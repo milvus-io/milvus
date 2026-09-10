@@ -512,17 +512,30 @@ interceptor chain.
    shard delisted from a state that never stopped taking writes) says the
    post-image is incoherent, something no later commit could have made true,
    and stays loud.
-5. On rejection the proxy refreshes the routing table. A write to the fenced
-   source vchannel is rejected with `SHARD_FENCED`; the proxy invalidates its
-   cached collection meta, refetches it, re-resolves to the new owning shard
-   and retries (bounded with backoff, since the refresh can race the routing
-   commit), then re-dispatches the writes in order. Writes go directly to
-   the new WALs from then on. The new shards are routable only after the ack
-   callback's meta commit (the proxy cannot see a shard before its
-   collection-meta write lands), so the write-unavailability window —
-   fence → routing commit → proxy refresh, scoped to the residues the split
-   moves — has the same shape in any ordering (§10), and fits the
-   short-latency-increase goal of §1.2.
+5. On rejection the proxy **will** refresh the routing table — the one step of
+   this flow that is **not on this branch** (§11). A write to the fenced source
+   vchannel is rejected with `SHARD_FENCED`; the proxy is to invalidate its
+   cached collection meta, refetch it, re-resolve to the new owning shard and
+   retry (bounded with backoff, since the refresh can race the routing commit),
+   then re-dispatch the writes in order. Writes then go directly to the new
+   WALs. The new shards are routable only after the ack callback's meta commit
+   (the proxy cannot see a shard before its collection-meta write lands), so the
+   write-unavailability window — fence → routing commit → proxy refresh, scoped
+   to the residues the split moves — has the same shape in any ordering (§10),
+   and fits the short-latency-increase goal of §1.2.
+
+   What exists today is only the rejection. The proxy still places a row by
+   vchannel POSITION (`typeutil.HashPK2Channels` in `internal/proxy/util.go`,
+   `task_delete.go`, `task_upsert_streaming.go`); `internal/util/routing` has no
+   proxy consumer; `proxy.enableRoutingTable` has no reader; and the only
+   consumer of `SHARD_FENCED` is `status.IsUnrecoverable`, which stops the
+   producer from retrying — nothing refreshes routing on it. Were the write
+   switch enabled as it stands, the cache expiry at the end of step 4 would hand
+   the proxy a LONGER vchannel list and every row in the collection would
+   re-place against it: one write in N+k would land on the fenced source and
+   fail, and the rest would drift silently, sending a delete to a different
+   shard than the insert it removes. **The write switch must not be enabled
+   before the proxy routes by residue.**
 
 WAL transactions need no special machinery and there is no drain step:
 the `SplitShard` message type is marked `ExclusiveRequired`, so the lock
@@ -926,20 +939,37 @@ be collected is a local fact, and a message announcing it would either arrive
 before a secondary had drained (and be refused, wedging replication) or be
 obeyed and lose data.
 
-**Operator rules.** Three, and they are rules rather than mechanisms:
+**Operator rules.** Four, and they are rules rather than mechanisms:
 
 1. **`SplitShard` and `AlterCollection` must be replicated together.**
    Skipping one while replicating the other leaves a secondary with targets
    created but their routing never committed, or the reverse.
 2. **Do not perform a graceful switchover while a split is in flight.** No
    code reconciles a half-replicated split across a planned role swap. A
-   *forced* promotion is handled: `fixIncompleteBroadcastsForForcePromote`
-   strips the replicate header from the incomplete task's pending replicas
-   and re-drives them through the normal broadcast path, which reproduces the
-   two-phase order; the ack callback then creates or advances the task, and
-   the new primary continues draining and issues the adoption itself.
+   *forced* promotion is handled **while the adoption has not yet replicated**:
+   `fixIncompleteBroadcastsForForcePromote` strips the replicate header from
+   the incomplete task's pending replicas and re-drives them through the normal
+   broadcast path, which reproduces the two-phase order; the ack callback then
+   creates or advances the task, and the new primary continues draining and
+   issues the adoption itself. Once the adoption HAS replicated, rule 4.
 3. The trigger must run on the primary only — a secondary's split tasks may
    come from ack callbacks alone. The trigger is not in this branch; see §11.
+4. **Do not force-promote a secondary between an adoption replicating to it
+   and that secondary draining.** In that window the adoption's ack callback
+   refuses (the local drain predicate) and the broadcaster retries it with
+   backoff while holding the broadcast's resource keys. Those keys include
+   `SharedCluster`: `appendSharedClusterRK` adds it to EVERY broadcast that
+   does not already carry a cluster key, and the locker keys on domain+name
+   only, so `SharedCluster` and `ExclusiveCluster` are the same lock. Every
+   cluster-exclusive DDL callback therefore queues behind the drain — the
+   forced promotion's own ack callback (its broadcast *fix* still runs, only
+   the callback waits), `FlushAll`, resource-group DDL,
+   `UpdateReplicateConfiguration`. The drain is the split manager moving the
+   source's data and can take hours, so this is not a brief stall. Other
+   *collections* are still unaffected — only cluster-scoped DDL queues. The
+   mechanical fix — the adoption callback not holding the cluster
+   key across the drain wait — changes locker semantics and is a follow-up
+   (§11).
 
 ## 7. Consistency Guarantees
 
@@ -1054,7 +1084,8 @@ landed on — and each cluster's DataCoord only ever reads its own.
    describes. The obligations that come with it are operational rather than
    mechanical: replicate `SplitShard` and `AlterCollection` together or not at
    all; do not perform a graceful switchover while a split is in flight (a
-   forced promotion is handled); and let only the primary trigger splits, so
+   forced promotion is handled while the adoption has not yet replicated —
+   §6.5 rule 4); and let only the primary trigger splits, so
    that a secondary's split tasks come from ack callbacks alone.
 7. **BM25 statistics** are shard-level and are rebuilt for the two new
    shards before adoption; per-namespace vector indexes move with their
@@ -1143,7 +1174,8 @@ callbacks (§6.5).
 | DataCoord dies before `Broadcast()` returns | On restart it re-issues the same message under the same idempotency key; the broadcaster resolves it to the original broadcast and returns that result. The callback had already recorded the task. |
 | StreamingNode restart | `SPLITTED` vchannels are restored from the recovery snapshot and their fence tombstones rebuilt by name (`split_time_tick`, `split_task_id`); a target is rebuilt from its own recovery meta; a still-fenced source's data sync service is recovered with its fence tick so it can still close itself once drained. |
 | Secondary proxy restart while gated | The replicate stream reconnects, replays from its checkpoint, and re-enters the wait. |
-| Forced promotion mid-split | `fixIncompleteBroadcastsForForcePromote` strips the replicate header from the incomplete task's pending replicas and re-drives them through the normal broadcast path, reproducing the two-phase order; the ack callback then creates or advances the task, and the new primary drains and adopts as primary. |
+| Forced promotion mid-split, adoption not yet replicated | `fixIncompleteBroadcastsForForcePromote` strips the replicate header from the incomplete task's pending replicas and re-drives them through the normal broadcast path, reproducing the two-phase order; the ack callback then creates or advances the task, and the new primary drains and adopts as primary. |
+| Forced promotion after the adoption replicated but before the local drain | The broadcast fix still runs, but the promotion's own ack callback queues behind the adoption's retrying one, which holds the cluster key until the local drain finishes. **Operator rule: do not force-promote in that window** (§6.5 rule 4); the mechanical fix is a follow-up (§11). |
 | Graceful switchover mid-split | Not reconciled by any code. **Operator rule: do not switch over while a split is in flight** (§6.5). |
 
 - **A re-sent fence recovers `T_switch`.** The StreamingNode persists it in
@@ -1166,11 +1198,11 @@ callbacks (§6.5).
 | RootCoord | The `SplitShard` ack callback (validate the post-image and cross-check it against the header → `CommitShardSplit` → `MetaTable.ApplyShardSplitRouting` → `BroadcastAlteredCollection` → expire caches), the drain gate on an `AlterCollection` that delists a vchannel, `CommitShardSplitRouting` (the adoption broadcast, over CChannel ∪ the current vchannels ∪ the post-image's, taking the collection's own resource keys), the topology bookkeeping an alter that changes the vchannel list must now do (`generalCnt`, pchannel stats), and the **user-facing entry point** in `internal/rootcoord/alter_collection_shard_num.go`: the declarative `collection.shardNum` property (recorded as an intent that DataCoord reconciles toward by rehashing; deleting the property withdraws it), the per-collection `collection.shardSplitMode` (`auto`/`manual`), and the checks rootcoord can answer in the caller's own response — shard split disabled, auto mode forbidding a hand-set count, minimum of 2, the `proxy.maxShardNum` cap, and pchannel headroom for a rehash (which holds sources and targets at once, so it needs `len(current vchannels) + desired`) |
 | StreamingCoord | vchannel allocation for existing collections (per-collection increasing shard index, distinct pchannels), pchannel headroom and expansion; the broadcaster's two-phase append with `AckPartial`; `WaitVChannelsAcked` and its shutdown release |
 | StreamingNode | Source side: the source replica auto-flushes growing segments (embedding their IDs), fences the vchannel and tears its registration down leaving a named `SplitFence` tombstone; recovery meta `VCHANNEL_STATE_SPLITTED` with `split_time_tick`, later `retired` and collected locally; the data sync service closes itself when its checkpoint passes the fence. Target side: the target replica runs the three genesis paths (shard manager / RecoveryStorage / flusher) from the body's `CreateCollection`-shaped schema, with no barrier and no `Creating`/`Activate` state. Bystander replicas are a deliberate no-op in all three; an unknown-role replica is refused |
-| Proxy | Residue routing lookup, reject-and-refetch loop, cache invalidation on adoption; on a secondary, the replicate service's name remap for `SplitShard` and for `AlterCollection(shard_split_routing)`, and the append gate |
+| Proxy | On this branch: on a secondary, the replicate service's name remap for `SplitShard` and for `AlterCollection(shard_split_routing)`, and the append gate. **Not on this branch** (fourth item below): the residue routing lookup, the reject-and-refetch loop on `SHARD_FENCED`, cache invalidation on adoption |
 | QueryNode | In-place child delegator spawn, fronting fan-out + reduce, delete/TimeTick forwarding, `min(tsafe)` serving timestamp, idempotent re-spawn on recovery, in-place handoff |
 | QueryCoord | Splitting flag (balance freeze), one-shot adoption, in-place delegator conversion, source-shard release |
 
-Three pieces the design assumes are **not** on this branch and land with the
+Four pieces the design assumes are **not** on this branch and land with the
 split manager's rebase:
 
 - the primary-only trigger, and with it the size trigger and the reconciler
@@ -1183,4 +1215,42 @@ split manager's rebase:
   long to keep it, but nothing calls either yet, so today a finished split's
   record stays in meta. Every place this document says a redelivered adoption
   would ask about a reclaimed task describes the behaviour once the reaper
-  exists.
+  exists;
+- the proxy write path: the residue routing lookup, the reject-and-refetch loop
+  on `SHARD_FENCED`, and the cache invalidation on adoption. The proxy still
+  places rows by vchannel position, `internal/util/routing` has no proxy
+  consumer, `proxy.enableRoutingTable` has no reader, and no consumer of
+  `SHARD_FENCED` refreshes routing (§6.1 step 5). **The write switch must not be
+  enabled before the proxy routes by residue** — with the switch on and the
+  proxy still hashing by position, a split silently re-places every row of the
+  collection.
+
+One follow-up on code that IS here: the adoption ack callback should not hold
+the cluster resource key across its drain wait. It does today, because every
+broadcast carries `SharedCluster` and the locker cannot tell it from
+`ExclusiveCluster`, which queues a secondary's cluster-level DDL — a forced
+promotion's own ack callback included — behind a drain that can take hours
+(§6.5 rule 4). Changing that means changing locker semantics, so it is tracked
+separately rather than done here.
+
+**Rollout.** The feature is off by default (`dataCoord.shardSplit.enable=false`)
+and has no trigger on this branch, which is what makes the mixed-version cases
+below theoretical rather than live; they are the constraints for turning it on.
+All proto changes are additive (new fields, new enum values, message types 49
+with 50/51 reserved), and `etcd_meta.proto`'s `shard_infos` moved from a local
+`CollectionShardInfo` to `schemapb.CollectionShardInfo` whose field 1 is the
+same `last_truncate_time_tick` varint, so the persisted bytes are compatible.
+What is not compatible is behaviour:
+
+- an **old StreamingNode** has no handler for message type 49, so its shard
+  interceptor falls through to a plain append: the replica lands in the WAL and
+  the source is never fenced;
+- an **old secondary's proxy** neither remaps a replicated `SplitShard` into its
+  own namespace nor holds the non-append-first replicas behind the fence, so the
+  secondary would create targets under the primary's channel names, in any
+  order;
+- **rolling back** to a version without `VCHANNEL_STATE_SPLITTED` (3) after a
+  split has fenced a source registers that source as a live shard again.
+
+So: upgrade every node before enabling the switch, and do not roll back across a
+split that has already fenced.
