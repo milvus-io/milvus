@@ -400,7 +400,16 @@ func (s *Session) getServerID() (int64, error) {
 			return nodeID, nil
 		}
 	}
-	nodeID, err := s.getServerIDWithKey(DefaultIDKey)
+	var nodeID int64
+	// Embedded etcd may still be electing its leader when session
+	// initialization starts. A transient leader-election error (e.g.
+	// "etcdserver: leader changed") must be retried with backoff rather than
+	// propagated to Init, which would panic and terminate the whole process.
+	err := retry.Do(s.ctx, func() error {
+		var err error
+		nodeID, err = s.getServerIDWithKey(DefaultIDKey)
+		return err
+	}, retry.Attempts(uint(s.sessionRetryTimes)), retry.RetryErr(etcd.IsRetriableEtcdErr))
 	if err != nil {
 		return nodeID, err
 	}

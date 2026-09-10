@@ -58,6 +58,37 @@ func TestIsRetriableWatchErr(t *testing.T) {
 	}
 }
 
+func TestIsRetriableEtcdErr(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"leader changed", rpctypes.ErrLeaderChanged, true},
+		{"no leader", rpctypes.ErrNoLeader, true},
+		{"not leader", rpctypes.ErrNotLeader, true},
+		{"not capable", rpctypes.ErrNotCapable, true},
+		{"timeout", rpctypes.ErrTimeout, true},
+		{"timeout due to leader fail", rpctypes.ErrTimeoutDueToLeaderFail, true},
+		{"timeout due to connection lost", rpctypes.ErrTimeoutDueToConnectionLost, true},
+		{"timeout wait applied index", rpctypes.ErrTimeoutWaitAppliedIndex, true},
+		{"unhealthy", rpctypes.ErrUnhealthy, true},
+		{"raw grpc unavailable", status.Error(codes.Unavailable, "connection refused"), true},
+		{"wrapped leader changed", errors.Wrap(rpctypes.ErrLeaderChanged, "get key failed"), true},
+		{"permission denied", rpctypes.ErrPermissionDenied, false},
+		{"corrupt cluster", rpctypes.ErrCorrupt, false},
+		{"context canceled", context.Canceled, false},
+		{"context deadline exceeded", context.DeadlineExceeded, false},
+		{"generic error", errors.New("some other error"), false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, IsRetriableEtcdErr(c.err))
+		})
+	}
+}
+
 // freePort grabs a random unused TCP port. There's a small TOCTOU window
 // between Close and the subsequent bind, but for unit tests it's acceptable.
 func freePort(t *testing.T) int {

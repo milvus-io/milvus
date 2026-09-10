@@ -3,12 +3,14 @@ package etcd
 import (
 	"context"
 	"sync"
+	"time"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.etcd.io/etcd/server/v3/etcdserver/api/v3client"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // EtcdServer is the singleton of embedded etcd server
@@ -53,8 +55,20 @@ func InitEtcdServer(
 			if err != nil {
 				mlog.Error(context.TODO(), "failed to init embedded Etcd server", mlog.Err(err))
 				initError = err
+				return
 			}
 			etcdServer = e
+			// embed.StartEtcd returns once the server is serving traffic, but a
+			// single-member cluster has not necessarily elected itself leader
+			// yet. Wait until etcd is ready (leader elected + member published)
+			// before returning, otherwise components starting right after would
+			// race the leader election and hit transient "etcdserver: leader
+			// changed" errors during session initialization.
+			if err := waitEtcdServerReady(e); err != nil {
+				mlog.Error(context.TODO(), "embedded Etcd server failed to become ready", mlog.Err(err))
+				initError = err
+				return
+			}
 			mlog.Info(context.TODO(), "finish init Etcd config", mlog.String("path", path), mlog.String("data", dataDir))
 		})
 		return initError
@@ -64,6 +78,20 @@ func InitEtcdServer(
 
 func HasServer() bool {
 	return etcdServer != nil
+}
+
+// waitEtcdServerReady blocks until the embedded etcd server has elected a
+// leader and published its member, i.e. it can serve linearizable requests.
+// embed.StartEtcd returns as soon as the server is serving traffic, which for
+// a single-member cluster happens before the leader election completes.
+func waitEtcdServerReady(e *embed.Etcd) error {
+	select {
+	case <-e.Server.ReadyNotify():
+		return nil
+	case <-time.After(60 * time.Second):
+		e.Server.Stop()
+		return merr.WrapErrServiceInternalMsg("embedded etcd took too long to become ready")
+	}
 }
 
 // StopEtcdServer stops embedded etcd server singleton.
