@@ -200,7 +200,11 @@ PhyConjunctFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         // input of the next expression.
         auto active_rows = BuildActiveBitmap(all_flat_result);
         if (active_rows.none()) {
-            SkipFollowingExprs(i + 1);
+            // An unevaluated child may still have its default sequential
+            // mode. Offset short-circuiting must not advance its cursor.
+            if (!has_input_offset) {
+                SkipFollowingExprs(i + 1);
+            }
             ClearBitmapInput(context);
             return;
         }

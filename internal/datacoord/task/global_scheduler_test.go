@@ -110,6 +110,9 @@ func TestGlobalScheduler_GetPendingTaskCountIncludesBackoff(t *testing.T) {
 	// would let a worker-side failure storm silently disable the admission gate.
 	globalScheduler.recordTaskFailure(tasks[2])
 	assert.Equal(t, 2, scheduler.GetPendingTaskCount(taskcommon.Stats))
+	assert.Equal(t, 1, scheduler.GetPendingTaskCount(taskcommon.Stats, func(task Task) bool {
+		return task.GetTaskID() == 2
+	}))
 }
 
 func TestGlobalScheduler_AbortAndRemoveTask(t *testing.T) {
@@ -544,4 +547,99 @@ func TestGlobalScheduler_TerminalTaskClearsBackoff(t *testing.T) {
 	assert.False(t, ok, "backoff entry must be removed once the task reaches a terminal state")
 	assert.Equal(t, 0, scheduler.runningTasks.Len())
 	assert.Equal(t, 0, len(scheduler.pendingTasks.TaskIDs()))
+}
+
+// Wrap the generated mock rather than modifying generated files.
+type filteredTask struct {
+	*MockTask
+	eligible func(int64) bool
+}
+
+func (t *filteredTask) CanRunOnNode(nodeID int64) bool { return t.eligible(nodeID) }
+
+func TestGlobalScheduler_pickNodeForTask_TiedSlots(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		available int64
+		required  int64
+		remaining int64
+		assigned  bool
+	}{
+		{"positive", 16, 10, 6, true},
+		{"best_effort", 16, 32, 0, true},
+		{"zero", 16, 0, 16, true},
+		{"negative", 16, -1, 16, true},
+		{"exhausted", 0, 1, 0, false},
+		{"cleanup_when_exhausted", 0, 0, 0, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			scheduler := &globalTaskScheduler{}
+			nodes := map[int64]*session.WorkerSlots{
+				1: {AvailableSlots: tc.available},
+				2: {AvailableSlots: tc.available},
+			}
+			slotHeap := newNodeSlotHeap(nodes)
+			// Make the current heap root eligible regardless of map iteration
+			// order. Popping and reinserting it would put the other tied node first.
+			eligibleID := slotHeap.Peek().nodeID
+			mockTask := NewMockTask(t)
+			mockTask.EXPECT().GetTaskSlot().Return(tc.required)
+			task := &filteredTask{mockTask, func(id int64) bool { return id == eligibleID }}
+
+			nodeID := scheduler.pickNodeForTask(slotHeap, task)
+			if tc.assigned {
+				assert.Equal(t, eligibleID, nodeID)
+			} else {
+				assert.Equal(t, int64(NullNodeID), nodeID)
+			}
+			assert.Equal(t, 2, slotHeap.Len())
+			for id, slots := range nodes {
+				if id == eligibleID {
+					assert.Equal(t, tc.remaining, slots.AvailableSlots)
+				} else {
+					assert.Equal(t, tc.available, slots.AvailableSlots, "excluded node keeps its slots")
+				}
+			}
+		})
+	}
+}
+
+func TestGlobalScheduler_CapabilityBlockedTaskDoesNotBlockOthers(t *testing.T) {
+	cluster := session.NewMockCluster(t)
+	nodes := map[int64]*session.WorkerSlots{
+		1: {NodeID: 1, AvailableSlots: 100},
+		2: {NodeID: 2, AvailableSlots: 50},
+	}
+	cluster.EXPECT().QuerySlot().Return(nodes)
+	scheduler := NewGlobalTaskScheduler(context.Background(), cluster).(*globalTaskScheduler)
+	defer scheduler.execPool.Release()
+	makeTask := func(id int64) *MockTask {
+		task := NewMockTask(t)
+		task.EXPECT().GetTaskID().Return(id).Maybe()
+		task.EXPECT().GetTaskType().Return(taskcommon.Stats).Maybe()
+		task.EXPECT().GetTaskSlot().Return(10).Maybe()
+		task.EXPECT().GetTaskVersion().Return(0).Maybe()
+		task.EXPECT().GetTaskTime(mock.Anything).Return(time.Time{}).Maybe()
+		task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return().Maybe()
+		return task
+	}
+	blocked := makeTask(1)
+	blocked.EXPECT().GetTaskState().Return(taskcommon.Init)
+	scheduler.Enqueue(&filteredTask{blocked, func(int64) bool { return false }})
+
+	compatible := makeTask(2)
+	var dispatched atomic.Bool
+	compatible.EXPECT().GetTaskState().RunAndReturn(func() taskcommon.State {
+		if dispatched.Load() {
+			return taskcommon.Finished
+		}
+		return taskcommon.Init
+	})
+	compatible.EXPECT().CreateTaskOnWorker(int64(2), cluster).Run(func(int64, session.Cluster) { dispatched.Store(true) })
+	scheduler.Enqueue(&filteredTask{compatible, func(id int64) bool { return id == 2 }})
+	scheduler.schedule()
+	assert.True(t, dispatched.Load())
+	assert.Equal(t, int64(100), nodes[1].AvailableSlots, "excluded node keeps its slots")
+	assert.Equal(t, int64(40), nodes[2].AvailableSlots)
+	assert.Equal(t, 1, scheduler.pendingTasks.TaskCount())
 }

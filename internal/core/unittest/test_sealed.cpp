@@ -23,6 +23,7 @@
 #include <chrono>
 #include <cstdint>
 #include <exception>
+#include <filesystem>
 #include <functional>
 #include <future>
 #include <iostream>
@@ -59,11 +60,13 @@
 #include "common/VectorArray.h"
 #include "common/VectorTrait.h"
 #include "common/protobuf_utils.h"
+#include "exec/expression/ExprCache.h"
 #include "exec/expression/function/FunctionFactory.h"
 #include "gtest/gtest.h"
 #include "index/Index.h"
 #include "index/IndexFactory.h"
 #include "index/IndexInfo.h"
+#include "index/JsonScalarIndexWrapper.h"
 #include "index/Meta.h"
 #include "index/SkipIndex.h"
 #include "index/StringIndexSort.h"
@@ -100,6 +103,7 @@
 #include "storage/Util.h"
 #include "test_utils/Constants.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/GenExprProto.h"
 #include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/indexbuilder_test_utils.h"
 #include "test_utils/storage_test_utils.h"
@@ -4060,6 +4064,258 @@ TEST(SealedDropFieldData, PKFieldStillDropsBinlogIndex) {
     // Drop again - should be a no-op (idempotent)
     segment->DropFieldData(pk_id);
     EXPECT_TRUE(segment->HasFieldData(pk_id));
+}
+
+class SealedSegmentReopenExprCacheTest
+    : public testing::TestWithParam<exec::CacheMode> {
+ protected:
+    void
+    SetUp() override {
+        auto& cache = exec::ExprResCacheManager::Instance();
+        cache.Clear();
+        exec::CacheConfig config;
+        config.mode = GetParam();
+        config.admission_threshold = 1;
+        config.mem_min_eval_duration_us = 0;
+        config.disk_min_eval_duration_us = 0;
+        if (config.mode == exec::CacheMode::Disk) {
+            auto path = (std::filesystem::temp_directory_path() /
+                         "reopen_expr_cache_XXXXXX")
+                            .string();
+            ASSERT_NE(mkdtemp(path.data()), nullptr);
+            cache_dir_ = path;
+            config.disk_base_path = path;
+            config.disk_max_file_size = 1ULL << 20;
+        }
+        ASSERT_TRUE(cache.SetConfig(config));
+        exec::ExprResCacheManager::SetEnabled(true);
+
+        auto schema = MakeSchema(100);
+        auto dataset = DataGen(schema, kRows);
+        segment_ = CreateSealedWithFieldDataLoaded(schema, dataset);
+        sealed_ = dynamic_cast<ChunkedSegmentSealedImpl*>(segment_.get());
+        ASSERT_NE(sealed_, nullptr);
+    }
+
+    void
+    TearDown() override {
+        segment_.reset();
+        auto& cache = exec::ExprResCacheManager::Instance();
+        cache.Clear();
+        cache.SetConfig(exec::CacheConfig{});
+        exec::ExprResCacheManager::SetEnabled(false);
+        if (!cache_dir_.empty()) {
+            std::filesystem::remove(cache_dir_);
+        }
+    }
+
+    SchemaPtr
+    MakeSchema(int64_t version) {
+        auto schema = std::make_shared<Schema>();
+        auto pk = schema->AddDebugField("pk", DataType::INT64);
+        schema->set_primary_field_id(pk);
+        schema->set_schema_version(version);
+        return schema;
+    }
+
+    void
+    Put(int64_t segment_id, const std::string& signature) {
+        exec::ExprResCacheManager::Value value;
+        value.result = std::make_shared<TargetBitmap>(kRows, true);
+        value.valid_result = std::make_shared<TargetBitmap>(kRows, true);
+        value.active_count = kRows;
+        exec::ExprResCacheManager::Instance().Put({segment_id, signature},
+                                                  value);
+    }
+
+    bool
+    Has(int64_t segment_id, const std::string& signature) {
+        exec::ExprResCacheManager::Value value;
+        value.active_count = kRows;
+        return exec::ExprResCacheManager::Instance().Get(
+            {segment_id, signature}, value);
+    }
+
+    static constexpr int64_t kRows = 4;
+    SegmentSealedUPtr segment_;
+    ChunkedSegmentSealedImpl* sealed_ = nullptr;
+    std::filesystem::path cache_dir_;
+};
+
+INSTANTIATE_TEST_SUITE_P(CacheBackends,
+                         SealedSegmentReopenExprCacheTest,
+                         testing::Values(exec::CacheMode::Memory,
+                                         exec::CacheMode::Disk));
+
+TEST_P(SealedSegmentReopenExprCacheTest, InvalidatesOnlyReopenedSegment) {
+    const auto segment_id = sealed_->get_segment_id();
+    int64_t version = 100;
+    for (bool load_info_reopen : {false, true}) {
+        for (bool cache_enabled : {true, false}) {
+            SCOPED_TRACE(load_info_reopen ? "load-info" : "schema-only");
+            SCOPED_TRACE(cache_enabled ? "cache-enabled" : "cache-disabled");
+            Put(segment_id, "predicate");
+            Put(segment_id, "index-result");
+            Put(segment_id + 1, "predicate");
+            ASSERT_TRUE(Has(segment_id, "predicate"));
+            ASSERT_TRUE(Has(segment_id, "index-result"));
+            ASSERT_TRUE(Has(segment_id + 1, "predicate"));
+
+            // Temporarily disabling caching does not remove existing entries.
+            exec::ExprResCacheManager::SetEnabled(cache_enabled);
+            auto schema = MakeSchema(++version);
+            if (load_info_reopen) {
+                auto proto = sealed_->TestGetLoadInfoSnapshot()->GetProto();
+                sealed_->Reopen(nullptr, proto, schema);
+            } else {
+                sealed_->Reopen(schema);
+            }
+            exec::ExprResCacheManager::SetEnabled(true);
+
+            EXPECT_EQ(sealed_->get_row_count(), kRows);
+            EXPECT_FALSE(Has(segment_id, "predicate"));
+            EXPECT_FALSE(Has(segment_id, "index-result"));
+            EXPECT_TRUE(Has(segment_id + 1, "predicate"));
+            Put(segment_id, "predicate");
+            EXPECT_TRUE(Has(segment_id, "predicate"));
+        }
+    }
+}
+
+TEST_P(SealedSegmentReopenExprCacheTest, InvalidatesAfterReadersDrain) {
+    const auto segment_id = sealed_->get_segment_id();
+    Put(segment_id, "predicate");
+    ASSERT_TRUE(Has(segment_id, "predicate"));
+
+    auto read_lease = sealed_->AcquireReadLease(folly::CancellationToken());
+    auto reopen = std::async(std::launch::async,
+                             [&] { sealed_->Reopen(MakeSchema(200)); });
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (!sealed_->TestReadGateWriterPending() &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    EXPECT_TRUE(sealed_->TestReadGateWriterPending());
+    EXPECT_EQ(sealed_->TestGetSchemaSnapshot()->get_schema_version(), 100);
+    EXPECT_TRUE(Has(segment_id, "predicate"));
+    // An old request can still fill the cache before releasing its read lease.
+    Put(segment_id, "late-old-result");
+    EXPECT_TRUE(Has(segment_id, "late-old-result"));
+    read_lease.reset();
+    ASSERT_NO_THROW(reopen.get());
+
+    auto new_read_lease = sealed_->AcquireReadLease(folly::CancellationToken());
+    EXPECT_EQ(sealed_->TestGetSchemaSnapshot()->get_schema_version(), 200);
+    EXPECT_FALSE(Has(segment_id, "predicate"));
+    EXPECT_FALSE(Has(segment_id, "late-old-result"));
+}
+
+TEST_P(SealedSegmentReopenExprCacheTest,
+       JsonIndexReplacementRecomputesResultAndValidity) {
+    auto schema = std::make_shared<Schema>();
+    auto json_fid = schema->AddDebugField("json", DataType::JSON);
+    auto segment = CreateSealedSegment(schema);
+    auto json_field =
+        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, false);
+    std::vector<milvus::Json> jsons;
+    for (const auto& json : {R"({"n":9007199254740992})",
+                             R"({"n":9007199254740993})",
+                             R"({"n":1.5})",
+                             R"({"n":null})"}) {
+        jsons.emplace_back(simdjson::padded_string(std::string(json)));
+    }
+    json_field->add_json_data(jsons);
+    auto replace_index = [&]<typename T>(const std::string& cast_type) {
+        storage::FileManagerContext ctx;
+        ctx.fieldDataMeta.field_schema.set_data_type(proto::schema::JSON);
+        ctx.fieldDataMeta.field_schema.set_fieldid(json_fid.get());
+        ctx.fieldDataMeta.field_id = json_fid.get();
+        auto indexing = index::IndexFactory::GetInstance().CreateJsonIndex(
+            index::CreateIndexInfo{
+                .index_type = index::INVERTED_INDEX_TYPE,
+                .json_cast_type = JsonCastType::FromString(cast_type),
+                .json_path = "/n",
+            },
+            ctx);
+        auto* json_index =
+            dynamic_cast<index::JsonInvertedIndex<T>*>(indexing.get());
+        ASSERT_NE(json_index, nullptr);
+        json_index->BuildWithFieldData({json_field});
+        json_index->finish();
+        json_index->create_reader(index::SetBitsetSealed);
+        LoadIndexInfo load;
+        load.field_id = json_fid.get();
+        load.field_type = DataType::JSON;
+        load.index_params = {{JSON_PATH, "/n"}, {JSON_CAST_TYPE, cast_type}};
+        load.cache_index = CreateTestCacheIndex("cache-replace-" + cast_type,
+                                                std::move(indexing));
+        segment->LoadIndex(load);
+    };
+
+    proto::plan::GenericValue operand;
+    operand.set_int64_val(9007199254740993LL);
+    auto predicate = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"n"}),
+        proto::plan::Equal,
+        operand,
+        std::vector<proto::plan::GenericValue>());
+    auto filter =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, predicate);
+    auto evaluate = [&](bool double_projection) {
+        auto result = milvus::test::gen_filter_res(
+            filter.get(), segment.get(), kRows, MAX_TIMESTAMP);
+        ASSERT_EQ(result->size(), kRows);
+        TargetBitmapView bits(result->GetRawData(), kRows);
+        TargetBitmapView valid(result->GetValidRawData(), kRows);
+        EXPECT_EQ(bits[0], double_projection);
+        EXPECT_TRUE(bits[1]);
+        EXPECT_FALSE(bits[2]);
+        EXPECT_FALSE(bits[3]);
+        EXPECT_TRUE(valid[0]);
+        EXPECT_TRUE(valid[1]);
+        EXPECT_EQ(valid[2], double_projection);
+        EXPECT_FALSE(valid[3]);
+    };
+
+    replace_index.operator()<double>("DOUBLE");
+    ASSERT_FALSE(segment->HasFieldData(json_fid));
+    evaluate(true);
+    ASSERT_TRUE(Has(segment->get_segment_id(), predicate->ToString()));
+    evaluate(true);  // Prove the old projection is cached before replacement.
+
+    replace_index.operator()<int64_t>("INT64");
+    ASSERT_FALSE(Has(segment->get_segment_id(), predicate->ToString()));
+    ASSERT_FALSE(segment->HasFieldData(json_fid));
+    evaluate(false);
+    ASSERT_TRUE(Has(segment->get_segment_id(), predicate->ToString()));
+    evaluate(false);
+}
+
+TEST_P(SealedSegmentReopenExprCacheTest, CancelledPublicationPreservesCache) {
+    const auto segment_id = sealed_->get_segment_id();
+    Put(segment_id, "predicate");
+    ASSERT_TRUE(Has(segment_id, "predicate"));
+
+    folly::CancellationSource cancellation;
+    milvus::OpContext op_ctx(cancellation.getToken());
+    auto read_lease = sealed_->AcquireReadLease(folly::CancellationToken());
+    auto proto = sealed_->TestGetLoadInfoSnapshot()->GetProto();
+    auto reopen = std::async(std::launch::async, [&] {
+        sealed_->Reopen(&op_ctx, proto, MakeSchema(200));
+    });
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (!sealed_->TestReadGateWriterPending() &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    EXPECT_TRUE(sealed_->TestReadGateWriterPending());
+    cancellation.requestCancellation();
+    EXPECT_THROW(reopen.get(), SegcoreError);
+    read_lease.reset();
+
+    auto new_read_lease = sealed_->AcquireReadLease(folly::CancellationToken());
+    EXPECT_EQ(sealed_->TestGetSchemaSnapshot()->get_schema_version(), 100);
+    EXPECT_TRUE(Has(segment_id, "predicate"));
 }
 
 TEST(SealedSegmentReopen, LazySchemaReopenFailsFastWhileReadLeaseActive) {

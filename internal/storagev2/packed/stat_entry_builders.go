@@ -40,7 +40,7 @@ func FieldBinlogStatEntry(prefix string, fieldID int64, fb *datapb.FieldBinlog) 
 }
 
 // TextIndexStatEntries builds StatEntry slice from text index stats.
-func TextIndexStatEntries(textStats map[int64]*datapb.TextIndexStats, scalarIndexVersion int32) []StatEntry {
+func TextIndexStatEntries(textStats map[int64]*datapb.TextIndexStats) []StatEntry {
 	entries := make([]StatEntry, 0, len(textStats))
 	for fieldID, ts := range textStats {
 		entries = append(entries, StatEntry{
@@ -51,7 +51,7 @@ func TextIndexStatEntries(textStats map[int64]*datapb.TextIndexStats, scalarInde
 				"build_id":                     fmt.Sprintf("%d", ts.GetBuildID()),
 				"log_size":                     fmt.Sprintf("%d", ts.GetLogSize()),
 				"memory_size":                  fmt.Sprintf("%d", ts.GetMemorySize()),
-				"current_scalar_index_version": fmt.Sprintf("%d", scalarIndexVersion),
+				"current_scalar_index_version": fmt.Sprintf("%d", ts.GetCurrentScalarIndexVersion()),
 			},
 		})
 	}

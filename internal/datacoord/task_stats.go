@@ -56,8 +56,9 @@ type statsTask struct {
 var _ globalTask.Task = (*statsTask)(nil)
 
 var (
-	errStatsResultStale     = errors.New("stale stats result")
-	errStatsResultDiscarded = errors.New("discarded stats result")
+	errStatsResultStale       = errors.New("stale stats result")
+	errStatsResultDiscarded   = errors.New("discarded stats result")
+	errJSONStatsResultInvalid = errors.New("JSON stats result does not satisfy the requested format")
 )
 
 func newStatsTask(t *indexpb.StatsTask,
@@ -106,6 +107,103 @@ func (st *statsTask) GetTaskVersion() int64 {
 	return st.GetVersion()
 }
 
+func (st *statsTask) getJSONStatsDataFormat() int64 {
+	format := st.GetJsonStatsDataFormat()
+	if format == 0 {
+		// StatsTask predates the persisted format field. Such a task was created
+		// while V3 was the only writable format. Never reinterpret its output
+		// as V4; migration retires the old task before creating a new task ID.
+		return common.JSONStatsDataFormatV3
+	}
+	return format
+}
+
+func (st *statsTask) requiresJSONStatsV4() bool {
+	return st.GetSubJobType() == indexpb.StatsSubJob_JsonKeyIndexJob &&
+		st.getJSONStatsDataFormat() == common.JSONStatsDataFormatV4
+}
+
+// CanRunOnNode pauses JSON stats when shredding is disabled and gates persisted
+// V4 tasks on coordinator compatibility: reader/writer capabilities alone
+// cannot protect V3 files from an old GC.
+func (st *statsTask) CanRunOnNode(nodeID int64) bool {
+	if st.GetSubJobType() != indexpb.StatsSubJob_JsonKeyIndexJob {
+		return true
+	}
+	if st.meta != nil {
+		segment := st.meta.GetHealthySegment(context.TODO(), st.GetSegmentID())
+		if segment == nil || segment.GetNumOfRows() == 0 {
+			// Local completion/cleanup does not write a JSON stats artifact.
+			return true
+		}
+	}
+	if !Params.CommonCfg.EnabledJSONKeyStats.GetAsBool() || jsonShreddingDisabledByDeprecatedConfig() {
+		return false
+	}
+	if !st.requiresJSONStatsV4() {
+		return true
+	}
+	if Params.DataCoordCfg.JSONStatsFormatVersion.GetAsInt64() != common.JSONStatsDataFormatV4 {
+		return false
+	}
+	versions, ok := st.ievm.(JSONStatsVersionManager)
+	return ok && versions.SupportsJSONStatsReaders() && versions.SupportsJSONStatsWriter(nodeID)
+}
+
+// validateJSONStatsResult runs before any metadata/manifest publication. Old
+// DataNodes can report success without output for an unknown requested format.
+// Admitted JSON attempts always request shredding; disabling new work must not
+// relax their output contract or prevent valid in-flight results from finishing.
+func (st *statsTask) validateJSONStatsResult(ctx context.Context, result *workerpb.StatsResult) error {
+	if !st.requiresJSONStatsV4() {
+		return nil
+	}
+	segment := st.meta.GetHealthySegment(ctx, st.GetSegmentID())
+	if segment == nil || segment.GetNumOfRows() == 0 {
+		return nil
+	}
+	if Params.DataCoordCfg.JSONStatsFormatVersion.GetAsInt64() != common.JSONStatsDataFormatV4 {
+		return merr.WrapErrServiceNotReadyMsg("waiting for V4 JSON stats version gate before publication")
+	}
+	collection, err := st.handler.GetCollection(ctx, segment.GetCollectionID())
+	if err != nil {
+		return merr.Wrap(err, "get schema to validate JSON stats result")
+	}
+	if collection == nil || collection.Schema == nil {
+		return merr.WrapErrServiceNotReadyMsg("collection schema unavailable for JSON stats validation")
+	}
+	stats := result.GetJsonKeyStatsLogs()
+	currentFields := make(map[int64]struct{})
+	for _, fieldID := range getJSONStatsFieldIDs(collection) {
+		currentFields[fieldID] = struct{}{}
+	}
+	if len(stats) == 0 && len(currentFields) > 0 {
+		return merr.Wrap(errJSONStatsResultInvalid, "missing JSON stats output")
+	}
+	for _, fieldID := range st.GetJsonStatsFieldIds() {
+		// A removed/disabled field no longer needs an artifact. Fields added
+		// after task creation are not part of this attempt's contract.
+		if _, enabled := currentFields[fieldID]; enabled && stats[fieldID] == nil {
+			return merr.Wrapf(errJSONStatsResultInvalid, "missing stats for field %d", fieldID)
+		}
+	}
+	for fieldID, info := range stats {
+		if info == nil || info.GetFieldID() != fieldID ||
+			info.GetJsonKeyStatsDataFormat() != st.getJSONStatsDataFormat() ||
+			info.GetBuildID() != st.GetTaskID() || len(info.GetFiles()) == 0 {
+			return merr.Wrapf(errJSONStatsResultInvalid, "invalid stats for field %d: expected format %d and build %d",
+				fieldID, st.getJSONStatsDataFormat(), st.GetTaskID())
+		}
+	}
+	versions, ok := st.ievm.(JSONStatsVersionManager)
+	if !ok || !versions.SupportsJSONStatsReaders() {
+		// Hold the completed worker result until readers catch up. No rebuild
+		// is needed and no manifest may be published during this window.
+		return merr.WrapErrServiceNotReadyMsg("waiting for V4 JSON stats readers before publication")
+	}
+	return nil
+}
+
 func (st *statsTask) SetState(state indexpb.JobState, failReason string) {
 	st.State = state
 	st.FailReason = failReason
@@ -141,6 +239,37 @@ func (st *statsTask) dropAndResetTaskOnWorker(ctx context.Context, cluster sessi
 		return
 	}
 	st.resetTask(ctx, reason)
+}
+
+// Retire only idle, background-owned V3 tasks once V4 can be built safely.
+// Otherwise a legacy parser failure can keep retrying forever and block both
+// the inspector and migration compaction. Published V3 artifacts are untouched:
+// the inspector creates a fresh V4 task for missing stats, while compaction
+// owns the gradual replacement of segments that already have V3 stats.
+func (st *statsTask) retireLegacyJSONStatsTask(ctx context.Context, nodeID int64, cluster session.Cluster) (bool, error) {
+	if st.GetState() != indexpb.JobState_JobStateInit || !st.GetCanRecycle() ||
+		st.GetSubJobType() != indexpb.StatsSubJob_JsonKeyIndexJob ||
+		st.getJSONStatsDataFormat() != common.JSONStatsDataFormatV3 ||
+		!Params.CommonCfg.EnabledJSONKeyStats.GetAsBool() || jsonShreddingDisabledByDeprecatedConfig() ||
+		Params.DataCoordCfg.JSONStatsFormatVersion.GetAsInt64() != common.JSONStatsDataFormatV4 {
+		return false, nil
+	}
+	versions, ok := st.ievm.(JSONStatsVersionManager)
+	if !ok || !versions.SupportsJSONStatsReaders() || !versions.SupportsJSONStatsWriter(nodeID) {
+		return false, nil
+	}
+	if st.GetNodeID() != 0 {
+		if err := st.tryDropTaskOnWorker(cluster); err != nil {
+			return false, merr.Wrap(err, "drop legacy JSON stats attempt before migration")
+		}
+	}
+	if err := st.meta.statsTaskMeta.DropStatsTask(ctx, st.GetTaskID()); err != nil {
+		return false, merr.Wrap(err, "retire legacy JSON stats task before migration")
+	}
+	st.SetState(indexpb.JobState_JobStateNone, "legacy JSON stats task retired for automatic V4 migration")
+	mlog.Info(ctx, "retired legacy JSON stats task for automatic V4 migration",
+		mlog.FieldTaskID(st.GetTaskID()), mlog.FieldSegmentID(st.GetSegmentID()))
+	return true, nil
 }
 
 func (st *statsTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
@@ -187,6 +316,21 @@ func (st *statsTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 		if err := st.handleEmptySegment(ctx); err != nil {
 			log.Warn(context.TODO(), "failed to handle empty segment", mlog.Err(err))
 		}
+		return
+	}
+
+	retired, err := st.retireLegacyJSONStatsTask(ctx, nodeID, cluster)
+	if err != nil {
+		log.Warn(ctx, "failed to retire legacy JSON stats task, will retry", mlog.Err(err))
+		return
+	}
+	if retired {
+		return
+	}
+
+	// Recheck after selection, before assigning an attempt or making an RPC.
+	if !st.CanRunOnNode(nodeID) {
+		err = merr.WrapErrServiceNotReadyMsg("waiting for enabled JSON shredding, compatible readers and a compatible DataNode")
 		return
 	}
 
@@ -268,6 +412,14 @@ func (st *statsTask) QueryTaskOnWorker(cluster session.Cluster) {
 		switch state {
 		case indexpb.JobState_JobStateFinished:
 			err := st.SetJobInfo(ctx, result)
+			if errors.Is(err, errJSONStatsResultInvalid) {
+				if versions, ok := st.ievm.(JSONStatsVersionManager); ok {
+					versions.RejectJSONStatsWriter(st.NodeID)
+				}
+				log.Warn(ctx, "reject JSON stats result and retry on a compatible worker", mlog.Err(err))
+				st.dropAndResetTaskOnWorker(ctx, cluster, err.Error())
+				return
+			}
 			if errors.Is(err, errStatsResultStale) {
 				st.discardRejectedStatsResult(ctx, cluster, result, "stale stats result discarded")
 				return
@@ -447,6 +599,15 @@ func (st *statsTask) handleEmptySegment(ctx context.Context) error {
 
 // Prepare the stats request
 func (st *statsTask) prepareJobRequest(ctx context.Context, segment *SegmentInfo) (*workerpb.CreateStatsRequest, error) {
+	// Snapshot once for this attempt: the switch can change after node selection
+	// or while preparing the request. Never dispatch a dedicated JSON job that
+	// tells the worker to skip the very output we require on completion.
+	enableJSONKeyStats := Params.CommonCfg.EnabledJSONKeyStats.GetAsBool()
+	if st.GetSubJobType() == indexpb.StatsSubJob_JsonKeyIndexJob &&
+		(!enableJSONKeyStats || jsonShreddingDisabledByDeprecatedConfig()) {
+		return nil, merr.WrapErrServiceNotReadyMsg("JSON shredding is disabled")
+	}
+
 	collInfo, err := st.handler.GetCollection(ctx, segment.GetCollectionID())
 	if err != nil {
 		return nil, merr.Wrap(err, "failed to get collection info")
@@ -490,8 +651,8 @@ func (st *statsTask) prepareJobRequest(ctx context.Context, segment *SegmentInfo
 		NumRows:         segment.GetNumOfRows(),
 		// update version after check
 		TaskVersion:                      st.GetVersion(),
-		EnableJsonKeyStats:               Params.CommonCfg.EnabledJSONKeyStats.GetAsBool(),
-		JsonKeyStatsDataFormat:           common.JSONStatsDataFormatVersion,
+		EnableJsonKeyStats:               enableJSONKeyStats,
+		JsonKeyStatsDataFormat:           st.getJSONStatsDataFormat(),
 		TaskSlot:                         st.taskSlot,
 		StorageVersion:                   segment.StorageVersion,
 		CurrentScalarIndexVersion:        st.ievm.ResolveScalarIndexVersion(),
@@ -506,6 +667,10 @@ func (st *statsTask) prepareJobRequest(ctx context.Context, segment *SegmentInfo
 }
 
 func (st *statsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResult) error {
+	if err := st.validateJSONStatsResult(ctx, result); err != nil {
+		return err
+	}
+
 	var err error
 	switch st.GetSubJobType() {
 	case indexpb.StatsSubJob_TextIndexJob:
@@ -634,7 +799,7 @@ func (st *statsTask) commitTextIndexStats(ctx context.Context, result *workerpb.
 				// Pin current_scalar_index_version to the value the worker actually
 				// built the index with (echoed per entry), not a fresh resolve which
 				// could drift from the shipped index.
-				Stats: packed.TextIndexStatEntries(textStats, pinnedScalarIndexVersion(textStats)),
+				Stats: packed.TextIndexStatEntries(textStats),
 			},
 		},
 		CatalogMutation: SegmentCatalogMutation{TextStats: textStats},
@@ -710,15 +875,6 @@ func statsAlreadyCommitted[T any](existing, incoming map[int64]T, buildID func(T
 		}
 	}
 	return true
-}
-
-// pinnedScalarIndexVersion returns the current_scalar_index_version the worker
-// built the text index with, echoed identically on every entry.
-func pinnedScalarIndexVersion(textStats map[int64]*datapb.TextIndexStats) int32 {
-	for _, ts := range textStats {
-		return ts.GetCurrentScalarIndexVersion()
-	}
-	return 0
 }
 
 // jsonKeyStatEntriesForManifest rebuilds JSON key StatEntries with absolute file
