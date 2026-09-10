@@ -14,19 +14,28 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// Shard split is not supported on a cluster with replication enabled: a
-// replicated transaction never expires, and the secondary maps pchannels by
-// index position, so a topology change it cannot represent would corrupt it.
-// The SplitShard broadcast built here is therefore marked UNREPLICABLE, which
-// keeps it out of the replicate stream -- it carries SOURCE-cluster vchannel
-// names in its header, and in its body's genesis CreateCollectionRequest.
+// The SplitShard broadcast built here REPLICATES. A secondary cluster must end
+// up with the same shard topology as the primary, so the split travels down the
+// replicate stream like any other DDL rather than being withheld from it.
 //
-// That is containment, not the gate. The design (20260610-shard_split.md, §8)
-// asks for the split to be REJECTED on a replicating cluster at the DataCoord
-// trigger AND again at the StreamingNode; the second check is not implemented
-// here, because the shard interceptor does not hold the WAL's replicate state.
-// TODO: thread the replicates manager into the shard interceptor and refuse
-// this message type outright when the WAL is in a replicating topology.
+// Two mechanisms on the receiving side make that safe, and neither belongs in
+// this file -- both live in replicate_service.go, which is where a replica is
+// received:
+//
+//  1. Name remap. Every channel name this message carries -- the sources and
+//     targets in the header, the routing post-image and the genesis in the body,
+//     and the broadcast header's append_first_vchannels -- names a channel of
+//     the PRIMARY. The secondary rewrites all of them into its own namespace
+//     before the replica is appended.
+//  2. The append gate. The primary's ordering (sources appended and persisted
+//     first) is produced by the broadcaster and is not carried by the replicate
+//     streams, which deliver each pchannel independently. The secondary
+//     reproduces it by holding every non-append-first replica until the
+//     append-first ones have landed there.
+//
+// The names are what makes this message replicable at all; the order is what
+// makes it correct. Losing either would corrupt the secondary silently rather
+// than loudly, which is why the two are described here and not only there.
 
 // SplitShardParam is the parameter of NewSplitShardBroadcastMessage.
 //
@@ -204,8 +213,8 @@ type SplitShardResult struct {
 // idempotency key derived from the split task id -- a retry of the same task
 // against the same collection is therefore the SAME broadcast, not a new one.
 //
-// The message is marked UNREPLICABLE for the reason given at the top of this
-// file.
+// The message is replicable; see the top of this file for what the secondary
+// does with it.
 func NewSplitShardBroadcastMessage(param SplitShardParam) (message.BroadcastMutableMessage, error) {
 	if err := param.Validate(); err != nil {
 		return nil, err
@@ -250,7 +259,6 @@ func NewSplitShardBroadcastMessage(param SplitShardParam) (message.BroadcastMuta
 		}).
 		WithBroadcast(vchannels, message.OptBuildBroadcastAppendFirst(param.SourceVChannels...)).
 		WithIdempotencyKey(message.NewCollectionScopedIdempotencyKey(param.CollectionID, fmt.Sprintf("shard-split-%d", param.SplitTaskID))).
-		WithUnreplicable().
 		BuildBroadcast()
 	if err != nil {
 		return nil, errors.Wrap(err, "build split shard broadcast message failed")

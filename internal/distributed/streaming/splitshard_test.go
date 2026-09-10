@@ -53,7 +53,6 @@ func TestNewSplitShardBroadcastMessage(t *testing.T) {
 	assert.ElementsMatch(t, []string{"p0_1v0", "p0_1v1", "p0_1v2", "p0_vcchan"}, bh.VChannels)
 	// only the sources are appended (and therefore persisted) first.
 	assert.ElementsMatch(t, param.SourceVChannels, bh.AppendFirstVChannels)
-	assert.True(t, msg.IsUnreplicable())
 	assert.Equal(t,
 		message.NewCollectionScopedIdempotencyKey(param.CollectionID, fmt.Sprintf("shard-split-%d", param.SplitTaskID)),
 		message.IdempotencyKeyOf(msg))
@@ -87,6 +86,26 @@ func TestNewSplitShardBroadcastMessage(t *testing.T) {
 // needs the message so it can observe the split; the vchannel set is the
 // union of CollectionVChannels, SourceVChannels, the targets and the control
 // channel, and only the sources are appended (and therefore persisted) first.
+// TestSplitShardBroadcastIsReplicable pins the decision this whole redesign
+// rests on: the split travels down the replicate stream instead of being
+// withheld from it, so a secondary cluster ends up with the same shard topology
+// as the primary rather than silently diverging at the first split.
+//
+// Marking it unreplicable again would not fail any other test here -- it would
+// just stop the split from ever reaching a secondary -- which is exactly why
+// this assertion exists on its own.
+func TestSplitShardBroadcastIsReplicable(t *testing.T) {
+	msg, err := streaming.NewSplitShardBroadcastMessage(newSplitShardParam())
+	require.NoError(t, err)
+	assert.False(t, msg.IsUnreplicable())
+
+	// Every replica of it, not just the broadcast envelope.
+	msg.OverwriteBroadcastHeader(1)
+	for _, replica := range msg.SplitIntoMutableMessage() {
+		assert.False(t, replica.IsUnreplicable(), replica.VChannel())
+	}
+}
+
 func TestNewSplitShardBroadcastMessageCoversTheCollection(t *testing.T) {
 	param := newSplitShardParam()
 	// "p1_1v0" is a bystander shard of the same collection: neither a source

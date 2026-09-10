@@ -138,6 +138,19 @@ service StreamingCoordBroadcastService {
 
     // Ack acknowledge broadcast message is consumed.
     rpc Ack(BroadcastAckRequest) returns (BroadcastAckResponse) {}
+
+    // WaitVChannelsAcked blocks until every named vchannel of the given
+    // broadcast has been acked in THIS cluster, or the context ends.
+    //
+    // It exists for the secondary cluster's append gate: a replicated
+    // broadcast whose header names append-first vchannels must land those
+    // replicas before any other replica of the same broadcast is appended
+    // here, and the broadcast task's per-vchannel ack state is the only fact
+    // a secondary has to order them by. The broadcast task itself may not
+    // exist yet when the call arrives -- the first replica to reach a
+    // secondary is whichever the replicate streams deliver first -- so the
+    // wait covers the task's creation too.
+    rpc WaitVChannelsAcked(WaitVChannelsAckedRequest) returns (WaitVChannelsAckedResponse) {}
 }
 
 // BroadcastRequest is the request of the Broadcast RPC.
@@ -158,6 +171,17 @@ message BroadcastAckRequest {
 }
 
 message BroadcastAckResponse {
+}
+
+// WaitVChannelsAckedRequest is the request of the WaitVChannelsAcked RPC.
+message WaitVChannelsAckedRequest {
+    uint64 broadcast_id       = 1; // the broadcast to wait on.
+    repeated string vchannels = 2; // the vchannels of that broadcast that must be acked, named in THIS cluster.
+}
+
+// WaitVChannelsAckedResponse is the response of the WaitVChannelsAcked RPC.
+// Empty: the call answers by returning, and every failure is an error.
+message WaitVChannelsAckedResponse {
 }
 
 //

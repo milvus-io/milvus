@@ -197,6 +197,54 @@ func (_c *MockBroadcaster_LegacyAck_Call) RunAndReturn(run func(context.Context,
 	return _c
 }
 
+// WaitVChannelsAcked provides a mock function with given fields: ctx, broadcastID, vchannels
+func (_m *MockBroadcaster) WaitVChannelsAcked(ctx context.Context, broadcastID uint64, vchannels []string) error {
+	ret := _m.Called(ctx, broadcastID, vchannels)
+
+	if len(ret) == 0 {
+		panic("no return value specified for WaitVChannelsAcked")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, uint64, []string) error); ok {
+		r0 = rf(ctx, broadcastID, vchannels)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockBroadcaster_WaitVChannelsAcked_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'WaitVChannelsAcked'
+type MockBroadcaster_WaitVChannelsAcked_Call struct {
+	*mock.Call
+}
+
+// WaitVChannelsAcked is a helper method to define mock.On call
+//   - ctx context.Context
+//   - broadcastID uint64
+//   - vchannels []string
+func (_e *MockBroadcaster_Expecter) WaitVChannelsAcked(ctx interface{}, broadcastID interface{}, vchannels interface{}) *MockBroadcaster_WaitVChannelsAcked_Call {
+	return &MockBroadcaster_WaitVChannelsAcked_Call{Call: _e.mock.On("WaitVChannelsAcked", ctx, broadcastID, vchannels)}
+}
+
+func (_c *MockBroadcaster_WaitVChannelsAcked_Call) Run(run func(ctx context.Context, broadcastID uint64, vchannels []string)) *MockBroadcaster_WaitVChannelsAcked_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(uint64), args[2].([]string))
+	})
+	return _c
+}
+
+func (_c *MockBroadcaster_WaitVChannelsAcked_Call) Return(_a0 error) *MockBroadcaster_WaitVChannelsAcked_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockBroadcaster_WaitVChannelsAcked_Call) RunAndReturn(run func(context.Context, uint64, []string) error) *MockBroadcaster_WaitVChannelsAcked_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // WithResourceKeys provides a mock function with given fields: ctx, resourceKeys
 func (_m *MockBroadcaster) WithResourceKeys(ctx context.Context, resourceKeys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
 	_va := make([]interface{}, len(resourceKeys))

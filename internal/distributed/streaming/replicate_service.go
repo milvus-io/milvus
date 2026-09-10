@@ -2,6 +2,7 @@ package streaming
 
 import (
 	"context"
+	"slices"
 	"strings"
 
 	"github.com/cockroachdb/errors"
@@ -53,7 +54,48 @@ func (s replicateService) Append(ctx context.Context, rmsg message.ReplicateMuta
 	if err != nil {
 		return nil, err
 	}
+	if err := s.waitAppendFirstReplicas(ctx, msg); err != nil {
+		return nil, err
+	}
 	return s.appendReplicateMessageToWAL(ctx, msg)
+}
+
+// waitAppendFirstReplicas is the secondary cluster's append gate.
+//
+// A broadcast whose header names append-first vchannels is ordered on the
+// primary by the broadcaster: it appends and persists that group before any
+// other replica. Replication carries the replicas to a secondary as independent
+// per-pchannel streams, which restores no order between them at all, so a
+// SplitShard target's genesis could otherwise be appended here before the
+// source's fence -- inverting the one invariant the split rests on (nothing on a
+// target precedes T_switch, nothing on a source follows it) and, with it, the
+// order of a delete against an insert of the same primary key.
+//
+// The gate closes that gap on the receiving side, because only the receiving
+// side knows: the sender sees one replica at a time and has no way to observe
+// another cluster's ticks. The streamingcoord ack state is the fact it waits on.
+//
+// It cannot deadlock: an append-first replica never waits for anything, and
+// every other replica waits only on append-first ones, so the wait graph has no
+// cycle even when a rehash fences several sources at once.
+//
+// Called AFTER the remap, so the names it compares and the names it waits on are
+// both this cluster's.
+func (s replicateService) waitAppendFirstReplicas(ctx context.Context, msg message.MutableMessage) error {
+	bh := msg.BroadcastHeader()
+	if bh == nil || len(bh.AppendFirstVChannels) == 0 {
+		return nil
+	}
+	if slices.Contains(bh.AppendFirstVChannels, msg.VChannel()) {
+		// This replica IS one of the append-first ones; it is what the others
+		// are waiting for.
+		return nil
+	}
+	// The error is returned as it stands. Everything that can fail here is
+	// transient -- the replicate stream's context ending, the coord being
+	// unreachable, the broadcaster shutting down -- and the replicate stream
+	// retries from its checkpoint, re-entering the wait.
+	return s.streamingCoordClient.Broadcast().WaitVChannelsAcked(ctx, bh.BroadcastID, bh.AppendFirstVChannels)
 }
 
 func (s replicateService) UpdateReplicateConfiguration(ctx context.Context, req *milvuspb.UpdateReplicateConfigurationRequest) error {
@@ -182,6 +224,14 @@ func (s replicateService) overwriteReplicateMessage(ctx context.Context, msg mes
 		}
 	case message.MessageTypeAlterLoadConfig:
 		s.overwriteAlterLoadConfigMessage(msg)
+	case message.MessageTypeSplitShard:
+		if err := s.overwriteSplitShardMessage(sourceCluster, msg); err != nil {
+			return nil, err
+		}
+	case message.MessageTypeAlterCollection:
+		if err := s.overwriteShardSplitRoutingMessage(sourceCluster, msg); err != nil {
+			return nil, err
+		}
 	}
 
 	if funcutil.IsControlChannel(msg.VChannel()) {
@@ -266,4 +316,122 @@ func (s replicateService) overwriteAlterLoadConfigMessage(msg message.ReplicateM
 	header := alterLoadConfigMsg.Header()
 	header.UseLocalReplicaConfig = true
 	alterLoadConfigMsg.OverwriteHeader(header)
+}
+
+// overwriteSplitShardMessage rewrites every channel name a SplitShard carries
+// into this cluster's namespace: the sources it fences and the targets it
+// creates, in the header, and the routing post-image (plus the target genesis,
+// should it ever carry a channel list) in the body.
+//
+// Everything else in the message is deliberately left alone. Collection id,
+// partition ids, the split task id, the residues and the modulus are the same
+// facts in both clusters -- ids are replicated, and routing is a property of the
+// data, not of where it is stored -- so remapping them would break the very
+// correspondence replication exists to keep.
+func (s replicateService) overwriteSplitShardMessage(sourceCluster *replicateutil.MilvusCluster, msg message.ReplicateMutableMessage) error {
+	splitShardMsg := message.MustAsMutableSplitShardMessageV2(msg)
+	header := splitShardMsg.Header()
+	if err := s.overwriteVChannelNames(sourceCluster, header.SourceVchannels); err != nil {
+		return err
+	}
+	for _, target := range header.GetTargets() {
+		targetVChannel, err := s.getTargetVChannel(sourceCluster, target.GetVchannel())
+		if err != nil {
+			return err
+		}
+		target.Vchannel = targetVChannel
+	}
+	splitShardMsg.OverwriteHeader(header)
+
+	body := splitShardMsg.MustBody()
+	if err := s.overwriteRoutingChannelNames(sourceCluster, body.GetRouting()); err != nil {
+		return err
+	}
+	if genesis := body.GetGenesis(); genesis != nil {
+		if err := s.overwriteVChannelNames(sourceCluster, genesis.VirtualChannelNames); err != nil {
+			return err
+		}
+		if err := s.overwritePChannelNames(sourceCluster, genesis.PhysicalChannelNames); err != nil {
+			return err
+		}
+	}
+	splitShardMsg.OverwriteBody(body)
+	return nil
+}
+
+// overwriteShardSplitRoutingMessage rewrites the channel names of an
+// AlterCollection that commits a shard-split routing post-image -- the split's
+// adoption message, replicated like any other AlterCollection.
+//
+// Every other AlterCollection is left untouched: the routing mask is the only
+// one whose updates carry channel names at all.
+func (s replicateService) overwriteShardSplitRoutingMessage(sourceCluster *replicateutil.MilvusCluster, msg message.ReplicateMutableMessage) error {
+	alterCollectionMsg := message.MustAsMutableAlterCollectionMessageV2(msg)
+	if !slices.Contains(alterCollectionMsg.Header().GetUpdateMask().GetPaths(), message.FieldMaskCollectionShardSplitRouting) {
+		return nil
+	}
+	body := alterCollectionMsg.MustBody()
+	if err := s.overwriteRoutingChannelNames(sourceCluster, body.GetUpdates()); err != nil {
+		return err
+	}
+	alterCollectionMsg.OverwriteBody(body)
+	return nil
+}
+
+// overwriteRoutingChannelNames rewrites the channel names of a routing
+// post-image in place.
+//
+// The shard infos are rewritten too, not only the two name lists: a shard info
+// names its own vchannel so that a consumer can key by it instead of by position
+// (internal/util/routing/table.go REFUSES a shard info whose name disagrees with
+// the vchannel at its position), so a name left in the source cluster's
+// namespace would make the whole routing table unreadable here rather than
+// merely stale.
+func (s replicateService) overwriteRoutingChannelNames(sourceCluster *replicateutil.MilvusCluster, updates *message.AlterCollectionMessageUpdates) error {
+	if updates == nil {
+		return nil
+	}
+	if err := s.overwriteVChannelNames(sourceCluster, updates.VirtualChannelNames); err != nil {
+		return err
+	}
+	if err := s.overwritePChannelNames(sourceCluster, updates.PhysicalChannelNames); err != nil {
+		return err
+	}
+	for _, shardInfo := range updates.GetShardInfos() {
+		// An empty name is the persisted shape of a collection older than the
+		// field, and means "key me by position"; there is nothing to map.
+		if shardInfo.GetVchannelName() == "" {
+			continue
+		}
+		vchannel, err := s.getTargetVChannel(sourceCluster, shardInfo.GetVchannelName())
+		if err != nil {
+			return err
+		}
+		shardInfo.VchannelName = vchannel
+	}
+	return nil
+}
+
+// overwriteVChannelNames rewrites a list of vchannel names in place.
+func (s replicateService) overwriteVChannelNames(sourceCluster *replicateutil.MilvusCluster, vchannels []string) error {
+	for idx, vchannel := range vchannels {
+		targetVChannel, err := s.getTargetVChannel(sourceCluster, vchannel)
+		if err != nil {
+			return err
+		}
+		vchannels[idx] = targetVChannel
+	}
+	return nil
+}
+
+// overwritePChannelNames rewrites a list of pchannel names in place.
+func (s replicateService) overwritePChannelNames(sourceCluster *replicateutil.MilvusCluster, pchannels []string) error {
+	for idx, pchannel := range pchannels {
+		targetPChannel, err := sourceCluster.GetTargetChannel(pchannel, s.clusterID)
+		if err != nil {
+			return status.NewReplicateViolation("failed to get target channel, %s", err.Error())
+		}
+		pchannels[idx] = targetPChannel
+	}
+	return nil
 }

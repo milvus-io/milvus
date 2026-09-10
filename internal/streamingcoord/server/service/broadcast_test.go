@@ -110,6 +110,54 @@ func TestBroadcastService(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+// TestBroadcastServiceWaitVChannelsAcked drives the RPC the secondary cluster's
+// append gate calls: the request's broadcast id and vchannels reach the
+// broadcaster unchanged, the empty response means "they landed", and a failure
+// is surfaced as the RPC's error rather than swallowed into a success.
+func TestBroadcastServiceWaitVChannelsAcked(t *testing.T) {
+	broadcast.ResetBroadcaster()
+	snmanager.ResetStreamingNodeManager()
+
+	mb := mock_broadcaster.NewMockBroadcaster(t)
+	mb.EXPECT().Close().Return().Maybe()
+	broadcast.Register(mb)
+
+	var gotID uint64
+	var gotVChannels []string
+	mb.EXPECT().WaitVChannelsAcked(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, broadcastID uint64, vchannels []string) error {
+			gotID = broadcastID
+			gotVChannels = vchannels
+			if broadcastID == 0 {
+				return context.Canceled
+			}
+			return nil
+		})
+
+	service := NewBroadcastService()
+	resp, err := service.WaitVChannelsAcked(context.Background(), &streamingpb.WaitVChannelsAckedRequest{
+		BroadcastId: 42,
+		Vchannels:   []string{"by-dev-rootcoord-dml_0_1v0", "by-dev-rootcoord-dml_1_1v1"},
+	})
+	assert.NoError(t, err)
+	assert.NotNil(t, resp)
+	assert.EqualValues(t, 42, gotID)
+	assert.Equal(t, []string{"by-dev-rootcoord-dml_0_1v0", "by-dev-rootcoord-dml_1_1v1"}, gotVChannels)
+
+	_, err = service.WaitVChannelsAcked(context.Background(), &streamingpb.WaitVChannelsAckedRequest{
+		Vchannels: []string{"by-dev-rootcoord-dml_0_1v0"},
+	})
+	assert.ErrorIs(t, err, context.Canceled)
+
+	// Before the local broadcaster is ready there is no ack state to consult,
+	// so the wait fails rather than answering "landed" from nothing.
+	broadcast.ResetBroadcaster()
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = service.WaitVChannelsAcked(cancelled, &streamingpb.WaitVChannelsAckedRequest{BroadcastId: 42})
+	assert.Error(t, err)
+}
+
 // TestBroadcastService_ForwardImportToDataCoord tests that import messages from old proxies
 // are forwarded to DataCoord.ImportV2 for backward compatibility during rolling upgrades.
 func TestBroadcastService_ForwardImportToDataCoord(t *testing.T) {

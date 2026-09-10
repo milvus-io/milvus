@@ -130,6 +130,54 @@ func (_c *MockBroadcastService_Broadcast_Call) RunAndReturn(run func(context.Con
 	return _c
 }
 
+// WaitVChannelsAcked provides a mock function with given fields: ctx, broadcastID, vchannels
+func (_m *MockBroadcastService) WaitVChannelsAcked(ctx context.Context, broadcastID uint64, vchannels []string) error {
+	ret := _m.Called(ctx, broadcastID, vchannels)
+
+	if len(ret) == 0 {
+		panic("no return value specified for WaitVChannelsAcked")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, uint64, []string) error); ok {
+		r0 = rf(ctx, broadcastID, vchannels)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockBroadcastService_WaitVChannelsAcked_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'WaitVChannelsAcked'
+type MockBroadcastService_WaitVChannelsAcked_Call struct {
+	*mock.Call
+}
+
+// WaitVChannelsAcked is a helper method to define mock.On call
+//   - ctx context.Context
+//   - broadcastID uint64
+//   - vchannels []string
+func (_e *MockBroadcastService_Expecter) WaitVChannelsAcked(ctx interface{}, broadcastID interface{}, vchannels interface{}) *MockBroadcastService_WaitVChannelsAcked_Call {
+	return &MockBroadcastService_WaitVChannelsAcked_Call{Call: _e.mock.On("WaitVChannelsAcked", ctx, broadcastID, vchannels)}
+}
+
+func (_c *MockBroadcastService_WaitVChannelsAcked_Call) Run(run func(ctx context.Context, broadcastID uint64, vchannels []string)) *MockBroadcastService_WaitVChannelsAcked_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(uint64), args[2].([]string))
+	})
+	return _c
+}
+
+func (_c *MockBroadcastService_WaitVChannelsAcked_Call) Return(_a0 error) *MockBroadcastService_WaitVChannelsAcked_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockBroadcastService_WaitVChannelsAcked_Call) RunAndReturn(run func(context.Context, uint64, []string) error) *MockBroadcastService_WaitVChannelsAcked_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewMockBroadcastService creates a new instance of MockBroadcastService. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockBroadcastService(t interface {

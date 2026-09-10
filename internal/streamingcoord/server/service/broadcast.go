@@ -136,6 +136,26 @@ func (s *broadcastServceImpl) forwardImportToDataCoord(ctx context.Context, msg 
 	}, nil
 }
 
+// WaitVChannelsAcked blocks until every named vchannel of the broadcast has been
+// acked in this cluster, or the request context ends.
+//
+// The wait is deliberately not given a server-side deadline: the caller is a
+// secondary cluster's replicate stream, whose own context is the only sensible
+// bound, and a server-side timeout would turn "the replicas have not arrived
+// yet" into a failure the caller cannot distinguish from a real one. Every
+// failure it does return is transient by nature -- a cancelled context, or a
+// broadcaster shutting down -- so the replicate stream retries.
+func (s *broadcastServceImpl) WaitVChannelsAcked(ctx context.Context, req *streamingpb.WaitVChannelsAckedRequest) (*streamingpb.WaitVChannelsAckedResponse, error) {
+	broadcaster, err := broadcast.GetWithContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := broadcaster.WaitVChannelsAcked(ctx, req.GetBroadcastId(), req.GetVchannels()); err != nil {
+		return nil, err
+	}
+	return &streamingpb.WaitVChannelsAckedResponse{}, nil
+}
+
 // Ack acknowledges the message at the specified vchannel.
 func (s *broadcastServceImpl) Ack(ctx context.Context, req *streamingpb.BroadcastAckRequest) (*streamingpb.BroadcastAckResponse, error) {
 	broadcaster, err := broadcast.GetWithContext(ctx)

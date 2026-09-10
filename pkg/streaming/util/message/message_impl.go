@@ -251,6 +251,31 @@ func (m *messageImpl) OverwriteReplicateVChannel(vchannel string, broadcastVChan
 	if len(bh.Vchannels) != len(broadcastVChannels[0]) {
 		panic("broadcast vchannels length mismatch")
 	}
+	// AppendFirstVchannels names a SUBSET of Vchannels, so it is rewritten
+	// through the very mapping the caller just supplied for that list, position
+	// by position, rather than through a second mapping that could disagree
+	// with it. Leaving it in the source cluster's namespace would leave the
+	// secondary's append gate naming vchannels that exist nowhere in this
+	// cluster -- it would wait on them forever.
+	if len(bh.AppendFirstVchannels) > 0 {
+		mapping := make(map[string]string, len(bh.Vchannels))
+		for idx, vchannel := range bh.Vchannels {
+			mapping[vchannel] = broadcastVChannels[0][idx]
+		}
+		appendFirst := make([]string, 0, len(bh.AppendFirstVchannels))
+		for _, vchannel := range bh.AppendFirstVchannels {
+			mapped, ok := mapping[vchannel]
+			if !ok {
+				// A broadcast header whose append-first list is not a subset of
+				// its own vchannel list is malformed at the source; there is no
+				// name to map it to, so say so instead of silently carrying a
+				// foreign name into this cluster.
+				panic("append first vchannel is not one of the broadcast vchannels")
+			}
+			appendFirst = append(appendFirst, mapped)
+		}
+		bh.AppendFirstVchannels = appendFirst
+	}
 	bh.Vchannels = broadcastVChannels[0]
 	bhVal, err := EncodeProto(bh)
 	if err != nil {

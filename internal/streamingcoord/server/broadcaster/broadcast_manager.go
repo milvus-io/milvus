@@ -81,14 +81,15 @@ func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) *broadcastTask
 	}
 
 	m := &broadcastTaskManager{
-		lifetime:           typeutil.NewLifetime(),
-		mu:                 &sync.Mutex{},
-		tasks:              tasks,
-		idempotencyIndex:   idxOfKeys,
-		resourceKeyLocker:  rkLocker,
-		metrics:            metrics,
-		broadcastScheduler: newBroadcasterScheduler(pendingTasks, logger),
-		ackScheduler:       ackScheduler,
+		lifetime:            typeutil.NewLifetime(),
+		mu:                  &sync.Mutex{},
+		tasks:               tasks,
+		taskCreationWaiters: make(map[uint64][]chan struct{}),
+		idempotencyIndex:    idxOfKeys,
+		resourceKeyLocker:   rkLocker,
+		metrics:             metrics,
+		broadcastScheduler:  newBroadcasterScheduler(pendingTasks, logger),
+		ackScheduler:        ackScheduler,
 	}
 
 	// Set the broadcast task manager reference for accessing incomplete tasks.
@@ -104,14 +105,21 @@ func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) *broadcastTask
 type broadcastTaskManager struct {
 	mlog.Binder
 
-	lifetime           *typeutil.Lifetime
-	mu                 *sync.Mutex
-	tasks              map[uint64]*broadcastTask // map the broadcastID to the broadcastTaskState
-	idempotencyIndex   *idempotencyIndex         // map the idempotency key to the broadcastID that owns it
-	resourceKeyLocker  *resourceKeyLocker
-	metrics            *broadcasterMetrics
-	broadcastScheduler *broadcasterScheduler // the scheduler of the broadcast task
-	ackScheduler       *ackCallbackScheduler // the scheduler of the ack task
+	lifetime *typeutil.Lifetime
+	mu       *sync.Mutex
+	tasks    map[uint64]*broadcastTask // map the broadcastID to the broadcastTaskState
+	// taskCreationWaiters holds, per broadcastID, the channels that
+	// WaitVChannelsAcked registered while that broadcast had no task yet. A
+	// secondary cluster learns of a broadcast only from the replicas its
+	// replicate streams deliver, in whatever order they arrive, so a waiter for
+	// the append-first replicas of a broadcast routinely gets there before the
+	// broadcast itself does. Closed and dropped by notifyBroadcastTaskCreated.
+	taskCreationWaiters map[uint64][]chan struct{}
+	idempotencyIndex    *idempotencyIndex // map the idempotency key to the broadcastID that owns it
+	resourceKeyLocker   *resourceKeyLocker
+	metrics             *broadcasterMetrics
+	broadcastScheduler  *broadcasterScheduler // the scheduler of the broadcast task
+	ackScheduler        *ackCallbackScheduler // the scheduler of the ack task
 }
 
 // WithResourceKeys acquires the resource keys for the broadcast task.
@@ -305,6 +313,102 @@ func (bm *broadcastTaskManager) Ack(ctx context.Context, msg message.ImmutableMe
 	return t.Ack(ctx, msg)
 }
 
+// WaitVChannelsAcked blocks until every named vchannel of the given broadcast
+// has a recorded checkpoint in THIS cluster, or the context ends.
+//
+// It is the server half of the secondary cluster's append gate: a replica whose
+// broadcast names append-first vchannels may not be appended here until those
+// vchannels' replicas have landed here, and this ack state is the only fact a
+// secondary has to order them by. Both halves of the wait are unbounded except
+// by ctx -- the caller owns the deadline, exactly as the duplicate-broadcast
+// wait in broadcast() does -- because there is no local answer to give when the
+// replicas simply have not arrived yet: the replicate stream is still coming.
+//
+// The broadcast may not exist here yet when the call arrives, so the wait covers
+// the task's creation as well as the acks.
+func (bm *broadcastTaskManager) WaitVChannelsAcked(ctx context.Context, broadcastID uint64, vchannels []string) error {
+	if !bm.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return status.NewOnShutdownError("broadcaster is closing")
+	}
+	defer bm.lifetime.Done()
+
+	t, err := bm.blockUntilBroadcastTaskCreated(ctx, broadcastID)
+	if err != nil {
+		return err
+	}
+	for _, vchannel := range vchannels {
+		if err := t.BlockUntilVChannelAcked(ctx, vchannel); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// blockUntilBroadcastTaskCreated returns the task of the given broadcastID,
+// waiting for it to be created if it does not exist yet.
+func (bm *broadcastTaskManager) blockUntilBroadcastTaskCreated(ctx context.Context, broadcastID uint64) (*broadcastTask, error) {
+	for {
+		t, created := bm.getBroadcastTaskOrRegisterWaiter(broadcastID)
+		if t != nil {
+			return t, nil
+		}
+		select {
+		case <-ctx.Done():
+			// Drop the registration rather than leaving it for a broadcast that
+			// may never arrive: a secondary's replicate streams reconnect and
+			// retry, so an abandoned waiter per attempt would accumulate.
+			bm.removeTaskCreationWaiter(broadcastID, created)
+			return nil, ctx.Err()
+		case <-created:
+			// Loop rather than trust the notification: the task is looked up
+			// again under the lock, so a task removed between the close and the
+			// lookup re-registers instead of returning a stale one.
+		}
+	}
+}
+
+// getBroadcastTaskOrRegisterWaiter returns the task of the broadcastID, or a
+// channel that is closed when that task is created.
+func (bm *broadcastTaskManager) getBroadcastTaskOrRegisterWaiter(broadcastID uint64) (*broadcastTask, chan struct{}) {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+
+	if t, ok := bm.tasks[broadcastID]; ok {
+		return t, nil
+	}
+	ch := make(chan struct{})
+	bm.taskCreationWaiters[broadcastID] = append(bm.taskCreationWaiters[broadcastID], ch)
+	return nil, ch
+}
+
+// removeTaskCreationWaiter drops one abandoned creation waiter.
+func (bm *broadcastTaskManager) removeTaskCreationWaiter(broadcastID uint64, ch chan struct{}) {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+
+	waiters := bm.taskCreationWaiters[broadcastID]
+	for i, waiter := range waiters {
+		if waiter == ch {
+			waiters = append(waiters[:i], waiters[i+1:]...)
+			break
+		}
+	}
+	if len(waiters) == 0 {
+		delete(bm.taskCreationWaiters, broadcastID)
+		return
+	}
+	bm.taskCreationWaiters[broadcastID] = waiters
+}
+
+// notifyBroadcastTaskCreated releases everyone waiting for the broadcast to
+// exist. Must be called with bm.mu held, from every site that registers a task.
+func (bm *broadcastTaskManager) notifyBroadcastTaskCreated(broadcastID uint64) {
+	for _, ch := range bm.taskCreationWaiters[broadcastID] {
+		close(ch)
+	}
+	delete(bm.taskCreationWaiters, broadcastID)
+}
+
 // DropTombstone drops the tombstone task from the manager.
 func (bm *broadcastTaskManager) DropTombstone(ctx context.Context, broadcastID uint64) error {
 	if !bm.lifetime.Add(typeutil.LifetimeStateWorking) {
@@ -385,6 +489,7 @@ func (bm *broadcastTaskManager) getOrAddBroadcastTask(
 	newIncomingTask.WithResourceKeyLockGuards(guards)
 	bm.tasks[broadcastID] = newIncomingTask
 	bm.idempotencyIndex.Add(scope, broadcastID)
+	bm.notifyBroadcastTaskCreated(broadcastID)
 	return newIncomingTask, true
 }
 
@@ -409,6 +514,7 @@ func (bm *broadcastTaskManager) getOrCreateBroadcastTask(msg message.ImmutableMe
 	newBroadcastTask.SetLogger(bm.Logger())
 	bm.tasks[bh.BroadcastID] = newBroadcastTask
 	bm.idempotencyIndex.Add(newBroadcastTask.IdempotencyScope(), bh.BroadcastID)
+	bm.notifyBroadcastTaskCreated(bh.BroadcastID)
 	return newBroadcastTask, true
 }
 

@@ -101,3 +101,32 @@ func TestOptBuildBroadcastAppendFirstAndAckSyncUpAreMutuallyExclusive(t *testing
 			MustBuildBroadcast()
 	}, "ack-sync-up cannot be added to an already append-first broadcast")
 }
+
+// TestOverwriteReplicateVChannelPanicsOnAForeignAppendFirst pins what happens
+// when a broadcast header's append-first list is NOT a subset of its own
+// vchannel list.
+//
+// The builder refuses to produce such a header, so this forges one: the case
+// only reaches a secondary cluster from a malformed or corrupted remote header,
+// and there is no name to map it to. Refusing loudly is the point -- carrying
+// the source cluster's name through would make the secondary's append gate wait
+// on a vchannel that exists nowhere here, silently and forever.
+func TestOverwriteReplicateVChannelPanicsOnAForeignAppendFirst(t *testing.T) {
+	msg := NewSplitShardMessageBuilderV2().
+		WithHeader(&messagespb.SplitShardMessageHeader{CollectionId: 1}).
+		WithBody(&messagespb.SplitShardMessageBody{}).
+		WithBroadcast([]string{"p0_1v0", "p1_1v1"}, OptBuildBroadcastAppendFirst("p0_1v0")).
+		MustBuildBroadcast().
+		WithBroadcastID(9)
+
+	replica := msg.SplitIntoMutableMessage()[0].(*messageImpl)
+	bh := replica.broadcastHeader()
+	bh.AppendFirstVchannels = []string{"foreign_1v9"}
+	encoded, err := EncodeProto(bh)
+	assert.NoError(t, err)
+	replica.properties.Set(messageBroadcastHeader, encoded)
+
+	assert.Panics(t, func() {
+		replica.OverwriteReplicateVChannel(replica.VChannel(), []string{"q0_1v0", "q1_1v1"})
+	})
+}

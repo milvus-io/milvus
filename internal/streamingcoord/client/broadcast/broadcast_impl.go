@@ -64,3 +64,21 @@ func (c *GRPCBroadcastServiceImpl) Ack(ctx context.Context, msg message.Immutabl
 	})
 	return err
 }
+
+// WaitVChannelsAcked blocks until every named vchannel of the broadcast has been
+// acked at the streaming coord, or ctx ends.
+//
+// The RPC error is returned as it stands, never reclassified: everything that
+// can fail here -- the context ending, the coord being unreachable or shutting
+// down -- is transient, and the replicate stream that calls this retries.
+func (c *GRPCBroadcastServiceImpl) WaitVChannelsAcked(ctx context.Context, broadcastID uint64, vchannels []string) error {
+	client, err := c.service.GetService(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = client.WaitVChannelsAcked(ctx, &streamingpb.WaitVChannelsAckedRequest{
+		BroadcastId: broadcastID,
+		Vchannels:   vchannels,
+	})
+	return err
+}
