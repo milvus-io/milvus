@@ -11,6 +11,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <mutex>
 #include <string>
 
 #include "cachinglayer/Metrics.h"
@@ -18,9 +19,15 @@
 #include "common/init_c.h"
 #include "common/PrometheusClient.h"
 #include "monitor_c.h"
+#include "storage/LoadAdmissionController.h"
 
 char*
 GetCoreMetrics() {
+    // Concurrent Go gathers must not interleave snapshot publication with
+    // collection and return mixed or stale admission gauges.
+    static std::mutex scrape_mutex;
+    std::lock_guard lock(scrape_mutex);
+    milvus::storage::LoadAdmissionController::GetInstance().UpdateMetrics();
     UpdateArrowIOThreadPoolMetrics();
     static_cast<void>(
         milvus::cachinglayer::monitor::collect_cache_shard_disk_usage_stats());

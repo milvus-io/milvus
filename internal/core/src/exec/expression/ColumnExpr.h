@@ -107,6 +107,11 @@ class PhyColumnExpr : public Expr {
     }
 
     void
+    SetSnapshot(const segcore::SegmentReadSnapshot* snapshot) override {
+        segment_chunk_reader_.SetSnapshot(snapshot);
+    }
+
+    void
     MoveCursorForIndexed() {
         current_chunk_pos_ = current_chunk_pos_ + batch_size_ >=
                                      segment_chunk_reader_.active_count_
@@ -122,7 +127,7 @@ class PhyColumnExpr : public Expr {
                 use_index_data_ && segment_chunk_reader_.segment_->type() ==
                                        SegmentType::Sealed
                     ? current_chunk_pos_
-                    : segment_chunk_reader_.segment_->num_rows_until_chunk(
+                    : segment_chunk_reader_.NumRowsUntilChunk(
                           expr_->GetColumn().field_id_, current_chunk_id_) +
                           current_chunk_pos_;
             return current_rows;

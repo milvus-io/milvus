@@ -740,7 +740,7 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
         for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
             auto data_pos =
                 (i == current_data_chunk_) ? current_data_chunk_pos_ : 0;
-            int64_t size = segment_->chunk_size(field_id_, i) - data_pos;
+            int64_t size = ChunkSize(field_id_, i) - data_pos;
             size = std::min(size, real_batch_size - processed_rows);
 
             if (size > 0) {
@@ -802,6 +802,13 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
                "expect batch size {}",
                batch_valid.size(),
                real_batch_size);
+    if (segment_->type() != SegmentType::Sealed) {
+        CommitLegacyDataProgress(processed_rows);
+        AssertInfo(current_data_global_pos_ == current_index_chunk_pos_,
+                   "growing GIS data cursor at {}, index cursor at {}",
+                   current_data_global_pos_,
+                   current_index_chunk_pos_);
+    }
     return std::make_shared<ColumnVector>(std::move(batch_result),
                                           std::move(batch_valid));
 }

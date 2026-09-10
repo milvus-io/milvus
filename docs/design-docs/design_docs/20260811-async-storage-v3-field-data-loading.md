@@ -9,30 +9,37 @@
 
 ## Summary
 
-This design adds an opt-in asynchronous load path for field data backed by the
-Storage V3 manifest and column-group reader. The existing caching-layer
+This design adds an experimental asynchronous load path for field data backed
+by the Storage V3 manifest and column-group reader. The existing caching-layer
 `Translator` interface remains synchronous, but the work behind
 `ManifestGroupTranslator::get_cells()` is decomposed into coroutine-based read
 windows that can overlap remote reads without dedicating one load worker to
 each blocking storage request.
 
-The design has five main properties:
+Before installing these translators, the batch load path also opens projected
+chunk readers through the native asynchronous reader factory.
 
-1. Requested cache cells are sorted by their physical row-group position and
+The design has six main properties:
+
+1. Projected chunk readers are opened on the async-load executor with at most
+   16 concurrent opens per call, then passed to translator construction.
+2. Requested cache cells are sorted by their physical row-group position and
    grouped into byte-bounded, contiguous read windows.
-2. Every window acquires a process-wide transient-memory budget lease before
-   its storage read is submitted.
-3. Remote reads run through the native asynchronous `ChunkReader` API on a
+3. Every window jointly reserves transient bytes and one process-wide load
+   admission slot before its storage read is submitted.
+4. Remote reads run through the native asynchronous `ChunkReader` API on a
    priority-aware executor.
-4. In-memory finalization stays on the load executor, while mmap finalization
+5. In-memory finalization stays on the load executor, while mmap finalization
    may move to a dedicated local-file executor so blocking file writes do not
    occupy remote-load workers.
-5. Caller cancellation and the first sibling failure cancel pending windows;
+6. Caller cancellation and the first sibling failure cancel pending windows;
    failures are published before a window releases its budget lease.
 
 The path is guarded by the temporary
 `queryNode.segcore.storageV2.enableAsyncLoad` switch, which defaults to
-`false`. The legacy `LoadCellBatchAsync` path remains available during rollout.
+`false`. Async loading support for data and indexes is incomplete, and enabling
+the switch is currently unsupported. The legacy `LoadCellBatchAsync` path
+remains the default.
 
 This PR covers Storage V3 field data and JSON key-stat column groups. It does
 not make scalar-index loading asynchronous.
@@ -45,9 +52,11 @@ This document follows the names used by the current Segcore implementation:
 |---|---|
 | cache cell | The caching-layer unit returned by a translator. One cell contains one or more adjacent row groups. |
 | row group / chunk | A physical reader unit addressed by `ChunkReader`; `chunk_indices` are row-group indices in this path. |
+| reader open | Preparing one projected `ChunkReader` through `Reader::get_chunk_reader_async()`, before a translator can load its cells. |
 | read window | One async storage request containing one or more adjacent cache cells and all row groups belonging to them. |
 | loaded bytes | The estimated final decoded size used to split read windows. |
-| transient bytes | The estimated peak temporary memory held from admission through finalization. This is what the global budget charges. |
+| transient bytes | The estimated peak temporary memory held from admission through finalization. This is the memory dimension charged by load admission. |
+| admission slot | One admitted, unfinished load window, legacy field-data batch, or index stream slice. It is released with the transient-byte reservation. |
 | finalization | Converting Arrow record batches into Milvus `GroupChunk` data, including local mmap-file materialization when enabled. |
 
 This feature is part of the Storage V3 load path. Some existing implementation
@@ -86,6 +95,8 @@ semantics, and error categories across coroutine and executor boundaries.
 
 ## Goals
 
+- Open projected chunk readers asynchronously for manifest batch loads and
+  JSON key-stat column groups, with bounded per-call concurrency.
 - Use the native `ChunkReader::get_chunks_async()` path for Storage V3
   field-data reads.
 - Overlap independent read windows without blocking a worker for each remote
@@ -100,7 +111,8 @@ semantics, and error categories across coroutine and executor boundaries.
   existing translator.
 - Cancel pending sibling windows after the first failure and propagate the
   original typed error.
-- Allow a disabled-by-default rollout with the legacy path as fallback.
+- Keep the experimental path disabled by default with the legacy path as
+  fallback.
 - Reuse the same async pipeline for normal manifest field data and JSON
   key-stat column groups.
 
@@ -110,8 +122,8 @@ semantics, and error categories across coroutine and executor boundaries.
 - Removing `LoadCellBatchAsync` or the legacy translator path in this PR.
 - Changing the public caching-layer `Translator` interface to return a future
   or coroutine.
-- Making `ChunkReader` creation asynchronous. Reader preparation remains
-  synchronous before the translator is installed.
+- Making the entire segment-load API asynchronous. Top-level `Reader::create()`
+  and the outer load/translator interfaces remain synchronous.
 - Changing cache-cell sizing or cache eviction semantics.
 - Allowing a zero-byte read window. A read-window target must be positive.
 - Guaranteeing immediate cancellation of a storage request that has already
@@ -132,8 +144,8 @@ ManifestGroupTranslator::get_cells(OpContext* ctx,
                                    const std::vector<cid_t>& cids);
 ```
 
-The rollout mode is captured when a translator is constructed. A cache miss
-then selects one of two implementations:
+Each translator retains the mode selected during preparation or construction.
+A cache miss then selects one of two implementations:
 
 ```text
 ManifestGroupTranslator::get_cells()
@@ -148,16 +160,81 @@ ManifestGroupTranslator::get_cells()
 ```
 
 The outer call is still synchronous because the caching-layer contract is
-unchanged. The asynchronous benefit is inside `LoadCellsAsync`: storage waits
-and sibling windows compose as coroutines on dedicated executors rather than as
-one blocking storage operation per load task.
+unchanged. During cell loading, storage waits and sibling windows compose
+inside `LoadCellsAsync` as coroutines on dedicated executors rather than as one
+blocking storage operation per load task.
 
 The switch is passed into translators created for:
 
 - eager and lazy Storage V3 sealed-segment column groups; and
 - eager and lazy JSON key-stat column groups.
 
-### End-to-end flow
+### Async reader preparation
+
+Reader preparation and cell loading are separate stages:
+
+| Stage | Entry point | Responsibility |
+|---|---|---|
+| reader preparation | `OpenChunkReadersAsync()` in `AsyncChunkReader` | Open projected readers through `Reader::get_chunk_reader_async()` and return them in request order. |
+| cell loading | `LoadCellsAsync()` in `AsyncLoadPipeline` | Use an already prepared reader to admit read windows, call `ChunkReader::get_chunks_async()`, and finalize cells. |
+
+`OpenChunkReadersAsync` takes a shared storage `Reader` and a list of
+`ChunkReaderOpenSpec` entries. Each entry supplies a column-group index and
+shared projected-column names. The returned task is lazy: storage opens start
+when it is awaited. The executor keep-alive and `OpContext` cancellation token
+are captured at call time, and the reader and projections remain owned until
+the opens finish.
+
+For manifest batch loads, the flow is:
+
+```text
+build manifest load tasks and projected-column specs
+  -> capture enableAsyncLoad
+  -> blockingWait(OpenChunkReadersAsync())
+       -> shared priority-aware async-load executor
+       -> collectAllWindowed(max concurrent opens = 16)
+       -> Reader::get_chunk_reader_async(column_group_index, needed_columns)
+       -> validate status and non-null reader
+       -> return readers in spec order
+  -> reuse prepared readers for column-size estimates
+  -> move each reader into its MIDDLE-pool load task
+  -> construct ManifestGroupTranslator with the prepared reader
+  -> load cells on warmup or cache miss
+```
+
+The outer preparation call still waits for the batch before dispatching its
+translator-construction tasks. `PrepareManifestLoadTasks` is shared by the
+regular and external-collection batch paths. It fetches size estimates once per
+column group from a prepared reader, avoiding an additional synchronous reader
+open solely for estimates. The translator retains the mode selected during
+preparation, so a configuration change cannot switch it between stages.
+
+JSON key stats use the same helper: eager loading opens one reader projecting
+all columns; lazy loading batches one projected reader per column and reuses a
+prepared reader for size estimates. These call sites currently pass a null
+`OpContext`, so they do not provide context cancellation to reader preparation.
+
+The concurrency cap is **per `OpenChunkReadersAsync` call**, not process-wide.
+It is separate from the bytes-and-slots admission used by `LoadCellsAsync`;
+reader opens do not acquire either resource, and the cap does not bound cell-read
+windows or total memory across concurrent batches.
+
+Cancellation is checked before each storage factory invocation. The first
+observed open failure cancels pending dispatches; already issued opens are
+drained because the storage factory API provides no way to interrupt them.
+After draining, caller/context cancellation takes precedence over the first
+open failure. Status conversion and non-null validation happen inside each
+child before its slot can issue another open. Only a fully successful batch
+returns readers, in the original spec order.
+
+With the switch disabled, the batch paths retain synchronous estimate reads
+and open each actual reader on its existing worker. This migration does not
+cover every reader-construction entry point: the `LoadColumnGroup` overload
+taking `RuntimeResourceState*` still calls synchronous `get_chunk_reader()`.
+Top-level `Reader::create()` and subsequent metadata access also retain their
+synchronous interfaces.
+
+### Cell-load flow
 
 ```text
 requested cache cell IDs
@@ -175,7 +252,7 @@ BuildAsyncReadWindows
         |
         v
 for each window, in physical order
-  await transient-budget admission
+  await joint transient-byte and slot admission
         |
         v
 schedule admitted window on priority load executor
@@ -190,7 +267,7 @@ load executor / read continuation   LocalFileIOPool when enabled
         |                              |
         +---------------+--------------+
                         v
-             release Arrow batches and budget lease
+             release Arrow batches and admission lease
                         |
                         v
              join all window coroutines
@@ -293,31 +370,61 @@ state.
 
 ### Load executor
 
-The default executor is a process-wide `folly::CPUThreadPoolExecutor` with:
+Reader preparation and cell loading share the default process-wide
+`folly::CPUThreadPoolExecutor`, resolved through `ResolveAsyncLoadExecutor`, with:
 
-- `max(1, CPU_NUM)` workers;
-- two priority queues;
+- a positive worker limit from `queryNode.segcore.storageV2.asyncLoadThreadPoolSize`,
+  defaulting to `max(1, min(CPU_NUM, 16))`;
+- two unbounded priority queues;
 - thread name prefix `MILVUS_ASYNC_LOAD_`.
+
+QueryNode applies this limit at startup and watches updates and override deletion.
+Configuration alone does not create the executor; its first user creates it with
+the latest limit. Updates resize the same executor, preserving queued work and
+existing keep-alives. Shrinking may wait for running workers, so configuration
+runs off the load workers and does not hold the executor-acquisition lock while
+resizing. Resize errors are returned at startup and logged on hot updates; the
+resize path attempts to restore the previous limit on failure.
+
+This worker limit is independent of admission slots and the legacy HIGH/LOW
+thread-pool coefficients. It does not add preemption or reserve capacity for HIGH
+work already blocked behind admitted LOW work.
 
 Milvus `LoadPriority::HIGH` maps to Folly high priority and
 `LoadPriority::LOW` maps to Folly low priority. The continuation after an
 asynchronous storage future is also rebound to this executor and priority.
 
-The pipeline can accept a custom executor for tests or future integration. A
-custom executor must defer submitted work, support Folly keep-alive semantics
-or outlive the task, and implement priority submission if it advertises more
-than one priority.
+Reader opening and cell loading can accept a custom executor for tests or
+future integration. A custom executor must defer submitted work, support Folly
+keep-alive semantics or otherwise outlive the task and all its continuations,
+and implement priority submission if it advertises more than one priority.
+The selected submission method (`add()` or `addWithPriority()`) must accept
+initial tasks and every continuation without rejecting work or throwing. The
+same requirements apply to an executor returned by the mmap finalization
+provider.
+
+Backpressure belongs before dispatch, using the joint load admission for
+cell reads and the existing concurrency limit for reader opens. Executors that
+reject submissions when their queues fill are unsupported: a continuation
+must still be able to run so admitted work can complete and release resources.
+The production load and local-file executors use unbounded priority queues and
+keep-alive ownership. Folly schedules both initial tasks and continuations
+through `noexcept` paths; an exception during submission, including an
+allocation failure, terminates the process instead of reaching the pipeline's
+exception handlers. Executor submission failures are outside the recoverable
+error contract.
 
 ### Window submission
 
 The parent coroutine walks windows in physical order. For each window it first
-awaits budget admission, then adds the admitted window to an `AsyncScope`.
+awaits joint byte and slot admission, then adds the admitted window to an `AsyncScope`.
 This ordering has two effects:
 
-- a window cannot enter the executor queue before its transient memory is
-  reserved; and
-- the number of submitted-but-not-finished windows is bounded by budget
-  capacity when a non-zero capacity is configured.
+- a window cannot enter the executor queue before both resources are reserved;
+- the byte budget gates estimated transient memory, including the oversized
+  request exception described below; and
+- a positive slot capacity independently bounds admitted, unfinished load work,
+  even when byte estimates are very small or the byte limit is disabled.
 
 All children are joined before the parent returns or throws. Each child writes
 only its own per-window optional slot; the parent assembles the final ordered
@@ -342,36 +449,122 @@ storage format providing the native async override. This PR pins a
 milvus-storage revision containing that implementation and optionally exposes
 the CRT-backed S3 build path through `WITH_CRT`.
 
-## Transient-Memory Admission
+## Load Admission
 
 The pipeline uses the process-wide
-`storage::TransientMemoryBudget::GetLoadTransientBudget()` instance. The same
-budget is shared with other load-time streaming paths, including scalar-index
-V3 entry streaming, so concurrent subsystems are controlled by one transient
-memory ceiling.
+`storage::LoadAdmissionController::GetInstance()` instance. The controller is
+shared with legacy field-data batches and scalar-index V3 stream slices.
+Each current production caller reserves one slot and its estimated transient
+bytes in a single request:
 
-For each window:
+```cpp
+auto lease = co_await admission.AcquireAsync(
+    {.transient_bytes = window.budget_bytes, .slots = 1},
+    priority,
+    cancellation_token);
+```
 
-1. Sum `loading_overhead_size` across its cells.
-2. Await `AcquireAsync(bytes, priority, cancellation_token)`.
-3. Move the returned RAII lease into the window coroutine.
-4. Hold it across remote read and finalization.
-5. Release it when temporary Arrow data and the finalization frame unwind.
+The returned move-only RAII lease owns both reservations. It moves into the
+window coroutine and remains alive across remote reads, executor handoffs, and
+finalization. Temporary Arrow data is destroyed before the lease returns both
+resources. A zero-byte request still consumes and releases its slot. Legacy
+blocking and `TryAcquire` callers participate in the same queues and must release
+exactly the full request after their temporary data is consumed.
 
 Admission has the following semantics:
 
-- capacity `0` means unlimited;
-- high-priority waiters are considered before low-priority waiters;
-- FIFO order is preserved within one priority queue;
-- a request larger than total capacity may run only when no other bytes are in
-  flight, preventing permanent starvation;
+- both resources are checked and reserved under the same mutex; waiting requests
+  hold neither resource;
+- capacity `0` disables only that dimension's limit;
+- high-priority waiters precede low-priority waiters, with FIFO within each class;
+  sustained high-priority traffic can starve low priority;
+- a queue head that cannot fit blocks later requests in that priority class,
+  even if smaller requests could fit;
+- a request exceeding the byte capacity can run when no other bytes are
+  reserved, but cannot bypass the slot limit;
+- weighted slot requests above total slot capacity wait for expansion or
+  cancellation. All current production requests use one slot, so any positive
+  slot capacity permits them to make progress;
 - cancellation removes a pending waiter and immediately re-evaluates the queue;
-- a runtime capacity increase or disabling the limit wakes eligible waiters.
+- increasing or disabling either capacity wakes newly eligible waiters;
+- shrinking a capacity does not revoke admitted work. New requests wait until
+  they fit the new limits, subject to the byte-only oversized exception.
 
-The async feature can technically run with capacity `0`, but production
-rollout should configure `common.loadTransientBudgetBytes` to a positive value.
-Otherwise the read-window size limits one storage operation but does not bound
-the number of simultaneously admitted windows across segments.
+Immediate admission checks cancellation, priority and both capacities before
+creating a waiter or registering cancellation callbacks. The asynchronous API
+still creates its Future contract. If waiting is necessary, the controller
+prepares the waiter and queue node outside the mutex and rechecks admission
+before linking the node into the shared queue. Queue-node allocation and
+destruction happen outside the mutex.
+
+Each blocking waiter has a one-shot Baton. The operation that changes it from
+pending to admitted or cancelled posts that Baton after unlocking, including
+when notification precedes the start of the wait. This avoids broadcasting to
+unrelated blocking waiters. Promise completion and cancellation-callback
+destruction also happen outside the mutex.
+
+Refill loops holding unfinished work use `TryAcquire` so they can consume and
+release that work instead of blocking on admission. Callers must not hold an
+admission while waiting for child work that needs the same exhausted controller.
+
+The slot capacity counts unfinished windows, batches, and stream slices; it
+does not count worker threads or individual storage RPCs. A window can fan out
+inside the storage implementation. Reader opens retain their separate per-call
+concurrency limit. Stage-specific I/O or CPU admission can be considered later
+if measurements show that a window-level limit is insufficient.
+
+The async feature can technically run with both capacities `0`, but enabling it
+is currently unsupported. Before supported enablement, async loading needs to
+be completed and the default admission limits validated. When async loading is
+enabled, absent admission parameters default to a 2 GiB transient byte budget
+and `2 * hardware.GetCPUNum()` slots. When async loading is disabled, absent
+parameters resolve to `0`, preserving the legacy unlimited admission behavior.
+Each explicitly configured value, including `0`, takes precedence independently
+of the switch. Negative values are normalized to the parameter's declared
+async-mode default.
+
+The slot default uses Milvus's effective Go CPU count at initialization
+(`GOMAXPROCS`, including its container CPU configuration). The CPU count is a
+sizing heuristic for unfinished load work, not a count of executing threads.
+The byte budget accounts for estimated temporary data, not RSS, and does not
+preallocate memory; the oversized-request exception still applies.
+
+### Admission metrics
+
+The process-wide controller exports these metric families with the prefix
+`internal_load_admission_`:
+
+| Suffix | Type | Labels | Meaning |
+|---|---|---|---|
+| `reserved_bytes` | Gauge | none | Estimated transient bytes reserved by unfinished admitted work, not RSS |
+| `capacity_bytes` | Gauge | none | Effective byte capacity; `0` means unlimited |
+| `reserved_slots` | Gauge | none | Slots reserved by unfinished admitted work |
+| `capacity_slots` | Gauge | none | Effective slot capacity; `0` means unlimited |
+| `pending_requests` | Gauge | `priority=high/low` | Requests still waiting without a reservation |
+| `oldest_wait_seconds` | Gauge | `priority=high/low` | Age of the queue head, or `0` for an empty queue |
+| `queue_wait_seconds` | Histogram | `priority=high/low`, `outcome=admitted/cancelled` | Time from enqueue to the terminal admission or cancellation decision |
+
+The C metrics scrape takes one O(1) resource/queue snapshot under the admission
+mutex, then publishes gauges after unlocking. Scrapes serialize publication and
+collection so concurrent scrapes cannot mix gauge snapshots. Queue-head age
+continues to grow even when no request completes. Reserved values can exceed
+capacity after a shrink or, for bytes, an oversized admission; utilization ratios
+must exclude zero capacities.
+
+Only requests that actually enter a queue record a monotonic start time. An
+admission batch records its completion time under the admission mutex; a queued
+cancellation records its own decision time. Each queued request contributes once
+to the matching histogram, outside the admission mutex and before notification.
+The histogram excludes coroutine resumption delay, immediate admissions,
+`TryAcquire` attempts, and cancellation before enqueue. Its `_count` provides
+the cumulative number of queued requests resolved with each outcome. Histogram
+observations and the gauge snapshot are collected independently, so they are
+not an atomic accounting transaction.
+
+Immediate admission and releases that admit no waiters perform no metric updates
+or clock reads. The four histogram instances are registered once; updates require
+no label lookup or allocation. The histogram library still takes its own mutex,
+so contention at very high queue-resolution rates remains a measurement concern.
 
 ## Finalization and Local File I/O
 
@@ -452,9 +645,21 @@ After the join:
 2. otherwise the first recorded failure is rethrown;
 3. only a failure-free request assembles results.
 
-Arrow and storage statuses are translated through
-`milvus_storage::ToSegcoreError`, preserving typed storage error categories at
-the Segcore boundary.
+Both reader opening and cell loading translate Arrow/storage statuses through
+`milvus_storage::ToSegcoreError`. Their public entry points also classify native
+exceptions that propagate from setup and awaited work: `SegcoreError` codes
+are preserved, allocation failures become `MemAllocateFailed`, Folly
+cancellation becomes `FollyCancel`, other Folly future failures become
+`FollyOtherException`, and untyped failures become `UnexpectedError`.
+Awaited failures are classified after
+draining work and selecting the error to propagate. Categories already flattened
+into an untyped Arrow status upstream cannot be recovered here.
+
+This classification excludes executor submission failures in Folly's
+`noexcept` scheduling paths, including allocation failures during submission.
+Those failures terminate the process; the first-failure, draining, and lease
+release protocol does not provide recovery from them. Executors must meet the
+submission requirements described under [Load executor](#load-executor).
 
 ## Result Ordering and Ownership
 
@@ -472,7 +677,7 @@ Before returning, the pipeline verifies that:
 The caller therefore sees the same ordering contract as the legacy translator,
 even if windows were reordered for I/O or completed out of order.
 
-The transient budget lease lives through finalization. This is deliberate:
+The joint admission lease lives through finalization. This is deliberate:
 remote record batches are not considered consumed until the final
 `GroupChunk` has been built and the temporary Arrow ownership can unwind.
 
@@ -480,17 +685,47 @@ remote record batches are not considered consumed until the final
 
 | Parameter | Default | Refresh behavior | Purpose |
 |---|---:|---|---|
-| `queryNode.segcore.storageV2.enableAsyncLoad` | `false` | watched dynamically; mode is captured by newly constructed translators | temporary rollout and rollback switch |
+| `queryNode.segcore.storageV2.enableAsyncLoad` | `false` | watched dynamically; mode is captured during preparation/construction | internal experimental switch; enabling is currently unsupported |
+| `queryNode.segcore.storageV2.asyncLoadThreadPoolSize` | `min(CPUNUM, 16)`, at least 1 | watched dynamically; invalid/non-positive values restore the default | shared async executor worker limit; independent of admission slots |
 | `queryNode.segcore.storageV2.asyncLoadReadWindowSizeBytes` | `16777216` (16 MiB) | watched dynamically; non-positive values fall back to 16 MiB | target loaded bytes per contiguous read window |
-| `common.loadTransientBudgetBytes` | `0` (unlimited) | refreshable | process-wide admitted transient bytes across load paths |
+| `common.loadTransientBudgetBytes` | unset: `2 GiB` with async enabled, otherwise `0` | refreshable; explicit values override the switch | QueryNode admitted transient bytes across load paths |
+| `common.loadAdmissionSlots` | unset: `2 × CPUNUM` with async enabled, otherwise `0` | refreshable; explicit values override the switch | QueryNode admitted, unfinished load windows, batches, and index stream slices |
 | `common.diskWriteNumThreads` | `0` | applied through disk-writer configuration | optional local mmap-finalization executor and write concurrency limit |
 
-The async switch is intentionally not exported in the generated public config
-surface. It is a temporary operational control, not a long-term user-facing
-feature contract.
+The async switch, async executor size, and both load admission parameters are intentionally not
+exported in the generated public config surface or listed in `milvus.yaml`.
+The admission parameters remain available for explicit internal configuration
+and dynamic updates. Async loading support for data and indexes is incomplete; this document
+describes the implemented field-data stages, not complete async index support.
+Enabling the switch is currently unsupported. Complete async loading support
+and validate these defaults before supporting enablement.
 
-The switch is captured at translator construction. Changing it does not mutate
-translators that already exist:
+Admission limits must be non-negative integers. Malformed strings, values outside
+int64, and negative values fall back to their declared defaults (2 GiB and
+2 × CPUNUM); a valid explicit zero still disables that limit. The async executor
+size must be a positive int32, and invalid values restore its default.
+
+Disk writer configuration validates the mode and rate-limiter parameters before
+changing the mode, buffer size, or local-file pool. Pool configuration precedes
+the remaining updates. This prevents invalid input from partially applying a
+configuration; it is not a transaction across arbitrary allocation or thread
+creation failures.
+
+QueryNode registers one serialized watcher for the switch and both admission
+parameters during initialization, with an immediate post-registration sync to
+catch concurrent startup updates. It resolves explicit configuration separately
+for each limit: an explicit `0` disables that dimension even with async enabled,
+and an explicit positive limit applies even with async disabled. Deleting an
+override restores the default for the current switch value (or reveals a
+lower-priority source on reset). Limits are installed before publishing an
+enabled switch; a disabled switch is published before relaxing the defaults.
+DataNode neither initializes nor watches these admission settings. This also
+prevents it from overwriting QueryNode's process-wide controller in standalone.
+
+Manifest batch loads capture the switch before reader preparation and carry
+that choice into translator construction. JSON key stats similarly use one
+captured value for both stages. Changing it does not mutate translators that
+already exist:
 
 - enabling it affects newly created column-group translators;
 - disabling it stops new translators from selecting the async path;
@@ -499,13 +734,17 @@ translators that already exist:
 
 The read-window target is looked up when the async task runs, so an updated
 positive value affects subsequent loads performed by existing async
-translators. The transient budget is process-wide and also applies immediately
-to subsequent admissions.
+translators. Both admission capacities are process-wide and apply immediately
+to subsequent admissions. Updating one does not disable the other. Toggling the
+async switch recomputes both defaults while preserving explicit limits. In
+particular, disabling async removes any implicit admission limits even though
+existing async translators retain their mode; it does not revoke held leases.
 
-Recommended rollout sequence:
+Planned validation sequence after these prerequisites are met:
 
 1. Configure a positive `common.loadTransientBudgetBytes` appropriate for the
-   QueryNode memory envelope.
+   QueryNode memory envelope, and a positive `common.loadAdmissionSlots` to
+   independently cap unfinished load work.
 2. Optionally configure `common.diskWriteNumThreads` when mmap finalization
    should be isolated from the async load executor.
 3. Enable `queryNode.segcore.storageV2.enableAsyncLoad` on a limited set of
@@ -521,8 +760,9 @@ Recommended rollout sequence:
   not change.
 - Cache keys, cell IDs, warmup policy, and eviction support are unchanged.
 - The legacy path remains the default.
-- Reader construction remains synchronous, limiting the initial scope to chunk
-  reads and finalization.
+- Batch manifest and JSON key-stat paths use async reader opening when the
+  experimental switch is enabled; the outer load interfaces still wait for
+  preparation to finish before installing translators.
 - The async mode is captured per translator, avoiding a mid-load mode switch.
 - Memory and mmap finalization use the same `load_group_chunk()` implementation
   as the legacy path.
@@ -569,44 +809,51 @@ Blocking local writes can occupy the same workers that should resume remote
 read continuations. The optional local-file executor provides isolation while
 retaining a fallback for the default zero-thread configuration.
 
-### Make reader creation asynchronous in the first rollout
+### Keep projected reader creation synchronous
 
-Reader preparation has different metadata and lifetime failure modes. Keeping
-it synchronous reduces the first rollout's scope and makes the async boundary
-start at a fully constructed shared `ChunkReader`.
+This was the initial scope, but it leaves reader-open waits on the synchronous
+path. The implementation now uses a separate bounded reader-preparation stage
+so opens can overlap while retaining ownership and draining on failure. Cell
+loading still starts from a fully constructed shared `ChunkReader`.
 
 ## Testing Strategy
 
-The implementation adds focused tests for the following contracts:
+Focused tests should cover the following contracts:
 
+- async reader opening, projection and result ordering, the per-call concurrency
+  cap, and reuse of prepared readers;
+- reader-open failure stopping pending dispatch, draining issued opens, and
+  caller/context cancellation taking precedence over the first open failure;
 - contiguous window construction, gap splitting, oversized cells, positive
   read-window validation, and original-order restoration;
 - lazy task behavior and execution off the caller thread;
 - async storage continuation binding to the configured executor and priority;
 - budget-before-submit ordering, high-priority admission, FIFO behavior,
-  oversized admission, dynamic capacity, and cancellation races;
-- budget release on storage, finalization, scheduling, and cancellation errors;
+  oversized byte admission, joint resource reservation, zero-byte slot leases,
+  dynamic capacities, and cancellation races;
+- budget release on propagated setup, storage, finalization, and cancellation
+  errors;
 - first-failure publication before budget release;
 - cancellation while waiting for budget, after storage read, and between cell
   finalizations;
 - in-memory versus mmap finalization executor selection;
 - local-file pool reconfiguration, draining, concurrency limiting, and write
   error preservation;
-- typed storage error preservation;
+- typed storage error preservation and native exception classification at both
+  reader-open and cell-load entry points;
 - eager and lazy manifest translators, including projected estimates and JSON
   key-stat integration;
 - disabled-switch compatibility with the legacy synchronous reader path.
 
-The PR is verified with the C++ unit-test build, targeted async-load and sealed
-segment tests, and `make verifiers`.
+The validation plan includes the C++ unit-test build, targeted async-load and
+sealed-segment tests, and `make verifiers`.
 
 ## Follow-Up Work
 
 - Add the async scalar-index path described by issue #51245.
-- Add dedicated window/admission/read/finalization latency and in-flight byte
-  metrics before broad rollout.
-- Validate production budget and read-window defaults with object-storage and
-  mmap workloads.
+- Add dedicated window/read/finalization latency metrics before broad rollout.
+- Validate the 2 GiB transient budget and CPU-derived slots with the read-window
+  default on object-storage and mmap workloads before supported enablement.
 - Decide whether native async storage support must become a hard requirement
   instead of allowing the synchronous `get_chunks_async()` fallback.
 - Consider a storage-aware sparse-window planner only if contiguous windows
@@ -618,11 +865,14 @@ segment tests, and `make verifiers`.
 
 | Area | Files |
 |---|---|
+| bounded async reader preparation | `internal/core/src/segcore/storagev2translator/AsyncChunkReader.{h,cpp}` |
 | coroutine pipeline and window planner | `internal/core/src/segcore/storagev2translator/AsyncLoadPipeline.{h,cpp}` |
+| shared async executor and priority | `internal/core/src/segcore/storagev2translator/AsyncLoadExecutor.{h,cpp}` |
+| native exception classification | `internal/core/src/segcore/storagev2translator/AsyncLoadException.h` |
 | manifest translator integration | `internal/core/src/segcore/storagev2translator/ManifestGroupTranslator.{h,cpp}` |
-| per-process async configuration | `internal/core/src/segcore/storagev2translator/StorageV2Config.h` |
+| per-process async configuration | `internal/core/src/segcore/storagev2translator/StorageV2Config.{h,cpp}` |
 | cell metadata and size planning | `internal/core/src/segcore/storagev2translator/GroupCTMeta.h` |
-| transient-memory admission | `internal/core/src/storage/EntryStreamUtils.h` |
+| bytes-and-slots load admission | `internal/core/src/storage/LoadAdmissionController.{h,cpp}` |
 | mmap finalization executor | `internal/core/src/storage/LocalFileIOPool.{h,cpp}` |
 | synchronous local file writer and permits | `internal/core/src/storage/FileWriter.{h,cpp}` |
 | sealed segment translator construction | `internal/core/src/segcore/ChunkedSegmentSealedImpl.cpp` |

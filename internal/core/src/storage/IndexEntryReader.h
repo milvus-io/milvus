@@ -95,14 +95,14 @@ class IndexEntryReader {
         const std::vector<std::pair<std::string, std::string>>& name_path_pairs,
         io::Priority write_priority = io::Priority::MIDDLE);
 
-    /// Stream entry data via transient memory budget.
+    /// Stream entry data with joint transient-byte and slot admission.
     /// Downloads are concurrent (full bandwidth). Slices are delivered in entry
     /// order to `slice_consumer`; the data pointer is valid only for the
-    /// duration of that call. Global TransientMemoryBudget controls total
-    /// inflight slice bytes across all concurrent entry streams.
+    /// duration of that call. Global LoadAdmissionController controls total
+    /// inflight slice bytes and count across all concurrent entry streams.
     /// CRC32c is verified incrementally. Consumers may receive partial data
     /// before a later slice error is reported. Slow consumers keep their slice
-    /// budget until the callback returns, which can block other streams.
+    /// reservations until the callback returns, which can block other streams.
     /// Plain entries are split into `slice_size` byte slices. Encrypted entries
     /// ignore `slice_size` and use the slice boundaries stored in the V3
     /// directory.

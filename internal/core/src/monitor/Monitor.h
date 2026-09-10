@@ -15,6 +15,25 @@
 
 namespace milvus::monitor {
 
+// Load admission: gauges are refreshed at scrape time; queue waits are observed
+// only for queued requests, with bounded priority and outcome labels.
+DECLARE_PROMETHEUS_GAUGE(internal_load_admission_reserved_bytes);
+DECLARE_PROMETHEUS_GAUGE(internal_load_admission_capacity_bytes);
+DECLARE_PROMETHEUS_GAUGE(internal_load_admission_reserved_slots);
+DECLARE_PROMETHEUS_GAUGE(internal_load_admission_capacity_slots);
+DECLARE_PROMETHEUS_GAUGE(internal_load_admission_pending_requests_high);
+DECLARE_PROMETHEUS_GAUGE(internal_load_admission_pending_requests_low);
+DECLARE_PROMETHEUS_GAUGE(internal_load_admission_oldest_wait_seconds_high);
+DECLARE_PROMETHEUS_GAUGE(internal_load_admission_oldest_wait_seconds_low);
+DECLARE_PROMETHEUS_HISTOGRAM(
+    internal_load_admission_queue_wait_seconds_high_admitted);
+DECLARE_PROMETHEUS_HISTOGRAM(
+    internal_load_admission_queue_wait_seconds_high_cancelled);
+DECLARE_PROMETHEUS_HISTOGRAM(
+    internal_load_admission_queue_wait_seconds_low_admitted);
+DECLARE_PROMETHEUS_HISTOGRAM(
+    internal_load_admission_queue_wait_seconds_low_cancelled);
+
 DECLARE_PROMETHEUS_HISTOGRAM_FAMILY(internal_storage_kv_size);
 DECLARE_PROMETHEUS_HISTOGRAM(internal_storage_kv_size_get);
 DECLARE_PROMETHEUS_HISTOGRAM(internal_storage_kv_size_put);
@@ -78,6 +97,26 @@ DECLARE_PROMETHEUS_HISTOGRAM(internal_core_expr_filter_ratio);
 // approaches 1 the pruning has silently degraded to a full scan.
 DECLARE_PROMETHEUS_HISTOGRAM(internal_core_gis_coarse_ratio);
 DECLARE_PROMETHEUS_HISTOGRAM(internal_core_gis_refine_ratio);
+DECLARE_PROMETHEUS_HISTOGRAM_FAMILY(internal_core_strict_group_phase2_count);
+DECLARE_PROMETHEUS_HISTOGRAM_FAMILY(internal_core_strict_group_phase2_ratio);
+DECLARE_PROMETHEUS_HISTOGRAM(
+    internal_core_strict_group_phase2_phase1_candidates);
+DECLARE_PROMETHEUS_HISTOGRAM(
+    internal_core_strict_group_phase2_phase2_candidates);
+DECLARE_PROMETHEUS_HISTOGRAM(internal_core_strict_group_phase2_batch_count);
+DECLARE_PROMETHEUS_HISTOGRAM(
+    internal_core_strict_group_phase2_probe_candidates);
+DECLARE_PROMETHEUS_HISTOGRAM(internal_core_strict_group_phase2_probe_accepted);
+DECLARE_PROMETHEUS_HISTOGRAM(
+    internal_core_strict_group_phase2_probe_group_hits);
+DECLARE_PROMETHEUS_HISTOGRAM(
+    internal_core_strict_group_phase2_original_remaining_candidates);
+DECLARE_PROMETHEUS_HISTOGRAM(
+    internal_core_strict_group_phase2_membership_build_latency);
+DECLARE_PROMETHEUS_HISTOGRAM(
+    internal_core_strict_group_phase2_bitmap_build_latency);
+DECLARE_PROMETHEUS_HISTOGRAM(
+    internal_core_strict_group_phase2_acceptance_ratio);
 
 // async cgo metrics
 DECLARE_PROMETHEUS_HISTOGRAM_FAMILY(internal_cgo_queue_duration_seconds);

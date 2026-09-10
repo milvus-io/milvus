@@ -633,10 +633,7 @@ func SetupCoreConfigChangelCallback() {
 			return nil
 		})
 
-		paramtable.Get().CommonCfg.LoadTransientBudgetBytes.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
-			UpdateLoadTransientBudgetBytes(paramtable.Get().CommonCfg.LoadTransientBudgetBytes.GetAsInt64())
-			return nil
-		})
+		registerStorageV2AsyncLoadReadWindowConfig(paramtable.Get())
 
 		paramtable.Get().QueryNodeCfg.KnowhereThreadPoolSize.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
 			factor, err := strconv.ParseFloat(newValue, 64)
@@ -899,6 +896,12 @@ func InitGeometryCache(params *paramtable.ComponentParam) error {
 func InitGISSplitFusion(params *paramtable.ComponentParam) error {
 	enableGISSplitFusion := C.bool(params.QueryNodeCfg.EnableGISSplitFusion.GetAsBool())
 	C.SegcoreSetEnableGISSplitFusion(enableGISSplitFusion)
+	return nil
+}
+
+func InitScanPinPolicy(params *paramtable.ComponentParam) error {
+	cursorOwnsPin := C.bool(params.QueryNodeCfg.ScanCursorOwnsPin.GetAsBool())
+	C.SegcoreSetScanCursorOwnsPin(cursorOwnsPin)
 	return nil
 }
 

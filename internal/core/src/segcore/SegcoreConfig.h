@@ -290,6 +290,16 @@ class SegcoreConfig {
         return enable_gis_split_fusion_;
     }
 
+    void
+    set_scan_cursor_owns_pin(bool value) {
+        scan_cursor_owns_pin_ = value;
+    }
+
+    bool
+    get_scan_cursor_owns_pin() const {
+        return scan_cursor_owns_pin_;
+    }
+
  private:
     inline static const std::unordered_set<std::string>
         valid_dense_vector_index_type = {
@@ -316,6 +326,7 @@ class SegcoreConfig {
     inline static bool refine_with_quant_flag_ = false;
     inline static bool enable_geometry_cache_ = false;
     inline static bool enable_gis_split_fusion_ = false;
+    inline static bool scan_cursor_owns_pin_ = false;
     inline static bool prefer_field_data_when_index_has_raw_data_ = false;
     inline static bool reject_remote_vector_output_ = false;
     inline static std::atomic<int64_t> take_for_output_result_count_limit_{

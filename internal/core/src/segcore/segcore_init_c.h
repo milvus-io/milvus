@@ -45,6 +45,9 @@ void
 SegcoreSetEnableGISSplitFusion(const bool);
 
 void
+SegcoreSetScanCursorOwnsPin(const bool);
+
+void
 SegcoreSetNlist(const int64_t);
 
 // FM-index count-first guard threshold (queryNode.fmindexCostRatio).
