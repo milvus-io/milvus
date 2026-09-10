@@ -80,15 +80,17 @@ func TestSnapshotDeleteReadErrors(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			r := &reader{ctx: ctx, snapshotSource: &internalpb.SnapshotImportSource{}, deleteBudget: 1024,
-				schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, IsPrimaryKey: true, DataType: schemapb.DataType_Int64}}}}
+			r := &reader{
+				ctx: ctx, snapshotSource: &internalpb.SnapshotImportSource{}, deleteBudget: 1024,
+				schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, IsPrimaryKey: true, DataType: schemapb.DataType_Int64}}},
+			}
 			if mode == "missing_pk" {
 				r.schema.Fields = nil
 			}
 			if mode == "zero_budget" {
 				r.deleteBudget = 0
 			}
-			pkType, tsType := arrow.DataType(arrow.PrimitiveTypes.Int64), arrow.DataType(arrow.PrimitiveTypes.Int64)
+			pkType, tsType := arrow.PrimitiveTypes.Int64, arrow.PrimitiveTypes.Int64
 			if mode == "bad_pk" {
 				pkType = arrow.BinaryTypes.String
 			}
@@ -170,8 +172,10 @@ func TestSnapshotL0RealFiles(t *testing.T) {
 			cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: root}
 			cm := storage.NewLocalChunkManager()
 			schema := typeutil.AppendSystemFields(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
-				{FieldID: 100, Name: "pk", DataType: pkType, IsPrimaryKey: true,
-					TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "100"}}},
+				{
+					FieldID: 100, Name: "pk", DataType: pkType, IsPrimaryKey: true,
+					TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "100"}},
+				},
 			}})
 			// Use real storage writers and readers. The data manifest has no own
 			// deltas: successful filtering must come from the attached L0 files.
@@ -200,7 +204,7 @@ func TestSnapshotL0RealFiles(t *testing.T) {
 				deltaWriter, err := storage.NewDeltalogWriter(ctx, 1, 10, 30, int64(i+1), pkType, paths[i],
 					storage.WithVersion(version), storage.WithStorageConfig(cfg), storage.WithUploader(cm.MultiWrite))
 				require.NoError(t, err)
-				var arrowPK arrow.DataType = arrow.PrimitiveTypes.Int64
+				arrowPK := arrow.PrimitiveTypes.Int64
 				if pkType == schemapb.DataType_VarChar {
 					arrowPK = arrow.BinaryTypes.String
 				}
@@ -223,8 +227,10 @@ func TestSnapshotL0RealFiles(t *testing.T) {
 				require.NoError(t, deltaWriter.Close())
 			}
 			for _, commit := range []uint64{0, 300} {
-				source := &internalpb.SnapshotImportSource{Version: 1, ManifestPath: manifest, SourceCommitTimestamp: commit,
-					LegacyL0Deltalogs: paths[:1], ManifestL0Deltalogs: paths[1:]}
+				source := &internalpb.SnapshotImportSource{
+					Version: 1, ManifestPath: manifest, SourceCommitTimestamp: commit,
+					LegacyL0Deltalogs: paths[:1], ManifestL0Deltalogs: paths[1:],
+				}
 				// Re-open twice to model the identical persisted input used by
 				// PreImport and Import; exact row IDs prove reinsert ordering.
 				for phase := 0; phase < 2; phase++ {
@@ -251,8 +257,10 @@ func TestSnapshotL0RealFiles(t *testing.T) {
 					require.Nil(t, r.deleteData)
 				}
 			}
-			source := &internalpb.SnapshotImportSource{Version: 1, ManifestPath: manifest,
-				LegacyL0Deltalogs: paths, ManifestL0Deltalogs: nil}
+			source := &internalpb.SnapshotImportSource{
+				Version: 1, ManifestPath: manifest,
+				LegacyL0Deltalogs: paths, ManifestL0Deltalogs: nil,
+			}
 			// V2 metadata can reference either legacy or packed files; the
 			// legacy inventory must retain its established V1/V2 fallback.
 			r, err := NewStorageV3ManifestReader(ctx, cm, schema, cfg, manifest, 0, 450, 1024, "", source, 512)
@@ -1459,7 +1467,7 @@ func TestStorageV3Reader_SourceTimestampInvariant(t *testing.T) {
 					{FieldID: 100, Name: "pk", DataType: pkType, IsPrimaryKey: true},
 				}}
 				var pk any = int64(1)
-				var arrowPK arrow.DataType = arrow.PrimitiveTypes.Int64
+				arrowPK := arrow.PrimitiveTypes.Int64
 				if pkType == schemapb.DataType_VarChar {
 					pk, arrowPK = "key", arrow.BinaryTypes.String
 				}

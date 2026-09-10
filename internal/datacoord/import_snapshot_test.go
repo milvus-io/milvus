@@ -107,8 +107,10 @@ func TestSnapshotImportL0URIRead(t *testing.T) {
 	defer transport.UnPatch()
 	snapshot := snapshotImportTestData(datapb.SnapshotLayout_SnapshotLayoutReferenced)
 	data := []*datapb.SegmentDescription{{PartitionId: 10, ChannelName: "source", ManifestPath: manifest}}
-	deltas := []*datapb.SegmentDescription{{PartitionId: 10, ChannelName: "source", StorageVersion: milvusstorage.StorageV1,
-		Deltalogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: "s3://source/" + key}, {LogPath: key}}}}}}
+	deltas := []*datapb.SegmentDescription{{
+		PartitionId: 10, ChannelName: "source", StorageVersion: milvusstorage.StorageV1,
+		Deltalogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: "s3://source/" + key}, {LogPath: key}}}},
+	}}
 	files := []*internalpb.ImportFile{{}}
 	require.NoError(t, attachSnapshotImportL0(ctx, cm, "s3://source/"+strings.TrimPrefix(root, "/")+"/snapshots/1/metadata/2.json",
 		snapshot, data, deltas, files, cfg))
@@ -146,16 +148,22 @@ func TestSnapshotImportL0URIValidation(t *testing.T) {
 			snapshot := snapshotImportTestData(datapb.SnapshotLayout_SnapshotLayoutReferenced)
 			data := snapshot.Segments[:1]
 			data[0].ChannelName = "source"
-			deltas := []*datapb.SegmentDescription{{PartitionId: 10, ChannelName: "source", StorageVersion: milvusstorage.StorageV1,
-				Deltalogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: "root/delta"}, {LogPath: tc.uri}}}}}}
+			deltas := []*datapb.SegmentDescription{{
+				PartitionId: 10, ChannelName: "source", StorageVersion: milvusstorage.StorageV1,
+				Deltalogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: "root/delta"}, {LogPath: tc.uri}}}},
+			}}
 			if tc.name == "decoder_alias" {
-				deltas = append(deltas, &datapb.SegmentDescription{PartitionId: 10, ChannelName: "source", StorageVersion: milvusstorage.StorageV3,
-					ManifestPath: packed.MarshalManifestPath("root/l0", 1)})
+				deltas = append(deltas, &datapb.SegmentDescription{
+					PartitionId: 10, ChannelName: "source", StorageVersion: milvusstorage.StorageV3,
+					ManifestPath: packed.MarshalManifestPath("root/l0", 1),
+				})
 			}
 			packedPaths := []string{"root/delta"}
 			if tc.name == "packed_alias" {
-				deltas = []*datapb.SegmentDescription{{PartitionId: 10, ChannelName: "source", StorageVersion: milvusstorage.StorageV3,
-					ManifestPath: packed.MarshalManifestPath("root/l0", 1)}}
+				deltas = []*datapb.SegmentDescription{{
+					PartitionId: 10, ChannelName: "source", StorageVersion: milvusstorage.StorageV3,
+					ManifestPath: packed.MarshalManifestPath("root/l0", 1),
+				}}
 				packedPaths = append(packedPaths, tc.uri)
 			}
 			patch := mockey.Mock(packed.GetDeltaLogPathsFromManifest).Return(packedPaths, nil).Build()
@@ -370,9 +378,11 @@ func TestExpandSnapshotImportL0(t *testing.T) {
 				snapshot.Segments[1].ChannelName = "source"
 				snapshot.Segments[1].CommitTimestamp = 300
 				deltaPath := "root/files/l0/delete"
-				delta := &datapb.SegmentDescription{SegmentId: 30, PartitionId: common.AllPartitionsID, ChannelName: "source",
+				delta := &datapb.SegmentDescription{
+					SegmentId: 30, PartitionId: common.AllPartitionsID, ChannelName: "source",
 					SegmentLevel: datapb.SegmentLevel_L0, StorageVersion: milvusstorage.StorageV2,
-					Deltalogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: deltaPath, EntriesNum: 0}, {LogPath: deltaPath}}}}}
+					Deltalogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: deltaPath, EntriesNum: 0}, {LogPath: deltaPath}}}},
+				}
 				switch mode {
 				case "legacy_v1":
 					delta.StorageVersion = milvusstorage.StorageV1
@@ -453,8 +463,10 @@ func TestSnapshotImportL0PlanErrors(t *testing.T) {
 			data := snapshot.Segments[:1]
 			data[0].ChannelName = "source"
 			paths := []string{"root/delta"}
-			deltas := []*datapb.SegmentDescription{{ChannelName: "source", PartitionId: 10, StorageVersion: milvusstorage.StorageV1,
-				Deltalogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: paths[0]}}}}}}
+			deltas := []*datapb.SegmentDescription{{
+				ChannelName: "source", PartitionId: 10, StorageVersion: milvusstorage.StorageV1,
+				Deltalogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: paths[0]}}}},
+			}}
 			switch mode {
 			case "large_manifest":
 				data[0].ManifestPath = packed.MarshalManifestPath(strings.Repeat("x", importutilv2.SnapshotSourcePlanMaxBytes), 1)
@@ -465,8 +477,10 @@ func TestSnapshotImportL0PlanErrors(t *testing.T) {
 			case "invalid_path":
 				deltas[0].Deltalogs[0].Binlogs[0].LogPath = "../escape"
 			case "conflicting_decoder":
-				deltas = append(deltas, &datapb.SegmentDescription{ChannelName: "source", PartitionId: 10, StorageVersion: milvusstorage.StorageV3,
-					ManifestPath: packed.MarshalManifestPath("root/l0", 1)})
+				deltas = append(deltas, &datapb.SegmentDescription{
+					ChannelName: "source", PartitionId: 10, StorageVersion: milvusstorage.StorageV3,
+					ManifestPath: packed.MarshalManifestPath("root/l0", 1),
+				})
 			}
 			patch := mockey.Mock(packed.GetDeltaLogPathsFromManifest).Return(paths, nil).Build()
 			defer patch.UnPatch()
@@ -567,10 +581,12 @@ func TestSnapshotImportAckFailure(t *testing.T) {
 	server.stateCode.Store(commonpb.StateCode_Healthy)
 	for _, mode := range []string{"valid", "lost", "unknown", "nil_file", "binding_failure", "bad_timeout"} {
 		t.Run(mode, func(t *testing.T) {
-			req := &internalpb.ImportRequestInternal{JobID: 12, CollectionID: 1, PartitionIDs: []int64{10},
+			req := &internalpb.ImportRequestInternal{
+				JobID: 12, CollectionID: 1, PartitionIDs: []int64{10},
 				Options: snapshotImportTestOptions(), Files: []*internalpb.ImportFile{{SnapshotSource: &internalpb.SnapshotImportSource{
 					Version: 1, ManifestPath: packed.MarshalManifestPath("root/segment", 1), SourceCommitTimestamp: 300,
-				}}}}
+				}}},
+			}
 			var bindingErr error
 			switch mode {
 			case "lost":
