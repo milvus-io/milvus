@@ -18,7 +18,6 @@ package taskmodel
 
 import (
 	"context"
-	"sync"
 
 	"github.com/cockroachdb/errors"
 )
@@ -39,19 +38,15 @@ type TaskCondition struct {
 	done chan error
 	ctx  context.Context
 
-	onContextDoneMu sync.RWMutex
-	onContextDone   func()
+	onContextDone func()
 }
 
 // WaitToFinish waits until the TaskCondition is notified or context done or canceled
 func (tc *TaskCondition) WaitToFinish() error {
 	select {
 	case <-tc.ctx.Done():
-		tc.onContextDoneMu.RLock()
-		handler := tc.onContextDone
-		tc.onContextDoneMu.RUnlock()
-		if handler != nil {
-			handler()
+		if tc.onContextDone != nil {
+			tc.onContextDone()
 		}
 		return errors.Wrap(tc.ctx.Err(), "proxy TaskCondition context Done")
 	case err := <-tc.done:
@@ -70,9 +65,8 @@ func (tc *TaskCondition) Ctx() context.Context {
 }
 
 // SetOnContextDone registers a handler invoked when WaitToFinish returns because its context is done.
+// Registration must complete before WaitToFinish begins, and the handler must not change after waiting starts.
 func (tc *TaskCondition) SetOnContextDone(handler func()) {
-	tc.onContextDoneMu.Lock()
-	defer tc.onContextDoneMu.Unlock()
 	tc.onContextDone = handler
 }
 
