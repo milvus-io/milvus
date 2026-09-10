@@ -814,17 +814,17 @@ func setPartialUpdateCASTestChannels(task *upsertTask, vchannels []string) {
 func preparePartialUpdateCASTestGroups(t *testing.T, task *upsertTask) {
 	t.Helper()
 	require.NoError(t, task.preparePartialUpdateCASGroups(context.Background()))
-	bindPartialUpdateCASTestSnapshots(t, task, 1000)
+	bindPartialUpdateCASTestReadTimestamps(t, task, 1000)
 }
 
-// Supply query response snapshots to tests focused on append and retry control.
-func bindPartialUpdateCASTestSnapshots(t *testing.T, task *upsertTask, snapshot uint64) {
+// Supply query response read timestamps to tests focused on append and retry control.
+func bindPartialUpdateCASTestReadTimestamps(t *testing.T, task *upsertTask, readTs uint64) {
 	t.Helper()
-	snapshots := typeutil.NewConcurrentMap[string, uint64]()
+	channelReadTs := typeutil.NewConcurrentMap[string, uint64]()
 	for channel := range task.partialUpdateCASGroups {
-		snapshots.Insert(channel, snapshot)
+		channelReadTs.Insert(channel, readTs)
 	}
-	require.NoError(t, task.bindPartialUpdateReadSnapshots(snapshots))
+	require.NoError(t, task.bindPartialUpdateReadTimestamps(channelReadTs))
 }
 
 func buildPartialUpdateCASTestMessages(
@@ -2476,7 +2476,7 @@ func TestRetrieveByPKsStrongReadRejectsMissingProofBeforeMerge(t *testing.T) {
 			} else {
 				require.ErrorIs(t, err, merr.ErrServiceInternal)
 				require.Equal(t, merr.SystemError, merr.GetErrorType(err))
-				require.ErrorContains(t, err, "query succeeded but read timestamp is "+scenario+" for write channel")
+				require.ErrorContains(t, err, "query succeeded but read timestamp is "+scenario+" for candidate write channel")
 			}
 			require.Equal(t, 1, calls)
 			require.EqualValues(t, 3, cost.ScannedRemoteBytes)
@@ -2492,30 +2492,30 @@ func TestRetrieveByPKsStrongReadRejectsMissingProofBeforeMerge(t *testing.T) {
 	}
 }
 
-func TestBindPartialUpdateReadSnapshotsRequiresCompleteAttempt(t *testing.T) {
+func TestBindPartialUpdateReadTimestampsRequiresCompleteAttempt(t *testing.T) {
 	task := &upsertTask{partialUpdateCASGroups: map[string]*messagespb.PartialUpdateCAS{
 		"ch0": {ObservedPchannelTerm: 2}, "ch1": {ObservedPchannelTerm: 3},
 	}}
-	snapshots := typeutil.NewConcurrentMap[string, uint64]()
-	snapshots.Insert("ch0", 70)
-	err := task.bindPartialUpdateReadSnapshots(snapshots)
+	channelReadTs := typeutil.NewConcurrentMap[string, uint64]()
+	channelReadTs.Insert("ch0", 70)
+	err := task.bindPartialUpdateReadTimestamps(channelReadTs)
 	require.ErrorIs(t, err, merr.ErrServiceInternal)
-	require.ErrorContains(t, err, `read timestamp is missing for write channel "ch1"`)
+	require.ErrorContains(t, err, `read timestamp is missing for candidate write channel "ch1"`)
 	require.Zero(t, task.partialUpdateCASGroups["ch0"].ReadTs)
 	require.Zero(t, task.partialUpdateCASGroups["ch1"].ReadTs)
-	snapshots.Insert("ch1", 0)
-	err = task.bindPartialUpdateReadSnapshots(snapshots)
+	channelReadTs.Insert("ch1", 0)
+	err = task.bindPartialUpdateReadTimestamps(channelReadTs)
 	require.ErrorIs(t, err, merr.ErrServiceInternal)
-	require.ErrorContains(t, err, `read timestamp is zero for write channel "ch1"`)
+	require.ErrorContains(t, err, `read timestamp is zero for candidate write channel "ch1"`)
 	require.Zero(t, task.partialUpdateCASGroups["ch0"].ReadTs)
 	require.Zero(t, task.partialUpdateCASGroups["ch1"].ReadTs)
-	snapshots.Insert("ch1", 90)
-	require.NoError(t, task.bindPartialUpdateReadSnapshots(snapshots))
+	channelReadTs.Insert("ch1", 90)
+	require.NoError(t, task.bindPartialUpdateReadTimestamps(channelReadTs))
 	require.EqualValues(t, 70, task.partialUpdateCASGroups["ch0"].ReadTs)
 	require.EqualValues(t, 90, task.partialUpdateCASGroups["ch1"].ReadTs)
-	err = (&upsertTask{}).bindPartialUpdateReadSnapshots(snapshots)
+	err = (&upsertTask{}).bindPartialUpdateReadTimestamps(channelReadTs)
 	require.ErrorIs(t, err, merr.ErrServiceInternal)
-	require.ErrorContains(t, err, "CAS write channel groups are empty")
+	require.ErrorContains(t, err, "CAS candidate write channel groups are empty")
 }
 
 func TestRetrieveByPKs_GetPrimaryFieldSchemaError(t *testing.T) {
@@ -3058,8 +3058,14 @@ func partialUpdateAutoIDInsertTestTask(t *testing.T, stringPK bool) *upsertTask 
 }
 
 func TestPartialUpdateAutoIDInsertAndRetry(t *testing.T) {
-	for _, stringPK := range []bool{false, true} {
-		t.Run(strconv.FormatBool(stringPK), func(t *testing.T) {
+	for _, testCase := range []struct {
+		stringPK    bool
+		allocatedID int64
+	}{
+		{false, 2}, {false, 1000}, {true, 2}, {true, 1000},
+	} {
+		t.Run(fmt.Sprintf("stringPK=%t/id=%d", testCase.stringPK, testCase.allocatedID), func(t *testing.T) {
+			stringPK := testCase.stringPK
 			task := partialUpdateAutoIDInsertTestTask(t, stringPK)
 			partition := mockey.Mock((*MetaCache).GetPartitionID).Return(UniqueID(100), nil).Build()
 			defer partition.UnPatch()
@@ -3072,6 +3078,9 @@ func TestPartialUpdateAutoIDInsertAndRetry(t *testing.T) {
 			alloc := mockey.Mock((*allocator.IDAllocator).Alloc).To(func(_ *allocator.IDAllocator, count uint32) (int64, int64, error) {
 				allocations++
 				begin := int64(1000 * allocations)
+				if allocations == 1 {
+					begin = testCase.allocatedID
+				}
 				return begin, begin + int64(count), nil
 			}).Build()
 			defer alloc.UnPatch()
@@ -3103,7 +3112,7 @@ func TestPartialUpdateAutoIDInsertAndRetry(t *testing.T) {
 			require.NoError(t, task.preparePartialUpdate(context.Background()))
 			require.Equal(t, 1, reads)
 			require.Equal(t, 1, allocations)
-			require.Equal(t, map[int]int64{1: 1000}, task.partialUpdateAllocatedIDs)
+			require.Equal(t, map[int]int64{1: testCase.allocatedID}, task.partialUpdateAllocatedIDs)
 			for i, field := range originalFields {
 				require.True(t, proto.Equal(field, task.partialUpdateOriginalFields[i]))
 			}
@@ -3111,10 +3120,11 @@ func TestPartialUpdateAutoIDInsertAndRetry(t *testing.T) {
 			require.NoError(t, err)
 			destinationIDs, err := parsePrimaryFieldData2IDs(pk)
 			require.NoError(t, err)
+			destinationIDs = proto.Clone(destinationIDs).(*schemapb.IDs)
 			if stringPK {
-				require.Equal(t, []string{"1", "1000"}, destinationIDs.GetStrId().GetData())
+				require.Equal(t, []string{"1", strconv.FormatInt(testCase.allocatedID, 10)}, destinationIDs.GetStrId().GetData())
 			} else {
-				require.Equal(t, []int64{1, 1000}, destinationIDs.GetIntId().GetData())
+				require.Equal(t, []int64{1, testCase.allocatedID}, destinationIDs.GetIntId().GetData())
 			}
 			expectedGroups := expectedPartialUpdateCASGroups(t, destinationIDs, partialUpdateCASTestVChannels)
 			require.Len(t, task.partialUpdateCASGroups, len(expectedGroups))
@@ -3126,10 +3136,20 @@ func TestPartialUpdateAutoIDInsertAndRetry(t *testing.T) {
 
 			// The generated row is still absent after a rejected attempt. Retry
 			// must keep its ID, including in the response after insert validation.
+			// This also holds when the allocated ID equals the missing source PK.
+			task.req.FieldsData[1].GetScalars().GetIntData().Data[0] = 999
 			require.NoError(t, task.preparePartialUpdateRetryAttempt(context.Background()))
 			require.Equal(t, 2, reads)
 			require.True(t, proto.Equal(destinationIDs, task.result.IDs))
 			require.Equal(t, 2, allocations) // one PK range, one internal RowID range
+			require.Equal(t, []int32{100, 200}, task.req.FieldsData[1].GetScalars().GetIntData().GetData())
+			// Rebuilt working fields must not alias the saved response IDs.
+			if stringPK {
+				task.req.FieldsData[0].GetScalars().GetStringData().Data[0] = "999"
+			} else {
+				task.req.FieldsData[0].GetScalars().GetLongData().Data[0] = 999
+			}
+			require.True(t, proto.Equal(destinationIDs, task.partialUpdateResultIDs))
 			// Another channel can have committed before a CAS retry. Re-querying
 			// the generated ID must update that same entity, not allocate a third.
 			committed = true
@@ -3139,47 +3159,11 @@ func TestPartialUpdateAutoIDInsertAndRetry(t *testing.T) {
 			require.True(t, proto.Equal(destinationIDs, task.result.IDs))
 			require.True(t, proto.Equal(destinationIDs, task.deletePKs))
 			require.Equal(t, []int32{100, 200}, task.insertFieldData[1].GetScalars().GetIntData().GetData())
-			require.Equal(t, map[int]int64{1: 1000}, task.partialUpdateAllocatedIDs)
+			require.Equal(t, map[int]int64{1: testCase.allocatedID}, task.partialUpdateAllocatedIDs)
 			for i, field := range originalFields {
 				require.True(t, proto.Equal(field, task.partialUpdateOriginalFields[i]))
 			}
 		})
-	}
-}
-
-func TestPartialUpdateAutoIDRestoresOriginalFields(t *testing.T) {
-	for _, stringPK := range []bool{false, true} {
-		for _, allocatedID := range []int64{2, 1000} {
-			t.Run(fmt.Sprintf("stringPK=%t/id=%d", stringPK, allocatedID), func(t *testing.T) {
-				task := partialUpdateAutoIDInsertTestTask(t, stringPK)
-				original := cloneFieldDataList(task.partialUpdateOriginalFields)
-				task.partialUpdateAllocatedIDs = map[int]int64{1: allocatedID}
-				require.NoError(t, task.restorePartialUpdateFields())
-				ids, err := parsePrimaryFieldData2IDs(task.req.FieldsData[0])
-				require.NoError(t, err)
-				if stringPK {
-					require.Equal(t, []string{"1", strconv.FormatInt(allocatedID, 10)}, ids.GetStrId().GetData())
-				} else {
-					require.Equal(t, []int64{1, allocatedID}, ids.GetIntId().GetData())
-				}
-				// A generated ID can equal the caller's guessed, missing source ID.
-				// Allocation state must still survive and prevent another allocation.
-				allocated := mockey.Mock((*allocator.IDAllocator).Alloc).To(func(_ *allocator.IDAllocator, _ uint32) (int64, int64, error) {
-					t.Fatal("a restored row must not allocate another AutoID")
-					return 0, 0, nil
-				}).Build()
-				defer allocated.UnPatch()
-				rewritten, err := task.allocateMissingPartialUpdateAutoIDs([]int{1})
-				require.NoError(t, err)
-				require.Nil(t, rewritten)
-				task.req.FieldsData[1].GetScalars().GetIntData().Data[0] = 999
-				require.NoError(t, task.restorePartialUpdateFields())
-				require.Equal(t, []int32{100, 200}, task.req.FieldsData[1].GetScalars().GetIntData().GetData())
-				for i, field := range original {
-					require.True(t, proto.Equal(field, task.partialUpdateOriginalFields[i]))
-				}
-			})
-		}
 	}
 }
 
@@ -3304,7 +3288,7 @@ func TestPartialUpdateAutoIDDestinationSnapshotFromQueryRPC(t *testing.T) {
 				newID++
 			}
 			destination := channelForPK(newID)
-			snapshots := map[string]uint64{source: 70, destination: 90}
+			channelReadTs := map[string]uint64{source: 70, destination: 90}
 			terms := map[string]int64{source: 7, destination: 9}
 			task.req.NumRows = 1
 			task.upsertMsg.InsertMsg.NumRows = 1
@@ -3376,7 +3360,7 @@ func TestPartialUpdateAutoIDDestinationSnapshotFromQueryRPC(t *testing.T) {
 				if assert.Len(t, values, 1) {
 					assert.Equal(t, originalID, values[0].GetInt64Val(), "freshly allocated IDs must not be queried again")
 				}
-				ts := snapshots[channel]
+				ts := channelReadTs[channel]
 				if scenario.zero && channel == destination {
 					ts = 0
 				}
@@ -3445,7 +3429,7 @@ func TestPartialUpdateAutoIDDestinationSnapshotFromQueryRPC(t *testing.T) {
 			require.Equal(t, destination, msg.VChannel())
 			require.Equal(t, streamingmessage.MessageTypeInsert, msg.MessageType())
 			proof := requireFirstPartialUpdateCAS(t, fakeWAL.appended)
-			require.Equal(t, snapshots[destination], proof.GetReadTs())
+			require.Equal(t, channelReadTs[destination], proof.GetReadTs())
 			require.Equal(t, terms[destination], proof.GetObservedPchannelTerm())
 			body := streamingmessage.MustAsMutableInsertMessageV1(msg).MustBody()
 			pk, err := typeutil.GetPrimaryFieldData(body.GetFieldsData(), task.schema.Fields[0])
@@ -3776,15 +3760,6 @@ func TestPartialUpdateAutoIDPostExecuteUsesSavedIDs(t *testing.T) {
 			saved, err := task.allocateMissingPartialUpdateAutoIDs([]int{0, 1})
 			require.NoError(t, err)
 			require.NotNil(t, saved)
-			// Rebuilding the working payload must not change the saved response.
-			require.NoError(t, task.restorePartialUpdateFields())
-			if stringPK {
-				task.req.FieldsData[0].GetScalars().GetStringData().Data[0] = "999"
-				require.Equal(t, []string{"1000", "1001"}, saved.GetStrId().GetData())
-			} else {
-				task.req.FieldsData[0].GetScalars().GetLongData().Data[0] = 999
-				require.Equal(t, []int64{1000, 1001}, saved.GetIntId().GetData())
-			}
 			task.req = nil
 			task.schema = nil
 			require.NoError(t, task.PostExecute(context.Background()))
@@ -6208,7 +6183,7 @@ func TestPartialUpdateRetryStrongReadRejectsMissingSnapshot(t *testing.T) {
 	defer query.UnPatch()
 	err := task.preparePartialUpdateRetryAttempt(context.Background())
 	require.ErrorIs(t, err, merr.ErrServiceInternal)
-	require.ErrorContains(t, err, "query succeeded but read timestamp is missing for write channel")
+	require.ErrorContains(t, err, "query succeeded but read timestamp is missing for candidate write channel")
 	require.Zero(t, fakeWAL.appendCalls)
 	for _, meta := range task.partialUpdateCASGroups {
 		require.Zero(t, meta.GetReadTs())

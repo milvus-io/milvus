@@ -260,15 +260,15 @@ Proxy builds the first attempt and every eligible retry in the same order:
 ```text
 clone original user fields and overlay previously allocated AutoIDs by row
   -> generate function output
-  -> resolve and snapshot terms for all possible write channels
+  -> resolve and record terms for all candidate write channels
      (all collection shards for AutoID, or the fixed namespace channel)
   -> enqueue a new Strong Query with GuaranteeTimestamp = MvccTimestamp = 0
-  -> collect actual nonzero readTS from each successful write channel
+  -> collect actual nonzero readTS from each candidate write channel's successful response
   -> normalize fields and validate row alignment
   -> classify existing and missing rows, validate insert fields for missing rows
   -> if an unconverted AutoID PK is missing: allocate
      its destination PK, record the row-to-ID mapping, update the working PK column
-  -> select final write channels from this query's captured terms and snapshots
+  -> select final write channels from this query's captured terms and read timestamps
   -> merge without querying freshly allocated IDs
   -> attach that channel's term and readTS to every CAS Insert chunk
 ```
@@ -723,12 +723,12 @@ Production-scale benchmarks are still required for:
 Every initial attempt and eligible retry uses the following Strong-read flow:
 
 ```text
-resolve terms for all possible write channels
+resolve terms for all candidate write channels
   -> enqueue a Strong Query (GuaranteeTimestamp=0, MvccTimestamp=0)
   -> Query receives its own BeginTs from TSO
   -> each delegator waits for its guarantee and fixes its actual snapshot S[c]
   -> successful channel response reports S[c], including empty results
-  -> Proxy validates all write channels have nonzero S[c]
+  -> Proxy validates all candidate write channels have nonzero S[c]
   -> allocate new PKs for missing AutoID rows without another query
   -> retain captured proofs for the final destination channels
   -> merge, then commit(term[c], readTS=S[c])
@@ -738,7 +738,7 @@ The outer Upsert BeginTs is not reused. This lets the existing Strong-read
 optimization use the WAL MVCC barrier without waiting for a separately allocated
 fixed read timestamp. QueryNode reports the request's executed MVCC snapshot,
 not a later sample of tSafe. Internal `RetrieveResults.mvcc_timestamp` (field 20)
-is an additive response field. Proxy's output snapshot map is separate from
+is an additive response field. Proxy's per-channel read timestamp map is separate from
 query input overrides and is populated only by successful channel responses.
 Different channels may use different snapshots; cross-channel atomicity is not
 provided.
@@ -768,7 +768,7 @@ Import, restore, and backfill remain subject to the original non-goals.
 
 ### Missing proofs and retries
 
-A missing or zero snapshot means a channel response cannot support CAS proof.
+A missing or zero read timestamp means a channel response cannot support CAS proof.
 Proxy rejects the attempt before merge or any DML. Query errors propagate.
 No compatibility fallback or feature flag is provided for old QueryNodes.
 

@@ -2434,7 +2434,7 @@ func checkPartialUpdatePrimaryFieldData(
 			return nil, err
 		}
 		if duplicate {
-			return nil, merr.WrapErrServiceInternalMsg("allocated partial update AutoID collides with another request primary key")
+			return nil, merr.WrapErrServiceInternalMsg("partial update: duplicate primary keys after applying allocated AutoIDs")
 		}
 	}
 	ids, err := parsePrimaryFieldData2IDs(pk)
