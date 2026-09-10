@@ -12,13 +12,16 @@
 #pragma once
 
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "cachinglayer/Translator.h"
 #include "cachinglayer/Utils.h"
 #include "common/Chunk.h"
+#include "common/ChunkTarget.h"
 #include "common/type_c.h"
 #include "mmap/Types.h"
+#include "segcore/CacheMetricAttribution.h"
 
 namespace milvus::segcore::storagev1translator {
 
@@ -34,12 +37,16 @@ struct CTMeta : public milvus::cachinglayer::Meta {
            milvus::cachinglayer::CellIdMappingMode cell_id_mapping_mode,
            milvus::cachinglayer::CellDataType cell_data_type,
            CacheWarmupPolicy cache_warmup_policy,
-           bool support_eviction)
-        : milvus::cachinglayer::Meta(storage_type,
-                                     cell_id_mapping_mode,
-                                     cell_data_type,
-                                     cache_warmup_policy,
-                                     support_eviction) {
+           bool support_eviction,
+           std::string shard = "")
+        : milvus::cachinglayer::Meta(
+              storage_type,
+              cell_id_mapping_mode,
+              cell_data_type,
+              cache_warmup_policy,
+              support_eviction,
+              std::nullopt,
+              milvus::segcore::MetricAttributionFromShard(std::move(shard))) {
     }
 };
 
@@ -66,7 +73,8 @@ class ChunkTranslator : public milvus::cachinglayer::Translator<milvus::Chunk> {
                     bool use_mmap,
                     bool mmap_populate,
                     milvus::proto::common::LoadPriority load_priority,
-                    const std::string& warmup_policy);
+                    const std::string& warmup_policy,
+                    MmapChunkWritebackMode writeback_mode);
 
     size_t
     num_cells() const override;
@@ -109,6 +117,7 @@ class ChunkTranslator : public milvus::cachinglayer::Translator<milvus::Chunk> {
     CTMeta meta_;
     FieldMeta field_meta_;
     std::string mmap_dir_path_;
+    MmapChunkWritebackMode writeback_mode_;
     milvus::proto::common::LoadPriority load_priority_{
         milvus::proto::common::LoadPriority::HIGH};
 };

@@ -26,10 +26,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -38,11 +40,14 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy"
+	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const (
@@ -165,7 +170,7 @@ func genAuthMiddleWare(needAuth bool) gin.HandlerFunc {
 }
 
 func InitMockGlobalMetaCache() {
-	proxy.InitEmptyGlobalCache()
+	proxy.InitEmptyMetaCacheForTest()
 }
 
 func Print(code int32, message string) string {
@@ -226,6 +231,129 @@ func TestVectorAuthenticate(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Equal(t, "{\"code\":200,\"data\":[\""+DefaultCollectionName+"\"]}", w.Body.String())
 	})
+}
+
+// newRESTV1ServerForRBACTest builds a v1 REST server whose auth middleware sets
+// the parsed username directly, without re-initializing the proxy privilege
+// cache (genAuthMiddleWare resets it, which would wipe test grants).
+func newRESTV1ServerForRBACTest(t *testing.T, pxy types.ProxyComponent) *gin.Engine {
+	t.Helper()
+	h := NewHandlersV1(pxy)
+	ginHandler := gin.Default()
+	app := ginHandler.Group(URIPrefixV1, func(c *gin.Context) {
+		username, _, ok := ParseUsernamePassword(c)
+		if !ok || username == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: merr.Code(merr.ErrNeedAuthenticate), HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
+			return
+		}
+		c.Set(ContextUsername, username)
+	})
+	h.RegisterRoutesToV1(app)
+	return ginHandler
+}
+
+// TestRESTV1AliasRBAC guards the alias-resolution wiring of the REST v1
+// authorization path (see TestRESTV2AliasRBAC for the shared rationale).
+func TestRESTV1AliasRBAC(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(proxy.Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	t.Cleanup(func() { paramtable.Get().Reset(proxy.Params.CommonCfg.AuthorizationEnabled.Key) })
+	paramtable.Get().Save(proxy.Params.ProxyCfg.ResolveAliasForPrivilege.Key, "true")
+	t.Cleanup(func() { paramtable.Get().Reset(proxy.Params.ProxyCfg.ResolveAliasForPrivilege.Key) })
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	t.Cleanup(func() { paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key) })
+
+	const (
+		username = "alice"
+		role     = "role_reader"
+		alias    = "orders_current"
+		realCol  = "orders"
+	)
+
+	cache := proxy.InitEmptyMetaCacheForTest()
+	require.NotNil(t, cache)
+	patch := mockey.Mock((*proxy.MetaCache).ResolveCollectionAlias).Return(realCol, nil).Build()
+	t.Cleanup(func() { patch.UnPatch() })
+
+	privCache := privilege.GetPrivilegeCache()
+	require.NotNil(t, privCache)
+	require.NoError(t, privCache.RefreshPolicyInfo(typeutil.CacheOp{
+		OpType: typeutil.CacheGrantPrivilege,
+		OpKey:  funcutil.PolicyForPrivilege(role, commonpb.ObjectType_Collection.String(), realCol, commonpb.ObjectPrivilege_PrivilegeQuery.String(), util.DefaultDBName),
+	}))
+	require.NoError(t, privCache.RefreshPolicyInfo(typeutil.CacheOp{
+		OpType: typeutil.CacheAddUserToRole,
+		OpKey:  funcutil.EncodeUserRoleCache(username, role),
+	}))
+
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().Query(mock.Anything, mock.Anything).Return(&milvuspb.QueryResults{Status: &StatusSuccess}, nil).Twice()
+	testEngine := newRESTV1ServerForRBACTest(t, proxyComponentWithMetaCache{ProxyComponent: mp, metaCache: cache})
+
+	queryPath := versional(VectorQueryPath)
+	for _, tc := range []struct {
+		name string
+		coll string
+	}{
+		{"real collection name", realCol},
+		{"alias resolves to the granted collection", alias},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := bytes.NewReader([]byte(`{"collectionName": "` + tc.coll + `", "filter": "pk > 0"}`))
+			req := httptest.NewRequest(http.MethodPost, queryPath, body)
+			req.SetBasicAuth(username, "pwd")
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		})
+	}
+}
+
+// TestRESTV1AliasRBAC_GrantOnAliasStringDenied verifies the inverse: a grant
+// scoped to the alias string must NOT authorize access through the alias.
+func TestRESTV1AliasRBAC_GrantOnAliasStringDenied(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(proxy.Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	t.Cleanup(func() { paramtable.Get().Reset(proxy.Params.CommonCfg.AuthorizationEnabled.Key) })
+	paramtable.Get().Save(proxy.Params.ProxyCfg.ResolveAliasForPrivilege.Key, "true")
+	t.Cleanup(func() { paramtable.Get().Reset(proxy.Params.ProxyCfg.ResolveAliasForPrivilege.Key) })
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	t.Cleanup(func() { paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key) })
+
+	const (
+		username = "alice"
+		role     = "role_reader"
+		alias    = "orders_current"
+		realCol  = "orders"
+	)
+
+	cache := proxy.InitEmptyMetaCacheForTest()
+	require.NotNil(t, cache)
+	patch := mockey.Mock((*proxy.MetaCache).ResolveCollectionAlias).Return(realCol, nil).Build()
+	t.Cleanup(func() { patch.UnPatch() })
+
+	privCache := privilege.GetPrivilegeCache()
+	require.NotNil(t, privCache)
+	require.NoError(t, privCache.RefreshPolicyInfo(typeutil.CacheOp{
+		OpType: typeutil.CacheGrantPrivilege,
+		OpKey:  funcutil.PolicyForPrivilege(role, commonpb.ObjectType_Collection.String(), alias, commonpb.ObjectPrivilege_PrivilegeQuery.String(), util.DefaultDBName),
+	}))
+	require.NoError(t, privCache.RefreshPolicyInfo(typeutil.CacheOp{
+		OpType: typeutil.CacheAddUserToRole,
+		OpKey:  funcutil.EncodeUserRoleCache(username, role),
+	}))
+
+	mp := mocks.NewMockProxy(t)
+	testEngine := newRESTV1ServerForRBACTest(t, proxyComponentWithMetaCache{ProxyComponent: mp, metaCache: cache})
+
+	body := bytes.NewReader([]byte(`{"collectionName": "` + alias + `", "filter": "pk > 0"}`))
+	req := httptest.NewRequest(http.MethodPost, versional(VectorQueryPath), body)
+	req.SetBasicAuth(username, "pwd")
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+	mp.AssertNotCalled(t, "Query", mock.Anything, mock.Anything)
 }
 
 func TestVectorListCollection(t *testing.T) {
@@ -869,6 +997,99 @@ func TestInsertForDataType(t *testing.T) {
 	}
 }
 
+func TestNarrowIntegerOverflowV1(t *testing.T) {
+	paramtable.Init()
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         generateNarrowIntegerCollectionSchema(schemapb.DataType_Int8),
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Twice()
+	testEngine := initHTTPServer(mp, true)
+	body := []byte(`{"collectionName":"book","data":[{"book_id":1,"book_intro":[0.1,0.2],"word_count":2,"narrow_int":128}]}`)
+
+	for _, path := range []string{VectorInsertPath, VectorUpsertPath} {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, versional(path), bytes.NewReader(body))
+			req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+			returnBody := &ReturnErrMsg{}
+			assert.NoError(t, json.Unmarshal(w.Body.Bytes(), returnBody))
+			assert.Equal(t, merr.Code(merr.ErrInvalidInsertData), returnBody.Code)
+			assert.Contains(t, returnBody.Message, "actual=128")
+			assert.Contains(t, returnBody.Message, "field narrow_int value must be an integer in range [-128, 127]")
+		})
+	}
+}
+
+func TestStructArrayIntegerExponentV1(t *testing.T) {
+	paramtable.Init()
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         buildStructArrayTestSchema(),
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Twice()
+	testEngine := initHTTPServer(mp, true)
+	body := []byte(`{"collectionName":"book","data":[{"id":1,"vec":[0.1,0.2,0.3,0.4],"my_struct":[{"sub_int":1e-999999,"sub_vec":[1.1,1.2,1.3,1.4]}]}]}`)
+
+	for _, path := range []string{VectorInsertPath, VectorUpsertPath} {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, versional(path), bytes.NewReader(body))
+			req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+			returnBody := &ReturnErrMsg{}
+			assert.NoError(t, json.Unmarshal(w.Body.Bytes(), returnBody))
+			assert.Equal(t, merr.Code(merr.ErrInvalidInsertData), returnBody.Code)
+			assert.Contains(t, returnBody.Message, "sub-field sub_int")
+			assert.Contains(t, returnBody.Message, "value=1e-999999")
+		})
+	}
+}
+
+func TestStructArrayExactInt64V1(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+	schema := buildStructArrayTestSchema()
+	schema.GetStructArrayFields()[0].GetFields()[0].ElementType = schemapb.DataType_Int64
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         schema,
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Once()
+	mp.EXPECT().Insert(mock.Anything, mock.MatchedBy(func(req *milvuspb.InsertRequest) bool {
+		return hasStructArrayInt64Value(req.GetFieldsData(), "my_struct", "sub_int", 9007199254740993)
+	})).Return(&milvuspb.MutationResult{
+		Status:    &StatusSuccess,
+		InsertCnt: 1,
+		IDs: &schemapb.IDs{IdField: &schemapb.IDs_IntId{
+			IntId: &schemapb.LongArray{Data: []int64{1}},
+		}},
+	}, nil).Once()
+	testEngine := initHTTPServer(mp, true)
+	body := []byte(`{"collectionName":"book","data":[{"id":1,"vec":[0.1,0.2,0.3,0.4],"my_struct":[{"sub_int":9007199254740993.0,"sub_vec":[1.1,1.2,1.3,1.4]}]}]}`)
+	req := httptest.NewRequest(http.MethodPost, versional(VectorInsertPath), bytes.NewReader(body))
+	req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	returnBody := &ReturnErrMsg{}
+	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), returnBody))
+	assert.Equal(t, int32(http.StatusOK), returnBody.Code)
+}
+
 func TestReturnInt64(t *testing.T) {
 	paramtable.Init()
 	paramtable.Get().Save(proxy.Params.HTTPCfg.AcceptTypeAllowInt64.Key, "false")
@@ -1434,7 +1655,7 @@ func TestFp16Bf16VectorsV1(t *testing.T) {
 			assert.Nil(t, err, "case %d: ", i)
 			assert.Equal(t, testcase.errCode, returnBody.Code, "case %d: ", i, string(testcase.requestBody))
 			if testcase.errCode != 0 {
-				assert.Equal(t, testcase.errMsg, returnBody.Message, "case %d: ", i, string(testcase.requestBody))
+				assert.Contains(t, returnBody.Message, testcase.errMsg, "case %d: ", i, string(testcase.requestBody))
 			}
 			fmt.Println(w.Body.String())
 		})
@@ -1569,6 +1790,34 @@ func TestSearch(t *testing.T) {
 		testEngine.ServeHTTP(w, req)
 		assert.Equal(t, tt.exceptCode, w.Code)
 	})
+}
+
+func TestSearchV1RejectSearchAggregation(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(proxy.Params.HTTPCfg.AcceptTypeAllowInt64.Key, "true")
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	testEngine := initHTTPServer(mocks.NewMockProxy(t), true)
+	data, _ := json.Marshal(map[string]interface{}{
+		HTTPCollectionName: DefaultCollectionName,
+		"vector":           []float32{0.0, 0.0},
+		"searchAggregation": map[string]interface{}{
+			"fields": []string{"brand"},
+			"size":   1,
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, versional(VectorSearchPath), bytes.NewReader(data))
+	req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	resp := &ReturnErrMsg{}
+	err := json.Unmarshal(w.Body.Bytes(), resp)
+	assert.NoError(t, err)
+	assert.Equal(t, int32(1100), resp.Code)
+	assert.Contains(t, resp.Message, "searchAggregation is not supported for REST v1 search")
 }
 
 type ReturnType int
@@ -2009,31 +2258,31 @@ func TestInterceptor(t *testing.T) {
 	v := atomic.NewInt32(0)
 	h.interceptors = []RestRequestInterceptor{
 		func(ctx context.Context, ginCtx *gin.Context, req any, handler func(reqCtx context.Context, req any) (any, error)) (any, error) {
-			log.Info("pre1")
+			mlog.Info(context.TODO(), "pre1")
 			v.Add(1)
 			assert.EqualValues(t, 1, v.Load())
 			res, err := handler(ctx, req)
-			log.Info("post1")
+			mlog.Info(context.TODO(), "post1")
 			v.Add(1)
 			assert.EqualValues(t, 6, v.Load())
 			return res, err
 		},
 		func(ctx context.Context, ginCtx *gin.Context, req any, handler func(reqCtx context.Context, req any) (any, error)) (any, error) {
-			log.Info("pre2")
+			mlog.Info(context.TODO(), "pre2")
 			v.Add(1)
 			assert.EqualValues(t, 2, v.Load())
 			res, err := handler(ctx, req)
-			log.Info("post2")
+			mlog.Info(context.TODO(), "post2")
 			v.Add(1)
 			assert.EqualValues(t, 5, v.Load())
 			return res, err
 		},
 		func(ctx context.Context, ginCtx *gin.Context, req any, handler func(reqCtx context.Context, req any) (any, error)) (any, error) {
-			log.Info("pre3")
+			mlog.Info(context.TODO(), "pre3")
 			v.Add(1)
 			assert.EqualValues(t, 3, v.Load())
 			res, err := handler(ctx, req)
-			log.Info("post3")
+			mlog.Info(context.TODO(), "post3")
 			v.Add(1)
 			assert.EqualValues(t, 4, v.Load())
 			return res, err

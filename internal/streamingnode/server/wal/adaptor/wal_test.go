@@ -13,7 +13,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -29,7 +28,7 @@ import (
 	internaltypes "github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/idalloc"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
@@ -85,11 +84,9 @@ func initResourceForTest(t *testing.T) {
 	catalog.EXPECT().GetConsumeCheckpoint(mock.Anything, mock.Anything).Return(nil, nil)
 	catalog.EXPECT().SaveConsumeCheckpoint(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	catalog.EXPECT().ListSegmentAssignment(mock.Anything, mock.Anything).Return(nil, nil)
-	catalog.EXPECT().SaveSegmentAssignments(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	catalog.EXPECT().ListVChannel(mock.Anything, mock.Anything).Return(nil, nil)
-	catalog.EXPECT().SaveVChannels(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	catalog.EXPECT().GetSalvageCheckpoint(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
-	catalog.EXPECT().SaveSalvageCheckpoint(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().SaveRecoverySnapshot(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	fMixCoordClient := syncutil.NewFuture[internaltypes.MixCoordClient]()
 	fMixCoordClient.Set(rc)
 	resource.InitForTest(
@@ -447,7 +444,7 @@ func (f *testOneWALFramework) testRead(ctx context.Context, w wal.ROWAL) ([]mess
 	cnt := 5
 	for {
 		msg, ok := <-s.Chan()
-		log.Info("read message", zap.Uint64("msg", msg.TimeTick()))
+		mlog.Info(ctx, "read message", mlog.Uint64("msg", msg.TimeTick()))
 		// make a random slow down to trigger cache expire.
 		if rand.Int31n(10) == 0 && cnt > 0 {
 			cnt--

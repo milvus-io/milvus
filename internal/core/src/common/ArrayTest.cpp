@@ -231,3 +231,43 @@ TEST(Array, TestConstructArray) {
     ASSERT_EQ(0, empty_array.byte_size());
     ASSERT_TRUE(empty_array.is_same_array(field_empty_array));
 }
+
+TEST(Array, TestLiteralElementTypeMismatch) {
+    using namespace milvus;
+
+    auto expect_mismatch = [](const Array& array,
+                              const proto::plan::Array& literal) {
+        EXPECT_FALSE(array.is_same_array(literal));
+
+        auto array_view = ArrayView(const_cast<char*>(array.data()),
+                                    array.length(),
+                                    array.byte_size(),
+                                    array.get_element_type(),
+                                    array.get_offsets_data());
+        EXPECT_FALSE(array_view.is_same_array(literal));
+    };
+
+    proto::schema::ScalarField int64_data;
+    int64_data.mutable_long_data()->add_data(0);
+    auto int64_array = Array(int64_data);
+    proto::plan::Array float_literal;
+    float_literal.set_same_type(true);
+    float_literal.mutable_array()->Add()->set_float_val(1.5);
+    expect_mismatch(int64_array, float_literal);
+
+    proto::schema::ScalarField bool_data;
+    bool_data.mutable_bool_data()->add_data(false);
+    auto bool_array = Array(bool_data);
+    proto::plan::Array int_literal;
+    int_literal.set_same_type(true);
+    int_literal.mutable_array()->Add()->set_int64_val(0);
+    expect_mismatch(bool_array, int_literal);
+
+    proto::schema::ScalarField string_data;
+    string_data.mutable_string_data()->add_data("");
+    auto string_array = Array(string_data);
+    proto::plan::Array bool_literal;
+    bool_literal.set_same_type(true);
+    bool_literal.mutable_array()->Add()->set_bool_val(false);
+    expect_mismatch(string_array, bool_literal);
+}

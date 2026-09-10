@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
@@ -13,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/mvcc"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/wab"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -61,18 +61,18 @@ func buildInterceptorParams(ctx context.Context, underlyingWALImpls walimpls.WAL
 // 2. get position of wal to determine the end of current wal.
 // 3. make all un-synced messages synced by the timetick message, so the un-synced messages can be seen by the recovery storage.
 func sendFirstTimeTick(ctx context.Context, underlyingWALImpls walimpls.WALImpls, lastConfirmedMessageID message.MessageID) (msg message.ImmutableMessage, err error) {
-	logger := resource.Resource().Logger().With(zap.String("channel", underlyingWALImpls.Channel().String()))
+	logger := resource.Resource().Logger().With(mlog.String("channel", underlyingWALImpls.Channel().String()))
 	if lastConfirmedMessageID != nil {
-		logger = logger.With(zap.Stringer("lastConfirmedMessageID", lastConfirmedMessageID))
+		logger = logger.With(mlog.Stringer("lastConfirmedMessageID", lastConfirmedMessageID))
 	}
 
-	logger.Info("start to sync first time tick")
+	logger.Info(ctx, "start to sync first time tick")
 	defer func() {
 		if err != nil {
-			logger.Error("sync first time tick failed", zap.Error(err))
+			logger.Error(ctx, "sync first time tick failed", mlog.Err(err))
 			return
 		}
-		logger.Info("sync first time tick done", zap.String("msgID", msg.MessageID().String()), zap.Uint64("timetick", msg.TimeTick()))
+		logger.Info(ctx, "sync first time tick done", mlog.String("msgID", msg.MessageID().String()), mlog.Uint64("timetick", msg.TimeTick()))
 	}()
 
 	sourceID := paramtable.GetNodeID()

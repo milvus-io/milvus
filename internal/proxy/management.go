@@ -90,6 +90,10 @@ func RegisterMgrRoute(proxy *Proxy) {
 			HandlerFunc: proxy.CheckQueryNodeDistribution,
 		})
 		management.Register(&management.Handler{
+			Path:        management.RouteClearReadTaskQueue,
+			HandlerFunc: proxy.ClearReadTaskQueueManagement,
+		})
+		management.Register(&management.Handler{
 			Path:        management.RouteQueryCoordBalanceStatus,
 			HandlerFunc: proxy.CheckQueryCoordBalanceStatus,
 		})
@@ -163,6 +167,30 @@ func (node *Proxy) PauseDatacoordGC(w http.ResponseWriter, req *http.Request) {
 	fmt.Fprintf(w, `{"msg": "OK", "ticket": "%s"}`, ticket)
 }
 
+type commitBackfillSegmentStatusJSON struct {
+	SegmentID int64  `json:"segment_id,omitempty"`
+	OK        bool   `json:"ok"`
+	Reason    string `json:"reason,omitempty"`
+	Kind      string `json:"kind,omitempty"`
+}
+
+func toCommitBackfillSegmentStatusesJSON(statuses []*datapb.CommitBackfillResultSegmentStatus) []*commitBackfillSegmentStatusJSON {
+	result := make([]*commitBackfillSegmentStatusJSON, 0, len(statuses))
+	for _, status := range statuses {
+		if status == nil {
+			result = append(result, nil)
+			continue
+		}
+		result = append(result, &commitBackfillSegmentStatusJSON{
+			SegmentID: status.GetSegmentId(),
+			OK:        status.GetOk(),
+			Reason:    status.GetReason(),
+			Kind:      status.GetKind(),
+		})
+	}
+	return result
+}
+
 // CommitBackfillResult is the proxy-side handler for the
 // /management/datacoord/backfill/commit endpoint. It forwards the S3 result
 // path to DataCoord.CommitBackfillResult and returns the aggregated
@@ -202,7 +230,7 @@ func (node *Proxy) CommitBackfillResult(w http.ResponseWriter, req *http.Request
 			"total_segments":     resp.GetTotalSegments(),
 			"committed_segments": resp.GetCommittedSegments(),
 			"failed_segments":    resp.GetFailedSegments(),
-			"segment_statuses":   resp.GetSegmentStatuses(),
+			"segment_statuses":   toCommitBackfillSegmentStatusesJSON(resp.GetSegmentStatuses()),
 		})
 		return
 	}
@@ -211,7 +239,7 @@ func (node *Proxy) CommitBackfillResult(w http.ResponseWriter, req *http.Request
 		"total_segments":     resp.GetTotalSegments(),
 		"committed_segments": resp.GetCommittedSegments(),
 		"failed_segments":    resp.GetFailedSegments(),
-		"segment_statuses":   resp.GetSegmentStatuses(),
+		"segment_statuses":   toCommitBackfillSegmentStatusesJSON(resp.GetSegmentStatuses()),
 	})
 }
 
@@ -394,6 +422,28 @@ func (node *Proxy) CheckQueryCoordBalanceStatus(w http.ResponseWriter, req *http
 		balanceStatus = "active"
 	}
 	fmt.Fprintf(w, `{"msg": "OK", "status": "%v"}`, balanceStatus)
+}
+
+func (node *Proxy) ClearReadTaskQueueManagement(w http.ResponseWriter, req *http.Request) {
+	resp, err := node.mixCoord.ClearReadTaskQueue(req.Context(), &internalpb.ClearReadTaskQueueRequest{
+		Base:     commonpbutil.NewMsgBase(),
+		TaskType: req.URL.Query().Get("task_type"),
+		Reason:   req.URL.Query().Get("reason"),
+	})
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprintf(w, `{"msg": "failed to clear read task queue, %s"}`, err.Error())
+		return
+	}
+	if !merr.Ok(resp.GetStatus()) {
+		w.WriteHeader(http.StatusInternalServerError)
+		bs, _ := json.Marshal(resp)
+		w.Write(bs)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	bs, _ := json.Marshal(resp)
+	w.Write(bs)
 }
 
 func (node *Proxy) SuspendQueryNode(w http.ResponseWriter, req *http.Request) {

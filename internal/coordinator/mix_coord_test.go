@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/datacoord"
 	"github.com/milvus-io/milvus/internal/querycoordv2"
+	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/pathutil"
@@ -239,20 +240,23 @@ func TestMixCoord_checkExpiredPOSIXDIR(t *testing.T) {
 			assert.NoError(t, err)
 		}
 
-		// Mock queryCoord and dataCoord servers
+		// Mock queryCoord, dataCoord, and rootCoord servers
 		mockQueryCoord := &querycoordv2.Server{}
 		mockDataCoord := &datacoord.Server{}
+		mockRootCoord := &rootcoord.Core{}
 
 		coord := &mixCoordImpl{
 			ctx:              context.Background(),
 			queryCoordServer: mockQueryCoord,
 			datacoordServer:  mockDataCoord,
+			rootcoordServer:  mockRootCoord,
 		}
 
 		// Mock ServerExist methods - return false for all nodes (simulating expired state)
 		mockey.PatchConvey("test POSIX cleanup with expired dirs", t, func() {
 			mockey.Mock((*querycoordv2.Server).ServerExist).Return(false).Build()
 			mockey.Mock((*datacoord.Server).ServerExist).Return(false).Build()
+			mockey.Mock((*rootcoord.Core).ServerExist).Return(false).Build()
 			mockey.Mock(pathutil.GetPath).Return(rootCachePath).Build()
 
 			// Should remove all directories since all nodes are expired
@@ -263,6 +267,38 @@ func TestMixCoord_checkExpiredPOSIXDIR(t *testing.T) {
 				nodeDir := filepath.Join(rootCachePath, fmt.Sprintf("%d", nodeID))
 				assert.NoDirExists(t, nodeDir)
 			}
+		})
+	})
+
+	t.Run("POSIX mode enabled - active proxy directory", func(t *testing.T) {
+		paramtable.Init()
+		paramtable.Get().Save(Params.CommonCfg.EnablePosixMode.Key, "true")
+
+		tempDir := t.TempDir()
+		rootCachePath := filepath.Join(tempDir, "cache")
+		proxyID := int64(3001)
+		proxyDir := filepath.Join(rootCachePath, fmt.Sprintf("%d", proxyID))
+		err := os.MkdirAll(proxyDir, 0o755)
+		assert.NoError(t, err)
+
+		coord := &mixCoordImpl{
+			ctx:              context.Background(),
+			queryCoordServer: &querycoordv2.Server{},
+			datacoordServer:  &datacoord.Server{},
+			rootcoordServer:  &rootcoord.Core{},
+		}
+
+		mockey.PatchConvey("keep cache for active proxy", t, func() {
+			mockey.Mock((*querycoordv2.Server).ServerExist).Return(false).Build()
+			mockey.Mock((*datacoord.Server).ServerExist).Return(false).Build()
+			mockey.Mock((*rootcoord.Core).ServerExist).To(func(serverID int64) bool {
+				return serverID == proxyID
+			}).Build()
+			mockey.Mock(pathutil.GetPath).Return(rootCachePath).Build()
+
+			coord.checkExpiredPOSIXDIR()
+
+			assert.DirExists(t, proxyDir)
 		})
 	})
 

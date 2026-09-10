@@ -1,15 +1,11 @@
-import time
-import random
-import pdb
-import threading
-import logging
 import json
-from multiprocessing import Pool, Process
-import pytest
-from utils.util_pymilvus import get_milvus, restart_server, gen_entities, gen_unique_str, default_nb
-from common.constants import default_fields, default_entities
-from common.common_type import CaseLabel
+import logging
+import time
 
+import pytest
+from common.common_type import CaseLabel
+from common.constants import default_entities, default_fields
+from utils.util_pymilvus import default_nb, gen_entities, gen_unique_str, get_milvus, restart_server
 
 uid = "wal"
 TIMEOUT = 120
@@ -23,9 +19,10 @@ default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_typ
 class TestRestartBase:
     """
     ******************************************************************
-      The following cases are used to test `create_partition` function 
+      The following cases are used to test `create_partition` function
     ******************************************************************
     """
+
     @pytest.fixture(scope="module", autouse=True)
     def skip_check(self, args):
         logging.getLogger().info(args)
@@ -100,7 +97,7 @@ class TestRestartBase:
         ids = connect.bulk_insert(collection, big_entities)
         connect.flush([collection])
         delete_length = 1000
-        delete_ids = ids[big_nb//4:big_nb//4+delete_length]
+        delete_ids = ids[big_nb // 4 : big_nb // 4 + delete_length]
         delete_res = connect.delete_entity_by_id(collection, delete_ids)
         connect.flush([collection], _async=True)
         res_count = connect.count_entities(collection)
@@ -108,7 +105,7 @@ class TestRestartBase:
         # restart server
         assert restart_server(args["service_name"])
         # assert row count again
-        new_connect = get_milvus(args["ip"], args["port"], handler=args["handler"]) 
+        new_connect = get_milvus(args["ip"], args["port"], handler=args["handler"])
         res_count_2 = new_connect.count_entities(collection)
         logging.getLogger().info(res_count_2)
         timeout = 100
@@ -141,7 +138,7 @@ class TestRestartBase:
         # restart server
         assert restart_server(args["service_name"])
         # assert row count again
-        new_connect = get_milvus(args["ip"], args["port"], handler=args["handler"]) 
+        new_connect = get_milvus(args["ip"], args["port"], handler=args["handler"])
         assert new_connect.count_entities(collection) == big_nb
         stats = connect.get_collection_stats(collection)
         for file in stats["partitions"][0]["segments"][0]["files"]:
@@ -167,17 +164,16 @@ class TestRestartBase:
         connect.create_index(collection, field_name, default_index, _async=True)
         res_count = connect.count_entities(collection)
         logging.getLogger().info(res_count)
-        stats = connect.get_collection_stats(collection)
-        # logging.getLogger().info(stats)
+        connect.get_collection_stats(collection)
         # restart server
         assert restart_server(args["service_name"])
         # assert row count again
-        new_connect = get_milvus(args["ip"], args["port"], handler=args["handler"]) 
+        new_connect = get_milvus(args["ip"], args["port"], handler=args["handler"])
         res_count_2 = new_connect.count_entities(collection)
         logging.getLogger().info(res_count_2)
         assert res_count_2 == loop * big_nb
         status = new_connect._cmd("status")
-        assert json.loads(status)["indexing"] == True
+        assert json.loads(status)["indexing"] is True
         # timeout = 100
         # start_time = time.time()
         # while time.time() - start_time < timeout:
@@ -213,23 +209,23 @@ class TestRestartBase:
         delete_length = 1000
         loop = 10
         for i in range(loop):
-            delete_ids = ids[i*delete_length:(i+1)*delete_length]
+            delete_ids = ids[i * delete_length : (i + 1) * delete_length]
             delete_res = connect.delete_entity_by_id(collection, delete_ids)
         connect.flush([collection])
         connect.compact(collection, _async=True)
         res_count = connect.count_entities(collection)
         logging.getLogger().info(res_count)
-        assert res_count == big_nb - delete_length*loop
+        assert res_count == big_nb - delete_length * loop
         info = connect.get_collection_stats(collection)
         size_old = info["partitions"][0]["segments"][0]["data_size"]
         logging.getLogger().info(size_old)
         # restart server
         assert restart_server(args["service_name"])
         # assert row count again
-        new_connect = get_milvus(args["ip"], args["port"], handler=args["handler"]) 
+        new_connect = get_milvus(args["ip"], args["port"], handler=args["handler"])
         res_count_2 = new_connect.count_entities(collection)
         logging.getLogger().info(res_count_2)
-        assert res_count_2 == big_nb - delete_length*loop
+        assert res_count_2 == big_nb - delete_length * loop
         info = connect.get_collection_stats(collection)
         size_before = info["partitions"][0]["segments"][0]["data_size"]
         status = connect.compact(collection)
@@ -237,7 +233,6 @@ class TestRestartBase:
         info = connect.get_collection_stats(collection)
         size_after = info["partitions"][0]["segments"][0]["data_size"]
         assert size_before > size_after
-
 
     @pytest.mark.tags(CaseLabel.L2)
     def _test_insert_during_flushing_multi_collections(self, connect, args):
@@ -261,7 +256,7 @@ class TestRestartBase:
             # restart server
             assert restart_server(args["service_name"])
             # assert row count again
-            new_connect = get_milvus(args["ip"], args["port"], handler=args["handler"]) 
+            new_connect = get_milvus(args["ip"], args["port"], handler=args["handler"])
             res_count_2 = new_connect.count_entities(collection_list[-1])
             logging.getLogger().info(res_count_2)
             timeout = 300
@@ -276,7 +271,7 @@ class TestRestartBase:
                     if tmp_count != big_nb:
                         break_flag = False
                         break
-                if break_flag == True:
+                if break_flag:
                     break
                 time.sleep(10)
             for name in collection_list:
@@ -304,7 +299,7 @@ class TestRestartBase:
             # restart server
             assert restart_server(args["service_name"])
             # assert row count again
-            new_connect = get_milvus(args["ip"], args["port"], handler=args["handler"]) 
+            new_connect = get_milvus(args["ip"], args["port"], handler=args["handler"])
             res_count_2 = new_connect.count_entities(collection)
             logging.getLogger().info(res_count_2)
             timeout = 300

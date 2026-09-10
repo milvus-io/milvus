@@ -17,18 +17,35 @@
 package rootcoord
 
 import (
+	"context"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func TestCheckTimeTickLagExceededUsesConnectedDataNodeMetrics(t *testing.T) {
+	mixCoord := mocks.NewMixCoord(t)
+	mixCoord.EXPECT().GetQueryCoordTopology(mock.Anything, mock.Anything).
+		Return(&metricsinfo.QueryCoordTopology{}, nil).Once()
+	mixCoord.EXPECT().GetConnectedDataNodeMetrics(mock.Anything, mock.Anything).
+		Return([]metricsinfo.DataNodeInfos{}, nil).Once()
+
+	require.NoError(t, CheckTimeTickLagExceeded(context.Background(), mixCoord, time.Second))
+}
 
 func Test_EncodeMsgPositions(t *testing.T) {
 	mp := &msgstream.MsgPosition{
@@ -456,9 +473,9 @@ func TestIsSubsetOfProperties(t *testing.T) {
 	}
 }
 
-func Test_nextFieldID(t *testing.T) {
+func Test_maxAssignedFieldIDFromSchema(t *testing.T) {
 	type args struct {
-		coll *model.Collection
+		schema *schemapb.CollectionSchema
 	}
 	tests := []struct {
 		name string
@@ -468,14 +485,14 @@ func Test_nextFieldID(t *testing.T) {
 		{
 			name: "collection with max field ID in struct array sub-field",
 			args: args{
-				coll: &model.Collection{
-					Fields: []*model.Field{
+				schema: &schemapb.CollectionSchema{
+					Fields: []*schemapb.FieldSchema{
 						{FieldID: common.StartOfUserFieldID},
 					},
-					StructArrayFields: []*model.StructArrayField{
+					StructArrayFields: []*schemapb.StructArrayFieldSchema{
 						{
 							FieldID: common.StartOfUserFieldID + 1,
-							Fields: []*model.Field{
+							Fields: []*schemapb.FieldSchema{
 								{FieldID: common.StartOfUserFieldID + 2},
 								{FieldID: common.StartOfUserFieldID + 10},
 							},
@@ -483,25 +500,25 @@ func Test_nextFieldID(t *testing.T) {
 					},
 				},
 			},
-			want: common.StartOfUserFieldID + 11,
+			want: common.StartOfUserFieldID + 10,
 		},
 		{
 			name: "collection with multiple struct array fields",
 			args: args{
-				coll: &model.Collection{
-					Fields: []*model.Field{
+				schema: &schemapb.CollectionSchema{
+					Fields: []*schemapb.FieldSchema{
 						{FieldID: common.StartOfUserFieldID},
 					},
-					StructArrayFields: []*model.StructArrayField{
+					StructArrayFields: []*schemapb.StructArrayFieldSchema{
 						{
 							FieldID: common.StartOfUserFieldID + 1,
-							Fields: []*model.Field{
+							Fields: []*schemapb.FieldSchema{
 								{FieldID: common.StartOfUserFieldID + 2},
 							},
 						},
 						{
 							FieldID: common.StartOfUserFieldID + 5,
-							Fields: []*model.Field{
+							Fields: []*schemapb.FieldSchema{
 								{FieldID: common.StartOfUserFieldID + 6},
 								{FieldID: common.StartOfUserFieldID + 7},
 							},
@@ -509,12 +526,42 @@ func Test_nextFieldID(t *testing.T) {
 					},
 				},
 			},
-			want: common.StartOfUserFieldID + 8,
+			want: common.StartOfUserFieldID + 7,
+		},
+		{
+			name: "collection with max_field_id property after field drop",
+			args: args{
+				schema: &schemapb.CollectionSchema{
+					Fields: []*schemapb.FieldSchema{
+						{FieldID: common.StartOfUserFieldID},     // 100
+						{FieldID: common.StartOfUserFieldID + 1}, // 101
+					},
+					Properties: []*commonpb.KeyValuePair{
+						{Key: common.MaxFieldIDKey, Value: "102"},
+					},
+				},
+			},
+			want: common.StartOfUserFieldID + 2, // 102, not 101
+		},
+		{
+			name: "max_field_id property smaller than current fields",
+			args: args{
+				schema: &schemapb.CollectionSchema{
+					Fields: []*schemapb.FieldSchema{
+						{FieldID: common.StartOfUserFieldID},     // 100
+						{FieldID: common.StartOfUserFieldID + 5}, // 105
+					},
+					Properties: []*commonpb.KeyValuePair{
+						{Key: common.MaxFieldIDKey, Value: "102"},
+					},
+				},
+			},
+			want: common.StartOfUserFieldID + 5, // 105, current fields dominate
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := nextFieldID(tt.args.coll)
+			got := maxAssignedFieldIDFromSchema(tt.args.schema)
 			assert.Equal(t, tt.want, got)
 		})
 	}
@@ -687,4 +734,189 @@ func TestCheckStructArrayFieldSchema_MaxCapacityValidation(t *testing.T) {
 		assert.Contains(t, err.Error(), "my_struct")
 		assert.Contains(t, err.Error(), "sub_b")
 	})
+
+	t.Run("nested array is supported", func(t *testing.T) {
+		schemas := []*schemapb.StructArrayFieldSchema{
+			{
+				Name: "my_struct",
+				Fields: []*schemapb.FieldSchema{
+					{
+						Name:        "nested",
+						DataType:    schemapb.DataType_Array,
+						ElementType: schemapb.DataType_Array,
+						TypeSchema: &schemapb.TypeSchema{
+							TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "100"}},
+							Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: &schemapb.TypeSchema{
+								TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "10"}},
+								Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: &schemapb.TypeSchema{
+									Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int32},
+								}},
+							}},
+						},
+					},
+					{
+						Name:        "legacy",
+						DataType:    schemapb.DataType_Array,
+						ElementType: schemapb.DataType_Int32,
+						TypeParams:  []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "100"}},
+					},
+				},
+			},
+		}
+
+		require.NoError(t, checkStructArrayFieldSchema(schemas))
+	})
+}
+
+func Test_updateMaxFieldIDProperty(t *testing.T) {
+	t.Run("add to empty properties", func(t *testing.T) {
+		props := updateMaxFieldIDProperty(nil, 105)
+		assert.Len(t, props, 1)
+		assert.Equal(t, common.MaxFieldIDKey, props[0].Key)
+		assert.Equal(t, "105", props[0].Value)
+	})
+
+	t.Run("update existing property", func(t *testing.T) {
+		props := []*commonpb.KeyValuePair{
+			{Key: "other_key", Value: "other_value"},
+			{Key: common.MaxFieldIDKey, Value: "100"},
+		}
+		result := updateMaxFieldIDProperty(props, 105)
+		assert.Len(t, result, 2)
+		assert.Equal(t, "105", result[1].Value)
+	})
+
+	t.Run("update existing property does not mutate original", func(t *testing.T) {
+		original := &commonpb.KeyValuePair{Key: common.MaxFieldIDKey, Value: "100"}
+		props := []*commonpb.KeyValuePair{
+			{Key: "other_key", Value: "other_value"},
+			original,
+		}
+		result := updateMaxFieldIDProperty(props, 105)
+		assert.Len(t, result, 2)
+		assert.Equal(t, "105", result[1].Value)
+		// verify original is NOT modified
+		assert.Equal(t, "100", original.Value)
+	})
+
+	t.Run("append to non-empty properties", func(t *testing.T) {
+		props := []*commonpb.KeyValuePair{
+			{Key: "other_key", Value: "other_value"},
+		}
+		result := updateMaxFieldIDProperty(props, 103)
+		assert.Len(t, result, 2)
+		assert.Equal(t, common.MaxFieldIDKey, result[1].Key)
+		assert.Equal(t, "103", result[1].Value)
+	})
+}
+
+func TestCheckFieldSchemaNestedArrayTypeRepresentation(t *testing.T) {
+	nestedField := func(rootCapacity, elementCapacity string) *schemapb.FieldSchema {
+		return &schemapb.FieldSchema{
+			Name:        "nested_array",
+			DataType:    schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Array,
+			TypeSchema: &schemapb.TypeSchema{
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: rootCapacity}},
+				Kind: &schemapb.TypeSchema_ArrayElement{
+					ArrayElement: &schemapb.TypeSchema{
+						TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: elementCapacity}},
+						Kind: &schemapb.TypeSchema_ArrayElement{
+							ArrayElement: &schemapb.TypeSchema{
+								Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int64},
+							},
+						},
+					},
+				},
+			},
+		}
+	}
+
+	require.NoError(t, checkFieldSchema([]*schemapb.FieldSchema{nestedField("32", "16")}))
+
+	matchingMirror := nestedField("32", "16")
+	matchingMirror.TypeParams = []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "32"}}
+	require.NoError(t, checkFieldSchema([]*schemapb.FieldSchema{matchingMirror}))
+
+	conflictingMirror := nestedField("32", "16")
+	conflictingMirror.TypeParams = []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "64"}}
+	err := checkFieldSchema([]*schemapb.FieldSchema{conflictingMirror})
+	require.ErrorContains(t, err, "must match type_schema root capacity")
+
+	invalidRepresentation := nestedField("32", "16")
+	invalidRepresentation.DataType = schemapb.DataType_None
+	invalidRepresentation.ElementType = schemapb.DataType_None
+	err = checkFieldSchema([]*schemapb.FieldSchema{invalidRepresentation})
+	require.ErrorContains(t, err, "must specify data_type Array and element_type Array")
+
+	tooLarge := strconv.FormatInt(Params.ProxyCfg.MaxArrayCapacity.GetAsInt64()+1, 10)
+	err = checkFieldSchema([]*schemapb.FieldSchema{nestedField(tooLarge, "16")})
+	require.ErrorContains(t, err, "maximum capacity")
+
+	err = checkFieldSchema([]*schemapb.FieldSchema{nestedField("32", tooLarge)})
+	require.ErrorContains(t, err, "maximum capacity")
+}
+
+func TestValidateLocalFormat(t *testing.T) {
+	tests := []struct {
+		name      string
+		field     *schemapb.FieldSchema
+		errorText string
+	}{
+		{
+			name: "raw scalar",
+			field: &schemapb.FieldSchema{
+				Name:       "raw_scalar",
+				DataType:   schemapb.DataType_Int64,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.LocalFormatKey, Value: common.LocalFormatRaw}},
+			},
+		},
+		{
+			name: "vortex scalar",
+			field: &schemapb.FieldSchema{
+				Name:       "vortex_scalar",
+				DataType:   schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.LocalFormatKey, Value: common.LocalFormatVortex}},
+			},
+		},
+		{
+			name: "invalid value",
+			field: &schemapb.FieldSchema{
+				Name:       "invalid",
+				DataType:   schemapb.DataType_Int64,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.LocalFormatKey, Value: "unknown"}},
+			},
+			errorText: "invalid local_format",
+		},
+		{
+			name: "primary key",
+			field: &schemapb.FieldSchema{
+				Name:         "pk",
+				DataType:     schemapb.DataType_Int64,
+				IsPrimaryKey: true,
+				TypeParams:   []*commonpb.KeyValuePair{{Key: common.LocalFormatKey, Value: common.LocalFormatVortex}},
+			},
+			errorText: "not supported for primary key",
+		},
+		{
+			name: "vector field",
+			field: &schemapb.FieldSchema{
+				Name:       "vector",
+				DataType:   schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.LocalFormatKey, Value: common.LocalFormatVortex}},
+			},
+			errorText: "not supported for vector field",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateLocalFormat(test.field)
+			if test.errorText == "" {
+				assert.NoError(t, err)
+				return
+			}
+			assert.ErrorContains(t, err, test.errorText)
+		})
+	}
 }

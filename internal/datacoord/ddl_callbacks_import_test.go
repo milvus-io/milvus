@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -32,16 +33,23 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
 
 // ================================
@@ -75,33 +83,6 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_InvalidTimeoutReturnsEr
 
 	s.Error(err)
 	s.Contains(err.Error(), "timeout")
-}
-
-func (s *ImportCallbacksSuite) TestValidateImportRequest_MaxJobsExceededReturnsError() {
-	ctx := context.Background()
-
-	mock := mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
-		return 2000 // Exceeds default MaxImportJobNum (1024)
-	}).Build()
-	defer mock.UnPatch()
-
-	server := &Server{
-		importMeta: &importMeta{},
-	}
-
-	files := []*msgpb.ImportFile{
-		{Id: 1, Paths: []string{"/test/file1.json"}},
-	}
-	options := []*commonpb.KeyValuePair{
-		{Key: "timeout", Value: "300s"},
-	}
-
-	err := server.validateImportRequest(ctx, files, options)
-
-	s.Error(err)
-	// ValidateMaxImportJobExceed returns WrapErrImportFailed, not ErrServiceQuotaExceeded
-	s.True(errors.Is(err, merr.ErrImportFailed))
-	s.Contains(err.Error(), "The number of jobs has reached the limit")
 }
 
 func (s *ImportCallbacksSuite) TestValidateImportRequest_BalancerGetFailsReturnsError() {
@@ -177,8 +158,59 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_ReplicatingClusterRetur
 	err := server.validateImportRequest(ctx, files, options)
 
 	s.Error(err)
-	s.True(errors.Is(err, merr.ErrImportFailed))
+	s.True(errors.Is(err, merr.ErrOperationNotSupported))
 	s.Contains(err.Error(), "replicating cluster")
+}
+
+func (s *ImportCallbacksSuite) TestValidateImportRequest_ReplicatingClusterEnabledRequiresManualCommit() {
+	ctx := context.Background()
+
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.ImportInReplicatingCluster.Key, "true")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.ImportInReplicatingCluster.Key)
+
+	mockCount := mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
+		return 1
+	}).Build()
+	defer mockCount.UnPatch()
+
+	mockBalancer := &mockBalancerImpl{}
+	mockBalance := mockey.Mock(balance.GetWithContext).To(func(ctx context.Context) (balancer.Balancer, error) {
+		return mockBalancer, nil
+	}).Build()
+	defer mockBalance.UnPatch()
+
+	mockAssignment := mockey.Mock((*mockBalancerImpl).GetLatestChannelAssignment).To(
+		func(_ *mockBalancerImpl) (*channel.WatchChannelAssignmentsCallbackParam, error) {
+			return &channel.WatchChannelAssignmentsCallbackParam{
+				ReplicateConfiguration: &commonpb.ReplicateConfiguration{
+					Clusters: []*commonpb.MilvusCluster{
+						{ClusterId: "cluster1"},
+						{ClusterId: "cluster2"},
+					},
+				},
+			}, nil
+		}).Build()
+	defer mockAssignment.UnPatch()
+
+	server := &Server{
+		importMeta: &importMeta{},
+	}
+	files := []*msgpb.ImportFile{
+		{Id: 1, Paths: []string{"/test/file1.json"}},
+	}
+
+	err := server.validateImportRequest(ctx, files, []*commonpb.KeyValuePair{
+		{Key: "timeout", Value: "300s"},
+	})
+	s.Error(err)
+	s.True(errors.Is(err, merr.ErrOperationNotSupported))
+	s.Contains(err.Error(), "auto_commit=true")
+
+	err = server.validateImportRequest(ctx, files, []*commonpb.KeyValuePair{
+		{Key: "timeout", Value: "300s"},
+		{Key: importutilv2.AutoCommitKey, Value: "false"},
+	})
+	s.NoError(err)
 }
 
 func (s *ImportCallbacksSuite) TestValidateImportRequest_SuccessWithValidInput() {
@@ -223,29 +255,30 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_SuccessWithValidInput()
 // broadcastImport Tests
 // --------------------------------
 
+// A request that fails validateImportRequest is rejected before any broadcast wiring is
+// touched -- server.broker is nil here, so reaching it would panic or block. The trigger
+// is an unparsable timeout, i.e. a pure function of the request. The job-count limit is
+// admission over mutable cluster state rather than a pure function of the request, but
+// it runs in the same place -- validateImportRequest, before any resource key is taken;
+// see TestImportV2_JobLimitStillRejectsANewJob.
 func (s *ImportCallbacksSuite) TestBroadcastImport_ValidationFailsReturnsError() {
 	ctx := context.Background()
-
-	// Mock validateImportRequest to fail
-	mockCount := mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
-		return 2000 // Exceeds limit
-	}).Build()
-	defer mockCount.UnPatch()
 
 	server := &Server{
 		importMeta: &importMeta{},
 	}
 
-	err := server.broadcastImport(
+	_, _, err := server.broadcastImport(
 		ctx,
 		"test_collection",
 		100,
 		[]int64{1},
 		[]*internalpb.ImportFile{{Id: 1, Paths: []string{"/test/file.json"}}},
-		[]*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
+		[]*commonpb.KeyValuePair{{Key: "timeout", Value: "not-a-duration"}},
 		&schemapb.CollectionSchema{Name: "test_collection"},
 		1000,
 		[]string{"v1"},
+		"",
 	)
 
 	s.Error(err)
@@ -284,7 +317,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_DescribeCollectionFailsReturn
 		broker:     mockBroker,
 	}
 
-	err := server.broadcastImport(
+	_, _, err := server.broadcastImport(
 		ctx,
 		"test_collection",
 		100,
@@ -294,6 +327,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_DescribeCollectionFailsReturn
 		&schemapb.CollectionSchema{Name: "test_collection"},
 		1000,
 		[]string{"v1"},
+		"",
 	)
 
 	s.Error(err)
@@ -342,7 +376,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_StartBroadcastFailsReturnsErr
 		broker:     mockBroker,
 	}
 
-	err := server.broadcastImport(
+	_, _, err := server.broadcastImport(
 		ctx,
 		"test_collection",
 		100,
@@ -352,6 +386,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_StartBroadcastFailsReturnsErr
 		&schemapb.CollectionSchema{Name: "test_collection"},
 		1000,
 		[]string{"v1"},
+		"",
 	)
 
 	s.Error(err)
@@ -405,7 +440,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SecondDescribeCollectionFails
 		broker:     mockBroker,
 	}
 
-	err := server.broadcastImport(
+	_, _, err := server.broadcastImport(
 		ctx,
 		"test_collection",
 		100,
@@ -415,6 +450,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SecondDescribeCollectionFails
 		&schemapb.CollectionSchema{Name: "test_collection"},
 		1000,
 		[]string{"v1"},
+		"",
 	)
 
 	s.Error(err)
@@ -466,7 +502,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_BroadcastFailsReturnsError() 
 		broker:     mockBroker,
 	}
 
-	err := server.broadcastImport(
+	_, _, err := server.broadcastImport(
 		ctx,
 		"test_collection",
 		100,
@@ -476,6 +512,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_BroadcastFailsReturnsError() 
 		&schemapb.CollectionSchema{Name: "test_collection"},
 		1000,
 		[]string{"v1"},
+		"",
 	)
 
 	s.Error(err)
@@ -526,7 +563,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 		broker:     mockBroker,
 	}
 
-	err := server.broadcastImport(
+	_, _, err := server.broadcastImport(
 		ctx,
 		"test_collection",
 		100,
@@ -536,6 +573,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 		&schemapb.CollectionSchema{Name: "test_collection"},
 		1000,
 		[]string{"v1"},
+		"",
 	)
 
 	s.NoError(err)
@@ -574,6 +612,9 @@ type mockBroadcastAPIImpl struct {
 	broadcastResult *types.BroadcastAppendResult
 	broadcastErr    error
 	closeCalled     atomic.Bool
+	// capturedMsg is the last message handed to Broadcast, for assertions on what the
+	// caller actually put on the wire.
+	capturedMsg message.BroadcastMutableMessage
 }
 
 func newMockBroadcastAPIImpl() *mockBroadcastAPIImpl {
@@ -596,6 +637,7 @@ func (m *mockBroadcastAPIImpl) Broadcast(ctx context.Context, msg message.Broadc
 	if msg == nil {
 		return nil, errors.New("message is nil")
 	}
+	m.capturedMsg = msg
 	if m.broadcastErr != nil {
 		return nil, m.broadcastErr
 	}
@@ -821,4 +863,409 @@ func TestImportFlowIntegration(t *testing.T) {
 
 		t.Log("Import flow documented successfully")
 	})
+}
+
+func newTestImportMeta(t *testing.T) (ImportMeta, *mocks.DataCoordCatalog) {
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Maybe()
+
+	alloc := allocator.NewMockAllocator(t)
+	importMeta, err := NewImportMeta(context.Background(), catalog, alloc, nil)
+	assert.NoError(t, err)
+	return importMeta, catalog
+}
+
+func buildCommitImportBroadcastResult(jobID int64) message.BroadcastResultCommitImportMessageV2 {
+	broadcastMsg := message.NewCommitImportMessageBuilderV2().
+		WithHeader(&message.CommitImportMessageHeader{JobId: jobID}).
+		WithBody(&messagespb.CommitImportMessageBody{}).
+		WithBroadcast([]string{"control_channel"}).
+		MustBuildBroadcast()
+	return message.BroadcastResultCommitImportMessageV2{
+		Message: message.MustAsSpecializedBroadcastMessage[*message.CommitImportMessageHeader, *messagespb.CommitImportMessageBody](broadcastMsg),
+		Results: map[string]*message.AppendResult{},
+	}
+}
+
+func buildRollbackImportBroadcastResult(jobID int64) message.BroadcastResultRollbackImportMessageV2 {
+	broadcastMsg := message.NewRollbackImportMessageBuilderV2().
+		WithHeader(&message.RollbackImportMessageHeader{JobId: jobID}).
+		WithBody(&messagespb.RollbackImportMessageBody{}).
+		WithBroadcast([]string{"control_channel"}).
+		MustBuildBroadcast()
+	return message.BroadcastResultRollbackImportMessageV2{
+		Message: message.MustAsSpecializedBroadcastMessage[*message.RollbackImportMessageHeader, *messagespb.RollbackImportMessageBody](broadcastMsg),
+		Results: map[string]*message.AppendResult{},
+	}
+}
+
+func TestCommitImportCallback_UncommittedToCommitting(t *testing.T) {
+	ctx := context.Background()
+	importMeta, _ := newTestImportMeta(t)
+
+	job := &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:      1,
+			State:      internalpb.ImportJobState_Uncommitted,
+			AutoCommit: false,
+		},
+		tr: timerecord.NewTimeRecorder("test"),
+	}
+	err := importMeta.AddJob(ctx, job)
+	assert.NoError(t, err)
+
+	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
+	err = callbacks.commitImportV2AckCallback(ctx, buildCommitImportBroadcastResult(1))
+	assert.NoError(t, err)
+
+	updatedJob := importMeta.GetJob(ctx, 1)
+	assert.NotNil(t, updatedJob)
+	assert.Equal(t, internalpb.ImportJobState_Committing, updatedJob.GetState())
+}
+
+func TestCommitImportCallback_BeforeUncommitted_Retry(t *testing.T) {
+	ctx := context.Background()
+	importMeta, _ := newTestImportMeta(t)
+
+	job := &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:      11,
+			State:      internalpb.ImportJobState_Importing,
+			AutoCommit: false,
+		},
+		tr: timerecord.NewTimeRecorder("test"),
+	}
+	err := importMeta.AddJob(ctx, job)
+	assert.NoError(t, err)
+
+	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
+	err = callbacks.commitImportV2AckCallback(ctx, buildCommitImportBroadcastResult(11))
+	assert.Error(t, err)
+	assert.True(t, errors.Is(err, merr.ErrImportSysFailed))
+
+	updatedJob := importMeta.GetJob(ctx, 11)
+	assert.NotNil(t, updatedJob)
+	assert.Equal(t, internalpb.ImportJobState_Importing, updatedJob.GetState())
+}
+
+func TestCommitImportCallback_MissingJob_Retry(t *testing.T) {
+	ctx := context.Background()
+	importMeta, _ := newTestImportMeta(t)
+
+	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
+	err := callbacks.commitImportV2AckCallback(ctx, buildCommitImportBroadcastResult(13))
+	assert.Error(t, err)
+	assert.True(t, errors.Is(err, merr.ErrImportSysFailed))
+	assert.Nil(t, importMeta.GetJob(ctx, 13))
+
+	job := &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:      13,
+			State:      internalpb.ImportJobState_Uncommitted,
+			AutoCommit: false,
+		},
+		tr: timerecord.NewTimeRecorder("test"),
+	}
+	err = importMeta.AddJob(ctx, job)
+	assert.NoError(t, err)
+
+	err = callbacks.commitImportV2AckCallback(ctx, buildCommitImportBroadcastResult(13))
+	assert.NoError(t, err)
+
+	updatedJob := importMeta.GetJob(ctx, 13)
+	assert.NotNil(t, updatedJob)
+	assert.Equal(t, internalpb.ImportJobState_Committing, updatedJob.GetState())
+}
+
+func TestCommitImportCallback_RetryAfterUncommitted(t *testing.T) {
+	ctx := context.Background()
+	importMeta, _ := newTestImportMeta(t)
+
+	job := &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:      12,
+			State:      internalpb.ImportJobState_Importing,
+			AutoCommit: false,
+		},
+		tr: timerecord.NewTimeRecorder("test"),
+	}
+	err := importMeta.AddJob(ctx, job)
+	assert.NoError(t, err)
+
+	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
+	err = callbacks.commitImportV2AckCallback(ctx, buildCommitImportBroadcastResult(12))
+	assert.Error(t, err)
+
+	err = importMeta.UpdateJob(ctx, 12, UpdateJobState(internalpb.ImportJobState_Uncommitted))
+	assert.NoError(t, err)
+
+	err = callbacks.commitImportV2AckCallback(ctx, buildCommitImportBroadcastResult(12))
+	assert.NoError(t, err)
+
+	updatedJob := importMeta.GetJob(ctx, 12)
+	assert.NotNil(t, updatedJob)
+	assert.Equal(t, internalpb.ImportJobState_Committing, updatedJob.GetState())
+}
+
+func TestRollbackImportCallback_TransitionToFailed(t *testing.T) {
+	ctx := context.Background()
+	importMeta, _ := newTestImportMeta(t)
+
+	job := &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:             2,
+			State:             internalpb.ImportJobState_Uncommitted,
+			AutoCommit:        false,
+			RequestedDiskSize: 1024 * 1024, // nonzero so we can observe release
+		},
+		tr: timerecord.NewTimeRecorder("test"),
+	}
+	err := importMeta.AddJob(ctx, job)
+	assert.NoError(t, err)
+
+	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
+	err = callbacks.rollbackImportV2AckCallback(ctx, buildRollbackImportBroadcastResult(2))
+	assert.NoError(t, err)
+
+	// Segment cleanup is handled by the import inspector's processFailed (covered
+	// by ImportInspectorSuite.TestProcessFailed), not by this callback.
+	updatedJob := importMeta.GetJob(ctx, 2)
+	assert.NotNil(t, updatedJob)
+	assert.Equal(t, internalpb.ImportJobState_Failed, updatedJob.GetState())
+	assert.Equal(t, "aborted by user", updatedJob.GetReason())
+	// UpdateJobState(Failed) also releases disk quota and arms GC eligibility.
+	assert.EqualValues(t, 0, updatedJob.GetRequestedDiskSize(),
+		"Failed transition must release RequestedDiskSize")
+	assert.Greater(t, updatedJob.GetCleanupTs(), uint64(0),
+		"Failed transition must set CleanupTs for GC eligibility")
+}
+
+func TestCommitImportCallback_AfterAbort_NoOp(t *testing.T) {
+	ctx := context.Background()
+	importMeta, _ := newTestImportMeta(t)
+
+	// Job already Failed (abort won the race).
+	job := &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID: 3,
+			State: internalpb.ImportJobState_Failed,
+		},
+		tr: timerecord.NewTimeRecorder("test"),
+	}
+	err := importMeta.AddJob(ctx, job)
+	assert.NoError(t, err)
+
+	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
+	err = callbacks.commitImportV2AckCallback(ctx, buildCommitImportBroadcastResult(3))
+	assert.NoError(t, err)
+
+	// UpdateJob skips jobs in Failed state → no-op.
+	updatedJob := importMeta.GetJob(ctx, 3)
+	assert.NotNil(t, updatedJob)
+	assert.Equal(t, internalpb.ImportJobState_Failed, updatedJob.GetState())
+}
+
+func TestRollbackImportCallback_AfterCommit_NoOp(t *testing.T) {
+	ctx := context.Background()
+	importMeta, _ := newTestImportMeta(t)
+
+	// Job already Committing (commit won the race).
+	job := &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID: 4,
+			State: internalpb.ImportJobState_Committing,
+		},
+		tr: timerecord.NewTimeRecorder("test"),
+	}
+	err := importMeta.AddJob(ctx, job)
+	assert.NoError(t, err)
+
+	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
+	err = callbacks.rollbackImportV2AckCallback(ctx, buildRollbackImportBroadcastResult(4))
+	assert.NoError(t, err)
+
+	// Abort rejected: job already in committed state.
+	updatedJob := importMeta.GetJob(ctx, 4)
+	assert.NotNil(t, updatedJob)
+	assert.Equal(t, internalpb.ImportJobState_Committing, updatedJob.GetState())
+}
+
+// TestImportAckCallbacks_CommitVsAbort_Race fires commit and rollback ack
+// callbacks concurrently against the same Uncommitted job. In production these
+// callbacks are serialized by the broadcaster's exclusive collection-level
+// resource-key lock (both CommitImport and RollbackImport are ExclusiveRequired
+// on NewExclusiveCollectionNameResourceKey), so this race is unreachable. The
+// test documents the invariant from the callback side and provides regression
+// coverage against future drift: the job must end in a deterministic terminal
+// state (Committing or Failed) without panicking or corrupting meta. Run with
+// `-race` to detect any unsynchronized access.
+func TestImportAckCallbacks_CommitVsAbort_Race(t *testing.T) {
+	for iter := 0; iter < 32; iter++ {
+		ctx := context.Background()
+		importMeta, _ := newTestImportMeta(t)
+
+		const jobID int64 = 5
+		err := importMeta.AddJob(ctx, &importJob{
+			ImportJob: &datapb.ImportJob{
+				JobID:      jobID,
+				State:      internalpb.ImportJobState_Uncommitted,
+				AutoCommit: false,
+			},
+			tr: timerecord.NewTimeRecorder("race"),
+		})
+		assert.NoError(t, err)
+
+		callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
+
+		start := make(chan struct{})
+		var commitErr, rollbackErr error
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			<-start
+			commitErr = callbacks.commitImportV2AckCallback(ctx, buildCommitImportBroadcastResult(jobID))
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			rollbackErr = callbacks.rollbackImportV2AckCallback(ctx, buildRollbackImportBroadcastResult(jobID))
+		}()
+		close(start)
+		wg.Wait()
+
+		assert.NoError(t, commitErr)
+		assert.NoError(t, rollbackErr)
+
+		final := importMeta.GetJob(ctx, jobID).GetState()
+		assert.Contains(t,
+			[]internalpb.ImportJobState{internalpb.ImportJobState_Committing, internalpb.ImportJobState_Failed},
+			final, "iter %d: terminal state must be Committing or Failed, got %s", iter, final)
+	}
+}
+
+// --------------------------------
+// broadcastCommitImportMessage / broadcastRollbackImportMessage Tests
+// --------------------------------
+
+// captureBroadcastAPI is a BroadcastAPI mock that records the message passed
+// to Broadcast so a test can assert its broadcast target vchannels.
+type captureBroadcastAPI struct {
+	captured message.BroadcastMutableMessage
+}
+
+func (c *captureBroadcastAPI) Broadcast(_ context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
+	c.captured = msg
+	return &types.BroadcastAppendResult{BroadcastID: 1}, nil
+}
+
+func (c *captureBroadcastAPI) Close() {}
+
+func testBroadcastTargetsDataVchannels(t *testing.T, broadcastFn func(*Server, context.Context, ImportJob) error) {
+	ctx := context.Background()
+	wantVchannels := []string{"by-dev-rootcoord-dml_0_v0", "by-dev-rootcoord-dml_1_v0"}
+
+	mockBroker := broker.NewMockBroker(t)
+	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(7)).Return(&milvuspb.DescribeCollectionResponse{
+		DbName:         "test_db",
+		CollectionName: "test_collection",
+	}, nil)
+
+	capture := &captureBroadcastAPI{}
+	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
+		func(_ context.Context, _ ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+			return capture, nil
+		}).Build()
+	defer mockBroadcast.UnPatch()
+
+	server := &Server{broker: mockBroker}
+	job := &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:        7,
+			CollectionID: 7,
+			Vchannels:    wantVchannels,
+		},
+		tr: timerecord.NewTimeRecorder("test"),
+	}
+
+	err := broadcastFn(server, ctx, job)
+	assert.NoError(t, err)
+	assert.NotNil(t, capture.captured, "Broadcast must have been called")
+	assert.ElementsMatch(t, wantVchannels, capture.captured.BroadcastHeader().VChannels,
+		"broadcast must target the job's data vchannels, not the control channel")
+}
+
+// TestBroadcastCommitImportMessage_TargetsDataVchannels asserts that the
+// CommitImport WAL message is broadcast to the job's data vchannels.
+// Control-channel-only broadcasts are dropped by the WAL flusher's
+// IsControlChannel guard before reaching the CommitImport case, so the
+// message must reach data vchannels for HandleCommitVchannel to run.
+func TestBroadcastCommitImportMessage_TargetsDataVchannels(t *testing.T) {
+	testBroadcastTargetsDataVchannels(t, (*Server).broadcastCommitImportMessage)
+}
+
+// TestBroadcastRollbackImportMessage_TargetsDataVchannels asserts that the
+// RollbackImport WAL message is broadcast to the job's data vchannels,
+// matching the CommitImport routing.
+func TestBroadcastRollbackImportMessage_TargetsDataVchannels(t *testing.T) {
+	testBroadcastTargetsDataVchannels(t, (*Server).broadcastRollbackImportMessage)
+}
+
+func testBroadcastRequiresVchannels(t *testing.T, broadcastFn func(*Server, context.Context, ImportJob) error) {
+	ctx := context.Background()
+	server := &Server{}
+	job := &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:        7,
+			CollectionID: 7,
+		},
+		tr: timerecord.NewTimeRecorder("test"),
+	}
+
+	err := broadcastFn(server, ctx, job)
+	assert.Error(t, err)
+	// Missing vchannels is internal broadcast state -> ErrImportSysFailed.
+	assert.True(t, errors.Is(err, merr.ErrImportSysFailed))
+	assert.Contains(t, err.Error(), "job 7 has no vchannels")
+}
+
+func TestBroadcastCommitImportMessage_RequiresVchannels(t *testing.T) {
+	testBroadcastRequiresVchannels(t, (*Server).broadcastCommitImportMessage)
+}
+
+func TestBroadcastRollbackImportMessage_RequiresVchannels(t *testing.T) {
+	testBroadcastRequiresVchannels(t, (*Server).broadcastRollbackImportMessage)
+}
+
+func TestJobIDFromDuplicatedBroadcast(t *testing.T) {
+	msg := message.NewImportMessageBuilderV1().
+		WithHeader(&message.ImportMessageHeader{}).
+		WithBody(&msgpb.ImportMsg{JobID: 4242, CollectionID: 100}).
+		WithIdempotencyKey(message.NewCollectionScopedIdempotencyKey(100, "run-1")).
+		WithBroadcast([]string{"v1"}).
+		MustBuildBroadcast()
+
+	jobID, err := jobIDFromDuplicatedBroadcast(msg, 100)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(4242), jobID)
+}
+
+// The collectionID comparison is an invariant check, not a semantic guard: the key is
+// scoped to a collection ID, so a hit already means both broadcasts targeted the same
+// collection. A mismatch can only come from an encoding or scoping bug, which must fail
+// loudly rather than hand back another collection's jobID.
+func TestJobIDFromDuplicatedBroadcast_RejectsADifferentCollection(t *testing.T) {
+	msg := message.NewImportMessageBuilderV1().
+		WithHeader(&message.ImportMessageHeader{}).
+		WithBody(&msgpb.ImportMsg{JobID: 4242, CollectionID: 100}).
+		WithIdempotencyKey(message.NewCollectionScopedIdempotencyKey(100, "run-1")).
+		WithBroadcast([]string{"v1"}).
+		MustBuildBroadcast()
+
+	_, err := jobIDFromDuplicatedBroadcast(msg, 101)
+	assert.Error(t, err)
+	assert.True(t, errors.Is(err, merr.ErrServiceInternal))
 }

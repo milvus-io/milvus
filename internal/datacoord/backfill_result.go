@@ -21,10 +21,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // BackfillResult is the decoded form of the JSON produced by the Spark
@@ -33,9 +32,15 @@ import (
 //
 // Reference: spark-milvus/docs/backfill-result-json-format.md
 type BackfillResult struct {
-	Success       bool                       `json:"success"`
-	CollectionID  int64                      `json:"collectionId"`
-	PartitionID   int64                      `json:"partitionId"`
+	Success      bool  `json:"success"`
+	CollectionID int64 `json:"collectionId"`
+	PartitionID  int64 `json:"partitionId"`
+	// SchemaVersion is the collection schema version the backfill job read
+	// when it snapshotted the data. Spark-milvus stamps it from the snapshot
+	// metadata; the fence in CommitBackfillResult rejects a result whose
+	// version no longer matches the collection's current version (schema
+	// changed while the job was in flight).
+	SchemaVersion int32                      `json:"schemaVersion"`
 	NewFieldNames []string                   `json:"newFieldNames"`
 	Segments      map[string]BackfillSegment `json:"segments"` // key = segmentID as decimal string
 }
@@ -86,34 +91,34 @@ var knownObjectSchemes = map[string]struct{}{
 //  3. Unknown scheme -> return ErrUnsupportedScheme.
 func normalizeObjectKey(raw, expectedBucket string) (string, error) {
 	if raw == "" {
-		return "", errors.New("empty object path")
+		return "", merr.WrapErrServiceInternalMsg("empty object path")
 	}
 	if !strings.Contains(raw, "://") {
 		key := strings.TrimPrefix(raw, "/")
 		if key == "" {
-			return "", errors.Newf("empty object key in %q", raw)
+			return "", merr.WrapErrServiceInternalMsg("empty object key in %q", raw)
 		}
 		return key, nil
 	}
 	idx := strings.Index(raw, "://")
 	scheme := strings.ToLower(raw[:idx])
 	if _, ok := knownObjectSchemes[scheme]; !ok {
-		return "", errors.Newf("unsupported object URI scheme %q in %q", scheme, raw)
+		return "", merr.WrapErrServiceInternalMsg("unsupported object URI scheme %q in %q", scheme, raw)
 	}
 	rest := raw[idx+3:]
 	slash := strings.Index(rest, "/")
 	if slash < 0 {
-		return "", errors.Newf("malformed object URI %q: missing object key", raw)
+		return "", merr.WrapErrServiceInternalMsg("malformed object URI %q: missing object key", raw)
 	}
 	bucket := rest[:slash]
 	key := rest[slash+1:]
 	if expectedBucket != "" && bucket != expectedBucket {
-		return "", errors.Newf("object URI bucket %q differs from datacoord bucket %q (path=%s)", bucket, expectedBucket, raw)
+		return "", merr.WrapErrServiceInternalMsg("object URI bucket %q differs from datacoord bucket %q (path=%s)", bucket, expectedBucket, raw)
 	}
 	// Reject inputs like "s3a://bucket/" that parse to an empty key -- passing
 	// an empty key to chunkManager.Read has undefined behavior across SDKs.
 	if key == "" {
-		return "", errors.Newf("empty object key in %q", raw)
+		return "", merr.WrapErrServiceInternalMsg("empty object key in %q", raw)
 	}
 	return key, nil
 }
@@ -147,20 +152,20 @@ func buildV2Groups(bucket string, entry *BackfillSegment) (map[int64]*datapb.Fie
 	for i := range entry.ColumnGroups {
 		g := &entry.ColumnGroups[i]
 		if len(g.FieldIDs) != 1 {
-			return nil, errors.Newf("backfill invariant violated: column group has %d field_ids (expected 1)", len(g.FieldIDs))
+			return nil, merr.WrapErrServiceInternalMsg("backfill invariant violated: column group has %d field_ids (expected 1)", len(g.FieldIDs))
 		}
 		n := int64(len(g.BinlogFiles))
 		if n == 0 {
-			return nil, errors.Newf("column group for field %d has no binlog files", g.FieldIDs[0])
+			return nil, merr.WrapErrServiceInternalMsg("column group for field %d has no binlog files", g.FieldIDs[0])
 		}
 		fid := g.FieldIDs[0]
 		if _, dup := out[fid]; dup {
-			return nil, errors.Newf("duplicate column group for field %d", fid)
+			return nil, merr.WrapErrServiceInternalMsg("duplicate column group for field %d", fid)
 		}
 		// row_count flows into EntriesNum; non-positive values are undefined
 		// (zero collapses presence markers, negatives break accounting).
 		if g.RowCount <= 0 {
-			return nil, errors.Newf("column group for field %d has non-positive row_count %d", fid, g.RowCount)
+			return nil, merr.WrapErrServiceInternalMsg("column group for field %d has non-positive row_count %d", fid, g.RowCount)
 		}
 		avg := g.RowCount / n
 		rem := g.RowCount - avg*n
@@ -176,7 +181,7 @@ func buildV2Groups(bucket string, entry *BackfillSegment) (map[int64]*datapb.Fie
 			}
 			logID, ok := parseLogIDFromKey(key)
 			if !ok {
-				return nil, errors.Newf("column group for field %d has binlog file %q with non-numeric trailing segment", fid, p)
+				return nil, merr.WrapErrServiceInternalMsg("column group for field %d has binlog file %q with non-numeric trailing segment", fid, p)
 			}
 			// LogPath must be empty at persistence time -- catalog.checkLogID
 			// rejects any Binlog with LogPath != "" (see
@@ -191,10 +196,9 @@ func buildV2Groups(bucket string, entry *BackfillSegment) (map[int64]*datapb.Fie
 		}
 		out[fid] = &datapb.FieldBinlog{
 			FieldID: fid,
-			// ChildFields carries the real field IDs that index creation
-			// (getSegmentBinlogFields) and backfill-compaction detection
-			// (getMissingFunctions) rely on. Without it the new group is
-			// invisible to both paths; it also lets the operator's strip
+			// ChildFields carries the real field IDs that backfill-compaction
+			// detection (getMissingFunctions) relies on. Without it the new
+			// group is invisible to that path; it also lets the operator's strip
 			// logic reference-count the field out of the old groups.
 			// The backfill invariant guarantees len(g.FieldIDs) == 1.
 			ChildFields: []int64{fid},

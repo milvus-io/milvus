@@ -17,13 +17,12 @@
 package resource
 
 import (
-	"fmt"
-
 	"google.golang.org/grpc/encoding"
 	"google.golang.org/grpc/mem"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/protoadapt"
 
+	"github.com/milvus-io/milvus/pkg/v3/util/fastpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -45,7 +44,7 @@ func (releaseCodec) Name() string { return "proto" }
 func (releaseCodec) Marshal(v any) (mem.BufferSlice, error) {
 	msg := messageV2Of(v)
 	if msg == nil {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("releaseCodec: %T does not implement proto.Message", v))
+		return nil, merr.WrapErrServiceInternalMsg("releaseCodec: %T does not implement proto.Message", v)
 	}
 
 	// Only release messages that opt in via MsgPinnable. This avoids a map
@@ -82,11 +81,17 @@ func (releaseCodec) Marshal(v any) (mem.BufferSlice, error) {
 func (releaseCodec) Unmarshal(data mem.BufferSlice, v any) error {
 	msg := messageV2Of(v)
 	if msg == nil {
-		return merr.WrapErrServiceInternal(fmt.Sprintf("releaseCodec: %T does not implement proto.Message", v))
+		return merr.WrapErrServiceInternalMsg("releaseCodec: %T does not implement proto.Message", v)
 	}
 
 	buf := data.MaterializeToBuffer(mem.DefaultBufferPool())
 	defer buf.Free()
+	// Fast path for the top-level hot RPC messages supported by TryUnmarshal:
+	// RetrieveResults, InsertRequest, and UpsertRequest. Unsupported message
+	// types fall through to the official codec.
+	if handled, err := fastpb.TryUnmarshal(v, buf.ReadOnlyData()); handled {
+		return err
+	}
 	return proto.Unmarshal(buf.ReadOnlyData(), msg)
 }
 

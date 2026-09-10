@@ -17,15 +17,15 @@
 package httpserver
 
 import (
-	"fmt"
-
-	"github.com/cockroachdb/errors"
+	"github.com/tidwall/gjson"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -70,7 +70,7 @@ type WrappedInsertRequest struct {
 func (w *WrappedInsertRequest) AsInsertRequest() (*milvuspb.InsertRequest, error) {
 	fieldData, err := convertFieldDataArray(w.FieldsData)
 	if err != nil {
-		return nil, fmt.Errorf("%w: convert field data failed: %v", errBadRequest, err)
+		return nil, badRequestf(err, "convert field data failed")
 	}
 	return &milvuspb.InsertRequest{
 		Base:           w.Base,
@@ -98,18 +98,68 @@ func (f *FieldData) makePbFloat16OrBfloat16Array(raw json.RawMessage, serializeF
 		return nil, 0, newFieldDataError(f.FieldName, err)
 	}
 	if len(wrappedData) < 1 {
-		return nil, 0, errors.New("at least one row for insert")
+		return nil, 0, merr.WrapErrParameterInvalidMsg("at least one row for insert")
 	}
 	array0 := wrappedData[0]
 	dim := len(array0)
 	if dim < 1 {
-		return nil, 0, errors.New("dim must >= 1")
+		return nil, 0, merr.WrapErrParameterInvalidMsg("dim must >= 1")
 	}
 	data := make([]byte, 0, len(wrappedData)*dim*2)
 	for _, fp32Array := range wrappedData {
 		data = append(data, serializeFunc(fp32Array)...)
 	}
 	return data, int64(dim), nil
+}
+
+// rejectNullInFieldPayload refuses a null anywhere inside a low-level /api/v1
+// field payload.
+//
+// The typed decoders below unmarshal straight into []bool, []float32 and
+// friends, and encoding/json leaves a null element as the zero value -- false,
+// 0, an empty string -- so what was stored is a value the caller never sent.
+// This is the low-level twin of the rule the high-level handlers apply in
+// checkAndSetData and rejectNullCoordinates.
+//
+// The two halves of that rule are gated differently, for the same reason they
+// are one level up. A vector has no per-element validity anywhere in the
+// system, so a null coordinate has no representation to fall back to and the
+// refusal is unconditional. A scalar column can be nullable, and this wire
+// format cannot say so for the legacy scalar decoders. TEXT is the exception:
+// its decoder below derives ValidData from null elements. For the other scalar
+// types, compatibilityMode restores the previous zero-value behavior for a
+// client that has not been corrected yet.
+func rejectNullInFieldPayload(dataType schemapb.DataType, fieldName string, raw json.RawMessage) error {
+	if len(raw) == 0 {
+		// absent; the typed decoder reports its own error
+		return nil
+	}
+	if dataType == schemapb.DataType_Text {
+		return nil
+	}
+	if !typeutil.IsVectorType(dataType) && paramtable.Get().HTTPCfg.CompatibilityMode.GetAsBool() {
+		return nil
+	}
+	var nullErr error
+	var walk func(node gjson.Result) bool
+	walk = func(node gjson.Result) bool {
+		switch {
+		case node.Type == gjson.Null:
+			nullErr = merr.WrapErrParameterInvalidMsg(
+				"field %s contains a null, which this API cannot represent; a null would silently become the element type's zero value", fieldName)
+			return false
+		case node.IsArray(), node.IsObject():
+			ok := true
+			node.ForEach(func(_, child gjson.Result) bool {
+				ok = walk(child)
+				return ok
+			})
+			return ok
+		}
+		return true
+	}
+	walk(gjson.Parse(string(raw)))
+	return nullErr
 }
 
 // AsSchemapb converts the FieldData to schemapb.FieldData
@@ -119,6 +169,10 @@ func (f *FieldData) AsSchemapb() (*schemapb.FieldData, error) {
 		Type:      f.Type,
 		FieldName: f.FieldName,
 		FieldId:   f.FieldID,
+	}
+
+	if err := rejectNullInFieldPayload(f.Type, f.FieldName, f.Field); err != nil {
+		return nil, err
 	}
 
 	raw := f.Field
@@ -152,6 +206,38 @@ func (f *FieldData) AsSchemapb() (*schemapb.FieldData, error) {
 					},
 				},
 			},
+		}
+	case schemapb.DataType_Text:
+		values := []*string{}
+		err := json.Unmarshal(raw, &values)
+		if err != nil {
+			return nil, newFieldDataError(f.FieldName, err)
+		}
+		data := make([]string, 0, len(values))
+		validData := make([]bool, len(values))
+		hasNull := false
+		for i, value := range values {
+			if value == nil {
+				hasNull = true
+				continue
+			}
+			data = append(data, *value)
+			validData[i] = true
+		}
+		ret.Field = &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_StringData{
+					StringData: &schemapb.StringArray{
+						Data: data,
+					},
+				},
+			},
+		}
+		// This wrapper does not have the collection schema, so only emit ValidData
+		// when the payload actually contains null. Proxy fills an all-true bitmap
+		// for nullable fields without nulls and requires no bitmap for non-nullable fields.
+		if hasNull {
+			typeutil.SetFieldDataValidData(&ret, validData)
 		}
 	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
 		data := []int32{}
@@ -238,12 +324,12 @@ func (f *FieldData) AsSchemapb() (*schemapb.FieldData, error) {
 			return nil, newFieldDataError(f.FieldName, err)
 		}
 		if len(wrappedData) < 1 {
-			return nil, errors.New("at least one row for insert")
+			return nil, merr.WrapErrParameterInvalidMsg("at least one row for insert")
 		}
 		array0 := wrappedData[0]
 		dim := len(array0)
 		if dim < 1 {
-			return nil, errors.New("dim must >= 1")
+			return nil, merr.WrapErrParameterInvalidMsg("dim must >= 1")
 		}
 		data := make([]float32, len(wrappedData)*dim)
 
@@ -299,7 +385,7 @@ func (f *FieldData) AsSchemapb() (*schemapb.FieldData, error) {
 			return nil, newFieldDataError(f.FieldName, err)
 		}
 		if len(wrappedData) < 1 {
-			return nil, errors.New("at least one row for insert")
+			return nil, merr.WrapErrParameterInvalidMsg("at least one row for insert")
 		}
 		data := make([][]byte, len(wrappedData))
 		dim := int64(0)
@@ -333,12 +419,12 @@ func (f *FieldData) AsSchemapb() (*schemapb.FieldData, error) {
 			return nil, newFieldDataError(f.FieldName, err)
 		}
 		if len(wrappedData) < 1 {
-			return nil, errors.New("at least one row for insert")
+			return nil, merr.WrapErrParameterInvalidMsg("at least one row for insert")
 		}
 		array0 := wrappedData[0]
 		dim := len(array0)
 		if dim < 1 {
-			return nil, errors.New("dim must >= 1")
+			return nil, merr.WrapErrParameterInvalidMsg("dim must >= 1")
 		}
 		data := make([]byte, len(wrappedData)*dim)
 
@@ -358,13 +444,13 @@ func (f *FieldData) AsSchemapb() (*schemapb.FieldData, error) {
 			},
 		}
 	default:
-		return nil, errors.New("unsupported data type")
+		return nil, merr.WrapErrParameterInvalidMsg("unsupported data type")
 	}
 	return &ret, nil
 }
 
 func newFieldDataError(field string, err error) error {
-	return fmt.Errorf("parse field[%s]: %s", field, err.Error())
+	return merr.WrapErrParameterInvalidErr(err, "parse field[%s]", field)
 }
 
 func convertFieldDataArray(input []*FieldData) ([]*schemapb.FieldData, error) {
@@ -381,28 +467,40 @@ func convertFieldDataArray(input []*FieldData) ([]*schemapb.FieldData, error) {
 
 // SearchRequest is the RESTful request body for search
 type SearchRequest struct {
-	Base               *commonpb.MsgBase        `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
-	DbName             string                   `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
-	CollectionName     string                   `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
-	PartitionNames     []string                 `protobuf:"bytes,4,rep,name=partition_names,json=partitionNames,proto3" json:"partition_names,omitempty"`
-	Dsl                string                   `protobuf:"bytes,5,opt,name=dsl,proto3" json:"dsl,omitempty"`
-	DslType            commonpb.DslType         `protobuf:"varint,7,opt,name=dsl_type,json=dslType,proto3,enum=milvus.proto.common.DslType" json:"dsl_type,omitempty"`
-	BinaryVectors      [][]byte                 `json:"binary_vectors,omitempty"`
-	Vectors            [][]float32              `json:"vectors,omitempty"`
-	OutputFields       []string                 `protobuf:"bytes,8,rep,name=output_fields,json=outputFields,proto3" json:"output_fields,omitempty"`
-	SearchParams       []*commonpb.KeyValuePair `protobuf:"bytes,9,rep,name=search_params,json=searchParams,proto3" json:"search_params,omitempty"`
-	TravelTimestamp    uint64                   `protobuf:"varint,10,opt,name=travel_timestamp,json=travelTimestamp,proto3" json:"travel_timestamp,omitempty"`
-	GuaranteeTimestamp uint64                   `protobuf:"varint,11,opt,name=guarantee_timestamp,json=guaranteeTimestamp,proto3" json:"guarantee_timestamp,omitempty"`
-	Nq                 int64                    `protobuf:"varint,12,opt,name=nq,proto3" json:"nq,omitempty"`
+	Base           *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	DbName         string            `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
+	CollectionName string            `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
+	PartitionNames []string          `protobuf:"bytes,4,rep,name=partition_names,json=partitionNames,proto3" json:"partition_names,omitempty"`
+	Dsl            string            `protobuf:"bytes,5,opt,name=dsl,proto3" json:"dsl,omitempty"`
+	DslType        commonpb.DslType  `protobuf:"varint,7,opt,name=dsl_type,json=dslType,proto3,enum=milvus.proto.common.DslType" json:"dsl_type,omitempty"`
+	// Base64VectorQuery rather than []byte: a null decodes to an empty slice
+	// and would travel as a zero-length vector
+	BinaryVectors []Base64VectorQuery `json:"binary_vectors,omitempty"`
+	// FloatVectorQuery rather than []float32: a null coordinate must be
+	// refused, not silently decoded to 0 and searched
+	Vectors                []FloatVectorQuery       `json:"vectors,omitempty"`
+	OutputFields           []string                 `protobuf:"bytes,8,rep,name=output_fields,json=outputFields,proto3" json:"output_fields,omitempty"`
+	SearchParams           []*commonpb.KeyValuePair `protobuf:"bytes,9,rep,name=search_params,json=searchParams,proto3" json:"search_params,omitempty"`
+	TravelTimestamp        uint64                   `protobuf:"varint,10,opt,name=travel_timestamp,json=travelTimestamp,proto3" json:"travel_timestamp,omitempty"`
+	GuaranteeTimestamp     uint64                   `protobuf:"varint,11,opt,name=guarantee_timestamp,json=guaranteeTimestamp,proto3" json:"guarantee_timestamp,omitempty"`
+	Nq                     int64                    `protobuf:"varint,12,opt,name=nq,proto3" json:"nq,omitempty"`
+	SearchAggregation      *SearchAggregationReq    `json:"searchAggregation,omitempty"`
+	SearchAggregationSnake *SearchAggregationReq    `json:"search_aggregation,omitempty"`
 }
 
-func binaryVector2Bytes(vectors [][]byte) []byte {
+func (r *SearchRequest) HasSearchAggregation() bool {
+	return r.SearchAggregation != nil || r.SearchAggregationSnake != nil
+}
+
+func binaryVector2Bytes(vectors []Base64VectorQuery) []byte {
 	ph := &commonpb.PlaceholderValue{
 		Tag:    "$0",
 		Type:   commonpb.PlaceholderType_BinaryVector,
 		Values: make([][]byte, 0, len(vectors)),
 	}
-	ph.Values = append(ph.Values, vectors...)
+	for _, vector := range vectors {
+		ph.Values = append(ph.Values, vector)
+	}
 	phg := &commonpb.PlaceholderGroup{
 		Placeholders: []*commonpb.PlaceholderValue{
 			ph,
@@ -412,7 +510,7 @@ func binaryVector2Bytes(vectors [][]byte) []byte {
 	return ret
 }
 
-func vector2Bytes(vectors [][]float32) []byte {
+func vector2Bytes(vectors []FloatVectorQuery) []byte {
 	ph := &commonpb.PlaceholderValue{
 		Tag:    "$0",
 		Type:   commonpb.PlaceholderType_FloatVector,
@@ -444,10 +542,13 @@ type WrappedCalcDistanceRequest struct {
 type VectorsArray struct {
 	// Dim of vectors or binary_vectors, not needed when use ids
 	Dim int64 `json:"dim,omitempty"`
-	// Vectors is an array of vector divided by given dim. Disabled when ids or binary_vectors is set
-	Vectors []float32 `json:"vectors,omitempty"`
-	// Vectors is an array of binary vector divided by given dim. Disabled when IDs is set
-	BinaryVectors []byte `json:"binary_vectors,omitempty"`
+	// Vectors is an array of vector divided by given dim. Disabled when ids or binary_vectors is set.
+	// FloatVectorQuery rather than []float32: a null coordinate must be
+	// refused, not silently decoded to 0 and measured against.
+	Vectors FloatVectorQuery `json:"vectors,omitempty"`
+	// Vectors is an array of binary vector divided by given dim. Disabled when IDs is set.
+	// Base64VectorQuery rather than []byte, for the same reason as above.
+	BinaryVectors Base64VectorQuery `json:"binary_vectors,omitempty"`
 	// IDs of vector field in milvus, if not nil, vectors will be ignored
 	IDs *VectorIDs `json:"ids,omitempty"`
 }
@@ -510,5 +611,7 @@ type VectorIDs struct {
 	CollectionName string   `protobuf:"bytes,1,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
 	FieldName      string   `protobuf:"bytes,2,opt,name=field_name,json=fieldName,proto3" json:"field_name,omitempty"`
 	PartitionNames []string `json:"partition_names"`
-	IDArray        []int64  `json:"id_array,omitempty"`
+	// Int64ListQuery rather than []int64: a null decodes to 0, which names a
+	// vector the caller never asked for
+	IDArray Int64ListQuery `json:"id_array,omitempty"`
 }

@@ -21,12 +21,11 @@ import (
 	"io"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -74,7 +73,7 @@ func readFromSegment(
 			return nil, nil, err
 		}
 		if len(paths) == 0 {
-			log.Ctx(ctx).Info("no delta log paths found in manifest")
+			mlog.Info(ctx, "no delta log paths found in manifest")
 			return []storage.PrimaryKey{}, []typeutil.Timestamp{}, nil
 		}
 		return readDeltalogsV2(ctx, pkType, paths, option...)
@@ -94,7 +93,7 @@ func readDeltalogsV1(
 
 	for _, deltalog := range deltalogs {
 		for _, binlog := range deltalog.Binlogs {
-			reader, err := storage.NewDeltalogReader(pkType, []string{binlog.GetLogPath()}, option...)
+			reader, err := storage.NewDeltalogReader(ctx, pkType, []string{binlog.GetLogPath()}, option...)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -108,7 +107,7 @@ func readDeltalogsV1(
 		}
 	}
 
-	log.Ctx(ctx).Info("read V1 deltalogs", zap.Int("entries", len(allPks)))
+	mlog.Info(ctx, "read V1 deltalogs", mlog.Int("entries", len(allPks)))
 	return allPks, allTss, nil
 }
 
@@ -119,7 +118,7 @@ func readDeltalogsV2(
 	paths []string,
 	option ...storage.RwOption,
 ) ([]storage.PrimaryKey, []typeutil.Timestamp, error) {
-	reader, err := storage.NewDeltalogReader(pkType, paths,
+	reader, err := storage.NewDeltalogReader(ctx, pkType, paths,
 		append(option, storage.WithVersion(storage.StorageV3))...)
 	if err != nil {
 		return nil, nil, err
@@ -131,7 +130,7 @@ func readDeltalogsV2(
 		return nil, nil, err
 	}
 
-	log.Ctx(ctx).Info("read V2 deltalogs", zap.Int("entries", len(pks)))
+	mlog.Info(ctx, "read V2 deltalogs", mlog.Int("entries", len(pks)))
 	return pks, tss, nil
 }
 

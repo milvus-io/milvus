@@ -45,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -176,6 +177,37 @@ func TestAllocSegment(t *testing.T) {
 		assert.EqualValues(t, 1, segments.Len())
 		assert.NotEqual(t, allocations1[0].SegmentID, allocations2[0].SegmentID)
 	})
+}
+
+func TestAllocSegmentExpirationUsesHybridTimestampArithmetic(t *testing.T) {
+	ctx := context.Background()
+	paramtable.Init()
+	Params.Save(Params.DataCoordCfg.AllocLatestExpireAttempt.Key, "1")
+	Params.Save(Params.DataCoordCfg.SegAssignmentExpiration.Key, "1000")
+	defer Params.Reset(Params.DataCoordCfg.AllocLatestExpireAttempt.Key)
+	defer Params.Reset(Params.DataCoordCfg.SegAssignmentExpiration.Key)
+
+	mockAllocator := allocator.NewMockAllocator(t)
+	basePhysical := int64(253402300798000)
+	logical := int64(7)
+	baseTS := tsoutil.ComposeTS(basePhysical, logical)
+	mockAllocator.EXPECT().AllocTimestamp(mock.Anything).Return(baseTS, nil).Maybe()
+	mockAllocator.EXPECT().AllocID(mock.Anything).Return(int64(100), nil).Maybe()
+
+	meta, err := newMemoryMeta(t)
+	assert.NoError(t, err)
+	meta.AddCollection(&collectionInfo{ID: 1, Schema: newTestSchema()})
+
+	segmentManager, err := newSegmentManager(meta, mockAllocator, withCalUpperLimitPolicy(func(*schemapb.CollectionSchema) (int, error) {
+		return 1000, nil
+	}))
+	assert.NoError(t, err)
+
+	allocations, err := segmentManager.AllocSegment(ctx, 1, 1, "large-ts-channel", 10, storage.StorageV1)
+	assert.NoError(t, err)
+	if assert.Len(t, allocations, 1) {
+		assert.Equal(t, tsoutil.ComposeTS(basePhysical+1000, logical), allocations[0].ExpireTime)
+	}
 }
 
 func TestLastExpireReset(t *testing.T) {

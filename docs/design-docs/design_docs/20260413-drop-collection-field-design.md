@@ -2,8 +2,8 @@
 
 **Branch**: `feat/drop-collection-field`
 **Author**: sijie-ni-0214
-**Date**: April 2026
-**Scope**: 30 files, +2,182/-600 lines
+**Date**: May 2026
+**Scope**: 40 files, +3,852/-1,067 lines
 
 ---
 
@@ -21,7 +21,7 @@ This feature enables users to dynamically drop fields and functions from existin
 2. **Backward compatibility**: Existing segments with dropped-field data must remain loadable and queryable
 3. **Cascade cleanup**: Indexes on dropped fields must be automatically removed
 4. **Field ID safety**: Dropped field IDs must never be reused to prevent data corruption
-5. **Concurrency safety**: Reuse the existing `AlterCollectionSchema` mutual exclusion and schema version consistency gateway
+5. **Concurrency safety**: Use the existing schema DDL execution path
 6. **Unified API**: Integrate into the existing `AlterCollectionSchema` RPC rather than introducing a separate RPC
 
 ### 1.3 Design Principles
@@ -45,8 +45,6 @@ This feature enables users to dynamically drop fields and functions from existin
                                         v
 +------------------------------------------------------------------------------+
 |                                   PROXY                                      |
-|  * Mutual exclusion: alterSchemaInFlight (one schema change per collection)  |
-|  * Schema version consistency check (all segments aligned)                   |
 |  * Validate drop constraints (not PK, not partition key, not last vector...) |
 |  * Forward to RootCoord via MixCoord                                         |
 +------------------------------------------------------------------------------+
@@ -77,7 +75,7 @@ This feature enables users to dynamically drop fields and functions from existin
 
 | Component | Responsibility |
 |-----------|----------------|
-| **Proxy** | Request validation, concurrency control, schema version consistency gate |
+| **Proxy** | Request validation and DDL scheduling |
 | **RootCoord** | Schema construction, field ID management, WAL broadcast, cascade index deletion |
 | **QueryNode (Go)** | Filter dropped-field binlogs and indexes during segment loading |
 | **Segcore (C++)** | Schema-driven field filtering in `ComputeDiff*`, `LoadFieldData`, column group loading |
@@ -89,7 +87,6 @@ The drop field feature reuses the existing `AlterCollectionSchema` infrastructur
 
 - **Streaming/WAL layer**: No new message types; uses existing `AlterCollectionMessage`
 - **DataNode**: No backfill; dropped-field binlogs are left in place
-- **Schema version consistency**: Reuses the existing gateway from add-field (DataCoord reports consistent/total segment counts)
 
 ---
 
@@ -115,8 +112,10 @@ message AlterCollectionSchemaRequest {
         oneof identifier {
             string field_name = 1;     // Drop field by name
             int64 field_id = 2;        // Drop field by ID
-            string function_name = 3;  // Drop function (cascades to output fields)
+            string function_name = 3;  // Drop function by name
         }
+        bool drop_function_output_fields = 4;  // With function_name, also drop
+                                                // supported output fields
     }
 
     message Action {
@@ -133,12 +132,13 @@ message AlterCollectionSchemaRequest {
 #### AlterCollectionMessage Extension
 
 ```protobuf
-// messages.proto - AlterCollectionMessageBody.Updates
-message Updates {
-    // ... existing fields (schema, properties, etc.)
-    repeated int64 dropped_field_ids = 9;  // Field IDs removed from schema,
+// messages.proto - AlterCollectionMessageHeader
+message AlterCollectionMessageHeader {
+    // ... existing fields (db_id, collection_id, update_mask, etc.)
+    repeated int64 dropped_field_ids = 6;  // Field IDs removed from schema,
                                             // used to cascade-delete indexes
-                                            // in ack callback
+                                            // in ack callback. Empty when
+                                            // detaching a function.
 }
 ```
 
@@ -146,28 +146,44 @@ message Updates {
 
 | Operation | UpdateMask Fields |
 |-----------|-------------------|
-| **Add** (field/function) | `schema` only |
+| **Add** (field/function) | `schema` + `properties` |
 | **Drop** (field/function) | `schema` + `properties` |
 
-Drop requires updating `properties` because it must persist `max_field_id` to prevent field ID reuse.
+Schema mutations update `properties` because they maintain `max_field_id` to prevent field ID reuse.
 
 ### 3.3 Client SDK (pymilvus)
 
 ```python
-def alter_collection_schema(
+def drop_collection_field(
     self,
     collection_name: str,
     *,
     field_name: str = "",       # Drop by field name
     field_id: int = 0,          # Drop by field ID
-    function_name: str = "",    # Drop by function name (cascade)
     db_name: str = "",
     timeout: Optional[float] = None,
 ) -> None:
-    """Drop a field or function from the collection schema.
+    """Drop a field from the collection schema."""
 
-    Exactly one of field_name, field_id, or function_name must be specified.
-    """
+def drop_collection_function(
+    self,
+    collection_name: str,
+    function_name: str,
+    *,
+    db_name: str = "",
+    timeout: Optional[float] = None,
+) -> None:
+    """Detach a function and keep its output fields as normal fields."""
+
+def drop_function_field(
+    self,
+    collection_name: str,
+    function_name: str,
+    *,
+    db_name: str = "",
+    timeout: Optional[float] = None,
+) -> None:
+    """Drop a supported function and its output fields."""
 ```
 
 ---
@@ -178,33 +194,31 @@ def alter_collection_schema(
 
 **Files**: `internal/proxy/impl.go`, `internal/proxy/task.go`
 
-#### Concurrency Control (Inherited from Add-Field)
+#### Scheduling and Validation
 
-Drop operations share the same concurrency safeguards as add operations:
+Drop operations use the standard Proxy DDL path:
 
-1. **`alterSchemaInFlight`** (`sync.Map`): Ensures only one `AlterCollectionSchema` request per collection at a time. Key is `dbName/collectionName`.
+1. **Current schema validation**: Proxy calls `DescribeCollection` and passes the current schema into `alterCollectionSchemaTask` for local validation.
 
-2. **Schema Version Consistency Gate**: Before any schema change, the proxy queries DataCoord for segment schema version statistics:
-   ```
-   consistentSegments == totalSegments  -->  proceed
-   consistentSegments != totalSegments  -->  reject (previous schema change still propagating)
-   ```
-
-3. **DDL Queue**: Tasks execute serially within the DDL queue, preventing race conditions.
+2. **DDL Queue**: The task is enqueued on `ddQueue`.
 
 #### PreExecute: Drop Validation
 
 ```go
 func (t *alterCollectionSchemaTask) preExecuteDrop(ctx context.Context) error {
-    dropReq := t.req.GetAction().GetOp().(*milvuspb.AlterSchemaAction_DropRequest).DropRequest
+    dropReq := t.GetAction().GetDropRequest()
 
     switch id := dropReq.GetIdentifier().(type) {
     case *milvuspb.AlterCollectionSchemaRequest_DropRequest_FunctionName:
-        return validateDropFunction(t.oldSchema, id.FunctionName)
+        return validateDropFunction(
+            t.oldSchema,
+            id.FunctionName,
+            dropReq.GetDropFunctionOutputFields(),
+        )
     case *milvuspb.AlterCollectionSchemaRequest_DropRequest_FieldId:
-        // Resolve field ID to field name, then validate
-        fieldName := resolveFieldName(t.oldSchema, id.FieldId)
-        return validateDropField(t.oldSchema, fieldName)
+        // Resolve field ID across top-level fields and struct array fields.
+        // Struct sub-field drops are rejected.
+        return validateDropFieldByID(t.oldSchema, id.FieldId)
     case *milvuspb.AlterCollectionSchemaRequest_DropRequest_FieldName:
         return validateDropField(t.oldSchema, id.FieldName)
     }
@@ -215,16 +229,16 @@ func (t *alterCollectionSchemaTask) preExecuteDrop(ctx context.Context) error {
 
 | Constraint | Error Message |
 |-----------|---------------|
-| Field name is empty | `field name cannot be empty` |
+| Field name is empty | `field name is empty` |
 | Field not found in schema | `field not found: {name}` |
 | System field (`$rowid`, `$timestamp`, `$meta`, `$namespace`) | `cannot drop system field: {name}` |
 | Primary key field | `cannot drop primary key field: {name}` |
 | Partition key field | `cannot drop partition key field: {name}` |
 | Clustering key field | `cannot drop clustering key field: {name}` |
-| Dynamic field (`IsDynamic=true`) | `cannot drop dynamic field directly, use AlterCollection to disable` |
+| Dynamic field (`IsDynamic=true`) | `cannot drop dynamic field: {name}, use AlterCollection to disable dynamic schema instead` |
 | Last vector field in schema | `cannot drop the last vector field: {name}` |
 | Field is function input | `field is referenced by function {fn} as input` |
-| Field is function output | `field is referenced by function {fn} as output, drop the function instead` |
+| Field is function output | `field is referenced by function {fn} as output, drop function first` |
 | Target is a sub-field of a struct array field | `cannot drop sub-field of struct array field: {struct}.{sub}` |
 | Dropping whole struct array field would leave no vector | `cannot drop struct array field {name}: it would leave no vector field in the collection` |
 
@@ -238,7 +252,9 @@ func (t *alterCollectionSchemaTask) preExecuteDrop(ctx context.Context) error {
 |-----------|---------------|
 | Function name is empty | `function name is empty` |
 | Function not found | `function not found: {name}` |
-| Cascade removal of output fields would leave no vector in schema | `cannot drop function {name}: it would leave no vector field in the collection` |
+| BM25 function is detached without dropping its output field | `BM25 function must be dropped with its output field in drop_function_field interface: {name}` |
+| Output-field drop is requested for an unsupported function type | `only BM25 and MinHash functions support dropping output fields: {name}` |
+| Output-field drop would leave no vector in schema | `cannot drop function {name}: it would leave no vector field in the collection` |
 
 
 ### 4.2 RootCoord Layer
@@ -253,7 +269,8 @@ func (t *alterCollectionSchemaTask) preExecuteDrop(ctx context.Context) error {
       v
 2. Build new schema:
    * buildSchemaForDropField(coll, fieldName, fieldID)
-     OR buildSchemaForDropFunction(coll, functionName)
+     OR buildSchemaForDetachFunction(coll, functionName)
+     OR buildSchemaForDropFunctionField(coll, functionName)
       |
       v
 3. Returns: (newSchema, newProperties, droppedFieldIds)
@@ -310,12 +327,12 @@ func buildSchemaForDropField(coll *model.Collection, fieldName string, fieldID i
 }
 ```
 
-#### buildSchemaForDropFunction
+#### buildSchemaForDetachFunction
 
-Drops a function and **all its output fields** (cascade):
+Detaches a function while keeping its output fields in the schema as normal fields:
 
 ```go
-func buildSchemaForDropFunction(coll *model.Collection, functionName string) (
+func buildSchemaForDetachFunction(coll *model.Collection, functionName string) (
     *schemapb.CollectionSchema, []*commonpb.KeyValuePair, []int64, error,
 ) {
     // 1. Find target function
@@ -324,19 +341,60 @@ func buildSchemaForDropFunction(coll *model.Collection, functionName string) (
         if fn.Name == functionName { targetFunc = fn; break }
     }
 
-    // 2. Collect output field IDs as droppedFieldIds
-    droppedFieldIds := targetFunc.OutputFieldIDs
+    // 2. BM25 output fields are internal generated fields and are not detached.
+    if targetFunc.Type == schemapb.FunctionType_BM25 {
+        return nil, nil, nil, err
+    }
 
-    // 3. Remove output fields from schema
-    outputFieldIDSet := make(map[int64]bool)
-    for _, id := range droppedFieldIds { outputFieldIDSet[id] = true }
+    // 3. Keep output fields but clear IsFunctionOutput.
+    outputFieldIDSet := set(targetFunc.OutputFieldIDs)
+    newFields := marshalFields(coll.Fields)
+    for _, field := range newFields {
+        if outputFieldIDSet[field.FieldID] {
+            field.IsFunctionOutput = false
+        }
+    }
 
-    newFields := filterFields(coll.Fields, outputFieldIDSet)
-
-    // 4. Remove function from schema
+    // 4. Remove function from schema.
     newFunctions := filterFunctions(coll.Functions, targetFunc.Name)
 
-    // 5. Persist max_field_id, increment schema version
+    // 5. Keep existing properties, increment schema version.
+    // ...
+
+    return schema, coll.Properties, nil, nil
+}
+```
+
+#### buildSchemaForDropFunctionField
+
+Drops a supported function and its output fields:
+
+```go
+func buildSchemaForDropFunctionField(coll *model.Collection, functionName string) (
+    *schemapb.CollectionSchema, []*commonpb.KeyValuePair, []int64, error,
+) {
+    // 1. Find target function
+    var targetFunc *model.Function
+    for _, fn := range coll.Functions {
+        if fn.Name == functionName { targetFunc = fn; break }
+    }
+
+    // 2. Only BM25 and MinHash expose output-field drop semantics.
+    switch targetFunc.Type {
+    case schemapb.FunctionType_BM25, schemapb.FunctionType_MinHash:
+    default:
+        return nil, nil, nil, err
+    }
+
+    // 3. Collect output field IDs as droppedFieldIds.
+    droppedFieldIds := targetFunc.OutputFieldIDs
+    outputFieldIDSet := set(droppedFieldIds)
+
+    // 4. Remove output fields and function from schema.
+    newFields := filterFields(coll.Fields, outputFieldIDSet)
+    newFunctions := filterFunctions(coll.Functions, targetFunc.Name)
+
+    // 5. Persist max_field_id, increment schema version.
     // ...
 
     return schema, properties, droppedFieldIds, nil
@@ -375,7 +433,7 @@ func nextFieldID(coll *model.Collection) int64 {
 }
 ```
 
-**Key**: `updateMaxFieldIDProperty` is called during every drop operation, ensuring the high-water mark is persisted even if the field with the highest ID is removed.
+**Key**: `updateMaxFieldIDProperty` is called during every field-removing drop operation, ensuring the high-water mark is persisted even if the field with the highest ID is removed. Detaching a function does not remove fields, so it keeps the existing collection properties.
 
 ### 4.4 Cascade Index Deletion
 
@@ -451,7 +509,7 @@ func broadcastDisableDynamicField(ctx context.Context, coll *model.Collection) e
 }
 ```
 
-**Proxy-side gate coverage**: Enabling/disabling the dynamic field mutates the schema and bumps `SchemaVersion + 1`, so it must respect the same concurrency invariants as `AlterCollectionSchema` (see §6.1). The `AlterCollection` handler inspects `request.Properties` and, when `dynamicfield.enabled` is present, routes the request through the same `alterSchemaInFlight` + `checkSchemaVersionConsistency` gates as `AlterCollectionSchema`, sharing the same `sync.Map` so the two handlers are mutually exclusive per collection. Requests that only alter unrelated properties (e.g. `collection.ttl.seconds`, `mmap.enabled`) bypass the gate and keep their existing lightweight path.
+Requests that alter unrelated properties (e.g., `collection.ttl.seconds`, `mmap.enabled`) keep the existing property-only path.
 
 ### 4.6 Segcore (C++) Layer
 
@@ -511,37 +569,53 @@ if err != nil {
 
 ## 5. Drop Field vs Drop Function: Semantic Differences
 
-| Aspect | Drop Field | Drop Function |
-|--------|-----------|---------------|
-| **Target** | A single field | A function + all its output fields |
-| **DroppedFieldIds** | `[fieldID]` | `[outputFieldID1, outputFieldID2, ...]` |
-| **Input fields** | N/A | Preserved (not removed) |
-| **Index cascade** | Drops indexes on the field | Drops indexes on all output fields |
-| **Validation** | Cannot drop if referenced by a function | No restriction (output fields cascade) |
+| Aspect | Drop Field | Detach Function | Drop Function Field |
+|--------|------------|-----------------|---------------------|
+| **Request shape** | `field_name` / `field_id` | `function_name`, `drop_function_output_fields=false` | `function_name`, `drop_function_output_fields=true` |
+| **Target** | A single field | Function metadata only | Function metadata + supported output fields |
+| **Output fields** | N/A | Preserved as normal fields with `IsFunctionOutput=false` | Removed from `schema.Fields` |
+| **DroppedFieldIds** | `[fieldID]` | `[]` | `[outputFieldID1, outputFieldID2, ...]` |
+| **Input fields** | N/A | Preserved | Preserved |
+| **Index cascade** | Drops indexes on the field | No output-field index deletion | Drops indexes on removed output fields |
+| **Validation** | Cannot drop if referenced by a function | BM25 functions are not detachable | Only BM25 and MinHash support output-field removal; the collection must retain at least one vector field |
 
-### Difference from DropCollectionFunction (Existing API)
+### Detach Function Contract
 
-| Aspect | DropCollectionFunction (existing) | AlterCollectionSchema Drop Function (this feature) |
-|--------|----------------------------------|-----------------------------------------------------|
-| Output fields | Preserved, marked `IsFunctionOutput=false` | **Cascade deleted** from schema |
-| Indexes | Not touched | Cascade deleted |
-| Field ID protection | No `max_field_id` update | `max_field_id` updated |
+Dropping a function with `drop_function_output_fields=false` only removes the function binding:
+
+- The target function is removed from `schema.Functions`.
+- Function output fields remain in `schema.Fields`.
+- Output fields are converted to normal fields by setting `IsFunctionOutput=false`.
+- `DroppedFieldIds` is empty, so no field index deletion is scheduled.
+- Collection properties are forwarded unchanged.
+
+This mode is used for functions whose output fields can exist independently as user-visible data, such as TextEmbedding dense-vector outputs and MinHash materialized `BinaryVector` outputs.
+
+### Drop Function Field Contract
+
+Dropping a function with `drop_function_output_fields=true` removes the function binding and supported generated/materialized output fields:
+
+- The target function is removed from `schema.Functions`.
+- Output fields are removed from `schema.Fields`.
+- Input fields are preserved.
+- Indexes on removed output fields are deleted through `DroppedFieldIds`.
+- `max_field_id` remains pinned to the historical high-water mark.
+
+This mode is supported for BM25 and MinHash functions. BM25 uses an internal generated output field and must use this mode; MinHash supports both detach and output-field removal because its output is a materialized `BinaryVector` field.
 
 ---
 
 ## 6. Concurrency and Consistency
 
-### 6.1 Three Layers of Protection
+### 6.1 Schema Mutation Ordering
 
-Drop operations inherit the same concurrency model as add operations through the unified `AlterCollectionSchema` entry point:
+Drop operations use the existing schema DDL ordering:
 
-1. **`alterSchemaInFlight` Mutex** (`sync.Map`): Only one schema modification per collection at a time. A second request immediately receives an error response.
+1. **Proxy DDL queue**: `AlterCollectionSchema` tasks are enqueued on `ddQueue`.
 
-2. **DDL Queue Serial Execution**: All DDL tasks (including schema changes) execute serially within the proxy's DDL queue.
+2. **Collection broadcast lock**: RootCoord broadcasts the schema mutation under the collection resource key.
 
-3. **Schema Version Consistency Gate**: The proxy checks DataCoord's segment statistics before allowing any schema change. If a previous change (e.g., add-field backfill) hasn't propagated to all segments, the new request is rejected.
-
-**Coverage across RPC entry points**: Because the proxy rootcoord lock serializes concurrent *writes* but not *writer-vs-in-flight-backfill*, layers (1) and (3) must guard every RPC entry that mutates the schema. In this PR, both `AlterCollectionSchema` and the dynamic-field branch of `AlterCollection` go through the same two gates and share the same `alterSchemaInFlight` `sync.Map`, so any two schema mutations targeting the same collection — regardless of which RPC they arrived on — are mutually exclusive, and neither can begin until the previous mutation's backfill has reached 100% of segments.
+3. **Schema-drop readiness**: `DropRequest` operations and dynamic-field disable call `waitUntilSchemaDropReady` before broadcasting the schema change.
 
 ### 6.2 Ack Callback Idempotency
 
@@ -551,7 +625,7 @@ The ack callback (`cascadeDropFieldIndexesInline` + `meta.AlterCollection`) may 
 
 ### 6.3 Cascade Intermediate Window
 
-A drop proceeds in two phases within the ack-callback pipeline:
+Field-removing drop requests proceed in two phases within the ack-callback pipeline:
 
 1. **Metadata phase**: `meta.AlterCollection` removes the field from `coll.Fields`. After this step `DescribeCollection` no longer reports the field.
 2. **Index cascade phase**: `cascadeDropFieldIndexesInline` broadcasts `DropIndex` for each surviving index on the dropped field ID; once those acks complete, `indexMeta` entries are cleared.
@@ -569,6 +643,8 @@ This state is **transient**, not an orphaned-index bug. It is equivalent to the 
 
 - RootCoord logs `cascade dropping index on dropped field` with `fieldID`, `indexName`, `indexID` for every cascade target; the presence of a recent entry for the observed index confirms the current state is transient.
 - Re-query after ~30s — if `ListIndexes` still returns the dropped field, the cascade has genuinely failed to converge and should be treated as an orphaned-index bug through the existing runbook.
+
+Detach-function requests carry an empty `DroppedFieldIds` list. The ack callback persists the function-list update, broadcasts the altered collection, and expires metadata caches without scheduling output-field index deletion.
 
 ### 6.4 In-flight Request Semantics
 
@@ -591,13 +667,11 @@ Requests that do not reference the dropped field pass through unaffected — pla
 | 2. Cross-version (narrow) | stale (N) | new schema (N+1), segment reloaded without the field | plan compiles against schema N, reaches querynode; segcore's `chunk_data_impl`/`chunk_array_view_impl` check `field_data_ready_bitset_`, the bit is 0 for the dropped field, `AssertInfo` raises `SegcoreError` — surfaced to the client as an error status |
 | 3. No race | stale or new | still has the field | executes normally |
 
-Cases 1 and 2 both return a clear error to the client; **neither aborts or corrupts state**. Case 2 is bounded in time by the proxy cache invalidation latency (rootcoord broadcast → per-proxy cache invalidate, milliseconds to seconds in practice), and further bounded by the schema-version-consistency gate in §6.1: a second schema mutation cannot begin until the previous one has propagated, so the cross-version window is always tied to a single in-flight mutation and never accumulates.
+Cases 1 and 2 both return a clear error to the client; **neither aborts or corrupts state**. Case 2 is bounded in time by the proxy cache invalidation latency (rootcoord broadcast → per-proxy cache invalidate, milliseconds to seconds in practice).
 
-SDKs cache collection schema in a process-wide `GlobalCache`. `add_collection_field` and `add_collection_function` previously did not invalidate this cache, relying on `@retry_on_schema_mismatch` on `insert_rows` / `upsert_rows` to recover from staleness on the write path.
+SDKs cache collection schema in a process-wide `GlobalCache`. Schema-mutating public methods must invalidate this cache on success because client-side request encoding can depend on field metadata. For example, bytes-input search consults the cached `anns_field` vector type to encode the placeholder; after a field is dropped and re-created with a different type, a stale cache would keep encoding the request with the old type.
 
-Introducing drop-field / drop-function surfaces a case this passive model cannot recover from: for bytes-input search, the SDK consults the cache for the `anns_field` vector type to encode the placeholder. After `drop_collection_field` followed by `add_collection_field` re-creating the field with a different type, the stale cache returns the old type, the server rejects the request, and because `search` has no schema-mismatch retry (unlike `insert_rows`), the error persists on every subsequent call.
-
-To close this, all four schema-mutating public methods — `drop_collection_field`, `drop_collection_function`, `add_collection_field` and `add_collection_function` (sync + async) — now invalidate the cache on success, so the next request re-fetches fresh schema from the server.
+All schema-mutating public methods — `drop_collection_field`, `drop_collection_function`, `drop_function_field`, `add_collection_field` and `add_collection_function` (sync + async) — invalidate the cache on success, so the next request re-fetches fresh schema from the server.
 
 ---
 
@@ -611,12 +685,6 @@ Client              Proxy           RootCoord        WAL/Streaming      QueryNod
   | AlterCollectionSchema               |                |                    |
   | (DropRequest: field_name="vec2")    |                |                    |
   |------------------>|                 |                |                    |
-  |                   |                 |                |                    |
-  |                   | alterSchemaInFlight.LoadOrStore  |                    |
-  |                   | (check no concurrent schema op) |                    |
-  |                   |                 |                |                    |
-  |                   | checkSchemaVersionConsistency   |                    |
-  |                   | (all segments aligned?)         |                    |
   |                   |                 |                |                    |
   |                   | validateDropField               |                    |
   |                   | (not PK, not last vector, etc.) |                    |
@@ -680,20 +748,20 @@ Client              Proxy           RootCoord        WAL/Streaming      QueryNod
 **Decision**: Store the historical maximum field ID in collection properties (`max_field_id` key).
 
 **Rationale**:
-- Without this, dropping the highest-ID field would cause `nextFieldID()` to return a previously-used ID
+- Without this, dropping the highest-ID field would cause `nextFieldID()` to return an already-used ID
 - Reused field IDs would cause QueryNode to incorrectly load stale binlogs for the new field
 - The property persists through metadata updates and is read by `nextFieldID()` alongside current field IDs
 - Minimal storage overhead (one key-value pair per collection)
 
-### 8.4 Unified Entry Point (No Separate RPC)
+### 8.4 Unified DropRequest Path
 
-**Decision**: Use `AlterCollectionSchema` with `DropRequest` instead of a dedicated `DropCollectionField` RPC.
+**Decision**: Use `AlterCollectionSchema` with `DropRequest` for field drop, function detach, and function-field drop operations.
 
 **Rationale**:
-- Inherits all existing concurrency controls (mutual exclusion, version consistency gate)
-- Single API surface for all schema evolution operations
-- Consistent with the Add/Drop symmetry pattern
-- Simplifies client SDK and documentation
+- Reuses the existing schema evolution entry point for schema-level drops
+- Keeps the add/drop schema mutation flow symmetric at Proxy and RootCoord
+- Carries the `drop_function_output_fields` flag in the same request envelope that identifies the target function
+- Lets field-removing paths share `DroppedFieldIds`, max-field-ID persistence, and index cleanup behavior
 
 ### 8.5 Schema-Driven Filtering in C++
 
@@ -715,9 +783,10 @@ Client              Proxy           RootCoord        WAL/Streaming      QueryNod
 |-----------|-----------|------------|
 | **Proxy: validateDropField** | All constraint violations (PK, partition key, clustering key, dynamic, last vector, function reference, system field, not found) | 12 |
 | **Proxy: preExecuteDrop** | DropRequest by field_name / field_id / function_name, nil action, unknown action | 11 |
-| **Proxy: validateDropFunction** | Function found / not found | 4 |
+| **Proxy: validateDropFunction** | Empty/not found, detach BM25 rejection, detach MinHash success, BM25/MinHash output-field drop, unsupported function type, last-vector protection | 9 |
 | **RootCoord: broadcastAlterCollectionSchemaDrop** | Full broadcast flow with ack callback | 1 |
-| **RootCoord: buildSchemaForDropFunction** | Function removal, output field cascade, droppedFieldIds | 3 |
+| **RootCoord: buildSchemaForDetachFunction** | Function removal, output fields retained as normal fields, BM25 rejection | 3 |
+| **RootCoord: buildSchemaForDropFunctionField** | BM25/MinHash output field removal, unsupported function rejection, droppedFieldIds | 4 |
 | **RootCoord: nextFieldID** | Properties-based max_field_id, historical collection compat | 4 |
 | **RootCoord: updateMaxFieldIDProperty** | Property creation and update | 4 |
 | **C++: SegmentLoadInfo** | ComputeDiffBinlogs/Indexes/ColumnGroups with dropped fields | 8 |
@@ -735,10 +804,12 @@ Client              Proxy           RootCoord        WAL/Streaming      QueryNod
 | 7 | Constraint rejection | PK / partition key / last vector correctly refused |
 | 8 | Dynamic field disable/enable | Idempotent toggle, index cascade |
 | 9 | Loaded collection drop + reload | Search and query work after reload |
-| 10 | Drop BM25 function | Function + output fields + indexes all removed, input preserved |
-| 11 | Drop function input field | Rejected (must drop function first) |
-| 12 | Field ID reuse prevention | Drop + Add same-name different-type, search old data no crash |
-| 13 | Add + Drop serial interaction | Schema version consistency gate works |
+| 10 | Drop BM25 function field | Function metadata, output fields, and indexes removed; input preserved |
+| 11 | Detach TextEmbedding / MinHash function | Function removed, output fields remain queryable as normal fields |
+| 12 | Detach BM25 function | Rejected with `drop_function_field` guidance |
+| 13 | Drop function input field | Rejected (must drop function first) |
+| 14 | Field ID reuse prevention | Drop + Add same-name different-type, search old data no crash |
+| 15 | Add + Drop serial interaction | Schema remains valid after sequential operations |
 
 ---
 

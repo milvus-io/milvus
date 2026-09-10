@@ -35,6 +35,8 @@ type segDistCriterion struct {
 	nodes          []int64
 	collectionID   int64
 	channel        string
+	segmentID      int64
+	hasSegmentID   bool
 	hasOtherFilter bool
 }
 
@@ -86,10 +88,19 @@ func WithNodeID(nodeID int64) SegmentDistFilter {
 	return NodeSegDistFilter(nodeID)
 }
 
+type SegmentIDSegDistFilter int64
+
+func (f SegmentIDSegDistFilter) Match(s *Segment) bool {
+	return s.GetID() == int64(f)
+}
+
+func (f SegmentIDSegDistFilter) AddFilter(filter *segDistCriterion) {
+	filter.segmentID = int64(f)
+	filter.hasSegmentID = true
+}
+
 func WithSegmentID(segmentID int64) SegmentDistFilter {
-	return SegmentDistFilterFunc(func(s *Segment) bool {
-		return s.GetID() == segmentID
-	})
+	return SegmentIDSegDistFilter(segmentID)
 }
 
 type CollectionSegDistFilter int64
@@ -171,6 +182,7 @@ func (segment *Segment) Clone() *Segment {
 
 type SegmentDistManagerInterface interface {
 	Update(nodeID typeutil.UniqueID, segments ...*Segment)
+	Patch(nodeID typeutil.UniqueID, upserts []*Segment, removedSegmentIDs []int64)
 	GetByFilter(filters ...SegmentDistFilter) []*Segment
 	GetSegmentDist(collectionID int64) []*metricsinfo.Segment
 	GetVersion() int64
@@ -194,11 +206,16 @@ type nodeSegments struct {
 	segments        []*Segment
 	collSegments    map[int64][]*Segment
 	channelSegments map[string][]*Segment
+	segmentSegments map[int64][]*Segment
 }
 
 func (s nodeSegments) Filter(criterion *segDistCriterion, filter func(*Segment) bool) []*Segment {
 	var segments []*Segment
+	needFilter := criterion.hasOtherFilter
 	switch {
+	case criterion.hasSegmentID:
+		segments = s.segmentSegments[criterion.segmentID]
+		needFilter = needFilter || criterion.collectionID != 0 || criterion.channel != ""
 	case criterion.channel != "":
 		segments = s.channelSegments[criterion.channel]
 	case criterion.collectionID != 0:
@@ -206,7 +223,7 @@ func (s nodeSegments) Filter(criterion *segDistCriterion, filter func(*Segment) 
 	default:
 		segments = s.segments
 	}
-	if criterion.hasOtherFilter {
+	if needFilter {
 		segments = lo.Filter(segments, func(segment *Segment, _ int) bool {
 			return filter(segment)
 		})
@@ -219,6 +236,7 @@ func composeNodeSegments(segments []*Segment) nodeSegments {
 		segments:        segments,
 		collSegments:    lo.GroupBy(segments, func(segment *Segment) int64 { return segment.GetCollectionID() }),
 		channelSegments: lo.GroupBy(segments, func(segment *Segment) string { return segment.GetInsertChannel() }),
+		segmentSegments: lo.GroupBy(segments, func(segment *Segment) int64 { return segment.GetID() }),
 	}
 }
 
@@ -243,6 +261,47 @@ func (m *SegmentDistManager) Update(nodeID typeutil.UniqueID, segments ...*Segme
 		segment.Node = nodeID
 	}
 	m.segments[nodeID] = composeNodeSegments(segments)
+	m.version++
+}
+
+func (m *SegmentDistManager) Patch(nodeID typeutil.UniqueID, upserts []*Segment, removedSegmentIDs []int64) {
+	if len(upserts) == 0 && len(removedSegmentIDs) == 0 {
+		return
+	}
+
+	m.rwmutex.Lock()
+	defer m.rwmutex.Unlock()
+
+	removedSegments := make(map[int64]struct{}, len(removedSegmentIDs))
+	for _, segmentID := range removedSegmentIDs {
+		removedSegments[segmentID] = struct{}{}
+	}
+	upsertSegments := make(map[int64]*Segment, len(upserts))
+	for _, segment := range upserts {
+		segment.Node = nodeID
+		upsertSegments[segment.GetID()] = segment
+	}
+
+	existing := m.segments[nodeID].segments
+	segments := make([]*Segment, 0, len(existing)+len(upserts))
+	for _, segment := range existing {
+		segmentID := segment.GetID()
+		if _, ok := removedSegments[segmentID]; ok {
+			continue
+		}
+		if _, ok := upsertSegments[segmentID]; ok {
+			continue
+		}
+		segments = append(segments, segment)
+	}
+	for _, segment := range upsertSegments {
+		segments = append(segments, segment)
+	}
+	if len(segments) == 0 {
+		delete(m.segments, nodeID)
+	} else {
+		m.segments[nodeID] = composeNodeSegments(segments)
+	}
 	m.version++
 }
 

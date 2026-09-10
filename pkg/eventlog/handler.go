@@ -20,9 +20,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"go.uber.org/zap"
-
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
 const (
@@ -68,7 +66,7 @@ func writeJSON(w http.ResponseWriter, r *http.Request, resp *eventLogResponse) {
 	w.Header().Set(ContentTypeHeader, ContentTypeJSON)
 	bs, err := json.Marshal(resp)
 	if err != nil {
-		log.Warn("faild to send response", zap.Error(err))
+		mlog.Warn(r.Context(), "faild to send response", mlog.Err(err))
 	}
 	w.Write(bs)
 }

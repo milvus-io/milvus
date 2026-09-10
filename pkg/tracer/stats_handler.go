@@ -23,6 +23,7 @@ import (
 
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 	"google.golang.org/grpc/stats"
 )
 
@@ -41,10 +42,7 @@ type dynamicOtelGrpcStatsHandler struct {
 
 func getDynamicServerHandler() *dynamicOtelGrpcStatsHandler {
 	initServerOnce.Do(func() {
-		statsHandler := otelgrpc.NewServerHandler(
-			otelgrpc.WithInterceptorFilter(filterFunc),
-			otelgrpc.WithTracerProvider(otel.GetTracerProvider()),
-		)
+		statsHandler := otelgrpc.NewServerHandler(getServerHandlerOpts()...)
 
 		dynamicServerHandler = &dynamicOtelGrpcStatsHandler{}
 		dynamicServerHandler.handler.Store(&statsHandler)
@@ -79,10 +77,7 @@ func GetDynamicOtelGrpcClientStatsHandler() stats.Handler {
 
 func NotifyTracerProviderUpdated() {
 	serverhandler := getDynamicServerHandler()
-	statsHandler := otelgrpc.NewServerHandler(
-		otelgrpc.WithInterceptorFilter(filterFunc),
-		otelgrpc.WithTracerProvider(otel.GetTracerProvider()),
-	)
+	statsHandler := otelgrpc.NewServerHandler(getServerHandlerOpts()...)
 
 	serverhandler.setHandler(statsHandler)
 
@@ -92,6 +87,22 @@ func NotifyTracerProviderUpdated() {
 		otelgrpc.WithTracerProvider(otel.GetTracerProvider()),
 	)
 	clientHandler.setHandler(statsHandler)
+}
+
+func getServerHandlerOpts() []otelgrpc.Option {
+	return []otelgrpc.Option{
+		otelgrpc.WithInterceptorFilter(filterFunc),
+		otelgrpc.WithTracerProvider(otel.GetTracerProvider()),
+		// Order matters: the W3C propagator runs first so a real traceparent always wins,
+		// and clientRequestIDPropagator's "already have a span context" guard becomes
+		// meaningful. With the previous order that guard could never fire, and the two
+		// propagators only happened to compose correctly because the later one overwrote
+		// the earlier one's span context.
+		otelgrpc.WithPropagators(propagation.NewCompositeTextMapPropagator(
+			otel.GetTextMapPropagator(),
+			clientRequestIDPropagator{},
+		)),
+	}
 }
 
 func (h *dynamicOtelGrpcStatsHandler) getHandler() stats.Handler {

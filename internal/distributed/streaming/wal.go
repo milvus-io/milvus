@@ -11,7 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/client"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
@@ -42,13 +42,13 @@ func newWALAccesser(c *clientv3.Client) *walAccesserImpl {
 
 		forwardService: newForwardService(streamingCoordClient),
 	}
-	w.SetLogger(log.With(log.FieldComponent("wal-accesser")))
+	w.SetLogger(mlog.With(mlog.FieldComponent("wal-accesser")))
 	return w
 }
 
 // walAccesserImpl is the implementation of WALAccesser.
 type walAccesserImpl struct {
-	log.Binder
+	mlog.Binder
 	lifetime  *typeutil.Lifetime
 	clusterID string
 
@@ -130,6 +130,26 @@ func (w *walAccesserImpl) Read(ctx context.Context, opts ReadOption) Scanner {
 		IgnorePauseConsumption: opts.IgnorePauseConsumption,
 	})
 	return rc
+}
+
+// ResolvePChannelInfo returns the current pchannel assignment for the vchannel.
+func (w *walAccesserImpl) ResolvePChannelInfo(ctx context.Context, vchannel string) (types.PChannelInfo, error) {
+	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return types.PChannelInfo{}, ErrWALAccesserClosed
+	}
+	defer w.lifetime.Done()
+
+	pchannel := funcutil.ToPhysicalChannel(vchannel)
+	assignments, err := w.streamingCoordClient.Assignment().GetLatestAssignments(ctx)
+	if err != nil {
+		return types.PChannelInfo{}, err
+	}
+	for _, assignment := range assignments.Assignments {
+		if pchannelInfo, ok := assignment.Channels[pchannel]; ok {
+			return pchannelInfo, nil
+		}
+	}
+	return types.PChannelInfo{}, status.NewChannelNotExist(pchannel)
 }
 
 // Broadcast returns a broadcast for broadcasting records to the wal.

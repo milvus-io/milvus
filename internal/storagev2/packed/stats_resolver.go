@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // compoundStatsLogIdx is the log index that identifies compound stats format.
@@ -261,10 +262,19 @@ func (r *StatsResolver) TextAndJSONIndexStatsWithBasePaths() *StatsResultWithErr
 
 		switch prefix {
 		case "text_index":
-			// For V3: extract basePath and convert to relative paths
+			// For V3: extract basePath and convert to relative paths.
 			statBasePath := basePath + "/_stats/" + key
 			resolvedPaths := r.resolveStatPaths(stat.Paths)
 			relativeFiles := stripBasePathPrefix(resolvedPaths, statBasePath)
+			// Unified text indexes are opened through FileManager, which resolves
+			// the remote object from StatsBasePath plus the file basename. A manifest
+			// may place the object under attempt directories such as taskID/version,
+			// so use the actual object directory as StatsBasePath. This also accepts
+			// older writers that keep the file directly under the field directory.
+			if len(resolvedPaths) == 1 && strings.HasSuffix(resolvedPaths[0], ".v3") {
+				statBasePath = path.Dir(resolvedPaths[0])
+				relativeFiles = []string{path.Base(resolvedPaths[0])}
+			}
 
 			version, _ := strconv.ParseInt(stat.Metadata["version"], 10, 64)
 			buildID, _ := strconv.ParseInt(stat.Metadata["build_id"], 10, 64)
@@ -289,6 +299,9 @@ func (r *StatsResolver) TextAndJSONIndexStatsWithBasePaths() *StatsResultWithErr
 			}
 
 		case "json_stats":
+			if _, ok := r.jsonKeyStats[fieldID]; !ok {
+				continue
+			}
 			// For V3: extract basePath and convert to relative paths
 			statBasePath := basePath + "/_stats/" + key
 			resolvedPaths := r.resolveStatPaths(stat.Paths)
@@ -364,7 +377,7 @@ func (r *StatsResolver) loadManifest() error {
 
 	stats, err := GetManifestStats(r.manifestPath, r.storageConfig)
 	if err != nil {
-		r.manifestErr = fmt.Errorf("failed to get manifest stats: %w", err)
+		r.manifestErr = merr.Wrap(err, "failed to get manifest stats")
 		return r.manifestErr
 	}
 	r.manifestStats = stats

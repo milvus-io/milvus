@@ -1,9 +1,10 @@
 package segmentutil
 
 import (
-	"go.uber.org/zap"
+	"context"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 )
@@ -12,12 +13,19 @@ import (
 // cloned copy, which is `newSeg`.
 // Note that `segCloned` should be a copied version of `seg`.
 func ReCalcRowCount(seg, segCloned *datapb.SegmentInfo) {
+	// V3 segments resolve row counts via SegmentInfo.NumOfRows (advanced from
+	// the writer checkpoint) and Statistics; their binlog arrays are a
+	// pass-through cache that may be empty (recovery) or delta-only (growing
+	// source flush), so array-derived counts are never authoritative for them.
+	if seg.GetStorageVersion() == storage.StorageV3 {
+		return
+	}
 	// `segment` is not mutated but only cloned above and is safe to be referred here.
 	if newCount := CalcRowCountFromBinLog(seg); newCount != seg.GetNumOfRows() && newCount > 0 {
-		log.Warn("segment row number meta inconsistent with bin log row count and will be corrected",
-			zap.Int64("segmentID", seg.GetID()),
-			zap.Int64("segment meta row count (wrong)", seg.GetNumOfRows()),
-			zap.Int64("segment bin log row count (correct)", newCount))
+		mlog.Warn(context.TODO(), "segment row number meta inconsistent with bin log row count and will be corrected",
+			mlog.FieldSegmentID(seg.GetID()),
+			mlog.Int64("segment meta row count (wrong)", seg.GetNumOfRows()),
+			mlog.Int64("segment bin log row count (correct)", newCount))
 		// Update the corrected row count.
 		segCloned.NumOfRows = newCount
 	}
@@ -36,30 +44,6 @@ func CalcRowCountFromBinLog(seg *datapb.SegmentInfo) int64 {
 		}
 	}
 	return rowCt
-}
-
-// CalcValidRowCountFromFieldBinLog calculates valid (non-null) row count for a specific field
-func CalcValidRowCountFromFieldBinLog(seg *datapb.SegmentInfo, fieldID int64) int64 {
-	for _, fieldBinlog := range seg.GetBinlogs() {
-		isMatch := fieldBinlog.GetFieldID() == fieldID
-		if !isMatch {
-			for _, childField := range fieldBinlog.GetChildFields() {
-				if childField == fieldID {
-					isMatch = true
-					break
-				}
-			}
-		}
-		if isMatch {
-			var validRowCt int64
-			for _, binlog := range fieldBinlog.GetBinlogs() {
-				nullCount := binlog.GetFieldNullCounts()[fieldID]
-				validRowCt += binlog.GetEntriesNum() - nullCount
-			}
-			return validRowCt
-		}
-	}
-	return -1
 }
 
 // CalcDelRowCountFromDeltaLog calculates deleted rows of a L0 segment from delta logs

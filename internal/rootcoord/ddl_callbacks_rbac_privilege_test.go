@@ -24,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -181,4 +182,17 @@ func TestDDLCallbacksRBACPrivilegeGroup(t *testing.T) {
 		GroupName: groupName,
 	})
 	require.NoError(t, merr.CheckRPCCall(status, err))
+}
+
+func TestIsDeprecatedExprPrivilege(t *testing.T) {
+	// Both the API form and the metastore form must be recognized, since the
+	// grant path is reached with either depending on the request version.
+	require.True(t, isDeprecatedExprPrivilege("Expr"))
+	require.True(t, isDeprecatedExprPrivilege(util.PrivilegeExpr))
+
+	// Live privileges must not be caught by the deprecation guard.
+	require.False(t, isDeprecatedExprPrivilege("Load"))
+	require.False(t, isDeprecatedExprPrivilege("CreateCollection"))
+	require.False(t, isDeprecatedExprPrivilege(""))
+	require.False(t, isDeprecatedExprPrivilege("ExprSomethingElse"))
 }

@@ -49,6 +49,9 @@ type PipelineParams struct {
 	Allocator          allocator.Interface
 	MsgHandler         MsgHandler
 	SchemaManager      metacache.SchemaManager
+	// FlushSourceModeNotifier is an optional callback invoked when writebuffer
+	// decides the sticky flush source mode for a segment.
+	FlushSourceModeNotifier writebuffer.FlushSourceModeNotifier
 }
 
 // TimeRange is a range of timestamp contains the min-timestamp and max-timestamp

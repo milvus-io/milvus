@@ -1,18 +1,37 @@
 package message_test
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
+
+type testBodyEncoder struct {
+	encodedSize func() (int, error)
+	marshalTo   func([]byte) (int, error)
+}
+
+func (e *testBodyEncoder) EncodedSize() (int, error) {
+	return e.encodedSize()
+}
+
+func (e *testBodyEncoder) MarshalTo(dst []byte) (int, error) {
+	return e.marshalTo(dst)
+}
+
+func (e *testBodyEncoder) BodyType() *msgpb.InsertRequest {
+	return nil
+}
 
 func TestMutableBuilder(t *testing.T) {
 	b := message.NewTimeTickMessageBuilderV1().
@@ -22,7 +41,7 @@ func TestMutableBuilder(t *testing.T) {
 		MustBuildMutable()
 	assert.True(t, b.IsPersisted())
 	assert.Equal(t, b.VChannel(), "")
-	log.Info("test", zap.Object("msg", b))
+	mlog.Info(context.TODO(), "test", mlog.Object("msg", b))
 
 	b = message.NewTimeTickMessageBuilderV1().
 		WithHeader(&message.TimeTickMessageHeader{}).
@@ -32,10 +51,124 @@ func TestMutableBuilder(t *testing.T) {
 		MustBuildMutable()
 	assert.False(t, b.IsPersisted())
 	assert.Equal(t, b.VChannel(), "v1")
-	log.Info("test", zap.Object("msg", b))
+	mlog.Info(context.TODO(), "test", mlog.Object("msg", b))
 
 	assert.Panics(t, func() {
 		message.NewCreateCollectionMessageBuilderV1().WithNotPersisted()
+	})
+}
+
+func TestMutableBuilderWithBodyEncoder(t *testing.T) {
+	body := &msgpb.InsertRequest{
+		ShardName: "v1",
+		RowIDs:    []int64{1, 2, 3},
+	}
+	expectedPayload, err := proto.Marshal(body)
+	require.NoError(t, err)
+
+	encodedSizeCalls := 0
+	marshalToCalls := 0
+	encoder := &testBodyEncoder{
+		encodedSize: func() (int, error) {
+			encodedSizeCalls++
+			return len(expectedPayload), nil
+		},
+		marshalTo: func(dst []byte) (int, error) {
+			marshalToCalls++
+			assert.Len(t, dst, len(expectedPayload))
+			assert.Equal(t, len(expectedPayload), cap(dst))
+			return copy(dst, expectedPayload), nil
+		},
+	}
+
+	msg, err := message.NewInsertMessageBuilderV1().
+		WithHeader(&message.InsertMessageHeader{}).
+		WithBodyEncoder(encoder).
+		WithVChannel("v1").
+		BuildMutable()
+	require.NoError(t, err)
+	assert.Equal(t, expectedPayload, msg.Payload())
+	assert.Equal(t, len(expectedPayload), cap(msg.Payload()))
+	assert.Equal(t, 1, encodedSizeCalls)
+	assert.Equal(t, 1, marshalToCalls)
+
+	insertMsg, err := message.AsMutableInsertMessageV1(msg)
+	require.NoError(t, err)
+	actualBody, err := insertMsg.Body()
+	require.NoError(t, err)
+	assert.True(t, proto.Equal(body, actualBody))
+}
+
+func TestMutableBuilderBodyEncoderValidation(t *testing.T) {
+	build := func(encoder message.BodyEncoder[*msgpb.InsertRequest]) (message.MutableMessage, error) {
+		return message.NewInsertMessageBuilderV1().
+			WithHeader(&message.InsertMessageHeader{}).
+			WithBodyEncoder(encoder).
+			WithVChannel("v1").
+			BuildMutable()
+	}
+
+	t.Run("encoded size error", func(t *testing.T) {
+		expectedErr := merr.WrapErrServiceInternalMsg("encoded size failed")
+		_, err := build(&testBodyEncoder{
+			encodedSize: func() (int, error) { return 0, expectedErr },
+			marshalTo:   func([]byte) (int, error) { panic("unexpected MarshalTo call") },
+		})
+		require.ErrorIs(t, err, expectedErr)
+		assert.ErrorContains(t, err, "failed to get encoded body size")
+	})
+
+	t.Run("negative encoded size", func(t *testing.T) {
+		_, err := build(&testBodyEncoder{
+			encodedSize: func() (int, error) { return -1, nil },
+			marshalTo:   func([]byte) (int, error) { panic("unexpected MarshalTo call") },
+		})
+		require.ErrorIs(t, err, merr.ErrServiceInternal)
+		assert.ErrorContains(t, err, "negative encoded size")
+	})
+
+	t.Run("marshal error", func(t *testing.T) {
+		expectedErr := merr.WrapErrServiceInternalMsg("marshal failed")
+		_, err := build(&testBodyEncoder{
+			encodedSize: func() (int, error) { return 1, nil },
+			marshalTo:   func([]byte) (int, error) { return 0, expectedErr },
+		})
+		require.ErrorIs(t, err, expectedErr)
+		assert.ErrorContains(t, err, "failed to marshal body")
+	})
+
+	t.Run("written size mismatch", func(t *testing.T) {
+		_, err := build(&testBodyEncoder{
+			encodedSize: func() (int, error) { return 2, nil },
+			marshalTo:   func(dst []byte) (int, error) { return copy(dst, []byte{1}), nil },
+		})
+		require.ErrorIs(t, err, merr.ErrServiceInternal)
+		assert.ErrorContains(t, err, "wrote 1 bytes, expected 2")
+	})
+}
+
+func TestMutableBuilderBodyAndEncoderAreMutuallyExclusive(t *testing.T) {
+	encoder := &testBodyEncoder{
+		encodedSize: func() (int, error) { return 0, nil },
+		marshalTo:   func([]byte) (int, error) { return 0, nil },
+	}
+
+	assert.PanicsWithValue(t, "message builder must set exactly one of body or body encoder", func() {
+		message.NewInsertMessageBuilderV1().
+			WithHeader(&message.InsertMessageHeader{}).
+			WithBody(&msgpb.InsertRequest{}).
+			WithBodyEncoder(encoder).
+			WithVChannel("v1").
+			BuildMutable()
+	})
+
+	var nilEncoder *testBodyEncoder
+	assert.PanicsWithValue(t, "message builder not ready for body field", func() {
+		message.NewInsertMessageBuilderV1().
+			WithHeader(&message.InsertMessageHeader{}).
+			WithBodyEncoder(nilEncoder).
+			WithVChannel("v1").
+			BuildMutable()
 	})
 }
 
@@ -64,7 +197,7 @@ func TestImmutableTxnBuilder(t *testing.T) {
 		WithVChannel("v1").
 		MustBuildMutable()
 	mutableMsg := msg.WithTimeTick(2).WithTxnContext(txnCtx).WithLastConfirmed(msgID)
-	log.Info("test", zap.Object("msg", mutableMsg))
+	mlog.Info(context.TODO(), "test", mlog.Object("msg", mutableMsg))
 	immutableMsg := mutableMsg.IntoImmutableMessage(msgID)
 	b.Add(immutableMsg)
 
@@ -81,7 +214,7 @@ func TestImmutableTxnBuilder(t *testing.T) {
 		VChannel:               "v1",
 	}
 	immutableCommit := commit.WithTimeTick(3).WithTxnContext(txnCtx).WithLastConfirmed(msgID).WithReplicateHeader(&rh).IntoImmutableMessage(msgID)
-	log.Info("test", zap.Object("msg", immutableCommit))
+	mlog.Info(context.TODO(), "test", mlog.Object("msg", immutableCommit))
 
 	assert.NotZero(t, b.EstimateSize())
 	beginMsg, msgs := b.Messages()
@@ -94,7 +227,7 @@ func TestImmutableTxnBuilder(t *testing.T) {
 	assert.Equal(t, "v1", immutableTxnMsg.ReplicateHeader().VChannel)
 	assert.Equal(t, msgID, immutableTxnMsg.ReplicateHeader().MessageID)
 	assert.Equal(t, msgID, immutableTxnMsg.ReplicateHeader().LastConfirmedMessageID)
-	log.Info("test", zap.Object("msg", immutableTxnMsg))
+	mlog.Info(context.TODO(), "test", mlog.Object("msg", immutableTxnMsg))
 }
 
 func TestReplicateBuilder(t *testing.T) {

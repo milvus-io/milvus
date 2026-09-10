@@ -3,27 +3,36 @@ package planparserv2
 import (
 	"math"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	parser "github.com/milvus-io/milvus/internal/parser/planparserv2/generated"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 var arithExprMap = map[int]planpb.ArithOpType{
-	parser.PlanParserADD: planpb.ArithOpType_Add,
-	parser.PlanParserSUB: planpb.ArithOpType_Sub,
-	parser.PlanParserMUL: planpb.ArithOpType_Mul,
-	parser.PlanParserDIV: planpb.ArithOpType_Div,
-	parser.PlanParserMOD: planpb.ArithOpType_Mod,
+	parser.PlanParserADD:  planpb.ArithOpType_Add,
+	parser.PlanParserSUB:  planpb.ArithOpType_Sub,
+	parser.PlanParserMUL:  planpb.ArithOpType_Mul,
+	parser.PlanParserDIV:  planpb.ArithOpType_Div,
+	parser.PlanParserMOD:  planpb.ArithOpType_Mod,
+	parser.PlanParserBAND: planpb.ArithOpType_BitAnd,
+	parser.PlanParserBOR:  planpb.ArithOpType_BitOr,
+	parser.PlanParserBXOR: planpb.ArithOpType_BitXor,
+	parser.PlanParserSHL:  planpb.ArithOpType_Shl,
+	parser.PlanParserSHR:  planpb.ArithOpType_Shr,
 }
 
 var arithNameMap = map[int]string{
-	parser.PlanParserADD: "add",
-	parser.PlanParserSUB: "subtract",
-	parser.PlanParserMUL: "multiply",
-	parser.PlanParserDIV: "divide",
-	parser.PlanParserMOD: "modulo",
+	parser.PlanParserADD:  "add",
+	parser.PlanParserSUB:  "subtract",
+	parser.PlanParserMUL:  "multiply",
+	parser.PlanParserDIV:  "divide",
+	parser.PlanParserMOD:  "modulo",
+	parser.PlanParserBAND: "bitand",
+	parser.PlanParserBOR:  "bitor",
+	parser.PlanParserBXOR: "bitxor",
+	parser.PlanParserSHL:  "shiftleft",
+	parser.PlanParserSHR:  "shiftright",
 }
 
 var cmpOpMap = map[int]planpb.OpType{
@@ -72,11 +81,11 @@ func Add(a, b *planpb.GenericValue) (*ExprWithType, error) {
 	}
 
 	if IsBool(a) || IsBool(b) {
-		return nil, errors.New("add cannot apply on bool field")
+		return nil, merr.WrapErrQueryPlanMsg("add cannot apply on bool field")
 	}
 
 	if IsString(a) || IsString(b) {
-		return nil, errors.New("add cannot apply on string field")
+		return nil, merr.WrapErrQueryPlanMsg("add cannot apply on string field")
 	}
 
 	aFloat, bFloat, aInt, bInt := IsFloating(a), IsFloating(b), IsInteger(a), IsInteger(b)
@@ -109,11 +118,11 @@ func Subtract(a, b *planpb.GenericValue) (*ExprWithType, error) {
 	}
 
 	if IsBool(a) || IsBool(b) {
-		return nil, errors.New("subtract cannot apply on bool field")
+		return nil, merr.WrapErrQueryPlanMsg("subtract cannot apply on bool field")
 	}
 
 	if IsString(a) || IsString(b) {
-		return nil, errors.New("subtract cannot apply on string field")
+		return nil, merr.WrapErrQueryPlanMsg("subtract cannot apply on string field")
 	}
 
 	aFloat, bFloat, aInt, bInt := IsFloating(a), IsFloating(b), IsInteger(a), IsInteger(b)
@@ -146,11 +155,11 @@ func Multiply(a, b *planpb.GenericValue) (*ExprWithType, error) {
 	}
 
 	if IsBool(a) || IsBool(b) {
-		return nil, errors.New("multiply cannot apply on bool field")
+		return nil, merr.WrapErrQueryPlanMsg("multiply cannot apply on bool field")
 	}
 
 	if IsString(a) || IsString(b) {
-		return nil, errors.New("multiply cannot apply on string field")
+		return nil, merr.WrapErrQueryPlanMsg("multiply cannot apply on string field")
 	}
 
 	aFloat, bFloat, aInt, bInt := IsFloating(a), IsFloating(b), IsInteger(a), IsInteger(b)
@@ -183,21 +192,21 @@ func Divide(a, b *planpb.GenericValue) (*ExprWithType, error) {
 	}
 
 	if IsBool(a) || IsBool(b) {
-		return nil, errors.New("divide cannot apply on bool field")
+		return nil, merr.WrapErrQueryPlanMsg("divide cannot apply on bool field")
 	}
 
 	if IsString(a) || IsString(b) {
-		return nil, errors.New("divide cannot apply on string field")
+		return nil, merr.WrapErrQueryPlanMsg("divide cannot apply on string field")
 	}
 
 	aFloat, bFloat, aInt, bInt := IsFloating(a), IsFloating(b), IsInteger(a), IsInteger(b)
 
 	if bFloat && b.GetFloatVal() == 0 {
-		return nil, errors.New("cannot divide by zero")
+		return nil, merr.WrapErrQueryPlanMsg("cannot divide by zero")
 	}
 
 	if bInt && b.GetInt64Val() == 0 {
-		return nil, errors.New("cannot divide by zero")
+		return nil, merr.WrapErrQueryPlanMsg("cannot divide by zero")
 	}
 
 	if aFloat && bFloat {
@@ -229,12 +238,12 @@ func Modulo(a, b *planpb.GenericValue) (*ExprWithType, error) {
 
 	aInt, bInt := IsInteger(a), IsInteger(b)
 	if !aInt || !bInt {
-		return nil, errors.New("modulo can only apply on integer")
+		return nil, merr.WrapErrQueryPlanMsg("modulo can only apply on integer")
 	}
 
 	// aInt && bInt
 	if b.GetInt64Val() == 0 {
-		return nil, errors.New("cannot modulo by zero")
+		return nil, merr.WrapErrQueryPlanMsg("cannot modulo by zero")
 	}
 
 	ret.dataType = schemapb.DataType_Int64
@@ -288,29 +297,109 @@ func Power(a, b *planpb.GenericValue) *ExprWithType {
 }
 
 func BitAnd(a, b *planpb.GenericValue) (*ExprWithType, error) {
-	return nil, errors.New("todo: unsupported")
+	if !IsInteger(a) || !IsInteger(b) {
+		return nil, merr.WrapErrQueryPlanMsg("bitand can only apply on integer fields")
+	}
+	return &ExprWithType{
+		dataType: schemapb.DataType_Int64,
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_ValueExpr{
+				ValueExpr: &planpb.ValueExpr{
+					Value: NewInt(a.GetInt64Val() & b.GetInt64Val()),
+				},
+			},
+		},
+	}, nil
 }
 
 func BitOr(a, b *planpb.GenericValue) (*ExprWithType, error) {
-	return nil, errors.New("todo: unsupported")
+	if !IsInteger(a) || !IsInteger(b) {
+		return nil, merr.WrapErrQueryPlanMsg("bitor can only apply on integer fields")
+	}
+	return &ExprWithType{
+		dataType: schemapb.DataType_Int64,
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_ValueExpr{
+				ValueExpr: &planpb.ValueExpr{
+					Value: NewInt(a.GetInt64Val() | b.GetInt64Val()),
+				},
+			},
+		},
+	}, nil
 }
 
 func BitXor(a, b *planpb.GenericValue) (*ExprWithType, error) {
-	return nil, errors.New("todo: unsupported")
+	if !IsInteger(a) || !IsInteger(b) {
+		return nil, merr.WrapErrQueryPlanMsg("bitxor can only apply on integer fields")
+	}
+	return &ExprWithType{
+		dataType: schemapb.DataType_Int64,
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_ValueExpr{
+				ValueExpr: &planpb.ValueExpr{
+					Value: NewInt(a.GetInt64Val() ^ b.GetInt64Val()),
+				},
+			},
+		},
+	}, nil
+}
+
+// shiftBitWidth bounds the shift amount. Shifting a 64-bit value by a negative
+// amount or by >= 64 is undefined behavior in both Go and the C++ executor, so
+// the amount is validated here (and again for the field path in
+// combineBinaryArithExpr) to keep constant-folding and execution consistent.
+const shiftBitWidth = 64
+
+func validateShiftAmount(b *planpb.GenericValue) error {
+	amount := b.GetInt64Val()
+	if amount < 0 || amount >= shiftBitWidth {
+		return merr.WrapErrQueryPlanMsg("shift amount must be in range [0, %d), got %d", shiftBitWidth, amount)
+	}
+	return nil
 }
 
 func ShiftLeft(a, b *planpb.GenericValue) (*ExprWithType, error) {
-	return nil, errors.New("todo: unsupported")
+	if !IsInteger(a) || !IsInteger(b) {
+		return nil, merr.WrapErrQueryPlanMsg("shiftleft can only apply on integer fields")
+	}
+	if err := validateShiftAmount(b); err != nil {
+		return nil, err
+	}
+	return &ExprWithType{
+		dataType: schemapb.DataType_Int64,
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_ValueExpr{
+				ValueExpr: &planpb.ValueExpr{
+					Value: NewInt(a.GetInt64Val() << b.GetInt64Val()),
+				},
+			},
+		},
+	}, nil
 }
 
 func ShiftRight(a, b *planpb.GenericValue) (*ExprWithType, error) {
-	return nil, errors.New("todo: unsupported")
+	if !IsInteger(a) || !IsInteger(b) {
+		return nil, merr.WrapErrQueryPlanMsg("shiftright can only apply on integer fields")
+	}
+	if err := validateShiftAmount(b); err != nil {
+		return nil, err
+	}
+	return &ExprWithType{
+		dataType: schemapb.DataType_Int64,
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_ValueExpr{
+				ValueExpr: &planpb.ValueExpr{
+					Value: NewInt(a.GetInt64Val() >> b.GetInt64Val()),
+				},
+			},
+		},
+	}, nil
 }
 
 func And(a, b *planpb.GenericValue) (*ExprWithType, error) {
 	aBool, bBool := IsBool(a), IsBool(b)
 	if !aBool || !bBool {
-		return nil, errors.New("and can only apply on boolean")
+		return nil, merr.WrapErrQueryPlanMsg("and can only apply on boolean")
 	}
 	return &ExprWithType{
 		dataType: schemapb.DataType_Bool,
@@ -327,7 +416,7 @@ func And(a, b *planpb.GenericValue) (*ExprWithType, error) {
 func Or(a, b *planpb.GenericValue) (*ExprWithType, error) {
 	aBool, bBool := IsBool(a), IsBool(b)
 	if !aBool || !bBool {
-		return nil, errors.New("or can only apply on boolean")
+		return nil, merr.WrapErrQueryPlanMsg("or can only apply on boolean")
 	}
 	return &ExprWithType{
 		dataType: schemapb.DataType_Bool,
@@ -341,8 +430,23 @@ func Or(a, b *planpb.GenericValue) (*ExprWithType, error) {
 	}, nil
 }
 
+// BitNot constant-folds ~a for an integer literal. For a non-const (field)
+// operand, VisitUnary rewrites ~x into (x ^ -1) instead, which reuses the
+// BitXor execution path (in two's complement ~x == x ^ -1).
 func BitNot(a *planpb.GenericValue) (*ExprWithType, error) {
-	return nil, errors.New("todo: unsupported")
+	if !IsInteger(a) {
+		return nil, merr.WrapErrQueryPlanMsg("bitnot can only apply on integer fields")
+	}
+	return &ExprWithType{
+		dataType: schemapb.DataType_Int64,
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_ValueExpr{
+				ValueExpr: &planpb.ValueExpr{
+					Value: NewInt(^a.GetInt64Val()),
+				},
+			},
+		},
+	}, nil
 }
 
 func Negative(a *planpb.GenericValue) *ExprWithType {
@@ -375,7 +479,7 @@ func Negative(a *planpb.GenericValue) *ExprWithType {
 
 func Not(a *planpb.GenericValue) (*ExprWithType, error) {
 	if !IsBool(a) {
-		return nil, errors.New("not can only apply on boolean")
+		return nil, merr.WrapErrQueryPlanMsg("not can only apply on boolean")
 	}
 	return &ExprWithType{
 		dataType: schemapb.DataType_Bool,
@@ -426,7 +530,7 @@ func less() relationalFn {
 			return a.GetInt64Val() < b.GetInt64Val(), nil
 		}
 
-		return false, errors.New("incompatible data type")
+		return false, merr.WrapErrQueryPlanMsg("incompatible data type")
 	}
 }
 

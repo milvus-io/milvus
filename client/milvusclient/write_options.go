@@ -26,10 +26,10 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/client/v2/column"
-	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/client/v2/row"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
+	"github.com/milvus-io/milvus/client/v3/column"
+	"github.com/milvus-io/milvus/client/v3/entity"
+	"github.com/milvus-io/milvus/client/v3/internal/typeutil"
+	"github.com/milvus-io/milvus/client/v3/row"
 )
 
 type InsertOption interface {
@@ -51,6 +51,7 @@ var (
 type columnBasedDataOption struct {
 	collName      string
 	partitionName string
+	namespace     *string
 	columns       []column.Column
 	partialUpdate bool
 
@@ -118,7 +119,7 @@ func (opt *columnBasedDataOption) processInsertColumns(colSchema *entity.Schema,
 
 		mNameColumn[col.Name()] = col
 		if col.Type() != field.DataType {
-			return nil, 0, fmt.Errorf("param column %s has type %v but collection field definition is %v", col.Name(), col.Type(), field.DataType)
+			return nil, 0, fmt.Errorf("param column %s has type %s but collection field definition is %s", col.Name(), col.Type().Name(), field.DataType.Name())
 		}
 		if field.DataType == entity.FieldTypeFloatVector || field.DataType == entity.FieldTypeBinaryVector ||
 			field.DataType == entity.FieldTypeFloat16Vector || field.DataType == entity.FieldTypeBFloat16Vector ||
@@ -238,6 +239,12 @@ func (opt *columnBasedDataOption) WithVarcharColumn(colName string, data []strin
 	return opt.WithColumns(column)
 }
 
+// WithTextColumn appends a native TEXT column to the write request.
+func (opt *columnBasedDataOption) WithTextColumn(colName string, data []string) *columnBasedDataOption {
+	column := column.NewColumnText(colName, data)
+	return opt.WithColumns(column)
+}
+
 func (opt *columnBasedDataOption) WithFloatVectorColumn(colName string, dim int, data [][]float32) *columnBasedDataOption {
 	column := column.NewColumnFloatVector(colName, dim, data)
 	return opt.WithColumns(column)
@@ -274,9 +281,10 @@ func (opt *columnBasedDataOption) WithInt8VectorColumn(colName string, dim int, 
 // WithStructArrayColumn appends a struct-array column built from a row-based representation,
 // inferring the per-sub-field array type from the corresponding field in `structSchema`.
 //
-// `rows` is a per-collection-row list; each entry is a map keyed by sub-field name. The value
-// for a scalar sub-field must be `[]<T>` (e.g. []int32, []string); the value for a vector
-// sub-field must be `[][]float32` / `[][]byte` / `[][]int8` matching the vector type.
+// `rows` is a per-collection-row list; a nil entry represents a null StructArray row. Each
+// non-null entry is a map keyed by sub-field name. The value for a scalar sub-field must be
+// `[]<T>` (e.g. []int32, []string); the value for a vector sub-field must be
+// `[][]float32` / `[][]byte` / `[][]int8` matching the vector type.
 //
 // Example:
 //
@@ -313,6 +321,12 @@ func buildStructArrayColumn(colName string, structSchema *entity.StructSchema, r
 		subColumns = append(subColumns, subColumn)
 	}
 	structCol := column.NewColumnStructArray(colName, subColumns)
+	for _, row := range rows {
+		if row == nil {
+			structCol.SetNullable(true)
+			break
+		}
+	}
 	for i, row := range rows {
 		if err := structCol.AppendValue(row); err != nil {
 			return nil, errors.Wrapf(err, "row %d", i)
@@ -376,6 +390,14 @@ func newStructSubColumn(field *entity.Field) (column.Column, error) {
 
 func (opt *columnBasedDataOption) WithPartition(partitionName string) *columnBasedDataOption {
 	opt.partitionName = partitionName
+	return opt
+}
+
+// WithNamespace scopes the write to a collection namespace. Primary keys are
+// still collection-scoped for delete/upsert tombstones, so callers must keep
+// primary keys unique across namespaces in the same collection.
+func (opt *columnBasedDataOption) WithNamespace(namespace string) *columnBasedDataOption {
+	opt.namespace = &namespace
 	return opt
 }
 
@@ -452,6 +474,7 @@ func (opt *columnBasedDataOption) InsertRequest(coll *entity.Collection) (*milvu
 	return &milvuspb.InsertRequest{
 		CollectionName:  opt.collName,
 		PartitionName:   opt.partitionName,
+		Namespace:       opt.namespace,
 		FieldsData:      fieldsData,
 		NumRows:         uint32(rowNum),
 		SchemaTimestamp: coll.UpdateTimestamp,
@@ -477,6 +500,7 @@ func (opt *columnBasedDataOption) UpsertRequest(coll *entity.Collection) (*milvu
 	return &milvuspb.UpsertRequest{
 		CollectionName:  opt.collName,
 		PartitionName:   opt.partitionName,
+		Namespace:       opt.namespace,
 		FieldsData:      fieldsData,
 		NumRows:         uint32(rowNum),
 		SchemaTimestamp: coll.UpdateTimestamp,
@@ -509,6 +533,36 @@ func NewRowBasedInsertOption(collName string, rows ...any) *rowBasedDataOption {
 	}
 }
 
+func (opt *rowBasedDataOption) WithPartition(partitionName string) *rowBasedDataOption {
+	opt.columnBasedDataOption.WithPartition(partitionName)
+	return opt
+}
+
+func (opt *rowBasedDataOption) WithNamespace(namespace string) *rowBasedDataOption {
+	opt.columnBasedDataOption.WithNamespace(namespace)
+	return opt
+}
+
+func (opt *rowBasedDataOption) WithPartialUpdate(partialUpdate bool) *rowBasedDataOption {
+	opt.columnBasedDataOption.WithPartialUpdate(partialUpdate)
+	return opt
+}
+
+func (opt *rowBasedDataOption) WithArrayAppend(fieldName string) *rowBasedDataOption {
+	opt.columnBasedDataOption.WithArrayAppend(fieldName)
+	return opt
+}
+
+func (opt *rowBasedDataOption) WithArrayRemove(fieldName string) *rowBasedDataOption {
+	opt.columnBasedDataOption.WithArrayRemove(fieldName)
+	return opt
+}
+
+func (opt *rowBasedDataOption) WithFieldPartialOp(fieldName string, op schemapb.FieldPartialUpdateOp_OpType) *rowBasedDataOption {
+	opt.columnBasedDataOption.WithFieldPartialOp(fieldName, op)
+	return opt
+}
+
 func (opt *rowBasedDataOption) InsertRequest(coll *entity.Collection) (*milvuspb.InsertRequest, error) {
 	columns, err := row.AnyToColumns(opt.rows, opt.keepAutoIDPk, coll.Schema)
 	if err != nil {
@@ -522,6 +576,7 @@ func (opt *rowBasedDataOption) InsertRequest(coll *entity.Collection) (*milvuspb
 	return &milvuspb.InsertRequest{
 		CollectionName: opt.collName,
 		PartitionName:  opt.partitionName,
+		Namespace:      opt.namespace,
 		FieldsData:     fieldsData,
 		NumRows:        uint32(rowNum),
 	}, nil
@@ -545,6 +600,7 @@ func (opt *rowBasedDataOption) UpsertRequest(coll *entity.Collection) (*milvuspb
 	return &milvuspb.UpsertRequest{
 		CollectionName: opt.collName,
 		PartitionName:  opt.partitionName,
+		Namespace:      opt.namespace,
 		FieldsData:     fieldsData,
 		NumRows:        uint32(rowNum),
 		PartialUpdate:  partialUpdate,
@@ -580,25 +636,47 @@ func (opt *rowBasedDataOption) WithKeepAutoIDPk(keepPk bool) *rowBasedDataOption
 }
 
 type DeleteOption interface {
-	Request() *milvuspb.DeleteRequest
+	Request() (*milvuspb.DeleteRequest, error)
 }
 
 type deleteOption struct {
 	collectionName string
 	partitionName  string
+	namespace      *string
 	expr           string
+	templateParams map[string]any
 }
 
-func (opt *deleteOption) Request() *milvuspb.DeleteRequest {
-	return &milvuspb.DeleteRequest{
+func (opt *deleteOption) Request() (*milvuspb.DeleteRequest, error) {
+	req := &milvuspb.DeleteRequest{
 		CollectionName: opt.collectionName,
 		PartitionName:  opt.partitionName,
+		Namespace:      opt.namespace,
 		Expr:           opt.expr,
 	}
+	req.ExprTemplateValues = make(map[string]*schemapb.TemplateValue, len(opt.templateParams))
+	for key, value := range opt.templateParams {
+		tmplVal, err := any2TmplValue(value)
+		if err != nil {
+			return req, errors.Wrapf(err, "invalid delete expression template parameter %q", key)
+		}
+		req.ExprTemplateValues[key] = tmplVal
+	}
+	return req, nil
 }
 
 func (opt *deleteOption) WithExpr(expr string) *deleteOption {
 	opt.expr = expr
+	return opt
+}
+
+// WithTemplateParam binds an expression-template value for delete. Slice and
+// blob values are not copied; do not mutate them until Client.Delete returns.
+func (opt *deleteOption) WithTemplateParam(key string, val any) *deleteOption {
+	if opt.templateParams == nil {
+		opt.templateParams = make(map[string]any)
+	}
+	opt.templateParams[key] = val
 	return opt
 }
 
@@ -617,6 +695,17 @@ func (opt *deleteOption) WithPartition(partitionName string) *deleteOption {
 	return opt
 }
 
+// WithNamespace scopes the delete request to a collection namespace. Delete
+// tombstones are primary-key based, so callers must keep primary keys unique
+// across namespaces in the same collection.
+func (opt *deleteOption) WithNamespace(namespace string) *deleteOption {
+	opt.namespace = &namespace
+	return opt
+}
+
 func NewDeleteOption(collectionName string) *deleteOption {
-	return &deleteOption{collectionName: collectionName}
+	return &deleteOption{
+		collectionName: collectionName,
+		templateParams: make(map[string]any),
+	}
 }

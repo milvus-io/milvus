@@ -17,7 +17,9 @@
 #include "segcore/storagev1translator/TextMatchIndexTranslator.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <functional>
+#include <optional>
 #include <string_view>
 #include <type_traits>
 #include <utility>
@@ -27,9 +29,24 @@
 #include "glog/logging.h"
 #include "index/TextMatchIndex.h"
 #include "log/Log.h"
+#include "segcore/CacheMetricAttribution.h"
 #include "segcore/Utils.h"
 
 namespace milvus::segcore::storagev1translator {
+
+namespace {
+
+int64_t
+EstimateValidityBitmapBytes(int64_t num_rows) {
+    constexpr int64_t kWordBytes = sizeof(uint64_t);
+    constexpr int64_t kBitsPerWord = kWordBytes * 8;
+    if (num_rows <= 0) {
+        return 0;
+    }
+    return ((num_rows - 1) / kBitsPerWord + 1) * kWordBytes;
+}
+
+}  // namespace
 
 TextMatchIndexTranslator::TextMatchIndexTranslator(
     TextMatchIndexLoadInfo load_info,
@@ -48,7 +65,9 @@ TextMatchIndexTranslator::TextMatchIndexTranslator(
             milvus::segcore::getCacheWarmupPolicy(load_info_.warmup_policy,
                                                   /* is_vector */ false,
                                                   /* is_index */ true),
-            /* support_eviction */ true) {
+            /* support_eviction */ true,
+            std::nullopt,
+            milvus::segcore::MetricAttributionFromShard(load_info_.shard)) {
 }
 
 size_t
@@ -66,13 +85,16 @@ std::pair<milvus::cachinglayer::ResourceUsage,
 TextMatchIndexTranslator::estimated_byte_size_of_cell(
     milvus::cachinglayer::cid_t) const {
     // ignore the cid checking, because there is only one cell
+    auto bitmap_bytes = EstimateValidityBitmapBytes(load_info_.num_rows);
     if (load_info_.enable_mmap) {
-        return {{0, load_info_.index_size}, {load_info_.index_size, 0}};
+        return {{bitmap_bytes, load_info_.index_size},
+                {load_info_.index_size, 0}};
     } else {
         // The reason the maximum disk usage is not zero is that the text match index
         // is first written to the disk, then loaded into memory. Only after that are
         // the disk files deleted.
-        return {{load_info_.index_size, 0}, {0, load_info_.index_size}};
+        return {{load_info_.index_size + bitmap_bytes, 0},
+                {0, load_info_.index_size}};
     }
 }
 
@@ -118,7 +140,8 @@ TextMatchIndexTranslator::get_cells(
              load_info_.segment_id);
 
     if (load_info_.enable_mmap) {
-        index->SetCellSize({0, index->ByteSize()});
+        auto bitmap_bytes = index->ValidityBitmapByteSize();
+        index->SetCellSize({bitmap_bytes, index->ByteSize() - bitmap_bytes});
     } else {
         index->SetCellSize({index->ByteSize(), 0});
     }

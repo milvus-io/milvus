@@ -19,9 +19,7 @@ package datacoord
 import (
 	"context"
 
-	"go.uber.org/zap"
-
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
@@ -39,29 +37,49 @@ func (c *DDLCallbacks) batchUpdateManifestV2AckCallback(ctx context.Context, res
 		hasV2 := cg != nil && len(cg.GetColumnGroups()) > 0
 		switch {
 		case hasV2 && hasV3:
-			log.Ctx(ctx).Warn("batch update manifest item has both V2 and V3 payload; skipping",
-				zap.Int64("segmentID", segID))
+			mlog.Warn(ctx, "batch update manifest item has both V2 and V3 payload; skipping",
+				mlog.FieldSegmentID(segID))
 			continue
 		case hasV2:
 			operators = append(operators, UpdateSegmentColumnGroupsOperator(segID, cg.GetColumnGroups()))
 			v2Count++
 		case hasV3:
+			// TODO(segment-manifest-commit): a batch broadcast carries up to 512
+			// items and this V3 payload is a pure manifest-version bump (no
+			// object-storage I/O). We deliberately keep it as an UpdateManifestVersion
+			// operator so the whole batch — V2 column groups and V3 version bumps —
+			// commits in a single atomic UpdateSegmentsInfo (one AlterSegments).
+			//
+			// Routing each item through meta.CommitSegmentManifest instead would take
+			// the per-segment manifest lock plus segMu twice per item and issue one
+			// catalog.Update per item, and a mid-loop failure would return before the
+			// accumulated V2 operators are applied — i.e. the batch would no longer be
+			// applied as a unit. The tension is that CommitSegmentManifest's per-segment
+			// serialization is what protects against concurrent writers
+			// (stats/index/GC/compaction) racing the manifest pointer; skipping it here
+			// trades that protection for batch atomicity. meta.CommitSegmentManifests now
+			// resolves that trade-off — it takes every segment's manifest lock as one
+			// atomic operation yet still commits in a single UpdateSegmentsInfo (L0
+			// compaction already uses it) — and because this V3 payload is an I/O-free
+			// pointer adoption it maps to a ManifestMutationNoop commit. Routing this
+			// callback (and the external collection refresh path) through it is the
+			// remaining follow-up.
 			operators = append(operators, UpdateManifestVersion(segID, item.GetManifestVersion()))
 			v3Count++
 		default:
-			log.Ctx(ctx).Warn("batch update manifest item has no payload; skipping",
-				zap.Int64("segmentID", segID))
+			mlog.Warn(ctx, "batch update manifest item has no payload; skipping",
+				mlog.FieldSegmentID(segID))
 		}
 	}
 	if len(operators) > 0 {
 		if err := c.meta.UpdateSegmentsInfo(ctx, operators...); err != nil {
-			log.Ctx(ctx).Warn("batch update manifest failed", zap.Error(err))
+			mlog.Warn(ctx, "batch update manifest failed", mlog.Err(err))
 			return err
 		}
 	}
-	log.Ctx(ctx).Info("batch update manifest handled",
-		zap.Int("itemCount", len(body.GetItems())),
-		zap.Int("v3Count", v3Count),
-		zap.Int("v2Count", v2Count))
+	mlog.Info(ctx, "batch update manifest handled",
+		mlog.Int("itemCount", len(body.GetItems())),
+		mlog.Int("v3Count", v3Count),
+		mlog.Int("v2Count", v2Count))
 	return nil
 }

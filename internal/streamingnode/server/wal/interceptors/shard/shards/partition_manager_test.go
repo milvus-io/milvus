@@ -17,7 +17,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/stats"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -56,13 +56,13 @@ func TestPartitionManager(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	w := mock_wal.NewMockWAL(t)
-	w.EXPECT().Available().RunAndReturn(func() <-chan struct{} {
+	w.EXPECT().Unavailable().RunAndReturn(func() <-chan struct{} {
 		return make(chan struct{})
 	}).Maybe()
 	f := syncutil.NewFuture[wal.WAL]()
 	f.Set(w)
 	m := newPartitionSegmentManager(ctx,
-		log.With(),
+		mlog.With(),
 		f,
 		types.PChannelInfo{
 			Name: "pchannel",
@@ -141,8 +141,22 @@ func TestPartitionManager(t *testing.T) {
 		},
 	}
 
-	result, _ = m.AssignSegment(req)
+	result, err = m.AssignSegment(req)
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
 	result.Ack()
+
+	// Each existing segment accepts the allocation that crosses its soft
+	// assignment target, then rejects later allocations.
+	result, err = m.AssignSegment(req)
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	result.Ack()
+	result, err = m.AssignSegment(req)
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	result.Ack()
+
 	_, err = m.AssignSegment(req)
 	assert.ErrorIs(t, err, ErrWaitForNewSegment)
 

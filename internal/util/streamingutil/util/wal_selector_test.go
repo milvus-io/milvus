@@ -5,6 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -84,4 +85,21 @@ func TestWoodpeckerLocalStorageInClusterMode(t *testing.T) {
 		assert.Equal(t, message.WALNameWoodpecker, mustSelectWALName(true, walTypeDefault, walEnable{false, false, false, true}))
 		assert.Equal(t, message.WALNameWoodpecker, mustSelectWALName(true, message.WALNameWoodpecker.String(), walEnable{true, true, true, true}))
 	})
+}
+
+func TestInitAndSelectWALNameDoesNotWriteRuntimeOverlay(t *testing.T) {
+	paramtable.Init()
+
+	walName := InitAndSelectWALName()
+
+	assert.NotEqual(t, message.WALNameUnknown, walName)
+	assert.Equal(t, walName, message.GetDefaultWALName())
+
+	// mq.type must keep being served from its original config source. Writing the
+	// resolved name into the runtime overlay would permanently shadow the etcd
+	// source and hide a later WAL switch from every reader (issue #51497).
+	mqTypeKey := paramtable.Get().MQCfg.Type.Key
+	source, _, err := paramtable.GetBaseTable().Manager().GetConfig(mqTypeKey)
+	assert.NoError(t, err)
+	assert.NotEqual(t, config.RuntimeSource, source)
 }

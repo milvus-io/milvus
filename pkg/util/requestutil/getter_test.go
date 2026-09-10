@@ -19,11 +19,18 @@
 package requestutil
 
 import (
+	"context"
 	"reflect"
 	"testing"
 
+	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestGetCollectionNameFromRequest(t *testing.T) {
@@ -489,6 +496,48 @@ func TestGetStatusFromResponse(t *testing.T) {
 			want1: true,
 		},
 		{
+			name: "alter collection schema response",
+			args: args{
+				resp: &milvuspb.AlterCollectionSchemaResponse{
+					AlterStatus: &commonpb.Status{
+						ErrorCode: commonpb.ErrorCode_Success,
+					},
+				},
+			},
+			want: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+			want1: true,
+		},
+		{
+			name: "nil common status",
+			args: args{
+				resp: (*commonpb.Status)(nil),
+			},
+			want1: false,
+		},
+		{
+			name: "response with nil status",
+			args: args{
+				resp: &milvuspb.DescribeCollectionResponse{},
+			},
+			want1: false,
+		},
+		{
+			name: "alter response with nil status",
+			args: args{
+				resp: &milvuspb.AlterCollectionSchemaResponse{},
+			},
+			want1: false,
+		},
+		{
+			name: "typed nil alter response",
+			args: args{
+				resp: (*milvuspb.AlterCollectionSchemaResponse)(nil),
+			},
+			want1: false,
+		},
+		{
 			name: "invalid response",
 			args: args{
 				resp: "foo",
@@ -505,6 +554,118 @@ func TestGetStatusFromResponse(t *testing.T) {
 			if got1 != tt.want1 {
 				t.Errorf("GetStatusFromResponse() got1 = %v, want %v", got1, tt.want1)
 			}
+		})
+	}
+}
+
+func TestParseMetricLabel(t *testing.T) {
+	assertLabels := func(wantStatus, wantCause string, resp any, err error) {
+		t.Helper()
+		status, cause := ParseMetricLabel(resp, err)
+		assert.Equal(t, wantStatus, status)
+		assert.Equal(t, wantCause, cause)
+	}
+
+	// transport / interceptor error -> rejected by the system
+	assertLabels(metrics.RejectedLabel, metrics.CauseSystem,
+		&commonpb.Status{}, errors.New("transport failed"))
+
+	// success
+	assertLabels(metrics.SuccessLabel, metrics.CauseNA, &commonpb.Status{}, nil)
+
+	// retryable hard failure -> retry (retryability beats classification)
+	assertLabels(metrics.RetryLabel, metrics.CauseNA,
+		merr.Status(merr.ErrServiceRateLimit), nil)
+
+	// hard failure caused by Milvus itself
+	assertLabels(metrics.FailLabel, metrics.CauseSystem,
+		merr.Status(merr.ErrSegcore), nil)
+
+	// hard failure caused by the request
+	inputErr := merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("bad param"))
+	assertLabels(metrics.FailLabel, metrics.CauseUser, merr.Status(inputErr), nil)
+
+	// response that itself implements GetStatus
+	assertLabels(metrics.FailLabel, metrics.CauseUser,
+		&milvuspb.BoolResponse{Status: merr.Status(inputErr)}, nil)
+
+	// AlterCollectionSchemaResponse reports the RPC status through AlterStatus.
+	assertLabels(metrics.FailLabel, metrics.CauseUser,
+		&milvuspb.AlterCollectionSchemaResponse{AlterStatus: merr.Status(inputErr)}, nil)
+	alterSys := merr.Status(merr.ErrSegcore)
+	assertLabels(metrics.FailLabel, metrics.CauseSystem,
+		&milvuspb.AlterCollectionSchemaResponse{AlterStatus: alterSys}, merr.Error(alterSys))
+
+	// merr input error through the err path (REST v2 handlers abort with merr
+	// directly; no GRPCStatus, so the gRPC switch alone would misbucket it as a
+	// system rejection)
+	assertLabels(metrics.RejectedLabel, metrics.CauseUser, &commonpb.Status{},
+		merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("bad param")))
+
+	// merr system error through the err path
+	assertLabels(metrics.RejectedLabel, metrics.CauseSystem,
+		&commonpb.Status{}, merr.WrapErrServiceInternalMsg("boom"))
+
+	// client cancellation is neither party's fault, but it stays a rejection so
+	// that a pre-existing status="rejected" query keeps counting it
+	assertLabels(metrics.RejectedLabel, metrics.CauseCancel, &commonpb.Status{}, context.Canceled)
+	assertLabels(metrics.RejectedLabel, metrics.CauseCancel,
+		&commonpb.Status{}, errors.Wrap(context.Canceled, "rpc aborted"))
+
+	// REST v2 wrapper shape: the response carries the failed status AND the
+	// wrapper reconstructs err from it. Processed failures must classify by
+	// the status ("fail"), not be misrouted into the "rejected" bucket.
+	restSys := merr.Status(merr.ErrSegcore)
+	assertLabels(metrics.FailLabel, metrics.CauseSystem, restSys, merr.Error(restSys))
+	restInput := merr.Status(merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("bad param")))
+	assertLabels(metrics.FailLabel, metrics.CauseUser, restInput, merr.Error(restInput))
+	// Cancellation surfaced through the response status is still a "fail", as it
+	// was before the cause dimension existed; cause is what excludes it.
+	restCancel := merr.Status(context.Canceled)
+	assertLabels(metrics.FailLabel, metrics.CauseCancel, restCancel, merr.Error(restCancel))
+}
+
+// The status label is a public monitoring contract: dashboards and alert rules
+// written against status="fail" / status="rejected" predate the cause dimension
+// and must keep working. Splitting the responsible party into new status values
+// (fail_input, rejected_system, ...) silently zeroes those queries, so pin the
+// domain here: anything finer belongs on the orthogonal cause label.
+func TestParseMetricLabelStatusDomainIsStable(t *testing.T) {
+	legacyStatus := typeutil.NewSet(
+		metrics.SuccessLabel,
+		metrics.FailLabel,
+		metrics.RejectedLabel,
+		metrics.RetryLabel,
+	)
+	knownCause := typeutil.NewSet(
+		metrics.CauseUser,
+		metrics.CauseSystem,
+		metrics.CauseCancel,
+		metrics.CauseNA,
+	)
+
+	inputErr := merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("bad param"))
+	cases := []struct {
+		name string
+		resp any
+		err  error
+	}{
+		{"success", &commonpb.Status{}, nil},
+		{"transport error", &commonpb.Status{}, errors.New("transport failed")},
+		{"rate limited", merr.Status(merr.ErrServiceRateLimit), nil},
+		{"system failure", merr.Status(merr.ErrSegcore), nil},
+		{"input failure", merr.Status(inputErr), nil},
+		{"input rejection", &commonpb.Status{}, inputErr},
+		{"canceled at interceptor", &commonpb.Status{}, context.Canceled},
+		{"canceled in response", merr.Status(context.Canceled), nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			status, cause := ParseMetricLabel(tc.resp, tc.err)
+			assert.Truef(t, legacyStatus.Contain(status),
+				"status %q is outside the pre-2.6.19 domain %v; put the distinction on the cause label instead",
+				status, legacyStatus.Collect())
+			assert.Truef(t, knownCause.Contain(cause), "unknown cause %q", cause)
 		})
 	}
 }

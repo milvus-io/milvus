@@ -21,10 +21,9 @@ import (
 	"io"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
@@ -116,9 +115,9 @@ func (r *retryableReader) objectSize() (int64, bool) {
 	}
 	size, err := r.sizeFunc(r.ctx, r.path)
 	if err != nil {
-		log.Ctx(r.ctx).Warn("retryable reader failed to get object size",
-			zap.String("path", r.path),
-			zap.Error(err),
+		mlog.Warn(r.ctx, "retryable reader failed to get object size",
+			mlog.String("path", r.path),
+			mlog.Err(err),
 		)
 		return 0, false
 	}
@@ -141,6 +140,44 @@ func (r *retryableReader) reopenAtOffset() error {
 	}
 	r.FileReader = reader
 	return nil
+}
+
+// ReadAt maps a storage fault to a typed IO error before it leaves the reader.
+//
+// The embedded FileReader would surface the provider's raw SDK error, which
+// carries no merr code, so IsTypedIOErr cannot recognize it and a transient fault
+// (503 SlowDown, connection reset) is classified as corrupt input by
+// WrapDecodeErr rather than as a retriable system error. Arrow reads a parquet
+// footer through ReadAt/Seek, not Read, so this is the only place that
+// classification can be made correct for the file-open path.
+//
+// Retrying ReadAt itself is deliberately not added here: that gap predates this
+// reader, and widening the retry surface belongs with the reopen bookkeeping
+// rather than with an error-classification fix.
+func (r *retryableReader) ReadAt(p []byte, off int64) (int, error) {
+	if r.FileReader == nil {
+		return 0, storage.ToMilvusIoError(r.path, io.ErrClosedPipe)
+	}
+	n, err := r.FileReader.ReadAt(p, off)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return n, storage.ToMilvusIoError(r.path, err)
+	}
+	return n, err
+}
+
+// Seek maps a storage fault to a typed IO error, for the same reason as ReadAt.
+// The reader's own offset bookkeeping is intentionally left untouched: it tracks
+// sequential Read progress for reopen, and seeks issued by a random-access
+// consumer such as Arrow must not disturb it.
+func (r *retryableReader) Seek(offset int64, whence int) (int64, error) {
+	if r.FileReader == nil {
+		return 0, storage.ToMilvusIoError(r.path, io.ErrClosedPipe)
+	}
+	pos, err := r.FileReader.Seek(offset, whence)
+	if err != nil {
+		return pos, storage.ToMilvusIoError(r.path, err)
+	}
+	return pos, nil
 }
 
 // Read reads from the underlying FileReader and retries on errors.
@@ -170,10 +207,10 @@ func (r *retryableReader) Read(p []byte) (int, error) {
 		if errors.Is(err, io.EOF) {
 			if size, ok := r.objectSize(); ok && r.offset < size && r.reopen != nil {
 				err = storage.ToMilvusIoError(r.path, io.ErrUnexpectedEOF)
-				log.Ctx(r.ctx).Warn("retryable reader got premature EOF",
-					zap.String("path", r.path),
-					zap.Int64("offset", r.offset),
-					zap.Int64("size", size),
+				mlog.Warn(r.ctx, "retryable reader got premature EOF",
+					mlog.String("path", r.path),
+					mlog.Int64("offset", r.offset),
+					mlog.Int64("size", size),
 				)
 				if reopenErr := r.reopenAtOffset(); reopenErr != nil {
 					return !merr.IsNonRetryableErr(reopenErr), reopenErr
@@ -186,9 +223,9 @@ func (r *retryableReader) Read(p []byte) (int, error) {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return false, err
 		}
-		log.Ctx(r.ctx).Warn("retryable reader read failed",
-			zap.String("path", r.path),
-			zap.Error(err),
+		mlog.Warn(r.ctx, "retryable reader read failed",
+			mlog.String("path", r.path),
+			mlog.Err(err),
 		)
 		err = storage.ToMilvusIoError(r.path, err)
 		// Denylist check - don't retry permanent/validation errors

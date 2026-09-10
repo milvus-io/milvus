@@ -17,12 +17,11 @@
 package paramtable
 
 import (
+	"context"
 	"fmt"
 	"math"
 
-	"go.uber.org/zap"
-
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
 const (
@@ -130,6 +129,7 @@ type quotaConfig struct {
 	LargeMaxQueryResultWindow      ParamItem `refreshable:"true"`
 	MaxOutputSize                  ParamItem `refreshable:"true"`
 	MaxInsertSize                  ParamItem `refreshable:"true"`
+	MaxDeleteSize                  ParamItem `refreshable:"true"`
 	MaxResourceGroupNumOfQueryNode ParamItem `refreshable:"true"`
 	MaxGroupSize                   ParamItem `refreshable:"true"`
 
@@ -1503,11 +1503,29 @@ Check https://milvus.io/docs/limitations.md for more details.`,
 	p.MaxInsertSize = ParamItem{
 		Key:          "quotaAndLimits.limits.maxInsertSize",
 		Version:      "2.4.1",
-		DefaultValue: "-1", // -1 means no limit, the unit is byte
-		Doc:          `maximum size of a single insert request, in bytes, -1 means no limit`,
-		Export:       true,
+		DefaultValue: "67108864", // 64 MiB, the unit is byte
+		Doc: `maximum protobuf size of the Proxy-side materialized insert message, in bytes,
+for both insert and upsert; -1 means no limit. The check runs after Proxy field
+materialization, including generated fields, row IDs, timestamps, namespace data,
+and partial-upsert query reconstruction. It does not include later streaming-message
+properties, encryption expansion, StreamingNode-generated function fields, or the
+broker envelope.`,
+		Export: true,
 	}
 	p.MaxInsertSize.Init(base.mgr)
+
+	p.MaxDeleteSize = ParamItem{
+		Key:          "quotaAndLimits.limits.maxDeleteSize",
+		Version:      "3.0.2",
+		DefaultValue: "16777216", // 16 MiB, the unit is byte
+		Doc: `maximum protobuf size of each Proxy-side materialized delete message, in bytes,
+for both delete and upsert tombstones; -1 means no limit. The check runs after
+primary keys and timestamps are materialized and routed to a vchannel. It does
+not include later streaming-message properties, encryption expansion, chunk
+markers, or the broker envelope.`,
+		Export: true,
+	}
+	p.MaxDeleteSize.Init(base.mgr)
 
 	p.MaxResourceGroupNumOfQueryNode = ParamItem{
 		Key:          "quotaAndLimits.limits.maxResourceGroupNumOfQueryNode",
@@ -1610,7 +1628,7 @@ When memory usage < memoryLowWaterLevel, no action.`,
 			level := getAsFloat(v)
 			// (0, 1]
 			if level <= 0 || level > 1 {
-				// log.Warn("MemoryLowWaterLevel must in the range of `(0, 1]`, use default value", zap.Float64("low", p.DataNodeMemoryHighWaterLevel), zap.Float64("default", defaultHighWaterLevel))
+				// mlog.Warn(context.TODO(), "MemoryLowWaterLevel must in the range of `(0, 1]`, use default value", mlog.Float64("low", p.DataNodeMemoryHighWaterLevel), mlog.Float64("default", defaultHighWaterLevel))
 				return highWaterLevel
 			}
 			if !p.checkMinMaxLegal(p.DataNodeMemoryLowWaterLevel.GetAsFloat(), getAsFloat(v)) {
@@ -1634,7 +1652,7 @@ When memory usage < memoryLowWaterLevel, no action.`,
 			level := getAsFloat(v)
 			// (0, 1]
 			if level <= 0 || level > 1 {
-				// log.Warn("MemoryLowWaterLevel must in the range of `(0, 1]`, use default value", zap.Float64("low", p.QueryNodeMemoryLowWaterLevel), zap.Float64("default", defaultLowWaterLevel))
+				// mlog.Warn(context.TODO(), "MemoryLowWaterLevel must in the range of `(0, 1]`, use default value", mlog.Float64("low", p.QueryNodeMemoryLowWaterLevel), mlog.Float64("default", defaultLowWaterLevel))
 				return lowWaterLevel
 			}
 			return v
@@ -1655,7 +1673,7 @@ When memory usage < memoryLowWaterLevel, no action.`,
 			level := getAsFloat(v)
 			// (0, 1]
 			if level <= 0 || level > 1 {
-				// log.Warn("MemoryLowWaterLevel must in the range of `(0, 1]`, use default value", zap.Float64("low", p.QueryNodeMemoryHighWaterLevel), zap.Float64("default", defaultHighWaterLevel))
+				// mlog.Warn(context.TODO(), "MemoryLowWaterLevel must in the range of `(0, 1]`, use default value", mlog.Float64("low", p.QueryNodeMemoryHighWaterLevel), mlog.Float64("default", defaultHighWaterLevel))
 				return highWaterLevel
 			}
 			if !p.checkMinMaxLegal(p.QueryNodeMemoryLowWaterLevel.GetAsFloat(), getAsFloat(v)) {
@@ -1971,8 +1989,8 @@ func megaBytes2Bytes(f float64) float64 {
 
 func (p *quotaConfig) checkMinMaxLegal(min, max float64) bool {
 	if min > max {
-		log.Warn("init QuotaConfig failed, max/high must be greater than or equal to min/low, use default values",
-			zap.String("msg", fmt.Sprintf("min: %v, max: %v, defaultMin: %v, defaultMax: %v", min, max, defaultMin, defaultMax)))
+		mlog.Warn(context.TODO(), "init QuotaConfig failed, max/high must be greater than or equal to min/low, use default values",
+			mlog.String("msg", fmt.Sprintf("min: %v, max: %v, defaultMin: %v, defaultMax: %v", min, max, defaultMin, defaultMax)))
 		return false
 	}
 	return true

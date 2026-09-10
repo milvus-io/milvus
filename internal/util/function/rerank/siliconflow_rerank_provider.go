@@ -20,7 +20,6 @@ package rerank
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 	"strings"
 
@@ -28,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/credentials"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/function/models/siliconflow"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type siliconflowProvider struct {
@@ -36,6 +36,7 @@ type siliconflowProvider struct {
 	url               string
 	modelName         string
 	params            map[string]any
+	timeoutMs         int64
 }
 
 func newSiliconflowProvider(params []*commonpb.KeyValuePair, conf map[string]string, credentials *credentials.Credentials, extraInfo *models.ModelExtraInfo) (ModelProvider, error) {
@@ -67,21 +68,23 @@ func newSiliconflowProvider(params []*commonpb.KeyValuePair, conf map[string]str
 		case models.MaxChunksPerDocParamKey:
 			maxChunksPerDoc, err := strconv.Atoi(param.Value)
 			if err != nil {
-				return nil, fmt.Errorf("[%s param's value: %s] is not a valid number", models.MaxChunksPerDocParamKey, param.Value)
+				return nil, merr.WrapErrParameterInvalidMsg("[%s param's value: %s] is not a valid number", models.MaxChunksPerDocParamKey, param.Value)
 			}
 			rankParams[models.MaxChunksPerDocParamKey] = maxChunksPerDoc
 		case models.OverlapTokensParamKey:
 			overlapTokens, err := strconv.Atoi(param.Value)
 			if err != nil {
-				return nil, fmt.Errorf("[%s param's value: %s] is not a valid number", models.OverlapTokensParamKey, param.Value)
+				return nil, merr.WrapErrParameterInvalidMsg("[%s param's value: %s] is not a valid number", models.OverlapTokensParamKey, param.Value)
 			}
 			rankParams[models.OverlapTokensParamKey] = overlapTokens
 		default:
 		}
 	}
 	if modelName == "" {
-		return nil, fmt.Errorf("siliconflow rerank model name is required")
+		return nil, merr.WrapErrParameterMissingMsg("siliconflow rerank model name is required")
 	}
+
+	timeoutMs := models.ResolveTimeoutMs(params)
 
 	provider := siliconflowProvider{
 		baseProvider:      baseProvider{batchSize: maxBatch},
@@ -89,12 +92,13 @@ func newSiliconflowProvider(params []*commonpb.KeyValuePair, conf map[string]str
 		url:               url,
 		modelName:         modelName,
 		params:            rankParams,
+		timeoutMs:         timeoutMs,
 	}
 	return &provider, nil
 }
 
 func (provider *siliconflowProvider) Rerank(ctx context.Context, query string, docs []string) ([]float32, error) {
-	rerankResp, err := provider.siliconflowClient.Rerank(provider.url, provider.modelName, query, docs, nil, 30)
+	rerankResp, err := provider.siliconflowClient.Rerank(provider.url, provider.modelName, query, docs, nil, provider.timeoutMs)
 	if err != nil {
 		return nil, err
 	}

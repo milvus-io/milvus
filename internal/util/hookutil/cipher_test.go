@@ -157,7 +157,7 @@ func (s *CipherSuite) TestTidyDBCipherPropertiesError() {
 	}
 	_, err := TidyDBCipherProperties(1, dbProperties)
 	s.Error(err)
-	s.Equal(ErrCipherPluginMissing, err)
+	s.Equal(errCipherPluginMissing, err)
 }
 
 func (s *CipherSuite) TestTidyDBCipherPropertiesInvalidValue() {
@@ -497,7 +497,7 @@ func (s *CipherSuite) TestBackupEZ() {
 	storeCipher(nil)
 	_, err := BackupEZ(123)
 	s.Error(err)
-	s.Equal(ErrCipherPluginMissing, err)
+	s.Equal(errCipherPluginMissing, err)
 
 	InitTestCipher()
 	_, err = BackupEZ(123)
@@ -513,7 +513,7 @@ func (s *CipherSuite) TestBackupEZKFromDBProperties() {
 	}
 	_, err := BackupEZKFromDBProperties(props)
 	s.Error(err)
-	s.Equal(ErrCipherPluginMissing, err)
+	s.Equal(errCipherPluginMissing, err)
 
 	props = []*commonpb.KeyValuePair{
 		{Key: common.EncryptionRootKeyKey, Value: "abc-key"},

@@ -6,7 +6,6 @@ import (
 
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel/trace"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -15,8 +14,9 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
+	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -24,16 +24,27 @@ import (
 type writeNode struct {
 	BaseNode
 
-	channelName string
-	wbManager   writebuffer.BufferManager
-	updater     util.StatsUpdater
-	metacache   metacache.MetaCache
-	pkField     *schemapb.FieldSchema
+	channelName  string
+	collectionID int64
+	wbManager    writebuffer.BufferManager
+	updater      util.StatsUpdater
+	metacache    metacache.MetaCache
+	pkField      *schemapb.FieldSchema
+
+	functionStore *function.FunctionRunnerLocalStore
 }
 
 // Name returns node name, implementing flowgraph.Node
 func (wNode *writeNode) Name() string {
 	return fmt.Sprintf("writeNode-%s", wNode.channelName)
+}
+
+func (wNode *writeNode) Free() {
+	wNode.releaseFunctionRunners()
+}
+
+func (wNode *writeNode) releaseFunctionRunners() {
+	wNode.functionStore.Close()
 }
 
 func (wNode *writeNode) Operate(in []Msg) []Msg {
@@ -80,24 +91,39 @@ func (wNode *writeNode) Operate(in []Msg) []Msg {
 	}()
 
 	start, end := fgMsg.StartPositions[0], fgMsg.EndPositions[0]
-	currentSchema := wNode.metacache.GetSchema(fgMsg.TimeTick())
-	schemaVersion := currentSchema.GetVersion()
+	ctx := fgMsg.TraceCtx()
+	// The schema version is only consumed while buffering insert data.
+	schemaVersion := int32(0)
 
-	if fgMsg.InsertData == nil {
-		insertData := make([]*writebuffer.InsertData, 0)
-		if len(fgMsg.InsertMessages) > 0 {
-			var err error
-			if insertData, err = writebuffer.PrepareInsert(currentSchema, wNode.pkField, fgMsg.InsertMessages); err != nil {
-				log.Error("failed to prepare data", zap.Error(err))
+	insertData := make([]*writebuffer.InsertData, 0)
+	if len(fgMsg.InsertMessages) > 0 {
+		currentSchema := wNode.metacache.GetSchema(fgMsg.TimeTick())
+		schemaVersion = currentSchema.GetVersion()
+		functionOutputFieldIDs, err := wNode.functionStore.OutputFieldIDs(currentSchema)
+		if err != nil {
+			mlog.Error(ctx, "failed to get embedding output fields", mlog.Err(err))
+			panic(err)
+		}
+		for _, msg := range fgMsg.InsertMessages {
+			if len(functionOutputFieldIDs) == 0 || function.HasAllFieldDataByID(msg.GetFieldsData(), functionOutputFieldIDs) {
+				continue
+			}
+			if err := wNode.functionStore.FillEmbeddingData(wNode.collectionID, currentSchema, msg.InsertRequest); err != nil {
+				mlog.Error(msg.TraceCtx(), "failed to fill embedding data", mlog.Err(err))
 				panic(err)
 			}
 		}
-		fgMsg.InsertData = insertData
+		preparedInsertData, err := writebuffer.PrepareInsert(currentSchema, wNode.pkField, fgMsg.InsertMessages)
+		if err != nil {
+			mlog.Error(ctx, "failed to prepare data", mlog.Err(err))
+			panic(err)
+		}
+		insertData = preparedInsertData
 	}
+	fgMsg.InsertData = insertData
 
-	err := wNode.wbManager.BufferData(wNode.channelName, fgMsg.InsertData, fgMsg.DeleteMessages, start, end, schemaVersion)
-	if err != nil {
-		log.Error("failed to buffer data", zap.Error(err))
+	if err := wNode.wbManager.BufferData(wNode.channelName, fgMsg.InsertData, fgMsg.DeleteMessages, start, end, schemaVersion); err != nil {
+		mlog.Error(ctx, "failed to buffer data", mlog.Err(err))
 		panic(err)
 	}
 
@@ -106,7 +132,7 @@ func (wNode *writeNode) Operate(in []Msg) []Msg {
 		func(id int64, _ int) (*commonpb.SegmentStats, bool) {
 			segInfo, ok := wNode.metacache.GetSegmentByID(id)
 			if !ok {
-				log.Warn("segment not found for stats", zap.Int64("segment", id))
+				mlog.Warn(ctx, "segment not found for stats", mlog.Int64("segment", id))
 				return nil, false
 			}
 			return &commonpb.SegmentStats{
@@ -157,12 +183,19 @@ func newWriteNode(
 		return nil, err
 	}
 
-	return &writeNode{
-		BaseNode:    baseNode,
-		channelName: config.vChannelName,
-		wbManager:   writeBufferManager,
-		updater:     updater,
-		metacache:   config.metacache,
-		pkField:     pkField,
-	}, nil
+	wNode := &writeNode{
+		BaseNode:     baseNode,
+		channelName:  config.vChannelName,
+		collectionID: config.collectionID,
+		wbManager:    writeBufferManager,
+		updater:      updater,
+		metacache:    config.metacache,
+		pkField:      pkField,
+
+		functionStore: function.NewFunctionRunnerLocalStore(),
+	}
+	if _, err := wNode.functionStore.OutputFieldIDs(collSchema); err != nil {
+		return nil, err
+	}
+	return wNode, nil
 }

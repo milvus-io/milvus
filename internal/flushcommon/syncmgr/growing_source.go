@@ -1,0 +1,1207 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package syncmgr
+
+import (
+	"context"
+	"fmt"
+	"path"
+	"sort"
+	"strings"
+	"sync"
+
+	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
+	"google.golang.org/protobuf/proto"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagecommon"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
+)
+
+type GrowingFlushConfig struct {
+	SegmentBasePath         string
+	PartitionBasePath       string
+	CollectionID            int64
+	PartitionID             int64
+	Schema                  *schemapb.CollectionSchema
+	TextFieldIDs            []int64
+	TextLobPaths            []string
+	TextInlineThreshold     int64
+	TextMaxLobFileBytes     int64
+	TextFlushThresholdBytes int64
+	BM25FieldIDs            []int64
+	BM25StatsLogIDs         []int64
+	WriteMergedBM25Stats    bool
+	PKStatsFieldID          int64
+	PKStatsLogID            int64
+	PKStatsBlob             []byte
+	MergedPKStatsBlob       []byte
+	ReadVersion             int64
+	WriterFormat            string
+	SchemaBasedPattern      string
+	SchemaBasedFormats      string
+	AllowedFieldIDs         []int64
+	ColumnGroups            []storagecommon.ColumnGroup
+}
+
+type GrowingFlushResult struct {
+	ManifestPath  string
+	NumRows       int64
+	TimestampFrom uint64
+	TimestampTo   uint64
+	// FlushedFieldIDs is the authoritative set of columns the flush actually
+	// wrote. It may be a subset of the flush schema: non-materialized
+	// function-output columns are skipped (backfilled later by bump-schema
+	// compaction). All binlog meta must be derived from this set, never from
+	// the schema.
+	FlushedFieldIDs        []int64
+	ColumnGroupMemorySizes map[int64]int64
+	FieldNullCounts        map[int64]int64
+	BM25Stats              map[int64]*storage.BM25Stats
+}
+
+type GrowingFlushSource interface {
+	CurrentOffset() int64
+	// MaterializedFieldIDs returns the field ids with materialized columns in
+	// the source segment. The flush layout must be trimmed to this set; a
+	// non-materialized column is legally absent (a dropped field or a
+	// function output backfilled by bump-schema compaction). A live segment
+	// always has materialized columns, so an empty set is an error, not a
+	// no-op.
+	MaterializedFieldIDs(ctx context.Context) ([]int64, error)
+	PrimaryKeys(ctx context.Context, startOffset, endOffset int64) ([]storage.PrimaryKey, error)
+	FlushGrowingData(ctx context.Context, startOffset, endOffset int64, config *GrowingFlushConfig) (*GrowingFlushResult, error)
+	Release()
+}
+
+type GrowingFlushSourceCommitter interface {
+	CommitGrowingFlush(targetOffset int64)
+}
+
+type GrowingSourceState int
+
+const (
+	GrowingSourceUnavailable GrowingSourceState = iota
+	GrowingSourcePending
+	GrowingSourceUsable
+)
+
+type GrowingSourceProvider interface {
+	GetGrowingFlushSource(segmentID int64, targetOffset int64, endPos *msgpb.MsgPosition) (GrowingFlushSource, GrowingSourceState)
+}
+
+type GrowingSourceReleaseHandoffSegment struct {
+	SegmentID    int64
+	TargetOffset int64
+}
+
+type GrowingSourceReleaseHandoffProvider interface {
+	BeginGrowingSourceReleaseHandoff(segmentIDs []int64) func()
+	PrepareGrowingSourceReleaseHandoff(ctx context.Context, fenceTs uint64, segments []GrowingSourceReleaseHandoffSegment) error
+	IsReleaseAllowed(segmentID int64, checkpointTs uint64) bool
+	IsReleasePrepared(segmentID int64, checkpointTs uint64) bool
+	MarkReleaseDetached(segmentID int64)
+	ClearReleasePrepared(segmentID int64)
+	ReleasePreparedSegments() []int64
+}
+
+type GrowingSourceRegistry struct {
+	mu        sync.RWMutex
+	nextToken uint64
+	providers map[string]map[uint64]GrowingSourceProvider
+}
+
+type GrowingSourceRegistration struct {
+	registry *GrowingSourceRegistry
+	channel  string
+	token    uint64
+}
+
+func NewGrowingSourceRegistry() *GrowingSourceRegistry {
+	return &GrowingSourceRegistry{
+		providers: make(map[string]map[uint64]GrowingSourceProvider),
+	}
+}
+
+func (r *GrowingSourceRegistry) Register(channel string, provider GrowingSourceProvider) *GrowingSourceRegistration {
+	if provider == nil {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.nextToken++
+	token := r.nextToken
+	if _, ok := r.providers[channel]; !ok {
+		r.providers[channel] = make(map[uint64]GrowingSourceProvider)
+	}
+	r.providers[channel][token] = provider
+	return &GrowingSourceRegistration{
+		registry: r,
+		channel:  channel,
+		token:    token,
+	}
+}
+
+func (r *GrowingSourceRegistry) Unregister(registration *GrowingSourceRegistration) {
+	if registration == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	providers, ok := r.providers[registration.channel]
+	if !ok {
+		return
+	}
+	delete(providers, registration.token)
+	if len(providers) == 0 {
+		delete(r.providers, registration.channel)
+	}
+}
+
+func (r *GrowingSourceRegistry) ProviderCount(channel string) int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.providers[channel])
+}
+
+func (r *GrowingSourceRegistry) getProviders(channel string) []GrowingSourceProvider {
+	r.mu.RLock()
+	channelProviders := r.providers[channel]
+	tokens := make([]uint64, 0, len(channelProviders))
+	for token := range channelProviders {
+		tokens = append(tokens, token)
+	}
+	sort.Slice(tokens, func(i, j int) bool {
+		return tokens[i] < tokens[j]
+	})
+	providers := make([]GrowingSourceProvider, 0, len(tokens))
+	for _, token := range tokens {
+		providers = append(providers, channelProviders[token])
+	}
+	r.mu.RUnlock()
+	return providers
+}
+
+func (r *GrowingSourceRegistry) BeginGrowingSourceReleaseHandoff(channel string, segmentIDs []int64) (func(), error) {
+	handoffProviders := make([]GrowingSourceReleaseHandoffProvider, 0)
+	for _, provider := range r.getProviders(channel) {
+		handoffProvider, ok := provider.(GrowingSourceReleaseHandoffProvider)
+		if !ok {
+			continue
+		}
+		handoffProviders = append(handoffProviders, handoffProvider)
+	}
+	if len(handoffProviders) == 0 {
+		return nil, merr.WrapErrChannelNotAvailable(channel, "no local growing-source release handoff provider")
+	}
+
+	rollbacks := make([]func(), 0, len(handoffProviders))
+	for _, handoffProvider := range handoffProviders {
+		rollback := handoffProvider.BeginGrowingSourceReleaseHandoff(segmentIDs)
+		if rollback != nil {
+			rollbacks = append(rollbacks, rollback)
+		}
+	}
+	return func() {
+		for i := len(rollbacks) - 1; i >= 0; i-- {
+			rollbacks[i]()
+		}
+	}, nil
+}
+
+func (r *GrowingSourceRegistry) PrepareGrowingSourceReleaseHandoff(ctx context.Context, channel string, fenceTs uint64, segments []GrowingSourceReleaseHandoffSegment) error {
+	handoffProviders := make([]GrowingSourceReleaseHandoffProvider, 0)
+	for _, provider := range r.getProviders(channel) {
+		handoffProvider, ok := provider.(GrowingSourceReleaseHandoffProvider)
+		if !ok {
+			continue
+		}
+		handoffProviders = append(handoffProviders, handoffProvider)
+	}
+	if len(handoffProviders) == 0 {
+		return merr.WrapErrChannelNotAvailable(channel, "no local growing-source release handoff provider")
+	}
+
+	for _, handoffProvider := range handoffProviders {
+		if err := handoffProvider.PrepareGrowingSourceReleaseHandoff(ctx, fenceTs, segments); err != nil {
+			return err
+		}
+	}
+
+	for _, segment := range segments {
+		if segment.TargetOffset > 0 {
+			if !r.IsReleasePrepared(channel, segment.SegmentID, fenceTs) {
+				return merr.WrapErrSegmentNotFound(segment.SegmentID, "growing-source release handoff source is not prepared")
+			}
+			continue
+		}
+		if !r.IsReleaseAllowed(channel, segment.SegmentID, fenceTs) {
+			return merr.WrapErrSegmentNotFound(segment.SegmentID, "growing-source release handoff is not allowed")
+		}
+	}
+	return nil
+}
+
+func (r *GrowingSourceRegistry) IsReleaseAllowed(channel string, segmentID int64, checkpointTs uint64) bool {
+	for _, provider := range r.getProviders(channel) {
+		handoffProvider, ok := provider.(GrowingSourceReleaseHandoffProvider)
+		if !ok {
+			continue
+		}
+		if handoffProvider.IsReleaseAllowed(segmentID, checkpointTs) {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *GrowingSourceRegistry) IsReleasePrepared(channel string, segmentID int64, checkpointTs uint64) bool {
+	for _, provider := range r.getProviders(channel) {
+		handoffProvider, ok := provider.(GrowingSourceReleaseHandoffProvider)
+		if !ok {
+			continue
+		}
+		if handoffProvider.IsReleasePrepared(segmentID, checkpointTs) {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *GrowingSourceRegistry) ClearReleasePrepared(channel string, segmentID int64) {
+	for _, provider := range r.getProviders(channel) {
+		handoffProvider, ok := provider.(GrowingSourceReleaseHandoffProvider)
+		if !ok {
+			continue
+		}
+		handoffProvider.ClearReleasePrepared(segmentID)
+	}
+}
+
+func (r *GrowingSourceRegistry) MarkReleaseDetached(channel string, segmentID int64) {
+	for _, provider := range r.getProviders(channel) {
+		handoffProvider, ok := provider.(GrowingSourceReleaseHandoffProvider)
+		if !ok {
+			continue
+		}
+		handoffProvider.MarkReleaseDetached(segmentID)
+	}
+}
+
+func (r *GrowingSourceRegistry) ReleasePreparedSegments(channel string) []int64 {
+	var segments []int64
+	for _, provider := range r.getProviders(channel) {
+		handoffProvider, ok := provider.(GrowingSourceReleaseHandoffProvider)
+		if !ok {
+			continue
+		}
+		segments = append(segments, handoffProvider.ReleasePreparedSegments()...)
+	}
+	return lo.Uniq(segments)
+}
+
+func (r *GrowingSourceRegistry) Resolve(channel string, segmentID int64, targetOffset int64, endPos *msgpb.MsgPosition) (GrowingFlushSource, GrowingSourceState) {
+	hasPending := false
+	for _, provider := range r.getProviders(channel) {
+		if provider == nil {
+			continue
+		}
+		source, state := provider.GetGrowingFlushSource(segmentID, targetOffset, endPos)
+		if source == nil {
+			if state == GrowingSourcePending {
+				hasPending = true
+			}
+			continue
+		}
+		switch state {
+		case GrowingSourceUsable:
+			return source, GrowingSourceUsable
+		case GrowingSourcePending:
+			hasPending = true
+			source.Release()
+		default:
+			source.Release()
+		}
+	}
+	if hasPending {
+		return nil, GrowingSourcePending
+	}
+	return nil, GrowingSourceUnavailable
+}
+
+var defaultGrowingSourceRegistry = NewGrowingSourceRegistry()
+
+func DefaultGrowingSourceRegistry() *GrowingSourceRegistry {
+	return defaultGrowingSourceRegistry
+}
+
+type GrowingSourceSyncTask struct {
+	collectionID  int64
+	partitionID   int64
+	segmentID     int64
+	channelName   string
+	startPosition *msgpb.MsgPosition
+	checkpoint    *msgpb.MsgPosition
+	batchRows     int64
+	targetOffset  int64
+	level         datapb.SegmentLevel
+	isFlush       bool
+	isDrop        bool
+
+	metacache  metacache.MetaCache
+	metaWriter MetaWriter
+	schema     *schemapb.CollectionSchema
+	source     GrowingFlushSource
+
+	chunkManager  storage.ChunkManager
+	allocator     allocator.Interface
+	storageConfig *indexpb.StorageConfig
+	manifestPath  string
+	flushedSize   int64
+	insertBinlogs map[int64]*datapb.FieldBinlog
+	bm25Stats     map[int64]*storage.BM25Stats
+	singlePKStats *storage.PrimaryKeyStats
+
+	committedManifestPath  string
+	committedBM25Stats     map[int64]*storage.BM25Stats
+	committedInsertBinlogs map[int64]*datapb.FieldBinlog
+	committedPKStats       *storage.PrimaryKeyStats
+
+	writeRetryOpts  []retry.Option
+	failureCallback func(error)
+	errorHandled    bool
+	tr              *timerecord.TimeRecorder
+}
+
+func NewGrowingSourceSyncTask() *GrowingSourceSyncTask {
+	return new(GrowingSourceSyncTask)
+}
+
+func (t *GrowingSourceSyncTask) WithCollectionID(collectionID int64) *GrowingSourceSyncTask {
+	t.collectionID = collectionID
+	return t
+}
+
+func (t *GrowingSourceSyncTask) WithPartitionID(partitionID int64) *GrowingSourceSyncTask {
+	t.partitionID = partitionID
+	return t
+}
+
+func (t *GrowingSourceSyncTask) WithSegmentID(segmentID int64) *GrowingSourceSyncTask {
+	t.segmentID = segmentID
+	return t
+}
+
+func (t *GrowingSourceSyncTask) WithChannelName(channelName string) *GrowingSourceSyncTask {
+	t.channelName = channelName
+	return t
+}
+
+func (t *GrowingSourceSyncTask) WithStartPosition(position *msgpb.MsgPosition) *GrowingSourceSyncTask {
+	t.startPosition = position
+	return t
+}
+
+func (t *GrowingSourceSyncTask) WithCheckpoint(position *msgpb.MsgPosition) *GrowingSourceSyncTask {
+	t.checkpoint = position
+	return t
+}
+
+func (t *GrowingSourceSyncTask) WithBatchRows(batchRows int64) *GrowingSourceSyncTask {
+	t.batchRows = batchRows
+	return t
+}
+
+func (t *GrowingSourceSyncTask) WithTargetOffset(targetOffset int64) *GrowingSourceSyncTask {
+	t.targetOffset = targetOffset
+	return t
+}
+
+func (t *GrowingSourceSyncTask) WithLevel(level datapb.SegmentLevel) *GrowingSourceSyncTask {
+	t.level = level
+	return t
+}
+
+func (t *GrowingSourceSyncTask) WithFlush() *GrowingSourceSyncTask {
+	t.isFlush = true
+	return t
+}
+
+func (t *GrowingSourceSyncTask) WithDrop() *GrowingSourceSyncTask {
+	t.isDrop = true
+	return t
+}
+
+func (t *GrowingSourceSyncTask) WithMetaCache(metacache metacache.MetaCache) *GrowingSourceSyncTask {
+	t.metacache = metacache
+	return t
+}
+
+func (t *GrowingSourceSyncTask) WithMetaWriter(metaWriter MetaWriter) *GrowingSourceSyncTask {
+	t.metaWriter = metaWriter
+	return t
+}
+
+func (t *GrowingSourceSyncTask) WithSchema(schema *schemapb.CollectionSchema) *GrowingSourceSyncTask {
+	t.schema = schema
+	return t
+}
+
+func (t *GrowingSourceSyncTask) WithSource(source GrowingFlushSource) *GrowingSourceSyncTask {
+	t.source = source
+	return t
+}
+
+func (t *GrowingSourceSyncTask) WithCommittedFlush(manifestPath string, bm25Stats map[int64]*storage.BM25Stats, insertBinlogs ...map[int64]*datapb.FieldBinlog) *GrowingSourceSyncTask {
+	t.committedManifestPath = manifestPath
+	t.committedBM25Stats = bm25Stats
+	if len(insertBinlogs) > 0 {
+		t.committedInsertBinlogs = cloneFieldBinlogMap(insertBinlogs[0])
+	}
+	return t
+}
+
+func (t *GrowingSourceSyncTask) WithCommittedPKStats(pkStats *storage.PrimaryKeyStats) *GrowingSourceSyncTask {
+	t.committedPKStats = pkStats
+	return t
+}
+
+func (t *GrowingSourceSyncTask) WithAllocator(allocator allocator.Interface) *GrowingSourceSyncTask {
+	t.allocator = allocator
+	return t
+}
+
+func (t *GrowingSourceSyncTask) WithStorageConfig(storageConfig *indexpb.StorageConfig) *GrowingSourceSyncTask {
+	t.storageConfig = storageConfig
+	return t
+}
+
+func (t *GrowingSourceSyncTask) WithChunkManager(cm storage.ChunkManager) *GrowingSourceSyncTask {
+	t.chunkManager = cm
+	return t
+}
+
+func (t *GrowingSourceSyncTask) WithWriteRetryOptions(opts ...retry.Option) *GrowingSourceSyncTask {
+	t.writeRetryOpts = opts
+	return t
+}
+
+func (t *GrowingSourceSyncTask) WithFailureCallback(callback func(error)) *GrowingSourceSyncTask {
+	t.failureCallback = callback
+	return t
+}
+
+func (t *GrowingSourceSyncTask) SegmentID() int64 {
+	return t.segmentID
+}
+
+func (t *GrowingSourceSyncTask) Checkpoint() *msgpb.MsgPosition {
+	return t.checkpoint
+}
+
+func (t *GrowingSourceSyncTask) StartPosition() *msgpb.MsgPosition {
+	return t.startPosition
+}
+
+func (t *GrowingSourceSyncTask) ChannelName() string {
+	return t.channelName
+}
+
+func (t *GrowingSourceSyncTask) IsFlush() bool {
+	return t.isFlush
+}
+
+func (t *GrowingSourceSyncTask) IsDrop() bool {
+	return t.isDrop
+}
+
+func (t *GrowingSourceSyncTask) ManifestPath() string {
+	return t.manifestPath
+}
+
+func (t *GrowingSourceSyncTask) HasCommittedFlush() bool {
+	return t.committedManifestPath != "" || t.manifestPath != ""
+}
+
+func (t *GrowingSourceSyncTask) CommittedManifestPath() string {
+	if t.committedManifestPath != "" {
+		return t.committedManifestPath
+	}
+	return t.manifestPath
+}
+
+func (t *GrowingSourceSyncTask) CommittedBM25Stats() map[int64]*storage.BM25Stats {
+	if len(t.committedBM25Stats) > 0 {
+		return t.committedBM25Stats
+	}
+	return t.bm25Stats
+}
+
+func (t *GrowingSourceSyncTask) CommittedInsertBinlogs() map[int64]*datapb.FieldBinlog {
+	if len(t.committedInsertBinlogs) > 0 {
+		return cloneFieldBinlogMap(t.committedInsertBinlogs)
+	}
+	return cloneFieldBinlogMap(t.insertBinlogs)
+}
+
+func (t *GrowingSourceSyncTask) CommittedPKStats() *storage.PrimaryKeyStats {
+	if t.committedPKStats != nil {
+		return t.committedPKStats
+	}
+	return t.singlePKStats
+}
+
+func (t *GrowingSourceSyncTask) BatchRows() int64 {
+	return t.batchRows
+}
+
+func (t *GrowingSourceSyncTask) TargetOffset() int64 {
+	return t.targetOffset
+}
+
+func (t *GrowingSourceSyncTask) HandleError(err error) {
+	if errors.IsAny(err, merr.ErrSegmentNotFound, merr.ErrChannelNotFound) {
+		return
+	}
+	// Run's defer and syncManager.submit's handler both call HandleError for the
+	// same failure; keep the callback and the failure metric single-shot.
+	if t.errorHandled {
+		return
+	}
+	t.errorHandled = true
+	if t.failureCallback != nil {
+		t.failureCallback(err)
+	}
+	metrics.DataNodeFlushBufferCount.WithLabelValues(paramtable.GetStringNodeID(), metrics.FailLabel, t.level.String()).Inc()
+}
+
+func (t *GrowingSourceSyncTask) ReleaseSource() {
+	if t.source != nil {
+		t.source.Release()
+		t.source = nil
+	}
+}
+
+func (t *GrowingSourceSyncTask) Run(ctx context.Context) (err error) {
+	t.tr = timerecord.NewTimeRecorder("growingSourceSyncTask")
+	log := mlog.With(
+		mlog.Int64("collectionID", t.collectionID),
+		mlog.Int64("partitionID", t.partitionID),
+		mlog.Int64("segmentID", t.segmentID),
+		mlog.String("channel", t.channelName),
+	)
+	commitSource := false
+	defer func() {
+		committer, shouldCommit := t.source.(GrowingFlushSourceCommitter)
+		t.ReleaseSource()
+		if commitSource && shouldCommit && (t.IsFlush() || t.IsDrop()) {
+			committer.CommitGrowingFlush(t.targetOffset)
+		}
+		if err != nil {
+			t.HandleError(err)
+		}
+	}()
+
+	segment, ok := t.metacache.GetSegmentByID(t.segmentID)
+	if !ok {
+		if t.isDrop {
+			log.Info(ctx, "segment dropped, discard growing source sync task")
+			return nil
+		}
+		log.Warn(ctx, "segment not found in metacache")
+		return nil
+	}
+	expectedRows := t.targetOffset - segment.FlushedRows()
+	if expectedRows < 0 {
+		return merr.WrapErrServiceInternalMsg("growing source target offset is behind flushed rows, flushedRows=%d targetOffset=%d segmentID=%d",
+			segment.FlushedRows(), t.targetOffset, t.segmentID)
+	}
+	columnGroups, err := t.getColumnGroups(segment)
+	if err != nil {
+		return err
+	}
+	// Unification point: from here on the intended layout and the layout the
+	// flush actually writes are one. Every consumer below (writer config,
+	// binlog meta, metacache current split) sees the same trimmed groups.
+	columnGroups, err = t.trimColumnGroupsToMaterialized(ctx, columnGroups)
+	if err != nil {
+		return err
+	}
+	if t.committedManifestPath != "" {
+		t.manifestPath = t.committedManifestPath
+		t.bm25Stats = t.committedBM25Stats
+		t.insertBinlogs = cloneFieldBinlogMap(t.committedInsertBinlogs)
+		t.singlePKStats = t.committedPKStats
+		t.flushedSize = growingSourceFlushedSizeFromBinlogs(t.insertBinlogs)
+	} else if expectedRows == 0 {
+		t.manifestPath = segment.ManifestPath()
+		t.flushedSize = 0
+	} else {
+		if t.source == nil {
+			return merr.WrapErrServiceInternalMsg("growing flush source is nil")
+		}
+		if t.source.CurrentOffset() < t.targetOffset {
+			return merr.WrapErrServiceInternalMsg("growing flush source is behind target offset, current=%d target=%d", t.source.CurrentOffset(), t.targetOffset)
+		}
+		config, err := t.buildFlushConfig(segment, columnGroups)
+		if err != nil {
+			return err
+		}
+		var insertSummaryLogIDs []int64
+		if t.metaWriter != nil && len(columnGroups) > 0 {
+			insertSummaryLogIDs, err = t.allocLogIDs(len(columnGroups), "growing source insert summary")
+			if err != nil {
+				return err
+			}
+		}
+		startOffset := segment.FlushedRows()
+		if err := t.fillPrimaryKeyStatsConfig(ctx, startOffset, t.targetOffset, config); err != nil {
+			return err
+		}
+		result, err := t.source.FlushGrowingData(ctx, startOffset, t.targetOffset, config)
+		if err != nil {
+			return errors.Wrap(err, "flush growing source data")
+		}
+		if result == nil || result.ManifestPath == "" {
+			return merr.WrapErrDataIntegrityMsg("growing source flush returned empty manifest")
+		}
+		if result.NumRows != expectedRows {
+			return merr.WrapErrDataIntegrityMsg("growing source flush row count mismatch, expected=%d actual=%d flushedRows=%d targetOffset=%d segmentID=%d",
+				expectedRows, result.NumRows, segment.FlushedRows(), t.targetOffset, t.segmentID)
+		}
+		t.manifestPath = result.ManifestPath
+		if len(result.BM25Stats) > 0 {
+			t.bm25Stats = result.BM25Stats
+		}
+		t.flushedSize = growingSourceFlushedSizeFromResult(result)
+		if t.metaWriter != nil && len(columnGroups) > 0 {
+			t.insertBinlogs, err = buildGrowingSourceInsertBinlogs(columnGroups, result, insertSummaryLogIDs)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	if t.metaWriter != nil && expectedRows > 0 && len(columnGroups) > 0 && len(t.insertBinlogs) == 0 {
+		return merr.WrapErrDataIntegrityMsg("growing source committed flush missing insert binlog summary, segmentID=%d targetOffset=%d",
+			t.segmentID, t.targetOffset)
+	}
+
+	if t.metaWriter != nil {
+		if err := t.metaWriter.UpdateGrowingSourceSync(ctx, t); err != nil {
+			return err
+		}
+	}
+
+	actions := make([]metacache.SegmentAction, 0, 3)
+	if t.batchRows > 0 {
+		actions = append(actions, metacache.FinishSyncing(t.batchRows))
+	}
+	if t.manifestPath != "" {
+		actions = append(actions, metacache.UpdateManifestPath(t.manifestPath))
+	}
+	if len(t.bm25Stats) > 0 {
+		actions = append(actions, metacache.MergeBm25Stats(t.bm25Stats))
+	}
+	if t.singlePKStats != nil {
+		actions = append(actions, metacache.RollStats(t.singlePKStats))
+	}
+	if len(columnGroups) > 0 {
+		actions = append(actions, metacache.UpdateCurrentSplit(columnGroups))
+	}
+	if t.IsFlush() {
+		actions = append(actions, metacache.UpdateState(commonpb.SegmentState_Flushed))
+	}
+	t.metacache.UpdateSegments(metacache.MergeSegmentAction(actions...), metacache.WithSegmentIDs(t.segmentID))
+	if t.isDrop {
+		t.metacache.RemoveSegments(metacache.WithSegmentIDs(t.segmentID))
+		log.Info(ctx, "dropped growing source segment removed")
+	}
+	commitSource = true
+
+	metrics.DataNodeWriteDataCount.WithLabelValues(paramtable.GetStringNodeID(), metrics.StreamingDataSourceLabel, metrics.InsertLabel, fmt.Sprint(t.collectionID)).Add(float64(t.batchRows))
+	metrics.DataNodeFlushedRows.WithLabelValues(paramtable.GetStringNodeID(), metrics.StreamingDataSourceLabel).Add(float64(t.batchRows))
+	metrics.DataNodeFlushBufferCount.WithLabelValues(paramtable.GetStringNodeID(), metrics.SuccessLabel, t.level.String()).Inc()
+	log.Info(ctx, "growing source sync task done",
+		mlog.Int64("targetOffset", t.targetOffset),
+		mlog.Int64("batchRows", t.batchRows),
+		mlog.String("manifestPath", t.manifestPath),
+		mlog.Duration("timeTaken", t.tr.ElapseSpan()))
+	return nil
+}
+
+func (t *GrowingSourceSyncTask) getColumnGroups(segment *metacache.SegmentInfo) ([]storagecommon.ColumnGroup, error) {
+	return resolveColumnGroups(segment, t.schema, t.segmentID, func() map[int64]storagecommon.ColumnStats {
+		return map[int64]storagecommon.ColumnStats{}
+	}), nil
+}
+
+// filterColumnGroupFields keeps only the fields keep() accepts, trimming the
+// parallel Columns array in lockstep so downstream consumers that map over
+// Columns (e.g. SchemaBasedPattern) never see a dropped field. Groups left
+// empty are removed. The skipped field ids are returned for logging.
+func filterColumnGroupFields(columnGroups []storagecommon.ColumnGroup, keep func(fieldID int64) bool) ([]storagecommon.ColumnGroup, []int64) {
+	skipped := make([]int64, 0)
+	trimmed := make([]storagecommon.ColumnGroup, 0, len(columnGroups))
+	for _, columnGroup := range columnGroups {
+		fields := make([]int64, 0, len(columnGroup.Fields))
+		columns := make([]int, 0, len(columnGroup.Columns))
+		for i, fieldID := range columnGroup.Fields {
+			if !keep(fieldID) {
+				skipped = append(skipped, fieldID)
+				continue
+			}
+			fields = append(fields, fieldID)
+			if i < len(columnGroup.Columns) {
+				columns = append(columns, columnGroup.Columns[i])
+			}
+		}
+		if len(fields) == 0 {
+			continue
+		}
+		columnGroup.Fields = fields
+		columnGroup.Columns = columns
+		trimmed = append(trimmed, columnGroup)
+	}
+	return trimmed, skipped
+}
+
+// trimColumnGroupsToMaterialized trims the flush layout to the columns the
+// source segment has actually materialized (plus system fields, which live
+// outside the insert record). A non-materialized column is legally absent —
+// a dropped field or a function output backfilled later by bump-schema
+// compaction; real schema/data inconsistency is segcore's concern and the
+// flush verifies it internally. A group left empty is dropped entirely. On a
+// committed-flush ack retry the source is gone; the committed binlogs are
+// the persisted truth and the layout is trimmed to them instead.
+func (t *GrowingSourceSyncTask) trimColumnGroupsToMaterialized(ctx context.Context, columnGroups []storagecommon.ColumnGroup) ([]storagecommon.ColumnGroup, error) {
+	if t.schema == nil || len(columnGroups) == 0 {
+		return columnGroups, nil
+	}
+	if t.source == nil {
+		if len(t.committedInsertBinlogs) == 0 {
+			return columnGroups, nil
+		}
+		// The committed binlogs are keyed by column group id; the flushed
+		// field ids live in ChildFields.
+		committed := typeutil.NewSet[int64]()
+		for _, fieldBinlog := range t.committedInsertBinlogs {
+			committed.Insert(fieldBinlog.GetChildFields()...)
+		}
+		trimmed, skipped := filterColumnGroupFields(columnGroups, func(fieldID int64) bool {
+			return committed.Contain(fieldID)
+		})
+		if len(skipped) > 0 {
+			mlog.Info(ctx, "trim growing flush layout to committed binlogs on ack retry",
+				mlog.Int64("segmentID", t.segmentID),
+				mlog.Int64s("fieldIDs", skipped))
+		}
+		return trimmed, nil
+	}
+	materialized, err := t.source.MaterializedFieldIDs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	// A live growing segment materializes its creation-schema columns in the
+	// InsertRecord ctor, so an empty set has no legal meaning — refuse it
+	// instead of writing a layout that may disagree with the data.
+	if len(materialized) == 0 {
+		return nil, merr.WrapErrServiceInternalMsg(
+			"growing flush source reported empty materialized field ids for segment %d", t.segmentID)
+	}
+	materializedSet := typeutil.NewSet(materialized...)
+	trimmed, skipped := filterColumnGroupFields(columnGroups, func(fieldID int64) bool {
+		return materializedSet.Contain(fieldID) || common.IsSystemField(fieldID)
+	})
+	if len(skipped) > 0 {
+		mlog.Info(ctx, "exclude non-materialized columns from growing flush layout",
+			mlog.Int64("segmentID", t.segmentID),
+			mlog.Int64s("fieldIDs", skipped))
+	}
+	return trimmed, nil
+}
+
+func (t *GrowingSourceSyncTask) schemaBasedPattern(columnGroups []storagecommon.ColumnGroup) (string, error) {
+	if len(columnGroups) == 0 {
+		return "", nil
+	}
+	arrowSchema, err := storage.ConvertToArrowSchema(t.schema, true)
+	if err != nil {
+		return "", merr.WrapErrServiceInternal(
+			fmt.Sprintf("can not convert collection schema %s to arrow schema: %s", t.schema.GetName(), err.Error()))
+	}
+	schemaBasedPattern, err := packed.SchemaBasedPattern(arrowSchema, columnGroups)
+	if err != nil {
+		return "", merr.WrapErrServiceInternal(
+			fmt.Sprintf("can not build schema based writer pattern %s", err.Error()))
+	}
+	return schemaBasedPattern, nil
+}
+
+func (t *GrowingSourceSyncTask) buildFlushConfig(segment *metacache.SegmentInfo, columnGroups []storagecommon.ColumnGroup) (*GrowingFlushConfig, error) {
+	if segment.GetStorageVersion() != storage.StorageV3 {
+		return nil, merr.WrapErrDataIntegrityMsg("growing source flush requires StorageV3 segment, segmentID=%d storageVersion=%d",
+			t.segmentID, segment.GetStorageVersion())
+	}
+	segmentBasePath := path.Join(t.chunkManager.RootPath(), common.SegmentInsertLogPath,
+		metautil.JoinIDPath(t.collectionID, t.partitionID, t.segmentID))
+	partitionBasePath := path.Join(t.chunkManager.RootPath(), common.SegmentInsertLogPath,
+		metautil.JoinIDPath(t.collectionID, t.partitionID))
+
+	allowedFieldIDs, allowedFieldSet := allowedFieldsFromColumnGroups(columnGroups)
+	var textFieldIDs []int64
+	var textLobPaths []string
+	var bm25FieldIDs []int64
+	var bm25StatsLogIDs []int64
+	if t.schema != nil {
+		for _, field := range typeutil.GetAllFieldSchemas(t.schema) {
+			if !fieldAllowed(allowedFieldSet, field.GetFieldID()) {
+				continue
+			}
+			if field.GetDataType() == schemapb.DataType_Text {
+				fieldID := field.GetFieldID()
+				textFieldIDs = append(textFieldIDs, fieldID)
+				textLobPaths = append(textLobPaths, fmt.Sprintf("%s/lobs/%d", partitionBasePath, fieldID))
+			}
+		}
+		for _, function := range t.schema.GetFunctions() {
+			if function.GetType() == schemapb.FunctionType_BM25 && len(function.GetOutputFieldIds()) > 0 {
+				outputFieldID := function.GetOutputFieldIds()[0]
+				if fieldAllowed(allowedFieldSet, outputFieldID) {
+					bm25FieldIDs = append(bm25FieldIDs, outputFieldID)
+				}
+			}
+		}
+	}
+	if len(bm25FieldIDs) > 0 {
+		var err error
+		bm25StatsLogIDs, err = t.allocBM25StatsLogIDs(len(bm25FieldIDs))
+		if err != nil {
+			return nil, err
+		}
+	}
+	writerFormat := paramtable.Get().DataNodeCfg.StorageFormat.GetValue()
+	schemaBasedPattern, err := t.schemaBasedPattern(columnGroups)
+	if err != nil {
+		return nil, err
+	}
+	readVersion, err := growingSourceReadVersion(segment.ManifestPath(), columnGroups)
+	if err != nil {
+		return nil, err
+	}
+	schemaBasedFormats := strings.Join(storagecommon.ColumnGroupFormats(columnGroups, writerFormat), ",")
+
+	return &GrowingFlushConfig{
+		SegmentBasePath:         segmentBasePath,
+		PartitionBasePath:       partitionBasePath,
+		CollectionID:            t.collectionID,
+		PartitionID:             t.partitionID,
+		Schema:                  t.schema,
+		TextFieldIDs:            textFieldIDs,
+		TextLobPaths:            textLobPaths,
+		TextInlineThreshold:     paramtable.Get().DataNodeCfg.TextInlineThreshold.GetAsInt64(),
+		TextMaxLobFileBytes:     paramtable.Get().DataNodeCfg.TextMaxLobFileBytes.GetAsInt64(),
+		TextFlushThresholdBytes: paramtable.Get().DataNodeCfg.TextFlushThresholdBytes.GetAsInt64(),
+		BM25FieldIDs:            bm25FieldIDs,
+		BM25StatsLogIDs:         bm25StatsLogIDs,
+		WriteMergedBM25Stats:    t.IsFlush() && t.level != datapb.SegmentLevel_L0 && t.schema != nil && hasBM25Function(t.schema),
+		ReadVersion:             readVersion,
+		WriterFormat:            writerFormat,
+		SchemaBasedPattern:      schemaBasedPattern,
+		SchemaBasedFormats:      schemaBasedFormats,
+		AllowedFieldIDs:         allowedFieldIDs,
+		ColumnGroups:            columnGroups,
+	}, nil
+}
+
+func (t *GrowingSourceSyncTask) fillPrimaryKeyStatsConfig(ctx context.Context, startOffset, endOffset int64, config *GrowingFlushConfig) error {
+	expectedRows := endOffset - startOffset
+	if expectedRows == 0 {
+		return nil
+	}
+	if t.source == nil {
+		return merr.WrapErrServiceInternalMsg("growing flush source is nil")
+	}
+	pks, err := t.source.PrimaryKeys(ctx, startOffset, endOffset)
+	if err != nil {
+		return err
+	}
+	if int64(len(pks)) != expectedRows {
+		return merr.WrapErrDataIntegrityMsg(
+			"growing source primary key count mismatch, segmentID=%d expected=%d actual=%d",
+			t.segmentID, expectedRows, len(pks))
+	}
+	if len(pks) == 0 {
+		return merr.WrapErrDataIntegrityMsg("growing source primary keys are empty, segmentID=%d rows=%d",
+			t.segmentID, expectedRows)
+	}
+
+	var pkField *schemapb.FieldSchema
+	for _, field := range t.schema.GetFields() {
+		if field.GetIsPrimaryKey() {
+			pkField = field
+			break
+		}
+	}
+	if pkField == nil {
+		return merr.WrapErrDataIntegrityMsg("growing source flush schema has no primary field, segmentID=%d", t.segmentID)
+	}
+	stats, err := storage.NewPrimaryKeyStats(pkField.GetFieldID(), int64(pkField.GetDataType()), expectedRows)
+	if err != nil {
+		return err
+	}
+	for _, pk := range pks {
+		if pk.Type() != pkField.GetDataType() {
+			return merr.WrapErrDataIntegrityMsg(
+				"growing source primary key type mismatch, segmentID=%d expected=%s actual=%s",
+				t.segmentID, pkField.GetDataType().String(), pk.Type().String())
+		}
+		stats.Update(pk)
+	}
+	blob, err := storage.NewInsertCodec().SerializePkStats(stats, expectedRows)
+	if err != nil {
+		return err
+	}
+	logIDs, err := t.allocLogIDs(1, "growing source primary key stats")
+	if err != nil {
+		return err
+	}
+	config.PKStatsFieldID = pkField.GetFieldID()
+	config.PKStatsLogID = logIDs[0]
+	config.PKStatsBlob = blob.Value
+	t.singlePKStats = stats
+	if t.IsFlush() && t.level != datapb.SegmentLevel_L0 {
+		serializer, err := NewStorageSerializer(t.metacache, t.schema)
+		if err != nil {
+			return err
+		}
+		mergedBlob, err := serializer.serializeMergedPkStatsWith(&SyncPack{
+			segmentID: t.segmentID,
+		}, stats)
+		if err != nil {
+			return err
+		}
+		if mergedBlob != nil {
+			config.MergedPKStatsBlob = mergedBlob.Value
+		}
+	}
+	return nil
+}
+
+func growingSourceReadVersion(manifestPath string, columnGroups []storagecommon.ColumnGroup) (int64, error) {
+	if manifestPath == "" {
+		return packed.ManifestEarliest, nil
+	}
+	_, version, err := packedManifestVersion(manifestPath)
+	if err != nil {
+		return 0, err
+	}
+	if version == packed.ManifestEarliest {
+		return version, nil
+	}
+	for _, columnGroup := range columnGroups {
+		if columnGroup.Format == "" {
+			return 0, merr.WrapErrDataIntegrityMsg("column group %d fields %v missing format for existing manifest %s",
+				columnGroup.GroupID, columnGroup.Fields, manifestPath)
+		}
+	}
+	return version, nil
+}
+
+func allowedFieldsFromColumnGroups(columnGroups []storagecommon.ColumnGroup) ([]int64, map[int64]struct{}) {
+	if len(columnGroups) == 0 {
+		return nil, nil
+	}
+	allowed := make(map[int64]struct{})
+	for _, group := range columnGroups {
+		for _, fieldID := range group.Fields {
+			allowed[fieldID] = struct{}{}
+		}
+	}
+	if len(allowed) == 0 {
+		return nil, nil
+	}
+	allowedFieldIDs := lo.Keys(allowed)
+	sort.Slice(allowedFieldIDs, func(i, j int) bool {
+		return allowedFieldIDs[i] < allowedFieldIDs[j]
+	})
+	return allowedFieldIDs, allowed
+}
+
+func fieldAllowed(allowed map[int64]struct{}, fieldID int64) bool {
+	if len(allowed) == 0 {
+		return true
+	}
+	_, ok := allowed[fieldID]
+	return ok
+}
+
+func (t *GrowingSourceSyncTask) allocBM25StatsLogIDs(count int) ([]int64, error) {
+	return t.allocLogIDs(count, "bm25 stats")
+}
+
+func (t *GrowingSourceSyncTask) allocLogIDs(count int, purpose string) ([]int64, error) {
+	if t.allocator == nil {
+		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("id allocator is nil when allocating %s ids", purpose))
+	}
+	ids := make([]int64, count)
+	for i := range ids {
+		id, err := t.allocator.AllocOne()
+		if err != nil {
+			return nil, err
+		}
+		ids[i] = id
+	}
+	return ids, nil
+}
+
+func buildGrowingSourceInsertBinlogs(columnGroups []storagecommon.ColumnGroup, result *GrowingFlushResult, logIDs []int64) (map[int64]*datapb.FieldBinlog, error) {
+	if result == nil || result.NumRows <= 0 || len(columnGroups) == 0 {
+		return nil, nil
+	}
+	if len(logIDs) != len(columnGroups) {
+		return nil, merr.WrapErrDataIntegrityMsg("growing source insert summary log id count mismatch, logIDs=%d columnGroups=%d",
+			len(logIDs), len(columnGroups))
+	}
+	logIDByGroup := make(map[int64]int64, len(columnGroups))
+	for i, columnGroup := range columnGroups {
+		logIDByGroup[columnGroup.GroupID] = logIDs[i]
+	}
+	// result.FlushedFieldIDs is the authoritative set of columns actually
+	// written; the flush skips legally-absent columns (dropped fields,
+	// non-materialized function outputs), so the binlog meta must be trimmed
+	// to it. A group left empty is dropped.
+	if len(result.FlushedFieldIDs) > 0 {
+		flushedSet := typeutil.NewSet(result.FlushedFieldIDs...)
+		columnGroups, _ = filterColumnGroupFields(columnGroups, func(fieldID int64) bool {
+			return flushedSet.Contain(fieldID)
+		})
+	}
+	for _, columnGroup := range columnGroups {
+		if _, ok := result.ColumnGroupMemorySizes[columnGroup.GroupID]; !ok {
+			return nil, merr.WrapErrDataIntegrityMsg("growing source missing column group memory size, groupID=%d fields=%v",
+				columnGroup.GroupID, columnGroup.Fields)
+		}
+	}
+	memorySize := func(columnGroupID int64) int64 {
+		return result.ColumnGroupMemorySizes[columnGroupID]
+	}
+	fieldNullCounts := func(columnGroup storagecommon.ColumnGroup) map[int64]int64 {
+		counts := make(map[int64]int64, len(columnGroup.Fields))
+		for _, fieldID := range columnGroup.Fields {
+			counts[fieldID] = result.FieldNullCounts[fieldID]
+		}
+		return counts
+	}
+	return buildV3ColumnGroupFieldBinlogs(
+		columnGroups,
+		result.NumRows,
+		result.TimestampFrom,
+		result.TimestampTo,
+		func(columnGroupID int64) int64 { return 0 },
+		memorySize,
+		func(columnGroupID int64) int64 { return logIDByGroup[columnGroupID] },
+		nil,
+		fieldNullCounts,
+	), nil
+}
+
+func growingSourceFlushedSizeFromResult(result *GrowingFlushResult) int64 {
+	if result == nil {
+		return 0
+	}
+	var size int64
+	for _, memorySize := range result.ColumnGroupMemorySizes {
+		size += memorySize
+	}
+	return size
+}
+
+func growingSourceFlushedSizeFromBinlogs(binlogs map[int64]*datapb.FieldBinlog) int64 {
+	var size int64
+	for _, fieldBinlog := range binlogs {
+		for _, binlog := range fieldBinlog.GetBinlogs() {
+			if binlog.GetLogSize() > 0 {
+				size += binlog.GetLogSize()
+				continue
+			}
+			size += binlog.GetMemorySize()
+		}
+	}
+	return size
+}
+
+func cloneFieldBinlogMap(binlogs map[int64]*datapb.FieldBinlog) map[int64]*datapb.FieldBinlog {
+	if len(binlogs) == 0 {
+		return nil
+	}
+	cloned := make(map[int64]*datapb.FieldBinlog, len(binlogs))
+	for fieldID, binlog := range binlogs {
+		if binlog == nil {
+			continue
+		}
+		cloned[fieldID] = proto.Clone(binlog).(*datapb.FieldBinlog)
+	}
+	return cloned
+}
+
+func manifestVersion(manifestPath string) int64 {
+	if manifestPath == "" {
+		return packed.ManifestEarliest
+	}
+	if _, version, err := packedManifestVersion(manifestPath); err == nil {
+		return version
+	}
+	return packed.ManifestEarliest
+}
+
+func packedManifestVersion(manifestPath string) (string, int64, error) {
+	return packed.UnmarshalManifestPath(manifestPath)
+}
+
+func (t *GrowingSourceSyncTask) startPositions() []*datapb.SegmentStartPosition {
+	startPos := lo.Map(t.metacache.GetSegmentsBy(
+		metacache.WithSegmentState(commonpb.SegmentState_Growing, commonpb.SegmentState_Sealed, commonpb.SegmentState_Flushing),
+		metacache.WithLevel(datapb.SegmentLevel_L1),
+		metacache.WithStartPosNotRecorded(),
+	), func(info *metacache.SegmentInfo, _ int) *datapb.SegmentStartPosition {
+		return &datapb.SegmentStartPosition{
+			SegmentID:     info.SegmentID(),
+			StartPosition: info.StartPosition(),
+		}
+	})
+	if t.level == datapb.SegmentLevel_L0 {
+		startPos = append(startPos, &datapb.SegmentStartPosition{SegmentID: t.segmentID, StartPosition: t.startPosition})
+	}
+	return startPos
+}

@@ -17,13 +17,15 @@
 package entity
 
 type User struct {
-	UserName string
-	Roles    []string
+	UserName    string
+	Roles       []string
+	Description string
 }
 
 type Role struct {
-	RoleName   string
-	Privileges []GrantItem
+	RoleName    string
+	Description string
+	Privileges  []GrantItem
 }
 
 type GrantItem struct {

@@ -23,6 +23,7 @@ const (
 	caseNoThrowStdException     int = 1
 	caseNoThrowFollyException   int = 2
 	caseNoThrowSegcoreException int = 3
+	caseNoThrowFieldNotLoaded   int = 4
 )
 
 type testCase struct {

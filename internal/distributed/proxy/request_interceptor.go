@@ -25,7 +25,9 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/requestutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -57,28 +59,54 @@ func UnaryRequestStatsInterceptor(ctx context.Context, req any, rpcInfo *grpc.Un
 		strconv.FormatInt(paramtable.GetNodeID(), 10),
 		methodTag,
 		metrics.TotalLabel,
+		metrics.CauseNA,
 		dbName,
 		collectionName,
 	).Inc()
 
 	start := time.Now()
 	resp, err := handler(ctx, req)
-	label := requestutil.ParseMetricLabel(resp, err)
+	label, cause := requestutil.ParseMetricLabel(resp, err)
 
 	// set metrics for state code
 	metrics.ProxyFunctionCall.WithLabelValues(
 		strconv.FormatInt(paramtable.GetNodeID(), 10),
 		methodTag,
 		label,
+		cause,
 		dbName,
 		collectionName,
 	).Inc()
+
+	// Mirror the metric's cause into the logs so a failed request can be
+	// filtered by error_type the same way the metric is. System failures are
+	// logged at Warn (actionable for SRE); input failures at Info (expected user
+	// mistakes — keeping them at Warn would spam the logs).
+	if label == metrics.FailLabel && (cause == metrics.CauseSystem || cause == metrics.CauseUser) {
+		status, _ := requestutil.GetStatusFromResponse(resp)
+		errType := merr.SystemError
+		if cause == metrics.CauseUser {
+			errType = merr.InputError
+		}
+		logger := mlog.With(
+			mlog.String("method", methodTag),
+			mlog.String("error_type", errType.String()),
+			mlog.Int32("code", status.GetCode()),
+			mlog.String("reason", status.GetReason()),
+		)
+		if errType == merr.InputError {
+			logger.Info(ctx, "rpc returned an input error")
+		} else {
+			logger.Warn(ctx, "rpc returned a system error")
+		}
+	}
 
 	// set metrics for latency
 	metrics.ProxyGRPCLatency.WithLabelValues(
 		strconv.FormatInt(paramtable.GetNodeID(), 10),
 		methodTag,
 		label,
+		cause,
 	).Observe(float64(time.Since(start).Milliseconds()))
 
 	return resp, err

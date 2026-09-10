@@ -276,7 +276,7 @@ install_ubuntu_deps() {
         lcov libtool m4 autoconf automake
         python3 python3-pip python3-venv
         pkg-config uuid-dev libaio-dev
-        libopenblas-dev libgoogle-perftools-dev
+        libgoogle-perftools-dev
     )
 
     # Version-specific GCC and clang-format. CI runs the cpp format checker on
@@ -355,7 +355,7 @@ install_rocky_deps() {
         gcc gcc-c++ gcc-gfortran \
         wget curl which git make ninja-build \
         automake python3-devel python3-pip \
-        openblas-devel libaio libuuid-devel \
+        libaio libuuid-devel \
         zip unzip ccache lcov libtool m4 autoconf
 
     # Install clang-tools for formatting
@@ -394,7 +394,7 @@ install_amazon_linux_deps() {
         wget curl which git make ninja-build \
         gcc gcc-c++ gcc-gfortran \
         automake python3-devel python3-pip \
-        openblas-devel libaio libuuid-devel \
+        libaio libuuid-devel \
         zip unzip ccache libtool m4 autoconf \
         openssl-devel zlib-devel
 
@@ -427,7 +427,7 @@ install_centos_deps() {
         automake python3-devel python3-pip \
         devtoolset-11-gcc devtoolset-11-gcc-c++ devtoolset-11-gcc-gfortran devtoolset-11-libatomic-devel \
         llvm-toolset-11.0-clang llvm-toolset-11.0-clang-tools-extra \
-        openblas-devel libaio libuuid-devel \
+        libaio libuuid-devel \
         zip unzip ccache lcov libtool m4 autoconf automake
 
     # Enable devtoolset

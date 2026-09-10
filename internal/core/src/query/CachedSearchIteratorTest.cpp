@@ -115,15 +115,22 @@ class CachedSearchIteratorTest
                     search_info,
                     bitset);
 
-            case ConstructorType::VectorBase:
+            case ConstructorType::VectorBase: {
+                // The snapshot only has to outlive the constructor: it walks
+                // every chunk through it before returning, and the iterators
+                // it produces are then owned by the returned object, whose
+                // chunks this test never reclaims.
+                auto chunks = vector_base_->acquire_chunks();
                 return std::make_unique<CachedSearchIterator>(
                     search_dataset_,
                     vector_base_.get(),
+                    chunks,
                     nb_,
                     search_info,
                     std::map<std::string, std::string>{},
                     bitset,
                     data_type_);
+            }
 
             case ConstructorType::ChunkedColumn:
                 return std::make_unique<CachedSearchIterator>(
@@ -709,9 +716,11 @@ TEST_P(CachedSearchIteratorTest, ConstructorWithInvalidParams) {
                          nullptr),
                      SegcoreError);
     } else if (std::get<0>(GetParam()) == ConstructorType::VectorBase) {
+        auto chunks = vector_base_->acquire_chunks();
         EXPECT_THROW(auto iterator = std::make_unique<CachedSearchIterator>(
                          dataset::SearchDataset{},
                          vector_base_.get(),
+                         chunks,
                          nb_,
                          search_info,
                          std::map<std::string, std::string>{},
@@ -719,9 +728,12 @@ TEST_P(CachedSearchIteratorTest, ConstructorWithInvalidParams) {
                          data_type_),
                      SegcoreError);
 
+        // Null column: rejected before the snapshot is ever consulted, so an
+        // unacquired snapshot is the honest thing to pass here.
         EXPECT_THROW(auto iterator = std::make_unique<CachedSearchIterator>(
                          search_dataset_,
                          nullptr,
+                         ChunkSnapshot{},
                          nb_,
                          search_info,
                          std::map<std::string, std::string>{},
@@ -732,6 +744,7 @@ TEST_P(CachedSearchIteratorTest, ConstructorWithInvalidParams) {
         EXPECT_THROW(auto iterator = std::make_unique<CachedSearchIterator>(
                          search_dataset_,
                          vector_base_.get(),
+                         chunks,
                          0,
                          search_info,
                          std::map<std::string, std::string>{},
@@ -841,8 +854,9 @@ TEST(CachedSearchIteratorNullableTest, ChunkedColumnWithPartialNulls) {
     // Build query from first valid vector
     std::vector<float> query_data(base_data.begin(), base_data.begin() + dim);
 
-    // Create an all-zero bitset (no filtering) for the physical data range
-    TargetBitmap search_bitset(total_valid, false);
+    // Search bitsets stay in logical row space; CachedSearchIterator attaches
+    // the chunk-local physical->logical window before entering Knowhere BF.
+    TargetBitmap search_bitset(chunk_rows * num_chunks, false);
     BitsetView search_bitview(search_bitset);
 
     dataset::SearchDataset search_dataset{
@@ -862,8 +876,6 @@ TEST(CachedSearchIteratorNullableTest, ChunkedColumnWithPartialNulls) {
     iter_v2_info.batch_size = batch_size;
     search_info.iterator_v2_info_ = iter_v2_info;
 
-    // Create CachedSearchIterator - this tests Fix 1:
-    // The lambda should use valid_count_per_chunk[chunk_id] as chunk_size
     CachedSearchIterator iter(column.get(),
                               search_dataset,
                               search_info,
@@ -877,8 +889,7 @@ TEST(CachedSearchIteratorNullableTest, ChunkedColumnWithPartialNulls) {
     ASSERT_EQ(result.seg_offsets_.size(), batch_size);
     ASSERT_EQ(result.distances_.size(), batch_size);
 
-    // All returned offsets should be physical offsets in [0, total_valid)
-    // (TransformOffset is NOT called here - that's the caller's job)
+    // Knowhere BF returns logical offsets through the BitsetView out-id window.
     int valid_count = 0;
     for (auto& offset : result.seg_offsets_) {
         if (offset == INVALID_SEG_OFFSET) {
@@ -886,9 +897,8 @@ TEST(CachedSearchIteratorNullableTest, ChunkedColumnWithPartialNulls) {
         }
         valid_count++;
         ASSERT_GE(offset, 0);
-        ASSERT_LT(offset, total_valid)
-            << "Physical offset " << offset << " exceeds valid count "
-            << total_valid;
+        ASSERT_LT(offset, chunk_rows * num_chunks);
+        ASSERT_EQ(offset % 2, 0) << "logical offset should be a valid row";
     }
     ASSERT_GT(valid_count, 0);
 }

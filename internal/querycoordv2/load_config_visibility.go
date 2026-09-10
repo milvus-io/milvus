@@ -19,9 +19,7 @@ package querycoordv2
 import (
 	"context"
 
-	"go.uber.org/zap"
-
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -35,6 +33,10 @@ func (s *Server) tryPromoteReadyLoadConfigReplicas(ctx context.Context) {
 	if len(replicas) == 0 {
 		return
 	}
+	// Promote load-config replicas all-or-nothing. Partially exposing ready
+	// replicas can let the query path enter a resource group while the load path
+	// is still moving the remaining replicas, causing the two paths to compete
+	// for resources during the switch.
 	for _, replica := range replicas {
 		if err := s.checkReplicaServiceable(ctx, replica); err != nil {
 			return
@@ -50,17 +52,17 @@ func (s *Server) tryPromoteReadyLoadConfigReplicas(ctx context.Context) {
 		return
 	}
 
-	log.Ctx(ctx).Info("load config replicas are query visible",
-		zap.Int64s("collections", collections),
-		zap.Int64s("replicas", replicaIDs))
+	mlog.Info(ctx, "load config replicas are query visible",
+		mlog.Int64s("collections", collections),
+		mlog.Int64s("replicas", replicaIDs))
 	if s.proxyClientManager == nil {
 		return
 	}
 	if err := s.proxyClientManager.InvalidateShardLeaderCache(ctx, &proxypb.InvalidateShardLeaderCacheRequest{
 		CollectionIDs: collections,
 	}); err != nil {
-		log.Ctx(ctx).Warn("failed to invalidate proxy shard leader cache after promoting load config replicas",
-			zap.Int64s("collections", collections),
-			zap.Error(err))
+		mlog.Warn(ctx, "failed to invalidate proxy shard leader cache after promoting load config replicas",
+			mlog.Int64s("collections", collections),
+			mlog.Err(err))
 	}
 }

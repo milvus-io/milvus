@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // hasNonReplacePartialOp reports whether req carries any non-REPLACE
@@ -38,6 +39,8 @@ func hasNonReplacePartialOp(req *milvuspb.UpsertRequest) bool {
 	return false
 }
 
+// TODO: Recursive Array fields do not support ARRAY_APPEND or ARRAY_REMOVE.
+//
 // validateFieldPartialUpdateOps validates FieldPartialUpdateOp entries
 // attached to an UpsertRequest. It enforces:
 //
@@ -59,6 +62,10 @@ func validateFieldPartialUpdateOps(req *milvuspb.UpsertRequest, schema *schemapb
 	if len(fieldOps) == 0 {
 		return false, nil
 	}
+	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
+	if err != nil {
+		return false, err
+	}
 
 	// Precompute PK names and a lookup table of FieldData by name so we
 	// can validate payload alignment in O(1) per op.
@@ -78,7 +85,7 @@ func validateFieldPartialUpdateOps(req *milvuspb.UpsertRequest, schema *schemapb
 	for _, opMsg := range fieldOps {
 		name := opMsg.GetFieldName()
 		if name == "" {
-			return false, merr.WrapErrParameterInvalidMsg("FieldPartialUpdateOp.field_name is required")
+			return false, merr.WrapErrParameterMissingMsg("FieldPartialUpdateOp.field_name is required")
 		}
 		if _, dup := seenOpFields[name]; dup {
 			return false, merr.WrapErrParameterInvalidMsg(
@@ -88,6 +95,10 @@ func validateFieldPartialUpdateOps(req *milvuspb.UpsertRequest, schema *schemapb
 
 		op := opMsg.GetOp()
 		if op == schemapb.FieldPartialUpdateOp_REPLACE {
+			if typeutil.IsStructSubField(name) {
+				return false, merr.WrapErrParameterInvalidMsg(
+					"partial struct update is not supported for struct sub-field %q; use the whole struct field instead", name)
+			}
 			// An explicit REPLACE is legal but indistinguishable from no
 			// op at all. Accept silently — no further validation needed.
 			continue
@@ -98,6 +109,14 @@ func validateFieldPartialUpdateOps(req *milvuspb.UpsertRequest, schema *schemapb
 			return false, merr.WrapErrParameterInvalidMsg(
 				fmt.Sprintf("field %q is the primary key and cannot carry a partial-update op", name))
 		}
+		if schemaHelper.GetStructArrayFieldFromName(name) != nil {
+			return false, merr.WrapErrParameterInvalidMsg(
+				"op %s is not supported for struct field %q", op.String(), name)
+		}
+		if typeutil.IsStructSubField(name) {
+			return false, merr.WrapErrParameterInvalidMsg(
+				"op %s is not supported for struct field %q", op.String(), name)
+		}
 
 		fieldSchema, err := findFieldSchemaByName(schema, name)
 		if err != nil {
@@ -106,6 +125,10 @@ func validateFieldPartialUpdateOps(req *milvuspb.UpsertRequest, schema *schemapb
 
 		switch op {
 		case schemapb.FieldPartialUpdateOp_ARRAY_APPEND, schemapb.FieldPartialUpdateOp_ARRAY_REMOVE:
+			if typeutil.IsNestedArrayTypeSchema(fieldSchema.GetTypeSchema()) {
+				return false, merr.WrapErrParameterInvalidMsg(
+					"op %s is not supported for recursive ARRAY field %q", op.String(), name)
+			}
 			if fieldSchema.GetDataType() != schemapb.DataType_Array {
 				return false, merr.WrapErrParameterInvalidMsg(
 					fmt.Sprintf("op %s requires Array field, but field %q is %s",
@@ -166,7 +189,7 @@ func findFieldSchemaByName(schema *schemapb.CollectionSchema, name string) (*sch
 			return f, nil
 		}
 	}
-	return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("field %q not found in collection schema", name))
+	return nil, merr.WrapErrParameterInvalidMsg("field %q not found in collection schema", name)
 }
 
 // checkArrayAppendPayloadWithinCapacity checks that the per-row payload

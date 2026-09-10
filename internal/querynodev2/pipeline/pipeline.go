@@ -54,26 +54,25 @@ func NewPipeLine(
 	pipelineQueueLength := paramtable.Get().QueryNodeCfg.FlowGraphMaxQueueLength.GetAsInt32()
 
 	p := &pipeline{
-		collectionID:   collectionID,
-		StreamPipeline: base.NewPipelineWithStream(dispatcher, nodeCtxTtInterval, enableTtChecker, channel, delegator),
+		collectionID: collectionID,
+		StreamPipeline: base.NewPipelineWithStream(
+			dispatcher,
+			nodeCtxTtInterval,
+			enableTtChecker,
+			channel,
+			delegator,
+			base.WithMsgPackBatcher(base.NewDMLMsgPackBatcher(paramtable.Get().QueryNodeCfg.DMLMicroBatchMaxMsgNum.GetAsInt)),
+		),
 	}
 
 	filterNode := newFilterNode(collectionID, channel, manager, delegator, pipelineQueueLength)
-
-	embeddingNode, err := newEmbeddingNode(collectionID, channel, manager, pipelineQueueLength)
+	insertNode, err := newInsertNode(collectionID, channel, manager, delegator, collection.Schema(), pipelineQueueLength)
 	if err != nil {
 		return nil, err
 	}
-
-	insertNode := newInsertNode(collectionID, channel, manager, delegator, pipelineQueueLength)
 	deleteNode := newDeleteNode(collectionID, channel, manager, delegator, pipelineQueueLength)
 
-	// skip add embedding node when collection has no function.
-	if embeddingNode != nil {
-		p.Add(filterNode, embeddingNode, insertNode, deleteNode)
-	} else {
-		p.Add(filterNode, insertNode, deleteNode)
-	}
+	p.Add(filterNode, insertNode, deleteNode)
 
 	return p, nil
 }

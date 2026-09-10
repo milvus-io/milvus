@@ -18,15 +18,13 @@ package componentutil
 
 import (
 	"context"
-	"fmt"
 	"time"
 
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
@@ -53,12 +51,13 @@ func WaitForComponentStates[T interface {
 			}
 		}
 		if !meet {
-			return fmt.Errorf(
-				"WaitForComponentStates, not meet, %s current state: %s",
+			return merr.WrapErrServiceNotReady(
 				serviceName,
-				resp.State.StateCode.String())
+				0,
+				resp.State.StateCode.String(),
+				"WaitForComponentStates, not meet")
 		}
-		log.Info("WaitForComponentStates success", zap.String("current state", resp.State.StateCode.String()))
+		mlog.Info(ctx, "WaitForComponentStates success", mlog.String("current state", resp.State.StateCode.String()))
 		return nil
 	}
 	return retry.Do(ctx, checkFunc, retry.Attempts(attempts), retry.Sleep(sleep))

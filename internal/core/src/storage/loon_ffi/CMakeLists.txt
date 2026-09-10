@@ -13,6 +13,7 @@
 set(FFI_SRCS
     ${CMAKE_CURRENT_SOURCE_DIR}/ffi_reader_c.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ffi_writer_c.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/milvus_table_c.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/util.cpp
 )
 

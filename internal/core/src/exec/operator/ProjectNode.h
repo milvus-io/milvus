@@ -20,6 +20,8 @@
 
 namespace milvus {
 namespace exec {
+class QueryContext;
+
 class PhyProjectNode : public Operator {
  public:
     PhyProjectNode(int32_t operator_id,
@@ -70,6 +72,7 @@ class PhyProjectNode : public Operator {
     const segcore::SegmentInternalInterface* segment_;
     bool is_finished_{false};
     const std::vector<FieldId> fields_to_project_;
+    QueryContext* query_context_;
     OpContext* op_context_;
 };
 }  // namespace exec

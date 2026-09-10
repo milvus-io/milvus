@@ -42,6 +42,25 @@ func testSchema() *schemapb.CollectionSchema {
 	}
 }
 
+func testSchemaWithStructArray() *schemapb.CollectionSchema {
+	schema := testSchema()
+	schema.StructArrayFields = []*schemapb.StructArrayFieldSchema{
+		{
+			FieldID: 200,
+			Name:    "items",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:     201,
+					Name:        "items[tag]",
+					DataType:    schemapb.DataType_Array,
+					ElementType: schemapb.DataType_VarChar,
+				},
+			},
+		},
+	}
+	return schema
+}
+
 func makeTestIntIDs(ids []int64) *schemapb.IDs {
 	return &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: ids}}}
 }
@@ -265,6 +284,67 @@ func TestNewQueryPipeline_GroupBy(t *testing.T) {
 	assert.NotNil(t, result)
 	// Should have 2 field columns: val and count(*)
 	assert.Equal(t, 2, len(result.GetFieldsData()))
+}
+
+func TestNewQueryPipeline_GroupByCountStarWithStructSchema(t *testing.T) {
+	schema := testSchemaWithStructArray()
+
+	countAggs, err := agg.NewAggregate("count", 0, "count(*)", schemapb.DataType_None)
+	require.NoError(t, err)
+	aggsBases := make([]agg.AggregateBase, len(countAggs))
+	copy(aggsBases, countAggs)
+	outputMap, err := agg.NewAggregationFieldMap(
+		[]string{"pk", "count(*)"},
+		[]string{"pk"},
+		aggsBases,
+	)
+	require.NoError(t, err)
+
+	pipeline, err := NewQueryPipeline(
+		schema, 10, 0, reduce.IReduceNoOrder,
+		nil,
+		[]int64{100},
+		[]*planpb.Aggregate{{Op: planpb.AggregateOp_count, FieldId: 0}},
+		outputMap,
+		nil,
+	)
+	require.NoError(t, err)
+
+	r1 := &internalpb.RetrieveResults{
+		FieldsData: []*schemapb.FieldData{
+			makeTestInt64Field(0, "", []int64{1, 2}),
+			makeTestInt64Field(0, "", []int64{2, 1}),
+		},
+	}
+	r2 := &internalpb.RetrieveResults{
+		FieldsData: []*schemapb.FieldData{
+			makeTestInt64Field(0, "", []int64{1, 3}),
+			makeTestInt64Field(0, "", []int64{3, 4}),
+		},
+	}
+
+	result, err := pipeline.Execute(context.Background(), []*internalpb.RetrieveResults{r1, r2})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	result.OutputFields = []string{"pk", "count(*)"}
+	reconstructStructFieldDataForQuery(result, schema)
+
+	require.Len(t, result.GetFieldsData(), 2)
+	assert.Equal(t, "pk", result.GetFieldsData()[0].GetFieldName())
+	assert.Equal(t, "count(*)", result.GetFieldsData()[1].GetFieldName())
+	assert.Equal(t, int64(0), result.GetFieldsData()[1].GetFieldId())
+	assert.Equal(t, []string{"pk", "count(*)"}, result.GetOutputFields())
+
+	pks := result.GetFieldsData()[0].GetScalars().GetLongData().GetData()
+	counts := result.GetFieldsData()[1].GetScalars().GetLongData().GetData()
+	require.Len(t, pks, len(counts))
+
+	countByPK := make(map[int64]int64, len(pks))
+	for i, pk := range pks {
+		countByPK[pk] = counts[i]
+	}
+	assert.Equal(t, map[int64]int64{1: 5, 2: 1, 3: 4}, countByPK)
 }
 
 func TestNewQueryPipeline_GroupByOrderBy(t *testing.T) {

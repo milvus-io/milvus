@@ -20,7 +20,9 @@ package credentials
 
 import (
 	"encoding/base64"
-	"fmt"
+	"strings"
+
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 const (
@@ -45,40 +47,45 @@ func NewCredentials(conf map[string]string) *Credentials {
 	return &Credentials{conf}
 }
 
+func credentialKey(name, key string) string {
+	// Config keys are case-insensitive and normalized to lowercase.
+	return strings.ToLower(name) + "." + key
+}
+
 func (c *Credentials) GetAPIKeyCredential(name string) (string, error) {
-	k := name + "." + APIKey
+	k := credentialKey(name, APIKey)
 	apikey, exist := c.confMap[k]
 	if !exist {
-		return "", fmt.Errorf("%s is not a apikey crediential, can not find key: %s", name, k)
+		return "", merr.WrapErrParameterInvalidMsg("%s is not a apikey crediential, can not find key: %s", name, k)
 	}
 	return apikey, nil
 }
 
 func (c *Credentials) GetAKSKCredential(name string) (string, string, error) {
-	IdKey := name + "." + AccessKeyId
+	IdKey := credentialKey(name, AccessKeyId)
 	accessKeyId, exist := c.confMap[IdKey]
 	if !exist {
-		return "", "", fmt.Errorf("%s is not a aksk crediential, can not find key: %s", name, IdKey)
+		return "", "", merr.WrapErrParameterInvalidMsg("%s is not a aksk crediential, can not find key: %s", name, IdKey)
 	}
 
-	AccessKey := name + "." + SecretAccessKey
+	AccessKey := credentialKey(name, SecretAccessKey)
 	secretAccessKey, exist := c.confMap[AccessKey]
 	if !exist {
-		return "", "", fmt.Errorf("%s is not a aksk crediential, can not find key: %s", name, AccessKey)
+		return "", "", merr.WrapErrParameterInvalidMsg("%s is not a aksk crediential, can not find key: %s", name, AccessKey)
 	}
 	return accessKeyId, secretAccessKey, nil
 }
 
 func (c *Credentials) GetGcpCredential(name string) ([]byte, error) {
-	k := name + "." + CredentialJSON
+	k := credentialKey(name, CredentialJSON)
 	jsonByte, exist := c.confMap[k]
 	if !exist {
-		return nil, fmt.Errorf("%s is not a gcp crediential, can not find key: %s ", name, k)
+		return nil, merr.WrapErrParameterInvalidMsg("%s is not a gcp crediential, can not find key: %s ", name, k)
 	}
 
 	decode, err := base64.StdEncoding.DecodeString(jsonByte)
 	if err != nil {
-		return nil, fmt.Errorf("parse gcp credential:%s faild, err: %s", name, err)
+		return nil, merr.WrapErrParameterInvalidMsg("parse gcp credential:%s faild, err: %s", name, err)
 	}
 	return decode, nil
 }

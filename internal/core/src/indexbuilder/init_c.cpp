@@ -14,6 +14,7 @@
 #include <string>
 
 #include "common/EasyAssert.h"
+#include "common/FastMem.h"
 #include "config/ConfigKnowhere.h"
 #include "indexbuilder/init_c.h"
 
@@ -28,7 +29,7 @@ IndexBuilderSetSimdType(const char* value) {
     auto real_type = milvus::config::KnowhereSetSimdType(value);
     char* ret = reinterpret_cast<char*>(malloc(real_type.length() + 1));
     AssertInfo(ret != nullptr, "memmory allocation for ret failed!");
-    memcpy(ret, real_type.c_str(), real_type.length());
+    milvus::fastmem::FastMemcpy(ret, real_type.c_str(), real_type.length());
     ret[real_type.length()] = 0;
     return ret;
 }

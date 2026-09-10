@@ -19,12 +19,17 @@
 package function
 
 import (
+	"sync/atomic"
 	"testing"
 
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/analyzer"
+	"github.com/milvus-io/milvus/internal/util/analyzer/interfaces"
 )
 
 type MultiAnalyzerBM25FunctionSuite struct {
@@ -183,6 +188,48 @@ func (s *MultiAnalyzerBM25FunctionSuite) TestBatchAnalyze() {
 		s.Equal(2, len(result[0]))
 		s.Equal(3, len(result[1]))
 	})
+}
+
+func (s *MultiAnalyzerBM25FunctionSuite) newTrackingAnalyzer(active *atomic.Int32, maxActive *atomic.Int32) *interfaces.MockAnalyzer {
+	tokenizer := interfaces.NewMockAnalyzer(s.T())
+	tokenizer.EXPECT().Clone().Return(tokenizer, nil)
+	tokenizer.EXPECT().NewTokenStream(mock.Anything).RunAndReturn(func(text string) interfaces.TokenStream {
+		return newTrackingTokenStream(text, active, maxActive)
+	})
+	tokenizer.EXPECT().Destroy().Return()
+	return tokenizer
+}
+
+func (s *MultiAnalyzerBM25FunctionSuite) TestRunReleasesTokenStreamsPerInput() {
+	var active, maxActive atomic.Int32
+	runner := &MultiAnalyzerBM25FunctionRunner{
+		analyzers: map[string]analyzer.Analyzer{
+			"default": s.newTrackingAnalyzer(&active, &maxActive),
+		},
+	}
+	dst := make([]map[uint32]float32, 3)
+
+	err := runner.run([]string{"a", "b", "c"}, []string{"default", "default", "default"}, dst)
+
+	s.NoError(err)
+	s.Equal(int32(0), active.Load())
+	s.Equal(int32(1), maxActive.Load())
+}
+
+func (s *MultiAnalyzerBM25FunctionSuite) TestAnalyzeReleasesTokenStreamsPerInput() {
+	var active, maxActive atomic.Int32
+	runner := &MultiAnalyzerBM25FunctionRunner{
+		analyzers: map[string]analyzer.Analyzer{
+			"default": s.newTrackingAnalyzer(&active, &maxActive),
+		},
+	}
+	dst := make([][]*milvuspb.AnalyzerToken, 3)
+
+	err := runner.analyze([]string{"a", "b", "c"}, []string{"default", "default", "default"}, dst, false, false)
+
+	s.NoError(err)
+	s.Equal(int32(0), active.Load())
+	s.Equal(int32(1), maxActive.Load())
 }
 
 func TestMultiAnalyzerBm25Function(t *testing.T) {

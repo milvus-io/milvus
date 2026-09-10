@@ -220,7 +220,7 @@ class IndexEntryDirectStreamWriter : public IndexEntryWriter {
 };
 ```
 
-Constructor writes Magic. `WriteEntry()` computes CRC-32C incrementally (`crc32c_update` per chunk as data streams through) and records the final checksum in the directory entry. For fd-based entries, CRC is updated per 16MB read chunk — no extra memory. `Finish()` writes the Meta Entry (as the last regular entry), then Directory Table JSON, then 32-byte Footer (`version` + `meta_entry_size` + `directory_table_size`), computes `total_bytes_written_`, closes stream.
+Constructor writes Magic. `WriteEntry()` computes CRC-32C incrementally (`crc32c_update` as data streams through) and records the final checksum in the directory entry. For fd-based entries, CRC is updated per 16MB read buffer — no extra memory. `Finish()` writes the Meta Entry (as the last regular entry), then Directory Table JSON, then 32-byte Footer (`version` + `meta_entry_size` + `directory_table_size`), computes `total_bytes_written_`, closes stream.
 
 ### 3.4 IndexEntryEncryptedLocalWriter (Encrypted)
 
@@ -392,7 +392,20 @@ protected:
 3. Create `IndexEntryReader::Open(input, file_size, collection_id)`.
 4. Call `LoadEntries(*reader, config)`.
 
-### 5.2 Meta Packing
+### 5.2 Streaming Read
+
+Large V3 data entries should use `IndexEntryReader::ReadEntryStream()` instead of `ReadEntry()` when the implementation can consume bytes incrementally.
+
+Streaming read behavior:
+
+- Slices are delivered to the consumer in entry order.
+- CRC-32C is verified incrementally as slices are consumed.
+- Consumers may receive partial data before a later slice error is reported.
+- Slow consumers keep their slice budget until the callback returns, which can block other streams.
+- Plain entries are read as 16MB slices by default, aligned with the encrypted slice size and existing V3 unencrypted range size. Explicit `slice_size` values below 64KB are rejected.
+- For encrypted entries, the reader uses the plaintext slice boundaries stored in the V3 directory. With the default writer settings, this is also 16MB.
+
+### 5.3 Meta Packing
 
 Each index packs all O(1) metadata into a **single meta entry**, eliminating multiple small IOs by design.
 
@@ -420,7 +433,7 @@ Meta structure definitions:
 // Hybrid:           {"index_type": uint8}
 ```
 
-### 5.3 Inheritance Patterns
+### 5.4 Inheritance Patterns
 
 **InvertedIndexTantivy** provides `BuildTantivyMeta()` as a virtual hook. Subclasses extend by:
 
@@ -446,7 +459,7 @@ All thread pools reuse V2 `ThreadPools::GetThreadPool(priority)`, no custom pool
 ### Upload — Unencrypted
 
 ```
-Main thread: [read chunk → crc32c_update → Write to RemoteOutputStream] ──→ sequential fill
+Main thread: [read buffer → crc32c_update → Write to RemoteOutputStream] ──→ sequential fill
 RemoteOutputStream:  background_writes parallel upload Part 0, 1, 2...  ──→ S3
 ```
 
@@ -507,6 +520,8 @@ Main thread (after all tasks complete, combine in sequential order):
 | Upload, encrypted, disk entry | W × `slice_size` × 2 |
 | Download, to memory | N × `range_size` + `original_size` |
 | Download, to file | N × `range_size` (reusable) |
+| Streaming load, unencrypted | bounded by entry stream budget |
+| Streaming load, encrypted | bounded by entry stream budget; each active slice budgets ciphertext + decrypted plaintext + returned slice |
 
 Consistent with V2: peak determined by concurrency × slice size, does not grow with entry size.
 

@@ -51,7 +51,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
-	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -79,7 +78,7 @@ func initStreamingSystem(t *testing.T) {
 		for _, vchannel := range msg.BroadcastHeader().VChannels {
 			results[vchannel] = &message.AppendResult{
 				MessageID:              rmq.NewRmqID(1),
-				TimeTick:               tsoutil.ComposeTSByTime(time.Now(), 0),
+				TimeTick:               tsoutil.ComposeTSByTime(time.Now()),
 				LastConfirmedMessageID: rmq.NewRmqID(1),
 			}
 		}
@@ -2544,6 +2543,88 @@ func TestServer_DropIndex(t *testing.T) {
 	})
 }
 
+func TestServer_DropIndex_DroppedField(t *testing.T) {
+	initStreamingSystem(t)
+	var (
+		collID    = UniqueID(1)
+		fieldID   = UniqueID(10)
+		indexID   = UniqueID(100)
+		indexName = "idx_dropped_field"
+		createTS  = uint64(1000)
+		ctx       = context.Background()
+	)
+
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	catalog.On("AlterIndexes", mock.Anything, mock.Anything).Return(nil)
+
+	// Broker returns a schema that does NOT contain fieldID=10 (simulating a dropped field)
+	b := broker.NewMockBroker(t)
+	b.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		Status:         merr.Status(nil),
+		DbName:         "test_db",
+		CollectionName: "test_collection",
+		Schema: &schemapb.CollectionSchema{
+			Name: "test_collection",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector},
+				// fieldID=10 is intentionally absent — it has been dropped
+			},
+		},
+	}, nil)
+
+	s := &Server{
+		meta: &meta{
+			catalog: catalog,
+			indexMeta: &indexMeta{
+				catalog: catalog,
+				indexes: map[UniqueID]map[UniqueID]*model.Index{
+					collID: {
+						indexID: {
+							CollectionID: collID,
+							FieldID:      fieldID, // points to dropped field
+							IndexID:      indexID,
+							IndexName:    indexName,
+							IsDeleted:    false,
+							CreateTime:   createTS,
+							TypeParams: []*commonpb.KeyValuePair{
+								{Key: common.DimKey, Value: "128"},
+							},
+							IndexParams: []*commonpb.KeyValuePair{
+								{Key: common.IndexTypeKey, Value: "IVF_FLAT"},
+							},
+						},
+					},
+				},
+				segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+			},
+			segments: NewSegmentsInfo(),
+		},
+		broker:          b,
+		allocator:       newMockAllocator(t),
+		notifyIndexChan: make(chan UniqueID, 1),
+	}
+
+	// Collection is loaded
+	mixCoord := mocks.NewMixCoord(t)
+	mixCoord.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+		Status:        merr.Success(),
+		CollectionIDs: []int64{collID},
+	}, nil)
+	s.mixCoord = mixCoord
+
+	RegisterDDLCallbacks(s)
+	s.stateCode.Store(commonpb.StateCode_Healthy)
+
+	// DropIndex should succeed: field not in schema triggers continue, not error
+	resp, err := s.DropIndex(ctx, &indexpb.DropIndexRequest{
+		CollectionID: collID,
+		IndexName:    indexName,
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+}
+
 func TestServer_GetIndexInfos(t *testing.T) {
 	var (
 		collID     = UniqueID(1)
@@ -2786,112 +2867,6 @@ func TestMeta_GetHasUnindexTaskSegments(t *testing.T) {
 	})
 }
 
-func TestValidateIndexParams(t *testing.T) {
-	t.Run("valid", func(t *testing.T) {
-		index := &model.Index{
-			IndexParams: []*commonpb.KeyValuePair{
-				{
-					Key:   common.IndexTypeKey,
-					Value: indexparamcheck.AutoIndex,
-				},
-				{
-					Key:   common.MmapEnabledKey,
-					Value: "true",
-				},
-			},
-		}
-		err := ValidateIndexParams(index)
-		assert.NoError(t, err)
-	})
-
-	t.Run("invalid index param", func(t *testing.T) {
-		index := &model.Index{
-			IndexParams: []*commonpb.KeyValuePair{
-				{
-					Key:   common.IndexTypeKey,
-					Value: indexparamcheck.AutoIndex,
-				},
-				{
-					Key:   common.MmapEnabledKey,
-					Value: "h",
-				},
-			},
-		}
-		err := ValidateIndexParams(index)
-		assert.Error(t, err)
-	})
-
-	t.Run("invalid index user param", func(t *testing.T) {
-		index := &model.Index{
-			IndexParams: []*commonpb.KeyValuePair{
-				{
-					Key:   common.IndexTypeKey,
-					Value: indexparamcheck.AutoIndex,
-				},
-			},
-			UserIndexParams: []*commonpb.KeyValuePair{
-				{
-					Key:   common.MmapEnabledKey,
-					Value: "h",
-				},
-			},
-		}
-		err := ValidateIndexParams(index)
-		assert.Error(t, err)
-	})
-
-	t.Run("duplicated_index_params", func(t *testing.T) {
-		index := &model.Index{
-			IndexParams: []*commonpb.KeyValuePair{
-				{
-					Key:   common.IndexTypeKey,
-					Value: indexparamcheck.AutoIndex,
-				},
-				{
-					Key:   common.IndexTypeKey,
-					Value: indexparamcheck.AutoIndex,
-				},
-			},
-		}
-		err := ValidateIndexParams(index)
-		assert.Error(t, err)
-	})
-
-	t.Run("duplicated_user_index_params", func(t *testing.T) {
-		index := &model.Index{
-			UserIndexParams: []*commonpb.KeyValuePair{
-				{
-					Key:   common.IndexTypeKey,
-					Value: indexparamcheck.AutoIndex,
-				},
-				{
-					Key:   common.IndexTypeKey,
-					Value: indexparamcheck.AutoIndex,
-				},
-			},
-		}
-		err := ValidateIndexParams(index)
-		assert.Error(t, err)
-	})
-
-	t.Run("duplicated_user_index_params", func(t *testing.T) {
-		index := &model.Index{
-			TypeParams: []*commonpb.KeyValuePair{
-				{
-					Key:   common.IndexTypeKey,
-					Value: indexparamcheck.AutoIndex,
-				},
-				{
-					Key:   common.IndexTypeKey,
-					Value: indexparamcheck.AutoIndex,
-				},
-			},
-		}
-		err := ValidateIndexParams(index)
-		assert.Error(t, err)
-	})
-}
-
 func TestJsonIndex(t *testing.T) {
 	initStreamingSystem(t)
 
@@ -3097,4 +3072,33 @@ func TestJsonIndex(t *testing.T) {
 	}
 	resp, err = s.CreateIndex(context.Background(), req)
 	assert.Error(t, merr.CheckRPCCall(resp, err))
+}
+
+// Test_checkFMIndexEngineVersion covers the shared FMINDEX rolling-upgrade gate
+// used by BOTH Server.CreateIndex and snapshotManager.RestoreIndexes (so a
+// snapshot restore cannot bypass it). MinScalarIndexVersionForFMINDEX is 5:
+// resolved version 4 must be rejected, 5 accepted; non-FMINDEX always passes.
+func Test_checkFMIndexEngineVersion(t *testing.T) {
+	fmParams := []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "FMINDEX"}}
+	invertedParams := []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "INVERTED"}}
+
+	t.Run("fmindex below min version rejected", func(t *testing.T) {
+		err := checkFMIndexEngineVersion(fmParams, common.MinScalarIndexVersionForFMINDEX-1)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrServiceNotReady)
+		assert.Contains(t, err.Error(), "FMINDEX requires scalar index engine version")
+		assert.True(t, merr.Status(err).GetRetriable())
+	})
+
+	t.Run("fmindex at min version accepted", func(t *testing.T) {
+		assert.NoError(t, checkFMIndexEngineVersion(fmParams, common.MinScalarIndexVersionForFMINDEX))
+	})
+
+	t.Run("fmindex above min version accepted", func(t *testing.T) {
+		assert.NoError(t, checkFMIndexEngineVersion(fmParams, common.MinScalarIndexVersionForFMINDEX+1))
+	})
+
+	t.Run("non-fmindex always accepted regardless of version", func(t *testing.T) {
+		assert.NoError(t, checkFMIndexEngineVersion(invertedParams, 0))
+	})
 }

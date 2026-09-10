@@ -27,6 +27,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -112,7 +113,7 @@ func (s *MixCompactionTaskStorageV2Suite) TestCompactDupPK_MixToV2Format() {
 	dblobs, err := getInt64DeltaBlobs(
 		1,
 		[]int64{100},
-		[]uint64{tsoutil.ComposeTSByTime(getMilvusBirthday().Add(time.Second), 0)},
+		[]uint64{tsoutil.ComposeTSByTime(getMilvusBirthday().Add(time.Second))},
 	)
 	s.Require().NoError(err)
 
@@ -144,7 +145,7 @@ func (s *MixCompactionTaskStorageV2Suite) TestCompactDupPK_MixToV2Format() {
 
 	v2Segments := []int64{10, 11}
 	for _, segID := range v2Segments {
-		binlogs, _, _, _, _, _, err := s.initStorageV2Segments(1, segID, alloc)
+		binlogs, _, _, _, _, _, _, err := s.initStorageV2Segments(1, segID, alloc)
 		s.NoError(err)
 		s.task.plan.SegmentBinlogs = append(s.task.plan.SegmentBinlogs, &datapb.CompactionSegmentBinlogs{
 			CollectionID:   1,
@@ -179,7 +180,7 @@ func (s *MixCompactionTaskStorageV2Suite) TestCompactDupPK_V2ToV2Format() {
 
 	v2Segments := []int64{10, 11}
 	for _, segID := range v2Segments {
-		binlogs, _, _, _, _, _, err := s.initStorageV2Segments(1, segID, alloc)
+		binlogs, _, _, _, _, _, _, err := s.initStorageV2Segments(1, segID, alloc)
 		s.NoError(err)
 		s.task.plan.SegmentBinlogs = append(s.task.plan.SegmentBinlogs, &datapb.CompactionSegmentBinlogs{
 			CollectionID:   1,
@@ -288,6 +289,72 @@ func (s *MixCompactionTaskStorageV2Suite) TestMergeNoExpirationLackBinlog_V1ToV2
 	s.TestMergeNoExpirationLackBinlog()
 }
 
+func (s *MixCompactionTaskStorageV2Suite) TestProjectedReaderPreservesPackedGroupPathIndexes() {
+	const segmentID = int64(1001)
+	fieldBinlogs, _, _, _, _, _, _, err := s.initStorageV2Segments(
+		1,
+		segmentID,
+		allocator.NewLocalAllocator(1000, math.MaxInt64),
+	)
+	s.Require().NoError(err)
+
+	fullSchema := s.meta.GetSchema()
+	selectedFields := lo.Filter(fullSchema.GetFields(), func(field *schemapb.FieldSchema, _ int) bool {
+		switch field.GetFieldID() {
+		case common.RowIDField, common.TimeStampField, Int64Field, FloatVectorField:
+			return true
+		default:
+			return false
+		}
+	})
+	readSchema := &schemapb.CollectionSchema{
+		Name:   fullSchema.GetName(),
+		Fields: selectedFields,
+	}
+	storageConfig := &indexpb.StorageConfig{
+		StorageType: "local",
+		RootPath:    paramtable.Get().LocalStorageCfg.Path.GetValue(),
+	}
+	segment := &datapb.CompactionSegmentBinlogs{
+		CollectionID:   CollectionID,
+		PartitionID:    PartitionID,
+		SegmentID:      segmentID,
+		StorageVersion: storage.StorageV2,
+	}
+	modernFieldBinlogs := storage.SortFieldBinlogs(fieldBinlogs)
+	legacyFieldBinlogs := lo.Map(modernFieldBinlogs, func(fieldBinlog *datapb.FieldBinlog, _ int) *datapb.FieldBinlog {
+		legacy := proto.Clone(fieldBinlog).(*datapb.FieldBinlog)
+		legacy.ChildFields = nil
+		return legacy
+	})
+	for _, testCase := range []struct {
+		name         string
+		fieldBinlogs []*datapb.FieldBinlog
+	}{
+		{name: "modern_v2", fieldBinlogs: modernFieldBinlogs},
+		{name: "legacy_v2", fieldBinlogs: legacyFieldBinlogs},
+	} {
+		s.Run(testCase.name, func() {
+			segment.FieldBinlogs = append([]*datapb.FieldBinlog(nil), testCase.fieldBinlogs...)
+			reader, _, err := newCompactionSegmentRecordReader(context.Background(), segment, readSchema, storageConfig,
+				storage.WithCollectionID(CollectionID),
+				storage.WithVersion(storage.StorageV2),
+				storage.WithStorageConfig(storageConfig),
+			)
+			s.Require().NoError(err)
+
+			record, err := reader.Next()
+			s.Require().NoError(err)
+			values := make([]*storage.Value, record.Len())
+			s.Require().NoError(storage.ValueDeserializerWithSelectedFields(record, values, selectedFields, true))
+			s.Require().Len(values, 1)
+			s.EqualValues(segmentID, values[0].Value.(map[int64]interface{})[Int64Field])
+			s.Equal([]float32{4, 5, 6, 7}, values[0].Value.(map[int64]interface{})[FloatVectorField])
+			s.Require().NoError(reader.Close())
+		})
+	}
+}
+
 func (s *MixCompactionTaskStorageV2Suite) initStorageV2Segments(rows int, seed int64, alloc allocator.Interface) (
 	inserts map[int64]*datapb.FieldBinlog,
 	deltas *datapb.FieldBinlog,
@@ -295,12 +362,13 @@ func (s *MixCompactionTaskStorageV2Suite) initStorageV2Segments(rows int, seed i
 	bm25Stats map[int64]*datapb.FieldBinlog,
 	manifest string,
 	size int64,
+	segmentStats *datapb.Statistics,
 	err error,
 ) {
 	rootPath := paramtable.Get().LocalStorageCfg.Path.GetValue()
 	cm := storage.NewLocalChunkManager(objectstorage.RootPath(rootPath))
 	bfs := pkoracle.NewBloomFilterSet()
-	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs, nil)
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs, nil, metacache.NewEmptySegmentStats())
 	metacache.UpdateNumOfRows(1000)(seg)
 	mc := metacache.NewMockMetaCache(s.T())
 	mc.EXPECT().Collection().Return(CollectionID).Maybe()
@@ -324,7 +392,7 @@ func (s *MixCompactionTaskStorageV2Suite) initStorageV2Segments(rows int, seed i
 }
 
 func getRowWithoutNil(magic int64) map[int64]interface{} {
-	ts := tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)
+	ts := tsoutil.ComposeTSByTime(getMilvusBirthday())
 	return map[int64]interface{}{
 		common.RowIDField:      magic,
 		common.TimeStampField:  int64(ts), // should be int64 here

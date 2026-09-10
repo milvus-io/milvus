@@ -14,7 +14,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/mocks/util/streamingutil/service/mock_lazygrpc"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mocks/proto/mock_streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -165,7 +165,7 @@ func TestGetReplicateConfiguration_FreshRead(t *testing.T) {
 			resumingExitCh: make(chan struct{}),
 			cond:           syncutil.NewContextCond(&sync.Mutex{}),
 			discoverer:     nil,
-			logger:         log.With(),
+			logger:         mlog.With(),
 		}
 		close(svc.resumingExitCh)
 		return svc

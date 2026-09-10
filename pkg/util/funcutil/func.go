@@ -31,15 +31,15 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	grpcStatus "google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -80,21 +80,21 @@ func GetIP(ip string) string {
 				}
 			}
 		}
-		panic(errors.New(`Network port does not have an IP address that falls within the given CIDR range`))
+		panic(merr.WrapErrParameterInvalidMsg(`Network port does not have an IP address that falls within the given CIDR range`))
 	}
 
 	netIP := net.ParseIP(ip)
 	// not a valid ip addr
 	if netIP == nil {
-		log.Warn("cannot parse input ip, treat it as hostname/service name", zap.String("ip", ip))
+		mlog.Warn(context.TODO(), "cannot parse input ip, treat it as hostname/service name", mlog.String("ip", ip))
 		return ip
 	}
 	// only localhost or unicast is acceptable
 	if netIP.IsUnspecified() {
-		panic(errors.Newf(`"%s" in param table is Unspecified IP address and cannot be used`))
+		panic(merr.WrapErrParameterInvalidMsg(`"%s" in param table is Unspecified IP address and cannot be used`))
 	}
 	if netIP.IsMulticast() || netIP.IsLinkLocalMulticast() || netIP.IsInterfaceLocalMulticast() {
-		panic(errors.Newf(`"%s" in param table is Multicast IP address and cannot be used`))
+		panic(merr.WrapErrParameterInvalidMsg(`"%s" in param table is Multicast IP address and cannot be used`))
 	}
 	return ip
 }
@@ -103,7 +103,7 @@ func GetIP(ip string) string {
 func GetLocalIP() string {
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
-		log.Warn("Failed to get interface addresses", zap.Error(err))
+		mlog.Warn(context.TODO(), "Failed to get interface addresses", mlog.Err(err))
 		return "127.0.0.1"
 	}
 
@@ -114,7 +114,7 @@ func GetLocalIP() string {
 		return ip
 	}
 
-	log.Warn("No valid local IP found, falling back to loopback")
+	mlog.Warn(context.TODO(), "No valid local IP found, falling back to loopback")
 	return "127.0.0.1"
 }
 
@@ -181,14 +181,14 @@ func getValidLocalIP(addrs []net.Addr, preferIPv6 bool) string {
 	for _, category := range priorities {
 		if ip, exists := candidates[category]; exists {
 			result := formatLocalIP(ip)
-			log.Debug("Selected IP by priority",
-				zap.String("ip", result),
-				zap.String("categoryName", getCategoryName(category)))
+			mlog.Debug(context.TODO(), "Selected IP by priority",
+				mlog.String("ip", result),
+				mlog.String("categoryName", getCategoryName(category)))
 			return result
 		}
 	}
 
-	log.Warn("No valid IP found in candidates")
+	mlog.Warn(context.TODO(), "No valid IP found in candidates")
 	return ""
 }
 
@@ -215,7 +215,7 @@ func JSONToMap(mStr string) (map[string]string, error) {
 	buffer := make(map[string]any)
 	err := json.Unmarshal([]byte(mStr), &buffer)
 	if err != nil {
-		return nil, fmt.Errorf("unmarshal params failed, %w", err)
+		return nil, merr.Wrap(err, "unmarshal params failed")
 	}
 	ret := make(map[string]string)
 	for key, value := range buffer {
@@ -238,7 +238,7 @@ func JSONToRoleDetails(mStr string) (map[string](map[string]([](map[string]strin
 	buffer := make(map[string](map[string]([](map[string]string))), 0)
 	err := json.Unmarshal([]byte(mStr), &buffer)
 	if err != nil {
-		return nil, fmt.Errorf("unmarshal `builtinRoles.Roles` failed, %w", err)
+		return nil, merr.Wrap(err, "unmarshal `builtinRoles.Roles` failed")
 	}
 	ret := make(map[string](map[string]([](map[string]string))), 0)
 	for role, privilegesJSON := range buffer {
@@ -275,7 +275,7 @@ func GetAttrByKeyFromRepeatedKV(key string, kvs []*commonpb.KeyValuePair) (strin
 		}
 	}
 
-	return "", fmt.Errorf("key %s not found", key)
+	return "", merr.WrapErrParameterInvalidMsg("key %s not found", key)
 }
 
 // TryGetAttrByKeyFromRepeatedKV return the value corresponding to key in kv pair
@@ -410,13 +410,41 @@ func GetVirtualChannel(pchannel string, collectionID int64, idx int) string {
 	return fmt.Sprintf("%s_%dv%d", pchannel, collectionID, idx)
 }
 
+// ParseVChannel parses a canonical virtual channel name formatted as
+// {pchannel}_{collectionID}v{index}.
+func ParseVChannel(vchannel string) (string, int64, int, error) {
+	separator := strings.LastIndexByte(vchannel, '_')
+	if separator <= 0 || separator == len(vchannel)-1 {
+		return "", 0, 0, merr.WrapErrServiceInternalMsg("invalid vchannel %q", vchannel)
+	}
+
+	suffix := vchannel[separator+1:]
+	versionSeparator := strings.IndexByte(suffix, 'v')
+	if versionSeparator <= 0 || versionSeparator == len(suffix)-1 {
+		return "", 0, 0, merr.WrapErrServiceInternalMsg("invalid vchannel %q", vchannel)
+	}
+
+	collectionComponent := suffix[:versionSeparator]
+	collectionID, err := strconv.ParseInt(collectionComponent, 10, 64)
+	if err != nil || collectionID < 0 || strconv.FormatInt(collectionID, 10) != collectionComponent {
+		return "", 0, 0, merr.WrapErrServiceInternalMsg("invalid vchannel %q", vchannel)
+	}
+	indexComponent := suffix[versionSeparator+1:]
+	indexValue, err := strconv.ParseInt(indexComponent, 10, strconv.IntSize)
+	if err != nil || indexValue < 0 || strconv.FormatInt(indexValue, 10) != indexComponent {
+		return "", 0, 0, merr.WrapErrServiceInternalMsg("invalid vchannel %q", vchannel)
+	}
+
+	return vchannel[:separator], collectionID, int(indexValue), nil
+}
+
 // ConvertChannelName assembles channel name according to parameters.
 func ConvertChannelName(chanName string, tokenFrom string, tokenTo string) (string, error) {
 	if tokenFrom == "" {
-		return "", errors.New("the tokenFrom is empty")
+		return "", merr.WrapErrParameterInvalidMsg("the tokenFrom is empty")
 	}
 	if !strings.Contains(chanName, tokenFrom) {
-		return "", fmt.Errorf("cannot find token '%s' in '%s'", tokenFrom, chanName)
+		return "", merr.WrapErrParameterInvalidMsg("cannot find token '%s' in '%s'", tokenFrom, chanName)
 	}
 	return strings.Replace(chanName, tokenFrom, tokenTo, 1), nil
 }
@@ -445,60 +473,60 @@ func getNumRowsOfArrayVectorField(datas interface{}) uint64 {
 
 func GetNumRowsOfFloatVectorField(fDatas []float32, dim int64) (uint64, error) {
 	if dim <= 0 {
-		return 0, fmt.Errorf("dim(%d) should be greater than 0", dim)
+		return 0, merr.WrapErrParameterInvalidMsg("dim(%d) should be greater than 0", dim)
 	}
 	l := len(fDatas)
 	if int64(l)%dim != 0 {
-		return 0, fmt.Errorf("the length(%d) of float data should divide the dim(%d)", l, dim)
+		return 0, merr.WrapErrParameterInvalidMsg("the length(%d) of float data should divide the dim(%d)", l, dim)
 	}
 	return uint64(int64(l) / dim), nil
 }
 
 func GetNumRowsOfBinaryVectorField(bDatas []byte, dim int64) (uint64, error) {
 	if dim <= 0 {
-		return 0, fmt.Errorf("dim(%d) should be greater than 0", dim)
+		return 0, merr.WrapErrParameterInvalidMsg("dim(%d) should be greater than 0", dim)
 	}
 	if dim%8 != 0 {
-		return 0, fmt.Errorf("dim(%d) should divide 8", dim)
+		return 0, merr.WrapErrParameterInvalidMsg("dim(%d) should divide 8", dim)
 	}
 	l := len(bDatas)
 	if (8*int64(l))%dim != 0 {
-		return 0, fmt.Errorf("the num(%d) of all bits should divide the dim(%d)", 8*l, dim)
+		return 0, merr.WrapErrParameterInvalidMsg("the num(%d) of all bits should divide the dim(%d)", 8*l, dim)
 	}
 	return uint64((8 * int64(l)) / dim), nil
 }
 
 func GetNumRowsOfFloat16VectorField(f16Datas []byte, dim int64) (uint64, error) {
 	if dim <= 0 {
-		return 0, fmt.Errorf("dim(%d) should be greater than 0", dim)
+		return 0, merr.WrapErrParameterInvalidMsg("dim(%d) should be greater than 0", dim)
 	}
 	l := len(f16Datas)
 	rowWidth := dim * 2
 	if int64(l)%rowWidth != 0 {
-		return 0, fmt.Errorf("the length(%d) of float16 data should divide the row width(%d)", l, rowWidth)
+		return 0, merr.WrapErrParameterInvalidMsg("the length(%d) of float16 data should divide the row width(%d)", l, rowWidth)
 	}
 	return uint64(int64(l) / rowWidth), nil
 }
 
 func GetNumRowsOfBFloat16VectorField(bf16Datas []byte, dim int64) (uint64, error) {
 	if dim <= 0 {
-		return 0, fmt.Errorf("dim(%d) should be greater than 0", dim)
+		return 0, merr.WrapErrParameterInvalidMsg("dim(%d) should be greater than 0", dim)
 	}
 	l := len(bf16Datas)
 	rowWidth := dim * 2
 	if int64(l)%rowWidth != 0 {
-		return 0, fmt.Errorf("the length(%d) of bfloat data should divide the row width(%d)", l, rowWidth)
+		return 0, merr.WrapErrParameterInvalidMsg("the length(%d) of bfloat data should divide the row width(%d)", l, rowWidth)
 	}
 	return uint64(int64(l) / rowWidth), nil
 }
 
 func GetNumRowsOfInt8VectorField(iDatas []byte, dim int64) (uint64, error) {
 	if dim <= 0 {
-		return 0, fmt.Errorf("dim(%d) should be greater than 0", dim)
+		return 0, merr.WrapErrParameterInvalidMsg("dim(%d) should be greater than 0", dim)
 	}
 	l := len(iDatas)
 	if int64(l)%dim != 0 {
-		return 0, fmt.Errorf("the length(%d) of int8 data should divide the dim(%d)", l, dim)
+		return 0, merr.WrapErrParameterInvalidMsg("the length(%d) of int8 data should divide the dim(%d)", l, dim)
 	}
 	return uint64(int64(l) / dim), nil
 }
@@ -515,7 +543,7 @@ func CountValidRows(validData []bool) uint64 {
 
 func GetVectorFieldPhysicalRows(fieldName string, dataType schemapb.DataType, vectors *schemapb.VectorField) (uint64, error) {
 	if vectors == nil {
-		return 0, fmt.Errorf("nullable vector field %s requires vector data", fieldName)
+		return 0, merr.WrapErrParameterInvalidMsg("nullable vector field %s requires vector data", fieldName)
 	}
 
 	return getVectorFieldPhysicalRowsWithDim(fieldName, dataType, vectors, vectors.GetDim())
@@ -539,23 +567,23 @@ func getVectorFieldPhysicalRowsWithDim(fieldName string, dataType schemapb.DataT
 	case schemapb.DataType_Int8Vector:
 		return GetNumRowsOfInt8VectorField(vectors.GetInt8Vector(), dim)
 	default:
-		return 0, fmt.Errorf("unsupported nullable vector type %s", dataType)
+		return 0, merr.WrapErrParameterInvalidMsg("unsupported nullable vector type %s", dataType)
 	}
 }
 
 func ValidateNullableVectorCompactRows(fieldName string, validData []bool, physicalRows uint64, logicalRows uint64, requireValidData bool) error {
 	if len(validData) == 0 {
 		if requireValidData {
-			return fmt.Errorf("nullable vector field %s requires valid_data", fieldName)
+			return merr.WrapErrParameterInvalidMsg("nullable vector field %s requires valid_data", fieldName)
 		}
 		return nil
 	}
 	if logicalRows > 0 && uint64(len(validData)) != logicalRows {
-		return fmt.Errorf("nullable vector field %s valid_data length mismatch: valid_data=%d, logical rows=%d", fieldName, len(validData), logicalRows)
+		return merr.WrapErrParameterInvalidMsg("nullable vector field %s valid_data length mismatch: valid_data=%d, logical rows=%d", fieldName, len(validData), logicalRows)
 	}
 	validRows := CountValidRows(validData)
 	if physicalRows != validRows {
-		return fmt.Errorf("nullable vector field %s has %d valid rows, but compact physical payload rows is %d", fieldName, validRows, physicalRows)
+		return merr.WrapErrParameterInvalidMsg("nullable vector field %s has %d valid rows, but compact physical payload rows is %d", fieldName, validRows, physicalRows)
 	}
 	return nil
 }
@@ -564,14 +592,15 @@ func ValidateNullableVectorFieldDataCompact(fieldData *schemapb.FieldData, logic
 	if fieldData == nil || !typeutil.IsSupportedNullableVectorType(fieldData.GetType()) {
 		return nil
 	}
-	if len(fieldData.GetValidData()) == 0 && !requireValidData {
+	validData := typeutil.GetFieldDataValidData(fieldData)
+	if len(validData) == 0 && !requireValidData {
 		return nil
 	}
 	physicalRows, err := GetVectorFieldPhysicalRows(fieldData.GetFieldName(), fieldData.GetType(), fieldData.GetVectors())
 	if err != nil {
 		return err
 	}
-	return ValidateNullableVectorCompactRows(fieldData.GetFieldName(), fieldData.GetValidData(), physicalRows, logicalRows, requireValidData)
+	return ValidateNullableVectorCompactRows(fieldData.GetFieldName(), validData, physicalRows, logicalRows, requireValidData)
 }
 
 func ValidateNullableVectorFieldDataCompactWithDim(fieldData *schemapb.FieldData, logicalRows uint64, requireValidData bool, dim int64) error {
@@ -581,14 +610,15 @@ func ValidateNullableVectorFieldDataCompactWithDim(fieldData *schemapb.FieldData
 	if !typeutil.IsSupportedNullableVectorType(fieldData.GetType()) {
 		return nil
 	}
-	if len(fieldData.GetValidData()) == 0 && !requireValidData {
+	validData := typeutil.GetFieldDataValidData(fieldData)
+	if len(validData) == 0 && !requireValidData {
 		return nil
 	}
 	physicalRows, err := getVectorFieldPhysicalRowsWithDim(fieldData.GetFieldName(), fieldData.GetType(), fieldData.GetVectors(), dim)
 	if err != nil {
 		return err
 	}
-	return ValidateNullableVectorCompactRows(fieldData.GetFieldName(), fieldData.GetValidData(), physicalRows, logicalRows, requireValidData)
+	return ValidateNullableVectorCompactRows(fieldData.GetFieldName(), validData, physicalRows, logicalRows, requireValidData)
 }
 
 // GetNumRowOfFieldDataWithSchema returns num of rows with schema specification.
@@ -599,7 +629,8 @@ func GetNumRowOfFieldDataWithSchema(fieldData *schemapb.FieldData, helper *typeu
 	if err != nil {
 		return 0, err
 	}
-	if len(fieldData.GetValidData()) > 0 && typeutil.IsSupportedNullableVectorType(fieldSchema.GetDataType()) {
+	validData := typeutil.GetFieldDataValidData(fieldData)
+	if len(validData) > 0 && typeutil.IsSupportedNullableVectorType(fieldSchema.GetDataType()) {
 		dim := fieldData.GetVectors().GetDim()
 		if dim == 0 && fieldSchema.GetDataType() != schemapb.DataType_SparseFloatVector {
 			dim, err = typeutil.GetDim(fieldSchema)
@@ -607,10 +638,10 @@ func GetNumRowOfFieldDataWithSchema(fieldData *schemapb.FieldData, helper *typeu
 				return 0, err
 			}
 		}
-		if err := ValidateNullableVectorFieldDataCompactWithDim(fieldData, uint64(len(fieldData.GetValidData())), false, dim); err != nil {
+		if err := ValidateNullableVectorFieldDataCompactWithDim(fieldData, uint64(len(validData)), false, dim); err != nil {
 			return 0, err
 		}
-		return uint64(len(fieldData.GetValidData())), nil
+		return uint64(len(validData)), nil
 	}
 	switch fieldSchema.GetDataType() {
 	case schemapb.DataType_Bool:
@@ -640,8 +671,8 @@ func GetNumRowOfFieldDataWithSchema(fieldData *schemapb.FieldData, helper *typeu
 			fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetGeometryWktData().GetData())
 		}
 	case schemapb.DataType_FloatVector:
-		if len(fieldData.GetValidData()) > 0 {
-			fieldNumRows = uint64(len(fieldData.GetValidData()))
+		if len(validData) > 0 {
+			fieldNumRows = uint64(len(validData))
 		} else {
 			dim := fieldData.GetVectors().GetDim()
 			fieldNumRows, err = GetNumRowsOfFloatVectorField(fieldData.GetVectors().GetFloatVector().GetData(), dim)
@@ -650,8 +681,8 @@ func GetNumRowOfFieldDataWithSchema(fieldData *schemapb.FieldData, helper *typeu
 			}
 		}
 	case schemapb.DataType_BinaryVector:
-		if len(fieldData.GetValidData()) > 0 {
-			fieldNumRows = uint64(len(fieldData.GetValidData()))
+		if len(validData) > 0 {
+			fieldNumRows = uint64(len(validData))
 		} else {
 			dim := fieldData.GetVectors().GetDim()
 			fieldNumRows, err = GetNumRowsOfBinaryVectorField(fieldData.GetVectors().GetBinaryVector(), dim)
@@ -660,8 +691,8 @@ func GetNumRowOfFieldDataWithSchema(fieldData *schemapb.FieldData, helper *typeu
 			}
 		}
 	case schemapb.DataType_Float16Vector:
-		if len(fieldData.GetValidData()) > 0 {
-			fieldNumRows = uint64(len(fieldData.GetValidData()))
+		if len(validData) > 0 {
+			fieldNumRows = uint64(len(validData))
 		} else {
 			dim := fieldData.GetVectors().GetDim()
 			fieldNumRows, err = GetNumRowsOfFloat16VectorField(fieldData.GetVectors().GetFloat16Vector(), dim)
@@ -670,8 +701,8 @@ func GetNumRowOfFieldDataWithSchema(fieldData *schemapb.FieldData, helper *typeu
 			}
 		}
 	case schemapb.DataType_BFloat16Vector:
-		if len(fieldData.GetValidData()) > 0 {
-			fieldNumRows = uint64(len(fieldData.GetValidData()))
+		if len(validData) > 0 {
+			fieldNumRows = uint64(len(validData))
 		} else {
 			dim := fieldData.GetVectors().GetDim()
 			fieldNumRows, err = GetNumRowsOfBFloat16VectorField(fieldData.GetVectors().GetBfloat16Vector(), dim)
@@ -680,14 +711,14 @@ func GetNumRowOfFieldDataWithSchema(fieldData *schemapb.FieldData, helper *typeu
 			}
 		}
 	case schemapb.DataType_SparseFloatVector:
-		if len(fieldData.GetValidData()) > 0 {
-			fieldNumRows = uint64(len(fieldData.GetValidData()))
+		if len(validData) > 0 {
+			fieldNumRows = uint64(len(validData))
 		} else {
 			fieldNumRows = uint64(len(fieldData.GetVectors().GetSparseFloatVector().GetContents()))
 		}
 	case schemapb.DataType_Int8Vector:
-		if len(fieldData.GetValidData()) > 0 {
-			fieldNumRows = uint64(len(fieldData.GetValidData()))
+		if len(validData) > 0 {
+			fieldNumRows = uint64(len(validData))
 		} else {
 			dim := fieldData.GetVectors().GetDim()
 			fieldNumRows, err = GetNumRowsOfInt8VectorField(fieldData.GetVectors().GetInt8Vector(), dim)
@@ -696,13 +727,13 @@ func GetNumRowOfFieldDataWithSchema(fieldData *schemapb.FieldData, helper *typeu
 			}
 		}
 	case schemapb.DataType_ArrayOfVector:
-		if len(fieldData.GetValidData()) > 0 {
-			fieldNumRows = uint64(len(fieldData.GetValidData()))
+		if len(validData) > 0 {
+			fieldNumRows = uint64(len(validData))
 		} else {
 			fieldNumRows = getNumRowsOfArrayVectorField(fieldData.GetVectors().GetVectorArray().GetData())
 		}
 	default:
-		return 0, fmt.Errorf("%s is not supported now", fieldSchema.GetDataType())
+		return 0, merr.WrapErrParameterInvalidMsg("%s is not supported now", fieldSchema.GetDataType())
 	}
 
 	return fieldNumRows, nil
@@ -712,6 +743,7 @@ func GetNumRowOfFieldDataWithSchema(fieldData *schemapb.FieldData, helper *typeu
 func GetNumRowOfFieldData(fieldData *schemapb.FieldData) (uint64, error) {
 	var fieldNumRows uint64
 	var err error
+	validData := typeutil.GetFieldDataValidData(fieldData)
 	switch fieldType := fieldData.Field.(type) {
 	case *schemapb.FieldData_Scalars:
 		scalarField := fieldData.GetScalars()
@@ -737,15 +769,15 @@ func GetNumRowOfFieldData(fieldData *schemapb.FieldData) (uint64, error) {
 		case *schemapb.ScalarField_GeometryData:
 			fieldNumRows = getNumRowsOfScalarField(scalarField.GetGeometryData().Data)
 		default:
-			return 0, fmt.Errorf("%s is not supported now", scalarType)
+			return 0, merr.WrapErrParameterInvalidMsg("%s is not supported now", scalarType)
 		}
 	case *schemapb.FieldData_Vectors:
 		vectorField := fieldData.GetVectors()
-		if len(fieldData.GetValidData()) > 0 {
-			if err := ValidateNullableVectorFieldDataCompact(fieldData, uint64(len(fieldData.GetValidData())), false); err != nil {
+		if len(validData) > 0 {
+			if err := ValidateNullableVectorFieldDataCompact(fieldData, uint64(len(validData)), false); err != nil {
 				return 0, err
 			}
-			return uint64(len(fieldData.GetValidData())), nil
+			return uint64(len(validData)), nil
 		}
 		switch vectorFieldType := vectorField.Data.(type) {
 		case *schemapb.VectorField_FloatVector:
@@ -783,10 +815,10 @@ func GetNumRowOfFieldData(fieldData *schemapb.FieldData) (uint64, error) {
 		case *schemapb.VectorField_VectorArray:
 			fieldNumRows = getNumRowsOfArrayVectorField(vectorField.GetVectorArray().Data)
 		default:
-			return 0, fmt.Errorf("%s is not supported now", vectorFieldType)
+			return 0, merr.WrapErrParameterInvalidMsg("%s is not supported now", vectorFieldType)
 		}
 	default:
-		return 0, fmt.Errorf("%s is not supported now", fieldType)
+		return 0, merr.WrapErrParameterInvalidMsg("%s is not supported now", fieldType)
 	}
 
 	return fieldNumRows, nil
@@ -847,7 +879,7 @@ func EncodeUserRoleCache(user string, role string) string {
 func DecodeUserRoleCache(cache string) (string, string, error) {
 	index := strings.LastIndex(cache, "/")
 	if index == -1 {
-		return "", "", fmt.Errorf("invalid param, cache: [%s]", cache)
+		return "", "", merr.WrapErrParameterInvalidMsg("invalid param, cache: [%s]", cache)
 	}
 	user := cache[:index]
 	role := cache[index+1:]
@@ -903,7 +935,7 @@ func categorizeLocalIP(ip net.IP) (ipCategory, bool) {
 		return ipCategoryIPv6Public, true
 	}
 
-	log.Debug("IP categorization: uncategorized IPv6", zap.String("ip", ip.String()))
+	mlog.Debug(context.TODO(), "IP categorization: uncategorized IPv6", mlog.String("ip", ip.String()))
 	return 0, false
 }
 

@@ -126,6 +126,33 @@ func TestExternalCollectionManager_SubmitTask_Success(t *testing.T) {
 	assert.Equal(t, []int64{1, 2}, info.KeptSegments)
 }
 
+func TestExternalCollectionManager_SubmitTask_DefaultsNoneStateToFinished(t *testing.T) {
+	ctx := context.Background()
+	manager := NewExternalCollectionManager(ctx, 4)
+	defer manager.Close()
+
+	clusterID := "test-cluster"
+	taskID := int64(20)
+	collID := int64(2000)
+
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		TaskID:       taskID,
+		CollectionID: collID,
+	}
+
+	err := manager.SubmitTask(clusterID, req, func(ctx context.Context) (*datapb.RefreshExternalCollectionTaskResponse, error) {
+		return &datapb.RefreshExternalCollectionTaskResponse{
+			State: indexpb.JobState_JobStateNone,
+		}, nil
+	})
+	require.NoError(t, err)
+
+	require.Eventually(t, func() bool {
+		info := manager.Get(clusterID, taskID)
+		return info != nil && info.State == indexpb.JobState_JobStateFinished
+	}, time.Second, 10*time.Millisecond)
+}
+
 func TestExternalCollectionManager_SubmitTask_Failure(t *testing.T) {
 	ctx := context.Background()
 	manager := NewExternalCollectionManager(ctx, 4)
@@ -248,9 +275,13 @@ func TestExternalCollectionManager_CancelTask(t *testing.T) {
 		}
 	}, time.Second, 10*time.Millisecond)
 
-	info := manager.Get(clusterID, taskID)
+	var info *TaskInfo
+	require.Eventually(t, func() bool {
+		info = manager.Get(clusterID, taskID)
+		return info != nil && info.State == indexpb.JobState_JobStateFailed
+	}, time.Second, 10*time.Millisecond)
+
 	require.NotNil(t, info)
-	assert.Equal(t, indexpb.JobState_JobStateFailed, info.State)
 	assert.Contains(t, info.FailReason, "context canceled")
 }
 

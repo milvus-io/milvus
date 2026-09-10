@@ -47,9 +47,13 @@ func (s *EtcdSourceSuite) TearDownSuite() {
 }
 
 func (s *EtcdSourceSuite) TestNewSource() {
-	source, err := NewEtcdSource(&EtcdInfo{
+	etcdCli, err := newEtcdClient(&EtcdInfo{Endpoints: s.endpoints, DialTimeout: 5 * time.Second})
+	s.Require().NoError(err)
+	defer etcdCli.Close()
+	source, err := NewEtcdSource(etcdCli, &EtcdInfo{
 		Endpoints:       s.endpoints,
 		KeyPrefix:       "by-dev",
+		DialTimeout:     5 * time.Second,
 		RefreshInterval: time.Second,
 	})
 	s.NoError(err)
@@ -58,7 +62,10 @@ func (s *EtcdSourceSuite) TestNewSource() {
 }
 
 func (s *EtcdSourceSuite) TestUpdateOptions() {
-	source, err := NewEtcdSource(&EtcdInfo{
+	etcdCli, err := newEtcdClient(&EtcdInfo{Endpoints: s.endpoints, DialTimeout: 5 * time.Second})
+	s.Require().NoError(err)
+	defer etcdCli.Close()
+	source, err := NewEtcdSource(etcdCli, &EtcdInfo{
 		Endpoints:       s.endpoints,
 		KeyPrefix:       "test_update_options_1",
 		RefreshInterval: time.Second,

@@ -73,7 +73,15 @@ func TestDropDatabaseTask(t *testing.T) {
 	defer rc.Close()
 
 	ctx := context.Background()
+	cache := NewMockCache(t)
+	cache.On("RemoveDatabase",
+		mock.Anything, // context.Context
+		mock.AnythingOfType("string"),
+	).Maybe()
 	task := &dropDatabaseTask{
+		baseTask: baseTask{
+			MetaCache: cache,
+		},
 		Condition: NewTaskCondition(ctx),
 		DropDatabaseRequest: &milvuspb.DropDatabaseRequest{
 			Base: &commonpb.MsgBase{
@@ -87,14 +95,6 @@ func TestDropDatabaseTask(t *testing.T) {
 		mixCoord: rc,
 		result:   nil,
 	}
-
-	cache := NewMockCache(t)
-	cache.On("RemoveDatabase",
-		mock.Anything, // context.Context
-		mock.AnythingOfType("string"),
-	).Maybe()
-	globalMetaCache = cache
-
 	t.Run("ok", func(t *testing.T) {
 		err := task.PreExecute(ctx)
 		assert.NoError(t, err)

@@ -15,9 +15,17 @@
 // limitations under the License.
 #pragma once
 
+#include <optional>
+#include <span>
+#include <utility>
+#include <vector>
+
 #include "common/Array.h"
-#include "common/VectorTrait.h"
+#include "common/ColumnarArrayChunkBuilder.h"
+#include "common/ArrayValue.h"
+#include "common/FastMem.h"
 #include "common/Utils.h"
+#include "common/VectorTrait.h"
 #include "storage/MmapManager.h"
 
 namespace milvus {
@@ -34,7 +42,8 @@ struct FixedLengthChunk {
         auto mcm = storage::MmapManager::GetInstance().GetMmapChunkManager();
         data_ = (Type*)(mcm->Allocate(mmap_descriptor_, sizeof(Type) * size));
         AssertInfo(data_ != nullptr,
-                   "failed to create a mmapchunk: {}, map_size");
+                   "failed to create a mmapchunk, map_size={}",
+                   sizeof(Type) * size);
     };
     void*
     data() {
@@ -95,6 +104,96 @@ struct VariableLengthChunk {
     storage::MmapChunkDescriptorPtr mmap_descriptor_ = nullptr;
 };
 
+template <>
+struct VariableLengthChunk<ArrayValue> {
+ public:
+    VariableLengthChunk() = delete;
+
+    explicit VariableLengthChunk(
+        const uint64_t size, storage::MmapChunkDescriptorPtr mmap_descriptor)
+        : size_(size),
+          mmap_descriptor_(std::move(mmap_descriptor)),
+          data_(size) {
+    }
+
+    void
+    set(const ArrayValue* src,
+        uint32_t begin,
+        uint32_t length,
+        const std::optional<CheckDataValid>& check_data_valid = std::nullopt) {
+        AssertInfo(begin <= size_ && length <= size_ - begin,
+                   "failed to set nested ARRAY chunk with length {} from "
+                   "begin {}, chunk size={}",
+                   length,
+                   begin,
+                   size_);
+        if (length == 0) {
+            return;
+        }
+
+        std::vector<uint8_t> valid_data;
+        if (check_data_valid.has_value()) {
+            valid_data.resize(length);
+            for (uint32_t i = 0; i < length; ++i) {
+                valid_data[i] = check_data_valid.value()(begin + i);
+            }
+        }
+
+        auto chunk = CreateMmapColumnarArrayChunkFromValues(
+            std::span<const ArrayValue>(src, length),
+            std::span<const uint8_t>(valid_data.data(), valid_data.size()),
+            mmap_descriptor_);
+        blocks_.push_back(chunk);
+        for (size_t i = 0; i < length; ++i) {
+            data_[begin + i] = chunk->View(i);
+        }
+    }
+
+    void
+    set_rows(std::span<const ScalarFieldProto* const> rows,
+             size_t begin,
+             const proto::schema::TypeSchema& type) {
+        AssertInfo(begin <= size_ && rows.size() <= size_ - begin,
+                   "failed to set nested ARRAY chunk with length {} from "
+                   "begin {}, chunk size={}",
+                   rows.size(),
+                   begin,
+                   size_);
+        if (rows.empty()) {
+            return;
+        }
+
+        auto chunk = CreateMmapColumnarArrayChunkFromProtoRows(
+            rows, type, mmap_descriptor_);
+        blocks_.push_back(chunk);
+        for (size_t i = 0; i < rows.size(); ++i) {
+            data_[begin + i] = chunk->View(i);
+        }
+    }
+
+    const ArrayValueView&
+    view(const int i) const {
+        return data_[i];
+    }
+
+    void*
+    data() {
+        return data_.data();
+    }
+
+    size_t
+    size() {
+        return size_;
+    }
+
+ private:
+    int64_t size_{0};
+    // Keep the descriptor alive until every Chunk tree has been destroyed.
+    storage::MmapChunkDescriptorPtr mmap_descriptor_;
+    FixedVector<ArrayValueView> data_;
+    std::vector<ColumnarArrayChunk::Ptr> blocks_;
+};
+
 // Template specialization for string
 template <>
 inline void
@@ -124,7 +223,7 @@ VariableLengthChunk<std::string>::set(
             data_[i + begin] = std::string_view("");
         } else {
             char* data_ptr = buf + offset;
-            std::memcpy(data_ptr, src[i].data(), src[i].size());
+            milvus::fastmem::FastMemcpy(data_ptr, src[i].data(), src[i].size());
             data_[i + begin] = std::string_view(data_ptr, src[i].size());
         }
         offset += data_size;
@@ -156,7 +255,8 @@ VariableLengthChunk<knowhere::sparse::SparseRow<SparseValueType>>::set(
     for (auto i = 0, offset = 0; i < length; i++) {
         auto data_size = src[i].data_byte_size();
         uint8_t* data_ptr = buf + offset;
-        std::memcpy(data_ptr, (uint8_t*)src[i].data(), data_size);
+        milvus::fastmem::FastMemcpy(
+            data_ptr, (uint8_t*)src[i].data(), data_size);
         data_[i + begin] = knowhere::sparse::SparseRow<SparseValueType>(
             src[i].size(), data_ptr, false);
         offset += data_size;
@@ -239,13 +339,13 @@ VariableLengthChunk<Array>::set(
             uint32_t* target_offsets_ptr = nullptr;
             if (IsVariableDataType(element_type)) {
                 target_offsets_ptr = reinterpret_cast<uint32_t*>(data_ptr);
-                std::copy(src_offsets_ptr,
-                          src_offsets_ptr + length,
-                          target_offsets_ptr);
+                milvus::fastmem::FastMemcpy(target_offsets_ptr,
+                                            src_offsets_ptr,
+                                            length * sizeof(uint32_t));
                 data_ptr += length * sizeof(uint32_t);
             }
             auto data_size = src[i].byte_size();
-            std::copy(src[i].data(), src[i].data() + data_size, data_ptr);
+            milvus::fastmem::FastMemcpy(data_ptr, src[i].data(), data_size);
             data_[i + begin] = ArrayView(
                 data_ptr, length, data_size, element_type, target_offsets_ptr);
             data_ptr += data_size;

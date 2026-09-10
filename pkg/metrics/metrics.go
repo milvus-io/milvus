@@ -34,6 +34,24 @@ const (
 	RetryLabel    = "retry"
 	RejectedLabel = "rejected"
 
+	// Values of the "cause" label, a dimension orthogonal to "status" that names
+	// the responsible party for a failed request, so monitoring can tell a
+	// user-input error (the caller must fix the request) apart from an internal
+	// system error (operators must intervene). It is a separate label rather
+	// than extra "status" values on purpose: the coarse status stays a valid
+	// query on its own ("fail" is still every hard failure, aggregated over
+	// cause by Prometheus), so dashboards written against it keep working.
+	// Cause is functionally dependent on the outcome, so the realized
+	// (status, cause) pairs are additive, not the product of both domains.
+	CauseUser   = "user"   // the request itself is at fault: bad arguments, missing auth, no such collection
+	CauseSystem = "system" // Milvus is at fault: component failure, IO error, internal bug
+	CauseCancel = "cancel" // neither party: the client gave up before the request completed
+	// CauseNA is the empty string on purpose: Prometheus treats an empty label
+	// value as equivalent to the label being absent, so success/total/retry/
+	// abandon series carry no meaningful cause and stay byte-identical to what
+	// pre-2.6.19 emitted -- only fail/rejected actually carry user/system/cancel.
+	CauseNA = "" // no cause applies: the request did not hard-fail
+
 	HybridSearchLabel = "hybrid_search"
 
 	InsertLabel      = "insert"
@@ -87,6 +105,9 @@ const (
 
 	BatchReduce = "batch_reduce"
 
+	FunctionChainLevelL0 = "l0"
+	FunctionChainLevelL1 = "l1"
+
 	Pending   = "pending"
 	Executing = "executing"
 	Done      = "done"
@@ -105,6 +126,7 @@ const (
 	nodeIDLabelName                = "node_id"
 	nodeHostLabelName              = "node_host"
 	statusLabelName                = "status"
+	causeLabelName                 = "cause"
 	indexTaskStatusLabelName       = "index_task_status"
 	msgTypeLabelName               = "msg_type"
 	collectionIDLabelName          = "collection_id"
@@ -112,6 +134,7 @@ const (
 	channelNameLabelName           = "channel_name"
 	functionLabelName              = "function_name"
 	queryTypeLabelName             = "query_type"
+	chainLevelLabelName            = "chain_level"
 	collectionName                 = "collection_name"
 	databaseLabelName              = "db_name"
 	ResourceGroupLabelName         = "rg"
@@ -121,6 +144,7 @@ const (
 	segmentLevelLabelName          = "segment_level"
 	segmentIsSortedLabelName       = "segment_is_sorted"
 	segmentStorageVersionLabelName = "segment_storage_version"
+	segmentFormatLabelName         = "segment_format"
 	usernameLabelName              = "username"
 	roleNameLabelName              = "role_name"
 	cacheNameLabelName             = "cache_name"
@@ -147,7 +171,6 @@ const (
 	// model function/UDF labels
 	functionTypeName = "function_type_name"
 	functionProvider = "function_provider"
-	functionName     = "function_name"
 
 	// entities label
 	LoadedLabel         = "loaded"
@@ -215,5 +238,6 @@ func Register(r prometheus.Registerer) {
 	r.MustRegister(BuildInfo)
 	r.MustRegister(RuntimeInfo)
 	r.MustRegister(ThreadNum)
+	r.MustRegister(ThreadCPUActiveNumByPool)
 	metricRegisterer = r
 }

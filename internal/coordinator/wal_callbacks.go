@@ -19,12 +19,10 @@ package coordinator
 import (
 	"context"
 
-	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -53,43 +51,43 @@ func (c *WALCallback) alterWALV2AckCallback(
 	ctx context.Context,
 	result message.BroadcastResult[*message.AlterWALMessageHeader, *message.AlterWALMessageBody],
 ) error {
-	logger := log.Ctx(ctx).With(
-		zap.Stringer("targetWALName", result.Message.Header().TargetWalName),
-		zap.Any("config", result.Message.Header().Config),
-		zap.Uint64("broadcastID", result.Message.BroadcastHeader().BroadcastID),
+	logger := mlog.With(
+		mlog.Stringer("targetWALName", result.Message.Header().TargetWalName),
+		mlog.Any("config", result.Message.Header().Config),
+		mlog.Uint64("broadcastID", result.Message.BroadcastHeader().BroadcastID),
 	)
 
-	logger.Info("AlterWAL broadcast message acknowledged by all vchannels",
-		zap.Int("vchannelCount", len(result.Results)))
+	logger.Info(ctx, "AlterWAL broadcast message acknowledged by all vchannels",
+		mlog.Int("vchannelCount", len(result.Results)))
 
 	// Convert WALName enum to string representation
 	targetWALName := result.Message.Header().TargetWalName
 	mqTypeValue := message.WALName(targetWALName).String()
 	if mqTypeValue == "unknown" {
-		return errors.Errorf("invalid target WAL name: %v", targetWALName)
+		return merr.WrapErrServiceInternalMsg("invalid target WAL name: %v", targetWALName)
 	}
 
 	// Get etcd source to update configuration
 	paramMgr := paramtable.GetBaseTable().Manager()
 	etcdSource, ok := paramMgr.GetEtcdSource()
 	if !ok {
-		logger.Warn("failed to update mq.type config, etcd source not enabled")
-		return errors.New("etcd source is not enabled, cannot update mq.type configuration")
+		logger.Warn(ctx, "failed to update mq.type config, etcd source not enabled")
+		return merr.WrapErrServiceInternalMsg("etcd source is not enabled, cannot update mq.type configuration")
 	}
 
 	// Update mq.type configuration in etcd
 	configKey := paramtable.Get().MQCfg.Type.Key
 	if err := paramMgr.UpdateConfigInEtcd(etcdSource, configKey, mqTypeValue); err != nil {
-		logger.Error("failed to update mq.type config in etcd",
-			zap.String("configKey", configKey),
-			zap.String("mqTypeValue", mqTypeValue),
-			zap.Error(err))
-		return errors.Wrap(err, "failed to update mq.type configuration in etcd")
+		logger.Error(ctx, "failed to update mq.type config in etcd",
+			mlog.String("configKey", configKey),
+			mlog.String("mqTypeValue", mqTypeValue),
+			mlog.Err(err))
+		return merr.Wrap(err, "failed to update mq.type configuration in etcd")
 	}
 
-	logger.Info("successfully updated mq.type configuration in etcd",
-		zap.String("configKey", configKey),
-		zap.String("mqTypeValue", mqTypeValue))
+	logger.Info(ctx, "successfully updated mq.type configuration in etcd",
+		mlog.String("configKey", configKey),
+		mlog.String("mqTypeValue", mqTypeValue))
 
 	return nil
 }

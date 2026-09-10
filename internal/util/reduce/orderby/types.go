@@ -22,6 +22,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // OrderByField defines a single sort key for ORDER BY operations.
@@ -134,7 +135,7 @@ func ParseOrderByFields(orderByStrs []string, schema *schemapb.CollectionSchema)
 			case "asc", "ascending", "":
 				ascending = true
 			default:
-				return nil, fmt.Errorf("invalid order direction '%s' for field '%s', must be 'asc' or 'desc'", dir, fieldName)
+				return nil, merr.WrapErrParameterInvalidMsg("invalid order direction '%s' for field '%s', must be 'asc' or 'desc'", dir, fieldName)
 			}
 		}
 
@@ -150,7 +151,7 @@ func ParseOrderByFields(orderByStrs []string, schema *schemapb.CollectionSchema)
 			case "nulls_last":
 				nullsFirst = false
 			default:
-				return nil, fmt.Errorf("invalid null ordering '%s', must be 'nulls_first' or 'nulls_last'", nullOpt)
+				return nil, merr.WrapErrParameterInvalidMsg("invalid null ordering '%s', must be 'nulls_first' or 'nulls_last'", nullOpt)
 			}
 		}
 
@@ -159,12 +160,12 @@ func ParseOrderByFields(orderByStrs []string, schema *schemapb.CollectionSchema)
 		// so ORDER BY on dynamic fields is not supported in the current version.
 		fieldSchema, found := fieldNameToSchema[fieldName]
 		if !found {
-			return nil, fmt.Errorf("order_by field '%s' does not exist in collection schema", fieldName)
+			return nil, merr.WrapErrParameterInvalidMsg("order_by field '%s' does not exist in collection schema", fieldName)
 		}
 
 		// Validate field type is sortable
 		if !IsSortableType(fieldSchema.DataType) {
-			return nil, fmt.Errorf("order_by field '%s' has type %s which is not sortable",
+			return nil, merr.WrapErrParameterInvalidMsg("order_by field '%s' has type %s which is not sortable",
 				fieldName, fieldSchema.DataType.String())
 		}
 
@@ -196,7 +197,7 @@ func ConvertFromPlanOrderByFields(planFields []*planpb.OrderByField, schema *sch
 	for i, pf := range planFields {
 		fs, ok := fieldIDToSchema[pf.GetFieldId()]
 		if !ok {
-			return nil, fmt.Errorf("ORDER BY field with ID %d not found in schema", pf.GetFieldId())
+			return nil, merr.WrapErrParameterInvalidMsg("ORDER BY field with ID %d not found in schema", pf.GetFieldId())
 		}
 		result[i] = &OrderByField{
 			FieldID:    pf.GetFieldId(),

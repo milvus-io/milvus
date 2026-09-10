@@ -32,7 +32,7 @@ namespace exec {
 void
 PhyValueExpr::Eval(EvalCtx& context, VectorPtr& result) {
     tracer::AutoSpan span("PhyValueExpr::Eval", tracer::GetRootSpan(), true);
-    span.GetSpan()->SetAttribute("data_type", static_cast<int>(expr_->type()));
+    span.SetAttribute("data_type", static_cast<int>(expr_->type()));
 
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
@@ -97,6 +97,7 @@ PhyValueExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         case DataType::STRING:
         case DataType::VARCHAR:
+        case DataType::TEXT:
             result = std::make_shared<ConstantVector<std::string>>(
                 expr_->type(),
                 real_batch_size,
@@ -106,7 +107,7 @@ PhyValueExpr::Eval(EvalCtx& context, VectorPtr& result) {
         case DataType::ARRAY:
         case DataType::JSON:
         default:
-            ThrowInfo(DataTypeInvalid,
+            ThrowInfo(UnexpectedError,
                       "PhyValueExpr not support data type " +
                           GetDataTypeName(expr_->type()));
     }

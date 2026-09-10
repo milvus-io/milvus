@@ -26,6 +26,10 @@ func TestRegistry(t *testing.T) {
 	id, err := message.UnmarshalMessageID(&commonpb.MessageID{WALName: commonpb.WALName(message.WALNameKafka), Id: kafkaID(123).Marshal()})
 	assert.NoError(t, err)
 	assert.True(t, id.EQ(kafkaID(123)))
+
+	id, err = message.UnmarshalMessageID(kafkaID(-2).IntoProto())
+	assert.NoError(t, err)
+	assert.True(t, id.EQ(kafkaID(-2)))
 }
 
 func TestKafka(t *testing.T) {
@@ -55,4 +59,16 @@ func TestGetBasicConfig(t *testing.T) {
 	assert.NotNil(t, basicConfig["ssl.certificate.location"])
 	assert.NotNil(t, basicConfig["sasl.username"])
 	assert.NotNil(t, basicConfig["security.protocol"])
+}
+
+func TestGetProducerConfigClampsConfiguredMessageMaxBytes(t *testing.T) {
+	params := paramtable.Get()
+	config := &params.KafkaCfg
+	assert.NoError(t, params.Save(config.ProducerMessageMaxBytes.Key, "4096"))
+	t.Cleanup(func() { assert.NoError(t, params.Reset(config.ProducerMessageMaxBytes.Key)) })
+
+	producerConfig := (&builderImpl{}).getProducerConfig()
+	value, err := producerConfig.Get("message.max.bytes", nil)
+	assert.NoError(t, err)
+	assert.Equal(t, 256*1024, value)
 }

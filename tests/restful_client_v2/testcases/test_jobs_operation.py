@@ -1,20 +1,21 @@
-import random
+import csv
 import json
+import random
 import subprocess
 import time
-from sklearn import preprocessing
 from pathlib import Path
+from uuid import uuid4
+
+import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
-import numpy as np
-import csv
-from pymilvus import Collection, utility
-from utils.utils import gen_collection_name
-from utils.util_log import test_log as logger
 import pytest
 from base.testbase import TestBase
-from uuid import uuid4
+from sklearn import preprocessing
+from utils.constant import CaseLabel
+from utils.util_log import test_log as logger
+from utils.utils import gen_collection_name
 
 IMPORT_TIMEOUT = 360
 
@@ -23,20 +24,136 @@ class NumpyEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, np.float32):
             return float(obj)
-        return super(NumpyEncoder, self).default(obj)
+        return super().default(obj)
 
 
+def write_parquet_with_string_columns(df, file_path, string_columns):
+    table = pa.Table.from_pandas(df, preserve_index=False)
+    for column in string_columns:
+        column_index = table.schema.get_field_index(column)
+        if column_index >= 0:
+            table = table.set_column(
+                column_index,
+                pa.field(column, pa.string()),
+                table[column].cast(pa.string()),
+            )
+    pq.write_table(table, file_path)
 
-@pytest.mark.BulkInsert
-class TestCreateImportJob(TestBase):
 
+class RestImportTestBase(TestBase):
+    """REST-only helpers for import-job setup and result verification."""
+
+    connect_with_pymilvus = False
+
+    def _query_count(self, collection_name, filter_expr=" ", partition_names=None, db_name="default"):
+        payload = {
+            "collectionName": collection_name,
+            "filter": filter_expr,
+            "limit": 0,
+            "outputFields": ["count(*)"],
+        }
+        if partition_names is not None:
+            payload["partitionNames"] = partition_names
+        rsp = self.vector_client.vector_query(payload, db_name=db_name, timeout=30)
+        assert rsp.get("code") == 0, rsp
+        assert len(rsp.get("data", [])) == 1, rsp
+        return rsp["data"][0]["count(*)"]
+
+    def _wait_for_count(
+        self,
+        collection_name,
+        expected_count,
+        timeout=120,
+        partition_names=None,
+        db_name="default",
+    ):
+        t0 = time.time()
+        last_count = None
+        last_refresh_rsp = None
+        while time.time() - t0 < timeout:
+            last_refresh_rsp = self.collection_client.refresh_load(collection_name, db_name=db_name)
+            assert last_refresh_rsp.get("code") == 0, last_refresh_rsp
+            last_count = self._query_count(
+                collection_name,
+                partition_names=partition_names,
+                db_name=db_name,
+            )
+            if last_count == expected_count:
+                return last_count
+            time.sleep(2)
+        raise AssertionError(
+            f"collection {collection_name} count did not reach {expected_count} within {timeout}s; "
+            f"last_count={last_count}, last_refresh_response={last_refresh_rsp}"
+        )
+
+    def _query_rows(
+        self,
+        collection_name,
+        filter_expr,
+        output_fields,
+        limit=100,
+        expected_count=1,
+        db_name="default",
+    ):
+        payload = {
+            "collectionName": collection_name,
+            "filter": filter_expr,
+            "outputFields": output_fields,
+            "limit": limit,
+        }
+        rsp = self.vector_client.vector_query(payload, db_name=db_name, timeout=30)
+        assert rsp.get("code") == 0, rsp
+        rows = rsp.get("data", [])
+        assert len(rows) == expected_count, rsp
+        return rows
+
+    def _flush_collection(self, collection_name, timeout=90, interval=11):
+        t0 = time.time()
+        last_rsp = None
+        while time.time() - t0 < timeout:
+            last_rsp = self.collection_client.flush(collection_name)
+            if last_rsp.get("code") == 0:
+                return last_rsp
+            if last_rsp.get("code") != 1807:
+                raise AssertionError(last_rsp)
+            time.sleep(interval)
+        raise AssertionError(f"collection {collection_name} flush timed out; last_response={last_rsp}")
+
+    def _create_database(self, db_name):
+        rsp = self.database_client.database_create({"dbName": db_name})
+        assert rsp.get("code") == 0, rsp
+
+    def _wait_for_index_ready(self, collection_name, index_name, timeout=120):
+        t0 = time.time()
+        last_rsp = None
+        while time.time() - t0 < timeout:
+            last_rsp = self.index_client.index_describe(
+                collection_name=collection_name,
+                index_name=index_name,
+            )
+            assert last_rsp.get("code") == 0, last_rsp
+            assert len(last_rsp.get("data", [])) == 1, last_rsp
+            index = last_rsp["data"][0]
+            if index.get("indexState") == "Finished":
+                assert index.get("failReason", "") == "", index
+                return index
+            time.sleep(1)
+        raise AssertionError(
+            f"index {index_name} of collection {collection_name} not ready within {timeout}s; last_response={last_rsp}"
+        )
+
+
+@pytest.mark.tags(CaseLabel.L0)
+class TestCreateImportJob(RestImportTestBase):
     @pytest.mark.parametrize("insert_num", [3000])
     @pytest.mark.parametrize("import_task_num", [2])
     @pytest.mark.parametrize("auto_id", [True])
     @pytest.mark.parametrize("is_partition_key", [True, False])
     @pytest.mark.parametrize("enable_dynamic_field", [True])
     @pytest.mark.parametrize("file_format", ["parquet", "json"])
-    def test_import_job_e2e(self, insert_num, import_task_num, auto_id, is_partition_key, enable_dynamic_field, file_format):
+    def test_import_job_e2e(
+        self, insert_num, import_task_num, auto_id, is_partition_key, enable_dynamic_field, file_format
+    ):
         # create collection
         name = gen_collection_name()
         dim = 128
@@ -47,12 +164,22 @@ class TestCreateImportJob(TestBase):
                 "enableDynamicField": enable_dynamic_field,
                 "fields": [
                     {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
-                    {"fieldName": "word_count", "dataType": "Int64", "isPartitionKey": is_partition_key, "elementTypeParams": {}},
-                    {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}, "nullable": True},
-                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}}
-                ]
+                    {
+                        "fieldName": "word_count",
+                        "dataType": "Int64",
+                        "isPartitionKey": is_partition_key,
+                        "elementTypeParams": {},
+                    },
+                    {
+                        "fieldName": "book_describe",
+                        "dataType": "VarChar",
+                        "elementTypeParams": {"max_length": "256"},
+                        "nullable": True,
+                    },
+                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}},
+                ],
             },
-            "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]
+            "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}],
         }
         rsp = self.collection_client.collection_create(payload)
         assert rsp["code"] == 0
@@ -63,7 +190,7 @@ class TestCreateImportJob(TestBase):
             tmp = {
                 "word_count": i,
                 "book_describe": f"book_{i}",
-                "book_intro": [np.float32(random.random()) for _ in range(dim)]
+                "book_intro": [np.float32(random.random()) for _ in range(dim)],
             }
             if not auto_id:
                 tmp["book_id"] = i
@@ -72,17 +199,25 @@ class TestCreateImportJob(TestBase):
                 tmp["$meta"].update({f"dynamic_field_{i}": i})
             data.append(tmp)
         # dump data to file
-        file_name = f"bulk_insert_data_{uuid4()}.json" if file_format == "json" else f"bulk_insert_data_{uuid4()}.parquet"
+        file_name = (
+            f"bulk_insert_data_{uuid4()}.json" if file_format == "json" else f"bulk_insert_data_{uuid4()}.parquet"
+        )
         file_path = f"/tmp/{file_name}"
         if file_format == "json":
             with open(file_path, "w") as f:
                 json.dump(data, f, cls=NumpyEncoder)
         if file_format == "parquet":
-            pa_schema = pa.schema([
-                ('word_count', pa.int64(), False),  # not nullable
-                ('book_describe', pa.string(), False),  # pecifically set as not nullable to verify a certain corner case
-                ('book_intro', pa.list_(pa.float32()), False)  # not nullable
-            ])
+            pa_schema = pa.schema(
+                [
+                    ("word_count", pa.int64(), False),  # not nullable
+                    (
+                        "book_describe",
+                        pa.string(),
+                        False,
+                    ),  # pecifically set as not nullable to verify a certain corner case
+                    ("book_intro", pa.list_(pa.float32()), False),  # not nullable
+                ]
+            )
             df = pd.DataFrame(data)
             table = pa.Table.from_pandas(df, schema=pa_schema)
             pq.write_table(table, file_path)
@@ -105,25 +240,19 @@ class TestCreateImportJob(TestBase):
         rsp = self.import_job_client.list_import_jobs(payload)
 
         # get import job progress
-        for task in rsp['data']["records"]:
-            task_id = task['jobId']
+        for task in rsp["data"]["records"]:
+            task_id = task["jobId"]
             finished = False
             t0 = time.time()
 
             while not finished:
                 rsp = self.import_job_client.get_import_job_progress(task_id)
-                if rsp['data']['state'] == "Completed":
+                if rsp["data"]["state"] == "Completed":
                     finished = True
                 time.sleep(5)
                 if time.time() - t0 > IMPORT_TIMEOUT:
                     assert False, "import job timeout"
-        c = Collection(name)
-        c.load(_refresh=True, timeou=120)
-        res = c.query(
-            expr="",
-            output_fields=["count(*)"],
-        )
-        assert res[0]["count(*)"] == insert_num * import_task_num
+        self._wait_for_count(name, insert_num * import_task_num)
         # query data
         payload = {
             "collectionName": name,
@@ -131,8 +260,7 @@ class TestCreateImportJob(TestBase):
             "outputFields": ["*"],
         }
         rsp = self.vector_client.vector_query(payload)
-        assert rsp['code'] == 0
-
+        assert rsp["code"] == 0
 
     @pytest.mark.parametrize("insert_num", [3000])
     @pytest.mark.parametrize("import_task_num", [2])
@@ -149,13 +277,24 @@ class TestCreateImportJob(TestBase):
                 "enableDynamicField": False,
                 "fields": [
                     {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
-                    {"fieldName": "word_count", "dataType": "Int64", "isPartitionKey": is_partition_key, "elementTypeParams": {}},
+                    {
+                        "fieldName": "word_count",
+                        "dataType": "Int64",
+                        "isPartitionKey": is_partition_key,
+                        "elementTypeParams": {},
+                    },
                     {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
-                    {"fieldName": "book_intro", "dataType": "SparseFloatVector"}
-                ]
+                    {"fieldName": "book_intro", "dataType": "SparseFloatVector"},
+                ],
             },
-            "indexParams": [ {"fieldName": "book_intro", "indexName": "sparse_float_vector_index", "metricType": "IP",
-                 "params": {"index_type": "SPARSE_INVERTED_INDEX", "drop_ratio_build": "0.2"}},]
+            "indexParams": [
+                {
+                    "fieldName": "book_intro",
+                    "indexName": "sparse_float_vector_index",
+                    "metricType": "IP",
+                    "params": {"index_type": "SPARSE_INVERTED_INDEX", "drop_ratio_build": "0.2"},
+                },
+            ],
         }
         self.collection_client.collection_create(payload)
         self.wait_load_completed(name)
@@ -165,7 +304,7 @@ class TestCreateImportJob(TestBase):
             tmp = {
                 "word_count": i,
                 "book_describe": f"book_{i}",
-                "book_intro": {"values": [random.random() for i in range(dim)], "indices": [i**2 for i in range(dim)]}
+                "book_intro": {"values": [random.random() for i in range(dim)], "indices": [i**2 for i in range(dim)]},
             }
             if not auto_id:
                 tmp["book_id"] = i
@@ -175,7 +314,7 @@ class TestCreateImportJob(TestBase):
         file_path = f"/tmp/{file_name}"
         df = pd.DataFrame(data)
         logger.info(df)
-        df.to_parquet(file_path, engine="pyarrow")
+        write_parquet_with_string_columns(df, file_path, ["book_describe"])
         # upload file to minio storage
         self.storage_client.upload_file(file_path, file_name)
 
@@ -193,25 +332,22 @@ class TestCreateImportJob(TestBase):
         rsp = self.import_job_client.list_import_jobs(payload)
 
         # get import job progress
-        for task in rsp['data']["records"]:
-            task_id = task['jobId']
+        for task in rsp["data"]["records"]:
+            task_id = task["jobId"]
             finished = False
             t0 = time.time()
 
             while not finished:
                 rsp = self.import_job_client.get_import_job_progress(task_id)
-                if rsp['data']['state'] == "Completed":
+                state = rsp["data"]["state"]
+                if state == "Completed":
                     finished = True
+                elif state == "Failed":
+                    assert False, f"Import job failed: {rsp}"
                 time.sleep(5)
                 if time.time() - t0 > IMPORT_TIMEOUT:
                     assert False, "import job timeout"
-        c = Collection(name)
-        c.load(_refresh=True, timeou=120)
-        res = c.query(
-            expr="",
-            output_fields=["count(*)"],
-        )
-        assert res[0]["count(*)"] == insert_num * import_task_num
+        self._wait_for_count(name, insert_num * import_task_num)
         # query data
         payload = {
             "collectionName": name,
@@ -219,16 +355,21 @@ class TestCreateImportJob(TestBase):
             "outputFields": ["*"],
         }
         rsp = self.vector_client.vector_query(payload)
-        assert rsp['code'] == 0
-
-
+        assert rsp["code"] == 0
 
     @pytest.mark.parametrize("insert_num", [3000])
     @pytest.mark.parametrize("import_task_num", [2])
-    @pytest.mark.parametrize("auto_id", [True,])
+    @pytest.mark.parametrize(
+        "auto_id",
+        [
+            True,
+        ],
+    )
     @pytest.mark.parametrize("is_partition_key", [True])
     @pytest.mark.parametrize("enable_dynamic_field", [True])
-    def test_import_with_longer_text_than_max_length(self, insert_num, import_task_num, auto_id, is_partition_key, enable_dynamic_field):
+    def test_import_with_longer_text_than_max_length(
+        self, insert_num, import_task_num, auto_id, is_partition_key, enable_dynamic_field
+    ):
         # create collection
         name = gen_collection_name()
         dim = 128
@@ -239,12 +380,17 @@ class TestCreateImportJob(TestBase):
                 "enableDynamicField": enable_dynamic_field,
                 "fields": [
                     {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
-                    {"fieldName": "word_count", "dataType": "Int64", "isPartitionKey": is_partition_key, "elementTypeParams": {}},
+                    {
+                        "fieldName": "word_count",
+                        "dataType": "Int64",
+                        "isPartitionKey": is_partition_key,
+                        "elementTypeParams": {},
+                    },
                     {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
-                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}}
-                ]
+                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}},
+                ],
             },
-            "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]
+            "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}],
         }
         self.collection_client.collection_create(payload)
         self.wait_load_completed(name)
@@ -254,7 +400,7 @@ class TestCreateImportJob(TestBase):
             tmp = {
                 "word_count": i,
                 "book_describe": f"book_{i}" * 256,
-                "book_intro": [np.float32(random.random()) for _ in range(dim)]
+                "book_intro": [np.float32(random.random()) for _ in range(dim)],
             }
             if not auto_id:
                 tmp["book_id"] = i
@@ -283,16 +429,16 @@ class TestCreateImportJob(TestBase):
         rsp = self.import_job_client.list_import_jobs(payload)
 
         # get import job progress
-        for task in rsp['data']["records"]:
-            task_id = task['jobId']
+        for task in rsp["data"]["records"]:
+            task_id = task["jobId"]
             finished = False
             t0 = time.time()
 
             while not finished:
                 rsp = self.import_job_client.get_import_job_progress(task_id)
-                if rsp['data']['state'] == "Completed":
+                if rsp["data"]["state"] == "Completed":
                     assert False, "import job should not be completed"
-                if rsp['data']['state'] == "Failed":
+                if rsp["data"]["state"] == "Failed":
                     assert True
                     finished = True
                 logger.debug(f"job progress: {rsp}")
@@ -300,15 +446,14 @@ class TestCreateImportJob(TestBase):
                 if time.time() - t0 > IMPORT_TIMEOUT:
                     assert False, "import job timeout"
 
-
     @pytest.mark.parametrize("insert_num", [5000])
     @pytest.mark.parametrize("import_task_num", [1])
     @pytest.mark.parametrize("auto_id", [True])
     @pytest.mark.parametrize("is_partition_key", [True])
     @pytest.mark.parametrize("enable_dynamic_field", [True])
     def test_import_job_with_db(self, insert_num, import_task_num, auto_id, is_partition_key, enable_dynamic_field):
-        self.create_database(db_name="test_job")
-        self.update_database(db_name="test_job")
+        db_name = f"test_job_{uuid4().hex[:8]}"
+        self._create_database(db_name)
         # create collection
         name = gen_collection_name()
         dim = 128
@@ -319,22 +464,28 @@ class TestCreateImportJob(TestBase):
                 "enableDynamicField": enable_dynamic_field,
                 "fields": [
                     {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
-                    {"fieldName": "word_count", "dataType": "Int64", "isPartitionKey": is_partition_key, "elementTypeParams": {}},
+                    {
+                        "fieldName": "word_count",
+                        "dataType": "Int64",
+                        "isPartitionKey": is_partition_key,
+                        "elementTypeParams": {},
+                    },
                     {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
-                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}}
-                ]
+                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}},
+                ],
             },
-            "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]
+            "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}],
         }
-        self.collection_client.collection_create(payload)
-        self.wait_load_completed(name)
+        rsp = self.collection_client.collection_create(payload, db_name=db_name)
+        assert rsp["code"] == 0, rsp
+        self.wait_load_completed(name, db_name=db_name)
         # upload file to storage
         data = []
         for i in range(insert_num):
             tmp = {
                 "word_count": i,
                 "book_describe": f"book_{i}",
-                "book_intro": [np.float32(random.random()) for _ in range(dim)]
+                "book_intro": [np.float32(random.random()) for _ in range(dim)],
             }
             if not auto_id:
                 tmp["book_id"] = i
@@ -355,48 +506,46 @@ class TestCreateImportJob(TestBase):
             "files": [[file_name]],
         }
         for i in range(import_task_num):
-            rsp = self.import_job_client.create_import_jobs(payload)
+            rsp = self.import_job_client.create_import_jobs(payload, db_name=db_name)
+            assert rsp["code"] == 0, rsp
         # list import job
         payload = {
             "collectionName": name,
         }
-        rsp = self.import_job_client.list_import_jobs(payload)
+        rsp = self.import_job_client.list_import_jobs(payload, db_name=db_name)
+        assert rsp["code"] == 0, rsp
 
         # get import job progress
-        for task in rsp['data']["records"]:
-            task_id = task['jobId']
+        for task in rsp["data"]["records"]:
+            task_id = task["jobId"]
             finished = False
             t0 = time.time()
 
             while not finished:
-                rsp = self.import_job_client.get_import_job_progress(task_id)
-                if rsp['data']['state'] == "Completed":
+                rsp = self.import_job_client.get_import_job_progress(task_id, db_name=db_name)
+                if rsp["data"]["state"] == "Completed":
                     finished = True
                 time.sleep(5)
                 if time.time() - t0 > IMPORT_TIMEOUT:
                     assert False, "import job timeout"
-        c = Collection(name)
-        c.load(_refresh=True, timeou=120)
-        res = c.query(
-            expr="",
-            output_fields=["count(*)"],
-        )
-        assert res[0]["count(*)"] == insert_num * import_task_num
+        self._wait_for_count(name, insert_num * import_task_num, db_name=db_name)
         # query data
         payload = {
             "collectionName": name,
             "filter": "book_id > 0",
             "outputFields": ["*"],
         }
-        rsp = self.vector_client.vector_query(payload)
-        assert rsp['code'] == 0
+        rsp = self.vector_client.vector_query(payload, db_name=db_name)
+        assert rsp["code"] == 0
 
     @pytest.mark.parametrize("insert_num", [5000])
     @pytest.mark.parametrize("import_task_num", [1])
     @pytest.mark.parametrize("auto_id", [True])
     @pytest.mark.parametrize("is_partition_key", [False])
     @pytest.mark.parametrize("enable_dynamic_field", [True])
-    def test_import_job_with_partition(self, insert_num, import_task_num, auto_id, is_partition_key, enable_dynamic_field):
+    def test_import_job_with_partition(
+        self, insert_num, import_task_num, auto_id, is_partition_key, enable_dynamic_field
+    ):
         # create collection
         name = gen_collection_name()
         dim = 128
@@ -407,13 +556,17 @@ class TestCreateImportJob(TestBase):
                 "enableDynamicField": enable_dynamic_field,
                 "fields": [
                     {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
-                    {"fieldName": "word_count", "dataType": "Int64", "isPartitionKey": is_partition_key,
-                     "elementTypeParams": {}},
+                    {
+                        "fieldName": "word_count",
+                        "dataType": "Int64",
+                        "isPartitionKey": is_partition_key,
+                        "elementTypeParams": {},
+                    },
                     {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
-                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}}
-                ]
+                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}},
+                ],
             },
-            "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]
+            "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}],
         }
         self.collection_client.collection_create(payload)
         self.wait_load_completed(name)
@@ -424,7 +577,7 @@ class TestCreateImportJob(TestBase):
             tmp = {
                 "word_count": i,
                 "book_describe": f"book_{i}",
-                "book_intro": [np.float32(random.random()) for _ in range(dim)]
+                "book_intro": [np.float32(random.random()) for _ in range(dim)],
             }
             if not auto_id:
                 tmp["book_id"] = i
@@ -456,33 +609,26 @@ class TestCreateImportJob(TestBase):
         rsp = self.import_job_client.list_import_jobs(payload)
 
         # get import job progress
-        for task in rsp['data']["records"]:
-            task_id = task['jobId']
+        for task in rsp["data"]["records"]:
+            task_id = task["jobId"]
             finished = False
             t0 = time.time()
 
             while not finished:
                 rsp = self.import_job_client.get_import_job_progress(task_id)
-                if rsp['data']['state'] == "Completed":
+                if rsp["data"]["state"] == "Completed":
                     finished = True
                 time.sleep(5)
                 if time.time() - t0 > IMPORT_TIMEOUT:
                     assert False, "import job timeout"
-        c = Collection(name)
-        c.load(_refresh=True, timeou=120)
-        res = c.query(
-            expr="",
-            output_fields=["count(*)"],
-        )
-        logger.info(f"count in collection: {res}")
-        assert res[0]["count(*)"] == insert_num * import_task_num
-        res = c.query(
-            expr="",
+        collection_count = self._wait_for_count(name, insert_num * import_task_num)
+        logger.info(f"count in collection: {collection_count}")
+        partition_count = self._wait_for_count(
+            name,
+            insert_num * import_task_num,
             partition_names=[partition_name],
-            output_fields=["count(*)"],
         )
-        logger.info(f"count in partition {[partition_name]}: {res}")
-        assert res[0]["count(*)"] == insert_num * import_task_num
+        logger.info(f"count in partition {[partition_name]}: {partition_count}")
         # query data
         payload = {
             "collectionName": name,
@@ -490,7 +636,7 @@ class TestCreateImportJob(TestBase):
             "outputFields": ["*"],
         }
         rsp = self.vector_client.vector_query(payload)
-        assert rsp['code'] == 0
+        assert rsp["code"] == 0
 
     def test_job_import_multi_json_file(self):
         # create collection
@@ -503,10 +649,10 @@ class TestCreateImportJob(TestBase):
                     {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
                     {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
                     {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
-                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}}
+                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}},
                 ]
             },
-            "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]
+            "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}],
         }
         self.collection_client.collection_create(payload)
         self.wait_load_completed(name)
@@ -515,12 +661,15 @@ class TestCreateImportJob(TestBase):
         file_nums = 2
         file_names = []
         for file_num in range(file_nums):
-            data = [{
-                "book_id": i,
-                "word_count": i,
-                "book_describe": f"book_{i}",
-                "book_intro": [np.float32(random.random()) for _ in range(dim)]}
-                for i in range(1000*file_num, 1000*(file_num+1))]
+            data = [
+                {
+                    "book_id": i,
+                    "word_count": i,
+                    "book_describe": f"book_{i}",
+                    "book_intro": [np.float32(random.random()) for _ in range(dim)],
+                }
+                for i in range(1000 * file_num, 1000 * (file_num + 1))
+            ]
 
             # dump data to file
             file_name = f"bulk_insert_data_{file_num}_{uuid4()}.json"
@@ -546,33 +695,30 @@ class TestCreateImportJob(TestBase):
         rsp = self.import_job_client.list_import_jobs(payload)
 
         # get import job progress
-        for job in rsp['data']["records"]:
-            job_id = job['jobId']
+        for job in rsp["data"]["records"]:
+            job_id = job["jobId"]
             finished = False
             t0 = time.time()
 
             while not finished:
                 rsp = self.import_job_client.get_import_job_progress(job_id)
-                if rsp['data']['state'] == "Completed":
+                if rsp["data"]["state"] == "Completed":
                     finished = True
                 time.sleep(5)
                 if time.time() - t0 > IMPORT_TIMEOUT:
                     assert False, "import job timeout"
-        time.sleep(10)
         # assert data count
-        c = Collection(name)
-        c.load(_refresh=True, timeou=120)
-        assert c.num_entities == 2000
+        self._wait_for_count(name, 2000)
         # assert import data can be queried
         payload = {
             "collectionName": name,
             "filter": f"book_id in {[i for i in range(1000)]}",
             "limit": 100,
             "offset": 0,
-            "outputFields": ["*"]
+            "outputFields": ["*"],
         }
         rsp = self.vector_client.vector_query(payload)
-        assert len(rsp['data']) == 100
+        assert len(rsp["data"]) == 100
 
     def test_job_import_multi_parquet_file(self):
         # create collection
@@ -585,10 +731,10 @@ class TestCreateImportJob(TestBase):
                     {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
                     {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
                     {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
-                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}}
+                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}},
                 ]
             },
-            "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]
+            "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}],
         }
         self.collection_client.collection_create(payload)
         self.wait_load_completed(name)
@@ -597,12 +743,15 @@ class TestCreateImportJob(TestBase):
         file_nums = 2
         file_names = []
         for file_num in range(file_nums):
-            data = [{
-                "book_id": i,
-                "word_count": i,
-                "book_describe": f"book_{i}",
-                "book_intro": [np.float32(random.random()) for _ in range(dim)]}
-                for i in range(1000*file_num, 1000*(file_num+1))]
+            data = [
+                {
+                    "book_id": i,
+                    "word_count": i,
+                    "book_describe": f"book_{i}",
+                    "book_intro": [np.float32(random.random()) for _ in range(dim)],
+                }
+                for i in range(1000 * file_num, 1000 * (file_num + 1))
+            ]
 
             # dump data to file
             file_name = f"bulk_insert_data_{file_num}_{uuid4()}.parquet"
@@ -610,7 +759,7 @@ class TestCreateImportJob(TestBase):
             # create dir for file path
             Path(file_path).parent.mkdir(parents=True, exist_ok=True)
             df = pd.DataFrame(data)
-            df.to_parquet(file_path, index=False)
+            write_parquet_with_string_columns(df, file_path, ["book_describe"])
             # upload file to minio storage
             self.storage_client.upload_file(file_path, file_name)
             file_names.append([file_name])
@@ -628,33 +777,30 @@ class TestCreateImportJob(TestBase):
         rsp = self.import_job_client.list_import_jobs(payload)
 
         # get import job progress
-        for job in rsp['data']["records"]:
-            job_id = job['jobId']
+        for job in rsp["data"]["records"]:
+            job_id = job["jobId"]
             finished = False
             t0 = time.time()
 
             while not finished:
                 rsp = self.import_job_client.get_import_job_progress(job_id)
-                if rsp['data']['state'] == "Completed":
+                if rsp["data"]["state"] == "Completed":
                     finished = True
                 time.sleep(5)
                 if time.time() - t0 > IMPORT_TIMEOUT:
                     assert False, "import job timeout"
-        time.sleep(10)
         # assert data count
-        c = Collection(name)
-        c.load(_refresh=True, timeou=120)
-        assert c.num_entities == 2000
+        self._wait_for_count(name, 2000)
         # assert import data can be queried
         payload = {
             "collectionName": name,
             "filter": f"book_id in {[i for i in range(1000)]}",
             "limit": 100,
             "offset": 0,
-            "outputFields": ["*"]
+            "outputFields": ["*"],
         }
         rsp = self.vector_client.vector_query(payload)
-        assert len(rsp['data']) == 100
+        assert len(rsp["data"]) == 100
 
     def test_job_import_multi_numpy_file(self):
         # create collection
@@ -667,10 +813,10 @@ class TestCreateImportJob(TestBase):
                     {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
                     {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
                     {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
-                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}}
+                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}},
                 ]
             },
-            "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]
+            "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}],
         }
         self.collection_client.collection_create(payload)
         self.wait_load_completed(name)
@@ -679,12 +825,15 @@ class TestCreateImportJob(TestBase):
         file_nums = 2
         file_names = []
         for file_num in range(file_nums):
-            data = [{
-                "book_id": i,
-                "word_count": i,
-                "book_describe": f"book_{i}",
-                "book_intro": [np.float32(random.random()) for _ in range(dim)]}
-                for i in range(1000*file_num, 1000*(file_num+1))]
+            data = [
+                {
+                    "book_id": i,
+                    "word_count": i,
+                    "book_describe": f"book_{i}",
+                    "book_intro": [np.float32(random.random()) for _ in range(dim)],
+                }
+                for i in range(1000 * file_num, 1000 * (file_num + 1))
+            ]
 
             file_list = []
             # dump data to file
@@ -715,33 +864,30 @@ class TestCreateImportJob(TestBase):
         rsp = self.import_job_client.list_import_jobs(payload)
 
         # get import job progress
-        for job in rsp['data']["records"]:
-            job_id = job['jobId']
+        for job in rsp["data"]["records"]:
+            job_id = job["jobId"]
             finished = False
             t0 = time.time()
 
             while not finished:
                 rsp = self.import_job_client.get_import_job_progress(job_id)
-                if rsp['data']['state'] == "Completed":
+                if rsp["data"]["state"] == "Completed":
                     finished = True
                 time.sleep(5)
                 if time.time() - t0 > IMPORT_TIMEOUT:
                     assert False, "import job timeout"
-        time.sleep(10)
         # assert data count
-        c = Collection(name)
-        c.load(_refresh=True, timeou=120)
-        assert c.num_entities == 2000
+        self._wait_for_count(name, 2000)
         # assert import data can be queried
         payload = {
             "collectionName": name,
             "filter": f"book_id in {[i for i in range(1000)]}",
             "limit": 100,
             "offset": 0,
-            "outputFields": ["*"]
+            "outputFields": ["*"],
         }
         rsp = self.vector_client.vector_query(payload)
-        assert len(rsp['data']) == 100
+        assert len(rsp["data"]) == 100
 
     def test_job_import_multi_file_type(self):
         # create collection
@@ -754,10 +900,10 @@ class TestCreateImportJob(TestBase):
                     {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
                     {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
                     {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
-                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}}
+                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}},
                 ]
             },
-            "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]
+            "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}],
         }
         self.collection_client.collection_create(payload)
         self.wait_load_completed(name)
@@ -768,12 +914,15 @@ class TestCreateImportJob(TestBase):
 
         # numpy file
         for file_num in range(file_nums):
-            data = [{
-                "book_id": i,
-                "word_count": i,
-                "book_describe": f"book_{i}",
-                "book_intro": [np.float32(random.random()) for _ in range(dim)]}
-                for i in range(1000*file_num, 1000*(file_num+1))]
+            data = [
+                {
+                    "book_id": i,
+                    "word_count": i,
+                    "book_describe": f"book_{i}",
+                    "book_intro": [np.float32(random.random()) for _ in range(dim)],
+                }
+                for i in range(1000 * file_num, 1000 * (file_num + 1))
+            ]
 
             file_list = []
             # dump data to file
@@ -792,13 +941,16 @@ class TestCreateImportJob(TestBase):
                 file_list.append(file_name)
             file_names.append(file_list)
         # parquet file
-        for file_num in range(2,file_nums+2):
-            data = [{
-                "book_id": i,
-                "word_count": i,
-                "book_describe": f"book_{i}",
-                "book_intro": [np.float32(random.random()) for _ in range(dim)]}
-                for i in range(1000*file_num, 1000*(file_num+1))]
+        for file_num in range(2, file_nums + 2):
+            data = [
+                {
+                    "book_id": i,
+                    "word_count": i,
+                    "book_describe": f"book_{i}",
+                    "book_intro": [np.float32(random.random()) for _ in range(dim)],
+                }
+                for i in range(1000 * file_num, 1000 * (file_num + 1))
+            ]
 
             # dump data to file
             file_name = f"bulk_insert_data_{file_num}_{uuid4()}.parquet"
@@ -806,18 +958,21 @@ class TestCreateImportJob(TestBase):
             # create dir for file path
             Path(file_path).parent.mkdir(parents=True, exist_ok=True)
             df = pd.DataFrame(data)
-            df.to_parquet(file_path, index=False)
+            write_parquet_with_string_columns(df, file_path, ["book_describe"])
             # upload file to minio storage
             self.storage_client.upload_file(file_path, file_name)
             file_names.append([file_name])
         # json file
-        for file_num in range(4, file_nums+4):
-            data = [{
-                "book_id": i,
-                "word_count": i,
-                "book_describe": f"book_{i}",
-                "book_intro": [np.float32(random.random()) for _ in range(dim)]}
-                for i in range(1000*file_num, 1000*(file_num+1))]
+        for file_num in range(4, file_nums + 4):
+            data = [
+                {
+                    "book_id": i,
+                    "word_count": i,
+                    "book_describe": f"book_{i}",
+                    "book_intro": [np.float32(random.random()) for _ in range(dim)],
+                }
+                for i in range(1000 * file_num, 1000 * (file_num + 1))
+            ]
 
             # dump data to file
             file_name = f"bulk_insert_data_{file_num}_{uuid4()}.json"
@@ -841,33 +996,30 @@ class TestCreateImportJob(TestBase):
         rsp = self.import_job_client.list_import_jobs(payload)
 
         # get import job progress
-        for job in rsp['data']["records"]:
-            job_id = job['jobId']
+        for job in rsp["data"]["records"]:
+            job_id = job["jobId"]
             finished = False
             t0 = time.time()
 
             while not finished:
                 rsp = self.import_job_client.get_import_job_progress(job_id)
-                if rsp['data']['state'] == "Completed":
+                if rsp["data"]["state"] == "Completed":
                     finished = True
                 time.sleep(5)
                 if time.time() - t0 > IMPORT_TIMEOUT:
                     assert False, "import job timeout"
-        time.sleep(10)
         # assert data count
-        c = Collection(name)
-        c.load(_refresh=True, timeou=120)
-        assert c.num_entities == 6000
+        self._wait_for_count(name, 6000)
         # assert import data can be queried
         payload = {
             "collectionName": name,
             "filter": f"book_id in {[i for i in range(1000)]}",
             "limit": 100,
             "offset": 0,
-            "outputFields": ["*"]
+            "outputFields": ["*"],
         }
         rsp = self.vector_client.vector_query(payload)
-        assert len(rsp['data']) == 100
+        assert len(rsp["data"]) == 100
 
     @pytest.mark.parametrize("insert_round", [2])
     @pytest.mark.parametrize("auto_id", [True])
@@ -876,8 +1028,7 @@ class TestCreateImportJob(TestBase):
     @pytest.mark.parametrize("nb", [3000])
     @pytest.mark.parametrize("dim", [128])
     @pytest.mark.skip(reason="default storage is v3, cannot use collection to create v2 import")
-    def test_job_import_binlog_file_type(self, nb, dim, insert_round, auto_id,
-                                                      is_partition_key, enable_dynamic_schema):
+    def test_job_import_binlog_file_type(self, nb, dim, insert_round, auto_id, is_partition_key, enable_dynamic_schema):
         """
         Insert a vector with a simple payload
         """
@@ -890,26 +1041,42 @@ class TestCreateImportJob(TestBase):
                 "enableDynamicField": enable_dynamic_schema,
                 "fields": [
                     {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
-                    {"fieldName": "user_id", "dataType": "Int64", "isPartitionKey": is_partition_key,
-                     "elementTypeParams": {}},
+                    {
+                        "fieldName": "user_id",
+                        "dataType": "Int64",
+                        "isPartitionKey": is_partition_key,
+                        "elementTypeParams": {},
+                    },
                     {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
                     {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
                     {"fieldName": "bool", "dataType": "Bool", "elementTypeParams": {}},
                     {"fieldName": "json", "dataType": "JSON", "elementTypeParams": {}},
-                    {"fieldName": "int_array", "dataType": "Array", "elementDataType": "Int64",
-                     "elementTypeParams": {"max_capacity": "1024"}},
-                    {"fieldName": "varchar_array", "dataType": "Array", "elementDataType": "VarChar",
-                     "elementTypeParams": {"max_capacity": "1024", "max_length": "256"}},
-                    {"fieldName": "bool_array", "dataType": "Array", "elementDataType": "Bool",
-                     "elementTypeParams": {"max_capacity": "1024"}},
+                    {
+                        "fieldName": "int_array",
+                        "dataType": "Array",
+                        "elementDataType": "Int64",
+                        "elementTypeParams": {"max_capacity": "1024"},
+                    },
+                    {
+                        "fieldName": "varchar_array",
+                        "dataType": "Array",
+                        "elementDataType": "VarChar",
+                        "elementTypeParams": {"max_capacity": "1024", "max_length": "256"},
+                    },
+                    {
+                        "fieldName": "bool_array",
+                        "dataType": "Array",
+                        "elementDataType": "Bool",
+                        "elementTypeParams": {"max_capacity": "1024"},
+                    },
                     {"fieldName": "text_emb", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}},
                     {"fieldName": "image_emb", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}},
-                ]
+                ],
             },
             "indexParams": [
                 {"fieldName": "text_emb", "indexName": "text_emb", "metricType": "L2"},
-                {"fieldName": "image_emb", "indexName": "image_emb", "metricType": "L2"}
-            ]
+                {"fieldName": "image_emb", "indexName": "image_emb", "metricType": "L2"},
+            ],
         }
         self.collection_client.collection_create(payload)
         self.wait_load_completed(name)
@@ -917,10 +1084,10 @@ class TestCreateImportJob(TestBase):
         restore_collection_name = f"{name}_restore"
         payload["collectionName"] = restore_collection_name
         rsp = self.collection_client.collection_create(payload)
-        assert rsp['code'] == 0
+        assert rsp["code"] == 0
         rsp = self.collection_client.collection_describe(name)
         logger.info(f"rsp: {rsp}")
-        assert rsp['code'] == 0
+        assert rsp["code"] == 0
         # insert data
         for i in range(insert_round):
             data = []
@@ -935,10 +1102,12 @@ class TestCreateImportJob(TestBase):
                         "int_array": [i],
                         "varchar_array": [f"varchar_{i}"],
                         "bool_array": [random.choice([True, False])],
-                        "text_emb": preprocessing.normalize([np.array([np.float32(random.random()) for _ in range(dim)])])[
-                            0].tolist(),
-                        "image_emb": preprocessing.normalize([np.array([np.float32(random.random()) for _ in range(dim)])])[
-                            0].tolist(),
+                        "text_emb": preprocessing.normalize(
+                            [np.array([np.float32(random.random()) for _ in range(dim)])]
+                        )[0].tolist(),
+                        "image_emb": preprocessing.normalize(
+                            [np.array([np.float32(random.random()) for _ in range(dim)])]
+                        )[0].tolist(),
                     }
                 else:
                     tmp = {
@@ -951,10 +1120,12 @@ class TestCreateImportJob(TestBase):
                         "int_array": [i],
                         "varchar_array": [f"varchar_{i}"],
                         "bool_array": [random.choice([True, False])],
-                        "text_emb": preprocessing.normalize([np.array([np.float32(random.random()) for _ in range(dim)])])[
-                            0].tolist(),
-                        "image_emb": preprocessing.normalize([np.array([np.float32(random.random()) for _ in range(dim)])])[
-                            0].tolist(),
+                        "text_emb": preprocessing.normalize(
+                            [np.array([np.float32(random.random()) for _ in range(dim)])]
+                        )[0].tolist(),
+                        "image_emb": preprocessing.normalize(
+                            [np.array([np.float32(random.random()) for _ in range(dim)])]
+                        )[0].tolist(),
                     }
                 if enable_dynamic_schema:
                     tmp.update({f"dynamic_field_{i}": i})
@@ -964,25 +1135,25 @@ class TestCreateImportJob(TestBase):
                 "data": data,
             }
             rsp = self.vector_client.vector_insert(payload)
-            assert rsp['code'] == 0
-            assert rsp['data']['insertCount'] == nb
+            assert rsp["code"] == 0
+            assert rsp["data"]["insertCount"] == nb
         # flush data to generate binlog file
-        c = Collection(name)
-        c.flush()
+        self._flush_collection(name)
         # wait for index building to complete, which ensures sort compaction is done
         for field_name in ["text_emb", "image_emb"]:
-            utility.wait_for_index_building_complete(name, field_name)
+            self._wait_for_index_ready(name, field_name)
 
         # query data to make sure the data is inserted
         rsp = self.vector_client.vector_query({"collectionName": name, "filter": "user_id > 0", "limit": 50})
-        assert rsp['code'] == 0
-        assert len(rsp['data']) == 50
+        assert rsp["code"] == 0
+        assert len(rsp["data"]) == 50
         # get collection id
-        c = Collection(name)
-        res = c.describe()
-        collection_id = res["collection_id"]
+        rsp = self.collection_client.collection_describe(name)
+        assert rsp["code"] == 0, rsp
+        collection_id = rsp["data"]["collectionID"]
         # get binlog files
         binlog_files = self.storage_client.get_collection_binlog(collection_id)
+        assert binlog_files, f"no binlog files found for collection {collection_id}"
         files = []
         for file in binlog_files:
             files.append([file, ""])
@@ -991,16 +1162,12 @@ class TestCreateImportJob(TestBase):
         payload = {
             "collectionName": restore_collection_name,
             "files": files,
-            "options": {
-                "backup": "true",
-                "storage_version": "2"
-            }
-
+            "options": {"backup": "true", "storage_version": "2"},
         }
         if is_partition_key:
             payload["partitionName"] = "_default_0"
         rsp = self.import_job_client.create_import_jobs(payload)
-        assert rsp['code'] == 0
+        assert rsp["code"] == 0
         # list import job
         payload = {
             "collectionName": restore_collection_name,
@@ -1008,24 +1175,22 @@ class TestCreateImportJob(TestBase):
         rsp = self.import_job_client.list_import_jobs(payload)
 
         # get import job progress
-        for job in rsp['data']["records"]:
-            job_id = job['jobId']
+        for job in rsp["data"]["records"]:
+            job_id = job["jobId"]
             finished = False
             t0 = time.time()
 
             while not finished:
                 rsp = self.import_job_client.get_import_job_progress(job_id)
-                if rsp['data']['state'] == "Completed":
+                if rsp["data"]["state"] == "Completed":
                     finished = True
                 time.sleep(5)
                 if time.time() - t0 > IMPORT_TIMEOUT:
                     assert False, "import job timeout"
-        time.sleep(10)
-        c_restore = Collection(restore_collection_name)
         # since we import both original and sorted segments, the number of entities should be 2x
-        time.sleep(10)
-        logger.info(f"c.num_entities: {c.num_entities}, c_restore.num_entities: {c_restore.num_entities}")
-        assert c.num_entities*2 == c_restore.num_entities
+        source_count = self._wait_for_count(name, nb * insert_round)
+        restore_count = self._wait_for_count(restore_collection_name, source_count * 2)
+        logger.info(f"source count: {source_count}, restore count: {restore_count}")
 
     def test_import_json_with_nullable_fields(self):
         """Test JSON import with nullable and default_value fields - fields should be auto-filled"""
@@ -1036,7 +1201,7 @@ class TestCreateImportJob(TestBase):
         default_varchar_value = "default_text"
         varchar_max_length = 256
         required_field_base = 100
-        
+
         # Create collection with nullable and default_value fields
         payload = {
             "collectionName": name,
@@ -1048,72 +1213,81 @@ class TestCreateImportJob(TestBase):
                     {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
                     {"fieldName": "nullable_int", "dataType": "Int64", "nullable": True},
                     {"fieldName": "default_int", "dataType": "Int64", "defaultValue": default_int_value},
-                    {"fieldName": "nullable_varchar", "dataType": "VarChar", "elementTypeParams": {"max_length": str(varchar_max_length)}, "nullable": True},
-                    {"fieldName": "default_varchar", "dataType": "VarChar", "elementTypeParams": {"max_length": str(varchar_max_length)}, "defaultValue": default_varchar_value},
-                    {"fieldName": "required_field", "dataType": "Int64"}
-                ]
+                    {
+                        "fieldName": "nullable_varchar",
+                        "dataType": "VarChar",
+                        "elementTypeParams": {"max_length": str(varchar_max_length)},
+                        "nullable": True,
+                    },
+                    {
+                        "fieldName": "default_varchar",
+                        "dataType": "VarChar",
+                        "elementTypeParams": {"max_length": str(varchar_max_length)},
+                        "defaultValue": default_varchar_value,
+                    },
+                    {"fieldName": "required_field", "dataType": "Int64"},
+                ],
             },
-            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}]
+            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}],
         }
         self.collection_client.collection_create(payload)
         self.wait_load_completed(name)
-        
+
         # Create JSON data with missing nullable and default fields
         data = []
         for i in range(num_entities):
             if i % 2 == 0:
                 # Missing nullable and default fields (should be auto-filled)
-                data.append({
-                    "id": i,
-                    "vector": [np.float32(random.random()) for _ in range(dim)],
-                    "required_field": required_field_base + i
-                })
+                data.append(
+                    {
+                        "id": i,
+                        "vector": [np.float32(random.random()) for _ in range(dim)],
+                        "required_field": required_field_base + i,
+                    }
+                )
             else:
                 # Provide all fields explicitly
-                data.append({
-                    "id": i,
-                    "vector": [np.float32(random.random()) for _ in range(dim)],
-                    "nullable_int": 200 + i,
-                    "default_int": 300 + i,
-                    "nullable_varchar": f"provided_value_{i}",
-                    "default_varchar": f"custom_value_{i}",
-                    "required_field": required_field_base + i
-                })
-        
+                data.append(
+                    {
+                        "id": i,
+                        "vector": [np.float32(random.random()) for _ in range(dim)],
+                        "nullable_int": 200 + i,
+                        "default_int": 300 + i,
+                        "nullable_varchar": f"provided_value_{i}",
+                        "default_varchar": f"custom_value_{i}",
+                        "required_field": required_field_base + i,
+                    }
+                )
+
         # Save to JSON file
         file_name = f"test_nullable_{uuid4()}.json"
         file_path = f"/tmp/{file_name}"
         with open(file_path, "w") as f:
             json.dump(data, f, cls=NumpyEncoder)
         self.storage_client.upload_file(file_path, file_name)
-        
+
         # Import the file
-        payload = {
-            "collectionName": name,
-            "files": [[file_name]]
-        }
+        payload = {"collectionName": name, "files": [[file_name]]}
         rsp = self.import_job_client.create_import_jobs(payload)
-        job_id = rsp['data']['jobId']
-        
+        job_id = rsp["data"]["jobId"]
+
         # Wait for import to complete
         res, result = self.import_job_client.wait_import_job_completed(job_id)
         assert result, f"Import job failed: {res}"
-        
+
         # Verify data
-        c = Collection(name)
-        c.load(_refresh=True)
-        assert c.num_entities == num_entities
-        
+        self._wait_for_count(name, num_entities)
+
         # Query and verify nullable/default fields were filled correctly
         # Check even id (missing fields)
-        res = c.query(expr="id == 0", output_fields=["*"])
+        res = self._query_rows(name, "id == 0", ["*"])
         assert res[0]["nullable_int"] is None
         assert res[0]["default_int"] == default_int_value
         assert res[0]["nullable_varchar"] is None
         assert res[0]["default_varchar"] == default_varchar_value
-        
+
         # Check odd id (provided fields)
-        res = c.query(expr="id == 1", output_fields=["*"])
+        res = self._query_rows(name, "id == 1", ["*"])
         assert res[0]["nullable_int"] == 201
         assert res[0]["default_int"] == 301
         assert res[0]["nullable_varchar"] == "provided_value_1"
@@ -1125,7 +1299,7 @@ class TestCreateImportJob(TestBase):
         dim = 128
         num_entities = 3000
         text_max_length = 256
-        
+
         # Create collection with BM25 function output field
         payload = {
             "collectionName": name,
@@ -1134,9 +1308,13 @@ class TestCreateImportJob(TestBase):
                 "enableDynamicField": True,
                 "fields": [
                     {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
-                    {"fieldName": "text", "dataType": "VarChar", "elementTypeParams": {"max_length": str(text_max_length), "enable_analyzer": True}},
+                    {
+                        "fieldName": "text",
+                        "dataType": "VarChar",
+                        "elementTypeParams": {"max_length": str(text_max_length), "enable_analyzer": True},
+                    },
                     {"fieldName": "sparse_vector", "dataType": "SparseFloatVector"},
-                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
+                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
                 ],
                 "functions": [
                     {
@@ -1144,55 +1322,57 @@ class TestCreateImportJob(TestBase):
                         "type": "BM25",
                         "inputFieldNames": ["text"],
                         "outputFieldNames": ["sparse_vector"],
-                        "params": {}
+                        "params": {},
                     }
-                ]
+                ],
             },
             "indexParams": [
                 {"fieldName": "sparse_vector", "indexName": "sparse_idx", "metricType": "BM25"},
-                {"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"}
-            ]
+                {"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"},
+            ],
         }
-        
+
         self.collection_client.collection_create(payload)
         self.wait_load_completed(name)
-        
+
         # Create JSON data that includes the function output field
         data = []
         for i in range(num_entities):
-            data.append({
-                "id": i,
-                "text": f"sample text for BM25 document {i}",
-                "sparse_vector": {"indices": [1, 2, 3], "values": [0.1, 0.2, 0.3]},  # This should cause error
-                "dense_vector": [np.float32(random.random()) for _ in range(dim)]
-            })
-        
+            data.append(
+                {
+                    "id": i,
+                    "text": f"sample text for BM25 document {i}",
+                    "sparse_vector": {"indices": [1, 2, 3], "values": [0.1, 0.2, 0.3]},  # This should cause error
+                    "dense_vector": [np.float32(random.random()) for _ in range(dim)],
+                }
+            )
+
         # Save to JSON file
         file_name = f"test_function_output_{uuid4()}.json"
         file_path = f"/tmp/{file_name}"
         with open(file_path, "w") as f:
             json.dump(data, f, cls=NumpyEncoder)
         self.storage_client.upload_file(file_path, file_name)
-        
+
         # Import should fail
-        payload = {
-            "collectionName": name,
-            "files": [[file_name]]
-        }
+        payload = {"collectionName": name, "files": [[file_name]]}
         rsp = self.import_job_client.create_import_jobs(payload)
-        job_id = rsp['data']['jobId']
-        
+        job_id = rsp["data"]["jobId"]
+
         # Wait and verify import fails
         finished = False
         t0 = time.time()
         while not finished:
             rsp = self.import_job_client.get_import_job_progress(job_id)
-            if rsp['data']['state'] == "Failed":
-                reason = rsp['data'].get('reason', '').lower()
-                assert "not allowed to provide data for bm25 function output field" in reason or \
-                       "output by function" in reason or "function" in reason
+            if rsp["data"]["state"] == "Failed":
+                reason = rsp["data"].get("reason", "").lower()
+                assert (
+                    "not allowed to provide data for bm25 function output field" in reason
+                    or "output by function" in reason
+                    or "function" in reason
+                )
                 finished = True
-            elif rsp['data']['state'] == "Completed":
+            elif rsp["data"]["state"] == "Completed":
                 assert False, "Import should have failed for BM25 function output field"
             time.sleep(5)
             if time.time() - t0 > IMPORT_TIMEOUT:
@@ -1204,7 +1384,7 @@ class TestCreateImportJob(TestBase):
         dim = 128
         num_entities = 3000
         title_max_length = 256
-        
+
         # Create collection without dynamic field
         payload = {
             "collectionName": name,
@@ -1214,53 +1394,54 @@ class TestCreateImportJob(TestBase):
                 "fields": [
                     {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
                     {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
-                    {"fieldName": "title", "dataType": "VarChar", "elementTypeParams": {"max_length": str(title_max_length)}}
-                ]
+                    {
+                        "fieldName": "title",
+                        "dataType": "VarChar",
+                        "elementTypeParams": {"max_length": str(title_max_length)},
+                    },
+                ],
             },
-            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}]
+            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}],
         }
         self.collection_client.collection_create(payload)
         self.wait_load_completed(name)
-        
+
         # Create JSON data with extra fields
         data = []
         for i in range(num_entities):
-            data.append({
-                "id": i,
-                "vector": [np.float32(random.random()) for _ in range(dim)],
-                "title": f"Document {i}",
-                "extra_field1": f"ignored_value_{i}",
-                "extra_field2": 12345 + i,
-                "extra_field3": {"nested": f"data_{i}"},
-                "another_extra": [i, i+1, i+2]
-            })
-        
+            data.append(
+                {
+                    "id": i,
+                    "vector": [np.float32(random.random()) for _ in range(dim)],
+                    "title": f"Document {i}",
+                    "extra_field1": f"ignored_value_{i}",
+                    "extra_field2": 12345 + i,
+                    "extra_field3": {"nested": f"data_{i}"},
+                    "another_extra": [i, i + 1, i + 2],
+                }
+            )
+
         # Save to JSON file
         file_name = f"test_extra_fields_{uuid4()}.json"
         file_path = f"/tmp/{file_name}"
         with open(file_path, "w") as f:
             json.dump(data, f, cls=NumpyEncoder)
         self.storage_client.upload_file(file_path, file_name)
-        
+
         # Import should succeed, ignoring extra fields
-        payload = {
-            "collectionName": name,
-            "files": [[file_name]]
-        }
+        payload = {"collectionName": name, "files": [[file_name]]}
         rsp = self.import_job_client.create_import_jobs(payload)
-        job_id = rsp['data']['jobId']
-        
+        job_id = rsp["data"]["jobId"]
+
         # Wait for import to complete
         res, result = self.import_job_client.wait_import_job_completed(job_id)
         assert result, f"Import job failed: {res}"
-        
+
         # Verify data imported successfully
-        c = Collection(name)
-        c.load(_refresh=True)
-        assert c.num_entities == num_entities
-        
+        self._wait_for_count(name, num_entities)
+
         # Verify only defined fields exist (sample check)
-        res = c.query(expr="id in [0, 1, 2]", output_fields=["*"])
+        res = self._query_rows(name, "id in [0, 1, 2]", ["*"], limit=3, expected_count=3)
         for item in res:
             assert "id" in item
             assert "title" in item
@@ -1275,7 +1456,7 @@ class TestCreateImportJob(TestBase):
         num_entities = 3000
         text_max_length = 256
         default_value = 100
-        
+
         # Create collection with nullable fields
         payload = {
             "collectionName": name,
@@ -1285,54 +1466,49 @@ class TestCreateImportJob(TestBase):
                 "fields": [
                     {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
                     {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
-                    {"fieldName": "required_text", "dataType": "VarChar", "elementTypeParams": {"max_length": str(text_max_length)}},
+                    {
+                        "fieldName": "required_text",
+                        "dataType": "VarChar",
+                        "elementTypeParams": {"max_length": str(text_max_length)},
+                    },
                     {"fieldName": "nullable_int", "dataType": "Int64", "nullable": True},
-                    {"fieldName": "default_value", "dataType": "Int64", "defaultValue": default_value}
-                ]
+                    {"fieldName": "default_value", "dataType": "Int64", "defaultValue": default_value},
+                ],
             },
-            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}]
+            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}],
         }
         self.collection_client.collection_create(payload)
         self.wait_load_completed(name)
-        
+
         # Create CSV file without nullable and default_value columns
         file_name = f"test_csv_nullable_{uuid4()}.csv"
         file_path = f"/tmp/{file_name}"
-        
-        with open(file_path, 'w', newline='') as csvfile:
-            fieldnames = ['id', 'vector', 'required_text']  # Missing nullable_int and default_value
+
+        with open(file_path, "w", newline="") as csvfile:
+            fieldnames = ["id", "vector", "required_text"]  # Missing nullable_int and default_value
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             writer.writeheader()
-            
+
             for i in range(num_entities):
-                vector_str = '[' + ','.join([str(random.random()) for _ in range(dim)]) + ']'
-                writer.writerow({
-                    'id': i,
-                    'vector': vector_str,
-                    'required_text': f'text_{i}'
-                })
-        
+                vector_str = "[" + ",".join([str(random.random()) for _ in range(dim)]) + "]"
+                writer.writerow({"id": i, "vector": vector_str, "required_text": f"text_{i}"})
+
         self.storage_client.upload_file(file_path, file_name)
-        
+
         # Import should succeed
-        payload = {
-            "collectionName": name,
-            "files": [[file_name]]
-        }
+        payload = {"collectionName": name, "files": [[file_name]]}
         rsp = self.import_job_client.create_import_jobs(payload)
-        job_id = rsp['data']['jobId']
-        
+        job_id = rsp["data"]["jobId"]
+
         # Wait for import to complete
         res, result = self.import_job_client.wait_import_job_completed(job_id)
         assert result, f"Import job failed: {res}"
-        
+
         # Verify data
-        c = Collection(name)
-        c.load(_refresh=True)
-        assert c.num_entities == num_entities
-        
+        self._wait_for_count(name, num_entities)
+
         # Verify nullable fields are null and default fields have default value
-        res = c.query(expr="id == 0", output_fields=["*"])
+        res = self._query_rows(name, "id == 0", ["*"])
         assert res[0]["nullable_int"] is None
         assert res[0]["default_value"] == default_value
 
@@ -1342,7 +1518,7 @@ class TestCreateImportJob(TestBase):
         dim = 128
         num_entities = 3000
         text_max_length = 256
-        
+
         # Create collection with BM25 function
         payload = {
             "collectionName": name,
@@ -1351,9 +1527,13 @@ class TestCreateImportJob(TestBase):
                 "enableDynamicField": False,
                 "fields": [
                     {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
-                    {"fieldName": "text", "dataType": "VarChar", "elementTypeParams": {"max_length": str(text_max_length), "enable_analyzer": True}},
+                    {
+                        "fieldName": "text",
+                        "dataType": "VarChar",
+                        "elementTypeParams": {"max_length": str(text_max_length), "enable_analyzer": True},
+                    },
                     {"fieldName": "sparse_vector", "dataType": "SparseFloatVector"},
-                    {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
+                    {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
                 ],
                 "functions": [
                     {
@@ -1361,59 +1541,61 @@ class TestCreateImportJob(TestBase):
                         "type": "BM25",
                         "inputFieldNames": ["text"],
                         "outputFieldNames": ["sparse_vector"],
-                        "params": {}
+                        "params": {},
                     }
-                ]
+                ],
             },
             "indexParams": [
                 {"fieldName": "sparse_vector", "indexName": "sparse_idx", "metricType": "BM25"},
-                {"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}
-            ]
+                {"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"},
+            ],
         }
-        
+
         self.collection_client.collection_create(payload)
         self.wait_load_completed(name)
-        
+
         # Create CSV file that includes the function output field
         file_name = f"test_csv_function_{uuid4()}.csv"
         file_path = f"/tmp/{file_name}"
-        
-        with open(file_path, 'w', newline='') as csvfile:
+
+        with open(file_path, "w", newline="") as csvfile:
             # Include sparse_vector which is a function output field
-            fieldnames = ['id', 'text', 'sparse_vector', 'vector']
+            fieldnames = ["id", "text", "sparse_vector", "vector"]
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             writer.writeheader()
-            
+
             for i in range(num_entities):
-                vector_str = '[' + ','.join([str(random.random()) for _ in range(dim)]) + ']'
-                writer.writerow({
-                    'id': str(i),
-                    'text': f'sample document {i}',
-                    'sparse_vector': '{"indices": [1, 2], "values": [0.1, 0.2]}',  # This should cause error
-                    'vector': vector_str
-                })
-        
+                vector_str = "[" + ",".join([str(random.random()) for _ in range(dim)]) + "]"
+                writer.writerow(
+                    {
+                        "id": str(i),
+                        "text": f"sample document {i}",
+                        "sparse_vector": '{"indices": [1, 2], "values": [0.1, 0.2]}',  # This should cause error
+                        "vector": vector_str,
+                    }
+                )
+
         self.storage_client.upload_file(file_path, file_name)
-        
+
         # Import should fail
-        payload = {
-            "collectionName": name,
-            "files": [[file_name]]
-        }
+        payload = {"collectionName": name, "files": [[file_name]]}
         rsp = self.import_job_client.create_import_jobs(payload)
-        job_id = rsp['data']['jobId']
-        
+        job_id = rsp["data"]["jobId"]
+
         # Wait and verify import fails
         finished = False
         t0 = time.time()
         while not finished:
             rsp = self.import_job_client.get_import_job_progress(job_id)
-            if rsp['data']['state'] == "Failed":
-                reason = rsp['data'].get('reason', '').lower()
-                assert "not allowed to provide data for bm25 function output field" in reason or \
-                       "output by function" in reason or "function" in reason
+            if rsp["data"]["state"] == "Failed":
+                reason = rsp["data"].get("reason", "").lower()
+                assert (
+                    "not allowed to provide data for bm25 function output field" in reason
+                    or "output by function" in reason
+                    or "function" in reason
+                )
                 finished = True
-            elif rsp['data']['state'] == "Completed":
+            elif rsp["data"]["state"] == "Completed":
                 assert False, "Import should have failed for BM25 function output field in CSV"
             time.sleep(5)
             if time.time() - t0 > IMPORT_TIMEOUT:
@@ -1433,7 +1615,7 @@ class TestCreateImportJob(TestBase):
                 "fields": [
                     {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
                     {"fieldName": "text", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
-                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
+                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
                 ],
                 "functions": [
                     {
@@ -1441,26 +1623,22 @@ class TestCreateImportJob(TestBase):
                         "type": "TextEmbedding",
                         "inputFieldNames": ["text"],
                         "outputFieldNames": ["dense_vector"],
-                        "params": {"provider": "TEI", "endpoint": tei_endpoint}
+                        "params": {"provider": "TEI", "endpoint": tei_endpoint},
                     }
-                ]
+                ],
             },
-            "indexParams": [
-                {"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"}
-            ]
+            "indexParams": [{"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"}],
         }
         rsp = self.collection_client.collection_create(payload)
-        assert rsp['code'] == 0
+        assert rsp["code"] == 0
         self.wait_load_completed(name)
 
         # Create JSON data with non-BM25 function output field
         data = []
         for i in range(num_entities):
-            data.append({
-                "id": i,
-                "text": f"sample text {i}",
-                "dense_vector": [np.float32(random.random()) for _ in range(dim)]
-            })
+            data.append(
+                {"id": i, "text": f"sample text {i}", "dense_vector": [np.float32(random.random()) for _ in range(dim)]}
+            )
 
         file_name = f"test_non_bm25_fn_output_{uuid4()}.json"
         file_path = f"/tmp/{file_name}"
@@ -1468,23 +1646,20 @@ class TestCreateImportJob(TestBase):
             json.dump(data, f, cls=NumpyEncoder)
         self.storage_client.upload_file(file_path, file_name)
 
-        payload = {
-            "collectionName": name,
-            "files": [[file_name]]
-        }
+        payload = {"collectionName": name, "files": [[file_name]]}
         rsp = self.import_job_client.create_import_jobs(payload)
-        job_id = rsp['data']['jobId']
+        job_id = rsp["data"]["jobId"]
 
         # Import should fail because allowInsertNonBM25FunctionOutputs is not enabled
         finished = False
         t0 = time.time()
         while not finished:
             rsp = self.import_job_client.get_import_job_progress(job_id)
-            if rsp['data']['state'] == "Failed":
-                reason = rsp['data'].get('reason', '').lower()
+            if rsp["data"]["state"] == "Failed":
+                reason = rsp["data"].get("reason", "").lower()
                 assert "function output" in reason
                 finished = True
-            elif rsp['data']['state'] == "Completed":
+            elif rsp["data"]["state"] == "Completed":
                 assert False, "Import should have failed for non-BM25 function output field without property enabled"
             time.sleep(5)
             if time.time() - t0 > IMPORT_TIMEOUT:
@@ -1504,7 +1679,7 @@ class TestCreateImportJob(TestBase):
                 "fields": [
                     {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
                     {"fieldName": "text", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
-                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
+                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
                 ],
                 "functions": [
                     {
@@ -1512,31 +1687,28 @@ class TestCreateImportJob(TestBase):
                         "type": "TextEmbedding",
                         "inputFieldNames": ["text"],
                         "outputFieldNames": ["dense_vector"],
-                        "params": {"provider": "TEI", "endpoint": tei_endpoint}
+                        "params": {"provider": "TEI", "endpoint": tei_endpoint},
                     }
-                ]
+                ],
             },
-            "indexParams": [
-                {"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"}
-            ]
+            "indexParams": [{"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"}],
         }
         rsp = self.collection_client.collection_create(payload)
-        assert rsp['code'] == 0
+        assert rsp["code"] == 0
         self.wait_load_completed(name)
 
         # Enable allowInsertNonBM25FunctionOutputs
         rsp = self.collection_client.alter_collection_properties(
-            name, {"collection.function.allowInsertNonBM25FunctionOutputs": "true"})
-        assert rsp['code'] == 0
+            name, {"collection.function.allowInsertNonBM25FunctionOutputs": "true"}
+        )
+        assert rsp["code"] == 0
 
         # Create JSON data with function output field
         data = []
         for i in range(num_entities):
-            data.append({
-                "id": i,
-                "text": f"sample text {i}",
-                "dense_vector": [np.float32(random.random()) for _ in range(dim)]
-            })
+            data.append(
+                {"id": i, "text": f"sample text {i}", "dense_vector": [np.float32(random.random()) for _ in range(dim)]}
+            )
 
         file_name = f"test_non_bm25_fn_output_allowed_{uuid4()}.json"
         file_path = f"/tmp/{file_name}"
@@ -1544,21 +1716,16 @@ class TestCreateImportJob(TestBase):
             json.dump(data, f, cls=NumpyEncoder)
         self.storage_client.upload_file(file_path, file_name)
 
-        payload = {
-            "collectionName": name,
-            "files": [[file_name]]
-        }
+        payload = {"collectionName": name, "files": [[file_name]]}
         rsp = self.import_job_client.create_import_jobs(payload)
-        job_id = rsp['data']['jobId']
+        job_id = rsp["data"]["jobId"]
 
         # Import should succeed
         res, result = self.import_job_client.wait_import_job_completed(job_id)
         assert result, f"Import job failed: {res}"
 
         # Verify data
-        c = Collection(name)
-        c.load(_refresh=True)
-        assert c.num_entities == num_entities
+        self._wait_for_count(name, num_entities)
 
     def test_import_json_without_non_bm25_function_output_field(self, tei_endpoint):
         """Test JSON import without non-BM25 function output field - should succeed with auto-generation"""
@@ -1574,7 +1741,7 @@ class TestCreateImportJob(TestBase):
                 "fields": [
                     {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
                     {"fieldName": "text", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
-                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
+                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
                 ],
                 "functions": [
                     {
@@ -1582,25 +1749,20 @@ class TestCreateImportJob(TestBase):
                         "type": "TextEmbedding",
                         "inputFieldNames": ["text"],
                         "outputFieldNames": ["dense_vector"],
-                        "params": {"provider": "TEI", "endpoint": tei_endpoint}
+                        "params": {"provider": "TEI", "endpoint": tei_endpoint},
                     }
-                ]
+                ],
             },
-            "indexParams": [
-                {"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"}
-            ]
+            "indexParams": [{"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"}],
         }
         rsp = self.collection_client.collection_create(payload)
-        assert rsp['code'] == 0
+        assert rsp["code"] == 0
         self.wait_load_completed(name)
 
         # Create JSON data WITHOUT function output field - should be auto-generated
         data = []
         for i in range(num_entities):
-            data.append({
-                "id": i,
-                "text": f"sample text {i}"
-            })
+            data.append({"id": i, "text": f"sample text {i}"})
 
         file_name = f"test_json_no_non_bm25_fn_output_{uuid4()}.json"
         file_path = f"/tmp/{file_name}"
@@ -1608,21 +1770,16 @@ class TestCreateImportJob(TestBase):
             json.dump(data, f, cls=NumpyEncoder)
         self.storage_client.upload_file(file_path, file_name)
 
-        payload = {
-            "collectionName": name,
-            "files": [[file_name]]
-        }
+        payload = {"collectionName": name, "files": [[file_name]]}
         rsp = self.import_job_client.create_import_jobs(payload)
-        job_id = rsp['data']['jobId']
+        job_id = rsp["data"]["jobId"]
 
         # Import should succeed with TextEmbedding auto-generating dense vectors
         res, result = self.import_job_client.wait_import_job_completed(job_id)
         assert result, f"Import job failed: {res}"
 
         # Verify data
-        c = Collection(name)
-        c.load(_refresh=True)
-        assert c.num_entities == num_entities
+        self._wait_for_count(name, num_entities)
 
     def test_import_csv_with_non_bm25_function_output_rejected_by_default(self, tei_endpoint):
         """Test CSV import with non-BM25 function output field is rejected by default"""
@@ -1638,7 +1795,7 @@ class TestCreateImportJob(TestBase):
                 "fields": [
                     {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
                     {"fieldName": "text", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
-                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
+                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
                 ],
                 "functions": [
                     {
@@ -1646,54 +1803,45 @@ class TestCreateImportJob(TestBase):
                         "type": "TextEmbedding",
                         "inputFieldNames": ["text"],
                         "outputFieldNames": ["dense_vector"],
-                        "params": {"provider": "TEI", "endpoint": tei_endpoint}
+                        "params": {"provider": "TEI", "endpoint": tei_endpoint},
                     }
-                ]
+                ],
             },
-            "indexParams": [
-                {"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"}
-            ]
+            "indexParams": [{"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"}],
         }
         rsp = self.collection_client.collection_create(payload)
-        assert rsp['code'] == 0
+        assert rsp["code"] == 0
         self.wait_load_completed(name)
 
         # Create CSV file with function output field
         file_name = f"test_csv_non_bm25_fn_output_{uuid4()}.csv"
         file_path = f"/tmp/{file_name}"
 
-        with open(file_path, 'w', newline='') as csvfile:
-            fieldnames = ['id', 'text', 'dense_vector']
+        with open(file_path, "w", newline="") as csvfile:
+            fieldnames = ["id", "text", "dense_vector"]
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             writer.writeheader()
 
             for i in range(num_entities):
-                vector_str = '[' + ','.join([str(random.random()) for _ in range(dim)]) + ']'
-                writer.writerow({
-                    'id': str(i),
-                    'text': f'sample text {i}',
-                    'dense_vector': vector_str
-                })
+                vector_str = "[" + ",".join([str(random.random()) for _ in range(dim)]) + "]"
+                writer.writerow({"id": str(i), "text": f"sample text {i}", "dense_vector": vector_str})
 
         self.storage_client.upload_file(file_path, file_name)
 
-        payload = {
-            "collectionName": name,
-            "files": [[file_name]]
-        }
+        payload = {"collectionName": name, "files": [[file_name]]}
         rsp = self.import_job_client.create_import_jobs(payload)
-        job_id = rsp['data']['jobId']
+        job_id = rsp["data"]["jobId"]
 
         # Import should fail because allowInsertNonBM25FunctionOutputs is not enabled
         finished = False
         t0 = time.time()
         while not finished:
             rsp = self.import_job_client.get_import_job_progress(job_id)
-            if rsp['data']['state'] == "Failed":
-                reason = rsp['data'].get('reason', '').lower()
+            if rsp["data"]["state"] == "Failed":
+                reason = rsp["data"].get("reason", "").lower()
                 assert "function output" in reason
                 finished = True
-            elif rsp['data']['state'] == "Completed":
+            elif rsp["data"]["state"] == "Completed":
                 assert False, "Import should have failed for non-BM25 function output field without property enabled"
             time.sleep(5)
             if time.time() - t0 > IMPORT_TIMEOUT:
@@ -1713,7 +1861,7 @@ class TestCreateImportJob(TestBase):
                 "fields": [
                     {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
                     {"fieldName": "text", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
-                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
+                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
                 ],
                 "functions": [
                     {
@@ -1721,57 +1869,47 @@ class TestCreateImportJob(TestBase):
                         "type": "TextEmbedding",
                         "inputFieldNames": ["text"],
                         "outputFieldNames": ["dense_vector"],
-                        "params": {"provider": "TEI", "endpoint": tei_endpoint}
+                        "params": {"provider": "TEI", "endpoint": tei_endpoint},
                     }
-                ]
+                ],
             },
-            "indexParams": [
-                {"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"}
-            ]
+            "indexParams": [{"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"}],
         }
         rsp = self.collection_client.collection_create(payload)
-        assert rsp['code'] == 0
+        assert rsp["code"] == 0
         self.wait_load_completed(name)
 
         # Enable allowInsertNonBM25FunctionOutputs
         rsp = self.collection_client.alter_collection_properties(
-            name, {"collection.function.allowInsertNonBM25FunctionOutputs": "true"})
-        assert rsp['code'] == 0
+            name, {"collection.function.allowInsertNonBM25FunctionOutputs": "true"}
+        )
+        assert rsp["code"] == 0
 
         # Create CSV file with function output field
         file_name = f"test_csv_non_bm25_fn_allowed_{uuid4()}.csv"
         file_path = f"/tmp/{file_name}"
 
-        with open(file_path, 'w', newline='') as csvfile:
-            fieldnames = ['id', 'text', 'dense_vector']
+        with open(file_path, "w", newline="") as csvfile:
+            fieldnames = ["id", "text", "dense_vector"]
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             writer.writeheader()
 
             for i in range(num_entities):
-                vector_str = '[' + ','.join([str(random.random()) for _ in range(dim)]) + ']'
-                writer.writerow({
-                    'id': str(i),
-                    'text': f'sample text {i}',
-                    'dense_vector': vector_str
-                })
+                vector_str = "[" + ",".join([str(random.random()) for _ in range(dim)]) + "]"
+                writer.writerow({"id": str(i), "text": f"sample text {i}", "dense_vector": vector_str})
 
         self.storage_client.upload_file(file_path, file_name)
 
-        payload = {
-            "collectionName": name,
-            "files": [[file_name]]
-        }
+        payload = {"collectionName": name, "files": [[file_name]]}
         rsp = self.import_job_client.create_import_jobs(payload)
-        job_id = rsp['data']['jobId']
+        job_id = rsp["data"]["jobId"]
 
         # Import should succeed
         res, result = self.import_job_client.wait_import_job_completed(job_id)
         assert result, f"Import job failed: {res}"
 
         # Verify data
-        c = Collection(name)
-        c.load(_refresh=True)
-        assert c.num_entities == num_entities
+        self._wait_for_count(name, num_entities)
 
     def test_import_csv_without_non_bm25_function_output_field(self, tei_endpoint):
         """Test CSV import without non-BM25 function output field - should succeed with auto-generation"""
@@ -1787,7 +1925,7 @@ class TestCreateImportJob(TestBase):
                 "fields": [
                     {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
                     {"fieldName": "text", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
-                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
+                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
                 ],
                 "functions": [
                     {
@@ -1795,50 +1933,40 @@ class TestCreateImportJob(TestBase):
                         "type": "TextEmbedding",
                         "inputFieldNames": ["text"],
                         "outputFieldNames": ["dense_vector"],
-                        "params": {"provider": "TEI", "endpoint": tei_endpoint}
+                        "params": {"provider": "TEI", "endpoint": tei_endpoint},
                     }
-                ]
+                ],
             },
-            "indexParams": [
-                {"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"}
-            ]
+            "indexParams": [{"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"}],
         }
         rsp = self.collection_client.collection_create(payload)
-        assert rsp['code'] == 0
+        assert rsp["code"] == 0
         self.wait_load_completed(name)
 
         # Create CSV file WITHOUT function output field
         file_name = f"test_csv_no_non_bm25_fn_output_{uuid4()}.csv"
         file_path = f"/tmp/{file_name}"
 
-        with open(file_path, 'w', newline='') as csvfile:
-            fieldnames = ['id', 'text']
+        with open(file_path, "w", newline="") as csvfile:
+            fieldnames = ["id", "text"]
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             writer.writeheader()
 
             for i in range(num_entities):
-                writer.writerow({
-                    'id': str(i),
-                    'text': f'sample text {i}'
-                })
+                writer.writerow({"id": str(i), "text": f"sample text {i}"})
 
         self.storage_client.upload_file(file_path, file_name)
 
-        payload = {
-            "collectionName": name,
-            "files": [[file_name]]
-        }
+        payload = {"collectionName": name, "files": [[file_name]]}
         rsp = self.import_job_client.create_import_jobs(payload)
-        job_id = rsp['data']['jobId']
+        job_id = rsp["data"]["jobId"]
 
         # Import should succeed with TextEmbedding auto-generating dense vectors
         res, result = self.import_job_client.wait_import_job_completed(job_id)
         assert result, f"Import job failed: {res}"
 
         # Verify data
-        c = Collection(name)
-        c.load(_refresh=True)
-        assert c.num_entities == num_entities
+        self._wait_for_count(name, num_entities)
 
     def test_import_parquet_with_non_bm25_function_output_rejected_by_default(self, tei_endpoint):
         """Test Parquet import with non-BM25 function output field is rejected by default"""
@@ -1854,7 +1982,7 @@ class TestCreateImportJob(TestBase):
                 "fields": [
                     {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
                     {"fieldName": "text", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
-                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
+                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
                 ],
                 "functions": [
                     {
@@ -1862,54 +1990,45 @@ class TestCreateImportJob(TestBase):
                         "type": "TextEmbedding",
                         "inputFieldNames": ["text"],
                         "outputFieldNames": ["dense_vector"],
-                        "params": {"provider": "TEI", "endpoint": tei_endpoint}
+                        "params": {"provider": "TEI", "endpoint": tei_endpoint},
                     }
-                ]
+                ],
             },
-            "indexParams": [
-                {"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"}
-            ]
+            "indexParams": [{"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"}],
         }
         rsp = self.collection_client.collection_create(payload)
-        assert rsp['code'] == 0
+        assert rsp["code"] == 0
         self.wait_load_completed(name)
 
         # Create Parquet file with function output field
         data = {
-            'id': list(range(num_entities)),
-            'text': [f'sample text {i}' for i in range(num_entities)],
-            'dense_vector': [[np.float32(random.random()) for _ in range(dim)] for _ in range(num_entities)]
+            "id": list(range(num_entities)),
+            "text": [f"sample text {i}" for i in range(num_entities)],
+            "dense_vector": [[np.float32(random.random()) for _ in range(dim)] for _ in range(num_entities)],
         }
         df = pd.DataFrame(data)
 
-        pa_schema = pa.schema([
-            ('id', pa.int64()),
-            ('text', pa.string()),
-            ('dense_vector', pa.list_(pa.float32()))
-        ])
+        pa_schema = pa.schema([("id", pa.int64()), ("text", pa.string()), ("dense_vector", pa.list_(pa.float32()))])
         file_name = f"test_parquet_non_bm25_fn_output_{uuid4()}.parquet"
         file_path = f"/tmp/{file_name}"
         table = pa.Table.from_pandas(df, schema=pa_schema)
         pq.write_table(table, file_path)
         self.storage_client.upload_file(file_path, file_name)
 
-        payload = {
-            "collectionName": name,
-            "files": [[file_name]]
-        }
+        payload = {"collectionName": name, "files": [[file_name]]}
         rsp = self.import_job_client.create_import_jobs(payload)
-        job_id = rsp['data']['jobId']
+        job_id = rsp["data"]["jobId"]
 
         # Import should fail because allowInsertNonBM25FunctionOutputs is not enabled
         finished = False
         t0 = time.time()
         while not finished:
             rsp = self.import_job_client.get_import_job_progress(job_id)
-            if rsp['data']['state'] == "Failed":
-                reason = rsp['data'].get('reason', '').lower()
+            if rsp["data"]["state"] == "Failed":
+                reason = rsp["data"].get("reason", "").lower()
                 assert "function output" in reason
                 finished = True
-            elif rsp['data']['state'] == "Completed":
+            elif rsp["data"]["state"] == "Completed":
                 assert False, "Import should have failed for non-BM25 function output field without property enabled"
             time.sleep(5)
             if time.time() - t0 > IMPORT_TIMEOUT:
@@ -1929,7 +2048,7 @@ class TestCreateImportJob(TestBase):
                 "fields": [
                     {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
                     {"fieldName": "text", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
-                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
+                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
                 ],
                 "functions": [
                     {
@@ -1937,57 +2056,47 @@ class TestCreateImportJob(TestBase):
                         "type": "TextEmbedding",
                         "inputFieldNames": ["text"],
                         "outputFieldNames": ["dense_vector"],
-                        "params": {"provider": "TEI", "endpoint": tei_endpoint}
+                        "params": {"provider": "TEI", "endpoint": tei_endpoint},
                     }
-                ]
+                ],
             },
-            "indexParams": [
-                {"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"}
-            ]
+            "indexParams": [{"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"}],
         }
         rsp = self.collection_client.collection_create(payload)
-        assert rsp['code'] == 0
+        assert rsp["code"] == 0
         self.wait_load_completed(name)
 
         # Enable allowInsertNonBM25FunctionOutputs
         rsp = self.collection_client.alter_collection_properties(
-            name, {"collection.function.allowInsertNonBM25FunctionOutputs": "true"})
-        assert rsp['code'] == 0
+            name, {"collection.function.allowInsertNonBM25FunctionOutputs": "true"}
+        )
+        assert rsp["code"] == 0
 
         # Create Parquet file with function output field
         data = {
-            'id': list(range(num_entities)),
-            'text': [f'sample text {i}' for i in range(num_entities)],
-            'dense_vector': [[np.float32(random.random()) for _ in range(dim)] for _ in range(num_entities)]
+            "id": list(range(num_entities)),
+            "text": [f"sample text {i}" for i in range(num_entities)],
+            "dense_vector": [[np.float32(random.random()) for _ in range(dim)] for _ in range(num_entities)],
         }
         df = pd.DataFrame(data)
 
-        pa_schema = pa.schema([
-            ('id', pa.int64()),
-            ('text', pa.string()),
-            ('dense_vector', pa.list_(pa.float32()))
-        ])
+        pa_schema = pa.schema([("id", pa.int64()), ("text", pa.string()), ("dense_vector", pa.list_(pa.float32()))])
         file_name = f"test_parquet_non_bm25_fn_allowed_{uuid4()}.parquet"
         file_path = f"/tmp/{file_name}"
         table = pa.Table.from_pandas(df, schema=pa_schema)
         pq.write_table(table, file_path)
         self.storage_client.upload_file(file_path, file_name)
 
-        payload = {
-            "collectionName": name,
-            "files": [[file_name]]
-        }
+        payload = {"collectionName": name, "files": [[file_name]]}
         rsp = self.import_job_client.create_import_jobs(payload)
-        job_id = rsp['data']['jobId']
+        job_id = rsp["data"]["jobId"]
 
         # Import should succeed
         res, result = self.import_job_client.wait_import_job_completed(job_id)
         assert result, f"Import job failed: {res}"
 
         # Verify data
-        c = Collection(name)
-        c.load(_refresh=True)
-        assert c.num_entities == num_entities
+        self._wait_for_count(name, num_entities)
 
     def test_import_parquet_without_non_bm25_function_output_field(self, tei_endpoint):
         """Test Parquet import without non-BM25 function output field - should succeed with auto-generation"""
@@ -2003,7 +2112,7 @@ class TestCreateImportJob(TestBase):
                 "fields": [
                     {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
                     {"fieldName": "text", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
-                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
+                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
                 ],
                 "functions": [
                     {
@@ -2011,50 +2120,37 @@ class TestCreateImportJob(TestBase):
                         "type": "TextEmbedding",
                         "inputFieldNames": ["text"],
                         "outputFieldNames": ["dense_vector"],
-                        "params": {"provider": "TEI", "endpoint": tei_endpoint}
+                        "params": {"provider": "TEI", "endpoint": tei_endpoint},
                     }
-                ]
+                ],
             },
-            "indexParams": [
-                {"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"}
-            ]
+            "indexParams": [{"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"}],
         }
         rsp = self.collection_client.collection_create(payload)
-        assert rsp['code'] == 0
+        assert rsp["code"] == 0
         self.wait_load_completed(name)
 
         # Create Parquet file WITHOUT function output field
-        data = {
-            'id': list(range(num_entities)),
-            'text': [f'sample text {i}' for i in range(num_entities)]
-        }
+        data = {"id": list(range(num_entities)), "text": [f"sample text {i}" for i in range(num_entities)]}
         df = pd.DataFrame(data)
 
-        pa_schema = pa.schema([
-            ('id', pa.int64()),
-            ('text', pa.string())
-        ])
+        pa_schema = pa.schema([("id", pa.int64()), ("text", pa.string())])
         file_name = f"test_parquet_no_non_bm25_fn_output_{uuid4()}.parquet"
         file_path = f"/tmp/{file_name}"
         table = pa.Table.from_pandas(df, schema=pa_schema)
         pq.write_table(table, file_path)
         self.storage_client.upload_file(file_path, file_name)
 
-        payload = {
-            "collectionName": name,
-            "files": [[file_name]]
-        }
+        payload = {"collectionName": name, "files": [[file_name]]}
         rsp = self.import_job_client.create_import_jobs(payload)
-        job_id = rsp['data']['jobId']
+        job_id = rsp["data"]["jobId"]
 
         # Import should succeed with TextEmbedding auto-generating dense vectors
         res, result = self.import_job_client.wait_import_job_completed(job_id)
         assert result, f"Import job failed: {res}"
 
         # Verify data
-        c = Collection(name)
-        c.load(_refresh=True)
-        assert c.num_entities == num_entities
+        self._wait_for_count(name, num_entities)
 
     def test_import_json_bm25_output_rejected_even_with_property(self):
         """Test JSON import with BM25 function output field is still rejected even with property enabled"""
@@ -2069,10 +2165,13 @@ class TestCreateImportJob(TestBase):
                 "enableDynamicField": False,
                 "fields": [
                     {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
-                    {"fieldName": "text", "dataType": "VarChar",
-                     "elementTypeParams": {"max_length": "256", "enable_analyzer": True}},
+                    {
+                        "fieldName": "text",
+                        "dataType": "VarChar",
+                        "elementTypeParams": {"max_length": "256", "enable_analyzer": True},
+                    },
                     {"fieldName": "sparse_vector", "dataType": "SparseFloatVector"},
-                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
+                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
                 ],
                 "functions": [
                     {
@@ -2080,32 +2179,35 @@ class TestCreateImportJob(TestBase):
                         "type": "BM25",
                         "inputFieldNames": ["text"],
                         "outputFieldNames": ["sparse_vector"],
-                        "params": {}
+                        "params": {},
                     }
-                ]
+                ],
             },
             "indexParams": [
                 {"fieldName": "sparse_vector", "indexName": "sparse_idx", "metricType": "BM25"},
-                {"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"}
-            ]
+                {"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"},
+            ],
         }
         self.collection_client.collection_create(payload)
         self.wait_load_completed(name)
 
         # Enable property — should NOT affect BM25 output rejection
         rsp = self.collection_client.alter_collection_properties(
-            name, {"collection.function.allowInsertNonBM25FunctionOutputs": "true"})
-        assert rsp['code'] == 0
+            name, {"collection.function.allowInsertNonBM25FunctionOutputs": "true"}
+        )
+        assert rsp["code"] == 0
 
         # Create JSON data with BM25 function output field
         data = []
         for i in range(num_entities):
-            data.append({
-                "id": i,
-                "text": f"sample text for BM25 {i}",
-                "sparse_vector": {"indices": [1, 2, 3], "values": [0.1, 0.2, 0.3]},
-                "dense_vector": [np.float32(random.random()) for _ in range(dim)]
-            })
+            data.append(
+                {
+                    "id": i,
+                    "text": f"sample text for BM25 {i}",
+                    "sparse_vector": {"indices": [1, 2, 3], "values": [0.1, 0.2, 0.3]},
+                    "dense_vector": [np.float32(random.random()) for _ in range(dim)],
+                }
+            )
 
         file_name = f"test_bm25_output_with_property_{uuid4()}.json"
         file_path = f"/tmp/{file_name}"
@@ -2113,23 +2215,20 @@ class TestCreateImportJob(TestBase):
             json.dump(data, f, cls=NumpyEncoder)
         self.storage_client.upload_file(file_path, file_name)
 
-        payload = {
-            "collectionName": name,
-            "files": [[file_name]]
-        }
+        payload = {"collectionName": name, "files": [[file_name]]}
         rsp = self.import_job_client.create_import_jobs(payload)
-        job_id = rsp['data']['jobId']
+        job_id = rsp["data"]["jobId"]
 
         # Import should still fail for BM25 output
         finished = False
         t0 = time.time()
         while not finished:
             rsp = self.import_job_client.get_import_job_progress(job_id)
-            if rsp['data']['state'] == "Failed":
-                reason = rsp['data'].get('reason', '').lower()
+            if rsp["data"]["state"] == "Failed":
+                reason = rsp["data"].get("reason", "").lower()
                 assert "bm25" in reason or "function output" in reason
                 finished = True
-            elif rsp['data']['state'] == "Completed":
+            elif rsp["data"]["state"] == "Completed":
                 assert False, "Import should have failed for BM25 function output field"
             time.sleep(5)
             if time.time() - t0 > IMPORT_TIMEOUT:
@@ -2148,10 +2247,13 @@ class TestCreateImportJob(TestBase):
                 "enableDynamicField": False,
                 "fields": [
                     {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
-                    {"fieldName": "text", "dataType": "VarChar",
-                     "elementTypeParams": {"max_length": "256", "enable_analyzer": True}},
+                    {
+                        "fieldName": "text",
+                        "dataType": "VarChar",
+                        "elementTypeParams": {"max_length": "256", "enable_analyzer": True},
+                    },
                     {"fieldName": "sparse_vector", "dataType": "SparseFloatVector"},
-                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
+                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
                 ],
                 "functions": [
                     {
@@ -2159,14 +2261,14 @@ class TestCreateImportJob(TestBase):
                         "type": "BM25",
                         "inputFieldNames": ["text"],
                         "outputFieldNames": ["sparse_vector"],
-                        "params": {}
+                        "params": {},
                     }
-                ]
+                ],
             },
             "indexParams": [
                 {"fieldName": "sparse_vector", "indexName": "sparse_idx", "metricType": "BM25"},
-                {"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"}
-            ]
+                {"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"},
+            ],
         }
         self.collection_client.collection_create(payload)
         self.wait_load_completed(name)
@@ -2174,11 +2276,13 @@ class TestCreateImportJob(TestBase):
         # Create JSON data WITHOUT function output field
         data = []
         for i in range(num_entities):
-            data.append({
-                "id": i,
-                "text": f"sample text for document {i}",
-                "dense_vector": [np.float32(random.random()) for _ in range(dim)]
-            })
+            data.append(
+                {
+                    "id": i,
+                    "text": f"sample text for document {i}",
+                    "dense_vector": [np.float32(random.random()) for _ in range(dim)],
+                }
+            )
 
         file_name = f"test_no_fn_output_{uuid4()}.json"
         file_path = f"/tmp/{file_name}"
@@ -2186,21 +2290,16 @@ class TestCreateImportJob(TestBase):
             json.dump(data, f, cls=NumpyEncoder)
         self.storage_client.upload_file(file_path, file_name)
 
-        payload = {
-            "collectionName": name,
-            "files": [[file_name]]
-        }
+        payload = {"collectionName": name, "files": [[file_name]]}
         rsp = self.import_job_client.create_import_jobs(payload)
-        job_id = rsp['data']['jobId']
+        job_id = rsp["data"]["jobId"]
 
         # Import should succeed with BM25 auto-generating sparse vectors
         res, result = self.import_job_client.wait_import_job_completed(job_id)
         assert result, f"Import job failed: {res}"
 
         # Verify data
-        c = Collection(name)
-        c.load(_refresh=True)
-        assert c.num_entities == num_entities
+        self._wait_for_count(name, num_entities)
 
     def test_import_csv_default_value_with_nullkey(self):
         """Test CSV import where default_value field has nullkey - should use default value"""
@@ -2208,7 +2307,7 @@ class TestCreateImportJob(TestBase):
         dim = 128
         num_entities = 3000
         default_value = 999
-        
+
         # Create collection with default_value field
         payload = {
             "collectionName": name,
@@ -2219,68 +2318,67 @@ class TestCreateImportJob(TestBase):
                     {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
                     {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
                     {"fieldName": "default_int", "dataType": "Int64", "defaultValue": default_value},
-                    {"fieldName": "nullable_int", "dataType": "Int64", "nullable": True}
-                ]
+                    {"fieldName": "nullable_int", "dataType": "Int64", "nullable": True},
+                ],
             },
-            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}]
+            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}],
         }
         self.collection_client.collection_create(payload)
         self.wait_load_completed(name)
-        
+
         # Create CSV with nullkey for default_value field
         file_name = f"test_csv_default_nullkey_{uuid4()}.csv"
         file_path = f"/tmp/{file_name}"
-        
-        with open(file_path, 'w', newline='') as csvfile:
-            fieldnames = ['id', 'vector', 'default_int', 'nullable_int']
+
+        with open(file_path, "w", newline="") as csvfile:
+            fieldnames = ["id", "vector", "default_int", "nullable_int"]
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             writer.writeheader()
-            
+
             # Write rows with nullkey and provided values
             for i in range(num_entities):
-                vector_str = '[' + ','.join([str(random.random()) for _ in range(dim)]) + ']'
+                vector_str = "[" + ",".join([str(random.random()) for _ in range(dim)]) + "]"
                 if i % 2 == 0:
                     # Use nullkey (empty string)
-                    writer.writerow({
-                        'id': str(i),
-                        'vector': vector_str,
-                        'default_int': '',  # Empty string as nullkey
-                        'nullable_int': ''
-                    })
+                    writer.writerow(
+                        {
+                            "id": str(i),
+                            "vector": vector_str,
+                            "default_int": "",  # Empty string as nullkey
+                            "nullable_int": "",
+                        }
+                    )
                 else:
                     # Provide explicit values
-                    writer.writerow({
-                        'id': str(i),
-                        'vector': vector_str,
-                        'default_int': str(123 + i),  # Provided value
-                        'nullable_int': str(456 + i)
-                    })
-        
+                    writer.writerow(
+                        {
+                            "id": str(i),
+                            "vector": vector_str,
+                            "default_int": str(123 + i),  # Provided value
+                            "nullable_int": str(456 + i),
+                        }
+                    )
+
         self.storage_client.upload_file(file_path, file_name)
-        
+
         # Import
-        payload = {
-            "collectionName": name,
-            "files": [[file_name]]
-        }
+        payload = {"collectionName": name, "files": [[file_name]]}
         rsp = self.import_job_client.create_import_jobs(payload)
-        job_id = rsp['data']['jobId']
-        
+        job_id = rsp["data"]["jobId"]
+
         # Wait for import
         res, result = self.import_job_client.wait_import_job_completed(job_id)
         assert result, f"Import job failed: {res}"
-        
+
         # Verify data
-        c = Collection(name)
-        c.load(_refresh=True)
-        assert c.num_entities == num_entities
-        
+        self._wait_for_count(name, num_entities)
+
         # Verify default_value field uses default when nullkey, nullable field is null
-        res = c.query(expr="id == 0", output_fields=["*"])
+        res = self._query_rows(name, "id == 0", ["*"])
         assert res[0]["default_int"] == default_value  # Should use default value
         assert res[0]["nullable_int"] is None  # Should be null
-        
-        res = c.query(expr="id == 1", output_fields=["*"])
+
+        res = self._query_rows(name, "id == 1", ["*"])
         assert res[0]["default_int"] == 124  # Should use provided value (123 + 1)
         assert res[0]["nullable_int"] == 457  # Should use provided value (456 + 1)
 
@@ -2290,7 +2388,7 @@ class TestCreateImportJob(TestBase):
         dim = 128
         num_entities = 3000
         text_max_length = 256
-        
+
         # Create collection
         payload = {
             "collectionName": name,
@@ -2300,50 +2398,60 @@ class TestCreateImportJob(TestBase):
                 "fields": [
                     {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
                     {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
-                    {"fieldName": "text", "dataType": "VarChar", "elementTypeParams": {"max_length": str(text_max_length)}}
-                ]
+                    {
+                        "fieldName": "text",
+                        "dataType": "VarChar",
+                        "elementTypeParams": {"max_length": str(text_max_length)},
+                    },
+                ],
             },
-            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}]
+            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}],
         }
         self.collection_client.collection_create(payload)
         self.wait_load_completed(name)
-        
+
         # Create DataFrame with extra columns
         data = {
-            'id': list(range(num_entities)),
-            'vector': [[random.random() for _ in range(dim)] for _ in range(num_entities)],
-            'text': [f'text_{i}' for i in range(num_entities)],
-            'extra_column1': list(range(num_entities, num_entities * 2)),  # Extra column
-            'extra_column2': [f'extra_{i}' for i in range(num_entities)],  # Extra column
-            'extra_column3': [[i, i+1, i+2] for i in range(num_entities)]  # Extra column
+            "id": list(range(num_entities)),
+            "vector": [[random.random() for _ in range(dim)] for _ in range(num_entities)],
+            "text": [f"text_{i}" for i in range(num_entities)],
+            "extra_column1": list(range(num_entities, num_entities * 2)),  # Extra column
+            "extra_column2": [f"extra_{i}" for i in range(num_entities)],  # Extra column
+            "extra_column3": [[i, i + 1, i + 2] for i in range(num_entities)],  # Extra column
         }
         df = pd.DataFrame(data)
-        
+
         # Save to Parquet
         file_name = f"test_parquet_extra_{uuid4()}.parquet"
         file_path = f"/tmp/{file_name}"
-        df.to_parquet(file_path, engine='pyarrow')
+        pa_schema = pa.schema(
+            [
+                ("id", pa.int64()),
+                ("vector", pa.list_(pa.float32())),
+                ("text", pa.string()),
+                ("extra_column1", pa.int64()),
+                ("extra_column2", pa.string()),
+                ("extra_column3", pa.list_(pa.int64())),
+            ]
+        )
+        table = pa.Table.from_pandas(df, schema=pa_schema, preserve_index=False)
+        pq.write_table(table, file_path)
         self.storage_client.upload_file(file_path, file_name)
-        
+
         # Import should succeed, ignoring extra columns
-        payload = {
-            "collectionName": name,
-            "files": [[file_name]]
-        }
+        payload = {"collectionName": name, "files": [[file_name]]}
         rsp = self.import_job_client.create_import_jobs(payload)
-        job_id = rsp['data']['jobId']
-        
+        job_id = rsp["data"]["jobId"]
+
         # Wait for import
         res, result = self.import_job_client.wait_import_job_completed(job_id)
         assert result, f"Import job failed: {res}"
-        
+
         # Verify data
-        c = Collection(name)
-        c.load(_refresh=True)
-        assert c.num_entities == num_entities
-        
+        self._wait_for_count(name, num_entities)
+
         # Verify only expected fields exist
-        res = c.query(expr="id >= 0", limit=1, output_fields=["*"])
+        res = self._query_rows(name, "id >= 0", ["*"], limit=1)
         assert "id" in res[0]
         assert "text" in res[0]
         assert "extra_column1" not in res[0]
@@ -2355,7 +2463,7 @@ class TestCreateImportJob(TestBase):
         dim = 128
         num_entities = 3000
         default_value = 888
-        
+
         # Create collection with nullable fields
         payload = {
             "collectionName": name,
@@ -2367,51 +2475,46 @@ class TestCreateImportJob(TestBase):
                     {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
                     {"fieldName": "required_field", "dataType": "Int64"},
                     {"fieldName": "nullable_field", "dataType": "Int64", "nullable": True},
-                    {"fieldName": "default_field", "dataType": "Int64", "defaultValue": default_value}
-                ]
+                    {"fieldName": "default_field", "dataType": "Int64", "defaultValue": default_value},
+                ],
             },
-            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}]
+            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}],
         }
         self.collection_client.collection_create(payload)
         self.wait_load_completed(name)
-        
+
         # Create numpy files (excluding nullable and default fields)
         file_dir = f"numpy_test_{uuid4()}"
         base_path = f"/tmp/{file_dir}"
         Path(base_path).mkdir(parents=True, exist_ok=True)
-        
+
         # Only create files for required fields
         np.save(f"{base_path}/id.npy", np.array(list(range(num_entities))))
         np.save(f"{base_path}/vector.npy", np.random.random((num_entities, dim)).astype(np.float32))
         np.save(f"{base_path}/required_field.npy", np.array(list(range(100, 100 + num_entities))))
         # NOT creating nullable_field.npy and default_field.npy
-        
+
         # Upload files
         file_list = []
-        for field in ['id', 'vector', 'required_field']:
+        for field in ["id", "vector", "required_field"]:
             file_name = f"{file_dir}/{field}.npy"
             self.storage_client.upload_file(f"{base_path}/{field}.npy", file_name)
             file_list.append(file_name)
-        
+
         # Import should succeed
-        payload = {
-            "collectionName": name,
-            "files": [file_list]
-        }
+        payload = {"collectionName": name, "files": [file_list]}
         rsp = self.import_job_client.create_import_jobs(payload)
-        job_id = rsp['data']['jobId']
-        
+        job_id = rsp["data"]["jobId"]
+
         # Wait for import
         res, result = self.import_job_client.wait_import_job_completed(job_id)
         assert result, f"Import job failed: {res}"
-        
+
         # Verify data
-        c = Collection(name)
-        c.load(_refresh=True)
-        assert c.num_entities == num_entities
-        
+        self._wait_for_count(name, num_entities)
+
         # Verify nullable field is null and default field has default value
-        res = c.query(expr="id == 0", output_fields=["*"])
+        res = self._query_rows(name, "id == 0", ["*"])
         assert res[0]["nullable_field"] is None
         assert res[0]["default_field"] == default_value
 
@@ -2422,7 +2525,7 @@ class TestCreateImportJob(TestBase):
         num_entities = 3000
         max_length = 10
         max_capacity = 100
-        
+
         # Create collection with Array<Varchar> field
         payload = {
             "collectionName": name,
@@ -2432,48 +2535,58 @@ class TestCreateImportJob(TestBase):
                 "fields": [
                     {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
                     {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
-                    {"fieldName": "varchar_array", "dataType": "Array", "elementDataType": "VarChar",
-                     "elementTypeParams": {"max_capacity": str(max_capacity), "max_length": str(max_length)}}
-                ]
+                    {
+                        "fieldName": "varchar_array",
+                        "dataType": "Array",
+                        "elementDataType": "VarChar",
+                        "elementTypeParams": {"max_capacity": str(max_capacity), "max_length": str(max_length)},
+                    },
+                ],
             },
-            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}]
+            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}],
         }
         self.collection_client.collection_create(payload)
         self.wait_load_completed(name)
-        
+
         # Create JSON data with varchar array exceeding max_length
         data = []
         for i in range(num_entities):
-            data.append({
-                "id": i,
-                "vector": [np.float32(random.random()) for _ in range(dim)],
-                "varchar_array": ["short", "also_ok", "this_string_is_way_too_long_for_limit"]  # Last one exceeds max_length
-            })
-        
+            data.append(
+                {
+                    "id": i,
+                    "vector": [np.float32(random.random()) for _ in range(dim)],
+                    "varchar_array": [
+                        "short",
+                        "also_ok",
+                        "this_string_is_way_too_long_for_limit",
+                    ],  # Last one exceeds max_length
+                }
+            )
+
         # Save to JSON file
         file_name = f"test_array_varchar_{uuid4()}.json"
         file_path = f"/tmp/{file_name}"
         with open(file_path, "w") as f:
             json.dump(data, f, cls=NumpyEncoder)
         self.storage_client.upload_file(file_path, file_name)
-        
+
         # Import should fail due to max_length violation
-        payload = {
-            "collectionName": name,
-            "files": [[file_name]]
-        }
+        payload = {"collectionName": name, "files": [[file_name]]}
         rsp = self.import_job_client.create_import_jobs(payload)
-        job_id = rsp['data']['jobId']
-        
+        job_id = rsp["data"]["jobId"]
+
         # Wait and verify import fails
         finished = False
         t0 = time.time()
         while not finished:
             rsp = self.import_job_client.get_import_job_progress(job_id)
-            if rsp['data']['state'] == "Failed":
-                assert "max_length" in rsp['data'].get('reason', '').lower() or "length" in rsp['data'].get('reason', '').lower()
+            if rsp["data"]["state"] == "Failed":
+                assert (
+                    "max_length" in rsp["data"].get("reason", "").lower()
+                    or "length" in rsp["data"].get("reason", "").lower()
+                )
                 finished = True
-            elif rsp['data']['state'] == "Completed":
+            elif rsp["data"]["state"] == "Completed":
                 assert False, "Import should have failed due to max_length violation"
             time.sleep(5)
             if time.time() - t0 > IMPORT_TIMEOUT:
@@ -2483,7 +2596,7 @@ class TestCreateImportJob(TestBase):
         """Test Parquet import with Array<Float> containing NaN - should fail"""
         name = gen_collection_name()
         dim = 128
-        
+
         # Create collection with Array<Float> field
         payload = {
             "collectionName": name,
@@ -2493,57 +2606,56 @@ class TestCreateImportJob(TestBase):
                 "fields": [
                     {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
                     {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
-                    {"fieldName": "float_array", "dataType": "Array", "elementDataType": "Float",
-                     "elementTypeParams": {"max_capacity": "100"}}
-                ]
+                    {
+                        "fieldName": "float_array",
+                        "dataType": "Array",
+                        "elementDataType": "Float",
+                        "elementTypeParams": {"max_capacity": "100"},
+                    },
+                ],
             },
-            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}]
+            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}],
         }
         self.collection_client.collection_create(payload)
         self.wait_load_completed(name)
-        
+
         # Create DataFrame with NaN in float array
         data = {
-            'id': [1, 2],
-            'vector': [[random.random() for _ in range(dim)] for _ in range(2)],
-            'float_array': [[1.0, 2.0, 3.0], [4.0, None, 6.0]]  # Second row has None
+            "id": [1, 2],
+            "vector": [[random.random() for _ in range(dim)] for _ in range(2)],
+            "float_array": [[1.0, 2.0, 3.0], [4.0, None, 6.0]],  # Second row has None
         }
         df = pd.DataFrame(data)
-        
+
         # Save to Parquet
         file_name = f"test_parquet_nan_{uuid4()}.parquet"
         file_path = f"/tmp/{file_name}"
-        
+
         # Create parquet schema with proper array type
-        pa_schema = pa.schema([
-            ('id', pa.int64()),
-            ('vector', pa.list_(pa.float32())),
-            ('float_array', pa.list_(pa.float32()))
-        ])
+        pa_schema = pa.schema(
+            [("id", pa.int64()), ("vector", pa.list_(pa.float32())), ("float_array", pa.list_(pa.float32()))]
+        )
         table = pa.Table.from_pandas(df, schema=pa_schema)
         logger.info(f"table: {table}")
         pq.write_table(table, file_path)
-        
+
         self.storage_client.upload_file(file_path, file_name)
-        
+
         # Import should fail due to NaN
-        payload = {
-            "collectionName": name,
-            "files": [[file_name]]
-        }
+        payload = {"collectionName": name, "files": [[file_name]]}
         rsp = self.import_job_client.create_import_jobs(payload)
-        job_id = rsp['data']['jobId']
-        
+        job_id = rsp["data"]["jobId"]
+
         # Wait and verify import fails
         finished = False
         t0 = time.time()
         while not finished:
             rsp = self.import_job_client.get_import_job_progress(job_id)
-            if rsp['data']['state'] == "Failed":
-                reason = rsp['data'].get('reason', '').lower()
+            if rsp["data"]["state"] == "Failed":
+                reason = rsp["data"].get("reason", "").lower()
                 assert "nan" in reason or "infinite" in reason or "invalid" in reason
                 finished = True
-            elif rsp['data']['state'] == "Completed":
+            elif rsp["data"]["state"] == "Completed":
                 assert False, "Import should have failed due to NaN value"
             time.sleep(5)
             if time.time() - t0 > IMPORT_TIMEOUT:
@@ -2553,7 +2665,7 @@ class TestCreateImportJob(TestBase):
         """Test CSV import with extra columns when dynamic field is disabled - should be ignored"""
         name = gen_collection_name()
         dim = 128
-        
+
         # Create collection without dynamic field
         payload = {
             "collectionName": name,
@@ -2563,56 +2675,53 @@ class TestCreateImportJob(TestBase):
                 "fields": [
                     {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
                     {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
-                    {"fieldName": "name", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}}
-                ]
+                    {"fieldName": "name", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
+                ],
             },
-            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}]
+            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}],
         }
         self.collection_client.collection_create(payload)
         self.wait_load_completed(name)
-        
+
         # Create CSV file with extra columns
         file_name = f"test_csv_extra_{uuid4()}.csv"
         file_path = f"/tmp/{file_name}"
-        
-        with open(file_path, 'w', newline='') as csvfile:
+
+        with open(file_path, "w", newline="") as csvfile:
             # Include extra columns that are not in schema
-            fieldnames = ['id', 'vector', 'name', 'extra_col1', 'extra_col2', 'extra_col3']
+            fieldnames = ["id", "vector", "name", "extra_col1", "extra_col2", "extra_col3"]
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             writer.writeheader()
-            
+
             for i in range(20):
-                vector_str = '[' + ','.join([str(random.random()) for _ in range(dim)]) + ']'
-                writer.writerow({
-                    'id': i,
-                    'vector': vector_str,
-                    'name': f'name_{i}',
-                    'extra_col1': f'extra_value_{i}',
-                    'extra_col2': i * 100,
-                    'extra_col3': f'ignored_{i}'
-                })
-        
+                vector_str = "[" + ",".join([str(random.random()) for _ in range(dim)]) + "]"
+                writer.writerow(
+                    {
+                        "id": i,
+                        "vector": vector_str,
+                        "name": f"name_{i}",
+                        "extra_col1": f"extra_value_{i}",
+                        "extra_col2": i * 100,
+                        "extra_col3": f"ignored_{i}",
+                    }
+                )
+
         self.storage_client.upload_file(file_path, file_name)
-        
+
         # Import should succeed, ignoring extra columns
-        payload = {
-            "collectionName": name,
-            "files": [[file_name]]
-        }
+        payload = {"collectionName": name, "files": [[file_name]]}
         rsp = self.import_job_client.create_import_jobs(payload)
-        job_id = rsp['data']['jobId']
-        
+        job_id = rsp["data"]["jobId"]
+
         # Wait for import to complete
         res, result = self.import_job_client.wait_import_job_completed(job_id)
         assert result, f"Import job failed: {res}"
-        
+
         # Verify data imported successfully
-        c = Collection(name)
-        c.load(_refresh=True)
-        assert c.num_entities == 20
-        
+        self._wait_for_count(name, 20)
+
         # Verify only expected fields exist
-        res = c.query(expr="id == 0", output_fields=["*"])
+        res = self._query_rows(name, "id == 0", ["*"])
         assert "id" in res[0]
         assert "name" in res[0]
         assert "extra_col1" not in res[0]
@@ -2632,10 +2741,10 @@ class TestCreateImportJob(TestBase):
                 "fields": [
                     {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
                     {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
-                    {"fieldName": "required_text", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}}
-                ]
+                    {"fieldName": "required_text", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
+                ],
             },
-            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}]
+            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}],
         }
         self.collection_client.collection_create(payload)
         self.wait_load_completed(name)
@@ -2643,11 +2752,13 @@ class TestCreateImportJob(TestBase):
         # Create JSON data missing required_text field
         data = []
         for i in range(num_entities):
-            data.append({
-                "id": i,
-                "vector": [np.float32(random.random()) for _ in range(dim)]
-                # Missing required_text
-            })
+            data.append(
+                {
+                    "id": i,
+                    "vector": [np.float32(random.random()) for _ in range(dim)],
+                    # Missing required_text
+                }
+            )
 
         file_name = f"test_required_missing_{uuid4()}.json"
         file_path = f"/tmp/{file_name}"
@@ -2655,21 +2766,18 @@ class TestCreateImportJob(TestBase):
             json.dump(data, f, cls=NumpyEncoder)
         self.storage_client.upload_file(file_path, file_name)
 
-        payload = {
-            "collectionName": name,
-            "files": [[file_name]]
-        }
+        payload = {"collectionName": name, "files": [[file_name]]}
         rsp = self.import_job_client.create_import_jobs(payload)
-        job_id = rsp['data']['jobId']
+        job_id = rsp["data"]["jobId"]
 
         # Import should fail due to missing required field
         finished = False
         t0 = time.time()
         while not finished:
             rsp = self.import_job_client.get_import_job_progress(job_id)
-            if rsp['data']['state'] == "Failed":
+            if rsp["data"]["state"] == "Failed":
                 finished = True
-            elif rsp['data']['state'] == "Completed":
+            elif rsp["data"]["state"] == "Completed":
                 assert False, "Import should have failed due to missing required field"
             time.sleep(5)
             if time.time() - t0 > IMPORT_TIMEOUT:
@@ -2689,10 +2797,10 @@ class TestCreateImportJob(TestBase):
                 "fields": [
                     {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
                     {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
-                    {"fieldName": "required_text", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}}
-                ]
+                    {"fieldName": "required_text", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
+                ],
             },
-            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}]
+            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}],
         }
         self.collection_client.collection_create(payload)
         self.wait_load_completed(name)
@@ -2701,35 +2809,29 @@ class TestCreateImportJob(TestBase):
         file_name = f"test_csv_required_missing_{uuid4()}.csv"
         file_path = f"/tmp/{file_name}"
 
-        with open(file_path, 'w', newline='') as csvfile:
-            fieldnames = ['id', 'vector']  # Missing required_text
+        with open(file_path, "w", newline="") as csvfile:
+            fieldnames = ["id", "vector"]  # Missing required_text
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             writer.writeheader()
 
             for i in range(num_entities):
-                vector_str = '[' + ','.join([str(random.random()) for _ in range(dim)]) + ']'
-                writer.writerow({
-                    'id': str(i),
-                    'vector': vector_str
-                })
+                vector_str = "[" + ",".join([str(random.random()) for _ in range(dim)]) + "]"
+                writer.writerow({"id": str(i), "vector": vector_str})
 
         self.storage_client.upload_file(file_path, file_name)
 
-        payload = {
-            "collectionName": name,
-            "files": [[file_name]]
-        }
+        payload = {"collectionName": name, "files": [[file_name]]}
         rsp = self.import_job_client.create_import_jobs(payload)
-        job_id = rsp['data']['jobId']
+        job_id = rsp["data"]["jobId"]
 
         # Import should fail due to missing required field
         finished = False
         t0 = time.time()
         while not finished:
             rsp = self.import_job_client.get_import_job_progress(job_id)
-            if rsp['data']['state'] == "Failed":
+            if rsp["data"]["state"] == "Failed":
                 finished = True
-            elif rsp['data']['state'] == "Completed":
+            elif rsp["data"]["state"] == "Completed":
                 assert False, "Import should have failed due to missing required field in CSV"
             time.sleep(5)
             if time.time() - t0 > IMPORT_TIMEOUT:
@@ -2749,47 +2851,41 @@ class TestCreateImportJob(TestBase):
                 "fields": [
                     {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
                     {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
-                    {"fieldName": "required_text", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}}
-                ]
+                    {"fieldName": "required_text", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
+                ],
             },
-            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}]
+            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}],
         }
         self.collection_client.collection_create(payload)
         self.wait_load_completed(name)
 
         # Create Parquet file missing required_text column
         data = {
-            'id': list(range(num_entities)),
-            'vector': [[np.float32(random.random()) for _ in range(dim)] for _ in range(num_entities)]
+            "id": list(range(num_entities)),
+            "vector": [[np.float32(random.random()) for _ in range(dim)] for _ in range(num_entities)],
             # Missing required_text
         }
         df = pd.DataFrame(data)
 
-        pa_schema = pa.schema([
-            ('id', pa.int64()),
-            ('vector', pa.list_(pa.float32()))
-        ])
+        pa_schema = pa.schema([("id", pa.int64()), ("vector", pa.list_(pa.float32()))])
         file_name = f"test_parquet_required_missing_{uuid4()}.parquet"
         file_path = f"/tmp/{file_name}"
         table = pa.Table.from_pandas(df, schema=pa_schema)
         pq.write_table(table, file_path)
         self.storage_client.upload_file(file_path, file_name)
 
-        payload = {
-            "collectionName": name,
-            "files": [[file_name]]
-        }
+        payload = {"collectionName": name, "files": [[file_name]]}
         rsp = self.import_job_client.create_import_jobs(payload)
-        job_id = rsp['data']['jobId']
+        job_id = rsp["data"]["jobId"]
 
         # Import should fail due to missing required field
         finished = False
         t0 = time.time()
         while not finished:
             rsp = self.import_job_client.get_import_job_progress(job_id)
-            if rsp['data']['state'] == "Failed":
+            if rsp["data"]["state"] == "Failed":
                 finished = True
-            elif rsp['data']['state'] == "Completed":
+            elif rsp["data"]["state"] == "Completed":
                 assert False, "Import should have failed due to missing required field in Parquet"
             time.sleep(5)
             if time.time() - t0 > IMPORT_TIMEOUT:
@@ -2808,10 +2904,10 @@ class TestCreateImportJob(TestBase):
                 "enableDynamicField": False,
                 "fields": [
                     {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
-                    {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
-                ]
+                    {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
+                ],
             },
-            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}]
+            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}],
         }
         self.collection_client.collection_create(payload)
         self.wait_load_completed(name)
@@ -2820,10 +2916,7 @@ class TestCreateImportJob(TestBase):
         wrong_dim = 64
         data = []
         for i in range(num_entities):
-            data.append({
-                "id": i,
-                "vector": [np.float32(random.random()) for _ in range(wrong_dim)]
-            })
+            data.append({"id": i, "vector": [np.float32(random.random()) for _ in range(wrong_dim)]})
 
         file_name = f"test_dim_mismatch_{uuid4()}.json"
         file_path = f"/tmp/{file_name}"
@@ -2831,23 +2924,20 @@ class TestCreateImportJob(TestBase):
             json.dump(data, f, cls=NumpyEncoder)
         self.storage_client.upload_file(file_path, file_name)
 
-        payload = {
-            "collectionName": name,
-            "files": [[file_name]]
-        }
+        payload = {"collectionName": name, "files": [[file_name]]}
         rsp = self.import_job_client.create_import_jobs(payload)
-        job_id = rsp['data']['jobId']
+        job_id = rsp["data"]["jobId"]
 
         # Import should fail due to dimension mismatch
         finished = False
         t0 = time.time()
         while not finished:
             rsp = self.import_job_client.get_import_job_progress(job_id)
-            if rsp['data']['state'] == "Failed":
-                reason = rsp['data'].get('reason', '').lower()
+            if rsp["data"]["state"] == "Failed":
+                reason = rsp["data"].get("reason", "").lower()
                 assert "dim" in reason or "dimension" in reason or "mismatch" in reason
                 finished = True
-            elif rsp['data']['state'] == "Completed":
+            elif rsp["data"]["state"] == "Completed":
                 assert False, "Import should have failed due to vector dimension mismatch"
             time.sleep(5)
             if time.time() - t0 > IMPORT_TIMEOUT:
@@ -2866,10 +2956,10 @@ class TestCreateImportJob(TestBase):
                 "enableDynamicField": False,
                 "fields": [
                     {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
-                    {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
-                ]
+                    {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
+                ],
             },
-            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}]
+            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}],
         }
         self.collection_client.collection_create(payload)
         self.wait_load_completed(name)
@@ -2879,37 +2969,31 @@ class TestCreateImportJob(TestBase):
         file_name = f"test_csv_dim_mismatch_{uuid4()}.csv"
         file_path = f"/tmp/{file_name}"
 
-        with open(file_path, 'w', newline='') as csvfile:
-            fieldnames = ['id', 'vector']
+        with open(file_path, "w", newline="") as csvfile:
+            fieldnames = ["id", "vector"]
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             writer.writeheader()
 
             for i in range(num_entities):
-                vector_str = '[' + ','.join([str(random.random()) for _ in range(wrong_dim)]) + ']'
-                writer.writerow({
-                    'id': str(i),
-                    'vector': vector_str
-                })
+                vector_str = "[" + ",".join([str(random.random()) for _ in range(wrong_dim)]) + "]"
+                writer.writerow({"id": str(i), "vector": vector_str})
 
         self.storage_client.upload_file(file_path, file_name)
 
-        payload = {
-            "collectionName": name,
-            "files": [[file_name]]
-        }
+        payload = {"collectionName": name, "files": [[file_name]]}
         rsp = self.import_job_client.create_import_jobs(payload)
-        job_id = rsp['data']['jobId']
+        job_id = rsp["data"]["jobId"]
 
         # Import should fail due to dimension mismatch
         finished = False
         t0 = time.time()
         while not finished:
             rsp = self.import_job_client.get_import_job_progress(job_id)
-            if rsp['data']['state'] == "Failed":
-                reason = rsp['data'].get('reason', '').lower()
+            if rsp["data"]["state"] == "Failed":
+                reason = rsp["data"].get("reason", "").lower()
                 assert "dim" in reason or "dimension" in reason or "mismatch" in reason
                 finished = True
-            elif rsp['data']['state'] == "Completed":
+            elif rsp["data"]["state"] == "Completed":
                 assert False, "Import should have failed due to vector dimension mismatch in CSV"
             time.sleep(5)
             if time.time() - t0 > IMPORT_TIMEOUT:
@@ -2928,10 +3012,10 @@ class TestCreateImportJob(TestBase):
                 "enableDynamicField": False,
                 "fields": [
                     {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
-                    {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
-                ]
+                    {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
+                ],
             },
-            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}]
+            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}],
         }
         self.collection_client.collection_create(payload)
         self.wait_load_completed(name)
@@ -2939,38 +3023,32 @@ class TestCreateImportJob(TestBase):
         # Create Parquet file with wrong vector dimension
         wrong_dim = 64
         data = {
-            'id': list(range(num_entities)),
-            'vector': [[np.float32(random.random()) for _ in range(wrong_dim)] for _ in range(num_entities)]
+            "id": list(range(num_entities)),
+            "vector": [[np.float32(random.random()) for _ in range(wrong_dim)] for _ in range(num_entities)],
         }
         df = pd.DataFrame(data)
 
-        pa_schema = pa.schema([
-            ('id', pa.int64()),
-            ('vector', pa.list_(pa.float32()))
-        ])
+        pa_schema = pa.schema([("id", pa.int64()), ("vector", pa.list_(pa.float32()))])
         file_name = f"test_parquet_dim_mismatch_{uuid4()}.parquet"
         file_path = f"/tmp/{file_name}"
         table = pa.Table.from_pandas(df, schema=pa_schema)
         pq.write_table(table, file_path)
         self.storage_client.upload_file(file_path, file_name)
 
-        payload = {
-            "collectionName": name,
-            "files": [[file_name]]
-        }
+        payload = {"collectionName": name, "files": [[file_name]]}
         rsp = self.import_job_client.create_import_jobs(payload)
-        job_id = rsp['data']['jobId']
+        job_id = rsp["data"]["jobId"]
 
         # Import should fail due to dimension mismatch
         finished = False
         t0 = time.time()
         while not finished:
             rsp = self.import_job_client.get_import_job_progress(job_id)
-            if rsp['data']['state'] == "Failed":
-                reason = rsp['data'].get('reason', '').lower()
+            if rsp["data"]["state"] == "Failed":
+                reason = rsp["data"].get("reason", "").lower()
                 assert "dim" in reason or "dimension" in reason or "mismatch" in reason
                 finished = True
-            elif rsp['data']['state'] == "Completed":
+            elif rsp["data"]["state"] == "Completed":
                 assert False, "Import should have failed due to vector dimension mismatch in Parquet"
             time.sleep(5)
             if time.time() - t0 > IMPORT_TIMEOUT:
@@ -2994,52 +3072,52 @@ class TestCreateImportJob(TestBase):
                     {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
                     {"fieldName": "nullable_int", "dataType": "Int64", "nullable": True},
                     {"fieldName": "default_int", "dataType": "Int64", "defaultValue": default_int_value},
-                    {"fieldName": "nullable_varchar", "dataType": "VarChar",
-                     "elementTypeParams": {"max_length": "256"}, "nullable": True},
-                    {"fieldName": "default_varchar", "dataType": "VarChar",
-                     "elementTypeParams": {"max_length": "256"}, "defaultValue": default_varchar_value}
-                ]
+                    {
+                        "fieldName": "nullable_varchar",
+                        "dataType": "VarChar",
+                        "elementTypeParams": {"max_length": "256"},
+                        "nullable": True,
+                    },
+                    {
+                        "fieldName": "default_varchar",
+                        "dataType": "VarChar",
+                        "elementTypeParams": {"max_length": "256"},
+                        "defaultValue": default_varchar_value,
+                    },
+                ],
             },
-            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}]
+            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}],
         }
         self.collection_client.collection_create(payload)
         self.wait_load_completed(name)
 
         # Create Parquet file with only required fields (missing nullable and default fields)
         data = {
-            'id': list(range(num_entities)),
-            'vector': [[np.float32(random.random()) for _ in range(dim)] for _ in range(num_entities)]
+            "id": list(range(num_entities)),
+            "vector": [[np.float32(random.random()) for _ in range(dim)] for _ in range(num_entities)],
         }
         df = pd.DataFrame(data)
 
-        pa_schema = pa.schema([
-            ('id', pa.int64()),
-            ('vector', pa.list_(pa.float32()))
-        ])
+        pa_schema = pa.schema([("id", pa.int64()), ("vector", pa.list_(pa.float32()))])
         file_name = f"test_parquet_nullable_default_{uuid4()}.parquet"
         file_path = f"/tmp/{file_name}"
         table = pa.Table.from_pandas(df, schema=pa_schema)
         pq.write_table(table, file_path)
         self.storage_client.upload_file(file_path, file_name)
 
-        payload = {
-            "collectionName": name,
-            "files": [[file_name]]
-        }
+        payload = {"collectionName": name, "files": [[file_name]]}
         rsp = self.import_job_client.create_import_jobs(payload)
-        job_id = rsp['data']['jobId']
+        job_id = rsp["data"]["jobId"]
 
         # Import should succeed
         res, result = self.import_job_client.wait_import_job_completed(job_id)
         assert result, f"Import job failed: {res}"
 
         # Verify data
-        c = Collection(name)
-        c.load(_refresh=True)
-        assert c.num_entities == num_entities
+        self._wait_for_count(name, num_entities)
 
         # Verify nullable fields are null and default fields have default value
-        res = c.query(expr="id == 0", output_fields=["*"])
+        res = self._query_rows(name, "id == 0", ["*"])
         assert res[0]["nullable_int"] is None
         assert res[0]["default_int"] == default_int_value
         assert res[0]["nullable_varchar"] is None
@@ -3058,10 +3136,10 @@ class TestCreateImportJob(TestBase):
                 "enableDynamicField": True,
                 "fields": [
                     {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
-                    {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
-                ]
+                    {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
+                ],
             },
-            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}]
+            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}],
         }
         self.collection_client.collection_create(payload)
         self.wait_load_completed(name)
@@ -3069,12 +3147,14 @@ class TestCreateImportJob(TestBase):
         # Create JSON data with extra fields
         data = []
         for i in range(num_entities):
-            data.append({
-                "id": i,
-                "vector": [np.float32(random.random()) for _ in range(dim)],
-                "extra_str": f"dynamic_value_{i}",
-                "extra_int": 1000 + i
-            })
+            data.append(
+                {
+                    "id": i,
+                    "vector": [np.float32(random.random()) for _ in range(dim)],
+                    "extra_str": f"dynamic_value_{i}",
+                    "extra_int": 1000 + i,
+                }
+            )
 
         file_name = f"test_json_dynamic_{uuid4()}.json"
         file_path = f"/tmp/{file_name}"
@@ -3082,23 +3162,18 @@ class TestCreateImportJob(TestBase):
             json.dump(data, f, cls=NumpyEncoder)
         self.storage_client.upload_file(file_path, file_name)
 
-        payload = {
-            "collectionName": name,
-            "files": [[file_name]]
-        }
+        payload = {"collectionName": name, "files": [[file_name]]}
         rsp = self.import_job_client.create_import_jobs(payload)
-        job_id = rsp['data']['jobId']
+        job_id = rsp["data"]["jobId"]
 
         res, result = self.import_job_client.wait_import_job_completed(job_id)
         assert result, f"Import job failed: {res}"
 
         # Verify data
-        c = Collection(name)
-        c.load(_refresh=True)
-        assert c.num_entities == num_entities
+        self._wait_for_count(name, num_entities)
 
         # Verify dynamic fields are stored
-        res = c.query(expr="id == 0", output_fields=["extra_str", "extra_int"])
+        res = self._query_rows(name, "id == 0", ["extra_str", "extra_int"])
         assert res[0]["extra_str"] == "dynamic_value_0"
         assert res[0]["extra_int"] == 1000
 
@@ -3115,10 +3190,10 @@ class TestCreateImportJob(TestBase):
                 "enableDynamicField": True,
                 "fields": [
                     {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
-                    {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
-                ]
+                    {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
+                ],
             },
-            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}]
+            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}],
         }
         self.collection_client.collection_create(payload)
         self.wait_load_completed(name)
@@ -3127,39 +3202,31 @@ class TestCreateImportJob(TestBase):
         file_name = f"test_csv_dynamic_{uuid4()}.csv"
         file_path = f"/tmp/{file_name}"
 
-        with open(file_path, 'w', newline='') as csvfile:
-            fieldnames = ['id', 'vector', 'extra_str', 'extra_int']
+        with open(file_path, "w", newline="") as csvfile:
+            fieldnames = ["id", "vector", "extra_str", "extra_int"]
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             writer.writeheader()
 
             for i in range(num_entities):
-                vector_str = '[' + ','.join([str(random.random()) for _ in range(dim)]) + ']'
-                writer.writerow({
-                    'id': str(i),
-                    'vector': vector_str,
-                    'extra_str': f'dynamic_value_{i}',
-                    'extra_int': str(1000 + i)
-                })
+                vector_str = "[" + ",".join([str(random.random()) for _ in range(dim)]) + "]"
+                writer.writerow(
+                    {"id": str(i), "vector": vector_str, "extra_str": f"dynamic_value_{i}", "extra_int": str(1000 + i)}
+                )
 
         self.storage_client.upload_file(file_path, file_name)
 
-        payload = {
-            "collectionName": name,
-            "files": [[file_name]]
-        }
+        payload = {"collectionName": name, "files": [[file_name]]}
         rsp = self.import_job_client.create_import_jobs(payload)
-        job_id = rsp['data']['jobId']
+        job_id = rsp["data"]["jobId"]
 
         res, result = self.import_job_client.wait_import_job_completed(job_id)
         assert result, f"Import job failed: {res}"
 
         # Verify data
-        c = Collection(name)
-        c.load(_refresh=True)
-        assert c.num_entities == num_entities
+        self._wait_for_count(name, num_entities)
 
         # Verify dynamic fields are stored
-        res = c.query(expr="id == 0", output_fields=["extra_str", "extra_int"])
+        res = self._query_rows(name, "id == 0", ["extra_str", "extra_int"])
         assert res[0]["extra_str"] == "dynamic_value_0"
 
     def test_import_parquet_extra_fields_with_dynamic(self):
@@ -3177,10 +3244,10 @@ class TestCreateImportJob(TestBase):
                 "enableDynamicField": True,
                 "fields": [
                     {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
-                    {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
-                ]
+                    {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
+                ],
             },
-            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}]
+            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}],
         }
         self.collection_client.collection_create(payload)
         self.wait_load_completed(name)
@@ -3188,34 +3255,33 @@ class TestCreateImportJob(TestBase):
         # Create Parquet file with $meta column for dynamic fields
         # Parquet requires using the special $meta column (JSON string) for dynamic data
         data = {
-            'id': list(range(num_entities)),
-            'vector': [[np.float32(random.random()) for _ in range(dim)] for _ in range(num_entities)],
-            '$meta': [json.dumps({"extra_str": f"dynamic_value_{i}", "extra_int": 1000 + i}) for i in range(num_entities)]
+            "id": list(range(num_entities)),
+            "vector": [[np.float32(random.random()) for _ in range(dim)] for _ in range(num_entities)],
+            "$meta": [
+                json.dumps({"extra_str": f"dynamic_value_{i}", "extra_int": 1000 + i}) for i in range(num_entities)
+            ],
         }
         df = pd.DataFrame(data)
 
         file_name = f"test_parquet_dynamic_{uuid4()}.parquet"
         file_path = f"/tmp/{file_name}"
-        df.to_parquet(file_path, engine='pyarrow')
+        pa_schema = pa.schema([("id", pa.int64()), ("vector", pa.list_(pa.float32())), ("$meta", pa.string())])
+        table = pa.Table.from_pandas(df, schema=pa_schema, preserve_index=False)
+        pq.write_table(table, file_path)
         self.storage_client.upload_file(file_path, file_name)
 
-        payload = {
-            "collectionName": name,
-            "files": [[file_name]]
-        }
+        payload = {"collectionName": name, "files": [[file_name]]}
         rsp = self.import_job_client.create_import_jobs(payload)
-        job_id = rsp['data']['jobId']
+        job_id = rsp["data"]["jobId"]
 
         res, result = self.import_job_client.wait_import_job_completed(job_id)
         assert result, f"Import job failed: {res}"
 
         # Verify data
-        c = Collection(name)
-        c.load(_refresh=True)
-        assert c.num_entities == num_entities
+        self._wait_for_count(name, num_entities)
 
         # Verify dynamic fields are stored via $meta
-        res = c.query(expr="id == 0", output_fields=["extra_str", "extra_int"])
+        res = self._query_rows(name, "id == 0", ["extra_str", "extra_int"])
         assert res[0]["extra_str"] == "dynamic_value_0"
         assert res[0]["extra_int"] == 1000
 
@@ -3232,10 +3298,13 @@ class TestCreateImportJob(TestBase):
                 "enableDynamicField": False,
                 "fields": [
                     {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
-                    {"fieldName": "text", "dataType": "VarChar",
-                     "elementTypeParams": {"max_length": "256", "enable_analyzer": True}},
+                    {
+                        "fieldName": "text",
+                        "dataType": "VarChar",
+                        "elementTypeParams": {"max_length": "256", "enable_analyzer": True},
+                    },
                     {"fieldName": "sparse_vector", "dataType": "SparseFloatVector"},
-                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
+                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
                 ],
                 "functions": [
                     {
@@ -3243,14 +3312,14 @@ class TestCreateImportJob(TestBase):
                         "type": "BM25",
                         "inputFieldNames": ["text"],
                         "outputFieldNames": ["sparse_vector"],
-                        "params": {}
+                        "params": {},
                     }
-                ]
+                ],
             },
             "indexParams": [
                 {"fieldName": "sparse_vector", "indexName": "sparse_idx", "metricType": "BM25"},
-                {"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"}
-            ]
+                {"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"},
+            ],
         }
         self.collection_client.collection_create(payload)
         self.wait_load_completed(name)
@@ -3259,36 +3328,27 @@ class TestCreateImportJob(TestBase):
         file_name = f"test_csv_no_fn_output_{uuid4()}.csv"
         file_path = f"/tmp/{file_name}"
 
-        with open(file_path, 'w', newline='') as csvfile:
-            fieldnames = ['id', 'text', 'dense_vector']
+        with open(file_path, "w", newline="") as csvfile:
+            fieldnames = ["id", "text", "dense_vector"]
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             writer.writeheader()
 
             for i in range(num_entities):
-                vector_str = '[' + ','.join([str(random.random()) for _ in range(dim)]) + ']'
-                writer.writerow({
-                    'id': str(i),
-                    'text': f'sample text for document {i}',
-                    'dense_vector': vector_str
-                })
+                vector_str = "[" + ",".join([str(random.random()) for _ in range(dim)]) + "]"
+                writer.writerow({"id": str(i), "text": f"sample text for document {i}", "dense_vector": vector_str})
 
         self.storage_client.upload_file(file_path, file_name)
 
-        payload = {
-            "collectionName": name,
-            "files": [[file_name]]
-        }
+        payload = {"collectionName": name, "files": [[file_name]]}
         rsp = self.import_job_client.create_import_jobs(payload)
-        job_id = rsp['data']['jobId']
+        job_id = rsp["data"]["jobId"]
 
         # Import should succeed with BM25 auto-generating sparse vectors
         res, result = self.import_job_client.wait_import_job_completed(job_id)
         assert result, f"Import job failed: {res}"
 
         # Verify data
-        c = Collection(name)
-        c.load(_refresh=True)
-        assert c.num_entities == num_entities
+        self._wait_for_count(name, num_entities)
 
     def test_import_csv_bm25_output_rejected_even_with_property(self):
         """Test CSV import with BM25 function output field is still rejected even with property enabled"""
@@ -3303,10 +3363,13 @@ class TestCreateImportJob(TestBase):
                 "enableDynamicField": False,
                 "fields": [
                     {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
-                    {"fieldName": "text", "dataType": "VarChar",
-                     "elementTypeParams": {"max_length": "256", "enable_analyzer": True}},
+                    {
+                        "fieldName": "text",
+                        "dataType": "VarChar",
+                        "elementTypeParams": {"max_length": "256", "enable_analyzer": True},
+                    },
                     {"fieldName": "sparse_vector", "dataType": "SparseFloatVector"},
-                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
+                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
                 ],
                 "functions": [
                     {
@@ -3314,60 +3377,60 @@ class TestCreateImportJob(TestBase):
                         "type": "BM25",
                         "inputFieldNames": ["text"],
                         "outputFieldNames": ["sparse_vector"],
-                        "params": {}
+                        "params": {},
                     }
-                ]
+                ],
             },
             "indexParams": [
                 {"fieldName": "sparse_vector", "indexName": "sparse_idx", "metricType": "BM25"},
-                {"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"}
-            ]
+                {"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"},
+            ],
         }
         self.collection_client.collection_create(payload)
         self.wait_load_completed(name)
 
         # Enable property — should NOT affect BM25 output rejection
         rsp = self.collection_client.alter_collection_properties(
-            name, {"collection.function.allowInsertNonBM25FunctionOutputs": "true"})
-        assert rsp['code'] == 0
+            name, {"collection.function.allowInsertNonBM25FunctionOutputs": "true"}
+        )
+        assert rsp["code"] == 0
 
         # Create CSV file with BM25 function output field
         file_name = f"test_csv_bm25_with_property_{uuid4()}.csv"
         file_path = f"/tmp/{file_name}"
 
-        with open(file_path, 'w', newline='') as csvfile:
-            fieldnames = ['id', 'text', 'sparse_vector', 'dense_vector']
+        with open(file_path, "w", newline="") as csvfile:
+            fieldnames = ["id", "text", "sparse_vector", "dense_vector"]
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             writer.writeheader()
 
             for i in range(num_entities):
-                vector_str = '[' + ','.join([str(random.random()) for _ in range(dim)]) + ']'
-                writer.writerow({
-                    'id': str(i),
-                    'text': f'sample text for BM25 {i}',
-                    'sparse_vector': '{"indices": [1, 2], "values": [0.1, 0.2]}',
-                    'dense_vector': vector_str
-                })
+                vector_str = "[" + ",".join([str(random.random()) for _ in range(dim)]) + "]"
+                writer.writerow(
+                    {
+                        "id": str(i),
+                        "text": f"sample text for BM25 {i}",
+                        "sparse_vector": '{"indices": [1, 2], "values": [0.1, 0.2]}',
+                        "dense_vector": vector_str,
+                    }
+                )
 
         self.storage_client.upload_file(file_path, file_name)
 
-        payload = {
-            "collectionName": name,
-            "files": [[file_name]]
-        }
+        payload = {"collectionName": name, "files": [[file_name]]}
         rsp = self.import_job_client.create_import_jobs(payload)
-        job_id = rsp['data']['jobId']
+        job_id = rsp["data"]["jobId"]
 
         # Import should still fail for BM25 output
         finished = False
         t0 = time.time()
         while not finished:
             rsp = self.import_job_client.get_import_job_progress(job_id)
-            if rsp['data']['state'] == "Failed":
-                reason = rsp['data'].get('reason', '').lower()
+            if rsp["data"]["state"] == "Failed":
+                reason = rsp["data"].get("reason", "").lower()
                 assert "bm25" in reason or "function output" in reason
                 finished = True
-            elif rsp['data']['state'] == "Completed":
+            elif rsp["data"]["state"] == "Completed":
                 assert False, "Import should have failed for BM25 function output field in CSV"
             time.sleep(5)
             if time.time() - t0 > IMPORT_TIMEOUT:
@@ -3386,10 +3449,13 @@ class TestCreateImportJob(TestBase):
                 "enableDynamicField": False,
                 "fields": [
                     {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
-                    {"fieldName": "text", "dataType": "VarChar",
-                     "elementTypeParams": {"max_length": "256", "enable_analyzer": True}},
+                    {
+                        "fieldName": "text",
+                        "dataType": "VarChar",
+                        "elementTypeParams": {"max_length": "256", "enable_analyzer": True},
+                    },
                     {"fieldName": "sparse_vector", "dataType": "SparseFloatVector"},
-                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
+                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
                 ],
                 "functions": [
                     {
@@ -3397,14 +3463,14 @@ class TestCreateImportJob(TestBase):
                         "type": "BM25",
                         "inputFieldNames": ["text"],
                         "outputFieldNames": ["sparse_vector"],
-                        "params": {}
+                        "params": {},
                     }
-                ]
+                ],
             },
             "indexParams": [
                 {"fieldName": "sparse_vector", "indexName": "sparse_idx", "metricType": "BM25"},
-                {"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"}
-            ]
+                {"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"},
+            ],
         }
         self.collection_client.collection_create(payload)
         self.wait_load_completed(name)
@@ -3412,10 +3478,10 @@ class TestCreateImportJob(TestBase):
         # Create Parquet file with BM25 function output field
         # Use sparse vector as a map column in parquet
         data = {
-            'id': list(range(num_entities)),
-            'text': [f'sample document {i}' for i in range(num_entities)],
-            'sparse_vector': [{"indices": [1, 2, 3], "values": [0.1, 0.2, 0.3]} for _ in range(num_entities)],
-            'dense_vector': [[random.random() for _ in range(dim)] for _ in range(num_entities)]
+            "id": list(range(num_entities)),
+            "text": [f"sample document {i}" for i in range(num_entities)],
+            "sparse_vector": [{"indices": [1, 2, 3], "values": [0.1, 0.2, 0.3]} for _ in range(num_entities)],
+            "dense_vector": [[random.random() for _ in range(dim)] for _ in range(num_entities)],
         }
 
         file_name = f"test_parquet_fn_output_{uuid4()}.json"
@@ -3424,24 +3490,24 @@ class TestCreateImportJob(TestBase):
             json.dump([{k: data[k][i] for k in data} for i in range(num_entities)], f, cls=NumpyEncoder)
         self.storage_client.upload_file(file_path, file_name)
 
-        payload = {
-            "collectionName": name,
-            "files": [[file_name]]
-        }
+        payload = {"collectionName": name, "files": [[file_name]]}
         rsp = self.import_job_client.create_import_jobs(payload)
-        job_id = rsp['data']['jobId']
+        job_id = rsp["data"]["jobId"]
 
         # Import should fail
         finished = False
         t0 = time.time()
         while not finished:
             rsp = self.import_job_client.get_import_job_progress(job_id)
-            if rsp['data']['state'] == "Failed":
-                reason = rsp['data'].get('reason', '').lower()
-                assert "not allowed to provide data for bm25 function output field" in reason or \
-                       "output by function" in reason or "function" in reason
+            if rsp["data"]["state"] == "Failed":
+                reason = rsp["data"].get("reason", "").lower()
+                assert (
+                    "not allowed to provide data for bm25 function output field" in reason
+                    or "output by function" in reason
+                    or "function" in reason
+                )
                 finished = True
-            elif rsp['data']['state'] == "Completed":
+            elif rsp["data"]["state"] == "Completed":
                 assert False, "Import should have failed for BM25 function output field in Parquet"
             time.sleep(5)
             if time.time() - t0 > IMPORT_TIMEOUT:
@@ -3460,10 +3526,13 @@ class TestCreateImportJob(TestBase):
                 "enableDynamicField": False,
                 "fields": [
                     {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
-                    {"fieldName": "text", "dataType": "VarChar",
-                     "elementTypeParams": {"max_length": "256", "enable_analyzer": True}},
+                    {
+                        "fieldName": "text",
+                        "dataType": "VarChar",
+                        "elementTypeParams": {"max_length": "256", "enable_analyzer": True},
+                    },
                     {"fieldName": "sparse_vector", "dataType": "SparseFloatVector"},
-                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
+                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
                 ],
                 "functions": [
                     {
@@ -3471,52 +3540,43 @@ class TestCreateImportJob(TestBase):
                         "type": "BM25",
                         "inputFieldNames": ["text"],
                         "outputFieldNames": ["sparse_vector"],
-                        "params": {}
+                        "params": {},
                     }
-                ]
+                ],
             },
             "indexParams": [
                 {"fieldName": "sparse_vector", "indexName": "sparse_idx", "metricType": "BM25"},
-                {"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"}
-            ]
+                {"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"},
+            ],
         }
         self.collection_client.collection_create(payload)
         self.wait_load_completed(name)
 
         # Create Parquet file WITHOUT function output field
         data = {
-            'id': list(range(num_entities)),
-            'text': [f'sample text for document {i}' for i in range(num_entities)],
-            'dense_vector': [[np.float32(random.random()) for _ in range(dim)] for _ in range(num_entities)]
+            "id": list(range(num_entities)),
+            "text": [f"sample text for document {i}" for i in range(num_entities)],
+            "dense_vector": [[np.float32(random.random()) for _ in range(dim)] for _ in range(num_entities)],
         }
         df = pd.DataFrame(data)
 
-        pa_schema = pa.schema([
-            ('id', pa.int64()),
-            ('text', pa.string()),
-            ('dense_vector', pa.list_(pa.float32()))
-        ])
+        pa_schema = pa.schema([("id", pa.int64()), ("text", pa.string()), ("dense_vector", pa.list_(pa.float32()))])
         file_name = f"test_parquet_no_fn_output_{uuid4()}.parquet"
         file_path = f"/tmp/{file_name}"
         table = pa.Table.from_pandas(df, schema=pa_schema)
         pq.write_table(table, file_path)
         self.storage_client.upload_file(file_path, file_name)
 
-        payload = {
-            "collectionName": name,
-            "files": [[file_name]]
-        }
+        payload = {"collectionName": name, "files": [[file_name]]}
         rsp = self.import_job_client.create_import_jobs(payload)
-        job_id = rsp['data']['jobId']
+        job_id = rsp["data"]["jobId"]
 
         # Import should succeed with BM25 auto-generating sparse vectors
         res, result = self.import_job_client.wait_import_job_completed(job_id)
         assert result, f"Import job failed: {res}"
 
         # Verify data
-        c = Collection(name)
-        c.load(_refresh=True)
-        assert c.num_entities == num_entities
+        self._wait_for_count(name, num_entities)
 
     def test_import_parquet_bm25_output_rejected_even_with_property(self):
         """Test Parquet import with BM25 function output field is still rejected even with property enabled"""
@@ -3531,10 +3591,13 @@ class TestCreateImportJob(TestBase):
                 "enableDynamicField": False,
                 "fields": [
                     {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
-                    {"fieldName": "text", "dataType": "VarChar",
-                     "elementTypeParams": {"max_length": "256", "enable_analyzer": True}},
+                    {
+                        "fieldName": "text",
+                        "dataType": "VarChar",
+                        "elementTypeParams": {"max_length": "256", "enable_analyzer": True},
+                    },
                     {"fieldName": "sparse_vector", "dataType": "SparseFloatVector"},
-                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
+                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
                 ],
                 "functions": [
                     {
@@ -3542,32 +3605,35 @@ class TestCreateImportJob(TestBase):
                         "type": "BM25",
                         "inputFieldNames": ["text"],
                         "outputFieldNames": ["sparse_vector"],
-                        "params": {}
+                        "params": {},
                     }
-                ]
+                ],
             },
             "indexParams": [
                 {"fieldName": "sparse_vector", "indexName": "sparse_idx", "metricType": "BM25"},
-                {"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"}
-            ]
+                {"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"},
+            ],
         }
         self.collection_client.collection_create(payload)
         self.wait_load_completed(name)
 
         # Enable property — should NOT affect BM25 output rejection
         rsp = self.collection_client.alter_collection_properties(
-            name, {"collection.function.allowInsertNonBM25FunctionOutputs": "true"})
-        assert rsp['code'] == 0
+            name, {"collection.function.allowInsertNonBM25FunctionOutputs": "true"}
+        )
+        assert rsp["code"] == 0
 
         # Create JSON data with BM25 function output field (use JSON for easier sparse vector encoding)
         data = []
         for i in range(num_entities):
-            data.append({
-                "id": i,
-                "text": f"sample text for BM25 {i}",
-                "sparse_vector": {"indices": [1, 2, 3], "values": [0.1, 0.2, 0.3]},
-                "dense_vector": [np.float32(random.random()) for _ in range(dim)]
-            })
+            data.append(
+                {
+                    "id": i,
+                    "text": f"sample text for BM25 {i}",
+                    "sparse_vector": {"indices": [1, 2, 3], "values": [0.1, 0.2, 0.3]},
+                    "dense_vector": [np.float32(random.random()) for _ in range(dim)],
+                }
+            )
 
         file_name = f"test_parquet_bm25_with_property_{uuid4()}.json"
         file_path = f"/tmp/{file_name}"
@@ -3575,31 +3641,28 @@ class TestCreateImportJob(TestBase):
             json.dump(data, f, cls=NumpyEncoder)
         self.storage_client.upload_file(file_path, file_name)
 
-        payload = {
-            "collectionName": name,
-            "files": [[file_name]]
-        }
+        payload = {"collectionName": name, "files": [[file_name]]}
         rsp = self.import_job_client.create_import_jobs(payload)
-        job_id = rsp['data']['jobId']
+        job_id = rsp["data"]["jobId"]
 
         # Import should still fail for BM25 output
         finished = False
         t0 = time.time()
         while not finished:
             rsp = self.import_job_client.get_import_job_progress(job_id)
-            if rsp['data']['state'] == "Failed":
-                reason = rsp['data'].get('reason', '').lower()
+            if rsp["data"]["state"] == "Failed":
+                reason = rsp["data"].get("reason", "").lower()
                 assert "bm25" in reason or "function output" in reason
                 finished = True
-            elif rsp['data']['state'] == "Completed":
+            elif rsp["data"]["state"] == "Completed":
                 assert False, "Import should have failed for BM25 function output field"
             time.sleep(5)
             if time.time() - t0 > IMPORT_TIMEOUT:
                 assert False, "Import job timeout"
 
 
-@pytest.mark.L2
-class TestImportJobAdvance(TestBase):
+@pytest.mark.tags(CaseLabel.L2)
+class TestImportJobAdvance(RestImportTestBase):
     def test_job_import_recovery_after_chaos(self, release_name):
         # create collection
         name = gen_collection_name()
@@ -3611,10 +3674,10 @@ class TestImportJobAdvance(TestBase):
                     {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
                     {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
                     {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
-                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}}
+                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}},
                 ]
             },
-            "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]
+            "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}],
         }
         self.collection_client.collection_create(payload)
         self.wait_load_completed(name)
@@ -3624,12 +3687,15 @@ class TestImportJobAdvance(TestBase):
         batch_size = 1000
         file_names = []
         for file_num in range(file_nums):
-            data = [{
-                "book_id": i,
-                "word_count": i,
-                "book_describe": f"book_{i}",
-                "book_intro": [np.float32(random.random()) for _ in range(dim)]}
-                for i in range(batch_size*file_num, batch_size*(file_num+1))]
+            data = [
+                {
+                    "book_id": i,
+                    "word_count": i,
+                    "book_describe": f"book_{i}",
+                    "book_intro": [np.float32(random.random()) for _ in range(dim)],
+                }
+                for i in range(batch_size * file_num, batch_size * (file_num + 1))
+            ]
 
             # dump data to file
             file_name = f"bulk_insert_data_{file_num}_{uuid4()}.json"
@@ -3648,13 +3714,13 @@ class TestImportJobAdvance(TestBase):
             "files": file_names,
         }
         rsp = self.import_job_client.create_import_jobs(payload)
-        job_id = rsp['data']['jobId']
+        job_id = rsp["data"]["jobId"]
         # list import job
         payload = {
             "collectionName": name,
         }
         rsp = self.import_job_client.list_import_jobs(payload)
-        assert job_id in [job["jobId"] for job in rsp['data']["records"]]
+        assert job_id in [job["jobId"] for job in rsp["data"]["records"]]
         rsp = self.import_job_client.list_import_jobs(payload)
         # kill milvus by deleting pod
         cmd = f"kubectl delete pod -l 'app.kubernetes.io/instance={release_name}, app.kubernetes.io/name=milvus' "
@@ -3665,15 +3731,15 @@ class TestImportJobAdvance(TestBase):
         logger.info(f"output: {output}, return_code, {return_code}")
 
         # get import job progress
-        for job in rsp['data']["records"]:
-            job_id = job['jobId']
+        for job in rsp["data"]["records"]:
+            job_id = job["jobId"]
             finished = False
             t0 = time.time()
 
             while not finished:
                 try:
                     rsp = self.import_job_client.get_import_job_progress(job_id)
-                    if rsp['data']['state'] == "Completed":
+                    if rsp["data"]["state"] == "Completed":
                         finished = True
                     time.sleep(5)
                     if time.time() - t0 > IMPORT_TIMEOUT:
@@ -3681,26 +3747,24 @@ class TestImportJobAdvance(TestBase):
                 except Exception as e:
                     logger.error(f"get import job progress failed: {e}")
                     time.sleep(5)
-        time.sleep(10)
         rsp = self.import_job_client.list_import_jobs(payload)
+        assert rsp["code"] == 0, rsp
         # assert data count
-        c = Collection(name)
-        c.load(_refresh=True, timeou=120)
-        assert c.num_entities == file_nums * batch_size
+        self._wait_for_count(name, file_nums * batch_size)
         # assert import data can be queried
         payload = {
             "collectionName": name,
             "filter": f"book_id in {[i for i in range(1000)]}",
             "limit": 100,
             "offset": 0,
-            "outputFields": ["*"]
+            "outputFields": ["*"],
         }
         rsp = self.vector_client.vector_query(payload)
-        assert len(rsp['data']) == 100
+        assert len(rsp["data"]) == 100
 
 
-@pytest.mark.L2
-class TestCreateImportJobAdvance(TestBase):
+@pytest.mark.tags(CaseLabel.L2)
+class TestCreateImportJobAdvance(RestImportTestBase):
     def test_job_import_with_multi_task_and_datanode(self, release_name):
         # create collection
         name = gen_collection_name()
@@ -3712,10 +3776,10 @@ class TestCreateImportJobAdvance(TestBase):
                     {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
                     {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
                     {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
-                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}}
+                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}},
                 ]
             },
-            "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]
+            "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}],
         }
         self.collection_client.collection_create(payload)
         self.wait_load_completed(name)
@@ -3726,12 +3790,15 @@ class TestCreateImportJobAdvance(TestBase):
         batch_size = 100000
         file_names = []
         for file_num in range(file_nums):
-            data = [{
-                "book_id": i,
-                "word_count": i,
-                "book_describe": f"book_{i}",
-                "book_intro": [np.float32(random.random()) for _ in range(dim)]}
-                for i in range(batch_size*file_num, batch_size*(file_num+1))]
+            data = [
+                {
+                    "book_id": i,
+                    "word_count": i,
+                    "book_describe": f"book_{i}",
+                    "book_intro": [np.float32(random.random()) for _ in range(dim)],
+                }
+                for i in range(batch_size * file_num, batch_size * (file_num + 1))
+            ]
 
             # dump data to file
             file_name = f"bulk_insert_data_{file_num}_{uuid4()}.json"
@@ -3750,24 +3817,24 @@ class TestCreateImportJobAdvance(TestBase):
                 "files": file_names,
             }
             rsp = self.import_job_client.create_import_jobs(payload)
-            job_id = rsp['data']['jobId']
+            job_id = rsp["data"]["jobId"]
             # list import job
             payload = {
                 "collectionName": name,
             }
             rsp = self.import_job_client.list_import_jobs(payload)
-            assert job_id in [job["jobId"] for job in rsp['data']["records"]]
+            assert job_id in [job["jobId"] for job in rsp["data"]["records"]]
         rsp = self.import_job_client.list_import_jobs(payload)
         # get import job progress
-        for job in rsp['data']["records"]:
-            job_id = job['jobId']
+        for job in rsp["data"]["records"]:
+            job_id = job["jobId"]
             finished = False
             t0 = time.time()
 
             while not finished:
                 try:
                     rsp = self.import_job_client.get_import_job_progress(job_id)
-                    if rsp['data']['state'] == "Completed":
+                    if rsp["data"]["state"] == "Completed":
                         finished = True
                     time.sleep(5)
                     if time.time() - t0 > IMPORT_TIMEOUT:
@@ -3775,22 +3842,20 @@ class TestCreateImportJobAdvance(TestBase):
                 except Exception as e:
                     logger.error(f"get import job progress failed: {e}")
                     time.sleep(5)
-        time.sleep(10)
         rsp = self.import_job_client.list_import_jobs(payload)
+        assert rsp["code"] == 0, rsp
         # assert data count
-        c = Collection(name)
-        c.load(_refresh=True, timeou=120)
-        assert c.num_entities == file_nums * batch_size * task_num
+        self._wait_for_count(name, file_nums * batch_size * task_num)
         # assert import data can be queried
         payload = {
             "collectionName": name,
             "filter": f"book_id in {[i for i in range(1000)]}",
             "limit": 100,
             "offset": 0,
-            "outputFields": ["*"]
+            "outputFields": ["*"],
         }
         rsp = self.vector_client.vector_query(payload)
-        assert len(rsp['data']) == 100
+        assert len(rsp["data"]) == 100
 
     def test_job_import_with_extremely_large_task_num(self, release_name):
         # create collection
@@ -3803,10 +3868,10 @@ class TestCreateImportJobAdvance(TestBase):
                     {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
                     {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
                     {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
-                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}}
+                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}},
                 ]
             },
-            "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]
+            "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}],
         }
         self.collection_client.collection_create(payload)
         self.wait_load_completed(name)
@@ -3817,12 +3882,15 @@ class TestCreateImportJobAdvance(TestBase):
         batch_size = 10
         file_names = []
         for file_num in range(file_nums):
-            data = [{
-                "book_id": i,
-                "word_count": i,
-                "book_describe": f"book_{i}",
-                "book_intro": [np.float32(random.random()) for _ in range(dim)]}
-                for i in range(batch_size*file_num, batch_size*(file_num+1))]
+            data = [
+                {
+                    "book_id": i,
+                    "word_count": i,
+                    "book_describe": f"book_{i}",
+                    "book_intro": [np.float32(random.random()) for _ in range(dim)],
+                }
+                for i in range(batch_size * file_num, batch_size * (file_num + 1))
+            ]
 
             # dump data to file
             file_name = f"bulk_insert_data_{file_num}_{uuid4()}.json"
@@ -3841,24 +3909,24 @@ class TestCreateImportJobAdvance(TestBase):
                 "files": file_names,
             }
             rsp = self.import_job_client.create_import_jobs(payload)
-            job_id = rsp['data']['jobId']
+            job_id = rsp["data"]["jobId"]
             # list import job
             payload = {
                 "collectionName": name,
             }
             rsp = self.import_job_client.list_import_jobs(payload)
-            assert job_id in [job["jobId"] for job in rsp['data']["records"]]
+            assert job_id in [job["jobId"] for job in rsp["data"]["records"]]
         rsp = self.import_job_client.list_import_jobs(payload)
         # get import job progress
-        for job in rsp['data']["records"]:
-            job_id = job['jobId']
+        for job in rsp["data"]["records"]:
+            job_id = job["jobId"]
             finished = False
             t0 = time.time()
 
             while not finished:
                 try:
                     rsp = self.import_job_client.get_import_job_progress(job_id)
-                    if rsp['data']['state'] == "Completed":
+                    if rsp["data"]["state"] == "Completed":
                         finished = True
                     time.sleep(5)
                     if time.time() - t0 > IMPORT_TIMEOUT:
@@ -3866,34 +3934,32 @@ class TestCreateImportJobAdvance(TestBase):
                 except Exception as e:
                     logger.error(f"get import job progress failed: {e}")
                     time.sleep(5)
-        time.sleep(10)
         rsp = self.import_job_client.list_import_jobs(payload)
+        assert rsp["code"] == 0, rsp
         # assert data count
-        c = Collection(name)
-        c.load(_refresh=True, timeou=120)
-        assert c.num_entities == file_nums * batch_size * task_num
+        self._wait_for_count(name, file_nums * batch_size * task_num)
         # assert import data can be queried
         payload = {
             "collectionName": name,
             "filter": f"book_id in {[i for i in range(1000)]}",
             "limit": 100,
             "offset": 0,
-            "outputFields": ["*"]
+            "outputFields": ["*"],
         }
         rsp = self.vector_client.vector_query(payload)
-        assert len(rsp['data']) == 100
+        assert len(rsp["data"]) == 100
 
 
-@pytest.mark.L1
-class TestCreateImportJobNegative(TestBase):
-
+@pytest.mark.tags(CaseLabel.L1)
+class TestCreateImportJobNegative(RestImportTestBase):
     @pytest.mark.parametrize("insert_num", [2])
     @pytest.mark.parametrize("import_task_num", [1])
     @pytest.mark.parametrize("auto_id", [True])
     @pytest.mark.parametrize("is_partition_key", [True])
     @pytest.mark.parametrize("enable_dynamic_field", [True])
-    @pytest.mark.BulkInsert
-    def test_create_import_job_with_json_dup_dynamic_key(self, insert_num, import_task_num, auto_id, is_partition_key, enable_dynamic_field):
+    def test_create_import_job_with_json_dup_dynamic_key(
+        self, insert_num, import_task_num, auto_id, is_partition_key, enable_dynamic_field
+    ):
         # create collection
         name = gen_collection_name()
         dim = 16
@@ -3904,12 +3970,17 @@ class TestCreateImportJobNegative(TestBase):
                 "enableDynamicField": enable_dynamic_field,
                 "fields": [
                     {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
-                    {"fieldName": "word_count", "dataType": "Int64", "isPartitionKey": is_partition_key, "elementTypeParams": {}},
+                    {
+                        "fieldName": "word_count",
+                        "dataType": "Int64",
+                        "isPartitionKey": is_partition_key,
+                        "elementTypeParams": {},
+                    },
                     {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
-                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}}
-                ]
+                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}},
+                ],
             },
-            "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]
+            "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}],
         }
         self.collection_client.collection_create(payload)
         self.wait_load_completed(name)
@@ -3921,12 +3992,12 @@ class TestCreateImportJobNegative(TestBase):
                 "word_count": i,
                 "book_describe": f"book_{i}",
                 "dynamic_key": i,
-                "book_intro": [random.random() for _ in range(dim)]
+                "book_intro": [random.random() for _ in range(dim)],
             }
             if not auto_id:
                 tmp["book_id"] = i
             if enable_dynamic_field:
-                tmp.update({f"$meta": {"dynamic_key": i+1}})
+                tmp.update({"$meta": {"dynamic_key": i + 1}})
             data.append(tmp)
         # dump data to file
         file_name = f"bulk_insert_data_{uuid4()}.json"
@@ -3951,17 +4022,17 @@ class TestCreateImportJobNegative(TestBase):
         rsp = self.import_job_client.list_import_jobs(payload)
 
         # get import job progress
-        for task in rsp['data']["records"]:
-            task_id = task['jobId']
+        for task in rsp["data"]["records"]:
+            task_id = task["jobId"]
             finished = False
             t0 = time.time()
 
             while not finished:
                 rsp = self.import_job_client.get_import_job_progress(task_id)
-                if rsp['data']['state'] == "Failed":
+                if rsp["data"]["state"] == "Failed":
                     assert True
                     finished = True
-                if rsp['data']['state'] == "Completed":
+                if rsp["data"]["state"] == "Completed":
                     assert False
                 time.sleep(5)
                 if time.time() - t0 > IMPORT_TIMEOUT:
@@ -3978,10 +4049,10 @@ class TestCreateImportJobNegative(TestBase):
                     {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
                     {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
                     {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
-                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}}
+                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}},
                 ]
             },
-            "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]
+            "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}],
         }
         self.collection_client.collection_create(payload)
         self.wait_load_completed(name)
@@ -3992,7 +4063,7 @@ class TestCreateImportJobNegative(TestBase):
             "files": [[]],
         }
         rsp = self.import_job_client.create_import_jobs(payload)
-        assert rsp['code'] == 1100 and "empty" in rsp['message']
+        assert rsp["code"] == 1100 and "empty" in rsp["message"]
 
     def test_import_job_with_non_exist_files(self):
         # create collection
@@ -4005,10 +4076,10 @@ class TestCreateImportJobNegative(TestBase):
                     {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
                     {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
                     {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
-                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}}
+                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}},
                 ]
             },
-            "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]
+            "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}],
         }
         rsp = self.collection_client.collection_create(payload)
 
@@ -4018,9 +4089,19 @@ class TestCreateImportJobNegative(TestBase):
             "files": [["invalid_file.json"]],
         }
         rsp = self.import_job_client.create_import_jobs(payload)
-        time.sleep(5)
-        rsp = self.import_job_client.get_import_job_progress(rsp['data']['jobId'])
-        assert rsp["data"]["state"] == "Failed"
+        job_id = rsp["data"]["jobId"]
+        # The job transitions Pending -> Importing -> Failed asynchronously once the
+        # importer tries to read the non-existent file. Poll until a terminal state
+        # instead of asserting after a fixed sleep, which races the scheduler under load.
+        state = None
+        t0 = time.time()
+        while time.time() - t0 < IMPORT_TIMEOUT:
+            rsp = self.import_job_client.get_import_job_progress(job_id)
+            state = rsp["data"]["state"]
+            if state in ("Failed", "Completed"):
+                break
+            time.sleep(1)
+        assert state == "Failed", f"expected import job to fail, got state={state}: {rsp}"
 
     def test_import_job_with_non_exist_binlog_files(self):
         # create collection
@@ -4033,10 +4114,10 @@ class TestCreateImportJobNegative(TestBase):
                     {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
                     {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
                     {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
-                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}}
+                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}},
                 ]
             },
-            "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]
+            "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}],
         }
         self.collection_client.collection_create(payload)
         self.wait_load_completed(name)
@@ -4044,15 +4125,15 @@ class TestCreateImportJobNegative(TestBase):
         # create import job
         payload = {
             "collectionName": name,
-            "files": [[
-                f"invalid_bucket/invalid_root_path/insert_log/invalid_id/",
-            ]],
-            "options": {
-                "backup": "true"
-            }
+            "files": [
+                [
+                    "invalid_bucket/invalid_root_path/insert_log/invalid_id/",
+                ]
+            ],
+            "options": {"backup": "true"},
         }
         rsp = self.import_job_client.create_import_jobs(payload)
-        assert rsp['code'] == 1100 and "invalid" in rsp['message']
+        assert rsp["code"] == 1101 and "partition not specified" in rsp["message"]
 
     def test_import_job_with_wrong_file_type(self):
         # create collection
@@ -4065,20 +4146,23 @@ class TestCreateImportJobNegative(TestBase):
                     {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
                     {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
                     {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
-                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}}
+                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}},
                 ]
             },
-            "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]
+            "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}],
         }
         rsp = self.collection_client.collection_create(payload)
 
         # upload file to storage
-        data = [{
-            "book_id": i,
-            "word_count": i,
-            "book_describe": f"book_{i}",
-            "book_intro": [np.float32(random.random()) for _ in range(dim)]}
-            for i in range(10000)]
+        data = [
+            {
+                "book_id": i,
+                "word_count": i,
+                "book_describe": f"book_{i}",
+                "book_intro": [np.float32(random.random()) for _ in range(dim)],
+            }
+            for i in range(10000)
+        ]
 
         # dump data to file
         file_name = f"bulk_insert_data_{uuid4()}.txt"
@@ -4087,7 +4171,7 @@ class TestCreateImportJobNegative(TestBase):
         json_data = json.dumps(data, cls=NumpyEncoder)
 
         # 将JSON数据保存到txt文件
-        with open(file_path, 'w') as file:
+        with open(file_path, "w") as file:
             file.write(json_data)
         # upload file to minio storage
         self.storage_client.upload_file(file_path, file_name)
@@ -4098,7 +4182,7 @@ class TestCreateImportJobNegative(TestBase):
             "files": [[file_name]],
         }
         rsp = self.import_job_client.create_import_jobs(payload)
-        assert rsp['code'] == 2100 and "unexpected file type" in rsp['message']
+        assert rsp["code"] == 2100 and "unexpected file type" in rsp["message"]
 
     def test_import_job_with_empty_rows(self):
         # create collection
@@ -4111,20 +4195,23 @@ class TestCreateImportJobNegative(TestBase):
                     {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
                     {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
                     {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
-                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}}
+                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}},
                 ]
             },
-            "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]
+            "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}],
         }
         rsp = self.collection_client.collection_create(payload)
 
         # upload file to storage
-        data = [{
-            "book_id": i,
-            "word_count": i,
-            "book_describe": f"book_{i}",
-            "book_intro": [np.float32(random.random()) for _ in range(dim)]}
-            for i in range(0)]
+        data = [
+            {
+                "book_id": i,
+                "word_count": i,
+                "book_describe": f"book_{i}",
+                "book_intro": [np.float32(random.random()) for _ in range(dim)],
+            }
+            for i in range(0)
+        ]
 
         # dump data to file
         file_name = "bulk_insert_empty_data.json"
@@ -4140,7 +4227,7 @@ class TestCreateImportJobNegative(TestBase):
             "files": [[file_name]],
         }
         rsp = self.import_job_client.create_import_jobs(payload)
-        job_id = rsp['data']['jobId']
+        job_id = rsp["data"]["jobId"]
         # list import job
         payload = {
             "collectionName": name,
@@ -4150,9 +4237,9 @@ class TestCreateImportJobNegative(TestBase):
         # wait import job to be completed
         res, result = self.import_job_client.wait_import_job_completed(job_id)
         assert result
-        c = Collection(name)
-        assert c.num_entities == 0
+        self._wait_for_count(name, 0)
 
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_create_import_job_with_new_user(self):
         # create collection
         name = gen_collection_name()
@@ -4164,19 +4251,16 @@ class TestCreateImportJobNegative(TestBase):
                     {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
                     {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
                     {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
-                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}}
+                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}},
                 ]
             },
-            "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]
+            "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}],
         }
         rsp = self.collection_client.collection_create(payload)
         # create new user
         username = "test_user"
         password = "12345678"
-        payload = {
-            "userName": username,
-            "password": password
-        }
+        payload = {"userName": username, "password": password}
         self.user_client.user_create(payload)
         # try to describe collection with new user
         self.collection_client.api_key = f"{username}:{password}"
@@ -4194,7 +4278,7 @@ class TestCreateImportJobNegative(TestBase):
             tmp = {
                 "word_count": i,
                 "book_describe": f"book_{i}",
-                "book_intro": [np.float32(random.random()) for _ in range(dim)]
+                "book_intro": [np.float32(random.random()) for _ in range(dim)],
             }
             if not auto_id:
                 tmp["book_id"] = i
@@ -4217,16 +4301,16 @@ class TestCreateImportJobNegative(TestBase):
         }
         self.import_job_client.api_key = f"{username}:{password}"
         rsp = self.import_job_client.create_import_jobs(payload)
-        assert rsp['code'] == 1100 and "empty" in rsp['message']
-
-
+        assert rsp["code"] == 1100 and "empty" in rsp["message"]
 
     @pytest.mark.parametrize("insert_num", [5000])
     @pytest.mark.parametrize("import_task_num", [2])
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("is_partition_key", [True, False])
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
-    def test_get_job_progress_with_mismatch_db_name(self, insert_num, import_task_num, auto_id, is_partition_key, enable_dynamic_field):
+    def test_get_job_progress_with_mismatch_db_name(
+        self, insert_num, import_task_num, auto_id, is_partition_key, enable_dynamic_field
+    ):
         # create collection
         name = gen_collection_name()
         dim = 128
@@ -4237,12 +4321,17 @@ class TestCreateImportJobNegative(TestBase):
                 "enableDynamicField": enable_dynamic_field,
                 "fields": [
                     {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
-                    {"fieldName": "word_count", "dataType": "Int64", "isPartitionKey": is_partition_key, "elementTypeParams": {}},
+                    {
+                        "fieldName": "word_count",
+                        "dataType": "Int64",
+                        "isPartitionKey": is_partition_key,
+                        "elementTypeParams": {},
+                    },
                     {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
-                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}}
-                ]
+                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}},
+                ],
             },
-            "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]
+            "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}],
         }
         rsp = self.collection_client.collection_create(payload)
 
@@ -4252,7 +4341,7 @@ class TestCreateImportJobNegative(TestBase):
             tmp = {
                 "word_count": i,
                 "book_describe": f"book_{i}",
-                "book_intro": [np.float32(random.random()) for _ in range(dim)]
+                "book_intro": [np.float32(random.random()) for _ in range(dim)],
             }
             if not auto_id:
                 tmp["book_id"] = i
@@ -4281,26 +4370,19 @@ class TestCreateImportJobNegative(TestBase):
         rsp = self.import_job_client.list_import_jobs(payload)
 
         # get import job progress
-        for task in rsp['data']["records"]:
-            task_id = task['jobId']
+        for task in rsp["data"]["records"]:
+            task_id = task["jobId"]
             finished = False
             t0 = time.time()
 
             while not finished:
                 rsp = self.import_job_client.get_import_job_progress(task_id)
-                if rsp['data']['state'] == "Completed":
+                if rsp["data"]["state"] == "Completed":
                     finished = True
                 time.sleep(5)
                 if time.time() - t0 > IMPORT_TIMEOUT:
                     assert False, "import job timeout"
-        c = Collection(name)
-        time.sleep(10)
-        c.load(_refresh=True, timeou=120)
-        res = c.query(
-            expr="",
-            output_fields=["count(*)"],
-        )
-        assert res[0]["count(*)"] == insert_num * import_task_num
+        self._wait_for_count(name, insert_num * import_task_num)
         # query data
         payload = {
             "collectionName": name,
@@ -4308,16 +4390,16 @@ class TestCreateImportJobNegative(TestBase):
             "outputFields": ["*"],
         }
         rsp = self.vector_client.vector_query(payload)
-        assert rsp['code'] == 0
+        assert rsp["code"] == 0
 
 
-@pytest.mark.L1
-class TestListImportJob(TestBase):
-
+@pytest.mark.tags(CaseLabel.L1)
+class TestListImportJob(RestImportTestBase):
     def test_list_job_e2e(self):
         # create two db
-        self.create_database(db_name="db1")
-        self.create_database(db_name="db2")
+        db_names = [f"db1_{uuid4().hex[:8]}", f"db2_{uuid4().hex[:8]}"]
+        for db_name in db_names:
+            self._create_database(db_name)
 
         # create collection
         insert_num = 5000
@@ -4334,15 +4416,21 @@ class TestListImportJob(TestBase):
                 "enableDynamicField": enable_dynamic_field,
                 "fields": [
                     {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
-                    {"fieldName": "word_count", "dataType": "Int64", "isPartitionKey": is_partition_key, "elementTypeParams": {}},
+                    {
+                        "fieldName": "word_count",
+                        "dataType": "Int64",
+                        "isPartitionKey": is_partition_key,
+                        "elementTypeParams": {},
+                    },
                     {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
-                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}}
-                ]
+                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}},
+                ],
             },
-            "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]
+            "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}],
         }
-        for db_name in ["db1", "db2"]:
+        for db_name in db_names:
             rsp = self.collection_client.collection_create(payload, db_name=db_name)
+            assert rsp["code"] == 0, rsp
 
         # upload file to storage
         data = []
@@ -4350,7 +4438,7 @@ class TestListImportJob(TestBase):
             tmp = {
                 "word_count": i,
                 "book_describe": f"book_{i}",
-                "book_intro": [np.float32(random.random()) for _ in range(dim)]
+                "book_intro": [np.float32(random.random()) for _ in range(dim)],
             }
             if not auto_id:
                 tmp["book_id"] = i
@@ -4366,17 +4454,17 @@ class TestListImportJob(TestBase):
         self.storage_client.upload_file(file_path, file_name)
 
         # create import job
-        for db in ["db1", "db2"]:
+        for db_name in db_names:
             payload = {
                 "collectionName": name,
                 "files": [[file_name]],
             }
             for i in range(import_task_num):
-                rsp = self.import_job_client.create_import_jobs(payload, db_name=db)
+                rsp = self.import_job_client.create_import_jobs(payload, db_name=db_name)
+                assert rsp["code"] == 0, rsp
         # list import job
-        payload = {
-        }
-        for db_name in [None, "db1", "db2", "default"]:
+        payload = {}
+        for db_name in [None, *db_names, "default"]:
             try:
                 rsp = self.import_job_client.list_import_jobs(payload, db_name=db_name)
                 logger.info(f"job num: {len(rsp['data']['records'])}")
@@ -4384,13 +4472,13 @@ class TestListImportJob(TestBase):
                 logger.error(f"list import job failed: {e}")
 
 
-@pytest.mark.L1
-class TestGetImportJobProgress(TestBase):
-
+@pytest.mark.tags(CaseLabel.L1)
+class TestGetImportJobProgress(RestImportTestBase):
     def test_list_job_e2e(self):
         # create two db
-        self.create_database(db_name="db1")
-        self.create_database(db_name="db2")
+        db_names = [f"db1_{uuid4().hex[:8]}", f"db2_{uuid4().hex[:8]}"]
+        for db_name in db_names:
+            self._create_database(db_name)
 
         # create collection
         insert_num = 5000
@@ -4407,15 +4495,21 @@ class TestGetImportJobProgress(TestBase):
                 "enableDynamicField": enable_dynamic_field,
                 "fields": [
                     {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
-                    {"fieldName": "word_count", "dataType": "Int64", "isPartitionKey": is_partition_key, "elementTypeParams": {}},
+                    {
+                        "fieldName": "word_count",
+                        "dataType": "Int64",
+                        "isPartitionKey": is_partition_key,
+                        "elementTypeParams": {},
+                    },
                     {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
-                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}}
-                ]
+                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}},
+                ],
             },
-            "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]
+            "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}],
         }
-        for db_name in ["db1", "db2"]:
+        for db_name in db_names:
             rsp = self.collection_client.collection_create(payload, db_name=db_name)
+            assert rsp["code"] == 0, rsp
 
         # upload file to storage
         data = []
@@ -4423,7 +4517,7 @@ class TestGetImportJobProgress(TestBase):
             tmp = {
                 "word_count": i,
                 "book_describe": f"book_{i}",
-                "book_intro": [np.float32(random.random()) for _ in range(dim)]
+                "book_intro": [np.float32(random.random()) for _ in range(dim)],
             }
             if not auto_id:
                 tmp["book_id"] = i
@@ -4437,31 +4531,30 @@ class TestGetImportJobProgress(TestBase):
             json.dump(data, f, cls=NumpyEncoder)
         # upload file to minio storage
         self.storage_client.upload_file(file_path, file_name)
-        job_id_list = []
+        jobs = []
         # create import job
-        for db in ["db1", "db2"]:
+        for db_name in db_names:
             payload = {
                 "collectionName": name,
                 "files": [[file_name]],
             }
             for i in range(import_task_num):
-                rsp = self.import_job_client.create_import_jobs(payload, db_name=db)
-                job_id_list.append(rsp['data']['jobId'])
+                rsp = self.import_job_client.create_import_jobs(payload, db_name=db_name)
+                assert rsp["code"] == 0, rsp
+                jobs.append((rsp["data"]["jobId"], db_name))
         time.sleep(5)
         # get import job progress
-        for job_id in job_id_list:
+        for job_id, db_name in jobs:
             try:
-                rsp = self.import_job_client.get_import_job_progress(job_id)
+                rsp = self.import_job_client.get_import_job_progress(job_id, db_name=db_name)
                 logger.info(f"job progress: {rsp}")
             except Exception as e:
                 logger.error(f"get import job progress failed: {e}")
 
 
-@pytest.mark.L1
-class TestGetImportJobProgressNegative(TestBase):
-
+@pytest.mark.tags(CaseLabel.L1)
+class TestGetImportJobProgressNegative(RestImportTestBase):
     def test_list_job_with_invalid_job_id(self):
-
         # get import job progress with invalid job id
         job_id_list = ["invalid_job_id", None]
         for job_id in job_id_list:
@@ -4472,7 +4565,6 @@ class TestGetImportJobProgressNegative(TestBase):
                 logger.error(f"get import job progress failed: {e}")
 
     def test_list_job_with_job_id(self):
-
         # get import job progress with invalid job id
         job_id_list = ["invalid_job_id", None]
         for job_id in job_id_list:
@@ -4482,12 +4574,14 @@ class TestGetImportJobProgressNegative(TestBase):
             except Exception as e:
                 logger.error(f"get import job progress failed: {e}")
 
+    @pytest.mark.tags(CaseLabel.RBAC)
     def test_list_job_with_new_user(self):
         # create new user
         user_name = "test_user"
         password = "12345678"
-        self.user_client.user_create({
-            "userName": user_name,
-            "password": password,
-        })
-
+        self.user_client.user_create(
+            {
+                "userName": user_name,
+                "password": password,
+            }
+        )

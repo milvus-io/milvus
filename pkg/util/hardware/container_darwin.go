@@ -12,15 +12,15 @@
 package hardware
 
 import (
-	"github.com/cockroachdb/errors"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // getContainerMemLimit returns memory limit and error
 func getContainerMemLimit() (uint64, error) {
-	return 0, errors.New("Not supported")
+	return 0, merr.WrapErrParameterInvalidMsg("Not supported")
 }
 
 // getContainerMemUsed returns memory usage and error
 func getContainerMemUsed() (uint64, error) {
-	return 0, errors.New("Not supported")
+	return 0, merr.WrapErrParameterInvalidMsg("Not supported")
 }

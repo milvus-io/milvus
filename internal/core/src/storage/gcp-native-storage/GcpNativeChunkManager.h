@@ -30,7 +30,8 @@ GcpErrorMessage(const std::string& func,
                 const std::string& fmt_string,
                 Args&&... args) {
     std::ostringstream oss;
-    const auto& message = fmt::format(fmt_string, std::forward<Args>(args)...);
+    const auto& message =
+        fmt::format(fmt::runtime(fmt_string), std::forward<Args>(args)...);
     oss << "Error in " << func << "[exception:" << err.what()
         << ", params:" << message << "]";
     return oss.str();
@@ -44,7 +45,11 @@ ThrowGcpNativeError(const std::string& func,
                     Args&&... args) {
     std::string error_message = GcpErrorMessage(func, err, fmt_string, args...);
     LOG_WARN("{}", error_message);
-    throw SegcoreError(GcpNativeError, error_message);
+    const auto* segcore_error = dynamic_cast<const SegcoreError*>(&err);
+    throw SegcoreError(segcore_error == nullptr
+                           ? ErrorCode::UnexpectedError
+                           : segcore_error->get_error_code(),
+                       error_message);
 }
 
 /**

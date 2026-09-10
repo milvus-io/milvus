@@ -16,8 +16,6 @@
 
 #pragma once
 
-#include <algorithm>
-
 #include <fmt/core.h>
 
 #include "common/EasyAssert.h"
@@ -38,6 +36,15 @@ IsCompareOp(proto::plan::OpType op) {
            op == proto::plan::OpType::GreaterThan ||
            op == proto::plan::OpType::LessEqual ||
            op == proto::plan::OpType::LessThan;
+}
+
+// Ops served by the per-field text index (segment_->GetTextIndex()) instead of
+// the scalar index path; add a new text-index op here and the dispatch follows.
+inline bool
+IsTextIndexOpType(proto::plan::OpType op) {
+    return op == proto::plan::OpType::TextMatch ||
+           op == proto::plan::OpType::PhraseMatch ||
+           op == proto::plan::OpType::TextMatchFuzzy;
 }
 
 [[maybe_unused]] static ColumnVectorPtr
@@ -121,7 +128,7 @@ CompareTwoJsonArray(T arr1, const proto::plan::Array& arr2) {
                 break;
             }
             default:
-                ThrowInfo(DataTypeInvalid,
+                ThrowInfo(UnexpectedError,
                           "unsupported data type {}",
                           arr2.array(i).val_case());
         }
@@ -132,8 +139,8 @@ CompareTwoJsonArray(T arr1, const proto::plan::Array& arr2) {
 
 template <>
 inline bool
-CompareTwoJsonArray<bsoncxx::array::view>(bsoncxx::array::view arr1,
-                                          const proto::plan::Array& arr2) {
+CompareTwoJsonArray<milvus::bson::array_view>(milvus::bson::array_view arr1,
+                                              const proto::plan::Array& arr2) {
     size_t bson_array_length = std::distance(arr1.begin(), arr1.end());
 
     if (arr2.array_size() != bson_array_length) {
@@ -151,7 +158,7 @@ CompareTwoJsonArray<bsoncxx::array::view>(bsoncxx::array::view arr1,
 
         switch (proto_elem.val_case()) {
             case proto::plan::GenericValue::kBoolVal: {
-                if (bson_elem.type() != bsoncxx::type::k_bool) {
+                if (bson_elem.type() != milvus::bson::type::k_bool) {
                     return false;
                 }
                 if (bson_elem.get_bool().value != proto_elem.bool_val()) {
@@ -160,12 +167,12 @@ CompareTwoJsonArray<bsoncxx::array::view>(bsoncxx::array::view arr1,
                 break;
             }
             case proto::plan::GenericValue::kInt64Val: {
-                if (bson_elem.type() == bsoncxx::type::k_int32) {
+                if (bson_elem.type() == milvus::bson::type::k_int32) {
                     const int32_t val = bson_elem.get_int32().value;
                     if (val != proto_elem.int64_val()) {
                         return false;
                     }
-                } else if (bson_elem.type() == bsoncxx::type::k_int64) {
+                } else if (bson_elem.type() == milvus::bson::type::k_int64) {
                     const int64_t val = bson_elem.get_int64().value;
                     if (val != proto_elem.int64_val()) {
                         return false;
@@ -178,13 +185,13 @@ CompareTwoJsonArray<bsoncxx::array::view>(bsoncxx::array::view arr1,
             case proto::plan::GenericValue::kFloatVal: {
                 double bson_val;
                 switch (bson_elem.type()) {
-                    case bsoncxx::type::k_int32:
+                    case milvus::bson::type::k_int32:
                         bson_val = bson_elem.get_int32().value;
                         break;
-                    case bsoncxx::type::k_int64:
+                    case milvus::bson::type::k_int64:
                         bson_val = bson_elem.get_int64().value;
                         break;
-                    case bsoncxx::type::k_double:
+                    case milvus::bson::type::k_double:
                         bson_val = bson_elem.get_double().value;
                         break;
                     default:
@@ -196,7 +203,7 @@ CompareTwoJsonArray<bsoncxx::array::view>(bsoncxx::array::view arr1,
                 break;
             }
             case proto::plan::GenericValue::kStringVal: {
-                if (bson_elem.type() != bsoncxx::type::k_string) {
+                if (bson_elem.type() != milvus::bson::type::k_string) {
                     return false;
                 }
                 auto bson_str_view = bson_elem.get_string().value;
@@ -289,26 +296,6 @@ GetValueWithCastNumber(const milvus::proto::plan::GenericValue& value_proto) {
     } else {
         return GetValueFromProto<T>(value_proto);
     }
-}
-
-// Locale-independent ASCII lowercase conversion
-// Converts only ASCII uppercase letters (A-Z) to lowercase (a-z)
-// Non-ASCII characters and non-uppercase characters remain unchanged
-inline unsigned char
-asciiToLower(unsigned char c) {
-    if (c >= 'A' && c <= 'Z') {
-        return static_cast<unsigned char>('a' + (c - 'A'));
-    }
-    return c;
-}
-
-inline std::string
-sanitizeName(const std::string& name) {
-    std::string sanitizedName;
-    sanitizedName.resize(name.size());
-    std::transform(
-        name.begin(), name.end(), sanitizedName.begin(), asciiToLower);
-    return sanitizedName;
 }
 
 }  // namespace exec

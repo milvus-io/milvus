@@ -8,7 +8,6 @@ package segcore
 #include "segcore/collection_c.h"
 #include "segcore/segment_c.h"
 #include "segcore/plan_c.h"
-#include "segcore/reduce_c.h"
 */
 import "C"
 
@@ -19,15 +18,13 @@ import (
 	"strings"
 	"unsafe"
 
-	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/cgo"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
@@ -74,7 +71,10 @@ func CreateCSegment(req *CreateCSegmentRequest) (CSegment, error) {
 	var ptr C.CSegmentInterface
 	var status C.CStatus
 	if req.LoadInfo != nil {
-		segLoadInfo := ConvertToSegcoreSegmentLoadInfo(req.LoadInfo)
+		segLoadInfo, err := ConvertToSegcoreSegmentLoadInfo(req.LoadInfo)
+		if err != nil {
+			return nil, merr.Wrap(err, "failed to convert segment load info")
+		}
 		loadInfoBlob, err := proto.Marshal(segLoadInfo)
 		if err != nil {
 			return nil, err
@@ -92,7 +92,7 @@ func CreateCSegment(req *CreateCSegmentRequest) (CSegment, error) {
 		if commitTs := req.LoadInfo.GetCommitTimestamp(); commitTs != 0 {
 			if err := seg.SetCommitTimestamp(commitTs); err != nil {
 				C.DeleteSegment(ptr)
-				return nil, errors.Wrap(err, "failed to set commit timestamp on segment")
+				return nil, merr.Wrap(err, "failed to set commit timestamp on segment")
 			}
 		}
 	}
@@ -258,7 +258,7 @@ func (s *cSegmentImpl) Insert(ctx context.Context, request *InsertRequest) (*Ins
 
 	insertRecordBlob, err := proto.Marshal(request.Record)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal insert record: %s", err)
+		return nil, merr.Wrap(err, "failed to marshal insert record")
 	}
 
 	numOfRow := len(request.RowIDs)
@@ -300,7 +300,7 @@ func (s *cSegmentImpl) Delete(ctx context.Context, request *DeleteRequest) (*Del
 
 	dataBlob, err := proto.Marshal(ids)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal ids: %s", err)
+		return nil, merr.Wrap(err, "failed to marshal ids")
 	}
 	status := C.Delete(s.ptr,
 		cSize,
@@ -321,7 +321,7 @@ func (s *cSegmentImpl) LoadFieldData(ctx context.Context, request *LoadFieldData
 
 	status := C.LoadFieldData(s.ptr, creq.cLoadFieldDataInfo)
 	if err := ConsumeCStatusIntoError(&status); err != nil {
-		return nil, errors.Wrap(err, "failed to load field data")
+		return nil, merr.Wrap(err, "failed to load field data")
 	}
 	return &LoadFieldDataResult{}, nil
 }
@@ -346,26 +346,29 @@ func (s *cSegmentImpl) Load(ctx context.Context) error {
 
 func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
 	if req == nil {
-		return errors.New("reopen request is nil")
+		return merr.WrapErrParameterInvalidMsg("reopen request is nil")
 	}
 	if req.LoadInfo == nil {
-		return errors.New("reopen load info is nil")
+		return merr.WrapErrParameterInvalidMsg("reopen load info is nil")
 	}
 	if req.Schema == nil {
-		return errors.New("reopen schema is nil")
+		return merr.WrapErrParameterInvalidMsg("reopen schema is nil")
 	}
 
 	traceCtx := ParseCTraceContext(ctx)
 	defer runtime.KeepAlive(traceCtx)
 	defer runtime.KeepAlive(req)
 
-	segLoadInfo := ConvertToSegcoreSegmentLoadInfo(req.LoadInfo)
+	segLoadInfo, err := ConvertToSegcoreSegmentLoadInfo(req.LoadInfo)
+	if err != nil {
+		return merr.Wrap(err, "failed to convert reopen load info")
+	}
 	loadInfoBlob, err := proto.Marshal(segLoadInfo)
 	if err != nil {
 		return err
 	}
 	if len(loadInfoBlob) == 0 {
-		return errors.New("reopen load info blob is empty")
+		return merr.WrapErrServiceInternalMsg("reopen load info blob is empty")
 	}
 
 	schemaBlob, err := proto.Marshal(req.Schema)
@@ -373,7 +376,7 @@ func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
 		return err
 	}
 	if len(schemaBlob) == 0 {
-		return errors.New("reopen schema blob is empty")
+		return merr.WrapErrServiceInternalMsg("reopen schema blob is empty")
 	}
 	defer runtime.KeepAlive(schemaBlob)
 
@@ -396,22 +399,6 @@ func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
 	return err
 }
 
-func (s *cSegmentImpl) DropIndex(ctx context.Context, fieldID int64) error {
-	status := C.DropSealedSegmentIndex(s.ptr, C.int64_t(fieldID))
-	if err := ConsumeCStatusIntoError(&status); err != nil {
-		return errors.Wrap(err, "failed to drop index")
-	}
-	return nil
-}
-
-func (s *cSegmentImpl) DropJSONIndex(ctx context.Context, fieldID int64, nestedPath string) error {
-	status := C.DropSealedSegmentJSONIndex(s.ptr, C.int64_t(fieldID), C.CString(nestedPath))
-	if err := ConsumeCStatusIntoError(&status); err != nil {
-		return errors.Wrap(err, "failed to drop json index")
-	}
-	return nil
-}
-
 // Release releases the segment.
 func (s *cSegmentImpl) Release() {
 	C.DeleteSegment(s.ptr)
@@ -428,15 +415,18 @@ func (s *cSegmentImpl) SetCommitTimestamp(ts uint64) error {
 // ConvertToSegcoreSegmentLoadInfo converts querypb.SegmentLoadInfo to segcorepb.SegmentLoadInfo.
 // This function is needed because segcorepb.SegmentLoadInfo is a simplified version that doesn't
 // depend on data_coord.proto and excludes fields like start_position, delta_position, and level.
-func ConvertToSegcoreSegmentLoadInfo(src *querypb.SegmentLoadInfo) *segcorepb.SegmentLoadInfo {
+func ConvertToSegcoreSegmentLoadInfo(src *querypb.SegmentLoadInfo) (*segcorepb.SegmentLoadInfo, error) {
 	if src == nil {
-		return nil
+		return nil, nil
 	}
 
 	// Resolve text/json stats with basePaths.
 	// V2: stats come from src proto fields, basePaths computed from metadata + rootPath.
 	// V3: stats resolved from manifest (src proto fields are empty), basePaths from manifest paths.
-	textStats, jsonStats, textBasePaths, jsonBasePaths := resolveStatsWithBasePaths(src)
+	textStats, jsonStats, textBasePaths, jsonBasePaths, err := resolveStatsWithBasePaths(src)
+	if err != nil {
+		return nil, err
+	}
 
 	return &segcorepb.SegmentLoadInfo{
 		SegmentID:            src.GetSegmentID(),
@@ -460,20 +450,23 @@ func ConvertToSegcoreSegmentLoadInfo(src *querypb.SegmentLoadInfo) *segcorepb.Se
 		JsonKeyStatsLogs:     convertJSONKeyStats(jsonStats, jsonBasePaths),
 		Priority:             src.GetPriority(),
 		ManifestPath:         src.GetManifestPath(),
-		UseTakeForOutput:     paramtable.Get().QueryNodeCfg.ExternalCollectionUseTakeForOutput.GetAsBool(),
+		UseTakeForOutput:     src.GetUseTakeForOutput(),
 		EstimatedBytesPerRow: src.GetEstimatedBytesPerRow(),
 		CommitTimestamp:      src.GetCommitTimestamp(),
-	}
+	}, nil
 }
 
 // resolveStatsWithBasePaths resolves text/json stats and computes basePaths.
 // V2: stats from src proto fields, basePaths computed from rootPath + metadata.
 // V3: stats resolved from manifest via StatsResolver, basePaths extracted from manifest paths.
+// A V3 manifest error does not fall back to V2 path construction because the
+// legacy prefixes are incompatible with manifest-backed stat files.
 func resolveStatsWithBasePaths(src *querypb.SegmentLoadInfo) (
 	map[int64]*datapb.TextIndexStats,
 	map[int64]*datapb.JsonKeyStats,
 	map[int64]string, // textBasePaths
 	map[int64]string, // jsonBasePaths
+	error,
 ) {
 	textStats := src.GetTextStatsLogs()
 	jsonStats := src.GetJsonKeyStatsLogs()
@@ -482,12 +475,13 @@ func resolveStatsWithBasePaths(src *querypb.SegmentLoadInfo) (
 	if src.GetStorageVersion() == storage.StorageV3 {
 		result := packed.NewStatsResolverFromLoadInfo(src).TextAndJSONIndexStatsWithBasePaths()
 		if result.Err() != nil {
-			log.Warn("failed to resolve stats from manifest for segcore load info",
-				zap.Int64("segmentID", src.GetSegmentID()),
-				zap.String("manifestPath", src.GetManifestPath()),
-				zap.Error(result.Err()))
+			mlog.Warn(context.TODO(), "failed to resolve stats from manifest for segcore load info",
+				mlog.Int64("segmentID", src.GetSegmentID()),
+				mlog.String("manifestPath", src.GetManifestPath()),
+				mlog.Err(result.Err()))
+			return nil, nil, nil, nil, merr.Wrap(result.Err(), "failed to resolve V3 stats from manifest")
 		} else {
-			return result.TextIndexStats, result.JSONKeyStats, result.TextBasePaths, result.JSONBasePaths
+			return result.TextIndexStats, result.JSONKeyStats, result.TextBasePaths, result.JSONBasePaths, nil
 		}
 	}
 
@@ -508,7 +502,7 @@ func resolveStatsWithBasePaths(src *querypb.SegmentLoadInfo) (
 			src.GetCollectionID(), src.GetPartitionID(), src.GetSegmentID(), fieldID)
 	}
 
-	return textStats, jsonStats, textBasePaths, jsonBasePaths
+	return textStats, jsonStats, textBasePaths, jsonBasePaths, nil
 }
 
 // convertFieldBinlogs converts datapb.FieldBinlog to segcorepb.FieldBinlog.
@@ -582,6 +576,7 @@ func convertFieldIndexInfos(src []*querypb.FieldIndexInfo) []*segcorepb.FieldInd
 			NumRows:                   fii.GetNumRows(),
 			CurrentIndexVersion:       fii.GetCurrentIndexVersion(),
 			CurrentScalarIndexVersion: fii.GetCurrentScalarIndexVersion(),
+			IndexStorePathVersion:     fii.GetIndexStorePathVersion(),
 		})
 	}
 	return result
@@ -613,13 +608,13 @@ func convertTextIndexStats(src map[int64]*datapb.TextIndexStats, basePaths map[i
 			}
 			files = stripped
 		}
-		log.Info("convertTextIndexStats",
-			zap.Int64("fieldID", v.GetFieldID()),
-			zap.Int64("buildID", v.GetBuildID()),
-			zap.Int64("version", v.GetVersion()),
-			zap.String("basePath", basePath),
-			zap.Int("fileCount", len(files)),
-			zap.Strings("files", files),
+		mlog.Info(context.TODO(), "convertTextIndexStats",
+			mlog.Int64("fieldID", v.GetFieldID()),
+			mlog.Int64("buildID", v.GetBuildID()),
+			mlog.Int64("version", v.GetVersion()),
+			mlog.String("basePath", basePath),
+			mlog.Int("fileCount", len(files)),
+			mlog.Strings("files", files),
 		)
 
 		result[k] = &segcorepb.TextIndexStats{
@@ -661,13 +656,13 @@ func convertJSONKeyStats(src map[int64]*datapb.JsonKeyStats, basePaths map[int64
 			}
 			files = stripped
 		}
-		log.Info("convertJSONKeyStats",
-			zap.Int64("fieldID", v.GetFieldID()),
-			zap.Int64("buildID", v.GetBuildID()),
-			zap.Int64("version", v.GetVersion()),
-			zap.String("basePath", basePath),
-			zap.Int("fileCount", len(files)),
-			zap.Strings("files", files),
+		mlog.Info(context.TODO(), "convertJSONKeyStats",
+			mlog.Int64("fieldID", v.GetFieldID()),
+			mlog.Int64("buildID", v.GetBuildID()),
+			mlog.Int64("version", v.GetVersion()),
+			mlog.String("basePath", basePath),
+			mlog.Int("fileCount", len(files)),
+			mlog.Strings("files", files),
 		)
 
 		result[k] = &segcorepb.JsonKeyStats{

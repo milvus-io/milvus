@@ -85,6 +85,16 @@ func TestIsRetryableErrWrapped(t *testing.T) {
 	assert.False(t, IsRetryableErr(nonRetryableErr))
 }
 
+func TestWrapErrServiceUnavailableErrPreservesCause(t *testing.T) {
+	cause := errors.New("transport failed")
+	err := WrapErrServiceUnavailableErr(cause, "dependency unavailable")
+
+	assert.ErrorIs(t, err, ErrServiceUnavailable)
+	assert.ErrorIs(t, err, cause)
+	assert.Equal(t, Code(ErrServiceUnavailable), Code(err))
+	assert.True(t, IsRetryableErr(err))
+}
+
 func TestChannelTSafeStalledStatus(t *testing.T) {
 	err := WrapErrChannelTSafeStalled("channel-1", "lag 3s")
 	assert.ErrorIs(t, err, ErrChannelTSafeStalled)
@@ -97,6 +107,26 @@ func TestChannelTSafeStalledStatus(t *testing.T) {
 	roundTripErr := Error(status)
 	assert.ErrorIs(t, roundTripErr, ErrChannelTSafeStalled)
 	assert.True(t, IsRetryableErr(roundTripErr))
+}
+
+func TestStatusInputErrorForcesNonRetriable(t *testing.T) {
+	// Boundary invariant: an input error must never be reported as retriable,
+	// even when the underlying sentinel is retriable. Retrying a malformed
+	// request unchanged can never succeed.
+	retriable := ErrServiceUnavailable // retriable=true
+	assert.True(t, IsRetryableErr(retriable))
+
+	inputErr := WrapErrAsInputError(retriable)
+	assert.Equal(t, InputError, GetErrorType(inputErr))
+
+	status := Status(inputErr)
+	assert.False(t, status.GetRetriable(), "input error must be non-retriable at the boundary")
+	_, flagged := status.GetExtraInfo()[InputErrorFlagKey]
+	assert.True(t, flagged, "input error flag should still be set")
+
+	// A non-input retriable error is unaffected.
+	plain := Status(retriable)
+	assert.True(t, plain.GetRetriable())
 }
 
 func TestIsMilvusError_WrappedChain(t *testing.T) {

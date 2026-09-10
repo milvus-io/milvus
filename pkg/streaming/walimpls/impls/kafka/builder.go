@@ -40,13 +40,16 @@ func (b *builderImpl) getProducerConfig() kafka.ConfigMap {
 	config := &paramtable.Get().KafkaCfg
 	producerConfig := getBasicConfig(config)
 
-	producerConfig.SetKey("message.max.bytes", 10485760)
 	producerConfig.SetKey("compression.codec", "zstd")
 	// we want to ensure tt send out as soon as possible
 	producerConfig.SetKey("linger.ms", 5)
 	for k, v := range config.ProducerExtraConfig.GetValue() {
 		producerConfig.SetKey(k, v)
 	}
+	// ProducerExtraConfig includes the raw kafka.producer.message.max.bytes
+	// entry. Apply the normalized ParamItem last so a value below the supported
+	// WAL minimum cannot overwrite the clamped producer limit.
+	producerConfig.SetKey("message.max.bytes", config.ProducerMessageMaxBytes.GetAsInt())
 	return producerConfig
 }
 

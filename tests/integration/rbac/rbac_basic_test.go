@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/tests/integration"
@@ -105,6 +106,76 @@ func (s *RBACBasicTestSuite) TestDropRole() {
 	for _, role := range backupRBACResp.GetRBACMeta().Roles {
 		s.NotEqual(roleName, role.GetName())
 	}
+}
+
+func (s *RBACBasicTestSuite) TestCredentialDescriptionRoundTrip() {
+	rootCtx := GetContext(context.Background(), defaultAuth)
+	userName := fmt.Sprintf("desc_user_%d", rand.Int31n(1000000))
+	oldPassword := "old_password"
+	newPassword := "new_password"
+	description := "CJK user description \xe6\x9d\x83\xe9\x99\x90\xe7\x94\xa8\xe6\x88\xb7"
+	updatedDescription := "updated description \xe6\x9b\xb4\xe6\x96\xb0"
+
+	resp, err := s.Cluster.MilvusClient.CreateCredential(rootCtx, &milvuspb.CreateCredentialRequest{
+		Username:    userName,
+		Password:    crypto.Base64Encode(oldPassword),
+		Description: &description,
+	})
+	s.NoError(err)
+	s.True(merr.Ok(resp))
+	defer s.Cluster.MilvusClient.DeleteCredential(rootCtx, &milvuspb.DeleteCredentialRequest{Username: userName}) //nolint
+
+	selectResp, err := s.Cluster.MilvusClient.SelectUser(rootCtx, &milvuspb.SelectUserRequest{
+		User:            &milvuspb.UserEntity{Name: userName},
+		IncludeRoleInfo: false,
+	})
+	s.NoError(err)
+	s.True(merr.Ok(selectResp.GetStatus()))
+	s.Len(selectResp.GetResults(), 1)
+	s.Equal(description, selectResp.GetResults()[0].GetDescription())
+
+	updateResp, err := s.Cluster.MilvusClient.UpdateCredential(rootCtx, &milvuspb.UpdateCredentialRequest{
+		Username:    userName,
+		Description: &updatedDescription,
+	})
+	s.NoError(err)
+	s.True(merr.Ok(updateResp))
+
+	oldUserCtx := GetContext(context.Background(), fmt.Sprintf("%s:%s", userName, oldPassword))
+	authResp, err := s.Cluster.MilvusClient.ShowCollections(oldUserCtx, &milvuspb.ShowCollectionsRequest{})
+	s.NoError(err)
+	s.True(merr.Ok(authResp.GetStatus()))
+
+	selectResp, err = s.Cluster.MilvusClient.SelectUser(rootCtx, &milvuspb.SelectUserRequest{
+		User:            &milvuspb.UserEntity{Name: userName},
+		IncludeRoleInfo: false,
+	})
+	s.NoError(err)
+	s.True(merr.Ok(selectResp.GetStatus()))
+	s.Len(selectResp.GetResults(), 1)
+	s.Equal(updatedDescription, selectResp.GetResults()[0].GetDescription())
+
+	updateResp, err = s.Cluster.MilvusClient.UpdateCredential(rootCtx, &milvuspb.UpdateCredentialRequest{
+		Username:    userName,
+		OldPassword: crypto.Base64Encode(oldPassword),
+		NewPassword: crypto.Base64Encode(newPassword),
+	})
+	s.NoError(err)
+	s.True(merr.Ok(updateResp))
+
+	newUserCtx := GetContext(context.Background(), fmt.Sprintf("%s:%s", userName, newPassword))
+	authResp, err = s.Cluster.MilvusClient.ShowCollections(newUserCtx, &milvuspb.ShowCollectionsRequest{})
+	s.NoError(err)
+	s.True(merr.Ok(authResp.GetStatus()))
+
+	selectResp, err = s.Cluster.MilvusClient.SelectUser(rootCtx, &milvuspb.SelectUserRequest{
+		User:            &milvuspb.UserEntity{Name: userName},
+		IncludeRoleInfo: false,
+	})
+	s.NoError(err)
+	s.True(merr.Ok(selectResp.GetStatus()))
+	s.Len(selectResp.GetResults(), 1)
+	s.Equal(updatedDescription, selectResp.GetResults()[0].GetDescription())
 }
 
 func TestRBAC(t *testing.T) {

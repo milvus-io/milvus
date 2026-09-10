@@ -160,12 +160,12 @@ class V3SegmentTestData {
         AssertInfo(commit_result.ok(),
                    "Failed to commit transaction: {}",
                    commit_result.status().ToString());
-        auto version = commit_result.ValueOrDie();
+        committed_version_ = commit_result.ValueOrDie();
 
         // Read back from manifest to get the committed column groups
         auto read_txn_result =
             milvus_storage::api::transaction::Transaction::Open(
-                fs, base_path_, version);
+                fs, base_path_, committed_version_);
         AssertInfo(read_txn_result.ok(),
                    "Failed to open read transaction: {}",
                    read_txn_result.status().ToString());
@@ -194,14 +194,16 @@ class V3SegmentTestData {
     operator=(V3SegmentTestData&&) = delete;
 
     std::unique_ptr<milvus_storage::api::ChunkReader>
-    CreateChunkReader(int64_t cg_index) const {
+    CreateChunkReader(int64_t cg_index,
+                      const std::shared_ptr<std::vector<std::string>>&
+                          needed_columns = nullptr) const {
         milvus_storage::api::Properties reader_props;
         milvus_storage::api::SetValue(
             reader_props, PROPERTY_FS_STORAGE_TYPE, LOON_FS_TYPE_LOCAL);
         milvus_storage::api::SetValue(
             reader_props, PROPERTY_FS_ROOT_PATH, root_path_.c_str());
         auto reader = milvus_storage::api::Reader::create(
-            column_groups_, loon_schema_, nullptr, reader_props);
+            column_groups_, loon_schema_, needed_columns, reader_props);
         auto result = reader->get_chunk_reader(cg_index);
         AssertInfo(result.ok(),
                    "Failed to create chunk reader for cg_index {}: {}",
@@ -251,6 +253,17 @@ class V3SegmentTestData {
         return base_path_;
     }
 
+    int64_t
+    Version() const {
+        return committed_version_;
+    }
+
+    std::string
+    ManifestPathJson() const {
+        return "{\"base_path\":\"" + base_path_ +
+               "\",\"ver\":" + std::to_string(committed_version_) + "}";
+    }
+
  private:
     SchemaPtr schema_;
     std::shared_ptr<arrow::Schema> loon_schema_;
@@ -258,6 +271,7 @@ class V3SegmentTestData {
     std::string base_path_;
     std::string root_path_;
     int64_t total_rows_ = 0;
+    int64_t committed_version_ = 0;
 };
 
 }  // namespace milvus::test

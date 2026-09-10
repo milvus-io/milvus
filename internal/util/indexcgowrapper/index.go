@@ -11,12 +11,10 @@ import "C"
 
 import (
 	"context"
-	"fmt"
 	"path/filepath"
 	"runtime"
 	"unsafe"
 
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/encoding/prototext"
 	"google.golang.org/protobuf/proto"
 
@@ -25,9 +23,10 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
 	"github.com/milvus-io/milvus/internal/util/segcore"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/cgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type Blob = storage.Blob
@@ -100,7 +99,7 @@ func NewCgoIndex(dtype schemapb.DataType, typeParams, indexParams map[string]str
 
 	runtime.SetFinalizer(index, func(index *CgoIndex) {
 		if index != nil && !index.close {
-			log.Error("there is leakage in index object, please check.")
+			mlog.Error(context.TODO(), "there is leakage in index object, please check.")
 		}
 	})
 
@@ -110,10 +109,10 @@ func NewCgoIndex(dtype schemapb.DataType, typeParams, indexParams map[string]str
 func CreateIndex(ctx context.Context, buildIndexInfo *indexcgopb.BuildIndexInfo) (CodecIndex, error) {
 	buildIndexInfoBlob, err := proto.Marshal(buildIndexInfo)
 	if err != nil {
-		log.Ctx(ctx).Warn("marshal buildIndexInfo failed",
-			zap.String("clusterID", buildIndexInfo.GetClusterID()),
-			zap.Int64("buildID", buildIndexInfo.GetBuildID()),
-			zap.Error(err))
+		mlog.Warn(ctx, "marshal buildIndexInfo failed",
+			mlog.String("clusterID", buildIndexInfo.GetClusterID()),
+			mlog.FieldBuildID(buildIndexInfo.GetBuildID()),
+			mlog.Err(err))
 		return nil, err
 	}
 	var indexPtr C.CIndex
@@ -129,7 +128,7 @@ func CreateIndex(ctx context.Context, buildIndexInfo *indexcgopb.BuildIndexInfo)
 
 	runtime.SetFinalizer(index, func(index *CgoIndex) {
 		if index != nil && !index.close {
-			log.Error("there is leakage in index object, please check.")
+			mlog.Error(ctx, "there is leakage in index object, please check.")
 		}
 	})
 
@@ -146,10 +145,10 @@ type JSONKeyStatsResult struct {
 func CreateJSONKeyStats(ctx context.Context, buildIndexInfo *indexcgopb.BuildIndexInfo) (*JSONKeyStatsResult, error) {
 	buildIndexInfoBlob, err := proto.Marshal(buildIndexInfo)
 	if err != nil {
-		log.Ctx(ctx).Warn("marshal buildIndexInfo failed",
-			zap.String("clusterID", buildIndexInfo.GetClusterID()),
-			zap.Int64("buildID", buildIndexInfo.GetBuildID()),
-			zap.Error(err))
+		mlog.Warn(ctx, "marshal buildIndexInfo failed",
+			mlog.String("clusterID", buildIndexInfo.GetClusterID()),
+			mlog.FieldBuildID(buildIndexInfo.GetBuildID()),
+			mlog.Err(err))
 		return nil, err
 	}
 	result := C.CreateProtoLayout()
@@ -182,7 +181,7 @@ func CreateJSONKeyStats(ctx context.Context, buildIndexInfo *indexcgopb.BuildInd
 func (index *CgoIndex) Build(dataset *Dataset) error {
 	switch dataset.DType {
 	case schemapb.DataType_None:
-		return fmt.Errorf("build index on supported data type: %s", dataset.DType.String())
+		return merr.WrapErrParameterInvalidMsg("build index on supported data type: %s", dataset.DType.String())
 	case schemapb.DataType_FloatVector:
 		return index.buildFloatVecIndex(dataset)
 	case schemapb.DataType_Float16Vector:
@@ -214,7 +213,7 @@ func (index *CgoIndex) Build(dataset *Dataset) error {
 	case schemapb.DataType_VarChar:
 		return index.buildStringIndex(dataset)
 	default:
-		return fmt.Errorf("build index on unsupported data type: %s", dataset.DType.String())
+		return merr.WrapErrParameterInvalidMsg("build index on unsupported data type: %s", dataset.DType.String())
 	}
 }
 
@@ -306,7 +305,7 @@ func (index *CgoIndex) buildSparseFloatVecIndex(dataset *Dataset) error {
 	if validData, ok := dataset.Data[keyValidArr].([]bool); ok && len(validData) > 0 {
 		validRows := validCount(validData)
 		if validRows > 0 && len(vectors) == 0 {
-			return fmt.Errorf("sparse float vector cgo build requires encoded sparse rows")
+			return merr.WrapErrParameterInvalidMsg("sparse float vector cgo build requires encoded sparse rows")
 		}
 		status := C.BuildSparseFloatVecIndexWithValidData(
 			index.indexPtr,
@@ -318,7 +317,7 @@ func (index *CgoIndex) buildSparseFloatVecIndex(dataset *Dataset) error {
 		return HandleCStatus(&status, "failed to build sparse float vector index with valid data")
 	}
 	if len(vectors) == 0 {
-		return fmt.Errorf("sparse float vector cgo build requires encoded sparse rows")
+		return merr.WrapErrParameterInvalidMsg("sparse float vector cgo build requires encoded sparse rows")
 	}
 	status := C.BuildSparseFloatVecIndex(index.indexPtr, (C.int64_t)(len(vectors)), (C.int64_t)(0), cUint8Ptr(vectors))
 	return HandleCStatus(&status, "failed to build sparse float vector index")

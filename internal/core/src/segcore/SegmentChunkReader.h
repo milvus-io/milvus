@@ -21,6 +21,7 @@
 #include <string>
 #include <vector>
 
+#include <boost/core/span.hpp>
 #include "boost/variant/variant.hpp"
 #include "cachinglayer/CacheSlot.h"
 #include "common/OpContext.h"
@@ -43,6 +44,7 @@ using data_access_type = std::optional<boost::variant<bool,
 
 using ChunkDataAccessor = std::function<const data_access_type(int)>;
 using MultipleChunkDataAccessor = std::function<const data_access_type()>;
+using PinnedIndexView = boost::span<const PinWrapper<const index::IndexBase*>>;
 
 // Helper to extract a value of type T from data_access_type.
 // For std::string, handles both std::string and std::string_view in the variant.
@@ -51,6 +53,8 @@ using MultipleChunkDataAccessor = std::function<const data_access_type()>;
 namespace detail {
 template <typename T>
 struct ValueExtractor : public boost::static_visitor<T> {
+    ValueExtractor() = default;
+
     T
     operator()(const T& val) const {
         return val;
@@ -58,12 +62,16 @@ struct ValueExtractor : public boost::static_visitor<T> {
     template <typename U>
     T
     operator()(const U&) const {
-        ThrowInfo(DataTypeInvalid, "unexpected type in data_access_type");
+        // Both types are selected from internal schema/accessor state, so a
+        // mismatch is an internal contract violation rather than bad input.
+        ThrowInfo(UnexpectedError, "unexpected type in data_access_type");
     }
 };
 
 template <>
 struct ValueExtractor<std::string> : public boost::static_visitor<std::string> {
+    ValueExtractor() = default;
+
     std::string
     operator()(const std::string& s) const {
         return s;
@@ -75,7 +83,9 @@ struct ValueExtractor<std::string> : public boost::static_visitor<std::string> {
     template <typename U>
     std::string
     operator()(const U&) const {
-        ThrowInfo(DataTypeInvalid, "unexpected type in data_access_type");
+        // Both types are selected from internal schema/accessor state, so a
+        // mismatch is an internal contract violation rather than bad input.
+        ThrowInfo(UnexpectedError, "unexpected type in data_access_type");
     }
 };
 }  // namespace detail
@@ -98,21 +108,17 @@ class SegmentChunkReader {
     }
 
     MultipleChunkDataAccessor
-    GetMultipleChunkDataAccessor(
-        DataType data_type,
-        FieldId field_id,
-        int64_t& current_chunk_id,
-        int64_t& current_chunk_pos,
-        const std::vector<PinWrapper<const index::IndexBase*>>& pinned_index)
-        const;
+    GetMultipleChunkDataAccessor(DataType data_type,
+                                 FieldId field_id,
+                                 int64_t& current_chunk_id,
+                                 int64_t& current_chunk_pos,
+                                 PinnedIndexView pinned_index) const;
 
     ChunkDataAccessor
     GetChunkDataAccessor(DataType data_type,
                          FieldId field_id,
                          int chunk_id,
-                         int data_barrier,
-                         const std::vector<PinWrapper<const index::IndexBase*>>&
-                             pinned_index) const;
+                         PinnedIndexView pinned_index) const;
 
     void
     MoveCursorForMultipleChunk(int64_t& current_chunk_id,
@@ -120,23 +126,58 @@ class SegmentChunkReader {
                                const FieldId field_id,
                                const int64_t num_chunk,
                                const int64_t batch_size) const {
-        int64_t segment_row_count = segment_->get_row_count();
+        int64_t segment_row_count = RowCount();
         int64_t current_offset =
-            segment_->num_rows_until_chunk(field_id, current_chunk_id) +
-            current_chunk_pos;
+            NumRowsUntilChunk(field_id, current_chunk_id) + current_chunk_pos;
         int64_t target_offset = current_offset + batch_size;
 
         if (target_offset >= segment_row_count) {
             current_chunk_id = num_chunk - 1;
-            current_chunk_pos =
-                segment_row_count -
-                segment_->num_rows_until_chunk(field_id, current_chunk_id);
+            current_chunk_pos = segment_row_count -
+                                NumRowsUntilChunk(field_id, current_chunk_id);
             return;
         }
-        auto [chunk_id, chunk_pos] =
-            segment_->get_chunk_by_offset(field_id, target_offset);
+        auto [chunk_id, chunk_pos] = GetChunkByOffset(field_id, target_offset);
         current_chunk_id = chunk_id;
         current_chunk_pos = chunk_pos;
+    }
+
+    // Bind the request-scoped sealed read snapshot. Borrowed from the owning
+    // QueryContext; valid for the whole ExecuteTask. Null for growing /
+    // non-pinned paths, which fall back to segment access below.
+    void
+    SetSnapshot(const segcore::SegmentReadSnapshot* snapshot) const {
+        snapshot_ = snapshot;
+    }
+
+    int64_t
+    ChunkSize(FieldId field_id, int64_t chunk_id) const {
+        return snapshot_ ? snapshot_->chunk_size(field_id, chunk_id)
+                         : segment_->chunk_size(field_id, chunk_id);
+    }
+
+    int64_t
+    NumRowsUntilChunk(FieldId field_id, int64_t chunk_id) const {
+        return snapshot_ ? snapshot_->num_rows_until_chunk(field_id, chunk_id)
+                         : segment_->num_rows_until_chunk(field_id, chunk_id);
+    }
+
+    std::pair<int64_t, int64_t>
+    GetChunkByOffset(FieldId field_id, int64_t offset) const {
+        return snapshot_ ? snapshot_->get_chunk_by_offset(field_id, offset)
+                         : segment_->get_chunk_by_offset(field_id, offset);
+    }
+
+    int64_t
+    NumChunkData(FieldId field_id) const {
+        return snapshot_ ? snapshot_->num_chunk_data(field_id)
+                         : segment_->num_chunk_data(field_id);
+    }
+
+    int64_t
+    RowCount() const {
+        return snapshot_ ? snapshot_->get_row_count()
+                         : segment_->get_row_count();
     }
 
     void
@@ -158,6 +199,7 @@ class SegmentChunkReader {
                 if (++processed_rows >= batch_size) {
                     current_chunk_id = chunk_id;
                     current_chunk_pos = i + 1;
+                    return;
                 }
             }
         }
@@ -170,24 +212,21 @@ class SegmentChunkReader {
 
     const int64_t active_count_;
     const segcore::SegmentInternalInterface* segment_;
+    mutable const segcore::SegmentReadSnapshot* snapshot_{nullptr};
 
  private:
     template <typename T>
     MultipleChunkDataAccessor
-    GetMultipleChunkDataAccessor(
-        FieldId field_id,
-        int64_t& current_chunk_id,
-        int64_t& current_chunk_pos,
-        const std::vector<PinWrapper<const index::IndexBase*>>& pinned_index)
-        const;
+    GetMultipleChunkDataAccessor(FieldId field_id,
+                                 int64_t& current_chunk_id,
+                                 int64_t& current_chunk_pos,
+                                 PinnedIndexView pinned_index) const;
 
     template <typename T>
     ChunkDataAccessor
     GetChunkDataAccessor(FieldId field_id,
                          int chunk_id,
-                         int data_barrier,
-                         const std::vector<PinWrapper<const index::IndexBase*>>&
-                             pinned_index) const;
+                         PinnedIndexView pinned_index) const;
 
     const int64_t size_per_chunk_;
     milvus::OpContext* op_ctx_;

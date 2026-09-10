@@ -19,6 +19,7 @@ package parquet
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"strings"
 	"testing"
@@ -98,6 +99,30 @@ func TestImportFixedSizeList_FloatVector(t *testing.T) {
 	require.Equal(t, 2, insertData.Data[fixedSizeListDataFieldID].RowNum())
 	require.EqualValues(t, []float32{1, 2, 3, 4}, insertData.Data[fixedSizeListDataFieldID].GetRow(0))
 	require.EqualValues(t, []float32{5, 6, 7, 8}, insertData.Data[fixedSizeListDataFieldID].GetRow(1))
+}
+
+func TestImportFixedSizeList_FloatVectorRejectsNonFiniteValues(t *testing.T) {
+	tests := []struct {
+		name  string
+		value float32
+	}{
+		{name: "nan", value: float32(math.NaN())},
+		{name: "positive infinity", value: float32(math.Inf(1))},
+		{name: "negative infinity", value: float32(math.Inf(-1))},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			schema := fixedSizeListFloatVectorSchema(4, false)
+			rows := []fixedSizeFloat32Row{
+				{valid: true, values: float32Ptrs(1, 2, tt.value, 4)},
+			}
+
+			_, err := tryReadFixedSizeListParquet(t, schema, fixedSizeFloat32ListArray(t, 4, rows))
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "not a number or infinity")
+		})
+	}
 }
 
 func TestImportFixedSizeList_NullableFloatVector(t *testing.T) {

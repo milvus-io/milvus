@@ -18,6 +18,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <optional>
 
 #include "proxy.h"
@@ -353,8 +354,21 @@ struct ElementWiseBitsetPolicy {
             start_element += 1;
         }
 
-        // process the middle
-        for (size_t i = start_element; i < end_element; i++) {
+        // process the middle; a per-element early-exit loop cannot be
+        // auto-vectorized, so AND-reduce 64-byte blocks (the fixed-trip
+        // inner loop vectorizes) and branch once per block
+        constexpr size_t block_elements = 64 / sizeof(data_type);
+        size_t i = start_element;
+        for (; i + block_elements <= end_element; i += block_elements) {
+            data_type acc = data_type(-1);
+            for (size_t k = 0; k < block_elements; k++) {
+                acc &= data[i + k];
+            }
+            if (acc != data_type(-1)) {
+                return false;
+            }
+        }
+        for (; i < end_element; i++) {
             if (data[i] != data_type(-1)) {
                 return false;
             }
@@ -410,8 +424,21 @@ struct ElementWiseBitsetPolicy {
             start_element += 1;
         }
 
-        // process the middle
-        for (size_t i = start_element; i < end_element; i++) {
+        // process the middle; a per-element early-exit loop cannot be
+        // auto-vectorized, so OR-reduce 64-byte blocks (the fixed-trip
+        // inner loop vectorizes) and branch once per block
+        constexpr size_t block_elements = 64 / sizeof(data_type);
+        size_t i = start_element;
+        for (; i + block_elements <= end_element; i += block_elements) {
+            data_type acc = data_type(0);
+            for (size_t k = 0; k < block_elements; k++) {
+                acc |= data[i + k];
+            }
+            if (acc != data_type(0)) {
+                return false;
+            }
+        }
+        for (; i < end_element; i++) {
             if (data[i] != data_type(0)) {
                 return false;
             }
@@ -446,10 +473,12 @@ struct ElementWiseBitsetPolicy {
 
         if ((start_src % data_bits) == 0) {
             if ((start_dst % data_bits) == 0) {
-                // plain memcpy
-                for (size_t i = 0; i < size_b; i += data_bits) {
-                    const data_type src_v = src[(start_src + i) / data_bits];
-                    dst[(start_dst + i) / data_bits] = src_v;
+                // op_copy callers provide non-overlapping ranges.
+                const size_t element_count = size_b / data_bits;
+                if (element_count != 0) {
+                    std::memcpy(dst + get_element(start_dst),
+                                src + get_element(start_src),
+                                element_count * sizeof(data_type));
                 }
             } else {
                 // easier read

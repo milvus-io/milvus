@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include <string.h>
+#include "common/FastMem.h"
 #include <cstdint>
 #include <exception>
 #include <iosfwd>
@@ -68,7 +69,7 @@ AppendIndexBinary(CBinarySet c_binary_set,
         std::string index_key(c_index_key);
         uint8_t* index = (uint8_t*)index_binary;
         uint8_t* dup = new uint8_t[index_size]();
-        memcpy(dup, index, index_size);
+        milvus::fastmem::FastMemcpy(dup, index, index_size);
         std::shared_ptr<uint8_t[]> data(dup);
         binary_set->Append(index_key, data, index_size);
 
@@ -127,7 +128,8 @@ CopyBinarySetValue(void* data, const char* key, CBinarySet c_binary_set) {
         auto binary = binary_set->GetByName(key);
         status.error_code = milvus::ErrorCode::Success;
         status.error_msg = "";
-        memcpy((uint8_t*)data, binary->data.get(), binary->size);
+        milvus::fastmem::FastMemcpy(
+            (uint8_t*)data, binary->data.get(), binary->size);
     } catch (std::exception& e) {
         status.error_code = milvus::ErrorCode::UnexpectedError;
         status.error_msg = strdup(e.what());

@@ -21,10 +21,8 @@ import (
 	"net/http"
 	"strings"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -54,7 +52,7 @@ func (s *mixCoordImpl) HandleReplicaLoadConfigCompliance(w http.ResponseWriter, 
 	}
 
 	ctx := req.Context()
-	logger := log.Ctx(ctx).With(zap.String("handler", "ReplicaLoadConfigCompliance"))
+	logger := mlog.With(mlog.String("handler", "ReplicaLoadConfigCompliance"))
 
 	// Cluster-level check: WAL is fully migrated onto the configured primary resource group.
 	// Short-circuit before reading config / loading collections — a WAL-layout issue affects
@@ -64,7 +62,7 @@ func (s *mixCoordImpl) HandleReplicaLoadConfigCompliance(w http.ResponseWriter, 
 		return
 	} else if err := b.ConfirmPrimaryResourceGroupReady(ctx); err != nil {
 		reason := fmt.Sprintf("WAL placement: %s", err.Error())
-		logger.Info("WAL not fully placed on primary resource group", zap.String("reason", reason))
+		logger.Info(ctx, "WAL not fully placed on primary resource group", mlog.String("reason", reason))
 		s.writeComplianceResponse(w, LoadConfigComplianceStateNotReady, reason)
 		return
 	}
@@ -72,37 +70,41 @@ func (s *mixCoordImpl) HandleReplicaLoadConfigCompliance(w http.ResponseWriter, 
 	// Get cluster-level configuration
 	clusterReplicaNum := Params.QueryCoordCfg.ClusterLevelLoadReplicaNumber.GetAsInt()
 	clusterResourceGroups := Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.GetAsStrings()
+	forceOverrideUserReplicaMode := Params.QueryCoordCfg.ClusterLevelLoadForceOverrideUserReplicaMode.GetAsBool()
 
-	logger.Info("checking replica load config compliance",
-		zap.Int("clusterReplicaNum", clusterReplicaNum),
-		zap.Strings("clusterResourceGroups", clusterResourceGroups))
+	logger.Info(ctx, "checking replica load config compliance",
+		mlog.Int("clusterReplicaNum", clusterReplicaNum),
+		mlog.Strings("clusterResourceGroups", clusterResourceGroups),
+		mlog.Bool("forceOverrideUserReplicaMode", forceOverrideUserReplicaMode))
 
 	// Use ShowLoadCollections to get all loaded collections
 	showResp, err := s.ShowLoadCollections(ctx, &querypb.ShowCollectionsRequest{
 		Base: commonpbutil.NewMsgBase(),
 	})
 	if err := merr.CheckRPCCall(showResp, err); err != nil {
-		logger.Warn("failed to show collections", zap.Error(err))
+		logger.Warn(ctx, "failed to show collections", mlog.Err(err))
 		writeJSONError(w, fmt.Sprintf("failed to get collections: %s", err.Error()), http.StatusInternalServerError)
 		return
 	}
 
 	// Check each collection
 	for _, collectionID := range showResp.GetCollectionIDs() {
+		skipClusterLevelConfigChecks := !forceOverrideUserReplicaMode && s.queryCoordServer.IsCollectionUserSpecifiedReplicaMode(ctx, collectionID)
+
 		// Get internal replicas from QueryCoord meta which contains StreamingResourceGroup field
 		internalReplicas := s.queryCoordServer.GetInternalReplicasByCollection(ctx, collectionID)
 
 		// Check replica count matches exactly — the replica meta must already reflect
 		// the configured count before we inspect serviceability/leaks.
-		if clusterReplicaNum > 0 && len(internalReplicas) != clusterReplicaNum {
+		if !skipClusterLevelConfigChecks && clusterReplicaNum > 0 && len(internalReplicas) != clusterReplicaNum {
 			reason := fmt.Sprintf("collection %d: replica count mismatch (expected %d, actual %d)",
 				collectionID, clusterReplicaNum, len(internalReplicas))
-			logger.Info("collection replica count does not match cluster requirement", zap.String("reason", reason))
+			logger.Info(ctx, "collection replica count does not match cluster requirement", mlog.String("reason", reason))
 			s.writeComplianceResponse(w, LoadConfigComplianceStateNotReady, reason)
 			return
 		}
 
-		if len(clusterResourceGroups) > 0 {
+		if !skipClusterLevelConfigChecks && len(clusterResourceGroups) > 0 {
 			// Check resource groups - collect actual RGs from replicas
 			actualRGs := []string{}
 			for _, replica := range internalReplicas {
@@ -116,25 +118,25 @@ func (s *mixCoordImpl) HandleReplicaLoadConfigCompliance(w http.ResponseWriter, 
 			}
 		}
 
-		for _, replica := range internalReplicas {
-			if !replica.IsQueryVisible() {
-				reason := fmt.Sprintf("collection %d: replica %d (rg=%s) is not query visible",
-					collectionID, replica.GetID(), replica.GetResourceGroup())
-				logger.Info("collection has query-invisible replica", zap.String("reason", reason))
-				s.writeComplianceResponse(w, LoadConfigComplianceStateNotReady, reason)
-				return
-			}
-		}
-
 		// Now that replica count and RG distribution match, verify every replica actually
 		// has a serviceable shard leader for every channel. This live dist check avoids
 		// the stale CollectionObserver-persisted LoadPercentage that can falsely report
 		// 100% during scale-up/scale-down transitions.
 		if err := s.queryCoordServer.CheckAllReplicasServiceable(ctx, collectionID); err != nil {
 			reason := fmt.Sprintf("collection %d: %s", collectionID, err.Error())
-			logger.Info("collection not serviceable", zap.String("reason", reason))
+			logger.Info(ctx, "collection not serviceable", mlog.String("reason", reason))
 			s.writeComplianceResponse(w, LoadConfigComplianceStateNotReady, reason)
 			return
+		}
+
+		for _, replica := range internalReplicas {
+			if !replica.IsQueryVisible() {
+				reason := fmt.Sprintf("collection %d: replica %d (rg=%s) is not query visible",
+					collectionID, replica.GetID(), replica.GetResourceGroup())
+				logger.Info(ctx, "collection has query-invisible replica", mlog.String("reason", reason))
+				s.writeComplianceResponse(w, LoadConfigComplianceStateNotReady, reason)
+				return
+			}
 		}
 
 		// Check that physical resources have been released from querynodes no longer
@@ -146,14 +148,14 @@ func (s *mixCoordImpl) HandleReplicaLoadConfigCompliance(w http.ResponseWriter, 
 		if leakedSegments > 0 || leakedChannels > 0 {
 			reason := fmt.Sprintf("collection %d: resources not fully released (leaked segments=%d, channels=%d)",
 				collectionID, leakedSegments, leakedChannels)
-			logger.Info("collection has leaked resources on non-replica nodes", zap.String("reason", reason))
+			logger.Info(ctx, "collection has leaked resources on non-replica nodes", mlog.String("reason", reason))
 			s.writeComplianceResponse(w, LoadConfigComplianceStateNotReady, reason)
 			return
 		}
 	}
 
 	// All collections meet the requirements
-	logger.Info("all collections meet replica load config compliance requirements", zap.Int("totalCollections", len(showResp.GetCollectionIDs())))
+	logger.Info(ctx, "all collections meet replica load config compliance requirements", mlog.Int("totalCollections", len(showResp.GetCollectionIDs())))
 	s.writeComplianceResponse(w, LoadConfigComplianceStateReady, "")
 }
 

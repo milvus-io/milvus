@@ -9,7 +9,7 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
@@ -26,7 +26,7 @@ type ROWriteAheadBuffer interface {
 // NewWriteAheadBuffer creates a new WriteAheadBuffer.
 func NewWriteAheadBuffer(
 	pchannel string,
-	logger *log.MLogger,
+	logger *mlog.Logger,
 	capacity int,
 	keepalive time.Duration,
 	lastConfirmedTimeTickMessage message.ImmutableMessage,
@@ -42,7 +42,7 @@ func NewWriteAheadBuffer(
 
 // WriteAheadBuffer is a buffer that stores messages in order of time tick.
 type WriteAheadBuffer struct {
-	logger          *log.MLogger
+	logger          *mlog.Logger
 	cond            *syncutil.ContextCond
 	closed          bool
 	pendingMessages *pendingQueue // The pending message is always sorted by timetick in monotonic ascending order.

@@ -20,10 +20,8 @@ import (
 	"context"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -90,7 +88,7 @@ func (c *client) Register(ctx context.Context, streamConfig *StreamConfig) (<-ch
 	vchannel := streamConfig.VChannel
 	pchannel := funcutil.ToPhysicalChannel(vchannel)
 
-	log := log.Ctx(ctx).With(zap.String("role", c.role), zap.Int64("nodeID", c.nodeID), zap.String("vchannel", vchannel))
+	log := mlog.With(mlog.String("role", c.role), mlog.FieldNodeID(c.nodeID), mlog.FieldVChannel(vchannel))
 
 	c.managerMut.Lock(pchannel)
 	defer c.managerMut.Unlock(pchannel)
@@ -106,10 +104,10 @@ func (c *client) Register(ctx context.Context, streamConfig *StreamConfig) (<-ch
 	// Begin to register
 	ch, err := manager.Add(ctx, streamConfig)
 	if err != nil {
-		log.Error("register failed", zap.Error(err))
+		log.Error(ctx, "register failed", mlog.Err(err))
 		return nil, err
 	}
-	log.Info("register done", zap.Duration("dur", time.Since(start)))
+	log.Info(ctx, "register done", mlog.Duration("dur", time.Since(start)))
 	return ch, nil
 }
 
@@ -122,22 +120,22 @@ func (c *client) Deregister(vchannel string) {
 
 	if manager, ok := c.managers.Get(pchannel); ok {
 		manager.Remove(vchannel)
-		log.Info("deregister done", zap.String("role", c.role), zap.Int64("nodeID", c.nodeID),
-			zap.String("vchannel", vchannel), zap.Duration("dur", time.Since(start)))
+		mlog.Info(context.TODO(), "deregister done", mlog.String("role", c.role), mlog.FieldNodeID(c.nodeID),
+			mlog.FieldVChannel(vchannel), mlog.Duration("dur", time.Since(start)))
 	}
 }
 
 func (c *client) Close() {
-	log := log.With(zap.String("role", c.role), zap.Int64("nodeID", c.nodeID))
+	log := mlog.With(mlog.String("role", c.role), mlog.FieldNodeID(c.nodeID))
 
 	c.managers.Range(func(pchannel string, manager DispatcherManager) bool {
 		c.managerMut.Lock(pchannel)
 		defer c.managerMut.Unlock(pchannel)
 
-		log.Info("close manager", zap.String("channel", pchannel))
+		log.Info(context.TODO(), "close manager", mlog.String("channel", pchannel))
 		c.managers.Remove(pchannel)
 		manager.Close()
 		return true
 	})
-	log.Info("dispatcher client closed")
+	log.Info(context.TODO(), "dispatcher client closed")
 }

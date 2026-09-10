@@ -35,6 +35,47 @@ PhyCompareFilterExpr::IsStringExpr() {
            expr_->right_data_type_ == DataType::VARCHAR;
 }
 
+bool
+PhyCompareFilterExpr::CanUseBothDataFastPath() {
+    if (is_left_indexed_ || is_right_indexed_ || IsStringExpr()) {
+        return false;
+    }
+
+    // Offset-input path resolves each field's chunk from the row offset
+    // independently, so it does not require left/right chunk boundaries to
+    // align.
+    if (has_offset_input_) {
+        return true;
+    }
+
+    if (can_use_both_data_sequential_fast_path_.has_value()) {
+        return can_use_both_data_sequential_fast_path_.value();
+    }
+
+    auto segment = segment_chunk_reader_.segment_;
+    if (!segment->is_chunked() || segment->type() == SegmentType::Growing) {
+        can_use_both_data_sequential_fast_path_ = true;
+        return true;
+    }
+
+    auto left_chunks = segment_chunk_reader_.NumChunkData(left_field_);
+    auto right_chunks = segment_chunk_reader_.NumChunkData(right_field_);
+    if (left_chunks <= 0 || right_chunks <= 0 || left_chunks != right_chunks) {
+        can_use_both_data_sequential_fast_path_ = false;
+        return false;
+    }
+
+    for (int64_t i = 0; i <= left_chunks; ++i) {
+        if (segment_chunk_reader_.NumRowsUntilChunk(left_field_, i) !=
+            segment_chunk_reader_.NumRowsUntilChunk(right_field_, i)) {
+            can_use_both_data_sequential_fast_path_ = false;
+            return false;
+        }
+    }
+    can_use_both_data_sequential_fast_path_ = true;
+    return true;
+}
+
 int64_t
 PhyCompareFilterExpr::GetNextBatchSize() {
     auto current_rows = GetCurrentRows();
@@ -61,47 +102,61 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
         TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
         TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
 
-        auto left_data_barrier = segment_chunk_reader_.segment_->num_chunk_data(
-            expr_->left_field_id_);
-        auto right_data_barrier =
-            segment_chunk_reader_.segment_->num_chunk_data(
-                expr_->right_field_id_);
+        auto left_raw_data_chunk_count =
+            segment_chunk_reader_.NumChunkData(expr_->left_field_id_);
+        auto right_raw_data_chunk_count =
+            segment_chunk_reader_.NumChunkData(expr_->right_field_id_);
 
         int64_t processed_rows = 0;
         const auto size_per_chunk = segment_chunk_reader_.SizePerChunk();
+        auto get_chunk_id_and_offset =
+            [&](const FieldId field,
+                const int64_t raw_data_chunk_count,
+                int64_t offset) -> std::pair<int64_t, int64_t> {
+            if (segment_chunk_reader_.segment_->type() ==
+                SegmentType::Growing) {
+                return {offset / size_per_chunk, offset % size_per_chunk};
+            } else if (segment_chunk_reader_.segment_->is_chunked() &&
+                       raw_data_chunk_count > 0) {
+                return segment_chunk_reader_.GetChunkByOffset(field, offset);
+            } else {
+                return {0, offset};
+            }
+        };
+        // Consecutive offsets frequently fall in the same left/right chunk;
+        // keep each column's data accessor (which pins its chunk) across
+        // iterations and rebuild it only when that column's chunk id changes.
+        // Safe on both sealed and growing (data and the chunked validity
+        // storage have stable per-chunk buffers). The pinned index views are
+        // chunk-independent, so they are resolved once.
+        const auto left_pinned_index = LeftPinnedIndexForRawLookup();
+        const auto right_pinned_index = RightPinnedIndexForRawLookup();
+        int64_t cached_left_chunk_id = -1;
+        int64_t cached_right_chunk_id = -1;
+        segcore::ChunkDataAccessor left;
+        segcore::ChunkDataAccessor right;
         for (auto i = 0; i < real_batch_size; ++i) {
             auto offset = (*input)[i];
-            auto get_chunk_id_and_offset =
-                [&](const FieldId field,
-                    const int64_t data_barrier) -> std::pair<int64_t, int64_t> {
-                if (segment_chunk_reader_.segment_->type() ==
-                    SegmentType::Growing) {
-                    return {offset / size_per_chunk, offset % size_per_chunk};
-                } else if (segment_chunk_reader_.segment_->is_chunked() &&
-                           data_barrier > 0) {
-                    return segment_chunk_reader_.segment_->get_chunk_by_offset(
-                        field, offset);
-                } else {
-                    return {0, offset};
-                }
-            };
-
-            auto [left_chunk_id, left_chunk_offset] =
-                get_chunk_id_and_offset(left_field_, left_data_barrier);
-            auto [right_chunk_id, right_chunk_offset] =
-                get_chunk_id_and_offset(right_field_, right_data_barrier);
-            auto left = segment_chunk_reader_.GetChunkDataAccessor(
-                expr_->left_data_type_,
-                expr_->left_field_id_,
-                left_chunk_id,
-                left_data_barrier,
-                pinned_index_left_);
-            auto right = segment_chunk_reader_.GetChunkDataAccessor(
-                expr_->right_data_type_,
-                expr_->right_field_id_,
-                right_chunk_id,
-                right_data_barrier,
-                pinned_index_right_);
+            auto [left_chunk_id, left_chunk_offset] = get_chunk_id_and_offset(
+                left_field_, left_raw_data_chunk_count, offset);
+            auto [right_chunk_id, right_chunk_offset] = get_chunk_id_and_offset(
+                right_field_, right_raw_data_chunk_count, offset);
+            if (left_chunk_id != cached_left_chunk_id) {
+                left = segment_chunk_reader_.GetChunkDataAccessor(
+                    expr_->left_data_type_,
+                    expr_->left_field_id_,
+                    left_chunk_id,
+                    left_pinned_index);
+                cached_left_chunk_id = left_chunk_id;
+            }
+            if (right_chunk_id != cached_right_chunk_id) {
+                right = segment_chunk_reader_.GetChunkDataAccessor(
+                    expr_->right_data_type_,
+                    expr_->right_field_id_,
+                    right_chunk_id,
+                    right_pinned_index);
+                cached_right_chunk_id = right_chunk_id;
+            }
             auto left_opt = left(left_chunk_offset);
             auto right_opt = right(right_chunk_offset);
             if (!left_opt.has_value() || !right_opt.has_value()) {
@@ -136,13 +191,13 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
             expr_->left_field_id_,
             left_current_chunk_id_,
             left_current_chunk_pos_,
-            pinned_index_left_);
+            LeftPinnedIndexForRawLookup());
         auto right = segment_chunk_reader_.GetMultipleChunkDataAccessor(
             expr_->right_data_type_,
             expr_->right_field_id_,
             right_current_chunk_id_,
             right_current_chunk_pos_,
-            pinned_index_right_);
+            RightPinnedIndexForRawLookup());
         for (int i = 0; i < real_batch_size; ++i) {
             auto left_value = left(), right_value = right();
             if (!left_value.has_value() || !right_value.has_value()) {
@@ -168,12 +223,6 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
         TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
         valid_res.set();
 
-        auto left_data_barrier = segment_chunk_reader_.segment_->num_chunk_data(
-            expr_->left_field_id_);
-        auto right_data_barrier =
-            segment_chunk_reader_.segment_->num_chunk_data(
-                expr_->right_field_id_);
-
         int64_t processed_rows = 0;
         for (int64_t chunk_id = current_chunk_id_; chunk_id < num_chunk_;
              ++chunk_id) {
@@ -186,14 +235,12 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
                 expr_->left_data_type_,
                 expr_->left_field_id_,
                 chunk_id,
-                left_data_barrier,
-                pinned_index_left_);
+                LeftPinnedIndexForRawLookup());
             auto right = segment_chunk_reader_.GetChunkDataAccessor(
                 expr_->right_data_type_,
                 expr_->right_field_id_,
                 chunk_id,
-                right_data_barrier,
-                pinned_index_right_);
+                RightPinnedIndexForRawLookup());
 
             for (int i = chunk_id == current_chunk_id_ ? current_chunk_pos_ : 0;
                  i < chunk_size;
@@ -226,15 +273,15 @@ void
 PhyCompareFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     tracer::AutoSpan span(
         "PhyCompareFilterExpr::Eval", tracer::GetRootSpan(), true);
-    span.GetSpan()->SetAttribute("op_type", static_cast<int>(expr_->op_type_));
-    span.GetSpan()->SetAttribute("left_indexed", is_left_indexed_);
-    span.GetSpan()->SetAttribute("right_indexed", is_right_indexed_);
+    span.SetAttribute("op_type", static_cast<int>(expr_->op_type_));
+    span.SetAttribute("left_indexed", is_left_indexed_);
+    span.SetAttribute("right_indexed", is_right_indexed_);
 
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
     // For segment both fields has no index, can use SIMD to speed up.
     // Avoiding too much call stack that blocks SIMD.
-    if (!is_left_indexed_ && !is_right_indexed_ && !IsStringExpr()) {
+    if (CanUseBothDataFastPath()) {
         result = ExecCompareExprDispatcherForBothDataSegment(context);
         return;
     }
@@ -270,7 +317,8 @@ PhyCompareFilterExpr::ExecCompareExprDispatcherForHybridSegment(
             // case OpType::PostfixMatch: {
             // }
         default: {
-            ThrowInfo(OpTypeInvalid, "unsupported optype: {}", expr_->op_type_);
+            ThrowInfo(
+                UnexpectedError, "unsupported optype: {}", expr_->op_type_);
         }
     }
 }
@@ -288,6 +336,7 @@ PhyCompareFilterExpr::ExecCompareExprDispatcherForBothDataSegment(
         case DataType::INT32:
             return ExecCompareLeftType<int32_t>(context);
         case DataType::INT64:
+        case DataType::TIMESTAMPTZ:
             return ExecCompareLeftType<int64_t>(context);
         case DataType::FLOAT:
             return ExecCompareLeftType<float>(context);
@@ -295,7 +344,7 @@ PhyCompareFilterExpr::ExecCompareExprDispatcherForBothDataSegment(
             return ExecCompareLeftType<double>(context);
         default:
             ThrowInfo(
-                DataTypeInvalid,
+                UnexpectedError,
                 fmt::format("unsupported left datatype:{} of compare expr",
                             expr_->left_data_type_));
     }
@@ -314,6 +363,7 @@ PhyCompareFilterExpr::ExecCompareLeftType(EvalCtx& context) {
         case DataType::INT32:
             return ExecCompareRightType<T, int32_t>(context);
         case DataType::INT64:
+        case DataType::TIMESTAMPTZ:
             return ExecCompareRightType<T, int64_t>(context);
         case DataType::FLOAT:
             return ExecCompareRightType<T, float>(context);
@@ -321,7 +371,7 @@ PhyCompareFilterExpr::ExecCompareLeftType(EvalCtx& context) {
             return ExecCompareRightType<T, double>(context);
         default:
             ThrowInfo(
-                DataTypeInvalid,
+                UnexpectedError,
                 fmt::format("unsupported right datatype:{} of compare expr",
                             expr_->right_data_type_));
     }
@@ -427,7 +477,7 @@ PhyCompareFilterExpr::ExecCompareRightType(EvalCtx& context) {
                 break;
             }
             default:
-                ThrowInfo(OpTypeInvalid,
+                ThrowInfo(UnexpectedError,
                           fmt::format("unsupported operator type for "
                                       "compare column expr: {}",
                                       expr_type));

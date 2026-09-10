@@ -28,13 +28,12 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/cockroachdb/errors"
 	"github.com/minio/minio-go/v7"
-	"go.uber.org/zap"
 	"golang.org/x/exp/mmap"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/api/googleapi"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
@@ -46,6 +45,10 @@ import (
 // Otherwise, WalkWithObjects will continue until reach the last object.
 type ChunkObjectWalkFunc func(chunkObjectInfo *ChunkObjectInfo) bool
 
+type CrossBucketCopier interface {
+	CopyCrossBucket(ctx context.Context, srcBucket, srcObject, dstBucket, dstObject string) error
+}
+
 type ObjectStorage interface {
 	GetObject(ctx context.Context, bucketName, objectName string, offset int64, size int64) (FileReader, error)
 	PutObject(ctx context.Context, bucketName, objectName string, reader io.Reader, objectSize int64) error
@@ -56,7 +59,7 @@ type ObjectStorage interface {
 	// 2. underlying walking failed or context canceled, WalkWithPrefix will stop and return a error.
 	WalkWithObjects(ctx context.Context, bucketName string, prefix string, recursive bool, walkFunc ChunkObjectWalkFunc) error
 	RemoveObject(ctx context.Context, bucketName, objectName string) error
-	CopyObject(ctx context.Context, bucketName, srcObjectName, dstObjectName string) error
+	CopyObjectCrossBucket(ctx context.Context, srcBucket, srcObjectName, dstBucket, dstObjectName string) error
 }
 
 // RemoteChunkManager is responsible for read and write data stored in mminio.
@@ -95,14 +98,14 @@ func NewRemoteChunkManager(ctx context.Context, c *objectstorage.Config) (*Remot
 		rootPath:          strings.TrimLeft(c.RootPath, "/"),
 		readRetryAttempts: c.ReadRetryAttempts,
 	}
-	log.Info("remote chunk manager init success.", zap.String("remote", c.CloudProvider), zap.String("bucketname", c.BucketName), zap.String("root", mcm.RootPath()))
+	mlog.Info(ctx, "remote chunk manager init success.", mlog.String("remote", c.CloudProvider), mlog.String("bucketname", c.BucketName), mlog.String("root", mcm.RootPath()))
 	return mcm, nil
 }
 
 // NewRemoteChunkManagerForTesting is used for testing.
 func NewRemoteChunkManagerForTesting(c *minio.Client, bucket string, rootPath string) *RemoteChunkManager {
 	mcm := &RemoteChunkManager{
-		client:            &MinioObjectStorage{c},
+		client:            &MinioObjectStorage{Client: c},
 		bucketName:        bucket,
 		rootPath:          rootPath,
 		readRetryAttempts: 10,
@@ -132,7 +135,7 @@ func (mcm *RemoteChunkManager) Path(ctx context.Context, filePath string) (strin
 		return "", err
 	}
 	if !exist {
-		return "", errors.New("minio file manage cannot be found with filePath:" + filePath)
+		return "", merr.WrapErrServiceInternalMsg("minio file manage cannot be found with filePath:" + filePath)
 	}
 	return filePath, nil
 }
@@ -141,7 +144,7 @@ func (mcm *RemoteChunkManager) Path(ctx context.Context, filePath string) (strin
 func (mcm *RemoteChunkManager) Reader(ctx context.Context, filePath string) (FileReader, error) {
 	reader, err := mcm.getObject(ctx, mcm.bucketName, filePath, int64(0), int64(0))
 	if err != nil {
-		log.Warn("failed to get object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
+		mlog.Warn(ctx, "failed to get object", mlog.String("bucket", mcm.bucketName), mlog.String("path", filePath), mlog.Err(err))
 		return nil, err
 	}
 	return reader, nil
@@ -154,7 +157,7 @@ func (mcm *RemoteChunkManager) ReaderAtOffset(ctx context.Context, filePath stri
 
 	reader, err := mcm.getObject(ctx, mcm.bucketName, filePath, offset, int64(0))
 	if err != nil {
-		log.Warn("failed to get object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Int64("offset", offset), zap.Error(err))
+		mlog.Warn(ctx, "failed to get object", mlog.String("bucket", mcm.bucketName), mlog.String("path", filePath), mlog.Int64("offset", offset), mlog.Err(err))
 		return nil, err
 	}
 	return reader, nil
@@ -168,7 +171,7 @@ func (mcm *RemoteChunkManager) Size(ctx context.Context, filePath string) (int64
 		if err == nil {
 			return false, nil
 		}
-		log.Warn("failed to get object size", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
+		mlog.Warn(ctx, "failed to get object size", mlog.String("bucket", mcm.bucketName), mlog.String("path", filePath), mlog.Err(err))
 		err = mapObjectStorageError(filePath, err)
 		if merr.IsRetryableErr(err) {
 			return true, err
@@ -182,7 +185,7 @@ func (mcm *RemoteChunkManager) Size(ctx context.Context, filePath string) (int64
 func (mcm *RemoteChunkManager) Write(ctx context.Context, filePath string, content []byte) error {
 	err := mcm.putObject(ctx, mcm.bucketName, filePath, bytes.NewReader(content), int64(len(content)))
 	if err != nil {
-		log.Warn("failed to put object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
+		mlog.Warn(ctx, "failed to put object", mlog.String("bucket", mcm.bucketName), mlog.String("path", filePath), mlog.Err(err))
 		return err
 	}
 
@@ -197,7 +200,7 @@ func (mcm *RemoteChunkManager) MultiWrite(ctx context.Context, kvs map[string][]
 	for key, value := range kvs {
 		err := mcm.Write(ctx, key, value)
 		if err != nil {
-			el = merr.Combine(el, errors.Wrapf(err, "failed to write %s", key))
+			el = merr.Combine(el, merr.Wrapf(err, "failed to write %s", key))
 		}
 	}
 	return el
@@ -210,7 +213,7 @@ func (mcm *RemoteChunkManager) Exist(ctx context.Context, filePath string) (bool
 		if errors.Is(err, merr.ErrIoKeyNotFound) {
 			return false, nil
 		}
-		log.Warn("failed to stat object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
+		mlog.Warn(ctx, "failed to stat object", mlog.String("bucket", mcm.bucketName), mlog.String("path", filePath), mlog.Err(err))
 		return false, err
 	}
 	return true, nil
@@ -222,7 +225,7 @@ func (mcm *RemoteChunkManager) Read(ctx context.Context, filePath string) ([]byt
 	err := retry.Do(ctx, func() error {
 		object, err := mcm.getObject(ctx, mcm.bucketName, filePath, int64(0), int64(0))
 		if err != nil {
-			log.Warn("failed to get object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
+			mlog.Warn(ctx, "failed to get object", mlog.String("bucket", mcm.bucketName), mlog.String("path", filePath), mlog.Err(err))
 			return err
 		}
 		defer object.Close()
@@ -232,18 +235,18 @@ func (mcm *RemoteChunkManager) Read(ctx context.Context, filePath string) ([]byt
 		_, err = object.Read(empty)
 		err = mapObjectStorageError(filePath, err)
 		if err != nil {
-			log.Warn("failed to read object", zap.String("path", filePath), zap.Error(err))
+			mlog.Warn(ctx, "failed to read object", mlog.String("path", filePath), mlog.Err(err))
 			return err
 		}
 		size, err := object.Size()
 		if err != nil {
-			log.Warn("failed to stat object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
+			mlog.Warn(ctx, "failed to stat object", mlog.String("bucket", mcm.bucketName), mlog.String("path", filePath), mlog.Err(err))
 			return err
 		}
 		data, err = read(object, size)
 		err = mapObjectStorageError(filePath, err)
 		if err != nil {
-			log.Warn("failed to read object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
+			mlog.Warn(ctx, "failed to read object", mlog.String("bucket", mcm.bucketName), mlog.String("path", filePath), mlog.Err(err))
 			return err
 		}
 		metrics.PersistentDataKvSize.WithLabelValues(metrics.DataGetLabel).Observe(float64(size))
@@ -262,7 +265,7 @@ func (mcm *RemoteChunkManager) MultiRead(ctx context.Context, keys []string) ([]
 	for _, key := range keys {
 		objectValue, err := mcm.Read(ctx, key)
 		if err != nil {
-			el = merr.Combine(el, errors.Wrapf(err, "failed to read %s", key))
+			el = merr.Combine(el, merr.Wrapf(err, "failed to read %s", key))
 		}
 		objectsValues = append(objectsValues, objectValue)
 	}
@@ -271,7 +274,7 @@ func (mcm *RemoteChunkManager) MultiRead(ctx context.Context, keys []string) ([]
 }
 
 func (mcm *RemoteChunkManager) Mmap(ctx context.Context, filePath string) (*mmap.ReaderAt, error) {
-	return nil, errors.New("this method has not been implemented")
+	return nil, merr.WrapErrServiceInternalMsg("this method has not been implemented")
 }
 
 // ReadAt reads specific position data of minio storage if exists.
@@ -282,7 +285,7 @@ func (mcm *RemoteChunkManager) ReadAt(ctx context.Context, filePath string, off 
 
 	object, err := mcm.getObject(ctx, mcm.bucketName, filePath, off, length)
 	if err != nil {
-		log.Warn("failed to get object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
+		mlog.Warn(ctx, "failed to get object", mlog.String("bucket", mcm.bucketName), mlog.String("path", filePath), mlog.Err(err))
 		return nil, err
 	}
 	defer object.Close()
@@ -290,7 +293,7 @@ func (mcm *RemoteChunkManager) ReadAt(ctx context.Context, filePath string, off 
 	data, err := read(object, length)
 	err = mapObjectStorageError(filePath, err)
 	if err != nil {
-		log.Warn("failed to read object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
+		mlog.Warn(ctx, "failed to read object", mlog.String("bucket", mcm.bucketName), mlog.String("path", filePath), mlog.Err(err))
 		return nil, err
 	}
 	metrics.PersistentDataKvSize.WithLabelValues(metrics.DataGetLabel).Observe(float64(length))
@@ -301,7 +304,7 @@ func (mcm *RemoteChunkManager) ReadAt(ctx context.Context, filePath string, off 
 func (mcm *RemoteChunkManager) Remove(ctx context.Context, filePath string) error {
 	err := mcm.removeObject(ctx, mcm.bucketName, filePath)
 	if err != nil {
-		log.Warn("failed to remove object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
+		mlog.Warn(ctx, "failed to remove object", mlog.String("bucket", mcm.bucketName), mlog.String("path", filePath), mlog.Err(err))
 		return err
 	}
 	return nil
@@ -313,7 +316,7 @@ func (mcm *RemoteChunkManager) MultiRemove(ctx context.Context, keys []string) e
 	for _, key := range keys {
 		err := mcm.Remove(ctx, key)
 		if err != nil {
-			el = merr.Combine(el, errors.Wrapf(err, "failed to remove %s", key))
+			el = merr.Combine(el, merr.Wrapf(err, "failed to remove %s", key))
 		}
 	}
 	return el
@@ -329,7 +332,7 @@ func (mcm *RemoteChunkManager) RemoveWithPrefix(ctx context.Context, prefix stri
 		runningGroup.Go(func() error {
 			err := mcm.removeObject(ctx, mcm.bucketName, key)
 			if err != nil {
-				log.Warn("failed to remove object", zap.String("path", key), zap.Error(err))
+				mlog.Warn(ctx, "failed to remove object", mlog.String("path", key), mlog.Err(err))
 			}
 			return err
 		})
@@ -346,18 +349,18 @@ func (mcm *RemoteChunkManager) RemoveWithPrefix(ctx context.Context, prefix stri
 func (mcm *RemoteChunkManager) WalkWithPrefix(ctx context.Context, prefix string, recursive bool, walkFunc ChunkObjectWalkFunc) (err error) {
 	start := timerecord.NewTimeRecorder("WalkWithPrefix")
 	metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataWalkLabel, metrics.TotalLabel).Inc()
-	logger := log.With(zap.String("prefix", prefix), zap.Bool("recursive", recursive))
+	logger := mlog.With(mlog.String("prefix", prefix), mlog.Bool("recursive", recursive))
 
-	logger.Info("start walk through objects")
+	logger.Info(ctx, "start walk through objects")
 	if err := mcm.client.WalkWithObjects(ctx, mcm.bucketName, prefix, recursive, walkFunc); err != nil {
 		metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataWalkLabel, metrics.FailLabel).Inc()
-		logger.Warn("failed to walk through objects", zap.Error(err))
+		logger.Warn(ctx, "failed to walk through objects", mlog.Err(err))
 		return err
 	}
 	metrics.PersistentDataRequestLatency.WithLabelValues(metrics.DataWalkLabel).
 		Observe(float64(start.ElapseSpan().Milliseconds()))
 	metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataWalkLabel, metrics.SuccessLabel).Inc()
-	logger.Info("finish walk through objects")
+	logger.Info(ctx, "finish walk through objects")
 	return nil
 }
 
@@ -447,18 +450,32 @@ func ToMilvusIoError(fileName string, err error) error {
 }
 
 func (mcm *RemoteChunkManager) Copy(ctx context.Context, srcFilePath string, dstFilePath string) error {
-	err := mcm.copyObject(ctx, mcm.bucketName, srcFilePath, dstFilePath)
+	err := mcm.copyObject(ctx, mcm.bucketName, srcFilePath, mcm.bucketName, dstFilePath)
 	if err != nil {
-		log.Warn("failed to copy object", zap.String("bucket", mcm.bucketName), zap.String("src", srcFilePath), zap.String("dst", dstFilePath), zap.Error(err))
+		mlog.Warn(ctx, "failed to copy object", mlog.String("bucket", mcm.bucketName), mlog.String("src", srcFilePath), mlog.String("dst", dstFilePath), mlog.Err(err))
 		return err
 	}
 	return nil
 }
 
-func (mcm *RemoteChunkManager) copyObject(ctx context.Context, bucketName, srcObjectName, dstObjectName string) error {
+func (mcm *RemoteChunkManager) CopyCrossBucket(ctx context.Context, srcBucket, srcFilePath, dstBucket, dstFilePath string) error {
+	err := mcm.copyObject(ctx, srcBucket, srcFilePath, dstBucket, dstFilePath)
+	if err != nil {
+		mlog.Warn(ctx, "failed to copy object across buckets",
+			mlog.String("srcBucket", srcBucket),
+			mlog.String("dstBucket", dstBucket),
+			mlog.String("src", srcFilePath),
+			mlog.String("dst", dstFilePath),
+			mlog.Err(err))
+		return err
+	}
+	return nil
+}
+
+func (mcm *RemoteChunkManager) copyObject(ctx context.Context, srcBucket, srcObjectName, dstBucket, dstObjectName string) error {
 	start := timerecord.NewTimeRecorder("copyObject")
 
-	err := mcm.client.CopyObject(ctx, bucketName, srcObjectName, dstObjectName)
+	err := mcm.client.CopyObjectCrossBucket(ctx, srcBucket, srcObjectName, dstBucket, dstObjectName)
 	metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataPutLabel, metrics.TotalLabel).Inc()
 	if err == nil {
 		metrics.PersistentDataRequestLatency.WithLabelValues(metrics.DataPutLabel).
@@ -514,6 +531,12 @@ func mapObjectStorageError(fileName string, err error) error {
 
 	// If error is already a Milvus error, return it as-is to avoid double-wrapping
 	if merr.IsMilvusError(err) {
+		return err
+	}
+
+	// Preserve context termination so callers can stop retries and classify
+	// canceled operations correctly.
+	if merr.IsCanceledOrTimeout(err) {
 		return err
 	}
 

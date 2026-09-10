@@ -18,12 +18,10 @@ package proxyutil
 
 import (
 	"context"
-	"fmt"
 	"sync"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -31,8 +29,9 @@ import (
 	grpcproxyclient "github.com/milvus-io/milvus/internal/distributed/proxy/client"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -95,6 +94,7 @@ type ProxyClientManagerInterface interface {
 	RefreshPolicyInfoCache(ctx context.Context, req *proxypb.RefreshPolicyInfoCacheRequest) error
 	GetProxyMetrics(ctx context.Context) ([]*milvuspb.GetMetricsResponse, error)
 	SetRates(ctx context.Context, request *proxypb.SetRatesRequest) error
+	ClearReadTaskQueue(ctx context.Context, request *internalpb.ClearReadTaskQueueRequest) ([]*internalpb.ClearReadTaskQueueComponentResult, error)
 	GetComponentStates(ctx context.Context) (map[int64]*milvuspb.ComponentStates, error)
 }
 
@@ -125,7 +125,7 @@ func (p *ProxyClientManager) SetProxyClients(sessions []*sessionutil.Session) {
 		if _, ok := aliveSessions[key]; !ok {
 			if cli, loaded := p.proxyClient.GetAndRemove(key); loaded {
 				cli.Close()
-				log.Info("remove stale proxy client", zap.Int64("serverID", key))
+				mlog.Info(context.TODO(), "remove stale proxy client", mlog.Int64("serverID", key))
 			}
 		}
 		return true
@@ -164,7 +164,7 @@ func (p *ProxyClientManager) updateProxyNumMetric() {
 func (p *ProxyClientManager) connect(session *sessionutil.Session) {
 	pc, err := p.creator(context.Background(), session.Address, session.ServerID)
 	if err != nil {
-		log.Warn("failed to create proxy client", zap.String("address", session.Address), zap.Int64("serverID", session.ServerID), zap.Error(err))
+		mlog.Warn(context.TODO(), "failed to create proxy client", mlog.String("address", session.Address), mlog.Int64("serverID", session.ServerID), mlog.Err(err))
 		return
 	}
 
@@ -173,7 +173,7 @@ func (p *ProxyClientManager) connect(session *sessionutil.Session) {
 		pc.Close()
 		return
 	}
-	log.Info("succeed to create proxy client", zap.String("address", session.Address), zap.Int64("serverID", session.ServerID))
+	mlog.Info(context.TODO(), "succeed to create proxy client", mlog.String("address", session.Address), mlog.Int64("serverID", session.ServerID))
 	p.helper.afterConnect()
 }
 
@@ -184,7 +184,7 @@ func (p *ProxyClientManager) DelProxyClient(s *sessionutil.Session) {
 	}
 
 	p.updateProxyNumMetric()
-	log.Info("remove proxy client", zap.String("proxy address", s.Address), zap.Int64("proxy id", s.ServerID))
+	mlog.Info(context.TODO(), "remove proxy client", mlog.String("proxy address", s.Address), mlog.Int64("proxy id", s.ServerID))
 }
 
 func (p *ProxyClientManager) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest, opts ...ExpireCacheOpt) error {
@@ -195,7 +195,7 @@ func (p *ProxyClientManager) InvalidateCollectionMetaCache(ctx context.Context, 
 	c.Apply(request)
 
 	if p.proxyClient.Len() == 0 {
-		log.Warn("proxy client is empty, InvalidateCollectionMetaCache will not send to any client")
+		mlog.Warn(ctx, "proxy client is empty, InvalidateCollectionMetaCache will not send to any client")
 		return nil
 	}
 
@@ -206,7 +206,7 @@ func (p *ProxyClientManager) InvalidateCollectionMetaCache(ctx context.Context, 
 			sta, err := v.InvalidateCollectionMetaCache(ctx, request)
 			if err != nil {
 				if errors.Is(err, merr.ErrNodeNotFound) {
-					log.Warn("InvalidateCollectionMetaCache failed due to proxy service not found", zap.Error(err))
+					mlog.Warn(ctx, "InvalidateCollectionMetaCache failed due to proxy service not found", mlog.Err(err))
 					return nil
 				}
 
@@ -214,10 +214,10 @@ func (p *ProxyClientManager) InvalidateCollectionMetaCache(ctx context.Context, 
 					return nil
 				}
 
-				return fmt.Errorf("InvalidateCollectionMetaCache failed, proxyID = %d, err = %s", k, err)
+				return merr.Wrapf(err, "InvalidateCollectionMetaCache failed, proxyID = %d", k)
 			}
 			if sta.ErrorCode != commonpb.ErrorCode_Success {
-				return fmt.Errorf("InvalidateCollectionMetaCache failed, proxyID = %d, err = %s", k, sta.Reason)
+				return merr.Wrapf(merr.Error(sta), "InvalidateCollectionMetaCache failed, proxyID = %d", k)
 			}
 			return nil
 		})
@@ -229,7 +229,7 @@ func (p *ProxyClientManager) InvalidateCollectionMetaCache(ctx context.Context, 
 // InvalidateCredentialCache TODO: too many codes similar to InvalidateCollectionMetaCache.
 func (p *ProxyClientManager) InvalidateCredentialCache(ctx context.Context, request *proxypb.InvalidateCredCacheRequest) error {
 	if p.proxyClient.Len() == 0 {
-		log.Warn("proxy client is empty, InvalidateCredentialCache will not send to any client")
+		mlog.Warn(ctx, "proxy client is empty, InvalidateCredentialCache will not send to any client")
 		return nil
 	}
 
@@ -239,10 +239,10 @@ func (p *ProxyClientManager) InvalidateCredentialCache(ctx context.Context, requ
 		group.Go(func() error {
 			sta, err := v.InvalidateCredentialCache(ctx, request)
 			if err != nil {
-				return fmt.Errorf("InvalidateCredentialCache failed, proxyID = %d, err = %s", k, err)
+				return merr.Wrapf(err, "InvalidateCredentialCache failed, proxyID = %d", k)
 			}
 			if sta.ErrorCode != commonpb.ErrorCode_Success {
-				return fmt.Errorf("InvalidateCredentialCache failed, proxyID = %d, err = %s", k, sta.Reason)
+				return merr.Wrapf(merr.Error(sta), "InvalidateCredentialCache failed, proxyID = %d", k)
 			}
 			return nil
 		})
@@ -255,7 +255,7 @@ func (p *ProxyClientManager) InvalidateCredentialCache(ctx context.Context, requ
 // UpdateCredentialCache TODO: too many codes similar to InvalidateCollectionMetaCache.
 func (p *ProxyClientManager) UpdateCredentialCache(ctx context.Context, request *proxypb.UpdateCredCacheRequest) error {
 	if p.proxyClient.Len() == 0 {
-		log.Warn("proxy client is empty, UpdateCredentialCache will not send to any client")
+		mlog.Warn(ctx, "proxy client is empty, UpdateCredentialCache will not send to any client")
 		return nil
 	}
 
@@ -265,10 +265,10 @@ func (p *ProxyClientManager) UpdateCredentialCache(ctx context.Context, request 
 		group.Go(func() error {
 			sta, err := v.UpdateCredentialCache(ctx, request)
 			if err != nil {
-				return fmt.Errorf("UpdateCredentialCache failed, proxyID = %d, err = %s", k, err)
+				return merr.Wrapf(err, "UpdateCredentialCache failed, proxyID = %d", k)
 			}
 			if sta.ErrorCode != commonpb.ErrorCode_Success {
-				return fmt.Errorf("UpdateCredentialCache failed, proxyID = %d, err = %s", k, sta.Reason)
+				return merr.Wrapf(merr.Error(sta), "UpdateCredentialCache failed, proxyID = %d", k)
 			}
 			return nil
 		})
@@ -280,7 +280,7 @@ func (p *ProxyClientManager) UpdateCredentialCache(ctx context.Context, request 
 // RefreshPolicyInfoCache TODO: too many codes similar to InvalidateCollectionMetaCache.
 func (p *ProxyClientManager) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.RefreshPolicyInfoCacheRequest) error {
 	if p.proxyClient.Len() == 0 {
-		log.Warn("proxy client is empty, RefreshPrivilegeInfoCache will not send to any client")
+		mlog.Warn(ctx, "proxy client is empty, RefreshPrivilegeInfoCache will not send to any client")
 		return nil
 	}
 
@@ -290,7 +290,7 @@ func (p *ProxyClientManager) RefreshPolicyInfoCache(ctx context.Context, req *pr
 		group.Go(func() error {
 			status, err := v.RefreshPolicyInfoCache(ctx, req)
 			if err != nil {
-				return fmt.Errorf("RefreshPolicyInfoCache failed, proxyID = %d, err = %s", k, err)
+				return merr.Wrapf(err, "RefreshPolicyInfoCache failed, proxyID = %d", k)
 			}
 			if status.GetErrorCode() != commonpb.ErrorCode_Success {
 				return merr.Error(status)
@@ -305,7 +305,7 @@ func (p *ProxyClientManager) RefreshPolicyInfoCache(ctx context.Context, req *pr
 // GetProxyMetrics sends requests to proxies to get metrics.
 func (p *ProxyClientManager) GetProxyMetrics(ctx context.Context) ([]*milvuspb.GetMetricsResponse, error) {
 	if p.proxyClient.Len() == 0 {
-		log.Warn("proxy client is empty, GetMetrics will not send to any client")
+		mlog.Warn(ctx, "proxy client is empty, GetMetrics will not send to any client")
 		return nil, nil
 	}
 
@@ -322,10 +322,10 @@ func (p *ProxyClientManager) GetProxyMetrics(ctx context.Context) ([]*milvuspb.G
 		group.Go(func() error {
 			rsp, err := v.GetProxyMetrics(ctx, req)
 			if err != nil {
-				return fmt.Errorf("GetMetrics failed, proxyID = %d, err = %s", k, err)
+				return merr.Wrapf(err, "GetMetrics failed, proxyID = %d", k)
 			}
 			if rsp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-				return fmt.Errorf("GetMetrics failed, proxyID = %d, err = %s", k, rsp.GetStatus().GetReason())
+				return merr.Wrapf(merr.Error(rsp.GetStatus()), "GetMetrics failed, proxyID = %d", k)
 			}
 			metricRspsMu.Lock()
 			metricRsps = append(metricRsps, rsp)
@@ -344,7 +344,7 @@ func (p *ProxyClientManager) GetProxyMetrics(ctx context.Context) ([]*milvuspb.G
 // SetRates notifies Proxy to limit rates of requests.
 func (p *ProxyClientManager) SetRates(ctx context.Context, request *proxypb.SetRatesRequest) error {
 	if p.proxyClient.Len() == 0 {
-		log.Warn("proxy client is empty, SetRates will not send to any client")
+		mlog.Warn(ctx, "proxy client is empty, SetRates will not send to any client")
 		return nil
 	}
 
@@ -354,16 +354,69 @@ func (p *ProxyClientManager) SetRates(ctx context.Context, request *proxypb.SetR
 		group.Go(func() error {
 			sta, err := v.SetRates(ctx, request)
 			if err != nil {
-				return fmt.Errorf("SetRates failed, proxyID = %d, err = %s", k, err)
+				return merr.Wrapf(err, "SetRates failed, proxyID = %d", k)
 			}
 			if sta.GetErrorCode() != commonpb.ErrorCode_Success {
-				return fmt.Errorf("SetRates failed, proxyID = %d, err = %s", k, sta.Reason)
+				return merr.Wrapf(merr.Error(sta), "SetRates failed, proxyID = %d", k)
 			}
 			return nil
 		})
 		return true
 	})
 	return group.Wait()
+}
+
+func (p *ProxyClientManager) ClearReadTaskQueue(ctx context.Context, request *internalpb.ClearReadTaskQueueRequest) ([]*internalpb.ClearReadTaskQueueComponentResult, error) {
+	if p.proxyClient.Len() == 0 {
+		mlog.Warn(ctx, "proxy client is empty, ClearReadTaskQueue will not send to any client")
+		return nil, nil
+	}
+
+	group := &errgroup.Group{}
+	var resultsMu sync.Mutex
+	results := make([]*internalpb.ClearReadTaskQueueComponentResult, 0, p.proxyClient.Len())
+	p.proxyClient.Range(func(key int64, value types.ProxyClient) bool {
+		nodeID, client := key, value
+		group.Go(func() error {
+			resp, err := client.ClearReadTaskQueue(ctx, request)
+			if errors.Is(err, merr.ErrServiceUnimplemented) {
+				return nil
+			}
+			if err != nil {
+				result := &internalpb.ClearReadTaskQueueComponentResult{
+					Status: merr.Status(err),
+					Role:   typeutil.ProxyRole,
+					NodeID: nodeID,
+				}
+				resultsMu.Lock()
+				results = append(results, result)
+				resultsMu.Unlock()
+				return errors.Wrapf(err, "ClearReadTaskQueue failed, proxyID = %d", nodeID)
+			}
+
+			status := resp.GetStatus()
+			if len(resp.GetResults()) > 0 {
+				resultsMu.Lock()
+				results = append(results, resp.GetResults()...)
+				resultsMu.Unlock()
+			} else {
+				resultsMu.Lock()
+				results = append(results, &internalpb.ClearReadTaskQueueComponentResult{
+					Status:        status,
+					Role:          typeutil.ProxyRole,
+					NodeID:        nodeID,
+					QueuedCleared: resp.GetProxyQueuedCleared(),
+				})
+				resultsMu.Unlock()
+			}
+			if !merr.Ok(status) {
+				return errors.Wrapf(merr.Error(status), "ClearReadTaskQueue failed, proxyID = %d", nodeID)
+			}
+			return nil
+		})
+		return true
+	})
+	return results, group.Wait()
 }
 
 func (p *ProxyClientManager) GetComponentStates(ctx context.Context) (map[int64]*milvuspb.ComponentStates, error) {
@@ -392,7 +445,7 @@ func (p *ProxyClientManager) GetComponentStates(ctx context.Context) (map[int64]
 
 func (p *ProxyClientManager) InvalidateShardLeaderCache(ctx context.Context, request *proxypb.InvalidateShardLeaderCacheRequest) error {
 	if p.proxyClient.Len() == 0 {
-		log.Warn("proxy client is empty, InvalidateShardLeaderCache will not send to any client")
+		mlog.Warn(ctx, "proxy client is empty, InvalidateShardLeaderCache will not send to any client")
 		return nil
 	}
 
@@ -403,13 +456,13 @@ func (p *ProxyClientManager) InvalidateShardLeaderCache(ctx context.Context, req
 			sta, err := v.InvalidateShardLeaderCache(ctx, request)
 			if err != nil {
 				if errors.Is(err, merr.ErrNodeNotFound) {
-					log.Warn("InvalidateShardLeaderCache failed due to proxy service not found", zap.Error(err))
+					mlog.Warn(ctx, "InvalidateShardLeaderCache failed due to proxy service not found", mlog.Err(err))
 					return nil
 				}
-				return fmt.Errorf("InvalidateShardLeaderCache failed, proxyID = %d, err = %s", k, err)
+				return merr.Wrapf(err, "InvalidateShardLeaderCache failed, proxyID = %d", k)
 			}
 			if sta.ErrorCode != commonpb.ErrorCode_Success {
-				return fmt.Errorf("InvalidateShardLeaderCache failed, proxyID = %d, err = %s", k, sta.Reason)
+				return merr.Wrapf(merr.Error(sta), "InvalidateShardLeaderCache failed, proxyID = %d", k)
 			}
 			return nil
 		})

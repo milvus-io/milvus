@@ -10,14 +10,17 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/flushcommon/pipeline"
+	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/mock_storage"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_wal"
@@ -30,7 +33,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -144,6 +148,20 @@ func TestWALFlusher_DispatchDefersAckSyncUpDropCollectionObserve(t *testing.T) {
 	require.ErrorContains(t, flusher.dispatch(msg), "observe failed")
 }
 
+func TestWALFlusher_DispatchStopsCreateCollectionOnObserveError(t *testing.T) {
+	rs := mock_recovery.NewMockRecoveryStorage(t)
+	flusher := newTestWALFlusher(rs)
+
+	msg := message.CreateTestCreateCollectionMessage(t, 2, 100, rmq.NewRmqID(100)).
+		IntoImmutableMessage(rmq.NewRmqID(101))
+	rs.EXPECT().ObserveMessage(mock.Anything, mock.Anything).Return(context.Canceled).Twice()
+
+	err := flusher.dispatch(msg)
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Empty(t, flusher.flusherComponents.dataServices)
+	rs.AssertNotCalled(t, "GetSchema", mock.Anything, mock.Anything, mock.Anything)
+}
+
 func TestWALFlusher_DispatchObservesAckSyncUpTruncateCollectionBeforeHandling(t *testing.T) {
 	rs := mock_recovery.NewMockRecoveryStorage(t)
 	rs.EXPECT().ObserveMessage(mock.Anything, mock.Anything).Return(errors.New("observe failed")).Once()
@@ -165,14 +183,52 @@ func TestWALFlusher_DispatchObservesTruncateCollectionBeforeHandlingWithoutAckSy
 	require.ErrorContains(t, flusher.dispatch(msg), "observe failed")
 }
 
+func TestWALFlusherDispatchRestoresTraceContext(t *testing.T) {
+	expectedTraceID, err := trace.TraceIDFromHex("0102030405060708090a0b0c0d0e0f10")
+	require.NoError(t, err)
+	spanID, err := trace.SpanIDFromHex("0102030405060708")
+	require.NoError(t, err)
+	clientCtx := trace.ContextWithSpanContext(context.Background(), trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID: expectedTraceID,
+		SpanID:  spanID,
+	}))
+
+	mutableMsg := message.NewDropCollectionMessageBuilderV1().
+		WithHeader(&message.DropCollectionMessageHeader{
+			CollectionId: 100,
+		}).
+		WithBody(&msgpb.DropCollectionRequest{
+			Base: &commonpb.MsgBase{},
+		}).
+		WithVChannel("vchannel-1").
+		MustBuildMutable().
+		WithTimeTick(100).
+		WithLastConfirmed(rmq.NewRmqID(1))
+	message.InjectTraceContext(clientCtx, mutableMsg)
+	msg := mutableMsg.IntoImmutableMessage(rmq.NewRmqID(2))
+
+	var observedTraceID trace.TraceID
+	rs := mock_recovery.NewMockRecoveryStorage(t)
+	rs.EXPECT().ObserveMessage(mock.Anything, mock.Anything).
+		RunAndReturn(func(ctx context.Context, msg message.ImmutableMessage) error {
+			observedTraceID = trace.SpanContextFromContext(ctx).TraceID()
+			return nil
+		}).
+		Once()
+
+	flusher := newTestWALFlusher(rs)
+	require.NoError(t, flusher.dispatch(msg))
+	assert.Equal(t, expectedTraceID, observedTraceID)
+}
+
 func newTestWALFlusher(rs recovery.RecoveryStorage) *WALFlusherImpl {
 	return &WALFlusherImpl{
 		notifier:        syncutil.NewAsyncTaskNotifier[struct{}](),
-		logger:          log.With(),
+		logger:          mlog.With(),
 		RecoveryStorage: rs,
 		flusherComponents: &flusherComponents{
 			dataServices: make(map[string]*dataSyncServiceWrapper),
-			logger:       log.With(),
+			logger:       mlog.With(),
 			rs:           rs,
 		},
 	}
@@ -268,6 +324,424 @@ func newMockMixcoord(t *testing.T, maybe bool) *mocks.MockMixCoordClient {
 		expect.Maybe()
 	}
 	return mixcoord
+}
+
+func TestDispatch_CommitImportMessage(t *testing.T) {
+	streamingutil.SetStreamingServiceEnabled()
+	defer streamingutil.UnsetStreamingServiceEnabled()
+
+	const (
+		vchannel = "test-vchannel"
+		jobID    = int64(42)
+		timeTick = uint64(200)
+	)
+
+	// Build a CommitImport immutable message.
+	mutableMsg := message.NewCommitImportMessageBuilderV2().
+		WithHeader(&message.CommitImportMessageHeader{
+			CollectionId: 100,
+			JobId:        jobID,
+		}).
+		WithBody(&message.CommitImportMessageBody{}).
+		WithVChannel(vchannel).
+		MustBuildMutable()
+	mutableMsg.WithTimeTick(timeTick)
+	mutableMsg.WithLastConfirmed(rmq.NewRmqID(199))
+	immutableMsg := mutableMsg.IntoImmutableMessage(rmq.NewRmqID(200))
+
+	// Set up mock MixCoordClient with HandleCommitVchannel expectation.
+	mixcoord := mocks.NewMockMixCoordClient(t)
+	mixcoord.EXPECT().HandleCommitVchannel(mock.Anything, mock.MatchedBy(func(req *datapb.HandleCommitVchannelRequest) bool {
+		return req.GetJobId() == jobID && req.GetVchannel() == vchannel
+	})).Return(merr.Status(nil), nil).Once()
+	fMixcoord := syncutil.NewFuture[internaltypes.MixCoordClient]()
+	fMixcoord.Set(mixcoord)
+
+	// Set up mock WriteBufferManager with FlushChannel expectation.
+	mockWBMgr := writebuffer.NewMockBufferManager(t)
+	mockWBMgr.EXPECT().FlushChannel(mock.Anything, vchannel, timeTick).Return(nil).Once()
+
+	// Set up mock RecoveryStorage with ObserveMessage expectation.
+	rs := mock_recovery.NewMockRecoveryStorage(t)
+	rs.EXPECT().ObserveMessage(mock.Anything, mock.Anything).Return(nil)
+
+	// Initialize resource with mocks.
+	resource.InitForTest(
+		t,
+		resource.OptMixCoordClient(fMixcoord),
+		resource.OptWriteBufferManager(mockWBMgr),
+	)
+
+	// Build a minimal WALFlusherImpl for dispatch testing.
+	impl := &WALFlusherImpl{
+		notifier:        syncutil.NewAsyncTaskNotifier[struct{}](),
+		logger:          mlog.With(mlog.FieldComponent("test-flusher")),
+		RecoveryStorage: rs,
+	}
+
+	err := impl.dispatch(immutableMsg)
+	assert.NoError(t, err)
+}
+
+func TestDispatch_CommitImportMessage_RetriesHandleCommitVchannelBeforeObserve(t *testing.T) {
+	streamingutil.SetStreamingServiceEnabled()
+	defer streamingutil.UnsetStreamingServiceEnabled()
+
+	const (
+		vchannel = "test-vchannel"
+		jobID    = int64(42)
+		timeTick = uint64(200)
+	)
+
+	mutableMsg := message.NewCommitImportMessageBuilderV2().
+		WithHeader(&message.CommitImportMessageHeader{
+			CollectionId: 100,
+			JobId:        jobID,
+		}).
+		WithBody(&message.CommitImportMessageBody{}).
+		WithVChannel(vchannel).
+		MustBuildMutable()
+	mutableMsg.WithTimeTick(timeTick)
+	mutableMsg.WithLastConfirmed(rmq.NewRmqID(199))
+	immutableMsg := mutableMsg.IntoImmutableMessage(rmq.NewRmqID(200))
+
+	mixcoord := mocks.NewMockMixCoordClient(t)
+	mixcoord.EXPECT().HandleCommitVchannel(mock.Anything, mock.MatchedBy(func(req *datapb.HandleCommitVchannelRequest) bool {
+		return req.GetJobId() == jobID && req.GetVchannel() == vchannel && req.GetCommitTimestamp() == timeTick
+	})).Return(merr.Status(merr.WrapErrImportSysFailedMsg("job not ready")), nil).Once()
+	mixcoord.EXPECT().HandleCommitVchannel(mock.Anything, mock.MatchedBy(func(req *datapb.HandleCommitVchannelRequest) bool {
+		return req.GetJobId() == jobID && req.GetVchannel() == vchannel && req.GetCommitTimestamp() == timeTick
+	})).Return(merr.Status(nil), nil).Once()
+	fMixcoord := syncutil.NewFuture[internaltypes.MixCoordClient]()
+	fMixcoord.Set(mixcoord)
+
+	mockWBMgr := writebuffer.NewMockBufferManager(t)
+	mockWBMgr.EXPECT().FlushChannel(mock.Anything, vchannel, timeTick).Return(nil).Once()
+
+	rs := mock_recovery.NewMockRecoveryStorage(t)
+	rs.EXPECT().ObserveMessage(mock.Anything, immutableMsg).Return(nil).Once()
+
+	resource.InitForTest(
+		t,
+		resource.OptMixCoordClient(fMixcoord),
+		resource.OptWriteBufferManager(mockWBMgr),
+	)
+
+	impl := &WALFlusherImpl{
+		notifier:        syncutil.NewAsyncTaskNotifier[struct{}](),
+		logger:          mlog.With(mlog.FieldComponent("test-flusher")),
+		RecoveryStorage: rs,
+	}
+
+	require.NotPanics(t, func() {
+		err := impl.dispatch(immutableMsg)
+		require.NoError(t, err)
+	})
+}
+
+func TestDispatch_CommitImportMessage_ChannelNotFoundStillCommitsVchannelNoPanic(t *testing.T) {
+	streamingutil.SetStreamingServiceEnabled()
+	defer streamingutil.UnsetStreamingServiceEnabled()
+
+	const (
+		vchannel = "by-dev-rootcoord-dml_5_466452018080884567v0"
+		jobID    = int64(466452018080884572)
+		timeTick = uint64(466453106370543641)
+	)
+
+	mutableMsg := message.NewCommitImportMessageBuilderV2().
+		WithHeader(&message.CommitImportMessageHeader{
+			CollectionId: 466452018080884567,
+			JobId:        jobID,
+		}).
+		WithBody(&message.CommitImportMessageBody{}).
+		WithVChannel(vchannel).
+		MustBuildMutable()
+	mutableMsg.WithTimeTick(timeTick)
+	mutableMsg.WithLastConfirmed(rmq.NewRmqID(2637))
+	immutableMsg := mutableMsg.IntoImmutableMessage(rmq.NewRmqID(2639))
+
+	mockWBMgr := writebuffer.NewMockBufferManager(t)
+	mockWBMgr.EXPECT().
+		FlushChannel(mock.Anything, vchannel, timeTick).
+		Return(merr.WrapErrChannelNotFound(vchannel)).
+		Once()
+
+	mixcoord := mocks.NewMockMixCoordClient(t)
+	mixcoord.EXPECT().HandleCommitVchannel(mock.Anything, mock.MatchedBy(func(req *datapb.HandleCommitVchannelRequest) bool {
+		return req.GetJobId() == jobID && req.GetVchannel() == vchannel
+	})).Return(merr.Status(nil), nil).Once()
+	fMixcoord := syncutil.NewFuture[internaltypes.MixCoordClient]()
+	fMixcoord.Set(mixcoord)
+
+	rs := mock_recovery.NewMockRecoveryStorage(t)
+	rs.EXPECT().ObserveMessage(mock.Anything, mock.Anything).Return(nil)
+
+	resource.InitForTest(
+		t,
+		resource.OptMixCoordClient(fMixcoord),
+		resource.OptWriteBufferManager(mockWBMgr),
+	)
+
+	impl := &WALFlusherImpl{
+		notifier:        syncutil.NewAsyncTaskNotifier[struct{}](),
+		logger:          mlog.With(mlog.FieldComponent("test-flusher")),
+		RecoveryStorage: rs,
+	}
+
+	require.NotPanics(t, func() {
+		err := impl.dispatch(immutableMsg)
+		require.NoError(t, err)
+	})
+}
+
+func TestWALFlusher_ExecuteReturnsObserveMessageError(t *testing.T) {
+	streamingutil.SetStreamingServiceEnabled()
+	defer streamingutil.UnsetStreamingServiceEnabled()
+
+	const (
+		vchannel = "test-vchannel"
+		jobID    = int64(42)
+		timeTick = uint64(200)
+	)
+
+	mutableMsg := message.NewCommitImportMessageBuilderV2().
+		WithHeader(&message.CommitImportMessageHeader{
+			CollectionId: 100,
+			JobId:        jobID,
+		}).
+		WithBody(&message.CommitImportMessageBody{}).
+		WithVChannel(vchannel).
+		MustBuildMutable()
+	mutableMsg.WithTimeTick(timeTick)
+	mutableMsg.WithLastConfirmed(rmq.NewRmqID(199))
+	immutableMsg := mutableMsg.IntoImmutableMessage(rmq.NewRmqID(200))
+
+	mixcoord := mocks.NewMockMixCoordClient(t)
+	mixcoord.EXPECT().HandleCommitVchannel(mock.Anything, mock.MatchedBy(func(req *datapb.HandleCommitVchannelRequest) bool {
+		return req.GetJobId() == jobID && req.GetVchannel() == vchannel && req.GetCommitTimestamp() == timeTick
+	})).Return(merr.Status(nil), nil).Once()
+	fMixcoord := syncutil.NewFuture[internaltypes.MixCoordClient]()
+	fMixcoord.Set(mixcoord)
+
+	mockWBMgr := writebuffer.NewMockBufferManager(t)
+	mockWBMgr.EXPECT().FlushChannel(mock.Anything, vchannel, timeTick).Return(nil).Once()
+
+	observeErr := errors.New("observe failed")
+	rs := mock_recovery.NewMockRecoveryStorage(t)
+	rs.EXPECT().ObserveMessage(mock.Anything, immutableMsg).Return(observeErr).Once()
+
+	l := mock_wal.NewMockWAL(t)
+	pchannel := types.PChannelInfo{Name: "pchannel"}
+	l.EXPECT().WALName().Return(message.WALNameRocksmq).Maybe()
+	l.EXPECT().Channel().Return(pchannel).Maybe()
+	l.EXPECT().Read(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, option wal.ReadOption) (wal.Scanner, error) {
+			ch := make(chan message.ImmutableMessage, 1)
+			ch <- immutableMsg
+			scanner := mock_wal.NewMockScanner(t)
+			scanner.EXPECT().Chan().Return(ch)
+			scanner.EXPECT().Close().Return(nil)
+			return scanner, nil
+		}).Once()
+
+	resource.InitForTest(
+		t,
+		resource.OptMixCoordClient(fMixcoord),
+		resource.OptWriteBufferManager(mockWBMgr),
+		resource.OptChunkManager(mock_storage.NewMockChunkManager(t)),
+	)
+
+	rateLimitComponent := rate.NewWALRateLimitComponent(pchannel)
+	defer rateLimitComponent.Close()
+	fatalErrCh := make(chan error, 2)
+	flusher := &WALFlusherImpl{
+		notifier:             syncutil.NewAsyncTaskNotifier[struct{}](),
+		wal:                  syncutil.NewFuture[wal.WAL](),
+		logger:               mlog.With(mlog.FieldComponent("test-flusher")),
+		metrics:              newFlusherMetrics(pchannel),
+		RecoveryStorage:      rs,
+		rateLimitComponent:   rateLimitComponent,
+		emptyTimeTickCounter: metrics.WALFlusherEmptyTimeTickFilteredTotal.WithLabelValues(paramtable.GetStringNodeID(), pchannel.Name),
+		onFatal: func(err error) {
+			fatalErrCh <- err
+		},
+	}
+	flusher.wal.Set(l)
+
+	err := flusher.Execute(&recovery.RecoverySnapshot{
+		VChannels: map[string]*streamingpb.VChannelMeta{},
+		Checkpoint: &recovery.WALCheckpoint{
+			TimeTick: 0,
+		},
+	})
+	require.ErrorIs(t, err, observeErr)
+	select {
+	case fatalErr := <-fatalErrCh:
+		require.ErrorIs(t, fatalErr, observeErr)
+	default:
+		t.Fatal("fatal flusher error was not reported")
+	}
+	select {
+	case fatalErr := <-fatalErrCh:
+		t.Fatalf("fatal flusher error was reported more than once: %v", fatalErr)
+	default:
+	}
+}
+
+func TestWALFlusher_ExecuteReturnsScannerError(t *testing.T) {
+	streamingutil.SetStreamingServiceEnabled()
+	defer streamingutil.UnsetStreamingServiceEnabled()
+
+	scannerErr := errors.New("corrupted wal record")
+	messageCh := make(chan message.ImmutableMessage)
+	close(messageCh)
+
+	scanner := mock_wal.NewMockScanner(t)
+	scanner.EXPECT().Chan().Return(messageCh).Once()
+	scanner.EXPECT().Error().Return(scannerErr).Once()
+	scanner.EXPECT().Close().Return(scannerErr).Once()
+
+	pchannel := types.PChannelInfo{Name: "pchannel"}
+	l := mock_wal.NewMockWAL(t)
+	l.EXPECT().WALName().Return(message.WALNameRocksmq).Once()
+	l.EXPECT().Read(mock.Anything, mock.Anything).Return(scanner, nil).Once()
+
+	mixcoord := mocks.NewMockMixCoordClient(t)
+	fMixcoord := syncutil.NewFuture[internaltypes.MixCoordClient]()
+	fMixcoord.Set(mixcoord)
+	resource.InitForTest(
+		t,
+		resource.OptMixCoordClient(fMixcoord),
+		resource.OptChunkManager(mock_storage.NewMockChunkManager(t)),
+	)
+
+	rs := mock_recovery.NewMockRecoveryStorage(t)
+	rateLimitComponent := rate.NewWALRateLimitComponent(pchannel)
+	defer rateLimitComponent.Close()
+	fatalErrCh := make(chan error, 2)
+	flusher := &WALFlusherImpl{
+		notifier:             syncutil.NewAsyncTaskNotifier[struct{}](),
+		wal:                  syncutil.NewFuture[wal.WAL](),
+		logger:               mlog.With(mlog.FieldComponent("test-flusher")),
+		metrics:              newFlusherMetrics(pchannel),
+		RecoveryStorage:      rs,
+		rateLimitComponent:   rateLimitComponent,
+		emptyTimeTickCounter: metrics.WALFlusherEmptyTimeTickFilteredTotal.WithLabelValues(paramtable.GetStringNodeID(), pchannel.Name),
+		onFatal: func(err error) {
+			fatalErrCh <- err
+		},
+	}
+	flusher.wal.Set(l)
+
+	err := flusher.Execute(&recovery.RecoverySnapshot{
+		VChannels: map[string]*streamingpb.VChannelMeta{},
+		Checkpoint: &recovery.WALCheckpoint{
+			TimeTick: 0,
+		},
+	})
+	require.ErrorIs(t, err, scannerErr)
+	select {
+	case fatalErr := <-fatalErrCh:
+		require.ErrorIs(t, fatalErr, scannerErr)
+	default:
+		t.Fatal("scanner error was not reported as fatal")
+	}
+	select {
+	case fatalErr := <-fatalErrCh:
+		t.Fatalf("scanner error was reported more than once: %v", fatalErr)
+	default:
+	}
+}
+
+func TestDispatch_CommitImportMessage_FlushUnexpectedErrorPanics(t *testing.T) {
+	streamingutil.SetStreamingServiceEnabled()
+	defer streamingutil.UnsetStreamingServiceEnabled()
+
+	const (
+		vchannel = "test-vchannel"
+		jobID    = int64(42)
+		timeTick = uint64(200)
+	)
+
+	mutableMsg := message.NewCommitImportMessageBuilderV2().
+		WithHeader(&message.CommitImportMessageHeader{
+			CollectionId: 100,
+			JobId:        jobID,
+		}).
+		WithBody(&message.CommitImportMessageBody{}).
+		WithVChannel(vchannel).
+		MustBuildMutable()
+	mutableMsg.WithTimeTick(timeTick)
+	mutableMsg.WithLastConfirmed(rmq.NewRmqID(199))
+	immutableMsg := mutableMsg.IntoImmutableMessage(rmq.NewRmqID(200))
+
+	mockWBMgr := writebuffer.NewMockBufferManager(t)
+	mockWBMgr.EXPECT().
+		FlushChannel(mock.Anything, vchannel, timeTick).
+		Return(errors.New("temporary flush failure")).
+		Once()
+
+	rs := mock_recovery.NewMockRecoveryStorage(t)
+
+	resource.InitForTest(t, resource.OptWriteBufferManager(mockWBMgr))
+
+	impl := &WALFlusherImpl{
+		notifier:        syncutil.NewAsyncTaskNotifier[struct{}](),
+		logger:          mlog.With(mlog.FieldComponent("test-flusher")),
+		RecoveryStorage: rs,
+	}
+
+	require.Panics(t, func() {
+		_ = impl.dispatch(immutableMsg)
+	})
+}
+
+func TestDispatch_RollbackImportMessage_NoOp(t *testing.T) {
+	streamingutil.SetStreamingServiceEnabled()
+	defer streamingutil.UnsetStreamingServiceEnabled()
+
+	tests := []struct {
+		name     string
+		vchannel string
+		jobID    int64
+	}{
+		{name: "basic_rollback", vchannel: "vchannel-rollback-1", jobID: 10},
+		{name: "different_job", vchannel: "vchannel-rollback-2", jobID: 99},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Build a RollbackImport immutable message.
+			mutableMsg := message.NewRollbackImportMessageBuilderV2().
+				WithHeader(&message.RollbackImportMessageHeader{
+					CollectionId: 100,
+					JobId:        tc.jobID,
+				}).
+				WithBody(&message.RollbackImportMessageBody{}).
+				WithVChannel(tc.vchannel).
+				MustBuildMutable()
+			mutableMsg.WithTimeTick(300)
+			mutableMsg.WithLastConfirmed(rmq.NewRmqID(299))
+			immutableMsg := mutableMsg.IntoImmutableMessage(rmq.NewRmqID(300))
+
+			// Set up mock RecoveryStorage: ObserveMessage should still be called from the defer.
+			rs := mock_recovery.NewMockRecoveryStorage(t)
+			rs.EXPECT().ObserveMessage(mock.Anything, mock.Anything).Return(nil)
+
+			// No MixCoordClient or WriteBufferManager should be called.
+			resource.InitForTest(t)
+
+			impl := &WALFlusherImpl{
+				notifier:        syncutil.NewAsyncTaskNotifier[struct{}](),
+				logger:          mlog.With(mlog.FieldComponent("test-flusher")),
+				RecoveryStorage: rs,
+			}
+
+			err := impl.dispatch(immutableMsg)
+			assert.NoError(t, err)
+		})
+	}
 }
 
 func newMockWAL(t *testing.T, maybe bool) *mock_wal.MockWAL {

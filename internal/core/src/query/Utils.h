@@ -22,15 +22,64 @@
 #include "common/Consts.h"
 #include "common/OffsetMapping.h"
 #include "common/QueryResult.h"
+#include "common/QueryInfo.h"
 #include "common/Types.h"
 #include "common/Utils.h"
+#include "knowhere/array_store.h"
 
 namespace milvus::query {
-// Map logical element IDs returned by knowhere to (doc_id, elem_idx) pairs
-// via ArrayOffsets. Caller must ensure the input `element_ids` are already
-// in logical space (i.e. apply TransformOffset first when offset_mapping is
-// enabled), since ArrayOffsets::ElementIDToRowID is keyed on logical
-// element IDs.
+inline bool
+CanUseStrictGroupFilteredIterator(const SearchInfo& info, int64_t nq) {
+    return info.strict_group_acceptance_threshold_ > 0 &&
+           info.strict_group_size_ && info.group_size_ > 1 && info.topk_ > 0 &&
+           nq == 1 && !info.element_level() &&
+           info.group_by_field_ids_.size() == 1;
+}
+
+inline void
+FillEmptySearchResult(SearchResult& result, int64_t num_queries, int64_t topk) {
+    auto total_num = num_queries * topk;
+    result.seg_offsets_.resize(total_num, INVALID_SEG_OFFSET);
+    result.distances_.resize(total_num, 0.0f);
+    result.total_nq_ = num_queries;
+    result.unity_topK_ = topk;
+}
+
+inline BitsetView
+AttachOffsetMappingIds(const BitsetView& bitset,
+                       const OffsetMappingIdView& ids) {
+    auto mapped = bitset;
+    if (!ids.empty()) {
+        // BF scans local physical ids. The mapping view is already clipped to
+        // one contiguous p2l window, so the backend can use ids directly.
+        knowhere::IdArray out_ids(ids.data, static_cast<size_t>(ids.count));
+        mapped.set_id_offset(0);
+        mapped.set_out_ids(out_ids, out_ids.size());
+        mapped.set_vector_count(static_cast<size_t>(ids.count));
+    }
+    return mapped;
+}
+
+inline const void*
+AdvanceVectorDataPointer(const void* data,
+                         DataType data_type,
+                         int64_t dim,
+                         int64_t rows) {
+    if (rows == 0) {
+        return data;
+    }
+    if (data_type == DataType::VECTOR_SPARSE_U32_F32) {
+        return static_cast<const knowhere::sparse::SparseRow<SparseValueType>*>(
+                   data) +
+               rows;
+    }
+    return static_cast<const uint8_t*>(data) +
+           rows * static_cast<int64_t>(GetDataTypeSize(data_type, dim));
+}
+
+// Map VECTOR_ARRAY element IDs returned by Knowhere to (doc_id, elem_idx)
+// pairs via ArrayOffsets. This is element-space only; row-level nullable
+// mapping is handled before or inside Knowhere search.
 inline std::pair<std::vector<int64_t>, std::vector<int32_t>>
 ApplyElementIDMapping(const std::vector<int64_t>& element_ids,
                       const milvus::IArrayOffsets& array_offsets) {
@@ -52,67 +101,18 @@ ApplyElementIDMapping(const std::vector<int64_t>& element_ids,
     return std::make_pair(std::move(doc_offsets), std::move(element_indices));
 }
 
-inline TargetBitmap
-TransformBitset(const BitsetView& bitset,
-                const milvus::OffsetMapping& mapping) {
-    // Empty BitsetView is the Knowhere fast path for "no rows filtered".
-    // Keep it empty after logical-to-physical mapping.
-    if (bitset.empty()) {
-        return {};
-    }
-
-    // bit=true means filtered out. The logical bitset may be shorter than the
-    // full mapping on growing segments because it is sized by query timestamp
-    // visibility. Physical rows outside that logical view are not visible yet.
-    TargetBitmap result;
-    auto count = mapping.GetValidCount();
-    result.resize(count, true);
-    for (int64_t physical_idx = 0; physical_idx < count; physical_idx++) {
-        auto logical_idx = mapping.GetLogicalOffset(physical_idx);
-        if (logical_idx >= 0 &&
-            logical_idx < static_cast<int64_t>(bitset.size())) {
-            result[physical_idx] = bitset.test(logical_idx);
-        }
-    }
-    return result;
-}
-
-inline void
-TransformOffset(std::vector<int64_t>& seg_offsets,
-                const milvus::OffsetMapping& mapping) {
-    for (auto& seg_offset : seg_offsets) {
-        if (seg_offset >= 0) {
-            seg_offset = mapping.GetLogicalOffset(seg_offset);
-        }
-    }
-}
-
-// Map knowhere's raw offsets back to logical space. The two inputs are
-// mutually exclusive:
-//
-// - array_offsets != nullptr (VECTOR_ARRAY element-level search):
-//   knowhere returns physical element IDs. ArrayOffsets is built by
-//   walking every row in the segment and advancing the row counter on
-//   every row (including empty/null rows, which occupy a zero-length
-//   element range), so ElementIDToRowID produces (logical_row_id,
-//   elem_idx) directly. No OffsetMapping pass is needed.
-//
-// - array_offsets == nullptr (plain vector field): when OffsetMapping is
-//   enabled, the index/chunk was built over valid rows only, so
-//   knowhere's physical row IDs must be remapped to logical via
-//   OffsetMapping. When OffsetMapping is disabled, TransformOffset is a
-//   no-op.
+// Convert VECTOR_ARRAY element IDs to (row_id, elem_idx). Row-level vector
+// search already receives logical IDs from Knowhere: indexed paths use IdMap,
+// raw BF paths pass physical->logical IDs through BitsetView.
 inline void
 FinalizeVectorSearchOffsets(SearchResult& result,
-                            const milvus::OffsetMapping& offset_mapping,
                             const milvus::IArrayOffsets* array_offsets) {
     if (array_offsets != nullptr) {
         auto [doc_offsets, elem_indices] =
             ApplyElementIDMapping(result.seg_offsets_, *array_offsets);
         result.seg_offsets_ = std::move(doc_offsets);
         result.element_indices_ = std::move(elem_indices);
-    } else {
-        TransformOffset(result.seg_offsets_, offset_mapping);
+        result.element_level_ = true;
     }
 }
 

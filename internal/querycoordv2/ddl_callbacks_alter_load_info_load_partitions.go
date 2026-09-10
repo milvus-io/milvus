@@ -21,6 +21,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -38,8 +39,12 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadPartitions(ctx conte
 		return err
 	}
 
-	userSpecifiedReplicaMode := req.GetReplicaNumber() > 0
-	replicaNumber, resourceGroups, err := s.getDefaultResourceGroupsAndReplicaNumber(ctx, req.GetReplicaNumber(), req.GetResourceGroups(), req.GetCollectionID())
+	replicaNumber, resourceGroups, userSpecifiedReplicaMode, err := s.getLoadReplicaConfigForRequest(
+		ctx,
+		req.GetReplicaNumber(),
+		req.GetResourceGroups(),
+		req.GetCollectionID(),
+	)
 	if err != nil {
 		return err
 	}
@@ -74,6 +79,13 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadPartitions(ctx conte
 	msg, err := job.GenerateAlterLoadConfigMessage(ctx, alterLoadConfigReq)
 	if err != nil {
 		return err
+	}
+	if msg == nil {
+		// load config unchanged, the partitions are already loaded as requested.
+		mlog.Info(ctx, "load partitions ignored, load config is unchanged",
+			mlog.Int64("collectionID", req.GetCollectionID()),
+			mlog.Int64s("partitionIDs", req.GetPartitionIDs()))
+		return nil
 	}
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err

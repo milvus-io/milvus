@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/mocks/flushcommon/mock_util"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -65,6 +66,8 @@ func (s *ClusteringCompactionTaskSuite) SetupSuite() {
 func (s *ClusteringCompactionTaskSuite) setupTest() {
 	paramtable.Get().Save(paramtable.Get().CommonCfg.StorageType.Key, "local")
 	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "false")
+	paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, s.T().TempDir())
+	initcore.InitStorageV2FileSystem(paramtable.Get())
 
 	s.mockBinlogIO = mock_util.NewMockBinlogIO(s.T())
 
@@ -119,6 +122,8 @@ func (s *ClusteringCompactionTaskSuite) SetupSubTest() {
 func (s *ClusteringCompactionTaskSuite) TearDownTest() {
 	paramtable.Get().Reset(paramtable.Get().CommonCfg.StorageType.Key)
 	paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+	paramtable.Get().Reset(paramtable.Get().LocalStorageCfg.Path.Key)
+	initcore.CleanArrowFileSystem()
 }
 
 func (s *ClusteringCompactionTaskSuite) TestWrongCompactionType() {
@@ -151,13 +156,10 @@ func (s *ClusteringCompactionTaskSuite) TestIsVectorClusteringKey() {
 func (s *ClusteringCompactionTaskSuite) TestCompactionWithEmptyBinlog() {
 	s.task.plan.Schema = genCollectionSchema()
 	s.task.plan.ClusteringKeyField = 100
+	s.task.plan.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{}
 	_, err := s.task.Compact()
 	s.Require().Error(err)
 	s.Equal(true, errors.Is(err, merr.ErrIllegalCompactionPlan))
-	s.task.plan.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{}
-	_, err2 := s.task.Compact()
-	s.Require().Error(err2)
-	s.Equal(true, errors.Is(err2, merr.ErrIllegalCompactionPlan))
 }
 
 func (s *ClusteringCompactionTaskSuite) TestCompactionWithEmptySchema() {
@@ -190,7 +192,7 @@ func (s *ClusteringCompactionTaskSuite) preparScalarCompactionNormalTask() {
 	dblobs, err := getInt64DeltaBlobs(
 		1,
 		[]int64{100},
-		[]uint64{tsoutil.ComposeTSByTime(getMilvusBirthday().Add(time.Second), 0)},
+		[]uint64{tsoutil.ComposeTSByTime(getMilvusBirthday().Add(time.Second))},
 	)
 	s.Require().NoError(err)
 	s.mockBinlogIO.EXPECT().Download(mock.Anything, []string{"1"}).
@@ -203,7 +205,7 @@ func (s *ClusteringCompactionTaskSuite) preparScalarCompactionNormalTask() {
 	for i := 0; i < 10240; i++ {
 		v := storage.Value{
 			PK:        storage.NewInt64PrimaryKey(int64(i)),
-			Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)),
+			Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday())),
 			Value:     genRow(int64(i)),
 		}
 		err = segWriter.Write(&v)
@@ -299,7 +301,7 @@ func (s *ClusteringCompactionTaskSuite) prepareScalarCompactionNormalByMemoryLim
 	for i := 0; i < 10240; i++ {
 		v := storage.Value{
 			PK:        storage.NewInt64PrimaryKey(int64(i)),
-			Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)),
+			Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday())),
 			Value:     genRow(int64(i)),
 		}
 		err = segWriter.Write(&v)
@@ -387,15 +389,23 @@ func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormalByMemoryLimit(
 
 func (s *ClusteringCompactionTaskSuite) prepareCompactionWithBM25FunctionTask() {
 	s.SetupTest()
+	s.prepareCompactionWithBM25OutputTask(10240)
+}
+
+func (s *ClusteringCompactionTaskSuite) prepareCompactionWithMissingBM25OutputTask(rowNum int) {
+	s.prepareCompactionWithBM25OutputTask(rowNum, 102)
+}
+
+func (s *ClusteringCompactionTaskSuite) prepareCompactionWithBM25OutputTask(rowNum int, removeFieldIDs ...int64) {
 	schema := genCollectionSchemaWithBM25()
-	var segmentID int64 = 1001
-	segWriter, err := NewSegmentWriter(schema, 1000, compactionBatchSize, segmentID, PartitionID, CollectionID, []int64{102})
+	segmentID := int64(1001)
+	segWriter, err := NewSegmentWriter(schema, int64(rowNum), compactionBatchSize, segmentID, PartitionID, CollectionID, []int64{102})
 	s.Require().NoError(err)
 
-	for i := 0; i < 10240; i++ {
+	for i := 0; i < rowNum; i++ {
 		v := storage.Value{
 			PK:        storage.NewInt64PrimaryKey(int64(i)),
-			Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)),
+			Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday())),
 			Value:     genRowWithBM25(int64(i)),
 		}
 		err = segWriter.Write(&v)
@@ -404,13 +414,12 @@ func (s *ClusteringCompactionTaskSuite) prepareCompactionWithBM25FunctionTask() 
 	segWriter.FlushAndIsFull()
 
 	kvs, fBinlogs, err := serializeWrite(context.TODO(), s.mockAlloc, segWriter)
-	s.NoError(err)
-	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, strings []string) ([][]byte, error) {
-		result := make([][]byte, 0, len(strings))
-		for _, path := range strings {
-			result = append(result, kvs[path])
-		}
-		return result, nil
+	s.Require().NoError(err)
+	for _, fieldID := range removeFieldIDs {
+		removeFieldBinlogForTest(kvs, fBinlogs, fieldID)
+	}
+	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, paths []string) ([][]byte, error) {
+		return downloadValuesForPathsForTest(kvs, paths)
 	})
 
 	s.plan.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{
@@ -421,7 +430,6 @@ func (s *ClusteringCompactionTaskSuite) prepareCompactionWithBM25FunctionTask() 
 		},
 	}
 
-	s.task.bm25FieldIds = []int64{102}
 	s.task.plan.Schema = schema
 	s.task.plan.ClusteringKeyField = 100
 	s.task.plan.PreferSegmentRows = 2048
@@ -490,8 +498,86 @@ func (s *ClusteringCompactionTaskSuite) TestCompactionWithBM25Function() {
 	s.Equal(totalRowNum, bm25RowNum)
 }
 
+func (s *ClusteringCompactionTaskSuite) TestScalarClusteringMaterializesMissingBM25OutputFromOldSegment() {
+	s.prepareCompactionWithMissingBM25OutputTask(3)
+
+	result, err := s.task.Compact()
+	s.Require().NoError(err)
+	s.Require().NotNil(result)
+
+	s.EqualValues(3, lo.SumBy(result.GetSegments(), func(segment *datapb.CompactionSegment) int64 {
+		return segment.GetNumOfRows()
+	}))
+	bm25Rows := int64(0)
+	for _, segment := range result.GetSegments() {
+		bm25Rows += fieldBinlogEntriesForTest(segment.GetBm25Logs(), 102)
+	}
+	s.EqualValues(3, bm25Rows)
+}
+
+func (s *ClusteringCompactionTaskSuite) TestScalarClusteringPrefillsMissingBM25InputBeforeOutput() {
+	s.prepareCompactionWithBM25OutputTask(3, 101, 102)
+	typeutil.GetField(s.task.plan.GetSchema(), 101).Nullable = true
+
+	result, err := s.task.Compact()
+	s.Require().NoError(err)
+	s.Require().NotNil(result)
+	var inputRows, bm25Rows int64
+	for _, segment := range result.GetSegments() {
+		inputRows += fieldBinlogEntriesForTest(segment.GetInsertLogs(), 101)
+		bm25Rows += fieldBinlogEntriesForTest(segment.GetBm25Logs(), 102)
+	}
+	s.EqualValues(3, inputRows)
+	s.EqualValues(3, bm25Rows)
+}
+
+func (s *ClusteringCompactionTaskSuite) TestScalarAnalyzeSegmentFiltersDroppedOrMissingFields() {
+	s.prepareCompactionWithMissingBM25OutputTask(2)
+	s.task.plan.ClusteringKeyField = 101
+	s.task.plan.SegmentBinlogs[0].FieldBinlogs = append(s.task.plan.SegmentBinlogs[0].FieldBinlogs, &datapb.FieldBinlog{
+		FieldID: common.StartOfUserFieldID + 1000,
+		Binlogs: []*datapb.Binlog{{
+			LogPath: "dropped-field-should-not-be-read",
+		}},
+	})
+
+	err := s.task.init()
+	s.Require().NoError(err)
+	defer s.task.cleanUp(context.Background())
+
+	analyzeResult, err := s.task.scalarAnalyzeSegment(context.Background(), s.task.plan.SegmentBinlogs[0])
+	s.Require().NoError(err)
+	s.Equal(map[interface{}]int64{"varchar": 2}, analyzeResult)
+}
+
+// An import segment committed at birthday+2s carries a deltalog entry deleting
+// PK=100 at birthday+1s. That delete predates the commit, so it must not remove
+// the row, and every output row timestamp must be normalized to commit_ts.
+func (s *ClusteringCompactionTaskSuite) TestScalarCompactionPreservesImportCommitTimestamp() {
+	s.preparScalarCompactionNormalTask()
+	commitTs := tsoutil.ComposeTSByTime(getMilvusBirthday().Add(2 * time.Second))
+	s.plan.SegmentBinlogs[0].CommitTimestamp = commitTs
+	s.task.compactionParams = compaction.GenParams()
+
+	compactionResult, err := s.task.Compact()
+	s.Require().NoError(err)
+
+	s.EqualValues(10240, lo.SumBy(compactionResult.GetSegments(), func(seg *datapb.CompactionSegment) int64 {
+		return seg.GetNumOfRows()
+	}))
+
+	for _, seg := range compactionResult.GetSegments() {
+		for _, fieldBinlog := range seg.GetInsertLogs() {
+			for _, b := range fieldBinlog.GetBinlogs() {
+				s.EqualValues(commitTs, b.GetTimestampFrom())
+				s.EqualValues(commitTs, b.GetTimestampTo())
+			}
+		}
+	}
+}
+
 func genRow(magic int64) map[int64]interface{} {
-	ts := tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)
+	ts := tsoutil.ComposeTSByTime(getMilvusBirthday())
 	return map[int64]interface{}{
 		common.RowIDField:     magic,
 		common.TimeStampField: int64(ts),
@@ -588,9 +674,10 @@ func genCollectionSchemaWithBM25() *schemapb.CollectionSchema {
 				},
 			},
 			{
-				FieldID:  102,
-				Name:     "sparse",
-				DataType: schemapb.DataType_SparseFloatVector,
+				FieldID:          102,
+				Name:             "sparse",
+				DataType:         schemapb.DataType_SparseFloatVector,
+				IsFunctionOutput: true,
 			},
 		},
 		Functions: []*schemapb.FunctionSchema{{
@@ -606,7 +693,7 @@ func genCollectionSchemaWithBM25() *schemapb.CollectionSchema {
 }
 
 func genRowWithBM25(magic int64) map[int64]interface{} {
-	ts := tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)
+	ts := tsoutil.ComposeTSByTime(getMilvusBirthday())
 	return map[int64]interface{}{
 		common.RowIDField:     magic,
 		common.TimeStampField: int64(ts),

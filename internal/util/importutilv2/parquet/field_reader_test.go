@@ -165,6 +165,80 @@ func TestReadTextFieldData(t *testing.T) {
 	assert.Equal(t, numRows, insertData.Data[fieldID].RowNum())
 }
 
+func TestReadNullableGeometryDataFillsDefaultAndValidData(t *testing.T) {
+	const (
+		pkFieldID   = int64(100)
+		geomFieldID = int64(101)
+		numRows     = 3
+		defaultWKT  = "POINT (1 2)"
+	)
+	defaultWKB, err := common.ConvertWKTToWKB(defaultWKT)
+	require.NoError(t, err)
+
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: pkFieldID, Name: "pk", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+			{
+				FieldID:  geomFieldID,
+				Name:     "geom",
+				DataType: schemapb.DataType_Geometry,
+				Nullable: true,
+				DefaultValue: &schemapb.ValueField{
+					Data: &schemapb.ValueField_StringData{StringData: defaultWKT},
+				},
+			},
+		},
+	}
+	pqSchema := arrow.NewSchema([]arrow.Field{
+		{Name: "pk", Type: arrow.PrimitiveTypes.Int64},
+		{Name: "geom", Type: arrow.BinaryTypes.String, Nullable: true},
+	}, nil)
+
+	filePath := fmt.Sprintf("/tmp/test_%d_nullable_geometry_default_reader.parquet", rand.Int())
+	defer os.Remove(filePath)
+	wf, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0o666)
+	require.NoError(t, err)
+	fw, err := pqarrow.NewFileWriter(pqSchema, wf,
+		parquet.NewWriterProperties(parquet.WithMaxRowGroupLength(numRows)), pqarrow.DefaultWriterProps())
+	require.NoError(t, err)
+
+	pkBuilder := array.NewInt64Builder(memory.DefaultAllocator)
+	defer pkBuilder.Release()
+	pkBuilder.AppendValues([]int64{1, 2, 3}, nil)
+	pkArr := pkBuilder.NewArray()
+	defer pkArr.Release()
+
+	geomBuilder := array.NewStringBuilder(memory.DefaultAllocator)
+	defer geomBuilder.Release()
+	geomBuilder.Append("POINT (0 0)")
+	geomBuilder.AppendNull()
+	geomBuilder.Append("POINT (3 3)")
+	geomArr := geomBuilder.NewArray()
+	defer geomArr.Release()
+
+	recordBatch := array.NewRecord(pqSchema, []arrow.Array{pkArr, geomArr}, numRows)
+	require.NoError(t, fw.Write(recordBatch))
+	recordBatch.Release()
+	require.NoError(t, fw.Close())
+
+	ctx := context.Background()
+	f := storage.NewChunkManagerFactory("local", objectstorage.RootPath(testOutputPath))
+	cm, err := f.NewPersistentStorageChunkManager(ctx)
+	require.NoError(t, err)
+	reader, err := NewReader(ctx, cm, schema, filePath, 64*1024*1024)
+	require.NoError(t, err)
+	defer reader.Close()
+
+	insertData, err := reader.Read()
+	require.NoError(t, err)
+	geomData := insertData.Data[geomFieldID].(*storage.GeometryFieldData)
+	require.Equal(t, []bool{true, true, true}, geomData.ValidData)
+	require.Equal(t, defaultWKB, geomData.Data[1])
+	require.NotEmpty(t, geomData.Data[1])
+	_, err = common.ConvertWKBToWKT(geomData.Data[1])
+	require.NoError(t, err)
+}
+
 // TestParseSparseFloatRowVector tests the parseSparseFloatRowVector function
 func TestParseSparseFloatRowVector(t *testing.T) {
 	tests := []struct {
@@ -509,7 +583,7 @@ func TestParseSparseFloatVectorStructs(t *testing.T) {
 
 	isValidFunc := func(indices arrow.Array, values arrow.Array) {
 		byteArr, maxDim := checkFunc(indices, values, true)
-		assert.Equal(t, uint32(78), maxDim)
+		assert.Equal(t, uint32(79), maxDim)
 		assert.Equal(t, 1, len(byteArr))
 		assert.Equal(t, rowBytes, byteArr[0])
 	}
@@ -633,6 +707,11 @@ func checkNullableSparseFloatVectorStructRead(t *testing.T, validData []bool, co
 	gotSparse := gotInsertData.Data[sparseFieldID].(*storage.SparseFloatVectorFieldData)
 	require.Equal(t, validData, gotSparse.ValidData)
 	require.Len(t, gotSparse.GetContents(), len(contents))
+	expectedDim := int64(0)
+	for _, row := range contents {
+		expectedDim = max(expectedDim, typeutil.SparseFloatRowDim(row))
+	}
+	require.Equal(t, expectedDim, gotSparse.Dim)
 	if len(contents) > 0 {
 		require.Equal(t, contents, gotSparse.GetContents())
 	}
@@ -997,6 +1076,174 @@ func TestTypeMismatch(t *testing.T) {
 			checkFunc(tt.srcDataType, tt.srcElementType, tt.dstDataType, tt.dstElementType, tt.nullable)
 		})
 	}
+}
+
+func TestReadFP16BF16VectorFromFloatParquet(t *testing.T) {
+	const (
+		fieldID  = int64(100)
+		rowCount = 2
+		dim      = 4
+	)
+	rows := [][]float32{
+		{0.1, 0.2, 0.3, 0.4},
+		{0.5, 0.6, 0.7, 0.8},
+	}
+	flattened := []float32{0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8}
+	makeField := func(dataType schemapb.DataType) *schemapb.FieldSchema {
+		return &schemapb.FieldSchema{
+			FieldID:  fieldID,
+			Name:     "vector",
+			DataType: dataType,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: "dim", Value: "4"},
+			},
+		}
+	}
+	buildArray := func(t *testing.T, elemType arrow.DataType, fixedSize bool, validData []bool) arrow.Array {
+		mem := memory.NewGoAllocator()
+		if fixedSize {
+			builder := array.NewFixedSizeListBuilder(mem, dim, elemType)
+			switch elemType.ID() {
+			case arrow.FLOAT32:
+				valueBuilder := builder.ValueBuilder().(*array.Float32Builder)
+				for i, row := range rows {
+					valid := validData == nil || validData[i]
+					builder.Append(valid)
+					if valid {
+						valueBuilder.AppendValues(row, nil)
+					}
+				}
+			case arrow.FLOAT64:
+				valueBuilder := builder.ValueBuilder().(*array.Float64Builder)
+				for i, row := range rows {
+					valid := validData == nil || validData[i]
+					builder.Append(valid)
+					if valid {
+						for _, value := range row {
+							valueBuilder.Append(float64(value))
+						}
+					}
+				}
+			}
+			return builder.NewArray()
+		}
+
+		builder := array.NewListBuilder(mem, elemType)
+		switch elemType.ID() {
+		case arrow.FLOAT32:
+			valueBuilder := builder.ValueBuilder().(*array.Float32Builder)
+			for i, row := range rows {
+				valid := validData == nil || validData[i]
+				builder.Append(valid)
+				if valid {
+					valueBuilder.AppendValues(row, nil)
+				}
+			}
+		case arrow.FLOAT64:
+			valueBuilder := builder.ValueBuilder().(*array.Float64Builder)
+			for i, row := range rows {
+				valid := validData == nil || validData[i]
+				builder.Append(valid)
+				if valid {
+					for _, value := range row {
+						valueBuilder.Append(float64(value))
+					}
+				}
+			}
+		}
+		return builder.NewArray()
+	}
+
+	for _, tt := range []struct {
+		name      string
+		dataType  schemapb.DataType
+		elemType  arrow.DataType
+		fixedSize bool
+		expected  []byte
+	}{
+		{"list float32 to float16", schemapb.DataType_Float16Vector, arrow.PrimitiveTypes.Float32, false, typeutil.Float32ArrayToFloat16Bytes(flattened)},
+		{"list float32 to bfloat16", schemapb.DataType_BFloat16Vector, arrow.PrimitiveTypes.Float32, false, typeutil.Float32ArrayToBFloat16Bytes(flattened)},
+		{"list float64 to float16", schemapb.DataType_Float16Vector, arrow.PrimitiveTypes.Float64, false, typeutil.Float32ArrayToFloat16Bytes(flattened)},
+		{"list float64 to bfloat16", schemapb.DataType_BFloat16Vector, arrow.PrimitiveTypes.Float64, false, typeutil.Float32ArrayToBFloat16Bytes(flattened)},
+		{"fixed size list float32 to float16", schemapb.DataType_Float16Vector, arrow.PrimitiveTypes.Float32, true, typeutil.Float32ArrayToFloat16Bytes(flattened)},
+		{"fixed size list float32 to bfloat16", schemapb.DataType_BFloat16Vector, arrow.PrimitiveTypes.Float32, true, typeutil.Float32ArrayToBFloat16Bytes(flattened)},
+		{"fixed size list float64 to float16", schemapb.DataType_Float16Vector, arrow.PrimitiveTypes.Float64, true, typeutil.Float32ArrayToFloat16Bytes(flattened)},
+		{"fixed size list float64 to bfloat16", schemapb.DataType_BFloat16Vector, arrow.PrimitiveTypes.Float64, true, typeutil.Float32ArrayToBFloat16Bytes(flattened)},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			field := makeField(tt.dataType)
+			schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}}
+			arr := buildArray(t, tt.elemType, tt.fixedSize, nil)
+			defer arr.Release()
+			var arrType arrow.DataType = arrow.ListOf(tt.elemType)
+			if tt.fixedSize {
+				arrType = arrow.FixedSizeListOf(dim, tt.elemType)
+			}
+			pqSchema := arrow.NewSchema([]arrow.Field{{Name: field.GetName(), Type: arrType, Nullable: true}}, nil)
+
+			filePath := fmt.Sprintf("/tmp/test_%d_low_precision_reader.parquet", rand.Int())
+			defer os.Remove(filePath)
+			wf, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0o666)
+			assert.NoError(t, err)
+			fw, err := pqarrow.NewFileWriter(pqSchema, wf,
+				parquet.NewWriterProperties(parquet.WithMaxRowGroupLength(rowCount)), pqarrow.DefaultWriterProps())
+			assert.NoError(t, err)
+			recordBatch := array.NewRecord(pqSchema, []arrow.Array{arr}, rowCount)
+			defer recordBatch.Release()
+			err = fw.Write(recordBatch)
+			assert.NoError(t, err)
+			assert.NoError(t, fw.Close())
+
+			ctx := context.Background()
+			f := storage.NewChunkManagerFactory("local", objectstorage.RootPath(testOutputPath))
+			cm, err := f.NewPersistentStorageChunkManager(ctx)
+			assert.NoError(t, err)
+			reader, err := NewReader(ctx, cm, schema, filePath, 64*1024*1024)
+			assert.NoError(t, err)
+			defer reader.Close()
+
+			insertData, err := reader.Read()
+			assert.NoError(t, err)
+			assert.Equal(t, tt.expected, insertData.Data[fieldID].GetDataRows().([]byte))
+		})
+	}
+
+	t.Run("nullable float64 list to bfloat16", func(t *testing.T) {
+		validData := []bool{true, false}
+		expectedRows := []float32{0.1, 0.2, 0.3, 0.4}
+		field := makeField(schemapb.DataType_BFloat16Vector)
+		field.Nullable = true
+		schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}}
+		arr := buildArray(t, arrow.PrimitiveTypes.Float64, false, validData)
+		defer arr.Release()
+		pqSchema := arrow.NewSchema([]arrow.Field{{Name: field.GetName(), Type: arrow.ListOf(arrow.PrimitiveTypes.Float64), Nullable: true}}, nil)
+
+		filePath := fmt.Sprintf("/tmp/test_%d_nullable_fp16bf16_reader.parquet", rand.Int())
+		defer os.Remove(filePath)
+		wf, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0o666)
+		assert.NoError(t, err)
+		fw, err := pqarrow.NewFileWriter(pqSchema, wf,
+			parquet.NewWriterProperties(parquet.WithMaxRowGroupLength(rowCount)), pqarrow.DefaultWriterProps())
+		assert.NoError(t, err)
+		recordBatch := array.NewRecord(pqSchema, []arrow.Array{arr}, rowCount)
+		defer recordBatch.Release()
+		assert.NoError(t, fw.Write(recordBatch))
+		assert.NoError(t, fw.Close())
+
+		ctx := context.Background()
+		f := storage.NewChunkManagerFactory("local", objectstorage.RootPath(testOutputPath))
+		cm, err := f.NewPersistentStorageChunkManager(ctx)
+		assert.NoError(t, err)
+		reader, err := NewReader(ctx, cm, schema, filePath, 64*1024*1024)
+		assert.NoError(t, err)
+		defer reader.Close()
+
+		insertData, err := reader.Read()
+		assert.NoError(t, err)
+		fieldData := insertData.Data[fieldID].(*storage.BFloat16VectorFieldData)
+		assert.Equal(t, typeutil.Float32ArrayToBFloat16Bytes(expectedRows), fieldData.Data)
+		assert.Equal(t, validData, fieldData.ValidData)
+	})
 }
 
 func TestArrayNullElement(t *testing.T) {

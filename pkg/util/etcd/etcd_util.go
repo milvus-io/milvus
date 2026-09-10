@@ -30,15 +30,61 @@ import (
 	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
+// IsRetriableWatchErr reports whether an etcd watch error can be recovered by
+// re-establishing the watch.
+//
+// It returns true for:
+//   - ErrCompacted: the watched revision has been compacted; re-watch from a
+//     fresh revision (pre-existing behavior).
+//   - auth-token errors (ErrInvalidAuthToken, ErrUserEmpty, ErrAuthOldRevision):
+//     with etcd auth enabled, the auth token held by a client can be
+//     invalidated server-side (the default "simple" token is GC'd after idle
+//     TTL, is member-local, and is lost on member restart). A long-idle standby
+//     coordinator hits this on promotion. clientv3 treats the resulting
+//     Unauthenticated error on an already-established watch stream as a halt
+//     error (see isHaltErr) and tears the stream down WITHOUT refreshing the
+//     token, so the watch owner must re-watch. Re-watching issues a unary
+//     request first, which goes through clientv3's unary retry interceptor and
+//     refreshes the auth token, so the new watch stream recovers.
+//
+// Genuine authorization failures (permission denied, bad credentials) carry
+// different codes (PermissionDenied, InvalidArgument, FailedPrecondition) and
+// are deliberately NOT retriable. We match the etcd sentinels via errors.Is
+// rather than the raw gRPC Unauthenticated code: clientv3 maps watch errors
+// back to these sentinels (v3rpc.Error), and ErrInvalidAuthToken is the only
+// source of Unauthenticated, so matching the sentinel is both sufficient and
+// narrower than trusting the code.
+//
+// Callers should wrap the re-watch in a bounded retry (retry.Attempts) so a
+// genuinely persistent failure does not loop forever.
+func IsRetriableWatchErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	return errors.Is(err, rpctypes.ErrCompacted) ||
+		errors.Is(err, rpctypes.ErrInvalidAuthToken) ||
+		errors.Is(err, rpctypes.ErrUserEmpty) ||
+		errors.Is(err, rpctypes.ErrAuthOldRevision)
+}
+
 type ClientOption func(*clientv3.Config)
+
+// WithDialTimeout overrides the etcd client dial timeout. A non-positive value keeps the default.
+func WithDialTimeout(dialTimeout time.Duration) ClientOption {
+	return func(cfg *clientv3.Config) {
+		if dialTimeout > 0 {
+			cfg.DialTimeout = dialTimeout
+		}
+	}
+}
 
 // WithDialKeepAlive configures gRPC keepalive and autosync behaviors for the etcd client.
 func WithDialKeepAlive(dialKeepAliveTime, dialKeepAliveTimeout time.Duration) ClientOption {
@@ -72,11 +118,11 @@ func GetEtcdClient(
 	minVersion string,
 	opts ...ClientOption,
 ) (*clientv3.Client, error) {
-	log.Info("create etcd client",
-		zap.Bool("useEmbedEtcd", useEmbedEtcd),
-		zap.Bool("useSSL", useSSL),
-		zap.Any("endpoints", endpoints),
-		zap.String("minVersion", minVersion))
+	mlog.Info(context.TODO(), "create etcd client",
+		mlog.Bool("useEmbedEtcd", useEmbedEtcd),
+		mlog.Bool("useSSL", useSSL),
+		mlog.Any("endpoints", endpoints),
+		mlog.String("minVersion", minVersion))
 	if useEmbedEtcd {
 		return GetEmbedEtcdClient()
 	}
@@ -123,11 +169,11 @@ func GetRemoteEtcdSSLClientWithCfg(endpoints []string, certFile string, keyFile 
 	cfg.DialTimeout = 5 * time.Second
 	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 	if err != nil {
-		return nil, errors.Wrap(err, "load etcd cert key pair error")
+		return nil, merr.Wrap(err, "load etcd cert key pair error")
 	}
 	caCert, err := os.ReadFile(caCertFile)
 	if err != nil {
-		return nil, errors.Wrapf(err, "load etcd CACert file error, filename = %s", caCertFile)
+		return nil, merr.Wrapf(err, "load etcd CACert file error, filename = %s", caCertFile)
 	}
 
 	caCertPool := x509.NewCertPool()
@@ -153,7 +199,7 @@ func GetRemoteEtcdSSLClientWithCfg(endpoints []string, certFile string, keyFile 
 	}
 
 	if cfg.TLS.MinVersion == 0 {
-		return nil, errors.Errorf("unknown TLS version,%s", minVersion)
+		return nil, merr.WrapErrParameterInvalidMsg("unknown TLS version,%s", minVersion)
 	}
 
 	cfg.DialOptions = append(cfg.DialOptions, grpc.WithBlock())
@@ -178,10 +224,10 @@ func CreateEtcdClient(
 	if !enableAuth || useEmbedEtcd {
 		return GetEtcdClient(useEmbedEtcd, useSSL, endpoints, certFile, keyFile, caCertFile, minVersion, opts...)
 	}
-	log.Info("create etcd client(enable auth)",
-		zap.Bool("useSSL", useSSL),
-		zap.Any("endpoints", endpoints),
-		zap.String("minVersion", minVersion))
+	mlog.Info(context.TODO(), "create etcd client(enable auth)",
+		mlog.Bool("useSSL", useSSL),
+		mlog.Any("endpoints", endpoints),
+		mlog.String("minVersion", minVersion))
 	if useSSL {
 		return GetRemoteEtcdSSLClientWithCfg(endpoints, certFile, keyFile, caCertFile, minVersion, clientv3.Config{Username: userName, Password: password}, opts...)
 	}
@@ -240,13 +286,13 @@ func RemoveByBatchWithLimit(removals []string, limit int, op func(partialKeys []
 
 func buildKvGroup(keys, values []string) (map[string]string, error) {
 	if len(keys) != len(values) {
-		return nil, fmt.Errorf("length of keys (%d) and values (%d) are not equal", len(keys), len(values))
+		return nil, merr.WrapErrParameterInvalidMsg("length of keys (%d) and values (%d) are not equal", len(keys), len(values))
 	}
 	ret := make(map[string]string, len(keys))
 	for i, k := range keys {
 		_, ok := ret[k]
 		if ok {
-			return nil, fmt.Errorf("duplicated key was found: %s", k)
+			return nil, merr.WrapErrParameterInvalidMsg("duplicated key was found: %s", k)
 		}
 		ret[k] = values[i]
 	}

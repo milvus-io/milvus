@@ -22,6 +22,7 @@
 
 #include "IndexMeta.h"
 #include "NamedType/named_type_impl.hpp"
+#include "common/EasyAssert.h"
 #include "common/Types.h"
 #include "pb/segcore.pb.h"
 #include "protobuf_utils.h"
@@ -74,7 +75,11 @@ CollectionIndexMeta::HasField(FieldId fieldId) const {
 const FieldIndexMeta&
 CollectionIndexMeta::GetFieldIndexMeta(FieldId fieldId) const {
     auto it = fieldMetas_.find(fieldId);
-    assert(it != fieldMetas_.end());
+    // Use AssertInfo, not assert: assert is compiled out under NDEBUG (release
+    // builds), turning a missing-field lookup into a dangling-iterator deref.
+    AssertInfo(it != fieldMetas_.end(),
+               "field index meta not found for field " +
+                   std::to_string(fieldId.get()));
     return it->second;
 }
 

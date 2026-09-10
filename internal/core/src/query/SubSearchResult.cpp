@@ -13,6 +13,8 @@
 #include <iterator>
 #include <string>
 
+#include "common/FastMem.h"
+
 #include "common/EasyAssert.h"
 #include "query/SubSearchResult.h"
 
@@ -71,8 +73,11 @@ SubSearchResult::merge_impl(const SubSearchResult& right) {
                 }
             }
         }
-        std::copy_n(buf_distances.data(), topk_, left_distances);
-        std::copy_n(buf_ids.data(), topk_, left_ids);
+        milvus::fastmem::FastMemcpy(left_distances,
+                                    buf_distances.data(),
+                                    topk_ * sizeof(*left_distances));
+        milvus::fastmem::FastMemcpy(
+            left_ids, buf_ids.data(), topk_ * sizeof(*left_ids));
     }
 }
 

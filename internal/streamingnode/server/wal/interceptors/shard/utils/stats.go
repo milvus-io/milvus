@@ -41,14 +41,15 @@ func (s *SegmentBelongs) PartitionUniqueKey() PartitionUniqueKey {
 // SegmentStats is the usage stats of a segment.
 type SegmentStats struct {
 	Modified              ModifiedMetrics
-	MaxRows               uint64    // MaxRows of current segment should be assigned, it's a fixed value when segment is transfer int growing.
-	MaxBinarySize         uint64    // MaxBinarySize of current segment should be assigned, it's a fixed value when segment is transfer int growing.
+	RuntimeFlushSize      uint64    // runtime-only size used by StreamingNode flush HWM/LWM decisions; not persisted into recovery meta.
+	MaxRows               uint64    // MaxRows is the soft assignment target of the segment and is fixed when the segment becomes growing.
+	MaxBinarySize         uint64    // MaxBinarySize is the soft assignment target of the segment and is fixed when the segment becomes growing.
 	CreateTime            time.Time // created timestamp of this segment, it's a fixed value when segment is created, not a tso.
 	LastModifiedTime      time.Time // LastWriteTime is the last write time of this segment, it's not a tso, just a local time.
 	CreateSegmentTimeTick uint64
 	BinLogCounter         uint64 // BinLogCounter is the counter of binlog (equal to the binlog file count of primary key), it's an async stat not real time.
 	BinLogFileCounter     uint64 // BinLogFileCounter is the counter of binlog files, it's an async stat not real time.
-	ReachLimit            bool   // ReachLimit is a flag to indicate the segment reach the limit once.
+	ReachLimit            bool   // ReachLimit means this segment has accepted its one allocation that crossed the soft assignment target.
 	Level                 datapb.SegmentLevel
 }
 
@@ -104,12 +105,18 @@ func NewProtoFromSegmentStat(stat *SegmentStats) *streamingpb.SegmentAssignmentS
 // AllocRows alloc space of rows on current segment.
 // Return true if the segment is assigned.
 func (s *SegmentStats) AllocRows(m ModifiedMetrics) bool {
-	if m.BinarySize > s.BinaryCanBeAssign() || m.Rows > s.RowsCanBeAssign() {
-		if s.Modified.BinarySize > 0 {
-			// if the binary size is not empty, it means the segment cannot hold more data, mark it as reach limit.
-			s.ReachLimit = true
-		}
+	// Every segment may accept exactly one allocation that crosses its soft
+	// assignment target. Once that crossing allocation has been accepted, all
+	// later allocations must move to another segment.
+	if s.ReachLimit || s.isOverAssignmentTarget() {
+		s.ReachLimit = true
 		return false
+	}
+
+	if m.BinarySize > s.BinaryCanBeAssign() || m.Rows > s.RowsCanBeAssign() {
+		// The target is a sealing threshold, not a hard admission limit. Accept
+		// the indivisible allocation that crosses it and seal afterwards.
+		s.ReachLimit = true
 	}
 
 	s.Modified.Collect(m)
@@ -117,19 +124,43 @@ func (s *SegmentStats) AllocRows(m ModifiedMetrics) bool {
 	return true
 }
 
+func (s *SegmentStats) isOverAssignmentTarget() bool {
+	return s.Modified.BinarySize > s.MaxBinarySize || s.Modified.Rows > s.MaxRows
+}
+
+// AllocRuntimeFlushSize records runtime-only size growth for flush HWM/LWM decisions.
+func (s *SegmentStats) AllocRuntimeFlushSize(size uint64) {
+	if size > math.MaxUint64-s.RuntimeFlushSize {
+		s.RuntimeFlushSize = math.MaxUint64
+		return
+	}
+	s.RuntimeFlushSize += size
+}
+
+// FlushSize returns the size used by runtime flush decisions.
+func (s *SegmentStats) FlushSize() uint64 {
+	if s.RuntimeFlushSize > 0 {
+		return s.RuntimeFlushSize
+	}
+	return s.Modified.BinarySize
+}
+
 // BinaryCanBeAssign returns the capacity of binary size can be inserted.
 func (s *SegmentStats) BinaryCanBeAssign() uint64 {
-	return s.MaxBinarySize - s.Modified.BinarySize
+	return SaturatingSubUint64(s.MaxBinarySize, s.Modified.BinarySize)
 }
 
 // RowsCanBeAssign returns the capacity of rows can be inserted.
 func (s *SegmentStats) RowsCanBeAssign() uint64 {
-	return s.MaxRows - s.Modified.Rows
+	return SaturatingSubUint64(s.MaxRows, s.Modified.Rows)
 }
 
 // ShouldBeSealed returns if the segment should be sealed.
 func (s *SegmentStats) ShouldBeSealed() bool {
-	return s.ReachLimit
+	// ReachLimit is runtime-only, so it is lost when SegmentStats is rebuilt
+	// from the persisted assignment stat. Recover the same sealing decision
+	// from the persisted modified metrics and assignment targets.
+	return s.ReachLimit || s.isOverAssignmentTarget()
 }
 
 // IsEmpty returns if the segment is empty.

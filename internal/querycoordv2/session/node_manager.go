@@ -18,7 +18,6 @@ package session
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
@@ -26,8 +25,9 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -78,7 +78,7 @@ func (m *NodeManager) IsStoppingNode(nodeID int64) (bool, error) {
 
 	node := m.nodes[nodeID]
 	if node == nil {
-		return false, fmt.Errorf("nodeID[%d] isn't existed", nodeID)
+		return false, merr.WrapErrNodeNotFound(nodeID)
 	}
 	return node.IsStoppingState(), nil
 }
@@ -359,7 +359,7 @@ func (m *NodeManager) cleanupLoop(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Info("cleanupLoop stopped")
+			mlog.Info(context.TODO(), "cleanupLoop stopped")
 			return
 		case <-ticker.C:
 			m.ClearExpiredResourceExhaustion()

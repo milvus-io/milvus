@@ -44,15 +44,20 @@ class GroupChunk {
         return it->second;
     }
 
-    // Add a chunk for a specific field
-    void
-    AddChunk(FieldId field_id, std::shared_ptr<Chunk> chunk) {
-        if (chunks_.find(field_id) != chunks_.end()) {
-            ThrowInfo(ErrorCode::FieldAlreadyExist,
-                      "Field {} already exists in GroupChunk",
-                      field_id.get());
+    // Borrow the chunk for a field WITHOUT sharing ownership. The returned
+    // pointer is valid only while this GroupChunk stays pinned/resident (e.g.
+    // for the lifetime of the CellAccessor that pinned it). Bulk accessors use
+    // this on the hot path to avoid the per-row shared_ptr refcount bump that
+    // GetChunk() incurs — an atomic RMW on a shared control block that contends
+    // across concurrent search threads. For anything that must outlive the pin,
+    // use GetChunk() instead.
+    Chunk*
+    GetChunkRaw(FieldId field_id) const {
+        auto it = chunks_.find(field_id);
+        if (it == chunks_.end()) {
+            return nullptr;
         }
-        chunks_[field_id] = std::move(chunk);
+        return it->second.get();
     }
 
     uint64_t
@@ -62,12 +67,6 @@ class GroupChunk {
             total_size += chunk.second->Size();
         }
         return total_size;
-    }
-
-    // Get all chunks
-    const std::unordered_map<FieldId, std::shared_ptr<Chunk>>&
-    GetChunks() const {
-        return chunks_;
     }
 
     cachinglayer::ResourceUsage
@@ -86,12 +85,6 @@ class GroupChunk {
             return 0;
         }
         return chunks_.begin()->second->RowNums();
-    }
-
-    // Check if the chunk for a specific field exists
-    bool
-    HasChunk(FieldId field_id) const {
-        return chunks_.find(field_id) != chunks_.end();
     }
 
  private:

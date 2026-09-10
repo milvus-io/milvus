@@ -12,7 +12,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	internaltypes "github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
@@ -27,16 +27,24 @@ func TestWALLifetime(t *testing.T) {
 		resource.OptMixCoordClient(fMixcoord),
 	)
 
+	// Gate the term-11 open so the background task cannot converge while the
+	// canceled-context assertions below run: the waiters must actually wait
+	// (and observe the cancellation) instead of racing with the background
+	// convergence.
+	term11OpenGate := make(chan struct{})
 	opener := mock_wal.NewMockOpener(t)
 	opener.EXPECT().Open(mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, oo *wal.OpenOption) (wal.WAL, error) {
+			if oo.Channel.Term == 11 {
+				<-term11OpenGate
+			}
 			l := mock_wal.NewMockWAL(t)
 			l.EXPECT().Channel().Return(oo.Channel)
 			l.EXPECT().Close().Return()
 			return l, nil
 		})
 
-	wlt := newWALLifetime(opener, channel, log.With())
+	wlt := newWALLifetime(opener, channel, mlog.With())
 	assert.Nil(t, wlt.GetWAL())
 
 	// Test open.
@@ -100,6 +108,9 @@ func TestWALLifetime(t *testing.T) {
 
 	err = wlt.Remove(ctx, 11)
 	assert.ErrorIs(t, err, context.Canceled)
+
+	// Release the background convergence of term 11.
+	close(term11OpenGate)
 
 	err = wlt.Open(context.Background(), types.PChannelInfo{
 		Name: channel,

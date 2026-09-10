@@ -18,7 +18,6 @@ package binlog
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"math"
 	"strings"
@@ -26,13 +25,12 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -107,8 +105,8 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64) error {
 	// the "paths" has one or two paths, the first is the binlog path of a segment
 	// the other is optional, is the delta path of a segment
 	if len(paths) > 2 {
-		return merr.WrapErrImportFailed(fmt.Sprintf("too many input paths for binlog import. "+
-			"Valid paths length should be one or two, but got paths:%s", paths))
+		return merr.WrapErrImportFailedMsg("too many input paths for binlog import. "+
+			"Valid paths length should be one or two, but got paths:%s", paths)
 	}
 	insertLogs, err := listInsertLogs(r.ctx, r.cm, paths[0], r.retryAttempts)
 	if err != nil {
@@ -124,7 +122,7 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64) error {
 	r.schema = cloneschema
 
 	validIDs := lo.Keys(r.insertLogs)
-	log.Info("create binlog reader for these fields", zap.Any("validIDs", validIDs))
+	mlog.Info(r.ctx, "create binlog reader for these fields", mlog.Any("validIDs", validIDs))
 
 	rwOptions := []storage.RwOption{
 		storage.WithVersion(r.storageVersion),
@@ -178,10 +176,9 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64) error {
 	if err != nil {
 		return err
 	}
-
-	log.Ctx(context.TODO()).Info("read delete done",
-		zap.String("collection", r.schema.GetName()),
-		zap.Int("deleteRows", len(r.deleteData)),
+	mlog.Info(context.TODO(), "read delete done",
+		mlog.String("collection", r.schema.GetName()),
+		mlog.Int("deleteRows", len(r.deleteData)),
 	)
 
 	deleteFilter, err := FilterWithDelete(r)
@@ -212,7 +209,7 @@ func (r *reader) readDelete(deltaLogs []string, tsStart, tsEnd uint64) (map[any]
 		if err != nil {
 			return nil, err
 		}
-		reader, err := storage.NewDeltalogReader(pkField.DataType, []string{path}, opts...)
+		reader, err := storage.NewDeltalogReader(r.ctx, pkField.DataType, []string{path}, opts...)
 		if err != nil {
 			return nil, err
 		}
@@ -224,7 +221,7 @@ func (r *reader) readDelete(deltaLogs []string, tsStart, tsEnd uint64) (map[any]
 				if err == io.EOF {
 					break
 				}
-				log.Error("compose delete wrong, failed to read deltalogs", zap.Error(err))
+				mlog.Error(r.ctx, "compose delete wrong, failed to read deltalogs", mlog.Err(err))
 				return nil, err
 			}
 
@@ -379,7 +376,7 @@ OUTER:
 		row := insertData.GetRow(i)
 		err = result.Append(row)
 		if err != nil {
-			return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to append row, err=%s", err.Error()))
+			return nil, merr.WrapErrImportFailedMsg("failed to append row, err=%s", err.Error())
 		}
 	}
 	return result, nil

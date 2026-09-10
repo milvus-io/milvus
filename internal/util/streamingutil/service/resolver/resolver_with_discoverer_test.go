@@ -14,7 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/google.golang.org/grpc/mock_resolver"
 	"github.com/milvus-io/milvus/internal/mocks/util/streamingutil/service/mock_discoverer"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/discoverer"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -33,7 +33,7 @@ func TestResolverWithDiscoverer(t *testing.T) {
 			}
 		}
 	})
-	r := newResolverWithDiscoverer(d, time.Second, log.With())
+	r := newResolverWithDiscoverer(d, time.Second, mlog.With())
 
 	var resultOfGRPCResolver resolver.State
 	mockClientConn := mock_resolver.NewMockClientConn(t)

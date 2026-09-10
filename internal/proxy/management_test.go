@@ -862,6 +862,16 @@ func (s *ProxyManagementSuite) TestCommitBackfillResult() {
 		s.Contains(body, "bad json")
 		s.Contains(body, `"failed_segments":1`)
 		s.Contains(body, `"segment_statuses"`)
+
+		var payload struct {
+			SegmentStatuses []struct {
+				OK *bool `json:"ok"`
+			} `json:"segment_statuses"`
+		}
+		s.Require().NoError(gojson.Unmarshal(recorder.Body.Bytes(), &payload))
+		s.Require().Len(payload.SegmentStatuses, 1)
+		s.Require().NotNil(payload.SegmentStatuses[0].OK)
+		s.False(*payload.SegmentStatuses[0].OK)
 	})
 }
 

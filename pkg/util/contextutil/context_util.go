@@ -22,12 +22,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc/metadata"
 
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
+	"github.com/milvus-io/milvus/pkg/v3/util/interceptor"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type ctxTenantKey struct{}
@@ -83,6 +84,26 @@ func SetToIncomingContext(ctx context.Context, kv ...string) context.Context {
 	return metadata.NewIncomingContext(ctx, md)
 }
 
+// IsIntraClusterRequest reports whether the request comes from another Milvus
+// component rather than a user request forwarded by proxy, judged by the shape
+// of the incoming metadata:
+//   - no incoming metadata at all: an in-process call inside the same process;
+//   - metadata carries the ServerID/Cluster keys (injected by the grpcclient
+//     interceptors on every intra-cluster RPC) but no authorization key.
+//
+// A user request forwarded by proxy always carries the authorization key
+// (appended by proxy after authentication), so it never matches.
+func IsIntraClusterRequest(ctx context.Context) bool {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return true
+	}
+	if len(md.Get(util.HeaderAuthorize)) > 0 {
+		return false
+	}
+	return len(md.Get(interceptor.ServerIDKey)) > 0 || len(md.Get(interceptor.ClusterKey)) > 0
+}
+
 func GetCurUserFromContext(ctx context.Context) (string, error) {
 	username, _, err := GetAuthInfoFromContext(ctx)
 	return username, err
@@ -91,20 +112,20 @@ func GetCurUserFromContext(ctx context.Context) (string, error) {
 func GetAuthInfoFromContext(ctx context.Context) (string, string, error) {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
-		return "", "", errors.New("fail to get md from the context")
+		return "", "", merr.WrapErrParameterInvalidMsg("fail to get md from the context")
 	}
 	authorization, ok := md[strings.ToLower(util.HeaderAuthorize)]
 	if !ok || len(authorization) < 1 {
-		return "", "", fmt.Errorf("fail to get authorization from the md, %s:[token]", strings.ToLower(util.HeaderAuthorize))
+		return "", "", merr.WrapErrParameterInvalidMsg("fail to get authorization from the md, %s:[token]", strings.ToLower(util.HeaderAuthorize))
 	}
 	token := authorization[0]
 	rawToken, err := crypto.Base64Decode(token)
 	if err != nil {
-		return "", "", fmt.Errorf("fail to decode the token, token: %s", token)
+		return "", "", merr.WrapErrParameterInvalidMsg("fail to decode the token, token: %s", token)
 	}
 	secrets := strings.SplitN(rawToken, util.CredentialSeparator, 2)
 	if len(secrets) < 2 {
-		return "", "", fmt.Errorf("fail to get user info from the raw token, raw token: %s", rawToken)
+		return "", "", merr.WrapErrParameterInvalidMsg("fail to get user info from the raw token, raw token: %s", rawToken)
 	}
 	// username: secrets[0]
 	// password: secrets[1]

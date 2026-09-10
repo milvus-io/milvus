@@ -14,25 +14,26 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
-	"strings"
 	"unsafe"
 
 	"github.com/cockroachdb/errors"
 
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-// ErrLoonTransient marks any failure surfaced by the loon FFI layer. Today
-// milvus-storage does not expose structured error codes, so callers cannot
-// distinguish a recoverable concurrent-transaction conflict from a hard IO
-// error. We treat all loon failures as retryable for now and rely on a
-// bounded retry budget plus outer error handling to keep the worst case
-// finite.
+// ErrLoonTransient marks any failure surfaced by the loon FFI layer. Some
+// milvus-storage paths can still lose their structured error detail and fall
+// back to a generic error code, so callers cannot reliably distinguish a
+// transient failure from a permanent one. Treat all loon failures as retryable
+// for now and rely on a bounded retry budget plus outer error handling to keep
+// the worst case finite.
 //
-// TODO(storage v3): once milvus-storage exposes explicit error codes, narrow
-// this sentinel to only the concurrent-transaction case (FailResolver) and
-// let other errors propagate immediately as retry.Unrecoverable.
+// TODO(storage v3): once every milvus-storage FFI path preserves explicit error
+// codes end-to-end, narrow this sentinel to the retryable cases and let other
+// errors propagate immediately as retry.Unrecoverable.
 var ErrLoonTransient = errors.New("loon FFI transient error")
 
 // Property keys exported by milvus-storage/ffi_c.h.
@@ -59,7 +60,9 @@ var (
 	PropertyFSUseCRC32CChecksum   = C.GoString(C.loon_properties_fs_use_crc32c_checksum)
 
 	PropertyWriterPolicy             = C.GoString(C.loon_properties_writer_policy)
+	PropertyWriterFormat             = C.GoString(C.loon_properties_writer_format)
 	PropertyWriterSchemaBasedPattern = C.GoString(C.loon_properties_writer_schema_base_patterns)
+	PropertyWriterSchemaBasedFormats = "writer.split.schema_based.formats"
 
 	// CMEK (Customer Managed Encryption Keys) writer properties
 	PropertyWriterEncEnable = C.GoString(C.loon_properties_writer_enc_enable)    // Enable encryption for written data
@@ -67,18 +70,6 @@ var (
 	PropertyWriterEncMeta   = C.GoString(C.loon_properties_writer_enc_meta)      // Encoded metadata containing zone ID, collection ID, and key version
 	PropertyWriterEncAlgo   = C.GoString(C.loon_properties_writer_enc_algorithm) // Encryption algorithm (e.g., "AES_GCM_V1")
 )
-
-// ensureHTTPScheme prepends http:// or https:// to a bare address so it stays
-// consistent with use_ssl; leaves addresses that already carry a scheme alone.
-func ensureHTTPScheme(address string, useSSL bool) string {
-	if strings.Contains(address, "://") {
-		return address
-	}
-	if useSSL {
-		return "https://" + address
-	}
-	return "http://" + address
-}
 
 // ExtfsPrefixForCollection returns the per-collection extfs property prefix.
 func ExtfsPrefixForCollection(collectionID int64) string {
@@ -91,7 +82,7 @@ func ExtfsPrefixForCollection(collectionID int64) string {
 // StorageConfig are mapped to corresponding key-value pairs in Properties.
 func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extraKVs map[string]string) (*C.LoonProperties, error) {
 	if storageConfig == nil {
-		return nil, fmt.Errorf("storageConfig is required")
+		return nil, merr.WrapErrStorageMsg("storageConfig is required")
 	}
 
 	// Prepare key-value pairs from StorageConfig
@@ -101,7 +92,7 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 	// Add non-empty string fields
 	if storageConfig.GetAddress() != "" {
 		keys = append(keys, PropertyFSAddress)
-		values = append(values, ensureHTTPScheme(storageConfig.GetAddress(), storageConfig.GetUseSSL()))
+		values = append(values, storageConfig.GetAddress())
 	}
 	if storageConfig.GetBucketName() != "" {
 		keys = append(keys, PropertyFSBucketName)
@@ -172,9 +163,22 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 	keys = append(keys, PropertyFSUseCustomPartUpload)
 	values = append(values, "true") // hardcoded to true as in the original code
 
-	// Add integer field
+	// Add integer fields
 	keys = append(keys, PropertyFSRequestTimeoutMS)
 	values = append(values, strconv.FormatInt(storageConfig.GetRequestTimeoutMs(), 10))
+	// 0 means "not set by the producer" — leave the key absent so
+	// milvus-storage applies its registered default (100). Emitting "0"
+	// instead would clobber that default: the registry only falls back when
+	// the key is missing, and s3_client_builder takes
+	// max(max(io_capacity, 25), max_connections), so an explicit 0 lowers the
+	// connection cap. It would also change ArrowFileSystemConfig's cache key
+	// and split the filesystem cache against producers that do set it. Same
+	// convention as ChunkManager.cpp / MinioChunkManager.cpp, which apply the
+	// value only when > 0.
+	if maxConns := storageConfig.GetMaxConnections(); maxConns > 0 {
+		keys = append(keys, PropertyFSMaxConnections)
+		values = append(values, strconv.FormatUint(uint64(maxConns), 10))
+	}
 
 	// Add TLS min version (skip "default" — consistent with C++ layer filtering)
 	if v := storageConfig.GetSslTlsMinVersion(); v != "" && v != "default" {
@@ -189,6 +193,9 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 	} else {
 		values = append(values, "false")
 	}
+
+	keys = append(keys, PropertyWriterFormat)
+	values = append(values, paramtable.Get().DataNodeCfg.StorageFormat.GetValue())
 
 	// No extfs.default.* properties here. Per-collection extfs properties
 	// (extfs.{collectionID}.*) are injected downstream via
@@ -243,7 +250,7 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 
 	err := HandleLoonFFIResult(result)
 	if err != nil {
-		return nil, err
+		return nil, merr.WrapErrStorage(err, "loon properties_create failed")
 	}
 	return properties, nil
 }
@@ -253,6 +260,24 @@ func FreeProperties(props *C.LoonProperties) {
 	if props != nil {
 		C.loon_properties_free(props)
 	}
+}
+
+// MilvusTablePrimaryKeyMode describes whether a milvus-table target segment
+// keeps source primary keys or uses target-generated virtual primary keys.
+type MilvusTablePrimaryKeyMode int
+
+const (
+	// MilvusTablePrimaryKeyModeUnspecified keeps the legacy real-PK behavior for
+	// callers that do not know the collection schema.
+	MilvusTablePrimaryKeyModeUnspecified MilvusTablePrimaryKeyMode = iota
+	// MilvusTablePrimaryKeyModeExternal means source primary keys are preserved.
+	MilvusTablePrimaryKeyModeExternal
+	// MilvusTablePrimaryKeyModeVirtual means DataNode generates virtual PKs.
+	MilvusTablePrimaryKeyModeVirtual
+)
+
+func (m MilvusTablePrimaryKeyMode) usesExternalPrimaryKey() bool {
+	return m != MilvusTablePrimaryKeyModeVirtual
 }
 
 // ExternalSpecContext carries the raw external-table inputs that C++
@@ -265,21 +290,28 @@ type ExternalSpecContext struct {
 	CollectionID int64
 	Source       string
 	Spec         string // raw JSON; C++ InjectExternalSpecProperties parses
+
+	// MilvusTablePKMode is only used by the milvus-table format. The zero
+	// value keeps the legacy real-PK behavior for direct storage helpers; callers
+	// with a collection schema should set this explicitly.
+	MilvusTablePKMode MilvusTablePrimaryKeyMode
 }
 
-// injectExternalSpecProperties appends every external_spec-derived property
-// (extfs.<collectionID>.* and format-layer keys) onto an existing
-// LoonProperties via the C++ InjectExternalSpecProperties pipeline. No-op
-// when externalSource is empty.
+// injectExternalSpecProperties appends External Table filesystem and
+// format-layer properties onto an existing LoonProperties via the C++
+// InjectExternalSpecProperties pipeline. The process-local IOPS policy is
+// applied only to the extfs.<collectionID> namespace. No-op when
+// externalSource is empty.
 func injectExternalSpecProperties(properties *C.LoonProperties, collectionID int64,
 	externalSource, externalSpec string,
 ) error {
 	if properties == nil {
-		return fmt.Errorf("injectExternalSpecProperties: properties is nil")
+		return merr.WrapErrStorageMsg("injectExternalSpecProperties: properties is nil")
 	}
 	if externalSource == "" {
 		return nil
 	}
+	params := paramtable.Get()
 	cSource := C.CString(externalSource)
 	defer C.free(unsafe.Pointer(cSource))
 	var cSpec *C.char
@@ -288,8 +320,17 @@ func injectExternalSpecProperties(properties *C.LoonProperties, collectionID int
 		defer C.free(unsafe.Pointer(cSpec))
 	}
 	result := C.loon_properties_inject_external_spec(
-		properties, C.int64_t(collectionID), cSource, cSpec)
-	return HandleLoonFFIResult(result)
+		properties,
+		C.int64_t(collectionID),
+		cSource,
+		cSpec,
+		C.uint32_t(params.CommonCfg.StorageIopsInitialRate.GetAsUint32()),
+		C.uint32_t(params.CommonCfg.StorageIopsMaxRate.GetAsUint32()),
+	)
+	if err := HandleLoonFFIResult(result); err != nil {
+		return merr.WrapErrStorage(err, "loon inject_external_spec failed")
+	}
+	return nil
 }
 
 func HandleLoonFFIResult(ffiResult C.LoonFFIResult) error {
@@ -301,7 +342,7 @@ func HandleLoonFFIResult(ffiResult C.LoonFFIResult) error {
 			errStr = C.GoString(errMsg)
 		}
 
-		return errors.Wrapf(ErrLoonTransient, "FFI operation failed: %s", errStr)
+		return merr.Wrapf(ErrLoonTransient, "FFI operation failed: %s", errStr)
 	}
 	return nil
 }
@@ -342,14 +383,14 @@ func CompareManifestPath(a, b string) (int, error) {
 	bBase, bVer, bErr := UnmarshalManifestPath(b)
 
 	if aErr != nil {
-		return 0, fmt.Errorf("failed to parse manifest path %q: %w", a, aErr)
+		return 0, merr.WrapErrStorage(aErr, "failed to parse manifest path %q", a)
 	}
 	if bErr != nil {
-		return 0, fmt.Errorf("failed to parse manifest path %q: %w", b, bErr)
+		return 0, merr.WrapErrStorage(bErr, "failed to parse manifest path %q", b)
 	}
 
 	if aBase != bBase {
-		return 0, fmt.Errorf("manifest paths have different base paths: %q vs %q", aBase, bBase)
+		return 0, merr.WrapErrServiceInternalMsg("manifest paths have different base paths: %q vs %q", aBase, bBase)
 	}
 
 	switch {
@@ -382,7 +423,7 @@ func AddLobFilesToTransaction(basePath string, version int64, storageConfig *ind
 
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
 	if err != nil {
-		return 0, fmt.Errorf("failed to make properties: %w", err)
+		return 0, merr.Wrap(err, "failed to make properties")
 	}
 	defer C.loon_properties_free(cProperties)
 
@@ -393,7 +434,7 @@ func AddLobFilesToTransaction(basePath string, version int64, storageConfig *ind
 	var cTransactionHandle C.LoonTransactionHandle
 	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), C.int32_t(0) /* resolve_id */, C.uint32_t(1) /* retry_limit */, &cTransactionHandle)
 	if err := HandleLoonFFIResult(result); err != nil {
-		return 0, fmt.Errorf("failed to begin transaction: %w", err)
+		return 0, merr.WrapErrStorage(err, "failed to begin transaction")
 	}
 	defer C.loon_transaction_destroy(cTransactionHandle)
 
@@ -413,7 +454,7 @@ func AddLobFilesToTransaction(basePath string, version int64, storageConfig *ind
 		C.free(unsafe.Pointer(cPath))
 
 		if err := HandleLoonFFIResult(result); err != nil {
-			return 0, fmt.Errorf("failed to add LOB file %s: %w", lobFile.Path, err)
+			return 0, merr.WrapErrStorage(err, "failed to add LOB file %s", lobFile.Path)
 		}
 	}
 
@@ -421,7 +462,7 @@ func AddLobFilesToTransaction(basePath string, version int64, storageConfig *ind
 	var committedVersion C.int64_t
 	result = C.loon_transaction_commit(cTransactionHandle, &committedVersion)
 	if err := HandleLoonFFIResult(result); err != nil {
-		return 0, fmt.Errorf("failed to commit transaction: %w", err)
+		return 0, merr.WrapErrStorage(err, "failed to commit transaction")
 	}
 
 	return int64(committedVersion), nil
@@ -432,12 +473,12 @@ func AddLobFilesToTransaction(basePath string, version int64, storageConfig *ind
 func GetManifestLobFiles(manifestPath string, storageConfig *indexpb.StorageConfig) ([]LobFileInfo, error) {
 	basePath, version, err := UnmarshalManifestPath(manifestPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal manifest path: %w", err)
+		return nil, merr.WrapErrStorage(err, "failed to unmarshal manifest path")
 	}
 
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to make properties: %w", err)
+		return nil, merr.Wrap(err, "failed to make properties")
 	}
 	defer C.loon_properties_free(cProperties)
 
@@ -448,7 +489,7 @@ func GetManifestLobFiles(manifestPath string, storageConfig *indexpb.StorageConf
 	var cTransactionHandle C.LoonTransactionHandle
 	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), C.int32_t(0) /* resolve_id */, C.uint32_t(1) /* retry_limit */, &cTransactionHandle)
 	if err := HandleLoonFFIResult(result); err != nil {
-		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+		return nil, merr.WrapErrStorage(err, "failed to begin transaction")
 	}
 	defer C.loon_transaction_destroy(cTransactionHandle)
 
@@ -456,7 +497,7 @@ func GetManifestLobFiles(manifestPath string, storageConfig *indexpb.StorageConf
 	var cManifest *C.LoonManifest
 	result = C.loon_transaction_get_manifest(cTransactionHandle, &cManifest)
 	if err := HandleLoonFFIResult(result); err != nil {
-		return nil, fmt.Errorf("failed to get manifest: %w", err)
+		return nil, merr.WrapErrStorage(err, "failed to get manifest")
 	}
 	defer C.loon_manifest_destroy(cManifest)
 

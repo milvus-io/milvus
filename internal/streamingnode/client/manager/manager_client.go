@@ -15,6 +15,7 @@ import (
 	streamingserviceinterceptor "github.com/milvus-io/milvus/internal/util/streamingutil/service/interceptor"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/resolver"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/tracer"
@@ -107,11 +108,13 @@ func getDialOptions(rb resolver.Builder) []grpc.DialOption {
 		grpc.WithResolvers(rb),
 		grpc.WithTransportCredentials(creds),
 		grpc.WithChainUnaryInterceptor(
+			mlog.UnaryClientInterceptor(),
 			otelgrpc.UnaryClientInterceptor(tracer.GetInterceptorOpts()...),
 			interceptor.ClusterInjectionUnaryClientInterceptor(),
 			streamingserviceinterceptor.NewStreamingServiceUnaryClientInterceptor(),
 		),
 		grpc.WithChainStreamInterceptor(
+			mlog.StreamClientInterceptor(),
 			otelgrpc.StreamClientInterceptor(tracer.GetInterceptorOpts()...),
 			interceptor.ClusterInjectionStreamClientInterceptor(),
 			streamingserviceinterceptor.NewStreamingServiceStreamClientInterceptor(),

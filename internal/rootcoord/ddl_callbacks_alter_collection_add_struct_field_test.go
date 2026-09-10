@@ -75,6 +75,7 @@ func TestDDLCallbacksAlterCollectionAddStructField(t *testing.T) {
 	require.Equal(t, schemapb.DataType_ArrayOfVector, structField.Fields[1].DataType)
 	require.True(t, structField.Fields[1].Nullable)
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 1)
+	assertMaxFieldIDProperty(t, ctx, core, dbName, collectionName, 103)
 
 	resp, err = core.AddCollectionStructField(ctx, &milvuspb.AddCollectionStructFieldRequest{
 		DbName:                 dbName,

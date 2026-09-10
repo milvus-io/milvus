@@ -274,6 +274,7 @@ message StatsResult {
   repeated data.FieldBinlog bm25_logs = 12;
   map<int64, data.JsonKeyStats> json_key_stats_logs = 13;
   string manifest = 14;
+  string base_manifest = 15;
 }
 
 message StatsResults {

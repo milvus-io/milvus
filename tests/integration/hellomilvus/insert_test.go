@@ -20,14 +20,13 @@ import (
 	"context"
 	"slices"
 
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
@@ -59,14 +58,14 @@ func (s *HelloMilvusSuite) TestInsertWithDuplicateField() {
 
 	err = merr.Error(createCollectionStatus)
 	if err != nil {
-		log.Warn("createCollectionStatus fail reason", zap.Error(err))
+		mlog.Warn(context.TODO(), "createCollectionStatus fail reason", mlog.Err(err))
 	}
 
-	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
+	mlog.Info(context.TODO(), "CreateCollection result", mlog.Any("createCollectionStatus", createCollectionStatus))
 	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.True(merr.Ok(showCollectionsResp.GetStatus()))
-	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
+	mlog.Info(context.TODO(), "ShowCollections result", mlog.Any("showCollectionsResp", showCollectionsResp))
 
 	// create index
 	createIndexStatus, err := c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
@@ -78,11 +77,11 @@ func (s *HelloMilvusSuite) TestInsertWithDuplicateField() {
 	s.NoError(err)
 	err = merr.Error(createIndexStatus)
 	if err != nil {
-		log.Warn("createIndexStatus fail reason", zap.Error(err))
+		mlog.Warn(context.TODO(), "createIndexStatus fail reason", mlog.Err(err))
 	}
 
 	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
-	log.Info("Create index done")
+	mlog.Info(context.TODO(), "Create index done")
 
 	// load
 	loadStatus, err := c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
@@ -92,10 +91,10 @@ func (s *HelloMilvusSuite) TestInsertWithDuplicateField() {
 	s.NoError(err)
 	err = merr.Error(loadStatus)
 	if err != nil {
-		log.Warn("LoadCollection fail reason", zap.Error(err))
+		mlog.Warn(context.TODO(), "LoadCollection fail reason", mlog.Err(err))
 	}
 	s.WaitForLoad(ctx, collectionName)
-	log.Info("Load collection done")
+	mlog.Info(context.TODO(), "Load collection done")
 
 	pkFieldData := integration.NewInt64FieldData(integration.Int64Field, rowNum)
 	hashKeys := integration.GenerateHashKeys(rowNum)
@@ -109,11 +108,11 @@ func (s *HelloMilvusSuite) TestInsertWithDuplicateField() {
 	s.NoError(err)
 	s.False(merr.Ok(insertResult.GetStatus()))
 
-	log.Info("==================")
-	log.Info("==================")
-	log.Info("TestInsert succeed")
-	log.Info("==================")
-	log.Info("==================")
+	mlog.Info(context.TODO(), "==================")
+	mlog.Info(context.TODO(), "==================")
+	mlog.Info(context.TODO(), "TestInsert succeed")
+	mlog.Info(context.TODO(), "==================")
+	mlog.Info(context.TODO(), "==================")
 }
 
 func (s *HelloMilvusSuite) TestInsertStorageV2() {
@@ -141,14 +140,14 @@ func (s *HelloMilvusSuite) TestInsertStorageV2() {
 
 	err = merr.Error(createCollectionStatus)
 	if err != nil {
-		log.Warn("createCollectionStatus fail reason", zap.Error(err))
+		mlog.Warn(context.TODO(), "createCollectionStatus fail reason", mlog.Err(err))
 	}
 
-	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
+	mlog.Info(context.TODO(), "CreateCollection result", mlog.Any("createCollectionStatus", createCollectionStatus))
 	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.True(merr.Ok(showCollectionsResp.GetStatus()))
-	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
+	mlog.Info(context.TODO(), "ShowCollections result", mlog.Any("showCollectionsResp", showCollectionsResp))
 
 	pkFieldData := integration.NewInt64FieldData(integration.Int64Field, rowNum)
 	vecFieldData := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)

@@ -26,7 +26,7 @@ import (
 )
 
 func init() {
-	MustRegisterOperator(types.OpTypeLimit, NewLimitOpFromRepr)
+	MustRegisterOperator(types.OpTypeLimit, statelessOperatorFactory(NewLimitOpFromRepr))
 }
 
 // LimitOp limits the number of rows in each chunk.
@@ -76,7 +76,7 @@ func (o *LimitOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame,
 			dataChunk := col.Chunk(chunkIdx)
 			sliced, err := sliceArray(dataChunk, int(start), int(end))
 			if err != nil {
-				return nil, merr.WrapErrServiceInternal(fmt.Sprintf("limit_op: column %s: %v", colName, err))
+				return nil, merr.WrapErrServiceInternalMsg("limit_op: column %s: %v", colName, err)
 			}
 			collector.Set(colName, chunkIdx, sliced)
 		}
@@ -90,7 +90,7 @@ func (o *LimitOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame,
 
 	for _, colName := range colNames {
 		if err := builder.AddColumnFromChunks(colName, collector.Consume(colName)); err != nil {
-			return nil, merr.WrapErrServiceInternal(fmt.Sprintf("limit_op: %v", err))
+			return nil, merr.WrapErrServiceInternalMsg("limit_op: %v", err)
 		}
 		builder.CopyFieldMetadata(input, colName)
 	}
@@ -107,34 +107,17 @@ func (o *LimitOp) String() string {
 
 // NewLimitOpFromRepr creates a LimitOp from an OperatorRepr.
 func NewLimitOpFromRepr(repr *OperatorRepr) (Operator, error) {
-	limitVal, ok := repr.Params["limit"]
-	if !ok {
-		return nil, merr.WrapErrParameterInvalidMsg("limit_op: limit is required")
-	}
-	var limit int64
-	switch v := limitVal.(type) {
-	case int64:
-		limit = v
-	case int:
-		limit = int64(v)
-	case float64:
-		limit = int64(v)
-	default:
-		return nil, merr.WrapErrParameterInvalidMsg("limit_op: limit must be a number")
+	reader := types.NewParamReader("limit_op", repr.Params)
+	limit, err := reader.Int64("limit", true, 0)
+	if err != nil {
+		return nil, err
 	}
 	if limit <= 0 {
 		return nil, merr.WrapErrParameterInvalidMsg("limit_op: limit must be positive")
 	}
-	offset := int64(0)
-	if offsetVal, ok := repr.Params["offset"]; ok {
-		switch v := offsetVal.(type) {
-		case int64:
-			offset = v
-		case int:
-			offset = int64(v)
-		case float64:
-			offset = int64(v)
-		}
+	offset, err := reader.Int64("offset", false, 0)
+	if err != nil {
+		return nil, err
 	}
 	if offset < 0 {
 		return nil, merr.WrapErrParameterInvalidMsg("limit_op: offset must be non-negative")

@@ -50,9 +50,9 @@ func GetContext(ctx context.Context, originValue string) context.Context {
 func (s *RBACBasicTestSuite) TestBackup() {
 	ctx := GetContext(context.Background(), defaultAuth)
 
-	createRole := func(name string) {
+	createRole := func(name, description string) {
 		resp, err := s.Cluster.MilvusClient.CreateRole(ctx, &milvuspb.CreateRoleRequest{
-			Entity: &milvuspb.RoleEntity{Name: name},
+			Entity: &milvuspb.RoleEntity{Name: name, Description: description},
 		})
 		s.NoError(err)
 		s.True(merr.Ok(resp))
@@ -86,7 +86,8 @@ func (s *RBACBasicTestSuite) TestBackup() {
 	// generate some rbac content
 	// create role test_role
 	roleName := fmt.Sprintf("test_role_%d", rand.Int31n(1000000))
-	createRole(roleName)
+	roleDescription := "backup restore role description"
+	createRole(roleName, roleDescription)
 
 	// grant collection level search privilege to role test_role
 	operatePrivilege(roleName, "Search", util.AnyWord, util.DefaultDBName, milvuspb.OperatePrivilegeType_Grant)
@@ -141,6 +142,11 @@ func (s *RBACBasicTestSuite) TestBackup() {
 	})
 	s.True(grants["Search"] != nil)
 	s.True(grants[groupName] != nil)
+	roles := lo.SliceToMap(backupRBACResp.GetRBACMeta().GetRoles(), func(role *milvuspb.RoleEntity) (string, *milvuspb.RoleEntity) {
+		return role.GetName(), role
+	})
+	s.Contains(roles, roleName)
+	s.Equal(roleDescription, roles[roleName].GetDescription())
 	s.Equal(groupName, backupRBACResp.GetRBACMeta().PrivilegeGroups[0].GroupName)
 	s.Equal(2, len(backupRBACResp.GetRBACMeta().PrivilegeGroups[0].Privileges))
 
@@ -194,6 +200,11 @@ func (s *RBACBasicTestSuite) TestBackup() {
 	s.NoError(err)
 	s.True(merr.Ok(backupRBACResp2.GetStatus()))
 	s.Equal(backupRBACResp2.GetRBACMeta().String(), backupRBACResp.GetRBACMeta().String())
+	restoredRoles := lo.SliceToMap(backupRBACResp2.GetRBACMeta().GetRoles(), func(role *milvuspb.RoleEntity) (string, *milvuspb.RoleEntity) {
+		return role.GetName(), role
+	})
+	s.Contains(restoredRoles, roleName)
+	s.Equal(roleDescription, restoredRoles[roleName].GetDescription())
 
 	// clean rbac meta
 	operatePrivilege(roleName, "Search", util.AnyWord, util.DefaultDBName, milvuspb.OperatePrivilegeType_Revoke)

@@ -13,13 +13,21 @@ import (
 	"testing"
 	"time"
 
+	"github.com/apache/arrow/go/v17/arrow"
+	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/memory"
+	"github.com/apache/arrow/go/v17/parquet/pqarrow"
 	miniogo "github.com/minio/minio-go/v7"
 	miniocreds "github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/client/v2/index"
-	client "github.com/milvus-io/milvus/client/v2/milvusclient"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/client/v3/column"
+	"github.com/milvus-io/milvus/client/v3/entity"
+	"github.com/milvus-io/milvus/client/v3/index"
+	client "github.com/milvus-io/milvus/client/v3/milvusclient"
 	"github.com/milvus-io/milvus/tests/go_client/base"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
@@ -39,6 +47,13 @@ func envOrDefault(key, defaultVal string) string {
 	case "MINIO_BUCKET":
 		if _, bucket, ok := inferGoSDKMinIOConfig(); ok {
 			return bucket
+		}
+	case "MINIO_ROOT_PATH":
+		if _, _, ok := inferGoSDKMinIOConfig(); ok {
+			// The go-sdk Helm deployment writes Milvus object data under
+			// minio.rootPath=file. Keep the inferred MinIO config complete so
+			// tests that inspect persisted objects use the same prefix.
+			return "file"
 		}
 	}
 	return defaultVal
@@ -221,6 +236,96 @@ func generateParquetBytesWithCompression(schema string, numRows, startID int64, 
 	return data, nil
 }
 
+func externalTakeDenseBytes(row int64, byteWidth int, seed int64) []byte {
+	data := make([]byte, byteWidth)
+	for i := range data {
+		data[i] = byte((seed + row*int64(byteWidth) + int64(i)) % 251)
+	}
+	return data
+}
+
+func externalTakeInt8Vector(row int64) []int8 {
+	data := make([]int8, testVecDim)
+	for i := range data {
+		data[i] = int8((row*3 + int64(i)) % 127)
+	}
+	return data
+}
+
+func externalTakeInt8VectorBytes(row int64) []byte {
+	values := externalTakeInt8Vector(row)
+	data := make([]byte, len(values))
+	for i, value := range values {
+		data[i] = byte(value)
+	}
+	return data
+}
+
+func generateExternalTakeVectorParquetBytes(numRows int64) ([]byte, error) {
+	const binVecDim = 16
+	binVecByteWidth := binVecDim / 8
+	fp16ByteWidth := testVecDim * 2
+	bf16ByteWidth := testVecDim * 2
+
+	arrowSchema := arrow.NewSchema(
+		[]arrow.Field{
+			{Name: "id", Type: arrow.PrimitiveTypes.Int64},
+			{Name: "bin_vec", Type: &arrow.FixedSizeBinaryType{ByteWidth: binVecByteWidth}},
+			{Name: "fp16_vec", Type: &arrow.FixedSizeBinaryType{ByteWidth: fp16ByteWidth}},
+			{Name: "bf16_vec", Type: &arrow.FixedSizeBinaryType{ByteWidth: bf16ByteWidth}},
+			{Name: "int8_vec", Type: &arrow.FixedSizeBinaryType{ByteWidth: testVecDim}},
+		},
+		nil,
+	)
+
+	var buf bytes.Buffer
+	writer, err := pqarrow.NewFileWriter(arrowSchema, &buf, nil, pqarrow.DefaultWriterProps())
+	if err != nil {
+		return nil, fmt.Errorf("create parquet writer: %w", err)
+	}
+
+	pool := memory.NewGoAllocator()
+	builder := array.NewRecordBuilder(pool, arrowSchema)
+	defer builder.Release()
+
+	idBuilder := builder.Field(0).(*array.Int64Builder)
+	binBuilder := builder.Field(1).(*array.FixedSizeBinaryBuilder)
+	fp16Builder := builder.Field(2).(*array.FixedSizeBinaryBuilder)
+	bf16Builder := builder.Field(3).(*array.FixedSizeBinaryBuilder)
+	int8Builder := builder.Field(4).(*array.FixedSizeBinaryBuilder)
+
+	for row := int64(0); row < numRows; row++ {
+		idBuilder.Append(row)
+		binBuilder.Append(externalTakeDenseBytes(row, binVecByteWidth, 11))
+		fp16Builder.Append(externalTakeDenseBytes(row, fp16ByteWidth, 31))
+		bf16Builder.Append(externalTakeDenseBytes(row, bf16ByteWidth, 51))
+		int8Builder.Append(externalTakeInt8VectorBytes(row))
+	}
+
+	record := builder.NewRecord()
+	defer record.Release()
+
+	if err := writer.Write(record); err != nil {
+		return nil, fmt.Errorf("write record: %w", err)
+	}
+	if err := writer.Close(); err != nil {
+		return nil, fmt.Errorf("close writer: %w", err)
+	}
+
+	return buf.Bytes(), nil
+}
+
+// --- Multi-type parquet generation ---
+
+// generateMultiTypeParquetBytes creates a Parquet file with multiple data types:
+//   - id (Int64), bool_val (Boolean), int8_val (Int8), int16_val (Int16),
+//   - int32_val (Int32), float_val (Float32), double_val (Float64),
+//   - embedding (FixedSizeList[Float32, testVecDim])
+//
+// Data formulas for row i (startID+i):
+//
+//	bool_val = (i is even), int8_val = i%100, int16_val = i*10,
+//	int32_val = i*100, float_val = i*1.5, double_val = i*0.01
 const testBinVecDim = 8 // BinaryVector dimension must be multiple of 8
 
 // --- Helpers ---
@@ -347,7 +452,10 @@ func indexAndLoadCollectionWithScalarAndVector(ctx context.Context, t *testing.T
 // --- E2E Tests ---
 
 func TestExternalCollectionSnapshotRestoreAndAccess(t *testing.T) {
-	t.Parallel()
+	// Heavy case (large data volume + minute-scale index/refresh/restore
+	// waits): intentionally NOT run in parallel. Under t.Parallel() it competes
+	// with the rest of the suite for the shared standalone cluster and flakes on
+	// those timeouts; keep it serial so it gets the resources it needs.
 
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -451,7 +559,10 @@ func TestExternalCollectionSnapshotRestoreAndAccess(t *testing.T) {
 //  4. Wait for refresh to complete
 //  5. Verify the generated segment count and total row count
 func TestRefreshExternalCollectionAndVerifySegments(t *testing.T) {
-	t.Parallel()
+	// Heavy case (large data volume + minute-scale index/refresh/restore
+	// waits): intentionally NOT run in parallel. Under t.Parallel() it competes
+	// with the rest of the suite for the shared standalone cluster and flakes on
+	// those timeouts; keep it serial so it gets the resources it needs.
 
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -735,7 +846,10 @@ func TestExternalCollectionParquetCompressionCodecs(t *testing.T) {
 //  7. Query with filter and output fields
 //  8. Search with vector
 func TestExternalCollectionLoadAndQuery(t *testing.T) {
-	t.Parallel()
+	// Heavy case (large data volume + minute-scale index/refresh/restore
+	// waits): intentionally NOT run in parallel. Under t.Parallel() it competes
+	// with the rest of the suite for the shared standalone cluster and flakes on
+	// those timeouts; keep it serial so it gets the resources it needs.
 
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -980,7 +1094,10 @@ indexAndLoad:
 }
 
 func TestExternalCollectionNullableFloatVectorTakeOutput(t *testing.T) {
-	t.Parallel()
+	// Heavy case (large data volume + minute-scale index/refresh/restore
+	// waits): intentionally NOT run in parallel. Under t.Parallel() it competes
+	// with the rest of the suite for the shared standalone cluster and flakes on
+	// those timeouts; keep it serial so it gets the resources it needs.
 
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -1079,13 +1196,159 @@ func TestExternalCollectionNullableFloatVectorTakeOutput(t *testing.T) {
 	assertVector(2, []float32{8, 9, 10, 11})
 }
 
+func TestExternalCollectionAdditionalVectorTakeOutput(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	minioCfg := getMinIOConfig()
+	minioClient, err := newMinIOClient(minioCfg)
+	require.NoError(t, err)
+
+	exists, err := minioClient.BucketExists(ctx, minioCfg.bucket)
+	if err != nil || !exists {
+		t.Skipf("MinIO bucket %q not accessible (exists=%v, err=%v), skipping",
+			minioCfg.bucket, exists, err)
+	}
+
+	collName := common.GenRandomString("ext_take_vec", 6)
+	extPath := fmt.Sprintf("external-e2e-test/%s", collName)
+
+	const numRows = int64(8)
+	data, err := generateExternalTakeVectorParquetBytes(numRows)
+	require.NoError(t, err, "generate vector take parquet")
+
+	objectKey := fmt.Sprintf("%s/data.parquet", extPath)
+	uploadParquetToMinIO(ctx, t, minioClient, minioCfg.bucket, objectKey, data)
+
+	t.Cleanup(func() {
+		cleanupMinIOPrefix(context.Background(), minioClient, minioCfg.bucket,
+			fmt.Sprintf("%s/", extPath))
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+	})
+
+	schema := entity.NewSchema().
+		WithName(collName).
+		WithExternalSource(extTestURI(minioCfg, extPath)).
+		WithExternalSpec(extTestSpec(minioCfg, "parquet")).
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithExternalField("id")).
+		WithField(entity.NewField().WithName("bin_vec").WithDataType(entity.FieldTypeBinaryVector).
+			WithDim(16).WithExternalField("bin_vec")).
+		WithField(entity.NewField().WithName("fp16_vec").WithDataType(entity.FieldTypeFloat16Vector).
+			WithDim(testVecDim).WithExternalField("fp16_vec")).
+		WithField(entity.NewField().WithName("bf16_vec").WithDataType(entity.FieldTypeBFloat16Vector).
+			WithDim(testVecDim).WithExternalField("bf16_vec")).
+		WithField(entity.NewField().WithName("int8_vec").WithDataType(entity.FieldTypeInt8Vector).
+			WithDim(testVecDim).WithExternalField("int8_vec"))
+
+	err = mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+	common.CheckErr(t, err, true)
+
+	refreshAndWait(ctx, t, mc, collName)
+
+	indexes := map[string]index.Index{
+		"bin_vec":  index.NewBinFlatIndex(entity.HAMMING),
+		"fp16_vec": index.NewFlatIndex(entity.L2),
+		"bf16_vec": index.NewFlatIndex(entity.L2),
+		"int8_vec": index.NewGenericIndex("int8_hnsw", map[string]string{
+			index.MetricTypeKey: string(entity.COSINE),
+			index.IndexTypeKey:  "HNSW",
+			"M":                 "8",
+			"efConstruction":    "64",
+		}),
+	}
+	for fieldName, idx := range indexes {
+		idxTask, idxErr := mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, fieldName, idx))
+		common.CheckErr(t, idxErr, true)
+		require.NoError(t, idxTask.Await(ctx), "create index on %s", fieldName)
+	}
+
+	loadTask, loadErr := mc.LoadCollection(ctx, client.NewLoadCollectionOption(collName))
+	common.CheckErr(t, loadErr, true)
+	require.NoError(t, loadTask.Await(ctx))
+
+	assertVectorRows := func(result client.ResultSet, context string) {
+		t.Helper()
+		idCol := result.GetColumn("id")
+		require.NotNil(t, idCol, "%s id column", context)
+		for _, fieldName := range []string{"bin_vec", "fp16_vec", "bf16_vec", "int8_vec"} {
+			require.NotNil(t, result.GetColumn(fieldName), "%s %s column", context, fieldName)
+		}
+		for i := 0; i < result.ResultCount; i++ {
+			id, err := idCol.GetAsInt64(i)
+			require.NoError(t, err)
+
+			rawBin, err := result.GetColumn("bin_vec").Get(i)
+			require.NoError(t, err)
+			require.Equal(t, externalTakeDenseBytes(id, 2, 11), []byte(rawBin.(entity.BinaryVector)),
+				"%s bin_vec row id=%d", context, id)
+
+			rawFP16, err := result.GetColumn("fp16_vec").Get(i)
+			require.NoError(t, err)
+			require.Equal(t, externalTakeDenseBytes(id, testVecDim*2, 31), []byte(rawFP16.(entity.Float16Vector)),
+				"%s fp16_vec row id=%d", context, id)
+
+			rawBF16, err := result.GetColumn("bf16_vec").Get(i)
+			require.NoError(t, err)
+			require.Equal(t, externalTakeDenseBytes(id, testVecDim*2, 51), []byte(rawBF16.(entity.BFloat16Vector)),
+				"%s bf16_vec row id=%d", context, id)
+
+			rawInt8, err := result.GetColumn("int8_vec").Get(i)
+			require.NoError(t, err)
+			require.Equal(t, externalTakeInt8Vector(id), []int8(rawInt8.(entity.Int8Vector)),
+				"%s int8_vec row id=%d", context, id)
+		}
+	}
+
+	queryRes, err := mc.Query(ctx, client.NewQueryOption(collName).
+		WithConsistencyLevel(entity.ClStrong).
+		WithFilter("id in [1, 3, 5]").
+		WithOutputFields("id", "bin_vec", "fp16_vec", "bf16_vec", "int8_vec"))
+	common.CheckErr(t, err, true)
+	require.Equal(t, 3, queryRes.ResultCount)
+	assertVectorRows(queryRes, "query output")
+
+	searchRes, err := mc.Search(ctx, client.NewSearchOption(collName, 3,
+		[]entity.Vector{entity.Int8Vector(externalTakeInt8Vector(3))}).
+		WithConsistencyLevel(entity.ClStrong).
+		WithANNSField("int8_vec").
+		WithOutputFields("id", "bin_vec", "fp16_vec", "bf16_vec", "int8_vec"))
+	common.CheckErr(t, err, true)
+	require.Equal(t, 1, len(searchRes))
+	require.Greater(t, searchRes[0].ResultCount, 0)
+	assertVectorRows(searchRes[0], "int8 search output")
+}
+
+func TestExternalCollectionSparseVectorCurrentlyRejected(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	minioCfg := getMinIOConfig()
+	collName := common.GenRandomString("ext_sparse_reject", 6)
+	extPath := fmt.Sprintf("external-e2e-test/%s", collName)
+
+	schema := entity.NewSchema().
+		WithName(collName).
+		WithExternalSource(extTestURI(minioCfg, extPath)).
+		WithExternalSpec(extTestSpec(minioCfg, "parquet")).
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithExternalField("id")).
+		WithField(entity.NewField().WithName("sparse_vec").WithDataType(entity.FieldTypeSparseVector).
+			WithExternalField("sparse_vec"))
+
+	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "does not support field type SparseFloatVector")
+}
+
 // TestExternalCollectionIncrementalRefresh tests that refreshing an external collection
 // after modifying the underlying parquet files correctly updates segments:
 //  1. Initial files: data0 (ids 0-499) + data1 (ids 500-999) → 1000 rows
 //  2. Remove data1, add data2 (ids 2000-2299) → 800 rows
 //  3. Verify: data0 intact, data1 gone, data2 present
 func TestExternalCollectionIncrementalRefresh(t *testing.T) {
-	t.Parallel()
+	// Heavy case (large data volume + minute-scale index/refresh/restore
+	// waits): intentionally NOT run in parallel. Under t.Parallel() it competes
+	// with the rest of the suite for the shared standalone cluster and flakes on
+	// those timeouts; keep it serial so it gets the resources it needs.
 
 	ctx := hp.CreateContext(t, time.Second*600) // 10 min for two refresh+load cycles
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -1242,10 +1505,177 @@ func TestExternalCollectionIncrementalRefresh(t *testing.T) {
 	t.Log("Phase 3: all verifications passed — incremental refresh works correctly")
 }
 
+// TestRefreshExternalCollectionAfterAddColumnReturnsCorrectData verifies that
+// adding an external field to an already refreshed external collection patches
+// existing same-fragment segments and returns correct values for the new field.
+func TestRefreshExternalCollectionAfterAddColumnReturnsCorrectData(t *testing.T) {
+	// Heavy case (large data volume + minute-scale index/refresh/restore
+	// waits): intentionally NOT run in parallel. Under t.Parallel() it competes
+	// with the rest of the suite for the shared standalone cluster and flakes on
+	// those timeouts; keep it serial so it gets the resources it needs.
+
+	ctx := hp.CreateContext(t, time.Second*600)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	minioCfg := getMinIOConfig()
+	minioClient, err := newMinIOClient(minioCfg)
+	require.NoError(t, err)
+	skipIfMinIOUnreachable(ctx, t, minioClient, minioCfg.bucket)
+
+	collName := common.GenRandomString("ext_add_col", 6)
+	extPath := fmt.Sprintf("external-e2e-test/%s", collName)
+
+	t.Cleanup(func() {
+		cleanupMinIOPrefix(context.Background(), minioClient, minioCfg.bucket, extPath+"/")
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+	})
+
+	const rowsPerFile = int64(25)
+	totalExpectedRows := rowsPerFile * 2
+	for _, file := range []struct {
+		name    string
+		startID int64
+	}{
+		{name: "data0.parquet", startID: 0},
+		{name: "data1.parquet", startID: 100},
+	} {
+		data, genErr := generateParquetBytes(externalDataSchemaLarge, rowsPerFile, file.startID, testVecDim)
+		require.NoError(t, genErr)
+		uploadParquetToMinIO(ctx, t, minioClient, minioCfg.bucket, extPath+"/"+file.name, data)
+	}
+
+	// Create the collection without the parquet "score" column. The first
+	// refresh creates external segments whose manifests and fake binlogs cover
+	// only id, value, and embedding.
+	schema := entity.NewSchema().
+		WithName(collName).
+		WithExternalSource(extTestURI(minioCfg, extPath)).
+		WithExternalSpec(extTestSpec(minioCfg, "parquet")).
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithExternalField("id")).
+		WithField(entity.NewField().WithName("value").WithDataType(entity.FieldTypeFloat).WithExternalField("value")).
+		WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).
+			WithDim(testVecDim).WithExternalField("embedding"))
+
+	err = mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+	common.CheckErr(t, err, true)
+
+	refreshAndWait(ctx, t, mc, collName)
+	stats, err := mc.GetCollectionStats(ctx, client.NewGetCollectionStatsOption(collName))
+	common.CheckErr(t, err, true)
+	rowCount, err := strconv.ParseInt(stats["row_count"], 10, 64)
+	require.NoError(t, err)
+	require.Equal(t, totalExpectedRows, rowCount)
+
+	scoreField := entity.NewField().
+		WithName("score").
+		WithDataType(entity.FieldTypeDouble).
+		WithNullable(true).
+		WithExternalField("score")
+	err = mc.AddCollectionField(ctx, client.NewAddCollectionFieldOption(collName, scoreField))
+	require.ErrorContains(t, err, "alter collection schema operation is not supported for external collection")
+
+	// Keep the server-side external add-field and refresh coverage on the legacy
+	// RPC. The public Go SDK routes AddCollectionField through AlterCollectionSchema,
+	// which intentionally rejects external collections.
+	fieldSchema, err := proto.Marshal(scoreField.ProtoMessage())
+	require.NoError(t, err)
+	status, err := mc.GetService().AddCollectionField(ctx, &milvuspb.AddCollectionFieldRequest{
+		CollectionName: collName,
+		Schema:         fieldSchema,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, status)
+	require.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode(), status.GetReason())
+	require.Zero(t, status.GetCode(), status.GetReason())
+
+	described, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
+	common.CheckErr(t, err, true)
+	hasScore := false
+	for _, field := range described.Schema.Fields {
+		if field.Name == "score" {
+			hasScore = true
+			require.Equal(t, entity.FieldTypeDouble, field.DataType)
+			require.Equal(t, "score", field.ExternalField)
+			require.True(t, field.Nullable)
+		}
+	}
+	require.True(t, hasScore, "DescribeCollection should include the added external score field")
+
+	refreshAndWait(ctx, t, mc, collName)
+	indexAndLoadCollection(ctx, t, mc, collName, "embedding")
+
+	countRes, err := mc.Query(ctx, client.NewQueryOption(collName).
+		WithConsistencyLevel(entity.ClStrong).
+		WithOutputFields(common.QueryCountFieldName))
+	common.CheckErr(t, err, true)
+	count, err := countRes.GetColumn(common.QueryCountFieldName).GetAsInt64(0)
+	require.NoError(t, err)
+	require.Equal(t, totalExpectedRows, count)
+
+	lowIDRows, err := mc.Query(ctx, client.NewQueryOption(collName).
+		WithConsistencyLevel(entity.ClStrong).
+		WithFilter("id < 5").
+		WithOutputFields("id", "score"))
+	common.CheckErr(t, err, true)
+	assertExternalScoreRows(t, lowIDRows, map[int64]float64{
+		0: 0.00,
+		1: 0.01,
+		2: 0.02,
+		3: 0.03,
+		4: 0.04,
+	})
+
+	scoreFilterRows, err := mc.Query(ctx, client.NewQueryOption(collName).
+		WithConsistencyLevel(entity.ClStrong).
+		WithFilter("score >= 1.0 && score < 1.05").
+		WithOutputFields("id", "score"))
+	common.CheckErr(t, err, true)
+	assertExternalScoreRows(t, scoreFilterRows, map[int64]float64{
+		100: 1.00,
+		101: 1.01,
+		102: 1.02,
+		103: 1.03,
+		104: 1.04,
+	})
+}
+
+func assertExternalScoreRows(t *testing.T, result client.ResultSet, expected map[int64]float64) {
+	t.Helper()
+
+	idCol := result.GetColumn("id")
+	scoreCol := result.GetColumn("score")
+	require.NotNil(t, idCol, "query result should contain id")
+	require.NotNil(t, scoreCol, "query result should contain score")
+	require.Equal(t, len(expected), idCol.Len())
+	require.Equal(t, len(expected), scoreCol.Len())
+
+	actual := make(map[int64]float64, idCol.Len())
+	for i := 0; i < idCol.Len(); i++ {
+		id, err := idCol.GetAsInt64(i)
+		require.NoError(t, err)
+		isNull, err := scoreCol.IsNull(i)
+		require.NoError(t, err)
+		require.False(t, isNull, "score should be non-null for id %d", id)
+		score, err := scoreCol.GetAsDouble(i)
+		require.NoError(t, err)
+		actual[id] = score
+	}
+
+	require.Len(t, actual, len(expected))
+	for id, expectedScore := range expected {
+		score, ok := actual[id]
+		require.True(t, ok, "missing row for id %d in result %v", id, actual)
+		require.InDelta(t, expectedScore, score, 1e-9, "unexpected score for id %d", id)
+	}
+}
+
 // TestExternalCollectionMultipleDataTypes tests external collections with various data types:
 // Bool, Int8, Int16, Int32, Int64, Float, Double, VarChar, FloatVector
 func TestExternalCollectionMultipleDataTypes(t *testing.T) {
-	t.Parallel()
+	// Heavy case (large data volume + minute-scale index/refresh/restore
+	// waits): intentionally NOT run in parallel. Under t.Parallel() it competes
+	// with the rest of the suite for the shared standalone cluster and flakes on
+	// those timeouts; keep it serial so it gets the resources it needs.
 
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -1685,7 +2115,10 @@ func mapToEnvSlice(m map[string]string) []string {
 //  6. Query with filter
 //  7. Search with vector
 func TestExternalCollectionLanceFormat(t *testing.T) {
-	t.Parallel()
+	// Heavy case (large data volume + minute-scale index/refresh/restore
+	// waits): intentionally NOT run in parallel. Under t.Parallel() it competes
+	// with the rest of the suite for the shared standalone cluster and flakes on
+	// those timeouts; keep it serial so it gets the resources it needs.
 
 	ctx := hp.CreateContext(t, time.Second*600) // 10 min for lance operations
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -1979,7 +2412,10 @@ func buildVortexMultiTypeExternalSchema(collName, externalSource, externalSpec s
 //  6. Query with filter
 //  7. Search with vector
 func TestExternalCollectionVortexFormat(t *testing.T) {
-	t.Parallel()
+	// Heavy case (large data volume + minute-scale index/refresh/restore
+	// waits): intentionally NOT run in parallel. Under t.Parallel() it competes
+	// with the rest of the suite for the shared standalone cluster and flakes on
+	// those timeouts; keep it serial so it gets the resources it needs.
 
 	ctx := hp.CreateContext(t, time.Second*600)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -2206,7 +2642,10 @@ func TestExternalCollectionVortexFormat(t *testing.T) {
 // Vortex 0.56.0 cannot write Arrow FixedSizeBinary, so binary/half/int8 vector
 // fields remain covered by the parquet and lance multi-type tests.
 func TestExternalCollectionMultipleDataTypesVortex(t *testing.T) {
-	t.Parallel()
+	// Heavy case (large data volume + minute-scale index/refresh/restore
+	// waits): intentionally NOT run in parallel. Under t.Parallel() it competes
+	// with the rest of the suite for the shared standalone cluster and flakes on
+	// those timeouts; keep it serial so it gets the resources it needs.
 
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -2250,7 +2689,10 @@ func TestExternalCollectionMultipleDataTypesVortex(t *testing.T) {
 // format. Exercises the same multi-type schema and shared
 // refresh/index/load/query/search verification across the lance bridge.
 func TestExternalCollectionMultipleDataTypesLance(t *testing.T) {
-	t.Parallel()
+	// Heavy case (large data volume + minute-scale index/refresh/restore
+	// waits): intentionally NOT run in parallel. Under t.Parallel() it competes
+	// with the rest of the suite for the shared standalone cluster and flakes on
+	// those timeouts; keep it serial so it gets the resources it needs.
 
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -2295,7 +2737,10 @@ func TestExternalCollectionMultipleDataTypesLance(t *testing.T) {
 // types regardless of the output schema.  Vortex and Lance require schema-level
 // changes to support float32 list vectors (tracked separately).
 func TestExternalCollectionFloat32ListVector(t *testing.T) {
-	t.Parallel()
+	// Heavy case (large data volume + minute-scale index/refresh/restore
+	// waits): intentionally NOT run in parallel. Under t.Parallel() it competes
+	// with the rest of the suite for the shared standalone cluster and flakes on
+	// those timeouts; keep it serial so it gets the resources it needs.
 
 	ctx := hp.CreateContext(t, time.Second*600)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -3329,6 +3774,299 @@ func waitRefreshTerminal(t *testing.T, ctx context.Context, mc *base.MilvusClien
 			}
 		}
 	}
+}
+
+func TestRefreshExternalCollectionMilvusTableSnapshot(t *testing.T) {
+	ctx := hp.CreateContext(t, 5*time.Minute)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	const rowCount = 5000
+	const deletedCount = 500
+	sourceName := common.GenRandomString("mt_src", 6)
+	sourceSchema := entity.NewSchema().
+		WithName(sourceName).
+		WithField(entity.NewField().
+			WithName("id").
+			WithDataType(entity.FieldTypeInt64).
+			WithIsPrimaryKey(true)).
+		WithField(entity.NewField().
+			WithName("embedding").
+			WithDataType(entity.FieldTypeFloatVector).
+			WithDim(testVecDim))
+
+	require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(sourceName, sourceSchema)))
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(sourceName))
+	})
+
+	ids := make([]int64, rowCount)
+	vectors := make([][]float32, rowCount)
+	for i := 0; i < rowCount; i++ {
+		ids[i] = int64(i)
+		vectors[i] = []float32{float32(i), float32(i) + 1, float32(i) + 2, float32(i) + 3}
+	}
+	_, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(sourceName,
+		column.NewColumnInt64("id", ids),
+		column.NewColumnFloatVector("embedding", testVecDim, vectors)))
+	require.NoError(t, err)
+
+	flushTask, err := mc.Flush(ctx, client.NewFlushOption(sourceName))
+	require.NoError(t, err)
+	require.NoError(t, flushTask.Await(ctx))
+
+	deletedIDs := make([]int64, deletedCount)
+	for i := 0; i < deletedCount; i++ {
+		deletedIDs[i] = int64(i)
+	}
+	delRes, err := mc.Delete(ctx, client.NewDeleteOption(sourceName).WithInt64IDs("id", deletedIDs))
+	require.NoError(t, err)
+	require.Equal(t, int64(deletedCount), delRes.DeleteCount)
+
+	// Wait for the standalone flush rate limiter to reset before flushing
+	// the delete log. The local default is 0.1 flush requests per second.
+	time.Sleep(10 * time.Second)
+
+	flushTask, err = mc.Flush(ctx, client.NewFlushOption(sourceName))
+	require.NoError(t, err)
+	require.NoError(t, flushTask.Await(ctx))
+
+	sourceDesc, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(sourceName))
+	require.NoError(t, err)
+
+	snapshotName := common.GenRandomString("mt_snap", 6)
+	require.NoError(t, mc.CreateSnapshot(ctx, client.NewCreateSnapshotOption(snapshotName, sourceName).
+		WithDescription("milvus-table external snapshot e2e")))
+	t.Cleanup(func() {
+		_ = mc.DropSnapshot(context.Background(), client.NewDropSnapshotOption(snapshotName, sourceName))
+	})
+
+	snapshotInfo, err := mc.DescribeSnapshot(ctx, client.NewDescribeSnapshotOption(snapshotName, sourceName))
+	require.NoError(t, err)
+	require.NotEmpty(t, snapshotInfo.GetS3Location())
+
+	minioCfg := getMinIOConfig()
+	externalSource := snapshotInfo.GetS3Location()
+	externalSpec := extTestSpec(minioCfg, "milvus-table")
+
+	externalName := common.GenRandomString("mt_ext", 6)
+	externalSchema := entity.NewSchema().
+		WithName(externalName).
+		WithExternalSource(externalSource).
+		WithExternalSpec(externalSpec).
+		WithField(entity.NewField().
+			WithName("id").
+			WithDataType(entity.FieldTypeInt64).
+			WithIsPrimaryKey(true).
+			WithExternalField("id")).
+		WithField(entity.NewField().
+			WithName("embedding").
+			WithDataType(entity.FieldTypeFloatVector).
+			WithDim(testVecDim).
+			WithExternalField("embedding"))
+
+	require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(externalName, externalSchema)))
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(externalName))
+	})
+
+	refresh, err := mc.RefreshExternalCollection(ctx, client.NewRefreshExternalCollectionOption(externalName))
+	require.NoError(t, err)
+	waitRefreshTerminal(t, ctx, mc, refresh.JobID, entity.RefreshStateCompleted)
+
+	idxTask, err := mc.CreateIndex(ctx,
+		client.NewCreateIndexOption(externalName, "embedding", index.NewFlatIndex(entity.L2)))
+	require.NoError(t, err)
+	require.NoError(t, idxTask.Await(ctx))
+
+	loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(externalName))
+	require.NoError(t, err)
+	require.NoError(t, loadTask.Await(ctx))
+
+	countRes, err := mc.Query(ctx, client.NewQueryOption(externalName).
+		WithOutputFields(common.QueryCountFieldName).
+		WithConsistencyLevel(entity.ClStrong))
+	require.NoError(t, err)
+	count, err := countRes.GetColumn(common.QueryCountFieldName).GetAsInt64(0)
+	require.NoError(t, err)
+	require.Equal(t, int64(rowCount-deletedCount), count)
+
+	searchRes, err := mc.Search(ctx,
+		client.NewSearchOption(externalName, 5, []entity.Vector{entity.FloatVector(vectors[deletedCount])}).
+			WithOutputFields("id"))
+	require.NoError(t, err)
+	require.NotEmpty(t, searchRes)
+	require.Equal(t, 5, searchRes[0].ResultCount)
+	idCol := searchRes[0].GetColumn("id")
+	require.NotNil(t, idCol)
+	require.Equal(t, searchRes[0].ResultCount, idCol.Len())
+	for i := 0; i < idCol.Len(); i++ {
+		id, err := idCol.GetAsInt64(i)
+		require.NoError(t, err)
+		require.GreaterOrEqual(t, id, int64(deletedCount))
+	}
+	nearestID, err := idCol.GetAsInt64(0)
+	require.NoError(t, err)
+	require.Equal(t, int64(deletedCount), nearestID)
+
+	t.Logf("milvus-table snapshot e2e passed: sourceCollectionID=%d snapshot=%s externalSource=%s",
+		sourceDesc.ID, snapshotName, externalSource)
+}
+
+func TestRefreshExternalCollectionMilvusTableSnapshotVirtualPK(t *testing.T) {
+	ctx := hp.CreateContext(t, 5*time.Minute)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	const rowCount = 5000
+	const deletedCount = 500
+	const targetRow = 1234
+	sourceName := common.GenRandomString("mt_vpk_src", 6)
+	sourceSchema := entity.NewSchema().
+		WithName(sourceName).
+		WithField(entity.NewField().
+			WithName("id").
+			WithDataType(entity.FieldTypeInt64).
+			WithIsPrimaryKey(true)).
+		WithField(entity.NewField().
+			WithName("embedding").
+			WithDataType(entity.FieldTypeFloatVector).
+			WithDim(testVecDim))
+
+	require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(sourceName, sourceSchema)))
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(sourceName))
+	})
+
+	ids := make([]int64, rowCount)
+	vectors := make([][]float32, rowCount)
+	for i := 0; i < rowCount; i++ {
+		ids[i] = int64(i)
+		vectors[i] = []float32{float32(i), float32(i) + 1, float32(i) + 2, float32(i) + 3}
+	}
+	_, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(sourceName,
+		column.NewColumnInt64("id", ids),
+		column.NewColumnFloatVector("embedding", testVecDim, vectors)))
+	require.NoError(t, err)
+
+	flushTask, err := mc.Flush(ctx, client.NewFlushOption(sourceName))
+	require.NoError(t, err)
+	require.NoError(t, flushTask.Await(ctx))
+
+	deletedIDs := make([]int64, deletedCount)
+	for i := 0; i < deletedCount; i++ {
+		deletedIDs[i] = int64(i)
+	}
+	delRes, err := mc.Delete(ctx, client.NewDeleteOption(sourceName).WithInt64IDs("id", deletedIDs))
+	require.NoError(t, err)
+	require.Equal(t, int64(deletedCount), delRes.DeleteCount)
+
+	// Wait for the standalone flush rate limiter to reset before flushing
+	// the delete log. The local default is 0.1 flush requests per second.
+	time.Sleep(10 * time.Second)
+
+	flushTask, err = mc.Flush(ctx, client.NewFlushOption(sourceName))
+	require.NoError(t, err)
+	require.NoError(t, flushTask.Await(ctx))
+
+	sourceDesc, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(sourceName))
+	require.NoError(t, err)
+
+	snapshotName := common.GenRandomString("mt_vpk_snap", 6)
+	require.NoError(t, mc.CreateSnapshot(ctx, client.NewCreateSnapshotOption(snapshotName, sourceName).
+		WithDescription("milvus-table external snapshot virtual pk e2e")))
+	t.Cleanup(func() {
+		_ = mc.DropSnapshot(context.Background(), client.NewDropSnapshotOption(snapshotName, sourceName))
+	})
+
+	snapshotInfo, err := mc.DescribeSnapshot(ctx, client.NewDescribeSnapshotOption(snapshotName, sourceName))
+	require.NoError(t, err)
+	require.NotEmpty(t, snapshotInfo.GetS3Location())
+
+	minioCfg := getMinIOConfig()
+	externalSource := snapshotInfo.GetS3Location()
+	externalSpec := extTestSpec(minioCfg, "milvus-table")
+
+	externalName := common.GenRandomString("mt_vpk_ext", 6)
+	externalSchema := entity.NewSchema().
+		WithName(externalName).
+		WithExternalSource(externalSource).
+		WithExternalSpec(externalSpec).
+		WithField(entity.NewField().
+			WithName("source_id").
+			WithDataType(entity.FieldTypeInt64).
+			WithExternalField("id")).
+		WithField(entity.NewField().
+			WithName("embedding").
+			WithDataType(entity.FieldTypeFloatVector).
+			WithDim(testVecDim).
+			WithExternalField("embedding"))
+
+	require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(externalName, externalSchema)))
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(externalName))
+	})
+
+	refresh, err := mc.RefreshExternalCollection(ctx, client.NewRefreshExternalCollectionOption(externalName))
+	require.NoError(t, err)
+	waitRefreshTerminal(t, ctx, mc, refresh.JobID, entity.RefreshStateCompleted)
+
+	idxTask, err := mc.CreateIndex(ctx,
+		client.NewCreateIndexOption(externalName, "embedding", index.NewFlatIndex(entity.L2)))
+	require.NoError(t, err)
+	require.NoError(t, idxTask.Await(ctx))
+
+	loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(externalName))
+	require.NoError(t, err)
+	require.NoError(t, loadTask.Await(ctx))
+
+	countRes, err := mc.Query(ctx, client.NewQueryOption(externalName).
+		WithOutputFields(common.QueryCountFieldName).
+		WithConsistencyLevel(entity.ClStrong))
+	require.NoError(t, err)
+	count, err := countRes.GetColumn(common.QueryCountFieldName).GetAsInt64(0)
+	require.NoError(t, err)
+	require.Equal(t, int64(rowCount-deletedCount), count)
+
+	deletedQueryRes, err := mc.Query(ctx, client.NewQueryOption(externalName).
+		WithFilter("source_id in [0,1,499]").
+		WithOutputFields("source_id").
+		WithConsistencyLevel(entity.ClStrong))
+	require.NoError(t, err)
+	require.Zero(t, deletedQueryRes.ResultCount)
+	deletedQuerySourceIDCol := deletedQueryRes.GetColumn("source_id")
+	require.NotNil(t, deletedQuerySourceIDCol)
+	require.Zero(t, deletedQuerySourceIDCol.Len())
+
+	deletedSearchRes, err := mc.Search(ctx,
+		client.NewSearchOption(externalName, 5, []entity.Vector{entity.FloatVector(vectors[0])}).
+			WithOutputFields("source_id"))
+	require.NoError(t, err)
+	require.Len(t, deletedSearchRes, 1)
+	require.Equal(t, 5, deletedSearchRes[0].ResultCount)
+	deletedSearchSourceIDCol := deletedSearchRes[0].GetColumn("source_id")
+	require.NotNil(t, deletedSearchSourceIDCol)
+	for i := 0; i < deletedSearchSourceIDCol.Len(); i++ {
+		sourceID, err := deletedSearchSourceIDCol.GetAsInt64(i)
+		require.NoError(t, err)
+		require.GreaterOrEqual(t, sourceID, int64(deletedCount))
+	}
+
+	searchRes, err := mc.Search(ctx,
+		client.NewSearchOption(externalName, 1, []entity.Vector{entity.FloatVector(vectors[targetRow])}).
+			WithOutputFields("source_id"))
+	require.NoError(t, err)
+	require.Len(t, searchRes, 1)
+	require.Equal(t, 1, searchRes[0].ResultCount)
+	require.NotNil(t, searchRes[0].IDs)
+	virtualID, err := searchRes[0].IDs.GetAsInt64(0)
+	require.NoError(t, err)
+	sourceID, err := searchRes[0].GetColumn("source_id").GetAsInt64(0)
+	require.NoError(t, err)
+	require.Equal(t, int64(targetRow), sourceID)
+	require.NotEqual(t, sourceID, virtualID,
+		"search IDs should be synthesized virtual PKs, not source real PKs")
+
+	t.Logf("milvus-table virtual pk snapshot e2e passed: sourceCollectionID=%d snapshot=%s externalSource=%s",
+		sourceDesc.ID, snapshotName, externalSource)
 }
 
 // Regression for the explore-manifest index-drift bug: the source

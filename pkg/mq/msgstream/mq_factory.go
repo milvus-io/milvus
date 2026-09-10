@@ -24,18 +24,17 @@ import (
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/apache/pulsar-client-go/pulsaradmin/pkg/rest"
 	"github.com/apache/pulsar-client-go/pulsaradmin/pkg/utils"
-	"github.com/cockroachdb/errors"
 	"github.com/prometheus/client_golang/prometheus"
-	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/mqimpl/rocksmq/server"
 	kafkawrapper "github.com/milvus-io/milvus/pkg/v3/mq/msgstream/mqwrapper/kafka"
 	pulsarmqwrapper "github.com/milvus-io/milvus/pkg/v3/mq/msgstream/mqwrapper/pulsar"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream/mqwrapper/rmq"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/pulsar/pulsarlog"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
@@ -82,7 +81,7 @@ func (f *PmsFactory) NewMsgStream(ctx context.Context) (MsgStream, error) {
 
 	if deadline, ok := ctx.Deadline(); ok {
 		if deadline.Before(time.Now()) {
-			return nil, errors.New("context timeout when NewMsgStream")
+			return nil, merr.WrapErrServiceUnavailable("context timeout when NewMsgStream")
 		}
 		timeout = time.Until(deadline)
 	}
@@ -111,7 +110,7 @@ func (f *PmsFactory) NewTtMsgStream(ctx context.Context) (MsgStream, error) {
 	timeout := f.RequestTimeout
 	if deadline, ok := ctx.Deadline(); ok {
 		if deadline.Before(time.Now()) {
-			return nil, errors.New("context timeout when NewTtMsgStream")
+			return nil, merr.WrapErrServiceUnavailable("context timeout when NewTtMsgStream")
 		}
 		timeout = time.Until(deadline)
 	}
@@ -138,10 +137,10 @@ func (f *PmsFactory) NewTtMsgStream(ctx context.Context) (MsgStream, error) {
 func (f *PmsFactory) getAuthentication() (pulsar.Authentication, error) {
 	auth, err := pulsar.NewAuthentication(f.PulsarAuthPlugin, f.PulsarAuthParams)
 	if err != nil {
-		log.Error("build authencation from config failed, please check it!",
-			zap.String("authPlugin", f.PulsarAuthPlugin),
-			zap.Error(err))
-		return nil, errors.New("build authencation from config failed")
+		mlog.Error(context.TODO(), "build authencation from config failed, please check it!",
+			mlog.String("authPlugin", f.PulsarAuthPlugin),
+			mlog.Err(err))
+		return nil, merr.WrapErrParameterInvalidMsg("build authencation from config failed")
 	}
 	return auth, nil
 }
@@ -160,7 +159,7 @@ func (f *PmsFactory) NewMsgStreamDisposer(ctx context.Context) func([]string, st
 			}
 			topic, err := utils.GetTopicName(fullTopicName)
 			if err != nil {
-				log.Warn("failed to get topic name", zap.Error(err))
+				mlog.Warn(ctx, "failed to get topic name", mlog.Err(err))
 				return retry.Unrecoverable(err)
 			}
 			err = admin.Subscriptions().ForceDelete(*topic, subname)
@@ -172,8 +171,8 @@ func (f *PmsFactory) NewMsgStreamDisposer(ctx context.Context) func([]string, st
 						return nil
 					}
 				}
-				log.Warn("failed to clean up subscriptions", zap.String("pulsar web", f.PulsarWebAddress),
-					zap.String("topic", channel), zap.String("subname", subname), zap.Error(err))
+				mlog.Warn(ctx, "failed to clean up subscriptions", mlog.String("pulsar web", f.PulsarWebAddress),
+					mlog.String("topic", channel), mlog.String("subname", subname), mlog.Err(err))
 			}
 		}
 		return nil
@@ -228,9 +227,9 @@ func NewKmsFactory(config *paramtable.ServiceParam) Factory {
 // NewRocksmqFactory creates a new message stream factory based on rocksmq.
 func NewRocksmqFactory(path string, cfg *paramtable.ServiceParam) Factory {
 	if err := server.InitRocksMQ(path); err != nil {
-		log.Fatal("fail to init rocksmq", zap.Error(err))
+		mlog.Fatal(context.TODO(), "fail to init rocksmq", mlog.Err(err))
 	}
-	log.Info("init rocksmq msgstream success", zap.String("path", path))
+	mlog.Info(context.TODO(), "init rocksmq msgstream success", mlog.String("path", path))
 
 	return &CommonFactory{
 		Newer:             rmq.NewClientWithDefaultOptions,

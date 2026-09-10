@@ -27,15 +27,16 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/pathutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -43,36 +44,81 @@ import (
 var (
 	GlobalFileManager Manager
 	once              sync.Once
+	listeners         = make(map[string]Listener)
+	listenerMu        sync.RWMutex
 )
 
 func InitManager(storage storage.ChunkManager, mode Mode) {
 	once.Do(func() {
-		m := NewManager(storage, mode)
-		GlobalFileManager = m
+		GlobalFileManager = NewManager(storage, mode)
 	})
 }
 
-func Sync(version uint64, resourceList []*internalpb.FileResourceInfo) error {
+func Sync(ctx context.Context, version uint64, resourceList []*internalpb.FileResourceInfo) error {
 	if GlobalFileManager == nil {
-		log.Error("sync file resource to file manager not init")
+		mlog.Error(ctx, "sync file resource to file manager not init")
 		return nil
 	}
 
-	return GlobalFileManager.Sync(version, resourceList)
+	return GlobalFileManager.Sync(ctx, version, resourceList)
+}
+
+func RegisterListener(name string, listener Listener) {
+	listenerMu.Lock()
+	defer listenerMu.Unlock()
+	listeners[name] = listener
+}
+
+func UnregisterListener(name string) {
+	listenerMu.Lock()
+	defer listenerMu.Unlock()
+	delete(listeners, name)
+}
+
+func notifyListeners(event SyncEvent) {
+	listenerMu.RLock()
+	cloned := make(map[string]Listener, len(listeners))
+	for name, listener := range listeners {
+		cloned[name] = listener
+	}
+	listenerMu.RUnlock()
+
+	for name, listener := range cloned {
+		if listener == nil {
+			continue
+		}
+		if err := listener.OnFileResourceSync(event); err != nil {
+			mlog.Warn(context.TODO(), "file resource sync listener failed", mlog.String("listener", name), mlog.Err(err))
+		}
+	}
 }
 
 // Manager manage file resource
 type Manager interface {
 	GetVersion() uint64
 	// sync resource to local
-	Sync(version uint64, resourceList []*internalpb.FileResourceInfo) error
+	Sync(ctx context.Context, version uint64, resourceList []*internalpb.FileResourceInfo) error
 
 	Download(ctx context.Context, downloader storage.ChunkManager, resources ...*internalpb.FileResourceInfo) error
 	Release(resources ...*internalpb.FileResourceInfo)
+	Close()
 	Mode() Mode
 }
 
 type Mode int
+
+func (m Mode) String() string {
+	switch m {
+	case SyncMode:
+		return SyncModeStr
+	case RefMode:
+		return RefModeStr
+	case CloseMode:
+		return CloseModeStr
+	default:
+		return fmt.Sprintf("unknown(%d)", m)
+	}
+}
 
 // manager mode
 // Sync: sync when file resource list changed and download all file resource to local.
@@ -88,7 +134,13 @@ type BaseManager struct {
 	localPath string
 }
 
-func (m *BaseManager) Sync(version uint64, resourceList []*internalpb.FileResourceInfo) error {
+func newBaseManager() BaseManager {
+	return BaseManager{
+		localPath: pathutil.GetPath(pathutil.FileResourcePath, paramtable.GetNodeID()),
+	}
+}
+
+func (m *BaseManager) Sync(ctx context.Context, version uint64, resourceList []*internalpb.FileResourceInfo) error {
 	return nil
 }
 
@@ -96,8 +148,86 @@ func (m *BaseManager) Download(ctx context.Context, downloader storage.ChunkMana
 	return nil
 }
 func (m *BaseManager) Release(resources ...*internalpb.FileResourceInfo) {}
+func (m *BaseManager) Close()                                            {}
 func (m *BaseManager) Mode() Mode                                        { return CloseMode }
 func (m *BaseManager) GetVersion() uint64                                { return 0 }
+
+func (m *BaseManager) downloadFile(ctx context.Context, downloader storage.ChunkManager, resource *internalpb.FileResourceInfo, destination string, downloadTimeout time.Duration) error {
+	if downloader == nil {
+		return merr.WrapErrServiceNotReadyMsg("file resource downloader is not initialized")
+	}
+	if resource == nil {
+		return merr.WrapErrServiceInternalMsg("file resource is nil")
+	}
+
+	downloadCtx, cancel := context.WithTimeout(ctx, downloadTimeout)
+	defer cancel()
+
+	size, err := downloader.Size(downloadCtx, resource.GetPath())
+	if err != nil {
+		return merr.Wrapf(err, "get file resource size for %s", resource.GetPath())
+	}
+	if size < 0 {
+		return merr.WrapErrIoFailedMsg("file resource %s reports negative size %d", resource.GetPath(), size)
+	}
+	reader, err := downloader.Reader(downloadCtx, resource.GetPath())
+	if err != nil {
+		return merr.Wrapf(err, "open file resource %s", resource.GetPath())
+	}
+	readerClosed := false
+	defer func() {
+		if !readerClosed {
+			if err := reader.Close(); err != nil {
+				mlog.Warn(ctx, "close file resource reader failed", mlog.String("path", resource.GetPath()), mlog.Err(err))
+			}
+		}
+	}()
+
+	destinationDir := path.Dir(destination)
+	if err := os.MkdirAll(destinationDir, os.ModePerm); err != nil {
+		return merr.WrapErrIoFailed(destinationDir, err)
+	}
+	temporary, err := os.CreateTemp(destinationDir, ".file-resource-*")
+	if err != nil {
+		return merr.WrapErrIoFailed(destination, err)
+	}
+	temporaryPath := temporary.Name()
+	committed := false
+	defer func() {
+		if !committed {
+			temporary.Close()
+			if err := os.Remove(temporaryPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+				mlog.Warn(ctx, "remove incomplete file resource failed", mlog.String("path", temporaryPath), mlog.Err(err))
+			}
+		}
+	}()
+
+	written, err := io.Copy(temporary, reader)
+	if err != nil {
+		return merr.Wrapf(err, "download file resource %s", resource.GetPath())
+	}
+	if written != size {
+		return merr.WrapErrIoUnexpectEOF(resource.GetPath(), errors.Newf("expected %d bytes, downloaded %d", size, written))
+	}
+	if err := reader.Close(); err != nil {
+		return merr.WrapErrIoFailed(resource.GetPath(), err)
+	}
+	readerClosed = true
+	if err := downloadCtx.Err(); err != nil {
+		return merr.Wrapf(err, "download file resource %s", resource.GetPath())
+	}
+	if err := temporary.Sync(); err != nil {
+		return merr.WrapErrIoFailed(destination, err)
+	}
+	if err := temporary.Close(); err != nil {
+		return merr.WrapErrIoFailed(destination, err)
+	}
+	if err := os.Rename(temporaryPath, destination); err != nil {
+		return merr.WrapErrIoFailed(destination, err)
+	}
+	committed = true
+	return nil
+}
 
 // Manager with Sync Mode
 // mixcoord should sync all node after add or remove file resource.
@@ -116,94 +246,78 @@ func (m *SyncManager) GetVersion() uint64 {
 }
 
 // sync file to local if file mode was Sync
-func (m *SyncManager) Sync(version uint64, resourceList []*internalpb.FileResourceInfo) error {
+func (m *SyncManager) Sync(ctx context.Context, version uint64, resourceList []*internalpb.FileResourceInfo) error {
 	m.Lock()
 	defer m.Unlock()
 
-	// skip if version is not changed
 	if version <= m.version.Load() {
 		return nil
 	}
 
 	newResourceMap := make(map[string]int64)
-	removes := []int64{}
-	ctx := context.Background()
+	resolvedResources := make([]*ResolvedFileResource, 0, len(resourceList))
+
 	for _, resource := range resourceList {
 		newResourceMap[resource.GetName()] = resource.GetId()
-		if id, ok := m.resourceMap[resource.GetName()]; ok {
-			if id == resource.GetId() {
-				continue
-			}
-		}
-
-		// download new resource
 		localResourcePath := path.Join(m.localPath, fmt.Sprint(resource.GetId()))
-
-		// remove old file if exist
-		err := os.RemoveAll(localResourcePath)
-		if err != nil {
-			log.Warn("remove invalid local resource failed", zap.String("path", localResourcePath), zap.Error(err))
+		localFilePath := path.Join(localResourcePath, path.Base(resource.GetPath()))
+		if id, ok := m.resourceMap[resource.GetName()]; ok && id == resource.GetId() {
+			resolvedResources = append(resolvedResources, &ResolvedFileResource{
+				ID:        resource.GetId(),
+				Name:      resource.GetName(),
+				Path:      resource.GetPath(),
+				LocalPath: localFilePath,
+			})
+			continue
 		}
 
-		err = os.MkdirAll(localResourcePath, os.ModePerm)
-		if err != nil {
+		downloadTimeout := paramtable.Get().CommonCfg.FileResourceDownloadTimeout.GetAsDurationByParse()
+		if err := m.downloadFile(ctx, m.downloader, resource, localFilePath, downloadTimeout); err != nil {
+			mlog.Warn(ctx, "download file resource failed",
+				mlog.String("name", resource.GetName()),
+				mlog.String("path", resource.GetPath()),
+				mlog.Int64("resourceID", resource.GetId()),
+				mlog.Duration("timeout", downloadTimeout),
+				mlog.Err(err))
 			return err
 		}
+		mlog.Info(ctx, "sync file resource to local", mlog.String("path", localResourcePath), mlog.Int64("resourceID", resource.GetId()))
+		resolvedResources = append(resolvedResources, &ResolvedFileResource{
+			ID:        resource.GetId(),
+			Name:      resource.GetName(),
+			Path:      resource.GetPath(),
+			LocalPath: localFilePath,
+		})
+	}
 
-		if err := func() error {
-			reader, err := m.downloader.Reader(ctx, resource.GetPath())
-			if err != nil {
-				log.Info("download resource failed", zap.String("path", resource.GetPath()), zap.Error(err))
-				return err
-			}
-			defer reader.Close()
+	if err := analyzer.UpdateGlobalResourceInfo(newResourceMap); err != nil {
+		return err
+	}
 
-			fileName := path.Join(localResourcePath, path.Base(resource.GetPath()))
-			file, err := os.Create(fileName)
-			if err != nil {
-				return err
-			}
-			defer file.Close()
-
-			if _, err = io.Copy(file, reader); err != nil {
-				log.Info("download resource failed", zap.String("path", resource.GetPath()), zap.Error(err))
-				return err
-			}
-			log.Info("sync file to local", zap.String("name", fileName), zap.Int64("id", resource.GetId()))
-			return nil
-		}(); err != nil {
-			return err
+	activeIDs := make(map[int64]struct{}, len(newResourceMap))
+	for _, id := range newResourceMap {
+		activeIDs[id] = struct{}{}
+	}
+	for _, id := range m.resourceMap {
+		if _, ok := activeIDs[id]; ok {
+			continue
+		}
+		if err := os.RemoveAll(path.Join(m.localPath, fmt.Sprint(id))); err != nil {
+			mlog.Warn(ctx, "remove local file resource failed", mlog.Int64("resourceID", id), mlog.Err(err))
 		}
 	}
 
-	for name, id := range m.resourceMap {
-		if newId, ok := newResourceMap[name]; ok {
-			if newId != id {
-				// remove old resource with same name
-				removes = append(removes, id)
-			}
-		} else {
-			// remove old resource not exist in new resource list
-			removes = append(removes, id)
-		}
-	}
-
-	for _, resourceID := range removes {
-		err := os.RemoveAll(path.Join(m.localPath, fmt.Sprint(resourceID)))
-		if err != nil {
-			log.Warn("remove local resource failed", zap.Int64("id", resourceID), zap.Error(err))
-		}
-	}
 	m.resourceMap = newResourceMap
 	m.version.Store(version)
-	return analyzer.UpdateGlobalResourceInfo(newResourceMap)
+	notifyListeners(SyncEvent{Version: version, Resources: resolvedResources})
+	return nil
 }
 
 func (m *SyncManager) Mode() Mode { return SyncMode }
 
 func NewSyncManager(downloader storage.ChunkManager) *SyncManager {
 	return &SyncManager{
-		BaseManager: BaseManager{localPath: pathutil.GetPath(pathutil.FileResourcePath, paramtable.GetNodeID())},
+		BaseManager: newBaseManager(),
 		downloader:  downloader,
 		resourceMap: make(map[string]int64),
 		version:     atomic.NewUint64(0),
@@ -222,6 +336,8 @@ type RefManager struct {
 
 	finished *typeutil.ConcurrentMap[string, bool]
 	sf       *conc.Singleflight[interface{}]
+	cancel   context.CancelFunc
+	wg       sync.WaitGroup
 }
 
 func (m *RefManager) Download(ctx context.Context, downloader storage.ChunkManager, resources ...*internalpb.FileResourceInfo) error {
@@ -233,6 +349,12 @@ func (m *RefManager) Download(ctx context.Context, downloader storage.ChunkManag
 		m.ref[key] += 1
 	}
 	m.Unlock()
+	downloaded := false
+	defer func() {
+		if !downloaded {
+			m.Release(resources...)
+		}
+	}()
 
 	for _, r := range resources {
 		resource := r
@@ -247,27 +369,15 @@ func (m *RefManager) Download(ctx context.Context, downloader storage.ChunkManag
 			}
 
 			localResourcePath := path.Join(m.localPath, key)
-
-			err := os.MkdirAll(localResourcePath, os.ModePerm)
-			if err != nil {
-				return nil, err
-			}
-
-			reader, err := downloader.Reader(ctx, resource.GetPath())
-			if err != nil {
-				log.Info("download resource failed", zap.String("path", resource.GetPath()), zap.Error(err))
-				return nil, err
-			}
-			defer reader.Close()
-
 			fileName := path.Join(localResourcePath, path.Base(resource.GetPath()))
-			file, err := os.Create(fileName)
-			if err != nil {
-				return nil, err
-			}
-			defer file.Close()
-
-			if _, err = io.Copy(file, reader); err != nil {
+			downloadTimeout := paramtable.Get().CommonCfg.FileResourceDownloadTimeout.GetAsDurationByParse()
+			if err := m.downloadFile(ctx, downloader, resource, fileName, downloadTimeout); err != nil {
+				mlog.Warn(ctx, "download file resource failed",
+					mlog.String("name", resource.GetName()),
+					mlog.String("path", resource.GetPath()),
+					mlog.Int64("resourceID", resource.GetId()),
+					mlog.Duration("timeout", downloadTimeout),
+					mlog.Err(err))
 				return nil, err
 			}
 			m.finished.Insert(key, true)
@@ -278,6 +388,7 @@ func (m *RefManager) Download(ctx context.Context, downloader storage.ChunkManag
 			return err
 		}
 	}
+	downloaded = true
 	return nil
 }
 
@@ -309,20 +420,37 @@ func (m *RefManager) CleanResource() {
 }
 
 func (m *RefManager) Start() {
-	go m.GcLoop()
+	ctx, cancel := context.WithCancel(context.Background())
+	m.cancel = cancel
+	m.wg.Add(1)
+	go m.GcLoop(ctx)
 }
 
-func (m *RefManager) GcLoop() {
+func (m *RefManager) GcLoop(ctx context.Context) {
+	defer m.wg.Done()
 	ticker := time.NewTicker(15 * time.Minute)
+	defer ticker.Stop()
 
-	for range ticker.C {
-		m.CleanResource()
+	for {
+		select {
+		case <-ticker.C:
+			m.CleanResource()
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func (m *RefManager) Close() {
+	if m.cancel != nil {
+		m.cancel()
+		m.wg.Wait()
 	}
 }
 
 func NewRefManger() *RefManager {
 	return &RefManager{
-		BaseManager: BaseManager{localPath: pathutil.GetPath(pathutil.FileResourcePath, paramtable.GetNodeID())},
+		BaseManager: newBaseManager(),
 		ref:         map[string]int{},
 		finished:    typeutil.NewConcurrentMap[string, bool](),
 		sf:          &conc.Singleflight[interface{}]{},
@@ -332,7 +460,8 @@ func NewRefManger() *RefManager {
 func NewManager(storage storage.ChunkManager, mode Mode) Manager {
 	switch mode {
 	case CloseMode:
-		return &BaseManager{}
+		manager := newBaseManager()
+		return &manager
 	case SyncMode:
 		return NewSyncManager(storage)
 	case RefMode:

@@ -26,16 +26,17 @@ package packed
 import "C"
 
 import (
-	"fmt"
+	"context"
 	"net/url"
+	"path"
 	"sort"
 	"strings"
 	"unsafe"
 
-	"go.uber.org/zap"
-
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // formatExtensions maps format names to their expected file extensions.
@@ -88,8 +89,10 @@ func NormalizeFileInfos(fileInfos []FileInfo, format string) ([]FileInfo, int) {
 // a row total at this layer. Real row counts are only available after manifest
 // construction where Fragment.RowCount = endRow - startRow.
 type FileInfo struct {
-	FilePath string
-	NumRows  int64
+	FilePath        string
+	NumRows         int64
+	SourceSegmentID int64
+	Deltalogs       []*datapb.FieldBinlog
 }
 
 // ExploreFiles scans an external directory and returns file information.
@@ -107,16 +110,16 @@ func GetFileInfo(
 
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create properties: %w", err)
+		return nil, merr.Wrap(err, "failed to create properties")
 	}
 	defer C.loon_properties_free(cProperties)
 	if err := injectExternalSpecProperties(cProperties, extfs.CollectionID, extfs.Source, extfs.Spec); err != nil {
-		return nil, fmt.Errorf("inject extfs: %w", err)
+		return nil, merr.Wrap(err, "inject extfs")
 	}
 
 	normalizedFilePath, err := normalizeExternalPathForStorage(filePath, cProperties, extfs)
 	if err != nil {
-		return nil, fmt.Errorf("normalize external file path: %w", err)
+		return nil, merr.WrapErrStorage(err, "normalize external file path")
 	}
 	cFilePath := C.CString(normalizedFilePath)
 	defer C.free(unsafe.Pointer(cFilePath))
@@ -125,7 +128,7 @@ func GetFileInfo(
 
 	result := C.loon_exttable_get_file_info(cFormat, cFilePath, cProperties, &numRows)
 	if err := HandleLoonFFIResult(result); err != nil {
-		return nil, fmt.Errorf("loon_exttable_get_file_info failed: %w", err)
+		return nil, merr.WrapErrStorage(err, "loon_exttable_get_file_info failed")
 	}
 
 	return &FileInfo{
@@ -173,6 +176,70 @@ func normalizeExternalPathForStorage(path string, properties *C.LoonProperties, 
 	return u.String(), nil
 }
 
+func resolveExternalSourceRelativePath(sourcePath string, properties *C.LoonProperties, extfs ExternalSpecContext) (string, error) {
+	if sourcePath == "" || extfs.Source == "" || properties == nil {
+		return sourcePath, nil
+	}
+	if isAbsoluteExternalPath(sourcePath) {
+		return normalizeExternalPathForStorage(sourcePath, properties, extfs)
+	}
+
+	sourceURI, err := url.Parse(extfs.Source)
+	if err != nil {
+		return "", err
+	}
+	if sourceURI.Scheme == "" || sourceURI.Host == "" {
+		return sourcePath, nil
+	}
+
+	prefix := ExtfsPrefixForCollection(extfs.CollectionID)
+	bucketName := loonPropertyString(properties, prefix+"bucket_name")
+	if bucketName == "" {
+		return "", merr.WrapErrServiceInternalMsg("resolve external source relative path: missing bucket_name for %s", extfs.Source)
+	}
+	address := loonPropertyString(properties, prefix+"address")
+	addressHost, err := propertyAddressHost(address)
+	if err != nil {
+		return "", err
+	}
+
+	resolved := &url.URL{
+		Scheme: sourceURI.Scheme,
+		Host:   sourceURI.Host,
+	}
+	relativePath := strings.TrimPrefix(sourcePath, "/")
+	if addressHost != "" {
+		resolved.Host = addressHost
+		resolved.Path = "/" + path.Join(bucketName, relativePath)
+	} else if sourceURI.Host == bucketName {
+		resolved.Path = "/" + relativePath
+	} else if firstPathSegment(sourceURI.Path) == bucketName {
+		resolved.Path = "/" + path.Join(bucketName, relativePath)
+	} else {
+		resolved.Path = "/" + relativePath
+	}
+	return normalizeExternalPathForStorage(resolved.String(), properties, extfs)
+}
+
+func isAbsoluteExternalPath(filePath string) bool {
+	u, err := url.Parse(filePath)
+	if err != nil {
+		return false
+	}
+	return u.Scheme != "" || path.IsAbs(filePath)
+}
+
+func firstPathSegment(filePath string) string {
+	trimmed := strings.Trim(filePath, "/")
+	if trimmed == "" {
+		return ""
+	}
+	if idx := strings.Index(trimmed, "/"); idx >= 0 {
+		return trimmed[:idx]
+	}
+	return trimmed
+}
+
 func loonPropertyString(properties *C.LoonProperties, key string) string {
 	cKey := C.CString(key)
 	defer C.free(unsafe.Pointer(cKey))
@@ -208,6 +275,58 @@ func ExploreFilesReturnManifestPath(
 	storageConfig *indexpb.StorageConfig,
 	extfs ExternalSpecContext,
 ) ([]FileInfo, string, error) {
+	if isMilvusTableFormat(format) {
+		metadataPath, err := resolveMilvusTableSnapshotMetadataPath(exploreDir, extfs.Spec)
+		if err != nil {
+			return nil, "", err
+		}
+		metadataBytes, err := ReadFileWithExternalSpec(storageConfig, metadataPath, extfs)
+		if err != nil {
+			return nil, "", merr.Wrap(err, "read milvus snapshot metadata")
+		}
+		cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
+		if err != nil {
+			return nil, "", merr.Wrap(err, "failed to create properties")
+		}
+		defer C.loon_properties_free(cProperties)
+		if err := injectExternalSpecProperties(cProperties, extfs.CollectionID, extfs.Source, extfs.Spec); err != nil {
+			return nil, "", merr.Wrap(err, "inject extfs")
+		}
+		resolveSourcePath := func(sourcePath string) (string, error) {
+			return resolveExternalSourceRelativePath(sourcePath, cProperties, extfs)
+		}
+		fileInfos, err := buildMilvusTableFileInfosFromSnapshotMetadata(
+			metadataBytes,
+			func(manifestPath string, formatVersion int32) (*datapb.SegmentDescription, error) {
+				resolvedManifestPath, err := resolveSourcePath(manifestPath)
+				if err != nil {
+					return nil, err
+				}
+				segment, err := readMilvusSnapshotSegmentManifest(resolvedManifestPath, formatVersion, func(path string) ([]byte, error) {
+					return ReadFileWithExternalSpec(storageConfig, path, extfs)
+				})
+				if err != nil {
+					return nil, err
+				}
+				if err := resolveMilvusTableSegmentDeltalogPaths(segment, resolveSourcePath); err != nil {
+					return nil, err
+				}
+				return segment, nil
+			},
+			func(manifestPath string) (string, error) {
+				return resolveMilvusTableSourceManifestPath(manifestPath, resolveSourcePath)
+			},
+		)
+		if err != nil {
+			return nil, "", err
+		}
+		manifestPath, err := writeMilvusTableExploreManifest(baseDir, fileInfos, storageConfig)
+		if err != nil {
+			return nil, "", err
+		}
+		return fileInfos, manifestPath, nil
+	}
+
 	cColumns := make([]*C.char, len(columns))
 	for i, col := range columns {
 		cColumns[i] = C.CString(col)
@@ -225,16 +344,16 @@ func ExploreFilesReturnManifestPath(
 
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to create properties: %w", err)
+		return nil, "", merr.Wrap(err, "failed to create properties")
 	}
 	defer C.loon_properties_free(cProperties)
 	if err := injectExternalSpecProperties(cProperties, extfs.CollectionID, extfs.Source, extfs.Spec); err != nil {
-		return nil, "", fmt.Errorf("inject extfs: %w", err)
+		return nil, "", merr.Wrap(err, "inject extfs")
 	}
 
 	normalizedExploreDir, err := normalizeExternalPathForStorage(exploreDir, cProperties, extfs)
 	if err != nil {
-		return nil, "", fmt.Errorf("normalize external explore path: %w", err)
+		return nil, "", merr.WrapErrStorage(err, "normalize external explore path")
 	}
 	cExploreDir := C.CString(normalizedExploreDir)
 	defer C.free(unsafe.Pointer(cExploreDir))
@@ -253,10 +372,10 @@ func ExploreFilesReturnManifestPath(
 		&numFiles, &outColumnGroupsPath,
 	)
 	if err := HandleLoonFFIResult(result); err != nil {
-		return nil, "", fmt.Errorf("loon_exttable_explore failed: %w", err)
+		return nil, "", merr.WrapErrStorage(err, "loon_exttable_explore failed")
 	}
 	if outColumnGroupsPath == nil {
-		return nil, "", fmt.Errorf("loon_exttable_explore returned nil column groups path")
+		return nil, "", merr.WrapErrServiceInternalMsg("loon_exttable_explore returned nil column groups path")
 	}
 	manifestPath := C.GoString(outColumnGroupsPath)
 	C.loon_free_cstr(outColumnGroupsPath)
@@ -272,9 +391,9 @@ func ExploreFilesReturnManifestPath(
 	// NormalizeFileInfos doc for the index-drift bug this prevents.
 	fileInfos, skipped := NormalizeFileInfos(fileInfos, format)
 	if skipped > 0 {
-		log.Info("Skipped files with non-matching format during explore",
-			zap.Int("skippedCount", skipped),
-			zap.String("format", format))
+		mlog.Info(context.TODO(), "Skipped files with non-matching format during explore",
+			mlog.Int("skippedCount", skipped),
+			mlog.String("format", format))
 	}
 
 	return fileInfos, manifestPath, nil
@@ -291,21 +410,21 @@ func ReadFileInfosFromManifestPath(
 
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create properties: %w", err)
+		return nil, merr.Wrap(err, "failed to create properties")
 	}
 	defer C.loon_properties_free(cProperties)
 
 	var manifest *C.LoonManifest
 	result := C.loon_exttable_read_manifest(cManifestPath, cProperties, &manifest)
 	if err := HandleLoonFFIResult(result); err != nil {
-		return nil, fmt.Errorf("loon_exttable_read_manifest failed: %w", err)
+		return nil, merr.WrapErrStorage(err, "loon_exttable_read_manifest failed")
 	}
 	defer C.loon_manifest_destroy(manifest)
 
 	var fileInfos []FileInfo
 	cgroups := &manifest.column_groups
 	if cgroups.column_group_array == nil && cgroups.num_of_column_groups > 0 {
-		return nil, fmt.Errorf("column_group_array is nil but num_of_column_groups is %d", cgroups.num_of_column_groups)
+		return nil, merr.WrapErrServiceInternalMsg("column_group_array is nil but num_of_column_groups is %d", cgroups.num_of_column_groups)
 	}
 
 	cgArray := unsafe.Slice(cgroups.column_group_array, int(cgroups.num_of_column_groups))
@@ -317,7 +436,7 @@ func ReadFileInfosFromManifestPath(
 		fileArray := unsafe.Slice(cg.files, int(cg.num_of_files))
 		for j := range fileArray {
 			if fileArray[j].path == nil {
-				return nil, fmt.Errorf("file path is nil in column group %d, file %d", i, j)
+				return nil, merr.WrapErrServiceInternalMsg("file path is nil in column group %d, file %d", i, j)
 			}
 			fileInfos = append(fileInfos, FileInfo{
 				FilePath: C.GoString(fileArray[j].path),

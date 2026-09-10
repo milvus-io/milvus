@@ -18,6 +18,29 @@
 
 package fileresource
 
+import "sync"
+
+var (
+	localModeMu sync.RWMutex
+	localMode   = CloseMode
+)
+
+type ResolvedFileResource struct {
+	ID        int64
+	Name      string
+	Path      string
+	LocalPath string
+}
+
+type SyncEvent struct {
+	Version   uint64
+	Resources []*ResolvedFileResource
+}
+
+type Listener interface {
+	OnFileResourceSync(event SyncEvent) error
+}
+
 const (
 	SyncModeStr  string = "sync"
 	RefModeStr   string = "ref"
@@ -43,4 +66,29 @@ func IsSyncMode(value string) bool {
 
 func IsRefMode(value string) bool {
 	return value == RefModeStr
+}
+
+func ResolveMode(modes ...Mode) Mode {
+	resolved := CloseMode
+	for _, mode := range modes {
+		switch mode {
+		case SyncMode:
+			return SyncMode
+		case RefMode:
+			resolved = RefMode
+		}
+	}
+	return resolved
+}
+
+func SetLocalMode(mode Mode) {
+	localModeMu.Lock()
+	localMode = mode
+	localModeMu.Unlock()
+}
+
+func GetLocalMode() Mode {
+	localModeMu.RLock()
+	defer localModeMu.RUnlock()
+	return localMode
 }

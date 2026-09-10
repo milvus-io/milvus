@@ -1,18 +1,18 @@
 package producer
 
 import (
+	"context"
 	"io"
 	"sync"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/walmanager"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/ratelimit"
@@ -29,7 +29,7 @@ import (
 func CreateProduceServer(walManager walmanager.Manager, streamServer streamingpb.StreamingNodeHandlerService_ProduceServer) (*ProduceServer, error) {
 	createReq, err := contextutil.GetCreateProducer(streamServer.Context())
 	if err != nil {
-		return nil, status.NewInvaildArgument("create producer request is required")
+		return nil, status.NewInvalidArgument("create producer request is required")
 	}
 	l, err := walManager.GetAvailableWAL(types.NewPChannelInfoFromProto(createReq.GetPchannel()))
 	if err != nil {
@@ -49,9 +49,9 @@ func CreateProduceServer(walManager walmanager.Manager, streamServer streamingpb
 		wal:           l,
 		produceServer: produceServer,
 		logger: resource.Resource().Logger().With(
-			log.FieldComponent("producer-server"),
-			zap.String("channel", l.Channel().Name),
-			zap.Int64("term", l.Channel().Term)),
+			mlog.FieldComponent("producer-server"),
+			mlog.String("channel", l.Channel().Name),
+			mlog.Int64("term", l.Channel().Term)),
 		produceMessageCh:   make(chan *streamingpb.ProduceMessageResponse),
 		rateLimitMessageCh: make(chan ratelimit.RateLimitState, 1),
 		appendWG:           sync.WaitGroup{},
@@ -65,7 +65,7 @@ func CreateProduceServer(walManager walmanager.Manager, streamServer streamingpb
 type ProduceServer struct {
 	wal                wal.WAL
 	produceServer      *produceGrpcServerHelper
-	logger             *log.MLogger
+	logger             *mlog.Logger
 	produceMessageCh   chan *streamingpb.ProduceMessageResponse // All processing messages result should sent from theses channel.
 	rateLimitMessageCh chan ratelimit.RateLimitState            // All rate limit messages should sent from theses channel.
 	appendWG           sync.WaitGroup
@@ -96,27 +96,27 @@ func (p *ProduceServer) Execute() error {
 func (p *ProduceServer) sendLoop() (err error) {
 	defer func() {
 		if err != nil {
-			p.logger.Warn("send arm of stream closed by unexpected error", zap.Error(err))
+			p.logger.Warn(context.TODO(), "send arm of stream closed by unexpected error", mlog.Err(err))
 			return
 		}
-		p.logger.Info("send arm of stream closed")
+		p.logger.Info(context.TODO(), "send arm of stream closed")
 	}()
-	available := p.wal.Available()
+	unavailable := p.wal.Unavailable()
 	var appendWGDoneChan <-chan struct{}
 
 	for {
 		select {
-		case <-available:
+		case <-unavailable:
 			// If the wal is not available any more, we should stop sending message, and close the server.
 			// appendWGDoneChan make a graceful shutdown for those case.
-			available = nil
+			unavailable = nil
 			appendWGDoneChan = p.getWaitAppendChan()
 		case <-appendWGDoneChan:
 			// All pending append request has been finished, we can close the streaming server now.
 			// Recv arm will be closed by context cancel of stream server.
 			// Send an unavailable response to ask client to release resource.
 			p.produceServer.SendClosed()
-			return errors.New("send loop is stopped for close of wal")
+			return status.NewOnShutdownError("send loop is stopped for close of wal")
 		case resp, ok := <-p.produceMessageCh:
 			if !ok {
 				// all message has been sent, sent close response.
@@ -152,10 +152,10 @@ func (p *ProduceServer) recvLoop() (err error) {
 		p.appendWG.Wait()
 		close(p.produceMessageCh)
 		if err != nil {
-			p.logger.Warn("recv arm of stream closed by unexpected error", zap.Error(err))
+			p.logger.Warn(context.TODO(), "recv arm of stream closed by unexpected error", mlog.Err(err))
 			return
 		}
-		p.logger.Info("recv arm of stream closed")
+		p.logger.Info(context.TODO(), "recv arm of stream closed")
 	}()
 
 	for {
@@ -170,11 +170,11 @@ func (p *ProduceServer) recvLoop() (err error) {
 		case *streamingpb.ProduceRequest_Produce:
 			p.handleProduce(req.Produce)
 		case *streamingpb.ProduceRequest_Close:
-			p.logger.Info("recv arm of stream start to close, waiting for all append request finished...")
+			p.logger.Info(context.TODO(), "recv arm of stream start to close, waiting for all append request finished...")
 			// we will receive io.EOF after that.
 		default:
 			// skip message here, to keep the forward compatibility.
-			p.logger.Warn("unknown request type", zap.Any("request", req))
+			p.logger.Warn(context.TODO(), "unknown request type", mlog.Any("request", req))
 		}
 	}
 }
@@ -188,13 +188,14 @@ func (p *ProduceServer) handleProduce(req *streamingpb.ProduceMessageRequest) {
 	}
 
 	p.appendWG.Add(1)
-	p.logger.Debug("recv produce message from client", zap.Int64("requestID", req.RequestId))
-	// Update metrics.
 	msg := message.NewMutableMessageBeforeAppend(req.GetMessage().GetPayload(), req.GetMessage().GetProperties())
+	ctx := message.ExtractTraceContext(p.produceServer.Context(), msg)
+	p.logger.Debug(ctx, "recv produce message from client", mlog.Int64("requestID", req.RequestId))
+	// Update metrics.
 	metricsGuard := p.metrics.StartProduce()
 	if err := p.validateMessage(msg); err != nil {
-		p.logger.Warn("produce message validation failed", zap.Int64("requestID", req.RequestId), zap.Error(err))
-		p.sendProduceResult(req.RequestId, nil, err)
+		p.logger.Warn(ctx, "produce message validation failed", mlog.Int64("requestID", req.RequestId), mlog.Err(err))
+		p.sendProduceResult(ctx, req.RequestId, nil, err)
 		metricsGuard.Finish(err)
 		p.appendWG.Done()
 		return
@@ -202,12 +203,12 @@ func (p *ProduceServer) handleProduce(req *streamingpb.ProduceMessageRequest) {
 
 	// Append message to wal.
 	// Concurrent append request can be executed concurrently.
-	p.wal.AppendAsync(p.produceServer.Context(), msg, func(appendResult *wal.AppendResult, err error) {
+	p.wal.AppendAsync(ctx, msg, func(appendResult *wal.AppendResult, err error) {
 		defer func() {
 			metricsGuard.Finish(err)
 			p.appendWG.Done()
 		}()
-		p.sendProduceResult(req.RequestId, appendResult, err)
+		p.sendProduceResult(ctx, req.RequestId, appendResult, err)
 	})
 }
 
@@ -215,7 +216,17 @@ func (p *ProduceServer) handleProduce(req *streamingpb.ProduceMessageRequest) {
 func (p *ProduceServer) validateMessage(msg message.MutableMessage) error {
 	// validate the msg.
 	if !msg.MessageType().Valid() {
-		return status.NewInvaildArgument("unsupported message type")
+		return status.NewInvalidArgument("unsupported message type")
+	}
+	// Chunk markers are produced below this layer, by the WAL adaptor, and are
+	// stripped again on reassembly -- a message arriving here can never
+	// legitimately carry them. Reject instead of appending: a foreign record
+	// carrying `_ci`/`_ct` is read back as a corrupted chunk run, which fails
+	// the scanner and takes the whole pchannel down. Turning a bad input into a
+	// channel-wide outage is not an acceptable trade, so the check belongs at
+	// ingress.
+	if message.IsChunkedPayload(msg) {
+		return status.NewInvalidArgument("message properties must not carry the reserved WAL chunk markers")
 	}
 	return nil
 }
@@ -224,7 +235,7 @@ func (p *ProduceServer) validateMessage(msg message.MutableMessage) error {
 // This function is non-blocking and only keeps the latest state.
 func (p *ProduceServer) UpdateRateLimitState(state ratelimit.RateLimitState) {
 	if p.produceServer.Context().Err() != nil {
-		p.logger.Warn("stream closed before rate limit state updated", zap.Any("state", state))
+		p.logger.Warn(context.TODO(), "stream closed before rate limit state updated", mlog.Any("state", state))
 		return
 	}
 	done := p.produceServer.Context().Done()
@@ -232,7 +243,7 @@ func (p *ProduceServer) UpdateRateLimitState(state ratelimit.RateLimitState) {
 	// Non-blocking send, only keep the latest state
 	select {
 	case <-done:
-		p.logger.Warn("stream closed before rate limit state updated", zap.Any("state", state))
+		p.logger.Warn(context.TODO(), "stream closed before rate limit state updated", mlog.Any("state", state))
 		return
 	case p.rateLimitMessageCh <- state:
 		return
@@ -248,19 +259,19 @@ func (p *ProduceServer) UpdateRateLimitState(state ratelimit.RateLimitState) {
 	// Try to send the new state
 	select {
 	case <-done:
-		p.logger.Warn("stream closed before rate limit state updated", zap.Any("state", state))
+		p.logger.Warn(context.TODO(), "stream closed before rate limit state updated", mlog.Any("state", state))
 		return
 	case p.rateLimitMessageCh <- state:
 	}
 }
 
 // sendProduceResult sends the produce result to client.
-func (p *ProduceServer) sendProduceResult(reqID int64, appendResult *wal.AppendResult, err error) {
+func (p *ProduceServer) sendProduceResult(ctx context.Context, reqID int64, appendResult *wal.AppendResult, err error) {
 	resp := &streamingpb.ProduceMessageResponse{
 		RequestId: reqID,
 	}
 	if err != nil {
-		p.logger.Warn("append message to wal failed", zap.Int64("requestID", reqID), zap.Error(err))
+		p.logger.Warn(ctx, "append message to wal failed", mlog.Int64("requestID", reqID), mlog.Err(err))
 		resp.Response = &streamingpb.ProduceMessageResponse_Error{Error: status.AsStreamingError(err).AsPBError()}
 	} else {
 		resp.Response = &streamingpb.ProduceMessageResponse_Result{Result: appendResult.IntoProto()}
@@ -270,9 +281,9 @@ func (p *ProduceServer) sendProduceResult(reqID int64, appendResult *wal.AppendR
 	// all pending response message should be dropped, client side will handle it.
 	select {
 	case p.produceMessageCh <- resp:
-		p.logger.Debug("send produce message response to client", zap.Int64("requestID", reqID), zap.Any("appendResult", appendResult), zap.Error(err))
+		p.logger.Debug(ctx, "send produce message response to client", mlog.Int64("requestID", reqID), mlog.Any("appendResult", appendResult), mlog.Err(err))
 	case <-p.produceServer.Context().Done():
-		p.logger.Warn("stream closed before produce message response sent", zap.Int64("requestID", reqID), zap.Any("appendResult", appendResult), zap.Error(err))
+		p.logger.Warn(ctx, "stream closed before produce message response sent", mlog.Int64("requestID", reqID), mlog.Any("appendResult", appendResult), mlog.Err(err))
 		return
 	}
 }

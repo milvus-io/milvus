@@ -23,7 +23,10 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -60,6 +63,105 @@ type testSource string
 
 func (s testSource) String() string {
 	return string(s)
+}
+
+func TestExecutorGetCollectionInfoDoesNotCacheResult(t *testing.T) {
+	ctx := context.Background()
+	collectionID := int64(1000)
+	broker := meta.NewMockBroker(t)
+	ex := NewExecutor(1, nil, nil, broker, nil, nil, session.NewNodeManager())
+
+	describeCalls := 0
+	broker.EXPECT().DescribeCollection(mock.Anything, collectionID).
+		RunAndReturn(func(ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
+			describeCalls++
+			return &milvuspb.DescribeCollectionResponse{
+				CollectionID: collectionID,
+				Schema: &schemapb.CollectionSchema{
+					Name: fmt.Sprintf("collection-info-call-%d", describeCalls),
+				},
+			}, nil
+		}).Twice()
+
+	collectionInfo, err := ex.getCollectionInfo(ctx, collectionID)
+	assert.NoError(t, err)
+	assert.Equal(t, "collection-info-call-1", collectionInfo.GetSchema().GetName())
+
+	collectionInfo, err = ex.getCollectionInfo(ctx, collectionID)
+	assert.NoError(t, err)
+	assert.Equal(t, "collection-info-call-2", collectionInfo.GetSchema().GetName())
+	assert.Equal(t, 2, describeCalls)
+}
+
+func TestExecutorGetCollectionInfoDoesNotCancelLookupWithCallerContext(t *testing.T) {
+	ctx := context.Background()
+	collectionID := int64(1001)
+	broker := meta.NewMockBroker(t)
+	ex := NewExecutor(1, nil, nil, broker, nil, nil, session.NewNodeManager())
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	brokerErrs := make(chan error, 1)
+	broker.EXPECT().DescribeCollection(mock.Anything, collectionID).
+		RunAndReturn(func(ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
+			close(entered)
+			select {
+			case <-ctx.Done():
+				brokerErrs <- ctx.Err()
+				return nil, ctx.Err()
+			case <-release:
+				brokerErrs <- nil
+				return &milvuspb.DescribeCollectionResponse{
+					CollectionID: collectionID,
+					Schema: &schemapb.CollectionSchema{
+						Name: "TestExecutorGetCollectionInfoDoesNotCancelLookupWithCallerContext",
+					},
+				}, nil
+			}
+		}).Once()
+
+	callerCtx, callerCancel := context.WithCancel(ctx)
+	callerErrs := make(chan error, 1)
+	go func() {
+		_, err := ex.getCollectionInfo(callerCtx, collectionID)
+		callerErrs <- err
+	}()
+
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("DescribeCollection was not called")
+	}
+
+	callerCancel()
+	select {
+	case err := <-callerErrs:
+		assert.ErrorIs(t, err, context.Canceled)
+	case <-time.After(time.Second):
+		t.Fatal("caller did not observe its cancellation")
+	}
+
+	close(release)
+	select {
+	case err := <-brokerErrs:
+		assert.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("DescribeCollection did not finish")
+	}
+}
+
+func TestExecutorGetCollectionInfoReturnsCallerContextErrorBeforeLookup(t *testing.T) {
+	collectionID := int64(1002)
+	broker := meta.NewMockBroker(t)
+	ex := NewExecutor(1, nil, nil, broker, nil, nil, session.NewNodeManager())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	collectionInfo, err := ex.getCollectionInfo(ctx, collectionID)
+	assert.Nil(t, collectionInfo)
+	assert.ErrorIs(t, err, context.Canceled)
+	broker.AssertNotCalled(t, "DescribeCollection", mock.Anything, collectionID)
 }
 
 func TestExecutorCapacity(t *testing.T) {
@@ -296,7 +398,7 @@ func TestExecutorDeadlockReproduction(t *testing.T) {
 	// In the old single-pool design, this would fail because all 5 slots would need to be full
 	// But with split pools, non-channel has its own capacity of 3
 	leaderAction := NewLeaderAction(1, 1, ActionTypeGrow, "shard-0", 700, 1)
-	leaderTask := NewLeaderSegmentTask(ctx, testSource("test"), 1000, replica, 1, leaderAction)
+	leaderTask := NewLeaderSegmentTask(ctx, 10*time.Second, testSource("test"), 1000, replica, 1, leaderAction)
 	leaderTask.SetID(700)
 
 	// Directly check: can we increment the non-channel counter?

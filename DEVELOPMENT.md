@@ -289,6 +289,10 @@ cd ../../../
 make unittest
 ```
 
+The Apple Silicon compose file uses the Milvus Harbor Docker Hub proxy for
+Pulsar by default. To pull Pulsar directly from Docker Hub instead, set
+`PULSAR_IMAGE=milvusdb/pulsar:v2.8.2-m1`.
+
 For others:
 
 ```shell

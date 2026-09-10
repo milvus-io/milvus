@@ -9,6 +9,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 )
 
@@ -31,11 +32,11 @@ func WithCreateConsumer(ctx context.Context, req *streamingpb.CreateConsumerRequ
 func GetCreateConsumer(ctx context.Context) (*streamingpb.CreateConsumerRequest, error) {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
-		return nil, errors.New("create consumer metadata not found from incoming context")
+		return nil, status.NewInvalidArgument("create consumer metadata not found from incoming context")
 	}
 	msg := md.Get(createConsumerKey)
 	if len(msg) == 0 {
-		return nil, errors.New("create consumer metadata not found")
+		return nil, status.NewInvalidArgument("create consumer metadata not found")
 	}
 
 	bytes, err := base64.StdEncoding.DecodeString(msg[0])

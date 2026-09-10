@@ -18,6 +18,7 @@ package paramtable
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -62,6 +63,9 @@ func TestFunctionConfig(t *testing.T) {
 		"yc.credential",
 		"yc.url",
 		"yc.enable",
+		"huggingface.credential",
+		"huggingface.url",
+		"huggingface.enable",
 	}
 	for _, key := range keys {
 		assert.True(t, cfg.TextEmbeddingProviders.GetDoc(key) != "")
@@ -82,6 +86,9 @@ func TestFunctionConfig(t *testing.T) {
 		"siliconflow.url",
 		"siliconflow.credential",
 		"siliconflow.enable",
+		"huggingface.credential",
+		"huggingface.url",
+		"huggingface.enable",
 	}
 	for _, key := range keys {
 		assert.True(t, cfg.RerankModelProviders.GetDoc(key) != "")
@@ -89,4 +96,11 @@ func TestFunctionConfig(t *testing.T) {
 	assert.True(t, cfg.RerankModelProviders.GetDoc("Unknow") == "")
 
 	assert.Equal(t, 5, cfg.GetBatchFactor())
+	assert.Equal(t, 8, cfg.GetAnalyzerRunnerConcurrency())
+
+	old := cfg.AnalyzerRunnerConcurrency.SwapTempValue("-1")
+	defer cfg.AnalyzerRunnerConcurrency.SwapTempValue(old)
+	assert.Equal(t, 1, cfg.GetAnalyzerRunnerConcurrency())
+
+	assert.Equal(t, 30*time.Second, cfg.ModelRequestTimeout.GetAsDurationByParse())
 }

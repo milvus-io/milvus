@@ -17,6 +17,7 @@
 
 #include "common/BitsetView.h"
 #include "common/FieldMeta.h"
+#include "common/IndexMeta.h"
 #include "common/OpContext.h"
 #include "common/QueryInfo.h"
 #include "common/Types.h"
@@ -30,6 +31,21 @@ namespace milvus::query {
 void
 CheckBruteForceSearchParam(const FieldMeta& field,
                            const SearchInfo& search_info);
+
+// Assemble the knowhere config for a brute-force search. BM25/MinHash params
+// are taken from index_info when present, otherwise from the plan-delivered
+// search_params_. Exposed for unit testing.
+knowhere::Json
+PrepareBFSearchParams(const SearchInfo& search_info,
+                      const std::map<std::string, std::string>& index_info);
+
+// Populate SearchInfo::brute_force_index_params_ from a field's collection-level
+// index metadata (BM25 k1/b, MinHash band/width). Called at plan creation so
+// brute force has a fallback when a segment predates a field added by
+// add_function_field. Exposed for unit testing.
+void
+PopulateBruteForceIndexParams(SearchInfo& search_info,
+                              const FieldIndexMeta& field_index_meta);
 
 SubSearchResult
 BruteForceSearch(const dataset::SearchDataset& query_ds,

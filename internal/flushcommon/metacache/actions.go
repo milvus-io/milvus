@@ -215,11 +215,27 @@ func MergeBm25Stats(newStats map[int64]*storage.BM25Stats) SegmentAction {
 	}
 }
 
+func SetStatistics(stats *SegmentStats) SegmentAction {
+	return func(info *SegmentInfo) {
+		if stats != nil {
+			info.stats = stats
+		}
+	}
+}
+
 func StartSyncing(batchSize int64) SegmentAction {
 	return func(info *SegmentInfo) {
 		info.syncingRows += batchSize
 		info.bufferRows -= batchSize
 		info.syncingTasks++
+	}
+}
+
+func AbortSyncing(batchSize int64) SegmentAction {
+	return func(info *SegmentInfo) {
+		info.syncingRows -= batchSize
+		info.bufferRows += batchSize
+		info.syncingTasks--
 	}
 }
 
@@ -246,6 +262,18 @@ func SetStartPosRecorded(flag bool) SegmentAction {
 func UpdateManifestPath(manifestPath string) SegmentAction {
 	return func(info *SegmentInfo) {
 		info.manifestPath = manifestPath
+	}
+}
+
+// SetFlushSourceMode records which subsystem owns the segment's payload at
+// flush time. The decision is sticky: once a non-Unknown mode is set, later
+// calls with a different mode are no-ops, so the source for a given segment
+// stays consistent across its lifetime.
+func SetFlushSourceMode(mode FlushSourceMode) SegmentAction {
+	return func(info *SegmentInfo) {
+		if info.flushSourceMode == FlushSourceUnknown {
+			info.flushSourceMode = mode
+		}
 	}
 }
 

@@ -2,30 +2,29 @@ package connection
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 
-	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-func ZapClientInfo(info *commonpb.ClientInfo) []zap.Field {
-	fields := []zap.Field{
-		zap.String("sdk_type", info.GetSdkType()),
-		zap.String("sdk_version", info.GetSdkVersion()),
-		zap.String("local_time", info.GetLocalTime()),
-		zap.String("user", info.GetUser()),
-		zap.String("host", info.GetHost()),
+func ClientInfoFields(info *commonpb.ClientInfo) []mlog.Field {
+	fields := []mlog.Field{
+		mlog.String("sdk_type", info.GetSdkType()),
+		mlog.String("sdk_version", info.GetSdkVersion()),
+		mlog.String("local_time", info.GetLocalTime()),
+		mlog.String("user", info.GetUser()),
+		mlog.String("host", info.GetHost()),
 	}
 
 	for k, v := range info.GetReserved() {
-		fields = append(fields, zap.String(k, v))
+		fields = append(fields, mlog.String(k, v))
 	}
 
 	return fields
@@ -34,15 +33,15 @@ func ZapClientInfo(info *commonpb.ClientInfo) []zap.Field {
 func GetIdentifierFromContext(ctx context.Context) (int64, error) {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
-		return 0, errors.New("fail to get metadata from the context")
+		return 0, merr.WrapErrParameterInvalidMsg("fail to get metadata from the context")
 	}
 	identifierContent, ok := md[util.IdentifierKey]
 	if !ok || len(identifierContent) < 1 {
-		return 0, errors.New("no identifier found in metadata")
+		return 0, merr.WrapErrParameterInvalidMsg("no identifier found in metadata")
 	}
 	identifier, err := strconv.ParseInt(identifierContent[0], 10, 64)
 	if err != nil {
-		return 0, fmt.Errorf("failed to parse identifier: %s, error: %s", identifierContent[0], err.Error())
+		return 0, merr.WrapErrParameterInvalidMsg("failed to parse identifier: %s, error: %s", identifierContent[0], err.Error())
 	}
 	return identifier, nil
 }

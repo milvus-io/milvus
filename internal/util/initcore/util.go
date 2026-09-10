@@ -27,9 +27,14 @@ package initcore
 import "C"
 
 import (
+	"context"
 	"strings"
+	"sync"
 	"unsafe"
 
+	"github.com/milvus-io/milvus/internal/util/pathutil"
+	"github.com/milvus-io/milvus/pkg/v3/config"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -45,6 +50,14 @@ func UpdateLogLevel(level string) error {
 
 func UpdateIndexSliceSize(size int) {
 	C.SetIndexSliceSize(C.int64_t(size))
+}
+
+func UpdateLoadTransientBudgetBytes(bytes int64) {
+	C.SetLoadTransientBudgetBytes(C.int64_t(bytes))
+}
+
+func UpdateLoadAdmissionSlots(slots int64) {
+	C.SetLoadAdmissionSlots(C.int64_t(slots))
 }
 
 func UpdateHighPriorityThreadCoreCoefficient(coefficient float64) {
@@ -75,6 +88,10 @@ func UpdateDefaultOptimizeExprEnable(enable bool) {
 	C.SetDefaultOptimizeExprEnable(C.bool(enable))
 }
 
+func UpdateDefaultDriverPrefetchEnable(enable bool) {
+	C.SetDefaultDriverPrefetchEnable(C.bool(enable))
+}
+
 func UpdateDefaultJSONKeyStatsEnable(enable bool) {
 	C.SetDefaultJSONKeyStatsEnable(C.bool(enable))
 }
@@ -83,8 +100,22 @@ func UpdateExprResCacheEnable(enable bool) {
 	C.SetExprResCacheEnable(C.bool(enable))
 }
 
-func UpdateExprResCacheCapacityBytes(capacity int) {
-	C.SetExprResCacheCapacityBytes(C.int64_t(capacity))
+func UpdateExprResCacheConfig() {
+	params := paramtable.Get()
+	diskPath := pathutil.GetPath(pathutil.ExprCachePath, paramtable.GetNodeID())
+	cMode := C.CString(params.QueryNodeCfg.ExprResCacheMode.GetValue())
+	cDiskPath := C.CString(diskPath)
+	defer C.free(unsafe.Pointer(cMode))
+	defer C.free(unsafe.Pointer(cDiskPath))
+
+	C.SetExprResCacheConfig(cMode, cDiskPath,
+		C.int64_t(params.QueryNodeCfg.ExprResCacheMemMaxBytes.GetAsInt64()),
+		C.bool(params.QueryNodeCfg.ExprResCacheMemCompressionEnabled.GetAsBool()),
+		C.int32_t(params.QueryNodeCfg.ExprResCacheAdmissionThreshold.GetAsInt32()),
+		C.int64_t(params.QueryNodeCfg.ExprResCacheMinEvalDurationUs.GetAsInt64()),
+		C.int64_t(params.QueryNodeCfg.ExprResCacheDiskMaxBytes.GetAsInt64()),
+		C.int64_t(params.QueryNodeCfg.ExprResCacheDiskMaxFileSizeBytes.GetAsInt64()),
+		C.int64_t(params.QueryNodeCfg.ExprResCacheMinEvalDurationUs.GetAsInt64()))
 }
 
 func UpdateArrowIOThreadPoolCapacity(threads int) {
@@ -111,8 +142,248 @@ func ResolveArrowIOThreadPoolCapacity() int {
 	return threads
 }
 
+// RegisterArrowIOThreadPoolWatchers wires hot-reload of arrow IO pool capacity
+// to paramtable updates on the two coefficient/maxCapacity keys. `source` is
+// included in the log entry so log lines from different components (e.g.
+// "querynode" vs "datanode" in standalone, where both register the same keys)
+// remain distinguishable.
+func RegisterArrowIOThreadPoolWatchers(pt *paramtable.ComponentParam, source string) {
+	handler := func(key string) func(*config.Event) {
+		return func(evt *config.Event) {
+			if !evt.HasUpdated {
+				return
+			}
+			newThreads := ResolveArrowIOThreadPoolCapacity()
+			UpdateArrowIOThreadPoolCapacity(newThreads)
+			mlog.Info(context.TODO(), "arrow io thread pool capacity updated",
+				mlog.String("source", source),
+				mlog.String("trigger", key),
+				mlog.Int("threads", newThreads))
+		}
+	}
+	pt.Watch(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key,
+		config.NewHandler(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key,
+			handler(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key)))
+	pt.Watch(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key,
+		config.NewHandler(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key,
+			handler(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key)))
+}
+
+// RegisterArrowReaderConfigWatchers wires hot-reload of arrow parquet reader
+// range-coalescing limits to paramtable updates on the two hole/range size
+// keys. `source` is included in the log entry for the same reason as in
+// RegisterArrowIOThreadPoolWatchers.
+func RegisterArrowReaderConfigWatchers(pt *paramtable.ComponentParam, source string) {
+	handler := func(evt *config.Event) {
+		if !evt.HasUpdated {
+			return
+		}
+		if err := InitArrowReaderConfig(pt); err != nil {
+			mlog.Warn(context.TODO(), "failed to reconfigure arrow reader params",
+				mlog.String("source", source), mlog.Err(err))
+			return
+		}
+		mlog.Info(context.TODO(), "arrow reader params reconfigured",
+			mlog.String("source", source),
+			mlog.Int64("holeSizeLimitBytes", pt.CommonCfg.ArrowReaderHoleSizeLimitBytes.GetAsInt64()),
+			mlog.Int64("rangeSizeLimitBytes", pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.GetAsInt64()))
+	}
+	pt.Watch(pt.CommonCfg.ArrowReaderHoleSizeLimitBytes.Key,
+		config.NewHandler(pt.CommonCfg.ArrowReaderHoleSizeLimitBytes.Key, handler))
+	pt.Watch(pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.Key,
+		config.NewHandler(pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.Key, handler))
+}
+
+// RegisterLoonReaderConfigWatchers wires hot-reload of the milvus-storage
+// reader thread pool size and the index-build read window. `source` is
+// included in the log entry for the same reason as in
+// RegisterArrowIOThreadPoolWatchers. Note the thread pool cannot be
+// destroyed once created — updating the size to 0 leaves the current pool
+// unchanged.
+func RegisterLoonReaderConfigWatchers(pt *paramtable.ComponentParam, source string) {
+	handler := func(evt *config.Event) {
+		if !evt.HasUpdated {
+			return
+		}
+		// InitLoonReaderConfig range-checks both values before applying
+		// either, so an out-of-range update leaves the running settings
+		// untouched rather than resizing the (non-destroyable) reader pool
+		// and only then failing on the window. It also serializes
+		// read-then-apply internally, so concurrent updates cannot land in
+		// the reverse order of the config writes; the logging below reads
+		// the paramtable again outside that critical section, so under
+		// concurrent updates the logged values may lag the applied ones.
+		if err := InitLoonReaderConfig(pt); err != nil {
+			mlog.Warn(context.TODO(),
+				"failed to reconfigure loon reader params, previous settings stay in effect",
+				mlog.String("source", source),
+				mlog.Int64("readerThreadPoolSize", pt.CommonCfg.StorageReaderThreadPoolSize.GetAsInt64()),
+				mlog.Int64("indexBuildReadWindowBytes", pt.CommonCfg.IndexBuildReadWindowBytes.GetAsInt64()),
+				mlog.Err(err))
+			return
+		}
+		// Report the effective pool size, not the requested one: non-zero
+		// values resize the pool either way, but 0 cannot destroy it, so
+		// rolling back to 0 leaves the existing pool serving reads. Note a
+		// reader latches the parallelism it saw at open only as an on/off
+		// gate; a reader opened with parallelism > 1 follows the pool's
+		// current size on every later round, so resizes also affect
+		// already-open readers.
+		// GetParallelism() reports 1 when the pool does not exist, so
+		// requested == 0 with effective == 1 is the pool being absent (or
+		// sized 1) - not a failure to destroy it. Only warn when a real
+		// pool survives a disable request.
+		requested := pt.CommonCfg.StorageReaderThreadPoolSize.GetAsInt64()
+		effective := int64(EffectiveLoonReaderThreadPoolSize())
+		if requested == 0 && effective > 1 {
+			mlog.Warn(context.TODO(),
+				"loon reader thread pool size not fully applied; the pool cannot be destroyed at runtime, restart to disable it",
+				mlog.String("source", source),
+				mlog.Int64("requested", requested),
+				mlog.Int64("effective", effective))
+		}
+		mlog.Info(context.TODO(), "loon reader params reconfigured",
+			mlog.String("source", source),
+			mlog.Int64("readerThreadPoolSizeRequested", requested),
+			mlog.Int64("readerThreadPoolSizeEffective", effective),
+			mlog.Int64("indexBuildReadWindowBytes", pt.CommonCfg.IndexBuildReadWindowBytes.GetAsInt64()))
+	}
+	pt.Watch(pt.CommonCfg.StorageReaderThreadPoolSize.Key,
+		config.NewHandler(pt.CommonCfg.StorageReaderThreadPoolSize.Key, handler))
+	pt.Watch(pt.CommonCfg.IndexBuildReadWindowBytes.Key,
+		config.NewHandler(pt.CommonCfg.IndexBuildReadWindowBytes.Key, handler))
+}
+
 func UpdateStorageV2CellTargetSizeBytes(bytes int64) {
 	C.SetStorageV2CellTargetSizeBytes(C.int64_t(bytes))
+}
+
+// updateStorageV2AsyncLoadEnabled publishes the rollout value to C++.
+func updateStorageV2AsyncLoadEnabled(enabled bool) {
+	C.SetStorageV2AsyncLoadEnabled(C.bool(enabled))
+}
+
+// updateStorageV2AsyncLoadThreadPoolSize publishes the positive worker limit.
+func updateStorageV2AsyncLoadThreadPoolSize(threads int) error {
+	status := C.SetStorageV2AsyncLoadThreadPoolSize(C.int(threads))
+	return HandleCStatus(&status, "configure async load executor failed")
+}
+
+// getStorageV2AsyncLoadThreadPoolSize returns the effective native worker limit.
+func getStorageV2AsyncLoadThreadPoolSize() int {
+	return int(C.GetStorageV2AsyncLoadThreadPoolSize())
+}
+
+// registerQueryNodeAsyncLoadThreadPoolConfig applies startup configuration and
+// serializes read-then-resize updates, including deletion of an override.
+func registerQueryNodeAsyncLoadThreadPoolConfig(ctx context.Context, pt *paramtable.ComponentParam, apply func(int) error) error {
+	if ctx == nil {
+		ctx = context.TODO()
+	}
+	item := &pt.QueryNodeCfg.StorageV2AsyncLoadThreadPoolSize
+	var mu sync.Mutex
+	syncConfig := func() error {
+		mu.Lock()
+		defer mu.Unlock()
+		threads := item.GetAsInt()
+		if err := apply(threads); err != nil {
+			return err
+		}
+		mlog.Info(ctx, "Async load executor configuration updated", mlog.Int("threads", threads))
+		return nil
+	}
+	pt.Watch(item.Key, config.NewHandler(item.Key+".querynode", func(evt *config.Event) {
+		if evt.HasUpdated {
+			if err := syncConfig(); err != nil {
+				mlog.Warn(ctx, "Failed to update async load executor configuration", mlog.Err(err))
+			}
+		}
+	}))
+	return syncConfig()
+}
+
+// registerConfigWatcherWithCatchUp serializes config application and performs
+// one post-registration sync so startup cannot miss a concurrent update.
+func registerConfigWatcherWithCatchUp(register func(syncConfig func()), syncConfig func()) {
+	var syncMu sync.Mutex
+	serializedSync := func() {
+		syncMu.Lock()
+		defer syncMu.Unlock()
+		syncConfig()
+	}
+
+	register(serializedSync)
+	serializedSync()
+}
+
+func applyQueryNodeLoadConfig(enabled bool, budgetBytes, slots int64) {
+	// Stop new translators from selecting async before relaxing its defaults;
+	// install the limits before allowing new translators to select async.
+	if !enabled {
+		updateStorageV2AsyncLoadEnabled(false)
+	}
+	UpdateLoadTransientBudgetBytes(budgetBytes)
+	UpdateLoadAdmissionSlots(slots)
+	if enabled {
+		updateStorageV2AsyncLoadEnabled(true)
+	}
+}
+
+// registerQueryNodeLoadConfig applies the initial rollout switch and admission
+// limits, then keeps all three keys synchronized. Only QueryNode owns this
+// process-wide configuration, including when colocated with DataNode.
+func registerQueryNodeLoadConfig(ctx context.Context, pt *paramtable.ComponentParam, apply func(bool, int64, int64)) {
+	if ctx == nil {
+		ctx = context.TODO()
+	}
+	registerConfigWatcherWithCatchUp(func(syncConfig func()) {
+		for _, key := range []string{
+			pt.QueryNodeCfg.StorageV2EnableAsyncLoad.Key,
+			pt.CommonCfg.LoadTransientBudgetBytes.Key,
+			pt.CommonCfg.LoadAdmissionSlots.Key,
+		} {
+			pt.Watch(key, config.NewHandler(key+".querynode", func(evt *config.Event) {
+				if !evt.HasUpdated {
+					return
+				}
+				syncConfig()
+			}))
+		}
+	}, func() {
+		enabled := pt.QueryNodeCfg.StorageV2EnableAsyncLoad.GetAsBool()
+		budgetBytes, slots := pt.CommonCfg.ResolveLoadAdmissionLimits(enabled)
+		apply(enabled, budgetBytes, slots)
+		mlog.Info(ctx, "QueryNode load configuration updated",
+			mlog.Bool("async_enabled", enabled),
+			mlog.Int64("transient_budget_bytes", budgetBytes),
+			mlog.Int64("admission_slots", slots))
+	})
+}
+
+// registerStorageV2AsyncLoadReadWindowConfig keeps the native read-window
+// threshold synchronized with the historical storageV2 config key.
+func registerStorageV2AsyncLoadReadWindowConfig(pt *paramtable.ComponentParam) {
+	item := &pt.QueryNodeCfg.StorageV2AsyncLoadReadWindowSizeBytes
+	registerConfigWatcherWithCatchUp(func(syncConfig func()) {
+		pt.Watch(item.Key, config.NewHandler(item.Key+".core", func(evt *config.Event) {
+			if !evt.HasUpdated {
+				return
+			}
+			syncConfig()
+		}))
+	}, func() {
+		updateStorageV2AsyncLoadReadWindowSizeBytes(item.GetAsInt64())
+	})
+}
+
+// updateStorageV2AsyncLoadReadWindowSizeBytes publishes the threshold to C++.
+func updateStorageV2AsyncLoadReadWindowSizeBytes(bytes int64) {
+	C.SetStorageV2AsyncLoadReadWindowSizeBytes(C.int64_t(bytes))
+}
+
+// getStorageV2AsyncLoadReadWindowSizeBytes returns the effective native value.
+func getStorageV2AsyncLoadReadWindowSizeBytes() int64 {
+	return int64(C.GetStorageV2AsyncLoadReadWindowSizeBytes())
 }
 
 func UpdateDefaultGrowingJSONKeyStatsEnable(enable bool) {

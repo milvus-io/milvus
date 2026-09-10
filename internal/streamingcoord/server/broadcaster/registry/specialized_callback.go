@@ -30,6 +30,8 @@ var (
 	RegisterTruncateCollectionV2AckCallback = registerMessageAckCallback[*message.TruncateCollectionMessageHeader, *message.TruncateCollectionMessageBody]
 	RegisterAlterLoadConfigV2AckCallback    = registerMessageAckCallback[*message.AlterLoadConfigMessageHeader, *message.AlterLoadConfigMessageBody]
 	RegisterDropLoadConfigV2AckCallback     = registerMessageAckCallback[*message.DropLoadConfigMessageHeader, *message.DropLoadConfigMessageBody]
+	RegisterAlterRLSMetadataV2AckCallback   = registerMessageAckCallback[*message.AlterRLSMetadataMessageHeader, *message.AlterRLSMetadataMessageBody]
+	RegisterDropRLSMetadataV2AckCallback    = registerMessageAckCallback[*message.DropRLSMetadataMessageHeader, *message.DropRLSMetadataMessageBody]
 
 	// Partition
 	RegisterCreatePartitionV1AckCallback = registerMessageAckCallback[*message.CreatePartitionMessageHeader, *message.CreatePartitionRequest]
@@ -74,6 +76,10 @@ var (
 
 	// External Collection
 	RegisterRefreshExternalCollectionV2AckCallback = registerMessageAckCallback[*message.RefreshExternalCollectionMessageHeader, *message.RefreshExternalCollectionMessageBody]
+
+	// Import 2PC
+	RegisterCommitImportV2AckCallback   = registerMessageAckCallback[*message.CommitImportMessageHeader, *message.CommitImportMessageBody]
+	RegisterRollbackImportV2AckCallback = registerMessageAckCallback[*message.RollbackImportMessageHeader, *message.RollbackImportMessageBody]
 )
 
 // resetMessageAckCallbacks resets the message ack callbacks.
@@ -96,6 +102,8 @@ func resetMessageAckCallbacks() {
 		message.MessageTypeTruncateCollectionV2: syncutil.NewFuture[messageInnerAckCallback](),
 		message.MessageTypeAlterLoadConfigV2:    syncutil.NewFuture[messageInnerAckCallback](),
 		message.MessageTypeDropLoadConfigV2:     syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeAlterRLSMetadataV2:   syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeDropRLSMetadataV2:    syncutil.NewFuture[messageInnerAckCallback](),
 
 		// Partition
 		message.MessageTypeCreatePartitionV1: syncutil.NewFuture[messageInnerAckCallback](),
@@ -140,5 +148,9 @@ func resetMessageAckCallbacks() {
 
 		// External Collection
 		message.MessageTypeRefreshExternalCollectionV2: syncutil.NewFuture[messageInnerAckCallback](),
+
+		// Import 2PC
+		message.MessageTypeCommitImportV2:   syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeRollbackImportV2: syncutil.NewFuture[messageInnerAckCallback](),
 	}
 }

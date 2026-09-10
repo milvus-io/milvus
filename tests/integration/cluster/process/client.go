@@ -53,6 +53,10 @@ func (c *mixCoordClient) CheckHealth(ctx context.Context, in *milvuspb.CheckHeal
 	return c.RootCoordClient.CheckHealth(ctx, in, opts...)
 }
 
+func (c *mixCoordClient) ClearReadTaskQueue(ctx context.Context, in *internalpb.ClearReadTaskQueueRequest, opts ...grpc.CallOption) (*internalpb.ClearReadTaskQueueResponse, error) {
+	return c.RootCoordClient.ClearReadTaskQueue(ctx, in, opts...)
+}
+
 func (c *mixCoordClient) Close() error {
 	return c.conn.Close()
 }

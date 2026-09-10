@@ -3,23 +3,32 @@ package shards
 import (
 	"context"
 	"fmt"
+	"math"
+	"strings"
 	"sync"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/stats"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+// latestCollectionSchemaVersion asks schema accessors to use the latest
+// snapshot. Zero is a valid schema version and must stay explicit.
+const latestCollectionSchemaVersion int32 = -1
 
 var (
 	ErrCollectionExists                = errors.New("collection exists")
@@ -37,7 +46,6 @@ var (
 	ErrWaitForNewSegment = errors.New("wait for new segment")
 	ErrNotGrowing        = errors.New("segment is not growing")
 	ErrNotEnoughSpace    = stats.ErrNotEnoughSpace
-	ErrTooLargeInsert    = stats.ErrTooLargeInsert
 )
 
 // ShardManagerRecoverParam is the parameter for recovering the segment assignment manager.
@@ -56,7 +64,7 @@ func RecoverShardManager(param *ShardManagerRecoverParam) ShardManager {
 	partitionToSegmentManagers, segmentBelongs := newSegmentAllocManagersFromRecovery(param.ChannelInfo, param.InitialRecoverSnapshot, collections)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	logger := resource.Resource().Logger().With(log.FieldComponent("shard-manager")).With(zap.Stringer("pchannel", param.ChannelInfo))
+	logger := resource.Resource().Logger().With(mlog.FieldComponent("shard-manager")).With(mlog.Stringer("pchannel", param.ChannelInfo))
 	// create managers list.
 	managers := make(map[PartitionUniqueKey]*partitionManager)
 	segmentTotal := 0
@@ -89,7 +97,7 @@ func RecoverShardManager(param *ShardManagerRecoverParam) ShardManager {
 		}
 	}
 	m := &shardManagerImpl{
-		mu:                sync.Mutex{},
+		mu:                sync.RWMutex{},
 		ctx:               ctx,
 		cancel:            cancel,
 		wal:               param.WAL,
@@ -106,6 +114,9 @@ func RecoverShardManager(param *ShardManagerRecoverParam) ShardManager {
 	stats := make([]*stats.SegmentStats, 0, len(belongs))
 	for _, belong := range belongs {
 		stat := m.partitionManagers[belong.PartitionUniqueKey()].segments[belong.SegmentID].GetStatFromRecovery()
+		if info := m.collections[belong.CollectionID]; info != nil {
+			stat.RuntimeFlushSize = info.RuntimeFlushSize(stat.Modified)
+		}
 		stats = append(stats, stat)
 	}
 	resource.Resource().SegmentStatsManager().RegisterSealOperator(m, belongs, stats)
@@ -120,8 +131,8 @@ func newSegmentAllocManagersFromRecovery(pchannel types.PChannelInfo, recoverInf
 	// recover the segment infos from the streaming node segment assignment meta storage
 	partitionToSegmentManagers := make(map[PartitionUniqueKey]map[int64]*segmentAllocManager)
 	growingBelongs := make(map[int64]stats.SegmentBelongs)
+	seenSegments := make(map[int64]struct{}, len(recoverInfos.SegmentAssignments))
 	for _, rawMeta := range recoverInfos.SegmentAssignments {
-		m := newSegmentAllocManagerFromProto(pchannel, rawMeta)
 		coll, ok := collections[rawMeta.GetCollectionId()]
 		if !ok {
 			panic(fmt.Sprintf("segment assignment meta is dirty, collection not found, %d", rawMeta.GetCollectionId()))
@@ -129,24 +140,35 @@ func newSegmentAllocManagersFromRecovery(pchannel types.PChannelInfo, recoverInf
 		if _, ok := coll.PartitionIDs[rawMeta.GetPartitionId()]; !ok {
 			panic(fmt.Sprintf("segment assignment meta is dirty, partition not found, partition not found, %d", rawMeta.GetPartitionId()))
 		}
-		if _, ok := growingBelongs[rawMeta.GetSegmentId()]; ok {
+		if _, ok := seenSegments[rawMeta.GetSegmentId()]; ok {
 			panic(fmt.Sprintf("segment assignment meta is dirty, segment repeated, %d", rawMeta.GetSegmentId()))
 		}
-		growingBelongs[m.GetSegmentID()] = stats.SegmentBelongs{
-			PChannel:     pchannel.Name,
-			VChannel:     m.GetVChannel(),
-			CollectionID: rawMeta.GetCollectionId(),
-			PartitionID:  rawMeta.GetPartitionId(),
-			SegmentID:    m.GetSegmentID(),
-		}
+		seenSegments[rawMeta.GetSegmentId()] = struct{}{}
 		uniqueKey := PartitionUniqueKey{
 			CollectionID: rawMeta.GetCollectionId(),
 			PartitionID:  rawMeta.GetPartitionId(),
 		}
-		if _, ok := partitionToSegmentManagers[uniqueKey]; !ok {
-			partitionToSegmentManagers[uniqueKey] = make(map[int64]*segmentAllocManager, 2)
+		switch rawMeta.GetState() {
+		case streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING:
+			m := newSegmentAllocManagerFromProto(pchannel, rawMeta)
+			growingBelongs[m.GetSegmentID()] = stats.SegmentBelongs{
+				PChannel:     pchannel.Name,
+				VChannel:     m.GetVChannel(),
+				CollectionID: rawMeta.GetCollectionId(),
+				PartitionID:  rawMeta.GetPartitionId(),
+				SegmentID:    m.GetSegmentID(),
+			}
+			if _, ok := partitionToSegmentManagers[uniqueKey]; !ok {
+				partitionToSegmentManagers[uniqueKey] = make(map[int64]*segmentAllocManager, 2)
+			}
+			partitionToSegmentManagers[uniqueKey][rawMeta.GetSegmentId()] = m
+		case streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED:
+			continue
+		case streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED:
+			continue
+		default:
+			panic(fmt.Sprintf("segment assignment meta has unknown state, segment %d state %s", rawMeta.GetSegmentId(), rawMeta.GetState()))
 		}
-		partitionToSegmentManagers[uniqueKey][rawMeta.GetSegmentId()] = m
 	}
 	return partitionToSegmentManagers, growingBelongs
 }
@@ -167,11 +189,12 @@ func newCollectionInfos(recoverInfos *recovery.RecoverySnapshot) map[int64]*Coll
 		if len(vchannelInfo.CollectionInfo.Schemas) > 0 {
 			latestSchema = vchannelInfo.CollectionInfo.Schemas[len(vchannelInfo.CollectionInfo.Schemas)-1]
 		}
-		collectionInfoMap[vchannelInfo.CollectionInfo.CollectionId] = &CollectionInfo{
+		collectionInfo := &CollectionInfo{
 			VChannel:     vchannelInfo.Vchannel,
 			PartitionIDs: currentPartition,
-			Schema:       latestSchema,
 		}
+		collectionInfo.setSchema(latestSchema)
+		collectionInfoMap[vchannelInfo.CollectionInfo.CollectionId] = collectionInfo
 	}
 	return collectionInfoMap
 }
@@ -180,9 +203,9 @@ func newCollectionInfos(recoverInfos *recovery.RecoverySnapshot) map[int64]*Coll
 // It's a in-memory data structure, and will be recovered from recovery stroage of wal and wal itself.
 // !!! Don't add any block operation (such as rpc or meta opration) in this module.
 type shardManagerImpl struct {
-	log.Binder
+	mlog.Binder
 
-	mu                sync.Mutex
+	mu                sync.RWMutex
 	ctx               context.Context
 	cancel            context.CancelFunc
 	wal               *syncutil.Future[wal.WAL]
@@ -197,6 +220,37 @@ type CollectionInfo struct {
 	VChannel     string
 	PartitionIDs map[int64]struct{}
 	Schema       *streamingpb.CollectionSchemaOfVChannel
+	primaryKey   *PrimaryKeyDescriptor
+}
+
+// PrimaryKeyDescriptor is the immutable PK information needed by WAL write
+// tracking without exposing or cloning a collection schema.
+type PrimaryKeyDescriptor struct {
+	FieldID  int64
+	DataType schemapb.DataType
+}
+
+func (c *CollectionInfo) setSchema(schema *streamingpb.CollectionSchemaOfVChannel) {
+	c.Schema = schema
+	c.primaryKey = nil
+	if schema == nil || schema.GetSchema() == nil {
+		return
+	}
+	descriptor, err := primaryKeyDescriptorFromSchema(schema.GetSchema())
+	if err == nil {
+		c.primaryKey = &descriptor
+	}
+}
+
+func primaryKeyDescriptorFromSchema(schema *schemapb.CollectionSchema) (PrimaryKeyDescriptor, error) {
+	primaryField, err := typeutil.GetPrimaryFieldSchema(schema)
+	if err != nil {
+		return PrimaryKeyDescriptor{}, err
+	}
+	return PrimaryKeyDescriptor{
+		FieldID:  primaryField.GetFieldID(),
+		DataType: primaryField.GetDataType(),
+	}, nil
 }
 
 // SchemaVersion returns the current collection schema version for the write path.
@@ -210,6 +264,125 @@ func (c *CollectionInfo) SchemaVersion() int32 {
 		return 0
 	}
 	return s.GetVersion()
+}
+
+func (c *CollectionInfo) AllowGrowingSourceFlush() bool {
+	if c == nil || c.Schema == nil {
+		return false
+	}
+	return typeutil.AllowGrowingSourceFlush(c.Schema.GetSchema(),
+		paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool(),
+		paramtable.Get().CommonCfg.EnableGrowingSourceFlush.GetAsBool())
+}
+
+func (c *CollectionInfo) RequiresStorageV3() bool {
+	return c.HasTextField()
+}
+
+func (c *CollectionInfo) HasTextField() bool {
+	if c == nil || c.Schema == nil || c.Schema.GetSchema() == nil {
+		return false
+	}
+	return typeutil.HasTextField(c.Schema.GetSchema())
+}
+
+// RuntimeFlushSize estimates the in-memory footprint used by flush pressure decisions.
+func (c *CollectionInfo) RuntimeFlushSize(modified stats.ModifiedMetrics) uint64 {
+	if modified.Rows == 0 || modified.BinarySize == 0 {
+		return modified.BinarySize
+	}
+	if !c.shouldEstimateInterimIndexExtra() {
+		return modified.BinarySize
+	}
+
+	extra := estimateInterimIndexExtra(c.Schema.GetSchema(), modified.Rows)
+	if extra == 0 {
+		return modified.BinarySize
+	}
+	return utils.SaturatingAddUint64(modified.BinarySize, extra)
+}
+
+func (c *CollectionInfo) shouldEstimateInterimIndexExtra() bool {
+	if c == nil || c.Schema == nil || c.Schema.GetSchema() == nil || !c.AllowGrowingSourceFlush() {
+		return false
+	}
+	params := paramtable.Get()
+	return params.QueryNodeCfg.EnableInterminSegmentIndex.GetAsBool() &&
+		!params.QueryNodeCfg.GrowingMmapEnabled.GetAsBool()
+}
+
+func estimateInterimIndexExtra(schema *schemapb.CollectionSchema, rows uint64) uint64 {
+	var extra uint64
+	for _, field := range schema.GetFields() {
+		switch field.GetDataType() {
+		case schemapb.DataType_FloatVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
+			dim, err := typeutil.GetDim(field)
+			if err != nil || dim <= 0 {
+				continue
+			}
+			extra = utils.SaturatingAddUint64(extra, estimateDenseInterimIndexExtra(field.GetDataType(), uint64(dim), rows))
+		case schemapb.DataType_SparseFloatVector:
+			// Sparse interim indexes keep their own representation roughly at
+			// raw sparse-vector size. Modified.BinarySize already accounts for
+			// the raw insert payload, so add one more sparse estimate as index
+			// overhead when chunks are retained for growing-source flush.
+			extra = utils.SaturatingAddUint64(extra, utils.SaturatingMulUint64(rows, uint64(typeutil.GetSparseFloatVectorEstimateLength())))
+		}
+	}
+	return extra
+}
+
+func estimateDenseInterimIndexExtra(dataType schemapb.DataType, dim uint64, rows uint64) uint64 {
+	params := paramtable.Get()
+	indexType := params.QueryNodeCfg.DenseVectorInterminIndexType.GetValue()
+	switch {
+	case strings.EqualFold(indexType, "IVF_FLAT_CC"):
+		rawBytes := utils.SaturatingMulUint64(rows, denseVectorRawBytes(dataType, dim))
+		expansionRate := params.QueryNodeCfg.InterimIndexMemExpandRate.GetAsFloat()
+		if expansionRate <= 0 {
+			expansionRate = 1
+		}
+		return ceilMulFloat(rawBytes, expansionRate)
+	case strings.EqualFold(indexType, "SCANN_DVR"):
+		return utils.SaturatingMulUint64(rows, scannDVRBytesPerRow(dim))
+	default:
+		return 0
+	}
+}
+
+func denseVectorRawBytes(dataType schemapb.DataType, dim uint64) uint64 {
+	switch dataType {
+	case schemapb.DataType_FloatVector:
+		return utils.SaturatingMulUint64(dim, 4)
+	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
+		return utils.SaturatingMulUint64(dim, 2)
+	default:
+		return 0
+	}
+}
+
+func scannDVRBytesPerRow(dim uint64) uint64 {
+	params := paramtable.Get()
+	subDim := uint64(params.QueryNodeCfg.InterimIndexSubDim.GetAsInt64())
+	bytes := utils.SaturatingMulUint64(subDim/8, dim)
+	switch strings.ToUpper(params.QueryNodeCfg.InterimIndexRefineQuantType.GetValue()) {
+	case "UINT8":
+		bytes = utils.SaturatingAddUint64(bytes, dim)
+	case "FLOAT16", "BFLOAT16":
+		bytes = utils.SaturatingAddUint64(bytes, utils.SaturatingMulUint64(dim, 2))
+	}
+	return bytes
+}
+
+func ceilMulFloat(value uint64, factor float64) uint64 {
+	if value == 0 || factor <= 0 {
+		return 0
+	}
+	result := math.Ceil(float64(value) * factor)
+	if result >= float64(math.MaxUint64) {
+		return math.MaxUint64
+	}
+	return uint64(result)
 }
 
 func (m *shardManagerImpl) Channel() types.PChannelInfo {

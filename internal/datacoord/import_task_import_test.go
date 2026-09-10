@@ -18,18 +18,19 @@ package datacoord
 
 import (
 	"context"
-	"math"
 	"testing"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
@@ -536,6 +537,7 @@ func TestImportTask_QueryTaskOnWorker(t *testing.T) {
 				{
 					SegmentID:    6,
 					ImportedRows: 200,
+					Stats:        &datapb.Statistics{InsertBinlogSize: 7777, StatsBinlogSize: 333},
 				},
 			},
 		}, nil)
@@ -547,101 +549,190 @@ func TestImportTask_QueryTaskOnWorker(t *testing.T) {
 		assert.Equal(t, datapb.ImportTaskStateV2_Completed, task.GetState())
 		assert.Equal(t, int64(100), task.meta.segments.GetSegment(5).GetNumOfRows())
 		assert.Equal(t, int64(200), task.meta.segments.GetSegment(6).GetNumOfRows())
-	})
-}
-
-func TestExtractTimestampFromBinlogs(t *testing.T) {
-	t.Run("empty binlogs", func(t *testing.T) {
-		minTs, maxTs := extractTimestampFromBinlogs(nil)
-		assert.Equal(t, uint64(math.MaxUint64), minTs)
-		assert.Equal(t, uint64(0), maxTs)
+		seg6Stats := task.meta.segments.GetSegment(6).GetStats()
+		assert.EqualValues(t, 7777, seg6Stats.GetInsertBinlogSize())
+		assert.EqualValues(t, 333, seg6Stats.GetStatsBinlogSize())
 	})
 
-	t.Run("empty field binlogs", func(t *testing.T) {
-		binlogs := []*datapb.FieldBinlog{}
-		minTs, maxTs := extractTimestampFromBinlogs(binlogs)
-		assert.Equal(t, uint64(math.MaxUint64), minTs)
-		assert.Equal(t, uint64(0), maxTs)
-	})
+	// Replaces the removed TestExtractTimestampFromBinlogs coverage. The
+	// helper extractTimestampFromBinlogs was inlined into the Completed
+	// branch and now reuses storage.BuildStatsFromFieldBinlogs. Verify
+	// end-to-end that:
+	//   non-L0 import → StartPosition/DmlPosition derived from Binlogs
+	//   L0 import     → StartPosition/DmlPosition derived from Deltalogs
+	t.Run("completed non-L0 plumbs binlog timestamps into positions", func(t *testing.T) {
+		catalog := mocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
+		catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+		catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
+		catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
+		catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
 
-	t.Run("single binlog", func(t *testing.T) {
-		binlogs := []*datapb.FieldBinlog{
-			{
-				FieldID: 100,
-				Binlogs: []*datapb.Binlog{
-					{
-						TimestampFrom: 1000,
-						TimestampTo:   2000,
+		im, err := NewImportMeta(context.TODO(), catalog, nil, nil)
+		assert.NoError(t, err)
+
+		var job ImportJob = &importJob{
+			ImportJob: &datapb.ImportJob{
+				JobID: 100,
+				// No L0Import option → non-L0 path.
+			},
+		}
+		err = im.AddJob(context.TODO(), job)
+		assert.NoError(t, err)
+
+		taskProto := &datapb.ImportTaskV2{
+			JobID:        100,
+			TaskID:       101,
+			CollectionID: 3,
+			SegmentIDs:   []int64{42},
+			NodeID:       7,
+			State:        datapb.ImportTaskStateV2_InProgress,
+		}
+		task := &importTask{
+			alloc: nil,
+			meta: &meta{
+				collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+				segments:    NewSegmentsInfo(),
+			},
+			importMeta: im,
+			tr:         timerecord.NewTimeRecorder(""),
+		}
+		task.task.Store(taskProto)
+		err = im.AddTask(context.TODO(), task)
+		assert.NoError(t, err)
+
+		task.meta.segments.SetSegment(42, &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:        42,
+				NumOfRows: 0,
+			},
+		})
+
+		cluster := session.NewMockCluster(t)
+		cluster.EXPECT().QueryImport(mock.Anything, mock.Anything).Return(&datapb.QueryImportResponse{
+			State: datapb.ImportTaskStateV2_Completed,
+			ImportSegmentsInfo: []*datapb.ImportSegmentInfo{
+				{
+					SegmentID:    42,
+					ImportedRows: 10,
+					Binlogs: []*datapb.FieldBinlog{
+						{
+							FieldID: 100,
+							Binlogs: []*datapb.Binlog{
+								{LogID: 1, TimestampFrom: 1000, TimestampTo: 2000},
+								{LogID: 2, TimestampFrom: 500, TimestampTo: 3000},
+							},
+						},
 					},
 				},
 			},
-		}
-		minTs, maxTs := extractTimestampFromBinlogs(binlogs)
-		assert.Equal(t, uint64(1000), minTs)
-		assert.Equal(t, uint64(2000), maxTs)
+		}, nil)
+
+		catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		task.meta.catalog = catalog
+
+		task.QueryTaskOnWorker(cluster)
+		assert.Equal(t, datapb.ImportTaskStateV2_Completed, task.GetState())
+
+		seg := task.meta.segments.GetSegment(42)
+		require.NotNil(t, seg)
+		// min(TimestampFrom) across binlogs → StartPosition.Timestamp.
+		assert.EqualValues(t, 500, seg.GetStartPosition().GetTimestamp())
+		// max(TimestampTo) across binlogs → DmlPosition.Timestamp.
+		assert.EqualValues(t, 3000, seg.GetDmlPosition().GetTimestamp())
 	})
 
-	t.Run("multiple binlogs in single field", func(t *testing.T) {
-		binlogs := []*datapb.FieldBinlog{
-			{
-				FieldID: 100,
-				Binlogs: []*datapb.Binlog{
-					{
-						TimestampFrom: 1000,
-						TimestampTo:   2000,
-					},
-					{
-						TimestampFrom: 500,
-						TimestampTo:   3000,
-					},
+	t.Run("completed L0 plumbs deltalog timestamps into positions", func(t *testing.T) {
+		catalog := mocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
+		catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+		catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
+		catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
+		catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
+
+		im, err := NewImportMeta(context.TODO(), catalog, nil, nil)
+		assert.NoError(t, err)
+
+		var job ImportJob = &importJob{
+			ImportJob: &datapb.ImportJob{
+				JobID: 200,
+				Options: []*commonpb.KeyValuePair{
+					{Key: importutilv2.L0Import, Value: "true"},
 				},
 			},
 		}
-		minTs, maxTs := extractTimestampFromBinlogs(binlogs)
-		assert.Equal(t, uint64(500), minTs)
-		assert.Equal(t, uint64(3000), maxTs)
-	})
+		err = im.AddJob(context.TODO(), job)
+		assert.NoError(t, err)
 
-	t.Run("multiple fields with multiple binlogs", func(t *testing.T) {
-		binlogs := []*datapb.FieldBinlog{
-			{
-				FieldID: 100,
-				Binlogs: []*datapb.Binlog{
-					{
-						TimestampFrom: 1000,
-						TimestampTo:   2000,
+		taskProto := &datapb.ImportTaskV2{
+			JobID:        200,
+			TaskID:       201,
+			CollectionID: 3,
+			SegmentIDs:   []int64{43},
+			NodeID:       7,
+			State:        datapb.ImportTaskStateV2_InProgress,
+		}
+		task := &importTask{
+			alloc: nil,
+			meta: &meta{
+				collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+				segments:    NewSegmentsInfo(),
+			},
+			importMeta: im,
+			tr:         timerecord.NewTimeRecorder(""),
+		}
+		task.task.Store(taskProto)
+		err = im.AddTask(context.TODO(), task)
+		assert.NoError(t, err)
+
+		task.meta.segments.SetSegment(43, &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:        43,
+				NumOfRows: 0,
+				Level:     datapb.SegmentLevel_L0,
+			},
+		})
+
+		cluster := session.NewMockCluster(t)
+		cluster.EXPECT().QueryImport(mock.Anything, mock.Anything).Return(&datapb.QueryImportResponse{
+			State: datapb.ImportTaskStateV2_Completed,
+			ImportSegmentsInfo: []*datapb.ImportSegmentInfo{
+				{
+					SegmentID:    43,
+					ImportedRows: 10,
+					// Binlogs intentionally carry an outlier range that
+					// should be ignored because IsL0Import == true.
+					Binlogs: []*datapb.FieldBinlog{
+						{
+							FieldID: 100,
+							Binlogs: []*datapb.Binlog{
+								{LogID: 10, TimestampFrom: 99999, TimestampTo: 99999},
+							},
+						},
+					},
+					Deltalogs: []*datapb.FieldBinlog{
+						{
+							Binlogs: []*datapb.Binlog{
+								{LogID: 1, EntriesNum: 5, TimestampFrom: 7000, TimestampTo: 8000},
+								{LogID: 2, EntriesNum: 3, TimestampFrom: 5500, TimestampTo: 9500},
+							},
+						},
 					},
 				},
 			},
-			{
-				FieldID: 101,
-				Binlogs: []*datapb.Binlog{
-					{
-						TimestampFrom: 500,
-						TimestampTo:   1500,
-					},
-					{
-						TimestampFrom: 800,
-						TimestampTo:   3000,
-					},
-				},
-			},
-		}
-		minTs, maxTs := extractTimestampFromBinlogs(binlogs)
-		assert.Equal(t, uint64(500), minTs)
-		assert.Equal(t, uint64(3000), maxTs)
-	})
+		}, nil)
 
-	t.Run("field binlog with no binlogs inside", func(t *testing.T) {
-		binlogs := []*datapb.FieldBinlog{
-			{
-				FieldID: 100,
-				Binlogs: []*datapb.Binlog{},
-			},
-		}
-		minTs, maxTs := extractTimestampFromBinlogs(binlogs)
-		assert.Equal(t, uint64(math.MaxUint64), minTs)
-		assert.Equal(t, uint64(0), maxTs)
+		catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		task.meta.catalog = catalog
+
+		task.QueryTaskOnWorker(cluster)
+		assert.Equal(t, datapb.ImportTaskStateV2_Completed, task.GetState())
+
+		seg := task.meta.segments.GetSegment(43)
+		require.NotNil(t, seg)
+		// L0: positions derived from deltalogs, NOT binlogs.
+		assert.EqualValues(t, 5500, seg.GetStartPosition().GetTimestamp())
+		assert.EqualValues(t, 9500, seg.GetDmlPosition().GetTimestamp())
 	})
 }
 

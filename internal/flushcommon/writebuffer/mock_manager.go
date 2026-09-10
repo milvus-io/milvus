@@ -77,17 +77,17 @@ func (_c *MockBufferManager_BufferData_Call) RunAndReturn(run func(string, []*In
 	return _c
 }
 
-// CreateNewGrowingSegment provides a mock function with given fields: ctx, channel, partition, segmentID, schemaVersion
-func (_m *MockBufferManager) CreateNewGrowingSegment(ctx context.Context, channel string, partition int64, segmentID int64, schemaVersion int32) error {
-	ret := _m.Called(ctx, channel, partition, segmentID, schemaVersion)
+// CreateNewGrowingSegment provides a mock function with given fields: ctx, channel, info
+func (_m *MockBufferManager) CreateNewGrowingSegment(ctx context.Context, channel string, info CreateGrowingSegmentInfo) error {
+	ret := _m.Called(ctx, channel, info)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CreateNewGrowingSegment")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, int64, int64, int32) error); ok {
-		r0 = rf(ctx, channel, partition, segmentID, schemaVersion)
+	if rf, ok := ret.Get(0).(func(context.Context, string, CreateGrowingSegmentInfo) error); ok {
+		r0 = rf(ctx, channel, info)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -103,16 +103,14 @@ type MockBufferManager_CreateNewGrowingSegment_Call struct {
 // CreateNewGrowingSegment is a helper method to define mock.On call
 //   - ctx context.Context
 //   - channel string
-//   - partition int64
-//   - segmentID int64
-//   - schemaVersion int32
-func (_e *MockBufferManager_Expecter) CreateNewGrowingSegment(ctx interface{}, channel interface{}, partition interface{}, segmentID interface{}, schemaVersion interface{}) *MockBufferManager_CreateNewGrowingSegment_Call {
-	return &MockBufferManager_CreateNewGrowingSegment_Call{Call: _e.mock.On("CreateNewGrowingSegment", ctx, channel, partition, segmentID, schemaVersion)}
+//   - info CreateGrowingSegmentInfo
+func (_e *MockBufferManager_Expecter) CreateNewGrowingSegment(ctx interface{}, channel interface{}, info interface{}) *MockBufferManager_CreateNewGrowingSegment_Call {
+	return &MockBufferManager_CreateNewGrowingSegment_Call{Call: _e.mock.On("CreateNewGrowingSegment", ctx, channel, info)}
 }
 
-func (_c *MockBufferManager_CreateNewGrowingSegment_Call) Run(run func(ctx context.Context, channel string, partition int64, segmentID int64, schemaVersion int32)) *MockBufferManager_CreateNewGrowingSegment_Call {
+func (_c *MockBufferManager_CreateNewGrowingSegment_Call) Run(run func(ctx context.Context, channel string, info CreateGrowingSegmentInfo)) *MockBufferManager_CreateNewGrowingSegment_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string), args[2].(int64), args[3].(int64), args[4].(int32))
+		run(args[0].(context.Context), args[1].(string), args[2].(CreateGrowingSegmentInfo))
 	})
 	return _c
 }
@@ -122,7 +120,7 @@ func (_c *MockBufferManager_CreateNewGrowingSegment_Call) Return(_a0 error) *Moc
 	return _c
 }
 
-func (_c *MockBufferManager_CreateNewGrowingSegment_Call) RunAndReturn(run func(context.Context, string, int64, int64, int32) error) *MockBufferManager_CreateNewGrowingSegment_Call {
+func (_c *MockBufferManager_CreateNewGrowingSegment_Call) RunAndReturn(run func(context.Context, string, CreateGrowingSegmentInfo) error) *MockBufferManager_CreateNewGrowingSegment_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -242,52 +240,6 @@ func (_c *MockBufferManager_FlushChannel_Call) RunAndReturn(run func(context.Con
 	return _c
 }
 
-// HasTextFields provides a mock function with given fields: channel
-func (_m *MockBufferManager) HasTextFields(channel string) bool {
-	ret := _m.Called(channel)
-
-	if len(ret) == 0 {
-		panic("no return value specified for HasTextFields")
-	}
-
-	var r0 bool
-	if rf, ok := ret.Get(0).(func(string) bool); ok {
-		r0 = rf(channel)
-	} else {
-		r0 = ret.Get(0).(bool)
-	}
-
-	return r0
-}
-
-// MockBufferManager_HasTextFields_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'HasTextFields'
-type MockBufferManager_HasTextFields_Call struct {
-	*mock.Call
-}
-
-// HasTextFields is a helper method to define mock.On call
-//   - channel string
-func (_e *MockBufferManager_Expecter) HasTextFields(channel interface{}) *MockBufferManager_HasTextFields_Call {
-	return &MockBufferManager_HasTextFields_Call{Call: _e.mock.On("HasTextFields", channel)}
-}
-
-func (_c *MockBufferManager_HasTextFields_Call) Run(run func(channel string)) *MockBufferManager_HasTextFields_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string))
-	})
-	return _c
-}
-
-func (_c *MockBufferManager_HasTextFields_Call) Return(_a0 bool) *MockBufferManager_HasTextFields_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockBufferManager_HasTextFields_Call) RunAndReturn(run func(string) bool) *MockBufferManager_HasTextFields_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // GetCheckpoint provides a mock function with given fields: channel
 func (_m *MockBufferManager) GetCheckpoint(channel string) (*msgpb.MsgPosition, bool, error) {
 	ret := _m.Called(channel)
@@ -349,6 +301,113 @@ func (_c *MockBufferManager_GetCheckpoint_Call) Return(_a0 *msgpb.MsgPosition, _
 }
 
 func (_c *MockBufferManager_GetCheckpoint_Call) RunAndReturn(run func(string) (*msgpb.MsgPosition, bool, error)) *MockBufferManager_GetCheckpoint_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetGrowingFlushProgress provides a mock function with given fields: ctx, channel, segmentIDs, fenceTs
+func (_m *MockBufferManager) GetGrowingFlushProgress(ctx context.Context, channel string, segmentIDs []int64, fenceTs uint64) ([]GrowingFlushSegmentProgress, error) {
+	ret := _m.Called(ctx, channel, segmentIDs, fenceTs)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetGrowingFlushProgress")
+	}
+
+	var r0 []GrowingFlushSegmentProgress
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, []int64, uint64) ([]GrowingFlushSegmentProgress, error)); ok {
+		return rf(ctx, channel, segmentIDs, fenceTs)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, []int64, uint64) []GrowingFlushSegmentProgress); ok {
+		r0 = rf(ctx, channel, segmentIDs, fenceTs)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]GrowingFlushSegmentProgress)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, []int64, uint64) error); ok {
+		r1 = rf(ctx, channel, segmentIDs, fenceTs)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockBufferManager_GetGrowingFlushProgress_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetGrowingFlushProgress'
+type MockBufferManager_GetGrowingFlushProgress_Call struct {
+	*mock.Call
+}
+
+// GetGrowingFlushProgress is a helper method to define mock.On call
+//   - ctx context.Context
+//   - channel string
+//   - segmentIDs []int64
+//   - fenceTs uint64
+func (_e *MockBufferManager_Expecter) GetGrowingFlushProgress(ctx interface{}, channel interface{}, segmentIDs interface{}, fenceTs interface{}) *MockBufferManager_GetGrowingFlushProgress_Call {
+	return &MockBufferManager_GetGrowingFlushProgress_Call{Call: _e.mock.On("GetGrowingFlushProgress", ctx, channel, segmentIDs, fenceTs)}
+}
+
+func (_c *MockBufferManager_GetGrowingFlushProgress_Call) Run(run func(ctx context.Context, channel string, segmentIDs []int64, fenceTs uint64)) *MockBufferManager_GetGrowingFlushProgress_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].([]int64), args[3].(uint64))
+	})
+	return _c
+}
+
+func (_c *MockBufferManager_GetGrowingFlushProgress_Call) Return(_a0 []GrowingFlushSegmentProgress, _a1 error) *MockBufferManager_GetGrowingFlushProgress_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockBufferManager_GetGrowingFlushProgress_Call) RunAndReturn(run func(context.Context, string, []int64, uint64) ([]GrowingFlushSegmentProgress, error)) *MockBufferManager_GetGrowingFlushProgress_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// AllowGrowingSourceFlush provides a mock function with given fields: channel
+func (_m *MockBufferManager) AllowGrowingSourceFlush(channel string) bool {
+	ret := _m.Called(channel)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AllowGrowingSourceFlush")
+	}
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func(string) bool); ok {
+		r0 = rf(channel)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockBufferManager_AllowGrowingSourceFlush_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AllowGrowingSourceFlush'
+type MockBufferManager_AllowGrowingSourceFlush_Call struct {
+	*mock.Call
+}
+
+// AllowGrowingSourceFlush is a helper method to define mock.On call
+//   - channel string
+func (_e *MockBufferManager_Expecter) AllowGrowingSourceFlush(channel interface{}) *MockBufferManager_AllowGrowingSourceFlush_Call {
+	return &MockBufferManager_AllowGrowingSourceFlush_Call{Call: _e.mock.On("AllowGrowingSourceFlush", channel)}
+}
+
+func (_c *MockBufferManager_AllowGrowingSourceFlush_Call) Run(run func(channel string)) *MockBufferManager_AllowGrowingSourceFlush_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockBufferManager_AllowGrowingSourceFlush_Call) Return(_a0 bool) *MockBufferManager_AllowGrowingSourceFlush_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockBufferManager_AllowGrowingSourceFlush_Call) RunAndReturn(run func(string) bool) *MockBufferManager_AllowGrowingSourceFlush_Call {
 	_c.Call.Return(run)
 	return _c
 }

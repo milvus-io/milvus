@@ -15,7 +15,6 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -23,12 +22,14 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	pb "github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
@@ -1013,7 +1014,7 @@ func Test_batchMultiSaveAndRemove(t *testing.T) {
 	t.Run("normal case", func(t *testing.T) {
 		snapshot := mocks.NewTxnKV(t)
 		snapshot.EXPECT().MultiSave(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, kvs map[string]string) error {
-			log.Info("multi save", zap.Any("len", len(kvs)), zap.Any("saves", kvs))
+			mlog.Info(context.TODO(), "multi save", mlog.Any("len", len(kvs)), mlog.Any("saves", kvs))
 			return nil
 		})
 		snapshot.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).Return(nil)
@@ -1192,6 +1193,63 @@ func TestCatalog_AlterCollection(t *testing.T) {
 		err := kc.AlterCollection(ctx, oldC, newC, metastore.MODIFY, 0, true)
 		assert.NoError(t, err)
 	})
+
+	t.Run("modify removes stale schema keys", func(t *testing.T) {
+		var collectionID int64 = 1
+		snapshot := mocks.NewTxnKV(t)
+		snapshot.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error {
+				assert.Contains(t, saves, BuildCollectionKey(0, collectionID))
+				assert.Contains(t, saves, BuildFieldKey(collectionID, 100))
+				assert.Contains(t, saves, BuildStructArrayFieldKey(collectionID, 200))
+				assert.Contains(t, saves, BuildFunctionKey(collectionID, 300))
+				assert.NotContains(t, saves, BuildFieldKey(collectionID, 101))
+				assert.NotContains(t, saves, BuildStructArrayFieldKey(collectionID, 201))
+				assert.NotContains(t, saves, BuildFunctionKey(collectionID, 301))
+				assert.ElementsMatch(t, []string{
+					BuildFieldKey(collectionID, 101),
+					BuildStructArrayFieldKey(collectionID, 201),
+					BuildFunctionKey(collectionID, 301),
+				}, removals)
+				return nil
+			})
+
+		kc := NewCatalog(snapshot).(*Catalog)
+		ctx := context.Background()
+		oldC := &model.Collection{
+			DBID:         0,
+			CollectionID: collectionID,
+			State:        pb.CollectionState_CollectionCreated,
+			Fields: []*model.Field{
+				{FieldID: 100, Name: "keep_field"},
+				{FieldID: 101, Name: "drop_field"},
+			},
+			StructArrayFields: []*model.StructArrayField{
+				{FieldID: 200, Name: "keep_struct"},
+				{FieldID: 201, Name: "drop_struct"},
+			},
+			Functions: []*model.Function{
+				{ID: 300, Name: "keep_function"},
+				{ID: 301, Name: "drop_function"},
+			},
+		}
+		newC := &model.Collection{
+			DBID:         0,
+			CollectionID: collectionID,
+			State:        pb.CollectionState_CollectionCreated,
+			Fields: []*model.Field{
+				{FieldID: 100, Name: "keep_field"},
+			},
+			StructArrayFields: []*model.StructArrayField{
+				{FieldID: 200, Name: "keep_struct"},
+			},
+			Functions: []*model.Function{
+				{ID: 300, Name: "keep_function"},
+			},
+		}
+		err := kc.AlterCollection(ctx, oldC, newC, metastore.MODIFY, 0, true)
+		assert.NoError(t, err)
+	})
 }
 
 func TestCatalog_AlterCollectionDB(t *testing.T) {
@@ -1218,6 +1276,28 @@ func TestCatalog_AlterCollectionDB(t *testing.T) {
 		newC := &model.Collection{CollectionID: collectionID, State: pb.CollectionState_CollectionCreated, DBID: 1}
 		err := kc.AlterCollectionDB(ctx, oldC, newC, 0)
 		assert.NoError(t, err)
+	})
+
+	t.Run("RLS metadata remains addressable", func(t *testing.T) {
+		kv := memkv.NewMemoryKV()
+		catalog := NewCatalog(kv).(*Catalog)
+		oldC := &model.Collection{CollectionID: collectionID, State: pb.CollectionState_CollectionCreated, DBID: 10}
+		newC := &model.Collection{CollectionID: collectionID, State: pb.CollectionState_CollectionCreated, DBID: 11}
+		policy := &model.RLSPolicy{DBID: 10, CollectionID: collectionID, PolicyID: 100, PolicyName: "policy"}
+		principal := &model.RLSPrincipal{DBID: 10, CollectionID: collectionID, PrincipalName: "alice"}
+
+		require.NoError(t, catalog.SaveRLSPolicy(ctx, policy))
+		require.NoError(t, catalog.SaveRLSPrincipal(ctx, principal))
+		require.NoError(t, catalog.AlterCollectionDB(ctx, oldC, newC, 0))
+
+		policies, err := catalog.ListRLSPolicies(ctx, collectionID)
+		require.NoError(t, err)
+		require.Len(t, policies, 1)
+		assert.Equal(t, policy.PolicyName, policies[0].PolicyName)
+		principals, err := catalog.ListRLSPrincipals(ctx, collectionID)
+		require.NoError(t, err)
+		require.Len(t, principals, 1)
+		assert.Equal(t, principal.PrincipalName, principals[0].PrincipalName)
 	})
 }
 
@@ -1276,31 +1356,14 @@ type mockSnapshotOpt func(ss *mocks.TxnKV)
 
 func newMockSnapshot(t *testing.T, opts ...mockSnapshotOpt) *mocks.TxnKV {
 	ss := mocks.NewTxnKV(t)
+	// CreateCollection/DropCollection delegate to the composite Update, whose
+	// txn.Commit reads the store's txn op limit. Stub it so the mock does not
+	// panic; a large value keeps the write on the atomic path.
+	ss.EXPECT().MaxTxnOps().Return(128).Maybe()
 	for _, opt := range opts {
 		opt(ss)
 	}
 	return ss
-}
-
-func withMockSave(saveErr error) mockSnapshotOpt {
-	return func(ss *mocks.TxnKV) {
-		ss.On(
-			"Save",
-			mock.Anything,
-			mock.AnythingOfType("string"),
-			mock.AnythingOfType("string")).
-			Return(saveErr)
-	}
-}
-
-func withMockMultiSave(multiSaveErr error) mockSnapshotOpt {
-	return func(ss *mocks.TxnKV) {
-		ss.On(
-			"MultiSave",
-			mock.Anything,
-			mock.AnythingOfType("map[string]string")).
-			Return(multiSaveErr)
-	}
 }
 
 func withMockMultiSaveAndRemoveWithPrefix(err error) mockSnapshotOpt {
@@ -1324,22 +1387,10 @@ func TestCatalog_CreateCollection(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("failed to save fields", func(t *testing.T) {
-		mockSnapshot := newMockSnapshot(t, withMockMultiSave(errors.New("error mock MultiSave")))
-		kc := NewCatalog(mockSnapshot)
-		ctx := context.Background()
-		coll := &model.Collection{
-			Partitions: []*model.Partition{
-				{PartitionName: "test"},
-			},
-			State: pb.CollectionState_CollectionCreated,
-		}
-		err := kc.CreateCollection(ctx, coll, 100)
-		assert.Error(t, err)
-	})
-
-	t.Run("succeed to save fields but failed to save collection key", func(t *testing.T) {
-		mockSnapshot := newMockSnapshot(t, withMockMultiSave(nil), withMockSave(errors.New("error mock Save")))
+	t.Run("failed to commit", func(t *testing.T) {
+		// CreateCollection now delegates to Update, committing children +
+		// collection key in a single atomic MultiSaveAndRemove.
+		mockSnapshot := newMockSnapshot(t, withMockMultiSaveAndRemove(errors.New("error mock MultiSaveAndRemove")))
 		kc := NewCatalog(mockSnapshot)
 		ctx := context.Background()
 		coll := &model.Collection{
@@ -1353,7 +1404,7 @@ func TestCatalog_CreateCollection(t *testing.T) {
 	})
 
 	t.Run("no fields or partitions, only collection key", func(t *testing.T) {
-		mockSnapshot := newMockSnapshot(t, withMockSave(nil))
+		mockSnapshot := newMockSnapshot(t, withMockMultiSaveAndRemove(nil))
 		kc := NewCatalog(mockSnapshot)
 		ctx := context.Background()
 		coll := &model.Collection{State: pb.CollectionState_CollectionCreated}
@@ -1362,7 +1413,7 @@ func TestCatalog_CreateCollection(t *testing.T) {
 	})
 
 	t.Run("normal case", func(t *testing.T) {
-		mockSnapshot := newMockSnapshot(t, withMockMultiSave(nil), withMockSave(nil))
+		mockSnapshot := newMockSnapshot(t, withMockMultiSaveAndRemove(nil))
 		kc := NewCatalog(mockSnapshot)
 		ctx := context.Background()
 		coll := &model.Collection{
@@ -1376,7 +1427,7 @@ func TestCatalog_CreateCollection(t *testing.T) {
 	})
 
 	t.Run("create collection with function and struct array field", func(t *testing.T) {
-		mockSnapshot := newMockSnapshot(t, withMockMultiSave(nil), withMockSave(nil))
+		mockSnapshot := newMockSnapshot(t, withMockMultiSaveAndRemove(nil))
 		kc := NewCatalog(mockSnapshot)
 		ctx := context.Background()
 		coll := &model.Collection{
@@ -1446,32 +1497,33 @@ func TestCatalog_DropCollection(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("succeed to remove first, but failed to remove twice", func(t *testing.T) {
+	t.Run("removes children and collection key in one atomic txn", func(t *testing.T) {
+		// DropCollection now delegates to Update: children + collection key
+		// are removed together in a single atomic MultiSaveAndRemove.
 		mockSnapshot := newMockSnapshot(t)
-		removeOtherCalled := false
-		removeCollectionCalled := false
+		var gotSaves map[string]string
+		var gotRemovals []string
 		mockSnapshot.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
-			RunAndReturn(func(_ context.Context, _ map[string]string, _ []string, _ ...predicates.Predicate) error {
-				removeOtherCalled = true
+			RunAndReturn(func(_ context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error {
+				gotSaves = saves
+				gotRemovals = removals
+				assert.Empty(t, preds)
 				return nil
-			}).Once()
-		mockSnapshot.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
-			RunAndReturn(func(_ context.Context, _ map[string]string, _ []string, _ ...predicates.Predicate) error {
-				removeCollectionCalled = true
-				return errors.New("error mock MultiSaveAndRemove")
 			}).Once()
 		kc := NewCatalog(mockSnapshot)
 		ctx := context.Background()
 		coll := &model.Collection{
+			CollectionID: 1,
 			Partitions: []*model.Partition{
-				{PartitionName: "test"},
+				{PartitionID: 10, PartitionName: "test"},
 			},
 			State: pb.CollectionState_CollectionDropping,
 		}
 		err := kc.DropCollection(ctx, coll, 100)
-		assert.Error(t, err)
-		assert.True(t, removeOtherCalled)
-		assert.True(t, removeCollectionCalled)
+		assert.NoError(t, err)
+		assert.Empty(t, gotSaves)
+		assert.Contains(t, gotRemovals, BuildCollectionKey(coll.DBID, coll.CollectionID))
+		assert.Contains(t, gotRemovals, BuildPartitionKey(coll.CollectionID, 10))
 	})
 
 	t.Run("normal case", func(t *testing.T) {
@@ -1486,6 +1538,34 @@ func TestCatalog_DropCollection(t *testing.T) {
 		}
 		err := kc.DropCollection(ctx, coll, 100)
 		assert.NoError(t, err)
+	})
+
+	t.Run("drop collection with RLS metadata", func(t *testing.T) {
+		mockSnapshot := newMockSnapshot(t)
+		var removeOtherKeys []string
+		mockSnapshot.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, _ map[string]string, keys []string, _ ...predicates.Predicate) error {
+				removeOtherKeys = append(removeOtherKeys, keys...)
+				return nil
+			}).Once()
+
+		kc := NewCatalog(mockSnapshot)
+		ctx := context.Background()
+		coll := &model.Collection{
+			DBID:         10,
+			CollectionID: 20,
+			RLSPolicies: map[string]*model.RLSPolicy{
+				"dept_read": {PolicyID: 30, PolicyName: "dept_read"},
+			},
+			RLSPrincipals: []*model.RLSPrincipal{
+				{PrincipalName: "team/a user"},
+			},
+			State: pb.CollectionState_CollectionDropping,
+		}
+		err := kc.DropCollection(ctx, coll, 100)
+		require.NoError(t, err)
+		require.Contains(t, removeOtherKeys, BuildRLSPolicyKey(20, 30))
+		require.Contains(t, removeOtherKeys, buildRLSPrincipalKey(20, "team/a user"))
 	})
 
 	t.Run("drop collection with function", func(t *testing.T) {
@@ -1544,10 +1624,245 @@ func TestCatalog_DropCollection(t *testing.T) {
 	})
 }
 
+func TestCatalog_RLSMetadata(t *testing.T) {
+	ctx := context.Background()
+	kv := memkv.NewMemoryKV()
+	catalog := NewCatalog(kv).(*Catalog)
+
+	policyA := &model.RLSPolicy{
+		DBID:         10,
+		CollectionID: 20,
+		PolicyID:     100,
+		PolicyName:   "dept_read",
+		PolicyType:   rlsutil.PolicyTypePermissive,
+		Actions:      []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+		UsingExpr:    "dept == $current_principal_tags['dept']",
+		Description:  "department read policy",
+	}
+	policyB := &model.RLSPolicy{
+		DBID:         10,
+		CollectionID: 20,
+		PolicyID:     101,
+		PolicyName:   "owner_write",
+		PolicyType:   rlsutil.PolicyTypeRestrictive,
+		Actions:      []rlsutil.PolicyAction{rlsutil.PolicyActionInsert},
+		CheckExpr:    "owner == $current_principal",
+	}
+
+	require.NoError(t, catalog.SaveRLSPolicy(ctx, policyB))
+	require.NoError(t, catalog.SaveRLSPolicy(ctx, policyA))
+
+	policyKey := BuildRLSPolicyKey(20, policyA.PolicyID)
+	assert.Equal(t, RLSPolicyMetaPrefix+"/20/100", policyKey)
+	_, err := kv.Load(ctx, policyKey)
+	require.NoError(t, err)
+	require.ErrorIs(t, catalog.SaveRLSPolicy(ctx, &model.RLSPolicy{
+		DBID:         10,
+		CollectionID: 20,
+		PolicyName:   "missing_id",
+	}), merr.ErrServiceInternal)
+
+	policies, err := catalog.ListRLSPolicies(ctx, 20)
+	require.NoError(t, err)
+	require.Len(t, policies, 2)
+	assert.Equal(t, "dept_read", policies[0].PolicyName)
+	assert.Equal(t, "owner_write", policies[1].PolicyName)
+	assert.Equal(t, policyA.UsingExpr, policies[0].UsingExpr)
+	assert.Equal(t, policyB.CheckExpr, policies[1].CheckExpr)
+
+	require.NoError(t, catalog.DropRLSPolicy(ctx, 20, policyA.PolicyID))
+	_, err = kv.Load(ctx, BuildRLSPolicyKey(20, policyA.PolicyID))
+	assert.ErrorIs(t, err, merr.ErrIoKeyNotFound)
+	policies, err = catalog.ListRLSPolicies(ctx, 20)
+	require.NoError(t, err)
+	require.Len(t, policies, 1)
+	assert.Equal(t, "owner_write", policies[0].PolicyName)
+	principal := &model.RLSPrincipal{
+		DBID:          10,
+		CollectionID:  20,
+		PrincipalName: "team/a user",
+		Tags: map[string]rlsutil.TagValue{
+			"dept":  rlsutil.NewStringTagValue("sales"),
+			"level": rlsutil.NewInt64TagValue(3),
+			"score": rlsutil.NewDoubleTagValue(0.75),
+		},
+	}
+	require.NoError(t, catalog.SaveRLSPrincipal(ctx, principal))
+
+	principalKey := buildRLSPrincipalKey(20, principal.PrincipalName)
+	assert.Equal(t, RLSPrincipalMetaPrefix+"/20/team%2Fa%20user", principalKey)
+	assert.Contains(t, principalKey, "team%2Fa%20user")
+	_, err = kv.Load(ctx, principalKey)
+	require.NoError(t, err)
+
+	loadedPrincipal, err := catalog.GetRLSPrincipal(ctx, 20, principal.PrincipalName)
+	require.NoError(t, err)
+	assert.Equal(t, principal.PrincipalName, loadedPrincipal.PrincipalName)
+	assert.Equal(t, principal.Tags, loadedPrincipal.Tags)
+
+	principals, err := catalog.ListRLSPrincipals(ctx, 20)
+	require.NoError(t, err)
+	require.Len(t, principals, 1)
+	assert.Equal(t, principal.PrincipalName, principals[0].PrincipalName)
+
+	require.NoError(t, catalog.DropRLSPrincipal(ctx, 20, principal.PrincipalName))
+	_, err = catalog.GetRLSPrincipal(ctx, 20, principal.PrincipalName)
+	assert.ErrorIs(t, err, merr.ErrIoKeyNotFound)
+}
+
+func TestCatalog_DropRLSPolicyUsesLogicalKey(t *testing.T) {
+	ctx := context.Background()
+	policy := &model.RLSPolicy{
+		DBID:         10,
+		CollectionID: 20,
+		PolicyID:     100,
+		PolicyName:   "dept_read",
+		PolicyType:   rlsutil.PolicyTypePermissive,
+		Actions:      []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+		UsingExpr:    "dept == 'sales'",
+	}
+	logicalKey := BuildRLSPolicyKey(policy.CollectionID, policy.PolicyID)
+	kvmock := mocks.NewTxnKV(t)
+	kvmock.EXPECT().
+		Remove(mock.Anything, logicalKey).
+		Return(nil).
+		Once()
+
+	catalog := NewCatalog(kvmock).(*Catalog)
+	require.NoError(t, catalog.DropRLSPolicy(ctx, policy.CollectionID, policy.PolicyID))
+}
+
 func getUserInfoMetaString(username string) string {
 	validInfo := &internalpb.CredentialInfo{Username: username, EncryptedPassword: "pwd" + username}
 	validBytes, _ := json.Marshal(validInfo)
 	return string(validBytes)
+}
+
+func TestGetUserResultIncludesDescriptionWithoutRoleInfo(t *testing.T) {
+	ctx := context.TODO()
+	tenant := util.DefaultTenant
+	username := "user-with-description"
+	description := "stored description"
+
+	kvmock := mocks.NewTxnKV(t)
+	c := NewCatalog(kvmock).(*Catalog)
+	credential := &model.Credential{
+		Username:    username,
+		Description: description,
+	}
+
+	result, err := c.getUserResult(ctx, tenant, credential, false)
+
+	require.NoError(t, err)
+	assert.Equal(t, username, result.GetUser().GetName())
+	assert.Equal(t, description, result.GetDescription())
+	assert.Empty(t, result.GetRoles())
+}
+
+func TestListUserReturnsCredentialLoadError(t *testing.T) {
+	ctx := context.TODO()
+	tenant := util.DefaultTenant
+	username := "user-with-credential-load-error"
+	credentialKey := fmt.Sprintf("%s/%s", CredentialPrefix, username)
+	expectedErr := errors.New("credential load failed")
+
+	kvmock := mocks.NewTxnKV(t)
+	c := NewCatalog(kvmock).(*Catalog)
+	kvmock.EXPECT().Load(mock.Anything, credentialKey).Return("", expectedErr)
+
+	results, err := c.ListUser(ctx, tenant, &milvuspb.UserEntity{Name: username}, false)
+
+	require.ErrorIs(t, err, expectedErr)
+	assert.Empty(t, results)
+}
+
+func TestListUserSingleUserReusesLoadedCredentialDescription(t *testing.T) {
+	ctx := context.TODO()
+	tenant := util.DefaultTenant
+	username := "user-with-description"
+	description := "single user description"
+	credentialKey := fmt.Sprintf("%s/%s", CredentialPrefix, username)
+	credentialValue, err := json.Marshal(&internalpb.CredentialInfo{Description: &description})
+	require.NoError(t, err)
+
+	kvmock := mocks.NewTxnKV(t)
+	c := NewCatalog(kvmock).(*Catalog)
+	kvmock.EXPECT().Load(mock.Anything, credentialKey).Return(string(credentialValue), nil).Once()
+
+	results, err := c.ListUser(ctx, tenant, &milvuspb.UserEntity{Name: username}, false)
+
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, username, results[0].GetUser().GetName())
+	assert.Equal(t, description, results[0].GetDescription())
+	assert.Empty(t, results[0].GetRoles())
+}
+
+func TestListUserAllUsersReusesLoadedCredentialDescriptions(t *testing.T) {
+	ctx := context.TODO()
+	tenant := util.DefaultTenant
+	user1Description := "first user"
+	user2Description := "second user"
+	ghostDescription := "ghost user"
+	user1Credential, err := json.Marshal(&internalpb.CredentialInfo{Description: &user1Description})
+	require.NoError(t, err)
+	user2Credential, err := json.Marshal(&internalpb.CredentialInfo{Description: &user2Description})
+	require.NoError(t, err)
+	ghostCredential, err := json.Marshal(&internalpb.CredentialInfo{Description: &ghostDescription})
+	require.NoError(t, err)
+
+	kvmock := mocks.NewTxnKV(t)
+	c := NewCatalog(kvmock).(*Catalog)
+	kvmock.EXPECT().LoadWithPrefix(mock.Anything, CredentialPrefix+"/").Return(
+		[]string{
+			fmt.Sprintf("%s/%s", CredentialPrefix, "user1"),
+			fmt.Sprintf("%s/%s", CredentialPrefix, "user2"),
+			fmt.Sprintf("%s/%s/%s", CredentialPrefix, UserSubPrefix, "ghost"),
+		},
+		[]string{string(user1Credential), string(user2Credential), string(ghostCredential)},
+		nil,
+	)
+
+	results, err := c.ListUser(ctx, tenant, nil, false)
+
+	require.NoError(t, err)
+	require.Len(t, results, 2)
+	assert.Equal(t, "user1", results[0].GetUser().GetName())
+	assert.Equal(t, user1Description, results[0].GetDescription())
+	assert.Empty(t, results[0].GetRoles())
+	assert.Equal(t, "user2", results[1].GetUser().GetName())
+	assert.Equal(t, user2Description, results[1].GetDescription())
+	assert.Empty(t, results[1].GetRoles())
+}
+
+func TestBackupRBACReusesLoadedCredentials(t *testing.T) {
+	ctx := context.TODO()
+	tenant := util.DefaultTenant
+	username := "user-with-password"
+	password := "encrypted-password"
+	credentialValue, err := json.Marshal(&internalpb.CredentialInfo{EncryptedPassword: password})
+	require.NoError(t, err)
+
+	var credentialPrefixLoads int
+	kvmock := mocks.NewTxnKV(t)
+	c := NewCatalog(kvmock).(*Catalog)
+	kvmock.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, key string) ([]string, []string, error) {
+			if key == CredentialPrefix+"/" {
+				credentialPrefixLoads++
+				return []string{fmt.Sprintf("%s/%s", CredentialPrefix, username)}, []string{string(credentialValue)}, nil
+			}
+			return nil, nil, nil
+		})
+
+	backup, err := c.BackupRBAC(ctx, tenant)
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, credentialPrefixLoads)
+	require.Len(t, backup.GetUsers(), 1)
+	assert.Equal(t, username, backup.GetUsers()[0].GetUser())
+	assert.Equal(t, password, backup.GetUsers()[0].GetPassword())
+	assert.Empty(t, backup.GetUsers()[0].GetRoles())
 }
 
 func TestRBAC_Credential(t *testing.T) {
@@ -1654,6 +1969,32 @@ func TestRBAC_Credential(t *testing.T) {
 		}
 	})
 
+	t.Run("test AlterCredential does not persist sha256 password", func(t *testing.T) {
+		var (
+			kvmock = mocks.NewTxnKV(t)
+			c      = NewCatalog(kvmock)
+		)
+
+		kvmock.EXPECT().
+			Save(mock.Anything, fmt.Sprintf("%s/%s", CredentialPrefix, "user1"), mock.MatchedBy(func(value string) bool {
+				credential := &internalpb.CredentialInfo{}
+				require.NoError(t, json.Unmarshal([]byte(value), credential))
+				return credential.GetEncryptedPassword() == "password" &&
+					credential.GetSha256Password() == "" &&
+					credential.GetDescription() == "description"
+			})).
+			Return(nil)
+
+		description := "description"
+		err := c.AlterCredential(ctx, &model.Credential{
+			Username:          "user1",
+			EncryptedPassword: "password",
+			Sha256Password:    "sha256-password",
+			Description:       description,
+		})
+		assert.NoError(t, err)
+	})
+
 	t.Run("test DropCredential", func(t *testing.T) {
 		var (
 			kvmock = mocks.NewTxnKV(t)
@@ -1723,6 +2064,8 @@ func TestRBAC_Credential(t *testing.T) {
 
 		// Return valid keys if count==0
 		// return error if count!=0
+		credentialValue, err := json.Marshal(&internalpb.CredentialInfo{EncryptedPassword: crypto.Base64Encode("passwd")})
+		require.NoError(t, err)
 		kvmock.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Call.Return(
 			func(ctx context.Context, key string) []string {
 				cmu.RLock()
@@ -1732,6 +2075,7 @@ func TestRBAC_Credential(t *testing.T) {
 						fmt.Sprintf("%s/%s", CredentialPrefix, "user1"),
 						fmt.Sprintf("%s/%s", CredentialPrefix, "user2"),
 						fmt.Sprintf("%s/%s", CredentialPrefix, "user3"),
+						fmt.Sprintf("%s/%s/%s", CredentialPrefix, UserSubPrefix, "ghost"),
 						"random",
 					}
 				}
@@ -1740,13 +2084,13 @@ func TestRBAC_Credential(t *testing.T) {
 			func(ctx context.Context, key string) []string {
 				cmu.RLock()
 				defer cmu.RUnlock()
-				passwd, _ := json.Marshal(&model.Credential{EncryptedPassword: crypto.Base64Encode("passwd")})
 				if count == 0 {
 					return []string{
-						string(passwd),
-						string(passwd),
-						string(passwd),
-						string(passwd),
+						string(credentialValue),
+						string(credentialValue),
+						string(credentialValue),
+						string(credentialValue),
+						string(credentialValue),
 					}
 				}
 				return nil
@@ -1848,6 +2192,140 @@ func TestRBAC_Role(t *testing.T) {
 			Name: "role1",
 		})
 		assert.NoError(t, err)
+	})
+	t.Run("test AlterRole load error", func(t *testing.T) {
+		var (
+			kvmock   = mocks.NewTxnKV(t)
+			c        = NewCatalog(kvmock)
+			roleName = "role_load_error"
+			loadErr  = errors.New("mock load role error")
+		)
+
+		kvmock.EXPECT().Load(mock.Anything, RolePrefix+"/"+roleName).Return("", loadErr).Once()
+
+		err := c.AlterRole(ctx, tenant, &milvuspb.RoleEntity{
+			Name:        roleName,
+			Description: "description",
+		})
+		assert.ErrorIs(t, err, loadErr)
+		kvmock.AssertNotCalled(t, "Save", mock.Anything, mock.Anything, mock.Anything)
+	})
+	t.Run("test AlterRole malformed stored role value", func(t *testing.T) {
+		var (
+			kvmock     = mocks.NewTxnKV(t)
+			c          = NewCatalog(kvmock)
+			roleName   = "role_malformed_alter"
+			newDesc    = "new description"
+			expectedKV string
+		)
+
+		expectedKV, err := model.MarshalRoleModel(&model.Role{
+			Name:        roleName,
+			Description: newDesc,
+		})
+		require.NoError(t, err)
+
+		kvmock.EXPECT().Load(mock.Anything, RolePrefix+"/"+roleName).Return("not-json", nil).Once()
+		kvmock.EXPECT().Save(mock.Anything, RolePrefix+"/"+roleName, expectedKV).Return(nil).Once()
+
+		err = c.AlterRole(ctx, tenant, &milvuspb.RoleEntity{
+			Name:        roleName,
+			Description: newDesc,
+		})
+		require.NoError(t, err)
+	})
+	t.Run("test ListRole malformed exact role value", func(t *testing.T) {
+		var (
+			kvmock   = mocks.NewTxnKV(t)
+			c        = NewCatalog(kvmock)
+			roleName = "role_malformed_exact"
+		)
+
+		kvmock.EXPECT().Load(mock.Anything, RolePrefix+"/"+roleName).Return("{", nil).Once()
+
+		roles, err := c.ListRole(ctx, tenant, &milvuspb.RoleEntity{Name: roleName}, false)
+		require.NoError(t, err)
+		require.Len(t, roles, 1)
+		assert.Equal(t, roleName, roles[0].GetRole().GetName())
+		assert.Empty(t, roles[0].GetRole().GetDescription())
+	})
+	t.Run("test ListRole empty exact role name", func(t *testing.T) {
+		var (
+			kvmock = mocks.NewTxnKV(t)
+			c      = NewCatalog(kvmock)
+		)
+
+		roles, err := c.ListRole(ctx, tenant, &milvuspb.RoleEntity{Name: ""}, false)
+		require.Error(t, err)
+		assert.Empty(t, roles)
+		assert.Contains(t, err.Error(), "role name in the role entity is empty")
+	})
+	t.Run("test role description persistence", func(t *testing.T) {
+		etcdCli, err := etcd.GetEtcdClient(
+			Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+			Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
+			Params.EtcdCfg.Endpoints.GetAsStrings(),
+			Params.EtcdCfg.EtcdTLSCert.GetValue(),
+			Params.EtcdCfg.EtcdTLSKey.GetValue(),
+			Params.EtcdCfg.EtcdTLSCACert.GetValue(),
+			Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+		require.NoError(t, err)
+		rootPath := "/test/rbac/role-description/" + funcutil.RandomString(8)
+		metaKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
+		defer metaKV.RemoveWithPrefix(context.TODO(), "")
+		defer metaKV.Close()
+		c := NewCatalog(metaKV)
+
+		roleName := "role_desc"
+		require.NoError(t, c.CreateRole(ctx, tenant, &milvuspb.RoleEntity{
+			Name:        roleName,
+			Description: "初始角色描述",
+		}))
+		roles, err := c.ListRole(ctx, tenant, &milvuspb.RoleEntity{Name: roleName}, false)
+		require.NoError(t, err)
+		require.Len(t, roles, 1)
+		assert.Equal(t, "初始角色描述", roles[0].GetRole().GetDescription())
+
+		require.NoError(t, c.AlterRole(ctx, tenant, &milvuspb.RoleEntity{
+			Name:        roleName,
+			Description: "updated role description",
+		}))
+		roles, err = c.ListRole(ctx, tenant, nil, false)
+		require.NoError(t, err)
+		require.Len(t, roles, 1)
+		assert.Equal(t, roleName, roles[0].GetRole().GetName())
+		assert.Equal(t, "updated role description", roles[0].GetRole().GetDescription())
+
+		require.NoError(t, metaKV.Save(ctx, RolePrefix+"/legacy_role", ""))
+		roles, err = c.ListRole(ctx, tenant, &milvuspb.RoleEntity{Name: "legacy_role"}, false)
+		require.NoError(t, err)
+		require.Len(t, roles, 1)
+		assert.Empty(t, roles[0].GetRole().GetDescription())
+
+		roles, err = c.ListRole(ctx, tenant, nil, false)
+		require.NoError(t, err)
+		require.Len(t, roles, 2)
+		roleDescriptions := lo.SliceToMap(roles, func(role *milvuspb.RoleResult) (string, string) {
+			return role.GetRole().GetName(), role.GetRole().GetDescription()
+		})
+		assert.Equal(t, "updated role description", roleDescriptions[roleName])
+		assert.Empty(t, roleDescriptions["legacy_role"])
+
+		require.NoError(t, metaKV.Save(ctx, RolePrefix+"/malformed_role", "{"))
+		roles, err = c.ListRole(ctx, tenant, nil, false)
+		require.NoError(t, err)
+		require.Len(t, roles, 3)
+		roleDescriptions = lo.SliceToMap(roles, func(role *milvuspb.RoleResult) (string, string) {
+			return role.GetRole().GetName(), role.GetRole().GetDescription()
+		})
+		assert.Equal(t, "updated role description", roleDescriptions[roleName])
+		assert.Empty(t, roleDescriptions["legacy_role"])
+		assert.Empty(t, roleDescriptions["malformed_role"])
+
+		roles, err = c.ListRole(ctx, tenant, &milvuspb.RoleEntity{Name: "malformed_role"}, false)
+		require.NoError(t, err)
+		require.Len(t, roles, 1)
+		assert.Empty(t, roles[0].GetRole().GetDescription())
 	})
 	t.Run("test DropRole", func(t *testing.T) {
 		var (
@@ -2062,11 +2540,12 @@ func TestRBAC_Role(t *testing.T) {
 			kvmock = mocks.NewTxnKV(t)
 			c      = NewCatalog(kvmock).(*Catalog)
 
-			invalidUser    = "invalid-user"
-			invalidUserKey = funcutil.HandleTenantForEtcdPrefix(RoleMappingPrefix, tenant, invalidUser)
+			invalidUser        = "invalid-user"
+			invalidRoleUser    = "invalid-role-user"
+			invalidRoleUserKey = funcutil.HandleTenantForEtcdPrefix(RoleMappingPrefix, tenant, invalidRoleUser)
 		)
-		// returns error for invalidUserKey
-		kvmock.EXPECT().LoadWithPrefix(mock.Anything, invalidUserKey).Call.Return(
+		// returns error for invalidRoleUserKey
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, invalidRoleUserKey).Call.Return(
 			nil, nil, errors.New("Mock load with prefix wrong"))
 
 		// Returns keys for RoleMappingPrefix/tenant/user1/ (with trailing slash after the fix)
@@ -2079,6 +2558,9 @@ func TestRBAC_Role(t *testing.T) {
 					user1Key + "role3/error",
 				}
 			}, nil, nil)
+		kvmock.EXPECT().Load(mock.Anything, fmt.Sprintf("%s/%s", CredentialPrefix, "user1")).Return(getUserInfoMetaString("user1"), nil).Maybe()
+		kvmock.EXPECT().Load(mock.Anything, fmt.Sprintf("%s/%s", CredentialPrefix, invalidUser)).Return("", errors.New("mock load credential error")).Maybe()
+		kvmock.EXPECT().Load(mock.Anything, fmt.Sprintf("%s/%s", CredentialPrefix, invalidRoleUser)).Return(getUserInfoMetaString(invalidRoleUser), nil).Maybe()
 
 		// Returns keys for CredentialPrefix
 		var loadCredentialPrefixReturn atomic.Bool
@@ -2086,7 +2568,7 @@ func TestRBAC_Role(t *testing.T) {
 			func(ctx context.Context, key string) []string {
 				if loadCredentialPrefixReturn.Load() {
 					return []string{
-						fmt.Sprintf("%s/%s/%s", CredentialPrefix, UserSubPrefix, "user1"),
+						fmt.Sprintf("%s/%s", CredentialPrefix, "user1"),
 					}
 				}
 				return nil
@@ -2111,20 +2593,19 @@ func TestRBAC_Role(t *testing.T) {
 				description string
 				isValid     bool
 
-				user            string
+				credential      *model.Credential
 				includeRoleInfo bool
 			}{
-				{"valid user1 not include RoleInfo", true, "user1", false},
-				{"valid user1 include RoleInfo", true, "user1", true},
-				{"invalid user not include RoleInfo", true, invalidUser, false},
-				{"invalid user include RoleInfo", false, invalidUser, true},
+				{"valid user1 not include RoleInfo", true, &model.Credential{Username: "user1"}, false},
+				{"valid user1 include RoleInfo", true, &model.Credential{Username: "user1"}, true},
+				{"invalid role user include RoleInfo", false, &model.Credential{Username: invalidRoleUser}, true},
 			}
 
 			for _, test := range tests {
 				t.Run(test.description, func(t *testing.T) {
-					res, err := c.getUserResult(ctx, tenant, test.user, test.includeRoleInfo)
+					res, err := c.getUserResult(ctx, tenant, test.credential, test.includeRoleInfo)
 
-					assert.Equal(t, test.user, res.GetUser().GetName())
+					assert.Equal(t, test.credential.Username, res.GetUser().GetName())
 
 					if test.isValid {
 						assert.NoError(t, err)
@@ -2174,6 +2655,7 @@ func TestRBAC_Role(t *testing.T) {
 				{true, true, &milvuspb.UserEntity{Name: "user1"}, false, "valid entity user1 not include RoleInfo"},
 				{true, true, &milvuspb.UserEntity{Name: "user1"}, true, "valid entity user1 include RoleInfo"},
 				{false, true, &milvuspb.UserEntity{Name: invalidUser}, true, "invalid entity invalidUser include RoleInfo"},
+				{false, true, &milvuspb.UserEntity{Name: invalidRoleUser}, true, "invalid entity invalidRoleUser include RoleInfo"},
 			}
 
 			for _, test := range tests {
@@ -2282,14 +2764,14 @@ func TestRBAC_Grant(t *testing.T) {
 		)
 
 		validRoleKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, validRole, object, objName)
-		validRoleValue := crypto.MD5(validRoleKey)
+		validRoleValue := crypto.GranteeID(validRoleKey)
 
 		invalidRoleKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, invalidRole, object, objName)
 		invalidRoleKeyWithDb := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, invalidRole, object, funcutil.CombineObjectName(util.DefaultDBName, objName))
 
 		keyNotExistRoleKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, keyNotExistRole, object, objName)
 		keyNotExistRoleKeyWithDb := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, keyNotExistRole, object, funcutil.CombineObjectName(util.DefaultDBName, objName))
-		keyNotExistRoleValueWithDb := crypto.MD5(keyNotExistRoleKeyWithDb)
+		keyNotExistRoleValueWithDb := crypto.GranteeID(keyNotExistRoleKeyWithDb)
 
 		errorSaveRoleKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, errorSaveRole, object, objName)
 		errorSaveRoleKeyWithDb := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, errorSaveRole, object, funcutil.CombineObjectName(util.DefaultDBName, objName))
@@ -2673,6 +3155,7 @@ func TestRBAC_Grant(t *testing.T) {
 					return []string{
 						crypto.MD5(key + "obj1/obj_name1"),
 						crypto.MD5(key + "obj2/obj_name2"),
+						"invalid",
 					}
 				}
 				return nil
@@ -2731,6 +3214,802 @@ func TestRBAC_Grant(t *testing.T) {
 			})
 		}
 	})
+}
+
+func TestRBACGrantLegacyGranteeIDCompatibility(t *testing.T) {
+	ctx := context.Background()
+	etcdCli, _ := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
+		Params.EtcdCfg.Endpoints.GetAsStrings(),
+		Params.EtcdCfg.EtcdTLSCert.GetValue(),
+		Params.EtcdCfg.EtcdTLSKey.GetValue(),
+		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
+		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+	rootPath := fmt.Sprintf("/test/rbac/legacy-grantee-id-%d", rand.Int())
+	metaKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
+	defer metaKV.RemoveWithPrefix(ctx, "")
+	defer metaKV.Close()
+	c := NewCatalog(metaKV)
+
+	roleName := "legacy-role"
+	objectName := "legacy-collection"
+	granteeKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, roleName, commonpb.ObjectType_Collection.String(), funcutil.CombineObjectName(util.DefaultDBName, objectName))
+	legacyID := crypto.MD5(granteeKey)
+	legacyPrivilegeKey := fmt.Sprintf("%s/%s/%s", GranteeIDPrefix, legacyID, "PrivilegeLoad")
+
+	require.Len(t, legacyID, 16)
+	require.NoError(t, metaKV.Save(ctx, granteeKey, legacyID))
+	require.NoError(t, metaKV.Save(ctx, legacyPrivilegeKey, "legacy-user"))
+
+	assertPolicyPrivileges := func(expected []string) {
+		policies, err := c.ListPolicy(ctx, util.DefaultTenant)
+		require.NoError(t, err)
+		require.Len(t, policies, len(expected))
+		assert.ElementsMatch(t, expected, lo.Map(policies, func(policy *milvuspb.GrantEntity, _ int) string {
+			assert.Equal(t, roleName, policy.GetRole().GetName())
+			assert.Equal(t, commonpb.ObjectType_Collection.String(), policy.GetObject().GetName())
+			assert.Equal(t, objectName, policy.GetObjectName())
+			assert.Equal(t, util.DefaultDBName, policy.GetDbName())
+			return policy.GetGrantor().GetPrivilege().GetName()
+		}))
+	}
+	assertPolicyPrivileges([]string{"Load"})
+
+	listEntity := &milvuspb.GrantEntity{
+		Role:       &milvuspb.RoleEntity{Name: roleName},
+		Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Collection.String()},
+		ObjectName: objectName,
+		DbName:     util.DefaultDBName,
+	}
+	grants, err := c.ListGrant(ctx, util.DefaultTenant, listEntity)
+	require.NoError(t, err)
+	require.Len(t, grants, 1)
+	assert.Equal(t, "legacy-user", grants[0].GetGrantor().GetUser().GetName())
+	assert.Equal(t, "Load", grants[0].GetGrantor().GetPrivilege().GetName())
+
+	releaseGrant := &milvuspb.GrantEntity{
+		Role:       &milvuspb.RoleEntity{Name: roleName},
+		Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Collection.String()},
+		ObjectName: objectName,
+		DbName:     util.DefaultDBName,
+		Grantor: &milvuspb.GrantorEntity{
+			User:      &milvuspb.UserEntity{Name: "new-user"},
+			Privilege: &milvuspb.PrivilegeEntity{Name: "PrivilegeRelease"},
+		},
+	}
+	require.NoError(t, c.AlterGrant(ctx, util.DefaultTenant, releaseGrant, milvuspb.OperatePrivilegeType_Grant))
+
+	newID := crypto.GranteeID(granteeKey)
+	require.Len(t, newID, 32)
+	storedID, err := metaKV.Load(ctx, granteeKey)
+	require.NoError(t, err)
+	assert.Equal(t, newID, storedID)
+
+	grants, err = c.ListGrant(ctx, util.DefaultTenant, listEntity)
+	require.NoError(t, err)
+	require.Len(t, grants, 2)
+	assert.ElementsMatch(t, []string{"Load", "Release"}, lo.Map(grants, func(grant *milvuspb.GrantEntity, _ int) string {
+		return grant.GetGrantor().GetPrivilege().GetName()
+	}))
+	assertPolicyPrivileges([]string{"Load", "Release"})
+	legacyKeys, _, err := metaKV.LoadWithPrefix(ctx, funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, util.DefaultTenant, legacyID))
+	require.NoError(t, err)
+	assert.Empty(t, legacyKeys)
+
+	revokeGrant := &milvuspb.GrantEntity{
+		Role:       &milvuspb.RoleEntity{Name: roleName},
+		Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Collection.String()},
+		ObjectName: objectName,
+		DbName:     util.DefaultDBName,
+		Grantor: &milvuspb.GrantorEntity{
+			User:      &milvuspb.UserEntity{Name: "legacy-user"},
+			Privilege: &milvuspb.PrivilegeEntity{Name: "PrivilegeLoad"},
+		},
+	}
+	require.NoError(t, c.AlterGrant(ctx, util.DefaultTenant, revokeGrant, milvuspb.OperatePrivilegeType_Revoke))
+
+	grants, err = c.ListGrant(ctx, util.DefaultTenant, listEntity)
+	require.NoError(t, err)
+	require.Len(t, grants, 1)
+	assert.Equal(t, "Release", grants[0].GetGrantor().GetPrivilege().GetName())
+	assertPolicyPrivileges([]string{"Release"})
+}
+
+func TestRBACGrantSharedLegacyGranteeIDMigrationFailsClosed(t *testing.T) {
+	ctx := context.Background()
+	etcdCli, _ := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
+		Params.EtcdCfg.Endpoints.GetAsStrings(),
+		Params.EtcdCfg.EtcdTLSCert.GetValue(),
+		Params.EtcdCfg.EtcdTLSKey.GetValue(),
+		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
+		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+	rootPath := fmt.Sprintf("/test/rbac/shared-legacy-grantee-id-%d", rand.Int())
+	metaKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
+	defer metaKV.RemoveWithPrefix(ctx, "")
+	defer metaKV.Close()
+	c := NewCatalog(metaKV)
+
+	objectName := "shared-legacy-collection"
+	objectType := commonpb.ObjectType_Collection.String()
+	donorKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "donor-role", objectType, funcutil.CombineObjectName(util.DefaultDBName, objectName))
+	victimKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "victim-role", objectType, funcutil.CombineObjectName(util.DefaultDBName, objectName))
+	sharedLegacyID := crypto.MD5(donorKey)
+	donorPrivilegeKey := buildGranteeIDKey(sharedLegacyID, "PrivilegeInsert")
+
+	require.NoError(t, metaKV.MultiSave(ctx, map[string]string{
+		donorKey:          sharedLegacyID,
+		victimKey:         sharedLegacyID,
+		donorPrivilegeKey: "donor-user",
+	}))
+
+	victimListEntity := &milvuspb.GrantEntity{
+		Role:       &milvuspb.RoleEntity{Name: "victim-role"},
+		Object:     &milvuspb.ObjectEntity{Name: objectType},
+		ObjectName: objectName,
+		DbName:     util.DefaultDBName,
+	}
+	victimGrants, err := c.ListGrant(ctx, util.DefaultTenant, victimListEntity)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "shared legacy grantee id")
+	assert.Empty(t, victimGrants)
+	policies, err := c.ListPolicy(ctx, util.DefaultTenant)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "shared legacy grantee id")
+	assert.Empty(t, policies)
+
+	err = c.AlterGrant(ctx, util.DefaultTenant, &milvuspb.GrantEntity{
+		Role:       &milvuspb.RoleEntity{Name: "victim-role"},
+		Object:     &milvuspb.ObjectEntity{Name: objectType},
+		ObjectName: objectName,
+		DbName:     util.DefaultDBName,
+		Grantor: &milvuspb.GrantorEntity{
+			User:      &milvuspb.UserEntity{Name: "victim-user"},
+			Privilege: &milvuspb.PrivilegeEntity{Name: "PrivilegeLoad"},
+		},
+	}, milvuspb.OperatePrivilegeType_Grant)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "shared legacy grantee id")
+
+	storedID, err := metaKV.Load(ctx, victimKey)
+	require.NoError(t, err)
+	assert.Equal(t, sharedLegacyID, storedID)
+
+	victimFullID := crypto.GranteeID(victimKey)
+	victimFullIDKeys, _, err := metaKV.LoadWithPrefix(ctx, funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, util.DefaultTenant, victimFullID))
+	require.NoError(t, err)
+	assert.Empty(t, victimFullIDKeys)
+
+	donorUser, err := metaKV.Load(ctx, donorPrivilegeKey)
+	require.NoError(t, err)
+	assert.Equal(t, "donor-user", donorUser)
+}
+
+func TestBackupRBACLegacyGranteeIDReusesLoadedGrantKeys(t *testing.T) {
+	ctx := context.Background()
+	tenant := util.DefaultTenant
+	kvmock := mocks.NewTxnKV(t)
+	c := NewCatalog(kvmock)
+
+	rolePrefix := funcutil.HandleTenantForEtcdPrefix(RolePrefix, tenant)
+	granteePrefix := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
+	objectType := commonpb.ObjectType_Collection.String()
+	firstLogicalKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "role1", objectType, funcutil.CombineObjectName(util.DefaultDBName, "coll1"))
+	secondLogicalKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "role2", objectType, funcutil.CombineObjectName(util.DefaultDBName, "coll2"))
+	firstRolePrefix := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant, "role1")
+	secondRolePrefix := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant, "role2")
+	firstLegacyID := crypto.MD5(firstLogicalKey)
+	secondLegacyID := crypto.MD5(secondLogicalKey)
+	firstIDPrefix := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, firstLegacyID)
+	secondIDPrefix := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, secondLegacyID)
+	var granteePrefixLoads atomic.Int32
+
+	kvmock.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, key string) ([]string, []string, error) {
+			switch key {
+			case CredentialPrefix + "/":
+				return nil, nil, nil
+			case rolePrefix:
+				return []string{rolePrefix + "role1", rolePrefix + "role2"}, []string{"", ""}, nil
+			case firstRolePrefix:
+				return []string{firstLogicalKey}, []string{firstLegacyID}, nil
+			case secondRolePrefix:
+				return []string{secondLogicalKey}, []string{secondLegacyID}, nil
+			case granteePrefix:
+				granteePrefixLoads.Inc()
+				return []string{firstLogicalKey, secondLogicalKey}, []string{firstLegacyID, secondLegacyID}, nil
+			case firstIDPrefix:
+				return []string{firstIDPrefix + "PrivilegeLoad"}, []string{"grantor1"}, nil
+			case secondIDPrefix:
+				return []string{secondIDPrefix + "PrivilegeRelease"}, []string{"grantor2"}, nil
+			case PrivilegeGroupPrefix + "/":
+				return nil, nil, nil
+			default:
+				require.Failf(t, "unexpected LoadWithPrefix", "key %q", key)
+				return nil, nil, nil
+			}
+		},
+	)
+
+	backup, err := c.BackupRBAC(ctx, tenant)
+	require.NoError(t, err)
+	require.Len(t, backup.GetGrants(), 2)
+	assert.ElementsMatch(t, []string{"grantor1", "grantor2"}, lo.Map(backup.GetGrants(), func(grant *milvuspb.GrantEntity, _ int) string {
+		return grant.GetGrantor().GetUser().GetName()
+	}))
+	assert.Equal(t, int32(1), granteePrefixLoads.Load(), "BackupRBAC should reuse one tenant-wide grantee scan for legacy ID collision checks")
+}
+
+func TestBackupRBACCustomRolesWithoutLegacyIDsDoesNotPreloadAllGrantees(t *testing.T) {
+	ctx := context.Background()
+	tenant := util.DefaultTenant
+	kvmock := mocks.NewTxnKV(t)
+	c := NewCatalog(kvmock)
+
+	rolePrefix := funcutil.HandleTenantForEtcdPrefix(RolePrefix, tenant)
+	granteePrefix := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
+	objectType := commonpb.ObjectType_Collection.String()
+	logicalKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "role1", objectType, funcutil.CombineObjectName(util.DefaultDBName, "coll1"))
+	roleGranteePrefix := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant, "role1")
+	fullID := crypto.GranteeID(logicalKey)
+	idPrefix := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, fullID)
+	var granteePrefixLoads atomic.Int32
+
+	kvmock.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, key string) ([]string, []string, error) {
+			switch key {
+			case CredentialPrefix + "/":
+				return nil, nil, nil
+			case rolePrefix:
+				return []string{rolePrefix + "role1"}, []string{""}, nil
+			case roleGranteePrefix:
+				return []string{logicalKey}, []string{fullID}, nil
+			case granteePrefix:
+				granteePrefixLoads.Inc()
+				return []string{logicalKey}, []string{fullID}, nil
+			case idPrefix:
+				return []string{idPrefix + "PrivilegeLoad"}, []string{"grantor1"}, nil
+			case PrivilegeGroupPrefix + "/":
+				return nil, nil, nil
+			default:
+				require.Failf(t, "unexpected LoadWithPrefix", "key %q", key)
+				return nil, nil, nil
+			}
+		},
+	)
+
+	backup, err := c.BackupRBAC(ctx, tenant)
+	require.NoError(t, err)
+	require.Len(t, backup.GetGrants(), 1)
+	assert.Equal(t, "grantor1", backup.GetGrants()[0].GetGrantor().GetUser().GetName())
+	assert.Equal(t, int32(0), granteePrefixLoads.Load(), "BackupRBAC should not preload all grantees when no grant carries a legacy ID")
+}
+
+func TestBackupRBACLegacyGranteeIDLoadsTenantSnapshotAfterRoleRead(t *testing.T) {
+	ctx := context.Background()
+	tenant := util.DefaultTenant
+	kvmock := mocks.NewTxnKV(t)
+	c := NewCatalog(kvmock)
+
+	rolePrefix := funcutil.HandleTenantForEtcdPrefix(RolePrefix, tenant)
+	granteePrefix := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
+	objectType := commonpb.ObjectType_Collection.String()
+	objectName := funcutil.CombineObjectName(util.DefaultDBName, "coll1")
+	donorLogicalKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "donor-role", objectType, objectName)
+	victimLogicalKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "victim-role", objectType, objectName)
+	donorRolePrefix := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant, "donor-role")
+	victimRolePrefix := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant, "victim-role")
+	sharedLegacyID := crypto.MD5(victimLogicalKey)
+	victimIDPrefix := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, sharedLegacyID)
+	var roleGrantPrefixReads atomic.Int32
+	var granteePrefixLoads atomic.Int32
+
+	kvmock.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, key string) ([]string, []string, error) {
+			switch key {
+			case CredentialPrefix + "/":
+				return nil, nil, nil
+			case rolePrefix:
+				return []string{rolePrefix + "donor-role", rolePrefix + "victim-role"}, []string{"", ""}, nil
+			case donorRolePrefix:
+				roleGrantPrefixReads.Inc()
+				return nil, nil, nil
+			case victimRolePrefix:
+				roleGrantPrefixReads.Inc()
+				return []string{victimLogicalKey}, []string{sharedLegacyID}, nil
+			case granteePrefix:
+				granteePrefixLoads.Inc()
+				if roleGrantPrefixReads.Load() == 0 {
+					return []string{donorLogicalKey, victimLogicalKey}, []string{sharedLegacyID, sharedLegacyID}, nil
+				}
+				return []string{victimLogicalKey}, []string{sharedLegacyID}, nil
+			case victimIDPrefix:
+				return []string{victimIDPrefix + "PrivilegeLoad"}, []string{"victim-user"}, nil
+			case PrivilegeGroupPrefix + "/":
+				return nil, nil, nil
+			default:
+				require.Failf(t, "unexpected LoadWithPrefix", "key %q", key)
+				return nil, nil, nil
+			}
+		},
+	)
+
+	backup, err := c.BackupRBAC(ctx, tenant)
+	require.NoError(t, err)
+	require.Len(t, backup.GetGrants(), 1)
+	assert.Equal(t, "victim-user", backup.GetGrants()[0].GetGrantor().GetUser().GetName())
+	assert.Equal(t, int32(1), granteePrefixLoads.Load(), "BackupRBAC should lazily load one tenant-wide grantee snapshot for legacy ID collision checks")
+}
+
+func TestBackupRBACLegacyGranteeIDReuseStillFailsClosedOnSharedID(t *testing.T) {
+	ctx := context.Background()
+	tenant := util.DefaultTenant
+	kvmock := mocks.NewTxnKV(t)
+	c := NewCatalog(kvmock)
+
+	rolePrefix := funcutil.HandleTenantForEtcdPrefix(RolePrefix, tenant)
+	granteePrefix := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
+	objectType := commonpb.ObjectType_Collection.String()
+	objectName := funcutil.CombineObjectName(util.DefaultDBName, "shared-coll")
+	donorLogicalKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "donor-role", objectType, objectName)
+	victimLogicalKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "victim-role", objectType, objectName)
+	donorRolePrefix := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant, "donor-role")
+	victimRolePrefix := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant, "victim-role")
+	sharedLegacyID := crypto.MD5(donorLogicalKey)
+	donorIDPrefix := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, sharedLegacyID)
+
+	kvmock.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, key string) ([]string, []string, error) {
+			switch key {
+			case CredentialPrefix + "/":
+				return nil, nil, nil
+			case rolePrefix:
+				return []string{rolePrefix + "donor-role", rolePrefix + "victim-role"}, []string{"", ""}, nil
+			case donorRolePrefix:
+				return []string{donorLogicalKey}, []string{sharedLegacyID}, nil
+			case victimRolePrefix:
+				return []string{victimLogicalKey}, []string{sharedLegacyID}, nil
+			case granteePrefix:
+				return []string{donorLogicalKey, victimLogicalKey}, []string{sharedLegacyID, sharedLegacyID}, nil
+			case donorIDPrefix:
+				return []string{donorIDPrefix + "PrivilegeInsert"}, []string{"donor-user"}, nil
+			case PrivilegeGroupPrefix + "/":
+				return nil, nil, nil
+			default:
+				require.Failf(t, "unexpected LoadWithPrefix", "key %q", key)
+				return nil, nil, nil
+			}
+		},
+	)
+
+	backup, err := c.BackupRBAC(ctx, tenant)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "shared legacy grantee id")
+	assert.Nil(t, backup)
+}
+
+func TestBackupRBACLegacyGranteeIDFailsClosedOnInvalidLoadedTenantKey(t *testing.T) {
+	ctx := context.Background()
+	tenant := util.DefaultTenant
+	kvmock := mocks.NewTxnKV(t)
+	c := NewCatalog(kvmock)
+
+	rolePrefix := funcutil.HandleTenantForEtcdPrefix(RolePrefix, tenant)
+	granteePrefix := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
+	objectType := commonpb.ObjectType_Collection.String()
+	logicalKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "role1", objectType, funcutil.CombineObjectName(util.DefaultDBName, "coll1"))
+	roleGranteePrefix := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant, "role1")
+	legacyID := crypto.MD5(logicalKey)
+	idPrefix := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, legacyID)
+
+	kvmock.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, key string) ([]string, []string, error) {
+			switch key {
+			case CredentialPrefix + "/":
+				return nil, nil, nil
+			case rolePrefix:
+				return []string{rolePrefix + "role1"}, []string{""}, nil
+			case roleGranteePrefix:
+				return []string{logicalKey}, []string{legacyID}, nil
+			case granteePrefix:
+				return []string{granteePrefix + "malformed"}, []string{legacyID}, nil
+			case idPrefix:
+				return []string{idPrefix + "PrivilegeLoad"}, []string{"grantor1"}, nil
+			case PrivilegeGroupPrefix + "/":
+				return nil, nil, nil
+			default:
+				require.Failf(t, "unexpected LoadWithPrefix", "key %q", key)
+				return nil, nil, nil
+			}
+		},
+	)
+
+	backup, err := c.BackupRBAC(ctx, tenant)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "shared legacy grantee id")
+	assert.Nil(t, backup)
+}
+
+func TestBackupRBACNoCustomRolesSkipsGranteePreload(t *testing.T) {
+	ctx := context.Background()
+	tenant := util.DefaultTenant
+	kvmock := mocks.NewTxnKV(t)
+	c := NewCatalog(kvmock)
+
+	rolePrefix := funcutil.HandleTenantForEtcdPrefix(RolePrefix, tenant)
+	granteePrefix := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
+	var granteePrefixLoads atomic.Int32
+
+	kvmock.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, key string) ([]string, []string, error) {
+			switch key {
+			case CredentialPrefix + "/":
+				return nil, nil, nil
+			case rolePrefix:
+				return []string{rolePrefix + util.RoleAdmin, rolePrefix + util.RolePublic}, []string{"", ""}, nil
+			case granteePrefix:
+				granteePrefixLoads.Inc()
+				return nil, nil, nil
+			case PrivilegeGroupPrefix + "/":
+				return nil, nil, nil
+			default:
+				require.Failf(t, "unexpected LoadWithPrefix", "key %q", key)
+				return nil, nil, nil
+			}
+		},
+	)
+
+	backup, err := c.BackupRBAC(ctx, tenant)
+	require.NoError(t, err)
+	require.NotNil(t, backup)
+	assert.Empty(t, backup.GetRoles())
+	assert.Empty(t, backup.GetGrants())
+	assert.Equal(t, int32(0), granteePrefixLoads.Load(), "BackupRBAC should not preload grantees when there are no custom roles")
+}
+
+func TestBackupRBACRejectsMismatchedLoadedGranteePreload(t *testing.T) {
+	ctx := context.Background()
+	tenant := util.DefaultTenant
+	kvmock := mocks.NewTxnKV(t)
+	c := NewCatalog(kvmock)
+
+	rolePrefix := funcutil.HandleTenantForEtcdPrefix(RolePrefix, tenant)
+	granteePrefix := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
+	objectType := commonpb.ObjectType_Collection.String()
+	logicalKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "role1", objectType, funcutil.CombineObjectName(util.DefaultDBName, "coll1"))
+	roleGranteePrefix := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant, "role1")
+	legacyID := crypto.MD5(logicalKey)
+
+	kvmock.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, key string) ([]string, []string, error) {
+			switch key {
+			case CredentialPrefix + "/":
+				return nil, nil, nil
+			case rolePrefix:
+				return []string{rolePrefix + "role1"}, []string{""}, nil
+			case roleGranteePrefix:
+				return []string{logicalKey}, []string{legacyID}, nil
+			case granteePrefix:
+				return nil, []string{}, nil
+			default:
+				require.Failf(t, "unexpected LoadWithPrefix", "key %q", key)
+				return nil, nil, nil
+			}
+		},
+	)
+
+	backup, err := c.BackupRBAC(ctx, tenant)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrServiceInternal)
+	assert.Contains(t, err.Error(), "loaded grantee keys and values")
+	assert.Nil(t, backup)
+}
+
+func TestLoadGranteeIDPrefixWithLoadedGranteesRejectsMismatchedLoadedGrantees(t *testing.T) {
+	ctx := context.Background()
+	tenant := util.DefaultTenant
+	granteeKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "role1", commonpb.ObjectType_Collection.String(), funcutil.CombineObjectName(util.DefaultDBName, "coll1"))
+	legacyID := crypto.MD5(granteeKey)
+
+	tests := []struct {
+		name          string
+		granteeKeys   []string
+		granteeValues []string
+	}{
+		{
+			name:          "keys without values",
+			granteeKeys:   []string{granteeKey},
+			granteeValues: nil,
+		},
+		{
+			name:          "values without keys",
+			granteeKeys:   nil,
+			granteeValues: []string{legacyID},
+		},
+		{
+			name:          "length mismatch",
+			granteeKeys:   []string{granteeKey},
+			granteeValues: []string{},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			kvmock := mocks.NewTxnKV(t)
+			c := NewCatalog(kvmock).(*Catalog)
+			kvmock.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Return(nil, nil, nil).Maybe()
+
+			keys, values, _, err := c.loadGranteeIDPrefixWithLoadedGrantees(ctx, tenant, granteeKey, legacyID, test.granteeKeys, test.granteeValues)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, merr.ErrServiceInternal)
+			assert.Contains(t, err.Error(), "loaded grantee keys and values")
+			assert.Nil(t, keys)
+			assert.Nil(t, values)
+		})
+	}
+}
+
+func TestRBACListPolicyLegacyGranteeIDReusesLoadedGrantKeys(t *testing.T) {
+	ctx := context.Background()
+	tenant := util.DefaultTenant
+	kvmock := mocks.NewTxnKV(t)
+	c := NewCatalog(kvmock)
+
+	granteePrefix := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
+	objectType := commonpb.ObjectType_Collection.String()
+	firstLogicalKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "role1", objectType, funcutil.CombineObjectName(util.DefaultDBName, "coll1"))
+	secondLogicalKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "role2", objectType, funcutil.CombineObjectName(util.DefaultDBName, "coll2"))
+	firstEtcdKey := fmt.Sprintf("%s%s/%s/%s", granteePrefix, "role1", objectType, funcutil.CombineObjectName(util.DefaultDBName, "coll1"))
+	secondEtcdKey := fmt.Sprintf("%s%s/%s/%s", granteePrefix, "role2", objectType, funcutil.CombineObjectName(util.DefaultDBName, "coll2"))
+	firstLegacyID := crypto.MD5(firstLogicalKey)
+	secondLegacyID := crypto.MD5(secondLogicalKey)
+	var granteePrefixLoads atomic.Int32
+
+	kvmock.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Call.Return(
+		func(ctx context.Context, key string) []string {
+			switch key {
+			case granteePrefix:
+				granteePrefixLoads.Inc()
+				return []string{firstEtcdKey, secondEtcdKey}
+			case funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, firstLegacyID):
+				return []string{key + "PrivilegeLoad"}
+			case funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, secondLegacyID):
+				return []string{key + "PrivilegeLoad"}
+			default:
+				return nil
+			}
+		},
+		func(ctx context.Context, key string) []string {
+			switch key {
+			case granteePrefix:
+				return []string{firstLegacyID, secondLegacyID}
+			case funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, firstLegacyID):
+				return []string{"root"}
+			case funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, secondLegacyID):
+				return []string{"root"}
+			default:
+				return nil
+			}
+		},
+		func(ctx context.Context, key string) error {
+			return nil
+		},
+	)
+
+	policies, err := c.ListPolicy(ctx, tenant)
+	require.NoError(t, err)
+	require.Len(t, policies, 2)
+	assert.Equal(t, int32(1), granteePrefixLoads.Load(), "ListPolicy should reuse the initially loaded grantee keys for legacy ID collision checks")
+}
+
+func TestRBACGrantMigrationIgnoresUnreferencedComputedLegacyID(t *testing.T) {
+	ctx := context.Background()
+	etcdCli, _ := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
+		Params.EtcdCfg.Endpoints.GetAsStrings(),
+		Params.EtcdCfg.EtcdTLSCert.GetValue(),
+		Params.EtcdCfg.EtcdTLSKey.GetValue(),
+		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
+		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+	rootPath := fmt.Sprintf("/test/rbac/unreferenced-computed-legacy-grantee-id-%d", rand.Int())
+	metaKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
+	defer metaKV.RemoveWithPrefix(ctx, "")
+	defer metaKV.Close()
+	c := NewCatalog(metaKV)
+
+	roleName := "custom-id-role"
+	objectName := "custom-id-collection"
+	objectType := commonpb.ObjectType_Collection.String()
+	granteeKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, roleName, objectType, funcutil.CombineObjectName(util.DefaultDBName, objectName))
+	storedLegacyID := "0123456789abcdef"
+	computedLegacyID := crypto.MD5(granteeKey)
+	require.NotEqual(t, storedLegacyID, computedLegacyID)
+
+	require.NoError(t, metaKV.MultiSave(ctx, map[string]string{
+		granteeKey: storedLegacyID,
+		buildGranteeIDKey(computedLegacyID, "PrivilegeInsert"): "donor-user",
+	}))
+
+	listEntity := &milvuspb.GrantEntity{
+		Role:       &milvuspb.RoleEntity{Name: roleName},
+		Object:     &milvuspb.ObjectEntity{Name: objectType},
+		ObjectName: objectName,
+		DbName:     util.DefaultDBName,
+	}
+	grants, err := c.ListGrant(ctx, util.DefaultTenant, listEntity)
+	require.NoError(t, err)
+	assert.Empty(t, grants)
+
+	require.NoError(t, c.AlterGrant(ctx, util.DefaultTenant, &milvuspb.GrantEntity{
+		Role:       &milvuspb.RoleEntity{Name: roleName},
+		Object:     &milvuspb.ObjectEntity{Name: objectType},
+		ObjectName: objectName,
+		DbName:     util.DefaultDBName,
+		Grantor: &milvuspb.GrantorEntity{
+			User:      &milvuspb.UserEntity{Name: "victim-user"},
+			Privilege: &milvuspb.PrivilegeEntity{Name: "PrivilegeLoad"},
+		},
+	}, milvuspb.OperatePrivilegeType_Grant))
+
+	newID := crypto.GranteeID(granteeKey)
+	fullIDKeys, _, err := metaKV.LoadWithPrefix(ctx, funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, util.DefaultTenant, newID))
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{fmt.Sprintf("%s/%s/%s", rootPath, GranteeIDPrefix, newID) + "/PrivilegeLoad"}, fullIDKeys)
+
+	orphanUser, err := metaKV.Load(ctx, buildGranteeIDKey(computedLegacyID, "PrivilegeInsert"))
+	require.NoError(t, err)
+	assert.Equal(t, "donor-user", orphanUser)
+}
+
+func TestRBACGrantDeleteSharedLegacyGranteeIDKeepsSurvivorSubtree(t *testing.T) {
+	ctx := context.Background()
+	etcdCli, _ := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
+		Params.EtcdCfg.Endpoints.GetAsStrings(),
+		Params.EtcdCfg.EtcdTLSCert.GetValue(),
+		Params.EtcdCfg.EtcdTLSKey.GetValue(),
+		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
+		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+	rootPath := fmt.Sprintf("/test/rbac/delete-shared-legacy-grantee-id-%d", rand.Int())
+	metaKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
+	defer metaKV.RemoveWithPrefix(ctx, "")
+	defer metaKV.Close()
+	c := NewCatalog(metaKV)
+
+	objectType := commonpb.ObjectType_Collection.String()
+	victimRole := "victim-role"
+	survivorRole := "survivor-role"
+	victimKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, victimRole, objectType, funcutil.CombineObjectName(util.DefaultDBName, "victim-col"))
+	survivorKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, survivorRole, objectType, funcutil.CombineObjectName(util.DefaultDBName, "survivor-col"))
+	sharedLegacyID := crypto.MD5(victimKey)
+	sharedPrivilegeKey := buildGranteeIDKey(sharedLegacyID, "PrivilegeInsert")
+	require.NoError(t, metaKV.MultiSave(ctx, map[string]string{
+		victimKey:          sharedLegacyID,
+		survivorKey:        sharedLegacyID,
+		sharedPrivilegeKey: "shared-user",
+	}))
+
+	require.NoError(t, c.DeleteGrant(ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: victimRole}))
+
+	_, err := metaKV.Load(ctx, victimKey)
+	require.Error(t, err)
+	survivorID, err := metaKV.Load(ctx, survivorKey)
+	require.NoError(t, err)
+	assert.Equal(t, sharedLegacyID, survivorID)
+	sharedUser, err := metaKV.Load(ctx, sharedPrivilegeKey)
+	require.NoError(t, err)
+	assert.Equal(t, "shared-user", sharedUser)
+}
+
+func TestRBACGrantDeleteCollectionSharedLegacyGranteeIDKeepsSurvivorSubtree(t *testing.T) {
+	ctx := context.Background()
+	etcdCli, _ := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
+		Params.EtcdCfg.Endpoints.GetAsStrings(),
+		Params.EtcdCfg.EtcdTLSCert.GetValue(),
+		Params.EtcdCfg.EtcdTLSKey.GetValue(),
+		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
+		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+	rootPath := fmt.Sprintf("/test/rbac/delete-collection-shared-legacy-grantee-id-%d", rand.Int())
+	metaKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
+	defer metaKV.RemoveWithPrefix(ctx, "")
+	defer metaKV.Close()
+	c := NewCatalog(metaKV)
+
+	objectType := commonpb.ObjectType_Collection.String()
+	droppedKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "dropped-role", objectType, funcutil.CombineObjectName(util.DefaultDBName, "dropped-col"))
+	survivorKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "survivor-role", objectType, funcutil.CombineObjectName(util.DefaultDBName, "survivor-col"))
+	sharedLegacyID := crypto.MD5(droppedKey)
+	sharedPrivilegeKey := buildGranteeIDKey(sharedLegacyID, "PrivilegeInsert")
+	require.NoError(t, metaKV.MultiSave(ctx, map[string]string{
+		droppedKey:         sharedLegacyID,
+		survivorKey:        sharedLegacyID,
+		sharedPrivilegeKey: "shared-user",
+	}))
+
+	require.NoError(t, c.DeleteGrantByCollectionName(ctx, util.DefaultTenant, util.DefaultDBName, "dropped-col"))
+
+	_, err := metaKV.Load(ctx, droppedKey)
+	require.Error(t, err)
+	survivorID, err := metaKV.Load(ctx, survivorKey)
+	require.NoError(t, err)
+	assert.Equal(t, sharedLegacyID, survivorID)
+	sharedUser, err := metaKV.Load(ctx, sharedPrivilegeKey)
+	require.NoError(t, err)
+	assert.Equal(t, "shared-user", sharedUser)
+}
+
+func TestRBACGrantSharedLegacyGranteeIDListGrantFallbacksFailClosed(t *testing.T) {
+	ctx := context.Background()
+	etcdCli, _ := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
+		Params.EtcdCfg.Endpoints.GetAsStrings(),
+		Params.EtcdCfg.EtcdTLSCert.GetValue(),
+		Params.EtcdCfg.EtcdTLSKey.GetValue(),
+		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
+		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+
+	testCases := []struct {
+		name     string
+		unsafeDB string
+	}{
+		{
+			name:     "legacy no db key",
+			unsafeDB: "",
+		},
+		{
+			name:     "wildcard db key",
+			unsafeDB: util.AnyWord,
+		},
+	}
+
+	for _, test := range testCases {
+		t.Run(test.name, func(t *testing.T) {
+			objectName := strings.ReplaceAll(test.name, " ", "-")
+			rootPath := fmt.Sprintf("/test/rbac/shared-legacy-fallback-%s-%d", objectName, rand.Int())
+			metaKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
+			defer metaKV.RemoveWithPrefix(ctx, "")
+			defer metaKV.Close()
+			c := NewCatalog(metaKV)
+
+			roleName := "victim-role"
+			objectType := commonpb.ObjectType_Collection.String()
+			donorKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "donor-role", objectType, funcutil.CombineObjectName(util.DefaultDBName, objectName))
+			sharedLegacyID := crypto.MD5(donorKey)
+			var unsafeKey string
+			if test.unsafeDB == "" {
+				unsafeKey = fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, roleName, objectType, objectName)
+			} else {
+				unsafeKey = fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, roleName, objectType, funcutil.CombineObjectName(test.unsafeDB, objectName))
+			}
+			exactKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, roleName, objectType, funcutil.CombineObjectName(util.DefaultDBName, objectName))
+			exactID := crypto.GranteeID(exactKey)
+
+			require.NoError(t, metaKV.MultiSave(ctx, map[string]string{
+				donorKey:  sharedLegacyID,
+				unsafeKey: sharedLegacyID,
+				buildGranteeIDKey(sharedLegacyID, "PrivilegeInsert"): "donor-user",
+				exactKey: exactID,
+				buildGranteeIDKey(exactID, "PrivilegeLoad"): "victim-user",
+			}))
+
+			grants, err := c.ListGrant(ctx, util.DefaultTenant, &milvuspb.GrantEntity{
+				Role:       &milvuspb.RoleEntity{Name: roleName},
+				Object:     &milvuspb.ObjectEntity{Name: objectType},
+				ObjectName: objectName,
+				DbName:     util.DefaultDBName,
+			})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "shared legacy grantee id")
+			assert.Empty(t, grants)
+		})
+	}
 }
 
 func TestRBAC_Backup(t *testing.T) {
@@ -2846,10 +4125,11 @@ func TestRBAC_Restore(t *testing.T) {
 	assert.NoError(t, err)
 
 	// check user
-	users, err := c.ListCredentialsWithPasswd(ctx)
+	credentials, err := c.(*Catalog).listCredentials(ctx)
 	assert.NoError(t, err)
-	assert.Len(t, users, 1)
-	assert.Equal(t, users["user1"], "passwd")
+	assert.Len(t, credentials, 1)
+	assert.Equal(t, "user1", credentials[0].Username)
+	assert.Equal(t, "passwd", credentials[0].EncryptedPassword)
 	// check role
 	roles, err := c.ListRole(ctx, util.DefaultTenant, nil, false)
 	assert.NoError(t, err)
@@ -2917,9 +4197,9 @@ func TestRBAC_Restore(t *testing.T) {
 	assert.NoError(t, err)
 
 	// check user
-	users, err = c.ListCredentialsWithPasswd(ctx)
+	credentials, err = c.(*Catalog).listCredentials(ctx)
 	assert.NoError(t, err)
-	assert.Len(t, users, 2)
+	assert.Len(t, credentials, 2)
 	// check role
 	roles, err = c.ListRole(ctx, util.DefaultTenant, nil, false)
 	assert.NoError(t, err)
@@ -3312,6 +4592,162 @@ func TestRBACPrefixMatch(t *testing.T) {
 		}
 		assert.Contains(t, privileges, util.PrivilegeNameForAPI("Insert"))
 		assert.Contains(t, privileges, util.PrivilegeNameForAPI("Delete"))
+	})
+}
+
+func TestRBACReadSkipsEmptyKeySegments(t *testing.T) {
+	ctx := context.Background()
+	tenant := util.DefaultTenant
+
+	t.Run("getRolesByUsername", func(t *testing.T) {
+		username := "ai_voice"
+		prefix := funcutil.HandleTenantForEtcdPrefix(RoleMappingPrefix, tenant, username)
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock).(*Catalog)
+
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, prefix).Return(
+			[]string{
+				prefix + "default_db_rw",
+				prefix,
+				prefix + "kb_db_rw",
+			},
+			nil,
+			nil,
+		)
+
+		roles, err := c.getRolesByUsername(ctx, tenant, username)
+		require.NoError(t, err)
+		require.ElementsMatch(t, []string{"default_db_rw", "kb_db_rw"}, roles)
+		require.NotContains(t, roles, "")
+	})
+
+	t.Run("ListUserRole", func(t *testing.T) {
+		prefix := funcutil.HandleTenantForEtcdPrefix(RoleMappingPrefix, tenant)
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock)
+
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, prefix).Return(
+			[]string{
+				prefix + "user1/role1",
+				prefix + "user1/",
+				prefix + "/role2",
+			},
+			nil,
+			nil,
+		)
+
+		userRoles, err := c.ListUserRole(ctx, tenant)
+		require.NoError(t, err)
+		require.ElementsMatch(t, []string{"user1/role1"}, userRoles)
+	})
+
+	t.Run("ListRole", func(t *testing.T) {
+		roleName := "role1"
+		prefix := funcutil.HandleTenantForEtcdPrefix(RoleMappingPrefix, tenant)
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock)
+
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, prefix).Return(
+			[]string{
+				prefix + "user1/" + roleName,
+				prefix + "/" + roleName,
+				prefix + "user2/",
+			},
+			nil,
+			nil,
+		)
+		kvmock.EXPECT().Load(mock.Anything, RolePrefix+"/"+roleName).Return("", nil)
+
+		roles, err := c.ListRole(ctx, tenant, &milvuspb.RoleEntity{Name: roleName}, true)
+		require.NoError(t, err)
+		require.Len(t, roles, 1)
+		require.Equal(t, roleName, roles[0].GetRole().GetName())
+		require.Len(t, roles[0].GetUsers(), 1)
+		require.Equal(t, "user1", roles[0].GetUsers()[0].GetName())
+	})
+
+	t.Run("ListRoleAllRoles", func(t *testing.T) {
+		prefix := funcutil.HandleTenantForEtcdPrefix(RolePrefix, tenant)
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock)
+
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, prefix).Return(
+			[]string{
+				prefix + "role1",
+				prefix + "   ",
+			},
+			nil,
+			nil,
+		)
+
+		roles, err := c.ListRole(ctx, tenant, nil, false)
+		require.NoError(t, err)
+		require.Len(t, roles, 1)
+		require.Equal(t, "role1", roles[0].GetRole().GetName())
+	})
+
+	t.Run("ListGrant", func(t *testing.T) {
+		roleName := "role1"
+		granteePrefix := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant, roleName)
+		validIDPrefix := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, "grant-id")
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock)
+
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteePrefix).Return(
+			[]string{
+				granteePrefix + "Collection/default.coll",
+				granteePrefix + "Collection/",
+			},
+			[]string{"grant-id", "bad-id"},
+			nil,
+		)
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, validIDPrefix).Return(
+			[]string{validIDPrefix + "PrivilegeLoad", validIDPrefix},
+			[]string{"root", "root"},
+			nil,
+		)
+
+		grants, err := c.ListGrant(ctx, tenant, &milvuspb.GrantEntity{
+			Role:   &milvuspb.RoleEntity{Name: roleName},
+			DbName: util.AnyWord,
+		})
+		require.NoError(t, err)
+		require.Len(t, grants, 1)
+		require.Equal(t, roleName, grants[0].GetRole().GetName())
+		require.Equal(t, "Collection", grants[0].GetObject().GetName())
+		require.Equal(t, "coll", grants[0].GetObjectName())
+		require.Equal(t, util.DefaultDBName, grants[0].GetDbName())
+		require.Equal(t, util.PrivilegeNameForAPI("PrivilegeLoad"), grants[0].GetGrantor().GetPrivilege().GetName())
+	})
+
+	t.Run("ListPolicy", func(t *testing.T) {
+		granteePrefix := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
+		validIDPrefix := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, "grant-id")
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock)
+
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteePrefix).Return(
+			[]string{
+				granteePrefix + "role1/Collection/default.coll",
+				granteePrefix + "role2/Collection/",
+			},
+			[]string{"grant-id", "bad-id"},
+			nil,
+		)
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, validIDPrefix).Return(
+			[]string{validIDPrefix + "PrivilegeLoad", validIDPrefix},
+			nil,
+			nil,
+		)
+
+		policy, err := c.ListPolicy(ctx, tenant)
+		require.NoError(t, err)
+		require.Len(t, policy, 1)
+		require.Equal(t, "role1", policy[0].GetRole().GetName())
+		require.Equal(t, "Collection", policy[0].GetObject().GetName())
+		require.Equal(t, "coll", policy[0].GetObjectName())
+		require.Equal(t, util.DefaultDBName, policy[0].GetDbName())
+		require.Equal(t, util.PrivilegeNameForAPI("PrivilegeLoad"), policy[0].GetGrantor().GetPrivilege().GetName())
 	})
 }
 
@@ -3753,8 +5189,8 @@ func TestMigrateGrantCollectionName(t *testing.T) {
 			"role1", "Collection", funcutil.CombineObjectName("default", "new_col"))
 		newKey2 := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix,
 			"role2", "Collection", funcutil.CombineObjectName("default", "new_col"))
-		newIdStr1 := crypto.MD5(newKey1)
-		newIdStr2 := crypto.MD5(newKey2)
+		newIdStr1 := crypto.GranteeID(newKey1)
+		newIdStr2 := crypto.GranteeID(newKey2)
 
 		// Mock loading GranteeIDPrefix entries for each old idStr
 		oldGranteeIDKey1 := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, "gid1")
@@ -3795,7 +5231,7 @@ func TestMigrateGrantCollectionName(t *testing.T) {
 
 		newKey1 := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix,
 			"role1", "Collection", funcutil.CombineObjectName("db2", "col2"))
-		newIdStr1 := crypto.MD5(newKey1)
+		newIdStr1 := crypto.GranteeID(newKey1)
 
 		// Mock loading GranteeIDPrefix entries for old idStr
 		oldGranteeIDKey1 := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, "gid1")
@@ -3829,7 +5265,7 @@ func TestMigrateGrantCollectionName(t *testing.T) {
 
 		newKey2 := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix,
 			"role1", "Collection", funcutil.CombineObjectName("default", "new_col"))
-		newIdStr2 := crypto.MD5(newKey2)
+		newIdStr2 := crypto.GranteeID(newKey2)
 
 		kvmock.EXPECT().MultiSaveAndRemove(mock.Anything,
 			map[string]string{newKey2: newIdStr2},
@@ -3837,6 +5273,53 @@ func TestMigrateGrantCollectionName(t *testing.T) {
 
 		err := c.MigrateGrantCollectionName(ctx, tenant, "default", "old_col", "default", "new_col")
 		assert.NoError(t, err)
+	})
+
+	t.Run("shared legacy grantee id removes old parent without copying privileges", func(t *testing.T) {
+		etcdCli, _ := etcd.GetEtcdClient(
+			Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+			Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
+			Params.EtcdCfg.Endpoints.GetAsStrings(),
+			Params.EtcdCfg.EtcdTLSCert.GetValue(),
+			Params.EtcdCfg.EtcdTLSKey.GetValue(),
+			Params.EtcdCfg.EtcdTLSCACert.GetValue(),
+			Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+		rootPath := fmt.Sprintf("/test/rbac/rename-shared-legacy-grantee-id-%d", rand.Int())
+		metaKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
+		defer metaKV.RemoveWithPrefix(ctx, "")
+		defer metaKV.Close()
+		c := NewCatalog(metaKV)
+
+		donorKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "donor-role", "Collection", funcutil.CombineObjectName("default", "old_col"))
+		victimKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "victim-role", "Collection", funcutil.CombineObjectName("default", "old_col"))
+		sharedLegacyID := crypto.MD5(donorKey)
+		require.NoError(t, metaKV.MultiSave(ctx, map[string]string{
+			donorKey:  sharedLegacyID,
+			victimKey: sharedLegacyID,
+			buildGranteeIDKey(sharedLegacyID, "PrivilegeInsert"): "donor-user",
+		}))
+
+		err := c.MigrateGrantCollectionName(ctx, tenant, "default", "old_col", "default", "new_col")
+		require.NoError(t, err)
+
+		donorNewKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "donor-role", "Collection", funcutil.CombineObjectName("default", "new_col"))
+		donorNewID := crypto.GranteeID(donorNewKey)
+		victimNewKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "victim-role", "Collection", funcutil.CombineObjectName("default", "new_col"))
+		victimNewID := crypto.GranteeID(victimNewKey)
+		donorFullIDKeys, _, err := metaKV.LoadWithPrefix(ctx, funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, donorNewID))
+		require.NoError(t, err)
+		assert.Empty(t, donorFullIDKeys)
+		victimFullIDKeys, _, err := metaKV.LoadWithPrefix(ctx, funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, victimNewID))
+		require.NoError(t, err)
+		assert.Empty(t, victimFullIDKeys)
+
+		_, err = metaKV.Load(ctx, donorKey)
+		require.Error(t, err)
+		_, err = metaKV.Load(ctx, victimKey)
+		require.Error(t, err)
+		sharedUser, err := metaKV.Load(ctx, buildGranteeIDKey(sharedLegacyID, "PrivilegeInsert"))
+		require.NoError(t, err)
+		assert.Equal(t, "donor-user", sharedUser)
 	})
 
 	t.Run("save error", func(t *testing.T) {

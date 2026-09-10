@@ -20,6 +20,7 @@
 #include <boost/algorithm/string/join.hpp>
 #include <boost/algorithm/string/replace.hpp>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <optional>
 #include <string>
@@ -112,6 +113,20 @@ ExtractSubJson(std::string_view json, const std::vector<std::string>& keys) {
 using document = simdjson::ondemand::document;
 template <typename T>
 using value_result = simdjson::simdjson_result<T>;
+
+struct JsonStringOrInt64 {
+    enum class Kind : uint8_t {
+        NoProbeValue,
+        String,
+        Int64,
+        OtherNumber,
+    };
+
+    Kind kind{Kind::NoProbeValue};
+    std::string_view string_value{};
+    int64_t int64_value{};
+};
+
 class Json {
  public:
     Json() = default;
@@ -194,25 +209,6 @@ class Json {
         return doc;
     }
 
-    value_result<document>
-    doc(uint16_t offset, uint16_t length) const {
-        thread_local simdjson::ondemand::parser parser;
-
-        // it's always safe to add the padding,
-        // as we have allocated the memory with this padding
-        auto doc = parser.iterate(
-            data_.data() + offset, length, length + simdjson::SIMDJSON_PADDING);
-        AssertInfo(doc.error() == simdjson::SUCCESS,
-                   "failed to parse the json {} offset {}, length {}: {}, "
-                   "total_json:{}",
-                   std::string(data_.data() + offset, length),
-                   offset,
-                   length,
-                   simdjson::error_message(doc.error()),
-                   data_);
-        return doc;
-    }
-
     value_result<simdjson::dom::element>
     dom_doc() const {
         if (data_.size() == 0) {
@@ -226,20 +222,6 @@ class Json {
         AssertInfo(doc.error() == simdjson::SUCCESS,
                    "failed to parse the json {}: {}",
                    data_,
-                   simdjson::error_message(doc.error()));
-        return doc;
-    }
-
-    value_result<simdjson::dom::element>
-    dom_doc(uint16_t offset, uint16_t length) const {
-        thread_local simdjson::dom::parser parser;
-
-        // it's always safe to add the padding,
-        // as we have allocated the memory with this padding
-        auto doc = parser.parse(data_.data() + offset, length);
-        AssertInfo(doc.error() == simdjson::SUCCESS,
-                   "failed to parse the json {}: {}",
-                   std::string(data_.data() + offset, length),
                    simdjson::error_message(doc.error()));
         return doc;
     }
@@ -315,6 +297,60 @@ class Json {
         return doc().at_pointer(pointer).get_number();
     }
 
+    // Parse the document and resolve the JSON pointer exactly once, then
+    // classify the value for callers that accept only strings or int64s.
+    // string_value must be consumed before the next ondemand parse on this
+    // thread because simdjson may store decoded strings in its parser buffer.
+    JsonStringOrInt64
+    at_string_or_int64(std::string_view pointer) const {
+        const auto extract = [](auto&& value) {
+            auto type = value.type();
+            if (type.error()) {
+                return JsonStringOrInt64{};
+            }
+
+            switch (type.value()) {
+                case simdjson::ondemand::json_type::string: {
+                    auto str = value.get_string(false);
+                    if (str.error()) {
+                        return JsonStringOrInt64{};
+                    }
+                    return JsonStringOrInt64{
+                        JsonStringOrInt64::Kind::String, str.value(), 0};
+                }
+                case simdjson::ondemand::json_type::number: {
+                    auto number = value.get_number();
+                    if (number.error()) {
+                        return JsonStringOrInt64{};
+                    }
+                    auto n = number.value();
+                    if (n.is_int64()) {
+                        return JsonStringOrInt64{
+                            JsonStringOrInt64::Kind::Int64, {}, n.get_int64()};
+                    }
+                    return JsonStringOrInt64{
+                        JsonStringOrInt64::Kind::OtherNumber, {}, 0};
+                }
+                default:
+                    return JsonStringOrInt64{};
+            }
+        };
+
+        auto document = doc();
+        if (document.error()) {
+            return {};
+        }
+        if (pointer.empty()) {
+            return extract(document.value());
+        }
+
+        auto value = document.value().at_pointer(pointer);
+        if (value.error()) {
+            return {};
+        }
+        return extract(value.value());
+    }
+
     value_result<std::string>
     at_string_any(std::string_view pointer) const {
         if (data_.empty()) {
@@ -331,22 +367,6 @@ class Json {
         SIMDJSON_CHECK_ERROR(json_str);
 
         return std::string{json_str.value()};
-    }
-
-    template <typename T>
-    value_result<T>
-    at(uint16_t offset, uint16_t length) const {
-        return doc(offset, length).get<T>();
-    }
-
-    std::string_view
-    at_string(uint16_t offset, uint16_t length) const {
-        return std::string_view(data_.data() + offset, length);
-    }
-
-    value_result<simdjson::dom::array>
-    array_at(uint16_t offset, uint16_t length) const {
-        return dom_doc(offset, length).get_array();
     }
 
     // get dom array by JSON pointer,

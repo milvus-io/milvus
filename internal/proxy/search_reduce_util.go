@@ -2,19 +2,16 @@ package proxy
 
 import (
 	"context"
-	"fmt"
 
-	"github.com/cockroachdb/errors"
 	"go.opentelemetry.io/otel"
-	"go.uber.org/zap"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/reduce"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/fastpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -102,14 +99,14 @@ func reduceSearchResultDataWithGroupBy(
 	defer func() { tr.CtxElapse(ctx, "done") }()
 
 	limit := topk - offset
-	log.Ctx(ctx).Debug("reduceSearchResultDataWithGroupBy",
-		zap.Int("subSearchCount", len(subSearchResultData)),
-		zap.Int64("nq", nq),
-		zap.Int64("offset", offset),
-		zap.Int64("limit", limit),
-		zap.Int64("groupSize", groupSize),
-		zap.Int("groupByFieldCount", len(groupByFieldIDs)),
-		zap.String("metricType", metricType))
+	mlog.Debug(ctx, "reduceSearchResultDataWithGroupBy",
+		mlog.Int("subSearchCount", len(subSearchResultData)),
+		mlog.Int64("nq", nq),
+		mlog.Int64("offset", offset),
+		mlog.Int64("limit", limit),
+		mlog.Int64("groupSize", groupSize),
+		mlog.Int("groupByFieldCount", len(groupByFieldIDs)),
+		mlog.String("metricType", metricType))
 
 	ret := &milvuspb.SearchResults{
 		Status: merr.Success(),
@@ -128,7 +125,7 @@ func reduceSearchResultDataWithGroupBy(
 	}
 	allSearchCount, hitNum, err := checkResultDatas(ctx, subSearchResultData, nq, topk)
 	if err != nil {
-		log.Ctx(ctx).Warn("invalid search results", zap.Error(err))
+		mlog.Warn(ctx, "invalid search results", mlog.Err(err))
 		return ret, err
 	}
 	ret.GetResults().AllSearchCount = allSearchCount
@@ -142,7 +139,7 @@ func reduceSearchResultDataWithGroupBy(
 
 	singleFieldGroupBy := len(groupByFieldIDs) == 1
 	if err := reduce.ValidateGroupByFieldsPresent(subSearchResultData, groupByFieldIDs, singleFieldGroupBy); err != nil {
-		return ret, merr.WrapErrServiceInternal("failed to construct group by field data builder", err.Error())
+		return ret, merr.Wrap(err, "failed to construct group by field data builder")
 	}
 	if hitNum == 0 {
 		ret.Results.Topks = make([]int64, nq)
@@ -178,7 +175,7 @@ func reduceSearchResultDataWithGroupBy(
 	}
 
 	if err := reduce.WriteGroupByFieldValues(ret.Results, acceptedRows, subSearchResultData, groupByFieldIDs); err != nil {
-		return ret, merr.WrapErrServiceInternal("failed to construct group by field data builder", err.Error())
+		return ret, merr.Wrap(err, "failed to construct group by field data builder")
 	}
 
 	if !metric.PositivelyRelated(metricType) {
@@ -269,13 +266,13 @@ func runSingleFieldGroupByHotLoop(
 		}
 
 		if realTopK != -1 && realTopK != j {
-			log.Ctx(ctx).Warn("Proxy Reduce Search Result", zap.Error(errors.New("the length (topk) between all result of query is different")))
+			mlog.Warn(ctx, "Proxy Reduce Search Result", mlog.Err(merr.WrapErrServiceInternalMsg("the length (topk) between all result of query is different")))
 		}
 		realTopK = j
 		ret.Results.Topks = append(ret.Results.Topks, realTopK)
 
 		if retSize > maxOutputSize {
-			return nil, fmt.Errorf("search results exceed the maxOutputSize Limit %d", maxOutputSize)
+			return nil, merr.WrapErrParameterInvalidMsg("search results exceed the maxOutputSize Limit %d", maxOutputSize)
 		}
 	}
 
@@ -392,13 +389,13 @@ func runMultiFieldGroupByHotLoop(
 		acceptedRows = append(acceptedRows, perNqAccepted...)
 
 		if realTopK != -1 && realTopK != j {
-			log.Ctx(ctx).Warn("Proxy Reduce Search Result", zap.Error(errors.New("the length (topk) between all result of query is different")))
+			mlog.Warn(ctx, "Proxy Reduce Search Result", mlog.Err(merr.WrapErrServiceInternalMsg("the length (topk) between all result of query is different")))
 		}
 		realTopK = j
 		ret.Results.Topks = append(ret.Results.Topks, realTopK)
 
 		if retSize > maxOutputSize {
-			return nil, fmt.Errorf("search results exceed the maxOutputSize Limit %d", maxOutputSize)
+			return nil, merr.WrapErrParameterInvalidMsg("search results exceed the maxOutputSize Limit %d", maxOutputSize)
 		}
 	}
 
@@ -413,16 +410,16 @@ func checkResultDatas(ctx context.Context, subSearchResultData []*schemapb.Searc
 	var hitNum int
 	for i, sData := range subSearchResultData {
 		pkLength := typeutil.GetSizeOfIDs(sData.GetIds())
-		log.Ctx(ctx).Debug("subSearchResultData",
-			zap.Int("result No.", i),
-			zap.Int64("nq", sData.NumQueries),
-			zap.Int64("topk", sData.TopK),
-			zap.Int("length of pks", pkLength),
-			zap.Int("length of FieldsData", len(sData.FieldsData)))
+		mlog.Debug(ctx, "subSearchResultData",
+			mlog.Int("result No.", i),
+			mlog.Int64("nq", sData.NumQueries),
+			mlog.Int64("topk", sData.TopK),
+			mlog.Int("length of pks", pkLength),
+			mlog.Int("length of FieldsData", len(sData.FieldsData)))
 		allSearchCount += sData.GetAllSearchCount()
 		hitNum += pkLength
 		if err := checkSearchResultData(sData, nq, topK, pkLength); err != nil {
-			log.Ctx(ctx).Warn("invalid search results", zap.Error(err))
+			mlog.Warn(ctx, "invalid search results", mlog.Err(err))
 			return allSearchCount, hitNum, err
 		}
 	}
@@ -446,9 +443,9 @@ func reduceAdvanceGroupBy(ctx context.Context, subSearchResultData []*schemapb.S
 			if gbv == nil {
 				continue
 			}
-			if gbv.GetValidData() != nil {
+			if validData := typeutil.GetFieldDataValidData(gbv); validData != nil {
 				fieldName := gbv.GetFieldName()
-				totalRows := len(gbv.GetValidData())
+				totalRows := len(validData)
 				gpFieldBuilder, err := typeutil.NewFieldDataBuilder(gbv.GetType(), true, totalRows)
 				if err != nil {
 					return nil, err
@@ -500,7 +497,7 @@ func reduceAdvanceGroupBy(ctx context.Context, subSearchResultData []*schemapb.S
 
 	var limit int64
 	if allSearchCount, hitNum, err := checkResultDatas(ctx, subSearchResultData, nq, topK); err != nil {
-		log.Ctx(ctx).Warn("invalid search results", zap.Error(err))
+		mlog.Warn(ctx, "invalid search results", mlog.Err(err))
 		return ret, err
 	} else {
 		ret.GetResults().AllSearchCount = allSearchCount
@@ -569,7 +566,7 @@ func reduceAdvanceGroupBy(ctx context.Context, subSearchResultData []*schemapb.S
 	}
 
 	if err := reduce.WriteGroupByFieldValues(ret.Results, acceptedRows, subSearchResultData, groupByFieldIDs); err != nil {
-		return ret, merr.WrapErrServiceInternal("failed to write group by field values", err.Error())
+		return ret, merr.Wrap(err, "failed to write group by field values")
 	}
 	ret.Results.TopK = topK // realTopK is the topK of the nq-th query
 	if !metric.PositivelyRelated(metricType) {
@@ -617,12 +614,12 @@ func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []
 	}()
 
 	limit := topk - offset
-	log.Ctx(ctx).Debug("reduceSearchResultData",
-		zap.Int("len(subSearchResultData)", len(subSearchResultData)),
-		zap.Int64("nq", nq),
-		zap.Int64("offset", offset),
-		zap.Int64("limit", limit),
-		zap.String("metricType", metricType))
+	mlog.Debug(ctx, "reduceSearchResultData",
+		mlog.Int("len(subSearchResultData)", len(subSearchResultData)),
+		mlog.Int64("nq", nq),
+		mlog.Int64("offset", offset),
+		mlog.Int64("limit", limit),
+		mlog.String("metricType", metricType))
 
 	ret := &milvuspb.SearchResults{
 		Status: merr.Success(),
@@ -641,7 +638,7 @@ func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []
 	}
 
 	if allSearchCount, _, err := checkResultDatas(ctx, subSearchResultData, nq, topk); err != nil {
-		log.Ctx(ctx).Warn("invalid search results", zap.Error(err))
+		mlog.Warn(ctx, "invalid search results", mlog.Err(err))
 		return ret, err
 	} else {
 		ret.GetResults().AllSearchCount = allSearchCount
@@ -736,15 +733,15 @@ func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []
 				cursors[subSearchIdx]++
 			}
 			if realTopK != -1 && realTopK != j {
-				log.Ctx(ctx).Warn("Proxy Reduce Search Result", zap.Error(errors.New("the length (topk) between all result of query is different")))
-				// return nil, errors.New("the length (topk) between all result of query is different")
+				mlog.Warn(ctx, "Proxy Reduce Search Result", mlog.Err(merr.WrapErrParameterInvalidMsg("the length (topk) between all result of query is different")))
+				// return nil, merr.WrapErrParameterInvalidMsg("the length (topk) between all result of query is different")
 			}
 			realTopK = j
 			ret.Results.Topks = append(ret.Results.Topks, realTopK)
 
 			// limit search result to avoid oom
 			if retSize > maxOutputSize {
-				return nil, fmt.Errorf("search results exceed the maxOutputSize Limit %d", maxOutputSize)
+				return nil, merr.WrapErrParameterInvalidMsg("search results exceed the maxOutputSize Limit %d", maxOutputSize)
 			}
 		}
 		ret.Results.TopK = realTopK // realTopK is the topK of the nq-th query
@@ -783,7 +780,7 @@ func setupIdListForSearchResult(searchResult *milvuspb.SearchResults, pkType sch
 			},
 		}
 	default:
-		return errors.New("unsupported pk type")
+		return merr.WrapErrServiceInternalMsg("unsupported pk type")
 	}
 	return nil
 }
@@ -802,31 +799,31 @@ func reduceResults(ctx context.Context, toReduceResults []*internalpb.SearchResu
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "reduceResults")
 	defer sp.End()
 
-	log := log.Ctx(ctx)
+	log := mlog.With()
 	// Decode all search results
 	validSearchResults, err := decodeSearchResults(ctx, toReduceResults)
 	if err != nil {
-		log.Warn("failed to decode search results", zap.Error(err))
+		log.Warn(ctx, "failed to decode search results", mlog.Err(err))
 		return nil, err
 	}
 
 	if len(validSearchResults) <= 0 {
-		log.Debug("reduced search results is empty, fill in empty result")
+		log.Debug(ctx, "reduced search results is empty, fill in empty result")
 		return fillInEmptyResult(nq), nil
 	}
 
 	// Reduce all search results
-	log.Debug("proxy search post execute reduce",
-		zap.Int64("collection", collectionID),
-		zap.Int64s("partitionIDs", partitionIDs),
-		zap.Int("number of valid search results", len(validSearchResults)))
+	log.Debug(ctx, "proxy search post execute reduce",
+		mlog.Int64("collection", collectionID),
+		mlog.Int64s("partitionIDs", partitionIDs),
+		mlog.Int("number of valid search results", len(validSearchResults)))
 	var result *milvuspb.SearchResults
 	result, err = reduceSearchResult(ctx, validSearchResults, reduce.NewReduceSearchResultInfo(nq, topK).WithMetricType(metricType).WithPkType(pkType).
 		WithOffset(offset).WithGroupSize(queryInfo.GetGroupSize()).
 		WithGroupByFieldIdsFromProto(queryInfo.GetGroupByFieldId(), queryInfo.GetGroupByFieldIds()).
 		WithAdvance(isAdvance).WithSearchAggregation(isSearchAggregation))
 	if err != nil {
-		log.Warn("failed to reduce search results", zap.Error(err))
+		log.Warn(ctx, "failed to reduce search results", mlog.Err(err))
 		return nil, err
 	}
 	return result, nil
@@ -843,7 +840,9 @@ func decodeSearchResults(ctx context.Context, searchResults []*internalpb.Search
 			results = append(results, partialSearchResult.ResultData)
 		} else if partialSearchResult.SlicedBlob != nil {
 			var partialResultData schemapb.SearchResultData
-			err := proto.Unmarshal(partialSearchResult.SlicedBlob, &partialResultData)
+			// fastpb: hand-written decoder for the search reduce hot path
+			// (wire-equivalent to proto.Unmarshal, ~2x varchar / ~6x vector).
+			err := fastpb.UnmarshalSearchResultData(partialSearchResult.SlicedBlob, &partialResultData)
 			if err != nil {
 				return nil, err
 			}
@@ -856,14 +855,16 @@ func decodeSearchResults(ctx context.Context, searchResults []*internalpb.Search
 
 func checkSearchResultData(data *schemapb.SearchResultData, nq int64, topk int64, pkHitNum int) error {
 	if data.NumQueries != nq {
-		return fmt.Errorf("search result's nq(%d) mis-match with %d", data.NumQueries, nq)
+		// The result shape comes from querynode/segcore, never from the request:
+		// a mismatch is an internal protocol violation, not user input.
+		return merr.WrapErrServiceInternalMsg("search result's nq(%d) mis-match with %d", data.NumQueries, nq)
 	}
 	if data.TopK != topk {
-		return fmt.Errorf("search result's topk(%d) mis-match with %d", data.TopK, topk)
+		return merr.WrapErrServiceInternalMsg("search result's topk(%d) mis-match with %d", data.TopK, topk)
 	}
 
 	if len(data.Scores) != pkHitNum {
-		return fmt.Errorf("search result's score length invalid, score length=%d, expectedLength=%d",
+		return merr.WrapErrServiceInternalMsg("search result's score length invalid, score length=%d, expectedLength=%d",
 			len(data.Scores), pkHitNum)
 	}
 	return nil
@@ -891,7 +892,7 @@ func selectHighestScoreIndex(ctx context.Context, subSearchResultData []*schemap
 			if subSearchIdx == -1 {
 				// A bad case happens where Knowhere returns distance/score == +/-maxFloat32
 				// by mistake.
-				log.Ctx(ctx).Error("a bad score is returned, something is wrong here!", zap.Float32("score", sScore))
+				mlog.Error(ctx, "a bad score is returned, something is wrong here!", mlog.Float32("score", sScore))
 			} else if typeutil.ComparePK(
 				typeutil.GetPK(subSearchResultData[i].GetIds(), sIdx),
 				typeutil.GetPK(subSearchResultData[subSearchIdx].GetIds(), resultDataIdx)) {

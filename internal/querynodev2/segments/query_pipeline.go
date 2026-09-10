@@ -18,7 +18,6 @@ package segments
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/agg"
@@ -31,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -77,7 +77,7 @@ func RunQNQueryPipeline(
 	// Common: run pipeline
 	finalMsg, err := pipeline.Run(ctx, nil, msg)
 	if err != nil {
-		return nil, fmt.Errorf("QN query pipeline failed: %w", err)
+		return nil, merr.Wrap(err, "QN query pipeline failed")
 	}
 
 	// Common: extract output + aggregate stats + fill empty fields
@@ -138,7 +138,7 @@ func buildStandardQNPipeline(
 		req.GetReq().GetOrderByFields(), schema,
 	)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to convert ORDER BY fields: %w", err)
+		return nil, nil, merr.Wrap(err, "failed to convert ORDER BY fields")
 	}
 
 	// Convert segcore results to internal format.
@@ -220,7 +220,7 @@ func extractSegcoreResult(
 			}
 		}
 	default:
-		return nil, fmt.Errorf("unexpected pipeline output type: %T", rawOutput)
+		return nil, merr.WrapErrServiceInternalMsg("unexpected pipeline output type: %T", rawOutput)
 	}
 
 	merged := &segcorepb.RetrieveResults{
@@ -263,7 +263,7 @@ func RunDelegatorQueryPipeline(
 		req.GetReq().GetOrderByFields(), schema,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to convert ORDER BY fields: %w", err)
+		return nil, merr.Wrap(err, "failed to convert ORDER BY fields")
 	}
 
 	// Build and run pipeline
@@ -277,13 +277,13 @@ func RunDelegatorQueryPipeline(
 		maxOutputSize,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to build delegator query pipeline: %w", err)
+		return nil, merr.Wrap(err, "failed to build delegator query pipeline")
 	}
 
 	msg := queryutil.OpMsg{queryutil.PipelineInput: results}
 	finalMsg, err := pipeline.Run(ctx, nil, msg)
 	if err != nil {
-		return nil, fmt.Errorf("delegator query pipeline failed: %w", err)
+		return nil, merr.Wrap(err, "delegator query pipeline failed")
 	}
 
 	output := finalMsg[queryutil.PipelineOutput].(*internalpb.RetrieveResults)

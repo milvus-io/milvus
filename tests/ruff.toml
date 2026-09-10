@@ -18,13 +18,19 @@ select = [
 ignore = [
     "E501",  # line-too-long handled by formatter
     "E741",  # ambiguous variable names (l, I, O) common in test code
+
+    # Only these two stay off. Everything else pyflakes/pycodestyle checks is
+    # enforced, including F401/F811/F821, so new code cannot introduce dead,
+    # duplicate or undefined names.
+    "F841",  # assigned-but-unused: tests deliberately keep call results, and the
+             # cases that were genuinely missing an assertion have been fixed
+    "UP031",  # printf-style formatting: a pure style rewrite that catches no bugs,
+              # and 27 of the sites use `% (...)` tuples where it is not equivalent
 ]
 
 [lint.per-file-ignores]
-"__init__.py" = ["F401", "F403"]
+"__init__.py" = ["F401"]
 "conftest.py" = ["F401", "F811"]
-"**/testcases/**/*.py" = ["E402"]
-"**/chaos/**/*.py" = ["E402"]
 
 [format]
 quote-style = "double"

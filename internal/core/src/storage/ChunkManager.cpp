@@ -34,8 +34,8 @@
 
 namespace milvus::storage {
 
-Aws::String
-ConvertToAwsString(const std::string& str) {
+static Aws::String
+ConvertChunkManagerToAwsString(const std::string& str) {
     return Aws::String(str.c_str(), str.size());
 }
 
@@ -45,7 +45,8 @@ generateConfig(const StorageConfig& storage_config) {
     // For more details, please refer to https://github.com/aws/aws-sdk-cpp/issues/1440
     static Aws::Client::ClientConfiguration g_config;
     Aws::Client::ClientConfiguration config = g_config;
-    config.endpointOverride = ConvertToAwsString(storage_config.address);
+    config.endpointOverride =
+        ConvertChunkManagerToAwsString(storage_config.address);
 
     // Three cases:
     // 1. no ssl, verifySSL=false
@@ -55,7 +56,8 @@ generateConfig(const StorageConfig& storage_config) {
         config.scheme = Aws::Http::Scheme::HTTPS;
         config.verifySSL = true;
         if (!storage_config.sslCACert.empty()) {
-            config.caPath = ConvertToAwsString(storage_config.sslCACert);
+            config.caPath =
+                ConvertChunkManagerToAwsString(storage_config.sslCACert);
             config.verifySSL = false;
         }
     } else {
@@ -64,7 +66,7 @@ generateConfig(const StorageConfig& storage_config) {
     }
 
     if (!storage_config.region.empty()) {
-        config.region = ConvertToAwsString(storage_config.region);
+        config.region = ConvertChunkManagerToAwsString(storage_config.region);
     }
 
     config.requestTimeoutMs = storage_config.requestTimeoutMs == 0

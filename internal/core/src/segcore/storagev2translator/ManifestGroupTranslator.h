@@ -15,11 +15,12 @@
 // limitations under the License.
 #pragma once
 
-#include <assert.h>
-#include <stdint.h>
 #include <algorithm>
+#include <cassert>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -30,6 +31,7 @@
 #include "arrow/table.h"
 #include "cachinglayer/Translator.h"
 #include "cachinglayer/Utils.h"
+#include "common/ChunkTarget.h"
 #include "common/FieldMeta.h"
 #include "common/GroupChunk.h"
 #include "common/OpContext.h"
@@ -37,9 +39,23 @@
 #include "common/protobuf_utils.h"
 #include "milvus-storage/reader.h"
 #include "pb/common.pb.h"
+#include "segcore/memory_planner.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
 
 namespace milvus::segcore::storagev2translator {
+
+using ColumnSizeEstimateMatrix = std::vector<std::vector<uint64_t>>;
+
+struct ColumnSizeEstimateResult {
+    std::shared_ptr<const ColumnSizeEstimateMatrix> sizes;
+    std::string error;
+};
+
+/**
+ * @brief Fetch the complete column-by-chunk estimate matrix once.
+ */
+[[nodiscard]] ColumnSizeEstimateResult
+FetchColumnSizeEstimates(milvus_storage::api::ChunkReader& chunk_reader);
 
 /**
  * @brief Translator for loading column groups from milvus storage manifest
@@ -59,11 +75,20 @@ class ManifestGroupTranslator
      * @param column_group_index Index of the column group within the segment
      * @param chunk_reader Reader for accessing chunks from storage
      * @param field_metas Metadata for all fields in this column group
+     * @param column_group_columns Logical column-group names in estimate order
+     * @param projected_columns Physical column names projected by chunk_reader
      * @param use_mmap Whether to use memory mapping for data loading
      * @param mmap_populate Whether to populate data into memory mapping
      * @param mmap_dir_path Directory path for memory mapping
      * @param num_fields Total number of fields in the column group
      * @param load_priority Priority level for loading operations
+     * @param eager_load Whether this translator represents eager loading
+     * @param warmup_policy Cache warmup policy for produced chunks
+     * @param cache_key_suffix Optional suffix that disambiguates lazy entries
+     * @param fallback_bytes_per_row Sampled fallback estimate in bytes per row
+     * @param shard Insert channel associated with the loaded data
+     * @param column_size_estimate Optional pre-fetched per-column size matrix
+     * @param enable_async_load Whether to use the Storage V3 async pipeline
      */
     ManifestGroupTranslator(
         int64_t segment_id,
@@ -71,6 +96,8 @@ class ManifestGroupTranslator
         int64_t column_group_index,
         std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader,
         const std::unordered_map<FieldId, FieldMeta>& field_metas,
+        const std::vector<std::string>& column_group_columns,
+        const std::vector<std::string>& projected_columns,
         bool use_mmap,
         bool mmap_populate,
         const std::string& mmap_dir_path,
@@ -79,7 +106,13 @@ class ManifestGroupTranslator
         bool eager_load,
         const std::string& warmup_policy,
         const std::string& cache_key_suffix = "",
-        int64_t fallback_bytes_per_row = 0);
+        int64_t fallback_bytes_per_row = 0,
+        std::string shard = "",
+        std::optional<ColumnSizeEstimateResult> column_size_estimate =
+            std::nullopt,
+        MmapChunkWritebackMode writeback_mode =
+            MmapChunkWritebackMode::Disabled,
+        bool enable_async_load = false);
     ~ManifestGroupTranslator() = default;
 
     /**
@@ -128,6 +161,7 @@ class ManifestGroupTranslator
      * Reads the requested chunks from the chunk reader and converts them
      * to GroupChunk objects containing field data.
      *
+     * @param ctx Optional operation context used for cancellation
      * @param cids List of cell IDs to load
      * @return Vector of (cell_id, GroupChunk) pairs
      */
@@ -170,6 +204,21 @@ class ManifestGroupTranslator
     }
 
  private:
+    using CellResult = std::pair<milvus::cachinglayer::cid_t,
+                                 std::unique_ptr<milvus::GroupChunk>>;
+
+    // Loads cells through the existing batched future-based implementation.
+    std::vector<CellResult>
+    get_cells_legacy(milvus::OpContext* ctx,
+                     const std::vector<milvus::cachinglayer::cid_t>& cids,
+                     std::vector<milvus::segcore::CellSpec> cell_specs) const;
+
+    // Loads cells through the Storage V3 coroutine pipeline.
+    std::vector<CellResult>
+    get_cells_via_async_pipeline(
+        milvus::OpContext* ctx,
+        std::vector<milvus::segcore::CellSpec> cell_specs) const;
+
     /**
      * @brief Load a cell from multiple Arrow Tables
      *
@@ -182,7 +231,11 @@ class ManifestGroupTranslator
      */
     std::unique_ptr<milvus::GroupChunk>
     load_group_chunk(const std::vector<std::shared_ptr<arrow::Table>>& tables,
-                     milvus::cachinglayer::cid_t cid);
+                     milvus::cachinglayer::cid_t cid) const;
+
+    // Returns peak transient bytes needed to materialize one cell.
+    int64_t
+    loading_overhead_bytes(int64_t cell_size) const;
 
     int64_t segment_id_;
     GroupChunkType group_chunk_type_;
@@ -194,9 +247,12 @@ class ManifestGroupTranslator
     GroupCTMeta meta_;
     bool use_mmap_;
     bool mmap_populate_;
+    bool has_array_field_{false};
     std::string mmap_dir_path_;
+    MmapChunkWritebackMode writeback_mode_;
     milvus::proto::common::LoadPriority load_priority_{
         milvus::proto::common::LoadPriority::HIGH};
+    bool enable_async_load_{false};
 };
 
 }  // namespace milvus::segcore::storagev2translator

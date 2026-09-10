@@ -27,11 +27,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/allocator"
 	mocktso "github.com/milvus-io/milvus/internal/tso/mocks"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -376,7 +375,7 @@ func (t *WithLockKeyTask) GetLockerKey() LockerKey {
 }
 
 func (t *WithLockKeyTask) Execute(ctx context.Context) error {
-	log.Info("execute task", zap.String("name", t.name), zap.Duration("duration", time.Since(t.newTime)))
+	mlog.Info(ctx, "execute task", mlog.String("name", t.name), mlog.Duration("duration", time.Since(t.newTime)))
 	time.Sleep(t.workDuration)
 	return nil
 }

@@ -19,11 +19,12 @@ package datacoord
 import (
 	"context"
 	"math"
+	"sort"
 	"strconv"
 	"time"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -31,9 +32,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -55,7 +58,7 @@ type Handler interface {
 	GetCollection(ctx context.Context, collectionID UniqueID) (*collectionInfo, error)
 	GetCurrentSegmentsView(ctx context.Context, channel RWChannel, partitionIDs ...UniqueID) *SegmentsView
 	ListLoadedSegments(ctx context.Context) ([]int64, error)
-	GenSnapshot(ctx context.Context, collectionID UniqueID) (*SnapshotData, error)
+	GenSnapshot(ctx context.Context, collectionID UniqueID) (*snapshotstorage.SnapshotData, error)
 	GetDeltaLogFromCompactTo(ctx context.Context, segmentID UniqueID) ([]*datapb.FieldBinlog, error)
 }
 
@@ -84,10 +87,10 @@ func newServerHandler(s *Server) *ServerHandler {
 // level zero segmentIDs ---> L0 segments
 func (h *ServerHandler) GetDataVChanPositions(channel RWChannel, partitionID UniqueID) *datapb.VchannelInfo {
 	segments := h.s.meta.GetRealSegmentsForChannel(channel.GetName())
-	log.Info("GetDataVChanPositions",
-		zap.Int64("collectionID", channel.GetCollectionID()),
-		zap.String("channel", channel.GetName()),
-		zap.Int("numOfSegments", len(segments)),
+	mlog.Info(context.TODO(), "GetDataVChanPositions",
+		mlog.FieldCollectionID(channel.GetCollectionID()),
+		mlog.String("channel", channel.GetName()),
+		mlog.Int("numOfSegments", len(segments)),
 	)
 	var (
 		levelZeroIDs = make(typeutil.UniqueSet)
@@ -223,7 +226,8 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 		return indexed.Contain(segID) || ((validSegmentInfos[segID].GetIsSorted() || validSegmentInfos[segID].GetIsSortedByNamespace()) && validSegmentInfos[segID].GetNumOfRows() < Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64())
 	}
 
-	flushedIDs, droppedIDs = retrieveSegment(validSegmentInfos, flushedIDs, droppedIDs, segmentIndexed)
+	fallbackParentReady := func(segID UniqueID) bool { return indexed.Contain(segID) }
+	flushedIDs, droppedIDs = retrieveSegment(validSegmentInfos, flushedIDs, droppedIDs, segmentIndexed, fallbackParentReady)
 
 	seekPosition := h.GetChannelSeekPosition(channel, partitionIDs...)
 	// if no l0 segment exist, use checkpoint as delete checkpoint
@@ -246,85 +250,234 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 
 func retrieveSegment(validSegmentInfos map[int64]*SegmentInfo,
 	flushedIDs, droppedIDs typeutil.UniqueSet,
-	segmentIndexed func(segID UniqueID) bool,
+	segmentIndexed, fallbackParentReady func(segID UniqueID) bool,
 ) (typeutil.UniqueSet, typeutil.UniqueSet) {
-	newFlushedIDs := make(typeutil.UniqueSet)
+	// A recovered view may contain both compactTo segments and still-live
+	// compactFrom segments when an ordered compaction metadata update is
+	// interrupted. CompactTo segments are published before any compactFrom
+	// segment is retired, so normalize the immutable input frontier as follows:
+	//   - all direct parents present: retirement has not started and the output
+	//     set may be incomplete; keep the parents and remove the child;
+	//   - only some direct parents present: retirement has started, which proves
+	//     the output set was fully published; keep the child and remove the
+	//     remaining parents.
+	// Each child can be evaluated independently. M:N outputs share the same
+	// CompactionFrom set, so they make the same decision against this snapshot.
+	initialFlushedIDs := typeutil.NewUniqueSet(flushedIDs.Collect()...)
+	removeFromView := make(typeutil.UniqueSet)
+	for id := range initialFlushedIDs {
+		segment := validSegmentInfos[id]
+		if segment == nil || len(segment.GetCompactionFrom()) == 0 {
+			continue
+		}
 
-	isConditionMet := func(condition func(seg *SegmentInfo) bool, ids ...UniqueID) bool {
+		presentParents := make(typeutil.UniqueSet)
+		for _, parentID := range segment.GetCompactionFrom() {
+			if initialFlushedIDs.Contain(parentID) {
+				presentParents.Insert(parentID)
+			}
+		}
+
+		switch len(presentParents) {
+		case len(segment.GetCompactionFrom()):
+			removeFromView.Insert(id)
+		case 0:
+		default:
+			removeFromView.Insert(presentParents.Collect()...)
+		}
+	}
+	initialFlushedIDs.Remove(removeFromView.Collect()...)
+	flushedIDs = initialFlushedIDs
+
+	allParentsReady := func(ids ...UniqueID) bool {
 		for _, id := range ids {
-			if seg, ok := validSegmentInfos[id]; !ok || seg == nil || !condition(seg) {
+			seg, ok := validSegmentInfos[id]
+			if !ok || seg == nil || seg.GetIsInvisible() || !fallbackParentReady(id) {
 				return false
 			}
 		}
 		return true
 	}
 
-	isValid := func(ids ...UniqueID) bool {
-		return isConditionMet(func(seg *SegmentInfo) bool {
-			return true
-		}, ids...)
-	}
-
-	isVisible := func(ids ...UniqueID) bool {
-		return isConditionMet(func(seg *SegmentInfo) bool {
-			return !seg.GetIsInvisible()
-		}, ids...)
-	}
-
-	compactionFromExistWithCache := func(segID UniqueID) bool {
-		var compactionFromExist func(segID UniqueID) bool
-		compactionFromExistMap := make(map[UniqueID]bool)
-
-		compactionFromExist = func(segID UniqueID) bool {
-			if exist, ok := compactionFromExistMap[segID]; ok {
-				return exist
-			}
-			compactionFrom := validSegmentInfos[segID].GetCompactionFrom()
-			if len(compactionFrom) == 0 || !isValid(compactionFrom...) {
-				compactionFromExistMap[segID] = false
-				return false
-			}
-			for _, fromID := range compactionFrom {
-				if flushedIDs.Contain(fromID) || newFlushedIDs.Contain(fromID) {
-					compactionFromExistMap[segID] = true
-					return true
-				}
-				if compactionFromExist(fromID) {
-					compactionFromExistMap[segID] = true
-					return true
-				}
-			}
-			compactionFromExistMap[segID] = false
-			return false
+	// Select the initial fallbacks in one pass. Every expansion, including the
+	// ones added later to resolve overlap, must use a complete ready parent set.
+	expanded := make(typeutil.UniqueSet)
+	for id := range flushedIDs {
+		segment := validSegmentInfos[id]
+		compactionFrom := segment.GetCompactionFrom()
+		if len(compactionFrom) == 0 || segmentIndexed(id) || !allParentsReady(compactionFrom...) {
+			continue
 		}
-		return compactionFromExist(segID)
+		expanded.Insert(id)
 	}
 
-	retrieve := func() bool {
-		continueRetrieve := false
+	buildCandidates := func() (typeutil.UniqueSet, map[UniqueID]typeutil.UniqueSet) {
+		candidates := make(typeutil.UniqueSet)
+		fallbackOwners := make(map[UniqueID]typeutil.UniqueSet)
+		type candidateVisit struct {
+			id     UniqueID
+			rootID UniqueID
+		}
+		var visited map[candidateVisit]struct{}
+		var emit func(id, rootID UniqueID, fromFallback bool)
+		emit = func(id, rootID UniqueID, fromFallback bool) {
+			segment, ok := validSegmentInfos[id]
+			if ok && segment != nil && expanded.Contain(id) {
+				if visited == nil {
+					visited = make(map[candidateVisit]struct{})
+				}
+				visit := candidateVisit{id: id, rootID: rootID}
+				if _, ok := visited[visit]; ok {
+					return
+				}
+				visited[visit] = struct{}{}
+
+				for _, parentID := range segment.GetCompactionFrom() {
+					emit(parentID, rootID, true)
+				}
+				return
+			}
+
+			candidates.Insert(id)
+			if fromFallback {
+				if fallbackOwners[id] == nil {
+					fallbackOwners[id] = make(typeutil.UniqueSet)
+				}
+				fallbackOwners[id].Insert(rootID)
+			}
+		}
 		for id := range flushedIDs {
-			compactionFrom := validSegmentInfos[id].GetCompactionFrom()
-			if len(compactionFrom) == 0 {
-				newFlushedIDs.Insert(id)
-			} else if !compactionFromExistWithCache(id) && (segmentIndexed(id) || !isVisible(compactionFrom...)) {
-				newFlushedIDs.Insert(id)
-			} else {
-				for _, fromID := range compactionFrom {
-					newFlushedIDs.Insert(fromID)
-					continueRetrieve = true
-					droppedIDs.Remove(fromID)
+			emit(id, id, false)
+		}
+		return candidates, fallbackOwners
+	}
+
+	type ancestorCoverage int
+	const (
+		noAncestorCoverage ancestorCoverage = iota
+		partialAncestorCoverage
+		completeAncestorCoverage
+	)
+
+	type coverageResult struct {
+		coverage ancestorCoverage
+		owners   typeutil.UniqueSet
+	}
+	newCoverageChecker := func(candidates typeutil.UniqueSet, fallbackOwners map[UniqueID]typeutil.UniqueSet) func(UniqueID) coverageResult {
+		coverageCache := make(map[UniqueID]coverageResult)
+		trackOwners := fallbackOwners != nil
+		var coverage func(UniqueID) coverageResult
+		coverage = func(id UniqueID) coverageResult {
+			if cached, ok := coverageCache[id]; ok {
+				return cached
+			}
+
+			segment, ok := validSegmentInfos[id]
+			if !ok || segment == nil || len(segment.GetCompactionFrom()) == 0 {
+				return coverageResult{coverage: noAncestorCoverage}
+			}
+
+			result := coverageResult{}
+			if trackOwners {
+				result.owners = make(typeutil.UniqueSet)
+			}
+			anyCovered := false
+			allCovered := true
+			for _, parentID := range segment.GetCompactionFrom() {
+				parentResult := coverageResult{coverage: noAncestorCoverage}
+				if candidates.Contain(parentID) {
+					parentResult.coverage = completeAncestorCoverage
+					if trackOwners {
+						parentResult.owners = fallbackOwners[parentID]
+					}
+				} else {
+					parentResult = coverage(parentID)
+				}
+				anyCovered = anyCovered || parentResult.coverage != noAncestorCoverage
+				allCovered = allCovered && parentResult.coverage == completeAncestorCoverage
+				if trackOwners {
+					for ownerID := range parentResult.owners {
+						result.owners.Insert(ownerID)
+					}
 				}
 			}
+
+			switch {
+			case allCovered:
+				result.coverage = completeAncestorCoverage
+			case anyCovered:
+				result.coverage = partialAncestorCoverage
+			default:
+				result.coverage = noAncestorCoverage
+			}
+			coverageCache[id] = result
+			return result
 		}
-		return continueRetrieve
+		return coverage
 	}
 
-	for retrieve() {
-		flushedIDs = newFlushedIDs
-		newFlushedIDs = make(typeutil.UniqueSet)
+	// Close partial overlaps created by M:N compactions. Expand the descendant
+	// when all of its direct parents are ready; otherwise cancel the root
+	// fallback that introduced the overlapping ancestors and keep its child.
+	var candidates typeutil.UniqueSet
+	blockedRoots := make(typeutil.UniqueSet)
+	for {
+		var fallbackOwners map[UniqueID]typeutil.UniqueSet
+		candidates, fallbackOwners = buildCandidates()
+		coverage := newCoverageChecker(candidates, fallbackOwners)
+		toExpand := make(typeutil.UniqueSet)
+		toCancel := make(typeutil.UniqueSet)
+		hasPartialCoverage := false
+		for id := range candidates {
+			result := coverage(id)
+			if result.coverage != partialAncestorCoverage {
+				continue
+			}
+			hasPartialCoverage = true
+			segment := validSegmentInfos[id]
+			if segment != nil && len(segment.GetCompactionFrom()) > 0 && !blockedRoots.Contain(id) && allParentsReady(segment.GetCompactionFrom()...) {
+				toExpand.Insert(id)
+			} else {
+				toCancel.Insert(result.owners.Collect()...)
+			}
+		}
+		if !hasPartialCoverage {
+			break
+		}
+
+		changed := false
+		for id := range toExpand {
+			if !toCancel.Contain(id) {
+				expanded.Insert(id)
+				changed = true
+			}
+		}
+		for id := range toCancel {
+			expanded.Remove(id)
+			blockedRoots.Insert(id)
+			changed = true
+		}
+		if !changed {
+			// The original leaf frontier is the safe fallback for malformed
+			// metadata that cannot attribute a partial overlap to an expansion.
+			candidates = typeutil.NewUniqueSet(flushedIDs.Collect()...)
+			break
+		}
 	}
 
-	return newFlushedIDs, droppedIDs
+	// Deduplicate against the immutable candidate frontier. An ancestor may be
+	// selected by another branch of an M:N compaction, so walk the complete
+	// ancestry here, but never introduce additional segments during this phase.
+	coverage := newCoverageChecker(candidates, nil)
+	finalFrontier := make(typeutil.UniqueSet)
+	for id := range candidates {
+		if coverage(id).coverage != completeAncestorCoverage {
+			finalFrontier.Insert(id)
+		}
+	}
+	droppedIDs.Remove(finalFrontier.Collect()...)
+
+	return finalFrontier, droppedIDs
 }
 
 func (h *ServerHandler) GetCurrentSegmentsView(ctx context.Context, channel RWChannel, partitionIDs ...UniqueID) *SegmentsView {
@@ -371,18 +524,17 @@ func (h *ServerHandler) GetCurrentSegmentsView(ctx context.Context, channel RWCh
 		}
 	}
 
-	flushedIDs, droppedIDs = retrieveSegment(validSegmentInfos, flushedIDs, droppedIDs, func(segID UniqueID) bool {
-		return true
-	})
+	alwaysReady := func(UniqueID) bool { return true }
+	flushedIDs, droppedIDs = retrieveSegment(validSegmentInfos, flushedIDs, droppedIDs, alwaysReady, alwaysReady)
 
-	log.Ctx(ctx).Info("GetCurrentSegmentsView",
-		zap.Int64("collectionID", channel.GetCollectionID()),
-		zap.String("channel", channel.GetName()),
-		zap.Int("numOfSegments", len(segments)),
-		zap.Int("result flushed", len(flushedIDs)),
-		zap.Int("result growing", len(growingIDs)),
-		zap.Int("result importing", len(importingIDs)),
-		zap.Int("result L0", len(levelZeroIDs)),
+	mlog.Info(ctx, "GetCurrentSegmentsView",
+		mlog.FieldCollectionID(channel.GetCollectionID()),
+		mlog.String("channel", channel.GetName()),
+		mlog.Int("numOfSegments", len(segments)),
+		mlog.Int("result flushed", len(flushedIDs)),
+		mlog.Int("result growing", len(growingIDs)),
+		mlog.Int("result importing", len(importingIDs)),
+		mlog.Int("result L0", len(levelZeroIDs)),
 	)
 
 	return &SegmentsView{
@@ -430,17 +582,17 @@ func (h *ServerHandler) getEarliestSegmentDMLPos(channel string, partitionIDs ..
 		}
 	}
 	if minPos != nil {
-		log.Info("getEarliestSegmentDMLPos done",
-			zap.Int64("segmentID", minPosSegID),
-			zap.Uint64("posTs", minPosTs),
-			zap.Time("posTime", tsoutil.PhysicalTime(minPosTs)))
+		mlog.Info(context.TODO(), "getEarliestSegmentDMLPos done",
+			mlog.FieldSegmentID(minPosSegID),
+			mlog.Uint64("posTs", minPosTs),
+			mlog.Time("posTime", tsoutil.PhysicalTime(minPosTs)))
 	}
 	return minPos
 }
 
 // getCollectionStartPos returns collection start position.
 func (h *ServerHandler) getCollectionStartPos(channel RWChannel) *msgpb.MsgPosition {
-	log := log.With(zap.String("channel", channel.GetName()))
+	log := mlog.With(mlog.String("channel", channel.GetName()))
 	if channel.GetStartPosition() != nil {
 		return channel.GetStartPosition()
 	}
@@ -453,9 +605,9 @@ func (h *ServerHandler) getCollectionStartPos(channel RWChannel) *msgpb.MsgPosit
 		// because when using the collection start position, we don't perform any sync operation of data,
 		// so we can just use 0 here without introducing any repeated data to avoid filtering some DML whose timetick is less than collectionInfo.CreatedAt.
 		// And after enabling new DDL framework, the collection start position will have its own timestamp, so we can use it directly.
-		log.Info("NEITHER segment position or channel start position are found, setting channel seek position to collection start position",
-			zap.Uint64("posTs", startPosition.GetTimestamp()),
-			zap.Time("posTime", tsoutil.PhysicalTime(startPosition.GetTimestamp())),
+		log.Info(context.TODO(), "NEITHER segment position or channel start position are found, setting channel seek position to collection start position",
+			mlog.Uint64("posTs", startPosition.GetTimestamp()),
+			mlog.Time("posTime", tsoutil.PhysicalTime(startPosition.GetTimestamp())),
 		)
 		return startPosition
 	}
@@ -468,7 +620,7 @@ func (h *ServerHandler) getCollectionStartPos(channel RWChannel) *msgpb.MsgPosit
 //  3. Collection start position;
 //     And would return if any position is valid.
 func (h *ServerHandler) GetChannelSeekPosition(channel RWChannel, partitionIDs ...UniqueID) *msgpb.MsgPosition {
-	log := log.With(zap.String("channel", channel.GetName()))
+	log := mlog.With(mlog.String("channel", channel.GetName()))
 	var seekPosition *msgpb.MsgPosition
 	seekPosition = h.s.meta.GetChannelCheckpoint(channel.GetName())
 	if seekPosition != nil {
@@ -477,21 +629,21 @@ func (h *ServerHandler) GetChannelSeekPosition(channel RWChannel, partitionIDs .
 
 	seekPosition = h.getEarliestSegmentDMLPos(channel.GetName(), partitionIDs...)
 	if seekPosition != nil {
-		log.Info("channel seek position set from earliest segment dml position",
-			zap.Uint64("posTs", seekPosition.Timestamp),
-			zap.Time("posTime", tsoutil.PhysicalTime(seekPosition.GetTimestamp())))
+		log.Info(context.TODO(), "channel seek position set from earliest segment dml position",
+			mlog.Uint64("posTs", seekPosition.Timestamp),
+			mlog.Time("posTime", tsoutil.PhysicalTime(seekPosition.GetTimestamp())))
 		return seekPosition
 	}
 
 	seekPosition = h.getCollectionStartPos(channel)
 	if seekPosition != nil {
-		log.Info("channel seek position set from collection start position",
-			zap.Uint64("posTs", seekPosition.Timestamp),
-			zap.Time("posTime", tsoutil.PhysicalTime(seekPosition.GetTimestamp())))
+		log.Info(context.TODO(), "channel seek position set from collection start position",
+			mlog.Uint64("posTs", seekPosition.Timestamp),
+			mlog.Time("posTime", tsoutil.PhysicalTime(seekPosition.GetTimestamp())))
 		return seekPosition
 	}
 
-	log.Warn("get channel checkpoint failed, channelCPMeta and earliestSegDMLPos and collStartPos are all invalid")
+	log.Warn(context.TODO(), "get channel checkpoint failed, channelCPMeta and earliestSegDMLPos and collStartPos are all invalid")
 	return nil
 }
 
@@ -548,15 +700,15 @@ func (h *ServerHandler) HasCollection(ctx context.Context, collectionID UniqueID
 	if err := retry.Do(ctx2, func() error {
 		has, err := h.s.broker.HasCollection(ctx2, collectionID)
 		if err != nil {
-			log.RatedInfo(60, "datacoord ServerHandler HasCollection retry failed", zap.Error(err))
+			mlog.RatedInfo(ctx, rate.Limit(60), "datacoord ServerHandler HasCollection retry failed", mlog.Err(err))
 			return err
 		}
 		hasCollection = has
 		return nil
 	}, retry.Attempts(5)); err != nil {
-		log.Ctx(ctx2).Error("datacoord ServerHandler HasCollection finally failed",
-			zap.Int64("collectionID", collectionID),
-			zap.Error(err))
+		mlog.Error(ctx2, "datacoord ServerHandler HasCollection finally failed",
+			mlog.FieldCollectionID(collectionID),
+			mlog.Err(err))
 		// A workaround for https://github.com/milvus-io/milvus/issues/26863. The collection may be considered as not
 		// dropped when any exception happened, but there are chances that finally the collection will be cleaned.
 		return true, nil
@@ -575,14 +727,14 @@ func (h *ServerHandler) GetCollection(ctx context.Context, collectionID UniqueID
 	if err := retry.Do(ctx2, func() error {
 		err := h.s.loadCollectionFromRootCoord(ctx2, collectionID)
 		if err != nil {
-			log.Warn("failed to load collection from rootcoord", zap.Int64("collectionID", collectionID), zap.Error(err))
+			mlog.Warn(ctx, "failed to load collection from rootcoord", mlog.FieldCollectionID(collectionID), mlog.Err(err))
 			return err
 		}
 		return nil
 	}, retry.Attempts(5)); err != nil {
-		log.Ctx(ctx2).Warn("datacoord ServerHandler GetCollection finally failed",
-			zap.Int64("collectionID", collectionID),
-			zap.Error(err))
+		mlog.Warn(ctx2, "datacoord ServerHandler GetCollection finally failed",
+			mlog.FieldCollectionID(collectionID),
+			mlog.Err(err))
 		return nil, err
 	}
 
@@ -600,10 +752,10 @@ func (h *ServerHandler) CheckShouldDropChannel(channel string) bool {
 func (h *ServerHandler) FinishDropChannel(channel string, collectionID int64) error {
 	err := h.s.meta.catalog.DropChannel(h.s.ctx, channel)
 	if err != nil {
-		log.Warn("DropChannel failed", zap.String("vChannel", channel), zap.Error(err))
+		mlog.Warn(context.TODO(), "DropChannel failed", mlog.String("vChannel", channel), mlog.Err(err))
 		return err
 	}
-	log.Info("DropChannel succeeded", zap.String("channel", channel))
+	mlog.Info(context.TODO(), "DropChannel succeeded", mlog.String("channel", channel))
 	// Channel checkpoints are cleaned up during garbage collection.
 
 	// clean collection info cache when meet drop collection info
@@ -616,25 +768,53 @@ func (h *ServerHandler) ListLoadedSegments(ctx context.Context) ([]int64, error)
 	return h.s.listLoadedSegments(ctx)
 }
 
-// GetSnapshotTs use the smallest channel checkpoint ts as snapshot ts
-// Note: if channel has tt lag, the snapshot ts also has tt lag
-func (h *ServerHandler) GetSnapshotTs(ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) (uint64, error) {
+// GetSnapshotSeekPositions returns every channel seek position used to create a snapshot.
+// The returned min timestamp is kept as SnapshotInfo.create_ts for compatibility.
+// Note: if channel has tt lag, the snapshot ts also has tt lag.
+func (h *ServerHandler) GetSnapshotSeekPositions(ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) ([]*msgpb.MsgPosition, uint64, error) {
 	channels, err := h.s.getChannelsByCollectionID(ctx, collectionID)
 	if err != nil {
-		return 0, err
+		return nil, 0, err
 	}
+	if len(channels) == 0 {
+		return nil, 0, merr.WrapErrServiceInternal("no channel found for snapshot")
+	}
+
+	positions := make([]*msgpb.MsgPosition, 0, len(channels))
 	minTs := uint64(math.MaxUint64)
 	for _, channel := range channels {
 		seekPosition := h.GetChannelSeekPosition(channel, partitionIDs...)
-		if seekPosition != nil && seekPosition.Timestamp < minTs {
-			minTs = seekPosition.Timestamp
+		if seekPosition == nil {
+			return nil, 0, merr.WrapErrServiceInternal("no valid channel seek position for snapshot")
 		}
+		cloned := proto.Clone(seekPosition).(*msgpb.MsgPosition)
+		cloned.ChannelName = channel.GetName()
+		if cloned.GetTimestamp() < minTs {
+			minTs = cloned.GetTimestamp()
+		}
+		positions = append(positions, cloned)
 	}
-	// Check if no valid seek position was found
-	if minTs == math.MaxUint64 {
-		return 0, merr.WrapErrServiceInternal("no valid channel seek position for snapshot")
+
+	sort.Slice(positions, func(i, j int) bool {
+		return positions[i].GetChannelName() < positions[j].GetChannelName()
+	})
+	return positions, minTs, nil
+}
+
+// hasCommittedManifest reports whether a Storage V3 manifest references
+// committed files. ManifestEarliest is only the placeholder assigned to a new
+// Growing segment before its first manifest commit.
+func hasCommittedManifest(info *SegmentInfo) (bool, error) {
+	if info.GetStorageVersion() != storage.StorageV3 || info.GetManifestPath() == "" {
+		return false, nil
 	}
-	return minTs, nil
+
+	_, version, err := packed.UnmarshalManifestPath(info.GetManifestPath())
+	if err != nil {
+		return false, merr.WrapErrDataIntegrity(err,
+			"invalid manifest path for segment %d", info.GetID())
+	}
+	return version > packed.ManifestEarliest, nil
 }
 
 // GenSnapshot generates a point-in-time snapshot of a collection's data and metadata.
@@ -649,9 +829,9 @@ func (h *ServerHandler) GetSnapshotTs(ctx context.Context, collectionID UniqueID
 // Process flow:
 //  1. Retrieve collection schema and partition information
 //  2. Filter user-created partitions (exclude default and auto-created partitions)
-//  3. Generate snapshot timestamp ensuring data consistency
-//  4. Collect index metadata created before snapshot timestamp
-//  5. Select segments with data that started before snapshot timestamp
+//  3. Generate per-channel snapshot seek positions ensuring data consistency
+//  4. Collect current index metadata for the collection
+//  5. Select segments with data that started before each channel seek timestamp
 //  6. Decompress binlog paths for segment data
 //  7. Gather delta logs from compacted segments
 //  8. Build segment descriptions with all binlog and index file paths
@@ -662,7 +842,7 @@ func (h *ServerHandler) GetSnapshotTs(ctx context.Context, collectionID UniqueID
 //   - collectionID: ID of collection to snapshot
 //
 // Returns:
-//   - SnapshotData: Complete snapshot with collection metadata and segment descriptions
+//   - snapshotstorage.SnapshotData: Complete snapshot with collection metadata and segment descriptions
 //   - error: If collection not found, timestamp generation fails, or binlog operations fail
 //
 // Partition filtering logic:
@@ -671,14 +851,14 @@ func (h *ServerHandler) GetSnapshotTs(ctx context.Context, collectionID UniqueID
 //   - Collections with partition key: Include all partitions (filtering handled elsewhere)
 //
 // Segment selection criteria:
-// - Must have data (binlogs or deltalogs present)
-// - StartPosition timestamp < snapshot timestamp (data started before snapshot)
+// - Must have data (binlogs, deltalogs, or a committed V3 manifest present)
+// - StartPosition timestamp < channel seek timestamp (data started before snapshot)
 // - State != Dropped (still valid)
 // - Not importing (stable segments only)
 //
 // Index handling:
-// - Only includes indexes created before snapshot timestamp
-// - Captures vector/scalar indexes with full file paths
+// - Includes collection index definitions
+// - Captures finished segment index files with full paths
 // - Includes text indexes and JSON key indexes
 // - Preserves index parameters and versions
 //
@@ -691,7 +871,7 @@ func (h *ServerHandler) GetSnapshotTs(ctx context.Context, collectionID UniqueID
 // - Creating backup snapshots for disaster recovery
 // - Point-in-time restore for data rollback
 // - Collection cloning to different database/cluster
-func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) (*SnapshotData, error) {
+func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) (*snapshotstorage.SnapshotData, error) {
 	// get coll info
 	resp, err := h.s.broker.DescribeCollectionInternal(ctx, collectionID)
 	if err != nil {
@@ -709,10 +889,17 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 		partitionMapping[name] = partitionIDs[idx]
 	}
 
-	// generate snapshot ts with current partition ids
-	snapshotTs, err := h.GetSnapshotTs(ctx, collectionID, partitionIDs...)
+	// generate snapshot seek positions with current partition ids
+	channelSeekPositions, snapshotTs, err := h.GetSnapshotSeekPositions(ctx, collectionID, partitionIDs...)
 	if err != nil {
 		return nil, err
+	}
+	channelSeekTs := make(map[string]uint64, len(channelSeekPositions))
+	for _, position := range channelSeekPositions {
+		if position.GetChannelName() == "" {
+			return nil, merr.WrapErrServiceInternal("empty snapshot channel seek position")
+		}
+		channelSeekTs[position.GetChannelName()] = position.GetTimestamp()
 	}
 
 	indexes := h.s.meta.indexMeta.GetIndexesForCollection(collectionID, "")
@@ -730,15 +917,37 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 	})
 
 	// get segment info
-	segments := h.s.meta.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(info *SegmentInfo) bool {
-		segmentHasData := len(info.GetBinlogs()) > 0 || len(info.GetDeltalogs()) > 0
-		return segmentHasData && segmentEffectiveTs(info.SegmentInfo) < snapshotTs && info.GetState() != commonpb.SegmentState_Dropped && !info.GetIsImporting()
+	candidateSegments := h.s.meta.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(info *SegmentInfo) bool {
+		return info.GetState() != commonpb.SegmentState_Dropped && !info.GetIsImporting()
 	}))
+	segments := make([]*SegmentInfo, 0, len(candidateSegments))
+	for _, info := range candidateSegments {
+		segmentHasData := len(info.GetBinlogs()) > 0 || len(info.GetDeltalogs()) > 0
+		if !segmentHasData {
+			segmentHasData, err = hasCommittedManifest(info)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if !segmentHasData {
+			continue
+		}
+
+		seekTs, ok := channelSeekTs[info.GetInsertChannel()]
+		if !ok {
+			return nil, merr.WrapErrServiceInternalMsg(
+				"missing snapshot channel seek position for segment channel %s",
+				info.GetInsertChannel())
+		}
+		if segmentEffectiveTs(info.SegmentInfo) < seekTs {
+			segments = append(segments, info)
+		}
+	}
 
 	if len(segments) == 0 {
-		log.Info("no segments found for collection when generating snapshot",
-			zap.Int64("collectionID", collectionID),
-			zap.Uint64("snapshotTs", snapshotTs))
+		mlog.Info(ctx, "no segments found for collection when generating snapshot",
+			mlog.FieldCollectionID(collectionID),
+			mlog.Uint64("snapshotTs", snapshotTs))
 	}
 
 	segmentInfos := lo.Map(segments, func(segment *SegmentInfo, _ int) *datapb.SegmentInfo {
@@ -747,10 +956,10 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 
 	err = binlog.DecompressMultiBinLogs(segmentInfos)
 	if err != nil {
-		log.Error("decompress segment binlogs failed when generating snapshot",
-			zap.Int64("collectionID", collectionID),
-			zap.Uint64("snapshotTs", snapshotTs),
-			zap.Error(err))
+		mlog.Error(ctx, "decompress segment binlogs failed when generating snapshot",
+			mlog.FieldCollectionID(collectionID),
+			mlog.Uint64("snapshotTs", snapshotTs),
+			mlog.Err(err))
 		return nil, err
 	}
 
@@ -758,11 +967,11 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 	lo.ForEach(segmentInfos, func(segInfo *datapb.SegmentInfo, _ int) {
 		deltalogs, err := h.GetDeltaLogFromCompactTo(ctx, segInfo.GetID())
 		if err != nil {
-			log.Error("get delta logs from compactTo failed when generating snapshot",
-				zap.Int64("collectionID", collectionID),
-				zap.Uint64("snapshotTs", snapshotTs),
-				zap.Int64("segmentID", segInfo.GetID()),
-				zap.Error(err))
+			mlog.Error(ctx, "get delta logs from compactTo failed when generating snapshot",
+				mlog.FieldCollectionID(collectionID),
+				mlog.Uint64("snapshotTs", snapshotTs),
+				mlog.FieldSegmentID(segInfo.GetID()),
+				mlog.Err(err))
 			return
 		}
 		segInfo.Deltalogs = append(segInfo.GetDeltalogs(), deltalogs...)
@@ -804,16 +1013,19 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 		Value: strconv.Itoa(int(resp.GetConsistencyLevel())),
 	})
 
-	return &SnapshotData{
+	return &snapshotstorage.SnapshotData{
 		SnapshotInfo: &datapb.SnapshotInfo{
-			CollectionId: collectionID,
-			PartitionIds: partitionIDs,
-			CreateTs:     int64(snapshotTs),
+			CollectionId:         collectionID,
+			PartitionIds:         partitionIDs,
+			CreateTs:             int64(snapshotTs),
+			ChannelSeekPositions: channelSeekPositions,
 		},
 		Collection: &datapb.CollectionDescription{
 			Schema:              schema,
 			NumShards:           int64(resp.GetShardsNum()),
 			NumPartitions:       resp.GetNumPartitions(),
+			ConsistencyLevel:    resp.GetConsistencyLevel(),
+			Properties:          common.CloneKeyValuePairs(resp.GetProperties()),
 			Partitions:          partitionMapping,
 			VirtualChannelNames: resp.GetVirtualChannelNames(),
 		},
@@ -872,7 +1084,7 @@ func (h *ServerHandler) GetDeltaLogFromCompactTo(ctx context.Context, segmentID 
 		children, ok := h.s.meta.GetCompactionTo(id)
 		// double-check the segment, maybe the segment is being dropped concurrently.
 		if !ok {
-			log.Warn("failed to get segment, this may have been cleaned", zap.Int64("segmentID", id))
+			mlog.Warn(ctx, "failed to get segment, this may have been cleaned", mlog.FieldSegmentID(id))
 			err := merr.WrapErrSegmentNotFound(id)
 			return nil, err
 		}
@@ -881,7 +1093,7 @@ func (h *ServerHandler) GetDeltaLogFromCompactTo(ctx context.Context, segmentID 
 			clonedChild := child.Clone()
 			// child segment should decompress binlog path
 			if err := binlog.DecompressBinLog(storage.DeleteBinlog, clonedChild.GetCollectionID(), clonedChild.GetPartitionID(), clonedChild.GetID(), clonedChild.GetDeltalogs()); err != nil {
-				log.Warn("failed to decompress delta binlog", zap.Int64("segmentID", clonedChild.GetID()), zap.Error(err))
+				mlog.Warn(ctx, "failed to decompress delta binlog", mlog.FieldSegmentID(clonedChild.GetID()), mlog.Err(err))
 				return nil, err
 			}
 			allDeltaLogs = append(allDeltaLogs, clonedChild.GetDeltalogs()...)

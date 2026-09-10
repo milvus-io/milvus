@@ -9,7 +9,7 @@ spec:
       - chaos-testing
     labelSelectors:
       app.kubernetes.io/instance: milvus-chaos
-      component: kafka
+      app.kubernetes.io/component: kafka
   mode: fixed
   value: "1"
   action: pod-failure

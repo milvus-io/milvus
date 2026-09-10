@@ -1,11 +1,11 @@
 package pulsarlog
 
 import (
-	plog "github.com/apache/pulsar-client-go/pulsar/log"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
+	"context"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	plog "github.com/apache/pulsar-client-go/pulsar/log"
+
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
 var _ plog.Logger = (*logger)(nil)
@@ -14,11 +14,11 @@ var _ plog.Logger = (*logger)(nil)
 // TODO: currently, pulsar client will log a huge message when logging,
 // so we only log the first msg without format the log.
 func NewLogger() plog.Logger {
-	return &logger{log.With(zap.String("component", "pulsar"))}
+	return &logger{mlog.With(mlog.FieldComponent("pulsar"))}
 }
 
 type logger struct {
-	inner *log.MLogger
+	inner *mlog.Logger
 }
 
 func (l *logger) SubLogger(fields plog.Fields) plog.Logger {
@@ -35,70 +35,70 @@ func (l *logger) WithField(name string, value interface{}) plog.Entry {
 }
 
 func (l *logger) WithError(err error) plog.Entry {
-	return &logger{l.inner.With(zap.Error(err))}
+	return &logger{l.inner.With(mlog.Err(err))}
 }
 
 func (l *logger) Debug(args ...interface{}) {
-	l.logWithLevel(zap.DebugLevel, args...)
+	l.logWithLevel(mlog.DebugLevel, args...)
 }
 
 func (l *logger) Info(args ...interface{}) {
-	l.logWithLevel(zap.InfoLevel, args...)
+	l.logWithLevel(mlog.InfoLevel, args...)
 }
 
 func (l *logger) Warn(args ...interface{}) {
-	l.logWithLevel(zap.WarnLevel, args...)
+	l.logWithLevel(mlog.WarnLevel, args...)
 }
 
 func (l *logger) Error(args ...interface{}) {
-	l.logWithLevel(zap.ErrorLevel, args...)
+	l.logWithLevel(mlog.ErrorLevel, args...)
 }
 
 func (l *logger) Debugf(format string, args ...interface{}) {
-	l.logWithLevel(zap.DebugLevel, format)
+	l.logWithLevel(mlog.DebugLevel, format)
 }
 
 func (l *logger) Infof(format string, args ...interface{}) {
-	l.logWithLevel(zap.InfoLevel, format)
+	l.logWithLevel(mlog.InfoLevel, format)
 }
 
 func (l *logger) Warnf(format string, args ...interface{}) {
-	l.logWithLevel(zap.WarnLevel, format)
+	l.logWithLevel(mlog.WarnLevel, format)
 }
 
 func (l *logger) Errorf(format string, args ...interface{}) {
-	l.logWithLevel(zap.ErrorLevel, format)
+	l.logWithLevel(mlog.ErrorLevel, format)
 }
 
-func (l *logger) logWithLevel(level zapcore.Level, args ...interface{}) {
+func (l *logger) logWithLevel(level mlog.Level, args ...interface{}) {
 	if len(args) == 0 {
 		return
 	}
 	if msg, ok := args[0].(string); ok {
-		l.inner.WithOptions(zap.AddCallerSkip(2)).Log(level, msg)
+		l.inner.WithOptions(mlog.AddCallerSkip(2)).Log(context.TODO(), level, msg)
 	} else {
-		l.inner.WithOptions(zap.AddCallerSkip(2)).Log(level, "unknown log message type")
+		l.inner.WithOptions(mlog.AddCallerSkip(2)).Log(context.TODO(), level, "unknown log message type")
 	}
 }
 
-func exportFields(fields plog.Fields) []zap.Field {
-	fs := make([]zap.Field, 0, 2*len(fields))
+func exportFields(fields plog.Fields) []mlog.Field {
+	fs := make([]mlog.Field, 0, 2*len(fields))
 	for k, v := range fields {
 		switch v := v.(type) {
 		case string:
-			fs = append(fs, zap.String(k, v))
+			fs = append(fs, mlog.String(k, v))
 		case int:
-			fs = append(fs, zap.Int(k, v))
+			fs = append(fs, mlog.Int(k, v))
 		case bool:
-			fs = append(fs, zap.Bool(k, v))
+			fs = append(fs, mlog.Bool(k, v))
 		case float64:
-			fs = append(fs, zap.Float64(k, v))
+			fs = append(fs, mlog.Float64(k, v))
 		case []byte:
-			fs = append(fs, zap.Binary(k, v))
+			fs = append(fs, mlog.Binary(k, v))
 		case error:
-			fs = append(fs, zap.Error(v))
+			fs = append(fs, mlog.Err(v))
 		default:
-			fs = append(fs, zap.Any(k, v))
+			fs = append(fs, mlog.Any(k, v))
 		}
 	}
 	return fs

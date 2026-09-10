@@ -57,6 +57,9 @@ class PhyMatchFilterExpr : public Expr {
                     ? active_count_ - current_pos_
                     : batch_size_;
             current_pos_ += real_batch_size;
+            for (auto& input : inputs_) {
+                input->MoveCursor();
+            }
         }
     }
 
@@ -79,6 +82,13 @@ class PhyMatchFilterExpr : public Expr {
     CanExecuteAllAtOnce() const override {
         return false;
     }
+
+ private:
+    void
+    ApplyStructRowValidity(ColumnVector* col_vec,
+                           FieldId field_id,
+                           const OffsetVector* input,
+                           int64_t batch_rows);
 
  private:
     std::shared_ptr<const milvus::expr::MatchExpr> expr_;

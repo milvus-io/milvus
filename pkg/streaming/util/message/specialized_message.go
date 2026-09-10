@@ -6,6 +6,9 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
+
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // mustAsSpecializedMutableMessage converts a MutableMessage to a specialized MutableMessage.
@@ -37,13 +40,13 @@ func asSpecializedMutableMessage[H proto.Message, B proto.Message](msg BasicMess
 	msgType := MustGetMessageTypeWithVersion[H, B]()
 	if underlying.MessageType() != msgType.MessageType {
 		// The message type do not match the specialized header.
-		return nil, errors.New("message type do not match specialized header")
+		return nil, merr.WrapErrParameterInvalidMsg("message type do not match specialized header")
 	}
 
 	// Get the specialized header from the message.
 	val, ok := underlying.properties.Get(messageHeader)
 	if !ok {
-		return nil, errors.Errorf("lost specialized header, %s", msgType.String())
+		return nil, merr.WrapErrServiceInternalMsg("lost specialized header, %s", msgType.String())
 	}
 
 	// Decode the specialized header.
@@ -90,20 +93,20 @@ func asSpecializedImmutableMessage[H proto.Message, B proto.Message](msg Immutab
 	underlying, ok := msg.(*immutableMessageImpl)
 	if !ok {
 		// maybe a txn message.
-		return nil, errors.New("not a specialized immutable message, txn message maybe")
+		return nil, merr.WrapErrParameterInvalidMsg("not a specialized immutable message, txn message maybe")
 	}
 
 	var header H
 	msgType := MustGetMessageTypeWithVersion[H, B]()
 	if underlying.MessageType() != msgType.MessageType {
 		// The message type do not match the specialized header.
-		return nil, errors.New("message type do not match specialized header")
+		return nil, merr.WrapErrParameterInvalidMsg("message type do not match specialized header")
 	}
 
 	// Get the specialized header from the message.
 	val, ok := underlying.properties.Get(messageHeader)
 	if !ok {
-		return nil, errors.Errorf("lost specialized header, %s", msgType.String())
+		return nil, merr.WrapErrServiceInternalMsg("lost specialized header, %s", msgType.String())
 	}
 
 	// Decode the specialized header.
@@ -185,6 +188,28 @@ func (m *specializedMutableMessageImpl[H, B]) OverwriteBody(body B) {
 	payload, err := proto.Marshal(body)
 	if err != nil {
 		panic(fmt.Sprintf("failed to marshal specialized body, %s", err.Error()))
+	}
+	if ch := m.cipherHeader(); ch != nil {
+		cipher := mustGetCipher()
+		encryptor, safeKey, err := cipher.GetEncryptor(ch.EzId, ch.CollectionId)
+		if err != nil {
+			panic(fmt.Sprintf("failed to get encryptor when overwriting specialized body, %s", err.Error()))
+		}
+		payloadBytes := len(payload)
+		payload, err = encryptor.Encrypt(payload)
+		if err != nil {
+			panic(fmt.Sprintf("failed to encrypt overwritten specialized body, %s", err.Error()))
+		}
+		cipherHeader, err := EncodeProto(&messagespb.CipherHeader{
+			EzId:         ch.EzId,
+			CollectionId: ch.CollectionId,
+			SafeKey:      safeKey,
+			PayloadBytes: int64(payloadBytes),
+		})
+		if err != nil {
+			panic(fmt.Sprintf("failed to encode overwritten specialized body cipher header, %s", err.Error()))
+		}
+		m.properties.Set(messageCipherHeader, cipherHeader)
 	}
 	m.payload = payload
 }

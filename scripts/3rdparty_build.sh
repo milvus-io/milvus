@@ -23,15 +23,14 @@ if [[ ${SKIP_3RDPARTY} -eq 1 ]]; then
 fi
 
 usage() {
-  echo "Usage: $0 [-o BUILD_OPENDAL] [-t BUILD_TYPE] [-h]"
-  echo "  -o BUILD_OPENDAL  Enable/disable OpenDAL build (ON/OFF, default: OFF)"
+  echo "Usage: $0 [-t BUILD_TYPE] [-h]"
   echo "  -t BUILD_TYPE     Set build type (Debug/Release/RelWithDebInfo/MinSizeRel, default: Release)"
   echo "  -h                Show this help message"
   echo ""
   echo "Examples:"
-  echo "  $0                          # Build with default settings (Release, OpenDAL OFF)"
+  echo "  $0                          # Build with default settings (Release)"
   echo "  $0 -t Debug                 # Build in Debug mode"
-  echo "  $0 -o ON -t RelWithDebInfo  # Build with OpenDAL enabled and RelWithDebInfo"
+  echo "  $0 -t RelWithDebInfo        # Build with RelWithDebInfo"
 }
 
 SOURCE="${BASH_SOURCE[0]}"
@@ -41,13 +40,9 @@ while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symli
   [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE" # if $SOURCE was a relative symlink, we need to resolve it relative to the path where the symlink file was located
 done
 
-BUILD_OPENDAL="OFF"
 BUILD_TYPE="Release"
-while getopts "o:t:h" arg; do
+while getopts "t:h" arg; do
   case $arg in
-  o)
-    BUILD_OPENDAL=$OPTARG
-    ;;
   t)
     BUILD_TYPE=$OPTARG
     ;;
@@ -143,8 +138,16 @@ export CFLAGS="-Wno-error=address -Wno-error=deprecated-declarations"
 # macOS SDK headers to exclude macOS-specific APIs (SecImportExport, SCPreferences, etc.).
 # This fixes aws-c-cal, c-ares, and other packages that depend on macOS Security/SystemConfig APIs.
 if [[ "$(uname -s)" == "Darwin" ]]; then
-    export CFLAGS="${CFLAGS} -DTARGET_OS_OSX=1"
-    export CXXFLAGS="${CXXFLAGS} -DTARGET_OS_OSX=1"
+    arm_crypto_flags=""
+    if [[ "$(uname -m)" == "arm64" ]]; then
+        # Homebrew LLVM needs ARM crypto enabled for libsodium armcrypto sources on macOS arm64.
+        # +crc: Apple Silicon enables __ARM_FEATURE_CRC32 by default, so milvus core/knowhere
+        # compile folly's F14 hash table in SimdAndCrc mode. 3rdparty deps (folly) must match,
+        # else folly::f14::F14LinkCheck<mode> is undefined at link time.
+        arm_crypto_flags=" -march=armv8-a+crypto+crc"
+    fi
+    export CFLAGS="${CFLAGS} -DTARGET_OS_OSX=1${arm_crypto_flags}"
+    export CXXFLAGS="${CXXFLAGS} -DTARGET_OS_OSX=1${arm_crypto_flags}"
 fi
 # Allow CMake 4.x to build packages with old cmake_minimum_required versions (< 3.5)
 export CMAKE_POLICY_VERSION_MINIMUM=3.5
@@ -211,7 +214,7 @@ case "${unameOut}" in
     export CMAKE_CXX_COMPILER_LAUNCHER=ccache
     echo "Using CXX: $CXX"
     echo "Using CC: $CC"
-    CONAN_ARGS="--output-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler=clang -s compiler.version=${llvm_version} -s compiler.libcxx=libc++ -s compiler.cppstd=17 -u"
+    CONAN_ARGS="--output-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler=clang -s compiler.version=${llvm_version} -s compiler.libcxx=libc++ -s compiler.cppstd=20 -u"
 
     # On macOS, Conan packages with shared libraries (protobuf, grpc) produce
     # binaries (protoc, grpc_cpp_plugin) whose install rpaths don't include
@@ -275,9 +278,9 @@ HOOK_EOF
     export CPU_TARGET=avx
     GCC_VERSION=`gcc -dumpversion`
     if [[ `gcc -v 2>&1 | sed -n 's/.*\(--with-default-libstdcxx-abi\)=\(\w*\).*/\2/p'` == "gcc4" ]]; then
-      "$CONAN" install ${CPP_SRC_DIR} --output-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler.version=${GCC_VERSION} -s compiler.cppstd=17 || { echo 'conan install failed'; exit 1; }
+      "$CONAN" install ${CPP_SRC_DIR} --output-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler.version=${GCC_VERSION} -s compiler.cppstd=20 -s:b compiler.cppstd=20 || { echo 'conan install failed'; exit 1; }
     else
-      "$CONAN" install ${CPP_SRC_DIR} --output-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler.version=${GCC_VERSION} -s compiler.libcxx=libstdc++11 -s compiler.cppstd=17 || { echo 'conan install failed'; exit 1; }
+      "$CONAN" install ${CPP_SRC_DIR} --output-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler.version=${GCC_VERSION} -s compiler.libcxx=libstdc++11 -s compiler.cppstd=20 -s:b compiler.cppstd=20 || { echo 'conan install failed'; exit 1; }
     fi
     ;;
   *)

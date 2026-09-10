@@ -27,6 +27,7 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
 )
 
@@ -86,7 +87,7 @@ func (s *SortOpTestSuite) TestSortDescending() {
 	)
 	defer df.Release()
 
-	op := NewSortOp(types.ScoreFieldName, true)
+	op := newSortOp(types.ScoreFieldName, true, types.IDFieldName)
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
 	result, err := op.Execute(ctx, df)
 	s.Require().NoError(err)
@@ -110,7 +111,7 @@ func (s *SortOpTestSuite) TestSortAscending() {
 	)
 	defer df.Release()
 
-	op := NewSortOp(types.ScoreFieldName, false)
+	op := newSortOp(types.ScoreFieldName, false, types.IDFieldName)
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
 	result, err := op.Execute(ctx, df)
 	s.Require().NoError(err)
@@ -149,7 +150,7 @@ func (s *SortOpTestSuite) TestSortWithAllNullScores() {
 	df := builder.Build()
 	defer df.Release()
 
-	op := NewSortOp(types.ScoreFieldName, true)
+	op := newSortOp(types.ScoreFieldName, true, types.IDFieldName)
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
 	result, err := op.Execute(ctx, df)
 	s.Require().NoError(err)
@@ -193,7 +194,7 @@ func (s *SortOpTestSuite) TestSortNullsLastDescending() {
 	df := builder.Build()
 	defer df.Release()
 
-	op := NewSortOp(types.ScoreFieldName, true)
+	op := newSortOp(types.ScoreFieldName, true, types.IDFieldName)
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
 	result, err := op.Execute(ctx, df)
 	s.Require().NoError(err)
@@ -236,7 +237,7 @@ func (s *SortOpTestSuite) TestSortNullsLastAscending() {
 	df := builder.Build()
 	defer df.Release()
 
-	op := NewSortOp(types.ScoreFieldName, false)
+	op := newSortOp(types.ScoreFieldName, false, types.IDFieldName)
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
 	result, err := op.Execute(ctx, df)
 	s.Require().NoError(err)
@@ -259,7 +260,7 @@ func (s *SortOpTestSuite) TestSortMultiChunkIndependent() {
 	)
 	defer df.Release()
 
-	op := NewSortOp(types.ScoreFieldName, true)
+	op := newSortOp(types.ScoreFieldName, true, types.IDFieldName)
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
 	result, err := op.Execute(ctx, df)
 	s.Require().NoError(err)
@@ -282,7 +283,7 @@ func (s *SortOpTestSuite) TestSortColumnNotFound() {
 	df := s.createSortTestDF([]int64{1}, []float64{0.5}, []int64{1})
 	defer df.Release()
 
-	op := NewSortOp("nonexistent", true)
+	op := newSortOp("nonexistent", true, types.IDFieldName)
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
 	_, err := op.Execute(ctx, df)
 	s.Error(err)
@@ -309,13 +310,48 @@ func (s *SortOpTestSuite) TestSortEmptyChunk() {
 	df := builder.Build()
 	defer df.Release()
 
-	op := NewSortOp(types.ScoreFieldName, true)
+	op := newSortOp(types.ScoreFieldName, true, types.IDFieldName)
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
 	result, err := op.Execute(ctx, df)
 	s.Require().NoError(err)
 	defer result.Release()
 
 	s.Equal(int64(0), result.NumRows())
+}
+
+func (s *SortOpTestSuite) TestSortInputsIncludeTieBreak() {
+	op := newSortOp(types.ScoreFieldName, true, types.IDFieldName)
+	s.Equal([]string{types.ScoreFieldName, types.IDFieldName}, op.Inputs())
+	s.Empty(op.Outputs())
+}
+
+func (s *SortOpTestSuite) TestSortFromReprUsesInputsAndDefaultsTieBreak() {
+	op, err := NewSortOpFromRepr(&OperatorRepr{
+		Inputs: []string{types.ScoreFieldName},
+		Params: map[string]*schemapb.FunctionParamValue{
+			"desc": {Value: &schemapb.FunctionParamValue_BoolValue{BoolValue: true}},
+		},
+	})
+	s.Require().NoError(err)
+	s.Equal([]string{types.ScoreFieldName, types.IDFieldName}, op.Inputs())
+	s.Equal("Sort($score DESC, $id ASC)", op.String())
+
+	op, err = NewSortOpFromRepr(&OperatorRepr{
+		Inputs: []string{types.ScoreFieldName, "tie"},
+	})
+	s.Require().NoError(err)
+	s.Equal([]string{types.ScoreFieldName, "tie"}, op.Inputs())
+	s.Equal("Sort($score ASC, tie ASC)", op.String())
+}
+
+func (s *SortOpTestSuite) TestSortFromReprRejectsInvalidInputs() {
+	_, err := NewSortOpFromRepr(&OperatorRepr{})
+	s.Require().Error(err)
+	s.Contains(err.Error(), "column is required")
+
+	_, err = NewSortOpFromRepr(&OperatorRepr{Inputs: []string{"score", "tie", "extra"}})
+	s.Require().Error(err)
+	s.Contains(err.Error(), "expects at most 2 input columns")
 }
 
 func (s *SortOpTestSuite) TestSortTieBreakByID() {
@@ -329,7 +365,7 @@ func (s *SortOpTestSuite) TestSortTieBreakByID() {
 	)
 	defer df.Release()
 
-	op := NewSortOpWithTieBreak(types.ScoreFieldName, true, types.IDFieldName)
+	op := newSortOp(types.ScoreFieldName, true, types.IDFieldName)
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
 	result, err := op.Execute(ctx, df)
 	s.Require().NoError(err)
@@ -354,7 +390,7 @@ func (s *SortOpTestSuite) TestSortTieBreakPartialTies() {
 	)
 	defer df.Release()
 
-	op := NewSortOpWithTieBreak(types.ScoreFieldName, true, types.IDFieldName)
+	op := newSortOp(types.ScoreFieldName, true, types.IDFieldName)
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
 	result, err := op.Execute(ctx, df)
 	s.Require().NoError(err)
@@ -367,4 +403,77 @@ func (s *SortOpTestSuite) TestSortTieBreakPartialTies() {
 	s.Equal(int64(30), ids.Value(2)) // score 0.5
 	s.Equal(int64(40), ids.Value(3)) // score 0.5
 	s.Equal(int64(50), ids.Value(4)) // score 0.1
+}
+
+func (s *SortOpTestSuite) TestSortFastPathFloat32DescWithInt64TieBreak() {
+	builder := NewDataFrameBuilder()
+	builder.SetChunkSizes([]int64{4})
+
+	idBuilder := array.NewInt64Builder(s.pool)
+	idBuilder.AppendValues([]int64{3, 2, 1, 4}, nil)
+	idChunk := idBuilder.NewArray()
+	idBuilder.Release()
+
+	scoreBuilder := array.NewFloat32Builder(s.pool)
+	scoreBuilder.AppendValues([]float32{0.5, 0.9, 0.5, 0.7}, nil)
+	scoreChunk := scoreBuilder.NewArray()
+	scoreBuilder.Release()
+
+	s.Require().NoError(builder.AddColumnFromChunks(types.IDFieldName, []arrow.Array{idChunk}))
+	s.Require().NoError(builder.AddColumnFromChunks(types.ScoreFieldName, []arrow.Array{scoreChunk}))
+	df := builder.Build()
+	defer df.Release()
+
+	op := newSortOp(types.ScoreFieldName, true, types.IDFieldName)
+	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
+	result, err := op.Execute(ctx, df)
+	s.Require().NoError(err)
+	defer result.Release()
+
+	ids := result.Column(types.IDFieldName).Chunk(0).(*array.Int64)
+	s.Equal(int64(2), ids.Value(0))
+	s.Equal(int64(4), ids.Value(1))
+	s.Equal(int64(1), ids.Value(2))
+	s.Equal(int64(3), ids.Value(3))
+}
+
+func (s *SortOpTestSuite) TestSortIgnoresNonComparableTieBreakAndStringHelpers() {
+	builder := NewDataFrameBuilder()
+	builder.SetChunkSizes([]int64{3})
+
+	idBuilder := array.NewInt64Builder(s.pool)
+	idBuilder.AppendValues([]int64{3, 2, 1}, nil)
+	idChunk := idBuilder.NewArray()
+	idBuilder.Release()
+
+	scoreBuilder := array.NewFloat64Builder(s.pool)
+	scoreBuilder.AppendValues([]float64{0.5, 0.5, 0.5}, nil)
+	scoreChunk := scoreBuilder.NewArray()
+	scoreBuilder.Release()
+
+	boolBuilder := array.NewBooleanBuilder(s.pool)
+	boolBuilder.AppendValues([]bool{true, false, true}, nil)
+	boolChunk := boolBuilder.NewArray()
+	boolBuilder.Release()
+
+	s.Require().NoError(builder.AddColumnFromChunks(types.IDFieldName, []arrow.Array{idChunk}))
+	s.Require().NoError(builder.AddColumnFromChunks(types.ScoreFieldName, []arrow.Array{scoreChunk}))
+	s.Require().NoError(builder.AddColumnFromChunks("bool_tie", []arrow.Array{boolChunk}))
+	df := builder.Build()
+	defer df.Release()
+
+	op := newSortOp(types.ScoreFieldName, true, "bool_tie")
+	s.Equal("Sort($score DESC, bool_tie ASC)", op.String())
+	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
+	result, err := op.Execute(ctx, df)
+	s.Require().NoError(err)
+	defer result.Release()
+
+	ids := result.Column(types.IDFieldName).Chunk(0).(*array.Int64)
+	s.Equal(int64(3), ids.Value(0))
+	s.Equal(int64(2), ids.Value(1))
+	s.Equal(int64(1), ids.Value(2))
+
+	emptyOp := &SortOp{}
+	s.Empty(emptyOp.Column())
 }

@@ -19,57 +19,8 @@
 #include <folly/Unit.h>
 #include <folly/futures/Future.h>
 
-#include "log/Log.h"
-
 namespace milvus {
 
-template <class T>
-class MilvusPromise : public folly::Promise<T> {
- public:
-    MilvusPromise() : folly::Promise<T>() {
-    }
-
-    explicit MilvusPromise(const std::string& context)
-        : folly::Promise<T>(), context_(context) {
-    }
-
-    MilvusPromise(folly::futures::detail::EmptyConstruct,
-                  const std::string& context) noexcept
-        : folly::Promise<T>(folly::Promise<T>::makeEmpty()), context_(context) {
-    }
-
-    ~MilvusPromise() {
-        if (!this->isFulfilled()) {
-            LOG_WARN(
-                "PROMISE: Unfulfilled promise is being deleted. Context: {}",
-                context_);
-        }
-    }
-
-    explicit MilvusPromise(MilvusPromise<T>&& other)
-        : folly::Promise<T>(std::move(other)),
-          context_(std::move(other.context_)) {
-    }
-
-    MilvusPromise&
-    operator=(MilvusPromise<T>&& other) noexcept {
-        folly::Promise<T>::operator=(std::move(other));
-        context_ = std::move(other.context_);
-        return *this;
-    }
-
-    static MilvusPromise
-    MakeEmpty(const std::string& context = "") noexcept {
-        return MilvusPromise<T>(folly::futures::detail::EmptyConstruct{},
-                                context);
-    }
-
- private:
-    /// Optional parameter to understand where this promise was created.
-    std::string context_;
-};
-
-using ContinuePromise = MilvusPromise<folly::Unit>;
 using ContinueFuture = folly::SemiFuture<folly::Unit>;
 
 }  // namespace milvus

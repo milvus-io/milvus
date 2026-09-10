@@ -18,13 +18,11 @@ package common
 
 import (
 	"encoding/binary"
-	"fmt"
 	"math/bits"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/twpayne/go-geom/encoding/wkb"
 	"github.com/twpayne/go-geom/encoding/wkbcommon"
@@ -32,6 +30,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // system field id:
@@ -61,6 +60,11 @@ const (
 
 	// NamespaceFieldName defines the name of the Namespace field
 	NamespaceFieldName = "$namespace_id"
+
+	NamespaceModeKey          = "namespace.mode"
+	NamespaceModePartitionKey = "partition_key"
+	NamespaceModePartition    = "partition"
+	ValidNamespaceModes       = NamespaceModePartitionKey + ", " + NamespaceModePartition
 
 	// MetaFieldName is the field name of dynamic schema
 	MetaFieldName = "$meta"
@@ -119,15 +123,39 @@ const (
 	// Scalar index engine version 4:
 	// - JSON path index supports STL_SORT / BITMAP / HYBRID (in addition to
 	//   the existing INVERTED / NGRAM)
+	// - Nested (struct sub-field) HYBRID indexes may select STL_SORT for
+	//   high-cardinality data (in addition to the existing INVERTED); an
+	//   older reader's ScalarIndexSort predates nested-index support and
+	//   cannot load a nested STL_SORT physical index
+	//   (see MinScalarIndexVersionForNestedHybridStlSort)
 	// - On-disk file format is unchanged from v3
+	//
+	// Scalar index engine version 5:
+	// - FMINDEX scalar index (exact LIKE prefix/infix/suffix on VARCHAR).
+	//   An older QueryNode does not recognize FMINDEX and would fail to load
+	//   such a segment, so creation is gated on the whole cluster reporting >= 5
+	//   (see MinScalarIndexVersionForFMINDEX).
 	MinimalScalarIndexEngineVersion = int32(0)
-	CurrentScalarIndexEngineVersion = int32(4)
-	MaximumScalarIndexEngineVersion = int32(4)
+	CurrentScalarIndexEngineVersion = int32(5)
+	MaximumScalarIndexEngineVersion = int32(5)
 
 	// MinScalarIndexVersionForJsonPathMultiType is the minimum scalar index
 	// engine version that supports STL_SORT / BITMAP / HYBRID on JSON fields.
 	// Below this version, only INVERTED (and NGRAM for VARCHAR) are allowed.
 	MinScalarIndexVersionForJsonPathMultiType = int32(4) //nolint:revive // intentionally "Json" not "JSON" to match JsonCastType / JsonPathKey naming
+
+	// MinScalarIndexVersionForNestedHybridStlSort is the minimum scalar index
+	// engine version at which nested (struct sub-field) HYBRID indexes may
+	// select STL_SORT for high-cardinality data instead of INVERTED. Below
+	// this version, nested HYBRID indexes always keep INVERTED at high
+	// cardinality so that an older reader (e.g. 2.6, whose ScalarIndexSort
+	// predates nested-index support) can still load the index.
+	MinScalarIndexVersionForNestedHybridStlSort = int32(4)
+
+	// MinScalarIndexVersionForFMINDEX is the minimum scalar index engine version
+	// that recognizes FMINDEX. Creating an FMINDEX while any node still reports a
+	// lower version would break rolling upgrade (old QueryNodes cannot load it).
+	MinScalarIndexVersionForFMINDEX = int32(5)
 )
 
 // ClampScalarIndexVersion clamps the given scalar index version to MaximumScalarIndexEngineVersion.
@@ -192,15 +220,17 @@ const (
 
 // Search, Index parameter keys
 const (
-	TopKKey         = "topk"
-	SearchParamKey  = "search_param"
-	SegmentNumKey   = "segment_num"
-	WithFilterKey   = "with_filter"
-	DataTypeKey     = "data_type"
-	ChannelNumKey   = "channel_num"
-	WithOptimizeKey = "with_optimize"
-	CollectionKey   = "collection"
-	RecallEvalKey   = "recall_eval"
+	TopKKey                           = "topk"
+	SearchParamKey                    = "search_param"
+	SegmentNumKey                     = "segment_num"
+	WithFilterKey                     = "with_filter"
+	DataTypeKey                       = "data_type"
+	ChannelNumKey                     = "channel_num"
+	WithOptimizeKey                   = "with_optimize"
+	CollectionKey                     = "collection"
+	RecallEvalKey                     = "recall_eval"
+	StrictGroupAcceptanceThresholdKey = "strict_group_acceptance_threshold"
+	StrictGroupProbeCandidatesKey     = "strict_group_probe_candidates"
 
 	GlobalRefineKey    = "global_refine"
 	SearchTopkRatioKey = "search_topk_ratio"
@@ -311,9 +341,16 @@ const (
 	FieldDescriptionKey = "field.description"
 )
 
+// local format type
+const (
+	LocalFormatRaw    = "raw"
+	LocalFormatVortex = "vortex"
+)
+
 // common properties
 const (
 	MmapEnabledKey             = "mmap.enabled"
+	LocalFormatKey             = "local_format"
 	LoadPriorityKey            = "load_priority"
 	PartitionKeyIsolationKey   = "partitionkey.isolation"
 	FieldSkipLoadKey           = "field.skipLoad"
@@ -325,11 +362,19 @@ const (
 	TimezoneKey             = "timezone"
 	AllowInsertAutoIDKey    = "allow_insert_auto_id"
 	DisableFuncRuntimeCheck = "disable_func_runtime_check"
+	MaxFieldIDKey           = "max_field_id"
 
 	// query mode
 	QueryModeKey       = "query_mode"
 	QueryModeLargeTopK = "large_topk"
 	ValidQueryModes    = QueryModeLargeTopK // comma-separated if more modes added later
+
+	// namespace sharding
+	NamespaceShardingEnabledKey = "namespace.sharding.enabled"
+
+	// row level security
+	RLSEnabledKey = "rls.enabled"
+	RLSForceKey   = "rls.force"
 
 	// warmup related
 	WarmupKey            = "warmup"
@@ -424,7 +469,7 @@ func IsCollectionWarmupKey(key string) bool {
 // ValidateWarmupPolicy validates that the warmup policy value is valid
 func ValidateWarmupPolicy(value string) error {
 	if value != WarmupDisable && value != WarmupSync && value != WarmupAsync {
-		return fmt.Errorf("invalid warmup policy: %s, must be '%s', '%s' or '%s'", value, WarmupDisable, WarmupSync, WarmupAsync)
+		return merr.WrapErrParameterInvalidMsg("invalid warmup policy: %s, must be '%s', '%s' or '%s'", value, WarmupDisable, WarmupSync, WarmupAsync)
 	}
 	return nil
 }
@@ -516,7 +561,7 @@ func IsPartitionKeyIsolationKvEnabled(kvs ...*commonpb.KeyValuePair) (bool, erro
 		if kv.Key == PartitionKeyIsolationKey {
 			val, err := strconv.ParseBool(strings.ToLower(kv.Value))
 			if err != nil {
-				return false, errors.Wrap(err, "failed to parse partition key isolation")
+				return false, merr.WrapErrParameterInvalidMsg("failed to parse partition key isolation: %v", err)
 			}
 			return val, nil
 		}
@@ -553,12 +598,12 @@ func ValidateQueryMode(kvs ...*commonpb.KeyValuePair) error {
 		if kv.Key == QueryModeKey {
 			mode := kv.Value
 			if mode != QueryModeLargeTopK {
-				return fmt.Errorf("invalid query_mode value %q, valid values: [%s]", kv.Value, ValidQueryModes)
+				return merr.WrapErrParameterInvalidMsg("invalid query_mode value %q, valid values: [%s]", kv.Value, ValidQueryModes)
 			}
 			return nil
 		}
 		if strings.EqualFold(kv.Key, QueryModeKey) {
-			return fmt.Errorf("invalid property key %q, did you mean %q?", kv.Key, QueryModeKey)
+			return merr.WrapErrParameterInvalidMsg("invalid property key %q, did you mean %q?", kv.Key, QueryModeKey)
 		}
 	}
 	return nil
@@ -569,12 +614,187 @@ func IsQueryModeLargeTopK(kvs ...*commonpb.KeyValuePair) bool {
 	return GetQueryMode(kvs...) == QueryModeLargeTopK
 }
 
+// IsNamespaceShardingEnabledKeyExists checks if namespace.sharding.enabled exists in the key-value pairs.
+func IsNamespaceShardingEnabledKeyExists(kvs ...*commonpb.KeyValuePair) bool {
+	for _, kv := range kvs {
+		if kv.Key == NamespaceShardingEnabledKey {
+			return true
+		}
+	}
+	return false
+}
+
+// IsNamespaceShardingEnabled extracts namespace.sharding.enabled from properties.
+// Returns false if not set.
+func IsNamespaceShardingEnabled(kvs ...*commonpb.KeyValuePair) (bool, error) {
+	for _, kv := range kvs {
+		if kv.Key == NamespaceShardingEnabledKey {
+			switch kv.Value {
+			case "true":
+				return true, nil
+			case "false":
+				return false, nil
+			default:
+				return false, merr.WrapErrParameterInvalidMsg("invalid namespace.sharding.enabled value %q, valid values: [true,false]", kv.Value)
+			}
+		}
+	}
+	return false, nil
+}
+
+// ValidateNamespaceShardingEnabled validates namespace.sharding.enabled. Returns nil if
+// the value is valid or if namespace.sharding.enabled is not set. Also rejects
+// case-variant keys that would be silently ignored.
+func ValidateNamespaceShardingEnabled(kvs ...*commonpb.KeyValuePair) error {
+	for _, kv := range kvs {
+		if kv.Key == NamespaceShardingEnabledKey {
+			_, err := IsNamespaceShardingEnabled(kv)
+			return err
+		}
+		if strings.EqualFold(kv.Key, NamespaceShardingEnabledKey) {
+			return merr.WrapErrParameterInvalidMsg("invalid property key %q, did you mean %q?", kv.Key, NamespaceShardingEnabledKey)
+		}
+	}
+	return nil
+}
+
+// ValidateNamespaceShardingEnabledNotAltered rejects attempts to update or
+// delete namespace.sharding.enabled after collection creation.
+func ValidateNamespaceShardingEnabledNotAltered(properties []*commonpb.KeyValuePair, deleteKeys []string) error {
+	for _, property := range properties {
+		if property.GetKey() == NamespaceShardingEnabledKey {
+			return merr.WrapErrParameterInvalidMsg("cannot alter %s after collection creation", NamespaceShardingEnabledKey)
+		}
+		if strings.EqualFold(property.GetKey(), NamespaceShardingEnabledKey) {
+			return merr.WrapErrParameterInvalidMsg("invalid property key %q, did you mean %q?", property.GetKey(), NamespaceShardingEnabledKey)
+		}
+	}
+	for _, key := range deleteKeys {
+		if key == NamespaceShardingEnabledKey {
+			return merr.WrapErrParameterInvalidMsg("cannot delete %s after collection creation", NamespaceShardingEnabledKey)
+		}
+		if strings.EqualFold(key, NamespaceShardingEnabledKey) {
+			return merr.WrapErrParameterInvalidMsg("invalid property key %q, did you mean %q?", key, NamespaceShardingEnabledKey)
+		}
+	}
+	return nil
+}
+
+// ValidateRLSEnabledNotAltered rejects attempts to update or delete
+// rls.enabled after collection creation.
+func ValidateRLSEnabledNotAltered(properties []*commonpb.KeyValuePair, deleteKeys []string) error {
+	for _, property := range properties {
+		if property.GetKey() == RLSEnabledKey {
+			return merr.WrapErrParameterInvalidMsg("cannot alter %s after collection creation", RLSEnabledKey)
+		}
+		if strings.EqualFold(property.GetKey(), RLSEnabledKey) {
+			return merr.WrapErrParameterInvalidMsg("invalid property key %q, did you mean %q?", property.GetKey(), RLSEnabledKey)
+		}
+	}
+	for _, key := range deleteKeys {
+		if key == RLSEnabledKey {
+			return merr.WrapErrParameterInvalidMsg("cannot delete %s after collection creation", RLSEnabledKey)
+		}
+		if strings.EqualFold(key, RLSEnabledKey) {
+			return merr.WrapErrParameterInvalidMsg("invalid property key %q, did you mean %q?", key, RLSEnabledKey)
+		}
+	}
+	return nil
+}
+
+// IsRLSEnabled extracts rls.enabled from collection properties.
+// Returns false if not set.
+func IsRLSEnabled(kvs ...*commonpb.KeyValuePair) (bool, error) {
+	value, ok := getProperty(kvs, RLSEnabledKey)
+	if !ok {
+		return false, nil
+	}
+	enabled, err := strconv.ParseBool(value)
+	if err != nil {
+		return false, merr.WrapErrParameterInvalidMsg("invalid %s value %q", RLSEnabledKey, value)
+	}
+	return enabled, nil
+}
+
+// IsRLSForce extracts rls.force from collection properties.
+// Returns false if not set.
+func IsRLSForce(kvs ...*commonpb.KeyValuePair) (bool, error) {
+	value, ok := getProperty(kvs, RLSForceKey)
+	if !ok {
+		return false, nil
+	}
+	force, err := strconv.ParseBool(value)
+	if err != nil {
+		return false, merr.WrapErrParameterInvalidMsg("invalid %s value %q", RLSForceKey, value)
+	}
+	return force, nil
+}
+
+func getProperty(kvs []*commonpb.KeyValuePair, key string) (string, bool) {
+	var value string
+	found := false
+	for _, kv := range kvs {
+		if kv.GetKey() == key {
+			value = kv.GetValue()
+			found = true
+		}
+	}
+	return value, found
+}
+
+// ValidateRLSProperties validates collection-level RLS properties.
+// Returns nil if the values are valid or if RLS properties are not set. Also
+// rejects case-variant keys that would be silently ignored.
+func ValidateRLSProperties(kvs ...*commonpb.KeyValuePair) error {
+	seen := make(map[string]struct{}, 2)
+	for _, kv := range kvs {
+		switch kv.GetKey() {
+		case RLSEnabledKey:
+			if _, ok := seen[RLSEnabledKey]; ok {
+				return merr.WrapErrParameterInvalidMsg("duplicated collection property %q", RLSEnabledKey)
+			}
+			seen[RLSEnabledKey] = struct{}{}
+			enabled, err := IsRLSEnabled(kv)
+			if err != nil {
+				return err
+			}
+			// The management plane lands before the data-plane enforcement in
+			// the stacked rollout. Keep the public switch fail-closed until the
+			// enforcement slice removes this temporary gate.
+			if enabled {
+				return merr.WrapErrParameterInvalidMsg("RLS runtime enforcement is not available yet; %s cannot be enabled", RLSEnabledKey)
+			}
+		case RLSForceKey:
+			if _, ok := seen[RLSForceKey]; ok {
+				return merr.WrapErrParameterInvalidMsg("duplicated collection property %q", RLSForceKey)
+			}
+			seen[RLSForceKey] = struct{}{}
+			force, err := IsRLSForce(kv)
+			if err != nil {
+				return err
+			}
+			// rls.force only affects runtime enforcement. Reject it together
+			// with rls.enabled while the enforcement slice is not available.
+			if force {
+				return merr.WrapErrParameterInvalidMsg("RLS runtime enforcement is not available yet; %s cannot be enabled", RLSForceKey)
+			}
+		default:
+			for _, key := range []string{RLSEnabledKey, RLSForceKey} {
+				if strings.EqualFold(kv.GetKey(), key) {
+					return merr.WrapErrParameterInvalidMsg("invalid property key %q, did you mean %q?", kv.GetKey(), key)
+				}
+			}
+		}
+	}
+	return nil
+}
+
 func IsDisableFuncRuntimeCheck(kvs ...*commonpb.KeyValuePair) (bool, error) {
 	for _, kv := range kvs {
 		if kv.Key == DisableFuncRuntimeCheck {
 			val, err := strconv.ParseBool(strings.ToLower(kv.Value))
 			if err != nil {
-				return false, errors.Wrap(err, "failed to parse disable_func_runtime_check param")
+				return false, merr.WrapErrParameterInvalidMsg("failed to parse disable_func_runtime_check param: %v", err)
 			}
 			return val, nil
 		}
@@ -589,9 +809,56 @@ func IsPartitionKeyIsolationPropEnabled(props map[string]string) (bool, error) {
 	}
 	iso, parseErr := strconv.ParseBool(val)
 	if parseErr != nil {
-		return false, errors.Wrap(parseErr, "failed to parse partition key isolation property")
+		return false, merr.WrapErrParameterInvalidMsg("failed to parse partition key isolation property: %v", parseErr)
 	}
 	return iso, nil
+}
+
+func GetNamespaceMode(kvs ...*commonpb.KeyValuePair) string {
+	for _, kv := range kvs {
+		if kv.GetKey() == NamespaceModeKey {
+			mode, ok := normalizeNamespaceMode(kv.GetValue())
+			if ok {
+				return mode
+			}
+			return kv.GetValue()
+		}
+	}
+	return NamespaceModePartitionKey
+}
+
+func IsNamespaceModePartitionKey(kvs ...*commonpb.KeyValuePair) bool {
+	return GetNamespaceMode(kvs...) == NamespaceModePartitionKey
+}
+
+func IsNamespaceModePartition(kvs ...*commonpb.KeyValuePair) bool {
+	return GetNamespaceMode(kvs...) == NamespaceModePartition
+}
+
+func ValidateNamespaceMode(kvs ...*commonpb.KeyValuePair) error {
+	for _, kv := range kvs {
+		if kv.GetKey() == NamespaceModeKey {
+			if _, ok := normalizeNamespaceMode(kv.GetValue()); !ok {
+				return merr.WrapErrParameterInvalidMsg("invalid namespace.mode value %q, valid values: [%s]", kv.GetValue(), ValidNamespaceModes)
+			}
+			return nil
+		}
+		if strings.EqualFold(kv.GetKey(), NamespaceModeKey) {
+			return merr.WrapErrParameterInvalidMsg("invalid property key %q, did you mean %q?", kv.GetKey(), NamespaceModeKey)
+		}
+	}
+	return nil
+}
+
+func normalizeNamespaceMode(mode string) (string, bool) {
+	switch mode {
+	case "", NamespaceModePartitionKey:
+		return NamespaceModePartitionKey, true
+	case NamespaceModePartition:
+		return NamespaceModePartition, true
+	default:
+		return "", false
+	}
 }
 
 const (
@@ -604,20 +871,20 @@ func DatabaseLevelReplicaNumber(kvs []*commonpb.KeyValuePair) (int64, error) {
 		if kv.Key == DatabaseReplicaNumber {
 			replicaNum, err := strconv.ParseInt(kv.Value, 10, 64)
 			if err != nil {
-				return 0, fmt.Errorf("invalid database property: [key=%s] [value=%s]", kv.Key, kv.Value)
+				return 0, merr.WrapErrParameterInvalidMsg("invalid database property: [key=%s] [value=%s]", kv.Key, kv.Value)
 			}
 
 			return replicaNum, nil
 		}
 	}
 
-	return 0, fmt.Errorf("database property not found: %s", DatabaseReplicaNumber)
+	return 0, merr.WrapErrParameterInvalidMsg("database property not found: %s", DatabaseReplicaNumber)
 }
 
 func DatabaseLevelResourceGroups(kvs []*commonpb.KeyValuePair) ([]string, error) {
 	for _, kv := range kvs {
 		if kv.Key == DatabaseResourceGroups {
-			invalidPropValue := fmt.Errorf("invalid database property: [key=%s] [value=%s]", kv.Key, kv.Value)
+			invalidPropValue := merr.WrapErrParameterInvalidMsg("invalid database property: [key=%s] [value=%s]", kv.Key, kv.Value)
 			if len(kv.Value) == 0 {
 				return nil, invalidPropValue
 			}
@@ -631,7 +898,7 @@ func DatabaseLevelResourceGroups(kvs []*commonpb.KeyValuePair) ([]string, error)
 		}
 	}
 
-	return nil, fmt.Errorf("database property not found: %s", DatabaseResourceGroups)
+	return nil, merr.WrapErrParameterInvalidMsg("database property not found: %s", DatabaseResourceGroups)
 }
 
 func CollectionLevelReplicaNumber(kvs []*commonpb.KeyValuePair) (int64, error) {
@@ -639,20 +906,20 @@ func CollectionLevelReplicaNumber(kvs []*commonpb.KeyValuePair) (int64, error) {
 		if kv.Key == CollectionReplicaNumber {
 			replicaNum, err := strconv.ParseInt(kv.Value, 10, 64)
 			if err != nil {
-				return 0, fmt.Errorf("invalid collection property: [key=%s] [value=%s]", kv.Key, kv.Value)
+				return 0, merr.WrapErrParameterInvalidMsg("invalid collection property: [key=%s] [value=%s]", kv.Key, kv.Value)
 			}
 
 			return replicaNum, nil
 		}
 	}
 
-	return 0, fmt.Errorf("collection property not found: %s", CollectionReplicaNumber)
+	return 0, merr.WrapErrParameterInvalidMsg("collection property not found: %s", CollectionReplicaNumber)
 }
 
 func CollectionLevelResourceGroups(kvs []*commonpb.KeyValuePair) ([]string, error) {
 	for _, kv := range kvs {
 		if kv.Key == CollectionResourceGroups {
-			invalidPropValue := fmt.Errorf("invalid collection property: [key=%s] [value=%s]", kv.Key, kv.Value)
+			invalidPropValue := merr.WrapErrParameterInvalidMsg("invalid collection property: [key=%s] [value=%s]", kv.Key, kv.Value)
 			if len(kv.Value) == 0 {
 				return nil, invalidPropValue
 			}
@@ -666,7 +933,7 @@ func CollectionLevelResourceGroups(kvs []*commonpb.KeyValuePair) ([]string, erro
 		}
 	}
 
-	return nil, fmt.Errorf("collection property not found: %s", CollectionReplicaNumber)
+	return nil, merr.WrapErrParameterInvalidMsg("collection property not found: %s", CollectionReplicaNumber)
 }
 
 // GetCollectionLoadFields returns the load field ids according to the type params.
@@ -730,7 +997,7 @@ func ValidateAutoIndexMmapConfig(autoIndexConfigEnable, isVectorField bool, inde
 
 	_, ok := indexParams[MmapEnabledKey]
 	if ok && isVectorField {
-		return errors.New("mmap index is not supported to config for the collection in auto index mode")
+		return merr.WrapErrParameterInvalidMsg("mmap index is not supported to config for the collection in auto index mode")
 	}
 	return nil
 }
@@ -744,6 +1011,24 @@ func AllocAutoID(allocFunc func(uint32) (int64, int64, error), rowNum uint32, cl
 	// right shift by 1 to preserve sign bit
 	reversed = reversed >> 1
 
+	return idStart | int64(reversed), idEnd | int64(reversed), nil
+}
+
+// AllocAutoIDN is the int64 counterpart of AllocAutoID. It allocates n contiguous
+// ids in a single logical range via allocFunc (which itself takes an int64 count,
+// e.g. datacoord's allocator.AllocN), so callers can request more than
+// math.MaxUint32 ids at once. The returned [begin, end) carries the clusterID bits
+// in its high bits, identical to AllocAutoID.
+func AllocAutoIDN(allocFunc func(int64) (int64, int64, error), n int64, clusterID uint64) (int64, int64, error) {
+	if n <= 0 {
+		return 0, 0, nil
+	}
+	idStart, idEnd, err := allocFunc(n)
+	if err != nil {
+		return 0, 0, err
+	}
+	// right shift by 1 to preserve sign bit
+	reversed := bits.Reverse64(clusterID) >> 1
 	return idStart | int64(reversed), idEnd | int64(reversed), nil
 }
 
@@ -824,9 +1109,9 @@ func CheckNamespace(schema *schemapb.CollectionSchema, namespace *string) error 
 	namespaceIsSet := namespace != nil
 	if enabled != namespaceIsSet {
 		if namespaceIsSet {
-			return fmt.Errorf("namespace data is set but namespace disabled")
+			return merr.WrapErrParameterInvalidMsg("namespace data is set but namespace disabled")
 		}
-		return fmt.Errorf("namespace data is not set but namespace enabled")
+		return merr.WrapErrParameterInvalidMsg("namespace data is not set but namespace enabled")
 	}
 	return nil
 }

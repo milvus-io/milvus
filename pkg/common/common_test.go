@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestIsSystemField(t *testing.T) {
@@ -151,6 +152,71 @@ func TestCommonPartitionKeyIsolation(t *testing.T) {
 	})
 }
 
+func TestNamespaceMode(t *testing.T) {
+	t.Run("default mode is partition key", func(t *testing.T) {
+		assert.Equal(t, NamespaceModePartitionKey, GetNamespaceMode())
+		assert.True(t, IsNamespaceModePartitionKey())
+		assert.False(t, IsNamespaceModePartition())
+		assert.NoError(t, ValidateNamespaceMode())
+	})
+
+	t.Run("accepts partition key mode", func(t *testing.T) {
+		kvs := []*commonpb.KeyValuePair{
+			{Key: NamespaceModeKey, Value: NamespaceModePartitionKey},
+		}
+		assert.Equal(t, NamespaceModePartitionKey, GetNamespaceMode(kvs...))
+		assert.True(t, IsNamespaceModePartitionKey(kvs...))
+		assert.False(t, IsNamespaceModePartition(kvs...))
+		assert.NoError(t, ValidateNamespaceMode(kvs...))
+	})
+
+	t.Run("accepts partition mode", func(t *testing.T) {
+		kvs := []*commonpb.KeyValuePair{
+			{Key: NamespaceModeKey, Value: NamespaceModePartition},
+		}
+		assert.Equal(t, NamespaceModePartition, GetNamespaceMode(kvs...))
+		assert.False(t, IsNamespaceModePartitionKey(kvs...))
+		assert.True(t, IsNamespaceModePartition(kvs...))
+		assert.NoError(t, ValidateNamespaceMode(kvs...))
+	})
+
+	t.Run("rejects invalid value", func(t *testing.T) {
+		for _, val := range []string{"invalid", "multitenant"} {
+			kvs := []*commonpb.KeyValuePair{
+				{Key: NamespaceModeKey, Value: val},
+			}
+			err := ValidateNamespaceMode(kvs...)
+			assert.Error(t, err)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.Contains(t, err.Error(), "valid values")
+		}
+	})
+
+	t.Run("rejects wrong case value", func(t *testing.T) {
+		for _, val := range []string{"PARTITION_KEY", "Partition"} {
+			kvs := []*commonpb.KeyValuePair{
+				{Key: NamespaceModeKey, Value: val},
+			}
+			err := ValidateNamespaceMode(kvs...)
+			assert.Error(t, err, "value %q should be rejected", val)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.Contains(t, err.Error(), "valid values")
+		}
+	})
+
+	t.Run("rejects wrong case key", func(t *testing.T) {
+		for _, key := range []string{"NAMESPACE.MODE", "Namespace.Mode", "namespace.Mode"} {
+			kvs := []*commonpb.KeyValuePair{
+				{Key: key, Value: NamespaceModePartition},
+			}
+			err := ValidateNamespaceMode(kvs...)
+			assert.Error(t, err, "key %q should be rejected", key)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.Contains(t, err.Error(), "did you mean")
+		}
+	})
+}
+
 func TestShouldFieldBeLoaded(t *testing.T) {
 	type testCase struct {
 		tag          string
@@ -216,6 +282,37 @@ func TestAllocAutoID(t *testing.T) {
 	assert.NoError(t, err)
 	assert.EqualValues(t, 0b0100, start>>60)
 	assert.EqualValues(t, 0b0100, end>>60)
+}
+
+func TestAllocAutoIDN(t *testing.T) {
+	// clusterID bits are applied to the high bits, same as AllocAutoID.
+	start, end, err := AllocAutoIDN(func(n int64) (int64, int64, error) {
+		return 100, 100 + n, nil
+	}, 10, 1)
+	assert.NoError(t, err)
+	assert.EqualValues(t, 0b0100, start>>60)
+	assert.EqualValues(t, 0b0100, end>>60)
+
+	// A count exceeding math.MaxUint32 is passed through in one allocation
+	// (the uint32 limitation of AllocAutoID does not apply here).
+	bigN := int64(1)<<32 + 1000
+	var got int64
+	s, e, err := AllocAutoIDN(func(n int64) (int64, int64, error) {
+		got = n
+		return 0, n, nil
+	}, bigN, 0) // clusterID 0 => no high bits set
+	assert.NoError(t, err)
+	assert.Equal(t, bigN, got)
+	assert.Equal(t, bigN, e-s)
+
+	// Non-positive count is a no-op and never calls allocFunc.
+	s, e, err = AllocAutoIDN(func(n int64) (int64, int64, error) {
+		t.Fatal("allocFunc must not be called for n<=0")
+		return 0, 0, nil
+	}, 0, 1)
+	assert.NoError(t, err)
+	assert.Zero(t, s)
+	assert.Zero(t, e)
 }
 
 func TestFunctionProperty(t *testing.T) {
@@ -470,6 +567,255 @@ func TestQueryMode(t *testing.T) {
 			err := ValidateQueryMode(kvs...)
 			assert.Error(t, err, "key %q should be rejected", key)
 			assert.Contains(t, err.Error(), "did you mean")
+		}
+	})
+}
+
+func TestNamespaceShardingEnabled(t *testing.T) {
+	t.Run("IsNamespaceShardingEnabled returns value when set", func(t *testing.T) {
+		kvs := []*commonpb.KeyValuePair{
+			{Key: NamespaceShardingEnabledKey, Value: "true"},
+		}
+		enabled, err := IsNamespaceShardingEnabled(kvs...)
+		assert.NoError(t, err)
+		assert.True(t, enabled)
+	})
+
+	t.Run("IsNamespaceShardingEnabled defaults to false", func(t *testing.T) {
+		kvs := []*commonpb.KeyValuePair{
+			{Key: "other.key", Value: "true"},
+		}
+		enabled, err := IsNamespaceShardingEnabled(kvs...)
+		assert.NoError(t, err)
+		assert.False(t, enabled)
+		enabled, err = IsNamespaceShardingEnabled()
+		assert.NoError(t, err)
+		assert.False(t, enabled)
+	})
+
+	t.Run("IsNamespaceShardingEnabledKeyExists returns true", func(t *testing.T) {
+		kvs := []*commonpb.KeyValuePair{
+			{Key: NamespaceShardingEnabledKey, Value: "false"},
+		}
+		assert.True(t, IsNamespaceShardingEnabledKeyExists(kvs...))
+	})
+
+	t.Run("IsNamespaceShardingEnabledKeyExists returns false when not set", func(t *testing.T) {
+		assert.False(t, IsNamespaceShardingEnabledKeyExists())
+	})
+
+	t.Run("ValidateNamespaceShardingEnabled accepts true and false", func(t *testing.T) {
+		for _, val := range []string{"true", "false"} {
+			kvs := []*commonpb.KeyValuePair{
+				{Key: NamespaceShardingEnabledKey, Value: val},
+			}
+			assert.NoError(t, ValidateNamespaceShardingEnabled(kvs...), "value %q should be accepted", val)
+		}
+	})
+
+	t.Run("ValidateNamespaceShardingEnabled accepts missing key", func(t *testing.T) {
+		assert.NoError(t, ValidateNamespaceShardingEnabled())
+	})
+
+	t.Run("ValidateNamespaceShardingEnabled rejects invalid values", func(t *testing.T) {
+		for _, val := range []string{"invalid", "True", "FALSE", "1", "0"} {
+			kvs := []*commonpb.KeyValuePair{
+				{Key: NamespaceShardingEnabledKey, Value: val},
+			}
+			err := ValidateNamespaceShardingEnabled(kvs...)
+			assert.Error(t, err, "value %q should be rejected", val)
+			assert.Contains(t, err.Error(), "valid values")
+			assert.Contains(t, err.Error(), "namespace.sharding.enabled")
+		}
+	})
+
+	t.Run("ValidateNamespaceShardingEnabled rejects wrong case key", func(t *testing.T) {
+		for _, key := range []string{"NAMESPACE.SHARDING.ENABLED", "Namespace.Sharding.Enabled", "Namespace.sharding.enabled"} {
+			kvs := []*commonpb.KeyValuePair{
+				{Key: key, Value: "true"},
+			}
+			err := ValidateNamespaceShardingEnabled(kvs...)
+			if assert.Error(t, err, "key %q should be rejected", key) {
+				assert.Contains(t, err.Error(), "did you mean")
+			}
+		}
+	})
+
+	t.Run("ValidateNamespaceShardingEnabledNotAltered rejects update", func(t *testing.T) {
+		err := ValidateNamespaceShardingEnabledNotAltered(
+			[]*commonpb.KeyValuePair{{Key: NamespaceShardingEnabledKey, Value: "true"}},
+			nil,
+		)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "cannot alter namespace.sharding.enabled")
+	})
+
+	t.Run("ValidateNamespaceShardingEnabledNotAltered rejects delete", func(t *testing.T) {
+		err := ValidateNamespaceShardingEnabledNotAltered(nil, []string{NamespaceShardingEnabledKey})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "cannot delete namespace.sharding.enabled")
+	})
+
+	t.Run("ValidateNamespaceShardingEnabledNotAltered rejects wrong case update", func(t *testing.T) {
+		err := ValidateNamespaceShardingEnabledNotAltered(
+			[]*commonpb.KeyValuePair{{Key: "Namespace.Sharding.Enabled", Value: "true"}},
+			nil,
+		)
+		if assert.Error(t, err) {
+			assert.Contains(t, err.Error(), "did you mean")
+		}
+	})
+
+	t.Run("ValidateNamespaceShardingEnabledNotAltered rejects wrong case delete", func(t *testing.T) {
+		err := ValidateNamespaceShardingEnabledNotAltered(nil, []string{"Namespace.Sharding.Enabled"})
+		if assert.Error(t, err) {
+			assert.Contains(t, err.Error(), "did you mean")
+		}
+	})
+
+	t.Run("ValidateNamespaceShardingEnabledNotAltered accepts unrelated changes", func(t *testing.T) {
+		err := ValidateNamespaceShardingEnabledNotAltered(
+			[]*commonpb.KeyValuePair{{Key: "other.key", Value: "true"}},
+			[]string{"other.deleted.key"},
+		)
+		assert.NoError(t, err)
+	})
+}
+
+func TestRLSEnabled(t *testing.T) {
+	t.Run("rls.enabled is immutable after creation", func(t *testing.T) {
+		for _, value := range []string{"true", "false", "True", "0"} {
+			err := ValidateRLSEnabledNotAltered(
+				[]*commonpb.KeyValuePair{{Key: RLSEnabledKey, Value: value}},
+				nil,
+			)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		}
+		assert.ErrorIs(t, ValidateRLSEnabledNotAltered(nil, []string{RLSEnabledKey}), merr.ErrParameterInvalid)
+	})
+
+	t.Run("rls.enabled immutable validation rejects wrong case", func(t *testing.T) {
+		for _, key := range []string{"RLS.ENABLED", "Rls.Enabled"} {
+			err := ValidateRLSEnabledNotAltered(
+				[]*commonpb.KeyValuePair{{Key: key, Value: "true"}},
+				nil,
+			)
+			assert.ErrorContains(t, err, "did you mean")
+			assert.ErrorContains(t, ValidateRLSEnabledNotAltered(nil, []string{key}), "did you mean")
+		}
+	})
+
+	t.Run("rls.enabled immutable validation accepts unrelated changes", func(t *testing.T) {
+		assert.NoError(t, ValidateRLSEnabledNotAltered(
+			[]*commonpb.KeyValuePair{{Key: RLSForceKey, Value: "true"}},
+			[]string{"other.key"},
+		))
+	})
+
+	t.Run("returns value when set", func(t *testing.T) {
+		enabled, err := IsRLSEnabled(&commonpb.KeyValuePair{Key: RLSEnabledKey, Value: "true"})
+		assert.NoError(t, err)
+		assert.True(t, enabled)
+	})
+
+	t.Run("uses the last duplicate value", func(t *testing.T) {
+		enabled, err := IsRLSEnabled(
+			&commonpb.KeyValuePair{Key: RLSEnabledKey, Value: "false"},
+			&commonpb.KeyValuePair{Key: RLSEnabledKey, Value: "true"},
+		)
+		assert.NoError(t, err)
+		assert.True(t, enabled)
+	})
+
+	t.Run("defaults to false", func(t *testing.T) {
+		enabled, err := IsRLSEnabled(&commonpb.KeyValuePair{Key: "other.key", Value: "true"})
+		assert.NoError(t, err)
+		assert.False(t, enabled)
+
+		enabled, err = IsRLSEnabled()
+		assert.NoError(t, err)
+		assert.False(t, enabled)
+	})
+
+	t.Run("force returns value and defaults to false", func(t *testing.T) {
+		force, err := IsRLSForce(&commonpb.KeyValuePair{Key: RLSForceKey, Value: "true"})
+		assert.NoError(t, err)
+		assert.True(t, force)
+
+		force, err = IsRLSForce()
+		assert.NoError(t, err)
+		assert.False(t, force)
+	})
+
+	t.Run("rejects enable until runtime enforcement lands", func(t *testing.T) {
+		for _, value := range []string{"1", "t", "T", "TRUE", "true", "True"} {
+			err := ValidateRLSProperties(&commonpb.KeyValuePair{Key: RLSEnabledKey, Value: value})
+			assert.ErrorContains(t, err, "runtime enforcement is not available")
+		}
+	})
+
+	t.Run("accepts standard disabled values", func(t *testing.T) {
+		for _, value := range []string{"0", "f", "F", "FALSE", "false", "False"} {
+			err := ValidateRLSProperties(&commonpb.KeyValuePair{Key: RLSEnabledKey, Value: value})
+			assert.NoError(t, err, "value %q should be accepted", value)
+		}
+	})
+
+	t.Run("rejects force until runtime enforcement lands", func(t *testing.T) {
+		for _, value := range []string{"1", "t", "T", "TRUE", "true", "True"} {
+			err := ValidateRLSProperties(&commonpb.KeyValuePair{Key: RLSForceKey, Value: value})
+			assert.ErrorContains(t, err, "runtime enforcement is not available")
+		}
+	})
+
+	t.Run("accepts standard force-disabled values", func(t *testing.T) {
+		for _, value := range []string{"0", "f", "F", "FALSE", "false", "False"} {
+			err := ValidateRLSProperties(&commonpb.KeyValuePair{Key: RLSForceKey, Value: value})
+			assert.NoError(t, err, "value %q should be accepted", value)
+		}
+	})
+
+	t.Run("accepts missing key", func(t *testing.T) {
+		assert.NoError(t, ValidateRLSProperties())
+	})
+
+	t.Run("rejects invalid values", func(t *testing.T) {
+		for _, key := range []string{RLSEnabledKey, RLSForceKey} {
+			for _, value := range []string{"", "invalid", "yes", "2"} {
+				err := ValidateRLSProperties(&commonpb.KeyValuePair{Key: key, Value: value})
+				if assert.Error(t, err, "value %q should be rejected", value) {
+					assert.Contains(t, err.Error(), "invalid")
+					assert.Contains(t, err.Error(), key)
+				}
+			}
+		}
+	})
+
+	t.Run("rejects duplicate RLS properties", func(t *testing.T) {
+		for _, key := range []string{RLSEnabledKey, RLSForceKey} {
+			err := ValidateRLSProperties(
+				&commonpb.KeyValuePair{Key: key, Value: "false"},
+				&commonpb.KeyValuePair{Key: key, Value: "false"},
+			)
+			if assert.ErrorIs(t, err, merr.ErrParameterInvalid) {
+				assert.Contains(t, err.Error(), "duplicated collection property")
+				assert.Contains(t, err.Error(), key)
+			}
+		}
+	})
+
+	t.Run("rejects wrong case key", func(t *testing.T) {
+		for expected, variants := range map[string][]string{
+			RLSEnabledKey: {"RLS.ENABLED", "Rls.Enabled", "RLS.enabled"},
+			RLSForceKey:   {"RLS.FORCE", "Rls.Force", "RLS.force"},
+		} {
+			for _, key := range variants {
+				err := ValidateRLSProperties(&commonpb.KeyValuePair{Key: key, Value: "true"})
+				if assert.Error(t, err, "key %q should be rejected", key) {
+					assert.Contains(t, err.Error(), "did you mean")
+					assert.Contains(t, err.Error(), expected)
+				}
+			}
 		}
 	})
 }

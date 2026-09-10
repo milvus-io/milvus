@@ -35,6 +35,7 @@
 #include "common/Schema.h"
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
+#include "exec/expression/ExprBatchTestUtils.h"
 #include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
@@ -78,9 +79,16 @@ struct FileSliceSizeGuard {
     int64_t old_slice_size_;
 };
 
-int64_t
+struct LoadedJsonOffsetStats {
+    int64_t count;
+    int64_t exists_count;
+    int64_t null_count;
+};
+
+LoadedJsonOffsetStats
 BuildAndLoadJsonInvertedIndexForOffsetRegression(
-    const std::vector<std::string>& json_raw_data) {
+    const std::vector<std::string>& json_raw_data,
+    const std::vector<uint8_t>* valid_data = nullptr) {
     constexpr int64_t collection_id = 1;
     constexpr int64_t partition_id = 2;
     constexpr int64_t segment_id = 3;
@@ -90,6 +98,7 @@ BuildAndLoadJsonInvertedIndexForOffsetRegression(
 
     auto field_meta = milvus::segcore::gen_field_meta(
         collection_id, partition_id, segment_id, field_id, DataType::JSON);
+    field_meta.field_schema.set_nullable(valid_data != nullptr);
     auto index_meta =
         gen_index_meta(segment_id, field_id, index_build_id, index_version);
 
@@ -119,9 +128,30 @@ BuildAndLoadJsonInvertedIndexForOffsetRegression(
         jsons.push_back(milvus::Json(simdjson::padded_string(json)));
     }
 
-    auto json_field =
-        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, false);
-    json_field->add_json_data(jsons);
+    auto json_field = std::make_shared<FieldData<milvus::Json>>(
+        DataType::JSON, valid_data != nullptr);
+    if (valid_data == nullptr) {
+        json_field->add_json_data(jsons);
+    } else {
+        arrow::BinaryBuilder builder;
+        for (size_t i = 0; i < jsons.size(); ++i) {
+            if (((*valid_data)[i / 8] & (1U << (i % 8))) == 0) {
+                AssertInfo(builder.AppendNull().ok(),
+                           "failed to append null JSON");
+                continue;
+            }
+            auto data = jsons[i].data();
+            AssertInfo(
+                builder.Append(data.data(), static_cast<int32_t>(data.size()))
+                    .ok(),
+                "failed to append JSON");
+        }
+
+        std::shared_ptr<arrow::Array> json_array;
+        AssertInfo(builder.Finish(&json_array).ok(),
+                   "failed to finish JSON array");
+        json_field->FillFieldData(json_array);
+    }
     json_index->BuildWithFieldData({json_field});
 
     auto stats = json_index->Upload();
@@ -139,12 +169,17 @@ BuildAndLoadJsonInvertedIndexForOffsetRegression(
         milvus::proto::common::LoadPriority::HIGH;
 
     loaded_json_index->Load(milvus::tracer::TraceContext{}, load_config);
-    return loaded_json_index->Count();
+    auto exists = loaded_json_index->Exists();
+    auto nulls = loaded_json_index->IsNull();
+    return {loaded_json_index->Count(),
+            static_cast<int64_t>(exists.count()),
+            static_cast<int64_t>(nulls.count())};
 }
 
 }  // namespace
 
 TEST(JsonIndexTest, TestJsonContains) {
+    milvus::test::ExprBatchSizeGuard batch_size_guard(8);
     std::vector<std::string> json_raw_data = {
         R"(1)",
         R"("a simple string")",
@@ -171,6 +206,9 @@ TEST(JsonIndexTest, TestJsonContains) {
         R"({"a": []})",
         R"({"a": [0, 2, 3]})",
         R"({"a": [{"b": 1}, 2.0, 3.0, "4", true, [1, 3.0], null]})",
+        R"({"a": [9007199254740992]})",
+        R"({"a": [9007199254740993]})",
+        R"({"a": [9007199254740994]})",
     };
 
     auto json_path = "/a";
@@ -261,6 +299,43 @@ TEST(JsonIndexTest, TestJsonContains) {
             EXPECT_TRUE(result[id]);
         }
     }
+
+    proto::plan::GenericValue int_value;
+    int_value.set_int64_val(1);
+    proto::plan::GenericValue string_value;
+    string_value.set_string_val("4");
+    auto mixed_expr = std::make_shared<expr::JsonContainsExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"a"}, true),
+        proto::plan::JSONContainsExpr_JSONOp_ContainsAny,
+        false,
+        std::vector<proto::plan::GenericValue>{int_value, string_value});
+    auto mixed_plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, mixed_expr);
+    auto mixed_result = query::ExecuteQueryExpr(
+        mixed_plan, segment.get(), json_raw_data.size(), MAX_TIMESTAMP);
+    EXPECT_EQ(mixed_result.count(), 3);
+    EXPECT_TRUE(mixed_result[17]);
+    EXPECT_TRUE(mixed_result[18]);
+    EXPECT_TRUE(mixed_result[24]);
+
+    proto::plan::GenericValue large_int_value;
+    large_int_value.set_int64_val(9007199254740993LL);
+    auto large_int_expr = std::make_shared<expr::JsonContainsExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"a"}, true),
+        proto::plan::JSONContainsExpr_JSONOp_Contains,
+        true,
+        std::vector<proto::plan::GenericValue>{large_int_value});
+    EXPECT_FALSE(milvus::test::CanExprExecuteAllAtOnce(
+        large_int_expr, segment.get(), json_raw_data.size()));
+    EXPECT_EQ(milvus::test::EvalExprBatchSizes(
+                  large_int_expr, segment.get(), json_raw_data.size()),
+              (std::vector<int64_t>{8, 8, 8, 4}));
+    auto large_int_plan = std::make_shared<plan::FilterBitsNode>(
+        DEFAULT_PLANNODE_ID, large_int_expr);
+    auto large_int_result = query::ExecuteQueryExpr(
+        large_int_plan, segment.get(), json_raw_data.size(), MAX_TIMESTAMP);
+    EXPECT_EQ(large_int_result.count(), 1);
+    EXPECT_TRUE(large_int_result[26]);
 }
 
 TEST(JsonIndexTest, TestJsonCast) {
@@ -383,7 +458,8 @@ TEST(JsonIndexTest, TestSlicedOffsetFilesLoadIndependently) {
     // Build with enough rows to produce large null_offset and
     // non_exist_offset arrays (each > FILE_SLICE_SIZE = 64 bytes).
     // - invalid row   -> null_offset + non_exist_offset (8 bytes per entry)
-    // - {"b": 1}      -> non_exist_offset only (key "a" doesn't exist)
+    // - {"b": 1}      -> null_offset + non_exist_offset (key "a" doesn't
+    //                    exist, so the typed comparison value is invalid)
     // - {"a": 1.0}    -> valid data (neither offset)
     // 20 invalid + 20 missing-path rows make both files slice reliably.
     constexpr int kInvalidRows = 20;
@@ -485,7 +561,8 @@ TEST(JsonIndexTest, TestSlicedOffsetFilesLoadIndependently) {
         auto result = CompactIndexDatasByKey(
             INDEX_NULL_OFFSET_FILE_NAME, std::move(slice_meta), partial);
         EXPECT_GT(result.codecs_.size(), 0);
-        EXPECT_EQ(result.size_, kInvalidRows * sizeof(size_t));
+        EXPECT_EQ(result.size_,
+                  (kInvalidRows + kMissingPathRows) * sizeof(size_t));
     }
 
     // --- Verify the fix: CompactIndexDatasByKey with non_exist_offset ---
@@ -511,8 +588,10 @@ TEST(JsonIndexTest, TestLoadWithOnlySlicedNonExistOffsets) {
         json_raw_data.emplace_back(R"({"a": 1.0})");
     }
 
-    EXPECT_EQ(BuildAndLoadJsonInvertedIndexForOffsetRegression(json_raw_data),
-              json_raw_data.size());
+    auto stats =
+        BuildAndLoadJsonInvertedIndexForOffsetRegression(json_raw_data);
+    EXPECT_EQ(stats.count, json_raw_data.size());
+    EXPECT_EQ(stats.exists_count, 10);
 }
 
 TEST(JsonIndexTest, TestLoadWithOnlySlicedNullOffsets) {
@@ -520,12 +599,19 @@ TEST(JsonIndexTest, TestLoadWithOnlySlicedNullOffsets) {
 
     std::vector<std::string> json_raw_data;
     for (int i = 0; i < 20; ++i) {
-        json_raw_data.emplace_back(R"({"a": null})");
+        json_raw_data.emplace_back(R"({"a": 1.0})");
     }
     for (int i = 0; i < 10; ++i) {
         json_raw_data.emplace_back(R"({"a": 1.0})");
     }
+    std::vector<uint8_t> valid_data((json_raw_data.size() + 7) / 8, 0xFF);
+    for (size_t i = 0; i < 20; ++i) {
+        valid_data[i / 8] &= ~(1U << (i % 8));
+    }
 
-    EXPECT_EQ(BuildAndLoadJsonInvertedIndexForOffsetRegression(json_raw_data),
-              json_raw_data.size());
+    auto stats = BuildAndLoadJsonInvertedIndexForOffsetRegression(json_raw_data,
+                                                                  &valid_data);
+    EXPECT_EQ(stats.count, json_raw_data.size());
+    EXPECT_EQ(stats.exists_count, 10);
+    EXPECT_EQ(stats.null_count, 20);
 }

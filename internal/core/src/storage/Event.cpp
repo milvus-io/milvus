@@ -39,6 +39,8 @@
 #include "nlohmann/json.hpp"
 #include "nlohmann/json_fwd.hpp"
 #include "storage/Event.h"
+
+#include "common/FastMem.h"
 #include "storage/PayloadReader.h"
 #include "storage/PayloadStream.h"
 #include "storage/PayloadWriter.h"
@@ -105,13 +107,17 @@ EventHeader::Serialize() {
                        sizeof(event_length_) + sizeof(next_position_);
     std::vector<uint8_t> res(header_size);
     int offset = 0;
-    memcpy(res.data() + offset, &timestamp_, sizeof(timestamp_));
+    milvus::fastmem::FastMemcpy(
+        res.data() + offset, &timestamp_, sizeof(timestamp_));
     offset += sizeof(timestamp_);
-    memcpy(res.data() + offset, &event_type_, sizeof(event_type_));
+    milvus::fastmem::FastMemcpy(
+        res.data() + offset, &event_type_, sizeof(event_type_));
     offset += sizeof(event_type_);
-    memcpy(res.data() + offset, &event_length_, sizeof(event_length_));
+    milvus::fastmem::FastMemcpy(
+        res.data() + offset, &event_length_, sizeof(event_length_));
     offset += sizeof(event_length_);
-    memcpy(res.data() + offset, &next_position_, sizeof(next_position_));
+    milvus::fastmem::FastMemcpy(
+        res.data() + offset, &next_position_, sizeof(next_position_));
 
     return res;
 }
@@ -141,19 +147,26 @@ DescriptorEventDataFixPart::Serialize() {
                          sizeof(data_type);
     std::vector<uint8_t> res(fix_part_size);
     int offset = 0;
-    memcpy(res.data() + offset, &collection_id, sizeof(collection_id));
+    milvus::fastmem::FastMemcpy(
+        res.data() + offset, &collection_id, sizeof(collection_id));
     offset += sizeof(collection_id);
-    memcpy(res.data() + offset, &partition_id, sizeof(partition_id));
+    milvus::fastmem::FastMemcpy(
+        res.data() + offset, &partition_id, sizeof(partition_id));
     offset += sizeof(partition_id);
-    memcpy(res.data() + offset, &segment_id, sizeof(segment_id));
+    milvus::fastmem::FastMemcpy(
+        res.data() + offset, &segment_id, sizeof(segment_id));
     offset += sizeof(segment_id);
-    memcpy(res.data() + offset, &field_id, sizeof(field_id));
+    milvus::fastmem::FastMemcpy(
+        res.data() + offset, &field_id, sizeof(field_id));
     offset += sizeof(field_id);
-    memcpy(res.data() + offset, &start_timestamp, sizeof(start_timestamp));
+    milvus::fastmem::FastMemcpy(
+        res.data() + offset, &start_timestamp, sizeof(start_timestamp));
     offset += sizeof(start_timestamp);
-    memcpy(res.data() + offset, &end_timestamp, sizeof(end_timestamp));
+    milvus::fastmem::FastMemcpy(
+        res.data() + offset, &end_timestamp, sizeof(end_timestamp));
     offset += sizeof(end_timestamp);
-    memcpy(res.data() + offset, &data_type, sizeof(data_type));
+    milvus::fastmem::FastMemcpy(
+        res.data() + offset, &data_type, sizeof(data_type));
 
     return res;
 }
@@ -218,24 +231,29 @@ DescriptorEventData::Serialize() {
                sizeof(extra_length) + extra_length;
     std::vector<uint8_t> res(len);
     int offset = 0;
-    memcpy(res.data() + offset, fix_part_data.data(), fix_part_data.size());
+    milvus::fastmem::FastMemcpy(
+        res.data() + offset, fix_part_data.data(), fix_part_data.size());
     offset += fix_part_data.size();
-    memcpy(res.data() + offset,
-           post_header_lengths.data(),
-           post_header_lengths.size());
+    milvus::fastmem::FastMemcpy(res.data() + offset,
+                                post_header_lengths.data(),
+                                post_header_lengths.size());
     offset += post_header_lengths.size();
-    memcpy(res.data() + offset, &extra_length, sizeof(extra_length));
+    milvus::fastmem::FastMemcpy(
+        res.data() + offset, &extra_length, sizeof(extra_length));
     offset += sizeof(extra_length);
-    memcpy(res.data() + offset, extra_bytes.data(), extra_bytes.size());
+    milvus::fastmem::FastMemcpy(
+        res.data() + offset, extra_bytes.data(), extra_bytes.size());
 
     return res;
 }
 
-BaseEventData::BaseEventData(BinlogReaderPtr reader,
-                             int event_length,
-                             DataType data_type,
-                             bool nullable,
-                             bool is_field_data) {
+BaseEventData::BaseEventData(
+    BinlogReaderPtr reader,
+    int event_length,
+    DataType data_type,
+    bool nullable,
+    bool is_field_data,
+    std::optional<proto::schema::TypeSchema> array_type) {
     auto ast = reader->ReadSingleValue<Timestamp>(start_timestamp);
     AssertInfo(ast.ok(), "read start timestamp failed");
     ast = reader->ReadSingleValue<Timestamp>(end_timestamp);
@@ -245,8 +263,12 @@ BaseEventData::BaseEventData(BinlogReaderPtr reader,
         event_length - sizeof(start_timestamp) - sizeof(end_timestamp);
     auto res = reader->Read(payload_length);
     AssertInfo(res.first.ok(), "read payload failed");
-    payload_reader = std::make_shared<PayloadReader>(
-        res.second.get(), payload_length, data_type, nullable, is_field_data);
+    payload_reader = std::make_shared<PayloadReader>(res.second.get(),
+                                                     payload_length,
+                                                     data_type,
+                                                     nullable,
+                                                     is_field_data,
+                                                     std::move(array_type));
 }
 
 std::vector<uint8_t>
@@ -259,11 +281,14 @@ BaseEventData::Serialize() {
             sizeof(start_timestamp) + sizeof(end_timestamp) + payload_size;
         std::vector<uint8_t> res(len);
         int offset = 0;
-        memcpy(res.data() + offset, &start_timestamp, sizeof(start_timestamp));
+        milvus::fastmem::FastMemcpy(
+            res.data() + offset, &start_timestamp, sizeof(start_timestamp));
         offset += sizeof(start_timestamp);
-        memcpy(res.data() + offset, &end_timestamp, sizeof(end_timestamp));
+        milvus::fastmem::FastMemcpy(
+            res.data() + offset, &end_timestamp, sizeof(end_timestamp));
         offset += sizeof(end_timestamp);
-        memcpy(res.data() + offset, payload_data, payload_size);
+        milvus::fastmem::FastMemcpy(
+            res.data() + offset, payload_data, payload_size);
         return res;
     } else {
         // for insert bin log, use field_data to serialize
@@ -277,8 +302,11 @@ BaseEventData::Serialize() {
             AssertInfo(vector_array_field != nullptr,
                        "Failed to cast to FieldData<VectorArray>");
             auto element_type = vector_array_field->get_element_type();
-            payload_writer = std::make_unique<PayloadWriter>(
-                data_type, field_data->get_dim(), element_type);
+            payload_writer =
+                std::make_unique<PayloadWriter>(data_type,
+                                                field_data->get_dim(),
+                                                element_type,
+                                                field_data->IsNullable());
         } else if (IsVectorDataType(data_type) &&
                    !IsSparseFloatVectorDataType(data_type)) {
             payload_writer = std::make_unique<PayloadWriter>(
@@ -301,12 +329,21 @@ BaseEventData::Serialize() {
                 break;
             }
             case DataType::ARRAY: {
+                auto nested_array_field =
+                    std::dynamic_pointer_cast<FieldData<ArrayValue>>(
+                        field_data);
                 for (size_t offset = 0; offset < field_data->get_num_rows();
                      ++offset) {
-                    auto array =
-                        static_cast<const Array*>(field_data->RawValue(offset));
-                    auto array_string =
-                        array->output_data().SerializeAsString();
+                    std::string array_string;
+                    if (nested_array_field != nullptr) {
+                        auto array = static_cast<const ArrayValue*>(
+                            field_data->RawValue(offset));
+                        array_string = array->output_data().SerializeAsString();
+                    } else {
+                        auto array = static_cast<const Array*>(
+                            field_data->RawValue(offset));
+                        array_string = array->output_data().SerializeAsString();
+                    }
                     auto size =
                         field_data->is_valid(offset) ? array_string.size() : -1;
 
@@ -335,9 +372,15 @@ BaseEventData::Serialize() {
                      ++offset) {
                     auto geo_ptr = static_cast<const std::string*>(
                         field_data->RawValue(offset));
+                    // A negative length is the only way a null reaches Arrow
+                    // (AddOneBinaryToArrowBuilder appends a null iff
+                    // length < 0), so a null row must not be handed its raw
+                    // size -- same as the STRING/ARRAY/JSON branches above.
+                    auto size =
+                        field_data->is_valid(offset) ? geo_ptr->size() : -1;
                     payload_writer->add_one_binary_payload(
                         reinterpret_cast<const uint8_t*>(geo_ptr->data()),
-                        geo_ptr->size());
+                        size);
                 }
                 break;
             }
@@ -386,11 +429,13 @@ BaseEventData::Serialize() {
                    payload_buffer.size();
         std::vector<uint8_t> res(len);
         int offset = 0;
-        memcpy(res.data() + offset, &start_timestamp, sizeof(start_timestamp));
+        milvus::fastmem::FastMemcpy(
+            res.data() + offset, &start_timestamp, sizeof(start_timestamp));
         offset += sizeof(start_timestamp);
-        memcpy(res.data() + offset, &end_timestamp, sizeof(end_timestamp));
+        milvus::fastmem::FastMemcpy(
+            res.data() + offset, &end_timestamp, sizeof(end_timestamp));
         offset += sizeof(end_timestamp);
-        memcpy(
+        milvus::fastmem::FastMemcpy(
             res.data() + offset, payload_buffer.data(), payload_buffer.size());
 
         return res;
@@ -419,9 +464,10 @@ BaseEvent::Serialize() {
     int len = header_size + data_size;
     std::vector<uint8_t> res(len, 0);
     int offset = 0;
-    memcpy(res.data() + offset, header.data(), header_size);
+    milvus::fastmem::FastMemcpy(
+        res.data() + offset, header.data(), header_size);
     offset += header_size;
-    memcpy(res.data() + offset, data.data(), data_size);
+    milvus::fastmem::FastMemcpy(res.data() + offset, data.data(), data_size);
 
     return res;
 }
@@ -470,11 +516,13 @@ DescriptorEvent::Serialize() {
 
     std::vector<uint8_t> res(event_header.next_position_, 0);
     int32_t offset = 0;
-    memcpy(res.data(), &MAGIC_NUM, sizeof(MAGIC_NUM));
+    milvus::fastmem::FastMemcpy(res.data(), &MAGIC_NUM, sizeof(MAGIC_NUM));
     offset += sizeof(MAGIC_NUM);
-    memcpy(res.data() + offset, header_bytes.data(), header_bytes.size());
+    milvus::fastmem::FastMemcpy(
+        res.data() + offset, header_bytes.data(), header_bytes.size());
     offset += header_bytes.size();
-    memcpy(res.data() + offset, data_bytes.data(), data_bytes.size());
+    milvus::fastmem::FastMemcpy(
+        res.data() + offset, data_bytes.data(), data_bytes.size());
     offset += data_bytes.size();
 
     return res;
@@ -490,13 +538,16 @@ LocalInsertEvent::Serialize() {
 
     std::vector<uint8_t> res(len);
     int offset = 0;
-    memcpy(res.data() + offset, &row_num, sizeof(row_num));
+    milvus::fastmem::FastMemcpy(res.data() + offset, &row_num, sizeof(row_num));
     offset += sizeof(row_num);
-    memcpy(res.data() + offset, &dimension, sizeof(dimension));
+    milvus::fastmem::FastMemcpy(
+        res.data() + offset, &dimension, sizeof(dimension));
     offset += sizeof(dimension);
-    memcpy(res.data() + offset, field_data->Data(), data_size);
+    milvus::fastmem::FastMemcpy(
+        res.data() + offset, field_data->Data(), data_size);
     offset += data_size;
-    memcpy(res.data() + offset, field_data->ValidData(), valid_data_size);
+    milvus::fastmem::FastMemcpy(
+        res.data() + offset, field_data->ValidData(), valid_data_size);
     return res;
 }
 
@@ -520,11 +571,13 @@ LocalIndexEvent::Serialize() {
 
     std::vector<uint8_t> res(len);
     int offset = 0;
-    memcpy(res.data() + offset, &index_size, sizeof(index_size));
+    milvus::fastmem::FastMemcpy(
+        res.data() + offset, &index_size, sizeof(index_size));
     offset += sizeof(index_size);
-    memcpy(res.data() + offset, &degree, sizeof(degree));
+    milvus::fastmem::FastMemcpy(res.data() + offset, &degree, sizeof(degree));
     offset += sizeof(degree);
-    memcpy(res.data() + offset, field_data->Data(), index_size);
+    milvus::fastmem::FastMemcpy(
+        res.data() + offset, field_data->Data(), index_size);
 
     return res;
 }

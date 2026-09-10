@@ -33,6 +33,10 @@ impl IndexWriterWrapperImpl {
         };
         let index_writer =
             index.writer_with_num_threads(num_threads, overall_memory_budget_in_bytes)?;
+        // Json key stats writers are only used for sealed index builds. Keep
+        // memory-budget-flushed segments and avoid background merge write
+        // amplification.
+        index_writer.set_merge_policy(Box::new(tantivy::merge_policy::NoMergePolicy));
         Ok(IndexWriterWrapperImpl {
             field,
             index_writer,

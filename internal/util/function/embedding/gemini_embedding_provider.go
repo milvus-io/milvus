@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/credentials"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/function/models/gemini"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -39,9 +40,9 @@ type GeminiEmbeddingProvider struct {
 	embedDimParam int64
 	taskType      string
 
-	maxBatch   int
-	timeoutSec int64
-	extraInfo  *models.ModelExtraInfo
+	maxBatch  int
+	timeoutMs int64
+	extraInfo *models.ModelExtraInfo
 }
 
 func NewGeminiEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string, credentials *credentials.Credentials, extraInfo *models.ModelExtraInfo) (*GeminiEmbeddingProvider, error) {
@@ -51,7 +52,7 @@ func NewGeminiEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchem
 	}
 
 	if fieldSchema.DataType != schemapb.DataType_FloatVector {
-		return nil, fmt.Errorf("Gemini embedding only supports FloatVector field, got %s", schemapb.DataType_name[int32(fieldSchema.DataType)]) //nolint:staticcheck // starts with proper noun
+		return nil, merr.WrapErrParameterInvalidMsg("Gemini embedding only supports FloatVector field, got %s", schemapb.DataType_name[int32(fieldSchema.DataType)]) //nolint:staticcheck // starts with proper noun
 	}
 
 	apiKey, url, err := models.ParseAKAndURL(credentials, functionSchema.Params, params, models.GeminiAKEnvStr, extraInfo)
@@ -79,7 +80,7 @@ func NewGeminiEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchem
 	}
 
 	if modelName == "" {
-		return nil, fmt.Errorf("model_name is required for Gemini embedding provider")
+		return nil, merr.WrapErrParameterMissingMsg("model_name is required for Gemini embedding provider")
 	}
 	modelName = strings.TrimPrefix(modelName, "models/")
 
@@ -92,6 +93,8 @@ func NewGeminiEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchem
 		url = fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:batchEmbedContents", modelName)
 	}
 
+	timeoutMs := models.ResolveTimeoutMs(functionSchema.Params)
+
 	provider := GeminiEmbeddingProvider{
 		client:        c,
 		url:           url,
@@ -100,7 +103,7 @@ func NewGeminiEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchem
 		embedDimParam: dim,
 		taskType:      taskType,
 		maxBatch:      32,
-		timeoutSec:    30,
+		timeoutMs:     timeoutMs,
 		extraInfo:     extraInfo,
 	}
 	return &provider, nil
@@ -134,17 +137,17 @@ func (provider *GeminiEmbeddingProvider) CallEmbedding(ctx context.Context, text
 		if end > numRows {
 			end = numRows
 		}
-		resp, err := provider.client.Embedding(provider.url, provider.modelName, texts[i:end], int(provider.embedDimParam), taskType, provider.timeoutSec)
+		resp, err := provider.client.Embedding(provider.url, provider.modelName, texts[i:end], int(provider.embedDimParam), taskType, provider.timeoutMs)
 		if err != nil {
 			return nil, err
 		}
 		if end-i != len(resp.Embeddings) {
-			return nil, fmt.Errorf("get embedding failed, the number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(resp.Embeddings))
+			return nil, merr.WrapErrFunctionFailedMsg("get embedding failed, the number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(resp.Embeddings))
 		}
 
 		for _, item := range resp.Embeddings {
 			if len(item.Values) != int(provider.fieldDim) {
-				return nil, fmt.Errorf("the required embedding dim is [%d], but the embedding obtained from the model is [%d]",
+				return nil, merr.WrapErrFunctionFailedMsg("the required embedding dim is [%d], but the embedding obtained from the model is [%d]",
 					provider.fieldDim, len(item.Values))
 			}
 			embRet.Append(item.Values)

@@ -18,7 +18,6 @@ package binlog
 
 import (
 	"context"
-	"fmt"
 	"path"
 	"sort"
 	"strconv"
@@ -41,18 +40,18 @@ func readData(reader *storage.BinlogReader, et storage.EventTypeCode) ([]any, []
 	for {
 		event, err := reader.NextEventReader()
 		if err != nil {
-			return nil, nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to iterate events reader, error: %v", err))
+			return nil, nil, merr.WrapErrImportSysFailedMsg("failed to iterate events reader, error: %v", err)
 		}
 		if event == nil {
 			break // end of the file
 		}
 		if event.TypeCode != et {
-			return nil, nil, merr.WrapErrImportFailed(fmt.Sprintf("wrong binlog type, expect:%s, actual:%s",
-				et.String(), event.TypeCode.String()))
+			return nil, nil, merr.WrapErrImportFailedMsg("wrong binlog type, expect:%s, actual:%s",
+				et.String(), event.TypeCode.String())
 		}
 		rows, validDataRows, _, err := event.GetDataFromPayload()
 		if err != nil {
-			return nil, nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to read data, error: %v", err))
+			return nil, nil, merr.WrapErrImportSysFailedMsg("failed to read data, error: %v", err)
 		}
 		rowsSet = append(rowsSet, rows)
 		validDataRowsSet = append(validDataRowsSet, validDataRows)
@@ -62,14 +61,16 @@ func readData(reader *storage.BinlogReader, et storage.EventTypeCode) ([]any, []
 
 // read delete data only
 func newBinlogReader(ctx context.Context, cm storage.ChunkManager, path string) (*storage.BinlogReader, error) {
-	bytes, err := cm.Read(ctx, path) // TODO: dyh, checks if the error is a retryable error
+	bytes, err := cm.Read(ctx, path)
 	if err != nil {
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to open binlog %s", path))
+		// cm.Read returns a typed storage error (Io* family); keep its code and
+		// retriability instead of flattening it into a generic import failure.
+		return nil, merr.Wrapf(err, "failed to open binlog %s", path)
 	}
 	var reader *storage.BinlogReader
 	reader, err = storage.NewBinlogReader(bytes)
 	if err != nil {
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to create reader, binlog:%s, error:%v", path, err))
+		return nil, merr.WrapErrImportSysFailedMsg("failed to create reader, binlog:%s, error:%v", path, err)
 	}
 	return reader, nil
 }
@@ -87,7 +88,7 @@ func listInsertLogs(ctx context.Context, cm storage.ChunkManager, insertPrefix s
 			fieldStrID := path.Base(fieldPath)
 			fieldID, err := strconv.ParseInt(fieldStrID, 10, 64)
 			if err != nil {
-				walkErr = merr.WrapErrImportFailed(fmt.Sprintf("failed to parse field id from log, error: %v", err))
+				walkErr = merr.WrapErrImportSysFailedMsg("failed to parse field id from log, error: %v", err)
 				return false
 			}
 			insertLogs[fieldID] = append(insertLogs[fieldID], insertLog.FilePath)
@@ -141,8 +142,8 @@ func verify(schema *schemapb.CollectionSchema, storageVersion int64, insertLogs 
 	// check binlog file count, must be equal for all fields
 	for fieldID, logs := range insertLogs {
 		if len(logs) != len(insertLogs[common.RowIDField]) {
-			return nil, nil, merr.WrapErrImportFailed(fmt.Sprintf("misaligned binlog count, field%d:%d, field%d:%d",
-				fieldID, len(logs), common.RowIDField, len(insertLogs[common.RowIDField])))
+			return nil, nil, merr.WrapErrImportFailedMsg("misaligned binlog count, field%d:%d, field%d:%d",
+				fieldID, len(logs), common.RowIDField, len(insertLogs[common.RowIDField]))
 		}
 	}
 
@@ -152,7 +153,7 @@ func verify(schema *schemapb.CollectionSchema, storageVersion int64, insertLogs 
 			if typeutil.IsVectorType(field.GetDataType()) {
 				if _, ok := insertLogs[field.GetFieldID()]; !ok {
 					// vector field must be provided
-					return nil, nil, merr.WrapErrImportFailed(fmt.Sprintf("no binlog for field:%s", field.GetName()))
+					return nil, nil, merr.WrapErrImportFailedMsg("no binlog for field:%s", field.GetName())
 				}
 			}
 		}
@@ -200,7 +201,7 @@ func verify(schema *schemapb.CollectionSchema, storageVersion int64, insertLogs 
 			// primary key is required
 			// function output field is also required
 			// the other field must be provided
-			return nil, nil, merr.WrapErrImportFailed(fmt.Sprintf("no binlog for field:%s", field.GetName()))
+			return nil, nil, merr.WrapErrImportFailedMsg("no binlog for field:%s", field.GetName())
 		} else {
 			// these binlogs are intend to be imported
 			validInsertLogs[id] = logs
@@ -230,7 +231,7 @@ func verify(schema *schemapb.CollectionSchema, storageVersion int64, insertLogs 
 			continue
 		}
 		if len(missingFields) > 0 {
-			return nil, nil, merr.WrapErrImportFailed(fmt.Sprintf("no binlog for struct field:%s", missingFields[0]))
+			return nil, nil, merr.WrapErrImportFailedMsg("no binlog for struct field:%s", missingFields[0])
 		}
 		for id, logs := range presentLogs {
 			validInsertLogs[id] = logs

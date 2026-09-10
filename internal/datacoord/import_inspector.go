@@ -22,12 +22,10 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
 
@@ -63,13 +61,13 @@ func NewImportInspector(ctx context.Context, meta *meta, importMeta ImportMeta, 
 
 func (s *importInspector) Start() {
 	s.reloadFromMeta()
-	log.Ctx(s.ctx).Info("start import inspector")
+	mlog.Info(s.ctx, "start import inspector")
 	ticker := time.NewTicker(Params.DataCoordCfg.ImportScheduleInterval.GetAsDuration(time.Second))
 	defer ticker.Stop()
 	for {
 		select {
 		case <-s.closeChan:
-			log.Ctx(s.ctx).Info("import inspector exited")
+			mlog.Info(s.ctx, "import inspector exited")
 			return
 		case <-ticker.C:
 			s.inspect()
@@ -84,41 +82,46 @@ func (s *importInspector) Close() {
 }
 
 func (s *importInspector) reloadFromMeta() {
-	jobs := s.importMeta.GetJobBy(s.ctx)
-	sort.Slice(jobs, func(i, j int) bool {
-		return jobs[i].GetJobID() < jobs[j].GetJobID()
-	})
-	for _, job := range jobs {
-		tasks := s.importMeta.GetTaskBy(s.ctx, WithJob(job.GetJobID()))
-		for _, task := range tasks {
-			if task.GetState() == datapb.ImportTaskStateV2_InProgress {
-				s.scheduler.Enqueue(task)
-			}
+	tasks := s.importMeta.GetTaskBy(s.ctx, WithStates(datapb.ImportTaskStateV2_InProgress))
+	sortImportTasks(tasks)
+	for _, task := range tasks {
+		if s.importMeta.GetJob(s.ctx, task.GetJobID()) != nil {
+			s.scheduler.Enqueue(task)
 		}
 	}
 }
 
 func (s *importInspector) inspect() {
-	jobs := s.importMeta.GetJobBy(s.ctx)
-	sort.Slice(jobs, func(i, j int) bool {
-		return jobs[i].GetJobID() < jobs[j].GetJobID()
-	})
-	for _, job := range jobs {
-		tasks := s.importMeta.GetTaskBy(s.ctx, WithJob(job.GetJobID()))
-		for _, task := range tasks {
-			switch task.GetState() {
-			case datapb.ImportTaskStateV2_Pending:
-				switch task.GetType() {
-				case PreImportTaskType:
-					s.processPendingPreImport(task)
-				case ImportTaskType:
-					s.processPendingImport(task)
-				}
-			case datapb.ImportTaskStateV2_Failed:
-				s.processFailed(task)
+	tasks := s.importMeta.GetTaskBy(s.ctx, WithStates(
+		datapb.ImportTaskStateV2_Pending,
+		datapb.ImportTaskStateV2_Failed,
+	))
+	sortImportTasks(tasks)
+	for _, task := range tasks {
+		if s.importMeta.GetJob(s.ctx, task.GetJobID()) == nil {
+			continue
+		}
+		switch task.GetState() {
+		case datapb.ImportTaskStateV2_Pending:
+			switch task.GetType() {
+			case PreImportTaskType:
+				s.processPendingPreImport(task)
+			case ImportTaskType:
+				s.processPendingImport(task)
 			}
+		case datapb.ImportTaskStateV2_Failed:
+			s.processFailed(task)
 		}
 	}
+}
+
+func sortImportTasks(tasks []ImportTask) {
+	sort.Slice(tasks, func(i, j int) bool {
+		if tasks[i].GetJobID() == tasks[j].GetJobID() {
+			return tasks[i].GetTaskID() < tasks[j].GetTaskID()
+		}
+		return tasks[i].GetJobID() < tasks[j].GetJobID()
+	})
 }
 
 func (s *importInspector) processPendingPreImport(task ImportTask) {
@@ -138,14 +141,14 @@ func (s *importInspector) processFailed(task ImportTask) {
 			op := UpdateStatusOperator(segment, commonpb.SegmentState_Dropped)
 			err := s.meta.UpdateSegmentsInfo(s.ctx, op)
 			if err != nil {
-				log.Ctx(s.ctx).Warn("drop import segment failed", WrapTaskLog(task, zap.Int64("segment", segment), zap.Error(err))...)
+				mlog.Warn(s.ctx, "drop import segment failed", WrapTaskLog(task, mlog.Int64("segment", segment), mlog.Err(err))...)
 				return
 			}
 		}
 		if len(segments) > 0 {
 			err := s.importMeta.UpdateTask(s.ctx, task.GetTaskID(), UpdateSegmentIDs(nil), UpdateStatsSegmentIDs(nil))
 			if err != nil {
-				log.Ctx(s.ctx).Warn("update import task segments failed", WrapTaskLog(task, zap.Error(err))...)
+				mlog.Warn(s.ctx, "update import task segments failed", WrapTaskLog(task, mlog.Err(err))...)
 			}
 		}
 	}

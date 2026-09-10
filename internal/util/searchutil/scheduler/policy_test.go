@@ -70,6 +70,37 @@ func TestPolicyCleanupCanceledTasks(t *testing.T) {
 	}
 }
 
+func TestPolicyRemove(t *testing.T) {
+	paramtable.Init()
+	for name, policy := range map[string]schedulePolicy{
+		"fifo":              newFIFOPolicy(),
+		"user-task-polling": newUserTaskPollingPolicy(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			base := time.Now()
+			keep := newMockTask(mockTaskConfig{username: "keep", nq: 2})
+			remove := newMockTask(mockTaskConfig{username: "remove", nq: 3})
+
+			added, err := policy.Push(newQueuedTask(keep, base))
+			assert.NoError(t, err)
+			assert.Equal(t, 1, added)
+			added, err = policy.Push(newQueuedTask(remove, base))
+			assert.NoError(t, err)
+			assert.Equal(t, 1, added)
+
+			removed := policy.Remove(func(task Task) bool {
+				return task.Username() == "remove"
+			}, base.Add(time.Second))
+
+			assert.Len(t, removed, 1)
+			assert.Same(t, remove, removed[0].Task)
+			assert.Equal(t, 1, policy.Len())
+			assert.Same(t, keep, policy.Pop(base).Task)
+			assert.Equal(t, 0, policy.Len())
+		})
+	}
+}
+
 func testCrossUserMerge(t *testing.T, policy schedulePolicy) {
 	userN := 10
 	maxNQ := paramtable.Get().QueryNodeCfg.MaxGroupNQ.GetAsInt64()

@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
@@ -17,7 +17,7 @@ import (
 
 func TestWriteAheadBufferWithOnlyTrivialTimeTick(t *testing.T) {
 	ctx := context.Background()
-	wb := NewWriteAheadBuffer("pchannel", log.With(), 5*1024*1024, 30*time.Second, createTimeTickMessage(0, true))
+	wb := NewWriteAheadBuffer("pchannel", mlog.With(), 5*1024*1024, 30*time.Second, createTimeTickMessage(0, true))
 
 	// Test timeout
 	ctx, cancel := context.WithTimeout(ctx, 1*time.Millisecond)
@@ -81,7 +81,7 @@ func TestWriteAheadBufferWithOnlyTrivialTimeTick(t *testing.T) {
 func TestWriteAheadBuffer(t *testing.T) {
 	// Concurrent add message into bufffer and make syncup.
 	// The reader should never lost any message if no eviction happen.
-	wb := NewWriteAheadBuffer("pchannel", log.With(), 5*1024*1024, 30*time.Second, createTimeTickMessage(1, true))
+	wb := NewWriteAheadBuffer("pchannel", mlog.With(), 5*1024*1024, 30*time.Second, createTimeTickMessage(1, true))
 	expectedLastTimeTick := uint64(10000)
 	ch := make(chan struct{})
 	totalCnt := 0
@@ -186,7 +186,7 @@ func TestWriteAheadBuffer(t *testing.T) {
 }
 
 func TestWriteAheadBufferEviction(t *testing.T) {
-	wb := NewWriteAheadBuffer("pchannel", log.With(), 5*1024*1024, 50*time.Millisecond, createTimeTickMessage(0, true))
+	wb := NewWriteAheadBuffer("pchannel", mlog.With(), 5*1024*1024, 50*time.Millisecond, createTimeTickMessage(0, true))
 
 	msgs := make([]message.ImmutableMessage, 0)
 	for i := 1; i < 100; i++ {

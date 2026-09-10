@@ -291,6 +291,15 @@ class OffsetMap {
 
     virtual size_t
     memory_size() const = 0;
+
+    // Returns true if the implementation stores nothing per-row (e.g.
+    // VirtualPKOffsetMap derives pk→offset via bit-extract). Callers that
+    // fall back to full pk-column scans (GetAllChunks + two-pointers) can
+    // short-circuit to find_range() when this is true — O(M) not O(M+N).
+    virtual bool
+    is_zero_storage() const {
+        return false;
+    }
 };
 
 template <typename T>
@@ -488,20 +497,62 @@ class OffsetOrderedMap : public OffsetMap {
         auto more_hit_than_limit = cnt > limit;
         limit = std::min(limit, cnt);
 
-        // Traverse map_ in PK order
+        // Traverse map_ in PK order; for each PK visit offsets from back to
+        // front to obtain the latest offset, and only use the first (newest)
+        // offset that has matching elements (same as find_first_n_by_index)
+        // to avoid returning stale versions.
+        // Element ranges are resolved in windows: gather the next
+        // kRangeBatchSize candidate doc offsets in traversal order and
+        // resolve them with ONE CopyRowElementRanges call (one lock-free
+        // published snapshot for the whole window on growing) instead of one
+        // virtual call per doc. Ranges prefetched for docs the traversal ends up
+        // skipping (older offsets of an already-hit PK, or docs past the
+        // limit) are simply unused — the lookups are pure.
+        constexpr int64_t kRangeBatchSize = 64;
+        int32_t batch_offsets[kRangeBatchSize];
+        std::pair<int32_t, int32_t> batch_ranges[kRangeBatchSize];
+        const typename OrderedMap::value_type* batch_pks[kRangeBatchSize];
+
         std::vector<int32_t> matching_indices;
-        auto it = map_.begin();
-        for (; hit_num < limit && it != map_.end(); ++it) {
-            // For each PK, traverse from back to front to obtain the latest offset.
-            // Same as find_first_n_by_index: only use the first (newest) offset
-            // that has matching elements, then break to avoid returning stale versions.
-            for (int i = it->second.size() - 1; i >= 0 && hit_num < limit;
-                 --i) {
-                auto doc_offset = it->second[i];
+        // Gather cursor over the flattened (pk, offset) traversal.
+        auto gather_it = map_.begin();
+        int64_t gather_idx =
+            gather_it == map_.end()
+                ? -1
+                : static_cast<int64_t>(gather_it->second.size()) - 1;
+        // PK entry whose remaining (older) offsets must be skipped — the
+        // batched equivalent of the per-doc inner-loop `break`.
+        const typename OrderedMap::value_type* skip_pk = nullptr;
+        while (hit_num < limit && gather_it != map_.end()) {
+            // Gather the next window of candidate docs.
+            int64_t n = 0;
+            while (n < kRangeBatchSize && gather_it != map_.end()) {
+                if (gather_idx < 0) {
+                    ++gather_it;
+                    if (gather_it == map_.end()) {
+                        break;
+                    }
+                    gather_idx =
+                        static_cast<int64_t>(gather_it->second.size()) - 1;
+                    continue;
+                }
+                batch_offsets[n] =
+                    static_cast<int32_t>(gather_it->second[gather_idx]);
+                batch_pks[n] = &*gather_it;
+                ++n;
+                --gather_idx;
+            }
+            array_offsets->CopyRowElementRanges(batch_offsets, n, batch_ranges);
+
+            for (int64_t k = 0; k < n && hit_num < limit; ++k) {
+                const auto* pk_entry = batch_pks[k];
+                if (pk_entry == skip_pk) {
+                    continue;
+                }
+                const int64_t doc_offset = batch_offsets[k];
 
                 // Get element range for this doc
-                auto [first_elem, last_elem] =
-                    array_offsets->ElementIDRangeOfRow(doc_offset);
+                auto [first_elem, last_elem] = batch_ranges[k];
 
                 // Collect all matching element indices for this doc
                 matching_indices.clear();
@@ -512,7 +563,7 @@ class OffsetOrderedMap : public OffsetMap {
                         continue;
                     }
                     if (is_skipped_by_cursor(
-                            it->first, elem_id - first_elem, cursor)) {
+                            pk_entry->first, elem_id - first_elem, cursor)) {
                         continue;
                     }
                     if (!element_bitset[elem_id]) {  // 0 means pass filter
@@ -527,12 +578,11 @@ class OffsetOrderedMap : public OffsetMap {
                     doc_offsets.push_back(doc_offset);
                     element_indices.push_back(std::move(matching_indices));
                     // PK hit, no need to continue traversing older offsets with the same PK.
-                    break;
-                }
-                if (is_cursor_pk(it->first, cursor)) {
+                    skip_pk = pk_entry;
+                } else if (is_cursor_pk(pk_entry->first, cursor)) {
                     // The cursor applies to the newest visible row for this PK.
                     // Do not fall through to older offsets of the same PK.
-                    break;
+                    skip_pk = pk_entry;
                 }
             }
         }
@@ -767,39 +817,56 @@ class OffsetOrderedArray : public OffsetMap {
         auto more_hit_than_limit = cnt > limit;
         limit = std::min(limit, cnt);
 
-        // Traverse array_ in PK order (already sorted)
+        // Traverse array_ in PK order (already sorted). Element ranges are
+        // resolved in windows of kRangeBatchSize docs with one
+        // CopyRowElementRanges call each instead of one virtual call per
+        // doc; ranges prefetched past an early limit-exit are unused (the
+        // lookups are pure).
+        constexpr int64_t kRangeBatchSize = 64;
+        int32_t batch_rows[kRangeBatchSize];
+        std::pair<int32_t, int32_t> batch_ranges[kRangeBatchSize];
+
         std::vector<int32_t> matching_indices;
-        auto it = array_.begin();
-        for (; hit_num < limit && it != array_.end(); ++it) {
-            auto doc_offset = it->second;
-
-            // Get element range for this doc
-            auto [first_elem, last_elem] =
-                array_offsets->ElementIDRangeOfRow(doc_offset);
-
-            // Collect all matching element indices for this doc
-            matching_indices.clear();
-            for (int64_t elem_id = first_elem;
-                 elem_id < last_elem && hit_num < limit;
-                 ++elem_id) {
-                if (elem_id >= element_size) {
-                    continue;
-                }
-                if (is_skipped_by_cursor(
-                        it->first, elem_id - first_elem, cursor)) {
-                    continue;
-                }
-                if (!element_bitset[elem_id]) {  // 0 means pass filter
-                    matching_indices.push_back(
-                        static_cast<int32_t>(elem_id - first_elem));
-                    hit_num++;
-                }
+        const int64_t total = static_cast<int64_t>(array_.size());
+        for (int64_t base = 0; base < total && hit_num < limit;
+             base += kRangeBatchSize) {
+            const int64_t n = std::min(kRangeBatchSize, total - base);
+            for (int64_t k = 0; k < n; ++k) {
+                batch_rows[k] = array_[base + k].second;
             }
+            array_offsets->CopyRowElementRanges(batch_rows, n, batch_ranges);
 
-            // Only add doc if it has matching elements
-            if (!matching_indices.empty()) {
-                doc_offsets.push_back(doc_offset);
-                element_indices.push_back(std::move(matching_indices));
+            for (int64_t k = 0; k < n && hit_num < limit; ++k) {
+                const auto& entry = array_[base + k];
+                auto doc_offset = entry.second;
+
+                // Get element range for this doc
+                auto [first_elem, last_elem] = batch_ranges[k];
+
+                // Collect all matching element indices for this doc
+                matching_indices.clear();
+                for (int64_t elem_id = first_elem;
+                     elem_id < last_elem && hit_num < limit;
+                     ++elem_id) {
+                    if (elem_id >= element_size) {
+                        continue;
+                    }
+                    if (is_skipped_by_cursor(
+                            entry.first, elem_id - first_elem, cursor)) {
+                        continue;
+                    }
+                    if (!element_bitset[elem_id]) {  // 0 means pass filter
+                        matching_indices.push_back(
+                            static_cast<int32_t>(elem_id - first_elem));
+                        hit_num++;
+                    }
+                }
+
+                // Only add doc if it has matching elements
+                if (!matching_indices.empty()) {
+                    doc_offsets.push_back(doc_offset);
+                    element_indices.push_back(std::move(matching_indices));
+                }
             }
         }
 
@@ -983,21 +1050,35 @@ class VirtualPKOffsetMap : public OffsetMap {
         std::vector<std::vector<int32_t>> element_indices;
         int64_t hit_num = 0;
 
-        for (int64_t doc = 0; doc < num_rows_ && hit_num < limit; doc++) {
-            auto [first_elem, last_elem] =
-                array_offsets->ElementIDRangeOfRow(doc);
-            std::vector<int32_t> matching;
-            for (int64_t e = first_elem; e < last_elem && hit_num < limit;
-                 e++) {
-                if (e < element_size && !element_bitset[e] &&
-                    !is_skipped_by_cursor(doc, e - first_elem, cursor)) {
-                    matching.push_back(static_cast<int32_t>(e - first_elem));
-                    hit_num++;
+        // Docs are scanned sequentially, so resolve element ranges with one
+        // contiguous CopyRowElementStarts call per window of kRowBatchSize
+        // rows ([starts[i], starts[i+1]) is row (base + i)'s range) instead
+        // of one virtual call per row.
+        constexpr int64_t kRowBatchSize = 64;
+        int32_t batch_starts[kRowBatchSize + 1];
+
+        for (int64_t base = 0; base < num_rows_ && hit_num < limit;
+             base += kRowBatchSize) {
+            const int64_t n = std::min(kRowBatchSize, num_rows_ - base);
+            array_offsets->CopyRowElementStarts(base, n, batch_starts);
+            for (int64_t i = 0; i < n && hit_num < limit; i++) {
+                const int64_t doc = base + i;
+                const int32_t first_elem = batch_starts[i];
+                const int32_t last_elem = batch_starts[i + 1];
+                std::vector<int32_t> matching;
+                for (int64_t e = first_elem; e < last_elem && hit_num < limit;
+                     e++) {
+                    if (e < element_size && !element_bitset[e] &&
+                        !is_skipped_by_cursor(doc, e - first_elem, cursor)) {
+                        matching.push_back(
+                            static_cast<int32_t>(e - first_elem));
+                        hit_num++;
+                    }
                 }
-            }
-            if (!matching.empty()) {
-                doc_offsets.push_back(doc);
-                element_indices.push_back(std::move(matching));
+                if (!matching.empty()) {
+                    doc_offsets.push_back(doc);
+                    element_indices.push_back(std::move(matching));
+                }
             }
         }
         return {std::move(doc_offsets),
@@ -1026,6 +1107,11 @@ class VirtualPKOffsetMap : public OffsetMap {
         auto last_pk = std::get_if<int64_t>(&cursor->last_pk);
         return last_pk != nullptr && *last_pk == (shifted_segment_id_ | doc) &&
                element_offset <= cursor->last_element_offset;
+    }
+
+    bool
+    is_zero_storage() const override {
+        return true;
     }
 
  private:
@@ -1082,6 +1168,14 @@ class InsertRecordSealed {
     bool
     contain(const PkType& pk) const {
         return pk2offset_->contain(pk);
+    }
+
+    // Returns true when the owned pk2offset_ is zero-storage (currently only
+    // VirtualPKOffsetMap). Sealed search_pks uses this to short-circuit the
+    // sorted two-pointers path.
+    bool
+    pk2offset_is_zero_storage() const {
+        return pk2offset_ != nullptr && pk2offset_->is_zero_storage();
     }
 
     std::vector<SegOffset>
@@ -1433,10 +1527,16 @@ class InsertRecordGrowing {
         pk2offset_->find_range(pk, op, bitset, condition);
     }
 
+    // `start_offset` is the logical offset PreInsert reserved for this batch.
+    // pk2offset_ maps a pk to the row offset every other growing structure
+    // addresses that row by, so a batch that starts anywhere but 0 has to say
+    // so -- indexing from 0 would silently point queries and deletes at the
+    // wrong rows.
     void
-    insert_pks(const std::vector<FieldDataPtr>& field_datas) {
+    insert_pks(int64_t start_offset,
+               const std::vector<FieldDataPtr>& field_datas) {
         std::lock_guard lck(shared_mutex_);
-        int64_t offset = 0;
+        int64_t offset = start_offset;
         for (auto& data : field_datas) {
             int64_t row_count = data->get_num_rows();
             auto data_type = data->get_data_type();
@@ -1472,13 +1572,6 @@ class InsertRecordGrowing {
         return pk2offset_->empty();
     }
 
-    void
-    seal_pks() {
-        std::lock_guard lck(shared_mutex_);
-        pk2offset_
-            ->seal();  // will throw for growing map, consistent with previous behavior
-    }
-
     const ConcurrentVector<Timestamp>&
     timestamps() const {
         return timestamps_;
@@ -1498,7 +1591,11 @@ class InsertRecordGrowing {
             pk2offset_->clear();
         }
         reserved = 0;
-        data_.clear();
+        {
+            std::unique_lock<std::shared_mutex> lck(field_map_mutex_);
+            data_.clear();
+            valid_data_.clear();
+        }
         ack_responder_.clear();
     }
 
@@ -1509,7 +1606,7 @@ class InsertRecordGrowing {
         int64_t size_per_chunk,
         const storage::MmapChunkDescriptorPtr mmap_descriptor = nullptr) {
         if (field_meta.is_nullable()) {
-            this->append_valid_data(field_id);
+            this->append_valid_data(field_id, size_per_chunk);
         }
         const milvus::storage::MmapConfig mmap_config =
             storage::MmapManager::GetInstance().GetMmapConfig();
@@ -1628,6 +1725,7 @@ class InsertRecordGrowing {
                     field_id, size_per_chunk, scalar_mmap_descriptor);
                 return;
             }
+            case DataType::STRING:
             case DataType::VARCHAR:
             case DataType::TEXT: {
                 this->append_data<std::string>(
@@ -1640,8 +1738,13 @@ class InsertRecordGrowing {
                 return;
             }
             case DataType::ARRAY: {
-                this->append_data<Array>(
-                    field_id, size_per_chunk, scalar_mmap_descriptor);
+                if (field_meta.is_nested_array()) {
+                    this->append_data<ArrayValue>(
+                        field_id, size_per_chunk, scalar_mmap_descriptor);
+                } else {
+                    this->append_data<Array>(
+                        field_id, size_per_chunk, scalar_mmap_descriptor);
+                }
                 return;
             }
             case DataType::GEOMETRY: {
@@ -1666,12 +1769,10 @@ class InsertRecordGrowing {
     // get data without knowing the type
     VectorBase*
     get_data_base(FieldId field_id) const {
-        AssertInfo(data_.find(field_id) != data_.end(),
-                   "Cannot find field_data with field_id: " +
-                       std::to_string(field_id.get()));
-        AssertInfo(data_.at(field_id) != nullptr,
-                   "data_ at i is null" + std::to_string(field_id.get()));
-        return data_.at(field_id).get();
+        // Guard the field map against concurrent structural modification
+        // (e.g. append_field_meta during schema evolution rehashing data_).
+        std::shared_lock<std::shared_mutex> lck(field_map_mutex_);
+        return get_data_base_unlocked(field_id);
     }
 
     // get field data in given type, const version
@@ -1696,43 +1797,70 @@ class InsertRecordGrowing {
 
     ThreadSafeValidDataPtr
     get_valid_data(FieldId field_id) const {
-        AssertInfo(valid_data_.find(field_id) != valid_data_.end(),
-                   "Cannot find valid_data with field_id: " +
-                       std::to_string(field_id.get()));
-        AssertInfo(valid_data_.at(field_id) != nullptr,
-                   "valid_data_ at i is null" + std::to_string(field_id.get()));
-        return valid_data_.at(field_id);
+        // Guard the field map against concurrent structural modification
+        // (e.g. append_field_meta during schema evolution rehashing valid_data_).
+        std::shared_lock<std::shared_mutex> lck(field_map_mutex_);
+        return get_valid_data_unlocked(field_id);
     }
 
     bool
     is_data_exist(FieldId field_id) const {
+        std::shared_lock<std::shared_mutex> lck(field_map_mutex_);
         return data_.find(field_id) != data_.end();
+    }
+
+    // Field ids that have materialized columns. The exact set the flush
+    // layout must be trimmed to: non-materialized function outputs are
+    // absent here.
+    std::vector<int64_t>
+    get_data_field_ids() const {
+        std::shared_lock<std::shared_mutex> lck(field_map_mutex_);
+        std::vector<int64_t> ids;
+        ids.reserve(data_.size());
+        for (const auto& [field_id, entry] : data_) {
+            // An allocated-but-empty column (e.g. a function output the
+            // replayed older-era inserts never filled) is not materialized.
+            if (!entry || entry->empty()) {
+                continue;
+            }
+            ids.push_back(field_id.get());
+        }
+        return ids;
     }
 
     bool
     is_valid_data_exist(FieldId field_id) const {
-        return valid_data_.find(field_id) != valid_data_.end();
+        std::shared_lock<std::shared_mutex> lck(field_map_mutex_);
+        return is_valid_data_exist_unlocked(field_id);
     }
 
     SpanBase
     get_span_base(FieldId field_id, int64_t chunk_id) const {
-        auto data = get_data_base(field_id);
-        if (is_valid_data_exist(field_id)) {
+        // Take the shared lock once for the whole span resolution instead of
+        // re-locking inside each of get_data_base / is_valid_data_exist /
+        // get_valid_data. This both removes the redundant lock churn on this
+        // hot path and gives a consistent snapshot of the field map across the
+        // three lookups.
+        std::shared_lock<std::shared_mutex> lck(field_map_mutex_);
+        auto data = get_data_base_unlocked(field_id);
+        if (is_valid_data_exist_unlocked(field_id)) {
             auto size = data->get_chunk_size(chunk_id);
             auto element_offset = data->get_element_offset(chunk_id);
-            return SpanBase(
-                data->get_chunk_data(chunk_id),
-                get_valid_data(field_id)->get_chunk_data(element_offset),
-                size,
-                data->get_element_size());
+            return SpanBase(data->get_chunk_data(chunk_id),
+                            get_valid_data_unlocked(field_id)->get_chunk_data(
+                                element_offset),
+                            size,
+                            data->get_element_size());
         }
         return data->get_span_base(chunk_id);
     }
 
     // append a column of scalar type
     void
-    append_valid_data(FieldId field_id) {
-        valid_data_.emplace(field_id, std::make_shared<ThreadSafeValidData>());
+    append_valid_data(FieldId field_id, int64_t size_per_chunk) {
+        auto valid_data = std::make_shared<ThreadSafeValidData>(size_per_chunk);
+        std::unique_lock<std::shared_mutex> lck(field_map_mutex_);
+        valid_data_.emplace(field_id, std::move(valid_data));
     }
 
     // append a column of vector type
@@ -1744,14 +1872,16 @@ class InsertRecordGrowing {
                 const storage::MmapChunkDescriptorPtr mmap_descriptor) {
         static_assert(std::is_base_of_v<VectorTrait, VectorType>);
         bool use_mapping_storage = is_valid_data_exist(field_id);
-        data_.emplace(
-            field_id,
-            std::make_unique<ConcurrentVector<VectorType>>(
-                dim,
-                size_per_chunk,
-                mmap_descriptor,
-                use_mapping_storage ? get_valid_data(field_id) : nullptr,
-                use_mapping_storage));
+        // Resolve valid_data and build the column before taking the write lock
+        // so the shared-lock readers above are not nested inside the unique lock.
+        auto column = std::make_unique<ConcurrentVector<VectorType>>(
+            dim,
+            size_per_chunk,
+            mmap_descriptor,
+            use_mapping_storage ? get_valid_data(field_id) : nullptr,
+            use_mapping_storage);
+        std::unique_lock<std::shared_mutex> lck(field_map_mutex_);
+        data_.emplace(field_id, std::move(column));
     }
 
     // append a column of scalar or sparse float vector type
@@ -1762,28 +1892,23 @@ class InsertRecordGrowing {
                 const storage::MmapChunkDescriptorPtr mmap_descriptor) {
         static_assert(IsScalar<Type> || IsSparse<Type>);
         bool use_mapping_storage = is_valid_data_exist(field_id);
+        // Resolve valid_data and build the column before taking the write lock
+        // so the shared-lock readers above are not nested inside the unique lock.
+        std::unique_ptr<ConcurrentVector<Type>> column;
         if constexpr (IsSparse<Type>) {
-            data_.emplace(
-                field_id,
-                std::make_unique<ConcurrentVector<Type>>(
-                    size_per_chunk,
-                    mmap_descriptor,
-                    use_mapping_storage ? get_valid_data(field_id) : nullptr,
-                    use_mapping_storage));
+            column = std::make_unique<ConcurrentVector<Type>>(
+                size_per_chunk,
+                mmap_descriptor,
+                use_mapping_storage ? get_valid_data(field_id) : nullptr,
+                use_mapping_storage);
         } else {
-            data_.emplace(
-                field_id,
-                std::make_unique<ConcurrentVector<Type>>(
-                    size_per_chunk,
-                    mmap_descriptor,
-                    use_mapping_storage ? get_valid_data(field_id) : nullptr));
+            column = std::make_unique<ConcurrentVector<Type>>(
+                size_per_chunk,
+                mmap_descriptor,
+                use_mapping_storage ? get_valid_data(field_id) : nullptr);
         }
-    }
-
-    void
-    drop_field_data(FieldId field_id) {
-        data_.erase(field_id);
-        valid_data_.erase(field_id);
+        std::unique_lock<std::shared_mutex> lck(field_map_mutex_);
+        data_.emplace(field_id, std::move(column));
     }
 
     int64_t
@@ -1807,9 +1932,52 @@ class InsertRecordGrowing {
     AckResponder ack_responder_;
 
  private:
+    // Unlocked field-map lookups. Callers MUST already hold field_map_mutex_
+    // (at least shared). These let multi-lookup hot paths such as
+    // get_span_base resolve under a single lock acquisition.
+    VectorBase*
+    get_data_base_unlocked(FieldId field_id) const {
+        AssertInfo(data_.find(field_id) != data_.end(),
+                   "Cannot find field_data with field_id: " +
+                       std::to_string(field_id.get()));
+        AssertInfo(data_.at(field_id) != nullptr,
+                   "data_ at i is null" + std::to_string(field_id.get()));
+        return data_.at(field_id).get();
+    }
+
+    ThreadSafeValidDataPtr
+    get_valid_data_unlocked(FieldId field_id) const {
+        AssertInfo(valid_data_.find(field_id) != valid_data_.end(),
+                   "Cannot find valid_data with field_id: " +
+                       std::to_string(field_id.get()));
+        AssertInfo(valid_data_.at(field_id) != nullptr,
+                   "valid_data_ at i is null" + std::to_string(field_id.get()));
+        return valid_data_.at(field_id);
+    }
+
+    bool
+    is_valid_data_exist_unlocked(FieldId field_id) const {
+        return valid_data_.find(field_id) != valid_data_.end();
+    }
+
     std::unordered_map<FieldId, std::unique_ptr<VectorBase>> data_{};
     std::unordered_map<FieldId, ThreadSafeValidDataPtr> valid_data_{};
     mutable std::shared_mutex shared_mutex_{};
+    // Protects the structure of data_ / valid_data_ against concurrent
+    // rehash: structural writes (append_*/clear during schema evolution)
+    // take it unique, lookups (get_data_base/get_valid_data/...) take it shared.
+    // Kept separate from shared_mutex_ so frequent reads do not contend with
+    // pk inserts.
+    //
+    // PRECONDITION: this lock only protects the map structure, NOT element
+    // lifetime. The raw VectorBase* returned by get_data_base() escapes the
+    // shared lock, so callers rely on no concurrent erase()/clear() of the
+    // entry they hold (append-only mutation is safe). Today that holds because
+    // the maps are append-only -- there is no per-field erase, and clear() is
+    // never called concurrently with reads. Whoever adds drop-field support
+    // (e.g. schema evolution dropping fields) must also fence element
+    // lifetime; this lock alone will not save the escaped pointers.
+    mutable std::shared_mutex field_map_mutex_{};
 };
 
 // Keep the original template API via alias

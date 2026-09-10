@@ -9,6 +9,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 )
 
@@ -157,6 +158,25 @@ func TestCIndex_New(t *testing.T) {
 		err = index.Delete()
 		assert.Equal(t, err, nil)
 	}
+}
+
+func TestCIndex_NewFMIndexInvalidParamPreservesInputError(t *testing.T) {
+	index, err := NewCgoIndex(
+		schemapb.DataType_VarChar,
+		nil,
+		map[string]string{
+			common.IndexTypeKey: "FMINDEX",
+			"fm_sa_sample_rate": "not-an-integer",
+		},
+	)
+	require.Error(t, err)
+	assert.Nil(t, index)
+	assert.ErrorIs(t, err, merr.ErrSegcore)
+	assert.Equal(t, merr.InputError, merr.GetErrorType(err))
+	status := merr.Status(err)
+	assert.False(t, status.GetRetriable())
+	assert.Contains(t, status.GetReason(), "segcoreCode=2042")
+	assert.Contains(t, err.Error(), "fm_sa_sample_rate for FMINDEX")
 }
 
 func TestCIndex_BuildFloatVecIndex(t *testing.T) {

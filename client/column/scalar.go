@@ -21,7 +21,7 @@ import (
 
 	"github.com/samber/lo"
 
-	"github.com/milvus-io/milvus/client/v2/entity"
+	"github.com/milvus-io/milvus/client/v3/entity"
 )
 
 /* bool */
@@ -279,6 +279,30 @@ func NewColumnVarChar(name string, values []string) *ColumnVarChar {
 
 func (c *ColumnVarChar) Slice(start, end int) Column {
 	return &ColumnVarChar{
+		genericColumnBase: c.genericColumnBase.slice(start, end),
+	}
+}
+
+/* Text */
+
+var _ Column = (*ColumnText)(nil)
+
+type ColumnText struct {
+	*genericColumnBase[string]
+}
+
+func NewColumnText(name string, values []string) *ColumnText {
+	return &ColumnText{
+		genericColumnBase: &genericColumnBase[string]{
+			name:      name,
+			fieldType: entity.FieldTypeText,
+			values:    values,
+		},
+	}
+}
+
+func (c *ColumnText) Slice(start, end int) Column {
+	return &ColumnText{
 		genericColumnBase: c.genericColumnBase.slice(start, end),
 	}
 }

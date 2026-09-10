@@ -17,15 +17,15 @@
 package metacache
 
 import (
+	"context"
 	"sync"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
 
@@ -117,13 +117,16 @@ func NewMetaCache(
 
 func (c *metaCacheImpl) init(vchannel *datapb.VchannelInfo, pkFactory PkStatsFactory, bmFactor BM25StatsFactory) {
 	for _, seg := range vchannel.FlushedSegments {
-		c.addSegment(NewSegmentInfo(seg, pkFactory(seg), bmFactor(seg)))
+		c.addSegment(NewSegmentInfo(seg, pkFactory(seg), bmFactor(seg), NewSegmentStatsFromStats(seg.GetStats(), seg.GetNumOfRows())))
 	}
 
 	for _, seg := range vchannel.UnflushedSegments {
 		// segment state could be sealed for growing segment if flush request processed before datanode watch
 		seg.State = commonpb.SegmentState_Growing
-		c.addSegment(NewSegmentInfo(seg, pkFactory(seg), bmFactor(seg)))
+		// Restore the cumulative stats collector from the persisted Stats so a
+		// recovered growing segment keeps accumulating instead of undercounting
+		// from empty after restart.
+		c.addSegment(NewSegmentInfo(seg, pkFactory(seg), bmFactor(seg), NewSegmentStatsFromStats(seg.GetStats(), seg.GetNumOfRows())))
 	}
 }
 
@@ -134,7 +137,7 @@ func (c *metaCacheImpl) Collection() int64 {
 
 // AddSegment adds a segment from segment info.
 func (c *metaCacheImpl) AddSegment(segInfo *datapb.SegmentInfo, pkFactory PkStatsFactory, bmFactory BM25StatsFactory, actions ...SegmentAction) {
-	segment := NewSegmentInfo(segInfo, pkFactory(segInfo), bmFactory(segInfo))
+	segment := NewSegmentInfo(segInfo, pkFactory(segInfo), bmFactory(segInfo), NewEmptySegmentStats())
 
 	for _, action := range actions {
 		action(segment)
@@ -153,7 +156,7 @@ func (c *metaCacheImpl) addSegment(segment *SegmentInfo) {
 
 func (c *metaCacheImpl) RemoveSegments(filters ...SegmentFilter) []int64 {
 	if len(filters) == 0 {
-		log.Warn("remove segment without filters is not allowed", zap.Stack("callstack"))
+		mlog.Warn(context.TODO(), "remove segment without filters is not allowed", mlog.Stack("callstack"))
 		return nil
 	}
 	c.mu.Lock()
@@ -245,19 +248,17 @@ func (c *metaCacheImpl) rangeWithFilter(fn func(id int64, info *SegmentInfo), fi
 	}
 
 	for _, candidate := range candidates {
-		var segments map[int64]*SegmentInfo
 		if criterion.ids != nil {
-			segments = lo.SliceToMap(lo.FilterMap(criterion.ids.Collect(), func(id int64, _ int) (*SegmentInfo, bool) {
+			for id := range criterion.ids {
 				segment, ok := candidate[id]
-				return segment, ok
-			}), func(segment *SegmentInfo) (int64, *SegmentInfo) {
-				return segment.SegmentID(), segment
-			})
-		} else {
-			segments = candidate
+				if ok && criterion.Match(segment) {
+					fn(id, segment)
+				}
+			}
+			continue
 		}
 
-		for id, segment := range segments {
+		for id, segment := range candidate {
 			if criterion.Match(segment) {
 				fn(id, segment)
 			}
@@ -299,10 +300,11 @@ func (c *metaCacheImpl) UpdateSegmentView(partitionID int64,
 				flushedRows:      info.GetNumOfRows(),
 				startPosRecorded: true,
 				bfs:              newSegmentsBF[i],
+				stats:            NewEmptySegmentStats(),
 			}
 			c.segmentInfos[info.GetSegmentId()] = segInfo
 			c.stateSegments[info.GetState()][info.GetSegmentId()] = segInfo
-			log.Info("metacache does not have segment, add it", zap.Int64("segmentID", info.GetSegmentId()))
+			mlog.Info(context.TODO(), "metacache does not have segment, add it", mlog.FieldSegmentID(info.GetSegmentId()))
 		}
 	}
 
@@ -314,7 +316,7 @@ func (c *metaCacheImpl) UpdateSegmentView(partitionID int64,
 			continue
 		}
 		if _, ok := allSegments[segID]; !ok {
-			log.Info("remove dropped segment", zap.Int64("segmentID", segID))
+			mlog.Info(context.TODO(), "remove dropped segment", mlog.FieldSegmentID(segID))
 			delete(c.segmentInfos, segID)
 			delete(c.stateSegments[info.State()], segID)
 		}

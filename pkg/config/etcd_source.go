@@ -26,10 +26,11 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 const (
@@ -48,9 +49,11 @@ type EtcdSource struct {
 	manager         ConfigManager
 }
 
-func NewEtcdSource(etcdInfo *EtcdInfo) (*EtcdSource, error) {
-	log.Ctx(context.TODO()).Debug("init etcd source", zap.Any("etcdInfo", etcdInfo))
-	etcdCli, err := etcd.CreateEtcdClient(
+// newEtcdClient creates the etcd client described by info. The client is owned
+// by the caller: it is passed into NewEtcdSource (which never constructs its
+// own client) and may be shared with other etcd users.
+func newEtcdClient(etcdInfo *EtcdInfo) (*clientv3.Client, error) {
+	return etcd.CreateEtcdClient(
 		etcdInfo.UseEmbed,
 		etcdInfo.EnableAuth,
 		etcdInfo.UserName,
@@ -60,10 +63,20 @@ func NewEtcdSource(etcdInfo *EtcdInfo) (*EtcdSource, error) {
 		etcdInfo.CertFile,
 		etcdInfo.KeyFile,
 		etcdInfo.CaCertFile,
-		etcdInfo.MinVersion)
-	if err != nil {
-		return nil, err
+		etcdInfo.MinVersion,
+		etcd.WithDialTimeout(etcdInfo.DialTimeout))
+}
+
+// NewEtcdSource creates an etcd config source over the given client. The
+// client is injected by the caller and never constructed here, so it can be
+// shared with other etcd users (e.g. the version gate confirmator); the source
+// does not own it and Close does not close it. A nil client is rejected: the
+// source would otherwise fail asynchronously in its refresher.
+func NewEtcdSource(etcdCli *clientv3.Client, etcdInfo *EtcdInfo) (*EtcdSource, error) {
+	if etcdCli == nil {
+		return nil, merr.WrapErrServiceInternal("nil etcd client")
 	}
+	mlog.Debug(context.TODO(), "init etcd source", mlog.Any("etcdInfo", etcdInfo))
 	es := &EtcdSource{
 		etcdCli:        etcdCli,
 		ctx:            context.Background(),
@@ -163,14 +176,13 @@ func (es *EtcdSource) RefreshConfigurationsLinearizable() error {
 }
 
 func (es *EtcdSource) refreshConfigurationsWithOpts(extraOpts ...clientv3.OpOption) error {
-	log := log.Ctx(es.ctx).WithRateGroup("config.etcdSource", 1, 60)
 	es.RLock()
 	prefix := path.Join(es.keyPrefix, "config")
 	es.RUnlock()
 
 	ctx, cancel := context.WithTimeout(es.ctx, ReadConfigTimeout)
 	defer cancel()
-	log.RatedDebug(10, "etcd refreshConfigurations", zap.String("prefix", prefix), zap.Any("endpoints", es.etcdCli.Endpoints()))
+	mlog.RatedDebug(es.ctx, rate.Limit(10), "etcd refreshConfigurations", mlog.String("prefix", prefix), mlog.Any("endpoints", es.etcdCli.Endpoints()))
 	opts := append([]clientv3.OpOption{clientv3.WithPrefix()}, extraOpts...)
 	response, err := es.etcdCli.Get(ctx, prefix, opts...)
 	if err != nil {
@@ -182,7 +194,7 @@ func (es *EtcdSource) refreshConfigurationsWithOpts(extraOpts ...clientv3.OpOpti
 		key = strings.TrimPrefix(key, prefix+"/")
 		newConfig[key] = string(kv.Value)
 		newConfig[formatKey(key)] = string(kv.Value)
-		log.Debug("got config from etcd", zap.String("key", string(kv.Key)), zap.String("value", string(kv.Value)))
+		mlog.Debug(es.ctx, "got config from etcd", mlog.String("key", string(kv.Key)), mlog.String("value", string(kv.Value)))
 	}
 	return es.update(newConfig)
 }
@@ -196,7 +208,7 @@ func (es *EtcdSource) update(configs map[string]string) error {
 	events, err := PopulateEvents(es.GetSourceName(), es.currentConfigs, configs)
 	if err != nil {
 		es.Unlock()
-		log.Ctx(es.ctx).Warn("generating event error", zap.Error(err))
+		mlog.Warn(es.ctx, "generating event error", mlog.Err(err))
 		return err
 	}
 	es.currentConfigs = configs

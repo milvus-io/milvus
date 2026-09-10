@@ -23,14 +23,14 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
@@ -53,12 +53,22 @@ func newNonRetriableJobError(format string, args ...interface{}) error {
 	return &nonRetriableJobError{reason: fmt.Sprintf(format, args...)}
 }
 
-// exploreTempDirForJob returns the per-job explore temp directory path used
-// both when datacoord writes the explore manifest and when cleanupExploreTempForJob
-// reclaims it after the job reaches a terminal state. Keep the two call sites in
-// sync by routing both through this helper.
+var errMilvusTableRefreshSchemaInvalid = errors.New("milvus-table refresh schema invalid")
+
+// Bound DataCoord's job-level manifest reads without multiplying the per-task
+// object-storage concurrency already used by DataNodes.
+const externalRefreshManifestReadConcurrency = 16
+
+// exploreTempDirForJob returns the root directory for every Explore attempt of
+// one refresh job. Terminal cleanup removes this root and all attempt manifests.
 func exploreTempDirForJob(jobID int64) string {
 	return fmt.Sprintf("__explore_temp__/coord_%d", jobID)
+}
+
+// exploreTempDirForAttempt isolates manifests produced by retried planning
+// attempts while keeping the parent job directory as the cleanup boundary.
+func exploreTempDirForAttempt(jobID, attemptID int64) string {
+	return fmt.Sprintf("%s/attempt_%d", exploreTempDirForJob(jobID), attemptID)
 }
 
 // External Collection Refresh Manager
@@ -158,8 +168,20 @@ type externalCollectionRefreshManager struct {
 	// they could both observe a stale snapshot (before the WAL broadcast
 	// propagates back into the DataCoord cache) and both broadcast.
 	// forgetJob on GC prevents unbounded growth.
+	//
+	// cleanedJobs is the same shape for the OTHER one-time side effect, the
+	// per-job explore temp dir, and it is deliberately a SEPARATE key. The two
+	// obligations do not coincide: a job that has applied its segments owes a
+	// schema publish whatever state it ends in, while every job - published or
+	// not - owes exactly one temp-dir cleanup. Sharing one key let the Failed
+	// path claim it and permanently suppress a publish that was still due,
+	// which becomes reachable the moment a job can be applied and non-terminal
+	// at once (the index wait): a job that enters the wait and hits the timeout
+	// in the same processJob pass would commit its segments and never publish
+	// the refreshed source/spec. Both maps are guarded by notifiedMu.
 	notifiedMu   sync.Mutex
 	notifiedJobs map[int64]struct{}
+	cleanedJobs  map[int64]struct{}
 
 	// initJobsInFlight tracks jobs whose async task-creation (Phase B) is
 	// currently running. SubmitRefreshJobWithID persists the job record in
@@ -200,6 +222,7 @@ func NewExternalCollectionRefreshManager(
 		chunkManager:     chunkManager,
 		closeChan:        closeChan,
 		notifiedJobs:     make(map[int64]struct{}),
+		cleanedJobs:      make(map[int64]struct{}),
 		initJobsInFlight: make(map[int64]struct{}),
 	}
 
@@ -210,60 +233,71 @@ func NewExternalCollectionRefreshManager(
 	// state, so the schema-update callback fires before the task method
 	// returns. The checker still runs the same per-job function periodically
 	// as a safety net for missed events (e.g., after a DataCoord restart).
-	// forgetJob cleans up the notifiedJobs dedup map when the checker GC's
+	// forgetJob releases the per-job dedup entries when the checker GC's
 	// a job, preventing unbounded growth.
-	m.inspector = newRefreshInspector(ctx, refreshMeta, mt, scheduler, allocator, closeChan)
-	m.checker = newRefreshChecker(ctx, refreshMeta, closeChan, m.handleJobFinished, m.applyFinishedJobSegments, m.handleJobFailed, m.forgetJob, m.ensureTasksForInitJob)
+	m.inspector = newRefreshInspector(ctx, refreshMeta, scheduler, closeChan)
+	m.checker = newRefreshChecker(ctx, mt, refreshMeta, closeChan, m.handleJobFinished, m.applyFinishedJobSegments, m.handleJobFailed, m.forgetJob, m.ensureTasksForInitJob)
 	m.inspector.wrapTask = m.wrapTask
 
 	return m
 }
 
-// forgetJob removes a jobID from the notifiedJobs dedup map. Called by the
-// checker after successfully dropping a GC'd job, so the map does not grow
-// unboundedly across DataCoord lifetime.
+// forgetJob releases a jobID from both dedup maps. Called by the checker
+// after successfully dropping a GC'd job, so neither map grows unboundedly
+// across DataCoord lifetime.
 //
 // Also serves as a fallback cleanup path for Failed/Timeout jobs whose temp
-// dir was never reclaimed by the eager Finished path. Finished jobs already
-// had cleanup fired inside handleJobFinished (presence in notifiedJobs is
-// the signal), so forgetJob skips the redundant second cleanup for them.
+// dir was never reclaimed by a terminal handler; cleanupExploreTempOnce makes
+// the redundant second cleanup a no-op for jobs a handler already reclaimed.
 func (m *externalCollectionRefreshManager) forgetJob(jobID int64) {
-	m.notifiedMu.Lock()
-	_, alreadyCleaned := m.notifiedJobs[jobID]
-	delete(m.notifiedJobs, jobID)
-	m.notifiedMu.Unlock()
+	// Cleanup first, then drop the keys: releasing them first would make this
+	// same call re-run a cleanup a terminal handler already did.
+	m.cleanupExploreTempOnce(jobID)
 
-	if alreadyCleaned {
-		// Terminal handler (handleJobFinished or handleJobFailed) already
-		// reclaimed this job's explore temp dir; skip the redundant pass.
-		return
-	}
-	m.cleanupExploreTempForJob(jobID)
+	m.notifiedMu.Lock()
+	delete(m.notifiedJobs, jobID)
+	delete(m.cleanedJobs, jobID)
+	m.notifiedMu.Unlock()
 }
 
 // handleJobFailed reclaims per-job resources when the checker transitions
 // a job into Failed state (via aggregateJobState or tryTimeoutJob). It is
-// the Failed-path symmetric companion to handleJobFinished: both paths add
-// the jobID to notifiedJobs so forgetJob knows cleanup already ran, and
-// both paths fire cleanupExploreTempForJob exactly once per jobID.
+// the Failed-path companion to handleJobFinished for the temp dir, and only
+// for the temp dir.
 //
-// Unlike handleJobFinished, this path does NOT touch schemaUpdater — a
-// failed refresh leaves the collection schema unchanged by design.
+// It must not claim the schema-publish key. A Failed job that never applied
+// its segments has no publish due, so claiming it looks free - but with the
+// index wait a job CAN be applied and Failed at once (it applied on wait
+// entry, then outran the job timeout), and there the publish is still owed:
+// its segments are the collection's contents and are being served, and index
+// builds read the external source/spec from the collection schema. Claiming
+// one key for both would silence that publish for good, since the only key
+// removal is forgetJob at GC. handleJobFinished, which ensureJobFinishedNotified
+// still fires for such a job, owns the publish.
 func (m *externalCollectionRefreshManager) handleJobFailed(jobID int64) {
+	m.cleanupExploreTempOnce(jobID)
+}
+
+// cleanupExploreTempOnce reclaims the per-job explore temp dir at most once
+// per jobID, whichever path gets there first (Finished, Failed, or the GC
+// fallback). The underlying removal is idempotent; this only keeps the
+// object-store round trips down to one.
+func (m *externalCollectionRefreshManager) cleanupExploreTempOnce(jobID int64) {
 	m.notifiedMu.Lock()
-	if _, already := m.notifiedJobs[jobID]; already {
+	if _, already := m.cleanedJobs[jobID]; already {
 		m.notifiedMu.Unlock()
 		return
 	}
-	m.notifiedJobs[jobID] = struct{}{}
+	m.cleanedJobs[jobID] = struct{}{}
 	m.notifiedMu.Unlock()
 
 	m.cleanupExploreTempForJob(jobID)
 }
 
 // cleanupExploreTempForJob removes the per-job explore temp directory on
-// shared storage. The directory layout is `__explore_temp__/coord_{jobID}`,
-// matching the path the datacoord wrote via the loon FFI in fetchFiles.
+// shared storage. Every planning attempt writes below
+// `__explore_temp__/coord_{jobID}/attempt_{attemptID}`; removing the job root
+// reclaims successful and abandoned attempts together.
 //
 // Both passes are required because LocalChunkManager and RemoteChunkManager
 // have different removal semantics:
@@ -284,49 +318,103 @@ func (m *externalCollectionRefreshManager) cleanupExploreTempForJob(jobID int64)
 		return
 	}
 	exploreBaseDir := exploreTempDirForJob(jobID)
+	explorePrefix := exploreBaseDir + "/"
 	// Derive from m.ctx so shutdown cancels in-flight cleanup instead of
 	// blocking Stop() on a slow object-store call.
 	ctx, cancel := context.WithTimeout(m.ctx, 30*time.Second)
 	defer cancel()
 
-	if err := m.chunkManager.RemoveWithPrefix(ctx, exploreBaseDir); err != nil {
-		log.Warn("failed to remove explore temp prefix",
-			zap.Int64("jobID", jobID),
-			zap.String("dir", exploreBaseDir),
-			zap.Error(err))
+	if err := m.chunkManager.RemoveWithPrefix(ctx, explorePrefix); err != nil {
+		mlog.Warn(m.ctx, "failed to remove explore temp prefix",
+			mlog.FieldJobID(jobID),
+			mlog.String("dir", explorePrefix),
+			mlog.Err(err))
 	}
 	if err := m.chunkManager.Remove(ctx, exploreBaseDir); err != nil {
-		log.Warn("failed to remove explore temp root",
-			zap.Int64("jobID", jobID),
-			zap.String("dir", exploreBaseDir),
-			zap.Error(err))
+		mlog.Warn(m.ctx, "failed to remove explore temp root",
+			mlog.FieldJobID(jobID),
+			mlog.String("dir", exploreBaseDir),
+			mlog.Err(err))
 	}
 }
 
+// applyFinishedJobSegments validates durable task results against the published
+// ownership plan, aggregates them, and applies the complete result as one
+// job-level metadata mutation.
+// An owned baseline segment absent from both kept and updated results is treated
+// as removed, but a task may classify only the baseline segments it owns.
 func (m *externalCollectionRefreshManager) applyFinishedJobSegments(ctx context.Context, job *datapb.ExternalCollectionRefreshJob) error {
-	tasks := m.refreshMeta.GetTasksByJobID(job.GetJobId())
+	tasks, err := m.refreshMeta.GetCommittedTaskResultsByJobID(job.GetJobId())
+	if err != nil {
+		return err
+	}
 	if len(tasks) == 0 {
-		return fmt.Errorf("job %d has no tasks to apply", job.GetJobId())
+		return merr.WrapErrServiceInternalMsg("job %d has no tasks to apply", job.GetJobId())
 	}
 
+	// Reconstruct the immutable refresh baseline and its exclusive task owners
+	// from persisted metadata instead of the collection's current segment set.
+	ownerBySegment := make(map[int64]int64)
+	baselineSegmentIDs := make([]int64, 0)
+	for _, task := range tasks {
+		if !isSupportedExternalRefreshOwnershipPlanVersion(task.GetOwnershipPlanVersion()) {
+			return merr.WrapErrServiceInternalMsg(
+				"job %d contains external refresh task %d with unsupported ownership plan version %d; retry refresh",
+				job.GetJobId(),
+				task.GetTaskId(),
+				task.GetOwnershipPlanVersion(),
+			)
+		}
+		for _, segmentID := range task.GetOwnedSegmentIds() {
+			if segmentID <= 0 {
+				return merr.WrapErrServiceInternalMsg("task %d owns invalid segment ID %d", task.GetTaskId(), segmentID)
+			}
+			if ownerTaskID, ok := ownerBySegment[segmentID]; ok {
+				return merr.WrapErrServiceInternalMsg(
+					"segment %d is owned by both external refresh tasks %d and %d",
+					segmentID,
+					ownerTaskID,
+					task.GetTaskId(),
+				)
+			}
+			ownerBySegment[segmentID] = task.GetTaskId()
+			baselineSegmentIDs = append(baselineSegmentIDs, segmentID)
+		}
+	}
+	// Validate that every baseline classification came from its owner task while
+	// allowing newly allocated segment IDs that are outside the baseline.
 	keptSet := make(map[int64]struct{})
 	updatedSet := make(map[int64]struct{})
+	classifiedBaselineCount := 0
+	patchedSegmentCount := 0
+	createdSegmentCount := 0
 	keptSegments := make([]int64, 0)
 	updatedSegments := make([]*datapb.SegmentInfo, 0)
 	for _, task := range tasks {
 		if task.GetState() != indexpb.JobState_JobStateFinished {
-			return fmt.Errorf("job %d has non-finished task %d in state %s",
+			return merr.WrapErrServiceInternalMsg("job %d has non-finished task %d in state %s",
 				job.GetJobId(), task.GetTaskId(), task.GetState().String())
 		}
 		if !task.GetResultReady() {
-			return fmt.Errorf("job %d has finished task %d without persisted refresh result; please retry refresh",
+			return merr.WrapErrServiceInternalMsg("job %d has finished task %d without persisted refresh result; please retry refresh",
 				job.GetJobId(), task.GetTaskId())
 		}
 		for _, segmentID := range task.GetKeptSegments() {
+			ownerTaskID, ok := ownerBySegment[segmentID]
+			if !ok || ownerTaskID != task.GetTaskId() {
+				return merr.WrapErrServiceInternalMsg(
+					"task %d returned kept segment %d owned by task %d",
+					task.GetTaskId(),
+					segmentID,
+					ownerTaskID,
+				)
+			}
 			if _, ok := keptSet[segmentID]; ok {
-				continue
+				return merr.WrapErrServiceInternalMsg("job %d has duplicate kept segment %d from task %d",
+					job.GetJobId(), segmentID, task.GetTaskId())
 			}
 			keptSet[segmentID] = struct{}{}
+			classifiedBaselineCount++
 			keptSegments = append(keptSegments, segmentID)
 		}
 		for _, segment := range task.GetUpdatedSegments() {
@@ -334,21 +422,84 @@ func (m *externalCollectionRefreshManager) applyFinishedJobSegments(ctx context.
 				continue
 			}
 			if _, ok := updatedSet[segment.GetID()]; ok {
-				return fmt.Errorf("job %d has duplicate updated segment %d from task %d",
+				return merr.WrapErrServiceInternalMsg("job %d has duplicate updated segment %d from task %d",
 					job.GetJobId(), segment.GetID(), task.GetTaskId())
+			}
+			if ownerTaskID, ok := ownerBySegment[segment.GetID()]; ok {
+				if ownerTaskID != task.GetTaskId() {
+					return merr.WrapErrServiceInternalMsg(
+						"task %d returned updated segment %d owned by task %d",
+						task.GetTaskId(),
+						segment.GetID(),
+						ownerTaskID,
+					)
+				}
+				if _, kept := keptSet[segment.GetID()]; kept {
+					return merr.WrapErrServiceInternalMsg("segment %d cannot be both kept and updated", segment.GetID())
+				}
+				classifiedBaselineCount++
+				patchedSegmentCount++
+			} else {
+				createdSegmentCount++
 			}
 			updatedSet[segment.GetID()] = struct{}{}
 			updatedSegments = append(updatedSegments, segment)
 		}
 	}
 
-	return applyExternalCollectionSegmentUpdate(
+	// Task results carry physical row counts for every patched or newly created
+	// segment. Unchanged segments are represented only by ID, so read their
+	// baseline row counts from one metadata snapshot before applying the job.
+	baselineRowsBySegment := make(map[int64]int64, len(baselineSegmentIDs))
+	var baselineRows int64
+	if m.mt != nil {
+		baselineSegments := getExternalRefreshSegmentSnapshots(m.mt, baselineSegmentIDs)
+		for index, segment := range baselineSegments {
+			if segment == nil {
+				continue
+			}
+			rows := segment.GetNumOfRows()
+			baselineRowsBySegment[baselineSegmentIDs[index]] = rows
+			baselineRows += rows
+		}
+	}
+	var refreshedRows int64
+	for _, segmentID := range keptSegments {
+		refreshedRows += baselineRowsBySegment[segmentID]
+	}
+	for _, segment := range updatedSegments {
+		refreshedRows += segment.GetNumOfRows()
+	}
+
+	mlog.Info(ctx, "aggregated ownership-scoped external refresh results",
+		mlog.FieldJobID(job.GetJobId()),
+		mlog.FieldCollectionID(job.GetCollectionId()),
+		mlog.Int("numTasks", len(tasks)),
+		mlog.Int("baselineSegments", len(baselineSegmentIDs)),
+		mlog.Int("keptSegments", len(keptSegments)),
+		mlog.Int("updatedSegments", len(updatedSegments)),
+		mlog.Int("patchedSegments", patchedSegmentCount),
+		mlog.Int("createdSegments", createdSegmentCount),
+		mlog.Int("removedSegments", len(baselineSegmentIDs)-classifiedBaselineCount),
+		mlog.Int("finalSegments", len(keptSegments)+len(updatedSegments)),
+		mlog.Int64("baselineRows", baselineRows),
+		mlog.Int64("refreshedRows", refreshedRows),
+		mlog.Int64("rowDelta", refreshedRows-baselineRows))
+
+	// Intentionally allow the collection schema to advance while tasks are
+	// running. For the current additive-only scope, an older-schema refresh can
+	// be applied; it may miss newly added external columns, and the next refresh
+	// self-heals them. Segment-level validation still rejects schema-version
+	// rollback, but drop, rename, or type changes need a schema gate or lock
+	// before they are supported.
+	return applyExternalCollectionSegmentUpdateForBaseline(
 		ctx,
 		m.mt,
 		job.GetCollectionId(),
+		baselineSegmentIDs,
 		keptSegments,
 		updatedSegments,
-		zap.Int64("jobID", job.GetJobId()),
+		mlog.FieldJobID(job.GetJobId()),
 	)
 }
 
@@ -390,14 +541,26 @@ func (m *externalCollectionRefreshManager) Stop() {
 	m.wg.Wait()
 }
 
-// handleJobFinished is invoked when a refresh job transitions to Finished.
-// It is called both eagerly (synchronously from the task path via
-// processJobByID) and from the periodic checker tick. The notifiedJobs
-// dedup map below guarantees exactly-once schemaUpdater invocation per
-// jobID: concurrent calls from the two paths race on the mutex, the loser
-// sees the jobID already present and short-circuits. The source/spec
-// equality check is a cheap secondary guard (e.g., for jobs that finished
-// with the same schema as the current collection).
+// handleJobFinished publishes the refreshed external source/spec for a job
+// whose segments are applied. It is called both eagerly (synchronously from
+// the task path via processJobByID) and from the periodic checker tick. The
+// notifiedJobs dedup map below admits at most ONE schemaUpdater call in
+// flight per jobID, and none at all once one has delivered: concurrent calls
+// from the two paths race on the mutex, the loser sees the jobID already
+// present and short-circuits. The source/spec equality check is a cheap
+// secondary guard (e.g., for jobs that finished with the same schema as the
+// current collection).
+//
+// "Applied", not "Finished", is the trigger: ensureJobFinishedNotified fires
+// this for a job that is Finished, and also for one still in the index wait
+// or one that outran the job timeout while waiting - both have committed
+// their segments, so the publish is due either way.
+//
+// "Owed" is about which jobs reach here; whether the publish actually lands
+// is the dedup key's own business, and the key is a lock before it is a
+// receipt - see the block below. A call that fails releases it, so a
+// transient RootCoord or WAL failure retries on the next checker tick instead
+// of reading as published for the rest of this DataCoord lifetime.
 func (m *externalCollectionRefreshManager) handleJobFinished(ctx context.Context, job *datapb.ExternalCollectionRefreshJob) {
 	if m.schemaUpdater == nil {
 		return
@@ -413,22 +576,48 @@ func (m *externalCollectionRefreshManager) handleJobFinished(ctx context.Context
 	mapSize := len(m.notifiedJobs)
 	m.notifiedMu.Unlock()
 	if mapSize > 1000 {
-		log.Warn("notifiedJobs dedup map is large, GC may be lagging",
-			zap.Int("size", mapSize))
+		mlog.Warn(ctx, "notifiedJobs dedup map is large, GC may be lagging",
+			mlog.Int("size", mapSize))
 	}
 
+	// The key is an in-flight lock first and a delivered marker second. It is
+	// claimed above so a concurrent caller cannot broadcast the same schema
+	// twice, and released below unless this call actually delivered - a
+	// transient RootCoord or WAL failure must not read as "published" for the
+	// rest of this DataCoord lifetime, since the only other removal is
+	// forgetJob at GC.
+	//
+	// Releasing on failure cannot reopen the duplicate-broadcast window it
+	// guards: the release happens after this call is done, so no other caller
+	// is ever in flight at the same time. What it buys is a retry on the next
+	// checker tick - and with the index wait that retry is load-bearing, not
+	// cosmetic. nudgeIndexBuilds holds the build acceleration until the
+	// refreshed source/spec are visible in collection meta, so a publish that
+	// failed once and never retried would suppress the nudge for the whole
+	// wait and leave the refresh to run out its timeout.
+	published := false
+	defer func() {
+		if published {
+			return
+		}
+		m.notifiedMu.Lock()
+		delete(m.notifiedJobs, job.GetJobId())
+		m.notifiedMu.Unlock()
+	}()
+
 	// Reclaim the per-job explore temp dir now that all datanode tasks have
-	// finished consuming the manifest. The Failed/Timeout path is covered
-	// later by forgetJob when the checker GCs the job.
-	defer m.cleanupExploreTempForJob(job.GetJobId())
+	// finished consuming the manifest. Deduped on its own key, so a job that
+	// reached here after handleJobFailed already reclaimed it does not repeat
+	// the object-store round trip.
+	defer m.cleanupExploreTempOnce(job.GetJobId())
 
 	// Get current collection info
 	collection, err := m.collectionGetter(ctx, job.GetCollectionId())
 	if err != nil || collection == nil {
-		log.Warn("failed to get collection for schema update after refresh",
-			zap.Int64("jobID", job.GetJobId()),
-			zap.Int64("collectionID", job.GetCollectionId()),
-			zap.Error(err))
+		mlog.Warn(ctx, "failed to get collection for schema update after refresh, will retry on the next check",
+			mlog.FieldJobID(job.GetJobId()),
+			mlog.FieldCollectionID(job.GetCollectionId()),
+			mlog.Err(err))
 		return
 	}
 
@@ -439,23 +628,28 @@ func (m *externalCollectionRefreshManager) handleJobFinished(ctx context.Context
 	newSpec := job.GetExternalSpec()
 
 	if currentSource == newSource && currentSpec == newSpec {
-		return // No change, skip
+		// Nothing to deliver - the collection already describes this refresh.
+		// That is a delivered publish, so keep the key.
+		published = true
+		return
 	}
 
-	log.Info("updating collection schema after refresh",
-		zap.Int64("jobID", job.GetJobId()),
-		zap.Int64("collectionID", job.GetCollectionId()),
-		zap.String("oldSource", currentSource),
-		zap.String("newSource", newSource),
-		zap.String("oldSpec", externalspec.RedactExternalSpec(currentSpec)),
-		zap.String("newSpec", externalspec.RedactExternalSpec(newSpec)))
+	mlog.Info(ctx, "updating collection schema after refresh",
+		mlog.FieldJobID(job.GetJobId()),
+		mlog.FieldCollectionID(job.GetCollectionId()),
+		mlog.String("oldSource", currentSource),
+		mlog.String("newSource", newSource),
+		mlog.String("oldSpec", externalspec.RedactExternalSpecForLog(currentSpec)),
+		mlog.String("newSpec", externalspec.RedactExternalSpecForLog(newSpec)))
 
 	if err := m.schemaUpdater(ctx, job.GetCollectionId(), newSource, newSpec); err != nil {
-		log.Warn("failed to update external schema after refresh, schema may be stale until next refresh",
-			zap.Int64("jobID", job.GetJobId()),
-			zap.Int64("collectionID", job.GetCollectionId()),
-			zap.Error(err))
+		mlog.Warn(ctx, "failed to update external schema after refresh, will retry on the next check",
+			mlog.FieldJobID(job.GetJobId()),
+			mlog.FieldCollectionID(job.GetCollectionId()),
+			mlog.Err(err))
+		return
 	}
+	published = true
 }
 
 // ============================================================================
@@ -496,16 +690,16 @@ func (m *externalCollectionRefreshManager) SubmitRefreshJobWithID(
 	collectionName string,
 	externalSource, externalSpec string,
 ) (int64, error) {
-	log := log.Ctx(ctx).With(
-		zap.Int64("jobID", jobID),
-		zap.Int64("collectionID", collectionID),
-		zap.String("collectionName", collectionName))
+	log := mlog.With(
+		mlog.FieldJobID(jobID),
+		mlog.FieldCollectionID(collectionID),
+		mlog.FieldCollectionName(collectionName))
 
 	// Idempotency: if job already exists, return. TOCTOU between this check and AddJob
 	// is mitigated by WAL idempotency (same JobID on retry) and per-collection lock in AddJob.
 	existingJob := m.refreshMeta.GetJob(jobID)
 	if existingJob != nil {
-		log.Info("job already exists, skip creating")
+		log.Info(ctx, "job already exists, skip creating")
 		// Retry Phase B in case the prior submission failed to create tasks
 		// and left the job stuck in Init. ensureTasksForInitJob dedups
 		// concurrent invocations internally.
@@ -519,13 +713,13 @@ func (m *externalCollectionRefreshManager) SubmitRefreshJobWithID(
 	// DataCoord syncs the newly created collection.
 	collection, err := m.collectionGetter(ctx, collectionID)
 	if err != nil || collection == nil {
-		log.Warn("collection not found", zap.Error(err))
+		log.Warn(ctx, "collection not found", mlog.Err(err))
 		return 0, merr.WrapErrCollectionNotFound(collectionID)
 	}
 
 	// Validate it's an external collection
 	if !typeutil.IsExternalCollection(collection.Schema) {
-		log.Warn("not an external collection")
+		log.Warn(ctx, "not an external collection")
 		return 0, merr.WrapErrCollectionIllegalSchema(collectionName, "not an external collection")
 	}
 
@@ -541,9 +735,9 @@ func (m *externalCollectionRefreshManager) SubmitRefreshJobWithID(
 	// Only one active refresh job is allowed at a time
 	activeJob := m.refreshMeta.GetActiveJobByCollectionID(collectionID)
 	if activeJob != nil {
-		log.Warn("refresh job already in progress",
-			zap.Int64("existingJobID", activeJob.GetJobId()),
-			zap.String("existingJobState", activeJob.GetState().String()))
+		log.Warn(ctx, "refresh job already in progress",
+			mlog.Int64("existingJobID", activeJob.GetJobId()),
+			mlog.String("existingJobState", activeJob.GetState().String()))
 		return 0, merr.WrapErrTaskDuplicate("refresh_external_collection", fmt.Sprintf("refresh job %d is already in progress for collection %s, please wait for it to complete or cancel it first",
 			activeJob.GetJobId(), collectionName))
 	}
@@ -564,12 +758,12 @@ func (m *externalCollectionRefreshManager) SubmitRefreshJobWithID(
 	}
 
 	if err := m.refreshMeta.AddJob(job); err != nil {
-		log.Warn("failed to add job to meta", zap.Error(err))
+		log.Warn(ctx, "failed to add job to meta", mlog.Err(err))
 		return 0, err
 	}
 
-	log.Info("external collection refresh job accepted (Init), task creation deferred to async phase",
-		zap.String("externalSource", externalSource))
+	log.Info(ctx, "external collection refresh job accepted (Init), task creation deferred to async phase",
+		mlog.String("externalSource", externalSource))
 
 	// Phase B: kick off async task creation so this call returns immediately.
 	// The checker tick drives the same path as a retry safety net, and
@@ -625,47 +819,52 @@ func (m *externalCollectionRefreshManager) ensureTasksForInitJob(jobID int64) {
 		ctx, cancel := context.WithTimeout(m.ctx, timeout)
 		defer cancel()
 
-		log := log.Ctx(ctx).With(zap.Int64("jobID", jobID))
+		log := mlog.With(mlog.FieldJobID(jobID))
 
 		// Re-read under goroutine to catch race where state changed between
 		// the cheap pre-check above and actual work start.
 		freshJob := m.refreshMeta.GetJob(jobID)
 		if freshJob == nil {
-			log.Info("init job gone before async task creation ran")
+			log.Info(m.ctx, "init job gone before async task creation ran")
 			return
 		}
 		if freshJob.GetState() != indexpb.JobState_JobStateInit {
-			log.Info("init job no longer in Init state, skip async task creation",
-				zap.String("state", freshJob.GetState().String()))
+			log.Info(m.ctx, "init job no longer in Init state, skip async task creation",
+				mlog.String("state", freshJob.GetState().String()))
 			return
 		}
 		if len(freshJob.GetTaskIds()) > 0 {
-			log.Info("init job already has tasks, skip async task creation",
-				zap.Int("taskCount", len(freshJob.GetTaskIds())))
+			log.Info(m.ctx, "init job already has tasks, skip async task creation",
+				mlog.Int("taskCount", len(freshJob.GetTaskIds())))
 			return
 		}
 
 		tasks, err := m.createTasksForJob(ctx, freshJob)
 		if err != nil {
+			if errors.Is(err, errExternalRefreshTaskPlanNotPublishable) {
+				log.Info(m.ctx, "async task creation stopped because job is no longer publishable",
+					mlog.Err(err))
+				return
+			}
 			// Non-retriable failures (empty source, zero-row source, etc.)
 			// must transition the job to Failed immediately. Otherwise the
 			// checker tick keeps re-running the same explore that will fail
 			// the same way forever, giving operators no signal to act on.
 			var perm *nonRetriableJobError
 			if errors.As(err, &perm) {
-				log.Warn("non-retriable error in task creation, marking job failed",
-					zap.Error(err))
+				log.Warn(m.ctx, "non-retriable error in task creation, marking job failed",
+					mlog.Err(err))
 				if _, uerr := m.refreshMeta.UpdateJobState(jobID,
 					indexpb.JobState_JobStateFailed, perm.Error()); uerr != nil {
-					log.Warn("failed to mark job failed", zap.Error(uerr))
+					log.Warn(m.ctx, "failed to mark job failed", mlog.Err(uerr))
 				}
 				return
 			}
 			// Transient failures (e.g. S3 blip) — leave in Init so the
 			// checker tick / WAL redelivery path retries. tryTimeoutJob
 			// bounds how long a stuck job can linger.
-			log.Warn("async task creation failed, will retry on next checker tick",
-				zap.Error(err))
+			log.Warn(m.ctx, "async task creation failed, will retry on next checker tick",
+				mlog.Err(err))
 			return
 		}
 
@@ -673,42 +872,44 @@ func (m *externalCollectionRefreshManager) ensureTasksForInitJob(jobID int64) {
 		for _, t := range tasks {
 			m.scheduler.Enqueue(t)
 		}
-		log.Info("async task creation completed",
-			zap.Int("taskCount", len(tasks)))
+		log.Info(m.ctx, "async task creation completed",
+			mlog.Int("taskCount", len(tasks)))
 	}()
 }
 
 // createTasksForJob creates task(s) for a job and persists them to meta.
 // Returns the created tasks for subsequent scheduling.
 //
-// Task count is ceil(totalFiles / ExternalCollectionFilesPerTask), driven by
-// the config — it is independent of the current DataNode count. Each task
-// carries the shared manifest path plus a [FileIndexBegin, FileIndexEnd)
-// slice; DataNodes then read the manifest from object storage once and
-// process only their assigned range, so the FFI explore runs exactly once
-// on DataCoord.
+// Task ranges use ExternalCollectionFilesPerTask as a target, but ownership
+// closure may make a protected range larger. Each task carries the manifest
+// produced by this planning attempt plus a [FileIndexBegin, FileIndexEnd)
+// slice. All tasks in the plan share that manifest; if publication fails, a
+// later planning retry may run Explore again and produce another manifest.
 func (m *externalCollectionRefreshManager) createTasksForJob(
 	ctx context.Context,
 	job *datapb.ExternalCollectionRefreshJob,
 ) ([]*refreshExternalCollectionTask, error) {
-	log := log.Ctx(ctx).With(zap.Int64("jobID", job.GetJobId()), zap.Int64("collectionID", job.GetCollectionId()))
+	log := mlog.With(mlog.FieldJobID(job.GetJobId()), mlog.FieldCollectionID(job.GetCollectionId()))
 
-	// ExploreFiles once on DataCoord to get the full file list and manifest path.
-	// Manifest is written to S3 so DataNodes can read file info by range.
+	// Explore once for this planning attempt to get the full file list and
+	// manifest path. The manifest is written to shared storage so all DataNodes
+	// in the resulting plan can read their assigned ranges.
 	allFiles, manifestPath, err := m.exploreExternalFiles(ctx, job)
 	if err != nil {
-		// Any FFI failure during explore is terminal for this job: the
-		// source is unreachable, denied, malformed, or absent and no
-		// amount of in-loop retrying can change that. Surface as
-		// non-retriable so the user gets a clear RefreshFailed signal
-		// (with the underlying error attached) and can re-issue refresh
-		// after fixing the source. Pure in-process errors (ctx cancel,
-		// etcd unavailable, etc.) keep the existing transient path so
-		// a real outage still gets retried.
-		if errors.Is(err, packed.ErrLoonTransient) {
+		// Hard explore failures are terminal for this job: the source is
+		// unreachable, denied, malformed, absent, or its snapshot metadata
+		// is incompatible with the requested external format. Surface them
+		// as non-retriable so the user gets a clear RefreshFailed signal
+		// and can re-issue refresh after fixing the source. Pure
+		// in-process errors (ctx cancel, etcd unavailable, etc.) keep the
+		// existing transient path so a real outage still gets retried.
+		if merr.GetErrorType(err) == merr.InputError ||
+			errors.Is(err, errMilvusTableRefreshSchemaInvalid) ||
+			errors.Is(err, packed.ErrLoonTransient) ||
+			packed.IsMilvusTableStorageV2ManifestListMissing(err) {
 			return nil, newNonRetriableJobError("explore external files failed: %v", err)
 		}
-		return nil, fmt.Errorf("failed to explore external files: %w", err)
+		return nil, merr.WrapErrServiceInternalErr(err, "failed to explore external files")
 	}
 	if len(allFiles) == 0 {
 		return nil, newNonRetriableJobError("no files found in external source: %s", job.GetExternalSource())
@@ -718,80 +919,129 @@ func (m *externalCollectionRefreshManager) createTasksForJob(
 	// parquet metadata, so FileInfo.NumRows carries -1, not a real row count.
 	// The real guard lives at datanode's balanceFragmentsToSegments, where
 	// fragment RowCount is populated from manifest (endRow - startRow).
-	log.Info("explored external files for task splitting",
-		zap.Int("totalFiles", len(allFiles)),
-		zap.String("manifestPath", manifestPath))
+	log.Info(ctx, "explored external files for task splitting",
+		mlog.Int("totalFiles", len(allFiles)),
+		mlog.String("manifestPath", manifestPath))
 
-	// Determine task count: ceil(totalFiles/filesPerTask).
-	// - filesPerTask: configurable via dataCoord.externalCollectionFilesPerTask
-	// In standalone mode, multiple tasks run concurrently on the single DN's worker pool.
-	minFilesPerTask := int(paramtable.Get().DataCoordCfg.ExternalCollectionFilesPerTask.GetAsInt64())
-
-	type taskChunk struct {
-		fileIndexBegin int64
-		fileIndexEnd   int64
-	}
-	var chunks []taskChunk
-	numTasks := (len(allFiles) + minFilesPerTask - 1) / minFilesPerTask
-	if numTasks < 1 {
-		numTasks = 1
-	}
-	filesPerTask := (len(allFiles) + numTasks - 1) / numTasks // ceil division
-	for i := 0; i < len(allFiles); i += filesPerTask {
-		end := i + filesPerTask
-		if end > len(allFiles) {
-			end = len(allFiles)
+	currentSegments := m.mt.SelectSegments(
+		ctx,
+		CollectionFilter(job.GetCollectionId()),
+		SegmentFilterFunc(isSegmentHealthy),
+	)
+	baselineSegments := make([]*datapb.SegmentInfo, 0, len(currentSegments))
+	baselineManifestSegments := 0
+	for _, segment := range currentSegments {
+		baselineSegments = append(baselineSegments, segment.SegmentInfo)
+		if segment.GetManifestPath() != "" {
+			baselineManifestSegments++
 		}
-		chunks = append(chunks, taskChunk{
-			fileIndexBegin: int64(i),
-			fileIndexEnd:   int64(end),
-		})
 	}
 
-	log.Info("splitting refresh job into tasks",
-		zap.Int("totalFiles", len(allFiles)),
-		zap.Int("numTasks", len(chunks)))
+	manifestReadStart := time.Now()
+	segmentFragments, err := packed.BuildCurrentSegmentFragmentsConcurrently(
+		ctx,
+		baselineSegments,
+		createStorageConfig(),
+		nil,
+		externalRefreshManifestReadConcurrency,
+	)
+	if err != nil {
+		return nil, merr.Wrap(err, "read external refresh baseline manifests")
+	}
+	log.Info(ctx, "read external refresh baseline manifests",
+		mlog.Int("baselineSegments", len(baselineSegments)),
+		mlog.Int("manifestSegments", baselineManifestSegments),
+		mlog.Int("maxConcurrency", externalRefreshManifestReadConcurrency),
+		mlog.Duration("duration", time.Since(manifestReadStart)))
 
-	var tasks []*refreshExternalCollectionTask
-	for _, chunk := range chunks {
+	filesPerTask := paramtable.Get().DataCoordCfg.ExternalCollectionFilesPerTask.GetAsInt64()
+	taskPlans, ownershipSummary, err := planExternalRefreshOwnership(
+		allFiles,
+		segmentFragments,
+		filesPerTask,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	log.Info(ctx, "splitting refresh job into tasks",
+		mlog.Int("totalFiles", len(allFiles)),
+		mlog.Int64("filesPerTask", filesPerTask),
+		mlog.Int("baselineSegments", len(baselineSegments)),
+		mlog.Int("baseNumTasks", ownershipSummary.BaseTaskCount),
+		mlog.Int("numTasks", ownershipSummary.FinalTaskCount),
+		mlog.Int("closureRemovedBoundaries", ownershipSummary.ClosureRemovedBoundaries),
+		mlog.Int("maxTaskFiles", ownershipSummary.MaxTaskFiles),
+		mlog.Int("maxOwnedSegments", ownershipSummary.MaxOwnedSegments),
+		mlog.Int("tasksWithoutOwnedSegments", ownershipSummary.TasksWithoutOwnedSegments),
+		mlog.Int("baselineFilePaths", ownershipSummary.BaselineFilePaths),
+		mlog.Int("addedFilePaths", ownershipSummary.AddedFilePaths),
+		mlog.Int("removedFilePaths", ownershipSummary.RemovedFilePaths),
+		mlog.Int("unchangedFilePaths", ownershipSummary.UnchangedFilePaths))
+
+	// Allocate IDs and build every task first (ID allocation order preserved),
+	// then persist all task saves plus the job's updated TaskIds as a single
+	// composite catalog write - the job written last as the commit marker - so
+	// a partial failure can no longer desync the job's TaskIds from the
+	// persisted task set. In-memory bookkeeping is applied only after that
+	// write succeeds.
+	rawTasks := make([]*datapb.ExternalCollectionRefreshTask, 0, len(taskPlans))
+	for _, plan := range taskPlans {
 		taskID, err := m.allocator.AllocID(ctx)
 		if err != nil {
-			log.Warn("failed to allocate task ID", zap.Error(err))
+			log.Warn(ctx, "failed to allocate task ID", mlog.Err(err))
 			return nil, err
 		}
 
 		task := &datapb.ExternalCollectionRefreshTask{
-			TaskId:              taskID,
-			JobId:               job.GetJobId(),
-			CollectionId:        job.GetCollectionId(),
-			Version:             0,
-			NodeId:              0,
-			State:               indexpb.JobState_JobStateInit,
-			ExternalSource:      job.GetExternalSource(),
-			ExternalSpec:        job.GetExternalSpec(),
-			Progress:            0,
-			ExploreManifestPath: manifestPath,
-			FileIndexBegin:      chunk.fileIndexBegin,
-			FileIndexEnd:        chunk.fileIndexEnd,
+			TaskId:               taskID,
+			JobId:                job.GetJobId(),
+			CollectionId:         job.GetCollectionId(),
+			Version:              0,
+			NodeId:               0,
+			State:                indexpb.JobState_JobStateInit,
+			ExternalSource:       job.GetExternalSource(),
+			ExternalSpec:         job.GetExternalSpec(),
+			Progress:             0,
+			ExploreManifestPath:  manifestPath,
+			FileIndexBegin:       plan.FileIndexBegin,
+			FileIndexEnd:         plan.FileIndexEnd,
+			OwnershipPlanVersion: externalRefreshOwnershipPlanVersion,
+			OwnedSegmentIds:      append([]int64(nil), plan.OwnedSegmentIDs...),
 		}
-
-		if err = m.refreshMeta.AddTask(task); err != nil {
-			log.Warn("failed to add task to meta", zap.Error(err))
-			return nil, err
-		}
-
-		if err = m.refreshMeta.AddTaskIDToJob(job.GetJobId(), taskID); err != nil {
-			log.Warn("failed to add taskID to job", zap.Error(err))
-			return nil, err
-		}
-
-		taskWrapper := m.wrapTask(task)
-		tasks = append(tasks, taskWrapper)
+		log.Debug(ctx, "planned external refresh task",
+			mlog.FieldTaskID(taskID),
+			mlog.Int64("fileIndexBegin", plan.FileIndexBegin),
+			mlog.Int64("fileIndexEnd", plan.FileIndexEnd),
+			mlog.Int64("fileCount", plan.FileIndexEnd-plan.FileIndexBegin),
+			mlog.Int("ownedSegments", len(plan.OwnedSegmentIDs)))
+		rawTasks = append(rawTasks, task)
 	}
 
-	log.Info("tasks created for job",
-		zap.Int("numTasks", len(tasks)),
-		zap.Int64("jobID", job.GetJobId()))
+	if err = m.refreshMeta.AddTasksToJob(job.GetJobId(), rawTasks); err != nil {
+		if errors.Is(err, errExternalRefreshTaskPlanNotPublishable) {
+			latestJob := m.refreshMeta.GetJob(job.GetJobId())
+			if latestJob == nil ||
+				latestJob.GetState() == indexpb.JobState_JobStateFinished ||
+				latestJob.GetState() == indexpb.JobState_JobStateFailed {
+				// A terminal transition may have cleaned the job directory while
+				// Explore was still writing. Re-run the idempotent cleanup after the
+				// definitive pre-write rejection to remove any late manifest.
+				m.cleanupExploreTempForJob(job.GetJobId())
+			}
+		}
+		log.Warn(ctx, "failed to add tasks to job", mlog.Err(err))
+		return nil, err
+	}
+
+	tasks := make([]*refreshExternalCollectionTask, 0, len(rawTasks))
+	for _, task := range rawTasks {
+		tasks = append(tasks, m.wrapTask(task))
+	}
+
+	log.Info(ctx, "tasks created for job",
+		mlog.Int("numTasks", len(tasks)),
+		mlog.FieldJobID(job.GetJobId()))
 
 	return tasks, nil
 }
@@ -808,6 +1058,15 @@ func normalizeRefreshJobProgress(job *datapb.ExternalCollectionRefreshJob, state
 
 	if state == indexpb.JobState_JobStateFinished {
 		job.State = indexpb.JobState_JobStateInProgress
+		// A job in the index wait has every task Finished, so the task
+		// aggregate is a flat 100 and says nothing about the wait. Its
+		// persisted progress is the indexed fraction - the only signal there
+		// is - so prefer it. Keyed on the wait marker, not on the value: below
+		// the wait, the persisted number is just the last ingest progress and
+		// the brief pre-transition window must still read "as good as done".
+		if job.GetIndexWaitStartedTime() != 0 {
+			progress = job.GetProgress()
+		}
 		if progress > 99 {
 			progress = 99
 		}
@@ -823,11 +1082,14 @@ func normalizeRefreshJobProgress(job *datapb.ExternalCollectionRefreshJob, state
 func (m *externalCollectionRefreshManager) GetJobProgress(ctx context.Context, jobID int64) (*datapb.ExternalCollectionRefreshJob, error) {
 	job := m.refreshMeta.GetJob(jobID)
 	if job == nil {
-		return nil, fmt.Errorf("job %d not found", jobID)
+		return nil, merr.WrapErrParameterInvalidMsg("refresh job %d not found", jobID)
 	}
 
 	// Aggregate state and progress from tasks
-	state, progress := m.refreshMeta.AggregateJobStateFromTasks(jobID)
+	state, progress, err := m.refreshMeta.AggregateJobStateFromTasks(jobID)
+	if err != nil {
+		return nil, err
+	}
 	normalizeRefreshJobProgress(job, state, progress)
 	return job, nil
 }
@@ -845,7 +1107,10 @@ func (m *externalCollectionRefreshManager) ListJobs(ctx context.Context, collect
 	result := make([]*datapb.ExternalCollectionRefreshJob, 0, len(jobs))
 	for _, job := range jobs {
 		// Aggregate state and progress from tasks
-		state, progress := m.refreshMeta.AggregateJobStateFromTasks(job.GetJobId())
+		state, progress, err := m.refreshMeta.AggregateJobStateFromTasks(job.GetJobId())
+		if err != nil {
+			return nil, err
+		}
 		normalizeRefreshJobProgress(job, state, progress)
 		result = append(result, job)
 	}
@@ -860,7 +1125,8 @@ func (m *externalCollectionRefreshManager) GetActiveJobByCollectionID(collection
 	return m.refreshMeta.GetActiveJobByCollectionID(collectionID)
 }
 
-// exploreExternalFiles calls ExploreFiles once on DataCoord and returns the full file list.
+// exploreExternalFiles runs one DataCoord-side Explore for the current planning
+// attempt and returns its full file list and shared manifest path.
 func (m *externalCollectionRefreshManager) exploreExternalFiles(
 	ctx context.Context,
 	job *datapb.ExternalCollectionRefreshJob,
@@ -871,28 +1137,38 @@ func (m *externalCollectionRefreshManager) exploreExternalFiles(
 	// when both present.
 	if job.GetExternalSource() != "" {
 		if err := externalspec.ValidateSourceAndSpec(job.GetExternalSource(), job.GetExternalSpec()); err != nil {
-			return nil, "", fmt.Errorf("external source/spec failed revalidation: %w", err)
+			return nil, "", merr.Wrap(err, "external source/spec failed revalidation")
 		}
 	}
 	spec, err := externalspec.ParseExternalSpec(job.GetExternalSpec())
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to parse external spec: %w", err)
+		return nil, "", merr.Wrap(err, "failed to parse external spec")
 	}
 
 	collInfo := m.mt.GetCollection(job.GetCollectionId())
 	if collInfo == nil {
-		return nil, "", fmt.Errorf("collection %d not found", job.GetCollectionId())
+		return nil, "", merr.WrapErrCollectionNotFound(job.GetCollectionId())
+	}
+	if spec.Format == externalspec.FormatMilvusTable {
+		if err := validateMilvusTableRefreshSchema(job, collInfo.Schema); err != nil {
+			return nil, "", err
+		}
 	}
 
 	columns := packed.GetColumnNamesFromSchema(collInfo.Schema)
 	storageConfig := createStorageConfig()
 	extfs := packed.ExternalSpecContext{
-		CollectionID: job.GetCollectionId(),
-		Source:       job.GetExternalSource(),
-		Spec:         job.GetExternalSpec(),
+		CollectionID:      job.GetCollectionId(),
+		Source:            job.GetExternalSource(),
+		Spec:              job.GetExternalSpec(),
+		MilvusTablePKMode: packed.MilvusTablePrimaryKeyModeFromSchema(collInfo.Schema),
 	}
 
-	exploreBaseDir := exploreTempDirForJob(job.GetJobId())
+	attemptID, err := m.allocator.AllocID(ctx)
+	if err != nil {
+		return nil, "", merr.Wrap(err, "allocate external refresh Explore attempt ID")
+	}
+	exploreBaseDir := exploreTempDirForAttempt(job.GetJobId(), attemptID)
 	fileInfos, manifestPath, err := packed.ExploreFilesReturnManifestPath(
 		columns,
 		spec.Format,
@@ -902,7 +1178,7 @@ func (m *externalCollectionRefreshManager) exploreExternalFiles(
 		extfs,
 	)
 	if err != nil {
-		return nil, "", fmt.Errorf("ExploreFilesReturnManifestPath failed: %w", err)
+		return nil, "", merr.WrapErrServiceInternalErr(err, "failed to explore files returning manifest path")
 	}
 
 	// Convert to proto type
@@ -914,4 +1190,32 @@ func (m *externalCollectionRefreshManager) exploreExternalFiles(
 		}
 	}
 	return result, manifestPath, nil
+}
+
+func validateMilvusTableRefreshSchema(job *datapb.ExternalCollectionRefreshJob, targetSchema *schemapb.CollectionSchema) error {
+	metadata, err := packed.ReadMilvusTableSnapshotMetadata(
+		job.GetExternalSource(),
+		job.GetExternalSpec(),
+		createStorageConfig(),
+		packed.ExternalSpecContext{
+			CollectionID: job.GetCollectionId(),
+			Source:       job.GetExternalSource(),
+			Spec:         job.GetExternalSpec(),
+		},
+	)
+	if err != nil {
+		return merr.Wrap(err, "read milvus-table snapshot metadata for schema validation")
+	}
+	sourceSchema := metadata.GetCollection().GetSchema()
+	if sourceSchema == nil {
+		return merr.Wrap(errMilvusTableRefreshSchemaInvalid, "missing collection schema")
+	}
+	if typeutil.IsExternalCollection(sourceSchema) {
+		return merr.Wrap(errMilvusTableRefreshSchemaInvalid, "source snapshot is an external collection")
+	}
+	if err := typeutil.ValidateMilvusTableSchemaIdentity(targetSchema, sourceSchema, true); err != nil {
+		return merr.Wrap(errMilvusTableRefreshSchemaInvalid,
+			"source schema does not match target collection schema: "+err.Error())
+	}
+	return nil
 }

@@ -34,7 +34,7 @@ const (
 	ActionTypeReduce
 	ActionTypeUpdate
 	ActionTypeStatsUpdate
-	ActionTypeDropIndex
+	_ // retired action value
 	ActionTypeReopen
 )
 
@@ -43,7 +43,6 @@ var ActionTypeName = map[ActionType]string{
 	ActionTypeReduce:      "Reduce",
 	ActionTypeUpdate:      "Update",
 	ActionTypeStatsUpdate: "StatsUpdate",
-	ActionTypeDropIndex:   "DropIndex",
 	ActionTypeReopen:      "Reopen",
 }
 
@@ -141,7 +140,46 @@ func (action *SegmentAction) GetScope() querypb.DataScope {
 }
 
 func (action *SegmentAction) IsFinished(distMgr *meta.DistributionManager) bool {
-	return action.rpcReturned.Load()
+	if !action.rpcReturned.Load() {
+		return false
+	}
+	return action.isDistMatched(distMgr)
+}
+
+func (action *SegmentAction) isDistMatched(distMgr *meta.DistributionManager) bool {
+	inDist := segmentInDist(distMgr, action.Node(), action.GetShard(), action.GetSegmentID(), action.GetScope())
+	switch action.Type() {
+	case ActionTypeGrow:
+		return inDist
+	case ActionTypeReduce:
+		return !inDist
+	default:
+		return true
+	}
+}
+
+func segmentInDist(distMgr *meta.DistributionManager, nodeID int64, channelName string, segmentID int64, scope querypb.DataScope) bool {
+	if scope == querypb.DataScope_Streaming {
+		channels := distMgr.ChannelDistManager.GetByFilter(
+			meta.WithNodeID2Channel(nodeID),
+			meta.WithChannelName2Channel(channelName),
+		)
+		for _, channel := range channels {
+			if channel.View == nil {
+				continue
+			}
+			if _, ok := channel.View.GrowingSegments[segmentID]; ok {
+				return true
+			}
+		}
+		return false
+	}
+
+	segments := distMgr.SegmentDistManager.GetByFilter(
+		meta.WithNodeID(nodeID),
+		meta.WithSegmentID(segmentID),
+	)
+	return len(segments) > 0
 }
 
 func (action *SegmentAction) Desc() string {
@@ -253,34 +291,4 @@ func (action *LeaderAction) GetLeaderID() typeutil.UniqueID {
 
 func (action *LeaderAction) IsFinished(distMgr *meta.DistributionManager) bool {
 	return action.rpcReturned.Load()
-}
-
-type DropIndexAction struct {
-	*BaseAction
-	indexIDs    []int64
-	rpcReturned atomic.Bool
-}
-
-func NewDropIndexAction(nodeID typeutil.UniqueID, typ ActionType, shard string, indexIDs []int64) *DropIndexAction {
-	return &DropIndexAction{
-		BaseAction:  NewBaseAction(nodeID, typ, shard, 0),
-		indexIDs:    indexIDs,
-		rpcReturned: *atomic.NewBool(false),
-	}
-}
-
-func (action *DropIndexAction) IndexIDs() []int64 {
-	return action.indexIDs
-}
-
-func (action *DropIndexAction) IsFinished(distMgr *meta.DistributionManager) bool {
-	return action.rpcReturned.Load()
-}
-
-func (action *DropIndexAction) Desc() string {
-	return fmt.Sprintf("type:%s, node id: %d, index ids: %v", action.Type().String(), action.Node(), action.IndexIDs())
-}
-
-func (action *DropIndexAction) String() string {
-	return action.BaseAction.String() + fmt.Sprintf(`{[indexIDs=%v]}`, action.IndexIDs())
 }

@@ -83,24 +83,6 @@ class MmapManager {
         return mmap_config_;
     }
 
-    size_t
-    GetAllocSize() {
-        if (mcm_ != nullptr) {
-            return mcm_->GetDiskAllocSize();
-        } else {
-            return 0;
-        }
-    }
-
-    size_t
-    GetDiskUsage() {
-        if (mcm_ != nullptr) {
-            return mcm_->GetDiskUsage();
-        } else {
-            return 0;
-        }
-    }
-
  private:
     mutable std::mutex init_mutex_;
     MmapConfig mmap_config_;

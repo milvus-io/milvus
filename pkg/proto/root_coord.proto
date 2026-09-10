@@ -165,6 +165,7 @@ service RootCoord {
 
     // https://wiki.lfaidata.foundation/display/MIL/MEP+29+--+Support+Role-Based+Access+Control
     rpc CreateRole(milvus.CreateRoleRequest) returns (common.Status) {}
+    rpc AlterRole(milvus.AlterRoleRequest) returns (common.Status) {}
     rpc DropRole(milvus.DropRoleRequest) returns (common.Status) {}
     rpc OperateUserRole(milvus.OperateUserRoleRequest) returns (common.Status) {}
     rpc SelectRole(milvus.SelectRoleRequest) returns (milvus.SelectRoleResponse) {}
@@ -190,6 +191,7 @@ service RootCoord {
     rpc AlterDatabase(AlterDatabaseRequest) returns(common.Status){}
 
     rpc GetQuotaMetrics(internal.GetQuotaMetricsRequest) returns (internal.GetQuotaMetricsResponse) {}
+    rpc ClearReadTaskQueue(internal.ClearReadTaskQueueRequest) returns (internal.ClearReadTaskQueueResponse) {}
     rpc BackupEzk(internal.BackupEzkRequest) returns (internal.BackupEzkResponse) {}
     // File Resource Management
     rpc AddFileResource(milvus.AddFileResourceRequest) returns (common.Status) {}
@@ -201,6 +203,21 @@ service RootCoord {
     rpc GetClientTelemetry(milvus.GetClientTelemetryRequest) returns (milvus.GetClientTelemetryResponse) {}
     rpc PushClientCommand(milvus.PushClientCommandRequest) returns (milvus.PushClientCommandResponse) {}
     rpc DeleteClientCommand(milvus.DeleteClientCommandRequest) returns (milvus.DeleteClientCommandResponse) {}
+    rpc ListClientCommands(ListClientCommandsRequest) returns (ListClientCommandsResponse) {}
+}
+
+// ListClientCommandsRequest asks for the commands the coordinator is currently holding for
+// clients: one-time commands that have not expired or been answered, and persistent
+// configs. Unlike the other telemetry RPCs it carries no filter -- the set is small and
+// bounded by the command store's own limits, and the caller (the telemetry UI) shows all
+// of it.
+message ListClientCommandsRequest {
+  common.MsgBase base = 1;
+}
+
+message ListClientCommandsResponse {
+  common.Status status = 1;
+  repeated common.ClientCommand commands = 2;
 }
 
 message AllocTimestampRequest {
@@ -287,6 +304,28 @@ message AlterDatabaseRequest {
   string db_id = 3;
   repeated common.KeyValuePair properties = 4;
   repeated string delete_keys = 5;
+}
+
+message RLSPolicyInfo {
+  int64 db_id = 1;
+  int64 collection_id = 2;
+  int64 policy_id = 3;
+  string policy_name = 4;
+  milvus.RowPolicyType policy_type = 5;
+  repeated milvus.RowPolicyAction actions = 6;
+  string using_expr = 7;
+  string check_expr = 8;
+  string description = 9;
+}
+
+message RLSPrincipalInfo {
+  int64 db_id = 1;
+  int64 collection_id = 2;
+  string principal_name = 3;
+  // JSON object whose values are string, int64, or double. Keeping the
+  // durable representation opaque preserves tag types and permits future
+  // extensions without changing the persisted protobuf schema.
+  string tags = 4;
 }
 
 message GetPChannelInfoRequest {

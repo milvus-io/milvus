@@ -12,6 +12,7 @@
 package metricsinfo
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"strconv"
@@ -19,12 +20,11 @@ import (
 	"time"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -45,7 +45,7 @@ func MarshalGetMetricsValues[T any](metrics []T, err error) (string, error) {
 
 	bs, err := json.Marshal(metrics)
 	if err != nil {
-		log.Warn("marshal metrics value failed", zap.Any("metrics", metrics), zap.String("err", err.Error()))
+		mlog.Warn(context.TODO(), "marshal metrics value failed", mlog.Any("metrics", metrics), mlog.String("err", err.Error()))
 		return "", nil
 	}
 	return string(bs), nil

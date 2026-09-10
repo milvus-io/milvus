@@ -2,19 +2,19 @@ package broadcaster
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
-	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // newBroadcastTaskFromProto creates a new broadcast task from the proto.
@@ -67,7 +67,7 @@ func newBroadcastTaskFromBroadcastMessage(msg message.BroadcastMutableMessage, m
 	m := metrics.NewBroadcastTask(msg.MessageType(), streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING, msg.BroadcastHeader().ResourceKeys.Collect())
 	header := msg.BroadcastHeader()
 	bt := &broadcastTask{
-		Binder:           log.Binder{},
+		Binder:           mlog.Binder{},
 		taskMetricsGuard: m,
 		mu:               sync.Mutex{},
 		msg:              msg,
@@ -98,7 +98,7 @@ func newBroadcastTaskFromImmutableMessage(msg message.ImmutableMessage, metrics 
 
 // broadcastTask is the state of the broadcast task.
 type broadcastTask struct {
-	log.Binder
+	mlog.Binder
 	*taskMetricsGuard
 
 	mu                       sync.Mutex
@@ -114,8 +114,8 @@ type broadcastTask struct {
 }
 
 // SetLogger sets the logger of the broadcast task.
-func (b *broadcastTask) SetLogger(logger *log.MLogger) {
-	b.Binder.SetLogger(logger.With(log.FieldMessage(b.msg)))
+func (b *broadcastTask) SetLogger(logger *mlog.Logger) {
+	b.Binder.SetLogger(logger.With(mlog.FieldMessage(b.msg)))
 }
 
 // WithResourceKeyLockGuards sets the lock guards for the broadcast task.
@@ -133,6 +133,17 @@ func (b *broadcastTask) BroadcastResult() (message.BroadcastMutableMessage, map[
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
+	msg, result, acked := b.broadcastResult()
+	if !acked {
+		panic("unreachable: BroadcastResult is called before the broadcast task is acked")
+	}
+	return msg, result
+}
+
+// broadcastResult zips the vchannels of the task with their acked checkpoints.
+// Returns acked=false and a nil result when any vchannel has no checkpoint yet.
+// Caller must hold b.mu.
+func (b *broadcastTask) broadcastResult() (message.BroadcastMutableMessage, map[string]*types.AppendResult, bool) {
 	vchannels := b.header().VChannels
 	result := make(map[string]*types.AppendResult, len(vchannels))
 	for idx, vchannel := range vchannels {
@@ -147,7 +158,7 @@ func (b *broadcastTask) BroadcastResult() (message.BroadcastMutableMessage, map[
 		}
 		cp := b.task.AckedCheckpoints[idx]
 		if cp == nil || cp.TimeTick == 0 {
-			panic("unreachable: BroadcastResult is called before the broadcast task is acked")
+			return b.msg, nil, false
 		}
 		result[vchannel] = &types.AppendResult{
 			MessageID:              message.MustUnmarshalMessageID(cp.MessageId),
@@ -155,7 +166,7 @@ func (b *broadcastTask) BroadcastResult() (message.BroadcastMutableMessage, map[
 			TimeTick:               cp.TimeTick,
 		}
 	}
-	return b.msg, result
+	return b.msg, result, true
 }
 
 // Header returns the header of the broadcast task.
@@ -170,6 +181,22 @@ func (b *broadcastTask) Header() *message.BroadcastHeader {
 // Caller must hold b.mu.
 func (b *broadcastTask) header() *message.BroadcastHeader {
 	return b.msg.BroadcastHeader()
+}
+
+// IdempotencyScope returns the idempotency scope of the message of the broadcast task.
+// Must acquire b.mu because MarkIgnore may replace b.msg concurrently.
+func (b *broadcastTask) IdempotencyScope() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return idempotencyScopeOfMessage(b.msg)
+}
+
+// BroadcastMessage returns the message of the broadcast task.
+// Must acquire b.mu because MarkIgnore may replace b.msg concurrently.
+func (b *broadcastTask) BroadcastMessage() message.BroadcastMutableMessage {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.msg
 }
 
 // ControlChannelTimeTick returns the time tick of the control channel.
@@ -252,7 +279,7 @@ func (b *broadcastTask) MarkIgnore() error {
 	msg := message.NewBroadcastMutableMessageBeforeAppend(b.task.Message.Payload, copiedProps)
 	alterMsg, err := message.AsMutableAlterReplicateConfigMessageV2(msg)
 	if err != nil {
-		return errors.Wrap(err, "failed to parse message as AlterReplicateConfigMessage")
+		return merr.Wrap(err, "failed to parse message as AlterReplicateConfigMessage")
 	}
 
 	// Get current header and set ignore to true
@@ -402,9 +429,9 @@ func (b *broadcastTask) copyAndSetAckedCheckpoints(msgs ...message.ImmutableMess
 	task := proto.Clone(b.task).(*streamingpb.BroadcastTask)
 	for _, msg := range msgs {
 		vchannel := msg.VChannel()
-		idx, err := findIdxOfVChannel(vchannel, b.header().VChannels)
-		if err != nil {
-			panic(err)
+		idx := findIdxOfVChannel(vchannel, b.header().VChannels)
+		if idx < 0 {
+			panic(fmt.Sprintf("broadcast task invariant violated: vchannel %s not in task's own VChannels list", vchannel))
 		}
 		if len(task.AckedVchannelBitmap) == 0 {
 			task.AckedVchannelBitmap = make([]byte, len(b.header().VChannels))
@@ -430,17 +457,20 @@ func (b *broadcastTask) copyAndSetAckedCheckpoints(msgs ...message.ImmutableMess
 	}
 	// update current task state.
 	b.task = task
-	return
+	return isControlChannelAcked
 }
 
-// findIdxOfVChannel finds the index of the vchannel in the broadcast task.
-func findIdxOfVChannel(vchannel string, vchannels []string) (int, error) {
+// findIdxOfVChannel finds the index of the vchannel in the broadcast task's
+// VChannels list, returning -1 if not present. By construction the vchannel
+// must be present (it came from the task's own messages); callers panic on
+// -1 because that signals a task-invariant violation.
+func findIdxOfVChannel(vchannel string, vchannels []string) int {
 	for i, channelName := range vchannels {
 		if channelName == vchannel {
-			return i, nil
+			return i
 		}
 	}
-	return -1, errors.Errorf("unreachable: vchannel is %s not found in the broadcast task", vchannel)
+	return -1
 }
 
 // FastAck trigger a fast ack operation when the broadcast operation is done.
@@ -522,20 +552,20 @@ func (b *broadcastTask) MarkAckCallbackDone(ctx context.Context) error {
 }
 
 // saveTaskIfDirty saves the broadcast task recovery info if the task is dirty.
-func (b *broadcastTask) saveTaskIfDirty(ctx context.Context, logger *log.MLogger) error {
+func (b *broadcastTask) saveTaskIfDirty(ctx context.Context, logger *mlog.Logger) error {
 	if !b.dirty {
 		return nil
 	}
 	b.dirty = false
-	logger = logger.With(zap.String("state", b.task.State.String()), zap.Int("ackedVChannelCount", ackedCount(b.task)))
+	logger = logger.With(mlog.String("state", b.task.State.String()), mlog.Int("ackedVChannelCount", ackedCount(b.task)))
 	if err := resource.Resource().StreamingCatalog().SaveBroadcastTask(ctx, b.header().BroadcastID, b.task); err != nil {
-		logger.Warn("save broadcast task failed", zap.Error(err))
+		logger.Warn(ctx, "save broadcast task failed", mlog.Err(err))
 		if ctx.Err() == nil {
 			panic("critical error: the save broadcast task is failed before the context is done")
 		}
 		return err
 	}
 	b.ObserveStateChanged(b.task.State)
-	logger.Info("save broadcast task done")
+	logger.Info(ctx, "save broadcast task done")
 	return nil
 }

@@ -17,14 +17,13 @@
 package storage
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -55,7 +54,7 @@ func NewInt64PrimaryKey(v int64) *Int64PrimaryKey {
 func (ip *Int64PrimaryKey) GT(key PrimaryKey) bool {
 	pk, ok := key.(*Int64PrimaryKey)
 	if !ok {
-		log.Warn("type of compared pk is not int64")
+		mlog.Warn(context.TODO(), "type of compared pk is not int64")
 		return false
 	}
 	if ip.Value > pk.Value {
@@ -68,7 +67,7 @@ func (ip *Int64PrimaryKey) GT(key PrimaryKey) bool {
 func (ip *Int64PrimaryKey) GE(key PrimaryKey) bool {
 	pk, ok := key.(*Int64PrimaryKey)
 	if !ok {
-		log.Warn("type of compared pk is not int64")
+		mlog.Warn(context.TODO(), "type of compared pk is not int64")
 		return false
 	}
 	if ip.Value >= pk.Value {
@@ -81,7 +80,7 @@ func (ip *Int64PrimaryKey) GE(key PrimaryKey) bool {
 func (ip *Int64PrimaryKey) LT(key PrimaryKey) bool {
 	pk, ok := key.(*Int64PrimaryKey)
 	if !ok {
-		log.Warn("type of compared pk is not int64")
+		mlog.Warn(context.TODO(), "type of compared pk is not int64")
 		return false
 	}
 
@@ -95,7 +94,7 @@ func (ip *Int64PrimaryKey) LT(key PrimaryKey) bool {
 func (ip *Int64PrimaryKey) LE(key PrimaryKey) bool {
 	pk, ok := key.(*Int64PrimaryKey)
 	if !ok {
-		log.Warn("type of compared pk is not int64")
+		mlog.Warn(context.TODO(), "type of compared pk is not int64")
 		return false
 	}
 
@@ -109,7 +108,7 @@ func (ip *Int64PrimaryKey) LE(key PrimaryKey) bool {
 func (ip *Int64PrimaryKey) EQ(key PrimaryKey) bool {
 	pk, ok := key.(*Int64PrimaryKey)
 	if !ok {
-		log.Warn("type of compared pk is not int64")
+		mlog.Warn(context.TODO(), "type of compared pk is not int64")
 		return false
 	}
 
@@ -141,7 +140,7 @@ func (ip *Int64PrimaryKey) UnmarshalJSON(data []byte) error {
 func (ip *Int64PrimaryKey) SetValue(data interface{}) error {
 	value, ok := data.(int64)
 	if !ok {
-		return errors.New("wrong type value when setValue for Int64PrimaryKey")
+		return merr.WrapErrServiceInternalMsg("wrong type value when setValue for Int64PrimaryKey")
 	}
 
 	ip.Value = value
@@ -173,7 +172,7 @@ func NewVarCharPrimaryKey(v string) *VarCharPrimaryKey {
 func (vcp *VarCharPrimaryKey) GT(key PrimaryKey) bool {
 	pk, ok := key.(*VarCharPrimaryKey)
 	if !ok {
-		log.Warn("type of compared pk is not varChar")
+		mlog.Warn(context.TODO(), "type of compared pk is not varChar")
 		return false
 	}
 
@@ -183,7 +182,7 @@ func (vcp *VarCharPrimaryKey) GT(key PrimaryKey) bool {
 func (vcp *VarCharPrimaryKey) GE(key PrimaryKey) bool {
 	pk, ok := key.(*VarCharPrimaryKey)
 	if !ok {
-		log.Warn("type of compared pk is not varChar")
+		mlog.Warn(context.TODO(), "type of compared pk is not varChar")
 		return false
 	}
 
@@ -193,7 +192,7 @@ func (vcp *VarCharPrimaryKey) GE(key PrimaryKey) bool {
 func (vcp *VarCharPrimaryKey) LT(key PrimaryKey) bool {
 	pk, ok := key.(*VarCharPrimaryKey)
 	if !ok {
-		log.Warn("type of compared pk is not varChar")
+		mlog.Warn(context.TODO(), "type of compared pk is not varChar")
 		return false
 	}
 
@@ -203,7 +202,7 @@ func (vcp *VarCharPrimaryKey) LT(key PrimaryKey) bool {
 func (vcp *VarCharPrimaryKey) LE(key PrimaryKey) bool {
 	pk, ok := key.(*VarCharPrimaryKey)
 	if !ok {
-		log.Warn("type of compared pk is not varChar")
+		mlog.Warn(context.TODO(), "type of compared pk is not varChar")
 		return false
 	}
 
@@ -213,7 +212,7 @@ func (vcp *VarCharPrimaryKey) LE(key PrimaryKey) bool {
 func (vcp *VarCharPrimaryKey) EQ(key PrimaryKey) bool {
 	pk, ok := key.(*VarCharPrimaryKey)
 	if !ok {
-		log.Warn("type of compared pk is not varChar")
+		mlog.Warn(context.TODO(), "type of compared pk is not varChar")
 		return false
 	}
 
@@ -241,7 +240,7 @@ func (vcp *VarCharPrimaryKey) UnmarshalJSON(data []byte) error {
 func (vcp *VarCharPrimaryKey) SetValue(data interface{}) error {
 	value, ok := data.(string)
 	if !ok {
-		return errors.New("wrong type value when setValue for VarCharPrimaryKey")
+		return merr.WrapErrServiceInternalMsg("wrong type value when setValue for VarCharPrimaryKey")
 	}
 
 	vcp.Value = value
@@ -272,7 +271,7 @@ func GenPrimaryKeyByRawData(data interface{}, pkType schemapb.DataType) (Primary
 			Value: data.(string),
 		}
 	default:
-		return nil, errors.New("not supported primary data type")
+		return nil, merr.WrapErrServiceInternalMsg("not supported primary data type")
 	}
 
 	return result, nil
@@ -305,11 +304,11 @@ func GenVarcharPrimaryKeys(data ...string) ([]PrimaryKey, error) {
 func ParseFieldData2PrimaryKeys(data *schemapb.FieldData) ([]PrimaryKey, error) {
 	ret := make([]PrimaryKey, 0)
 	if data == nil {
-		return ret, errors.New("failed to parse pks from nil field data")
+		return ret, merr.WrapErrServiceInternalMsg("failed to parse pks from nil field data")
 	}
 	scalarData := data.GetScalars()
 	if scalarData == nil {
-		return ret, errors.New("failed to parse pks from nil scalar data")
+		return ret, merr.WrapErrServiceInternalMsg("failed to parse pks from nil scalar data")
 	}
 
 	switch data.Type {
@@ -324,7 +323,7 @@ func ParseFieldData2PrimaryKeys(data *schemapb.FieldData) ([]PrimaryKey, error) 
 			ret = append(ret, pk)
 		}
 	default:
-		return ret, errors.New("not supported primary data type")
+		return ret, merr.WrapErrServiceInternalMsg("not supported primary data type")
 	}
 
 	return ret, nil

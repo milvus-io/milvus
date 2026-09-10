@@ -28,6 +28,8 @@ type PriorityQueue interface {
 	Pop() Task
 	Get(taskID int64) Task
 	Remove(taskID int64)
+	TaskCount() int
+	TaskCountBy(filter func(Task) bool) int
 	TaskIDs() []int64
 }
 
@@ -99,6 +101,26 @@ func (pqp *priorityQueuePolicy) Get(taskID int64) Task {
 	defer pqp.lock.RUnlock()
 
 	return pqp.tasks[taskID]
+}
+
+func (pqp *priorityQueuePolicy) TaskCount() int {
+	pqp.lock.RLock()
+	defer pqp.lock.RUnlock()
+
+	return len(pqp.tasks)
+}
+
+func (pqp *priorityQueuePolicy) TaskCountBy(filter func(Task) bool) int {
+	pqp.lock.RLock()
+	defer pqp.lock.RUnlock()
+
+	count := 0
+	for _, task := range pqp.tasks {
+		if filter(task) {
+			count++
+		}
+	}
+	return count
 }
 
 func (pqp *priorityQueuePolicy) TaskIDs() []int64 {

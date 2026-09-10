@@ -24,7 +24,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
@@ -32,7 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v3/config"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
@@ -55,10 +54,10 @@ func newRecoveryScannerAdaptor(l walimpls.ROWALImpls,
 ) *scannerAdaptorImpl {
 	name := "recovery"
 	logger := resource.Resource().Logger().With(
-		log.FieldComponent("scanner"),
-		zap.String("name", name),
-		zap.String("channel", l.Channel().String()),
-		zap.String("startMessageID", startMessageID.String()),
+		mlog.FieldComponent("scanner"),
+		mlog.String("name", name),
+		mlog.String("channel", l.Channel().String()),
+		mlog.String("startMessageID", startMessageID.String()),
 	)
 	readOption := wal.ReadOption{
 		DeliverPolicy:          options.DeliverPolicyStartFrom(startMessageID),
@@ -98,9 +97,9 @@ func newScannerAdaptor(
 	}
 	options.GetFilterFunc(readOption.MessageFilter)
 	logger := resource.Resource().Logger().With(
-		log.FieldComponent("scanner"),
-		zap.String("name", name),
-		zap.String("channel", l.Channel().Name),
+		mlog.FieldComponent("scanner"),
+		mlog.String("name", name),
+		mlog.String("channel", l.Channel().Name),
 	)
 	s := &scannerAdaptorImpl{
 		logger:          logger,
@@ -124,7 +123,7 @@ func newScannerAdaptor(
 type scannerAdaptorImpl struct {
 	*helper.ScannerHelper
 	recovery      bool
-	logger        *log.MLogger
+	logger        *mlog.Logger
 	innerWAL      walimpls.ROWALImpls
 	readOption    wal.ReadOption
 	filterFunc    func(message.ImmutableMessage) bool
@@ -168,34 +167,48 @@ func (s *scannerAdaptorImpl) clear() {
 }
 
 func (s *scannerAdaptorImpl) execute() {
+	var finalErr error
 	defer func() {
 		s.readOption.MesasgeHandler.Close()
-		s.Finish(nil)
-		s.logger.Info("scanner is closed")
+		s.Finish(finalErr)
+		s.logger.Info(context.TODO(), "scanner is closed")
 	}()
-	s.logger.Info("scanner start background task")
+	s.logger.Info(context.TODO(), "scanner start background task")
 
 	msgChan := make(chan message.ImmutableMessage)
 
-	ch := make(chan struct{})
-	defer func() { <-ch }()
+	producerErrCh := make(chan error, 1)
 	// TODO: optimize the extra goroutine here after msgstream is removed.
 	go func() {
-		defer close(ch)
 		err := s.produceEventLoop(msgChan)
-		if errors.Is(err, context.Canceled) {
-			s.logger.Info("the produce event loop of scanner is closed")
-			return
-		}
-		s.logger.Warn("the produce event loop of scanner is closed with unexpected error", zap.Error(err))
+		producerErrCh <- err
+		// Wake a consumer blocked in its handler. execute reconciles the two
+		// loop results below and preserves a non-cancellation producer error.
+		s.Cancel()
 	}()
 
-	err := s.consumeEventLoop(msgChan)
-	if errors.Is(err, context.Canceled) {
-		s.logger.Info("the consuming event loop of scanner is closed")
-		return
+	consumeErr := s.consumeEventLoop(msgChan)
+	s.Cancel()
+	producerErr := <-producerErrCh
+
+	if errors.Is(producerErr, context.Canceled) {
+		s.logger.Info(context.TODO(), "the produce event loop of scanner is closed")
+	} else if producerErr != nil {
+		s.logger.Warn(context.TODO(), "the produce event loop of scanner is closed with unexpected error", mlog.Err(producerErr))
 	}
-	s.logger.Warn("the consuming event loop of scanner is closed with unexpected error", zap.Error(err))
+	if errors.Is(consumeErr, context.Canceled) {
+		s.logger.Info(context.TODO(), "the consuming event loop of scanner is closed")
+	} else if consumeErr != nil {
+		s.logger.Warn(context.TODO(), "the consuming event loop of scanner is closed with unexpected error", mlog.Err(consumeErr))
+	}
+
+	// A consumer-side processing failure wins if both loops fail. Otherwise a
+	// fatal durable-reader/assembly error must be visible from Scanner.Error().
+	if consumeErr != nil && !errors.Is(consumeErr, context.Canceled) {
+		finalErr = consumeErr
+	} else if producerErr != nil && !errors.Is(producerErr, context.Canceled) {
+		finalErr = producerErr
+	}
 }
 
 // produceEventLoop produces the message from the wal and write ahead buffer.
@@ -215,7 +228,7 @@ func (s *scannerAdaptorImpl) produceEventLoop(msgChan chan<- message.ImmutableMe
 	}
 
 	scanner := newSwithableScanner(s.Name(), s.logger, s.innerWAL, wb, s.readOption.DeliverPolicy, msgChan)
-	s.logger.Info("start produce loop of scanner at model", zap.String("model", getScannerModel(scanner)))
+	s.logger.Info(context.TODO(), "start produce loop of scanner at model", mlog.String("model", getScannerModel(scanner)))
 	for {
 		if s.readOption.RateLimitControl != nil {
 			// if the scanner is working with rate limit control,
@@ -237,7 +250,7 @@ func (s *scannerAdaptorImpl) produceEventLoop(msgChan chan<- message.ImmutableMe
 		}
 		m := getScannerModel(scanner)
 		s.metrics.SwitchModel(m)
-		s.logger.Info("switch scanner model", zap.String("model", m))
+		s.logger.Info(context.TODO(), "switch scanner model", mlog.String("model", m))
 	}
 }
 
@@ -266,7 +279,9 @@ func (s *scannerAdaptorImpl) consumeEventLoop(msgChan <-chan message.ImmutableMe
 			s.metrics.UpdatePendingQueueSize(s.pendingQueue.Bytes())
 		}
 		if handleResult.Incoming != nil {
-			s.handleUpstream(handleResult.Incoming)
+			if err := s.handleUpstream(handleResult.Incoming); err != nil {
+				return err
+			}
 		}
 	}
 }
@@ -292,12 +307,12 @@ func (s *scannerAdaptorImpl) waitUntilStartConsumption() {
 		paramtable.Get().Watch(watchKey, handler)
 		defer paramtable.Get().Unwatch(watchKey, handler)
 
-		s.logger.Info("pause consumption...")
+		s.logger.Info(context.TODO(), "pause consumption...")
 		select {
 		case <-resumeChan:
-			s.logger.Info("continue to consume messages")
+			s.logger.Info(context.TODO(), "continue to consume messages")
 		case <-s.Context().Done():
-			s.logger.Info("pause consumption is canceled")
+			s.logger.Info(context.TODO(), "pause consumption is canceled")
 		}
 	}
 }
@@ -336,11 +351,11 @@ func (c *slowdownCheckerImpl) SlowdownStartupHWM() int64 {
 }
 
 // handleUpstream handles the incoming message from the upstream.
-func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) {
+func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) error {
 	// Filtering the message if needed.
 	// System message should never be filtered.
 	if s.filterFunc != nil && !s.filterFunc(msg) {
-		return
+		return nil
 	}
 
 	// Track read rate for rate limiting control.
@@ -362,12 +377,11 @@ func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) {
 
 		if len(msgs) > 0 {
 			// Push the confirmed messages into pending queue for consuming.
-			if s.logger.Level().Enabled(zap.DebugLevel) {
+			if s.logger.LevelEnabled(mlog.DebugLevel) {
 				for _, m := range msgs {
-					s.logger.Debug(
-						"push message into pending queue",
-						zap.Uint64("committedTimeTick", msg.TimeTick()),
-						log.FieldMessage(m),
+					s.logger.Debug(context.TODO(), "push message into pending queue",
+						mlog.Uint64("committedTimeTick", msg.TimeTick()),
+						mlog.FieldMessage(m),
 					)
 				}
 			}
@@ -383,26 +397,27 @@ func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) {
 			s.pendingQueue.Add([]message.ImmutableMessage{msg})
 		}
 		s.metrics.UpdatePendingQueueSize(s.pendingQueue.Bytes())
-		return
+		return nil
 	}
 
 	// Filtering the vchannel
 	// If the message is not belong to any vchannel, it should be broadcasted to all vchannels.
 	// Otherwise, it should be filtered by vchannel.
 	if msg.VChannel() != "" && s.readOption.VChannel != "" && s.readOption.VChannel != msg.VChannel() {
-		return
+		return nil
 	}
 	// otherwise add message into reorder buffer directly.
 	if err := s.reorderBuffer.Push(msg); err != nil {
 		if errors.Is(err, utility.ErrTimeTickVoilation) {
 			s.metrics.ObserveTimeTickViolation(isTailing, msg.MessageType())
 		}
-		s.logger.Warn("failed to push message into reorder buffer",
-			log.FieldMessage(msg),
-			zap.Bool("tailing", isTailing),
-			zap.Error(err))
+		s.logger.Warn(context.TODO(), "failed to push message into reorder buffer",
+			mlog.FieldMessage(msg),
+			mlog.Bool("tailing", isTailing),
+			mlog.Err(err))
 	}
 	// Observe the filtered message.
 	s.metrics.UpdateTimeTickBufSize(s.reorderBuffer.Bytes())
 	s.metrics.ObservePassedMessage(isTailing, msg.MessageType(), msg.EstimateSize())
+	return nil
 }

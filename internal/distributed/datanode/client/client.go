@@ -20,8 +20,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -30,12 +28,13 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -57,12 +56,12 @@ type Client struct {
 // NewClient creates a client for DataNode.
 func NewClient(ctx context.Context, addr string, serverID int64, encryption bool) (types.DataNodeClient, error) {
 	if addr == "" {
-		return nil, errors.New("address is empty")
+		return nil, merr.WrapErrParameterInvalidMsg("address is empty")
 	}
 	sess := sessionutil.NewSession(context.Background())
 	if sess == nil {
-		err := errors.New("new session error, maybe can not connect to etcd")
-		log.Ctx(ctx).Debug("DataNodeClient New Etcd Session failed", zap.Error(err))
+		err := merr.WrapErrServiceUnavailable("new session error, maybe can not connect to etcd")
+		mlog.Debug(ctx, "DataNodeClient New Etcd Session failed", mlog.Err(err))
 		return nil, err
 	}
 
@@ -87,7 +86,7 @@ func NewClient(ctx context.Context, addr string, serverID int64, encryption bool
 		client.grpcClient.EnableEncryption()
 		cp, err := utils.CreateCertPoolforClient(Params.InternalTLSCfg.InternalTLSCaPemPath.GetValue(), "DataNode")
 		if err != nil {
-			log.Ctx(ctx).Error("Failed to create cert pool for DataNode client")
+			mlog.Error(ctx, "Failed to create cert pool for DataNode client")
 			return nil, err
 		}
 		client.grpcClient.SetInternalTLSCertPool(cp)

@@ -22,20 +22,21 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
+	"github.com/milvus-io/milvus/internal/util/function/validator"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	util "github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -68,7 +69,7 @@ func (t *createCollectionTask) releaseFileResources() {
 
 func (t *createCollectionTask) validate(ctx context.Context) error {
 	if t.Req == nil {
-		return errors.New("empty requests")
+		return merr.WrapErrServiceInternalMsg("empty requests")
 	}
 	Params := paramtable.Get()
 
@@ -81,29 +82,24 @@ func (t *createCollectionTask) validate(ctx context.Context) error {
 		cfgMaxShardNum = Params.RootCoordCfg.DmlChannelNum.GetAsInt32()
 	}
 	if shardsNum > cfgMaxShardNum {
-		return fmt.Errorf("shard num (%d) exceeds max configuration (%d)", shardsNum, cfgMaxShardNum)
+		return merr.WrapErrParameterInvalidMsg("shard num (%d) exceeds max configuration (%d)", shardsNum, cfgMaxShardNum)
 	}
 
 	cfgShardLimit := Params.ProxyCfg.MaxShardNum.GetAsInt32()
 	if shardsNum > cfgShardLimit {
-		return fmt.Errorf("shard num (%d) exceeds system limit (%d)", shardsNum, cfgShardLimit)
+		return merr.WrapErrParameterInvalidMsg("shard num (%d) exceeds system limit (%d)", shardsNum, cfgShardLimit)
 	}
 
 	// 2. check db-collection capacity
-	db2CollIDs := t.meta.ListAllAvailCollections(ctx)
-	if err := t.checkMaxCollectionsPerDB(ctx, db2CollIDs); err != nil {
+	dbCollectionCount, totalCollections, dbExists := t.meta.GetAvailableCollectionCount(ctx, t.header.DbId)
+	if err := t.checkMaxCollectionsPerDB(ctx, dbCollectionCount, dbExists); err != nil {
 		return err
 	}
 
 	// 3. check total collection number
-	totalCollections := 0
-	for _, collIDs := range db2CollIDs {
-		totalCollections += len(collIDs)
-	}
-
 	maxCollectionNum := Params.QuotaConfig.MaxCollectionNum.GetAsInt()
 	if totalCollections >= maxCollectionNum {
-		log.Ctx(ctx).Warn("unable to create collection because the number of collection has reached the limit", zap.Int("max_collection_num", maxCollectionNum))
+		mlog.Warn(ctx, "unable to create collection because the number of collection has reached the limit", mlog.Int("max_collection_num", maxCollectionNum))
 		return merr.WrapErrCollectionNumLimitExceeded(t.Req.GetDbName(), maxCollectionNum)
 	}
 
@@ -116,24 +112,23 @@ func (t *createCollectionTask) validate(ctx context.Context) error {
 }
 
 // checkMaxCollectionsPerDB DB properties take precedence over quota configurations for max collections.
-func (t *createCollectionTask) checkMaxCollectionsPerDB(ctx context.Context, db2CollIDs map[int64][]int64) error {
+func (t *createCollectionTask) checkMaxCollectionsPerDB(ctx context.Context, dbCollectionCount int, dbExists bool) error {
 	Params := paramtable.Get()
 
-	collIDs, ok := db2CollIDs[t.header.DbId]
-	if !ok {
-		log.Ctx(ctx).Warn("can not found DB ID", zap.String("collection", t.Req.GetCollectionName()), zap.String("dbName", t.Req.GetDbName()))
+	if !dbExists {
+		mlog.Warn(ctx, "can not found DB ID", mlog.String("collection", t.Req.GetCollectionName()), mlog.String("dbName", t.Req.GetDbName()))
 		return merr.WrapErrDatabaseNotFound(t.Req.GetDbName(), "failed to create collection")
 	}
 
 	db, err := t.meta.GetDatabaseByName(ctx, t.Req.GetDbName(), typeutil.MaxTimestamp)
 	if err != nil {
-		log.Ctx(ctx).Warn("can not found DB ID", zap.String("collection", t.Req.GetCollectionName()), zap.String("dbName", t.Req.GetDbName()))
+		mlog.Warn(ctx, "can not found DB ID", mlog.String("collection", t.Req.GetCollectionName()), mlog.String("dbName", t.Req.GetDbName()))
 		return merr.WrapErrDatabaseNotFound(t.Req.GetDbName(), "failed to create collection")
 	}
 
 	check := func(maxColNumPerDB int) error {
-		if len(collIDs) >= maxColNumPerDB {
-			log.Ctx(ctx).Warn("unable to create collection because the number of collection has reached the limit in DB", zap.Int("maxCollectionNumPerDB", maxColNumPerDB))
+		if dbCollectionCount >= maxColNumPerDB {
+			mlog.Warn(ctx, "unable to create collection because the number of collection has reached the limit in DB", mlog.Int("maxCollectionNumPerDB", maxColNumPerDB))
 			return merr.WrapErrCollectionNumLimitExceeded(t.Req.GetDbName(), maxColNumPerDB)
 		}
 		return nil
@@ -143,9 +138,9 @@ func (t *createCollectionTask) checkMaxCollectionsPerDB(ctx context.Context, db2
 	if maxColNumPerDBStr != "" {
 		maxColNumPerDB, err := strconv.Atoi(maxColNumPerDBStr)
 		if err != nil {
-			log.Ctx(ctx).Warn("parse value of property fail", zap.String("key", common.DatabaseMaxCollectionsKey),
-				zap.String("value", maxColNumPerDBStr), zap.Error(err))
-			return fmt.Errorf("parse value of property fail, key:%s, value:%s", common.DatabaseMaxCollectionsKey, maxColNumPerDBStr)
+			mlog.Warn(ctx, "parse value of property fail", mlog.String("key", common.DatabaseMaxCollectionsKey),
+				mlog.String("value", maxColNumPerDBStr), mlog.Err(err))
+			return merr.WrapErrServiceInternalMsg("parse value of property fail, key:%s, value:%s", common.DatabaseMaxCollectionsKey, maxColNumPerDBStr)
 		}
 		return check(maxColNumPerDB)
 	}
@@ -156,7 +151,7 @@ func (t *createCollectionTask) checkMaxCollectionsPerDB(ctx context.Context, db2
 
 func checkGeometryDefaultValue(value string) error {
 	if _, err := common.ConvertWKTToWKB(value); err != nil {
-		log.Warn("invalid default value for geometry field", zap.Error(err))
+		mlog.Warn(context.TODO(), "invalid default value for geometry field", mlog.Err(err))
 		return merr.WrapErrParameterInvalidMsg("invalid default value for geometry field")
 	}
 
@@ -173,9 +168,9 @@ func hasSystemFields(schema *schemapb.CollectionSchema, systemFields []string) b
 }
 
 func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schemapb.CollectionSchema) error {
-	log.Ctx(ctx).With(zap.String("CollectionName", t.Req.CollectionName))
+	mlog.With(mlog.String("CollectionName", t.Req.CollectionName))
 	if t.Req.GetCollectionName() != schema.GetName() {
-		log.Ctx(ctx).Error("collection name not matches schema name", zap.String("SchemaName", schema.Name))
+		mlog.Error(ctx, "collection name not matches schema name", mlog.String("SchemaName", schema.Name))
 		msg := fmt.Sprintf("collection name = %s, schema.Name=%s", t.Req.GetCollectionName(), schema.Name)
 		return merr.WrapErrParameterInvalid("collection name matches schema name", "don't match", msg)
 	}
@@ -198,6 +193,9 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 	if err := typeutil.NormalizeAndValidateExternalCollectionSchema(schema); err != nil {
 		return err
 	}
+	if err := typeutil.ValidateTextRequiresStorageV3(schema, Params.CommonCfg.UseLoonFFI.GetAsBool()); err != nil {
+		return merr.WrapErrParameterInvalidMsg("%s", err.Error())
+	}
 
 	// For external collections, validate the source URL scheme allowlist and
 	// the JSON spec structure (extfs allowlist + format whitelist) at the
@@ -214,11 +212,11 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 	}
 
 	if hasSystemFields(schema, []string{RowIDFieldName, TimeStampFieldName, MetaFieldName, NamespaceFieldName}) {
-		log.Ctx(ctx).Error("schema contains system field",
-			zap.String("RowIDFieldName", RowIDFieldName),
-			zap.String("TimeStampFieldName", TimeStampFieldName),
-			zap.String("MetaFieldName", MetaFieldName),
-			zap.String("NamespaceFieldName", NamespaceFieldName))
+		mlog.Error(ctx, "schema contains system field",
+			mlog.String("RowIDFieldName", RowIDFieldName),
+			mlog.String("TimeStampFieldName", TimeStampFieldName),
+			mlog.String("MetaFieldName", MetaFieldName),
+			mlog.String("NamespaceFieldName", NamespaceFieldName))
 		msg := fmt.Sprintf("schema contains system field: %s, %s, %s, %s", RowIDFieldName, TimeStampFieldName, MetaFieldName, NamespaceFieldName)
 		return merr.WrapErrParameterInvalid("schema don't contains system field", "contains", msg)
 	}
@@ -227,64 +225,70 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 		return err
 	}
 
-	// check analyzer was vaild
-	analyzerInfos := make([]*querypb.AnalyzerInfo, 0)
-	for _, field := range schema.GetFields() {
-		err := validateAnalyzer(schema, field, &analyzerInfos)
-		if err != nil {
-			return err
-		}
+	fileResourceIds, err := t.validateSchemaAnalyzerFileResources(ctx, schema)
+	if err != nil {
+		return err
 	}
+	schema.FileResourceIds = fileResourceIds
 
-	// validate analyzer params at any streaming node
-	// and set file resource ids to schema
-	if len(analyzerInfos) > 0 {
-		err := retry.Do(ctx, func() error {
-			if t.fileResourceObserver == nil {
-				return nil
-			}
-			if err := t.fileResourceObserver.CheckAllQnReady(); err != nil {
-				return err
-			}
-			return nil
-		}, retry.Attempts(10), retry.Sleep(3*time.Second))
-		if err != nil {
-			return err
-		}
-
-		resp, err := t.mixCoord.ValidateAnalyzer(t.ctx, &querypb.ValidateAnalyzerRequest{
-			AnalyzerInfos: analyzerInfos,
-		})
-		if err != nil {
-			return err
-		}
-
-		if err := merr.Error(resp.GetStatus()); err != nil {
-			return err
-		}
-		schema.FileResourceIds = resp.GetResourceIds()
-
+	if len(schema.FileResourceIds) > 0 {
 		// Bind file resources to collection lifecycle: refCnt++ now, refCnt-- on
 		// drop. Under ddLock, atomic with RemoveFileResource. See #48612.
-		if len(schema.FileResourceIds) > 0 {
-			if err := t.meta.IncFileResourceRefCnt(schema.FileResourceIds); err != nil {
-				return err
-			}
-			t.heldFileResourceIds = schema.FileResourceIds
+		if err := reserveFileResourceRefs(t.meta, schema.FileResourceIds); err != nil {
+			return err
 		}
+		t.heldFileResourceIds = schema.FileResourceIds
 	}
 
 	return validateFieldDataType(schema.GetFields())
 }
 
+func (c *Core) validateSchemaAnalyzerFileResources(ctx context.Context, schema *schemapb.CollectionSchema) ([]int64, error) {
+	analyzerInfos, err := collectAnalyzerInfos(schema)
+	if err != nil {
+		return nil, err
+	}
+	return c.validateAnalyzerInfos(ctx, analyzerInfos)
+}
+
+func (c *Core) validateAnalyzerInfos(ctx context.Context, analyzerInfos []*querypb.AnalyzerInfo) ([]int64, error) {
+	if len(analyzerInfos) == 0 {
+		return nil, nil
+	}
+
+	// validate analyzer params at any streaming node
+	// and set file resource ids to schema
+	err := retry.Do(ctx, func() error {
+		if c.fileResourceObserver == nil {
+			return nil
+		}
+		if err := c.fileResourceObserver.CheckAllQnReady(); err != nil {
+			return err
+		}
+		return nil
+	}, retry.Attempts(10), retry.Sleep(3*time.Second))
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.mixCoord.ValidateAnalyzer(ctx, &querypb.ValidateAnalyzerRequest{
+		AnalyzerInfos: analyzerInfos,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if err := merr.Error(resp.GetStatus()); err != nil {
+		return nil, err
+	}
+	return resp.GetResourceIds(), nil
+}
+
 func (t *createCollectionTask) assignFieldAndFunctionID(schema *schemapb.CollectionSchema) error {
-	name2id := map[string]int64{}
 	idx := 0
 	for _, field := range schema.GetFields() {
 		field.FieldID = int64(idx + StartOfUserFieldID)
 		idx++
-
-		name2id[field.GetName()] = field.GetFieldID()
 	}
 
 	for _, structArrayField := range schema.GetStructArrayFields() {
@@ -294,7 +298,21 @@ func (t *createCollectionTask) assignFieldAndFunctionID(schema *schemapb.Collect
 		for _, field := range structArrayField.GetFields() {
 			field.FieldID = int64(idx + StartOfUserFieldID)
 			idx++
-			// Also register sub-field names in name2id map
+		}
+	}
+
+	return assignFunctionIDsFromFieldNames(schema)
+}
+
+// assignFunctionIDsFromFieldNames resolves function input/output field IDs
+// after field IDs have been assigned or aligned from a source snapshot.
+func assignFunctionIDsFromFieldNames(schema *schemapb.CollectionSchema) error {
+	name2id := map[string]int64{}
+	for _, field := range schema.GetFields() {
+		name2id[field.GetName()] = field.GetFieldID()
+	}
+	for _, structArrayField := range schema.GetStructArrayFields() {
+		for _, field := range structArrayField.GetFields() {
 			name2id[field.GetName()] = field.GetFieldID()
 		}
 	}
@@ -305,7 +323,7 @@ func (t *createCollectionTask) assignFieldAndFunctionID(schema *schemapb.Collect
 		for idx, name := range function.InputFieldNames {
 			fieldId, ok := name2id[name]
 			if !ok {
-				return fmt.Errorf("input field %s of function %s not found", name, function.GetName())
+				return merr.WrapErrParameterInvalidMsg("input field %s of function %s not found", name, function.GetName())
 			}
 			function.InputFieldIds[idx] = fieldId
 		}
@@ -314,7 +332,7 @@ func (t *createCollectionTask) assignFieldAndFunctionID(schema *schemapb.Collect
 		for idx, name := range function.OutputFieldNames {
 			fieldId, ok := name2id[name]
 			if !ok {
-				return fmt.Errorf("output field %s of function %s not found", name, function.GetName())
+				return merr.WrapErrParameterInvalidMsg("output field %s of function %s not found", name, function.GetName())
 			}
 			function.OutputFieldIds[idx] = fieldId
 		}
@@ -337,7 +355,7 @@ func (t *createCollectionTask) appendDynamicField(ctx context.Context, schema *s
 				},
 			},
 		})
-		log.Ctx(ctx).Info("append dynamic field", zap.String("collection", schema.Name))
+		mlog.Info(ctx, "append dynamic field", mlog.String("collection", schema.Name))
 	}
 }
 
@@ -359,11 +377,32 @@ func (t *createCollectionTask) appendConsistecyLevel() {
 	})
 }
 
+func (t *createCollectionTask) appendNamespaceShardingEnabled() error {
+	if err := common.ValidateNamespaceShardingEnabled(t.Req.Properties...); err != nil {
+		return err
+	}
+	if common.IsNamespaceShardingEnabledKeyExists(t.Req.Properties...) {
+		return nil
+	}
+	t.Req.Properties = append(t.Req.Properties, &commonpb.KeyValuePair{
+		Key:   common.NamespaceShardingEnabledKey,
+		Value: "false",
+	})
+	return nil
+}
+
 func (t *createCollectionTask) handleNamespaceField(ctx context.Context, schema *schemapb.CollectionSchema) error {
 	hasIsolation := hasIsolationProperty(t.Req.Properties...)
 	_, err := typeutil.GetPartitionKeyFieldSchema(schema)
 	hasPartitionKey := err == nil
 	if !schema.GetEnableNamespace() {
+		return nil
+	}
+
+	if common.IsNamespaceModePartition(t.Req.GetProperties()...) {
+		if hasPartitionKey {
+			return merr.WrapErrParameterInvalidMsg("namespace is not supported with partition key mode")
+		}
 		return nil
 	}
 
@@ -386,6 +425,10 @@ func (t *createCollectionTask) handleNamespaceField(ctx context.Context, schema 
 		return merr.WrapErrParameterInvalidMsg("namespace is not supported with partition key mode")
 	}
 
+	if common.IsNamespaceModePartition(t.Req.GetProperties()...) {
+		return nil
+	}
+
 	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
 		Name:           common.NamespaceFieldName,
 		IsPartitionKey: true,
@@ -398,9 +441,9 @@ func (t *createCollectionTask) handleNamespaceField(ctx context.Context, schema 
 		Key:   common.PartitionKeyIsolationKey,
 		Value: "true",
 	})
-	log.Ctx(ctx).Info("added namespace field",
-		zap.String("collectionName", t.Req.CollectionName),
-		zap.String("fieldName", common.NamespaceFieldName))
+	mlog.Info(ctx, "added namespace field",
+		mlog.String("collectionName", t.Req.CollectionName),
+		mlog.String("fieldName", common.NamespaceFieldName))
 	return nil
 }
 
@@ -430,18 +473,189 @@ func (t *createCollectionTask) appendSysFields(schema *schemapb.CollectionSchema
 	})
 }
 
+// prepareMilvusTableSnapshotSchema validates the source snapshot and aligns
+// target field IDs before normal create-collection field ID assignment runs.
+func (t *createCollectionTask) prepareMilvusTableSnapshotSchema(ctx context.Context) error {
+	schema := t.body.CollectionSchema
+	if schema == nil || schema.GetExternalSource() == "" || schema.GetExternalSpec() == "" {
+		return nil
+	}
+	// Validate before reading snapshot metadata so RootCoord keeps the same
+	// external source boundary even if a request bypasses Proxy.
+	if err := externalspec.ValidateSourceAndSpec(schema.GetExternalSource(), schema.GetExternalSpec()); err != nil {
+		return err
+	}
+	spec, err := externalspec.ParseExternalSpec(schema.GetExternalSpec())
+	if err != nil {
+		return err
+	}
+	if spec.Format != externalspec.FormatMilvusTable {
+		return nil
+	}
+	if t.preserveFieldID {
+		// DDL replay carries the schema after milvus-table field-ID alignment.
+		// Re-reading the source snapshot here would make RootCoord recovery
+		// depend on the external bucket and credentials still being available.
+		return nil
+	}
+
+	metadata, err := packed.ReadMilvusTableSnapshotMetadata(
+		schema.GetExternalSource(),
+		schema.GetExternalSpec(),
+		createMilvusTableSnapshotStorageConfig(),
+		packed.ExternalSpecContext{
+			Source: schema.GetExternalSource(),
+			Spec:   schema.GetExternalSpec(),
+		},
+	)
+	if err != nil {
+		return merr.Wrap(err, "read milvus-table snapshot metadata for schema alignment")
+	}
+	sourceSchema := metadata.GetCollection().GetSchema()
+	if sourceSchema == nil {
+		return merr.WrapErrParameterInvalidMsg("milvus-table snapshot metadata missing collection schema")
+	}
+	if typeutil.IsExternalCollection(sourceSchema) {
+		// Avoid external-table chaining. A chained source would require refresh
+		// and read paths to chase another collection's external source/storage
+		// contract, which is not part of the milvus-table snapshot contract.
+		return merr.WrapErrParameterInvalidMsg("milvus-table external collection cannot use an external collection snapshot as source")
+	}
+	if err := typeutil.ValidateMilvusTableSchemaIdentity(schema, sourceSchema, false); err != nil {
+		return merr.Wrap(err, "milvus-table target schema must match source snapshot schema")
+	}
+
+	sourceFields := milvusTableSourceFieldsByName(sourceSchema)
+	nextTargetOnlyFieldID := nextMilvusTableTargetOnlyFieldID(sourceSchema)
+	for _, field := range schema.GetFields() {
+		if field.GetName() == common.VirtualPKFieldName || typeutil.IsFunctionOutputField(schema, field) {
+			// Milvus-table mapped fields must reuse source field IDs because
+			// source manifests store physical columns by field ID. Target-only
+			// fields, including virtual PK and target function outputs, are not
+			// read from the source manifest and therefore need IDs outside the
+			// source snapshot range.
+			field.FieldID = nextTargetOnlyFieldID
+			nextTargetOnlyFieldID++
+			continue
+		}
+		if typeutil.IsExternalSystemOrVirtualField(field.GetName()) {
+			continue
+		}
+		sourceField := sourceFields[field.GetExternalField()]
+		if sourceField == nil {
+			return merr.WrapErrParameterInvalidMsg("milvus-table target field %q maps to missing source field %q", field.GetName(), field.GetExternalField())
+		}
+		field.FieldID = sourceField.GetFieldID()
+	}
+	if err := assignFunctionIDsFromFieldNames(schema); err != nil {
+		return merr.Wrap(err, "align milvus-table function field IDs")
+	}
+	// Newly aligned milvus-table schemas set preserveFieldID below and would
+	// bypass the direct-path ValidateFunction in prepareSchema, so run the
+	// non-runtime function validation here; DDL replay never reaches this
+	// point (it returns early above) and keeps its historical schema unjudged.
+	if err := validator.ValidateFunction(schema, "", true); err != nil {
+		return err
+	}
+	t.preserveFieldID = true
+	t.Req.Properties = upsertCreateCollectionProperty(t.Req.GetProperties(), util.PreserveFieldIdsKey, "true")
+
+	mlog.Info(ctx, "aligned milvus-table external collection field IDs with source snapshot",
+		mlog.String("collection", t.Req.GetCollectionName()),
+		mlog.String("externalSource", schema.GetExternalSource()))
+	return nil
+}
+
+// createMilvusTableSnapshotStorageConfig builds the local Milvus storage config
+// used to read source snapshot metadata during create collection.
+func createMilvusTableSnapshotStorageConfig() *indexpb.StorageConfig {
+	params := paramtable.Get()
+	if params.CommonCfg.StorageType.GetValue() == "local" {
+		return &indexpb.StorageConfig{
+			RootPath:    params.LocalStorageCfg.Path.GetValue(),
+			StorageType: params.CommonCfg.StorageType.GetValue(),
+			// External collections may reference an s3:// source even when the
+			// primary storage is local, so the connection cap still applies.
+			MaxConnections: uint32(params.MinioCfg.MaxConnections.GetAsInt()),
+		}
+	}
+	return &indexpb.StorageConfig{
+		Address:           params.MinioCfg.Address.GetValue(),
+		AccessKeyID:       params.MinioCfg.AccessKeyID.GetValue(),
+		SecretAccessKey:   params.MinioCfg.SecretAccessKey.GetValue(),
+		UseSSL:            params.MinioCfg.UseSSL.GetAsBool(),
+		SslCACert:         params.MinioCfg.SslCACert.GetValue(),
+		BucketName:        params.MinioCfg.BucketName.GetValue(),
+		RootPath:          params.MinioCfg.RootPath.GetValue(),
+		UseIAM:            params.MinioCfg.UseIAM.GetAsBool(),
+		IAMEndpoint:       params.MinioCfg.IAMEndpoint.GetValue(),
+		StorageType:       params.CommonCfg.StorageType.GetValue(),
+		Region:            params.MinioCfg.Region.GetValue(),
+		UseVirtualHost:    params.MinioCfg.UseVirtualHost.GetAsBool(),
+		CloudProvider:     params.MinioCfg.CloudProvider.GetValue(),
+		RequestTimeoutMs:  params.MinioCfg.RequestTimeoutMs.GetAsInt64(),
+		MaxConnections:    uint32(params.MinioCfg.MaxConnections.GetAsInt()),
+		GcpCredentialJSON: params.MinioCfg.GcpCredentialJSON.GetValue(),
+		SslTlsMinVersion:  params.MinioCfg.SslTLSMinVersion.GetValue(),
+		UseCrc32CChecksum: params.MinioCfg.UseCRC32C.GetAsBool(),
+	}
+}
+
+// nextMilvusTableTargetOnlyFieldID returns the first field ID above all source
+// snapshot IDs so target-only fields cannot collide with source columns.
+func nextMilvusTableTargetOnlyFieldID(schemas ...*schemapb.CollectionSchema) int64 {
+	next := int64(StartOfUserFieldID)
+	for _, schema := range schemas {
+		for _, field := range schema.GetFields() {
+			if field.GetFieldID() >= next {
+				next = field.GetFieldID() + 1
+			}
+		}
+	}
+	return next
+}
+
+// milvusTableSourceFieldsByName indexes source user fields that can be targets
+// of ExternalField mappings.
+func milvusTableSourceFieldsByName(schema *schemapb.CollectionSchema) map[string]*schemapb.FieldSchema {
+	fields := make(map[string]*schemapb.FieldSchema, len(schema.GetFields()))
+	for _, field := range schema.GetFields() {
+		if typeutil.IsExternalSystemOrVirtualField(field.GetName()) {
+			continue
+		}
+		fields[field.GetName()] = field
+	}
+	return fields
+}
+
+// upsertCreateCollectionProperty inserts or updates one create-collection
+// property without disturbing the remaining request properties.
+func upsertCreateCollectionProperty(properties []*commonpb.KeyValuePair, key, value string) []*commonpb.KeyValuePair {
+	for _, property := range properties {
+		if property.GetKey() == key {
+			property.Value = value
+			return properties
+		}
+	}
+	return append(properties, &commonpb.KeyValuePair{Key: key, Value: value})
+}
+
 func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
+	if err := t.prepareMilvusTableSnapshotSchema(ctx); err != nil {
+		return err
+	}
+
 	// if schema comes from restore snapshot
 	preservedDynamicFieldID := int64(-1)
 	preservedNamespaceFieldID := int64(-1)
 	if t.preserveFieldID {
-		log.Ctx(ctx).Info("preserve field IDs from schema during create collection", zap.String("collection", t.Req.CollectionName))
+		mlog.Info(ctx, "preserve field IDs from schema during create collection", mlog.String("collection", t.Req.CollectionName))
 		fields := make([]*schemapb.FieldSchema, 0)
 		// filter out system fields
 		for _, field := range t.body.CollectionSchema.Fields {
 			if field.Name != RowIDFieldName && field.GetFieldID() == 0 {
-				log.Info("field id 0 is not allowed when preserve field ids", zap.String("field", field.Name))
-				return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("field id 0 is not allowed when preserve field ids, field: %s", field.Name))
+				mlog.Info(context.TODO(), "field id 0 is not allowed when preserve field ids", mlog.String("field", field.Name))
+				return merr.WrapErrParameterInvalidMsg("field id 0 is not allowed when preserve field ids, field: %s", field.Name)
 			}
 
 			if field.GetName() == MetaFieldName {
@@ -465,7 +679,16 @@ func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
 	}
 
 	t.appendConsistecyLevel()
+	if err := t.appendNamespaceShardingEnabled(); err != nil {
+		return err
+	}
+	if err := common.ValidateRLSProperties(t.Req.GetProperties()...); err != nil {
+		return err
+	}
 	t.appendDynamicField(ctx, t.body.CollectionSchema)
+	if err := common.ValidateNamespaceMode(t.Req.GetProperties()...); err != nil {
+		return err
+	}
 	if err := t.handleNamespaceField(ctx, t.body.CollectionSchema); err != nil {
 		return err
 	}
@@ -486,6 +709,21 @@ func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
 		if err := t.assignFieldAndFunctionID(t.body.CollectionSchema); err != nil {
 			return err
 		}
+		// Function schema validation for requests entering RootCoord directly —
+		// the proxy validates before forwarding, but nothing else on this path
+		// does. Runs only for newly created schemas: preserveFieldID restores an
+		// existing collection (snapshot/replication), whose historical schema
+		// must not be re-judged by current-version rules. External collections
+		// are validated too — the one resolution-sensitive rule (nullable
+		// input) exempts externally-mapped fields at the rule level, so the
+		// structural checks (e.g. the MinHash dim/num_hashes relation) stay
+		// authoritative on this path for the RESOLVED schema as well.
+		if err := validator.ValidateFunction(t.body.CollectionSchema, "", true); err != nil {
+			return err
+		}
+	}
+	if err := typeutil.ValidateExternalCollectionResolvedSchema(t.body.CollectionSchema); err != nil {
+		return err
 	}
 
 	// Validate timezone
@@ -495,7 +733,7 @@ func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
 	}
 
 	// Set properties for persistent
-	t.body.CollectionSchema.Properties = t.Req.GetProperties()
+	t.body.CollectionSchema.Properties = updateMaxFieldIDProperty(t.Req.GetProperties(), maxAssignedFieldIDFromSchema(t.body.CollectionSchema))
 	t.body.CollectionSchema.Version = 0
 	t.appendSysFields(t.body.CollectionSchema)
 	return nil
@@ -519,12 +757,12 @@ func (t *createCollectionTask) assignPartitionIDs(ctx context.Context) error {
 		partitionNums := t.Req.GetNumPartitions()
 		// double check, default num of physical partitions should be greater than 0
 		if partitionNums <= 0 {
-			return errors.New("the specified partitions should be greater than 0 if partition key is used")
+			return merr.WrapErrParameterInvalidMsg("the specified partitions should be greater than 0 if partition key is used")
 		}
 
 		cfgMaxPartitionNum := Params.RootCoordCfg.MaxPartitionNum.GetAsInt64()
 		if partitionNums > cfgMaxPartitionNum {
-			return fmt.Errorf("partition number (%d) exceeds max configuration (%d), collection: %s",
+			return merr.WrapErrParameterInvalidMsg("partition number (%d) exceeds max configuration (%d), collection: %s",
 				partitionNums, cfgMaxPartitionNum, t.Req.CollectionName)
 		}
 
@@ -549,10 +787,10 @@ func (t *createCollectionTask) assignPartitionIDs(ctx context.Context) error {
 	}
 	t.body.PartitionNames = partitionNames
 
-	log.Ctx(ctx).Info("assign partitions when create collection",
-		zap.String("collectionName", t.Req.GetCollectionName()),
-		zap.Int64s("partitionIds", t.header.PartitionIds),
-		zap.Strings("partitionNames", t.body.PartitionNames))
+	mlog.Info(ctx, "assign partitions when create collection",
+		mlog.String("collectionName", t.Req.GetCollectionName()),
+		mlog.Int64s("partitionIds", t.header.PartitionIds),
+		mlog.Strings("partitionNames", t.body.PartitionNames))
 	return nil
 }
 
@@ -562,7 +800,8 @@ func (t *createCollectionTask) assignChannels(ctx context.Context) error {
 		Num:          int(t.Req.GetShardsNum()),
 	})
 	if err != nil {
-		return err
+		return merr.Wrapf(err, "failed to allocate vchannels for collection %d (shards=%d)",
+			t.header.GetCollectionId(), t.Req.GetShardsNum())
 	}
 
 	for _, vchannel := range vchannels {
@@ -623,8 +862,8 @@ func (t *createCollectionTask) Prepare(ctx context.Context) error {
 func (t *createCollectionTask) validateIfCollectionExists(ctx context.Context) error {
 	// Check if the collection name duplicates an alias.
 	if _, err := t.meta.DescribeAlias(ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), typeutil.MaxTimestamp); err == nil {
-		err2 := fmt.Errorf("collection name [%s] conflicts with an existing alias, please choose a unique name", t.Req.GetCollectionName())
-		log.Ctx(ctx).Warn("create collection failed", zap.String("database", t.Req.GetDbName()), zap.Error(err2))
+		err2 := merr.WrapErrAsInputError(merr.WrapErrAliasCollectionNameConflict(t.Req.GetDbName(), t.Req.GetCollectionName(), "please choose a unique name"))
+		mlog.Warn(ctx, "create collection failed", mlog.String("database", t.Req.GetDbName()), mlog.Err(err2))
 		return err2
 	}
 
@@ -633,7 +872,7 @@ func (t *createCollectionTask) validateIfCollectionExists(ctx context.Context) e
 	if err == nil {
 		newCollInfo := newCollectionModel(t.header, t.body, 0)
 		if equal := existedCollInfo.Equal(*newCollInfo); !equal {
-			return fmt.Errorf("create duplicate collection with different parameters, collection: %s", t.Req.GetCollectionName())
+			return merr.WrapErrParameterInvalidMsg("create duplicate collection with different parameters, collection: %s", t.Req.GetCollectionName())
 		}
 		return errIgnoredCreateCollection
 	}
@@ -652,12 +891,12 @@ func validateMultiAnalyzerParams(params string, coll *schemapb.CollectionSchema,
 
 	mfield, ok := m["by_field"]
 	if !ok {
-		return fmt.Errorf("multi analyzer params now must set by_field to specify with field decide analyzer")
+		return merr.WrapErrParameterInvalidMsg("multi analyzer params now must set by_field to specify with field decide analyzer")
 	}
 
 	err = json.Unmarshal(mfield, &mFileName)
 	if err != nil {
-		return fmt.Errorf("multi analyzer params by_field must be string but now: %s", mfield)
+		return merr.WrapErrParameterInvalidMsg("multi analyzer params by_field must be string but now: %s", mfield)
 	}
 
 	// check field exist
@@ -666,7 +905,7 @@ func validateMultiAnalyzerParams(params string, coll *schemapb.CollectionSchema,
 		if field.GetName() == mFileName {
 			// only support string field now
 			if field.GetDataType() != schemapb.DataType_VarChar {
-				return fmt.Errorf("multi analyzer params now only support by string field, but field %s is not string", field.GetName())
+				return merr.WrapErrParameterInvalidMsg("multi analyzer params now only support by string field, but field %s is not string", field.GetName())
 			}
 			fieldExist = true
 			break
@@ -674,25 +913,25 @@ func validateMultiAnalyzerParams(params string, coll *schemapb.CollectionSchema,
 	}
 
 	if !fieldExist {
-		return fmt.Errorf("multi analyzer dependent field %s not exist in collection %s", string(mfield), coll.GetName())
+		return merr.WrapErrParameterInvalidMsg("multi analyzer dependent field %s not exist in collection %s", string(mfield), coll.GetName())
 	}
 
 	if value, ok := m["alias"]; ok {
 		mapping := map[string]string{}
 		err = json.Unmarshal(value, &mapping)
 		if err != nil {
-			return fmt.Errorf("multi analyzer alias must be string map but now: %s", value)
+			return merr.WrapErrParameterInvalidMsg("multi analyzer alias must be string map but now: %s", value)
 		}
 	}
 
 	analyzers, ok := m["analyzers"]
 	if !ok {
-		return fmt.Errorf("multi analyzer params must set analyzers ")
+		return merr.WrapErrParameterInvalidMsg("multi analyzer params must set analyzers ")
 	}
 
 	err = json.Unmarshal(analyzers, &analyzerMap)
 	if err != nil {
-		return fmt.Errorf("unmarshal analyzers failed: %s", err)
+		return merr.WrapErrParameterInvalidMsg("unmarshal analyzers failed: %s", err)
 	}
 
 	hasDefault := false
@@ -708,27 +947,39 @@ func validateMultiAnalyzerParams(params string, coll *schemapb.CollectionSchema,
 	}
 
 	if !hasDefault {
-		return fmt.Errorf("multi analyzer must set default analyzer for all unknown value")
+		return merr.WrapErrParameterInvalidMsg("multi analyzer must set default analyzer for all unknown value")
 	}
 	return nil
 }
 
+func collectAnalyzerInfos(collSchema *schemapb.CollectionSchema) ([]*querypb.AnalyzerInfo, error) {
+	analyzerInfos := make([]*querypb.AnalyzerInfo, 0)
+	for _, field := range collSchema.GetFields() {
+		if err := validateAnalyzer(collSchema, field, &analyzerInfos); err != nil {
+			return nil, err
+		}
+	}
+	return analyzerInfos, nil
+}
+
+// validateAnalyzer validates active match/BM25 fields and fields with
+// enable_analyzer=true. Analyzer params are ignored while analyzer is disabled.
 func validateAnalyzer(collSchema *schemapb.CollectionSchema, fieldSchema *schemapb.FieldSchema, analyzerInfos *[]*querypb.AnalyzerInfo) error {
 	h := typeutil.CreateFieldSchemaHelper(fieldSchema)
-	if !h.EnableMatch() && !typeutil.IsBm25FunctionInputField(collSchema, fieldSchema) {
-		return nil
+	active := h.EnableMatch() || typeutil.IsBm25FunctionInputField(collSchema, fieldSchema)
+	if active && !h.EnableAnalyzer() {
+		return merr.WrapErrParameterInvalidMsg("field %s which has enable_match or is input of BM25 function must also enable_analyzer", fieldSchema.Name)
 	}
-
 	if !h.EnableAnalyzer() {
-		return fmt.Errorf("field %s which has enable_match or is input of BM25 function must also enable_analyzer", fieldSchema.Name)
+		return nil
 	}
 
 	if params, ok := h.GetMultiAnalyzerParams(); ok {
 		if h.EnableMatch() {
-			return fmt.Errorf("multi analyzer now only support for bm25, but now field %s enable match", fieldSchema.Name)
+			return merr.WrapErrParameterInvalidMsg("multi analyzer now only support for bm25, but now field %s enable match", fieldSchema.Name)
 		}
 		if h.HasAnalyzerParams() {
-			return fmt.Errorf("field %s analyzer params should be none if has multi analyzer params", fieldSchema.Name)
+			return merr.WrapErrParameterInvalidMsg("field %s analyzer params should be none if has multi analyzer params", fieldSchema.Name)
 		}
 
 		return validateMultiAnalyzerParams(params, collSchema, fieldSchema, analyzerInfos)

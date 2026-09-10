@@ -67,6 +67,7 @@ const (
 	RootCoord_ListCredUsers_FullMethodName                 = "/milvus.proto.rootcoord.RootCoord/ListCredUsers"
 	RootCoord_GetCredential_FullMethodName                 = "/milvus.proto.rootcoord.RootCoord/GetCredential"
 	RootCoord_CreateRole_FullMethodName                    = "/milvus.proto.rootcoord.RootCoord/CreateRole"
+	RootCoord_AlterRole_FullMethodName                     = "/milvus.proto.rootcoord.RootCoord/AlterRole"
 	RootCoord_DropRole_FullMethodName                      = "/milvus.proto.rootcoord.RootCoord/DropRole"
 	RootCoord_OperateUserRole_FullMethodName               = "/milvus.proto.rootcoord.RootCoord/OperateUserRole"
 	RootCoord_SelectRole_FullMethodName                    = "/milvus.proto.rootcoord.RootCoord/SelectRole"
@@ -88,6 +89,7 @@ const (
 	RootCoord_DescribeDatabase_FullMethodName              = "/milvus.proto.rootcoord.RootCoord/DescribeDatabase"
 	RootCoord_AlterDatabase_FullMethodName                 = "/milvus.proto.rootcoord.RootCoord/AlterDatabase"
 	RootCoord_GetQuotaMetrics_FullMethodName               = "/milvus.proto.rootcoord.RootCoord/GetQuotaMetrics"
+	RootCoord_ClearReadTaskQueue_FullMethodName            = "/milvus.proto.rootcoord.RootCoord/ClearReadTaskQueue"
 	RootCoord_BackupEzk_FullMethodName                     = "/milvus.proto.rootcoord.RootCoord/BackupEzk"
 	RootCoord_AddFileResource_FullMethodName               = "/milvus.proto.rootcoord.RootCoord/AddFileResource"
 	RootCoord_RemoveFileResource_FullMethodName            = "/milvus.proto.rootcoord.RootCoord/RemoveFileResource"
@@ -96,6 +98,7 @@ const (
 	RootCoord_GetClientTelemetry_FullMethodName            = "/milvus.proto.rootcoord.RootCoord/GetClientTelemetry"
 	RootCoord_PushClientCommand_FullMethodName             = "/milvus.proto.rootcoord.RootCoord/PushClientCommand"
 	RootCoord_DeleteClientCommand_FullMethodName           = "/milvus.proto.rootcoord.RootCoord/DeleteClientCommand"
+	RootCoord_ListClientCommands_FullMethodName            = "/milvus.proto.rootcoord.RootCoord/ListClientCommands"
 )
 
 // RootCoordClient is the client API for RootCoord service.
@@ -220,6 +223,7 @@ type RootCoordClient interface {
 	GetCredential(ctx context.Context, in *GetCredentialRequest, opts ...grpc.CallOption) (*GetCredentialResponse, error)
 	// https://wiki.lfaidata.foundation/display/MIL/MEP+29+--+Support+Role-Based+Access+Control
 	CreateRole(ctx context.Context, in *milvuspb.CreateRoleRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	AlterRole(ctx context.Context, in *milvuspb.AlterRoleRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	DropRole(ctx context.Context, in *milvuspb.DropRoleRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	OperateUserRole(ctx context.Context, in *milvuspb.OperateUserRoleRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	SelectRole(ctx context.Context, in *milvuspb.SelectRoleRequest, opts ...grpc.CallOption) (*milvuspb.SelectRoleResponse, error)
@@ -241,6 +245,7 @@ type RootCoordClient interface {
 	DescribeDatabase(ctx context.Context, in *DescribeDatabaseRequest, opts ...grpc.CallOption) (*DescribeDatabaseResponse, error)
 	AlterDatabase(ctx context.Context, in *AlterDatabaseRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	GetQuotaMetrics(ctx context.Context, in *internalpb.GetQuotaMetricsRequest, opts ...grpc.CallOption) (*internalpb.GetQuotaMetricsResponse, error)
+	ClearReadTaskQueue(ctx context.Context, in *internalpb.ClearReadTaskQueueRequest, opts ...grpc.CallOption) (*internalpb.ClearReadTaskQueueResponse, error)
 	BackupEzk(ctx context.Context, in *internalpb.BackupEzkRequest, opts ...grpc.CallOption) (*internalpb.BackupEzkResponse, error)
 	// File Resource Management
 	AddFileResource(ctx context.Context, in *milvuspb.AddFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
@@ -251,6 +256,7 @@ type RootCoordClient interface {
 	GetClientTelemetry(ctx context.Context, in *milvuspb.GetClientTelemetryRequest, opts ...grpc.CallOption) (*milvuspb.GetClientTelemetryResponse, error)
 	PushClientCommand(ctx context.Context, in *milvuspb.PushClientCommandRequest, opts ...grpc.CallOption) (*milvuspb.PushClientCommandResponse, error)
 	DeleteClientCommand(ctx context.Context, in *milvuspb.DeleteClientCommandRequest, opts ...grpc.CallOption) (*milvuspb.DeleteClientCommandResponse, error)
+	ListClientCommands(ctx context.Context, in *ListClientCommandsRequest, opts ...grpc.CallOption) (*ListClientCommandsResponse, error)
 }
 
 type rootCoordClient struct {
@@ -657,6 +663,15 @@ func (c *rootCoordClient) CreateRole(ctx context.Context, in *milvuspb.CreateRol
 	return out, nil
 }
 
+func (c *rootCoordClient) AlterRole(ctx context.Context, in *milvuspb.AlterRoleRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, RootCoord_AlterRole_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *rootCoordClient) DropRole(ctx context.Context, in *milvuspb.DropRoleRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	out := new(commonpb.Status)
 	err := c.cc.Invoke(ctx, RootCoord_DropRole_FullMethodName, in, out, opts...)
@@ -846,6 +861,15 @@ func (c *rootCoordClient) GetQuotaMetrics(ctx context.Context, in *internalpb.Ge
 	return out, nil
 }
 
+func (c *rootCoordClient) ClearReadTaskQueue(ctx context.Context, in *internalpb.ClearReadTaskQueueRequest, opts ...grpc.CallOption) (*internalpb.ClearReadTaskQueueResponse, error) {
+	out := new(internalpb.ClearReadTaskQueueResponse)
+	err := c.cc.Invoke(ctx, RootCoord_ClearReadTaskQueue_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *rootCoordClient) BackupEzk(ctx context.Context, in *internalpb.BackupEzkRequest, opts ...grpc.CallOption) (*internalpb.BackupEzkResponse, error) {
 	out := new(internalpb.BackupEzkResponse)
 	err := c.cc.Invoke(ctx, RootCoord_BackupEzk_FullMethodName, in, out, opts...)
@@ -912,6 +936,15 @@ func (c *rootCoordClient) PushClientCommand(ctx context.Context, in *milvuspb.Pu
 func (c *rootCoordClient) DeleteClientCommand(ctx context.Context, in *milvuspb.DeleteClientCommandRequest, opts ...grpc.CallOption) (*milvuspb.DeleteClientCommandResponse, error) {
 	out := new(milvuspb.DeleteClientCommandResponse)
 	err := c.cc.Invoke(ctx, RootCoord_DeleteClientCommand_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *rootCoordClient) ListClientCommands(ctx context.Context, in *ListClientCommandsRequest, opts ...grpc.CallOption) (*ListClientCommandsResponse, error) {
+	out := new(ListClientCommandsResponse)
+	err := c.cc.Invoke(ctx, RootCoord_ListClientCommands_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1040,6 +1073,7 @@ type RootCoordServer interface {
 	GetCredential(context.Context, *GetCredentialRequest) (*GetCredentialResponse, error)
 	// https://wiki.lfaidata.foundation/display/MIL/MEP+29+--+Support+Role-Based+Access+Control
 	CreateRole(context.Context, *milvuspb.CreateRoleRequest) (*commonpb.Status, error)
+	AlterRole(context.Context, *milvuspb.AlterRoleRequest) (*commonpb.Status, error)
 	DropRole(context.Context, *milvuspb.DropRoleRequest) (*commonpb.Status, error)
 	OperateUserRole(context.Context, *milvuspb.OperateUserRoleRequest) (*commonpb.Status, error)
 	SelectRole(context.Context, *milvuspb.SelectRoleRequest) (*milvuspb.SelectRoleResponse, error)
@@ -1061,6 +1095,7 @@ type RootCoordServer interface {
 	DescribeDatabase(context.Context, *DescribeDatabaseRequest) (*DescribeDatabaseResponse, error)
 	AlterDatabase(context.Context, *AlterDatabaseRequest) (*commonpb.Status, error)
 	GetQuotaMetrics(context.Context, *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error)
+	ClearReadTaskQueue(context.Context, *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error)
 	BackupEzk(context.Context, *internalpb.BackupEzkRequest) (*internalpb.BackupEzkResponse, error)
 	// File Resource Management
 	AddFileResource(context.Context, *milvuspb.AddFileResourceRequest) (*commonpb.Status, error)
@@ -1071,6 +1106,7 @@ type RootCoordServer interface {
 	GetClientTelemetry(context.Context, *milvuspb.GetClientTelemetryRequest) (*milvuspb.GetClientTelemetryResponse, error)
 	PushClientCommand(context.Context, *milvuspb.PushClientCommandRequest) (*milvuspb.PushClientCommandResponse, error)
 	DeleteClientCommand(context.Context, *milvuspb.DeleteClientCommandRequest) (*milvuspb.DeleteClientCommandResponse, error)
+	ListClientCommands(context.Context, *ListClientCommandsRequest) (*ListClientCommandsResponse, error)
 }
 
 // UnimplementedRootCoordServer should be embedded to have forward compatible implementations.
@@ -1209,6 +1245,9 @@ func (UnimplementedRootCoordServer) GetCredential(context.Context, *GetCredentia
 func (UnimplementedRootCoordServer) CreateRole(context.Context, *milvuspb.CreateRoleRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateRole not implemented")
 }
+func (UnimplementedRootCoordServer) AlterRole(context.Context, *milvuspb.AlterRoleRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AlterRole not implemented")
+}
 func (UnimplementedRootCoordServer) DropRole(context.Context, *milvuspb.DropRoleRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DropRole not implemented")
 }
@@ -1272,6 +1311,9 @@ func (UnimplementedRootCoordServer) AlterDatabase(context.Context, *AlterDatabas
 func (UnimplementedRootCoordServer) GetQuotaMetrics(context.Context, *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetQuotaMetrics not implemented")
 }
+func (UnimplementedRootCoordServer) ClearReadTaskQueue(context.Context, *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ClearReadTaskQueue not implemented")
+}
 func (UnimplementedRootCoordServer) BackupEzk(context.Context, *internalpb.BackupEzkRequest) (*internalpb.BackupEzkResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method BackupEzk not implemented")
 }
@@ -1295,6 +1337,9 @@ func (UnimplementedRootCoordServer) PushClientCommand(context.Context, *milvuspb
 }
 func (UnimplementedRootCoordServer) DeleteClientCommand(context.Context, *milvuspb.DeleteClientCommandRequest) (*milvuspb.DeleteClientCommandResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeleteClientCommand not implemented")
+}
+func (UnimplementedRootCoordServer) ListClientCommands(context.Context, *ListClientCommandsRequest) (*ListClientCommandsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListClientCommands not implemented")
 }
 
 // UnsafeRootCoordServer may be embedded to opt out of forward compatibility for this service.
@@ -2100,6 +2145,24 @@ func _RootCoord_CreateRole_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RootCoord_AlterRole_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.AlterRoleRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).AlterRole(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_AlterRole_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).AlterRole(ctx, req.(*milvuspb.AlterRoleRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _RootCoord_DropRole_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(milvuspb.DropRoleRequest)
 	if err := dec(in); err != nil {
@@ -2478,6 +2541,24 @@ func _RootCoord_GetQuotaMetrics_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RootCoord_ClearReadTaskQueue_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(internalpb.ClearReadTaskQueueRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).ClearReadTaskQueue(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_ClearReadTaskQueue_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).ClearReadTaskQueue(ctx, req.(*internalpb.ClearReadTaskQueueRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _RootCoord_BackupEzk_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(internalpb.BackupEzkRequest)
 	if err := dec(in); err != nil {
@@ -2618,6 +2699,24 @@ func _RootCoord_DeleteClientCommand_Handler(srv interface{}, ctx context.Context
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(RootCoordServer).DeleteClientCommand(ctx, req.(*milvuspb.DeleteClientCommandRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RootCoord_ListClientCommands_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListClientCommandsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).ListClientCommands(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_ListClientCommands_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).ListClientCommands(ctx, req.(*ListClientCommandsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2806,6 +2905,10 @@ var RootCoord_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _RootCoord_CreateRole_Handler,
 		},
 		{
+			MethodName: "AlterRole",
+			Handler:    _RootCoord_AlterRole_Handler,
+		},
+		{
 			MethodName: "DropRole",
 			Handler:    _RootCoord_DropRole_Handler,
 		},
@@ -2890,6 +2993,10 @@ var RootCoord_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _RootCoord_GetQuotaMetrics_Handler,
 		},
 		{
+			MethodName: "ClearReadTaskQueue",
+			Handler:    _RootCoord_ClearReadTaskQueue_Handler,
+		},
+		{
 			MethodName: "BackupEzk",
 			Handler:    _RootCoord_BackupEzk_Handler,
 		},
@@ -2920,6 +3027,10 @@ var RootCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteClientCommand",
 			Handler:    _RootCoord_DeleteClientCommand_Handler,
+		},
+		{
+			MethodName: "ListClientCommands",
+			Handler:    _RootCoord_ListClientCommands_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

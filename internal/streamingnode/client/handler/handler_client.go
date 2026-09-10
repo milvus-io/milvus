@@ -17,6 +17,7 @@ import (
 	streamingserviceinterceptor "github.com/milvus-io/milvus/internal/util/streamingutil/service/interceptor"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/resolver"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
@@ -84,6 +85,10 @@ type HandlerClient interface {
 	// GetSalvageCheckpoint returns all salvage checkpoints captured during force promote.
 	// Returns an empty slice if no force promote has occurred.
 	GetSalvageCheckpoint(ctx context.Context, channelName string) ([]*wal.ReplicateCheckpoint, error)
+
+	// PrepareReleaseManualFlushIfLocal prepares process-local release handoff.
+	// If the wal is located at remote, it will return false, error.
+	PrepareReleaseManualFlushIfLocal(ctx context.Context, collectionID int64, vchannel string, releaseSegmentIDs []int64) (bool, error)
 
 	// GetWALMetricsIfLocal gets the metrics of the local wal.
 	// It will only return the metrics of the local wal but not the remote wal.
@@ -167,11 +172,13 @@ func getDialOptions(rb resolver.Builder) []grpc.DialOption {
 		grpc.WithResolvers(rb),
 		grpc.WithTransportCredentials(creds),
 		grpc.WithChainUnaryInterceptor(
+			mlog.UnaryClientInterceptor(),
 			otelgrpc.UnaryClientInterceptor(tracer.GetInterceptorOpts()...),
 			interceptor.ClusterInjectionUnaryClientInterceptor(),
 			streamingserviceinterceptor.NewStreamingServiceUnaryClientInterceptor(),
 		),
 		grpc.WithChainStreamInterceptor(
+			mlog.StreamClientInterceptor(),
 			otelgrpc.StreamClientInterceptor(tracer.GetInterceptorOpts()...),
 			interceptor.ClusterInjectionStreamClientInterceptor(),
 			streamingserviceinterceptor.NewStreamingServiceStreamClientInterceptor(),

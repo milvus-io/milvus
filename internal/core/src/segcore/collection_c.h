@@ -45,9 +45,6 @@ SetIndexMeta(CCollection collection,
 void
 DeleteCollection(CCollection collection);
 
-const char*
-GetCollectionName(CCollection collection);
-
 #ifdef __cplusplus
 }
 #endif

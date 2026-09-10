@@ -2,18 +2,29 @@ package planparserv2
 
 import (
 	"bytes"
-	"fmt"
-
-	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func convertArrayValue(templateName string, templateValue *schemapb.TemplateArrayValue) (*planpb.GenericValue, error) {
 	var arrayValues []*planpb.GenericValue
 	var elementType schemapb.DataType
+	// An empty SDK list has no element from which to infer a concrete oneof
+	// type. Preserve it as an untyped empty array; consumers with field context
+	// can still interpret its semantics (for example, ARRAY == []).
+	if templateValue != nil && templateValue.GetData() == nil {
+		return &planpb.GenericValue{
+			Val: &planpb.GenericValue_ArrayVal{
+				ArrayVal: &planpb.Array{
+					SameType:    true,
+					ElementType: schemapb.DataType_None,
+				},
+			},
+		}, nil
+	}
 	switch templateValue.GetData().(type) {
 	case *schemapb.TemplateArrayValue_BoolData:
 		elements := templateValue.GetBoolData().GetData()
@@ -93,7 +104,7 @@ func convertArrayValue(templateName string, templateValue *schemapb.TemplateArra
 		}
 		elementType = schemapb.DataType_JSON
 	default:
-		return nil, fmt.Errorf("unknown template variable value type: %v", templateValue.GetData())
+		return nil, merr.WrapErrQueryPlanMsg("unknown template variable value type")
 	}
 	return &planpb.GenericValue{
 		Val: &planpb.GenericValue_ArrayVal{
@@ -108,7 +119,7 @@ func convertArrayValue(templateName string, templateValue *schemapb.TemplateArra
 
 func ConvertToGenericValue(templateName string, templateValue *schemapb.TemplateValue) (*planpb.GenericValue, error) {
 	if templateValue == nil {
-		return nil, fmt.Errorf("expression template variable value is nil, template name: {%s}", templateName)
+		return nil, merr.WrapErrQueryPlanMsg("expression template variable value is nil, template name: {%s}", templateName)
 	}
 	switch templateValue.GetVal().(type) {
 	case *schemapb.TemplateValue_BoolVal:
@@ -137,8 +148,15 @@ func ConvertToGenericValue(templateName string, templateValue *schemapb.Template
 		}, nil
 	case *schemapb.TemplateValue_ArrayVal:
 		return convertArrayValue(templateName, templateValue.GetArrayVal())
+	case *schemapb.TemplateValue_BytesVal:
+		// Raw binary payload (e.g. a client pre-built membership-filter blob).
+		return &planpb.GenericValue{
+			Val: &planpb.GenericValue_BytesVal{
+				BytesVal: templateValue.GetBytesVal(),
+			},
+		}, nil
 	default:
-		return nil, errors.New("expression elements can only be scalars")
+		return nil, merr.WrapErrQueryPlanMsg("expression elements can only be scalars")
 	}
 }
 

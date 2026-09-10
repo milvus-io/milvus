@@ -400,6 +400,119 @@ func (_c *MockImportMeta_GetTaskBy_Call) RunAndReturn(run func(context.Context, 
 	return _c
 }
 
+// GetTaskByJob provides a mock function with given fields: ctx, jobID, filters
+func (_m *MockImportMeta) GetTaskByJob(ctx context.Context, jobID int64, filters ...ImportTaskFilter) []ImportTask {
+	_va := make([]interface{}, len(filters))
+	for _i := range filters {
+		_va[_i] = filters[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, jobID)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetTaskByJob")
+	}
+
+	var r0 []ImportTask
+	if rf, ok := ret.Get(0).(func(context.Context, int64, ...ImportTaskFilter) []ImportTask); ok {
+		r0 = rf(ctx, jobID, filters...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]ImportTask)
+		}
+	}
+
+	return r0
+}
+
+// MockImportMeta_GetTaskByJob_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetTaskByJob'
+type MockImportMeta_GetTaskByJob_Call struct {
+	*mock.Call
+}
+
+// GetTaskByJob is a helper method to define mock.On call
+//   - ctx context.Context
+//   - jobID int64
+//   - filters ...ImportTaskFilter
+func (_e *MockImportMeta_Expecter) GetTaskByJob(ctx interface{}, jobID interface{}, filters ...interface{}) *MockImportMeta_GetTaskByJob_Call {
+	return &MockImportMeta_GetTaskByJob_Call{Call: _e.mock.On("GetTaskByJob",
+		append([]interface{}{ctx, jobID}, filters...)...)}
+}
+
+func (_c *MockImportMeta_GetTaskByJob_Call) Run(run func(ctx context.Context, jobID int64, filters ...ImportTaskFilter)) *MockImportMeta_GetTaskByJob_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]ImportTaskFilter, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(ImportTaskFilter)
+			}
+		}
+		run(args[0].(context.Context), args[1].(int64), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockImportMeta_GetTaskByJob_Call) Return(_a0 []ImportTask) *MockImportMeta_GetTaskByJob_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockImportMeta_GetTaskByJob_Call) RunAndReturn(run func(context.Context, int64, ...ImportTaskFilter) []ImportTask) *MockImportMeta_GetTaskByJob_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// HandleCommitVchannel provides a mock function with given fields: ctx, jobID, vchannel, callback
+func (_m *MockImportMeta) HandleCommitVchannel(ctx context.Context, jobID int64, vchannel string, callback func() error) error {
+	ret := _m.Called(ctx, jobID, vchannel, callback)
+
+	if len(ret) == 0 {
+		panic("no return value specified for HandleCommitVchannel")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64, string, func() error) error); ok {
+		r0 = rf(ctx, jobID, vchannel, callback)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockImportMeta_HandleCommitVchannel_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'HandleCommitVchannel'
+type MockImportMeta_HandleCommitVchannel_Call struct {
+	*mock.Call
+}
+
+// HandleCommitVchannel is a helper method to define mock.On call
+//   - ctx context.Context
+//   - jobID int64
+//   - vchannel string
+//   - callback func() error
+func (_e *MockImportMeta_Expecter) HandleCommitVchannel(ctx interface{}, jobID interface{}, vchannel interface{}, callback interface{}) *MockImportMeta_HandleCommitVchannel_Call {
+	return &MockImportMeta_HandleCommitVchannel_Call{Call: _e.mock.On("HandleCommitVchannel", ctx, jobID, vchannel, callback)}
+}
+
+func (_c *MockImportMeta_HandleCommitVchannel_Call) Run(run func(ctx context.Context, jobID int64, vchannel string, callback func() error)) *MockImportMeta_HandleCommitVchannel_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64), args[2].(string), args[3].(func() error))
+	})
+	return _c
+}
+
+func (_c *MockImportMeta_HandleCommitVchannel_Call) Return(_a0 error) *MockImportMeta_HandleCommitVchannel_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockImportMeta_HandleCommitVchannel_Call) RunAndReturn(run func(context.Context, int64, string, func() error) error) *MockImportMeta_HandleCommitVchannel_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // RemoveJob provides a mock function with given fields: ctx, jobID
 func (_m *MockImportMeta) RemoveJob(ctx context.Context, jobID int64) error {
 	ret := _m.Called(ctx, jobID)
@@ -669,7 +782,8 @@ func (_c *MockImportMeta_UpdateTask_Call) RunAndReturn(run func(context.Context,
 func NewMockImportMeta(t interface {
 	mock.TestingT
 	Cleanup(func())
-}) *MockImportMeta {
+},
+) *MockImportMeta {
 	mock := &MockImportMeta{}
 	mock.Mock.Test(t)
 

@@ -98,15 +98,29 @@ class TestMilvusClientV2Base(Base):
 
     @trace()
     def create_struct_field_schema(self, client, check_task=None, check_items=None, **kwargs):
-
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([client.create_struct_field_schema], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
         return res, check_result
 
     @trace()
-    def add_field(self, schema, field_name, datatype, check_task=None, check_items=None, **kwargs):
+    def create_field_schema(
+        self,
+        client,
+        name,
+        data_type,
+        desc="",
+        check_task=None,
+        check_items=None,
+        **kwargs,
+    ):
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.create_field_schema, name, data_type, desc], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
 
+    @trace()
+    def add_field(self, schema, field_name, datatype, check_task=None, check_items=None, **kwargs):
         # Set default parameters for specific field types
         if datatype == DataType.VARCHAR and "max_length" not in kwargs:
             kwargs["max_length"] = ct.default_length
@@ -774,7 +788,6 @@ class TestMilvusClientV2Base(Base):
 
     @trace()
     def prepare_index_params(self, client, check_task=None, check_items=None, **kwargs):
-
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([client.prepare_index_params], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
@@ -863,6 +876,31 @@ class TestMilvusClientV2Base(Base):
             time.sleep(2)
         return False
 
+    def wait_for_schema_version_consistency(self, client, collection_name, timeout=None):
+        """Wait until every eligible sealed segment catches up with the latest collection
+        schema version, i.e. all pending schema-bump backfill is done. Polls the
+        schema_version_consistent_segments / schema_version_total_segments stats emitted
+        by DataCoord through get_collection_stats (present only after a schema-changing
+        DDL; growing and L0 segments are excluded server-side, so flush data that must
+        be counted). Two consecutive consistent polls absorb the DDL -> DataCoord
+        propagation window.
+        """
+        timeout = TIMEOUT if timeout is None else timeout
+        start_time = time.time()
+        streak = 0
+        while start_time + timeout > time.time():
+            stats, _ = self.get_collection_stats(client, collection_name)
+            consistent = stats.get("schema_version_consistent_segments")
+            total = stats.get("schema_version_total_segments")
+            if consistent is not None and total is not None and int(total) > 0 and int(consistent) == int(total):
+                streak += 1
+                if streak >= 2:
+                    return True
+            else:
+                streak = 0
+            time.sleep(2)
+        return False
+
     @trace()
     def create_alias(self, client, collection_name, alias, timeout=None, check_task=None, check_items=None, **kwargs):
         timeout = TIMEOUT if timeout is None else timeout
@@ -947,6 +985,9 @@ class TestMilvusClientV2Base(Base):
         check_result = ResponseChecker(
             res, func_name, check_task, check_items, check, user_name=user_name, password=password, **kwargs
         ).run()
+        # track for per-instance teardown; avoids cross-worker drops under -n
+        if check is True and check_task is None and user_name not in self.tear_down_user_names:
+            self.tear_down_user_names.append(user_name)
         return res, check_result
 
     @trace()
@@ -1022,6 +1063,9 @@ class TestMilvusClientV2Base(Base):
         check_result = ResponseChecker(
             res, func_name, check_task, check_items, check, role_name=role_name, **kwargs
         ).run()
+        # track for per-instance teardown; avoids cross-worker drops under -n
+        if check is True and check_task is None and role_name not in self.tear_down_role_names:
+            self.tear_down_role_names.append(role_name)
         return res, check_result
 
     @trace()
@@ -1590,93 +1634,127 @@ class TestMilvusClientV2Base(Base):
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
         return res, check_result
 
-    def wait_schema_version_consistent(self, client, collection_name, timeout=30, poll_interval=0.01):
-        """
-        Poll get_collection_stats until the schema version consistency gate would pass.
+    @trace()
+    def add_function_field(
+        self,
+        client,
+        collection_name,
+        field_schema,
+        func,
+        timeout=None,
+        check_task=None,
+        check_items=None,
+        **kwargs,
+    ):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
 
-        Background: After a previous schema-change DDL (AlterCollectionSchema or
-        AddCollectionField), DataCoord's backfill segment-version propagation runs on
-        a periodic tick. Until the tick fires, a back-to-back schema-change call is
-        rejected by the consistency gate at the Proxy / RootCoord with an error like
-        "schema version consistency check failed: N/M segments have caught up".
-        E2E tests that issue successive schema changes need to wait until the gate
-        would pass; this helper polls the same stats keys the gate reads.
-
-        Pass condition (mirrors checkSchemaVersionConsistency):
-          - both keys absent → schema version is 0, no backfill in progress → pass
-          - schema_version_consistent_segments == schema_version_total_segments → pass
-
-        Note: pymilvus MilvusClient.get_collection_stats returns a dict[str, str]
-        (with row_count converted to int), so we read the keys directly from the dict.
-
-        Args:
-            client: pymilvus MilvusClient
-            collection_name: target collection
-            timeout: max seconds to wait before giving up (default 30s)
-            poll_interval: sleep between polls in seconds (default 10ms)
-
-        Raises:
-            AssertionError on timeout, with the last observed counts for debugging.
-        """
-        consistent_key = "schema_version_consistent_segments"
-        total_key = "schema_version_total_segments"
-        deadline = time.time() + timeout
-        last_consistent, last_total = None, None
-        while time.time() < deadline:
-            stats, _ = self.get_collection_stats(client, collection_name)
-            if not stats:
-                time.sleep(poll_interval)
-                continue
-            consistent = stats.get(consistent_key)
-            total = stats.get(total_key)
-            # Both absent → schema v0 path, gate passes trivially.
-            if consistent is None and total is None:
-                return
-            # Both present and equal → backfill caught up.
-            if consistent is not None and total is not None and int(consistent) == int(total):
-                return
-            last_consistent, last_total = consistent, total
-            time.sleep(poll_interval)
-        raise AssertionError(
-            f"wait_schema_version_consistent timed out after {timeout}s for collection "
-            f"{collection_name}: consistent={last_consistent}, total={last_total}"
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request(
+            [client.add_function_field],
+            collection_name=collection_name,
+            field_schema=field_schema,
+            func=func,
+            **kwargs,
         )
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
 
-    def add_collection_field_wait_schema_version_consistency(
+    @trace()
+    def drop_collection_function(
+        self,
+        client,
+        collection_name,
+        function_name,
+        timeout=None,
+        check_task=None,
+        check_items=None,
+        **kwargs,
+    ):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.drop_collection_function, collection_name, function_name], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def drop_function_field(
+        self,
+        client,
+        collection_name,
+        function_name,
+        timeout=None,
+        check_task=None,
+        check_items=None,
+        **kwargs,
+    ):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.drop_function_field, collection_name, function_name], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def drop_collection_field(
+        self,
+        client,
+        collection_name,
+        field_name="",
+        field_id=0,
+        timeout=None,
+        check_task=None,
+        check_items=None,
+        **kwargs,
+    ):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request(
+            [client.drop_collection_field],
+            collection_name=collection_name,
+            field_name=field_name,
+            field_id=field_id,
+            **kwargs,
+        )
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def add_collection_struct_field(
         self,
         client,
         collection_name,
         field_name,
-        data_type,
-        desc="",
+        struct_schema,
+        max_capacity,
+        desc=None,
         timeout=None,
         check_task=None,
         check_items=None,
-        wait_timeout=30,
-        poll_interval=0.01,
         **kwargs,
     ):
-        """
-        Wrapper around add_collection_field that first waits for the schema-version
-        consistency gate to pass. Use this in E2E tests that issue successive
-        schema-change DDLs back-to-back, where the previous call's backfill
-        segment-version propagation tick may not have fired yet.
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
 
-        See wait_schema_version_consistent for the polling logic and pass conditions.
-        All add_collection_field arguments are forwarded unchanged.
-        """
-        self.wait_schema_version_consistent(client, collection_name, timeout=wait_timeout, poll_interval=poll_interval)
-        return self.add_collection_field(
-            client,
-            collection_name,
-            field_name,
-            data_type,
-            desc=desc,
-            timeout=timeout,
-            check_task=check_task,
-            check_items=check_items,
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request(
+            [
+                client.add_collection_struct_field,
+                collection_name,
+                field_name,
+                struct_schema,
+                max_capacity,
+                desc,
+            ],
             **kwargs,
         )
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
 
     # ====================== Snapshot ======================
     @trace()

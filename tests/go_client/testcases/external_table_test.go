@@ -7,8 +7,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus/client/v2/entity"
-	client "github.com/milvus-io/milvus/client/v2/milvusclient"
+	"github.com/milvus-io/milvus/client/v3/entity"
+	client "github.com/milvus-io/milvus/client/v3/milvusclient"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
@@ -162,7 +162,7 @@ func TestCreateExternalCollectionWithPrimaryKey(t *testing.T) {
 
 	// Create collection should fail - external collections don't support primary key
 	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
-	common.CheckErr(t, err, false, "does not support primary key")
+	common.CheckErr(t, err, false, "does not support user-defined primary key")
 }
 
 // TestCreateExternalCollectionWithDynamicField tests that creating external collection

@@ -9,7 +9,6 @@ import time
 # from dotenv import load_dotenv
 from pymilvus import DataType
 from pymilvus.milvus_client import IndexParams
-
 from pymilvus_pg import MilvusPGClient as MilvusClient
 from pymilvus_pg import logger
 
@@ -159,12 +158,7 @@ def main():
 
     start_time = time.time()
 
-    client = MilvusClient(
-        uri=args.uri,
-        token=args.token,
-        pg_conn_str=args.pg_conn,
-        ignore_vector=True
-    )
+    client = MilvusClient(uri=args.uri, token=args.token, pg_conn_str=args.pg_conn, ignore_vector=True)
     collection_name = f"{COLLECTION_NAME_PREFIX}_{int(time.time())}"
     logger.info(f"Using collection: {collection_name}")
     create_collection(client, collection_name)

@@ -296,8 +296,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         # 1. create collection
         error = {
             ct.err_code: 1100,
-            ct.err_msg: f"float vector index does not support metric type: {metric_type}: "
-            f"invalid parameter[expected=valid index params][actual=invalid index params",
+            ct.err_msg: "float vector index does not support metric type",
         }
         self.create_collection(
             client,
@@ -518,7 +517,10 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         for _ in range(limit_num):
             schema_1.add_field(cf.gen_unique_str("field_name"), DataType.INT64)
         schema_1.add_field(cf.gen_unique_str("extra_field"), DataType.INT64)
-        error_fields_over = {ct.err_code: 1, ct.err_msg: "maximum field's number should be limited to 64"}
+        error_fields_over = {
+            ct.err_code: 1,
+            ct.err_msg: f"maximum field's number should be limited to {ct.max_field_num}",
+        }
         self.create_collection(
             client,
             collection_name,
@@ -552,14 +554,17 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         for _ in range(ct.max_field_num):
             schema_3.add_field(cf.gen_unique_str("field_name"), DataType.INT64)
         schema_3.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
-        error_fields_over_64 = {ct.err_code: 65535, ct.err_msg: "maximum field's number should be limited to 64"}
+        error_fields_over = {
+            ct.err_code: 65535,
+            ct.err_msg: f"maximum field's number should be limited to {ct.max_field_num}",
+        }
         self.create_collection(
             client,
             collection_name,
             default_dim,
             schema=schema_3,
             check_task=CheckTasks.err_res,
-            check_items=error_fields_over_64,
+            check_items=error_fields_over,
         )
         # ========== Scenario 4: over maximum vector fields and over maximum total fields ==========
         schema_4 = self.create_schema(client, enable_dynamic_field=False)[0]
@@ -575,7 +580,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
             default_dim,
             schema=schema_4,
             check_task=CheckTasks.err_res,
-            check_items=error_fields_over_64,
+            check_items=error_fields_over,
         )
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -745,31 +750,33 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_collection_invalid_schema_multi_pk(self):
         """
-        target: test create collection with schema containing multiple primary key fields
-        method: create schema with two primary key fields and use it to create collection
-        expected: raise exception due to multiple primary keys
+        target: test schema rejects multiple primary key fields
+        method: add conflicting primary key definitions to a schema
+        expected: raise exception while adding the conflicting field
         """
         client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        # Create schema with multiple primary key fields
+        error = {ct.err_code: 1, ct.err_msg: "Expected only one primary key field"}
+
         schema_1 = self.create_schema(client, enable_dynamic_field=False)[0]
         schema_1.add_field("field1", DataType.INT64, is_primary=True, auto_id=False)
-        schema_1.add_field("field2", DataType.INT64, is_primary=True, auto_id=False)  # Second primary key
-        schema_1.add_field("vector_field", DataType.FLOAT_VECTOR, dim=32)
-        # Try to create collection with multiple primary keys
-        error = {ct.err_code: 999, ct.err_msg: "Expected only one primary key field"}
-        self.create_collection(
-            client, collection_name, schema=schema_1, check_task=CheckTasks.err_res, check_items=error
+        self.add_field(
+            schema_1,
+            "field2",
+            DataType.INT64,
+            is_primary=True,
+            auto_id=False,
+            check_task=CheckTasks.err_res,
+            check_items=error,
         )
 
         schema_2 = self.create_schema(client, enable_dynamic_field=False, primary_field="field2")[0]
         schema_2.add_field("field1", DataType.INT64, is_primary=True, auto_id=False)
-        schema_2.add_field("field2", DataType.INT64)  # Second primary key
-        schema_2.add_field("vector_field", DataType.FLOAT_VECTOR, dim=32)
-        # Try to create collection with multiple primary keys
-        error = {ct.err_code: 999, ct.err_msg: "Expected only one primary key field"}
-        self.create_collection(
-            client, collection_name, schema=schema_2, check_task=CheckTasks.err_res, check_items=error
+        self.add_field(
+            schema_2,
+            "field2",
+            DataType.INT64,
+            check_task=CheckTasks.err_res,
+            check_items=error,
         )
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -937,8 +944,7 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
                 nullable=True,
                 is_cluster_key=True,
             )
-            # Wait for previous schema bump's backfill segment-version propagation tick.
-            self.add_collection_field_wait_schema_version_consistency(
+            self.add_collection_field(
                 client,
                 collection_name,
                 field_name="field_new_var",
@@ -1121,7 +1127,7 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
         )
 
         # not support search on null vector with is null or is not null filter
-        error = {ct.err_code: 999, ct.err_msg: "error: IsNull/IsNotNull operations are not supported on vector fields"}
+        error = {ct.err_code: 999, ct.err_msg: "IsNull/IsNotNull operations are not supported on vector fields"}
         self.search(
             client,
             collection_name,
@@ -4261,10 +4267,11 @@ class TestMilvusClientDescribeCollectionValid(TestMilvusClientV2Base):
             "aliases": [],
             "consistency_level": 0,
             "consistency_level_name": "Strong",
-            "properties": {"timezone": "UTC"},
+            "properties": {"max_field_id": "102", "namespace.sharding.enabled": "false", "timezone": "UTC"},
             "num_partitions": 1,
             "enable_dynamic_field": True,
             "enable_namespace": False,
+            "schema_version": 0,
         }
         # Get actual description
         res = self.describe_collection(client, collection_name)[0]

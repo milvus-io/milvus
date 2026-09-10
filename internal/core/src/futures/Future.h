@@ -345,6 +345,18 @@ class Future : public IFuture {
             } catch (const folly::FutureCancellation& e) {
                 metrics_.withDuringCancel();
                 throw e;
+            } catch (const milvus::SegcoreError& e) {
+                // A cancellation raised inside execution does not always reach
+                // here as a raw folly::FutureCancellation: the exec driver's
+                // CALL_OPERATOR (and the load path) wrap it into a SegcoreError
+                // carrying ErrorCode::FollyCancel so the sync and async CGO
+                // boundaries agree on the code. Recognize that wrapped form so
+                // a mid-execution cancellation is still counted as a during-
+                // execute cancel instead of being dropped.
+                if (e.get_error_code() == milvus::ErrorCode::FollyCancel) {
+                    metrics_.withDuringCancel();
+                }
+                throw;  // rethrow the exception to the consumer side.
             } catch (...) {
                 throw;  // rethrow the exception to the consumer side.
             }

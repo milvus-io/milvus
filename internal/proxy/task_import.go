@@ -20,17 +20,15 @@ package proxy
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -93,21 +91,24 @@ func (it *importTask) OnEnqueue() error {
 func (it *importTask) PreExecute(ctx context.Context) error {
 	req := it.req
 	node := it.node
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
+	collectionID, err := it.GetMetaCache().GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		return err
 	}
 	it.collectionID = collectionID
-	schema, err := globalMetaCache.GetCollectionSchema(ctx, req.GetDbName(), req.GetCollectionName())
+	schema, err := it.GetMetaCache().GetCollectionSchema(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		return err
 	}
 	if schema.CollectionSchema == nil || len(schema.GetFields()) == 0 {
-		return merr.WrapErrImportFailed("collection schema has no fields")
+		return merr.WrapErrImportSysFailed("collection schema has no fields")
+	}
+	if err := validateTextStorageV3Enabled(schema.CollectionSchema); err != nil {
+		return err
 	}
 	it.schema = schema
 
-	channels, err := node.chMgr.getVChannels(collectionID)
+	channels, err := node.chMgr.GetVChannels(collectionID)
 	if err != nil {
 		return err
 	}
@@ -120,10 +121,10 @@ func (it *importTask) PreExecute(ctx context.Context) error {
 	var partitionIDs []int64
 	if isBackup {
 		if req.GetPartitionName() == "" {
-			return merr.WrapErrParameterInvalidMsg("partition not specified")
+			return merr.WrapErrParameterMissingMsg("partition not specified")
 		}
 		// Currently, Backup tool call import must with a partition name, each time restore a partition
-		partitionID, err := globalMetaCache.GetPartitionID(ctx, req.GetDbName(), req.GetCollectionName(), req.GetPartitionName())
+		partitionID, err := it.GetMetaCache().GetPartitionID(ctx, req.GetDbName(), req.GetCollectionName(), req.GetPartitionName())
 		if err != nil {
 			return err
 		}
@@ -132,7 +133,7 @@ func (it *importTask) PreExecute(ctx context.Context) error {
 		if req.GetPartitionName() == "" {
 			partitionIDs = []UniqueID{common.AllPartitionsID}
 		} else {
-			partitionID, err := globalMetaCache.GetPartitionID(ctx, req.GetDbName(), req.GetCollectionName(), req.PartitionName)
+			partitionID, err := it.GetMetaCache().GetPartitionID(ctx, req.GetDbName(), req.GetCollectionName(), req.PartitionName)
 			if err != nil {
 				return err
 			}
@@ -155,7 +156,7 @@ func (it *importTask) PreExecute(ctx context.Context) error {
 			if req.GetPartitionName() != "" {
 				return merr.WrapErrImportFailed("not allow to set partition name for collection with partition key")
 			}
-			partitions, err := globalMetaCache.GetPartitions(ctx, req.GetDbName(), req.GetCollectionName())
+			partitions, err := it.GetMetaCache().GetPartitions(ctx, req.GetDbName(), req.GetCollectionName())
 			if err != nil {
 				return err
 			}
@@ -167,7 +168,7 @@ func (it *importTask) PreExecute(ctx context.Context) error {
 			if req.GetPartitionName() == "" {
 				req.PartitionName = Params.CommonCfg.DefaultPartitionName.GetValue()
 			}
-			partitionID, err := globalMetaCache.GetPartitionID(ctx, req.GetDbName(), req.GetCollectionName(), req.PartitionName)
+			partitionID, err := it.GetMetaCache().GetPartitionID(ctx, req.GetDbName(), req.GetCollectionName(), req.PartitionName)
 			if err != nil {
 				return err
 			}
@@ -182,8 +183,8 @@ func (it *importTask) PreExecute(ctx context.Context) error {
 		return merr.WrapErrParameterInvalidMsg("import request is empty")
 	}
 	if len(req.Files) > Params.DataCoordCfg.MaxFilesPerImportReq.GetAsInt() {
-		return merr.WrapErrImportFailed(fmt.Sprintf("The max number of import files should not exceed %d, but got %d",
-			Params.DataCoordCfg.MaxFilesPerImportReq.GetAsInt(), len(req.Files)))
+		return merr.WrapErrImportFailedMsg("The max number of import files should not exceed %d, but got %d",
+			Params.DataCoordCfg.MaxFilesPerImportReq.GetAsInt(), len(req.Files))
 	}
 	if !isBackup && !isL0Import {
 		// check file type
@@ -198,13 +199,13 @@ func (it *importTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (it *importTask) setChannels() error {
+func (it *importTask) SetChannels() error {
 	// import task only send message by broadcast, which didn't affect the time tick rule at proxy.
 	// so we don't need to set channels here.
 	return nil
 }
 
-func (it *importTask) getChannels() []pChan {
+func (it *importTask) GetChannels() []pChan {
 	return nil
 }
 
@@ -213,14 +214,14 @@ func (it *importTask) Execute(ctx context.Context) error {
 	// DataCoord will handle validation, broadcasting, and job creation
 
 	// Get database ID from database name
-	dbInfo, err := globalMetaCache.GetDatabaseInfo(ctx, it.req.GetDbName())
+	dbInfo, err := it.GetMetaCache().GetDatabaseInfo(ctx, it.req.GetDbName())
 	if err != nil {
-		log.Ctx(ctx).Warn("failed to get database info", zap.String("dbName", it.req.GetDbName()), zap.Error(err))
+		mlog.Warn(ctx, "failed to get database info", mlog.FieldDbName(it.req.GetDbName()), mlog.Err(err))
 		return err
 	}
 
 	importReq := &internalpb.ImportRequestInternal{
-		DbID:           dbInfo.dbID,
+		DbID:           dbInfo.DBID,
 		CollectionID:   it.collectionID,
 		CollectionName: it.req.GetCollectionName(),
 		PartitionIDs:   it.partitionIDs,
@@ -234,18 +235,16 @@ func (it *importTask) Execute(ctx context.Context) error {
 
 	resp, err := it.mixCoord.ImportV2(ctx, importReq)
 	if err != nil {
-		log.Ctx(ctx).Warn("import request to datacoord failed", zap.Error(err))
+		mlog.Warn(ctx, "import request to datacoord failed", mlog.Err(err))
 		return err
 	}
 	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		err = merr.Error(resp.GetStatus())
-		log.Ctx(ctx).Warn("import request rejected by datacoord", zap.Error(err))
+		mlog.Warn(ctx, "import request rejected by datacoord", mlog.Err(err))
 		return err
 	}
-
-	log.Ctx(ctx).Info(
-		"import request sent to datacoord successfully",
-		zap.String("jobID", resp.GetJobID()),
+	mlog.Info(ctx, "import request sent to datacoord successfully",
+		mlog.String("jobID", resp.GetJobID()),
 	)
 	it.resp.JobID = resp.GetJobID()
 	return nil

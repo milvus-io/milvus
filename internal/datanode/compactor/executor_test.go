@@ -27,7 +27,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -72,9 +71,73 @@ func TestCompactionExecutor(t *testing.T) {
 		assert.Equal(t, 1, len(ex.taskCh))
 	})
 
-	t.Run("Test_Enqueue_DefaultSlotUsage", func(t *testing.T) {
+	t.Run("Test_Slots_NotBlocked_WhenEnqueueWaitsOnFullQueue", func(t *testing.T) {
 		ex := NewExecutor()
+		for i := 0; i < cap(ex.taskCh); i++ {
+			ex.taskCh <- nil
+		}
 
+		enqueueHoldingLock := make(chan struct{})
+		mockC := NewMockCompactor(t)
+		mockC.EXPECT().GetPlanID().Return(int64(100))
+		mockC.EXPECT().GetSlotUsage().Run(func() {
+			close(enqueueHoldingLock)
+		}).Return(int64(8))
+
+		enqueueDone := make(chan struct{})
+		go func() {
+			defer close(enqueueDone)
+			succeed, err := ex.Enqueue(mockC)
+			assert.True(t, succeed)
+			assert.NoError(t, err)
+		}()
+
+		require.Eventually(t, func() bool {
+			select {
+			case <-enqueueHoldingLock:
+				return true
+			default:
+				return false
+			}
+		}, time.Second, 10*time.Millisecond)
+
+		slotsDone := make(chan int64, 1)
+		go func() {
+			slotsDone <- ex.Slots()
+		}()
+
+		var slotsBlocked bool
+		select {
+		case slots := <-slotsDone:
+			assert.Equal(t, int64(8), slots)
+		case <-time.After(100 * time.Millisecond):
+			slotsBlocked = true
+		}
+
+		<-ex.taskCh
+		require.Eventually(t, func() bool {
+			select {
+			case <-enqueueDone:
+				return true
+			default:
+				return false
+			}
+		}, time.Second, 10*time.Millisecond)
+
+		if slotsBlocked {
+			require.Eventually(t, func() bool {
+				select {
+				case <-slotsDone:
+					return true
+				default:
+					return false
+				}
+			}, time.Second, 10*time.Millisecond)
+			require.Fail(t, "Slots blocked while Enqueue waited on a full task queue")
+		}
+	})
+
+	t.Run("Test_Enqueue_DefaultSlotUsage", func(t *testing.T) {
 		testCases := []struct {
 			name              string
 			compactionType    datapb.CompactionType
@@ -95,10 +158,16 @@ func TestCompactionExecutor(t *testing.T) {
 				compactionType:    datapb.CompactionType_ClusteringCompaction,
 				expectedSlotUsage: paramtable.Get().DataCoordCfg.ClusteringCompactionSlotUsage.GetAsInt64(),
 			},
+			{
+				name:              "BumpSchemaVersionCompaction",
+				compactionType:    datapb.CompactionType_BumpSchemaVersionCompaction,
+				expectedSlotUsage: paramtable.Get().DataCoordCfg.BumpSchemaVersionCompactionSlotUsage.GetAsInt64(),
+			},
 		}
 
 		for i, tc := range testCases {
 			t.Run(tc.name, func(t *testing.T) {
+				ex := NewExecutor()
 				mockC := NewMockCompactor(t)
 				mockC.EXPECT().GetPlanID().Return(int64(i + 10))
 				mockC.EXPECT().GetSlotUsage().Return(int64(0)).Times(2)
@@ -107,6 +176,7 @@ func TestCompactionExecutor(t *testing.T) {
 				succeed, err := ex.Enqueue(mockC)
 				assert.True(t, succeed)
 				assert.NoError(t, err)
+				assert.Equal(t, tc.expectedSlotUsage, ex.Slots())
 			})
 		}
 	})
@@ -136,7 +206,6 @@ func TestCompactionExecutor(t *testing.T) {
 		mockC.EXPECT().GetSlotUsage().Return(int64(8)).Times(2)
 		mockC.EXPECT().Compact().Return(result, nil)
 		mockC.EXPECT().Complete().Return()
-		mockC.EXPECT().GetStorageConfig().Return(nil)
 
 		succeed, err := ex.Enqueue(mockC)
 		assert.True(t, succeed)
@@ -165,7 +234,6 @@ func TestCompactionExecutor(t *testing.T) {
 		mockC.EXPECT().GetSlotUsage().Return(int64(8)).Times(2)
 		mockC.EXPECT().Compact().Return(nil, errors.New("compaction failed"))
 		mockC.EXPECT().Complete().Return()
-		mockC.EXPECT().GetStorageConfig().Return(nil)
 
 		succeed, err := ex.Enqueue(mockC)
 		assert.True(t, succeed)
@@ -353,7 +421,6 @@ func TestCompactionExecutor(t *testing.T) {
 		mockC.EXPECT().GetPlanID().Return(planID)
 		mockC.EXPECT().GetSlotUsage().Return(slotUsage).Times(2)
 		mockC.EXPECT().Complete().Return()
-		mockC.EXPECT().GetStorageConfig().Return(nil)
 
 		ex.Enqueue(mockC)
 		assert.Equal(t, slotUsage, ex.Slots())
@@ -378,7 +445,6 @@ func TestCompactionExecutor(t *testing.T) {
 		mockC := NewMockCompactor(t)
 		mockC.EXPECT().GetSlotUsage().Return(int64(10))
 		mockC.EXPECT().Complete().Return()
-		mockC.EXPECT().GetStorageConfig().Return(nil)
 
 		ex.tasks[1] = &taskState{
 			compactor: mockC,
@@ -387,6 +453,40 @@ func TestCompactionExecutor(t *testing.T) {
 
 		ex.completeTask(1, nil)
 
+		assert.Equal(t, int64(0), ex.Slots())
+	})
+
+	t.Run("Test_CompleteTask_DoesNotHoldLockDuringCallbacks", func(t *testing.T) {
+		ex := NewExecutor()
+		mockC := NewMockCompactor(t)
+		planID := int64(10)
+		slotUsage := int64(8)
+
+		ex.tasks[planID] = &taskState{
+			compactor: mockC,
+			state:     datapb.CompactionTaskState_executing,
+		}
+		ex.usingSlots = slotUsage
+
+		callbackSlots := make(chan int64, 1)
+		mockC.EXPECT().GetSlotUsage().Return(slotUsage)
+		mockC.EXPECT().Complete().Run(func() {
+			callbackSlots <- ex.Slots()
+		}).Return()
+
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			ex.completeTask(planID, &datapb.CompactionPlanResult{PlanID: planID})
+		}()
+
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Fatal("completeTask blocked while invoking compactor callbacks")
+		}
+
+		require.Equal(t, int64(0), <-callbackSlots)
 		assert.Equal(t, int64(0), ex.Slots())
 	})
 
@@ -401,7 +501,6 @@ func TestCompactionExecutor(t *testing.T) {
 		mockC.EXPECT().GetChannelName().Return("ch1")
 		mockC.EXPECT().Complete().Return()
 		mockC.EXPECT().GetCompactionType().Return(datapb.CompactionType_MixCompaction)
-		mockC.EXPECT().GetStorageConfig().Return(nil)
 
 		ex.Enqueue(mockC)
 		ex.mu.RLock()
@@ -435,7 +534,7 @@ func TestCompactionExecutor(t *testing.T) {
 		assert.Equal(t, datapb.CompactionTaskState_executing, results[0].State)
 	})
 
-	t.Run("Test_Multiple_ExecuteTask_WithMetrics", func(t *testing.T) {
+	t.Run("Test_Multiple_ExecuteTask", func(t *testing.T) {
 		ex := NewExecutor()
 
 		planIDs := []int64{1, 2, 3}
@@ -447,7 +546,6 @@ func TestCompactionExecutor(t *testing.T) {
 			mockC.EXPECT().GetChannelName().Return("ch1")
 			mockC.EXPECT().GetSlotUsage().Return(int64(4)).Times(2)
 			mockC.EXPECT().Complete().Return()
-			mockC.EXPECT().GetStorageConfig().Return(nil)
 
 			result := &datapb.CompactionPlanResult{
 				PlanID: planID,
@@ -480,36 +578,5 @@ func TestCompactionExecutor(t *testing.T) {
 		for _, result := range results {
 			assert.Equal(t, datapb.CompactionTaskState_completed, result.State)
 		}
-	})
-
-	t.Run("Test_CompleteTask_WithStorageConfig", func(t *testing.T) {
-		ex := NewExecutor()
-		mockC := NewMockCompactor(t)
-
-		planID := int64(1)
-		storageConfig := &indexpb.StorageConfig{
-			StorageType: "minio",
-			Address:     "localhost:9000",
-			BucketName:  "test-bucket",
-		}
-
-		mockC.EXPECT().GetPlanID().Return(planID)
-		mockC.EXPECT().GetSlotUsage().Return(int64(8)).Times(2)
-		mockC.EXPECT().Complete().Return()
-		mockC.EXPECT().GetStorageConfig().Return(storageConfig)
-
-		ex.Enqueue(mockC)
-		assert.Equal(t, int64(8), ex.Slots())
-
-		result := &datapb.CompactionPlanResult{PlanID: planID}
-		ex.completeTask(planID, result)
-
-		assert.Equal(t, int64(0), ex.Slots())
-
-		ex.mu.RLock()
-		task := ex.tasks[planID]
-		ex.mu.RUnlock()
-		assert.Equal(t, datapb.CompactionTaskState_completed, task.state)
-		assert.Equal(t, result, task.result)
 	})
 }

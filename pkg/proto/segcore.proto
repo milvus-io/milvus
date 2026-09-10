@@ -4,6 +4,7 @@ package milvus.proto.segcore;
 option go_package = "github.com/milvus-io/milvus/pkg/v3/proto/segcorepb";
 import "schema.proto";
 import "common.proto";
+import "index_coord.proto";
 
 message Binlog {
   int64 entries_num = 1;
@@ -110,6 +111,7 @@ message FieldIndexInfo {
   int32 current_index_version = 11;
   int64 index_store_version = 12 [deprecated = true];
   int32 current_scalar_index_version = 13;
+  index.IndexStorePathVersion index_store_path_version = 14;
 }
 
 message SegmentLoadInfo {

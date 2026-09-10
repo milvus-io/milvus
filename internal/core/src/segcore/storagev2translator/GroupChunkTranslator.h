@@ -22,6 +22,7 @@
 
 #include "cachinglayer/Translator.h"
 #include "cachinglayer/Utils.h"
+#include "common/ChunkTarget.h"
 #include "milvus-storage/common/metadata.h"
 #include "mmap/Types.h"
 #include "common/Types.h"
@@ -46,7 +47,8 @@ class GroupChunkTranslator
         bool mmap_populate,
         int64_t num_fields,
         milvus::proto::common::LoadPriority load_priority,
-        const std::string& warmup_policy);
+        const std::string& warmup_policy,
+        MmapChunkWritebackMode writeback_mode);
 
     ~GroupChunkTranslator() override;
 
@@ -97,6 +99,9 @@ class GroupChunkTranslator
     load_group_chunk(const std::vector<std::shared_ptr<arrow::Table>>& tables,
                      const milvus::cachinglayer::cid_t cid);
 
+    int64_t
+    loading_overhead_bytes(int64_t cell_size) const;
+
     int64_t segment_id_;
     GroupChunkType group_chunk_type_{GroupChunkType::DEFAULT};
     std::string key_;
@@ -110,6 +115,8 @@ class GroupChunkTranslator
     GroupCTMeta meta_;
     bool use_mmap_;
     bool mmap_populate_;
+    bool has_array_field_{false};
+    MmapChunkWritebackMode writeback_mode_;
     milvus::proto::common::LoadPriority load_priority_{
         milvus::proto::common::LoadPriority::HIGH};
 };

@@ -18,11 +18,13 @@ package checkers
 
 import (
 	"context"
+	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel/trace"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
@@ -33,7 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -212,8 +214,8 @@ func (c *ChannelChecker) getDmChannelDiff(ctx context.Context, collectionID int6
 ) (toLoad, toRelease []*meta.DmChannel) {
 	replica := c.meta.Get(ctx, replicaID)
 	if replica == nil {
-		log.Info("replica does not exist, skip it")
-		return
+		mlog.Info(ctx, "replica does not exist, skip it")
+		return toLoad, toRelease
 	}
 
 	dist := c.dist.ChannelDistManager.GetByFilter(meta.WithReplica2Channel(replica))
@@ -242,16 +244,15 @@ func (c *ChannelChecker) getDmChannelDiff(ctx context.Context, collectionID int6
 		}
 	}
 
-	return
+	return toLoad, toRelease
 }
 
 func (c *ChannelChecker) findRepeatedChannels(ctx context.Context, replicaID int64) []*meta.DmChannel {
-	log := log.Ctx(ctx).WithRateGroup("ChannelChecker.findRepeatedChannels", 1, 60)
 	replica := c.meta.Get(ctx, replicaID)
 	dupChannels := make([]*meta.DmChannel, 0)
 
 	if replica == nil {
-		log.Info("replica does not exist, skip it")
+		mlog.Info(ctx, "replica does not exist, skip it")
 		return dupChannels
 	}
 
@@ -259,7 +260,7 @@ func (c *ChannelChecker) findRepeatedChannels(ctx context.Context, replicaID int
 	for _, delegator := range delegatorList {
 		leader := c.dist.ChannelDistManager.GetShardLeader(delegator.GetChannelName(), replica)
 		if leader == nil {
-			log.Warn("channel leader does not exist, skip it", zap.String("channel", delegator.GetChannelName()))
+			mlog.Warn(ctx, "channel leader does not exist, skip it", mlog.String("channel", delegator.GetChannelName()))
 			continue
 		}
 		// if channel's version is smaller than shard leader's version, it means that the channel is not up to date
@@ -272,7 +273,16 @@ func (c *ChannelChecker) findRepeatedChannels(ctx context.Context, replicaID int
 }
 
 func (c *ChannelChecker) createChannelLoadTask(ctx context.Context, channels []*meta.DmChannel, replica *meta.Replica) []task.Task {
-	plans := make([]assign.ChannelAssignPlan, 0)
+	// Group channels by their candidate node set and hand each group to the
+	// assign policy in one call. Assigning channel by channel lets every call
+	// observe the same node scores (the tasks of this round are not in the
+	// scheduler yet), so all channels of a replica end up on the same node.
+	type channelGroup struct {
+		nodes    []int64
+		channels []*meta.DmChannel
+	}
+	groups := make(map[string]*channelGroup)
+	groupKeys := make([]string, 0)
 	for _, ch := range channels {
 		var rwNodes []int64
 		if streamingutil.IsStreamingServiceEnabled() {
@@ -282,15 +292,44 @@ func (c *ChannelChecker) createChannelLoadTask(ctx context.Context, channels []*
 				rwNodes = replica.GetRWNodes()
 			}
 		}
-		plan := c.assignPolicy.AssignChannel(ctx, replica.GetCollectionID(), []*meta.DmChannel{ch}, rwNodes, true)
-		plans = append(plans, plan...)
+		key := nodesGroupKey(rwNodes)
+		group, ok := groups[key]
+		if !ok {
+			group = &channelGroup{nodes: rwNodes}
+			groups[key] = group
+			groupKeys = append(groupKeys, key)
+		}
+		group.channels = append(group.channels, ch)
+	}
+
+	plans := make([]assign.ChannelAssignPlan, 0, len(channels))
+	for _, key := range groupKeys {
+		group := groups[key]
+		plans = append(plans, c.assignPolicy.AssignChannel(ctx, replica.GetCollectionID(), group.channels, group.nodes, true)...)
 	}
 
 	for i := range plans {
 		plans[i].Replica = replica
 	}
 
+	// TODO: same known limitation as SegmentChecker.createSegmentLoadTasks --
+	// a channel whose real watch time (L0/growing backlog, seek distance)
+	// consistently exceeds ChannelTaskTimeout never converges: killed and
+	// rebuilt with the same budget every check tick, no backoff or retry cap.
 	return balance.CreateChannelTasksFromPlans(ctx, c.ID(), Params.QueryCoordCfg.ChannelTaskTimeout.GetAsDuration(time.Millisecond), plans)
+}
+
+// nodesGroupKey returns an order-insensitive key of a node set.
+func nodesGroupKey(nodes []int64) string {
+	sorted := make([]int64, len(nodes))
+	copy(sorted, nodes)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+	var sb strings.Builder
+	for _, node := range sorted {
+		sb.WriteString(strconv.FormatInt(node, 10))
+		sb.WriteByte(',')
+	}
+	return sb.String()
 }
 
 func (c *ChannelChecker) createChannelReduceTasks(ctx context.Context, channels []*meta.DmChannel, replica *meta.Replica) []task.Task {
@@ -299,12 +338,12 @@ func (c *ChannelChecker) createChannelReduceTasks(ctx context.Context, channels 
 		action := task.NewChannelAction(ch.Node, task.ActionTypeReduce, ch.GetChannelName())
 		task, err := task.NewChannelTask(ctx, Params.QueryCoordCfg.ChannelTaskTimeout.GetAsDuration(time.Millisecond), c.ID(), ch.GetCollectionID(), replica, action)
 		if err != nil {
-			log.Warn("create channel reduce task failed",
-				zap.Int64("collection", ch.GetCollectionID()),
-				zap.Int64("replica", replica.GetID()),
-				zap.String("channel", ch.GetChannelName()),
-				zap.Int64("from", ch.Node),
-				zap.Error(err),
+			mlog.Warn(ctx, "create channel reduce task failed",
+				mlog.Int64("collection", ch.GetCollectionID()),
+				mlog.Int64("replica", replica.GetID()),
+				mlog.String("channel", ch.GetChannelName()),
+				mlog.Int64("from", ch.Node),
+				mlog.Err(err),
 			)
 			continue
 		}

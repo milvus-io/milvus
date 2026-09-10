@@ -20,7 +20,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/collector"
-	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
@@ -29,19 +28,18 @@ import (
 )
 
 type insertNodeMsg struct {
-	insertMsgs    []*InsertMsg
-	deleteMsgs    []*DeleteMsg
-	insertDatas   map[int64]*delegator.InsertData
-	timeRange     TimeRange
-	schema        *schemapb.CollectionSchema
-	schemaVersion uint64
+	insertMsgs      []*InsertMsg
+	deleteMsgs      []*DeleteMsg
+	timeRange       TimeRange
+	schema          *schemapb.CollectionSchema
+	schemaBarrierTs uint64
 }
 
 type deleteNodeMsg struct {
-	deleteMsgs    []*DeleteMsg
-	timeRange     TimeRange
-	schema        *schemapb.CollectionSchema
-	schemaVersion uint64
+	deleteMsgs      []*DeleteMsg
+	timeRange       TimeRange
+	schema          *schemapb.CollectionSchema
+	schemaBarrierTs uint64
 }
 
 func (msg *insertNodeMsg) append(taskMsg msgstream.TsMsg) error {
@@ -61,18 +59,17 @@ func (msg *insertNodeMsg) append(taskMsg msgstream.TsMsg) error {
 			return err
 		}
 		msg.schema = body.GetSchema()
-		msg.schemaVersion = taskMsg.BeginTs()
+		msg.schemaBarrierTs = taskMsg.BeginTs()
 	case commonpb.MsgType_AlterCollection:
 		putCollectionMsg := taskMsg.(*adaptor.AlterCollectionMessageBody)
 		header := putCollectionMsg.AlterCollectionMessage.Header()
 		if messageutil.IsSchemaChange(header) {
 			body := putCollectionMsg.AlterCollectionMessage.MustBody()
 			msg.schema = body.GetUpdates().GetSchema()
-			msg.schemaVersion = taskMsg.BeginTs()
+			msg.schemaBarrierTs = taskMsg.BeginTs()
 		}
 	case commonpb.MsgType_ManualFlush:
-		// ManualFlush is already handled in filterNode.filtrate() via delegator.ProcessManualFlush().
-		// No-op here since ManualFlush doesn't carry insert/delete data.
+		// ManualFlush is consumed in filterNode.filtrate(); no insert/delete payload here.
 	default:
 		return merr.WrapErrParameterInvalid("msgType is Insert or Delete", "not")
 	}

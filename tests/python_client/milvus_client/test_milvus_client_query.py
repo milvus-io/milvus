@@ -213,7 +213,7 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
         else:
             error = {
                 ct.err_code: 65535,
-                ct.err_msg: f"cannot parse expression: {term_expr}, error: field invalid_field not exist",
+                ct.err_msg: "field invalid_field not exist",
             }
             self.query(client, collection_name, filter=term_expr, check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
@@ -499,15 +499,14 @@ class TestMilvusClientQueryInvalidShared(TestMilvusClientV2Base):
         expr_1 = f"{ct.default_int64_field_name} inn [1, 2]"
         error_1 = {
             ct.err_code: 65535,
-            ct.err_msg: "cannot parse expression: int64 inn [1, 2], error: invalid expression: int64 inn [1, 2]",
+            ct.err_msg: "invalid expression: int64 inn [1, 2]",
         }
         self.query(client, INVALID_SHARED_COLLECTION, filter=expr_1, check_task=CheckTasks.err_res, check_items=error_1)
 
         expr_2 = f"{ct.default_int64_field_name} in not [1, 2]"
         error_2 = {
             ct.err_code: 65535,
-            ct.err_msg: "cannot parse expression: int64 in not [1, 2], "
-            "error: not can only apply on boolean: invalid parameter",
+            ct.err_msg: "not can only apply on boolean",
         }
         self.query(client, INVALID_SHARED_COLLECTION, filter=expr_2, check_task=CheckTasks.err_res, check_items=error_2)
 
@@ -523,15 +522,14 @@ class TestMilvusClientQueryInvalidShared(TestMilvusClientV2Base):
         for expr in exprs:
             error = {
                 ct.err_code: 1100,
-                ct.err_msg: f"cannot parse expression: {expr}, error: the right-hand side of 'in' must be a list",
+                ct.err_msg: "the right-hand side of 'in' must be a list",
             }
             self.query(client, INVALID_SHARED_COLLECTION, filter=expr, check_task=CheckTasks.err_res, check_items=error)
 
         expr = f"{ct.default_int64_field_name} in (mn)"
         error = {
             ct.err_code: 1100,
-            ct.err_msg: f"cannot parse expression: {expr}, "
-            "error: value '(mn)' in list cannot be a non-const expression",
+            ct.err_msg: "value '(mn)' in list cannot be a non-const expression",
         }
         self.query(client, INVALID_SHARED_COLLECTION, filter=expr, check_task=CheckTasks.err_res, check_items=error)
 
@@ -548,8 +546,7 @@ class TestMilvusClientQueryInvalidShared(TestMilvusClientV2Base):
         term_expr = f"{default_primary_key_field_name} in {values}"
         error = {
             ct.err_code: 1100,
-            ct.err_msg: f"failed to create query plan: cannot parse expression: {term_expr}, "
-            "error: value 'float_val:1' in list cannot be casted to Int64",
+            ct.err_msg: "value 'float_val:1' in list cannot be casted to Int64",
         }
         self.query(
             client, INVALID_SHARED_COLLECTION, filter=term_expr, check_task=CheckTasks.err_res, check_items=error
@@ -559,8 +556,7 @@ class TestMilvusClientQueryInvalidShared(TestMilvusClientV2Base):
         term_expr = f"{default_primary_key_field_name} in {values}"
         error = {
             ct.err_code: 1100,
-            ct.err_msg: f"failed to create query plan: cannot parse expression: {term_expr}, "
-            "error: value 'float_val:2' in list cannot be casted to Int64",
+            ct.err_msg: "value 'float_val:2' in list cannot be casted to Int64",
         }
         self.query(
             client, INVALID_SHARED_COLLECTION, filter=term_expr, check_task=CheckTasks.err_res, check_items=error
@@ -681,7 +677,10 @@ class TestMilvusClientQueryInvalidShared(TestMilvusClientV2Base):
         expected: raise invalid-limit error
         """
         client = self._client()
-        error = {ct.err_code: 1, ct.err_msg: f"limit [{limit}] is invalid"}
+        # milvus strips leading/trailing whitespace before echoing the value
+        # in the error message, so " " becomes "" in `limit [<displayed>] is invalid`
+        displayed = limit.strip() if isinstance(limit, str) else limit
+        error = {ct.err_code: 1, ct.err_msg: f"limit [{displayed}] is invalid"}
         self.query(
             client,
             INVALID_SHARED_COLLECTION,
@@ -729,7 +728,10 @@ class TestMilvusClientQueryInvalidShared(TestMilvusClientV2Base):
         expected: raise invalid-offset error
         """
         client = self._client()
-        error = {ct.err_code: 1, ct.err_msg: f"offset [{offset}] is invalid"}
+        # milvus strips leading/trailing whitespace before echoing the value
+        # in the error message, so " " becomes "" in `offset [<displayed>] is invalid`
+        displayed = offset.strip() if isinstance(offset, str) else offset
+        error = {ct.err_code: 1, ct.err_msg: f"offset [{displayed}] is invalid"}
         self.query(
             client,
             INVALID_SHARED_COLLECTION,
@@ -801,6 +803,68 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
             check_task=CheckTasks.check_query_results,
             check_items={exp_res: rows, "with_vec": True, "pk_name": default_primary_key_field_name},
         )
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_query_with_multiple_namespaces(self):
+        """
+        target: test query with namespace enabled
+        method: create namespace-enabled collection with multiple shards, insert rows into multiple namespaces, then query by namespace
+        expected: query only returns rows from the requested namespace
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        shards_num = 4
+        self.create_collection(
+            client,
+            collection_name,
+            default_dim,
+            consistency_level="Strong",
+            enable_namespace=True,
+            shards_num=shards_num,
+        )
+
+        desc = self.describe_collection(client, collection_name)[0]
+        assert desc["enable_namespace"] is True
+        assert desc["num_shards"] == shards_num
+
+        rng = np.random.default_rng(seed=19530)
+        namespaces = [f"namespace_{i}" for i in range(8)]
+        nb_per_namespace = 10
+        ids_by_namespace = {
+            namespace: [idx * 1000 + i for i in range(nb_per_namespace)]
+            for idx, namespace in enumerate(namespaces)
+        }
+        for namespace, ids in ids_by_namespace.items():
+            rows = [
+                {
+                    default_primary_key_field_name: pk,
+                    default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                }
+                for pk in ids
+            ]
+            self.insert(client, collection_name, rows, namespace=namespace)
+
+        for namespace, expected_ids in ids_by_namespace.items():
+            res = self.query(
+                client,
+                collection_name,
+                filter=default_search_exp,
+                output_fields=[default_primary_key_field_name],
+                namespace=namespace,
+            )[0]
+            assert {r[default_primary_key_field_name] for r in res} == set(expected_ids)
+
+        first_id_per_namespace = [ids[0] for ids in ids_by_namespace.values()]
+        for namespace, expected_ids in ids_by_namespace.items():
+            filtered = self.query(
+                client,
+                collection_name,
+                filter=f"{default_primary_key_field_name} in {first_id_per_namespace}",
+                output_fields=[default_primary_key_field_name],
+                namespace=namespace,
+            )[0]
+            assert {r[default_primary_key_field_name] for r in filtered} == {expected_ids[0]}
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1550,8 +1614,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         not_support_expr = f"{ct.default_bool_field_name} in [0]"
         error = {
             ct.err_code: 65535,
-            ct.err_msg: "cannot parse expression: bool in [0], error: "
-            "value 'int64_val:0' in list cannot be casted to Bool",
+            ct.err_msg: "value 'int64_val:0' in list cannot be casted to Bool",
         }
         self.query(
             client,
@@ -2043,7 +2106,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
                 "listFlt": [m * 1.0 for m in range(i, i + limit)],
                 "listBool": [bool(i % 2)],
                 "listList": [[i, str(i + 1)], [i * 1.0, i + 1]],
-                "listMix": [i, i * 1.1, str(i), bool(i % 2), [i, str(i)]],
+                "listMix": [i, i + 0.5, str(i), bool(i % 2), [i, str(i)]],
             }
         self.insert(client, collection_name, rows)
         # 3. create index and load
@@ -2112,7 +2175,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
                 "listFlt": [m * 1.0 for m in range(i, i + limit)],
                 "listBool": [bool(i % 2)],
                 "listList": [[i, str(i + 1)], [i * 1.0, i + 1]],
-                "listMix": [i, i * 1.1, str(i), bool(i % 2), [i, str(i)]],
+                "listMix": [i, i + 0.5, str(i), bool(i % 2), [i, str(i)]],
             }
         self.insert(client, collection_name, rows)
         # 3. create index and load
@@ -2412,7 +2475,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         flt_data = [[m * 1.0 for m in range(i, i + limit)] for i in range(default_nb)]
         bool_data = [[bool(i % 2)] for i in range(default_nb)]
         list_data = [[[i, str(i + 1)], [i * 1.0, i + 1]] for i in range(default_nb)]
-        mix_data = [[i, i * 1.1, str(i), bool(i % 2), [i, str(i)]] for i in range(default_nb)]
+        mix_data = [[i, i + 0.5, str(i), bool(i % 2), [i, str(i)]] for i in range(default_nb)]
 
         for i in range(default_nb):
             rows[i][ct.default_json_field_name] = {
@@ -5031,7 +5094,7 @@ class TestQueryStringPrimaryShared(TestMilvusClientV2Base):
         expression = 'float like "0%"'
         error = {
             ct.err_code: 65535,
-            ct.err_msg: f"cannot parse expression: {expression}, error: like operation on non-string or no-json field is unsupported",
+            ct.err_msg: "like operation on non-string or no-json field is unsupported",
         }
         self.query(
             client,
@@ -5080,8 +5143,7 @@ class TestQueryStringPrimaryShared(TestMilvusClientV2Base):
         expression = "varchar == int64"
         error = {
             ct.err_code: 1100,
-            ct.err_msg: f"failed to create query plan: cannot parse expression: {expression}, "
-            f"error: comparisons between VarChar and Int64 are not supported: invalid parameter",
+            ct.err_msg: "comparisons between VarChar and Int64 are not supported",
         }
         self.query(
             client,
@@ -5377,6 +5439,99 @@ class TestQueryArray(TestMilvusClientV2Base):
             returned_ids = [record["id"] for record in res]
             assert set(returned_ids) == set(ground_truth)
         # 5. clean up
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_query_array_contains_merge_equivalence(self):
+        """
+        target: compare merged ARRAY contains predicates with explicit contains_any/contains_all
+        method: query nullable, empty, and duplicate-element arrays in growing and sealed/indexed segments
+        expected: original and explicit predicates return identical primary keys in both execution paths
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        array_field = "array_values"
+
+        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(
+            array_field,
+            DataType.ARRAY,
+            element_type=DataType.INT64,
+            max_capacity=16,
+            nullable=True,
+        )
+        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
+
+        vector_index = self.prepare_index_params(client)[0]
+        vector_index.add_index(field_name="vector", index_type="FLAT", metric_type="L2")
+        self.create_index(client, collection_name, vector_index)
+        self.load_collection(client, collection_name)
+
+        arrays = [[], None, [1], [2], [1, 2], [1, 1, 2], [3]]
+        vectors = cf.gen_vectors(len(arrays), default_dim)
+        rows = [
+            {"id": row_id, "vector": vectors[row_id], array_field: array}
+            for row_id, array in enumerate(arrays)
+        ]
+        self.insert(client, collection_name, rows)
+
+        predicate_cases = [
+            (
+                f"array_contains({array_field}, 1) or array_contains({array_field}, 2)",
+                f"array_contains_any({array_field}, [1, 2])",
+                {2, 3, 4, 5},
+            ),
+            (
+                f"array_contains({array_field}, 1) and array_contains({array_field}, 2)",
+                f"array_contains_all({array_field}, [1, 2])",
+                {4, 5},
+            ),
+            (
+                f"array_contains({array_field}, 1) or array_contains({array_field}, 1)",
+                f"array_contains_any({array_field}, [1, 1])",
+                {2, 4, 5},
+            ),
+            (
+                f"array_contains({array_field}, 1) and array_contains({array_field}, 1)",
+                f"array_contains_all({array_field}, [1, 1])",
+                {2, 4, 5},
+            ),
+        ]
+
+        def assert_equivalent():
+            for original, explicit, expected_ids in predicate_cases:
+                original_result = self.query(
+                    client,
+                    collection_name,
+                    filter=original,
+                    output_fields=["id"],
+                    limit=len(rows),
+                )[0]
+                explicit_result = self.query(
+                    client,
+                    collection_name,
+                    filter=explicit,
+                    output_fields=["id"],
+                    limit=len(rows),
+                )[0]
+                original_ids = {record["id"] for record in original_result}
+                explicit_ids = {record["id"] for record in explicit_result}
+                assert original_ids == explicit_ids == expected_ids
+
+        # Loaded-before-insert data stays in the growing segment.
+        assert_equivalent()
+
+        # Flush and add an ARRAY scalar index to exercise the sealed/indexed path.
+        self.flush(client, collection_name)
+        self.release_collection(client, collection_name)
+        array_index = self.prepare_index_params(client)[0]
+        array_index.add_index(field_name=array_field, index_type="INVERTED")
+        self.create_index(client, collection_name, array_index)
+        self.load_collection(client, collection_name)
+        assert_equivalent()
+
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -6284,7 +6439,7 @@ class TestQueryCount(TestMilvusClientV2Base):
         # 3. create index and load
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(
-            field_name=ct.default_float_vec_field_name, index_type="IVF_SQ8", metric_type="L2", params={"nlist": 64}
+            field_name=ct.default_float_vec_field_name, index_type="FLAT", metric_type="L2", params={}
         )
         self.create_index(client, collection_name, index_params)
         self.load_collection(client, collection_name)

@@ -18,9 +18,9 @@ package importv2
 
 import (
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 )
@@ -151,6 +151,11 @@ func UpdateSegmentInfo(info *datapb.ImportSegmentInfo) UpdateAction {
 				segmentsInfo[segment].Deltalogs = mergeFn(segmentsInfo[segment].Deltalogs, info.GetDeltalogs())
 				segmentsInfo[segment].Bm25Logs = mergeFn(segmentsInfo[segment].Bm25Logs, info.GetBm25Logs())
 				segmentsInfo[segment].ManifestPath = info.GetManifestPath()
+				// Stats (segment.Statistics().Publish()) is cumulative per segment,
+				// so the latest contributing file's snapshot supersedes earlier
+				// ones — refresh like ImportedRows rather than freezing the first,
+				// which would undercount every file after the first. Do NOT sum.
+				segmentsInfo[segment].Stats = info.GetStats()
 				return
 			}
 			segmentsInfo[segment] = info
@@ -174,6 +179,17 @@ func UpdateSegmentResult(result *datapb.CopySegmentResult) UpdateAction {
 	}
 }
 
+// UpdateCopiedFiles records target objects created by a CopySegmentTask so a
+// failed task can remove them. TaskManager serializes updates and Clone keeps
+// each published task snapshot immutable.
+func UpdateCopiedFiles(files []string) UpdateAction {
+	return func(task Task) {
+		if it, ok := task.(*CopySegmentTask); ok {
+			it.copiedFiles = append(it.copiedFiles, files...)
+		}
+	}
+}
+
 type Task interface {
 	Execute() []*conc.Future[any]
 	GetJobID() int64
@@ -191,12 +207,12 @@ type Task interface {
 	Clone() Task
 }
 
-func WrapLogFields(task Task, fields ...zap.Field) []zap.Field {
-	res := []zap.Field{
-		zap.Int64("taskID", task.GetTaskID()),
-		zap.Int64("jobID", task.GetJobID()),
-		zap.Int64("collectionID", task.GetCollectionID()),
-		zap.String("type", task.GetType().String()),
+func WrapLogFields(task Task, fields ...mlog.Field) []mlog.Field {
+	res := []mlog.Field{
+		mlog.FieldTaskID(task.GetTaskID()),
+		mlog.FieldJobID(task.GetJobID()),
+		mlog.FieldCollectionID(task.GetCollectionID()),
+		mlog.String("type", task.GetType().String()),
 	}
 	res = append(res, fields...)
 	return res

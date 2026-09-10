@@ -23,10 +23,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 const (
@@ -46,12 +45,12 @@ func encodeEZContext(ezID int64, key []byte) string {
 func decodeEZContext(encoded string) (ezID int64, key string, err error) {
 	parts := strings.Split(encoded, ":")
 	if len(parts) != 2 {
-		return 0, "", fmt.Errorf("invalid EZ context format: %s", encoded)
+		return 0, "", merr.WrapErrParameterInvalidMsg("invalid EZ context format: %s", encoded)
 	}
 
 	ezID, err = strconv.ParseInt(parts[0], 10, 64)
 	if err != nil {
-		return 0, "", fmt.Errorf("invalid ezID in context: %w", err)
+		return 0, "", merr.Wrap(err, "invalid ezID in context")
 	}
 
 	return ezID, parts[1], nil
@@ -114,12 +113,12 @@ func RemoveEZ(ezID int64) error {
 func BackupEZ(ezID int64) (string, error) {
 	cipher := GetCipher()
 	if cipher == nil {
-		return "", ErrCipherPluginMissing
+		return "", errCipherPluginMissing
 	}
 
 	backupProvider, ok := cipher.(BackupInterface)
 	if !ok {
-		return "", fmt.Errorf("cipher plugin does not support backup operation")
+		return "", merr.WrapErrServiceInternalMsg("cipher plugin does not support backup operation")
 	}
 
 	return backupProvider.Backup(ezID)
@@ -133,7 +132,7 @@ func GetPluginContext(ezID int64, collectionID int64) ([]*commonpb.KeyValuePair,
 
 	key := cipher.GetUnsafeKey(ezID, collectionID)
 	if len(key) == 0 {
-		return nil, errors.Newf("cannot get ez key for ezID=%d, collectionID=%d", ezID, collectionID)
+		return nil, merr.WrapErrParameterInvalidMsg("cannot get ez key for ezID=%d, collectionID=%d", ezID, collectionID)
 	}
 
 	return []*commonpb.KeyValuePair{{
@@ -152,7 +151,7 @@ func ImportEZ(importEzk string) ([]*commonpb.KeyValuePair, error) {
 		CipherConfigImportEZ: importEzk,
 	}
 	if err := cipher.Init(config); err != nil {
-		return nil, fmt.Errorf("failed to import EZK: %w", err)
+		return nil, merr.Wrap(err, "failed to import EZK")
 	}
 
 	ezID, err := GetEzIDByImportEzk(importEzk)
@@ -165,7 +164,7 @@ func ImportEZ(importEzk string) ([]*commonpb.KeyValuePair, error) {
 func GetEzIDByImportEzk(importEzk string) (int64, error) {
 	ezkBytes, err := base64.StdEncoding.DecodeString(importEzk)
 	if err != nil {
-		return 0, fmt.Errorf("failed to decode EZK: %w", err)
+		return 0, merr.Wrap(err, "failed to decode EZK")
 	}
 
 	type EZKData struct {
@@ -173,7 +172,7 @@ func GetEzIDByImportEzk(importEzk string) (int64, error) {
 	}
 	var ezkData EZKData
 	if err := json.Unmarshal(ezkBytes, &ezkData); err != nil {
-		return 0, fmt.Errorf("failed to unmarshal EZK: %w", err)
+		return 0, merr.Wrap(err, "failed to unmarshal EZK")
 	}
 	return ezkData.EzID, nil
 }

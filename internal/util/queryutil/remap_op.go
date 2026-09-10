@@ -18,12 +18,12 @@ package queryutil
 
 import (
 	"context"
-	"fmt"
 
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // RemapOperator reorders FieldsData by pre-computed positional indices.
@@ -58,7 +58,7 @@ func (op *RemapOperator) Run(_ context.Context, _ trace.Span, inputs ...any) ([]
 	newFieldsData := make([]*schemapb.FieldData, 0, len(op.outputIndices))
 	for _, pos := range op.outputIndices {
 		if pos < 0 || pos >= len(fieldsData) {
-			return nil, fmt.Errorf("RemapOperator: output index %d out of range [0, %d)", pos, len(fieldsData))
+			return nil, merr.WrapErrParameterInvalidMsg("RemapOperator: output index %d out of range [0, %d)", pos, len(fieldsData))
 		}
 		newFieldsData = append(newFieldsData, fieldsData[pos])
 	}

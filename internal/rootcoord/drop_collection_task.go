@@ -18,14 +18,12 @@ package rootcoord
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -42,7 +40,7 @@ type dropCollectionTask struct {
 func (t *dropCollectionTask) validate(ctx context.Context) error {
 	// Critical promise here, also see comment of startBroadcastWithCollectionLock.
 	if t.meta.IsAlias(ctx, t.Req.GetDbName(), t.Req.GetCollectionName()) {
-		return fmt.Errorf("cannot drop the collection via alias = %s", t.Req.CollectionName)
+		return merr.WrapErrParameterInvalidMsg("cannot drop the collection via alias = %s", t.Req.CollectionName)
 	}
 
 	// use max ts to check if latest collection exists.
@@ -62,8 +60,8 @@ func (t *dropCollectionTask) validate(ctx context.Context) error {
 
 	// Check if all aliases have been dropped.
 	if len(aliases) > 0 {
-		err = fmt.Errorf("unable to drop the collection [%s] because it has associated aliases %v, please remove all aliases before dropping the collection", t.Req.GetCollectionName(), aliases)
-		log.Ctx(ctx).Warn("drop collection failed", zap.String("database", t.Req.GetDbName()), zap.Error(err))
+		err = merr.WrapErrParameterInvalidMsg("unable to drop the collection [%s] because it has associated aliases %v, please remove all aliases before dropping the collection", t.Req.GetCollectionName(), aliases)
+		mlog.Warn(ctx, "drop collection failed", mlog.String("database", t.Req.GetDbName()), mlog.Err(err))
 		return err
 	}
 

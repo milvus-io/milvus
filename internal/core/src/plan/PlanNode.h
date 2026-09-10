@@ -59,11 +59,6 @@ class PlanNode {
     virtual std::vector<std::shared_ptr<PlanNode>>
     sources() const = 0;
 
-    virtual bool
-    RequireSplits() const {
-        return false;
-    }
-
     virtual std::string
     ToString() const = 0;
 
@@ -618,24 +613,6 @@ struct SortOrder {
     SortOrder(bool asc = true, bool nulls_first_val = false)
         : ascending(asc), nulls_first(nulls_first_val) {
     }
-
-    /// Standard sort orders
-    static SortOrder
-    kAscNullsFirst() {
-        return SortOrder(true, true);
-    }
-    static SortOrder
-    kAscNullsLast() {
-        return SortOrder(true, false);
-    }
-    static SortOrder
-    kDescNullsFirst() {
-        return SortOrder(false, true);
-    }
-    static SortOrder
-    kDescNullsLast() {
-        return SortOrder(false, false);
-    }
 };
 
 /**
@@ -760,11 +737,6 @@ struct PlanFragment {
     int32_t num_splitgroups_{0};
 
     PlanFragment() = default;
-
-    inline bool
-    IsGroupedExecution() const {
-        return execution_strategy_ == ExecutionStrategy::kGrouped;
-    }
 
     explicit PlanFragment(std::shared_ptr<const PlanNode> top_node,
                           ExecutionStrategy strategy,

@@ -25,13 +25,12 @@ import (
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/apache/pulsar-client-go/pulsaradmin/pkg/admin"
 	"github.com/apache/pulsar-client-go/pulsaradmin/pkg/admin/config"
-	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	mqcommon "github.com/milvus-io/milvus/pkg/v3/mq/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
 
@@ -53,7 +52,7 @@ func NewClient(tenant string, namespace string, opts pulsar.ClientOptions) (*pul
 		var c pulsar.Client
 		c, err = pulsar.NewClient(opts)
 		if err != nil {
-			log.Error("Failed to set pulsar client: ", zap.Error(err))
+			mlog.Error(context.TODO(), "Failed to set pulsar client: ", mlog.Err(err))
 			return
 		}
 		cli := &pulsarClient{
@@ -93,7 +92,7 @@ func (pc *pulsarClient) CreateProducer(ctx context.Context, options mqcommon.Pro
 	}
 	if pp == nil {
 		metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateProducerLabel, metrics.FailLabel).Inc()
-		return nil, errors.New("pulsar is not ready, producer is nil")
+		return nil, merr.WrapErrServiceUnavailable("pulsar is not ready, producer is nil")
 	}
 	elapsed := start.ElapseSpan()
 	metrics.MsgStreamRequestLatency.WithLabelValues(metrics.CreateProducerLabel).Observe(float64(elapsed.Milliseconds()))
@@ -140,11 +139,11 @@ func (pc *pulsarClient) Subscribe(ctx context.Context, options mqwrapper.Consume
 
 func GetFullTopicName(tenant string, namespace string, topic string) (string, error) {
 	if len(tenant) == 0 || len(namespace) == 0 || len(topic) == 0 {
-		log.Error("build full topic name failed",
-			zap.String("tenant", tenant),
-			zap.String("namesapce", namespace),
-			zap.String("topic", topic))
-		return "", errors.New("build full topic name failed")
+		mlog.Error(context.TODO(), "build full topic name failed",
+			mlog.String("tenant", tenant),
+			mlog.String("namesapce", namespace),
+			mlog.String("topic", topic))
+		return "", merr.WrapErrMqInternalMsg("build full topic name failed")
 	}
 
 	return fmt.Sprintf("%s/%s/%s", tenant, namespace, topic), nil
@@ -158,7 +157,7 @@ func NewAdminClient(address, authPlugin, authParams string) (admin.Client, error
 	}
 	adminClient, err := admin.New(&cfg)
 	if err != nil {
-		return nil, fmt.Errorf("failed to build pulsar admin client due to %s", err.Error())
+		return nil, merr.WrapErrMqInternal(err, "failed to build pulsar admin client")
 	}
 
 	return adminClient, nil

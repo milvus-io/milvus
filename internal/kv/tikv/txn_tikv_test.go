@@ -20,17 +20,21 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	tikverr "github.com/tikv/client-go/v2/error"
 	"github.com/tikv/client-go/v2/txnkv"
 	"github.com/tikv/client-go/v2/txnkv/transaction"
 	"golang.org/x/exp/maps"
 
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
 func TestTiKVLoad(te *testing.T) {
@@ -296,6 +300,11 @@ func TestTiKVLoad(te *testing.T) {
 	})
 
 	te.Run("kv failed to start txn", func(t *testing.T) {
+		origSleep := writeTxnRetrySleep
+		writeTxnRetrySleep = time.Millisecond
+		defer func() {
+			writeTxnRetrySleep = origSleep
+		}()
 		rootPath := "/tikv/test/root/start_exn"
 		kv := NewTiKV(txnClient, rootPath)
 		defer kv.Close()
@@ -321,6 +330,11 @@ func TestTiKVLoad(te *testing.T) {
 	})
 
 	te.Run("kv failed to commit txn", func(t *testing.T) {
+		origSleep := writeTxnRetrySleep
+		writeTxnRetrySleep = time.Millisecond
+		defer func() {
+			writeTxnRetrySleep = origSleep
+		}()
 		rootPath := "/tikv/test/root/commit_txn"
 		kv := NewTiKV(txnClient, rootPath)
 		defer kv.Close()
@@ -639,4 +653,430 @@ func TestTxnWithPredicates(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestWriteTxnRetry(t *testing.T) {
+	rootPath := "/tikv/test/root/write_txn_retry"
+	kv := NewTiKV(txnClient, rootPath)
+	err := kv.RemoveWithPrefix(context.TODO(), "")
+	require.NoError(t, err)
+
+	defer kv.Close()
+	defer kv.RemoveWithPrefix(context.TODO(), "")
+
+	ctx := context.TODO()
+
+	t.Run("transient commit failure recovers for MultiSave", func(t *testing.T) {
+		fails := 2
+		commitTxn = func(ctx context.Context, txn *transaction.KVTxn) error {
+			if fails > 0 {
+				fails--
+				// Simulate a region error escaping client-go after its internal
+				// backoff budget is exhausted (e.g. a region split under load).
+				return errors.New("epoch_not_match:<>")
+			}
+			return tiTxnCommit(ctx, txn)
+		}
+		defer func() {
+			commitTxn = tiTxnCommit
+		}()
+
+		err := kv.MultiSave(ctx, map[string]string{"retry_key_1": "v1"})
+		assert.NoError(t, err)
+		assert.Zero(t, fails)
+
+		val, err := kv.Load(ctx, "retry_key_1")
+		assert.NoError(t, err)
+		assert.Equal(t, "v1", val)
+	})
+
+	t.Run("transient commit failure recovers for Save", func(t *testing.T) {
+		fails := 1
+		commitTxn = func(ctx context.Context, txn *transaction.KVTxn) error {
+			if fails > 0 {
+				fails--
+				return errors.New("epoch_not_match:<>")
+			}
+			return tiTxnCommit(ctx, txn)
+		}
+		defer func() {
+			commitTxn = tiTxnCommit
+		}()
+
+		err := kv.Save(ctx, "retry_key_2", "v2")
+		assert.NoError(t, err)
+		assert.Zero(t, fails)
+
+		val, err := kv.Load(ctx, "retry_key_2")
+		assert.NoError(t, err)
+		assert.Equal(t, "v2", val)
+	})
+
+	t.Run("transient begin failure recovers", func(t *testing.T) {
+		fails := 1
+		beginTxn = func(txn *txnkv.Client) (*transaction.KVTxn, error) {
+			if fails > 0 {
+				fails--
+				return nil, errors.New("pd timeout")
+			}
+			return tiTxnBegin(txn)
+		}
+		defer func() {
+			beginTxn = tiTxnBegin
+		}()
+
+		err := kv.MultiSave(ctx, map[string]string{"retry_key_3": "v3"})
+		assert.NoError(t, err)
+		assert.Zero(t, fails)
+	})
+
+	t.Run("persistent commit failure still surfaces", func(t *testing.T) {
+		origSleep := writeTxnRetrySleep
+		writeTxnRetrySleep = time.Millisecond
+		defer func() {
+			writeTxnRetrySleep = origSleep
+		}()
+		commits := 0
+		commitTxn = func(ctx context.Context, txn *transaction.KVTxn) error {
+			commits++
+			return errors.New("epoch_not_match:<>")
+		}
+		defer func() {
+			commitTxn = tiTxnCommit
+		}()
+
+		err := kv.MultiSave(ctx, map[string]string{"retry_key_4": "v4"})
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrIoFailed)
+		assert.True(t, retry.IsRecoverable(err))
+		assert.Equal(t, int(writeTxnRetryAttempts), commits)
+	})
+
+	t.Run("undetermined commit aborts on first attempt", func(t *testing.T) {
+		commits := 0
+		commitTxn = func(ctx context.Context, txn *transaction.KVTxn) error {
+			commits++
+			return fmt.Errorf("commit failed: %w", tikverr.ErrResultUndetermined)
+		}
+		defer func() {
+			commitTxn = tiTxnCommit
+		}()
+
+		err := kv.MultiSave(ctx, map[string]string{"undetermined_commit_key": "v"})
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, tikverr.ErrResultUndetermined)
+		assert.True(t, retry.IsRecoverable(err))
+		assert.Equal(t, 1, commits)
+	})
+
+	t.Run("undetermined commit wins over transient shape", func(t *testing.T) {
+		commits := 0
+		commitTxn = func(ctx context.Context, txn *transaction.KVTxn) error {
+			commits++
+			return fmt.Errorf("%w after %w", tikverr.ErrResultUndetermined, tikverr.ErrRegionUnavailable)
+		}
+		defer func() {
+			commitTxn = tiTxnCommit
+		}()
+
+		err := kv.MultiSave(ctx, map[string]string{"undetermined_region_key": "v"})
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, tikverr.ErrResultUndetermined)
+		assert.True(t, retry.IsRecoverable(err))
+		assert.Equal(t, 1, commits)
+	})
+
+	t.Run("undetermined commit wins over caller cancellation", func(t *testing.T) {
+		callerCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
+
+		commits := 0
+		commitTxn = func(ctx context.Context, txn *transaction.KVTxn) error {
+			commits++
+			cancel()
+			return fmt.Errorf("commit failed: %w", tikverr.ErrResultUndetermined)
+		}
+		defer func() {
+			commitTxn = tiTxnCommit
+		}()
+
+		err := kv.MultiSave(callerCtx, map[string]string{"undetermined_cancel_key": "v"})
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, tikverr.ErrResultUndetermined)
+		assert.True(t, retry.IsRecoverable(err))
+		assert.Equal(t, 1, commits)
+	})
+
+	t.Run("canceled commit aborts and surfaces", func(t *testing.T) {
+		commits := 0
+		commitTxn = func(ctx context.Context, txn *transaction.KVTxn) error {
+			commits++
+			return context.Canceled
+		}
+		defer func() {
+			commitTxn = tiTxnCommit
+		}()
+
+		err := kv.MultiSave(ctx, map[string]string{"canceled_commit_key": "v"})
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, context.Canceled)
+		assert.True(t, retry.IsRecoverable(err))
+		assert.Equal(t, 1, commits)
+	})
+
+	t.Run("mid commit caller cancel aborts with context error", func(t *testing.T) {
+		callerCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
+
+		commits := 0
+		commitTxn = func(ctx context.Context, txn *transaction.KVTxn) error {
+			commits++
+			cancel()
+			return tikverr.ErrRegionUnavailable
+		}
+		defer func() {
+			commitTxn = tiTxnCommit
+		}()
+
+		err := kv.MultiSave(callerCtx, map[string]string{"mid_cancel_key": "v"})
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, context.Canceled)
+		assert.True(t, retry.IsRecoverable(err))
+		assert.Equal(t, 1, commits)
+	})
+
+	t.Run("deadline stops commit retries", func(t *testing.T) {
+		origSleep := writeTxnRetrySleep
+		writeTxnRetrySleep = 200 * time.Millisecond
+		defer func() {
+			writeTxnRetrySleep = origSleep
+		}()
+
+		deadlineCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
+		defer cancel()
+
+		commits := 0
+		commitTxn = func(ctx context.Context, txn *transaction.KVTxn) error {
+			commits++
+			return tikverr.ErrRegionUnavailable
+		}
+		defer func() {
+			commitTxn = tiTxnCommit
+		}()
+
+		err := kv.MultiSave(deadlineCtx, map[string]string{"deadline_commit_key": "v"})
+		assert.Error(t, err)
+		assert.Less(t, commits, int(writeTxnRetryAttempts))
+		assert.GreaterOrEqual(t, commits, 1)
+	})
+
+	t.Run("transient build failure recovers", func(t *testing.T) {
+		builds := 0
+		begins := 0
+		commits := 0
+		beginTxn = func(txn *txnkv.Client) (*transaction.KVTxn, error) {
+			begins++
+			return tiTxnBegin(txn)
+		}
+		defer func() {
+			beginTxn = tiTxnBegin
+		}()
+
+		err := kv.runWriteTxnWithRetry(ctx, "test transient build", func(txn *transaction.KVTxn) error {
+			builds++
+			if builds == 1 {
+				return merr.WrapErrIoFailedReason("transient build read", "epoch_not_match")
+			}
+			return nil
+		}, func(ctx context.Context, txn *transaction.KVTxn) error {
+			commits++
+			return tiTxnCommit(ctx, txn)
+		})
+
+		assert.NoError(t, err)
+		assert.Equal(t, 2, builds)
+		assert.Equal(t, 2, begins)
+		assert.Equal(t, 1, commits)
+	})
+
+	t.Run("persistent build failure still surfaces", func(t *testing.T) {
+		origSleep := writeTxnRetrySleep
+		writeTxnRetrySleep = time.Millisecond
+		defer func() {
+			writeTxnRetrySleep = origSleep
+		}()
+
+		builds := 0
+		commits := 0
+		err := kv.runWriteTxnWithRetry(ctx, "test persistent build", func(txn *transaction.KVTxn) error {
+			builds++
+			return merr.WrapErrIoFailedReason("transient build read", "epoch_not_match")
+		}, func(ctx context.Context, txn *transaction.KVTxn) error {
+			commits++
+			return tiTxnCommit(ctx, txn)
+		})
+
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrIoFailed)
+		assert.True(t, retry.IsRecoverable(err))
+		assert.Equal(t, int(writeTxnRetryAttempts), builds)
+		assert.Zero(t, commits)
+	})
+
+	t.Run("local mutation validation build failure is not retried", func(t *testing.T) {
+		origSleep := writeTxnRetrySleep
+		writeTxnRetrySleep = time.Millisecond
+		defer func() {
+			writeTxnRetrySleep = origSleep
+		}()
+
+		begins := 0
+		commits := 0
+		beginTxn = func(txn *txnkv.Client) (*transaction.KVTxn, error) {
+			begins++
+			return tiTxnBegin(txn)
+		}
+		defer func() {
+			beginTxn = tiTxnBegin
+		}()
+		commitTxn = func(ctx context.Context, txn *transaction.KVTxn) error {
+			commits++
+			return tiTxnCommit(ctx, txn)
+		}
+		defer func() {
+			commitTxn = tiTxnCommit
+		}()
+
+		err := kv.MultiSave(ctx, map[string]string{strings.Repeat("k", 1<<16): "v"})
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrIoFailed)
+		assert.Contains(t, err.Error(), "key size too large")
+		assert.True(t, retry.IsRecoverable(err))
+		assert.Equal(t, 1, begins)
+		assert.Zero(t, commits)
+	})
+
+	t.Run("later begin failure is not hidden by previous build failure", func(t *testing.T) {
+		origSleep := writeTxnRetrySleep
+		writeTxnRetrySleep = time.Millisecond
+		defer func() {
+			writeTxnRetrySleep = origSleep
+		}()
+
+		begins := 0
+		builds := 0
+		commits := 0
+		beginTxn = func(txn *txnkv.Client) (*transaction.KVTxn, error) {
+			begins++
+			if begins > 1 {
+				return nil, errors.New("pd timeout")
+			}
+			return tiTxnBegin(txn)
+		}
+		defer func() {
+			beginTxn = tiTxnBegin
+		}()
+
+		err := kv.runWriteTxnWithRetry(ctx, "test build then begin", func(txn *transaction.KVTxn) error {
+			builds++
+			return merr.WrapErrIoFailedReason("transient build read", "epoch_not_match")
+		}, func(ctx context.Context, txn *transaction.KVTxn) error {
+			commits++
+			return tiTxnCommit(ctx, txn)
+		})
+
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrIoFailed)
+		assert.Contains(t, err.Error(), "Failed to create txn for test build then begin")
+		assert.Equal(t, int(writeTxnRetryAttempts), begins)
+		assert.Equal(t, 1, builds)
+		assert.Zero(t, commits)
+	})
+
+	t.Run("predicate failure is not retried and not wrapped", func(t *testing.T) {
+		err := kv.MultiSave(ctx, map[string]string{"predicate_key": "1"})
+		require.NoError(t, err)
+
+		for _, test := range []struct {
+			name string
+			run  func() error
+		}{
+			{
+				name: "MultiSaveAndRemoveWrongValue",
+				run: func() error {
+					return kv.MultiSaveAndRemove(ctx, map[string]string{"predicate_save": "v"}, nil, predicates.ValueEqual("predicate_key", "2"))
+				},
+			},
+			{
+				name: "MultiSaveAndRemoveWithPrefixWrongValue",
+				run: func() error {
+					return kv.MultiSaveAndRemoveWithPrefix(ctx, map[string]string{"predicate_prefix_save": "v"}, nil, predicates.ValueEqual("predicate_key", "2"))
+				},
+			},
+			{
+				name: "MultiSaveAndRemoveMissingKey",
+				run: func() error {
+					return kv.MultiSaveAndRemove(ctx, map[string]string{"predicate_missing_save": "v"}, nil, predicates.ValueEqual("predicate_missing_key", "1"))
+				},
+			},
+			{
+				name: "MultiSaveAndRemoveWithPrefixMissingKey",
+				run: func() error {
+					return kv.MultiSaveAndRemoveWithPrefix(ctx, map[string]string{"predicate_missing_prefix_save": "v"}, nil, predicates.ValueEqual("predicate_missing_key", "1"))
+				},
+			},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				origSleep := writeTxnRetrySleep
+				writeTxnRetrySleep = time.Millisecond
+				defer func() {
+					writeTxnRetrySleep = origSleep
+				}()
+
+				begins := 0
+				beginTxn = func(txn *txnkv.Client) (*transaction.KVTxn, error) {
+					begins++
+					return tiTxnBegin(txn)
+				}
+				defer func() {
+					beginTxn = tiTxnBegin
+				}()
+
+				err := test.run()
+				assert.Error(t, err)
+				assert.ErrorIs(t, err, merr.ErrIoFailed)
+				assert.True(t, retry.IsRecoverable(err))
+				assert.Equal(t, 1, begins)
+			})
+		}
+	})
+
+	t.Run("reserved value build failure is not retried and not wrapped", func(t *testing.T) {
+		begins := 0
+		beginTxn = func(txn *txnkv.Client) (*transaction.KVTxn, error) {
+			begins++
+			return tiTxnBegin(txn)
+		}
+		defer func() {
+			beginTxn = tiTxnBegin
+		}()
+
+		commits := 0
+		commitTxn = func(ctx context.Context, txn *transaction.KVTxn) error {
+			commits++
+			return tiTxnCommit(ctx, txn)
+		}
+		defer func() {
+			commitTxn = tiTxnCommit
+		}()
+
+		// Reserved empty-value placeholder is rejected while building mutations.
+		err := kv.MultiSave(ctx, map[string]string{"bad_key": EmptyValueString})
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Equal(t, 1, begins)
+		assert.Zero(t, commits)
+		// The retry.Unrecoverable marker must not leak to callers.
+		assert.True(t, retry.IsRecoverable(err))
+	})
 }

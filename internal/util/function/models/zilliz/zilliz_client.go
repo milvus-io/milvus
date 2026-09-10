@@ -20,12 +20,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"fmt"
 	"strconv"
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/connectivity"
@@ -34,8 +32,9 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/modelservicepb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type clientConfig struct {
@@ -71,14 +70,14 @@ type clientManager struct {
 func loadConfig(config map[string]string) (*clientConfig, error) {
 	endpoint := config["endpoint"]
 	if endpoint == "" {
-		return nil, fmt.Errorf("zilliz client config error, lost endpoint config")
+		return nil, merr.WrapErrParameterInvalidMsg("zilliz client config error, lost endpoint config")
 	}
 	enableTLSStr := config["enableTLS"]
 	enableTLS := false
 	if enableTLSStr != "" {
 		var err error
 		if enableTLS, err = strconv.ParseBool(enableTLSStr); err != nil {
-			return nil, fmt.Errorf("zilliz client config err: enableTLS:%s is not bool, err:%w", enableTLSStr, err)
+			return nil, merr.Wrapf(err, "zilliz client config err: enableTLS:%s is not bool", enableTLSStr)
 		}
 	}
 	if enableTLS {
@@ -97,7 +96,7 @@ func (m *clientManager) GetConn(clientConf *clientConfig) (*grpc.ClientConn, err
 		if clientConf.endpoint != m.config.endpoint {
 			err := m.conn.Close()
 			if err != nil {
-				log.Warn("Close connect failed", zap.String("endpoint", m.config.endpoint), zap.Error(err))
+				mlog.Warn(context.TODO(), "Close connect failed", mlog.String("endpoint", m.config.endpoint), mlog.Err(err))
 			}
 			m.conn = nil
 		} else {
@@ -182,9 +181,10 @@ type ZillizClient struct {
 	clusterID         string
 	dbName            string
 	conn              *grpc.ClientConn
+	timeout           time.Duration
 }
 
-func NewZilliClient(modelDeploymentID string, clusterID string, dbName string, info map[string]string) (*ZillizClient, error) {
+func NewZilliClient(modelDeploymentID string, clusterID string, dbName string, info map[string]string, timeoutMs int64) (*ZillizClient, error) {
 	mgr := getClientManager()
 	clientConf, err := loadConfig(info)
 	if err != nil {
@@ -192,14 +192,46 @@ func NewZilliClient(modelDeploymentID string, clusterID string, dbName string, i
 	}
 	conn, err := mgr.GetConn(clientConf)
 	if err != nil {
-		return nil, fmt.Errorf("connect model serving failed, err:%w", err)
+		// failing to connect to the model serving backend is transient
+		return nil, merr.WrapErrServiceUnavailable(err.Error(), "connect model serving failed")
+	}
+	timeout := clientConf.Timeout
+	if timeoutMs > 0 {
+		timeout = time.Duration(timeoutMs) * time.Millisecond
+	}
+	if timeout <= 0 {
+		timeout = 30000 * time.Millisecond
 	}
 	return &ZillizClient{
 		modelDeploymentID: modelDeploymentID,
 		clusterID:         clusterID,
 		dbName:            dbName,
 		conn:              conn,
+		timeout:           timeout,
 	}, nil
+}
+
+func NewZilliClientForTests(modelDeploymentID string, clusterID string, dbName string, conn *grpc.ClientConn, timeoutMs int64) *ZillizClient {
+	timeout := 30000 * time.Millisecond
+	if timeoutMs > 0 {
+		timeout = time.Duration(timeoutMs) * time.Millisecond
+	}
+	return &ZillizClient{
+		modelDeploymentID: modelDeploymentID,
+		clusterID:         clusterID,
+		dbName:            dbName,
+		conn:              conn,
+		timeout:           timeout,
+	}
+}
+
+func (c *ZillizClient) requestContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	timeout := c.timeout
+	if timeout <= 0 {
+		timeout = 30000 * time.Millisecond
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, timeout)
+	return c.setMeta(requestCtx), cancel
 }
 
 func (c *ZillizClient) setMeta(ctx context.Context) context.Context {
@@ -218,8 +250,9 @@ func (c *ZillizClient) Embedding(ctx context.Context, texts []string, params map
 		Texts:  texts,
 		Params: params,
 	}
-	ctx = c.setMeta(ctx)
-	res, err := stub.Embedding(ctx, req)
+	callCtx, cancel := c.requestContext(ctx)
+	defer cancel()
+	res, err := stub.Embedding(callCtx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -245,8 +278,9 @@ func (c *ZillizClient) Rerank(ctx context.Context, query string, texts []string,
 		Documents: texts,
 		Params:    params,
 	}
-	ctx = c.setMeta(ctx)
-	res, err := stub.Rerank(ctx, req)
+	callCtx, cancel := c.requestContext(ctx)
+	defer cancel()
+	res, err := stub.Rerank(callCtx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -260,8 +294,9 @@ func (c *ZillizClient) Highlight(ctx context.Context, query string, texts []stri
 		Documents: texts,
 		Params:    params,
 	}
-	ctx = c.setMeta(ctx)
-	res, err := stub.Highlight(ctx, req)
+	callCtx, cancel := c.requestContext(ctx)
+	defer cancel()
+	res, err := stub.Highlight(callCtx, req)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -280,7 +315,7 @@ func (c *ZillizClient) Highlight(ctx context.Context, query string, texts []stri
 		}
 
 		if len(sentences) != len(retScores) {
-			return nil, nil, fmt.Errorf("sentences length %d does not match scores length %d", len(sentences), len(retScores))
+			return nil, nil, merr.WrapErrFunctionFailedMsg("sentences length %d does not match scores length %d", len(sentences), len(retScores))
 		}
 		highlights = append(highlights, sentences)
 		scores = append(scores, retScores)

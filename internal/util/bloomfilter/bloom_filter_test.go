@@ -16,6 +16,7 @@
 package bloomfilter
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -23,9 +24,8 @@ import (
 	"github.com/bits-and-blooms/bloom/v3"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
-	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
 func TestPerformance(t *testing.T) {
@@ -42,32 +42,32 @@ func TestPerformance(t *testing.T) {
 	for _, key := range keys {
 		bf1.Add(key)
 	}
-	log.Info("Block BF construct time", zap.Duration("time", time.Since(start1)))
+	mlog.Info(context.TODO(), "Block BF construct time", mlog.Duration("time", time.Since(start1)))
 	data, err := bf1.MarshalJSON()
 	assert.NoError(t, err)
-	log.Info("Block BF size", zap.Int("size", len(data)))
+	mlog.Info(context.TODO(), "Block BF size", mlog.Int("size", len(data)))
 
 	start2 := time.Now()
 	for _, key := range keys {
 		bf1.Test(key)
 	}
-	log.Info("Block BF Test cost", zap.Duration("time", time.Since(start2)))
+	mlog.Info(context.TODO(), "Block BF Test cost", mlog.Duration("time", time.Since(start2)))
 
 	bf2 := newBasicBloomFilter(uint(capacity), fpr)
 	start3 := time.Now()
 	for _, key := range keys {
 		bf2.Add(key)
 	}
-	log.Info("Basic BF construct time", zap.Duration("time", time.Since(start3)))
+	mlog.Info(context.TODO(), "Basic BF construct time", mlog.Duration("time", time.Since(start3)))
 	data, err = bf2.MarshalJSON()
 	assert.NoError(t, err)
-	log.Info("Basic BF size", zap.Int("size", len(data)))
+	mlog.Info(context.TODO(), "Basic BF size", mlog.Int("size", len(data)))
 
 	start4 := time.Now()
 	for _, key := range keys {
 		bf2.Test(key)
 	}
-	log.Info("Basic BF Test cost", zap.Duration("time", time.Since(start4)))
+	mlog.Info(context.TODO(), "Basic BF Test cost", mlog.Duration("time", time.Since(start4)))
 }
 
 func TestPerformance_MultiBF(t *testing.T) {
@@ -92,7 +92,7 @@ func TestPerformance_MultiBF(t *testing.T) {
 		bfs1 = append(bfs1, bf1)
 	}
 
-	log.Info("Block BF construct cost", zap.Duration("time", time.Since(start1)))
+	mlog.Info(context.TODO(), "Block BF construct cost", mlog.Duration("time", time.Since(start1)))
 
 	start3 := time.Now()
 	for _, key := range testKeys {
@@ -101,7 +101,7 @@ func TestPerformance_MultiBF(t *testing.T) {
 			bfs1[i].TestLocations(locations)
 		}
 	}
-	log.Info("Block BF TestLocation cost", zap.Duration("time", time.Since(start3)))
+	mlog.Info(context.TODO(), "Block BF TestLocation cost", mlog.Duration("time", time.Since(start3)))
 
 	bfs2 := make([]*basicBloomFilter, 0)
 	start1 = time.Now()
@@ -113,7 +113,7 @@ func TestPerformance_MultiBF(t *testing.T) {
 		bfs2 = append(bfs2, bf2)
 	}
 
-	log.Info("Basic BF construct cost", zap.Duration("time", time.Since(start1)))
+	mlog.Info(context.TODO(), "Basic BF construct cost", mlog.Duration("time", time.Since(start1)))
 
 	start3 = time.Now()
 	for _, key := range testKeys {
@@ -122,7 +122,7 @@ func TestPerformance_MultiBF(t *testing.T) {
 			bfs2[i].TestLocations(locations)
 		}
 	}
-	log.Info("Basic BF TestLocation cost", zap.Duration("time", time.Since(start3)))
+	mlog.Info(context.TODO(), "Basic BF TestLocation cost", mlog.Duration("time", time.Since(start3)))
 }
 
 func TestPerformance_BatchTestLocations(t *testing.T) {
@@ -149,7 +149,7 @@ func TestPerformance_BatchTestLocations(t *testing.T) {
 		bfs1 = append(bfs1, bf1)
 	}
 
-	log.Info("Block BF construct cost", zap.Duration("time", time.Since(start1)))
+	mlog.Info(context.TODO(), "Block BF construct cost", mlog.Duration("time", time.Since(start1)))
 
 	start3 := time.Now()
 	for _, key := range testKeys {
@@ -158,7 +158,7 @@ func TestPerformance_BatchTestLocations(t *testing.T) {
 			bfs1[i].TestLocations(locations)
 		}
 	}
-	log.Info("Block BF TestLocation cost", zap.Duration("time", time.Since(start3)))
+	mlog.Info(context.TODO(), "Block BF TestLocation cost", mlog.Duration("time", time.Since(start3)))
 
 	start3 = time.Now()
 	for i := 0; i < testKeySize; i += batchSize {
@@ -174,7 +174,7 @@ func TestPerformance_BatchTestLocations(t *testing.T) {
 			bfs1[j].BatchTestLocations(locations, hits)
 		}
 	}
-	log.Info("Block BF BatchTestLocation cost", zap.Duration("time", time.Since(start3)))
+	mlog.Info(context.TODO(), "Block BF BatchTestLocation cost", mlog.Duration("time", time.Since(start3)))
 
 	bfs2 := make([]*basicBloomFilter, 0)
 	start1 = time.Now()
@@ -187,7 +187,7 @@ func TestPerformance_BatchTestLocations(t *testing.T) {
 		bfs2 = append(bfs2, bf2)
 	}
 
-	log.Info("Basic BF construct cost", zap.Duration("time", time.Since(start1)))
+	mlog.Info(context.TODO(), "Basic BF construct cost", mlog.Duration("time", time.Since(start1)))
 
 	start3 = time.Now()
 	for _, key := range testKeys {
@@ -196,7 +196,7 @@ func TestPerformance_BatchTestLocations(t *testing.T) {
 			bfs2[i].TestLocations(locations)
 		}
 	}
-	log.Info("Basic BF TestLocation cost", zap.Duration("time", time.Since(start3)))
+	mlog.Info(context.TODO(), "Basic BF TestLocation cost", mlog.Duration("time", time.Since(start3)))
 
 	start3 = time.Now()
 	for i := 0; i < testKeySize; i += batchSize {
@@ -212,7 +212,7 @@ func TestPerformance_BatchTestLocations(t *testing.T) {
 			bfs2[j].BatchTestLocations(locations, hits)
 		}
 	}
-	log.Info("Block BF BatchTestLocation cost", zap.Duration("time", time.Since(start3)))
+	mlog.Info(context.TODO(), "Block BF BatchTestLocation cost", mlog.Duration("time", time.Since(start3)))
 }
 
 func TestPerformance_Capacity(t *testing.T) {
@@ -230,7 +230,7 @@ func TestPerformance_Capacity(t *testing.T) {
 			bf1.Add(key)
 		}
 
-		log.Info("Block BF construct cost", zap.Duration("time", time.Since(start1)))
+		mlog.Info(context.TODO(), "Block BF construct cost", mlog.Duration("time", time.Since(start1)))
 
 		testKeys := make([][]byte, 0)
 		for i := 0; i < 10000; i++ {
@@ -243,7 +243,7 @@ func TestPerformance_Capacity(t *testing.T) {
 			bf1.TestLocations(locations)
 		}
 		_, k := bloom.EstimateParameters(uint(capacity), fpr)
-		log.Info("Block BF TestLocation cost", zap.Duration("time", time.Since(start3)), zap.Int("k", int(k)), zap.Int64("capacity", capacity))
+		mlog.Info(context.TODO(), "Block BF TestLocation cost", mlog.Duration("time", time.Since(start3)), mlog.Int("k", int(k)), mlog.Int64("capacity", capacity))
 	}
 }
 

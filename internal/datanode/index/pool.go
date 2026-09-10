@@ -20,10 +20,8 @@ import (
 	"context"
 	"sync"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/pkg/v3/config"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -42,20 +40,20 @@ func initVecIndexBuildPool() {
 
 	watchKey := pt.DataNodeCfg.MaxVecIndexBuildConcurrency.Key
 	pt.Watch(watchKey, config.NewHandler(watchKey, resizeVecIndexBuildPool))
-	log.Info("init vector index building pool done", zap.Int("size", initPoolSize))
+	mlog.Info(context.TODO(), "init vector index building pool done", mlog.Int("size", initPoolSize))
 }
 
 func resizeVecIndexBuildPool(evt *config.Event) {
 	if evt.HasUpdated {
 		newSize := paramtable.Get().DataNodeCfg.MaxVecIndexBuildConcurrency.GetAsInt()
-		log := log.Ctx(context.Background()).With(zap.Int("newSize", newSize))
+		log := mlog.With(mlog.Int("newSize", newSize))
 
 		err := GetVecIndexBuildPool().Resize(newSize)
 		if err != nil {
-			log.Warn("failed to resize pool", zap.Error(err))
+			log.Warn(context.TODO(), "failed to resize pool", mlog.Err(err))
 			return
 		}
-		log.Info("vector index building pool resize successfully")
+		log.Info(context.TODO(), "vector index building pool resize successfully")
 	}
 }
 

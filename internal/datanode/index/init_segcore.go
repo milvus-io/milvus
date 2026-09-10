@@ -85,9 +85,45 @@ func InitSegcore(nodeID int64) error {
 	if err := initcore.InitLocalChunkManager(localDataRootPath); err != nil {
 		return err
 	}
+	// Select the segcore remote chunk manager backend before any index
+	// build/load creates one from the per-request storage config.
+	initcore.SetArrowFSChunkManagerEnabled(paramtable.Get())
 	cGpuMemoryPoolInitSize := C.uint32_t(paramtable.Get().GpuConfig.InitSize.GetAsUint32())
 	cGpuMemoryPoolMaxSize := C.uint32_t(paramtable.Get().GpuConfig.MaxSize.GetAsUint32())
 	C.SegcoreSetKnowhereGpuMemoryPoolSize(cGpuMemoryPoolInitSize, cGpuMemoryPoolMaxSize)
+
+	// Apply Arrow IO thread pool capacity from paramtable. Without this call the
+	// pool stays at Arrow's built-in default (kDefaultNumIoThreads = 8), which is
+	// almost always undersized for DataNode under concurrent storage v2 reads
+	// (sort compaction, import, stats). Mirror of the QueryNode wiring in #49208.
+	C.SetArrowIOThreadPoolCapacity(C.int(initcore.ResolveArrowIOThreadPoolCapacity()))
+
+	// Apply Arrow parquet reader range-coalescing config (hole/range size limits).
+	if err := initcore.InitArrowReaderConfig(paramtable.Get()); err != nil {
+		return err
+	}
+	if err := initcore.InitExternalVectorNullPolicy(paramtable.Get()); err != nil {
+		return err
+	}
+
+	// Publish the External Table IOPS policy once for native IndexBuilder
+	// readers. Reader config watchers must not rewrite this startup policy.
+	if err := initcore.InitExternalIopsConfig(paramtable.Get()); err != nil {
+		return err
+	}
+
+	// Apply milvus-storage reader concurrency config: the global reader
+	// thread pool (chunk/file-level fan-out) and the index-build read
+	// window (row groups prefetched in parallel per round).
+	if err := initcore.InitLoonReaderConfig(paramtable.Get()); err != nil {
+		return err
+	}
+
+	// Wire hot-reload watchers so capacity / coalescing-limit changes take effect
+	// without restart, matching QueryNode behavior.
+	initcore.RegisterArrowIOThreadPoolWatchers(paramtable.Get(), "datanode")
+	initcore.RegisterArrowReaderConfigWatchers(paramtable.Get(), "datanode")
+	initcore.RegisterLoonReaderConfigWatchers(paramtable.Get(), "datanode")
 
 	// init paramtable change callback for core related config
 	initcore.SetupCoreConfigChangelCallback()

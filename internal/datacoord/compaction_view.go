@@ -18,12 +18,12 @@ package datacoord
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
-	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
 
@@ -36,12 +36,12 @@ type CompactionView interface {
 	ForceTrigger() (CompactionView, string)
 	ForceTriggerAll() ([]CompactionView, string)
 	GetTriggerID() int64
-	// IsInlineExecutable reports whether this view should be applied directly inside
-	// datacoord by CompactionTriggerManager rather than dispatched as a compaction
-	// task to the inspector. Inline views consume no inspector slot and do not depend
-	// on a free queue, so they must not be gated by inspector pressure.
-	// Default: false (most views are real compaction work).
-	IsInlineExecutable() bool
+	GetTotalSize() float64
+	GetCollectionTTL() time.Duration
+}
+
+func sumSegmentSize(views []*SegmentView) float64 {
+	return lo.SumBy(views, func(v *SegmentView) float64 { return v.Size })
 }
 
 type FullViews struct {
@@ -143,9 +143,14 @@ func (s *SegmentView) Clone() *SegmentView {
 
 func GetViewsByInfo(segments ...*SegmentInfo) []*SegmentView {
 	return lo.Map(segments, func(segment *SegmentInfo, _ int) *SegmentView {
+		stats := segment.EnsureStats()
 		numOfRows := segment.GetNumOfRows()
 		if segment.GetLevel() == datapb.SegmentLevel_L0 {
-			numOfRows = segmentutil.CalcDelRowCountFromDeltaLog(segment.SegmentInfo)
+			// L0 segments record deleted-row count under numOfRows for view
+			// purposes (no inserts). DeleteNumRows on Statistics is the
+			// persisted equivalent of the legacy CalcDelRowCountFromDeltaLog
+			// iteration.
+			numOfRows = stats.GetDeleteNumRows()
 		}
 		return &SegmentView{
 			ID: segment.ID,
@@ -162,12 +167,16 @@ func GetViewsByInfo(segments ...*SegmentInfo) []*SegmentView {
 			startPos: segment.GetStartPosition(),
 			dmlPos:   segment.GetDmlPosition(),
 
-			DeltaSize:     GetBinlogSizeAsBytes(segment.GetDeltalogs()),
-			DeltalogCount: GetBinlogCount(segment.GetDeltalogs()),
-			DeltaRowCount: GetBinlogEntriesNum(segment.GetDeltalogs()),
+			// Aggregate metrics come from Statistics. StatslogCount stays on
+			// the array path because Statistics has no per-segment stat-file
+			// count; V3 segments' empty statslogs read as 0, which matches
+			// the manifest-driven layout.
+			DeltaSize:     float64(stats.GetDeltaBinlogSize()),
+			DeltalogCount: int(stats.GetDeltaBinlogCount()),
+			DeltaRowCount: int(stats.GetDeleteNumRows()),
 
-			Size:          GetBinlogSizeAsBytes(segment.GetBinlogs()),
-			BinlogCount:   GetBinlogCount(segment.GetBinlogs()),
+			Size:          float64(stats.GetInsertBinlogSize()),
+			BinlogCount:   int(stats.GetInsertBinlogCount()),
 			StatslogCount: GetBinlogCount(segment.GetStatslogs()),
 
 			NumOfRows: numOfRows,

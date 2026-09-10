@@ -1,12 +1,11 @@
 package pathutil
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 
-	"go.uber.org/zap"
-
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -18,6 +17,7 @@ const (
 	BM25Path
 	RootCachePath
 	FileResourcePath
+	ExprCachePath
 )
 
 const (
@@ -26,6 +26,7 @@ const (
 	LocalChunkPathPrefix   = "local_chunk"
 	BM25PathPrefix         = "bm25"
 	FileResourcePathPrefix = "file_resource"
+	ExprCachePathPrefix    = "expr_cache"
 )
 
 func GetPath(pathType PathType, nodeID int64) string {
@@ -41,8 +42,10 @@ func GetPath(pathType PathType, nodeID int64) string {
 		path = filepath.Join(path, fmt.Sprintf("%d", nodeID), BM25PathPrefix)
 	case FileResourcePath:
 		path = filepath.Join(path, fmt.Sprintf("%d", nodeID), FileResourcePathPrefix)
+	case ExprCachePath:
+		path = filepath.Join(path, fmt.Sprintf("%d", nodeID), ExprCachePathPrefix)
 	case RootCachePath:
 	}
-	log.Info("Get path for", zap.Any("pathType", pathType), zap.Int64("nodeID", nodeID), zap.String("path", path))
+	mlog.Info(context.TODO(), "Get path for", mlog.Any("pathType", pathType), mlog.FieldNodeID(nodeID), mlog.String("path", path))
 	return path
 }

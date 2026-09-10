@@ -33,8 +33,21 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
 )
+
+// proxyComponentWithMetaCache wraps a proxy component so the http handlers can
+// resolve a meta cache through GetMetaCache, mirroring the real Proxy which
+// owns its cache instance.
+type proxyComponentWithMetaCache struct {
+	types.ProxyComponent
+	metaCache proxy.Cache
+}
+
+func (p proxyComponentWithMetaCache) GetMetaCache() proxy.Cache {
+	return p.metaCache
+}
 
 func Test_WrappedInsertRequest_JSONMarshal_AsInsertRequest(t *testing.T) {
 	// https://github.com/milvus-io/milvus/issues/20415
@@ -600,5 +613,23 @@ func TestHandlers(t *testing.T) {
 			testEngine.ServeHTTP(w, req)
 			assert.Equal(t, http.StatusBadRequest, w.Code)
 		})
+	}
+}
+
+func TestLowLevelSearchRejectSearchAggregation(t *testing.T) {
+	h := NewHandlers(&mockProxyComponent{})
+	testEngine := gin.New()
+	h.RegisterRoutesTo(testEngine)
+
+	for _, body := range [][]byte{
+		[]byte(`{"collection_name":"book","searchAggregation":{"fields":["brand"],"size":1}}`),
+		[]byte(`{"collection_name":"book","search_aggregation":{"fields":["brand"],"size":1}}`),
+	} {
+		req := httptest.NewRequest(http.MethodPost, "/search", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+		testEngine.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "searchAggregation is not supported for low-level REST search")
 	}
 }

@@ -14,18 +14,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "common/init_c.h"
+
+#include <algorithm>
 #include <cstddef>
+#include <exception>
 #include <mutex>
+#include <string>
 
 #include <arrow/io/interfaces.h>
+#include <arrow/io/type_fwd.h>
+#include <arrow/util/thread_pool.h>
 #include <openssl/evp.h>
-#include "common/init_c.h"
+
 #include "common/Common.h"
 #include "common/Tracer.h"
-#include "common/init_c.h"
 #include "exec/expression/ExprCache.h"
 #include "log/Log.h"
+#include "monitor/Monitor.h"
+#include "segcore/memory_planner.h"
+#include "segcore/storagev2translator/AsyncLoadExecutor.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
 #include "storage/ThreadPool.h"
 
 std::once_flag traceFlag;
@@ -40,6 +50,16 @@ InitCpuNum(const int value) {
 void
 SetIndexSliceSize(const int64_t size) {
     milvus::SetIndexSliceSize(size);
+}
+
+void
+SetLoadTransientBudgetBytes(int64_t bytes) {
+    milvus::SetLoadTransientBudgetBytes(bytes);
+}
+
+void
+SetLoadAdmissionSlots(int64_t slots) {
+    milvus::SetLoadAdmissionSlots(slots);
 }
 
 void
@@ -78,6 +98,11 @@ SetDefaultOptimizeExprEnable(bool val) {
 }
 
 void
+SetDefaultDriverPrefetchEnable(bool val) {
+    milvus::SetDefaultDriverPrefetchEnable(val);
+}
+
+void
 SetDefaultJSONKeyStatsEnable(bool val) {
     milvus::SetDefaultJSONKeyStatsEnable(val);
 }
@@ -113,9 +138,57 @@ SetExprResCacheEnable(bool val) {
 }
 
 void
-SetExprResCacheCapacityBytes(int64_t bytes) {
-    milvus::exec::ExprResCacheManager::Instance().SetCapacityBytes(
-        static_cast<size_t>(bytes));
+SetExprResCacheConfig(const char* mode,
+                      const char* disk_base_path,
+                      int64_t mem_max_bytes,
+                      bool compression_enabled,
+                      int32_t admission_threshold,
+                      int64_t mem_min_eval_duration_us,
+                      int64_t disk_max_bytes,
+                      int64_t disk_max_file_size,
+                      int64_t disk_min_eval_duration_us) {
+    milvus::exec::CacheConfig config;
+    std::string mode_value = mode == nullptr ? "" : std::string(mode);
+    if (mode_value == "disk") {
+        config.mode = milvus::exec::CacheMode::Disk;
+    } else if (mode_value == "memory") {
+        config.mode = milvus::exec::CacheMode::Memory;
+    } else {
+        LOG_WARN("invalid expr result cache mode '{}', disabling cache",
+                 mode_value);
+        milvus::exec::ExprResCacheManager::SetEnabled(false);
+        return;
+    }
+
+    if ((config.mode == milvus::exec::CacheMode::Memory &&
+         mem_max_bytes <= 0) ||
+        (config.mode == milvus::exec::CacheMode::Disk &&
+         (disk_max_bytes <= 0 || disk_max_file_size <= 0))) {
+        LOG_WARN("invalid expr result cache size config, disabling cache");
+        milvus::exec::ExprResCacheManager::SetEnabled(false);
+        return;
+    }
+
+    config.disk_base_path =
+        disk_base_path == nullptr ? std::string() : std::string(disk_base_path);
+    config.mem_max_bytes = static_cast<size_t>(mem_max_bytes);
+    config.compression_enabled = compression_enabled;
+    if (admission_threshold < 1) {
+        admission_threshold = 1;
+    } else if (admission_threshold > 255) {
+        admission_threshold = 255;
+    }
+    config.admission_threshold = static_cast<uint8_t>(admission_threshold);
+    config.mem_min_eval_duration_us =
+        mem_min_eval_duration_us < 0 ? 0 : mem_min_eval_duration_us;
+    config.disk_max_bytes = static_cast<uint64_t>(disk_max_bytes);
+    config.disk_max_file_size = static_cast<uint64_t>(disk_max_file_size);
+    config.disk_min_eval_duration_us =
+        disk_min_eval_duration_us < 0 ? 0 : disk_min_eval_duration_us;
+
+    bool applied =
+        milvus::exec::ExprResCacheManager::Instance().SetConfig(config);
+    milvus::exec::ExprResCacheManager::SetEnabled(applied);
 }
 
 void
@@ -131,11 +204,64 @@ SetArrowIOThreadPoolCapacity(int threads) {
         return;
     }
     LOG_INFO("arrow io thread pool capacity set to {}", threads);
+    UpdateArrowIOThreadPoolMetrics();
+}
+
+void
+UpdateArrowIOThreadPoolMetrics() {
+    auto capacity = arrow::io::GetIOThreadPoolCapacity();
+    milvus::monitor::internal_arrow_io_pool_capacity_all.Set(capacity);
+
+    auto* executor = arrow::io::default_io_context().executor();
+    auto* thread_pool = dynamic_cast<arrow::internal::ThreadPool*>(executor);
+    if (thread_pool == nullptr) {
+        milvus::monitor::internal_arrow_io_pool_tasks_total_all.Set(-1);
+        return;
+    }
+
+    auto tasks = thread_pool->GetNumTasks();
+    milvus::monitor::internal_arrow_io_pool_tasks_total_all.Set(tasks);
 }
 
 void
 SetStorageV2CellTargetSizeBytes(int64_t bytes) {
     milvus::segcore::storagev2translator::SetCellTargetSizeBytes(bytes);
+}
+
+void
+SetStorageV2AsyncLoadEnabled(const bool enabled) {
+    milvus::segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(enabled);
+}
+
+CStatus
+SetStorageV2AsyncLoadThreadPoolSize(const int threads) {
+    try {
+        milvus::segcore::storagev2translator::SetAsyncLoadThreadPoolSize(
+            threads);
+        return milvus::SuccessCStatus();
+    } catch (const std::exception& error) {
+        return milvus::FailureCStatus(&error);
+    } catch (...) {
+        return milvus::FailureCStatus(
+            milvus::UnexpectedError, "Failed to configure async load executor");
+    }
+}
+
+int
+GetStorageV2AsyncLoadThreadPoolSize() {
+    return milvus::segcore::storagev2translator::GetAsyncLoadThreadPoolSize();
+}
+
+void
+SetStorageV2AsyncLoadReadWindowSizeBytes(const int64_t bytes) {
+    milvus::segcore::storagev2translator::
+        SetStorageV2AsyncLoadReadWindowSizeBytes(bytes);
+}
+
+int64_t
+GetStorageV2AsyncLoadReadWindowSizeBytes() {
+    return milvus::segcore::storagev2translator::
+        StorageV2AsyncLoadReadWindowSizeBytes();
 }
 
 void

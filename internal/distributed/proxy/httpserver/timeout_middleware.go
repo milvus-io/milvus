@@ -27,13 +27,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
-	"go.uber.org/zap"
 
 	mhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/json"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -93,7 +91,7 @@ func (w *timeoutResponseRecorder) Write(data []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.closed || w.body == nil {
-		return 0, errors.New("response writer closed")
+		return 0, merr.WrapErrServiceInternalMsg("response writer closed")
 	}
 	if !w.written() {
 		w.size = 0
@@ -107,7 +105,7 @@ func (w *timeoutResponseRecorder) WriteString(s string) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.closed || w.body == nil {
-		return 0, errors.New("response writer closed")
+		return 0, merr.WrapErrServiceInternalMsg("response writer closed")
 	}
 	if !w.written() {
 		w.size = 0
@@ -161,7 +159,7 @@ func (w *timeoutResponseRecorder) Written() bool {
 func (w *timeoutResponseRecorder) Flush() {}
 
 func (w *timeoutResponseRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-	return nil, nil, errors.New("response writer does not support hijack")
+	return nil, nil, merr.WrapErrServiceInternalMsg("response writer does not support hijack")
 }
 
 func (w *timeoutResponseRecorder) CloseNotify() <-chan bool {
@@ -176,7 +174,7 @@ func (w *timeoutResponseRecorder) CommitTo(realWriter gin.ResponseWriter) error 
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.closed || w.body == nil {
-		return errors.New("response writer closed")
+		return merr.WrapErrServiceInternalMsg("response writer closed")
 	}
 
 	dst := realWriter.Header()
@@ -241,8 +239,20 @@ func timeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 	bufPool := &BufferPool{}
 	return func(gCtx *gin.Context) {
 		timeout := paramtable.Get().HTTPCfg.RequestTimeoutMs.GetAsDuration(time.Millisecond)
-		timeoutSecond, err := strconv.ParseInt(gCtx.Request.Header.Get(mhttp.HTTPHeaderRequestTimeout), 10, 64)
-		if err == nil {
+		requestTimeout := gCtx.Request.Header.Get(mhttp.HTTPHeaderRequestTimeout)
+		if requestTimeout != "" {
+			timeoutSecond, err := strconv.ParseInt(requestTimeout, 10, 64)
+			if err != nil {
+				HTTPAbortReturn(gCtx, http.StatusOK, gin.H{
+					mhttp.HTTPReturnCode: merr.Code(merr.ErrParameterInvalid),
+					mhttp.HTTPReturnMessage: merr.WrapErrParameterInvalidMsg(
+						"%s parse failed, err: %s",
+						mhttp.HTTPHeaderRequestTimeout,
+						err.Error(),
+					).Error(),
+				})
+				return
+			}
 			timeout = time.Duration(timeoutSecond) * time.Second
 		}
 		topCtx, cancel := context.WithTimeout(gCtx.Request.Context(), timeout)
@@ -288,7 +298,7 @@ func timeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 			}
 			gCtx.Next()
 			if err := recorder.CommitTo(realWriter); err != nil {
-				log.Warn("failed to write response body", zap.Error(err))
+				mlog.Warn(context.TODO(), "failed to write response body", mlog.Err(err))
 				recorder.Close()
 				bufPool.Put(buffer)
 				return
@@ -305,6 +315,9 @@ func timeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 			bufPool.Put(buffer)
 
 			realWriter.Header().Set("Content-Type", "application/json; charset=utf-8")
+			if traceID, ok := getTraceID(gCtx); ok {
+				setTraceIDHeaderTo(realWriter.Header(), traceID)
+			}
 			realWriter.WriteHeader(http.StatusRequestTimeout)
 			body, _ := json.Marshal(gin.H{HTTPReturnCode: merr.TimeoutCode, HTTPReturnMessage: "request timeout"})
 			realWriter.Write(body)

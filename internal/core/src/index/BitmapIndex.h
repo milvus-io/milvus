@@ -30,11 +30,6 @@
 namespace milvus {
 namespace index {
 
-struct BitmapInfo {
-    size_t offset_;
-    size_t size_;
-};
-
 enum class BitmapIndexBuildMode {
     ROARING,
     BITSET,
@@ -49,7 +44,8 @@ class BitmapIndex : public ScalarIndex<T> {
  public:
     explicit BitmapIndex(
         const storage::FileManagerContext& file_manager_context =
-            storage::FileManagerContext());
+            storage::FileManagerContext(),
+        bool is_nested_index = false);
 
     ~BitmapIndex() {
         if (is_mmap_) {
@@ -76,6 +72,18 @@ class BitmapIndex : public ScalarIndex<T> {
         return ScalarIndexType::BITMAP;
     }
 
+    // Reverse_Lookup is O(1) only when the offset cache is built; otherwise it
+    // linearly scans all distinct postings (O(cardinality)) per row.
+    bool
+    SupportFastReverseLookup() const override {
+        return use_offset_cache_;
+    }
+
+    bool
+    IsNestedIndex() const override {
+        return is_nested_index_;
+    }
+
     void
     Build(size_t n, const T* values, const bool* valid_data = nullptr) override;
 
@@ -93,6 +101,11 @@ class BitmapIndex : public ScalarIndex<T> {
 
     const TargetBitmap
     IsNull() override;
+
+    // Declaring IsNotNull() here hides the base's row-count-aware
+    // IsNotNull(int64_t) overload; keep it visible so a call through this
+    // static type still finds it.
+    using ScalarIndex<T>::IsNotNull;
 
     TargetBitmap
     IsNotNull() override;
@@ -207,49 +220,6 @@ class BitmapIndex : public ScalarIndex<T> {
         return std::is_same_v<T, std::string>;
     }
 
-    bool
-    SupportPatternQuery() const override {
-        return std::is_same_v<T, std::string>;
-    }
-
-    const TargetBitmap
-    PatternQuery(const std::string& pattern) override {
-        if constexpr (!std::is_same_v<T, std::string>) {
-            ThrowInfo(ErrorCode::OpTypeInvalid,
-                      "pattern query only supported for string type");
-            return TargetBitmap{};
-        } else {
-            AssertInfo(is_built_, "index has not been built");
-
-            LikePatternMatcher matcher(pattern);
-            TargetBitmap res(total_num_rows_, false);
-            if (is_mmap_) {
-                for (const auto& [key, bitmap] : bitmap_info_map_) {
-                    if (matcher(key)) {
-                        for (const auto& v : bitmap) {
-                            res.set(v);
-                        }
-                    }
-                }
-            } else if (build_mode_ == BitmapIndexBuildMode::ROARING) {
-                for (const auto& [key, bitmap] : data_) {
-                    if (matcher(key)) {
-                        for (const auto& v : bitmap) {
-                            res.set(v);
-                        }
-                    }
-                }
-            } else {
-                for (const auto& [key, bitset] : bitsets_) {
-                    if (matcher(key)) {
-                        res |= bitset;
-                    }
-                }
-            }
-            return res;
-        }
-    }
-
     const TargetBitmap
     PatternMatch(const std::string& pattern, proto::plan::OpType op) override {
         switch (op) {
@@ -306,6 +276,45 @@ class BitmapIndex : public ScalarIndex<T> {
         }
     }
 
+ protected:
+    const TargetBitmap
+    PatternQuery(const std::string& pattern) override {
+        if constexpr (!std::is_same_v<T, std::string>) {
+            ThrowInfo(ErrorCode::OpTypeInvalid,
+                      "pattern query only supported for string type");
+            return TargetBitmap{};
+        }
+
+        AssertInfo(is_built_, "index has not been built");
+
+        LikePatternMatcher matcher(pattern);
+        TargetBitmap res(total_num_rows_, false);
+        if (is_mmap_) {
+            for (const auto& [key, bitmap] : bitmap_info_map_) {
+                if (matcher(key)) {
+                    for (const auto& v : bitmap) {
+                        res.set(v);
+                    }
+                }
+            }
+        } else if (build_mode_ == BitmapIndexBuildMode::ROARING) {
+            for (const auto& [key, bitmap] : data_) {
+                if (matcher(key)) {
+                    for (const auto& v : bitmap) {
+                        res.set(v);
+                    }
+                }
+            }
+        } else {
+            for (const auto& [key, bitset] : bitsets_) {
+                if (matcher(key)) {
+                    res |= bitset;
+                }
+            }
+        }
+        return res;
+    }
+
  public:
     int64_t
     Cardinality() {
@@ -326,6 +335,9 @@ class BitmapIndex : public ScalarIndex<T> {
 
     void
     BuildArrayField(const std::vector<FieldDataPtr>& datas);
+
+    void
+    BuildArrayFieldNested(const std::vector<FieldDataPtr>& datas);
 
     size_t
     GetIndexDataSize();
@@ -434,6 +446,7 @@ class BitmapIndex : public ScalarIndex<T> {
     std::map<T, roaring::Roaring> data_;
     std::map<T, TargetBitmap> bitsets_;
     bool is_mmap_{false};
+    bool is_nested_index_{false};
     char* mmap_data_;
     int64_t mmap_size_;
     std::map<T, roaring::Roaring> bitmap_info_map_;

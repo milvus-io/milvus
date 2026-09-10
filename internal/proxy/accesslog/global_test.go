@@ -17,13 +17,17 @@
 package accesslog
 
 import (
+	"bytes"
 	"context"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
@@ -33,7 +37,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog/info"
-	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -72,21 +75,48 @@ func TestAccessLogger_InitFailed(t *testing.T) {
 	assert.False(t, ok)
 
 	// init minio error cause init writter failed
-	Params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
-	Params.Save(Params.ProxyCfg.AccessLog.MinioEnable.Key, "true")
-	Params.Save(Params.MinioCfg.Address.Key, "")
+	// Use a fresh once and params to avoid the watch registered above from firing on param changes
+	once = sync.Once{}
+	var Params2 paramtable.ComponentParam
+	Params2.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+	Params2.Save(Params2.ProxyCfg.AccessLog.Enable.Key, "true")
+	Params2.Save(Params2.ProxyCfg.AccessLog.Filename.Key, "test_access")
+	Params2.Save(Params2.ProxyCfg.AccessLog.LocalPath.Key, t.TempDir())
+	Params2.Save(Params2.ProxyCfg.AccessLog.MinioEnable.Key, "true")
+	Params2.Save(Params2.MinioCfg.Address.Key, "")
 
-	InitAccessLogger(&Params)
+	InitAccessLogger(&Params2)
 	rpcInfo = &grpc.UnaryServerInfo{Server: nil, FullMethod: "testMethod"}
 	accessInfo = info.NewGrpcAccessInfo(context.Background(), rpcInfo, nil)
 	ok = _globalL.Write(accessInfo)
 	assert.False(t, ok)
 }
 
+func TestAccessLogger_UpdateDisableClearsRotateWriter(t *testing.T) {
+	var Params paramtable.ComponentParam
+	Params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+	Params.Save(Params.ProxyCfg.AccessLog.Enable.Key, "true")
+	Params.Save(Params.ProxyCfg.AccessLog.Filename.Key, "test_access")
+	Params.Save(Params.ProxyCfg.AccessLog.LocalPath.Key, t.TempDir())
+	Params.Save(Params.ProxyCfg.AccessLog.CacheSize.Key, "0")
+
+	logger := NewAccessLogger()
+	require.NoError(t, logger.Init(&Params))
+	writer, ok := logger.writer.(*RotateWriter)
+	require.True(t, ok)
+
+	require.NoError(t, logger.Update(false))
+	assert.False(t, logger.enable.Load())
+	assert.Nil(t, logger.writer)
+	assert.True(t, writer.closed)
+
+	require.NoError(t, logger.Update(false))
+}
+
 func TestAccessLogger_DynamicEnable(t *testing.T) {
 	once = sync.Once{}
 	var Params paramtable.ComponentParam
-	Params.Init(paramtable.NewBaseTable())
+	Params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
 	Params.Save(Params.ProxyCfg.AccessLog.Enable.Key, "false")
 	// init with close accesslog
 	InitAccessLogger(&Params)
@@ -95,21 +125,8 @@ func TestAccessLogger_DynamicEnable(t *testing.T) {
 	ok := _globalL.Write(accessInfo)
 	assert.False(t, ok)
 
-	etcdCli, err := etcd.GetEtcdClient(
-		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
-		Params.EtcdCfg.Endpoints.GetAsStrings(),
-		Params.EtcdCfg.EtcdTLSCert.GetValue(),
-		Params.EtcdCfg.EtcdTLSKey.GetValue(),
-		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
-		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
-	require.NoError(t, err)
-
 	// enable access log
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	etcdCli.Put(ctx, "by-dev/config/proxy/accessLog/enable", "true")
-	defer etcdCli.Delete(ctx, "by-dev/config/proxy/accessLog/enable")
+	require.NoError(t, Params.Save(Params.ProxyCfg.AccessLog.Enable.Key, "true"))
 
 	assert.Eventually(t, func() bool {
 		accessInfo := info.NewGrpcAccessInfo(context.Background(), rpcInfo, nil)
@@ -118,7 +135,7 @@ func TestAccessLogger_DynamicEnable(t *testing.T) {
 	}, 10*time.Second, 500*time.Millisecond)
 
 	// disable access log
-	etcdCli.Put(ctx, "by-dev/config/proxy/accessLog/enable", "false")
+	require.NoError(t, Params.Save(Params.ProxyCfg.AccessLog.Enable.Key, "false"))
 	assert.Eventually(t, func() bool {
 		accessInfo := info.NewGrpcAccessInfo(context.Background(), rpcInfo, nil)
 		ok := _globalL.Write(accessInfo)
@@ -170,6 +187,76 @@ func TestAccessLogger_Basic(t *testing.T) {
 
 	ok := _globalL.Write(accessInfo)
 	assert.True(t, ok)
+}
+
+func TestAccessLogger_RestfulMethodUsesURLPath(t *testing.T) {
+	newLogger := func(writer *bytes.Buffer) *AccessLogger {
+		formatters := NewFormatterManger()
+		formatters.Add(BaseFormatterKey, "base: $method_name")
+		formatters.Add("search", "search: $method_name")
+		formatters.SetMethod("search", "/v2/search")
+
+		logger := NewAccessLogger()
+		logger.enable.Store(true)
+		logger.writer = writer
+		logger.formatters = formatters
+		return logger
+	}
+
+	tests := []struct {
+		name     string
+		target   string
+		expected string
+	}{
+		{
+			name:     "exact path matches",
+			target:   "/v2/search",
+			expected: "search: /v2/search\n",
+		},
+		{
+			name:     "query does not change restful method",
+			target:   "/v2/search?cluster_id=123",
+			expected: "search: /v2/search?cluster_id=123\n",
+		},
+		{
+			name:     "different prefix does not match",
+			target:   "/search?cluster_id=123",
+			expected: "base: /search?cluster_id=123\n",
+		},
+		{
+			name:     "different path does not match",
+			target:   "/v2/searching?cluster_id=123",
+			expected: "base: /v2/searching?cluster_id=123\n",
+		},
+		{
+			name:     "child path does not match",
+			target:   "/v2/search/result?cluster_id=123",
+			expected: "base: /v2/search/result?cluster_id=123\n",
+		},
+		{
+			name:     "escaped question mark remains part of path",
+			target:   "/v2/search%3Fcluster_id=123",
+			expected: "base: /v2/search%3Fcluster_id=123\n",
+		},
+	}
+
+	gin.SetMode(gin.TestMode)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx.Request = httptest.NewRequest(http.MethodPost, test.target, nil)
+			accessInfo := info.NewRestfulInfo(ctx)
+			accessInfo.SetParams(&gin.LogFormatterParams{
+				Request: ctx.Request,
+				Path:    ctx.Request.URL.RequestURI(),
+			})
+
+			var writer bytes.Buffer
+			logger := newLogger(&writer)
+			require.True(t, logger.Write(accessInfo))
+			assert.Equal(t, test.expected, writer.String())
+		})
+	}
 }
 
 func TestAccessLogger_WriteFailed(t *testing.T) {

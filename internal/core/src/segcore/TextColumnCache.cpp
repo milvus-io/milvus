@@ -18,21 +18,39 @@
 
 #include "common/EasyAssert.h"
 #include "log/Log.h"
+#include "milvus-storage/common/extend_status.h"
 #include "milvus-storage/lob_column/lob_reference.h"
 
 namespace milvus::segcore {
 
-using namespace milvus_storage::lob_column;
+namespace {
+
+arrow::Result<std::unique_ptr<milvus_storage::lob_column::LobColumnReader>>
+DefaultTextLobReaderFactory(
+    std::shared_ptr<arrow::fs::FileSystem> fs,
+    const milvus_storage::lob_column::LobColumnConfig& config) {
+    return milvus_storage::lob_column::CreateLobColumnReader(std::move(fs),
+                                                             config);
+}
+
+}  // namespace
 
 TextColumnCache::TextColumnCache(const TextColumnCacheConfig& config)
-    : config_(config), reader_cache_(config.max_file_readers) {
+    : TextColumnCache(config, DefaultTextLobReaderFactory) {
+}
+
+TextColumnCache::TextColumnCache(const TextColumnCacheConfig& config,
+                                 TextLobReaderFactory reader_factory)
+    : config_(config),
+      reader_factory_(std::move(reader_factory)),
+      reader_cache_(config.max_file_readers) {
 }
 
 TextColumnCache::~TextColumnCache() {
     Clear();
 }
 
-std::shared_ptr<LobColumnReader>
+std::shared_ptr<CachedTextLobReader>
 TextColumnCache::GetOrCreateReader(
     const std::string& lob_base_path,
     std::shared_ptr<arrow::fs::FileSystem> fs,
@@ -48,21 +66,23 @@ TextColumnCache::GetOrCreateReader(
 
     file_cache_misses_.fetch_add(1, std::memory_order_relaxed);
 
-    LobColumnConfig config;
+    milvus_storage::lob_column::LobColumnConfig config;
     config.lob_base_path = lob_base_path;
     config.properties = properties;
 
-    auto reader_result = CreateLobColumnReader(fs, config);
+    auto reader_result = reader_factory_(std::move(fs), config);
     if (!reader_result.ok()) {
-        throw SegcoreError(
-            ErrorCode::UnexpectedError,
-            fmt::format("Failed to create LobColumnReader for {}: {}",
-                        lob_base_path,
-                        reader_result.status().message()));
+        auto error = milvus_storage::ToSegcoreError(reader_result.status());
+        ThrowInfo(error.get_error_code(),
+                  "Failed to create LobColumnReader for {}: {}",
+                  lob_base_path,
+                  error.what());
     }
 
-    auto reader = std::shared_ptr<LobColumnReader>(
+    auto reader = std::shared_ptr<milvus_storage::lob_column::LobColumnReader>(
         std::move(reader_result).ValueOrDie().release());
+    auto cached_reader =
+        std::make_shared<CachedTextLobReader>(std::move(reader));
 
     {
         std::lock_guard<std::mutex> lock(reader_cache_mutex_);
@@ -70,52 +90,18 @@ TextColumnCache::GetOrCreateReader(
         if (cached.has_value()) {
             return cached.value();
         }
-        reader_cache_.put(lob_base_path, reader);
+        reader_cache_.put(lob_base_path, cached_reader);
     }
 
-    return reader;
-}
-
-std::string
-TextColumnCache::ReadText(const std::string& lob_base_path,
-                          std::shared_ptr<arrow::fs::FileSystem> fs,
-                          const milvus_storage::api::Properties& properties,
-                          const uint8_t* encoded_ref,
-                          size_t ref_size) {
-    if (encoded_ref == nullptr || ref_size == 0) {
-        return "";
-    }
-
-    if (IsInlineData(encoded_ref)) {
-        return DecodeInlineText(encoded_ref, ref_size);
-    }
-
-    if (ref_size != LOB_REFERENCE_SIZE) {
-        throw SegcoreError(
-            ErrorCode::UnexpectedError,
-            fmt::format("Invalid LOB reference size: {}, expected: {}",
-                        ref_size,
-                        LOB_REFERENCE_SIZE));
-    }
-
-    auto reader = GetOrCreateReader(lob_base_path, fs, properties);
-
-    auto result = reader->ReadText(encoded_ref, ref_size);
-    if (!result.ok()) {
-        throw SegcoreError(ErrorCode::UnexpectedError,
-                           fmt::format("Failed to read text from {}: {}",
-                                       lob_base_path,
-                                       result.status().message()));
-    }
-
-    return std::move(result).ValueOrDie();
+    return cached_reader;
 }
 
 std::vector<std::string>
-TextColumnCache::ReadBatch(const std::string& lob_base_path,
-                           std::shared_ptr<arrow::fs::FileSystem> fs,
-                           const milvus_storage::api::Properties& properties,
-                           const std::vector<EncodedRef>& encoded_refs) {
+TextColumnCache::ReadBatch(
+    const std::string& lob_base_path,
+    std::shared_ptr<arrow::fs::FileSystem> fs,
+    const milvus_storage::api::Properties& properties,
+    const std::vector<milvus_storage::lob_column::EncodedRef>& encoded_refs) {
     if (encoded_refs.empty()) {
         return {};
     }
@@ -123,7 +109,7 @@ TextColumnCache::ReadBatch(const std::string& lob_base_path,
     std::vector<std::string> results(encoded_refs.size());
     std::vector<size_t>
         pending_indices;  // Indices that need to be read from file
-    std::vector<EncodedRef> pending_refs;
+    std::vector<milvus_storage::lob_column::EncodedRef> pending_refs;
 
     for (size_t i = 0; i < encoded_refs.size(); i++) {
         const auto& ref = encoded_refs[i];
@@ -133,8 +119,9 @@ TextColumnCache::ReadBatch(const std::string& lob_base_path,
             continue;
         }
 
-        if (IsInlineData(ref.data)) {
-            results[i] = DecodeInlineText(ref.data, ref.size);
+        if (milvus_storage::lob_column::IsInlineData(ref.data)) {
+            results[i] = milvus_storage::lob_column::DecodeInlineText(ref.data,
+                                                                      ref.size);
             continue;
         }
 
@@ -143,18 +130,23 @@ TextColumnCache::ReadBatch(const std::string& lob_base_path,
     }
 
     if (!pending_refs.empty()) {
-        auto reader = GetOrCreateReader(lob_base_path, fs, properties);
+        auto cached_reader = GetOrCreateReader(lob_base_path, fs, properties);
 
-        auto batch_result = reader->ReadBatch(pending_refs);
-        if (!batch_result.ok()) {
-            throw SegcoreError(
-                ErrorCode::UnexpectedError,
-                fmt::format("Failed to read text batch from {}: {}",
-                            lob_base_path,
-                            batch_result.status().message()));
+        std::vector<std::string> texts;
+        {
+            std::lock_guard<std::mutex> reader_lock(cached_reader->mutex);
+            auto batch_result = cached_reader->reader->ReadBatch(pending_refs);
+            if (!batch_result.ok()) {
+                auto error =
+                    milvus_storage::ToSegcoreError(batch_result.status());
+                ThrowInfo(error.get_error_code(),
+                          "Failed to read text batch from {}: {}",
+                          lob_base_path,
+                          error.what());
+            }
+            texts = std::move(batch_result).ValueOrDie();
         }
 
-        auto texts = std::move(batch_result).ValueOrDie();
         for (size_t i = 0; i < pending_indices.size() && i < texts.size();
              i++) {
             size_t original_idx = pending_indices[i];
@@ -170,14 +162,14 @@ TextColumnCache::ReadBatchInto(
     const std::string& lob_base_path,
     std::shared_ptr<arrow::fs::FileSystem> fs,
     const milvus_storage::api::Properties& properties,
-    const std::vector<EncodedRef>& encoded_refs,
+    const std::vector<milvus_storage::lob_column::EncodedRef>& encoded_refs,
     google::protobuf::RepeatedPtrField<std::string>* dst) {
     if (encoded_refs.empty()) {
         return;
     }
 
     std::vector<size_t> pending_indices;
-    std::vector<EncodedRef> pending_refs;
+    std::vector<milvus_storage::lob_column::EncodedRef> pending_refs;
 
     for (size_t i = 0; i < encoded_refs.size(); i++) {
         const auto& ref = encoded_refs[i];
@@ -187,8 +179,9 @@ TextColumnCache::ReadBatchInto(
             continue;
         }
 
-        if (IsInlineData(ref.data)) {
-            *dst->Mutable(i) = DecodeInlineText(ref.data, ref.size);
+        if (milvus_storage::lob_column::IsInlineData(ref.data)) {
+            *dst->Mutable(i) = milvus_storage::lob_column::DecodeInlineText(
+                ref.data, ref.size);
             continue;
         }
 
@@ -197,18 +190,23 @@ TextColumnCache::ReadBatchInto(
     }
 
     if (!pending_refs.empty()) {
-        auto reader = GetOrCreateReader(lob_base_path, fs, properties);
+        auto cached_reader = GetOrCreateReader(lob_base_path, fs, properties);
 
-        auto batch_result = reader->ReadBatch(pending_refs);
-        if (!batch_result.ok()) {
-            throw SegcoreError(
-                ErrorCode::UnexpectedError,
-                fmt::format("Failed to read text batch from {}: {}",
-                            lob_base_path,
-                            batch_result.status().message()));
+        std::vector<std::string> texts;
+        {
+            std::lock_guard<std::mutex> reader_lock(cached_reader->mutex);
+            auto batch_result = cached_reader->reader->ReadBatch(pending_refs);
+            if (!batch_result.ok()) {
+                auto error =
+                    milvus_storage::ToSegcoreError(batch_result.status());
+                ThrowInfo(error.get_error_code(),
+                          "Failed to read text batch from {}: {}",
+                          lob_base_path,
+                          error.what());
+            }
+            texts = std::move(batch_result).ValueOrDie();
         }
 
-        auto texts = std::move(batch_result).ValueOrDie();
         for (size_t i = 0; i < pending_indices.size() && i < texts.size();
              i++) {
             *dst->Mutable(pending_indices[i]) = std::move(texts[i]);
@@ -217,30 +215,9 @@ TextColumnCache::ReadBatchInto(
 }
 
 void
-TextColumnCache::Invalidate(const std::string& lob_base_path) {
-    std::lock_guard<std::mutex> lock(reader_cache_mutex_);
-    reader_cache_.remove(lob_base_path);
-}
-
-void
 TextColumnCache::Clear() {
     std::lock_guard<std::mutex> lock(reader_cache_mutex_);
     reader_cache_.clean();
-}
-
-TextColumnCacheStats
-TextColumnCache::GetStats() const {
-    TextColumnCacheStats stats;
-    stats.file_cache_hits = file_cache_hits_.load(std::memory_order_relaxed);
-    stats.file_cache_misses =
-        file_cache_misses_.load(std::memory_order_relaxed);
-
-    {
-        std::lock_guard<std::mutex> lock(reader_cache_mutex_);
-        stats.current_file_cache_size = reader_cache_.size();
-    }
-
-    return stats;
 }
 
 static std::unique_ptr<TextColumnCache> g_text_column_cache;

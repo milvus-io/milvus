@@ -18,7 +18,6 @@ package storage
 
 import (
 	"encoding/binary"
-	"fmt"
 
 	"google.golang.org/protobuf/proto"
 
@@ -60,7 +59,11 @@ func NewInsertDataWithFunctionOutputField(schema *schemapb.CollectionSchema) (*I
 
 func NewInsertDataWithCap(schema *schemapb.CollectionSchema, cap int, withFunctionOutput bool) (*InsertData, error) {
 	if schema == nil {
-		return nil, merr.WrapErrParameterMissing("collection schema")
+		// A nil schema here is an internal invariant violation (callers within
+		// Milvus always pass a schema), not a client-supplied missing parameter.
+		// ErrParameterMissing defaults to InputError, so mark this one site as a
+		// system error to keep it out of the client-fault (cause="user") bucket.
+		return nil, merr.WrapErrAsSysError(merr.WrapErrParameterMissing("collection schema"))
 	}
 
 	idata := &InsertData{
@@ -69,17 +72,17 @@ func NewInsertDataWithCap(schema *schemapb.CollectionSchema, cap int, withFuncti
 
 	appendField := func(field *schemapb.FieldSchema) error {
 		if field.IsPrimaryKey && field.GetNullable() {
-			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("primary key field should not be nullable (field: %s)", field.Name))
+			return merr.WrapErrParameterInvalidMsg("primary key field should not be nullable (field: %s)", field.Name)
 		}
 		if field.IsPartitionKey && field.GetNullable() {
-			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("partition key field should not be nullable (field: %s)", field.Name))
+			return merr.WrapErrParameterInvalidMsg("partition key field should not be nullable (field: %s)", field.Name)
 		}
 		if field.IsFunctionOutput {
 			if field.IsPrimaryKey || field.IsPartitionKey {
-				return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("function output field should not be primary key or partition key (field: %s)", field.Name))
+				return merr.WrapErrParameterInvalidMsg("function output field should not be primary key or partition key (field: %s)", field.Name)
 			}
 			if field.GetNullable() {
-				return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("function output field should not be nullable (field: %s)", field.Name))
+				return merr.WrapErrParameterInvalidMsg("function output field should not be nullable (field: %s)", field.Name)
 			}
 			if !withFunctionOutput {
 				return nil
@@ -149,11 +152,11 @@ func (i *InsertData) Append(row map[FieldID]interface{}) error {
 	for fID, v := range row {
 		field, ok := i.Data[fID]
 		if !ok {
-			return fmt.Errorf("missing field when appending row, got %d", fID)
+			return merr.WrapErrServiceInternalMsg("missing field when appending row, got %d", fID)
 		}
 
 		if err := field.AppendRow(v); err != nil {
-			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("append data for field %d failed, err=%s", fID, err.Error()))
+			return merr.WrapErrParameterInvalidMsg("append data for field %d failed, err=%s", fID, err.Error())
 		}
 	}
 
@@ -190,6 +193,7 @@ type FieldData interface {
 	AppendValidDataRows(rows interface{}) error
 	GetDataType() schemapb.DataType
 	GetNullable() bool
+	GetValidData() []bool
 }
 
 func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema, cap int) (FieldData, error) {
@@ -405,7 +409,7 @@ func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema,
 		}
 		return data, nil
 	default:
-		return nil, fmt.Errorf("unexpected schema data type: %d", dataType)
+		return nil, merr.WrapErrServiceInternalMsg("unexpected schema data type: %d", dataType)
 	}
 }
 
@@ -2025,27 +2029,47 @@ func (data *StringFieldData) GetMemorySize() int {
 	return size + binary.Size(data.ValidData) + binary.Size(data.Nullable)
 }
 
+func getArrayScalarFieldMemorySize(data *schemapb.ScalarField, elementType schemapb.DataType) int {
+	if data == nil {
+		return 0
+	}
+
+	// Nested Array rows are recursively encoded as ScalarField_ArrayData.
+	// Descend into that payload before dispatching on the leaf element type.
+	if arrayData := data.GetArrayData(); arrayData != nil {
+		var size int
+		for _, element := range arrayData.GetData() {
+			size += getArrayScalarFieldMemorySize(element, arrayData.GetElementType())
+		}
+		return size
+	}
+
+	switch elementType {
+	case schemapb.DataType_Bool:
+		return binary.Size(data.GetBoolData().GetData())
+	case schemapb.DataType_Int8:
+		return binary.Size(data.GetIntData().GetData()) / 4
+	case schemapb.DataType_Int16:
+		return binary.Size(data.GetIntData().GetData()) / 2
+	case schemapb.DataType_Int32:
+		return binary.Size(data.GetIntData().GetData())
+	case schemapb.DataType_Int64, schemapb.DataType_Timestamptz:
+		return binary.Size(data.GetLongData().GetData())
+	case schemapb.DataType_Float:
+		return binary.Size(data.GetFloatData().GetData())
+	case schemapb.DataType_Double:
+		return binary.Size(data.GetDoubleData().GetData())
+	case schemapb.DataType_String, schemapb.DataType_VarChar:
+		return (&StringFieldData{Data: data.GetStringData().GetData()}).GetMemorySize()
+	default:
+		return 0
+	}
+}
+
 func (data *ArrayFieldData) GetMemorySize() int {
 	var size int
 	for _, val := range data.Data {
-		switch data.ElementType {
-		case schemapb.DataType_Bool:
-			size += binary.Size(val.GetBoolData().GetData())
-		case schemapb.DataType_Int8:
-			size += binary.Size(val.GetIntData().GetData()) / 4
-		case schemapb.DataType_Int16:
-			size += binary.Size(val.GetIntData().GetData()) / 2
-		case schemapb.DataType_Int32:
-			size += binary.Size(val.GetIntData().GetData())
-		case schemapb.DataType_Int64:
-			size += binary.Size(val.GetLongData().GetData())
-		case schemapb.DataType_Float:
-			size += binary.Size(val.GetFloatData().GetData())
-		case schemapb.DataType_Double:
-			size += binary.Size(val.GetDoubleData().GetData())
-		case schemapb.DataType_String, schemapb.DataType_VarChar:
-			size += (&StringFieldData{Data: val.GetStringData().GetData()}).GetMemorySize()
-		}
+		size += getArrayScalarFieldMemorySize(val, data.ElementType)
 	}
 	return size + binary.Size(data.ValidData) + binary.Size(data.Nullable)
 }
@@ -2113,25 +2137,7 @@ func (data *StringFieldData) GetRowSize(i int) int   { return len(data.Data[i]) 
 func (data *JSONFieldData) GetRowSize(i int) int     { return len(data.Data[i]) + 16 }
 func (data *GeometryFieldData) GetRowSize(i int) int { return len(data.Data[i]) + 16 }
 func (data *ArrayFieldData) GetRowSize(i int) int {
-	switch data.ElementType {
-	case schemapb.DataType_Bool:
-		return binary.Size(data.Data[i].GetBoolData().GetData())
-	case schemapb.DataType_Int8:
-		return binary.Size(data.Data[i].GetIntData().GetData()) / 4
-	case schemapb.DataType_Int16:
-		return binary.Size(data.Data[i].GetIntData().GetData()) / 2
-	case schemapb.DataType_Int32:
-		return binary.Size(data.Data[i].GetIntData().GetData())
-	case schemapb.DataType_Int64:
-		return binary.Size(data.Data[i].GetLongData().GetData())
-	case schemapb.DataType_Float:
-		return binary.Size(data.Data[i].GetFloatData().GetData())
-	case schemapb.DataType_Double:
-		return binary.Size(data.Data[i].GetDoubleData().GetData())
-	case schemapb.DataType_String, schemapb.DataType_VarChar:
-		return (&StringFieldData{Data: data.Data[i].GetStringData().GetData()}).GetMemorySize()
-	}
-	return 0
+	return getArrayScalarFieldMemorySize(data.Data[i], data.ElementType)
 }
 
 func (data *SparseFloatVectorFieldData) GetRowSize(i int) int {

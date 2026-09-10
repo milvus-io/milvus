@@ -64,6 +64,10 @@ func TestFunctionWithParamSliceHandling(t *testing.T) {
 	f = NewFunction().WithParam("empty_slice_key", []string{})
 	assert.Equal(t, "[]", f.Params["empty_slice_key"])
 
+	// Test nil without panicking
+	f = NewFunction().WithParam("nil_key", nil)
+	assert.Equal(t, "null", f.Params["nil_key"])
+
 	// Test the JSON marshal error fallback path
 	type unmarshalableType struct {
 		Channel chan int

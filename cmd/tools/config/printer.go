@@ -1,26 +1,26 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"sort"
 
-	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
 func ShowYaml(filepath string) {
 	data, err := os.ReadFile(filepath) //nolint:gosec // filepath is from CLI args, not untrusted input
 	if err != nil {
-		log.Warn("read config failed", zap.Error(err))
+		mlog.Warn(context.TODO(), "read config failed", mlog.Err(err))
 		os.Exit(-3)
 	}
 
 	var raw map[string]interface{}
 	if err := yaml.Unmarshal(data, &raw); err != nil {
-		log.Warn("parse config failed", zap.Error(err))
+		mlog.Warn(context.TODO(), "parse config failed", mlog.Err(err))
 		os.Exit(-3)
 	}
 

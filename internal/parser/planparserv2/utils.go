@@ -7,13 +7,14 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/cockroachdb/errors"
 	"github.com/twpayne/go-geom"
 	"github.com/twpayne/go-geom/encoding/wkt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/internal/parser/planparserv2/rewriter"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -76,6 +77,15 @@ func IsString(n *planpb.GenericValue) bool {
 		return true
 	}
 	return false
+}
+
+func IsBytes(n *planpb.GenericValue) bool {
+	switch n.GetVal().(type) {
+	case *planpb.GenericValue_BytesVal:
+		return true
+	default:
+		return false
+	}
 }
 
 func IsArray(n *planpb.GenericValue) bool {
@@ -207,7 +217,7 @@ func getTargetType(lDataType, rDataType schemapb.DataType) (schemapb.DataType, e
 		}
 	}
 
-	return schemapb.DataType_None, fmt.Errorf("incompatible data type, %s, %s", lDataType.String(), rDataType.String())
+	return schemapb.DataType_None, merr.WrapErrQueryPlanMsg("incompatible data type, %s, %s", lDataType.String(), rDataType.String())
 }
 
 func getSameType(left, right *ExprWithType) (schemapb.DataType, error) {
@@ -243,7 +253,7 @@ func reverseOrder(op planpb.OpType) (planpb.OpType, error) {
 	case planpb.OpType_NotEqual:
 		return planpb.OpType_NotEqual, nil
 	default:
-		return planpb.OpType_Invalid, fmt.Errorf("cannot reverse order: %s", op)
+		return planpb.OpType_Invalid, merr.WrapErrQueryPlanMsg("cannot reverse order: %s", op)
 	}
 }
 
@@ -252,6 +262,15 @@ func toColumnInfo(left *ExprWithType) *planpb.ColumnInfo {
 }
 
 func castValue(dataType schemapb.DataType, value *planpb.GenericValue) (*planpb.GenericValue, error) {
+	// A raw-bytes value has exactly one consumer family — the membership filter
+	// blob argument of membership_match — each
+	// validated and embedded by the unified fill path without passing through
+	// castValue. Reject it in every typed/JSON comparison context here, at the
+	// proxy, instead of fanning out a GenericValue kBytesVal that segcore's plan
+	// parser cannot evaluate.
+	if IsBytes(value) {
+		return nil, bytesTemplateValueError()
+	}
 	if typeutil.IsJSONType(dataType) {
 		return value, nil
 	}
@@ -282,7 +301,18 @@ func castValue(dataType schemapb.DataType, value *planpb.GenericValue) (*planpb.
 		return value, nil
 	}
 
-	return nil, fmt.Errorf("cannot cast value to %s, value: %s", dataType.String(), value)
+	// The value is not echoed. castValue is reached from fill_expression_value
+	// after template substitution, so it can hold a value the caller supplied
+	// out of band; the design doc forbids rendering one. The declared type and
+	// the value's own type are what identify the mismatch anyway.
+	return nil, merr.WrapErrQueryPlanMsg(
+		"cannot cast value to %s: incompatible source type", dataType.String())
+}
+
+func bytesTemplateValueError() error {
+	return merr.WrapErrParameterInvalidMsg(
+		"a bytes template value can only be used as the membership filter argument " +
+			"of membership_match")
 }
 
 func combineBinaryArithExpr(op planpb.OpType, arithOp planpb.ArithOpType, arithExprDataType schemapb.DataType, columnInfo *planpb.ColumnInfo, operandExpr, valueExpr *planpb.ValueExpr) (*planpb.Expr, error) {
@@ -297,7 +327,17 @@ func combineBinaryArithExpr(op planpb.OpType, arithOp planpb.ArithOpType, arithE
 
 	if arithOp == planpb.ArithOpType_Div || arithOp == planpb.ArithOpType_Mod {
 		if (IsInteger(operand) && operand.GetInt64Val() == 0) || (IsFloating(operand) && operand.GetFloatVal() == 0) {
-			return nil, errors.New("division or modulus by zero")
+			return nil, merr.WrapErrQueryPlanMsg("division or modulus by zero")
+		}
+	}
+
+	// A negative or too-large shift amount is undefined behavior in the C++
+	// executor, so reject it at plan time (constant-const folding is guarded
+	// separately in ShiftLeft/ShiftRight). Templated operands are validated when
+	// the placeholder value is filled in.
+	if (arithOp == planpb.ArithOpType_Shl || arithOp == planpb.ArithOpType_Shr) && !isTemplateExpr(operandExpr) {
+		if !IsInteger(operand) || operand.GetInt64Val() < 0 || operand.GetInt64Val() >= 64 {
+			return nil, merr.WrapErrQueryPlanMsg("shift amount must be in range [0, 64), got %s", operand.String())
 		}
 	}
 
@@ -342,12 +382,12 @@ func handleBinaryArithExpr(op planpb.OpType, arithExpr *planpb.BinaryArithExpr, 
 
 	if leftExpr != nil && rightExpr != nil {
 		// a + b == 3
-		return nil, errors.New("not supported to do arithmetic operations between multiple fields")
+		return nil, merr.WrapErrQueryPlanMsg("not supported to do arithmetic operations between multiple fields")
 	}
 
 	if leftValue != nil && rightValue != nil {
 		// 2 + 1 == 3
-		return nil, errors.New("unexpected, should be optimized already")
+		return nil, merr.WrapErrQueryPlanMsg("unexpected, should be optimized already")
 	}
 
 	if leftExpr != nil && rightValue != nil {
@@ -368,11 +408,11 @@ func handleBinaryArithExpr(op planpb.OpType, arithExpr *planpb.BinaryArithExpr, 
 		case planpb.ArithOpType_Add, planpb.ArithOpType_Mul:
 			return combineBinaryArithExpr(op, arithOp, arithExprDataType, rightExpr.GetInfo(), leftValue, valueExpr)
 		default:
-			return nil, errors.New("module field is not yet supported")
+			return nil, merr.WrapErrQueryPlanMsg("module field is not yet supported")
 		}
 	} else {
 		// (a + b) / 2 == 3
-		return nil, errors.New("complicated arithmetic operations are not supported")
+		return nil, merr.WrapErrQueryPlanMsg("complicated arithmetic operations are not supported")
 	}
 }
 
@@ -401,7 +441,7 @@ func handleCompareRightValue(op planpb.OpType, left *ExprWithType, right *planpb
 	}
 
 	if columnInfo == nil {
-		return nil, errors.New("not supported to combine multiple fields")
+		return nil, merr.WrapErrQueryPlanMsg("not supported to combine multiple fields")
 	}
 	expr := &planpb.Expr{
 		Expr: &planpb.Expr_UnaryRangeExpr{
@@ -417,7 +457,7 @@ func handleCompareRightValue(op planpb.OpType, left *ExprWithType, right *planpb
 
 	switch op {
 	case planpb.OpType_Invalid:
-		return nil, fmt.Errorf("unsupported op type: %s", op)
+		return nil, merr.WrapErrQueryPlanMsg("unsupported op type: %s", op)
 	default:
 		return expr, nil
 	}
@@ -426,6 +466,11 @@ func handleCompareRightValue(op planpb.OpType, left *ExprWithType, right *planpb
 func handleCompare(op planpb.OpType, left *ExprWithType, right *ExprWithType) (*planpb.Expr, error) {
 	leftColumnInfo := toColumnInfo(left)
 	rightColumnInfo := toColumnInfo(right)
+
+	if (left.expr.GetIsTemplate() && left.expr.GetValueExpr() == nil) ||
+		(right.expr.GetIsTemplate() && right.expr.GetValueExpr() == nil) {
+		return nil, merr.WrapErrQueryPlanMsg("template variables in composite expressions cannot be compared with fields")
+	}
 
 	if left.expr.GetIsTemplate() {
 		return &planpb.Expr{
@@ -441,12 +486,19 @@ func handleCompare(op planpb.OpType, left *ExprWithType, right *ExprWithType) (*
 	}
 
 	if leftColumnInfo == nil || rightColumnInfo == nil {
-		return nil, errors.New("only comparison between two fields is supported")
+		return nil, merr.WrapErrQueryPlanMsg("only comparison between two fields is supported")
+	}
+
+	// CompareExpr only carries field IDs and storage data types. It cannot
+	// represent an element path for an ARRAY-backed column, and the executor
+	// does not support ARRAY as an operand type.
+	if typeutil.IsArrayType(leftColumnInfo.GetDataType()) || typeutil.IsArrayType(rightColumnInfo.GetDataType()) {
+		return nil, merr.WrapErrQueryPlanMsg("field-to-field comparison involving ARRAY fields is not supported")
 	}
 
 	// Check if both left and right are non-JSON types
 	if typeutil.IsJSONType(leftColumnInfo.GetDataType()) || typeutil.IsJSONType(rightColumnInfo.GetDataType()) {
-		return nil, errors.New("two column comparison with JSON type is not supported")
+		return nil, merr.WrapErrQueryPlanMsg("two column comparison with JSON type is not supported")
 	}
 
 	expr := &planpb.Expr{
@@ -461,7 +513,7 @@ func handleCompare(op planpb.OpType, left *ExprWithType, right *ExprWithType) (*
 
 	switch op {
 	case planpb.OpType_Invalid:
-		return nil, fmt.Errorf("unsupported op type: %s", op)
+		return nil, merr.WrapErrQueryPlanMsg("unsupported op type: %s", op)
 	default:
 		return expr, nil
 	}
@@ -484,6 +536,10 @@ func canBeComparedDataType(left, right schemapb.DataType) bool {
 		return typeutil.IsStringType(right) || typeutil.IsJSONType(right)
 	case schemapb.DataType_JSON:
 		return true
+	case schemapb.DataType_Timestamptz:
+		// Same type only. Mixed TIMESTAMPTZ vs INT64 stays unsupported even
+		// though both dispatch to int64_t in the C++ compare path.
+		return typeutil.IsTimestamptzType(right)
 	default:
 		return false
 	}
@@ -522,7 +578,7 @@ func getDataType(expr *ExprWithType) string {
 func HandleCompare(op int, left, right *ExprWithType) (*planpb.Expr, error) {
 	if !left.expr.GetIsTemplate() && !right.expr.GetIsTemplate() {
 		if !canBeCompared(left, right) {
-			return nil, fmt.Errorf("comparisons between %s and %s are not supported",
+			return nil, merr.WrapErrQueryPlanMsg("comparisons between %s and %s are not supported",
 				getDataType(left), getDataType(right))
 		}
 	}
@@ -662,7 +718,7 @@ func canArithmetic(left, leftElement, right, rightElement schemapb.DataType, rev
 		left, right = right, left
 	}
 	if !canArithmeticDataType(left, right) {
-		return fmt.Errorf("cannot perform arithmetic between %s field and %s", left.String(), right.String())
+		return merr.WrapErrQueryPlanMsg("cannot perform arithmetic between %s field and %s", left.String(), right.String())
 	}
 	return nil
 }
@@ -703,7 +759,12 @@ func checkValidModArith(tokenType planpb.ArithOpType, leftType, leftElementType,
 	switch tokenType {
 	case planpb.ArithOpType_Mod:
 		if !canConvertToIntegerType(leftType, leftElementType) || !canConvertToIntegerType(rightType, rightElementType) {
-			return errors.New("modulo can only apply on integer types")
+			return merr.WrapErrQueryPlanMsg("modulo can only apply on integer types")
+		}
+	case planpb.ArithOpType_BitAnd, planpb.ArithOpType_BitOr, planpb.ArithOpType_BitXor,
+		planpb.ArithOpType_Shl, planpb.ArithOpType_Shr:
+		if !canConvertToIntegerType(leftType, leftElementType) || !canConvertToIntegerType(rightType, rightElementType) {
+			return merr.WrapErrQueryPlanMsg("bitwise operations can only apply on integer types")
 		}
 	default:
 	}
@@ -714,17 +775,17 @@ func castRangeValue(dataType schemapb.DataType, value *planpb.GenericValue) (*pl
 	switch dataType {
 	case schemapb.DataType_String, schemapb.DataType_VarChar:
 		if !IsString(value) {
-			return nil, errors.New("invalid range operations")
+			return nil, merr.WrapErrQueryPlanMsg("invalid range operations")
 		}
 	case schemapb.DataType_Bool:
-		return nil, errors.New("invalid range operations on boolean expr")
+		return nil, merr.WrapErrQueryPlanMsg("invalid range operations on boolean expr")
 	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32, schemapb.DataType_Int64:
 		if !IsInteger(value) {
-			return nil, errors.New("invalid range operations")
+			return nil, merr.WrapErrQueryPlanMsg("invalid range operations")
 		}
 	case schemapb.DataType_Float, schemapb.DataType_Double:
 		if !IsNumber(value) {
-			return nil, errors.New("invalid range operations")
+			return nil, merr.WrapErrQueryPlanMsg("invalid range operations")
 		}
 		if IsInteger(value) {
 			return NewFloat(float64(value.GetInt64Val())), nil
@@ -733,9 +794,20 @@ func castRangeValue(dataType schemapb.DataType, value *planpb.GenericValue) (*pl
 	return value, nil
 }
 
+func validateBinaryRangeBounds(lower, upper *planpb.GenericValue, lowerInclusive, upperInclusive bool) error {
+	cmp, ok := rewriter.CompareRangeValues(lower, upper)
+	if !ok {
+		return merr.WrapErrQueryPlanMsg("invalid range: bounds are not comparable")
+	}
+	if cmp > 0 || (cmp == 0 && (!lowerInclusive || !upperInclusive)) {
+		return merr.WrapErrQueryPlanMsg("invalid range: lowerbound is greater than upperbound")
+	}
+	return nil
+}
+
 func checkContainsElement(columnExpr *ExprWithType, op planpb.JSONContainsExpr_JSONOp, elementValue *planpb.GenericValue) error {
 	if op != planpb.JSONContainsExpr_Contains && elementValue.GetArrayVal() == nil {
-		return fmt.Errorf("%s operation element must be an array", op.String())
+		return merr.WrapErrQueryPlanMsg("%s operation element must be an array", op.String())
 	}
 
 	if typeutil.IsArrayType(columnExpr.expr.GetColumnExpr().GetInfo().GetDataType()) {
@@ -753,7 +825,7 @@ func checkContainsElement(columnExpr *ExprWithType, op planpb.JSONContainsExpr_J
 		for _, value := range elements {
 			valExpr := toValueExpr(value)
 			if !canBeComparedDataType(arrayElementType, valExpr.dataType) {
-				return fmt.Errorf("%s operation can't compare between array element type: %s and %s",
+				return merr.WrapErrQueryPlanMsg("%s operation can't compare between array element type: %s and %s",
 					op.String(),
 					arrayElementType,
 					valExpr.dataType)
@@ -771,7 +843,7 @@ func parseJSONValue(value interface{}) (*planpb.GenericValue, schemapb.DataType,
 		} else if floatValue, err := v.Float64(); err == nil {
 			return NewFloat(floatValue), schemapb.DataType_Double, nil
 		} else {
-			return nil, schemapb.DataType_None, fmt.Errorf("%v is a number, but couldn't convert it", value)
+			return nil, schemapb.DataType_None, merr.WrapErrQueryPlanMsg("%v is a number, but couldn't convert it", value)
 		}
 	case string:
 		return NewString(v), schemapb.DataType_String, nil
@@ -803,7 +875,7 @@ func parseJSONValue(value interface{}) (*planpb.GenericValue, schemapb.DataType,
 			},
 		}, schemapb.DataType_Array, nil
 	default:
-		return nil, schemapb.DataType_None, fmt.Errorf("%v is of unknown type: %T", value, v)
+		return nil, schemapb.DataType_None, merr.WrapErrQueryPlanMsg("%v is of unknown type: %T", value, v)
 	}
 }
 
@@ -825,11 +897,38 @@ func convertHanToASCII(s string) string {
 	var builder strings.Builder
 	builder.Grow(len(s) * 6)
 	skipCur := false
+	// Raw-string context. A raw string (r"..." / R'...') is taken verbatim by the
+	// parser (no Unquote / decodeUnicode pass downstream), so its CJK content must
+	// NOT be rewritten to \uXXXX here — otherwise the escape leaks all the way to
+	// the matcher and `LIKE r"中%"` / `=~ r"中"` silently fail (issue #43864).
+	// Normal strings and bare identifiers keep the Han->\uXXXX rewrite, which the
+	// parser reverses via Unquote (strings) or decodeUnicode (identifiers/keys).
+	var quote rune        // current string delimiter; 0 when outside any string
+	rawString := false    // whether the current string literal is a raw string
+	rawSkip := false      // a backslash inside a raw string escapes the next byte
+	var prev1, prev2 rune // previous two input runes, for raw-prefix detection
 	n := len(s)
 	for i, r := range s {
+		// Inside a raw string: copy verbatim, no Han rewrite, no escape bail.
+		if rawString {
+			builder.WriteRune(r)
+			switch {
+			case rawSkip:
+				rawSkip = false
+			case r == '\\':
+				rawSkip = true // backslash prevents the next byte from closing
+			case r == quote:
+				rawString = false
+				quote = 0
+			}
+			prev2, prev1 = prev1, r
+			continue
+		}
+
 		if skipCur {
 			builder.WriteRune(r)
 			skipCur = false
+			prev2, prev1 = prev1, r
 			continue
 		}
 		if r == '\\' {
@@ -838,6 +937,20 @@ func convertHanToASCII(s string) string {
 			}
 			skipCur = true
 			builder.WriteRune(r)
+			prev2, prev1 = prev1, r
+			continue
+		}
+		if r == '"' || r == '\'' {
+			if quote == 0 {
+				// Opening a string. It is raw iff preceded by an r/R prefix that is
+				// itself at a token boundary (not the tail of an identifier).
+				quote = r
+				rawString = (prev1 == 'r' || prev1 == 'R') && !isIdentContinue(prev2)
+			} else if r == quote {
+				quote = 0 // closing a normal string
+			}
+			builder.WriteRune(r)
+			prev2, prev1 = prev1, r
 			continue
 		}
 
@@ -846,9 +959,20 @@ func convertHanToASCII(s string) string {
 		} else {
 			builder.WriteRune(r)
 		}
+		prev2, prev1 = prev1, r
 	}
 
 	return builder.String()
+}
+
+// isIdentContinue reports whether r can appear inside an identifier token
+// (Identifier: [a-zA-Z_][a-zA-Z0-9_]*). Used to tell an r/R raw-string prefix
+// apart from an r/R that is merely the tail of an identifier (e.g. `myr"x"`).
+func isIdentContinue(r rune) bool {
+	return r == '_' ||
+		(r >= 'a' && r <= 'z') ||
+		(r >= 'A' && r <= 'Z') ||
+		(r >= '0' && r <= '9')
 }
 
 func decodeUnicode(input string) string {
@@ -869,7 +993,7 @@ func checkValidPoint(wktStr string) error {
 		return err
 	}
 	if _, ok := g.(*geom.Point); !ok {
-		return fmt.Errorf("only supports POINT geometry: %s", wktStr)
+		return merr.WrapErrQueryPlanMsg("only supports POINT geometry: %s", wktStr)
 	}
 	return nil
 }
@@ -877,7 +1001,7 @@ func checkValidPoint(wktStr string) error {
 func parseISODuration(durationStr string) (*planpb.Interval, error) {
 	matches := iso8601DurationRegex.FindStringSubmatch(durationStr)
 	if matches == nil {
-		return nil, fmt.Errorf("invalid ISO 8601 duration: %s", durationStr)
+		return nil, merr.WrapErrQueryPlanMsg("invalid ISO 8601 duration: %s", durationStr)
 	}
 
 	interval := &planpb.Interval{}
@@ -898,7 +1022,7 @@ func parseISODuration(durationStr string) (*planpb.Interval, error) {
 		if matches[matchIndex] != "" {
 			value, err := strconv.ParseInt(matches[matchIndex], 10, 64)
 			if err != nil {
-				return nil, fmt.Errorf("invalid %s value '%s' in duration: %w", target.unitName, matches[matchIndex], err)
+				return nil, merr.WrapErrQueryPlan(err, "invalid %s value '%s' in duration", target.unitName, matches[matchIndex])
 			}
 			*target.fieldPtr = value
 		}

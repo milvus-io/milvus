@@ -34,6 +34,10 @@ type GrpcQueryNodeClient struct {
 	Err error
 }
 
+func (m *GrpcQueryNodeClient) ClearReadTaskQueue(ctx context.Context, in *internalpb.ClearReadTaskQueueRequest, opts ...grpc.CallOption) (*internalpb.ClearReadTaskQueueResponse, error) {
+	return &internalpb.ClearReadTaskQueueResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}}, m.Err
+}
+
 func (m *GrpcQueryNodeClient) GetStatistics(ctx context.Context, in *querypb.GetStatisticsRequest, opts ...grpc.CallOption) (*internalpb.GetStatisticsResponse, error) {
 	return &internalpb.GetStatisticsResponse{}, m.Err
 }
@@ -156,10 +160,6 @@ func (m *GrpcQueryNodeClient) GetHighlight(ctx context.Context, in *querypb.GetH
 
 func (m *GrpcQueryNodeClient) Close() error {
 	return m.Err
-}
-
-func (m *GrpcQueryNodeClient) DropIndex(ctx context.Context, in *querypb.DropIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.Err
 }
 
 func (m *GrpcQueryNodeClient) UpdateIndex(ctx context.Context, in *querypb.UpdateIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {

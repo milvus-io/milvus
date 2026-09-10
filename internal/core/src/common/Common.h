@@ -18,8 +18,6 @@
 
 #include <atomic>
 #include <iostream>
-#include <utility>
-#include <variant>
 #include "common/Consts.h"
 #include "storage/ThreadPool.h"
 
@@ -30,6 +28,7 @@ extern std::atomic<int64_t> EXEC_EVAL_EXPR_BATCH_SIZE;
 extern std::atomic<int64_t> DELETE_DUMP_BATCH_SIZE;
 extern std::atomic<bool> ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION;
 extern std::atomic<bool> OPTIMIZE_EXPR_ENABLED;
+extern std::atomic<bool> ENABLE_DRIVER_PREFETCH;
 extern std::atomic<bool> JSON_KEY_STATS_ENABLED;
 extern std::atomic<bool> GROWING_JSON_KEY_STATS_ENABLED;
 extern std::atomic<bool> CONFIG_PARAM_TYPE_CHECK_ENABLED;
@@ -39,6 +38,12 @@ void
 SetIndexSliceSize(const int64_t size);
 
 void
+SetLoadTransientBudgetBytes(int64_t bytes);
+
+void
+SetLoadAdmissionSlots(int64_t slots);
+
+void
 SetDefaultExecEvalExprBatchSize(int64_t val);
 
 void
@@ -46,6 +51,9 @@ SetDefaultDeleteDumpBatchSize(int64_t val);
 
 void
 SetDefaultOptimizeExprEnable(bool val);
+
+void
+SetDefaultDriverPrefetchEnable(bool val);
 
 void
 SetDefaultJSONKeyStatsEnable(bool val);
@@ -64,16 +72,5 @@ SetEnableLatestDeleteSnapshotOptimization(bool val);
 
 void
 SetLogLevel(const char* level);
-
-struct BufferView {
-    struct Element {
-        const char* data_;
-        uint32_t* offsets_;
-        int start_;
-        int end_;
-    };
-
-    std::variant<std::vector<Element>, std::pair<char*, size_t>> data_;
-};
 
 }  // namespace milvus

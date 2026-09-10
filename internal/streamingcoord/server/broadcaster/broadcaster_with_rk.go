@@ -3,6 +3,8 @@ package broadcaster
 import (
 	"context"
 
+	"go.opentelemetry.io/otel/codes"
+
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 )
@@ -14,10 +16,34 @@ type broadcasterWithRK struct {
 }
 
 func (b *broadcasterWithRK) Broadcast(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
-	// consume the guards after the broadcast is called to avoid double unlock.
+	// The idempotency decision lives in the manager, under the same lock that
+	// registers the task: see getOrAddBroadcastTask. It used to live here, as a
+	// lookup separate from the registration, with the resource keys this object
+	// holds expected to keep two same-key requests apart in between. They do not,
+	// whenever the lock names a different object than the scope does.
+	//
+	// Consume the guards up front: broadcast takes ownership on every path -- the
+	// registered task owns them, or broadcast releases them itself -- so Close()
+	// must stay a no-op from here on, panic paths included.
 	guards := b.guards
 	b.guards = nil
-	return b.broadcaster.broadcast(ctx, msg, b.broadcastID, guards)
+
+	// Stamping the header, opening the span and injecting the trace context all
+	// operate on this call's own values, so they stay outside the manager lock.
+	// Keep a trace context in the broadcast message so that the DDL ack callback
+	// can still extract it after the original caller span is long gone.
+	msg = msg.OverwriteBroadcastHeader(b.broadcastID, guards.ResourceKeys()...)
+	ctx, span := message.StartSpanForMessage(ctx, msg, message.SpanNameWALBroadcast)
+	defer span.End()
+	message.InjectTraceContext(ctx, msg)
+
+	result, err := b.broadcaster.broadcast(ctx, msg, b.broadcastID, guards)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+	return result, nil
 }
 
 func (b *broadcasterWithRK) Close() {

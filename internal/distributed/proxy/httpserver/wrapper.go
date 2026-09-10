@@ -25,9 +25,17 @@ import (
 	"github.com/gin-gonic/gin/binding"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 var errBadRequest = errors.New("bad request")
+
+// badRequestf wraps err with the package-internal errBadRequest sentinel and
+// a contextual message, preserving the inner error chain. wrapHandler maps
+// any error that matches errBadRequest to HTTP 400.
+func badRequestf(err error, format string, args ...any) error {
+	return merr.Mark(merr.Wrapf(err, format, args...), errBadRequest)
+}
 
 // handlerFunc handles http request with gin context
 type handlerFunc func(c *gin.Context) (interface{}, error)

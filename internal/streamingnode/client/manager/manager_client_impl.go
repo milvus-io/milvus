@@ -4,7 +4,6 @@ import (
 	"context"
 	"sync"
 
-	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/balancer/picker"
@@ -14,7 +13,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/resolver"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -196,7 +195,6 @@ func chooseFallbackResourceGroup(statsByRG map[string]resourceGroupSessionStats)
 }
 
 func (c *managerClientImpl) getAllStreamingNodeStatus(ctx context.Context, state discoverer.VersionedState, resourceGroup string) (map[int64]*types.StreamingNodeStatus, error) {
-	log := log.Ctx(ctx)
 	// wait for manager service ready.
 	manager, err := c.service.GetService(ctx)
 	if err != nil {
@@ -224,7 +222,7 @@ func (c *managerClientImpl) getAllStreamingNodeStatus(ctx context.Context, state
 			defer mu.Unlock()
 
 			if err != nil {
-				log.Warn("collect status failed, skip", zap.Int64("serverID", serverID), zap.Error(err))
+				mlog.Warn(ctx, "collect status failed, skip", mlog.Int64("serverID", serverID), mlog.Err(err))
 				return err
 			}
 			result[serverID] = &types.StreamingNodeStatus{
@@ -235,7 +233,7 @@ func (c *managerClientImpl) getAllStreamingNodeStatus(ctx context.Context, state
 				Metrics: types.NewStreamingNodeBalanceAttrsFromProto(resp.Metrics),
 				Err:     err,
 			}
-			log.Debug("collect status success", zap.Int64("serverID", serverID), zap.Any("status", resp))
+			mlog.Debug(ctx, "collect status success", mlog.Int64("serverID", serverID), mlog.Any("status", resp))
 			return nil
 		})
 	}

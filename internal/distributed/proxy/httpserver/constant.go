@@ -34,10 +34,14 @@ const (
 	IndexCategory                 = "/indexes/"
 	AliasCategory                 = "/aliases/"
 	ImportJobCategory             = "/jobs/import/"
+	SnapshotJobCategory           = "/jobs/snapshot/"
+	SnapshotCategory              = "/snapshots/"
 	ExternalCollectionJobCategory = "/jobs/external_collection/"
 	PrivilegeGroupCategory        = "/privilege_groups/"
 	CollectionFieldCategory       = "/collections/fields/"
+	CollectionStructFieldCategory = "/collections/struct_fields/"
 	ResourceGroupCategory         = "/resource_groups/"
+	FileResourceCategory          = "/file_resources/"
 	SegmentCategory               = "/segments/"
 	QuotaCenterCategory           = "/quotacenter/"
 	CommonCategory                = "/common/"
@@ -74,19 +78,31 @@ const (
 	AddFunctionAction               = "add_function"
 	AlterFunctionAction             = "alter_function"
 	DropFunctionAction              = "drop_function"
+	AddFunctionFieldAction          = "add_function_field"
+	DropFunctionFieldAction         = "drop_function_field"
 	AddAction                       = `add`
+	RemoveAction                    = "remove"
 	DropPropertiesAction            = "drop_properties"
 	CompactAction                   = "compact"
 	CompactionStateAction           = "get_compaction_state"
 	FlushAction                     = "flush"
 	TruncateAction                  = "truncate"
 	GetProgressAction               = "get_progress" // deprecated, keep it for compatibility, use `/v2/vectordb/jobs/import/describe` instead
+	RestoreExternalAction           = "restore_external"
+	RestoreAction                   = "restore"
+	PinAction                       = "pin"
+	UnpinAction                     = "unpin"
+	ExportAction                    = "export"
+	DescribeExportAction            = "export/describe"
 	RefreshAction                   = "refresh"
 	AddPrivilegesToGroupAction      = "add_privileges_to_group"
 	RemovePrivilegesFromGroupAction = "remove_privileges_from_group"
 	TransferReplicaAction           = "transfer_replica"
 
 	RunAnalyzerAction = "run_analyzer"
+
+	CommitAction = "commit"
+	AbortAction  = "abort"
 )
 
 const (
@@ -131,7 +147,9 @@ const (
 	DefaultOutputFields      = "*"
 	HTTPHeaderAllowInt64     = "Accept-Type-Allow-Int64"
 	HTTPHeaderDBName         = "DB-Name"
+	HTTPHeaderIdempotencyKey = "Idempotency-Key"
 	HTTPHeaderRequestTimeout = "Request-Timeout"
+	HTTPHeaderMilvusTraceID  = "X-Milvus-Trace-Id"
 	HTTPReturnCode           = "code"
 	HTTPReturnMessage        = "message"
 	HTTPReturnData           = "data"
@@ -140,6 +158,7 @@ const (
 	HTTPReturnLoadState      = "loadState"
 	HTTPReturnLoadProgress   = "loadProgress"
 	HTTPReturnTopks          = "topks"
+	HTTPReturnAggTopks       = "aggTopks"
 
 	HTTPReturnHas = "has"
 

@@ -12,7 +12,7 @@ Messages transition through three stages:
 
 - **ImmutableMessage**: The post-append, read-only state. Carries a backend-assigned MessageID and LastConfirmedMessageID. Returned by WAL Read/Consume operations. For transactions, multiple ImmutableMessages are assembled into an **ImmutableTxnMessage** (Begin + body messages + Commit) by the consumer-side TxnBuffer.
 
-- **ReplicateMutableMessage**: Created from a source cluster's ImmutableMessage for cross-cluster replication. Attaches a `ReplicateHeader` preserving the source cluster's original Message Properties, then re-enters the local WAL as a MutableMessage,
+- **ReplicateMutableMessage**: Created from a source cluster's ImmutableMessage for cross-cluster replication. Attaches a `ReplicateHeader` preserving the source cluster's original Message Properties, then re-enters the local WAL as a MutableMessage. Replication honors message-level compatibility markers such as `Unreplicable`.
 
 ## Key Properties
 
@@ -27,6 +27,7 @@ Messages transition through three stages:
 | **LastConfirmedMessageID** | Reading from this MessageID guarantees all subsequent messages have TimeTick greater than this message's TimeTick (including txn messages). |
 | **TxnContext** | Links the message to a transaction. Nil if non-transactional. |
 | **ReplicateHeader** | Source cluster's original message metadata for cross-cluster replication. |
+| **Unreplicable** (`_ur`) | Marks this concrete message as unsafe for cross-cluster replication. Replication skips only messages carrying this property; absence means replicable, including old WAL messages written before the marker existed. |
 | **MessageID** | Backend-assigned unique identifier. |
 | **PChannel** | The PChannel this message belongs to. |
 

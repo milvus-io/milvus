@@ -250,6 +250,13 @@ func Test_NewServer(t *testing.T) {
 		assert.NotNil(t, resp)
 	})
 
+	t.Run("AlterRole", func(t *testing.T) {
+		mockMixCoord.EXPECT().AlterRole(mock.Anything, mock.Anything).Return(&commonpb.Status{}, nil)
+		resp, err := server.AlterRole(ctx, nil)
+		assert.NoError(t, err)
+		assert.NotNil(t, resp)
+	})
+
 	t.Run("GetSegmentInfo", func(t *testing.T) {
 		mockMixCoord.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).Return(&datapb.GetSegmentInfoResponse{}, nil)
 		resp, err := server.GetSegmentInfo(ctx, nil)

@@ -19,17 +19,14 @@ package accesslog
 import (
 	"bufio"
 	"context"
-	"fmt"
 	"io"
 	"os"
 	"path"
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
-
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -79,7 +76,7 @@ func (l *CacheWriter) Write(p []byte) (n int, err error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.closed {
-		return 0, errors.New("write to closed writer")
+		return 0, merr.WrapErrParameterInvalidMsg("write to closed writer")
 	}
 
 	return l.writer.Write(p)
@@ -171,12 +168,12 @@ func NewRotateWriter(logCfg *paramtable.AccessLogConfig, minioCfg *paramtable.Mi
 		maxBackups:  logCfg.MaxBackups.GetAsInt(),
 		closeCh:     make(chan struct{}),
 	}
-	log.Info("Access log save to " + logger.dir())
+	mlog.Info(context.TODO(), "Access log save to "+logger.dir())
 	if logCfg.MinioEnable.GetAsBool() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		log.Info("Access log will backup files to minio", zap.String("remote", logCfg.RemotePath.GetValue()), zap.String("maxBackups", logCfg.MaxBackups.GetValue()))
+		mlog.Info(context.TODO(), "Access log will backup files to minio", mlog.String("remote", logCfg.RemotePath.GetValue()), mlog.String("maxBackups", logCfg.MaxBackups.GetValue()))
 		handler, err := NewMinioHandler(ctx, minioCfg, logCfg.RemotePath.GetValue(), logCfg.MaxBackups.GetAsInt())
 		if err != nil {
 			return nil, err
@@ -198,12 +195,12 @@ func (l *RotateWriter) Write(p []byte) (n int, err error) {
 	defer l.mu.Unlock()
 
 	if l.closed {
-		return 0, errors.New("write to closed writer")
+		return 0, merr.WrapErrParameterInvalidMsg("write to closed writer")
 	}
 
 	writeLen := int64(len(p))
 	if writeLen > l.max() {
-		return 0, fmt.Errorf(
+		return 0, merr.WrapErrParameterInvalidMsg(
 			"write length %d exceeds maximum file size %d", writeLen, l.max(),
 		)
 	}
@@ -270,7 +267,7 @@ func (l *RotateWriter) openFileExistingOrNew() error {
 		return l.openNewFile()
 	}
 	if err != nil {
-		return fmt.Errorf("file to get log file info: %s", err)
+		return merr.WrapErrIoFailed(filename, err)
 	}
 
 	file, err := os.OpenFile(filename, os.O_APPEND|os.O_WRONLY, 0o644)
@@ -286,7 +283,7 @@ func (l *RotateWriter) openFileExistingOrNew() error {
 func (l *RotateWriter) openNewFile() error {
 	err := os.MkdirAll(l.dir(), 0o744)
 	if err != nil {
-		return fmt.Errorf("make directories for new log file filed: %s", err)
+		return merr.WrapErrIoFailed(l.dir(), err)
 	}
 
 	name := l.filename()
@@ -296,9 +293,9 @@ func (l *RotateWriter) openNewFile() error {
 		mode = info.Mode()
 		newName := l.newBackupName()
 		if err := os.Rename(name, newName); err != nil {
-			return fmt.Errorf("can't rename log file: %s", err)
+			return merr.WrapErrIoFailed(name, err)
 		}
-		log.Info("seal old log to: " + newName)
+		mlog.Info(context.TODO(), "seal old log to: "+newName)
 		if l.handler != nil {
 			l.handler.Update(newName, path.Base(newName))
 		}
@@ -311,7 +308,7 @@ func (l *RotateWriter) openNewFile() error {
 
 	f, err := os.OpenFile(name, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
 	if err != nil {
-		return fmt.Errorf("can't open new logfile: %s", err)
+		return merr.WrapErrIoFailed(name, err)
 	}
 	l.file = f
 	l.size = 0
@@ -352,7 +349,7 @@ func (l *RotateWriter) millRun() {
 	for {
 		select {
 		case <-l.closeCh:
-			log.Warn("close Access log mill")
+			mlog.Warn(context.TODO(), "close Access log mill")
 			return
 		case <-l.millCh:
 			_ = l.millRunOnce()
@@ -369,14 +366,14 @@ func (l *RotateWriter) mill() {
 
 func (l *RotateWriter) timeRotating() {
 	ticker := time.NewTicker(time.Duration(l.rotatedTime * int64(time.Second)))
-	log.Info("start time rotating of access log")
+	mlog.Info(context.TODO(), "start time rotating of access log")
 	defer ticker.Stop()
 	defer l.closeWg.Done()
 
 	for {
 		select {
 		case <-l.closeCh:
-			log.Warn("close Access file logger")
+			mlog.Warn(context.TODO(), "close Access file logger")
 			return
 		case <-ticker.C:
 			l.Rotate()
@@ -429,7 +426,7 @@ func (l *RotateWriter) newBackupName() string {
 func (l *RotateWriter) oldLogFiles() ([]logInfo, error) {
 	files, err := os.ReadDir(l.dir())
 	if err != nil {
-		return nil, fmt.Errorf("can't read log file directory: %s", err)
+		return nil, merr.WrapErrIoFailed(l.dir(), err)
 	}
 
 	logFiles := []logInfo{}

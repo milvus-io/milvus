@@ -18,6 +18,8 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/util/streamingutil/service/mock_resolver"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/consumer"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/producer"
+	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/registry"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mocks/proto/mock_streamingpb"
@@ -29,6 +31,16 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+type shutdownWALManager struct{}
+
+func (m shutdownWALManager) GetAvailableWAL(channel types.PChannelInfo) (wal.WAL, error) {
+	return nil, status.NewOnShutdownError("wal manager is closed")
+}
+
+func (m shutdownWALManager) Metrics() (*types.StreamingNodeMetrics, error) {
+	return nil, status.NewOnShutdownError("wal manager is closed")
+}
 
 func TestHandlerClient(t *testing.T) {
 	assignment := &types.PChannelInfoAssigned{
@@ -192,6 +204,173 @@ func TestHandlerClient_GetSalvageCheckpoint(t *testing.T) {
 	cps, err = handler.GetSalvageCheckpoint(ctx, "pchannel")
 	assert.ErrorIs(t, err, ErrClientClosed)
 	assert.Nil(t, cps)
+}
+
+func TestHandlerClientReadOnlyAssignmentWaitsForNextAssignment(t *testing.T) {
+	assignment := &types.PChannelInfoAssigned{
+		Channel: types.PChannelInfo{Name: "pchannel", Term: 1, AccessMode: types.AccessModeRO},
+		Node:    types.StreamingNodeInfo{ServerID: 1, Address: "localhost"},
+	}
+
+	testcases := []struct {
+		name string
+		run  func(*handlerClientImpl) error
+	}{
+		{
+			name: "replicate checkpoint",
+			run: func(handler *handlerClientImpl) error {
+				cp, err := handler.GetReplicateCheckpoint(context.Background(), "pchannel")
+				assert.Nil(t, cp)
+				return err
+			},
+		},
+		{
+			name: "salvage checkpoint",
+			run: func(handler *handlerClientImpl) error {
+				cps, err := handler.GetSalvageCheckpoint(context.Background(), "pchannel")
+				assert.Nil(t, cps)
+				return err
+			},
+		},
+		{
+			name: "producer",
+			run: func(handler *handlerClientImpl) error {
+				producer, err := handler.CreateProducer(context.Background(), &ProducerOptions{PChannel: "pchannel"})
+				assert.Nil(t, producer)
+				return err
+			},
+		},
+	}
+
+	for _, tc := range testcases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := mock_assignment.NewMockWatcher(t)
+			w.EXPECT().Get(mock.Anything, "pchannel").Return(assignment)
+			w.EXPECT().Watch(mock.Anything, "pchannel", assignment).Return(context.Canceled)
+
+			handler := &handlerClientImpl{
+				lifetime: typeutil.NewLifetime(),
+				watcher:  w,
+			}
+
+			err := tc.run(handler)
+			assert.ErrorIs(t, err, context.Canceled)
+		})
+	}
+}
+
+func TestHandlerClient_PrepareReleaseManualFlushIfLocal(t *testing.T) {
+	assignment := &types.PChannelInfoAssigned{
+		Channel: types.PChannelInfo{Name: "pchannel", Term: 1, AccessMode: types.AccessModeRO},
+		Node:    types.StreamingNodeInfo{ServerID: 1, Address: "localhost"},
+	}
+	vchannel := "pchannel_100v0"
+	releaseSegmentIDs := []int64{1001}
+
+	service := mock_lazygrpc.NewMockService[streamingpb.StreamingNodeHandlerServiceClient](t)
+	service.EXPECT().Close().Return()
+
+	rb := mock_resolver.NewMockBuilder(t)
+	rb.EXPECT().Close().Run(func() {})
+	w := mock_assignment.NewMockWatcher(t)
+	w.EXPECT().Get(mock.Anything, "pchannel").Return(assignment)
+	w.EXPECT().Close().Run(func() {})
+
+	handler := &handlerClientImpl{
+		lifetime: typeutil.NewLifetime(),
+		service:  service,
+		rb:       rb,
+		watcher:  w,
+	}
+
+	prepared, err := handler.PrepareReleaseManualFlushIfLocal(context.Background(), 100, vchannel, releaseSegmentIDs)
+	assert.Error(t, err)
+	assert.False(t, prepared)
+
+	handler.Close()
+	prepared, err = handler.PrepareReleaseManualFlushIfLocal(context.Background(), 100, vchannel, releaseSegmentIDs)
+	assert.ErrorIs(t, err, ErrClientClosed)
+	assert.False(t, prepared)
+}
+
+func TestHandlerClient_PrepareReleaseManualFlushIfLocalReturnsLocalWALShutdown(t *testing.T) {
+	paramtable.Init()
+	paramtable.SetLocalComponentEnabled(typeutil.StreamingNodeRole)
+	registry.RegisterLocalWALManager(shutdownWALManager{})
+
+	assignment := &types.PChannelInfoAssigned{
+		Channel: types.PChannelInfo{Name: "pchannel", Term: 1, AccessMode: types.AccessModeRW},
+		Node:    types.StreamingNodeInfo{ServerID: 1, Address: "localhost"},
+	}
+	vchannel := "pchannel_100v0"
+	releaseSegmentIDs := []int64{1001}
+
+	w := mock_assignment.NewMockWatcher(t)
+	w.EXPECT().Get(mock.Anything, "pchannel").Return(assignment)
+	// Watch is intentionally not expected: local WAL shutdown is returned to
+	// the caller like GetLatestMVCCTimestampIfLocal, not retried on assignment.
+
+	handler := &handlerClientImpl{
+		lifetime: typeutil.NewLifetime(),
+		watcher:  w,
+	}
+
+	prepared, err := handler.PrepareReleaseManualFlushIfLocal(context.Background(), 100, vchannel, releaseSegmentIDs)
+	assert.True(t, status.AsStreamingError(err).IsOnShutdown())
+	assert.False(t, prepared)
+}
+
+func TestHandlerClient_PrepareReleaseManualFlushIfLocalWaitsForAssignmentReady(t *testing.T) {
+	vchannel := "pchannel_100v0"
+	releaseSegmentIDs := []int64{1001}
+
+	w := mock_assignment.NewMockWatcher(t)
+	w.EXPECT().Get(mock.Anything, "pchannel").Return(nil)
+	w.EXPECT().Watch(mock.Anything, "pchannel", (*types.PChannelInfoAssigned)(nil)).Return(context.Canceled)
+
+	handler := &handlerClientImpl{
+		lifetime: typeutil.NewLifetime(),
+		watcher:  w,
+	}
+
+	prepared, err := handler.PrepareReleaseManualFlushIfLocal(context.Background(), 100, vchannel, releaseSegmentIDs)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.False(t, prepared)
+}
+
+func TestHandlerClient_GetReplicateCheckpointReplicateViolation(t *testing.T) {
+	assignment := &types.PChannelInfoAssigned{
+		Channel: types.PChannelInfo{Name: "pchannel", Term: 1},
+		Node:    types.StreamingNodeInfo{ServerID: 1, Address: "localhost"},
+	}
+
+	service := mock_lazygrpc.NewMockService[streamingpb.StreamingNodeHandlerServiceClient](t)
+	handlerServiceClient := mock_streamingpb.NewMockStreamingNodeHandlerServiceClient(t)
+	// Remote WAL reports a replicate violation: the target is no longer a secondary
+	// cluster (e.g. after force_promote). This is unrecoverable for the current WAL
+	// role, so it must be returned immediately rather than retried to the deadline.
+	handlerServiceClient.EXPECT().GetReplicateCheckpoint(mock.Anything, mock.Anything).Return(
+		nil, status.NewReplicateViolation("wal is not a secondary cluster in replicating topology"))
+	service.EXPECT().GetService(mock.Anything).Return(handlerServiceClient, nil)
+
+	w := mock_assignment.NewMockWatcher(t)
+	// Always return the assignment so the create func is invoked.
+	w.EXPECT().Get(mock.Anything, mock.Anything).Return(assignment)
+	// Watch is intentionally NOT expected: an immediate return must not enter the
+	// backoff retry loop. If it did, the mock would fail on an unexpected Watch call.
+	rebalanceTrigger := mock_types.NewMockAssignmentRebalanceTrigger(t)
+
+	handler := &handlerClientImpl{
+		lifetime:         typeutil.NewLifetime(),
+		service:          service,
+		watcher:          w,
+		rebalanceTrigger: rebalanceTrigger,
+	}
+
+	cp, err := handler.GetReplicateCheckpoint(context.Background(), "pchannel")
+	assert.Error(t, err)
+	assert.Nil(t, cp)
+	assert.True(t, status.AsStreamingError(err).IsReplicateViolation())
 }
 
 func TestDial(t *testing.T) {

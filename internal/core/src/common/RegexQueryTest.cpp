@@ -212,11 +212,6 @@ struct MockStringIndex : index::StringIndexMarisa {
     HasRawData() const override {
         return true;
     }
-
-    bool
-    SupportPatternQuery() const override {
-        return false;
-    }
 };
 
 class SealedSegmentRegexQueryTest : public ::testing::Test {

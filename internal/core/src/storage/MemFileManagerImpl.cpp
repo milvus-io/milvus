@@ -57,6 +57,7 @@ MemFileManagerImpl::MemFileManagerImpl(
     loon_ffi_properties_ = fileManagerContext.loon_ffi_properties;
     plugin_context_ = fileManagerContext.plugin_context;
     stats_base_path_ = fileManagerContext.stats_base_path;
+    storage_column_mappings_ = fileManagerContext.storage_column_mappings;
 }
 
 bool
@@ -226,6 +227,42 @@ MemFileManagerImpl::cache_raw_data_to_memory_storage_v2(const Config& config) {
     AssertInfo(element_type.has_value(),
                "[StorageV2] element type is empty when build index");
     auto dim = index::GetValueFromConfig<int64_t>(config, DIM_KEY).value_or(0);
+    auto max_rows =
+        index::GetValueFromConfig<int64_t>(config, NUM_ROWS_KEY).value_or(0);
+    auto offset =
+        index::GetValueFromConfig<int64_t>(config, OFFSET_KEY).value_or(0);
+    // max_rows and offset are read as signed values but the storage-v2 /
+    // manifest readers below take size_t. Validate the pagination range
+    // BEFORE the implicit signed->unsigned conversion at the call sites:
+    //   - A negative value would wrap to a huge size_t, turning a malformed
+    //     parameter into a full-column read (or an out-of-range manifest row
+    //     index) instead of a clean rejection.
+    //   - Both readers treat max_rows == 0 as "read the whole column" and
+    //     ignore offset, so `offset > 0 && max_rows == 0` would silently drop
+    //     the requested offset and read everything. Reject it rather than
+    //     honoring a request the readers cannot express.
+    // These are caller-supplied request parameters, so a bad value is an
+    // Input error (InvalidParameter), not an internal/System failure. Using
+    // AssertInfo here would be wrong: it classifies as UnexpectedError
+    // (System), which is non-retriable-System semantics for what is really a
+    // malformed request.
+    if (max_rows < 0) {
+        ThrowInfo(ErrorCode::InvalidParameter,
+                  "[StorageV2] num_rows must be non-negative, got: {}",
+                  max_rows);
+    }
+    if (offset < 0) {
+        ThrowInfo(ErrorCode::InvalidParameter,
+                  "[StorageV2] offset must be non-negative, got: {}",
+                  offset);
+    }
+    if (offset > 0 && max_rows == 0) {
+        ThrowInfo(ErrorCode::InvalidParameter,
+                  "[StorageV2] offset ({}) requires a positive num_rows; "
+                  "num_rows == 0 selects a full-column read and ignores "
+                  "offset",
+                  offset);
+    }
     auto segment_insert_files =
         index::GetValueFromConfig<std::vector<std::vector<std::string>>>(
             config, SEGMENT_INSERT_FILES_KEY);
@@ -240,12 +277,29 @@ MemFileManagerImpl::cache_raw_data_to_memory_storage_v2(const Config& config) {
         AssertInfo(loon_ffi_properties_ != nullptr,
                    "[StorageV2] loon ffi properties is null when build index "
                    "with manifest");
+        auto storage_column_mapping =
+            GetStorageColumnMapping(field_meta_.field_id);
+        auto is_text_match =
+            index::GetValueFromConfig<bool>(config, "is_text_match")
+                .value_or(false);
+        auto is_external_field =
+            storage_column_mapping.has_value()
+                ? storage_column_mapping->is_external_column
+                : !field_meta_.field_schema.external_field().empty();
+        if (data_type.value() == DataType::TEXT && !is_external_field &&
+            is_text_match) {
+            return GetTextFieldDatasFromManifest(
+                manifest_path_str, loon_ffi_properties_, field_meta_);
+        }
         return GetFieldDatasFromManifest(manifest_path_str,
                                          loon_ffi_properties_,
                                          field_meta_,
                                          data_type,
                                          dim,
-                                         element_type);
+                                         element_type,
+                                         max_rows,
+                                         offset,
+                                         storage_column_mapping);
     }
 
     auto remote_files = segment_insert_files.value();
@@ -257,7 +311,9 @@ MemFileManagerImpl::cache_raw_data_to_memory_storage_v2(const Config& config) {
                                                   data_type.value(),
                                                   element_type.value(),
                                                   dim,
-                                                  fs_);
+                                                  fs_,
+                                                  max_rows,
+                                                  offset);
     // field data list could differ for storage v2 group list
     return field_datas;
 }
@@ -448,12 +504,16 @@ MemFileManagerImpl::cache_opt_field_memory_v3(const Config& config) {
                                                   field_meta_.segment_id,
                                                   field_id,
                                                   field_schema};
-        auto field_datas = GetFieldDatasFromManifest(manifest_path_str,
-                                                     loon_ffi_properties_,
-                                                     field_meta,
-                                                     field_type,
-                                                     1,  // scalar field
-                                                     element_type);
+        auto field_datas =
+            GetFieldDatasFromManifest(manifest_path_str,
+                                      loon_ffi_properties_,
+                                      field_meta,
+                                      field_type,
+                                      1,  // scalar field
+                                      element_type,
+                                      0,
+                                      0,
+                                      GetStorageColumnMapping(field_id));
 
         res[field_id] = GetOptFieldIvfData(field_type, field_datas);
     }

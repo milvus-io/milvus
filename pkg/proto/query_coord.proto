@@ -98,6 +98,7 @@ service QueryCoord {
   rpc TransferSegment(TransferSegmentRequest) returns (common.Status) {}
   rpc TransferChannel(TransferChannelRequest) returns (common.Status) {}
   rpc CheckQueryNodeDistribution(CheckQueryNodeDistributionRequest) returns (common.Status) {}
+  rpc ClearReadTaskQueue(internal.ClearReadTaskQueueRequest) returns (internal.ClearReadTaskQueueResponse) {}
 
   rpc UpdateLoadConfig(UpdateLoadConfigRequest) returns (common.Status) {}
   rpc RunAnalyzer(RunAnalyzerRequest) returns(milvus.RunAnalyzerResponse){}
@@ -178,11 +179,11 @@ service QueryNode {
     rpc RunAnalyzer(RunAnalyzerRequest) returns(milvus.RunAnalyzerResponse){}
     rpc GetHighlight(GetHighlightRequest) returns (GetHighlightResponse){}
     
-    rpc DropIndex(DropIndexRequest) returns (common.Status) {}
     rpc ValidateAnalyzer(ValidateAnalyzerRequest) returns(ValidateAnalyzerResponse){}
     
     // file resource
     rpc SyncFileResource(internal.SyncFileResourceRequest) returns(common.Status) {}
+    rpc ClearReadTaskQueue(internal.ClearReadTaskQueueRequest) returns (internal.ClearReadTaskQueueResponse) {}
 
     rpc ComputePhraseMatchSlop(ComputePhraseMatchSlopRequest) returns(ComputePhraseMatchSlopResponse){}
 }
@@ -331,6 +332,32 @@ message ShardLeadersList {  // All leaders of all replicas of one shard
     repeated int64 node_ids = 2;
     repeated string node_addrs = 3;
     repeated bool serviceable = 4;
+    // resource_groups[i] is the resource group of the REPLICA that node_ids[i]
+    // leads -- parallel to the three arrays above, same length.
+    //
+    // It is the replica's resource group, never the node's. A replica may
+    // borrow nodes from another resource group (querycoord models exactly that
+    // as num_outgoing_node / num_incoming_node), so node-set membership is not
+    // replica membership, and the two diverge precisely during the rebalance
+    // windows a caller asking this question cares about. The coordinator is
+    // the only place that still holds the mapping: this response flattens
+    // every replica into one list per channel, so a caller cannot recover it
+    // afterwards -- which is why the tag has to be on the wire.
+    //
+    // A caller must treat an empty list as "unknown", not as "no resource
+    // group": an old coordinator built before this field existed leaves it
+    // empty while still filling the other three, and proto3 gives the caller
+    // no other way to tell. That is also the difference from putting the
+    // filter in the request, where an old coordinator silently ignores it and
+    // answers unfiltered in a response shape nothing can distinguish.
+    //
+    // The tag says which group a leader belongs to, NOT whether that group can
+    // serve the collection. A replica that is not query-visible yet is
+    // filtered out before this list is built, so a group still coming up
+    // simply does not appear -- absence here does not mean the group holds no
+    // replica. Ask GetShardLeaderReadinessByResourceGroup for that; it
+    // separates "shards without a leader" from "no replica in this group".
+    repeated string resource_groups = 5;
 }
 
 message SyncNewCreatedPartitionRequest {
@@ -350,7 +377,7 @@ message LoadMetaInfo {
     string resource_group = 6; // Only used for metrics label.
     repeated int64 load_fields = 7;
     repeated common.KeyValuePair db_properties = 8;
-    uint64 schema_version = 9; // used for schema change detection.
+    uint64 schema_barrier_ts = 9; // Wire-compatible rename of legacy schema_version; timestamp barrier used to fence stale load results.
 }
 
 message WatchDmChannelsRequest {
@@ -413,6 +440,11 @@ message SegmentLoadInfo {
     // passing to C++ segcore to overwrite the in-memory timestamp column
     // (enabling correct MVCC visibility and TTL evaluation).
     uint64 commit_timestamp = 28;
+    // child_manifest_paths carries compact-to child manifests whose delta logs
+    // must be loaded together with the fallback parent segment.
+    repeated string child_manifest_paths = 29;
+    // stats carries the durable segment aggregates used for resource estimation.
+    data.Statistics stats = 30;
 }
 
 message FieldIndexInfo {
@@ -430,6 +462,7 @@ message FieldIndexInfo {
     int32 current_index_version = 11;
     int64 index_store_version = 12 [deprecated = true];
     int32 current_scalar_index_version = 13;
+    index.IndexStorePathVersion index_store_path_version = 14;
 }
 
 message JsonStatsInfo {
@@ -441,9 +474,9 @@ message JsonStatsInfo {
 }
 
 enum LoadScope {
+    reserved 2;
     Full = 0;
     Delta = 1;
-    Index = 2;
     Stats = 3;
     Reopen = 4;
 }
@@ -663,6 +696,7 @@ message GetDataDistributionRequest {
     common.MsgBase base = 1;
     map<string, msg.MsgPosition> checkpoints = 2;
     int64 lastUpdateTs = 3;
+    bool support_delta = 4;
 }
 
 message GetDataDistributionResponse {
@@ -674,6 +708,11 @@ message GetDataDistributionResponse {
     int64 lastModifyTs = 6;
     double memCapacityInMB = 7;
     int64 cpu_num = 8;
+    bool is_delta = 9;
+    repeated int64 removed_segment_ids = 10;
+    repeated string removed_channel_names = 11;
+    int64 total_segment_count = 12;
+    int64 total_channel_count = 13;
 }
 
 message LeaderView {
@@ -1027,7 +1066,7 @@ message UpdateSchemaRequest {
     common.MsgBase base = 1;
     int64 collectionID = 2;
     schema.CollectionSchema schema = 3;
-    uint64 version = 4;
+    uint64 schema_barrier_ts = 4; // Wire-compatible rename of legacy version; timestamp barrier used to fence stale load results.
 }
 
 message UpdateIndexRequest {
@@ -1141,11 +1180,4 @@ message ListLoadedSegmentsRequest {
 message ListLoadedSegmentsResponse {
     common.Status status = 1;
     repeated int64 segmentIDs = 2;
-}
-message DropIndexRequest {
-    common.MsgBase base = 1;
-    int64 segmentID = 2;
-    repeated int64 indexIDs = 3;
-    string channel = 4;
-    bool need_transfer = 5;
 }

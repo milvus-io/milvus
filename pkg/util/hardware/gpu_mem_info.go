@@ -3,7 +3,7 @@
 
 package hardware
 
-import "github.com/cockroachdb/errors"
+import "github.com/milvus-io/milvus/pkg/v3/util/merr"
 
 // GPUMemoryInfo holds information about a GPU's memory
 type GPUMemoryInfo struct {
@@ -14,5 +14,5 @@ type GPUMemoryInfo struct {
 // GetAllGPUMemoryInfo returns mock GPU memory information for non-CUDA builds
 func GetAllGPUMemoryInfo() ([]GPUMemoryInfo, error) {
 	// Mock error to indicate no CUDA support
-	return nil, errors.New("CUDA not supported: failed to retrieve GPU memory info or no GPUs found")
+	return nil, merr.WrapErrParameterInvalidMsg("CUDA not supported: failed to retrieve GPU memory info or no GPUs found")
 }

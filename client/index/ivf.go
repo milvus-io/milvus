@@ -26,8 +26,12 @@ const (
 	ivfRefineKey     = `refine`
 	ivfRefineTypeKey = `refine_type`
 
-	ivfRbqQueryBitsKey = `rbq_query_bits`
+	// knowhere's IvfRaBitQConfig declares the field as rbq_bits_query and
+	// KNOWHERE_CONFIG_DECLARE_FIELD stringifies the field name into the JSON
+	// key, so the transposed spelling reached no consumer.
+	ivfRbqQueryBitsKey = `rbq_bits_query`
 	ivfRbqRefineKKey   = `refine_k`
+	ivfRbqBitsKey      = `rbq_bits`
 )
 
 var _ Index = ivfFlatIndex{}
@@ -121,6 +125,8 @@ type ivfRabitQIndex struct {
 	baseIndex
 
 	nlist      int
+	rbqBits    int
+	rbqBitsSet bool
 	refine     bool
 	refineType string
 }
@@ -132,11 +138,24 @@ func (idx *ivfRabitQIndex) Params() map[string]string {
 		ivfNlistKey:   strconv.Itoa(idx.nlist),
 	}
 
+	// Forwarded as given once set, so an out-of-range value is rejected by the
+	// server rather than silently falling back to the default.
+	if idx.rbqBitsSet {
+		result[ivfRbqBitsKey] = strconv.Itoa(idx.rbqBits)
+	}
 	if idx.refine {
 		result[ivfRefineKey] = strconv.FormatBool(idx.refine)
 		result[ivfRefineTypeKey] = idx.refineType
 	}
 	return result
+}
+
+// WithRbqBits sets how many bits each dimension is quantized to at build time,
+// in [1, 9]. The server default is 1, applied when this is never called.
+func (idx *ivfRabitQIndex) WithRbqBits(rbqBits int) *ivfRabitQIndex {
+	idx.rbqBits = rbqBits
+	idx.rbqBitsSet = true
+	return idx
 }
 
 func (idx *ivfRabitQIndex) WithRefineType(refineType string) *ivfRabitQIndex {
@@ -149,7 +168,9 @@ func NewIvfRabitQIndex(metricType MetricType, nlist int) *ivfRabitQIndex {
 	return &ivfRabitQIndex{
 		baseIndex: baseIndex{
 			metricType: metricType,
-			indexType:  BinIvfFlat,
+			// Params() has always emitted IVF_RABITQ; indexType was left on
+			// BinIvfFlat, so IndexType() reported BIN_IVF_FLAT for a RaBitQ index.
+			indexType: IvfRabitQ,
 		},
 
 		nlist: nlist,

@@ -3,7 +3,6 @@ package mlog
 import (
 	"fmt"
 	"strconv"
-	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -12,6 +11,24 @@ import (
 
 // Field is an alias for zap.Field - no wrapper overhead
 type Field = zap.Field
+
+// ObjectEncoder is an alias for zapcore.ObjectEncoder.
+type ObjectEncoder = zapcore.ObjectEncoder
+
+// ObjectMarshaler is an alias for zapcore.ObjectMarshaler.
+type ObjectMarshaler = zapcore.ObjectMarshaler
+
+// ObjectMarshalerFunc is an alias for zapcore.ObjectMarshalerFunc.
+type ObjectMarshalerFunc = zapcore.ObjectMarshalerFunc
+
+// ArrayEncoder is an alias for zapcore.ArrayEncoder.
+type ArrayEncoder = zapcore.ArrayEncoder
+
+// ArrayMarshaler is an alias for zapcore.ArrayMarshaler.
+type ArrayMarshaler = zapcore.ArrayMarshaler
+
+// ArrayMarshalerFunc is an alias for zapcore.ArrayMarshalerFunc.
+type ArrayMarshalerFunc = zapcore.ArrayMarshalerFunc
 
 // Basic type field constructors - thin wrappers around zap functions
 
@@ -22,6 +39,9 @@ func Strings(key string, val []string) Field      { return zap.Strings(key, val)
 func ByteString(key string, val []byte) Field     { return zap.ByteString(key, val) }
 func ByteStrings(key string, val [][]byte) Field  { return zap.ByteStrings(key, val) }
 func Stringer(key string, val fmt.Stringer) Field { return zap.Stringer(key, val) }
+func Stringers[T fmt.Stringer](key string, values []T) Field {
+	return zap.Stringers(key, values)
+}
 
 // Bool types
 func Bool(key string, val bool) Field    { return zap.Bool(key, val) }
@@ -100,10 +120,10 @@ func Binary(key string, val []byte) Field { return zap.Binary(key, val) }
 func Reflect(key string, val any) Field   { return zap.Reflect(key, val) }
 
 // Structured types
-func Object(key string, val zapcore.ObjectMarshaler) Field { return zap.Object(key, val) }
-func Array(key string, val zapcore.ArrayMarshaler) Field   { return zap.Array(key, val) }
-func Inline(val zapcore.ObjectMarshaler) Field             { return zap.Inline(val) }
-func Namespace(key string) Field                           { return zap.Namespace(key) }
+func Object(key string, val ObjectMarshaler) Field { return zap.Object(key, val) }
+func Array(key string, val ArrayMarshaler) Field   { return zap.Array(key, val) }
+func Inline(val ObjectMarshaler) Field             { return zap.Inline(val) }
+func Namespace(key string) Field                   { return zap.Namespace(key) }
 
 // Stack and skip
 func Stack(key string) Field               { return zap.Stack(key) }
@@ -120,10 +140,11 @@ type propagatedMarker struct{}
 
 // propagatedStringField creates a string field that will be propagated via RPC.
 // The field is logged as a flat string and transmitted in gRPC metadata.
-// The key is automatically converted to lowercase for gRPC metadata compatibility.
+// gRPC metadata lowercases the wire key during propagation; extraction restores
+// well-known lowercase keys back to their canonical log key.
 func propagatedStringField(key string, val string) Field {
 	return Field{
-		Key:       strings.ToLower(key),
+		Key:       key,
 		Type:      zapcore.StringType,
 		String:    val,
 		Interface: propagatedMarker{},
@@ -132,10 +153,11 @@ func propagatedStringField(key string, val string) Field {
 
 // propagatedInt64Field creates an int64 field that will be propagated via RPC.
 // The field is logged as a flat int64 and transmitted in gRPC metadata.
-// The key is automatically converted to lowercase for gRPC metadata compatibility.
+// gRPC metadata lowercases the wire key during propagation; extraction restores
+// well-known lowercase keys back to their canonical log key.
 func propagatedInt64Field(key string, val int64) Field {
 	return Field{
-		Key:       strings.ToLower(key),
+		Key:       key,
 		Type:      zapcore.Int64Type,
 		Integer:   val,
 		Interface: propagatedMarker{},

@@ -20,8 +20,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
@@ -29,12 +27,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/ce"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func (c *Core) broadcastDropPartition(ctx context.Context, in *milvuspb.DropPartitionRequest) error {
 	if in.GetPartitionName() == Params.CommonCfg.DefaultPartitionName.GetValue() {
-		return errors.New("default partition cannot be deleted")
+		return merr.WrapErrParameterInvalidMsg("default partition cannot be deleted")
 	}
 
 	broadcaster, err := c.startBroadcastWithAliasOrCollectionLock(ctx, in.GetDbName(), in.GetCollectionName())

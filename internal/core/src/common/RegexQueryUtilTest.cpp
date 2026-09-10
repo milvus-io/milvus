@@ -603,14 +603,14 @@ TEST(BoostRegexMatcherTest, DefaultBehavior) {
     EXPECT_FALSE(matcher(true));
 }
 
-// ============== MultiWildcardMatcher Tests ==============
+// ============== LikePatternMatcher Tests ==============
 
 TEST(MultiWildcardMatcherTest, SimplePatterns) {
     using namespace milvus;
 
     // Test "abc" (exact match)
     {
-        MultiWildcardMatcher matcher("abc");
+        LikePatternMatcher matcher("abc");
         EXPECT_TRUE(matcher(std::string("abc")));
         EXPECT_FALSE(matcher(std::string("abcd")));
         EXPECT_FALSE(matcher(std::string("xabc")));
@@ -619,7 +619,7 @@ TEST(MultiWildcardMatcherTest, SimplePatterns) {
 
     // Test "abc%" (prefix match)
     {
-        MultiWildcardMatcher matcher("abc%");
+        LikePatternMatcher matcher("abc%");
         EXPECT_TRUE(matcher(std::string("abc")));
         EXPECT_TRUE(matcher(std::string("abcdef")));
         EXPECT_FALSE(matcher(std::string("xabc")));
@@ -628,7 +628,7 @@ TEST(MultiWildcardMatcherTest, SimplePatterns) {
 
     // Test "%abc" (suffix match)
     {
-        MultiWildcardMatcher matcher("%abc");
+        LikePatternMatcher matcher("%abc");
         EXPECT_TRUE(matcher(std::string("abc")));
         EXPECT_TRUE(matcher(std::string("xyzabc")));
         EXPECT_FALSE(matcher(std::string("abcx")));
@@ -637,7 +637,7 @@ TEST(MultiWildcardMatcherTest, SimplePatterns) {
 
     // Test "%abc%" (contains)
     {
-        MultiWildcardMatcher matcher("%abc%");
+        LikePatternMatcher matcher("%abc%");
         EXPECT_TRUE(matcher(std::string("abc")));
         EXPECT_TRUE(matcher(std::string("xabcy")));
         EXPECT_TRUE(matcher(std::string("abcdef")));
@@ -652,7 +652,7 @@ TEST(MultiWildcardMatcherTest, ComplexPatterns) {
 
     // Test "a%b%c" (multi-segment)
     {
-        MultiWildcardMatcher matcher("a%b%c");
+        LikePatternMatcher matcher("a%b%c");
         EXPECT_TRUE(matcher(std::string("abc")));
         EXPECT_TRUE(matcher(std::string("aXbYc")));
         EXPECT_TRUE(matcher(std::string("aXXXbYYYc")));
@@ -664,7 +664,7 @@ TEST(MultiWildcardMatcherTest, ComplexPatterns) {
 
     // Test "%a%b%c%" (multi-segment with wildcards at both ends)
     {
-        MultiWildcardMatcher matcher("%a%b%c%");
+        LikePatternMatcher matcher("%a%b%c%");
         EXPECT_TRUE(matcher(std::string("abc")));
         EXPECT_TRUE(matcher(std::string("XaYbZcW")));
         EXPECT_TRUE(matcher(std::string("aXbYc")));
@@ -673,7 +673,7 @@ TEST(MultiWildcardMatcherTest, ComplexPatterns) {
 
     // Test "hello%world" (prefix and suffix)
     {
-        MultiWildcardMatcher matcher("hello%world");
+        LikePatternMatcher matcher("hello%world");
         EXPECT_TRUE(matcher(std::string("helloworld")));
         EXPECT_TRUE(matcher(std::string("hello beautiful world")));
         EXPECT_FALSE(matcher(std::string("hello")));
@@ -688,7 +688,7 @@ TEST(MultiWildcardMatcherTest, EscapedCharacters) {
 
     // Test with escaped % followed by wildcard
     {
-        MultiWildcardMatcher matcher("100\\%%");
+        LikePatternMatcher matcher("100\\%%");
         EXPECT_TRUE(matcher(std::string("100%")));
         EXPECT_TRUE(matcher(std::string("100%discount")));
         EXPECT_FALSE(matcher(std::string("100")));
@@ -697,7 +697,7 @@ TEST(MultiWildcardMatcherTest, EscapedCharacters) {
 
     // Test with trailing escaped % (no wildcard after) - critical regression test
     {
-        MultiWildcardMatcher matcher("100\\%");
+        LikePatternMatcher matcher("100\\%");
         EXPECT_TRUE(matcher(std::string("100%")));
         EXPECT_FALSE(matcher(std::string("100")));
         EXPECT_FALSE(matcher(std::string("100%X")));  // Must not allow suffix!
@@ -706,7 +706,7 @@ TEST(MultiWildcardMatcherTest, EscapedCharacters) {
 
     // Test with escaped _
     {
-        MultiWildcardMatcher matcher("file\\_name");
+        LikePatternMatcher matcher("file\\_name");
         EXPECT_TRUE(matcher(std::string("file_name")));
         EXPECT_FALSE(matcher(std::string("fileXname")));
         EXPECT_FALSE(matcher(std::string("file_name_")));
@@ -714,7 +714,7 @@ TEST(MultiWildcardMatcherTest, EscapedCharacters) {
 
     // Test leading escaped %
     {
-        MultiWildcardMatcher matcher("\\%value");
+        LikePatternMatcher matcher("\\%value");
         EXPECT_TRUE(matcher(std::string("%value")));
         EXPECT_FALSE(matcher(std::string("value")));
         EXPECT_FALSE(matcher(std::string("X%value")));
@@ -724,7 +724,7 @@ TEST(MultiWildcardMatcherTest, EscapedCharacters) {
 TEST(MultiWildcardMatcherTest, StringViewSupport) {
     using namespace milvus;
 
-    MultiWildcardMatcher matcher("%hello%");
+    LikePatternMatcher matcher("%hello%");
     std::string_view sv1 = "hello world";
     std::string_view sv2 = "world";
 
@@ -2719,6 +2719,56 @@ TEST(InvalidUTF8ConsistencyTest, InvalidContinuationByte) {
     EXPECT_FALSE(like_result);
     EXPECT_EQ(re2_result, like_result)
         << "RE2/Like must agree on invalid continuation byte";
+}
+
+// ============== Literal-wildcard operand Match Tests ==============
+// The LIKE optimizer (Go side) unescapes "\%" / "\_" into LITERAL bytes when it
+// lowers a pattern to Equal/Prefix/Postfix/InnerMatch, so the operand handed to
+// these executors can itself CONTAIN a '%' or '_'. They must be compared
+// verbatim as bytes — never re-interpreted as wildcards. (issue #43864)
+TEST(LiteralWildcardMatch, OperandContainsLiteralWildcardByte) {
+    using namespace milvus;
+
+    // InnerMatch: operand "abc%" is a literal substring needle.
+    EXPECT_TRUE(InnerMatch("xxabc%yy", "abc%"));
+    EXPECT_FALSE(InnerMatch("xxabcZyy", "abc%"))
+        << "literal '%' in the operand must not act as a wildcard";
+    EXPECT_FALSE(InnerMatch("abcdef", "abc%"));
+
+    // PrefixMatch: operand "abc%" is a literal prefix.
+    EXPECT_TRUE(PrefixMatch("abc%def", "abc%"));
+    EXPECT_FALSE(PrefixMatch("abcXdef", "abc%"));
+
+    // PostfixMatch: operand "abc%" is a literal suffix.
+    EXPECT_TRUE(PostfixMatch("xyzabc%", "abc%"));
+    EXPECT_FALSE(PostfixMatch("xyzabcX", "abc%"));
+
+    // A literal underscore must not act as the single-char wildcard either.
+    EXPECT_TRUE(InnerMatch("aa_bb", "a_b"));
+    EXPECT_FALSE(InnerMatch("aaXbb", "a_b"));
+    EXPECT_TRUE(PrefixMatch("a_bc", "a_b"));
+    EXPECT_FALSE(PrefixMatch("aXbc", "a_b"));
+
+    // Stronger decoys: a literal '%' must not behave like a MULTI-char wildcard
+    // ('.*') either. Each value would match if the operand's '%' were treated
+    // as a wildcard spanning several bytes, but it must stay a literal byte.
+    EXPECT_FALSE(InnerMatch("xxabcZZZZyy", "abc%"));
+    EXPECT_FALSE(PrefixMatch("abcXYZdef", "abc%"));
+    EXPECT_FALSE(PostfixMatch("xyzabcXYZ", "abc%"));
+
+    // The UNescaped '%' boundary — realized as the optimized Prefix/Postfix/
+    // Inner op — DOES match an arbitrarily long span on the wildcard side.
+    // (operand has no literal wildcard; long surroundings prove '%' is '.*').
+    const std::string longx(1000, 'x');
+    const std::string longy(1000, 'y');
+    EXPECT_TRUE(InnerMatch(longx + "abc" + longy, "abc"));  // from "%abc%"
+    EXPECT_TRUE(PrefixMatch("abc" + longy, "abc"));         // from "abc%"
+    EXPECT_TRUE(PostfixMatch(longx + "abc", "abc"));        // from "%abc"
+
+    // Combined: a literal '%' in the operand is matched verbatim while the
+    // wildcard boundary still spans the long surrounding text.
+    EXPECT_TRUE(InnerMatch(longx + "abc%" + longy, "abc%"));
+    EXPECT_FALSE(InnerMatch(longx + "abcZ" + longy, "abc%"));
 }
 
 // ============== NUL-aware Prefix/Postfix/Inner Match Tests ==============

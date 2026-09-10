@@ -156,6 +156,15 @@ func (s *LogFormatterSuite) TestFormatMethodInfo() {
 		s.True(strings.Contains(fs, s.traceID))
 	}
 
+	missingIDContext := metadata.AppendToOutgoingContext(s.ctx, "other", "value")
+	for _, req := range s.reqs {
+		i := info.NewGrpcAccessInfo(missingIDContext, s.serverinfo, req)
+		s.NotPanics(func() {
+			fs := formatter.Format(i)
+			s.True(strings.Contains(fs, info.Unknown))
+		})
+	}
+
 	tracer.Init()
 	traceContext, traceSpan := otel.Tracer(typeutil.ProxyRole).Start(s.ctx, "test")
 	trueTraceID := traceSpan.SpanContext().TraceID().String()

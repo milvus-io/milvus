@@ -33,7 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
@@ -116,7 +116,7 @@ func (suite *ResourceManagerSuite) TestValidateConfiguration() {
 	err = suite.manager.validateResourceGroupConfig("rg1", cfg)
 	suite.ErrorIs(err, merr.ErrResourceGroupIllegalConfig)
 
-	err = suite.manager.AddResourceGroup(ctx, "rg2", newResourceGroupConfig(0, 0))
+	_, err = suite.manager.AddResourceGroup(ctx, "rg2", newResourceGroupConfig(0, 0))
 	suite.NoError(err)
 
 	err = suite.manager.RemoveResourceGroup(ctx, "rg2")
@@ -126,7 +126,7 @@ func (suite *ResourceManagerSuite) TestValidateConfiguration() {
 func (suite *ResourceManagerSuite) TestValidateDelete() {
 	ctx := suite.ctx
 	// Non empty resource group can not be removed.
-	err := suite.manager.AddResourceGroup(ctx, "rg1", newResourceGroupConfig(1, 1))
+	_, err := suite.manager.AddResourceGroup(ctx, "rg1", newResourceGroupConfig(1, 1))
 	suite.NoError(err)
 
 	err = suite.manager.validateResourceGroupIsDeletable(DefaultResourceGroupName)
@@ -167,31 +167,32 @@ func (suite *ResourceManagerSuite) TestValidateDelete() {
 func (suite *ResourceManagerSuite) TestManipulateResourceGroup() {
 	ctx := suite.ctx
 	// test add rg
-	err := suite.manager.AddResourceGroup(ctx, "rg1", newResourceGroupConfig(0, 0))
+	_, err := suite.manager.AddResourceGroup(ctx, "rg1", newResourceGroupConfig(0, 0))
 	suite.NoError(err)
 	suite.True(suite.manager.ContainResourceGroup(ctx, "rg1"))
 	suite.Len(suite.manager.ListResourceGroups(ctx), 2)
 
-	// test add duplicate rg but same configuration is ok
-	err = suite.manager.AddResourceGroup(ctx, "rg1", newResourceGroupConfig(0, 0))
-	suite.ErrorIs(err, ErrResourceGroupOperationIgnored)
+	// test add duplicate rg but same configuration is ok (signaled via ignored=true)
+	ignored, err := suite.manager.AddResourceGroup(ctx, "rg1", newResourceGroupConfig(0, 0))
+	suite.NoError(err)
+	suite.True(ignored)
 
-	err = suite.manager.AddResourceGroup(ctx, "rg1", newResourceGroupConfig(1, 1))
+	_, err = suite.manager.AddResourceGroup(ctx, "rg1", newResourceGroupConfig(1, 1))
 	suite.Error(err)
 
 	// test delete rg
 	err = suite.manager.RemoveResourceGroup(ctx, "rg1")
 	suite.NoError(err)
 
-	// test delete rg which doesn't exist
+	// test delete rg which doesn't exist — RemoveResourceGroup swallows ignored, returns nil
 	err = suite.manager.RemoveResourceGroup(ctx, "rg1")
-	suite.ErrorIs(err, ErrResourceGroupOperationIgnored)
+	suite.NoError(err)
 	// test delete default rg
 	err = suite.manager.RemoveResourceGroup(ctx, DefaultResourceGroupName)
 	suite.ErrorIs(err, merr.ErrParameterInvalid)
 
 	// test delete a rg not empty.
-	err = suite.manager.AddResourceGroup(ctx, "rg2", newResourceGroupConfig(1, 1))
+	_, err = suite.manager.AddResourceGroup(ctx, "rg2", newResourceGroupConfig(1, 1))
 	suite.NoError(err)
 	err = suite.manager.RemoveResourceGroup(ctx, "rg2")
 	suite.ErrorIs(err, merr.ErrParameterInvalid)
@@ -204,7 +205,7 @@ func (suite *ResourceManagerSuite) TestManipulateResourceGroup() {
 	suite.NoError(err)
 
 	// assign a node to rg.
-	err = suite.manager.AddResourceGroup(ctx, "rg2", newResourceGroupConfig(1, 1))
+	_, err = suite.manager.AddResourceGroup(ctx, "rg2", newResourceGroupConfig(1, 1))
 	suite.NoError(err)
 	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
@@ -218,7 +219,7 @@ func (suite *ResourceManagerSuite) TestManipulateResourceGroup() {
 	suite.manager.AlterResourceGroups(ctx, map[string]*rgpb.ResourceGroupConfig{
 		"rg2": newResourceGroupConfig(0, 0),
 	})
-	log.Info("xxxxx")
+	mlog.Info(suite.ctx, "xxxxx")
 	// RemoveResourceGroup will remove all nodes from the resource group.
 	err = suite.manager.RemoveResourceGroup(ctx, "rg2")
 	suite.NoError(err)
@@ -252,7 +253,7 @@ func (suite *ResourceManagerSuite) TestNodeUpAndDown() {
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
-	err := suite.manager.AddResourceGroup(ctx, "rg1", newResourceGroupConfig(1, 1))
+	_, err := suite.manager.AddResourceGroup(ctx, "rg1", newResourceGroupConfig(1, 1))
 	suite.NoError(err)
 	// test add node to rg
 	suite.manager.HandleNodeUp(ctx, 1)
@@ -858,7 +859,7 @@ func (suite *ResourceManagerSuite) TestNodeLabels_NodeAssign() {
 		},
 	})
 
-	log.Info("test swap rg's label")
+	mlog.Info(suite.ctx, "test swap rg's label")
 	for i := 0; i < 4; i++ {
 		suite.manager.AutoRecoverResourceGroup(ctx, "rg1")
 		suite.manager.AutoRecoverResourceGroup(ctx, "rg2")

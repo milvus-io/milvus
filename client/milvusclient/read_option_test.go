@@ -25,8 +25,8 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus/client/v2/column"
-	"github.com/milvus-io/milvus/client/v2/entity"
+	"github.com/milvus-io/milvus/client/v3/column"
+	"github.com/milvus-io/milvus/client/v3/entity"
 )
 
 type SearchOptionSuite struct {
@@ -88,6 +88,44 @@ func (s *SearchOptionSuite) TestBasic() {
 	opt = NewSearchOption(collName, topK, []entity.Vector{nonSupportData{}})
 	_, err = opt.Request()
 	s.Error(err)
+}
+
+func (s *SearchOptionSuite) TestWithNamespace() {
+	collName := "namespace_read_option"
+	namespace := "tenant_a"
+
+	searchReq, err := NewSearchOption(collName, 10, []entity.Vector{entity.FloatVector([]float32{0.1, 0.2})}).
+		WithNamespace(namespace).
+		Request()
+	s.Require().NoError(err)
+	s.Equal(namespace, searchReq.GetNamespace())
+
+	queryReq, err := NewQueryOption(collName).
+		WithNamespace(namespace).
+		Request()
+	s.Require().NoError(err)
+	s.Equal(namespace, queryReq.GetNamespace())
+
+	hybridReq, err := NewHybridSearchOption(collName, 10, NewAnnRequest("vector", 10, entity.FloatVector([]float32{0.1, 0.2}))).
+		WithNamespace(namespace).
+		HybridRequest()
+	s.Require().NoError(err)
+	s.Equal(namespace, hybridReq.GetNamespace())
+}
+
+func (s *SearchOptionSuite) TestQueryOrderByFields() {
+	collName := "query_order_by"
+
+	queryReq, err := NewQueryOption(collName).
+		WithFilter("price > 50").
+		WithLimit(10).
+		WithOrderByFields("price:desc", "name:asc").
+		Request()
+	s.Require().NoError(err)
+
+	queryParams := entity.KvPairsMap(queryReq.GetQueryParams())
+	s.Equal("price:desc,name:asc", queryParams[spOrderByFields])
+	s.Equal("10", queryParams[spLimit])
 }
 
 func (s *SearchOptionSuite) TestPlaceHolder() {
@@ -182,6 +220,79 @@ func (s *SearchOptionSuite) TestPlaceHolder() {
 				s.NoError(err)
 				s.Equal(tc.expectType, phv.GetType())
 			}
+		})
+	}
+}
+
+func (s *SearchOptionSuite) TestSearchAggregationOption() {
+	opt := NewSearchOption("coll", 100, []entity.Vector{entity.FloatVector([]float32{0.1, 0.2})}).
+		WithSearchAggregation(
+			NewSearchAggregation([]string{"brand"}, 3).
+				WithMetric("count_all", "count", "*").
+				WithTopHits(NewTopHits(2).WithSort("_score", "asc")),
+		)
+
+	req, err := opt.Request()
+	s.Require().NoError(err)
+	s.NotNil(req.GetSearchAggregation())
+	s.Equal([]string{"brand"}, req.GetSearchAggregation().GetFields())
+	s.EqualValues(3, req.GetSearchAggregation().GetSize())
+	s.Equal("count", req.GetSearchAggregation().GetMetrics()["count_all"].GetOp())
+}
+
+func (s *SearchOptionSuite) TestSearchAggregationRejectsConflictingOptions() {
+	base := func() *searchOption {
+		return NewSearchOption("coll", 10, []entity.Vector{entity.FloatVector([]float32{0.1, 0.2})}).
+			WithSearchAggregation(NewSearchAggregation([]string{"brand"}, 3))
+	}
+
+	cases := []struct {
+		name string
+		opt  *searchOption
+		msg  string
+	}{
+		{
+			name: "legacy group by field",
+			opt:  base().WithGroupByField("brand"),
+			msg:  "search_aggregation and group_by_field/group_size are mutually exclusive",
+		},
+		{
+			name: "legacy group size",
+			opt:  base().WithGroupSize(2),
+			msg:  "search_aggregation and group_by_field/group_size are mutually exclusive",
+		},
+		{
+			name: "legacy strict group size",
+			opt:  base().WithStrictGroupSize(true),
+			msg:  "search_aggregation and group_by_field/group_size are mutually exclusive",
+		},
+		{
+			name: "offset",
+			opt:  base().WithOffset(1),
+			msg:  "offset is not supported with search_aggregation",
+		},
+		{
+			name: "raw offset param",
+			opt:  base().WithSearchParam("offset", "1"),
+			msg:  "offset is not supported with search_aggregation",
+		},
+		{
+			name: "raw group_by_field param",
+			opt:  base().WithSearchParam("group_by_field", "brand"),
+			msg:  "group_by_field and search_aggregation cannot be used simultaneously",
+		},
+		{
+			name: "raw group_by_fields param",
+			opt:  base().WithSearchParam("group_by_fields", "brand,color"),
+			msg:  "group_by_fields and search_aggregation cannot be used simultaneously",
+		},
+	}
+
+	for _, tc := range cases {
+		s.Run(tc.name, func() {
+			_, err := tc.opt.Request()
+			s.Require().Error(err)
+			s.Contains(err.Error(), tc.msg)
 		})
 	}
 }

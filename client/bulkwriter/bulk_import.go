@@ -307,6 +307,128 @@ func GetImportProgress(ctx context.Context, option *GetImportProgressOption) (*G
 	return result, result.CheckStatus()
 }
 
+type CommitImportOption struct {
+	URL       string `json:"-"`
+	JobID     string `json:"jobId"`
+	ClusterID string `json:"clusterId,omitempty"`
+	APIKey    string `json:"-"`
+}
+
+func (opt *CommitImportOption) GetRequest() ([]byte, error) {
+	return json.Marshal(opt)
+}
+
+func (opt *CommitImportOption) WithAPIKey(key string) *CommitImportOption {
+	opt.APIKey = key
+	return opt
+}
+
+func NewCommitImportOption(uri string, jobID string) *CommitImportOption {
+	return &CommitImportOption{
+		URL:   uri,
+		JobID: jobID,
+	}
+}
+
+func NewCloudCommitImportOption(uri string, jobID string, apiKey string, clusterID string) *CommitImportOption {
+	return &CommitImportOption{
+		URL:       uri,
+		JobID:     jobID,
+		APIKey:    apiKey,
+		ClusterID: clusterID,
+	}
+}
+
+type CommitImportResponse struct {
+	ResponseBase
+}
+
+// CommitImport is the API wrapper for the restful import commit API.
+func CommitImport(ctx context.Context, option *CommitImportOption) (*CommitImportResponse, error) {
+	url := option.URL + "/v2/vectordb/jobs/import/commit"
+
+	bs, err := option.GetRequest()
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(bs))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if option.APIKey != "" {
+		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", option.APIKey))
+	}
+
+	result := &CommitImportResponse{}
+	if err := doPostRequest(req, result); err != nil {
+		return nil, err
+	}
+	return result, result.CheckStatus()
+}
+
+type AbortImportOption struct {
+	URL       string `json:"-"`
+	JobID     string `json:"jobId"`
+	ClusterID string `json:"clusterId,omitempty"`
+	APIKey    string `json:"-"`
+}
+
+func (opt *AbortImportOption) GetRequest() ([]byte, error) {
+	return json.Marshal(opt)
+}
+
+func (opt *AbortImportOption) WithAPIKey(key string) *AbortImportOption {
+	opt.APIKey = key
+	return opt
+}
+
+func NewAbortImportOption(uri string, jobID string) *AbortImportOption {
+	return &AbortImportOption{
+		URL:   uri,
+		JobID: jobID,
+	}
+}
+
+func NewCloudAbortImportOption(uri string, jobID string, apiKey string, clusterID string) *AbortImportOption {
+	return &AbortImportOption{
+		URL:       uri,
+		JobID:     jobID,
+		APIKey:    apiKey,
+		ClusterID: clusterID,
+	}
+}
+
+type AbortImportResponse struct {
+	ResponseBase
+}
+
+// AbortImport is the API wrapper for the restful import abort API.
+func AbortImport(ctx context.Context, option *AbortImportOption) (*AbortImportResponse, error) {
+	url := option.URL + "/v2/vectordb/jobs/import/abort"
+
+	bs, err := option.GetRequest()
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(bs))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if option.APIKey != "" {
+		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", option.APIKey))
+	}
+
+	result := &AbortImportResponse{}
+	if err := doPostRequest(req, result); err != nil {
+		return nil, err
+	}
+	return result, result.CheckStatus()
+}
+
 func doPostRequest(req *http.Request, response any) error {
 	client := &http.Client{}
 	resp, err := client.Do(req)

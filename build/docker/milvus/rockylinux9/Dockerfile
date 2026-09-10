@@ -13,24 +13,25 @@ FROM rockylinux/rockylinux:9
 
 ARG TARGETARCH
 ARG MILVUS_ASAN_LIB
+ARG MILVUS_RUNTIME_USER=milvus:milvus
 
-# Enable CRB repo for openblas-devel
 RUN dnf install -y dnf-plugins-core && \
     dnf config-manager --set-enabled crb && \
-    dnf install -y wget libgomp libaio libatomic openblas-devel tzdata && \
-    rm -rf /var/cache/dnf/* && \
-    for f in /usr/include/openblas/*.h; do ln -sf "$f" /usr/include/$(basename "$f"); done
+    dnf install -y wget libgomp libaio libatomic tzdata && \
+    dnf upgrade -y openssl openssl-libs && \
+    rm -rf /var/cache/dnf/*
 
 # Add Tini
 RUN curl -L -o /tini https://github.com/krallin/tini/releases/download/v0.19.0/tini-$TARGETARCH && \
     chmod +x /tini
 
-RUN mkdir -p /milvus/bin
-COPY ./bin/milvus /milvus/bin/milvus
+RUN groupadd -r milvus && useradd -r -g milvus milvus && \
+    install -d -o milvus -g milvus /milvus /milvus/bin /var/lib/milvus
+COPY --chown=milvus:milvus ./bin/milvus /milvus/bin/milvus
 
-COPY ./configs/ /milvus/configs/
+COPY --chown=milvus:milvus ./configs/ /milvus/configs/
 
-COPY ./lib/ /milvus/lib/
+COPY --chown=milvus:milvus ./lib/ /milvus/lib/
 
 ENV PATH=/milvus/bin:$PATH
 ENV LD_LIBRARY_PATH=/milvus/lib:$LD_LIBRARY_PATH:/usr/lib
@@ -40,17 +41,15 @@ ENV OPENSSL_MODULES=/milvus/lib/ossl-modules
 
 # Generate fipsmodule.cnf for FIPS module integrity self-test.
 # FIPS activation is handled programmatically at startup — no OPENSSL_CONF needed.
+USER milvus:milvus
 RUN openssl fipsinstall -out /milvus/configs/ssl/fipsmodule.cnf -module /milvus/lib/ossl-modules/fips.so
 
-# Change user to milvus
 # protobuf 5.x RepeatedField adds container annotations that trigger ASAN
 # container-overflow false positives during static initialization, disable it.
-ENV ASAN_OPTIONS=detect_leaks=0:detect_container_overflow=0
-RUN groupadd -r milvus && useradd -r -g milvus milvus && \
-    mkdir -p /var/lib/milvus && \
-    chown -R milvus:milvus /milvus /var/lib/milvus
 ENV ASAN_OPTIONS=detect_leaks=1:detect_container_overflow=0
-USER milvus:milvus
+
+# Run as milvus by default; downstream images may select another user at build time.
+USER ${MILVUS_RUNTIME_USER}
 
 ENTRYPOINT ["/tini", "--"]
 

@@ -117,11 +117,3 @@ TEST(CApiTest, SetIndexMetaTest) {
     SetIndexMeta(collection, buffer.data(), indexMeta.ByteSizeLong());
     DeleteCollection(collection);
 }
-
-TEST(CApiTest, GetCollectionNameTest) {
-    auto collection = NewCollection(get_default_schema_config().c_str());
-    auto name = GetCollectionName(collection);
-    ASSERT_EQ(strcmp(name, "default-collection"), 0);
-    DeleteCollection(collection);
-    free((void*)(name));
-}

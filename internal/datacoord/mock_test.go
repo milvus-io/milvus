@@ -34,6 +34,7 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
+	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
@@ -129,7 +130,9 @@ func newMock0Allocator(t *testing.T) *allocator.MockAllocator {
 	mock0Allocator := allocator.NewMockAllocator(t)
 	mock0Allocator.EXPECT().AllocID(mock.Anything).Return(100, nil).Maybe()
 	mock0Allocator.EXPECT().AllocTimestamp(mock.Anything).Return(1000, nil).Maybe()
-	mock0Allocator.EXPECT().AllocN(mock.Anything).Return(100, 200, nil).Maybe()
+	mock0Allocator.EXPECT().AllocN(mock.Anything).RunAndReturn(func(i int64) (int64, int64, error) {
+		return 100, 100 + i, nil
+	}).Maybe()
 	return mock0Allocator
 }
 
@@ -226,6 +229,10 @@ func (m *mockMixCoord) AddCollectionStructField(ctx context.Context, req *milvus
 
 func (m *mockMixCoord) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error) {
 	panic("implement me")
+}
+
+func (m *mockMixCoord) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error) {
+	return &internalpb.ClearReadTaskQueueResponse{Status: merr.Success()}, nil
 }
 
 func (m *mockMixCoord) ListLoadedSegments(ctx context.Context, req *querypb.ListLoadedSegmentsRequest) (*querypb.ListLoadedSegmentsResponse, error) {
@@ -551,6 +558,10 @@ func (m *mockMixCoord) GetDataCoordTopology(ctx context.Context, req *milvuspb.G
 	panic("not implemented") // TODO: Implement
 }
 
+func (m *mockMixCoord) GetConnectedDataNodeMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) ([]metricsinfo.DataNodeInfos, error) {
+	panic("not implemented") // TODO: Implement
+}
+
 func (m *mockMixCoord) GetQueryCoordTopology(ctx context.Context, req *milvuspb.GetMetricsRequest) (*metricsinfo.QueryCoordTopology, error) {
 	panic("not implemented") // TODO: Implement
 }
@@ -632,6 +643,10 @@ func (m *mockMixCoord) GetCredential(ctx context.Context, req *rootcoordpb.GetCr
 }
 
 func (m *mockMixCoord) CreateRole(ctx context.Context, req *milvuspb.CreateRoleRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
+func (m *mockMixCoord) AlterRole(ctx context.Context, req *milvuspb.AlterRoleRequest) (*commonpb.Status, error) {
 	panic("implement me")
 }
 
@@ -1007,6 +1022,10 @@ func (s *mockMixCoord) ListFileResources(ctx context.Context, req *milvuspb.List
 	panic("implement me")
 }
 
+func (s *mockMixCoord) GetFileResources(ctx context.Context, resourceIDs ...int64) ([]*internalpb.FileResourceInfo, error) {
+	panic("implement me")
+}
+
 func (s *mockMixCoord) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error) {
 	panic("implement me")
 }
@@ -1048,6 +1067,14 @@ func (s *mockMixCoord) RestoreSnapshot(ctx context.Context, req *datapb.RestoreS
 	panic("implement me")
 }
 
+func (s *mockMixCoord) ExportSnapshot(ctx context.Context, req *datapb.ExportSnapshotRequest) (*datapb.ExportSnapshotResponse, error) {
+	panic("implement me")
+}
+
+func (s *mockMixCoord) GetExportSnapshotState(ctx context.Context, req *datapb.GetExportSnapshotStateRequest) (*datapb.GetExportSnapshotStateResponse, error) {
+	panic("implement me")
+}
+
 func (s *mockMixCoord) GetRestoreSnapshotState(ctx context.Context, req *datapb.GetRestoreSnapshotStateRequest) (*datapb.GetRestoreSnapshotStateResponse, error) {
 	panic("implement me")
 }
@@ -1064,6 +1091,10 @@ func (s *mockMixCoord) DeleteClientCommand(ctx context.Context, req *milvuspb.De
 	panic("implement me")
 }
 
+func (s *mockMixCoord) ListClientCommands(ctx context.Context, req *rootcoordpb.ListClientCommandsRequest) (*rootcoordpb.ListClientCommandsResponse, error) {
+	panic("implement me")
+}
+
 func (s *mockMixCoord) GetClientTelemetry(ctx context.Context, req *milvuspb.GetClientTelemetryRequest) (*milvuspb.GetClientTelemetryResponse, error) {
 	panic("implement me")
 }
@@ -1077,6 +1108,18 @@ func (s *mockMixCoord) PinSnapshotData(ctx context.Context, req *datapb.PinSnaps
 }
 
 func (s *mockMixCoord) UnpinSnapshotData(ctx context.Context, req *datapb.UnpinSnapshotDataRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
+func (s *mockMixCoord) CommitImport(ctx context.Context, req *datapb.CommitImportRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
+func (s *mockMixCoord) AbortImport(ctx context.Context, req *datapb.AbortImportRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
+func (s *mockMixCoord) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCommitVchannelRequest) (*commonpb.Status, error) {
 	panic("implement me")
 }
 
@@ -1126,8 +1169,8 @@ func (h *mockHandler) ListLoadedSegments(ctx context.Context) ([]int64, error) {
 	return nil, nil
 }
 
-func (h *mockHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) (*SnapshotData, error) {
-	return &SnapshotData{
+func (h *mockHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) (*snapshotstorage.SnapshotData, error) {
+	return &snapshotstorage.SnapshotData{
 		SnapshotInfo: &datapb.SnapshotInfo{
 			Name:         "test_snapshot",
 			CollectionId: collectionID,

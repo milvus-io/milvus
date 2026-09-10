@@ -23,9 +23,9 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 
-	"github.com/milvus-io/milvus/client/v2/column"
-	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/client/v2/row"
+	"github.com/milvus-io/milvus/client/v3/column"
+	"github.com/milvus-io/milvus/client/v3/entity"
+	"github.com/milvus-io/milvus/client/v3/row"
 )
 
 // ResultSet is struct for search result set.
@@ -37,9 +37,11 @@ type ResultSet struct {
 	GroupByValue column.Column
 	IDs          column.Column // auto generated id, can be mapped to the columns from `Insert` API
 	Fields       DataSet       // output field data
-	Scores       []float32     // distance to the target vector
-	Recall       float32       // recall of the query vector's search result (estimated by zilliz cloud)
-	Err          error         // search error if any
+	// AggregationBuckets contains search aggregation results for this query.
+	AggregationBuckets []AggregationBucket
+	Scores             []float32 // distance to the target vector
+	Recall             float32   // recall of the query vector's search result (estimated by zilliz cloud)
+	Err                error     // search error if any
 }
 
 // GetColumn returns column with provided field name.
@@ -62,6 +64,7 @@ func (rs ResultSet) Slice(start, end int) ResultSet {
 		Fields: lo.Map(rs.Fields, func(column column.Column, _ int) column.Column {
 			return column.Slice(start, end)
 		}),
+		AggregationBuckets: rs.AggregationBuckets,
 		// Recall will not be sliced
 		Err: rs.Err,
 	}

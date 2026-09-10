@@ -1,3 +1,5 @@
+//go:build rbac || rg
+
 package advcases
 
 import (

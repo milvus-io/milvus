@@ -24,8 +24,8 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/spf13/cast"
-	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -33,6 +33,19 @@ var (
 	ErrNotInitial   = errors.New("config is not initialized")
 	ErrIgnoreChange = errors.New("ignore change")
 	ErrKeyNotFound  = errors.New("key not found")
+
+	// config source management
+	ErrSourceDuplicate = errors.New("duplicate config source")
+	ErrSourceInvalid   = errors.New("invalid config source or source not added")
+
+	// etcd config read/write
+	ErrEtcdClientUnavailable     = errors.New("etcd client is not available")
+	ErrImmutableConfigSaveFailed = errors.New("failed to save immutable configs to etcd")
+	ErrNoConfigsToAlter          = errors.New("no configs to alter")
+
+	// config file parsing
+	ErrUnsupportedConfigType  = errors.New("unsupported config file type")
+	ErrAllConfigFilesNotExist = errors.New("all config files not exist")
 )
 
 const (
@@ -49,14 +62,18 @@ func Init(opts ...Option) (*Manager, error) {
 		s := NewFileSource(o.FileInfo)
 		err := sourceManager.AddSource(s)
 		if err != nil {
-			log.Fatal("failed to add FileSource config", zap.Error(err))
+			log.Fatal("failed to add FileSource config", mlog.Err(err))
 		}
 	}
 	if o.EnvKeyFormatter != nil {
 		sourceManager.AddSource(NewEnvSource(o.EnvKeyFormatter))
 	}
 	if o.EtcdInfo != nil {
-		s, err := NewEtcdSource(o.EtcdInfo)
+		etcdCli, err := newEtcdClient(o.EtcdInfo)
+		if err != nil {
+			return nil, err
+		}
+		s, err := NewEtcdSource(etcdCli, o.EtcdInfo)
 		if err != nil {
 			return nil, err
 		}
@@ -85,6 +102,14 @@ func formatKey(key string) string {
 	result := strings.NewReplacer("/", "", "_", "", ".", "").Replace(strings.ToLower(key))
 	formattedKeys.Insert(key, result)
 	return result
+}
+
+// FormatKey formats a config key for storage/retrieval in the config sources
+// (lowercased, with '/', '_' and '.' stripped). It is the exported form of
+// formatKey for callers that must address config keys directly, e.g. writing
+// to the config center from outside pkg/config.
+func FormatKey(key string) string {
+	return formatKey(key)
 }
 
 func flattenAndMergeMap(prefix string, m map[string]interface{}, result map[string]string) {

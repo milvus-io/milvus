@@ -32,12 +32,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
@@ -49,7 +49,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -63,7 +63,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
-	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -103,6 +102,12 @@ type DelegatorDataSuite struct {
 	delegator    *shardDelegator
 	rootPath     string
 	chunkManager storage.ChunkManager
+}
+
+func (s *DelegatorDataSuite) getIDFOracleForTest() *idfOracle {
+	oracle, ok := s.delegator.getIDFOracle().(*idfOracle)
+	s.Require().True(ok)
+	return oracle
 }
 
 func (s *DelegatorDataSuite) SetupSuite() {
@@ -178,15 +183,50 @@ func (s *DelegatorDataSuite) genNormalCollection() {
 			},
 		},
 	}, &querypb.LoadMetaInfo{
-		LoadType:      querypb.LoadType_LoadCollection,
-		PartitionIDs:  []int64{1001, 1002},
-		SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0),
+		LoadType:        querypb.LoadType_LoadCollection,
+		PartitionIDs:    []int64{1001, 1002},
+		SchemaBarrierTs: 0,
+	})
+}
+
+func (s *DelegatorDataSuite) genTextCollection() {
+	s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
+		Name: "TestTextCollection",
+		Fields: []*schemapb.FieldSchema{
+			{
+				Name:         "id",
+				FieldID:      100,
+				IsPrimaryKey: true,
+				DataType:     schemapb.DataType_Int64,
+			},
+			{
+				Name:     "text",
+				FieldID:  101,
+				DataType: schemapb.DataType_Text,
+			},
+			{
+				Name:     "vector",
+				FieldID:  102,
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.DimKey,
+						Value: "128",
+					},
+				},
+			},
+		},
+	}, nil, &querypb.LoadMetaInfo{
+		LoadType:        querypb.LoadType_LoadCollection,
+		PartitionIDs:    []int64{1001},
+		SchemaBarrierTs: 0,
 	})
 }
 
 func (s *DelegatorDataSuite) genCollectionWithFunction() {
 	s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
-		Name: "TestCollection",
+		Name:    "TestCollection",
+		Version: 1,
 		Fields: []*schemapb.FieldSchema{
 			{
 				Name:         "id",
@@ -216,14 +256,20 @@ func (s *DelegatorDataSuite) genCollectionWithFunction() {
 			InputFieldIds:  []int64{102},
 			OutputFieldIds: []int64{101},
 		}},
-	}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
+	}, nil, &querypb.LoadMetaInfo{SchemaBarrierTs: 0})
 
 	delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
 	s.NoError(err)
 	s.delegator = delegator.(*shardDelegator)
+	s.allocFunctionRunnersForTest()
 }
 
 func (s *DelegatorDataSuite) SetupTest() {
+	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key, "false")
+	s.T().Cleanup(func() {
+		paramtable.Get().Reset(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key)
+	})
+
 	s.workerManager = &cluster.MockManager{}
 	s.manager = segments.NewManager()
 	s.loader = &segments.MockLoader{}
@@ -243,51 +289,94 @@ func (s *DelegatorDataSuite) SetupTest() {
 	s.delegator = sd
 }
 
+func (s *DelegatorDataSuite) enableGrowingSourceFlush() {
+	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
+	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key, "true")
+	s.T().Cleanup(func() {
+		paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+		paramtable.Get().Reset(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key)
+	})
+}
+
+func (s *DelegatorDataSuite) TearDownTest() {
+	function.GetManager().Release(s.collectionID, "WAL-"+s.vchannelName)
+	function.GetManager().Release(s.collectionID, delegatorFunctionRunnerKey(s.vchannelName))
+}
+
+func (s *DelegatorDataSuite) allocFunctionRunnersForTest() {
+	s.Require().NoError(function.GetManager().Update(s.collectionID, delegatorFunctionRunnerKey(s.vchannelName), s.delegator.collection.Schema()))
+}
+
 func (s *DelegatorDataSuite) TestProcessInsert() {
+	validInsertData := func() *InsertData {
+		return &InsertData{
+			RowIDs:        []int64{0, 1},
+			PrimaryKeys:   []storage.PrimaryKey{storage.NewInt64PrimaryKey(1), storage.NewInt64PrimaryKey(2)},
+			Timestamps:    []uint64{10, 10},
+			PartitionID:   500,
+			StartPosition: &msgpb.MsgPosition{},
+			InsertRecord: &segcorepb.InsertRecord{
+				FieldsData: []*schemapb.FieldData{
+					{
+						Type:      schemapb.DataType_Int64,
+						FieldName: "id",
+						Field: &schemapb.FieldData_Scalars{
+							Scalars: &schemapb.ScalarField{
+								Data: &schemapb.ScalarField_LongData{
+									LongData: &schemapb.LongArray{
+										Data: []int64{1, 2},
+									},
+								},
+							},
+						},
+						FieldId: 100,
+					},
+					{
+						Type:      schemapb.DataType_FloatVector,
+						FieldName: "vector",
+						Field: &schemapb.FieldData_Vectors{
+							Vectors: &schemapb.VectorField{
+								Dim: 128,
+								Data: &schemapb.VectorField_FloatVector{
+									FloatVector: &schemapb.FloatArray{Data: make([]float32, 128*2)},
+								},
+							},
+						},
+						FieldId: 101,
+					},
+				},
+				NumRows: 2,
+			},
+		}
+	}
+
 	s.Run("normal_insert", func() {
 		s.delegator.ProcessInsert(map[int64]*InsertData{
-			100: {
-				RowIDs:        []int64{0, 1},
-				PrimaryKeys:   []storage.PrimaryKey{storage.NewInt64PrimaryKey(1), storage.NewInt64PrimaryKey(2)},
-				Timestamps:    []uint64{10, 10},
-				PartitionID:   500,
-				StartPosition: &msgpb.MsgPosition{},
-				InsertRecord: &segcorepb.InsertRecord{
-					FieldsData: []*schemapb.FieldData{
-						{
-							Type:      schemapb.DataType_Int64,
-							FieldName: "id",
-							Field: &schemapb.FieldData_Scalars{
-								Scalars: &schemapb.ScalarField{
-									Data: &schemapb.ScalarField_LongData{
-										LongData: &schemapb.LongArray{
-											Data: []int64{1, 2},
-										},
-									},
-								},
-							},
-							FieldId: 100,
-						},
-						{
-							Type:      schemapb.DataType_FloatVector,
-							FieldName: "vector",
-							Field: &schemapb.FieldData_Vectors{
-								Vectors: &schemapb.VectorField{
-									Dim: 128,
-									Data: &schemapb.VectorField_FloatVector{
-										FloatVector: &schemapb.FloatArray{Data: make([]float32, 128*2)},
-									},
-								},
-							},
-							FieldId: 101,
-						},
-					},
-					NumRows: 2,
-				},
-			},
+			100: validInsertData(),
 		})
 
 		s.NotNil(s.manager.Segment.GetGrowing(100))
+	})
+
+	s.Run("notify_new_growing_segment_once", func() {
+		var notifiedChannels []string
+		delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil,
+			WithLeaderViewUpdatedCallback(func(channel string) {
+				notifiedChannels = append(notifiedChannels, channel)
+			}))
+		s.Require().NoError(err)
+		sd := delegator.(*shardDelegator)
+
+		insert := func() {
+			sd.ProcessInsert(map[int64]*InsertData{
+				101: validInsertData(),
+			})
+		}
+
+		insert()
+		insert()
+
+		s.Equal([]string{s.vchannelName}, notifiedChannels)
 	})
 
 	s.Run("insert_bad_data", func() {
@@ -336,6 +425,7 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 			ms.EXPECT().Partition().Return(info.GetPartitionID())
 			ms.EXPECT().Indexes().Return(nil)
 			ms.EXPECT().RowNum().Return(info.GetNumOfRows())
+			ms.EXPECT().LoadInfo().Return(info)
 			ms.EXPECT().Delete(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 			ms.EXPECT().MayPkExist(mock.Anything).RunAndReturn(func(lc *storage.LocationsCache) bool {
 				return lc.GetPk().EQ(storage.NewInt64PrimaryKey(10))
@@ -485,7 +575,6 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 		},
 	}, 10)
 
-	s.delegator.distribution.Flush()
 	s.False(s.delegator.distribution.Serviceable())
 
 	worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).
@@ -508,7 +597,6 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 		Version: time.Now().UnixNano(),
 	})
 	s.Require().NoError(err)
-	s.delegator.distribution.Flush()
 	s.True(s.delegator.distribution.Serviceable())
 	// Test normal errors with retry and fail
 	worker1.ExpectedCalls = nil
@@ -521,7 +609,6 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 			RowCount:    1,
 		},
 	}, 10)
-	s.delegator.distribution.Flush()
 	s.False(s.delegator.distribution.Serviceable(), "should retry and failed")
 
 	// refresh
@@ -545,7 +632,6 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 		Version: time.Now().UnixNano(),
 	})
 	s.Require().NoError(err)
-	s.delegator.distribution.Flush()
 	s.True(s.delegator.distribution.Serviceable())
 
 	s.delegator.Close()
@@ -566,6 +652,50 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 	s.True(s.delegator.distribution.Serviceable())
 }
 
+func (s *DelegatorDataSuite) TestProcessDeleteBatchesPreservesBatchTsInDeleteBuffer() {
+	batches := []DeleteBatch{
+		{
+			Ts: 10,
+			Data: []*DeleteData{
+				{
+					PartitionID: 500,
+					PrimaryKeys: []storage.PrimaryKey{
+						storage.NewInt64PrimaryKey(10),
+					},
+					Timestamps: []uint64{10},
+					RowCount:   1,
+				},
+			},
+		},
+		{
+			Ts: 20,
+			Data: []*DeleteData{
+				{
+					PartitionID: 500,
+					PrimaryKeys: []storage.PrimaryKey{
+						storage.NewInt64PrimaryKey(20),
+					},
+					Timestamps: []uint64{20},
+					RowCount:   1,
+				},
+			},
+		},
+	}
+
+	s.delegator.ProcessDeleteBatches(batches)
+
+	after15 := s.delegator.deleteBuffer.ListAfter(15)
+	s.Require().Len(after15, 1)
+	s.Equal(uint64(20), after15[0].Ts)
+	s.Require().Len(after15[0].Data, 1)
+	s.ElementsMatch([]storage.PrimaryKey{storage.NewInt64PrimaryKey(20)}, after15[0].Data[0].DeleteData.Pks)
+
+	after0 := s.delegator.deleteBuffer.ListAfter(0)
+	s.Require().Len(after0, 2)
+	s.Equal(uint64(10), after0[0].Ts)
+	s.Equal(uint64(20), after0[1].Ts)
+}
+
 func (s *DelegatorDataSuite) TestLoadGrowingWithBM25() {
 	s.genCollectionWithFunction()
 	mockSegment := segments.NewMockSegment(s.T())
@@ -575,6 +705,8 @@ func (s *DelegatorDataSuite) TestLoadGrowingWithBM25() {
 	mockSegment.EXPECT().ID().Return(int64(111))
 	// Note: Type() is no longer called since pkOracle was removed
 	// Candidate is now stored directly in SegmentEntry
+	mockSegment.EXPECT().RowNum().Return(int64(0)).Maybe()
+	mockSegment.EXPECT().LoadInfo().Return(&querypb.SegmentLoadInfo{SegmentID: 111}).Maybe()
 	mockSegment.EXPECT().GetBM25Stats().Return(map[int64]*storage.BM25Stats{})
 
 	err := s.delegator.LoadGrowing(context.Background(), []*querypb.SegmentLoadInfo{{SegmentID: 1}}, 1)
@@ -628,7 +760,6 @@ func (s *DelegatorDataSuite) TestLoadSegmentsWithBm25() {
 		})
 
 		s.NoError(err)
-		s.delegator.distribution.Flush()
 		sealed, _ := s.delegator.GetSegmentInfo(false)
 		s.Require().Equal(1, len(sealed))
 		s.Equal(int64(1), sealed[0].NodeID)
@@ -642,6 +773,273 @@ func (s *DelegatorDataSuite) TestLoadSegmentsWithBm25() {
 			},
 		}, segmentEntryCoreFields(sealed[0].Segments))
 	})
+}
+
+func (s *DelegatorDataSuite) TestLoadSegmentsReopenBM25Stats() {
+	s.genCollectionWithFunction()
+
+	remotePath := "bm25stats/reopen/segment_100/field_101/0"
+	stats := storage.NewBM25Stats()
+	for i := uint32(1); i < 4; i++ {
+		stats.Append(map[uint32]float32{i: 1})
+	}
+	data, err := stats.Serialize()
+	s.Require().NoError(err)
+
+	cm := mocks.NewChunkManager(s.T())
+	cm.EXPECT().Reader(mock.Anything, remotePath).Return(&bytesFileReader{bytes.NewReader(data)}, nil)
+	s.loader.EXPECT().GetChunkManager().Return(cm)
+
+	worker1 := &cluster.MockWorker{}
+	worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).Return(nil)
+	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Return(worker1, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err = s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		DstNodeID:    1,
+		CollectionID: s.collectionID,
+		LoadScope:    querypb.LoadScope_Reopen,
+		Infos: []*querypb.SegmentLoadInfo{
+			{
+				SegmentID:     100,
+				PartitionID:   500,
+				StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				Level:         datapb.SegmentLevel_L1,
+				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
+				Bm25Logs:      bm25LogsForField(101, remotePath),
+			},
+		},
+	})
+
+	s.NoError(err)
+	loadedStats := s.getIDFOracleForTest()
+	fieldStats, err := loadedStats.current.GetStats(101)
+	s.NoError(err)
+	s.Equal(int64(0), fieldStats.NumRow())
+	segStats, ok := loadedStats.sealed.Get(100)
+	s.True(ok)
+	s.True(segStats.HasField(101))
+
+	sealed, _ := s.delegator.GetSegmentInfo(false)
+	s.Empty(sealed)
+}
+
+func (s *DelegatorDataSuite) TestLoadSegmentsReopenBM25StatsRetriesTransientFailure() {
+	s.genCollectionWithFunction()
+
+	remotePath := "bm25stats/reopen-retry/segment_100/field_101/0"
+	stats := storage.NewBM25Stats()
+	for i := uint32(1); i < 4; i++ {
+		stats.Append(map[uint32]float32{i: 1})
+	}
+	data, err := stats.Serialize()
+	s.Require().NoError(err)
+
+	cm := mocks.NewChunkManager(s.T())
+	cm.EXPECT().Reader(mock.Anything, remotePath).
+		Run(func(context.Context, string) {
+			s.delegator.distribution.AddDistributions(SegmentEntry{
+				NodeID:      1,
+				SegmentID:   100,
+				PartitionID: 500,
+				Version:     1,
+				Level:       datapb.SegmentLevel_L1,
+			})
+			s.delegator.distribution.SyncTargetVersion(&querypb.SyncAction{
+				TargetVersion:         1,
+				SealedInTarget:        []int64{100},
+				SealedSegmentRowCount: map[int64]int64{100: 3},
+			}, []int64{500})
+		}).
+		Return(nil, merr.WrapErrIoTooManyRequests(remotePath, errors.New("storage throttled"))).Once()
+	cm.EXPECT().Reader(mock.Anything, remotePath).
+		Return(&bytesFileReader{bytes.NewReader(data)}, nil).Once()
+	s.loader.EXPECT().GetChunkManager().Return(cm)
+
+	worker1 := &cluster.MockWorker{}
+	worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).Return(nil).Once()
+	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Return(worker1, nil)
+
+	err = s.delegator.LoadSegments(context.Background(), &querypb.LoadSegmentsRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		DstNodeID:    1,
+		CollectionID: s.collectionID,
+		LoadScope:    querypb.LoadScope_Reopen,
+		Infos: []*querypb.SegmentLoadInfo{
+			{
+				SegmentID:     100,
+				PartitionID:   500,
+				StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				Level:         datapb.SegmentLevel_L1,
+				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
+				Bm25Logs:      bm25LogsForField(101, remotePath),
+			},
+		},
+	})
+
+	s.NoError(err)
+	loadedStats := s.getIDFOracleForTest()
+	segStats, ok := loadedStats.sealed.Get(100)
+	s.True(ok)
+	s.True(segStats.HasField(101))
+	fieldStats, err := loadedStats.current.GetStats(101)
+	s.NoError(err)
+	s.Equal(int64(3), fieldStats.NumRow())
+}
+
+func (s *DelegatorDataSuite) TestLoadSegmentsReopenBM25StatsDoesNotRetryPermanentFailure() {
+	s.genCollectionWithFunction()
+
+	remotePath := "bm25stats/reopen-missing/segment_100/field_101/0"
+	cm := mocks.NewChunkManager(s.T())
+	cm.EXPECT().Reader(mock.Anything, remotePath).
+		Return(nil, merr.WrapErrIoKeyNotFound(remotePath)).Once()
+	s.loader.EXPECT().GetChunkManager().Return(cm)
+
+	worker1 := &cluster.MockWorker{}
+	worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).Return(nil).Once()
+	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Return(worker1, nil)
+
+	err := s.delegator.LoadSegments(context.Background(), &querypb.LoadSegmentsRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		DstNodeID:    1,
+		CollectionID: s.collectionID,
+		LoadScope:    querypb.LoadScope_Reopen,
+		Infos: []*querypb.SegmentLoadInfo{
+			{
+				SegmentID:     100,
+				PartitionID:   500,
+				StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				Level:         datapb.SegmentLevel_L1,
+				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
+				Bm25Logs:      bm25LogsForField(101, remotePath),
+			},
+		},
+	})
+
+	s.ErrorIs(err, merr.ErrIoKeyNotFound)
+}
+
+func (s *DelegatorDataSuite) TestLoadSegmentsReopenBM25StatsMergesReadableSegment() {
+	s.genCollectionWithFunction()
+	s.delegator.distribution.AddDistributions(SegmentEntry{
+		NodeID:      1,
+		SegmentID:   100,
+		PartitionID: 500,
+		Version:     1,
+		Level:       datapb.SegmentLevel_L1,
+	})
+	s.delegator.distribution.SyncTargetVersion(&querypb.SyncAction{
+		TargetVersion:         1,
+		SealedInTarget:        []int64{100},
+		SealedSegmentRowCount: map[int64]int64{100: 3},
+	}, []int64{500})
+	s.True(s.delegator.distribution.IsReadableSealedSegment(100))
+
+	remotePath := "bm25stats/reopen-readable/segment_100/field_101/0"
+	stats := storage.NewBM25Stats()
+	for i := uint32(1); i < 4; i++ {
+		stats.Append(map[uint32]float32{i: 1})
+	}
+	data, err := stats.Serialize()
+	s.Require().NoError(err)
+
+	cm := mocks.NewChunkManager(s.T())
+	cm.EXPECT().Reader(mock.Anything, remotePath).Return(&bytesFileReader{bytes.NewReader(data)}, nil)
+	s.loader.EXPECT().GetChunkManager().Return(cm)
+
+	worker1 := &cluster.MockWorker{}
+	worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).Return(nil)
+	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Return(worker1, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err = s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		DstNodeID:    1,
+		CollectionID: s.collectionID,
+		LoadScope:    querypb.LoadScope_Reopen,
+		Infos: []*querypb.SegmentLoadInfo{
+			{
+				SegmentID:     100,
+				PartitionID:   500,
+				StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				Level:         datapb.SegmentLevel_L1,
+				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
+				Bm25Logs:      bm25LogsForField(101, remotePath),
+			},
+		},
+	})
+
+	s.NoError(err)
+	loadedStats := s.getIDFOracleForTest()
+	fieldStats, err := loadedStats.current.GetStats(101)
+	s.NoError(err)
+	s.Equal(int64(3), fieldStats.NumRow())
+}
+
+func (s *DelegatorDataSuite) TestLoadSegmentsReopenBM25StatsRequiresOracleForRetry() {
+	worker1 := &cluster.MockWorker{}
+	worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).Return(nil)
+	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Return(worker1, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err := s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		DstNodeID:    1,
+		CollectionID: s.collectionID,
+		LoadScope:    querypb.LoadScope_Reopen,
+		Infos: []*querypb.SegmentLoadInfo{
+			{
+				SegmentID:     100,
+				PartitionID:   500,
+				StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				Level:         datapb.SegmentLevel_L1,
+				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
+				Bm25Logs:      bm25LogsForField(101, "bm25stats/reopen/segment_100/field_101/0"),
+			},
+		},
+	})
+
+	s.Error(err)
+	s.ErrorIs(err, merr.ErrServiceInternal)
+}
+
+func (s *DelegatorDataSuite) TestLoadSegmentsReopenWithoutBM25StatsNoop() {
+	worker1 := &cluster.MockWorker{}
+	worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).Return(nil)
+	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Return(worker1, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err := s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		DstNodeID:    1,
+		CollectionID: s.collectionID,
+		LoadScope:    querypb.LoadScope_Reopen,
+		Infos: []*querypb.SegmentLoadInfo{
+			{
+				SegmentID:     100,
+				PartitionID:   500,
+				StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				Level:         datapb.SegmentLevel_L1,
+				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
+			},
+		},
+	})
+
+	s.NoError(err)
+	sealed, _ := s.delegator.GetSegmentInfo(false)
+	s.Empty(sealed)
 }
 
 func (s *DelegatorDataSuite) TestLoadSegments() {
@@ -689,7 +1087,6 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 		})
 
 		s.NoError(err)
-		s.delegator.distribution.Flush()
 		sealed, _ := s.delegator.GetSegmentInfo(false)
 		s.Require().Equal(1, len(sealed))
 		s.Equal(int64(1), sealed[0].NodeID)
@@ -938,6 +1335,46 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 	})
 }
 
+func (s *DelegatorDataSuite) TestSyncCollectionMetaUpdatesFunctionRunners() {
+	ctx := context.Background()
+	s.delegator.Start()
+	schema := newFunctionRuntimeTestSchemaWithVersion(1, newBM25FunctionSchema())
+	s.Require().Nil(s.delegator.getIDFOracle())
+	err := s.delegator.syncCollectionMeta(ctx, &querypb.LoadSegmentsRequest{
+		CollectionID:  s.collectionID,
+		Schema:        schema,
+		LoadMeta:      &querypb.LoadMetaInfo{SchemaBarrierTs: 1},
+		IndexInfoList: mock_segcore.GenTestIndexInfoList(s.collectionID, schema),
+	})
+	s.Require().NoError(err)
+	s.Equal(uint64(1), s.delegator.collectionVersion.Load())
+	s.Equal(uint64(1), s.delegator.schemaBarrierTs)
+	s.Require().NotNil(s.delegator.getIDFOracle())
+
+	// The load path has already advanced the collection snapshot, so the DDL
+	// event is skipped as a no-op. The function runner key must still point at
+	// the schema installed by the load path.
+	s.Require().NoError(s.delegator.UpdateSchema(ctx, schema, 1))
+	ok, err := function.GetManager().RunWithRunner(ctx, s.collectionID, delegatorFunctionRunnerKey(s.vchannelName), 102, func(function.FunctionRunner) error {
+		return nil
+	})
+	s.Require().NoError(err)
+	s.True(ok)
+}
+
+func (s *DelegatorDataSuite) TestSyncCollectionMetaWithoutIndexInfoUpdatesDelegatorSchema() {
+	ctx := context.Background()
+	s.delegator.Start()
+	schema := proto.Clone(s.delegator.collection.Schema()).(*schemapb.CollectionSchema)
+	schema.Version = 1
+	s.Require().NoError(s.manager.Collection.PutOrRef(s.collectionID, schema, nil, &querypb.LoadMetaInfo{SchemaBarrierTs: 100}))
+	s.manager.Collection.Unref(s.collectionID, 1)
+
+	s.Require().NoError(s.delegator.syncCollectionMeta(ctx, &querypb.LoadSegmentsRequest{CollectionID: s.collectionID}))
+	s.Equal(uint64(1), s.delegator.collectionVersion.Load())
+	s.Equal(uint64(100), s.delegator.schemaBarrierTs)
+}
+
 func (s *DelegatorDataSuite) TestLoadSegmentsWithoutBloomFilter() {
 	defer func() {
 		s.workerManager.ExpectedCalls = nil
@@ -986,7 +1423,6 @@ func (s *DelegatorDataSuite) TestLoadSegmentsWithoutBloomFilter() {
 	})
 
 	s.Require().NoError(err)
-	s.delegator.distribution.Flush()
 	sealed, _ := s.delegator.GetSegmentInfo(false)
 	s.Require().Equal(1, len(sealed))
 	s.Require().Equal(1, len(sealed[0].Segments))
@@ -1055,7 +1491,7 @@ func (s *DelegatorDataSuite) TestPostLoadLimiter() {
 
 func (s *DelegatorDataSuite) waitTargetVersion(targetVersion int64) {
 	for {
-		if s.delegator.idfOracle.TargetVersion() >= targetVersion {
+		if s.getIDFOracleForTest().TargetVersion() >= targetVersion {
 			return
 		}
 		time.Sleep(time.Millisecond * 100)
@@ -1064,6 +1500,11 @@ func (s *DelegatorDataSuite) waitTargetVersion(targetVersion int64) {
 
 func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 	s.genCollectionWithFunction()
+	schema := s.delegator.collection.Schema()
+	bm25Runner, err := function.BuildEmbeddingRunner(schema, schema.GetFunctions()[0])
+	s.Require().NoError(err)
+	s.Require().NotNil(bm25Runner)
+	defer bm25Runner.Close()
 
 	registerSealedStats := func(oracle *idfOracle, segID int64, start uint32, end uint32) {
 		stats := storage.NewBM25Stats()
@@ -1130,11 +1571,11 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 		sealedSegs := []int64{1, 2, 3, 4}
 		for _, segID := range sealedSegs {
 			// every segment stats only has one token, avgdl = 1
-			registerSealedStats(s.delegator.idfOracle.(*idfOracle), segID, uint32(segID), uint32(segID)+1)
+			registerSealedStats(s.getIDFOracleForTest(), segID, uint32(segID), uint32(segID)+1)
 		}
 		snapshot := genSnapShot([]int64{1, 2, 3, 4}, []int64{}, 100)
 
-		s.delegator.idfOracle.SetNext(snapshot)
+		s.getIDFOracleForTest().SetNext(snapshot)
 		s.waitTargetVersion(snapshot.targetVersion)
 		placeholderGroupBytes, err := funcutil.FieldDataToPlaceholderGroupBytes(genStringFieldData("test bm25 data"))
 		s.NoError(err)
@@ -1153,7 +1594,7 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 			SerializedExprPlan: plan,
 			FieldId:            101,
 		}
-		avgdl, err := s.delegator.buildBM25IDF(req)
+		avgdl, err := s.delegator.buildBM25IDF(req, bm25Runner)
 		s.NoError(err)
 		s.Equal(float64(1), avgdl)
 
@@ -1183,7 +1624,7 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 			PlaceholderGroup: placeholderGroupBytes,
 			FieldId:          101,
 		}
-		_, err = s.delegator.buildBM25IDF(req)
+		_, err = s.delegator.buildBM25IDF(req, bm25Runner)
 		s.Error(err)
 	})
 
@@ -1196,7 +1637,7 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 			FieldId:          103, // invalid field id
 		}
 
-		_, err = s.delegator.buildBM25IDF(req)
+		_, err = s.delegator.buildBM25IDF(req, bm25Runner)
 		s.Error(err)
 	})
 
@@ -1204,9 +1645,7 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 		placeholderGroupBytes, err := funcutil.FieldDataToPlaceholderGroupBytes(genStringFieldData("test bm25 data"))
 		s.NoError(err)
 
-		oldRunner := s.delegator.functionRunners
 		mockRunner := function.NewMockFunctionRunner(s.T())
-		s.delegator.functionRunners = map[int64]function.FunctionRunner{101: mockRunner}
 		mockRunner.EXPECT().GetInputFields().Return([]*schemapb.FieldSchema{
 			{
 				FieldID:  101,
@@ -1215,15 +1654,11 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 			},
 		})
 		mockRunner.EXPECT().BatchRun(mock.Anything).Return(nil, errors.New("mock err"))
-		defer func() {
-			s.delegator.functionRunners = oldRunner
-		}()
-
 		req := &internalpb.SearchRequest{
 			PlaceholderGroup: placeholderGroupBytes,
 			FieldId:          101,
 		}
-		_, err = s.delegator.buildBM25IDF(req)
+		_, err = s.delegator.buildBM25IDF(req, mockRunner)
 		s.Error(err)
 	})
 
@@ -1231,9 +1666,7 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 		placeholderGroupBytes, err := funcutil.FieldDataToPlaceholderGroupBytes(genStringFieldData("test bm25 data"))
 		s.NoError(err)
 
-		oldRunner := s.delegator.functionRunners
 		mockRunner := function.NewMockFunctionRunner(s.T())
-		s.delegator.functionRunners = map[int64]function.FunctionRunner{101: mockRunner}
 		mockRunner.EXPECT().GetInputFields().Return([]*schemapb.FieldSchema{
 			{
 				FieldID:  101,
@@ -1242,15 +1675,11 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 			},
 		})
 		mockRunner.EXPECT().BatchRun(mock.Anything).Return([]interface{}{1}, nil)
-		defer func() {
-			s.delegator.functionRunners = oldRunner
-		}()
-
 		req := &internalpb.SearchRequest{
 			PlaceholderGroup: placeholderGroupBytes,
 			FieldId:          101,
 		}
-		_, err = s.delegator.buildBM25IDF(req)
+		_, err = s.delegator.buildBM25IDF(req, mockRunner)
 		s.Error(err)
 	})
 
@@ -1258,9 +1687,7 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 		placeholderGroupBytes, err := funcutil.FieldDataToPlaceholderGroupBytes(genStringFieldData("test bm25 data"))
 		s.NoError(err)
 
-		oldRunner := s.delegator.functionRunners
 		mockRunner := function.NewMockFunctionRunner(s.T())
-		s.delegator.functionRunners = map[int64]function.FunctionRunner{103: mockRunner}
 		mockRunner.EXPECT().GetInputFields().Return([]*schemapb.FieldSchema{
 			{
 				FieldID:  101,
@@ -1269,17 +1696,13 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 			},
 		})
 		mockRunner.EXPECT().BatchRun(mock.Anything).Return([]interface{}{&schemapb.SparseFloatArray{Contents: [][]byte{typeutil.CreateAndSortSparseFloatRow(map[uint32]float32{1: 1})}}}, nil)
-		defer func() {
-			s.delegator.functionRunners = oldRunner
-		}()
-
 		req := &internalpb.SearchRequest{
 			PlaceholderGroup: placeholderGroupBytes,
 			FieldId:          103, // invalid field
 		}
-		_, err = s.delegator.buildBM25IDF(req)
+		_, err = s.delegator.buildBM25IDF(req, mockRunner)
 		s.Error(err)
-		log.Info("test", zap.Error(err))
+		mlog.Info(context.TODO(), "test", mlog.Err(err))
 	})
 
 	s.Run("set avgdl failed", func() {
@@ -1287,11 +1710,11 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 		sealedSegs := []int64{1, 2, 3, 4}
 		for _, segID := range sealedSegs {
 			// every segment stats only has one token, avgdl = 1
-			registerSealedStats(s.delegator.idfOracle.(*idfOracle), segID, uint32(segID), uint32(segID)+1)
+			registerSealedStats(s.getIDFOracleForTest(), segID, uint32(segID), uint32(segID)+1)
 		}
 		snapshot := genSnapShot([]int64{1, 2, 3, 4}, []int64{}, 100)
 
-		s.delegator.idfOracle.SetNext(snapshot)
+		s.getIDFOracleForTest().SetNext(snapshot)
 		s.waitTargetVersion(snapshot.targetVersion)
 		placeholderGroupBytes, err := funcutil.FieldDataToPlaceholderGroupBytes(genStringFieldData("test bm25 data"))
 		s.NoError(err)
@@ -1300,7 +1723,7 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 			PlaceholderGroup: placeholderGroupBytes,
 			FieldId:          101,
 		}
-		_, err = s.delegator.buildBM25IDF(req)
+		_, err = s.delegator.buildBM25IDF(req, bm25Runner)
 		s.Error(err)
 	})
 }
@@ -1317,6 +1740,7 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 			ms.EXPECT().Collection().Return(info.GetCollectionID())
 			ms.EXPECT().Indexes().Return(nil)
 			ms.EXPECT().RowNum().Return(info.GetNumOfRows())
+			ms.EXPECT().LoadInfo().Return(info)
 			ms.EXPECT().Delete(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 			ms.EXPECT().MayPkExist(mock.Anything).Call.Return(func(pk storage.PrimaryKey) bool {
 				return pk.EQ(storage.NewInt64PrimaryKey(10))
@@ -1388,7 +1812,6 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 	})
 	s.Require().NoError(err)
 
-	s.delegator.distribution.Flush()
 	sealed, growing := s.delegator.GetSegmentInfo(false)
 	s.Require().Equal(1, len(sealed))
 	s.Equal(int64(1), sealed[0].NodeID)
@@ -1451,6 +1874,315 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 	req.Base.TargetID = 1
 	err = s.delegator.ReleaseSegments(ctx, req, false)
 	s.NoError(err)
+}
+
+func (s *DelegatorDataSuite) TestReleaseSegmentsWorkerNotAvailable() {
+	ctx := context.Background()
+	// the target worker is offline/unhealthy, GetWorker returns no worker
+	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).
+		Return(nil, merr.WrapErrNodeNotAvailable(1))
+
+	err := s.delegator.ReleaseSegments(ctx, &querypb.ReleaseSegmentsRequest{
+		Base:       commonpbutil.NewMsgBase(),
+		NodeID:     1,
+		SegmentIDs: []int64{1000},
+		Scope:      querypb.DataScope_All,
+	}, false)
+	s.Error(err)
+	// pin the contract: GetWorker's error code must reach the caller unmasked
+	s.ErrorIs(err, merr.ErrNodeNotAvailable)
+
+	// growingSegmentLock must be released even when the remote release fails,
+	// otherwise the channel's insert pipeline blocks forever
+	locked := s.delegator.growingSegmentLock.TryLock()
+	s.True(locked, "growingSegmentLock should be released after failed release")
+	if locked {
+		s.delegator.growingSegmentLock.Unlock()
+	}
+}
+
+func (s *DelegatorDataSuite) TestReleaseGrowingSourceAfterPreparedHandoff() {
+	ctx := context.Background()
+	s.workerManager = &cluster.MockManager{}
+	s.manager = segments.NewManager()
+	s.loader = &segments.MockLoader{}
+	s.genTextCollection()
+	s.enableGrowingSourceFlush()
+
+	delegator, err := NewShardDelegator(
+		ctx,
+		s.collectionID,
+		s.replicaID,
+		s.vchannelName,
+		s.version,
+		s.workerManager,
+		s.manager,
+		s.loader,
+		10000,
+		nil,
+		s.chunkManager,
+		NewChannelQueryView(nil, nil, nil, initialTargetVersion),
+		nil)
+	s.Require().NoError(err)
+	sd := delegator.(*shardDelegator)
+	defer sd.Close()
+
+	const (
+		segmentID    = int64(1001)
+		partitionID  = int64(500)
+		targetOffset = int64(10)
+	)
+
+	segment := segments.NewMockSegment(s.T())
+	segment.EXPECT().ID().Return(segmentID).Maybe()
+	segment.EXPECT().Version().Return(int64(1)).Maybe()
+	segment.EXPECT().Shard().Return(s.channel).Maybe()
+	segment.EXPECT().Collection().Return(s.collectionID).Maybe()
+	segment.EXPECT().Partition().Return(partitionID).Maybe()
+	segment.EXPECT().Type().Return(segments.SegmentTypeGrowing).Maybe()
+	segment.EXPECT().Level().Return(datapb.SegmentLevel_Legacy).Maybe()
+	segment.EXPECT().PinIfNotReleased().Return(nil).Once()
+	segment.EXPECT().InsertCount().Return(targetOffset).Once()
+	segment.EXPECT().MemSize().Return(int64(1024)).Once()
+	segment.EXPECT().Unpin().Maybe()
+
+	s.manager.Segment.Put(ctx, segments.SegmentTypeGrowing, segment)
+	sd.distribution.AddGrowing(SegmentEntry{
+		NodeID:      paramtable.GetNodeID(),
+		SegmentID:   segmentID,
+		PartitionID: partitionID,
+		Version:     1,
+	})
+	worker := &cluster.MockWorker{}
+	worker.EXPECT().ReleaseSegments(mock.Anything, mock.AnythingOfType("*querypb.ReleaseSegmentsRequest")).Return(nil).Once()
+	s.workerManager.EXPECT().GetWorker(mock.Anything, paramtable.GetNodeID()).Return(worker, nil).Once()
+
+	err = sd.growingSourceProvider.PrepareGrowingSourceReleaseHandoff(ctx, 10000, []syncmgr.GrowingSourceReleaseHandoffSegment{
+		{
+			SegmentID:    segmentID,
+			TargetOffset: targetOffset,
+		},
+	})
+	s.Require().NoError(err)
+
+	err = sd.ReleaseSegments(ctx, &querypb.ReleaseSegmentsRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		NodeID:       paramtable.GetNodeID(),
+		CollectionID: s.collectionID,
+		SegmentIDs:   []int64{segmentID},
+		Scope:        querypb.DataScope_Streaming,
+		Shard:        s.vchannelName,
+	}, false)
+	s.Require().NoError(err)
+}
+
+func (s *DelegatorDataSuite) TestReleaseGrowingSourceAfterFencePreparedHandoff() {
+	ctx := context.Background()
+	s.workerManager = &cluster.MockManager{}
+	s.manager = segments.NewManager()
+	s.loader = &segments.MockLoader{}
+	s.genTextCollection()
+	s.enableGrowingSourceFlush()
+
+	delegator, err := NewShardDelegator(
+		ctx,
+		s.collectionID,
+		s.replicaID,
+		s.vchannelName,
+		s.version,
+		s.workerManager,
+		s.manager,
+		s.loader,
+		10000,
+		nil,
+		s.chunkManager,
+		NewChannelQueryView(nil, nil, nil, initialTargetVersion),
+		nil)
+	s.Require().NoError(err)
+	sd := delegator.(*shardDelegator)
+	defer sd.Close()
+
+	const segmentID = int64(1001)
+	sd.distribution.AddGrowing(SegmentEntry{
+		NodeID:      paramtable.GetNodeID(),
+		SegmentID:   segmentID,
+		PartitionID: 500,
+		Version:     1,
+	})
+
+	err = sd.growingSourceProvider.PrepareGrowingSourceReleaseHandoff(ctx, 10000, []syncmgr.GrowingSourceReleaseHandoffSegment{
+		{SegmentID: segmentID},
+	})
+	s.Require().NoError(err)
+	worker := &cluster.MockWorker{}
+	worker.EXPECT().ReleaseSegments(mock.Anything, mock.AnythingOfType("*querypb.ReleaseSegmentsRequest")).Return(nil).Once()
+	s.workerManager.EXPECT().GetWorker(mock.Anything, paramtable.GetNodeID()).Return(worker, nil).Once()
+
+	err = sd.ReleaseSegments(ctx, &querypb.ReleaseSegmentsRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		NodeID:       paramtable.GetNodeID(),
+		CollectionID: s.collectionID,
+		SegmentIDs:   []int64{segmentID},
+		Scope:        querypb.DataScope_Streaming,
+		Shard:        s.vchannelName,
+		Checkpoint:   &msgpb.MsgPosition{Timestamp: 10000},
+	}, false)
+	s.Require().NoError(err)
+}
+
+func (s *DelegatorDataSuite) TestReleaseGrowingSourceAfterNoRetainPreparedHandoff() {
+	ctx := context.Background()
+	s.workerManager = &cluster.MockManager{}
+	s.manager = segments.NewManager()
+	s.loader = &segments.MockLoader{}
+	s.genTextCollection()
+	s.enableGrowingSourceFlush()
+
+	delegator, err := NewShardDelegator(
+		ctx,
+		s.collectionID,
+		s.replicaID,
+		s.vchannelName,
+		s.version,
+		s.workerManager,
+		s.manager,
+		s.loader,
+		10000,
+		nil,
+		s.chunkManager,
+		NewChannelQueryView(nil, nil, nil, initialTargetVersion),
+		nil)
+	s.Require().NoError(err)
+	sd := delegator.(*shardDelegator)
+	defer sd.Close()
+
+	const segmentID = int64(1001)
+	sd.distribution.AddGrowing(SegmentEntry{
+		NodeID:      paramtable.GetNodeID(),
+		SegmentID:   segmentID,
+		PartitionID: 500,
+		Version:     1,
+	})
+
+	err = sd.growingSourceProvider.PrepareGrowingSourceReleaseHandoff(ctx, 10000, []syncmgr.GrowingSourceReleaseHandoffSegment{
+		{SegmentID: segmentID},
+	})
+	s.Require().NoError(err)
+
+	worker := &cluster.MockWorker{}
+	worker.EXPECT().ReleaseSegments(mock.Anything, mock.AnythingOfType("*querypb.ReleaseSegmentsRequest")).Return(nil).Once()
+	s.workerManager.EXPECT().GetWorker(mock.Anything, paramtable.GetNodeID()).Return(worker, nil).Once()
+
+	err = sd.ReleaseSegments(ctx, &querypb.ReleaseSegmentsRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		NodeID:       paramtable.GetNodeID(),
+		CollectionID: s.collectionID,
+		SegmentIDs:   []int64{segmentID},
+		Scope:        querypb.DataScope_Streaming,
+		Shard:        s.vchannelName,
+		Checkpoint:   &msgpb.MsgPosition{Timestamp: 10000},
+	}, false)
+	s.Require().NoError(err)
+}
+
+func (s *DelegatorDataSuite) TestReleaseGrowingSourceWithoutPreparedHandoff() {
+	ctx := context.Background()
+	s.workerManager = &cluster.MockManager{}
+	s.manager = segments.NewManager()
+	s.loader = &segments.MockLoader{}
+	s.genTextCollection()
+	s.enableGrowingSourceFlush()
+
+	delegator, err := NewShardDelegator(
+		ctx,
+		s.collectionID,
+		s.replicaID,
+		s.vchannelName,
+		s.version,
+		s.workerManager,
+		s.manager,
+		s.loader,
+		10000,
+		nil,
+		s.chunkManager,
+		NewChannelQueryView(nil, nil, nil, initialTargetVersion),
+		nil)
+	s.Require().NoError(err)
+	sd := delegator.(*shardDelegator)
+	defer sd.Close()
+
+	const segmentID = int64(1001)
+	sd.distribution.AddGrowing(SegmentEntry{
+		NodeID:      paramtable.GetNodeID(),
+		SegmentID:   segmentID,
+		PartitionID: 500,
+		Version:     1,
+	})
+
+	worker := &cluster.MockWorker{}
+	worker.EXPECT().ReleaseSegments(mock.Anything, mock.AnythingOfType("*querypb.ReleaseSegmentsRequest")).Return(nil).Once()
+	s.workerManager.EXPECT().GetWorker(mock.Anything, paramtable.GetNodeID()).Return(worker, nil).Once()
+
+	err = sd.ReleaseSegments(ctx, &querypb.ReleaseSegmentsRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		NodeID:       paramtable.GetNodeID(),
+		CollectionID: s.collectionID,
+		SegmentIDs:   []int64{segmentID},
+		Scope:        querypb.DataScope_Streaming,
+		Shard:        s.vchannelName,
+		Checkpoint:   &msgpb.MsgPosition{Timestamp: 10000},
+	}, false)
+	s.Require().NoError(err)
+}
+
+func (s *DelegatorDataSuite) TestReleaseGrowingSourceDroppedChannelWithoutPreparedHandoff() {
+	ctx := context.Background()
+	s.workerManager = &cluster.MockManager{}
+	s.manager = segments.NewManager()
+	s.loader = &segments.MockLoader{}
+	s.genTextCollection()
+	s.enableGrowingSourceFlush()
+
+	delegator, err := NewShardDelegator(
+		ctx,
+		s.collectionID,
+		s.replicaID,
+		s.vchannelName,
+		s.version,
+		s.workerManager,
+		s.manager,
+		s.loader,
+		10000,
+		nil,
+		s.chunkManager,
+		NewChannelQueryView(nil, nil, nil, initialTargetVersion),
+		nil)
+	s.Require().NoError(err)
+	sd := delegator.(*shardDelegator)
+	defer sd.Close()
+
+	const segmentID = int64(1001)
+	sd.distribution.AddGrowing(SegmentEntry{
+		NodeID:      paramtable.GetNodeID(),
+		SegmentID:   segmentID,
+		PartitionID: 500,
+		Version:     1,
+	})
+
+	worker := &cluster.MockWorker{}
+	worker.EXPECT().ReleaseSegments(mock.Anything, mock.AnythingOfType("*querypb.ReleaseSegmentsRequest")).Return(nil).Once()
+	s.workerManager.EXPECT().GetWorker(mock.Anything, paramtable.GetNodeID()).Return(worker, nil).Once()
+
+	err = sd.ReleaseSegments(ctx, &querypb.ReleaseSegmentsRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		NodeID:       paramtable.GetNodeID(),
+		CollectionID: s.collectionID,
+		SegmentIDs:   []int64{segmentID},
+		Scope:        querypb.DataScope_Streaming,
+		Shard:        s.vchannelName,
+		Checkpoint:   &msgpb.MsgPosition{Timestamp: typeutil.MaxTimestamp},
+	}, false)
+	s.Require().NoError(err)
 }
 
 func (s *DelegatorDataSuite) TestLoadPartitionStats() {
@@ -1753,6 +2485,378 @@ func (s *DelegatorDataSuite) TestLoadSegmentsDoesNotBlockProcessDelete() {
 	s.False(processDeleteBlocked.Load(), "ProcessDelete was blocked for too long during LoadSegments — tsafe would freeze")
 }
 
+// TestLoadStreamDeletePhase3FlushStarvesProcessDelete is a minimal reproduction of issue
+// #49435 ("channel tsafe stalled" under concurrent Strong query + upsert).
+//
+// Root cause: loadStreamDelete Phase 3 holds deleteMut.RLock while doing the network
+// Flush() (worker.Delete). When that forward is slow — as happens under a post-compaction
+// load storm where the single worker is saturated — the live ProcessDelete, which needs
+// deleteMut.Lock (write) and is the ONLY thing that advances tsafe (deleteNode.Operate
+// calls ProcessDelete then UpdateTSafe on the same single-threaded flowgraph), is starved.
+// A frozen tsafe is exactly what makes Strong-consistency queries fail with
+// "channel tsafe stalled".
+//
+// This test makes the Phase-3 worker.Delete block (RLock held) and asserts ProcessDelete is
+// NOT starved. It FAILS on current code (Flush under RLock) and PASSES once the network Flush
+// is moved out of the RLock.
+func (s *DelegatorDataSuite) TestLoadStreamDeletePhase3FlushStarvesProcessDelete() {
+	defer func() {
+		s.workerManager.ExpectedCalls = nil
+		s.loader.ExpectedCalls = nil
+	}()
+
+	// BF matches only {10,20,30}, so Phase 3 forwards just a few rows — well under the 4MB
+	// ForwardBatchSize, guaranteeing worker.Delete is called ONLY in Phase 3's Flush (under
+	// RLock), never via a lock-free Phase 2 auto-sync.
+	s.loader.EXPECT().LoadBloomFilterSet(mock.Anything, s.collectionID, mock.Anything).
+		Call.Return(func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
+		return lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *pkoracle.BloomFilterSet {
+			bfs := pkoracle.NewBloomFilterSet(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed)
+			bf := bloomfilter.NewBloomFilterWithType(
+				paramtable.Get().CommonCfg.BloomFilterSize.GetAsUint(),
+				paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat(),
+				paramtable.Get().CommonCfg.BloomFilterType.GetValue())
+			pks := &storage.PkStatistics{PkFilter: bf}
+			pks.UpdatePKRange(&storage.Int64FieldData{Data: []int64{10, 20, 30}})
+			bfs.AddHistoricalStats(pks)
+			return bfs
+		})
+	}, func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) error {
+		return nil
+	})
+
+	worker1 := &cluster.MockWorker{}
+	worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).Return(nil)
+
+	// Block the Phase-3 Flush's worker.Delete, simulating a worker saturated by the load storm.
+	// Signal once we are inside it — at that point Phase 3 is holding deleteMut.RLock.
+	deleteEntered := make(chan struct{})
+	releaseDelete := make(chan struct{})
+	var once sync.Once
+	worker1.EXPECT().Delete(mock.Anything, mock.AnythingOfType("*querypb.DeleteRequest")).
+		RunAndReturn(func(ctx context.Context, req *querypb.DeleteRequest) error {
+			once.Do(func() { close(deleteEntered) })
+			<-releaseDelete
+			return nil
+		})
+	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Return(worker1, nil)
+
+	// Pre-populate the delete buffer so loadStreamDelete has historical deletes to replay.
+	for i := 0; i < 100; i++ {
+		s.delegator.ProcessDelete([]*DeleteData{{
+			PartitionID: 500,
+			PrimaryKeys: []storage.PrimaryKey{storage.NewInt64PrimaryKey(int64(i))},
+			Timestamps:  []uint64{uint64(10 + i)},
+			RowCount:    1,
+		}}, uint64(10+i))
+	}
+
+	// Start the segment load; its Phase-3 Flush blocks in worker.Delete while holding RLock.
+	go func() {
+		_ = s.delegator.LoadSegments(context.Background(), &querypb.LoadSegmentsRequest{
+			Base:         commonpbutil.NewMsgBase(),
+			DstNodeID:    1,
+			CollectionID: s.collectionID,
+			Infos: []*querypb.SegmentLoadInfo{{
+				SegmentID:     300,
+				PartitionID:   500,
+				StartPosition: &msgpb.MsgPosition{Timestamp: 5},
+				DeltaPosition: &msgpb.MsgPosition{Timestamp: 5},
+				Level:         datapb.SegmentLevel_L1,
+				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
+			}},
+		})
+	}()
+
+	// Wait until Phase 3 is inside the blocked worker.Delete, i.e. holding deleteMut.RLock.
+	select {
+	case <-deleteEntered:
+	case <-time.After(5 * time.Second):
+		close(releaseDelete)
+		s.FailNow("loadStreamDelete never reached Phase-3 worker.Delete")
+	}
+
+	// A live delete now arrives on the flowgraph. ProcessDelete needs deleteMut.Lock (write);
+	// tsafe advancement depends on it completing. It must NOT be starved by the Phase-3 RLock.
+	processDone := make(chan struct{})
+	go func() {
+		s.delegator.ProcessDelete([]*DeleteData{{
+			PartitionID: 500,
+			PrimaryKeys: []storage.PrimaryKey{storage.NewInt64PrimaryKey(999)},
+			Timestamps:  []uint64{200},
+			RowCount:    1,
+		}}, 200)
+		close(processDone)
+	}()
+
+	starved := false
+	select {
+	case <-processDone:
+	case <-time.After(time.Second):
+		starved = true // still blocked while Phase 3 holds RLock during the slow Flush
+	}
+
+	close(releaseDelete) // let the load finish
+	<-processDone        // ProcessDelete returns once the RLock is released
+
+	s.False(starved, "ProcessDelete (and thus tsafe) was starved by loadStreamDelete Phase-3 RLock-during-Flush — issue #49435")
+}
+
+// TestLoadStreamDeleteCatchUpFlushDoesNotStarveProcessDelete covers the catch-up
+// path specifically (issue #49435 adversarial review): a delete that arrives
+// AFTER the Phase-1 snapshot is forwarded during catch-up. The catch-up
+// worker.Delete must run without deleteMut.RLock held, so a saturated worker
+// there must not starve the live ProcessDelete either. This FAILS if the final
+// catch-up forward is done under the lock, and PASSES once catch-up forwards
+// lock-free.
+func (s *DelegatorDataSuite) TestLoadStreamDeleteCatchUpFlushDoesNotStarveProcessDelete() {
+	defer func() {
+		s.workerManager.ExpectedCalls = nil
+		s.loader.ExpectedCalls = nil
+	}()
+
+	// BF matches {10,20,30}: small batches, so worker.Delete is reached only via
+	// explicit Flush, never a lock-free auto-sync over ForwardBatchSize.
+	s.loader.EXPECT().LoadBloomFilterSet(mock.Anything, s.collectionID, mock.Anything).
+		Call.Return(func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
+		return lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *pkoracle.BloomFilterSet {
+			bfs := pkoracle.NewBloomFilterSet(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed)
+			bf := bloomfilter.NewBloomFilterWithType(
+				paramtable.Get().CommonCfg.BloomFilterSize.GetAsUint(),
+				paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat(),
+				paramtable.Get().CommonCfg.BloomFilterType.GetValue())
+			pks := &storage.PkStatistics{PkFilter: bf}
+			pks.UpdatePKRange(&storage.Int64FieldData{Data: []int64{10, 20, 30}})
+			bfs.AddHistoricalStats(pks)
+			return bfs
+		})
+	}, func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) error {
+		return nil
+	})
+
+	worker1 := &cluster.MockWorker{}
+	worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).Return(nil)
+	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Return(worker1, nil)
+
+	// worker.Delete: the FIRST call is the bulk-snapshot flush (lock-free). Inside
+	// it, inject a NEW delete (pk 20, later ts) so the catch-up round has a record
+	// to forward. Every SUBSEQUENT call (the catch-up flush) blocks, simulating a
+	// worker still saturated by the load storm; signal once we're inside it.
+	deleteEntered := make(chan struct{})
+	releaseDelete := make(chan struct{})
+	var callNo atomic.Int32
+	var enterOnce sync.Once
+	worker1.EXPECT().Delete(mock.Anything, mock.AnythingOfType("*querypb.DeleteRequest")).
+		RunAndReturn(func(ctx context.Context, req *querypb.DeleteRequest) error {
+			if callNo.Add(1) == 1 {
+				// Bulk flush done lock-free; a live delete arrives now and lands
+				// after the Phase-1 snapshot, so it must be caught up.
+				s.delegator.ProcessDelete([]*DeleteData{{
+					PartitionID: 500,
+					PrimaryKeys: []storage.PrimaryKey{storage.NewInt64PrimaryKey(20)},
+					Timestamps:  []uint64{200},
+					RowCount:    1,
+				}}, 200)
+				return nil
+			}
+			enterOnce.Do(func() { close(deleteEntered) })
+			<-releaseDelete
+			return nil
+		})
+
+	// Pre-populate the delete buffer (the Phase-1 snapshot).
+	for i := 0; i < 100; i++ {
+		s.delegator.ProcessDelete([]*DeleteData{{
+			PartitionID: 500,
+			PrimaryKeys: []storage.PrimaryKey{storage.NewInt64PrimaryKey(int64(i))},
+			Timestamps:  []uint64{uint64(10 + i)},
+			RowCount:    1,
+		}}, uint64(10+i))
+	}
+
+	go func() {
+		_ = s.delegator.LoadSegments(context.Background(), &querypb.LoadSegmentsRequest{
+			Base:         commonpbutil.NewMsgBase(),
+			DstNodeID:    1,
+			CollectionID: s.collectionID,
+			Infos: []*querypb.SegmentLoadInfo{{
+				SegmentID:     301,
+				PartitionID:   500,
+				StartPosition: &msgpb.MsgPosition{Timestamp: 5},
+				DeltaPosition: &msgpb.MsgPosition{Timestamp: 5},
+				Level:         datapb.SegmentLevel_L1,
+				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
+			}},
+		})
+	}()
+
+	// Wait until the catch-up flush is inside the blocked worker.Delete.
+	select {
+	case <-deleteEntered:
+	case <-time.After(5 * time.Second):
+		close(releaseDelete)
+		s.FailNow("loadStreamDelete never reached the catch-up worker.Delete")
+	}
+
+	// A live delete arrives; ProcessDelete needs deleteMut.Lock and must not be
+	// starved by the (now lock-free) catch-up flush.
+	processDone := make(chan struct{})
+	go func() {
+		s.delegator.ProcessDelete([]*DeleteData{{
+			PartitionID: 500,
+			PrimaryKeys: []storage.PrimaryKey{storage.NewInt64PrimaryKey(999)},
+			Timestamps:  []uint64{300},
+			RowCount:    1,
+		}}, 300)
+		close(processDone)
+	}()
+
+	starved := false
+	select {
+	case <-processDone:
+	case <-time.After(time.Second):
+		starved = true
+	}
+
+	close(releaseDelete)
+	<-processDone
+
+	s.False(starved, "ProcessDelete was starved by the catch-up worker.Delete holding deleteMut.RLock — issue #49435")
+}
+
+// TestLoadStreamDeleteCatchUpPastCapTerminatesWithFinalBarrier covers the
+// adversarial cap path: catch-up keeps seeing new delete records past the
+// lock-free rounds. loadStreamDelete must eventually stop waiting for a
+// globally quiet delete stream by applying one final locked tail and publishing
+// the segment before releasing deleteMut.
+func (s *DelegatorDataSuite) TestLoadStreamDeleteCatchUpPastCapTerminatesWithFinalBarrier() {
+	defer func() {
+		s.workerManager.ExpectedCalls = nil
+		s.loader.ExpectedCalls = nil
+	}()
+
+	s.loader.EXPECT().LoadBloomFilterSet(mock.Anything, s.collectionID, mock.Anything).
+		Call.Return(func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
+		return lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *pkoracle.BloomFilterSet {
+			bfs := pkoracle.NewBloomFilterSet(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed)
+			bf := bloomfilter.NewBloomFilterWithType(
+				paramtable.Get().CommonCfg.BloomFilterSize.GetAsUint(),
+				paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat(),
+				paramtable.Get().CommonCfg.BloomFilterType.GetValue())
+			pks := &storage.PkStatistics{PkFilter: bf}
+			pks.UpdatePKRange(&storage.Int64FieldData{Data: []int64{10, 20, 30}})
+			bfs.AddHistoricalStats(pks)
+			return bfs
+		})
+	}, func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) error {
+		return nil
+	})
+
+	worker1 := &cluster.MockWorker{}
+	worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).Return(nil)
+	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Return(worker1, nil)
+
+	finalBarrierEntered := make(chan struct{})
+	releaseFinalBarrier := make(chan struct{})
+	var releaseFinalOnce sync.Once
+	defer releaseFinalOnce.Do(func() { close(releaseFinalBarrier) })
+	var callNo atomic.Int32
+	var finalOnce sync.Once
+	worker1.EXPECT().Delete(mock.Anything, mock.AnythingOfType("*querypb.DeleteRequest")).
+		RunAndReturn(func(ctx context.Context, req *querypb.DeleteRequest) error {
+			call := callNo.Add(1)
+			if call <= 6 {
+				// Keep one matching delete arriving after every lock-free
+				// catch-up flush. Call 1 is the bulk snapshot flush; calls
+				// 2-6 are catch-up rounds 0-4, so the next round reaches the
+				// maxLockFreeCatchUpRounds cap with remaining > 0.
+				ts := uint64(199 + call)
+				s.delegator.ProcessDelete([]*DeleteData{{
+					PartitionID: 500,
+					PrimaryKeys: []storage.PrimaryKey{
+						storage.NewInt64PrimaryKey(20),
+					},
+					Timestamps: []uint64{ts},
+					RowCount:   1,
+				}}, ts)
+				return nil
+			}
+			finalOnce.Do(func() { close(finalBarrierEntered) })
+			<-releaseFinalBarrier
+			return nil
+		})
+
+	for i := 0; i < 100; i++ {
+		s.delegator.ProcessDelete([]*DeleteData{{
+			PartitionID: 500,
+			PrimaryKeys: []storage.PrimaryKey{
+				storage.NewInt64PrimaryKey(int64(i)),
+			},
+			Timestamps: []uint64{uint64(10 + i)},
+			RowCount:   1,
+		}}, uint64(10+i))
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	loadDone := make(chan error, 1)
+	go func() {
+		loadDone <- s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+			Base:         commonpbutil.NewMsgBase(),
+			DstNodeID:    1,
+			CollectionID: s.collectionID,
+			Infos: []*querypb.SegmentLoadInfo{{
+				SegmentID:     302,
+				PartitionID:   500,
+				StartPosition: &msgpb.MsgPosition{Timestamp: 5},
+				DeltaPosition: &msgpb.MsgPosition{Timestamp: 5},
+				Level:         datapb.SegmentLevel_L1,
+				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
+			}},
+		})
+	}()
+
+	select {
+	case <-finalBarrierEntered:
+	case <-time.After(5 * time.Second):
+		releaseFinalOnce.Do(func() { close(releaseFinalBarrier) })
+		s.FailNow("loadStreamDelete never reached the final locked catch-up barrier")
+	}
+
+	// A live delete attempts to arrive while the final barrier holds RLock. It is
+	// allowed to wait briefly here; the point of the barrier is that loadStreamDelete
+	// now terminates instead of chasing new arrivals forever.
+	processDone := make(chan struct{})
+	go func() {
+		s.delegator.ProcessDelete([]*DeleteData{{
+			PartitionID: 500,
+			PrimaryKeys: []storage.PrimaryKey{
+				storage.NewInt64PrimaryKey(999),
+			},
+			Timestamps: []uint64{300},
+			RowCount:   1,
+		}}, 300)
+		close(processDone)
+	}()
+
+	releaseFinalOnce.Do(func() { close(releaseFinalBarrier) })
+
+	select {
+	case err := <-loadDone:
+		s.NoError(err)
+	case <-time.After(2 * time.Second):
+		s.FailNow("loadStreamDelete did not terminate after the final locked catch-up barrier")
+	}
+
+	select {
+	case <-processDone:
+	case <-time.After(2 * time.Second):
+		s.FailNow("ProcessDelete did not resume after the final locked catch-up barrier")
+	}
+
+	s.GreaterOrEqual(callNo.Load(), int32(7), "loadStreamDelete should reach the post-cap final barrier")
+}
+
 func (s *DelegatorDataSuite) TestDelegatorData_ExcludeSegments() {
 	s.delegator.AddExcludedSegments(map[int64]uint64{
 		1: 3,
@@ -1765,18 +2869,6 @@ func (s *DelegatorDataSuite) TestDelegatorData_ExcludeSegments() {
 	s.delegator.TryCleanExcludedSegments(4)
 	s.True(s.delegator.VerifyExcludedSegments(1, 1))
 	s.True(s.delegator.VerifyExcludedSegments(1, 5))
-}
-
-func (s *DelegatorDataSuite) TestProcessManualFlush_NilManager() {
-	// When growingFlushManager is nil (non-TEXT collection), should return immediately without panic
-	s.Nil(s.delegator.growingFlushManager)
-	s.delegator.ProcessManualFlush(context.Background(), 1000)
-}
-
-func (s *DelegatorDataSuite) TestProcessManualFlush_NilTracker() {
-	// When checkpointTracker is nil, should return immediately without panic
-	s.delegator.checkpointTracker = nil
-	s.delegator.ProcessManualFlush(context.Background(), 1000)
 }
 
 func TestSegmentEffectiveTs(t *testing.T) {

@@ -18,16 +18,43 @@ package paramtable
 
 import (
 	"strings"
+	"time"
 )
 
 type functionConfig struct {
 	BatchFactor                   ParamItem  `refreshable:"true"`
+	ModelRequestTimeout           ParamItem  `refreshable:"true"`
 	TextEmbeddingProviders        ParamGroup `refreshable:"true"`
 	RerankModelProviders          ParamGroup `refreshable:"true"`
 	LocalResourcePath             ParamItem  `refreshable:"true"`
 	LinderaDownloadUrls           ParamGroup `refreshable:"true"`
 	ZillizProviders               ParamGroup `refreshable:"true"`
 	AnalyzerConcurrencyPerCPUCore ParamItem  `refreshable:"true"`
+	AnalyzerRunnerConcurrency     ParamItem  `refreshable:"true"`
+	// EnableWriteBeforeMaterialization gates the write-before function
+	// materialization (streamingnode materializes BM25/embedding function
+	// output fields before WAL append). Default "auto": it is switched on
+	// automatically once the whole cluster has confirmed version >= 2.6.23
+	// (plus the SwitchDelay stability window); before that the write path keeps
+	// the legacy format. Explicit "false" keeps legacy format forever (escape
+	// hatch); explicit "true" force-enables and bypasses the version gate (use
+	// with caution).
+	//
+	// Notes on the auto-switch behavior:
+	//   - The flip is a one-shot decision taken by the MixCoord confirmator:
+	//     once it flips the value to "true" it writes the config-center (etcd)
+	//     key, which then outranks file/env sources per the usual config
+	//     priority. After the flip, the only working override is the etcd
+	//     config-center key itself (`<etcd.rootPath>/config/<key>`); a "false"
+	//     set in milvus.yaml or env afterwards is silently ignored. Explicit
+	//     "false"/"true" set before the flip (in any source) is honored and
+	//     skips the etcd write.
+	//   - Setting "false" at startup makes the gate resolve immediately and the
+	//     confirmator exits; reverting "false" back to "auto" at runtime does
+	//     not re-arm the gate (the confirmator is one-shot), so the flip only
+	//     takes effect after a MixCoord restart. Operators can still intervene
+	//     at any time by setting "true" or "false" explicitly.
+	EnableWriteBeforeMaterialization ParamItem `refreshable:"true"`
 }
 
 func (p *functionConfig) init(base *BaseTable) {
@@ -37,6 +64,15 @@ func (p *functionConfig) init(base *BaseTable) {
 		DefaultValue: "5",
 	}
 	p.BatchFactor.Init(base.mgr)
+
+	p.ModelRequestTimeout = ParamItem{
+		Key:          "function.model.requestTimeout",
+		Version:      "2.6.12",
+		DefaultValue: "30s",
+		Export:       true,
+		Doc:          "Global timeout for external model requests, e.g. 30s. Function param timeout_ms overrides it.",
+	}
+	p.ModelRequestTimeout.Init(base.mgr)
 
 	p.TextEmbeddingProviders = ParamGroup{
 		KeyPrefix: "function.textEmbedding.providers.",
@@ -108,6 +144,12 @@ func (p *functionConfig) init(base *BaseTable) {
 				return "Your Gemini embedding url, Default is the official embedding url"
 			case "gemini.enable":
 				return "Whether to enable Gemini model service"
+			case "huggingface.credential":
+				return "The name in the credential configuration item"
+			case "huggingface.url":
+				return "Your Hugging Face Inference Providers router URL, default is https://router.huggingface.co"
+			case "huggingface.enable":
+				return "Whether to enable Hugging Face text embedding service"
 			default:
 				return ""
 			}
@@ -147,6 +189,12 @@ func (p *functionConfig) init(base *BaseTable) {
 				return "Your cohere rerank url, Default is the official rerank url"
 			case "cohere.enable":
 				return "Whether to enable cohere model service"
+			case "huggingface.credential":
+				return "The name in the credential configuration item"
+			case "huggingface.url":
+				return "Your Hugging Face Inference Providers router URL, default is https://router.huggingface.co"
+			case "huggingface.enable":
+				return "Whether to enable Hugging Face rerank service"
 			default:
 				return ""
 			}
@@ -182,6 +230,31 @@ func (p *functionConfig) init(base *BaseTable) {
 		DefaultValue: "8",
 	}
 	p.AnalyzerConcurrencyPerCPUCore.Init(base.mgr)
+
+	p.AnalyzerRunnerConcurrency = ParamItem{
+		Key:          "function.analyzer.runner_concurrency",
+		Version:      "2.6.8",
+		Export:       true,
+		Doc:          "The concurrency for each function runner to tokenize text",
+		DefaultValue: "8",
+	}
+	p.AnalyzerRunnerConcurrency.Init(base.mgr)
+
+	p.EnableWriteBeforeMaterialization = ParamItem{
+		Key:          "function.enableWriteBeforeMaterialization",
+		Version:      "2.6.23",
+		Export:       false,
+		Doc:          "Whether to materialize function output fields (e.g. BM25 sparse vectors) before WAL append. auto: switch on automatically once the whole cluster reaches 2.6.23 and the stability window elapses; false: always keep the legacy format (escape hatch); true: force enable and bypass the version gate (use with caution).",
+		DefaultValue: "auto",
+		VersionGateSwitcher: &VersionGateSwitcher{
+			EnableAutoSwitchValue: "auto",
+			PreSwitchValue:        "false", // before the gate is activated the write path keeps the legacy format
+			GateVersion:           "2.6.23",
+			TargetValue:           "true",
+			SwitchDelay:           1 * time.Minute,
+		},
+	}
+	p.EnableWriteBeforeMaterialization.Init(base.mgr)
 }
 
 func (p *functionConfig) GetTextEmbeddingProviderConfig(providerName string) map[string]string {
@@ -204,6 +277,14 @@ func (p *functionConfig) GetBatchFactor() int {
 		factor = 1
 	}
 	return factor
+}
+
+func (p *functionConfig) GetAnalyzerRunnerConcurrency() int {
+	concurrency := p.AnalyzerRunnerConcurrency.GetAsInt()
+	if concurrency <= 0 {
+		concurrency = 1
+	}
+	return concurrency
 }
 
 func (p *functionConfig) GetRerankModelProviders(providerName string) map[string]string {

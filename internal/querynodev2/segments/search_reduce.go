@@ -2,14 +2,12 @@ package segments
 
 import (
 	"context"
-	"fmt"
 
 	"go.opentelemetry.io/otel"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/reduce"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -30,7 +28,7 @@ func getSearchResultDedupKey(data *schemapb.SearchResultData, idx int64, pk inte
 	}
 	elementIndices := data.GetElementIndices()
 	if elementIndices == nil || idx < 0 || idx >= int64(len(elementIndices.GetData())) {
-		return nil, fmt.Errorf("element-level search result missing element index at offset %d", idx)
+		return nil, merr.WrapErrServiceInternalMsg("element-level search result missing element index at offset %d", idx)
 	}
 	return elementSearchResultKey{
 		pk:           pk,
@@ -40,10 +38,18 @@ func getSearchResultDedupKey(data *schemapb.SearchResultData, idx int64, pk inte
 
 type SearchCommonReduce struct{}
 
+func reduceFieldsDataLen(searchResultData []*schemapb.SearchResultData) int {
+	for _, data := range searchResultData {
+		if len(data.GetFieldsData()) > 0 {
+			return len(data.GetFieldsData())
+		}
+	}
+	return 0
+}
+
 func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searchResultData []*schemapb.SearchResultData, info *reduce.ResultInfo) (*schemapb.SearchResultData, error) {
 	ctx, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "ReduceSearchResultData")
 	defer sp.End()
-	log := log.Ctx(ctx)
 
 	if len(searchResultData) == 0 {
 		return &schemapb.SearchResultData{
@@ -52,7 +58,7 @@ func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searc
 			FieldsData: make([]*schemapb.FieldData, 0),
 			Scores:     make([]float32, 0),
 			Ids:        &schemapb.IDs{},
-			Topks:      make([]int64, 0),
+			Topks:      make([]int64, int(info.GetNq())),
 		}, nil
 	}
 	nq := info.GetNq()
@@ -60,7 +66,7 @@ func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searc
 	ret := &schemapb.SearchResultData{
 		NumQueries: nq,
 		TopK:       topk,
-		FieldsData: make([]*schemapb.FieldData, len(searchResultData[0].FieldsData)),
+		FieldsData: make([]*schemapb.FieldData, reduceFieldsDataLen(searchResultData)),
 		Scores:     make([]float32, 0, nq*topk),
 		Ids:        &schemapb.IDs{},
 		Topks:      make([]int64, 0, nq),
@@ -84,7 +90,7 @@ func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searc
 				if ids == nil || typeutil.GetSizeOfIDs(ids) == 0 {
 					data.ElementIndices = &schemapb.LongArray{}
 				} else {
-					return nil, fmt.Errorf("inconsistent element-level flag in search results: result has data but missing ElementIndices at index %d", i)
+					return nil, merr.WrapErrServiceInternalMsg("inconsistent element-level flag in search results: result has data but missing ElementIndices at index %d", i)
 				}
 			}
 		}
@@ -97,7 +103,7 @@ func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searc
 	totalOffsetElements := 0
 	for i, data := range searchResultData {
 		if int64(len(data.Topks)) < nq {
-			return nil, fmt.Errorf("invalid search result topks length at index %d: got %d, expected at least %d", i, len(data.Topks), nq)
+			return nil, merr.WrapErrServiceInternalMsg("invalid search result topks length at index %d: got %d, expected at least %d", i, len(data.Topks), nq)
 		}
 		totalOffsetElements += len(data.Topks)
 	}
@@ -161,17 +167,17 @@ func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searc
 		}
 
 		// if realTopK != -1 && realTopK != j {
-		// 	log.Warn("Proxy Reduce Search Result", zap.Error(errors.New("the length (topk) between all result of query is different")))
+		// 	log.Warn(ctx, "Proxy Reduce Search Result", mlog.Err(errors.New("the length (topk) between all result of query is different")))
 		// 	// return nil, errors.New("the length (topk) between all result of query is different")
 		// }
 		ret.Topks = append(ret.Topks, j)
 
 		// limit search result to avoid oom
 		if retSize > maxOutputSize {
-			return nil, fmt.Errorf("search results exceed the maxOutputSize Limit %d", maxOutputSize)
+			return nil, merr.WrapErrParameterInvalidMsg("search results exceed the maxOutputSize Limit %d", maxOutputSize)
 		}
 	}
-	log.Debug("skip duplicated search result", zap.Int64("count", skipDupCnt))
+	mlog.Debug(ctx, "skip duplicated search result", mlog.Int64("count", skipDupCnt))
 	return ret, nil
 }
 
@@ -180,10 +186,9 @@ type SearchGroupByReduce struct{}
 func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, searchResultData []*schemapb.SearchResultData, info *reduce.ResultInfo) (*schemapb.SearchResultData, error) {
 	ctx, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "ReduceSearchResultData")
 	defer sp.End()
-	log := log.Ctx(ctx)
 
 	if len(searchResultData) == 0 {
-		log.Debug("Shortcut return SearchGroupByReduce, directly return empty result", zap.Any("result info", info))
+		mlog.Debug(ctx, "Shortcut return SearchGroupByReduce, directly return empty result", mlog.Any("result info", info))
 		return &schemapb.SearchResultData{
 			NumQueries: info.GetNq(),
 			TopK:       info.GetTopK(),
@@ -198,7 +203,7 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 	ret := &schemapb.SearchResultData{
 		NumQueries: nq,
 		TopK:       topk,
-		FieldsData: make([]*schemapb.FieldData, len(searchResultData[0].FieldsData)),
+		FieldsData: make([]*schemapb.FieldData, reduceFieldsDataLen(searchResultData)),
 		Scores:     make([]float32, 0, nq*topk),
 		Ids:        &schemapb.IDs{},
 		Topks:      make([]int64, 0, nq),
@@ -222,7 +227,7 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 				if ids == nil || typeutil.GetSizeOfIDs(ids) == 0 {
 					data.ElementIndices = &schemapb.LongArray{}
 				} else {
-					return nil, fmt.Errorf("inconsistent element-level flag in search results: result has data but missing ElementIndices at index %d", i)
+					return nil, merr.WrapErrServiceInternalMsg("inconsistent element-level flag in search results: result has data but missing ElementIndices at index %d", i)
 				}
 			}
 		}
@@ -235,7 +240,7 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 	totalOffsetElements := 0
 	for i, data := range searchResultData {
 		if int64(len(data.Topks)) < nq {
-			return nil, fmt.Errorf("invalid search result topks length at index %d: got %d, expected at least %d", i, len(data.Topks), nq)
+			return nil, merr.WrapErrServiceInternalMsg("invalid search result topks length at index %d: got %d, expected at least %d", i, len(data.Topks), nq)
 		}
 		totalOffsetElements += len(data.Topks)
 	}
@@ -300,19 +305,19 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 		ret.Topks = append(ret.Topks, j)
 
 		if retSize > maxOutputSize {
-			return nil, fmt.Errorf("search results exceed the maxOutputSize Limit %d", maxOutputSize)
+			return nil, merr.WrapErrParameterInvalidMsg("search results exceed the maxOutputSize Limit %d", maxOutputSize)
 		}
 	}
 	if err := writeGroupByOutput(ret, acceptedRows, searchResultData, info); err != nil {
-		return ret, merr.WrapErrServiceInternal("failed to construct group by output", err.Error())
+		return ret, merr.Wrap(err, "failed to construct group by output")
 	}
 	if float64(filteredCount) >= 0.3*float64(groupBound) {
-		log.Warn("GroupBy reduce filtered too many results, "+
+		mlog.Warn(ctx, "GroupBy reduce filtered too many results, "+
 			"this may influence the final result seriously",
-			zap.Int64("filteredCount", filteredCount),
-			zap.Int64("groupBound", groupBound))
+			mlog.Int64("filteredCount", filteredCount),
+			mlog.Int64("groupBound", groupBound))
 	}
-	log.Debug("skip duplicated search result", zap.Int64("count", filteredCount))
+	mlog.Debug(ctx, "skip duplicated search result", mlog.Int64("count", filteredCount))
 	return ret, nil
 }
 
@@ -396,7 +401,7 @@ func reduceGroupBySinglePerNq(
 		}
 		offsets[sel]++
 	}
-	return
+	return j, filtered, retSize, err
 }
 
 // reduceGroupByMultiPerNq is the N>=2 per-nq hot loop: uint64 hash map with
@@ -462,7 +467,7 @@ func reduceGroupByMultiPerNq(
 		}
 		offsets[sel]++
 	}
-	return
+	return j, filtered, retSize, err
 }
 
 // keyExtractor returns (hash, normalized values) for the row at idx. The hash

@@ -21,6 +21,7 @@ import (
 	"strconv"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // properties keys
@@ -36,8 +37,10 @@ const (
 	CollectionIDKey = "collection_id"
 
 	// result
-	StateKey  = "task_state"
-	ReasonKey = "task_reason"
+	StateKey      = "task_state"
+	ReasonKey     = "task_reason"
+	CostTimeKey   = "cost_time"
+	CostCPUNumKey = "cost_cpu_num"
 )
 
 type Properties map[string]string
@@ -50,7 +53,10 @@ func NewProperties(properties map[string]string) Properties {
 }
 
 func WrapErrTaskPropertyLack(lackProperty string, taskID any) error {
-	return fmt.Errorf("cannot find property '%s' for task '%v'", lackProperty, taskID)
+	// Task properties are populated by the coordinator, never by user input, so a
+	// missing property is an internal protocol violation (e.g. a mixed-version
+	// rolling upgrade), not a user error.
+	return merr.WrapErrServiceInternalMsg("cannot find property '%s' for task '%v'", lackProperty, taskID)
 }
 
 func (p Properties) AppendClusterID(clusterID string) {
@@ -63,7 +69,7 @@ func (p Properties) AppendTaskID(taskID int64) {
 
 func (p Properties) AppendType(t Type) {
 	switch t {
-	case PreImport, Import, Compaction, Index, Stats, Analyze, RefreshExternalCollection, CopySegment:
+	case PreImport, Import, Compaction, Index, Stats, Analyze, RefreshExternalCollection, CopySegment, ExternalCopySegment:
 		p[TypeKey] = t
 	default:
 		p[TypeKey] = TypeNone
@@ -98,15 +104,27 @@ func (p Properties) AppendTaskState(state State) {
 	p[StateKey] = state.String()
 }
 
+func (p Properties) AppendCostTime(costTime int64) {
+	p[CostTimeKey] = fmt.Sprintf("%d", costTime)
+}
+
+func (p Properties) AppendCostCPUNum(costCPUNum int64) {
+	p[CostCPUNumKey] = fmt.Sprintf("%d", costCPUNum)
+}
+
 func (p Properties) GetTaskType() (Type, error) {
 	if _, ok := p[TypeKey]; !ok {
 		return "", WrapErrTaskPropertyLack(TypeKey, p[TaskIDKey])
 	}
 	switch p[TypeKey] {
-	case PreImport, Import, Compaction, Index, Stats, Analyze, RefreshExternalCollection, CopySegment:
+	case PreImport, Import, Compaction, Index, Stats, Analyze, RefreshExternalCollection, CopySegment, ExternalCopySegment:
 		return p[TypeKey], nil
 	default:
-		return p[TypeKey], fmt.Errorf("unrecognized task type '%s', taskID=%s", p[TypeKey], p[TaskIDKey])
+		// Task types are assigned by the coordinator. An unrecognized type means
+		// this worker does not implement the coordinator's task protocol, which is
+		// a system capability mismatch rather than invalid user input.
+		return p[TypeKey], merr.Wrapf(merr.ErrServiceUnimplemented,
+			"unrecognized task type '%s', taskID=%s", p[TypeKey], p[TaskIDKey])
 	}
 }
 
@@ -151,7 +169,7 @@ func (p Properties) GetTaskState() (State, error) {
 	}
 	stateStr := p[StateKey]
 	if _, ok := indexpb.JobState_value[stateStr]; !ok {
-		return None, fmt.Errorf("invalid task state '%v', taskID=%s", stateStr, p[TaskIDKey])
+		return None, merr.WrapErrParameterInvalidMsg("invalid task state '%v', taskID=%s", stateStr, p[TaskIDKey])
 	}
 	return State(indexpb.JobState_value[stateStr]), nil
 }
@@ -198,4 +216,26 @@ func (p Properties) GetCollectionID() (int64, error) {
 		return 0, err
 	}
 	return collectionID, nil
+}
+
+func (p Properties) GetCostTime() int64 {
+	if _, ok := p[CostTimeKey]; !ok {
+		return 0
+	}
+	costTime, err := strconv.ParseInt(p[CostTimeKey], 10, 64)
+	if err != nil {
+		return 0
+	}
+	return costTime
+}
+
+func (p Properties) GetCostCPUNum() int64 {
+	if _, ok := p[CostCPUNumKey]; !ok {
+		return 0
+	}
+	costCPUNum, err := strconv.ParseInt(p[CostCPUNumKey], 10, 64)
+	if err != nil {
+		return 0
+	}
+	return costCPUNum
 }

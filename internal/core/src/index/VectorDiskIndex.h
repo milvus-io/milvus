@@ -52,6 +52,12 @@ class VectorDiskAnnIndex : public VectorIndex {
 
     int64_t
     Count() override {
+        if (HasValidData() && GetValidCount() == 0) {
+            return 0;
+        }
+        if (IsEmptyEmbListIndex()) {
+            return 0;
+        }
         return index_.Count();
     }
 
@@ -109,9 +115,30 @@ class VectorDiskAnnIndex : public VectorIndex {
     knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
     VectorIterators(const DatasetPtr dataset,
                     const knowhere::Json& json,
-                    const BitsetView& bitset) const override;
+                    const BitsetView& bitset,
+                    milvus::OpContext* op_context = nullptr) const override;
+
+    knowhere::IdMap&
+    GetIdMap() override {
+        return index_.GetIdMap();
+    }
+
+    const knowhere::IdMap&
+    GetIdMap() const override {
+        return index_.GetIdMap();
+    }
+
+    void
+    SetIdMapType(knowhere::IdMap::Type type) override {
+        index_.SetIdMapType(type);
+    }
 
  private:
+    bool
+    IsEmptyEmbListIndex() const {
+        return elem_type_ != DataType::NONE && !empty_emb_list_offsets_.empty();
+    }
+
     knowhere::Json
     update_load_json(const Config& config);
 
@@ -121,6 +148,7 @@ class VectorDiskAnnIndex : public VectorIndex {
     uint32_t search_beamwidth_ = 8;
     // used for embedding list only
     DataType elem_type_;
+    std::vector<size_t> empty_emb_list_offsets_;
 };
 
 template <typename T>

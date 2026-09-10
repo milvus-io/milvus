@@ -17,6 +17,7 @@
 package paramtable
 
 import (
+	"context"
 	"encoding/json"
 	"net/url"
 	"os"
@@ -25,10 +26,10 @@ import (
 	"strings"
 	"time"
 
-	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
@@ -40,8 +41,53 @@ const (
 	KafkaProducerConfigPrefix = "kafka.producer."
 	KafkaConsumerConfigPrefix = "kafka.consumer."
 
+	// minWALMessageSize is the smallest supported per-record WAL message-size
+	// limit. Smaller limits do not leave enough useful payload capacity after
+	// reserving the streaming headers, properties, encryption expansion, and
+	// broker envelope, so bounded WAL backends clamp their configured limit to
+	// 256 KiB.
+	minWALMessageSize = 256 * 1024
+
+	// defaultPulsarMessageReserveSize is the headroom kept outside the plaintext
+	// message body for the streaming message header, cipher metadata/expansion,
+	// properties added before WAL append, and Pulsar message metadata. Sized
+	// generously (64 KiB): the WAL-impl payload chunker slices bodies into
+	// records of at most (limit - reserve) bytes, and this reserve must absorb
+	// the per-record properties clone plus the backend envelope of every chunk.
+	defaultPulsarMessageReserveSize = 64 * 1024
+
+	// minPulsarMessageReserveSize is the smallest headroom that can plausibly
+	// absorb one record's envelope. A reserve below this would let a full chunk
+	// plus its properties clone,
+	// streaming header, cipher metadata, and broker metadata cross the backend
+	// cap, and the rejected record would retry forever: exactly the stall the
+	// chunker exists to remove. The effective reserve is therefore clamped
+	// rather than trusted.
+	minPulsarMessageReserveSize = 1024
+
 	defaultLocalStoragePath = "/var/lib/milvus/data"
 )
+
+func walMessageSizeFormatter(key string, defaultSize int) func(string) string {
+	return func(value string) string {
+		messageSize, err := strconv.ParseInt(value, 10, 32)
+		if err != nil {
+			mlog.Warn(context.TODO(), "WAL message size must be a 32-bit integer, using default",
+				mlog.String("key", key),
+				mlog.String("configured", value),
+				mlog.Int("default", defaultSize))
+			return strconv.Itoa(defaultSize)
+		}
+		if messageSize < minWALMessageSize {
+			mlog.Warn(context.TODO(), "WAL message size is below the supported minimum, clamping",
+				mlog.String("key", key),
+				mlog.Int64("configured", messageSize),
+				mlog.Int("minimum", minWALMessageSize))
+			return strconv.Itoa(minWALMessageSize)
+		}
+		return value
+	}
+}
 
 // ServiceParam is used to quickly and easily access all basic service configurations.
 type ServiceParam struct {
@@ -76,6 +122,27 @@ func (p *ServiceParam) RocksmqEnable() bool {
 	return p.RocksmqCfg.Path.GetValue() != ""
 }
 
+// WALMaxMessageSize reports the effective per-record limit used by WAL
+// chunking. Pulsar, Kafka, and Woodpecker configuration is normalized to at
+// least 256 KiB by the corresponding ParamItem formatter. External Pulsar
+// broker/proxy and Kafka broker/topic limits must support the same limit
+// because local normalization cannot raise their caps. RocksMQ has neither a
+// hard per-entry cap nor a configured chunk threshold (and neither do
+// unrecognized names), so 0 is returned there. This is the single place a WAL
+// name maps to its chunking limit.
+func (p *ServiceParam) WALMaxMessageSize(walName string) int {
+	switch walName {
+	case "kafka":
+		return p.KafkaCfg.ProducerMessageMaxBytes.GetAsInt()
+	case "woodpecker":
+		return p.WoodpeckerCfg.MaxMessageSize.GetAsInt()
+	case "pulsar":
+		return p.PulsarCfg.MaxMessageSize.GetAsInt()
+	default:
+		return 0
+	}
+}
+
 func (p *ServiceParam) PulsarEnable() bool {
 	return p.PulsarCfg.Address.GetValue() != ""
 }
@@ -106,6 +173,7 @@ type EtcdConfig struct {
 	EtcdTLSCACert        ParamItem          `refreshable:"false"`
 	EtcdTLSMinVersion    ParamItem          `refreshable:"false"`
 	RequestTimeout       ParamItem          `refreshable:"false"`
+	DialTimeout          ParamItem          `refreshable:"false"`
 	DialKeepAliveTime    ParamItem          `refreshable:"false"`
 	DialKeepAliveTimeout ParamItem          `refreshable:"false"`
 
@@ -290,6 +358,15 @@ We recommend using version 1.2 and above.`,
 	}
 	p.RequestTimeout.Init(base.mgr)
 
+	p.DialTimeout = ParamItem{
+		Key:          "etcd.dialTimeout",
+		DefaultValue: "5000",
+		Version:      "2.6.12",
+		Doc:          `Timeout in milliseconds for establishing the initial connection to etcd endpoints. Increase it for environments where transient network delays are expected during node scale-out.`,
+		Export:       true,
+	}
+	p.DialTimeout.Init(base.mgr)
+
 	p.DialKeepAliveTime = ParamItem{
 		Key:          "etcd.dialKeepAliveTime",
 		DefaultValue: "3000",
@@ -318,7 +395,7 @@ We recommend using version 1.2 and above.`,
 	p.EtcdEnableAuth.Init(base.mgr)
 
 	if p.UseEmbedEtcd.GetAsBool() && p.EtcdEnableAuth.GetAsBool() {
-		log.Warn("embedded etcd does not support auth, disabling etcd auth automatically")
+		mlog.Warn(context.TODO(), "embedded etcd does not support auth, disabling etcd auth automatically")
 		p.EtcdEnableAuth.SwapTempValue("false")
 	}
 
@@ -359,6 +436,7 @@ func (p *EtcdConfig) GetAll() map[string]string {
 		"etcd.ssl.tlsCACert":        p.EtcdTLSCACert.GetValue(),
 		"etcd.ssl.tlsMinVersion":    p.EtcdTLSMinVersion.GetValue(),
 		"etcd.requestTimeout":       p.RequestTimeout.GetValue(),
+		"etcd.dialTimeout":          p.DialTimeout.GetValue(),
 		"etcd.dialKeepAliveTime":    p.DialKeepAliveTime.GetValue(),
 		"etcd.dialKeepAliveTimeout": p.DialKeepAliveTimeout.GetValue(),
 		"etcd.auth.enabled":         p.EtcdEnableAuth.GetValue(),
@@ -368,15 +446,18 @@ func (p *EtcdConfig) GetAll() map[string]string {
 }
 
 func (p *EtcdConfig) ClientOptions() []etcd.ClientOption {
+	dialTimeout := p.DialTimeout.GetAsDuration(time.Millisecond)
 	dialKeepAliveTime := p.DialKeepAliveTime.GetAsDuration(time.Millisecond)
 	dialKeepAliveTimeout := p.DialKeepAliveTimeout.GetAsDuration(time.Millisecond)
 
-	if dialKeepAliveTime <= 0 && dialKeepAliveTimeout <= 0 {
-		return nil
+	var options []etcd.ClientOption
+	if dialTimeout > 0 {
+		options = append(options, etcd.WithDialTimeout(dialTimeout))
 	}
-	return []etcd.ClientOption{
-		etcd.WithDialKeepAlive(dialKeepAliveTime, dialKeepAliveTimeout),
+	if dialKeepAliveTime > 0 || dialKeepAliveTimeout > 0 {
+		options = append(options, etcd.WithDialKeepAlive(dialKeepAliveTime, dialKeepAliveTimeout))
 	}
+	return options
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -559,6 +640,13 @@ func (p *MetaStoreConfig) Init(base *BaseTable) {
 		DefaultValue: "64",
 		Doc:          `maximum number of operations in a single etcd transaction`,
 		Export:       true,
+		Formatter: func(value string) string {
+			maxTxnNum := getAsInt(value)
+			if maxTxnNum < 1 {
+				return "64"
+			}
+			return strconv.Itoa(maxTxnNum)
+		},
 	}
 	p.MaxEtcdTxnNum.Init(base.mgr)
 
@@ -706,13 +794,23 @@ type WoodpeckerConfig struct {
 	MetaType   ParamItem `refreshable:"false"`
 	MetaPrefix ParamItem `refreshable:"false"`
 
+	// MaxMessageSize is Milvus' target upper bound for one Woodpecker WAL
+	// record. Woodpecker does not enforce a corresponding single-entry hard
+	// limit; the WAL layer uses this value as its chunk threshold (#52474).
+	MaxMessageSize ParamItem `refreshable:"true"`
+
 	// client
-	AppendQueueSize         ParamItem `refreshable:"true"`
-	AppendMaxRetries        ParamItem `refreshable:"true"`
-	SegmentRollingMaxSize   ParamItem `refreshable:"true"`
-	SegmentRollingMaxTime   ParamItem `refreshable:"true"`
-	SegmentRollingMaxBlocks ParamItem `refreshable:"true"`
-	AuditorMaxInterval      ParamItem `refreshable:"true"`
+	AppendQueueSize           ParamItem `refreshable:"true"`
+	AppendMaxRetries          ParamItem `refreshable:"true"`
+	AppendMaxBatchEntries     ParamItem `refreshable:"false"`
+	AppendMaxBatchBytes       ParamItem `refreshable:"false"`
+	SegmentRollingMaxSize     ParamItem `refreshable:"true"`
+	SegmentRollingMaxTime     ParamItem `refreshable:"true"`
+	SegmentRollingMaxBlocks   ParamItem `refreshable:"true"`
+	AuditorMaxInterval        ParamItem `refreshable:"true"`
+	DirectReadEnabled         ParamItem `refreshable:"false"`
+	DirectReadMaxBatchSize    ParamItem `refreshable:"false"`
+	DirectReadMaxFetchThreads ParamItem `refreshable:"false"`
 
 	// quorum configuration
 	// Buffer pools for different regions
@@ -729,6 +827,7 @@ type WoodpeckerConfig struct {
 	// logstore
 	SyncMaxInterval                ParamItem `refreshable:"true"`
 	SyncMaxIntervalForLocalStorage ParamItem `refreshable:"true"`
+	SyncMaxIntervalForService      ParamItem `refreshable:"true"`
 	SyncMaxBytes                   ParamItem `refreshable:"true"`
 	SyncMaxEntries                 ParamItem `refreshable:"true"`
 	FlushMaxRetries                ParamItem `refreshable:"true"`
@@ -763,10 +862,22 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 		Key:          "woodpecker.meta.prefix",
 		Version:      "2.6.0",
 		DefaultValue: "woodpecker",
-		Doc:          "The Prefix of the metadata provider. default is woodpecker.",
+		Doc:          "The Prefix of the metadata provider, prepended with etcd.rootPath. default is woodpecker. Only takes effect on an etcd with no pre-existing woodpecker metadata under the legacy root 'woodpecker/' prefix; if legacy metadata is detected, the legacy prefix is reused for backward compatibility.",
 		Export:       true,
 	}
 	p.MetaPrefix.Init(base.mgr)
+
+	p.MaxMessageSize = ParamItem{
+		Key:          "woodpecker.maxMessageSize",
+		Version:      "3.0.2",
+		DefaultValue: strconv.Itoa(10 * 1024 * 1024),
+		Doc: `The target maximum size of each Woodpecker WAL record produced by Milvus. Unit: Byte.
+Woodpecker does not enforce a corresponding single-entry hard limit. Milvus uses this value as the WAL-layer chunk threshold and splits larger payloads into multiple records.
+Values below 256 KiB are clamped to 256 KiB. Invalid or out-of-range values fall back to the default 10 MiB limit.`,
+		Export:    true,
+		Formatter: walMessageSizeFormatter("woodpecker.maxMessageSize", 10*1024*1024),
+	}
+	p.MaxMessageSize.Init(base.mgr)
 
 	p.AppendQueueSize = ParamItem{
 		Key:          "woodpecker.client.segmentAppend.queueSize",
@@ -785,6 +896,24 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 		Export:       true,
 	}
 	p.AppendMaxRetries.Init(base.mgr)
+
+	p.AppendMaxBatchEntries = ParamItem{
+		Key:          "woodpecker.client.segmentAppend.maxBatchEntries",
+		Version:      "2.6.0",
+		DefaultValue: "1000",
+		Doc:          "Client-side group commit: max consecutive appends coalesced into one AddEntries request. Opportunistic (only batches already-queued ops, adds no latency at low load). Set to 1 to disable batching.",
+		Export:       true,
+	}
+	p.AppendMaxBatchEntries.Init(base.mgr)
+
+	p.AppendMaxBatchBytes = ParamItem{
+		Key:          "woodpecker.client.segmentAppend.maxBatchBytes",
+		Version:      "2.6.0",
+		DefaultValue: "2000000",
+		Doc:          "Max total payload (bytes) of a coalesced batch, default 2MB. A batch closes once it reaches maxBatchEntries or its payload reaches maxBatchBytes; the first entry is always taken, so a batch may exceed the byte cap by one entry. Set to 0 to remove the byte limit (bounded by maxBatchEntries only). Ignored when maxBatchEntries <= 1.",
+		Export:       true,
+	}
+	p.AppendMaxBatchBytes.Init(base.mgr)
 
 	p.SegmentRollingMaxSize = ParamItem{
 		Key:          "woodpecker.client.segmentRollingPolicy.maxSize",
@@ -822,6 +951,33 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 	}
 	p.AuditorMaxInterval.Init(base.mgr)
 
+	p.DirectReadEnabled = ParamItem{
+		Key:          "woodpecker.client.directRead.enabled",
+		Version:      "2.6.0",
+		DefaultValue: "true",
+		Doc:          "Whether the Woodpecker client reads sealed segments directly from object storage in service storage mode.",
+		Export:       true,
+	}
+	p.DirectReadEnabled.Init(base.mgr)
+
+	p.DirectReadMaxBatchSize = ParamItem{
+		Key:          "woodpecker.client.directRead.maxBatchSize",
+		Version:      "2.6.0",
+		DefaultValue: "16M",
+		Doc:          "Maximum batch size for direct reads from object storage in service storage mode.",
+		Export:       true,
+	}
+	p.DirectReadMaxBatchSize.Init(base.mgr)
+
+	p.DirectReadMaxFetchThreads = ParamItem{
+		Key:          "woodpecker.client.directRead.maxFetchThreads",
+		Version:      "2.6.0",
+		DefaultValue: "4",
+		Doc:          "Maximum number of concurrent fetch threads used by Woodpecker direct reads from object storage.",
+		Export:       true,
+	}
+	p.DirectReadMaxFetchThreads.Init(base.mgr)
+
 	// Buffer pools for different regions
 	p.QuorumBufferPools = ParamItem{
 		Key:          "woodpecker.client.quorum.quorumBufferPools",
@@ -833,7 +989,7 @@ Example configuration below:
     seeds: [n1,n2,n3] # List of seed node addresses for this pool
   - name: region2 # Name of the region pool
     seeds: [n4,n5,n6] # List of seed node addresses for this pool`,
-		Export: false,
+		Export: true,
 	}
 	p.QuorumBufferPools.Init(base.mgr)
 
@@ -843,7 +999,7 @@ Example configuration below:
 		Version:      "2.6.0",
 		DefaultValue: "soft",
 		Doc:          "Affinity mode for node selection rules. Valid values: [soft, hard]",
-		Export:       false,
+		Export:       true,
 	}
 	p.QuorumAffinityMode.Init(base.mgr)
 
@@ -852,7 +1008,7 @@ Example configuration below:
 		Version:      "2.6.0",
 		DefaultValue: "3",
 		Doc:          "Number of replicas in the quorum ensemble. Valid values: [3, 5]",
-		Export:       false,
+		Export:       true,
 	}
 	p.QuorumReplicas.Init(base.mgr)
 
@@ -869,7 +1025,7 @@ multi-az-single-rg: Multiple availability zones, single resource group
 multi-az-multi-rg: Multiple availability zones and resource groups
 cross-region: Nodes across different regions for maximum durability
 custom: Use custom expressions defined below`,
-		Export: false,
+		Export: true,
 	}
 	p.QuorumStrategy.Init(base.mgr)
 
@@ -892,7 +1048,7 @@ Example configuration below:
     region: "default-region-pool"
     az: "az.*"
     resourceGroup: "rg.*"`,
-		Export: false,
+		Export: true,
 	}
 	p.QuorumCustomPlacement.Init(base.mgr)
 
@@ -913,6 +1069,15 @@ Example configuration below:
 		Export:       true,
 	}
 	p.SyncMaxIntervalForLocalStorage.Init(base.mgr)
+
+	p.SyncMaxIntervalForService = ParamItem{
+		Key:          "woodpecker.logstore.segmentSyncPolicy.maxIntervalForService",
+		Version:      "2.6.0",
+		DefaultValue: "10ms",
+		Doc:          "Maximum interval between two sync operations for woodpecker service-storage mode (woodpecker.storage.type=service), default is 10 milliseconds. Only takes effect on standalone woodpecker log-store servers (staged-storage writer); it is not consumed by milvus embedded mode. A larger interval coalesces more entries per flush to raise QPS under small-batch high-concurrency writes, at the cost of up to that much extra durability latency. Note this raises the interval from woodpecker's built-in 1ms default, changing the sync cadence for existing service-mode deployments.",
+		Export:       true,
+	}
+	p.SyncMaxIntervalForService.Init(base.mgr)
 
 	p.SyncMaxEntries = ParamItem{
 		Key:          "woodpecker.logstore.segmentSyncPolicy.maxEntries",
@@ -1037,7 +1202,7 @@ Valid values: [auto, enable, disable]`,
 		Key:          "woodpecker.storage.type",
 		Version:      "2.6.0",
 		DefaultValue: "minio",
-		Doc:          "The Type of the storage provider. Valid values: [minio, local]",
+		Doc:          "The Type of the storage provider. Valid values: [minio, local, service]",
 		Export:       true,
 	}
 	p.StorageType.Init(base.mgr)
@@ -1064,11 +1229,12 @@ Valid values: [auto, enable, disable]`,
 // /////////////////////////////////////////////////////////////////////////////
 // --- pulsar ---
 type PulsarConfig struct {
-	Address        ParamItem `refreshable:"false"`
-	Port           ParamItem `refreshable:"false"`
-	WebAddress     ParamItem `refreshable:"false"`
-	WebPort        ParamItem `refreshable:"false"`
-	MaxMessageSize ParamItem `refreshable:"true"`
+	Address            ParamItem `refreshable:"false"`
+	Port               ParamItem `refreshable:"false"`
+	WebAddress         ParamItem `refreshable:"false"`
+	WebPort            ParamItem `refreshable:"false"`
+	MaxMessageSize     ParamItem `refreshable:"true"`
+	MessageReserveSize ParamItem `refreshable:"true"`
 
 	// support auth
 	AuthPlugin ParamItem `refreshable:"false"`
@@ -1085,6 +1251,48 @@ type PulsarConfig struct {
 	EnableClientMetrics ParamItem `refreshable:"false"`
 
 	BacklogAutoClearBytes ParamItem `refreshable:"false"`
+}
+
+// GetMessageSizeLimitsFor generalizes the plaintext-body budget to an
+// arbitrary WAL backend's broker limit -- not necessarily Pulsar's own. The
+// reserve amount (streaming message header, properties added before WAL
+// append, cipher metadata/expansion, and broker message metadata) covers the
+// same envelope regardless of which backend produced maxMessageSize, so it is
+// still read from pulsar.messageReserveSize; that config item is not
+// Pulsar-specific in what it represents, only in where it is set.
+func (p *PulsarConfig) GetMessageSizeLimitsFor(maxMessageSize int) (int, int) {
+	return maxMessageSize, normalizePulsarMessageReserve(maxMessageSize, p.MessageReserveSize.GetAsInt())
+}
+
+func normalizePulsarMessageReserve(maxMessageSize, messageReserveSize int) int {
+	if maxMessageSize <= 0 {
+		return 0
+	}
+	if messageReserveSize >= minPulsarMessageReserveSize && messageReserveSize < maxMessageSize {
+		return messageReserveSize
+	}
+	// Bounded WAL configuration is normalized to at least 256 KiB before it
+	// reaches this helper, so the default reserve always fits in production.
+	// Keep the smaller-limit branches defensive for direct callers and
+	// rate-limit the persistent misconfiguration warning globally by call site.
+	//
+	// Prefer the generous default; fall back to the minimum envelope headroom
+	// when a direct caller supplies a smaller limit. Zero is used only when that
+	// limit is too small to reserve anything at all, which disables chunking
+	// rather than emitting records that are guaranteed to be rejected.
+	fallback := 0
+	switch {
+	case defaultPulsarMessageReserveSize < maxMessageSize:
+		fallback = defaultPulsarMessageReserveSize
+	case minPulsarMessageReserveSize < maxMessageSize:
+		fallback = minPulsarMessageReserveSize
+	}
+	mlog.RatedWarn(context.TODO(), rate.Limit(1.0/60.0),
+		"pulsar.messageReserveSize does not fit under the active WAL message size limit, falling back",
+		mlog.Int("configuredReserve", messageReserveSize),
+		mlog.Int("maxMessageSize", maxMessageSize),
+		mlog.Int("effectiveReserve", fallback))
+	return fallback
 }
 
 func (p *PulsarConfig) Init(base *BaseTable) {
@@ -1137,7 +1345,7 @@ Default value applies when Pulsar is running on the same network with Milvus.`,
 		Formatter: func(add string) string {
 			pulsarURL, err := url.ParseRequestURI(p.Address.GetValue())
 			if err != nil {
-				log.Info("failed to parse pulsar config, assume pulsar not used", zap.Error(err))
+				mlog.Info(context.TODO(), "failed to parse pulsar config, assume pulsar not used", mlog.Err(err))
 				return ""
 			}
 			return "http://" + pulsarURL.Hostname() + ":" + p.WebPort.GetValue()
@@ -1150,11 +1358,34 @@ Default value applies when Pulsar is running on the same network with Milvus.`,
 		Version:      "2.0.0",
 		DefaultValue: "2097152",
 		Doc: `The maximum size of each message in Pulsar. Unit: Byte.
-By default, Pulsar can transmit at most 2MB of data in a single message. When the size of inserted data is greater than this value, proxy fragments the data into multiple messages to ensure that they can be transmitted correctly.
-If the corresponding parameter in Pulsar remains unchanged, increasing this configuration will cause Milvus to fail, and reducing it produces no advantage.`,
-		Export: true,
+By default, Pulsar can transmit at most 2MB of data in a single message. When streaming.splitChunkSN is enabled, the StreamingNode WAL layer splits larger payloads into multiple records that fit this limit.
+Values below 256 KiB are clamped to 256 KiB. The Pulsar broker/proxy limit must be no smaller than this effective value; otherwise Pulsar can still reject records that Milvus considers valid. Invalid or out-of-range values fall back to the default 2 MiB limit.`,
+		Export:    true,
+		Formatter: walMessageSizeFormatter("pulsar.maxMessageSize", 2*1024*1024),
 	}
 	p.MaxMessageSize.Init(base.mgr)
+
+	p.MessageReserveSize = ParamItem{
+		Key:          "pulsar.messageReserveSize",
+		Version:      "3.0.2",
+		DefaultValue: strconv.Itoa(defaultPulsarMessageReserveSize),
+		Doc: `The headroom reserved out of the active WAL backend's message-size limit (pulsar.maxMessageSize, kafka.producer.message.max.bytes, or woodpecker.maxMessageSize) for message overhead outside the plaintext body. Unit: Byte.
+A produced record carries a streaming message header, properties added before WAL append, cipher metadata/expansion, and broker message metadata on top of the body, so the producer budgets only the active WAL backend's own message-size limit minus this value for the body itself.
+Must be a 32-bit integer of at least 1024 bytes and smaller than the active WAL backend's message-size limit: a smaller reserve cannot absorb one record's envelope, so a full-budget chunk would still be rejected by the backend. Invalid or out-of-range values fall back to the default reserve size.`,
+		Export: true,
+		Formatter: func(value string) string {
+			reserveSize, err := strconv.ParseInt(value, 10, 32)
+			if err != nil || reserveSize < minPulsarMessageReserveSize {
+				mlog.Warn(context.TODO(), "pulsar.messageReserveSize must be a 32-bit integer of at least the minimum envelope headroom, using default",
+					mlog.String("configured", value),
+					mlog.Int("minimum", minPulsarMessageReserveSize),
+					mlog.Int("default", defaultPulsarMessageReserveSize))
+				return strconv.Itoa(defaultPulsarMessageReserveSize)
+			}
+			return value
+		},
+	}
+	p.MessageReserveSize.Init(base.mgr)
 
 	p.Tenant = ParamItem{
 		Key:          "pulsar.tenant",
@@ -1237,20 +1468,21 @@ If this option is zero or negative, it will be ignored and the default value (10
 
 // --- kafka ---
 type KafkaConfig struct {
-	Address              ParamItem  `refreshable:"false"`
-	SaslUsername         ParamItem  `refreshable:"false"`
-	SaslPassword         ParamItem  `refreshable:"false"`
-	SaslMechanisms       ParamItem  `refreshable:"false"`
-	SecurityProtocol     ParamItem  `refreshable:"false"`
-	KafkaUseSSL          ParamItem  `refreshable:"false"`
-	KafkaTLSCert         ParamItem  `refreshable:"false"`
-	KafkaTLSKey          ParamItem  `refreshable:"false"`
-	KafkaTLSCACert       ParamItem  `refreshable:"false"`
-	KafkaTLSKeyPassword  ParamItem  `refreshable:"false"`
-	ConsumerExtraConfig  ParamGroup `refreshable:"false"`
-	ProducerExtraConfig  ParamGroup `refreshable:"false"`
-	ReadTimeout          ParamItem  `refreshable:"true"`
-	QueuedMessagesKbytes ParamItem  `refreshable:"false"`
+	Address                 ParamItem  `refreshable:"false"`
+	SaslUsername            ParamItem  `refreshable:"false"`
+	SaslPassword            ParamItem  `refreshable:"false"`
+	SaslMechanisms          ParamItem  `refreshable:"false"`
+	SecurityProtocol        ParamItem  `refreshable:"false"`
+	KafkaUseSSL             ParamItem  `refreshable:"false"`
+	KafkaTLSCert            ParamItem  `refreshable:"false"`
+	KafkaTLSKey             ParamItem  `refreshable:"false"`
+	KafkaTLSCACert          ParamItem  `refreshable:"false"`
+	KafkaTLSKeyPassword     ParamItem  `refreshable:"false"`
+	ProducerMessageMaxBytes ParamItem  `refreshable:"false"`
+	ConsumerExtraConfig     ParamGroup `refreshable:"false"`
+	ProducerExtraConfig     ParamGroup `refreshable:"false"`
+	ReadTimeout             ParamItem  `refreshable:"true"`
+	QueuedMessagesKbytes    ParamItem  `refreshable:"false"`
 }
 
 func (k *KafkaConfig) Init(base *BaseTable) {
@@ -1335,6 +1567,17 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 		Export:  true,
 	}
 	k.KafkaTLSKeyPassword.Init(base.mgr)
+
+	k.ProducerMessageMaxBytes = ParamItem{
+		Key:          KafkaProducerConfigPrefix + "message.max.bytes",
+		DefaultValue: strconv.Itoa(10 * 1024 * 1024),
+		Version:      "3.0.0",
+		Doc:          "Maximum size of a Kafka producer message in bytes. Values below 256 KiB are clamped to 256 KiB; invalid or out-of-range values fall back to the default 10 MiB. Kafka broker/topic limits must support the configured value. Requires a restart to take effect.",
+		Export:       true,
+		Immutable:    true,
+		Formatter:    walMessageSizeFormatter(KafkaProducerConfigPrefix+"message.max.bytes", 10*1024*1024),
+	}
+	k.ProducerMessageMaxBytes.Init(base.mgr)
 
 	k.ConsumerExtraConfig = ParamGroup{
 		KeyPrefix: "kafka.consumer.",
@@ -1483,6 +1726,8 @@ type MinioConfig struct {
 	MaxConnections     ParamItem `refreshable:"false"`
 	ListObjectsMaxKeys ParamItem `refreshable:"true"`
 	UseCRC32C          ParamItem `refreshable:"false"`
+
+	DisableAWSChunkedEncoding ParamItem `refreshable:"false"`
 }
 
 func (p *MinioConfig) Init(base *BaseTable) {
@@ -1556,6 +1801,16 @@ The default value applies to MinIO or S3 service that started with the default d
 		Export:       true,
 	}
 	p.UseSSL.Init(base.mgr)
+
+	p.DisableAWSChunkedEncoding = ParamItem{
+		Key:          "minio.disableAWSChunkedEncoding",
+		Version:      "2.6.20",
+		DefaultValue: "false",
+		Doc: `When enabled, PutObject requests use UNSIGNED-PAYLOAD to support S3-compatible endpoints that are incompatible with AWS chunked encoding.
+HTTPS is recommended because payload integrity is then protected by TLS rather than a signed payload hash.`,
+		Export: false,
+	}
+	p.DisableAWSChunkedEncoding.Init(base.mgr)
 
 	p.SslCACert = ParamItem{
 		Key:          "minio.ssl.tlsCACert",

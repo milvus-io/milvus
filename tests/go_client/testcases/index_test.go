@@ -1,17 +1,17 @@
 package testcases
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/client/v2/index"
-	client "github.com/milvus-io/milvus/client/v2/milvusclient"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/client/v3/entity"
+	"github.com/milvus-io/milvus/client/v3/index"
+	client "github.com/milvus-io/milvus/client/v3/milvusclient"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
@@ -43,7 +43,7 @@ func TestIndexVectorDefault(t *testing.T) {
 
 	// index
 	for _, idx := range hp.GenAllFloatIndex(entity.L2) {
-		log.Debug("index", zap.String("name", idx.Name()), zap.Any("indexType", idx.IndexType()), zap.Any("params", idx.Params()))
+		mlog.Debug(context.TODO(), "index", mlog.String("name", idx.Name()), mlog.Any("indexType", idx.IndexType()), mlog.Any("params", idx.Params()))
 		for _, fieldName := range []string{common.DefaultFloat16VecFieldName, common.DefaultBFloat16VecFieldName, common.DefaultFloatVecFieldName} {
 			indexTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, fieldName, idx))
 			common.CheckErr(t, err, true)
@@ -77,7 +77,7 @@ func TestIndexVectorIP(t *testing.T) {
 
 	// index
 	for _, idx := range hp.GenAllFloatIndex(entity.IP) {
-		log.Debug("index", zap.String("name", idx.Name()), zap.Any("indexType", idx.IndexType()), zap.Any("params", idx.Params()))
+		mlog.Debug(context.TODO(), "index", mlog.String("name", idx.Name()), mlog.Any("indexType", idx.IndexType()), mlog.Any("params", idx.Params()))
 		for _, fieldName := range []string{common.DefaultFloat16VecFieldName, common.DefaultBFloat16VecFieldName, common.DefaultFloatVecFieldName} {
 			indexTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, fieldName, idx))
 			common.CheckErr(t, err, true)
@@ -112,7 +112,7 @@ func TestIndexVectorCosine(t *testing.T) {
 
 	// index
 	for _, idx := range hp.GenAllFloatIndex(entity.COSINE) {
-		log.Debug("index", zap.String("name", idx.Name()), zap.Any("indexType", idx.IndexType()), zap.Any("params", idx.Params()))
+		mlog.Debug(context.TODO(), "index", mlog.String("name", idx.Name()), mlog.Any("indexType", idx.IndexType()), mlog.Any("params", idx.Params()))
 		for _, fieldName := range []string{common.DefaultFloat16VecFieldName, common.DefaultBFloat16VecFieldName, common.DefaultFloatVecFieldName} {
 			indexTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, fieldName, idx))
 			common.CheckErr(t, err, true)
@@ -635,7 +635,7 @@ func TestCreateIndexWithOtherFieldName(t *testing.T) {
 	// create index in binary field with default name
 	idxBinary := index.NewBinFlatIndex(entity.JACCARD)
 	_, err = mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, common.DefaultBinaryVecFieldName, idxBinary))
-	common.CheckErr(t, err, false, "CreateIndex failed: at most one distinct index is allowed per field")
+	common.CheckErr(t, err, false, "at most one distinct index is allowed per field")
 }
 
 // create all scalar index on json field -> error
@@ -735,7 +735,7 @@ func TestCreateInvertedIndexArrayField(t *testing.T) {
 	// create scalar and vector index on array field
 	for _, field := range schema.Fields {
 		if field.DataType == entity.FieldTypeArray {
-			log.Debug("array field", zap.String("name", field.Name), zap.Any("element type", field.ElementType))
+			mlog.Debug(context.TODO(), "array field", mlog.String("name", field.Name), mlog.Any("element type", field.ElementType))
 
 			// create scalar index
 			_, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, field.Name, index.NewInvertedIndex()))
@@ -813,7 +813,7 @@ func TestCreateIndexDup(t *testing.T) {
 	common.CheckIndex(t, _index, expIndex, common.TNewCheckIndexOpt(common.DefaultNb))
 
 	_, err = mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, common.DefaultFloatVecFieldName, idxIvfSq8))
-	common.CheckErr(t, err, false, "CreateIndex failed: at most one distinct index is allowed per field")
+	common.CheckErr(t, err, false, "at most one distinct index is allowed per field")
 }
 
 func TestCreateIndexSparseVectorGeneric(t *testing.T) {
@@ -970,6 +970,50 @@ func TestCreateIndexGeneric(t *testing.T) {
 		common.CheckErr(t, err, true)
 		common.CheckIndex(t, descIdx, index.NewGenericIndex(field.Name, idx.Params()), common.TNewCheckIndexOpt(common.DefaultNb))
 	}
+}
+
+func TestCreateIndexVanillaFaissGeneric(t *testing.T) {
+	t.Parallel()
+
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	cp := hp.NewCreateCollectionParams(hp.Int64Vec)
+	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption(), hp.TNewSchemaOption())
+
+	// insert
+	ip := hp.NewInsertParams(schema)
+	prepare.InsertData(ctx, t, mc, ip, hp.TNewDataOption())
+	prepare.FlushData(ctx, t, mc, schema.CollectionName)
+
+	idx := index.NewGenericIndex(common.DefaultFloatVecFieldName, map[string]string{
+		index.IndexTypeKey:  "FAISS",
+		index.MetricTypeKey: "L2",
+		"faiss_index_name":  "IVF64,Flat",
+	})
+	idxTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, common.DefaultFloatVecFieldName, idx))
+	common.CheckErr(t, err, true)
+	err = idxTask.Await(ctx)
+	common.CheckErr(t, err, true)
+
+	descIdx, err := mc.DescribeIndex(ctx, client.NewDescribeIndexOption(schema.CollectionName, common.DefaultFloatVecFieldName))
+	common.CheckErr(t, err, true)
+	common.CheckIndex(t, descIdx, index.NewGenericIndex(common.DefaultFloatVecFieldName, idx.Params()), common.TNewCheckIndexOpt(common.DefaultNb))
+	require.Equal(t, "FAISS", descIdx.Index.Params()[index.IndexTypeKey])
+	require.Equal(t, "IVF64,Flat", descIdx.Index.Params()["faiss_index_name"])
+
+	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
+
+	queryVec := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
+	annParam := index.NewCustomAnnParam()
+	annParam.WithExtraParam("nprobe", 64)
+	searchRes, err := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, queryVec).
+		WithANNSField(common.DefaultFloatVecFieldName).
+		// nprobe=nlist (IVF64) scans all lists so topK results are returned deterministically (#50392)
+		WithAnnParam(annParam).
+		WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	common.CheckSearchResult(t, searchRes, common.DefaultNq, common.DefaultLimit)
 }
 
 // test create index with not exist index name and not exist field name
@@ -1131,7 +1175,7 @@ func TestCreateIndexAsync(t *testing.T) {
 
 	idx, err := mc.DescribeIndex(ctx, client.NewDescribeIndexOption(schema.CollectionName, common.DefaultFloatVecFieldName))
 	common.CheckErr(t, err, true)
-	log.Debug("describe index", zap.Any("descIdx", idx))
+	mlog.Debug(context.TODO(), "describe index", mlog.Any("descIdx", idx))
 }
 
 // create same index name on different vector field
@@ -1157,7 +1201,7 @@ func TestIndexMultiVectorDupName(t *testing.T) {
 	common.CheckErr(t, err, true)
 
 	_, err = mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, common.DefaultFloat16VecFieldName, idx).WithIndexName("index_1"))
-	common.CheckErr(t, err, false, "CreateIndex failed: at most one distinct index is allowed per field")
+	common.CheckErr(t, err, false, "at most one distinct index is allowed per field")
 
 	// create different index on same field
 	idxRe := index.NewIvfSQ8Index(entity.COSINE, 32)

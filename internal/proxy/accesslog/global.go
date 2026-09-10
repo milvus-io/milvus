@@ -17,17 +17,17 @@
 package accesslog
 
 import (
+	"context"
 	"io"
-	"strconv"
+	"os"
 	"sync"
 	"time"
 
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/proxy/accesslog/info"
 	configEvent "github.com/milvus-io/milvus/pkg/v3/config"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -76,27 +76,37 @@ func (l *AccessLogger) Init(params *paramtable.ComponentParam) error {
 	return nil
 }
 
-func (l *AccessLogger) SetEnable(enable bool) error {
+func (l *AccessLogger) Update(enable bool) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	if l.enable.Load() == enable {
+	// close logger
+	if !enable {
+		if l.enable.Load() != enable {
+			mlog.Info(context.TODO(), "start close access log")
+			if write, ok := l.writer.(*RotateWriter); ok {
+				write.Close()
+				l.writer = nil
+			}
+			l.enable.Store(enable)
+		}
 		return nil
 	}
 
-	if enable {
-		log.Info("start enable access log")
-		params := paramtable.Get()
-		err := l.init(params)
-		if err != nil {
-			log.Warn("enable access log failed", zap.Error(err))
-			return err
+	// close old writer before re-init
+	if l.writer != nil {
+		if rw, ok := l.writer.(*RotateWriter); ok {
+			rw.Close()
 		}
-	} else {
-		log.Info("start close access log")
-		if write, ok := l.writer.(*RotateWriter); ok {
-			write.Close()
-		}
+	}
+
+	// update access log params
+	mlog.Info(context.TODO(), "start update access log params")
+	params := paramtable.Get()
+	err := l.init(params)
+	if err != nil {
+		mlog.Warn(context.TODO(), "enable access log failed", mlog.Err(err))
+		return err
 	}
 
 	l.enable.Store(enable)
@@ -111,14 +121,14 @@ func (l *AccessLogger) Write(info info.AccessInfo) bool {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 
-	method := info.MethodName()
+	method := info.MethodNameForFormatter()
 	formatter, ok := l.formatters.GetByMethod(method)
 	if !ok {
 		return false
 	}
 	_, err := l.writer.Write([]byte(formatter.Format(info)))
 	if err != nil {
-		log.Warn("write access log failed", zap.Error(err))
+		mlog.Warn(context.TODO(), "write access log failed", mlog.Err(err))
 		return false
 	}
 	return true
@@ -128,22 +138,20 @@ func InitAccessLogger(params *paramtable.ComponentParam) {
 	once.Do(func() {
 		logger := NewAccessLogger()
 		// support dynamic param
-		params.Watch(params.ProxyCfg.AccessLog.Enable.Key, configEvent.NewHandler("enable accesslog", func(event *configEvent.Event) {
-			value, err := strconv.ParseBool(event.Value)
-			if err != nil {
-				log.Warn("Failed to parse bool value", zap.String("v", event.Value), zap.Error(err))
-				return
+		params.WatchKeyPrefix("proxy.accessLog", configEvent.NewHandler("update accesslog", func(event *configEvent.Event) {
+			enable := params.ProxyCfg.AccessLog.Enable.GetAsBool()
+			if err := logger.Update(enable); err != nil {
+				mlog.Warn(context.TODO(), "update access log failed", mlog.Err(err))
 			}
-			logger.SetEnable(value)
 		}))
 
 		err := logger.Init(params)
 		if err != nil {
-			log.Warn("Init access logger failed", zap.Error(err))
+			mlog.Warn(context.TODO(), "Init access logger failed", mlog.Err(err))
 		}
 		_globalL = logger
 		info.ClusterPrefix.Store(params.CommonCfg.ClusterPrefix.GetValue())
-		log.Info("Init access logger success")
+		mlog.Info(context.TODO(), "Init access logger success")
 	})
 }
 
@@ -191,15 +199,10 @@ func initWriter(logCfg *paramtable.AccessLogConfig, minioCfg *paramtable.MinioCo
 	}
 
 	// wirte to stdout when filename = ""
-	stdout, _, err := zap.Open([]string{"stdout"}...)
-	if err != nil {
-		return nil, err
-	}
-
 	if logCfg.CacheSize.GetAsInt() > 0 {
-		lg := NewCacheWriter(stdout, logCfg.CacheSize.GetAsInt(), logCfg.CacheFlushInterval.GetAsDuration(time.Second))
+		lg := NewCacheWriter(os.Stdout, logCfg.CacheSize.GetAsInt(), logCfg.CacheFlushInterval.GetAsDuration(time.Second))
 		return lg, nil
 	}
 
-	return stdout, nil
+	return os.Stdout, nil
 }

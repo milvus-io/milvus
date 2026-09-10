@@ -65,6 +65,10 @@ class ScalarIndexSort : public ScalarIndex<T> {
             munmap(mmap_data_, mmap_size_);
             unlink(mmap_filepath_.c_str());
         }
+        if (mmap_meta_data_ != nullptr && mmap_meta_data_ != MAP_FAILED) {
+            munmap(mmap_meta_data_, mmap_meta_size_);
+            unlink(mmap_meta_filepath_.c_str());
+        }
     }
 
     BinarySet
@@ -106,6 +110,11 @@ class ScalarIndexSort : public ScalarIndex<T> {
     const TargetBitmap
     IsNull() override;
 
+    // Declaring IsNotNull() here hides the base's row-count-aware
+    // IsNotNull(int64_t) overload; keep it visible so a call through this
+    // static type still finds it.
+    using ScalarIndex<T>::IsNotNull;
+
     TargetBitmap
     IsNotNull() override;
 
@@ -136,8 +145,12 @@ class ScalarIndexSort : public ScalarIndex<T> {
         ScalarIndex<T>::ComputeByteSize();
         int64_t total = this->cached_byte_size_;
 
-        // idx_to_offsets_: vector<int32_t>
-        total += idx_to_offsets_.capacity() * sizeof(int32_t);
+        // idx_to_offsets
+        if (mmap_meta_data_ != nullptr) {
+            total += mmap_meta_size_;
+        } else {
+            total += idx_to_offsets_.capacity() * sizeof(int32_t);
+        }
 
         // valid_bitset_: TargetBitmap
         total += valid_bitset_.size_in_bytes();
@@ -158,7 +171,7 @@ class ScalarIndexSort : public ScalarIndex<T> {
 
     const bool
     HasRawData() const override {
-        return true;
+        return !is_nested_index_ && !is_array_field_;
     }
 
     void
@@ -172,16 +185,6 @@ class ScalarIndexSort : public ScalarIndex<T> {
     ShouldSkip(const T lower_value, const T upper_value, const OpType op);
 
  public:
-    const IndexStructure<T>*
-    GetData() {
-        return data_ptr_;
-    }
-
-    bool
-    IsBuilt() const {
-        return is_built_;
-    }
-
     void
     LoadWithoutAssemble(const BinarySet& binary_set,
                         const Config& config) override;
@@ -245,9 +248,16 @@ class ScalarIndexSort : public ScalarIndex<T> {
     int64_t field_id_ = 0;
 
     bool is_nested_index_ = false;
+    bool is_array_field_ = false;
     bool is_built_ = false;
     Config config_;
-    std::vector<int32_t> idx_to_offsets_;  // used to retrieve.
+    // idx_to_offsets: maps row_id → sorted offset.
+    // Build/memory-load paths use the vector; mmap-load points into mmap_meta_data_.
+    std::vector<int32_t> idx_to_offsets_;  // memory mode owner
+    const int32_t* idx_to_offsets_ptr_ =
+        nullptr;  // read accessor (vec or mmap)
+    size_t idx_to_offsets_size_ = 0;
+
     std::shared_ptr<storage::DiskFileManagerImpl> disk_file_manager_;
     size_t total_num_rows_{0};
     // generate valid_bitset_ to speed up NotIn and IsNull and IsNotNull operate
@@ -257,13 +267,18 @@ class ScalarIndexSort : public ScalarIndex<T> {
     // Note: it should not be used directly for accessing data. Use data_ptr_ instead.
     std::vector<IndexStructure<T>> data_;
 
-    // for mmap
+    // for mmap: index_data
     bool is_mmap_{false};
     int64_t mmap_size_ = 0;
     int64_t data_size_ = 0;
     // Note: it should not be used directly for accessing data. Use data_ptr_ instead.
     char* mmap_data_ = nullptr;
     std::string mmap_filepath_;
+
+    // for mmap: idx_to_offsets
+    char* mmap_meta_data_ = nullptr;
+    int64_t mmap_meta_size_ = 0;
+    std::string mmap_meta_filepath_;
 
     mutable const IndexStructure<T>* data_ptr_ = nullptr;
     mutable const IndexStructure<T>* end_ptr_ = nullptr;

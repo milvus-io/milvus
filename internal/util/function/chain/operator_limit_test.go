@@ -27,6 +27,7 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
 )
 
@@ -175,7 +176,7 @@ func (s *LimitOpTestSuite) TestLimitEmptyChunk() {
 func (s *LimitOpTestSuite) TestLimitNegativeOffset() {
 	repr := &OperatorRepr{
 		Type:   "limit",
-		Params: map[string]interface{}{"limit": int64(10), "offset": int64(-1)},
+		Params: map[string]*schemapb.FunctionParamValue{"limit": intParam(10), "offset": intParam(-1)},
 	}
 	_, err := NewLimitOpFromRepr(repr)
 	s.Require().Error(err)

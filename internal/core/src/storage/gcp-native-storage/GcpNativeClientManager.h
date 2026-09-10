@@ -15,6 +15,7 @@
 #include "google/cloud/storage/client.h"
 #include "google/cloud/options.h"
 #include "common/EasyAssert.h"
+#include "storage/GcpStatus.h"
 
 namespace gcpnative {
 /**
@@ -78,6 +79,13 @@ class GcpNativeClientManager {
         return fmt::format("Gcp native error: {} ({})",
                            status.message(),
                            static_cast<int>(status.code()));
+    }
+
+    [[noreturn]] inline void
+    ThrowGcpNativeStatus(const google::cloud::Status& status) {
+        throw milvus::SegcoreError(
+            milvus::storage::GcpNativeStatusToErrorCode(status.code()),
+            GetGcpNativeError(status));
     }
 
  private:

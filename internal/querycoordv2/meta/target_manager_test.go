@@ -811,10 +811,9 @@ func (suite *TargetManagerSuite) TestUpdateNextTarget_DroppedSentinelRejected() 
 
 	err := suite.mgr.UpdateCollectionNextTarget(ctx, collectionID)
 	suite.Require().Error(err)
-	suite.True(errors.Is(err, merr.ErrChannelNotAvailable),
-		"error should wrap ErrChannelNotAvailable, got: %v", err)
+	suite.True(errors.Is(err, merr.ErrChannelDroppedSentinel),
+		"error should wrap ErrChannelDroppedSentinel, got: %v", err)
 	suite.Contains(err.Error(), "sentinel-channel")
-	suite.Contains(err.Error(), "dropped checkpoint sentinel")
 
 	// Next target must NOT be advanced.
 	suite.assertChannels([]string{}, suite.mgr.GetDmChannelsByCollection(ctx, collectionID, NextTarget))
@@ -860,7 +859,7 @@ func (suite *TargetManagerSuite) TestUpdateNextTarget_SentinelAmongMultiple() {
 
 	err := suite.mgr.UpdateCollectionNextTarget(ctx, collectionID)
 	suite.Require().Error(err)
-	suite.True(errors.Is(err, merr.ErrChannelNotAvailable))
+	suite.True(errors.Is(err, merr.ErrChannelDroppedSentinel))
 	suite.Contains(err.Error(), "poisoned-channel")
 
 	// Next target must remain empty — no partial build.

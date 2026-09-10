@@ -301,6 +301,135 @@ func (suite *ResultSuite) TestReduceSearchOnQueryNode_NonAdvanced() {
 	suite.Equal(int64(222+444), out.GetScannedTotalBytes())
 }
 
+func (suite *ResultSuite) TestReduceSearchOnQueryNode_NonAdvancedKeepsZeroHitWorkerMetadata() {
+	ctx := context.Background()
+	metricType := metric.IP
+	nq := int64(1)
+	topK := int64(1)
+
+	key := paramtable.Get().QueryNodeCfg.EnableResultZeroCopy.Key
+	original := paramtable.Get().QueryNodeCfg.EnableResultZeroCopy.GetValue()
+	defer paramtable.Get().Save(key, original)
+	paramtable.Get().Save(key, "false")
+
+	hitData := &schemapb.SearchResultData{
+		NumQueries:     nq,
+		TopK:           topK,
+		Ids:            &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}},
+		Scores:         []float32{0.9},
+		Topks:          []int64{1},
+		AllSearchCount: 10,
+	}
+	emptyData := &schemapb.SearchResultData{
+		NumQueries:     nq,
+		TopK:           topK,
+		Ids:            &schemapb.IDs{},
+		Scores:         []float32{},
+		Topks:          []int64{0},
+		AllSearchCount: 20,
+		FieldsData:     []*schemapb.FieldData{},
+	}
+
+	hitResult, err := EncodeSearchResultData(ctx, hitData, nq, topK, metricType)
+	suite.NoError(err)
+	hitResult.ScannedRemoteBytes = 111
+	hitResult.ScannedTotalBytes = 222
+	hitResult.CostAggregation = &internalpb.CostAggregation{
+		ResponseTime:         1,
+		ServiceTime:          11,
+		TotalRelatedDataSize: 13,
+	}
+	hitResult.ChannelsMvcc = map[string]uint64{"hit-channel": 100}
+
+	emptyResult, err := EncodeSearchResultData(ctx, emptyData, nq, topK, metricType)
+	suite.NoError(err)
+	suite.NotEmpty(emptyResult.GetSlicedBlob())
+	emptyResult.ScannedRemoteBytes = 333
+	emptyResult.ScannedTotalBytes = 444
+	emptyResult.CostAggregation = &internalpb.CostAggregation{
+		ResponseTime:         2,
+		ServiceTime:          22,
+		TotalRelatedDataSize: 17,
+	}
+	emptyResult.ChannelsMvcc = map[string]uint64{"empty-channel": 200}
+
+	out, err := ReduceSearchOnQueryNode(ctx, []*internalpb.SearchResults{hitResult, emptyResult},
+		reduce.NewReduceSearchResultInfo(nq, topK).WithMetricType(metricType).WithPkType(schemapb.DataType_Int64))
+	suite.NoError(err)
+	suite.Equal(int64(111+333), out.GetScannedRemoteBytes())
+	suite.Equal(int64(222+444), out.GetScannedTotalBytes())
+	suite.Equal(int64(13+17), out.GetCostAggregation().GetTotalRelatedDataSize())
+	suite.Equal(map[string]uint64{"hit-channel": 100, "empty-channel": 200}, out.GetChannelsMvcc())
+
+	var reduced schemapb.SearchResultData
+	suite.NoError(proto.Unmarshal(out.GetSlicedBlob(), &reduced))
+	suite.Equal(int64(30), reduced.GetAllSearchCount())
+	suite.Equal([]int64{1}, reduced.GetIds().GetIntId().GetData())
+	suite.Equal([]int64{1}, reduced.GetTopks())
+}
+
+func (suite *ResultSuite) TestReduceSearchOnQueryNode_ZeroCopyEmptyResultBeforeFieldsData() {
+	ctx := context.Background()
+	metricType := metric.IP
+	nq := int64(1)
+	topK := int64(1)
+
+	key := paramtable.Get().QueryNodeCfg.EnableResultZeroCopy.Key
+	original := paramtable.Get().QueryNodeCfg.EnableResultZeroCopy.GetValue()
+	defer paramtable.Get().Save(key, original)
+	paramtable.Get().Save(key, "true")
+
+	emptyData := &schemapb.SearchResultData{
+		NumQueries: nq,
+		TopK:       topK,
+		Ids:        &schemapb.IDs{},
+		Scores:     []float32{},
+		Topks:      []int64{0},
+		FieldsData: []*schemapb.FieldData{},
+	}
+	hitData := &schemapb.SearchResultData{
+		NumQueries: nq,
+		TopK:       topK,
+		Ids:        &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}},
+		Scores:     []float32{0.9},
+		Topks:      []int64{1},
+		FieldsData: []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_Int64,
+				FieldName: "field1",
+				FieldId:   100,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{
+							LongData: &schemapb.LongArray{Data: []int64{10}},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	emptyResult, err := EncodeSearchResultData(ctx, emptyData, nq, topK, metricType)
+	suite.NoError(err)
+	hitResult, err := EncodeSearchResultData(ctx, hitData, nq, topK, metricType)
+	suite.NoError(err)
+
+	var out *internalpb.SearchResults
+	suite.NotPanics(func() {
+		out, err = ReduceSearchOnQueryNode(ctx, []*internalpb.SearchResults{emptyResult, hitResult},
+			reduce.NewReduceSearchResultInfo(nq, topK).WithMetricType(metricType).WithPkType(schemapb.DataType_Int64))
+	})
+	suite.NoError(err)
+	if suite.NotNil(out) {
+		reduced, err := DecodeSearchResults(ctx, []*internalpb.SearchResults{out})
+		suite.NoError(err)
+		if suite.Len(reduced, 1) {
+			suite.Equal([]int64{1}, reduced[0].GetIds().GetIntId().GetData())
+			suite.Len(reduced[0].GetFieldsData(), 1)
+		}
+	}
+}
+
 func (suite *ResultSuite) TestEncodeSearchResultData_ZeroCopySwitch() {
 	ctx := context.Background()
 	key := paramtable.Get().QueryNodeCfg.EnableResultZeroCopy.Key
@@ -435,17 +564,31 @@ func (suite *ResultSuite) TestEncodeSearchResultData_EmptyResult() {
 	suite.Nil(encoded.GetResultData())
 	suite.Nil(encoded.GetSlicedBlob())
 
-	// empty IDs — should produce neither
+	// empty IDs still carry search metadata and should be encoded
 	srd := &schemapb.SearchResultData{
-		NumQueries: 1,
-		TopK:       1,
-		Ids:        &schemapb.IDs{},
-		Scores:     []float32{},
-		Topks:      []int64{0},
+		NumQueries:     1,
+		TopK:           1,
+		Ids:            &schemapb.IDs{},
+		Scores:         []float32{},
+		Topks:          []int64{0},
+		AllSearchCount: 123,
+		FieldsData:     []*schemapb.FieldData{},
 	}
+
+	paramtable.Get().Save(key, "false")
 	encoded, err = EncodeSearchResultData(ctx, srd, 1, 1, metric.IP)
 	suite.NoError(err)
 	suite.Nil(encoded.GetResultData())
+	suite.NotEmpty(encoded.GetSlicedBlob())
+
+	var decoded schemapb.SearchResultData
+	suite.NoError(proto.Unmarshal(encoded.GetSlicedBlob(), &decoded))
+	suite.True(proto.Equal(srd, &decoded))
+
+	paramtable.Get().Save(key, "true")
+	encoded, err = EncodeSearchResultData(ctx, srd, 1, 1, metric.IP)
+	suite.NoError(err)
+	suite.Same(srd, encoded.GetResultData())
 	suite.Nil(encoded.GetSlicedBlob())
 }
 

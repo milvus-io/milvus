@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <numeric>
 #include <optional>
 #include <shared_mutex>
 #include <string>
@@ -38,6 +39,7 @@
 #include "common/BitsetView.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
+#include "common/Geometry.h"
 #include "common/Json.h"
 #include "common/LoadInfo.h"
 #include "common/OpContext.h"
@@ -58,7 +60,6 @@
 #include "index/NgramInvertedIndex.h"
 #include "index/SkipIndex.h"
 #include "index/TextMatchIndex.h"
-#include "index/json_stats/JsonKeyStats.h"
 #include "mmap/ChunkedColumnInterface.h"
 #include "parquet/statistics.h"
 #include "pb/plan.pb.h"
@@ -66,6 +67,14 @@
 #include "query/PlanImpl.h"
 #include "segcore/ConcurrentVector.h"
 #include "segcore/InsertRecord.h"
+
+namespace milvus::exec {
+class SimpleGeometryCache;
+}
+
+namespace milvus::index {
+class JsonKeyStats;
+}
 
 namespace milvus::segcore {
 
@@ -75,6 +84,39 @@ struct SegmentStats {
     // we stat the memory size used by the segment,
     // including the insert data and delete data.
     std::atomic<size_t> mem_size{};
+};
+
+// Monotonic source for SegmentInternalInterface::segment_instance_uid().
+// Starts at 1 so 0 can never collide with a live instance.
+inline uint64_t
+NextSegmentInstanceUid() {
+    static std::atomic<uint64_t> counter{0};
+    return counter.fetch_add(1, std::memory_order_relaxed) + 1;
+}
+
+// Request-scoped read snapshot for sealed segments. Captured exactly once per
+// search/retrieve request while the request read lease is held; it reads the
+// immutable published state without locks or per-chunk re-capture. Growing
+// segments and non-pinned paths return nullptr and fall back to per-call
+// segment access with identical semantics.
+class SegmentReadSnapshot {
+ public:
+    virtual ~SegmentReadSnapshot() = default;
+
+    virtual int64_t
+    chunk_size(FieldId f, int64_t c) const = 0;
+
+    virtual int64_t
+    num_rows_until_chunk(FieldId f, int64_t c) const = 0;
+
+    virtual std::pair<int64_t, int64_t>
+    get_chunk_by_offset(FieldId f, int64_t off) const = 0;
+
+    virtual int64_t
+    num_chunk_data(FieldId f) const = 0;
+
+    virtual int64_t
+    get_row_count() const = 0;
 };
 
 // common interface of SegmentSealed and SegmentGrowing used by C API
@@ -104,7 +146,8 @@ class SegmentInterface {
            Timestamp collection_ttl,
            int64_t entity_ttl_physical_time_us = 0,
            bool filter_only = false,
-           bool enable_expr_cache = false) const = 0;
+           bool enable_expr_cache = false,
+           milvus::tracer::SpanPtr trace_span = nullptr) const = 0;
 
     // Only used for test
     std::unique_ptr<SearchResult>
@@ -167,6 +210,11 @@ class SegmentInterface {
 
     virtual const Schema&
     get_schema() const = 0;
+
+    virtual SchemaPtr
+    get_schema_snapshot() const {
+        return std::make_shared<Schema>(get_schema());
+    }
 
     virtual int64_t
     get_deleted_count() const = 0;
@@ -268,7 +316,8 @@ class SegmentInterface {
     // Compute exact distances from the index for given query vectors and candidate IDs.
     // Used for refine step in reduce phase. Returns false if not supported (e.g., no index).
     virtual bool
-    CalcDistByIDs(FieldId field_id,
+    CalcDistByIDs(milvus::OpContext* op_ctx,
+                  FieldId field_id,
                   const knowhere::DataSetPtr& query_dataset,
                   const int64_t* seg_offsets,
                   size_t count,
@@ -278,8 +327,29 @@ class SegmentInterface {
     }
 
     virtual bool
-    IsIndexRefineEnabled(FieldId field_id) const {
+    CalcDistByIDs(FieldId field_id,
+                  const knowhere::DataSetPtr& query_dataset,
+                  const int64_t* seg_offsets,
+                  size_t count,
+                  bool is_cosine,
+                  float* distances) const {
+        return CalcDistByIDs(nullptr,
+                             field_id,
+                             query_dataset,
+                             seg_offsets,
+                             count,
+                             is_cosine,
+                             distances);
+    }
+
+    virtual bool
+    IsIndexRefineEnabled(milvus::OpContext* op_ctx, FieldId field_id) const {
         return false;
+    }
+
+    virtual bool
+    IsIndexRefineEnabled(FieldId field_id) const {
+        return IsIndexRefineEnabled(nullptr, field_id);
     }
 
     virtual void
@@ -324,12 +394,62 @@ class SegmentInterface {
 // only for implementation
 class SegmentInternalInterface : public SegmentInterface {
  public:
+    // Process-unique id for THIS segment OBJECT, distinct from
+    // get_segment_id() which identifies the logical segment.
+    //
+    // Two live objects can share a logical segment id: a growing and a sealed
+    // twin during handoff, and -- because segmentManager::Put installs the new
+    // instance and releases the replaced one asynchronously
+    // (querynodev2/segments/manager.go:409-441) -- two sealed instances of
+    // different versions. Anything whose lifetime is tied to the object rather
+    // than to the logical segment (the geometry cache) must key on this, or
+    // the departing instance's teardown will take the incoming instance's
+    // state with it.
+    uint64_t
+    segment_instance_uid() const {
+        return segment_instance_uid_;
+    }
+
+    // Growing segments use the process-level cache manager. Sealed segments
+    // override this to return the cache from their immutable published runtime
+    // snapshot, so a column replacement and its cache become visible together.
+    virtual std::shared_ptr<milvus::exec::SimpleGeometryCache>
+    GetGeometryCache(FieldId field_id) const;
+
     virtual void
     prefetch_chunks(milvus::OpContext* op_ctx,
                     FieldId field_id,
                     const std::vector<int64_t>& chunk_ids) const {
         // do nothing
     }
+
+    // Convenience: prefetch all chunks of a field. Default impl enumerates
+    // [0, num_chunk(field_id)) and forwards to the typed overload.
+    virtual void
+    prefetch_chunks(milvus::OpContext* op_ctx, FieldId field_id) const {
+    }
+
+    virtual void
+    prefetch_vector(milvus::OpContext* op_ctx, FieldId field_id) const {
+    }
+
+    // Apply field nullability to an already-initialized valid_result bitmap.
+    // Implementations only clear invalid rows and leave valid rows unchanged.
+    virtual void
+    ApplyFieldValidData(milvus::OpContext* op_ctx,
+                        FieldId field_id,
+                        int64_t chunk_id,
+                        int64_t offset,
+                        int64_t size,
+                        TargetBitmapView valid_result) const = 0;
+
+    // Offsets are segment-level row offsets. valid_result must have count bits.
+    virtual void
+    ApplyFieldValidDataByOffsets(milvus::OpContext* op_ctx,
+                                 FieldId field_id,
+                                 const int64_t* offsets,
+                                 int64_t count,
+                                 TargetBitmapView valid_result) const = 0;
 
     template <typename T>
     PinWrapper<Span<T>>
@@ -343,7 +463,7 @@ class SegmentInternalInterface : public SegmentInterface {
     }
 
     template <typename ViewType>
-    PinWrapper<std::pair<std::vector<ViewType>, FixedVector<bool>>>
+    PinWrapper<std::pair<std::vector<ViewType>, ValidityView>>
     chunk_view(milvus::OpContext* op_ctx,
                FieldId field_id,
                int64_t chunk_id,
@@ -355,26 +475,30 @@ class SegmentInternalInterface : public SegmentInterface {
         } else if constexpr (std::is_same_v<ViewType, ArrayView>) {
             return chunk_array_view_impl(
                 op_ctx, field_id, chunk_id, offset_len);
+        } else if constexpr (std::is_same_v<ViewType, ArrayValueView>) {
+            return chunk_array_value_view_impl(
+                op_ctx, field_id, chunk_id, offset_len);
         } else if constexpr (std::is_same_v<ViewType, VectorArrayView>) {
             return chunk_vector_array_view_impl(
                 op_ctx, field_id, chunk_id, offset_len);
         } else if constexpr (std::is_same_v<ViewType, Json>) {
             auto pw =
                 chunk_string_view_impl(op_ctx, field_id, chunk_id, offset_len);
-            auto [string_views, valid_data] = pw.get();
+            auto& [string_views, valid_data] = pw.get();
             std::vector<Json> res;
             res.reserve(string_views.size());
             for (const auto& str_view : string_views) {
                 res.emplace_back(Json(str_view));
             }
-            return PinWrapper<
-                std::pair<std::vector<ViewType>, FixedVector<bool>>>(
-                pw, {std::move(res), std::move(valid_data)});
+            std::pair<std::vector<ViewType>, ValidityView> content{
+                std::move(res), std::move(valid_data)};
+            return PinWrapper<std::pair<std::vector<ViewType>, ValidityView>>(
+                std::move(pw), std::move(content));
         }
     }
 
     template <typename ViewType>
-    PinWrapper<std::pair<std::vector<ViewType>, FixedVector<bool>>>
+    PinWrapper<std::pair<std::vector<ViewType>, ValidityView>>
     get_batch_views(milvus::OpContext* op_ctx,
                     FieldId field_id,
                     int64_t chunk_id,
@@ -390,6 +514,38 @@ class SegmentInternalInterface : public SegmentInterface {
 
     template <typename ViewType>
     PinWrapper<std::pair<std::vector<ViewType>, FixedVector<bool>>>
+    chunk_views_by_offsets(milvus::OpContext* op_ctx,
+                           FieldId field_id,
+                           int64_t chunk_id,
+                           const FixedVector<int32_t>& offsets) const {
+        if constexpr (std::is_same_v<ViewType, std::string_view>) {
+            return chunk_string_views_by_offsets(
+                op_ctx, field_id, chunk_id, offsets);
+        } else if constexpr (std::is_same_v<ViewType, Json>) {
+            auto pw = chunk_string_views_by_offsets(
+                op_ctx, field_id, chunk_id, offsets);
+            auto& [string_views, valid_data] = pw.get();
+            std::vector<ViewType> res;
+            res.reserve(string_views.size());
+            for (const auto& view : string_views) {
+                res.emplace_back(view);
+            }
+            std::pair<std::vector<ViewType>, FixedVector<bool>> content{
+                std::move(res), std::move(valid_data)};
+            return PinWrapper<
+                std::pair<std::vector<ViewType>, FixedVector<bool>>>(
+                std::move(pw), std::move(content));
+        } else if constexpr (std::is_same_v<ViewType, ArrayView>) {
+            return chunk_array_views_by_offsets(
+                op_ctx, field_id, chunk_id, offsets);
+        } else if constexpr (std::is_same_v<ViewType, ArrayValueView>) {
+            return chunk_array_value_views_by_offsets(
+                op_ctx, field_id, chunk_id, offsets);
+        }
+    }
+
+    template <typename ViewType>
+    PinWrapper<std::pair<std::vector<ViewType>, FixedVector<bool>>>
     get_views_by_offsets(milvus::OpContext* op_ctx,
                          FieldId field_id,
                          int64_t chunk_id,
@@ -398,24 +554,8 @@ class SegmentInternalInterface : public SegmentInterface {
             ThrowInfo(ErrorCode::Unsupported,
                       "get chunk views not supported for growing segment");
         }
-        if constexpr (std::is_same_v<ViewType, std::string_view>) {
-            return chunk_string_views_by_offsets(
-                op_ctx, field_id, chunk_id, offsets);
-        } else if constexpr (std::is_same_v<ViewType, Json>) {
-            auto pw = chunk_string_views_by_offsets(
-                op_ctx, field_id, chunk_id, offsets);
-            std::vector<ViewType> res;
-            res.reserve(pw.get().first.size());
-            for (const auto& view : pw.get().first) {
-                res.emplace_back(view);
-            }
-            return PinWrapper<
-                std::pair<std::vector<ViewType>, FixedVector<bool>>>(
-                {std::move(res), pw.get().second});
-        } else if constexpr (std::is_same_v<ViewType, ArrayView>) {
-            return chunk_array_views_by_offsets(
-                op_ctx, field_id, chunk_id, offsets);
-        }
+        return chunk_views_by_offsets<ViewType>(
+            op_ctx, field_id, chunk_id, offsets);
     }
 
     // union(segment_id, field_id) as unique id
@@ -437,7 +577,8 @@ class SegmentInternalInterface : public SegmentInterface {
            Timestamp collection_ttl,
            int64_t entity_ttl_physical_time_us = 0,
            bool filter_only = false,
-           bool enable_expr_cache = false) const override;
+           bool enable_expr_cache = false,
+           milvus::tracer::SpanPtr trace_span = nullptr) const override;
 
     void
     FillPrimaryKeys(const query::Plan* plan,
@@ -473,6 +614,18 @@ class SegmentInternalInterface : public SegmentInterface {
     virtual bool
     HasIndex(FieldId field_id) const = 0;
 
+    bool
+    FieldAccessible(FieldId field_id) const {
+        return HasFieldData(field_id) || HasIndex(field_id);
+    }
+
+    // Returns whether the segment's loaded manifest contains the storage
+    // column. Non-manifest segment types default to true.
+    virtual bool
+    HasColumnInLoadedManifest(const std::string&) const {
+        return true;
+    }
+
     // JSON indexes (JsonFlatIndex + JSON-cast scalar) live in a separate
     // per-segment container from the scalar/vector/binlog index bitsets, so
     // they are checked via this dedicated API rather than widening HasIndex().
@@ -493,19 +646,25 @@ class SegmentInternalInterface : public SegmentInterface {
     set_field_avg_size(FieldId field_id,
                        int64_t num_rows,
                        int64_t field_size) override;
+
+    void
+    set_field_avg_size(const FieldMeta& field_meta,
+                       int64_t num_rows,
+                       int64_t field_size);
+
     virtual bool
     is_chunked() const {
         return false;
     }
 
-    const SkipIndex&
+    std::shared_ptr<const SkipIndex>
     GetSkipIndex() const;
 
     void
     LoadSkipIndex(FieldId field_id,
                   DataType data_type,
                   std::shared_ptr<ChunkedColumnInterface> column) {
-        skip_index_.LoadSkip(get_segment_id(), field_id, data_type, column);
+        skip_index_->LoadSkip(get_segment_id(), field_id, data_type, column);
     }
 
     void
@@ -513,7 +672,7 @@ class SegmentInternalInterface : public SegmentInterface {
         FieldId field_id,
         DataType data_type,
         std::vector<std::shared_ptr<parquet::Statistics>> statistics) {
-        skip_index_.LoadSkipFromStatistics(
+        skip_index_->LoadSkipFromStatistics(
             get_segment_id(), field_id, data_type, statistics);
     }
 
@@ -585,6 +744,14 @@ class SegmentInternalInterface : public SegmentInterface {
     // element size in each chunk
     virtual int64_t
     size_per_chunk() const = 0;
+
+    // Capture a request-scoped read snapshot, or return nullptr when the
+    // segment does not use an immutable published snapshot (growing segments).
+    // Called once per request; see SegmentReadSnapshot.
+    virtual std::shared_ptr<const SegmentReadSnapshot>
+    CaptureReadSnapshot() const {
+        return nullptr;
+    }
 
     virtual int64_t
     get_active_count(Timestamp ts) const = 0;
@@ -680,23 +847,28 @@ class SegmentInternalInterface : public SegmentInterface {
                     int64_t chunk_id) const = 0;
 
     // internal API: return chunk string views in vector
-    virtual PinWrapper<
-        std::pair<std::vector<std::string_view>, FixedVector<bool>>>
+    virtual PinWrapper<std::pair<std::vector<std::string_view>, ValidityView>>
     chunk_string_view_impl(
         milvus::OpContext* op_ctx,
         FieldId field_id,
         int64_t chunk_id,
         std::optional<std::pair<int64_t, int64_t>> offset_len) const = 0;
 
-    virtual PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
+    virtual PinWrapper<std::pair<std::vector<ArrayView>, ValidityView>>
     chunk_array_view_impl(
         milvus::OpContext* op_ctx,
         FieldId field_id,
         int64_t chunk_id,
         std::optional<std::pair<int64_t, int64_t>> offset_len) const = 0;
 
-    virtual PinWrapper<
-        std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
+    virtual PinWrapper<std::pair<std::vector<ArrayValueView>, ValidityView>>
+    chunk_array_value_view_impl(
+        milvus::OpContext* op_ctx,
+        FieldId field_id,
+        int64_t chunk_id,
+        std::optional<std::pair<int64_t, int64_t>> offset_len) const = 0;
+
+    virtual PinWrapper<std::pair<std::vector<VectorArrayView>, ValidityView>>
     chunk_vector_array_view_impl(
         milvus::OpContext* op_ctx,
         FieldId field_id,
@@ -716,6 +888,14 @@ class SegmentInternalInterface : public SegmentInterface {
                                  FieldId field_id,
                                  int64_t chunk_id,
                                  const FixedVector<int32_t>& offsets) const = 0;
+
+    virtual PinWrapper<
+        std::pair<std::vector<ArrayValueView>, FixedVector<bool>>>
+    chunk_array_value_views_by_offsets(
+        milvus::OpContext* op_ctx,
+        FieldId field_id,
+        int64_t chunk_id,
+        const FixedVector<int32_t>& offsets) const = 0;
 
     virtual void
     check_search(const query::Plan* plan) const = 0;
@@ -773,14 +953,9 @@ class SegmentInternalInterface : public SegmentInterface {
                     bool upper_inclusive,
                     BitsetTypeView& bitset) const = 0;
 
-    virtual GEOSContextHandle_t
-    get_ctx() const {
-        return ctx_;
-    };
-
  protected:
     // mutex protecting rw options on schema_
-    std::shared_mutex sch_mutex_;
+    mutable std::shared_mutex sch_mutex_;
 
     milvus::proto::segcore::SegmentLoadInfo load_info_;
 
@@ -788,7 +963,7 @@ class SegmentInternalInterface : public SegmentInterface {
     // fieldID -> std::pair<num_rows, avg_size>
     std::unordered_map<FieldId, std::pair<int64_t, int64_t>>
         variable_fields_avg_size_;  // bytes;
-    SkipIndex skip_index_;
+    std::shared_ptr<SkipIndex> skip_index_ = std::make_shared<SkipIndex>();
 
     // text-indexes used to do match.
     std::unordered_map<
@@ -802,7 +977,8 @@ class SegmentInternalInterface : public SegmentInterface {
     std::unordered_map<FieldId, std::shared_ptr<index::JsonKeyStats>>
         json_stats_;
 
-    GEOSContextHandle_t ctx_ = GEOS_init_r();
+    // Assigned once per constructed object; never reused within a process.
+    const uint64_t segment_instance_uid_ = NextSegmentInstanceUid();
 };
 
 }  // namespace milvus::segcore

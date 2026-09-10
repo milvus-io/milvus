@@ -20,12 +20,41 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
+var _ mlog.ObjectMarshaler = Params{}
+
+// MarshalLogObject logs every tunable under the lowerCamel form of its json
+// tag, plus the non-secret locator fields of StorageConfig. The credentials in
+// StorageConfig are never logged.
+func (p Params) MarshalLogObject(enc mlog.ObjectEncoder) error {
+	enc.AddInt64("storageVersion", p.StorageVersion)
+	enc.AddString("storageFormat", p.StorageFormat)
+	enc.AddUint64("binlogMaxSize", p.BinLogMaxSize)
+	enc.AddBool("useMergeSort", p.UseMergeSort)
+	enc.AddInt("maxSegmentMergeSort", p.MaxSegmentMergeSort)
+	enc.AddFloat64("preferSegmentSizeRatio", p.PreferSegmentSizeRatio)
+	enc.AddInt("bloomFilterApplyBatchSize", p.BloomFilterApplyBatchSize)
+	enc.AddBool("useLoonFfi", p.UseLoonFFI)
+	enc.AddFloat64("lobHoleRatioThreshold", p.LOBHoleRatioThreshold)
+	enc.AddInt64("textInlineThreshold", p.TextInlineThreshold)
+	enc.AddInt64("textMaxLobFileBytes", p.TextMaxLobFileBytes)
+	enc.AddInt64("textFlushThresholdBytes", p.TextFlushThresholdBytes)
+	if cfg := p.StorageConfig; cfg != nil {
+		enc.AddString("storageType", cfg.GetStorageType())
+		enc.AddString("storageAddress", cfg.GetAddress())
+		enc.AddString("storageBucket", cfg.GetBucketName())
+		enc.AddString("storageRootPath", cfg.GetRootPath())
+	}
+	return nil
+}
+
 type Params struct {
 	StorageVersion            int64                  `json:"storage_version,omitempty"`
+	StorageFormat             string                 `json:"storage_format,omitempty"`
 	BinLogMaxSize             uint64                 `json:"binlog_max_size,omitempty"`
 	UseMergeSort              bool                   `json:"use_merge_sort,omitempty"`
 	MaxSegmentMergeSort       int                    `json:"max_segment_merge_sort,omitempty"`
@@ -46,6 +75,7 @@ func GenParams() Params {
 	}
 	return Params{
 		StorageVersion:            storageVersion,
+		StorageFormat:             paramtable.Get().DataNodeCfg.StorageFormat.GetValue(),
 		BinLogMaxSize:             paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsUint64(),
 		UseMergeSort:              paramtable.Get().DataNodeCfg.UseMergeSort.GetAsBool(),
 		MaxSegmentMergeSort:       paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.GetAsInt(),
@@ -58,6 +88,13 @@ func GenParams() Params {
 		TextMaxLobFileBytes:       getTextMaxLobFileBytes(),
 		TextFlushThresholdBytes:   getTextFlushThresholdBytes(),
 	}
+}
+
+func (p Params) GetStorageFormat() string {
+	if p.StorageFormat != "" {
+		return p.StorageFormat
+	}
+	return paramtable.Get().DataNodeCfg.StorageFormat.GetValue()
 }
 
 func GenerateJSONParams(schema *schemapb.CollectionSchema) (string, error) {
@@ -93,6 +130,9 @@ func CreateStorageConfig() *indexpb.StorageConfig {
 		storageConfig = &indexpb.StorageConfig{
 			RootPath:    paramtable.Get().LocalStorageCfg.Path.GetValue(),
 			StorageType: paramtable.Get().CommonCfg.StorageType.GetValue(),
+			// External collections may reference an s3:// source even when the
+			// primary storage is local, so the connection cap still applies.
+			MaxConnections: uint32(paramtable.Get().MinioCfg.MaxConnections.GetAsInt()),
 		}
 	} else {
 		storageConfig = &indexpb.StorageConfig{
@@ -110,6 +150,7 @@ func CreateStorageConfig() *indexpb.StorageConfig {
 			UseVirtualHost:    paramtable.Get().MinioCfg.UseVirtualHost.GetAsBool(),
 			CloudProvider:     paramtable.Get().MinioCfg.CloudProvider.GetValue(),
 			RequestTimeoutMs:  paramtable.Get().MinioCfg.RequestTimeoutMs.GetAsInt64(),
+			MaxConnections:    uint32(paramtable.Get().MinioCfg.MaxConnections.GetAsInt()),
 			GcpCredentialJSON: paramtable.Get().MinioCfg.GcpCredentialJSON.GetValue(),
 			SslTlsMinVersion:  paramtable.Get().MinioCfg.SslTLSMinVersion.GetValue(),
 			UseCrc32CChecksum: paramtable.Get().MinioCfg.UseCRC32C.GetAsBool(),

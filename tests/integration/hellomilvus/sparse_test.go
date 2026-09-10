@@ -21,14 +21,13 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -75,11 +74,11 @@ func (s *HelloMilvusSuite) createCollection(ctx context.Context, c *cluster.Mini
 	})
 	s.NoError(err)
 	s.Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
-	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
+	mlog.Info(ctx, "CreateCollection result", mlog.Any("createCollectionStatus", createCollectionStatus))
 	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.Equal(showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
-	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
+	mlog.Info(ctx, "ShowCollections result", mlog.Any("showCollectionsResp", showCollectionsResp))
 	return collectionName
 }
 
@@ -248,7 +247,7 @@ func (s *HelloMilvusSuite) TestSparse_invalid_index_build() {
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
-		log.Info("ShowSegments result", zap.String("segment", segment.String()))
+		mlog.Info(context.TODO(), "ShowSegments result", mlog.String("segment", segment.String()))
 	}
 
 	// unsupported index type
@@ -408,7 +407,7 @@ func (s *HelloMilvusSuite) TestSparse_invalid_search_request() {
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
-		log.Info("ShowSegments result", zap.String("segment", segment.String()))
+		mlog.Info(context.TODO(), "ShowSegments result", mlog.String("segment", segment.String()))
 	}
 
 	indexType := integration.IndexSparseInvertedIndex
@@ -447,7 +446,7 @@ func (s *HelloMilvusSuite) TestSparse_invalid_search_request() {
 	})
 	s.NoError(err)
 	if loadStatus.GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("loadStatus fail reason", zap.String("reason", loadStatus.GetReason()))
+		mlog.Warn(context.TODO(), "loadStatus fail reason", mlog.String("reason", loadStatus.GetReason()))
 	}
 	s.Equal(commonpb.ErrorCode_Success, loadStatus.GetErrorCode())
 	s.WaitForLoad(ctx, collectionName)

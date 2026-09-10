@@ -27,11 +27,11 @@ standalone:
     enabled: true
   resources:
     limits:
-      cpu: "4"
+      cpu: "8"
       memory: 16Gi
     requests:
-      cpu: "1"
-      memory: 3.5Gi
+      cpu: "3"
+      memory: 8Gi
 log:
   level: debug
 extraConfigFiles:
@@ -40,7 +40,16 @@ extraConfigFiles:
       storage:
         # enable storage v3
         useLoonFFI: true
+    dataNode:
+      storage:
+        format: vortex
     dataCoord:
+      targetVecIndexVersion: 11
+      forceRebuildScalarSegmentIndex: true
+      targetScalarIndexVersion: 5
+      compaction:
+        bumpSchemaVersion:
+          enabled: true
       gc:
         interval: 1800
         missingTolerance: 1800

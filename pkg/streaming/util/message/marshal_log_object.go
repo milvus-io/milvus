@@ -6,16 +6,16 @@ import (
 	"strconv"
 	"strings"
 
-	"go.uber.org/zap/zapcore"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/rgpb"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
 const maxPrintedIDs = 1024
 
 // MarshalLogObject encodes the message into zap log object.
-func (m *messageImpl) MarshalLogObject(enc zapcore.ObjectEncoder) error {
+func (m *messageImpl) MarshalLogObject(enc mlog.ObjectEncoder) error {
 	if m == nil {
 		return nil
 	}
@@ -47,7 +47,7 @@ func (m *messageImpl) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 }
 
 // MarshalLogObject encodes the immutable message into zap log object.
-func (m *immutableMessageImpl) MarshalLogObject(enc zapcore.ObjectEncoder) error {
+func (m *immutableMessageImpl) MarshalLogObject(enc mlog.ObjectEncoder) error {
 	if m == nil {
 		return nil
 	}
@@ -75,12 +75,12 @@ func (m *immutableMessageImpl) MarshalLogObject(enc zapcore.ObjectEncoder) error
 	return nil
 }
 
-func (m *immutableTxnMessageImpl) MarshalLogObject(enc zapcore.ObjectEncoder) error {
+func (m *immutableTxnMessageImpl) MarshalLogObject(enc mlog.ObjectEncoder) error {
 	if m == nil {
 		return nil
 	}
 	enc.AddInt("messageCount", m.Size())
-	enc.AddArray("txn", zapcore.ArrayMarshalerFunc(func(enc zapcore.ArrayEncoder) error {
+	enc.AddArray("txn", mlog.ArrayMarshalerFunc(func(enc mlog.ArrayEncoder) error {
 		txnMessage := AsImmutableTxnMessage(m)
 		txnMessage.RangeOver(func(im ImmutableMessage) error {
 			enc.AppendObject(im)
@@ -92,7 +92,7 @@ func (m *immutableTxnMessageImpl) MarshalLogObject(enc zapcore.ObjectEncoder) er
 }
 
 // marshalSpecializedHeader marshals the specialized header of the message.
-func marshalSpecializedHeader(t MessageType, v Version, h string, enc zapcore.ObjectEncoder) {
+func marshalSpecializedHeader(t MessageType, v Version, h string, enc mlog.ObjectEncoder) {
 	typ, ok := GetSerializeType(NewMessageTypeWithVersion(t, v))
 	if !ok {
 		enc.AddString("headerDecodeError", fmt.Sprintf("message type %s version %d not found", t, v))
@@ -217,7 +217,7 @@ func marshalSpecializedHeader(t MessageType, v Version, h string, enc zapcore.Ob
 	}
 }
 
-func encodeIDs(name string, targetIDs []int64, enc zapcore.ObjectEncoder) {
+func encodeIDs(name string, targetIDs []int64, enc mlog.ObjectEncoder) {
 	ids := make([]string, 0, len(targetIDs))
 	for _, id := range targetIDs {
 		if len(ids) > maxPrintedIDs {
@@ -229,7 +229,7 @@ func encodeIDs(name string, targetIDs []int64, enc zapcore.ObjectEncoder) {
 	enc.AddString(name, strings.Join(ids, "|"))
 }
 
-func encodeResourceGroupConfigs(configs map[string]*rgpb.ResourceGroupConfig, enc zapcore.ObjectEncoder) {
+func encodeResourceGroupConfigs(configs map[string]*rgpb.ResourceGroupConfig, enc mlog.ObjectEncoder) {
 	strs := make([]string, 0, len(configs))
 	for name, config := range configs {
 		strs = append(strs, fmt.Sprintf(

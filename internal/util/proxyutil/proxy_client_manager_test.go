@@ -30,9 +30,11 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type UniqueID = int64
@@ -415,6 +417,49 @@ func TestProxyClientManager_SetRates(t *testing.T) {
 		pcm.proxyClient.Insert(TestProxyID, p1)
 		err := pcm.SetRates(ctx, &proxypb.SetRatesRequest{})
 		assert.NoError(t, err)
+	})
+}
+
+func TestProxyClientManager_ClearReadTaskQueue(t *testing.T) {
+	TestProxyID := int64(1001)
+	t.Run("empty proxy list", func(t *testing.T) {
+		ctx := context.Background()
+		pcm := NewProxyClientManager(DefaultProxyCreator)
+		results, err := pcm.ClearReadTaskQueue(ctx, &internalpb.ClearReadTaskQueueRequest{})
+		assert.NoError(t, err)
+		assert.Empty(t, results)
+	})
+
+	t.Run("normal case", func(t *testing.T) {
+		ctx := context.Background()
+		p1 := mocks.NewMockProxyClient(t)
+		p1.EXPECT().ClearReadTaskQueue(mock.Anything, mock.Anything).Return(&internalpb.ClearReadTaskQueueResponse{
+			Status:             merr.Success(),
+			ProxyQueuedCleared: 3,
+			Results: []*internalpb.ClearReadTaskQueueComponentResult{
+				{Status: merr.Success(), Role: typeutil.ProxyRole, NodeID: TestProxyID, QueuedCleared: 3},
+			},
+		}, nil)
+		pcm := NewProxyClientManager(DefaultProxyCreator)
+		pcm.proxyClient.Insert(TestProxyID, p1)
+		results, err := pcm.ClearReadTaskQueue(ctx, &internalpb.ClearReadTaskQueueRequest{})
+		assert.NoError(t, err)
+		assert.Len(t, results, 1)
+		assert.Equal(t, int64(3), results[0].GetQueuedCleared())
+	})
+
+	t.Run("partial failure keeps result", func(t *testing.T) {
+		ctx := context.Background()
+		p1 := mocks.NewMockProxyClient(t)
+		mockErr := errors.New("mock clear error")
+		p1.EXPECT().ClearReadTaskQueue(mock.Anything, mock.Anything).Return(nil, mockErr)
+		pcm := NewProxyClientManager(DefaultProxyCreator)
+		pcm.proxyClient.Insert(TestProxyID, p1)
+		results, err := pcm.ClearReadTaskQueue(ctx, &internalpb.ClearReadTaskQueueRequest{})
+		assert.Error(t, err)
+		assert.Len(t, results, 1)
+		assert.False(t, merr.Ok(results[0].GetStatus()))
+		assert.Equal(t, TestProxyID, results[0].GetNodeID())
 	})
 }
 

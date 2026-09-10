@@ -20,7 +20,7 @@ func SHA256(src string, salt string) string {
 
 // PasswordEncrypt encrypt password
 func PasswordEncrypt(pwd string) (string, error) {
-	bytes, err := bcrypt.GenerateFromPassword([]byte(pwd), bcrypt.MinCost)
+	bytes, err := bcrypt.GenerateFromPassword([]byte(pwd), bcrypt.DefaultCost)
 	if err != nil {
 		return "", err
 	}
@@ -45,4 +45,10 @@ func MD5(str string) string {
 	// #nosec
 	data := md5.Sum([]byte(str))
 	return hex.EncodeToString(data[:])[8:24]
+}
+
+func GranteeID(str string) string {
+	// #nosec G401 -- RBAC grantee IDs need stable 128-bit identifiers, not password hashing.
+	data := md5.Sum([]byte(str))
+	return hex.EncodeToString(data[:])
 }

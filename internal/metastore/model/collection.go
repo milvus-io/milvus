@@ -17,6 +17,7 @@
 package model
 
 import (
+	"maps"
 	"slices"
 
 	"github.com/samber/lo"
@@ -30,17 +31,21 @@ import (
 
 // TODO: These collection is dirty implementation and easy to be broken, we should drop it in the future.
 type Collection struct {
-	TenantID             string
-	DBID                 int64
-	CollectionID         int64
-	Partitions           []*Partition
-	Name                 string
-	DBName               string
-	Description          string
-	AutoID               bool
-	Fields               []*Field
-	StructArrayFields    []*StructArrayField
-	Functions            []*Function
+	TenantID          string
+	DBID              int64
+	CollectionID      int64
+	Partitions        []*Partition
+	Name              string
+	DBName            string
+	Description       string
+	AutoID            bool
+	Fields            []*Field
+	StructArrayFields []*StructArrayField
+	Functions         []*Function
+	// RLS metadata is an internal RootCoord cache. It is persisted in its own
+	// KV namespace and must not be marshaled into collection info.
+	RLSPolicies          map[string]*RLSPolicy
+	RLSPrincipals        []*RLSPrincipal
 	VirtualChannelNames  []string
 	PhysicalChannelNames []string
 	ShardsNum            int32
@@ -58,7 +63,6 @@ type Collection struct {
 	FileResourceIds      []int64
 	ExternalSource       string
 	ExternalSpec         string
-	DoPhysicalBackfill   bool
 }
 
 type ShardInfo struct {
@@ -95,13 +99,14 @@ func (c *Collection) ShallowClone() *Collection {
 		EnableDynamicField:   c.EnableDynamicField,
 		EnableNamespace:      c.EnableNamespace,
 		Functions:            c.Functions,
+		RLSPolicies:          maps.Clone(c.RLSPolicies),
+		RLSPrincipals:        slices.Clone(c.RLSPrincipals),
 		UpdateTimestamp:      c.UpdateTimestamp,
 		SchemaVersion:        c.SchemaVersion,
 		ShardInfos:           c.ShardInfos,
 		FileResourceIds:      c.FileResourceIds,
 		ExternalSource:       c.ExternalSource,
 		ExternalSpec:         c.ExternalSpec,
-		DoPhysicalBackfill:   c.DoPhysicalBackfill,
 	}
 }
 
@@ -137,20 +142,21 @@ func (c *Collection) Clone() *Collection {
 		EnableDynamicField:   c.EnableDynamicField,
 		EnableNamespace:      c.EnableNamespace,
 		Functions:            CloneFunctions(c.Functions),
+		RLSPolicies:          CloneRLSPolicyMap(c.RLSPolicies),
+		RLSPrincipals:        CloneRLSPrincipals(c.RLSPrincipals),
 		UpdateTimestamp:      c.UpdateTimestamp,
 		SchemaVersion:        c.SchemaVersion,
 		ShardInfos:           shardInfos,
 		FileResourceIds:      slices.Clone(c.FileResourceIds),
 		ExternalSource:       c.ExternalSource,
 		ExternalSpec:         c.ExternalSpec,
-		DoPhysicalBackfill:   c.DoPhysicalBackfill,
 	}
 }
 
 // ToCollectionSchemaPB returns a schemapb.CollectionSchema populated from the
 // current Collection. All schema-level fields are copied verbatim — callers
-// override Version, Properties, EnableDynamicField, DoPhysicalBackfill, etc.
-// after the call when the operation requires a different value.
+// override Version, Properties, EnableDynamicField, etc. after the call when
+// the operation requires a different value.
 //
 // Centralizing the conversion here ensures that newly added schema fields are
 // propagated consistently across every rootcoord broadcast/response path.
@@ -170,7 +176,6 @@ func (c *Collection) ToCollectionSchemaPB() *schemapb.CollectionSchema {
 		FileResourceIds:    c.FileResourceIds,
 		ExternalSource:     c.ExternalSource,
 		ExternalSpec:       c.ExternalSpec,
-		DoPhysicalBackfill: c.DoPhysicalBackfill,
 	}
 }
 
@@ -205,6 +210,16 @@ func (c *Collection) ApplyUpdates(header *message.AlterCollectionMessageHeader, 
 		case message.FieldMaskDB:
 			c.DBID = updates.DbId
 			c.DBName = updates.DbName
+			for _, policy := range c.RLSPolicies {
+				if policy != nil {
+					policy.DBID = updates.DbId
+				}
+			}
+			for _, principal := range c.RLSPrincipals {
+				if principal != nil {
+					principal.DBID = updates.DbId
+				}
+			}
 		case message.FieldMaskCollectionName:
 			c.Name = updates.CollectionName
 		case message.FieldMaskCollectionDescription:
@@ -221,9 +236,9 @@ func (c *Collection) ApplyUpdates(header *message.AlterCollectionMessageHeader, 
 			c.Functions = UnmarshalFunctionModels(updates.Schema.Functions)
 			c.StructArrayFields = UnmarshalStructArrayFieldModels(updates.Schema.StructArrayFields)
 			c.SchemaVersion = updates.Schema.Version
+			c.FileResourceIds = updates.Schema.GetFileResourceIds()
 			c.ExternalSource = updates.Schema.ExternalSource
 			c.ExternalSpec = updates.Schema.ExternalSpec
-			c.DoPhysicalBackfill = updates.Schema.DoPhysicalBackfill
 		case message.FieldMaskCollectionExternalSpec:
 			// Defensive: only overwrite when the update carries a value.
 			// Legacy WAL messages from before the atomic-tuple invariant may
@@ -297,7 +312,6 @@ func UnmarshalCollectionModel(coll *pb.CollectionInfo) *Collection {
 		FileResourceIds:      coll.Schema.GetFileResourceIds(),
 		ExternalSource:       coll.Schema.ExternalSource,
 		ExternalSpec:         coll.Schema.ExternalSpec,
-		DoPhysicalBackfill:   coll.Schema.DoPhysicalBackfill,
 	}
 }
 
@@ -353,7 +367,6 @@ func marshalCollectionModelWithConfig(coll *Collection, c *config) *pb.Collectio
 		FileResourceIds:    coll.FileResourceIds,
 		ExternalSource:     coll.ExternalSource,
 		ExternalSpec:       coll.ExternalSpec,
-		DoPhysicalBackfill: coll.DoPhysicalBackfill,
 	}
 
 	if c.withFields {

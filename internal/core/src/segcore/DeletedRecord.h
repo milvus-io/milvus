@@ -153,15 +153,19 @@ class DeletedRecord {
                 if (deleted_mask_.size() > row_id && deleted_mask_[row_id]) {
                     return;
                 }
-                // if insert and delete have the same timestamp,
-                // delete should not take effect on this record.
+                // Skip delete when delete_ts <= insert_ts.
+                // Normal segment callers search PKs with include_same_ts=false,
+                // so only rows with insert_ts < delete_ts reach this callback.
+                // This check is therefore redundant for normal production
+                // callers and keeps direct callers/tests on the same boundary.
+                // Sealed-segment search callbacks perform the same check from
+                // one published snapshot before invoking this callback.
                 Timestamp insert_ts = 0;
-                if (!insert_record_->timestamps_.empty()) {
+                if (insert_record_ != nullptr &&
+                    !insert_record_->timestamps_.empty()) {
                     insert_ts = insert_record_->timestamps_[row_id];
-                } else if (get_insert_timestamp_func_) {
-                    insert_ts = get_insert_timestamp_func_(row_id);
                 }
-                if (insert_ts != 0 && delete_ts == insert_ts) {
+                if (insert_ts != 0 && delete_ts <= insert_ts) {
                     return;
                 }
                 accessor.insert(std::make_pair(delete_ts, row_id));
@@ -237,7 +241,7 @@ class DeletedRecord {
         if (snapshot && snapshot->max_ts > 0 &&
             query_timestamp >= snapshot->max_ts) {
             auto or_size = std::min({snapshot->bitset.size(), bitset.size()});
-            bitset.inplace_or_with_count(snapshot->bitset, or_size);
+            bitset.inplace_or(snapshot->bitset, or_size);
             return;
         }
 
@@ -257,8 +261,7 @@ class DeletedRecord {
                     next_iter = accessor.lower_bound(snap_next_pos_[loc]);
                     auto or_size =
                         std::min(snapshots_[loc].second.size(), bitset.size());
-                    bitset.inplace_or_with_count(snapshots_[loc].second,
-                                                 or_size);
+                    bitset.inplace_or(snapshots_[loc].second, or_size);
                     hit_snapshot = true;
                 }
             }
@@ -272,21 +275,6 @@ class DeletedRecord {
             }
             it++;
         }
-    }
-
-    size_t
-    GetSnapshotBitsSize() const {
-        auto all_dump_bits = 0;
-        auto next_dump_ts = 0;
-        std::shared_lock<std::shared_mutex> lock(snap_lock_);
-        int loc = snapshots_.size() - 1;
-        while (loc >= 0) {
-            if (next_dump_ts != snapshots_[loc].first) {
-                all_dump_bits += snapshots_[loc].second.size();
-            }
-            loc--;
-        }
-        return all_dump_bits;
     }
 
     void
@@ -308,8 +296,8 @@ class DeletedRecord {
             Timestamp last_dump_ts = 0;
             if (!snapshots_.empty()) {
                 it = accessor.lower_bound(snap_next_pos_.back());
-                bitmap.inplace_or_with_count(snapshots_.back().second,
-                                             snapshots_.back().second.size());
+                bitmap.inplace_or(snapshots_.back().second,
+                                  snapshots_.back().second.size());
             }
 
             bool need_rebuild = false;
@@ -403,15 +391,6 @@ class DeletedRecord {
         deleted_mask_.resize(row_count);
     }
 
-    // Set a callback to read insert timestamp for a given row_id.
-    // Used by StorageV2 lazy-init path where insert_record_.timestamps_
-    // may be empty but timestamp data is available in the column.
-    void
-    set_get_insert_timestamp_func(
-        std::function<Timestamp(int64_t row_id)> func) {
-        get_insert_timestamp_func_ = std::move(func);
-    }
-
     std::vector<std::pair<Timestamp, BitsetType>>
     get_snapshots() const {
         std::shared_lock<std::shared_mutex> lock(snap_lock_);
@@ -449,10 +428,6 @@ class DeletedRecord {
     std::atomic<int64_t> dumped_entry_count_{0};
     // estimated memory size of DeletedRecord, only used for sealed segment
     int64_t estimated_memory_size_{0};
-
-    // Callback to read insert timestamp from column (StorageV2 lazy path).
-    // Used when insert_record_->timestamps_ is empty.
-    std::function<Timestamp(int64_t row_id)> get_insert_timestamp_func_;
 
     // atomic snapshot for fast path query optimization
     // when query_timestamp >= snapshot.max_ts, we can directly use the bitset

@@ -17,15 +17,16 @@
 package meta
 
 import (
+	"context"
 	"sync"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/util/metrics"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
@@ -227,6 +228,7 @@ func composeNodeChannels(channels ...*DmChannel) nodeChannels {
 type ChannelDistManagerInterface interface {
 	GetByFilter(filters ...ChannelDistFilter) []*DmChannel
 	Update(nodeID typeutil.UniqueID, channels ...*DmChannel) []*DmChannel
+	Patch(nodeID typeutil.UniqueID, updates []*DmChannel, removedChannels []string) []*DmChannel
 	GetShardLeader(channelName string, replica *Replica) *DmChannel
 	GetChannelDist(collectionID int64) []*metricsinfo.DmChannel
 	GetLeaderView(collectionID int64) []*metricsinfo.LeaderView
@@ -315,6 +317,60 @@ func (m *ChannelDistManager) Update(nodeID typeutil.UniqueID, channels ...*DmCha
 	return newServiceableChannels
 }
 
+func (m *ChannelDistManager) Patch(nodeID typeutil.UniqueID, updates []*DmChannel, removedChannels []string) []*DmChannel {
+	if len(updates) == 0 && len(removedChannels) == 0 {
+		return nil
+	}
+
+	m.rwmutex.Lock()
+	defer m.rwmutex.Unlock()
+
+	existing := m.channels[nodeID]
+	updatesByName := make(map[string]*DmChannel, len(updates))
+	for _, channel := range updates {
+		updatesByName[channel.GetChannelName()] = channel
+	}
+	removedByName := make(map[string]struct{}, len(removedChannels))
+	for _, channelName := range removedChannels {
+		removedByName[channelName] = struct{}{}
+	}
+
+	channels := make([]*DmChannel, 0, len(existing.channels)+len(updates))
+	newServiceableChannels := make([]*DmChannel, 0)
+	for _, old := range existing.channels {
+		channelName := old.GetChannelName()
+		if _, ok := removedByName[channelName]; ok {
+			continue
+		}
+		channel, ok := updatesByName[channelName]
+		if !ok {
+			channels = append(channels, old)
+			continue
+		}
+
+		channel.Node = nodeID
+		if channel.IsServiceable() && !old.IsServiceable() {
+			newServiceableChannels = append(newServiceableChannels, channel)
+		}
+		channels = append(channels, channel)
+		delete(updatesByName, channelName)
+	}
+	for _, channel := range updatesByName {
+		channel.Node = nodeID
+		if channel.IsServiceable() {
+			newServiceableChannels = append(newServiceableChannels, channel)
+		}
+		channels = append(channels, channel)
+	}
+	if len(channels) == 0 {
+		delete(m.channels, nodeID)
+	} else {
+		m.channels[nodeID] = composeNodeChannels(channels...)
+	}
+	m.version++
+	return newServiceableChannels
+}
+
 // GetShardLeader return the only one delegator leader which has the highest version in given replica
 // if there is no serviceable leader, return the highest version leader
 // With specific channel name and replica, return the only one delegator leader
@@ -351,21 +407,21 @@ func (m *ChannelDistManager) GetShardLeader(channelName string, replica *Replica
 			}
 		}
 	}
-	if log.Level().Enabled(zap.DebugLevel) {
-		logger := log.With(
-			zap.String("Scope", "ChannelDistManager"),
-			zap.String("channelName", channelName),
-			zap.Int64("replicaID", replica.GetID()),
-		).WithRateGroup("ChannelDistManager", 1.0, 60.0)
+	if mlog.LevelEnabled(mlog.DebugLevel) {
+		logger := mlog.With(
+			mlog.String("Scope", "ChannelDistManager"),
+			mlog.String("channelName", channelName),
+			mlog.Int64("replicaID", replica.GetID()),
+		)
 		if candidates != nil {
-			logger.RatedDebug(1.0, "final",
-				zap.String("candidates", candidates.GetChannelName()),
-				zap.Int64("candidates version", candidates.Version),
-				zap.Int64("candidates node", candidates.Node),
-				zap.String("reason", setReason),
+			logger.RatedDebug(context.TODO(), rate.Limit(1.0), "final",
+				mlog.String("candidates", candidates.GetChannelName()),
+				mlog.Int64("candidates version", candidates.Version),
+				mlog.Int64("candidates node", candidates.Node),
+				mlog.String("reason", setReason),
 			)
 		} else {
-			logger.RatedDebug(1.0, "no candidates found")
+			logger.RatedDebug(context.TODO(), rate.Limit(1.0), "no candidates found")
 		}
 	}
 	return candidates

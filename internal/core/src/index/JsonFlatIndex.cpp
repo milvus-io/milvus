@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "index/JsonFlatIndex.h"
+#include "common/FastMem.h"
 
 #include <simdjson.h>
 #include <string.h>
@@ -68,7 +69,8 @@ JsonFlatIndex::build_index_for_json(
                         scratch_buffer =
                             simdjson::padded_string((str.size() + 1) * 2);
                     }
-                    std::memcpy(scratch_buffer.data(), str.data(), str.size());
+                    milvus::fastmem::FastMemcpy(
+                        scratch_buffer.data(), str.data(), str.size());
                     // Add null terminator - required for C string FFI to Rust
                     scratch_buffer.data()[str.size()] = '\0';
                     // Create Json referencing scratch buffer (non-owning)

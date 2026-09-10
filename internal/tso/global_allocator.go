@@ -30,14 +30,13 @@
 package tso
 
 import (
+	"context"
 	"sync/atomic"
 	"time"
 
-	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/pkg/v3/kv"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -110,7 +109,7 @@ func (gta *GlobalTSOAllocator) SetTSO(tso uint64) error {
 func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (uint64, error) {
 	var physical, logical int64
 	if count == 0 {
-		return 0, errors.New("tso count should be positive")
+		return 0, merr.WrapErrParameterInvalidMsg("tso count should be positive")
 	}
 
 	maxRetryCount := 10
@@ -119,7 +118,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (uint64, error) {
 		current := (*atomicObject)(atomic.LoadPointer(&gta.tso.TSO))
 		if current == nil || current.physical.Equal(typeutil.ZeroTime) {
 			// If it's leader, maybe SyncTimestamp hasn't completed yet
-			log.Info("sync hasn't completed yet, wait for a while")
+			mlog.Info(context.TODO(), "sync hasn't completed yet, wait for a while")
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
@@ -127,14 +126,14 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (uint64, error) {
 		physical = current.physical.UnixMilli()
 		logical = atomic.AddInt64(&current.logical, int64(count))
 		if logical >= maxLogical && gta.LimitMaxLogic {
-			log.Info("logical part outside of max logical interval, please check ntp time",
-				zap.Int("retry-count", i))
+			mlog.Info(context.TODO(), "logical part outside of max logical interval, please check ntp time",
+				mlog.Int("retry-count", i))
 			time.Sleep(UpdateTimestampStep)
 			continue
 		}
 		return tsoutil.ComposeTS(physical, logical), nil
 	}
-	return 0, errors.New("can not get timestamp")
+	return 0, merr.WrapErrServiceInternalMsg("can not get timestamp")
 }
 
 // Alloc allocates a batch of timestamps. What is returned is the starting timestamp.

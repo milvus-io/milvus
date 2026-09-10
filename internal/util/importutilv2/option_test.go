@@ -61,14 +61,14 @@ func TestOption_ParseTimeRange(t *testing.T) {
 	assert.Equal(t, uint64(0), s)
 	assert.Equal(t, uint64(math.MaxUint64), e)
 
-	startTs := tsoutil.GetCurrentTime()
+	startTs := tsoutil.ComposeTSByTime(time.Now())
 	options := []*commonpb.KeyValuePair{{Key: StartTs, Value: fmt.Sprintf("%d", startTs)}}
 	s, e, err = ParseTimeRange(options)
 	assert.NoError(t, err)
 	assert.Equal(t, startTs, s)
 	assert.Equal(t, uint64(math.MaxUint64), e)
 
-	endTs := tsoutil.GetCurrentTime()
+	endTs := tsoutil.ComposeTSByTime(time.Now())
 	options = []*commonpb.KeyValuePair{{Key: EndTs, Value: fmt.Sprintf("%d", endTs)}}
 	s, e, err = ParseTimeRange(options)
 	assert.NoError(t, err)
@@ -212,4 +212,18 @@ func TestSimple(t *testing.T) {
 	// Simple test to verify the test environment works
 	assert.Equal(t, 1, 1)
 	assert.Equal(t, "test", "test")
+}
+
+func TestIsAutoCommit(t *testing.T) {
+	// default true when key absent
+	assert.True(t, IsAutoCommit(nil))
+	assert.True(t, IsAutoCommit([]*commonpb.KeyValuePair{}))
+
+	// explicit true
+	opts := []*commonpb.KeyValuePair{{Key: AutoCommitKey, Value: "true"}}
+	assert.True(t, IsAutoCommit(opts))
+
+	// explicit false
+	opts = []*commonpb.KeyValuePair{{Key: AutoCommitKey, Value: "false"}}
+	assert.False(t, IsAutoCommit(opts))
 }

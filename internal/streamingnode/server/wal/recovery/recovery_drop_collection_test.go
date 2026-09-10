@@ -3,6 +3,7 @@
 package recovery
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -111,7 +112,7 @@ func TestHandleDropCollection_VChannelAlreadyDropped_FlushesOrphanedSegments(t *
 
 	// Replay DropCollection for the already-dropped vchannel.
 	dropMsg := buildDropCollectionMsg("v1", 100, 50, 50)
-	rs.handleDropCollection(dropMsg)
+	rs.handleDropCollection(context.Background(), dropMsg)
 
 	// Verify: orphaned segments for collection 100 are flushed.
 	assert.False(t, rs.segments[1001].IsGrowing(), "segment 1001 should be flushed")
@@ -129,7 +130,7 @@ func TestHandleDropCollection_VChannelNotFound_FlushesOrphanedSegments(t *testin
 	addGrowingSegment(rs, 1001, 100, 200, "v1")
 
 	dropMsg := buildDropCollectionMsg("v1", 100, 50, 50)
-	rs.handleDropCollection(dropMsg)
+	rs.handleDropCollection(context.Background(), dropMsg)
 
 	// Segment should be flushed even though vchannel doesn't exist.
 	assert.False(t, rs.segments[1001].IsGrowing(), "segment 1001 should be flushed")
@@ -143,7 +144,7 @@ func TestHandleDropCollection_NormalCase_StillWorks(t *testing.T) {
 	addGrowingSegment(rs, 1001, 100, 200, "v1")
 
 	dropMsg := buildDropCollectionMsg("v1", 100, 50, 50)
-	rs.handleDropCollection(dropMsg)
+	rs.handleDropCollection(context.Background(), dropMsg)
 
 	// vchannel should be marked as DROPPED.
 	assert.Equal(t, streamingpb.VChannelState_VCHANNEL_STATE_DROPPED, rs.vchannels["v1"].meta.State)
@@ -225,7 +226,7 @@ func TestHandleCreateSegment_SkipsForDroppedVChannel(t *testing.T) {
 		WithLastConfirmed(rmq.NewRmqID(50)).
 		IntoImmutableMessage(rmq.NewRmqID(50))
 
-	rs.handleCreateSegment(message.MustAsImmutableCreateSegmentMessageV2(createMsg))
+	rs.handleCreateSegment(context.Background(), message.MustAsImmutableCreateSegmentMessageV2(createMsg))
 
 	// Segment should NOT have been created.
 	assert.Empty(t, rs.segments, "no segment should be created for a dropped vchannel")
@@ -250,7 +251,7 @@ func TestHandleCreateSegment_SkipsForNonExistentVChannel(t *testing.T) {
 		WithLastConfirmed(rmq.NewRmqID(50)).
 		IntoImmutableMessage(rmq.NewRmqID(50))
 
-	rs.handleCreateSegment(message.MustAsImmutableCreateSegmentMessageV2(createMsg))
+	rs.handleCreateSegment(context.Background(), message.MustAsImmutableCreateSegmentMessageV2(createMsg))
 
 	// Segment should NOT have been created.
 	assert.Empty(t, rs.segments, "no segment should be created for a non-existent vchannel")
@@ -277,7 +278,7 @@ func TestHandleCreateSegment_NormalCase_StillWorks(t *testing.T) {
 		WithLastConfirmed(rmq.NewRmqID(50)).
 		IntoImmutableMessage(rmq.NewRmqID(50))
 
-	rs.handleCreateSegment(message.MustAsImmutableCreateSegmentMessageV2(createMsg))
+	rs.handleCreateSegment(context.Background(), message.MustAsImmutableCreateSegmentMessageV2(createMsg))
 
 	// Segment should be created normally.
 	assert.Len(t, rs.segments, 1)
@@ -303,7 +304,7 @@ func TestFullReplayScenario_DroppedCollectionReplay(t *testing.T) {
 		WithTimeTick(10).
 		WithLastConfirmed(rmq.NewRmqID(10)).
 		IntoImmutableMessage(rmq.NewRmqID(10))
-	rs.handleCreateCollection(message.MustAsImmutableCreateCollectionMessageV1(createCollMsg))
+	rs.handleCreateCollection(context.Background(), message.MustAsImmutableCreateCollectionMessageV1(createCollMsg))
 
 	// Step 2: CreateSegment replayed
 	createSegMsg := message.NewCreateSegmentMessageBuilderV2().
@@ -320,11 +321,11 @@ func TestFullReplayScenario_DroppedCollectionReplay(t *testing.T) {
 		WithTimeTick(20).
 		WithLastConfirmed(rmq.NewRmqID(20)).
 		IntoImmutableMessage(rmq.NewRmqID(20))
-	rs.handleCreateSegment(message.MustAsImmutableCreateSegmentMessageV2(createSegMsg))
+	rs.handleCreateSegment(context.Background(), message.MustAsImmutableCreateSegmentMessageV2(createSegMsg))
 
 	// Step 3: DropCollection replayed — should flush the segment and mark vchannel dropped.
 	dropMsg := buildDropCollectionMsg("v1", 100, 30, 30)
-	rs.handleDropCollection(dropMsg)
+	rs.handleDropCollection(context.Background(), dropMsg)
 
 	// After drop: vchannel is DROPPED, segment is FLUSHED.
 	assert.Equal(t, streamingpb.VChannelState_VCHANNEL_STATE_DROPPED, rs.vchannels["v1"].meta.State)
@@ -350,7 +351,7 @@ func TestFullReplayScenario_PartialEtcdPersist(t *testing.T) {
 
 	// Then DropCollection is replayed again.
 	dropMsg := buildDropCollectionMsg("v1", 100, 50, 50)
-	rs.handleDropCollection(dropMsg)
+	rs.handleDropCollection(context.Background(), dropMsg)
 
 	// All segments should be flushed.
 	assert.False(t, rs.segments[1001].IsGrowing())

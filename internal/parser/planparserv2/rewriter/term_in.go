@@ -1,6 +1,9 @@
 package rewriter
 
 import (
+	"math"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 )
 
@@ -9,7 +12,6 @@ func (v *visitor) combineOrEqualsToIn(parts []*planpb.Expr) []*planpb.Expr {
 		col         *planpb.ColumnInfo
 		values      []*planpb.GenericValue
 		origIndices []int
-		valCase     string
 	}
 	others := make([]*planpb.Expr, 0, len(parts))
 	groups := make(map[string]*group)
@@ -25,16 +27,15 @@ func (v *visitor) combineOrEqualsToIn(parts []*planpb.Expr) []*planpb.Expr {
 			others = append(others, e)
 			continue
 		}
-		key := columnKey(col)
-		g, ok := groups[key]
-		valCase := valueCase(u.GetValue())
+		key, ok := valueGroupKey(col, u.GetValue())
 		if !ok {
-			g = &group{col: col, values: []*planpb.GenericValue{}, origIndices: []int{}, valCase: valCase}
-			groups[key] = g
-		}
-		if g.valCase != valCase {
 			others = append(others, e)
 			continue
+		}
+		g, ok := groups[key]
+		if !ok {
+			g = &group{col: col, values: []*planpb.GenericValue{}, origIndices: []int{}}
+			groups[key] = g
 		}
 		g.values = append(g.values, u.GetValue())
 		g.origIndices = append(g.origIndices, idx)
@@ -59,7 +60,6 @@ func (v *visitor) combineAndNotEqualsToNotIn(parts []*planpb.Expr) []*planpb.Exp
 		col         *planpb.ColumnInfo
 		values      []*planpb.GenericValue
 		origIndices []int
-		valCase     string
 	}
 	others := make([]*planpb.Expr, 0, len(parts))
 	groups := make(map[string]*group)
@@ -75,16 +75,15 @@ func (v *visitor) combineAndNotEqualsToNotIn(parts []*planpb.Expr) []*planpb.Exp
 			others = append(others, e)
 			continue
 		}
-		key := columnKey(col)
-		g, ok := groups[key]
-		valCase := valueCase(u.GetValue())
+		key, ok := valueGroupKey(col, u.GetValue())
 		if !ok {
-			g = &group{col: col, values: []*planpb.GenericValue{}, origIndices: []int{}, valCase: valCase}
-			groups[key] = g
-		}
-		if g.valCase != valCase {
 			others = append(others, e)
 			continue
+		}
+		g, ok := groups[key]
+		if !ok {
+			g = &group{col: col, values: []*planpb.GenericValue{}, origIndices: []int{}}
+			groups[key] = g
 		}
 		g.values = append(g.values, u.GetValue())
 		g.origIndices = append(g.origIndices, idx)
@@ -93,6 +92,23 @@ func (v *visitor) combineAndNotEqualsToNotIn(parts []*planpb.Expr) []*planpb.Exp
 	out = append(out, others...)
 	for _, g := range groups {
 		if len(g.values) >= 2 {
+			// This rewrite requires both an executable TermExpr and strict
+			// != == NOT(==) semantics for every predicate under three-valued logic.
+			canRewrite := canBuildTermExpr(g.values...)
+			if canRewrite {
+				for _, value := range g.values {
+					if !canRewriteNotEqual(g.col, value) {
+						canRewrite = false
+						break
+					}
+				}
+			}
+			if !canRewrite {
+				for _, i := range g.origIndices {
+					out = append(out, indexToExpr[i])
+				}
+				continue
+			}
 			g.values = sortGenericValues(g.values)
 			in := newTermExpr(g.col, g.values)
 			out = append(out, notExpr(in))
@@ -129,7 +145,11 @@ func (v *visitor) combineAndInWithEqual(parts []*planpb.Expr) []*planpb.Expr {
 	others := []int{}
 	for idx, e := range parts {
 		if te := e.GetTermExpr(); te != nil {
-			k := columnKey(te.GetColumnInfo())
+			k, ok := termGroupKey(te)
+			if !ok {
+				others = append(others, idx)
+				continue
+			}
 			g := groups[k]
 			if g == nil {
 				g = &agg{col: te.GetColumnInfo()}
@@ -140,7 +160,11 @@ func (v *visitor) combineAndInWithEqual(parts []*planpb.Expr) []*planpb.Expr {
 			continue
 		}
 		if ue := e.GetUnaryRangeExpr(); ue != nil && ue.GetOp() == planpb.OpType_Equal && ue.GetValue() != nil && ue.GetColumnInfo() != nil {
-			k := columnKey(ue.GetColumnInfo())
+			k, ok := valueGroupKey(ue.GetColumnInfo(), ue.GetValue())
+			if !ok {
+				others = append(others, idx)
+				continue
+			}
 			g := groups[k]
 			if g == nil {
 				g = &agg{col: ue.GetColumnInfo()}
@@ -179,6 +203,9 @@ func (v *visitor) combineAndInWithEqual(parts []*planpb.Expr) []*planpb.Expr {
 		}
 		// If multiple different equals present, AND implies contradiction unless identical.
 		if len(eqUnique) > 1 {
+			if !canFoldPredicateToBoolConstant(g.col) {
+				continue
+			}
 			for _, ti := range g.termIdxs {
 				used[ti] = true
 			}
@@ -197,6 +224,9 @@ func (v *visitor) combineAndInWithEqual(parts []*planpb.Expr) []*planpb.Expr {
 				inSet = true
 				break
 			}
+		}
+		if !inSet && !canFoldPredicateToBoolConstant(g.col) {
+			continue
 		}
 		for _, ti := range g.termIdxs {
 			used[ti] = true
@@ -234,7 +264,11 @@ func (v *visitor) combineOrInWithEqual(parts []*planpb.Expr) []*planpb.Expr {
 	others := []int{}
 	for idx, e := range parts {
 		if te := e.GetTermExpr(); te != nil {
-			k := columnKey(te.GetColumnInfo())
+			k, ok := termGroupKey(te)
+			if !ok {
+				others = append(others, idx)
+				continue
+			}
 			g := groups[k]
 			if g == nil {
 				g = &agg{col: te.GetColumnInfo()}
@@ -245,7 +279,11 @@ func (v *visitor) combineOrInWithEqual(parts []*planpb.Expr) []*planpb.Expr {
 			continue
 		}
 		if ue := e.GetUnaryRangeExpr(); ue != nil && ue.GetOp() == planpb.OpType_Equal && ue.GetValue() != nil && ue.GetColumnInfo() != nil {
-			k := columnKey(ue.GetColumnInfo())
+			k, ok := valueGroupKey(ue.GetColumnInfo(), ue.GetValue())
+			if !ok {
+				others = append(others, idx)
+				continue
+			}
 			g := groups[k]
 			if g == nil {
 				g = &agg{col: ue.GetColumnInfo()}
@@ -285,17 +323,46 @@ func (v *visitor) combineOrInWithEqual(parts []*planpb.Expr) []*planpb.Expr {
 	return out
 }
 
+func resolveInRangeComparisonType(col *planpb.ColumnInfo, value *planpb.GenericValue) (schemapb.DataType, bool) {
+	dt := effectiveDataType(col)
+	if dt != schemapb.DataType_JSON {
+		if !isSupportedScalarForRange(dt) || !valueMatchesType(dt, value) {
+			return schemapb.DataType_None, false
+		}
+		return dt, true
+	}
+
+	// JSON is dynamically typed. Use the literal's exact kind instead of the
+	// schema-level JSON type so cmpGeneric never treats an unsupported type as
+	// equal. Keep int and float separate here to avoid losing int64 precision.
+	switch valueCaseWithNil(value) {
+	case "int64":
+		return schemapb.DataType_Int64, true
+	case "float":
+		if math.IsNaN(value.GetFloatVal()) {
+			return schemapb.DataType_None, false
+		}
+		return schemapb.DataType_Double, true
+	case "string":
+		return schemapb.DataType_VarChar, true
+	default:
+		return schemapb.DataType_None, false
+	}
+}
+
 // AND: (a IN S) AND (range) -> filter S by range
 func (v *visitor) combineAndInWithRange(parts []*planpb.Expr) []*planpb.Expr {
 	type group struct {
-		col       *planpb.ColumnInfo
-		termIdx   int
-		term      *planpb.TermExpr
-		lower     *planpb.GenericValue
-		lowerInc  bool
-		upper     *planpb.GenericValue
-		upperInc  bool
-		rangeIdxs []int
+		col            *planpb.ColumnInfo
+		comparisonType schemapb.DataType
+		comparable     bool
+		termIdx        int
+		term           *planpb.TermExpr
+		lower          *planpb.GenericValue
+		lowerInc       bool
+		upper          *planpb.GenericValue
+		upperInc       bool
+		rangeIdxs      []int
 	}
 	groups := map[string]*group{}
 	others := []int{}
@@ -304,30 +371,59 @@ func (v *visitor) combineAndInWithRange(parts []*planpb.Expr) []*planpb.Expr {
 	}
 	for idx, e := range parts {
 		if te := e.GetTermExpr(); te != nil {
-			k := columnKey(te.GetColumnInfo())
+			k, ok := termGroupKey(te)
+			if !ok {
+				others = append(others, idx)
+				continue
+			}
+			comparisonType, comparable := resolveInRangeComparisonType(te.GetColumnInfo(), te.GetValues()[0])
+			for _, value := range te.GetValues()[1:] {
+				valueType, ok := resolveInRangeComparisonType(te.GetColumnInfo(), value)
+				if !ok || valueType != comparisonType {
+					comparable = false
+					break
+				}
+			}
 			g := groups[k]
 			if g == nil {
-				g = &group{col: te.GetColumnInfo()}
+				g = &group{
+					col:            te.GetColumnInfo(),
+					comparisonType: comparisonType,
+					comparable:     comparable,
+				}
 				groups[k] = g
+			} else if !comparable || g.comparisonType != comparisonType {
+				g.comparable = false
 			}
 			g.term = te
 			g.termIdx = idx
 			continue
 		}
 		if ue := e.GetUnaryRangeExpr(); ue != nil && isRange(ue.GetOp()) && ue.GetValue() != nil && ue.GetColumnInfo() != nil {
-			k := columnKey(ue.GetColumnInfo())
+			k, ok := valueGroupKey(ue.GetColumnInfo(), ue.GetValue())
+			if !ok {
+				others = append(others, idx)
+				continue
+			}
+			comparisonType, comparable := resolveInRangeComparisonType(ue.GetColumnInfo(), ue.GetValue())
 			g := groups[k]
 			if g == nil {
-				g = &group{col: ue.GetColumnInfo()}
+				g = &group{
+					col:            ue.GetColumnInfo(),
+					comparisonType: comparisonType,
+					comparable:     comparable,
+				}
 				groups[k] = g
+			} else if !comparable || g.comparisonType != comparisonType {
+				g.comparable = false
 			}
-			if ue.GetOp() == planpb.OpType_GreaterThan || ue.GetOp() == planpb.OpType_GreaterEqual {
-				if g.lower == nil || cmpGeneric(effectiveDataType(g.col), ue.GetValue(), g.lower) > 0 || (cmpGeneric(effectiveDataType(g.col), ue.GetValue(), g.lower) == 0 && ue.GetOp() == planpb.OpType_GreaterThan && g.lowerInc) {
+			if g.comparable && (ue.GetOp() == planpb.OpType_GreaterThan || ue.GetOp() == planpb.OpType_GreaterEqual) {
+				if g.lower == nil || cmpGeneric(g.comparisonType, ue.GetValue(), g.lower) > 0 || (cmpGeneric(g.comparisonType, ue.GetValue(), g.lower) == 0 && ue.GetOp() == planpb.OpType_GreaterThan && g.lowerInc) {
 					g.lower = ue.GetValue()
 					g.lowerInc = ue.GetOp() == planpb.OpType_GreaterEqual
 				}
-			} else {
-				if g.upper == nil || cmpGeneric(effectiveDataType(g.col), ue.GetValue(), g.upper) < 0 || (cmpGeneric(effectiveDataType(g.col), ue.GetValue(), g.upper) == 0 && ue.GetOp() == planpb.OpType_LessThan && g.upperInc) {
+			} else if g.comparable {
+				if g.upper == nil || cmpGeneric(g.comparisonType, ue.GetValue(), g.upper) < 0 || (cmpGeneric(g.comparisonType, ue.GetValue(), g.upper) == 0 && ue.GetOp() == planpb.OpType_LessThan && g.upperInc) {
 					g.upper = ue.GetValue()
 					g.upperInc = ue.GetOp() == planpb.OpType_LessEqual
 				}
@@ -344,30 +440,14 @@ func (v *visitor) combineAndInWithRange(parts []*planpb.Expr) []*planpb.Expr {
 		used[idx] = true
 	}
 	for _, g := range groups {
-		if g.term == nil || (g.lower == nil && g.upper == nil) {
+		if !g.comparable || g.term == nil || (g.lower == nil && g.upper == nil) {
 			continue
 		}
-		// Skip optimization if any term value is not comparable with the provided bounds
 		termVals := g.term.GetValues()
-		comparable := true
-		for _, tv := range termVals {
-			if g.lower != nil {
-				if !areComparableCases(valueCaseWithNil(tv), valueCaseWithNil(g.lower)) && (!isNumericCase(valueCaseWithNil(tv)) || !isNumericCase(valueCaseWithNil(g.lower))) {
-					comparable = false
-					break
-				}
-			}
-			if comparable && g.upper != nil {
-				if !areComparableCases(valueCaseWithNil(tv), valueCaseWithNil(g.upper)) && (!isNumericCase(valueCaseWithNil(tv)) || !isNumericCase(valueCaseWithNil(g.upper))) {
-					comparable = false
-					break
-				}
-			}
-		}
-		if !comparable {
+		filtered := filterValuesByRange(g.comparisonType, termVals, g.lower, g.lowerInc, g.upper, g.upperInc)
+		if len(filtered) == 0 && !canFoldPredicateToBoolConstant(g.col) {
 			continue
 		}
-		filtered := filterValuesByRange(effectiveDataType(g.col), termVals, g.lower, g.lowerInc, g.upper, g.upperInc)
 		used[g.termIdx] = true
 		for _, ri := range g.rangeIdxs {
 			used[ri] = true
@@ -398,7 +478,11 @@ func (v *visitor) combineOrInWithIn(parts []*planpb.Expr) []*planpb.Expr {
 	others := []int{}
 	for idx, e := range parts {
 		if te := e.GetTermExpr(); te != nil {
-			k := columnKey(te.GetColumnInfo())
+			k, ok := termGroupKey(te)
+			if !ok {
+				others = append(others, idx)
+				continue
+			}
 			g := groups[k]
 			if g == nil {
 				g = &agg{col: te.GetColumnInfo()}
@@ -449,7 +533,11 @@ func (v *visitor) combineAndInWithIn(parts []*planpb.Expr) []*planpb.Expr {
 	others := []int{}
 	for idx, e := range parts {
 		if te := e.GetTermExpr(); te != nil {
-			k := columnKey(te.GetColumnInfo())
+			k, ok := termGroupKey(te)
+			if !ok {
+				others = append(others, idx)
+				continue
+			}
 			g := groups[k]
 			if g == nil {
 				g = &agg{col: te.GetColumnInfo()}
@@ -493,6 +581,9 @@ func (v *visitor) combineAndInWithIn(parts []*planpb.Expr) []*planpb.Expr {
 				inter = append(inter, v)
 			}
 		}
+		if len(inter) == 0 && !canFoldPredicateToBoolConstant(g.col) {
+			continue
+		}
 		for _, i := range g.idxs {
 			used[i] = true
 		}
@@ -523,7 +614,11 @@ func (v *visitor) combineAndInWithNotEqual(parts []*planpb.Expr) []*planpb.Expr 
 	others := []int{}
 	for idx, e := range parts {
 		if te := e.GetTermExpr(); te != nil {
-			k := columnKey(te.GetColumnInfo())
+			k, ok := termGroupKey(te)
+			if !ok {
+				others = append(others, idx)
+				continue
+			}
 			g := groups[k]
 			if g == nil {
 				g = &group{col: te.GetColumnInfo()}
@@ -534,7 +629,11 @@ func (v *visitor) combineAndInWithNotEqual(parts []*planpb.Expr) []*planpb.Expr 
 			continue
 		}
 		if ue := e.GetUnaryRangeExpr(); ue != nil && ue.GetOp() == planpb.OpType_NotEqual && ue.GetValue() != nil && ue.GetColumnInfo() != nil {
-			k := columnKey(ue.GetColumnInfo())
+			k, ok := valueGroupKey(ue.GetColumnInfo(), ue.GetValue())
+			if !ok {
+				others = append(others, idx)
+				continue
+			}
 			g := groups[k]
 			if g == nil {
 				g = &group{col: ue.GetColumnInfo()}
@@ -569,6 +668,9 @@ func (v *visitor) combineAndInWithNotEqual(parts []*planpb.Expr) []*planpb.Expr 
 				filtered = append(filtered, tv)
 			}
 		}
+		if len(filtered) == 0 && !canFoldPredicateToBoolConstant(g.col) {
+			continue
+		}
 		used[g.termIdx] = true
 		for _, ni := range g.neqIdxs {
 			used[ni] = true
@@ -600,7 +702,11 @@ func (v *visitor) combineOrInWithNotEqual(parts []*planpb.Expr) []*planpb.Expr {
 	others := []int{}
 	for idx, e := range parts {
 		if te := e.GetTermExpr(); te != nil {
-			k := columnKey(te.GetColumnInfo())
+			k, ok := termGroupKey(te)
+			if !ok {
+				others = append(others, idx)
+				continue
+			}
 			g := groups[k]
 			if g == nil {
 				g = &group{col: te.GetColumnInfo()}
@@ -611,7 +717,11 @@ func (v *visitor) combineOrInWithNotEqual(parts []*planpb.Expr) []*planpb.Expr {
 			continue
 		}
 		if ue := e.GetUnaryRangeExpr(); ue != nil && ue.GetOp() == planpb.OpType_NotEqual && ue.GetValue() != nil && ue.GetColumnInfo() != nil {
-			k := columnKey(ue.GetColumnInfo())
+			k, ok := valueGroupKey(ue.GetColumnInfo(), ue.GetValue())
+			if !ok {
+				others = append(others, idx)
+				continue
+			}
 			g := groups[k]
 			if g == nil {
 				g = &group{col: ue.GetColumnInfo()}
@@ -647,6 +757,9 @@ func (v *visitor) combineOrInWithNotEqual(parts []*planpb.Expr) []*planpb.Expr {
 			}
 		}
 		if containsAny {
+			if !canFoldPredicateToBoolConstant(g.col) {
+				continue
+			}
 			used[g.termIdx] = true
 			for _, ni := range g.neqIdxs {
 				used[ni] = true

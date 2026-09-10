@@ -3,7 +3,7 @@
 package mock_shards
 
 import (
-	log "github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	message "github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	mock "github.com/stretchr/testify/mock"
 
@@ -949,19 +949,19 @@ func (_c *MockShardManager_FlushSegment_Call) RunAndReturn(run func(message.Immu
 }
 
 // Logger provides a mock function with no fields
-func (_m *MockShardManager) Logger() *log.MLogger {
+func (_m *MockShardManager) Logger() *mlog.Logger {
 	ret := _m.Called()
 
 	if len(ret) == 0 {
 		panic("no return value specified for Logger")
 	}
 
-	var r0 *log.MLogger
-	if rf, ok := ret.Get(0).(func() *log.MLogger); ok {
+	var r0 *mlog.Logger
+	if rf, ok := ret.Get(0).(func() *mlog.Logger); ok {
 		r0 = rf()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*log.MLogger)
+			r0 = ret.Get(0).(*mlog.Logger)
 		}
 	}
 
@@ -985,12 +985,12 @@ func (_c *MockShardManager_Logger_Call) Run(run func()) *MockShardManager_Logger
 	return _c
 }
 
-func (_c *MockShardManager_Logger_Call) Return(_a0 *log.MLogger) *MockShardManager_Logger_Call {
+func (_c *MockShardManager_Logger_Call) Return(_a0 *mlog.Logger) *MockShardManager_Logger_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockShardManager_Logger_Call) RunAndReturn(run func() *log.MLogger) *MockShardManager_Logger_Call {
+func (_c *MockShardManager_Logger_Call) RunAndReturn(run func() *mlog.Logger) *MockShardManager_Logger_Call {
 	_c.Call.Return(run)
 	return _c
 }

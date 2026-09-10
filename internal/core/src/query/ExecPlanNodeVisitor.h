@@ -16,6 +16,7 @@
 #include <iostream>
 #include <memory>
 #include <optional>
+#include <string_view>
 #include <type_traits>
 #include <vector>
 
@@ -26,15 +27,32 @@
 #include "common/EasyAssert.h"
 #include "common/OpContext.h"
 #include "common/QueryResult.h"
+#include "common/Tracer.h"
 #include "common/Types.h"
 #include "common/Vector.h"
 #include "exec/QueryContext.h"
+#include "exec/expression/Utils.h"
 #include "plan/PlanNode.h"
 #include "query/PlanImpl.h"
 #include "query/PlanNode.h"
 #include "segcore/SegmentInterface.h"
 
 namespace milvus::query {
+
+inline ColumnVectorPtr
+GetColumnVectorForTest(const VectorPtr& result) {
+    if (auto convert_vector = std::dynamic_pointer_cast<ColumnVector>(result)) {
+        return convert_vector;
+    }
+
+    if (result != nullptr &&
+        std::string_view(typeid(*result).name()) ==
+            std::string_view(typeid(ColumnVector).name())) {
+        return std::static_pointer_cast<ColumnVector>(result);
+    }
+
+    return milvus::exec::GetColumnVector(result);
+}
 
 class ExecPlanNodeVisitor : public PlanNodeVisitor {
  public:
@@ -54,7 +72,8 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
                             folly::CancellationToken(),
                         int32_t consistency_level = 0,
                         Timestamp collection_ttl = 0,
-                        int64_t entity_ttl_physical_time_us = 0)
+                        int64_t entity_ttl_physical_time_us = 0,
+                        milvus::tracer::SpanPtr trace_span = nullptr)
         : segment_(segment),
           timestamp_(timestamp),
           entity_ttl_physical_time_us_(
@@ -66,7 +85,8 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
           placeholder_group_(placeholder_group),
           cancel_token_(cancel_token),
           consistency_level_(consistency_level),
-          collection_ttl_timestamp_(collection_ttl) {
+          collection_ttl_timestamp_(collection_ttl),
+          trace_span_(std::move(trace_span)) {
     }
 
     // Only used for test
@@ -173,6 +193,7 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
     bool expr_use_pk_index_ = false;
     bool filter_only_ = false;
     bool enable_expr_cache_ = false;
+    milvus::tracer::SpanPtr trace_span_ = nullptr;
 };
 
 // for test use only
@@ -191,7 +212,7 @@ ExecuteQueryExpr(std::shared_ptr<milvus::plan::PlanNode> plannode,
     AssertInfo(
         row->childrens().size() == 1,
         "query expr operator's result vector's children size not equal one");
-    auto col_vec = std::dynamic_pointer_cast<ColumnVector>(row->childrens()[0]);
+    auto col_vec = milvus::query::GetColumnVectorForTest(row->childrens()[0]);
     AssertInfo(col_vec != nullptr, "failed to cast to ColumnVector");
     BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
     BitsetType query_view(view);
@@ -227,7 +248,7 @@ ExecuteQueryExpr(std::shared_ptr<milvus::plan::PlanNode> plannode,
     AssertInfo(
         row->childrens().size() == 1,
         "query expr operator's result vector's children size not equal one");
-    auto col_vec = std::dynamic_pointer_cast<ColumnVector>(row->childrens()[0]);
+    auto col_vec = milvus::query::GetColumnVectorForTest(row->childrens()[0]);
     AssertInfo(col_vec != nullptr, "failed to cast to ColumnVector");
     BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
     BitsetType query_view(view);

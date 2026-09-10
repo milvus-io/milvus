@@ -20,8 +20,8 @@ mlog is a context-aware logging library built on [zap](https://github.com/uber-g
 │  │  logger.go   │  │  context.go  │  │      field.go          │  │
 │  │              │  │              │  │                        │  │
 │  │ - Log()      │  │ - WithFields │  │ - Field constructors   │  │
-│  │ - Debug()    │  │ - GetProp..  │  │ - PropagatedString     │  │
-│  │ - Info()     │  │ - logContext │  │ - PropagatedInt64      │  │
+│  │ - Debug()    │  │ - GetProp..  │  │ - Field constructors   │  │
+│  │ - Info()     │  │ - logContext │  │ - OptPropagated()      │  │
 │  │ - Warn()     │  │              │  │                        │  │
 │  │ - Error()    │  │              │  └────────────────────────┘  │
 │  │ - Logger     │  └──────────────┘                              │
@@ -67,30 +67,36 @@ type logContext struct {
 | Type | Description | Propagated |
 |------|-------------|------------|
 | `String`, `Int64`, ... | Regular fields, local logging only | No |
-| `PropagatedString` | Propagatable string field | Yes |
-| `PropagatedInt64` | Propagatable int64 field (serialized as string) | Yes |
+| `FieldXxx(..., OptPropagated())` | Well-known field marked for cross-service propagation | Yes |
+| Typed constructor + `WithFields` | Local context field unless wrapped by a propagation-aware helper | No |
 
 ### 3. Well-Known Keys
 
-Predefined standard field names (lowercase with underscores, gRPC metadata compatible).
+Predefined standard field names (camelCase in logs; gRPC metadata lowercases keys during propagation).
 Keys are unexported; use `FieldXxx()` constructors instead of raw key strings:
 
 | Key | FieldXxx Constructor |
 |-----|---------------------|
-| `node_id` | `FieldNodeID(val)` |
+| `nodeID` | `FieldNodeID(val)` |
 | `module` | `FieldModule(val)` |
-| `trace_id` | `FieldTraceID(val)` |
-| `span_id` | `FieldSpanID(val)` |
-| `db_id` | `FieldDbID(val, opts...)` |
-| `db_name` | `FieldDbName(val, opts...)` |
-| `collection_id` | `FieldCollectionID(val, opts...)` |
-| `collection_name` | `FieldCollectionName(val, opts...)` |
-| `partition_id` | `FieldPartitionID(val, opts...)` |
-| `partition_name` | `FieldPartitionName(val, opts...)` |
-| `segment_id` | `FieldSegmentID(val, opts...)` |
+| `traceID` | `FieldTraceID(val)` |
+| `spanID` | `FieldSpanID(val)` |
+| `dbID` | `FieldDbID(val, opts...)` |
+| `dbName` | `FieldDbName(val, opts...)` |
+| `collectionID` | `FieldCollectionID(val, opts...)` |
+| `collectionName` | `FieldCollectionName(val, opts...)` |
+| `partitionID` | `FieldPartitionID(val, opts...)` |
+| `partitionName` | `FieldPartitionName(val, opts...)` |
+| `segmentID` | `FieldSegmentID(val, opts...)` |
+| `indexID` | `FieldIndexID(val, opts...)` |
+| `fieldID` | `FieldFieldID(val, opts...)` |
+| `taskID` | `FieldTaskID(val, opts...)` |
+| `broadcastID` | `FieldBroadcastID(val, opts...)` |
+| `jobID` | `FieldJobID(val, opts...)` |
+| `buildID` | `FieldBuildID(val, opts...)` |
 | `vchannel` | `FieldVChannel(val, opts...)` |
 | `pchannel` | `FieldPChannel(val, opts...)` |
-| `message_id` | `FieldMessageID(val)` |
+| `messageID` | `FieldMessageID(val)` |
 | `message` | `FieldMessage(val)` |
 
 ## Usage Guide
@@ -129,7 +135,7 @@ func (qn *QueryNode) Search(ctx context.Context, req *SearchRequest) {
     // ctx carries request-level fields (traceID, collectionID, etc.)
     // Automatically merges component fields + ctx fields when logging
     qn.logger.Info(ctx, "search started", mlog.Int64("nq", req.NQ))
-    // Output: {"module":"querynode", "node_id":123, "trace_id":"xxx", "nq":10, ...}
+    // Output: {"module":"querynode", "nodeID":123, "traceID":"xxx", "nq":10, ...}
 }
 ```
 
@@ -139,8 +145,10 @@ func (qn *QueryNode) Search(ctx context.Context, req *SearchRequest) {
 |--------|-------------|
 | `mlog.With(fields...)` | Create new Logger with immediately encoded fields |
 | `mlog.WithLazy(fields...)` | Create new Logger with lazily encoded fields |
+| `mlog.WithOptions(opts...)` | Create new Logger from the global logger with options applied |
 | `(*Logger) With(fields...)` | Add fields (immediately encoded), returns new Logger |
 | `(*Logger) WithLazy(fields...)` | Add fields (lazily encoded), returns new Logger |
+| `(*Logger) WithOptions(opts...)` | Apply logger options, returns new Logger |
 | `Level()` | Get current log level |
 | `Log(ctx, level, msg, fields...)` | Log at specified level |
 | `Debug/Info/Warn/Error(ctx, msg, fields...)` | Log a message |
@@ -195,7 +203,7 @@ ctx = mlog.WithFields(ctx,
 
 // Get propagated fields (for manual propagation scenarios)
 props := mlog.GetPropagated(ctx)
-// props = map[string]string{"collection_name": "my_collection", "collection_id": "12345"}
+// props = map[string]string{"collectionName": "my_collection", "collectionID": "12345"}
 ```
 
 ### gRPC Interceptors
@@ -203,7 +211,7 @@ props := mlog.GetPropagated(ctx)
 Interceptors are defined in `interceptor.go` within the `mlog` package (not a subpackage):
 
 ```go
-import "github.com/milvus-io/milvus/pkg/v2/mlog"
+import "github.com/milvus-io/milvus/pkg/v3/mlog"
 
 // Server configuration
 server := grpc.NewServer(
@@ -222,7 +230,7 @@ conn, _ := grpc.Dial(addr,
 
 | Interceptor | Function |
 |-------------|----------|
-| `UnaryServerInterceptor(module)` | Extract TraceID/SpanID, metadata fields, auto-add module |
+| `UnaryServerInterceptor(module)` | Extract propagated mlog fields from metadata and auto-add module |
 | `StreamServerInterceptor(module)` | Same as above, for streaming RPC |
 | `UnaryClientInterceptor()` | Inject propagated fields into outgoing metadata |
 | `StreamClientInterceptor()` | Same as above, for streaming RPC |
@@ -278,7 +286,7 @@ mlog.SetLevel(mlog.ErrorLevel)
 mlog.Debug(ctx, "message")  // Fields not encoded, zero overhead
 ```
 
-Note: Global fields (like nodeId) use `.With()` for immediate encoding since they always need to be output.
+Note: Global fields (like nodeID) use `.With()` for immediate encoding since they always need to be output.
 
 ### 3. Logger Caching
 
@@ -342,7 +350,7 @@ ctx = mlog.WithFields(ctx,
 mlog.FieldCollectionName(name)
 
 // Not recommended: Hard-coded key strings
-mlog.String("collection_name", name)
+mlog.String("collectionName", name)
 ```
 
 ### 5. Specify Module Name in Server Interceptors
@@ -366,7 +374,13 @@ mlog.UnaryServerInterceptor("datanode")
 | `Info(ctx, msg, fields...)` | Log at Info level |
 | `Warn(ctx, msg, fields...)` | Log at Warn level |
 | `Error(ctx, msg, fields...)` | Log at Error level |
+| `DPanic(ctx, msg, fields...)` | Log at DPanic level |
+| `Panic(ctx, msg, fields...)` | Log at Panic level, then panic |
+| `Fatal(ctx, msg, fields...)` | Log at Fatal level, then exit |
 | `Log(ctx, level, msg, fields...)` | Log at specified level |
+| `With(fields...)` | Create Logger with immediately encoded fields |
+| `WithLazy(fields...)` | Create Logger with lazily encoded fields |
+| `WithOptions(opts...)` | Create Logger from the global logger with options applied |
 | `WithFields(ctx, fields...)` | Add fields to context |
 | `FieldsFromContext(ctx)` | Extract fields from context |
 | `GetPropagated(ctx)` | Get propagated fields |
@@ -383,12 +397,16 @@ mlog.UnaryServerInterceptor("datanode")
 | `WithLazy(fields...)` | Create component-level Logger with lazily encoded fields |
 | `(*Logger) With(fields...)` | Add fields (immediately encoded), returns new Logger |
 | `(*Logger) WithLazy(fields...)` | Add fields (lazily encoded), returns new Logger |
+| `(*Logger) WithOptions(opts...)` | Apply logger options, returns new Logger |
 | `(*Logger) Level()` | Get current log level |
 | `(*Logger) LevelEnabled(level)` | Check if a level would be logged |
 | `(*Logger) Debug(ctx, msg, fields...)` | Log at Debug level |
 | `(*Logger) Info(ctx, msg, fields...)` | Log at Info level |
 | `(*Logger) Warn(ctx, msg, fields...)` | Log at Warn level |
 | `(*Logger) Error(ctx, msg, fields...)` | Log at Error level |
+| `(*Logger) DPanic(ctx, msg, fields...)` | Log at DPanic level |
+| `(*Logger) Panic(ctx, msg, fields...)` | Log at Panic level, then panic |
+| `(*Logger) Fatal(ctx, msg, fields...)` | Log at Fatal level, then exit |
 | `(*Logger) Log(ctx, level, msg, fields...)` | Log at specified level |
 
 **Rate-Limited Functions (package-level and Logger):**
@@ -429,7 +447,9 @@ Complete list of field constructors (corresponding to zap):
 | **Special** | `Any`, `Binary`, `Reflect` |
 | **Structured** | `Object`, `Array`, `Inline`, `Namespace` |
 | **Debug** | `Stack`, `StackSkip`, `Skip` |
-| **Propagation** | `PropagatedString`, `PropagatedInt64` |
+| **Options** | `AddCallerSkip` |
+| **Aliases** | `ObjectEncoder`, `ObjectMarshaler`, `ObjectMarshalerFunc` |
+| **Propagation** | `OptPropagated` on well-known `FieldXxx` constructors |
 
 ### Well-Known Field Functions
 
@@ -448,6 +468,12 @@ Predefined field constructors providing type-safe field creation:
 | `FieldPartitionID(val)` | int64 | Partition ID |
 | `FieldPartitionName(val)` | string | Partition name |
 | `FieldSegmentID(val)` | int64 | Segment ID |
+| `FieldIndexID(val)` | int64 | Index ID |
+| `FieldFieldID(val)` | int64 | Field ID |
+| `FieldTaskID(val)` | int64 | Task ID |
+| `FieldBroadcastID(val)` | int64 | Broadcast ID |
+| `FieldJobID(val)` | int64 | Job ID |
+| `FieldBuildID(val)` | int64 | Build ID |
 | `FieldVChannel(val)` | string | Virtual channel name |
 | `FieldPChannel(val)` | string | Physical channel name |
 | `FieldMessageID(val)` | ObjectMarshaler | Message ID |
@@ -464,8 +490,8 @@ mlog.Info(ctx, "segment loaded",
 
 // Equivalent raw key usage (not recommended — keys are unexported)
 mlog.Info(ctx, "segment loaded",
-    mlog.Int64("collection_id", 12345),
-    mlog.Int64("segment_id", 67890),
+    mlog.Int64("collectionID", 12345),
+    mlog.Int64("segmentID", 67890),
 )
 ```
 

@@ -410,9 +410,9 @@ func TestScalarGroupByCards_DoubleData(t *testing.T) {
 func TestFieldDataLen_WithValidData(t *testing.T) {
 	// ValidData length takes precedence over scalar array length
 	fd := &schemapb.FieldData{
-		ValidData: []bool{true, false, true},
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
+				ValidData: []bool{true, false, true},
 				Data: &schemapb.ScalarField_StringData{
 					StringData: &schemapb.StringArray{Data: []string{"a", "b"}}, // compact
 				},

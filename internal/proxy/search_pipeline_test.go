@@ -23,18 +23,23 @@ import (
 	"testing"
 	"time"
 
+	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proxy/scheduler"
 	"github.com/milvus-io/milvus/internal/proxy/search_agg"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
+	"github.com/milvus-io/milvus/internal/util/function/chain"
+	"github.com/milvus-io/milvus/internal/util/function/chain/types"
 	"github.com/milvus-io/milvus/internal/util/function/highlight"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -43,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestSearchPipeline(t *testing.T) {
@@ -60,6 +66,22 @@ func (op searchPipelineTestOperator) run(ctx context.Context, span trace.Span, i
 	return op(ctx, span, inputs...)
 }
 
+func testSearchResultIDs(ids ...int64) *schemapb.IDs {
+	return &schemapb.IDs{
+		IdField: &schemapb.IDs_IntId{
+			IntId: &schemapb.LongArray{Data: ids},
+		},
+	}
+}
+
+func testSearchResultStringIDs(ids ...string) *schemapb.IDs {
+	return &schemapb.IDs{
+		IdField: &schemapb.IDs_StrId{
+			StrId: &schemapb.StringArray{Data: ids},
+		},
+	}
+}
+
 func (s *SearchPipelineSuite) SetupTest() {
 	_, sp := otel.Tracer("test").Start(context.Background(), "Proxy-Search-PostExecute")
 	s.span = sp
@@ -67,6 +89,35 @@ func (s *SearchPipelineSuite) SetupTest() {
 
 func (s *SearchPipelineSuite) TearDownTest() {
 	s.span.End()
+}
+
+func (s *SearchPipelineSuite) TestBuildChainFromFunctionChainRerankMeta() {
+	repr, err := chain.ProtoChainToRepr(l2LimitFunctionChain(10))
+	s.Require().NoError(err)
+
+	fc, err := buildChainFromMeta(&functionChainRerankMeta{repr: repr}, nil, nil, nil, memory.NewGoAllocator())
+	s.Require().NoError(err)
+	s.NotNil(fc)
+}
+
+func (s *SearchPipelineSuite) TestBuildMergeChainFromFunctionChainRerankMeta() {
+	repr, err := chain.ProtoChainToRepr(l2FunctionChain(&schemapb.FunctionChainOp{
+		Op: types.OpTypeMerge,
+		Params: map[string]*schemapb.FunctionParamValue{
+			chain.MergeParamStrategy: chainStringParam(string(chain.MergeStrategyRRF)),
+		},
+	}))
+	s.Require().NoError(err)
+
+	fc, err := buildChainFromMeta(
+		&functionChainRerankMeta{repr: repr},
+		nil,
+		[]string{"IP", "L2"},
+		nil,
+		memory.NewGoAllocator(),
+	)
+	s.Require().NoError(err)
+	s.NotNil(fc)
 }
 
 func (s *SearchPipelineSuite) TestSerializeBucketKeyPreservesRequestedOrder() {
@@ -251,6 +302,367 @@ func (s *SearchPipelineSuite) TestRerankOp() {
 	s.NoError(err)
 }
 
+func (s *SearchPipelineSuite) TestRerankOpValidatesAllEmptyResults() {
+	const (
+		nq   = int64(1)
+		topK = int64(10)
+	)
+
+	emptyResults := []*milvuspb.SearchResults{
+		{
+			Status: merr.Success(),
+			Results: &schemapb.SearchResultData{
+				NumQueries: nq,
+				TopK:       topK,
+				Topks:      []int64{0},
+				Ids:        &schemapb.IDs{},
+			},
+		},
+		{
+			Status: merr.Success(),
+			Results: &schemapb.SearchResultData{
+				NumQueries: nq,
+				TopK:       topK,
+				Topks:      []int64{0},
+				Ids:        &schemapb.IDs{},
+			},
+		},
+	}
+	metrics := []string{"IP", "COSINE"}
+
+	functionRRF := func(weights string) rerankMeta {
+		return &funcScoreRerankMeta{
+			funcScore: &schemapb.FunctionScore{
+				Functions: []*schemapb.FunctionSchema{
+					{
+						Type: schemapb.FunctionType_Rerank,
+						Params: []*commonpb.KeyValuePair{
+							{Key: "reranker", Value: "rrf"},
+							{Key: "weights", Value: weights},
+						},
+					},
+				},
+			},
+		}
+	}
+	legacyRRF := func(params string) rerankMeta {
+		return &legacyRerankMeta{
+			legacyParams: []*commonpb.KeyValuePair{
+				{Key: "strategy", Value: "rrf"},
+				{Key: "params", Value: params},
+			},
+		}
+	}
+
+	tests := []struct {
+		name    string
+		meta    rerankMeta
+		wantErr string
+	}{
+		{name: "function malformed weights", meta: functionRRF("not-json"), wantErr: "failed to parse weights"},
+		{name: "function null weights", meta: functionRRF("null"), wantErr: "non-empty array"},
+		{name: "function empty weights", meta: functionRRF("[]"), wantErr: "non-empty array"},
+		{name: "function out-of-range weights", meta: functionRRF("[-0.1, 0.2]"), wantErr: "range [0, 1]"},
+		{name: "function mismatched weights", meta: functionRRF("[0.8]"), wantErr: "length of weights param mismatch"},
+		{name: "legacy mismatched weights", meta: legacyRRF(`{"weights":[0.8]}`), wantErr: "length of weights param mismatch"},
+		{name: "function valid weights", meta: functionRRF("[0.8, 0.2]")},
+		{name: "legacy omitted weights", meta: legacyRRF(`{"k":60}`)},
+	}
+
+	for _, test := range tests {
+		s.Run(test.name, func() {
+			op := rerankOperator{
+				nq:           nq,
+				topK:         topK,
+				roundDecimal: -1,
+				rerankMeta:   test.meta,
+			}
+
+			outputs, err := op.run(context.Background(), s.span, emptyResults, metrics)
+			if test.wantErr != "" {
+				s.ErrorIs(err, merr.ErrParameterInvalid)
+				s.ErrorContains(err, test.wantErr)
+				s.Nil(outputs)
+				return
+			}
+
+			s.Require().NoError(err)
+			s.Require().Len(outputs, 1)
+			result := outputs[0].(*milvuspb.SearchResults).GetResults()
+			s.Equal([]int64{0}, result.GetTopks())
+			s.Empty(result.GetScores())
+		})
+	}
+}
+
+func (s *SearchPipelineSuite) TestRerankOpWithFunctionChainMeta() {
+	schema := &schemapb.CollectionSchema{
+		Name: "test",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "ts", DataType: schemapb.DataType_Int64},
+		},
+	}
+	nq := int64(2)
+	topk := int64(10)
+	limit := int64(3)
+
+	reduceOp := searchReduceOperator{
+		context.Background(),
+		schema.Fields[0],
+		nq,
+		topk,
+		0,
+		1,
+		[]int64{1},
+		[]*planpb.QueryInfo{{}},
+		nil,
+		false,
+	}
+
+	data := genTestSearchResultData(nq, topk, schemapb.DataType_Int64, "ts", 101, false)
+	reduced, err := reduceOp.run(context.Background(), s.span, []*internalpb.SearchResults{data})
+	s.Require().NoError(err)
+
+	repr, err := chain.ProtoChainToRepr(l2FunctionChain(
+		mapOp(types.ScoreFieldName, "num_combine", columnArg(types.ScoreFieldName), columnArg("ts")),
+		&schemapb.FunctionChainOp{
+			Op: types.OpTypeLimit,
+			Params: map[string]*schemapb.FunctionParamValue{
+				"limit": chainIntParam(limit),
+			},
+		},
+	))
+	s.Require().NoError(err)
+
+	op := rerankOperator{
+		nq:           nq,
+		topK:         topk,
+		roundDecimal: -1,
+		collSchema:   schema,
+		rerankMeta: &functionChainRerankMeta{
+			repr:            repr,
+			inputFieldNames: []string{"ts"},
+		},
+	}
+
+	outputs, err := op.run(context.Background(), s.span, reduced[0], []string{"IP"})
+	s.Require().NoError(err)
+	s.Require().Len(outputs, 1)
+
+	result := outputs[0].(*milvuspb.SearchResults).GetResults()
+	s.Equal([]int64{limit, limit}, result.GetTopks())
+	s.Equal(limit, result.GetTopK())
+	s.Len(result.GetScores(), int(nq*limit))
+	s.Len(result.GetIds().GetIntId().GetData(), int(nq*limit))
+	s.Empty(result.GetFieldsData())
+}
+
+func (s *SearchPipelineSuite) TestRerankOpPreservesGroupByFieldWithColumnPruning() {
+	schema := &schemapb.CollectionSchema{
+		Name: "test",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "category", DataType: schemapb.DataType_VarChar},
+		},
+	}
+	funcScore := &schemapb.FunctionScore{
+		Functions: []*schemapb.FunctionSchema{{
+			Name: "rrf",
+			Type: schemapb.FunctionType_Rerank,
+			Params: []*commonpb.KeyValuePair{
+				{Key: "reranker", Value: "rrf"},
+			},
+		}},
+	}
+	input := &milvuspb.SearchResults{
+		Status: merr.Success(),
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       4,
+			Topks:      []int64{4},
+			Ids:        testSearchResultIDs(1, 2, 3, 4),
+			Scores:     []float32{0.9, 0.8, 0.7, 0.6},
+			GroupByFieldValues: []*schemapb.FieldData{{
+				FieldId:   101,
+				FieldName: "category",
+				Type:      schemapb.DataType_VarChar,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{Data: []string{"A", "A", "B", "B"}},
+					},
+				}},
+			}},
+		},
+	}
+	op := rerankOperator{
+		nq:               1,
+		topK:             2,
+		roundDecimal:     -1,
+		groupByFieldName: "category",
+		groupSize:        1,
+		collSchema:       schema,
+		rerankMeta:       newRerankMeta(schema, funcScore),
+	}
+
+	outputs, err := op.run(context.Background(), s.span, []*milvuspb.SearchResults{input}, []string{"IP"})
+	s.Require().NoError(err)
+	s.Require().Len(outputs, 1)
+
+	result := outputs[0].(*milvuspb.SearchResults).GetResults()
+	s.Require().Len(result.GetGroupByFieldValues(), 1)
+	groupBy := result.GetGroupByFieldValues()[0]
+	s.Equal(int64(101), groupBy.GetFieldId())
+	s.Equal("category", groupBy.GetFieldName())
+	s.Equal([]string{"A", "B"}, groupBy.GetScalars().GetStringData().GetData())
+	s.Empty(result.GetFieldsData())
+}
+
+func (s *SearchPipelineSuite) TestRerankOpWithFunctionChainMerge() {
+	repr, err := chain.ProtoChainToRepr(l2FunctionChain(
+		&schemapb.FunctionChainOp{
+			Op: types.OpTypeMerge,
+			Params: map[string]*schemapb.FunctionParamValue{
+				chain.MergeParamStrategy: chainStringParam(string(chain.MergeStrategyRRF)),
+			},
+		},
+		&schemapb.FunctionChainOp{
+			Op: types.OpTypeLimit,
+			Params: map[string]*schemapb.FunctionParamValue{
+				"limit": chainIntParam(3),
+			},
+		},
+	))
+	s.Require().NoError(err)
+
+	result := func(ids []int64, scores []float32) *milvuspb.SearchResults {
+		return &milvuspb.SearchResults{
+			Status: merr.Success(),
+			Results: &schemapb.SearchResultData{
+				NumQueries: 1,
+				TopK:       int64(len(ids)),
+				Topks:      []int64{int64(len(ids))},
+				Ids:        testSearchResultIDs(ids...),
+				Scores:     scores,
+			},
+		}
+	}
+
+	op := rerankOperator{
+		nq:           1,
+		topK:         3,
+		roundDecimal: -1,
+		rerankMeta:   &functionChainRerankMeta{repr: repr},
+	}
+	outputs, err := op.run(
+		context.Background(),
+		s.span,
+		[]*milvuspb.SearchResults{
+			result([]int64{1, 2}, []float32{0.9, 0.8}),
+			result([]int64{2, 3}, []float32{0.95, 0.7}),
+		},
+		[]string{"IP", "COSINE"},
+	)
+	s.Require().NoError(err)
+	s.Require().Len(outputs, 1)
+
+	merged := outputs[0].(*milvuspb.SearchResults).GetResults()
+	s.Equal([]int64{3}, merged.GetTopks())
+	s.Equal([]int64{2, 1, 3}, merged.GetIds().GetIntId().GetData())
+	s.Require().Len(merged.GetScores(), 3)
+	s.Greater(merged.GetScores()[0], merged.GetScores()[1])
+	s.Greater(merged.GetScores()[1], merged.GetScores()[2])
+}
+
+func (s *SearchPipelineSuite) TestRerankOpWithFunctionChainMergeElementLevel() {
+	repr, err := chain.ProtoChainToRepr(l2FunctionChain(
+		&schemapb.FunctionChainOp{
+			Op: types.OpTypeMerge,
+			Params: map[string]*schemapb.FunctionParamValue{
+				chain.MergeParamStrategy: chainStringParam(string(chain.MergeStrategyRRF)),
+			},
+		},
+		&schemapb.FunctionChainOp{
+			Op: types.OpTypeLimit,
+			Params: map[string]*schemapb.FunctionParamValue{
+				"limit": chainIntParam(3),
+			},
+		},
+	))
+	s.Require().NoError(err)
+
+	result := func(ids []int64, elementIndices []int64, scores []float32) *milvuspb.SearchResults {
+		return &milvuspb.SearchResults{
+			Status: merr.Success(),
+			Results: &schemapb.SearchResultData{
+				NumQueries:     1,
+				TopK:           int64(len(ids)),
+				Topks:          []int64{int64(len(ids))},
+				Ids:            testSearchResultIDs(ids...),
+				Scores:         scores,
+				ElementIndices: &schemapb.LongArray{Data: elementIndices},
+			},
+		}
+	}
+
+	op := rerankOperator{
+		nq:           1,
+		topK:         3,
+		roundDecimal: -1,
+		rerankMeta:   &functionChainRerankMeta{repr: repr},
+	}
+	outputs, err := op.run(
+		context.Background(),
+		s.span,
+		[]*milvuspb.SearchResults{
+			result([]int64{1, 1}, []int64{0, 1}, []float32{0.9, 0.8}),
+			result([]int64{1, 2}, []int64{1, 0}, []float32{0.95, 0.7}),
+		},
+		[]string{"IP", "COSINE"},
+	)
+	s.Require().NoError(err)
+	s.Require().Len(outputs, 1)
+
+	merged := outputs[0].(*milvuspb.SearchResults).GetResults()
+	s.Equal([]int64{3}, merged.GetTopks())
+	s.Equal([]int64{1, 1, 2}, merged.GetIds().GetIntId().GetData())
+	s.Equal([]int64{1, 0, 0}, merged.GetElementIndices().GetData())
+	s.Require().Len(merged.GetScores(), 3)
+	s.Greater(merged.GetScores()[0], merged.GetScores()[1])
+
+	emptyOutputs, err := op.run(
+		context.Background(),
+		s.span,
+		[]*milvuspb.SearchResults{
+			{
+				Status: merr.Success(),
+				Results: &schemapb.SearchResultData{
+					NumQueries:     1,
+					Topks:          []int64{0},
+					Ids:            &schemapb.IDs{},
+					Scores:         []float32{},
+					ElementIndices: &schemapb.LongArray{},
+				},
+			},
+			{
+				Status: merr.Success(),
+				Results: &schemapb.SearchResultData{
+					NumQueries:     1,
+					Topks:          []int64{0},
+					Ids:            &schemapb.IDs{},
+					Scores:         []float32{},
+					ElementIndices: &schemapb.LongArray{},
+				},
+			},
+		},
+		[]string{"IP", "COSINE"},
+	)
+	s.Require().NoError(err)
+	empty := emptyOutputs[0].(*milvuspb.SearchResults).GetResults()
+	s.NotNil(empty.GetElementIndices())
+	s.Empty(empty.GetElementIndices().GetData())
+}
+
 func (s *SearchPipelineSuite) TestElementBestCollapseOp_CollapsesElementLevelResultsByRowID() {
 	input := &milvuspb.SearchResults{
 		Status: merr.Success(),
@@ -416,19 +828,33 @@ func (s *SearchPipelineSuite) TestElementBestCollapseOp_AllowsEmptyElementLevelR
 		},
 	}
 
-	op := &elementBestCollapseOperator{}
-	out, err := op.run(context.Background(), s.span, []*milvuspb.SearchResults{input}, []string{""})
-	s.Require().NoError(err)
+	tests := []struct {
+		name   string
+		config elementCollapseConfig
+	}{
+		{name: "default max"},
+		{name: "topk sum", config: elementCollapseConfig{Strategy: elementCollapseTopKSum, TopK: 2}},
+	}
+	for _, test := range tests {
+		s.Run(test.name, func() {
+			op := &elementBestCollapseOperator{}
+			if test.config.Strategy != "" {
+				op.configs = []elementCollapseConfig{test.config}
+			}
+			out, err := op.run(context.Background(), s.span, []*milvuspb.SearchResults{input}, []string{""})
+			s.Require().NoError(err)
 
-	results := out[0].([]*milvuspb.SearchResults)
-	result := results[0].GetResults()
+			results := out[0].([]*milvuspb.SearchResults)
+			result := results[0].GetResults()
 
-	s.Nil(result.GetElementIndices())
-	s.Equal(int64(1), result.GetNumQueries())
-	s.Equal(int64(0), result.GetTopK())
-	s.Equal([]int64{0}, result.GetTopks())
-	s.Empty(result.GetScores())
-	s.Equal(int64(10), result.GetAllSearchCount())
+			s.Nil(result.GetElementIndices())
+			s.Equal(int64(1), result.GetNumQueries())
+			s.Equal(int64(0), result.GetTopK())
+			s.Equal([]int64{0}, result.GetTopks())
+			s.Empty(result.GetScores())
+			s.Equal(int64(10), result.GetAllSearchCount())
+		})
+	}
 }
 
 func (s *SearchPipelineSuite) TestElementBestCollapseOp_DeduplicatesEqualScoreElementsByRowID() {
@@ -586,6 +1012,199 @@ func (s *SearchPipelineSuite) TestElementBestCollapseOp_UsesMetricDirection() {
 	s.Equal([]float32{0.2, 0.5}, result.GetScores())
 }
 
+func (s *SearchPipelineSuite) TestElementBestCollapseOp_UsesConfiguredCollapseStrategies() {
+	makeInput := func() *milvuspb.SearchResults {
+		return &milvuspb.SearchResults{
+			Status: merr.Success(),
+			Results: &schemapb.SearchResultData{
+				NumQueries: 1,
+				TopK:       6,
+				Topks:      []int64{6},
+				Ids: &schemapb.IDs{
+					IdField: &schemapb.IDs_IntId{
+						IntId: &schemapb.LongArray{Data: []int64{1, 1, 1, 2, 2, 3}},
+					},
+				},
+				Scores:         []float32{0.9, 0.6, 0.3, 0.5, 0.1, 0.55},
+				Distances:      []float32{0.9, 0.6, 0.3, 0.5, 0.1, 0.55},
+				ElementIndices: &schemapb.LongArray{Data: []int64{0, 1, 2, 0, 1, 0}},
+			},
+		}
+	}
+
+	tests := []struct {
+		name           string
+		config         elementCollapseConfig
+		expectedIDs    []int64
+		expectedScores []float32
+		expectedDists  []float32
+	}{
+		{
+			name:           "sum",
+			config:         elementCollapseConfig{Strategy: elementCollapseSum},
+			expectedIDs:    []int64{1, 2, 3},
+			expectedScores: []float32{1.8, 0.6, 0.55},
+			expectedDists:  []float32{0.9, 0.5, 0.55},
+		},
+		{
+			name:           "avg",
+			config:         elementCollapseConfig{Strategy: elementCollapseAvg},
+			expectedIDs:    []int64{1, 3, 2},
+			expectedScores: []float32{0.6, 0.55, 0.3},
+			expectedDists:  []float32{0.9, 0.55, 0.5},
+		},
+		{
+			name:           "topk_sum",
+			config:         elementCollapseConfig{Strategy: elementCollapseTopKSum, TopK: 2},
+			expectedIDs:    []int64{1, 2, 3},
+			expectedScores: []float32{1.5, 0.6, 0.55},
+			expectedDists:  []float32{0.9, 0.5, 0.55},
+		},
+		{
+			name:           "topk_avg",
+			config:         elementCollapseConfig{Strategy: elementCollapseTopKAvg, TopK: 2},
+			expectedIDs:    []int64{1, 3, 2},
+			expectedScores: []float32{0.75, 0.55, 0.3},
+			expectedDists:  []float32{0.9, 0.55, 0.5},
+		},
+	}
+
+	for _, test := range tests {
+		s.Run(test.name, func() {
+			op := &elementBestCollapseOperator{configs: []elementCollapseConfig{test.config}}
+			out, err := op.run(context.Background(), s.span, []*milvuspb.SearchResults{makeInput()}, []string{"IP"})
+			s.Require().NoError(err)
+
+			result := out[0].([]*milvuspb.SearchResults)[0].GetResults()
+			s.Nil(result.GetElementIndices())
+			s.Equal(test.expectedIDs, result.GetIds().GetIntId().GetData())
+			s.InDeltaSlice(test.expectedScores, result.GetScores(), 0.00001)
+			s.InDeltaSlice(test.expectedDists, result.GetDistances(), 0.00001)
+		})
+	}
+}
+
+func (s *SearchPipelineSuite) TestElementBestCollapseOp_RejectsSumCollapseForNegativeMetrics() {
+	input := &milvuspb.SearchResults{
+		Status: merr.Success(),
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       2,
+			Topks:      []int64{2},
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{1, 1}},
+				},
+			},
+			Scores:         []float32{0.8, 0.2},
+			ElementIndices: &schemapb.LongArray{Data: []int64{0, 1}},
+		},
+	}
+	op := &elementBestCollapseOperator{configs: []elementCollapseConfig{{Strategy: elementCollapseTopKSum, TopK: 2}}}
+
+	_, err := op.run(context.Background(), s.span, []*milvuspb.SearchResults{input}, []string{"L2"})
+
+	s.Require().Error(err)
+	s.ErrorIs(err, merr.ErrParameterInvalid)
+	s.Contains(err.Error(), "only supported for positively related metrics")
+}
+
+func (s *SearchPipelineSuite) TestElementBestCollapseOp_RejectsSumCollapseForNegativeMetricsWithEmptyResult() {
+	input := &milvuspb.SearchResults{
+		Status: merr.Success(),
+		Results: &schemapb.SearchResultData{
+			NumQueries:     1,
+			TopK:           0,
+			Topks:          []int64{0},
+			ElementIndices: &schemapb.LongArray{},
+		},
+	}
+	op := &elementBestCollapseOperator{configs: []elementCollapseConfig{{Strategy: elementCollapseTopKSum, TopK: 2}}}
+
+	_, err := op.run(context.Background(), s.span, []*milvuspb.SearchResults{input}, []string{"L2"})
+
+	s.Require().Error(err)
+	s.ErrorIs(err, merr.ErrParameterInvalid)
+	s.Contains(err.Error(), "only supported for positively related metrics")
+}
+
+func (s *SearchPipelineSuite) TestElementLevelHybridPreservesNativeKeys() {
+	input := &milvuspb.SearchResults{
+		Status: merr.Success(),
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       3,
+			Topks:      []int64{3},
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{10, 10, 20}},
+				},
+			},
+			Scores:         []float32{0.8, 0.9, 0.7},
+			ElementIndices: &schemapb.LongArray{Data: []int64{0, 2, 1}},
+			GroupByFieldValues: []*schemapb.FieldData{{
+				FieldId:   100,
+				FieldName: "pk",
+				Type:      schemapb.DataType_Int64,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{10, 10, 20}}},
+				}},
+			}},
+		},
+	}
+
+	prepared, err := normalizeElementLevelHybridResult(input)
+	s.Require().NoError(err)
+	s.Same(input, prepared)
+	s.Equal([]int64{10, 10, 20}, prepared.GetResults().GetIds().GetIntId().GetData())
+	s.Equal([]int64{0, 2, 1}, prepared.GetResults().GetElementIndices().GetData())
+	s.Require().Len(prepared.GetResults().GetGroupByFieldValues(), 1)
+	s.Equal([]int64{10, 10, 20}, prepared.GetResults().GetGroupByFieldValues()[0].GetScalars().GetLongData().GetData())
+
+	empty := &milvuspb.SearchResults{
+		Status: merr.Success(),
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       0,
+			Topks:      []int64{0},
+		},
+	}
+	normalizedEmpty, err := normalizeElementLevelHybridResult(empty)
+	s.Require().NoError(err)
+	s.NotSame(empty, normalizedEmpty)
+	s.NotNil(normalizedEmpty.GetResults().GetElementIndices())
+	s.Empty(normalizedEmpty.GetResults().GetElementIndices().GetData())
+
+	emptyWithIdentity := &milvuspb.SearchResults{
+		Status: merr.Success(),
+		Results: &schemapb.SearchResultData{
+			NumQueries:     1,
+			Topks:          []int64{0},
+			ElementIndices: &schemapb.LongArray{},
+		},
+	}
+	normalizedEmpty, err = normalizeElementLevelHybridResult(emptyWithIdentity)
+	s.Require().NoError(err)
+	s.Same(emptyWithIdentity, normalizedEmpty)
+
+	_, err = normalizeElementLevelHybridResult(&milvuspb.SearchResults{
+		Status: merr.Success(),
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       1,
+			Topks:      []int64{1},
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{10}},
+				},
+			},
+			Scores: []float32{0.8},
+		},
+	})
+	s.Require().Error(err)
+	s.Contains(err.Error(), "missing element_indices")
+}
+
 func (s *SearchPipelineSuite) TestElementBestCollapseOp_RejectsEmptyMetricForElementLevelResult() {
 	input := &milvuspb.SearchResults{
 		Status: merr.Success(),
@@ -721,10 +1340,10 @@ func (s *SearchPipelineSuite) TestHybridAssembleOpNullableVectorCompactData() {
 					Type:      schemapb.DataType_FloatVector,
 					FieldName: "nullable_vec",
 					FieldId:   101,
-					ValidData: []bool{false, true, true},
 					Field: &schemapb.FieldData_Vectors{
 						Vectors: &schemapb.VectorField{
-							Dim: 2,
+							ValidData: []bool{false, true, true},
+							Dim:       2,
 							Data: &schemapb.VectorField_FloatVector{
 								FloatVector: &schemapb.FloatArray{Data: []float32{20, 20, 30, 30}},
 							},
@@ -750,10 +1369,10 @@ func (s *SearchPipelineSuite) TestHybridAssembleOpNullableVectorCompactData() {
 					Type:      schemapb.DataType_FloatVector,
 					FieldName: "nullable_vec",
 					FieldId:   101,
-					ValidData: []bool{true, false},
 					Field: &schemapb.FieldData_Vectors{
 						Vectors: &schemapb.VectorField{
-							Dim: 2,
+							ValidData: []bool{true, false},
+							Dim:       2,
 							Data: &schemapb.VectorField_FloatVector{
 								FloatVector: &schemapb.FloatArray{Data: []float32{40, 40}},
 							},
@@ -784,8 +1403,207 @@ func (s *SearchPipelineSuite) TestHybridAssembleOpNullableVectorCompactData() {
 	result := out[0].(*milvuspb.SearchResults).GetResults()
 	s.Require().Len(result.GetFieldsData(), 1)
 	field := result.GetFieldsData()[0]
-	s.Equal([]bool{true, false, false, true, true}, field.GetValidData())
+	s.Equal([]bool{true, false, false, true, true}, typeutil.GetFieldDataValidData(field))
 	s.Equal([]float32{30, 30, 40, 40, 20, 20}, field.GetVectors().GetFloatVector().GetData())
+}
+
+func (s *SearchPipelineSuite) TestComputeFieldIdxsByOriginalOrderUsesAscendingRowsAndPreservesOutputOrder() {
+	rowIdxs := []int64{5, 1, 4, 2}
+	calls := make([]int64, 0, len(rowIdxs))
+
+	fieldIdxs := computeFieldIdxsByOriginalOrder(rowIdxs, func(rowIdx int64) []int64 {
+		calls = append(calls, rowIdx)
+		return []int64{rowIdx + 100}
+	})
+
+	s.Equal([]int64{1, 2, 4, 5}, calls)
+	s.Equal([][]int64{{105}, {101}, {104}, {102}}, fieldIdxs)
+}
+
+func (s *SearchPipelineSuite) TestComputeFieldIdxsByOriginalOrderCopiesSharedComputeBuffer() {
+	rowIdxs := []int64{5, 1, 4, 2}
+	shared := []int64{0, 0}
+
+	fieldIdxs := computeFieldIdxsByOriginalOrder(rowIdxs, func(rowIdx int64) []int64 {
+		shared[0] = rowIdx + 100
+		shared[1] = rowIdx + 200
+		return shared
+	})
+
+	s.Equal([][]int64{{105, 205}, {101, 201}, {104, 204}, {102, 202}}, fieldIdxs)
+}
+
+func (s *SearchPipelineSuite) TestHybridAssembleOp_ElementLevelHybridUsesNativeCandidateKey() {
+	reduced := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       3,
+			Topks:      []int64{3},
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{10, 10, 20}},
+				},
+			},
+			Scores:         []float32{0.8, 0.9, 0.7},
+			ElementIndices: &schemapb.LongArray{Data: []int64{0, 2, 1}},
+			FieldsData: []*schemapb.FieldData{
+				{
+					Type:      schemapb.DataType_Int64,
+					FieldName: "value",
+					FieldId:   101,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_LongData{
+								LongData: &schemapb.LongArray{Data: []int64{100, 200, 300}},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	rankResult := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       2,
+			Topks:      []int64{2},
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{10, 20}},
+				},
+			},
+			Scores:         []float32{0.99, 0.88},
+			ElementIndices: &schemapb.LongArray{Data: []int64{2, 1}},
+		},
+	}
+
+	op := &hybridAssembleOperator{collectionID: 12345, elementLevelHybrid: true}
+	out, err := op.run(context.Background(), s.span, []*milvuspb.SearchResults{reduced}, rankResult)
+	s.Require().NoError(err)
+
+	result := out[0].(*milvuspb.SearchResults).GetResults()
+	s.Equal([]int64{10, 20}, result.GetIds().GetIntId().GetData())
+	s.Equal([]int64{2, 1}, result.GetElementIndices().GetData())
+	s.Equal([]float32{0.99, 0.88}, result.GetScores())
+	s.Equal([]int64{200, 300}, result.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+}
+
+func (s *SearchPipelineSuite) TestHybridAssembleOp_ElementLevelHybridUsesStringCandidateKey() {
+	reduced := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			NumQueries:     1,
+			TopK:           3,
+			Topks:          []int64{3},
+			Ids:            testSearchResultStringIDs("row-a", "row-a", "row-b"),
+			Scores:         []float32{0.8, 0.9, 0.7},
+			ElementIndices: &schemapb.LongArray{Data: []int64{0, 2, 1}},
+			FieldsData: []*schemapb.FieldData{{
+				Type:      schemapb.DataType_Int64,
+				FieldName: "value",
+				FieldId:   101,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{Data: []int64{100, 200, 300}},
+					},
+				}},
+			}},
+		},
+	}
+	rankResult := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			NumQueries:     1,
+			TopK:           2,
+			Topks:          []int64{2},
+			Ids:            testSearchResultStringIDs("row-a", "row-b"),
+			Scores:         []float32{0.99, 0.88},
+			ElementIndices: &schemapb.LongArray{Data: []int64{2, 1}},
+		},
+	}
+
+	op := &hybridAssembleOperator{collectionID: 12345, elementLevelHybrid: true}
+	out, err := op.run(context.Background(), s.span, []*milvuspb.SearchResults{reduced}, rankResult)
+	s.Require().NoError(err)
+
+	result := out[0].(*milvuspb.SearchResults).GetResults()
+	s.Equal([]string{"row-a", "row-b"}, result.GetIds().GetStrId().GetData())
+	s.Equal([]int64{2, 1}, result.GetElementIndices().GetData())
+	s.Equal([]float32{0.99, 0.88}, result.GetScores())
+	s.Equal([]int64{200, 300}, result.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+}
+
+func (s *SearchPipelineSuite) TestHybridAssembleOp_ValidatesNativeElementIndices() {
+	reduced := func(elementIndices *schemapb.LongArray) *milvuspb.SearchResults {
+		return &milvuspb.SearchResults{Results: &schemapb.SearchResultData{
+			NumQueries:     1,
+			TopK:           1,
+			Topks:          []int64{1},
+			Ids:            testSearchResultIDs(10),
+			Scores:         []float32{0.8},
+			ElementIndices: elementIndices,
+			FieldsData: []*schemapb.FieldData{{
+				Type:      schemapb.DataType_Int64,
+				FieldName: "value",
+				FieldId:   101,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{100}}},
+				}},
+			}},
+		}}
+	}
+	ranked := func(elementIndices *schemapb.LongArray) *milvuspb.SearchResults {
+		return &milvuspb.SearchResults{Results: &schemapb.SearchResultData{
+			NumQueries:     1,
+			TopK:           1,
+			Topks:          []int64{1},
+			Ids:            testSearchResultIDs(10),
+			Scores:         []float32{0.9},
+			ElementIndices: elementIndices,
+		}}
+	}
+	op := &hybridAssembleOperator{collectionID: 12345, elementLevelHybrid: true}
+
+	tests := []struct {
+		name             string
+		reducedElements  *schemapb.LongArray
+		rerankedElements *schemapb.LongArray
+		errorContains    string
+	}{
+		{
+			name:             "sub-result missing element indices",
+			rerankedElements: &schemapb.LongArray{Data: []int64{0}},
+			errorContains:    "sub-result[0] is missing element_indices",
+		},
+		{
+			name:             "sub-result element indices too short",
+			reducedElements:  &schemapb.LongArray{},
+			rerankedElements: &schemapb.LongArray{Data: []int64{0}},
+			errorContains:    "element_indices length 0 is less than ids length 1",
+		},
+		{
+			name:            "reranked result missing element indices",
+			reducedElements: &schemapb.LongArray{Data: []int64{0}},
+			errorContains:   "reranked result is missing element_indices",
+		},
+		{
+			name:             "reranked element indices too short",
+			reducedElements:  &schemapb.LongArray{Data: []int64{0}},
+			rerankedElements: &schemapb.LongArray{},
+			errorContains:    "missing element index for reranked row 0",
+		},
+	}
+
+	for _, test := range tests {
+		s.Run(test.name, func() {
+			_, err := op.run(
+				context.Background(),
+				s.span,
+				[]*milvuspb.SearchResults{reduced(test.reducedElements)},
+				ranked(test.rerankedElements),
+			)
+			s.ErrorContains(err, test.errorContains)
+			s.ErrorIs(err, merr.ErrServiceInternal)
+		})
+	}
 }
 
 func (s *SearchPipelineSuite) TestRequeryOp() {
@@ -875,7 +1693,7 @@ func (s *SearchPipelineSuite) TestHighlightOp() {
 	proxy.tsoAllocator = &timestampAllocator{
 		tso: newMockTimestampAllocatorInterface(),
 	}
-	sched, err := newTaskScheduler(ctx, proxy.tsoAllocator)
+	sched, err := scheduler.NewTaskScheduler(ctx, proxy.tsoAllocator)
 	s.Require().NoError(err)
 
 	err = sched.Start()
@@ -913,7 +1731,7 @@ func (s *SearchPipelineSuite) TestHighlightOp() {
 			tasks: highlightTasks,
 		},
 		lb:             mockLb,
-		schema:         newSchemaInfo(schema),
+		schema:         mustNewSchemaInfo(schema),
 		request:        req,
 		collectionName: collName,
 		SearchRequest: &internalpb.SearchRequest{
@@ -930,7 +1748,7 @@ func (s *SearchPipelineSuite) TestHighlightOp() {
 		qn.EXPECT().GetHighlight(mock.Anything, mock.Anything).Return(
 			&querypb.GetHighlightResponse{
 				Status:  merr.Success(),
-				Results: []*querypb.HighlightResult{},
+				Results: []*querypb.HighlightResult{{}},
 			}, nil)
 		workload.Exec(ctx, 0, qn, "test_chan")
 	}).Return(nil)
@@ -939,6 +1757,7 @@ func (s *SearchPipelineSuite) TestHighlightOp() {
 		Results: &schemapb.SearchResultData{
 			TopK:  3,
 			Topks: []int64{1},
+			Ids:   testSearchResultIDs(1),
 			FieldsData: []*schemapb.FieldData{{
 				FieldName: testVarCharField,
 				FieldId:   100,
@@ -955,6 +1774,213 @@ func (s *SearchPipelineSuite) TestHighlightOp() {
 		},
 	})
 	s.NoError(err)
+}
+
+func (s *SearchPipelineSuite) TestLexicalHighlightOpNullableStringKeepsEmptyHighlightData() {
+	cases := []struct {
+		name          string
+		rowNum        int
+		stringData    []string
+		validData     []bool
+		expectedTexts []string
+	}{
+		{
+			name:          "compact nullable string",
+			rowNum:        2,
+			stringData:    []string{"match text"},
+			validData:     []bool{true, false},
+			expectedTexts: []string{"target text", "match text", ""},
+		},
+		{
+			name:          "all null string",
+			rowNum:        1,
+			stringData:    []string{},
+			validData:     []bool{false},
+			expectedTexts: []string{"target text", ""},
+		},
+		{
+			name:          "empty string",
+			rowNum:        1,
+			stringData:    []string{""},
+			validData:     []bool{true},
+			expectedTexts: []string{"target text", ""},
+		},
+	}
+
+	for _, tc := range cases {
+		s.Run(tc.name, func() {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			proxy := &Proxy{}
+			proxy.tsoAllocator = &timestampAllocator{
+				tso: newMockTimestampAllocatorInterface(),
+			}
+			sched, err := scheduler.NewTaskScheduler(ctx, proxy.tsoAllocator)
+			s.Require().NoError(err)
+
+			err = sched.Start()
+			s.Require().NoError(err)
+			defer sched.Close()
+			proxy.sched = sched
+
+			collName := "test_coll_highlight_nullable"
+			fieldName2Types := map[string]schemapb.DataType{
+				testVarCharField: schemapb.DataType_VarChar,
+			}
+			schema := constructCollectionSchemaByDataType(collName, fieldName2Types, testVarCharField, false)
+
+			highlightTasks := map[int64]*highlightTask{
+				100: {
+					HighlightTask: &querypb.HighlightTask{
+						Texts:         []string{"target text"},
+						FieldName:     testVarCharField,
+						FieldId:       100,
+						SearchTextNum: 1,
+					},
+					preTags:  [][]byte{[]byte(DefaultPreTag)},
+					postTags: [][]byte{[]byte(DefaultPostTag)},
+				},
+			}
+
+			mockLb := shardclient.NewMockLBPolicy(s.T())
+			searchTask := &searchTask{
+				node: proxy,
+				highlighter: &LexicalHighlighter{
+					tasks: highlightTasks,
+				},
+				lb:             mockLb,
+				schema:         mustNewSchemaInfo(schema),
+				request:        &milvuspb.SearchRequest{CollectionName: collName, DbName: "default"},
+				collectionName: collName,
+				SearchRequest:  &internalpb.SearchRequest{CollectionID: 0},
+			}
+
+			op, err := opFactory[highlightOp](searchTask, map[string]any{})
+			s.Require().NoError(err)
+
+			queryNodeResults := make([]*querypb.HighlightResult, tc.rowNum)
+			for i := range queryNodeResults {
+				queryNodeResults[i] = &querypb.HighlightResult{}
+			}
+
+			mockLb.EXPECT().ExecuteOneChannel(mock.Anything, mock.Anything).Run(func(ctx context.Context, workload shardclient.CollectionWorkLoad) {
+				qn := mocks.NewMockQueryNodeClient(s.T())
+				qn.EXPECT().GetHighlight(mock.Anything, mock.Anything).Run(func(ctx context.Context, req *querypb.GetHighlightRequest, opts ...grpc.CallOption) {
+					s.Require().Len(req.GetTasks(), 1)
+					task := req.GetTasks()[0]
+					s.Equal(int64(tc.rowNum), task.GetCorpusTextNum())
+					s.Equal(tc.expectedTexts, task.GetTexts())
+				}).Return(
+					&querypb.GetHighlightResponse{
+						Status:  merr.Success(),
+						Results: queryNodeResults,
+					}, nil)
+				workload.Exec(ctx, 0, qn, "test_chan")
+			}).Return(nil)
+
+			ids := make([]int64, tc.rowNum)
+			scores := make([]float32, tc.rowNum)
+			for i := range tc.rowNum {
+				ids[i] = int64(i + 1)
+				scores[i] = 1.0 - float32(i)*0.1
+			}
+
+			results, err := op.run(ctx, s.span, &milvuspb.SearchResults{
+				Results: &schemapb.SearchResultData{
+					NumQueries: 1,
+					TopK:       int64(tc.rowNum),
+					Topks:      []int64{int64(tc.rowNum)},
+					Ids:        testSearchResultIDs(ids...),
+					Scores:     scores,
+					FieldsData: []*schemapb.FieldData{
+						{
+							FieldId:   100,
+							FieldName: testVarCharField,
+							Type:      schemapb.DataType_VarChar,
+							Field: &schemapb.FieldData_Scalars{
+								Scalars: &schemapb.ScalarField{
+									ValidData: tc.validData,
+									Data: &schemapb.ScalarField_StringData{
+										StringData: &schemapb.StringArray{Data: tc.stringData},
+									},
+								},
+							},
+						},
+					},
+				},
+			})
+			s.NoError(err)
+			s.Require().Len(results, 1)
+
+			result := results[0].(*milvuspb.SearchResults)
+			highlightResults := result.GetResults().GetHighlightResults()
+			s.Require().Len(highlightResults, 1)
+			s.Equal(testVarCharField, highlightResults[0].GetFieldName())
+			s.Require().Len(highlightResults[0].GetDatas(), tc.rowNum)
+			for _, data := range highlightResults[0].GetDatas() {
+				s.NotNil(data)
+				s.Empty(data.GetFragments())
+			}
+		})
+	}
+}
+
+func (s *SearchPipelineSuite) TestLexicalHighlightOpZeroHitWithNonEmptyFieldsData() {
+	op := &lexicalHighlightOperator{
+		tasks: []*highlightTask{
+			{
+				HighlightTask: &querypb.HighlightTask{
+					Texts:     []string{"target text"},
+					FieldName: testVarCharField,
+					FieldId:   100,
+				},
+				preTags:  [][]byte{[]byte(DefaultPreTag)},
+				postTags: [][]byte{[]byte(DefaultPostTag)},
+			},
+		},
+	}
+
+	results, err := op.run(context.Background(), s.span, &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       5,
+			Topks:      []int64{0},
+			FieldsData: []*schemapb.FieldData{
+				{
+					FieldId:   101,
+					FieldName: "unrelated_field",
+					Type:      schemapb.DataType_Int64,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_LongData{
+								LongData: &schemapb.LongArray{Data: []int64{}},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+	s.NoError(err)
+	s.Require().Len(results, 1)
+
+	result := results[0].(*milvuspb.SearchResults)
+	s.Empty(result.GetResults().GetHighlightResults())
+}
+
+func (s *SearchPipelineSuite) TestLexicalHighlightOpNonZeroHitWithEmptyFieldsData() {
+	op := &lexicalHighlightOperator{}
+	_, err := op.run(context.Background(), s.span, &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       1,
+			Topks:      []int64{1},
+			Ids:        testSearchResultIDs(1),
+		},
+	})
+	s.Error(err)
+	s.Contains(err.Error(), "field data is empty for non-empty search result")
 }
 
 func (s *SearchPipelineSuite) TestSemanticHighlightOp() {
@@ -996,6 +2022,7 @@ func (s *SearchPipelineSuite) TestSemanticHighlightOp() {
 			NumQueries: 1,
 			TopK:       3,
 			Topks:      []int64{3},
+			Ids:        testSearchResultIDs(1, 2, 3),
 			FieldsData: []*schemapb.FieldData{
 				{
 					FieldId:   101,
@@ -1034,6 +2061,79 @@ func (s *SearchPipelineSuite) TestSemanticHighlightOp() {
 	s.Equal([]string{"<em>highlighted</em> text 3"}, highlightResult.Datas[2].Fragments)
 }
 
+func (s *SearchPipelineSuite) TestSemanticHighlightOpNullableStringAlignsRows() {
+	ctx := context.Background()
+
+	mockProcess := mockey.Mock((*highlight.SemanticHighlight).Process).To(
+		func(h *highlight.SemanticHighlight, ctx context.Context, topks []int64, texts []string) ([][]string, [][]float32, error) {
+			s.Equal([]int64{3}, topks)
+			s.Equal([]string{"text 1", "", "text 3"}, texts)
+			return [][]string{
+					{"highlighted text 1"},
+					{},
+					{"highlighted text 3"},
+				}, [][]float32{
+					{0.9},
+					{},
+					{0.7},
+				}, nil
+		}).Build()
+	defer mockProcess.UnPatch()
+
+	mockFieldIDs := mockey.Mock((*highlight.SemanticHighlight).FieldIDs).Return([]int64{101}).Build()
+	defer mockFieldIDs.UnPatch()
+
+	mockGetFieldName := mockey.Mock((*highlight.SemanticHighlight).GetFieldName).Return(testVarCharField).Build()
+	defer mockGetFieldName.UnPatch()
+
+	op := &semanticHighlightOperator{
+		highlight: &highlight.SemanticHighlight{},
+	}
+
+	searchResults := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       3,
+			Topks:      []int64{3},
+			Ids:        testSearchResultIDs(1, 2, 3),
+			FieldsData: []*schemapb.FieldData{
+				{
+					FieldId:   101,
+					FieldName: testVarCharField,
+					Type:      schemapb.DataType_VarChar,
+					ValidData: []bool{true, false, true},
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_StringData{
+								StringData: &schemapb.StringArray{
+									Data: []string{"text 1", "text 3"},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	results, err := op.run(ctx, s.span, searchResults)
+	s.NoError(err)
+	s.Require().Len(results, 1)
+
+	result := results[0].(*milvuspb.SearchResults)
+	s.Require().Len(result.GetResults().GetHighlightResults(), 1)
+	highlightResult := result.GetResults().GetHighlightResults()[0]
+	// The fix under test is the row alignment feeding Process: the NULL row
+	// materializes as "" at its own index, asserted on `texts` inside the mock
+	// above. Here we only verify the per-row results survive alignment 1:1 —
+	// the row-1 payload is whatever the mock returned, not a NULL-semantics
+	// guarantee, so we assert positional pass-through across all three rows.
+	s.Require().Len(highlightResult.GetDatas(), 3)
+	s.Equal([]string{"highlighted text 1"}, highlightResult.GetDatas()[0].GetFragments())
+	s.Equal([]string{}, highlightResult.GetDatas()[1].GetFragments())
+	s.Equal([]string{"highlighted text 3"}, highlightResult.GetDatas()[2].GetFragments())
+}
+
 func (s *SearchPipelineSuite) TestSemanticHighlightOpMissingField() {
 	ctx := context.Background()
 
@@ -1051,6 +2151,7 @@ func (s *SearchPipelineSuite) TestSemanticHighlightOpMissingField() {
 			NumQueries: 1,
 			TopK:       1,
 			Topks:      []int64{1},
+			Ids:        testSearchResultIDs(1),
 			FieldsData: []*schemapb.FieldData{
 				{
 					FieldId:   101,
@@ -1115,6 +2216,7 @@ func (s *SearchPipelineSuite) TestSemanticHighlightOpMultipleFields() {
 			NumQueries: 1,
 			TopK:       2,
 			Topks:      []int64{2},
+			Ids:        testSearchResultIDs(1, 2),
 			FieldsData: []*schemapb.FieldData{
 				{
 					FieldId:   101,
@@ -1221,10 +2323,64 @@ func (s *SearchPipelineSuite) TestSemanticHighlightOpEmptyResults() {
 
 	// Verify results
 	result := results[0].(*milvuspb.SearchResults)
-	s.NotNil(result.Results.HighlightResults)
-	s.Len(result.Results.HighlightResults, 1)
-	s.Equal(testVarCharField, result.Results.HighlightResults[0].FieldName)
-	s.Len(result.Results.HighlightResults[0].Datas, 0)
+	s.Empty(result.Results.HighlightResults)
+}
+
+func (s *SearchPipelineSuite) TestSemanticHighlightOpZeroHitWithNonEmptyFieldsData() {
+	ctx := context.Background()
+
+	mockFieldIDs := mockey.Mock((*highlight.SemanticHighlight).FieldIDs).Return([]int64{999}).Build()
+	defer mockFieldIDs.UnPatch()
+
+	op := &semanticHighlightOperator{
+		highlight: &highlight.SemanticHighlight{},
+	}
+
+	searchResults := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       5,
+			Topks:      []int64{0},
+			FieldsData: []*schemapb.FieldData{
+				{
+					FieldId:   101,
+					FieldName: testVarCharField,
+					Type:      schemapb.DataType_VarChar,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_StringData{
+								StringData: &schemapb.StringArray{Data: []string{}},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	results, err := op.run(ctx, s.span, searchResults)
+	s.NoError(err)
+	s.Require().Len(results, 1)
+
+	result := results[0].(*milvuspb.SearchResults)
+	s.Empty(result.GetResults().GetHighlightResults())
+}
+
+func (s *SearchPipelineSuite) TestSemanticHighlightOpNonZeroHitWithEmptyFieldsData() {
+	op := &semanticHighlightOperator{
+		highlight: &highlight.SemanticHighlight{},
+	}
+
+	_, err := op.run(context.Background(), s.span, &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       1,
+			Topks:      []int64{1},
+			Ids:        testSearchResultIDs(1),
+		},
+	})
+	s.Error(err)
+	s.Contains(err.Error(), "field data is empty for non-empty search result")
 }
 
 func (s *SearchPipelineSuite) TestSemanticHighlightOpDynamicField() {
@@ -1266,6 +2422,7 @@ func (s *SearchPipelineSuite) TestSemanticHighlightOpDynamicField() {
 			NumQueries: 1,
 			TopK:       2,
 			Topks:      []int64{2},
+			Ids:        testSearchResultIDs(1, 2),
 			Scores:     []float32{0.9, 0.8},
 			FieldsData: []*schemapb.FieldData{
 				{
@@ -1349,6 +2506,7 @@ func (s *SearchPipelineSuite) TestSemanticHighlightOpMixedFields() {
 			NumQueries: 1,
 			TopK:       1,
 			Topks:      []int64{1},
+			Ids:        testSearchResultIDs(1),
 			Scores:     []float32{0.9},
 			FieldsData: []*schemapb.FieldData{
 				{
@@ -1402,6 +2560,72 @@ func (s *SearchPipelineSuite) TestSemanticHighlightOpMixedFields() {
 	// Dynamic field result
 	s.Equal("dyn_content", result.Results.HighlightResults[1].FieldName)
 	s.Equal([]string{"<em>dynamic</em> text"}, result.Results.HighlightResults[1].Datas[0].Fragments)
+}
+
+// Process slices documents by topks without checking that they sum to
+// len(documents), so a $meta payload shorter than the hit count would go out of
+// range there. The dynamic-field branch must reject it up front, the same way
+// the schema branch does.
+func (s *SearchPipelineSuite) TestSemanticHighlightOpDynamicFieldRowCountMismatch() {
+	ctx := context.Background()
+
+	mockProcess := mockey.Mock((*highlight.SemanticHighlight).Process).To(
+		func(h *highlight.SemanticHighlight, ctx context.Context, topks []int64, texts []string) ([][]string, [][]float32, error) {
+			s.Fail("Process must not be called with a row-count mismatch")
+			return nil, nil, nil
+		}).Build()
+	defer mockProcess.UnPatch()
+
+	mockFieldIDs := mockey.Mock((*highlight.SemanticHighlight).FieldIDs).Return([]int64{}).Build()
+	defer mockFieldIDs.UnPatch()
+
+	mockHasDynamicFields := mockey.Mock((*highlight.SemanticHighlight).HasDynamicFields).Return(true).Build()
+	defer mockHasDynamicFields.UnPatch()
+
+	mockDynamicFieldNames := mockey.Mock((*highlight.SemanticHighlight).DynamicFieldNames).Return([]string{"dyn_content"}).Build()
+	defer mockDynamicFieldNames.UnPatch()
+
+	mockDynamicFieldID := mockey.Mock((*highlight.SemanticHighlight).DynamicFieldID).Return(int64(102)).Build()
+	defer mockDynamicFieldID.UnPatch()
+
+	op := &semanticHighlightOperator{
+		highlight: &highlight.SemanticHighlight{},
+	}
+
+	// Topks says 3 hits, $meta carries only 2 rows.
+	searchResults := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       3,
+			Topks:      []int64{3},
+			Ids:        testSearchResultIDs(1, 2, 3),
+			Scores:     []float32{0.9, 0.8, 0.7},
+			FieldsData: []*schemapb.FieldData{
+				{
+					FieldId:   102,
+					FieldName: "$meta",
+					Type:      schemapb.DataType_JSON,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_JsonData{
+								JsonData: &schemapb.JSONArray{
+									Data: [][]byte{
+										[]byte(`{"dyn_content": "dynamic content 1"}`),
+										[]byte(`{"dyn_content": "dynamic content 2"}`),
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	results, err := op.run(ctx, s.span, searchResults)
+	s.Error(err)
+	s.Nil(results)
+	s.Contains(err.Error(), "dynamic field dyn_content has 2 rows, expected 3")
 }
 
 func (s *SearchPipelineSuite) TestExtractMultipleDynamicFieldTexts() {
@@ -1490,7 +2714,7 @@ func (s *SearchPipelineSuite) TestSearchPipeline() {
 					{FieldID: 101, Name: "intField", DataType: schemapb.DataType_Int64},
 				},
 			},
-			pkField: &schemapb.FieldSchema{FieldID: 100, Name: "int64", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			PkField: &schemapb.FieldSchema{FieldID: 100, Name: "int64", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 		},
 		queryInfos:             []*planpb.QueryInfo{{}},
 		translatedOutputFields: []string{"intField"},
@@ -1547,7 +2771,7 @@ func (s *SearchPipelineSuite) TestSearchPipelineWithRequery() {
 					{FieldID: 101, Name: "intField", DataType: schemapb.DataType_Int64},
 				},
 			},
-			pkField: &schemapb.FieldSchema{FieldID: 100, Name: "int64", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			PkField: &schemapb.FieldSchema{FieldID: 100, Name: "int64", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 		},
 		queryInfos:             []*planpb.QueryInfo{{}},
 		translatedOutputFields: []string{"intField"},
@@ -1628,7 +2852,7 @@ func (s *SearchPipelineSuite) TestSearchWithRerankPipe() {
 		},
 		schema: &schemaInfo{
 			CollectionSchema: schema,
-			pkField:          &schemapb.FieldSchema{FieldID: 100, Name: "int64", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			PkField:          &schemapb.FieldSchema{FieldID: 100, Name: "int64", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 		},
 		queryInfos:             []*planpb.QueryInfo{{}},
 		translatedOutputFields: []string{"intField"},
@@ -1701,7 +2925,7 @@ func (s *SearchPipelineSuite) TestSearchWithRerankRequeryPipe() {
 		},
 		schema: &schemaInfo{
 			CollectionSchema: schema,
-			pkField:          &schemapb.FieldSchema{FieldID: 100, Name: "int64", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			PkField:          &schemapb.FieldSchema{FieldID: 100, Name: "int64", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 		},
 		queryInfos:             []*planpb.QueryInfo{{}},
 		translatedOutputFields: []string{"intField"},
@@ -1850,6 +3074,110 @@ func (s *SearchPipelineSuite) TestFilterFieldOperatorWithStructArrayFields() {
 	}
 }
 
+func (s *SearchPipelineSuite) TestEndOperatorRoundsScores() {
+	task := &searchTask{
+		queryInfos: []*planpb.QueryInfo{{RoundDecimal: 0}},
+		schema: &schemaInfo{
+			CollectionSchema: &schemapb.CollectionSchema{},
+		},
+	}
+
+	op, err := newEndOperator(task, nil)
+	s.NoError(err)
+
+	searchResults := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			Scores: []float32{0.49, 0.36},
+		},
+	}
+
+	results, err := op.run(context.Background(), s.span, searchResults, []*milvuspb.SearchResults{{Results: &schemapb.SearchResultData{AllSearchCount: 0}}})
+	s.NoError(err)
+
+	resultData := results[0].(*milvuspb.SearchResults).GetResults()
+	s.Equal([]float32{0, 0}, resultData.GetScores())
+}
+
+func (s *SearchPipelineSuite) TestRoundAggHitScores() {
+	// Aggregation searches bypass endOperator, so hit scores are rounded at the
+	// aggregate operator's terminal step. Covers nested sub-aggregation buckets.
+	buckets := []*search_agg.AggBucketResult{
+		{
+			Hits: []*search_agg.HitResult{{Score: 0.49}, {Score: 0.36}},
+			SubAggBuckets: []*search_agg.AggBucketResult{
+				{Hits: []*search_agg.HitResult{{Score: 0.51}, nil}},
+			},
+		},
+		nil,
+	}
+
+	roundAggHitScores(buckets, 0)
+
+	s.Equal(float32(0), buckets[0].Hits[0].Score)
+	s.Equal(float32(0), buckets[0].Hits[1].Score)
+	s.Equal(float32(1), buckets[0].SubAggBuckets[0].Hits[0].Score)
+}
+
+func (s *SearchPipelineSuite) TestRoundAggHitScoresDisabled() {
+	buckets := []*search_agg.AggBucketResult{
+		{Hits: []*search_agg.HitResult{{Score: 0.49}, {Score: 0.36}}},
+	}
+
+	roundAggHitScores(buckets, -1)
+
+	s.Equal(float32(0.49), buckets[0].Hits[0].Score)
+	s.Equal(float32(0.36), buckets[0].Hits[1].Score)
+}
+
+func (s *SearchPipelineSuite) TestEndOperatorKeepsScoresWhenRoundDecimalDisabled() {
+	task := &searchTask{
+		queryInfos: []*planpb.QueryInfo{{RoundDecimal: -1}},
+		schema: &schemaInfo{
+			CollectionSchema: &schemapb.CollectionSchema{},
+		},
+	}
+
+	op, err := newEndOperator(task, nil)
+	s.NoError(err)
+
+	searchResults := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			Scores: []float32{0.49, 0.36},
+		},
+	}
+
+	results, err := op.run(context.Background(), s.span, searchResults, []*milvuspb.SearchResults{{Results: &schemapb.SearchResultData{AllSearchCount: 0}}})
+	s.NoError(err)
+
+	resultData := results[0].(*milvuspb.SearchResults).GetResults()
+	s.Equal([]float32{float32(0.49), float32(0.36)}, resultData.GetScores())
+}
+
+func (s *SearchPipelineSuite) TestEndOperatorKeepsAdvancedRerankScores() {
+	task := &searchTask{
+		SearchRequest: &internalpb.SearchRequest{IsAdvanced: true},
+		rankParams:    &rankParams{roundDecimal: 0},
+		schema: &schemaInfo{
+			CollectionSchema: &schemapb.CollectionSchema{},
+		},
+	}
+
+	op, err := newEndOperator(task, nil)
+	s.NoError(err)
+
+	searchResults := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			Scores: []float32{0.99, 0.88},
+		},
+	}
+
+	results, err := op.run(context.Background(), s.span, searchResults, []*milvuspb.SearchResults{{Results: &schemapb.SearchResultData{AllSearchCount: 0}}})
+	s.NoError(err)
+
+	resultData := results[0].(*milvuspb.SearchResults).GetResults()
+	s.Equal([]float32{float32(0.99), float32(0.88)}, resultData.GetScores())
+}
+
 func (s *SearchPipelineSuite) TestHybridSearchWithRequeryAndRerankByDataPipe() {
 	task := getHybridSearchTask("test_collection", [][]string{
 		{"1", "2"},
@@ -1890,6 +3218,132 @@ func (s *SearchPipelineSuite) TestHybridSearchWithRequeryAndRerankByDataPipe() {
 	s.Equal("intField", results.Results.FieldsData[0].FieldName)
 	s.Equal(int64(101), results.Results.FieldsData[0].FieldId)
 	s.Equal(int64(2*2*10), results.GetResults().AllSearchCount)
+}
+
+func (s *SearchPipelineSuite) TestHybridSearchWithRequeryAndRerankByDataPipe_ElementLevelRequeryUsesPKs() {
+	task := getHybridSearchTask("test_collection", [][]string{
+		{"1"},
+		{"2"},
+	}, []string{"intField"})
+	task.hybridElementLevel = true
+
+	input := &milvuspb.SearchResults{
+		Status: merr.Success(),
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       3,
+			Topks:      []int64{3},
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{10, 10, 20}},
+				},
+			},
+			Scores:         []float32{0.8, 0.9, 0.7},
+			ElementIndices: &schemapb.LongArray{Data: []int64{0, 2, 1}},
+			AllSearchCount: 3,
+		},
+	}
+	pkField := &schemapb.FieldData{
+		Type:      schemapb.DataType_Int64,
+		FieldName: "int64",
+		FieldId:   100,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{
+					LongData: &schemapb.LongArray{Data: []int64{10, 20}},
+				},
+			},
+		},
+	}
+	intField := &schemapb.FieldData{
+		Type:      schemapb.DataType_Int64,
+		FieldName: "intField",
+		FieldId:   101,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{
+					LongData: &schemapb.LongArray{Data: []int64{100, 200}},
+				},
+			},
+		},
+	}
+
+	originalReduceFactory := opFactory[hybridSearchReduceOp]
+	originalRequeryFactory := opFactory[requeryOp]
+	originalRerankFactory := opFactory[rerankOp]
+	defer func() {
+		opFactory[hybridSearchReduceOp] = originalReduceFactory
+		opFactory[requeryOp] = originalRequeryFactory
+		opFactory[rerankOp] = originalRerankFactory
+	}()
+
+	opFactory[hybridSearchReduceOp] = func(_ *searchTask, _ map[string]any) (operator, error) {
+		return searchPipelineTestOperator(func(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
+			return []any{[]*milvuspb.SearchResults{input}, []string{"IP"}}, nil
+		}), nil
+	}
+
+	requeryCalled := false
+	opFactory[requeryOp] = func(_ *searchTask, _ map[string]any) (operator, error) {
+		return searchPipelineTestOperator(func(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
+			requeryCalled = true
+
+			ids, ok := inputs[0].(*schemapb.IDs)
+			s.Require().True(ok)
+			s.ElementsMatch([]int64{10, 20}, ids.GetIntId().GetData())
+			s.Nil(ids.GetStrId())
+
+			storageCost := inputs[1].(segcore.StorageCost)
+			return []any{[]*schemapb.FieldData{intField, pkField}, storageCost}, nil
+		}), nil
+	}
+
+	rerankCalled := false
+	opFactory[rerankOp] = func(_ *searchTask, _ map[string]any) (operator, error) {
+		return searchPipelineTestOperator(func(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
+			rerankCalled = true
+
+			rankData, ok := inputs[0].([]*milvuspb.SearchResults)
+			s.Require().True(ok)
+			s.Require().Len(rankData, 1)
+			data := rankData[0].GetResults()
+			s.Equal([]int64{10, 10, 20}, data.GetIds().GetIntId().GetData())
+			s.Equal([]int64{0, 2, 1}, data.GetElementIndices().GetData())
+			s.Nil(data.GetIds().GetStrId())
+			s.Equal([]int64{100, 100, 200}, data.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+
+			return []any{&milvuspb.SearchResults{
+				Status: merr.Success(),
+				Results: &schemapb.SearchResultData{
+					NumQueries: 1,
+					TopK:       2,
+					Topks:      []int64{2},
+					Ids: &schemapb.IDs{
+						IdField: &schemapb.IDs_IntId{
+							IntId: &schemapb.LongArray{Data: []int64{10, 20}},
+						},
+					},
+					Scores:         []float32{0.99, 0.88},
+					ElementIndices: &schemapb.LongArray{Data: []int64{2, 1}},
+				},
+			}}, nil
+		}), nil
+	}
+
+	pipeline, err := newPipeline(hybridSearchWithRequeryAndRerankByFieldDataPipe, task)
+	s.Require().NoError(err)
+	s.Require().NoError(pipeline.AddNodes(task, endNode))
+
+	results, _, err := pipeline.Run(context.Background(), s.span, nil, segcore.StorageCost{})
+	s.Require().NoError(err)
+	s.True(requeryCalled)
+	s.True(rerankCalled)
+
+	result := results.GetResults()
+	s.Equal([]int64{10, 20}, result.GetIds().GetIntId().GetData())
+	s.Equal([]int64{2, 1}, result.GetElementIndices().GetData())
+	s.Equal([]float32{0.99, 0.88}, result.GetScores())
+	s.Equal([]int64{100, 200}, result.GetFieldsData()[0].GetScalars().GetLongData().GetData())
 }
 
 func (s *SearchPipelineSuite) TestHybridSearchWithRequeryPipe() {
@@ -1996,7 +3450,7 @@ func getHybridSearchTask(collName string, data [][]string, outputFields []string
 		},
 		schema: &schemaInfo{
 			CollectionSchema: schema,
-			pkField:          &schemapb.FieldSchema{FieldID: 100, Name: "int64", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			PkField:          &schemapb.FieldSchema{FieldID: 100, Name: "int64", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 		},
 		mixCoord: nil,
 		tr:       timerecord.NewTimeRecorder("test-search"),
@@ -2108,6 +3562,7 @@ func (s *SearchPipelineSuite) TestParseOrderByFields() {
 	s.Len(result, 1)
 	s.Equal("score", result[0].FieldName)
 	s.True(result[0].Ascending)
+	s.False(result[0].NullsFirst)
 
 	// Test single field with explicit asc
 	params = []*commonpb.KeyValuePair{{Key: OrderByFieldsKey, Value: "score:asc"}}
@@ -2116,6 +3571,7 @@ func (s *SearchPipelineSuite) TestParseOrderByFields() {
 	s.Len(result, 1)
 	s.Equal("score", result[0].FieldName)
 	s.True(result[0].Ascending)
+	s.False(result[0].NullsFirst)
 
 	// Test single field descending
 	params = []*commonpb.KeyValuePair{{Key: OrderByFieldsKey, Value: "score:desc"}}
@@ -2124,6 +3580,22 @@ func (s *SearchPipelineSuite) TestParseOrderByFields() {
 	s.Len(result, 1)
 	s.Equal("score", result[0].FieldName)
 	s.False(result[0].Ascending)
+	s.True(result[0].NullsFirst)
+
+	// Test explicit null ordering
+	params = []*commonpb.KeyValuePair{{Key: OrderByFieldsKey, Value: "score:asc:nulls_first"}}
+	result, err = parseOrderByFields(params, schema)
+	s.NoError(err)
+	s.Len(result, 1)
+	s.True(result[0].Ascending)
+	s.True(result[0].NullsFirst)
+
+	params = []*commonpb.KeyValuePair{{Key: OrderByFieldsKey, Value: "score:desc:nulls_last"}}
+	result, err = parseOrderByFields(params, schema)
+	s.NoError(err)
+	s.Len(result, 1)
+	s.False(result[0].Ascending)
+	s.False(result[0].NullsFirst)
 
 	// Test multiple fields
 	params = []*commonpb.KeyValuePair{{Key: OrderByFieldsKey, Value: "score:desc,name:asc,id"}}
@@ -2132,16 +3604,25 @@ func (s *SearchPipelineSuite) TestParseOrderByFields() {
 	s.Len(result, 3)
 	s.Equal("score", result[0].FieldName)
 	s.False(result[0].Ascending)
+	s.True(result[0].NullsFirst)
 	s.Equal("name", result[1].FieldName)
 	s.True(result[1].Ascending)
+	s.False(result[1].NullsFirst)
 	s.Equal("id", result[2].FieldName)
 	s.True(result[2].Ascending)
+	s.False(result[2].NullsFirst)
 
 	// Test invalid direction
 	params = []*commonpb.KeyValuePair{{Key: OrderByFieldsKey, Value: "score:invalid"}}
 	_, err = parseOrderByFields(params, schema)
 	s.Error(err)
 	s.Contains(err.Error(), "invalid order direction")
+
+	// Test invalid null ordering
+	params = []*commonpb.KeyValuePair{{Key: OrderByFieldsKey, Value: "score:asc:nulls_middle"}}
+	_, err = parseOrderByFields(params, schema)
+	s.Error(err)
+	s.Contains(err.Error(), "invalid null ordering 'nulls_middle', expected 'nulls_first' or 'nulls_last'")
 
 	// Test non-existent field
 	params = []*commonpb.KeyValuePair{{Key: OrderByFieldsKey, Value: "nonexistent"}}
@@ -2331,7 +3812,7 @@ func (s *SearchPipelineSuite) TestIsSortableFieldType() {
 func (s *SearchPipelineSuite) TestCompareFieldDataAt() {
 	// Helper to call compareFieldDataAt and assert no error
 	mustCompare := func(field *schemapb.FieldData, i, j int) int {
-		cmp, err := compareFieldDataAt(field, i, j)
+		cmp, err := compareFieldDataAt(field, i, j, true)
 		s.NoError(err)
 		return cmp
 	}
@@ -2405,7 +3886,7 @@ func (s *SearchPipelineSuite) TestCompareFieldDataAt() {
 func (s *SearchPipelineSuite) TestCompareFieldDataAtWithNulls() {
 	// Helper to call compareFieldDataAt and assert no error
 	mustCompare := func(field *schemapb.FieldData, i, j int) int {
-		cmp, err := compareFieldDataAt(field, i, j)
+		cmp, err := compareFieldDataAt(field, i, j, true)
 		s.NoError(err)
 		return cmp
 	}
@@ -2416,17 +3897,24 @@ func (s *SearchPipelineSuite) TestCompareFieldDataAtWithNulls() {
 		FieldName: "nullable_field",
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
+				ValidData: []bool{true, false, true}, // index 1 is null
 				Data: &schemapb.ScalarField_LongData{
 					LongData: &schemapb.LongArray{Data: []int64{10, 20, 30}},
 				},
 			},
 		},
-		ValidData: []bool{true, false, true}, // index 1 is null
 	}
 
-	// null vs non-null: null should be first (return -1)
+	// NULLS FIRST
 	s.Equal(-1, mustCompare(nullableField, 1, 0)) // null < 10
 	s.Equal(1, mustCompare(nullableField, 0, 1))  // 10 > null
+
+	cmp, err := compareFieldDataAt(nullableField, 1, 0, false)
+	s.NoError(err)
+	s.Equal(1, cmp) // NULLS LAST: null > 10
+	cmp, err = compareFieldDataAt(nullableField, 0, 1, false)
+	s.NoError(err)
+	s.Equal(-1, cmp) // NULLS LAST: 10 < null
 
 	// null vs null: equal
 	nullableField2 := &schemapb.FieldData{
@@ -2434,12 +3922,12 @@ func (s *SearchPipelineSuite) TestCompareFieldDataAtWithNulls() {
 		FieldName: "nullable_field2",
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
+				ValidData: []bool{false, false, true}, // index 0 and 1 are null
 				Data: &schemapb.ScalarField_LongData{
 					LongData: &schemapb.LongArray{Data: []int64{10, 20, 30}},
 				},
 			},
 		},
-		ValidData: []bool{false, false, true}, // index 0 and 1 are null
 	}
 	s.Equal(0, mustCompare(nullableField2, 0, 1)) // null == null
 
@@ -2491,6 +3979,30 @@ func (s *SearchPipelineSuite) TestIsSameGroupByValue() {
 	}
 	s.True(isSameGroupByValue(boolField, 0, 1))  // true == true
 	s.False(isSameGroupByValue(boolField, 1, 2)) // true != false
+}
+
+func (s *SearchPipelineSuite) TestNewSearchReduceOperatorUsesPipelineOffsetParam() {
+	task := &searchTask{
+		ctx: context.Background(),
+		SearchRequest: &internalpb.SearchRequest{
+			Nq:           1,
+			Topk:         3,
+			Offset:       2,
+			CollectionID: 100,
+			PartitionIDs: []int64{10},
+		},
+		schema: mustNewSchemaInfo(&schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 101, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			},
+		}),
+		queryInfos: []*planpb.QueryInfo{{}},
+	}
+
+	op, err := newSearchReduceOperator(task, map[string]any{reduceOffsetParamKey: int64(0)})
+
+	s.NoError(err)
+	s.Equal(int64(0), op.(*searchReduceOperator).offset)
 }
 
 func (s *SearchPipelineSuite) TestNewOrderByOperatorUsesPluralGroupByFieldIDs() {
@@ -2561,6 +4073,172 @@ func (s *SearchPipelineSuite) TestOrderByOperator() {
 	s.Equal(expectedPrices, actualPrices)
 }
 
+func (s *SearchPipelineSuite) TestOrderByOperatorAppliesOffsetAfterOrderBy() {
+	result := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{1, 2, 3, 4}},
+				},
+			},
+			Scores:         []float32{0.9, 0.8, 0.7, 0.6},
+			Distances:      []float32{9, 8, 7, 6},
+			Recalls:        []float32{90, 80, 70, 60},
+			ElementIndices: &schemapb.LongArray{Data: []int64{10, 20, 30, 40}},
+			TopK:           4,
+			Topks:          []int64{4},
+			FieldsData: []*schemapb.FieldData{
+				{
+					Type:      schemapb.DataType_Int64,
+					FieldName: "price",
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_LongData{
+								LongData: &schemapb.LongArray{Data: []int64{30, 10, 20, 40}},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	op := &orderByOperator{
+		orderByFields:  []OrderByField{{FieldName: "price", Ascending: true}},
+		groupByFieldId: -1,
+		limit:          2,
+		offset:         1,
+	}
+	outputs, err := op.run(context.Background(), s.span, result)
+
+	s.NoError(err)
+	sliced := outputs[0].(*milvuspb.SearchResults).GetResults()
+	s.Equal([]int64{3, 1}, sliced.GetIds().GetIntId().GetData())
+	s.Equal([]float32{0.7, 0.9}, sliced.GetScores())
+	s.Equal([]float32{7, 9}, sliced.GetDistances())
+	s.Equal([]float32{70, 90}, sliced.GetRecalls())
+	s.Equal([]int64{30, 10}, sliced.GetElementIndices().GetData())
+	s.Equal([]int64{20, 30}, sliced.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+	s.Equal([]int64{2}, sliced.GetTopks())
+	s.Equal(int64(2), sliced.GetTopK())
+}
+
+func (s *SearchPipelineSuite) TestOrderByOperatorSlicesStringIDsAndNonNullableVectorAfterOrderBy() {
+	result := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_StrId{
+					StrId: &schemapb.StringArray{Data: []string{"a", "b", "c", "d"}},
+				},
+			},
+			Scores: []float32{0.9, 0.8, 0.7, 0.6},
+			TopK:   4,
+			Topks:  []int64{4},
+			FieldsData: []*schemapb.FieldData{
+				{
+					Type:      schemapb.DataType_Int64,
+					FieldName: "price",
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_LongData{
+								LongData: &schemapb.LongArray{Data: []int64{30, 10, 20, 40}},
+							},
+						},
+					},
+				},
+				{
+					Type:      schemapb.DataType_FloatVector,
+					FieldName: "vec",
+					Field: &schemapb.FieldData_Vectors{
+						Vectors: &schemapb.VectorField{
+							Dim: 2,
+							Data: &schemapb.VectorField_FloatVector{
+								FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4, 5, 6, 7, 8}},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	op := &orderByOperator{
+		orderByFields:  []OrderByField{{FieldName: "price", Ascending: true}},
+		groupByFieldId: -1,
+		limit:          2,
+		offset:         1,
+	}
+	outputs, err := op.run(context.Background(), s.span, result)
+
+	s.NoError(err)
+	sliced := outputs[0].(*milvuspb.SearchResults).GetResults()
+	s.Equal([]string{"c", "a"}, sliced.GetIds().GetStrId().GetData())
+	s.Equal([]float32{0.7, 0.9}, sliced.GetScores())
+	s.Equal([]int64{20, 30}, sliced.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+	s.Equal([]float32{5, 6, 1, 2}, sliced.GetFieldsData()[1].GetVectors().GetFloatVector().GetData())
+	s.Equal([]int64{2}, sliced.GetTopks())
+	s.Equal(int64(2), sliced.GetTopK())
+}
+
+func (s *SearchPipelineSuite) TestOrderByOperatorAppliesGroupOffsetAfterOrderBy() {
+	result := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{1, 2, 3, 4, 5, 6}},
+				},
+			},
+			Scores: []float32{0.9, 0.85, 0.8, 0.75, 0.7, 0.65},
+			TopK:   6,
+			Topks:  []int64{6},
+			FieldsData: []*schemapb.FieldData{
+				{
+					Type:      schemapb.DataType_Int64,
+					FieldName: "price",
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_LongData{
+								LongData: &schemapb.LongArray{Data: []int64{30, 25, 10, 20, 15, 18}},
+							},
+						},
+					},
+				},
+			},
+			GroupByFieldValues: []*schemapb.FieldData{
+				{
+					Type: schemapb.DataType_VarChar,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_StringData{
+								StringData: &schemapb.StringArray{Data: []string{"A", "A", "B", "C", "C", "C"}},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	op := &orderByOperator{
+		orderByFields:  []OrderByField{{FieldName: "price", Ascending: true}},
+		groupByFieldId: 100,
+		groupSize:      3,
+		limit:          1,
+		offset:         1,
+	}
+	outputs, err := op.run(context.Background(), s.span, result)
+
+	s.NoError(err)
+	sliced := outputs[0].(*milvuspb.SearchResults).GetResults()
+	s.Equal([]int64{4, 5, 6}, sliced.GetIds().GetIntId().GetData())
+	s.Equal([]float32{0.75, 0.7, 0.65}, sliced.GetScores())
+	s.Equal([]int64{20, 15, 18}, sliced.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+	s.Equal([]string{"C", "C", "C"}, sliced.GetGroupByFieldValues()[0].GetScalars().GetStringData().GetData())
+	s.Nil(sliced.GetGroupByFieldValue())
+	s.Equal([]int64{3}, sliced.GetTopks())
+	s.Equal(int64(3), sliced.GetTopK())
+}
+
 func (s *SearchPipelineSuite) TestOrderByOperatorReordersNullableVectorCompactOutput() {
 	result := &milvuspb.SearchResults{
 		Results: &schemapb.SearchResultData{
@@ -2586,10 +4264,10 @@ func (s *SearchPipelineSuite) TestOrderByOperatorReordersNullableVectorCompactOu
 				{
 					Type:      schemapb.DataType_FloatVector,
 					FieldName: "nullable_float_vec",
-					ValidData: []bool{true, false, true},
 					Field: &schemapb.FieldData_Vectors{
 						Vectors: &schemapb.VectorField{
-							Dim: 2,
+							ValidData: []bool{true, false, true},
+							Dim:       2,
 							Data: &schemapb.VectorField_FloatVector{
 								FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 5, 6}},
 							},
@@ -2599,10 +4277,10 @@ func (s *SearchPipelineSuite) TestOrderByOperatorReordersNullableVectorCompactOu
 				{
 					Type:      schemapb.DataType_SparseFloatVector,
 					FieldName: "nullable_sparse_vec",
-					ValidData: []bool{true, false, true},
 					Field: &schemapb.FieldData_Vectors{
 						Vectors: &schemapb.VectorField{
-							Dim: 3,
+							ValidData: []bool{true, false, true},
+							Dim:       3,
 							Data: &schemapb.VectorField_SparseFloatVector{
 								SparseFloatVector: &schemapb.SparseFloatArray{
 									Dim:      3,
@@ -2629,9 +4307,9 @@ func (s *SearchPipelineSuite) TestOrderByOperatorReordersNullableVectorCompactOu
 
 	s.Equal([]int64{2, 3, 1}, sortedResult.Results.Ids.GetIntId().Data)
 	s.Equal([]int64{10, 20, 30}, sortedResult.Results.FieldsData[0].GetScalars().GetLongData().Data)
-	s.Equal([]bool{false, true, true}, sortedResult.Results.FieldsData[1].GetValidData())
+	s.Equal([]bool{false, true, true}, typeutil.GetFieldDataValidData(sortedResult.Results.FieldsData[1]))
 	s.Equal([]float32{5, 6, 1, 2}, sortedResult.Results.FieldsData[1].GetVectors().GetFloatVector().GetData())
-	s.Equal([]bool{false, true, true}, sortedResult.Results.FieldsData[2].GetValidData())
+	s.Equal([]bool{false, true, true}, typeutil.GetFieldDataValidData(sortedResult.Results.FieldsData[2]))
 	s.Equal([][]byte{{0x03}, {0x01}}, sortedResult.Results.FieldsData[2].GetVectors().GetSparseFloatVector().GetContents())
 }
 
@@ -2761,6 +4439,374 @@ func (s *SearchPipelineSuite) TestOrderByOperatorMultipleQueriesWithGroupBy() {
 	s.Equal(expectedPrices, actualPrices)
 }
 
+// Per liliu-z review (search_pipeline.go:1855): the per-query offset/limit loop was only
+// exercised with nq=1. Assert offset/limit apply PER QUERY, not globally over the flattened
+// result, so a regression that slices the offset window globally returns misaligned rows for nq>1.
+func (s *SearchPipelineSuite) TestOrderByOperatorAppliesOffsetPerQueryForMultipleQueries() {
+	// nq=2, topk=4 each.
+	// q1 ids[1,2,3,4] price[40,10,30,20] -> sort asc [2,4,3,1] -> offset1/limit2 -> [4,3]
+	// q2 ids[5,6,7,8] price[80,50,70,60] -> sort asc [6,8,7,5] -> offset1/limit2 -> [8,7]
+	result := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			Ids:    &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2, 3, 4, 5, 6, 7, 8}}}},
+			Scores: []float32{0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2},
+			TopK:   4,
+			Topks:  []int64{4, 4},
+			FieldsData: []*schemapb.FieldData{{
+				Type:      schemapb.DataType_Int64,
+				FieldName: "price",
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{40, 10, 30, 20, 80, 50, 70, 60}}},
+				}},
+			}},
+		},
+	}
+
+	op := &orderByOperator{
+		orderByFields:  []OrderByField{{FieldName: "price", Ascending: true}},
+		groupByFieldId: -1,
+		limit:          2,
+		offset:         1,
+	}
+	outputs, err := op.run(context.Background(), s.span, result)
+	s.NoError(err)
+	sliced := outputs[0].(*milvuspb.SearchResults).GetResults()
+
+	// per-query pages: q1 -> [4,3], q2 -> [8,7]; a global slice would drop q2's page entirely.
+	s.Equal([]int64{4, 3, 8, 7}, sliced.GetIds().GetIntId().GetData())
+	s.Equal([]int64{20, 30, 60, 70}, sliced.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+	s.Equal([]float32{0.6, 0.7, 0.2, 0.3}, sliced.GetScores())
+	s.Equal([]int64{2, 2}, sliced.GetTopks()) // each query keeps its own page size
+}
+
+// Same per-query invariant as above, combined with group-by: the group offset/limit must
+// paginate groups PER QUERY, not across the flattened multi-query result.
+func (s *SearchPipelineSuite) TestOrderByOperatorAppliesGroupOffsetPerQueryForMultipleQueries() {
+	// nq=2, topk=4 each, 2 groups (size 2) per query.
+	// q1 A(ids1,2 p20,25) B(ids3,4 p10,15) -> groups asc by first price [B,A] -> off1/lim1 group -> A=[1,2]
+	// q2 C(ids5,6 p50,55) D(ids7,8 p30,35) -> groups asc by first price [D,C] -> off1/lim1 group -> C=[5,6]
+	result := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			Ids:    &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2, 3, 4, 5, 6, 7, 8}}}},
+			Scores: []float32{0.9, 0.85, 0.8, 0.75, 0.7, 0.65, 0.6, 0.55},
+			TopK:   4,
+			Topks:  []int64{4, 4},
+			GroupByFieldValues: []*schemapb.FieldData{{
+				Type: schemapb.DataType_Int64,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{100, 100, 200, 200, 300, 300, 400, 400}}},
+				}},
+			}},
+			FieldsData: []*schemapb.FieldData{{
+				Type:      schemapb.DataType_Int64,
+				FieldName: "price",
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{20, 25, 10, 15, 50, 55, 30, 35}}},
+				}},
+			}},
+		},
+	}
+
+	op := &orderByOperator{
+		orderByFields:  []OrderByField{{FieldName: "price", Ascending: true}},
+		groupByFieldId: 1,
+		groupSize:      2,
+		limit:          1,
+		offset:         1,
+	}
+	outputs, err := op.run(context.Background(), s.span, result)
+	s.NoError(err)
+	sliced := outputs[0].(*milvuspb.SearchResults).GetResults()
+
+	s.Equal([]int64{1, 2, 5, 6}, sliced.GetIds().GetIntId().GetData())
+	s.Equal([]int64{20, 25, 50, 55}, sliced.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+	s.Equal([]int64{2, 2}, sliced.GetTopks())
+}
+
+// paginateSortedRows: offset at/beyond the row count clamps to an empty page.
+func (s *SearchPipelineSuite) TestPaginateSortedRowsOffsetBeyondLength() {
+	indices := []int{0, 1, 2}
+	s.Empty(paginateSortedRows(indices, 5, 2))                 // offset > len -> empty
+	s.Empty(paginateSortedRows(indices, 3, 0))                 // offset == len -> empty
+	s.Equal([]int{1, 2}, paginateSortedRows(indices, 1, 10))   // limit beyond end -> offset..end
+	s.Equal([]int{0, 1, 2}, paginateSortedRows(indices, 0, 0)) // no limit -> all
+}
+
+// getOrderByGroupByFieldValue: nil input, plural-preferred, legacy fallback.
+func (s *SearchPipelineSuite) TestGetOrderByGroupByFieldValueNilAndSelection() {
+	s.Nil(getOrderByGroupByFieldValue(nil))
+
+	plural := &schemapb.SearchResultData{
+		GroupByFieldValues: []*schemapb.FieldData{{FieldName: "g"}},
+	}
+	s.Equal("g", getOrderByGroupByFieldValue(plural).GetFieldName())
+
+	legacy := &schemapb.SearchResultData{
+		GroupByFieldValue: &schemapb.FieldData{FieldName: "l"},
+	}
+	s.Equal("l", getOrderByGroupByFieldValue(legacy).GetFieldName())
+}
+
+// sortQueryResults returns early on empty indices (op.run guards with topk>0, so cover directly).
+func (s *SearchPipelineSuite) TestSortQueryResultsEmptyIndices() {
+	op := &orderByOperator{
+		orderByFields:  []OrderByField{{FieldName: "price", Ascending: true}},
+		groupByFieldId: -1,
+	}
+	out, err := op.sortQueryResults(&milvuspb.SearchResults{Results: &schemapb.SearchResultData{}}, []int{})
+	s.NoError(err)
+	s.Empty(out)
+}
+
+// sortGroupsByOrderByFields returns early on empty indices.
+func (s *SearchPipelineSuite) TestSortGroupsByOrderByFieldsEmptyIndices() {
+	op := &orderByOperator{
+		orderByFields:  []OrderByField{{FieldName: "price", Ascending: true}},
+		groupByFieldId: 0,
+		groupSize:      1,
+	}
+	out, err := op.sortGroupsByOrderByFields(&milvuspb.SearchResults{Results: &schemapb.SearchResultData{}}, []int{})
+	s.NoError(err)
+	s.Empty(out)
+}
+
+// reorderFieldData: vector payload length not divisible by per-vector width -> error (defensive guard).
+func (s *SearchPipelineSuite) TestReorderFieldDataDimNotDivisibleErrors() {
+	indices := []int{0}
+	cases := []struct {
+		name  string
+		field *schemapb.FieldData
+	}{
+		{"float_vector", &schemapb.FieldData{
+			Type: schemapb.DataType_FloatVector, FieldName: "fv",
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Dim:  2,
+				Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3}}},
+			}},
+		}},
+		{"binary_vector", &schemapb.FieldData{
+			Type: schemapb.DataType_BinaryVector, FieldName: "bv",
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Dim:  16,
+				Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{0x01, 0x02, 0x03}},
+			}},
+		}},
+		{"float16_vector", &schemapb.FieldData{
+			Type: schemapb.DataType_Float16Vector, FieldName: "f16",
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Dim:  2,
+				Data: &schemapb.VectorField_Float16Vector{Float16Vector: []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06}},
+			}},
+		}},
+		{"bfloat16_vector", &schemapb.FieldData{
+			Type: schemapb.DataType_BFloat16Vector, FieldName: "bf16",
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Dim:  2,
+				Data: &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06}},
+			}},
+		}},
+		{"int8_vector", &schemapb.FieldData{
+			Type: schemapb.DataType_Int8Vector, FieldName: "i8",
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Dim:  4,
+				Data: &schemapb.VectorField_Int8Vector{Int8Vector: []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06}},
+			}},
+		}},
+	}
+	for _, c := range cases {
+		s.Error(reorderFieldData(c.field, indices), c.name)
+	}
+}
+
+// reorderFieldData: index out of range for the vector payload -> validateReorderIndex error (defensive guard).
+func (s *SearchPipelineSuite) TestReorderFieldDataIndexOutOfBoundsErrors() {
+	oob := []int{5} // every field below holds 2 vectors; index 5 is out of range
+	cases := []struct {
+		name  string
+		field *schemapb.FieldData
+	}{
+		{"float_vector", &schemapb.FieldData{
+			Type: schemapb.DataType_FloatVector, FieldName: "fv",
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Dim:  2,
+				Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4}}},
+			}},
+		}},
+		{"binary_vector", &schemapb.FieldData{
+			Type: schemapb.DataType_BinaryVector, FieldName: "bv",
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Dim:  16,
+				Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{0x01, 0x02, 0x03, 0x04}},
+			}},
+		}},
+		{"float16_vector", &schemapb.FieldData{
+			Type: schemapb.DataType_Float16Vector, FieldName: "f16",
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Dim:  2,
+				Data: &schemapb.VectorField_Float16Vector{Float16Vector: []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08}},
+			}},
+		}},
+		{"bfloat16_vector", &schemapb.FieldData{
+			Type: schemapb.DataType_BFloat16Vector, FieldName: "bf16",
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Dim:  2,
+				Data: &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08}},
+			}},
+		}},
+		{"sparse_vector", &schemapb.FieldData{
+			Type: schemapb.DataType_SparseFloatVector, FieldName: "sv",
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Dim: 100,
+				Data: &schemapb.VectorField_SparseFloatVector{SparseFloatVector: &schemapb.SparseFloatArray{
+					Contents: [][]byte{{0x01, 0x02}, {0x03, 0x04}},
+				}},
+			}},
+		}},
+		{"int8_vector", &schemapb.FieldData{
+			Type: schemapb.DataType_Int8Vector, FieldName: "i8",
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Dim:  4,
+				Data: &schemapb.VectorField_Int8Vector{Int8Vector: []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08}},
+			}},
+		}},
+	}
+	for _, c := range cases {
+		s.Error(reorderFieldData(c.field, oob), c.name)
+	}
+}
+
+// reorderResults: out-of-range index for each result column -> internal error (defensive guard).
+func (s *SearchPipelineSuite) TestReorderResultsIndexOutOfBounds() {
+	op := &orderByOperator{}
+	oob := []int{5}
+	longIDs := func() *schemapb.IDs {
+		return &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}}}}
+	}
+
+	// int IDs
+	s.Error(op.reorderResults(&milvuspb.SearchResults{Results: &schemapb.SearchResultData{
+		Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}},
+	}}, oob), "int_ids")
+
+	// string IDs
+	s.Error(op.reorderResults(&milvuspb.SearchResults{Results: &schemapb.SearchResultData{
+		Ids: &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{"a"}}}},
+	}}, oob), "str_ids")
+
+	// distances (IDs long enough so the distances check is the one that trips)
+	s.Error(op.reorderResults(&milvuspb.SearchResults{Results: &schemapb.SearchResultData{
+		Ids: longIDs(), Distances: []float32{0.1},
+	}}, oob), "distances")
+
+	// recalls
+	s.Error(op.reorderResults(&milvuspb.SearchResults{Results: &schemapb.SearchResultData{
+		Ids: longIDs(), Recalls: []float32{0.1},
+	}}, oob), "recalls")
+
+	// element indices
+	s.Error(op.reorderResults(&milvuspb.SearchResults{Results: &schemapb.SearchResultData{
+		Ids: longIDs(), ElementIndices: &schemapb.LongArray{Data: []int64{10}},
+	}}, oob), "element_indices")
+}
+
+// op.run propagates a sort error: the order_by field has fewer values than rows, so
+// compareFieldDataAt hits an out-of-bounds index during the per-query sort.
+func (s *SearchPipelineSuite) TestOrderByRunReturnsSortError() {
+	result := &milvuspb.SearchResults{Results: &schemapb.SearchResultData{
+		Ids:    &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2, 3}}}},
+		Scores: []float32{0.9, 0.8, 0.7},
+		Topks:  []int64{3},
+		FieldsData: []*schemapb.FieldData{{
+			Type: schemapb.DataType_Int64, FieldName: "price",
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{10}}}, // 1 value for 3 rows
+			}},
+		}},
+	}}
+	op := &orderByOperator{
+		orderByFields:  []OrderByField{{FieldName: "price", Ascending: true}},
+		groupByFieldId: -1,
+	}
+	_, err := op.run(context.Background(), s.span, result)
+	s.Error(err)
+}
+
+// op.run propagates a reorder error: the sort succeeds but a malformed vector field fails reorderResults.
+func (s *SearchPipelineSuite) TestOrderByRunReturnsReorderError() {
+	result := &milvuspb.SearchResults{Results: &schemapb.SearchResultData{
+		Ids:    &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2}}}},
+		Scores: []float32{0.9, 0.8},
+		Topks:  []int64{2},
+		FieldsData: []*schemapb.FieldData{
+			{
+				Type: schemapb.DataType_Int64, FieldName: "price",
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{20, 10}}},
+				}},
+			},
+			{
+				Type: schemapb.DataType_FloatVector, FieldName: "vec",
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim:  2,
+					Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3}}}, // 3 not divisible by dim 2
+				}},
+			},
+		},
+	}}
+	op := &orderByOperator{
+		orderByFields:  []OrderByField{{FieldName: "price", Ascending: true}},
+		groupByFieldId: -1,
+	}
+	_, err := op.run(context.Background(), s.span, result)
+	s.Error(err)
+}
+
+// sortGroupsByOrderByFields propagates a sort error during group ordering (group value present).
+func (s *SearchPipelineSuite) TestSortGroupsByOrderByFieldsReturnsSortError() {
+	result := &milvuspb.SearchResults{Results: &schemapb.SearchResultData{
+		Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2, 3, 4}}}},
+		GroupByFieldValues: []*schemapb.FieldData{{
+			Type: schemapb.DataType_Int64,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{100, 100, 200, 200}}},
+			}},
+		}},
+		FieldsData: []*schemapb.FieldData{{
+			Type: schemapb.DataType_Int64, FieldName: "price",
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{10}}}, // 1 value for 4 rows
+			}},
+		}},
+	}}
+	op := &orderByOperator{
+		orderByFields:  []OrderByField{{FieldName: "price", Ascending: true}},
+		groupByFieldId: 1,
+		groupSize:      2,
+	}
+	_, err := op.sortGroupsByOrderByFields(result, []int{0, 1, 2, 3})
+	s.Error(err)
+}
+
+// sortGroupsByOrderByFields with no group value falls back to row sort and propagates its error.
+func (s *SearchPipelineSuite) TestSortGroupsByOrderByFieldsNilGroupValueReturnsSortError() {
+	result := &milvuspb.SearchResults{Results: &schemapb.SearchResultData{
+		Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2, 3}}}},
+		FieldsData: []*schemapb.FieldData{{
+			Type: schemapb.DataType_Int64, FieldName: "price",
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{10}}},
+			}},
+		}},
+	}}
+	op := &orderByOperator{
+		orderByFields:  []OrderByField{{FieldName: "price", Ascending: true}},
+		groupByFieldId: 1,
+		groupSize:      2,
+	}
+	_, err := op.sortGroupsByOrderByFields(result, []int{0, 1, 2})
+	s.Error(err)
+}
+
 // Test orderByOperator with descending sort
 func (s *SearchPipelineSuite) TestOrderByOperatorDescending() {
 	result := &milvuspb.SearchResults{
@@ -2802,6 +4848,84 @@ func (s *SearchPipelineSuite) TestOrderByOperatorDescending() {
 	// After descending sort by price: 40, 30, 20, 10
 	expectedIds := []int64{3, 1, 4, 2}
 	s.Equal(expectedIds, sortedResult.Results.Ids.GetIntId().Data)
+}
+
+func (s *SearchPipelineSuite) TestOrderByOperatorNullableScalarNullOrdering() {
+	makeResult := func() *milvuspb.SearchResults {
+		return &milvuspb.SearchResults{
+			Results: &schemapb.SearchResultData{
+				Ids: &schemapb.IDs{
+					IdField: &schemapb.IDs_IntId{
+						IntId: &schemapb.LongArray{Data: []int64{1, 2, 3, 4}},
+					},
+				},
+				Scores: []float32{0.9, 0.8, 0.7, 0.6},
+				Topks:  []int64{4},
+				FieldsData: []*schemapb.FieldData{
+					{
+						Type:      schemapb.DataType_Int64,
+						FieldName: "price",
+						Field: &schemapb.FieldData_Scalars{
+							Scalars: &schemapb.ScalarField{
+								ValidData: []bool{true, false, true, false},
+								Data: &schemapb.ScalarField_LongData{
+									LongData: &schemapb.LongArray{Data: []int64{30, 10, 40, 20}},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+	}
+
+	tests := []struct {
+		name          string
+		orderBy       OrderByField
+		expectedIDs   []int64
+		expectedValid []bool
+	}{
+		{
+			name:          "asc_default_nulls_last",
+			orderBy:       OrderByField{FieldName: "price", Ascending: true, NullsFirst: false},
+			expectedIDs:   []int64{1, 3, 2, 4},
+			expectedValid: []bool{true, true, false, false},
+		},
+		{
+			name:          "desc_default_nulls_first",
+			orderBy:       OrderByField{FieldName: "price", Ascending: false, NullsFirst: true},
+			expectedIDs:   []int64{2, 4, 3, 1},
+			expectedValid: []bool{false, false, true, true},
+		},
+		{
+			name:          "asc_explicit_nulls_first",
+			orderBy:       OrderByField{FieldName: "price", Ascending: true, NullsFirst: true},
+			expectedIDs:   []int64{2, 4, 1, 3},
+			expectedValid: []bool{false, false, true, true},
+		},
+		{
+			name:          "desc_explicit_nulls_last",
+			orderBy:       OrderByField{FieldName: "price", Ascending: false, NullsFirst: false},
+			expectedIDs:   []int64{3, 1, 2, 4},
+			expectedValid: []bool{true, true, false, false},
+		},
+	}
+
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			op := &orderByOperator{
+				orderByFields:  []OrderByField{tt.orderBy},
+				groupByFieldId: -1,
+			}
+
+			outputs, err := op.run(context.Background(), s.span, makeResult())
+			s.NoError(err)
+			sortedResult := outputs[0].(*milvuspb.SearchResults)
+
+			s.Equal(tt.expectedIDs, sortedResult.Results.Ids.GetIntId().Data)
+			s.Equal(tt.expectedValid, typeutil.GetFieldDataValidData(sortedResult.Results.FieldsData[0]))
+		})
+	}
 }
 
 // Test orderByOperator validates missing fields
@@ -3088,12 +5212,12 @@ func (s *SearchPipelineSuite) TestCompareFieldDataAtJSON() {
 
 	// JSON comparison is byte-level, so "2" > "1" (comparing '2' vs '1' in "10")
 	// This tests the documented behavior that JSON sorting is lexicographic
-	cmp, err := compareFieldDataAt(jsonField, 0, 1)
+	cmp, err := compareFieldDataAt(jsonField, 0, 1, true)
 	s.NoError(err)
 	s.Greater(cmp, 0) // {"a": 2} > {"a": 10} in byte comparison because '2' > '1'
 
 	// Different keys
-	cmp, err = compareFieldDataAt(jsonField, 0, 2)
+	cmp, err = compareFieldDataAt(jsonField, 0, 2, true)
 	s.NoError(err)
 	s.Less(cmp, 0) // {"a": ...} < {"b": ...} because 'a' < 'b'
 }
@@ -3138,7 +5262,7 @@ func (s *SearchPipelineSuite) TestReorderFieldDataFloatVector() {
 // Test Double comparison in compareFieldDataAt
 func (s *SearchPipelineSuite) TestCompareFieldDataAtDouble() {
 	mustCompare := func(field *schemapb.FieldData, i, j int) int {
-		cmp, err := compareFieldDataAt(field, i, j)
+		cmp, err := compareFieldDataAt(field, i, j, true)
 		s.NoError(err)
 		return cmp
 	}
@@ -3162,7 +5286,7 @@ func (s *SearchPipelineSuite) TestCompareFieldDataAtDouble() {
 // Test Int32 comparison in compareFieldDataAt
 func (s *SearchPipelineSuite) TestCompareFieldDataAtInt32() {
 	mustCompare := func(field *schemapb.FieldData, i, j int) int {
-		cmp, err := compareFieldDataAt(field, i, j)
+		cmp, err := compareFieldDataAt(field, i, j, true)
 		s.NoError(err)
 		return cmp
 	}
@@ -3245,48 +5369,52 @@ func (s *SearchPipelineSuite) TestCompareJSONValues() {
 	// Number comparison
 	a := extractJSONValue([]byte(`{"v": 10}`), "/v")
 	b := extractJSONValue([]byte(`{"v": 20}`), "/v")
-	s.Equal(-1, compareJSONValues(a, b)) // 10 < 20
-	s.Equal(1, compareJSONValues(b, a))  // 20 > 10
-	s.Equal(0, compareJSONValues(a, a))  // 10 == 10
+	s.Equal(-1, compareJSONValues(a, b, true)) // 10 < 20
+	s.Equal(1, compareJSONValues(b, a, true))  // 20 > 10
+	s.Equal(0, compareJSONValues(a, a, true))  // 10 == 10
 
 	// String comparison
 	a = extractJSONValue([]byte(`{"v": "apple"}`), "/v")
 	b = extractJSONValue([]byte(`{"v": "banana"}`), "/v")
-	s.Equal(-1, compareJSONValues(a, b)) // "apple" < "banana"
-	s.Equal(1, compareJSONValues(b, a))  // "banana" > "apple"
+	s.Equal(-1, compareJSONValues(a, b, true)) // "apple" < "banana"
+	s.Equal(1, compareJSONValues(b, a, true))  // "banana" > "apple"
 
 	// Boolean comparison (false < true)
 	a = extractJSONValue([]byte(`{"v": false}`), "/v")
 	b = extractJSONValue([]byte(`{"v": true}`), "/v")
-	s.Equal(-1, compareJSONValues(a, b)) // false < true
-	s.Equal(1, compareJSONValues(b, a))  // true > false
+	s.Equal(-1, compareJSONValues(a, b, true)) // false < true
+	s.Equal(1, compareJSONValues(b, a, true))  // true > false
 
-	// Non-existent values (nulls first)
+	// Non-existent values
 	a = extractJSONValue([]byte(`{}`), "/v")
 	b = extractJSONValue([]byte(`{"v": 10}`), "/v")
-	s.Equal(-1, compareJSONValues(a, b)) // null < 10
-	s.Equal(1, compareJSONValues(b, a))  // 10 > null
+	s.Equal(-1, compareJSONValues(a, b, true))  // NULLS FIRST: null < 10
+	s.Equal(1, compareJSONValues(b, a, true))   // NULLS FIRST: 10 > null
+	s.Equal(1, compareJSONValues(a, b, false))  // NULLS LAST: null > 10
+	s.Equal(-1, compareJSONValues(b, a, false)) // NULLS LAST: 10 < null
 
 	// Both non-existent
 	a = extractJSONValue([]byte(`{}`), "/v")
 	b = extractJSONValue([]byte(`{}`), "/v")
-	s.Equal(0, compareJSONValues(a, b)) // null == null
+	s.Equal(0, compareJSONValues(a, b, true)) // null == null
 
 	// Explicit JSON null value (type gjson.Null)
 	a = extractJSONValue([]byte(`{"v": null}`), "/v")
 	b = extractJSONValue([]byte(`{"v": 10}`), "/v")
-	s.Equal(-1, compareJSONValues(a, b)) // null < 10
-	s.Equal(1, compareJSONValues(b, a))  // 10 > null
+	s.Equal(-1, compareJSONValues(a, b, true))  // NULLS FIRST: null < 10
+	s.Equal(1, compareJSONValues(b, a, true))   // NULLS FIRST: 10 > null
+	s.Equal(1, compareJSONValues(a, b, false))  // NULLS LAST: null > 10
+	s.Equal(-1, compareJSONValues(b, a, false)) // NULLS LAST: 10 < null
 
 	// Both explicit null
 	a = extractJSONValue([]byte(`{"v": null}`), "/v")
 	b = extractJSONValue([]byte(`{"v": null}`), "/v")
-	s.Equal(0, compareJSONValues(a, b)) // null == null
+	s.Equal(0, compareJSONValues(a, b, true)) // null == null
 
 	// Explicit null vs non-existent (both treated as null)
 	a = extractJSONValue([]byte(`{"v": null}`), "/v")
 	b = extractJSONValue([]byte(`{}`), "/v")
-	s.Equal(0, compareJSONValues(a, b)) // null == null
+	s.Equal(0, compareJSONValues(a, b, true)) // null == null
 }
 
 // Test orderByOperator with JSON subfield path
@@ -3325,7 +5453,7 @@ func (s *SearchPipelineSuite) TestOrderByOperatorWithJSONPath() {
 	// Sort by metadata["price"] ascending
 	op := &orderByOperator{
 		orderByFields: []OrderByField{
-			{FieldName: "metadata", FieldID: 100, JSONPath: "/price", Ascending: true},
+			{FieldName: "metadata", FieldID: 100, JSONPath: "/price", Ascending: true, NullsFirst: false},
 		},
 		groupByFieldId: -1,
 	}
@@ -3374,7 +5502,7 @@ func (s *SearchPipelineSuite) TestOrderByOperatorWithJSONPathDescending() {
 
 	op := &orderByOperator{
 		orderByFields: []OrderByField{
-			{FieldName: "data", FieldID: 100, JSONPath: "/score", Ascending: false},
+			{FieldName: "data", FieldID: 100, JSONPath: "/score", Ascending: false, NullsFirst: true},
 		},
 		groupByFieldId: -1,
 	}
@@ -3390,8 +5518,79 @@ func (s *SearchPipelineSuite) TestOrderByOperatorWithJSONPathDescending() {
 	s.Equal(expectedIds, sortedResult.Results.Ids.GetIntId().Data)
 }
 
-// Test orderByOperator with missing JSON path values (nulls first)
 func (s *SearchPipelineSuite) TestOrderByOperatorWithMissingJSONPath() {
+	makeResult := func() *milvuspb.SearchResults {
+		return &milvuspb.SearchResults{
+			Results: &schemapb.SearchResultData{
+				Ids: &schemapb.IDs{
+					IdField: &schemapb.IDs_IntId{
+						IntId: &schemapb.LongArray{Data: []int64{1, 2, 3, 4, 5}},
+					},
+				},
+				Scores: []float32{0.9, 0.8, 0.7, 0.6, 0.5},
+				Topks:  []int64{5},
+				FieldsData: []*schemapb.FieldData{
+					{
+						Type:      schemapb.DataType_JSON,
+						FieldName: "metadata",
+						Field: &schemapb.FieldData_Scalars{
+							Scalars: &schemapb.ScalarField{
+								Data: &schemapb.ScalarField_JsonData{
+									JsonData: &schemapb.JSONArray{Data: [][]byte{
+										[]byte(`{"price": 30}`),
+										[]byte(`{}`),
+										[]byte(`{"price": 10}`),
+										[]byte(`{"other": 99}`),
+										[]byte(`{"price": null}`),
+									}},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+	}
+
+	tests := []struct {
+		name        string
+		orderBy     OrderByField
+		expectedIDs []int64
+	}{
+		{
+			name:        "asc_default_nulls_last",
+			orderBy:     OrderByField{FieldName: "metadata", FieldID: 100, JSONPath: "/price", Ascending: true, NullsFirst: false},
+			expectedIDs: []int64{3, 1, 2, 4, 5},
+		},
+		{
+			name:        "desc_default_nulls_first",
+			orderBy:     OrderByField{FieldName: "metadata", FieldID: 100, JSONPath: "/price", Ascending: false, NullsFirst: true},
+			expectedIDs: []int64{2, 4, 5, 1, 3},
+		},
+		{
+			name:        "desc_explicit_nulls_last",
+			orderBy:     OrderByField{FieldName: "metadata", FieldID: 100, JSONPath: "/price", Ascending: false, NullsFirst: false},
+			expectedIDs: []int64{1, 3, 2, 4, 5},
+		},
+	}
+
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			op := &orderByOperator{
+				orderByFields:  []OrderByField{tt.orderBy},
+				groupByFieldId: -1,
+			}
+
+			outputs, err := op.run(context.Background(), s.span, makeResult())
+			s.NoError(err)
+			sortedResult := outputs[0].(*milvuspb.SearchResults)
+
+			s.Equal(tt.expectedIDs, sortedResult.Results.Ids.GetIntId().Data)
+		})
+	}
+}
+
+func (s *SearchPipelineSuite) TestOrderByOperatorDynamicJSONNullOrdering() {
 	result := &milvuspb.SearchResults{
 		Results: &schemapb.SearchResultData{
 			Ids: &schemapb.IDs{
@@ -3404,15 +5603,15 @@ func (s *SearchPipelineSuite) TestOrderByOperatorWithMissingJSONPath() {
 			FieldsData: []*schemapb.FieldData{
 				{
 					Type:      schemapb.DataType_JSON,
-					FieldName: "metadata",
+					FieldName: "$meta",
 					Field: &schemapb.FieldData_Scalars{
 						Scalars: &schemapb.ScalarField{
 							Data: &schemapb.ScalarField_JsonData{
 								JsonData: &schemapb.JSONArray{Data: [][]byte{
-									[]byte(`{"price": 30}`),
-									[]byte(`{}`), // missing price - should sort first
-									[]byte(`{"price": 10}`),
-									[]byte(`{"other": 99}`), // missing price - should sort first
+									[]byte(`{"dyn_price": 30}`),
+									[]byte(`{}`),
+									[]byte(`{"dyn_price": 10}`),
+									[]byte(`{"dyn_price": null}`),
 								}},
 							},
 						},
@@ -3424,7 +5623,7 @@ func (s *SearchPipelineSuite) TestOrderByOperatorWithMissingJSONPath() {
 
 	op := &orderByOperator{
 		orderByFields: []OrderByField{
-			{FieldName: "metadata", FieldID: 100, JSONPath: "/price", Ascending: true},
+			{FieldName: "$meta", FieldID: 100, JSONPath: "/dyn_price", Ascending: false, NullsFirst: true, IsDynamicField: true},
 		},
 		groupByFieldId: -1,
 	}
@@ -3433,19 +5632,9 @@ func (s *SearchPipelineSuite) TestOrderByOperatorWithMissingJSONPath() {
 	s.NoError(err)
 	sortedResult := outputs[0].(*milvuspb.SearchResults)
 
-	// Nulls first, then ascending: null, null, 10, 30
-	// IDs with missing price (2, 4) should come first, then 3(10), 1(30)
-	// Note: stable sort preserves relative order of equal elements
-	resultIds := sortedResult.Results.Ids.GetIntId().Data
-	// First two should be the ones with missing price (2 and 4)
-	s.Contains([]int64{2, 4}, resultIds[0])
-	s.Contains([]int64{2, 4}, resultIds[1])
-	// Last two should be 3(10) and 1(30) in that order
-	s.Equal(int64(3), resultIds[2])
-	s.Equal(int64(1), resultIds[3])
+	s.Equal([]int64{2, 4, 1, 3}, sortedResult.Results.Ids.GetIntId().Data)
 }
 
-// Test parseOrderByFields with JSON path syntax
 func (s *SearchPipelineSuite) TestParseOrderByFieldsWithJSONPath() {
 	schema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
@@ -3464,17 +5653,19 @@ func (s *SearchPipelineSuite) TestParseOrderByFieldsWithJSONPath() {
 	s.Equal(int64(101), result[0].FieldID)
 	s.Equal("/price", result[0].JSONPath)
 	s.True(result[0].Ascending)
+	s.False(result[0].NullsFirst)
 	s.Equal("metadata", result[0].OutputFieldName) // Regular JSON: request whole field
 	s.False(result[0].IsDynamicField)              // Not a dynamic field
 
 	// Test JSON path with descending
-	params = []*commonpb.KeyValuePair{{Key: OrderByFieldsKey, Value: `metadata["rating"]:desc`}}
+	params = []*commonpb.KeyValuePair{{Key: OrderByFieldsKey, Value: `metadata["rating"]:desc:nulls_last`}}
 	result, err = parseOrderByFields(params, schema)
 	s.NoError(err)
 	s.Len(result, 1)
 	s.Equal("metadata", result[0].FieldName)
 	s.Equal("/rating", result[0].JSONPath)
 	s.False(result[0].Ascending)
+	s.False(result[0].NullsFirst)
 	s.Equal("metadata", result[0].OutputFieldName) // Regular JSON: request whole field
 	s.False(result[0].IsDynamicField)
 
@@ -3487,10 +5678,12 @@ func (s *SearchPipelineSuite) TestParseOrderByFieldsWithJSONPath() {
 	s.Equal("score", result[0].FieldName)
 	s.Equal("", result[0].JSONPath)
 	s.False(result[0].Ascending)
+	s.True(result[0].NullsFirst)
 	// Second field: JSON path
 	s.Equal("metadata", result[1].FieldName)
 	s.Equal("/price", result[1].JSONPath)
 	s.True(result[1].Ascending)
+	s.False(result[1].NullsFirst)
 
 	// Test nested JSON path
 	params = []*commonpb.KeyValuePair{{Key: OrderByFieldsKey, Value: `metadata["user"]["age"]:asc`}}
@@ -3521,17 +5714,19 @@ func (s *SearchPipelineSuite) TestParseOrderByFieldsWithDynamicField() {
 	s.Equal(int64(102), result[0].FieldID)
 	s.Equal("/age", result[0].JSONPath)
 	s.True(result[0].Ascending)
+	s.False(result[0].NullsFirst)
 	s.Equal("age", result[0].OutputFieldName) // Dynamic field: use original key for requery
 	s.True(result[0].IsDynamicField)          // Is a dynamic field - QueryNode extracts subfield
 
 	// Test dynamic field with explicit path
-	params = []*commonpb.KeyValuePair{{Key: OrderByFieldsKey, Value: `$meta["category"]:desc`}}
+	params = []*commonpb.KeyValuePair{{Key: OrderByFieldsKey, Value: `$meta["category"]:desc:nulls_last`}}
 	result, err = parseOrderByFields(params, schema)
 	s.NoError(err)
 	s.Len(result, 1)
 	s.Equal("$meta", result[0].FieldName)
 	s.Equal("/category", result[0].JSONPath)
 	s.False(result[0].Ascending)
+	s.False(result[0].NullsFirst)
 	s.Equal(`$meta["category"]`, result[0].OutputFieldName) // Explicit path for requery
 	s.True(result[0].IsDynamicField)
 
@@ -3545,41 +5740,58 @@ func (s *SearchPipelineSuite) TestParseOrderByFieldsWithDynamicField() {
 	s.Equal("$meta", result[0].FieldName)
 	s.Equal("/dyn_meta/price", result[0].JSONPath)
 	s.True(result[0].Ascending)
+	s.False(result[0].NullsFirst)
 	s.Equal("dyn_meta", result[0].OutputFieldName) // Base name only; full path would cause multi-level rejection
 	s.True(result[0].IsDynamicField)
 }
 
-// Test splitOrderByFieldAndDirection helper
-func (s *SearchPipelineSuite) TestSplitOrderByFieldAndDirection() {
+// Test splitOrderByFieldOptions helper
+func (s *SearchPipelineSuite) TestSplitOrderByFieldOptions() {
 	// Simple field
-	field, dir := splitOrderByFieldAndDirection("name:asc")
+	field, dir, nullOrdering, err := splitOrderByFieldOptions("name:asc")
+	s.NoError(err)
 	s.Equal("name", field)
 	s.Equal("asc", dir)
+	s.Equal("", nullOrdering)
 
 	// Field without direction
-	field, dir = splitOrderByFieldAndDirection("name")
+	field, dir, nullOrdering, err = splitOrderByFieldOptions("name")
+	s.NoError(err)
 	s.Equal("name", field)
 	s.Equal("", dir)
+	s.Equal("", nullOrdering)
 
 	// JSON path with direction
-	field, dir = splitOrderByFieldAndDirection(`metadata["price"]:desc`)
+	field, dir, nullOrdering, err = splitOrderByFieldOptions(`metadata["price"]:desc`)
+	s.NoError(err)
 	s.Equal(`metadata["price"]`, field)
 	s.Equal("desc", dir)
+	s.Equal("", nullOrdering)
 
 	// JSON path without direction
-	field, dir = splitOrderByFieldAndDirection(`metadata["price"]`)
+	field, dir, nullOrdering, err = splitOrderByFieldOptions(`metadata["price"]`)
+	s.NoError(err)
 	s.Equal(`metadata["price"]`, field)
 	s.Equal("", dir)
+	s.Equal("", nullOrdering)
 
 	// Nested JSON path with direction
-	field, dir = splitOrderByFieldAndDirection(`data["user"]["age"]:asc`)
+	field, dir, nullOrdering, err = splitOrderByFieldOptions(`data["user"]["age"]:asc`)
+	s.NoError(err)
 	s.Equal(`data["user"]["age"]`, field)
 	s.Equal("asc", dir)
+	s.Equal("", nullOrdering)
 
-	// JSON path with colon in value (edge case - not typical but should handle)
-	field, dir = splitOrderByFieldAndDirection(`metadata["key:with:colons"]:desc`)
+	// JSON path with colon in value and explicit null ordering
+	field, dir, nullOrdering, err = splitOrderByFieldOptions(`metadata["key:with:colons"]:asc:nulls_last`)
+	s.NoError(err)
 	s.Equal(`metadata["key:with:colons"]`, field)
-	s.Equal("desc", dir)
+	s.Equal("asc", dir)
+	s.Equal("nulls_last", nullOrdering)
+
+	_, _, _, err = splitOrderByFieldOptions(`metadata["price"]:asc:nulls_last:extra`)
+	s.Error(err)
+	s.Contains(err.Error(), "too many order_by field options")
 }
 
 // Test jsonPointerToGjsonPath conversion
@@ -3662,7 +5874,7 @@ func (s *SearchPipelineSuite) TestParseOrderByFieldsErrors() {
 // Test compareFieldDataAt for different data types
 func (s *SearchPipelineSuite) TestCompareFieldDataAtAllTypes() {
 	mustCompare := func(field *schemapb.FieldData, i, j int) int {
-		cmp, err := compareFieldDataAt(field, i, j)
+		cmp, err := compareFieldDataAt(field, i, j, true)
 		s.NoError(err)
 		return cmp
 	}
@@ -3732,20 +5944,20 @@ func (s *SearchPipelineSuite) TestCompareFieldDataAtAllTypes() {
 	s.Equal(0, mustCompare(boolField, 0, 2))  // true == true
 
 	// Test out of bounds returns error
-	_, err := compareFieldDataAt(intField, 10, 20)
+	_, err := compareFieldDataAt(intField, 10, 20, true)
 	s.Error(err)
-	_, err = compareFieldDataAt(floatField, 10, 20)
+	_, err = compareFieldDataAt(floatField, 10, 20, true)
 	s.Error(err)
-	_, err = compareFieldDataAt(doubleField, 10, 20)
+	_, err = compareFieldDataAt(doubleField, 10, 20, true)
 	s.Error(err)
-	_, err = compareFieldDataAt(boolField, 10, 20)
+	_, err = compareFieldDataAt(boolField, 10, 20, true)
 	s.Error(err)
 }
 
 // Test compareFieldDataAt with nullable fields (ValidData)
 func (s *SearchPipelineSuite) TestCompareFieldDataAtNullable() {
 	mustCompare := func(field *schemapb.FieldData, i, j int) int {
-		cmp, err := compareFieldDataAt(field, i, j)
+		cmp, err := compareFieldDataAt(field, i, j, true)
 		s.NoError(err)
 		return cmp
 	}
@@ -3756,18 +5968,25 @@ func (s *SearchPipelineSuite) TestCompareFieldDataAtNullable() {
 		FieldName: "nullable_field",
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
+				ValidData: []bool{true, false, true}, // Index 1 is null
 				Data: &schemapb.ScalarField_LongData{
 					LongData: &schemapb.LongArray{Data: []int64{100, 200, 300}},
 				},
 			},
 		},
-		ValidData: []bool{true, false, true}, // Index 1 is null
 	}
 
-	// null vs non-null: null should come first (NULLS FIRST)
+	// NULLS FIRST
 	s.Equal(1, mustCompare(nullableField, 0, 1))  // 100 > null
 	s.Equal(-1, mustCompare(nullableField, 1, 0)) // null < 100
 	s.Equal(-1, mustCompare(nullableField, 1, 2)) // null < 300
+
+	cmp, err := compareFieldDataAt(nullableField, 0, 1, false)
+	s.NoError(err)
+	s.Equal(-1, cmp) // NULLS LAST: 100 < null
+	cmp, err = compareFieldDataAt(nullableField, 1, 0, false)
+	s.NoError(err)
+	s.Equal(1, cmp) // NULLS LAST: null > 100
 
 	// Create field where both are null
 	nullableField2 := &schemapb.FieldData{
@@ -3775,12 +5994,12 @@ func (s *SearchPipelineSuite) TestCompareFieldDataAtNullable() {
 		FieldName: "nullable_field2",
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
+				ValidData: []bool{false, false, true}, // Index 0 and 1 are null
 				Data: &schemapb.ScalarField_LongData{
 					LongData: &schemapb.LongArray{Data: []int64{100, 200, 300}},
 				},
 			},
 		},
-		ValidData: []bool{false, false, true}, // Index 0 and 1 are null
 	}
 	s.Equal(0, mustCompare(nullableField2, 0, 1)) // null == null
 }
@@ -3868,18 +6087,18 @@ func (s *SearchPipelineSuite) TestCompareJSONValuesBool() {
 	// Test bool: false < true
 	a := extractJSONValue([]byte(`{"v": false}`), "/v")
 	b := extractJSONValue([]byte(`{"v": true}`), "/v")
-	s.Equal(-1, compareJSONValues(a, b)) // false < true
-	s.Equal(1, compareJSONValues(b, a))  // true > false
+	s.Equal(-1, compareJSONValues(a, b, true)) // false < true
+	s.Equal(1, compareJSONValues(b, a, true))  // true > false
 
 	// Test both true
 	a = extractJSONValue([]byte(`{"v": true}`), "/v")
 	b = extractJSONValue([]byte(`{"v": true}`), "/v")
-	s.Equal(0, compareJSONValues(a, b)) // true == true
+	s.Equal(0, compareJSONValues(a, b, true)) // true == true
 
 	// Test both false
 	a = extractJSONValue([]byte(`{"v": false}`), "/v")
 	b = extractJSONValue([]byte(`{"v": false}`), "/v")
-	s.Equal(0, compareJSONValues(a, b)) // false == false
+	s.Equal(0, compareJSONValues(a, b, true)) // false == false
 }
 
 // Test compareJSONValues with mixed types (fallback to raw comparison)
@@ -3888,7 +6107,7 @@ func (s *SearchPipelineSuite) TestCompareJSONValuesMixedTypes() {
 	// Raw: "10" vs "\"hello\"" - quote char '"' (34) < '1' (49)
 	a := extractJSONValue([]byte(`{"v": 10}`), "/v")
 	b := extractJSONValue([]byte(`{"v": "hello"}`), "/v")
-	cmp := compareJSONValues(a, b)
+	cmp := compareJSONValues(a, b, true)
 	// String (with quotes) should sort before number due to quote ASCII
 	s.Equal(1, cmp) // "10" > "\"hello\"" because '1' > '"'
 }
@@ -4315,10 +6534,10 @@ func (s *SearchPipelineSuite) TestReorderFieldDataNullableVectorCompactData() {
 			field: &schemapb.FieldData{
 				Type:      schemapb.DataType_FloatVector,
 				FieldName: "nullable_float_vec",
-				ValidData: []bool{true, false, true},
 				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-					Dim:  2,
-					Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 5, 6}}},
+					ValidData: []bool{true, false, true},
+					Dim:       2,
+					Data:      &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 5, 6}}},
 				}},
 			},
 			assert: func(field *schemapb.FieldData) {
@@ -4330,10 +6549,10 @@ func (s *SearchPipelineSuite) TestReorderFieldDataNullableVectorCompactData() {
 			field: &schemapb.FieldData{
 				Type:      schemapb.DataType_BinaryVector,
 				FieldName: "nullable_binary_vec",
-				ValidData: []bool{true, false, true},
 				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-					Dim:  16,
-					Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{0x01, 0x02, 0x05, 0x06}},
+					ValidData: []bool{true, false, true},
+					Dim:       16,
+					Data:      &schemapb.VectorField_BinaryVector{BinaryVector: []byte{0x01, 0x02, 0x05, 0x06}},
 				}},
 			},
 			assert: func(field *schemapb.FieldData) {
@@ -4345,10 +6564,10 @@ func (s *SearchPipelineSuite) TestReorderFieldDataNullableVectorCompactData() {
 			field: &schemapb.FieldData{
 				Type:      schemapb.DataType_Float16Vector,
 				FieldName: "nullable_float16_vec",
-				ValidData: []bool{true, false, true},
 				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-					Dim:  2,
-					Data: &schemapb.VectorField_Float16Vector{Float16Vector: []byte{0x01, 0x02, 0x03, 0x04, 0x09, 0x0A, 0x0B, 0x0C}},
+					ValidData: []bool{true, false, true},
+					Dim:       2,
+					Data:      &schemapb.VectorField_Float16Vector{Float16Vector: []byte{0x01, 0x02, 0x03, 0x04, 0x09, 0x0A, 0x0B, 0x0C}},
 				}},
 			},
 			assert: func(field *schemapb.FieldData) {
@@ -4360,10 +6579,10 @@ func (s *SearchPipelineSuite) TestReorderFieldDataNullableVectorCompactData() {
 			field: &schemapb.FieldData{
 				Type:      schemapb.DataType_BFloat16Vector,
 				FieldName: "nullable_bfloat16_vec",
-				ValidData: []bool{true, false, true},
 				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-					Dim:  2,
-					Data: &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{0x11, 0x12, 0x13, 0x14, 0x31, 0x32, 0x33, 0x34}},
+					ValidData: []bool{true, false, true},
+					Dim:       2,
+					Data:      &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{0x11, 0x12, 0x13, 0x14, 0x31, 0x32, 0x33, 0x34}},
 				}},
 			},
 			assert: func(field *schemapb.FieldData) {
@@ -4375,10 +6594,10 @@ func (s *SearchPipelineSuite) TestReorderFieldDataNullableVectorCompactData() {
 			field: &schemapb.FieldData{
 				Type:      schemapb.DataType_Int8Vector,
 				FieldName: "nullable_int8_vec",
-				ValidData: []bool{true, false, true},
 				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-					Dim:  4,
-					Data: &schemapb.VectorField_Int8Vector{Int8Vector: []byte{0x01, 0x02, 0x03, 0x04, 0x09, 0x0A, 0x0B, 0x0C}},
+					ValidData: []bool{true, false, true},
+					Dim:       4,
+					Data:      &schemapb.VectorField_Int8Vector{Int8Vector: []byte{0x01, 0x02, 0x03, 0x04, 0x09, 0x0A, 0x0B, 0x0C}},
 				}},
 			},
 			assert: func(field *schemapb.FieldData) {
@@ -4390,9 +6609,9 @@ func (s *SearchPipelineSuite) TestReorderFieldDataNullableVectorCompactData() {
 			field: &schemapb.FieldData{
 				Type:      schemapb.DataType_SparseFloatVector,
 				FieldName: "nullable_sparse_vec",
-				ValidData: []bool{true, false, true},
 				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-					Dim: 3,
+					ValidData: []bool{true, false, true},
+					Dim:       3,
 					Data: &schemapb.VectorField_SparseFloatVector{SparseFloatVector: &schemapb.SparseFloatArray{
 						Dim:      3,
 						Contents: [][]byte{{0x01}, {0x03}},
@@ -4409,7 +6628,7 @@ func (s *SearchPipelineSuite) TestReorderFieldDataNullableVectorCompactData() {
 		s.Run(tt.name, func() {
 			err := reorderFieldData(tt.field, indices)
 			s.NoError(err)
-			s.Equal(expectedValidData, tt.field.GetValidData())
+			s.Equal(expectedValidData, typeutil.GetFieldDataValidData(tt.field))
 			tt.assert(tt.field)
 		})
 	}
@@ -4429,10 +6648,10 @@ func (s *SearchPipelineSuite) TestReorderFieldDataNullableVectorAllNullCompactDa
 			field: &schemapb.FieldData{
 				Type:      schemapb.DataType_FloatVector,
 				FieldName: "nullable_float_vec",
-				ValidData: []bool{false, false},
 				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-					Dim:  2,
-					Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{}},
+					ValidData: []bool{false, false},
+					Dim:       2,
+					Data:      &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{}},
 				}},
 			},
 			assert: func(field *schemapb.FieldData) {
@@ -4444,10 +6663,10 @@ func (s *SearchPipelineSuite) TestReorderFieldDataNullableVectorAllNullCompactDa
 			field: &schemapb.FieldData{
 				Type:      schemapb.DataType_BinaryVector,
 				FieldName: "nullable_binary_vec",
-				ValidData: []bool{false, false},
 				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-					Dim:  16,
-					Data: &schemapb.VectorField_BinaryVector{},
+					ValidData: []bool{false, false},
+					Dim:       16,
+					Data:      &schemapb.VectorField_BinaryVector{},
 				}},
 			},
 			assert: func(field *schemapb.FieldData) {
@@ -4459,10 +6678,10 @@ func (s *SearchPipelineSuite) TestReorderFieldDataNullableVectorAllNullCompactDa
 			field: &schemapb.FieldData{
 				Type:      schemapb.DataType_Float16Vector,
 				FieldName: "nullable_float16_vec",
-				ValidData: []bool{false, false},
 				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-					Dim:  2,
-					Data: &schemapb.VectorField_Float16Vector{},
+					ValidData: []bool{false, false},
+					Dim:       2,
+					Data:      &schemapb.VectorField_Float16Vector{},
 				}},
 			},
 			assert: func(field *schemapb.FieldData) {
@@ -4474,10 +6693,10 @@ func (s *SearchPipelineSuite) TestReorderFieldDataNullableVectorAllNullCompactDa
 			field: &schemapb.FieldData{
 				Type:      schemapb.DataType_BFloat16Vector,
 				FieldName: "nullable_bfloat16_vec",
-				ValidData: []bool{false, false},
 				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-					Dim:  2,
-					Data: &schemapb.VectorField_Bfloat16Vector{},
+					ValidData: []bool{false, false},
+					Dim:       2,
+					Data:      &schemapb.VectorField_Bfloat16Vector{},
 				}},
 			},
 			assert: func(field *schemapb.FieldData) {
@@ -4489,10 +6708,10 @@ func (s *SearchPipelineSuite) TestReorderFieldDataNullableVectorAllNullCompactDa
 			field: &schemapb.FieldData{
 				Type:      schemapb.DataType_Int8Vector,
 				FieldName: "nullable_int8_vec",
-				ValidData: []bool{false, false},
 				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-					Dim:  4,
-					Data: &schemapb.VectorField_Int8Vector{},
+					ValidData: []bool{false, false},
+					Dim:       4,
+					Data:      &schemapb.VectorField_Int8Vector{},
 				}},
 			},
 			assert: func(field *schemapb.FieldData) {
@@ -4504,10 +6723,10 @@ func (s *SearchPipelineSuite) TestReorderFieldDataNullableVectorAllNullCompactDa
 			field: &schemapb.FieldData{
 				Type:      schemapb.DataType_SparseFloatVector,
 				FieldName: "nullable_sparse_vec",
-				ValidData: []bool{false, false},
 				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-					Dim:  3,
-					Data: &schemapb.VectorField_SparseFloatVector{SparseFloatVector: &schemapb.SparseFloatArray{Dim: 3}},
+					ValidData: []bool{false, false},
+					Dim:       3,
+					Data:      &schemapb.VectorField_SparseFloatVector{SparseFloatVector: &schemapb.SparseFloatArray{Dim: 3}},
 				}},
 			},
 			assert: func(field *schemapb.FieldData) {
@@ -4520,7 +6739,7 @@ func (s *SearchPipelineSuite) TestReorderFieldDataNullableVectorAllNullCompactDa
 		s.Run(tt.name, func() {
 			err := reorderFieldData(tt.field, indices)
 			s.NoError(err)
-			s.Equal(expectedValidData, tt.field.GetValidData())
+			s.Equal(expectedValidData, typeutil.GetFieldDataValidData(tt.field))
 			tt.assert(tt.field)
 		})
 	}
@@ -4533,12 +6752,12 @@ func (s *SearchPipelineSuite) TestReorderFieldDataWithValidData() {
 		FieldName: "nullable_field",
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
+				ValidData: []bool{true, false, true}, // index 1 is null
 				Data: &schemapb.ScalarField_LongData{
 					LongData: &schemapb.LongArray{Data: []int64{10, 20, 30}},
 				},
 			},
 		},
-		ValidData: []bool{true, false, true}, // index 1 is null
 	}
 
 	// Reorder: [2, 0, 1]
@@ -4549,7 +6768,7 @@ func (s *SearchPipelineSuite) TestReorderFieldDataWithValidData() {
 	expectedData := []int64{30, 10, 20}
 	expectedValid := []bool{true, true, false} // null moves to index 2
 	s.Equal(expectedData, field.GetScalars().GetLongData().Data)
-	s.Equal(expectedValid, field.ValidData)
+	s.Equal(expectedValid, typeutil.GetFieldDataValidData(field))
 }
 
 // Test orderByOperator with Int32 field to cover reorderFieldData Int32 branch
@@ -4690,37 +6909,45 @@ func (s *SearchPipelineSuite) TestOrderByOperatorVarCharField() {
 	s.Equal(expectedNames, sortedResult.Results.FieldsData[0].GetScalars().GetStringData().Data)
 }
 
-// Test compareNullsFirst helper function
-func (s *SearchPipelineSuite) TestCompareNullsFirst() {
+// Test compareNulls helper function
+func (s *SearchPipelineSuite) TestCompareNulls() {
 	// Empty ValidData - should return (0, false)
-	cmp, handled := compareNullsFirst(nil, 0, 1)
+	cmp, handled := compareNulls(nil, 0, 1, true)
 	s.Equal(0, cmp)
 	s.False(handled)
 
-	cmp, handled = compareNullsFirst([]bool{}, 0, 1)
+	cmp, handled = compareNulls([]bool{}, 0, 1, true)
 	s.Equal(0, cmp)
 	s.False(handled)
 
 	// Both non-null - should return (0, false)
 	validData := []bool{true, true, true}
-	cmp, handled = compareNullsFirst(validData, 0, 1)
+	cmp, handled = compareNulls(validData, 0, 1, true)
 	s.Equal(0, cmp)
 	s.False(handled)
 
 	// First is null, second is not - should return (-1, true) (nulls first)
 	validData = []bool{false, true, true}
-	cmp, handled = compareNullsFirst(validData, 0, 1)
+	cmp, handled = compareNulls(validData, 0, 1, true)
 	s.Equal(-1, cmp)
 	s.True(handled)
 
 	// First is not null, second is null - should return (1, true)
-	cmp, handled = compareNullsFirst(validData, 1, 0)
+	cmp, handled = compareNulls(validData, 1, 0, true)
 	s.Equal(1, cmp)
+	s.True(handled)
+
+	// Nulls last reverses the null/non-null ordering.
+	cmp, handled = compareNulls(validData, 0, 1, false)
+	s.Equal(1, cmp)
+	s.True(handled)
+	cmp, handled = compareNulls(validData, 1, 0, false)
+	s.Equal(-1, cmp)
 	s.True(handled)
 
 	// Both are null - should return (0, true)
 	validData = []bool{false, false, true}
-	cmp, handled = compareNullsFirst(validData, 0, 1)
+	cmp, handled = compareNulls(validData, 0, 1, true)
 	s.Equal(0, cmp)
 	s.True(handled)
 }
@@ -4811,6 +7038,7 @@ func (s *SearchPipelineSuite) TestCompareOrderByFieldNullableJSON() {
 		FieldName: "metadata",
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
+				ValidData: []bool{true, false, true}, // Index 1 is null
 				Data: &schemapb.ScalarField_JsonData{
 					JsonData: &schemapb.JSONArray{
 						Data: [][]byte{
@@ -4822,13 +7050,12 @@ func (s *SearchPipelineSuite) TestCompareOrderByFieldNullableJSON() {
 				},
 			},
 		},
-		ValidData: []bool{true, false, true}, // Index 1 is null
 	}
 
 	fieldMap := map[string]*schemapb.FieldData{
 		"metadata": jsonField,
 	}
-	orderBy := OrderByField{FieldName: "metadata", JSONPath: "/score"}
+	orderBy := OrderByField{FieldName: "metadata", JSONPath: "/score", Ascending: true, NullsFirst: true}
 	cache := buildJSONValueCache(fieldMap, []OrderByField{orderBy}, []int{0, 1, 2})
 
 	// null vs non-null: null should come first
@@ -4902,7 +7129,7 @@ func (s *SearchPipelineSuite) TestNewSearchPipelineWithOrderBy() {
 					{FieldID: 101, Name: "intField", DataType: schemapb.DataType_Int64},
 				},
 			},
-			pkField: &schemapb.FieldSchema{FieldID: 100, Name: "int64", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			PkField: &schemapb.FieldSchema{FieldID: 100, Name: "int64", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 		},
 		queryInfos:             []*planpb.QueryInfo{{}},
 		translatedOutputFields: []string{"intField"},
@@ -4936,7 +7163,7 @@ func (s *SearchPipelineSuite) TestNewRequeryOperator_WithHighlightDynamicFields(
 				{FieldID: 101, Name: "title", DataType: schemapb.DataType_VarChar},
 			},
 		},
-		pkField: &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		PkField: &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 	}
 
 	// Mock highlighter with dynamic field names
@@ -4987,7 +7214,7 @@ func (s *SearchPipelineSuite) TestNewRequeryOperatorIncludesOrderByOutputFieldNa
 				{FieldID: 103, Name: "price", DataType: schemapb.DataType_Int64},
 			},
 		},
-		pkField: &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		PkField: &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 	}
 	task := &searchTask{
 		ctx:            context.Background(),
@@ -5021,7 +7248,7 @@ func (s *SearchPipelineSuite) TestNewRequeryOperator_WithoutHighlighter() {
 				{FieldID: 101, Name: "title", DataType: schemapb.DataType_VarChar},
 			},
 		},
-		pkField: &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		PkField: &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 	}
 
 	task := &searchTask{
@@ -5064,7 +7291,7 @@ func (s *SearchPipelineSuite) TestNewBuiltInPipelineWithAggCtx() {
 		aggCtx:        aggCtx,
 		schema: &schemaInfo{
 			CollectionSchema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{pkField}},
-			pkField:          pkField,
+			PkField:          pkField,
 		},
 		queryInfos: []*planpb.QueryInfo{{}},
 	}
@@ -5084,7 +7311,7 @@ func (s *SearchPipelineSuite) TestNewSearchPipelineWithAggCtxSkipsEndNode() {
 		aggCtx:        aggCtx,
 		schema: &schemaInfo{
 			CollectionSchema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{pkField}},
-			pkField:          pkField,
+			PkField:          pkField,
 		},
 		queryInfos:  []*planpb.QueryInfo{{}},
 		highlighter: nil,
@@ -5153,7 +7380,7 @@ func (s *SearchPipelineSuite) TestNewRequeryOperator_WithHighlighterNoDynamicFie
 				{FieldID: 101, Name: "title", DataType: schemapb.DataType_VarChar},
 			},
 		},
-		pkField: &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		PkField: &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 	}
 
 	// Mock highlighter with empty dynamic field names
@@ -5242,10 +7469,10 @@ func (s *SearchPipelineSuite) TestPickFieldDataWithNullableSparseVector() {
 			Type:      schemapb.DataType_SparseFloatVector,
 			FieldName: "sparse_vec",
 			FieldId:   101,
-			ValidData: []bool{true, false, true}, // Row 1 is null
 			Field: &schemapb.FieldData_Vectors{
 				Vectors: &schemapb.VectorField{
-					Dim: 700,
+					ValidData: []bool{true, false, true}, // Row 1 is null
+					Dim:       700,
 					Data: &schemapb.VectorField_SparseFloatVector{
 						SparseFloatVector: &schemapb.SparseFloatArray{
 							Dim:      700,
@@ -5270,7 +7497,7 @@ func (s *SearchPipelineSuite) TestPickFieldDataWithNullableSparseVector() {
 	// Verify sparse vector ValidData is reordered correctly
 	// Original ValidData: [true, false, true] for rows [1, 2, 3]
 	// After reorder to [3, 1, 2]: ValidData should be [true, true, false]
-	sparseValidData := result[1].GetValidData()
+	sparseValidData := typeutil.GetFieldDataValidData(result[1])
 	s.Equal([]bool{true, true, false}, sparseValidData)
 
 	// Verify sparse vector Contents has correct number of entries (2 non-null values)
@@ -5312,10 +7539,10 @@ func (s *SearchPipelineSuite) TestPickFieldDataWithAllNullSparseVector() {
 			Type:      schemapb.DataType_SparseFloatVector,
 			FieldName: "sparse_vec",
 			FieldId:   101,
-			ValidData: []bool{false, false}, // All null
 			Field: &schemapb.FieldData_Vectors{
 				Vectors: &schemapb.VectorField{
-					Dim: 700,
+					ValidData: []bool{false, false}, // All null
+					Dim:       700,
 					Data: &schemapb.VectorField_SparseFloatVector{
 						SparseFloatVector: &schemapb.SparseFloatArray{
 							Dim:      700,
@@ -5332,7 +7559,7 @@ func (s *SearchPipelineSuite) TestPickFieldDataWithAllNullSparseVector() {
 	s.NotNil(result)
 
 	// All should still be null after reorder
-	sparseValidData := result[1].GetValidData()
+	sparseValidData := typeutil.GetFieldDataValidData(result[1])
 	s.Equal([]bool{false, false}, sparseValidData)
 	s.Len(result[1].GetVectors().GetSparseFloatVector().GetContents(), 0)
 }
@@ -5393,6 +7620,6 @@ func (s *SearchPipelineSuite) TestPickFieldDataWithNullableSparseVectorMissingVa
 	result, err := pickFieldData(searchIDs, pkOffset, queryFields, schema, 12345)
 	s.NoError(err)
 	s.Equal([]int64{2, 1}, result[0].GetScalars().GetLongData().GetData())
-	s.Equal([]bool{false, false}, result[1].GetValidData())
+	s.Equal([]bool{false, false}, typeutil.GetFieldDataValidData(result[1]))
 	s.Empty(result[1].GetVectors().GetSparseFloatVector().GetContents())
 }

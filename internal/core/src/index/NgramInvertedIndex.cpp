@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "index/NgramInvertedIndex.h"
+#include "common/FastMem.h"
 
 #include <simdjson.h>
 #include <string.h>
@@ -73,6 +74,11 @@ constexpr size_t kMaxIterationsForMediumRow = 3;
 
 constexpr double kBreakThresholdForSmallRow = 0.01;  // 1%
 constexpr size_t kMaxIterationsForSmallRow = 2;
+
+inline size_t
+Utf8LiteralLength(const std::string& literal) {
+    return Utf8CharCount(literal.data(), literal.size());
+}
 
 // for string/varchar type
 NgramInvertedIndex::NgramInvertedIndex(const storage::FileManagerContext& ctx,
@@ -226,7 +232,8 @@ NgramInvertedIndex::LoadEntries(storage::IndexEntryReader& reader,
     InvertedIndexTantivy<std::string>::LoadEntries(reader, config);
 
     auto avg_row_entry = reader.ReadEntry(NGRAM_AVG_ROW_SIZE_FILE_NAME);
-    std::memcpy(&avg_row_size_, avg_row_entry.data.data(), sizeof(size_t));
+    milvus::fastmem::FastMemcpy(
+        &avg_row_size_, avg_row_entry.data.data(), sizeof(size_t));
 
     LOG_INFO("LoadEntries NgramInvertedIndex done, avg_row_size: {} bytes",
              avg_row_size_);
@@ -254,7 +261,7 @@ NgramInvertedIndex::LoadIndexMetas(const std::vector<std::string>& index_files,
             file_manager_->LoadIndexToMemory({*avg_row_size_it}, load_priority);
         auto avg_row_size_data =
             std::move(index_datas.at(NGRAM_AVG_ROW_SIZE_FILE_NAME));
-        memcpy(
+        milvus::fastmem::FastMemcpy(
             &avg_row_size_, avg_row_size_data->PayloadData(), sizeof(size_t));
         LOG_INFO("Loaded ngram index avg_row_size: {} bytes", avg_row_size_);
     } else {
@@ -311,38 +318,11 @@ NgramInvertedIndex::Load(milvus::tracer::TraceContext ctx,
         disk_file_manager_->RemoveNgramIndexFiles();
     }
 
+    // This custom Load() does not go through InvertedIndexTantivy::Load().
+    FinalizeSealed(/*release_null_offsets=*/true);
+
     LOG_INFO(
         "load ngram index done for field id:{} with dir:{}", field_id_, path_);
-}
-
-std::vector<std::string>
-split_by_wildcard(const std::string& literal) {
-    std::vector<std::string> result;
-    std::string r;
-    r.reserve(literal.size());
-    bool escape_mode = false;
-    for (char c : literal) {
-        if (escape_mode) {
-            r += c;
-            escape_mode = false;
-        } else {
-            if (c == '\\') {
-                // consider case "\\%", we should reserve %
-                escape_mode = true;
-            } else if (c == '%' || c == '_') {
-                if (r.length() > 0) {
-                    result.push_back(std::move(r));
-                    r.clear();
-                }
-            } else {
-                r += c;
-            }
-        }
-    }
-    if (r.length() > 0) {
-        result.push_back(std::move(r));
-    }
-    return result;
 }
 
 // Extract runs of literal bytes from a regex pattern that are GUARANTEED to
@@ -802,7 +782,7 @@ NgramInvertedIndex::CanHandleLiteral(const std::string& literal,
                 return false;
             }
             for (const auto& l : literals) {
-                if (l.length() < min_gram_) {
+                if (Utf8LiteralLength(l) < min_gram_) {
                     return false;
                 }
             }
@@ -814,7 +794,7 @@ NgramInvertedIndex::CanHandleLiteral(const std::string& literal,
                 return false;
             }
             for (const auto& l : literals) {
-                if (l.length() >= min_gram_) {
+                if (Utf8LiteralLength(l) >= min_gram_) {
                     return true;
                 }
             }
@@ -823,7 +803,7 @@ NgramInvertedIndex::CanHandleLiteral(const std::string& literal,
         case proto::plan::OpType::InnerMatch:
         case proto::plan::OpType::PrefixMatch:
         case proto::plan::OpType::PostfixMatch:
-            return literal.length() >= min_gram_;
+            return Utf8LiteralLength(literal) >= min_gram_;
         default:
             return false;
     }
@@ -922,16 +902,16 @@ NgramInvertedIndex::ExecutePhase1(const std::string& literal,
         AssertInfo(!literals_vec.empty(),
                    "ExecutePhase1: Match pattern must have non-empty parts");
         for (const auto& l : literals_vec) {
-            AssertInfo(l.length() >= min_gram_,
-                       "ExecutePhase1: part length {} < min_gram {}",
-                       l.length(),
+            AssertInfo(Utf8LiteralLength(l) >= min_gram_,
+                       "ExecutePhase1: part char length {} < min_gram {}",
+                       Utf8LiteralLength(l),
                        min_gram_);
         }
     } else if (op_type == proto::plan::OpType::RegexMatch) {
         auto all_literals = extract_literals_from_regex(literal);
         // Only keep literals that are long enough for ngram
         for (const auto& l : all_literals) {
-            if (l.length() >= min_gram_) {
+            if (Utf8LiteralLength(l) >= min_gram_) {
                 literals_vec.push_back(l);
             }
         }
@@ -939,9 +919,9 @@ NgramInvertedIndex::ExecutePhase1(const std::string& literal,
                    "ExecutePhase1: RegexMatch pattern must have non-empty "
                    "literals >= min_gram");
     } else {
-        AssertInfo(literal.length() >= min_gram_,
-                   "ExecutePhase1: literal length {} < min_gram {}",
-                   literal.length(),
+        AssertInfo(Utf8LiteralLength(literal) >= min_gram_,
+                   "ExecutePhase1: literal char length {} < min_gram {}",
+                   Utf8LiteralLength(literal),
                    min_gram_);
         literals_vec.push_back(literal);
     }

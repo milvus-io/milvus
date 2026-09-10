@@ -51,8 +51,6 @@ class AWS_CORE_API AliyunSTSAssumeRoleWebIdentityCredentialsProvider
  private:
     void
     RefreshIfExpired();
-    Aws::String
-    CalculateQueryString() const;
 
     Aws::UniquePtr<Aws::Internal::AliyunSTSCredentialsClient> m_client;
     Aws::Auth::AWSCredentials m_credentials;

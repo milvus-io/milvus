@@ -19,17 +19,17 @@ package shardclient
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -47,6 +47,21 @@ type ChannelWorkload struct {
 	Nq              int64
 	Exec            ExecuteFunc
 	PreferredNodeID int64
+	// ResourceGroup, when non-empty, restricts selectNode to the leaders whose
+	// replica lives in that resource group (NodeInfo.ResourceGroup). It scopes
+	// the candidates of this one channel only -- the channel itself is still
+	// executed -- and an empty scoped candidate set is reported as
+	// ErrCollectionNotFullyLoaded (retriable), see selectNode. Empty is the
+	// absence of a scope and leaves routing exactly as before.
+	//
+	// EVERY construction site must carry it, and the way to do that is
+	// CollectionWorkLoad.ForChannel rather than a literal. Three paths build a
+	// ChannelWorkload directly instead of going through Execute -- the
+	// namespace single-shard fast paths in task_search.go, task_query.go and
+	// task_delete.go -- and one that forgets does not fail: it routes that
+	// subset of requests to another group's leader, silently, which is the
+	// same wrong-routing-with-no-signal failure as filtering the channel map.
+	ResourceGroup string
 }
 
 type CollectionWorkLoad struct {
@@ -55,7 +70,31 @@ type CollectionWorkLoad struct {
 	CollectionID   int64
 	Nq             int64
 	Exec           ExecuteFunc
+	// ResourceGroup is copied onto every ChannelWorkload the fan-out creates,
+	// through ForChannel. The fan-out itself stays unscoped: every shard is
+	// visited, and a shard the group cannot serve fails its channel rather
+	// than vanishing from the answer. See ChannelWorkload.ResourceGroup.
+	ResourceGroup  string
 	PreferredNodes map[string]int64
+}
+
+// ForChannel derives the ChannelWorkload for one shard of w, carrying every
+// collection-level field -- including ResourceGroup -- so that a caller which
+// dispatches a single channel itself (the namespace fast paths) cannot build a
+// workload that silently drops the scope. preferredNodeID is passed in rather
+// than derived because the fast paths and Execute resolve it from different
+// sources; the caller keeps whatever it did before.
+func (w CollectionWorkLoad) ForChannel(channel string, preferredNodeID int64) ChannelWorkload {
+	return ChannelWorkload{
+		Db:              w.Db,
+		CollectionName:  w.CollectionName,
+		CollectionID:    w.CollectionID,
+		Channel:         channel,
+		Nq:              w.Nq,
+		Exec:            w.Exec,
+		PreferredNodeID: preferredNodeID,
+		ResourceGroup:   w.ResourceGroup,
+	}
 }
 
 type LBPolicy interface {
@@ -111,7 +150,9 @@ func (lb *LBPolicyImpl) Start(ctx context.Context) {
 	lb.blacklist.Start()
 }
 
-// GetShard will retry until ctx done, except the collection is not loaded.
+// GetShard retries a bounded number of times (retry.Handle's default: 10
+// attempts, backing off from 200ms) or until ctx is done, whichever comes first, except
+// when the collection is not loaded.
 // return all replicas of shard from cache if withCache is true, otherwise return shard leaders from coord.
 func (lb *LBPolicyImpl) GetShard(ctx context.Context, dbName string, collName string, collectionID int64, channel string, withCache bool) ([]NodeInfo, error) {
 	var shardLeaders []NodeInfo
@@ -123,13 +164,32 @@ func (lb *LBPolicyImpl) GetShard(ctx context.Context, dbName string, collName st
 	return shardLeaders, err
 }
 
-// GetShardLeaderList will retry until ctx done, except the collection is not loaded.
+// GetShardLeaderList retries a bounded number of times (retry.Handle's
+// default: 10 attempts, backing off from 200ms) or until ctx is done, whichever comes
+// first, except when the collection is not loaded.
 // return all shard(channel) from cache if withCache is true, otherwise return shard leaders from coord.
 func (lb *LBPolicyImpl) GetShardLeaderList(ctx context.Context, dbName string, collName string, collectionID int64, withCache bool) ([]string, error) {
 	var ret []string
 	err := retry.Handle(ctx, func() (bool, error) {
 		var err error
 		ret, err = lb.clientMgr.GetShardLeaderList(ctx, dbName, collName, collectionID, withCache)
+		return !errors.Is(err, merr.ErrCollectionNotLoaded), err
+	})
+	return ret, err
+}
+
+// GetShardLeaders retries a bounded number of times (retry.Handle's default:
+// 10 attempts, backing off from 200ms) or until ctx is done, whichever comes first,
+// except when the collection is not loaded -- the same policy as its two
+// siblings above, so a transient coordinator error does not fail a request
+// the other two reads would have retried through. Returns every channel of
+// the collection with its leaders in one read; with withCache=false that is
+// one coordinator call refreshing all of them.
+func (lb *LBPolicyImpl) GetShardLeaders(ctx context.Context, dbName string, collName string, collectionID int64, withCache bool) (map[string][]NodeInfo, error) {
+	var ret map[string][]NodeInfo
+	err := retry.Handle(ctx, func() (bool, error) {
+		var err error
+		ret, err = lb.clientMgr.GetShardLeaders(ctx, withCache, dbName, collName, collectionID)
 		return !errors.Is(err, merr.ErrCollectionNotLoaded), err
 	})
 	return ret, err
@@ -154,16 +214,40 @@ func preferredNodeID(workload CollectionWorkLoad, channel string) int64 {
 
 // try to select the best node from the available nodes
 func (lb *LBPolicyImpl) selectNode(ctx context.Context, balancer LBBalancer, workload ChannelWorkload, excludeNodes *typeutil.UniqueSet) (NodeInfo, bool, error) {
-	log := log.Ctx(ctx).With(
-		zap.Int64("collectionID", workload.CollectionID),
-		zap.String("channelName", workload.Channel),
+	log := mlog.With(
+		mlog.Int64("collectionID", workload.CollectionID),
+		mlog.String("channelName", workload.Channel),
 	)
 	// Select node using specified nodes
 	trySelectNode := func(withCache bool) (NodeInfo, bool, error) {
 		shardLeaders, err := lb.GetShard(ctx, workload.Db, workload.CollectionName, workload.CollectionID, workload.Channel, withCache)
 		if err != nil {
-			log.Warn("failed to get shard delegator",
-				zap.Error(err))
+			log.Warn(ctx, "failed to get shard delegator",
+				mlog.Err(err))
+			return NodeInfo{}, false, err
+		}
+
+		// The resource-group scope is applied to THIS channel's candidates,
+		// before the exclusion logic below so that "every candidate excluded"
+		// is judged on the scoped set. The channel itself is never dropped:
+		// Execute fans out over the unscoped GetShardLeaderList, so a shard the
+		// group cannot serve fails here, visibly, instead of being silently
+		// left out of the answer.
+		shardLeaders = FilterByResourceGroup(shardLeaders, workload.ResourceGroup)
+		if len(shardLeaders) == 0 && workload.ResourceGroup != "" {
+			// A scoped request finding no candidate is a resource group that
+			// is still coming up: its replica exists, but its delegator for
+			// this channel is not serviceable yet (or the cache predates it;
+			// the second, uncached attempt covers that). That is a
+			// seconds-to-minutes transient the caller polls through, so it is
+			// reported with ErrCollectionNotFullyLoaded (103, retriable) --
+			// the same code the strict GetShardLeaders gate uses for a
+			// collection still coming up. ErrChannelNotAvailable is (503,
+			// non-retriable) and would tell the SDK and every upper layer to
+			// stop on a state that heals itself; the unscoped answer below
+			// keeps the code it has always used.
+			err = merr.WrapErrCollectionNotFullyLoaded(workload.CollectionID,
+				fmt.Sprintf("no shard leader for channel %s in resource group %s", workload.Channel, workload.ResourceGroup))
 			return NodeInfo{}, false, err
 		}
 
@@ -178,7 +262,7 @@ func (lb *LBPolicyImpl) selectNode(ctx context.Context, balancer LBBalancer, wor
 				}
 			}
 			if allReplicaExcluded {
-				log.Warn("all replicas are excluded after refresh shard leader cache, clear it and try to select node")
+				log.Warn(ctx, "all replicas are excluded after refresh shard leader cache, clear it and try to select node")
 				excludeNodes.Clear()
 			}
 		}
@@ -193,11 +277,11 @@ func (lb *LBPolicyImpl) selectNode(ctx context.Context, balancer LBBalancer, wor
 				serviceableNodesInStr := lo.Map(lo.Values(serviceableNodes), func(node NodeInfo, _ int) string {
 					return node.String()
 				})
-				log.Warn("failed to select shard",
-					zap.Int64s("excluded", excludeNodes.Collect()),
-					zap.String("candidates", strings.Join(candidatesInStr, ", ")),
-					zap.String("serviceableNodes", strings.Join(serviceableNodesInStr, ", ")),
-					zap.Error(err))
+				log.Warn(ctx, "failed to select shard",
+					mlog.Int64s("excluded", excludeNodes.Collect()),
+					mlog.String("candidates", strings.Join(candidatesInStr, ", ")),
+					mlog.String("serviceableNodes", strings.Join(serviceableNodesInStr, ", ")),
+					mlog.Err(err))
 			}
 		}()
 
@@ -260,9 +344,9 @@ func (lb *LBPolicyImpl) selectNode(ctx context.Context, balancer LBBalancer, wor
 
 // ExecuteWithRetry will choose a qn to execute the workload, and retry if failed, until reach the max retryTimes.
 func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWorkload) error {
-	log := log.Ctx(ctx).With(
-		zap.Int64("collectionID", workload.CollectionID),
-		zap.String("channelName", workload.Channel),
+	log := mlog.With(
+		mlog.Int64("collectionID", workload.CollectionID),
+		mlog.String("channelName", workload.Channel),
 	)
 	var lastErr error
 	var err error
@@ -271,25 +355,34 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 	tryExecute := func() (bool, error) {
 		// Get fresh blacklist on each retry to include newly blacklisted nodes
 		blacklist := lb.blacklist.GetBlacklistedNodes(workload.Channel)
-		if len(shardLeaders) > 0 && requestExcludedNodes.Len() >= len(shardLeaders) {
+		// The "every leader excluded" recovery is judged on the SCOPED leader
+		// set: under a scope the request can only ever exclude the group's
+		// own leaders, so comparing against the unscoped count would never
+		// fire for a group holding a subset of the channel's leaders, and the
+		// refresh-and-clear would be dead code for exactly the requests that
+		// poll through a group coming up. shardLeaders itself stays unscoped
+		// (it is also the retry budget, see below).
+		scopedLeaders := FilterByResourceGroup(shardLeaders, workload.ResourceGroup)
+		if len(scopedLeaders) > 0 && requestExcludedNodes.Len() >= len(scopedLeaders) {
 			shardLeaders, err = lb.GetShard(ctx, workload.Db, workload.CollectionName, workload.CollectionID, workload.Channel, false)
 			if err != nil {
-				log.Warn("failed to refresh shard leaders", zap.Error(err))
+				log.Warn(ctx, "failed to refresh shard leaders", mlog.Err(err))
 				if lastErr != nil {
 					return true, lastErr
 				}
 				return true, err
 			}
 
-			allReplicaExcluded := len(shardLeaders) > 0
-			for _, node := range shardLeaders {
+			scopedLeaders = FilterByResourceGroup(shardLeaders, workload.ResourceGroup)
+			allReplicaExcluded := len(scopedLeaders) > 0
+			for _, node := range scopedLeaders {
 				if !requestExcludedNodes.Contain(node.NodeID) {
 					allReplicaExcluded = false
 					break
 				}
 			}
 			if allReplicaExcluded {
-				log.Warn("all replicas are request-level excluded after refresh, clear it and retry")
+				log.Warn(ctx, "all replicas are request-level excluded after refresh, clear it and retry")
 				requestExcludedNodes.Clear()
 			}
 		}
@@ -298,12 +391,38 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 		balancer := lb.getBalancer()
 		targetNode, selectedByBalancer, err := lb.selectNode(ctx, balancer, workload, &excludeNodes)
 		if err != nil {
-			log.Warn("failed to select node for shard",
-				zap.Int64("nodeID", targetNode.NodeID),
-				zap.Int64s("excluded", excludeNodes.Collect()),
-				zap.Error(err),
+			log.Warn(ctx, "failed to select node for shard",
+				mlog.Int64("nodeID", targetNode.NodeID),
+				mlog.Int64s("excluded", excludeNodes.Collect()),
+				mlog.Err(err),
 			)
-			if lastErr != nil {
+			// The exec error from an earlier attempt is normally the more
+			// informative one to end on, and for an unscoped request it stays
+			// that way -- unchanged from before the scope existed.
+			//
+			// Under a scope there is one ordering where that is wrong: the
+			// group's leader failed with a non-retriable error and then
+			// disappeared from the channel, so the next selection is the
+			// retriable ErrCollectionNotFullyLoaded. Ending on the earlier
+			// error would tell the layer waiting for the group to stop,
+			// undoing the code in exactly the case it exists for.
+			//
+			// Scoped ONLY, and ONLY for that one refusal -- the
+			// ErrCollectionNotFullyLoaded selectNode raises when the scoped
+			// candidate set is empty. Both halves of the gate are load-bearing:
+			// selectNode also propagates the balancer's error, and the balancer
+			// answers a RETRIABLE ErrServiceUnavailable whenever every
+			// candidate is unreachable (look_aside_balancer.go), so a rule
+			// keyed on "any retriable error" would silently reclassify the
+			// ordinary "all nodes down after a terminal exec error" from
+			// terminal to retriable and drop the cause the caller could act on
+			// -- on the scoped path just as much as the unscoped one.
+			// TestExecuteWithRetryUnscopedKeepsTheExecError and
+			// TestExecuteWithRetryScopedKeepsTheExecErrorOnBalancerFailure pin
+			// the two halves.
+			scopedFreshRefusal := workload.ResourceGroup != "" &&
+				errors.Is(err, merr.ErrCollectionNotFullyLoaded) && !merr.IsRetryableErr(lastErr)
+			if lastErr != nil && !scopedFreshRefusal {
 				return true, lastErr
 			}
 			return true, err
@@ -315,9 +434,9 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 
 		client, err := lb.clientMgr.GetClient(ctx, targetNode)
 		if err != nil {
-			log.Warn("search/query channel failed, node not available",
-				zap.Int64("nodeID", targetNode.NodeID),
-				zap.Error(err))
+			log.Warn(ctx, "search/query channel failed, node not available",
+				mlog.Int64("nodeID", targetNode.NodeID),
+				mlog.Err(err))
 			lb.blacklist.Add(workload.Channel, targetNode.NodeID)
 
 			lastErr = errors.Wrapf(err, "failed to get delegator %d for channel %s", targetNode.NodeID, workload.Channel)
@@ -326,9 +445,16 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 
 		err = workload.Exec(ctx, targetNode.NodeID, client, workload.Channel)
 		if err != nil {
-			log.Warn("search/query channel failed",
-				zap.Int64("nodeID", targetNode.NodeID),
-				zap.Error(err))
+			log.Warn(ctx, "search/query channel failed",
+				mlog.Int64("nodeID", targetNode.NodeID),
+				mlog.Err(err))
+			// An input error is the request's own fault: re-dispatching it to
+			// other replicas cannot make it succeed, and blacklisting the
+			// (healthy) serving node would penalize it for a bad request. Abort
+			// immediately without retrying or touching the blacklist.
+			if merr.GetErrorType(err) == merr.InputError {
+				return false, err
+			}
 			if merr.IsRetryableErr(err) {
 				requestExcludedNodes.Insert(targetNode.NodeID)
 			} else {
@@ -343,16 +469,24 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 
 	shardLeaders, err = lb.GetShard(ctx, workload.Db, workload.CollectionName, workload.CollectionID, workload.Channel, true)
 	if err != nil {
-		log.Warn("failed to get shard leaders", zap.Error(err))
+		log.Warn(ctx, "failed to get shard leaders", mlog.Err(err))
 		return err
 	}
 	// Sweep all shard leaders once, then allow configured request-level retries after every leader returns a retriable error.
+	//
+	// Deliberately the UNSCOPED leader count. Under a scope the request may
+	// have no leader to switch to, so each round is one forced cache refresh
+	// plus one more try at the group's own leader -- a poll, not a sweep --
+	// and the budget is what bounds how long that poll runs before the
+	// retriable ErrCollectionNotFullyLoaded reaches the caller. Computing it
+	// from the filtered list would shorten the poll for precisely the group
+	// that needs it most.
 	retryTimes := len(shardLeaders) + max(lb.retryOnReplica, 1)
 	err = retry.Handle(ctx, tryExecute, retry.Attempts(uint(retryTimes)))
 	if err != nil {
-		log.Warn("failed to execute",
-			zap.String("channel", workload.Channel),
-			zap.Error(err))
+		log.Warn(ctx, "failed to execute",
+			mlog.String("channel", workload.Channel),
+			mlog.Err(err))
 	}
 
 	return err
@@ -360,45 +494,29 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 
 // Execute will execute collection workload in parallel
 func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad) error {
-	log := log.Ctx(ctx).With(
-		zap.Int64("collectionID", workload.CollectionID),
+	log := mlog.With(
+		mlog.Int64("collectionID", workload.CollectionID),
 	)
 	channelList, err := lb.GetShardLeaderList(ctx, workload.Db, workload.CollectionName, workload.CollectionID, true)
 	if err != nil {
-		log.Warn("failed to get shards", zap.Error(err))
+		log.Warn(ctx, "failed to get shards", mlog.Err(err))
 		return err
 	}
 
 	if len(channelList) == 0 {
-		log.Info("no shard leaders found", zap.Int64("collectionID", workload.CollectionID))
+		log.Info(ctx, "no shard leaders found", mlog.Int64("collectionID", workload.CollectionID))
 		return merr.WrapErrCollectionNotLoaded(workload.CollectionID)
 	}
 
 	// Single channel fast path: skip errgroup/goroutine overhead
 	if len(channelList) == 1 {
-		return lb.ExecuteWithRetry(ctx, ChannelWorkload{
-			Db:              workload.Db,
-			CollectionName:  workload.CollectionName,
-			CollectionID:    workload.CollectionID,
-			Channel:         channelList[0],
-			Nq:              workload.Nq,
-			Exec:            workload.Exec,
-			PreferredNodeID: preferredNodeID(workload, channelList[0]),
-		})
+		return lb.ExecuteWithRetry(ctx, workload.ForChannel(channelList[0], preferredNodeID(workload, channelList[0])))
 	}
 
 	wg, _ := errgroup.WithContext(ctx)
 	for _, channel := range channelList {
 		wg.Go(func() error {
-			return lb.ExecuteWithRetry(ctx, ChannelWorkload{
-				Db:              workload.Db,
-				CollectionName:  workload.CollectionName,
-				CollectionID:    workload.CollectionID,
-				Channel:         channel,
-				Nq:              workload.Nq,
-				Exec:            workload.Exec,
-				PreferredNodeID: preferredNodeID(workload, channel),
-			})
+			return lb.ExecuteWithRetry(ctx, workload.ForChannel(channel, preferredNodeID(workload, channel)))
 		})
 	}
 	return wg.Wait()
@@ -406,25 +524,71 @@ func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad
 
 // ExecuteOneChannel will execute at any one channel in collection
 func (lb *LBPolicyImpl) ExecuteOneChannel(ctx context.Context, workload CollectionWorkLoad) error {
-	channelList, err := lb.GetShardLeaderList(ctx, workload.Db, workload.CollectionName, workload.CollectionID, true)
-	if err != nil {
-		log.Ctx(ctx).Warn("failed to get shards", zap.Error(err))
-		return err
+	// Unscoped: any one channel will do, so the first is taken. Scoped: the
+	// channel list is a map's key order, so the first channel may be one the
+	// group has no leader on; that refusal is the retriable
+	// ErrCollectionNotFullyLoaded, and rather than hand it back when a
+	// sibling channel could have served, move on to the next channel and end
+	// on the refusal only if none can.
+	//
+	// Each channel that is tried and refused burns a full retry budget first
+	// (~1.6s), so a group that can serve no shard of a wide collection would
+	// take shards x budget to fail. A pre-pass keeps that bounded, and it is
+	// made on FRESH data so that it is allowed to refuse: one uncached
+	// GetShardLeaders is one coordinator call that refreshes every channel of
+	// the collection at once (updateShardLocationCache replaces the whole
+	// entry), so what it returns is authoritative rather than stale. The
+	// scoped channel list is derived from that table alone -- the cached
+	// channel list is read only on the unscoped branch, so the scoped path
+	// pays for exactly one read and never mixes a stale key set with a fresh
+	// leader table; sorted, so one state always tries one order. None
+	// servable at all is refused right here, with the same retriable code
+	// selectNode would reach after a full sweep -- in zero budgets instead of
+	// shards x budget. The cost is one RPC on the scoped path (through the
+	// same retry wrapper the other reads use), and one cache-metric hit
+	// (caller="GetShardLeaders") rather than one per channel.
+	var channelList []string
+	if workload.ResourceGroup != "" {
+		fresh, err := lb.GetShardLeaders(ctx, workload.Db, workload.CollectionName, workload.CollectionID, false)
+		if err != nil {
+			mlog.Warn(ctx, "failed to refresh shard leaders for the resource group pre-pass", mlog.Err(err))
+			return err
+		}
+		servable := make([]string, 0, len(fresh))
+		for channel, leaders := range fresh {
+			if len(FilterByResourceGroup(leaders, workload.ResourceGroup)) > 0 {
+				servable = append(servable, channel)
+			}
+		}
+		sort.Strings(servable)
+		if len(servable) == 0 {
+			return merr.WrapErrCollectionNotFullyLoaded(workload.CollectionID,
+				fmt.Sprintf("no shard leader in resource group %s", workload.ResourceGroup))
+		}
+		channelList = servable
+	} else {
+		var err error
+		channelList, err = lb.GetShardLeaderList(ctx, workload.Db, workload.CollectionName, workload.CollectionID, true)
+		if err != nil {
+			mlog.Warn(ctx, "failed to get shards", mlog.Err(err))
+			return err
+		}
 	}
-
-	// let every request could retry at least twice, which could retry after update shard leader cache
+	var lastErr error
 	for _, channel := range channelList {
-		return lb.ExecuteWithRetry(ctx, ChannelWorkload{
-			Db:              workload.Db,
-			CollectionName:  workload.CollectionName,
-			CollectionID:    workload.CollectionID,
-			Channel:         channel,
-			Nq:              workload.Nq,
-			Exec:            workload.Exec,
-			PreferredNodeID: preferredNodeID(workload, channel),
-		})
+		err := lb.ExecuteWithRetry(ctx, workload.ForChannel(channel, preferredNodeID(workload, channel)))
+		if workload.ResourceGroup == "" || !errors.Is(err, merr.ErrCollectionNotFullyLoaded) {
+			return err
+		}
+		lastErr = err
 	}
-	return fmt.Errorf("no acitvate sheard leader exist for collection: %s", workload.CollectionName)
+	if lastErr != nil {
+		return lastErr
+	}
+	// An empty leader list here is a transient routing-cache state (leaders are
+	// re-discovered on retry); reporting "collection not loaded" would tell the
+	// user to re-load a collection that is loaded.
+	return merr.WrapErrServiceUnavailable(fmt.Sprintf("no available shard leader for collection %d", workload.CollectionID))
 }
 
 func (lb *LBPolicyImpl) UpdateCostMetrics(node int64, cost *internalpb.CostAggregation) {

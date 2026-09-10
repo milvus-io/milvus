@@ -16,8 +16,63 @@
 
 package index
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/client/v3/entity"
+)
 
 func TestGenericIndex(t *testing.T) {
-	// idx := NewGenericIndex("auto_scalar_index")
+	params := map[string]string{
+		IndexTypeKey: string(FMINDEX),
+		"custom_key": "custom_value",
+	}
+	idx := NewGenericIndex("fm_index", params)
+
+	assert.Equal(t, "fm_index", idx.Name())
+	assert.EqualValues(t, FMINDEX, idx.IndexType())
+	assert.Equal(t, params, idx.Params())
+
+	idxWithoutType := NewGenericIndex("legacy_index", map[string]string{"custom_key": "custom_value"})
+	assert.Empty(t, idxWithoutType.IndexType())
+}
+
+func TestWithExtraIndexParams(t *testing.T) {
+	// A param the typed constructor does not model must reach the wire without
+	// giving up the constructor.
+	idx := WithExtraIndexParams(NewHNSWIndex(entity.L2, 16, 200), map[string]string{
+		"refine":      "true",
+		"refine_type": "fp32",
+	})
+
+	result := idx.Params()
+	assert.EqualValues(t, HNSW, result[IndexTypeKey])
+	assert.Equal(t, "16", result[hnswMKey])
+	assert.Equal(t, "true", result["refine"])
+	assert.Equal(t, "fp32", result["refine_type"])
+	assert.EqualValues(t, HNSW, idx.IndexType())
+
+	// Extras win on collision, and the wrapped index is left untouched.
+	base := NewHNSWIndex(entity.L2, 16, 200)
+	wrapped := WithExtraIndexParams(base, map[string]string{hnswMKey: "32"})
+	assert.Equal(t, "32", wrapped.Params()[hnswMKey])
+	assert.Equal(t, "16", base.Params()[hnswMKey])
+}
+
+func TestWithExtraIndexParamsReservedKeys(t *testing.T) {
+	// Overriding index_type would make Params() disagree with IndexType(), so
+	// the reserved keys are ignored rather than honored.
+	idx := WithExtraIndexParams(NewHNSWIndex(entity.L2, 16, 200), map[string]string{
+		IndexTypeKey:  string(IvfFlat),
+		MetricTypeKey: string(entity.IP),
+		"refine_k":    "64",
+	})
+
+	result := idx.Params()
+	assert.EqualValues(t, HNSW, result[IndexTypeKey])
+	assert.EqualValues(t, HNSW, idx.IndexType())
+	assert.EqualValues(t, entity.L2, result[MetricTypeKey])
+	assert.Equal(t, "64", result["refine_k"])
 }

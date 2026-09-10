@@ -20,14 +20,13 @@ import (
 	"context"
 	"crypto/tls"
 
-	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus/client/v2/milvusclient"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/client/v3/milvusclient"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -52,7 +51,7 @@ func NewMilvusClient(ctx context.Context, cluster *commonpb.MilvusCluster) (Milv
 	// Build TLS config from per-cluster paramtable config.
 	tlsConfig, err := buildCDCTLSConfig(cluster.GetClusterId())
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to build CDC TLS config")
+		return nil, merr.Wrap(err, "failed to build CDC TLS config")
 	}
 	if tlsConfig != nil {
 		config.WithTLSConfig(tlsConfig)
@@ -60,14 +59,14 @@ func NewMilvusClient(ctx context.Context, cluster *commonpb.MilvusCluster) (Milv
 
 	if authority := paramtable.Get().ProxyGrpcServerCfg.GetClusterAuthority(cluster.GetClusterId()); authority != "" {
 		config.WithGrpcAuthority(authority)
-		log.Info("CDC outbound gRPC authority set",
-			zap.String("targetCluster", cluster.GetClusterId()),
-			zap.String("authority", authority))
+		mlog.Info(context.TODO(), "CDC outbound gRPC authority set",
+			mlog.String("targetCluster", cluster.GetClusterId()),
+			mlog.String("authority", authority))
 	}
 
 	cli, err := milvusclient.New(ctx, config)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to create milvus client")
+		return nil, merr.Wrap(err, "failed to create milvus client")
 	}
 	return cli, nil
 }
@@ -82,11 +81,11 @@ func buildCDCTLSConfig(clusterID string) (*tls.Config, error) {
 		return nil, nil
 	}
 
-	log.Info("CDC outbound TLS enabled",
-		zap.String("targetCluster", clusterID),
-		zap.String("caPemPath", caPemPath),
-		zap.String("clientPemPath", clientPemPath),
-		zap.String("clientKeyPath", clientKeyPath))
+	mlog.Info(context.TODO(), "CDC outbound TLS enabled",
+		mlog.String("targetCluster", clusterID),
+		mlog.String("caPemPath", caPemPath),
+		mlog.String("clientPemPath", clientPemPath),
+		mlog.String("clientKeyPath", clientKeyPath))
 
 	return milvusclient.BuildTLSConfig(caPemPath, clientPemPath, clientKeyPath)
 }

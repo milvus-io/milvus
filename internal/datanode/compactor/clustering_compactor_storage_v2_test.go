@@ -60,6 +60,7 @@ func (s *ClusteringCompactionTaskStorageV2Suite) TearDownTest() {
 	os.RemoveAll(paramtable.Get().LocalStorageCfg.Path.GetValue() + "insert_log")
 	os.RemoveAll(paramtable.Get().LocalStorageCfg.Path.GetValue() + "delta_log")
 	os.RemoveAll(paramtable.Get().LocalStorageCfg.Path.GetValue() + "stats_log")
+	s.ClusteringCompactionTaskSuite.TearDownTest()
 }
 
 func (s *ClusteringCompactionTaskStorageV2Suite) TestScalarCompactionNormal() {
@@ -83,13 +84,13 @@ func (s *ClusteringCompactionTaskStorageV2Suite) TestScalarCompactionNormal() {
 func (s *ClusteringCompactionTaskStorageV2Suite) TestScalarCompactionNormal_V2ToV2Format() {
 	var segmentID int64 = 1001
 
-	fBinlogs, deltalogs, _, _, _, _, err := s.initStorageV2Segments(10240, segmentID)
+	fBinlogs, deltalogs, _, _, _, _, _, err := s.initStorageV2Segments(10240, segmentID)
 	s.NoError(err)
 
 	dblobs, err := getInt64DeltaBlobs(
 		1,
 		[]int64{100},
-		[]uint64{tsoutil.ComposeTSByTime(getMilvusBirthday().Add(time.Second), 0)},
+		[]uint64{tsoutil.ComposeTSByTime(getMilvusBirthday().Add(time.Second))},
 	)
 	s.Require().NoError(err)
 	s.mockBinlogIO.EXPECT().Download(mock.Anything, []string{deltalogs.GetBinlogs()[0].GetLogPath()}).
@@ -188,12 +189,13 @@ func (s *ClusteringCompactionTaskStorageV2Suite) initStorageV2Segments(rows int,
 	bm25Stats map[int64]*datapb.FieldBinlog,
 	manifest string,
 	size int64,
+	segmentStats *datapb.Statistics,
 	err error,
 ) {
 	rootPath := paramtable.Get().LocalStorageCfg.Path.GetValue()
 	cm := storage.NewLocalChunkManager(objectstorage.RootPath(rootPath))
 	bfs := pkoracle.NewBloomFilterSet()
-	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs, nil)
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs, nil, metacache.NewEmptySegmentStats())
 	metacache.UpdateNumOfRows(int64(rows))(seg)
 	mc := metacache.NewMockMetaCache(s.T())
 	mc.EXPECT().Collection().Return(CollectionID).Maybe()
@@ -205,7 +207,7 @@ func (s *ClusteringCompactionTaskStorageV2Suite) initStorageV2Segments(rows int,
 	}).Return().Maybe()
 
 	channelName := fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", CollectionID)
-	deleteData := storage.NewDeleteData([]storage.PrimaryKey{storage.NewInt64PrimaryKey(100)}, []uint64{tsoutil.ComposeTSByTime(getMilvusBirthday().Add(time.Second), 0)})
+	deleteData := storage.NewDeleteData([]storage.PrimaryKey{storage.NewInt64PrimaryKey(100)}, []uint64{tsoutil.ComposeTSByTime(getMilvusBirthday().Add(time.Second))})
 	pack := new(syncmgr.SyncPack).WithCollectionID(CollectionID).WithPartitionID(PartitionID).WithSegmentID(segmentID).WithChannelName(channelName).WithInsertData(genInsertData(rows, segmentID, genCollectionSchema())).WithDeleteData(deleteData)
 	sch := genCollectionSchema()
 	fields := typeutil.GetAllFieldSchemas(sch)

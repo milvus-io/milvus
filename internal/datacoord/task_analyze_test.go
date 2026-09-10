@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -203,6 +204,12 @@ func (s *analyzeTaskSuite) newTask() *analyzeTask {
 	}, s.mt)
 }
 
+// restoreMetaTask puts back the task the suite was set up with, so a test that
+// persists a state transition does not leak it into the following tests.
+func (s *analyzeTaskSuite) restoreMetaTask(task *indexpb.AnalyzeTask) {
+	s.mt.analyzeMeta.tasks[s.taskID] = task
+}
+
 func (s *analyzeTaskSuite) TestCreateTaskOnWorker_SegmentNil() {
 	// Replace segment 102 with a dropped segment so it's filtered out by isSegmentHealthy
 	s.mt.segments.SetSegment(102, &SegmentInfo{
@@ -230,10 +237,14 @@ func (s *analyzeTaskSuite) TestCreateTaskOnWorker_SegmentNil() {
 	catalog := catalogmocks.NewDataCoordCatalog(s.T())
 	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).Return(nil)
 	s.mt.analyzeMeta.catalog = catalog
+	defer s.restoreMetaTask(s.mt.analyzeMeta.tasks[s.taskID])
 
 	at.CreateTaskOnWorker(1, session.NewMockCluster(s.T()))
 	s.Equal(indexpb.JobState_JobStateFailed, at.GetState())
 	s.Contains(at.GetFailReason(), "102")
+	// The terminal state must be persisted, not only set on the scheduler-owned copy.
+	s.Equal(indexpb.JobState_JobStateFailed, s.mt.analyzeMeta.GetTask(s.taskID).GetState())
+	s.Contains(s.mt.analyzeMeta.GetTask(s.taskID).GetFailReason(), "102")
 }
 
 func (s *analyzeTaskSuite) TestCreateTaskOnWorker_DimExtractionError() {
@@ -274,10 +285,36 @@ func (s *analyzeTaskSuite) TestCreateTaskOnWorker_DataTooSmall() {
 	catalog := catalogmocks.NewDataCoordCatalog(s.T())
 	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).Return(nil)
 	s.mt.analyzeMeta.catalog = catalog
+	defer s.restoreMetaTask(s.mt.analyzeMeta.tasks[s.taskID])
 
 	at.CreateTaskOnWorker(1, session.NewMockCluster(s.T()))
 	// data too small → skip → mark as finished
 	s.Equal(indexpb.JobState_JobStateFinished, at.GetState())
+	// Persisting Finished is what lets the GC recycle the task's analyze stats files.
+	s.Equal(indexpb.JobState_JobStateFinished, s.mt.analyzeMeta.GetTask(s.taskID).GetState())
+}
+
+func (s *analyzeTaskSuite) TestCreateTaskOnWorker_TerminalStateNotPersisted() {
+	// Set MinCentroidsNum very high so data is considered too small
+	origMin := Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.SwapTempValue("999999999")
+	defer Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.SwapTempValue(origMin)
+
+	at := s.newTask()
+	catalog := catalogmocks.NewDataCoordCatalog(s.T())
+	// The first save is UpdateVersion, the second one is the terminal state transition.
+	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).Return(nil).Once()
+	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).
+		Return(merr.WrapErrServiceInternalMsg("mock save error")).Once()
+	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).Return(nil)
+	s.mt.analyzeMeta.catalog = catalog
+	defer s.restoreMetaTask(s.mt.analyzeMeta.tasks[s.taskID])
+	stateBefore := s.mt.analyzeMeta.GetTask(s.taskID).GetState()
+
+	at.CreateTaskOnWorker(1, session.NewMockCluster(s.T()))
+	// A failed persistence leaves the task at Init so the scheduler re-enqueues it,
+	// rather than dropping it on an in-memory-only terminal state.
+	s.Equal(indexpb.JobState_JobStateInit, at.GetState())
+	s.Equal(stateBefore, s.mt.analyzeMeta.GetTask(s.taskID).GetState())
 }
 
 func (s *analyzeTaskSuite) TestCreateTaskOnWorker_NumClustersCapped() {
@@ -357,6 +394,60 @@ func (s *analyzeTaskSuite) TestCreateTaskOnWorker_SegmentStatsPopulated() {
 		}
 		// Clustering params should be populated
 		if req.MaxTrainSizeRatio == 0 || req.MaxClusterSize == 0 || req.TaskSlot == 0 {
+			return false
+		}
+		return true
+	})).Return(nil)
+
+	at.CreateTaskOnWorker(1, cluster)
+	s.Equal(indexpb.JobState_JobStateInProgress, at.GetState())
+}
+
+func (s *analyzeTaskSuite) TestCreateTaskOnWorker_ManifestPropagated() {
+	origMin := Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.SwapTempValue("1")
+	defer Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.SwapTempValue(origMin)
+
+	// Segment 101 becomes a recovered StorageV3 segment: manifest set, no binlogs.
+	s.mt.segments.SetSegment(101, &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             101,
+			CollectionID:   s.collID,
+			PartitionID:    s.partID,
+			State:          commonpb.SegmentState_Flushed,
+			NumOfRows:      1000,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   "{\"base_path\":\"root/segments/101\",\"ver\":3}",
+			Binlogs:        nil,
+		},
+	})
+	defer s.mt.segments.SetSegment(101, &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID: 101, CollectionID: s.collID, PartitionID: s.partID,
+			State: commonpb.SegmentState_Flushed, NumOfRows: 1000,
+			Binlogs: []*datapb.FieldBinlog{
+				{FieldID: s.fieldID, Binlogs: []*datapb.Binlog{{LogID: 1001}, {LogID: 1002}}},
+			},
+		},
+	})
+
+	at := s.newTask()
+	catalog := catalogmocks.NewDataCoordCatalog(s.T())
+	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).Return(nil)
+	s.mt.analyzeMeta.catalog = catalog
+
+	cluster := session.NewMockCluster(s.T())
+	cluster.EXPECT().CreateAnalyze(mock.Anything, mock.MatchedBy(func(req *workerpb.AnalyzeRequest) bool {
+		stat101 := req.SegmentStats[101]
+		stat102 := req.SegmentStats[102]
+		if stat101 == nil || stat102 == nil {
+			return false
+		}
+		// V3: manifest set, logIDs empty.
+		if stat101.ManifestPath == "" || len(stat101.LogIDs) != 0 {
+			return false
+		}
+		// V1: manifest empty, logIDs present.
+		if stat102.ManifestPath != "" || len(stat102.LogIDs) != 2 {
 			return false
 		}
 		return true

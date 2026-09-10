@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include "storage/BinlogReader.h"
+#include "common/FastMem.h"
 
 #include <string.h>
 
@@ -29,7 +30,7 @@ BinlogReader::Read(int64_t nbytes, void* out) {
         return SegcoreError(milvus::UnexpectedError,
                             "out range of binlog data");
     }
-    std::memcpy(out, data_.get() + tell_, nbytes);
+    milvus::fastmem::FastMemcpy(out, data_.get() + tell_, nbytes);
     tell_ += nbytes;
     return SegcoreError(milvus::Success, "");
 }

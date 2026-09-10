@@ -29,6 +29,8 @@ constexpr const char* MATCH_VALUE = "match_value";
 // below configurations will be persistent, do not edit them.
 constexpr const char* MARISA_TRIE_INDEX = "marisa_trie_index";
 constexpr const char* MARISA_STR_IDS = "marisa_trie_str_ids";
+constexpr const char* MARISA_CSR_INDEX = "marisa_csr_index";
+constexpr const char* MARISA_CSR_OFFSETS = "marisa_csr_offsets";
 
 // below meta key of store bitmap indexes
 constexpr const char* BITMAP_INDEX_DATA = "bitmap_index_data";
@@ -58,6 +60,12 @@ constexpr const char* INDEX_NON_ENCODING = "index.nonEncoding";
 constexpr const char* NGRAM_INDEX_TYPE = "NGRAM";
 constexpr const char* MIN_GRAM = "min_gram";
 constexpr const char* MAX_GRAM = "max_gram";
+constexpr const char* FMINDEX_INDEX_TYPE = "FMINDEX";
+// FM-index build param: suffix-array sampling rate (space vs. locate latency).
+constexpr const char* FM_SA_SAMPLE_RATE = "fm_sa_sample_rate";
+// FM-index build param: rank-directory block granularity in bytes (power-of-two
+// multiple of 8 in [8, 128]); larger shrinks resident directory RAM. Default 64.
+constexpr const char* FM_BLOCK_BYTES = "fm_block_bytes";
 
 constexpr const char* JSON_KEY_STATS_INDEX_TYPE = "JsonKeyStats";
 // index meta
@@ -79,6 +87,8 @@ constexpr const char* HYBRID_HIGH_CARDINALITY_INDEX_TYPE =
 // index config key
 constexpr const char* MMAP_FILE_PATH = "mmap_filepath";
 constexpr const char* ENABLE_MMAP = "enable_mmap";
+constexpr const char* ENABLE_MMAP_I2O_MAP = "enable_mmap_i2o_map";
+constexpr const char* ENABLE_MMAP_O2I_MAP = "enable_mmap_o2i_map";
 constexpr const char* WARMUP = "warmup";
 constexpr const char* INDEX_FILES = "index_files";
 constexpr const char* INDEX_SIZE = "index_size";

@@ -18,10 +18,10 @@ package accesslog
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
 	"google.golang.org/grpc"
 
@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog/info"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type AccessKey struct{}
@@ -53,6 +54,15 @@ func UnaryUpdateAccessInfoInterceptor(ctx context.Context, req any, rpcInfonfo *
 func AccessLogMiddleware(ctx *gin.Context) {
 	accessInfo := info.NewRestfulInfo(ctx)
 	ctx.Set(ContextLogKey, accessInfo)
+	// Bridge the access info into the standard request context. The gRPC
+	// interceptor injects the same AccessKey value for grpc traffic; without
+	// this, REST handlers reach the Proxy through the hook interceptor with a
+	// context lacking AccessKey, so task PreExecute (SetActualConsistencyLevel)
+	// and slow logs fall back to the raw request consistency level.
+	if ctx.Request != nil {
+		reqCtx := context.WithValue(ctx.Request.Context(), AccessKey{}, accessInfo)
+		ctx.Request = ctx.Request.WithContext(reqCtx)
+	}
 	ctx.Next()
 	accessInfo.InitReq()
 	_globalL.Write(accessInfo)
@@ -82,10 +92,10 @@ func join(path1, path2 string) string {
 
 func timeFromName(filename, prefix, ext string) (time.Time, error) {
 	if !strings.HasPrefix(filename, prefix) {
-		return time.Time{}, errors.New("mismatched prefix")
+		return time.Time{}, merr.WrapErrParameterInvalidMsg("mismatched prefix")
 	}
 	if !strings.HasSuffix(filename, ext) {
-		return time.Time{}, errors.New("mismatched extension")
+		return time.Time{}, merr.WrapErrParameterInvalidMsg("mismatched extension")
 	}
 	ts := filename[len(prefix) : len(filename)-len(ext)]
 	return time.Parse(timeNameFormat, ts)
@@ -99,4 +109,35 @@ func SetActualConsistencyLevel(ctx context.Context, acl commonpb.ConsistencyLeve
 			info.SetActualConsistencyLevel(acl)
 		}
 	}
+}
+
+type ConsistencyLevelCarrier interface {
+	GetConsistencyLevel() commonpb.ConsistencyLevel
+}
+
+type ConsistencyLevelHelper struct {
+	accessInfo  info.AccessInfo
+	clvlCarrier ConsistencyLevelCarrier
+}
+
+func (clHelper *ConsistencyLevelHelper) String() string {
+	if clHelper.accessInfo != nil {
+		return fmt.Sprintf("ACT-%s", clHelper.accessInfo.ConsistencyLevel())
+	}
+	if clHelper.clvlCarrier == nil {
+		return info.Unknown
+	}
+	return fmt.Sprintf("REQ-%s", clHelper.clvlCarrier.GetConsistencyLevel().String())
+}
+
+func NewConsistencyLevelHelper(ctx context.Context, clvlCarrier ConsistencyLevelCarrier) *ConsistencyLevelHelper {
+	cc := &ConsistencyLevelHelper{clvlCarrier: clvlCarrier}
+	if ctx != nil {
+		v := ctx.Value(AccessKey{})
+		info, ok := v.(info.AccessInfo)
+		if ok && info != nil {
+			cc.accessInfo = info
+		}
+	}
+	return cc
 }

@@ -18,17 +18,16 @@ package rootcoord
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type KeyManager struct {
@@ -42,10 +41,10 @@ func NewKeyManager(
 	meta IMetaTable,
 ) *KeyManager {
 	if hookutil.GetCipherWithState() == nil {
-		log.Info("KeyManager disabled (cipher plugin not loaded)")
+		mlog.Info(ctx, "KeyManager disabled (cipher plugin not loaded)")
 		return nil
 	}
-	log.Info("KeyManager enabled")
+	mlog.Info(ctx, "KeyManager enabled")
 	return &KeyManager{
 		ctx:  ctx,
 		meta: meta,
@@ -55,7 +54,7 @@ func NewKeyManager(
 func (km *KeyManager) GetRevokedDatabases() ([]int64, error) {
 	currentStates, err := hookutil.GetEzStates()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get cipher states: %w", err)
+		return nil, merr.Wrap(err, "failed to get cipher states")
 	}
 
 	abnormalDB := make(map[int64]struct{})
@@ -63,7 +62,7 @@ func (km *KeyManager) GetRevokedDatabases() ([]int64, error) {
 		if currentState != hookutil.KeyStateEnabled {
 			db, err := km.getDatabaseByEzID(ezID)
 			if err != nil {
-				log.Warn("KeyManager: failed to get database for ezID", zap.Int64("ezID", ezID), zap.Error(err))
+				mlog.Warn(km.ctx, "KeyManager: failed to get database for ezID", mlog.Int64("ezID", ezID), mlog.Err(err))
 				continue
 			}
 
@@ -88,7 +87,7 @@ func (km *KeyManager) getDatabaseByEzID(ezID int64) (*model.Database, error) {
 
 	// verify the ezID matches the retrieved DB
 	if db.GetProperty(common.EncryptionEzIDKey) != strconv.FormatInt(ezID, 10) {
-		return nil, fmt.Errorf("db for ezID %d not found", ezID)
+		return nil, merr.WrapErrServiceInternalMsg("db for ezID %d not found", ezID)
 	}
 
 	return db, nil

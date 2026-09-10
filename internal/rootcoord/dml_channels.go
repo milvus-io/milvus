@@ -24,22 +24,21 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type dmlMsgStream struct {
-	ms    msgstream.MsgStream
-	mutex sync.RWMutex
+	ms     msgstream.MsgStream
+	mutex  sync.RWMutex
+	closed bool
 
 	refcnt int64 // current in use count
 	used   int64 // total used counter in current run, not stored in meta so meant to be inaccurate
@@ -82,8 +81,46 @@ func (dms *dmlMsgStream) DecRefCnt() {
 	if dms.refcnt > 0 {
 		dms.refcnt--
 	} else {
-		log.Warn("Try to remove channel with no ref count", zap.Int64("idx", dms.idx))
+		mlog.Warn(context.TODO(), "Try to remove channel with no ref count", mlog.Int64("idx", dms.idx))
 	}
+}
+
+func (dms *dmlMsgStream) broadcast(ctx context.Context, pack *msgstream.MsgPack) (map[string][]msgstream.MessageID, error) {
+	dms.mutex.RLock()
+	defer dms.mutex.RUnlock()
+
+	if dms.closed {
+		return nil, merr.WrapErrServiceNotReadyMsg("legacy dml msgstream is closed")
+	}
+	if dms.refcnt <= 0 {
+		return nil, nil
+	}
+	return dms.ms.Broadcast(ctx, pack)
+}
+
+func (dms *dmlMsgStream) broadcastMark(ctx context.Context, pack *msgstream.MsgPack) (map[string][]msgstream.MessageID, error) {
+	dms.mutex.RLock()
+	defer dms.mutex.RUnlock()
+
+	if dms.closed {
+		return nil, merr.WrapErrServiceNotReadyMsg("legacy dml msgstream is closed")
+	}
+	if dms.refcnt <= 0 {
+		return nil, merr.WrapErrServiceInternalMsg("channel not in use")
+	}
+	return dms.ms.Broadcast(ctx, pack)
+}
+
+func (dms *dmlMsgStream) close() {
+	dms.mutex.Lock()
+	if dms.closed {
+		dms.mutex.Unlock()
+		return
+	}
+	dms.closed = true
+	dms.mutex.Unlock()
+
+	dms.ms.Close()
 }
 
 // channelsHeap implements heap.Interface to performs like an priority queue.
@@ -150,9 +187,9 @@ type dmlChannels struct {
 }
 
 func newDmlChannels(initCtx context.Context, factory msgstream.Factory, chanNamePrefixDefault string, chanNumDefault int64) *dmlChannels {
-	log.Ctx(initCtx).Info("new DmlChannels",
-		zap.String("chanNamePrefixDefault", chanNamePrefixDefault),
-		zap.Int64("chanNumDefault", chanNumDefault))
+	mlog.Info(initCtx, "new DmlChannels",
+		mlog.String("chanNamePrefixDefault", chanNamePrefixDefault),
+		mlog.Int64("chanNumDefault", chanNumDefault))
 	params := &paramtable.Get().CommonCfg
 	var (
 		chanNamePrefix string
@@ -182,6 +219,7 @@ func newDmlChannels(initCtx context.Context, factory msgstream.Factory, chanName
 
 	for i, name := range names {
 		var ms msgstream.MsgStream
+		var closeNotifier *snmanager.StreamingReadyNotifier
 		if !streamingutil.IsStreamingServiceEnabled() {
 			ms = d.newMsgstream(initCtx, factory, name)
 		} else {
@@ -189,20 +227,13 @@ func newDmlChannels(initCtx context.Context, factory msgstream.Factory, chanName
 			if err := snmanager.StaticStreamingNodeManager.RegisterStreamingEnabledListener(initCtx, notifier); err != nil {
 				panic(err)
 			}
-			logger := log.Ctx(initCtx).With(zap.String("pchannel", name))
+			logger := mlog.With(mlog.String("pchannel", name))
 			if !notifier.IsReady() {
-				logger.Info("streaming service is not enabled, create a msgstream to use")
+				logger.Info(initCtx, "streaming service is not enabled, create a msgstream to use")
 				ms = d.newMsgstream(initCtx, factory, name)
-				go func() {
-					defer notifier.Release()
-					<-notifier.Ready()
-					// release the msgstream.
-					logger.Info("streaming service is enabled, release the msgstream...")
-					ms.Close()
-					logger.Info("streaming service is enabled, release the msgstream done")
-				}()
+				closeNotifier = notifier
 			} else {
-				logger.Info("streaming service has been enabled, msgstream should not be created")
+				logger.Info(initCtx, "streaming service has been enabled, msgstream should not be created")
 				notifier.Release()
 			}
 		}
@@ -215,11 +246,23 @@ func newDmlChannels(initCtx context.Context, factory msgstream.Factory, chanName
 		}
 		d.pool.Insert(name, dms)
 		d.channelsHeap = append(d.channelsHeap, dms)
+
+		if closeNotifier != nil {
+			go func(notifier *snmanager.StreamingReadyNotifier, stream *dmlMsgStream, pchannel string) {
+				defer notifier.Release()
+				<-notifier.Ready()
+				// release the msgstream.
+				logger := mlog.With(mlog.String("pchannel", pchannel))
+				logger.Info(initCtx, "streaming service is enabled, release the msgstream...")
+				stream.close()
+				logger.Info(initCtx, "streaming service is enabled, release the msgstream done")
+			}(closeNotifier, dms, name)
+		}
 	}
 
 	heap.Init(&d.channelsHeap)
 
-	log.Ctx(initCtx).Info("init dml channels", zap.String("prefix", chanNamePrefix), zap.Int64("num", chanNum))
+	mlog.Info(initCtx, "init dml channels", mlog.String("prefix", chanNamePrefix), mlog.Int64("num", chanNum))
 
 	metrics.RootCoordNumOfDMLChannel.Add(float64(chanNum))
 	metrics.RootCoordNumOfMsgStream.Add(float64(chanNum))
@@ -231,9 +274,9 @@ func (d *dmlChannels) newMsgstream(initCtx context.Context, factory msgstream.Fa
 	var err error
 	ms, err := factory.NewMsgStream(initCtx)
 	if err != nil {
-		log.Ctx(initCtx).Error("Failed to add msgstream",
-			zap.String("name", name),
-			zap.Error(err))
+		mlog.Error(initCtx, "Failed to add msgstream",
+			mlog.String("name", name),
+			mlog.Err(err))
 		panic("Failed to add msgstream")
 	}
 
@@ -311,8 +354,8 @@ func (d *dmlChannels) getChannelNum() int {
 func (d *dmlChannels) getMsgStreamByName(chanName string) (*dmlMsgStream, error) {
 	dms, ok := d.pool.Get(chanName)
 	if !ok {
-		log.Ctx(d.ctx).Error("invalid channelName", zap.String("chanName", chanName))
-		return nil, errors.Newf("invalid channel name: %s", chanName)
+		mlog.Error(d.ctx, "invalid channelName", mlog.String("chanName", chanName))
+		return nil, merr.WrapErrParameterInvalidMsg("invalid channel name: %s", chanName)
 	}
 	return dms, nil
 }
@@ -324,15 +367,10 @@ func (d *dmlChannels) broadcast(chanNames []string, pack *msgstream.MsgPack) err
 			return err
 		}
 
-		dms.mutex.RLock()
-		if dms.refcnt > 0 {
-			if _, err := dms.ms.Broadcast(d.ctx, pack); err != nil {
-				log.Ctx(d.ctx).Error("Broadcast failed", zap.Error(err), zap.String("chanName", chanName))
-				dms.mutex.RUnlock()
-				return err
-			}
+		if _, err := dms.broadcast(d.ctx, pack); err != nil {
+			mlog.Error(d.ctx, "Broadcast failed", mlog.Err(err), mlog.String("chanName", chanName))
+			return err
 		}
-		dms.mutex.RUnlock()
 	}
 	return nil
 }
@@ -345,25 +383,17 @@ func (d *dmlChannels) broadcastMark(chanNames []string, pack *msgstream.MsgPack)
 			return result, err
 		}
 
-		dms.mutex.RLock()
-		if dms.refcnt > 0 {
-			ids, err := dms.ms.Broadcast(d.ctx, pack)
-			if err != nil {
-				log.Ctx(d.ctx).Error("BroadcastMark failed", zap.Error(err), zap.String("chanName", chanName))
-				dms.mutex.RUnlock()
-				return result, err
-			}
-			for cn, idList := range ids {
-				// idList should have length 1, just flat by iteration
-				for _, id := range idList {
-					result[cn] = id.Serialize()
-				}
-			}
-		} else {
-			dms.mutex.RUnlock()
-			return nil, errors.Newf("channel not in use: %s", chanName)
+		ids, err := dms.broadcastMark(d.ctx, pack)
+		if err != nil {
+			mlog.Error(d.ctx, "BroadcastMark failed", mlog.Err(err), mlog.String("chanName", chanName))
+			return result, merr.Wrapf(err, "channel %s", chanName)
 		}
-		dms.mutex.RUnlock()
+		for cn, idList := range ids {
+			// idList should have length 1, just flat by iteration
+			for _, id := range idList {
+				result[cn] = id.Serialize()
+			}
+		}
 	}
 	return result, nil
 }
@@ -416,12 +446,12 @@ func genChannelNames(prefix string, num int64) []string {
 func parseChannelNameIndex(channelName string) int {
 	index := strings.LastIndex(channelName, "_")
 	if index < 0 {
-		log.Ctx(context.TODO()).Error("invalid channelName", zap.String("chanName", channelName))
+		mlog.Error(context.TODO(), "invalid channelName", mlog.String("chanName", channelName))
 		panic("invalid channel name: " + channelName)
 	}
 	index, err := strconv.Atoi(channelName[index+1:])
 	if err != nil {
-		log.Ctx(context.TODO()).Error("invalid channelName", zap.String("chanName", channelName), zap.Error(err))
+		mlog.Error(context.TODO(), "invalid channelName", mlog.String("chanName", channelName), mlog.Err(err))
 		panic("invalid channel name: " + channelName)
 	}
 	return index
@@ -445,7 +475,7 @@ func getNeedChanNum(setNum int, chanMap map[typeutil.UniqueID][]string) int {
 				panic("topic were empty")
 			}
 			if chanNameSet.Contain(topic) {
-				log.Ctx(context.TODO()).Error("duplicate topics are pre-created", zap.String("topic", topic))
+				mlog.Error(context.TODO(), "duplicate topics are pre-created", mlog.String("topic", topic))
 				panic("duplicate topic: " + topic)
 			}
 			chanNameSet.Insert(topic)
@@ -454,7 +484,7 @@ func getNeedChanNum(setNum int, chanMap map[typeutil.UniqueID][]string) int {
 		for _, chanNames := range chanMap {
 			for _, chanName := range chanNames {
 				if !chanNameSet.Contain(chanName) {
-					log.Ctx(context.TODO()).Error("invalid channel that is not in the list when pre-created topic", zap.String("chanName", chanName))
+					mlog.Error(context.TODO(), "invalid channel that is not in the list when pre-created topic", mlog.String("chanName", chanName))
 					panic("invalid chanName: " + chanName)
 				}
 			}

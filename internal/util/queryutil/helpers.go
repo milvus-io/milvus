@@ -14,15 +14,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// The merge/slice helpers in this file consume RetrieveResults produced by
+// segcore (and merged across query nodes), never raw user input, so every
+// data-shape assertion below classifies as ServiceInternal: a violation means
+// a segcore/Milvus bug, and must not be attributed to the user (cause="user")
+// or suppress cross-replica failover the way an InputError would.
+
 package queryutil
 
 import (
-	"fmt"
-
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -73,7 +78,7 @@ func buildMergedRetrieveResults(results []*internalpb.RetrieveResults, selectedR
 	for _, ref := range selectedRows {
 		refFields := len(results[ref.resultIdx].GetFieldsData())
 		if refFields != numFields {
-			return nil, fmt.Errorf(
+			return nil, merr.WrapErrServiceInternalMsg(
 				"FieldsData count mismatch: result[%d] has %d fields, expected %d",
 				ref.resultIdx, refFields, numFields)
 		}
@@ -147,7 +152,7 @@ func validateElementLevelConsistency(results []*internalpb.RetrieveResults, _ []
 
 	for i, r := range results {
 		if r.GetElementLevel() != isElementLevel {
-			return fmt.Errorf(
+			return merr.WrapErrServiceInternalMsg(
 				"inconsistent element-level flag: result[%d] has ElementLevel=%v, expected %v",
 				i, r.GetElementLevel(), isElementLevel)
 		}
@@ -155,7 +160,7 @@ func validateElementLevelConsistency(results []*internalpb.RetrieveResults, _ []
 			idsLen := typeutil.GetSizeOfIDs(r.GetIds())
 			indicesLen := len(r.GetElementIndices())
 			if indicesLen != idsLen {
-				return fmt.Errorf(
+				return merr.WrapErrServiceInternalMsg(
 					"element_indices length (%d) does not match ids length (%d) in result[%d]",
 					indicesLen, idsLen, i)
 			}
@@ -235,13 +240,13 @@ func buildMergedFieldData(results []*internalpb.RetrieveResults, selectedRows []
 	if isNullable {
 		validData := make([]bool, len(selectedRows))
 		for i, ref := range selectedRows {
-			vd := results[ref.resultIdx].GetFieldsData()[fieldIdx].GetValidData()
+			vd := typeutil.GetFieldDataValidData(results[ref.resultIdx].GetFieldsData()[fieldIdx])
 			if len(vd) > 0 && int(ref.rowIdx) < len(vd) {
 				validData[i] = vd[ref.rowIdx]
 			}
 			// ValidData absent or rowIdx out of bounds: keep false (null semantics)
 		}
-		newFd.ValidData = validData
+		typeutil.SetFieldDataValidData(newFd, validData)
 	}
 
 	return newFd, nil
@@ -411,7 +416,7 @@ func buildCompactIndices(results []*internalpb.RetrieveResults, fieldIdx int, is
 	for ri, r := range results {
 		numRows := typeutil.GetSizeOfIDs(r.GetIds())
 		fd := r.GetFieldsData()[fieldIdx]
-		vd := fd.GetValidData()
+		vd := typeutil.GetFieldDataValidData(fd)
 
 		if numRows == 0 {
 			indices[ri] = nil
@@ -428,14 +433,14 @@ func buildCompactIndices(results []*internalpb.RetrieveResults, fieldIdx int, is
 		// but that path is unreachable for merge inputs (HasRawData gate + empty IDs filtering).
 		// Therefore empty ValidData here is always a segcore bug, not a legitimate state.
 		if len(vd) == 0 {
-			return nil, fmt.Errorf(
+			return nil, merr.WrapErrServiceInternalMsg(
 				"buildCompactIndices: nullable vector field fid=%d name=%q has empty ValidData but numRows=%d in result[%d]; "+
 					"segcore must always provide ValidData for nullable fields with rows",
 				fd.GetFieldId(), fd.GetFieldName(), numRows, ri)
 		}
 
 		if len(vd) != numRows {
-			return nil, fmt.Errorf(
+			return nil, merr.WrapErrServiceInternalMsg(
 				"buildCompactIndices: nullable vector field fid=%d name=%q has len(ValidData)=%d but numRows=%d in result[%d]; "+
 					"segcore violated the nullable contract (len(ValidData) must equal numRows)",
 				fd.GetFieldId(), fd.GetFieldName(), len(vd), numRows, ri)
@@ -449,15 +454,15 @@ func buildCompactIndices(results []*internalpb.RetrieveResults, fieldIdx int, is
 
 func arrayOfVectorRowValid(fd *schemapb.FieldData, rowIdx int64, isNullable bool, numRows int, resultIdx int) (bool, error) {
 	if rowIdx < 0 {
-		return false, fmt.Errorf(
+		return false, merr.WrapErrServiceInternalMsg(
 			"arrayOfVectorRowValid: field fid=%d name=%q in result[%d] has invalid rowIdx=%d",
 			fd.GetFieldId(), fd.GetFieldName(), resultIdx, rowIdx)
 	}
 
-	validData := fd.GetValidData()
+	validData := typeutil.GetFieldDataValidData(fd)
 	if len(validData) == 0 {
 		if isNullable {
-			return false, fmt.Errorf(
+			return false, merr.WrapErrServiceInternalMsg(
 				"arrayOfVectorRowValid: nullable ArrayOfVector field fid=%d name=%q has empty ValidData but numRows=%d in result[%d]; "+
 					"segcore must always provide ValidData for nullable fields with rows",
 				fd.GetFieldId(), fd.GetFieldName(), numRows, resultIdx)
@@ -466,12 +471,12 @@ func arrayOfVectorRowValid(fd *schemapb.FieldData, rowIdx int64, isNullable bool
 	}
 
 	if int(rowIdx) >= len(validData) {
-		return false, fmt.Errorf(
+		return false, merr.WrapErrServiceInternalMsg(
 			"arrayOfVectorRowValid: ArrayOfVector field fid=%d name=%q in result[%d] has rowIdx=%d outside ValidData bounds len(ValidData)=%d",
 			fd.GetFieldId(), fd.GetFieldName(), resultIdx, rowIdx, len(validData))
 	}
 	if isNullable && numRows > 0 && len(validData) != numRows {
-		return false, fmt.Errorf(
+		return false, merr.WrapErrServiceInternalMsg(
 			"arrayOfVectorRowValid: nullable ArrayOfVector field fid=%d name=%q has len(ValidData)=%d but numRows=%d in result[%d]; "+
 				"segcore violated the nullable contract (len(ValidData) must equal numRows)",
 			fd.GetFieldId(), fd.GetFieldName(), len(validData), numRows, resultIdx)
@@ -576,7 +581,7 @@ func buildMergedVectorField(results []*internalpb.RetrieveResults, selectedRows 
 	// This indicates segcore returned truncated/malformed vector data.
 	vecDataOOB := func(ref rowRef, di int, dataLen int) error {
 		fd := results[ref.resultIdx].GetFieldsData()[fieldIdx]
-		return fmt.Errorf(
+		return merr.WrapErrServiceInternalMsg(
 			"buildMergedVectorField: vector data too short for %s field fid=%d name=%q in result[%d]: "+
 				"dataIdx=%d requires offset beyond data length %d (dim=%d, numRows=%d); segcore returned truncated data",
 			dataType, fd.GetFieldId(), fd.GetFieldName(), ref.resultIdx,
@@ -679,7 +684,7 @@ func buildMergedVectorField(results []*internalpb.RetrieveResults, selectedRows 
 			sparse := results[ref.resultIdx].GetFieldsData()[fieldIdx].GetVectors().GetSparseFloatVector()
 			if sparse == nil || di >= len(sparse.GetContents()) {
 				fd := results[ref.resultIdx].GetFieldsData()[fieldIdx]
-				return nil, fmt.Errorf(
+				return nil, merr.WrapErrServiceInternalMsg(
 					"buildMergedVectorField: sparse vector data missing for field fid=%d name=%q in result[%d]: "+
 						"dataIdx=%d but SparseFloatArray is nil or has only %d contents (numRows=%d); segcore returned truncated data",
 					fd.GetFieldId(), fd.GetFieldName(), ref.resultIdx,
@@ -740,14 +745,14 @@ func buildMergedVectorField(results []*internalpb.RetrieveResults, selectedRows 
 			}
 			va := fd.GetVectors().GetVectorArray()
 			if va == nil || len(va.GetData()) == 0 {
-				return nil, fmt.Errorf(
+				return nil, merr.WrapErrServiceInternalMsg(
 					"buildMergedVectorField: VectorArray data missing for field fid=%d name=%q in result[%d]: "+
 						"dataIdx=%d but VectorArray is nil or has no entries (numRows=%d); segcore returned truncated data",
 					fd.GetFieldId(), fd.GetFieldName(), ref.resultIdx,
 					di, typeutil.GetSizeOfIDs(results[ref.resultIdx].GetIds()))
 			}
 			if di >= len(va.GetData()) {
-				return nil, fmt.Errorf(
+				return nil, merr.WrapErrServiceInternalMsg(
 					"buildMergedVectorField: VectorArray data missing for field fid=%d name=%q in result[%d]: "+
 						"dataIdx=%d but VectorArray is nil or has only %d entries (numRows=%d); segcore returned truncated data",
 					fd.GetFieldId(), fd.GetFieldName(), ref.resultIdx,
@@ -834,7 +839,7 @@ func rangeSliceFieldData(fd *schemapb.FieldData, start, end int) (*schemapb.Fiel
 			Scalars: rangeSliceScalarField(fd.GetScalars(), start, end),
 		}
 	case *schemapb.FieldData_Vectors:
-		vectors, err := rangeSliceVectorField(fd.GetVectors(), start, end, fd.GetValidData())
+		vectors, err := rangeSliceVectorField(fd.GetVectors(), start, end, typeutil.GetFieldDataValidData(fd))
 		if err != nil {
 			return nil, err
 		}
@@ -843,8 +848,8 @@ func rangeSliceFieldData(fd *schemapb.FieldData, start, end int) (*schemapb.Fiel
 		}
 	}
 
-	if len(fd.GetValidData()) > 0 {
-		newFd.ValidData = fd.GetValidData()[start:end]
+	if validData := typeutil.GetFieldDataValidData(fd); len(validData) > 0 {
+		typeutil.SetFieldDataValidData(newFd, validData[start:end])
 	}
 
 	return newFd, nil
@@ -1033,7 +1038,7 @@ func sliceFieldData(fd *schemapb.FieldData, indices []int) (*schemapb.FieldData,
 			Scalars: sliceScalarField(fd.GetScalars(), indices),
 		}
 	case *schemapb.FieldData_Vectors:
-		vectors, err := sliceVectorField(fd.GetVectors(), indices, fd.GetValidData())
+		vectors, err := sliceVectorField(fd.GetVectors(), indices, typeutil.GetFieldDataValidData(fd))
 		if err != nil {
 			return nil, err
 		}
@@ -1043,13 +1048,12 @@ func sliceFieldData(fd *schemapb.FieldData, indices []int) (*schemapb.FieldData,
 	}
 
 	// Preserve ValidData (nullable bitmap) for nullable fields.
-	if len(fd.GetValidData()) > 0 {
-		validData := fd.GetValidData()
+	if validData := typeutil.GetFieldDataValidData(fd); len(validData) > 0 {
 		newValidData := make([]bool, len(indices))
 		for i, idx := range indices {
 			newValidData[i] = validData[idx]
 		}
-		newFd.ValidData = newValidData
+		typeutil.SetFieldDataValidData(newFd, newValidData)
 	}
 
 	return newFd, nil
@@ -1361,7 +1365,7 @@ func newRowSizeCalculator(result *internalpb.RetrieveResults) *rowSizeCalculator
 	}
 	for fieldIdx, fd := range fieldsData {
 		if typeutil.IsCompactNullableVectorFieldData(fd) {
-			indices, _ := typeutil.BuildNullableVectorDataIndices(fd.GetValidData())
+			indices, _ := typeutil.BuildNullableVectorDataIndices(typeutil.GetFieldDataValidData(fd))
 			c.compactIndices[fieldIdx] = indices
 		}
 	}
@@ -1387,7 +1391,7 @@ func calcRowSize(result *internalpb.RetrieveResults, rowIdx int64) int64 {
 func calcFieldElementSize(fd *schemapb.FieldData, rowIdx int) int64 {
 	var compactIdx []int
 	if typeutil.IsCompactNullableVectorFieldData(fd) {
-		compactIdx, _ = typeutil.BuildNullableVectorDataIndices(fd.GetValidData())
+		compactIdx, _ = typeutil.BuildNullableVectorDataIndices(typeutil.GetFieldDataValidData(fd))
 	}
 	return calcFieldElementSizeWithCompactIndex(fd, rowIdx, compactIdx)
 }
@@ -1494,7 +1498,7 @@ func calcFieldElementSizeWithCompactIndex(fd *schemapb.FieldData, rowIdx int, co
 // Returns (value, isNull)
 func getFieldValue(fd *schemapb.FieldData, rowIdx int) (any, bool) {
 	// Check valid_data for nullable fields
-	validData := fd.GetValidData()
+	validData := typeutil.GetFieldDataValidData(fd)
 	if len(validData) > rowIdx && !validData[rowIdx] {
 		return nil, true
 	}
@@ -1564,8 +1568,8 @@ func getRowCount(result *internalpb.RetrieveResults) int {
 	}
 
 	fd := result.GetFieldsData()[0]
-	if len(fd.GetValidData()) > 0 {
-		return len(fd.GetValidData())
+	if validData := typeutil.GetFieldDataValidData(fd); len(validData) > 0 {
+		return len(validData)
 	}
 	if fd.GetScalars() != nil {
 		switch data := fd.GetScalars().GetData().(type) {

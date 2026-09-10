@@ -37,6 +37,10 @@ AppendLoadFieldInfo(CLoadFieldDataInfo c_load_field_data_info,
                     int64_t field_id,
                     int64_t row_count);
 
+void
+SetLoadFieldDataInfoShard(CLoadFieldDataInfo c_load_field_data_info,
+                          const char* shard);
+
 CStatus
 SetLoadFieldInfoChildFields(CLoadFieldDataInfo c_load_field_data_info,
                             int64_t field_id,
@@ -49,10 +53,6 @@ AppendLoadFieldDataPath(CLoadFieldDataInfo c_load_field_data_info,
                         int64_t entries_num,
                         int64_t memory_size,
                         const char* file_path);
-
-void
-SetStorageVersion(CLoadFieldDataInfo c_load_field_data_info,
-                  int64_t storage_version);
 
 void
 EnableMmap(CLoadFieldDataInfo c_load_field_data_info,

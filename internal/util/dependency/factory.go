@@ -6,15 +6,16 @@ import (
 	"path/filepath"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const (
@@ -94,7 +95,7 @@ func (f *DefaultFactory) Init(params *paramtable.ComponentParam) {
 func (f *DefaultFactory) initMQ(standalone bool, params *paramtable.ComponentParam) error {
 	mqType := mustSelectMQType(standalone, params.MQCfg.Type.GetValue(), mqEnable{params.RocksmqEnable(), params.PulsarEnable(), params.KafkaEnable(), params.WoodpeckerEnable()})
 	metrics.RegisterMQType(mqType)
-	log.Info("try to init mq", zap.Bool("standalone", standalone), zap.String("mqType", mqType))
+	mlog.Info(context.TODO(), "try to init mq", mlog.Bool("standalone", standalone), mlog.String("mqType", mqType))
 
 	switch mqType {
 	case mqTypeRocksmq:
@@ -107,7 +108,7 @@ func (f *DefaultFactory) initMQ(standalone bool, params *paramtable.ComponentPar
 		f.msgStreamFactory = msgstream.NewWpmsFactory(&params.ServiceParam)
 	}
 	if f.msgStreamFactory == nil {
-		return errors.New("failed to create MQ: check the milvus log for initialization failures")
+		return merr.WrapErrServiceInternalMsg("failed to create MQ: check the milvus log for initialization failures")
 	}
 	return nil
 }
@@ -142,10 +143,10 @@ func mustSelectMQType(standalone bool, mqType string, enable mqEnable) string {
 // Validate mq type.
 func validateMQType(standalone bool, mqType string) error {
 	if mqType != mqTypeRocksmq && mqType != mqTypeKafka && mqType != mqTypePulsar && mqType != mqTypeWoodpecker {
-		return errors.Newf("mq type %s is invalid", mqType)
+		return merr.WrapErrParameterInvalidMsg("mq type %s is invalid", mqType)
 	}
 	if !standalone && mqType == mqTypeRocksmq {
-		return errors.Newf("mq %s is only valid in standalone mode")
+		return merr.WrapErrParameterInvalidMsg("mq %s is only valid in standalone mode", mqType)
 	}
 	return nil
 }
@@ -173,6 +174,14 @@ type Factory interface {
 }
 
 func HealthCheck(mqType string) *common.MQClusterStatus {
+	if mqType == mqTypeDefault {
+		// "default" is a placeholder meaning "auto-select by enabled MQs"; resolve
+		// it to the concrete type before probing. The same resolution already
+		// succeeded at factory init, so it cannot panic here on a running node.
+		params := paramtable.Get()
+		mqType = mustSelectMQType(paramtable.GetRole() == typeutil.StandaloneRole, mqType,
+			mqEnable{params.RocksmqEnable(), params.PulsarEnable(), params.KafkaEnable(), params.WoodpeckerEnable()})
+	}
 	clusterStatus := &common.MQClusterStatus{MqType: mqType}
 	switch mqType {
 	case mqTypeRocksmq:

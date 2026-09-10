@@ -27,6 +27,7 @@
 
 #include "common/Channel.h"
 #include "common/FieldData.h"
+#include "common/GroupChunk.h"
 #include "common/OpContext.h"
 #include "milvus-storage/common/metadata.h"
 #include "milvus-storage/filesystem/fs.h"
@@ -44,26 +45,12 @@ struct RowGroupBlock {
     }
 };
 
-const std::size_t MAX_ROW_GROUP_BLOCK_MEMORY = 16 << 20;
-
 // Strategy interface for row group splitting
 class RowGroupSplitStrategy {
  public:
     virtual ~RowGroupSplitStrategy() = default;
     virtual std::vector<RowGroupBlock>
     split(const std::vector<int64_t>& input_row_groups) = 0;
-};
-
-// Memory-based splitting strategy
-class MemoryBasedSplitStrategy : public RowGroupSplitStrategy {
- public:
-    explicit MemoryBasedSplitStrategy(
-        const milvus_storage::RowGroupMetadataVector& row_group_metadatas);
-    std::vector<RowGroupBlock>
-    split(const std::vector<int64_t>& input_row_groups) override;
-
- private:
-    const milvus_storage::RowGroupMetadataVector& row_group_metadatas_;
 };
 
 // Parallel degree based splitting strategy
@@ -100,14 +87,20 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
 
 // ---- Cell-batch loading ----
 
-// The channel capacity multiplier relative to pool size.
-// The bounded channel holds at most (pool_size * kChannelCapacityMultiplier) items,
-// providing backpressure to producer threads while keeping them busy.
-constexpr double kChannelCapacityMultiplier = 1.5;
+constexpr int64_t kDefaultFieldDataLoadBatchTargetBytes =
+    DEFAULT_FIELD_MAX_MEMORY_LIMIT / 4;
 
-// Safety margin for loading overhead upper bound estimation.
-// Covers Arrow Table alignment overhead, metadata, and other estimation errors.
-constexpr double kLoadingOverheadInflationRatio = 1.2;
+constexpr int64_t kDefaultFieldDataReadWindowBytes =
+    DEFAULT_INDEX_FILE_SLICE_SIZE;
+
+int64_t
+FieldDataLoadBatchTargetBytes();
+
+int64_t
+FieldDataLoadBatchSplitTargetBytes();
+
+int64_t
+FieldDataReadWindowBytes();
 
 // A cell specification: identifies a cell's location within a specific file.
 struct CellSpec {
@@ -115,23 +108,25 @@ struct CellSpec {
     size_t file_idx;          // index into the remote_files list
     int64_t local_rg_offset;  // file-local row group start offset
     int64_t rg_count;         // number of row groups in this cell
-    int64_t memory_size = 0;  // estimated Arrow memory in bytes; 0 = unknown
+    int64_t memory_size = 0;  // estimated final loaded memory in bytes
+    int64_t loading_overhead_size =
+        0;  // extra transient bytes during loading; 0 = memory_size
 };
 
-// Result of loading a single cell: cid + the arrow tables read.
-struct CellLoadResult {
+struct LoadedCell {
     int64_t cid;
-    std::vector<std::shared_ptr<arrow::Table>> tables;
+    std::unique_ptr<milvus::GroupChunk> chunk;
 };
 
-using CellReaderChannel = milvus::Channel<std::shared_ptr<CellLoadResult>>;
+using LoadedCellBatch = std::vector<LoadedCell>;
+using CellLoadFuture = std::future<LoadedCellBatch>;
 
 // Creates a batch reader for a range of contiguous row groups.
 // Returns all row groups as a vector of tables in one call.
 // batch_key: grouping key (file_idx for files, 0 for single reader)
 // rg_offset: start row group index for this batch
 // total_rg_count: total row groups across all cells in this batch
-// reader_memory_limit: memory budget for this batch's reader
+// reader_memory_limit: per-reader window size for this batch
 using BatchReaderFactory =
     std::function<arrow::Result<std::vector<std::shared_ptr<arrow::Table>>>(
         size_t batch_key,
@@ -139,31 +134,40 @@ using BatchReaderFactory =
         int64_t total_rg_count,
         int64_t reader_memory_limit)>;
 
+using CellFinalizeFunc = std::function<std::unique_ptr<milvus::GroupChunk>(
+    const std::vector<std::shared_ptr<arrow::Table>>& tables, int64_t cid)>;
+
 /**
  * Load cells in batches using a pluggable reader factory. Cells are sorted by
  * (file_idx, local_rg_offset) and grouped into IO-merged batches.
- * Each completed cell is pushed to the channel immediately, enabling
- * streaming consumption without accumulating all ArrowTables.
+ * Each completed cell is finalized and returned in its batch future.
+ * Batch admission waits on the global transient memory budget before
+ * submitting work to the load pool. After finalize_cell returns, the batch task
+ * releases transient Arrow tables before storing the result in the future.
  *
  * @param op_ctx operation context for cancellation
  * @param cell_specs cell specifications (sorted internally)
  * @param reader_factory factory that reads all row groups for a batch
- * @param channel channel to receive loaded cell data; closed when all done
- * @param memory_limit total memory limit for readers
+ * @param memory_limit split target for per-batch loading overhead and
+ * per-reader upper bound for final loaded memory. A global transient memory
+ * budget gates concurrent batch loading across calls.
  * @param priority load priority
- * @return vector of futures for the batch loading tasks
+ * @param finalize_cell converts loaded Arrow tables into the final GroupChunk
+ * before the cell is stored in the batch result
+ * @return futures containing finalized cells for each batch
  */
-std::vector<std::future<void>>
+std::vector<CellLoadFuture>
 LoadCellBatchAsync(milvus::OpContext* op_ctx,
                    std::vector<CellSpec> cell_specs,
                    BatchReaderFactory reader_factory,
-                   std::shared_ptr<CellReaderChannel>& channel,
                    int64_t memory_limit,
-                   milvus::proto::common::LoadPriority priority =
-                       milvus::proto::common::LoadPriority::HIGH);
+                   milvus::proto::common::LoadPriority priority,
+                   CellFinalizeFunc finalize_cell);
 
 /**
- * Creates a BatchReaderFactory that reads from Parquet files via FileRowGroupReader.
+ * Creates a BatchReaderFactory that reads from Parquet files via
+ * FileRowGroupReader. This factory uses one reader for the requested contiguous
+ * row group range and leaves row group internals to the storage/Arrow reader.
  * The returned factory owns a copy of remote_files, so the caller's vector
  * need not outlive the factory.
  */

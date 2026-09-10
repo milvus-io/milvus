@@ -16,17 +16,14 @@
 
 #pragma once
 
-#include <folly/executors/CPUThreadPoolExecutor.h>
 #include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdint>
 #include <cstring>
-#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
-#include <thread>
 #include <type_traits>
 #include <utility>
 
@@ -36,6 +33,8 @@
 #include "pb/common.pb.h"
 
 namespace milvus::storage {
+
+class FileWriterTestAccessor;
 
 namespace io {
 enum class Priority { HIGH = 0, MIDDLE = 1, LOW = 2, NR_PRIORITY = 3 };
@@ -55,13 +54,11 @@ class WriteRateLimiter {
         return instance;
     }
 
-    void
-    Configure(int64_t refill_period_us,
-              int64_t avg_bps,
-              int64_t max_burst_bps,
-              int32_t high_priority_ratio,
-              int32_t middle_priority_ratio,
-              int32_t low_priority_ratio) {
+    // Validates rate settings without changing shared limiter state.
+    static void
+    ValidateConfig(int64_t refill_period_us,
+                   int64_t avg_bps,
+                   int64_t max_burst_bps) {
         if (refill_period_us <= 0 || avg_bps <= 0 || max_burst_bps <= 0 ||
             avg_bps > max_burst_bps) {
             ThrowInfo(ErrorCode::InvalidParameter,
@@ -72,6 +69,16 @@ class WriteRateLimiter {
                       avg_bps,
                       max_burst_bps);
         }
+    }
+
+    void
+    Configure(int64_t refill_period_us,
+              int64_t avg_bps,
+              int64_t max_burst_bps,
+              int32_t high_priority_ratio,
+              int32_t middle_priority_ratio,
+              int32_t low_priority_ratio) {
+        ValidateConfig(refill_period_us, avg_bps, max_burst_bps);
         std::unique_lock<std::mutex> lock(mutex_);
         // avoid too small refill period, 1ms is used as the minimum refill period
         refill_period_us_ = std::max<int64_t>(1000, refill_period_us);
@@ -163,18 +170,6 @@ class WriteRateLimiter {
         return refill_period_us_;
     }
 
-    size_t
-    GetBytesPerPeriod() const {
-        return refill_bytes_per_period_;
-    }
-
-    void
-    Reset() {
-        std::unique_lock<std::mutex> lock(mutex_);
-        available_bytes_ = refill_bytes_per_period_;
-        last_refill_time_ = std::chrono::steady_clock::now();
-    }
-
     WriteRateLimiter(const WriteRateLimiter&) = delete;
     WriteRateLimiter&
     operator=(const WriteRateLimiter&) = delete;
@@ -201,7 +196,8 @@ class WriteRateLimiter {
 
 /**
  * FileWriter is a class that sequentially writes data to new files, designed specifically for saving temporary data downloaded from remote storage.
- * It supports both buffered and direct I/O, and can use an additional thread pool to write data to files.
+ * It supports both buffered and direct I/O. All methods execute synchronously
+ * on the calling thread.
  * FileWriter is not thread-safe, so you should take care of the thread safety when using the same FileWriter object in multiple threads.
  * For now, only QueryNode uses FileWriter to write data to files. If you want to use it in DataNode, you need to add it to the configuration.
  *
@@ -231,9 +227,14 @@ class FileWriter {
 
     ~FileWriter();
 
+    // Synchronously appends bytes, subject to the global disk-write limit.
+    void
+    SetFdatasyncOnFinish();
+
     void
     Write(const void* data, size_t size);
 
+    // Flushes pending bytes, closes the file, and returns its logical size.
     size_t
     Finish();
 
@@ -251,8 +252,13 @@ class FileWriter {
     GetBufferSize();
 
  private:
+    friend class FileWriterTestAccessor;
+
     void
     WriteInternal(const void* data, size_t nbyte);
+
+    void
+    SyncFileData();
 
     void
     FlushWithDirectIO();
@@ -275,13 +281,14 @@ class FileWriter {
     std::string filename_{""};
     size_t file_size_{0};
 
-    bool use_writer_pool_{false};
-
     // for direct io
     bool use_direct_io_{false};
     void* aligned_buf_{nullptr};
     size_t capacity_{0};
     size_t offset_{0};
+    bool fdatasync_on_finish_{false};
+    // Used by FileWriterTestAccessor to block the sync point deterministically.
+    std::function<void()> sync_file_data_hook_for_test_;
 
     // for global configuration
     static WriteMode
@@ -293,86 +300,43 @@ class FileWriter {
     io::WriteRateLimiter& rate_limiter_;
 };
 
-class FileWriteWorkerPool {
+class PositionedFileWriter {
  public:
-    FileWriteWorkerPool() = default;
+    explicit PositionedFileWriter(std::string filename,
+                                  size_t file_size,
+                                  io::Priority priority = io::Priority::MIDDLE);
 
-    static FileWriteWorkerPool&
-    GetInstance() {
-        static FileWriteWorkerPool instance;
-        return instance;
-    }
+    ~PositionedFileWriter();
 
-    static void
-    Configure(int nr_worker) {
-        auto& instance = GetInstance();
-        instance.SetWorker(nr_worker);
-    }
+    PositionedFileWriter(const PositionedFileWriter&) = delete;
+    PositionedFileWriter&
+    operator=(const PositionedFileWriter&) = delete;
 
     void
-    SetWorker(int nr_worker) {
-        if (nr_worker < 0) {
-            LOG_WARN(
-                "Invalid number of worker, expected: > 0, got: {}, "
-                "set to 0",
-                nr_worker);
-            nr_worker = 0;
-        } else if (nr_worker > std::thread::hardware_concurrency()) {
-            LOG_WARN(
-                "Invalid number of worker, expected: <= {}, got: {}, "
-                "set to {}",
-                std::thread::hardware_concurrency(),
-                nr_worker,
-                std::thread::hardware_concurrency());
-            nr_worker = std::thread::hardware_concurrency();
-        }
-        std::shared_ptr<folly::CPUThreadPoolExecutor> old_executor = nullptr;
-        {
-            std::lock_guard<std::mutex> lock(executor_mutex_);
-            old_executor = executor_;
-            if (nr_worker > 0) {
-                executor_ =
-                    std::make_shared<folly::CPUThreadPoolExecutor>(nr_worker);
-            } else {
-                executor_ = nullptr;
-            }
-        }
-        if (old_executor != nullptr) {
-            old_executor->stop();
-            old_executor->join();
-        }
-        LOG_INFO("Set the number of write worker to {}", nr_worker);
-    }
+    WriteAt(size_t file_offset, const void* data, size_t size);
 
-    bool
-    AddTask(std::function<void()> task) {
-        std::lock_guard<std::mutex> lock(executor_mutex_);
-        if (executor_ == nullptr) {
-            return false;
-        }
-        executor_->add(std::move(task));
-        return true;
-    }
-
-    bool
-    HasPool() const {
-        // no lock here, so it's not thread-safe
-        // but it's ok because we still can write without the pool
-        return executor_ != nullptr;
-    }
-
-    ~FileWriteWorkerPool() {
-        std::lock_guard<std::mutex> lock(executor_mutex_);
-        if (executor_ != nullptr) {
-            executor_->stop();
-            executor_->join();
-            executor_ = nullptr;
-        }
-    }
+    size_t
+    Finish();
 
  private:
-    std::shared_ptr<folly::CPUThreadPoolExecutor> executor_{nullptr};
-    std::mutex executor_mutex_{};
+    void
+    WriteBufferedAt(size_t file_offset, const void* data, size_t size);
+
+    void
+    WriteDirectAlignedAt(size_t file_offset, const void* data, size_t size);
+
+    void
+    Cleanup() noexcept;
+
+    int fd_{-1};
+    std::string filename_{""};
+    size_t file_size_{0};
+    FileWriter::WriteMode mode_{FileWriter::WriteMode::BUFFERED};
+    bool use_direct_io_{false};
+    bool finished_{false};
+
+    io::Priority priority_;
+    io::WriteRateLimiter& rate_limiter_;
 };
 
 }  // namespace milvus::storage

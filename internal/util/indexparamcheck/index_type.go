@@ -12,11 +12,11 @@
 package indexparamcheck
 
 import (
-	"fmt"
 	"strconv"
 
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // IndexType string.
@@ -34,6 +34,7 @@ const (
 	IndexHybrid   IndexType = "HYBRID" // BITMAP + INVERTED
 	IndexINVERTED IndexType = "INVERTED"
 	IndexNGRAM    IndexType = "NGRAM"
+	IndexFMINDEX  IndexType = "FMINDEX"
 	IndexRTREE    IndexType = "RTREE"
 
 	AutoIndex IndexType = "AUTOINDEX"
@@ -41,7 +42,8 @@ const (
 
 func IsScalarIndexType(indexType IndexType) bool {
 	return indexType == IndexSTLSORT || indexType == IndexTRIE || indexType == IndexTrie ||
-		indexType == IndexBitmap || indexType == IndexHybrid || indexType == IndexINVERTED
+		indexType == IndexBitmap || indexType == IndexHybrid || indexType == IndexINVERTED ||
+		indexType == IndexNGRAM || indexType == IndexFMINDEX
 }
 
 func IsGpuIndex(indexType IndexType) bool {
@@ -66,7 +68,8 @@ func IsScalarMmapIndex(indexType IndexType) bool {
 		indexType == IndexBitmap ||
 		indexType == IndexHybrid ||
 		indexType == IndexTrie ||
-		indexType == IndexNGRAM
+		indexType == IndexNGRAM ||
+		indexType == IndexFMINDEX
 }
 
 func ValidateMmapIndexParams(indexType IndexType, indexParams map[string]string) error {
@@ -76,11 +79,11 @@ func ValidateMmapIndexParams(indexType IndexType, indexParams map[string]string)
 	}
 	enable, err := strconv.ParseBool(mmapEnable)
 	if err != nil {
-		return fmt.Errorf("invalid %s value: %s, expected: true, false", common.MmapEnabledKey, mmapEnable)
+		return merr.WrapErrParameterInvalidMsg("invalid %s value: %s, expected: true, false", common.MmapEnabledKey, mmapEnable)
 	}
 	mmapSupport := indexType == AutoIndex || IsVectorMmapIndex(indexType) || IsScalarMmapIndex(indexType)
 	if enable && !mmapSupport {
-		return fmt.Errorf("index type %s does not support mmap", indexType)
+		return merr.WrapErrParameterInvalidMsg("index type %s does not support mmap", indexType)
 	}
 	return nil
 }
@@ -92,10 +95,10 @@ func ValidateOffsetCacheIndexParams(indexType IndexType, indexParams map[string]
 	}
 	enable, err := strconv.ParseBool(offsetCacheEnable)
 	if err != nil {
-		return fmt.Errorf("invalid %s value: %s, expected: true, false", common.IndexOffsetCacheEnabledKey, offsetCacheEnable)
+		return merr.WrapErrParameterInvalidMsg("invalid %s value: %s, expected: true, false", common.IndexOffsetCacheEnabledKey, offsetCacheEnable)
 	}
 	if enable && !IsOffsetCacheSupported(indexType) {
-		return fmt.Errorf("only bitmap index support %s now", common.IndexOffsetCacheEnabledKey)
+		return merr.WrapErrParameterInvalidMsg("only bitmap index support %s now", common.IndexOffsetCacheEnabledKey)
 	}
 	return nil
 }

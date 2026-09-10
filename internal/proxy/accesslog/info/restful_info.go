@@ -19,7 +19,9 @@ package info
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -28,6 +30,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/requestutil"
 )
 
@@ -36,7 +40,11 @@ const (
 	ContextReturnCode    = "code"
 	ContextReturnMessage = "message"
 	ContextRequest       = "request"
-	ContextToken         = "token"
+	// ContextErrorType carries the merr classification (input_error/system_error)
+	// set by the REST handler when it holds the error object; must match the key
+	// written in internal/distributed/proxy/httpserver.
+	ContextErrorType = "error_type"
+	ContextToken     = "token"
 )
 
 type RestfulInfo struct {
@@ -46,7 +54,7 @@ type RestfulInfo struct {
 	req    interface{}
 
 	// runtime set info
-	actualConsistencyLevel *commonpb.ConsistencyLevel
+	actualConsistencyLevel atomic.Pointer[commonpb.ConsistencyLevel]
 }
 
 func NewRestfulInfo(ctx *gin.Context) *RestfulInfo {
@@ -93,6 +101,13 @@ func (i *RestfulInfo) TimeEnd() string {
 
 func (i *RestfulInfo) MethodName() string {
 	return i.params.Path
+}
+
+func (i *RestfulInfo) MethodNameForFormatter() string {
+	if i.ctx == nil || i.ctx.Request == nil || i.ctx.Request.URL == nil {
+		return i.MethodName()
+	}
+	return i.ctx.Request.URL.Path
 }
 
 func (i *RestfulInfo) Address() string {
@@ -159,7 +174,20 @@ func (i *RestfulInfo) ErrorMsg() string {
 }
 
 func (i *RestfulInfo) ErrorType() string {
-	return Unknown
+	if et, ok := i.ctx.Get(ContextErrorType); ok {
+		if s, ok := et.(string); ok {
+			return s
+		}
+	}
+	// Aborts that never reached the proxy call (request binding / local
+	// validation) only stored the wire code; recover the sentinel's baked
+	// classification from it. Success rows report "" like the gRPC access log.
+	if code, ok := i.ctx.Get(ContextReturnCode); ok {
+		if c, ok := code.(int32); ok && c != 0 {
+			return merr.ErrorTypeOfCode(c).String()
+		}
+	}
+	return ""
 }
 
 func (i *RestfulInfo) SdkVersion() string {
@@ -176,10 +204,26 @@ func (i *RestfulInfo) DbName() string {
 
 func (i *RestfulInfo) CollectionName() string {
 	name, ok := requestutil.GetCollectionNameFromRequest(i.req)
-	if !ok {
-		return Unknown
+	if ok {
+		return name.(string)
 	}
-	return name.(string)
+
+	// requests such as Flush/ShowCollections carry a list of collection names
+	names, ok := requestutil.GetCollectionNamesFromRequest(i.req)
+	if ok {
+		return fmt.Sprint(names.([]string))
+	}
+
+	// requests that reference collections via non-standard fields
+	switch req := i.req.(type) {
+	case *milvuspb.RenameCollectionRequest:
+		// rename references both the source and target collection
+		return fmt.Sprintf("%s->%s", req.GetOldName(), req.GetNewName())
+	case *milvuspb.BatchDescribeCollectionRequest:
+		return fmt.Sprint(req.GetCollectionName())
+	}
+
+	return Unknown
 }
 
 func (i *RestfulInfo) PartitionName() string {
@@ -223,8 +267,8 @@ func (i *RestfulInfo) OutputFields() string {
 
 func (i *RestfulInfo) ConsistencyLevel() string {
 	// return actual consistency level if set
-	if i.actualConsistencyLevel != nil {
-		return i.actualConsistencyLevel.String()
+	if acl := i.actualConsistencyLevel.Load(); acl != nil {
+		return acl.String()
 	}
 	level, ok := requestutil.GetConsistencyLevelFromRequst(i.req)
 	if ok {
@@ -273,12 +317,25 @@ func (i *RestfulInfo) QueryParams() string {
 	return Unknown
 }
 
+// ClientRequestTime returns client-side request time string.
+// REST clients pass it via the same key as gRPC metadata, but as an HTTP header.
 func (i *RestfulInfo) ClientRequestTime() string {
-	return Unknown
+	if i.ctx == nil || i.ctx.Request == nil {
+		return Unknown
+	}
+	timestamp := i.ctx.GetHeader(common.ClientRequestMsecKey)
+	if timestamp == "" {
+		return Unknown
+	}
+	unixmsec, err := strconv.ParseInt(timestamp, 10, 64)
+	if err != nil {
+		return Unknown
+	}
+	return time.UnixMilli(unixmsec).Format(timeFormat)
 }
 
 func (i *RestfulInfo) SetActualConsistencyLevel(acl commonpb.ConsistencyLevel) {
-	i.actualConsistencyLevel = &acl
+	i.actualConsistencyLevel.Store(&acl)
 }
 
 func (i *RestfulInfo) TemplateValueLength() string {

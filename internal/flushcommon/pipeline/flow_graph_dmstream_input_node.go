@@ -21,14 +21,12 @@ import (
 	"fmt"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
@@ -66,8 +64,8 @@ func createNewInputFromDispatcher(initCtx context.Context,
 	schema *schemapb.CollectionSchema,
 	dbProperties []*commonpb.KeyValuePair,
 ) (<-chan *msgstream.MsgPack, error) {
-	log := log.With(zap.Int64("nodeID", paramtable.GetNodeID()),
-		zap.String("vchannel", vchannel))
+	log := mlog.With(mlog.FieldNodeID(paramtable.GetNodeID()),
+		mlog.FieldVChannel(vchannel))
 
 	var (
 		input <-chan *msgstream.MsgPack
@@ -83,17 +81,17 @@ func createNewInputFromDispatcher(initCtx context.Context,
 			SubPos:   common.SubscriptionPositionUnknown,
 		})
 		if err != nil {
-			log.Warn("datanode consume failed after retried", zap.Error(err))
+			log.Warn(initCtx, "datanode consume failed after retried", mlog.Err(err))
 			dispatcherClient.Deregister(vchannel)
 			return nil, err
 		}
 
-		log.Info("datanode seek successfully when register to msgDispatcher",
-			zap.ByteString("msgID", seekPos.GetMsgID()),
-			zap.Stringer("walName", seekPos.WALName),
-			zap.Time("tsTime", tsoutil.PhysicalTime(seekPos.GetTimestamp())),
-			zap.Duration("tsLag", time.Since(tsoutil.PhysicalTime(seekPos.GetTimestamp()))),
-			zap.Duration("dur", time.Since(start)))
+		log.Info(initCtx, "datanode seek successfully when register to msgDispatcher",
+			mlog.ByteString("msgID", seekPos.GetMsgID()),
+			mlog.Stringer("walName", seekPos.WALName),
+			mlog.Time("tsTime", tsoutil.PhysicalTime(seekPos.GetTimestamp())),
+			mlog.Duration("tsLag", time.Since(tsoutil.PhysicalTime(seekPos.GetTimestamp()))),
+			mlog.Duration("dur", time.Since(start)))
 		return input, err
 	}
 
@@ -103,11 +101,11 @@ func createNewInputFromDispatcher(initCtx context.Context,
 		SubPos:   common.SubscriptionPositionEarliest,
 	})
 	if err != nil {
-		log.Warn("datanode consume failed after retried", zap.Error(err))
+		log.Warn(initCtx, "datanode consume failed after retried", mlog.Err(err))
 		dispatcherClient.Deregister(vchannel)
 		return nil, err
 	}
 
-	log.Info("datanode consume successfully when register to msgDispatcher")
+	log.Info(initCtx, "datanode consume successfully when register to msgDispatcher")
 	return input, err
 }

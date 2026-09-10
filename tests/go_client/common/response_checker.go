@@ -8,17 +8,15 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
-	// "github.com/twpayne/go-geom/encoding/wkb"
-	// "github.com/twpayne/go-geom/encoding/wkt"
-	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/client/v2/column"
-	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/client/v2/index"
-	client "github.com/milvus-io/milvus/client/v2/milvusclient"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/client/v3/column"
+	"github.com/milvus-io/milvus/client/v3/entity"
+	"github.com/milvus-io/milvus/client/v3/index"
+	client "github.com/milvus-io/milvus/client/v3/milvusclient"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
 func trace() string {
@@ -43,7 +41,7 @@ func CheckErr(t *testing.T, actualErr error, expErrNil bool, expErrorMsg ...stri
 		require.Error(t, actualErr, trace())
 		switch len(expErrorMsg) {
 		case 0:
-			log.Fatal("expect error message should not be empty", zap.String("trace", trace()))
+			mlog.Fatal(context.TODO(), "expect error message should not be empty", mlog.String("trace", trace()))
 		case 1:
 			require.ErrorContains(t, actualErr, expErrorMsg[0], trace())
 		default:
@@ -56,6 +54,37 @@ func CheckErr(t *testing.T, actualErr error, expErrNil bool, expErrorMsg ...stri
 			if !contains {
 				t.Fatalf("CheckErr failed, actualErr doesn't contains any expErrorMsg, actual msg:%s, trace:%s", actualErr, trace())
 			}
+		}
+	}
+}
+
+func IsTSafeStalledError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "tsafe stalled")
+}
+
+func RetryOnTSafeStalled(ctx context.Context, operation func() error) error {
+	return retryOnTSafeStalled(ctx, 30*time.Second, time.Second, operation)
+}
+
+func retryOnTSafeStalled(ctx context.Context, timeout time.Duration, interval time.Duration, operation func() error) error {
+	var err error
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		err = operation()
+		if !IsTSafeStalledError(err) {
+			return err
+		}
+
+		select {
+		case <-ctx.Done():
+			return err
+		case <-deadline.C:
+			return err
+		case <-ticker.C:
 		}
 	}
 }
@@ -83,8 +112,8 @@ func EqualColumn(t *testing.T, columnA column.Column, columnB column.Column) {
 	case entity.FieldTypeVarChar:
 		require.ElementsMatch(t, columnA.(*column.ColumnVarChar).Data(), columnB.(*column.ColumnVarChar).Data())
 	case entity.FieldTypeJSON:
-		log.Debug("data", zap.String("name", columnA.Name()), zap.Any("type", columnA.Type()), zap.Any("data", columnA.FieldData()))
-		log.Debug("data", zap.String("name", columnB.Name()), zap.Any("type", columnB.Type()), zap.Any("data", columnB.FieldData()))
+		mlog.Debug(context.TODO(), "data", mlog.String("name", columnA.Name()), mlog.Any("type", columnA.Type()), mlog.Any("data", columnA.FieldData()))
+		mlog.Debug(context.TODO(), "data", mlog.String("name", columnB.Name()), mlog.Any("type", columnB.Type()), mlog.Any("data", columnB.FieldData()))
 		require.Equal(t, reflect.TypeOf(columnA), reflect.TypeOf(columnB))
 		switch _v := columnA.(type) {
 		case *column.ColumnDynamic:
@@ -92,7 +121,7 @@ func EqualColumn(t *testing.T, columnA column.Column, columnB column.Column) {
 		case *column.ColumnJSONBytes:
 			require.ElementsMatch(t, columnA.(*column.ColumnJSONBytes).Data(), columnB.(*column.ColumnJSONBytes).Data())
 		default:
-			log.Warn("columnA type", zap.String("name", columnB.Name()), zap.Any("type", _v))
+			mlog.Warn(context.TODO(), "columnA type", mlog.String("name", columnB.Name()), mlog.Any("type", _v))
 		}
 	// case entity.FieldTypeGeometry:
 	// 	// currently proxy transform wkb to wkt,the query output wkt has different precision with client input(omit trailing zeros),and omit omissible bracket
@@ -119,7 +148,7 @@ func EqualColumn(t *testing.T, columnA column.Column, columnB column.Column) {
 	case entity.FieldTypeArray:
 		EqualArrayColumn(t, columnA, columnB)
 	default:
-		log.Info("Support column type is:", zap.Any("FieldType", []entity.FieldType{
+		mlog.Info(context.TODO(), "Support column type is:", mlog.Any("FieldType", []entity.FieldType{
 			entity.FieldTypeBool,
 			entity.FieldTypeInt8, entity.FieldTypeInt16, entity.FieldTypeInt32,
 			entity.FieldTypeInt64, entity.FieldTypeFloat, entity.FieldTypeDouble, entity.FieldTypeString,
@@ -151,8 +180,8 @@ func EqualArrayColumn(t *testing.T, columnA column.Column, columnB column.Column
 	case *column.ColumnVarCharArray:
 		require.ElementsMatch(t, columnA.(*column.ColumnVarCharArray).Data(), columnB.(*column.ColumnVarCharArray).Data())
 	default:
-		log.Debug("columnA type is", zap.Any("type", _type))
-		log.Info("Support array element type is:", zap.Any("FieldType", []entity.FieldType{
+		mlog.Debug(context.TODO(), "columnA type is", mlog.Any("type", _type))
+		mlog.Info(context.TODO(), "Support array element type is:", mlog.Any("FieldType", []entity.FieldType{
 			entity.FieldTypeBool, entity.FieldTypeInt8, entity.FieldTypeInt16,
 			entity.FieldTypeInt32, entity.FieldTypeInt64, entity.FieldTypeFloat, entity.FieldTypeDouble, entity.FieldTypeVarChar,
 		}))
@@ -173,10 +202,10 @@ func CheckFieldsNullable(t *testing.T, expNullableFields []string, actualSchema 
 // CheckFieldsDefaultValue check schema nullable fields and default value fields
 func CheckFieldsDefaultValue(t *testing.T, expDefaultValueFields map[string]interface{}, actualSchema *entity.Schema) {
 	if len(expDefaultValueFields) == 0 {
-		log.Warn("expDefaultValueFields is empty")
+		mlog.Warn(context.TODO(), "expDefaultValueFields is empty")
 		return
 	}
-	log.Info("CheckFieldsDefaultValue", zap.Any("expDefaultValueFields", expDefaultValueFields), zap.Any("actualSchema", actualSchema))
+	mlog.Info(context.TODO(), "CheckFieldsDefaultValue", mlog.Any("expDefaultValueFields", expDefaultValueFields), mlog.Any("actualSchema", actualSchema))
 	actualDefaultValueFields := make([]string, 0)
 	// check expDefaultValueFields is in actualSchema.Fields and default value is equal to expDefaultValueFields
 	for _, field := range actualSchema.Fields {
@@ -197,7 +226,7 @@ func CheckFieldsDefaultValue(t *testing.T, expDefaultValueFields map[string]inte
 				require.Equal(t, expDefaultValueFields[field.Name], field.DefaultValue.GetStringData())
 			}
 		} else {
-			log.Warn("CheckFieldsDefaultValue: field skip check", zap.String("fieldName", field.Name))
+			mlog.Warn(context.TODO(), "CheckFieldsDefaultValue: field skip check", mlog.String("fieldName", field.Name))
 		}
 	}
 	actualDefaultValueFieldsKeys := make([]string, 0, len(expDefaultValueFields))
@@ -219,7 +248,7 @@ func CheckInsertResult(t *testing.T, expIDs column.Column, insertRes client.Inse
 	case entity.FieldTypeVarChar:
 		require.ElementsMatch(t, actualIDs.(*column.ColumnVarChar).Data(), expIDs.(*column.ColumnVarChar).Data())
 	default:
-		log.Info("The primary field only support ", zap.Any("type", []entity.FieldType{entity.FieldTypeInt64, entity.FieldTypeVarChar}))
+		mlog.Info(context.TODO(), "The primary field only support ", mlog.Any("type", []entity.FieldType{entity.FieldTypeInt64, entity.FieldTypeVarChar}))
 	}
 }
 
@@ -229,18 +258,18 @@ func CheckOutputFields(t *testing.T, expFields []string, actualColumns []column.
 	for _, actualColumn := range actualColumns {
 		actualFields = append(actualFields, actualColumn.Name())
 	}
-	log.Debug("CheckOutputFields", zap.Any("expFields", expFields), zap.Any("actualFields", actualFields))
+	mlog.Debug(context.TODO(), "CheckOutputFields", mlog.Any("expFields", expFields), mlog.Any("actualFields", actualFields))
 	require.ElementsMatchf(t, expFields, actualFields, fmt.Sprintf("Expected search output fields: %v, actual: %v", expFields, actualFields))
 }
 
 // CheckSearchResult check search result, check nq, topk, ids, score
 func CheckSearchResult(t *testing.T, actualSearchResults []client.ResultSet, expNq int, expTopK int) {
-	require.Equalf(t, len(actualSearchResults), expNq, fmt.Sprintf("Expected nq=%d, actual SearchResultsLen=%d", expNq, len(actualSearchResults)))
+	require.Equalf(t, expNq, len(actualSearchResults), fmt.Sprintf("Expected nq=%d, actual SearchResultsLen=%d", expNq, len(actualSearchResults)))
 	require.Len(t, actualSearchResults, expNq)
 	for _, actualSearchResult := range actualSearchResults {
-		require.Equalf(t, actualSearchResult.ResultCount, expTopK, fmt.Sprintf("Expected topK=%d, actual ResultCount=%d", expTopK, actualSearchResult.ResultCount))
-		require.Equalf(t, actualSearchResult.IDs.Len(), expTopK, fmt.Sprintf("Expected topK=%d, actual IDsLen=%d", expTopK, actualSearchResult.IDs.Len()))
-		require.Equalf(t, len(actualSearchResult.Scores), expTopK, fmt.Sprintf("Expected topK=%d, actual ScoresLen=%d", expTopK, len(actualSearchResult.Scores)))
+		require.Equalf(t, expTopK, actualSearchResult.ResultCount, fmt.Sprintf("Expected topK=%d, actual ResultCount=%d", expTopK, actualSearchResult.ResultCount))
+		require.Equalf(t, expTopK, actualSearchResult.IDs.Len(), fmt.Sprintf("Expected topK=%d, actual IDsLen=%d", expTopK, actualSearchResult.IDs.Len()))
+		require.Equalf(t, expTopK, len(actualSearchResult.Scores), fmt.Sprintf("Expected topK=%d, actual ScoresLen=%d", expTopK, len(actualSearchResult.Scores)))
 	}
 }
 
@@ -257,7 +286,7 @@ func CheckQueryResult(t *testing.T, expColumns []column.Column, actualColumns []
 			}
 		}
 		if !exist {
-			log.Error("CheckQueryResult actualColumns no column", zap.String("name", expColumn.Name()))
+			mlog.Error(context.TODO(), "CheckQueryResult actualColumns no column", mlog.String("name", expColumn.Name()))
 		}
 	}
 }
@@ -295,7 +324,7 @@ func CheckSearchIteratorResult(ctx context.Context, t *testing.T, itr client.Sea
 			if err == io.EOF {
 				break
 			} else {
-				log.Error("SearchIterator next gets error", zap.Error(err))
+				mlog.Error(ctx, "SearchIterator next gets error", mlog.Err(err))
 				break
 			}
 		}
@@ -314,7 +343,7 @@ func CheckSearchIteratorResult(ctx context.Context, t *testing.T, itr client.Sea
 	}
 	require.Equal(t, expLimit, actualLimit)
 	if opt.expBatchSize != nil {
-		log.Debug("SearchIterator result len", zap.Any("result len", actualBatchSize))
+		mlog.Debug(ctx, "SearchIterator result len", mlog.Any("result len", actualBatchSize))
 		require.True(t, EqualIntSlice(opt.expBatchSize, actualBatchSize))
 	}
 }
@@ -333,7 +362,7 @@ func CheckQueryIteratorResult(ctx context.Context, t *testing.T, itr client.Quer
 			if err == io.EOF {
 				break
 			} else {
-				log.Error("QueryIterator next gets error", zap.Error(err))
+				mlog.Error(ctx, "QueryIterator next gets error", mlog.Err(err))
 				break
 			}
 		}
@@ -352,7 +381,7 @@ func CheckQueryIteratorResult(ctx context.Context, t *testing.T, itr client.Quer
 	}
 	require.Equal(t, expLimit, actualLimit)
 	if opt.expBatchSize != nil {
-		log.Debug("QueryIterator result len", zap.Any("result len", actualBatchSize))
+		mlog.Debug(ctx, "QueryIterator result len", mlog.Any("result len", actualBatchSize))
 		require.True(t, EqualIntSlice(opt.expBatchSize, actualBatchSize))
 	}
 }
@@ -368,7 +397,7 @@ func CheckPartialResult(t *testing.T, expColumns []column.Column, actualColumns 
 			}
 		}
 		if !exist {
-			log.Error("CheckQueryResult actualColumns no column", zap.String("name", expColumn.Name()))
+			mlog.Error(context.TODO(), "CheckQueryResult actualColumns no column", mlog.String("name", expColumn.Name()))
 		}
 	}
 }

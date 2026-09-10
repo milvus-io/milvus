@@ -20,13 +20,13 @@ package embedding
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/credentials"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/function/models/siliconflow"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -38,9 +38,9 @@ type SiliconflowEmbeddingProvider struct {
 	modelName     string
 	embedDimParam int64
 
-	maxBatch   int
-	timeoutSec int64
-	extraInfo  *models.ModelExtraInfo
+	maxBatch  int
+	timeoutMs int64
+	extraInfo *models.ModelExtraInfo
 }
 
 func NewSiliconflowEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string, credentials *credentials.Credentials, extraInfo *models.ModelExtraInfo) (*SiliconflowEmbeddingProvider, error) {
@@ -77,6 +77,8 @@ func NewSiliconflowEmbeddingProvider(fieldSchema *schemapb.FieldSchema, function
 		url = "https://api.siliconflow.cn/v1/embeddings"
 	}
 
+	timeoutMs := models.ResolveTimeoutMs(functionSchema.Params)
+
 	provider := SiliconflowEmbeddingProvider{
 		client:        c,
 		url:           url,
@@ -84,7 +86,7 @@ func NewSiliconflowEmbeddingProvider(fieldSchema *schemapb.FieldSchema, function
 		modelName:     modelName,
 		embedDimParam: dim,
 		maxBatch:      32,
-		timeoutSec:    30,
+		timeoutMs:     timeoutMs,
 		extraInfo:     extraInfo,
 	}
 	return &provider, nil
@@ -106,16 +108,16 @@ func (provider *SiliconflowEmbeddingProvider) CallEmbedding(ctx context.Context,
 		if end > numRows {
 			end = numRows
 		}
-		resp, err := provider.client.Embedding(provider.url, provider.modelName, texts[i:end], "float", int(provider.embedDimParam), provider.timeoutSec)
+		resp, err := provider.client.Embedding(provider.url, provider.modelName, texts[i:end], "float", int(provider.embedDimParam), provider.timeoutMs)
 		if err != nil {
 			return nil, err
 		}
 		if end-i != len(resp.Data) {
-			return nil, fmt.Errorf("get embedding failed, the number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(resp.Data))
+			return nil, merr.WrapErrFunctionFailedMsg("get embedding failed, the number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(resp.Data))
 		}
 		for _, item := range resp.Data {
 			if len(item.Embedding) != int(provider.fieldDim) {
-				return nil, fmt.Errorf("the required embedding dim is [%d], but the embedding obtained from the model is [%d]",
+				return nil, merr.WrapErrFunctionFailedMsg("the required embedding dim is [%d], but the embedding obtained from the model is [%d]",
 					provider.fieldDim, len(item.Embedding))
 			}
 			data = append(data, item.Embedding)

@@ -19,24 +19,22 @@ package querycoordv2
 import (
 	"context"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/rgpb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
-func (s *Server) broadcastCreateResourceGroup(ctx context.Context, req *milvuspb.CreateResourceGroupRequest) error {
+func (s *Server) broadcastCreateResourceGroup(ctx context.Context, req *milvuspb.CreateResourceGroupRequest) (ignored bool, err error) {
 	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx, message.NewExclusiveClusterResourceKey())
 	if err != nil {
 		if !shouldApplyLocallyOnNonPrimary(err, message.MessageTypeAlterResourceGroup) {
-			return err
+			return false, err
 		}
 	}
 	if broadcaster != nil {
@@ -48,8 +46,8 @@ func (s *Server) broadcastCreateResourceGroup(ctx context.Context, req *milvuspb
 		// Use default config if not set, compatible with old client.
 		cfg = meta.NewResourceGroupConfig(0, 0)
 	}
-	if err := s.meta.CheckIfResourceGroupAddable(ctx, req.GetResourceGroup(), cfg); err != nil {
-		return err
+	if ignored, err := s.meta.CheckIfResourceGroupAddable(ctx, req.GetResourceGroup(), cfg); err != nil || ignored {
+		return ignored, err
 	}
 
 	msg := message.NewAlterResourceGroupMessageBuilderV2().
@@ -60,10 +58,10 @@ func (s *Server) broadcastCreateResourceGroup(ctx context.Context, req *milvuspb
 		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 		MustBuildBroadcast()
 	if broadcaster == nil {
-		return registry.CallMessageAckCallback(ctx, msg, nil)
+		return false, registry.CallMessageAckCallback(ctx, msg, nil)
 	}
 	_, err = broadcaster.Broadcast(ctx, msg)
-	return err
+	return false, err
 }
 
 func (s *Server) broadcastUpdateResourceGroups(ctx context.Context, req *querypb.UpdateResourceGroupsRequest) error {
@@ -113,7 +111,7 @@ func (s *Server) broadcastTransferNode(ctx context.Context, req *milvuspb.Transf
 	// Move node from source resource group to target resource group.
 	rgs, err := s.meta.CheckIfTransferNode(ctx, req.GetSourceResourceGroup(), req.GetTargetResourceGroup(), int(req.GetNumNode()))
 	if err != nil {
-		log.Warn("failed to transfer node", zap.Error(err))
+		mlog.Warn(ctx, "failed to transfer node", mlog.Err(err))
 		return err
 	}
 

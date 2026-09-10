@@ -16,7 +16,6 @@ include_directories(
     ${KNOWHERE_INCLUDE_DIR}
     ${SIMDJSON_INCLUDE_DIR}
     ${TANTIVY_INCLUDE_DIR}
-    ${MILVUS_COMMON_INCLUDE_DIR}
     ${MILVUS_STORAGE_INCLUDE_DIR}
 )
 
@@ -38,8 +37,13 @@ file(GLOB_RECURSE SOURCE_TEST_FILES
 set(MILVUS_TEST_FILES
         ${SOURCE_TEST_FILES}
         init_gtest.cpp
+        test_bloom_filter_expr.cpp
+        test_roaring_filter_expr.cpp
         test_loading.cpp
         test_exec.cpp
+        test_timestamptz_arith_compare.cpp
+        test_timestamptz_compare.cpp
+        test_offsets_eval_correctness.cpp
         test_expr_materialized_view.cpp
         test_float16.cpp
         test_search_group_by.cpp
@@ -58,7 +62,7 @@ set(MILVUS_TEST_FILES
         test_element_filter.cpp
         test_query_group_by.cpp
         test_minhash.cpp
-        test_async_warmup.cpp
+        test_boost_score_c.cpp
         test_sort_buffer.cpp
         test_row_container.cpp
         test_query_order_by.cpp
@@ -69,6 +73,10 @@ set(MILVUS_TEST_FILES
         test_arrow_canonicalize.cpp
         TextLobSpilloverTest.cpp
         test_commit_timestamp.cpp
+        test_schema_reopen.cpp
+        test_growing_concurrent_reopen.cpp
+        test_segment_read_lease.cpp
+        CipherPluginContextTest.cpp
         )
 
 if ( NOT (INDEX_ENGINE STREQUAL "cardinal") )
@@ -103,6 +111,12 @@ endif()
 # once done, move this line to the else branch of `if (DEFINED AZURE_BUILD_DIR)`
 list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "RemoteChunkManagerTest\\.cpp$")
 
+# ArrowFileSystemChunkManagerRemoteTest needs a live object store (MinIO); the
+# cpp-ut environment has none (MINIO_ADDRESS points at the docker-compose
+# `minio` service, unresolvable there), so keep it out of all_tests like the
+# real-object-storage tests above.
+list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "ArrowFileSystemChunkManagerRemoteTest\\.cpp$")
+
 if (ENABLE_GCP_NATIVE)
     add_definitions(-DENABLE_GCP_NATIVE)
 else()
@@ -123,6 +137,16 @@ add_compile_definitions(
         MILVUS_CPPUT_OUTPUT_DIR="${CMAKE_INSTALL_PREFIX}/cpput_output"
         MILVUS_UNIT_TEST)
 
+if (LINUX)
+    # milvus-storage's Rust bridge (librust_bridge.a) statically embeds xxhash
+    # and re-exports its XXH* symbols globally. These collide with the conan
+    # xxhash that milvus_core links for BloomFilter/MinHash, so linking the
+    # unit-test binaries fails with "multiple definition of `XXH...'". Tell the
+    # GNU linker to keep the first definition instead of erroring on the
+    # duplicate. Applies to every test target declared below (and subdirs).
+    add_link_options("LINKER:--allow-multiple-definition")
+endif()
+
 add_executable(all_tests
         ${MILVUS_TEST_FILES}
         )
@@ -134,7 +158,6 @@ target_link_libraries(all_tests
         milvus_conan_deps
         knowhere
         milvus-storage
-        milvus-common
         )
 
 # Link plan parser library using full path and set RPATH
@@ -182,7 +205,7 @@ endif()
 install(TARGETS bitset_test DESTINATION unittest)
 
 add_executable(test_json_uint64 ${CMAKE_HOME_DIRECTORY}/src/exec/expression/ExprJsonUint64Test.cpp)
-target_link_libraries(test_json_uint64 GTest::gtest GTest::gtest_main milvus_core milvus_conan_deps knowhere milvus-storage milvus-common)
+target_link_libraries(test_json_uint64 GTest::gtest GTest::gtest_main milvus_core milvus_conan_deps knowhere milvus-storage)
 target_link_options(test_json_uint64 PRIVATE "-L${PLANPARSER_LIB_DIR}")
 target_link_libraries(test_json_uint64 milvus-planparser-cpp)
 set_target_properties(test_json_uint64 PROPERTIES BUILD_RPATH "${PLANPARSER_LIB_DIR}" INSTALL_RPATH "${PLANPARSER_LIB_DIR}")

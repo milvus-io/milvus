@@ -3,6 +3,7 @@ package utility
 import (
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -37,7 +38,7 @@ func (r *ReOrderByTimeTickBuffer) Push(msg message.ImmutableMessage) error {
 	}
 	msgID := msg.MessageID().Marshal()
 	if r.messageIDs.Contain(msgID) {
-		return errors.Errorf("message is duplicated: %s", msgID)
+		return status.NewInner("message is duplicated: %s", msgID)
 	}
 	r.messageHeap.Push(msg)
 	r.messageIDs.Insert(msgID)

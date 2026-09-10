@@ -12,7 +12,7 @@ class MilvusConan(ConanFile):
         "rocksdb/6.29.5@milvus/dev#67b8ae76ad7be5f779082f67416f89bf",
         "onetbb/2021.9.0#f9d7a3aa294ac4a594a93f9b4c7f272d",
         "zstd/1.5.5#70dc5eb8ea16708fc946fbac884c507e",
-        "arrow/17.0.0@milvus/dev-2.6#c743ea7a6f2420ba5811b2be3df59892",
+        "arrow/17.0.0@milvus/dev#17b7257ae0de563ed6ab7b7843cedf86",
         "libevent/2.1.12#95065aaefcd58d3956d6dfbfc5631d97",
         "googleapis/cci.20221108#4553d68a2429cc0fff7d2bab4e5b3ea9",
         "gtest/1.13.0#2cf98fac7337eb73fc4ee839dbcd4468",
@@ -22,15 +22,16 @@ class MilvusConan(ConanFile):
         "glog/0.7.1#a306e61d7b8311db8cb148ad62c48030",
         "gflags/2.2.2#7671803f1dc19354cc90bd32874dcfda",
         "double-conversion/3.3.0#640e35791a4bac95b0545e2f54b7aceb",
-        "libsodium/cci.20220430#7429a9e5351cc67bea3537229921714d",
+        "libsodium/1.0.19",
         "xsimd/9.0.1#51df19a2d512f70597105ee2a2d21916",
         "xz_utils/5.4.5#fc4e36861e0a47ecd4a40a00e6d29ac8",
         "prometheus-cpp/1.2.4#0918d66c13f97acb7809759f9de49b3f",
         "re2/20230301#f8efaf45f98d0193cd0b2ea08b6b4060",
-        "folly/2024.08.12.00@milvus/dev#f9b2bdf162c0ec47cb4e5404097b340d",
+        "folly/2026.04.20.00@milvus/dev#06852bea5b6449f0c4eb0df002b5779c",
+        "milvus-common/1.0.0-7d67e14@milvus/dev#dc4c1c257103c92e01c0c1bd83541623",
         "google-cloud-cpp/2.28.0@milvus/dev#468918b43cec43624531a0340398cf43",
         "opentelemetry-cpp/1.23.0@milvus/dev#11bc565ec6e82910ae8f7471da756720",
-        "librdkafka/1.9.1#ec1a00d5414f618555799be9566adfb7",
+        "librdkafka/2.6.1@milvus/dev#a15d9fefad917290d59fa3fcbc144888",
         "roaring/3.0.0#25a703f80eda0764a31ef939229e202d",
         "crc32c/1.1.2",
         "simde/0.8.2#5e1edfd5cba92f25d79bf6ef4616b972",
@@ -38,7 +39,7 @@ class MilvusConan(ConanFile):
         "unordered_dense/4.4.0#6a855c992618cc4c63019109a2e47298",
         "geos/3.12.0#a923af6dc4c18f87a7dfa960118f3166",
         "icu/74.2#cd1937b9561b8950a2ae6311284c5813",
-        "libavrocpp/1.12.1.1@milvus/dev#cde7bb587a29f6f233bae7e18b71815d",
+        "libavrocpp/1.12.1.1@milvus/dev#b4854183542196740ec9a004fdfff7ec",
     )
 
     default_options = {
@@ -82,6 +83,8 @@ class MilvusConan(ConanFile):
         "glog/*:shared": True,
         "prometheus-cpp/*:with_pull": False,
         "fmt/*:header_only": False,
+        "openblas/*:dynamic_arch": True,
+        "openblas/*:shared": False,
         "onetbb/*:tbbmalloc": False,
         "onetbb/*:tbbproxy": False,
         "gflags/*:shared": True,
@@ -90,6 +93,7 @@ class MilvusConan(ConanFile):
         "icu/*:shared": False,
         "icu/*:data_packaging": "library",
         "xz_utils/*:shared": True,
+        "openblas/*:use_openmp": True,
         "opentelemetry-cpp/*:with_stl": True,
     }
 
@@ -118,17 +122,25 @@ class MilvusConan(ConanFile):
         self.requires("libcurl/8.10.1#a3113369c86086b0e84231844e7ed0a9", force=True)
         self.requires("nlohmann_json/3.11.3#ffb9e9236619f1c883e36662f944345d", force=True)
         self.requires("abseil/20250127.0#481edcc75deb0efb16500f511f0f0a1c", force=True)
-        self.requires("fmt/11.0.2#eb98daa559c7c59d591f4720dde4cd5c", force=True)
-        self.requires("rapidjson/cci.20230929#0a3982e5f4fa453a9b9cd0dd5b1dcb3a", force=True)
+        self.requires("fmt/11.2.0#eb98daa559c7c59d591f4720dde4cd5c", force=True)
+        # libbson only (BSON C library) for JSON stats — NOT the full mongo-c-driver.
+        # Drops libmongoc/mongocxx/utf8proc; see src/common/bson_shim.h.
+        self.requires("libbson/1.30.6@milvus/dev#4fc4c269cbda1b46c3118fa396cdc690")
         # azure-sdk-for-cpp is a transitive dep of Arrow, but must be declared
         # as a direct dep so CMakeDeps generates standalone cmake config files.
         # Without this, find_package(Azure) can't find include directories.
-        self.requires("azure-sdk-for-cpp/1.11.3@milvus/dev#395e8e7a0c29644d41ef160088128f14")
-        self.requires("aws-sdk-cpp/1.11.692@milvus/dev#c309ce91fa572fff68f9f4e36d477a04")
+        self.requires("azure-sdk-for-cpp/1.16.4@milvus/dev#7c95e3df67cfea28b3cf6dbd60fbf137", force=True)
+        self.requires("aws-sdk-cpp/1.11.842@milvus/dev#363556887f622db23a10168c108dd55d", force=True)
         # Force snappy/lz4 versions to override Arrow's older transitive deps
         # (arrow/*:with_snappy and arrow/*:with_lz4 are enabled for Parquet decoding)
         self.requires("snappy/1.2.1#b940695c64ccbff63c1aabd4b1eee3f3", force=True)
-        self.requires("lz4/1.9.4#7f0b5851453198536c14354ee30ca9ae", force=True)
+        self.requires("lz4/1.10.0#982d9b673900f665a1da109e09c17cab", force=True)
+        # Pin rapidjson to the newest cci snapshot. Arrow 17 pulls an older
+        # rapidjson transitively, which fails to compile under clang 19 (libc++ 19).
+        # force=True overrides Arrow's transitive version.
+        self.requires("rapidjson/cci.20230929#0a3982e5f4fa453a9b9cd0dd5b1dcb3a", force=True)
+        if self.settings.os == "Linux":
+            self.requires("openblas/0.3.30")
         if self.settings.os != "Macos":
             self.requires("libunwind/1.8.1#748a981ace010b80163a08867b732e71")
         # Override s2n 1.4.1 (from aws-c-io) to 1.6.0 for OpenSSL 3.x FIPS detection

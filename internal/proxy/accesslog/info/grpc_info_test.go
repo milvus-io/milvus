@@ -80,6 +80,12 @@ func (s *GrpcAccessInfoSuite) SetupTest() {
 	}
 }
 
+func (s *GrpcAccessInfoSuite) TestMethodName() {
+	s.info.grpcInfo.FullMethod = "/milvus.proto.milvus.MilvusService/Search"
+	s.Equal("Search", s.info.MethodName())
+	s.Equal("Search", s.info.MethodNameForFormatter())
+}
+
 func (s *GrpcAccessInfoSuite) TestErrorCode() {
 	s.info.resp = &milvuspb.QueryResults{
 		Status: merr.Status(nil),
@@ -124,7 +130,11 @@ func (s *GrpcAccessInfoSuite) TestErrorType() {
 	result = Get(s.info, "$error_type")
 	s.Equal(merr.InputError.String(), result[0])
 
-	s.info.err = merr.ErrParameterInvalid
+	// ErrServiceInternal is a SystemError-typed sentinel.
+	// (ErrParameterInvalid was previously SystemError but became InputError after
+	// the 02-storage err-std PR; keep this branch on a still-SystemError sentinel
+	// so the test still covers the "system_error" classification path.)
+	s.info.err = merr.ErrServiceInternal
 	result = Get(s.info, "$error_type")
 	s.Equal(merr.SystemError.String(), result[0])
 }
@@ -139,6 +149,43 @@ func (s *GrpcAccessInfoSuite) TestDbName() {
 	}
 	result = Get(s.info, "$database_name")
 	s.Equal("test", result[0])
+}
+
+func (s *GrpcAccessInfoSuite) TestCollectionName() {
+	s.info.req = nil
+	result := Get(s.info, "$collection_name")
+	s.Equal(Unknown, result[0])
+
+	// singular collection name
+	s.info.req = &milvuspb.QueryRequest{
+		CollectionName: "test_collection",
+	}
+	result = Get(s.info, "$collection_name")
+	s.Equal("test_collection", result[0])
+
+	// requests carrying a list of collection names (e.g. Flush) should not be Unknown
+	s.info.req = &milvuspb.FlushRequest{
+		CollectionNames: []string{"coll_a", "coll_b"},
+	}
+	result = Get(s.info, "$collection_name")
+	s.Equal(fmt.Sprint([]string{"coll_a", "coll_b"}), result[0])
+	s.NotEqual(Unknown, result[0])
+
+	// rename logs both the source and target collection
+	s.info.req = &milvuspb.RenameCollectionRequest{
+		OldName: "old_coll",
+		NewName: "new_coll",
+	}
+	result = Get(s.info, "$collection_name")
+	s.Equal("old_coll->new_coll", result[0])
+
+	// batch describe carries a list under the singular-named CollectionName field
+	s.info.req = &milvuspb.BatchDescribeCollectionRequest{
+		CollectionName: []string{"coll_a", "coll_b"},
+	}
+	result = Get(s.info, "$collection_name")
+	s.Equal(fmt.Sprint([]string{"coll_a", "coll_b"}), result[0])
+	s.NotEqual(Unknown, result[0])
 }
 
 func (s *GrpcAccessInfoSuite) TestSdkInfo() {

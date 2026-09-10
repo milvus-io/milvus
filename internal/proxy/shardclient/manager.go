@@ -24,13 +24,13 @@ import (
 	"time"
 
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/registry"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -42,7 +42,11 @@ import (
 type ShardClientMgr interface {
 	GetShard(ctx context.Context, withCache bool, database, collectionName string, collectionID int64, channel string) ([]NodeInfo, error)
 	GetShardLeaderList(ctx context.Context, database, collectionName string, collectionID int64, withCache bool) ([]string, error)
-	DeprecateShardCache(database, collectionName string)
+	// GetShardLeaders returns every channel of the collection with its
+	// leaders in one read -- one cache lookup, or with withCache=false one
+	// coordinator call that refreshes every channel at once. The map is the
+	// cache's own entry and must be treated as read-only.
+	GetShardLeaders(ctx context.Context, withCache bool, database, collectionName string, collectionID int64) (map[string][]NodeInfo, error)
 	InvalidateShardLeaderCache(collections []int64)
 	ListShardLocation() map[int64]NodeInfo
 	RemoveDatabase(database string)
@@ -64,8 +68,13 @@ type shardClientMgrImpl struct {
 
 	mixCoord types.MixCoordClient
 
-	leaderMut  sync.RWMutex
-	collLeader map[string]map[string]*shardLeaders // database -> collectionName -> collection_leaders
+	leaderMut sync.RWMutex
+	// collLeader keys shard leaders by the cluster-unique collection id, so name/alias/database
+	// resolution (done upstream against the meta cache) can never serve one collection's shard
+	// leaders under another's name after an alias repoint or a cross-db rename. Eviction is by
+	// collection id only -- the cache deliberately does not depend on the mutable
+	// collection->database mapping. See issue #51533.
+	collLeader map[int64]*shardLeaders // collectionID -> collection_leaders
 }
 
 const (
@@ -93,7 +102,7 @@ func NewShardClientMgr(mixCoord types.MixCoordClient, options ...shardClientMgrO
 		purgeInterval:   defaultPurgeInterval,
 		expiredDuration: defaultExpiredDuration,
 
-		collLeader: make(map[string]map[string]*shardLeaders),
+		collLeader: make(map[int64]*shardLeaders),
 		mixCoord:   mixCoord,
 	}
 	for _, opt := range options {
@@ -110,7 +119,7 @@ func (c *shardClientMgrImpl) SetClientCreatorFunc(creator queryNodeCreatorFunc) 
 func (m *shardClientMgrImpl) GetShard(ctx context.Context, withCache bool, database, collectionName string, collectionID int64, channel string) ([]NodeInfo, error) {
 	method := "GetShard"
 	// check cache first
-	cacheShardLeaders := m.getCachedShardLeaders(database, collectionName, method)
+	cacheShardLeaders := m.getCachedShardLeaders(collectionID, method)
 	if cacheShardLeaders == nil || !withCache {
 		// refresh shard leader cache
 		newShardLeaders, err := m.updateShardLocationCache(ctx, database, collectionName, collectionID)
@@ -123,10 +132,26 @@ func (m *shardClientMgrImpl) GetShard(ctx context.Context, withCache bool, datab
 	return cacheShardLeaders.Get(channel), nil
 }
 
+func (m *shardClientMgrImpl) GetShardLeaders(ctx context.Context, withCache bool, database, collectionName string, collectionID int64) (map[string][]NodeInfo, error) {
+	method := "GetShardLeaders"
+	// check cache first
+	cacheShardLeaders := m.getCachedShardLeaders(collectionID, method)
+	if cacheShardLeaders == nil || !withCache {
+		// refresh shard leader cache
+		newShardLeaders, err := m.updateShardLocationCache(ctx, database, collectionName, collectionID)
+		if err != nil {
+			return nil, err
+		}
+		cacheShardLeaders = newShardLeaders
+	}
+
+	return cacheShardLeaders.shardLeaders, nil
+}
+
 func (m *shardClientMgrImpl) GetShardLeaderList(ctx context.Context, database, collectionName string, collectionID int64, withCache bool) ([]string, error) {
 	method := "GetShardLeaderList"
 	// check cache first
-	cacheShardLeaders := m.getCachedShardLeaders(database, collectionName, method)
+	cacheShardLeaders := m.getCachedShardLeaders(collectionID, method)
 	if cacheShardLeaders == nil || !withCache {
 		// refresh shard leader cache
 		newShardLeaders, err := m.updateShardLocationCache(ctx, database, collectionName, collectionID)
@@ -139,15 +164,9 @@ func (m *shardClientMgrImpl) GetShardLeaderList(ctx context.Context, database, c
 	return cacheShardLeaders.GetShardLeaderList(), nil
 }
 
-func (m *shardClientMgrImpl) getCachedShardLeaders(database, collectionName, caller string) *shardLeaders {
+func (m *shardClientMgrImpl) getCachedShardLeaders(collectionID int64, caller string) *shardLeaders {
 	m.leaderMut.RLock()
-	var cacheShardLeaders *shardLeaders
-	db, ok := m.collLeader[database]
-	if !ok {
-		cacheShardLeaders = nil
-	} else {
-		cacheShardLeaders = db[collectionName]
-	}
+	cacheShardLeaders := m.collLeader[collectionID]
 	m.leaderMut.RUnlock()
 
 	if cacheShardLeaders != nil {
@@ -160,10 +179,10 @@ func (m *shardClientMgrImpl) getCachedShardLeaders(database, collectionName, cal
 }
 
 func (m *shardClientMgrImpl) updateShardLocationCache(ctx context.Context, database, collectionName string, collectionID int64) (*shardLeaders, error) {
-	log := log.Ctx(ctx).With(
-		zap.String("db", database),
-		zap.String("collectionName", collectionName),
-		zap.Int64("collectionID", collectionID))
+	log := mlog.With(
+		mlog.String("db", database),
+		mlog.FieldCollectionName(collectionName),
+		mlog.FieldCollectionID(collectionID))
 
 	method := "updateShardLocationCache"
 	tr := timerecord.NewTimeRecorder(method)
@@ -180,16 +199,16 @@ func (m *shardClientMgrImpl) updateShardLocationCache(ctx context.Context, datab
 	}
 	resp, err := m.mixCoord.GetShardLeaders(ctx, req)
 	if err := merr.CheckRPCCall(resp.GetStatus(), err); err != nil {
-		log.Error("failed to get shard locations",
-			zap.Int64("collectionID", collectionID),
-			zap.Error(err))
+		log.Error(ctx, "failed to get shard locations",
+			mlog.FieldCollectionID(collectionID),
+			mlog.Err(err))
 		return nil, err
 	}
 
-	shards := parseShardLeaderList2QueryNode(resp.GetShards())
+	shards := parseShardLeaderList2QueryNode(ctx, resp.GetShards())
 
 	// convert shards map to string for logging
-	if log.Level() == zap.DebugLevel {
+	if mlog.LevelEnabled(mlog.DebugLevel) {
 		shardStr := make([]string, 0, len(shards))
 		for channel, nodes := range shards {
 			nodeStrs := make([]string, 0, len(nodes))
@@ -198,7 +217,7 @@ func (m *shardClientMgrImpl) updateShardLocationCache(ctx context.Context, datab
 			}
 			shardStr = append(shardStr, fmt.Sprintf("%s:[%s]", channel, strings.Join(nodeStrs, ", ")))
 		}
-		log.Debug("update shard leader cache", zap.String("newShardLeaders", strings.Join(shardStr, ", ")))
+		log.Debug(ctx, "update shard leader cache", mlog.String("newShardLeaders", strings.Join(shardStr, ", ")))
 	}
 
 	newShardLeaders := &shardLeaders{
@@ -208,23 +227,57 @@ func (m *shardClientMgrImpl) updateShardLocationCache(ctx context.Context, datab
 	}
 
 	m.leaderMut.Lock()
-	if _, ok := m.collLeader[database]; !ok {
-		m.collLeader[database] = make(map[string]*shardLeaders)
-	}
-	m.collLeader[database][collectionName] = newShardLeaders
+	m.collLeader[collectionID] = newShardLeaders
 	m.leaderMut.Unlock()
 
 	return newShardLeaders, nil
 }
 
-func parseShardLeaderList2QueryNode(shardsLeaders []*querypb.ShardLeadersList) map[string][]NodeInfo {
+func parseShardLeaderList2QueryNode(ctx context.Context, shardsLeaders []*querypb.ShardLeadersList) map[string][]NodeInfo {
 	shard2QueryNodes := make(map[string][]NodeInfo)
 
 	for _, leaders := range shardsLeaders {
 		qns := make([]NodeInfo, len(leaders.GetNodeIds()))
 
+		// resource_groups is parallel to the other three arrays, but a
+		// coordinator built before that field existed fills the others and
+		// leaves this one empty -- proto3 offers no other signal, and proxy
+		// and coordinator deploy separately. Index defensively rather than
+		// assuming the lengths match, so a rolling upgrade degrades to
+		// "unknown group" instead of panicking on every cache refresh.
+		resourceGroups := leaders.GetResourceGroups()
+
+		// Two ways the array can be short, meaning opposite things, and only
+		// one of them is expected. Empty is the documented downgrade above.
+		// Non-empty but short is a broken parallel-array invariant on the
+		// coordinator side -- which is the premise the whole tag rests on: a
+		// leader dropped from one array but not the others shifts every tag
+		// after it, so the tags that ARE present are of unknown alignment
+		// and FilterByResourceGroup would route on them into the wrong group.
+		// Neutralize the whole array to the documented "unknown" -- strictly
+		// safer than a misaligned one, since an unknown entry never matches a
+		// named group -- and say so loudly, rather than let it look like an
+		// ordinary upgrade.
+		if len(resourceGroups) != 0 && len(resourceGroups) != len(leaders.GetNodeIds()) {
+			mlog.RatedWarn(ctx, rate.Limit(1.0/60.0),
+				"shard leader resource groups are not parallel to node ids, dropping the tags for this channel",
+				mlog.String("channel", leaders.GetChannelName()),
+				mlog.Int("nodeIDs", len(leaders.GetNodeIds())),
+				mlog.Int("resourceGroups", len(resourceGroups)))
+			resourceGroups = nil
+		}
+
 		for j := range qns {
-			qns[j] = NodeInfo{leaders.GetNodeIds()[j], leaders.GetNodeAddrs()[j], leaders.GetServiceable()[j]}
+			resourceGroup := ""
+			if j < len(resourceGroups) {
+				resourceGroup = resourceGroups[j]
+			}
+			qns[j] = NodeInfo{
+				NodeID:        leaders.GetNodeIds()[j],
+				Address:       leaders.GetNodeAddrs()[j],
+				Serviceable:   leaders.GetServiceable()[j],
+				ResourceGroup: resourceGroup,
+			}
 		}
 
 		shard2QueryNodes[leaders.GetChannelName()] = qns
@@ -239,53 +292,34 @@ func (m *shardClientMgrImpl) ListShardLocation() map[int64]NodeInfo {
 	defer m.leaderMut.RUnlock()
 	shardLeaderInfo := make(map[int64]NodeInfo)
 
-	for _, dbInfo := range m.collLeader {
-		for _, shardLeaders := range dbInfo {
-			for _, nodeInfos := range shardLeaders.shardLeaders {
-				for _, node := range nodeInfos {
-					shardLeaderInfo[node.NodeID] = node
-				}
+	for _, shardLeaders := range m.collLeader {
+		for _, nodeInfos := range shardLeaders.shardLeaders {
+			for _, node := range nodeInfos {
+				shardLeaderInfo[node.NodeID] = node
 			}
 		}
 	}
 	return shardLeaderInfo
 }
 
-func (m *shardClientMgrImpl) RemoveDatabase(database string) {
-	m.leaderMut.Lock()
-	defer m.leaderMut.Unlock()
-	delete(m.collLeader, database)
-}
+// RemoveDatabase is a no-op for the shard cache. DropDatabase requires the database to be empty
+// first (rootcoord rejects a non-empty drop), so every collection has already been dropped
+// individually and evicted by id via InvalidateShardLeaderCache before this is called. The cache
+// is keyed by the cluster-unique collection id and deliberately does not track database
+// membership -- that mapping is mutable (cross-db rename), so making eviction depend on it would
+// let a stale attribution drop a live collection or leak one that moved. Kept on the interface so
+// the DropDatabase meta-cache invalidation path has a symmetric hook.
+func (m *shardClientMgrImpl) RemoveDatabase(database string) {}
 
-// DeprecateShardCache clear the shard leader cache of a collection
-func (m *shardClientMgrImpl) DeprecateShardCache(database, collectionName string) {
-	log.Info("deprecate shard cache for collection", zap.String("collectionName", collectionName))
-	m.leaderMut.Lock()
-	defer m.leaderMut.Unlock()
-	dbInfo, ok := m.collLeader[database]
-	if ok {
-		delete(dbInfo, collectionName)
-		if len(dbInfo) == 0 {
-			delete(m.collLeader, database)
-		}
-	}
-}
-
-// InvalidateShardLeaderCache called when Shard leader balance happened
+// InvalidateShardLeaderCache drops the cached shard leaders for the given collection ids.
+// Called on shard-leader balance (querycoord), collection drop, and search/query retry. Because
+// the cache is keyed by id, this is a direct O(len(collections)) delete instead of a full scan.
 func (m *shardClientMgrImpl) InvalidateShardLeaderCache(collections []int64) {
-	log.Info("Invalidate shard cache for collections", zap.Int64s("collectionIDs", collections))
+	mlog.Info(context.TODO(), "Invalidate shard cache for collections", mlog.Int64s("collectionIDs", collections))
 	m.leaderMut.Lock()
 	defer m.leaderMut.Unlock()
-	collectionSet := typeutil.NewUniqueSet(collections...)
-	for dbName, dbInfo := range m.collLeader {
-		for collectionName, shardLeaders := range dbInfo {
-			if collectionSet.Contain(shardLeaders.collectionID) {
-				delete(dbInfo, collectionName)
-			}
-		}
-		if len(dbInfo) == 0 {
-			delete(m.collLeader, dbName)
-		}
+	for _, collectionID := range collections {
+		delete(m.collLeader, collectionID)
 	}
 }
 
@@ -312,7 +346,7 @@ func (c *shardClientMgrImpl) PurgeClient() {
 						closed := value.Close(false)
 						if closed {
 							c.clients.Remove(key)
-							log.Info("remove idle node client", zap.Int64("nodeID", key))
+							mlog.Info(context.TODO(), "remove idle node client", mlog.FieldNodeID(key))
 						}
 					}
 				}

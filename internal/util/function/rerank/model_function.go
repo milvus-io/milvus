@@ -20,13 +20,13 @@ package rerank
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 	"strings"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/util/credentials"
 	"github.com/milvus-io/milvus/internal/util/function/models"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -39,14 +39,15 @@ const (
 	voyageaiProviderName    string = "voyageai"
 	aliProviderName         string = "ali"
 	zillizProviderName      string = "zilliz"
+	huggingFaceProviderName string = "huggingface"
 )
 
 func parseMaxBatch(maxBatch string) (int, error) {
 	if batch, err := strconv.Atoi(maxBatch); err != nil {
-		return -1, fmt.Errorf("[%s param's value: %s] is not a valid number", models.MaxClientBatchSizeParamKey, maxBatch)
+		return -1, merr.WrapErrParameterInvalidMsg("[%s param's value: %s] is not a valid number", models.MaxClientBatchSizeParamKey, maxBatch)
 	} else {
 		if batch <= 0 {
-			return -1, fmt.Errorf("[%s param's value: %s] must be greater than 0", models.MaxClientBatchSizeParamKey, maxBatch)
+			return -1, merr.WrapErrParameterInvalidMsg("[%s param's value: %s] must be greater than 0", models.MaxClientBatchSizeParamKey, maxBatch)
 		}
 		return batch, nil
 	}
@@ -73,7 +74,7 @@ func NewModelProvider(params []*commonpb.KeyValuePair, extraInfo *models.ModelEx
 			provider := strings.ToLower(param.Value)
 			conf := paramtable.Get().FunctionCfg.GetRerankModelProviders(provider)
 			if !models.IsEnable(conf) {
-				return nil, fmt.Errorf("rerank provider: [%s] is disabled", provider)
+				return nil, merr.WrapErrParameterInvalidMsg("rerank provider: [%s] is disabled", provider)
 			}
 			credentials := credentials.NewCredentials(paramtable.Get().CredentialCfg.GetCredentials())
 			switch provider {
@@ -92,10 +93,12 @@ func NewModelProvider(params []*commonpb.KeyValuePair, extraInfo *models.ModelEx
 			case zillizProviderName:
 				conf := paramtable.Get().FunctionCfg.ZillizProviders.GetValue()
 				return newZillizProvider(params, conf, extraInfo)
+			case huggingFaceProviderName:
+				return newHuggingFaceProvider(params, conf, credentials, extraInfo)
 			default:
-				return nil, fmt.Errorf("unknown rerank model provider:%s", param.Value)
+				return nil, merr.WrapErrParameterInvalidMsg("unknown rerank model provider:%s", param.Value)
 			}
 		}
 	}
-	return nil, fmt.Errorf("lost rerank params:%s ", providerParamName)
+	return nil, merr.WrapErrParameterInvalidMsg("lost rerank params:%s ", providerParamName)
 }

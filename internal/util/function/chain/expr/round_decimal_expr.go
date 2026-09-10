@@ -19,7 +19,6 @@
 package expr
 
 import (
-	"fmt"
 	"math"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -36,10 +35,6 @@ const RoundDecimalFuncName = "round_decimal"
 //
 // Input:  1 column ($score, Float32)
 // Output: 1 column ($score, Float32, rounded)
-//
-// Note: Not registered in the function registry because it requires a specific
-// decimal parameter that is set programmatically from SearchParams.RoundDecimal
-// in rerank_builder.go, not from user-facing function configuration.
 type RoundDecimalExpr struct {
 	BaseExpr
 	decimal    int64
@@ -59,13 +54,22 @@ func NewRoundDecimalExpr(decimal int64) (*RoundDecimalExpr, error) {
 	}, nil
 }
 
+func NewRoundDecimalExprFromParams(_ types.FunctionBuildContext, cfg types.FunctionConfig) (types.FunctionExpr, error) {
+	reader := types.NewParamReader(RoundDecimalFuncName, cfg.Params)
+	decimal, err := reader.Int64("decimal", true, 0)
+	if err != nil {
+		return nil, err
+	}
+	return NewRoundDecimalExpr(decimal)
+}
+
 func (e *RoundDecimalExpr) OutputDataTypes() []arrow.DataType {
 	return []arrow.DataType{arrow.PrimitiveTypes.Float32}
 }
 
 func (e *RoundDecimalExpr) Execute(ctx *types.FuncContext, inputs []*arrow.Chunked) ([]*arrow.Chunked, error) {
 	if len(inputs) != 1 {
-		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("round_decimal: expected 1 input column, got %d", len(inputs)))
+		return nil, merr.WrapErrServiceInternalMsg("round_decimal: expected 1 input column, got %d", len(inputs))
 	}
 
 	scoreCol := inputs[0]
@@ -78,7 +82,7 @@ func (e *RoundDecimalExpr) Execute(ctx *types.FuncContext, inputs []*arrow.Chunk
 			for i := 0; i < chunkIdx; i++ {
 				newChunks[i].Release()
 			}
-			return nil, merr.WrapErrServiceInternal(fmt.Sprintf("round_decimal: input chunk %d must be Float32, got %T", chunkIdx, scoreCol.Chunk(chunkIdx)))
+			return nil, merr.WrapErrParameterInvalidMsg("round_decimal: input chunk %d must be Float32, got %T", chunkIdx, scoreCol.Chunk(chunkIdx))
 		}
 
 		builder := array.NewFloat32Builder(ctx.Pool())
@@ -101,4 +105,8 @@ func (e *RoundDecimalExpr) Execute(ctx *types.FuncContext, inputs []*arrow.Chunk
 	}
 
 	return []*arrow.Chunked{result}, nil
+}
+
+func init() {
+	types.MustRegisterFunction(RoundDecimalFuncName, NewRoundDecimalExprFromParams)
 }

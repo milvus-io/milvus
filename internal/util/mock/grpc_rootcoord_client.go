@@ -37,6 +37,10 @@ type GrpcRootCoordClient struct {
 	Err error
 }
 
+func (m *GrpcRootCoordClient) ClearReadTaskQueue(ctx context.Context, in *internalpb.ClearReadTaskQueueRequest, opts ...grpc.CallOption) (*internalpb.ClearReadTaskQueueResponse, error) {
+	return &internalpb.ClearReadTaskQueueResponse{Status: merr.Success()}, m.Err
+}
+
 func (m *GrpcRootCoordClient) DescribeDatabase(ctx context.Context, in *rootcoordpb.DescribeDatabaseRequest, opts ...grpc.CallOption) (*rootcoordpb.DescribeDatabaseResponse, error) {
 	return &rootcoordpb.DescribeDatabaseResponse{}, m.Err
 }
@@ -62,6 +66,10 @@ func (m *GrpcRootCoordClient) CheckHealth(ctx context.Context, in *milvuspb.Chec
 }
 
 func (m *GrpcRootCoordClient) CreateRole(ctx context.Context, in *milvuspb.CreateRoleRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
+func (m *GrpcRootCoordClient) AlterRole(ctx context.Context, in *milvuspb.AlterRoleRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }
 
@@ -356,6 +364,10 @@ func (m *GrpcRootCoordClient) ListFileResources(ctx context.Context, in *milvusp
 
 func (m *GrpcRootCoordClient) ClientHeartbeat(ctx context.Context, in *milvuspb.ClientHeartbeatRequest, opts ...grpc.CallOption) (*milvuspb.ClientHeartbeatResponse, error) {
 	return &milvuspb.ClientHeartbeatResponse{}, m.Err
+}
+
+func (m *GrpcRootCoordClient) ListClientCommands(ctx context.Context, in *rootcoordpb.ListClientCommandsRequest, opts ...grpc.CallOption) (*rootcoordpb.ListClientCommandsResponse, error) {
+	return &rootcoordpb.ListClientCommandsResponse{}, m.Err
 }
 
 func (m *GrpcRootCoordClient) DeleteClientCommand(ctx context.Context, in *milvuspb.DeleteClientCommandRequest, opts ...grpc.CallOption) (*milvuspb.DeleteClientCommandResponse, error) {

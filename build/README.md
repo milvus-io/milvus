@@ -172,7 +172,7 @@ The `builder.sh` is executed by first creating a “docker volume“ directory i
 
 The working principle is as follows: mount the local file system to the workspace inside the container, or copy it to the container. The extension of vs code is installed inside the container and runs in it, so that the vs Code of the host can fully access the tools, platforms and file systems inside the container. This means that you just need to connect to different containers to switch the entire development environment seamlessly.
 
-![image](../docs/imgs/vscode.png)
+![image](docs/assets/vscode.png)
 
 Taking the Milvus project as an example, there is a file named **.devcontainer.json** in the root directory of the project. This file describes how vs code accesses (or creates) a development container environment, and defines the container environment, working directory, extension tool set, etc.
 
@@ -182,17 +182,17 @@ Start VS Code，in the command panel ( F1 ) input **“Remote-Containers: Open F
 
 or click right-bottom corner button > < , choose **“Remote-Containers: Open Folder in Container”**，then select the project folder which contains devcontainer.json file.
 
-![image](../docs/imgs/remote.png)
+![image](docs/assets/remote.png)
 
 VS Code begin load and construct Devcontainer, the progress bar display the construction state.
 
-![image](../docs/imgs/bar.png)
+![image](docs/assets/bar.png)
 
 After Construction, VS Code automatically connects to the container. Now you can code and debug in VS Code, just like developing in your host machine.
 
 You can also use terminal of VS Code to enter the Dev container to do something. Choose **Terminal >> New Terminal** in the navigation bar, then you can enter the container:
 
-![image](../docs/imgs/terminal.png)
+![image](docs/assets/terminal.png)
 
 Modify vscode go setups if necessary, the setting path is **code -> preference -> settings**
 
@@ -202,7 +202,7 @@ Modify vscode go setups if necessary, the setting path is **code -> preference -
 "go.lintOnSave": true   //if you want to auto golint and check code style
 ```
 
-![image](../docs/imgs/settings.png)
+![image](docs/assets/settings.png)
 
 ### Integrate goland with docker
 

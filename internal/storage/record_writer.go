@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"path"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -34,6 +35,29 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+// toWriterRecord returns r as an arrow.Record projected onto the writer's own
+// schema, plus a release func the caller must defer. The fast path (returning
+// the backing arrow record untouched) is taken only when r is a
+// simpleArrowRecord whose schema already equals the writer's; otherwise the
+// writer's columns are selected by field ID, narrowing an over-wide record
+// (e.g. the additive schema-bump reader record carrying a row-anchor column in
+// addition to the appended field) to exactly the writer's column set. Passing
+// such an over-wide record straight to the FFI writer misaligns column count
+// against the writer's manifest and crashes loon_writer_write.
+func toWriterRecord(r Record, schema *schemapb.CollectionSchema, arrowSchema *arrow.Schema) (arrow.Record, func()) {
+	if sar, ok := r.(*simpleArrowRecord); ok && sar.r.Schema().Equal(arrowSchema) {
+		return sar.r, func() {}
+	}
+	// Include struct sub-fields, matching the writer's arrow schema layout.
+	allFields := typeutil.GetAllFieldSchemas(schema)
+	arrays := make([]arrow.Array, len(allFields))
+	for i, field := range allFields {
+		arrays[i] = r.Column(field.GetFieldID())
+	}
+	rec := array.NewRecord(arrowSchema, arrays, int64(r.Len()))
+	return rec, rec.Release
+}
 
 var _ RecordWriter = (*packedRecordWriter)(nil)
 
@@ -151,15 +175,13 @@ func NewPackedRecordWriter(
 	}
 	writer, err := packed.NewPackedWriter(paths, arrowSchema, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext)
 	if err != nil {
-		return nil, merr.WrapErrServiceInternal(
-			fmt.Sprintf("can not new packed record writer %s", err.Error()))
+		return nil, merr.WrapErrStorage(err, "can not new packed record writer")
 	}
 	columnGroupUncompressed := make(map[typeutil.UniqueID]uint64)
 	columnGroupCompressed := make(map[typeutil.UniqueID]uint64)
 	pathsMap := make(map[typeutil.UniqueID]string)
 	if len(paths) != len(columnGroups) {
-		return nil, merr.WrapErrParameterInvalid(len(paths), len(columnGroups),
-			"paths length is not equal to column groups length for packed record writer")
+		return nil, merr.WrapErrStorageMsg("paths length is not equal to column groups length for packed record writer: paths=%d columnGroups=%d", len(paths), len(columnGroups))
 	}
 	for i, columnGroup := range columnGroups {
 		columnGroupUncompressed[columnGroup.GroupID] = 0
@@ -180,7 +202,7 @@ func NewPackedRecordWriter(
 	}, nil
 }
 
-type packedRecordManifestWriter struct {
+type packedRecordBatchWriter struct {
 	writer                  *packed.FFIPackedWriter
 	bufferSize              int64
 	columnGroups            []storagecommon.ColumnGroup
@@ -192,25 +214,12 @@ type packedRecordManifestWriter struct {
 	writtenUncompressed     uint64
 	columnGroupUncompressed map[typeutil.UniqueID]uint64
 	columnGroupCompressed   map[typeutil.UniqueID]uint64
-	outputManifest          string
 	storageConfig           *indexpb.StorageConfig
 }
 
-func (pw *packedRecordManifestWriter) Write(r Record) error {
-	var rec arrow.Record
-	sar, ok := r.(*simpleArrowRecord)
-	if !ok {
-		// Get all fields including struct sub-fields
-		allFields := typeutil.GetAllFieldSchemas(pw.schema)
-		arrays := make([]arrow.Array, len(allFields))
-		for i, field := range allFields {
-			arrays[i] = r.Column(field.FieldID)
-		}
-		rec = array.NewRecord(pw.arrowSchema, arrays, int64(r.Len()))
-		defer rec.Release()
-	} else {
-		rec = sar.r
-	}
+func (pw *packedRecordBatchWriter) Write(r Record) error {
+	rec, release := toWriterRecord(r, pw.schema, pw.arrowSchema)
+	defer release()
 	pw.rowNum += int64(r.Len())
 	for col, arr := range rec.Columns() {
 		size := calculateActualDataSize(arr)
@@ -225,67 +234,155 @@ func (pw *packedRecordManifestWriter) Write(r Record) error {
 	return pw.writer.WriteRecordBatch(rec)
 }
 
-func (pw *packedRecordManifestWriter) GetWrittenUncompressed() uint64 {
+func (pw *packedRecordBatchWriter) GetWrittenUncompressed() uint64 {
 	return pw.writtenUncompressed
 }
 
-func (pw *packedRecordManifestWriter) GetColumnGroupWrittenUncompressed(columnGroup typeutil.UniqueID) uint64 {
+func (pw *packedRecordBatchWriter) GetColumnGroupWrittenUncompressed(columnGroup typeutil.UniqueID) uint64 {
 	if size, ok := pw.columnGroupUncompressed[columnGroup]; ok {
 		return size
 	}
 	return 0
 }
 
-func (pw *packedRecordManifestWriter) GetColumnGroupWrittenCompressed(columnGroup typeutil.UniqueID) uint64 {
+func (pw *packedRecordBatchWriter) GetColumnGroupWrittenCompressed(columnGroup typeutil.UniqueID) uint64 {
 	if size, ok := pw.columnGroupCompressed[columnGroup]; ok {
 		return size
 	}
 	return 0
 }
 
-func (pw *packedRecordManifestWriter) GetWrittenPaths(columnGroup typeutil.UniqueID) string {
+func (pw *packedRecordBatchWriter) GetWrittenPaths(columnGroup typeutil.UniqueID) string {
 	if path, ok := pw.pathsMap[columnGroup]; ok {
 		return path
 	}
 	return ""
 }
 
-func (pw *packedRecordManifestWriter) GetWrittenManifest() string {
-	return pw.outputManifest
-}
-
-func (pw *packedRecordManifestWriter) GetWrittenRowNum() int64 {
+func (pw *packedRecordBatchWriter) GetWrittenRowNum() int64 {
 	return pw.rowNum
 }
 
-func (pw *packedRecordManifestWriter) Close() error {
-	if pw.writer != nil {
-		manifest, err := pw.writer.Close()
-		if err != nil {
-			return err
-		}
-		pw.outputManifest = manifest
-		for id := range pw.pathsMap {
-			pw.columnGroupCompressed[id] = uint64(0)
-		}
+// Close closes the underlying FFI writer and returns the resulting
+// column-groups payload. The writer never touches the manifest — the
+// caller passes the returned handle to packed.CommitManifestUpdates and
+// calls Destroy on it when done.
+func (pw *packedRecordBatchWriter) Close() (packed.WriterOutput, error) {
+	if pw.writer == nil {
+		return nil, nil
 	}
-	return nil
+	out, err := pw.writer.Close()
+	if err != nil {
+		return nil, err
+	}
+	pw.writer = nil
+	for id := range pw.pathsMap {
+		pw.columnGroupCompressed[id] = uint64(0)
+	}
+	return out, nil
 }
 
-func NewPackedRecordManifestWriter(
+// Abort releases the underlying FFI writer without producing column groups for
+// CommitManifestUpdates. It prevents metadata publication only: files already
+// flushed before the abort stay on storage as unreferenced objects, and GC
+// skips files under a registered V3 segment prefix, so their reclamation
+// depends on the manifest-aware orphan cleanup tracked by #51649.
+func (pw *packedRecordBatchWriter) Abort() {
+	if pw.writer == nil {
+		return
+	}
+	pw.writer.Destroy()
+	pw.writer = nil
+}
+
+func (pw *packedRecordBatchWriter) AsNewColumnGroups() {
+	if pw.writer != nil {
+		pw.writer.AsNewColumnGroups()
+	}
+}
+
+func NewPackedRecordBatchWriter(
 	basePath string,
-	baseVersion int64,
 	schema *schemapb.CollectionSchema,
 	bufferSize int64,
 	multiPartUploadSize int64,
 	columnGroups []storagecommon.ColumnGroup,
 	storageConfig *indexpb.StorageConfig,
 	storagePluginContext *indexcgopb.StoragePluginContext,
-) (*packedRecordManifestWriter, error) {
-	// Validate PK field exists before proceeding
-	_, err := typeutil.GetPrimaryFieldSchema(schema)
-	if err != nil {
-		return nil, err
+	writerFormat string,
+	schemaBasedFormats []string,
+) (*packedRecordBatchWriter, error) {
+	return newPackedRecordBatchWriter(basePath, schema, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext, true, false, writerFormat, schemaBasedFormats)
+}
+
+func NewPartialPackedRecordBatchWriter(
+	basePath string,
+	schema *schemapb.CollectionSchema,
+	bufferSize int64,
+	multiPartUploadSize int64,
+	columnGroups []storagecommon.ColumnGroup,
+	storageConfig *indexpb.StorageConfig,
+	storagePluginContext *indexcgopb.StoragePluginContext,
+	writerFormat string,
+	schemaBasedFormats []string,
+) (*packedRecordBatchWriter, error) {
+	return newPackedRecordBatchWriter(basePath, schema, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext, false, false, writerFormat, schemaBasedFormats)
+}
+
+// NewPartialPackedRecordBatchWriterWithTextRefsAsBinary creates a partial
+// column-group writer whose TEXT columns use the binary LOB-reference Arrow
+// representation. Schema-bump reconciliation uses this for newly added,
+// nullable TEXT columns, whose historical values are materialized as binary
+// NULLs without rewriting any existing LOB data.
+func NewPartialPackedRecordBatchWriterWithTextRefsAsBinary(
+	basePath string,
+	schema *schemapb.CollectionSchema,
+	bufferSize int64,
+	multiPartUploadSize int64,
+	columnGroups []storagecommon.ColumnGroup,
+	storageConfig *indexpb.StorageConfig,
+	storagePluginContext *indexcgopb.StoragePluginContext,
+	writerFormat string,
+	schemaBasedFormats []string,
+) (*packedRecordBatchWriter, error) {
+	return newPackedRecordBatchWriter(basePath, schema, bufferSize, multiPartUploadSize, columnGroups, storageConfig, storagePluginContext, false, true, writerFormat, schemaBasedFormats)
+}
+
+func validatePackedRecordBatchWriterSchema(schema *schemapb.CollectionSchema) error {
+	for _, field := range typeutil.GetAllFieldSchemas(schema) {
+		if field.GetDataType() == schemapb.DataType_Text {
+			return merr.WrapErrParameterInvalidMsg(
+				"TEXT field %d requires TEXT-aware writer or text refs as binary preserve-ref path",
+				field.GetFieldID(),
+			)
+		}
+	}
+	return nil
+}
+
+func newPackedRecordBatchWriter(
+	basePath string,
+	schema *schemapb.CollectionSchema,
+	bufferSize int64,
+	multiPartUploadSize int64,
+	columnGroups []storagecommon.ColumnGroup,
+	storageConfig *indexpb.StorageConfig,
+	storagePluginContext *indexcgopb.StoragePluginContext,
+	validatePK bool,
+	textRefsAsBinary bool,
+	writerFormat string,
+	schemaBasedFormats []string,
+) (*packedRecordBatchWriter, error) {
+	if validatePK {
+		_, err := typeutil.GetPrimaryFieldSchema(schema)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if !textRefsAsBinary {
+		if err := validatePackedRecordBatchWriterSchema(schema); err != nil {
+			return nil, err
+		}
 	}
 
 	arrowSchema, err := ConvertToArrowSchema(schema, true)
@@ -293,11 +390,24 @@ func NewPackedRecordManifestWriter(
 		return nil, merr.WrapErrServiceInternal(
 			fmt.Sprintf("can not convert collection schema %s to arrow schema: %s", schema.Name, err.Error()))
 	}
+	if textRefsAsBinary {
+		arrowSchema = overrideTextFieldsToBinary(schema, arrowSchema)
+	}
 
-	writer, err := packed.NewFFIPackedWriter(basePath, baseVersion, arrowSchema, columnGroups, storageConfig, storagePluginContext)
+	if len(schemaBasedFormats) > 0 && len(schemaBasedFormats) != len(columnGroups) {
+		return nil, merr.WrapErrParameterInvalid(len(schemaBasedFormats), len(columnGroups),
+			"schema based writer formats size must match column groups size")
+	}
+	extraProperties := map[string]string{}
+	if writerFormat != "" {
+		extraProperties[packed.PropertyWriterFormat] = writerFormat
+	}
+	if len(schemaBasedFormats) > 0 {
+		extraProperties[packed.PropertyWriterSchemaBasedFormats] = strings.Join(schemaBasedFormats, ",")
+	}
+	writer, err := packed.NewFFIPackedWriter(basePath, arrowSchema, columnGroups, storageConfig, storagePluginContext, extraProperties)
 	if err != nil {
-		return nil, merr.WrapErrServiceInternal(
-			fmt.Sprintf("can not new packed record writer %s", err.Error()))
+		return nil, merr.WrapErrStorage(err, "can not new packed record writer")
 	}
 	columnGroupUncompressed := make(map[typeutil.UniqueID]uint64)
 	columnGroupCompressed := make(map[typeutil.UniqueID]uint64)
@@ -312,7 +422,7 @@ func NewPackedRecordManifestWriter(
 		pathsMap[columnGroup.GroupID] = path.Join(basePath, strconv.FormatInt(columnGroup.GroupID, 10), strconv.FormatInt(start, 10))
 	}
 
-	return &packedRecordManifestWriter{
+	return &packedRecordBatchWriter{
 		writer:                  writer,
 		schema:                  schema,
 		arrowSchema:             arrowSchema,
@@ -331,17 +441,16 @@ func NewPackedSerializeWriter(bucketName string, paths []string, schema *schemap
 ) (*SerializeWriterImpl[*Value], error) {
 	packedRecordWriter, err := NewPackedRecordWriter(bucketName, paths, schema, bufferSize, multiPartUploadSize, columnGroups, nil, nil)
 	if err != nil {
-		return nil, merr.WrapErrServiceInternal(
-			fmt.Sprintf("can not new packed record writer %s", err.Error()))
+		return nil, merr.Wrap(err, "can not new packed record writer")
 	}
 	return NewSerializeRecordWriter(packedRecordWriter, func(v []*Value) (Record, error) {
 		return ValueSerializer(v, schema)
 	}, batchSize), nil
 }
 
-// packedTextManifestWriter wraps FFISegmentWriter for TEXT column support during compaction.
+// packedTextBatchWriter wraps FFISegmentWriter for TEXT column support during compaction.
 // it handles TEXT column rewriting with LOB file management in REWRITE_ALL mode.
-type packedTextManifestWriter struct {
+type packedTextBatchWriter struct {
 	writer                  *packed.FFISegmentWriter
 	bufferSize              int64
 	columnGroups            []storagecommon.ColumnGroup
@@ -353,11 +462,10 @@ type packedTextManifestWriter struct {
 	writtenUncompressed     uint64
 	columnGroupUncompressed map[typeutil.UniqueID]uint64
 	columnGroupCompressed   map[typeutil.UniqueID]uint64
-	outputManifest          string
 	storageConfig           *indexpb.StorageConfig
 }
 
-func (pw *packedTextManifestWriter) Write(r Record) error {
+func (pw *packedTextBatchWriter) Write(r Record) error {
 	var rec arrow.Record
 	sar, ok := r.(*simpleArrowRecord)
 	if !ok {
@@ -386,69 +494,73 @@ func (pw *packedTextManifestWriter) Write(r Record) error {
 	return pw.writer.Write(rec)
 }
 
-func (pw *packedTextManifestWriter) GetWrittenUncompressed() uint64 {
+func (pw *packedTextBatchWriter) GetWrittenUncompressed() uint64 {
 	return pw.writtenUncompressed
 }
 
-func (pw *packedTextManifestWriter) GetColumnGroupWrittenUncompressed(columnGroup typeutil.UniqueID) uint64 {
+func (pw *packedTextBatchWriter) GetColumnGroupWrittenUncompressed(columnGroup typeutil.UniqueID) uint64 {
 	if size, ok := pw.columnGroupUncompressed[columnGroup]; ok {
 		return size
 	}
 	return 0
 }
 
-func (pw *packedTextManifestWriter) GetColumnGroupWrittenCompressed(columnGroup typeutil.UniqueID) uint64 {
+func (pw *packedTextBatchWriter) GetColumnGroupWrittenCompressed(columnGroup typeutil.UniqueID) uint64 {
 	if size, ok := pw.columnGroupCompressed[columnGroup]; ok {
 		return size
 	}
 	return 0
 }
 
-func (pw *packedTextManifestWriter) GetWrittenPaths(columnGroup typeutil.UniqueID) string {
+func (pw *packedTextBatchWriter) GetWrittenPaths(columnGroup typeutil.UniqueID) string {
 	if path, ok := pw.pathsMap[columnGroup]; ok {
 		return path
 	}
 	return ""
 }
 
-func (pw *packedTextManifestWriter) GetWrittenManifest() string {
-	return pw.outputManifest
-}
-
-func (pw *packedTextManifestWriter) GetWrittenRowNum() int64 {
+func (pw *packedTextBatchWriter) GetWrittenRowNum() int64 {
 	return pw.rowNum
 }
 
-func (pw *packedTextManifestWriter) Close() error {
-	if pw.writer != nil {
-		defer pw.writer.Destroy()
-		result, err := pw.writer.Close()
-		if err != nil {
-			return err
-		}
-		pw.outputManifest = result.ManifestPath
-		pw.rowNum = result.RowsWritten
-		for id := range pw.pathsMap {
-			pw.columnGroupCompressed[id] = uint64(0)
-		}
+// Close closes the underlying segment writer and returns the resulting
+// column-groups + LOB payload. The writer never touches the manifest —
+// the caller passes the returned handle to packed.CommitManifestUpdates
+// and calls Destroy on it when done. FFISegmentWriter.Close releases its
+// own handle and properties, so no extra cleanup is needed here.
+func (pw *packedTextBatchWriter) Close() (packed.WriterOutput, error) {
+	if pw.writer == nil {
+		return nil, nil
 	}
-	return nil
+	out, err := pw.writer.Close()
+	pw.writer = nil
+	if err != nil {
+		return nil, err
+	}
+	if so, ok := out.(*packed.SegmentOutput); ok {
+		pw.rowNum = so.RowsWritten()
+	}
+	for id := range pw.pathsMap {
+		pw.columnGroupCompressed[id] = uint64(0)
+	}
+	return out, nil
 }
 
-// NewPackedTextManifestWriter creates a new writer that uses FFISegmentWriter with TEXT column support.
+// NewPackedTextBatchWriter creates a new writer that uses FFISegmentWriter with TEXT column support.
 // this writer is used during compaction when TEXT columns need REWRITE_ALL strategy.
 // textColumnConfigs: TEXT column configurations for REWRITE_ALL fields (nil if no TEXT fields need rewriting)
-func NewPackedTextManifestWriter(
+func NewPackedTextBatchWriter(
 	bucketName string,
 	basePath string,
-	baseVersion int64,
 	schema *schemapb.CollectionSchema,
 	bufferSize int64,
 	multiPartUploadSize int64,
 	columnGroups []storagecommon.ColumnGroup,
 	storageConfig *indexpb.StorageConfig,
 	textColumnConfigs []packed.TextColumnConfig,
-) (*packedTextManifestWriter, error) {
+	writerFormat string,
+	schemaBasedFormats []string,
+) (*packedTextBatchWriter, error) {
 	// validate PK field exists before proceeding
 	_, err := typeutil.GetPrimaryFieldSchema(schema)
 	if err != nil {
@@ -474,18 +586,28 @@ func NewPackedTextManifestWriter(
 		arrowSchema = overrideTextFieldsToBinary(schema, arrowSchema)
 	}
 
+	if len(schemaBasedFormats) > 0 && len(schemaBasedFormats) != len(columnGroups) {
+		return nil, merr.WrapErrParameterInvalid(len(schemaBasedFormats), len(columnGroups),
+			"schema based writer formats size must match column groups size")
+	}
 	// build segment writer config
+	schemaBasedPattern, err := packed.SchemaBasedPattern(arrowSchema, columnGroups)
+	if err != nil {
+		return nil, merr.WrapErrServiceInternal(
+			fmt.Sprintf("can not build schema based writer pattern %s", err.Error()))
+	}
 	config := &packed.SegmentWriterConfig{
-		SegmentPath: basePath,
-		ReadVersion: baseVersion,
-		RetryLimit:  3,
-		TextColumns: textColumnConfigs,
+		SegmentPath:        basePath,
+		TextColumns:        textColumnConfigs,
+		ColumnGroups:       columnGroups,
+		WriterFormat:       writerFormat,
+		SchemaBasedPattern: schemaBasedPattern,
+		SchemaBasedFormats: schemaBasedFormats,
 	}
 
 	writer, err := packed.NewFFISegmentWriter(arrowSchema, config, storageConfig)
 	if err != nil {
-		return nil, merr.WrapErrServiceInternal(
-			fmt.Sprintf("can not new segment writer %s", err.Error()))
+		return nil, merr.WrapErrStorage(err, "can not new segment writer")
 	}
 
 	columnGroupUncompressed := make(map[typeutil.UniqueID]uint64)
@@ -501,7 +623,7 @@ func NewPackedTextManifestWriter(
 		pathsMap[columnGroup.GroupID] = path.Join(basePath, strconv.FormatInt(columnGroup.GroupID, 10), strconv.FormatInt(start, 10))
 	}
 
-	return &packedTextManifestWriter{
+	return &packedTextBatchWriter{
 		writer:                  writer,
 		schema:                  schema,
 		arrowSchema:             arrowSchema,

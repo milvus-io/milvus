@@ -22,10 +22,9 @@ import (
 	"strings"
 	"sync"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/cdc/meta"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/internal/cdc/replication/replicatestream"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -55,7 +54,7 @@ func (r *replicateManager) CreateReplicator(channel *meta.ReplicateChannel) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	logger := log.With(zap.String("key", channel.Key), zap.Int64("modRevision", channel.ModRevision))
+	logger := mlog.With(mlog.String("key", channel.Key), mlog.Int64("modRevision", channel.ModRevision))
 	repKey := buildReplicatorKey(channel.Key, channel.ModRevision)
 	currentClusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
 	if !strings.Contains(channel.Value.GetSourceChannelName(), currentClusterID) {
@@ -63,34 +62,39 @@ func (r *replicateManager) CreateReplicator(channel *meta.ReplicateChannel) {
 	}
 	_, ok := r.replicators[repKey]
 	if ok {
-		logger.Debug("replicator already exists, skip create replicator")
+		logger.Debug(r.ctx, "replicator already exists, skip create replicator")
 		return
 	}
 	replicator := NewChannelReplicator(channel)
 	replicator.StartReplication()
 	r.replicators[repKey] = replicator
 	r.replicatorChannels[repKey] = channel
-	logger.Info("created replicator for replicate pchannel")
+	logger.Info(r.ctx, "created replicator for replicate pchannel")
 }
 
 func (r *replicateManager) RemoveReplicator(key string, modRevision int64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.removeReplicatorInternal(key, modRevision)
+	channel, removed := r.removeReplicatorInternal(key, modRevision)
+	if removed && channel != nil {
+		replicatestream.DeleteLastReplicatedTimeTick(channel.Value)
+	}
 }
 
-func (r *replicateManager) removeReplicatorInternal(key string, modRevision int64) {
-	logger := log.With(zap.String("key", key), zap.Int64("modRevision", modRevision))
+func (r *replicateManager) removeReplicatorInternal(key string, modRevision int64) (*meta.ReplicateChannel, bool) {
+	logger := mlog.With(mlog.String("key", key), mlog.Int64("modRevision", modRevision))
 	repKey := buildReplicatorKey(key, modRevision)
 	replicator, ok := r.replicators[repKey]
 	if !ok {
-		logger.Info("replicator not found, skip remove")
-		return
+		logger.Info(r.ctx, "replicator not found, skip remove")
+		return nil, false
 	}
+	channel := r.replicatorChannels[repKey]
 	replicator.StopReplication()
 	delete(r.replicators, repKey)
 	delete(r.replicatorChannels, repKey)
-	logger.Info("removed replicator for replicate pchannel")
+	logger.Info(r.ctx, "removed replicator for replicate pchannel")
+	return channel, true
 }
 
 func (r *replicateManager) RemoveOutdatedReplicators(aliveChannels []*meta.ReplicateChannel) {
@@ -104,6 +108,14 @@ func (r *replicateManager) RemoveOutdatedReplicators(aliveChannels []*meta.Repli
 	for repKey := range r.replicators {
 		if _, ok := alivesMap[repKey]; !ok {
 			channel := r.replicatorChannels[repKey]
+			if channel == nil {
+				continue
+			}
+			// No lag-series deletion here: a replicate pchannel key is only
+			// deleted after the replicator's in-band removal path
+			// (handleAlterReplicateConfigMessage) confirmed the removal and
+			// deleted the series; out-of-band key deletions are covered by
+			// the etcd DELETE event path (RemoveReplicator).
 			r.removeReplicatorInternal(channel.Key, channel.ModRevision)
 		}
 	}

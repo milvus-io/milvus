@@ -21,6 +21,7 @@ package expr_test
 import (
 	"testing"
 
+	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/stretchr/testify/suite"
 
@@ -152,16 +153,16 @@ func (s *DecayExprIntegrationTestSuite) TestIntegration_ChainWithDecay() {
 	decayExpr, err := expr.NewDecayExpr(expr.GaussFunction, 100, 50, 0, 0.5)
 	s.Require().NoError(err)
 
-	combineExpr, err := expr.NewScoreCombineExpr(expr.ModeMultiply, nil)
+	combineExpr, err := expr.NewNumCombineExpr(expr.ModeMultiply, nil)
 	s.Require().NoError(err)
 
 	// DecayExpr outputs pure decay factor into "_decay_score",
-	// then ScoreCombineExpr multiplies $score with _decay_score.
+	// then NumCombineExpr multiplies $score with _decay_score.
 	result, err := chain.NewFuncChainWithAllocator(s.pool).
 		SetStage(types.StageL2Rerank).
 		Map(decayExpr, []string{"distance"}, []string{"_decay_score"}).
 		Map(combineExpr, []string{types.ScoreFieldName, "_decay_score"}, []string{types.ScoreFieldName}).
-		Sort(types.ScoreFieldName, true). // descending
+		Sort(types.ScoreFieldName, true, types.IDFieldName). // descending
 		Limit(3).
 		Execute(df)
 	s.Require().NoError(err)
@@ -171,39 +172,99 @@ func (s *DecayExprIntegrationTestSuite) TestIntegration_ChainWithDecay() {
 	s.Equal([]int64{3, 3}, result.ChunkSizes())
 }
 
-func (s *DecayExprIntegrationTestSuite) TestIntegration_ParseFromJSON() {
-	// DecayExpr only takes distance input, outputs decay factor into _decay_score.
-	// ScoreCombineExpr then multiplies $score with _decay_score.
-	jsonRepr := `{
-		"name": "decay-test",
-		"stage": "L2_rerank",
-		"operators": [{
-			"type": "map",
-			"inputs": ["distance"],
-			"outputs": ["_decay_score"],
-			"function": {
-				"name": "decay",
-				"params": {
-					"function": "gauss",
-					"origin": 100,
-					"scale": 50,
-					"decay": 0.5
-				}
-			}
-		}, {
-			"type": "map",
-			"inputs": ["$score", "_decay_score"],
-			"outputs": ["$score"],
-			"function": {
-				"name": "score_combine",
-				"params": {
-					"mode": "multiply"
-				}
-			}
-		}]
-	}`
+func (s *DecayExprIntegrationTestSuite) TestIntegration_NullDecayFactorTreatedAsZero() {
+	fieldData := &schemapb.FieldData{
+		Type:      schemapb.DataType_Int64,
+		FieldName: "distance",
+		FieldId:   100,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				ValidData: []bool{true, false},
+				Data: &schemapb.ScalarField_LongData{
+					LongData: &schemapb.LongArray{
+						Data: []int64{100, 0},
+					},
+				},
+			},
+		},
+	}
+	resultData := &schemapb.SearchResultData{
+		NumQueries: 1,
+		TopK:       2,
+		Topks:      []int64{2},
+		Scores:     []float32{1.0, 0.8},
+		Ids: &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{
+					Data: []int64{1, 2},
+				},
+			},
+		},
+		FieldsData: []*schemapb.FieldData{fieldData},
+	}
+	df, err := chain.FromSearchResultData(resultData, s.pool, []string{"distance"})
+	s.Require().NoError(err)
+	defer df.Release()
 
-	fc, err := chain.ParseFuncChainRepr(jsonRepr, s.pool)
+	decayExpr, err := expr.NewDecayExpr(expr.GaussFunction, 100, 50, 0, 0.5)
+	s.Require().NoError(err)
+	combineExpr, err := expr.NewNumCombineExpr(expr.ModeMultiply, nil, expr.WithNullPolicy(expr.NumCombineNullAsZero))
+	s.Require().NoError(err)
+
+	result, err := chain.NewFuncChainWithAllocator(s.pool).
+		SetStage(types.StageL2Rerank).
+		Map(decayExpr, []string{"distance"}, []string{"_decay_score"}).
+		Map(combineExpr, []string{types.ScoreFieldName, "_decay_score"}, []string{types.ScoreFieldName}).
+		Execute(df)
+	s.Require().NoError(err)
+	defer result.Release()
+
+	scores := result.Column(types.ScoreFieldName).Chunk(0).(*array.Float32)
+	s.False(scores.IsNull(0))
+	s.InDelta(1.0, scores.Value(0), 0.001)
+	s.False(scores.IsNull(1))
+	s.InDelta(0.0, scores.Value(1), 0.001)
+}
+
+func (s *DecayExprIntegrationTestSuite) TestIntegration_ParseFromProto() {
+	// DecayExpr only takes distance input, outputs decay factor into _decay_score.
+	// NumCombineExpr then multiplies $score with _decay_score.
+	fc, err := chain.ParseFuncChainProto(&schemapb.FunctionChain{
+		Name:  "decay-test",
+		Stage: schemapb.FunctionChainStage_FunctionChainStageL2Rerank,
+		Ops: []*schemapb.FunctionChainOp{
+			{
+				Op:      types.OpTypeMap,
+				Outputs: []string{"_decay_score"},
+				Expr: &schemapb.FunctionChainExpr{
+					Name: "decay",
+					Args: []*schemapb.FunctionChainExprArg{
+						columnArg("distance"),
+					},
+					Params: map[string]*schemapb.FunctionParamValue{
+						types.DecayParamFunction: stringParam(types.DecayFuncGauss),
+						types.DecayParamOrigin:   intParam(100),
+						types.DecayParamScale:    intParam(50),
+						types.DecayParamDecay:    doubleParam(0.5),
+					},
+				},
+			},
+			{
+				Op:      types.OpTypeMap,
+				Outputs: []string{types.ScoreFieldName},
+				Expr: &schemapb.FunctionChainExpr{
+					Name: "num_combine",
+					Args: []*schemapb.FunctionChainExprArg{
+						columnArg(types.ScoreFieldName),
+						columnArg("_decay_score"),
+					},
+					Params: map[string]*schemapb.FunctionParamValue{
+						types.NumCombineParamMode: stringParam(types.NumCombineModeMultiply),
+					},
+				},
+			},
+		},
+	}, s.pool)
 	s.Require().NoError(err)
 
 	df := s.createTestDataFrame(schemapb.DataType_Int64)
@@ -216,24 +277,43 @@ func (s *DecayExprIntegrationTestSuite) TestIntegration_ParseFromJSON() {
 	s.True(result.HasColumn(types.ScoreFieldName))
 }
 
-func (s *DecayExprIntegrationTestSuite) TestIntegration_ScoreCombine_ParseFromJSON() {
-	jsonRepr := `{
-		"name": "score-combine-test",
-		"stage": "L2_rerank",
-		"operators": [{
-			"type": "map",
-			"inputs": ["$score", "_func_score"],
-			"outputs": ["$score"],
-			"function": {
-				"name": "score_combine",
-				"params": {
-					"mode": "multiply"
-				}
-			}
-		}]
-	}`
-
-	fc, err := chain.ParseFuncChainRepr(jsonRepr, s.pool)
+func (s *DecayExprIntegrationTestSuite) TestIntegration_NumCombine_ParseFromProto() {
+	fc, err := chain.ParseFuncChainProto(&schemapb.FunctionChain{
+		Name:  "num-combine-test",
+		Stage: schemapb.FunctionChainStage_FunctionChainStageL2Rerank,
+		Ops: []*schemapb.FunctionChainOp{
+			{
+				Op:      types.OpTypeMap,
+				Outputs: []string{types.ScoreFieldName},
+				Expr: &schemapb.FunctionChainExpr{
+					Name: "num_combine",
+					Args: []*schemapb.FunctionChainExprArg{
+						columnArg(types.ScoreFieldName),
+						columnArg("_func_score"),
+					},
+					Params: map[string]*schemapb.FunctionParamValue{
+						types.NumCombineParamMode: stringParam(types.NumCombineModeMultiply),
+					},
+				},
+			},
+		},
+	}, s.pool)
 	s.Require().NoError(err)
 	s.NotNil(fc)
+}
+
+func columnArg(name string) *schemapb.FunctionChainExprArg {
+	return &schemapb.FunctionChainExprArg{Arg: &schemapb.FunctionChainExprArg_Column{Column: &schemapb.FunctionChainColumnArg{Name: name}}}
+}
+
+func intParam(value int64) *schemapb.FunctionParamValue {
+	return &schemapb.FunctionParamValue{Value: &schemapb.FunctionParamValue_Int64Value{Int64Value: value}}
+}
+
+func doubleParam(value float64) *schemapb.FunctionParamValue {
+	return &schemapb.FunctionParamValue{Value: &schemapb.FunctionParamValue_DoubleValue{DoubleValue: value}}
+}
+
+func stringParam(value string) *schemapb.FunctionParamValue {
+	return &schemapb.FunctionParamValue{Value: &schemapb.FunctionParamValue_StringValue{StringValue: value}}
 }

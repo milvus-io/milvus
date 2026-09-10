@@ -18,7 +18,6 @@ package parquet
 
 import (
 	"context"
-	"fmt"
 	"io"
 
 	"github.com/apache/arrow/go/v17/arrow/memory"
@@ -26,12 +25,11 @@ import (
 	"github.com/apache/arrow/go/v17/parquet/file"
 	"github.com/apache/arrow/go/v17/parquet/pqarrow"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -73,10 +71,10 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 	}))
 	if err != nil {
 		retryableReader.Close()
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("new parquet reader failed, err=%v", err))
+		return nil, common.WrapDecodeErr(err, "new parquet reader failed")
 	}
-	log.Info("parquet file info", zap.Int("row group num", r.NumRowGroups()),
-		zap.Int64("num rows", r.NumRows()))
+	mlog.Info(ctx, "parquet file info", mlog.Int("row group num", r.NumRowGroups()),
+		mlog.Int64("num rows", r.NumRows()))
 
 	count, err := common.EstimateReadCountPerBatch(bufferSize, schema)
 	if err != nil {
@@ -90,7 +88,7 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 	fileReader, err := pqarrow.NewFileReader(r, readProps, memory.DefaultAllocator)
 	if err != nil {
 		r.Close()
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("new parquet file reader failed, err=%v", err))
+		return nil, merr.WrapErrImportSysFailedMsg("new parquet file reader failed, err=%v", err)
 	}
 
 	crs, err := CreateFieldReaders(ctx, fileReader, schema)
@@ -160,7 +158,7 @@ func (r *reader) Size() (int64, error) {
 func (r *reader) Close() {
 	err := r.r.Close()
 	if err != nil {
-		log.Warn("close parquet reader failed", zap.Error(err))
+		mlog.Warn(r.ctx, "close parquet reader failed", mlog.Err(err))
 	}
 	if r.cmr != nil {
 		r.cmr.Close()

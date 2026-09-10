@@ -18,13 +18,11 @@ package cluster
 
 import (
 	context "context"
-	"fmt"
 	"strconv"
 
-	"go.uber.org/zap"
-
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -51,9 +49,9 @@ func (m *grpcWorkerManager) GetWorker(ctx context.Context, nodeID int64) (Worker
 		worker, err, _ = m.sf.Do(strconv.FormatInt(nodeID, 10), func() (Worker, error) {
 			worker, err = m.builder(ctx, nodeID)
 			if err != nil {
-				log.Warn("failed to build worker",
-					zap.Int64("nodeID", nodeID),
-					zap.Error(err),
+				mlog.Warn(ctx, "failed to build worker",
+					mlog.FieldNodeID(nodeID),
+					mlog.Err(err),
 				)
 				return nil, err
 			}
@@ -70,7 +68,7 @@ func (m *grpcWorkerManager) GetWorker(ctx context.Context, nodeID int64) (Worker
 	}
 	if !worker.IsHealthy() {
 		// TODO wrap error
-		return nil, fmt.Errorf("node is not healthy: %d", nodeID)
+		return nil, merr.WrapErrNodeNotAvailable(nodeID, "node is not healthy")
 	}
 	return worker, nil
 }

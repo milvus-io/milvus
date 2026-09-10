@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -42,7 +41,7 @@ func (reducer *MilvusAggReducer) Reduce(results []*internalpb.RetrieveResults) (
 	for i := 0; i < fieldCount; i++ {
 		indices := reducer.outputMap.IndexesAt(i)
 		if len(indices) == 0 {
-			return nil, fmt.Errorf("no indices found for output field at index %d", i)
+			return nil, merr.WrapErrParameterInvalidMsg("no indices found for output field at index %d", i)
 		} else if len(indices) == 1 {
 			// Single index: direct copy (non-avg aggregation or group-by field)
 			reOrganizedFieldDatas[i] = reducedFieldDatas[indices[0]]
@@ -53,12 +52,12 @@ func (reducer *MilvusAggReducer) Reduce(results []*internalpb.RetrieveResults) (
 			countFieldData := reducedFieldDatas[indices[1]]
 			avgFieldData, err := agg.ComputeAvgFromSumAndCount(sumFieldData, countFieldData)
 			if err != nil {
-				return nil, fmt.Errorf("failed to compute avg for field %s: %w", reducer.outputMap.NameAt(i), err)
+				return nil, merr.Wrapf(err, "failed to compute avg for field %s", reducer.outputMap.NameAt(i))
 			}
 			avgFieldData.FieldName = reducer.outputMap.NameAt(i)
 			reOrganizedFieldDatas[i] = avgFieldData
 		} else {
-			return nil, fmt.Errorf("unexpected number of indices (%d) for output field at index %d, expected 1 or 2", len(indices), i)
+			return nil, merr.WrapErrParameterInvalidMsg("unexpected number of indices (%d) for output field at index %d, expected 1 or 2", len(indices), i)
 		}
 	}
 	return &milvuspb.QueryResults{FieldsData: reOrganizedFieldDatas, Status: merr.Success()}, nil

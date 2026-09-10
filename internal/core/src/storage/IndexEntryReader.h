@@ -18,32 +18,59 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <future>
 #include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
+#include "folly/CancellationToken.h"
 #include "common/EasyAssert.h"
 #include "filemanager/InputStream.h"
 #include "nlohmann/json.hpp"
+#include "storage/FileWriter.h"
 #include "storage/IndexEntryWriter.h"
 #include "storage/ThreadPools.h"
 #include "storage/plugin/PluginInterface.h"
 
 namespace milvus::storage {
 
+size_t
+DefaultEntryStreamSliceSize();
+
 struct Entry {
     std::vector<uint8_t> data;
 };
 
+struct EntryStreamLoadInfo {
+    // Exact encrypted-stream task bounds derived from persisted V3 directory
+    // slice metadata. Plaintext files leave both byte counts at zero.
+    bool encrypted{false};
+    size_t total_transient_bytes{0};
+    size_t max_task_transient_bytes{0};
+};
+
 class IndexEntryReader {
  public:
+    static EntryStreamLoadInfo
+    InspectStreamLoadInfo(std::shared_ptr<milvus::InputStream> input,
+                          int64_t file_size,
+                          folly::CancellationToken cancellation_token =
+                              folly::CancellationToken());
+
     static std::unique_ptr<IndexEntryReader>
     Open(std::shared_ptr<milvus::InputStream> input,
          int64_t file_size,
          int64_t collection_id = 0,
-         ThreadPoolPriority priority = ThreadPoolPriority::HIGH);
+         ThreadPoolPriority priority = ThreadPoolPriority::HIGH,
+         folly::CancellationToken cancellation_token =
+             folly::CancellationToken());
+
+    const EntryStreamLoadInfo&
+    GetStreamLoadInfo() const {
+        return stream_load_info_;
+    }
 
     std::vector<std::string>
     GetEntryNames() const;
@@ -57,6 +84,43 @@ class IndexEntryReader {
     void
     ReadEntriesToFiles(const std::vector<std::pair<std::string, std::string>>&
                            name_path_pairs);
+
+    void
+    ReadEntryStreamToFile(const std::string& name,
+                          const std::string& local_path,
+                          io::Priority write_priority = io::Priority::MIDDLE);
+
+    void
+    ReadEntriesStreamToFiles(
+        const std::vector<std::pair<std::string, std::string>>& name_path_pairs,
+        io::Priority write_priority = io::Priority::MIDDLE);
+
+    /// Stream entry data with joint transient-byte and slot admission.
+    /// Downloads are concurrent (full bandwidth). Slices are delivered in entry
+    /// order to `slice_consumer`; the data pointer is valid only for the
+    /// duration of that call. Global LoadAdmissionController controls total
+    /// inflight slice bytes and count across all concurrent entry streams.
+    /// CRC32c is verified incrementally. Consumers may receive partial data
+    /// before a later slice error is reported. Slow consumers keep their slice
+    /// reservations until the callback returns, which can block other streams.
+    /// Plain entries are split into `slice_size` byte slices. Encrypted entries
+    /// ignore `slice_size` and use the slice boundaries stored in the V3
+    /// directory.
+    void
+    ReadEntryStream(
+        const std::string& name,
+        std::function<void(const uint8_t* data, size_t len)> slice_consumer,
+        size_t slice_size = DefaultEntryStreamSliceSize());
+
+    /// Return the uncompressed data size of an entry without reading it.
+    size_t
+    GetEntrySize(const std::string& name) const;
+
+    /// Check if an entry exists in the index file.
+    bool
+    HasEntry(const std::string& name) const {
+        return entry_index_.find(name) != entry_index_.end();
+    }
 
     template <typename T>
     T
@@ -108,11 +172,25 @@ class IndexEntryReader {
     ReadFooterAndDirectory();
     void
     ValidateMagic();
+    void
+    CheckCancelled(const std::string& operation) const;
 
     Entry
     ReadPlainEntry(const EntryMeta& meta);
     Entry
     ReadEncryptedEntry(const EntryMeta& meta);
+
+    void
+    ReadPlainEntryStream(const PlainEntryMeta& pm,
+                         const std::function<void(const uint8_t* data,
+                                                  size_t len)>& slice_consumer,
+                         size_t slice_size);
+
+    void
+    ReadEncryptedEntryStream(
+        const EncryptedEntryMeta& em,
+        const std::function<void(const uint8_t* data, size_t len)>&
+            slice_consumer);
 
     void
     VerifyCrc32c(uint32_t expected,
@@ -133,6 +211,13 @@ class IndexEntryReader {
         std::vector<RangeCrc> range_crcs;
     };
 
+    struct EntryStreamDownloadState {
+        std::string name;
+        std::unique_ptr<PositionedFileWriter> writer;
+        uint32_t expected_crc;
+        std::vector<RangeCrc> range_crcs;
+    };
+
     // Prepare download state for an entry (open file, allocate CRC vector)
     EntryDownloadState
     PrepareEntryDownload(const std::string& name,
@@ -145,14 +230,38 @@ class IndexEntryReader {
                              EntryDownloadState& state,
                              std::vector<std::future<void>>& futures);
 
+    static size_t
+    DownloadRangeCount(uint64_t size);
+
+    static size_t
+    DownloadTaskCount(const EntryMeta& meta);
+
     // Verify CRC and close file descriptor
     void
     FinalizeEntryDownload(EntryDownloadState& state);
+
+    EntryStreamDownloadState
+    PrepareEntryStreamDownload(const std::string& name,
+                               const std::string& local_path,
+                               const EntryMeta& meta,
+                               io::Priority write_priority);
+
+    void
+    SubmitEntryStreamDownloadTasks(const EntryMeta& meta,
+                                   EntryStreamDownloadState& state,
+                                   std::vector<std::future<void>>& futures);
+
+    static size_t
+    StreamDownloadTaskCount(const EntryMeta& meta);
+
+    void
+    FinalizeEntryStreamDownload(EntryStreamDownloadState& state);
 
     std::shared_ptr<milvus::InputStream> input_;
     int64_t file_size_ = 0;
     int64_t collection_id_ = 0;
     ThreadPoolPriority priority_ = ThreadPoolPriority::HIGH;
+    folly::CancellationToken cancellation_token_;
 
     bool is_encrypted_ = false;
     std::string edek_;
@@ -162,6 +271,7 @@ class IndexEntryReader {
     std::shared_ptr<plugin::ICipherPlugin> cipher_plugin_;
 
     std::unordered_map<std::string, EntryMeta> entry_index_;
+    EntryStreamLoadInfo stream_load_info_;
     std::vector<std::string> entry_names_;
 
     static constexpr size_t kSmallEntryCacheThreshold = 1 * 1024 * 1024;

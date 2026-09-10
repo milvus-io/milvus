@@ -25,14 +25,13 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
@@ -97,11 +96,11 @@ func (s *DBPropertiesSuite) prepareCollection(ctx context.Context, dbName string
 	s.NoError(err)
 	err = merr.Error(createIndexStatus)
 	if err != nil {
-		log.Warn("createIndexStatus fail reason", zap.Error(err))
+		mlog.Warn(ctx, "createIndexStatus fail reason", mlog.Err(err))
 	}
 
 	s.WaitForIndexBuiltWithDB(timeoutCtx, dbName, collectionName, integration.FloatVecField)
-	log.Info("Create index done")
+	mlog.Info(ctx, "Create index done")
 
 	// load
 	loadStatus, err := s.Cluster.MilvusClient.LoadCollection(timeoutCtx, &milvuspb.LoadCollectionRequest{
@@ -111,10 +110,10 @@ func (s *DBPropertiesSuite) prepareCollection(ctx context.Context, dbName string
 	s.NoError(err)
 	err = merr.Error(loadStatus)
 	if err != nil {
-		log.Warn("LoadCollection fail reason", zap.Error(err))
+		mlog.Warn(ctx, "LoadCollection fail reason", mlog.Err(err))
 	}
 	s.WaitForLoadWithDB(ctx, dbName, collectionName)
-	log.Info("Load collection done")
+	mlog.Info(ctx, "Load collection done")
 }
 
 func (s *DBPropertiesSuite) insert(ctx context.Context, dbName string, collectionName string,

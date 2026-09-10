@@ -1,16 +1,16 @@
 package storage
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -147,7 +147,7 @@ func (s *InsertDataSuite) TestInsertData() {
 			s.Equal(2, field.RowNum())
 
 			err := field.AppendRow(struct{}{})
-			log.Warn("error", zap.Error(err))
+			mlog.Warn(context.TODO(), "error", mlog.Err(err))
 			s.ErrorIs(err, merr.ErrParameterInvalid)
 		}
 	})

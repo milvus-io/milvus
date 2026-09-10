@@ -18,7 +18,6 @@ package parquet
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -40,13 +39,72 @@ type StructFieldReader struct {
 	dim          int
 }
 
+// collectSubFieldLeaves returns the parquet leaf column indices belonging to the
+// fieldIndex-th sub-field of the list<struct> column at columnIndex.
+func collectSubFieldLeaves(manifest *pqarrow.SchemaManifest, columnIndex, fieldIndex int) (map[int]bool, error) {
+	if manifest == nil || columnIndex < 0 || columnIndex >= len(manifest.Fields) {
+		return nil, merr.WrapErrImportSysFailedMsg("struct column index %d out of range", columnIndex)
+	}
+	listField := &manifest.Fields[columnIndex]
+	if len(listField.Children) != 1 {
+		return nil, merr.WrapErrImportSysFailedMsg("struct column %d is not a list of structs", columnIndex)
+	}
+	structField := &listField.Children[0]
+	if fieldIndex < 0 || fieldIndex >= len(structField.Children) {
+		return nil, merr.WrapErrImportSysFailedMsg("struct sub-field index %d out of range", fieldIndex)
+	}
+
+	leaves := make(map[int]bool)
+	collectLeafColumnIndices(&structField.Children[fieldIndex], leaves)
+	// Unreachable with the current recursion, which always records at least one
+	// index for any node it is handed. Kept as a guard so a future change to
+	// collectLeafColumnIndices cannot silently hand arrow an empty leaf set,
+	// which GetFieldReader answers with a nil reader rather than an error.
+	if len(leaves) == 0 {
+		return nil, merr.WrapErrImportSysFailedMsg("no leaf column found for struct sub-field index %d", fieldIndex)
+	}
+	return leaves, nil
+}
+
+// collectLeafColumnIndices walks a schema subtree and records every leaf column index.
+//
+// Recursion terminates on len(Children) == 0 rather than SchemaField.IsLeaf():
+// arrow assigns ColIndex only in populateLeaf and zero-initializes every other
+// SchemaField, so IsLeaf() (ColIndex != -1) reports true for group nodes and
+// yields a bogus index of 0. arrow's own getReader guards the same way.
+func collectLeafColumnIndices(field *pqarrow.SchemaField, leaves map[int]bool) {
+	if len(field.Children) == 0 {
+		leaves[field.ColIndex] = true
+		return
+	}
+	for i := range field.Children {
+		collectLeafColumnIndices(&field.Children[i], leaves)
+	}
+}
+
 // NewStructFieldReader creates a reader for extracting a field from nested struct
 func NewStructFieldReader(ctx context.Context, fileReader *pqarrow.FileReader, columnIndex int,
 	fieldIndex int, field *schemapb.FieldSchema,
 ) (*FieldReader, error) {
-	columnReader, err := fileReader.GetColumn(ctx, columnIndex)
+	// Only pull the leaf columns of this sub-field. Using GetColumn here would
+	// decode every leaf of the list<struct> column for every sub-field reader,
+	// reading the whole column N times for N sub-fields.
+	includedLeaves, err := collectSubFieldLeaves(fileReader.Manifest, columnIndex, fieldIndex)
+	if err != nil {
+		return nil, merr.Wrapf(err, "failed to resolve leaf columns for struct sub-field '%s'", field.GetName())
+	}
+
+	rowGroups := make([]int, fileReader.ParquetReader().NumRowGroups())
+	for i := range rowGroups {
+		rowGroups[i] = i
+	}
+
+	columnReader, err := fileReader.GetFieldReader(ctx, columnIndex, includedLeaves, rowGroups)
 	if err != nil {
 		return nil, err
+	}
+	if columnReader == nil {
+		return nil, merr.WrapErrImportSysFailedMsg("no column reader for struct sub-field '%s'", field.GetName())
 	}
 
 	dim := 0
@@ -68,8 +126,11 @@ func NewStructFieldReader(ctx context.Context, fileReader *pqarrow.FileReader, c
 	sfr := &StructFieldReader{
 		columnReader: columnReader,
 		field:        field,
-		fieldIndex:   fieldIndex,
-		dim:          dim,
+		// Leaf pruning leaves exactly one surviving child under the struct, so
+		// the sub-field always sits at position 0 in the arrow struct this
+		// reader produces.
+		fieldIndex: 0,
+		dim:        dim,
 	}
 
 	fr := &FieldReader{
@@ -101,7 +162,7 @@ func (r *StructFieldReader) Next(count int64) (any, any, error) {
 	case schemapb.DataType_ArrayOfVector:
 		return r.readArrayOfVectorField(chunked)
 	default:
-		return nil, nil, merr.WrapErrImportFailed(fmt.Sprintf("unsupported data type for struct field: %v", r.field.GetDataType()))
+		return nil, nil, merr.WrapErrImportFailedMsg("unsupported data type for struct field: %v", r.field.GetDataType())
 	}
 }
 
@@ -113,7 +174,7 @@ func (r *StructFieldReader) toScalarField(data []interface{}) (*schemapb.ScalarF
 		for i, v := range data {
 			val, ok := v.(bool)
 			if !ok {
-				return nil, merr.WrapErrImportFailed(fmt.Sprintf("expected bool for field '%s', got %T at index %d", r.field.GetName(), v, i))
+				return nil, merr.WrapErrImportFailedMsg("expected bool for field '%s', got %T at index %d", r.field.GetName(), v, i)
 			}
 			boolData[i] = val
 		}
@@ -127,7 +188,7 @@ func (r *StructFieldReader) toScalarField(data []interface{}) (*schemapb.ScalarF
 		for i, v := range data {
 			val, ok := v.(int8)
 			if !ok {
-				return nil, merr.WrapErrImportFailed(fmt.Sprintf("expected int8 for field '%s', got %T at index %d", r.field.GetName(), v, i))
+				return nil, merr.WrapErrImportFailedMsg("expected int8 for field '%s', got %T at index %d", r.field.GetName(), v, i)
 			}
 			intData[i] = int32(val)
 		}
@@ -141,7 +202,7 @@ func (r *StructFieldReader) toScalarField(data []interface{}) (*schemapb.ScalarF
 		for i, v := range data {
 			val, ok := v.(int16)
 			if !ok {
-				return nil, merr.WrapErrImportFailed(fmt.Sprintf("expected int16 for field '%s', got %T at index %d", r.field.GetName(), v, i))
+				return nil, merr.WrapErrImportFailedMsg("expected int16 for field '%s', got %T at index %d", r.field.GetName(), v, i)
 			}
 			intData[i] = int32(val)
 		}
@@ -155,7 +216,7 @@ func (r *StructFieldReader) toScalarField(data []interface{}) (*schemapb.ScalarF
 		for i, v := range data {
 			val, ok := v.(int32)
 			if !ok {
-				return nil, merr.WrapErrImportFailed(fmt.Sprintf("expected int32 for field '%s', got %T at index %d", r.field.GetName(), v, i))
+				return nil, merr.WrapErrImportFailedMsg("expected int32 for field '%s', got %T at index %d", r.field.GetName(), v, i)
 			}
 			intData[i] = val
 		}
@@ -169,7 +230,7 @@ func (r *StructFieldReader) toScalarField(data []interface{}) (*schemapb.ScalarF
 		for i, v := range data {
 			val, ok := v.(int64)
 			if !ok {
-				return nil, merr.WrapErrImportFailed(fmt.Sprintf("expected int64 for field '%s', got %T at index %d", r.field.GetName(), v, i))
+				return nil, merr.WrapErrImportFailedMsg("expected int64 for field '%s', got %T at index %d", r.field.GetName(), v, i)
 			}
 			intData[i] = val
 		}
@@ -183,7 +244,7 @@ func (r *StructFieldReader) toScalarField(data []interface{}) (*schemapb.ScalarF
 		for i, v := range data {
 			val, ok := v.(float32)
 			if !ok {
-				return nil, merr.WrapErrImportFailed(fmt.Sprintf("expected float32 for field '%s', got %T at index %d", r.field.GetName(), v, i))
+				return nil, merr.WrapErrImportFailedMsg("expected float32 for field '%s', got %T at index %d", r.field.GetName(), v, i)
 			}
 			floatData[i] = val
 		}
@@ -197,7 +258,7 @@ func (r *StructFieldReader) toScalarField(data []interface{}) (*schemapb.ScalarF
 		for i, v := range data {
 			val, ok := v.(float64)
 			if !ok {
-				return nil, merr.WrapErrImportFailed(fmt.Sprintf("expected float64 for field '%s', got %T at index %d", r.field.GetName(), v, i))
+				return nil, merr.WrapErrImportFailedMsg("expected float64 for field '%s', got %T at index %d", r.field.GetName(), v, i)
 			}
 			floatData[i] = val
 		}
@@ -211,7 +272,7 @@ func (r *StructFieldReader) toScalarField(data []interface{}) (*schemapb.ScalarF
 		for i, v := range data {
 			val, ok := v.(string)
 			if !ok {
-				return nil, merr.WrapErrImportFailed(fmt.Sprintf("expected string for field '%s', got %T at index %d", r.field.GetName(), v, i))
+				return nil, merr.WrapErrImportFailedMsg("expected string for field '%s', got %T at index %d", r.field.GetName(), v, i)
 			}
 			strData[i] = val
 		}
@@ -221,7 +282,7 @@ func (r *StructFieldReader) toScalarField(data []interface{}) (*schemapb.ScalarF
 			},
 		}, nil
 	default:
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("unsupported element type for struct field: %v", r.field.GetElementType()))
+		return nil, merr.WrapErrImportFailedMsg("unsupported element type for struct field: %v", r.field.GetElementType())
 	}
 }
 
@@ -325,7 +386,7 @@ func (r *StructFieldReader) readArrayField(chunked *arrow.Chunked) (any, any, er
 						}
 						value := field.Value(int(structIdx))
 						if err := typeutil.VerifyFloat(float64(value)); err != nil {
-							return nil, nil, fmt.Errorf("float32 verification failed: %w", err)
+							return nil, nil, merr.Wrap(err, "float32 verification failed")
 						}
 						combinedData = append(combinedData, value)
 					case *array.Float64:
@@ -334,7 +395,7 @@ func (r *StructFieldReader) readArrayField(chunked *arrow.Chunked) (any, any, er
 						}
 						value := field.Value(int(structIdx))
 						if err := typeutil.VerifyFloat(value); err != nil {
-							return nil, nil, fmt.Errorf("float64 verification failed: %w", err)
+							return nil, nil, merr.Wrap(err, "float64 verification failed")
 						}
 						combinedData = append(combinedData, value)
 					case *array.String:

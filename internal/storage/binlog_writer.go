@@ -18,15 +18,14 @@ package storage
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
-
-	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // BinlogType is to distinguish different files saving different data.
@@ -114,7 +113,7 @@ func (writer *baseBinlogWriter) GetBinlogType() BinlogType {
 // GetBuffer gets binlog buffer. Return nil if binlog is not finished yet.
 func (writer *baseBinlogWriter) GetBuffer() ([]byte, error) {
 	if writer.buffer == nil {
-		return nil, errors.New("please close binlog before get buffer")
+		return nil, merr.WrapErrServiceInternalMsg("please close binlog before get buffer")
 	}
 	return writer.buffer.Bytes(), nil
 }
@@ -125,7 +124,7 @@ func (writer *baseBinlogWriter) Finish() error {
 		return nil
 	}
 	if writer.StartTimestamp == 0 || writer.EndTimestamp == 0 {
-		return errors.New("invalid start/end timestamp")
+		return merr.WrapErrServiceInternalMsg("invalid start/end timestamp")
 	}
 
 	var offset int32
@@ -169,10 +168,10 @@ func (writer *baseBinlogWriter) Finish() error {
 		if err != nil {
 			return err
 		}
-		log.Debug("Binlog writer encrypted plain text",
-			zap.String("writer type", writer.binlogType.String()),
-			zap.Int("plain size", eventBuffer.Len()),
-			zap.Int("cipher size", len(encrypted)))
+		mlog.Debug(context.TODO(), "Binlog writer encrypted plain text",
+			mlog.String("writer type", writer.binlogType.String()),
+			mlog.Int("plain size", eventBuffer.Len()),
+			mlog.Int("cipher size", len(encrypted)))
 		if err := binary.Write(writer.buffer, common.Endian, encrypted); err != nil {
 			return err
 		}
@@ -194,7 +193,7 @@ type InsertBinlogWriter struct {
 // NextInsertEventWriter returns an event writer to write insert data to an event.
 func (writer *InsertBinlogWriter) NextInsertEventWriter(opts ...PayloadWriterOptions) (*insertEventWriter, error) {
 	if writer.isClosed() {
-		return nil, errors.New("binlog has closed")
+		return nil, merr.WrapErrServiceInternalMsg("binlog has closed")
 	}
 
 	event, err := newInsertEventWriter(writer.PayloadDataType, opts...)
@@ -214,7 +213,7 @@ type DeleteBinlogWriter struct {
 // NextDeleteEventWriter returns an event writer to write delete data to an event.
 func (writer *DeleteBinlogWriter) NextDeleteEventWriter(opts ...PayloadWriterOptions) (*deleteEventWriter, error) {
 	if writer.isClosed() {
-		return nil, errors.New("binlog has closed")
+		return nil, merr.WrapErrServiceInternalMsg("binlog has closed")
 	}
 	event, err := newDeleteEventWriter(writer.PayloadDataType, opts...)
 	if err != nil {
@@ -232,7 +231,7 @@ type IndexFileBinlogWriter struct {
 // NextIndexFileEventWriter return next available EventWriter
 func (writer *IndexFileBinlogWriter) NextIndexFileEventWriter() (*indexFileEventWriter, error) {
 	if writer.isClosed() {
-		return nil, errors.New("binlog has closed")
+		return nil, merr.WrapErrServiceInternalMsg("binlog has closed")
 	}
 	event, err := newIndexFileEventWriter(writer.PayloadDataType)
 	if err != nil {

@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
 
@@ -40,24 +41,28 @@ type ImportMeta interface {
 	GetJobBy(ctx context.Context, filters ...ImportJobFilter) []ImportJob
 	CountJobBy(ctx context.Context, filters ...ImportJobFilter) int
 	RemoveJob(ctx context.Context, jobID int64) error
+	HandleCommitVchannel(ctx context.Context, jobID int64, vchannel string, callback func() error) error
 
 	AddTask(ctx context.Context, task ImportTask) error
 	UpdateTask(ctx context.Context, taskID int64, actions ...UpdateAction) error
 	GetTask(ctx context.Context, taskID int64) ImportTask
 	GetTaskBy(ctx context.Context, filters ...ImportTaskFilter) []ImportTask
+	GetTaskByJob(ctx context.Context, jobID int64, filters ...ImportTaskFilter) []ImportTask
 	RemoveTask(ctx context.Context, taskID int64) error
 	TaskStatsJSON(ctx context.Context) string
 }
 
 type importTasks struct {
-	tasks     map[int64]ImportTask
-	taskStats *expirable.LRU[int64, ImportTask]
+	tasks          map[int64]ImportTask
+	taskIDsByJobID map[int64]map[int64]struct{}
+	taskStats      *expirable.LRU[int64, ImportTask]
 }
 
 func newImportTasks() *importTasks {
 	return &importTasks{
-		tasks:     make(map[int64]ImportTask),
-		taskStats: expirable.NewLRU[UniqueID, ImportTask](512, nil, time.Minute*30),
+		tasks:          make(map[int64]ImportTask),
+		taskIDsByJobID: make(map[int64]map[int64]struct{}),
+		taskStats:      expirable.NewLRU[UniqueID, ImportTask](512, nil, time.Minute*30),
 	}
 }
 
@@ -70,20 +75,49 @@ func (t *importTasks) get(taskID int64) ImportTask {
 }
 
 func (t *importTasks) add(task ImportTask) {
-	t.tasks[task.GetTaskID()] = task
-	t.taskStats.Add(task.GetTaskID(), task)
+	taskID := task.GetTaskID()
+	jobID := task.GetJobID()
+	if oldTask, ok := t.tasks[taskID]; ok && oldTask.GetJobID() != jobID {
+		t.removeFromJob(oldTask.GetJobID(), taskID)
+	}
+	t.tasks[taskID] = task
+	if _, ok := t.taskIDsByJobID[jobID]; !ok {
+		t.taskIDsByJobID[jobID] = make(map[int64]struct{})
+	}
+	t.taskIDsByJobID[jobID][taskID] = struct{}{}
+	t.taskStats.Add(taskID, task)
 }
 
 func (t *importTasks) remove(taskID int64) {
 	task, ok := t.tasks[taskID]
 	if ok {
 		delete(t.tasks, taskID)
+		t.removeFromJob(task.GetJobID(), taskID)
 		t.taskStats.Add(task.GetTaskID(), task)
+	}
+}
+
+func (t *importTasks) removeFromJob(jobID, taskID int64) {
+	taskIDs := t.taskIDsByJobID[jobID]
+	delete(taskIDs, taskID)
+	if len(taskIDs) == 0 {
+		delete(t.taskIDsByJobID, jobID)
 	}
 }
 
 func (t *importTasks) listTasks() []ImportTask {
 	return maps.Values(t.tasks)
+}
+
+func (t *importTasks) listTasksByJob(jobID int64) []ImportTask {
+	taskIDs := t.taskIDsByJobID[jobID]
+	tasks := make([]ImportTask, 0, len(taskIDs))
+	for taskID := range taskIDs {
+		if task, ok := t.tasks[taskID]; ok {
+			tasks = append(tasks, task)
+		}
+	}
+	return tasks
 }
 
 func (t *importTasks) listTaskStats() []ImportTask {
@@ -292,9 +326,19 @@ func (m *importMeta) GetTask(ctx context.Context, taskID int64) ImportTask {
 func (m *importMeta) GetTaskBy(ctx context.Context, filters ...ImportTaskFilter) []ImportTask {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	return filterImportTasks(m.tasks.listTasks(), filters...)
+}
+
+func (m *importMeta) GetTaskByJob(ctx context.Context, jobID int64, filters ...ImportTaskFilter) []ImportTask {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return filterImportTasks(m.tasks.listTasksByJob(jobID), filters...)
+}
+
+func filterImportTasks(tasks []ImportTask, filters ...ImportTaskFilter) []ImportTask {
 	ret := make([]ImportTask, 0)
 OUTER:
-	for _, task := range m.tasks.listTasks() {
+	for _, task := range tasks {
 		for _, f := range filters {
 			if !f(task) {
 				continue OUTER
@@ -334,4 +378,68 @@ func (m *importMeta) TaskStatsJSON(ctx context.Context) string {
 		return ""
 	}
 	return string(ret)
+}
+
+func (m *importMeta) HandleCommitVchannel(ctx context.Context, jobID int64, vchannel string, callback func() error) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	job := m.jobs[jobID]
+	if job == nil {
+		return merr.WrapErrImportSysFailedMsg("job %d not found", jobID)
+	}
+	switch job.GetState() {
+	case internalpb.ImportJobState_Uncommitted, internalpb.ImportJobState_Committing:
+		// continue
+	case internalpb.ImportJobState_Completed, internalpb.ImportJobState_Failed:
+		return nil
+	default:
+		// Do not record committed_vchannels while the import task is still
+		// importing. The caller must retry after the job becomes Uncommitted;
+		// otherwise a later retry would treat this vchannel as committed even
+		// though the visibility callback has not run.
+		return merr.WrapErrImportSysFailedMsg("job %d is in state %s, waiting for Uncommitted", jobID, job.GetState())
+	}
+	// Idempotency: if vchannel already committed, skip.
+	for _, c := range job.GetCommittedVchannels() {
+		if c == vchannel {
+			return nil
+		}
+	}
+	if job.GetState() == internalpb.ImportJobState_Uncommitted {
+		updatedJob := job.Clone()
+		updatedJob.(*importJob).State = internalpb.ImportJobState_Committing
+		if err := m.catalog.SaveImportJob(ctx, updatedJob.(*importJob).ImportJob); err != nil {
+			return err
+		}
+		m.jobs[jobID] = updatedJob
+		job = updatedJob
+	}
+	// Move the job into commit phase before making any segment visible, then
+	// execute the callback before persisting the committed vchannel.
+	// If callback fails, we return error without persisting committed_vchannels;
+	// the caller retries and the callback will be invoked again. This avoids the
+	// scenario where committed_vchannels is persisted but callback fails, causing
+	// the idempotency check to skip the callback on retry (data stays invisible
+	// forever).
+	// The callback (setting is_importing=false) is idempotent, so re-execution on
+	// retry after a persist failure is safe.
+	//
+	// Visibility ordering note: the callback clears segment meta (is_importing=false)
+	// before this function persists job meta (committed_vchannels). Therefore a
+	// vchannel's imported data can become visible before the job-level transition
+	// to Completed (which happens later in checkCommittingJob once all vchannels
+	// have been recorded here). This is inherent to per-vchannel commit fences —
+	// 2PC for import is per-vchannel-atomic, not job-atomic. See MEP
+	// (milvus-io/milvus-design-docs#29) "Segment Visibility" section.
+	if err := callback(); err != nil {
+		return err
+	}
+	updatedJob := job.Clone()
+	updatedJob.(*importJob).CommittedVchannels = append(updatedJob.GetCommittedVchannels(), vchannel)
+	if err := m.catalog.SaveImportJob(ctx, updatedJob.(*importJob).ImportJob); err != nil {
+		return err
+	}
+	m.jobs[jobID] = updatedJob
+	return nil
 }

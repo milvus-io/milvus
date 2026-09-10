@@ -46,6 +46,9 @@ type Scheduler interface {
 	// 3. Concurrent safe.
 	Add(task Task) error
 
+	// ClearQueued removes queued tasks matched by filter and notifies waiters.
+	ClearQueued(ctx context.Context, filter TaskFilter, reason string) (ClearResult, error)
+
 	// Start schedule the owned task asynchronously and continuously.
 	// Shall be called only once
 	Start()
@@ -61,11 +64,21 @@ type Scheduler interface {
 	GetWaitingTaskTotal() int64
 }
 
+type TaskFilter func(Task) bool
+
+type ClearResult struct {
+	QueuedCleared   int64
+	QueuedNQCleared int64
+}
+
 // schedulePolicy is the policy of scheduler.
 type schedulePolicy interface {
 	// Cleanup removes queued tasks whose context deadline has been reached.
 	// Removed tasks are returned to scheduler for error notification.
 	Cleanup(now time.Time) []*queuedTask
+
+	// Remove removes queued tasks matched by filter.
+	Remove(filter TaskFilter, now time.Time) []*queuedTask
 
 	// Push add a new task into scheduler.
 	// Return the count of new task added (task may be chunked or merged)

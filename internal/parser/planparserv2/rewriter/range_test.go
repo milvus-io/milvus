@@ -244,11 +244,42 @@ func buildSchemaHelperWithArraysT(t *testing.T) *typeutil.SchemaHelper {
 		{FieldID: 201, Name: "ArrayInt", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
 		{FieldID: 202, Name: "ArrayFloat", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Double},
 		{FieldID: 203, Name: "ArrayVarchar", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_VarChar},
+		{FieldID: 204, Name: "ArrayBool", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Bool},
+		{FieldID: 205, Name: "NullableArrayInt", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, Nullable: true},
 	}
 	schema := &schemapb.CollectionSchema{
 		Name:   "rewrite_array_test",
 		AutoID: false,
 		Fields: fields,
+	}
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+	return helper
+}
+
+func buildSchemaHelperWithStructArrayT(t *testing.T) *typeutil.SchemaHelper {
+	structArrayField := &schemapb.StructArrayFieldSchema{
+		FieldID: 301,
+		Name:    "struct_array",
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:     302,
+				Name:        "struct_array[sub_str]",
+				DataType:    schemapb.DataType_Array,
+				ElementType: schemapb.DataType_VarChar,
+			},
+			{
+				FieldID:     303,
+				Name:        "struct_array[sub_int]",
+				DataType:    schemapb.DataType_Array,
+				ElementType: schemapb.DataType_Int64,
+			},
+		},
+	}
+	schema := &schemapb.CollectionSchema{
+		Name:              "rewrite_struct_array_test",
+		AutoID:            false,
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{structArrayField},
 	}
 	helper, err := typeutil.CreateSchemaHelper(schema)
 	require.NoError(t, err)
@@ -363,6 +394,36 @@ func TestRewrite_Range_Array_Index_Different_NoMerge(t *testing.T) {
 	require.True(t, seenLower)
 }
 
+func TestRewrite_Range_ArrayIndex_ContradictionsKeepPredicate(t *testing.T) {
+	helper := buildSchemaHelperWithArraysT(t)
+
+	for _, exprStr := range []string{
+		`ArrayInt[0] > 100 and ArrayInt[0] < 50`,
+		`not (ArrayInt[0] > 100 and ArrayInt[0] < 50)`,
+	} {
+		expr, err := parser.ParseExpr(helper, exprStr, nil)
+		require.NoError(t, err, exprStr)
+		require.NotNil(t, expr, exprStr)
+		require.False(t, rewriter.IsAlwaysFalseExpr(expr), "indexed array must not fold to valid false when the index can be out of range: %s", exprStr)
+		require.False(t, rewriter.IsAlwaysTrueExpr(expr), "indexed array under NOT must not fold to valid true when the index can be out of range: %s", exprStr)
+	}
+}
+
+func TestRewrite_Range_StructArrayIndex_ContradictionsKeepPredicate(t *testing.T) {
+	helper := buildSchemaHelperWithStructArrayT(t)
+
+	for _, exprStr := range []string{
+		`struct_array[0][sub_int] > 100 and struct_array[0][sub_int] < 50`,
+		`not (struct_array[0][sub_int] > 100 and struct_array[0][sub_int] < 50)`,
+	} {
+		expr, err := parser.ParseExpr(helper, exprStr, nil)
+		require.NoError(t, err, exprStr)
+		require.NotNil(t, expr, exprStr)
+		require.False(t, rewriter.IsAlwaysFalseExpr(expr), "indexed struct array must not fold to valid false when the element can be missing: %s", exprStr)
+		require.False(t, rewriter.IsAlwaysTrueExpr(expr), "indexed struct array under NOT must not fold to valid true when the element can be missing: %s", exprStr)
+	}
+}
+
 // Test invalid BinaryRangeExpr: lower > upper → false
 func TestRewrite_Range_AND_InvalidRange_LowerGreaterThanUpper(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
@@ -426,6 +487,31 @@ func TestRewrite_Range_AND_InvalidRange_String_LowerGreaterThanUpper(t *testing.
 	require.NoError(t, err)
 	require.NotNil(t, expr)
 	require.True(t, rewriter.IsAlwaysFalseExpr(expr))
+}
+
+func TestRewrite_Range_AND_InvalidRange_Nullable_KeepsPredicate(t *testing.T) {
+	helper := buildSchemaHelperForRewriteNullableT(t)
+
+	expr, err := parser.ParseExpr(helper, `NullableInt64Field > 100 and NullableInt64Field < 50`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	require.False(t, rewriter.IsAlwaysFalseExpr(expr), "nullable impossible range must not fold to valid false")
+	require.NotNil(t, expr.GetBinaryExpr())
+}
+
+func TestRewrite_Range_AND_InvalidRange_Nullable_UnderNotDoesNotBecomeAlwaysTrue(t *testing.T) {
+	helper := buildSchemaHelperForRewriteNullableT(t)
+
+	for _, exprStr := range []string{
+		`not (NullableInt64Field > 100 and NullableInt64Field < 50)`,
+		`not ((NullableInt64Field > 10 and NullableInt64Field < 20) and (NullableInt64Field > 30 and NullableInt64Field < 40))`,
+	} {
+		expr, err := parser.ParseExpr(helper, exprStr, nil)
+		require.NoError(t, err, exprStr)
+		require.NotNil(t, expr, exprStr)
+		require.False(t, rewriter.IsAlwaysTrueExpr(expr), "nullable impossible range under NOT must preserve NULL semantics: %s", exprStr)
+		require.NotNil(t, expr.GetUnaryExpr(), "nullable impossible range under NOT should remain negated: %s", exprStr)
+	}
 }
 
 // Test AlwaysFalse propagation through nested AND expressions

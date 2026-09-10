@@ -71,8 +71,7 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
             is_clustering_key=True,
             mmap_enabled=True,
         )
-        # Wait for previous schema bump's backfill segment-version propagation tick to fire.
-        self.add_collection_field_wait_schema_version_consistency(
+        self.add_collection_field(
             client,
             collection_name,
             field_name="field_new_var",
@@ -189,7 +188,7 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
         # search on the new added null vector field fails for no reloading for it yet
         error = {
             ct.err_code: 999,
-            ct.err_msg: f"field {new_vec_field_name} is not loaded, please reload the collection",
+            ct.err_msg: f"field index of the field: {new_vec_field_name} is not loaded, please reload the collection",
         }
         self.search(
             client,
@@ -351,11 +350,8 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
         rows = cf.gen_row_data_by_schema(nb=ct.default_nb, schema=new_collection_info, start=ct.default_nb)
         self.insert(client, collection_name, rows)
         # 4. add one more vector field and index data
-        # Wait for the previous add_collection_field's backfill segment-version
-        # propagation tick to fire before the second schema change — otherwise
-        # the consistency gate at Proxy / RootCoord rejects this call.
         new_vec_field_name_2 = "embeddings_2"
-        self.add_collection_field_wait_schema_version_consistency(
+        self.add_collection_field(
             client,
             collection_name,
             field_name=new_vec_field_name_2,
@@ -935,6 +931,120 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_add_match_field_with_default_value_on_growing_data(self):
+        """
+        target: verify schema reopen builds a text index for an added enable_match VARCHAR field
+                and indexes its default value for pre-existing growing rows
+        method: load a basic collection, insert rows without flush, add an analyzer field with default_value,
+                query text_match immediately, insert another row that uses the default, then flush/reload and repeat
+        expected: old rows immediately match the default token, the new row matches after the growing text index
+                  catches up, and all results remain unchanged after reload
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 8
+        field_name = "text_content"
+        default_text = "defaultmarker"
+        old_row_count = default_nb
+        old_ids = set(range(old_row_count))
+
+        # Create and load before insert so the historical rows live in a QueryNode growing segment.
+        schema = client.create_schema(enable_dynamic_field=False, auto_id=False)
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("vec", DataType.FLOAT_VECTOR, dim=dim)
+        index_params = client.prepare_index_params()
+        index_params.add_index(field_name="vec", index_type="AUTOINDEX", metric_type="L2")
+        client.create_collection(
+            collection_name=collection_name,
+            schema=schema,
+            index_params=index_params,
+            consistency_level="Strong",
+        )
+        client.load_collection(collection_name)
+
+        vectors = cf.gen_vectors(old_row_count + 1, dim, vector_data_type=DataType.FLOAT_VECTOR)
+        old_rows = [{"id": i, "vec": vectors[i]} for i in range(old_row_count)]
+        client.insert(collection_name=collection_name, data=old_rows)
+
+        # Confirm the unflushed tail is query-visible before changing the schema.
+        visible = client.query(
+            collection_name,
+            filter=f"id == {old_row_count - 1}",
+            output_fields=["id"],
+        )
+        assert [row["id"] for row in visible] == [old_row_count - 1]
+
+        client.add_collection_field(
+            collection_name,
+            field_name=field_name,
+            data_type=DataType.VARCHAR,
+            nullable=True,
+            default_value=default_text,
+            max_length=64,
+            enable_analyzer=True,
+            enable_match=True,
+            analyzer_params={"tokenizer": "standard"},
+        )
+
+        # Critical regression assertion: do not flush, create an index, or reload before this query.
+        default_match = client.query(
+            collection_name,
+            filter=f"text_match({field_name}, '{default_text}')",
+            output_fields=["id", field_name],
+            limit=old_row_count + 1,
+        )
+        assert {row["id"] for row in default_match} == old_ids
+        assert len(default_match) == old_row_count
+        assert all(row[field_name] == default_text for row in default_match)
+
+        new_id = old_row_count
+        all_ids = set(range(old_row_count + 1))
+        client.insert(
+            collection_name=collection_name,
+            data=[{"id": new_id, "vec": vectors[new_id]}],
+        )
+
+        inserted = client.query(
+            collection_name,
+            filter=f"id == {new_id}",
+            output_fields=["id", field_name],
+        )
+        assert [row["id"] for row in inserted] == [new_id]
+        assert inserted[0][field_name] == default_text
+
+        # Growing text index updates asynchronously for newly inserted rows. Poll with a bounded timeout.
+        default_after_insert = []
+        for _ in range(30):
+            default_after_insert = client.query(
+                collection_name,
+                filter=f"text_match({field_name}, '{default_text}')",
+                output_fields=["id", field_name],
+                limit=old_row_count + 1,
+            )
+            if {row["id"] for row in default_after_insert} == all_ids:
+                break
+            time.sleep(1)
+        assert {row["id"] for row in default_after_insert} == all_ids
+        assert len(default_after_insert) == old_row_count + 1
+        assert all(row[field_name] == default_text for row in default_after_insert)
+
+        client.flush(collection_name)
+        client.release_collection(collection_name)
+        client.load_collection(collection_name)
+
+        default_after_reload = client.query(
+            collection_name,
+            filter=f"text_match({field_name}, '{default_text}')",
+            output_fields=["id", field_name],
+            limit=old_row_count + 1,
+        )
+        assert {row["id"] for row in default_after_reload} == all_ids
+        assert len(default_after_reload) == old_row_count + 1
+        assert all(row[field_name] == default_text for row in default_after_reload)
+
+        client.drop_collection(collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_add_field_and_update_existing_data(self):
         """
         target: test that updating existing data after adding a field works correctly in search
@@ -1233,7 +1343,10 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
         # 5. verify search on new field fails before indexing (field not loaded)
         search_vecs = cf.gen_vectors(ct.default_nq, search_dim, vector_data_type=vector_type)
         # err_code 999 = gRPC unknown; Milvus uses it for "field not loaded" and "no index" errors
-        error = {ct.err_code: 999, ct.err_msg: f"field {new_vec_field} is not loaded, please reload the collection"}
+        error = {
+            ct.err_code: 999,
+            ct.err_msg: f"field index of the field: {new_vec_field} is not loaded, please reload the collection",
+        }
         self.search(
             client,
             collection_name,
@@ -1696,25 +1809,17 @@ class TestMilvusClientAddFieldFeatureInvalid(TestMilvusClientV2Base):
         dim, field_name = 8, default_new_field_name
         error = {
             ct.err_code: 1100,
-            ct.err_msg: "The number of fields has reached the maximum value 64: invalid parameter",
+            ct.err_msg: f"The number of fields has reached the maximum value {ct.max_field_num}: invalid parameter",
         }
-        self.create_collection(client, collection_name, dim)
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        for i in range(ct.max_field_num - 2):
+            schema.add_field(f"{field_name}_{i}", DataType.VARCHAR, nullable=True, max_length=64)
+        self.create_collection(client, collection_name, schema=schema)
         collections = self.list_collections(client)[0]
         assert collection_name in collections
-        # Each loop iteration bumps the schema version; wait for the previous bump's
-        # backfill segment-version propagation tick to fire before the next call.
-        for i in range(62):
-            self.add_collection_field_wait_schema_version_consistency(
-                client,
-                collection_name,
-                field_name=f"{field_name}_{i}",
-                data_type=DataType.VARCHAR,
-                nullable=True,
-                max_length=64,
-            )
-        # Final err_res call: the gate must be passed BEFORE this call so the error
-        # returned is the intended "max fields exceeded" error, not a consistency error.
-        self.add_collection_field_wait_schema_version_consistency(
+        self.add_collection_field(
             client,
             collection_name,
             field_name=field_name,
@@ -1743,10 +1848,8 @@ class TestMilvusClientAddFieldFeatureInvalid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, dim)
         collections = self.list_collections(client)[0]
         assert collection_name in collections
-        # Each loop iteration bumps the schema version; wait for the previous bump's
-        # backfill segment-version propagation tick to fire before the next call.
         for i in range(ct.max_vector_field_num - 1):
-            self.add_collection_field_wait_schema_version_consistency(
+            self.add_collection_field(
                 client,
                 collection_name,
                 field_name=f"{field_name}_{i}",
@@ -1754,9 +1857,7 @@ class TestMilvusClientAddFieldFeatureInvalid(TestMilvusClientV2Base):
                 dim=dim,
                 nullable=True,
             )
-        # Final err_res call: wait for consistency so the error we assert is the
-        # real "max vector fields exceeded" error, not a spurious consistency error.
-        self.add_collection_field_wait_schema_version_consistency(
+        self.add_collection_field(
             client,
             collection_name,
             field_name=field_name,

@@ -52,10 +52,13 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	mocktso "github.com/milvus-io/milvus/internal/tso/mocks"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
+	"github.com/milvus-io/milvus/internal/util/proxyutil"
+	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
@@ -77,6 +80,31 @@ func TestMain(m *testing.M) {
 	rand.Seed(time.Now().UnixNano())
 	code := m.Run()
 	os.Exit(code)
+}
+
+// testBoundIndexRecorder captures FieldIndexes applied through the fake
+// CreateIndexV2 ack callback so DDL tests can assert on bound-index creation.
+var testBoundIndexRecorder = struct {
+	mu      sync.Mutex
+	indexes []*indexpb.FieldIndex
+}{}
+
+func resetRecordedBoundIndexes() {
+	testBoundIndexRecorder.mu.Lock()
+	defer testBoundIndexRecorder.mu.Unlock()
+	testBoundIndexRecorder.indexes = nil
+}
+
+func recordBoundIndex(fieldIndex *indexpb.FieldIndex) {
+	testBoundIndexRecorder.mu.Lock()
+	defer testBoundIndexRecorder.mu.Unlock()
+	testBoundIndexRecorder.indexes = append(testBoundIndexRecorder.indexes, fieldIndex)
+}
+
+func recordedBoundIndexes() []*indexpb.FieldIndex {
+	testBoundIndexRecorder.mu.Lock()
+	defer testBoundIndexRecorder.mu.Unlock()
+	return append([]*indexpb.FieldIndex(nil), testBoundIndexRecorder.indexes...)
 }
 
 func initStreamingSystemAndCore(t *testing.T) *Core {
@@ -110,6 +138,11 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 	registry.RegisterDropIndexV2AckCallback(func(ctx context.Context, result message.BroadcastResultDropIndexMessageV2) error {
 		return nil
 	})
+	resetRecordedBoundIndexes()
+	registry.RegisterCreateIndexV2AckCallback(func(ctx context.Context, result message.BroadcastResultCreateIndexMessageV2) error {
+		recordBoundIndex(result.Message.MustBody().GetFieldIndex())
+		return nil
+	})
 	registry.RegisterDropLoadConfigV2AckCallback(func(ctx context.Context, result message.BroadcastResultDropLoadConfigMessageV2) error {
 		return nil
 	})
@@ -128,7 +161,7 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 		for _, vchannel := range msg.BroadcastHeader().VChannels {
 			results[vchannel] = &message.AppendResult{
 				MessageID:              rmq.NewRmqID(1),
-				TimeTick:               tsoutil.ComposeTSByTime(time.Now(), 0),
+				TimeTick:               tsoutil.ComposeTSByTime(time.Now()),
 				LastConfirmedMessageID: rmq.NewRmqID(1),
 			}
 		}
@@ -147,7 +180,7 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 		wg.Wait()
 
 		retry.Do(context.Background(), func() error {
-			log.Info("broadcast message", log.FieldMessage(msg))
+			mlog.Info(context.TODO(), "broadcast message", mlog.FieldMessage(msg))
 			return registry.CallMessageAckCallback(context.Background(), msg, results)
 		}, retry.AttemptAlways())
 		return &types.BroadcastAppendResult{}, nil
@@ -173,11 +206,13 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 		return vchannels, nil
 	}).Maybe()
 	b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
+	b.EXPECT().WaitUntilSchemaDropReady(mock.Anything).Return(nil).Maybe()
 	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, callback balancer.WatchChannelAssignmentsCallback) error {
 		<-ctx.Done()
 		return ctx.Err()
 	}).Maybe()
 	b.EXPECT().Close().Return().Maybe()
+	balance.ResetBalancer()
 	balance.Register(b)
 	channel.ResetStaticPChannelStatsManager()
 	channel.RecoverPChannelStatsManager([]string{})
@@ -411,7 +446,9 @@ func TestRootCoord_DescribeAlias(t *testing.T) {
 		ctx := context.Background()
 		resp, err := c.DescribeAlias(ctx, &milvuspb.DescribeAliasRequest{})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+		// ParameterMissing (1101) projects to the legacy IllegalArgument like
+		// every parameter-class error, so old SDKs don't see UnexpectedError.
+		assert.Equal(t, commonpb.ErrorCode_IllegalArgument, resp.GetStatus().GetErrorCode())
 		assert.Equal(t, int32(1101), resp.GetStatus().GetCode())
 	})
 
@@ -809,7 +846,7 @@ func TestRootCoord_AllocTimestamp(t *testing.T) {
 		alloc := newMockTsoAllocator()
 		count := uint32(10)
 		current := time.Now()
-		ts := tsoutil.ComposeTSByTime(current.Add(time.Second), 1)
+		ts := tsoutil.ComposeTSByTimeWithLogical(current.Add(time.Second), 1)
 		alloc.GenerateTSOF = func(count uint32) (uint64, error) {
 			// end ts
 			return ts, nil
@@ -822,7 +859,7 @@ func TestRootCoord_AllocTimestamp(t *testing.T) {
 			withTsoAllocator(alloc))
 		resp, err := c.AllocTimestamp(ctx, &rootcoordpb.AllocTimestampRequest{
 			Count:          count,
-			BlockTimestamp: tsoutil.ComposeTSByTime(current.Add(time.Second), 0),
+			BlockTimestamp: tsoutil.ComposeTSByTime(current.Add(time.Second)),
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
@@ -1362,26 +1399,14 @@ func TestRootCoord_AddCollectionFunction(t *testing.T) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
 	})
 
-	t.Run("run ok", func(t *testing.T) {
+	// Deprecated legacy RPC: always rejects (add BM25/MinHash via add_function_field,
+	// define TextEmbedding at collection creation).
+	t.Run("rejected", func(t *testing.T) {
 		ctx := context.Background()
-		c := initStreamingSystemAndCore(t)
-		defer c.Stop()
-		mocker := mockey.Mock((*Core).broadcastAlterCollectionForAddFunction).Return(nil).Build()
-		defer mocker.UnPatch()
+		c := newTestCore(withHealthyCode())
 		resp, err := c.AddCollectionFunction(ctx, &milvuspb.AddCollectionFunctionRequest{})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
-	})
-
-	t.Run("run failed", func(t *testing.T) {
-		ctx := context.Background()
-		c := initStreamingSystemAndCore(t)
-		defer c.Stop()
-		mocker := mockey.Mock((*Core).broadcastAlterCollectionForAddFunction).Return(fmt.Errorf("")).Build()
-		defer mocker.UnPatch()
-		resp, err := c.AddCollectionFunction(ctx, &milvuspb.AddCollectionFunctionRequest{})
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
 	})
 }
 
@@ -1394,26 +1419,13 @@ func TestRootCoord_DropCollectionFunction(t *testing.T) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
 	})
 
-	t.Run("run ok", func(t *testing.T) {
+	// Deprecated legacy RPC: always rejects (drop routes through drop_function_field).
+	t.Run("rejected", func(t *testing.T) {
 		ctx := context.Background()
-		c := initStreamingSystemAndCore(t)
-		defer c.Stop()
-		mocker := mockey.Mock((*Core).broadcastAlterCollectionForDropFunction).Return(nil).Build()
-		defer mocker.UnPatch()
+		c := newTestCore(withHealthyCode())
 		resp, err := c.DropCollectionFunction(ctx, &milvuspb.DropCollectionFunctionRequest{})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
-	})
-
-	t.Run("run failed", func(t *testing.T) {
-		ctx := context.Background()
-		c := initStreamingSystemAndCore(t)
-		defer c.Stop()
-		mocker := mockey.Mock((*Core).broadcastAlterCollectionForDropFunction).Return(fmt.Errorf("")).Build()
-		defer mocker.UnPatch()
-		resp, err := c.DropCollectionFunction(ctx, &milvuspb.DropCollectionFunctionRequest{})
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
 	})
 }
 
@@ -1528,8 +1540,8 @@ func TestRootCoord_CheckHealth(t *testing.T) {
 	// 	}, nil
 	// }
 
-	// querynodeTT := tsoutil.ComposeTSByTime(time.Now().Add(-1*time.Minute), 0)
-	// datanodeTT := tsoutil.ComposeTSByTime(time.Now().Add(-2*time.Minute), 0)
+	// querynodeTT := tsoutil.ComposeTSByTime(time.Now().Add(-1 * time.Minute))
+	// datanodeTT := tsoutil.ComposeTSByTime(time.Now().Add(-2 * time.Minute))
 
 	// dcClient := mocks.NewMixCoord(t)
 	// dcClient.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(getDataCoordMetricsFunc(datanodeTT))
@@ -1768,6 +1780,211 @@ func TestCore_BackupRBAC(t *testing.T) {
 	assert.False(t, merr.Ok(resp.GetStatus()))
 }
 
+func TestCore_RLSAPIs(t *testing.T) {
+	ctx := context.Background()
+	meta := mockrootcoord.NewIMetaTable(t)
+	policyLock := mock_broadcaster.NewMockBroadcastAPI(t)
+	policyLock.EXPECT().Broadcast(mock.Anything, mock.MatchedBy(func(msg message.BroadcastMutableMessage) bool {
+		if msg.IsUnreplicable() {
+			return false
+		}
+		return msg.MessageType() == message.MessageTypeAlterRLSMetadata ||
+			msg.MessageType() == message.MessageTypeDropRLSMetadata
+	})).Return(nil, nil).Times(5)
+	policyLock.EXPECT().Close().Times(6)
+	lockMocker := mockey.Mock((*Core).startBroadcastWithAliasOrCollectionLock).Return(policyLock, nil).Build()
+	defer lockMocker.UnPatch()
+	wal := mock_streaming.NewMockWALAccesser(t)
+	wal.EXPECT().ControlChannel().Return("by-dev-rootcoord-dml_0").Times(5)
+	streaming.SetWALForTest(wal)
+	defer streaming.SetWALForTest(nil)
+	idAllocator := newMockIDAllocator()
+	allocations := 0
+	idAllocator.AllocOneF = func() (UniqueID, error) {
+		allocations++
+		return 123, nil
+	}
+	c := newTestCore(withHealthyCode(), withMeta(meta), withIDAllocator(idAllocator))
+
+	createReq := &rlsutil.CreateRowPolicyRequest{
+		DbName:         "db1",
+		CollectionName: "coll1",
+		PolicyName:     "policy1",
+		PolicyType:     rlsutil.PolicyTypePermissive,
+		Actions:        []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+		UsingExpr:      "dept == $current_principal_tags['dept']",
+	}
+	meta.EXPECT().PrepareCreateRLSPolicy(mock.Anything, createReq, unallocatedRLSPolicyID).Return(&model.RLSPolicy{
+		DBID:         10,
+		CollectionID: 20,
+		PolicyID:     unallocatedRLSPolicyID,
+		PolicyName:   createReq.GetPolicyName(),
+		PolicyType:   createReq.GetPolicyType(),
+		Actions:      createReq.GetActions(),
+		UsingExpr:    createReq.GetUsingExpr(),
+	}, nil).Once()
+	status, err := c.CreateRowPolicy(ctx, createReq)
+	require.NoError(t, err)
+	assert.True(t, merr.Ok(status))
+	assert.Equal(t, 1, allocations)
+
+	meta.EXPECT().PrepareCreateRLSPolicy(mock.Anything, createReq, unallocatedRLSPolicyID).
+		Return(nil, merr.WrapErrParameterInvalidMsg("RLS policy [%s] already exists", createReq.GetPolicyName())).Once()
+	status, err = c.CreateRowPolicy(ctx, createReq)
+	require.NoError(t, err)
+	assert.ErrorIs(t, merr.Error(status), merr.ErrParameterInvalid)
+	assert.Contains(t, status.GetReason(), "already exists")
+	assert.Equal(t, 1, allocations, "duplicate creates must not allocate another policy ID")
+
+	updateReq := &rlsutil.UpdateRowPolicyRequest{
+		DbName:         "db1",
+		CollectionName: "coll1",
+		PolicyName:     "policy1",
+		PolicyType:     rlsutil.PolicyTypeRestrictive,
+		Actions:        []rlsutil.PolicyAction{rlsutil.PolicyActionSearch},
+		UsingExpr:      "owner == $current_principal",
+	}
+	meta.EXPECT().PrepareUpdateRLSPolicy(mock.Anything, updateReq).Return(&model.RLSPolicy{
+		DBID:         10,
+		CollectionID: 20,
+		PolicyID:     123,
+		PolicyName:   updateReq.GetPolicyName(),
+		PolicyType:   updateReq.GetPolicyType(),
+		Actions:      updateReq.GetActions(),
+		UsingExpr:    updateReq.GetUsingExpr(),
+	}, nil).Once()
+	status, err = c.UpdateRowPolicy(ctx, updateReq)
+	require.NoError(t, err)
+	assert.True(t, merr.Ok(status))
+
+	dropReq := &rlsutil.DropRowPolicyRequest{DbName: "db1", CollectionName: "coll1", PolicyName: "policy1"}
+	meta.EXPECT().PrepareDropRLSPolicy(mock.Anything, dropReq).Return(&model.RLSPolicy{
+		DBID:         10,
+		CollectionID: 20,
+		PolicyName:   dropReq.GetPolicyName(),
+	}, nil).Once()
+	status, err = c.DropRowPolicy(ctx, dropReq)
+	require.NoError(t, err)
+	assert.True(t, merr.Ok(status))
+
+	listReq := &rlsutil.ListRowPoliciesRequest{DbName: "db1", CollectionName: "coll1"}
+	meta.EXPECT().ListRLSPolicies(mock.Anything, listReq).Return([]*rlsutil.RowPolicy{{PolicyName: "policy1"}}, nil).Once()
+	listResp, err := c.ListRowPolicies(ctx, listReq)
+	require.NoError(t, err)
+	assert.True(t, merr.Ok(listResp.Status))
+	require.Len(t, listResp.Policies, 1)
+	assert.Equal(t, "policy1", listResp.Policies[0].GetPolicyName())
+	assert.Equal(t, "db1", listResp.DbName)
+	assert.Equal(t, "coll1", listResp.CollectionName)
+
+	setTagsReq := &rlsutil.SetRLSPrincipalTagsRequest{
+		DbName:         "db1",
+		CollectionName: "coll1",
+		PrincipalName:  "alice",
+		Tags:           map[string]rlsutil.TagValue{"dept": rlsutil.NewStringTagValue("sales")},
+	}
+	meta.EXPECT().PrepareSetRLSPrincipalTags(mock.Anything, setTagsReq).Return(&model.RLSPrincipal{
+		DBID:          10,
+		CollectionID:  20,
+		PrincipalName: setTagsReq.GetPrincipalName(),
+		Tags:          setTagsReq.GetTags(),
+	}, nil).Once()
+	status, err = c.SetRLSPrincipalTags(ctx, setTagsReq)
+	require.NoError(t, err)
+	assert.True(t, merr.Ok(status))
+
+	getTagsReq := &rlsutil.GetRLSPrincipalTagsRequest{DbName: "db1", CollectionName: "coll1", PrincipalName: "alice"}
+	meta.EXPECT().GetRLSPrincipalTags(mock.Anything, getTagsReq).Return(map[string]rlsutil.TagValue{
+		"dept": rlsutil.NewStringTagValue("sales"),
+	}, nil).Once()
+	getTagsResp, err := c.GetRLSPrincipalTags(ctx, getTagsReq)
+	require.NoError(t, err)
+	assert.True(t, merr.Ok(getTagsResp.Status))
+	assert.Equal(t, map[string]rlsutil.TagValue{"dept": rlsutil.NewStringTagValue("sales")}, getTagsResp.Tags)
+	assert.Equal(t, "alice", getTagsResp.PrincipalName)
+
+	listPrincipalsReq := &rlsutil.ListRLSPrincipalsRequest{DbName: "db1", CollectionName: "coll1"}
+	meta.EXPECT().ListRLSPrincipals(mock.Anything, listPrincipalsReq).Return([]string{"alice", "bob"}, nil).Once()
+	listPrincipalsResp, err := c.ListRLSPrincipals(ctx, listPrincipalsReq)
+	require.NoError(t, err)
+	assert.True(t, merr.Ok(listPrincipalsResp.Status))
+	assert.Equal(t, []string{"alice", "bob"}, listPrincipalsResp.PrincipalNames)
+
+	deleteTagsReq := &rlsutil.DeleteRLSPrincipalTagsRequest{DbName: "db1", CollectionName: "coll1", PrincipalName: "alice", TagKeys: []string{"dept"}}
+	meta.EXPECT().PrepareDeleteRLSPrincipalTags(mock.Anything, deleteTagsReq).Return(&model.RLSPrincipal{
+		DBID:          10,
+		CollectionID:  20,
+		PrincipalName: deleteTagsReq.GetPrincipalName(),
+	}, true, nil).Once()
+	status, err = c.DeleteRLSPrincipalTags(ctx, deleteTagsReq)
+	require.NoError(t, err)
+	assert.True(t, merr.Ok(status))
+}
+
+func TestCore_RLSAPIsRejectNilRequest(t *testing.T) {
+	ctx := context.Background()
+	c := newTestCore(withHealthyCode())
+
+	assertParameterInvalidStatus := func(t *testing.T, status *commonpb.Status) {
+		t.Helper()
+		require.NotNil(t, status)
+		require.True(t, errors.Is(merr.Error(status), merr.ErrParameterInvalid), status.GetReason())
+	}
+
+	status, err := c.CreateRowPolicy(ctx, nil)
+	require.NoError(t, err)
+	assertParameterInvalidStatus(t, status)
+
+	status, err = c.UpdateRowPolicy(ctx, nil)
+	require.NoError(t, err)
+	assertParameterInvalidStatus(t, status)
+
+	status, err = c.DropRowPolicy(ctx, nil)
+	require.NoError(t, err)
+	assertParameterInvalidStatus(t, status)
+
+	listResp, err := c.ListRowPolicies(ctx, nil)
+	require.NoError(t, err)
+	assertParameterInvalidStatus(t, listResp.Status)
+
+	status, err = c.SetRLSPrincipalTags(ctx, nil)
+	require.NoError(t, err)
+	assertParameterInvalidStatus(t, status)
+
+	getTagsResp, err := c.GetRLSPrincipalTags(ctx, nil)
+	require.NoError(t, err)
+	assertParameterInvalidStatus(t, getTagsResp.Status)
+
+	listPrincipalsResp, err := c.ListRLSPrincipals(ctx, nil)
+	require.NoError(t, err)
+	assertParameterInvalidStatus(t, listPrincipalsResp.Status)
+
+	status, err = c.DeleteRLSPrincipalTags(ctx, nil)
+	require.NoError(t, err)
+	assertParameterInvalidStatus(t, status)
+}
+
+func TestCore_RLSPolicyMutationReturnsCollectionLockFailure(t *testing.T) {
+	lockErr := merr.WrapErrServiceUnavailableMsg("collection lock unavailable")
+	lockMocker := mockey.Mock((*Core).startBroadcastWithAliasOrCollectionLock).Return(nil, lockErr).Build()
+	defer lockMocker.UnPatch()
+
+	meta := mockrootcoord.NewIMetaTable(t)
+	idAllocator := newMockIDAllocator()
+	idAllocator.AllocOneF = func() (UniqueID, error) {
+		return 123, nil
+	}
+	c := newTestCore(withHealthyCode(), withMeta(meta), withIDAllocator(idAllocator))
+	status, err := c.CreateRowPolicy(context.Background(), &rlsutil.CreateRowPolicyRequest{
+		DbName:         "db1",
+		CollectionName: "coll1",
+		PolicyName:     "policy1",
+	})
+	require.NoError(t, err)
+	require.ErrorIs(t, merr.Error(status), merr.ErrServiceUnavailable)
+	require.Contains(t, status.GetReason(), "collection lock unavailable")
+}
+
 func TestCore_getMetastorePrivilegeName(t *testing.T) {
 	meta := mockrootcoord.NewIMetaTable(t)
 	c := newTestCore(withHealthyCode(), withMeta(meta))
@@ -1778,7 +1995,7 @@ func TestCore_getMetastorePrivilegeName(t *testing.T) {
 
 	meta.EXPECT().IsCustomPrivilegeGroup(mock.Anything, "unknown").Return(false, nil)
 	_, err = c.getMetastorePrivilegeName(context.Background(), "unknown")
-	assert.Equal(t, err.Error(), "not found the privilege name [unknown] from metastore")
+	assert.ErrorContains(t, err, "not found the privilege name [unknown] from metastore")
 }
 
 func TestCore_expandPrivilegeGroup(t *testing.T) {
@@ -1873,6 +2090,38 @@ func (s *RootCoordSuite) TestRestore() {
 	core.restore(context.Background())
 }
 
+func TestRootCoord_ServerExist(t *testing.T) {
+	const serverID int64 = 1001
+
+	t.Run("found", func(t *testing.T) {
+		session := sessionutil.NewMockSession(t)
+		session.EXPECT().GetSessions(mock.Anything, typeutil.ProxyRole).Return(map[string]*sessionutil.Session{
+			"proxy-1001": {SessionRaw: sessionutil.SessionRaw{ServerID: serverID}},
+		}, int64(1), nil)
+		core := &Core{ctx: context.Background(), session: session}
+
+		assert.True(t, core.ServerExist(serverID))
+	})
+
+	t.Run("not found", func(t *testing.T) {
+		session := sessionutil.NewMockSession(t)
+		session.EXPECT().GetSessions(mock.Anything, typeutil.ProxyRole).Return(map[string]*sessionutil.Session{
+			"proxy-1002": {SessionRaw: sessionutil.SessionRaw{ServerID: 1002}},
+		}, int64(1), nil)
+		core := &Core{ctx: context.Background(), session: session}
+
+		assert.False(t, core.ServerExist(serverID))
+	})
+
+	t.Run("get sessions error", func(t *testing.T) {
+		session := sessionutil.NewMockSession(t)
+		session.EXPECT().GetSessions(mock.Anything, typeutil.ProxyRole).Return(nil, int64(0), errors.New("mock error"))
+		core := &Core{ctx: context.Background(), session: session}
+
+		assert.False(t, core.ServerExist(serverID))
+	})
+}
+
 func TestRootCoord_AddFileResource(t *testing.T) {
 	t.Run("not healthy", func(t *testing.T) {
 		c := newTestCore(withAbnormalCode())
@@ -1880,6 +2129,15 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 		resp, err := c.AddFileResource(ctx, &milvuspb.AddFileResourceRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetErrorCode())
+	})
+
+	t.Run("empty name", func(t *testing.T) {
+		c := newTestCore(withHealthyCode())
+		resp, err := c.AddFileResource(context.Background(), &milvuspb.AddFileResourceRequest{
+			Path: "/path/to/file",
+		})
+		assert.NoError(t, err)
+		assert.ErrorIs(t, merr.Error(resp), merr.ErrParameterMissing)
 	})
 
 	t.Run("storage check error", func(t *testing.T) {
@@ -1908,6 +2166,167 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 		})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	t.Run("file size limit disabled", func(t *testing.T) {
+		Params.Save(Params.CommonCfg.FileResourceMaxFileSize.Key, "0")
+		defer Params.Reset(Params.CommonCfg.FileResourceMaxFileSize.Key)
+
+		storageMock := mock_storage.NewMockChunkManager(t)
+		storageMock.EXPECT().Exist(mock.Anything, mock.Anything).Return(true, nil)
+
+		tsoAllocator := newMockTsoAllocator()
+		tsoAllocator.GenerateTSOF = func(count uint32) (uint64, error) {
+			return 100, nil
+		}
+
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().AddFileResource(mock.Anything, mock.Anything).Return(nil)
+
+		c := newTestCore(withHealthyCode(), withStorage(storageMock), withTsoAllocator(tsoAllocator), withMeta(meta))
+		resp, err := c.AddFileResource(context.Background(), &milvuspb.AddFileResourceRequest{
+			Name: "test_resource",
+			Path: "/path/to/file",
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	t.Run("file size at limit", func(t *testing.T) {
+		Params.Save(Params.CommonCfg.FileResourceMaxFileSize.Key, "100")
+		defer Params.Reset(Params.CommonCfg.FileResourceMaxFileSize.Key)
+
+		storageMock := mock_storage.NewMockChunkManager(t)
+		storageMock.EXPECT().Exist(mock.Anything, mock.Anything).Return(true, nil)
+		storageMock.EXPECT().Size(mock.Anything, mock.Anything).Return(int64(100), nil)
+
+		tsoAllocator := newMockTsoAllocator()
+		tsoAllocator.GenerateTSOF = func(count uint32) (uint64, error) {
+			return 100, nil
+		}
+
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().ListFileResource(mock.Anything).Return(nil, uint64(0))
+		meta.EXPECT().AddFileResource(mock.Anything, mock.Anything).Return(nil)
+
+		c := newTestCore(withHealthyCode(), withStorage(storageMock), withTsoAllocator(tsoAllocator), withMeta(meta))
+		resp, err := c.AddFileResource(context.Background(), &milvuspb.AddFileResourceRequest{
+			Name: "test_resource",
+			Path: "/path/to/file",
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	t.Run("file size exceeds limit", func(t *testing.T) {
+		Params.Save(Params.CommonCfg.FileResourceMaxFileSize.Key, "100")
+		defer Params.Reset(Params.CommonCfg.FileResourceMaxFileSize.Key)
+
+		storageMock := mock_storage.NewMockChunkManager(t)
+		storageMock.EXPECT().Exist(mock.Anything, mock.Anything).Return(true, nil)
+		storageMock.EXPECT().Size(mock.Anything, mock.Anything).Return(int64(101), nil)
+
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().ListFileResource(mock.Anything).Return(nil, uint64(0))
+
+		c := newTestCore(withHealthyCode(), withStorage(storageMock), withMeta(meta))
+		resp, err := c.AddFileResource(context.Background(), &milvuspb.AddFileResourceRequest{
+			Name: "test_resource",
+			Path: "/path/to/file",
+		})
+		assert.NoError(t, err)
+		assert.ErrorIs(t, merr.Error(resp), merr.ErrParameterTooLarge)
+		assert.Equal(t, "true", resp.GetExtraInfo()[merr.InputErrorFlagKey])
+		assert.False(t, resp.GetRetriable())
+	})
+
+	t.Run("identical add skips size check", func(t *testing.T) {
+		Params.Save(Params.CommonCfg.FileResourceMaxFileSize.Key, "100")
+		defer Params.Reset(Params.CommonCfg.FileResourceMaxFileSize.Key)
+
+		request := &milvuspb.AddFileResourceRequest{
+			Name: "test_resource",
+			Path: "/path/to/file",
+		}
+		storageMock := mock_storage.NewMockChunkManager(t)
+		storageMock.EXPECT().Exist(mock.Anything, request.GetPath()).Return(true, nil)
+
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().ListFileResource(mock.Anything).Return([]*internalpb.FileResourceInfo{{
+			Id:   99,
+			Name: request.GetName(),
+			Path: request.GetPath(),
+		}}, uint64(1))
+
+		c := newTestCore(withHealthyCode(), withStorage(storageMock), withMeta(meta))
+		resp, err := c.AddFileResource(context.Background(), request)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	t.Run("same name with different path skips size check and fails", func(t *testing.T) {
+		Params.Save(Params.CommonCfg.FileResourceMaxFileSize.Key, "100")
+		defer Params.Reset(Params.CommonCfg.FileResourceMaxFileSize.Key)
+
+		request := &milvuspb.AddFileResourceRequest{
+			Name: "test_resource",
+			Path: "/path/to/new-file",
+		}
+		storageMock := mock_storage.NewMockChunkManager(t)
+		storageMock.EXPECT().Exist(mock.Anything, request.GetPath()).Return(true, nil)
+
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().ListFileResource(mock.Anything).Return([]*internalpb.FileResourceInfo{{
+			Id:   99,
+			Name: request.GetName(),
+			Path: "/path/to/old-file",
+		}}, uint64(1))
+
+		c := newTestCore(withHealthyCode(), withStorage(storageMock), withMeta(meta))
+		resp, err := c.AddFileResource(context.Background(), request)
+		assert.NoError(t, err)
+		assert.ErrorIs(t, merr.Error(resp), merr.ErrParameterInvalid)
+	})
+
+	t.Run("file size check error", func(t *testing.T) {
+		Params.Save(Params.CommonCfg.FileResourceMaxFileSize.Key, "100")
+		defer Params.Reset(Params.CommonCfg.FileResourceMaxFileSize.Key)
+
+		sizeErr := merr.WrapErrIoFailedReason("size error")
+		storageMock := mock_storage.NewMockChunkManager(t)
+		storageMock.EXPECT().Exist(mock.Anything, mock.Anything).Return(true, nil)
+		storageMock.EXPECT().Size(mock.Anything, mock.Anything).Return(int64(0), sizeErr)
+
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().ListFileResource(mock.Anything).Return(nil, uint64(0))
+
+		c := newTestCore(withHealthyCode(), withStorage(storageMock), withMeta(meta))
+		resp, err := c.AddFileResource(context.Background(), &milvuspb.AddFileResourceRequest{
+			Name: "test_resource",
+			Path: "/path/to/file",
+		})
+		assert.NoError(t, err)
+		assert.ErrorIs(t, merr.Error(resp), merr.ErrIoFailed)
+	})
+
+	t.Run("negative file size", func(t *testing.T) {
+		Params.Save(Params.CommonCfg.FileResourceMaxFileSize.Key, "100")
+		defer Params.Reset(Params.CommonCfg.FileResourceMaxFileSize.Key)
+
+		storageMock := mock_storage.NewMockChunkManager(t)
+		storageMock.EXPECT().Exist(mock.Anything, mock.Anything).Return(true, nil)
+		storageMock.EXPECT().Size(mock.Anything, mock.Anything).Return(int64(-1), nil)
+
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().ListFileResource(mock.Anything).Return(nil, uint64(0))
+
+		c := newTestCore(withHealthyCode(), withStorage(storageMock), withMeta(meta))
+		resp, err := c.AddFileResource(context.Background(), &milvuspb.AddFileResourceRequest{
+			Name: "test_resource",
+			Path: "/path/to/file",
+		})
+		assert.NoError(t, err)
+		assert.ErrorIs(t, merr.Error(resp), merr.ErrIoFailed)
 	})
 
 	t.Run("tso allocator error", func(t *testing.T) {
@@ -1988,6 +2407,20 @@ func TestRootCoord_RemoveFileResource(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetErrorCode())
 	})
 
+	t.Run("remove legacy empty name", func(t *testing.T) {
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().RemoveFileResource(mock.Anything, "").Return(nil, true)
+
+		observer := NewMockFileResourceObserver(t)
+		observer.EXPECT().Sync().Return(nil)
+
+		c := newTestCore(withHealthyCode(), withMeta(meta))
+		c.SetFileResourceObserver(observer)
+		resp, err := c.RemoveFileResource(context.Background(), &milvuspb.RemoveFileResourceRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
 	t.Run("meta remove file resource error", func(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().RemoveFileResource(mock.Anything, mock.Anything).Return(errors.New("meta error"), false)
@@ -2036,6 +2469,69 @@ func TestRootCoord_RemoveFileResource(t *testing.T) {
 	})
 }
 
+func TestCore_NotifyFileResourceObserverOnProxySession(t *testing.T) {
+	t.Run("add proxy", func(t *testing.T) {
+		proxyManager := proxyutil.NewMockProxyClientManager(t)
+		observer := NewMockFileResourceObserver(t)
+		session := &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: TestProxyID}}
+		clientAdded := false
+		proxyManager.EXPECT().AddProxyClient(session).Run(func(*sessionutil.Session) {
+			clientAdded = true
+		})
+		observer.EXPECT().IsEmpty().Return(false)
+		observer.EXPECT().Notify().Run(func() {
+			assert.True(t, clientAdded)
+		})
+
+		c := newTestCore()
+		c.proxyClientManager = proxyManager
+		c.SetFileResourceObserver(observer)
+		c.addProxyClient(session)
+	})
+
+	t.Run("set proxies", func(t *testing.T) {
+		proxyManager := proxyutil.NewMockProxyClientManager(t)
+		observer := NewMockFileResourceObserver(t)
+		sessions := []*sessionutil.Session{{SessionRaw: sessionutil.SessionRaw{ServerID: TestProxyID}}}
+		clientsSet := false
+		proxyManager.EXPECT().SetProxyClients(sessions).Run(func([]*sessionutil.Session) {
+			clientsSet = true
+		})
+		observer.EXPECT().IsEmpty().Return(false)
+		observer.EXPECT().Notify().Run(func() {
+			assert.True(t, clientsSet)
+		})
+
+		c := newTestCore()
+		c.proxyClientManager = proxyManager
+		c.SetFileResourceObserver(observer)
+		c.setProxyClients(sessions)
+	})
+
+	t.Run("nil observer", func(t *testing.T) {
+		proxyManager := proxyutil.NewMockProxyClientManager(t)
+		session := &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: TestProxyID}}
+		proxyManager.EXPECT().AddProxyClient(session)
+
+		c := newTestCore()
+		c.proxyClientManager = proxyManager
+		c.addProxyClient(session)
+	})
+
+	t.Run("empty resources", func(t *testing.T) {
+		proxyManager := proxyutil.NewMockProxyClientManager(t)
+		observer := NewMockFileResourceObserver(t)
+		session := &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: TestProxyID}}
+		proxyManager.EXPECT().AddProxyClient(session)
+		observer.EXPECT().IsEmpty().Return(true)
+
+		c := newTestCore()
+		c.proxyClientManager = proxyManager
+		c.SetFileResourceObserver(observer)
+		c.addProxyClient(session)
+	})
+}
+
 func TestRootCoord_ListFileResources(t *testing.T) {
 	t.Run("not healthy", func(t *testing.T) {
 		c := newTestCore(withAbnormalCode())
@@ -2059,6 +2555,26 @@ func TestRootCoord_ListFileResources(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.NotNil(t, resp.GetResources())
+	})
+}
+
+func TestRootCoord_GetFileResources(t *testing.T) {
+	t.Run("not healthy", func(t *testing.T) {
+		c := newTestCore(withAbnormalCode())
+		resources, err := c.GetFileResources(context.Background(), 1)
+		assert.Nil(t, resources)
+		assert.ErrorIs(t, err, merr.ErrServiceNotReady)
+	})
+
+	t.Run("success", func(t *testing.T) {
+		expected := []*internalpb.FileResourceInfo{{Id: 1, Name: "test", Path: "test_path"}}
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().GetFileResources(mock.Anything, int64(1)).Return(expected, nil)
+
+		c := newTestCore(withHealthyCode(), withMeta(meta))
+		resources, err := c.GetFileResources(context.Background(), 1)
+		assert.NoError(t, err)
+		assert.Equal(t, expected, resources)
 	})
 }
 

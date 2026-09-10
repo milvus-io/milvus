@@ -3,11 +3,10 @@ package broadcast
 import (
 	"context"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
@@ -39,7 +38,7 @@ func StartBroadcastWithResourceKeys(ctx context.Context, resourceKeys ...message
 		return nil, err
 	}
 	if err := b.WaitUntilWALbasedDDLReady(ctx); err != nil {
-		return nil, errors.Wrap(err, "failed to wait until WAL based DDL ready")
+		return nil, merr.Wrap(err, "failed to wait until WAL based DDL ready")
 	}
 	return broadcaster.WithResourceKeys(ctx, resourceKeys...)
 }
@@ -57,18 +56,18 @@ func StartBroadcastWithSecondaryClusterResourceKey(ctx context.Context) (broadca
 		return nil, err
 	}
 	if err := b.WaitUntilWALbasedDDLReady(ctx); err != nil {
-		return nil, errors.Wrap(err, "failed to wait until WAL based DDL ready")
+		return nil, merr.Wrap(err, "failed to wait until WAL based DDL ready")
 	}
 	return broadcaster.WithSecondaryClusterResourceKey(ctx)
 }
 
-// GetPendingCreateCollectionResources returns pending CreateCollection file resource
-// IDs from the broadcaster. Must be called after Register.
-func GetPendingCreateCollectionResources() map[int64][]int64 {
+// GetPendingSchemaFileResources returns pending schema file resource IDs
+// from the broadcaster. Must be called after Register.
+func GetPendingSchemaFileResources() map[int64][]int64 {
 	if !singleton.Ready() {
 		return nil
 	}
-	return singleton.Get().GetPendingCreateCollectionResources()
+	return singleton.Get().GetPendingSchemaFileResources()
 }
 
 // Release releases the broadcaster.

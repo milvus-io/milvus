@@ -15,6 +15,7 @@
 #pragma once
 
 #include <cstdint>
+#include "common/FastMem.h"
 #include <cstring>
 #include <memory>
 #include <string>
@@ -109,7 +110,7 @@ class VolnitskySearcher {
     static inline uint16_t
     readBigram(const void* p) {
         uint16_t v;
-        std::memcpy(&v, p, 2);
+        milvus::fastmem::FastMemcpy(&v, p, 2);
         return v;
     }
 
@@ -126,8 +127,8 @@ class VolnitskySearcher {
     fastCompare(const uint8_t* a, const uint8_t* b, size_t len) {
         if (len >= 8) {
             uint64_t wa, wb;
-            std::memcpy(&wa, a, 8);
-            std::memcpy(&wb, b, 8);
+            milvus::fastmem::FastMemcpy(&wa, a, 8);
+            milvus::fastmem::FastMemcpy(&wb, b, 8);
             if (wa != wb)
                 return false;
             if (len == 8)

@@ -45,6 +45,113 @@ func TestDatabaseInterceptor(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("id-only describe keeps omitted database empty", func(t *testing.T) {
+		md := metadata.Pairs(util.HeaderDBName, "db-from-header")
+		ctx := metadata.NewIncomingContext(context.Background(), md)
+		req := &milvuspb.DescribeCollectionRequest{CollectionID: 100}
+		_, err := interceptor(ctx, req, &grpc.UnaryServerInfo{}, handler)
+		assert.NoError(t, err)
+		assert.Empty(t, req.GetDbName())
+	})
+
+	t.Run("name-based describe still gets database from metadata", func(t *testing.T) {
+		md := metadata.Pairs(util.HeaderDBName, "db-from-header")
+		ctx := metadata.NewIncomingContext(context.Background(), md)
+		req := &milvuspb.DescribeCollectionRequest{CollectionName: "collection"}
+		_, err := interceptor(ctx, req, &grpc.UnaryServerInfo{}, handler)
+		assert.NoError(t, err)
+		assert.Equal(t, "db-from-header", req.GetDbName())
+	})
+
+	t.Run("restore snapshot defaults databases independently from active database", func(t *testing.T) {
+		testCases := []struct {
+			name           string
+			dbName         string
+			targetDBName   string
+			metadataDBName string
+			expectedDBName string
+			expectedTarget string
+		}{
+			{
+				name:           "explicit source database",
+				dbName:         "source_db",
+				expectedDBName: "source_db",
+				expectedTarget: util.DefaultDBName,
+			},
+			{
+				name:           "explicit source database with different active database",
+				dbName:         "archive",
+				metadataDBName: "tenant_a",
+				expectedDBName: "archive",
+				expectedTarget: "tenant_a",
+			},
+			{
+				name:           "source database from metadata",
+				metadataDBName: "tenant_a",
+				expectedDBName: "tenant_a",
+				expectedTarget: "tenant_a",
+			},
+			{
+				name:           "explicit target database is preserved",
+				dbName:         "source_db",
+				targetDBName:   "target_db",
+				expectedDBName: "source_db",
+				expectedTarget: "target_db",
+			},
+		}
+
+		for _, testCase := range testCases {
+			t.Run(testCase.name, func(t *testing.T) {
+				ctx := context.Background()
+				if testCase.metadataDBName != "" {
+					ctx = metadata.NewIncomingContext(ctx, metadata.Pairs(util.HeaderDBName, testCase.metadataDBName))
+				}
+				req := &milvuspb.RestoreSnapshotRequest{
+					DbName:       testCase.dbName,
+					TargetDbName: testCase.targetDBName,
+				}
+
+				_, err := interceptor(ctx, req, &grpc.UnaryServerInfo{}, handler)
+				assert.NoError(t, err)
+				assert.Equal(t, testCase.expectedDBName, req.GetDbName())
+				assert.Equal(t, testCase.expectedTarget, req.GetTargetDbName())
+			})
+		}
+	})
+
+	t.Run("external snapshot requests get db from metadata", func(t *testing.T) {
+		md := metadata.Pairs(util.HeaderDBName, "db")
+		ctx := metadata.NewIncomingContext(context.Background(), md)
+		testCases := []struct {
+			name  string
+			req   proto.Message
+			dbFun func(proto.Message) string
+		}{
+			{
+				name: "restore external snapshot",
+				req:  &milvuspb.RestoreExternalSnapshotRequest{},
+				dbFun: func(req proto.Message) string {
+					return req.(*milvuspb.RestoreExternalSnapshotRequest).GetDbName()
+				},
+			},
+			{
+				name: "export snapshot",
+				req:  &milvuspb.ExportSnapshotRequest{},
+				dbFun: func(req proto.Message) string {
+					return req.(*milvuspb.ExportSnapshotRequest).GetDbName()
+				},
+			},
+		}
+
+		for _, testCase := range testCases {
+			t.Run(testCase.name, func(t *testing.T) {
+				_, err := interceptor(ctx, testCase.req, &grpc.UnaryServerInfo{}, handler)
+				assert.NoError(t, err)
+				assert.Equal(t, "db", testCase.dbFun(testCase.req))
+			})
+		}
+	})
+
 	t.Run("test ok for all request", func(t *testing.T) {
 		availableReqs := []proto.Message{
 			&milvuspb.CreateCollectionRequest{},
@@ -105,6 +212,8 @@ func TestDatabaseInterceptor(t *testing.T) {
 			&milvuspb.AddCollectionStructFieldRequest{},
 			&milvuspb.AlterCollectionSchemaRequest{},
 			&milvuspb.RunAnalyzerRequest{},
+			&milvuspb.RestoreExternalSnapshotRequest{},
+			&milvuspb.ExportSnapshotRequest{},
 			&milvuspb.RefreshExternalCollectionRequest{},
 			&milvuspb.ListRefreshExternalCollectionJobsRequest{},
 		}

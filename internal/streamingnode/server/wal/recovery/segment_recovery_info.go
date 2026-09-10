@@ -85,6 +85,9 @@ func (info *segmentRecoveryInfo) BinarySize() uint64 {
 
 // ObserveInsert is called when an insert message is observed.
 func (info *segmentRecoveryInfo) ObserveInsert(timetick uint64, assignment *messagespb.PartitionSegmentAssignment) {
+	if !info.IsGrowing() {
+		return
+	}
 	if timetick < info.meta.CheckpointTimeTick {
 		// the txn message will share the same time tick.
 		// so we only filter the time tick is less than the checkpoint time tick.

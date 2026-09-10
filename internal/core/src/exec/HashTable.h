@@ -16,6 +16,7 @@
 #pragma once
 #ifdef __SSE2__
 #include <emmintrin.h>
+#include "common/FastMem.h"
 #elif defined(__ARM_NEON) || defined(__ARM_NEON__)
 #include <arm_neon.h>
 #endif
@@ -127,7 +128,7 @@ class BaseHashTable {
 #else
         // Generic fallback: load bytes into std::array<uint8_t, 16>
         TagVector result;
-        std::memcpy(result.data(), src, result.size());
+        milvus::fastmem::FastMemcpy(result.data(), src, result.size());
         return result;
 #endif
     }
@@ -145,12 +146,6 @@ class BaseHashTable {
 
     virtual void
     setHashMode(HashMode mode, int32_t numNew) = 0;
-
-    /// Disables use of array or normalized key hash modes.
-    void
-    forceGenericHashMode() {
-        setHashMode(HashMode::kHash, 0);
-    }
 
     /// Populates 'hashes' and 'rows' fields in 'lookup' in preparation for
     /// 'groupProbe' call. Rehashes the table if necessary. Uses lookup.hashes to
@@ -300,7 +295,7 @@ class HashTable : public BaseHashTable {
     allocateTables(uint64_t size);
 
     void
-    fullProbe(HashLookup& lookup, ProbeState& state);
+    fullProbe(HashLookup& lookup, ProbeState& state, bool extraCheck);
 
     void
     clear(bool freeTable = false) override;

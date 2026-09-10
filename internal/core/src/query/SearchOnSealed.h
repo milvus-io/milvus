@@ -29,7 +29,7 @@ namespace milvus::query {
 
 void
 SearchOnSealedIndex(const Schema& schema,
-                    const segcore::SealedIndexingRecord& record,
+                    const segcore::SealedIndexingEntry& entry,
                     const SearchInfo& search_info,
                     const void* query_data,
                     const size_t* query_offsets,

@@ -57,6 +57,7 @@ func (s *CopySegmentMetaSuite) SetupTest() {
 	s.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	s.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
+	s.catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
 	s.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
@@ -90,6 +91,7 @@ func (s *CopySegmentMetaSuite) TestNewCopySegmentMeta_Success() {
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
@@ -151,6 +153,7 @@ func (s *CopySegmentMetaSuite) TestNewCopySegmentMeta_RestoreJobs() {
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
@@ -201,6 +204,7 @@ func (s *CopySegmentMetaSuite) TestNewCopySegmentMeta_RestoreTasks() {
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
@@ -292,6 +296,47 @@ func (s *CopySegmentMetaSuite) TestUpdateJob_Success() {
 	updatedJob := s.copyMeta.GetJob(context.TODO(), 100)
 	s.Equal(datapb.CopySegmentJobState_CopySegmentJobExecuting, updatedJob.GetState())
 	s.Equal("executing", updatedJob.GetReason())
+}
+
+func (s *CopySegmentMetaSuite) TestUpdateJobInState_AppliesOnlyWhenStateMatches() {
+	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Times(2)
+
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        100,
+			CollectionId: s.collectionID,
+			State:        datapb.CopySegmentJobState_CopySegmentJobFailed,
+		},
+		tr: timerecord.NewTimeRecorder("test job"),
+	}
+	s.NoError(s.copyMeta.AddJob(context.TODO(), job))
+
+	// Expected state mismatch (job is Failed, expected Pending): the update
+	// must be skipped without touching the catalog, so a stale caller cannot
+	// resurrect a terminal job.
+	updated, err := s.copyMeta.UpdateJobInState(context.TODO(), 100,
+		datapb.CopySegmentJobState_CopySegmentJobPending,
+		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobExecuting))
+	s.NoError(err)
+	s.False(updated)
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobFailed,
+		s.copyMeta.GetJob(context.TODO(), 100).GetState())
+
+	// Missing job: skipped, no error.
+	updated, err = s.copyMeta.UpdateJobInState(context.TODO(), 999,
+		datapb.CopySegmentJobState_CopySegmentJobPending,
+		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobExecuting))
+	s.NoError(err)
+	s.False(updated)
+
+	// Matching expected state: the update applies.
+	updated, err = s.copyMeta.UpdateJobInState(context.TODO(), 100,
+		datapb.CopySegmentJobState_CopySegmentJobFailed,
+		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobExecuting))
+	s.NoError(err)
+	s.True(updated)
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobExecuting,
+		s.copyMeta.GetJob(context.TODO(), 100).GetState())
 }
 
 func (s *CopySegmentMetaSuite) TestUpdateJob_NotFound() {
@@ -551,6 +596,36 @@ func (s *CopySegmentMetaSuite) TestUpdateTask_Success() {
 	updatedTask := s.copyMeta.GetTask(context.TODO(), 1001)
 	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskInProgress, updatedTask.GetState())
 	s.Equal("executing", updatedTask.GetReason())
+}
+
+func (s *CopySegmentMetaSuite) TestUpdateTask_SaveFailureLeavesCacheUnchanged() {
+	// AddTask persists fine; the subsequent UpdateTask save fails.
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Once()
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(errors.New("etcd unavailable")).Once()
+
+	task := &copySegmentTask{
+		copyMeta: s.copyMeta,
+		tr:       timerecord.NewTimeRecorder("task"),
+		times:    taskcommon.NewTimes(),
+	}
+	task.task.Store(&datapb.CopySegmentTask{
+		TaskId:       1001,
+		JobId:        100,
+		CollectionId: s.collectionID,
+		State:        datapb.CopySegmentTaskState_CopySegmentTaskPending,
+	})
+	err := s.copyMeta.AddTask(context.TODO(), task)
+	s.NoError(err)
+
+	err = s.copyMeta.UpdateTask(context.TODO(), 1001,
+		UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskFailed),
+		UpdateCopyTaskReason("should not stick"))
+	s.Error(err)
+
+	// The in-memory cache must still reflect the persisted (old) state.
+	cachedTask := s.copyMeta.GetTask(context.TODO(), 1001)
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskPending, cachedTask.GetState())
+	s.Empty(cachedTask.GetReason())
 }
 
 func (s *CopySegmentMetaSuite) TestUpdateTask_NotFound() {

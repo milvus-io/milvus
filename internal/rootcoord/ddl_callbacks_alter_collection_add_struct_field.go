@@ -67,15 +67,20 @@ func (c *Core) broadcastAlterCollectionForAddStructField(ctx context.Context, re
 		return err
 	}
 
-	fieldIDStart := nextFieldID(coll)
+	schema := coll.ToCollectionSchemaPB()
+	fieldIDStart := maxAssignedFieldIDFromSchema(schema) + 1
 	structArrayField.FieldID = fieldIDStart
 	for i, field := range structArrayField.GetFields() {
 		field.FieldID = fieldIDStart + int64(i) + 1
 	}
 
-	schema := coll.ToCollectionSchemaPB()
 	schema.Version = coll.SchemaVersion + 1
 	schema.StructArrayFields = append(schema.StructArrayFields, structArrayField)
+	properties := updateMaxFieldIDProperty(coll.Properties, maxAssignedFieldIDFromSchema(schema))
+	schema.Properties = properties
+	if err := validateSchemaEvolution(coll, schema); err != nil {
+		return err
+	}
 
 	cacheExpirations, err := c.getCacheExpireForCollection(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
@@ -90,13 +95,14 @@ func (c *Core) broadcastAlterCollectionForAddStructField(ctx context.Context, re
 			DbId:         coll.DBID,
 			CollectionId: coll.CollectionID,
 			UpdateMask: &fieldmaskpb.FieldMask{
-				Paths: []string{message.FieldMaskCollectionSchema},
+				Paths: []string{message.FieldMaskCollectionSchema, message.FieldMaskCollectionProperties},
 			},
 			CacheExpirations: cacheExpirations,
 		}).
 		WithBody(&messagespb.AlterCollectionMessageBody{
 			Updates: &messagespb.AlterCollectionMessageUpdates{
-				Schema: schema,
+				Schema:     schema,
+				Properties: properties,
 			},
 		}).
 		WithBroadcast(channels).
@@ -255,7 +261,7 @@ func validateAddedStructFieldName(fieldName string) error {
 			return merr.WrapErrFieldNameInvalid(fieldName, msg)
 		}
 	}
-	if _, ok := common.FieldNameKeywords[fieldName]; ok {
+	if common.IsFieldNameKeyword(fieldName) {
 		msg := invalidMsg + fmt.Sprintf("%s is keyword in milvus.", fieldName)
 		return merr.WrapErrFieldNameInvalid(fieldName, msg)
 	}

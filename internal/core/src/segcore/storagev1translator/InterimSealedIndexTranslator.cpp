@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <exception>
 #include <map>
+#include <memory>
 #include <optional>
 #include <type_traits>
 
@@ -14,24 +15,24 @@
 #include "index/Index.h"
 #include "index/Utils.h"
 #include "index/VectorIndex.h"
+#include "index/VectorIndexValidDataUtils.h"
 #include "index/VectorMemIndex.h"
 #include "knowhere/dataset.h"
 #include "knowhere/expected.h"
 #include "knowhere/object.h"
 #include "knowhere/operands.h"
-#include "knowhere/version.h"
 #include "mmap/ChunkedColumnInterface.h"
 #include "nlohmann/json.hpp"
 #include "segcore/Utils.h"
 
 namespace milvus::segcore::storagev1translator {
-
 InterimSealedIndexTranslator::InterimSealedIndexTranslator(
     std::shared_ptr<ChunkedColumnInterface> vec_data,
     int64_t segment_id,
     int64_t field_id,
     knowhere::IndexType index_type,
     knowhere::MetricType metric_type,
+    IndexVersion index_version,
     knowhere::Json build_config,
     int64_t dim,
     bool is_sparse,
@@ -41,6 +42,7 @@ InterimSealedIndexTranslator::InterimSealedIndexTranslator(
       segment_id_(segment_id),
       index_type_(index_type),
       metric_type_(metric_type),
+      index_version_(index_version),
       build_config_(build_config),
       dim_(dim),
       is_sparse_(is_sparse),
@@ -119,36 +121,63 @@ InterimSealedIndexTranslator::get_cells(
         ctx, segment_id_, "InterimSealedIndexTranslator::get_cells()");
 
     std::unique_ptr<index::VectorIndex> vec_index = nullptr;
-    if (!is_sparse_) {
-        knowhere::ViewDataOp view_data = [field_raw_data_ptr =
-                                              vec_data_](size_t id) {
-            const void* data;
-            int64_t data_id = id;
+    auto num_chunk = vec_data_->num_chunks();
+    if (vec_data_->IsNullable()) {
+        vec_data_->BuildValidRowIds(ctx);
+    }
+    const auto& offset_mapping = vec_data_->GetOffsetMapping();
+    bool nullable = offset_mapping.IsEnabled();
+    const FixedVector<bool>* valid_data = nullptr;
+    if (nullable) {
+        valid_data = &vec_data_->GetValidData();
+    }
 
-            field_raw_data_ptr->BulkValueAt(
-                nullptr,
-                [&data](const char* value, size_t i) {
-                    data = static_cast<const void*>(value);
-                },
-                &data_id,
-                1);
-            return data;
+    if (!is_sparse_) {
+        auto rows_until_chunk = std::make_shared<std::vector<int64_t>>();
+        rows_until_chunk->reserve(num_chunk + 1);
+        rows_until_chunk->push_back(0);
+        for (int64_t chunk_id = 0; chunk_id < num_chunk; ++chunk_id) {
+            const auto chunk_rows =
+                nullable ? vec_data_->GetValidCountInChunk(chunk_id)
+                         : vec_data_->chunk_row_nums(chunk_id);
+            rows_until_chunk->push_back(rows_until_chunk->back() + chunk_rows);
+        }
+
+        knowhere::ViewDataOp view_data = [field_raw_data_ptr = vec_data_,
+                                          rows_until_chunk,
+                                          num_chunk](size_t id) {
+            auto compact_offset = static_cast<int64_t>(id);
+            auto it = std::upper_bound(rows_until_chunk->begin(),
+                                       rows_until_chunk->end(),
+                                       compact_offset);
+            AssertInfo(it != rows_until_chunk->begin(),
+                       "Compact offset {} is out of range",
+                       id);
+            const auto chunk_id =
+                std::distance(rows_until_chunk->begin(), it) - 1;
+            AssertInfo(
+                chunk_id < num_chunk, "Compact offset {} is out of range", id);
+            compact_offset -= (*rows_until_chunk)[chunk_id];
+
+            auto pw = field_raw_data_ptr->GetChunk(nullptr, chunk_id);
+            auto chunk = pw.get();
+            return static_cast<const void*>(chunk->ValueAt(compact_offset));
         };
 
         if (vec_data_type_ == DataType::VECTOR_FLOAT) {
-            vec_index = std::make_unique<index::VectorMemIndex<float>>(
-                DataType::NONE,
-                index_type_,
-                metric_type_,
-                knowhere::Version::GetCurrentVersion().VersionNumber(),
-                view_data,
-                false);
+            vec_index =
+                std::make_unique<index::VectorMemIndex<float>>(DataType::NONE,
+                                                               index_type_,
+                                                               metric_type_,
+                                                               index_version_,
+                                                               view_data,
+                                                               false);
         } else if (vec_data_type_ == DataType::VECTOR_FLOAT16) {
             vec_index = std::make_unique<index::VectorMemIndex<knowhere::fp16>>(
                 DataType::NONE,
                 index_type_,
                 metric_type_,
-                knowhere::Version::GetCurrentVersion().VersionNumber(),
+                index_version_,
                 view_data,
                 false);
         } else if (vec_data_type_ == DataType::VECTOR_BFLOAT16) {
@@ -156,37 +185,29 @@ InterimSealedIndexTranslator::get_cells(
                 DataType::NONE,
                 index_type_,
                 metric_type_,
-                knowhere::Version::GetCurrentVersion().VersionNumber(),
+                index_version_,
                 view_data,
                 false);
         }
     } else {
         // sparse vector case
         vec_index = std::make_unique<index::VectorMemIndex<sparse_u32_f32>>(
-            DataType::NONE,
-            index_type_,
-            metric_type_,
-            knowhere::Version::GetCurrentVersion().VersionNumber(),
-            false);
+            DataType::NONE, index_type_, metric_type_, index_version_, false);
     }
-
-    auto num_chunk = vec_data_->num_chunks();
-    // Interim index is a scan-the-world consumer: needs full valid_data_.
-    if (vec_data_->IsNullable() && vec_data_->GetValidData().empty()) {
-        vec_data_->BuildValidRowIds(ctx);
-    }
-    const auto& offset_mapping = vec_data_->GetOffsetMapping();
-    bool nullable = offset_mapping.IsEnabled();
-    const auto& valid_count_per_chunk =
-        nullable ? vec_data_->GetValidCountPerChunk() : std::vector<int64_t>{};
 
     int64_t total_valid_count =
         nullable ? offset_mapping.GetValidCount() : vec_data_->NumRows();
+    if (nullable) {
+        vec_index->SetIdMapType(knowhere::IdMap::Type::GROWING);
+    }
 
     if (total_valid_count == 0) {
         if (nullable) {
-            const auto& valid_data = vec_data_->GetValidData();
-            vec_index->BuildValidData(valid_data.data(), valid_data.size());
+            auto dataset = knowhere::GenDataSet(0, dim_, nullptr);
+            dataset->SetIsSparse(is_sparse_);
+            dataset->SetIdMapData(knowhere::IdMapData::FromValidData(
+                valid_data->data(), valid_data->size()));
+            vec_index->BuildWithDataset(dataset, build_config_);
         }
         std::vector<std::pair<cid_t, std::unique_ptr<milvus::index::IndexBase>>>
             result;
@@ -196,13 +217,23 @@ InterimSealedIndexTranslator::get_cells(
 
     bool first_build = true;
     for (int i = 0; i < num_chunk; ++i) {
-        auto pw = vec_data_->GetChunk(nullptr, i);
+        auto pw = vec_data_->GetChunk(ctx, i);
         auto chunk = pw.get();
 
+        const int64_t logical_begin = vec_data_->GetNumRowsUntilChunk(i);
+        const int64_t logical_rows = vec_data_->chunk_row_nums(i);
         int64_t actual_row_count =
-            nullable ? valid_count_per_chunk[i] : vec_data_->chunk_row_nums(i);
+            nullable ? vec_data_->GetValidCountInChunk(i) : logical_rows;
 
         if (actual_row_count == 0) {
+            if (nullable && !first_build) {
+                auto dataset = knowhere::GenDataSet(0, dim_, nullptr);
+                dataset->SetIsSparse(is_sparse_);
+                dataset->SetIdMapData(knowhere::IdMapData::FromValidData(
+                    valid_data->data() + logical_begin,
+                    static_cast<size_t>(logical_rows)));
+                vec_index->AddWithDataset(dataset, build_config_);
+            }
             continue;
         }
 
@@ -212,17 +243,23 @@ InterimSealedIndexTranslator::get_cells(
         dataset->SetIsSparse(is_sparse_);
 
         if (first_build) {
+            if (nullable) {
+                const auto logical_prefix = logical_begin + logical_rows;
+                dataset->SetIdMapData(knowhere::IdMapData::FromValidData(
+                    valid_data->data(), static_cast<size_t>(logical_prefix)));
+            }
             vec_index->BuildWithDataset(dataset, build_config_);
             first_build = false;
         } else {
+            if (nullable) {
+                dataset->SetIdMapData(knowhere::IdMapData::FromValidData(
+                    valid_data->data() + logical_begin,
+                    static_cast<size_t>(logical_rows)));
+            }
             vec_index->AddWithDataset(dataset, build_config_);
         }
     }
 
-    if (nullable) {
-        const auto& valid_data = vec_data_->GetValidData();
-        vec_index->BuildValidData(valid_data.data(), valid_data.size());
-    }
     std::vector<std::pair<cid_t, std::unique_ptr<milvus::index::IndexBase>>>
         result;
     result.emplace_back(std::make_pair(0, std::move(vec_index)));

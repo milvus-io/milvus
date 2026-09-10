@@ -104,7 +104,7 @@ func (t *CreateAliasTask) PreExecute(ctx context.Context) error {
 	// This is needed for correctness: rootcoord's CheckIfAliasCreatable only checks mt.names,
 	// so passing an alias as CollectionName would fail.
 	dbName := t.GetDbName()
-	if resolved, err := resolveCollectionAlias(ctx, dbName, collName); err == nil {
+	if resolved, err := resolveCollectionAlias(ctx, t.GetMetaCache(), dbName, collName); err == nil {
 		t.CollectionName = resolved
 	}
 	return nil
@@ -191,7 +191,9 @@ func (t *DropAliasTask) Execute(ctx context.Context) error {
 	var err error
 	t.result, err = t.mixCoord.DropAlias(ctx, t.DropAliasRequest)
 	if err = merr.CheckRPCCall(t.result, err); err != nil {
-		return err
+		// alias/collection/db names are caller-supplied; a not-found from rootcoord
+		// is the user's input error, not a system fault.
+		return merr.WrapErrAsInputErrorWhen(err, merr.ErrAliasNotFound, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
 	}
 	return nil
 }
@@ -267,7 +269,7 @@ func (t *AlterAliasTask) PreExecute(ctx context.Context) error {
 	// This is needed for correctness: rootcoord's CheckIfAliasAlterable only checks mt.names,
 	// so passing an alias as CollectionName would fail.
 	dbName := t.GetDbName()
-	if resolved, err := resolveCollectionAlias(ctx, dbName, collName); err == nil {
+	if resolved, err := resolveCollectionAlias(ctx, t.GetMetaCache(), dbName, collName); err == nil {
 		t.CollectionName = resolved
 	}
 	return nil
@@ -277,7 +279,9 @@ func (t *AlterAliasTask) Execute(ctx context.Context) error {
 	var err error
 	t.result, err = t.mixCoord.AlterAlias(ctx, t.AlterAliasRequest)
 	if err = merr.CheckRPCCall(t.result, err); err != nil {
-		return err
+		// alias/collection/db names are caller-supplied; a not-found from rootcoord
+		// is the user's input error, not a system fault.
+		return merr.WrapErrAsInputErrorWhen(err, merr.ErrAliasNotFound, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
 	}
 	return nil
 }
@@ -347,7 +351,10 @@ func (a *DescribeAliasTask) PreExecute(ctx context.Context) error {
 func (a *DescribeAliasTask) Execute(ctx context.Context) error {
 	var err error
 	a.result, err = a.mixCoord.DescribeAlias(ctx, a.DescribeAliasRequest)
-	return merr.CheckRPCCall(a.result, err)
+	// alias/collection/db names are caller-supplied; a not-found from rootcoord is
+	// the user's input error, not a system fault.
+	return merr.WrapErrAsInputErrorWhen(merr.CheckRPCCall(a.result, err),
+		merr.ErrAliasNotFound, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
 }
 
 func (a *DescribeAliasTask) PostExecute(ctx context.Context) error {
@@ -412,7 +419,7 @@ func (a *ListAliasesTask) PreExecute(ctx context.Context) error {
 		// Resolve CollectionName in case the user passed an alias instead of the real name.
 		// rootcoord filters by collection name in mt.names, so an alias would return no results.
 		dbName := a.GetDbName()
-		if resolved, err := resolveCollectionAlias(ctx, dbName, a.GetCollectionName()); err == nil {
+		if resolved, err := resolveCollectionAlias(ctx, a.GetMetaCache(), dbName, a.GetCollectionName()); err == nil {
 			a.CollectionName = resolved
 		}
 	}

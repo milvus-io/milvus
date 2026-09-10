@@ -57,6 +57,7 @@
 #include "google/cloud/status.h"
 #include "log/Log.h"
 #include "storage/ChunkManager.h"
+#include "storage/GcpStatus.h"
 #include "storage/Types.h"
 #include "storage/aliyun/AliyunCredentialsProvider.h"
 #include "storage/huawei/HuaweiCloudCredentialsProvider.h"
@@ -80,11 +81,40 @@ S3ErrorMessage(const std::string& func,
                const std::string& fmt_string,
                Args&&... args) {
     std::ostringstream oss;
-    const auto& message = fmt::format(fmt_string, std::forward<Args>(args)...);
+    const auto& message =
+        fmt::format(fmt::runtime(fmt_string), std::forward<Args>(args)...);
     oss << "Error in " << func << "[errcode:" << int(err.GetResponseCode())
         << ", exception:" << err.GetExceptionName()
         << ", errmessage:" << err.GetMessage() << ", params:" << message << "]";
     return oss.str();
+}
+
+inline ErrorCode
+S3ErrorToErrorCode(Aws::S3::S3Errors error,
+                   Aws::Http::HttpResponseCode response_code,
+                   bool should_retry) {
+    switch (error) {
+        case Aws::S3::S3Errors::NO_SUCH_BUCKET:
+            return ErrorCode::BucketInvalid;
+        case Aws::S3::S3Errors::NO_SUCH_KEY:
+        case Aws::S3::S3Errors::RESOURCE_NOT_FOUND:
+            return ErrorCode::ObjectNotExist;
+        case Aws::S3::S3Errors::UNKNOWN:
+            // S3-compatible services may return a non-standard error name the
+            // SDK cannot map, so its retry flag is unreliable here; fall back
+            // to the structured HTTP status for the retry decision.
+            return Aws::Http::IsRetryableHttpResponseCode(response_code)
+                       ? ErrorCode::S3Error
+                       : ErrorCode::UnexpectedError;
+        default:
+            // Defer the transient-vs-permanent decision to the AWS SDK's own
+            // retryability classification (throttling, 5xx, timeouts,
+            // REQUEST_EXPIRED, REQUEST_TIME_TOO_SKEWED, network, and any future
+            // error type), instead of a hand-maintained list that drifts from
+            // it. NoSuchBucket / NoSuchKey above stay permanent by identity.
+            return should_retry ? ErrorCode::S3Error
+                                : ErrorCode::UnexpectedError;
+    }
 }
 
 template <typename... Args>
@@ -95,7 +125,10 @@ ThrowS3Error(const std::string& func,
              Args&&... args) {
     std::string error_message = S3ErrorMessage(func, err, fmt_string, args...);
     LOG_WARN("{}", error_message);
-    throw SegcoreError(S3Error, error_message);
+    throw SegcoreError(
+        S3ErrorToErrorCode(
+            err.GetErrorType(), err.GetResponseCode(), err.ShouldRetry()),
+        error_message);
 }
 
 [[maybe_unused]] static bool
@@ -471,7 +504,9 @@ class GoogleHttpClientFactory : public Aws::Http::HttpClientFactory {
         auto auth_header =
             google::cloud::oauth2_internal::AuthorizationHeader(*credentials_);
         if (!auth_header.ok()) {
-            ThrowInfo(S3Error,
+            ThrowInfo(IsRetryableGcpStatus(auth_header.status().code())
+                          ? ErrorCode::S3Error
+                          : ErrorCode::UnexpectedError,
                       fmt::format("get authorization failed, errcode: {}",
                                   google::cloud::StatusCodeToString(
                                       auth_header.status().code())));

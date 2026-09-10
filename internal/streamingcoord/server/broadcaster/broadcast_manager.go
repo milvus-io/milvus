@@ -6,16 +6,16 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -32,7 +32,7 @@ func RecoverBroadcaster(ctx context.Context) (Broadcaster, error) {
 // newBroadcastTaskManager creates a new broadcast task manager with recovery info.
 // return the manager, the pending broadcast tasks and the pending ack callback tasks.
 func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) *broadcastTaskManager {
-	logger := resource.Resource().Logger().With(log.FieldComponent("broadcaster"))
+	logger := resource.Resource().Logger().With(mlog.FieldComponent("broadcaster"))
 	metrics := newBroadcasterMetrics()
 	rkLocker := newResourceKeyLocker()
 	ackScheduler := newAckCallbackScheduler(logger)
@@ -47,6 +47,7 @@ func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) *broadcastTask
 	pendingTasks := make([]*pendingBroadcastTask, 0, len(recoveryTasks))
 	pendingAckCallbackTasks := make([]*broadcastTask, 0, len(recoveryTasks))
 	tombstoneIDs := make([]uint64, 0, len(recoveryTasks))
+	idxOfKeys := newIdempotencyIndex()
 	for _, task := range recoveryTasks {
 		switch task.task.State {
 		case streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING, streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_WAIT_ACK:
@@ -74,12 +75,16 @@ func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) *broadcastTask
 			tombstoneIDs = append(tombstoneIDs, task.Header().BroadcastID)
 		}
 		tasks[task.Header().BroadcastID] = task
+		// Rebuild the idempotency index across EVERY state, tombstones included:
+		// a tombstoned task is exactly what a late retry must still hit.
+		idxOfKeys.Add(task.IdempotencyScope(), task.Header().BroadcastID)
 	}
 
 	m := &broadcastTaskManager{
 		lifetime:           typeutil.NewLifetime(),
 		mu:                 &sync.Mutex{},
 		tasks:              tasks,
+		idempotencyIndex:   idxOfKeys,
 		resourceKeyLocker:  rkLocker,
 		metrics:            metrics,
 		broadcastScheduler: newBroadcasterScheduler(pendingTasks, logger),
@@ -97,11 +102,12 @@ func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) *broadcastTask
 
 // broadcastTaskManager is the manager of the broadcast task.
 type broadcastTaskManager struct {
-	log.Binder
+	mlog.Binder
 
 	lifetime           *typeutil.Lifetime
 	mu                 *sync.Mutex
 	tasks              map[uint64]*broadcastTask // map the broadcastID to the broadcastTaskState
+	idempotencyIndex   *idempotencyIndex         // map the idempotency key to the broadcastID that owns it
 	resourceKeyLocker  *resourceKeyLocker
 	metrics            *broadcasterMetrics
 	broadcastScheduler *broadcasterScheduler // the scheduler of the broadcast task
@@ -117,7 +123,7 @@ func (bm *broadcastTaskManager) WithResourceKeys(ctx context.Context, resourceKe
 	id, err := resource.Resource().IDAllocator().Allocate(ctx)
 	if err != nil {
 		guards.Unlock()
-		return nil, errors.Wrapf(err, "allocate new id failed")
+		return nil, merr.Wrapf(err, "allocate new id failed")
 	}
 
 	if err := bm.checkClusterRole(ctx); err != nil {
@@ -140,7 +146,7 @@ func (bm *broadcastTaskManager) WithResourceKeys(ctx context.Context, resourceKe
 func (bm *broadcastTaskManager) WithSecondaryClusterResourceKey(ctx context.Context) (BroadcastAPI, error) {
 	id, err := resource.Resource().IDAllocator().Allocate(ctx)
 	if err != nil {
-		return nil, errors.Wrapf(err, "allocate new id failed")
+		return nil, merr.Wrapf(err, "allocate new id failed")
 	}
 
 	startLockInstant := time.Now()
@@ -209,23 +215,59 @@ func (bm *broadcastTaskManager) appendSharedClusterRK(resourceKeys ...message.Re
 	return append(resourceKeys, message.NewSharedClusterResourceKey())
 }
 
-// broadcast broadcasts the message to all vchannels.
-// it will block until the message is broadcasted to all vchannels
-func (bm *broadcastTaskManager) broadcast(ctx context.Context, msg message.BroadcastMutableMessage, broadcastID uint64, guards *lockGuards) (*types.BroadcastAppendResult, error) {
+// broadcast broadcasts the message to all vchannels, or resolves it to the
+// broadcast that already owns its idempotency scope, waiting for that owner to
+// complete before answering.
+//
+// Either way it consumes the caller's lock guards: a registered task takes them
+// over and releases them from its ack callback, and every other path -- shutdown,
+// duplicate -- releases them here before returning. An early return added to this
+// function MUST keep that contract; the caller cannot tell the paths apart and
+// stops releasing on all of them.
+func (bm *broadcastTaskManager) broadcast(
+	ctx context.Context,
+	msg message.BroadcastMutableMessage,
+	broadcastID uint64,
+	guards *lockGuards,
+) (*types.BroadcastAppendResult, error) {
 	if !bm.lifetime.Add(typeutil.LifetimeStateWorking) {
 		guards.Unlock()
-		return nil, status.NewOnShutdownError("broadcaster is closing")
+		return nil, errors.Mark(status.NewOnShutdownError("broadcaster is closing"), ErrBroadcastTaskNotCreated)
 	}
 	defer bm.lifetime.Done()
 
 	// Validation is now done before calling broadcast (in DataCoord for import operations)
 	// CheckCallback mechanism has been removed as part of the import refactoring
 
-	task := bm.addBroadcastTask(msg, broadcastID, guards)
-	pendingTask := newPendingBroadcastTask(task)
+	task, created := bm.getOrAddBroadcastTask(ctx, msg, broadcastID, guards)
+	if !created {
+		// Nothing was registered and nothing reached the WAL for THIS request; the
+		// answer is the owner's. This call is about to wait on that owner, so its own
+		// guards are released first rather than held across someone else's broadcast
+		// -- they may even name a different collection than the owner's, when the
+		// two requests raced a rename.
+		guards.Unlock()
+
+		// Wait for the owner to reach the state a non-duplicate caller returns from:
+		// ack callback done. The owner is not serialized behind this caller's
+		// resource lock on the two paths that can observe it mid-flight -- a retry
+		// that raced a rename holds the stale name's lock, and a task recovered from
+		// a replicated WAL holds no lock at all -- and answering before the owner
+		// finishes hands the client a broadcastID whose effects (for import, the job
+		// itself: it is created in the ack callback) do not exist yet. The wait is
+		// bounded by the request context, which answers with the caller's own timeout
+		// instead of an ID that nothing backs. An owner already tombstoned returns
+		// immediately.
+		result, err := task.BlockUntilDone(ctx)
+		if err != nil {
+			return nil, err
+		}
+		result.Duplicated = task.BroadcastMessage()
+		return result, nil
+	}
 
 	// Add it into broadcast scheduler to broadcast the message into all vchannels.
-	return bm.broadcastScheduler.AddTask(ctx, pendingTask)
+	return bm.broadcastScheduler.AddTask(ctx, newPendingBroadcastTask(task))
 }
 
 // LegacyAck is the legacy ack function for the broadcast task.
@@ -233,12 +275,13 @@ func (bm *broadcastTaskManager) broadcast(ctx context.Context, msg message.Broad
 func (bm *broadcastTaskManager) LegacyAck(ctx context.Context, broadcastID uint64, vchannel string) error {
 	task, ok := bm.getBroadcastTaskByID(broadcastID)
 	if !ok {
-		bm.Logger().Warn("broadcast task not found, it may already acked, ignore the request", zap.Uint64("broadcastID", broadcastID), zap.String("vchannel", vchannel))
+		bm.Logger().Warn(ctx,
+			"broadcast task not found, it may already acked, ignore the request", mlog.Uint64("broadcastID", broadcastID), mlog.String("vchannel", vchannel))
 		return nil
 	}
 	msg := task.GetImmutableMessageFromVChannel(vchannel)
 	if msg == nil {
-		task.Logger().Warn("vchannel is already acked, ignore the ack request", zap.String("vchannel", vchannel))
+		task.Logger().Warn(ctx, "vchannel is already acked, ignore the ack request", mlog.String("vchannel", vchannel))
 		return nil
 	}
 	return bm.Ack(ctx, msg)
@@ -253,10 +296,10 @@ func (bm *broadcastTaskManager) Ack(ctx context.Context, msg message.ImmutableMe
 
 	t, ok := bm.getOrCreateBroadcastTask(msg)
 	if !ok {
-		bm.Logger().Debug(
+		bm.Logger().Debug(ctx,
 			"task is tombstone, ignored the ack request",
-			zap.Uint64("broadcastID", msg.BroadcastHeader().BroadcastID),
-			zap.String("vchannel", msg.VChannel()))
+			mlog.Uint64("broadcastID", msg.BroadcastHeader().BroadcastID),
+			mlog.String("vchannel", msg.VChannel()))
 		return nil
 	}
 	return t.Ack(ctx, msg)
@@ -271,7 +314,7 @@ func (bm *broadcastTaskManager) DropTombstone(ctx context.Context, broadcastID u
 
 	t, ok := bm.getBroadcastTaskByID(broadcastID)
 	if !ok {
-		bm.Logger().Debug("task is not found, ignored the drop tombstone request", zap.Uint64("broadcastID", broadcastID))
+		bm.Logger().Debug(ctx, "task is not found, ignored the drop tombstone request", mlog.Uint64("broadcastID", broadcastID))
 		return nil
 	}
 	if err := t.DropTombstone(ctx); err != nil {
@@ -290,17 +333,59 @@ func (bm *broadcastTaskManager) Close() {
 	bm.ackScheduler.Close()
 }
 
-// addBroadcastTask adds the broadcast task into the manager.
-func (bm *broadcastTaskManager) addBroadcastTask(msg message.BroadcastMutableMessage, broadcastID uint64, guards *lockGuards) *broadcastTask {
-	msg = msg.OverwriteBroadcastHeader(broadcastID, guards.ResourceKeys()...)
+// getOrAddBroadcastTask resolves the idempotency scope and registers the task in
+// ONE critical section.
+//
+// The lookup and the insert used to be two critical sections on bm.mu, and only
+// the caller's resource lock kept two same-key requests out of the gap between
+// them. That works only when the lock is exclusive on the very object the scope
+// names. It is not: import scopes by collection ID (so a retry still dedups after
+// a rename) but locks by collection name, and RenameCollection takes DB-level keys
+// only. A rename between name resolution and lock acquisition therefore leaves two
+// same-key requests holding non-conflicting collection-name locks -- both miss,
+// both register, both reach the WAL, and idempotencyIndex.Add silently keeps the
+// first. Deciding under bm.mu retires that caller obligation instead of restating
+// it in a comment.
+//
+// Returns the owning task and created=false on a hit, having registered nothing;
+// the caller still holds its lock guards. Returns the newly registered task and
+// created=true on a miss, and that task now owns the guards.
+func (bm *broadcastTaskManager) getOrAddBroadcastTask(
+	ctx context.Context,
+	msg message.BroadcastMutableMessage,
+	broadcastID uint64,
+	guards *lockGuards,
+) (task *broadcastTask, created bool) {
+	// The scope comes from the message alone, so the hit path and the miss path
+	// cannot drift apart. It touches no shared state, so it is derived outside the
+	// lock.
+	scope := idempotencyScopeOfMessage(msg)
+
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+
+	if ownerID, ok := bm.idempotencyIndex.Get(scope); ok {
+		if t, ok := bm.tasks[ownerID]; ok {
+			return t, false
+		}
+		// tasks and idempotencyIndex are written together under this lock and
+		// removeBroadcastTask drops the index entry first, so a scope whose owner
+		// has no task is unreachable. Say so rather than trusting the entry, and
+		// fall through to registration.
+		bm.Logger().Warn(ctx, "idempotency index entry has no task, treating it as a miss",
+			mlog.Uint64("ownerBroadcastID", ownerID))
+	}
+	// Constructed only once the broadcast is certain to be registered: construction
+	// counts the task into the PENDING gauge, and the hit path above transitions no
+	// state, so an earlier construction would leak that count for the lifetime of the
+	// process. It builds no shared state, but it is cheap enough to hold bm.mu across
+	// at DDL frequency.
 	newIncomingTask := newBroadcastTaskFromBroadcastMessage(msg, bm.metrics, bm.ackScheduler)
 	newIncomingTask.SetLogger(bm.Logger())
 	newIncomingTask.WithResourceKeyLockGuards(guards)
-
-	bm.mu.Lock()
 	bm.tasks[broadcastID] = newIncomingTask
-	bm.mu.Unlock()
-	return newIncomingTask
+	bm.idempotencyIndex.Add(scope, broadcastID)
+	return newIncomingTask, true
 }
 
 // getOrCreateBroadcastTask returns the task by the broadcastID
@@ -316,13 +401,14 @@ func (bm *broadcastTaskManager) getOrCreateBroadcastTask(msg message.ImmutableMe
 		return t, t.State() != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE
 	}
 	if msg.ReplicateHeader() == nil {
-		bm.Logger().Warn("try to recover task from the wal from non-replicate message, ignore it")
+		bm.Logger().Warn(context.TODO(), "try to recover task from the wal from non-replicate message, ignore it")
 		return nil, false
 	}
 
 	newBroadcastTask := newBroadcastTaskFromImmutableMessage(msg, bm.metrics, bm.ackScheduler)
 	newBroadcastTask.SetLogger(bm.Logger())
 	bm.tasks[bh.BroadcastID] = newBroadcastTask
+	bm.idempotencyIndex.Add(newBroadcastTask.IdempotencyScope(), bh.BroadcastID)
 	return newBroadcastTask, true
 }
 
@@ -340,6 +426,9 @@ func (bm *broadcastTaskManager) removeBroadcastTask(broadcastID uint64) {
 	bm.mu.Lock()
 	defer bm.mu.Unlock()
 
+	if t, ok := bm.tasks[broadcastID]; ok {
+		bm.idempotencyIndex.Remove(t.IdempotencyScope(), broadcastID)
+	}
 	delete(bm.tasks, broadcastID)
 }
 
@@ -365,10 +454,10 @@ func (bm *broadcastTaskManager) getIncompleteBroadcastTasks() []*broadcastTask {
 	return result
 }
 
-// GetPendingCreateCollectionResources returns collection ID → file resource IDs
-// for all non-tombstone CreateCollection broadcast tasks. Used during recovery to
-// rebuild file resource refCnt for collections whose AddCollection hasn't run yet.
-func (bm *broadcastTaskManager) GetPendingCreateCollectionResources() map[int64][]int64 {
+// GetPendingSchemaFileResources returns collection ID -> file resource IDs
+// for all non-tombstone schema broadcast tasks. Used during recovery to rebuild
+// file resource refCnt for resources referenced by pending schema changes.
+func (bm *broadcastTaskManager) GetPendingSchemaFileResources() map[int64][]int64 {
 	bm.mu.Lock()
 	defer bm.mu.Unlock()
 
@@ -377,18 +466,43 @@ func (bm *broadcastTaskManager) GetPendingCreateCollectionResources() map[int64]
 		if task.State() == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE {
 			continue
 		}
-		if task.msg.MessageType() != message.MessageTypeCreateCollection {
+		switch task.msg.MessageTypeWithVersion() {
+		case message.MessageTypeCreateCollectionV1:
+			createMsg, err := message.AsMutableCreateCollectionMessageV1(task.msg)
+			if err != nil {
+				continue
+			}
+			body := createMsg.MustBody()
+			ids := body.CollectionSchema.GetFileResourceIds()
+			appendPendingFileResourceIDs(result, createMsg.Header().CollectionId, ids)
+		case message.MessageTypeAlterCollectionV2:
+			alterMsg, err := message.AsMutableAlterCollectionMessageV2(task.msg)
+			if err != nil {
+				continue
+			}
+			schema := alterMsg.MustBody().GetUpdates().GetSchema()
+			ids := schema.GetFileResourceIds()
+			appendPendingFileResourceIDs(result, alterMsg.Header().CollectionId, ids)
+		default:
 			continue
-		}
-		createMsg, err := message.AsMutableCreateCollectionMessageV1(task.msg)
-		if err != nil {
-			continue
-		}
-		body := createMsg.MustBody()
-		ids := body.CollectionSchema.GetFileResourceIds()
-		if len(ids) > 0 {
-			result[createMsg.Header().CollectionId] = ids
 		}
 	}
 	return result
+}
+
+func appendPendingFileResourceIDs(result map[int64][]int64, collectionID int64, ids []int64) {
+	if len(ids) == 0 {
+		return
+	}
+	seen := make(map[int64]struct{}, len(result[collectionID])+len(ids))
+	for _, id := range result[collectionID] {
+		seen[id] = struct{}{}
+	}
+	for _, id := range ids {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		result[collectionID] = append(result[collectionID], id)
+		seen[id] = struct{}{}
+	}
 }

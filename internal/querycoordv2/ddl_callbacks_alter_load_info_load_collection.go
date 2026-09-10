@@ -20,13 +20,12 @@ import (
 	"context"
 	"fmt"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // broadcastAlterLoadConfigCollectionV2ForLoadCollection is called when the load collection request is received.
@@ -47,9 +46,12 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 	if err != nil {
 		return err
 	}
-	// if user specified the replica number in load request, load config changes won't be apply to the collection automatically
-	userSpecifiedReplicaMode := req.GetReplicaNumber() > 0
-	replicaNumber, resourceGroups, err := s.getDefaultResourceGroupsAndReplicaNumber(ctx, req.GetReplicaNumber(), req.GetResourceGroups(), req.GetCollectionID())
+	replicaNumber, resourceGroups, userSpecifiedReplicaMode, err := s.getLoadReplicaConfigForRequest(
+		ctx,
+		req.GetReplicaNumber(),
+		req.GetResourceGroups(),
+		req.GetCollectionID(),
+	)
 	if err != nil {
 		return err
 	}
@@ -77,8 +79,51 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 	if err != nil {
 		return err
 	}
+	if msg == nil {
+		// load config unchanged, the collection is already loaded as requested.
+		mlog.Info(ctx, "load collection ignored, load config is unchanged",
+			mlog.Int64("collectionID", req.GetCollectionID()))
+		return nil
+	}
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err
+}
+
+func (s *Server) getLoadReplicaConfigForRequest(ctx context.Context, replicaNumber int32, resourceGroups []string, collectionID int64) (int32, []string, bool, error) {
+	// If force override is enabled with a complete cluster-level load config,
+	// new load requests are interpreted as cluster-managed even when the request
+	// carries explicit replica/RG parameters.
+	if overrideReplicaNumber, overrideResourceGroups, ok := getClusterLevelLoadConfigForForceOverride(); ok {
+		mlog.Info(ctx,
+			"force override user-specified replica mode for load request",
+			mlog.Int64("collectionID", collectionID),
+			mlog.Int32("replicaNumber", overrideReplicaNumber),
+			mlog.Strings("resourceGroups", overrideResourceGroups))
+		return overrideReplicaNumber, overrideResourceGroups, false, nil
+	}
+
+	// If user specified the replica number in load request, load config changes
+	// won't be applied to the collection automatically.
+	userSpecifiedReplicaMode := replicaNumber > 0
+	replicaNumber, resourceGroups, err := s.getDefaultResourceGroupsAndReplicaNumber(ctx, replicaNumber, resourceGroups, collectionID)
+	return replicaNumber, resourceGroups, userSpecifiedReplicaMode, err
+}
+
+func getClusterLevelLoadConfigForForceOverride() (int32, []string, bool) {
+	queryCoordCfg := &paramtable.Get().QueryCoordCfg
+	if !queryCoordCfg.ClusterLevelLoadForceOverrideUserReplicaMode.GetAsBool() {
+		return 0, nil, false
+	}
+
+	replicaNumber := queryCoordCfg.ClusterLevelLoadReplicaNumber.GetAsInt32()
+	resourceGroups := queryCoordCfg.ClusterLevelLoadResourceGroups.GetAsStrings()
+	if replicaNumber <= 0 || len(resourceGroups) == 0 {
+		return 0, nil, false
+	}
+	if len(resourceGroups) != 1 && len(resourceGroups) != int(replicaNumber) {
+		return 0, nil, false
+	}
+	return replicaNumber, resourceGroups, true
 }
 
 // getDefaultResourceGroupsAndReplicaNumber gets the default resource groups and replica number for the collection.
@@ -88,7 +133,7 @@ func (s *Server) getDefaultResourceGroupsAndReplicaNumber(ctx context.Context, r
 		// when replica number or resource groups is not set, use pre-defined load config
 		rgs, replicas, err := s.broker.GetCollectionLoadInfo(ctx, collectionID)
 		if err != nil {
-			log.Warn("failed to get pre-defined load info", zap.Error(err))
+			mlog.Warn(ctx, "failed to get pre-defined load info", mlog.Err(err))
 		} else {
 			replicaNumber = int32(replicas)
 			resourceGroups = rgs
@@ -96,11 +141,12 @@ func (s *Server) getDefaultResourceGroupsAndReplicaNumber(ctx context.Context, r
 	}
 	// to be compatible with old sdk, which set replica=1 if replica is not specified
 	if replicaNumber <= 0 {
-		log.Info("request doesn't indicate the number of replicas, set it to 1")
+		mlog.Info(ctx, "request doesn't indicate the number of replicas, set it to 1")
 		replicaNumber = 1
 	}
 	if len(resourceGroups) == 0 {
-		log.Info(fmt.Sprintf("request doesn't indicate the resource groups, set it to %s", meta.DefaultResourceGroupName))
+		mlog.Info(ctx,
+			fmt.Sprintf("request doesn't indicate the resource groups, set it to %s", meta.DefaultResourceGroupName))
 		resourceGroups = []string{meta.DefaultResourceGroupName}
 	}
 	return replicaNumber, resourceGroups, nil

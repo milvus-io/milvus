@@ -20,8 +20,8 @@ import (
 	"fmt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/client/v2/index"
+	"github.com/milvus-io/milvus/client/v3/entity"
+	"github.com/milvus-io/milvus/client/v3/index"
 )
 
 type SearchIteratorOption interface {
@@ -54,6 +54,9 @@ func (opt *searchIteratorOption) ValidateParams() error {
 	if opt.batchSize <= 0 {
 		return fmt.Errorf("batch size must be greater than 0")
 	}
+	if opt.searchAggregation != nil {
+		return fmt.Errorf("search_aggregation is not supported with search iterator")
+	}
 	return nil
 }
 
@@ -64,6 +67,11 @@ func (opt *searchIteratorOption) WithBatchSize(batchSize int) *searchIteratorOpt
 
 func (opt *searchIteratorOption) WithPartitions(partitionNames ...string) *searchIteratorOption {
 	opt.partitionNames = partitionNames
+	return opt
+}
+
+func (opt *searchIteratorOption) WithNamespace(namespace string) *searchIteratorOption {
+	opt.searchOption.WithNamespace(namespace)
 	return opt
 }
 
@@ -163,6 +171,7 @@ type QueryIteratorOption interface {
 type queryIteratorOption struct {
 	collectionName             string
 	partitionNames             []string
+	namespace                  *string
 	outputFields               []string
 	expr                       string
 	batchSize                  int
@@ -175,6 +184,7 @@ func (opt *queryIteratorOption) Request() (*milvuspb.QueryRequest, error) {
 	return &milvuspb.QueryRequest{
 		CollectionName:        opt.collectionName,
 		PartitionNames:        opt.partitionNames,
+		Namespace:             opt.namespace,
 		OutputFields:          opt.outputFields,
 		Expr:                  opt.expr,
 		ConsistencyLevel:      opt.consistencyLevel.CommonConsistencyLevel(),
@@ -205,6 +215,11 @@ func (opt *queryIteratorOption) WithBatchSize(batchSize int) *queryIteratorOptio
 
 func (opt *queryIteratorOption) WithPartitions(partitionNames ...string) *queryIteratorOption {
 	opt.partitionNames = partitionNames
+	return opt
+}
+
+func (opt *queryIteratorOption) WithNamespace(namespace string) *queryIteratorOption {
+	opt.namespace = &namespace
 	return opt
 }
 

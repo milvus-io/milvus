@@ -17,17 +17,16 @@
 package config
 
 import (
-	"fmt"
+	"context"
 	"os"
 	"path/filepath"
 	"sync"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 	"gopkg.in/yaml.v2"
 
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
 type FileSource struct {
@@ -135,7 +134,7 @@ func (fs *FileSource) loadFromFile() error {
 
 		ext := filepath.Ext(configFile)
 		if len(ext) == 0 || (ext[1:] != "yaml" && ext[1:] != "yml") {
-			return fmt.Errorf("unsupported Config Type: %s", ext)
+			return errors.Wrapf(ErrUnsupportedConfigType, "%s", ext)
 		}
 
 		data, err := os.ReadFile(configFile)
@@ -153,7 +152,7 @@ func (fs *FileSource) loadFromFile() error {
 	}
 	// not allow all config files missing, return error for this case
 	if notExistsNum == len(configFiles) {
-		return errors.Newf("all config files not exists, files: %v", configFiles)
+		return errors.Wrapf(ErrAllConfigFilesNotExist, "files: %v", configFiles)
 	}
 
 	return fs.update(newConfig)
@@ -170,7 +169,7 @@ func (fs *FileSource) update(configs map[string]string) error {
 	events, err := PopulateEvents(fs.GetSourceName(), fs.configs, configs)
 	if err != nil {
 		fs.Unlock()
-		log.Warn("generating event error", zap.Error(err))
+		mlog.Warn(context.TODO(), "generating event error", mlog.Err(err))
 		return err
 	}
 	fs.configs = configs

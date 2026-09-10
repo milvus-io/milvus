@@ -18,6 +18,7 @@
 #include <utility>
 
 #include "common/Tracer.h"
+#include "common/Utils.h"
 #include "common/protobuf_utils.h"
 #include "exec/Task.h"
 #include "fmt/core.h"
@@ -35,11 +36,12 @@
 namespace milvus::query {
 
 static SearchResult
-empty_search_result(int64_t num_queries) {
+empty_search_result(int64_t num_queries, bool element_level = false) {
     SearchResult final_result;
     final_result.total_nq_ = num_queries;
     final_result.unity_topK_ = 0;  // no result
     final_result.total_data_cnt_ = 0;
+    final_result.element_level_ = element_level;
     return final_result;
 }
 
@@ -48,8 +50,7 @@ ExecPlanNodeVisitor::ExecuteTask(
     plan::PlanFragment& plan,
     std::shared_ptr<milvus::exec::QueryContext> query_context) {
     tracer::AutoSpan span("ExecuteTask", tracer::GetRootSpan(), true);
-    span.GetSpan()->SetAttribute("active_count",
-                                 query_context->get_active_count());
+    span.SetAttribute("active_count", query_context->get_active_count());
 
     LOG_DEBUG("plannode: {}, active_count: {}, timestamp: {}",
               plan.plan_node_->ToString(),
@@ -69,7 +70,7 @@ ExecPlanNodeVisitor::ExecuteTask(
                 AssertInfo(first_column,
                            "first column must be a column vector");
                 if (first_column->IsBitmap()) {
-                    if (query_context->get_active_element_count() > 0) {
+                    if (query_context->bitset_is_element_level()) {
                         Assert(processed_num ==
                                query_context->get_active_element_count());
                     } else {
@@ -103,22 +104,10 @@ ExecPlanNodeVisitor::ExecuteTask(
             ret = result;
         }
     }
-    span.GetSpan()->SetAttribute("total_rows", processed_num);
-    span.GetSpan()->SetAttribute("matched_rows",
-                                 ret ? processed_num - ret->nullCount() : 0);
+    span.SetAttribute("total_rows", processed_num);
+    span.SetAttribute("matched_rows",
+                      ret ? processed_num - ret->nullCount() : 0);
     return ret;
-}
-
-std::unique_ptr<RetrieveResult>
-wrap_num_entities(int64_t cnt) {
-    auto retrieve_result = std::make_unique<RetrieveResult>();
-    DataArray arr;
-    arr.set_type(milvus::proto::schema::Int64);
-    auto scalar = arr.mutable_scalars();
-    scalar->mutable_long_data()->mutable_data()->Add(cnt);
-    retrieve_result->field_data_ = {arr};
-    retrieve_result->total_data_cnt_ = 0;
-    return retrieve_result;
 }
 
 template <typename S, typename T>
@@ -152,7 +141,7 @@ fillDataArrayFromColumnVector(const ColumnVectorPtr& column_vector,
     // Always copy validity data from ColumnVector
     // ColumnVector always tracks validity via valid_values_, so we should
     // always propagate it to ensure correctness for nullable fields
-    auto valid_data = data_array.mutable_valid_data();
+    auto valid_data = MutableFieldDataRowValidData(&data_array);
     const uint8_t* src_bitmap =
         static_cast<const uint8_t*>(column_vector->GetValidRawData());
     AssertInfo(src_bitmap,
@@ -293,6 +282,9 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
         std::unordered_map<std::string,
                            std::shared_ptr<milvus::exec::BaseConfig>>(),
         entity_ttl_physical_time_us_);
+
+    // Pin the sealed published snapshot exactly once for this request.
+    query_context->set_read_snapshot(segment->CaptureReadSnapshot());
 
     // Set op context to query context
     auto op_context = milvus::OpContext(cancel_token_);
@@ -444,10 +436,17 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
                                    std::shared_ptr<milvus::exec::BaseConfig>>(),
                 entity_ttl_physical_time_us_);
 
+            // Pin the sealed published snapshot exactly once for this request.
+            query_context->set_read_snapshot(segment->CaptureReadSnapshot());
+
             if (enable_expr_cache_) {
                 query_context->set_enable_expr_cache(true);
                 query_context->set_enable_sub_expr_cache_write(false);
             }
+
+            auto op_context = milvus::OpContext(cancel_token_);
+            op_context.trace_span = trace_span_;
+            query_context->set_op_context(&op_context);
 
             auto result = ExecuteTask(plan_fragment, query_context);
 
@@ -473,8 +472,9 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
 
     // PreExecute: skip all calculation
     if (active_count == 0) {
-        search_result_opt_ =
-            empty_search_result(placeholder_group_->at(0).num_of_queries_);
+        const auto& placeholder = placeholder_group_->at(0);
+        search_result_opt_ = empty_search_result(placeholder.num_of_queries_,
+                                                 placeholder.element_level_);
         return;
     }
 
@@ -496,6 +496,9 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
                            std::shared_ptr<milvus::exec::BaseConfig>>(),
         entity_ttl_physical_time_us_);
 
+    // Pin the sealed published snapshot exactly once for this request.
+    query_context->set_read_snapshot(segment->CaptureReadSnapshot());
+
     query_context->set_search_info(node.search_info_);
     query_context->set_placeholder_group(placeholder_group_);
     if (enable_expr_cache_) {
@@ -505,6 +508,7 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
 
     // Set op context to query context
     auto op_context = milvus::OpContext(cancel_token_);
+    op_context.trace_span = trace_span_;
     query_context->set_op_context(&op_context);
 
     // Do plan fragment task work

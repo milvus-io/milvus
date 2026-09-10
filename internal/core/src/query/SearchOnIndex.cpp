@@ -20,7 +20,6 @@
 #include "CachedSearchIterator.h"
 #include "Utils.h"
 #include "common/Consts.h"
-#include "common/OffsetMapping.h"
 #include "common/QueryInfo.h"
 #include "common/QueryResult.h"
 #include "common/Types.h"
@@ -45,23 +44,44 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
         knowhere::GenDataSet(num_queries, dim, search_dataset.query_data);
     dataset->SetIsSparse(is_sparse);
 
-    const auto& offset_mapping = indexing.GetOffsetMapping();
-    TargetBitmap transformed_bitset;
     BitsetView search_bitset = bitset;
-    if (offset_mapping.IsEnabled()) {
-        if (offset_mapping.GetValidCount() == 0) {
-            // All vectors are null, return empty result
-            auto total_num = num_queries * search_conf.topk_;
-            search_result.seg_offsets_.resize(total_num, INVALID_SEG_OFFSET);
-            search_result.distances_.resize(total_num, 0.0f);
-            search_result.total_nq_ = num_queries;
-            search_result.unity_topK_ = search_conf.topk_;
-            return;
-        }
-        if (!bitset.empty()) {
-            transformed_bitset = TransformBitset(bitset, offset_mapping);
-            search_bitset =
-                search_result.PinBitset(std::move(transformed_bitset));
+    const auto active_count = search_conf.active_count_;
+
+    // A growing interim index can advance after the plan freezes its visible
+    // logical prefix.  Knowhere treats an empty bitset as IDSelectorAll, so an
+    // empty/no-filter fast path must still carry an explicit prefix length or
+    // rows appended after active_count can occupy the ANN top-k before Reduce
+    // gets a chance to validate their offsets.
+    //
+    // Indexed nullable mapping lives inside Knowhere IdMap, so the visible
+    // prefix stays in logical row space.
+    if (active_count >= 0 && active_count == 0) {
+        FillEmptySearchResult(search_result, num_queries, search_conf.topk_);
+        return;
+    }
+
+    auto pin_visible_prefix = [&](int64_t count) {
+        TargetBitmap visible_prefix(count, false);
+        search_bitset = search_result.PinBitset(std::move(visible_prefix));
+    };
+
+    if (active_count >= 0 && bitset.empty()) {
+        pin_visible_prefix(active_count);
+    } else if (active_count >= 0) {
+        // The plan layer sizes the filter bitmap to the same frozen
+        // active_count it stamps into SearchInfo (both come from one
+        // QueryContext), and Knowhere filters every id >= bitset.size(), so
+        // the incoming bitset normally already carries the bound.
+        //
+        // A caller without a plan node can still hand in a longer bitset --
+        // FloatSegmentIndexSearch resolves active_count_ from the segment for
+        // those. Narrow the view rather than rejecting the search: scanning
+        // past the frozen bound is the failure this function exists to
+        // prevent, and the subview aliases the caller's buffer, so this costs
+        // nothing. A shorter bitset already bounds the scan more tightly than
+        // active_count and is left alone.
+        if (static_cast<int64_t>(bitset.size()) > active_count) {
+            search_bitset = bitset.subview(0, active_count);
         }
     }
 
@@ -70,25 +90,20 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
                                                       dataset,
                                                       search_result,
                                                       search_bitset,
-                                                      indexing)) {
+                                                      indexing,
+                                                      op_context)) {
         return;
     }
 
     if (search_conf.iterator_v2_info_.has_value()) {
-        auto iter =
-            CachedSearchIterator(indexing, dataset, search_conf, search_bitset);
+        auto iter = CachedSearchIterator(
+            indexing, dataset, search_conf, search_bitset, op_context);
         iter.NextBatch(search_conf, search_result);
-        if (offset_mapping.IsEnabled()) {
-            TransformOffset(search_result.seg_offsets_, offset_mapping);
-        }
         return;
     }
 
     indexing.Query(
         dataset, search_conf, search_bitset, op_context, search_result);
-    if (offset_mapping.IsEnabled()) {
-        TransformOffset(search_result.seg_offsets_, offset_mapping);
-    }
 }
 
 }  // namespace milvus::query

@@ -7,7 +7,7 @@ from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from common.constants import *  # noqa
-from pymilvus import AnnSearchRequest, DataType, RRFRanker, WeightedRanker
+from pymilvus import AnnSearchRequest, DataType, Function, FunctionType, RRFRanker, WeightedRanker
 from pymilvus.client.embedding_list import EmbeddingList
 from utils.util_log import test_log as log
 
@@ -731,6 +731,72 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
         assert top_hit["id"] == target_row, f"expected row {target_row}, got {top_hit['id']}"
         assert "offset" in top_hit, "element offset not exposed on hit"
         assert top_hit["offset"] == target_elem, f"expected element offset={target_elem}, got {top_hit['offset']}"
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_element_filter_template_matches_inline_query_and_search(self):
+        """
+        target: verify filter templates bind Struct child values for element-level query and search
+        method: compare a string template against its inline element_filter form for query and vector search
+        expected: template and inline forms return identical PK/offset results
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_ef_template")
+        data = self._create_collection_and_insert(client, collection_name, nb=20, metric_type="COSINE")
+        target_row = 5
+        target_elem = 2
+        tag = data[target_row]["structA"][target_elem]["str_val"]
+        query_vector = data[target_row]["structA"][target_elem]["embedding"]
+        inline = f'element_filter(structA, $[str_val] == "{tag}")'
+        template = "element_filter(structA, $[str_val] == {tag})"
+        failures = []
+
+        inline_query = client.query(
+            collection_name,
+            filter=inline,
+            output_fields=["id"],
+            limit=100,
+        )
+        try:
+            template_query = client.query(
+                collection_name,
+                filter=template,
+                filter_params={"tag": tag},
+                output_fields=["id"],
+                limit=100,
+            )
+            assert [(row["id"], row["offset"]) for row in template_query] == [
+                (row["id"], row["offset"]) for row in inline_query
+            ]
+        except Exception as exc:
+            failures.append(f"query failed: {exc}")
+
+        inline_search = client.search(
+            collection_name,
+            data=[query_vector],
+            anns_field="structA[embedding]",
+            search_params={"metric_type": "COSINE"},
+            filter=inline,
+            limit=10,
+            output_fields=["id"],
+        )[0]
+        try:
+            template_search = client.search(
+                collection_name,
+                data=[query_vector],
+                anns_field="structA[embedding]",
+                search_params={"metric_type": "COSINE"},
+                filter=template,
+                filter_params={"tag": tag},
+                limit=10,
+                output_fields=["id"],
+            )[0]
+            assert [(hit["id"], hit["offset"]) for hit in template_search] == [
+                (hit["id"], hit["offset"]) for hit in inline_search
+            ]
+        except Exception as exc:
+            failures.append(f"search failed: {exc}")
+
+        assert not failures, "\n".join(failures)
 
     # ---- L1 tests ----
 
@@ -3617,6 +3683,114 @@ class TestMilvusClientStructArrayElementHybridSearch(TestMilvusClientV2Base):
             )
         return data
 
+    def _cosine_vector(self, cosine, dim=default_dim):
+        """Build a unit vector whose cosine similarity with [1, 0, ...] is fixed."""
+        vec = [0.0] * dim
+        vec[0] = float(cosine)
+        if dim > 1:
+            vec[1] = float(np.sqrt(max(0.0, 1.0 - cosine * cosine)))
+        return vec
+
+    def _generate_hybrid_collapse_data(self, nb=default_nb, candidate_count=64):
+        """Generate enough rows to verify hybrid collapse with brute-force GT."""
+        data = [
+            {
+                "id": i,
+                "doc_int": i,
+                "normal_vector": self._cosine_vector(-1.0),
+                "structA": [
+                    {
+                        "embedding": self._cosine_vector(-1.0 + offset * 0.01),
+                        "int_val": -(offset + 1),
+                        "color": "drop",
+                    }
+                    for offset in range(3 + i % 4)
+                ],
+            }
+            for i in range(nb)
+        ]
+
+        for rank in range(candidate_count):
+            row_id = nb + rank
+            elem_score = 1.0 - rank * 0.025
+            normal_score = -1.0 if rank == 0 else 1.0 - (rank - 1) * 0.025
+            struct_array = [
+                {
+                    "embedding": self._cosine_vector(elem_score),
+                    "int_val": rank * 10,
+                    "color": "keep",
+                }
+            ]
+            if rank == 0:
+                struct_array.append(
+                    {
+                        "embedding": self._cosine_vector(0.99),
+                        "int_val": rank * 10 + 1,
+                        "color": "keep",
+                    }
+                )
+            elif rank % 7 == 0:
+                struct_array.append(
+                    {
+                        "embedding": self._cosine_vector(elem_score - 0.01),
+                        "int_val": rank * 10 + 1,
+                        "color": "keep",
+                    }
+                )
+            struct_array.append({"embedding": self._cosine_vector(-1.0), "int_val": -1, "color": "drop"})
+            struct_array.append({"embedding": self._cosine_vector(-0.9), "int_val": -2, "color": "drop"})
+            data.append(
+                {
+                    "id": row_id,
+                    "doc_int": row_id,
+                    "normal_vector": self._cosine_vector(normal_score),
+                    "structA": struct_array,
+                }
+            )
+
+        return data
+
+    def _gt_hybrid_collapse_rrf(self, data, query_vector, sub_limit, hybrid_limit, rrf_k):
+        """Compute element-level collapse + normal-vector RRF ground truth."""
+        element_hits = []
+        for row in data:
+            for offset, elem in enumerate(row["structA"]):
+                if elem["color"] != "keep":
+                    continue
+                element_hits.append(
+                    {
+                        "id": row["id"],
+                        "score": _cosine_sim(query_vector, elem["embedding"]),
+                        "offset": offset,
+                    }
+                )
+        element_hits.sort(key=lambda hit: (-hit["score"], hit["id"], hit["offset"]))
+        element_hits = element_hits[:sub_limit]
+
+        best_by_id = {}
+        for order, hit in enumerate(element_hits):
+            current = best_by_id.get(hit["id"])
+            if current is None or hit["score"] > current["score"]:
+                best_by_id[hit["id"]] = {
+                    "id": hit["id"],
+                    "score": hit["score"],
+                    "order": order,
+                }
+        element_rows = sorted(best_by_id.values(), key=lambda hit: (-hit["score"], hit["order"]))
+
+        normal_rows = [{"id": row["id"], "score": _cosine_sim(query_vector, row["normal_vector"])} for row in data]
+        normal_rows.sort(key=lambda hit: (-hit["score"], hit["id"]))
+        normal_rows = normal_rows[:sub_limit]
+
+        rrf_scores = {}
+        for hits in (element_rows, normal_rows):
+            for rank, hit in enumerate(hits):
+                rrf_scores[hit["id"]] = rrf_scores.get(hit["id"], 0.0) + 1 / (rrf_k + rank + 1)
+
+        hybrid_rows = [{"id": row_id, "score": score} for row_id, score in rrf_scores.items()]
+        hybrid_rows.sort(key=lambda hit: (-hit["score"], hit["id"]))
+        return element_hits, normal_rows, hybrid_rows[:hybrid_limit]
+
     def _setup_collection(
         self,
         client,
@@ -3643,6 +3817,85 @@ class TestMilvusClientStructArrayElementHybridSearch(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
         data = self._generate_data(nb=nb, dim=dim)
+        self.insert(client, collection_name, data)
+        self.flush(client, collection_name)
+        self.load_collection(client, collection_name)
+        return data
+
+    def _setup_multi_struct_collection(self, client, collection_name, metric_type="COSINE"):
+        """Create a compact deterministic collection for hybrid scope/group-by checks."""
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
+        schema.add_field(field_name="doc_int", datatype=DataType.INT64)
+        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim)
+
+        struct_a = client.create_struct_field_schema()
+        struct_a.add_field("embedding", DataType.FLOAT_VECTOR, dim=default_dim)
+        struct_a.add_field("embedding_alt", DataType.FLOAT_VECTOR, dim=default_dim)
+        struct_a.add_field("tag", DataType.VARCHAR, max_length=32)
+        schema.add_field(
+            "structA",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=struct_a,
+            max_capacity=10,
+        )
+
+        struct_b = client.create_struct_field_schema()
+        struct_b.add_field("embedding", DataType.FLOAT_VECTOR, dim=default_dim)
+        struct_b.add_field("tag", DataType.VARCHAR, max_length=32)
+        schema.add_field(
+            "structB",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=struct_b,
+            max_capacity=10,
+        )
+
+        index_params = client.prepare_index_params()
+        for field_name in ["normal_vector", "structA[embedding]", "structA[embedding_alt]", "structB[embedding]"]:
+            index_params.add_index(
+                field_name=field_name,
+                index_type="HNSW",
+                metric_type=metric_type,
+                params={"M": 8, "efConstruction": 64},
+            )
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+
+        def _struct_a(scores):
+            return [
+                {
+                    "embedding": self._cosine_vector(score),
+                    "embedding_alt": self._cosine_vector(score),
+                    "tag": f"a_{idx}",
+                }
+                for idx, score in enumerate(scores)
+            ]
+
+        def _struct_b(scores):
+            return [
+                {
+                    "embedding": self._cosine_vector(score),
+                    "tag": f"b_{idx}",
+                }
+                for idx, score in enumerate(scores)
+            ]
+
+        score_rows = [
+            (1, [0.99, 0.10, 0.10]),
+            (2, [0.90, 0.89, 0.88]),
+            (3, [0.70, 0.69, 0.68]),
+        ]
+        data = [
+            {
+                "id": row_id,
+                "doc_int": row_id * 10,
+                "normal_vector": self._cosine_vector(0.20 + row_id * 0.01),
+                "structA": _struct_a(scores),
+                "structB": _struct_b(scores),
+            }
+            for row_id, scores in score_rows
+        ]
         self.insert(client, collection_name, data)
         self.flush(client, collection_name)
         self.load_collection(client, collection_name)
@@ -3691,7 +3944,673 @@ class TestMilvusClientStructArrayElementHybridSearch(TestMilvusClientV2Base):
             output_fields=["id"],
         )
         assert check
-        assert len(results) > 0
+        assert len(results[0]) > 0
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("index_type", ["FLAT", "HNSW"])
+    def test_hybrid_element_filter_collapse_correctness(self, index_type):
+        """
+        target: verify element-level hybrid search collapses element hits to row hits before rerank
+        method: insert more than 3000 deterministic rows, compute brute-force ground truth,
+                and run with both FLAT and HNSW
+        expected: hybrid result matches element-collapse + normal-vector RRF ground truth
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_hyb_collapse_{index_type.lower()}")
+        query_vector = self._cosine_vector(1.0)
+        search_params = {"metric_type": "COSINE"}
+        if index_type == "HNSW":
+            search_params["params"] = HNSW_SEARCH_PARAMS
+
+        schema = self._create_schema(client)
+        index_params = client.prepare_index_params()
+        normal_index = {
+            "field_name": "normal_vector",
+            "index_type": index_type,
+            "metric_type": "COSINE",
+        }
+        struct_index = {
+            "field_name": "structA[embedding]",
+            "index_type": index_type,
+            "metric_type": "COSINE",
+        }
+        if index_type == "HNSW":
+            normal_index["params"] = INDEX_PARAMS
+            struct_index["params"] = INDEX_PARAMS
+        index_params.add_index(**normal_index)
+        index_params.add_index(**struct_index)
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+
+        sub_limit = 20
+        hybrid_limit = 10
+        rrf_k = 60
+        data = self._generate_hybrid_collapse_data()
+        assert len(data) > default_nb
+        self.insert(client, collection_name, data)
+        self.flush(client, collection_name)
+        self.load_collection(client, collection_name)
+        element_gt, normal_gt, hybrid_gt = self._gt_hybrid_collapse_rrf(
+            data,
+            query_vector,
+            sub_limit,
+            hybrid_limit,
+            rrf_k,
+        )
+
+        element_results, check = self.search(
+            client,
+            collection_name,
+            data=[query_vector],
+            anns_field="structA[embedding]",
+            search_params=search_params,
+            filter='element_filter(structA, $[color] == "keep")',
+            limit=sub_limit,
+            output_fields=["id"],
+        )
+        assert check
+        element_ids = [hit["id"] for hit in element_results[0]]
+        element_gt_ids = [hit["id"] for hit in element_gt]
+        assert len(element_gt_ids) > len(set(element_gt_ids))
+        assert element_ids == element_gt_ids
+
+        normal_results, check = self.search(
+            client,
+            collection_name,
+            data=[query_vector],
+            anns_field="normal_vector",
+            search_params=search_params,
+            limit=sub_limit,
+            output_fields=["id"],
+        )
+        assert check
+        assert [hit["id"] for hit in normal_results[0]] == [hit["id"] for hit in normal_gt]
+
+        req1 = AnnSearchRequest(
+            **{
+                "data": [query_vector],
+                "anns_field": "structA[embedding]",
+                "param": search_params,
+                "limit": sub_limit,
+                "expr": 'element_filter(structA, $[color] == "keep")',
+            }
+        )
+        req2 = AnnSearchRequest(
+            **{
+                "data": [query_vector],
+                "anns_field": "normal_vector",
+                "param": search_params,
+                "limit": sub_limit,
+            }
+        )
+
+        results, check = self.hybrid_search(
+            client,
+            collection_name,
+            [req1, req2],
+            ranker=RRFRanker(rrf_k),
+            limit=hybrid_limit,
+            output_fields=["id"],
+        )
+        assert check
+        hits = results[0]
+        ids = [hit["id"] for hit in hits]
+        expected_ids = [hit["id"] for hit in hybrid_gt]
+        assert ids == expected_ids
+        assert len(ids) == len(set(ids)), f"hybrid result should be row-level, got duplicate ids: {ids}"
+        assert all("offset" not in hit for hit in hits), f"hybrid result should not expose element offsets: {hits}"
+
+        expected_scores = {hit["id"]: hit["score"] for hit in hybrid_gt}
+        for hit in hits:
+            assert abs(hit["distance"] - expected_scores[hit["id"]]) < 1e-5, (
+                f"unexpected RRF score for id={hit['id']}: got {hit['distance']}, expected {expected_scores[hit['id']]}"
+            )
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_hybrid_element_scope_topk_sum_changes_collapse_order(self):
+        """
+        target: element_scope collapse controls row-level hybrid collapse
+        method: compare default max collapse with topk_sum across two different struct arrays
+        expected: default max ranks row 1 first; topk_sum ranks row 2 first
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_hyb_scope_topk_sum")
+        self._setup_multi_struct_collection(client, collection_name)
+        query_vector = self._cosine_vector(1.0)
+
+        def _req(field_name, params=None):
+            search_params = {"metric_type": "COSINE", "params": {"ef": 64}}
+            if params is not None:
+                search_params["params"].update(params)
+            return AnnSearchRequest(
+                **{
+                    "data": [query_vector],
+                    "anns_field": field_name,
+                    "param": search_params,
+                    "limit": 9,
+                }
+            )
+
+        default_results, check = self.hybrid_search(
+            client,
+            collection_name,
+            [_req("structA[embedding]"), _req("structB[embedding]")],
+            ranker=RRFRanker(),
+            limit=3,
+            output_fields=["id"],
+        )
+        assert check
+        default_ids = [hit["id"] for hit in default_results[0]]
+        assert default_ids[0] == 1, f"default max collapse should rank row 1 first, got {default_ids}"
+
+        element_scope = {"element_scope": {"collapse": {"strategy": "topk_sum", "topk": 3}}}
+        scoped_results, check = self.hybrid_search(
+            client,
+            collection_name,
+            [_req("structA[embedding]", element_scope), _req("structB[embedding]", element_scope)],
+            ranker=RRFRanker(),
+            limit=3,
+            output_fields=["id"],
+        )
+        assert check
+        scoped_ids = [hit["id"] for hit in scoped_results[0]]
+        assert scoped_ids[0] == 2, f"topk_sum collapse should rank row 2 first, got {scoped_ids}"
+        assert scoped_ids != default_ids
+        assert len(scoped_ids) == len(set(scoped_ids)), f"row-level hybrid should not duplicate ids: {scoped_ids}"
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_hybrid_element_scope_all_collapse_strategies_exact(self):
+        """
+        target: verify all Struct element collapse strategies with exact row order and RRF score
+        method: use identical deterministic vectors in two parent Struct fields, run nq=2 hybrid search for
+            max, sum, avg, topk_sum, and topk_avg, including topk larger than the row element count
+        expected: each strategy produces its calculated row order, exact RRF scores, and no element offset leakage
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_hyb_scope_all")
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
+
+        for struct_name in ("structA", "structB"):
+            struct_schema = client.create_struct_field_schema()
+            struct_schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=default_dim)
+            schema.add_field(
+                struct_name,
+                datatype=DataType.ARRAY,
+                element_type=DataType.STRUCT,
+                struct_schema=struct_schema,
+                max_capacity=4,
+            )
+
+        index_params = client.prepare_index_params()
+        for field_name in ("structA[embedding]", "structB[embedding]"):
+            index_params.add_index(
+                field_name=field_name,
+                index_type="HNSW",
+                metric_type="COSINE",
+                params={"M": 8, "efConstruction": 64},
+            )
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+
+        scores_by_id = {
+            1: [0.99, 0.10, 0.10, 0.10],
+            2: [0.80, 0.80, 0.80, 0.80],
+            3: [0.90, 0.90],
+            4: [0.95],
+        }
+        rows = []
+        for row_id, scores in scores_by_id.items():
+            values = [{"embedding": self._cosine_vector(score)} for score in scores]
+            rows.append({"id": row_id, "structA": values, "structB": values})
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        self.load_collection(client, collection_name)
+
+        expected_orders = {
+            "max": [1, 4, 3, 2],
+            "sum": [2, 3, 1, 4],
+            "avg": [4, 3, 2, 1],
+            "topk_sum": [3, 2, 1, 4],
+            "topk_avg": [4, 3, 2, 1],
+            "topk_sum_all": [2, 3, 1, 4],
+            "topk_avg_all": [4, 3, 2, 1],
+        }
+        cases = [
+            ("max", {"strategy": "max"}),
+            ("sum", {"strategy": "sum"}),
+            ("avg", {"strategy": "avg"}),
+            ("topk_sum", {"strategy": "topk_sum", "topk": 2}),
+            ("topk_avg", {"strategy": "topk_avg", "topk": 2}),
+            ("topk_sum_all", {"strategy": "topk_sum", "topk": 10}),
+            ("topk_avg_all", {"strategy": "topk_avg", "topk": 10}),
+        ]
+        query_vector = self._cosine_vector(1.0)
+        rrf_k = 60
+
+        for case_name, collapse in cases:
+            requests = [
+                AnnSearchRequest(
+                    **{
+                        "data": [query_vector, query_vector],
+                        "anns_field": field_name,
+                        "param": {
+                            "metric_type": "COSINE",
+                            "params": {"ef": 64, "element_scope": {"collapse": collapse}},
+                        },
+                        "limit": sum(len(values) for values in scores_by_id.values()),
+                    }
+                )
+                for field_name in ("structA[embedding]", "structB[embedding]")
+            ]
+            results, check = self.hybrid_search(
+                client,
+                collection_name,
+                requests,
+                ranker=RRFRanker(rrf_k),
+                limit=len(scores_by_id),
+                output_fields=["id"],
+            )
+            assert check
+            assert len(results) == 2
+            for hits in results:
+                assert [hit["id"] for hit in hits] == expected_orders[case_name]
+                assert all("offset" not in hit for hit in hits)
+                for rank, hit in enumerate(hits):
+                    assert hit["distance"] == pytest.approx(2 / (rrf_k + rank + 1), abs=1e-6)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_hybrid_element_scope_validation_matrix(self):
+        """
+        target: verify element collapse strategy and topk validation
+        method: submit missing, zero, extraneous, and unsupported collapse parameters
+        expected: every invalid configuration is rejected with its source-defined parameter error
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_hyb_scope_validation")
+        self._setup_multi_struct_collection(client, collection_name)
+        query_vector = self._cosine_vector(1.0)
+        invalid_cases = [
+            ({"strategy": "topk_sum"}, "element_scope.collapse.topk is required for strategy topk_sum"),
+            ({"strategy": "topk_avg", "topk": 0}, "element_scope.collapse.topk must be positive"),
+            ({"strategy": "max", "topk": 1}, "element_scope.collapse.topk is only valid for topk strategies"),
+            ({"strategy": "median"}, "unsupported element_scope.collapse.strategy: median"),
+        ]
+
+        for collapse, expected_message in invalid_cases:
+            req1 = AnnSearchRequest(
+                **{
+                    "data": [query_vector],
+                    "anns_field": "structA[embedding]",
+                    "param": {
+                        "metric_type": "COSINE",
+                        "params": {"ef": 64, "element_scope": {"collapse": collapse}},
+                    },
+                    "limit": 9,
+                }
+            )
+            req2 = AnnSearchRequest(
+                **{
+                    "data": [query_vector],
+                    "anns_field": "structB[embedding]",
+                    "param": {"metric_type": "COSINE", "params": {"ef": 64}},
+                    "limit": 9,
+                }
+            )
+            self.hybrid_search(
+                client,
+                collection_name,
+                [req1, req2],
+                ranker=RRFRanker(),
+                limit=3,
+                check_task=CheckTasks.err_res,
+                check_items={ct.err_code: 1100, ct.err_msg: expected_message},
+            )
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize(
+        "ranker",
+        [RRFRanker(60), WeightedRanker(0.5, 0.5)],
+        ids=["rrf", "weighted"],
+    )
+    def test_hybrid_same_struct_string_pk_element_identity_exact(self, ranker):
+        """
+        target: verify same-Struct hybrid preserves string primary key and element offset identity
+        method: rerank two identical vector sub-fields with RRF and WeightedRanker
+        expected: both rankers return the exact ordered (string PK, offset) sequence without row collapse
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_hyb_string_pk")
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field(field_name="id", datatype=DataType.VARCHAR, max_length=32, is_primary=True)
+        struct_schema = client.create_struct_field_schema()
+        struct_schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=default_dim)
+        struct_schema.add_field("embedding_alt", DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(
+            "structA",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=struct_schema,
+            max_capacity=4,
+        )
+        index_params = client.prepare_index_params()
+        for field_name in ("structA[embedding]", "structA[embedding_alt]"):
+            index_params.add_index(
+                field_name=field_name,
+                index_type="HNSW",
+                metric_type="COSINE",
+                params={"M": 8, "efConstruction": 64},
+            )
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+
+        score_rows = {"doc/a": [0.99, 0.10], "doc:b": [0.90, 0.80]}
+        rows = []
+        for row_id, scores in score_rows.items():
+            rows.append(
+                {
+                    "id": row_id,
+                    "structA": [
+                        {
+                            "embedding": self._cosine_vector(score),
+                            "embedding_alt": self._cosine_vector(score),
+                        }
+                        for score in scores
+                    ],
+                }
+            )
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        self.load_collection(client, collection_name)
+
+        query_vector = self._cosine_vector(1.0)
+        requests = [
+            AnnSearchRequest(
+                **{
+                    "data": [query_vector],
+                    "anns_field": field_name,
+                    "param": {"metric_type": "COSINE", "params": {"ef": 64}},
+                    "limit": 4,
+                }
+            )
+            for field_name in ("structA[embedding]", "structA[embedding_alt]")
+        ]
+        results, check = self.hybrid_search(
+            client,
+            collection_name,
+            requests,
+            ranker=ranker,
+            limit=4,
+            output_fields=["id"],
+        )
+        assert check
+        assert [(hit["id"], hit["offset"]) for hit in results[0]] == [
+            ("doc/a", 0),
+            ("doc:b", 0),
+            ("doc:b", 1),
+            ("doc/a", 1),
+        ]
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_hybrid_element_level_range_same_struct_supported(self):
+        """
+        target: same-struct element-level hybrid supports range search
+        method: apply COSINE radius to both same-struct sub-searches
+        expected: hybrid succeeds and only rows with in-range elements are returned
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_hyb_range_same_struct")
+        self._setup_multi_struct_collection(client, collection_name)
+        query_vector = self._cosine_vector(1.0)
+        range_params = {"ef": 64, "radius": 0.85}
+
+        req1 = AnnSearchRequest(
+            **{
+                "data": [query_vector],
+                "anns_field": "structA[embedding]",
+                "param": {"metric_type": "COSINE", "params": range_params},
+                "limit": 9,
+            }
+        )
+        req2 = AnnSearchRequest(
+            **{
+                "data": [query_vector],
+                "anns_field": "structA[embedding_alt]",
+                "param": {"metric_type": "COSINE", "params": range_params},
+                "limit": 9,
+            }
+        )
+
+        results, check = self.hybrid_search(
+            client,
+            collection_name,
+            [req1, req2],
+            ranker=RRFRanker(),
+            limit=4,
+            output_fields=["id"],
+        )
+        assert check
+        ids = [hit["id"] for hit in results[0]]
+        assert ids, "hybrid range search should return in-range element hits"
+        assert set(ids).issubset({1, 2}), f"range should filter out row 3, got ids={ids}"
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_hybrid_same_struct_element_group_by_pk_supported(self):
+        """
+        target: same-struct element-level hybrid supports group_by on primary key
+        method: hybrid search structA[embedding] + structA[embedding_alt] with group_by_field="id"
+        expected: request succeeds and each primary key appears at most once
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_hyb_gb_pk")
+        self._setup_multi_struct_collection(client, collection_name)
+        query_vector = self._cosine_vector(1.0)
+        req1 = AnnSearchRequest(
+            **{
+                "data": [query_vector],
+                "anns_field": "structA[embedding]",
+                "param": {"metric_type": "COSINE"},
+                "limit": 9,
+            }
+        )
+        req2 = AnnSearchRequest(
+            **{
+                "data": [query_vector],
+                "anns_field": "structA[embedding_alt]",
+                "param": {"metric_type": "COSINE"},
+                "limit": 9,
+            }
+        )
+
+        results, check = self.hybrid_search(
+            client,
+            collection_name,
+            [req1, req2],
+            ranker=RRFRanker(),
+            limit=3,
+            output_fields=["id"],
+            group_by_field="id",
+        )
+        assert check
+        ids = [hit["id"] for hit in results[0]]
+        assert ids[0] == 1
+        assert len(ids) == len(set(ids)), f"group_by primary key should deduplicate ids: {ids}"
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_hybrid_same_struct_element_scope_not_supported(self):
+        """
+        target: element_scope is rejected for same-struct element-level hybrid
+        method: pass element_scope to one same-struct sub-search
+        expected: parameter error
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_hyb_scope_same_struct")
+        self._setup_multi_struct_collection(client, collection_name)
+        query_vector = self._cosine_vector(1.0)
+        req1 = AnnSearchRequest(
+            **{
+                "data": [query_vector],
+                "anns_field": "structA[embedding]",
+                "param": {
+                    "metric_type": "COSINE",
+                    "params": {"element_scope": {"collapse": {"strategy": "max"}}},
+                },
+                "limit": 9,
+            }
+        )
+        req2 = AnnSearchRequest(
+            **{
+                "data": [query_vector],
+                "anns_field": "structA[embedding_alt]",
+                "param": {"metric_type": "COSINE"},
+                "limit": 9,
+            }
+        )
+        error = {
+            ct.err_code: 1100,
+            ct.err_msg: "element_scope is not allowed for same-struct element-level hybrid search",
+        }
+        self.hybrid_search(
+            client,
+            collection_name,
+            [req1, req2],
+            ranker=RRFRanker(),
+            limit=3,
+            output_fields=["id"],
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_hybrid_element_scope_sum_l2_not_supported(self):
+        """
+        target: sum-family element_scope is limited to positively related metrics
+        method: use topk_sum collapse with L2 element-level hybrid
+        expected: parameter error
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_hyb_scope_l2")
+        self._setup_multi_struct_collection(client, collection_name, metric_type="L2")
+        query_vector = self._cosine_vector(1.0)
+        req1 = AnnSearchRequest(
+            **{
+                "data": [query_vector],
+                "anns_field": "structA[embedding]",
+                "param": {
+                    "metric_type": "L2",
+                    "params": {"element_scope": {"collapse": {"strategy": "topk_sum", "topk": 2}}},
+                },
+                "limit": 9,
+            }
+        )
+        req2 = AnnSearchRequest(
+            **{
+                "data": [query_vector],
+                "anns_field": "structB[embedding]",
+                "param": {"metric_type": "L2"},
+                "limit": 9,
+            }
+        )
+        error = {ct.err_code: 1100, ct.err_msg: "element_scope.collapse.strategy topk_sum is only supported"}
+        self.hybrid_search(
+            client,
+            collection_name,
+            [req1, req2],
+            ranker=RRFRanker(),
+            limit=3,
+            output_fields=["id"],
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_hybrid_group_by_non_pk_not_supported_for_same_struct_element(self):
+        """
+        target: same-struct element-level hybrid only allows group_by on primary key
+        method: group_by_field uses doc_int
+        expected: parameter error
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_hyb_gb_nonpk")
+        self._setup_multi_struct_collection(client, collection_name)
+        query_vector = self._cosine_vector(1.0)
+        req1 = AnnSearchRequest(
+            **{
+                "data": [query_vector],
+                "anns_field": "structA[embedding]",
+                "param": {"metric_type": "COSINE"},
+                "limit": 9,
+            }
+        )
+        req2 = AnnSearchRequest(
+            **{
+                "data": [query_vector],
+                "anns_field": "structA[embedding_alt]",
+                "param": {"metric_type": "COSINE"},
+                "limit": 9,
+            }
+        )
+        error = {
+            ct.err_code: 1100,
+            ct.err_msg: "only group by primary key is supported for same-struct element-level vector array fields",
+        }
+        self.hybrid_search(
+            client,
+            collection_name,
+            [req1, req2],
+            ranker=RRFRanker(),
+            limit=3,
+            output_fields=["id"],
+            group_by_field="doc_int",
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize(
+        "req_fields",
+        [
+            ("structA[embedding]", "normal_vector"),
+            ("structA[embedding]", "structB[embedding]"),
+        ],
+        ids=["mixed-normal-vector", "different-structs"],
+    )
+    def test_hybrid_group_by_non_same_struct_element_not_supported(self, req_fields):
+        """
+        target: element-level hybrid group_by requires all sub-searches from the same struct array
+        method: mix element-level search with normal vector or a different struct array
+        expected: parameter error
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_hyb_gb_scope")
+        data = self._setup_multi_struct_collection(client, collection_name)
+        query_vector = self._cosine_vector(1.0)
+        reqs = []
+        for field_name in req_fields:
+            vector = data[0]["normal_vector"] if field_name == "normal_vector" else query_vector
+            reqs.append(
+                AnnSearchRequest(
+                    **{
+                        "data": [vector],
+                        "anns_field": field_name,
+                        "param": {"metric_type": "COSINE"},
+                        "limit": 9,
+                    }
+                )
+            )
+
+        error = {
+            ct.err_code: 1100,
+            ct.err_msg: "group by search is only supported for same-struct element-level vector array fields",
+        }
+        self.hybrid_search(
+            client,
+            collection_name,
+            reqs,
+            ranker=RRFRanker(),
+            limit=3,
+            output_fields=["id"],
+            group_by_field="id",
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_hybrid_element_filter_with_weighted_ranker(self):
@@ -3732,7 +4651,7 @@ class TestMilvusClientStructArrayElementHybridSearch(TestMilvusClientV2Base):
             output_fields=["id"],
         )
         assert check
-        assert len(results) > 0
+        assert len(results[0]) > 0
 
     # ---- L2 tests ----
 
@@ -3777,7 +4696,7 @@ class TestMilvusClientStructArrayElementHybridSearch(TestMilvusClientV2Base):
             output_fields=["id"],
         )
         assert check
-        assert len(results) > 0
+        assert len(results[0]) > 0
 
 
 class TestMilvusClientStructArrayElementSearchInvalid(TestMilvusClientV2Base):
@@ -4423,6 +5342,97 @@ class TestMilvusClientStructArrayElementSearchInvalid(TestMilvusClientV2Base):
             all_data.extend(growing)
         self.load_collection(client, collection_name)
         return all_data
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_hybrid_embedding_list_range_not_supported(self):
+        """
+        target: hybrid range search is rejected for embedding-list-level struct vector sub-search
+        method: use EmbeddingList data with radius in one hybrid sub-search
+        expected: parameter error from hybrid validation
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_hyb_emblist_radius")
+        data = self._create_embedding_list_collection(client, collection_name)
+
+        tensor = EmbeddingList()
+        tensor.add(_seed_vector(7))
+        tensor.add(_seed_vector(8))
+        req1 = AnnSearchRequest(
+            **{
+                "data": [tensor],
+                "anns_field": "structA[embedding]",
+                "param": {"metric_type": "MAX_SIM_COSINE", "params": {"radius": 0.1}},
+                "limit": 10,
+            }
+        )
+        req2 = AnnSearchRequest(
+            **{
+                "data": [data[0]["normal_vector"]],
+                "anns_field": "normal_vector",
+                "param": {"metric_type": "COSINE"},
+                "limit": 10,
+            }
+        )
+        error = {
+            ct.err_code: 1100,
+            ct.err_msg: "range search is not supported for vector array (embedding-list) fields in hybrid search",
+        }
+        self.hybrid_search(
+            client,
+            collection_name,
+            [req1, req2],
+            ranker=RRFRanker(),
+            limit=10,
+            output_fields=["id"],
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_hybrid_embedding_list_group_by_not_supported(self):
+        """
+        target: hybrid group_by is rejected for embedding-list-level struct vector sub-search
+        method: use EmbeddingList data and group_by_field="id" in hybrid search
+        expected: parameter error from hybrid validation
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_hyb_emblist_gb")
+        data = self._create_embedding_list_collection(client, collection_name)
+
+        tensor = EmbeddingList()
+        tensor.add(_seed_vector(3))
+        tensor.add(_seed_vector(4))
+        req1 = AnnSearchRequest(
+            **{
+                "data": [tensor],
+                "anns_field": "structA[embedding]",
+                "param": {"metric_type": "MAX_SIM_COSINE"},
+                "limit": 10,
+            }
+        )
+        req2 = AnnSearchRequest(
+            **{
+                "data": [data[0]["normal_vector"]],
+                "anns_field": "normal_vector",
+                "param": {"metric_type": "COSINE"},
+                "limit": 10,
+            }
+        )
+        error = {
+            ct.err_code: 1100,
+            ct.err_msg: "group by search is not supported for vector array (embedding-list) fields in hybrid search",
+        }
+        self.hybrid_search(
+            client,
+            collection_name,
+            [req1, req2],
+            ranker=RRFRanker(),
+            limit=10,
+            output_fields=["id"],
+            group_by_field="id",
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_element_search_invalid_embedding_list_with_radius(self):
@@ -6168,21 +7178,15 @@ class TestMilvusClientStructArrayElementQueryIterator(TestMilvusClientV2Base):
     @pytest.mark.parametrize(
         "match_type,match_expr,predicate",
         [
-            pytest.param(
+            (
                 "ANY",
                 'match_any(structA, $[color] == "Red")',
                 lambda sa: any(e["color"] == "Red" for e in sa),
-                marks=pytest.mark.skip(
-                    reason="milvus-io/milvus#49755: query_iterator + match_any can trigger ASan abort"
-                ),
             ),
-            pytest.param(
+            (
                 "ALL",
                 "match_all(structA, $[int_val] >= 0)",
                 lambda sa: all(e["int_val"] >= 0 for e in sa),
-                marks=pytest.mark.skip(
-                    reason="milvus-io/milvus#49693: query_iterator full StructArray output can fail"
-                ),
             ),
         ],
     )
@@ -6198,10 +7202,6 @@ class TestMilvusClientStructArrayElementQueryIterator(TestMilvusClientV2Base):
 
         self._assert_match_query_and_iterator(client, collection_name, match_expr, predicate)
 
-    @pytest.mark.skip(
-        reason="milvus-io/milvus#49693: full StructArray output fails after release/load "
-        "when ArrayOfVector uses HNSW+COSINE index raw-data retrieve path"
-    )
     @pytest.mark.tags(CaseLabel.L1)
     def test_query_iterator_full_struct_output_after_reload(self):
         """
@@ -7058,6 +8058,148 @@ class TestMilvusClientStructArrayElementGroupBySearch(TestMilvusClientV2Base):
         )
         assert check
         assert len(results) > 0
+
+
+# ==================== Regression: Element-Level Search With Function Rerank ====================
+
+
+class TestMilvusClientStructArrayElementSearchFunctionRerank(TestMilvusClientV2Base):
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_function_rerank_preserves_element_identity_and_fields(self):
+        """
+        target: ordinary Struct Array element-level search with FunctionScore L2 rerank
+        method: make two elements from the same PK rank first, then apply a decay reranker
+        expected: both element hits survive rerank and their offsets remain aligned with Struct Array fields
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_function_rerank")
+        dim = 4
+
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
+        schema.add_field(field_name="doc_int", datatype=DataType.INT64)
+
+        struct_schema = client.create_struct_field_schema()
+        struct_schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=dim)
+        struct_schema.add_field("int_val", DataType.INT64)
+        struct_schema.add_field("str_val", DataType.VARCHAR, max_length=128)
+        schema.add_field(
+            "structA",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=struct_schema,
+            max_capacity=4,
+        )
+
+        index_params = client.prepare_index_params()
+        index_params.add_index(
+            field_name="structA[embedding]",
+            index_type="FLAT",
+            metric_type="COSINE",
+        )
+        _, check = self.create_collection(
+            client,
+            collection_name,
+            schema=schema,
+            index_params=index_params,
+        )
+        assert check
+
+        rows = [
+            {
+                "id": 0,
+                "doc_int": 0,
+                "structA": [
+                    {
+                        "embedding": [1.0, 0.0, 0.0, 0.0],
+                        "int_val": 0,
+                        "str_val": "row_0_elem_0",
+                    },
+                    {
+                        "embedding": [0.99, 0.01, 0.0, 0.0],
+                        "int_val": 1,
+                        "str_val": "row_0_elem_1",
+                    },
+                ],
+            },
+            {
+                "id": 1,
+                "doc_int": 10,
+                "structA": [
+                    {
+                        "embedding": [0.8, 0.6, 0.0, 0.0],
+                        "int_val": 100,
+                        "str_val": "row_1_elem_0",
+                    },
+                    {
+                        "embedding": [0.6, 0.8, 0.0, 0.0],
+                        "int_val": 101,
+                        "str_val": "row_1_elem_1",
+                    },
+                ],
+            },
+            {
+                "id": 2,
+                "doc_int": 20,
+                "structA": [
+                    {
+                        "embedding": [0.2, 0.98, 0.0, 0.0],
+                        "int_val": 200,
+                        "str_val": "row_2_elem_0",
+                    },
+                    {
+                        "embedding": [0.0, 1.0, 0.0, 0.0],
+                        "int_val": 201,
+                        "str_val": "row_2_elem_1",
+                    },
+                ],
+            },
+        ]
+        _, check = self.insert(client, collection_name, rows)
+        assert check
+        self.flush(client, collection_name)
+        self.load_collection(client, collection_name)
+
+        decay_reranker = Function(
+            name="element_identity_decay",
+            input_field_names=["doc_int"],
+            function_type=FunctionType.RERANK,
+            params={
+                "reranker": "decay",
+                "function": "gauss",
+                "origin": 0,
+                "offset": 0,
+                "decay": 0.5,
+                "scale": 1000,
+            },
+        )
+        results, check = self.search(
+            client,
+            collection_name,
+            data=[[1.0, 0.0, 0.0, 0.0]],
+            anns_field="structA[embedding]",
+            search_params={"metric_type": "COSINE"},
+            limit=4,
+            output_fields=["id", "doc_int", "structA"],
+            ranker=decay_reranker,
+        )
+        assert check
+        assert len(results) == 1
+        assert len(results[0]) == 4
+
+        hits = results[0]
+        element_keys = [(hit["id"], hit["offset"]) for hit in hits]
+        assert element_keys[:2] == [(0, 0), (0, 1)]
+        assert len(element_keys) == len(set(element_keys))
+
+        expected_doc_int = {row["id"]: row["doc_int"] for row in rows}
+        for hit in hits:
+            row_id = hit["id"]
+            element_offset = hit["offset"]
+            assert hit["doc_int"] == expected_doc_int[row_id]
+            element = hit["structA"][element_offset]
+            assert element["int_val"] == row_id * 100 + element_offset
+            assert element["str_val"] == f"row_{row_id}_elem_{element_offset}"
 
 
 # ==================== Test Case 9: Element-Level Search Without Filter ====================

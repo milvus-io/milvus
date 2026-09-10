@@ -19,6 +19,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -27,11 +28,16 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	imocks "github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
+	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_broadcaster"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -88,6 +94,47 @@ func TestDDLCallbacksAlterCollectionProperties(t *testing.T) {
 	})
 	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
 
+	// namespace.sharding.enabled is immutable after collection creation.
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Properties:     []*commonpb.KeyValuePair{{Key: common.NamespaceShardingEnabledKey, Value: "true"}},
+	})
+	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
+
+	// namespace.sharding.enabled cannot be deleted after collection creation.
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		DeleteKeys:     []string{common.NamespaceShardingEnabledKey},
+	})
+	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
+
+	// "True" is a valid standard boolean spelling, but rls.enabled itself is
+	// immutable after collection creation.
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Properties:     []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "True"}},
+	})
+	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
+
+	// rls.enabled delete key must use the exact property key casing.
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		DeleteKeys:     []string{"RLS.Enabled"},
+	})
+	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
+
+	// rls.force delete key must use the exact property key casing.
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		DeleteKeys:     []string{"RLS.Force"},
+	})
+	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
+
 	// Alter a database that does not exist should return error.
 	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
 		DbName:         dbName,
@@ -111,6 +158,43 @@ func TestDDLCallbacksAlterCollectionProperties(t *testing.T) {
 	// atler a property of a collection.
 	createCollectionAndAliasForTest(t, ctx, core, dbName, collectionName)
 	assertReplicaNumber(t, ctx, core, dbName, collectionName, 1)
+
+	// RLS can only be enabled when the collection is created.
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Properties:     []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "true"}},
+	})
+	alterErr := merr.CheckRPCCall(resp, err)
+	require.ErrorIs(t, alterErr, merr.ErrParameterInvalid)
+
+	for _, tc := range []struct {
+		name       string
+		properties []*commonpb.KeyValuePair
+		deleteKeys []string
+	}{
+		{
+			name:       "set namespace mode",
+			properties: []*commonpb.KeyValuePair{{Key: common.NamespaceModeKey, Value: common.NamespaceModePartition}},
+		},
+		{
+			name:       "delete namespace mode",
+			deleteKeys: []string{common.NamespaceModeKey},
+		},
+	} {
+		t.Run("reject "+tc.name, func(t *testing.T) {
+			resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+				DbName:         dbName,
+				CollectionName: collectionName,
+				Properties:     tc.properties,
+				DeleteKeys:     tc.deleteKeys,
+			})
+			alterErr := merr.CheckRPCCall(resp, err)
+			require.ErrorIs(t, alterErr, merr.ErrParameterInvalid)
+			require.ErrorContains(t, alterErr, common.NamespaceModeKey)
+		})
+	}
+
 	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
@@ -169,6 +253,90 @@ func TestDDLCallbacksAlterCollectionProperties(t *testing.T) {
 	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
 }
 
+func TestAlterCollectionRejectsReservedMaxFieldIDProperty(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		properties []*commonpb.KeyValuePair
+		deleteKeys []string
+	}{
+		{
+			name:       "alter",
+			properties: []*commonpb.KeyValuePair{{Key: common.MaxFieldIDKey, Value: "999"}},
+		},
+		{
+			name:       "delete",
+			deleteKeys: []string{common.MaxFieldIDKey},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			streaming.SetupNoopWALForTest()
+			defer streaming.SetWALForTest(nil)
+
+			coll := new(DDLCallbacksCollectionFunctionTestSuite).createTestCollection()
+			mockMeta := mockrootcoord.NewIMetaTable(t)
+			mockMeta.EXPECT().GetCollectionByName(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp, mock.Anything).Return(coll, nil).Maybe()
+			core := newTestCore(withHealthyCode(), withMeta(mockMeta), withBroker(newValidMockBroker()))
+
+			mockBroadcaster := mock_broadcaster.NewMockBroadcastAPI(t)
+			mockBroadcaster.EXPECT().Close().Maybe()
+			mockBroadcaster.EXPECT().Broadcast(mock.Anything, mock.Anything).Return(&types.BroadcastAppendResult{}, nil).Maybe()
+			lockMocker := mockey.Mock((*Core).startBroadcastWithAliasOrCollectionLock).Return(mockBroadcaster, nil).Build()
+			defer lockMocker.UnPatch()
+			cacheMocker := mockey.Mock((*Core).getCacheExpireForCollection).Return(nil, nil).Build()
+			defer cacheMocker.UnPatch()
+
+			err := core.broadcastAlterCollectionForAlterCollection(context.Background(), &milvuspb.AlterCollectionRequest{
+				DbName:         "test_db",
+				CollectionName: "test_collection",
+				Properties:     tc.properties,
+				DeleteKeys:     tc.deleteKeys,
+			})
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			require.ErrorContains(t, err, common.MaxFieldIDKey)
+		})
+	}
+}
+
+func TestValidateNamespaceModeImmutable(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		properties []*commonpb.KeyValuePair
+		deleteKeys []string
+	}{
+		{
+			name:       "set namespace mode",
+			properties: []*commonpb.KeyValuePair{{Key: common.NamespaceModeKey, Value: common.NamespaceModePartition}},
+		},
+		{
+			name:       "set namespace mode with wrong case",
+			properties: []*commonpb.KeyValuePair{{Key: "Namespace.Mode", Value: common.NamespaceModePartition}},
+		},
+		{
+			name:       "delete namespace mode",
+			deleteKeys: []string{common.NamespaceModeKey},
+		},
+		{
+			name:       "delete namespace mode with wrong case",
+			deleteKeys: []string{"Namespace.Mode"},
+		},
+	} {
+		t.Run("reject "+tc.name, func(t *testing.T) {
+			err := validateNamespaceModeImmutable(tc.properties, tc.deleteKeys)
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			require.ErrorContains(t, err, common.NamespaceModeKey)
+		})
+	}
+
+	require.NoError(t, validateNamespaceModeImmutable(
+		[]*commonpb.KeyValuePair{{Key: common.CollectionReplicaNumber, Value: "2"}},
+		nil,
+	))
+	require.NoError(t, validateNamespaceModeImmutable(
+		nil,
+		[]string{common.CollectionReplicaNumber},
+	))
+}
+
 func TestDDLCallbacksAlterCollectionV2AckCallback_UpdateLoadConfigRPCError(t *testing.T) {
 	ctx := context.Background()
 
@@ -182,7 +350,11 @@ func TestDDLCallbacksAlterCollectionV2AckCallback_UpdateLoadConfigRPCError(t *te
 		withMeta(meta),
 		withMixCoord(mixc),
 		withValidProxyManager(),
-		withBroker(&mockBroker{}),
+		withBroker(&mockBroker{
+			BroadcastAlteredCollectionFunc: func(ctx context.Context, collectionID int64) error {
+				return nil
+			},
+		}),
 	)
 	cb := &DDLCallback{Core: c}
 
@@ -222,7 +394,11 @@ func TestDDLCallbacksAlterCollectionV2AckCallback_UpdateLoadConfigNonRGNotFoundE
 		withMeta(meta),
 		withMixCoord(mixc),
 		withValidProxyManager(),
-		withBroker(&mockBroker{}),
+		withBroker(&mockBroker{
+			BroadcastAlteredCollectionFunc: func(ctx context.Context, collectionID int64) error {
+				return nil
+			},
+		}),
 	)
 	cb := &DDLCallback{Core: c}
 
@@ -266,7 +442,11 @@ func TestDDLCallbacksAlterCollectionV2AckCallback_StopRetryOnResourceGroupNotFou
 		withMeta(meta),
 		withMixCoord(mixc),
 		withValidProxyManager(),
-		withBroker(&mockBroker{}),
+		withBroker(&mockBroker{
+			BroadcastAlteredCollectionFunc: func(ctx context.Context, collectionID int64) error {
+				return nil
+			},
+		}),
 	)
 	cb := &DDLCallback{Core: c}
 
@@ -349,8 +529,9 @@ func TestDDLCallbacksAlterCollectionV2AckCallback_BroadcastAlteredCollectionErro
 	meta := mockrootcoord.NewIMetaTable(t)
 	meta.EXPECT().AlterCollection(mock.Anything, mock.Anything).Return(nil)
 
+	// UpdateLoadConfig is never reached: the schema broadcast now runs first
+	// (before the bound-index apply and load-config update) and fails here.
 	mixc := imocks.NewMixCoord(t)
-	mixc.On("UpdateLoadConfig", mock.Anything, mock.Anything).Return(merr.Success(), nil)
 
 	c := newTestCore(
 		withMeta(meta),
@@ -431,13 +612,77 @@ func TestDDLCallbacksAlterCollectionPropertiesForDynamicField(t *testing.T) {
 	assertDynamicSchema(t, ctx, core, dbName, collectionName, true)
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 1)
 
-	// disable dynamic schema property should return error.
+	// disable dynamic schema property should succeed.
 	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Properties:     []*commonpb.KeyValuePair{{Key: common.EnableDynamicSchemaKey, Value: "false"}},
 	})
-	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	assertDynamicSchema(t, ctx, core, dbName, collectionName, false)
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 2) // drop dynamic field should increment schema version.
+
+	// disable dynamic schema property should be idempotent.
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Properties:     []*commonpb.KeyValuePair{{Key: common.EnableDynamicSchemaKey, Value: "false"}},
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	assertDynamicSchema(t, ctx, core, dbName, collectionName, false)
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 2)
+
+	// re-enable dynamic schema property should succeed with a new field ID.
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Properties:     []*commonpb.KeyValuePair{{Key: common.EnableDynamicSchemaKey, Value: "true"}},
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	assertDynamicSchema(t, ctx, core, dbName, collectionName, true)
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 3)
+	// The re-enabled $meta field should have a new FieldID (102, not 101).
+	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	dynamicField := coll.Fields[len(coll.Fields)-1]
+	require.True(t, dynamicField.IsDynamic)
+	require.Equal(t, int64(102), dynamicField.FieldID)
+	assertMaxFieldIDProperty(t, ctx, core, dbName, collectionName, 102)
+}
+
+func TestDDLCallbacksAlterCollectionPropertiesDisableDynamicFieldWaitsForSchemaDropReady(t *testing.T) {
+	core := initStreamingSystemAndCore(t)
+	ctx := context.Background()
+	dbName := "testDB" + funcutil.RandomString(10)
+	collectionName := "testCollection" + funcutil.RandomString(10)
+
+	createCollectionAndAliasForTest(t, ctx, core, dbName, collectionName)
+	resp, err := core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Properties:     []*commonpb.KeyValuePair{{Key: common.EnableDynamicSchemaKey, Value: "true"}},
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	assertDynamicSchema(t, ctx, core, dbName, collectionName, true)
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 1)
+
+	barrierErr := errors.New("proxy version barrier")
+	b := mock_balancer.NewMockBalancer(t)
+	b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
+	b.EXPECT().WaitUntilSchemaDropReady(mock.Anything).Return(barrierErr).Once()
+	b.EXPECT().Close().Return().Maybe()
+	balance.ResetBalancer()
+	balance.Register(b)
+
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Properties:     []*commonpb.KeyValuePair{{Key: common.EnableDynamicSchemaKey, Value: "false"}},
+	})
+	require.Error(t, merr.CheckRPCCall(resp, err))
+	require.Contains(t, resp.GetDetail(), "failed to wait until schema drop ready")
+	assertDynamicSchema(t, ctx, core, dbName, collectionName, true)
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 1)
 }
 
 func TestDDLCallbacksAlterCollectionProperties_TTLFieldShouldBroadcastSchema(t *testing.T) {
@@ -581,10 +826,10 @@ func TestDDLCallbacksAlterCollectionProperties_AcceptExternalSourceSpec(t *testi
 	testSchema := &schemapb.CollectionSchema{
 		Name: collectionName,
 		Fields: []*schemapb.FieldSchema{
-			{Name: "field1", DataType: schemapb.DataType_Int64},
+			{Name: "field1", DataType: schemapb.DataType_Int64, ExternalField: "field1"},
 		},
 		ExternalSource: "s3://bucket/old/",
-		ExternalSpec:   `{"format":"parquet"}`,
+		ExternalSpec:   `{"format":"parquet","extfs":{"anonymous":"true","region":"us-east-1","cloud_provider":"aws"}}`,
 	}
 	schemaBytes, err := proto.Marshal(testSchema)
 	require.NoError(t, err)
@@ -601,12 +846,12 @@ func TestDDLCallbacksAlterCollectionProperties_AcceptExternalSourceSpec(t *testi
 		DbName: dbName, CollectionName: collectionName,
 		Properties: []*commonpb.KeyValuePair{
 			{Key: common.CollectionExternalSource, Value: "s3://bucket/new/"},
-			{Key: common.CollectionExternalSpec, Value: `{"format":"parquet"}`},
+			{Key: common.CollectionExternalSpec, Value: `{"format":"parquet","extfs":{"anonymous":"true","region":"us-east-1","cloud_provider":"aws"}}`},
 		},
 	})
 	require.NoError(t, merr.CheckRPCCall(resp, err))
 	assertExternalSource(t, ctx, core, dbName, collectionName, "s3://bucket/new/")
-	assertExternalSpec(t, ctx, core, dbName, collectionName, `{"format":"parquet"}`)
+	assertExternalSpec(t, ctx, core, dbName, collectionName, `{"format":"parquet","extfs":{"anonymous":"true","region":"us-east-1","cloud_provider":"aws"}}`)
 }
 
 // Regression for #49335: refresh override path may carry source-only updates
@@ -625,10 +870,10 @@ func TestDDLCallbacksAlterCollectionProperties_PartialExternalUpdatePreservesOth
 	testSchema := &schemapb.CollectionSchema{
 		Name: collectionName,
 		Fields: []*schemapb.FieldSchema{
-			{Name: "field1", DataType: schemapb.DataType_Int64},
+			{Name: "field1", DataType: schemapb.DataType_Int64, ExternalField: "field1"},
 		},
 		ExternalSource: "s3://bucket/old/",
-		ExternalSpec:   `{"format":"parquet","extfs":{"region":"us-east-1"}}`,
+		ExternalSpec:   `{"format":"parquet","extfs":{"anonymous":"true","region":"us-east-1","cloud_provider":"aws"}}`,
 	}
 	schemaBytes, err := proto.Marshal(testSchema)
 	require.NoError(t, err)
@@ -649,7 +894,7 @@ func TestDDLCallbacksAlterCollectionProperties_PartialExternalUpdatePreservesOth
 	})
 	require.NoError(t, merr.CheckRPCCall(resp, err))
 	assertExternalSource(t, ctx, core, dbName, collectionName, "s3://bucket/new/")
-	assertExternalSpec(t, ctx, core, dbName, collectionName, `{"format":"parquet","extfs":{"region":"us-east-1"}}`)
+	assertExternalSpec(t, ctx, core, dbName, collectionName, `{"format":"parquet","extfs":{"anonymous":"true","region":"us-east-1","cloud_provider":"aws"}}`)
 }
 
 // Regression for #49335: alter that mixes external_source with a regular
@@ -668,10 +913,10 @@ func TestDDLCallbacksAlterCollectionProperties_MixedExternalAndRegular(t *testin
 	testSchema := &schemapb.CollectionSchema{
 		Name: collectionName,
 		Fields: []*schemapb.FieldSchema{
-			{Name: "field1", DataType: schemapb.DataType_Int64},
+			{Name: "field1", DataType: schemapb.DataType_Int64, ExternalField: "field1"},
 		},
 		ExternalSource: "s3://bucket/old/",
-		ExternalSpec:   `{"format":"parquet"}`,
+		ExternalSpec:   `{"format":"parquet","extfs":{"anonymous":"true","region":"us-east-1","cloud_provider":"aws"}}`,
 	}
 	schemaBytes, err := proto.Marshal(testSchema)
 	require.NoError(t, err)
@@ -696,7 +941,7 @@ func TestDDLCallbacksAlterCollectionProperties_MixedExternalAndRegular(t *testin
 	assertReplicaNumber(t, ctx, core, dbName, collectionName, 2)
 }
 
-func createCollectionForTest(t *testing.T, ctx context.Context, core *Core, dbName string, collectionName string) {
+func createCollectionForTest(t *testing.T, ctx context.Context, core *Core, dbName string, collectionName string, properties ...*commonpb.KeyValuePair) {
 	resp, err := core.CreateDatabase(ctx, &milvuspb.CreateDatabaseRequest{
 		DbName: dbName,
 	})
@@ -715,9 +960,11 @@ func createCollectionForTest(t *testing.T, ctx context.Context, core *Core, dbNa
 	schemaBytes, err := proto.Marshal(testSchema)
 	require.NoError(t, err)
 	resp, err = core.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
-		DbName:           dbName,
-		CollectionName:   collectionName,
-		Properties:       []*commonpb.KeyValuePair{{Key: common.CollectionReplicaNumber, Value: "1"}},
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Properties: append([]*commonpb.KeyValuePair{
+			{Key: common.CollectionReplicaNumber, Value: "1"},
+		}, properties...),
 		Schema:           schemaBytes,
 		ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
 	})
@@ -791,10 +1038,12 @@ func assertDynamicSchema(t *testing.T, ctx context.Context, core *Core, dbName s
 	require.NoError(t, err)
 	require.Equal(t, dynamicSchema, coll.EnableDynamicField)
 	if !dynamicSchema {
+		// Verify no dynamic field exists.
+		for _, field := range coll.Fields {
+			require.False(t, field.IsDynamic, "expected no dynamic field after disabling")
+		}
 		return
 	}
-	require.Len(t, coll.Fields, 4)
 	require.True(t, coll.Fields[len(coll.Fields)-1].IsDynamic)
 	require.Equal(t, coll.Fields[len(coll.Fields)-1].DataType, schemapb.DataType_JSON)
-	require.Equal(t, coll.Fields[len(coll.Fields)-1].FieldID, int64(101))
 }

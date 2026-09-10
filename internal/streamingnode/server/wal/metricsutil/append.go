@@ -1,12 +1,11 @@
 package metricsutil
 
 import (
+	"context"
 	"fmt"
 	"time"
 
-	"go.uber.org/zap"
-
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 )
@@ -71,21 +70,21 @@ func (m *AppendMetrics) StartAppendGuard() *AppendMetricsGuard {
 }
 
 // IntoLogFields convert the metrics to log fields.
-func (m *AppendMetrics) IntoLogFields() []zap.Field {
-	fields := []zap.Field{
-		log.FieldMessage(m.msg),
-		zap.Duration("duration", m.appendDuration),
-		zap.Duration("implDuration", m.implAppendDuration),
+func (m *AppendMetrics) IntoLogFields() []mlog.Field {
+	fields := []mlog.Field{
+		mlog.FieldMessage(m.msg),
+		mlog.Duration("duration", m.appendDuration),
+		mlog.Duration("implDuration", m.implAppendDuration),
 	}
 
 	if m.err != nil {
-		fields = append(fields, zap.Error(m.err))
+		fields = append(fields, mlog.Err(m.err))
 	} else {
-		fields = append(fields, zap.String("messageID", m.result.MessageID.String()))
-		fields = append(fields, zap.String("lcMessageID", m.result.LastConfirmedMessageID.String()))
-		fields = append(fields, zap.Uint64("timetick", m.result.TimeTick))
+		fields = append(fields, mlog.String("messageID", m.result.MessageID.String()))
+		fields = append(fields, mlog.String("lcMessageID", m.result.LastConfirmedMessageID.String()))
+		fields = append(fields, mlog.Uint64("timetick", m.result.TimeTick))
 		if m.result.TxnCtx != nil {
-			fields = append(fields, zap.Int64("txnID", int64(m.result.TxnCtx.TxnID)))
+			fields = append(fields, mlog.Int64("txnID", int64(m.result.TxnCtx.TxnID)))
 		}
 	}
 	loggedInterceptorCount := 0
@@ -96,7 +95,7 @@ L:
 				continue
 			}
 			if loggedInterceptorCount <= maxLogged {
-				fields = append(fields, zap.Stringer(fmt.Sprintf("%s_%d", name, i), im))
+				fields = append(fields, mlog.Stringer(fmt.Sprintf("%s_%d", name, i), im))
 				loggedInterceptorCount++
 			}
 			if loggedInterceptorCount >= maxLogged {
@@ -130,10 +129,10 @@ func (m *AppendMetrics) RangeOverInterceptors(f func(name string, ims []*Interce
 }
 
 // Done push the metrics.
-func (m *AppendMetrics) Done(result *types.AppendResult, err error) {
+func (m *AppendMetrics) Done(ctx context.Context, result *types.AppendResult, err error) {
 	m.err = err
 	m.result = result
-	m.wm.done(m)
+	m.wm.done(ctx, m)
 }
 
 // InterceptorCollectGuard is used to collect the metrics of interceptor.

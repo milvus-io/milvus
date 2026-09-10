@@ -13,10 +13,12 @@
 
 #include <memory>
 #include <cstdlib>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "common/FieldData.h"
+#include "common/QueryResult.h"
 #include "common/type_c.h"
 #include "common/Types.h"
 #include "index/Index.h"
@@ -152,19 +154,16 @@ ReverseDataFromIndex(const index::IndexBase* index,
                      int64_t count,
                      const FieldMeta& field_meta);
 void
-LoadArrowReaderForJsonStatsFromRemote(
-    const std::vector<std::string>& remote_files,
-    std::shared_ptr<ArrowReaderChannel> channel);
-
-void
 LoadArrowReaderFromRemote(const std::vector<std::string>& remote_files,
                           std::shared_ptr<ArrowReaderChannel> channel,
                           milvus::proto::common::LoadPriority priority);
 
 void
-LoadFieldDatasFromRemote(const std::vector<std::string>& remote_files,
-                         FieldDataChannelPtr channel,
-                         milvus::proto::common::LoadPriority priority);
+LoadFieldDatasFromRemote(
+    const std::vector<std::string>& remote_files,
+    FieldDataChannelPtr channel,
+    milvus::proto::common::LoadPriority priority,
+    std::optional<proto::schema::TypeSchema> array_type = std::nullopt);
 /**
  * Returns an index pointing to the first element in the range [first, last) such that `value < element` is true
  * (i.e. that is strictly greater than value), or last if no such element is found.
@@ -275,5 +274,15 @@ GetEffectiveSearchTopk(const SearchInfo& search_info) {
                         search_info.search_topk_ratio_ * search_info.topk_)),
                     lower_bound);
 }
+
+// SortEqualScoresByPks normalizes the in-segment ordering by sorting
+// equal-score runs by PK ASC, in place. The C++ search engine returns rows in
+// score DESC order but with undefined PK order within equal-score runs; the
+// Go reduce path requires a deterministic order so PK dedup picks the same
+// row across runs. Operates on seg_offsets_, distances_, primary_keys_, and
+// (if present) element_indices_ and composite_group_by_values_, using an in-place
+// cyclic permutation.
+void
+SortEqualScoresByPks(SearchResult* search_result);
 
 }  // namespace milvus::segcore

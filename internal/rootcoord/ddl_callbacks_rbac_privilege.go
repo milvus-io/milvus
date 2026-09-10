@@ -20,13 +20,12 @@ import (
 	"context"
 	"strings"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func (c *Core) broadcastOperatePrivilege(ctx context.Context, in *milvuspb.OperatePrivilegeRequest) error {
@@ -37,9 +36,13 @@ func (c *Core) broadcastOperatePrivilege(ctx context.Context, in *milvuspb.Opera
 	defer broadcaster.Close()
 
 	if err := c.operatePrivilegeCommonCheck(ctx, in); err != nil {
-		return errors.Wrap(err, "failed to operate privilege common check")
+		return merr.Wrap(err, "failed to operate privilege common check")
 	}
 	privName := in.Entity.Grantor.Privilege.Name
+	if in.Type == milvuspb.OperatePrivilegeType_Grant && isDeprecatedExprPrivilege(privName) {
+		return merr.WrapErrParameterInvalidMsg(
+			"privilege %q is deprecated: the /expr endpoint it granted access to has been removed", privName)
+	}
 	switch in.Version {
 	case "v2":
 		if err := c.isValidPrivilegeV2(ctx, privName); err != nil {
@@ -79,10 +82,22 @@ func (c *Core) broadcastOperatePrivilege(ctx context.Context, in *milvuspb.Opera
 			WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 			MustBuildBroadcast()
 	default:
-		return errors.New("invalid operate privilege type")
+		return merr.WrapErrParameterInvalidMsg("invalid operate privilege type")
 	}
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err
+}
+
+// isDeprecatedExprPrivilege reports whether name refers to the Expr privilege,
+// in either its API form ("Expr") or its metastore form ("PrivilegeExpr").
+//
+// The /expr endpoint that this privilege guarded has been removed, so granting
+// it confers nothing. New grants are rejected, but the name stays valid
+// everywhere else so that grants created on releases which shipped the endpoint
+// can still be listed and revoked -- grant and revoke otherwise share one
+// validation path, and rejecting both would strand them.
+func isDeprecatedExprPrivilege(name string) bool {
+	return name == util.PrivilegeExpr || util.PrivilegeNameForMetastore(name) == util.PrivilegeExpr
 }
 
 func (c *DDLCallback) alterPrivilegeV2AckCallback(ctx context.Context, result message.BroadcastResultAlterPrivilegeMessageV2) error {
@@ -102,7 +117,7 @@ func (c *Core) broadcastCreatePrivilegeGroup(ctx context.Context, in *milvuspb.C
 	defer broadcaster.Close()
 
 	if err := c.meta.CheckIfPrivilegeGroupCreatable(ctx, in); err != nil {
-		return errors.Wrap(err, "failed to check if privilege group creatable")
+		return merr.Wrap(err, "failed to check if privilege group creatable")
 	}
 
 	msg := message.NewAlterPrivilegeGroupMessageBuilderV2().
@@ -126,7 +141,7 @@ func (c *Core) broadcastOperatePrivilegeGroup(ctx context.Context, in *milvuspb.
 	defer broadcaster.Close()
 
 	if err := c.meta.CheckIfPrivilegeGroupAlterable(ctx, in); err != nil {
-		return errors.Wrap(err, "failed to check if privilege group alterable")
+		return merr.Wrap(err, "failed to check if privilege group alterable")
 	}
 
 	var msg message.BroadcastMutableMessage
@@ -154,7 +169,7 @@ func (c *Core) broadcastOperatePrivilegeGroup(ctx context.Context, in *milvuspb.
 			WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 			MustBuildBroadcast()
 	default:
-		return errors.New("invalid operate privilege group type")
+		return merr.WrapErrParameterInvalidMsg("invalid operate privilege group type")
 	}
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err
@@ -175,7 +190,7 @@ func (c *Core) broadcastDropPrivilegeGroup(ctx context.Context, in *milvuspb.Dro
 	defer broadcaster.Close()
 
 	if err := c.meta.CheckIfPrivilegeGroupDropable(ctx, in); err != nil {
-		return errors.Wrap(err, "failed to check if privilege group dropable")
+		return merr.Wrap(err, "failed to check if privilege group dropable")
 	}
 
 	msg := message.NewDropPrivilegeGroupMessageBuilderV2().

@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "common/Types.h"
+#include "common/OpContext.h"
 #include "fmt/core.h"
 #include "index/IndexStats.h"
 #include "index/Meta.h"
@@ -146,6 +147,15 @@ ScalarIndex<int64_t>::BuildWithRawDataForUT(size_t n,
 
 template <>
 void
+ScalarIndex<uint64_t>::BuildWithRawDataForUT(size_t n,
+                                             const void* values,
+                                             const Config& config) {
+    auto data = reinterpret_cast<uint64_t*>(const_cast<void*>(values));
+    Build(n, data);
+}
+
+template <>
+void
 ScalarIndex<float>::BuildWithRawDataForUT(size_t n,
                                           const void* values,
                                           const Config& config) {
@@ -211,7 +221,7 @@ ScalarIndex<T>::UploadUnified(const Config& config) {
 
 template <typename T>
 void
-ScalarIndex<T>::LoadUnified(const Config& config) {
+ScalarIndex<T>::LoadUnified(const Config& config, milvus::OpContext* op_ctx) {
     AssertInfo(
         file_manager_ != nullptr,
         "file_manager_ is null, LoadUnified requires a valid file manager");
@@ -241,8 +251,18 @@ ScalarIndex<T>::LoadUnified(const Config& config) {
     auto collection_id =
         GetValueFromConfig<int64_t>(config, COLLECTION_ID).value_or(0);
 
+    auto load_priority =
+        GetValueFromConfig<milvus::proto::common::LoadPriority>(
+            config, milvus::LOAD_PRIORITY)
+            .value_or(milvus::proto::common::LoadPriority::HIGH);
+    auto cancellation_token =
+        op_ctx ? op_ctx->cancellation_token : folly::CancellationToken();
     auto reader =
-        storage::IndexEntryReader::Open(input, file_size, collection_id);
+        storage::IndexEntryReader::Open(input,
+                                        file_size,
+                                        collection_id,
+                                        milvus::PriorityForLoad(load_priority),
+                                        cancellation_token);
     AssertInfo(reader != nullptr, "failed to create IndexEntryReader");
 
     LoadEntries(*reader, config);
@@ -255,6 +275,7 @@ template class ScalarIndex<int8_t>;
 template class ScalarIndex<int16_t>;
 template class ScalarIndex<int32_t>;
 template class ScalarIndex<int64_t>;
+template class ScalarIndex<uint64_t>;
 template class ScalarIndex<float>;
 template class ScalarIndex<double>;
 template class ScalarIndex<std::string>;

@@ -124,7 +124,18 @@ struct Range2Compare {
 };
 
 // The following operation is Milvus-specific
-enum class ArithOpType { Add, Sub, Mul, Div, Mod };
+enum class ArithOpType {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+    BitAnd,
+    BitOr,
+    BitXor,
+    Shl,
+    Shr
+};
 
 template <typename T>
 using ArithHighPrecisionType =
@@ -149,6 +160,22 @@ struct ArithCompareOperator {
             return CompareOperator<CmpOp>::compare(left / right, value);
         } else if constexpr (AOp == ArithOpType::Mod) {
             return CompareOperator<CmpOp>::compare(long(left) % long(right),
+                                                   value);
+        } else if constexpr (AOp == ArithOpType::BitAnd) {
+            return CompareOperator<CmpOp>::compare(long(left) & long(right),
+                                                   value);
+        } else if constexpr (AOp == ArithOpType::BitOr) {
+            return CompareOperator<CmpOp>::compare(long(left) | long(right),
+                                                   value);
+        } else if constexpr (AOp == ArithOpType::BitXor) {
+            return CompareOperator<CmpOp>::compare(long(left) ^ long(right),
+                                                   value);
+        } else if constexpr (AOp == ArithOpType::Shl) {
+            // shift amount is validated to be within [0, 64) at plan time
+            return CompareOperator<CmpOp>::compare(long(left) << long(right),
+                                                   value);
+        } else if constexpr (AOp == ArithOpType::Shr) {
+            return CompareOperator<CmpOp>::compare(long(left) >> long(right),
                                                    value);
         } else {
             // unimplemented

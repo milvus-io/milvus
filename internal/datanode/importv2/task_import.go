@@ -25,7 +25,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -33,7 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
@@ -67,7 +66,9 @@ func NewImportTask(req *datapb.ImportRequest,
 	if importutilv2.IsBackup(req.GetOptions()) {
 		UnsetAutoID(req.GetSchema())
 	}
-	// Allocator for autoIDs and logIDs.
+	// Local allocator for binlog logIDs (and the legacy autoID fallback when a file
+	// carries no primary-allocated PK range). Deterministic cross-cluster autoID PKs
+	// are derived per file from ImportFile.PreAllocatedAutoIds, not from this allocator.
 	alloc := allocator.NewLocalAllocator(req.GetIDRange().GetBegin(), req.GetIDRange().GetEnd())
 	task := &ImportTask{
 		ImportTaskV2: &datapb.ImportTaskV2{
@@ -163,11 +164,11 @@ func (t *ImportTask) Clone() Task {
 
 func (t *ImportTask) Execute() []*conc.Future[any] {
 	bufferSize := t.GetBufferSize()
-	log.Info("start to import", WrapLogFields(t,
-		zap.Int64("bufferSize", bufferSize),
-		zap.Int64("taskSlot", t.GetSlots()),
-		zap.Any("files", t.req.GetFiles()),
-		zap.Any("schema", t.GetSchema()),
+	mlog.Info(t.ctx, "start to import", WrapLogFields(t,
+		mlog.Int64("bufferSize", bufferSize),
+		mlog.Int64("taskSlot", t.GetSlots()),
+		mlog.Any("files", t.req.GetFiles()),
+		mlog.FieldSchema(t.GetSchema()),
 	)...)
 	t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress))
 
@@ -176,22 +177,37 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 	fn := func(file *internalpb.ImportFile) error {
 		reader, err := importutilv2.NewReader(t.ctx, t.cm, t.GetSchema(), file, req.GetOptions(), int(bufferSize), t.req.GetStorageConfig())
 		if err != nil {
-			log.Warn("new reader failed", WrapLogFields(t, zap.String("file", file.String()), zap.Error(err))...)
+			mlog.Warn(t.ctx, "new reader failed", WrapLogFields(t, mlog.String("file", file.String()), mlog.Err(err))...)
 			reason := fmt.Sprintf("error: %v, file: %s", err, file.String())
 			t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason))
 			return err
 		}
 		defer reader.Close()
+		// Deterministic autoID: each file owns a disjoint PK range replicated from
+		// the primary. A nil cursor (no range) falls back to the local allocator.
+		var cur *pkCursor
+		if r := file.GetPreAllocatedAutoIds(); r.GetEnd() > r.GetBegin() {
+			cur = &pkCursor{begin: r.GetBegin(), end: r.GetEnd(), next: r.GetBegin()}
+		} else if pkField, err := typeutil.GetPrimaryFieldSchema(t.GetSchema()); err == nil &&
+			pkField.GetAutoID() && !importutilv2.IsBackup(req.GetOptions()) && !importutilv2.IsL0Import(req.GetOptions()) {
+			// The coordinator assigns a range to every autoID import, so an absent one
+			// means this job predates the mechanism or the coordinator is older than
+			// this datanode. Keys then come from the local allocator, which diverges
+			// from the source cluster if the job is replicated -- log it so the
+			// rolling-upgrade window is greppable instead of silent.
+			mlog.Warn(t.ctx, "no PK range on an autoID import file, falling back to the local allocator",
+				WrapLogFields(t, mlog.String("file", file.String()))...)
+		}
 		start := time.Now()
-		err = t.importFile(reader)
+		err = t.importFile(reader, cur)
 		if err != nil {
-			log.Warn("do import failed", WrapLogFields(t, zap.String("file", file.String()), zap.Error(err))...)
+			mlog.Warn(t.ctx, "do import failed", WrapLogFields(t, mlog.String("file", file.String()), mlog.Err(err))...)
 			reason := fmt.Sprintf("error: %v, file: %s", err, file.String())
 			t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason))
 			return err
 		}
-		log.Info("import file done", WrapLogFields(t, zap.Strings("files", file.GetPaths()),
-			zap.Duration("dur", time.Since(start)))...)
+		mlog.Info(t.ctx, "import file done", WrapLogFields(t, mlog.Strings("files", file.GetPaths()),
+			mlog.Duration("dur", time.Since(start)))...)
 		return nil
 	}
 
@@ -213,7 +229,7 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 	return futures
 }
 
-func (t *ImportTask) importFile(reader importutilv2.Reader) error {
+func (t *ImportTask) importFile(reader importutilv2.Reader, cur *pkCursor) error {
 	syncFutures := make([]*conc.Future[struct{}], 0)
 	syncTasks := make([]syncmgr.Task, 0)
 	for {
@@ -226,10 +242,16 @@ func (t *ImportTask) importFile(reader importutilv2.Reader) error {
 		}
 		rowNum, _ := GetInsertDataRowCount(data, t.GetSchema())
 		if rowNum == 0 {
-			log.Info("0 row was imported, the data may have been deleted", WrapLogFields(t)...)
+			mlog.Info(t.ctx, "0 row was imported, the data may have been deleted", WrapLogFields(t)...)
 			continue
 		}
-		err = AppendSystemFieldsData(t, data, rowNum)
+		// the same check has been done in preimport task, double-check here since
+		// the actual import task re-reads the files
+		err = CheckStructArrayConsistency(t.GetSchema(), data)
+		if err != nil {
+			return err
+		}
+		err = appendSystemFieldsDataWithCursor(t, data, rowNum, cur)
 		if err != nil {
 			return err
 		}
@@ -244,7 +266,7 @@ func (t *ImportTask) importFile(reader importutilv2.Reader) error {
 		if !importutilv2.IsBackup(t.req.GetOptions()) {
 			err = RunEmbeddingFunction(t, data)
 			if err != nil {
-				log.Warn("run embedding function failed", WrapLogFields(t, zap.Error(err))...)
+				mlog.Warn(t.ctx, "run embedding function failed", WrapLogFields(t, mlog.Err(err))...)
 				return err
 			}
 		}
@@ -269,13 +291,13 @@ func (t *ImportTask) importFile(reader importutilv2.Reader) error {
 			return err
 		}
 		t.manager.Update(t.GetTaskID(), UpdateSegmentInfo(segmentInfo))
-		log.Info("sync import data done", WrapLogFields(t, zap.Any("segmentInfo", segmentInfo))...)
+		mlog.Info(t.ctx, "sync import data done", WrapLogFields(t, mlog.Any("segmentInfo", segmentInfo))...)
 	}
 	return nil
 }
 
 func (t *ImportTask) sync(hashedData HashedData) ([]*conc.Future[struct{}], []syncmgr.Task, error) {
-	log.Ctx(context.TODO()).Info("start to sync import data", WrapLogFields(t)...)
+	mlog.Info(t.ctx, "start to sync import data", WrapLogFields(t)...)
 	futures := make([]*conc.Future[struct{}], 0)
 	syncTasks := make([]syncmgr.Task, 0)
 	for channelIdx, datas := range hashedData {
@@ -306,7 +328,7 @@ func (t *ImportTask) sync(hashedData HashedData) ([]*conc.Future[struct{}], []sy
 			}
 			future, err := t.syncMgr.SyncDataWithChunkManager(t.ctx, syncTask, t.cm)
 			if err != nil {
-				log.Ctx(context.TODO()).Error("sync data failed", WrapLogFields(t, zap.Error(err))...)
+				mlog.Error(context.TODO(), "sync data failed", WrapLogFields(t, mlog.Err(err))...)
 				return nil, nil, err
 			}
 			futures = append(futures, future)

@@ -49,11 +49,14 @@ class PhyNullExpr : public SegmentExpr {
                       batch_size,
                       consistency_level),
           expr_(expr) {
-        DetermineExecPath();
+        // DetermineExecPath();
     }
 
     void
     Eval(EvalCtx& context, VectorPtr& result) override;
+
+    void
+    DetermineExecPath() override;
 
     std::string
     ToString() const override {

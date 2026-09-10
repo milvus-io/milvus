@@ -17,11 +17,10 @@
 package util
 
 import (
+	"context"
 	"sync"
 
-	"go.uber.org/zap"
-
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/ratelimitutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -46,7 +45,7 @@ func initGlobalRateCollector() {
 		var err error
 		rateCol, err = newRateCollector()
 		if err != nil {
-			log.Warn("DataNode server init rateCollector failed", zap.Error(err))
+			mlog.Warn(context.TODO(), "DataNode server init rateCollector failed", mlog.Err(err))
 			panic(err)
 		}
 		rateCol.Register(metricsinfo.InsertConsumeThroughput)

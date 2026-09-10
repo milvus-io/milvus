@@ -19,6 +19,7 @@ package storage
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"math/rand"
@@ -32,16 +33,23 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/apache/arrow/go/v17/parquet/file"
 	"github.com/apache/arrow/go/v17/parquet/pqarrow"
+	"github.com/bytedance/mockey"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestBinlogDeserializeReader(t *testing.T) {
@@ -135,11 +143,735 @@ func TestBinlogStreamWriter(t *testing.T) {
 		ok := rr.Next()
 		assert.True(t, ok)
 		rec := rr.Record()
-		defer rec.Release()
 		assert.Equal(t, int64(size), rec.NumRows())
 		ok = rr.Next()
 		assert.False(t, ok)
 	})
+}
+
+func TestSingleFieldRecordWriterMemoryExpansionRatio(t *testing.T) {
+	array := func(element *schemapb.TypeSchema) *schemapb.TypeSchema {
+		return &schemapb.TypeSchema{
+			Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: element},
+		}
+	}
+	leaf := func(dataType schemapb.DataType) *schemapb.TypeSchema {
+		return &schemapb.TypeSchema{
+			Kind: &schemapb.TypeSchema_LeafType{LeafType: dataType},
+		}
+	}
+
+	tests := []struct {
+		name          string
+		field         *schemapb.FieldSchema
+		expectedRatio int
+	}{
+		{
+			name: "legacy int32 array",
+			field: &schemapb.FieldSchema{
+				FieldID:     1,
+				DataType:    schemapb.DataType_Array,
+				ElementType: schemapb.DataType_Int32,
+			},
+			expectedRatio: 4,
+		},
+		{
+			name: "nested int32 array",
+			field: &schemapb.FieldSchema{
+				FieldID:     1,
+				DataType:    schemapb.DataType_Array,
+				ElementType: schemapb.DataType_Array,
+				TypeSchema:  array(array(leaf(schemapb.DataType_Int32))),
+			},
+			expectedRatio: 4,
+		},
+		{
+			name: "deeply nested int64 array",
+			field: &schemapb.FieldSchema{
+				FieldID:     1,
+				DataType:    schemapb.DataType_Array,
+				ElementType: schemapb.DataType_Array,
+				TypeSchema: array(array(array(
+					leaf(schemapb.DataType_Int64),
+				))),
+			},
+			expectedRatio: 8,
+		},
+		{
+			name: "nested float array",
+			field: &schemapb.FieldSchema{
+				FieldID:     1,
+				DataType:    schemapb.DataType_Array,
+				ElementType: schemapb.DataType_Array,
+				TypeSchema:  array(array(leaf(schemapb.DataType_Float))),
+			},
+			expectedRatio: 1,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var buffer bytes.Buffer
+			writer, err := newSingleFieldRecordWriter(test.field, &buffer)
+			require.NoError(t, err)
+			require.Equal(t, test.expectedRatio, writer.memoryExpansionRatio)
+			require.NoError(t, writer.Close())
+		})
+	}
+}
+
+func TestRecordToInsertData(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "text", DataType: schemapb.DataType_VarChar},
+			{FieldID: 101, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+		},
+	}
+	arrowSchema := arrow.NewSchema([]arrow.Field{{Name: "text_col", Type: arrow.BinaryTypes.String}}, nil)
+	builder := array.NewRecordBuilder(memory.DefaultAllocator, arrowSchema)
+	defer builder.Release()
+	builder.Field(0).(*array.StringBuilder).AppendValues([]string{"a", "b"}, nil)
+	arrowRecord := builder.NewRecord()
+
+	record := NewSimpleArrowRecord(arrowRecord, map[FieldID]int{100: 0})
+	defer record.Release()
+	insertData, err := RecordToInsertData(record, schema, typeutil.NewSet[int64](100))
+	require.NoError(t, err)
+	require.Equal(t, 2, insertData.Data[100].RowNum())
+	require.Equal(t, 0, insertData.Data[101].RowNum())
+	require.Equal(t, []string{"a", "b"}, insertData.Data[100].(*StringFieldData).Data)
+
+	arrowRecord.Retain()
+	missingRecord := NewSimpleArrowRecord(arrowRecord, map[FieldID]int{999: 0})
+	defer missingRecord.Release()
+	_, err = RecordToInsertData(missingRecord, schema, typeutil.NewSet[int64](100))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "required field text")
+}
+
+type recordToInsertSparseRecord struct {
+	arr arrow.Array
+}
+
+func (r *recordToInsertSparseRecord) Column(fieldID FieldID) arrow.Array {
+	if fieldID == 100 {
+		return r.arr
+	}
+	return nil
+}
+
+func (r *recordToInsertSparseRecord) Len() int {
+	return r.arr.Len()
+}
+
+func (r *recordToInsertSparseRecord) Release() {
+	r.arr.Release()
+}
+
+func (r *recordToInsertSparseRecord) Retain() {
+	r.arr.Retain()
+}
+
+func TestRecordToInsertDataBranches(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "text", DataType: schemapb.DataType_VarChar},
+		},
+	}
+
+	t.Run("invalid schema", func(t *testing.T) {
+		_, err := RecordToInsertData(nil, nil, nil)
+		require.Error(t, err)
+	})
+
+	t.Run("nil and empty record", func(t *testing.T) {
+		insertData, err := RecordToInsertData(nil, schema, typeutil.NewSet[int64](100))
+		require.NoError(t, err)
+		require.Equal(t, 0, insertData.Data[100].RowNum())
+
+		arrowSchema := arrow.NewSchema([]arrow.Field{{Name: "text", Type: arrow.BinaryTypes.String}}, nil)
+		builder := array.NewRecordBuilder(memory.DefaultAllocator, arrowSchema)
+		defer builder.Release()
+		arrowRecord := builder.NewRecord()
+		record := NewSimpleArrowRecord(arrowRecord, map[FieldID]int{100: 0})
+		defer record.Release()
+
+		insertData, err = RecordToInsertData(record, schema, typeutil.NewSet[int64](100))
+		require.NoError(t, err)
+		require.Equal(t, 0, insertData.Data[100].RowNum())
+	})
+
+	t.Run("row count mismatch", func(t *testing.T) {
+		builder := array.NewStringBuilder(memory.DefaultAllocator)
+		builder.AppendValues([]string{"a", "b"}, nil)
+		first := builder.NewArray()
+		builder.Release()
+
+		builder = array.NewStringBuilder(memory.DefaultAllocator)
+		builder.Append("x")
+		second := builder.NewArray()
+		builder.Release()
+
+		record := &compositeRecord{
+			index: map[FieldID]int16{100: 1},
+			recs:  []arrow.Array{first, second},
+		}
+		defer record.Release()
+
+		_, err := RecordToInsertData(record, schema, typeutil.NewSet[int64](100))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "row count mismatch")
+	})
+
+	t.Run("vector and missing final required field", func(t *testing.T) {
+		vectorSchema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:  100,
+					Name:     "vector",
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "2"},
+					},
+				},
+			},
+		}
+		builder := array.NewBuilder(memory.DefaultAllocator,
+			serdeMap[schemapb.DataType_FloatVector].arrowType(2, schemapb.DataType_None))
+		require.NoError(t, serdeMap[schemapb.DataType_FloatVector].serialize(
+			builder, []float32{1, 2}, schemapb.DataType_None))
+		arr := builder.NewArray()
+		builder.Release()
+		record := &compositeRecord{
+			index: map[FieldID]int16{100: 0},
+			recs:  []arrow.Array{arr},
+		}
+		defer record.Release()
+
+		insertData, err := RecordToInsertData(record, vectorSchema, typeutil.NewSet[int64](100))
+		require.NoError(t, err)
+		require.Equal(t, []float32{1, 2}, insertData.Data[100].(*FloatVectorFieldData).Data)
+
+		_, err = RecordToInsertData(record, vectorSchema, typeutil.NewSet[int64](100, 999))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "required field ID=999")
+	})
+
+	t.Run("array of vector", func(t *testing.T) {
+		vectorSchema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:     100,
+					Name:        "vectors",
+					DataType:    schemapb.DataType_ArrayOfVector,
+					ElementType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "2"},
+					},
+				},
+			},
+		}
+		entry := serdeMap[schemapb.DataType_ArrayOfVector]
+		builder := array.NewBuilder(memory.DefaultAllocator,
+			entry.arrowType(2, schemapb.DataType_FloatVector))
+		require.NoError(t, entry.serialize(builder, &schemapb.VectorField{
+			Dim: 2,
+			Data: &schemapb.VectorField_FloatVector{
+				FloatVector: &schemapb.FloatArray{Data: []float32{1, 2}},
+			},
+		}, schemapb.DataType_FloatVector))
+		arr := builder.NewArray()
+		builder.Release()
+		record := &compositeRecord{
+			index: map[FieldID]int16{100: 0},
+			recs:  []arrow.Array{arr},
+		}
+		defer record.Release()
+
+		insertData, err := RecordToInsertData(record, vectorSchema, typeutil.NewSet[int64](100))
+		require.NoError(t, err)
+		got := insertData.Data[100].(*VectorArrayFieldData).Data
+		require.Len(t, got, 1)
+		require.Equal(t, []float32{1, 2}, got[0].GetFloatVector().GetData())
+	})
+
+	t.Run("deserialize and append errors", func(t *testing.T) {
+		intBuilder := array.NewInt64Builder(memory.DefaultAllocator)
+		intBuilder.Append(1)
+		intArr := intBuilder.NewArray()
+		intBuilder.Release()
+		badTypeRecord := &compositeRecord{
+			index: map[FieldID]int16{100: 0},
+			recs:  []arrow.Array{intArr},
+		}
+		defer badTypeRecord.Release()
+		_, err := RecordToInsertData(badTypeRecord, schema, typeutil.NewSet[int64](100))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "deserialize field text")
+
+		stringBuilder := array.NewStringBuilder(memory.DefaultAllocator)
+		stringBuilder.AppendNull()
+		nullArr := stringBuilder.NewArray()
+		stringBuilder.Release()
+		nullRecord := &compositeRecord{
+			index: map[FieldID]int16{100: 0},
+			recs:  []arrow.Array{nullArr},
+		}
+		defer nullRecord.Release()
+		_, err = RecordToInsertData(nullRecord, schema, typeutil.NewSet[int64](100))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "append field text")
+	})
+
+	t.Run("generic record skips missing optional field", func(t *testing.T) {
+		genericSchema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "text", DataType: schemapb.DataType_VarChar},
+				{FieldID: 101, Name: "optional", DataType: schemapb.DataType_VarChar},
+			},
+		}
+		builder := array.NewStringBuilder(memory.DefaultAllocator)
+		builder.Append("a")
+		record := &recordToInsertSparseRecord{arr: builder.NewArray()}
+		builder.Release()
+		defer record.Release()
+
+		insertData, err := RecordToInsertData(record, genericSchema, typeutil.NewSet[int64](100))
+		require.NoError(t, err)
+		require.Equal(t, []string{"a"}, insertData.Data[100].(*StringFieldData).Data)
+		require.Equal(t, 0, insertData.Data[101].RowNum())
+	})
+
+	t.Run("simple record invalid column", func(t *testing.T) {
+		arrowSchema := arrow.NewSchema([]arrow.Field{{Name: "text", Type: arrow.BinaryTypes.String}}, nil)
+		builder := array.NewRecordBuilder(memory.DefaultAllocator, arrowSchema)
+		defer builder.Release()
+		builder.Field(0).(*array.StringBuilder).Append("a")
+		arrowRecord := builder.NewRecord()
+		record := NewSimpleArrowRecord(arrowRecord, map[FieldID]int{100: 10})
+		defer record.Release()
+
+		insertData, err := RecordToInsertData(record, schema, nil)
+		require.NoError(t, err)
+		require.Equal(t, 0, insertData.Data[100].RowNum())
+	})
+
+	t.Run("insert data initializer misses field", func(t *testing.T) {
+		mockNewInsertData := mockey.Mock(NewInsertDataWithFunctionOutputField).
+			Return(&InsertData{Data: map[FieldID]FieldData{}}, nil).Build()
+		defer mockNewInsertData.UnPatch()
+
+		builder := array.NewStringBuilder(memory.DefaultAllocator)
+		builder.Append("a")
+		arr := builder.NewArray()
+		builder.Release()
+		record := &compositeRecord{
+			index: map[FieldID]int16{100: 0},
+			recs:  []arrow.Array{arr},
+		}
+		defer record.Release()
+
+		_, err := RecordToInsertData(record, schema, typeutil.NewSet[int64](100))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "not initialized")
+	})
+
+	t.Run("serde entry missing", func(t *testing.T) {
+		entry := serdeMap[schemapb.DataType_VarChar]
+		delete(serdeMap, schemapb.DataType_VarChar)
+		defer func() { serdeMap[schemapb.DataType_VarChar] = entry }()
+
+		builder := array.NewStringBuilder(memory.DefaultAllocator)
+		builder.Append("a")
+		arr := builder.NewArray()
+		builder.Release()
+		record := &compositeRecord{
+			index: map[FieldID]int16{100: 0},
+			recs:  []arrow.Array{arr},
+		}
+		defer record.Release()
+
+		_, err := RecordToInsertData(record, schema, typeutil.NewSet[int64](100))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "unsupported data type")
+	})
+}
+
+type fakeManifestRecordReader struct{}
+
+func (fakeManifestRecordReader) Next() (Record, error) {
+	return nil, io.EOF
+}
+
+func (fakeManifestRecordReader) Close() error {
+	return nil
+}
+
+func TestManifestReaderExternalContext(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name:           "external_collection",
+		ExternalSource: "s3://bucket/source",
+		ExternalSpec:   `{"format":"parquet"}`,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "text", DataType: schemapb.DataType_Text, ExternalField: "text_col"},
+			{FieldID: 101, Name: "score", DataType: schemapb.DataType_Int64},
+		},
+	}
+	internalSchema := &schemapb.CollectionSchema{
+		Name: "internal_collection",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "text", DataType: schemapb.DataType_Text},
+			{FieldID: 101, Name: "score", DataType: schemapb.DataType_Int64},
+		},
+	}
+	storageConfig := &indexpb.StorageConfig{RootPath: "root"}
+	externalReader := packed.ExternalReaderContext{
+		CollectionID: 19530,
+		Source:       schema.GetExternalSource(),
+		Spec:         schema.GetExternalSpec(),
+	}
+
+	opts := DefaultReaderOptions()
+	WithExternalReaderContext(externalReader)(opts)
+	require.Equal(t, externalReader, opts.externalReader)
+
+	var capturedManifest string
+	var capturedColumns []string
+	var capturedBufferSize int64
+	var capturedSchema *arrow.Schema
+	var capturedStorageConfig *indexpb.StorageConfig
+	var capturedPluginContext *indexcgopb.StoragePluginContext
+	var capturedExternalReader packed.ExternalReaderContext
+	mock := mockey.Mock(packed.NewFFIPackedReader).To(
+		func(manifestPath string,
+			arrowSchema *arrow.Schema,
+			neededColumns []string,
+			bufferSize int64,
+			cfg *indexpb.StorageConfig,
+			pluginContext *indexcgopb.StoragePluginContext,
+			ext packed.ExternalReaderContext,
+		) (*packed.FFIPackedReader, error) {
+			capturedManifest = manifestPath
+			capturedColumns = append([]string(nil), neededColumns...)
+			capturedBufferSize = bufferSize
+			capturedSchema = arrowSchema
+			capturedStorageConfig = cfg
+			capturedPluginContext = pluginContext
+			capturedExternalReader = ext
+			return &packed.FFIPackedReader{}, nil
+		}).Build()
+	defer mock.UnPatch()
+
+	reader, err := NewManifestReader("manifest-json", schema, 4096, storageConfig, nil,
+		WithExternalReaderContext(externalReader))
+	require.NoError(t, err)
+	require.Equal(t, "manifest-json", capturedManifest)
+	require.Equal(t, []string{"text_col", "101"}, capturedColumns)
+	require.Equal(t, int64(4096), capturedBufferSize)
+	require.Same(t, storageConfig, capturedStorageConfig)
+	require.Nil(t, capturedPluginContext)
+	require.Equal(t, externalReader, capturedExternalReader)
+	require.Equal(t, arrow.BinaryTypes.String, capturedSchema.Field(0).Type)
+	require.Equal(t, map[FieldID]int{100: 0, 101: 1}, reader.field2Col)
+
+	reader, err = NewManifestReader("manifest-json", internalSchema, 4096, storageConfig, nil)
+	require.NoError(t, err)
+	require.Equal(t, arrow.BinaryTypes.Binary, capturedSchema.Field(0).Type)
+	require.Equal(t, []string{"100", "101"}, reader.neededColumns)
+
+	reader, err = NewManifestReader("manifest-json", schema, 4096, storageConfig, nil)
+	require.NoError(t, err)
+	require.Equal(t, arrow.BinaryTypes.String, capturedSchema.Field(0).Type)
+	require.Equal(t, []string{"text_col", "101"}, reader.neededColumns)
+}
+
+func TestDeltalogReaderExternalContext(t *testing.T) {
+	storageConfig := &indexpb.StorageConfig{RootPath: "root"}
+	externalReader := packed.ExternalReaderContext{
+		CollectionID: 19530,
+		Source:       "s3://bucket/source",
+		Spec:         `{"format":"milvus-table"}`,
+	}
+	sourcePath := "s3://bucket/source/_delta/1"
+
+	var capturedPaths []string
+	var capturedBufferSize int64
+	var capturedStorageConfig *indexpb.StorageConfig
+	var capturedPluginContext *indexcgopb.StoragePluginContext
+	var capturedExternalReader packed.ExternalReaderContext
+	mock := mockey.Mock(packed.NewPackedReaderWithExtfs).To(
+		func(paths []string,
+			arrowSchema *arrow.Schema,
+			bufferSize int64,
+			cfg *indexpb.StorageConfig,
+			pluginContext *indexcgopb.StoragePluginContext,
+			ext packed.ExternalReaderContext,
+		) (*packed.PackedReader, error) {
+			require.NotNil(t, arrowSchema)
+			capturedPaths = append([]string(nil), paths...)
+			capturedBufferSize = bufferSize
+			capturedStorageConfig = cfg
+			capturedPluginContext = pluginContext
+			capturedExternalReader = ext
+			return &packed.PackedReader{}, nil
+		}).Build()
+	defer mock.UnPatch()
+
+	reader, err := NewDeltalogReader(
+		context.Background(),
+		schemapb.DataType_Int64,
+		[]string{sourcePath},
+		WithVersion(StorageV3),
+		WithStorageConfig(storageConfig),
+		WithBufferSize(4096),
+		WithExternalReaderContext(externalReader),
+	)
+	require.NoError(t, err)
+	record, err := reader.Next()
+	require.Nil(t, record)
+	require.ErrorIs(t, err, io.EOF)
+	require.Equal(t, []string{sourcePath}, capturedPaths)
+	require.Equal(t, int64(4096), capturedBufferSize)
+	require.Same(t, storageConfig, capturedStorageConfig)
+	require.Nil(t, capturedPluginContext)
+	require.Equal(t, externalReader, capturedExternalReader)
+}
+
+func TestManifestReaderExternalContextErrors(t *testing.T) {
+	storageConfig := &indexpb.StorageConfig{RootPath: "root"}
+	badSchema := &schemapb.CollectionSchema{
+		Name: "bad_schema",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "bad", DataType: schemapb.DataType_None},
+		},
+	}
+	_, err := NewManifestReader("manifest-json", badSchema, 4096, storageConfig, nil)
+	require.Error(t, err)
+
+	duplicateFieldSchema := &schemapb.CollectionSchema{
+		Name: "duplicate_field_schema",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "dup", DataType: schemapb.DataType_Int64},
+			{FieldID: 101, Name: "dup", DataType: schemapb.DataType_Int64},
+		},
+	}
+	_, err = NewManifestReader("manifest-json", duplicateFieldSchema, 4096, storageConfig, nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "duplicated fieldName")
+
+	schema := &schemapb.CollectionSchema{
+		Name: "external_collection",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "text", DataType: schemapb.DataType_Text},
+		},
+	}
+	mock := mockey.Mock(packed.NewFFIPackedReader).Return(nil, fmt.Errorf("ffi open failed")).Build()
+	defer mock.UnPatch()
+
+	_, err = NewManifestReader("manifest-json", schema, 4096, storageConfig, nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "ffi open failed")
+}
+
+func TestNewManifestRecordReaderPassesExternalContext(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name:           "external_collection",
+		ExternalSource: "s3://bucket/source",
+		ExternalSpec:   `{"format":"parquet"}`,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "text", DataType: schemapb.DataType_Text},
+		},
+	}
+	storageConfig := &indexpb.StorageConfig{RootPath: "root"}
+	externalReader := packed.ExternalReaderContext{
+		CollectionID: 19530,
+		Source:       schema.GetExternalSource(),
+		Spec:         schema.GetExternalSpec(),
+	}
+
+	var capturedOptions *rwOptions
+	mock := mockey.Mock(NewRecordReaderFromManifest).To(
+		func(manifest string,
+			schema *schemapb.CollectionSchema,
+			bufferSize int64,
+			cfg *indexpb.StorageConfig,
+			pluginContext *indexcgopb.StoragePluginContext,
+			option ...RwOption,
+		) (RecordReader, error) {
+			capturedOptions = DefaultReaderOptions()
+			for _, opt := range option {
+				opt(capturedOptions)
+			}
+			require.Equal(t, "manifest-json", manifest)
+			require.Equal(t, int64(4096), bufferSize)
+			require.Same(t, storageConfig, cfg)
+			require.Nil(t, pluginContext)
+			return fakeManifestRecordReader{}, nil
+		}).Build()
+	defer mock.UnPatch()
+
+	reader, err := NewManifestRecordReader(context.Background(), "manifest-json", schema,
+		WithVersion(StorageV3),
+		WithStorageConfig(storageConfig),
+		WithBufferSize(4096),
+		WithExternalReaderContext(externalReader),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, reader)
+	require.NotNil(t, capturedOptions)
+	require.Equal(t, StorageV3, capturedOptions.version)
+	require.Equal(t, storageConfig, capturedOptions.storageConfig)
+	require.Equal(t, externalReader, capturedOptions.externalReader)
+}
+
+type fakeUnsafeKeyCipher struct{}
+
+func (fakeUnsafeKeyCipher) Init(params map[string]string) error {
+	return nil
+}
+
+func (fakeUnsafeKeyCipher) GetEncryptor(ezID, collectionID int64) (hook.Encryptor, []byte, error) {
+	return nil, nil, nil
+}
+
+func (fakeUnsafeKeyCipher) GetDecryptor(ezID, collectionID int64, safeKey []byte) (hook.Decryptor, error) {
+	return nil, nil
+}
+
+func (fakeUnsafeKeyCipher) GetUnsafeKey(ezID, collectionID int64) []byte {
+	return []byte("unsafe-key")
+}
+
+func TestNewManifestRecordReaderBranches(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name: "external_collection",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "text", DataType: schemapb.DataType_Text},
+		},
+	}
+	_, err := NewManifestRecordReader(context.Background(), "manifest-json", schema)
+	require.Error(t, err)
+
+	pluginContext := &indexcgopb.StoragePluginContext{
+		EncryptionZoneId: 1,
+		CollectionId:     2,
+		EncryptionKey:    "key",
+	}
+	mockEncryption := mockey.Mock(hookutil.IsClusterEncryptionEnabled).Return(true).Build()
+	defer mockEncryption.UnPatch()
+
+	// The reader self-sources physical field IDs from the manifest; stub it so the
+	// mocked inner reader (fake manifest path) is reached.
+	mockFieldIDs := mockey.Mock(packed.GetManifestFieldIDs).Return(map[int64]struct{}{100: {}}, nil).Build()
+	defer mockFieldIDs.UnPatch()
+
+	var capturedPluginContext *indexcgopb.StoragePluginContext
+	mockReader := mockey.Mock(NewRecordReaderFromManifest).To(
+		func(manifest string,
+			schema *schemapb.CollectionSchema,
+			bufferSize int64,
+			cfg *indexpb.StorageConfig,
+			pluginContext *indexcgopb.StoragePluginContext,
+			option ...RwOption,
+		) (RecordReader, error) {
+			capturedPluginContext = pluginContext
+			return fakeManifestRecordReader{}, nil
+		}).Build()
+	defer mockReader.UnPatch()
+
+	reader, err := NewManifestRecordReader(context.Background(), "manifest-json", schema,
+		WithVersion(StorageV3),
+		WithStorageConfig(&indexpb.StorageConfig{RootPath: "root"}),
+		WithPluginContext(pluginContext),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, reader)
+	require.Same(t, pluginContext, capturedPluginContext)
+
+	schemaWithEZ := proto.Clone(schema).(*schemapb.CollectionSchema)
+	schemaWithEZ.Properties = []*commonpb.KeyValuePair{
+		{Key: common.EncryptionEzIDKey, Value: "7"},
+	}
+	mockCipher := mockey.Mock(hookutil.GetCipher).Return(fakeUnsafeKeyCipher{}).Build()
+	defer mockCipher.UnPatch()
+
+	reader, err = NewManifestRecordReader(context.Background(), "manifest-json", schemaWithEZ,
+		WithVersion(StorageV3),
+		WithStorageConfig(&indexpb.StorageConfig{RootPath: "root"}),
+		WithCollectionID(2),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, reader)
+	require.NotNil(t, capturedPluginContext)
+	require.Equal(t, int64(7), capturedPluginContext.GetEncryptionZoneId())
+	require.Equal(t, int64(2), capturedPluginContext.GetCollectionId())
+	// the plugin context contract carries the key base64-encoded, matching
+	// NewBinlogRecordReader/NewBinlogRecordWriter and hookutil.GetCPluginContext
+	require.Equal(t, base64.StdEncoding.EncodeToString([]byte("unsafe-key")), capturedPluginContext.GetEncryptionKey())
+}
+
+// TestNewManifestRecordReaderPresentFieldsSkipManifestRead pins the P5 perf path:
+// when the caller already knows the segment's physically-present field IDs and
+// supplies them via WithPresentFields, the reader must NOT re-derive them with a
+// second GetManifestFieldIDs manifest open.
+func TestNewManifestRecordReaderPresentFieldsSkipManifestRead(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64},
+		},
+	}
+	mockEnc := mockey.Mock(hookutil.IsClusterEncryptionEnabled).Return(false).Build()
+	defer mockEnc.UnPatch()
+	mockFieldIDs := mockey.Mock(packed.GetManifestFieldIDs).To(
+		func(string, *indexpb.StorageConfig) (map[int64]struct{}, error) {
+			t.Fatal("GetManifestFieldIDs must not be called when present fields are supplied")
+			return nil, nil
+		}).Build()
+	defer mockFieldIDs.UnPatch()
+	mockReader := mockey.Mock(NewRecordReaderFromManifest).Return(fakeManifestRecordReader{}, nil).Build()
+	defer mockReader.UnPatch()
+
+	reader, err := NewManifestRecordReader(context.Background(), "manifest-json", schema,
+		WithVersion(StorageV3),
+		WithStorageConfig(&indexpb.StorageConfig{RootPath: "root"}),
+		WithPresentFields(map[FieldID]struct{}{100: {}}),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, reader)
+}
+
+// TestNewManifestRecordReaderPartialStructErrors pins that the struct-array
+// all-or-nothing check in filterSchemaToPresentFields surfaces through the reader:
+// a physically-present set that covers only SOME children of a struct array is a
+// data-integrity violation, so NewManifestRecordReader must return an error and
+// never open the manifest.
+func TestNewManifestRecordReaderPartialStructErrors(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64}},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{FieldID: 200, Name: "st", Fields: []*schemapb.FieldSchema{
+				{FieldID: 201, Name: "st[a]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, Nullable: true},
+				{FieldID: 202, Name: "st[b]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_VarChar, Nullable: true},
+			}},
+		},
+	}
+	mockEnc := mockey.Mock(hookutil.IsClusterEncryptionEnabled).Return(false).Build()
+	defer mockEnc.UnPatch()
+	// present covers only ONE of the struct's two children -> partial struct.
+	mockFieldIDs := mockey.Mock(packed.GetManifestFieldIDs).Return(map[int64]struct{}{100: {}, 201: {}}, nil).Build()
+	defer mockFieldIDs.UnPatch()
+	mockReader := mockey.Mock(NewRecordReaderFromManifest).To(
+		func(string, *schemapb.CollectionSchema, int64, *indexpb.StorageConfig, *indexcgopb.StoragePluginContext, ...RwOption) (RecordReader, error) {
+			t.Fatal("must not open the manifest when the present set is a partial struct")
+			return nil, nil
+		}).Build()
+	defer mockReader.UnPatch()
+
+	_, err := NewManifestRecordReader(context.Background(), "manifest-json", schema,
+		WithVersion(StorageV3),
+		WithStorageConfig(&indexpb.StorageConfig{RootPath: "root"}),
+	)
+	require.Error(t, err)
 }
 
 func TestBinlogSerializeWriter(t *testing.T) {
@@ -156,7 +888,7 @@ func TestBinlogSerializeWriter(t *testing.T) {
 		chunkSize := uint64(64)                     // 64B
 		rw, err := newCompositeBinlogRecordWriter(0, 0, 0, schema,
 			func(b []*Blob) error {
-				log.Debug("write blobs", zap.Int("files", len(b)))
+				mlog.Debug(context.TODO(), "write blobs", mlog.Int("files", len(b)))
 				return nil
 			},
 			alloc, chunkSize, "root", 10000)
@@ -335,6 +1067,88 @@ func TestValueSerializerNullableDenseVectorUsesBinaryArrow(t *testing.T) {
 			assert.Equal(t, tc.row2, roundTrip[2].Value.(map[FieldID]interface{})[nullableSerdeVectorFieldID])
 		})
 	}
+}
+
+func TestValueDeserializerSerializerTextLobRefUsesBinaryArrow(t *testing.T) {
+	const (
+		pkFieldID   FieldID = 100
+		textFieldID FieldID = 101
+	)
+	schema := &schemapb.CollectionSchema{
+		Name: "text_lob_ref",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: common.RowIDField, Name: "row_id", DataType: schemapb.DataType_Int64},
+			{FieldID: common.TimeStampField, Name: "Timestamp", DataType: schemapb.DataType_Int64},
+			{FieldID: pkFieldID, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: textFieldID, Name: "content", DataType: schemapb.DataType_Text},
+		},
+	}
+	arrowSchema := arrow.NewSchema([]arrow.Field{
+		{Name: "row_id", Type: arrow.PrimitiveTypes.Int64},
+		{Name: "Timestamp", Type: arrow.PrimitiveTypes.Int64},
+		{Name: "pk", Type: arrow.PrimitiveTypes.Int64},
+		{Name: "content", Type: arrow.BinaryTypes.Binary},
+	}, nil)
+	builder := array.NewRecordBuilder(memory.DefaultAllocator, arrowSchema)
+	defer builder.Release()
+	builder.Field(0).(*array.Int64Builder).Append(11)
+	builder.Field(1).(*array.Int64Builder).Append(101)
+	builder.Field(2).(*array.Int64Builder).Append(1)
+	builder.Field(3).(*array.BinaryBuilder).Append([]byte("lob-ref"))
+
+	record := NewSimpleArrowRecord(builder.NewRecord(), map[FieldID]int{
+		common.RowIDField:     0,
+		common.TimeStampField: 1,
+		pkFieldID:             2,
+		textFieldID:           3,
+	})
+	defer record.Release()
+
+	values := make([]*Value, record.Len())
+	err := ValueDeserializerWithSchema(record, values, schema, true)
+	require.NoError(t, err)
+	textValue := values[0].Value.(map[FieldID]interface{})[textFieldID]
+	require.IsType(t, TextLobRef{}, textValue)
+	require.Equal(t, TextLobRef("lob-ref"), textValue)
+
+	rewrittenRecord, err := ValueSerializer(values, schema)
+	require.NoError(t, err)
+	defer rewrittenRecord.Release()
+	textColumn := rewrittenRecord.Column(textFieldID)
+	require.IsType(t, &array.Binary{}, textColumn)
+	require.Equal(t, []byte("lob-ref"), textColumn.(*array.Binary).Value(0))
+}
+
+func TestValueSerializerTextRejectsRawBytes(t *testing.T) {
+	const (
+		pkFieldID   FieldID = 100
+		textFieldID FieldID = 101
+	)
+	schema := &schemapb.CollectionSchema{
+		Name: "text_raw_bytes",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: common.RowIDField, Name: "row_id", DataType: schemapb.DataType_Int64},
+			{FieldID: common.TimeStampField, Name: "Timestamp", DataType: schemapb.DataType_Int64},
+			{FieldID: pkFieldID, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: textFieldID, Name: "content", DataType: schemapb.DataType_Text},
+		},
+	}
+	values := []*Value{
+		{
+			PK:        NewInt64PrimaryKey(1),
+			Timestamp: 101,
+			Value: map[FieldID]interface{}{
+				common.RowIDField:     int64(11),
+				common.TimeStampField: int64(101),
+				pkFieldID:             int64(1),
+				textFieldID:           []byte("raw-text-bytes"),
+			},
+		},
+	}
+
+	_, err := ValueSerializer(values, schema)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "expected string value")
 }
 
 type nullableDenseVectorSerdeCase struct {
@@ -702,7 +1516,7 @@ func BenchmarkSerializeWriter(b *testing.B) {
 	sort.Slice(values, func(i, j int) bool {
 		return values[i].PK.LT(values[j].PK)
 	})
-	log.Info("prepare data done", zap.Int("len", len(values)), zap.Duration("dur", time.Since(start)))
+	mlog.Info(context.TODO(), "prepare data done", mlog.Int("len", len(values)), mlog.Duration("dur", time.Since(start)))
 
 	b.ResetTimer()
 

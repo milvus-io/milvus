@@ -3084,7 +3084,6 @@ func TestArrowRecordReader(t *testing.T) {
 		for rr.Next() {
 			rec := rr.Record()
 			arr := rec.Column(0).(*array.String)
-			defer rec.Release()
 
 			assert.Equal(t, "hello0", arr.Value(0))
 			assert.Equal(t, "hello1", arr.Value(1))
@@ -3194,7 +3193,6 @@ func BenchmarkArrowRecordReader(b *testing.B) {
 		for rr.Next() {
 			rec := rr.Record()
 			arr := rec.Column(0).(*array.String)
-			defer rec.Release()
 			for i := 0; i < arr.Len(); i++ {
 				assert.Equal(b, 20, len(arr.Value(i)))
 			}

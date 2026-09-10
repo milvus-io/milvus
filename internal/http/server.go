@@ -19,6 +19,7 @@ package http
 import (
 	"context"
 	"embed"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -27,13 +28,9 @@ import (
 	"strings"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/http/healthz"
-	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/v3/eventlog"
-	"github.com/milvus-io/milvus/pkg/v3/log"
-	"github.com/milvus-io/milvus/pkg/v3/util/expr"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -76,11 +73,18 @@ type Handler struct {
 	Handler     http.Handler
 }
 
+func writeJSONError(w http.ResponseWriter, status int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(map[string]string{"msg": msg})
+}
+
 func registerDefaults() {
 	Register(&Handler{
 		Path: LogLevelRouterPath,
 		HandlerFunc: func(w http.ResponseWriter, req *http.Request) {
-			log.Level().ServeHTTP(w, req)
+			level := mlog.GetAtomicLevel()
+			level.ServeHTTP(w, req)
 		},
 	})
 	Register(&Handler{
@@ -95,52 +99,6 @@ func registerDefaults() {
 		Path:    EventLogRouterPath,
 		Handler: eventlog.Handler(),
 	})
-	Register(&Handler{
-		Path: ExprPath,
-		Handler: http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			// Check if expr endpoint is enabled
-			if !paramtable.Get().CommonCfg.ExprEnabled.GetAsBool() {
-				w.WriteHeader(http.StatusForbidden)
-				w.Write([]byte(`{"msg": "expr endpoint is disabled. Set common.security.exprEnabled to true to enable it."}`))
-				return
-			}
-
-			code := req.URL.Query().Get("code")
-			var auth string
-
-			// Only Proxy nodes can access /expr endpoint
-			if !expr.HasRegistered("proxy") || passwordVerifyFunc == nil {
-				w.WriteHeader(http.StatusForbidden)
-				w.Write([]byte(`{"msg": "/expr endpoint is only available on Proxy nodes"}`))
-				return
-			}
-
-			// On Proxy node: require root user authentication via HTTP Basic Auth
-			if err := checkExprRootAuth(req); err != nil {
-				w.WriteHeader(http.StatusUnauthorized)
-				fmt.Fprintf(w, `{"msg": "%s"}`, err.Error())
-				return
-			}
-			// Use bypass since we've already authenticated
-			auth = expr.AuthBypass
-
-			output, err := expr.Exec(code, auth)
-			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-				fmt.Fprintf(w, `{"msg": "failed to execute expression, %s"}`, err.Error()) //nolint:gosec // error message is safe to include in response
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			resp := make(map[string]string)
-			resp["output"] = output
-			json.NewEncoder(w).Encode(resp)
-		}),
-	})
-	Register(&Handler{
-		Path:    StaticPath,
-		Handler: GetStaticHandler(),
-	})
 
 	if paramtable.Get().HTTPCfg.EnableWebUI.GetAsBool() {
 		RegisterWebUIHandler()
@@ -152,15 +110,16 @@ func RegisterStopComponent(triggerComponentStop func(role string) error) {
 	Register(&Handler{
 		Path: RouteTriggerStopPath,
 		HandlerFunc: func(w http.ResponseWriter, req *http.Request) {
+			ctx := req.Context()
 			role := req.URL.Query().Get("role")
-			log.Info("start to trigger component stop", zap.String("role", role))
+			mlog.Info(ctx, "start to trigger component stop", mlog.String("role", role))
 			if err := triggerComponentStop(role); err != nil {
-				log.Warn("failed to trigger component stop", zap.Error(err))
+				mlog.Warn(ctx, "failed to trigger component stop", mlog.Err(err))
 				w.WriteHeader(http.StatusInternalServerError)
 				fmt.Fprintf(w, `{"msg": "failed to trigger component stop, %s"}`, err.Error())
 				return
 			}
-			log.Info("finish to trigger component stop", zap.String("role", role))
+			mlog.Info(ctx, "finish to trigger component stop", mlog.String("role", role))
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"msg": "OK"}`))
 		},
@@ -172,15 +131,16 @@ func RegisterCheckComponentReady(checkActive func(role string) error) {
 	Register(&Handler{
 		Path: RouteCheckComponentReady,
 		HandlerFunc: func(w http.ResponseWriter, req *http.Request) {
+			ctx := req.Context()
 			role := req.URL.Query().Get("role")
-			log.Info("start to check component ready", zap.String("role", role))
+			mlog.Info(ctx, "start to check component ready", mlog.String("role", role))
 			if err := checkActive(role); err != nil {
-				log.Warn("failed to check component ready", zap.Error(err))
+				mlog.Warn(ctx, "failed to check component ready", mlog.Err(err))
 				w.WriteHeader(http.StatusInternalServerError)
 				fmt.Fprintf(w, `{"msg": "failed to to check component ready, %s"}`, err.Error())
 				return
 			}
-			log.Info("finish to check component ready", zap.String("role", role))
+			mlog.Info(ctx, "finish to check component ready", mlog.String("role", role))
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"msg": "OK"}`))
 		},
@@ -288,7 +248,7 @@ func ServeHTTP() {
 	registerDefaults()
 	go func() {
 		bindAddr := getHTTPAddr()
-		log.Info("management listen", zap.String("addr", bindAddr))
+		mlog.Info(context.TODO(), "management listen", mlog.String("addr", bindAddr))
 		server = &http.Server{Handler: metricsServer, Addr: bindAddr, ReadTimeout: 10 * time.Second}
 
 		if runtime.GOARCH != "arm64" {
@@ -298,7 +258,7 @@ func ServeHTTP() {
 		}
 
 		if err := server.ListenAndServe(); err != nil {
-			log.Error("handle metrics failed", zap.Error(err))
+			mlog.Error(context.TODO(), "handle metrics failed", mlog.Err(err))
 		}
 	}()
 }
@@ -312,43 +272,4 @@ func getHTTPAddr() string {
 	paramtable.Get().Save(paramtable.Get().CommonCfg.MetricsPort.Key, port)
 
 	return fmt.Sprintf(":%s", port)
-}
-
-// checkExprRootAuth verifies that the request is from the root user.
-// It supports HTTP Basic Auth and Bearer token formats.
-func checkExprRootAuth(req *http.Request) error {
-	// Try HTTP Basic Auth first
-	username, password, ok := req.BasicAuth()
-	if !ok {
-		// Try Bearer token format: "user:password"
-		auth := req.Header.Get("Authorization")
-		auth = strings.TrimPrefix(auth, "Bearer ")
-		parts := strings.SplitN(auth, ":", 2)
-		if len(parts) == 2 {
-			username, password = parts[0], parts[1]
-			ok = true
-		}
-	}
-
-	if !ok || username == "" || password == "" {
-		return fmt.Errorf("authentication required. Use HTTP Basic Auth with root credentials")
-	}
-
-	// Only root user can access /expr
-	if username != "root" {
-		log.Warn("non-root user attempted to access /expr", zap.String("username", username))
-		return fmt.Errorf("only root user can access /expr endpoint")
-	}
-
-	// Verify root password
-	if passwordVerifyFunc == nil {
-		return fmt.Errorf("password verification not available")
-	}
-	if !passwordVerifyFunc(context.Background(), username, password) {
-		log.Warn("invalid root password for /expr access")
-		return fmt.Errorf("invalid root password")
-	}
-
-	log.Info("root user authenticated for /expr access")
-	return nil
 }

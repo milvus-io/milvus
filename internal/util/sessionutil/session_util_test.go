@@ -19,14 +19,14 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.etcd.io/etcd/api/v3/mvccpb"
+	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/json"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -122,7 +122,7 @@ func TestUpdateSessions(t *testing.T) {
 
 	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
 	etcdCli, _ := kvfactory.GetEtcdAndPath()
-	etcdKV := etcdkv.NewEtcdKV(etcdCli, "")
+	etcdKV := etcdkv.NewEtcdKV(etcdCli, metaRoot)
 
 	defer etcdKV.RemoveWithPrefix(ctx, "")
 
@@ -161,7 +161,7 @@ func TestUpdateSessions(t *testing.T) {
 	notExistSessions, _, _ := s.GetSessions(ctx, "testt")
 	assert.Equal(t, len(notExistSessions), 0)
 
-	etcdKV.RemoveWithPrefix(ctx, metaRoot)
+	etcdKV.RemoveWithPrefix(ctx, "")
 	assert.Eventually(t, func() bool {
 		sessions, _, _ := s.GetSessions(ctx, "test")
 		return len(sessions) == 0
@@ -299,6 +299,22 @@ func TestWatcherHandleWatchResp(t *testing.T) {
 		})
 	})
 
+	t.Run("error during shutdown does not panic", func(t *testing.T) {
+		// When the session ctx is canceled (graceful shutdown), the etcd watch
+		// delivers a final error response; handling it must exit quietly instead
+		// of crashing the process.
+		cctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		downSession := NewSessionWithEtcd(cctx, metaRoot, etcdCli)
+		w := getWatcher(downSession, nil)
+		wresp := clientv3.WatchResponse{
+			Canceled: true,
+		}
+		assert.NotPanics(t, func() {
+			w.handleWatchResponse(wresp)
+		})
+	})
+
 	t.Run("err handled but rewatch failed", func(t *testing.T) {
 		w := getWatcher(s, func(sessions map[string]*Session) error {
 			return errors.New("mocked")
@@ -309,6 +325,27 @@ func TestWatcherHandleWatchResp(t *testing.T) {
 		assert.Panics(t, func() {
 			w.handleWatchResponse(wresp)
 		})
+	})
+
+	t.Run("invalid auth token triggers rewatch instead of close", func(t *testing.T) {
+		rewatched := false
+		w := getWatcher(s, func(sessions map[string]*Session) error {
+			rewatched = true
+			return nil
+		})
+		// An Unauthenticated watch error is recoverable: the watcher must
+		// re-establish the watch (which refreshes the etcd auth token via the
+		// unary path) rather than close the channel and panic.
+		err := w.handleWatchErr(v3rpc.ErrInvalidAuthToken)
+		assert.NoError(t, err)
+		assert.True(t, rewatched)
+		assert.NotNil(t, w.rch)
+	})
+
+	t.Run("non-retriable error closes channel", func(t *testing.T) {
+		w := getWatcher(s, nil)
+		err := w.handleWatchErr(errors.New("some fatal error"))
+		assert.Error(t, err)
 	})
 }
 
@@ -322,7 +359,7 @@ func TestSession_Registered(t *testing.T) {
 
 func TestSession_String(t *testing.T) {
 	s := &Session{}
-	log.Debug("log session", zap.Any("session", s))
+	mlog.Debug(context.TODO(), "log session", mlog.Any("session", s))
 }
 
 func TestSesssionMarshal(t *testing.T) {
@@ -523,7 +560,7 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 	})
 	wg.Add(1)
 	s1.ProcessActiveStandBy(func() error {
-		log.Debug("Session 1 become active")
+		mlog.Debug(context.TODO(), "Session 1 become active")
 		wg.Done()
 		return nil
 	})
@@ -539,7 +576,7 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 	s2.Register()
 	wg.Add(1)
 	go s2.ProcessActiveStandBy(func() error {
-		log.Debug("Session 2 become active")
+		mlog.Debug(context.TODO(), "Session 2 become active")
 		wg.Done()
 		return nil
 	})
@@ -547,13 +584,13 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 
 	// assert.True(t, s2.watchingPrimaryKeyLock)
 	// stop session 1, session 2 will take over primary service
-	log.Debug("Stop session 1, session 2 will take over primary service")
+	mlog.Debug(context.TODO(), "Stop session 1, session 2 will take over primary service")
 	assert.False(t, flag)
 
 	s1.Stop()
 
 	wg.Wait()
-	log.Debug("session s2 wait done")
+	mlog.Debug(context.TODO(), "session s2 wait done")
 	assert.False(t, s2.isStandby.Load().(bool))
 	s2.Stop()
 }
@@ -932,6 +969,13 @@ func testForceKill(serverName string) {
 
 	// trigger a force kill
 	etcdCli.Revoke(context.Background(), *session.LeaseID)
+
+	// The force kill is asynchronous: the keepalive loop must observe the lost
+	// lease and call os.Exit(ExitCodeEtcd). Block long enough for that to fire,
+	// otherwise this function returns and the subprocess exits 0, racing (and
+	// usually beating) the force kill. The sleep is only paid in full on a
+	// regression; on success os.Exit terminates the process well before it ends.
+	time.Sleep(30 * time.Second)
 }
 
 func TestGetResourceGroupName(t *testing.T) {

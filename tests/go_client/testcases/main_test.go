@@ -50,25 +50,9 @@ func shouldInstallExternalTablePythonDeps() bool {
 		return true
 	}
 
-	host := hostFromMilvusAddr(addrFromTestArgs(os.Args))
+	host := hostFromMilvusAddr(helper.URIFromTestArgs(os.Args))
 	serviceName, _, _ := strings.Cut(host, ".")
 	return strings.HasPrefix(serviceName, "gosdk-") && strings.HasSuffix(serviceName, "-milvus")
-}
-
-func addrFromTestArgs(args []string) string {
-	for i, arg := range args {
-		switch {
-		case arg == "-addr" || arg == "--addr":
-			if i+1 < len(args) {
-				return args[i+1]
-			}
-		case strings.HasPrefix(arg, "-addr="):
-			return strings.TrimPrefix(arg, "-addr=")
-		case strings.HasPrefix(arg, "--addr="):
-			return strings.TrimPrefix(arg, "--addr=")
-		}
-	}
-	return ""
 }
 
 func isTruthyEnv(key string) bool {

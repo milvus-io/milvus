@@ -18,6 +18,7 @@ from chaos.checker import (
     FullTextSearchChecker,
     GeoQueryChecker,
     HybridSearchChecker,
+    Import2PCChecker,
     IndexCreateChecker,
     InsertChecker,
     JsonQueryChecker,
@@ -58,7 +59,20 @@ class TestBase:
 
 class TestOperations(TestBase):
     @pytest.fixture(scope="function", autouse=True)
-    def connection(self, upstream_uri, upstream_token, milvus_ns):
+    def connection(
+        self,
+        upstream_uri,
+        upstream_token,
+        downstream_uri,
+        downstream_token,
+        milvus_ns,
+        import_2pc_workload,
+        import_2pc_minio_endpoint,
+        import_2pc_minio_bucket,
+        import_2pc_downstream_minio_endpoint,
+        import_2pc_downstream_minio_bucket,
+        import_2pc_rows,
+    ):
         connections.connect("default", uri=upstream_uri, token=upstream_token)
         if connections.has_connection("default") is False:
             raise Exception("no connections")
@@ -70,6 +84,19 @@ class TestOperations(TestBase):
         self.milvus_sys = MilvusSys(alias="default")
         self.milvus_ns = milvus_ns
         self.release_name = get_milvus_instance_name(self.milvus_ns, milvus_sys=self.milvus_sys)
+        cf.param_info.param_uri = upstream_uri
+        cf.param_info.param_token = upstream_token
+        cf.param_info.param_bucket_name = import_2pc_minio_bucket
+        self.upstream_uri = upstream_uri
+        self.upstream_token = upstream_token
+        self.downstream_uri = downstream_uri
+        self.downstream_token = downstream_token
+        self.import_2pc_workload = import_2pc_workload
+        self.import_2pc_minio_endpoint = import_2pc_minio_endpoint
+        self.import_2pc_minio_bucket = import_2pc_minio_bucket
+        self.import_2pc_downstream_minio_endpoint = import_2pc_downstream_minio_endpoint
+        self.import_2pc_downstream_minio_bucket = import_2pc_downstream_minio_bucket
+        self.import_2pc_rows = import_2pc_rows
 
     def init_health_checkers(self, collection_name=None):
         c_name = collection_name
@@ -96,6 +123,19 @@ class TestOperations(TestBase):
             Op.add_field: AddFieldChecker(collection_name=c_name, schema=schema),
             Op.rename_collection: CollectionRenameChecker(collection_name=c_name, schema=schema),
         }
+        if self.import_2pc_workload:
+            checkers[Op.import_2pc] = Import2PCChecker(
+                collection_name=cf.gen_unique_str("Import2PCChecker_"),
+                rows_per_import=self.import_2pc_rows,
+                minio_endpoint=self.import_2pc_minio_endpoint,
+                bucket_name=self.import_2pc_minio_bucket,
+                uri=self.upstream_uri,
+                token=self.upstream_token,
+                downstream_uri=self.downstream_uri,
+                downstream_token=self.downstream_token,
+                downstream_minio_endpoint=self.import_2pc_downstream_minio_endpoint,
+                downstream_bucket_name=self.import_2pc_downstream_minio_bucket,
+            )
         self.health_checkers = checkers
 
     @pytest.mark.tags(CaseLabel.CDC)

@@ -22,11 +22,16 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blob"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blockblob"
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -34,6 +39,297 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
+
+func TestWaitAzureCopyComplete(t *testing.T) {
+	t.Run("wait until success", func(t *testing.T) {
+		statuses := []blob.CopyStatusType{blob.CopyStatusTypePending, blob.CopyStatusTypeSuccess}
+		client, calls := mockAzureCopyStatuses(t, statuses, "source", "copy-id", "")
+
+		err := waitAzureCopyComplete(context.Background(), client, "dst", "source", "copy-id")
+		require.NoError(t, err)
+		require.Equal(t, 2, *calls)
+	})
+
+	t.Run("failed status returns error", func(t *testing.T) {
+		statuses := []blob.CopyStatusType{blob.CopyStatusTypeFailed}
+		client, _ := mockAzureCopyStatuses(t, statuses, "source", "copy-id", "copy failed")
+
+		err := waitAzureCopyComplete(context.Background(), client, "dst", "source", "copy-id")
+		require.Error(t, err)
+	})
+
+	t.Run("aborted status returns error", func(t *testing.T) {
+		statuses := []blob.CopyStatusType{blob.CopyStatusTypeAborted}
+		client, _ := mockAzureCopyStatuses(t, statuses, "source", "copy-id", "")
+
+		err := waitAzureCopyComplete(context.Background(), client, "dst", "source", "copy-id")
+		require.Error(t, err)
+	})
+
+	t.Run("context canceled returns context error", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		err := waitAzureCopyComplete(ctx, new(blockblob.Client), "dst", "source", "copy-id")
+		require.ErrorIs(t, err, context.Canceled)
+	})
+
+	t.Run("pending copy respects caller deadline", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
+		defer cancel()
+		statuses := []blob.CopyStatusType{blob.CopyStatusTypePending}
+		client, _ := mockAzureCopyStatuses(t, statuses, "source", "copy-id", "")
+
+		err := waitAzureCopyComplete(ctx, client, "dst", "source", "copy-id")
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+	})
+
+	t.Run("rejects mismatched source", func(t *testing.T) {
+		statuses := []blob.CopyStatusType{blob.CopyStatusTypePending}
+		client, _ := mockAzureCopyStatuses(t, statuses, "other-source", "copy-id", "")
+
+		err := waitAzureCopyComplete(context.Background(), client, "dst", "source", "")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "copy source mismatch")
+	})
+
+	t.Run("mismatch error never carries the source SAS", func(t *testing.T) {
+		statuses := []blob.CopyStatusType{blob.CopyStatusTypePending}
+		actual := "https://other-account.blob.core.windows.net/src-container/srcobj?sv=2024-08-04&sig=other"
+		client, _ := mockAzureCopyStatuses(t, statuses, actual, "copy-id", "")
+
+		err := waitAzureCopyComplete(context.Background(), client, "dst",
+			"https://src-account.blob.core.windows.net/src-container/srcobj?sv=2024-08-04&sig=abc", "")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "https://src-account.blob.core.windows.net/src-container/srcobj")
+		assert.NotContains(t, err.Error(), "sig=abc")
+		assert.NotContains(t, err.Error(), "sig=other")
+	})
+
+	t.Run("rejects replaced copy ID", func(t *testing.T) {
+		statuses := []blob.CopyStatusType{blob.CopyStatusTypePending}
+		client, _ := mockAzureCopyStatuses(t, statuses, "source", "other-copy-id", "")
+
+		err := waitAzureCopyComplete(context.Background(), client, "dst", "source", "copy-id")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "copy ID mismatch")
+	})
+
+	t.Run("permanent poll error fails immediately", func(t *testing.T) {
+		calls := 0
+		patch := mockey.Mock((*blockblob.Client).GetProperties).To(
+			func(_ *blockblob.Client, _ context.Context, _ *blob.GetPropertiesOptions) (blob.GetPropertiesResponse, error) {
+				calls++
+				return blob.GetPropertiesResponse{}, &azcore.ResponseError{ErrorCode: string(bloberror.AuthorizationFailure)}
+			}).Build()
+		t.Cleanup(func() { patch.UnPatch() })
+
+		err := waitAzureCopyComplete(context.Background(), new(blockblob.Client), "dst", "source", "copy-id")
+		require.ErrorIs(t, err, merr.ErrIoPermissionDenied)
+		assert.Equal(t, 1, calls)
+	})
+}
+
+func TestStartOrResumeAzureCopySourceIdentityIgnoresQuery(t *testing.T) {
+	// The service echoes the copy source without a guarantee about the query
+	// string or percent-encoding; a SAS-bearing, escaped expected source must
+	// verify against its bare, unescaped form.
+	status := blob.CopyStatusTypeSuccess
+	copyID := "copy-id"
+	bareSource := "https://src-account.blob.core.windows.net/src-container/src/obj"
+	client, calls := mockAzureCopyStatuses(t, []blob.CopyStatusType{status}, bareSource, copyID, "")
+
+	err := waitAzureCopyComplete(context.Background(), client, "dst",
+		"https://src-account.blob.core.windows.net/src-container/src%2Fobj?sv=2024-08-04&sig=abc", copyID)
+	require.NoError(t, err)
+	require.Equal(t, 1, *calls)
+}
+
+func TestAzureObjectStorageCopyObjectCrossBucketSourceSAS(t *testing.T) {
+	newStorage := func(t *testing.T, sourceEndpoint, sourceSAS string, sourceUseSSL bool) *AzureObjectStorage {
+		t.Helper()
+		// #nosec G101 -- "ZmFrZS1rZXk=" is base64 for "fake-key", an offline
+		// fixture credential; all requests are mocked, nothing is ever signed.
+		cfg := &objectstorage.Config{
+			Address:                     "core.windows.net",
+			BucketName:                  "dst-container",
+			AccessKeyID:                 "dst-account",
+			SecretAccessKeyID:           "ZmFrZS1rZXk=",
+			CloudProvider:               objectstorage.CloudProviderAzure,
+			UseSSL:                      true,
+			SkipBucketCheck:             true,
+			IgnoreAzureConnectionString: true,
+			AzureSourceEndpoint:         sourceEndpoint,
+			AzureSourceUseSSL:           sourceUseSSL,
+			AzureSourceSAS:              sourceSAS,
+		}
+		storage, err := newAzureObjectStorageWithConfig(context.Background(), cfg)
+		require.NoError(t, err)
+		return storage
+	}
+
+	mockCopy := func(t *testing.T, source *string, echoSourceWithQuery bool) {
+		t.Helper()
+		copyID := "copy-id"
+		status := blob.CopyStatusTypeSuccess
+		startPatch := mockey.Mock((*blockblob.Client).StartCopyFromURL).To(
+			func(_ *blockblob.Client, _ context.Context, url string, _ *blob.StartCopyFromURLOptions) (blob.StartCopyFromURLResponse, error) {
+				*source = url
+				return blob.StartCopyFromURLResponse{CopyID: &copyID}, nil
+			}).Build()
+		t.Cleanup(func() { startPatch.UnPatch() })
+		echoedSource := ""
+		pollPatch := mockey.Mock((*blockblob.Client).GetProperties).To(
+			func(_ *blockblob.Client, _ context.Context, _ *blob.GetPropertiesOptions) (blob.GetPropertiesResponse, error) {
+				echoedSource = *source
+				if !echoSourceWithQuery {
+					if i := strings.IndexByte(echoedSource, '?'); i >= 0 {
+						echoedSource = echoedSource[:i]
+					}
+				}
+				return blob.GetPropertiesResponse{
+					CopyID:     &copyID,
+					CopySource: &echoedSource,
+					CopyStatus: &status,
+				}, nil
+			}).Build()
+		t.Cleanup(func() { pollPatch.UnPatch() })
+	}
+
+	t.Run("cross-account source URL addresses the source account and carries the SAS", func(t *testing.T) {
+		storage := newStorage(t, "src-account.blob.core.windows.net", "sv=2024-08-04&sig=abc", true)
+		var captured string
+		mockCopy(t, &captured, false)
+
+		err := storage.CopyObjectCrossBucket(context.Background(), "src-container", "srcobj", "dst-container", "dstobj")
+		require.NoError(t, err)
+		assert.Equal(t, "https://src-account.blob.core.windows.net/src-container/srcobj?sv=2024-08-04&sig=abc", captured)
+	})
+
+	t.Run("source URL scheme follows the source config, not the destination", func(t *testing.T) {
+		// The destination config uses SSL; the source account does not, so the
+		// source URL must be http even though the client config has UseSSL=true.
+		storage := newStorage(t, "src-account.blob.core.windows.net", "sv=2024-08-04&sig=abc", false)
+		var captured string
+		mockCopy(t, &captured, false)
+
+		err := storage.CopyObjectCrossBucket(context.Background(), "src-container", "srcobj", "dst-container", "dstobj")
+		require.NoError(t, err)
+		assert.Equal(t, "http://src-account.blob.core.windows.net/src-container/srcobj?sv=2024-08-04&sig=abc", captured)
+	})
+
+	t.Run("same-account source URL stays on the client service", func(t *testing.T) {
+		storage := newStorage(t, "", "", true)
+		var captured string
+		mockCopy(t, &captured, true)
+
+		err := storage.CopyObjectCrossBucket(context.Background(), "dst-container", "srcobj", "dst-container", "dstobj")
+		require.NoError(t, err)
+		assert.Equal(t, "https://dst-account.blob.core.windows.net/dst-container/srcobj", captured)
+	})
+
+	t.Run("invalid source endpoint host is rejected at construction", func(t *testing.T) {
+		// #nosec G101 -- "ZmFrZS1rZXk=" is base64 for "fake-key", an offline
+		// fixture credential; all requests are mocked, nothing is ever signed.
+		cfg := &objectstorage.Config{
+			Address:                     "core.windows.net",
+			BucketName:                  "dst-container",
+			AccessKeyID:                 "dst-account",
+			SecretAccessKeyID:           "ZmFrZS1rZXk=",
+			CloudProvider:               objectstorage.CloudProviderAzure,
+			UseSSL:                      true,
+			SkipBucketCheck:             true,
+			IgnoreAzureConnectionString: true,
+			AzureSourceEndpoint:         "not a host",
+			AzureSourceSAS:              "sv=2024-08-04&sig=abc",
+		}
+		_, err := newAzureObjectStorageWithConfig(context.Background(), cfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "must be a bare service host")
+	})
+}
+
+func TestStartOrResumeAzureCopy(t *testing.T) {
+	t.Run("poll retry does not restart copy", func(t *testing.T) {
+		startCalls := 0
+		copyID := "copy-id"
+		startPatch := mockey.Mock((*blockblob.Client).StartCopyFromURL).To(
+			func(_ *blockblob.Client, _ context.Context, _ string, _ *blob.StartCopyFromURLOptions) (blob.StartCopyFromURLResponse, error) {
+				startCalls++
+				return blob.StartCopyFromURLResponse{CopyID: &copyID}, nil
+			}).Build()
+		t.Cleanup(func() { startPatch.UnPatch() })
+
+		pollCalls := 0
+		source := "source"
+		status := blob.CopyStatusTypeSuccess
+		getPropertiesPatch := mockey.Mock((*blockblob.Client).GetProperties).To(
+			func(_ *blockblob.Client, _ context.Context, _ *blob.GetPropertiesOptions) (blob.GetPropertiesResponse, error) {
+				pollCalls++
+				if pollCalls == 1 {
+					return blob.GetPropertiesResponse{}, &azcore.ResponseError{ErrorCode: string(bloberror.ServerBusy)}
+				}
+				return blob.GetPropertiesResponse{
+					CopyID:     &copyID,
+					CopySource: &source,
+					CopyStatus: &status,
+				}, nil
+			}).Build()
+		t.Cleanup(func() { getPropertiesPatch.UnPatch() })
+
+		err := startOrResumeAzureCopy(context.Background(), new(blockblob.Client), "source", "dst")
+		require.NoError(t, err)
+		assert.Equal(t, 1, startCalls)
+		assert.Equal(t, 2, pollCalls)
+	})
+
+	t.Run("resumes pending copy", func(t *testing.T) {
+		startCalls := 0
+		startPatch := mockey.Mock((*blockblob.Client).StartCopyFromURL).To(
+			func(_ *blockblob.Client, _ context.Context, _ string, _ *blob.StartCopyFromURLOptions) (blob.StartCopyFromURLResponse, error) {
+				startCalls++
+				return blob.StartCopyFromURLResponse{}, &azcore.ResponseError{ErrorCode: string(bloberror.PendingCopyOperation)}
+			}).Build()
+		t.Cleanup(func() { startPatch.UnPatch() })
+		statuses := []blob.CopyStatusType{blob.CopyStatusTypePending, blob.CopyStatusTypeSuccess}
+		client, _ := mockAzureCopyStatuses(t, statuses, "source", "existing-copy-id", "")
+
+		err := startOrResumeAzureCopy(context.Background(), client, "source", "dst")
+		require.NoError(t, err)
+		assert.Equal(t, 1, startCalls)
+	})
+}
+
+func mockAzureCopyStatuses(
+	t *testing.T,
+	statuses []blob.CopyStatusType,
+	source string,
+	copyID string,
+	description string,
+) (*blockblob.Client, *int) {
+	t.Helper()
+	calls := 0
+	patch := mockey.Mock((*blockblob.Client).GetProperties).To(
+		func(_ *blockblob.Client, _ context.Context, _ *blob.GetPropertiesOptions) (blob.GetPropertiesResponse, error) {
+			idx := calls
+			calls++
+			if len(statuses) == 0 {
+				return blob.GetPropertiesResponse{}, nil
+			}
+			if idx >= len(statuses) {
+				idx = len(statuses) - 1
+			}
+			status := statuses[idx]
+			return blob.GetPropertiesResponse{
+				CopyID:                &copyID,
+				CopySource:            &source,
+				CopyStatus:            &status,
+				CopyStatusDescription: &description,
+			}, nil
+		}).Build()
+	t.Cleanup(func() { patch.UnPatch() })
+	return new(blockblob.Client), &calls
+}
 
 func TestAzureObjectStorage(t *testing.T) {
 	ctx := context.Background()
@@ -248,7 +544,7 @@ func TestAzureObjectStorage(t *testing.T) {
 			require.NoError(t, err)
 
 			// Copy object
-			err = testCM.CopyObject(ctx, config.BucketName, srcKey, dstKey)
+			err = testCM.CopyObjectCrossBucket(ctx, config.BucketName, srcKey, config.BucketName, dstKey)
 			assert.NoError(t, err)
 
 			// Verify destination object exists and has correct content
@@ -277,7 +573,7 @@ func TestAzureObjectStorage(t *testing.T) {
 			srcKey := "copy_test/not_exist/file"
 			dstKey := "copy_test/dst/file"
 
-			err := testCM.CopyObject(ctx, config.BucketName, srcKey, dstKey)
+			err := testCM.CopyObjectCrossBucket(ctx, config.BucketName, srcKey, config.BucketName, dstKey)
 			assert.Error(t, err)
 		})
 
@@ -297,7 +593,7 @@ func TestAzureObjectStorage(t *testing.T) {
 			require.NoError(t, err)
 
 			// Copy (should overwrite)
-			err = testCM.CopyObject(ctx, config.BucketName, srcKey, dstKey)
+			err = testCM.CopyObjectCrossBucket(ctx, config.BucketName, srcKey, config.BucketName, dstKey)
 			assert.NoError(t, err)
 
 			// Verify destination has new content
@@ -329,7 +625,7 @@ func TestAzureObjectStorage(t *testing.T) {
 			require.NoError(t, err)
 
 			// Copy large object
-			err = testCM.CopyObject(ctx, config.BucketName, srcKey, dstKey)
+			err = testCM.CopyObjectCrossBucket(ctx, config.BucketName, srcKey, config.BucketName, dstKey)
 			assert.NoError(t, err)
 
 			// Verify content
@@ -357,7 +653,7 @@ func TestAzureObjectStorage(t *testing.T) {
 			require.NoError(t, err)
 
 			// Copy empty object
-			err = testCM.CopyObject(ctx, config.BucketName, srcKey, dstKey)
+			err = testCM.CopyObjectCrossBucket(ctx, config.BucketName, srcKey, config.BucketName, dstKey)
 			assert.NoError(t, err)
 
 			// Verify destination exists and has size 0
@@ -383,7 +679,7 @@ func TestAzureObjectStorage(t *testing.T) {
 			require.NoError(t, err)
 
 			// Copy to nested path
-			err = testCM.CopyObject(ctx, config.BucketName, srcKey, dstKey)
+			err = testCM.CopyObjectCrossBucket(ctx, config.BucketName, srcKey, config.BucketName, dstKey)
 			assert.NoError(t, err)
 
 			// Verify destination exists and has correct content

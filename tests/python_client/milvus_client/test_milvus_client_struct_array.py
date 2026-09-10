@@ -1,3 +1,4 @@
+import csv
 import json
 import os
 import random
@@ -65,6 +66,10 @@ EMB_LIST_INDEX_CONFIGS = {
     },
 }
 EMB_LIST_INDEX_TYPES = list(EMB_LIST_INDEX_CONFIGS.keys())
+EMB_LIST_HNSW_INDEX_CONFIG = {
+    "build_params": INDEX_PARAMS,
+    "search_params": {"ef": 64},
+}
 
 # Supported vector types per emb list index type (for MaxSim metrics)
 EMB_LIST_VECTOR_TYPES = {
@@ -109,6 +114,13 @@ EMB_LIST_VECTOR_TYPES = {
         DataType.BFLOAT16_VECTOR,
     ],
 }
+EMB_LIST_VECTOR_FIELD_NAMES = {
+    DataType.FLOAT_VECTOR: "clip_float_vector",
+    DataType.FLOAT16_VECTOR: "clip_float16_vector",
+    DataType.BFLOAT16_VECTOR: "clip_bfloat16_vector",
+    DataType.INT8_VECTOR: "clip_int8_vector",
+    DataType.BINARY_VECTOR: "clip_binary_vector",
+}
 
 # Dim for emb list index tests (smaller for faster index building)
 EMB_LIST_DIM = 32
@@ -117,6 +129,25 @@ EMB_LIST_DIM = 32
 BINARY_METRIC = "MAX_SIM_HAMMING"
 FLOAT_METRIC = "MAX_SIM_COSINE"
 INT8_METRIC = "MAX_SIM_COSINE"
+STRUCT_ARRAY_IMPORT_VECTOR_TYPES = [
+    pytest.param(DataType.FLOAT_VECTOR, id="float_vector"),
+    pytest.param(DataType.FLOAT16_VECTOR, id="float16_vector"),
+    pytest.param(DataType.BFLOAT16_VECTOR, id="bfloat16_vector"),
+    pytest.param(DataType.INT8_VECTOR, id="int8_vector"),
+    pytest.param(DataType.BINARY_VECTOR, id="binary_vector"),
+]
+STRUCT_ARRAY_IMPORT_FILE_TYPES = [
+    pytest.param("JSON", id="json"),
+    pytest.param("JSONL", id="jsonl"),
+    pytest.param("CSV", id="csv"),
+    pytest.param("PARQUET", id="parquet"),
+]
+STRUCT_ARRAY_BULK_WRITER_FILE_TYPES = [
+    pytest.param(BulkFileType.JSON, id="bulk_writer_json"),
+    pytest.param(BulkFileType.JSONL, id="bulk_writer_jsonl"),
+    pytest.param(BulkFileType.CSV, id="bulk_writer_csv"),
+    pytest.param(BulkFileType.PARQUET, id="bulk_writer_parquet"),
+]
 
 EMB_LIST_STRATEGY_CONFIGS = {
     "tokenann": {
@@ -159,19 +190,28 @@ EMB_LIST_STRATEGY_INDEX_CONFIGS = {
         "search_params": {"search_list": 30, "retrieval_ann_ratio": 3.0, "emb_list_rerank": True},
     },
 }
-EMB_LIST_STRATEGY_INDEX_CASES = [
-    ("tokenann", "HNSW"),
-    pytest.param(
-        "muvera",
-        "HNSW",
-        marks=pytest.mark.skip(reason="milvus-io/milvus#49748: muvera+HNSW can fail to load emb-list index"),
-    ),
-    pytest.param(
-        "lemur",
-        "HNSW",
-        marks=pytest.mark.skip(reason="milvus-io/milvus#49748: lemur+HNSW can fail to load emb-list index"),
-    ),
-    ("tokenann", "DISKANN"),
+for _index_type in ["HNSW_SQ", "HNSW_PQ", "HNSW_PRQ", "IVF_FLAT", "IVF_FLAT_CC"]:
+    EMB_LIST_STRATEGY_INDEX_CONFIGS[_index_type] = {
+        "build_params": EMB_LIST_INDEX_CONFIGS[_index_type]["build_params"],
+        "search_params": {
+            **EMB_LIST_INDEX_CONFIGS[_index_type]["search_params"],
+            "retrieval_ann_ratio": 3.0,
+            "emb_list_rerank": True,
+        },
+    }
+EMB_LIST_MUVERA_LEMUR_INDEX_TYPES = ["HNSW", "HNSW_SQ", "HNSW_PQ", "HNSW_PRQ", "IVF_FLAT", "IVF_FLAT_CC"]
+EMB_LIST_STRATEGY_INDEX_CASES = (
+    [pytest.param("tokenann", "HNSW", id="tokenann-hnsw")]
+    + [
+        pytest.param(strategy, index_type, id=f"{strategy}-{index_type.lower()}")
+        for strategy in ["muvera", "lemur"]
+        for index_type in EMB_LIST_MUVERA_LEMUR_INDEX_TYPES
+    ]
+    + [pytest.param("tokenann", "DISKANN", id="tokenann-diskann")]
+)
+EMB_LIST_UNSUPPORTED_STRATEGY_INDEX_CASES = [
+    pytest.param("muvera", "DISKANN", id="muvera-diskann"),
+    pytest.param("lemur", "DISKANN", id="lemur-diskann"),
 ]
 
 
@@ -534,8 +574,8 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
                 assert isinstance(record["int16_field"], int)
                 assert isinstance(record["int32_field"], int)
                 assert isinstance(record["int64_field"], int)
-                assert isinstance(record["float_field"], (int, float))
-                assert isinstance(record["double_field"], (int, float))
+                assert isinstance(record["float_field"], int | float)
+                assert isinstance(record["double_field"], int | float)
                 assert isinstance(record["varchar_field"], str)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1631,6 +1671,27 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
             embedding_list.add(vector)
         return embedding_list
 
+    def get_emb_list_index_config(self, index_type: str):
+        """Get EmbList index build and search params by index type"""
+        if index_type == "HNSW":
+            return EMB_LIST_HNSW_INDEX_CONFIG
+        return EMB_LIST_INDEX_CONFIGS[index_type]
+
+    def get_emb_list_metric_type(self, vector_type: DataType):
+        """Get MAX_SIM metric for EmbList vector type"""
+        if vector_type == DataType.BINARY_VECTOR:
+            return BINARY_METRIC
+        if vector_type == DataType.INT8_VECTOR:
+            return INT8_METRIC
+        return FLOAT_METRIC
+
+    def create_embedding_list_by_vector_type(self, dim: int, num_vectors: int, vector_type: DataType):
+        """Create EmbeddingList for the specified vector type"""
+        vectors = cf.gen_vectors(num_vectors, dim, vector_type)
+        if vector_type == DataType.BINARY_VECTOR:
+            return EmbeddingList([np.frombuffer(v, dtype=np.uint8) if isinstance(v, bytes) else v for v in vectors])
+        return EmbeddingList([np.array(v) if not isinstance(v, np.ndarray) else v for v in vectors])
+
     def create_collection_with_configurable_index(
         self,
         client: MilvusClient,
@@ -1766,6 +1827,133 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         assert len(struct_search_results[0]) > 0
 
     @pytest.mark.tags(CaseLabel.L0)
+    def test_search_struct_array_last_vector_subfield(self):
+        """
+        target: test search on a vector sub-field after multiple struct array parent fields
+        method: create multiple struct arrays so parent field IDs create gaps, then search the last vector sub-field
+        expected: search returns results
+        """
+        collection_name = cf.gen_unique_str(f"{prefix}_search_last_subfield")
+
+        client = self._client()
+
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
+        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim)
+
+        person_schema = client.create_struct_field_schema()
+        person_schema.add_field("name", DataType.VARCHAR, max_length=128)
+        person_schema.add_field("name_vector", DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(
+            "suspects",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=person_schema,
+            max_capacity=20,
+        )
+        schema.add_field(
+            "victims",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=person_schema,
+            max_capacity=20,
+        )
+
+        vehicle_schema = client.create_struct_field_schema()
+        vehicle_schema.add_field("model", DataType.VARCHAR, max_length=128)
+        vehicle_schema.add_field("vehicle_vector", DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(
+            "vehicles",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=vehicle_schema,
+            max_capacity=20,
+        )
+
+        evidence_schema = client.create_struct_field_schema()
+        evidence_schema.add_field("item", DataType.VARCHAR, max_length=128)
+        evidence_schema.add_field("evidence_vector", DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(
+            "evidence",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=evidence_schema,
+            max_capacity=20,
+        )
+
+        index_params = client.prepare_index_params()
+        index_params.add_index(
+            field_name="normal_vector",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params=INDEX_PARAMS,
+        )
+        index_params.add_index(
+            field_name="suspects[name_vector]",
+            index_type="HNSW",
+            metric_type="MAX_SIM_COSINE",
+            params=INDEX_PARAMS,
+        )
+        index_params.add_index(
+            field_name="victims[name_vector]",
+            index_type="HNSW",
+            metric_type="MAX_SIM_COSINE",
+            params=INDEX_PARAMS,
+        )
+        index_params.add_index(
+            field_name="vehicles[vehicle_vector]",
+            index_type="HNSW",
+            metric_type="MAX_SIM_COSINE",
+            params=INDEX_PARAMS,
+        )
+        index_params.add_index(
+            field_name="evidence[evidence_vector]",
+            index_type="HNSW",
+            metric_type="MAX_SIM_COSINE",
+            params=INDEX_PARAMS,
+        )
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+
+        data = []
+        for i in range(64):
+            data.append(
+                {
+                    "id": i,
+                    "normal_vector": [random.random() for _ in range(default_dim)],
+                    "suspects": [
+                        {"name": f"suspect_{i}", "name_vector": [random.random() for _ in range(default_dim)]}
+                    ],
+                    "victims": [{"name": f"victim_{i}", "name_vector": [random.random() for _ in range(default_dim)]}],
+                    "vehicles": [
+                        {"model": f"vehicle_{i}", "vehicle_vector": [random.random() for _ in range(default_dim)]}
+                    ],
+                    "evidence": [
+                        {"item": f"evidence_{i}", "evidence_vector": [random.random() for _ in range(default_dim)]}
+                    ],
+                }
+            )
+
+        res, check = self.insert(client, collection_name, data)
+        assert check
+        assert res["insert_count"] == 64
+
+        res, check = self.load_collection(client, collection_name)
+        assert check
+
+        search_tensor = EmbeddingList()
+        search_tensor.add([random.random() for _ in range(default_dim)])
+        results, check = self.search(
+            client,
+            collection_name,
+            data=[search_tensor],
+            anns_field="evidence[evidence_vector]",
+            search_params={"metric_type": "MAX_SIM_COSINE"},
+            limit=10,
+        )
+        assert check
+        assert len(results[0]) > 0
+
+    @pytest.mark.tags(CaseLabel.L0)
     def test_search_struct_array_vector_multiple(self):
         """
         target: test search with multiple vectors (EmbeddingList) in struct array
@@ -1831,6 +2019,95 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
                 # Check that returned data respects the filter
                 # This depends on what fields are returned
                 assert hit is not None
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_emb_list_with_trailing_empty_arrays_and_scalar_filter(self):
+        """
+        target: test filtered emb-list search when sealed index data ends with empty arrays
+        method: insert non-empty arrays followed by empty arrays, flush, index, and search with a scalar filter
+        expected: search succeeds and returns every matching non-empty row
+        """
+        collection_name = cf.gen_unique_str(f"{prefix}_trailing_empty")
+        client = self._client()
+        dim = 32
+        non_empty_rows = 2000
+        total_rows = 3000
+
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
+
+        struct_schema = client.create_struct_field_schema()
+        struct_schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(
+            "clips",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=struct_schema,
+            max_capacity=1,
+            nullable=False,
+        )
+        res, check = self.create_collection(client, collection_name, schema=schema)
+        assert check
+
+        rng = np.random.default_rng(seed=19530)
+        vectors = rng.random((non_empty_rows, dim)).tolist()
+        data = [
+            {
+                "id": i,
+                "clips": [{"embedding": vectors[i]}] if i < non_empty_rows else [],
+            }
+            for i in range(total_rows)
+        ]
+        res, check = self.insert(client, collection_name, data)
+        assert check
+        assert res["insert_count"] == total_rows
+        res, check = self.flush(client, collection_name)
+        assert check
+
+        index_params = client.prepare_index_params()
+        index_params.add_index(
+            field_name="clips[embedding]",
+            index_type="HNSW",
+            metric_type="MAX_SIM_COSINE",
+            params=INDEX_PARAMS,
+        )
+        res, check = self.create_index(client, collection_name, index_params)
+        assert check
+        res, check = self.load_collection(client, collection_name)
+        assert check
+
+        trailing_results, check = self.query(
+            client,
+            collection_name,
+            filter=f"id in [{non_empty_rows - 1}, {total_rows - 2}, {total_rows - 1}]",
+            output_fields=["id", "clips"],
+        )
+        assert check
+        assert len(trailing_results) == 3
+        trailing_results_by_id = {row["id"]: row["clips"] for row in trailing_results}
+        assert len(trailing_results_by_id[non_empty_rows - 1]) == 1
+        np.testing.assert_allclose(
+            trailing_results_by_id[non_empty_rows - 1][0]["embedding"],
+            vectors[non_empty_rows - 1],
+        )
+        assert trailing_results_by_id[total_rows - 2] == []
+        assert trailing_results_by_id[total_rows - 1] == []
+
+        search_tensor = EmbeddingList()
+        search_tensor.add(vectors[0])
+        results, check = self.search(
+            client,
+            collection_name,
+            data=[search_tensor],
+            anns_field="clips[embedding]",
+            search_params={"metric_type": "MAX_SIM_COSINE", "params": {"ef": 64}},
+            filter="id < 10",
+            limit=10,
+            output_fields=["id"],
+        )
+        assert check
+        assert len(results[0]) == 10
+        assert {hit["id"] for hit in results[0]} == set(range(10))
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_different_array_lengths(self):
@@ -2536,13 +2813,126 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         for hit in results[0]:
             assert hit["id"] not in delete_ids
 
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize(
+        "index_type",
+        list(EMB_LIST_VECTOR_TYPES.keys()),
+        ids=[index_type.lower() for index_type in EMB_LIST_VECTOR_TYPES],
+    )
+    def test_search_emb_list_index_type_with_all_supported_vector_subfields(self, index_type):
+        """
+        target: test emb list search on each index type with all supported vector subfield types
+        method: create one struct array containing all supported vector types for the index type, then search each field
+        expected: index creation, load, and search work for every supported vector subfield type
+        """
+        collection_name = cf.gen_unique_str(f"{prefix}_search_idx_{index_type.lower()}_vtypes")
+        client = self._client()
+        vector_types = EMB_LIST_VECTOR_TYPES[index_type]
+        index_config = self.get_emb_list_index_config(index_type)
+
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
+        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=EMB_LIST_DIM)
+
+        struct_schema = client.create_struct_field_schema()
+        for vector_type in vector_types:
+            struct_schema.add_field(EMB_LIST_VECTOR_FIELD_NAMES[vector_type], vector_type, dim=EMB_LIST_DIM)
+        struct_schema.add_field("scalar_field", DataType.INT64)
+        struct_schema.add_field("category", DataType.VARCHAR, max_length=128)
+
+        schema.add_field(
+            "clips",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=struct_schema,
+            max_capacity=10,
+        )
+
+        res, check = self.create_collection(client, collection_name, schema=schema)
+        assert check
+
+        nb = 3000
+        clip_count = 2
+        vectors_by_type = {
+            vector_type: cf.gen_vectors(nb * clip_count, EMB_LIST_DIM, vector_type) for vector_type in vector_types
+        }
+        rows = []
+        for i in range(nb):
+            clips = []
+            for j in range(clip_count):
+                offset = i * clip_count + j
+                clip = {
+                    "scalar_field": i * 10 + j,
+                    "category": f"cat_{i % 5}",
+                }
+                for vector_type in vector_types:
+                    clip[EMB_LIST_VECTOR_FIELD_NAMES[vector_type]] = vectors_by_type[vector_type][offset]
+                clips.append(clip)
+
+            rows.append(
+                {
+                    "id": i,
+                    "normal_vector": [random.random() for _ in range(EMB_LIST_DIM)],
+                    "clips": clips,
+                }
+            )
+
+        res, check = self.insert(client, collection_name, rows)
+        assert check
+        assert res["insert_count"] == nb
+
+        res, check = self.flush(client, collection_name)
+        assert check
+
+        index_params = client.prepare_index_params()
+        index_params.add_index(
+            field_name="normal_vector",
+            index_type="IVF_FLAT",
+            metric_type="L2",
+            params={"nlist": 128},
+        )
+        for vector_type in vector_types:
+            field_name = EMB_LIST_VECTOR_FIELD_NAMES[vector_type]
+            index_params.add_index(
+                field_name=f"clips[{field_name}]",
+                index_name=f"struct_vector_index_{field_name}",
+                index_type=index_type,
+                metric_type=self.get_emb_list_metric_type(vector_type),
+                params=index_config["build_params"],
+            )
+
+        res, check = self.create_index(client, collection_name, index_params)
+        assert check
+
+        res, check = self.load_collection(client, collection_name)
+        assert check
+
+        for vector_type in vector_types:
+            field_name = EMB_LIST_VECTOR_FIELD_NAMES[vector_type]
+            results, check = self.search(
+                client,
+                collection_name,
+                data=[self.create_embedding_list_by_vector_type(EMB_LIST_DIM, 3, vector_type)],
+                anns_field=f"clips[{field_name}]",
+                search_params={
+                    "metric_type": self.get_emb_list_metric_type(vector_type),
+                    "params": index_config["search_params"],
+                },
+                limit=10,
+                output_fields=["id"],
+            )
+            assert check
+            assert len(results[0]) > 0
+            for hit in results[0]:
+                assert 0 <= hit["id"] < nb
+
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("emb_list_strategy,index_type", EMB_LIST_STRATEGY_INDEX_CASES)
     def test_search_emb_list_with_explicit_strategy(self, emb_list_strategy, index_type):
         """
         target: test emb list search with explicitly specified strategies
-        method: create HNSW and DISKANN indexes with supported emb_list_strategy values, load, and search
-        expected: index creation and search work correctly
+        method: create indexes with supported emb_list_strategy/index combinations, load, and search
+        expected: index creation and search work correctly for each supported combination
         """
         collection_name = cf.gen_unique_str(f"{prefix}_search_{emb_list_strategy}_{index_type.lower()}")
         client = self._client()
@@ -2634,6 +3024,61 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         assert len(results[0]) > 0
         for hit in results[0]:
             assert 0 <= hit["id"] < nb
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("emb_list_strategy,index_type", EMB_LIST_UNSUPPORTED_STRATEGY_INDEX_CASES)
+    def test_create_emb_list_with_unsupported_strategy_index(self, emb_list_strategy, index_type):
+        """
+        target: test unsupported emb list strategy/index combinations
+        method: create DISKANN index with muvera or lemur emb_list_strategy
+        expected: index creation fails because DISKANN only supports tokenann strategy
+        """
+        collection_name = cf.gen_unique_str(f"{prefix}_search_{emb_list_strategy}_{index_type.lower()}_invalid")
+        client = self._client()
+        strategy_config = EMB_LIST_STRATEGY_CONFIGS[emb_list_strategy]
+        index_config = EMB_LIST_STRATEGY_INDEX_CONFIGS[index_type]
+
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
+        schema.add_field(field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=EMB_LIST_DIM)
+
+        struct_schema = client.create_struct_field_schema()
+        struct_schema.add_field("clip_embedding1", DataType.FLOAT_VECTOR, dim=EMB_LIST_DIM)
+        struct_schema.add_field("scalar_field", DataType.INT64)
+        schema.add_field(
+            "clips",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=struct_schema,
+            max_capacity=10,
+        )
+
+        res, check = self.create_collection(client, collection_name, schema=schema)
+        assert check
+
+        index_params = client.prepare_index_params()
+        index_params.add_index(
+            field_name="clips[clip_embedding1]",
+            index_name=f"struct_vector_index_{emb_list_strategy}_{index_type.lower()}",
+            index_type=index_type,
+            metric_type="MAX_SIM_COSINE",
+            params={
+                **index_config["build_params"],
+                **strategy_config["strategy_params"],
+            },
+        )
+
+        error = {
+            ct.err_code: 1100,
+            ct.err_msg: "DiskANN only supports TokenANN strategy",
+        }
+        self.create_index(
+            client,
+            collection_name,
+            index_params,
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize(
@@ -3448,6 +3893,124 @@ class TestMilvusClientStructArrayQuery(TestMilvusClientV2Base):
             assert "id" in result
             assert "clips" in result
             assert "normal_vector" not in result
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_query_struct_array_parent_output_with_diskann_index(self):
+        """
+        target: test query parent struct array output when vector sub-field uses DISKANN
+        method: build DISKANN on array_struct[float_vector], query id-only, then query id + array_struct
+        expected: both queries succeed and parent struct array output is returned
+        """
+        collection_name = cf.gen_unique_str(f"{prefix}_query_diskann_output")
+
+        client = self._client()
+        dim = 32
+
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=dim)
+
+        struct_schema = client.create_struct_field_schema()
+        struct_schema.add_field("name", DataType.VARCHAR, max_length=64)
+        struct_schema.add_field("age", DataType.INT64)
+        struct_schema.add_field("float_vector", DataType.FLOAT_VECTOR, dim=dim)
+        struct_schema.add_field("nested_float_vector", DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(
+            "array_struct",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=struct_schema,
+            max_capacity=4,
+        )
+
+        res, check = self.create_collection(client, collection_name, schema=schema)
+        assert check
+
+        rows = []
+        for i in range(3000):
+            rows.append(
+                {
+                    "id": i,
+                    "vector": [random.random() for _ in range(dim)],
+                    "array_struct": [
+                        {
+                            "name": f"n{i}",
+                            "age": i % 100,
+                            "float_vector": [random.random() for _ in range(dim)],
+                            "nested_float_vector": [random.random() for _ in range(dim)],
+                        },
+                        {
+                            "name": f"n{i}_alt",
+                            "age": (i + 1) % 100,
+                            "float_vector": [random.random() for _ in range(dim)],
+                            "nested_float_vector": [random.random() for _ in range(dim)],
+                        },
+                    ],
+                }
+            )
+        res, check = self.insert(client, collection_name, rows)
+        assert check
+        assert res["insert_count"] == len(rows)
+        res, check = self.flush(client, collection_name)
+        assert check
+
+        index_params = client.prepare_index_params()
+        index_params.add_index(
+            field_name="vector",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params={"M": 8, "efConstruction": 64},
+        )
+        index_params.add_index(
+            field_name="array_struct[float_vector]",
+            index_type="DISKANN",
+            metric_type="MAX_SIM_COSINE",
+            params={},
+        )
+        index_params.add_index(
+            field_name="array_struct[nested_float_vector]",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params={"M": 8, "efConstruction": 64},
+        )
+        index_params.add_index(field_name="array_struct[name]", index_type="INVERTED")
+        index_params.add_index(field_name="array_struct[age]", index_type="STL_SORT")
+        res, check = self.create_index(
+            client,
+            collection_name,
+            index_params,
+            timeout=300,
+        )
+        assert check
+        res, check = self.load_collection(client, collection_name, timeout=300)
+        assert check
+
+        filter_expr = "MATCH_ANY(array_struct, $[age] >= 0)"
+        id_only_results, check = self.query(
+            client,
+            collection_name,
+            filter=filter_expr,
+            output_fields=["id"],
+            limit=3,
+        )
+        assert check
+        assert len(id_only_results) > 0
+        assert all(set(row) == {"id"} for row in id_only_results)
+
+        struct_results, check = self.query(
+            client,
+            collection_name,
+            filter=filter_expr,
+            output_fields=["id", "array_struct"],
+            limit=3,
+        )
+        assert check
+        assert len(struct_results) > 0
+        for row in struct_results:
+            assert "id" in row
+            assert "array_struct" in row
+            assert isinstance(row["array_struct"], list)
+            assert len(row["array_struct"]) > 0
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_query_with_expr_filter(self):
@@ -4396,7 +4959,6 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("nullable_field", ["clip_embedding1", "scalar_field"])
     def test_struct_array_with_nullable_field(self, nullable_field):
-
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
@@ -4422,8 +4984,8 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
         )
         error = {
             ct.err_code: 1100,
-            ct.err_msg: f"sub-field in non-nullable struct cannot be nullable individually, "
-            f"set nullable on the struct instead: structName=clips, subFieldName={nullable_field}",
+            ct.err_msg: f"Field '{nullable_field}' in struct 'clips' cannot be nullable individually, "
+            f"set nullable on the struct instead",
         }
         self.create_collection(
             client,
@@ -4434,11 +4996,11 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
         )
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_embedding_list_field_nullable_insert_none_not_supported(self):
+    def test_embedding_list_field_nullable_insert_none_supported(self):
         """
         target: test embedding list field nullable boundary
         method: create struct array field with nullable=True and insert None
-        expected: create collection succeeds, but None row value is not supported
+        expected: create collection and insert succeed, and null parent field is queryable
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
@@ -4462,7 +5024,20 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
             max_capacity=100,
             nullable=True,
         )
-        res, check = self.create_collection(client, collection_name, schema=schema)
+        index_params = client.prepare_index_params()
+        index_params.add_index(
+            field_name="normal_vector",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params=INDEX_PARAMS,
+        )
+        index_params.add_index(
+            field_name="clips[embedding]",
+            index_type="HNSW",
+            metric_type="MAX_SIM_COSINE",
+            params=INDEX_PARAMS,
+        )
+        res, check = self.create_collection(client, collection_name, schema=schema, index_params=index_params)
         assert check
 
         data = [
@@ -4472,17 +5047,22 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
                 "clips": None,
             }
         ]
-        error = {
-            ct.err_code: 1,
-            ct.err_msg: "Expected list, got NoneType",
-        }
-        self.insert(
+        res, check = self.insert(
             client,
             collection_name,
             data,
-            check_task=CheckTasks.err_res,
-            check_items=error,
         )
+        assert check
+        assert res["insert_count"] == 1
+
+        res, check = self.flush(client, collection_name)
+        assert check
+        res, check = self.load_collection(client, collection_name)
+        assert check
+
+        res, check = self.query(client, collection_name, filter="id == 0", output_fields=["id", "clips"])
+        assert check
+        assert res == [{"id": 0, "clips": None}]
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_struct_array_range_search_not_supported(self):
@@ -4606,7 +5186,7 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
         self.minio_endpoint = f"{minio_host}:9000"
 
     def gen_file_with_local_bulk_writer(
-        self, schema, data: list[dict[str, Any]], file_type: str = "PARQUET"
+        self, schema, data: list[dict[str, Any]], file_type: str | BulkFileType = "PARQUET"
     ) -> tuple[str, dict]:
         """
         Generate import file using LocalBulkWriter from insert-format data
@@ -4619,8 +5199,12 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
         Returns:
             Tuple of (directory path containing generated files, original data dict for verification)
         """
-        # Convert file_type string to BulkFileType enum
-        bulk_file_type = BulkFileType.PARQUET if file_type == "PARQUET" else BulkFileType.JSON
+        if isinstance(file_type, BulkFileType):
+            bulk_file_type = file_type
+            file_type_name = file_type.name
+        else:
+            bulk_file_type = BulkFileType[file_type]
+            file_type_name = file_type
 
         # Create LocalBulkWriter
         writer = LocalBulkWriter(
@@ -4630,7 +5214,7 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
             file_type=bulk_file_type,
         )
 
-        log.info(f"Creating {file_type} file using LocalBulkWriter with {len(data)} rows")
+        log.info(f"Creating {file_type_name} file using LocalBulkWriter with {len(data)} rows")
 
         # Append each row using the same format as insert
         for row in data:
@@ -4681,7 +5265,8 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
 
             # Upload file
             filename = os.path.basename(local_file_path)
-            minio_file_path = os.path.join(self.REMOTE_DATA_PATH, filename)
+            local_parent = os.path.basename(os.path.dirname(local_file_path))
+            minio_file_path = os.path.join(self.REMOTE_DATA_PATH, local_parent, filename)
             minio_client.fput_object(self.bucket_name, minio_file_path, local_file_path)
 
             log.info(f"Uploaded file to MinIO: {minio_file_path}")
@@ -4690,13 +5275,24 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
         except S3Error as e:
             raise Exception(f"Failed to connect MinIO server {self.minio_endpoint}, error: {e}")
 
-    def call_bulkinsert(self, collection_name: str, batch_files: list[list[str]]):
+    def call_bulkinsert(
+        self,
+        collection_name: str,
+        batch_files: list[list[str]],
+        expect_fail: bool = False,
+        partition_name: str = "",
+    ) -> dict[str, Any]:
         """
         Call bulk import API and wait for completion
 
         Args:
             collection_name: Target collection name
             batch_files: List of file paths in MinIO
+            expect_fail: Whether the import job is expected to fail
+            partition_name: Optional target partition name
+
+        Returns:
+            Import result dict with state and reason
         """
         url = f"http://{cf.param_info.param_host}:{cf.param_info.param_port}"
 
@@ -4705,6 +5301,8 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
             url=url,
             collection_name=collection_name,
             files=batch_files,
+            api_key=cf.param_info.param_token,
+            partition_name=partition_name,
         )
 
         job_id = resp.json()["data"]["jobId"]
@@ -4716,20 +5314,25 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
         while time.time() - start_time < timeout:
             time.sleep(5)
 
-            resp = get_import_progress(url=url, job_id=job_id)
+            resp = get_import_progress(url=url, job_id=job_id, api_key=cf.param_info.param_token)
             state = resp.json()["data"]["state"]
-            progress = resp.json()["data"]["progress"]
+            progress = resp.json()["data"].get("progress", 0)
 
             log.info(f"Import job {job_id} - state: {state}, progress: {progress}%")
 
             if state == "Importing":
                 continue
             elif state == "Failed":
-                reason = resp.json()["data"]["reason"]
+                reason = resp.json()["data"].get("reason", "Unknown reason")
+                if expect_fail:
+                    log.info(f"Bulk import job {job_id} failed as expected: {reason}")
+                    return {"state": "Failed", "reason": reason}
                 raise Exception(f"Bulk import job {job_id} failed: {reason}")
             elif state == "Completed" and progress == 100:
+                if expect_fail:
+                    raise AssertionError(f"Bulk import job {job_id} unexpectedly completed")
                 log.info(f"Bulk import job {job_id} completed successfully")
-                break
+                return {"state": "Completed", "reason": None}
         else:
             raise Exception(f"Bulk import job {job_id} timeout after {timeout}s")
 
@@ -5006,6 +5609,357 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
         self.verify_data(client, c_name, original_data)
 
         log.info("Struct array JSON import test completed successfully")
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("dim", [128])
+    @pytest.mark.parametrize("entities", [200])
+    @pytest.mark.parametrize("array_capacity", [100])
+    def test_import_struct_array_with_csv(self, dim, entities, array_capacity):
+        """
+        Test bulk import of struct array data from CSV.
+
+        Struct array is encoded as a JSON string in the CSV column, matching
+        importutilv2/csv row parser expectations.
+        """
+        client = self._client()
+        c_name = cf.gen_unique_str("import_struct_array_csv")
+
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
+        schema.add_field(field_name="float_vector", datatype=DataType.FLOAT_VECTOR, dim=dim)
+
+        struct_schema = client.create_struct_field_schema()
+        struct_schema.add_field("struct_varchar", DataType.VARCHAR, max_length=65535)
+        struct_schema.add_field("struct_int8", DataType.INT8)
+        struct_schema.add_field("struct_int16", DataType.INT16)
+        struct_schema.add_field("struct_int32", DataType.INT32)
+        struct_schema.add_field("struct_int64", DataType.INT64)
+        struct_schema.add_field("struct_float", DataType.FLOAT)
+        struct_schema.add_field("struct_double", DataType.DOUBLE)
+        struct_schema.add_field("struct_bool", DataType.BOOL)
+        struct_schema.add_field("struct_float_vec", DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(
+            "struct_array",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=struct_schema,
+            max_capacity=array_capacity,
+        )
+
+        index_params = client.prepare_index_params()
+        index_params.add_index(
+            field_name="float_vector",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params={"M": 16, "efConstruction": 200},
+        )
+        index_params.add_index(
+            field_name="struct_array[struct_float_vec]",
+            index_type="HNSW",
+            metric_type="MAX_SIM_COSINE",
+            params={"M": 16, "efConstruction": 200},
+        )
+        client.create_collection(collection_name=c_name, schema=schema, index_params=index_params)
+
+        local_file_path = os.path.join(self.LOCAL_FILES_PATH, f"test_{cf.gen_unique_str()}.csv")
+        original_data = self.gen_csv_file(entities, dim, local_file_path)
+        remote_files = self.upload_to_minio(local_file_path)
+        self.call_bulkinsert(c_name, remote_files)
+
+        client.refresh_load(collection_name=c_name)
+        stats = client.get_collection_stats(collection_name=c_name)
+        assert stats["row_count"] == entities
+        self.verify_data(client, c_name, original_data)
+
+    def create_vector_import_collection(
+        self, client, c_name: str, vector_type: DataType, dim: int, array_capacity: int
+    ):
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
+        schema.add_field(field_name="float_vector", datatype=DataType.FLOAT_VECTOR, dim=dim)
+
+        struct_schema = client.create_struct_field_schema()
+        struct_schema.add_field("struct_int", DataType.INT64)
+        struct_schema.add_field("struct_vec", vector_type, dim=dim)
+        schema.add_field(
+            "struct_array",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=struct_schema,
+            max_capacity=array_capacity,
+        )
+
+        index_params = client.prepare_index_params()
+        index_params.add_index(
+            field_name="float_vector",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params={"M": 16, "efConstruction": 200},
+        )
+        index_params.add_index(
+            field_name="struct_array[struct_vec]",
+            index_type="HNSW",
+            metric_type=self.struct_vector_metric(vector_type),
+            params={"M": 16, "efConstruction": 200},
+        )
+        client.create_collection(collection_name=c_name, schema=schema, index_params=index_params)
+        return schema
+
+    @staticmethod
+    def struct_vector_metric(vector_type: DataType) -> str:
+        return "MAX_SIM_HAMMING" if vector_type == DataType.BINARY_VECTOR else "MAX_SIM_COSINE"
+
+    @staticmethod
+    def struct_vector_arrow_type(vector_type: DataType):
+        if vector_type == DataType.FLOAT_VECTOR:
+            return pa.list_(pa.float32())
+        if vector_type in [DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR, DataType.BINARY_VECTOR]:
+            return pa.list_(pa.uint8())
+        if vector_type == DataType.INT8_VECTOR:
+            return pa.list_(pa.int8())
+        raise ValueError(f"unsupported struct vector type: {vector_type}")
+
+    @staticmethod
+    def vector_type_name(vector_type: DataType) -> str:
+        return vector_type.name.lower()
+
+    @staticmethod
+    def float_values(seed: int, dim: int) -> list[float]:
+        return [float(((seed + i) % 97) + 1) / 97 for i in range(dim)]
+
+    @classmethod
+    def binary_bytes(cls, seed: int, dim: int) -> list[int]:
+        return [((seed + i) % 256) for i in range(dim // 8)]
+
+    @classmethod
+    def binary_bits(cls, seed: int, dim: int) -> list[int]:
+        return [((seed + i) % 2) for i in range(dim)]
+
+    @classmethod
+    def int8_values(cls, seed: int, dim: int) -> list[int]:
+        return [((seed + i) % 255) - 128 for i in range(dim)]
+
+    @classmethod
+    def struct_vector_value_for_import(cls, vector_type: DataType, seed: int, dim: int, file_type: str):
+        if vector_type == DataType.FLOAT_VECTOR:
+            return cls.float_values(seed, dim)
+        if vector_type == DataType.FLOAT16_VECTOR:
+            values = cls.float_values(seed, dim)
+            if file_type == "PARQUET":
+                return list(np.array(values, dtype=np.float16).tobytes())
+            return values
+        if vector_type == DataType.BFLOAT16_VECTOR:
+            values = cls.float_values(seed, dim)
+            if file_type == "PARQUET":
+                return list(np.array(values, dtype=cf.bfloat16).tobytes())
+            return values
+        if vector_type == DataType.INT8_VECTOR:
+            return cls.int8_values(seed, dim)
+        if vector_type == DataType.BINARY_VECTOR:
+            return cls.binary_bytes(seed, dim)
+        raise ValueError(f"unsupported struct vector type: {vector_type}")
+
+    @classmethod
+    def struct_vector_value_for_bulk_writer(cls, vector_type: DataType, seed: int, dim: int):
+        if vector_type == DataType.FLOAT_VECTOR:
+            return cls.float_values(seed, dim)
+        if vector_type == DataType.FLOAT16_VECTOR:
+            return np.array(cls.float_values(seed, dim), dtype=np.float16)
+        if vector_type == DataType.BFLOAT16_VECTOR:
+            return np.array(cls.float_values(seed, dim), dtype=cf.bfloat16)
+        if vector_type == DataType.INT8_VECTOR:
+            return np.array(cls.int8_values(seed, dim), dtype=np.int8)
+        if vector_type == DataType.BINARY_VECTOR:
+            return cls.binary_bits(seed, dim)
+        raise ValueError(f"unsupported struct vector type: {vector_type}")
+
+    @classmethod
+    def struct_search_vector(cls, vector_type: DataType, seed: int, dim: int):
+        if vector_type == DataType.FLOAT_VECTOR:
+            return EmbeddingList([np.array(cls.float_values(seed, dim), dtype=np.float32)])
+        if vector_type == DataType.FLOAT16_VECTOR:
+            return EmbeddingList([np.array(cls.float_values(seed, dim), dtype=np.float16)])
+        if vector_type == DataType.BFLOAT16_VECTOR:
+            return EmbeddingList([np.array(cls.float_values(seed, dim), dtype=cf.bfloat16)])
+        if vector_type == DataType.INT8_VECTOR:
+            return EmbeddingList([np.array(cls.int8_values(seed, dim), dtype=np.int8)])
+        if vector_type == DataType.BINARY_VECTOR:
+            return EmbeddingList([np.frombuffer(bytes(cls.binary_bytes(seed, dim)), dtype=np.uint8)])
+        raise ValueError(f"unsupported struct vector type: {vector_type}")
+
+    def gen_struct_vector_rows(self, entities: int, dim: int, vector_type: DataType, file_type: str) -> dict[str, Any]:
+        id_arr = []
+        float_vector_arr = []
+        struct_arr = []
+        for i in range(entities):
+            rng = random.Random(i)
+            struct_list = []
+            for j in range(rng.randint(1, 4)):
+                struct_list.append(
+                    {
+                        "struct_int": i * 10 + j,
+                        "struct_vec": self.struct_vector_value_for_import(vector_type, i * 10 + j, dim, file_type),
+                    }
+                )
+            id_arr.append(i)
+            float_vector = [rng.random() for _ in range(dim)]
+            float_vector_arr.append(float_vector)
+            struct_arr.append(struct_list)
+        return {
+            "id": id_arr,
+            "float_vector": float_vector_arr,
+            "struct_array": struct_arr,
+        }
+
+    def gen_struct_vector_bulk_writer_rows(
+        self, entities: int, dim: int, vector_type: DataType
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        original_data = self.gen_struct_vector_rows(entities, dim, vector_type, "JSON")
+        rows = []
+        for i in range(entities):
+            struct_array = []
+            for item in original_data["struct_array"][i]:
+                struct_array.append(
+                    {
+                        "struct_int": item["struct_int"],
+                        "struct_vec": self.struct_vector_value_for_bulk_writer(vector_type, item["struct_int"], dim),
+                    }
+                )
+            rows.append(
+                {
+                    "id": original_data["id"][i],
+                    "float_vector": original_data["float_vector"][i],
+                    "struct_array": struct_array,
+                }
+            )
+        return rows, original_data
+
+    def write_struct_vector_import_file(
+        self, data: dict[str, Any], vector_type: DataType, file_type: str, dim: int, file_path: str
+    ):
+        rows = [
+            {
+                "id": data["id"][i],
+                "float_vector": data["float_vector"][i],
+                "struct_array": data["struct_array"][i],
+            }
+            for i in range(len(data["id"]))
+        ]
+        if file_type == "JSON":
+            with open(file_path, "w") as f:
+                json.dump(rows, f, indent=2)
+            return
+        if file_type == "JSONL":
+            with open(file_path, "w") as f:
+                for row in rows:
+                    f.write(json.dumps(row))
+                    f.write("\n")
+            return
+        if file_type == "CSV":
+            with open(file_path, "w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=["id", "float_vector", "struct_array"])
+                writer.writeheader()
+                for row in rows:
+                    writer.writerow(
+                        {
+                            "id": row["id"],
+                            "float_vector": json.dumps(row["float_vector"]),
+                            "struct_array": json.dumps(row["struct_array"]),
+                        }
+                    )
+            return
+
+        struct_type = pa.struct(
+            [
+                pa.field("struct_int", pa.int64()),
+                pa.field("struct_vec", self.struct_vector_arrow_type(vector_type)),
+            ]
+        )
+        table = pa.table(
+            {
+                "id": pa.array(data["id"], type=pa.int64()),
+                "float_vector": pa.array(data["float_vector"], type=pa.list_(pa.float32())),
+                "struct_array": pa.array(data["struct_array"], type=pa.list_(struct_type)),
+            }
+        )
+        pq.write_table(table, file_path, row_group_size=10000)
+
+    def verify_struct_vector_import(self, client: MilvusClient, collection_name: str, entities: int):
+        client.refresh_load(collection_name=collection_name)
+        stats = client.get_collection_stats(collection_name=collection_name)
+        assert stats["row_count"] == entities
+        results = client.query(collection_name=collection_name, filter="id >= 0", output_fields=["id"], limit=entities)
+        assert len(results) == entities
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("dim", [32])
+    @pytest.mark.parametrize("entities", [20])
+    @pytest.mark.parametrize("array_capacity", [32])
+    @pytest.mark.parametrize("vector_type", STRUCT_ARRAY_IMPORT_VECTOR_TYPES)
+    @pytest.mark.parametrize("file_type", STRUCT_ARRAY_IMPORT_FILE_TYPES)
+    def test_import_struct_array_vector_subfield_all_file_types(
+        self, dim, entities, array_capacity, vector_type, file_type
+    ):
+        """
+        Test import support for every struct-array vector sub-field type and row import file format.
+
+        The vector sub-field types are aligned with struct array insert support.
+        JSON, CSV, and parquet are all bulk import row formats and should accept the same vector sub-field set.
+        """
+        client = self._client()
+        c_name = cf.gen_unique_str(f"import_struct_{self.vector_type_name(vector_type)}_{file_type.lower()}")
+        self.create_vector_import_collection(client, c_name, vector_type, dim, array_capacity)
+
+        local_file_path = os.path.join(self.LOCAL_FILES_PATH, f"test_{cf.gen_unique_str()}.{file_type.lower()}")
+        original_data = self.gen_struct_vector_rows(entities, dim, vector_type, file_type)
+        self.write_struct_vector_import_file(original_data, vector_type, file_type, dim, local_file_path)
+        import_files = self.upload_to_minio(local_file_path)
+
+        self.call_bulkinsert(c_name, import_files)
+        self.verify_struct_vector_import(client, c_name, entities)
+
+        results = client.search(
+            collection_name=c_name,
+            data=[self.struct_search_vector(vector_type, 0, dim)],
+            anns_field="struct_array[struct_vec]",
+            search_params={"metric_type": self.struct_vector_metric(vector_type), "params": {"ef": 64}},
+            limit=1,
+            output_fields=["id"],
+        )
+        assert len(results[0]) == 1
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("dim", [32])
+    @pytest.mark.parametrize("entities", [20])
+    @pytest.mark.parametrize("array_capacity", [32])
+    @pytest.mark.parametrize("vector_type", STRUCT_ARRAY_IMPORT_VECTOR_TYPES)
+    @pytest.mark.parametrize("file_type", STRUCT_ARRAY_BULK_WRITER_FILE_TYPES)
+    def test_import_struct_array_vector_subfield_with_local_bulk_writer(
+        self, dim, entities, array_capacity, vector_type, file_type
+    ):
+        """
+        Test pymilvus LocalBulkWriter support for every struct-array vector sub-field type and row file format.
+
+        BulkWriter should accept the same struct array vector sub-field types and native insert-format inputs as
+        ordinary vector fields, then generate importable JSON, JSONL, CSV, and parquet files for them.
+        """
+        client = self._client()
+        c_name = cf.gen_unique_str(f"import_struct_bw_{self.vector_type_name(vector_type)}_{file_type.name.lower()}")
+        schema = self.create_vector_import_collection(client, c_name, vector_type, dim, array_capacity)
+        insert_data, _ = self.gen_struct_vector_bulk_writer_rows(entities, dim, vector_type)
+
+        batch_files, _ = self.gen_file_with_local_bulk_writer(
+            schema=schema,
+            data=insert_data,
+            file_type=file_type,
+        )
+        import_files = []
+        for file_list in batch_files:
+            for file_path in file_list:
+                import_files.extend(self.upload_to_minio(file_path))
+
+        self.call_bulkinsert(c_name, import_files)
+        self.verify_struct_vector_import(client, c_name, entities)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("dim", [128])
@@ -5293,6 +6247,52 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
 
         log.info(f"Generated comprehensive JSON file with {num_rows} rows: {file_path}")
 
+        return {
+            "id": id_arr,
+            "float_vector": float_vector_arr,
+            "struct_array": struct_arr,
+        }
+
+    def gen_csv_file(self, num_rows: int, dim: int, file_path: str) -> dict:
+        """Generate CSV file with struct array encoded as JSON string."""
+        id_arr = []
+        float_vector_arr = []
+        struct_arr = []
+
+        with open(file_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=["id", "float_vector", "struct_array"])
+            writer.writeheader()
+            for i in range(num_rows):
+                rng = random.Random(i)
+                id_arr.append(i)
+                float_vector = [rng.random() for _ in range(dim)]
+                float_vector_arr.append(float_vector)
+
+                struct_list = []
+                for j in range(rng.randint(1, 5)):
+                    struct_list.append(
+                        {
+                            "struct_varchar": f"varchar_{i}_{j}",
+                            "struct_int8": rng.randint(-128, 127),
+                            "struct_int16": rng.randint(-32768, 32767),
+                            "struct_int32": rng.randint(-2147483648, 2147483647),
+                            "struct_int64": rng.randint(-9223372036854775808, 9223372036854775807),
+                            "struct_float": rng.random() * 100,
+                            "struct_double": rng.random() * 1000,
+                            "struct_bool": rng.choice([True, False]),
+                            "struct_float_vec": [rng.random() for _ in range(dim)],
+                        }
+                    )
+                struct_arr.append(struct_list)
+                writer.writerow(
+                    {
+                        "id": i,
+                        "float_vector": json.dumps(float_vector),
+                        "struct_array": json.dumps(struct_list),
+                    }
+                )
+
+        log.info(f"Generated comprehensive CSV file with {num_rows} rows: {file_path}")
         return {
             "id": id_arr,
             "float_vector": float_vector_arr,

@@ -10,13 +10,12 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/client/v2/column"
-	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/client/v2/index"
-	client "github.com/milvus-io/milvus/client/v2/milvusclient"
-	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/client/v3/column"
+	"github.com/milvus-io/milvus/client/v3/entity"
+	"github.com/milvus-io/milvus/client/v3/index"
+	client "github.com/milvus-io/milvus/client/v3/milvusclient"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
@@ -871,7 +870,7 @@ func TestNullableQuery(t *testing.T) {
 		{expr: fmt.Sprintf("%s is not null and %d <= %s < %d", common.DefaultVarcharFieldName, common.DefaultNb*3, common.DefaultInt64FieldName, common.DefaultNb*4), count: common.DefaultNb},
 	}
 	for _, exprCount := range exprCounts {
-		log.Info("exprCount", zap.String("expr", exprCount.expr), zap.Int64("count", exprCount.count))
+		mlog.Info(context.TODO(), "exprCount", mlog.String("expr", exprCount.expr), mlog.Int64("count", exprCount.count))
 		countRes, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(exprCount.expr).WithOutputFields(common.QueryCountFieldName))
 		common.CheckErr(t, err, true)
 		count, _ := countRes.Fields[0].GetAsInt64(0)
@@ -929,7 +928,7 @@ func TestDefaultValueQuery(t *testing.T) {
 			{expr: fmt.Sprintf("%s == 'test'", common.DefaultVarcharFieldName), count: common.DefaultNb * 3 / 2},
 		}
 		for _, exprCount := range exprCounts {
-			log.Info("exprCount", zap.String("expr", exprCount.expr), zap.Int64("count", exprCount.count))
+			mlog.Info(context.TODO(), "exprCount", mlog.String("expr", exprCount.expr), mlog.Int64("count", exprCount.count))
 			countRes, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(exprCount.expr).WithOutputFields(common.QueryCountFieldName))
 			common.CheckErr(t, err, true)
 			count, _ := countRes.Fields[0].GetAsInt64(0)
@@ -2397,18 +2396,10 @@ func TestNullableVectorUpsert(t *testing.T) {
 			common.CheckErr(t, err, true)
 			require.EqualValues(t, upsert3Nb, upsertRes3.UpsertCount)
 
-			// For AutoID=true, upsert returns new IDs for the upserted rows
+			// AutoID partial update keeps the existing primary keys.
 			if autoID {
 				upsertedIDs := upsertRes3.IDs.(*column.ColumnInt64)
-				newPkData := upsertedIDs.Data()
-				// Update actualPkData for rows 0 to nullPercent-1
-				for i := range upsert3Nb {
-					// Remove old expected state
-					delete(expectedVectorMap, actualPkData[i])
-					delete(expectedScalarMap, actualPkData[i])
-					// Update to new PK
-					actualPkData[i] = newPkData[i]
-				}
+				require.Equal(t, upsert3PkData, upsertedIDs.Data())
 			}
 
 			// Update expected state: rows 0 to nullPercent-1 scalar updated, vector preserved (null)

@@ -19,7 +19,7 @@ In Milvus, collections are divided into shards (channels), and each shard has mu
 │                                                                │
 │  ┌─────────────────────────────────────────────────────┐    │
 │  │              ShardClientMgr                          │    │
-│  │  • Shard leader cache (database → collection → shards) │
+│  │  • Shard leader cache (collectionID → shards)         │
 │  │  • QueryNode client pool management                   │
 │  │  • Client lifecycle (init, purge, close)             │
 │  └───────────────────────┬──────────────────────────────┘    │
@@ -64,7 +64,7 @@ The central manager for QueryNode client connections and shard leader informatio
 **File**: `manager.go`
 
 **Key Responsibilities**:
-- Cache shard leader mappings from QueryCoord (`database → collectionName → channel → []nodeInfo`)
+- Cache shard leader mappings from QueryCoord, keyed by the cluster-unique collection id (`collectionID → channel → []nodeInfo`); name/alias/database are resolved upstream against the meta cache and are never part of the key
 - Manage `shardClient` instances for each QueryNode
 - Automatically purge expired clients (default: 60 minutes of inactivity)
 - Invalidate cache when shard leaders change
@@ -76,7 +76,6 @@ type ShardClientMgr interface {
              collectionID int64, channel string) ([]nodeInfo, error)
     GetShardLeaderList(ctx context.Context, database, collectionName string,
                        collectionID int64, withCache bool) ([]string, error)
-    DeprecateShardCache(database, collectionName string)
     InvalidateShardLeaderCache(collections []int64)
     GetClient(ctx context.Context, nodeInfo nodeInfo) (types.QueryNodeClient, error)
     Start()
@@ -251,7 +250,7 @@ err := policy.ExecuteOneChannel(ctx, workload)
 The shard leader cache stores the mapping of shards to their leader QueryNodes:
 
 ```
-database → collectionName → shardLeaders {
+collectionID → shardLeaders {
     collectionID: int64
     shardLeaders: map[channel][]nodeInfo
 }
@@ -260,10 +259,9 @@ database → collectionName → shardLeaders {
 **Cache Operations**:
 - **Hit**: When cached shard leaders are used (tracked via `ProxyCacheStatsCounter`)
 - **Miss**: When cache lookup fails, triggers RPC to QueryCoord via `GetShardLeaders`
-- **Invalidation**:
-  - `DeprecateShardCache(db, collection)`: Remove specific collection
-  - `InvalidateShardLeaderCache(collectionIDs)`: Remove collections by ID (called on shard leader changes)
-  - `RemoveDatabase(db)`: Remove entire database
+- **Invalidation** (the cache is keyed by the cluster-unique collection id):
+  - `InvalidateShardLeaderCache(collectionIDs)`: Remove collections by id (called on shard-leader changes, collection drop, and search/query retry). O(len(collectionIDs)) direct deletes.
+  - `RemoveDatabase(db)`: No-op. DropDatabase requires an empty database, so its collections were already dropped and evicted by id; the id-keyed cache does not track database membership.
 
 ### Client Purging
 
