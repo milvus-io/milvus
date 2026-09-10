@@ -82,6 +82,11 @@ func (suite *MetaReloadSuite) SetupTest() {
 
 func (suite *MetaReloadSuite) resetMock() {
 	suite.catalog.ExpectedCalls = nil
+	// newMeta calls ListSegmentChangeGroups (group recovery) on every
+	// construction; SetupTest runs once per test method, not per subtest, so
+	// resetMock must re-register this default or the subtests that reach
+	// loadSegmentChangeGroups fail on an unexpected call (C12).
+	suite.catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 }
 
 func (suite *MetaReloadSuite) TestReloadFromKV() {
