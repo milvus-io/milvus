@@ -86,7 +86,7 @@ GetLoonManifest(
  *       Layer 2: apply external_spec.extfs JSON with allowlist gating.
  *       Post-process: AWS-form swap + Tier-1/2 endpoint derivation.
  *   - format-layer — per-format keys derived from spec.format (e.g.
- *     iceberg.snapshot_id when format="iceberg-table").
+ *     reader.exttable.snapshot_id when format="iceberg-table").
  *
  * The caller MUST have run ValidateExternalSource (Go side) first — this
  * function asserts non-empty scheme and host on external_source.

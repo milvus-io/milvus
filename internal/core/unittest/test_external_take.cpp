@@ -3630,17 +3630,95 @@ TEST(InjectExtfsAllowlist, AnonymousLayer0SkippedWithStalePreseed) {
     EXPECT_EQ(std::get<std::string>(props.at("extfs.42.anonymous")), "true");
 }
 
-TEST(InjectExtfsAllowlist, IcebergSnapshotIDAcceptsString) {
-    milvus_storage::api::Properties props;
-    const int64_t coll_id = 42;
-    std::string spec =
-        R"({"format":"iceberg-table","snapshot_id":"5320540205222981137"})";
+TEST(InjectExtfsAllowlist, IcebergSnapshotID) {
+    for (
+        const std::string spec : {
+            R"({"format":"iceberg-table","snapshot_id":"5320540205222981137"})",
+            R"({"format":"iceberg-table","snapshot_id":5320540205222981137})",
+            R"({"snapshot_id":"5320540205222981137","format":"iceberg-table"})",
+            R"({"snapshot_id":5320540205222981137,"format":"iceberg-table"})",
+        }) {
+        SCOPED_TRACE(spec);
+        milvus_storage::api::Properties props;
+        ::InjectExternalSpecProperties(
+            props, 42, "s3://s3.amazonaws.com/bucket/key", spec);
 
-    ::InjectExternalSpecProperties(
-        props, coll_id, "s3://s3.amazonaws.com/bucket/key", spec);
+        // Read the same typed property as IcebergFormat::explore so a stale
+        // property key cannot silently fall back to the latest snapshot.
+        const auto snapshot_id = milvus_storage::api::GetValue<int64_t>(
+            props, PROPERTY_READER_EXTTABLE_SNAPSHOT_ID);
+        ASSERT_TRUE(snapshot_id.ok()) << snapshot_id.status().ToString();
+        EXPECT_EQ(*snapshot_id, 5320540205222981137LL);
+    }
+}
 
-    EXPECT_EQ(std::get<std::string>(props.at("iceberg.snapshot_id")),
-              "5320540205222981137");
+TEST(InjectExtfsAllowlist, IcebergSnapshotIDCAbiRoundTrip) {
+    for (
+        const std::string spec : {
+            R"({"format":"iceberg-table","snapshot_id":"5320540205222981137"})",
+            R"({"format":"iceberg-table","snapshot_id":5320540205222981137})",
+            R"({"snapshot_id":"5320540205222981137","format":"iceberg-table"})",
+            R"({"snapshot_id":5320540205222981137,"format":"iceberg-table"})",
+        }) {
+        SCOPED_TRACE(spec);
+        LoonProperties properties{};
+        auto result = loon_properties_inject_external_spec(
+            &properties,
+            42,
+            "s3://s3.amazonaws.com/bucket/key",
+            spec.c_str(),
+            2000,
+            5000);
+        const std::string error =
+            result.message != nullptr ? result.message : "";
+        EXPECT_EQ(result.err_code, loon_errcode_success) << error;
+        loon_ffi_free_result(&result);
+
+        EXPECT_STREQ(loon_properties_get(&properties,
+                                         PROPERTY_READER_EXTTABLE_SNAPSHOT_ID),
+                     "5320540205222981137");
+        milvus_storage::api::Properties round_tripped;
+        const auto conversion_error = milvus_storage::api::ConvertFFIProperties(
+            round_tripped, &properties);
+        loon_properties_free(&properties);
+        ASSERT_FALSE(conversion_error.has_value())
+            << conversion_error.value_or("");
+        const auto snapshot_id = milvus_storage::api::GetValue<int64_t>(
+            round_tripped, PROPERTY_READER_EXTTABLE_SNAPSHOT_ID);
+        ASSERT_TRUE(snapshot_id.ok()) << snapshot_id.status().ToString();
+        EXPECT_EQ(*snapshot_id, 5320540205222981137LL);
+    }
+}
+
+TEST(InjectExtfsAllowlist, InvalidIcebergSnapshotIDIsRejected) {
+    for (const std::string spec : {
+             R"({"format":"iceberg-table","snapshot_id":-2})",
+             R"({"format":"iceberg-table","snapshot_id":"-2"})",
+             R"({"snapshot_id":-2,"format":"iceberg-table"})",
+             R"({"snapshot_id":"-2","format":"iceberg-table"})",
+         }) {
+        SCOPED_TRACE(spec);
+        milvus_storage::api::Properties props;
+        EXPECT_THROW(::InjectExternalSpecProperties(
+                         props, 42, "s3://s3.amazonaws.com/bucket/key", spec),
+                     milvus::SegcoreError);
+
+        LoonProperties properties{};
+        auto result = loon_properties_inject_external_spec(
+            &properties,
+            42,
+            "s3://s3.amazonaws.com/bucket/key",
+            spec.c_str(),
+            2000,
+            5000);
+        EXPECT_EQ(result.err_code, loon_errcode_invalid_properties);
+        const std::string error =
+            result.message != nullptr ? result.message : "";
+        EXPECT_NE(error.find("reader.exttable.snapshot_id"), std::string::npos);
+        EXPECT_NE(error.find("-2"), std::string::npos);
+        loon_ffi_free_result(&result);
+        loon_properties_free(&properties);
+    }
 }
 
 // ============================================================
