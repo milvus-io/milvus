@@ -2329,7 +2329,7 @@ func LackOfFieldsDataBySchema(schema *schemapb.CollectionSchema, fieldsData []*s
 			}
 
 			log.Info(context.TODO(), "no corresponding fieldData pass in", mlog.String("fieldSchema", fieldSchema.GetName()))
-			return merr.WrapErrParameterInvalidMsg("fieldSchema(%s) has no corresponding fieldData pass in", fieldSchema.GetName())
+			return merr.WrapErrParameterInvalidMsg("missing required field %q", fieldSchema.GetName())
 		}
 	}
 	for _, structSchema := range schema.GetStructArrayFields() {
@@ -2338,7 +2338,7 @@ func LackOfFieldsDataBySchema(schema *schemapb.CollectionSchema, fieldsData []*s
 		}
 		if _, ok := dataNameMap[structSchema.GetName()]; !ok {
 			log.Info(context.TODO(), "no corresponding struct fieldData pass in", mlog.String("structFieldSchema", structSchema.GetName()))
-			return merr.WrapErrParameterInvalidMsg("structFieldSchema(%s) has no corresponding fieldData pass in", structSchema.GetName())
+			return merr.WrapErrParameterInvalidMsg("missing required struct field %q", structSchema.GetName())
 		}
 	}
 
