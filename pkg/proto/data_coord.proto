@@ -1840,6 +1840,9 @@ message SnapshotInfo {
   // Per-channel snapshot boundaries. Each position records the seek point used
   // to decide which segments from that channel are included in the snapshot.
   repeated msg.MsgPosition channel_seek_positions = 13;
+  // Set only by producers that capture every segment's commit_timestamp.
+  // Export must preserve false for old snapshots; zero alone is ambiguous.
+  bool segment_commit_timestamps_preserved = 14;
 }
 
 // StorageV2SegmentManifest maps a segment ID to its plain manifest object path.

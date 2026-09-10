@@ -8337,7 +8337,7 @@ if this parameter <= 0, will set it as 10`,
 	p.ImportDeleteBufferSize = ParamItem{
 		Key:          "dataNode.import.readDeleteBufferSizeInMB",
 		Version:      "2.5.14",
-		Doc:          "The delete buffer size (in MB) during import.",
+		Doc:          "The delete buffer size (in MB) during import. Also bounds the accounted combined segment/L0 delete map per reader for typed snapshot imports (with L0 or external_spec); both phases reserve it in addition to the row buffer.",
 		DefaultValue: "16",
 		Formatter: func(v string) string {
 			bufferSize := getAsFloat(v)

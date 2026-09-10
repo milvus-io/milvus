@@ -18,16 +18,20 @@ package datacoord
 
 import (
 	"context"
+	"strings"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	streamingutil "github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -40,6 +44,8 @@ import (
 // importV1AckCallback handles the ack callback for import messages.
 func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.BroadcastResultImportMessageV1) error {
 	body := result.Message.MustBody()
+	files, sourceErr := bindSnapshotImportSources(body.GetFiles(), result.Message.Header().GetSnapshotSources(),
+		funcutil.Map2KeyValuePair(body.GetOptions()))
 
 	// Ensure Schema.DbName is populated from the broadcast message's DbName,
 	// matching the behavior in master where this was set before calling ImportV2.
@@ -66,19 +72,11 @@ func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.B
 		PartitionIDs:   body.GetPartitionIDs(),
 		ChannelNames:   vchannels,
 		Schema:         body.GetSchema(),
-		Files: lo.Map(body.GetFiles(), func(file *msgpb.ImportFile, _ int) *internalpb.ImportFile {
-			// Carry the primary-allocated PK range (nil for legacy/non-autoID/backup)
-			// so both clusters derive identical autoID primary keys.
-			return &internalpb.ImportFile{
-				Id:                  file.GetId(),
-				Paths:               file.GetPaths(),
-				PreAllocatedAutoIds: file.GetPreAllocatedAutoIds(),
-			}
-		}),
-		Options:       funcutil.Map2KeyValuePair(body.GetOptions()),
-		DataTimestamp: result.GetMaxTimeTick(), // TODO: use per-vchannel TimeTick in future, must be supported for CDC.
-		JobID:         body.GetJobID(),
-	})
+		Files:          files,
+		Options:        funcutil.Map2KeyValuePair(body.GetOptions()),
+		DataTimestamp:  result.GetMaxTimeTick(), // TODO: use per-vchannel TimeTick in future, must be supported for CDC.
+		JobID:          body.GetJobID(),
+	}, sourceErr)
 
 	err = merr.CheckRPCCall(importResp, err)
 	if errors.Is(err, merr.ErrCollectionNotFound) {
@@ -88,6 +86,28 @@ func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.B
 		return nil
 	}
 	return err
+}
+
+// Bind the two WAL arrays exactly once, before file IDs are allocated. All
+// subsequent grouping and persistence operate on the complete internal file.
+func bindSnapshotImportSources(msgFiles []*msgpb.ImportFile, sources []*internalpb.SnapshotImportSource,
+	options importutilv2.Options,
+) ([]*internalpb.ImportFile, error) {
+	files := lo.Map(msgFiles, func(file *msgpb.ImportFile, _ int) *internalpb.ImportFile {
+		return &internalpb.ImportFile{Id: file.GetId(), Paths: file.GetPaths(), PreAllocatedAutoIds: file.GetPreAllocatedAutoIds()}
+	})
+	if len(sources) != 0 {
+		if len(sources) != len(files) {
+			return files, merr.WrapErrServiceInternalMsg("snapshot WAL descriptor/file cardinality mismatch")
+		}
+		for i, source := range sources {
+			if source == nil {
+				return files, merr.WrapErrServiceInternalMsg("snapshot WAL contains a nil descriptor")
+			}
+			files[i].SnapshotSource = proto.Clone(source).(*internalpb.SnapshotImportSource)
+		}
+	}
+	return files, importutilv2.ValidateSnapshotImportFiles(files, options)
 }
 
 // validateImportRequest validates the import request before broadcasting.
@@ -104,6 +124,9 @@ func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.B
 // original jobID. Retrying the same key once the limit frees up resolves normally;
 // minting a fresh key instead is what would import the data twice.
 func (s *Server) validateImportRequest(ctx context.Context, files []*msgpb.ImportFile, options []*commonpb.KeyValuePair) error {
+	if err := importutilv2.ValidateSnapshotSourceOptions(options); err != nil {
+		return err
+	}
 	// Validate timeout
 	_, err := importutilv2.GetTimeoutTs(options)
 	if err != nil {
@@ -111,7 +134,7 @@ func (s *Server) validateImportRequest(ctx context.Context, files []*msgpb.Impor
 	}
 
 	// Validate binlog import files if it's a backup
-	if importutilv2.IsBackup(options) {
+	if importutilv2.IsBackup(options) && !importutilv2.IsSnapshotSource(options) {
 		err = ValidateBinlogImportRequest(ctx, s.meta.chunkManager, files, options)
 		if err != nil {
 			return err
@@ -225,6 +248,9 @@ func (s *Server) broadcastImport(ctx context.Context,
 	vchannels []string,
 	idempotencyKey string,
 ) (duplicatedJobID int64, duplicated bool, err error) {
+	if err := importutilv2.ValidateSnapshotSourceRequest(options); err != nil {
+		return 0, false, err
+	}
 	// Convert files to msgpb format for validation
 	msgFiles := lo.Map(files, func(file *internalpb.ImportFile, _ int) *msgpb.ImportFile {
 		return &msgpb.ImportFile{
@@ -237,6 +263,40 @@ func (s *Server) broadcastImport(ctx context.Context,
 	if err := s.validateImportRequest(ctx, msgFiles, options); err != nil {
 		return 0, false, merr.Wrap(err, "failed to validate import request")
 	}
+
+	var chunkManager storage.ChunkManager
+	if s.meta != nil {
+		chunkManager = s.meta.chunkManager
+	}
+	files, err = expandSnapshotImportFiles(ctx, chunkManager, schema, files, options)
+	if err != nil {
+		return 0, false, merr.Wrap(err, "failed to expand snapshot import source")
+	}
+	if importutilv2.HasExternalSource(options) {
+		// Capture the original URI before the public metadata path is replaced
+		// by object-key manifests. Persist it once with the job's options so
+		// both phases and retries resolve the same foreign bucket/endpoint.
+		options = append(append([]*commonpb.KeyValuePair(nil), options...), &commonpb.KeyValuePair{
+			Key: importutilv2.SnapshotSourceURI, Value: strings.TrimSpace(msgFiles[0].GetPaths()[0]),
+		})
+	}
+	if err := importutilv2.ValidateSnapshotImportFiles(files, options); err != nil {
+		return 0, false, err
+	}
+	header := &message.ImportMessageHeader{}
+	for _, file := range files {
+		if source := file.GetSnapshotSource(); source != nil {
+			header.SnapshotSources = append(header.SnapshotSources, source)
+		}
+	}
+	// Snapshot expansion replaces the single metadata source with exact
+	// manifests. These are the files persisted in the broadcast message.
+	msgFiles = lo.Map(files, func(file *internalpb.ImportFile, _ int) *msgpb.ImportFile {
+		return &msgpb.ImportFile{
+			Id:    file.GetId(),
+			Paths: file.GetPaths(),
+		}
+	})
 
 	// Per-file PK ranges are the default path for every autoID import. The
 	// coordinator allocates each file a range once and ships it on the ImportMsg, so
@@ -289,7 +349,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 	}
 	// Build import message without deprecated MsgBase
 	msg := message.NewImportMessageBuilderV1().
-		WithHeader(&message.ImportMessageHeader{}).
+		WithHeader(header).
 		WithBody(&msgpb.ImportMsg{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Import,
@@ -314,6 +374,11 @@ func (s *Server) broadcastImport(ctx context.Context,
 		WithIdempotencyKey(message.NewCollectionScopedIdempotencyKey(collectionID, idempotencyKey)).
 		WithBroadcast(vchannels).
 		MustBuildBroadcast()
+	if len(header.GetSnapshotSources()) != 0 {
+		if err := validateSnapshotImportMessageSize(msg); err != nil {
+			return 0, false, err
+		}
+	}
 
 	// Broadcast the message
 	result, err := broadcaster.Broadcast(ctx, msg)
@@ -337,6 +402,24 @@ func (s *Server) broadcastImport(ctx context.Context,
 		mlog.FieldJobID(originalJobID),
 		keyFingerprint)
 	return originalJobID, true, nil
+}
+
+func validateSnapshotImportMessageSize(msg message.BroadcastMutableMessage) error {
+	// Count the serialized header properties (base64), not just proto.Size of
+	// the descriptors. The portable ceiling leaves headroom in the default
+	// catalog/RPC envelopes. Also respect smaller configured WAL limits, using
+	// the shared selector so mq.type=default is resolved exactly as at startup.
+	limit := 512 * 1024
+	switch streamingutil.MustSelectWALName() {
+	case message.WALNamePulsar:
+		limit = min(limit, Params.PulsarCfg.MaxMessageSize.GetAsInt()/2)
+	case message.WALNameKafka:
+		limit = min(limit, Params.KafkaCfg.ProducerMessageMaxBytes.GetAsInt()/2)
+	}
+	if msg.EstimateSize() > limit {
+		return merr.WrapErrImportFailedMsg("encoded snapshot Import message exceeds admission limit %d bytes", limit)
+	}
+	return nil
 }
 
 func (c *DDLCallbacks) registerImportCallbacks() {

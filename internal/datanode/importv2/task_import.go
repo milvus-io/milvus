@@ -174,8 +174,8 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 
 	req := t.req
 
-	fn := func(file *internalpb.ImportFile) error {
-		reader, err := importutilv2.NewReader(t.ctx, t.cm, t.GetSchema(), file, req.GetOptions(), int(bufferSize), t.req.GetStorageConfig())
+	fn := func(file *internalpb.ImportFile, deleteBudget int64) error {
+		reader, err := importutilv2.NewReader(t.ctx, t.cm, t.GetSchema(), file, req.GetOptions(), int(bufferSize), t.req.GetStorageConfig(), deleteBudget)
 		if err != nil {
 			mlog.Warn(t.ctx, "new reader failed", WrapLogFields(t, mlog.String("file", file.String()), mlog.Err(err))...)
 			reason := fmt.Sprintf("error: %v, file: %s", err, file.String())
@@ -215,13 +215,26 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 	for _, file := range req.GetFiles() {
 		file := file
 		f := GetExecPool().Submit(func() (any, error) {
+			if file.GetSnapshotSource() != nil {
+				budget, release, err := reserveSnapshotRead(t.ctx, t.GetTaskID(), bufferSize)
+				if err != nil {
+					t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(err.Error()))
+					return nil, err
+				}
+				defer func() {
+					release()
+					debug.FreeOSMemory()
+				}()
+				err = fn(file, budget)
+				return err, err
+			}
 			// Use blocking allocation - this will wait until memory is available
 			GetMemoryAllocator().BlockingAllocate(t.GetTaskID(), bufferSize)
 			defer func() {
 				GetMemoryAllocator().Release(t.GetTaskID(), bufferSize)
 				debug.FreeOSMemory()
 			}()
-			err := fn(file)
+			err := fn(file, 0)
 			return err, err
 		})
 		futures = append(futures, f)

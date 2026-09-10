@@ -4,12 +4,62 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func TestSnapshotImportPartitionKeyRoutingBothPhases(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
+		{FieldID: 101, Name: "part", DataType: schemapb.DataType_Int64, IsPartitionKey: true},
+	}}
+	options := []*commonpb.KeyValuePair{{Key: "backup", Value: "true"}, {Key: "source_type", Value: "snapshot"}}
+	partitions, channels := []int64{20, 10}, []string{"v1", "v2"}
+	pre := NewPreImportTask(&datapb.PreImportRequest{
+		Schema: proto.Clone(schema).(*schemapb.CollectionSchema), Options: options, PartitionIDs: partitions, Vchannels: channels,
+	}, nil, nil).(*PreImportTask)
+	defer pre.cancel()
+	imp := NewImportTask(&datapb.ImportRequest{
+		Schema: proto.Clone(schema).(*schemapb.CollectionSchema), Options: options, PartitionIDs: partitions, Vchannels: channels,
+	}, nil, nil, nil).(*ImportTask)
+	defer imp.cancel()
+	require.False(t, pre.GetSchema().GetFields()[0].GetAutoID())
+	require.False(t, imp.GetSchema().GetFields()[0].GetAutoID())
+	rows, err := storage.NewInsertData(typeutil.AppendSystemFields(pre.GetSchema()))
+	require.NoError(t, err)
+	for i := int64(0); i < 100; i++ {
+		require.NoError(t, rows.Append(map[int64]interface{}{0: i, 1: int64(100), 100: i, 101: i / 3}))
+	}
+	stats, err := GetRowsStats(pre, rows)
+	require.NoError(t, err)
+	hashed, err := HashData(imp, rows)
+	require.NoError(t, err)
+	total := 0
+	for c, channel := range channels {
+		for p, partition := range partitions {
+			count := hashed[c][p].GetRowNum()
+			require.Positive(t, count)
+			require.EqualValues(t, count, stats[channel].PartitionRows[partition])
+			total += count
+			for i := 0; i < count; i++ {
+				row := hashed[c][p].GetRow(i)
+				key := row[int64(101)].(int64)
+				hash, err := typeutil.Hash32Int64(key)
+				require.NoError(t, err)
+				require.EqualValues(t, hash%uint32(len(partitions)), p)
+				require.Equal(t, row[int64(0)], row[int64(100)]) // Source PK is preserved.
+			}
+		}
+	}
+	require.Equal(t, 100, total)
+}
 
 func TestNewHashedData(t *testing.T) {
 	schema := &schemapb.CollectionSchema{

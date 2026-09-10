@@ -175,6 +175,48 @@ func TestSnapshotExporter_ExportCopiesFilesAndWritesSelfContainedMetadata(t *tes
 	assert.Equal(t, copiedIndex, readSnapshot.Segments[0].GetIndexFiles()[0].GetIndexFilePaths()[0])
 }
 
+func TestSnapshotExporter_L0TimestampProvenance(t *testing.T) {
+	for _, preserved := range []bool{false, true} {
+		t.Run(fmt.Sprint(preserved), func(t *testing.T) {
+			ctx := context.Background()
+			cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+			snapshot := createTestSnapshotDataForMeta()
+			snapshot.SnapshotInfo.SegmentCommitTimestampsPreserved = preserved
+			data := snapshot.Segments[0]
+			clearSegmentNonInsertFiles(data)
+			data.SegmentLevel, data.CommitTimestamp = datapb.SegmentLevel_L1, 300
+			insertPath, deletePath := path.Join(cm.RootPath(), "files/insert"), path.Join(cm.RootPath(), "files/delete")
+			require.NoError(t, cm.Write(ctx, insertPath, []byte("insert")))
+			require.NoError(t, cm.Write(ctx, deletePath, []byte("delete")))
+			data.Binlogs = []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: insertPath}}}}
+			snapshot.Segments = append(snapshot.Segments, &datapb.SegmentDescription{
+				SegmentId: 1002, PartitionId: data.PartitionId, SegmentLevel: datapb.SegmentLevel_L0,
+				Deltalogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: deletePath, EntriesNum: 1}}}},
+			})
+			snapshot.SegmentIDs = []int64{1001, 1002}
+			copier := newSnapshotExporterCopierMock(t, func(ctx context.Context, _, src, _, dst string) error {
+				bytes, err := cm.Read(ctx, src)
+				if err != nil {
+					return err
+				}
+				return cm.Write(ctx, dst, bytes)
+			})
+			uri, err := exportSnapshot(ctx, cm, cm, copier, "", "", snapshot, path.Join(cm.RootPath(), "export"))
+			require.NoError(t, err)
+			result, err := snapshotstorage.NewSnapshotReader(cm).ReadSnapshot(ctx, uri, true)
+			require.NoError(t, err)
+			require.Equal(t, preserved, result.SnapshotInfo.GetSegmentCommitTimestampsPreserved(), "export must not fabricate provenance for an old source")
+			require.EqualValues(t, 300, result.Segments[0].GetCommitTimestamp())
+			require.Zero(t, result.Segments[1].GetCommitTimestamp())
+			copiedDelete := result.Segments[1].GetDeltalogs()[0].GetBinlogs()[0].GetLogPath()
+			require.NotEqual(t, deletePath, copiedDelete)
+			payload, err := cm.Read(ctx, copiedDelete)
+			require.NoError(t, err)
+			require.Equal(t, []byte("delete"), payload)
+		})
+	}
+}
+
 func TestSnapshotExporter_RejectsExternalCollectionBeforeCopy(t *testing.T) {
 	ctx := context.Background()
 	cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))

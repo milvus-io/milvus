@@ -426,7 +426,6 @@ func TestManifestRecordReader_ResolvesOutOfLineTextLob(t *testing.T) {
 
 	got, err := reader.Next()
 	require.NoError(t, err)
-	defer got.Release()
 	textColumn, ok := got.Column(textFieldID).(*array.String)
 	require.True(t, ok)
 	gotText := make([]string, textColumn.Len())
@@ -458,5 +457,5 @@ func TestManifestRecordReader_RejectsCMEKTextLob(t *testing.T) {
 	)
 	require.Nil(t, reader)
 	require.ErrorIs(t, err, merr.ErrOperationNotSupported)
-	require.Contains(t, err.Error(), "CMEK-protected StorageV3 backup import is not supported")
+	require.Contains(t, err.Error(), "CMEK-protected StorageV3 import does not support TEXT/LOB fields")
 }

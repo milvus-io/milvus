@@ -19,14 +19,17 @@ package importv2
 import (
 	"context"
 	"io"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -35,15 +38,217 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func TestSnapshotL0BothImportPhases(t *testing.T) {
+	type phaseRecordReader struct {
+		storage.RecordReader
+		record storage.Record
+		read   bool
+	}
+	paramtable.Init()
+	pool := conc.NewPool[any](1)
+	defer pool.Release()
+	poolPatch := mockey.Mock(GetExecPool).Return(pool).Build()
+	defer poolPatch.UnPatch()
+	ma := NewMemoryAllocator(1024 * 1024 * 1024).(*memoryAllocator)
+	memoryPatch := mockey.Mock(GetMemoryAllocator).Return(ma).Build()
+	defer memoryPatch.UnPatch()
+	for _, mode := range []string{"reinsert", "source_commit", "zero_rows", "missing_between_phases", "preimport_admission", "import_admission", "cancel_import"} {
+		t.Run(mode, func(t *testing.T) {
+			schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}}}
+			cm := storage.NewLocalChunkManager()
+			deltaPath := filepath.Join(t.TempDir(), "l0.delta")
+			ts := uint64(200)
+			if mode == "zero_rows" {
+				ts = 400
+			}
+			deltaRecord, _, _, err := storage.BuildDeleteRecord([]storage.PrimaryKey{storage.NewInt64PrimaryKey(1), storage.NewInt64PrimaryKey(2)}, []uint64{ts, ts})
+			require.NoError(t, err)
+			writer, err := storage.NewDeltalogWriter(context.Background(), 1, 10, 30, 1, schemapb.DataType_Int64, deltaPath,
+				storage.WithVersion(storage.StorageV1), storage.WithUploader(cm.MultiWrite))
+			require.NoError(t, err)
+			require.NoError(t, writer.Write(deltaRecord))
+			deltaRecord.Release()
+			require.NoError(t, writer.Close())
+			nextPatch := mockey.Mock((*phaseRecordReader).Next).To(func(r *phaseRecordReader) (storage.Record, error) {
+				if r.read {
+					return nil, io.EOF
+				}
+				r.read = true
+				return r.record, nil
+			}).Build()
+			defer nextPatch.UnPatch()
+			closePatch := mockey.Mock((*phaseRecordReader).Close).To(func(r *phaseRecordReader) error {
+				if r.record != nil {
+					r.record.Release()
+					r.record = nil
+				}
+				return nil
+			}).Build()
+			defer closePatch.UnPatch()
+			manifestPatch := mockey.Mock(storage.NewManifestRecordReader).To(func(_ context.Context, _ string, _ *schemapb.CollectionSchema, _ ...storage.RwOption) (storage.RecordReader, error) {
+				var values []*storage.Value
+				for i, row := range [][2]int64{{1, 100}, {1, 300}, {2, 100}} {
+					values = append(values, &storage.Value{Value: map[int64]any{0: int64(i + 1), 1: row[1], 100: row[0]}})
+				}
+				record, err := storage.ValueSerializer(values, typeutil.AppendSystemFields(schema))
+				return &phaseRecordReader{record: record}, err
+			}).Build()
+			defer manifestPatch.UnPatch()
+			fragmentsPatch := mockey.Mock(packed.ReadFragmentsFromManifest).Return([]packed.Fragment(nil), nil).Build()
+			defer fragmentsPatch.UnPatch()
+			lobPatch := mockey.Mock(packed.GetManifestLobFiles).Return([]packed.LobFileInfo(nil), nil).Build()
+			defer lobPatch.UnPatch()
+			deltaPatch := mockey.Mock(packed.GetDeltaLogPathsFromManifest).Return([]string(nil), nil).Build()
+			defer deltaPatch.UnPatch()
+			var imported []int64
+			syncPatch := mockey.Mock((*ImportTask).sync).To(func(_ *ImportTask, data HashedData) ([]*conc.Future[struct{}], []syncmgr.Task, error) {
+				for _, partitions := range data {
+					for _, rows := range partitions {
+						for i := 0; i < rows.GetRowNum(); i++ {
+							imported = append(imported, rows.Data[100].GetRow(i).(int64))
+						}
+					}
+				}
+				return nil, nil, nil
+			}).Build()
+			defer syncPatch.UnPatch()
+			file := &internalpb.ImportFile{Id: 1, SnapshotSource: &internalpb.SnapshotImportSource{
+				Version: 1, ManifestPath: packed.MarshalManifestPath("snapshot/data/20", 7), LegacyL0Deltalogs: []string{deltaPath}}}
+			want := []int64{1}
+			if mode == "source_commit" {
+				file.SnapshotSource.SourceCommitTimestamp = 300
+				want = []int64{1, 1, 2}
+			}
+			if mode == "zero_rows" {
+				want = nil
+			}
+			options := importutilv2.Options{{Key: importutilv2.BackupFlag, Value: "true"}, {Key: importutilv2.SourceType, Value: importutilv2.SourceTypeSnapshot}}
+			manager := NewTaskManager()
+			pre := NewPreImportTask(&datapb.PreImportRequest{TaskID: 1, Schema: schema, Options: options, ImportFiles: []*internalpb.ImportFile{file},
+				PartitionIDs: []int64{10}, Vchannels: []string{"target"}, StorageConfig: &indexpb.StorageConfig{}}, manager, cm)
+			defer pre.Cancel()
+			manager.Add(pre)
+			if mode == "preimport_admission" {
+				ma.systemTotalMemory = 0
+				defer func() { ma.systemTotalMemory = 1024 * 1024 * 1024 }()
+				require.ErrorIs(t, conc.AwaitAll(pre.Execute()...), merr.ErrServiceResourceInsufficient)
+				require.Equal(t, datapb.ImportTaskStateV2_Failed, manager.Get(1).GetState())
+				require.Zero(t, ma.usedMemory)
+				return
+			}
+			require.NoError(t, conc.AwaitAll(pre.Execute()...))
+			require.EqualValues(t, len(want), manager.Get(1).(*PreImportTask).GetFileStats()[0].GetTotalRows())
+			require.Zero(t, ma.usedMemory)
+			if mode == "missing_between_phases" {
+				require.NoError(t, cm.Remove(context.Background(), deltaPath))
+			}
+			imp := NewImportTask(&datapb.ImportRequest{TaskID: 2, Schema: schema, Options: options, Files: []*internalpb.ImportFile{file},
+				Ts: 9999, IDRange: &datapb.IDRange{Begin: 100, End: 1000}, PartitionIDs: []int64{10}, Vchannels: []string{"target"},
+				StorageConfig: &indexpb.StorageConfig{}}, manager, nil, cm)
+			defer imp.Cancel()
+			manager.Add(imp)
+			if mode == "import_admission" {
+				ma.systemTotalMemory = 0
+				defer func() { ma.systemTotalMemory = 1024 * 1024 * 1024 }()
+			}
+			if mode == "cancel_import" {
+				imp.Cancel()
+			}
+			err = conc.AwaitAll(imp.Execute()...)
+			if mode == "missing_between_phases" || mode == "import_admission" || mode == "cancel_import" {
+				require.Error(t, err)
+				require.Equal(t, datapb.ImportTaskStateV2_Failed, manager.Get(2).GetState())
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, want, imported, "target commit timestamp must not participate in source delete ordering")
+			}
+			require.Zero(t, ma.usedMemory)
+		})
+	}
+}
+
+func TestSnapshotSourceTimestampErrorFailsBothImportPhases(t *testing.T) {
+	type snapshotErrorReader struct{ importutilv2.Reader }
+	paramtable.Init()
+	pool := conc.NewPool[any](1)
+	defer pool.Release()
+	poolPatch := mockey.Mock(GetExecPool).Return(pool).Build()
+	defer poolPatch.UnPatch()
+	for _, phase := range []string{"preimport", "import"} {
+		t.Run(phase, func(t *testing.T) {
+			// Reader tests exercise the real timestamp check. Here inject its
+			// typed read error to verify the real task does not publish success
+			// or turn a corrupt source into an empty successful import.
+			readErr := merr.WrapErrDataIntegrityMsg("raw row timestamp 400 above segment commit timestamp 300")
+			file := &internalpb.ImportFile{Id: 1, SnapshotSource: &internalpb.SnapshotImportSource{
+				Version: 1, ManifestPath: "snapshot/segment/10", SourceCommitTimestamp: 300,
+			}}
+			fakeReader := &snapshotErrorReader{}
+			readPatch := mockey.Mock((*snapshotErrorReader).Read).Return(nil, readErr).Build()
+			defer readPatch.UnPatch()
+			sizePatch := mockey.Mock((*snapshotErrorReader).Size).Return(int64(1), nil).Build()
+			defer sizePatch.UnPatch()
+			closed := false
+			closePatch := mockey.Mock((*snapshotErrorReader).Close).To(func(_ *snapshotErrorReader) {
+				closed = true
+			}).Build()
+			defer closePatch.UnPatch()
+			factoryPatch := mockey.Mock(importutilv2.NewReader).To(func(_ context.Context, _ storage.ChunkManager,
+				_ *schemapb.CollectionSchema, gotFile *internalpb.ImportFile, _ importutilv2.Options, _ int,
+				_ *indexpb.StorageConfig, _ int64,
+			) (importutilv2.Reader, error) {
+				if gotFile != file {
+					return nil, merr.WrapErrServiceInternalMsg("task did not retain its immutable snapshot descriptor")
+				}
+				return fakeReader, nil
+			}).Build()
+			defer factoryPatch.UnPatch()
+
+			manager := NewTaskManager()
+			schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			}}
+			options := importutilv2.Options{{Key: importutilv2.BackupFlag, Value: "true"},
+				{Key: importutilv2.SourceType, Value: importutilv2.SourceTypeSnapshot}}
+			var task Task
+			if phase == "preimport" {
+				task = NewPreImportTask(&datapb.PreImportRequest{TaskID: 1, Schema: schema, Options: options,
+					ImportFiles: []*internalpb.ImportFile{file}, PartitionIDs: []int64{1}, Vchannels: []string{"v1"}}, manager, nil)
+			} else {
+				task = NewImportTask(&datapb.ImportRequest{TaskID: 1, Schema: schema, Options: options,
+					Files: []*internalpb.ImportFile{file}, PartitionIDs: []int64{1}, Vchannels: []string{"v1"}}, manager, nil, nil)
+			}
+			defer task.Cancel()
+			manager.Add(task)
+			futures := task.Execute()
+			require.Len(t, futures, 1)
+			select {
+			case <-futures[0].Inner():
+			case <-time.After(10 * time.Second):
+				t.Fatal("import phase did not finish after a terminal reader error")
+			}
+			_, err := futures[0].Await()
+			require.ErrorIs(t, err, merr.ErrDataIntegrity)
+			require.Equal(t, datapb.ImportTaskStateV2_Failed, manager.Get(1).GetState())
+			require.Contains(t, manager.Get(1).GetReason(), "raw row timestamp")
+			require.True(t, closed, "task must close its reader on failure")
+		})
+	}
+}
 
 type sampleRow struct {
 	FieldString      string    `json:"pk,omitempty"`

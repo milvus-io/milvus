@@ -20,8 +20,10 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
@@ -29,13 +31,92 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/interceptor"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-// Note: mockey is not used in this file since we use testify/mock for generated mocks
+func TestImportTaskPreExecuteTargetPartitions(t *testing.T) {
+	paramtable.Init()
+	for _, tc := range []struct {
+		name         string
+		snapshot     bool
+		backup       bool
+		partitionKey bool
+		partition    string
+		wantName     string
+		wantIDs      []int64
+		wantErr      string
+	}{
+		{name: "snapshot_default", snapshot: true, backup: true, wantName: "_default", wantIDs: []int64{10}},
+		{name: "snapshot_named", snapshot: true, backup: true, partition: "custom", wantName: "custom", wantIDs: []int64{20}},
+		{name: "snapshot_missing_partition", snapshot: true, backup: true, partition: "missing", wantErr: "partition not found"},
+		{name: "snapshot_partition_key", snapshot: true, backup: true, partitionKey: true, wantIDs: []int64{20, 10}},
+		{name: "snapshot_partition_key_explicit", snapshot: true, backup: true, partitionKey: true, partition: "_default_0", wantErr: "not allow to set partition name"},
+		{name: "legacy_backup_requires_partition", backup: true, wantErr: "partition not specified"},
+		{name: "legacy_backup_named", backup: true, partition: "custom", wantName: "custom", wantIDs: []int64{20}},
+		{name: "ordinary_default", wantName: "_default", wantIDs: []int64{10}},
+		{name: "ordinary_partition_key", partitionKey: true, wantIDs: []int64{20, 10}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "part", DataType: schemapb.DataType_Int64, IsPartitionKey: tc.partitionKey},
+			}}}
+			cache := &MetaCache{}
+			idPatch := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
+			defer idPatch.UnPatch()
+			schemaPatch := mockey.Mock((*MetaCache).GetCollectionSchema).Return(schema, nil).Build()
+			defer schemaPatch.UnPatch()
+			partitionPatch := mockey.Mock((*MetaCache).GetPartitionID).To(
+				func(_ *MetaCache, _ context.Context, _, _, name string) (int64, error) {
+					switch name {
+					case "_default":
+						return 10, nil
+					case "custom":
+						return 20, nil
+					default:
+						return 0, errors.New("partition not found")
+					}
+				}).Build()
+			defer partitionPatch.UnPatch()
+			// IDs deliberately differ from name order: both import phases must
+			// receive the stable partition-key index order, not map or ID order.
+			partitionsPatch := mockey.Mock((*MetaCache).GetPartitions).Return(map[string]int64{
+				"_default_1": 10, "_default_0": 20,
+			}, nil).Build()
+			defer partitionsPatch.UnPatch()
+			type testChannels struct{ channelmgr.ChannelsMgr }
+			channels := &testChannels{}
+			channelPatch := mockey.Mock((*testChannels).GetVChannels).Return([]string{"v1"}, nil).Build()
+			defer channelPatch.UnPatch()
+			req := &internalpb.ImportRequest{
+				DbName: "default", CollectionName: "target", PartitionName: tc.partition,
+				Files: []*internalpb.ImportFile{{Paths: []string{"data.json"}}},
+			}
+			if tc.backup {
+				req.Options = append(req.Options, &commonpb.KeyValuePair{Key: "backup", Value: "true"})
+			}
+			if tc.snapshot {
+				req.Options = append(req.Options, &commonpb.KeyValuePair{Key: "source_type", Value: "snapshot"})
+				req.Files[0].Paths = []string{"s3://source/root/snapshots/1/metadata/2.json"}
+			}
+			task := &importTask{req: req, node: &Proxy{chMgr: channels}}
+			task.MetaCache = cache
+			err := task.PreExecute(context.Background())
+			if tc.wantErr != "" {
+				require.ErrorContains(t, err, tc.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.wantName, req.PartitionName)
+			require.Equal(t, tc.wantIDs, task.partitionIDs)
+		})
+	}
+}
 
 // ================================
 // ImportTask Test Suite

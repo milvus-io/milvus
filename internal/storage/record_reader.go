@@ -319,13 +319,12 @@ func NewManifestReaderWithExtfs(
 		opt(rwOptions)
 	}
 	// milvus-storage SegmentReader resolves TEXT LOB values, but its current C
-	// API has no key-retriever plugin context. Reject CMEK input explicitly so
-	// this import path never ignores the supplied key and attempts a plaintext
-	// read. CMEK-protected StorageV3 backup import is intentionally out of scope
-	// for this change.
+	// API has no key-retriever plugin context. Reject this exact combination so
+	// the caller never silently drops a source key. CMEK sources without
+	// TEXT/LOB stay on PackedReader, which accepts storagePluginContext below.
 	if rwOptions.resolveTextLob && storagePluginContext != nil {
 		return nil, merr.WrapErrOperationNotSupportedMsg(
-			"CMEK-protected StorageV3 backup import is not supported",
+			"CMEK-protected StorageV3 import does not support TEXT/LOB fields",
 		)
 	}
 

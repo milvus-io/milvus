@@ -809,6 +809,20 @@ func TestNewManifestRecordReaderBranches(t *testing.T) {
 	// NewBinlogRecordReader/NewBinlogRecordWriter and hookutil.GetCPluginContext
 	require.Equal(t, base64.StdEncoding.EncodeToString([]byte("unsafe-key")), capturedPluginContext.GetEncryptionKey())
 
+	// Snapshot Import resolves the source context from the request. An explicit
+	// nil means the source is plaintext, even if neededSchema belongs to an
+	// encrypted target collection; target properties must not become a read key.
+	capturedPluginContext = pluginContext
+	reader, err = NewManifestRecordReader(context.Background(), "manifest-json", schemaWithEZ,
+		WithVersion(StorageV3),
+		WithStorageConfig(&indexpb.StorageConfig{RootPath: "root"}),
+		WithCollectionID(2),
+		WithPluginContext(nil),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, reader)
+	require.Nil(t, capturedPluginContext)
+
 	// WithResolveTextLob is used by backup import, where schemaWithEZ is the
 	// destination schema. The destination key must not be passed to the source
 	// reader or a plaintext backup would be mistaken for a CMEK source.

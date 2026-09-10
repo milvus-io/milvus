@@ -1002,6 +1002,7 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 			JsonKeyIndexFiles: uncompressedJSONStats,
 			TextIndexFiles:    segInfo.GetTextStatsLogs(),
 			ManifestPath:      segInfo.GetManifestPath(),
+			CommitTimestamp:   segInfo.GetCommitTimestamp(),
 		}
 	})
 
@@ -1015,10 +1016,11 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 
 	return &snapshotstorage.SnapshotData{
 		SnapshotInfo: &datapb.SnapshotInfo{
-			CollectionId:         collectionID,
-			PartitionIds:         partitionIDs,
-			CreateTs:             int64(snapshotTs),
-			ChannelSeekPositions: channelSeekPositions,
+			CollectionId:                     collectionID,
+			PartitionIds:                     partitionIDs,
+			CreateTs:                         int64(snapshotTs),
+			ChannelSeekPositions:             channelSeekPositions,
+			SegmentCommitTimestampsPreserved: true,
 		},
 		Collection: &datapb.CollectionDescription{
 			Schema:              schema,

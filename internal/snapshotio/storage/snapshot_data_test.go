@@ -40,6 +40,7 @@ import (
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -209,6 +210,34 @@ func createTestSnapshotData() *snapshotstorage.SnapshotData {
 				},
 			},
 		},
+	}
+}
+
+func TestSnapshotCommitProvenanceRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	for _, preserved := range []bool{false, true} {
+		for _, layout := range []datapb.SnapshotLayout{datapb.SnapshotLayout_SnapshotLayoutReferenced, datapb.SnapshotLayout_SnapshotLayoutSelfContained} {
+			t.Run(fmt.Sprintf("%s/%t", layout, preserved), func(t *testing.T) {
+				root := t.TempDir()
+				cm := storage.NewLocalChunkManager(objectstorage.RootPath(root))
+				data := &snapshotstorage.SnapshotData{
+					SnapshotInfo: &datapb.SnapshotInfo{Id: 1, CollectionId: 2, SegmentCommitTimestampsPreserved: preserved},
+					Collection:   &datapb.CollectionDescription{Schema: &schemapb.CollectionSchema{Name: "source"}, Partitions: map[string]int64{"default": 10}},
+					Segments: []*datapb.SegmentDescription{{SegmentId: 20, PartitionId: 10, SegmentLevel: datapb.SegmentLevel_L1, CommitTimestamp: 300},
+						{SegmentId: 30, PartitionId: common.AllPartitionsID, SegmentLevel: datapb.SegmentLevel_L0}},
+				}
+				uri, _, err := snapshotstorage.NewSnapshotWriter(cm).SaveToRootWithSize(ctx, data, root, layout)
+				require.NoError(t, err)
+				read, err := snapshotstorage.NewSnapshotReader(cm).ReadSnapshot(ctx, uri, true)
+				require.NoError(t, err)
+				require.Equal(t, preserved, read.SnapshotInfo.GetSegmentCommitTimestampsPreserved(), "writing a new layout must not fabricate old snapshot provenance")
+				commits := make(map[int64]uint64)
+				for _, segment := range read.Segments {
+					commits[segment.SegmentId] = segment.CommitTimestamp
+				}
+				require.Equal(t, map[int64]uint64{20: 300, 30: 0}, commits)
+			})
+		}
 	}
 }
 

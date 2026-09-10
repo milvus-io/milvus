@@ -395,6 +395,17 @@ enum ImportJobState {
   Committing  = 9;
 }
 
+// Immutable, coordinator-expanded input for snapshot jobs with applicable L0.
+message SnapshotImportSource {
+  uint32 version = 1;
+  string manifest_path = 2;
+  uint64 source_commit_timestamp = 3;
+  // Decoder contracts, NOT SegmentDescription.storage_version: StorageV2
+  // segments can contain legacy V1 deltalogs.
+  repeated string legacy_l0_deltalogs = 4;
+  repeated string manifest_l0_deltalogs = 5;
+}
+
 message ImportFile {
   int64 id = 1;
   // A singular row-based file or multiple column-based files.
@@ -404,6 +415,9 @@ message ImportFile {
   // as msgpb.ImportFile.pre_allocated_auto_ids, which it is copied from. Unset on
   // legacy / non-autoID / backup imports.
   common.IDRange pre_allocated_auto_ids = 3;
+  // Mutually exclusive with paths. Empty legacy paths make old consumers fail
+  // closed instead of importing rows without the snapshot's L0 deletes.
+  SnapshotImportSource snapshot_source = 4;
 }
 
 message ImportRequestInternal {
