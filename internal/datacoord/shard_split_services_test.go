@@ -27,9 +27,17 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -610,4 +618,111 @@ func TestCheckShardSplitDrainedRejectsAnUnhealthyServer(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Error(t, merr.Error(resp.GetStatus()))
+}
+
+// newBroadcastShardSplitParam builds a valid one-source/two-target
+// SplitShardParam for broadcastShardSplit tests: the residues exactly cover
+// the source's, and the routing post-image names every target.
+func newBroadcastShardSplitParam() streaming.SplitShardParam {
+	return streaming.SplitShardParam{
+		CollectionID:        100,
+		DBID:                1,
+		SplitTaskID:         200,
+		SourceVChannels:     []string{splitTestSource},
+		CollectionVChannels: []string{splitTestSource},
+		RoutingModulus:      2,
+		Targets: []*message.SplitShardTarget{
+			{Vchannel: splitTestTarget0, Routing: &schemapb.HashRouting{Buckets: []uint64{0}}},
+			{Vchannel: splitTestTarget1, Routing: &schemapb.HashRouting{Buckets: []uint64{1}}},
+		},
+		Schema:       &schemapb.CollectionSchema{Name: "col"},
+		PartitionIDs: []int64{10, 11},
+		Routing: &message.AlterCollectionMessageUpdates{
+			VirtualChannelNames: []string{splitTestSource, splitTestTarget0, splitTestTarget1},
+		},
+		ControlChannel: "by-dev-rootcoord-dml_99_1v99",
+	}
+}
+
+// broadcastShardSplitTestServer builds a datacoord Server wired with a mock
+// broker, the shape broadcastShardSplit needs from startBroadcastWithCollectionID.
+func broadcastShardSplitTestServer(t *testing.T) (*Server, *broker.MockBroker) {
+	mockBroker := broker.NewMockBroker(t)
+	s := &Server{broker: mockBroker}
+	s.UpdateStateCode(commonpb.StateCode_Healthy)
+	return s, mockBroker
+}
+
+func TestBroadcastShardSplitRefusesAnInvalidParamBeforeAnyBroadcast(t *testing.T) {
+	// No broker/broadcaster is wired at all: a call that reaches past
+	// Validate() here would panic on the nil broker, so a passing test is
+	// itself proof the invalid param never gets that far.
+	s := &Server{}
+	param := newBroadcastShardSplitParam()
+	param.CollectionID = 0 // invalid: Validate() requires a positive collection id
+
+	err := s.broadcastShardSplit(context.Background(), param)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrServiceInternal)
+}
+
+func TestBroadcastShardSplitPropagatesStartBroadcastFailure(t *testing.T) {
+	s, mockBroker := broadcastShardSplitTestServer(t)
+	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).
+		Return(nil, errors.New("collection not found"))
+
+	err := s.broadcastShardSplit(context.Background(), newBroadcastShardSplitParam())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to start broadcast for shard split")
+}
+
+func TestBroadcastShardSplitPropagatesBroadcastFailureAndStillCloses(t *testing.T) {
+	s, mockBroker := broadcastShardSplitTestServer(t)
+	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).
+		Return(&milvuspb.DescribeCollectionResponse{DbName: "test_db", CollectionName: "test_collection"}, nil)
+
+	mockAPI := newMockBroadcastAPIImpl()
+	mockAPI.broadcastErr = errors.New("wal append failed")
+	mockStart := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
+		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+			return mockAPI, nil
+		}).Build()
+	defer mockStart.UnPatch()
+
+	err := s.broadcastShardSplit(context.Background(), newBroadcastShardSplitParam())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to broadcast shard split")
+	assert.True(t, mockAPI.closeCalled.Load(), "Close must still be called after a Broadcast failure")
+}
+
+func TestBroadcastShardSplitSuccess(t *testing.T) {
+	s, mockBroker := broadcastShardSplitTestServer(t)
+	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).
+		Return(&milvuspb.DescribeCollectionResponse{DbName: "test_db", CollectionName: "test_collection"}, nil)
+
+	mockAPI := newMockBroadcastAPIImpl()
+	mockAPI.broadcastResult = &types.BroadcastAppendResult{
+		BroadcastID: 1,
+		AppendResults: map[string]*types.AppendResult{
+			"by-dev-rootcoord-dml_99_1v99": {TimeTick: 42},
+		},
+	}
+	mockStart := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
+		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+			return mockAPI, nil
+		}).Build()
+	defer mockStart.UnPatch()
+
+	param := newBroadcastShardSplitParam()
+	err := s.broadcastShardSplit(context.Background(), param)
+	require.NoError(t, err)
+	require.True(t, mockAPI.closeCalled.Load())
+
+	require.NotNil(t, mockAPI.capturedMsg)
+	header := message.MustAsMutableSplitShardMessageV2(mockAPI.capturedMsg).Header()
+	assert.Equal(t, param.SplitTaskID, header.GetSplitTaskId())
+	assert.Equal(t, param.SourceVChannels, header.GetSourceVchannels())
+	require.Len(t, header.GetTargets(), 2)
+	assert.Equal(t, splitTestTarget0, header.GetTargets()[0].GetVchannel())
+	assert.Equal(t, splitTestTarget1, header.GetTargets()[1].GetVchannel())
 }

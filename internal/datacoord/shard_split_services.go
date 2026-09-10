@@ -24,12 +24,82 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+// splitBroadcastTimeout bounds the SplitShard broadcast. The ack callback
+// (CommitShardSplit above) is what actually commits the split on every
+// replica that receives it, so a caller stuck past this long is almost
+// certainly talking to a broadcaster/WAL that will never ack, not one that is
+// merely slow.
+const splitBroadcastTimeout = 60 * time.Second
+
+// broadcastShardSplit issues a shard split's write switch as one broadcast:
+// the sources are fenced, the targets' genesis and the routing post-image
+// travel with them, all in the single message NewSplitShardBroadcastMessage
+// builds.
+//
+// There is nothing left for this function to do once Broadcast acks. The
+// bookkeeping -- persisting the split task, seeding the targets' checkpoints
+// -- happens in the ack callback (CommitShardSplit above), which runs on
+// every replica the broadcast reaches, including ones that never called this
+// function. This function only has to get the message onto the wire, or
+// report why it could not.
+func (s *Server) broadcastShardSplit(ctx context.Context, param streaming.SplitShardParam) error {
+	if err := param.Validate(); err != nil {
+		return err
+	}
+
+	broadcastAPI, err := s.startBroadcastWithCollectionID(ctx, param.CollectionID)
+	if err != nil {
+		return merr.Wrap(err, "failed to start broadcast for shard split")
+	}
+	defer broadcastAPI.Close()
+
+	msg, err := streaming.NewSplitShardBroadcastMessage(param)
+	if err != nil {
+		return merr.Wrap(err, "failed to build shard split broadcast message")
+	}
+
+	broadcastCtx, cancel := context.WithTimeout(ctx, splitBroadcastTimeout)
+	defer cancel()
+	result, err := broadcastAPI.Broadcast(broadcastCtx, msg)
+	if err != nil {
+		return merr.Wrap(err, "failed to broadcast shard split")
+	}
+
+	fields := []mlog.Field{
+		mlog.Int64("collectionID", param.CollectionID),
+		mlog.Int64("splitTaskID", param.SplitTaskID),
+		mlog.Strings("sources", param.SourceVChannels),
+		mlog.Strings("targets", splitShardTargetVChannelsFromParam(param.Targets)),
+	}
+	// Cheap to look up (a map read on the result already in hand) and useful
+	// as a cross-reference to the control channel's own log line; skipped
+	// rather than treated as an error when the control channel's append
+	// result is not part of the reply.
+	if controlResult := result.GetAppendResult(param.ControlChannel); controlResult != nil {
+		fields = append(fields, mlog.Uint64("controlChannelTick", controlResult.TimeTick))
+	}
+	mlog.Info(ctx, "broadcast the shard split write switch", fields...)
+	return nil
+}
+
+// splitShardTargetVChannelsFromParam is the target vchannel names of a shard
+// split param, for logging.
+func splitShardTargetVChannelsFromParam(targets []*message.SplitShardTarget) []string {
+	out := make([]string, 0, len(targets))
+	for _, target := range targets {
+		out = append(out, target.GetVchannel())
+	}
+	return out
+}
 
 // CommitShardSplit is the datacoord half of the SplitShard broadcast ack
 // callback.
