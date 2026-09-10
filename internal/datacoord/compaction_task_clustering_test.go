@@ -551,6 +551,44 @@ func (s *ClusteringCompactionTaskSuite) TestCreateTaskOnWorker() {
 	})
 }
 
+func (s *ClusteringCompactionTaskSuite) TestDoCompactPreservesCreateError() {
+	for _, saveFails := range []bool{false, true} {
+		s.Run(fmt.Sprintf("saveFails=%t", saveFails), func() {
+			task := s.generateBasicTask(false)
+			for _, segment := range []*datapb.SegmentInfo{
+				{ID: 101, State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1},
+				{ID: 102, State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L2, PartitionStatsVersion: 10000},
+			} {
+				s.NoError(s.meta.AddSegment(context.Background(), &SegmentInfo{SegmentInfo: segment}))
+			}
+			createErr := merr.WrapErrNodeNotFound(991)
+			var saveErr error
+			if saveFails {
+				saveErr = merr.WrapErrServiceUnavailable("catalog unavailable")
+			}
+			meta := NewMockCompactionMeta(s.T())
+			meta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(saveErr).Once()
+			cluster := session.NewMockCluster(s.T())
+			cluster.EXPECT().CreateCompaction(int64(991), mock.Anything, mock.Anything).
+				Run(func(int64, *datapb.CompactionPlan, int64) { task.meta = meta }).Return(createErr).Once()
+
+			err := task.doCompact(991, cluster)
+			s.ErrorIs(err, createErr)
+			s.ErrorContains(err, "create clustering compaction on worker 991")
+			s.ErrorContains(err, fmt.Sprintf("planID=%d", task.GetTaskProto().PlanID))
+			if saveFails {
+				s.ErrorIs(err, merr.ErrClusteringCompactionMetaError)
+				s.ErrorContains(err, saveErr.Error())
+				s.ErrorContains(err, "persist clustering compaction retry state")
+				s.Equal(merr.Code(merr.ErrClusteringCompactionMetaError), merr.Code(err))
+			} else {
+				s.Equal(merr.Code(createErr), merr.Code(err))
+				s.Equal(datapb.CompactionTaskState_pipelining, task.GetTaskProto().State)
+			}
+		})
+	}
+}
+
 func (s *ClusteringCompactionTaskSuite) TestQueryTaskOnWorker() {
 	s.Run("QueryTaskOnWorker, get compaction result fail", func() {
 		task := s.generateBasicTask(false)

@@ -557,14 +557,12 @@ func (c *compactionInspector) removeTasksByChannel(channel string) {
 }
 
 func (c *compactionInspector) submitTask(t CompactionTask) error {
-	// Account for admission before the queue publishes the task. Roll back the
-	// same metric if admission fails, even when the initial state is terminal.
+	// Capture the initial metric before the queue publishes the task.
 	metric := getCompactionTaskMetric(t.GetTaskProto())
-	updateCompactionTaskMetric(metric, 1)
 	if err := c.queueTasks.Enqueue(t); err != nil {
-		updateCompactionTaskMetric(metric, -1)
 		return err
 	}
+	updateCompactionTaskMetric(metric, 1)
 	return nil
 }
 

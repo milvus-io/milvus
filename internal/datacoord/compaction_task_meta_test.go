@@ -71,6 +71,22 @@ func TestCompactionTaskMetaMetricsUsePersistedState(t *testing.T) {
 	require.Equal(t, initialDone+1, testutil.ToFloat64(done))
 }
 
+func TestCompactionTaskMetaRemovedMetricsGC(t *testing.T) {
+	ctx := context.Background()
+	m := newTestCompactionTaskMeta(t)
+	p := &datapb.CompactionTask{TriggerID: 99550, PlanID: 99550, State: datapb.CompactionTaskState_cleaned}
+	require.NoError(t, m.SaveCompactionTask(ctx, p))
+	m.removeTaskMetric(p)
+	m.removeTaskMetric(p)
+	catalog := m.catalog.(*mocks.DataCoordCatalog)
+	catalog.EXPECT().DropCompactionTask(mock.Anything, mock.Anything).Return(errors.New("catalog unavailable")).Once()
+	require.Error(t, m.DropCompactionTask(ctx, p))
+	require.True(t, m.removedTaskMetrics.Contain(p.PlanID))
+	catalog.EXPECT().DropCompactionTask(mock.Anything, mock.Anything).Return(nil).Once()
+	require.NoError(t, m.DropCompactionTask(ctx, p))
+	require.Empty(t, m.removedTaskMetrics)
+}
+
 func TestCompactionTaskMetaMetricsTransitions(t *testing.T) {
 	for _, taskType := range []datapb.CompactionType{
 		datapb.CompactionType_MixCompaction,

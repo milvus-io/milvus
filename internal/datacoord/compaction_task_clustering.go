@@ -771,18 +771,16 @@ func (t *clusteringCompactionTask) doCompact(nodeID int64, cluster session.Clust
 	}
 	err = cluster.CreateCompaction(nodeID, t.GetPlan(), t.GetTaskProto().GetCollectionID())
 	if err != nil {
-		createErr := err
-		originNodeID := t.GetTaskProto().GetNodeID()
+		err = merr.Wrapf(err, "create clustering compaction on worker %d (planID=%d)", nodeID, t.GetTaskProto().GetPlanID())
 		mlog.Warn(context.TODO(), "Failed to notify compaction tasks to DataNode",
 			mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
-			mlog.Int64("nodeID", originNodeID),
+			mlog.FieldNodeID(nodeID),
 			mlog.Err(err))
-		err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID))
-		if err != nil {
-			mlog.Warn(context.TODO(), "updateAndSaveTaskMeta fail", mlog.Int64("planID", t.GetTaskProto().GetPlanID()), mlog.Err(err))
-			return err
+		if saveErr := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID)); saveErr != nil {
+			mlog.Warn(context.TODO(), "updateAndSaveTaskMeta fail", mlog.Int64("planID", t.GetTaskProto().GetPlanID()), mlog.Err(saveErr))
+			return merr.Combine(err, merr.Wrap(saveErr, "persist clustering compaction retry state"))
 		}
-		return createErr
+		return err
 	}
 	return t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_executing), setNodeID(nodeID))
 }

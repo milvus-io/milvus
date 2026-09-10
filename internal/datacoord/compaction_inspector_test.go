@@ -94,10 +94,13 @@ func TestRemoveCompactionTaskMetricsUsePersistedState(t *testing.T) {
 	compactionTask := newMixCompactionTask(p, nil, m, newMockVersionManager())
 	executing := metrics.DataCoordCompactionTaskNum.WithLabelValues("99532", p.Type.String(), metrics.Executing)
 	pending := metrics.DataCoordCompactionTaskNum.WithLabelValues("-1", p.Type.String(), metrics.Pending)
+	done := metrics.DataCoordCompactionTaskNum.WithLabelValues("99532", p.Type.String(), metrics.Done)
+	initialDone := testutil.ToFloat64(done)
 	initialExecuting, initialPending := testutil.ToFloat64(executing), testutil.ToFloat64(pending)
 	t.Cleanup(func() {
 		executing.Set(initialExecuting)
 		pending.Set(initialPending)
+		done.Set(initialDone)
 	})
 
 	scheduler := task.NewMockGlobalScheduler(t)
@@ -112,12 +115,21 @@ func TestRemoveCompactionTaskMetricsUsePersistedState(t *testing.T) {
 	require.NoError(t, m.SaveCompactionTask(ctx, retry))
 	handler.removeTasksByChannel(p.Channel)
 	handler.removeTasksByChannel(p.Channel)
+	// A scheduler callback popped before Abort can still save after removal.
+	for _, state := range []datapb.CompactionTaskState{datapb.CompactionTaskState_executing, datapb.CompactionTaskState_executing, datapb.CompactionTaskState_completed, datapb.CompactionTaskState_cleaned} {
+		late := compactionTask.ShadowClone(setState(state))
+		require.NoError(t, m.SaveCompactionTask(ctx, late))
+		require.Equal(t, state, m.GetCompactionTaskMeta().GetCompactionTasksByTriggerID(p.TriggerID)[0].State)
+		require.Equal(t, initialExecuting, testutil.ToFloat64(executing))
+		require.Equal(t, initialPending, testutil.ToFloat64(pending))
+		require.Equal(t, initialDone, testutil.ToFloat64(done))
+	}
 	require.Empty(t, handler.executingTasks)
 	require.Equal(t, initialExecuting, testutil.ToFloat64(executing))
 	require.Equal(t, initialPending, testutil.ToFloat64(pending))
 }
 
-func TestSubmitCompactionTaskMetricsRollback(t *testing.T) {
+func TestSubmitCompactionTaskMetricsFailedAdmission(t *testing.T) {
 	m := &meta{compactionTaskMeta: newTestCompactionTaskMeta(t)}
 	handler := newCompactionInspector(m, nil, nil, nil, nil, newMockVersionManager())
 	handler.queueTasks = NewCompactionQueue(1, func(CompactionTask) int { return 0 })

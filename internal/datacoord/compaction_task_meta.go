@@ -63,15 +63,18 @@ type compactionTaskMeta struct {
 	// currently only clustering compaction task is stored in persist meta
 	compactionTasks map[int64]map[int64]*datapb.CompactionTask // triggerID -> planID
 	taskStats       *expirable.LRU[UniqueID, *metricsinfo.CompactionTask]
+	// Channel removal ends metric accounting even if a dispatched save arrives late.
+	removedTaskMetrics typeutil.Set[int64]
 }
 
 func newCompactionTaskMeta(ctx context.Context, catalog metastore.DataCoordCatalog) (*compactionTaskMeta, error) {
 	csm := &compactionTaskMeta{
-		RWMutex:         sync.RWMutex{},
-		ctx:             ctx,
-		catalog:         catalog,
-		compactionTasks: make(map[int64]map[int64]*datapb.CompactionTask, 0),
-		taskStats:       expirable.NewLRU[UniqueID, *metricsinfo.CompactionTask](512, nil, time.Minute*15),
+		RWMutex:            sync.RWMutex{},
+		ctx:                ctx,
+		catalog:            catalog,
+		compactionTasks:    make(map[int64]map[int64]*datapb.CompactionTask, 0),
+		taskStats:          expirable.NewLRU[UniqueID, *metricsinfo.CompactionTask](512, nil, time.Minute*15),
+		removedTaskMetrics: typeutil.NewSet[int64](),
 	}
 	if err := csm.reloadFromKV(); err != nil {
 		return nil, err
@@ -171,7 +174,7 @@ func (csm *compactionTaskMeta) SaveCompactionTask(ctx context.Context, task *dat
 	// Concurrent callers may hold the same stale task snapshot, but only the
 	// first successful save should account for a transition. Initial admission
 	// is accounted for by the inspector, so the first save has no delta.
-	if old := csm.compactionTasks[task.GetTriggerID()][task.GetPlanID()]; old != nil {
+	if old := csm.compactionTasks[task.GetTriggerID()][task.GetPlanID()]; old != nil && !csm.removedTaskMetrics.Contain(task.GetPlanID()) {
 		updateCompactionTaskMetrics(old, task)
 	}
 	csm.saveCompactionTaskMemory(task)
@@ -187,13 +190,17 @@ func (csm *compactionTaskMeta) saveCompactionTaskMemory(task *datapb.CompactionT
 	csm.taskStats.Add(task.PlanID, newCompactionTaskStats(task))
 }
 
-// removeTaskMetric must be called after the inspector has stopped updates to
-// the task. Use the persisted version, which may be newer than the task object.
+// Stop accounting under the same lock as SaveCompactionTask so late saves
+// cannot reintroduce a removed task's metrics.
 func (csm *compactionTaskMeta) removeTaskMetric(task *datapb.CompactionTask) {
-	csm.RLock()
-	defer csm.RUnlock()
+	csm.Lock()
+	defer csm.Unlock()
+	if csm.removedTaskMetrics.Contain(task.GetPlanID()) {
+		return
+	}
 	if persisted := csm.compactionTasks[task.GetTriggerID()][task.GetPlanID()]; persisted != nil {
 		decCompactionTaskMetric(persisted)
+		csm.removedTaskMetrics.Insert(task.GetPlanID())
 	}
 }
 
@@ -211,6 +218,7 @@ func (csm *compactionTaskMeta) DropCompactionTask(ctx context.Context, task *dat
 	if len(csm.compactionTasks[task.TriggerID]) == 0 {
 		delete(csm.compactionTasks, task.TriggerID)
 	}
+	csm.removedTaskMetrics.Remove(task.PlanID)
 	return nil
 }
 
