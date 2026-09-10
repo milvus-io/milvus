@@ -21,6 +21,7 @@
 #include <functional>
 #include <memory>
 #include <span>
+#include <string>
 
 #include "filemanager/InputStream.h"
 #include "storage/ChunkManager.h"
@@ -48,6 +49,18 @@ struct LegacyIndexFileInfo {
     bool raw_payload{false};
 };
 
+struct LegacyIndexFile {
+    std::string path;
+    LegacyIndexFileInfo info;
+};
+
+enum class LegacyIndexConsumerOrder { Ordered, Unordered };
+
+// Stable per-load scratch bound, including the largest indivisible decode.
+// Shares dispatch limits, independent of refreshable executor/admission settings.
+[[nodiscard]] size_t
+LegacyIndexMaxTransientBytes(size_t max_unit_bytes);
+
 // The view is borrowed until the returned task completes. Consumers copy/write
 // it into their own destination before returning; retaining the view is invalid.
 // offset is within this file's decoded payload. Empty files produce one call.
@@ -70,5 +83,20 @@ StreamLegacyIndexFileAsync(milvus::InputStream& input,
                            const LegacyIndexConsumer& consume,
                            proto::common::LoadPriority priority,
                            folly::CancellationToken token = {});
+
+// Concurrently streams the concatenated payloads in the supplied file order.
+// Raw ranges and whole encoded objects share one bounded admission window.
+// Ordered consumers are serialized; unordered consumers may overlap and must
+// place disjoint ranges by offset. All issued work drains before return/throw.
+// Files, source, and consumer must outlive the returned task.
+[[nodiscard]] folly::coro::Task<void>
+StreamLegacyIndexFilesAsync(
+    std::span<const LegacyIndexFile> files,
+    const ChunkManagerPtr& chunk_manager,
+    const milvus_storage::ArrowFileSystemPtr& fs,
+    const LegacyIndexConsumer& consume,
+    proto::common::LoadPriority priority,
+    folly::CancellationToken token = {},
+    LegacyIndexConsumerOrder order = LegacyIndexConsumerOrder::Ordered);
 
 }  // namespace milvus::storage

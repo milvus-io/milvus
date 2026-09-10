@@ -640,7 +640,7 @@ DiskFileManagerImpl::CacheIndexToDiskAsync(
                     AcquireLocalDirWriteLease(local_index_prefix));
             },
             priority);
-        for (const auto& [prefix, slices] : files) {
+        for (auto& [prefix, slices] : files) {
             ThrowIfCancelled(token, "DiskFileManager::CreateLegacyFile");
             const auto name = prefix.substr(prefix.find_last_of('/') + 1);
             const auto local_path =
@@ -683,12 +683,13 @@ DiskFileManagerImpl::CacheIndexToDiskAsync(
                     },
                     priority);
             };
-            for (const auto& slice : slices) {
-                ThrowIfCancelled(token, "DiskFileManager::ReadLegacy");
-                auto input = OpenLegacyIndexInput(rcm_, fs_, slice.path);
-                co_await StreamLegacyIndexFileAsync(
-                    *input, slice.info, consume, priority, token);
+            std::vector<LegacyIndexFile> entry_files;
+            entry_files.reserve(slices.size());
+            for (auto& slice : slices) {
+                entry_files.push_back({std::move(slice.path), slice.info});
             }
+            co_await StreamLegacyIndexFilesAsync(
+                entry_files, rcm_, fs_, consume, priority, token);
             co_await RunLocalFileIOAsync(
                 [&] {
                     ThrowIfCancelled(token,

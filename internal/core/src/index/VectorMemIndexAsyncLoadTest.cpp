@@ -1289,7 +1289,11 @@ TEST_F(VectorMemIndexAsyncLoadTest,
         retained += info.payload_bytes;
         scratch = std::max(scratch, uint64_t{info.max_transient_bytes});
     }
+    std::optional<uint64_t> initial_peak;
     for (const bool enabled : {false, true}) {
+        storage::SetAsyncLoadThreadPoolSize(enabled ? 4 : 1);
+        storage::LoadAdmissionController::GetInstance().SetCapacityBytes(
+            enabled ? 2 << 20 : 1 << 20);
         source_->expect_async = enabled;
         segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(enabled);
         const auto request = IndexFactory::GetInstance().IndexLoadResource(
@@ -1306,7 +1310,13 @@ TEST_F(VectorMemIndexAsyncLoadTest,
             nullptr,
             nullptr);
         EXPECT_GE(request.max_memory_cost,
-                  request.final_memory_cost + retained + scratch);
+                  request.final_memory_cost + retained +
+                      storage::LegacyIndexMaxTransientBytes(scratch));
+        if (initial_peak) {
+            EXPECT_EQ(request.max_memory_cost, *initial_peak);
+        } else {
+            initial_peak = request.max_memory_cost;
+        }
     }
 }
 

@@ -508,7 +508,8 @@ IndexFactory::IndexLoadResource(
                         uint64_t{storage::FileWriter::MAX_BUFFER_SIZE},
                         uint64_t{element_type == DataType::NONE ? 1 : 3}));
             }
-            co_return SaturatingAdd(retained, scratch);
+            co_return SaturatingAdd(
+                retained, storage::LegacyIndexMaxTransientBytes(scratch));
         };
         // Enabled inspection uses the same shared async executor as loading;
         // disabled inspection stays at the synchronous planning boundary.
@@ -1302,8 +1303,9 @@ IndexFactory::ScalarIndexLegacyLoadResource(
             result.string_sort |= result.type == ASCENDING_SORT &&
                                   (name == "version" || name == "version_0");
             if (name == INDEX_FILE_SLICE_META) {
-                result.max_transient_bytes = std::max(
-                    result.max_transient_bytes,
+                // Parsed slice metadata survives while payload slices run.
+                result.retained_bytes = SaturatingAdd(
+                    result.retained_bytes,
                     SaturatingMultiply(info.payload_bytes, size_t{32}));
             }
             const bool metadata =
@@ -1437,8 +1439,11 @@ IndexFactory::ScalarIndexLegacyLoadResource(
             std::max(request.final_memory_cost,
                      SaturatingMultiply(persisted_bytes, uint64_t{2}));
     }
-    auto transient =
-        SaturatingAdd(info.retained_bytes, info.max_transient_bytes);
+    // The dispatch window is independent of worker/slot/budget refreshes, so
+    // estimates made before a cached load remain valid after those updates.
+    auto transient = SaturatingAdd(
+        info.retained_bytes,
+        storage::LegacyIndexMaxTransientBytes(info.max_transient_bytes));
     if (info.disk_files || mmap_enable || info.type == MARISA_TRIE ||
         info.type == MARISA_TRIE_UPPER) {
         // FileWriter's buffer setting is refreshable before a cache reload.

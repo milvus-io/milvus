@@ -63,8 +63,8 @@ class MemFileManagerImpl : public FileManagerImpl {
                       milvus::proto::common::LoadPriority priority);
 
     // Streams decoded legacy slices directly into the assembled BinarySet.
-    // One persisted slice is active per call. Returned buffers are request-local
-    // input memory; the loader releases admitted scratch after each copy.
+    // Concurrent slices copy into disjoint offsets. Returned buffers are
+    // request-local input memory; admitted scratch is released after each copy.
     // An optional entry name reads only that entry and its slice metadata.
     [[nodiscard]] folly::coro::Task<BinarySet>
     LoadIndexBinarySetAsync(const std::vector<std::string>& remote_files,
@@ -73,17 +73,20 @@ class MemFileManagerImpl : public FileManagerImpl {
                             std::string_view entry_name = {});
 
     // Prepare a destination once per logical entry (including empty entries).
-    // The returned consumer receives ordered entry-relative offsets; its borrowed
+    // The returned consumer receives entry-relative offsets; its borrowed
     // bytes remain admitted until the awaited consumer returns. Preparation runs
     // on the caller executor, so file operations belong in an awaited consumer.
+    // Ordered consumers are serialized within each entry; entries are sequential.
     using IndexEntryConsumerFactory =
         std::function<LegacyIndexConsumer(const std::string&, size_t)>;
     folly::coro::Task<void>
-    StreamIndexEntriesAsync(const std::vector<std::string>& remote_files,
-                            const IndexEntryConsumerFactory& prepare,
-                            proto::common::LoadPriority priority,
-                            folly::CancellationToken token = {},
-                            std::string_view entry_name = {});
+    StreamIndexEntriesAsync(
+        const std::vector<std::string>& remote_files,
+        const IndexEntryConsumerFactory& prepare,
+        proto::common::LoadPriority priority,
+        folly::CancellationToken token = {},
+        std::string_view entry_name = {},
+        LegacyIndexConsumerOrder order = LegacyIndexConsumerOrder::Ordered);
 
     std::vector<FieldDataPtr>
     CacheRawDataToMemory(const Config& config);

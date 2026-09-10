@@ -88,8 +88,12 @@ MemFileManagerImpl::LoadIndexBinarySetAsync(
             co_return;
         };
     };
-    co_await StreamIndexEntriesAsync(
-        remote_files, prepare, priority, token, entry_name);
+    co_await StreamIndexEntriesAsync(remote_files,
+                                     prepare,
+                                     priority,
+                                     token,
+                                     entry_name,
+                                     LegacyIndexConsumerOrder::Unordered);
     co_return result;
 }
 
@@ -99,15 +103,12 @@ MemFileManagerImpl::StreamIndexEntriesAsync(
     const IndexEntryConsumerFactory& prepare,
     proto::common::LoadPriority priority,
     folly::CancellationToken token,
-    std::string_view entry_name) {
+    std::string_view entry_name,
+    LegacyIndexConsumerOrder order) {
     token = folly::cancellation_token_merge(
         token, co_await folly::coro::co_current_cancellation_token);
     ThrowIfCancelled(token, "LegacyIndexLoader::Assemble");
-    struct File {
-        std::string path;
-        LegacyIndexFileInfo info;
-    };
-    std::map<std::string, File> files;
+    std::map<std::string, LegacyIndexFile> files;
     for (const auto& file : remote_files) {
         auto name = file.substr(file.find_last_of('/') + 1);
         if (!entry_name.empty() && name != INDEX_FILE_SLICE_META &&
@@ -126,24 +127,10 @@ MemFileManagerImpl::StreamIndexEntriesAsync(
         auto info =
             co_await InspectLegacyIndexFileAsync(*input, priority, token);
         CheckLegacyAssembly(
-            files.emplace(std::move(name), File{file, info}).second,
+            files.emplace(std::move(name), LegacyIndexFile{file, info}).second,
             "duplicate object basename");
     }
     std::set<std::string> entries;
-    auto load_file = [&](const File& file,
-                         const LegacyIndexConsumer& consume,
-                         size_t base_offset) -> folly::coro::Task<size_t> {
-        ThrowIfCancelled(token, "LegacyIndexLoader::Open");
-        auto input = OpenLegacyIndexInput(rcm_, fs_, file.path);
-        LegacyIndexConsumer append =
-            [&](size_t offset,
-                std::span<const uint8_t> bytes) -> folly::coro::Task<void> {
-            co_await consume(base_offset + offset, bytes);
-        };
-        co_await StreamLegacyIndexFileAsync(
-            *input, file.info, append, priority, token);
-        co_return file.info.payload_bytes;
-    };
     if (auto meta = files.find(INDEX_FILE_SLICE_META); meta != files.end()) {
         const auto size = meta->second.info.payload_bytes;
         auto raw_meta = std::make_unique<uint8_t[]>(size);
@@ -156,7 +143,9 @@ MemFileManagerImpl::StreamIndexEntriesAsync(
             }
             co_return;
         };
-        co_await load_file(meta->second, consume, 0);
+        auto input = OpenLegacyIndexInput(rcm_, fs_, meta->second.path);
+        co_await StreamLegacyIndexFileAsync(
+            *input, meta->second.info, consume, priority, token);
         Config metadata;
         try {
             metadata = Config::parse(raw_meta.get(), raw_meta.get() + size);
@@ -203,14 +192,16 @@ MemFileManagerImpl::StreamIndexEntriesAsync(
             CheckLegacyAssembly(remaining == 0, "assembled length mismatch");
             ThrowIfCancelled(token, "LegacyIndexLoader::Prepare");
             const auto consume_entry = prepare(name, bytes);
-            size_t offset = 0;
+            std::vector<LegacyIndexFile> entry_files;
+            entry_files.reserve(slices);
             for (int64_t slice = 0; slice < slices; ++slice) {
                 auto it = files.find(GenSlicedFileName(name, slice));
                 CheckLegacyAssembly(it != files.end(), "missing index slice");
-                offset += co_await load_file(it->second, consume_entry, offset);
+                entry_files.push_back(std::move(it->second));
                 files.erase(it);
             }
-            CheckLegacyAssembly(offset == bytes, "assembled length mismatch");
+            co_await StreamLegacyIndexFilesAsync(
+                entry_files, rcm_, fs_, consume_entry, priority, token, order);
         }
     }
     for (const auto& [name, path] : files) {
@@ -218,7 +209,13 @@ MemFileManagerImpl::StreamIndexEntriesAsync(
                             "duplicate assembled entry");
         ThrowIfCancelled(token, "LegacyIndexLoader::Prepare");
         const auto consume_entry = prepare(name, path.info.payload_bytes);
-        co_await load_file(path, consume_entry, 0);
+        co_await StreamLegacyIndexFilesAsync(std::span{&path, size_t{1}},
+                                             rcm_,
+                                             fs_,
+                                             consume_entry,
+                                             priority,
+                                             token,
+                                             order);
     }
     ThrowIfCancelled(token, "LegacyIndexLoader::AssembleComplete");
 }
