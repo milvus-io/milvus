@@ -98,6 +98,59 @@ class FixedVectorIterator : public VectorIterator {
 
 const char* METRICS_TYPE = "metric_type";
 
+TEST(CompositeGroupByMap, StrictCapacityPreservesAcceptedGroups) {
+    CompositeGroupKey null_composite_key;
+    null_composite_key.Add(std::nullopt);
+    null_composite_key.Add(GroupByValueType{std::string("first")});
+
+    CompositeGroupKey second_composite_key;
+    second_composite_key.Add(GroupByValueType{int64_t{2}});
+    second_composite_key.Add(GroupByValueType{std::string("second")});
+
+    CompositeGroupKey rejected_composite_key;
+    rejected_composite_key.Add(GroupByValueType{int64_t{3}});
+    rejected_composite_key.Add(GroupByValueType{std::string("rejected")});
+
+    CompositeGroupByMap group_map(/*group_capacity=*/2,
+                                  /*group_size=*/2,
+                                  /*strict_group_size=*/true);
+
+    EXPECT_TRUE(group_map.Push(null_composite_key));
+    EXPECT_TRUE(group_map.Push(second_composite_key));
+    EXPECT_FALSE(group_map.IsGroupResEnough());
+
+    for (int i = 0; i < 100; ++i) {
+        EXPECT_FALSE(group_map.Push(rejected_composite_key));
+    }
+    EXPECT_FALSE(group_map.IsGroupResEnough());
+
+    EXPECT_TRUE(group_map.Push(null_composite_key));
+    EXPECT_FALSE(group_map.IsGroupResEnough());
+    EXPECT_TRUE(group_map.Push(second_composite_key));
+    EXPECT_TRUE(group_map.IsGroupResEnough());
+
+    EXPECT_FALSE(group_map.Push(null_composite_key));
+    EXPECT_FALSE(group_map.Push(rejected_composite_key));
+}
+
+TEST(CompositeGroupByMap, NonStrictCapacitySemantics) {
+    CompositeGroupKey first_key;
+    first_key.Add(GroupByValueType{int64_t{1}});
+
+    CompositeGroupKey second_key;
+    second_key.Add(GroupByValueType{int64_t{2}});
+
+    CompositeGroupByMap group_map(/*group_capacity=*/1,
+                                  /*group_size=*/2,
+                                  /*strict_group_size=*/false);
+
+    EXPECT_TRUE(group_map.Push(first_key));
+    EXPECT_TRUE(group_map.IsGroupResEnough());
+    EXPECT_FALSE(group_map.Push(second_key));
+    EXPECT_TRUE(group_map.Push(first_key));
+    EXPECT_FALSE(group_map.Push(first_key));
+}
+
 TEST(GroupBY, SealedIndex) {
     using namespace milvus;
     using namespace milvus::query;
