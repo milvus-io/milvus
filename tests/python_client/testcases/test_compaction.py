@@ -1,5 +1,6 @@
 import threading
-from time import sleep, time
+from concurrent.futures import ThreadPoolExecutor
+from time import monotonic, sleep, time
 
 import pytest
 from base.client_base import TestcaseBase
@@ -11,6 +12,19 @@ from utils.util_log import test_log as log
 
 prefix = "compact"
 tmp_nb = 100
+
+
+def remaining_time(deadline, operation):
+    remaining = deadline - monotonic()
+    if remaining <= 0:
+        raise TimeoutError(f"Timed out while {operation}")
+    return remaining
+
+
+def wait_for_event(event, deadline, operation, future=None):
+    while not event.wait(timeout=min(0.1, remaining_time(deadline, operation))):
+        if future is not None and future.done():
+            future.result()
 
 
 class TestCompactionParams(TestcaseBase):
@@ -174,12 +188,15 @@ class TestCompactionParams(TestcaseBase):
         collection_w.wait_for_compaction_completed()
         collection_w.get_compaction_plans(check_task=CheckTasks.check_delete_compact)
 
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
-        collection_w.query(single_expr, check_items=CheckTasks.check_query_empty)
+        collection_w.query(single_expr, check_task=CheckTasks.check_query_empty)
 
         res = df.iloc[-1:, :1].to_dict("records")
         collection_w.query(
-            f"{ct.default_int64_field_name} in {insert_res.primary_keys[-1:]}", check_items={"exp_res": res}
+            f"{ct.default_int64_field_name} in {insert_res.primary_keys[-1:]}",
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_res": res},
         )
 
     @pytest.mark.tags(CaseLabel.L3)
@@ -257,11 +274,13 @@ class TestCompactionParams(TestcaseBase):
             sleep(1)
 
         collection_w.load()
-        collection_w.query(ratio_expr, check_items=CheckTasks.check_query_empty)
+        collection_w.query(ratio_expr, check_task=CheckTasks.check_query_empty)
 
         res = df.iloc[-1:, :1].to_dict("records")
         collection_w.query(
-            f"{ct.default_int64_field_name} in {insert_res.primary_keys[-1:]}", check_items={"exp_res": res}
+            f"{ct.default_int64_field_name} in {insert_res.primary_keys[-1:]}",
+            check_task=CheckTasks.check_query_results,
+            check_items={"exp_res": res},
         )
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -313,7 +332,7 @@ class TestCompactionParams(TestcaseBase):
 
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
-        collection_w.query(expr, check_items=CheckTasks.check_query_empty)
+        collection_w.query(expr, check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_compact_after_delete(self):
@@ -537,8 +556,10 @@ class TestCompactionOperation(TestcaseBase):
         collection_w.release()
         collection_w.load()
         seg_info, _ = self.utility_wrap.get_query_segment_info(collection_w.name)
-        for seg in seg_info:
-            seg.segmentID in targets
+        loaded_segment_ids = {seg.segmentID for seg in seg_info}
+        assert loaded_segment_ids == set(targets), (
+            f"loaded segments do not match compaction targets: loaded={loaded_segment_ids}, targets={set(targets)}"
+        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_compact_after_index(self):
@@ -590,8 +611,10 @@ class TestCompactionOperation(TestcaseBase):
         collection_w = self.init_collection_wrap(
             name=cf.gen_unique_str(prefix), shards_num=1, schema=cf.gen_default_binary_collection_schema()
         )
+        binary_vectors_by_id = {}
         for i in range(2):
-            df, _ = cf.gen_default_binary_dataframe_data()
+            df, raw_vectors = cf.gen_default_binary_dataframe_data(start=i * ct.default_nb)
+            binary_vectors_by_id.update(zip(df[ct.default_int64_field_name].to_list(), raw_vectors, strict=True))
             collection_w.insert(data=df)
             assert collection_w.num_entities == (i + 1) * ct.default_nb
 
@@ -601,13 +624,17 @@ class TestCompactionOperation(TestcaseBase):
 
         # load and search
         collection_w.load()
-        search_params = {"metric_type": "JACCARD", "params": {"nprobe": 32}}
+        search_params = {"metric_type": "JACCARD", "params": {"nprobe": 64}}
+        probe_ids = df[ct.default_int64_field_name][: ct.default_nq].to_list()
+        probe_vectors = raw_vectors[: ct.default_nq]
         search_res_one, _ = collection_w.search(
             df[ct.default_binary_vec_field_name][: ct.default_nq].to_list(),
             ct.default_binary_vec_field_name,
             search_params,
             ct.default_limit,
         )
+        assert len(search_res_one) == ct.default_nq
+        assert all(len(hits) == ct.default_limit for hits in search_res_one)
 
         # compact
         collection_w.compact()
@@ -634,9 +661,32 @@ class TestCompactionOperation(TestcaseBase):
             search_params,
             ct.default_limit,
         )
-        assert len(search_res_one) == ct.default_nq
-        for hits in search_res_one:
-            assert len(hits) == ct.default_limit
+        assert len(search_res_two) == ct.default_nq
+        for probe_id, probe_vector, before_hits, after_hits in zip(
+            probe_ids, probe_vectors, search_res_one, search_res_two, strict=True
+        ):
+            assert len(after_hits) == ct.default_limit
+            assert len(set(before_hits.ids)) == ct.default_limit
+            assert len(set(after_hits.ids)) == ct.default_limit
+            assert before_hits.ids[0] == probe_id
+            assert after_hits.ids[0] == probe_id
+            expected_distances = sorted(
+                cf.jaccard(probe_vector, candidate_vector) for candidate_vector in binary_vectors_by_id.values()
+            )[: ct.default_limit]
+            assert before_hits.distances == pytest.approx(expected_distances)
+            assert after_hits.distances == pytest.approx(expected_distances)
+            for hits in (before_hits, after_hits):
+                for hit_id, hit_distance in zip(hits.ids, hits.distances, strict=True):
+                    assert hit_distance == pytest.approx(cf.jaccard(probe_vector, binary_vectors_by_id[hit_id]))
+
+        query_res, _ = collection_w.query(
+            f"{ct.default_int64_field_name} in {probe_ids}", output_fields=[ct.default_int64_field_name]
+        )
+        query_ids = [row[ct.default_int64_field_name] for row in query_res]
+        assert len(query_ids) == len(probe_ids)
+        assert len(set(query_ids)) == len(probe_ids)
+        assert set(query_ids) == set(probe_ids)
+        assert collection_w.num_entities == 2 * ct.default_nb
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_compact_and_index(self):
@@ -1194,30 +1244,76 @@ class TestCompactionOperation(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L1)
     def test_compact_during_insert(self):
         """
-        target: test compact during insert and flush
-        method: 1.insert entities into multi segments
-                2.start a thread to load and search
-                3.compact collection
-        expected: Search and compact both successfully
+        target: test compact during an insert RPC
+        method: submit an asynchronous insert while compaction is Executing
+        expected: insert completes before compaction leaves Executing; flush and data checks succeed afterward
         """
+        # Keep the source plan active long enough to prove that a completed
+        # insert RPC ran inside the Executing window.  Disable auto compaction
+        # before writing so it cannot consume the nine source segments first.
+        num_of_segment = 9
         collection_w = self.collection_insert_multi_segments_one_shard(
-            prefix, nb_of_segment=ct.default_nb, is_dup=False
+            prefix,
+            num_of_segment=num_of_segment,
+            nb_of_segment=ct.default_nb,
+            is_dup=False,
+            collection_properties={"collection.autocompaction.enabled": "false"},
         )
         collection_w.create_index(ct.default_float_vec_field_name, ct.default_index)
         log.debug(collection_w.index())
-        df = cf.gen_default_dataframe_data(start=ct.default_nb * 2)
+        df = cf.gen_default_dataframe_data(nb=tmp_nb, start=ct.default_nb * num_of_segment)
+        expected_new_ids = set(df[ct.default_int64_field_name].tolist())
+
+        deadline = monotonic() + 300
+        worker_ready = threading.Event()
+        start_operation = threading.Event()
+        operation_submitted = threading.Event()
+        operation_completed = threading.Event()
+        stop_requested = threading.Event()
 
         def do_flush():
-            collection_w.insert(df)
-            log.debug(collection_w.num_entities)
+            worker_ready.set()
+            wait_for_event(start_operation, deadline, "waiting to start insert")
+            if stop_requested.is_set():
+                return
+            insert_future, _ = collection_w.insert(
+                df,
+                timeout=remaining_time(deadline, "submitting insert during compaction"),
+                _async=True,
+            )
+            operation_submitted.set()
+            mutation_result = insert_future.result()
+            assert mutation_result.insert_count == tmp_nb
+            operation_completed.set()
+            collection_w.flush(timeout=remaining_time(deadline, "flushing during compaction"))
 
         # compact during insert
-        t = threading.Thread(target=do_flush, args=())
-        t.start()
-        collection_w.compact()
-        collection_w.wait_for_compaction_completed()
-        collection_w.get_compaction_plans()
-        t.join()
+        executor = ThreadPoolExecutor(max_workers=1)
+        try:
+            insert_future = executor.submit(do_flush)
+            wait_for_event(worker_ready, deadline, "waiting for insert worker", insert_future)
+            collection_w.compact(timeout=remaining_time(deadline, "triggering compaction"))
+            collection_w.wait_for_compaction_executing(
+                timeout=min(30, remaining_time(deadline, "waiting for Executing"))
+            )
+            start_operation.set()
+            wait_for_event(operation_submitted, deadline, "waiting for insert RPC submission", insert_future)
+            collection_w.wait_for_compaction_executing(
+                timeout=min(30, remaining_time(deadline, "verifying submitted insert overlap"))
+            )
+            wait_for_event(operation_completed, deadline, "waiting for insert RPC to complete", insert_future)
+            collection_w.wait_for_compaction_executing(
+                timeout=min(30, remaining_time(deadline, "verifying completed insert overlap"))
+            )
+            collection_w.wait_for_compaction_completed(
+                timeout=remaining_time(deadline, "waiting for compaction completion")
+            )
+            collection_w.get_compaction_plans(timeout=remaining_time(deadline, "getting compaction plans"))
+            insert_future.result(timeout=remaining_time(deadline, "waiting for insert worker"))
+        finally:
+            stop_requested.set()
+            start_operation.set()
+            executor.shutdown(wait=True, cancel_futures=True)
 
         # waitting for new segment index and compact
         index_cost = 240
@@ -1262,36 +1358,122 @@ class TestCompactionOperation(TestcaseBase):
             ct.default_limit,
         )
         assert len(search_res[0]) == ct.default_limit
+        new_rows = collection_w.query(
+            f"{ct.default_int64_field_name} >= {min(expected_new_ids)} && "
+            f"{ct.default_int64_field_name} <= {max(expected_new_ids)}",
+            output_fields=[ct.default_int64_field_name],
+            consistency_level="Strong",
+        )[0]
+        actual_new_ids = [row[ct.default_int64_field_name] for row in new_rows]
+        assert len(actual_new_ids) == tmp_nb
+        assert len(set(actual_new_ids)) == tmp_nb
+        assert set(actual_new_ids) == expected_new_ids
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_compact_during_index(self):
         """
         target: test compact during index
-        method: while compact collection start a thread to create index
-        expected: No exception
+        method: complete an asynchronous CreateIndex request while compaction is Executing
+        expected: request overlap is proven and the index build later completes successfully
         """
+        # Keep the source plan active long enough to prove that index creation
+        # completed while the same compaction was still Executing.
+        num_of_segment = 9
         collection_w = self.collection_insert_multi_segments_one_shard(
-            prefix, nb_of_segment=ct.default_nb, is_dup=False
+            prefix,
+            num_of_segment=num_of_segment,
+            nb_of_segment=ct.default_nb,
+            is_dup=False,
+            collection_properties={"collection.autocompaction.enabled": "false"},
         )
 
+        deadline = monotonic() + 300
+        worker_ready = threading.Event()
+        start_operation = threading.Event()
+        operation_submitted = threading.Event()
+        operation_completed = threading.Event()
+        stop_requested = threading.Event()
+
         def do_index():
-            collection_w.create_index(ct.default_float_vec_field_name, ct.default_index)
-            assert collection_w.index()[0].params == ct.default_index
+            worker_ready.set()
+            wait_for_event(start_operation, deadline, "waiting to start index creation")
+            if stop_requested.is_set():
+                return
+            index_future, _ = collection_w.create_index(
+                ct.default_float_vec_field_name,
+                ct.default_index,
+                timeout=remaining_time(deadline, "creating index during compaction"),
+                _async=True,
+                sync=False,
+            )
+            operation_submitted.set()
+            index_future.result()
+            operation_completed.set()
+            assert collection_w.index(timeout=remaining_time(deadline, "checking index"))[0].params == ct.default_index
 
         # compact during index
-        t = threading.Thread(target=do_index, args=())
-        t.start()
-        collection_w.compact()
-        collection_w.wait_for_compaction_completed(timeout=180)
-        collection_w.get_compaction_plans()
+        executor = ThreadPoolExecutor(max_workers=1)
+        try:
+            index_future = executor.submit(do_index)
+            wait_for_event(worker_ready, deadline, "waiting for index worker", index_future)
+            collection_w.compact(timeout=remaining_time(deadline, "triggering compaction"))
+            collection_w.wait_for_compaction_executing(
+                timeout=min(30, remaining_time(deadline, "waiting for Executing"))
+            )
+            start_operation.set()
+            wait_for_event(operation_submitted, deadline, "waiting for index RPC submission", index_future)
+            collection_w.wait_for_compaction_executing(
+                timeout=min(30, remaining_time(deadline, "verifying submitted index overlap"))
+            )
+            wait_for_event(operation_completed, deadline, "waiting for index RPC to complete", index_future)
+            collection_w.wait_for_compaction_executing(
+                timeout=min(30, remaining_time(deadline, "verifying completed index overlap"))
+            )
+            collection_w.wait_for_compaction_completed(
+                timeout=remaining_time(deadline, "waiting for compaction completion")
+            )
+            compaction_plans = collection_w.get_compaction_plans(
+                timeout=remaining_time(deadline, "getting compaction plans")
+            )[0]
+            index_future.result(timeout=remaining_time(deadline, "waiting for index worker"))
+        finally:
+            stop_requested.set()
+            start_operation.set()
+            executor.shutdown(wait=True, cancel_futures=True)
 
-        t.join()
+        assert self.utility_wrap.wait_for_index_building_complete(
+            collection_w.name,
+            timeout=remaining_time(deadline, "waiting for index build completion"),
+        )[0]
+        raw_target_ids = [plan.target for plan in compaction_plans.plans]
+        target_ids = set(raw_target_ids)
+        assert raw_target_ids, f"Compaction completed without plans: {compaction_plans}"
+        assert len(raw_target_ids) == len(target_ids), f"Compaction targets must be unique: {compaction_plans}"
+
         collection_w.load()
-        replicas = collection_w.get_replicas()[0]
-        replica_num = len(replicas.groups)
-        seg_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
-        if not (len(seg_info) == 1 * replica_num or len(seg_info) == 2 * replica_num):
-            assert False
+        seg_info = []
+        while True:
+            seg_info = self.utility_wrap.get_query_segment_info(
+                collection_w.name,
+                timeout=remaining_time(deadline, "waiting for compaction target handoff"),
+            )[0]
+            loaded_ids = [segment.segmentID for segment in seg_info]
+            targets_loaded_and_indexed = (
+                len(loaded_ids) == len(set(loaded_ids))
+                and set(loaded_ids) == target_ids
+                and all(segment.indexID > 0 and segment.index_name for segment in seg_info)
+            )
+            if targets_loaded_and_indexed:
+                break
+            sleep(min(1, remaining_time(deadline, "waiting for indexed compaction targets")))
+
+        search_res = collection_w.search(
+            cf.gen_vectors(1, ct.default_dim),
+            ct.default_float_vec_field_name,
+            ct.default_search_params,
+            ct.default_limit,
+        )[0]
+        assert len(search_res[0]) == ct.default_limit
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_compact_during_search(self):
@@ -1308,25 +1490,64 @@ class TestCompactionOperation(TestcaseBase):
             prefix, num_of_segment=num_of_segment, nb_of_segment=100
         )
 
+        deadline = monotonic() + 300
+        worker_ready = threading.Event()
+        start_operation = threading.Event()
+        operation_submitted = threading.Event()
+        operation_completed = threading.Event()
+        stop_requested = threading.Event()
+
         def do_search():
-            for _ in range(5):
-                search_res, _ = collection_w.search(
+            worker_ready.set()
+            wait_for_event(start_operation, deadline, "waiting to start search")
+            if stop_requested.is_set():
+                return
+            for iteration in range(5):
+                search_future, _ = collection_w.search(
                     cf.gen_vectors(1, ct.default_dim),
                     ct.default_float_vec_field_name,
                     ct.default_search_params,
                     ct.default_limit,
+                    timeout=remaining_time(deadline, "searching during compaction"),
+                    _async=True,
                 )
+                if iteration == 0:
+                    operation_submitted.set()
+                search_res = search_future.result()
                 assert len(search_res[0]) == ct.default_limit
+                if iteration == 0:
+                    operation_completed.set()
 
         # compact during search
         collection_w.create_index(ct.default_float_vec_field_name, ct.default_index)
         collection_w.load()
-        t = threading.Thread(target=do_search, args=())
-        t.start()
-
-        collection_w.compact()
-        collection_w.wait_for_compaction_completed()
-        collection_w.get_compaction_plans(
-            check_task=CheckTasks.check_merge_compact, check_items={"segment_num": num_of_segment}
-        )
-        t.join()
+        executor = ThreadPoolExecutor(max_workers=1)
+        try:
+            search_future = executor.submit(do_search)
+            wait_for_event(worker_ready, deadline, "waiting for search worker", search_future)
+            collection_w.compact(timeout=remaining_time(deadline, "triggering compaction"))
+            collection_w.wait_for_compaction_executing(
+                timeout=min(30, remaining_time(deadline, "waiting for Executing"))
+            )
+            start_operation.set()
+            wait_for_event(operation_submitted, deadline, "waiting for search RPC submission", search_future)
+            collection_w.wait_for_compaction_executing(
+                timeout=min(30, remaining_time(deadline, "verifying submitted search overlap"))
+            )
+            wait_for_event(operation_completed, deadline, "waiting for search RPC to complete", search_future)
+            collection_w.wait_for_compaction_executing(
+                timeout=min(30, remaining_time(deadline, "verifying completed search overlap"))
+            )
+            collection_w.wait_for_compaction_completed(
+                timeout=remaining_time(deadline, "waiting for compaction completion")
+            )
+            collection_w.get_compaction_plans(
+                timeout=remaining_time(deadline, "getting compaction plans"),
+                check_task=CheckTasks.check_merge_compact,
+                check_items={"segment_num": num_of_segment},
+            )
+            search_future.result(timeout=remaining_time(deadline, "waiting for search worker"))
+        finally:
+            stop_requested.set()
+            start_operation.set()
+            executor.shutdown(wait=True, cancel_futures=True)

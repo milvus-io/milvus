@@ -6606,35 +6606,35 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	}
 	p.CompactionMaxFullSegmentThreshold.Init(base.mgr)
 
+	const defaultForceMergeMemoryFactor = "4.0"
+	forceMergeMemoryFactorFormatter := func(value string) string {
+		factor, err := strconv.ParseFloat(value, 64)
+		if err != nil || math.IsNaN(factor) || math.IsInf(factor, 0) {
+			return defaultForceMergeMemoryFactor
+		}
+		if factor < 1.0 {
+			factor = 1.0
+		}
+		return strconv.FormatFloat(factor, 'f', -1, 64)
+	}
+
 	p.CompactionForceMergeDataNodeMemoryFactor = ParamItem{
 		Key:          "dataCoord.compaction.forceMerge.dataNodeMemoryFactor",
 		Version:      "2.6.8",
-		DefaultValue: "4.0",
+		DefaultValue: defaultForceMergeMemoryFactor,
 		Doc:          "Memory safety factor for DataNode during force merge compaction. Max segment size = DataNode memory / factor. Default 4.0 means segments can use up to 1/4 of DataNode memory. Must be >= 1.0.",
 		Export:       false,
-		Formatter: func(value string) string {
-			factor, err := strconv.ParseFloat(value, 64)
-			if err != nil || factor < 1.0 {
-				factor = 1.0
-			}
-			return strconv.FormatFloat(factor, 'f', -1, 64)
-		},
+		Formatter:    forceMergeMemoryFactorFormatter,
 	}
 	p.CompactionForceMergeDataNodeMemoryFactor.Init(base.mgr)
 
 	p.CompactionForceMergeQueryNodeMemoryFactor = ParamItem{
 		Key:          "dataCoord.compaction.forceMerge.queryNodeMemoryFactor",
 		Version:      "2.6.8",
-		DefaultValue: "4.0",
+		DefaultValue: defaultForceMergeMemoryFactor,
 		Doc:          "Memory safety factor for QueryNode when loading segments after force merge. Max segment size = QueryNode memory / factor. Default 4.0 means segments can use up to 1/4 of QueryNode memory. Must be >= 1.0.",
 		Export:       false,
-		Formatter: func(value string) string {
-			factor, err := strconv.ParseFloat(value, 64)
-			if err != nil || factor < 1.0 {
-				factor = 1.0
-			}
-			return strconv.FormatFloat(factor, 'f', -1, 64)
-		},
+		Formatter:    forceMergeMemoryFactorFormatter,
 	}
 	p.CompactionForceMergeQueryNodeMemoryFactor.Init(base.mgr)
 

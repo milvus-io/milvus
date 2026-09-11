@@ -81,8 +81,24 @@ func setTmpSegments(segments []int64) compactionTaskOpt {
 
 func setState(state datapb.CompactionTaskState) compactionTaskOpt {
 	return func(task *datapb.CompactionTask) {
+		if isCompactionTerminalOutcome(state) &&
+			task.GetTerminalState() == datapb.CompactionTaskState_unknown {
+			task.TerminalState = state
+		} else if state == datapb.CompactionTaskState_cleaned &&
+			task.GetTerminalState() == datapb.CompactionTaskState_unknown &&
+			isCompactionTerminalOutcome(task.GetState()) {
+			// Tasks persisted before terminal_state was introduced still retain
+			// their outcome until the first cleanup transition after upgrade.
+			task.TerminalState = task.GetState()
+		}
 		task.State = state
 	}
+}
+
+func isCompactionTerminalOutcome(state datapb.CompactionTaskState) bool {
+	return state == datapb.CompactionTaskState_completed ||
+		state == datapb.CompactionTaskState_failed ||
+		state == datapb.CompactionTaskState_timeout
 }
 
 func setStartTime(startTime int64) compactionTaskOpt {

@@ -29,6 +29,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 )
 
 func TestQueryNodeStrictGroupSettings(t *testing.T) {
@@ -1440,6 +1441,48 @@ func TestDataCoordCompactionTargetConfig(t *testing.T) {
 	field, ok = reflect.TypeOf(dataCoordConfig{}).FieldByName("TargetCompactionMaxEvents")
 	assert.True(t, ok)
 	assert.Equal(t, "true", field.Tag.Get("refreshable"))
+}
+
+func TestDataCoordForceMergeMemoryFactorConfig(t *testing.T) {
+	base := NewBaseTable(SkipRemote(true))
+	var cfg dataCoordConfig
+	cfg.init(base)
+	for _, value := range []string{"NaN", "+Inf", "-Inf", "invalid"} {
+		base.Save(cfg.CompactionForceMergeDataNodeMemoryFactor.Key, value)
+		base.Save(cfg.CompactionForceMergeQueryNodeMemoryFactor.Key, value)
+		assert.Equal(t, 4.0, cfg.CompactionForceMergeDataNodeMemoryFactor.GetAsFloat(), value)
+		assert.Equal(t, 4.0, cfg.CompactionForceMergeQueryNodeMemoryFactor.GetAsFloat(), value)
+
+		_, err := metricsinfo.MarshalComponentInfos(metricsinfo.DataCoordInfos{
+			SystemConfigurations: metricsinfo.DataCoordConfiguration{
+				ForceMergeDataNodeMemoryFactor:  cfg.CompactionForceMergeDataNodeMemoryFactor.GetAsFloat(),
+				ForceMergeQueryNodeMemoryFactor: cfg.CompactionForceMergeQueryNodeMemoryFactor.GetAsFloat(),
+			},
+		})
+		assert.NoError(t, err, value)
+	}
+
+	for _, value := range []string{"-1", "0", "0.5", "0.9999"} {
+		base.Save(cfg.CompactionForceMergeDataNodeMemoryFactor.Key, value)
+		base.Save(cfg.CompactionForceMergeQueryNodeMemoryFactor.Key, value)
+		assert.Equal(t, 1.0, cfg.CompactionForceMergeDataNodeMemoryFactor.GetAsFloat(), value)
+		assert.Equal(t, 1.0, cfg.CompactionForceMergeQueryNodeMemoryFactor.GetAsFloat(), value)
+	}
+
+	for _, test := range []struct {
+		value    string
+		expected float64
+	}{
+		{value: "1.0", expected: 1.0},
+		{value: "1.0001", expected: 1.0001},
+		{value: "2.5", expected: 2.5},
+		{value: "8", expected: 8.0},
+	} {
+		base.Save(cfg.CompactionForceMergeDataNodeMemoryFactor.Key, test.value)
+		base.Save(cfg.CompactionForceMergeQueryNodeMemoryFactor.Key, test.value)
+		assert.Equal(t, test.expected, cfg.CompactionForceMergeDataNodeMemoryFactor.GetAsFloat(), test.value)
+		assert.Equal(t, test.expected, cfg.CompactionForceMergeQueryNodeMemoryFactor.GetAsFloat(), test.value)
+	}
 }
 
 func TestForbiddenItem(t *testing.T) {
