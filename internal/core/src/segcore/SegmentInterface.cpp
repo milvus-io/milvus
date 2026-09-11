@@ -786,12 +786,12 @@ SegmentInternalInterface::set_field_avg_size(const FieldMeta& field_meta,
     }
 }
 
-std::shared_ptr<const SkipIndex>
-SegmentInternalInterface::GetSkipIndex() const {
+FieldSkipMetricsView
+SegmentInternalInterface::GetFieldSkipMetrics(FieldId field_id) const {
     if (auto* sealed = dynamic_cast<const ChunkedSegmentSealedImpl*>(this)) {
-        return sealed->GetSkipIndexSnapshot();
+        return sealed->GetFieldSkipMetrics(field_id);
     }
-    return skip_index_;
+    return {};
 }
 
 PinWrapper<index::TextMatchIndex*>

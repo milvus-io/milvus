@@ -204,7 +204,8 @@ class RawScanCursor final : public ChunkedColumnInterface::ScanCursor {
             filter_->Source() ==
                 ColumnFilter::MetricsSource::PreloadedStatistics;
         auto data_skipped = preloaded_skip && ShouldSkipCell(chunk_id);
-        if (data_skipped && !column_->IsNullable()) {
+        if (data_skipped &&
+            (!column_->IsNullable() || !filter_->SkippedValidityRequired())) {
             // Next() invalidates the previous batch. A CursorOwned pin from
             // that batch must not survive merely because this Cell needs no
             // data pin of its own.
@@ -321,7 +322,8 @@ class RawScanCursor final : public ChunkedColumnInterface::ScanCursor {
                     ColumnFilter::MetricsSource::PreloadedStatistics &&
                 ShouldSkipCell(cell_id);
             // A nullable skipped Cell is still needed for its real validity.
-            if (data_skipped && !column_->IsNullable()) {
+            if (data_skipped && (!column_->IsNullable() ||
+                                 !filter_->SkippedValidityRequired())) {
                 continue;
             }
             remaining.push_back(cell_id);
