@@ -129,6 +129,29 @@ func prepareQueryNodeFunctionChainsFromPlan(plan *planpb.PlanNode, schema *schem
 	return prepared, nil
 }
 
+// validateQueryNodeMapOp checks request semantics without executing the function
+// or materializing input fields. Both L0 and L1 must run these checks before ANN.
+func validateQueryNodeMapOp(op *chain.OperatorRepr, stage string) error {
+	fn, err := chain.FunctionFromReprWithContext(op.Function, chaintypes.FunctionBuildContext{})
+	if err != nil {
+		return err
+	}
+	if len(op.Inputs) == 0 {
+		return merr.WrapErrParameterInvalidMsg("map operator requires inputs")
+	}
+	if len(op.Outputs) == 0 {
+		return merr.WrapErrParameterInvalidMsg("map operator requires outputs")
+	}
+	outputTypes := fn.OutputDataTypes()
+	if outputTypes != nil && len(op.Outputs) != len(outputTypes) {
+		return merr.WrapErrParameterInvalidMsg("map output columns count %d does not match function output count %d", len(op.Outputs), len(outputTypes))
+	}
+	if !fn.IsRunnable(stage) {
+		return merr.WrapErrParameterInvalidMsg("function %q does not support stage %q", fn.Name(), stage)
+	}
+	return nil
+}
+
 func validateQueryNodeFunctionChainSystemOutputs(repr *chain.ChainRepr, level string) error {
 	if repr == nil {
 		return merr.WrapErrParameterInvalidMsg("function chain repr is nil")

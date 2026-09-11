@@ -49,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -1202,9 +1203,13 @@ func TestExecuteFilterOnly(t *testing.T) {
 	require.NoError(t, err)
 	defer searchReqFilterOnly.Delete()
 
+	prepare := mockey.Mock(prepareQueryNodeFunctionChains).Return((*preparedQueryNodeFunctionChains)(nil), merr.ErrServiceInternal).Build()
+	defer prepare.UnPatch()
+
 	task := NewSearchTask(ctx, ts.collection, ts.manager, queryReq, 1)
 	require.NoError(t, task.PreExecute())
 	require.NoError(t, task.Execute())
+	assert.Zero(t, prepare.Times())
 
 	result := task.SearchResult()
 	require.NotNil(t, result)
@@ -1225,53 +1230,133 @@ func TestExecuteFilterOnly(t *testing.T) {
 	assert.NotNil(t, result.CostAggregation)
 }
 
-func TestExecuteEmptySearchReturnsNQEmptyResult(t *testing.T) {
-	const (
-		nq   int64 = 1
-		topK int64 = 10
-	)
-
+// Validate the request before either ANN implementation can observe local data.
+func TestExecuteValidatesFunctionChainsBeforeANN(t *testing.T) {
 	paramtable.Init()
-	schema := mock_segcore.GenTestCollectionSchema("test-empty-search", schemapb.DataType_Int64, true)
-	indexMeta := mock_segcore.GenTestIndexMeta(testCollectionID, schema)
+	schema := mock_segcore.GenTestCollectionSchema("test-chain-validation", schemapb.DataType_Int64, true)
+	var vectorField string
+	for _, field := range schema.GetFields() {
+		if field.GetDataType() == schemapb.DataType_FloatVector {
+			vectorField = field.GetName()
+		}
+	}
+	require.NotEmpty(t, vectorField)
 	manager := segments.NewManager()
-	manager.Collection.PutOrRef(testCollectionID, schema, indexMeta, &querypb.LoadMetaInfo{
-		LoadType:     querypb.LoadType_LoadCollection,
-		CollectionID: testCollectionID,
+	manager.Collection.PutOrRef(testCollectionID, schema, mock_segcore.GenTestIndexMeta(testCollectionID, schema), &querypb.LoadMetaInfo{
+		LoadType: querypb.LoadType_LoadCollection, CollectionID: testCollectionID,
 		PartitionIDs: []int64{testPartitionID},
 	})
 	collection := manager.Collection.Get(testCollectionID)
 	defer manager.Collection.Unref(collection.ID(), 1)
 
-	ctx := context.Background()
-	queryReq, err := mock_segcore.GenQueryRequest(
-		collection.GetCCollection(), nil, nq, topK, testCollectionID)
-	require.NoError(t, err)
-
-	task := NewSearchTask(ctx, collection, manager, queryReq, 1)
-	require.NoError(t, task.PreExecute())
-	require.NoError(t, task.Execute())
-
-	result := task.SearchResult()
-	require.NotNil(t, result)
-	assert.Equal(t, nq, result.NumQueries)
-	assert.Equal(t, topK, result.TopK)
-
-	var resultData *schemapb.SearchResultData
-	if result.ResultData != nil {
-		resultData = result.ResultData
-	} else {
-		require.NotEmpty(t, result.SlicedBlob)
-		resultData = &schemapb.SearchResultData{}
-		require.NoError(t, proto.Unmarshal(result.SlicedBlob, resultData))
+	cases := []struct {
+		name    string
+		op      *schemapb.FunctionChainOp
+		message string
+	}{
+		{"unknown function", mapOpForTest(chaintypes.ScoreFieldName, "unknown_function", columnArgForTest(chaintypes.ScoreFieldName)), "unknown function"},
+		{"invalid parameter", mapOpWithParamsForTest(chaintypes.ScoreFieldName, chainexpr.NumCombineFuncName,
+			map[string]*schemapb.FunctionParamValue{"mode": stringParamForTest("invalid")}, columnArgForTest(chaintypes.ScoreFieldName)), "invalid mode"},
+		{"missing field", mapOpForTest(chaintypes.ScoreFieldName, chainexpr.NumCombineFuncName, columnArgForTest("missing_field")), "neither a previous output nor a collection field"},
+		{"unsupported field", mapOpForTest(chaintypes.ScoreFieldName, chainexpr.NumCombineFuncName, columnArgForTest(vectorField)), "unsupported field type"},
+		{"invalid arguments", mapOpWithParamsForTest(chaintypes.ScoreFieldName, chainexpr.XGBoostFuncName,
+			map[string]*schemapb.FunctionParamValue{"model_resource": stringParamForTest("model.json")}), "expected at least one feature column"},
+		{"missing inputs", mapOpForTest(chaintypes.ScoreFieldName, chainexpr.NumCombineFuncName), "requires inputs"},
+		{"missing outputs", &schemapb.FunctionChainOp{Op: chaintypes.OpTypeMap, Expr: &schemapb.FunctionChainExpr{
+			Name: chainexpr.NumCombineFuncName, Args: []*schemapb.FunctionChainExprArg{columnArgForTest(chaintypes.ScoreFieldName)},
+		}}, "requires outputs"},
+		{"output count", &schemapb.FunctionChainOp{Op: chaintypes.OpTypeMap, Outputs: []string{chaintypes.ScoreFieldName, "extra"}, Expr: &schemapb.FunctionChainExpr{
+			Name: chainexpr.NumCombineFuncName, Args: []*schemapb.FunctionChainExprArg{columnArgForTest(chaintypes.ScoreFieldName)},
+		}}, "does not match function output count"},
 	}
+	for _, scope := range []querypb.DataScope{querypb.DataScope_Historical, querypb.DataScope_Streaming} {
+		for _, stage := range []schemapb.FunctionChainStage{schemapb.FunctionChainStage_FunctionChainStageL0Rerank, schemapb.FunctionChainStage_FunctionChainStageL1Rerank} {
+			for _, tc := range cases {
+				t.Run(scope.String()+"/"+stage.String()+"/"+tc.name, func(t *testing.T) {
+					queryReq, err := mock_segcore.GenQueryRequest(collection.GetCCollection(), nil, 1, 10, testCollectionID)
+					require.NoError(t, err)
+					queryReq.Scope = scope
+					plan := &planpb.PlanNode{}
+					require.NoError(t, proto.Unmarshal(queryReq.GetReq().GetSerializedExprPlan(), plan))
+					plan.QuerynodeFunctionChains = []*schemapb.FunctionChain{{Stage: stage, Ops: []*schemapb.FunctionChainOp{tc.op}}}
+					queryReq.Req.SerializedExprPlan, err = proto.Marshal(plan)
+					require.NoError(t, err)
 
-	assert.Equal(t, nq, resultData.NumQueries)
-	assert.Equal(t, topK, resultData.TopK)
-	assert.Equal(t, []int64{0}, resultData.Topks)
-	assert.Empty(t, resultData.Scores)
-	assert.Zero(t, typeutil.GetSizeOfIDs(resultData.GetIds()))
-	assert.Empty(t, resultData.FieldsData)
+					historical := mockey.Mock(segments.SearchHistorical).Return([]*segments.SearchResult(nil), []segments.Segment(nil), nil).Build()
+					defer historical.UnPatch()
+					streaming := mockey.Mock(segments.SearchStreaming).Return([]*segments.SearchResult(nil), []segments.Segment(nil), nil).Build()
+					defer streaming.UnPatch()
+					task := NewSearchTask(context.Background(), collection, manager, queryReq, 1)
+					require.NoError(t, task.PreExecute())
+					err = task.Execute()
+					require.ErrorIs(t, err, merr.ErrParameterInvalid)
+					assert.Contains(t, err.Error(), tc.message)
+					assert.Zero(t, historical.Times())
+					assert.Zero(t, streaming.Times())
+					assert.Nil(t, task.SearchResult())
+				})
+			}
+		}
+	}
+}
+
+func TestExecuteEmptySearchReturnsNQEmptyResultAfterFunctionChainValidation(t *testing.T) {
+	const (
+		nq   int64 = 2
+		topK int64 = 10
+	)
+	paramtable.Init()
+	schema := mock_segcore.GenTestCollectionSchema("test-empty-search", schemapb.DataType_Int64, true)
+	manager := segments.NewManager()
+	manager.Collection.PutOrRef(testCollectionID, schema, mock_segcore.GenTestIndexMeta(testCollectionID, schema), &querypb.LoadMetaInfo{
+		LoadType: querypb.LoadType_LoadCollection, CollectionID: testCollectionID,
+		PartitionIDs: []int64{testPartitionID},
+	})
+	collection := manager.Collection.Get(testCollectionID)
+	defer manager.Collection.Unref(collection.ID(), 1)
+
+	for _, scope := range []querypb.DataScope{querypb.DataScope_Historical, querypb.DataScope_Streaming} {
+		for _, withChain := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/chain=%t", scope.String(), withChain), func(t *testing.T) {
+				queryReq, err := mock_segcore.GenQueryRequest(collection.GetCCollection(), nil, nq, topK, testCollectionID)
+				require.NoError(t, err)
+				queryReq.Scope = scope
+				if withChain {
+					plan := &planpb.PlanNode{}
+					require.NoError(t, proto.Unmarshal(queryReq.GetReq().GetSerializedExprPlan(), plan))
+					// A valid XGBoost configuration needs no model on the empty path:
+					// preparation validates the request but never executes the model.
+					newOp := func() *schemapb.FunctionChainOp {
+						return mapOpWithParamsForTest(chaintypes.ScoreFieldName, chainexpr.XGBoostFuncName,
+							map[string]*schemapb.FunctionParamValue{"model_resource": stringParamForTest("not-loaded-empty-search-model.json")},
+							columnArgForTest(chaintypes.ScoreFieldName))
+					}
+					plan.QuerynodeFunctionChains = []*schemapb.FunctionChain{l0FunctionChainForTest(newOp()), l1FunctionChainForTest(newOp())}
+					queryReq.Req.SerializedExprPlan, err = proto.Marshal(plan)
+					require.NoError(t, err)
+				}
+				task := NewSearchTask(context.Background(), collection, manager, queryReq, 1)
+				require.NoError(t, task.PreExecute())
+				require.NoError(t, task.Execute())
+				result := task.SearchResult()
+				require.NotNil(t, result)
+				assert.Equal(t, nq, result.NumQueries)
+				assert.Equal(t, topK, result.TopK)
+				resultData := result.ResultData
+				if resultData == nil {
+					require.NotEmpty(t, result.SlicedBlob)
+					resultData = &schemapb.SearchResultData{}
+					require.NoError(t, proto.Unmarshal(result.SlicedBlob, resultData))
+				}
+				assert.Equal(t, nq, resultData.NumQueries)
+				assert.Equal(t, topK, resultData.TopK)
+				assert.Equal(t, []int64{0, 0}, resultData.Topks)
+				assert.Empty(t, resultData.Scores)
+				assert.Zero(t, typeutil.GetSizeOfIDs(resultData.GetIds()))
+				assert.Empty(t, resultData.FieldsData)
+			})
+		}
+	}
 }
 
 // TestExecuteMergedSubTasks exercises the multi-sub-task slicing path: after
