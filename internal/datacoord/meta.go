@@ -1963,10 +1963,9 @@ func UpdateCommitTimestamp(segmentID int64, ts uint64) UpdateOperator {
 				// Recovery from here is out of band. The job is already
 				// Committing by the time this runs -- commitImportV2AckCallback
 				// persists that state on the broadcast FastAck, independent of
-				// this fence -- and Committing is terminal for AbortImport while
-				// tryTimeoutJob never reaches it (TimeoutTs defaults to
-				// math.MaxUint64). Validating earlier does not change that: the
-				// ack path flips the state regardless of what this check says.
+				// this fence -- and Committing cannot be failed by any writer
+				// (UnfailableJobStates). Validating earlier does not change that:
+				// the ack path flips the state regardless of what this check says.
 				return modPack.fail(merr.WrapErrImportSysFailedMsg(
 					"commit timestamp %d is less than max binlog timestamp %d for import segment %d",
 					ts, maxTsTo, segmentID))

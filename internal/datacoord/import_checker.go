@@ -563,8 +563,11 @@ func (c *importChecker) tryFailingTasks(job ImportJob) {
 }
 
 func (c *importChecker) tryTimeoutJob(job ImportJob) {
-	if job.GetState() == internalpb.ImportJobState_Failed ||
-		job.GetState() == internalpb.ImportJobState_Completed {
+	switch job.GetState() {
+	case internalpb.ImportJobState_Failed, internalpb.ImportJobState_Completed,
+		internalpb.ImportJobState_Committing:
+		// Fast path on this tick's snapshot only; UpdateJobState enforces the
+		// rule against the current state under importMeta's lock.
 		return
 	}
 	timeoutTime := tsoutil.PhysicalTime(job.GetTimeoutTs())

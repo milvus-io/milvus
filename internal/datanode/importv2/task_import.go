@@ -143,15 +143,18 @@ func (t *ImportTask) GetSegmentsInfo() []*datapb.ImportSegmentInfo {
 }
 
 func (t *ImportTask) Clone() Task {
-	ctx, cancel := context.WithCancel(t.ctx)
 	infos := make(map[int64]*datapb.ImportSegmentInfo)
 	for id, info := range t.segmentsInfo {
 		infos[id] = typeutil.Clone(info)
 	}
+	// Share the running task's context instead of deriving a new one. The
+	// goroutines started by Execute hold the original ctx, and taskManager
+	// cancels whatever the map entry carries; a derived context would make
+	// that cancellation a no-op on the work actually in flight.
 	return &ImportTask{
 		ImportTaskV2: typeutil.Clone(t.ImportTaskV2),
-		ctx:          ctx,
-		cancel:       cancel,
+		ctx:          t.ctx,
+		cancel:       t.cancel,
 		segmentsInfo: infos,
 		req:          t.req,
 		allocator:    t.allocator,
