@@ -216,6 +216,25 @@ func (r *countedRecord) Release() {
 // Next()/Close(), the way a packed/binlog reader frees or reuses its buffer when
 // advanced. A wrapper that keeps a returned record past an advance must therefore
 // Retain it; otherwise the inner release below drops it under the wrapper.
+// sliceRecordReader is a minimal RecordReader that hands out a fixed slice of
+// records one per Next() call and then reports io.EOF. It does not take ownership
+// of the records (no Release on advance/Close), so callers keep their own refs.
+type sliceRecordReader struct {
+	recs []Record
+	pos  int
+}
+
+func (r *sliceRecordReader) Next() (Record, error) {
+	if r.pos >= len(r.recs) {
+		return nil, io.EOF
+	}
+	rec := r.recs[r.pos]
+	r.pos++
+	return rec, nil
+}
+
+func (r *sliceRecordReader) Close() error { return nil }
+
 type borrowingRecordReader struct {
 	recs []Record
 	pos  int
