@@ -1737,7 +1737,7 @@ INSTANTIATE_TEST_SUITE_P(
 //
 // INT8/INT16 array elements are PHYSICALLY stored as int32_t (4-byte stride).
 // The element-level query path reads them via ArrayView::get_data<int8_t>/
-// <int16_t>(index) inside UnaryElementFuncForArray (see UnaryExpr.h ~L493).
+// <int16_t>(index) inside UnaryArrayKernel (see UnaryExpr.h).
 // With the buggy 1-byte (int8) / 2-byte (int16) stride, get_data(index>0)
 // reads bytes that belong to element 0 (its high bytes, which are 0 for the
 // small positive values below) instead of the real element. The values here

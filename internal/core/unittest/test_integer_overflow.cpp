@@ -36,6 +36,7 @@
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
 using namespace milvus::query;
@@ -170,5 +171,52 @@ TEST(Expr, IntegerOverflow) {
             ASSERT_EQ(ans, ref)
                 << expr << "@" << i << "!!" << static_cast<int64_t>(val);
         }
+    }
+}
+
+TEST(Expr, IntegerOverflowOnAllZeroSealedChunk) {
+    // Overflowed literals on a sealed int8 chunk whose values are all 0: the
+    // result must not depend on comparing the chunk's min/max against the
+    // placeholder 0 (e.g. `age < 300` would prune the chunk to FALSE).
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto i8_fid = schema->AddDebugField("age", DataType::INT8);
+    auto i64_fid = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(i64_fid);
+
+    constexpr int64_t N = 1000;
+    auto raw_data = DataGen(schema, N, 42);
+    for (auto& field : *raw_data.raw_->mutable_fields_data()) {
+        if (field.field_id() == i8_fid.get()) {
+            for (auto& v :
+                 *field.mutable_scalars()->mutable_int_data()->mutable_data()) {
+                v = 0;
+            }
+        }
+    }
+    auto seg = CreateSealedWithFieldDataLoaded(schema, raw_data);
+
+    const std::vector<std::pair<std::string, bool>> testcases = {
+        {"age != 300", true},
+        {"age < 300", true},
+        {"age > -300", true},
+        {"age == 300", false},
+        {"age > 300", false},
+    };
+    ScopedSchemaHandle handle(*schema);
+    for (const auto& [expr, all_true] : testcases) {
+        auto plan_str = handle.ParseSearch(
+            expr, "fakevec", 10, "L2", "{\"nprobe\": 10}", 3);
+        auto plan =
+            CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
+        auto final = ExecuteQueryExpr(
+            (plan->plan_node_->plannodes_->sources()[0])->sources()[0],
+            seg.get(),
+            N,
+            MAX_TIMESTAMP);
+        ASSERT_EQ(final.size(), N) << expr;
+        EXPECT_EQ(final.count(), all_true ? static_cast<size_t>(N) : 0u)
+            << expr;
     }
 }

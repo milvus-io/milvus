@@ -22,11 +22,14 @@
 #include <optional>
 #include <utility>
 
+#include "common/Array.h"
 #include "common/EasyAssert.h"
+#include "common/Json.h"
 #include "common/Types.h"
 #include "common/Vector.h"
 #include "exec/expression/Expr.h"
 #include "exec/expression/Element.h"
+#include "exec/expression/JsonNumberComparison.h"
 #include "index/Meta.h"
 #include "index/ScalarIndex.h"
 #include "segcore/SegmentInterface.h"
@@ -111,521 +114,6 @@ UnaryCompare(const T& get_value,
                                   op_type));
     }
 }
-
-template <typename T, FilterType filter_type = FilterType::sequential>
-struct UnaryElementFuncForMatch {
-    using IndexInnerType =
-        std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
-
-    // Pre-built matcher — owned by PhyUnaryRangeFilterExpr and reused
-    // across batches; nullptr means build a local one (mirrors
-    // UnaryElementFuncForRegexMatch).
-    const LikePatternMatcher* matcher = nullptr;
-
-    void
-    operator()(const T* src,
-               size_t size,
-               const IndexInnerType& val,
-               TargetBitmapView res) {
-        static_assert(
-            filter_type == FilterType::sequential,
-            "this override operator() of UnaryElementFuncForMatch does "
-            "not support FilterType::random");
-
-        if constexpr (std::is_same_v<T, std::string> ||
-                      std::is_same_v<T, std::string_view>) {
-            std::unique_ptr<LikePatternMatcher> local_matcher;
-            const LikePatternMatcher* m = matcher;
-            if (m == nullptr) {
-                local_matcher = std::make_unique<LikePatternMatcher>(val);
-                m = local_matcher.get();
-            }
-            for (int i = 0; i < size; ++i) {
-                res[i] = (*m)(src[i]);
-            }
-        } else {
-            ThrowInfo(OpTypeInvalid,
-                      "Match operation only supports string type");
-        }
-    }
-
-    void
-    operator()(const T* src,
-               size_t size,
-               const IndexInnerType& val,
-               TargetBitmapView res,
-               const TargetBitmap& bitmap_input,
-               int start_cursor,
-               const int32_t* offsets = nullptr) {
-        if constexpr (std::is_same_v<T, std::string> ||
-                      std::is_same_v<T, std::string_view>) {
-            std::unique_ptr<LikePatternMatcher> local_matcher;
-            const LikePatternMatcher* m = matcher;
-            if (m == nullptr) {
-                local_matcher = std::make_unique<LikePatternMatcher>(val);
-                m = local_matcher.get();
-            }
-            bool has_bitmap_input = !bitmap_input.empty();
-            for (int i = 0; i < size; ++i) {
-                if (has_bitmap_input && !bitmap_input[i + start_cursor]) {
-                    continue;
-                }
-                if constexpr (filter_type == FilterType::random) {
-                    res[i] = (*m)(src[offsets ? offsets[i] : i]);
-                } else {
-                    res[i] = (*m)(src[i]);
-                }
-            }
-        } else {
-            ThrowInfo(OpTypeInvalid,
-                      "Match operation only supports string type");
-        }
-    }
-};
-
-template <typename T, FilterType filter_type = FilterType::sequential>
-struct UnaryElementFuncForRegexMatch {
-    using IndexInnerType =
-        std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
-
-    // Pre-built matcher and searcher — owned by PhyUnaryRangeFilterExpr,
-    // constructed once per segment, passed by pointer to avoid per-batch
-    // reconstruction.
-    const PartialRegexMatcher* matcher = nullptr;
-    const VolnitskySearcher* searcher = nullptr;  // null if no literal
-
-    void
-    operator()(const T* src,
-               size_t size,
-               const IndexInnerType& val,
-               TargetBitmapView res) {
-        static_assert(
-            filter_type == FilterType::sequential,
-            "this override operator() of UnaryElementFuncForRegexMatch does "
-            "not support FilterType::random");
-
-        if constexpr (std::is_same_v<T, std::string> ||
-                      std::is_same_v<T, std::string_view>) {
-            // Fallback: construct locally if no pre-built objects
-            std::unique_ptr<PartialRegexMatcher> local_matcher;
-            const PartialRegexMatcher* m = matcher;
-            if (!m) {
-                local_matcher = std::make_unique<PartialRegexMatcher>(val);
-                m = local_matcher.get();
-            }
-
-            if (searcher) {
-                for (int i = 0; i < size; ++i) {
-                    res[i] = searcher->contains(src[i]) && (*m)(src[i]);
-                }
-            } else {
-                for (int i = 0; i < size; ++i) {
-                    res[i] = (*m)(src[i]);
-                }
-            }
-        } else {
-            ThrowInfo(OpTypeInvalid,
-                      "RegexMatch operation only supports string type");
-        }
-    }
-
-    void
-    operator()(const T* src,
-               size_t size,
-               const IndexInnerType& val,
-               TargetBitmapView res,
-               const TargetBitmap& bitmap_input,
-               int start_cursor,
-               const int32_t* offsets = nullptr) {
-        if constexpr (std::is_same_v<T, std::string> ||
-                      std::is_same_v<T, std::string_view>) {
-            std::unique_ptr<PartialRegexMatcher> local_matcher;
-            const PartialRegexMatcher* m = matcher;
-            if (!m) {
-                local_matcher = std::make_unique<PartialRegexMatcher>(val);
-                m = local_matcher.get();
-            }
-
-            bool has_bitmap_input = !bitmap_input.empty();
-            if (searcher) {
-                for (int i = 0; i < size; ++i) {
-                    if (has_bitmap_input && !bitmap_input[i + start_cursor])
-                        continue;
-                    auto idx = (filter_type == FilterType::random && offsets)
-                                   ? offsets[i]
-                                   : i;
-                    res[i] = searcher->contains(src[idx]) && (*m)(src[idx]);
-                }
-            } else {
-                for (int i = 0; i < size; ++i) {
-                    if (has_bitmap_input && !bitmap_input[i + start_cursor])
-                        continue;
-                    if constexpr (filter_type == FilterType::random) {
-                        res[i] = (*m)(src[offsets ? offsets[i] : i]);
-                    } else {
-                        res[i] = (*m)(src[i]);
-                    }
-                }
-            }
-        } else {
-            ThrowInfo(OpTypeInvalid,
-                      "RegexMatch operation only supports string type");
-        }
-    }
-};
-
-template <typename T,
-          proto::plan::OpType op,
-          FilterType filter_type = FilterType::sequential>
-struct UnaryElementFunc {
-    using IndexInnerType =
-        std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
-
-    void
-    operator()(const T* src,
-               size_t size,
-               TargetBitmapView res,
-               const IndexInnerType& val) {
-        static_assert(filter_type == FilterType::sequential,
-                      "this override operator() of UnaryElementFunc does not "
-                      "support FilterType::random");
-        if constexpr (op == proto::plan::OpType::Match) {
-            UnaryElementFuncForMatch<T> func;
-            func(src, size, val, res);
-            return;
-        }
-        if constexpr (op == proto::plan::OpType::RegexMatch) {
-            UnaryElementFuncForRegexMatch<T> func;
-            func(src, size, val, res);
-            return;
-        }
-
-        if constexpr (std::is_same_v<T, std::string_view> ||
-                      std::is_same_v<T, std::string>) {
-            for (int i = 0; i < size; ++i) {
-                if constexpr (op == proto::plan::OpType::Equal) {
-                    res[i] = src[i] == val;
-                } else if constexpr (op == proto::plan::OpType::NotEqual) {
-                    res[i] = src[i] != val;
-                } else if constexpr (op == proto::plan::OpType::GreaterThan) {
-                    res[i] = src[i] > val;
-                } else if constexpr (op == proto::plan::OpType::LessThan) {
-                    res[i] = src[i] < val;
-                } else if constexpr (op == proto::plan::OpType::GreaterEqual) {
-                    res[i] = src[i] >= val;
-                } else if constexpr (op == proto::plan::OpType::LessEqual) {
-                    res[i] = src[i] <= val;
-                } else if constexpr (op == proto::plan::OpType::PrefixMatch ||
-                                     op == proto::plan::OpType::PostfixMatch ||
-                                     op == proto::plan::OpType::InnerMatch) {
-                    res[i] = milvus::query::Match(src[i], val, op);
-                } else {
-                    ThrowInfo(
-                        UnexpectedError,
-                        fmt::format(
-                            "unsupported op_type:{} for UnaryElementFunc", op));
-                }
-            }
-            return;
-        }
-
-        if constexpr (op == proto::plan::OpType::Equal) {
-            res.inplace_compare_val<T, milvus::bitset::CompareOpType::EQ>(
-                src, size, val);
-        } else if constexpr (op == proto::plan::OpType::NotEqual) {
-            res.inplace_compare_val<T, milvus::bitset::CompareOpType::NE>(
-                src, size, val);
-        } else if constexpr (op == proto::plan::OpType::GreaterThan) {
-            res.inplace_compare_val<T, milvus::bitset::CompareOpType::GT>(
-                src, size, val);
-        } else if constexpr (op == proto::plan::OpType::LessThan) {
-            res.inplace_compare_val<T, milvus::bitset::CompareOpType::LT>(
-                src, size, val);
-        } else if constexpr (op == proto::plan::OpType::GreaterEqual) {
-            res.inplace_compare_val<T, milvus::bitset::CompareOpType::GE>(
-                src, size, val);
-        } else if constexpr (op == proto::plan::OpType::LessEqual) {
-            res.inplace_compare_val<T, milvus::bitset::CompareOpType::LE>(
-                src, size, val);
-        } else {
-            ThrowInfo(
-                UnexpectedError,
-                fmt::format("unsupported op_type:{} for UnaryElementFunc", op));
-        }
-    }
-
-    void
-    operator()(const T* src,
-               size_t size,
-               const IndexInnerType& val,
-               TargetBitmapView res,
-               const TargetBitmap& bitmap_input,
-               size_t start_cursor,
-               const int32_t* offsets = nullptr) {
-        bool has_bitmap_input = !bitmap_input.empty();
-        if constexpr (op == proto::plan::OpType::Match) {
-            UnaryElementFuncForMatch<T, filter_type> func;
-            func(src, size, val, res, bitmap_input, start_cursor, offsets);
-            return;
-        }
-        if constexpr (op == proto::plan::OpType::RegexMatch) {
-            UnaryElementFuncForRegexMatch<T, filter_type> func;
-            func(src, size, val, res, bitmap_input, start_cursor, offsets);
-            return;
-        }
-
-        // This is the original code, which is kept for the documentation purposes
-        // also, for iterative filter
-        if constexpr (filter_type == FilterType::random) {
-            for (int i = 0; i < size; ++i) {
-                auto offset = (offsets != nullptr) ? offsets[i] : i;
-                if constexpr (op == proto::plan::OpType::Equal) {
-                    res[i] = src[offset] == val;
-                } else if constexpr (op == proto::plan::OpType::NotEqual) {
-                    res[i] = src[offset] != val;
-                } else if constexpr (op == proto::plan::OpType::GreaterThan) {
-                    res[i] = src[offset] > val;
-                } else if constexpr (op == proto::plan::OpType::LessThan) {
-                    res[i] = src[offset] < val;
-                } else if constexpr (op == proto::plan::OpType::GreaterEqual) {
-                    res[i] = src[offset] >= val;
-                } else if constexpr (op == proto::plan::OpType::LessEqual) {
-                    res[i] = src[offset] <= val;
-                } else if constexpr (op == proto::plan::OpType::PrefixMatch ||
-                                     op == proto::plan::OpType::PostfixMatch ||
-                                     op == proto::plan::OpType::InnerMatch) {
-                    res[i] = milvus::query::Match(src[offset], val, op);
-                } else {
-                    ThrowInfo(UnexpectedError,
-                              "unsupported op_type:{} for UnaryElementFunc",
-                              op);
-                }
-            }
-            return;
-        }
-
-        if (has_bitmap_input) {
-            if constexpr (std::is_same_v<T, std::string_view> ||
-                          std::is_same_v<T, std::string>) {
-                for (int i = 0; i < size; ++i) {
-                    if (!bitmap_input[i + start_cursor]) {
-                        continue;
-                    }
-                    if constexpr (op == proto::plan::OpType::Equal) {
-                        res[i] = src[i] == val;
-                    } else if constexpr (op == proto::plan::OpType::NotEqual) {
-                        res[i] = src[i] != val;
-                    } else if constexpr (op ==
-                                         proto::plan::OpType::GreaterThan) {
-                        res[i] = src[i] > val;
-                    } else if constexpr (op == proto::plan::OpType::LessThan) {
-                        res[i] = src[i] < val;
-                    } else if constexpr (op ==
-                                         proto::plan::OpType::GreaterEqual) {
-                        res[i] = src[i] >= val;
-                    } else if constexpr (op == proto::plan::OpType::LessEqual) {
-                        res[i] = src[i] <= val;
-                    } else if constexpr (op ==
-                                             proto::plan::OpType::PrefixMatch ||
-                                         op == proto::plan::OpType::
-                                                   PostfixMatch ||
-                                         op ==
-                                             proto::plan::OpType::InnerMatch) {
-                        res[i] = milvus::query::Match(src[i], val, op);
-                    } else {
-                        ThrowInfo(UnexpectedError,
-                                  "unsupported op_type:{} for UnaryElementFunc",
-                                  op);
-                    }
-                }
-                return;
-            }
-        }
-
-        if constexpr (op == proto::plan::OpType::PrefixMatch ||
-                      op == proto::plan::OpType::PostfixMatch ||
-                      op == proto::plan::OpType::InnerMatch) {
-            for (int i = 0; i < size; ++i) {
-                res[i] = milvus::query::Match(src[i], val, op);
-            }
-            return;
-        }
-
-        if constexpr (op == proto::plan::OpType::Equal) {
-            res.inplace_compare_val<T, milvus::bitset::CompareOpType::EQ>(
-                src, size, val);
-        } else if constexpr (op == proto::plan::OpType::NotEqual) {
-            res.inplace_compare_val<T, milvus::bitset::CompareOpType::NE>(
-                src, size, val);
-        } else if constexpr (op == proto::plan::OpType::GreaterThan) {
-            res.inplace_compare_val<T, milvus::bitset::CompareOpType::GT>(
-                src, size, val);
-        } else if constexpr (op == proto::plan::OpType::LessThan) {
-            res.inplace_compare_val<T, milvus::bitset::CompareOpType::LT>(
-                src, size, val);
-        } else if constexpr (op == proto::plan::OpType::GreaterEqual) {
-            res.inplace_compare_val<T, milvus::bitset::CompareOpType::GE>(
-                src, size, val);
-        } else if constexpr (op == proto::plan::OpType::LessEqual) {
-            res.inplace_compare_val<T, milvus::bitset::CompareOpType::LE>(
-                src, size, val);
-        } else {
-            ThrowInfo(UnexpectedError,
-                      "unsupported op_type:{} for UnaryElementFunc",
-                      op);
-        }
-    }
-};
-
-#define UnaryArrayCompare(cmp)                                               \
-    do {                                                                     \
-        if constexpr (std::is_same_v<GetType, proto::plan::Array>) {         \
-            res[i] = false;                                                  \
-        } else {                                                             \
-            if (index >= src[offset].length()) {                             \
-                res[i] = false;                                              \
-                valid_res[i] = false;                                        \
-                continue;                                                    \
-            }                                                                \
-            auto array_data = src[offset].template get_data<GetType>(index); \
-            res[i] = (cmp);                                                  \
-        }                                                                    \
-    } while (false)
-
-template <typename ValueType, proto::plan::OpType op, FilterType filter_type>
-struct UnaryElementFuncForArray {
-    using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
-                                       std::string_view,
-                                       ValueType>;
-    void
-    operator()(const ArrayView* src,
-               ValidityView valid_data,
-               size_t size,
-               const ValueType& val,
-               int index,
-               TargetBitmapView res,
-               TargetBitmapView valid_res,
-               const TargetBitmap& bitmap_input,
-               size_t start_cursor,
-               const int32_t* offsets = nullptr) {
-        bool has_bitmap_input = !bitmap_input.empty();
-        // Pre-construct LikePatternMatcher/PartialRegexMatcher before the loop
-        // to avoid re-parsing the pattern on every row.
-        [[maybe_unused]] std::optional<LikePatternMatcher> matcher;
-        if constexpr (op == proto::plan::OpType::Match) {
-            if constexpr (std::is_same_v<ValueType, std::string>) {
-                matcher.emplace(val);
-            }
-        }
-        [[maybe_unused]] std::optional<PartialRegexMatcher> regex_matcher;
-        if constexpr (op == proto::plan::OpType::RegexMatch) {
-            if constexpr (std::is_same_v<ValueType, std::string>) {
-                regex_matcher.emplace(val);
-            }
-        }
-        if constexpr (!std::is_same_v<GetType, proto::plan::Array>) {
-            AssertInfo(index >= 0,
-                       "array element predicate requires nested path");
-        }
-        for (int i = 0; i < size; ++i) {
-            auto offset = i;
-            if constexpr (filter_type == FilterType::random) {
-                offset = (offsets) ? offsets[i] : i;
-            }
-            if (valid_data && !valid_data[offset]) {
-                res[i] = valid_res[i] = false;
-                continue;
-            }
-            if (has_bitmap_input && !bitmap_input[i + start_cursor]) {
-                continue;
-            }
-            if constexpr (op == proto::plan::OpType::Equal) {
-                if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
-                    res[i] = src[offset].is_same_array(val);
-                } else {
-                    if (index >= src[offset].length()) {
-                        res[i] = false;
-                        valid_res[i] = false;
-                        continue;
-                    }
-                    auto array_data =
-                        src[offset].template get_data<GetType>(index);
-                    res[i] = array_data == val;
-                }
-            } else if constexpr (op == proto::plan::OpType::NotEqual) {
-                if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
-                    res[i] = !src[offset].is_same_array(val);
-                } else {
-                    if (index >= src[offset].length()) {
-                        res[i] = false;
-                        valid_res[i] = false;
-                        continue;
-                    }
-                    auto array_data =
-                        src[offset].template get_data<GetType>(index);
-                    res[i] = array_data != val;
-                }
-            } else if constexpr (op == proto::plan::OpType::GreaterThan) {
-                UnaryArrayCompare(array_data > val);
-            } else if constexpr (op == proto::plan::OpType::LessThan) {
-                UnaryArrayCompare(array_data < val);
-            } else if constexpr (op == proto::plan::OpType::GreaterEqual) {
-                UnaryArrayCompare(array_data >= val);
-            } else if constexpr (op == proto::plan::OpType::LessEqual) {
-                UnaryArrayCompare(array_data <= val);
-            } else if constexpr (op == proto::plan::OpType::PrefixMatch ||
-                                 op == proto::plan::OpType::PostfixMatch ||
-                                 op == proto::plan::OpType::InnerMatch) {
-                UnaryArrayCompare(milvus::query::Match(array_data, val, op));
-            } else if constexpr (op == proto::plan::OpType::Match) {
-                if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
-                    ThrowInfo(OpTypeInvalid,
-                              "Match operation is not supported for nested "
-                              "Array type");
-                } else if constexpr (std::is_same_v<GetType,
-                                                    std::string_view> ||
-                                     std::is_same_v<GetType, std::string>) {
-                    if (index >= src[offset].length()) {
-                        res[i] = false;
-                        valid_res[i] = false;
-                        continue;
-                    }
-                    auto array_data =
-                        src[offset].template get_data<GetType>(index);
-                    res[i] = (*matcher)(array_data);
-                } else {
-                    ThrowInfo(OpTypeInvalid,
-                              "Match operation only supports string type");
-                }
-            } else if constexpr (op == proto::plan::OpType::RegexMatch) {
-                if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
-                    ThrowInfo(OpTypeInvalid,
-                              "RegexMatch operation is not supported for "
-                              "nested Array type");
-                } else if constexpr (std::is_same_v<GetType,
-                                                    std::string_view> ||
-                                     std::is_same_v<GetType, std::string>) {
-                    if (index >= src[offset].length()) {
-                        res[i] = false;
-                        valid_res[i] = false;
-                        continue;
-                    }
-                    auto array_data =
-                        src[offset].template get_data<GetType>(index);
-                    res[i] = (*regex_matcher)(array_data);
-                } else {
-                    ThrowInfo(OpTypeInvalid,
-                              "RegexMatch operation only supports string type");
-                }
-            } else {
-                ThrowInfo(UnexpectedError,
-                          "unsupported op_type:{} for "
-                          "UnaryElementFuncForArray",
-                          op);
-            }
-        }
-    }
-};
 
 template <typename T>
 struct UnaryIndexFuncForMatch {
@@ -746,6 +234,592 @@ struct UnaryIndexFunc {
         }
     }
 };
+
+// ---------------------------------------------------------------------------
+// Scan kernels for PhyUnaryRangeFilterExpr
+// ---------------------------------------------------------------------------
+
+// How an integral literal that does not fit the column type T resolves.
+enum class UnaryOverflow : uint8_t { None, AllFalse, AllTrue };
+
+// Resolves an integral literal outside T's range to an all-FALSE or all-TRUE
+// predicate.
+template <typename T>
+UnaryOverflow
+ClassifyUnaryOverflow(proto::plan::OpType op,
+                      const proto::plan::GenericValue& value) {
+    if constexpr (std::is_integral_v<T> && !std::is_same_v<T, bool>) {
+        const auto val = GetValueFromProto<int64_t>(value);
+        if (!milvus::query::out_of_range<T>(val)) {
+            return UnaryOverflow::None;
+        }
+        switch (op) {
+            case proto::plan::GreaterThan:
+            case proto::plan::GreaterEqual:
+                return milvus::query::lt_lb<T>(val) ? UnaryOverflow::AllTrue
+                                                    : UnaryOverflow::AllFalse;
+            case proto::plan::LessThan:
+            case proto::plan::LessEqual:
+                return milvus::query::gt_ub<T>(val) ? UnaryOverflow::AllTrue
+                                                    : UnaryOverflow::AllFalse;
+            case proto::plan::Equal:
+                return UnaryOverflow::AllFalse;
+            case proto::plan::NotEqual:
+                return UnaryOverflow::AllTrue;
+            default:
+                ThrowInfo(UnexpectedError, "unsupported range node {}", op);
+        }
+    }
+    return UnaryOverflow::None;
+}
+
+// Visits positions that are candidates and non-NULL. KernelAdapter and
+// EvalKernel fold the others, so kernels only spend work on these rows.
+template <typename T, typename Fn>
+inline void
+ForEachCandidateRow(const CandidateBatch<T>& b, Fn&& fn) {
+    const bool has_candidates = !b.candidates.empty();
+    for (size_t i = 0; i < b.size; ++i) {
+        if ((has_candidates && !b.candidates[i]) ||
+            (b.validity && !b.validity[i])) {
+            continue;
+        }
+        fn(i);
+    }
+}
+
+// Scalar columns (bool / integral / floating / VARCHAR) and element-level
+// ARRAY elements of those types.
+template <typename T>
+struct UnaryRangeKernel {
+    using ValueType =
+        std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
+
+    proto::plan::OpType op{proto::plan::OpType::Invalid};
+    // T{} when overflow != None: GetValueFromProto returns T() on overflow.
+    ValueType val{};
+    UnaryOverflow overflow{UnaryOverflow::None};
+    // Owned by PhyUnaryRangeFilterExpr. like_matcher is required for Match and
+    // regex_matcher for RegexMatch on string columns; volnitsky may be null.
+    const LikePatternMatcher* like_matcher{nullptr};
+    const PartialRegexMatcher* regex_matcher{nullptr};
+    const VolnitskySearcher* volnitsky{nullptr};
+    milvus::OpContext* op_ctx{nullptr};
+
+    bool
+    AlwaysFalse() const {
+        return overflow == UnaryOverflow::AllFalse;
+    }
+
+    bool
+    AlwaysTrue() const {
+        return overflow == UnaryOverflow::AllTrue;
+    }
+
+    bool
+    CanSkip(const SkipIndex& skip_index,
+            FieldId field_id,
+            int64_t chunk) const {
+        // val is T{} for an overflowed literal; chunk min/max must not be
+        // compared against it (e.g. int8 `< 300` would prune an all-zero
+        // chunk to FALSE).
+        if (overflow != UnaryOverflow::None) {
+            return false;
+        }
+        return skip_index.CanSkipUnaryRange<T>(
+            op_ctx, field_id, chunk, op, val);
+    }
+
+    template <FilterType filter_type>
+    void
+    Eval(const CandidateBatch<T>& b, TriStateOut out) const {
+        if (overflow == UnaryOverflow::AllTrue) {
+            out.match.set();
+            return;
+        }
+        if (overflow == UnaryOverflow::AllFalse) {
+            return;
+        }
+        if constexpr (std::is_same_v<T, std::string> ||
+                      std::is_same_v<T, std::string_view>) {
+            EvalString(b, out);
+        } else {
+            EvalScalar<filter_type>(b, out);
+        }
+    }
+
+ private:
+    template <typename Pred>
+    static void
+    MatchRows(const CandidateBatch<T>& b, TriStateOut& out, Pred&& pred) {
+        const bool has_candidates = !b.candidates.empty();
+        for (size_t i = 0; i < b.size; ++i) {
+            if (has_candidates && !b.candidates[i]) {
+                continue;
+            }
+            if (pred(b.data[i])) {
+                out.SetTrue(i);
+            }
+        }
+    }
+
+    template <FilterType filter_type>
+    void
+    EvalScalar(const CandidateBatch<T>& b, TriStateOut& out) const {
+        using milvus::bitset::CompareOpType;
+        std::optional<CompareOpType> cmp;
+        switch (op) {
+            case proto::plan::GreaterThan:
+                cmp = CompareOpType::GT;
+                break;
+            case proto::plan::GreaterEqual:
+                cmp = CompareOpType::GE;
+                break;
+            case proto::plan::LessThan:
+                cmp = CompareOpType::LT;
+                break;
+            case proto::plan::LessEqual:
+                cmp = CompareOpType::LE;
+                break;
+            case proto::plan::Equal:
+                cmp = CompareOpType::EQ;
+                break;
+            case proto::plan::NotEqual:
+                cmp = CompareOpType::NE;
+                break;
+            case proto::plan::PrefixMatch:
+            case proto::plan::PostfixMatch:
+            case proto::plan::InnerMatch:
+                // Non-string T: query::Match's generic overload throws
+                // NotImplemented.
+                MatchRows(b, out, [this](const T& x) {
+                    return milvus::query::Match(x, val, op);
+                });
+                return;
+            case proto::plan::Match:
+                ThrowInfo(OpTypeInvalid,
+                          "Match operation only supports string type");
+            case proto::plan::RegexMatch:
+                ThrowInfo(OpTypeInvalid,
+                          "RegexMatch operation only supports string type");
+            default:
+                ThrowInfo(
+                    UnexpectedError,
+                    fmt::format("unsupported operator type for unary expr: {}",
+                                op));
+        }
+        if constexpr (filter_type == FilterType::sequential) {
+            // SIMD over the whole sub-batch; KernelAdapter and EvalKernel
+            // clear NULL and non-candidate rows.
+            out.match.inplace_compare_val<T>(b.data, b.size, val, *cmp);
+        } else {
+            MatchRows(b, out, [this](const T& x) {
+                return UnaryCompare(x, val, op);
+            });
+        }
+    }
+
+    void
+    EvalString(const CandidateBatch<T>& b, TriStateOut& out) const {
+        switch (op) {
+            case proto::plan::GreaterThan:
+                return MatchRows(
+                    b, out, [this](const T& x) { return x > val; });
+            case proto::plan::GreaterEqual:
+                return MatchRows(
+                    b, out, [this](const T& x) { return x >= val; });
+            case proto::plan::LessThan:
+                return MatchRows(
+                    b, out, [this](const T& x) { return x < val; });
+            case proto::plan::LessEqual:
+                return MatchRows(
+                    b, out, [this](const T& x) { return x <= val; });
+            case proto::plan::Equal:
+                return MatchRows(
+                    b, out, [this](const T& x) { return x == val; });
+            case proto::plan::NotEqual:
+                return MatchRows(
+                    b, out, [this](const T& x) { return x != val; });
+            case proto::plan::PrefixMatch:
+            case proto::plan::PostfixMatch:
+            case proto::plan::InnerMatch:
+                return MatchRows(b, out, [this](const T& x) {
+                    return milvus::query::Match(x, val, op);
+                });
+            case proto::plan::Match: {
+                AssertInfo(like_matcher != nullptr,
+                           "LIKE matcher is required for Match");
+                const auto* m = like_matcher;
+                return MatchRows(b, out, [m](const T& x) { return (*m)(x); });
+            }
+            case proto::plan::RegexMatch: {
+                AssertInfo(regex_matcher != nullptr,
+                           "regex matcher is required for RegexMatch");
+                const auto* m = regex_matcher;
+                if (volnitsky != nullptr) {
+                    const auto* s = volnitsky;
+                    return MatchRows(b, out, [m, s](const T& x) {
+                        return s->contains(x) && (*m)(x);
+                    });
+                }
+                return MatchRows(b, out, [m](const T& x) { return (*m)(x); });
+            }
+            default:
+                ThrowInfo(
+                    UnexpectedError,
+                    fmt::format("unsupported operator type for unary expr: {}",
+                                op));
+        }
+    }
+};
+
+// JSON column, literal of type ExprValueType at `pointer`.
+template <typename ExprValueType>
+struct UnaryJsonKernel {
+    using GetType =
+        std::conditional_t<std::is_same_v<ExprValueType, std::string>,
+                           std::string_view,
+                           ExprValueType>;
+
+    proto::plan::OpType op{proto::plan::OpType::Invalid};
+    ExprValueType val{};
+    std::string pointer;
+    // Only for ExprValueType == std::string.
+    const LikePatternMatcher* like_matcher{nullptr};
+    const PartialRegexMatcher* regex_matcher{nullptr};
+
+    template <FilterType filter_type>
+    void
+    Eval(const CandidateBatch<milvus::Json>& b, TriStateOut out) const {
+        switch (op) {
+            case proto::plan::GreaterThan:
+                return CompareValues(
+                    b, out, [this](const auto& value) { return value > val; });
+            case proto::plan::GreaterEqual:
+                return CompareValues(
+                    b, out, [this](const auto& value) { return value >= val; });
+            case proto::plan::LessThan:
+                return CompareValues(
+                    b, out, [this](const auto& value) { return value < val; });
+            case proto::plan::LessEqual:
+                return CompareValues(
+                    b, out, [this](const auto& value) { return value <= val; });
+            case proto::plan::Equal:
+                if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
+                    return CompareArrayLiteral(b, out, /*negate=*/false);
+                } else {
+                    return CompareValues(b, out, [this](const auto& value) {
+                        return value == val;
+                    });
+                }
+            case proto::plan::NotEqual:
+                if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
+                    return CompareArrayLiteral(b, out, /*negate=*/true);
+                } else {
+                    return CompareValues(b, out, [this](const auto& value) {
+                        return value != val;
+                    });
+                }
+            case proto::plan::InnerMatch:
+            case proto::plan::PostfixMatch:
+            case proto::plan::PrefixMatch:
+                return CompareValues(b, out, [this](const auto& value) {
+                    return milvus::query::Match(value, val, op);
+                });
+            case proto::plan::Match:
+                if constexpr (std::is_same_v<ExprValueType, std::string>) {
+                    AssertInfo(like_matcher != nullptr,
+                               "LIKE matcher is required for Match");
+                    const auto* m = like_matcher;
+                    return CompareValues(
+                        b, out, [m](const auto& value) { return (*m)(value); });
+                } else {
+                    ThrowInfo(OpTypeInvalid,
+                              "Match operation only supports string type");
+                }
+            case proto::plan::RegexMatch:
+                if constexpr (std::is_same_v<ExprValueType, std::string>) {
+                    AssertInfo(regex_matcher != nullptr,
+                               "regex matcher is required for RegexMatch");
+                    const auto* m = regex_matcher;
+                    return CompareValues(
+                        b, out, [m](const auto& value) { return (*m)(value); });
+                } else {
+                    ThrowInfo(OpTypeInvalid,
+                              "RegexMatch operation only supports string type");
+                }
+            default:
+                ThrowInfo(
+                    UnexpectedError,
+                    fmt::format("unsupported operator type for unary expr: {}",
+                                op));
+        }
+    }
+
+ private:
+    // Missing path or type mismatch -> UNKNOWN.
+    template <typename Cmp>
+    void
+    CompareValues(const CandidateBatch<milvus::Json>& b,
+                  TriStateOut& out,
+                  Cmp&& cmp) const {
+        ForEachCandidateRow(b, [&](size_t i) {
+            if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
+                // Ordering / pattern ops on an array literal: FALSE and known.
+                return;
+            } else if constexpr (std::is_same_v<GetType, int64_t>) {
+                auto number = b.data[i].at_numeric(pointer);
+                if (number.error()) {
+                    out.SetUnknown(i);
+                    return;
+                }
+                auto n = number.value();
+                bool hit;
+                if (n.is_int64()) {
+                    hit = cmp(n.get_int64());
+                } else {
+                    const double value =
+                        n.is_uint64() ? static_cast<double>(n.get_uint64())
+                                      : n.get_double();
+                    hit = cmp(value);
+                }
+                if (hit) {
+                    out.SetTrue(i);
+                }
+            } else {
+                auto x = b.data[i].template at<GetType>(pointer);
+                if (x.error()) {
+                    out.SetUnknown(i);
+                    return;
+                }
+                if (cmp(x.value())) {
+                    out.SetTrue(i);
+                }
+            }
+        });
+    }
+
+    void
+    CompareArrayLiteral(const CandidateBatch<milvus::Json>& b,
+                        TriStateOut& out,
+                        bool negate) const {
+        ForEachCandidateRow(b, [&](size_t i) {
+            // doc must outlive the array handle.
+            auto doc = b.data[i].doc();
+            auto array = doc.at_pointer(pointer).get_array();
+            if (array.error()) {
+                out.SetUnknown(i);
+                return;
+            }
+            if (CompareTwoJsonArray(array, val) != negate) {
+                out.SetTrue(i);
+            }
+        });
+    }
+};
+
+// JSON column, int64 literal that does not round-trip through double.
+struct UnaryJsonPreciseNumericKernel {
+    proto::plan::OpType op{proto::plan::OpType::Invalid};
+    std::string pointer;
+    const proto::plan::GenericValue* bound{
+        nullptr};  // owned by the logical expr
+
+    template <FilterType filter_type>
+    void
+    Eval(const CandidateBatch<milvus::Json>& b, TriStateOut out) const {
+        ForEachCandidateRow(b, [&](size_t i) {
+            auto number = b.data[i].at_numeric(pointer);
+            if (number.error()) {
+                out.SetUnknown(i);
+                return;
+            }
+            auto comparison = CompareJsonNumberToBound(number.value(), *bound);
+            if (comparison.has_value() &&
+                JsonNumberMatchesOp(*comparison, op)) {
+                out.SetTrue(i);
+            }
+        });
+    }
+};
+
+// Row-level ARRAY column: `arr[index] op val`, or whole-array `arr op [..]`
+// when ValueType is proto::plan::Array.
+template <typename ValueType>
+struct UnaryArrayKernel {
+    using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
+                                       std::string_view,
+                                       ValueType>;
+
+    proto::plan::OpType op{proto::plan::OpType::Invalid};
+    ValueType val{};
+    int index{-1};
+    // Only for ValueType == std::string.
+    const LikePatternMatcher* like_matcher{nullptr};
+    const PartialRegexMatcher* regex_matcher{nullptr};
+
+    template <FilterType filter_type>
+    void
+    Eval(const CandidateBatch<milvus::ArrayView>& b, TriStateOut out) const {
+        if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
+            EvalWholeArray(b, out);
+        } else {
+            AssertInfo(index >= 0,
+                       "array element predicate requires nested path");
+            EvalElement(b, out);
+        }
+    }
+
+ private:
+    void
+    EvalWholeArray(const CandidateBatch<milvus::ArrayView>& b,
+                   TriStateOut& out) const {
+        switch (op) {
+            case proto::plan::Equal:
+            case proto::plan::NotEqual: {
+                const bool negate = op == proto::plan::NotEqual;
+                return ForEachCandidateRow(b, [&](size_t i) {
+                    if (b.data[i].is_same_array(val) != negate) {
+                        out.SetTrue(i);
+                    }
+                });
+            }
+            case proto::plan::GreaterThan:
+            case proto::plan::GreaterEqual:
+            case proto::plan::LessThan:
+            case proto::plan::LessEqual:
+            case proto::plan::PrefixMatch:
+            case proto::plan::PostfixMatch:
+            case proto::plan::InnerMatch:
+                // Ordering / pattern ops on an array literal: FALSE and known.
+                return;
+            case proto::plan::Match:
+                return ForEachCandidateRow(b, [](size_t) {
+                    ThrowInfo(OpTypeInvalid,
+                              "Match operation is not supported for nested "
+                              "Array type");
+                });
+            case proto::plan::RegexMatch:
+                return ForEachCandidateRow(b, [](size_t) {
+                    ThrowInfo(OpTypeInvalid,
+                              "RegexMatch operation is not supported for "
+                              "nested Array type");
+                });
+            default:
+                ThrowInfo(
+                    UnexpectedError,
+                    fmt::format("unsupported operator type for unary expr: {}",
+                                op));
+        }
+    }
+
+    // Missing subscript -> UNKNOWN.
+    template <typename Cmp>
+    void
+    CompareElement(const CandidateBatch<milvus::ArrayView>& b,
+                   TriStateOut& out,
+                   Cmp&& cmp) const {
+        ForEachCandidateRow(b, [&](size_t i) {
+            const auto& row = b.data[i];
+            if (index >= row.length()) {
+                out.SetUnknown(i);
+                return;
+            }
+            if (cmp(row.template get_data<GetType>(index))) {
+                out.SetTrue(i);
+            }
+        });
+    }
+
+    void
+    EvalElement(const CandidateBatch<milvus::ArrayView>& b,
+                TriStateOut& out) const {
+        switch (op) {
+            case proto::plan::GreaterThan:
+                return CompareElement(
+                    b, out, [this](const GetType& x) { return x > val; });
+            case proto::plan::GreaterEqual:
+                return CompareElement(
+                    b, out, [this](const GetType& x) { return x >= val; });
+            case proto::plan::LessThan:
+                return CompareElement(
+                    b, out, [this](const GetType& x) { return x < val; });
+            case proto::plan::LessEqual:
+                return CompareElement(
+                    b, out, [this](const GetType& x) { return x <= val; });
+            case proto::plan::Equal:
+                return CompareElement(
+                    b, out, [this](const GetType& x) { return x == val; });
+            case proto::plan::NotEqual:
+                return CompareElement(
+                    b, out, [this](const GetType& x) { return x != val; });
+            case proto::plan::PrefixMatch:
+            case proto::plan::PostfixMatch:
+            case proto::plan::InnerMatch:
+                return CompareElement(b, out, [this](const GetType& x) {
+                    return milvus::query::Match(x, val, op);
+                });
+            case proto::plan::Match:
+                if constexpr (std::is_same_v<GetType, std::string_view>) {
+                    AssertInfo(like_matcher != nullptr,
+                               "LIKE matcher is required for Match");
+                    const auto* m = like_matcher;
+                    return CompareElement(
+                        b, out, [m](std::string_view x) { return (*m)(x); });
+                } else {
+                    return ForEachCandidateRow(b, [](size_t) {
+                        ThrowInfo(OpTypeInvalid,
+                                  "Match operation only supports string type");
+                    });
+                }
+            case proto::plan::RegexMatch:
+                if constexpr (std::is_same_v<GetType, std::string_view>) {
+                    AssertInfo(regex_matcher != nullptr,
+                               "regex matcher is required for RegexMatch");
+                    const auto* m = regex_matcher;
+                    return CompareElement(
+                        b, out, [m](std::string_view x) { return (*m)(x); });
+                } else {
+                    return ForEachCandidateRow(b, [](size_t) {
+                        ThrowInfo(
+                            OpTypeInvalid,
+                            "RegexMatch operation only supports string type");
+                    });
+                }
+            default:
+                ThrowInfo(
+                    UnexpectedError,
+                    fmt::format("unsupported operator type for unary expr: {}",
+                                op));
+        }
+    }
+};
+
+// Recheck of FMINDEX LIKE candidates against VARCHAR raw data.
+struct LikeMatchRecheckKernel {
+    const LikePatternMatcher* matcher{nullptr};
+
+    template <FilterType filter_type>
+    void
+    Eval(const CandidateBatch<std::string_view>& b, TriStateOut out) const {
+        ForEachCandidateRow(b, [&](size_t i) {
+            if ((*matcher)(b.data[i])) {
+                out.SetTrue(i);
+            }
+        });
+    }
+};
+
+static_assert(ScanKernel<UnaryRangeKernel<int64_t>, int64_t>);
+static_assert(ScanKernel<UnaryRangeKernel<std::string_view>, std::string_view>);
+static_assert(ScanKernel<UnaryJsonKernel<std::string>, milvus::Json>);
+static_assert(ScanKernel<UnaryJsonPreciseNumericKernel, milvus::Json>);
+static_assert(
+    ScanKernel<UnaryArrayKernel<proto::plan::Array>, milvus::ArrayView>);
+static_assert(ScanKernel<LikeMatchRecheckKernel, std::string_view>);
+static_assert(KernelCanSkip<UnaryRangeKernel<int64_t>> &&
+              KernelAlwaysFalse<UnaryRangeKernel<int64_t>> &&
+              KernelAlwaysTrue<UnaryRangeKernel<int64_t>>);
 
 template <typename T, typename U>
 void
@@ -1129,7 +1203,7 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     // Check overflow and cache result for performace
     template <typename T>
     ColumnVectorPtr
-    PreCheckOverflow(int64_t batch_size, OffsetVector* input = nullptr);
+    PreCheckOverflow(int64_t batch_size);
 
     template <typename T>
     bool
