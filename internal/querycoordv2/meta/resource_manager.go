@@ -1082,7 +1082,11 @@ func (rm *ResourceManager) unassignNode(ctx context.Context, node int64) (string
 		rg := mrg.ToResourceGroup()
 
 		if err := rm.catalog.SaveResourceGroup(ctx, rg.GetMeta()); err != nil {
-			mlog.Fatal(context.TODO(), "unassign node from resource group",
+			// A transient meta-store failure must not crash the whole querycoord.
+			// The resource observer recovers resource groups periodically, so the
+			// unassignment is re-applied on a later check once the meta store is
+			// back; callers already log the returned error.
+			mlog.Warn(ctx, "failed to save resource group when unassigning node",
 				mlog.String("rgName", rg.GetName()),
 				mlog.Int64("node", node),
 				mlog.Err(err),

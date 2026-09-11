@@ -1,6 +1,7 @@
 package kvfactory
 
 import (
+	"context"
 	"fmt"
 	"sync"
 
@@ -8,6 +9,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
 var clientCreator = &etcdClientCreator{}
@@ -48,8 +50,14 @@ func getEtcdAndPath() (*clientv3.Client, string) {
 	defer clientCreator.mu.Unlock()
 	// If client/path doesn’t exist, create a new one
 	if clientCreator.client == nil {
-		var err error
-		clientCreator.client, err = createEtcdClient()
+		// Retry transient etcd unavailability for a bounded budget (~1 min) so a
+		// brief outage doesn't crash the process; a persistent failure (e.g. bad
+		// endpoints/TLS config) still fails fast for human attention.
+		err := retry.Do(context.Background(), func() error {
+			var err error
+			clientCreator.client, err = createEtcdClient()
+			return err
+		}, retry.Attempts(20))
 		if err != nil {
 			panic(fmt.Errorf("failed to create etcd client: %w", err))
 		}
