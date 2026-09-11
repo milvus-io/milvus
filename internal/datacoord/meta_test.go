@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	dataviewpkg "github.com/milvus-io/milvus/internal/dataview"
 	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
@@ -56,6 +57,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -6598,6 +6600,253 @@ func TestCompactionCompletionRecordsSegmentCreateTsFromTaskCreateTs(t *testing.T
 		require.Equal(t, uint64(777), infos[0].GetCreateTs())
 		require.Equal(t, uint64(777), meta.GetSegment(ctx, 1).GetCreateTs())
 	})
+}
+
+func TestCompleteCompactionMutationPublishesOnlyFinalDataViewSegments(t *testing.T) {
+	ctx := context.Background()
+	newMetaWithDataView := func(t *testing.T) (*meta, dataviewpkg.Manager) {
+		catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
+		segments := NewSegmentsInfo()
+		for _, segmentID := range []int64{1, 2} {
+			segments.SetSegment(segmentID, NewSegmentInfo(&datapb.SegmentInfo{
+				ID:            segmentID,
+				CollectionID:  100,
+				PartitionID:   10,
+				InsertChannel: "ch-1",
+				State:         commonpb.SegmentState_Flushed,
+				Level:         datapb.SegmentLevel_L1,
+				NumOfRows:     100,
+				Binlogs: []*datapb.FieldBinlog{{
+					FieldID: 100,
+					Binlogs: []*datapb.Binlog{{LogID: segmentID}},
+				}},
+			}))
+		}
+		manager := dataviewpkg.NewManager(catalog, nil)
+		_, err := manager.OnCreateCollection(ctx, dataviewpkg.CreateCollectionDataViewEvent{
+			CollectionID: 100,
+			VChannels:    []string{"ch-1"},
+		})
+		require.NoError(t, err)
+		_, err = manager.RecomputeNow(ctx, 100, func(_ context.Context, _ int64) ([]dataviewpkg.LoadableSegment, error) {
+			return []dataviewpkg.LoadableSegment{
+				{SegmentID: 1, VChannel: "ch-1", PartitionID: 10},
+				{SegmentID: 2, VChannel: "ch-1", PartitionID: 10},
+			}, nil
+		})
+		require.NoError(t, err)
+		return &meta{ctx: ctx, catalog: catalog, segments: segments, dataViewManager: manager}, manager
+	}
+	dataViewSegmentIDs := func(t *testing.T, manager dataviewpkg.Manager) []int64 {
+		ref, err := manager.Latest(ctx, 100)
+		require.NoError(t, err)
+		require.NotNil(t, ref)
+		defer ref.Deref()
+		return lo.FlatMap(ref.DataView().GetShards(), func(shard *viewpb.DataViewOfShard, _ int) []int64 {
+			return lo.FlatMap(shard.GetPartitions(), func(partition *viewpb.DataViewOfPartition, _ int) []int64 {
+				return partition.GetSegmentIds()
+			})
+		})
+	}
+	// reconcile drives the same loadable projection the async recompute queue
+	// worker would run after the SegmentMeta mutation commits.
+	reconcile := func(t *testing.T, meta *meta, manager dataviewpkg.Manager) {
+		segments, err := meta.loadableProjection(ctx, 100)
+		require.NoError(t, err)
+		_, err = manager.RecomputeNow(ctx, 100, func(_ context.Context, _ int64) ([]dataviewpkg.LoadableSegment, error) {
+			return segments, nil
+		})
+		require.NoError(t, err)
+	}
+	result := &datapb.CompactionPlanResult{Segments: []*datapb.CompactionSegment{{
+		SegmentID: 3,
+		NumOfRows: 100,
+		InsertLogs: []*datapb.FieldBinlog{{
+			FieldID: 100,
+			Binlogs: []*datapb.Binlog{{LogID: 3}},
+		}},
+	}}}
+
+	t.Run("mix publishes final output", func(t *testing.T) {
+		meta, manager := newMetaWithDataView(t)
+		task := &datapb.CompactionTask{
+			CollectionID:  100,
+			PartitionID:   10,
+			InputSegments: []int64{1, 2},
+			Type:          datapb.CompactionType_MixCompaction,
+			Channel:       "ch-1",
+			Schema:        &schemapb.CollectionSchema{Version: 1},
+		}
+		_, _, err := meta.CompleteCompactionMutation(ctx, task, proto.Clone(result).(*datapb.CompactionPlanResult))
+		require.NoError(t, err)
+		// The mutation commits SegmentMeta first; the DataView converges via
+		// the async recompute over the final SegmentMeta.
+		reconcile(t, meta, manager)
+		require.Equal(t, []int64{3}, dataViewSegmentIDs(t, manager))
+	})
+
+	t.Run("mix converges on retry", func(t *testing.T) {
+		meta, manager := newMetaWithDataView(t)
+		task := &datapb.CompactionTask{
+			CollectionID:  100,
+			PartitionID:   10,
+			InputSegments: []int64{1, 2},
+			Type:          datapb.CompactionType_MixCompaction,
+			Channel:       "ch-1",
+			Schema:        &schemapb.CollectionSchema{Version: 1},
+		}
+		compactionResult := proto.Clone(result).(*datapb.CompactionPlanResult)
+
+		segments, mutation, err := meta.CompleteCompactionMutation(ctx, task, compactionResult)
+		require.NoError(t, err)
+		require.Len(t, segments, 1)
+		require.NotNil(t, mutation)
+		require.Equal(t, commonpb.SegmentState_Dropped, meta.segments.GetSegment(1).GetState())
+		require.Equal(t, commonpb.SegmentState_Dropped, meta.segments.GetSegment(2).GetState())
+		require.NotNil(t, meta.segments.GetSegment(3))
+
+		// Replaying the same mutation (e.g. a worker retry after the original
+		// response was lost) is idempotent, and the recompute still converges.
+		require.NoError(t, meta.ValidateSegmentStateBeforeCompleteCompactionMutation(task))
+		segments, mutation, err = meta.CompleteCompactionMutation(ctx, task, compactionResult)
+		require.NoError(t, err)
+		require.Len(t, segments, 1)
+		require.NotNil(t, mutation)
+		reconcile(t, meta, manager)
+		require.Equal(t, []int64{3}, dataViewSegmentIDs(t, manager))
+	})
+
+	t.Run("clustering does not publish temporary output", func(t *testing.T) {
+		meta, manager := newMetaWithDataView(t)
+		task := &datapb.CompactionTask{
+			CollectionID:  100,
+			PartitionID:   10,
+			InputSegments: []int64{1, 2},
+			Type:          datapb.CompactionType_ClusteringCompaction,
+			Channel:       "ch-1",
+			Schema:        &schemapb.CollectionSchema{Version: 1},
+		}
+		_, _, err := meta.CompleteCompactionMutation(ctx, task, proto.Clone(result).(*datapb.CompactionPlanResult))
+		require.NoError(t, err)
+		// The DataView is only published by the clustering completeTask after
+		// the whole job finishes; the single-mutation view is untouched until
+		// the async recompute runs against the final SegmentMeta.
+		require.ElementsMatch(t, []int64{1, 2}, dataViewSegmentIDs(t, manager))
+		reconcile(t, meta, manager)
+		// The clustering output stays invisible (visible after stats and index)
+		// until the completeTask marks it loadable; a standalone mutation does
+		// not surface it.
+		require.ElementsMatch(t, []int64{1, 2}, dataViewSegmentIDs(t, manager))
+	})
+
+	t.Run("sort converges after SegmentMeta commit", func(t *testing.T) {
+		meta, manager := newMetaWithDataView(t)
+		// Simulate a Segment flushed by an older coordinator that still used the
+		// delayed-visibility SortCompaction protocol.
+		meta.segments.GetSegment(1).IsInvisible = true
+		task := &datapb.CompactionTask{
+			CollectionID:  100,
+			PartitionID:   10,
+			InputSegments: []int64{1},
+			Type:          datapb.CompactionType_SortCompaction,
+			Channel:       "ch-1",
+			Schema:        &schemapb.CollectionSchema{Version: 1},
+		}
+		result := &datapb.CompactionPlanResult{Segments: []*datapb.CompactionSegment{{
+			SegmentID: 3,
+			NumOfRows: 100,
+			IsSorted:  true,
+			InsertLogs: []*datapb.FieldBinlog{{
+				FieldID: 100,
+				Binlogs: []*datapb.Binlog{{LogID: 3}},
+			}},
+		}}}
+
+		segments, mutation, err := meta.CompleteCompactionMutation(ctx, task, result)
+		require.NoError(t, err)
+		require.Len(t, segments, 1)
+		require.NotNil(t, mutation)
+		require.Equal(t, commonpb.SegmentState_Dropped, meta.segments.GetSegment(1).GetState())
+		require.NotNil(t, meta.segments.GetSegment(3))
+
+		require.NoError(t, meta.ValidateSegmentStateBeforeCompleteCompactionMutation(task))
+		segments, mutation, err = meta.CompleteCompactionMutation(ctx, task, result)
+		require.NoError(t, err)
+		require.Len(t, segments, 1)
+		require.NotNil(t, mutation)
+		reconcile(t, meta, manager)
+		require.ElementsMatch(t, []int64{2, 3}, dataViewSegmentIDs(t, manager))
+
+		ref, err := manager.Latest(ctx, 100)
+		require.NoError(t, err)
+		require.NotNil(t, ref)
+		defer ref.Deref()
+		require.Equal(t, int64(2), ref.Version().GetCompactVersion())
+	})
+}
+
+func TestCompleteCompactionMutationKeepsDataViewOrder(t *testing.T) {
+	ctx := context.Background()
+	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
+	segments := NewSegmentsInfo()
+	segments.SetSegment(1, NewSegmentInfo(&datapb.SegmentInfo{
+		ID:            1,
+		CollectionID:  100,
+		PartitionID:   10,
+		InsertChannel: "ch-1",
+		State:         commonpb.SegmentState_Flushed,
+		Level:         datapb.SegmentLevel_L1,
+		NumOfRows:     100,
+		Binlogs: []*datapb.FieldBinlog{{
+			FieldID: 100,
+			Binlogs: []*datapb.Binlog{{LogID: 1}},
+		}},
+	}))
+	manager := dataviewpkg.NewManager(catalog, nil)
+	_, err := manager.OnCreateCollection(ctx, dataviewpkg.CreateCollectionDataViewEvent{CollectionID: 100, VChannels: []string{"ch-1"}})
+	require.NoError(t, err)
+	_, err = manager.RecomputeNow(ctx, 100, func(_ context.Context, _ int64) ([]dataviewpkg.LoadableSegment, error) {
+		return []dataviewpkg.LoadableSegment{{SegmentID: 1, VChannel: "ch-1", PartitionID: 10}}, nil
+	})
+	require.NoError(t, err)
+	meta := &meta{ctx: ctx, catalog: catalog, segments: segments, dataViewManager: manager}
+	compact := func(from, to int64) error {
+		_, _, err := meta.CompleteCompactionMutation(ctx, &datapb.CompactionTask{
+			CollectionID:  100,
+			PartitionID:   10,
+			InputSegments: []int64{from},
+			Type:          datapb.CompactionType_MixCompaction,
+			Channel:       "ch-1",
+			Schema:        &schemapb.CollectionSchema{Version: 1},
+		}, &datapb.CompactionPlanResult{Segments: []*datapb.CompactionSegment{{
+			SegmentID: to,
+			NumOfRows: 100,
+			InsertLogs: []*datapb.FieldBinlog{{
+				FieldID: 100,
+				Binlogs: []*datapb.Binlog{{LogID: to}},
+			}},
+		}}})
+		return err
+	}
+
+	// Two compactions in sequence; the DataView recompute (queue worker)
+	// later reads the final SegmentMeta and converges to the last output
+	// exactly once, in a single snapshot write.
+	require.NoError(t, compact(1, 2))
+	require.NoError(t, compact(2, 3))
+
+	segmentsProjection, err := meta.loadableProjection(ctx, 100)
+	require.NoError(t, err)
+	_, err = manager.RecomputeNow(ctx, 100, func(_ context.Context, _ int64) ([]dataviewpkg.LoadableSegment, error) {
+		return segmentsProjection, nil
+	})
+	require.NoError(t, err)
+
+	ref, err := manager.Latest(ctx, 100)
+	require.NoError(t, err)
+	require.NotNil(t, ref)
+	defer ref.Deref()
+	require.Equal(t, []int64{3}, ref.DataView().GetShards()[0].GetPartitions()[0].GetSegmentIds())
 }
 
 func newCompactionCreateTsTestMeta(segments ...*SegmentInfo) *meta {

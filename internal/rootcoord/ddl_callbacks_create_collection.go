@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	streamingbroadcaster "github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -38,6 +39,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+type collectionDataViewCreator interface {
+	CreateCollectionDataView(ctx context.Context, collectionID int64, vchannels []string) error
+}
 
 func (c *Core) broadcastCreateCollectionV1(ctx context.Context, req *milvuspb.CreateCollectionRequest) error {
 	schema := &schemapb.CollectionSchema{}
@@ -116,6 +121,13 @@ func (c *DDLCallback) createCollectionV1AckCallback(ctx context.Context, result 
 				return merr.Wrap(err, "failed to create collection shard")
 			}
 		}
+	}
+	creator, ok := c.mixCoord.(collectionDataViewCreator)
+	if !ok {
+		mlog.Warn(ctx, "MixCoord does not support DataView collection creation",
+			mlog.FieldCollectionID(header.CollectionId))
+	} else if err := creator.CreateCollectionDataView(ctx, header.CollectionId, body.VirtualChannelNames); err != nil {
+		return merr.Wrap(err, "failed to create collection data view")
 	}
 	newCollInfo := newCollectionModelWithMessage(header, body, result)
 	if err := c.meta.AddCollection(ctx, newCollInfo); err != nil {

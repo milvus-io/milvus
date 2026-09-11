@@ -584,6 +584,11 @@ func (st *statsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResul
 			if !errors.Is(updateErr, merr.ErrSegmentNotFound) {
 				return updateErr
 			}
+		} else {
+			// The SegmentMeta mutation is committed (manifest version
+			// advanced); reconcile the DataView snapshot asynchronously so
+			// consumers observe the new manifest version.
+			st.meta.recomputeDataView(ctx, st.GetCollectionID())
 		}
 	}
 

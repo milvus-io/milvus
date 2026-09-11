@@ -40,6 +40,7 @@ const (
 	ExternalCollectionRefreshTaskPrefix = MetaPrefix + "/external-collection-refresh-task"
 	SnapshotPrefix                      = MetaPrefix + "/snapshot"
 	ExportSnapshotJobPrefix             = MetaPrefix + "/export-snapshot-job"
+	DataViewPrefix                      = "coord/dv"
 
 	NonRemoveFlagTomestone = "non-removed"
 	RemoveFlagTomestone    = "removed"

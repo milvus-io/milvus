@@ -415,3 +415,11 @@ func buildSnapshotKey(collectionID int64, snapshotID int64) string {
 func buildExportSnapshotJobKey(jobID int64) string {
 	return fmt.Sprintf("%s/%d", ExportSnapshotJobPrefix, jobID)
 }
+
+func buildDataViewVersionPrefix(collectionID int64) string {
+	return fmt.Sprintf("%s/%d/versions/", DataViewPrefix, collectionID)
+}
+
+func buildDataViewVersionKey(collectionID, streamingVersion, compactVersion int64) string {
+	return fmt.Sprintf("%s/%d/versions/%d/%d", DataViewPrefix, collectionID, streamingVersion, compactVersion)
+}

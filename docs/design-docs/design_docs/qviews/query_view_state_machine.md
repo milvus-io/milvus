@@ -20,12 +20,28 @@ atomic `ConsumeFlush` result. Persist and sync values are independently
 latest-wins until consumed, so the manager cannot drain only one half of a
 transition and leave an inconsistent externalization boundary.
 
+Each state-machine instance is derived from one Collection-scoped DataVersion.
+The QueryView manager must own the corresponding `DataViewRef` from Preparing
+through Ready, Up, Down, Unrecoverable, and Dropping, and release it only after
+Dropped destroys the instance. On recovery, persisted QueryViews must reacquire
+their DataVersions before DataView snapshot GC is enabled.
+
+L0 compaction advances DataView compact_version (a Manifest-version change
+with no dedicated counter). It invalidates the current
+QueryView: the state machine generates a new QueryView at the latest
+DataVersion so the old Manifest revision can be released. The TransformLog
+start frontier remains a TODO pending the StreamingNode shard barrier
+described in
+[Transform Start-After TimeTick](transform_start_after_timetick.md). The
+scheduling policy is not implemented by the current DataView-only PR.
+
 ### 1.1 Preparing
 
 **Entry Conditions:**
-- The lifecycle caller generates a new view (for example after a DataVersion
-  change, node membership change, previous Unrecoverable view, or load-config
-  change).
+- Balancer generates a new view (hard triggers: StreamingVersion or
+  CompactVersion change - including L0 Manifest advances - balance request,
+  QN online/offline, previous view becomes Unrecoverable, or load config
+  changes such as LoadPartition/ReleasePartition).
 - Recovery: loaded from ETCD in Preparing state.
 
 **Automatic Behavior:**
@@ -238,7 +254,8 @@ the crash-recovery path.
 **Automatic Behavior:**
 1. Check replica information.
 2. Transition growing segments to queryable state.
-3. Check whether the local Flusher's data_version > the view's data_version.
+3. Check whether retained growing data can satisfy the QueryView's composite
+   DataVersion, using the per-Segment Flush `streaming_version` handoff metadata.
 
 **Transitions:**
 
@@ -401,9 +418,17 @@ later local progress does not retroactively mutate an already-pending report.
 - Received Preparing sync signal from Coord via SyncQueryView.
 
 **Automatic Behavior:**
-1. Asynchronously load segments from object storage.
-2. Subscribe to the pure delete stream from SN.
-3. Mark each segment as ready progressively; report the latest accumulated
+1. Resolve each Segment's loading metadata from the DataView Manifest version:
+   - Version `0`: Coord keeps watching Coordinator SegmentMeta, resolves the
+     complete current SegmentInfo, and freezes it into this QueryView/load
+     operation before dispatch.
+   - Positive version: QueryNode constructs the canonical StorageV3 Manifest
+     object path from Collection/Partition/Segment IDs plus the version and
+     derives all loading metadata directly from that Manifest; no Coordinator
+     SegmentMeta watch is required for this Segment.
+2. Asynchronously load segments from object storage.
+3. Subscribe to the pure delete stream from SN.
+4. Mark each segment as ready progressively; report the latest accumulated
    ready subset to Coord via `ready_segment_ids` in responses.
 
 **Transitions:**
