@@ -34,6 +34,53 @@
 
 namespace milvus::index {
 
+namespace detail {
+
+// Ring-2 boundary for the vendored fm-index-lite library (see its NOTICE for
+// the pinned upstream revision). That library has no dependency on
+// milvus-common and so throws plain std:: exceptions; anything escaping it
+// untyped reaches the cgo boundary as UnexpectedError(2001) — the bucket that
+// means "unclassified internal bug". Every call into it goes through here.
+//
+// `fallback` is the code for a library failure in this phase (build vs load).
+// std::bad_alloc is deliberately NOT folded into it: an allocation failure is
+// transient and MemAllocateFailed(2034) is retriable, while the build/load
+// fallbacks are permanent. The library's parse path relies on this — it
+// self-classifies every other std::exception into a false return value and
+// rethrows only bad_alloc (FMIndexInl.h, FMIndex::parseView).
+template <typename Fn>
+void
+GuardFMIndexLibrary(Fn&& fn,
+                    ErrorCode fallback,
+                    const char* action,
+                    int64_t field_id) {
+    try {
+        fn();
+    } catch (const SegcoreError&) {
+        // Already classified (e.g. by a nested milvus call); keep its code.
+        throw;
+    } catch (const std::bad_alloc& e) {
+        ThrowInfo(ErrorCode::MemAllocateFailed,
+                  "failed to {} FM index for field {}: {}",
+                  action,
+                  field_id,
+                  e.what());
+    } catch (const std::exception& e) {
+        ThrowInfo(fallback,
+                  "failed to {} FM index for field {}: {}",
+                  action,
+                  field_id,
+                  e.what());
+    } catch (...) {
+        ThrowInfo(fallback,
+                  "failed to {} FM index for field {}: unknown exception",
+                  action,
+                  field_id);
+    }
+}
+
+}  // namespace detail
+
 // File-name / meta keys used by the V3 packed-file entries. These strings are
 // persisted, do not edit them.
 constexpr const char* FMINDEX_BLOB_FILE_NAME = "fm_index.bin";

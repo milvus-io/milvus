@@ -38,12 +38,14 @@
 #include "log/Log.h"
 #include "milvus-storage/column_groups.h"
 #include "milvus-storage/common/extend_status.h"
+#include "storage/loon_ffi/loon_error_code.h"
 #include "milvus-storage/ffi_internal/bridge.h"
 #include "milvus-storage/properties.h"
 #include "milvus-storage/reader.h"
 #include "nlohmann/json.hpp"
 #include "pb/schema.pb.h"
 #include "storage/Util.h"
+#include "common/EasyAssert.h"
 
 namespace {
 
@@ -54,14 +56,10 @@ ThrowIfFFIError(LoonFFIResult result, const std::string& context) {
         return;
     }
 
-    auto extend_status_code =
-        milvus_storage::ExtendStatusCodeFromInt(result.err_code);
-    auto error_code =
-        extend_status_code.has_value()
-            ? milvus_storage::ToSegcoreErrorCode(extend_status_code.value())
-            : (loon_ffi_is_retryable_errcode(result.err_code) != 0
-                   ? milvus::StorageTransientError
-                   : milvus::StorageError);
+    // Single classification entry for LOON FFI codes (low band, extend
+    // band, and the producer's retryability probe) -- keep in sync with
+    // milvus_table_c.cpp by construction, not by parallel edits.
+    auto error_code = milvus::storage::LoonErrCodeToErrorCode(result.err_code);
     const char* msg = loon_ffi_get_errmsg(&result);
     std::string detail = msg != nullptr ? msg : "unknown error";
     loon_ffi_free_result(&result);
@@ -119,7 +117,9 @@ ReadManifestColumnGroupsWithFFI(const char* manifest_path,
         loon_transaction_get_manifest(transaction.handle, &manifest.manifest),
         "get external segment manifest");
     if (manifest.manifest == nullptr) {
-        throw std::runtime_error("external segment manifest is nil");
+        ThrowInfo(milvus::ErrorCode::UnexpectedError,
+                  "{}",
+                  std::string("external segment manifest is nil"));
     }
 
     auto cgs = std::make_shared<milvus_storage::api::ColumnGroups>();
@@ -343,6 +343,8 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
         return ok;
     } catch (const std::exception& e) {
         return milvus::FailureCStatus(&e);
+    } catch (...) {
+        return MakeCStatusError("unknown exception");
     }
 }
 

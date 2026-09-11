@@ -305,8 +305,9 @@ NgramInvertedIndex::Load(milvus::tracer::TraceContext ctx,
             config, milvus::LOAD_PRIORITY)
             .value_or(milvus::proto::common::LoadPriority::HIGH);
     disk_file_manager_->CacheNgramIndexToDisk(files_value, load_priority);
-    AssertInfo(
-        tantivy_index_exist(path_.c_str()), "index not exist: {}", path_);
+    if (!(tantivy_index_exist(path_.c_str()))) {
+        ThrowInfo(ErrorCode::DataFormatBroken, "index not exist: {}", path_);
+    }
 
     auto load_in_mmap =
         GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);

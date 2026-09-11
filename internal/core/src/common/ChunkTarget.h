@@ -112,10 +112,12 @@ class MemChunkTarget : public ChunkTarget {
             mmap_flag |= MAP_POPULATE;
         }
         auto m = mmap(nullptr, cap, PROT_READ | PROT_WRITE, mmap_flag, -1, 0);
-        AssertInfo(m != MAP_FAILED,
-                   "failed to map: {}, map_size={}",
-                   strerror(errno),
-                   size_);
+        if (m == MAP_FAILED) {
+            ThrowInfo(ErrorCode::MmapError,
+                      "failed to map: {}, map_size={}",
+                      strerror(errno),
+                      size_);
+        }
         data_ = reinterpret_cast<char*>(m);
     }
 

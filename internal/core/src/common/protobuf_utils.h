@@ -125,9 +125,10 @@ class ProtoLayout {
     bool
     SerializeAndHoldProto(T& proto) {
         if (blob_ != nullptr || size_ != 0) {
-            throw std::runtime_error(
-                "ProtoLayout should always be empty "
-                "before calling SerializeAndHoldProto");
+            ThrowInfo(ErrorCode::UnexpectedError,
+                      "{}",
+                      std::string("ProtoLayout should always be empty "
+                                  "before calling SerializeAndHoldProto"));
         }
         size_ = proto.ByteSizeLong();
         blob_ = new uint8_t[size_];

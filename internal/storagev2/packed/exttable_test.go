@@ -73,7 +73,11 @@ func TestExploreFiles_InvalidDirectory(t *testing.T) {
 	)
 
 	assert.Error(t, err)
-	assert.ErrorIs(t, err, ErrLoonTransient)
+	// A nonexistent directory is LOON_FILE_NOT_FOUND (code 12): the FFI
+	// err_code now survives into the classification, so this is a permanent
+	// failure -- retrying a 404 cannot succeed -- not a transient one.
+	assert.ErrorIs(t, err, ErrLoonPermanent)
+	assert.NotErrorIs(t, err, ErrLoonTransient)
 	assert.Nil(t, files)
 }
 

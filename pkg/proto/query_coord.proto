@@ -920,6 +920,10 @@ message DeleteBatchResponse {
     common.Status status = 1;
     repeated int64 failed_ids = 2;
     repeated int64 missing_ids = 3;
+    // Typed per-segment failure, index-aligned with failed_ids: the caller
+    // decides with the carried retriable flag (merr.IsRetryableErr) instead of
+    // treating every failure as permanent and offlining the segment.
+    repeated common.Status failed_statuses = 4;
 }
 
 message ActivateCheckerRequest {

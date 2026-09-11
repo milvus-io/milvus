@@ -36,6 +36,7 @@
 #include "simdjson/base.h"
 #include "simdjson/padded_string.h"
 #include "storage/FileWriter.h"
+#include "storage/StatusToErrorCode.h"
 
 namespace milvus {
 namespace {
@@ -974,8 +975,15 @@ arrow::ArrayVector
 read_single_column_batches(std::shared_ptr<arrow::RecordBatchReader> reader) {
     arrow::ArrayVector array_vec;
     for (const auto& batch : *reader) {
-        auto batch_data = batch.ValueOrDie();
-        array_vec.push_back(batch_data->column(0));
+        // A failed read (corrupt file, IO error) surfaces here as an error
+        // Result; ValueOrDie would abort the process instead of throwing a
+        // classified error.
+        if (!batch.ok()) {
+            ThrowInfo(storage::ArrowStatusToErrorCode(batch.status()),
+                      "failed to read record batch: {}",
+                      batch.status().ToString());
+        }
+        array_vec.push_back(batch.ValueUnsafe()->column(0));
     }
     return array_vec;
 }

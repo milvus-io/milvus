@@ -72,8 +72,12 @@ CachedSearchIterator::CachedSearchIterator(
     if (expected_iterators.has_value()) {
         iterators_ = std::move(expected_iterators.value());
     } else {
-        ThrowInfo(ErrorCode::UnexpectedError,
-                  "Failed to create iterators from index");
+        // Route the knowhere status through the shared mapper so the
+        // retriability verdict survives (e.g. malloc_error -> retriable
+        // MemAllocateFailed) instead of collapsing to UnexpectedError.
+        ThrowInfo(KnowhereStatusToErrorCode(expected_iterators.error()),
+                  "Failed to create iterators from index: {}",
+                  expected_iterators.what());
     }
 }
 
@@ -95,8 +99,12 @@ CachedSearchIterator::AppendChunkIterators(
         ++num_chunks_;
         return;
     }
-    ThrowInfo(ErrorCode::UnexpectedError,
-              "Failed to create iterators from index");
+    // Route the knowhere status through the shared mapper so the retriability
+    // verdict survives (e.g. malloc_error -> retriable MemAllocateFailed)
+    // instead of collapsing to UnexpectedError.
+    ThrowInfo(KnowhereStatusToErrorCode(expected_iterators.error()),
+              "Failed to create brute-force iterators: {}",
+              expected_iterators.what());
 }
 
 void
@@ -347,15 +355,23 @@ CachedSearchIterator::GetNextValidResult(
     auto& iterator = iterators_[iterator_idx];
     while (true) {
         auto has_next = iterator->HasNext();
-        AssertInfo(has_next.has_value(),
-                   "knowhere iterator HasNext failed: {}",
-                   has_next.what());
+        if (!has_next.has_value()) {
+            // knowhere already classified this (OOM, disk read); route it
+            // through the mapper so a transient failure stays retriable
+            // instead of collapsing into UnexpectedError(2001).
+            ThrowInfo(KnowhereStatusToErrorCode(has_next.error()),
+                      "knowhere iterator HasNext failed: {}",
+                      has_next.what());
+        }
         if (!has_next.value()) {
             break;
         }
         auto next = iterator->Next();
-        AssertInfo(
-            next.has_value(), "knowhere iterator Next failed: {}", next.what());
+        if (!next.has_value()) {
+            ThrowInfo(KnowhereStatusToErrorCode(next.error()),
+                      "knowhere iterator Next failed: {}",
+                      next.what());
+        }
         auto result = ConvertIteratorResult(next.value());
         if (IsValid(result, last_bound, radius, range_filter)) {
             return result;
@@ -421,16 +437,20 @@ CachedSearchIterator::GetBatchedNextResults(size_t query_idx,
         auto& iterator = iterators_[query_idx];
         while (rst.size() < batch_size_) {
             auto has_next = iterator->HasNext();
-            AssertInfo(has_next.has_value(),
-                       "knowhere iterator HasNext failed: {}",
-                       has_next.what());
+            if (!has_next.has_value()) {
+                ThrowInfo(KnowhereStatusToErrorCode(has_next.error()),
+                          "knowhere iterator HasNext failed: {}",
+                          has_next.what());
+            }
             if (!has_next.value()) {
                 break;
             }
             auto next = iterator->Next();
-            AssertInfo(next.has_value(),
-                       "knowhere iterator Next failed: {}",
-                       next.what());
+            if (!next.has_value()) {
+                ThrowInfo(KnowhereStatusToErrorCode(next.error()),
+                          "knowhere iterator Next failed: {}",
+                          next.what());
+            }
             auto result = ConvertIteratorResult(next.value());
             if (IsValid(result, last_bound, radius, range_filter)) {
                 rst.emplace_back(result);

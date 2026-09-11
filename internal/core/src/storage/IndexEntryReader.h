@@ -125,7 +125,10 @@ class IndexEntryReader {
     template <typename T>
     T
     GetMeta(const std::string& key) const {
-        AssertInfo(meta_json_.contains(key), "Meta key not found: {}", key);
+        if (!(meta_json_.contains(key))) {
+            ThrowInfo(
+                ErrorCode::DataFormatBroken, "Meta key not found: {}", key);
+        }
         return meta_json_[key].get<T>();
     }
 

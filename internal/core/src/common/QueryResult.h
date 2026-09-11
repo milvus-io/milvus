@@ -32,6 +32,7 @@
 #include "common/FieldMeta.h"
 #include "common/ArrayOffsets.h"
 #include "common/Types.h"
+#include "common/Utils.h"
 #include "pb/schema.pb.h"
 #include "knowhere/index/index_node.h"
 
@@ -129,14 +130,21 @@ class ChunkMergeIterator : public VectorIterator {
             heap_.pop();
             auto& iter = iterators_[top->GetIteratorIdx()];
             auto has_next = iter->HasNext();
-            AssertInfo(has_next.has_value(),
-                       "knowhere iterator HasNext failed: {}",
-                       has_next.what());
+            if (!has_next.has_value()) {
+                // knowhere classifies its own failures (OOM, disk read); the
+                // mapper keeps a transient one retriable instead of collapsing
+                // it into UnexpectedError(2001).
+                ThrowInfo(KnowhereStatusToErrorCode(has_next.error()),
+                          "knowhere iterator HasNext failed: {}",
+                          has_next.what());
+            }
             if (has_next.value()) {
                 auto origin_pair = iter->Next();
-                AssertInfo(origin_pair.has_value(),
-                           "knowhere iterator Next failed: {}",
-                           origin_pair.what());
+                if (!origin_pair.has_value()) {
+                    ThrowInfo(KnowhereStatusToErrorCode(origin_pair.error()),
+                              "knowhere iterator Next failed: {}",
+                              origin_pair.what());
+                }
                 auto off_dis_pair = std::make_shared<OffsetDisPair>(
                     origin_pair.value(), top->GetIteratorIdx());
                 heap_.push(off_dis_pair);
@@ -167,14 +175,21 @@ class ChunkMergeIterator : public VectorIterator {
         for (int idx = 0; idx < static_cast<int>(iterators_.size()); ++idx) {
             auto& iter = iterators_[idx];
             auto has_next = iter->HasNext();
-            AssertInfo(has_next.has_value(),
-                       "knowhere iterator HasNext failed: {}",
-                       has_next.what());
+            if (!has_next.has_value()) {
+                // knowhere classifies its own failures (OOM, disk read); the
+                // mapper keeps a transient one retriable instead of collapsing
+                // it into UnexpectedError(2001).
+                ThrowInfo(KnowhereStatusToErrorCode(has_next.error()),
+                          "knowhere iterator HasNext failed: {}",
+                          has_next.what());
+            }
             if (has_next.value()) {
                 auto origin_pair = iter->Next();
-                AssertInfo(origin_pair.has_value(),
-                           "knowhere iterator Next failed: {}",
-                           origin_pair.what());
+                if (!origin_pair.has_value()) {
+                    ThrowInfo(KnowhereStatusToErrorCode(origin_pair.error()),
+                              "knowhere iterator Next failed: {}",
+                              origin_pair.what());
+                }
                 auto off_dis_pair =
                     std::make_shared<OffsetDisPair>(origin_pair.value(), idx);
                 heap_.push(off_dis_pair);

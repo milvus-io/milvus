@@ -123,7 +123,12 @@ TEST_F(FileWriterTest, InvalidDiskConfigDoesNotPublishState) {
         LocalFileIOPool::GetInstance().Configure(0);
         const CDiskWriteConfig config{"direct", 8, 1, rate_config};
         auto status = InitDiskFileWriterConfig(config);
-        EXPECT_EQ(status.error_code, ErrorCode::InvalidParameter);
+        // ConfigInvalid, not InvalidParameter: the rate-limiter fields reach
+        // this entry point from milvus.yaml via initcore, never from a
+        // request, so the same code the write-mode check a few lines up
+        // already returns applies. InvalidParameter carries InputError to Go,
+        // which would make a deployment error look like the caller's fault.
+        EXPECT_EQ(status.error_code, ErrorCode::ConfigInvalid);
         free(const_cast<char*>(status.error_msg));
         EXPECT_EQ(FileWriter::GetMode(), FileWriter::WriteMode::BUFFERED);
         EXPECT_EQ(FileWriter::GetBufferSize(), 4096);

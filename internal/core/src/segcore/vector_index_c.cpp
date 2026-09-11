@@ -19,6 +19,7 @@
 #include <string>
 #include <utility>
 
+#include "common/CGoCatch.h"
 #include "common/EasyAssert.h"
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
@@ -112,12 +113,8 @@ ValidateIndexParams(const char* index_type,
             cStatus.error_msg = strdup(error_msg.c_str());
         }
         return cStatus;
-    } catch (std::exception& e) {
-        auto cStatus = CStatus();
-        cStatus.error_code = milvus::UnexpectedError;
-        cStatus.error_msg = strdup(e.what());
-        return cStatus;
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 int

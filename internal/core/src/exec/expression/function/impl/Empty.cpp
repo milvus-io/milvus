@@ -36,7 +36,7 @@ namespace function {
 void
 EmptyVarchar(const RowVector& args, FilterFunctionReturn& result) {
     if (args.childrens().size() != 1) {
-        ThrowInfo(ExprInvalid,
+        ThrowInfo(UnexpectedError,
                   "invalid argument count, expect 1, actual {}",
                   args.childrens().size());
     }

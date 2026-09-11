@@ -36,6 +36,12 @@ import (
 // errors propagate immediately as retry.Unrecoverable.
 var ErrLoonTransient = errors.New("loon FFI transient error")
 
+// ErrLoonPermanent marks a loon FFI failure whose err_code the producer
+// itself reports as non-retryable (loon_ffi_is_retryable_errcode == 0):
+// access denied, malformed input, corrupt data. Retrying cannot succeed;
+// callers' retry guards must terminate on it.
+var ErrLoonPermanent = errors.New("loon FFI permanent error")
+
 // Property keys exported by milvus-storage/ffi_c.h.
 var (
 	PropertyFSAddress             = C.GoString(C.loon_properties_fs_address)
@@ -341,8 +347,17 @@ func HandleLoonFFIResult(ffiResult C.LoonFFIResult) error {
 		if errMsg != nil {
 			errStr = C.GoString(errMsg)
 		}
-
-		return merr.Wrapf(ErrLoonTransient, "FFI operation failed: %s", errStr)
+		// Classify by the err_code the FFI already carries instead of
+		// flattening every failure to transient: the producer's own
+		// loon_ffi_is_retryable_errcode decides, so a 404/access-denied/
+		// corrupt-data failure stops retry loops instead of spinning them.
+		code := int32(ffiResult.err_code)
+		if C.loon_ffi_is_retryable_errcode(C.int(code)) != 0 {
+			return merr.Wrapf(ErrLoonTransient,
+				"FFI operation failed (code=%d): %s", code, errStr)
+		}
+		return merr.Wrapf(ErrLoonPermanent,
+			"FFI operation failed (code=%d): %s", code, errStr)
 	}
 	return nil
 }

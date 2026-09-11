@@ -611,11 +611,13 @@ class FieldDataStringImpl : public FieldDataImpl<std::string, true> {
 
     void
     FillFieldData(const std::shared_ptr<arrow::Array> array) override {
-        AssertInfo(
-            array->type()->id() == arrow::Type::type::STRING ||
-                array->type()->id() == arrow::Type::type::BINARY,
-            "inconsistent data type, expected: STRING or BINARY, got: {}",
-            array->type()->ToString());
+        if (!(array->type()->id() == arrow::Type::type::STRING ||
+              array->type()->id() == arrow::Type::type::BINARY)) {
+            ThrowInfo(
+                ErrorCode::DataFormatBroken,
+                "inconsistent data type, expected: STRING or BINARY, got: {}",
+                array->type()->ToString());
+        }
         if (array->type()->id() == arrow::Type::type::STRING) {
             return FillFieldData(
                 std::dynamic_pointer_cast<arrow::StringArray>(array));
@@ -723,10 +725,12 @@ class FieldDataGeometryImpl : public FieldDataImpl<std::string, true> {
     }
     void
     FillFieldData(const std::shared_ptr<arrow::Array> array) override {
-        AssertInfo(array->type()->id() == arrow::Type::type::BINARY,
-                   "inconsistent data type, expected: {}, got: {}",
-                   "BINARY",
-                   array->type()->ToString());
+        if (!(array->type()->id() == arrow::Type::type::BINARY)) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "inconsistent data type, expected: {}, got: {}",
+                      "BINARY",
+                      array->type()->ToString());
+        }
         auto geometry_array =
             std::dynamic_pointer_cast<arrow::BinaryArray>(array);
         FillFieldData(geometry_array);
@@ -823,10 +827,12 @@ class FieldDataJsonImpl : public FieldDataImpl<Json, true> {
 
     void
     FillFieldData(const std::shared_ptr<arrow::Array> array) override {
-        AssertInfo(array->type()->id() == arrow::Type::type::BINARY,
-                   "inconsistent data type, expected: {}, got: {}",
-                   "BINARY",
-                   array->type()->ToString());
+        if (!(array->type()->id() == arrow::Type::type::BINARY)) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "inconsistent data type, expected: {}, got: {}",
+                      "BINARY",
+                      array->type()->ToString());
+        }
         auto json_array = std::dynamic_pointer_cast<arrow::BinaryArray>(array);
         FillFieldData(json_array);
     }

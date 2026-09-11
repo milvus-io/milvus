@@ -1998,7 +1998,11 @@ func estimateLogicalResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 
 			var estimateResult ResourceEstimate
 			err = GetCLoadInfoWithFunc(ctx, fieldSchema, loadInfo, fieldIndexInfo, func(c *LoadIndexInfo) error {
-				loadResourceRequest := C.EstimateLoadIndexResource(c.cLoadIndexInfo)
+				var loadResourceRequest C.LoadResourceRequest
+				status := C.EstimateLoadIndexResource(c.cLoadIndexInfo, &loadResourceRequest)
+				if err := HandleCStatus(ctx, &status, "failed to estimate load index resource"); err != nil {
+					return err
+				}
 				estimateResult = GetResourceEstimate(&loadResourceRequest)
 				return nil
 			})
@@ -2200,7 +2204,11 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 
 			var estimateResult ResourceEstimate
 			err = GetCLoadInfoWithFunc(ctx, fieldSchema, loadInfo, fieldIndexInfo, func(c *LoadIndexInfo) error {
-				loadResourceRequest := C.EstimateLoadIndexResource(c.cLoadIndexInfo)
+				var loadResourceRequest C.LoadResourceRequest
+				status := C.EstimateLoadIndexResource(c.cLoadIndexInfo, &loadResourceRequest)
+				if err := HandleCStatus(ctx, &status, "failed to estimate load index resource"); err != nil {
+					return err
+				}
 				estimateResult = GetResourceEstimate(&loadResourceRequest)
 				return nil
 			})

@@ -389,7 +389,7 @@ RTreeIndexWrapper::finish() {
                   "out of memory writing R-Tree files for {}",
                   index_path_);
     } catch (const std::exception& e) {
-        ThrowInfo(ErrorCode::UnexpectedError,
+        ThrowInfo(ErrorCode::FileWriteFailed,
                   fmt::format("Failed to write R-Tree files: {}", e.what()));
     }
 
@@ -454,7 +454,7 @@ RTreeIndexWrapper::load() {
                   "out of memory loading R-Tree index from {}",
                   index_path_);
     } catch (const std::exception& e) {
-        ThrowInfo(ErrorCode::UnexpectedError,
+        ThrowInfo(ErrorCode::DataFormatBroken,
                   fmt::format("Failed to load R-Tree index from {}: {}",
                               index_path_,
                               e.what()));

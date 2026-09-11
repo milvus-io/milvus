@@ -27,6 +27,7 @@
 #include <arrow/util/thread_pool.h>
 #include <openssl/evp.h>
 
+#include "common/CGoCatch.h"
 #include "common/Common.h"
 #include "common/Tracer.h"
 #include "exec/expression/ExprCache.h"
@@ -129,7 +130,10 @@ SetEnableLatestDeleteSnapshotOptimization(bool val) {
 
 void
 SetLogLevel(const char* level) {
-    milvus::SetLogLevel(level);
+    try {
+        milvus::SetLogLevel(level);
+    }
+    CGO_CATCH_AND_LOG("SetLogLevel")
 }
 
 void
@@ -186,9 +190,20 @@ SetExprResCacheConfig(const char* mode,
     config.disk_min_eval_duration_us =
         disk_min_eval_duration_us < 0 ? 0 : disk_min_eval_duration_us;
 
-    bool applied =
-        milvus::exec::ExprResCacheManager::Instance().SetConfig(config);
-    milvus::exec::ExprResCacheManager::SetEnabled(applied);
+    try {
+        bool applied =
+            milvus::exec::ExprResCacheManager::Instance().SetConfig(config);
+        milvus::exec::ExprResCacheManager::SetEnabled(applied);
+    } catch (const std::exception& e) {
+        LOG_ERROR("exception swallowed at cgo boundary {}: {}",
+                  "SetExprResCacheConfig",
+                  e.what());
+        milvus::exec::ExprResCacheManager::SetEnabled(false);
+    } catch (...) {
+        LOG_ERROR("unknown exception swallowed at cgo boundary {}",
+                  "SetExprResCacheConfig");
+        milvus::exec::ExprResCacheManager::SetEnabled(false);
+    }
 }
 
 void
@@ -283,12 +298,15 @@ InitTrace(CTraceConfig* config) {
                                                    config->otlpHeaders,
                                                    config->oltpSecure,
                                                    config->nodeID};
-    std::call_once(
-        traceFlag,
-        [](const milvus::tracer::TraceConfig& c) {
-            milvus::tracer::initTelemetry(c);
-        },
-        traceConfig);
+    try {
+        std::call_once(
+            traceFlag,
+            [](const milvus::tracer::TraceConfig& c) {
+                milvus::tracer::initTelemetry(c);
+            },
+            traceConfig);
+    }
+    CGO_CATCH_AND_LOG("InitTrace")
 }
 
 void
@@ -301,5 +319,8 @@ SetTrace(CTraceConfig* config) {
                                                    config->otlpHeaders,
                                                    config->oltpSecure,
                                                    config->nodeID};
-    milvus::tracer::initTelemetry(traceConfig);
+    try {
+        milvus::tracer::initTelemetry(traceConfig);
+    }
+    CGO_CATCH_AND_LOG("SetTrace")
 }

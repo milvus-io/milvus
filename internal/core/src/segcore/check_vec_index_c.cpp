@@ -12,6 +12,7 @@
 #include <string>
 
 #include "check_vec_index_c.h"
+#include "common/CGoCatch.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/comp/knowhere_check.h"
 
@@ -19,8 +20,13 @@ bool
 CheckVecIndexWithDataType(const char* index_type,
                           enum CDataType data_type,
                           bool is_emb_list_data) {
-    return knowhere::KnowhereCheck::IndexTypeAndDataTypeCheck(
-        std::string(index_type),
-        knowhere::VecType(data_type),
-        is_emb_list_data);
+    try {
+        return knowhere::KnowhereCheck::IndexTypeAndDataTypeCheck(
+            std::string(index_type),
+            knowhere::VecType(data_type),
+            is_emb_list_data);
+    }
+    CGO_CATCH_AND_LOG("CheckVecIndexWithDataType")
+    // Rejecting the index type is the safe direction on failure.
+    return false;
 }
