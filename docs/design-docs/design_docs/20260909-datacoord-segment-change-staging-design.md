@@ -103,7 +103,7 @@ catches up async" structure:
 | Path | Segment entry shape | Async post-processing |
 |---|---|---|
 | Import (`import_util.go:269`) | `State=Importing`, `IsImporting=true` | sort compaction → stats → index |
-| Sort compaction (`meta.go:3454`) | `State=Flushed`, inherits `IsInvisible`, `CompactionFrom=[origin]` | stats → index |
+| Sort compaction (`meta.go:3454`) | `State=Flushed`, `CompactionFrom=[origin]`；`IsInvisible` **仅当 origin `CreatedByCompaction=true` 时继承**——`completeSortCompactionMutation` 对非 compaction 起源（streaming flush / import）**清空** `IsInvisible` | stats → index |
 | Mix compaction (`meta.go:2649`) | `State=Flushed`, `IsInvisible=false`, `CompactionFrom=inputs` | stats → index |
 | Clustering compaction (`meta.go:2592`) | `State=Flushed`, `IsInvisible=true`, `CompactionFrom=inputs` | stats → index → per-segment visibility flips |
 | Backfill / copy segment | V3 manifest-version update / new segment | index / awaited by external job |
@@ -497,9 +497,7 @@ Per-term definition and edge cases:
 Excluded from readiness evaluation:
 
 - **L0 segments**: never staged (§6.2).
-- **Zero-row members**: created as Dropped, never enter a group; if a member is
-  discovered zero-row after creation (import `createSortCompactionTask` today),
-  it is removed from the group; an empty group → ABORTED.
+- **Zero-row members** (C32): a zero-row member discovered AFTER registration (import `createSortCompactionTask` today) can NOT be removed from the group — the member set is fixed at registration (`validateSegmentChangeGroupTransitionLocked`) and `Validate` requires a non-empty member set — so the whole group must be ABORTED (and the batch redone) rather than pruned member-by-member. Members discovered zero-row before registration are simply never added.
 - **Members marked compacting**: `SetSegmentsCompacting` does not affect the
   predicate, but publish must re-verify the member is still healthy.
 
@@ -650,9 +648,9 @@ compensating write** is introduced.
 | R3 publish ∥ single-segment stats/index/GC | no DataView-lock participant | manifest locks / segMu mutually exclude; GC only recycles Dropped, staged members unaffected | locks |
 | R4 publish ∥ flush (same collection) | `publishGroup` vs `SaveBinlogPaths` | serialized by DataView lock; flush advances streaming_version, publish advances compact_version, lexicographically compatible | lock order |
 | R5 groupInspector READY ∥ member index task failure | inspector vs index task | after READY a member's index state can regress (retry in flight) → publish Phase 2 re-checks `GetSegmentIndexState`; not Finished → abort back to STAGED | Phase-2 recheck |
-| R6 member manifest advanced by L0 ∥ publish | L0 task vs publish | L0 only targets **visible** segments; staged members cannot be L0 targets; after publish the member is visible and L0 may push it higher → handled by `Recompute` with monotonicity | §5.4.3 |
+| R6 member manifest advanced by L0 ∥ publish | L0 task vs publish | **C29 caveat**: `selectFlushedSegment` (L0) does NOT filter `IsInvisible`, so a staged (Flushed, invisible) member CAN be an L0 target. The invariant holds only once the L0 selector gains an `IsInvisible` exclusion (scheduled in §11); until then the publish/recompute monotonicity (§5.4.3) keeps the manifest version safe even if L0 materializes into a staged member | §5.4.3 + §11 |
 | R7 superseded dropped externally (partition/truncate/collection) ∥ publish | DDL vs publish | publish treats superseded idempotently (already Dropped → skip); non-idempotent for `new_segment` → FAILED | §5.4.3 |
-| R8 member re-selected for a second compaction ∥ publish | planner vs publish | planner excludes `IsInvisible` (`compaction_util.go:126`), staged members cannot be selected | invariant |
+| R8 member re-selected for a second compaction ∥ publish | planner vs publish | **C29 caveat**: the `IsInvisible` exclusion (`compaction_util.go:126`) applies only to the manual/force-merge selector; `canTriggerSortCompaction` and the storage-version policy do NOT exclude invisible segments, so staged members are re-selectable there. The staged-exclusion guard must be added to every selector (scheduled in §11) before the "no defensive gap" invariant (§1.1) is relied upon | invariant + §11 |
 | R9 two alive groups referencing the same L1/L2 segment (new or superseded) | registration vs registration | **rejected at `AddSegmentChangeGroup`** via the `stagedSegmentToGroup`/`supersededSegmentToGroup` reverse indexes (anti-duplication invariant §1.1); a registration race is serialized by segMu | invariant + §1.1 |
 | R10 seek-position read ∥ staged | `getEarliestSegmentDMLPos` (`handler.go:551`) | **existing bug**: filters `IsImporting` but not `IsInvisible`; a staged segment's DML position can pollute the channel-seek fallback | must also filter `IsInvisible` (§10) |
 | R11 metrics/partition stats ∥ staged | none | clustering's `UpdateSegmentPartitionStatsVersionOperator` runs only at publish | publish txn |
@@ -1002,6 +1000,9 @@ subgroups to bound single-txn size and the "entire batch invisible" wait.
 | `internal/datacoord/compaction_task_mix.go` / `sort` / `clustering` / `bump_schema_version` | outputs enter groups, retirement deferred to publish, `recomputeDataView` replaced by publish trigger |
 | `internal/datacoord/services.go` | `SaveBinlogPaths` sort-enabled branch: "awaiting sort, not published" (§6.1, subject to O1); `HandleCommitVchannel` triggers publish |
 | `internal/datacoord/copy_segment_task.go` | completion enters a group |
+| `internal/datacoord/compaction_trigger.go` | `canTriggerSortCompaction` gains a `!IsInvisible` exclusion (C29) |
+| `internal/datacoord/compaction_task_l0.go` | `selectFlushedSegment` gains a `!IsInvisible` exclusion (C29) |
+| `internal/datacoord/compaction_policy_storage_version.go` | segment selector gains a `!IsInvisible` exclusion (C29) |
 | `internal/datacoord/garbage_collector.go` | unchanged (§8 protections already hold) |
 | `internal/datacoord/snapshot_manager.go` | export/import filters staged members |
 | `internal/metastore/kv/datacoord/*` | new key prefix + `UpdateAction` types |
@@ -1031,13 +1032,26 @@ DataView entity (PR #52537) as prerequisite/parallel:
    **keeps** the `retrieveSegment` lineage fallback as the compatibility path —
    Flushed segments without `change_group_id` (existing data, mix/sort outputs)
    stay visible under current logic. Behavior matches master + PR #52537.
-2. **Phase 2 — stage all compactions, delete the fallback**: mix/sort/forcemerge
+ 2. **Phase 2 — stage all compactions, delete the fallback**: mix/sort/forcemerge
    outputs become staged (their `recomputeDataView` replaced by `publishGroup`);
    the legacy view deletes `retrieveSegment` and `FilterInIndexedSegments`,
    filtering only by `IsImporting`/`IsInvisible`. Existing segments remain
    visible (treated as group-less, already committed); new changes all go
    through groups. The new QueryView path (PR #52653) already reads DataView
    snapshots and agrees with the legacy view.
+
+   > **C30 — do NOT delete `retrieveSegment` until the no-group residue is
+   > handled.** Today the clustering flow retires its inputs in a SEPARATE
+   > step after publishing the outputs (a crash between the two leaves parent
+   > AND child both `Flushed`, no group). `retrieveSegment`'s
+   > "all direct parents present → keep parents, remove child" rule hides that
+   > residue from queries; `recycleDroppedSegments` only walks Dropped
+   > segments, so it never reclaims it. Deleting the fallback first would
+   > expose both parent and child on every query — permanently duplicating the
+   > children's rows. Phase 2 must either close the two-step window (retire
+   > superseded atomically with output publication) or keep a normalization
+   > that drops the still-live parents of a published child, BEFORE removing
+   > `retrieveSegment`.
  3. **Phase 3 — unify and clean up**: backfill, copy segment, CDC onboard;
    `IsImporting` converges to an alias of `IsInvisible`; delete the per-segment
    flip logic in compaction tasks and the `Recompute` default publication path

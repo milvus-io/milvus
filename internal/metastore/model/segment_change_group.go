@@ -236,7 +236,7 @@ func (g *SegmentChangeGroup) Validate() error {
 	// State would never enter the reverse indexes — its members/superseded become
 	// claimable by a second group (bypassing the anti-duplication invariant) —
 	// while IsTerminal/CanTransitionTo both fall through to false, leaving the
-	// record neither deletable nor transitionable.
+	// record neither deletable nor able to transition.
 	if g.State < SegmentChangeStateStaged || g.State > SegmentChangeStateAborted {
 		return merr.WrapErrDataIntegrityMsg(
 			"segment change group %d has invalid state %d", g.GroupID, int32(g.State))
