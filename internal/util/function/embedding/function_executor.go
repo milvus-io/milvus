@@ -28,7 +28,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
@@ -81,15 +80,10 @@ func validateFunction(schema *schemapb.CollectionSchema, fSchema *schemapb.Funct
 		return err
 	}
 
-	// BM25 or minhash function returns nil from createFunction
+	// BM25 and MinHash return nil from createFunction: neither needs a model
+	// runtime check. MinHash parameter validation is pure schema checking and
+	// runs unconditionally in validator.ValidateFunction instead.
 	if f == nil {
-		if fSchema.GetType() == schemapb.FunctionType_MinHash {
-			err := function.ValidateMinHashFunction(schema, fSchema)
-			if err != nil {
-				return err
-			}
-		}
-		// bm25 or minhash validate pass
 		return nil
 	}
 

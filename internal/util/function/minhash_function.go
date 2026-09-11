@@ -289,9 +289,10 @@ func ValidateMinHashFunction(collSchema *schemapb.CollectionSchema, funSchema *s
 	}
 
 	if numHashes > 0 {
-		expectedDim := int64(numHashes * 32) // binary vector, each hash is 4 bytes (32 bits), but stored as 8 bits in binary vector
-		if outputDim != expectedDim {
-			return merr.WrapErrParameterInvalidMsg("minhash function output field '%s' dim %d does not match expected dim %d (numHashes %d * one minhash signature size of 32bit)", outputFieldName, outputDim, expectedDim, numHashes)
+		// Compare via division: numHashes*32 can wrap around int64 and defeat
+		// the check. Each hash occupies 32 bits of the binary vector.
+		if outputDim%32 != 0 || outputDim/32 != int64(numHashes) {
+			return merr.WrapErrParameterInvalidMsg("minhash function output field '%s' dim %d does not match expected dim (numHashes %d * one minhash signature size of 32bit)", outputFieldName, outputDim, numHashes)
 		}
 	} else {
 		if outputDim%32 != 0 {

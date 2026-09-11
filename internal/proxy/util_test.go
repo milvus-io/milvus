@@ -3463,6 +3463,31 @@ func TestValidateFunctionInputField(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	t.Run("Valid MinHash function input - varchar", func(t *testing.T) {
+		function := &schemapb.FunctionSchema{
+			Type: schemapb.FunctionType_MinHash,
+		}
+		fields := []*schemapb.FieldSchema{
+			{DataType: schemapb.DataType_VarChar},
+		}
+		err := validator.CheckFunctionInputField(function, fields)
+		assert.NoError(t, err)
+	})
+
+	t.Run("Invalid MinHash function input - TEXT rejected", func(t *testing.T) {
+		// align with ValidateMinHashFunction's VarChar-only input contract:
+		// admitting TEXT here let the direct RootCoord path (which skipped that
+		// check) create schemas the runner-side validator rejects
+		function := &schemapb.FunctionSchema{
+			Type: schemapb.FunctionType_MinHash,
+		}
+		fields := []*schemapb.FieldSchema{
+			{DataType: schemapb.DataType_Text},
+		}
+		err := validator.CheckFunctionInputField(function, fields)
+		assert.Error(t, err)
+	})
+
 	t.Run("Invalid BM25 function input - multiple fields", func(t *testing.T) {
 		function := &schemapb.FunctionSchema{
 			Type: schemapb.FunctionType_BM25,
