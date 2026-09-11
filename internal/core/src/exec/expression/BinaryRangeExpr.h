@@ -20,6 +20,7 @@
 #include <simdjson.h>
 #include <stdint.h>
 #include <cstddef>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -36,208 +37,364 @@
 #include "common/Json.h"
 #include "common/OpContext.h"
 #include "common/Types.h"
+#include "common/ValidityView.h"
 #include "common/Vector.h"
 #include "common/protobuf_utils.h"
 #include "exec/expression/Element.h"
 #include "exec/expression/EvalCtx.h"
 #include "exec/expression/Expr.h"
+#include "exec/expression/JsonNumberComparison.h"
 #include "expr/ITypeExpr.h"
 #include "index/ScalarIndex.h"
+#include "index/SkipIndex.h"
 #include "index/json_stats/bson_inverted.h"
 #include "pb/plan.pb.h"
+#include "query/Utils.h"
 #include "segcore/SegmentInterface.h"
 #include "simdjson/error.h"
 
 namespace milvus {
 namespace exec {
 
-template <typename T,
-          bool lower_inclusive,
-          bool upper_inclusive,
-          FilterType filter_type = FilterType::sequential>
-struct BinaryRangeElementFunc {
-    typedef std::conditional_t<std::is_integral_v<T> &&
-                                   !std::is_same_v<bool, T>,
-                               int64_t,
-                               T>
-        HighPrecisionType;
+template <typename T>
+using BinaryRangeIndexInnerType =
+    std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
+
+template <typename T>
+using BinaryRangeHighPrecisionType =
+    std::conditional_t<std::is_integral_v<BinaryRangeIndexInnerType<T>> &&
+                           !std::is_same_v<bool, T>,
+                       int64_t,
+                       BinaryRangeIndexInnerType<T>>;
+
+template <bool lower_inclusive, bool upper_inclusive, typename B, typename V>
+inline bool
+BinaryRangeContains(const B& lower, const V& value, const B& upper) {
+    if constexpr (lower_inclusive && upper_inclusive) {
+        return lower <= value && value <= upper;
+    } else if constexpr (lower_inclusive) {
+        return lower <= value && value < upper;
+    } else if constexpr (upper_inclusive) {
+        return lower < value && value <= upper;
+    } else {
+        return lower < value && value < upper;
+    }
+}
+
+template <typename T>
+struct BinaryRangeBounds {
+    BinaryRangeHighPrecisionType<T> lower;
+    BinaryRangeHighPrecisionType<T> upper;
+    bool lower_inclusive;
+    bool upper_inclusive;
+    bool always_false;
+};
+
+template <typename T>
+BinaryRangeBounds<T>
+ClampBinaryRangeBounds(BinaryRangeHighPrecisionType<T> lower,
+                       BinaryRangeHighPrecisionType<T> upper,
+                       bool lower_inclusive,
+                       bool upper_inclusive) {
+    BinaryRangeBounds<T> bounds{std::move(lower),
+                                std::move(upper),
+                                lower_inclusive,
+                                upper_inclusive,
+                                false};
+    if constexpr (std::is_integral_v<T> && !std::is_same_v<bool, T>) {
+        if (milvus::query::gt_ub<T>(bounds.lower)) {
+            bounds.always_false = true;
+            return bounds;
+        } else if (milvus::query::lt_lb<T>(bounds.lower)) {
+            bounds.lower = std::numeric_limits<T>::min();
+            bounds.lower_inclusive = true;
+        }
+
+        if (milvus::query::gt_ub<T>(bounds.upper)) {
+            bounds.upper = std::numeric_limits<T>::max();
+            bounds.upper_inclusive = true;
+        } else if (milvus::query::lt_lb<T>(bounds.upper)) {
+            bounds.always_false = true;
+            return bounds;
+        }
+    }
+    return bounds;
+}
+
+template <typename T>
+struct BinaryRangeKernel {
+    using HighPrecisionType = BinaryRangeHighPrecisionType<T>;
+
+    HighPrecisionType lower;
+    HighPrecisionType upper;
+    bool lower_inclusive;
+    bool upper_inclusive;
+    bool always_false;
+    milvus::OpContext* op_ctx;
+
+    static BinaryRangeKernel
+    FromBounds(const BinaryRangeBounds<T>& bounds, milvus::OpContext* op_ctx) {
+        return BinaryRangeKernel{
+            .lower = bounds.lower,
+            .upper = bounds.upper,
+            .lower_inclusive = bounds.lower_inclusive,
+            .upper_inclusive = bounds.upper_inclusive,
+            .always_false = bounds.always_false,
+            .op_ctx = op_ctx,
+        };
+    }
+
+    template <FilterType filter_type>
     void
-    operator()(const T& val1,
-               const T& val2,
-               const T* src,
-               size_t n,
-               TargetBitmapView res,
-               const TargetBitmap& bitmap_input,
-               size_t start_cursor,
-               const int32_t* offsets = nullptr) {
+    Eval(const CandidateBatch<T>& b, TriStateOut out) const {
+        if (lower_inclusive && upper_inclusive) {
+            EvalRange<filter_type, true, true>(b, out);
+        } else if (lower_inclusive) {
+            EvalRange<filter_type, true, false>(b, out);
+        } else if (upper_inclusive) {
+            EvalRange<filter_type, false, true>(b, out);
+        } else {
+            EvalRange<filter_type, false, false>(b, out);
+        }
+    }
+
+    bool
+    CanSkip(const SkipIndex& skip_index,
+            FieldId field_id,
+            int64_t chunk_id) const {
+        return skip_index.CanSkipBinaryRange<T>(op_ctx,
+                                                field_id,
+                                                chunk_id,
+                                                lower,
+                                                upper,
+                                                lower_inclusive,
+                                                upper_inclusive);
+    }
+
+    bool
+    AlwaysFalse() const {
+        return always_false;
+    }
+
+ private:
+    template <FilterType filter_type,
+              bool range_lower_inclusive,
+              bool range_upper_inclusive>
+    void
+    EvalRange(const CandidateBatch<T>& b, TriStateOut out) const {
+        const T& lo = lower;
+        const T& hi = upper;
         if constexpr (filter_type == FilterType::random ||
                       std::is_same_v<T, std::string> ||
                       std::is_same_v<T, std::string_view>) {
-            bool has_bitmap_input = !bitmap_input.empty();
-            for (size_t i = 0; i < n; ++i) {
-                if (has_bitmap_input && !bitmap_input[i + start_cursor]) {
+            const bool has_candidates = !b.candidates.empty();
+            for (size_t i = 0; i < b.size; ++i) {
+                if (has_candidates && !b.candidates[i]) {
                     continue;
                 }
-                auto offset = (offsets) ? offsets[i] : i;
-                if constexpr (lower_inclusive && upper_inclusive) {
-                    res[i] = val1 <= src[offset] && src[offset] <= val2;
-                } else if constexpr (lower_inclusive && !upper_inclusive) {
-                    res[i] = val1 <= src[offset] && src[offset] < val2;
-                } else if constexpr (!lower_inclusive && upper_inclusive) {
-                    res[i] = val1 < src[offset] && src[offset] <= val2;
-                } else {
-                    res[i] = val1 < src[offset] && src[offset] < val2;
+                if (b.validity && !b.validity[i]) {
+                    continue;
                 }
+                out.match[i] = BinaryRangeContains<range_lower_inclusive,
+                                                   range_upper_inclusive>(
+                    lo, b.data[i], hi);
             }
             return;
         }
 
-        if constexpr (lower_inclusive && upper_inclusive) {
-            res.inplace_within_range_val<T, milvus::bitset::RangeType::IncInc>(
-                val1, val2, src, n);
-        } else if constexpr (lower_inclusive && !upper_inclusive) {
-            res.inplace_within_range_val<T, milvus::bitset::RangeType::IncExc>(
-                val1, val2, src, n);
-        } else if constexpr (!lower_inclusive && upper_inclusive) {
-            res.inplace_within_range_val<T, milvus::bitset::RangeType::ExcInc>(
-                val1, val2, src, n);
+        if constexpr (range_lower_inclusive && range_upper_inclusive) {
+            out.match
+                .inplace_within_range_val<T, milvus::bitset::RangeType::IncInc>(
+                    lo, hi, b.data, b.size);
+        } else if constexpr (range_lower_inclusive) {
+            out.match
+                .inplace_within_range_val<T, milvus::bitset::RangeType::IncExc>(
+                    lo, hi, b.data, b.size);
+        } else if constexpr (range_upper_inclusive) {
+            out.match
+                .inplace_within_range_val<T, milvus::bitset::RangeType::ExcInc>(
+                    lo, hi, b.data, b.size);
         } else {
-            res.inplace_within_range_val<T, milvus::bitset::RangeType::ExcExc>(
-                val1, val2, src, n);
+            out.match
+                .inplace_within_range_val<T, milvus::bitset::RangeType::ExcExc>(
+                    lo, hi, b.data, b.size);
         }
     }
 };
 
-// For int64_t GetType, uses at_numeric() (get_number()) to extract any JSON
-// number in a single parse.  Branches on actual type to preserve int64
-// precision; uint64 and double values fall back to double comparison,
-// consistent with the Tantivy index and JSON-stats paths.
-// 'cmp' must reference 'value' (int64_t or double depending on the JSON value).
-#define BinaryRangeJSONCompare(cmp)                                    \
-    do {                                                               \
-        if (valid_data && !valid_data[offset]) {                       \
-            res[i] = valid_res[i] = false;                             \
-            break;                                                     \
-        }                                                              \
-        if (has_bitmap_input && !bitmap_input[i + start_cursor]) {     \
-            break;                                                     \
-        }                                                              \
-        if constexpr (std::is_same_v<GetType, int64_t>) {              \
-            auto x = src[offset].at_numeric(pointer);                  \
-            if (x.error()) {                                           \
-                res[i] = valid_res[i] = false;                         \
-                break;                                                 \
-            }                                                          \
-            auto n = x.value();                                        \
-            if (n.is_int64()) {                                        \
-                auto value = n.get_int64();                            \
-                res[i] = (cmp);                                        \
-            } else {                                                   \
-                auto value = n.is_uint64()                             \
-                                 ? static_cast<double>(n.get_uint64()) \
-                                 : n.get_double();                     \
-                res[i] = (cmp);                                        \
-            }                                                          \
-        } else {                                                       \
-            auto x = src[offset].template at<GetType>(pointer);        \
-            if (x.error()) {                                           \
-                res[i] = valid_res[i] = false;                         \
-                break;                                                 \
-            }                                                          \
-            auto value = x.value();                                    \
-            res[i] = (cmp);                                            \
-        }                                                              \
-    } while (false)
+static_assert(KernelCanSkip<BinaryRangeKernel<int64_t>> &&
+              KernelAlwaysFalse<BinaryRangeKernel<int64_t>>);
 
-template <typename ValueType,
-          bool lower_inclusive,
-          bool upper_inclusive,
-          FilterType filter_type = FilterType::sequential>
-struct BinaryRangeElementFuncForJson {
+// For int64 values, at_numeric() extracts any JSON number in one parse; uint64
+// and double values fall back to double comparison, consistent with the
+// Tantivy index and JSON-stats paths.
+template <typename ValueType>
+struct BinaryRangeJsonKernel {
     using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
                                        std::string_view,
                                        ValueType>;
+
+    ValueType lower;
+    ValueType upper;
+    bool lower_inclusive;
+    bool upper_inclusive;
+    std::string pointer;
+
+    template <FilterType filter_type>
     void
-    operator()(const ValueType& val1,
-               const ValueType& val2,
-               const std::string& pointer,
-               const milvus::Json* src,
-               ValidityView valid_data,
-               size_t n,
-               TargetBitmapView res,
-               TargetBitmapView valid_res,
-               const TargetBitmap& bitmap_input,
-               size_t start_cursor,
-               const int32_t* offsets = nullptr) {
-        bool has_bitmap_input = !bitmap_input.empty();
-        for (size_t i = 0; i < n; ++i) {
-            auto offset = i;
-            if constexpr (filter_type == FilterType::random) {
-                offset = (offsets) ? offsets[i] : i;
+    Eval(const CandidateBatch<milvus::Json>& b, TriStateOut out) const {
+        if (lower_inclusive && upper_inclusive) {
+            EvalRange<true, true>(b, out);
+        } else if (lower_inclusive) {
+            EvalRange<true, false>(b, out);
+        } else if (upper_inclusive) {
+            EvalRange<false, true>(b, out);
+        } else {
+            EvalRange<false, false>(b, out);
+        }
+    }
+
+ private:
+    template <bool range_lower_inclusive, bool range_upper_inclusive>
+    void
+    EvalRange(const CandidateBatch<milvus::Json>& b, TriStateOut out) const {
+        const bool has_candidates = !b.candidates.empty();
+        for (size_t i = 0; i < b.size; ++i) {
+            if (has_candidates && !b.candidates[i]) {
+                continue;
             }
-            if constexpr (lower_inclusive && upper_inclusive) {
-                BinaryRangeJSONCompare(val1 <= value && value <= val2);
-            } else if constexpr (lower_inclusive && !upper_inclusive) {
-                BinaryRangeJSONCompare(val1 <= value && value < val2);
-            } else if constexpr (!lower_inclusive && upper_inclusive) {
-                BinaryRangeJSONCompare(val1 < value && value <= val2);
+            if (b.validity && !b.validity[i]) {
+                out.SetUnknown(i);
+                continue;
+            }
+            if constexpr (std::is_same_v<GetType, int64_t>) {
+                auto x = b.data[i].at_numeric(pointer);
+                if (x.error()) {
+                    out.SetUnknown(i);
+                    continue;
+                }
+                auto n = x.value();
+                if (n.is_int64()) {
+                    const auto value = n.get_int64();
+                    out.match[i] = BinaryRangeContains<range_lower_inclusive,
+                                                       range_upper_inclusive>(
+                        lower, value, upper);
+                } else {
+                    const auto value = n.is_uint64()
+                                           ? static_cast<double>(n.get_uint64())
+                                           : n.get_double();
+                    out.match[i] = BinaryRangeContains<range_lower_inclusive,
+                                                       range_upper_inclusive>(
+                        lower, value, upper);
+                }
             } else {
-                BinaryRangeJSONCompare(val1 < value && value < val2);
+                auto x = b.data[i].template at<GetType>(pointer);
+                if (x.error()) {
+                    out.SetUnknown(i);
+                    continue;
+                }
+                const auto value = x.value();
+                out.match[i] = BinaryRangeContains<range_lower_inclusive,
+                                                   range_upper_inclusive>(
+                    lower, value, upper);
             }
         }
     }
 };
 
-template <typename ValueType,
-          bool lower_inclusive,
-          bool upper_inclusive,
-          FilterType filter_type = FilterType::sequential>
-struct BinaryRangeElementFuncForArray {
+struct BinaryRangeJsonPreciseNumericKernel {
+    proto::plan::GenericValue lower_bound;
+    proto::plan::GenericValue upper_bound;
+    bool lower_inclusive;
+    bool upper_inclusive;
+    std::string pointer;
+
+    template <FilterType filter_type>
+    void
+    Eval(const CandidateBatch<milvus::Json>& b, TriStateOut out) const {
+        const bool has_candidates = !b.candidates.empty();
+        for (size_t i = 0; i < b.size; ++i) {
+            if (has_candidates && !b.candidates[i]) {
+                continue;
+            }
+            if (b.validity && !b.validity[i]) {
+                out.SetUnknown(i);
+                continue;
+            }
+            auto number = b.data[i].at_numeric(pointer);
+            if (number.error()) {
+                out.SetUnknown(i);
+                continue;
+            }
+            const auto lower_comparison =
+                CompareJsonNumberToBoundWithUint64DoubleFallback(number.value(),
+                                                                 lower_bound);
+            const auto upper_comparison =
+                CompareJsonNumberToBoundWithUint64DoubleFallback(number.value(),
+                                                                 upper_bound);
+            if (!lower_comparison.has_value() ||
+                !upper_comparison.has_value()) {
+                continue;
+            }
+            const bool lower_matches = lower_inclusive ? *lower_comparison >= 0
+                                                       : *lower_comparison > 0;
+            const bool upper_matches = upper_inclusive ? *upper_comparison <= 0
+                                                       : *upper_comparison < 0;
+            out.match[i] = lower_matches && upper_matches;
+        }
+    }
+};
+
+template <typename ValueType>
+struct BinaryRangeArrayKernel {
     using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
                                        std::string_view,
                                        ValueType>;
+
+    ValueType lower;
+    ValueType upper;
+    bool lower_inclusive;
+    bool upper_inclusive;
+    int index;
+
+    template <FilterType filter_type>
     void
-    operator()(const ValueType& val1,
-               const ValueType& val2,
-               int index,
-               const milvus::ArrayView* src,
-               ValidityView valid_data,
-               size_t n,
-               TargetBitmapView res,
-               TargetBitmapView valid_res,
-               const TargetBitmap& bitmap_input,
-               size_t start_cursor,
-               const int32_t* offsets = nullptr) {
-        bool has_bitmap_input = !bitmap_input.empty();
+    Eval(const CandidateBatch<milvus::ArrayView>& b, TriStateOut out) const {
         AssertInfo(index >= 0,
                    "array element range predicate requires nested path");
-        for (size_t i = 0; i < n; ++i) {
-            if (has_bitmap_input && !bitmap_input[i + start_cursor]) {
+        if (lower_inclusive && upper_inclusive) {
+            EvalRange<true, true>(b, out);
+        } else if (lower_inclusive) {
+            EvalRange<true, false>(b, out);
+        } else if (upper_inclusive) {
+            EvalRange<false, true>(b, out);
+        } else {
+            EvalRange<false, false>(b, out);
+        }
+    }
+
+ private:
+    template <bool range_lower_inclusive, bool range_upper_inclusive>
+    void
+    EvalRange(const CandidateBatch<milvus::ArrayView>& b,
+              TriStateOut out) const {
+        const bool has_candidates = !b.candidates.empty();
+        for (size_t i = 0; i < b.size; ++i) {
+            if (has_candidates && !b.candidates[i]) {
                 continue;
             }
-            size_t offset = i;
-            if constexpr (filter_type == FilterType::random) {
-                offset = (offsets) ? offsets[i] : i;
-            }
-            if (valid_data && !valid_data[offset]) {
-                res[i] = valid_res[i] = false;
+            if (b.validity && !b.validity[i]) {
+                out.SetUnknown(i);
                 continue;
             }
-            if (index >= src[offset].length()) {
-                res[i] = false;
-                valid_res[i] = false;
+            if (index >= b.data[i].length()) {
+                out.SetUnknown(i);
                 continue;
             }
-            auto value = src[offset].get_data<GetType>(index);
-            if constexpr (lower_inclusive && upper_inclusive) {
-                res[i] = val1 <= value && value <= val2;
-            } else if constexpr (lower_inclusive && !upper_inclusive) {
-                res[i] = val1 <= value && value < val2;
-            } else if constexpr (!lower_inclusive && upper_inclusive) {
-                res[i] = val1 < value && value <= val2;
-            } else {
-                res[i] = val1 < value && value < val2;
-            }
+            const auto value = b.data[i].template get_data<GetType>(index);
+            out.match[i] =
+                BinaryRangeContains<range_lower_inclusive,
+                                    range_upper_inclusive>(lower, value, upper);
         }
     }
 };
@@ -319,22 +476,13 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
     }
 
  private:
-    // Check overflow and cache result for performace
-    template <
-        typename T,
-        typename IndexInnerType = std::
-            conditional_t<std::is_same_v<T, std::string_view>, std::string, T>,
-        typename HighPrecisionType = std::conditional_t<
-            std::is_integral_v<IndexInnerType> && !std::is_same_v<bool, T>,
-            int64_t,
-            IndexInnerType>>
+    template <typename T>
+    BinaryRangeBounds<T>
+    GetBinaryRangeBounds();
+
+    template <typename T>
     ColumnVectorPtr
-    PreCheckOverflow(HighPrecisionType& val1,
-                     HighPrecisionType& val2,
-                     bool& lower_inclusive,
-                     bool& upper_inclusive,
-                     int64_t batch_size,
-                     OffsetVector* input = nullptr);
+    IndexOverflowBatch(int64_t batch_size, OffsetVector* input);
 
     template <typename T>
     VectorPtr

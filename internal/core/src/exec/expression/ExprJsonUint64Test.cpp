@@ -189,19 +189,22 @@ TEST(JsonNumericTest, BinaryRangeUint64OutsideSmallRange) {
     int64_t lo = -1000, hi = 1000;
     TargetBitmap res_bm(N, false);
     TargetBitmap valid_res_bm(N, true);
-    TargetBitmap empty_bitmap{};
-
-    BinaryRangeElementFuncForJson<int64_t, true, true> func;
-    func(lo,
-         hi,
-         pointer,
-         col.data(),
-         nullptr,
-         N,
-         TargetBitmapView(res_bm),
-         TargetBitmapView(valid_res_bm),
-         empty_bitmap,
-         0);
+    BinaryRangeJsonKernel<int64_t> kernel{
+        .lower = lo,
+        .upper = hi,
+        .lower_inclusive = true,
+        .upper_inclusive = true,
+        .pointer = pointer,
+    };
+    kernel.Eval<FilterType::sequential>(
+        CandidateBatch<Json>{
+            .data = col.data(),
+            .validity = ValidityView{},
+            .candidates = TargetBitmapView{},
+            .segment_offsets = nullptr,
+            .size = static_cast<size_t>(N),
+        },
+        TriStateOut{TargetBitmapView(res_bm), TargetBitmapView(valid_res_bm)});
 
     EXPECT_FALSE(res_bm[0]) << "INT64_MAX+1 as double not in [-1000, 1000]";
     EXPECT_FALSE(res_bm[1]) << "INT64_MAX+2 as double not in [-1000, 1000]";
@@ -225,19 +228,22 @@ TEST(JsonNumericTest, BinaryRangeUint64WithMaxRange) {
     int64_t lo = 0, hi = std::numeric_limits<int64_t>::max();
     TargetBitmap res_bm(N, false);
     TargetBitmap valid_res_bm(N, true);
-    TargetBitmap empty_bitmap{};
-
-    BinaryRangeElementFuncForJson<int64_t, true, true> func;
-    func(lo,
-         hi,
-         pointer,
-         col.data(),
-         nullptr,
-         N,
-         TargetBitmapView(res_bm),
-         TargetBitmapView(valid_res_bm),
-         empty_bitmap,
-         0);
+    BinaryRangeJsonKernel<int64_t> kernel{
+        .lower = lo,
+        .upper = hi,
+        .lower_inclusive = true,
+        .upper_inclusive = true,
+        .pointer = pointer,
+    };
+    kernel.Eval<FilterType::sequential>(
+        CandidateBatch<Json>{
+            .data = col.data(),
+            .validity = ValidityView{},
+            .candidates = TargetBitmapView{},
+            .segment_offsets = nullptr,
+            .size = static_cast<size_t>(N),
+        },
+        TriStateOut{TargetBitmapView(res_bm), TargetBitmapView(valid_res_bm)});
 
     // Double precision edge case: double(INT64_MAX+1) == double(INT64_MAX),
     // so INT64_MAX+1 appears to be within [0, INT64_MAX] after double cast.
@@ -257,19 +263,22 @@ TEST(JsonNumericTest, DoubleValuesStillWorkInBinaryRange) {
     int64_t lo = 0, hi = 100;
     TargetBitmap res_bm(N, false);
     TargetBitmap valid_res_bm(N, true);
-    TargetBitmap empty_bitmap{};
-
-    BinaryRangeElementFuncForJson<int64_t, true, true> func;
-    func(lo,
-         hi,
-         pointer,
-         col.data(),
-         nullptr,
-         N,
-         TargetBitmapView(res_bm),
-         TargetBitmapView(valid_res_bm),
-         empty_bitmap,
-         0);
+    BinaryRangeJsonKernel<int64_t> kernel{
+        .lower = lo,
+        .upper = hi,
+        .lower_inclusive = true,
+        .upper_inclusive = true,
+        .pointer = pointer,
+    };
+    kernel.Eval<FilterType::sequential>(
+        CandidateBatch<Json>{
+            .data = col.data(),
+            .validity = ValidityView{},
+            .candidates = TargetBitmapView{},
+            .segment_offsets = nullptr,
+            .size = static_cast<size_t>(N),
+        },
+        TriStateOut{TargetBitmapView(res_bm), TargetBitmapView(valid_res_bm)});
 
     EXPECT_TRUE(res_bm[0]) << "1.5 in [0, 100]";
     EXPECT_TRUE(res_bm[1]) << "50.0 in [0, 100]";
@@ -291,19 +300,22 @@ TEST(JsonNumericTest, MixedTypeBinaryRange) {
     int64_t lo = 0, hi = 100;
     TargetBitmap res_bm(N, false);
     TargetBitmap valid_res_bm(N, true);
-    TargetBitmap empty_bitmap{};
-
-    BinaryRangeElementFuncForJson<int64_t, true, true> func;
-    func(lo,
-         hi,
-         pointer,
-         col.data(),
-         nullptr,
-         N,
-         TargetBitmapView(res_bm),
-         TargetBitmapView(valid_res_bm),
-         empty_bitmap,
-         0);
+    BinaryRangeJsonKernel<int64_t> kernel{
+        .lower = lo,
+        .upper = hi,
+        .lower_inclusive = true,
+        .upper_inclusive = true,
+        .pointer = pointer,
+    };
+    kernel.Eval<FilterType::sequential>(
+        CandidateBatch<Json>{
+            .data = col.data(),
+            .validity = ValidityView{},
+            .candidates = TargetBitmapView{},
+            .segment_offsets = nullptr,
+            .size = static_cast<size_t>(N),
+        },
+        TriStateOut{TargetBitmapView(res_bm), TargetBitmapView(valid_res_bm)});
 
     EXPECT_TRUE(res_bm[0]) << "50 in [0,100]";
     EXPECT_FALSE(res_bm[1]) << "uint64 as double not in [0,100]";
@@ -338,19 +350,22 @@ TEST(JsonNumericTest, Int64PrecisionPreservedInBinaryRange) {
     int64_t lo = precise_val, hi = precise_val;
     TargetBitmap res_bm(N, false);
     TargetBitmap valid_res_bm(N, true);
-    TargetBitmap empty_bitmap{};
-
-    BinaryRangeElementFuncForJson<int64_t, true, true> func;
-    func(lo,
-         hi,
-         pointer,
-         col.data(),
-         nullptr,
-         N,
-         TargetBitmapView(res_bm),
-         TargetBitmapView(valid_res_bm),
-         empty_bitmap,
-         0);
+    BinaryRangeJsonKernel<int64_t> kernel{
+        .lower = lo,
+        .upper = hi,
+        .lower_inclusive = true,
+        .upper_inclusive = true,
+        .pointer = pointer,
+    };
+    kernel.Eval<FilterType::sequential>(
+        CandidateBatch<Json>{
+            .data = col.data(),
+            .validity = ValidityView{},
+            .candidates = TargetBitmapView{},
+            .segment_offsets = nullptr,
+            .size = static_cast<size_t>(N),
+        },
+        TriStateOut{TargetBitmapView(res_bm), TargetBitmapView(valid_res_bm)});
 
     // at_numeric() preserves int64 precision: these are compared as int64.
     // With the old double fallback, both would match since double can't
