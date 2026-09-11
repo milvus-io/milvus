@@ -7,6 +7,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/adaptor"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/idempotency"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/lock"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/partialupdate"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
@@ -32,8 +33,13 @@ func OpenManager() (Manager, error) {
 
 // newInterceptorBuilders keeps shard validation ahead of partial-update write
 // tracking while both remain inside the TimeTick publication boundary.
+//
+// Idempotency sits outermost, ahead of redo: a duplicate must be answered from
+// the window before anything downstream can retry it, or a retry of a write
+// that already landed would be redone as a second write.
 func newInterceptorBuilders() []interceptors.InterceptorBuilder {
 	return []interceptors.InterceptorBuilder{
+		idempotency.NewInterceptorBuilder(),
 		redo.NewInterceptorBuilder(),
 		lock.NewInterceptorBuilder(),
 		replicate.NewInterceptorBuilder(),

@@ -55,8 +55,10 @@ func ValidateIdempotencyKey(key string) error {
 	if key == "" {
 		return nil
 	}
+	// Zero disables the bound, matching the other streaming.idempotency.*
+	// limits; the two validation points on the insert path read it the same way.
 	limit := paramtable.Get().StreamingCfg.IdempotencyMaxKeyLength.GetAsInt()
-	if len(key) > limit {
+	if limit > 0 && len(key) > limit {
 		return merr.WrapErrParameterInvalidMsg(
 			"idempotency key length %d exceeds limit %d", len(key), limit)
 	}

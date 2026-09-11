@@ -6,11 +6,13 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/idempotency"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/partialupdate"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard"
 	internaltypes "github.com/milvus-io/milvus/internal/types"
@@ -37,9 +39,18 @@ func TestOpenManager(t *testing.T) {
 
 func TestPartialUpdateInterceptorRunsAfterShard(t *testing.T) {
 	builders := newInterceptorBuilders()
-	assert.Len(t, builders, 6)
-	assert.IsType(t, shard.NewInterceptorBuilder(), builders[4])
-	assert.IsType(t, partialupdate.NewInterceptorBuilder(), builders[5])
+	assert.Len(t, builders, 7)
+	assert.IsType(t, shard.NewInterceptorBuilder(), builders[5])
+	assert.IsType(t, partialupdate.NewInterceptorBuilder(), builders[6])
+}
+
+func TestIdempotencyInterceptorRunsOutermost(t *testing.T) {
+	// A duplicate must be answered from the window before anything downstream
+	// can retry it: behind redo, a retry of a write that already landed would
+	// be redone as a second write.
+	builders := newInterceptorBuilders()
+	require.NotEmpty(t, builders)
+	assert.IsType(t, idempotency.NewInterceptorBuilder(), builders[0])
 }
 
 func TestManager(t *testing.T) {

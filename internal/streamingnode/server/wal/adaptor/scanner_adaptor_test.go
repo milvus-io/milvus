@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mocks/streaming/mock_walimpls"
+	"github.com/milvus-io/milvus/pkg/v3/mocks/streaming/util/mock_message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -142,7 +143,7 @@ func TestPauseConsumption(t *testing.T) {
 			IgnorePauseConsumption: false,
 		},
 		filterFunc:    func(message.ImmutableMessage) bool { return true },
-		reorderBuffer: utility.NewReOrderBuffer(),
+		reorderBuffer: utility.NewReOrderBuffer(false),
 		pendingQueue:  utility.NewPendingQueue(),
 		cleanup:       func() {},
 		ScannerHelper: helper.NewScannerHelper("test"),
@@ -173,4 +174,57 @@ func TestPauseConsumption(t *testing.T) {
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("wait until start consumption timeout")
 	}
+}
+
+func TestTimeTickPreservesLegacyDeliverySemantics(t *testing.T) {
+	scanner := &scannerAdaptorImpl{
+		logger: mlog.With(),
+		readOption: wal.ReadOption{
+			IgnorePauseConsumption: true,
+		},
+		filterFunc:      func(message.ImmutableMessage) bool { return true },
+		reorderBuffer:   utility.NewReOrderBuffer(false),
+		pendingQueue:    utility.NewPendingQueue(),
+		txnBuffer:       utility.NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics()),
+		cleanup:         func() {},
+		ScannerHelper:   helper.NewScannerHelper("test"),
+		metrics:         metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics(),
+		readRateCounter: utility.NewAverageRateCounter(time.Second),
+	}
+	msg := newScannerTestMessage(t, 10, "v1", message.MessageTypeInsert, false)
+	timeTick := newScannerTestMessage(t, 20, "", message.MessageTypeTimeTick, true)
+
+	scanner.handleUpstream(msg)
+	scanner.handleUpstream(timeTick)
+
+	assert.Equal(t, 0, scanner.reorderBuffer.Len())
+	assert.Equal(t, 2, scanner.pendingQueue.Len())
+	assert.Equal(t, msg, scanner.pendingQueue.Next())
+	scanner.pendingQueue.UnsafeAdvance()
+	assert.Equal(t, timeTick, scanner.pendingQueue.Next())
+
+	scanner.pendingQueue.UnsafeAdvance()
+	nonPersistedTimeTick := newScannerTestMessage(t, 30, "", message.MessageTypeTimeTick, false)
+	scanner.handleUpstream(nonPersistedTimeTick)
+	assert.Equal(t, 1, scanner.pendingQueue.Len())
+	assert.Equal(t, nonPersistedTimeTick, scanner.pendingQueue.Next())
+}
+
+func newScannerTestMessage(
+	t *testing.T,
+	timetick uint64,
+	vchannel string,
+	msgType message.MessageType,
+	persisted bool,
+) *mock_message.MockImmutableMessage {
+	msg := mock_message.NewMockImmutableMessage(t)
+	msg.EXPECT().EstimateSize().Return(1).Maybe()
+	msg.EXPECT().MessageType().Return(msgType).Maybe()
+	msg.EXPECT().TimeTick().Return(timetick).Maybe()
+	msg.EXPECT().VChannel().Return(vchannel).Maybe()
+	msg.EXPECT().TxnContext().Return(nil).Maybe()
+	msg.EXPECT().IsPersisted().Return(persisted).Maybe()
+	msg.EXPECT().MessageID().Return(walimplstest.NewTestMessageID(int64(timetick))).Maybe()
+	msg.EXPECT().MarshalLogObject(mock.Anything).Return(nil).Maybe()
+	return msg
 }

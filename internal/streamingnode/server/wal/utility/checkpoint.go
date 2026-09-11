@@ -20,6 +20,7 @@ func NewWALCheckpointFromProto(cp *streamingpb.WALCheckpoint) *WALCheckpoint {
 		MessageID:           message.MustUnmarshalMessageID(cp.MessageId),
 		TimeTick:            cp.TimeTick,
 		Magic:               cp.RecoveryMagic,
+		Term:                cp.Term,
 		ReplicateConfig:     cp.ReplicateConfig,
 		ReplicateCheckpoint: NewReplicateCheckpointFromProto(cp.ReplicateCheckpoint),
 		AlterWalState:       cp.AlterWalState,
@@ -28,9 +29,14 @@ func NewWALCheckpointFromProto(cp *streamingpb.WALCheckpoint) *WALCheckpoint {
 
 // WALCheckpoint represents a consume checkpoint in the Write-Ahead Log (WAL).
 type WALCheckpoint struct {
-	MessageID           message.MessageID // should always be not nil.
-	TimeTick            uint64
-	Magic               int64
+	MessageID message.MessageID // should always be not nil.
+	TimeTick  uint64
+	Magic     int64
+	// Term of the publisher that last advanced this checkpoint. It fences
+	// advancement across term changes: a publisher whose term is older than the
+	// recorded one has been superseded and must not advance the checkpoint, or
+	// WAL truncation would outrun the successor's inherited manifest coverage.
+	Term                int64
 	ReplicateCheckpoint *ReplicateCheckpoint
 	ReplicateConfig     *commonpb.ReplicateConfiguration
 	AlterWalState       *streamingpb.AlterWALState
@@ -45,6 +51,7 @@ func (c *WALCheckpoint) IntoProto() *streamingpb.WALCheckpoint {
 		MessageId:           message.MustMarshalMessageID(c.MessageID),
 		TimeTick:            c.TimeTick,
 		RecoveryMagic:       c.Magic,
+		Term:                c.Term,
 		ReplicateConfig:     c.ReplicateConfig,
 		ReplicateCheckpoint: c.ReplicateCheckpoint.IntoProto(),
 		AlterWalState:       c.AlterWalState,
@@ -57,6 +64,7 @@ func (c *WALCheckpoint) Clone() *WALCheckpoint {
 		MessageID:           c.MessageID,
 		TimeTick:            c.TimeTick,
 		Magic:               c.Magic,
+		Term:                c.Term,
 		ReplicateConfig:     c.ReplicateConfig,
 		ReplicateCheckpoint: c.ReplicateCheckpoint.Clone(),
 		AlterWalState:       c.AlterWalState,

@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walsummary"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
@@ -42,11 +43,15 @@ func (r *recoveryStorageImpl) recoverRecoveryInfoFromMeta(ctx context.Context, c
 		}
 		r.checkpoint = utility.NewWALCheckpointFromProto(cpProto)
 	}
-	r.Logger().Info(ctx, "recover checkpoint done",
+	r.Logger().Info(
+		ctx, "recover checkpoint done",
 		mlog.String("checkpoint", r.checkpoint.MessageID.String()),
 		mlog.Uint64("timetick", r.checkpoint.TimeTick),
 		mlog.Int64("magic", r.checkpoint.Magic),
 	)
+	if err := r.fenceConsumeCheckpoint(ctx, channelInfo.Term); err != nil {
+		return errors.Wrap(err, "failed to fence the consume checkpoint")
+	}
 
 	fVChannel := conc.Go(func() (struct{}, error) {
 		var err error
@@ -72,7 +77,98 @@ func (r *recoveryStorageImpl) recoverRecoveryInfoFromMeta(ctx context.Context, c
 	if err := conc.BlockOnAll(fVChannel, fSegment); err != nil {
 		return err
 	}
-	return conc.BlockOnAll(fVChannel, fSegment)
+	return r.recoverSummary(ctx, channelInfo)
+}
+
+// recoverSummary restores the pchannel's WAL summary from object storage, so
+// its consumers see the durable records that precede the checkpoint.
+func (r *recoveryStorageImpl) recoverSummary(ctx context.Context, channelInfo types.PChannelInfo) error {
+	enabled := paramtable.Get().StreamingCfg.IdempotencyEnabled.GetAsBool()
+	chunkManager := resource.Resource().ChunkManager()
+	if !enabled && chunkManager == nil {
+		// Nothing to start, and no store to drop.
+		return nil
+	}
+	store := walsummary.NewStore(chunkManager, channelInfo.Name, channelInfo.Term)
+	if !enabled {
+		// The summary has no other consumer on this branch yet, so it is not
+		// started at all when idempotency is off: nothing would read what it
+		// persists, and observing every message would be pure overhead.
+		//
+		// Whatever an earlier enabled run left behind is dropped here rather
+		// than kept: with the feature off nothing records, and the WAL is
+		// truncated past what the store covers, so a retained store is stale by
+		// definition and a later re-enable would rebuild windows from it. The
+		// delete is best-effort -- a failure only leaves objects to reap on the
+		// next open, and must not fail the WAL open.
+		if err := store.RemoveAllObjects(ctx); err != nil {
+			r.Logger().Warn(ctx, "failed to drop the disabled wal summary store", mlog.Err(err))
+		}
+		return nil
+	}
+	summaryManager := walsummary.NewManager(walsummary.ManagerConfig{
+		PChannel:          channelInfo.Name,
+		Term:              channelInfo.Term,
+		Store:             store,
+		RetentionMaxBytes: uint64(paramtable.Get().StreamingCfg.IdempotencyMaxRetainedBytes.GetAsSize()),
+		MaxRetainedChunks: paramtable.Get().StreamingCfg.IdempotencyMaxRetainedChunks.GetAsInt(),
+		Logger:            r.Logger(),
+	})
+	if err := summaryManager.Restore(ctx); err != nil {
+		return errors.Wrap(err, "failed to restore the wal summary")
+	}
+	r.summaryManager = summaryManager
+	return nil
+}
+
+// fenceConsumeCheckpoint claims the consume checkpoint for this term, writing
+// its term and leaving the position alone. Every later advancement carries the
+// term, so a superseded publisher's own advancement is refused by the
+// compare-and-swap in SaveRecoverySnapshot.
+//
+// It must run BEFORE anything reads the summary store. The claim and the
+// store's forward probe divide the superseded publisher's writes between two
+// mechanisms that each cover one side, and only this order leaves no gap:
+// whatever it wrote before the claim was necessarily written before the probe,
+// so the probe adopts it; whatever it writes after cannot advance the
+// checkpoint, so those records stay above it in the WAL and replay recovers
+// them.
+//
+// Claiming after the probe leaves exactly that gap. A chunk written in between
+// is in neither the probe result nor blocked by the CAS, so the superseded
+// publisher can still advance the checkpoint past it and truncate the WAL to
+// there -- and once this term publishes a manifest that does not name that
+// chunk, those records exist nowhere a recovery will look.
+//
+// A lost CAS means this term is itself superseded. It does NOT surface as a
+// distinct error today: the shared metastore write wrapper retries any error
+// from a guarded commit, so the call stalls until the context expires and the
+// open then fails on the timeout rather than on "superseded". The fence itself
+// holds either way -- a superseded publisher cannot advance the checkpoint --
+// it just cannot tell that is why. Reporting it properly needs the predicate
+// mismatch to be distinguishable from a transient failure at the kv layer,
+// which is where TiKV already marks it (unexported) and etcd does not.
+func (r *recoveryStorageImpl) fenceConsumeCheckpoint(ctx context.Context, term int64) error {
+	if r.checkpoint == nil || r.checkpoint.MessageID == nil {
+		// Unreachable: the checkpoint is loaded or initialized above.
+		return nil
+	}
+	if r.checkpoint.Term == term {
+		// Already claimed by this term: a reopen with no ownership change.
+		return nil
+	}
+	stamped := r.checkpoint.Clone()
+	stamped.Term = term
+	if err := resource.Resource().StreamingNodeCatalog().SaveRecoverySnapshot(ctx, r.channel.Name, &metastore.WALRecoverySnapshot{
+		ConsumeCheckpoint: stamped.IntoProto(),
+	}); err != nil {
+		return err
+	}
+	// Every snapshot the background persist builds clones this, so the term
+	// rides along with each later advancement.
+	r.checkpoint = stamped
+	r.Logger().Info(ctx, "consume checkpoint claimed", mlog.Int64("term", term))
+	return nil
 }
 
 // initializeRecoverInfo initializes the recover info for the given channel.
@@ -152,6 +248,9 @@ func (r *recoveryStorageImpl) initializeRecoverInfo(ctx context.Context, channel
 		MessageId:     untilMessage.LastConfirmedMessageID().IntoProto(),
 		TimeTick:      untilMessage.TimeTick(),
 		RecoveryMagic: utility.RecoveryMagicStreamingInitialized,
+		// Claimed by this term from the start, so the fence below is a no-op
+		// on the channel that creates its own checkpoint.
+		Term: channelInfo.Term,
 	}
 	// Save the vchannels and the initial checkpoint into the catalog in one
 	// compound operation.
@@ -161,7 +260,8 @@ func (r *recoveryStorageImpl) initializeRecoverInfo(ctx context.Context, channel
 	}); err != nil {
 		return nil, errors.Wrap(err, "failed to save recovery snapshot to catalog")
 	}
-	r.Logger().Info(ctx, "initialize checkpoint done",
+	r.Logger().Info(
+		ctx, "initialize checkpoint done",
 		mlog.Int("vchannels", len(vchannels)),
 		mlog.String("checkpoint", checkpoint.MessageId.String()),
 		mlog.Uint64("timetick", checkpoint.TimeTick),
