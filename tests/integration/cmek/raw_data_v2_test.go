@@ -62,14 +62,22 @@ type rawDataCampaign struct {
 }
 
 type RawDataV2Suite struct {
+	rawDataSuite
+}
+
+type rawDataSuite struct {
 	integration.MiniClusterSuite
 	dbName string
 	ezID   int64
 }
 
 func (s *RawDataV2Suite) SetupSuite() {
+	s.setupRawData(2)
+}
+
+func (s *rawDataSuite) setupRawData(storageVersion int64) {
 	s.WithOptions(integration.WithoutResetDeploymentWhenTestTearDown())
-	s.WithMilvusConfig("common.storage.useLoonFFI", "false")
+	s.WithMilvusConfig("common.storage.useLoonFFI", strconv.FormatBool(storageVersion == 3))
 	s.WithMilvusConfig("dataNode.storage.format", "parquet")
 	s.WithMilvusConfig("common.storage.enableGrowingSourceFlush", "false")
 	s.WithMilvusConfig("indexCoord.segment.minSegmentNumRowsToEnableIndex", "1024")
@@ -79,7 +87,7 @@ func (s *RawDataV2Suite) SetupSuite() {
 	s.MiniClusterSuite.SetupSuite()
 
 	ctx := s.Cluster.GetContext()
-	s.dbName = "cmek_raw_v2_" + funcutil.GenRandomStr()
+	s.dbName = fmt.Sprintf("cmek_raw_v%d_%s", storageVersion, funcutil.GenRandomStr())
 	status, err := s.Cluster.MilvusClient.CreateDatabase(ctx, &milvuspb.CreateDatabaseRequest{
 		DbName: s.dbName,
 		Properties: []*commonpb.KeyValuePair{
@@ -95,7 +103,7 @@ func (s *RawDataV2Suite) SetupSuite() {
 	s.Require().Equal(strconv.FormatInt(s.ezID, 10), propertyValue(describe.GetProperties(), common.EncryptionEzIDKey))
 }
 
-func (s *RawDataV2Suite) TearDownSuite() {
+func (s *rawDataSuite) TearDownSuite() {
 	if s.Cluster != nil && s.dbName != "" {
 		status, err := s.Cluster.MilvusClient.DropDatabase(context.Background(), &milvuspb.DropDatabaseRequest{DbName: s.dbName})
 		s.NoError(merr.CheckRPCCall(status, err))
@@ -119,7 +127,7 @@ func TestRawDataV2Suite(t *testing.T) {
 	suite.Run(t, new(RawDataV2Suite))
 }
 
-func (s *RawDataV2Suite) runRawDataCampaign(c rawDataCampaign) {
+func (s *rawDataSuite) runRawDataCampaign(c rawDataCampaign) {
 	ctx := s.Cluster.GetContext()
 	collectionName := "cmek_raw_" + c.name + "_" + funcutil.GenRandomStr()
 	c.schema.Name = collectionName
@@ -195,7 +203,7 @@ func (s *RawDataV2Suite) runRawDataCampaign(c rawDataCampaign) {
 	}
 }
 
-func (s *RawDataV2Suite) inspectRawObjects(ctx context.Context, segments []*datapb.SegmentInfo, collectionID int64) {
+func (s *rawDataSuite) inspectRawObjects(ctx context.Context, segments []*datapb.SegmentInfo, collectionID int64) {
 	objects, err := inspector.LocateRawDataV2(s.Cluster.RootPath(), segments)
 	s.Require().NoError(err)
 	s.Require().NotEmpty(objects)
@@ -210,7 +218,7 @@ func (s *RawDataV2Suite) inspectRawObjects(ctx context.Context, segments []*data
 	}
 }
 
-func (s *RawDataV2Suite) createRawVectorIndexes(ctx context.Context, collection string, schema *schemapb.CollectionSchema) {
+func (s *rawDataSuite) createRawVectorIndexes(ctx context.Context, collection string, schema *schemapb.CollectionSchema) {
 	create := func(fieldName string, field *schemapb.FieldSchema) {
 		if !typeutil.IsVectorType(field.GetDataType()) {
 			return
@@ -254,7 +262,7 @@ func (s *RawDataV2Suite) createRawVectorIndexes(ctx context.Context, collection 
 	}
 }
 
-func (s *RawDataV2Suite) assertNoPhysicalVectorIndex(ctx context.Context, segments []*datapb.SegmentInfo, schema *schemapb.CollectionSchema) {
+func (s *rawDataSuite) assertNoPhysicalVectorIndex(ctx context.Context, segments []*datapb.SegmentInfo, schema *schemapb.CollectionSchema) {
 	ids := make([]int64, 0, len(segments))
 	for _, segment := range segments {
 		ids = append(ids, segment.GetID())
@@ -316,7 +324,7 @@ func completeVectorIndexMetadata(response *indexpb.GetIndexInfoResponse, segment
 	return true
 }
 
-func (s *RawDataV2Suite) assertLoadedFields(ctx context.Context, collectionID int64, expected []int64) {
+func (s *rawDataSuite) assertLoadedFields(ctx context.Context, collectionID int64, expected []int64) {
 	response, err := s.Cluster.MixCoordClient.ShowLoadCollections(ctx, &querypb.ShowCollectionsRequest{CollectionIDs: []int64{collectionID}})
 	s.Require().NoError(merr.CheckRPCCall(response, err))
 	s.Require().Equal([]int64{collectionID}, response.GetCollectionIDs())
@@ -327,7 +335,7 @@ func (s *RawDataV2Suite) assertLoadedFields(ctx context.Context, collectionID in
 	s.Require().Equal(expected, actual)
 }
 
-func (s *RawDataV2Suite) assertRawLoadedSegments(ctx context.Context, collectionID int64, expected []*datapb.SegmentInfo) {
+func (s *rawDataSuite) assertRawLoadedSegments(ctx context.Context, collectionID int64, expected []*datapb.SegmentInfo) {
 	expectedIDs := make(map[int64]struct{}, len(expected))
 	for _, segment := range expected {
 		expectedIDs[segment.GetID()] = struct{}{}
@@ -369,7 +377,7 @@ func (s *RawDataV2Suite) assertRawLoadedSegments(ctx context.Context, collection
 	}, 3*time.Minute, 500*time.Millisecond)
 }
 
-func (s *RawDataV2Suite) assertRawDataOracle(ctx context.Context, collection string, inserted []*schemapb.FieldData, loadFields []string) {
+func (s *rawDataSuite) assertRawDataOracle(ctx context.Context, collection string, inserted []*schemapb.FieldData, loadFields []string) {
 	count, err := s.Cluster.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
 		DbName: s.dbName, CollectionName: collection, Expr: "", OutputFields: []string{"count(*)"},
 		ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
@@ -434,7 +442,7 @@ func (s *RawDataV2Suite) assertRawDataOracle(ctx context.Context, collection str
 	s.Require().Empty(expectedByName)
 }
 
-func (s *RawDataV2Suite) assertExactFloatSearch(ctx context.Context, collection, field string, vector []float32, ef int) {
+func (s *rawDataSuite) assertExactFloatSearch(ctx context.Context, collection, field string, vector []float32, ef int) {
 	request := integration.ConstructSearchRequest(s.dbName, collection, "", field, schemapb.DataType_FloatVector,
 		[]string{fixturePrimaryKey}, metric.L2, map[string]any{"ef": ef}, 1, len(vector), 1, -1)
 	value := make([]byte, len(vector)*4)
@@ -453,7 +461,7 @@ func (s *RawDataV2Suite) assertExactFloatSearch(ctx context.Context, collection,
 	s.Require().InDelta(0, result.GetResults().GetScores()[0], 1e-6)
 }
 
-func (s *RawDataV2Suite) rawSealedSegments(collection string) []*datapb.SegmentInfo {
+func (s *rawDataSuite) rawSealedSegments(collection string) []*datapb.SegmentInfo {
 	var segments []*datapb.SegmentInfo
 	s.Require().Eventually(func() bool {
 		current, err := s.Cluster.ShowSegmentsWithDB(s.dbName, collection)
@@ -472,7 +480,7 @@ func (s *RawDataV2Suite) rawSealedSegments(collection string) []*datapb.SegmentI
 	return segments
 }
 
-func (s *RawDataV2Suite) rawFlushedSegments(collection string, flushed []int64) []*datapb.SegmentInfo {
+func (s *rawDataSuite) rawFlushedSegments(collection string, flushed []int64) []*datapb.SegmentInfo {
 	var segments []*datapb.SegmentInfo
 	s.Require().Eventually(func() bool {
 		current, err := s.Cluster.ShowSegmentsWithDB(s.dbName, collection)
@@ -506,7 +514,7 @@ func selectFlushSegments(flushed []int64, current []*datapb.SegmentInfo) []*data
 	return segments
 }
 
-func (s *RawDataV2Suite) cleanupRawCollection(collection string) {
+func (s *rawDataSuite) cleanupRawCollection(collection string) {
 	ctx := context.Background()
 	_, _ = s.Cluster.MilvusClient.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{DbName: s.dbName, CollectionName: collection})
 	status, err := s.Cluster.MilvusClient.DropCollection(ctx, &milvuspb.DropCollectionRequest{DbName: s.dbName, CollectionName: collection})
