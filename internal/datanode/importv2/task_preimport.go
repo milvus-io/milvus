@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/internal/util/taskresource"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -106,6 +107,18 @@ func (t *PreImportTask) GetSchema() *schemapb.CollectionSchema {
 
 func (t *PreImportTask) GetSlots() int64 {
 	return t.req.GetTaskSlot()
+}
+
+// GetResourceRequirement prices a preimport: a fixed base buffer per file in
+// flight, with no vchannel or partition fan-out because nothing is written.
+func (t *PreImportTask) GetResourceRequirement() taskresource.Requirement {
+	if req, ok := taskresource.RequirementFromProto(t.req.GetTaskResources()); ok {
+		return req
+	}
+	return taskresource.EstimateImport(taskresource.ImportInput{
+		IsPreImport: true,
+		FileNum:     len(t.GetFileStats()),
+	})
 }
 
 // PreImportTask buffer size is fixed

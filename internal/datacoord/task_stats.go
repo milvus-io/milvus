@@ -29,6 +29,7 @@ import (
 	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/taskresource"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -51,6 +52,26 @@ type statsTask struct {
 	handler   Handler
 	allocator allocator.Allocator
 	ievm      IndexEngineVersionManager
+
+	pricing requirementCache
+}
+
+// TaskResources prices this stats sub-job before a node is picked for it, from
+// the fields the sub-job actually reads rather than from the whole segment.
+// calculateStatsTaskSlot charged whole-segment size for every sub-job, so a
+// text index over one matched field of twenty cost twenty times what it reads.
+func (st *statsTask) TaskResources() *datapb.TaskResources {
+	return st.pricing.get(func() (taskresource.Requirement, bool) {
+		segment := st.meta.GetHealthySegment(context.TODO(), st.GetSegmentID())
+		if segment == nil {
+			return taskresource.LegacySlotToRequirement(st.taskSlot), false
+		}
+		collection, err := st.handler.GetCollection(context.TODO(), st.GetCollectionID())
+		if err != nil || collection == nil || collection.Schema == nil {
+			return taskresource.LegacySlotToRequirement(st.taskSlot), false
+		}
+		return statsRequirement(segment, collection.Schema, st.GetSubJobType()), true
+	}).ToProto()
 }
 
 var _ globalTask.Task = (*statsTask)(nil)
@@ -500,6 +521,11 @@ func (st *statsTask) prepareJobRequest(ctx context.Context, segment *SegmentInfo
 		JsonStatsWriteBatchSize:          Params.DataCoordCfg.JSONStatsWriteBatchSize.GetAsInt64(),
 		ManifestPath:                     segment.GetManifestPath(),
 	}
+	// The same figure the scheduler placed this task on. task_slot above keeps
+	// its whole-segment meaning for a worker that predates the vector.
+	req.TaskResources = st.pricing.fill(
+		statsRequirement(segment, collInfo.Schema, st.GetSubJobType()),
+	).ToProto()
 	WrapPluginContext(segment.GetCollectionID(), collInfo.Schema.GetProperties(), req)
 
 	return req, nil

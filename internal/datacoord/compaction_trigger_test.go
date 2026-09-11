@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/util/taskresource"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -634,8 +635,18 @@ func Test_compactionTrigger_force(t *testing.T) {
 					PreAllocatedSegmentIDs: &datapb.IDRange{Begin: preAllocatedSegmentIDBegin, End: preAllocatedSegmentIDEnd},
 					PreAllocatedLogIDs:     &datapb.IDRange{Begin: preAllocatedSegmentIDBegin, End: preAllocatedLogIDEnd},
 					MaxSize:                1073741824,
-					SlotUsage:              paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64(),
-					JsonParams:             params,
+					// The scalar keeps the meaning an un-upgraded worker
+					// accounts in: the flat mix constant.
+					SlotUsage: Params.DataCoordCfg.MixCompactionSlotUsage.GetAsInt64(),
+					// The estimate travels here instead. seg1/seg2 above carry
+					// no binlog MemorySize, so the estimator sees a zero-byte
+					// input and falls to the fixed streaming reader/writer
+					// buffer cost. Both fields are asserted so a change to
+					// either has to be deliberate.
+					TaskResources: taskresource.EstimateCompaction(taskresource.CompactionInput{
+						Type: datapb.CompactionType_MixCompaction,
+					}).ToProto(),
+					JsonParams: params,
 				},
 			},
 		},

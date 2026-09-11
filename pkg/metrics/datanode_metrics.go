@@ -362,6 +362,84 @@ var (
 		}, []string{nodeIDLabelName, "type"})
 )
 
+// DataNode task resource ledger metrics.
+//
+// These report the two-dimensional ledger that admits compaction, index and
+// import tasks (internal/datanode/resource). They are an addition to
+// DataNodeSlot above, not a replacement for it: "slot" keeps reporting what it
+// always did, from the executors' own counters, so that existing dashboards
+// keep meaning what they meant.
+//
+// Nothing in the admission path reads any of these back. They exist so that a
+// node which has stopped admitting work says why -- on the incident nodes of
+// issue #52180 a saturated node and a healthy one both reported the same thing.
+var (
+	DataNodeResourceReservedMemory = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataNodeRole,
+			Name:      "resource_reserved_memory_bytes",
+			Help:      "memory committed to admitted tasks by the resource ledger",
+		}, []string{nodeIDLabelName})
+
+	DataNodeResourceReservedCPU = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataNodeRole,
+			Name:      "resource_reserved_cpu_cores",
+			Help:      "CPU cores committed to admitted tasks by the resource ledger",
+		}, []string{nodeIDLabelName})
+
+	DataNodeResourceBudgetMemory = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataNodeRole,
+			Name:      "resource_budget_memory_bytes",
+			Help:      "memory available to tasks: node capacity after the non-task correction",
+		}, []string{nodeIDLabelName})
+
+	DataNodeResourceBudgetCPU = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataNodeRole,
+			Name:      "resource_budget_cpu_cores",
+			Help:      "CPU cores available to tasks",
+		}, []string{nodeIDLabelName})
+
+	// DataNodeResourceObservedMemory is the measured figure the estimates are
+	// checked against: divided by resource_reserved_memory_bytes it is the
+	// estimate-versus-actual ratio the memory factors are tuned from. It is
+	// exported as the raw measurement rather than as a ready-made ratio so it
+	// stays aggregatable, and because the ratio only means anything while the
+	// node is busy.
+	DataNodeResourceObservedMemory = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataNodeRole,
+			Name:      "resource_observed_memory_bytes",
+			Help:      "memory measured on the node at the last watermark sample",
+		}, []string{nodeIDLabelName})
+
+	DataNodeResourceFrozen = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataNodeRole,
+			Name:      "resource_frozen",
+			Help:      "1 while admission is frozen by the high memory watermark",
+		}, []string{nodeIDLabelName})
+
+	// DataNodeTaskAdmissionWait is in milliseconds, like every other DataNode
+	// latency histogram in this file, so that one dashboard does not mix units.
+	DataNodeTaskAdmissionWait = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataNodeRole,
+			Name:      "task_admission_wait_milliseconds",
+			Help:      "time a task spent waiting for a reservation before it started",
+			Buckets:   longTaskBuckets,
+		}, []string{nodeIDLabelName, "task_type"})
+)
+
 // DataNode pool metric descriptors (used by dataNodePoolMetricsCollector).
 var (
 	DataNodePoolCapacityDesc = prometheus.NewDesc(
@@ -470,6 +548,16 @@ func registerDataNodeOnce(registry *prometheus.Registry) {
 	registry.MustRegister(DataNodeBuildIndexLatency)
 	registry.MustRegister(DataNodeBuildJSONStatsLatency)
 	registry.MustRegister(DataNodeSlot)
+
+	// task resource ledger
+	registry.MustRegister(DataNodeResourceReservedMemory)
+	registry.MustRegister(DataNodeResourceReservedCPU)
+	registry.MustRegister(DataNodeResourceBudgetMemory)
+	registry.MustRegister(DataNodeResourceBudgetCPU)
+	registry.MustRegister(DataNodeResourceObservedMemory)
+	registry.MustRegister(DataNodeResourceFrozen)
+	registry.MustRegister(DataNodeTaskAdmissionWait)
+
 	registry.MustRegister(&dataNodePoolMetricsCollector{})
 	RegisterLoggingMetrics(registry)
 }

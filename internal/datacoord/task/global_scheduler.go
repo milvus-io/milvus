@@ -218,17 +218,37 @@ func newNodeSlotHeap(workerSlots map[int64]*session.WorkerSlots) typeutil.Heap[*
 	})
 }
 
-// pickNode selects the least-loaded node (the one with the most available slots)
-// for a task requiring taskSlot slots, instead of the first node that happens to
-// fit. Always assigning to the most-available node spreads tasks evenly across
-// DataNodes (water-filling on available slots) rather than packing them onto
-// whichever node is iterated first.
+// pickNode selects the least-loaded node -- the one with the most available
+// slots -- for a task requiring taskSlot slots. It is pickNodeWithMinimumVersion
+// with no version constraint, so every node in the heap is a candidate.
 //
-// It returns NullNodeID when no node has any available slot for a positive-slot
-// task. Non-positive-slot tasks are scheduled on the most-available node without
-// consuming slots. When even the most-available node cannot fully satisfy
-// taskSlot, it falls back to that node on a best-effort basis and drains its
-// slots, preserving the previous behavior.
+// When no node can fully satisfy taskSlot it still dispatches, to that
+// most-available node, and drains its slots. That is deliberate and not the
+// defect issue #52180 named: a task larger than any worker has to run
+// somewhere, and the emptiest worker is where it will start soonest. A worker
+// running the exclusive-admission guard (see internal/datanode/resource)
+// admits such a task only once every other reservation has been released and
+// runs it alone, so the harm in #52180 -- an oversized task running
+// *concurrently* with everything else -- cannot recur once every DataNode
+// carries that guard. Refusing to place the task here would instead leave it
+// pending forever, because no node ever grows.
+//
+// That precondition is not enforced on this path, and the worker-version
+// filter in pickNodeWithMinimumVersion does not change it. The filter screens
+// against a minimum version the *task* declares (Task.MinimumWorkerVersion),
+// and the only task that declares one today is an external-snapshot copy
+// segment; every oversized compaction, index or stats task reaches the heap
+// with an empty constraint, which workerSupportsMinimumVersion accepts from
+// every worker. Even a constrained task would not be a reliable screen for the
+// guard, since an unparsable development version is treated as compatible. So
+// during a partial rollout, a rollback, or before a node has restarted into
+// the new build, an oversized task dispatched to a guard-less worker still
+// behaves as it did in #52180.
+//
+// It returns NullNodeID when the heap holds no nodes at all, or when a task
+// needing slots finds every node reporting none; either way the task waits for
+// the next scheduling round. A task asking for no slots is placed on the
+// most-available node without consuming any.
 //
 // The picked node's slots are updated in place; the caller reuses the same heap
 // across all tasks in a scheduling round so later picks observe the decremented
@@ -271,6 +291,9 @@ func (s *globalTaskScheduler) schedule() {
 	// Build the node-slot max-heap once per round and reuse it across all picks,
 	// so each task is placed on the currently least-loaded node.
 	slotHeap := newNodeSlotHeap(nodeSlots)
+	// The picker places on dimensions where the worker reports them and falls
+	// back to this heap where it does not; a rolling upgrade has both.
+	picker := newNodePicker(nodeSlots, &scalarHeapAdapter{scheduler: s, heap: slotHeap})
 	futures := make([]*conc.Future[struct{}], 0)
 	var delayed []Task
 	for {
@@ -286,7 +309,8 @@ func (s *globalTaskScheduler) schedule() {
 			continue
 		}
 		taskSlot := task.GetTaskSlot()
-		nodeID := s.pickNode(slotHeap, taskSlot)
+		req, hasRequirement := requirementOf(task)
+		nodeID := picker.Pick(req, hasRequirement, taskSlot)
 		if nodeID == NullNodeID {
 			s.pendingTasks.Push(task)
 			break
@@ -468,4 +492,15 @@ func NewGlobalTaskScheduler(ctx context.Context, cluster session.Cluster) Global
 		cluster:      cluster,
 		backoffs:     typeutil.NewConcurrentMap[int64, *taskBackoff](),
 	}
+}
+
+// scalarHeapAdapter lets the pre-existing scalar placement serve as the
+// picker's second tier without changing it.
+type scalarHeapAdapter struct {
+	scheduler *globalTaskScheduler
+	heap      typeutil.Heap[*nodeSlotEntry]
+}
+
+func (a *scalarHeapAdapter) pick(taskSlot int64) int64 {
+	return a.scheduler.pickNode(a.heap, taskSlot)
 }

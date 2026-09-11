@@ -32,5 +32,9 @@ type Compactor interface {
 	GetChannelName() string
 	GetCompactionType() datapb.CompactionType
 	GetSlotUsage() int64
+	// GetPlan exposes the plan the task was built from so the node can price
+	// the task from its own inputs rather than from a figure the coordinator
+	// attached to it. It may be nil for a task that carries no plan.
+	GetPlan() *datapb.CompactionPlan
 	GetStorageConfig() *indexpb.StorageConfig
 }

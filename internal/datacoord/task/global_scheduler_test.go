@@ -261,6 +261,67 @@ func TestGlobalScheduler_pickNode_MixedTaskSizes(t *testing.T) {
 	assert.Equal(t, int64(0), nodes[3].AvailableSlots)
 }
 
+// issue #52180 named pickNode's best-effort dispatch as a defect. It is not,
+// now that a worker runs an oversized task exclusively: the task has to land
+// somewhere, and the emptiest node is where it will start soonest. Refusing to
+// place it would leave it pending forever, since no node ever grows.
+func TestPickNodeDispatchesOversizedTaskToEmptiestNode(t *testing.T) {
+	paramtable.Init()
+
+	s := &globalTaskScheduler{}
+	slots := map[int64]*session.WorkerSlots{
+		1: {NodeID: 1, AvailableSlots: 20},
+		2: {NodeID: 2, AvailableSlots: 100},
+	}
+	heap := newNodeSlotHeap(slots)
+
+	got := s.pickNode(heap, 384)
+	assert.Equal(t, int64(2), got, "an oversized task goes to the node with the most room")
+	assert.Equal(t, int64(0), slots[2].AvailableSlots,
+		"that node is drained, so nothing else joins it this round")
+}
+
+func TestPickNodeStillPrefersTheEmptiestNodeThatFits(t *testing.T) {
+	paramtable.Init()
+
+	s := &globalTaskScheduler{}
+	slots := map[int64]*session.WorkerSlots{
+		1: {NodeID: 1, AvailableSlots: 60},
+		2: {NodeID: 2, AvailableSlots: 100},
+	}
+	heap := newNodeSlotHeap(slots)
+
+	got := s.pickNode(heap, 50)
+	assert.Equal(t, int64(2), got)
+	assert.Equal(t, int64(50), slots[2].AvailableSlots, "charged exactly, not drained")
+}
+
+// The one case that must still stay pending: nothing anywhere.
+func TestPickNodeKeepsTaskPendingWhenEveryNodeIsFull(t *testing.T) {
+	paramtable.Init()
+
+	s := &globalTaskScheduler{}
+	slots := map[int64]*session.WorkerSlots{
+		1: {NodeID: 1, AvailableSlots: 0},
+		2: {NodeID: 2, AvailableSlots: 0},
+	}
+	heap := newNodeSlotHeap(slots)
+
+	assert.Equal(t, int64(NullNodeID), s.pickNode(heap, 1))
+}
+
+func TestPickNodeZeroSlotTaskConsumesNothing(t *testing.T) {
+	paramtable.Init()
+
+	s := &globalTaskScheduler{}
+	slots := map[int64]*session.WorkerSlots{1: {NodeID: 1, AvailableSlots: 30}}
+	heap := newNodeSlotHeap(slots)
+
+	got := s.pickNode(heap, 0)
+	assert.Equal(t, int64(1), got)
+	assert.Equal(t, int64(30), slots[1].AvailableSlots)
+}
+
 func TestGlobalScheduler_TestSchedule(t *testing.T) {
 	newCluster := func() session.Cluster {
 		cluster := session.NewMockCluster(t)

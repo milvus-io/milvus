@@ -1429,6 +1429,10 @@ func (t *bumpSchemaVersionCompactionTask) GetCompactionType() datapb.CompactionT
 	return t.plan.GetType()
 }
 
+func (t *bumpSchemaVersionCompactionTask) GetPlan() *datapb.CompactionPlan {
+	return t.plan
+}
+
 func (t *bumpSchemaVersionCompactionTask) GetSlotUsage() int64 {
 	return t.plan.GetSlotUsage()
 }

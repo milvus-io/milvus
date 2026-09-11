@@ -24,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/taskresource"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -173,6 +174,12 @@ func (t *CopySegmentTask) GetSchema() *schemapb.CollectionSchema {
 
 func (t *CopySegmentTask) GetSlots() int64 {
 	return t.slots
+}
+
+// GetResourceRequirement prices a segment copy, which moves no segment bytes
+// through this process: the object store does the copying.
+func (t *CopySegmentTask) GetResourceRequirement() taskresource.Requirement {
+	return taskresource.EstimateCopySegment(len(t.segmentResults))
 }
 
 func (t *CopySegmentTask) GetBufferSize() int64 {

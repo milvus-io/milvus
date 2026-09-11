@@ -549,6 +549,10 @@ func (t *LevelZeroCompactionTask) loadBF(ctx context.Context, targetSegments []*
 	return bfs, err
 }
 
+func (t *LevelZeroCompactionTask) GetPlan() *datapb.CompactionPlan {
+	return t.plan
+}
+
 func (t *LevelZeroCompactionTask) GetSlotUsage() int64 {
 	return t.plan.GetSlotUsage()
 }

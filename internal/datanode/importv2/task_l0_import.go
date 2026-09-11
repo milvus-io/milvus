@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/binlog"
+	"github.com/milvus-io/milvus/internal/util/taskresource"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -100,6 +101,18 @@ func (t *L0ImportTask) GetSchema() *schemapb.CollectionSchema {
 
 func (t *L0ImportTask) GetSlots() int64 {
 	return t.req.GetTaskSlot()
+}
+
+// GetResourceRequirement prices an L0 import: a delete buffer per file in
+// flight.
+func (t *L0ImportTask) GetResourceRequirement() taskresource.Requirement {
+	if req, ok := taskresource.RequirementFromProto(t.req.GetTaskResources()); ok {
+		return req
+	}
+	return taskresource.EstimateImport(taskresource.ImportInput{
+		IsL0:    true,
+		FileNum: len(t.req.GetFiles()),
+	})
 }
 
 // L0 import task buffer size is fixed

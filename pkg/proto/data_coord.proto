@@ -842,6 +842,9 @@ message CompactionPlan {
   repeated common.KeyValuePair plugin_context = 29;
   repeated internal.FileResourceInfo file_resources = 30;
   repeated schema.FunctionSchema functions = 31;
+  // task_resources supersedes slot_usage. slot_usage stays populated with the
+  // fold of this vector so an un-upgraded worker keeps working.
+  TaskResources task_resources = 32;
 }
 
 // ManifestColumnGroupFile is one loon/parquet file belonging to a column
@@ -1096,6 +1099,7 @@ message PreImportRequest {
   index.StorageConfig storage_config = 10;
   int64 task_slot = 11;
   repeated common.KeyValuePair plugin_context = 12;
+  TaskResources task_resources = 13;
 }
 
 message IDRange {
@@ -1127,6 +1131,7 @@ message ImportRequest {
   int64 storage_version = 15;
   repeated common.KeyValuePair plugin_context = 16;
   bool use_loon_ffi = 17;
+  TaskResources task_resources = 18;
 }
 
 message QueryPreImportRequest {
@@ -1518,8 +1523,11 @@ message QuerySlotRequest {}
 
 message QuerySlotResponse {
   common.Status status = 1;
+  // available_slots is the one-dimensional fold, kept for a coordinator that
+  // predates `resources`. A coordinator that understands `resources` ignores it.
   int64 available_slots = 2;
   string version = 3; // Kept for wire compatibility; new schedulers do not use it
+  NodeResources resources = 4;
 }
 
 enum CompactionTaskState {
@@ -2097,4 +2105,63 @@ message GetExportSnapshotStateRequest {
 message GetExportSnapshotStateResponse {
   common.Status status = 1;
   ExportSnapshotJobInfo info = 2;
+}
+
+// ---- Task resource accounting ---------------------------------------------
+//
+// A task's cost and a worker's capacity are both multi-dimensional, and the
+// dimensions are not the same kind of quantity. Memory is incompressible: a
+// task that exceeds it kills the process, so it GATES placement. CPU is
+// compressible -- two tasks on one core both finish, just later -- so it only
+// ranks candidates. A build-pool slot is neither: it is a discrete concurrency
+// token whose pool has a fixed width.
+//
+// The set travels as a NAMED VECTOR rather than as fixed cpu/memory fields so
+// that a further dimension (a second build pool, a disk budget) does not need
+// another wire change. Unknown names are ignored on both sides, which is what
+// lets a worker and a coordinator of different versions agree on the
+// dimensions they both understand and on no more than those.
+//
+// Canonical names and units live in internal/util/taskresource. The wire
+// carries int64 only, so the unit is encoded in the name: memory in bytes,
+// CPU in milli-cores, pools in whole slots.
+message TaskResourceAmount {
+  string name = 1;
+  int64 amount = 2;
+}
+
+// TaskResources is what one task is expected to occupy for its whole run.
+//
+// It is computed by DataCoord, which is the side that holds what the estimate
+// is derived from: SegmentInfo.Stats is populated on every storage version,
+// while the per-FieldBinlog arrays a worker would have to reconstruct from are
+// deliberately not persisted for V3 segments (see kv_catalog.AlterSegments).
+// A worker that receives this field does not recompute it.
+message TaskResources {
+  repeated TaskResourceAmount dims = 1;
+}
+
+// NodeResourceDim is one dimension of a worker's capacity report.
+message NodeResourceDim {
+  string name = 1;
+  int64 capacity = 2;
+  // committed is the sum over tasks the worker has ACCEPTED and not yet
+  // finished. It is deliberately NOT what the worker currently measures: a
+  // task accepted a moment ago has not reached its peak yet, and reporting
+  // observed usage is what let a coordinator place eight compactions on one
+  // node while every one of them was still downloading (issue #52180).
+  int64 committed = 3;
+  // gating marks a dimension a task must FIT IN to be placed here. Memory
+  // gates; CPU does not. Filtering on a non-gating dimension would serialize
+  // classes that contend for no common thread pool -- an L0 compaction held
+  // behind vector index builds it shares nothing with.
+  bool gating = 4;
+}
+
+message NodeResources {
+  repeated NodeResourceDim dims = 1;
+  // admitting is false when the worker has stopped taking new work for a
+  // reason no dimension expresses -- today, measured memory above the high
+  // watermark. It is a safety valve, not a term in the arithmetic.
+  bool admitting = 2;
 }

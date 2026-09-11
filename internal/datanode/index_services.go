@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datanode/index"
+	"github.com/milvus-io/milvus/internal/datanode/resource"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -190,30 +191,33 @@ func (node *DataNode) GetJobStats(ctx context.Context, req *workerpb.GetJobStats
 	}
 	defer node.lifetime.Done()
 
-	var (
-		totalSlots     = index.CalculateNodeSlots()
-		indexStatsUsed = node.taskScheduler.TaskQueue.GetUsingSlot()
-		compactionUsed = node.compactionExecutor.Slots()
-		importUsed     = node.importScheduler.Slots()
-	)
+	snap := resource.GetGuard().Snapshot()
+	legacyTotal := index.CalculateNodeSlots()
+	indexStatsUsed, compactionUsed, importUsed := node.queuedSlots()
+	// Same fold as QuerySlot: the ledger alone cannot see queued-but-unadmitted
+	// work, so a node with a full index queue would report itself free here too.
+	available := availableSlots(snap, legacyTotal, indexStatsUsed, compactionUsed, importUsed)
 
-	availableSlots := totalSlots - indexStatsUsed - compactionUsed - importUsed
-	if availableSlots < 0 {
-		availableSlots = 0
+	// A node that has stopped taking work reports zero, which is otherwise
+	// indistinguishable from being genuinely busy.
+	if !snap.Admitting {
+		mlog.Warn(ctx, "query slots done: node has stopped taking tasks on measured memory",
+			mlog.Int64("legacyTotalSlots", legacyTotal),
+			mlog.Int64("committedMemoryMiB", snap.Committed.Memory>>20),
+			mlog.Int64("capacityMemoryMiB", snap.Capacity.Memory>>20))
+	} else {
+		mlog.Info(ctx, "query slots done",
+			mlog.Int64("legacyTotalSlots", legacyTotal),
+			mlog.Int64("legacyAvailableSlots", available),
+			mlog.Int64("committedMemoryMiB", snap.Committed.Memory>>20),
+			mlog.Int64("capacityMemoryMiB", snap.Capacity.Memory>>20))
 	}
-
-	mlog.Info(ctx, "query slots done",
-		mlog.Int64("totalSlots", totalSlots),
-		mlog.Int64("availableSlots", availableSlots),
-		mlog.Int64("indexStatsUsed", indexStatsUsed),
-		mlog.Int64("compactionUsed", compactionUsed),
-		mlog.Int64("importUsed", importUsed),
-	)
 
 	return &workerpb.GetJobStatsResponse{
 		Status:         merr.Success(),
-		TotalSlots:     totalSlots,
-		AvailableSlots: availableSlots,
+		TotalSlots:     legacyTotal,
+		AvailableSlots: available,
+		Resources:      nodeResources(snap),
 	}, nil
 }
 
