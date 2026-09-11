@@ -355,6 +355,12 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 		return 0, nil
 	}
 
+	rb := NewRecordBuilder(schema)
+	outputColumns := make([][]arrow.Array, len(rr))
+	for i := range outputColumns {
+		outputColumns[i] = make([]arrow.Array, len(rb.fields))
+	}
+
 	nk := len(sortedByFieldIDs)
 	recs := make([]Record, len(rr))
 	// keys[ri][fp] is the fp-th merge key column of the record reader ri holds.
@@ -401,7 +407,13 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 		}
 		pos[ri] = 0
 		recNo[ri]++
-		return extractKeys(ri)
+		if err := extractKeys(ri); err != nil {
+			return err
+		}
+		for fi, field := range rb.fields {
+			outputColumns[ri][fi] = rec.Column(field.FieldID)
+		}
+		return nil
 	}
 
 	// compareKeys orders two rows that are both currently live in the heap.
@@ -485,7 +497,6 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 		}
 	}
 
-	rb := NewRecordBuilder(schema)
 	writeRecord := func() error {
 		rec := rb.Build()
 		defer rec.Release()
@@ -556,7 +567,7 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 		}
 		saveLast(idx)
 
-		if err := rb.Append(recs[idx.ri], int(idx.i), int(idx.i)+1); err != nil {
+		if err := rb.appendColumns(outputColumns[idx.ri], int(idx.i), int(idx.i)+1); err != nil {
 			return 0, err
 		}
 		numRows++
