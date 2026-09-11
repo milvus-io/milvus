@@ -30,6 +30,7 @@
 #include <utility>
 #include <vector>
 
+#include "ExprBatchTestUtils.h"
 #include "ExprTestBase.h"
 #include "NamedType/named_type_impl.hpp"
 #include "bitset/bitset.h"
@@ -933,6 +934,7 @@ TEST_P(ExprTest, test_term_pk_with_sorted) {
 }
 
 TEST_P(ExprTest, TestSealedSegmentGetBatchSize) {
+    milvus::test::ExprBatchSizeGuard batch_size_guard(7);
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField("fakevec", data_type, 16, metric_type);
     auto bool_fid = schema->AddDebugField("bool", DataType::BOOL);
@@ -952,6 +954,9 @@ TEST_P(ExprTest, TestSealedSegmentGetBatchSize) {
     auto str1_fid = schema->AddDebugField("string1", DataType::VARCHAR);
     auto str2_fid = schema->AddDebugField("string2", DataType::VARCHAR);
     auto str3_fid = schema->AddDebugField("string3", DataType::VARCHAR);
+    auto string_fid = schema->AddDebugField("string", DataType::STRING);
+    auto string_1_fid =
+        schema->AddDebugField("string1_internal", DataType::STRING);
     schema->set_primary_field_id(str1_fid);
 
     auto seg = CreateSealedSegment(schema);
@@ -1034,6 +1039,15 @@ TEST_P(ExprTest, TestSealedSegmentGetBatchSize) {
                                                         OpType::LessThan);
                 return compare_expr;
             }
+            case DataType::STRING: {
+                auto compare_expr =
+                    std::make_shared<expr::CompareExpr>(string_fid,
+                                                        string_1_fid,
+                                                        DataType::STRING,
+                                                        DataType::STRING,
+                                                        OpType::LessThan);
+                return compare_expr;
+            }
             default:
                 return std::make_shared<expr::CompareExpr>(int8_fid,
                                                            int8_1_fid,
@@ -1042,29 +1056,67 @@ TEST_P(ExprTest, TestSealedSegmentGetBatchSize) {
                                                            OpType::LessThan);
         }
     };
-    auto expr = build_expr(DataType::BOOL);
-    BitsetType final;
-    auto plan =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
-    final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
-    expr = build_expr(DataType::INT8);
-    plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
-    final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
-    expr = build_expr(DataType::INT16);
-    plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
-    final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
-    expr = build_expr(DataType::INT32);
-    plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
-    final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
-    expr = build_expr(DataType::INT64);
-    plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
-    final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
-    expr = build_expr(DataType::FLOAT);
-    plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
-    final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
-    expr = build_expr(DataType::DOUBLE);
-    plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
-    final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
+    auto execute = [&](DataType type) {
+        auto expr = build_expr(type);
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+        return ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
+    };
+
+    auto check = [&]<typename T>(DataType type, FieldId left, FieldId right) {
+        auto result = execute(type);
+        auto left_values = raw_data.get_col<T>(left);
+        auto right_values = raw_data.get_col<T>(right);
+        ASSERT_EQ(result.size(), N);
+        for (size_t i = 0; i < N; ++i) {
+            ASSERT_EQ(result[i], left_values[i] < right_values[i])
+                << "type " << static_cast<int>(type) << " row " << i;
+        }
+    };
+
+    check.operator()<bool>(DataType::BOOL, bool_fid, bool_1_fid);
+    check.operator()<int8_t>(DataType::INT8, int8_fid, int8_1_fid);
+    check.operator()<int16_t>(DataType::INT16, int16_fid, int16_1_fid);
+    check.operator()<int32_t>(DataType::INT32, int32_fid, int32_1_fid);
+    check.operator()<int64_t>(DataType::INT64, int64_fid, int64_1_fid);
+    check.operator()<float>(DataType::FLOAT, float_fid, float_1_fid);
+    check.operator()<double>(DataType::DOUBLE, double_fid, double_1_fid);
+    check.operator()<std::string>(DataType::VARCHAR, str2_fid, str3_fid);
+    check.operator()<std::string>(DataType::STRING, string_fid, string_1_fid);
+
+    auto int64_expr = build_expr(DataType::INT64);
+    auto int64_plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, int64_expr);
+    milvus::exec::OffsetVector offsets{9, 2, 9, 511, 3, 999};
+    auto offset_result = milvus::test::gen_filter_res(
+        int64_plan.get(), seg.get(), N, MAX_TIMESTAMP, &offsets);
+    BitsetTypeView offset_view(offset_result->GetRawData(),
+                               offset_result->size());
+    auto left_values = raw_data.get_col<int64_t>(int64_fid);
+    auto right_values = raw_data.get_col<int64_t>(int64_1_fid);
+    ASSERT_EQ(offset_view.size(), offsets.size());
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        const auto offset = offsets[i];
+        ASSERT_EQ(offset_view[i], left_values[offset] < right_values[offset])
+            << "offset input position " << i << " row " << offset;
+    }
+
+    auto varchar_expr = build_expr(DataType::VARCHAR);
+    auto varchar_plan = std::make_shared<plan::FilterBitsNode>(
+        DEFAULT_PLANNODE_ID, varchar_expr);
+    auto varchar_offset_result = milvus::test::gen_filter_res(
+        varchar_plan.get(), seg.get(), N, MAX_TIMESTAMP, &offsets);
+    BitsetTypeView varchar_offset_view(varchar_offset_result->GetRawData(),
+                                       varchar_offset_result->size());
+    auto left_strings = raw_data.get_col<std::string>(str2_fid);
+    auto right_strings = raw_data.get_col<std::string>(str3_fid);
+    ASSERT_EQ(varchar_offset_view.size(), offsets.size());
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        const auto offset = offsets[i];
+        ASSERT_EQ(varchar_offset_view[i],
+                  left_strings[offset] < right_strings[offset])
+            << "varchar offset input position " << i << " row " << offset;
+    }
 }
 
 TEST_P(ExprTest, TestReorder) {

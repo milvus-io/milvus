@@ -1515,6 +1515,11 @@ TEST(ColumnPlannerTest, LocatesSegmentOffsets) {
     const auto boundary = planner.Locate(3);
     EXPECT_EQ(boundary.cell_id, 1);
     EXPECT_EQ(boundary.cell_offset, 0);
+
+    ColumnPlanner single_cell(std::vector<int64_t>{0, 5});
+    const auto single_cell_last = single_cell.Locate(4);
+    EXPECT_EQ(single_cell_last.cell_id, 0);
+    EXPECT_EQ(single_cell_last.cell_offset, 4);
 }
 
 TEST(ColumnPlannerTest, BorrowsStableBoundariesAndOwnsTemporaryBoundaries) {
@@ -1547,6 +1552,26 @@ TYPED_TEST(ChunkedColumnInterfaceTest,
     EXPECT_TRUE(take->IsValid(1));
     EXPECT_FALSE(take->IsValid(2));
     EXPECT_TRUE(take->IsValid(3));
+    ASSERT_EQ(fx.pin_requests->size(), 1u);
+    EXPECT_EQ(fx.pin_requests->front(), (std::vector<int64_t>{0}));
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           NonNullableTakeIsValidRejectsInvalidOffsetWithoutPinning) {
+    ColumnSpec spec{{3, 2}, {}, /*nullable=*/false};
+    spec.data_type = DataType::INT32;
+    auto fx = TypeParam::Create(spec);
+
+    const FixedVector<int32_t> offsets{5};
+    auto take = fx.column->Take(
+        nullptr,
+        ChunkedColumnInterface::TakeOptions{
+            ChunkedColumnInterface::OffsetView::From(offsets.data(), 1),
+            ChunkedColumnInterface::TargetType::Int32});
+    ASSERT_NE(take, nullptr);
+
+    EXPECT_THROW(take->IsValid(0), std::exception);
+    EXPECT_TRUE(fx.pin_requests->empty());
 }
 
 TYPED_TEST(ChunkedColumnInterfaceTest,

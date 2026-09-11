@@ -242,6 +242,7 @@ struct GeneratedData {
                             std::copy_n(src_data, raw_->num_rows(), ret.data());
                             break;
                         }
+                        case DataType::STRING:
                         case DataType::VARCHAR: {
                             auto ret_data =
                                 reinterpret_cast<std::string*>(ret.data());
@@ -941,6 +942,7 @@ DataGen(SchemaPtr schema,
                 insert_cols(data, N, field_meta, random_valid);
                 break;
             }
+            case DataType::STRING:
             case DataType::VARCHAR: {
                 vector<std::string> data(N);
                 for (int i = 0; i < N / repeat_count; i++) {
