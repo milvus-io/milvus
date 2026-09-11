@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"sync"
 	"time"
@@ -452,19 +453,14 @@ type compactionBucket struct {
 	maxSize   int64
 }
 
-// generatePlans classifies candidate segments into prioritized (must
-// compact) and compactable (fill-rate below the full threshold) sets,
-// then composes compaction buckets with a two-tier bin-packing strategy:
-//
-//   - Full tier: pack compactable segments towards idealSize, only
-//     emitting a bucket when the packed size clears the fill-rate gate.
-//     This bounds each byte to at most one full-tier rewrite.
-//   - Fragment tier: once leftover fragments (residual size below the
-//     fragment threshold) exceed maxFragments, pack them towards
-//     middleSize so they don't accumulate unbounded before ever being
-//     compacted. Fragment-tier output feeds a later full-tier compaction,
-//     bounding total write amplification to at most 2x on the happy path.
 func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, signal *compactionSignal, compactTime *compactTime, expectedSize int64) []*compactionBucket {
+	if Params.DataCoordCfg.TwoTierCompaction.GetAsBool() {
+		return t.generatePlansTwoTier(segments, signal, compactTime, expectedSize)
+	}
+	return t.generatePlansLegacy(segments, signal, compactTime, expectedSize)
+}
+
+func (t *compactionTrigger) generatePlansTwoTier(segments []*SegmentInfo, signal *compactionSignal, compactTime *compactTime, expectedSize int64) []*compactionBucket {
 	if len(segments) == 0 {
 		mlog.Warn(context.TODO(), "the number of candidate segments is 0, skip to generate compaction plan")
 		return nil
@@ -512,7 +508,7 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, signal *compa
 		minSegs = 1
 	}
 	for {
-		pack, _ := packer.pack(expectedSize, fullMaxLeftSize, minSegs, math.MaxInt64)
+		pack, _ := packer.packSliding(expectedSize, fullMaxLeftSize, minSegs, math.MaxInt64)
 		if len(pack) == 0 {
 			break
 		}
@@ -585,6 +581,128 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, signal *compa
 	}
 
 	return buckets
+}
+
+func (t *compactionTrigger) generatePlansLegacy(segments []*SegmentInfo, signal *compactionSignal, compactTime *compactTime, expectedSize int64) []*compactionBucket {
+	if len(segments) == 0 {
+		mlog.Warn(context.TODO(), "the number of candidate segments is 0, skip to generate compaction plan")
+		return nil
+	}
+
+	var prioritizedCandidates []*SegmentInfo
+	var smallCandidates []*SegmentInfo
+	var nonPlannedSegments []*SegmentInfo
+
+	for _, segment := range segments {
+		segment := segment.ShadowClone()
+		if signal.isForce || t.ShouldDoSingleCompaction(segment, compactTime) {
+			prioritizedCandidates = append(prioritizedCandidates, segment)
+		} else if t.isSmallSegment(segment, expectedSize) {
+			smallCandidates = append(smallCandidates, segment)
+		} else {
+			nonPlannedSegments = append(nonPlannedSegments, segment)
+		}
+	}
+
+	buckets := [][]*SegmentInfo{}
+	toUpdate := newSegmentPacker("update", prioritizedCandidates, compactTime)
+	toMerge := newSegmentPacker("merge", smallCandidates, compactTime)
+
+	maxSegs := int64(4096)
+	minSegs := Params.DataCoordCfg.MinSegmentToMerge.GetAsInt64()
+	compactableProportion := Params.DataCoordCfg.SegmentCompactableProportion.GetAsFloat()
+	satisfiedSize := int64(float64(expectedSize) * compactableProportion)
+	maxLeftSize := expectedSize - satisfiedSize
+	reasons := make([]string, 0)
+
+	for {
+		pack, left := toMerge.pack(expectedSize, maxLeftSize, minSegs, maxSegs)
+		if len(pack) == 0 {
+			break
+		}
+		reasons = append(reasons, fmt.Sprintf("merging %d small segments with left size %d", len(pack), left))
+		buckets = append(buckets, pack)
+	}
+
+	for {
+		pack, _ := toUpdate.packWith(expectedSize, math.MaxInt64, 0, maxSegs, toMerge)
+		if len(pack) == 0 {
+			break
+		}
+		reasons = append(reasons, fmt.Sprintf("packing %d prioritized segments", len(pack)))
+		buckets = append(buckets, pack)
+	}
+	for _, s := range toUpdate.candidates {
+		buckets = append(buckets, []*SegmentInfo{s})
+		reasons = append(reasons, fmt.Sprintf("force packing prioritized segment %d", s.GetID()))
+	}
+
+	for {
+		pack, _ := toMerge.pack(expectedSize, math.MaxInt64, minSegs, maxSegs)
+		if len(pack) == 0 {
+			break
+		}
+		reasons = append(reasons, fmt.Sprintf("packing all %d small segments", len(pack)))
+		buckets = append(buckets, pack)
+	}
+	smallRemaining := t.squeezeSmallSegmentsToBuckets(toMerge.candidates, buckets, expectedSize)
+
+	result := make([]*compactionBucket, 0, len(buckets))
+	for _, b := range buckets {
+		var totalRows int64
+		for _, s := range b {
+			totalRows += s.GetNumOfRows()
+		}
+		result = append(result, &compactionBucket{
+			segments:  b,
+			totalRows: totalRows,
+			maxSize:   expectedSize,
+		})
+	}
+
+	if len(result) > 0 {
+		mlog.Info(context.TODO(), "generated nontrivial compaction tasks",
+			mlog.FieldCollectionID(signal.collectionID),
+			mlog.Int("prioritizedCandidates", len(prioritizedCandidates)),
+			mlog.Int("smallCandidates", len(smallCandidates)),
+			mlog.Int("nonPlannedSegments", len(nonPlannedSegments)),
+			mlog.Strings("reasons", reasons))
+	}
+	if len(smallRemaining) > 0 {
+		mlog.RatedInfo(context.TODO(), rate.Limit(300), "remain small segments",
+			mlog.FieldCollectionID(signal.collectionID),
+			mlog.FieldPartitionID(signal.partitionID),
+			mlog.String("channel", signal.channel),
+			mlog.Int("smallRemainingCount", len(smallRemaining)))
+	}
+	return result
+}
+
+func (t *compactionTrigger) isSmallSegment(segment *SegmentInfo, expectedSize int64) bool {
+	return segment.getSegmentSize() < int64(float64(expectedSize)*Params.DataCoordCfg.SegmentSmallProportion.GetAsFloat())
+}
+
+func isExpandableSmallSegment(segment *SegmentInfo, expectedSize int64) bool {
+	return segment.getSegmentSize() < int64(float64(expectedSize)*(Params.DataCoordCfg.SegmentExpansionRate.GetAsFloat()-1))
+}
+
+func (t *compactionTrigger) squeezeSmallSegmentsToBuckets(small []*SegmentInfo, buckets [][]*SegmentInfo, expectedSize int64) (remaining []*SegmentInfo) {
+	for i := len(small) - 1; i >= 0; i-- {
+		s := small[i]
+		if !isExpandableSmallSegment(s, expectedSize) {
+			continue
+		}
+		for bidx, b := range buckets {
+			totalSize := lo.SumBy(b, func(s *SegmentInfo) int64 { return s.getSegmentSize() })
+			if totalSize+s.getSegmentSize() > int64(Params.DataCoordCfg.SegmentExpansionRate.GetAsFloat()*float64(expectedSize)) {
+				continue
+			}
+			buckets[bidx] = append(buckets[bidx], s)
+			small = append(small[:i], small[i+1:]...)
+			break
+		}
+	}
+	return small
 }
 
 // getCandidates converts signal criterion into corresponding compaction candidate groups

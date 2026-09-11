@@ -17,6 +17,7 @@
 package datacoord
 
 import (
+	"math"
 	"sort"
 
 	"github.com/bits-and-blooms/bitset"
@@ -93,6 +94,49 @@ func (c *Knapsack[T]) pack(size, maxLeftSize, minSegs, maxSegs int64) ([]T, int6
 	}
 	segs := c.commit(selection)
 	return segs, left
+}
+
+// packSliding is like pack but slides past blocking head candidates.
+// When the greedy packer fails because the largest candidate consumes
+// too much capacity for the rest to form a valid group, packSliding
+// skips that candidate and retries with the remainder. Skipped
+// candidates are returned to the pool afterward.
+func (c *Knapsack[T]) packSliding(size, maxLeftSize, minSegs, maxSegs int64) ([]T, int64) {
+	var skipped []T
+	for {
+		segs, left := c.pack(size, maxLeftSize, minSegs, maxSegs)
+		if len(segs) > 0 {
+			c.candidates = append(skipped, c.candidates...)
+			return segs, left
+		}
+		if len(c.candidates) < 2 {
+			break
+		}
+		skipped = append(skipped, c.candidates[0])
+		c.candidates = c.candidates[1:]
+	}
+	c.candidates = append(skipped, c.candidates...)
+	return nil, size
+}
+
+func (c *Knapsack[T]) packWith(size, maxLeftSize, minSegs, maxSegs int64, other *Knapsack[T]) ([]T, int64) {
+	selection, left := c.tryPack(size, math.MaxInt64, 0, maxSegs)
+	if selection.Count() == 0 {
+		return nil, size
+	}
+
+	numPacked := int64(selection.Count())
+	otherSelection, left := other.tryPack(left, maxLeftSize, minSegs-numPacked, maxSegs-numPacked)
+
+	if otherSelection.Count() == 0 {
+		if left < maxLeftSize && int64(selection.Count()) >= minSegs {
+			return c.commit(selection), left
+		}
+		return nil, size
+	}
+	segs := c.commit(selection)
+	otherSegs := other.commit(otherSelection)
+	return append(segs, otherSegs...), left
 }
 
 func newSegmentPacker(name string, candidates []*SegmentInfo, compactTime *compactTime) *Knapsack[*SegmentInfo] {

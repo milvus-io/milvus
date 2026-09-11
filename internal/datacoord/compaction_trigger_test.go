@@ -1137,6 +1137,9 @@ func mockSegmentsInfo(sizeInMB ...int64) *SegmentsInfo {
 
 // Test compaction with prioritized candi
 func Test_compactionTrigger_PrioritizedCandi(t *testing.T) {
+	Params.Save(Params.DataCoordCfg.TwoTierCompaction.Key, "true")
+	defer Params.Save(Params.DataCoordCfg.TwoTierCompaction.Key, "false")
+
 	type fields struct {
 		meta          *meta
 		allocator     allocator.Allocator
@@ -1279,6 +1282,9 @@ func Test_compactionTrigger_PrioritizedCandi(t *testing.T) {
 
 // Test compaction with small candi
 func Test_compactionTrigger_SmallCandi(t *testing.T) {
+	Params.Save(Params.DataCoordCfg.TwoTierCompaction.Key, "true")
+	defer Params.Save(Params.DataCoordCfg.TwoTierCompaction.Key, "false")
+
 	type fields struct {
 		meta          *meta
 		allocator     allocator.Allocator
@@ -1427,6 +1433,9 @@ func Test_compactionTrigger_SmallCandi(t *testing.T) {
 
 // Test segment compaction target size
 func Test_compactionTrigger_noplan_random_size(t *testing.T) {
+	Params.Save(Params.DataCoordCfg.TwoTierCompaction.Key, "true")
+	defer Params.Save(Params.DataCoordCfg.TwoTierCompaction.Key, "false")
+
 	type fields struct {
 		meta          *meta
 		allocator     allocator.Allocator
@@ -2906,9 +2915,10 @@ func Test_compactionTrigger_generatePlans(t *testing.T) {
 
 	tests := []struct {
 		name   string
-		fields fields
-		args   args
-		want   []wantBucket
+		fields  fields
+		args    args
+		want    []wantBucket
+		twoTier bool
 	}{
 		{
 			name: "force trigger on large segments",
@@ -2980,7 +2990,8 @@ func Test_compactionTrigger_generatePlans(t *testing.T) {
 			// the fragment threshold (256*0.85=217) but their count (5)
 			// stays under MaxFragmentsPerGroup (8), so no fragment-tier
 			// bucket is emitted for them: cascading compaction is avoided.
-			name: "full-tier packs five 200-sized segments leaving fragments below maxFragments",
+			name:    "full-tier packs five 200-sized segments leaving fragments below maxFragments",
+			twoTier: true,
 			fields: fields{
 				meta:      makeMetaWithSegs(makeSeg(1, 200), makeSeg(2, 200), makeSeg(3, 200), makeSeg(4, 200), makeSeg(5, 200), makeSeg(6, 50), makeSeg(7, 45), makeSeg(8, 40), makeSeg(9, 35), makeSeg(10, 30)),
 				allocator: mock0Allocator,
@@ -3006,7 +3017,8 @@ func Test_compactionTrigger_generatePlans(t *testing.T) {
 			// MaxFragmentsPerGroup (8), so they are packed towards
 			// middleSize (1024/4=256) instead of being left to accumulate
 			// unboundedly.
-			name: "fragment-tier triggers when fragment count exceeds maxFragments",
+			name:    "fragment-tier triggers when fragment count exceeds maxFragments",
+			twoTier: true,
 			fields: fields{
 				meta: makeMetaWithSegs(func() []*SegmentInfo {
 					segs := make([]*SegmentInfo, 50)
@@ -3040,7 +3052,8 @@ func Test_compactionTrigger_generatePlans(t *testing.T) {
 			// (neither prioritized nor compactable). The remaining two
 			// 100-sized segments total 200 < 870 and their count (2) is
 			// under maxFragments, so no bucket is emitted at all.
-			name: "full segments are excluded from packing",
+			name:    "full segments are excluded from packing",
+			twoTier: true,
 			fields: fields{
 				meta:      makeMetaWithSegs(makeSeg(1, 900), makeSeg(2, 100), makeSeg(3, 100)),
 				allocator: mock0Allocator,
@@ -3060,7 +3073,8 @@ func Test_compactionTrigger_generatePlans(t *testing.T) {
 			// Two 450-sized segments sum to 900 >= 870, clearing the
 			// fill-rate gate without needing a minimum segment count
 			// (the full-tier packer only requires >= 2 segments).
-			name: "two segments compose without a minimum segment count",
+			name:    "two segments compose without a minimum segment count",
+			twoTier: true,
 			fields: fields{
 				meta:      makeMetaWithSegs(makeSeg(1, 450), makeSeg(2, 450)),
 				allocator: mock0Allocator,
@@ -3075,9 +3089,64 @@ func Test_compactionTrigger_generatePlans(t *testing.T) {
 				{segmentIDs: []int64{1, 2}, maxSize: 1024},
 			},
 		},
+		{
+			// An 800-sized segment blocks the greedy packer: it is
+			// selected first but leaves only 224 capacity, too little
+			// for any 300-sized segment. Without the skip-and-retry
+			// logic the three 300s would never be tried. The packer
+			// skips the 800, packs [300,300,300]=900 (>=870), and
+			// leaves the 800 as a non-full leftover.
+			name:    "skip blocking large segment to pack smaller ones",
+			twoTier: true,
+			fields: fields{
+				meta:      makeMetaWithSegs(makeSeg(1, 800), makeSeg(2, 300), makeSeg(3, 300), makeSeg(4, 300)),
+				allocator: mock0Allocator,
+			},
+			args: args{
+				segments: []*SegmentInfo{
+					makeSeg(1, 800), makeSeg(2, 300),
+					makeSeg(3, 300), makeSeg(4, 300),
+				},
+				signal:       &compactionSignal{collectionID: 2, partitionID: 1, channel: "ch1"},
+				compactTime:  zeroCompactTime,
+				expectedSize: 1024,
+			},
+			want: []wantBucket{
+				{segmentIDs: []int64{2, 3, 4}, maxSize: 1024},
+			},
+		},
+		{
+			// Similar to the previous case with a different shape:
+			// [600,500,500]. The greedy packer selects 600 first,
+			// leaving 424 — too little for 500. But 500+500=1000
+			// (>=870) is valid. The packer skips 600 and packs the
+			// two 500s.
+			name:    "skip one large segment so two medium segments can pair",
+			twoTier: true,
+			fields: fields{
+				meta:      makeMetaWithSegs(makeSeg(1, 600), makeSeg(2, 500), makeSeg(3, 500)),
+				allocator: mock0Allocator,
+			},
+			args: args{
+				segments: []*SegmentInfo{
+					makeSeg(1, 600), makeSeg(2, 500), makeSeg(3, 500),
+				},
+				signal:       &compactionSignal{collectionID: 2, partitionID: 1, channel: "ch1"},
+				compactTime:  zeroCompactTime,
+				expectedSize: 1024,
+			},
+			want: []wantBucket{
+				{segmentIDs: []int64{2, 3}, maxSize: 1024},
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.twoTier {
+				Params.Save(Params.DataCoordCfg.TwoTierCompaction.Key, "true")
+				defer Params.Save(Params.DataCoordCfg.TwoTierCompaction.Key, "false")
+			}
+
 			tr := &compactionTrigger{
 				meta:          tt.fields.meta,
 				handler:       newMockHandlerWithMeta(tt.fields.meta),
@@ -3104,6 +3173,9 @@ func Test_compactionTrigger_generatePlans(t *testing.T) {
 }
 
 func Test_compactionTrigger_generatePlansByTime(t *testing.T) {
+	Params.Save(Params.DataCoordCfg.TwoTierCompaction.Key, "true")
+	defer Params.Save(Params.DataCoordCfg.TwoTierCompaction.Key, "false")
+
 	catalog := mocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil).Maybe()
 

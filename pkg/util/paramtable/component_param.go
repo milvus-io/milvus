@@ -5721,6 +5721,7 @@ type dataCoordConfig struct {
 	StorageVersionCompactionSessionVersionRequirement ParamItem `refreshable:"true"`
 
 	MaxFragmentsPerGroup ParamItem `refreshable:"true"`
+	TwoTierCompaction    ParamItem `refreshable:"true"`
 
 	ChannelCheckpointMaxLag ParamItem `refreshable:"true"`
 	SyncSegmentsInterval    ParamItem `refreshable:"false"`
@@ -6367,6 +6368,15 @@ mix is prioritized by level: mix compactions first, then L0 compactions, then cl
 		Export:       true,
 	}
 	p.MaxFragmentsPerGroup.Init(base.mgr)
+
+	p.TwoTierCompaction = ParamItem{
+		Key:          "dataCoord.compaction.twoTierCompaction",
+		Version:      "2.6.0",
+		DefaultValue: "false",
+		Doc:          "whether to use the two-tier (full + fragment) compaction algorithm instead of the legacy algorithm",
+		Export:       false,
+	}
+	p.TwoTierCompaction.Init(base.mgr)
 
 	p.GlobalCompactionInterval = ParamItem{
 		Key:          "dataCoord.compaction.global.interval",
