@@ -119,13 +119,9 @@ func transformManifestPath(
 // describe state the snapshot never included and whose files this copy does not
 // carry over.
 //
-// Carrying them to the target is not merely wasteful, it is unsound: loon
-// discovers the current version by listing the manifest directory and taking
-// the highest revision number, and a commit whose read version is behind that
-// resolves against the highest revision and writes one past it. The target's
-// next manifest commit would therefore merge onto the SOURCE's post-snapshot
-// state and publish it as the target's own. Keeping only the pinned revision
-// makes the target's history start exactly where the snapshot ended.
+// Only the pinned revision belongs to the snapshot. OVERWRITE applies updates
+// to that specified read revision; higher revisions affect the next version
+// number, not its contents. Excluding unrelated history avoids extra copying.
 func excludeUnpinnedManifestRevisions(files []string, pinnedManifest string) []string {
 	pinnedName := path.Base(pinnedManifest)
 	kept := make([]string, 0, len(files))
@@ -494,11 +490,19 @@ func CopySegmentAndIndexFiles(
 			return nil, copiedFiles, merr.Wrap(err, "failed to transform manifest path")
 		}
 		sourceManifestKnownEmpty := source.ManifestHasIndex != nil && !source.GetManifestHasIndex()
+		copiedManifestPath := targetManifestPath
 		targetManifestPath, manifestIndexBuildIDs, err = republishCopiedManifestIndexes(
 			ctx, targetManifestPath, target, source.GetNumOfRows(), targetStorageConfig, indexInfos,
 			sourceManifestKnownEmpty)
 		if err != nil {
 			return nil, copiedFiles, merr.Wrap(err, "failed to republish copied manifest indexes")
+		}
+		if targetManifestPath != copiedManifestPath {
+			revisionFile, err := packed.ManifestFilePath(targetManifestPath)
+			if err != nil {
+				return nil, copiedFiles, err
+			}
+			copiedFiles = append(copiedFiles, revisionFile)
 		}
 	}
 
@@ -569,7 +573,7 @@ func CopySegmentAndIndexFiles(
 // the pointer DataCoord publishes is already correct and needs no second commit.
 //
 // The entries to drop are enumerated from the copied manifest itself unless
-// the snapshot's sticky marker proves the index section empty. The manifest
+// the snapshot's captured marker proves the index section empty. The manifest
 // object is already in the target bucket, so enumeration also works for an
 // external restore where DataCoord cannot read the source bucket.
 func republishCopiedManifestIndexes(

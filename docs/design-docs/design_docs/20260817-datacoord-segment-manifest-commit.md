@@ -133,19 +133,22 @@ Single-writer manifest writes do not serialize and are published inline via
   channel-owner check in `SaveBinlogPaths`, and a re-sent identical pointer is a
   no-op, so no base-match CAS is required.  The flusher returns a complete
   manifest pointer, which DataCoord records directly.
-- The finalization of a fresh copy or import target.  It is pre-registered with
-  an **empty** manifest path (`snapshot_manager.go`, `import_util.go`) and stays
-  `Importing` — invisible to stats/index/compaction, which gate on
-  `Flushed`/`Flushing` — until a single `Importing -> Flushed` finalization.  Its
-  worker returns a complete manifest pointer. Copy finalization reads back non-empty
+- The finalization of a fresh copy or import target. It is initially registered
+  with an empty manifest path (`snapshot_manager.go`, `import_util.go`). Before
+  dispatch, `copySegmentTask.prepareCopyCleanup` gives an Importing V3 copy
+  target a version-zero manifest pointer identifying its cleanup base; this
+  placeholder does not imply that a manifest file exists. During copying, the
+  target is `Importing`, excluding stats/index/compaction work that gates on
+  `Flushed`/`Flushing`. Successful finalization installs the worker's complete
+  manifest pointer and sets the target to `Flushed`. Copy finalization reads back non-empty
   index metadata to verify target identity and artifact paths; it creates no new
-  revision. No other writer touches the target before publication.
+  revision. These state filters exclude regular stats/index/compaction work;
+  they do not serialize copy finalization with task failure and cleanup.
 
-Because these paths have no concurrent writer, `UpdateManifest` carries no
-StorageV3 guard.  A producer may write data files, but a job that publishes into
-the concurrent post-flush window does not select a visible manifest revision
-itself; it hands DataCoord the structured entries and DataCoord commits the
-revision under the lock.
+These paths use `UpdateManifest` to adopt a worker-produced pointer; that
+operator has no StorageV3 guard. Participating post-flush writers instead hand
+DataCoord structured entries and create the revision under the segment lock.
+The backfill and external-refresh adoption bypasses are described below.
 
 ## API Shape
 
@@ -191,14 +194,19 @@ catalog write.
 
 For one segment, the protocol is:
 
-1. Lock `segmentManifestLocks[segmentID]`.
+1. Lock `segmentManifestLocks[segmentID]`. If the commit mutates SegmentIndex
+   records, acquire their `indexMeta.keyLock` locks in BuildID order and retain
+   them through manifest I/O and catalog publication.
 2. Briefly take `segMu`, clone the current `SegmentInfo`, and release `segMu`.
    Validate segment existence, StorageV3, health/state, and
    `ExpectedManifest` where the operation depends on a specific input.
-3. Execute the `packed` transaction using the cloned/current manifest.  The
-   packed resolver is `OVERWRITE`: under the segment lock there is no competing
-   local writer, while the resolver gives a deterministic latest-manifest
-   rebase for retry/leader-handoff races.
+3. Execute the `packed` transaction using that snapshot's manifest pointer.
+   In the pinned milvus-storage revision (`3ae6ac4`), `OVERWRITE` applies the
+   updates to the specified read manifest. The highest stored revision only
+   determines the next revision number; its contents are not merged. The
+   segment lock serializes participating local writers. The resolver alone
+   does not prevent lost updates from external writers or an overlapping
+   leader handoff.
 4. Reacquire `segMu`, reload the latest `SegmentInfo`, and revalidate segment
    health and `ExpectedManifest`. Apply the new pointer and catalog mutation to
    that latest clone, preserving unrelated ordinary metadata updates that ran
@@ -209,8 +217,8 @@ For one segment, the protocol is:
    `UpdateSegmentsInfo` consistency model: final catalog publications are
    serialized, while the slower manifest I/O for different segments remains
    concurrent. If the catalog write fails, do not change memory.
-6. Install the cloned metadata in memory, then release `segMu` and the segment
-   lock.
+6. Install the cloned metadata in memory, then release `segMu`. Release any
+   BuildID locks and the segment lock when the commit returns.
 
 The lock ordering is always:
 
@@ -218,13 +226,14 @@ The lock ordering is always:
 segmentManifestLock(segmentID) -> indexMeta.keyLock(buildID) -> segMu
 ```
 
-`segMu` is never held during object-storage I/O, and the BuildID key lock is
-acquired only after the manifest I/O completes, immediately before the final
-`segMu` publication (the pre-I/O `segMu` snapshot is a read lock released
-before any I/O or key-lock acquisition). Every other `SegmentIndex` writer
-takes `keyLock` and only then reads segment state under `segMu`, so a commit
-must take the key lock before - never inside or after - its final `segMu`
-section. No code may take a BuildID lock first and
+`segMu` is never held during object-storage I/O. For commits with SegmentIndex
+mutations, the BuildID locks are acquired before the initial `segMu` snapshot
+and held across manifest I/O and final publication. They keep the authoritative
+task projection stable while the manifest entry is generated and published.
+Other `SegmentIndex` writers take `keyLock` before reading segment state under
+`segMu`; the commit preserves this order in both its snapshot and publication
+sections. Commits without SegmentIndex mutations acquire no BuildID lock.
+No code may take a BuildID lock first and
 then attempt a segment manifest commit.  Multi-segment operations sort segment
 IDs before locking.  Where possible, compaction creates independent target
 segments rather than committing two segments under one lock.
@@ -314,7 +323,7 @@ manifest entry.
 
 Reload follows durable placement rather than the switch's current value. It
 first loads etcd task records, then reads each healthy, non-L0 StorageV3
-segment whose sticky `manifest_has_index` marker says a manifest entry has been
+segment whose `manifest_has_index` marker says a manifest entry has been
 published. Entries whose build IDs are absent from etcd are projected into
 in-memory `SegmentIndex` records; etcd wins conflicts, preserving task states
 and record-resident results. A marked manifest that cannot be read fails
@@ -325,7 +334,7 @@ object-storage fan-out is bounded by
 
 The switch may be changed in either direction. Turning it off sends new
 completions to etcd but does not move or hide records already resident in
-manifests; their sticky marker keeps reload and GC on those manifests. Turning
+manifests; their marker keeps reload and GC on those manifests. Turning
 it on again resumes manifest publication. No inverse feature switch and no
 eager manifest-to-etcd backfill are required, so mixed historical placement is
 supported without dual-writing an individual result.
@@ -342,7 +351,7 @@ already dropped has no `SegmentIndex` record by construction, and GC is entirely
 record-driven (`GetAllSegIndexes`, `GetDeletedIndexesWithV1Path`), so an entry
 with no record is never visited again and its bytes leak for the
 COLLECTION_ROOTED layout. The reload filter is therefore: healthy, non-L0,
-StorageV3, non-empty manifest path, and sticky `manifest_has_index`.
+StorageV3, non-empty manifest path, and `manifest_has_index`.
 
 Every entry read is validated with the same predicate the other manifest
 consumers use (`manifestIndexFilePathInfo`) before it becomes a record, because
@@ -379,7 +388,7 @@ off-by-default rather than removed:
   no manifest representation, they continue to persist in etcd. A recovered
   manifest record is `Finished` by construction.
 - Mode changes affect new terminal results only. Historical etcd and manifest
-  records may coexist; the sticky per-segment marker makes both recoverable.
+  records may coexist; the per-segment marker makes both recoverable.
 
 A version-skew guard protects the one cross-binary interaction: with the
 switch on, a copy executed by a DataNode that predates manifest index
@@ -492,3 +501,9 @@ same release.
    manifest.
 6. Tests demonstrate each required race and failure case rather than only
    successful sequential execution.
+
+## Recovery and restore resource bounds
+
+See [the index-publication design](20260811-storagev3-manifest-index-publication.md#recovery-and-restore-resource-bounds)
+for the shared manifest-read budget, empty-marker normalization, copy request
+compatibility, durable cleanup plans, and activation/rollback boundaries.

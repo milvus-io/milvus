@@ -2817,6 +2817,23 @@ func TestCopySegmentAndIndexFiles_WithManifest(t *testing.T) {
 		assert.Contains(t, copiedSrcPaths, "files/delta_log/111/222/333/0/30001")
 	})
 
+	t.Run("republished revision belongs to cleanup inventory", func(t *testing.T) {
+		mockNoManifestLobFiles(t)
+		mockCopiedManifestIndexEntries(t, []packed.ManifestIndexInfo{{IndexID: 1}})
+		defer mockey.Mock(listAllFiles).Return([]string{"files/insert_log/111/222/333/_data/0"}, nil).Build().UnPatch()
+		republished := packed.MarshalManifestPath("files/insert_log/444/555/666", 3)
+		defer mockey.Mock(packed.CommitManifestUpdates).Return(republished, nil).Build().UnPatch()
+		copier := newCopySegmentCopierMock(t, func(context.Context, string, string, string, string) error { return nil })
+		result, copiedFiles, err := CopySegmentAndIndexFiles(context.Background(), &struct{ storage.ChunkManager }{},
+			&indexpb.StorageConfig{BucketName: "test-bucket"}, &indexpb.StorageConfig{BucketName: "test-bucket"},
+			copier, "test-bucket", "test-bucket", source, target, nil)
+		require.NoError(t, err)
+		require.Equal(t, republished, result.GetManifestPath())
+		revisionFile, err := packed.ManifestFilePath(republished)
+		require.NoError(t, err)
+		require.Contains(t, copiedFiles, revisionFile)
+	})
+
 	t.Run("copy failure on physical file", func(t *testing.T) {
 		mockNoManifestLobFiles(t)
 

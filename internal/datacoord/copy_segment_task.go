@@ -47,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -179,6 +180,8 @@ type CopySegmentTask interface {
 	GetState() datapb.CopySegmentTaskState
 	GetReason() string
 	GetIndexWriteToManifest() (bool, bool)
+	GetCleanupPrefixes() []string
+	GetCleanupRequired() bool
 	GetIdMappings() []*datapb.CopySegmentIDMapping // Lightweight ID mappings
 	GetTR() *timerecord.TimeRecorder
 	Clone() CopySegmentTask
@@ -221,6 +224,22 @@ func (c *copySegmentSnapshotCache) load(
 // ===========================================================================================
 // Task Getters
 // ===========================================================================================
+
+func (t *copySegmentTask) GetCleanupPrefixes() []string { return t.task.Load().GetCleanupPrefixes() }
+func (t *copySegmentTask) GetCleanupRequired() bool     { return t.task.Load().GetCleanupRequired() }
+
+func updateCopyTaskCleanup(required bool) UpdateCopySegmentTaskAction {
+	return func(task CopySegmentTask) { task.(*copySegmentTask).task.Load().CleanupRequired = required }
+}
+
+// Keep every dispatch's allocated index directories: a retry allocates new
+// build IDs, and an earlier attempt may have uploaded files before losing its reply.
+func appendCopyTaskCleanupPrefixes(prefixes []string) UpdateCopySegmentTaskAction {
+	return func(task CopySegmentTask) {
+		record := task.(*copySegmentTask).task.Load()
+		record.CleanupPrefixes = slices.Compact(slices.Sorted(slices.Values(append(record.CleanupPrefixes, prefixes...))))
+	}
+}
 
 // GetTaskId returns the unique task identifier.
 func (t *copySegmentTask) GetTaskId() int64 {
@@ -389,6 +408,10 @@ func (t *copySegmentTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 		}
 		return
 	}
+	if err := t.prepareCopyCleanup(ctx, req); err != nil {
+		mlog.Warn(ctx, "failed to persist copy cleanup plan", mlog.FieldTaskID(t.GetTaskId()), mlog.Err(err))
+		return
+	}
 	err = cluster.CreateCopySegment(nodeID, req, t.GetCollectionId(), job.GetExternal())
 	if err != nil {
 		mlog.Warn(ctx, "failed to create copy segment task on datanode",
@@ -440,7 +463,7 @@ func (t *copySegmentTask) markTaskAndJobFailed(reason string) {
 			UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
 			UpdateCopyJobReason(reason))
 		if updateErr != nil {
-			mlog.Warn(context.TODO(), "failed to update job state to Failed",
+			mlog.Warn(t.ctx, "failed to update job state to Failed",
 				mlog.FieldJobID(t.GetJobId()), mlog.Err(updateErr))
 		}
 	}
@@ -552,6 +575,12 @@ func (t *copySegmentTask) QueryTaskOnWorker(cluster session.Cluster) {
 	// Sync task state and binlog info
 	err = SyncCopySegmentTask(t, resp, t.copyMeta, t.meta)
 	if err != nil {
+		if !t.GetCleanupRequired() {
+			// Admission failed before cleanup intent was durable. Retry the
+			// completed result; marking Failed here would lose its cleanup plan.
+			mlog.Warn(t.ctx, "retry completed copy after cleanup intent persistence failure", mlog.FieldTaskID(t.GetTaskId()), mlog.Err(err))
+			return
+		}
 		t.markTaskAndJobFailed(fmt.Sprintf("failed to sync segment metadata: %v", err))
 		return
 	}
@@ -588,6 +617,9 @@ func (t *copySegmentTask) DropTaskOnWorker(cluster session.Cluster) {
 			WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(err))...)
 		return
 	}
+	if err := t.copyMeta.UpdateTask(t.ctx, t.GetTaskId(), UpdateCopyTaskNodeID(NullNodeID)); err != nil {
+		mlog.Warn(t.ctx, "failed to clear copy worker assignment", mlog.FieldTaskID(t.GetTaskId()), mlog.Err(err))
+	}
 	mlog.Info(context.TODO(), "drop copy segment task on datanode done",
 		WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID))...)
 }
@@ -595,6 +627,67 @@ func (t *copySegmentTask) DropTaskOnWorker(cluster session.Cluster) {
 // ===========================================================================================
 // Helper Functions
 // ===========================================================================================
+
+// prepareCopyCleanup records only coordinator-derived task-owned directories.
+// No worker-supplied directory is ever promoted into a deletion prefix.
+func (t *copySegmentTask) prepareCopyCleanup(ctx context.Context, req *datapb.CopySegmentRequest) error {
+	var prefixes []string
+	var operators []UpdateOperator
+	for i, target := range req.GetTargets() {
+		source := req.GetSources()[i]
+		if source.GetStorageVersion() < storage.StorageV3 {
+			continue
+		}
+		root := req.GetStorageConfig().GetRootPath()
+		base := path.Join(root, common.SegmentInsertLogPath, fmt.Sprint(target.GetCollectionId()), fmt.Sprint(target.GetPartitionId()), fmt.Sprint(target.GetSegmentId()))
+		for _, logType := range []string{common.SegmentInsertLogPath, common.SegmentStatslogPath, common.SegmentDeltaLogPath, common.SegmentBm25LogPath} {
+			prefixes = append(prefixes, path.Join(root, logType, fmt.Sprint(target.GetCollectionId()), fmt.Sprint(target.GetPartitionId()), fmt.Sprint(target.GetSegmentId()))+"/")
+		}
+		// An Importing placeholder needs a base even if validation later refuses
+		// the worker's first manifest. GC can then reclaim it after worker loss.
+		segmentID := target.GetSegmentId()
+		operators = append(operators, func(pack *updateSegmentPack) bool {
+			segment := pack.Get(segmentID)
+			if segment == nil || segment.GetState() != commonpb.SegmentState_Importing || segment.GetManifestPath() != "" {
+				return false
+			}
+			segment.ManifestPath = packed.MarshalManifestPath(base, 0)
+			return true
+		})
+		for _, info := range source.GetIndexFiles() {
+			buildID := target.GetNewBuildIds()[info.GetBuildID()]
+			if buildID <= 0 {
+				return merr.WrapErrServiceInternalMsg("missing allocated copy build ID for %d", info.GetBuildID())
+			}
+			builder := metautil.NewIndexPathBuilder(root, info.GetIndexStorePathVersion(), target.GetCollectionId(), target.GetPartitionId(), target.GetSegmentId(), buildID, info.GetIndexVersion())
+			prefixes = append(prefixes, builder.BuildPrefix()+"/")
+		}
+	}
+	if len(prefixes) == 0 {
+		return nil
+	}
+	if err := t.copyMeta.UpdateTask(ctx, t.GetTaskId(), appendCopyTaskCleanupPrefixes(prefixes)); err != nil {
+		return err
+	}
+	return t.meta.UpdateSegmentsInfo(ctx, operators...)
+}
+
+// Only a completed worker result sets CleanupRequired. By the time a failed
+// task reaches this path, no copy work from that result is still writing.
+func cleanupRejectedCopy(ctx context.Context, task CopySegmentTask, meta *meta, copyMeta CopySegmentMeta) error {
+	if !task.GetCleanupRequired() {
+		return nil
+	}
+	if meta.chunkManager == nil {
+		return merr.WrapErrServiceUnavailableMsg("copy cleanup storage is unavailable")
+	}
+	for _, prefix := range task.GetCleanupPrefixes() {
+		if err := meta.chunkManager.RemoveWithPrefix(ctx, prefix); err != nil {
+			return merr.Wrap(err, "cleanup rejected copy")
+		}
+	}
+	return copyMeta.UpdateTask(ctx, task.GetTaskId(), updateCopyTaskCleanup(false))
+}
 
 // WrapCopySegmentTaskLog creates structured log fields for copy segment tasks.
 //
@@ -803,7 +896,7 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 					return struct{}{}, err
 				}
 				source := preparedSources[mappingIndex]
-				manifestIndexes, err := packed.GetManifestIndexInfos(source.GetManifestPath(), storageConfig)
+				manifestIndexes, err := t.meta.readManifestIndexes(ctx, source.GetManifestPath(), storageConfig)
 				if err != nil {
 					return struct{}{}, merr.Wrapf(err,
 						"failed to load source index metadata from manifest for segment %d", source.GetSegmentId())
@@ -836,7 +929,7 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 		// If the snapshot predates manifest-only finished records, IndexFiles is
 		// already complete and no manifest read is needed. Otherwise, supplement
 		// it from the source manifest. After the copy the worker either uses the
-		// sticky marker as proof of an empty index section or enumerates and
+		// captured marker as proof of an empty index section or enumerates and
 		// retracts inherited entries itself; DataCoord does not need to ship a
 		// second advisory list of the same IDs.
 		if !snapshotCarriesIndexFiles {
@@ -895,7 +988,6 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 			SegmentId:      targetSegID,
 			NewBuildIds:    newBuildIDs,
 			TargetRootPath: storageConfig.GetRootPath(),
-			TargetIndexes:  targetIndexes,
 		}
 		mlog.Info(ctx, "prepare copy segment source and target",
 			WrapCopySegmentTaskLog(task,
@@ -912,6 +1004,7 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 	}
 
 	return &datapb.CopySegmentRequest{
+		TargetIndexes: targetIndexes,
 		ClusterID:     Params.CommonCfg.ClusterPrefix.GetValue(),
 		JobID:         task.GetJobId(),
 		TaskID:        task.GetTaskId(),
@@ -1000,8 +1093,31 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 	// Update task state based on response
 	switch resp.GetState() {
 	case datapb.CopySegmentTaskState_CopySegmentTaskCompleted:
-		// Update binlog information for all segments
-		for _, result := range resp.GetSegmentResults() {
+		if err := copyMeta.UpdateTask(ctx, task.GetTaskId(), updateCopyTaskCleanup(true)); err != nil {
+			return err
+		}
+		results := resp.GetSegmentResults()
+		verified := make([]map[int64]int64, len(results))
+		verificationErrors := make([]error, len(results))
+		pool := conc.NewPool[struct{}](min(max(1, len(results)), segmentIndexManifestReadConcurrency()))
+		futures := make([]*conc.Future[struct{}], 0, len(results))
+		for i, result := range results {
+			futures = append(futures, pool.Submit(func() (struct{}, error) {
+				verified[i], verificationErrors[i] = verifyCopiedManifestIndexOwnership(ctx, result, task, meta)
+				return struct{}{}, nil
+			}))
+		}
+		_ = conc.BlockOnAll(futures...)
+		pool.Release()
+		for i, result := range results {
+			if verificationErrors[i] != nil {
+				return failCopySegmentSync(ctx, task, copyMeta, verificationErrors[i])
+			}
+			if err := validateCopiedManifestIndexPlacement(result, task, meta, verified[i]); err != nil {
+				return failCopySegmentSync(ctx, task, copyMeta, err)
+			}
+		}
+		for i, result := range results {
 			// Update binlog info and segment state to Flushed
 			// For StorageV3+ segments, also update manifest_path
 			op1 := UpdateBinlogsOperator(result.GetSegmentId(), result.GetBinlogs(),
@@ -1009,7 +1125,6 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 			op2 := UpdateStatusOperator(result.GetSegmentId(), commonpb.SegmentState_Flushed)
 			op3 := UpdateIsImporting(result.GetSegmentId(), false)
 			operators := []UpdateOperator{op1, op2, op3}
-			var err error
 			// A copy target is a freshly created, exclusively owned segment and the
 			// worker returns a complete manifest pointer - including the copied
 			// index entries, which it re-derives rather than inheriting from the
@@ -1022,44 +1137,22 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 			// skips the republication (the result carries no acknowledgement and
 			// the cluster RPC has no version gate), so the pointer is read back
 			// and rejected before publication if it still carries foreign entries.
-			var publishedBuilds map[int64]int64
+			publishedBuilds := verified[i]
 			if manifestPath := result.GetManifestPath(); manifestPath != "" {
 				operators = append(operators, UpdateManifest(result.GetSegmentId(), manifestPath))
-				publishedBuilds, err = verifyCopiedManifestIndexOwnership(ctx, result, task, meta)
-				if err == nil && len(publishedBuilds) > 0 {
+				if len(publishedBuilds) > 0 {
 					// The worker-created manifest is adopted outside
-					// CommitSegmentManifest, so publish its sticky recovery
+					// CommitSegmentManifest, so publish its recovery
 					// marker in the same segment transaction as the pointer.
 					operators = append(operators, UpdateManifestHasIndex(result.GetSegmentId()))
 				}
 			}
-			if err == nil {
-				err = validateCopiedManifestIndexPlacement(result, task, meta, publishedBuilds)
-			}
+			err := validateCopiedManifestIndexPlacement(result, task, meta, publishedBuilds)
 			if err == nil {
 				err = meta.UpdateSegmentsInfo(ctx, operators...)
 			}
 			if err != nil {
-				// On error, mark task and job as failed
-				updateErr := copyMeta.UpdateTask(ctx, task.GetTaskId(),
-					UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskFailed),
-					UpdateCopyTaskReason(err.Error()))
-				if updateErr != nil {
-					mlog.Warn(context.TODO(), "failed to update task state to Failed",
-						mlog.FieldTaskID(task.GetTaskId()), mlog.Err(updateErr))
-				}
-
-				updateErr = copyMeta.UpdateJobStateAndReleaseRef(ctx, task.GetJobId(),
-					UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
-					UpdateCopyJobReason(err.Error()))
-				if updateErr != nil {
-					mlog.Warn(context.TODO(), "failed to update job state to Failed",
-						mlog.FieldJobID(task.GetJobId()), mlog.Err(updateErr))
-				}
-
-				mlog.Warn(context.TODO(), "update copy segment binlogs failed",
-					WrapCopySegmentTaskLog(task, mlog.String("err", err.Error()))...)
-				return err
+				return failCopySegmentSync(ctx, task, copyMeta, err)
 			}
 
 			// Sync vector/scalar indexes
@@ -1098,6 +1191,7 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 
 		return copyMeta.UpdateTask(ctx, task.GetTaskId(),
 			UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskCompleted),
+			updateCopyTaskCleanup(false),
 			UpdateCopyTaskCompleteTs(completeTs))
 
 	case datapb.CopySegmentTaskState_CopySegmentTaskFailed:
@@ -1106,6 +1200,29 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 			UpdateCopyTaskReason(resp.GetReason()))
 	}
 	return nil
+}
+
+func failCopySegmentSync(ctx context.Context, task CopySegmentTask, copyMeta CopySegmentMeta, err error) error {
+	// On error, mark task and job as failed
+	updateErr := copyMeta.UpdateTask(ctx, task.GetTaskId(),
+		UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskFailed),
+		UpdateCopyTaskReason(err.Error()))
+	if updateErr != nil {
+		mlog.Warn(ctx, "failed to update task state to Failed",
+			mlog.FieldTaskID(task.GetTaskId()), mlog.Err(updateErr))
+	}
+
+	updateErr = copyMeta.UpdateJobStateAndReleaseRef(ctx, task.GetJobId(),
+		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
+		UpdateCopyJobReason(err.Error()))
+	if updateErr != nil {
+		mlog.Warn(ctx, "failed to update job state to Failed",
+			mlog.FieldJobID(task.GetJobId()), mlog.Err(updateErr))
+	}
+
+	mlog.Warn(ctx, "update copy segment binlogs failed",
+		WrapCopySegmentTaskLog(task, mlog.String("err", err.Error()))...)
+	return err
 }
 
 // verifyCopiedManifestIndexOwnership binds each published build to its actual
@@ -1135,7 +1252,7 @@ func verifyCopiedManifestIndexOwnership(ctx context.Context, result *datapb.Copy
 		}
 	}
 	storageConfig := createStorageConfig()
-	entries, err := packed.GetManifestIndexInfos(manifestPath, storageConfig)
+	entries, err := meta.readManifestIndexes(ctx, manifestPath, storageConfig)
 	if err != nil {
 		return nil, merr.Wrapf(err, "failed to read back copied manifest indexes for segment %d", result.GetSegmentId())
 	}

@@ -22,6 +22,8 @@ import (
 	"sync"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -347,6 +349,10 @@ func (t *CopySegmentTask) Execute() []*conc.Future[any] {
 //   - any: Always nil (future compatibility)
 //   - error: Error if validation fails or copy operation fails
 func (t *CopySegmentTask) copySingleSegment(source *datapb.CopySegmentSource, target *datapb.CopySegmentTarget) (any, error) {
+	if len(t.req.GetTargetIndexes()) > 0 {
+		target = proto.Clone(target).(*datapb.CopySegmentTarget)
+		target.TargetIndexes = t.req.GetTargetIndexes()
+	}
 	logFields := WrapLogFields(t,
 		mlog.Int64("sourceCollectionID", source.GetCollectionId()),
 		mlog.Int64("sourcePartitionID", source.GetPartitionId()),

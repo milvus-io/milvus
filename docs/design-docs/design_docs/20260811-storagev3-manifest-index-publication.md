@@ -22,9 +22,12 @@ StorageV3 build with files is published to the manifest, and that publication
 deletes its etcd task row in the same catalog transaction. StorageV1/V2 always
 remain etcd-backed. There is no durable dual-write mode.
 
-The same switch may be changed in either direction. A sticky
-`SegmentInfo.manifest_has_index` marker records that a segment has ever carried
-manifest-resident index metadata. Startup recovery and GC follow this marker,
+The same switch may be changed in either direction. A
+`SegmentInfo.manifest_has_index` marker conservatively records whether the
+current manifest may contain index metadata. Additions set it atomically with
+the pointer. Retractions read the final immutable revision and clear the marker
+in that same catalog transaction only when its index section is empty. Startup
+recovery and GC follow this marker,
 not the switch's current value, so disabling publication redirects new results
 to etcd without hiding or leaking indexes written while it was enabled. An
 all-etcd cluster has no marked segments and performs no manifest index reads.
@@ -106,6 +109,14 @@ transaction at exactly that revision, so an index task and a concurrent stats
 or delta-log commit on the same segment produce a linear revision chain instead
 of two siblings. Index tasks on different segments stay fully concurrent.
 
+For a commit that also mutates SegmentIndex records, the lock order is
+`segmentManifestLocks[segmentID] -> indexMeta.keyLock[BuildID] -> segMu`.
+The BuildID locks are acquired before the initial segment snapshot and retained
+through manifest I/O and catalog publication, preserving the task projection
+used to construct the entry. Only `segMu` is released during object-storage I/O.
+The packed OVERWRITE resolver applies updates to the specified read manifest;
+it does not merge a newer revision created by a writer outside this framework.
+
 Because the base revision is chosen at commit time rather than at build time,
 there is no "index revision does not follow the segment revision" failure mode
 and no stale-publication error for the scheduler to handle.
@@ -155,16 +166,13 @@ copied, in one transaction on top of the copied manifest.
 Committing on the target also constrains what the copy may bring over. The copy
 carries the segment directory wholesale, and the manifest directory is part of
 it; but a snapshot pins one revision while the source segment keeps evolving
-afterwards, so by copy time that directory can hold revisions newer than the
-pinned one. milvus-storage discovers the current version by listing the manifest
-directory and taking the highest revision number, and a commit whose read
-version is behind that resolves against the highest revision and writes one past
-it. Copying the newer revisions would therefore make the target's next commit
-merge onto the source's post-snapshot state and publish it as the target's own.
-The copy keeps only the pinned revision, so the target's manifest history starts
-exactly where the snapshot ended. This hazard predates index publication - any
-later commit on a restored segment would hit it - but publishing indexes is what
-makes a copied segment commit at all, so the guard belongs here.
+later. The copy keeps only that pinned revision to avoid copying unrelated
+history. The pinned milvus-storage implementation (`3ae6ac4`) applies OVERWRITE
+updates to the specified read manifest, not the highest revision's contents.
+It uses the highest revision only to choose the new version number. A stale
+revision left by a previous attempt therefore does not inject its entries into
+the new result. Generated target revisions are included in worker cleanup;
+coordinator cleanup also covers the entire task-owned target segment directory.
 
 The worker owns only physical facts (where the artifact landed, its build ID,
 sizes, engine versions). Identity does not survive the snapshot boundary —
@@ -172,7 +180,7 @@ sizes, engine versions). Identity does not survive the snapshot boundary —
 key — so DataCoord resolves it when assembling the request and ships target
 index definitions keyed by name. The worker obtains row count from the source
 description. It enumerates inherited entries from the copied manifest unless
-the snapshot's sticky marker proves that manifest index-free.
+the snapshot's captured marker proves that manifest index-free.
 
 The target-definition map is the switch's lever on this path. DataCoord
 persists the selected placement on the copy task before dispatch, so a switch
@@ -280,7 +288,7 @@ when publication is enabled.
 - GC blocks a dropped StorageV3 segment while its manifest is unreadable and
   recycles it once the manifest is gone.
 - The milvus-storage C FFI library is the version already pinned on master
-  (`8632a0f`), which contains both the index publication and the
+  (`3ae6ac4`), which contains both the index publication and the
   `drop_index(index_id)` APIs. Both the drop key and the `AddIndex` replacement
   key were read from that exact revision: `index_id`, not
   `(column_name, index_type)`.
@@ -288,3 +296,44 @@ when publication is enabled.
 Not verified end-to-end: no cluster run exercised a QueryNode load driven purely
 by manifest-resolved index metadata, and the copy/restore path was not run
 against a real snapshot. Both are covered by unit tests only.
+
+## Recovery and restore resource bounds
+
+All DataCoord manifest index reads during recovery, copy request assembly,
+copy result verification and GC share one metadata-owner semaphore. Waiting
+for admission is cancellable and does not enter cgo. The configured concurrency
+is capped by positive `minio.maxConnections`; zero means unspecified. Result
+verification prefetches under this bound, validates every result before installing
+any target, and keeps the verified BuildID-to-IndexID mapping for installation.
+
+Historical sticky markers are normalized once at startup: after an empty index
+section is read, recovery persists false against that exact manifest pointer.
+Subsequent startups skip the segment. A failed read or catalog write aborts
+recovery. A pointer change prevents clearing its marker. The candidate set still
+includes entries for dropped definitions so their files remain discoverable by GC.
+No extra count field or scan of collection index definitions is required.
+
+Copy requests carry collection index definitions once at request scope. Before
+sending non-empty shared definitions, DataCoord queries the selected worker's
+`copy_segment_shared_indexes` capability. Unknown/old workers receive the legacy
+per-target encoding. Current workers also continue to accept that encoding.
+This optimization changes wire size for capable workers; it does not remove the
+legacy workers' payload-size limit.
+
+Before dispatch, DataCoord persists the newly allocated target index directories
+and the V3 target segment directory on the copy task. Importing targets receive
+a version-zero manifest base so normal segment GC can find them even if result
+validation refuses the first real pointer. If a completed worker result is
+rejected, a durable cleanup intent keeps the failed task until the inspector
+successfully removes its planned directories. Cleanup uses coordinator-derived
+paths, including each retry's new BuildIDs, and retries object-storage failures
+across DataCoord restart without relying on the worker's in-memory file list.
+The plan applies to dispatches made by this implementation; it cannot recover
+unrecorded BuildIDs from tasks dispatched before this change. Partition-level
+LOB files remain covered by the existing LOB orphan collector and its safety
+window; a shared partition directory is never a task cleanup prefix.
+
+These changes do not enable concurrent backfill adoption or binary downgrade.
+Before enabling manifest-only publication, all DataCoords eligible for leadership
+must support recovery and GC of manifest-resident indexes. Turning publication
+off does not restore compatibility with pre-feature DataCoord binaries.

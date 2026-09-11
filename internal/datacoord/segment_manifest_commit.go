@@ -100,10 +100,9 @@ type SegmentCatalogMutation struct {
 	// retract several indexes and retire their records atomically.
 	SegmentIndexes []SegmentIndexMutation
 
-	// setManifestHasIndex is framework-owned. Structured mutations that add an
-	// index entry set the segment's sticky recovery marker in the same catalog
-	// transaction as the new manifest pointer.
-	setManifestHasIndex bool
+	// manifestHasIndex is framework-owned. A verified presence/emptiness result
+	// is installed atomically with the new pointer; nil preserves the marker.
+	manifestHasIndex *bool
 }
 
 // SegmentIndexMutationType selects which change a SegmentIndexMutation makes
@@ -164,7 +163,7 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 	if err := validateExpectedManifestUsage(commit); err != nil {
 		return err
 	}
-	commit.CatalogMutation.setManifestHasIndex = manifestMutationAddsIndexEntry(commit.Mutation)
+
 	// KeyLock.Lock is synchronous: a caller blocks here only when another
 	// transaction for this segment is in flight. There is no asynchronous
 	// queue or goroutine. Different segment IDs can perform manifest I/O
@@ -279,6 +278,11 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 	}
 
 	manifestPath, err := commitManifestMutation(segment.GetManifestPath(), commit)
+	if err != nil {
+		return err
+	}
+
+	commit.CatalogMutation.manifestHasIndex, err = m.manifestIndexMarkerAfterMutation(ctx, segment, manifestPath, commit)
 	if err != nil {
 		return err
 	}
@@ -532,6 +536,27 @@ func (m *meta) getSegmentManifestLocks() *lock.KeyLock[int64] {
 	return m.segmentManifestLocks
 }
 
+// Derive emptiness from the final immutable revision, never from the number
+// of requested drops (which may be stale/no-ops). A failed read prevents
+// publication, so the old pointer and its recovery marker remain authoritative.
+func (m *meta) manifestIndexMarkerAfterMutation(ctx context.Context, segment *SegmentInfo, manifestPath string, commit SegmentManifestCommit) (*bool, error) {
+	if manifestMutationAddsIndexEntry(commit.Mutation) {
+		value := true
+		return &value, nil
+	}
+	updates := commit.Mutation.Updates
+	if !segment.GetManifestHasIndex() || updates == nil ||
+		(len(updates.DropIndexes) == 0 && len(updates.ColumnGroups) == 0 && updates.NewFiles == nil) {
+		return nil, nil
+	}
+	entries, err := m.readManifestIndexes(ctx, manifestPath, commit.StorageConfig)
+	if err != nil {
+		return nil, merr.Wrap(err, "verify manifest index marker before publication")
+	}
+	value := len(entries) > 0
+	return &value, nil
+}
+
 func commitManifestMutation(baseManifest string, commit SegmentManifestCommit) (string, error) {
 	switch commit.Mutation.Type {
 	case ManifestMutationCommitUpdates:
@@ -685,10 +710,8 @@ func applySegmentCatalogTypedFields(segment *SegmentInfo, mutation SegmentCatalo
 	if mutation.IsImporting != nil {
 		segment.IsImporting = *mutation.IsImporting
 	}
-	if mutation.setManifestHasIndex {
-		// Sticky, set-only: a stale true costs one manifest read, while a
-		// false value could hide manifest-resident indexes after a mode flip.
-		segment.ManifestHasIndex = true
+	if mutation.manifestHasIndex != nil {
+		segment.ManifestHasIndex = *mutation.manifestHasIndex
 	}
 }
 
@@ -945,7 +968,7 @@ func (m *meta) prepareSegmentManifests(ctx context.Context, commits []SegmentMan
 		commit := commits[i]
 		snapshot := snapshots[commit.SegmentID]
 		futures = append(futures, pool.Submit(func() (*preparedSegmentManifest, error) {
-			return prepareSegmentManifest(ctx, commit, snapshot)
+			return m.prepareSegmentManifest(ctx, commit, snapshot)
 		}))
 	}
 	if err := conc.BlockOnAll(futures...); err != nil {
@@ -964,7 +987,7 @@ func (m *meta) prepareSegmentManifests(ctx context.Context, commits []SegmentMan
 // run the manifest mutation to produce the prepared revision. A dropped/unhealthy
 // segment returns (nil, nil) to be skipped; a stale CAS or I/O error returns a real
 // error to abort the batch.
-func prepareSegmentManifest(ctx context.Context, commit SegmentManifestCommit, snapshot *SegmentInfo) (*preparedSegmentManifest, error) {
+func (m *meta) prepareSegmentManifest(ctx context.Context, commit SegmentManifestCommit, snapshot *SegmentInfo) (*preparedSegmentManifest, error) {
 	if snapshot == nil || !isSegmentHealthy(snapshot) {
 		mlog.Warn(ctx, "segment dropped or unhealthy before batch manifest generation; skipping",
 			mlog.Int64("segmentID", commit.SegmentID))
@@ -977,6 +1000,10 @@ func prepareSegmentManifest(ctx context.Context, commit SegmentManifestCommit, s
 		return nil, staleSegmentManifestError(commit.SegmentID, commit.ExpectedManifest, snapshot.GetManifestPath())
 	}
 	manifestPath, err := commitManifestMutation(snapshot.GetManifestPath(), commit)
+	if err != nil {
+		return nil, err
+	}
+	commit.CatalogMutation.manifestHasIndex, err = m.manifestIndexMarkerAfterMutation(ctx, snapshot, manifestPath, commit)
 	if err != nil {
 		return nil, err
 	}

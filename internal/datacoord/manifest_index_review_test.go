@@ -86,6 +86,8 @@ func TestManifestReadConcurrencyUsesStorageBudget(t *testing.T) {
 	require.Equal(t, 7, segmentIndexManifestReadConcurrency())
 	params.MinioCfg.MaxConnections.SwapTempValue("100")
 	require.Equal(t, 64, segmentIndexManifestReadConcurrency())
+	params.MinioCfg.MaxConnections.SwapTempValue("0")
+	require.Equal(t, 64, segmentIndexManifestReadConcurrency())
 }
 
 // Exercise the actual initMeta loop: healthy manifests are read once, a

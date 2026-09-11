@@ -25,12 +25,14 @@ import (
 	"path"
 	"sort"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"golang.org/x/exp/maps"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -101,6 +103,8 @@ type meta struct {
 	// segment. It must be acquired before segMu. Manifest I/O runs outside
 	// segMu; final full-record catalog and memory publication runs under segMu.
 	segmentManifestLocks *lock.KeyLock[int64]
+	manifestReadOnce     sync.Once
+	manifestReadSlots    *semaphore.Weighted
 
 	channelCPs   *channelCPs // vChannel -> channel checkpoint/see position
 	chunkManager storage.ChunkManager
@@ -1826,11 +1830,11 @@ func UpdateManifest(segmentID int64, manifestPath string) UpdateOperator {
 	}
 }
 
-// UpdateManifestHasIndex sets the segment's sticky manifest_has_index marker
+// UpdateManifestHasIndex sets the segment's manifest_has_index marker
 // when a copy target adopts a worker-produced manifest containing target index
 // entries. It must be committed together with UpdateManifest so recovery can
-// never observe the pointer without the marker. There is intentionally no
-// clearing counterpart.
+// never observe the pointer without the marker. Clearing requires proof of an
+// empty index section at the exact pointer being published or recovered.
 func UpdateManifestHasIndex(segmentID int64) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
@@ -1843,6 +1847,19 @@ func UpdateManifestHasIndex(segmentID int64) UpdateOperator {
 			return false
 		}
 		segment.ManifestHasIndex = true
+		return true
+	}
+}
+
+// clearEmptyManifestIndexMarker applies a verified empty index section only to
+// the pointer that was read. A changed pointer must retain its own marker.
+func clearEmptyManifestIndexMarker(segmentID int64, expectedManifest string) UpdateOperator {
+	return func(pack *updateSegmentPack) bool {
+		segment := pack.Get(segmentID)
+		if segment == nil || segment.GetManifestPath() != expectedManifest || !segment.GetManifestHasIndex() {
+			return false
+		}
+		segment.ManifestHasIndex = false
 		return true
 	}
 }

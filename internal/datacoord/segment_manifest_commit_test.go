@@ -943,6 +943,7 @@ func TestCommitSegmentManifestRemovesSegmentIndexWithRetraction(t *testing.T) {
 		},
 	).Build()
 	defer commit.UnPatch()
+	defer mockey.Mock(packed.GetManifestIndexInfos).Return([]packed.ManifestIndexInfo{}, nil).Build().UnPatch()
 
 	require.NoError(t, meta.CommitSegmentManifest(context.Background(), SegmentManifestCommit{
 		SegmentID:     segmentID,
@@ -962,8 +963,8 @@ func TestCommitSegmentManifestRemovesSegmentIndexWithRetraction(t *testing.T) {
 	}))
 
 	require.Equal(t, newManifest, meta.GetSegment(context.Background(), segmentID).GetManifestPath())
-	require.True(t, meta.GetSegment(context.Background(), segmentID).GetManifestHasIndex(),
-		"retracting the last entry must not clear the sticky recovery marker")
+	require.False(t, meta.GetSegment(context.Background(), segmentID).GetManifestHasIndex(),
+		"a verified empty revision clears the recovery marker atomically")
 	_, ok := meta.indexMeta.GetIndexJob(buildID)
 	require.False(t, ok)
 	require.Empty(t, meta.indexMeta.GetSegmentIndexes(collectionID, segmentID))

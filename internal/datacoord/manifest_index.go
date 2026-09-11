@@ -22,6 +22,8 @@ import (
 	"sort"
 	"time"
 
+	"golang.org/x/sync/semaphore"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -172,8 +174,25 @@ func manifestIndexFilePathInfoForSegment(rootPath string, segment *datapb.Segmen
 // concurrency and the storage connection budget.
 func segmentIndexManifestReadConcurrency() int {
 	params := paramtable.Get()
-	return min(params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.GetAsInt(),
-		max(1, params.MinioCfg.MaxConnections.GetAsInt()))
+	limit := params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.GetAsInt()
+	if connections := params.MinioCfg.MaxConnections.GetAsInt(); connections > 0 {
+		limit = min(limit, connections)
+	}
+	return max(1, limit)
+}
+
+// readManifestIndexes shares a native-thread budget across startup, restore and GC.
+// Waiting for admission is cancellable and does not enter cgo.
+func (m *meta) readManifestIndexes(ctx context.Context, manifestPath string, config *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
+	m.manifestReadOnce.Do(func() { m.manifestReadSlots = semaphore.NewWeighted(int64(segmentIndexManifestReadConcurrency())) })
+	if err := m.manifestReadSlots.Acquire(ctx, 1); err != nil {
+		return nil, err
+	}
+	defer m.manifestReadSlots.Release(1)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return packed.GetManifestIndexInfos(manifestPath, config)
 }
 
 // validateManifestIndexPublishable is the writer-side twin of
@@ -267,7 +286,7 @@ func (m *meta) reloadSegmentIndexesFromManifests(ctx context.Context) error {
 				var entries []packed.ManifestIndexInfo
 				err := retry.Do(ctx, func() error {
 					var readErr error
-					entries, readErr = packed.GetManifestIndexInfos(segment.GetManifestPath(), storageConfig)
+					entries, readErr = m.readManifestIndexes(ctx, segment.GetManifestPath(), storageConfig)
 					return readErr
 				}, retry.Attempts(3), retry.Sleep(200*time.Millisecond))
 				if err != nil {
@@ -288,6 +307,19 @@ func (m *meta) reloadSegmentIndexesFromManifests(ctx context.Context) error {
 		// Drain all in-flight reads before returning or releasing the pool.
 		if err := conc.BlockOnAll(futures...); err != nil {
 			return merr.Wrap(err, "recover segment indexes from manifests")
+		}
+		// Normalize historical sticky markers once. Persist before exposing meta;
+		// a catalog failure leaves the conservative true marker for the next start.
+		var emptyMarkers []UpdateOperator
+		for i, indexes := range recovered {
+			if len(indexes) == 0 {
+				emptyMarkers = append(emptyMarkers, clearEmptyManifestIndexMarker(batch[i].GetID(), batch[i].GetManifestPath()))
+			}
+		}
+		if len(emptyMarkers) > 0 {
+			if err := m.UpdateSegmentsInfo(ctx, emptyMarkers...); err != nil {
+				return merr.Wrap(err, "persist empty manifest index markers")
+			}
 		}
 		for _, indexes := range recovered {
 			for _, segIdx := range indexes {

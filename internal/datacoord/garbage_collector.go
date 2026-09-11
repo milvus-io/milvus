@@ -1125,7 +1125,7 @@ func (gc *garbageCollector) getManifestIndexFiles(ctx context.Context, segment *
 	if segment == nil || segment.GetStorageVersion() != storage.StorageV3 || segment.GetManifestPath() == "" || !segment.GetManifestHasIndex() {
 		return nil, false, nil
 	}
-	manifestIndexes, err := packed.GetManifestIndexInfos(segment.GetManifestPath(), createStorageConfig())
+	manifestIndexes, err := gc.meta.readManifestIndexes(ctx, segment.GetManifestPath(), createStorageConfig())
 	if err != nil {
 		return nil, false, merr.Wrap(err, "failed to read manifest index metadata")
 	}
@@ -1575,7 +1575,7 @@ func (gc *garbageCollector) recycleUnusedSegIndexesForSegment(ctx context.Contex
 	manifestEntries := make(map[manifestIndexIdentity]packed.ManifestIndexInfo)
 	if segment != nil && isSegmentHealthy(segment) && segment.GetStorageVersion() == storage.StorageV3 &&
 		segment.GetManifestPath() != "" && segment.GetManifestHasIndex() {
-		indexes, err := packed.GetManifestIndexInfos(segment.GetManifestPath(), createStorageConfig())
+		indexes, err := gc.meta.readManifestIndexes(ctx, segment.GetManifestPath(), createStorageConfig())
 		if err != nil {
 			mlog.Warn(ctx, "failed to read segment manifest index metadata, wait to retry",
 				mlog.Int64("segmentID", segmentID), mlog.Err(err))

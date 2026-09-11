@@ -2430,6 +2430,7 @@ func assembleIndexPrecedenceFixture(t *testing.T, manifestIndexes []packed.Manif
 
 	task := &copySegmentTask{
 		ctx:          context.Background(),
+		meta:         &meta{},
 		snapshotMeta: &snapshotMeta{},
 		alloc:        &embeddedAllocator{},
 		tr:           timerecord.NewTimeRecorder("test"),
@@ -2546,6 +2547,7 @@ func newManifestFallbackAssembleFixture(ctx context.Context, segmentIDs ...int64
 
 	task := &copySegmentTask{
 		ctx:   ctx,
+		meta:  &meta{},
 		alloc: &embeddedAllocator{},
 		tr:    timerecord.NewTimeRecorder("test"),
 		times: taskcommon.NewTimes(),
@@ -2575,7 +2577,7 @@ func TestAssembleCopySegmentRequest_ManifestFallbackBoundsConcurrency(t *testing
 
 	var active int32
 	var maximum int32
-	started := make(chan struct{}, 3)
+	started := make(chan struct{}, 6)
 	release := make(chan struct{})
 	defer mockey.Mock(packed.GetManifestIndexInfos).To(
 		func(string, *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
@@ -2593,7 +2595,10 @@ func TestAssembleCopySegmentRequest_ManifestFallbackBoundsConcurrency(t *testing
 		}).Build().UnPatch()
 
 	task, job := newManifestFallbackAssembleFixture(context.Background(), 1, 2, 3)
-	result := make(chan error, 1)
+	otherTask, otherJob := newManifestFallbackAssembleFixture(context.Background(), 4, 5, 6)
+	otherTask.meta = task.meta
+	result := make(chan error, 2)
+	go func() { _, err := AssembleCopySegmentRequest(otherTask, otherJob); result <- err }()
 	go func() {
 		_, err := AssembleCopySegmentRequest(task, job)
 		result <- err
@@ -2612,6 +2617,7 @@ func TestAssembleCopySegmentRequest_ManifestFallbackBoundsConcurrency(t *testing
 	case <-time.After(100 * time.Millisecond):
 	}
 	close(release)
+	require.NoError(t, <-result)
 	require.NoError(t, <-result)
 	assert.Equal(t, int32(2), atomic.LoadInt32(&maximum))
 	assert.Zero(t, atomic.LoadInt32(&active))
@@ -2891,4 +2897,69 @@ func (s *CopySegmentTaskSuite) TestCopiedManifestKeepsVerifiedIndexIDDuringInsta
 	s.Require().True(ok)
 	s.EqualValues(300, record.IndexID, "the artifact belongs to the retired definition, never its replacement")
 	s.NotContains(m.indexMeta.GetSegmentIndexes(100, 2001), int64(301))
+}
+
+func (s *CopySegmentTaskSuite) TestCopyManifestVerificationParallelAndFailClosed() {
+	old := Params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.SwapTempValue("2")
+	defer Params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.SwapTempValue(old)
+	task, copies, m, resp := s.newCopiedManifestReadBackFixture()
+	original := resp.GetSegmentResults()[0]
+	for _, id := range []int64{2002, 2003} {
+		segment := m.GetSegment(context.Background(), 2001).Clone()
+		segment.ID = id
+		s.Require().NoError(m.AddSegment(context.Background(), segment))
+		result := proto.Clone(original).(*datapb.CopySegmentResult)
+		result.SegmentId = id
+		result.ManifestPath = packed.MarshalManifestPath("files/insert_log/100/10/"+strconv.FormatInt(id, 10), 3)
+		resp.SegmentResults = append(resp.SegmentResults, result)
+	}
+	started := make(chan struct{}, 3)
+	release := make(chan struct{})
+	defer mockey.Mock(packed.GetManifestIndexInfos).To(func(string, *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
+		started <- struct{}{}
+		<-release
+		return nil, merr.ErrServiceUnavailable
+	}).Build().UnPatch()
+	finished := make(chan error, 1)
+	go func() { finished <- SyncCopySegmentTask(task, resp, copies, m) }()
+	for range 2 {
+		select {
+		case <-started:
+		case <-time.After(5 * time.Second):
+			s.FailNow("verification was not parallel")
+		}
+	}
+	select {
+	case <-started:
+		s.FailNow("verification exceeded shared budget")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	s.ErrorIs(<-finished, merr.ErrServiceUnavailable)
+	for _, id := range []int64{2001, 2002, 2003} {
+		s.Equal(commonpb.SegmentState_Importing, m.GetSegment(context.Background(), id).GetState())
+	}
+	s.True(copies.GetTask(context.Background(), task.GetTaskId()).GetCleanupRequired())
+}
+
+func (s *CopySegmentTaskSuite) TestQueryCompletedCopyRetriesCleanupIntentFailure() {
+	task := createTestCopyTask(100, 2001).(*copySegmentTask)
+	copies, m := newCopySegmentTaskTestMeta(s.T(), task)
+	s.Require().NoError(m.AddSegment(context.Background(), newTestCopySegment(2001)))
+	s.Require().NoError(copies.UpdateTask(context.Background(), task.GetTaskId(), UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskInProgress)))
+	cluster := session.NewMockCluster(s.T())
+	cluster.EXPECT().QueryCopySegment(mock.Anything, mock.Anything).Return(&datapb.QueryCopySegmentResponse{
+		State:          datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
+		SegmentResults: []*datapb.CopySegmentResult{{SegmentId: 2001, ImportedRows: 100}},
+	}, nil)
+	failure := mockey.Mock((*kvdatacoord.Catalog).SaveCopySegmentTask).Return(merr.ErrServiceUnavailable).Build()
+	defer failure.UnPatch()
+	task.QueryTaskOnWorker(cluster)
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskInProgress, task.GetState())
+	s.Equal(commonpb.SegmentState_Importing, m.GetSegment(context.Background(), 2001).GetState())
+	s.False(task.GetCleanupRequired())
+	failure.UnPatch()
+	task.QueryTaskOnWorker(cluster)
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskCompleted, task.GetState())
+	s.False(task.GetCleanupRequired())
 }

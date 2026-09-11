@@ -273,6 +273,7 @@ func (s *copySegmentInspector) processPending(task CopySegmentTask) {
 // - Logs warnings if drop fails but continues processing other segments
 // - Failed drops will be retried on next inspection cycle
 func (s *copySegmentInspector) processFailed(task CopySegmentTask) {
+	allDropped := true
 	// Drop target segments if copy failed
 	for _, mapping := range task.GetIdMappings() {
 		targetSegID := mapping.GetTargetSegmentId()
@@ -284,11 +285,17 @@ func (s *copySegmentInspector) processFailed(task CopySegmentTask) {
 		op := UpdateStatusOperator(targetSegID, commonpb.SegmentState_Dropped)
 		err := s.meta.UpdateSegmentsInfo(s.ctx, op)
 		if err != nil {
+			allDropped = false
 			mlog.Warn(s.ctx, "failed to drop target segment after copy task failed",
 				WrapCopySegmentTaskLog(task, mlog.Int64("segmentID", targetSegID), mlog.Err(err))...)
 		} else {
 			mlog.Info(s.ctx, "dropped target segment after copy task failed",
 				WrapCopySegmentTaskLog(task, mlog.Int64("segmentID", targetSegID))...)
+		}
+	}
+	if allDropped {
+		if err := cleanupRejectedCopy(s.ctx, task, s.meta, s.copyMeta); err != nil {
+			mlog.Warn(s.ctx, "retry rejected copy cleanup", mlog.FieldTaskID(task.GetTaskId()), mlog.Err(err))
 		}
 	}
 }

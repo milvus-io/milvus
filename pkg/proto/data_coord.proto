@@ -480,11 +480,10 @@ message SegmentInfo {
   // Legacy segments keep the zero value, which means unknown.
   uint64 create_ts = 39;
 
-  // manifest_has_index records that this segment's manifest has carried at
-  // least one index entry. It is sticky and written atomically with the first
-  // such manifest pointer, so recovery and GC can find manifest-resident
-  // indexes independently of the current write-mode switch. A stale true only
-  // costs one manifest read; clearing it could hide live index metadata.
+  // Conservative presence marker for the current manifest's index section.
+  // Additions set it atomically with the pointer; removals clear it only after
+  // verifying the final revision is empty. Recovery normalizes old sticky true
+  // values once. False proves emptiness independently of the write-mode switch.
   bool manifest_has_index = 40;
 }
 
@@ -1239,7 +1238,7 @@ message CopySegmentSource {
   // replacing collection/partition/segment IDs.
   string source_root_path = 14;
 
-  // Sticky source-segment marker. Presence matters: false proves that the
+  // Source-segment index presence marker. Presence matters: false proves that the
   // copied manifest has no index entries, while absence means an older
   // snapshot whose manifest must still be inspected conservatively.
   optional bool manifest_has_index = 15;
@@ -1274,6 +1273,8 @@ message CopySegmentRequest {
   index.StorageConfig storage_config = 6;
   int64 task_slot = 7;
   string external_spec = 8;
+  // Shared collection definitions. Older workers receive the legacy per-target field.
+  repeated CopySegmentTargetIndex target_indexes = 9;
 }
 
 message QueryCopySegmentRequest {
@@ -1364,6 +1365,11 @@ message CopySegmentTask {
   // Placement selected before dispatch. Presence distinguishes an explicit
   // false value from an older persisted task that predates this field.
   optional bool index_write_to_manifest = 12;
+  // Coordinator-derived directories owned by this task, saved before dispatch.
+  repeated string cleanup_prefixes = 13;
+  // The worker completed, but the coordinator rejected its result. Cleanup is
+  // retried from durable metadata, including after coordinator/worker restart.
+  bool cleanup_required = 14;
 }
 
 // CopySegmentJobState defines the state machine for copy segment jobs
@@ -1548,6 +1554,7 @@ message QuerySlotResponse {
   common.Status status = 1;
   int64 available_slots = 2;
   string version = 3; // Kept for wire compatibility; new schedulers do not use it
+  bool copy_segment_shared_indexes = 4;
 }
 
 enum CompactionTaskState {
@@ -1838,7 +1845,7 @@ message SegmentDescription {
   // Must be preserved across snapshot/restore so temporal protections
   // (GC, TTL, MVCC) are not lost on the restored segments.
   uint64 commit_timestamp = 18;
-  // Sticky source marker copied from SegmentInfo. Presence lets restore skip
+  // Index presence marker copied from SegmentInfo. Presence lets restore skip
   // manifest index reads when false; old snapshots leave it absent.
   optional bool manifest_has_index = 19;
 }
