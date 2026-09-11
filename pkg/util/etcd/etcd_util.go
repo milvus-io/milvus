@@ -31,6 +31,8 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -73,6 +75,41 @@ func IsRetriableWatchErr(err error) bool {
 		errors.Is(err, rpctypes.ErrInvalidAuthToken) ||
 		errors.Is(err, rpctypes.ErrUserEmpty) ||
 		errors.Is(err, rpctypes.ErrAuthOldRevision)
+}
+
+// IsRetriableEtcdErr reports whether an etcd error is transient and safe to
+// retry the same request against.
+//
+// It returns true for the leader-election / availability errors a single-node
+// embedded etcd returns while it is still electing its leader during startup
+// (e.g. "etcdserver: leader changed", "etcdserver: no leader", the various
+// request-timeout sentinels) as well as a generic gRPC Unavailable (no
+// connection established yet). These are the errors that Session.Init /
+// Session.Register can legitimately observe during a cold start and should
+// backoff-and-retry rather than treat as fatal.
+//
+// Genuine authorization failures, permission denials, data loss (corrupt
+// cluster) and other non-transient errors carry different codes and are
+// deliberately NOT retriable.
+func IsRetriableEtcdErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	// Context cancellation / deadline is a terminal condition, never retried.
+	if errors.IsAny(err, context.Canceled, context.DeadlineExceeded) {
+		return false
+	}
+	return errors.Is(err, rpctypes.ErrLeaderChanged) ||
+		errors.Is(err, rpctypes.ErrNoLeader) ||
+		errors.Is(err, rpctypes.ErrNotLeader) ||
+		errors.Is(err, rpctypes.ErrNotCapable) ||
+		errors.Is(err, rpctypes.ErrTimeout) ||
+		errors.Is(err, rpctypes.ErrTimeoutDueToLeaderFail) ||
+		errors.Is(err, rpctypes.ErrTimeoutDueToConnectionLost) ||
+		errors.Is(err, rpctypes.ErrTimeoutWaitAppliedIndex) ||
+		errors.Is(err, rpctypes.ErrUnhealthy) ||
+		errors.Is(err, rpctypes.ErrClusterVersionUnavailable) ||
+		status.Code(err) == codes.Unavailable
 }
 
 type ClientOption func(*clientv3.Config)
