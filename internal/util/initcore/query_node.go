@@ -171,7 +171,7 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 		UpdateExprResCacheConfig()
 	}
 
-	C.SetArrowIOThreadPoolCapacity(C.int(ResolveArrowIOThreadPoolCapacity()))
+	ApplyArrowIOThreadPoolCapacity("querynode", "init")
 
 	cStorageV2CellTargetSizeBytes := C.int64_t(paramtable.Get().QueryNodeCfg.StorageV2CellTargetSizeBytes.GetAsInt64())
 	C.SetStorageV2CellTargetSizeBytes(cStorageV2CellTargetSizeBytes)

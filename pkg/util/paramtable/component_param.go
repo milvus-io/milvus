@@ -902,9 +902,8 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 			`range reads (ReadRangeCache) on this pool, which issue the actual ` +
 			`S3 GetObject requests — it is the real ceiling on parallel ` +
 			`object-storage reads, independent of segcore HIGH/MIDDLE pools and ` +
-			`minio.maxConnections. Arrow's built-in default is a fixed constant ` +
-			`of 8, which is almost always undersized. Typical range 2–8. 0 keeps ` +
-			`arrow's default (and the cap is ignored).`,
+			`minio.maxConnections. 0 means a fixed pool of 8 threads (the cap ` +
+			`is ignored). Typical range: 2–8. Negative values are ignored.`,
 		Export: false,
 	}
 	p.ArrowIOThreadPoolCoefficient.Init(base.mgr)
