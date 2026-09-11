@@ -17,14 +17,20 @@
 #pragma once
 
 #include <any>
+#include <cmath>
 #include <functional>
+#include <string_view>
+#include <utility>
 #include <fmt/core.h>
 
+#include "common/Array.h"
 #include "common/EasyAssert.h"
+#include "common/Json.h"
 #include "common/Types.h"
 #include "common/Vector.h"
 #include "exec/expression/Expr.h"
 #include "exec/expression/Element.h"
+#include "index/SkipIndex.h"
 #include "segcore/SegmentInterface.h"
 #include "index/json_stats/bson_inverted.h"
 #include "cachinglayer/CacheSlot.h"
@@ -41,6 +47,237 @@ struct TermIndexFunc {
     TargetBitmap
     operator()(Index* index, size_t n, const IndexInnerType* val) {
         return index->In(n, val);
+    }
+};
+
+using TermFilterChunkFn =
+    std::function<void(const void* data, int size, TargetBitmapView res)>;
+
+// IN / NOT IN over a scalar column, or over ARRAY elements when element-level.
+template <typename T>
+struct TermScalarKernel {
+    milvus::OpContext* op_ctx;
+    const MultiElement* vals;
+    // Batch SIMD filter over vals; nullptr or empty when vals is not a
+    // SimdBatchElement<T>. It only sets bits, so it relies on match == 0.
+    const TermFilterChunkFn* simd_filter_fn;
+    // vals as SetElement<std::string>, or nullptr.
+    const SetElement<std::string>* str_set_elem;
+    // std::vector<T> of IN values for SkipIndex, or an empty std::any.
+    const std::any* skip_elements;
+
+    bool
+    CanSkip(const SkipIndex& skip_index,
+            FieldId field_id,
+            int64_t chunk_id) const {
+        const auto* elements = std::any_cast<std::vector<T>>(skip_elements);
+        if (elements == nullptr) {
+            return false;
+        }
+        return skip_index.CanSkipInQuery<T>(
+            op_ctx, field_id, chunk_id, *elements);
+    }
+
+    template <FilterType filter_type>
+    void
+    Eval(const CandidateBatch<T>& b, TriStateOut out) const {
+        if constexpr (filter_type == FilterType::sequential) {
+            if (simd_filter_fn != nullptr && *simd_filter_fn) {
+                (*simd_filter_fn)(b.data, static_cast<int>(b.size), out.match);
+                return;
+            }
+        }
+        const bool has_candidates = !b.candidates.empty();
+        for (size_t i = 0; i < b.size; ++i) {
+            if (b.validity && !b.validity[i]) {
+                continue;
+            }
+            if (has_candidates && !b.candidates[i]) {
+                continue;
+            }
+            bool hit;
+            if constexpr (std::is_same_v<T, std::string> ||
+                          std::is_same_v<T, std::string_view>) {
+                if (str_set_elem != nullptr) {
+                    hit = str_set_elem->values_.find(std::string_view(
+                              b.data[i])) != str_set_elem->values_.end();
+                } else {
+                    hit = vals->In(
+                        MultiElement::ValueType(std::string_view(b.data[i])));
+                }
+            } else {
+                hit = vals->In(
+                    MultiElement::ValueType(std::in_place_type<T>, b.data[i]));
+            }
+            if (hit) {
+                out.SetTrue(i);
+            }
+        }
+    }
+};
+
+static_assert(KernelCanSkip<TermScalarKernel<int64_t>>);
+
+// `value in array_field`
+template <typename ValueType>
+struct TermArrayVariableInFieldKernel {
+    using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
+                                       std::string_view,
+                                       ValueType>;
+    ValueType target_val;
+
+    template <FilterType filter_type>
+    void
+    Eval(const CandidateBatch<milvus::ArrayView>& b, TriStateOut out) const {
+        const bool has_candidates = !b.candidates.empty();
+        for (size_t i = 0; i < b.size; ++i) {
+            if (b.validity && !b.validity[i]) {
+                continue;
+            }
+            if (has_candidates && !b.candidates[i]) {
+                continue;
+            }
+            const auto& row = b.data[i];
+            for (int j = 0; j < row.length(); ++j) {
+                if (row.template get_data<GetType>(j) == target_val) {
+                    out.SetTrue(i);
+                    break;
+                }
+            }
+        }
+    }
+};
+
+// `array_field[index] in [...]`
+template <typename ValueType>
+struct TermArrayFieldInVariableKernel {
+    using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
+                                       std::string_view,
+                                       ValueType>;
+    int index;
+    const MultiElement* term_set;
+
+    template <FilterType filter_type>
+    void
+    Eval(const CandidateBatch<milvus::ArrayView>& b, TriStateOut out) const {
+        AssertInfo(index >= 0,
+                   "array element term predicate requires nested path");
+        const bool has_candidates = !b.candidates.empty();
+        for (size_t i = 0; i < b.size; ++i) {
+            if (b.validity && !b.validity[i]) {
+                continue;
+            }
+            if (has_candidates && !b.candidates[i]) {
+                continue;
+            }
+            const auto& row = b.data[i];
+            if (index >= row.length()) {
+                out.SetUnknown(i);
+                continue;
+            }
+            auto value = row.template get_data<GetType>(index);
+            if (term_set->In(ValueType(value))) {
+                out.SetTrue(i);
+            }
+        }
+    }
+};
+
+// `value in json["path"]`
+template <typename ValueType>
+struct TermJsonVariableInFieldKernel {
+    using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
+                                       std::string_view,
+                                       ValueType>;
+    std::string_view pointer;
+    ValueType target_val;
+
+    template <FilterType filter_type>
+    void
+    Eval(const CandidateBatch<milvus::Json>& b, TriStateOut out) const {
+        const bool has_candidates = !b.candidates.empty();
+        for (size_t i = 0; i < b.size; ++i) {
+            if (b.validity && !b.validity[i]) {
+                continue;
+            }
+            if (has_candidates && !b.candidates[i]) {
+                continue;
+            }
+            auto doc = b.data[i].doc();
+            auto array = doc.at_pointer(pointer).get_array();
+            if (array.error()) {
+                out.SetUnknown(i);
+                continue;
+            }
+            for (auto it = array.begin(); it != array.end(); ++it) {
+                auto val = (*it).template get<GetType>();
+                if (val.error()) {
+                    continue;
+                }
+                if (val.value() == target_val) {
+                    out.SetTrue(i);
+                    break;
+                }
+            }
+        }
+    }
+};
+
+// `json["path"] in [...]`
+template <typename ValueType>
+struct TermJsonFieldInVariableKernel {
+    using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
+                                       std::string_view,
+                                       ValueType>;
+    std::string_view pointer;
+    const MultiElement* terms;
+
+    // (valid, matched); valid is false when the path is missing, null, or
+    // holds a value of another JSON type.
+    std::pair<bool, bool>
+    Probe(const milvus::Json& row) const {
+        if constexpr (std::is_same_v<GetType, std::int64_t>) {
+            auto x_num = row.at_numeric(pointer);
+            if (x_num.error()) {
+                return {false, false};
+            }
+            auto n = x_num.value();
+            if (n.is_int64()) {
+                return {true, terms->In(ValueType(n.get_int64()))};
+            }
+            auto dval = n.is_uint64() ? static_cast<double>(n.get_uint64())
+                                      : n.get_double();
+            return {true,
+                    std::floor(dval) == dval && terms->In(ValueType(dval))};
+        } else {
+            auto x = row.template at<GetType>(pointer);
+            if (x.error()) {
+                return {false, false};
+            }
+            return {true, terms->In(ValueType(x.value()))};
+        }
+    }
+
+    template <FilterType filter_type>
+    void
+    Eval(const CandidateBatch<milvus::Json>& b, TriStateOut out) const {
+        const bool has_candidates = !b.candidates.empty();
+        for (size_t i = 0; i < b.size; ++i) {
+            if (b.validity && !b.validity[i]) {
+                continue;
+            }
+            if (has_candidates && !b.candidates[i]) {
+                continue;
+            }
+            const auto [valid, matched] = Probe(b.data[i]);
+            if (!valid) {
+                out.SetUnknown(i);
+                continue;
+            }
+            if (matched) {
+                out.SetTrue(i);
+            }
+        }
     }
 };
 
@@ -160,6 +397,11 @@ class PhyTermFilterExpr : public SegmentExpr {
     VectorPtr
     ExecJsonInVariableByStats();
 
+    // `x in []`: FALSE and known for every row of the batch, NULL rows
+    // included.
+    VectorPtr
+    EmptyTermBatch(EvalCtx& context);
+
  private:
     std::shared_ptr<const milvus::expr::TermFilterExpr> expr_;
     bool cached_bits_inited_{false};
@@ -172,8 +414,7 @@ class PhyTermFilterExpr : public SegmentExpr {
     // Type-safe cached FilterChunk dispatch (avoids per-call dynamic_cast).
     // Set once during arg_inited_; empty when arg_set_ is not SimdBatch.
     // Captures a typed SimdBatchElement<T>* inside the lambda at init time.
-    using FilterChunkFn =
-        std::function<void(const void* data, int size, TargetBitmapView res)>;
+    using FilterChunkFn = TermFilterChunkFn;
     FilterChunkFn cached_filter_chunk_;
     // Cached SetElement<string> pointer for per-row string lookup without
     // variant construction. Set once during init; nullptr when arg_set_ is not

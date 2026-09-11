@@ -1683,14 +1683,15 @@ TEST(AlwaysTrueStringPlan, QueryWithOutputFieldsNullable) {
 
     Timestamp time = MAX_TIMESTAMP;
 
+    // `str in []` is FALSE for every row, NULL rows included, so its negation
+    // returns every row.
     auto retrieved = segment->Retrieve(
         nullptr, plan.get(), time, DEFAULT_MAX_OUTPUT_SIZE, false);
-    ASSERT_EQ(retrieved->offset().size(), N / 2);
+    ASSERT_EQ(retrieved->offset().size(), N);
     ASSERT_EQ(retrieved->fields_data().size(), 1);
     ASSERT_EQ(retrieved->fields_data(0).scalars().string_data().data().size(),
-              N / 2);
-    ASSERT_EQ(GetFieldDataRowValidData(retrieved->fields_data(0)).size(),
-              N / 2);
+              N);
+    ASSERT_EQ(GetFieldDataRowValidData(retrieved->fields_data(0)).size(), N);
 }
 
 // Test: NOT (a IS NOT NULL) - verifies that the result valid bits are always true

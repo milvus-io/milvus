@@ -515,3 +515,53 @@ TEST_P(ExprTest, TestTermTimestamptz) {
         }
     }
 }
+
+TEST(ExprTermEmptyList, NullRowsAreFalseAndKnown) {
+    // `x in []` is FALSE for every row, NULL rows included, so its negation
+    // matches every row on both growing and sealed segments.
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto nullable_fid =
+        schema->AddDebugField("nullable", DataType::INT64, true);
+    schema->set_primary_field_id(pk_fid);
+
+    constexpr int64_t N = 1000;
+    auto raw_data = DataGen(schema, N, 42);
+    const auto valid = raw_data.get_col_valid(nullable_fid);
+    ASSERT_NE(std::count(valid.begin(), valid.end(), false), 0);
+
+    auto growing = CreateGrowingSegment(schema, empty_index_meta);
+    growing->PreInsert(N);
+    growing->Insert(0,
+                    N,
+                    raw_data.row_ids_.data(),
+                    raw_data.timestamps_.data(),
+                    raw_data.raw_);
+    auto sealed = CreateSealedWithFieldDataLoaded(schema, raw_data);
+
+    const std::vector<std::pair<std::string, size_t>> testcases = {
+        {"nullable in []", 0},
+        {"not (nullable in [])", static_cast<size_t>(N)},
+    };
+    ScopedSchemaHandle handle(*schema);
+    for (const auto* segment :
+         {static_cast<const segcore::SegmentInternalInterface*>(growing.get()),
+          static_cast<const segcore::SegmentInternalInterface*>(
+              sealed.get())}) {
+        for (const auto& [expr, expected] : testcases) {
+            auto plan_str = handle.ParseSearch(
+                expr, "fakevec", 10, "L2", "{\"nprobe\": 10}", 3);
+            auto plan = CreateSearchPlanByExpr(
+                schema, plan_str.data(), plan_str.size());
+            auto final = ExecuteQueryExpr(
+                plan->plan_node_->plannodes_->sources()[0]->sources()[0],
+                segment,
+                N,
+                MAX_TIMESTAMP);
+            ASSERT_EQ(final.size(), N) << expr;
+            EXPECT_EQ(final.count(), expected) << expr;
+        }
+    }
+}

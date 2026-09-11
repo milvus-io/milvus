@@ -16,7 +16,6 @@
 
 #include "TermExpr.h"
 
-#include <math.h>
 #include <simdjson.h>
 #include <algorithm>
 #include <cstdint>
@@ -52,8 +51,6 @@
 #include "query/Utils.h"
 
 namespace milvus {
-class SkipIndex;
-
 namespace exec {
 
 void
@@ -285,120 +282,39 @@ PhyTermFilterExpr::ExecVisitorImplTemplateArray(EvalCtx& context) {
     }
 }
 
-template <typename ValueType>
 VectorPtr
-PhyTermFilterExpr::ExecTermArrayVariableInField(EvalCtx& context) {
-    using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
-                                       std::string_view,
-                                       ValueType>;
+PhyTermFilterExpr::EmptyTermBatch(EvalCtx& context) {
     auto* input = context.get_offset_input();
-    const auto& bitmap_input = context.get_bitmap_input();
-    auto real_batch_size =
-        has_offset_input_ ? input->size() : GetNextBatchSize();
+    const int64_t real_batch_size = has_offset_input_
+                                        ? static_cast<int64_t>(input->size())
+                                        : GetNextBatchSize();
     if (real_batch_size == 0) {
         return nullptr;
     }
+    MoveCursor();
+    return std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
+                                          TargetBitmap(real_batch_size, true));
+}
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
-    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
-
+template <typename ValueType>
+VectorPtr
+PhyTermFilterExpr::ExecTermArrayVariableInField(EvalCtx& context) {
     AssertInfo(expr_->vals_.size() == 1,
                "element length in json array must be one");
     if (!arg_inited_) {
         arg_val_.SetValue<ValueType>(expr_->vals_[0]);
         arg_inited_ = true;
     }
-    auto target_val = arg_val_.GetValue<ValueType>();
-
-    int processed_cursor = 0;
-    auto execute_sub_batch =
-        [&processed_cursor, &
-         bitmap_input ]<FilterType filter_type = FilterType::sequential>(
-            const ArrayView* data,
-            ValidityView valid_data,
-            const int32_t* offsets,
-            const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
-            const ValueType& target_val) {
-        // If data is nullptr, this chunk was skipped by SkipIndex.
-        // We only need to update processed_cursor for bitmap_input indexing.
-        if (data == nullptr) {
-            processed_cursor += size;
-            return;
-        }
-        auto executor = [&](size_t offset) {
-            for (int i = 0; i < data[offset].length(); i++) {
-                auto val = data[offset].template get_data<GetType>(i);
-                if (val == target_val) {
-                    return true;
-                }
-            }
-            return false;
-        };
-        bool has_bitmap_input = !bitmap_input.empty();
-        for (int i = 0; i < size; ++i) {
-            auto offset = i;
-            if constexpr (filter_type == FilterType::random) {
-                offset = (offsets) ? offsets[i] : i;
-            }
-            if (valid_data && !valid_data[offset]) {
-                res[i] = valid_res[i] = false;
-                continue;
-            }
-            if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
-                continue;
-            }
-            res[i] = executor(offset);
-        }
-        processed_cursor += size;
-    };
-
-    int64_t processed_size;
-    if (has_offset_input_) {
-        processed_size =
-            ProcessDataByOffsets<milvus::ArrayView>(execute_sub_batch,
-                                                    std::nullptr_t{},
-                                                    input,
-                                                    res,
-                                                    valid_res,
-                                                    target_val);
-    } else {
-        processed_size = ProcessDataChunks<milvus::ArrayView>(
-            execute_sub_batch, std::nullptr_t{}, res, valid_res, target_val);
-    }
-    AssertInfo(processed_size == real_batch_size,
-               "internal error: expr processed rows {} not equal "
-               "expect batch size {}",
-               processed_size,
-               real_batch_size);
-    return res_vec;
+    return EvalKernel<milvus::ArrayView>(
+        context,
+        TermArrayVariableInFieldKernel<ValueType>{
+            .target_val = arg_val_.GetValue<ValueType>()},
+        /*element_level=*/false);
 }
 
 template <typename ValueType>
 VectorPtr
 PhyTermFilterExpr::ExecTermArrayFieldInVariable(EvalCtx& context) {
-    using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
-                                       std::string_view,
-                                       ValueType>;
-
-    auto* input = context.get_offset_input();
-    const auto& bitmap_input = context.get_bitmap_input();
-    auto real_batch_size =
-        has_offset_input_ ? input->size() : GetNextBatchSize();
-    if (real_batch_size == 0) {
-        return nullptr;
-    }
-
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
-    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
-
     int index = -1;
     if (expr_->column_.nested_path_.size() > 0) {
         index = std::stoi(expr_->column_.nested_path_[0]);
@@ -407,195 +323,31 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable(EvalCtx& context) {
         arg_set_ = std::make_shared<SetElement<ValueType>>(expr_->vals_);
         arg_inited_ = true;
     }
-
     if (arg_set_->Empty()) {
-        res.reset();
-        MoveCursor();
-        return res_vec;
+        return EmptyTermBatch(context);
     }
-
-    int processed_cursor = 0;
-    auto execute_sub_batch =
-        [&processed_cursor, &
-         bitmap_input ]<FilterType filter_type = FilterType::sequential>(
-            const ArrayView* data,
-            ValidityView valid_data,
-            const int32_t* offsets,
-            const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
-            int index,
-            const std::shared_ptr<MultiElement>& term_set) {
-        if (!term_set->Empty()) {
-            AssertInfo(index >= 0,
-                       "array element term predicate requires nested path");
-        }
-        // If data is nullptr, this chunk was skipped by SkipIndex.
-        // We only need to update processed_cursor for bitmap_input indexing.
-        if (data == nullptr) {
-            processed_cursor += size;
-            return;
-        }
-        bool has_bitmap_input = !bitmap_input.empty();
-        for (int i = 0; i < size; ++i) {
-            auto offset = i;
-            if constexpr (filter_type == FilterType::random) {
-                offset = (offsets) ? offsets[i] : i;
-            }
-            if (valid_data && !valid_data[offset]) {
-                res[i] = valid_res[i] = false;
-                continue;
-            }
-            if (term_set->Empty()) {
-                res[i] = false;
-                continue;
-            }
-            if (index >= data[offset].length()) {
-                res[i] = false;
-                valid_res[i] = false;
-                continue;
-            }
-            if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
-                continue;
-            }
-            auto value = data[offset].get_data<GetType>(index);
-            res[i] = term_set->In(ValueType(value));
-        }
-        processed_cursor += size;
-    };
-
-    int64_t processed_size;
-    if (has_offset_input_) {
-        processed_size =
-            ProcessDataByOffsets<milvus::ArrayView>(execute_sub_batch,
-                                                    std::nullptr_t{},
-                                                    input,
-                                                    res,
-                                                    valid_res,
-                                                    index,
-                                                    arg_set_);
-    } else {
-        processed_size = ProcessDataChunks<milvus::ArrayView>(execute_sub_batch,
-                                                              std::nullptr_t{},
-                                                              res,
-                                                              valid_res,
-                                                              index,
-                                                              arg_set_);
-    }
-    AssertInfo(processed_size == real_batch_size,
-               "internal error: expr processed rows {} not equal "
-               "expect batch size {}",
-               processed_size,
-               real_batch_size);
-    return res_vec;
+    return EvalKernel<milvus::ArrayView>(
+        context,
+        TermArrayFieldInVariableKernel<ValueType>{.index = index,
+                                                  .term_set = arg_set_.get()},
+        /*element_level=*/false);
 }
 
 template <typename ValueType>
 VectorPtr
 PhyTermFilterExpr::ExecTermJsonVariableInField(EvalCtx& context) {
-    using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
-                                       std::string_view,
-                                       ValueType>;
-    auto* input = context.get_offset_input();
-    const auto& bitmap_input = context.get_bitmap_input();
-    auto real_batch_size =
-        has_offset_input_ ? input->size() : GetNextBatchSize();
-    if (real_batch_size == 0) {
-        return nullptr;
-    }
-
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
-    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
-
     AssertInfo(expr_->vals_.size() == 1,
                "element length in json array must be one");
     if (!arg_inited_) {
         arg_val_.SetValue<ValueType>(expr_->vals_[0]);
         arg_inited_ = true;
     }
-    auto val = arg_val_.GetValue<ValueType>();
-
-    auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
-
-    int processed_cursor = 0;
-    auto execute_sub_batch =
-        [&processed_cursor, &
-         bitmap_input ]<FilterType filter_type = FilterType::sequential>(
-            const Json* data,
-            ValidityView valid_data,
-            const int32_t* offsets,
-            const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
-            const std::string& pointer,
-            const ValueType& target_val) {
-        // If data is nullptr, this chunk was skipped by SkipIndex.
-        // We only need to update processed_cursor for bitmap_input indexing.
-        if (data == nullptr) {
-            processed_cursor += size;
-            return;
-        }
-        auto executor = [&](size_t i) {
-            auto doc = data[i].doc();
-            auto array = doc.at_pointer(pointer).get_array();
-            if (array.error()) {
-                return std::make_pair(false, false);
-            }
-            for (auto it = array.begin(); it != array.end(); ++it) {
-                auto val = (*it).template get<GetType>();
-                if (val.error()) {
-                    continue;
-                }
-                if (val.value() == target_val) {
-                    return std::make_pair(true, true);
-                }
-            }
-            return std::make_pair(true, false);
-        };
-        bool has_bitmap_input = !bitmap_input.empty();
-        for (size_t i = 0; i < size; ++i) {
-            auto offset = i;
-            if constexpr (filter_type == FilterType::random) {
-                offset = (offsets) ? offsets[i] : i;
-            }
-            if (valid_data && !valid_data[offset]) {
-                res[i] = valid_res[i] = false;
-                continue;
-            }
-            if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
-                continue;
-            }
-            auto [valid, matched] = executor(offset);
-            if (!valid) {
-                res[i] = valid_res[i] = false;
-                continue;
-            }
-            res[i] = matched;
-        }
-        processed_cursor += size;
-    };
-    int64_t processed_size;
-    if (has_offset_input_) {
-        processed_size = ProcessDataByOffsets<milvus::Json>(execute_sub_batch,
-                                                            std::nullptr_t{},
-                                                            input,
-                                                            res,
-                                                            valid_res,
-                                                            pointer,
-                                                            val);
-    } else {
-        processed_size = ProcessDataChunks<milvus::Json>(
-            execute_sub_batch, std::nullptr_t{}, res, valid_res, pointer, val);
-    }
-    AssertInfo(processed_size == real_batch_size,
-               "internal error: expr processed rows {} not equal "
-               "expect batch size {}",
-               processed_size,
-               real_batch_size);
-    return res_vec;
+    const auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
+    return EvalKernel<milvus::Json>(
+        context,
+        TermJsonVariableInFieldKernel<ValueType>{
+            .pointer = pointer, .target_val = arg_val_.GetValue<ValueType>()},
+        /*element_level=*/false);
 }
 
 template <typename ValueType>
@@ -772,12 +524,6 @@ PhyTermFilterExpr::ExecJsonInVariableByStats() {
 template <typename ValueType>
 VectorPtr
 PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
-    using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
-                                       std::string_view,
-                                       ValueType>;
-    auto* input = context.get_offset_input();
-    const auto& bitmap_input = context.get_bitmap_input();
-    FieldId field_id = expr_->column_.field_id_;
     if (!has_offset_input_ && exec_path_ == ExprExecPath::JsonStats) {
         milvus::ScopedTimer timer("term_json_by_stats", [this](double us) {
             json_filter_stats_latency_us_ += us;
@@ -789,131 +535,27 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
         json_filter_bruteforce_latency_us_ += us;
     });
 
-    auto real_batch_size =
-        has_offset_input_ ? input->size() : GetNextBatchSize();
-    if (real_batch_size == 0) {
-        return nullptr;
-    }
-
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
-    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
-
-    auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
+    const auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     if (!arg_inited_) {
         arg_set_ = std::make_shared<SetElement<ValueType>>(expr_->vals_);
         arg_inited_ = true;
     }
-
     if (arg_set_->Empty()) {
-        res.reset();
-        MoveCursor();
-        return res_vec;
+        return EmptyTermBatch(context);
     }
-
-    int processed_cursor = 0;
-    auto execute_sub_batch =
-        [&processed_cursor, &
-         bitmap_input ]<FilterType filter_type = FilterType::sequential>(
-            const Json* data,
-            ValidityView valid_data,
-            const int32_t* offsets,
-            const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
-            const std::string& pointer,
-            const std::shared_ptr<MultiElement>& terms) {
-        // If data is nullptr, this chunk was skipped by SkipIndex.
-        // We only need to update processed_cursor for bitmap_input indexing.
-        if (data == nullptr) {
-            processed_cursor += size;
-            return;
-        }
-        auto executor = [&](size_t i) {
-            if constexpr (std::is_same_v<GetType, std::int64_t>) {
-                auto x_num = data[i].at_numeric(pointer);
-                if (x_num.error()) {
-                    return std::make_pair(false, false);
-                }
-                auto n = x_num.value();
-                if (n.is_int64()) {
-                    return std::make_pair(true,
-                                          terms->In(ValueType(n.get_int64())));
-                }
-                // uint64 or double → compare as double, consistent with
-                // index/stats paths.
-                auto dval = n.is_uint64() ? static_cast<double>(n.get_uint64())
-                                          : n.get_double();
-                // if the term set is {1}, and the value is 1.1, we should
-                // not return true.
-                return std::make_pair(
-                    true,
-                    std::floor(dval) == dval && terms->In(ValueType(dval)));
-            } else {
-                auto x = data[i].template at<GetType>(pointer);
-                if (x.error()) {
-                    return std::make_pair(false, false);
-                }
-                return std::make_pair(true, terms->In(ValueType(x.value())));
-            }
-        };
-        bool has_bitmap_input = !bitmap_input.empty();
-        for (size_t i = 0; i < size; ++i) {
-            auto offset = i;
-            if constexpr (filter_type == FilterType::random) {
-                offset = (offsets) ? offsets[i] : i;
-            }
-            if (valid_data && !valid_data[offset]) {
-                res[i] = valid_res[i] = false;
-                continue;
-            }
-            if (terms->Empty()) {
-                res[i] = false;
-                continue;
-            }
-
-            if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
-                continue;
-            }
-            auto [valid, matched] = executor(offset);
-            if (!valid) {
-                res[i] = valid_res[i] = false;
-                continue;
-            }
-            res[i] = matched;
-        }
-        processed_cursor += size;
-    };
-    int64_t processed_size;
-    if (has_offset_input_) {
-        processed_size = ProcessDataByOffsets<milvus::Json>(execute_sub_batch,
-                                                            std::nullptr_t{},
-                                                            input,
-                                                            res,
-                                                            valid_res,
-                                                            pointer,
-                                                            arg_set_);
-    } else {
-        processed_size = ProcessDataChunks<milvus::Json>(execute_sub_batch,
-                                                         std::nullptr_t{},
-                                                         res,
-                                                         valid_res,
-                                                         pointer,
-                                                         arg_set_);
-    }
-    AssertInfo(processed_size == real_batch_size,
-               "internal error: expr processed rows {} not equal "
-               "expect batch size {}",
-               processed_size,
-               real_batch_size);
-    return res_vec;
+    return EvalKernel<milvus::Json>(
+        context,
+        TermJsonFieldInVariableKernel<ValueType>{.pointer = pointer,
+                                                 .terms = arg_set_.get()},
+        /*element_level=*/false);
 }
 
 template <typename T>
 VectorPtr
 PhyTermFilterExpr::ExecVisitorImpl(EvalCtx& context) {
+    if (expr_->vals_.empty() && !expr_->column_.element_level_) {
+        return EmptyTermBatch(context);
+    }
     if (exec_path_ == ExprExecPath::ScalarIndex && !has_offset_input_) {
         return ExecVisitorImplForIndex<T>();
     } else {
@@ -1025,26 +667,6 @@ PhyTermFilterExpr::ExecVisitorImplForIndex<bool>() {
 template <typename T>
 VectorPtr
 PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
-    auto* input = context.get_offset_input();
-    const auto& bitmap_input = context.get_bitmap_input();
-
-    auto next_batch_size =
-        GetNextRealBatchSize(input, expr_->column_.element_level_);
-    if (!next_batch_size.has_value()) {
-        return nullptr;
-    }
-    auto real_batch_size = *next_batch_size;
-    if (auto res = AdvanceEmptyElementBatch(
-            input, expr_->column_.element_level_, real_batch_size)) {
-        return res;
-    }
-
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
-    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
-
     if (!arg_inited_) {
         std::vector<T> vals;
         for (auto& val : expr_->vals_) {
@@ -1095,8 +717,6 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
             }
         }
         // Cache SIMD FilterChunk dispatch (numeric types only).
-        // SIMD path runs batch filter first, then applies validity/bitmap
-        // masks — avoids per-row variant construction entirely.
         if constexpr (!std::is_same_v<T, bool> &&
                       !std::is_same_v<T, std::string> &&
                       !std::is_same_v<T, std::string_view>) {
@@ -1121,123 +741,14 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
         arg_inited_ = true;
     }
 
-    const auto& simd_filter_fn = cached_filter_chunk_;
-    const auto str_set_elem = cached_str_set_elem_;
-
-    int processed_cursor = 0;
-    auto execute_sub_batch =
-        [&processed_cursor, &bitmap_input, &simd_filter_fn,
-         str_set_elem ]<FilterType filter_type = FilterType::sequential>(
-            const T* data,
-            ValidityView valid_data,
-            const int32_t* offsets,
-            const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
-            const std::shared_ptr<MultiElement>& vals) {
-        if (data == nullptr) {
-            processed_cursor += size;
-            return;
-        }
-        bool has_bitmap_input = !bitmap_input.empty();
-
-        // ── Path 1: SIMD batch (numeric, sequential, within threshold) ──
-        if constexpr (filter_type == FilterType::sequential) {
-            if (simd_filter_fn) {
-                simd_filter_fn(data, size, res);
-                ApplyValidMask(valid_data, res, valid_res, size);
-                // Apply bitmap mask
-                if (has_bitmap_input) {
-                    for (int i = 0; i < size; ++i) {
-                        if (!bitmap_input[i + processed_cursor]) {
-                            res[i] = false;
-                        }
-                    }
-                }
-                processed_cursor += size;
-                return;
-            }
-        }
-
-        // ── Path 2: Per-row (string, bool, large numeric, random access) ──
-        // Check validity and bitmap first, then direct lookup without variant.
-        for (int i = 0; i < size; ++i) {
-            auto offset = i;
-            if constexpr (filter_type == FilterType::random) {
-                offset = (offsets) ? offsets[i] : i;
-            }
-            if (valid_data && !valid_data[offset]) {
-                res[i] = valid_res[i] = false;
-                continue;
-            }
-            if (has_bitmap_input && !bitmap_input[i + processed_cursor]) {
-                continue;
-            }
-            // Direct lookup: skip variant construction
-            if constexpr (std::is_same_v<T, std::string> ||
-                          std::is_same_v<T, std::string_view>) {
-                if (str_set_elem) {
-                    // Hash lookup via string_view (zero copy)
-                    res[i] = str_set_elem->values_.find(std::string_view(
-                                 data[offset])) != str_set_elem->values_.end();
-                } else {
-                    // FlatVectorElement path (small IN ≤4)
-                    res[i] = vals->In(MultiElement::ValueType(
-                        std::string_view(data[offset])));
-                }
-            } else {
-                res[i] = vals->In(MultiElement::ValueType(std::in_place_type<T>,
-                                                          data[offset]));
-            }
-        }
-        processed_cursor += size;
-    };
-
-    auto skip_index_func =
-        [op_ctx = op_ctx_, &cached_elements = cached_skip_elements_](
-            const SkipIndex& skip_index, FieldId field_id, int64_t chunk_id) {
-            auto* elements = std::any_cast<std::vector<T>>(&cached_elements);
-            if (elements == nullptr) {
-                return false;
-            }
-            return skip_index.CanSkipInQuery<T>(
-                op_ctx, field_id, chunk_id, *elements);
-        };
-
-    int64_t processed_size;
-    if (has_offset_input_) {
-        if (expr_->column_.element_level_) {
-            // For element-level filtering with offset input
-            processed_size = ProcessElementLevelByOffsets<T>(execute_sub_batch,
-                                                             skip_index_func,
-                                                             input,
-                                                             res,
-                                                             valid_res,
-                                                             arg_set_);
-        } else {
-            processed_size = ProcessDataByOffsets<T>(execute_sub_batch,
-                                                     skip_index_func,
-                                                     input,
-                                                     res,
-                                                     valid_res,
-                                                     arg_set_);
-        }
-    } else {
-        if (expr_->column_.element_level_) {
-            // For element-level filtering without offset input (brute force)
-            processed_size = ProcessDataChunksForElementLevel<T>(
-                execute_sub_batch, skip_index_func, res, valid_res, arg_set_);
-        } else {
-            processed_size = ProcessDataChunks<T>(
-                execute_sub_batch, skip_index_func, res, valid_res, arg_set_);
-        }
-    }
-    AssertInfo(processed_size == real_batch_size,
-               "internal error: expr processed rows {} not equal "
-               "expect batch size {}",
-               processed_size,
-               real_batch_size);
-    return res_vec;
+    return EvalKernel<T>(
+        context,
+        TermScalarKernel<T>{.op_ctx = op_ctx_,
+                            .vals = arg_set_.get(),
+                            .simd_filter_fn = &cached_filter_chunk_,
+                            .str_set_elem = cached_str_set_elem_,
+                            .skip_elements = &cached_skip_elements_},
+        expr_->column_.element_level_);
 }
 
 void
