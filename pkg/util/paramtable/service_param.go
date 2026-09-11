@@ -19,6 +19,7 @@ package paramtable
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"net/url"
 	"os"
 	"path"
@@ -1342,13 +1343,40 @@ Default value applies when Pulsar is running on the same network with Milvus.`,
 		Key:          "pulsar.webaddress",
 		Version:      "2.0.0",
 		DefaultValue: "",
+		Doc: `Web address of the Pulsar admin REST API, used to clean up subscriptions. It must be a full url with scheme, e.g. http://pulsar-web:8080.
+Empty by default, in which case http://<host of pulsar.address>:<pulsar.webport> is used. Set it only if the admin API is not reachable there, e.g. behind a proxy or over https.`,
+		Export: true,
 		Formatter: func(add string) string {
+			add = strings.TrimSpace(add)
+			if add != "" {
+				// An explicit web address is used as is, but unlike pulsar.address it has to carry
+				// its scheme: the admin API may be served over https, so it cannot be guessed here.
+				u, err := url.Parse(add)
+				if err == nil && u.Host != "" && (u.Scheme == "http" || u.Scheme == "https") {
+					return add
+				}
+				mlog.Warn(context.TODO(), "pulsar.webaddress is not an http(s) url, using the address derived from pulsar.address",
+					mlog.String("configured", add))
+			}
 			pulsarURL, err := url.ParseRequestURI(p.Address.GetValue())
 			if err != nil {
 				mlog.Info(context.TODO(), "failed to parse pulsar config, assume pulsar not used", mlog.Err(err))
 				return ""
 			}
-			return "http://" + pulsarURL.Hostname() + ":" + p.WebPort.GetValue()
+			// pulsar.address may be a multi-host service url such as
+			// pulsar://host1:6650,host2:6650, which url.Hostname() cannot handle.
+			// Derive the web address from the first host.
+			host := pulsarURL.Host
+			if idx := strings.Index(host, ","); idx >= 0 {
+				host = host[:idx]
+			}
+			if hostOnly, _, err := net.SplitHostPort(host); err == nil {
+				host = hostOnly
+			} else {
+				// no port in the host; strip IPv6 brackets so that JoinHostPort adds them back
+				host = strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
+			}
+			return "http://" + net.JoinHostPort(host, p.WebPort.GetValue())
 		},
 	}
 	p.WebAddress.Init(base.mgr)
