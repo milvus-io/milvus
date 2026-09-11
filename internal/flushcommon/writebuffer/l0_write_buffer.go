@@ -49,7 +49,12 @@ func NewL0WriteBuffer(channel string, metacache metacache.MetaCache, syncMgr syn
 
 func (wb *l0WriteBuffer) dispatchDeleteMsgsWithoutFilter(deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition) {
 	for _, msg := range deleteMsgs {
-		l0SegmentID := wb.getL0SegmentID(msg.GetPartitionID(), startPos)
+		l0SegmentID, err := wb.getL0SegmentID(msg.GetPartitionID(), startPos)
+		if err != nil {
+			// write buffer is closing; remaining deletes replay from the WAL on restart.
+			wb.logger.Warn(wb.ctx, "skip buffering delete, write buffer is closing", mlog.Err(err))
+			return
+		}
 		pks := storage.ParseIDs2PrimaryKeys(msg.GetPrimaryKeys())
 		pkTss := msg.GetTimestamps()
 		if len(pks) > 0 {
@@ -130,17 +135,26 @@ func (wb *l0WriteBuffer) bufferInsert(inData *InsertData, startPos, endPos *msgp
 	return nil
 }
 
-func (wb *l0WriteBuffer) getL0SegmentID(partitionID int64, startPos *msgpb.MsgPosition) int64 {
+func (wb *l0WriteBuffer) getL0SegmentID(partitionID int64, startPos *msgpb.MsgPosition) (int64, error) {
 	log := wb.logger
 	segmentID, ok := wb.l0Segments[partitionID]
 	if !ok {
-		err := retry.Do(context.Background(), func() error {
+		err := retry.Do(wb.ctx, func() error {
 			var err error
 			segmentID, err = wb.idAllocator.AllocOne()
 			return err
 		})
 		if err != nil {
-			log.Error(context.TODO(), "failed to allocate l0 segment ID", mlog.Err(err))
+			if merr.IsCanceledOrTimeout(err) {
+				// wb.ctx is canceled, i.e. the channel/node is stopping. The
+				// delete stays in the WAL and is replayed on restart; don't crash.
+				log.Warn(wb.ctx, "failed to allocate l0 segment ID, write buffer is closing", mlog.Err(err))
+				return 0, err
+			}
+			// The retry above is deliberately bounded: an unbounded retry here
+			// would block flowgraph draining and hang graceful shutdown when the
+			// coordinator happens to stop first (cluster stop ordering). Exhausted
+			// retries panic so the WAL replays the delete after restart.
 			panic(err)
 		}
 		wb.l0Segments[partitionID] = segmentID
@@ -154,11 +168,11 @@ func (wb *l0WriteBuffer) getL0SegmentID(partitionID int64, startPos *msgpb.MsgPo
 			State:         commonpb.SegmentState_Growing,
 			Level:         datapb.SegmentLevel_L0,
 		}, func(_ *datapb.SegmentInfo) pkoracle.PkStat { return pkoracle.NewBloomFilterSet() }, metacache.NoneBm25StatsFactory, metacache.SetStartPosRecorded(false))
-		log.Info(context.TODO(), "Add a new level zero segment",
+		log.Info(wb.ctx, "Add a new level zero segment",
 			mlog.FieldSegmentID(segmentID),
 			mlog.String("level", datapb.SegmentLevel_L0.String()),
 			mlog.Any("start position", startPos),
 		)
 	}
-	return segmentID
+	return segmentID, nil
 }

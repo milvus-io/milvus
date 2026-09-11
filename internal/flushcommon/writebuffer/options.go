@@ -1,6 +1,7 @@
 package writebuffer
 
 import (
+	"context"
 	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -23,6 +24,7 @@ type FlushSourceModeNotifier func(segmentID int64, mode metacache.FlushSourceMod
 type GrowingSourceResolver func(segmentID int64, targetOffset int64, endPos *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState)
 
 type writeBufferOption struct {
+	ctx          context.Context
 	idAllocator  allocator.Interface
 	syncPolicies []SyncPolicy
 
@@ -39,6 +41,7 @@ type writeBufferOption struct {
 
 func defaultWBOption(metacache metacache.MetaCache) *writeBufferOption {
 	return &writeBufferOption{
+		ctx: context.Background(),
 		syncPolicies: []SyncPolicy{
 			GetFullBufferPolicy(),
 			GetSyncStaleBufferPolicy(paramtable.Get().DataNodeCfg.SyncPeriod.GetAsDuration(time.Second)),
@@ -79,6 +82,15 @@ func WithSyncPolicy(policy SyncPolicy) WriteBufferOption {
 func WithErrorHandler(handler func(err error)) WriteBufferOption {
 	return func(opt *writeBufferOption) {
 		opt.errorHandler = handler
+	}
+}
+
+// WithContext sets the lifecycle context for the write buffer. Background
+// retries inside the buffer (e.g. L0 segment ID allocation) are bounded by this
+// context, so they stop when the channel/node is shutting down.
+func WithContext(ctx context.Context) WriteBufferOption {
+	return func(opt *writeBufferOption) {
+		opt.ctx = ctx
 	}
 }
 
