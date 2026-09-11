@@ -74,14 +74,18 @@ consume memory readers / BinarySet entries. Some sparse implementations retain
 shared ownership of input buffers. They keep that ownership contract. GPU and
 remote-cluster execution have not been validated by this increment.
 
-Legacy scalar consumers use the same transport phases. Their final phase varies:
+Legacy scalar consumers use the same transport phases. All query-representation
+restoration runs on the shared async worker:
 
 | Consumer phase | Executor |
 | --- | --- |
 | Pure memory representation finalization | Shared async executor |
 | Hybrid child selection and child coroutine | Shared async executor; directly `co_await` the child |
-| Marisa temporary-file loading, scalar mmap finalization | `LocalFileIOPool` |
-| Tantivy/RTree directory preparation, writes, finish/open, failure cleanup | `LocalFileIOPool` |
+| Numeric/String Sort mapping, parsing, offsets and validity restoration | Shared async executor |
+| Marisa trie read/mmap and string-ID/CSR restoration | Shared async executor |
+| Bitmap decode, frozen conversion, read-only mapping and offset-cache restoration | Shared async executor |
+| Tantivy/RTree engine opening and state restoration | Shared async executor |
+| Staging-file preparation, writes, flush/close and removal | `LocalFileIOPool` |
 | JSON wrapper bitmap restoration | Resumes on the shared async executor after the base coroutine |
 
 Local-file work uses the existing disabled-pool fallback to the shared async
@@ -89,6 +93,22 @@ executor. For Milvus staging, a local-file executor token does not span remote
 I/O. Cross-executor operations are awaited; an async worker never calls a child's
 blocking load wrapper. Existing disk-index construction still prepares its generated directory
 on the constructing caller; the table describes the subsequent sealed `Load`.
+
+The existing `FinishLegacyLoadAsync` hook is overridden only by BinarySet
+consumers that need awaited file preparation: numeric Sort, StringSort, Marisa
+and Bitmap. Compatibility entry points reuse the extracted parsers and keep
+their synchronous scheduling. Tantivy/RTree open directly after disk staging
+returns. Bitmap shares its frozen conversion and mapping helpers between
+compatibility and async loading; async conversion groups output into 64 KiB
+batches (plus at most one large bitmap), then awaits writes before buffer reuse.
+No complete additional frozen index is retained in heap memory.
+
+Cancellation is checked before/after restoration and between Bitmap batches.
+An in-progress engine call completes before cancellation cleanup; pending
+writers close and temporary-file guards release on the local-file executor.
+Read-only engine mappings and later index destruction retain their normal
+ownership. The matching V3 phase split is described in the
+[packed scalar design](20260907-async-scalar-index-v3-loading.md#packed-scalar-index-pipeline).
 
 ## Slice ownership and memory estimates
 
@@ -232,7 +252,7 @@ and its text/ngram/stats variants, `GetObjectData`, index metadata loaders,
 | --- | --- |
 | `SealedIndexTranslator` legacy scalar dispatch | Context-aware `ScalarIndex::Load` invokes `LoadLegacyAsync` on the shared executor |
 | Numeric/string Sort, Bitmap, Marisa, Hybrid | Shared BinarySet streamer; Hybrid awaits its child coroutine |
-| Tantivy/Ngram and RTree | Shared metadata streamer, concurrent disk-file streamer, awaited local finalizer |
+| Tantivy/Ngram and RTree | Shared metadata streamer, concurrent disk-file streamer, engine opening on the async worker |
 | JSON scalar wrappers | Await the base coroutine and restore existing missing/null sidecars |
 | Knowhere memory and mmap | Shared logical-entry streamer; memory copies by offset and mmap consumers write in order |
 | Knowhere disk | Concurrent staging for the files selected by `LoadIndexWithStream`; backend-owned remote reads retain their existing contract |
@@ -382,3 +402,17 @@ eight BSON cases and the existing scalar/vector/storage/admission regression
 set. The separate JSON stats binary passed all 84 cases from 13 suites. Neither
 run had failures or skips. No remote-cluster or throughput test was run for this
 increment.
+
+### Scalar finalizer executor follow-up (2026-09-11)
+
+The finalizer split rebuilt both C++ test targets and passed 44 focused scalar
+cases, 655 related regression cases, and 84 JSON stats cases (783 distinct
+cases, no failures or skips). The focused suite now observes actual
+`ComputeByteSize` restoration on async workers for legacy consumers, including
+Marisa, and probes the single local-file worker while Sort/StringSort/Marisa/
+Bitmap/Tantivy/RTree restoration is blocked. The four BinarySet consumers also
+exercise V3/legacy, memory/mmap, cancellation and injected restoration failure.
+The regression set includes typed synchronous Bitmap mmap/array/nullable cases
+and existing writer, streamer, admission, vector and BSON checks. See the
+[packed scalar validation](20260907-async-scalar-index-v3-loading.md#scalar-finalizer-executor-validation-2026-09-11)
+for the coverage boundary.

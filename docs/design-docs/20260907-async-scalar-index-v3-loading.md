@@ -76,18 +76,24 @@ Open input and directory -> PlanLoad -> MaterializeIndexAsync
                         -> FinalizeLoad -> CommitTargets
 ```
 
-The scalar pipeline reuses the parent's `LocalFileIOPool` for blocking file
-operations. Executor selection follows the actual targets in the plan, since
-Tantivy and Marisa also use staging files when the final index is loaded into
-memory.
+The scalar pipeline reuses the parent's `LocalFileIOPool` for staging-file
+operations. Engine opening, read-only mapping, deserialization, and query-state
+restoration run on the shared async worker, including file-backed indexes.
+Tantivy and Marisa may use staging files even when the final index is loaded
+into memory. The existing `FinalizeLoad` contract is an awaited coroutine so
+Bitmap can suspend for derived frozen-file writes without moving conversion
+or representation restoration onto local-file workers.
 
 | Phase | Executor |
 | --- | --- |
 | Catalog, planning, slice scheduling, decryption, CRC | Shared async-load executor |
 | Create directories, preallocate and map writable targets | `LocalFileIOPool` |
 | Unmap and close writable targets after reads drain | `LocalFileIOPool` |
-| Finalize an artifact containing file targets; commit and release its staging resources | `LocalFileIOPool` |
-| Finalize a memory-only artifact | Shared async-load executor |
+| Open engines/read-only mappings; deserialize and restore query state for every artifact | Shared async-load executor |
+| Convert Bitmap postings into bounded frozen-output batches | Shared async-load executor |
+| Create/write/flush/close Bitmap's derived frozen file | `LocalFileIOPool` |
+| Commit and release staging resources of an artifact containing file targets | `LocalFileIOPool` |
+| Release a memory-only artifact | Shared async-load executor |
 | Clean up failed materialization with file targets, including its directory-lease context | `LocalFileIOPool` |
 
 Each local-file phase obtains its executor token immediately before scheduling
@@ -97,13 +103,22 @@ priority views of the selected executor. If the local-file pool is disabled,
 the parent's priority resolver falls back to the shared async-load executor.
 Cross-executor waits use `co_await`; they do not block a worker on a nested task.
 
-Cancellation is checked again when queued file preparation or finalization
-starts. Cleanup is awaited with cancellation disabled so it completes before
-the original exception is rethrown. Finalization owns its artifact in the
-scheduled coroutine body, ensuring destructor cleanup runs there on both
-success and failure. This routing covers materialization and finalization;
-planning that throws before returning a plan and later index destruction keep
-their existing lifetimes.
+Cancellation is checked before finalization and after synchronous engine/state
+restoration, and between Bitmap conversion/write batches. Engine calls are
+not interrupted; they return before borrowed inputs or staging resources are
+released. Cleanup is awaited with cancellation disabled before rethrowing the
+original failure. The outer coroutine owns the artifact while `FinalizeLoad`
+borrows it, then moves it into the local-file operation that commits retained
+targets and releases staging resources. Directory retention follows committed
+targets, so a failed or cancelled finalizer does not retain its directory.
+Tantivy heap-mode removal and pending Marisa/StringSort/Bitmap file guards are
+released in that cleanup phase. No local-file executor token spans engine
+opening or deserialization. Synchronous engine reads and read-only mapping
+occupy the async worker until the engine returns.
+
+This routing covers materialization and finalization. Planning that throws
+before returning a plan and later index destruction/eviction keep their
+existing lifetimes; it does not relocate destruction of a completed index.
 
 All index-specific plans allocate final heap destinations or describe staging
 mmap files. The materializer validates full, non-overlapping entry coverage
@@ -126,8 +141,12 @@ Writable files reserve blocks before mapping, reporting allocation failure
 before a writer can fault on an unbacked page. The materializer keeps mappings
 alive until every issued read completes, unmaps writable targets before final
 index construction, and retains files only after successful finalization.
-Bitmap's derived frozen file also has failure cleanup. Existing final index
-objects continue to own their read-only mappings and files.
+Bitmap's derived frozen file also has failure cleanup. Frozen conversion reuses
+a 64 KiB batch buffer, allowing at most one additional large bitmap in a batch;
+writes are awaited before reusing the buffer. Resource estimates include the
+batch prefix, decoded/frozen bitmap scratch, temporary output-buffer growth,
+and the refreshable FileWriter buffer bound. Existing final index objects
+continue to own their read-only mappings and files.
 
 ## Parent field-data loading
 
@@ -294,3 +313,25 @@ tests (including reader preparation), 21 packed-index reader/materializer tests,
 two Tantivy async load tests, and four scalar routing/mmap tests. The executor
 implementation and its relocated test bodies are unchanged apart from namespace,
 include paths, and formatting.
+
+### Scalar finalizer executor validation (2026-09-11)
+
+The executor split rebuilt `all_tests` and `json_stats_test` with GCC 12 in the
+cached Release build, with outer parallelism capped at 16 and independent
+third-party builders capped at one.
+
+All 44 focused scalar tests passed. The new restoration gate covers numeric
+Sort, StringSort, Marisa and high-cardinality Bitmap across legacy/V3,
+heap/mmap, and success/cancellation/injected restoration failure. While actual
+query-state restoration is blocked on the single async worker, the single
+local-file worker remains available and slice admission can be acquired.
+Bitmap uses 5,000 distinct keys to cross frozen-write batches, checks both ends
+of the result, and verifies derived-file removal on failure/cancellation.
+Common V3 routing tests separately check finalization and artifact-cleanup
+thread names with the local-file pool enabled and disabled.
+
+Another 655 regression cases passed, covering synchronous scalar mmap/nullable
+loads, resource estimates, storage/admission, Knowhere and BSON. The separate
+JSON stats binary passed all 84 cases. These are 783 distinct selected cases,
+with no failures or skips. This increment does not measure real object-storage
+throughput or process-wide peak memory.
