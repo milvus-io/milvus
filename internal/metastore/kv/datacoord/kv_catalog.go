@@ -1284,10 +1284,13 @@ func (kc *Catalog) DropExportSnapshotJob(ctx context.Context, jobID int64) error
 // propagate decode errors; recovery can then fail closed on corruption.
 func (kc *Catalog) ListSegmentChangeGroups(ctx context.Context) ([]*model.SegmentChangeGroup, error) {
 	groups := make([]*model.SegmentChangeGroup, 0)
-	applyFn := func(_ []byte, value []byte) error {
+	applyFn := func(key []byte, value []byte) error {
 		group, err := model.UnmarshalSegmentChangeGroup(value)
 		if err != nil {
-			return merr.Wrap(err, "failed to decode a persisted segment change group")
+			// C36: identify the offending etcd key so an operator facing a
+			// fail-closed startup can locate and remove it; Validate errors on
+			// a corrupt/zero record report GroupID 0, which is not searchable.
+			return merr.Wrap(err, "failed to decode a persisted segment change group at key "+string(key))
 		}
 		groups = append(groups, group)
 		return nil
