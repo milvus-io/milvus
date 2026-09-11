@@ -208,9 +208,11 @@ func TestKnowhereConfig_MergeIndexParamsJSON(t *testing.T) {
 	assert.NoError(t, err)
 	assert.JSONEq(t, `{"default_number":0.5,"default_string":"balanced","request_param":16}`, params[common.SearchParamKey].(string))
 
-	params[common.SearchParamKey] = "invalid"
-	err = cfg.MergeIndexParamsJSON("TEST_INDEX", SearchStage, params)
-	assert.Error(t, err)
+	for _, raw := range []string{"invalid", "null", "[]", "1"} {
+		params[common.SearchParamKey] = raw
+		err = cfg.MergeIndexParamsJSON("TEST_INDEX", SearchStage, params)
+		assert.Error(t, err, raw)
+	}
 }
 
 func TestKnowhereConfig_MergeWithResource(t *testing.T) {

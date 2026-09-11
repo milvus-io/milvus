@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type knowhereConfig struct {
@@ -174,6 +175,9 @@ func (p *knowhereConfig) MergeIndexParamsJSON(indexType, stage string, params ma
 	searchParams := make(map[string]json.RawMessage)
 	if err := json.Unmarshal([]byte(rawParams), &searchParams); err != nil {
 		return err
+	}
+	if searchParams == nil {
+		return merr.WrapErrParameterInvalidMsg("search params must be a JSON object")
 	}
 	for key, value := range defaultParams {
 		if _, exists := searchParams[key]; exists {
