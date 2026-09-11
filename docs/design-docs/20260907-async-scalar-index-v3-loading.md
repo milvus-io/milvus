@@ -383,3 +383,12 @@ changes, executor and rollout changes, unlimited capacities, and slot reductions
 with admitted work still in flight. An incompatible binding verifies that a
 rejected expansion keeps admission bounded and a subsequent retry can succeed.
 No remote-cluster or throughput validation was run for this accounting change.
+
+### Independent TextMatch entry point (2026-09-11)
+
+Independent TextMatch packed files reuse `LoadUnifiedAsync`, the Tantivy plan
+and finalizer, and the shared file-aware resource estimator. The translator
+now forwards cancellation and planning opens the packed object under its
+text-log prefix. Legacy TextMatch uses the existing Tantivy legacy coroutine.
+See [TextMatch loading](20260909-streaming-legacy-index-loading.md#independent-textmatch-loading)
+for routing, executor ownership and estimates.

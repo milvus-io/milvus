@@ -1,10 +1,10 @@
-# Streaming legacy scalar, Knowhere and BSON shared-key index loads
+# Streaming legacy scalar, Knowhere, BSON and TextMatch index loads
 
 ## Scope
 
 This extends [async scalar-index V3 loading](20260907-async-scalar-index-v3-loading.md)
 to legacy scalar formats, Knowhere memory, mmap, and disk staging loads, and
-BSON shared-key indexes. It shares
+BSON shared-key and independent TextMatch indexes. It shares
 `storage::AsyncLoadExecutor`, `LoadAdmissionController::GetInstance()`, and
 `LocalFileIOPool`. It adds no controller singleton or per-index executor.
 
@@ -19,10 +19,10 @@ The migration is incremental:
 Steps 1–5 are implemented at the Milvus load boundary. Internal remote reads
 in stream-capable Knowhere implementations retain
 their own admission contract, as detailed below. Index building,
-uploads, and independent text-match/JSON-key stats entries are outside these
-five steps. The subsequent BSON shared-key increment is described below;
-other JSON stats entry points retain their existing loaders. Packed scalar V3
-keeps its existing reader and materializer.
+uploads, and independent TextMatch/JSON-key stats entries were outside those
+five steps. The subsequent BSON shared-key and TextMatch increments are
+described below; other JSON stats entry points retain their existing loaders.
+Packed scalar V3 keeps its existing reader and materializer.
 
 The context-aware sealed-index `Load(trace, config, OpContext*)` reads
 `StorageV2AsyncLoadEnabled()` directly. Enabled legacy scalar and vector loads
@@ -50,7 +50,7 @@ do not select the old HIGH/LOW worker pools.
 | Call memory Knowhere `Deserialize` | Same shared async worker | One synchronous call; it occupies this worker until Knowhere returns |
 | Create/write/flush/close mmap files or disk slices | `LocalFileIOPool` | Coroutine awaits the operation; a read/decode lease survives each write |
 | Restore file-backed nullable/empty-list metadata; invoke `DeserializeFromFile` or disk `Deserialize` | Shared async executor | Files are closed first; the synchronous call occupies this worker, with no slice admission or local-file executor held |
-| Open BSON shared-key Tantivy reader, including heap loading or mapping | Shared async executor | One synchronous engine call after all staged files close and slice admission releases |
+| Open BSON shared-key or TextMatch Tantivy reader, including heap loading or mapping | Shared async executor | One synchronous engine call after all staged files close and slice admission releases |
 | Failure cleanup of files created by the load | `LocalFileIOPool` | Issued I/O and synchronous finalization drain before cleanup |
 | Parallel work inside `Deserialize` | Whatever workers / parallel runtime Knowhere selects | Milvus does not create deserialization tasks or impose an additional parallelism limit |
 | Publish a completed index | Existing cache-load caller after successful return | Cancellation or failure prevents publishing that result |
@@ -266,20 +266,48 @@ and its text/ngram/stats variants, `GetObjectData`, index metadata loaders,
 | Legacy Hybrid/Bitmap resource metadata | Admitted inspection and metadata assembly, scheduled on the shared executor when enabled |
 | Packed V3 and FMIndex | Existing `LoadUnifiedAsync` reader/materializer; not routed through the legacy decoder |
 | BSON shared-key `BsonInvertedIndexTranslator` | Context-aware `LoadIndex` uses the concurrent disk streamer, then opens Tantivy on the shared async worker |
+| Independent `TextMatchIndexTranslator` | Context-aware `TextMatchIndex::Load` selects inherited Tantivy legacy loading or the packed V3 reader/materializer |
 
 The remaining synchronous calls in those scalar/vector implementations belong
 to their two-argument compatibility loaders and associated metadata overloads.
 Index building uses `CacheRawDataToMemory`, `CacheRawDataToDisk`,
-`CacheOptFieldToDisk`, and field-data `GetObjectData` consumers. Independent
-`TextMatchIndex::Load` and JSON stats metadata retain
-their existing loaders. JSON shredding data already has its own async branch,
-but that does not migrate every stats file. These entry points do not pass
-through the sealed-index dispatch covered by this migration.
+`CacheOptFieldToDisk`, and field-data `GetObjectData` consumers. JSON stats
+metadata retains its existing loader. JSON shredding data already has its own
+async branch, but that does not migrate every stats file. Those entry points do
+not pass through the sealed-index dispatch covered by this migration.
 
 HIGH/LOW pools therefore still exist for compatibility and independent loaders.
 Shared-overhead accounting uses admission bytes and slots, with no worker-count
 lookup or pool construction. Enabled legacy payload tasks submit to the shared
 async executor.
+
+## Independent TextMatch loading
+
+`TextMatchIndexTranslator` passes its `OpContext` into `TextMatchIndex::Load`.
+With async loading enabled, legacy relative filenames are resolved against
+`stats_base_path` and passed to the inherited Tantivy `LoadLegacyAsync`.
+Its existing `is_index_file_` flag selects the text-log directory and cleanup.
+No separate TextMatch streamer, materializer, or finalizer is introduced.
+With the switch disabled, the legacy loader keeps its HIGH/LOW scheduling.
+
+A single `.v3` file already used `LoadUnified`; that branch now forwards the
+cancellation context. The shared V3 path reads from the text-log prefix and
+uses the existing generated index staging directory. Both async formats open
+Tantivy and build validity on the shared async worker after file writes close.
+`LocalFileIOPool` handles creation, writes, flush/close, and cleanup. Analyzer
+registration stays on the cache-load caller after loading. A final cancellation
+check prevents the translator from publishing a cancelled result.
+
+Resource planning reuses the ordinary Tantivy file-aware estimator, selecting
+the text-log prefix for packed files. Legacy planning resolves the same remote
+paths and saves the immutable envelope snapshot in `FileManagerContext`; both
+file managers reuse it during loading. Inspection uses the same admitted
+coroutine in both modes: enabled schedules it on the shared async executor;
+disabled drives it on the planning caller, without HIGH/LOW dispatch. That
+planning choice is separate from compatibility payload loading. Estimates
+cover validity, retained null-offset/slice metadata, bounded transient reads
+and temporary files across rollout changes. Shared overhead is used only when the existing estimator can
+prove that admission leases cover it completely.
 
 ## BSON shared-key loading
 
@@ -439,3 +467,20 @@ Both test targets built successfully, and 838 distinct selected cases passed
 without failures or skips. See the
 [review validation](20260907-async-scalar-index-v3-loading.md#design-review-follow-up-validation-2026-09-11)
 for the executed coverage and its limits.
+
+### TextMatch validation (2026-09-11)
+
+Both C++ test targets built with GCC 12 Release, at most 16 build jobs and
+nested builders capped at one job. Six focused TextMatch cases passed,
+including the three new async cases. The broader scalar/vector/BSON/TextMatch
+run passed 104 cases, and JSON stats passed 84. These are 191 distinct cases,
+with no failures or skips.
+
+TextMatch coverage includes legacy/V3, heap/mmap, relative text-log paths,
+sliced Tantivy files and null-offset metadata, query/null parity, and estimates
+across rollout changes. With one async worker and one admission slot, a native
+read can remain pending while another async task runs; cancellation waits for
+that read to drain and prevents cell publication. Cancellation at finalization
+also removes the staged directory for both formats and storage modes. These
+are local and controlled-backend tests, without remote-cluster throughput
+measurements.
