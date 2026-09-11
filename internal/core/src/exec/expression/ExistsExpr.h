@@ -26,6 +26,7 @@
 #include <vector>
 
 #include "cachinglayer/CacheSlot.h"
+#include "common/Json.h"
 #include "common/OpContext.h"
 #include "common/Types.h"
 #include "common/Vector.h"
@@ -38,6 +39,30 @@
 
 namespace milvus {
 namespace exec {
+
+// JSON EXISTS over raw rows. NULL rows are FALSE and known.
+struct ExistsKernel {
+    static constexpr bool kNullRowsKnownFalse = true;
+
+    std::string pointer;
+
+    template <FilterType filter_type>
+    void
+    Eval(const CandidateBatch<milvus::Json>& b, TriStateOut out) const {
+        for (size_t i = 0; i < b.size; ++i) {
+            if (b.validity && !b.validity[i]) {
+                continue;
+            }
+            if (!b.IsCandidate(i)) {
+                continue;
+            }
+            if (b.data[i].exist(pointer)) {
+                out.SetTrue(i);
+            }
+        }
+    }
+};
+static_assert(kKernelNullRowsKnownFalse<ExistsKernel>);
 
 class PhyExistsFilterExpr : public SegmentExpr {
  public:

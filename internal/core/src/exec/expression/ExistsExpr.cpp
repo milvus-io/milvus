@@ -130,9 +130,6 @@ PhyExistsFilterExpr::EvalJsonExistsForIndex() {
 
 VectorPtr
 PhyExistsFilterExpr::EvalJsonExistsForDataSegment(EvalCtx& context) {
-    auto* input = context.get_offset_input();
-    const auto& bitmap_input = context.get_bitmap_input();
-    FieldId field_id = expr_->column_.field_id_;
     if (exec_path_ == ExprExecPath::JsonStats && !has_offset_input_) {
         milvus::ScopedTimer timer("exists_json_by_stats", [this](double us) {
             json_filter_stats_latency_us_ += us;
@@ -143,72 +140,10 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegment(EvalCtx& context) {
     milvus::ScopedTimer timer("exists_json_bruteforce", [this](double us) {
         json_filter_bruteforce_latency_us_ += us;
     });
-
-    auto real_batch_size =
-        has_offset_input_ ? input->size() : GetNextBatchSize();
-    if (real_batch_size == 0) {
-        return nullptr;
-    }
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
-    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
-
-    auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
-    int processed_cursor = 0;
-    auto execute_sub_batch =
-        [&bitmap_input, &
-         processed_cursor ]<FilterType filter_type = FilterType::sequential>(
-            const milvus::Json* data,
-            ValidityView valid_data,
-            const int32_t* offsets,
-            const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
-            const std::string& pointer) {
-        // If data is nullptr, this chunk was skipped by SkipIndex.
-        // We only need to update processed_cursor for bitmap_input indexing.
-        if (data == nullptr) {
-            processed_cursor += size;
-            return;
-        }
-        bool has_bitmap_input = !bitmap_input.empty();
-        for (int i = 0; i < size; ++i) {
-            auto offset = i;
-            if constexpr (filter_type == FilterType::random) {
-                offset = (offsets) ? offsets[i] : i;
-            }
-            if (valid_data && !valid_data[offset]) {
-                res[i] = false;
-                continue;
-            }
-            if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
-                continue;
-            }
-            res[i] = data[offset].exist(pointer);
-        }
-        processed_cursor += size;
-    };
-
-    int64_t processed_size;
-    if (has_offset_input_) {
-        processed_size = ProcessDataByOffsets<Json>(execute_sub_batch,
-                                                    std::nullptr_t{},
-                                                    input,
-                                                    res,
-                                                    valid_res,
-                                                    pointer);
-    } else {
-        processed_size = ProcessDataChunks<Json>(
-            execute_sub_batch, std::nullptr_t{}, res, valid_res, pointer);
-    }
-    AssertInfo(processed_size == real_batch_size,
-               "internal error: expr processed rows {} not equal "
-               "expect batch size {}",
-               processed_size,
-               real_batch_size);
-    return res_vec;
+    return EvalKernel<milvus::Json>(
+        context,
+        ExistsKernel{milvus::Json::pointer(expr_->column_.nested_path_)},
+        /*element_level=*/false);
 }
 
 VectorPtr
