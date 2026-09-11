@@ -71,6 +71,11 @@ const (
 
 	// EZK is the base64-encoded encryption zone key for reading encrypted backup data.
 	EZK = "ezk"
+
+	// L0DeltaPaths specifies the paths to L0 delta logs to apply during binlog import.
+	// Type: semicolon-separated paths
+	// These deletes will be applied to the data segments being imported.
+	L0DeltaPaths = "l0_delta_paths"
 )
 
 type Options []*commonpb.KeyValuePair
@@ -194,6 +199,27 @@ func GetCSVNullKey(options Options) (string, error) {
 		return defaultNullKey, nil
 	}
 	return nullKey, nil
+}
+
+func GetL0DeltaPaths(options Options) ([]string, error) {
+	l0DeltaPathsStr, err := funcutil.GetAttrByKeyFromRepeatedKV(L0DeltaPaths, options)
+	if err != nil {
+		// not set, return empty
+		return []string{}, nil
+	}
+	if l0DeltaPathsStr == "" {
+		return []string{}, nil
+	}
+	// Parse semicolon-separated paths
+	paths := strings.Split(l0DeltaPathsStr, ";")
+	// Filter out empty paths
+	var result []string
+	for _, p := range paths {
+		if p = strings.TrimSpace(p); p != "" {
+			result = append(result, p)
+		}
+	}
+	return result, nil
 }
 
 func GetEZK(options Options) (string, error) {

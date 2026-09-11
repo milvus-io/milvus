@@ -64,7 +64,11 @@ func NewReader(ctx context.Context,
 			return nil, err
 		}
 		importEz, _ := GetEZK(options)
-		return binlog.NewReader(ctx, cm, schema, storageConfig, storageVersion, paths, tsStart, tsEnd, bufferSize, importEz)
+		l0DeltaPaths, err := GetL0DeltaPaths(options)
+		if err != nil {
+			return nil, err
+		}
+		return binlog.NewReader(ctx, cm, schema, storageConfig, storageVersion, paths, tsStart, tsEnd, bufferSize, importEz, l0DeltaPaths...)
 	}
 
 	fileType, err := GetFileType(importFile)
