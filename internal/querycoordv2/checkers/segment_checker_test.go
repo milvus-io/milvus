@@ -185,6 +185,219 @@ func (suite *SegmentCheckerTestSuite) TestLoadSegments() {
 	suite.Len(addedTasks, 1)
 }
 
+func (suite *SegmentCheckerTestSuite) TestLoadSegmentsGroupByRWNodes() {
+	ctx := context.Background()
+	checker := suite.checker
+	collectionID := int64(1)
+	replicaID := int64(1)
+	nodes := []int64{1, 2, 3, 4}
+	shards := []string{"channel1", "channel2", "channel3", "channel4"}
+
+	checker.meta.PutCollection(ctx, utils.CreateTestCollection(collectionID, 1))
+	checker.meta.PutPartition(ctx, utils.CreateTestPartition(collectionID, 1))
+	replica := meta.NewReplica(
+		&querypb.Replica{
+			ID:           replicaID,
+			CollectionID: collectionID,
+			Nodes:        nodes,
+			ChannelNodeInfos: map[string]*querypb.ChannelNodeInfo{
+				"channel1": {RwNodes: []int64{1, 2, 3, 4}},
+				"channel2": {RwNodes: []int64{4, 3, 2, 1}},
+				"channel3": {RwNodes: []int64{1, 2, 3, 4}},
+				"channel4": {RwNodes: []int64{4, 3, 2, 1}},
+			},
+		},
+	)
+	checker.meta.Put(ctx, replica)
+
+	for _, node := range nodes {
+		suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   node,
+			Address:  "localhost",
+			Hostname: "localhost",
+		}))
+		checker.meta.HandleNodeUp(ctx, node)
+	}
+
+	segments := make([]*datapb.SegmentInfo, 0, len(shards))
+	loadPriorities := make([]commonpb.LoadPriority, 0, len(shards))
+	for i, shard := range shards {
+		segment := &datapb.SegmentInfo{
+			ID:            int64(i + 1),
+			CollectionID:  collectionID,
+			PartitionID:   1,
+			InsertChannel: shard,
+			NumOfRows:     100,
+		}
+		segments = append(segments, segment)
+		loadPriorities = append(loadPriorities, commonpb.LoadPriority_HIGH)
+		checker.dist.ChannelDistManager.Update(int64(i+1), &meta.DmChannel{
+			VchannelInfo: &datapb.VchannelInfo{
+				CollectionID: collectionID,
+				ChannelName:  shard,
+			},
+			Node:    int64(i + 1),
+			Version: 1,
+			View:    &meta.LeaderView{ID: int64(i + 1), CollectionID: collectionID, Channel: shard, Version: 1, Status: &querypb.LeaderViewStatus{Serviceable: true}},
+		})
+	}
+
+	tasks := checker.createSegmentLoadTasks(ctx, segments, loadPriorities, replica)
+	suite.Len(tasks, len(segments))
+
+	assignedNodes := make(map[int64]struct{})
+	for _, t := range tasks {
+		suite.Require().Len(t.Actions(), 1)
+		action, ok := t.Actions()[0].(*task.SegmentAction)
+		suite.Require().True(ok)
+		suite.Equal(task.ActionTypeGrow, action.Type())
+		assignedNodes[action.Node()] = struct{}{}
+	}
+	suite.Len(assignedNodes, len(nodes))
+}
+
+func (suite *SegmentCheckerTestSuite) TestLoadSegmentsKeepDifferentRWNodeGroupsSeparate() {
+	ctx := context.Background()
+	checker := suite.checker
+	collectionID := int64(1)
+	replicaID := int64(1)
+	nodes := []int64{1, 2, 3, 4}
+	shardRWNodes := map[string][]int64{
+		"channel1": {1, 2},
+		"channel2": {2, 1},
+		"channel3": {3, 4},
+		"channel4": {4, 3},
+	}
+
+	checker.meta.PutCollection(ctx, utils.CreateTestCollection(collectionID, 1))
+	checker.meta.PutPartition(ctx, utils.CreateTestPartition(collectionID, 1))
+	replica := meta.NewReplica(
+		&querypb.Replica{
+			ID:           replicaID,
+			CollectionID: collectionID,
+			Nodes:        nodes,
+			ChannelNodeInfos: map[string]*querypb.ChannelNodeInfo{
+				"channel1": {RwNodes: shardRWNodes["channel1"]},
+				"channel2": {RwNodes: shardRWNodes["channel2"]},
+				"channel3": {RwNodes: shardRWNodes["channel3"]},
+				"channel4": {RwNodes: shardRWNodes["channel4"]},
+			},
+		},
+	)
+	checker.meta.Put(ctx, replica)
+
+	for _, node := range nodes {
+		suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   node,
+			Address:  "localhost",
+			Hostname: "localhost",
+		}))
+		checker.meta.HandleNodeUp(ctx, node)
+	}
+
+	shards := lo.Keys(shardRWNodes)
+	sort.Strings(shards)
+	segments := make([]*datapb.SegmentInfo, 0, len(shards))
+	loadPriorities := make([]commonpb.LoadPriority, 0, len(shards))
+	for i, shard := range shards {
+		segment := &datapb.SegmentInfo{
+			ID:            int64(i + 1),
+			CollectionID:  collectionID,
+			PartitionID:   1,
+			InsertChannel: shard,
+			NumOfRows:     100,
+		}
+		segments = append(segments, segment)
+		loadPriorities = append(loadPriorities, commonpb.LoadPriority_HIGH)
+		checker.dist.ChannelDistManager.Update(int64(i+1), &meta.DmChannel{
+			VchannelInfo: &datapb.VchannelInfo{
+				CollectionID: collectionID,
+				ChannelName:  shard,
+			},
+			Node:    int64(i + 1),
+			Version: 1,
+			View:    &meta.LeaderView{ID: int64(i + 1), CollectionID: collectionID, Channel: shard, Version: 1, Status: &querypb.LeaderViewStatus{Serviceable: true}},
+		})
+	}
+
+	tasks := checker.createSegmentLoadTasks(ctx, segments, loadPriorities, replica)
+	suite.Len(tasks, len(segments))
+
+	assignedNodes := make(map[int64]struct{})
+	for _, t := range tasks {
+		suite.Require().Len(t.Actions(), 1)
+		action, ok := t.Actions()[0].(*task.SegmentAction)
+		suite.Require().True(ok)
+		suite.Equal(task.ActionTypeGrow, action.Type())
+		suite.Contains(shardRWNodes[action.GetShard()], action.Node())
+		assignedNodes[action.Node()] = struct{}{}
+	}
+	suite.Len(assignedNodes, len(nodes))
+}
+
+func (suite *SegmentCheckerTestSuite) TestLoadSegmentsFallbackToReplicaRWNodes() {
+	ctx := context.Background()
+	checker := suite.checker
+	collectionID := int64(1)
+	replicaID := int64(1)
+	nodes := []int64{1, 2, 3, 4}
+
+	checker.meta.PutCollection(ctx, utils.CreateTestCollection(collectionID, 1))
+	checker.meta.PutPartition(ctx, utils.CreateTestPartition(collectionID, 1))
+	replica := meta.NewReplica(
+		&querypb.Replica{
+			ID:           replicaID,
+			CollectionID: collectionID,
+			Nodes:        nodes,
+			ChannelNodeInfos: map[string]*querypb.ChannelNodeInfo{
+				"channel1": {RwNodes: []int64{1, 2}},
+			},
+		},
+	)
+	checker.meta.Put(ctx, replica)
+
+	for _, node := range nodes {
+		nodeInfo := session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   node,
+			Address:  "localhost",
+			Hostname: "localhost",
+		})
+		if node <= 2 {
+			nodeInfo.UpdateStats(session.WithSegmentCnt(10))
+		}
+		suite.nodeMgr.Add(nodeInfo)
+		checker.meta.HandleNodeUp(ctx, node)
+	}
+
+	segments := []*datapb.SegmentInfo{
+		{
+			ID:            1,
+			CollectionID:  collectionID,
+			PartitionID:   1,
+			InsertChannel: "channel-without-rw-nodes",
+			NumOfRows:     100,
+		},
+	}
+	checker.dist.ChannelDistManager.Update(1, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: collectionID,
+			ChannelName:  "channel-without-rw-nodes",
+		},
+		Node:    1,
+		Version: 1,
+		View:    &meta.LeaderView{ID: 1, CollectionID: collectionID, Channel: "channel-without-rw-nodes", Version: 1, Status: &querypb.LeaderViewStatus{Serviceable: true}},
+	})
+
+	tasks := checker.createSegmentLoadTasks(ctx, segments, []commonpb.LoadPriority{commonpb.LoadPriority_HIGH}, replica)
+	suite.Len(tasks, 1)
+	suite.Require().Len(tasks[0].Actions(), 1)
+	action, ok := tasks[0].Actions()[0].(*task.SegmentAction)
+	suite.Require().True(ok)
+	suite.Equal(task.ActionTypeGrow, action.Type())
+	suite.EqualValues(1, action.GetSegmentID())
+	suite.EqualValues(3, action.Node())
+}
+
 func (suite *SegmentCheckerTestSuite) TestSkipLoadSegments() {
 	ctx := context.Background()
 	checker := suite.checker
