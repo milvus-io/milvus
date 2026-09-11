@@ -138,8 +138,9 @@ class TestVectorArrayStorageV2 : public testing::Test {
         auto fs = milvus::segcore::GetDefaultArrowFileSystem();
 
         // Prepare paths and column groups
-        std::vector<std::string> paths = {"test_data/0/10000.parquet",
-                                          "test_data/101/10001.parquet"};
+        std::vector<std::string> paths = {
+            TestLocalPath + "test_data/0/10000.parquet",
+            TestLocalPath + "test_data/101/10001.parquet"};
 
         // Create directories for the parquet files
         for (const auto& path : paths) {
@@ -293,7 +294,7 @@ class TestVectorArrayStorageV2 : public testing::Test {
     void
     TearDown() override {
         auto fs = milvus::segcore::GetDefaultArrowFileSystem();
-        (void)fs->DeleteDir("test_data");
+        (void)fs->DeleteDir(TestLocalPath + "test_data");
     }
 
  protected:
@@ -312,7 +313,8 @@ TEST_F(TestVectorArrayStorageV2, BuildEmbListHNSWIndex) {
     ASSERT_TRUE(segment_->HasFieldData(vector_array_field_id));
 
     // Get the storage v2 parquet file paths that were already written in SetUp
-    std::vector<std::string> paths = {"test_data/101/10001.parquet"};
+    std::vector<std::string> paths = {TestLocalPath +
+                                      "test_data/101/10001.parquet"};
 
     // Use the existing Arrow file system from SetUp
     auto fs = milvus::segcore::GetDefaultArrowFileSystem();
@@ -427,7 +429,8 @@ TEST_F(TestVectorArrayStorageV2, BuildEmbListHNSWIndexWithMmap) {
     ASSERT_TRUE(segment_->HasFieldData(vector_array_field_id));
 
     // Get the storage v2 parquet file paths that were already written in SetUp
-    std::vector<std::string> paths = {"test_data/101/10001.parquet"};
+    std::vector<std::string> paths = {TestLocalPath +
+                                      "test_data/101/10001.parquet"};
 
     // Use the existing Arrow file system from SetUp
     auto fs = milvus::segcore::GetDefaultArrowFileSystem();
@@ -565,7 +568,8 @@ TEST_F(TestVectorArrayStorageV2, BuildEncodedEmbListHNSWIndexWithMmap) {
     auto vector_array_field_id = fields_["vector_array"];
     ASSERT_TRUE(segment_->HasFieldData(vector_array_field_id));
 
-    std::vector<std::string> paths = {"test_data/101/10001.parquet"};
+    std::vector<std::string> paths = {TestLocalPath +
+                                      "test_data/101/10001.parquet"};
     auto fs = milvus::segcore::GetDefaultArrowFileSystem();
     auto storage_config = gen_local_storage_config(TestLocalPath);
     auto cm = CreateChunkManager(storage_config);

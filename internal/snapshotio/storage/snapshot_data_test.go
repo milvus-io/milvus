@@ -1525,6 +1525,10 @@ func TestListSnapshotDataFiles_StorageV3IncludesManifestRootObjectsAndLobs(t *te
 	basePath := path.Join(tempDir, "files/insert_log/100/20/1001")
 	require.NoError(t, cm.Write(ctx, path.Join(basePath, "manifest"), []byte("manifest")))
 	require.NoError(t, cm.Write(ctx, path.Join(basePath, "_data/cg0.parquet"), []byte("data")))
+	deltaPath := path.Join(basePath, "_delta/7")
+	require.NoError(t, cm.Write(ctx, deltaPath, []byte("delta")))
+	pathlessDeltaPath := path.Join(basePath, "_delta/8")
+	require.NoError(t, cm.Write(ctx, pathlessDeltaPath, []byte("pathless delta")))
 	siblingPath := basePath + "0/manifest"
 	require.NoError(t, cm.Write(ctx, siblingPath, []byte("sibling")))
 
@@ -1552,7 +1556,15 @@ func TestListSnapshotDataFiles_StorageV3IncludesManifestRootObjectsAndLobs(t *te
 		},
 	}
 	segment.Statslogs = nil
-	segment.Deltalogs = nil
+	// StorageV3 delta metadata: one entry with a complete key and one
+	// compressed summary placeholder without a path (the manifest owns the
+	// physical file, which the manifest walk lists).
+	segment.Deltalogs = []*datapb.FieldBinlog{{
+		Binlogs: []*datapb.Binlog{
+			{LogPath: deltaPath},
+			{LogID: 8},
+		},
+	}}
 	segment.Bm25Statslogs = nil
 	segment.IndexFiles = nil
 
@@ -1560,12 +1572,20 @@ func TestListSnapshotDataFiles_StorageV3IncludesManifestRootObjectsAndLobs(t *te
 		BucketName: "foreign-bucket",
 		RootPath:   "foreign-root",
 	}
+	getLobCalls := 0
 	mockGetLobFiles := mockey.Mock(packed.GetManifestLobFiles).To(
 		func(gotManifestPath string, gotStorageConfig *indexpb.StorageConfig) ([]packed.LobFileInfo, error) {
 			assert.Equal(t, segment.GetManifestPath(), gotManifestPath)
-			assert.Same(t, foreignStorageConfig, gotStorageConfig)
+			// Listing passes the caller's storage config through; the rewrite
+			// below calls again with its own config.
+			if getLobCalls == 0 {
+				assert.Same(t, foreignStorageConfig, gotStorageConfig)
+			}
+			getLobCalls++
+			// Manifest-expanded LOB paths are complete keys, so on local
+			// storage they are absolute like the manifest base.
 			return []packed.LobFileInfo{
-				{Path: "files/insert_log/100/20/lobs/30/_data/lob.vx", FieldID: 30},
+				{Path: path.Join(tempDir, "files/insert_log/100/20/lobs/30/_data/lob.vx"), FieldID: 30},
 			}, nil
 		}).Build()
 	defer mockGetLobFiles.UnPatch()
@@ -1581,11 +1601,32 @@ func TestListSnapshotDataFiles_StorageV3IncludesManifestRootObjectsAndLobs(t *te
 	assert.Equal(t, snapshotstorage.SnapshotFileTypeStorageV3ManifestRoot, byPath[basePath].Type)
 	assert.Equal(t, snapshotstorage.SnapshotFileTypeStorageV3ManifestObject, byPath[path.Join(basePath, "manifest")].Type)
 	assert.Equal(t, snapshotstorage.SnapshotFileTypeStorageV3ManifestObject, byPath[path.Join(basePath, "_data/cg0.parquet")].Type)
-	assert.Equal(t, snapshotstorage.SnapshotFileTypeStorageV3LOBFile, byPath["files/insert_log/100/20/lobs/30/_data/lob.vx"].Type)
+	assert.Equal(t, snapshotstorage.SnapshotFileTypeStorageV3LOBFile, byPath[path.Join(tempDir, "files/insert_log/100/20/lobs/30/_data/lob.vx")].Type)
 	assert.NotContains(t, byPath, "files/text_index/100/12/1001/7002/posting")
 	assert.NotContains(t, byPath, "files/json_index/100/13/1001/7003/key")
 	assert.NotContains(t, byPath, siblingPath)
-	assert.Len(t, byPath, 4)
+	assert.Contains(t, byPath, deltaPath)
+	assert.Contains(t, byPath, pathlessDeltaPath)
+	assert.Len(t, byPath, 6)
+
+	// Rewriting keeps the pathless summary pathless instead of failing on a
+	// missing mapping for "".
+	mappings := make(map[string]string, len(refs)*2)
+	for _, ref := range refs {
+		destination := snapshotstorage.ExportedSnapshotPath(cm, ref.NormalizedPath, "bundle")
+		mappings[ref.Path] = destination
+		mappings[ref.NormalizedPath] = destination
+	}
+	rewritten, err := snapshotstorage.RewriteSnapshotWithMapping(
+		snapshot,
+		mappings,
+		"bundle",
+		"s3://bucket/bundle/snapshots/100/metadata/1.json",
+	)
+	require.NoError(t, err)
+	assert.Equal(t, mappings[deltaPath], rewritten.Segments[0].GetDeltalogs()[0].GetBinlogs()[0].GetLogPath())
+	assert.Empty(t, rewritten.Segments[0].GetDeltalogs()[0].GetBinlogs()[1].GetLogPath())
+	assert.Equal(t, int64(8), rewritten.Segments[0].GetDeltalogs()[0].GetBinlogs()[1].GetLogID())
 }
 
 func validateSnapshotDataFiles(

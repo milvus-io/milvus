@@ -168,9 +168,26 @@ func (lcm *LocalChunkManager) WalkWithPrefix(ctx context.Context, prefix string,
 
 	if recursive {
 		dir := filepath.Dir(prefix)
+		// An object store returns an empty listing for a prefix that holds
+		// nothing, so a missing directory is "no objects", not an error.
+		// Callers rely on this to stay idempotent: re-running a prefix removal
+		// after it succeeded must not fail.
+		if _, statErr := os.Stat(dir); os.IsNotExist(statErr) {
+			return nil
+		}
 		return filepath.Walk(dir, func(filePath string, f os.FileInfo, err error) error {
 			if ctx.Err() != nil {
 				return ctx.Err()
+			}
+			// Do not descend into unrelated siblings (for example, local
+			// migration backups). Keep string-prefix matches such as
+			// insert_logExtra when the requested prefix is insert_log.
+			// Walk can report a directory-read error with its FileInfo; prune
+			// unrelated directories before propagating such an error.
+			if f != nil && f.IsDir() && filePath != dir &&
+				!strings.HasPrefix(filePath, prefix) &&
+				!strings.HasPrefix(prefix, filePath+string(filepath.Separator)) {
+				return filepath.SkipDir
 			}
 			if err != nil {
 				return err
@@ -251,6 +268,16 @@ func (lcm *LocalChunkManager) Size(ctx context.Context, filePath string) (int64,
 }
 
 func (lcm *LocalChunkManager) Remove(ctx context.Context, filePath string) error {
+	// Keep an empty key as a no-op and never allow this API to remove the
+	// configured storage root. Some existing local-only cleanup paths remove a
+	// derived job subdirectory recursively, so retain that behavior below the
+	// root while making the dangerous root cases explicit.
+	if filePath == "" {
+		return nil
+	}
+	if lcm.localPath != "" && filepath.Clean(filePath) == filepath.Clean(lcm.localPath) {
+		return merr.WrapErrParameterInvalidMsg("refuse to remove local storage root")
+	}
 	err := os.RemoveAll(filePath)
 	return merr.WrapErrIoFailed(filePath, err)
 }

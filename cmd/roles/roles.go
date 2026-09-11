@@ -433,6 +433,8 @@ func (mr *MilvusRoles) Run() {
 		}
 
 		params := paramtable.Get()
+		// Recover visible legacy local files before etcd and components start.
+		mr.migrateLocalStorageLayoutOrDie(ctx, params)
 		if params.EtcdCfg.UseEmbedEtcd.GetAsBool() {
 			// Start etcd server.
 			etcd.InitEtcdServer(

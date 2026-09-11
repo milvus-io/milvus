@@ -26,7 +26,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -271,15 +270,30 @@ func TestNewLOBGCContext(t *testing.T) {
 	assert.Equal(t, gc, lobCtx.gc)
 }
 
-func TestGetStorageConfig(t *testing.T) {
-	// this test verifies the getStorageConfig function returns a valid config
-	// based on paramtable values
-	gc := &garbageCollector{}
-	config := gc.getStorageConfig()
+// LOB GC reads manifests through the primary storage config, so its key prefix
+// must be localStorage.path under local storage. Deriving it from minio.rootPath
+// would address a namespace that holds no LOB files (#53051).
+func TestLOBGCStorageConfigUsesPrimaryStorageRoot(t *testing.T) {
+	params := Params
+	localRoot := t.TempDir()
+	require.NoError(t, params.Save(params.MinioCfg.RootPath.Key, "files"))
+	require.NoError(t, params.Save(params.LocalStorageCfg.Path.Key, localRoot))
+	t.Cleanup(func() {
+		_ = params.Reset(params.CommonCfg.StorageType.Key)
+		_ = params.Reset(params.MinioCfg.RootPath.Key)
+		_ = params.Reset(params.LocalStorageCfg.Path.Key)
+	})
 
+	require.NoError(t, params.Save(params.CommonCfg.StorageType.Key, "local"))
+	config := createStorageConfig()
 	require.NotNil(t, config)
-	// verify it's a valid StorageConfig struct
-	assert.IsType(t, &indexpb.StorageConfig{}, config)
+	assert.Equal(t, "local", config.GetStorageType())
+	assert.Equal(t, localRoot, config.GetRootPath())
+
+	require.NoError(t, params.Save(params.CommonCfg.StorageType.Key, "remote"))
+	config = createStorageConfig()
+	require.NotNil(t, config)
+	assert.Equal(t, "files", config.GetRootPath())
 }
 
 func TestCollectLOBFilesFromSegment(t *testing.T) {

@@ -73,9 +73,17 @@ MakeInternalPropertiesFromStorageConfig(CStorageConfig c_storage_config) {
                                       PROPERTY_FS_ACCESS_KEY_VALUE,
                                       c_storage_config.access_key_value);
     }
-    if (c_storage_config.root_path != nullptr) {
+    const std::string storage_type = c_storage_config.storage_type != nullptr
+                                         ? c_storage_config.storage_type
+                                         : "";
+    if (c_storage_config.root_path != nullptr || storage_type == "local") {
+        const std::string root_path = c_storage_config.root_path != nullptr
+                                          ? c_storage_config.root_path
+                                          : "";
         milvus_storage::api::SetValue(
-            *properties_map, PROPERTY_FS_ROOT_PATH, c_storage_config.root_path);
+            *properties_map,
+            PROPERTY_FS_ROOT_PATH,
+            LoonFSRootPath(storage_type, root_path).c_str());
     }
     if (c_storage_config.storage_type != nullptr) {
         milvus_storage::api::SetValue(*properties_map,
@@ -731,15 +739,25 @@ InjectExternalSpecProperties(milvus_storage::api::Properties& properties,
     }
 }
 
+std::string
+LoonFSRootPath(const std::string& storage_type, const std::string& root_path) {
+    if (storage_type == "local") {
+        return kLoonLocalFSRootPath;
+    }
+    return root_path;
+}
+
 std::shared_ptr<milvus_storage::api::Properties>
-MakeInternalLocalProperies(const char* c_path) {
+MakeInternalLocalProperies() {
     auto properties_map = std::make_shared<milvus_storage::api::Properties>();
 
     milvus_storage::api::SetValue(
         *properties_map, PROPERTY_FS_STORAGE_TYPE, "local");
 
+    // Local Milvus keys already include localStorage.path, so the filesystem is
+    // rooted at "/" and there is no prefix left to configure here.
     milvus_storage::api::SetValue(
-        *properties_map, PROPERTY_FS_ROOT_PATH, c_path);
+        *properties_map, PROPERTY_FS_ROOT_PATH, kLoonLocalFSRootPath);
 
     return properties_map;
 }

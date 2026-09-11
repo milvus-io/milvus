@@ -480,7 +480,7 @@ func TestCreateMilvusTableManifestFromSegmentManifests_ImportsSourceDeltalogs(t 
 
 func TestGetDeltaLogsFromManifestWithExtfsResolvesRelativeSourceDeltalogs(t *testing.T) {
 	cfg := manifestTestStorageConfig(t)
-	sourceBasePath := "files/source/segment/10"
+	sourceBasePath := path.Join(cfg.GetRootPath(), "source/segment/10")
 	sourceManifest := createBaseManifest(t, sourceBasePath, cfg)
 	sourceDeltaPath := path.Join(sourceBasePath, "_delta/9001")
 
