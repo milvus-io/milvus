@@ -323,8 +323,17 @@ func getCompactionMergeInfo(task *datapb.CompactionTask) *milvuspb.CompactionMer
 		target = task.GetResultSegments()[0]
 	}
 	return &milvuspb.CompactionMergeInfo{
-		Sources: task.GetInputSegments(),
-		Target:  target,
+		Sources:       task.GetInputSegments(),
+		Target:        target,
+		PlanId:        task.GetPlanID(),
+		TriggerId:     task.GetTriggerID(),
+		CollectionId:  task.GetCollectionID(),
+		PartitionId:   task.GetPartitionID(),
+		Channel:       task.GetChannel(),
+		Type:          task.GetType().String(),
+		State:         task.GetState().String(),
+		FailureReason: task.GetFailReason(),
+		Targets:       task.GetResultSegments(),
 	}
 }
 

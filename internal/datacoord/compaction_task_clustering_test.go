@@ -687,6 +687,7 @@ func (s *ClusteringCompactionTaskSuite) TestExecutingState() {
 	}, nil).Once()
 	task.QueryTaskOnWorker(cluster)
 	s.Equal(datapb.CompactionTaskState_failed, task.GetTaskProto().GetState())
+	s.Equal("DataNode reported compaction failure", task.GetTaskProto().GetFailReason())
 
 	cluster.EXPECT().QueryCompaction(mock.Anything, mock.Anything).Return(&datapb.CompactionPlanResult{
 		State: datapb.CompactionTaskState_failed,

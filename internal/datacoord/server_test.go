@@ -30,6 +30,7 @@ import (
 	"github.com/blang/semver/v4"
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -737,6 +738,7 @@ func TestGetSegmentsByStates(t *testing.T) {
 			flushedSegments []int64
 			sealedSegments  []int64
 			growingSegments []int64
+			droppedSegments []int64
 			expected        []int64
 		}
 		cases := []testCase{
@@ -747,6 +749,7 @@ func TestGetSegmentsByStates(t *testing.T) {
 				flushedSegments: []int64{1, 2, 3},
 				sealedSegments:  []int64{4},
 				growingSegments: []int64{5},
+				droppedSegments: []int64{12},
 				expected:        []int64{1, 2, 3, 4},
 			},
 			{
@@ -867,6 +870,17 @@ func TestGetSegmentsByStates(t *testing.T) {
 				}
 				assert.Nil(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segInfo)))
 			}
+			for _, ds := range tc.droppedSegments {
+				segInfo := &datapb.SegmentInfo{
+					ID:            ds,
+					CollectionID:  tc.collID,
+					PartitionID:   tc.partID,
+					InsertChannel: channelName + fmt.Sprint(tc.collID),
+					State:         commonpb.SegmentState_Dropped,
+					NumOfRows:     1024,
+				}
+				assert.Nil(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segInfo)))
+			}
 
 			resp, err := svr.GetSegmentsByStates(context.Background(), &datapb.GetSegmentsByStatesRequest{
 				CollectionID: tc.collID,
@@ -878,6 +892,44 @@ func TestGetSegmentsByStates(t *testing.T) {
 
 			assert.ElementsMatch(t, tc.expected, resp.GetSegments())
 		}
+
+		assert.NoError(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+			ID:                  13,
+			CollectionID:        1,
+			PartitionID:         1,
+			InsertChannel:       channelName + "1",
+			State:               commonpb.SegmentState_Flushed,
+			NumOfRows:           2048,
+			CompactionFrom:      []int64{1, 2},
+			CreatedByCompaction: true,
+			IsInvisible:         true,
+			StartPosition: &msgpb.MsgPosition{
+				ChannelName: "ch1",
+				MsgID:       []byte{8, 9, 10},
+			},
+			DmlPosition: &msgpb.MsgPosition{
+				ChannelName: "ch1",
+				MsgID:       []byte{11, 12, 13},
+				Timestamp:   2,
+			},
+		})))
+		resp, err := svr.GetSegmentsByStates(context.Background(), &datapb.GetSegmentsByStatesRequest{
+			CollectionID: 1,
+			PartitionID:  -1,
+			States:       []commonpb.SegmentState{commonpb.SegmentState_Sealed, commonpb.SegmentState_Flushed},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.ElementsMatch(t, []int64{1, 2, 3, 4, 6, 7}, resp.GetSegments())
+
+		resp, err = svr.GetSegmentsByStates(context.Background(), &datapb.GetSegmentsByStatesRequest{
+			CollectionID: 1,
+			PartitionID:  -1,
+			States:       []commonpb.SegmentState{commonpb.SegmentState_Growing, commonpb.SegmentState_Dropped},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.ElementsMatch(t, []int64{5, 8, 12}, resp.GetSegments())
 	})
 
 	t.Run("with closed server", func(t *testing.T) {
@@ -2046,6 +2098,55 @@ func TestGetCompactionStateWithPlans(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.Equal(t, commonpb.CompactionState_Executing, resp.State)
+	})
+
+	t.Run("test get all retained tasks by collection", func(t *testing.T) {
+		svr := newTestServer(t)
+		defer closeTestServer(t, svr)
+		taskMeta := svr.meta.GetCompactionTaskMeta()
+		taskMeta.saveCompactionTaskMemory(&datapb.CompactionTask{
+			PlanID:         10,
+			TriggerID:      100,
+			CollectionID:   1,
+			PartitionID:    2,
+			Channel:        "ch-1",
+			Type:           datapb.CompactionType_MixCompaction,
+			State:          datapb.CompactionTaskState_completed,
+			InputSegments:  []int64{1, 2},
+			ResultSegments: []int64{3, 4},
+		})
+		taskMeta.saveCompactionTaskMemory(&datapb.CompactionTask{
+			PlanID:        11,
+			TriggerID:     101,
+			CollectionID:  1,
+			PartitionID:   2,
+			Channel:       "ch-1",
+			Type:          datapb.CompactionType_Level0DeleteCompaction,
+			State:         datapb.CompactionTaskState_cleaned,
+			FailReason:    "mock failure",
+			InputSegments: []int64{5},
+		})
+		taskMeta.saveCompactionTaskMemory(&datapb.CompactionTask{
+			PlanID:       12,
+			TriggerID:    102,
+			CollectionID: 2,
+			State:        datapb.CompactionTaskState_executing,
+		})
+
+		resp, err := svr.GetCompactionStateWithPlans(context.TODO(), &milvuspb.GetCompactionPlansRequest{
+			CollectionId: 1,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.CompactionState_Completed, resp.GetState())
+		assert.Len(t, resp.GetMergeInfos(), 2)
+		plans := lo.SliceToMap(resp.GetMergeInfos(), func(info *milvuspb.CompactionMergeInfo) (int64, *milvuspb.CompactionMergeInfo) {
+			return info.GetPlanId(), info
+		})
+		assert.Equal(t, []int64{1, 2}, plans[10].GetSources())
+		assert.Equal(t, []int64{3, 4}, plans[10].GetTargets())
+		assert.Equal(t, "MixCompaction", plans[10].GetType())
+		assert.Equal(t, "cleaned", plans[11].GetState())
+		assert.Equal(t, "mock failure", plans[11].GetFailureReason())
 	})
 
 	t.Run("test get compaction state with closed server", func(t *testing.T) {

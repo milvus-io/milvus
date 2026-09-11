@@ -18,6 +18,7 @@ package querycoordv2
 
 import (
 	"context"
+	"sort"
 	"sync"
 	"time"
 
@@ -62,7 +63,7 @@ func (s *Server) checkAnyReplicaAvailable(collectionID int64) bool {
 	return false
 }
 
-func (s *Server) getCollectionSegmentInfo(ctx context.Context, collection int64) []*querypb.SegmentInfo {
+func (s *Server) getCollectionSegmentInfo(ctx context.Context, collection int64) ([]*querypb.SegmentInfo, error) {
 	segments := s.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(collection))
 	currentTargetSegmentsMap := s.targetMgr.GetSealedSegmentsByCollection(ctx, collection, meta.CurrentTarget)
 	infos := make(map[int64]*querypb.SegmentInfo)
@@ -86,7 +87,59 @@ func (s *Server) getCollectionSegmentInfo(ctx context.Context, collection int64)
 		utils.MergeMetaSegmentIntoSegmentInfo(info, segment)
 	}
 
-	return lo.Values(infos)
+	growingInfos := make(map[int64]*querypb.SegmentInfo)
+	channels := s.dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(collection))
+	for _, channel := range channels {
+		if !channel.IsServiceable() || channel.View.Status.GetCatchingUpStreamingData() {
+			continue
+		}
+		for segmentID := range channel.View.GrowingSegments {
+			info, ok := growingInfos[segmentID]
+			if !ok {
+				info = &querypb.SegmentInfo{
+					SegmentID:    segmentID,
+					CollectionID: collection,
+					DmChannel:    channel.GetChannelName(),
+					SegmentState: commonpb.SegmentState_Growing,
+				}
+				growingInfos[segmentID] = info
+			}
+			if !lo.Contains(info.GetNodeIds(), channel.Node) {
+				info.NodeIds = append(info.NodeIds, channel.Node)
+			}
+		}
+	}
+
+	if len(growingInfos) > 0 {
+		segmentIDs := lo.Keys(growingInfos)
+		segmentDetails, err := s.broker.GetSegmentInfo(ctx, segmentIDs...)
+		if err != nil {
+			return nil, merr.Wrap(err, "failed to get growing segment details")
+		}
+		for _, detail := range segmentDetails {
+			info, ok := growingInfos[detail.GetID()]
+			if !ok {
+				continue
+			}
+			info.PartitionID = detail.GetPartitionID()
+			info.NumRows = detail.GetNumOfRows()
+			info.DmChannel = detail.GetInsertChannel()
+			info.CompactionFrom = detail.GetCompactionFrom()
+			info.CreatedByCompaction = detail.GetCreatedByCompaction()
+			info.Level = detail.GetLevel()
+			info.IsSorted = detail.GetIsSorted()
+			info.StorageVersion = detail.GetStorageVersion()
+		}
+	}
+
+	for segmentID, info := range growingInfos {
+		infos[segmentID] = info
+	}
+	result := lo.Values(infos)
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].GetSegmentID() < result[j].GetSegmentID()
+	})
+	return result, nil
 }
 
 // generate balance segment task and submit to scheduler

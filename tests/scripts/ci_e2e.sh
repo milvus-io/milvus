@@ -42,6 +42,10 @@ MILVUS_SERVICE_NAME=$(echo "${MILVUS_HELM_RELEASE_NAME}-milvus.${MILVUS_HELM_NAM
 MILVUS_SERVICE_PORT="19530"
 # Minio service name
 MINIO_SERVICE_NAME=$(echo "${MILVUS_HELM_RELEASE_NAME}-minio.${MILVUS_HELM_NAMESPACE}" | tr -d '\n')
+# Etcd service created by the same Helm release; callers may override it for external etcd.
+ETCD_SERVICE_NAME="${ETCD_SERVICE_NAME:-$(echo "${MILVUS_HELM_RELEASE_NAME}-etcd.${MILVUS_HELM_NAMESPACE}" | tr -d '\n')}"
+ETCD_SERVICE_PORT="${ETCD_SERVICE_PORT:-2379}"
+ETCD_ROOT_PATH="${ETCD_ROOT_PATH:-by-dev}"
 
 
 # Shellcheck source=ci-util.sh
@@ -72,7 +76,7 @@ fi
 # Pytest is not able to have both --timeout & --workers, so do not add --timeout or --workers in the shell script
 if [[ -n "${TEST_TIMEOUT:-}" ]]; then
   
-  timeout  "${TEST_TIMEOUT}" pytest --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME} ${@:-}
+  timeout  "${TEST_TIMEOUT}" pytest --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME} --etcd_host ${ETCD_SERVICE_NAME} --etcd_port ${ETCD_SERVICE_PORT} --etcd_root_path ${ETCD_ROOT_PATH} ${@:-}
 else
-  pytest --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME} ${@:-}
+  pytest --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME} --etcd_host ${ETCD_SERVICE_NAME} --etcd_port ${ETCD_SERVICE_PORT} --etcd_root_path ${ETCD_ROOT_PATH} ${@:-}
 fi

@@ -2,8 +2,9 @@
 Pytest plugin for conditional logging based on test outcome.
 
 This plugin captures logs per test in memory buffers and only persists
-detailed logs for failed/xpass tests:
-- PASSED tests: Only metadata saved (nodeid, duration, timestamp)
+detailed logs for failed/xpass tests unless a record opts in with
+``persist_on_pass=True``:
+- PASSED tests: Metadata plus explicitly retained audit logs
 - FAILED tests: Full logs + error traceback + metadata
 - SKIPPED tests: Only metadata + skip reason
 - XFAIL tests: Only metadata + xfail reason (expected failures)
@@ -56,10 +57,18 @@ class LogBuffer:
         return "\n".join(formatted_logs) if formatted_logs else "(No logs captured)"
 
     def get_structured_logs(self):
-        """Get logs structured by level for JSON output"""
+        """Get all logs structured by level for JSON output"""
+        return self._structure_logs(self.records)
+
+    def get_pass_audit_logs(self):
+        """Get explicitly retained audit logs for a passed test"""
+        return self._structure_logs(record for record in self.records if getattr(record, "persist_on_pass", False))
+
+    @staticmethod
+    def _structure_logs(records):
         structured = {"debug": [], "info": [], "warning": [], "error": [], "critical": []}
 
-        for record in self.records:
+        for record in records:
             try:
                 level = record.levelname.lower()
                 if level in structured:
@@ -170,16 +179,18 @@ class ConditionalLogHandler(logging.Handler):
                         }
                     )
                 elif report.passed:
-                    self.test_stats["passed"].append(
-                        {
-                            "nodeid": item.nodeid,
-                            "file": file_path,
-                            "class": test_class,
-                            "function": test_function,
-                            "duration": report.duration,
-                            "timestamp": datetime.now().isoformat(),
-                        }
-                    )
+                    passed_test = {
+                        "nodeid": item.nodeid,
+                        "file": file_path,
+                        "class": test_class,
+                        "function": test_function,
+                        "duration": report.duration,
+                        "timestamp": datetime.now().isoformat(),
+                    }
+                    persisted_logs = buffer.get_pass_audit_logs()
+                    if any(persisted_logs.values()):
+                        passed_test["logs"] = persisted_logs
+                    self.test_stats["passed"].append(passed_test)
                 elif report.failed:
                     # Extract error information
                     error_info = self._extract_error_info(report)
@@ -368,6 +379,7 @@ class ConditionalLogHandler(logging.Handler):
                             "function": t["function"],
                             "duration": round(t["duration"], 3),
                             "timestamp": t["timestamp"],
+                            "logs": t.get("logs", {}),
                         }
                         for t in self.test_stats["passed"]
                     ],

@@ -61,6 +61,11 @@ def pytest_addoption(parser):
     parser.addoption("--replica_num", action="store", default=ct.default_replica_num, help="memory replica number")
     parser.addoption("--minio_host", action="store", default="localhost", help="minio service's ip")
     parser.addoption("--minio_bucket", action="store", default="milvus-bucket", help="minio bucket name")
+    parser.addoption("--etcd_host", action="store", default="localhost", help="etcd service host")
+    parser.addoption("--etcd_port", action="store", type=int, default=2379, help="etcd service port")
+    parser.addoption("--etcd_root_path", action="store", default="by-dev", help="Milvus root path in etcd")
+    parser.addoption("--etcd_user", action="store", default="", help="etcd authentication user")
+    parser.addoption("--etcd_password", action="store", default="", help="etcd authentication password")
     parser.addoption("--uri", action="store", default="", help="uri for milvus client")
     parser.addoption("--token", action="store", default="root:Milvus", help="token for milvus client")
     parser.addoption("--request_duration", action="store", default="10m", help="request_duration")
@@ -232,6 +237,31 @@ def minio_host(request):
 @pytest.fixture
 def minio_bucket(request):
     return request.config.getoption("--minio_bucket")
+
+
+@pytest.fixture
+def etcd_host(request):
+    return request.config.getoption("--etcd_host")
+
+
+@pytest.fixture
+def etcd_port(request):
+    return request.config.getoption("--etcd_port")
+
+
+@pytest.fixture
+def etcd_root_path(request):
+    return request.config.getoption("--etcd_root_path")
+
+
+@pytest.fixture
+def etcd_user(request):
+    return request.config.getoption("--etcd_user")
+
+
+@pytest.fixture
+def etcd_password(request):
+    return request.config.getoption("--etcd_password")
 
 
 @pytest.fixture

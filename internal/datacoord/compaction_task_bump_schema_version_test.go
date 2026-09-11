@@ -426,6 +426,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestQueryTaskOnWorker() {
 		}, nil).Once()
 		task.QueryTaskOnWorker(cluster)
 		s.Equal(datapb.CompactionTaskState_timeout, task.GetTaskProto().GetState())
+		s.Equal("DataNode reported compaction timeout", task.GetTaskProto().GetFailReason())
 	})
 
 	s.Run("QueryTaskOnWorker, failed state", func() {
@@ -437,6 +438,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestQueryTaskOnWorker() {
 		}, nil).Once()
 		task.QueryTaskOnWorker(cluster)
 		s.Equal(datapb.CompactionTaskState_failed, task.GetTaskProto().GetState())
+		s.Equal("compaction failed in datanode", task.GetTaskProto().GetFailReason())
 	})
 
 	s.Run("QueryTaskOnWorker, completed with ValidateSegmentState error (segment not in meta)", func() {
@@ -606,6 +608,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestQueryTaskOnWorker() {
 		}, nil).Once()
 		task.QueryTaskOnWorker(cluster)
 		s.Equal(datapb.CompactionTaskState_failed, task.GetTaskProto().GetState())
+		s.Equal("unsupported compaction state: unknown", task.GetTaskProto().GetFailReason())
 	})
 }
 

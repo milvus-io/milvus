@@ -90,20 +90,21 @@ class Base:
                 else:
                     self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, uri=uri)
 
-            if self.collection_wrap.collection is not None:
-                if self.collection_wrap.collection.name.startswith("alias"):
-                    log.info(f"collection {self.collection_wrap.collection.name} is alias, skip drop operation")
-                else:
-                    self.collection_wrap.drop(check_task=ct.CheckTasks.check_nothing)
+            # Temporarily disabled to preserve collections for post-E2E inspection.
+            # if self.collection_wrap.collection is not None:
+            #     if self.collection_wrap.collection.name.startswith("alias"):
+            #         log.info(f"collection {self.collection_wrap.collection.name} is alias, skip drop operation")
+            #     else:
+            #         self.collection_wrap.drop(check_task=ct.CheckTasks.check_nothing)
 
-            collection_list = self.utility_wrap.list_collections()[0]
-            for collection_name in self.tear_down_collection_names:
-                if collection_name is not None and collection_name in collection_list:
-                    alias_list = self.utility_wrap.list_aliases(collection_name)[0]
-                    if alias_list:
-                        for alias in alias_list:
-                            self.utility_wrap.drop_alias(alias)
-                    self.utility_wrap.drop_collection(collection_name)
+            # collection_list = self.utility_wrap.list_collections()[0]
+            # for collection_name in self.tear_down_collection_names:
+            #     if collection_name is not None and collection_name in collection_list:
+            #         alias_list = self.utility_wrap.list_aliases(collection_name)[0]
+            #         if alias_list:
+            #             for alias in alias_list:
+            #                 self.utility_wrap.drop_alias(alias)
+            #         self.utility_wrap.drop_collection(collection_name)
 
             """ Clean up the rgs before disconnect """
             rgs_list = self.utility_wrap.list_resource_groups()[0]
