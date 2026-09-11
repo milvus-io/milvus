@@ -63,6 +63,7 @@
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/Utils.h"
+#include "storage/MmapManager.h"
 #include "storage/Util.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/ManifestTestUtil.h"
@@ -374,6 +375,76 @@ TEST(Growing, InsertRejectsTruncatedGeometryBeforeWritingSegmentData) {
             ->RemoveLast();
     });
 }
+
+class GrowingJsonDefaultBackfillTest : public ::testing::TestWithParam<bool> {
+ protected:
+    void
+    SetUp() override {
+        auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
+        original_growing_mmap_ = mmap_config.GetEnableGrowingMmap();
+        mmap_config.growing_enable_mmap = GetParam();
+    }
+
+    void
+    TearDown() override {
+        storage::MmapManager::GetInstance()
+            .GetMmapConfig()
+            .growing_enable_mmap = original_growing_mmap_;
+    }
+
+ private:
+    bool original_growing_mmap_{false};
+};
+
+TEST_P(GrowingJsonDefaultBackfillTest, LoadMissingJsonBinlogUsesDefault) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    DefaultValueType default_value;
+    default_value.set_bytes_data("{}");
+    auto json_field = schema->AddDebugFieldWithDefaultValue(
+        "$meta", DataType::JSON, default_value, true);
+    schema->set_primary_field_id(pk);
+
+    constexpr int64_t row_count = 5;
+    auto dataset = DataGen(schema, row_count);
+    auto cm = storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_info = PrepareInsertBinlog(kCollectionID,
+                                         kPartitionID,
+                                         kSegmentID,
+                                         dataset,
+                                         cm,
+                                         GetParam() ? TestMmapPath : "",
+                                         {json_field.get()});
+    load_info.field_infos.emplace(
+        json_field.get(),
+        FieldBinlogInfo{
+            json_field.get(), row_count, {}, {}, GetParam(), "", {}});
+
+    auto segment =
+        CreateGrowingSegment(schema, empty_index_meta, kSegmentID + GetParam());
+    ASSERT_NO_THROW(segment->LoadFieldData(load_info));
+    ASSERT_EQ(segment->get_row_count(), row_count);
+
+    std::vector<int64_t> offsets(row_count);
+    std::iota(offsets.begin(), offsets.end(), 0);
+    auto result =
+        segment->bulk_subscript(nullptr, json_field, offsets.data(), row_count);
+    const auto& json_values = result->scalars().json_data().data();
+    ASSERT_EQ(json_values.size(), row_count);
+    for (const auto& json : json_values) {
+        EXPECT_EQ(json, "{}");
+    }
+    const auto valid_data = GetFieldDataRowValidData(*result);
+    ASSERT_EQ(valid_data.size(), row_count);
+    for (const auto valid : valid_data) {
+        EXPECT_TRUE(valid);
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(GrowingMmapModes,
+                         GrowingJsonDefaultBackfillTest,
+                         ::testing::Bool());
 
 TEST(Growing, MissingStructArrayOffsetsReturnsEmptyForOldRows) {
     auto old_schema = std::make_shared<Schema>();

@@ -14,6 +14,7 @@
 #include <utility>
 #include <vector>
 
+#include "common/EasyAssert.h"
 #include "common/bson_shim.h"
 #include "common/bson_view.h"
 #include "common/protobuf_utils.h"
@@ -171,6 +172,56 @@ TEST_F(BsonBuilderTest, CreateValueNodeTest) {
     // Test invalid type
     EXPECT_THROW(builder.CreateValueNode("value", static_cast<JSONType>(999)),
                  std::runtime_error);
+}
+
+TEST_F(BsonBuilderTest, LegacyNonFiniteArrayValuesBecomeNull) {
+    auto array_node = builder_->CreateValueNode(
+        R"([NaN, Infinity, -Infinity, "NaN", "escaped \"NaN\" Infinity", {"Infinity":NaN}, [Infinity]])",
+        JSONType::ARRAY);
+
+    ASSERT_TRUE(array_node.value.has_value());
+    const auto& array_bytes = array_node.value->arr_bytes;
+    milvus::bson::array_view array_view(array_bytes.data(), array_bytes.size());
+    ASSERT_EQ(std::distance(array_view.begin(), array_view.end()), 7);
+
+    auto it = array_view.begin();
+    EXPECT_EQ(it->type(), milvus::bson::type::k_null);
+    ++it;
+    EXPECT_EQ(it->type(), milvus::bson::type::k_null);
+    ++it;
+    EXPECT_EQ(it->type(), milvus::bson::type::k_null);
+    ++it;
+    EXPECT_EQ(it->get_string().value, "NaN");
+    ++it;
+    EXPECT_EQ(it->get_string().value, "escaped \"NaN\" Infinity");
+    ++it;
+
+    auto document_view = it->get_value().get_document().value;
+    auto document_it = document_view.begin();
+    ASSERT_NE(document_it, document_view.end());
+    EXPECT_EQ(document_it->key(), "Infinity");
+    EXPECT_EQ(document_it->type(), milvus::bson::type::k_null);
+    ++it;
+
+    auto nested_array_view = it->get_value().get_array().value;
+    auto nested_it = nested_array_view.begin();
+    ASSERT_NE(nested_it, nested_array_view.end());
+    EXPECT_EQ(nested_it->type(), milvus::bson::type::k_null);
+}
+
+TEST_F(BsonBuilderTest, LegacyNonFiniteFallbackKeepsMalformedJsonInvalid) {
+    const auto expect_json_key_invalid = [this](const std::string& value) {
+        try {
+            builder_->CreateValueNode(value, JSONType::ARRAY);
+            FAIL() << "expected malformed JSON array to be rejected";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), ErrorCode::JsonKeyInvalid);
+        }
+    };
+
+    expect_json_key_invalid(R"([NaN "missing comma"])");
+    expect_json_key_invalid(R"([NaNsuffix])");
+    expect_json_key_invalid(R"([NaN,])");
 }
 
 TEST_F(BsonBuilderTest, AppendToDomTest) {

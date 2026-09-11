@@ -209,6 +209,34 @@ TEST(JsonPathIndexTest, ConvertVarchar) {
     EXPECT_EQ(result.non_exist_offsets[0], 2);
 }
 
+TEST(JsonPathIndexTest, ConvertDouble_BackfilledDefaultJson) {
+    constexpr int64_t row_count = 5;
+    DefaultValueType default_value;
+    default_value.set_bytes_data(R"({"a": 42.0})");
+    auto json_fd = std::make_shared<FieldData<Json>>(
+        DataType::JSON,
+        true,
+        row_count,
+        std::optional<DefaultValueType>{default_value});
+
+    auto schema = MakeJsonSchema(101, true);
+    auto result = ConvertJsonToTypedFieldData<double>(
+        {json_fd},
+        schema,
+        "/a",
+        JsonCastType::FromString("DOUBLE"),
+        JsonCastFunction::FromString("unknown"));
+
+    ASSERT_EQ(result.field_data->get_num_rows(), row_count);
+    EXPECT_TRUE(result.non_exist_offsets.empty());
+    for (int64_t i = 0; i < row_count; ++i) {
+        ASSERT_TRUE(result.field_data->is_valid(i));
+        auto value = static_cast<const double*>(result.field_data->RawValue(i));
+        ASSERT_NE(value, nullptr);
+        EXPECT_DOUBLE_EQ(*value, 42.0);
+    }
+}
+
 // ============================================================
 // 2. JsonScalarIndexWrapper tests (Sort + Bitmap)
 // ============================================================
