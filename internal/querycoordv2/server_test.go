@@ -1336,3 +1336,153 @@ func TestCheckAllReplicasServiceable(t *testing.T) {
 		assert.NoError(t, err)
 	})
 }
+
+func TestGetLeakedResourcesByCollectionPerRG(t *testing.T) {
+	const collectionID int64 = 100
+
+	// Replica in meta holds nodes {10, 11}. Any segment/channel on a different node is leaked.
+	replica := meta.NewReplica(&querypb.Replica{
+		ID:           1,
+		CollectionID: collectionID,
+		Nodes:        []int64{10, 11},
+	}, typeutil.NewUniqueSet(10, 11))
+
+	idAllocator := func() func() (int64, error) {
+		var id int64
+		return func() (int64, error) {
+			id++
+			return id, nil
+		}
+	}
+	newServer := func() *Server {
+		return &Server{
+			meta: meta.NewMeta(idAllocator(), nil, session.NewNodeManager()),
+			dist: meta.NewDistributionManager(session.NewNodeManager()),
+		}
+	}
+
+	t.Run("no leaked resources returns empty map", func(t *testing.T) {
+		s := newServer()
+		mocker := mockey.Mock((*meta.ReplicaManager).GetByCollection).Return([]*meta.Replica{replica}).Build()
+		defer mocker.UnPatch()
+
+		leaked := s.GetLeakedResourcesByCollectionPerRG(context.Background(), collectionID)
+		assert.Empty(t, leaked)
+	})
+
+	t.Run("leaked resources attributed to the resource group of the holding node", func(t *testing.T) {
+		s := newServer()
+		mocker := mockey.Mock((*meta.ReplicaManager).GetByCollection).Return([]*meta.Replica{replica}).Build()
+		defer mocker.UnPatch()
+		// Authoritative mapping: leaked node 99 belongs to rg2, node 98 belongs to rg3.
+		mockerRG := mockey.Mock((*meta.ResourceManager).GetResourceGroupByNodeID).To(func(_ *meta.ResourceManager, nodeID int64) string {
+			switch nodeID {
+			case 99:
+				return "rg2"
+			case 98:
+				return "rg3"
+			}
+			return ""
+		}).Build()
+		defer mockerRG.UnPatch()
+
+		// Node 10 is in replica -> not leaked. Nodes 99 (rg2, 2 segments) and 98 (rg3, 1 channel) are leaked.
+		s.dist.SegmentDistManager.Update(10, meta.SegmentFromInfo(&datapb.SegmentInfo{ID: 1, CollectionID: collectionID}))
+		s.dist.SegmentDistManager.Update(99, meta.SegmentFromInfo(&datapb.SegmentInfo{ID: 2, CollectionID: collectionID}),
+			meta.SegmentFromInfo(&datapb.SegmentInfo{ID: 3, CollectionID: collectionID}))
+		s.dist.ChannelDistManager.Update(98, meta.DmChannelFromVChannel(&datapb.VchannelInfo{CollectionID: collectionID, ChannelName: "c1"}))
+
+		leaked := s.GetLeakedResourcesByCollectionPerRG(context.Background(), collectionID)
+		assert.Equal(t, map[string]int{"rg2": 2, "rg3": 1}, leaked)
+	})
+
+	t.Run("leaked node in no resource group attributed to empty group", func(t *testing.T) {
+		s := newServer()
+		mocker := mockey.Mock((*meta.ReplicaManager).GetByCollection).Return([]*meta.Replica{replica}).Build()
+		defer mocker.UnPatch()
+		mockerRG := mockey.Mock((*meta.ResourceManager).GetResourceGroupByNodeID).Return("").Build()
+		defer mockerRG.UnPatch()
+
+		s.dist.SegmentDistManager.Update(99, meta.SegmentFromInfo(&datapb.SegmentInfo{ID: 1, CollectionID: collectionID}))
+
+		leaked := s.GetLeakedResourcesByCollectionPerRG(context.Background(), collectionID)
+		assert.Equal(t, map[string]int{"": 1}, leaked)
+	})
+}
+
+func TestCheckReplicasServiceable(t *testing.T) {
+	const collectionID int64 = 100
+	const channelName = "test-channel-1"
+
+	idAllocator := func() func() (int64, error) {
+		var id int64
+		return func() (int64, error) {
+			id++
+			return id, nil
+		}
+	}
+	newServer := func() *Server {
+		nodeMgr := session.NewNodeManager()
+		targetMgr := meta.NewMockTargetManager(t)
+		return &Server{
+			meta:      meta.NewMeta(idAllocator(), nil, nodeMgr),
+			dist:      meta.NewDistributionManager(nodeMgr),
+			nodeMgr:   nodeMgr,
+			targetMgr: targetMgr,
+		}
+	}
+
+	t.Run("no replicas returns empty map", func(t *testing.T) {
+		s := newServer()
+		mocker := mockey.Mock((*meta.ReplicaManager).GetByCollection).Return([]*meta.Replica{}).Build()
+		defer mocker.UnPatch()
+
+		errs := s.CheckReplicasServiceable(context.Background(), collectionID)
+		assert.Empty(t, errs)
+	})
+
+	t.Run("collects errors for every unserviceable replica without failing fast", func(t *testing.T) {
+		s := newServer()
+		// Two replicas, each missing a shard leader for the channel -> both unserviceable.
+		replicas := []*meta.Replica{
+			meta.NewReplica(&querypb.Replica{ID: 1, CollectionID: collectionID, ResourceGroup: "rg1", Nodes: []int64{10, 11}}, typeutil.NewUniqueSet(10, 11)),
+			meta.NewReplica(&querypb.Replica{ID: 2, CollectionID: collectionID, ResourceGroup: "rg2", Nodes: []int64{20, 21}}, typeutil.NewUniqueSet(20, 21)),
+		}
+		mocker := mockey.Mock((*meta.ReplicaManager).GetByCollection).Return(replicas).Build()
+		defer mocker.UnPatch()
+		s.targetMgr.(*meta.MockTargetManager).EXPECT().GetDmChannelsByCollection(mock.Anything, collectionID, meta.CurrentTarget).Return(map[string]*meta.DmChannel{
+			channelName: {VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: channelName}},
+		})
+
+		errs := s.CheckReplicasServiceable(context.Background(), collectionID)
+		// Both replicas reported, keyed by replica ID (not just the first failure).
+		assert.Len(t, errs, 2)
+		assert.ErrorContains(t, errs[1], "no leader for channel")
+		assert.ErrorContains(t, errs[2], "no leader for channel")
+	})
+
+	t.Run("serviceable replica is absent from the map", func(t *testing.T) {
+		s := newServer()
+		replica := meta.NewReplica(&querypb.Replica{ID: 1, CollectionID: collectionID, ResourceGroup: "rg1", Nodes: []int64{10, 11}}, typeutil.NewUniqueSet(10, 11))
+		mocker := mockey.Mock((*meta.ReplicaManager).GetByCollection).Return([]*meta.Replica{replica}).Build()
+		defer mocker.UnPatch()
+		s.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: 10, Address: "localhost:10", Hostname: "localhost"}))
+		s.targetMgr.(*meta.MockTargetManager).EXPECT().GetDmChannelsByCollection(mock.Anything, collectionID, meta.CurrentTarget).Return(map[string]*meta.DmChannel{
+			channelName: {VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: channelName}},
+		})
+		s.targetMgr.(*meta.MockTargetManager).EXPECT().GetSealedSegmentsByChannel(mock.Anything, collectionID, channelName, meta.CurrentTarget).Return(map[int64]*datapb.SegmentInfo{})
+		s.dist.ChannelDistManager.Update(10, &meta.DmChannel{
+			VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: channelName},
+			Node:         10,
+			Version:      1,
+			View: &meta.LeaderView{
+				ID: 10, CollectionID: collectionID, Channel: channelName,
+				Status:   &querypb.LeaderViewStatus{Serviceable: true},
+				Segments: map[int64]*querypb.SegmentDist{},
+			},
+		})
+
+		errs := s.CheckReplicasServiceable(context.Background(), collectionID)
+		assert.Empty(t, errs)
+	})
+}

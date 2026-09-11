@@ -1075,6 +1075,31 @@ func TestResourceManager_handleNodeUp(t *testing.T) {
 	assert.Contains(t, nodes, nodeID)
 }
 
+// TestResourceManager_GetResourceGroupByNodeID tests that the accessor resolves membership from the
+// authoritative nodeIDMap, independent of the (frequently empty) session label.
+func TestResourceManager_GetResourceGroupByNodeID(t *testing.T) {
+	manager := createTestResourceManager(t)
+	ctx := context.Background()
+	nodeID := int64(1003)
+
+	// Node joins WITHOUT a RESOURCE_GROUP label (default helm/operator deployment): NewNodeInfo has
+	// no labels, so ResourceGroupName() would be "". Membership is decided by handleNodeUp.
+	nodeInfo := session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   nodeID,
+		Address:  "localhost",
+		Hostname: "localhost",
+	})
+	assert.Equal(t, "", nodeInfo.ResourceGroupName())
+	manager.nodeMgr.Add(nodeInfo)
+
+	// Not in any resource group yet.
+	assert.Equal(t, "", manager.GetResourceGroupByNodeID(nodeID))
+
+	// After assignment, membership is visible even though the label is still empty.
+	manager.handleNodeUp(ctx, nodeID)
+	assert.Equal(t, DefaultResourceGroupName, manager.GetResourceGroupByNodeID(nodeID))
+}
+
 // TestResourceManager_handleNodeDown tests the private handleNodeDown method
 func TestResourceManager_handleNodeDown(t *testing.T) {
 	// Arrange

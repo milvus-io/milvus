@@ -486,7 +486,7 @@ func (rm *ResourceManager) GetNodes(ctx context.Context, rgName string) ([]int64
 	return rm.groups[rgName].GetNodes(), nil
 }
 
-// GetResourceGroupByNodeID return whether resource group's node match required node count
+// VerifyNodeCount verifies that every required resource group has exactly the required number of nodes.
 func (rm *ResourceManager) VerifyNodeCount(ctx context.Context, requiredNodeCount map[string]int) error {
 	rm.rwmutex.RLock()
 	defer rm.rwmutex.RUnlock()
@@ -529,6 +529,18 @@ func (rm *ResourceManager) getResourceGroupByNodeID(nodeID int64) *ResourceGroup
 		return rm.groups[rgName]
 	}
 	return nil
+}
+
+// GetResourceGroupByNodeID returns the name of the resource group a node currently belongs to,
+// or an empty string if the node is not in any resource group (e.g. it already left the session).
+// The caller must hold no lock on rm when calling this.
+func (rm *ResourceManager) GetResourceGroupByNodeID(nodeID int64) string {
+	rm.rwmutex.RLock()
+	defer rm.rwmutex.RUnlock()
+	if rg := rm.getResourceGroupByNodeID(nodeID); rg != nil {
+		return rg.GetName()
+	}
+	return ""
 }
 
 // IsNodeSuspended checks whether a node is suspended.

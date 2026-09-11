@@ -931,6 +931,21 @@ func (s *Server) checkReplicaServiceable(ctx context.Context, replica *meta.Repl
 	return nil
 }
 
+// CheckReplicasServiceable checks every replica of the collection and returns a map of replica ID
+// to error for each non-serviceable one, instead of failing fast on the first bad replica. This
+// allows per-resource-group compliance reporting to attribute each failure to the replica's own
+// resource group. An empty map with no error means every replica is serviceable.
+func (s *Server) CheckReplicasServiceable(ctx context.Context, collectionID int64) map[int64]error {
+	replicas := s.meta.GetByCollection(ctx, collectionID)
+	errs := make(map[int64]error)
+	for _, replica := range replicas {
+		if err := s.checkReplicaServiceable(ctx, replica); err != nil {
+			errs[replica.GetID()] = err
+		}
+	}
+	return errs
+}
+
 // GetLeakedResourcesByCollection returns the number of segments and channels still held by
 // querynodes that are NOT part of any current replica of the collection. A non-zero result
 // means physical resources have not been fully released yet (e.g., during scale-down a
@@ -952,4 +967,34 @@ func (s *Server) GetLeakedResourcesByCollection(ctx context.Context, collectionI
 		}
 	}
 	return leakedSegments, leakedChannels
+}
+
+// GetLeakedResourcesByCollectionPerRG returns the number of segments and channels still held by
+// querynodes that are NOT part of any current replica of the collection, grouped by the resource
+// group of the holding querynode. Unlike GetLeakedResourcesByCollection, it preserves the per-RG
+// attribution so compliance reporting can mark exactly the resource groups that hold leaked
+// resources. Attribution uses the authoritative ResourceManager node->RG mapping (not the session
+// label, which most deployments never set); a leaked node not in any resource group is attributed
+// to the empty resource group, which callers treat as global.
+func (s *Server) GetLeakedResourcesByCollectionPerRG(ctx context.Context, collectionID int64) map[string]int {
+	replicas := s.meta.GetByCollection(ctx, collectionID)
+	validNodes := typeutil.NewUniqueSet()
+	for _, r := range replicas {
+		validNodes.Insert(r.GetNodes()...)
+	}
+	leaked := make(map[string]int)
+	rgOf := func(nodeID int64) string {
+		return s.meta.GetResourceGroupByNodeID(nodeID)
+	}
+	for _, seg := range s.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(collectionID)) {
+		if !validNodes.Contain(seg.Node) {
+			leaked[rgOf(seg.Node)]++
+		}
+	}
+	for _, ch := range s.dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(collectionID)) {
+		if !validNodes.Contain(ch.Node) {
+			leaked[rgOf(ch.Node)]++
+		}
+	}
+	return leaked
 }
