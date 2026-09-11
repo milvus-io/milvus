@@ -405,6 +405,7 @@ func InitTieredStorage(params *paramtable.ComponentParam) error {
 	diskMaxBytes := C.int64_t(diskMaxRatio * float64(osDiskBytes))
 
 	storageUsageTrackingEnabled := C.bool(params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool())
+	lazyColumnGroupEnabled := C.bool(params.QueryNodeCfg.TieredLazyColumnGroupEnabled.GetAsBool())
 	evictionEnabled := C.bool(params.QueryNodeCfg.TieredEvictionEnabled.GetAsBool())
 	cacheTouchWindowMs := C.int64_t(params.QueryNodeCfg.TieredCacheTouchWindowMs.GetAsInt64())
 	backgroundEvictionEnabled := C.bool(params.QueryNodeCfg.TieredBackgroundEvictionEnabled.GetAsBool())
@@ -421,6 +422,7 @@ func InitTieredStorage(params *paramtable.ComponentParam) error {
 
 	prefetchPoolThreads := C.uint32_t(hardware.GetCPUNum() * params.CommonCfg.LowPriorityThreadCoreCoefficient.GetAsInt())
 
+	C.SegcoreSetLazyColumnGroupEnabled(lazyColumnGroupEnabled)
 	C.ConfigureTieredStorage(scalarFieldCacheWarmupPolicy,
 		vectorFieldCacheWarmupPolicy,
 		scalarIndexCacheWarmupPolicy,
@@ -442,6 +444,10 @@ func InitTieredStorage(params *paramtable.ComponentParam) error {
 	)
 
 	return nil
+}
+
+func getLazyColumnGroupEnabled() bool {
+	return bool(C.SegcoreGetLazyColumnGroupEnabled())
 }
 
 func UpdateTieredStorageConfig(params *paramtable.ComponentParam) error {
@@ -475,8 +481,10 @@ func UpdateTieredStorageConfig(params *paramtable.ComponentParam) error {
 	loadingTimeoutMs := C.int64_t(params.QueryNodeCfg.TieredLoadingTimeoutMs.GetAsInt64())
 	warmupLoadingTimeoutMs := C.int64_t(params.QueryNodeCfg.TieredWarmupLoadingTimeoutMs.GetAsInt64())
 	storageUsageTrackingEnabled := C.bool(params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool())
+	lazyColumnGroupEnabled := C.bool(params.QueryNodeCfg.TieredLazyColumnGroupEnabled.GetAsBool())
 	rejectRemoteVectorOutput := C.bool(params.QueryNodeCfg.TieredRejectRemoteVectorOutput.GetAsBool())
 
+	C.SegcoreSetLazyColumnGroupEnabled(lazyColumnGroupEnabled)
 	C.UpdateTieredStorageConfig(
 		loadingTimeoutMs,
 		warmupLoadingTimeoutMs,
@@ -831,6 +839,7 @@ func SetupCoreConfigChangelCallback() {
 		paramtable.Get().QueryNodeCfg.TieredWarmupVectorField.RegisterCallback(updateTieredStorageConfigCallback)
 		paramtable.Get().QueryNodeCfg.TieredWarmupScalarIndex.RegisterCallback(updateTieredStorageConfigCallback)
 		paramtable.Get().QueryNodeCfg.TieredWarmupVectorIndex.RegisterCallback(updateTieredStorageConfigCallback)
+		paramtable.Get().QueryNodeCfg.TieredLazyColumnGroupEnabled.RegisterCallback(updateTieredStorageConfigCallback)
 	})
 }
 

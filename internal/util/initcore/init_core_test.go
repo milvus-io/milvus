@@ -195,6 +195,19 @@ func TestRegisterQueryNodeLoadConfigCatchesUp(t *testing.T) {
 	assert.False(t, applied.Load())
 }
 
+func TestLazyColumnGroupHotUpdate(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	SetupCoreConfigChangelCallback()
+	key := pt.QueryNodeCfg.TieredLazyColumnGroupEnabled.Key
+	previous := pt.QueryNodeCfg.TieredLazyColumnGroupEnabled.GetValue()
+	t.Cleanup(func() { assert.NoError(t, pt.Save(key, previous)) })
+	for _, value := range []string{"false", "true", "false"} {
+		assert.NoError(t, pt.Save(key, value))
+		assert.Equal(t, value == "true", getLazyColumnGroupEnabled())
+	}
+}
+
 // TestRegisterArrowIOThreadPoolWatchers verifies the lifted helper registers
 // a handler under each of the two watched keys. The sentinel handler we
 // register after the helper fires whenever the dispatcher receives an event
