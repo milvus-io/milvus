@@ -299,8 +299,15 @@ func (node *Proxy) Init() error {
 	node.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
 	mlog.Debug(node.ctx, "create metrics cache manager done", mlog.String("role", typeutil.ProxyRole))
 
-	node.shardMgr = shardclient.NewShardClientMgr(node.mixCoord)
-	node.lbPolicy = shardclient.NewLBPolicyImpl(node.shardMgr)
+	queryTrafficLabelProvider := shardclient.NewSessionQueryTrafficLabelProvider(node.session)
+	node.shardMgr = shardclient.NewShardClientMgr(
+		node.mixCoord,
+		shardclient.WithQueryTrafficLabelProvider(queryTrafficLabelProvider),
+	)
+	node.lbPolicy = shardclient.NewLBPolicyImpl(
+		node.shardMgr,
+		shardclient.WithQueryTrafficRouting(queryTrafficLabelProvider),
+	)
 
 	node.enableMaterializedView = Params.CommonCfg.EnableMaterializedView.GetAsBool()
 

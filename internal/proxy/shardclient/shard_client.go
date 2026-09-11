@@ -54,6 +54,10 @@ type NodeInfo struct {
 	// that the constraints on consuming it (see FilterByResourceGroup) live in
 	// one place rather than with each future caller.
 	ResourceGroup string
+	// Labels are the server labels of the node itself, resolved from Session
+	// service discovery for query traffic routing. Missing labels are treated
+	// as an empty label set.
+	Labels map[string]string
 }
 
 func (n NodeInfo) String() string {

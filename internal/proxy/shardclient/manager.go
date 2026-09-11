@@ -27,6 +27,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/proxy/shardclient/querytraffic"
 	"github.com/milvus-io/milvus/internal/registry"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -68,6 +69,8 @@ type shardClientMgrImpl struct {
 
 	mixCoord types.MixCoordClient
 
+	queryTrafficLabelProvider QueryTrafficLabelProvider
+
 	leaderMut sync.RWMutex
 	// collLeader keys shard leaders by the cluster-unique collection id, so name/alias/database
 	// resolution (done upstream against the meta cache) can never serve one collection's shard
@@ -87,6 +90,14 @@ type shardClientMgrOpt func(s ShardClientMgr)
 
 func withShardClientCreator(creator queryNodeCreatorFunc) shardClientMgrOpt {
 	return func(s ShardClientMgr) { s.SetClientCreatorFunc(creator) }
+}
+
+func WithQueryTrafficLabelProvider(labelProvider QueryTrafficLabelProvider) shardClientMgrOpt {
+	return func(s ShardClientMgr) {
+		if mgr, ok := s.(*shardClientMgrImpl); ok {
+			mgr.queryTrafficLabelProvider = labelProvider
+		}
+	}
 }
 
 func DefaultQueryNodeClientCreator(ctx context.Context, addr string, nodeID int64) (types.QueryNodeClient, error) {
@@ -205,7 +216,17 @@ func (m *shardClientMgrImpl) updateShardLocationCache(ctx context.Context, datab
 		return nil, err
 	}
 
-	shards := parseShardLeaderList2QueryNode(ctx, resp.GetShards())
+	nodeLabels, err := m.getQueryTrafficNodeLabels(ctx, resp.GetShards())
+	if err != nil {
+		// Do not cache label-less shard leaders on a transient label-fetch
+		// failure: the cache is rebuilt only on invalidation or a failed
+		// request, so label-less entries would silently degrade routing for a
+		// long time. Keep the previous cache and let the caller retry.
+		log.Warn(ctx, "failed to get query node labels for query traffic routing, keep previous shard leader cache",
+			mlog.Err(err))
+		return nil, err
+	}
+	shards := parseShardLeaderList2QueryNode(ctx, resp.GetShards(), nodeLabels)
 
 	// convert shards map to string for logging
 	if mlog.LevelEnabled(mlog.DebugLevel) {
@@ -233,7 +254,41 @@ func (m *shardClientMgrImpl) updateShardLocationCache(ctx context.Context, datab
 	return newShardLeaders, nil
 }
 
-func parseShardLeaderList2QueryNode(ctx context.Context, shardsLeaders []*querypb.ShardLeadersList) map[string][]NodeInfo {
+func (m *shardClientMgrImpl) getQueryTrafficNodeLabels(ctx context.Context, shardLeaders []*querypb.ShardLeadersList) (map[int64]querytraffic.Labels, error) {
+	// Gate on both the provider being present and the feature being enabled:
+	// with the default enabled=false, label resolution must not pay an
+	// uncached etcd prefix scan of all QueryNode sessions on every
+	// shard-leader cache refresh.
+	if m.queryTrafficLabelProvider == nil || !m.queryTrafficLabelProvider.Enabled() {
+		return nil, nil
+	}
+	nodeIDs := collectShardLeaderNodeIDs(shardLeaders)
+	if len(nodeIDs) == 0 {
+		return nil, nil
+	}
+	nodeLabels, err := m.queryTrafficLabelProvider.GetNodeLabels(ctx, nodeIDs)
+	if err != nil {
+		return nil, err
+	}
+	return nodeLabels, nil
+}
+
+func collectShardLeaderNodeIDs(shardLeaders []*querypb.ShardLeadersList) []int64 {
+	nodeIDSet := make(map[int64]struct{})
+	nodeIDs := make([]int64, 0)
+	for _, leaders := range shardLeaders {
+		for _, nodeID := range leaders.GetNodeIds() {
+			if _, ok := nodeIDSet[nodeID]; ok {
+				continue
+			}
+			nodeIDSet[nodeID] = struct{}{}
+			nodeIDs = append(nodeIDs, nodeID)
+		}
+	}
+	return nodeIDs
+}
+
+func parseShardLeaderList2QueryNode(ctx context.Context, shardsLeaders []*querypb.ShardLeadersList, nodeLabels map[int64]querytraffic.Labels) map[string][]NodeInfo {
 	shard2QueryNodes := make(map[string][]NodeInfo)
 
 	for _, leaders := range shardsLeaders {
@@ -272,11 +327,13 @@ func parseShardLeaderList2QueryNode(ctx context.Context, shardsLeaders []*queryp
 			if j < len(resourceGroups) {
 				resourceGroup = resourceGroups[j]
 			}
+			nodeID := leaders.GetNodeIds()[j]
 			qns[j] = NodeInfo{
-				NodeID:        leaders.GetNodeIds()[j],
+				NodeID:        nodeID,
 				Address:       leaders.GetNodeAddrs()[j],
 				Serviceable:   leaders.GetServiceable()[j],
 				ResourceGroup: resourceGroup,
+				Labels:        cloneQueryTrafficLabels(nodeLabels[nodeID]),
 			}
 		}
 
