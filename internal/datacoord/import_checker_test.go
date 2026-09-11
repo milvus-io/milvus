@@ -55,6 +55,7 @@ type ImportCheckerSuite struct {
 
 func (s *ImportCheckerSuite) SetupTest() {
 	catalog := mocks.NewDataCoordCatalog(s.T())
+	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
@@ -849,6 +850,7 @@ func TestImportCheckerCompaction(t *testing.T) {
 
 	// prepare objects
 	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)

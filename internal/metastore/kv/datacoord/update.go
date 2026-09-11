@@ -24,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/txn"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -138,6 +139,41 @@ func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction
 			default:
 				return unsupportedAction(action)
 			}
+		case metastore.SegmentChangeGroupEntry:
+			switch action.Type {
+			case metastore.ActionUpdate:
+				// Same encoding as catalog.SaveSegmentChangeGroup.
+				if e.Group == nil {
+					return merr.WrapErrServiceInternalMsg("datacoord catalog: nil segment change group in UpdateAction")
+				}
+				value, err := model.MarshalSegmentChangeGroup(e.Group)
+				if err != nil {
+					return err
+				}
+				if e.Group.IsTerminal() {
+					// Terminal states (COMMITTED/FAILED/ABORTED) are the
+					// visibility marker of the composite write: CommitSave lands
+					// the record LAST in the chunked-fallback flush, so a visible
+					// terminal record implies every non-commit op (member flips,
+					// superseded retirement) already landed.
+					b.CommitSave(buildSegmentChangeGroupKey(e.Group.CollectionID, e.Group.GroupID), string(value))
+				} else {
+					// ALIVE states (STAGED/READY) are NOT a commit marker (C13):
+					// for STAGED creation the group record must land BEFORE its
+					// staged members in the fallback flush, otherwise a crash
+					// between the two leaves invisible members with no group
+					// record — unrecoverable without SegmentInfo.change_group_id.
+					// Plain in-order Save lets the caller control that ordering.
+					b.Save(buildSegmentChangeGroupKey(e.Group.CollectionID, e.Group.GroupID), string(value))
+				}
+			case metastore.ActionDelete:
+				// CommitRemove marks the group removal as the visibility point:
+				// the group must land last when its members/superseded
+				// retirement are composed before it on the ordered fallback path.
+				b.CommitRemove(buildSegmentChangeGroupKey(e.CollectionID, e.GroupID))
+			default:
+				return unsupportedAction(action)
+			}
 		default:
 			return merr.WrapErrServiceInternalMsg("datacoord catalog cannot apply entry %T", action.Entry)
 		}
@@ -160,9 +196,18 @@ func (kc *Catalog) applySegmentEntry(ctx context.Context, b *txn.Builder, t meta
 	}
 	switch t {
 	case metastore.ActionAdd:
+		// C26: honor the caller's increments (including DroppedBinlogFieldIDs
+		// removals) instead of silently overwriting them with a default; a
+		// dropped binlog field whose removal is omitted would be resurrected by
+		// the prefix scan in listBinlogs on restart. Fall back to the full
+		// segment increment only when none is supplied.
+		increments := e.Binlogs
+		if len(increments) == 0 {
+			increments = []metastore.BinlogsIncrement{{Segment: e.Segment}}
+		}
 		kvs, removals, err := kc.buildAlterSegmentsKvs(ctx,
 			[]*datapb.SegmentInfo{e.Segment},
-			[]metastore.BinlogsIncrement{{Segment: e.Segment}})
+			increments)
 		if err != nil {
 			return err
 		}
@@ -180,7 +225,7 @@ func (kc *Catalog) applySegmentEntry(ctx context.Context, b *txn.Builder, t meta
 			// handleDroppedSegment GC-compat write when the segment predates
 			// binlog-prefix persistence, keeping compaction's compactFrom
 			// retirement byte-identical to catalog.AlterSegments.
-			kvs, removals, err := kc.buildAlterSegmentsKvs(ctx, []*datapb.SegmentInfo{e.Segment}, nil)
+			kvs, removals, err := kc.buildAlterSegmentsKvs(ctx, []*datapb.SegmentInfo{e.Segment}, e.Binlogs)
 			if err != nil {
 				return err
 			}
@@ -198,6 +243,15 @@ func (kc *Catalog) applySegmentEntry(ctx context.Context, b *txn.Builder, t meta
 		}
 		for k, v := range kvs {
 			b.Save(k, v)
+		}
+		if len(e.Binlogs) > 0 {
+			// C26: the record-only (non-AlterEncoding) ActionUpdate persists no
+			// binlog KVs and cannot honor DroppedBinlogFieldIDs removals —
+			// silently dropping them would resurrect zombie binlog entries.
+			// Reject per the Update contract ("reject what you cannot
+			// implement") instead of losing the removals without an error.
+			return merr.WrapErrServiceInternalMsg(
+				"datacoord catalog: binlog increments are not supported on a record-only segment update; use AlterEncoding")
 		}
 	default:
 		return merr.WrapErrServiceInternalMsg("datacoord catalog cannot apply action type %v to a segment", t)

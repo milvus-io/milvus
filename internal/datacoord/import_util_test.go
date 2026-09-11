@@ -124,6 +124,7 @@ func TestImportUtil_NewImportTasks(t *testing.T) {
 	alloc.EXPECT().AllocTimestamp(mock.Anything).Return(rand.Uint64(), nil)
 
 	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
@@ -200,6 +201,7 @@ func TestImportUtil_NewImportTasksWithDataTt(t *testing.T) {
 	alloc.EXPECT().AllocID(mock.Anything).Return(rand.Int63(), nil)
 
 	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
@@ -264,6 +266,7 @@ func TestImportUtil_AssembleRequest(t *testing.T) {
 	task.(*importTask).task.Store(importTaskProto)
 
 	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
@@ -343,6 +346,7 @@ func TestImportUtil_AssembleRequestWithDataTt(t *testing.T) {
 	task.(*importTask).task.Store(importTaskProto)
 
 	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
@@ -437,6 +441,7 @@ func TestImportUtil_L0ImportUsesStorageV2WhenLoonFFIEnabled(t *testing.T) {
 	})
 
 	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
@@ -510,6 +515,7 @@ func TestImportUtil_RegroupImportFiles(t *testing.T) {
 
 func TestImportUtil_CheckDiskQuota(t *testing.T) {
 	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
@@ -604,6 +610,7 @@ func TestImportUtil_DropImportTask(t *testing.T) {
 	cluster.EXPECT().DropImport(mock.Anything, mock.Anything).Return(nil)
 
 	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
@@ -701,6 +708,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	mockErr := "mock err"
 
 	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
@@ -1082,6 +1090,7 @@ func TestImportTask_MarshalJSON(t *testing.T) {
 func TestLogResultSegmentsInfo(t *testing.T) {
 	// Create mock catalog and broker
 	mockCatalog := mocks.NewDataCoordCatalog(t)
+	mockCatalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	meta := &meta{
 		segments: NewSegmentsInfo(),
 		catalog:  mockCatalog,
@@ -1390,6 +1399,7 @@ func TestImportUtil_AssembleRequestCarriesPKRange(t *testing.T) {
 	task.(*importTask).task.Store(importTaskProto)
 
 	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()

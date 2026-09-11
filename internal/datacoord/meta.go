@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
@@ -115,6 +116,19 @@ type meta struct {
 	broker                        broker.Broker
 	// Snapshot Meta
 	snapshotMeta *snapshotMeta
+
+	// segmentChangeGroups is the in-memory table of SegmentChangeGroup, keyed by
+	// groupID and guarded by segMu (the group record composes into the same
+	// catalog txn as segment writes, so it shares the segment lock). The reverse
+	// indexes map an ALIVE (STAGED/READY) group's referenced segments to their
+	// owning group for cheap "is this segment claimed" lookups and to enforce
+	// the anti-duplication invariant (an L1/L2 segment may be referenced — as a
+	// member or a superseded parent — by at most one alive group):
+	//   - stagedSegmentToGroup:    new_segment (member)     -> groupID
+	//   - supersededSegmentToGroup: superseded (parent)      -> groupID
+	segmentChangeGroups      map[int64]*model.SegmentChangeGroup
+	stagedSegmentToGroup     map[int64]int64
+	supersededSegmentToGroup map[int64]int64
 }
 
 func (m *meta) GetIndexMeta() *indexMeta {
@@ -276,14 +290,17 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 	// Construct meta struct first so reloadFromKV can run in parallel with sub-meta loading.
 	// reloadFromKV uses m.catalog/m.segments/m.channelCPs which are independent of sub-metas.
 	mt := &meta{
-		ctx:                  ctx,
-		catalog:              catalog,
-		collections:          typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-		segments:             NewSegmentsInfo(),
-		segmentManifestLocks: lock.NewKeyLock[int64](),
-		channelCPs:           newChannelCps(),
-		chunkManager:         chunkManager,
-		broker:               broker,
+		ctx:                      ctx,
+		catalog:                  catalog,
+		collections:              typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments:                 NewSegmentsInfo(),
+		segmentManifestLocks:     lock.NewKeyLock[int64](),
+		channelCPs:               newChannelCps(),
+		chunkManager:             chunkManager,
+		broker:                   broker,
+		segmentChangeGroups:      make(map[int64]*model.SegmentChangeGroup),
+		stagedSegmentToGroup:     make(map[int64]int64),
+		supersededSegmentToGroup: make(map[int64]int64),
 	}
 
 	g, _ := errgroup.WithContext(ctx)
@@ -344,6 +361,12 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 		return err
 	})
 
+	var (
+		scg  map[int64]*model.SegmentChangeGroup
+		stag map[int64]int64
+		sup  map[int64]int64
+	)
+
 	// reloadFromKV (ListSegments, ListChannelCheckpoint) runs in parallel with sub-meta loading.
 	// It only uses mt.catalog/mt.segments/mt.channelCPs, which are independent of sub-metas.
 	g.Go(func() error {
@@ -363,6 +386,18 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 	mt.statsTaskMeta = stm
 	mt.externalCollectionRefreshMeta = ecrm
 	mt.snapshotMeta = spm
+
+	// Segment change groups load AFTER segments are in memory: the recovery
+	// index build exempts L0 superseded parents, which requires segment levels
+	// (m.segments must be populated by reloadFromKV above).
+	var loadErr error
+	scg, stag, sup, loadErr = mt.loadSegmentChangeGroups(ctx)
+	if loadErr != nil {
+		return nil, loadErr
+	}
+	mt.segmentChangeGroups = scg
+	mt.stagedSegmentToGroup = stag
+	mt.supersededSegmentToGroup = sup
 
 	return mt, nil
 }

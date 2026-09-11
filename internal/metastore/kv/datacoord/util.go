@@ -415,3 +415,14 @@ func buildSnapshotKey(collectionID int64, snapshotID int64) string {
 func buildExportSnapshotJobKey(jobID int64) string {
 	return fmt.Sprintf("%s/%d", ExportSnapshotJobPrefix, jobID)
 }
+
+// buildSegmentChangeGroupKey returns the etcd key of one segment change group.
+func buildSegmentChangeGroupKey(collectionID, groupID int64) string {
+	return fmt.Sprintf("%s/%d/%d", SegmentChangeGroupPrefix, collectionID, groupID)
+}
+
+// buildSegmentChangeGroupCollectionPrefix returns the etcd prefix of all
+// segment change groups of one collection.
+func buildSegmentChangeGroupCollectionPrefix(collectionID int64) string {
+	return fmt.Sprintf("%s/%d/", SegmentChangeGroupPrefix, collectionID)
+}

@@ -73,6 +73,12 @@ type Entry interface {
 // intentionally omitted until such a caller exists.
 type SegmentEntry struct {
 	Segment *datapb.SegmentInfo
+	// Binlogs carries per-segment binlog increments for an ActionUpdate with
+	// AlterEncoding (the legacy AlterSegments encoding). Compaction's
+	// AlterSegment leaves it nil (a retirement rewrite); the batch publication
+	// path composes it so the staged members' binlogs persist atomically with
+	// the segment record and the segment change group.
+	Binlogs []BinlogsIncrement
 	// AlterEncoding selects the legacy AlterSegments key/value encoding for an
 	// ActionUpdate instead of the record-only SaveDroppedSegmentsInBatch
 	// encoding. It matters only for a Dropped segment: AlterSegments also
@@ -152,6 +158,24 @@ type ReplicaKeyEntry struct {
 	ReplicaID    int64
 }
 
+// SegmentChangeGroupEntry targets a segment change group record.
+//
+// For ActionUpdate, Group is the full already-mutated group and its record is
+// persisted. The commit-marker semantics are STATE-qualified (C13): a TERMINAL
+// group (COMMITTED/FAILED/ABORTED) is the visibility marker of a batch publish
+// txn — compose it AFTER the segment/DataView actions so a visible terminal
+// record implies they landed — while an ALIVE group (STAGED/READY) must land
+// BEFORE its staged members (the kv dispatch emits a plain in-order Save for
+// it, and the composite write orders it ahead of the member actions), so a
+// chunked-fallback crash can never leave invisible members with no group
+// record. For ActionDelete, CollectionID/GroupID identify the record to remove
+// (a COMMITTED group cleanup or a collection drop).
+type SegmentChangeGroupEntry struct {
+	Group        *model.SegmentChangeGroup
+	CollectionID int64
+	GroupID      int64
+}
+
 func (SegmentEntry) isEntry()               {}
 func (ChannelEntry) isEntry()               {}
 func (CollectionEntry) isEntry()            {}
@@ -162,6 +186,7 @@ func (PartitionStatsEntry) isEntry()        {}
 func (PartitionStatsVersionEntry) isEntry() {}
 func (ReplicaEntry) isEntry()               {}
 func (ReplicaKeyEntry) isEntry()            {}
+func (SegmentChangeGroupEntry) isEntry()    {}
 
 // UpdateAction is a single composable write against a metastore catalog,
 // applied via that catalog's composite Update. Type and Entry together
@@ -283,4 +308,24 @@ func SaveReplica(r *querypb.Replica) UpdateAction {
 // ReleaseReplica returns an UpdateAction that removes a replica's kv record.
 func ReleaseReplica(collectionID, replicaID int64) UpdateAction {
 	return UpdateAction{Type: ActionDelete, Entry: ReplicaKeyEntry{CollectionID: collectionID, ReplicaID: replicaID}}
+}
+
+// SaveSegmentChangeGroup returns an UpdateAction that persists g as a segment
+// change group upsert (full-value replace). It is the write used both for a
+// standalone state transition and for composing into a batch write. The kv
+// dispatch makes the commit-marker semantics STATE-qualified (C13): a TERMINAL
+// group (COMMITTED/FAILED/ABORTED) is commit-marked and must be composed AFTER
+// the segment/DataView actions as the visibility marker; an ALIVE group
+// (STAGED/READY) is persisted as a plain in-order Save and must be composed
+// BEFORE its staged member actions so a fallback crash cannot orphan invisible
+// members.
+func SaveSegmentChangeGroup(g *model.SegmentChangeGroup) UpdateAction {
+	return UpdateAction{Type: ActionUpdate, Entry: SegmentChangeGroupEntry{Group: g}}
+}
+
+// DeleteSegmentChangeGroup returns an UpdateAction that removes a segment
+// change group record. Compose it after the group's members and superseded
+// segments are fully retired.
+func DeleteSegmentChangeGroup(collectionID, groupID int64) UpdateAction {
+	return UpdateAction{Type: ActionDelete, Entry: SegmentChangeGroupEntry{CollectionID: collectionID, GroupID: groupID}}
 }

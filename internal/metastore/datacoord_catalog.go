@@ -155,4 +155,11 @@ type DataCoordCatalog interface {
 	SaveExportSnapshotJob(ctx context.Context, job *datapb.ExportSnapshotJob) error
 	ListExportSnapshotJobs(ctx context.Context) ([]*datapb.ExportSnapshotJob, error)
 	DropExportSnapshotJob(ctx context.Context, jobID int64) error
+
+	// SegmentChangeGroup persistence. Per-record writes go through the
+	// composite Update (metastore.SaveSegmentChangeGroup / DeleteSegmentChangeGroup)
+	// so they can be composed atomically with segment and DataView actions;
+	// List/Drop provide recovery scanning and collection-drop cleanup.
+	ListSegmentChangeGroups(ctx context.Context) ([]*model.SegmentChangeGroup, error)
+	DropSegmentChangeGroups(ctx context.Context, collectionID int64) error
 }

@@ -1272,3 +1272,38 @@ func (kc *Catalog) ListExportSnapshotJobs(ctx context.Context) ([]*datapb.Export
 func (kc *Catalog) DropExportSnapshotJob(ctx context.Context, jobID int64) error {
 	return kc.MetaKv.Remove(ctx, buildExportSnapshotJobKey(jobID))
 }
+
+// ListSegmentChangeGroups lists all segment change groups from etcd.
+//
+// A malformed value is an ERROR, not a skip: unlike DataView snapshots (which
+// are reconstructible from the SegmentMeta projection), a group record is the
+// sole owner of its staged members' visibility — SegmentInfo has no
+// change_group_id field yet (design F4) — so silently skipping a bad key
+// orphans its members (IsInvisible=true with no owner, never published or
+// reclaimed). This matches the other 13 List methods in this file, which all
+// propagate decode errors; recovery can then fail closed on corruption.
+func (kc *Catalog) ListSegmentChangeGroups(ctx context.Context) ([]*model.SegmentChangeGroup, error) {
+	groups := make([]*model.SegmentChangeGroup, 0)
+	applyFn := func(key []byte, value []byte) error {
+		group, err := model.UnmarshalSegmentChangeGroup(value)
+		if err != nil {
+			// C36: identify the offending etcd key so an operator facing a
+			// fail-closed startup can locate and remove it; Validate errors on
+			// a corrupt/zero record report GroupID 0, which is not searchable.
+			return merr.Wrap(err, "failed to decode a persisted segment change group at key "+string(key))
+		}
+		groups = append(groups, group)
+		return nil
+	}
+	if err := kc.MetaKv.WalkWithPrefix(ctx, SegmentChangeGroupPrefix+"/", kc.paginationSize, applyFn); err != nil {
+		return nil, err
+	}
+	return groups, nil
+}
+
+// DropSegmentChangeGroups removes every segment change group of one collection.
+// Used by collection drop; the per-collection prefix delete runs under the
+// caller's collection lifecycle lock.
+func (kc *Catalog) DropSegmentChangeGroups(ctx context.Context, collectionID int64) error {
+	return kc.MetaKv.RemoveWithPrefix(ctx, buildSegmentChangeGroupCollectionPrefix(collectionID))
+}
