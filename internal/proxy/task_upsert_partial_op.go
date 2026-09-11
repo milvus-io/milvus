@@ -208,7 +208,7 @@ func resolveFieldPartialUpdateOps(req *milvuspb.UpsertRequest, schema *schemapb.
 						op.String(), name, fieldSchema.GetDataType().String()))
 			}
 			if fieldSchema.GetElementNullable() {
-				return false, merr.WrapErrParameterInvalidMsg(
+				return nil, false, merr.WrapErrParameterInvalidMsg(
 					fmt.Sprintf("op %s does not support element nullable Array field %q", op.String(), name))
 			}
 		default:
