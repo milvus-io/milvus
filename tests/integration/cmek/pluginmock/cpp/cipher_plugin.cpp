@@ -23,6 +23,7 @@
 
 #include <array>
 #include <cstdint>
+#include <cstdlib>
 #include <iomanip>
 #include <sstream>
 #include <stdexcept>
@@ -295,10 +296,28 @@ class FixtureCipherPlugin final : public ICipherPlugin {
     GetEncryptor(int64_t ez_id, int64_t coll_id) const override {
         auto ezk = deriveEZKey(ez_id);
         auto nonce = newNonce();
+        auto dek = deriveDataKey(ezk, nonce, ez_id, coll_id);
+        // Test-only rejection sampling retains the normal EDEK protocol while
+        // making binary-key truncation reproducible at a chosen byte offset.
+        if (const char* offset =
+                std::getenv("MILVUS_CMEK_FIXTURE_DEK_NUL_AT")) {
+            auto nul_at = std::stoi(offset);
+            if (nul_at < 0 || nul_at >= kSHA256Size) {
+                throw std::runtime_error("invalid fixture DEK NUL offset");
+            }
+            size_t attempts = 0;
+            while (dek.find('\0') != static_cast<size_t>(nul_at)) {
+                if (++attempts == 65536) {
+                    throw std::runtime_error(
+                        "fixture could not generate the requested binary key");
+                }
+                nonce = newNonce();
+                dek = deriveDataKey(ezk, nonce, ez_id, coll_id);
+            }
+        }
         auto tag = deriveEDEKTag(ezk, nonce, ez_id, coll_id);
         auto edek = std::string(kEDEKVersion) + ":" + hexEncode(nonce) + ":" +
                     hexEncode(tag);
-        auto dek = deriveDataKey(ezk, nonce, ez_id, coll_id);
         return {std::make_shared<FixtureEncryptor>(std::move(dek)),
                 std::move(edek)};
     }

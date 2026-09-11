@@ -82,6 +82,14 @@ func (s *RawDataV3Suite) TestParquetRawScalar() {
 	s.runParquetCampaign(newRawScalarCampaign())
 }
 
+func (s *RawDataV3Suite) TestParquetRawVector() {
+	s.runParquetCampaign(newRawVectorCampaign())
+}
+
+func (s *RawDataV3Suite) TestParquetStructArray() {
+	s.runParquetCampaign(newStructArrayCampaign())
+}
+
 func (s *RawDataV3Suite) runParquetCampaign(c rawDataCampaign) {
 	ctx, cancel := context.WithTimeout(s.Cluster.GetContext(), 3*time.Minute)
 	defer cancel()

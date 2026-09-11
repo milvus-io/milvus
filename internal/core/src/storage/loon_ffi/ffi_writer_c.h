@@ -14,32 +14,23 @@
 
 #pragma once
 
+#include "common/common_type_c.h"
+#include "common/type_c.h"
+#include "milvus-storage/ffi_c.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#include "common/common_type_c.h"
-#include "common/type_c.h"
-
-/**
- * @brief Retrieves encryption parameters from the cipher plugin for CMEK (Customer Managed Encryption Keys).
- *
- * This function loads the cipher plugin, updates it with the provided plugin context,
- * and retrieves the encryption key and metadata required for encrypting data in storage.
- *
- * @param[in] c_plugin_context Pointer to the plugin context containing:
- *                             - ez_id: Encryption zone ID
- *                             - collection_id: The collection ID
- *                             - key: The encryption key string
- * @param[out] out_key Pointer to receive the encryption key (caller must free with free())
- * @param[out] out_meta Pointer to receive the encoded key metadata (caller must free with free())
- *
- * @return CStatus Success status or error with message if failed
- *
- * @note The caller is responsible for freeing the allocated out_key and out_meta strings.
- */
+// Creates an encrypted Loon writer without transporting binary DEKs through
+// NUL-terminated FFI properties. The caller owns the returned handle and uses
+// loon_writer_write/close/destroy normally. The schema is consumed on import.
 CStatus
-GetEncParams(CPluginContext* c_plugin_context, char** out_key, char** out_meta);
+NewPackedFFIWriterWithCMEK(const char* base_path,
+                           struct ArrowSchema* schema,
+                           const LoonProperties* properties,
+                           CPluginContext* plugin_context,
+                           LoonWriterHandle* out_handle);
 
 #ifdef __cplusplus
 }
