@@ -1473,7 +1473,7 @@ func TestExecuteMergedSubTasks_MixedTopKWithL1Rerank(t *testing.T) {
 		t.Cleanup(func() { paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.Enable.Key) })
 		hook := fixedTopKQueryHook{topK: maxTopK, searchParam: `{}`}
 		for i, req := range requests {
-			optimized, err := optimizers.OptimizeSearchParams(ctx, req, hook, numSegments, false, func(int64) int64 { return 128 })
+			optimized, err := optimizers.OptimizeSearchParams(ctx, req, hook, numSegments, false, func(int64) int64 { return 128 }, "")
 			require.NoError(t, err)
 			requests[i] = optimized
 		}
