@@ -121,7 +121,7 @@ BsonInvertedIndex::LoadIndex(const std::vector<std::string>& index_files,
         // index_files are absolute remote paths (basePath already prepended by caller)
         disk_file_manager_->CacheJsonStatsSharedIndexToDisk(index_files,
                                                             priority);
-        OpenIndex(load_in_mmap);
+        FinishLegacyLoad(load_in_mmap);
         if (!load_in_mmap) {
             // the index is loaded in ram, so we can remove files in advance
             disk_file_manager_->RemoveJsonStatsSharedIndexFiles();
@@ -156,7 +156,7 @@ BsonInvertedIndex::LoadIndex(const std::vector<std::string>& index_files,
             storage::ThrowIfCancelled(token, "BsonInvertedIndex::Open");
             // Synchronous engine work resumes on the shared async worker,
             // after file closure and release of all slice admission.
-            OpenIndex(load_in_mmap);
+            FinishLegacyLoad(load_in_mmap);
             if (!load_in_mmap) {
                 co_await storage::RunLocalFileIOAsync(
                     [&] {
@@ -197,7 +197,7 @@ BsonInvertedIndex::LoadIndex(const std::vector<std::string>& index_files,
 }
 
 void
-BsonInvertedIndex::OpenIndex(bool load_in_mmap) {
+BsonInvertedIndex::FinishLegacyLoad(bool load_in_mmap) {
     AssertInfo(
         tantivy_index_exist(path_.c_str()), "index dir not exist: {}", path_);
     wrapper_ = std::make_shared<TantivyIndexWrapper>(

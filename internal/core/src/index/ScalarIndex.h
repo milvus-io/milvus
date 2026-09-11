@@ -314,9 +314,9 @@ class ScalarIndex : public IndexBase {
  protected:
     // Reuses the BinarySet finalizer; file-backed finalization runs on local I/O.
     folly::coro::Task<void>
-    FinalizeLegacyLoadAsync(BinarySet binary,
-                            const Config& config,
-                            folly::CancellationToken token);
+    FinishLegacyLoadAsync(BinarySet binary,
+                          const Config& config,
+                          folly::CancellationToken token);
 
     // Uses the shared async executor, with local-file phases on LocalFileIOPool.
     folly::coro::Task<void>

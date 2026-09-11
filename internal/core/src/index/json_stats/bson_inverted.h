@@ -92,7 +92,7 @@ class BsonInvertedIndex {
     // Opens fully staged files on the calling thread, without owning transport
     // admission. File cleanup remains the responsibility of the load path.
     void
-    OpenIndex(bool load_in_mmap);
+    FinishLegacyLoad(bool load_in_mmap);
 
     std::string path_;
     bool is_load_;

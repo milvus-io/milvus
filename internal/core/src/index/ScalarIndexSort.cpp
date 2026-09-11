@@ -537,7 +537,7 @@ ScalarIndexSort<T>::LoadLegacyAsync(const Config& config,
         check(values[i].idx_ >= 0 && static_cast<size_t>(values[i].idx_) < rows,
               "index row offset out of bounds");
     }
-    co_await this->FinalizeLegacyLoadAsync(std::move(binary), config, token);
+    co_await this->FinishLegacyLoadAsync(std::move(binary), config, token);
 }
 
 template <typename T>
