@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -257,6 +258,79 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 			s.Error(err)
 		})
 	})
+}
+
+func (s *CollectionManagerSuite) TestValidateSchemaBarrier() {
+	cm := NewCollectionManager()
+	schemaV1 := mock_segcore.GenTestCollectionSchema("collection_v1", schemapb.DataType_Int64, false)
+	schemaV1.Version = 1
+	err := cm.PutOrRef(10, schemaV1, mock_segcore.GenTestIndexMeta(10, schemaV1), &querypb.LoadMetaInfo{
+		LoadType:        querypb.LoadType_LoadCollection,
+		SchemaBarrierTs: 100,
+	})
+	s.Require().NoError(err)
+	defer cm.Unref(10, 1)
+
+	schemaV0 := proto.Clone(schemaV1).(*schemapb.CollectionSchema)
+	schemaV0.Version = 0
+	err = cm.ValidateSchemaBarrier(10, schemaV0, 200)
+	s.ErrorIs(err, merr.ErrCollectionSchemaVersionNotReady)
+
+	err = cm.ValidateSchemaBarrier(10, schemaV1, 99)
+	s.ErrorIs(err, merr.ErrCollectionSchemaVersionNotReady)
+	s.NoError(cm.ValidateSchemaBarrier(10, schemaV1, 100))
+
+	schemaV2 := proto.Clone(schemaV1).(*schemapb.CollectionSchema)
+	schemaV2.Version = 2
+	s.NoError(cm.ValidateSchemaBarrier(10, schemaV2, 50))
+	s.NoError(cm.ValidateSchemaBarrier(11, schemaV0, 0))
+}
+
+func (s *CollectionManagerSuite) TestPutOrRefRejectsStaleSchemaWithoutRef() {
+	cm := NewCollectionManager()
+	schemaV2 := mock_segcore.GenTestCollectionSchema("collection_v2", schemapb.DataType_Int64, false)
+	schemaV2.Version = 2
+	s.Require().NoError(cm.PutOrRef(10, schemaV2, nil, &querypb.LoadMetaInfo{SchemaBarrierTs: 200}))
+
+	schemaV1 := proto.Clone(schemaV2).(*schemapb.CollectionSchema)
+	schemaV1.Version = 1
+	err := cm.PutOrRef(10, schemaV1, nil, &querypb.LoadMetaInfo{SchemaBarrierTs: 100})
+	s.ErrorIs(err, merr.ErrCollectionSchemaVersionNotReady)
+
+	// A rejected topology request must not publish the caller-visible ref.
+	s.True(cm.Unref(10, 1))
+	s.Nil(cm.Get(10))
+}
+
+func (s *CollectionManagerSuite) TestSchemaBarrierFenceSerializesUpdate() {
+	collection := s.cm.Get(1)
+	entered := make(chan struct{})
+	releaseFence := make(chan struct{})
+	fenceDone := make(chan error, 1)
+	go func() {
+		fenceDone <- collection.WithSchemaBarrierFence(func() error {
+			close(entered)
+			<-releaseFence
+			return nil
+		})
+	}()
+	<-entered
+
+	updated := make(chan error, 1)
+	schema := proto.Clone(collection.Schema()).(*schemapb.CollectionSchema)
+	schema.Version++
+	go func() {
+		updated <- s.cm.UpdateSchema(1, schema, 100)
+	}()
+
+	select {
+	case err := <-updated:
+		s.FailNow("schema update crossed receiver fence", "err=%v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(releaseFence)
+	s.NoError(<-fenceDone)
+	s.NoError(<-updated)
 }
 
 func (s *CollectionManagerSuite) TestSchemaAndVersionSnapshot() {

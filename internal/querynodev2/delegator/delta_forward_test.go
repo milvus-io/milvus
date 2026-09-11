@@ -165,6 +165,31 @@ func (s *StreamingForwardSuite) SetupTest() {
 	s.delegator = sd
 }
 
+func (s *StreamingForwardSuite) TestForwardL0RemoteLoadPreservesSchemaBarrier() {
+	worker := cluster.NewMockWorker(s.T())
+	schema := &schemapb.CollectionSchema{Name: "target", Version: 2}
+	loadMeta := &querypb.LoadMetaInfo{
+		CollectionID:    s.collectionID,
+		SchemaBarrierTs: 200,
+	}
+	worker.EXPECT().LoadSegments(mock.Anything, mock.MatchedBy(func(req *querypb.LoadSegmentsRequest) bool {
+		return req.GetSchema() == schema &&
+			req.GetLoadMeta() == loadMeta &&
+			req.GetLoadMeta().GetSchemaBarrierTs() == 200
+	})).Return(nil).Once()
+
+	err := s.delegator.forwardL0RemoteLoad(context.Background(), &querypb.SegmentLoadInfo{
+		SegmentID:    10,
+		CollectionID: s.collectionID,
+		PartitionID:  s.partitionIDs[0],
+	}, &querypb.LoadSegmentsRequest{
+		Schema:   schema,
+		LoadMeta: loadMeta,
+		Version:  10,
+	}, 1, worker)
+	s.NoError(err)
+}
+
 func (s *StreamingForwardSuite) TestBFStreamingForward() {
 	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.StreamingDeltaForwardPolicy.Key, StreamingForwardPolicyBF)
 	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.StreamingDeltaForwardPolicy.Key)

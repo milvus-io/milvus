@@ -44,6 +44,12 @@ type Broadcaster interface {
 	// callback yet. Used during recovery to rebuild file resource refCnt.
 	GetPendingSchemaFileResources() map[int64][]int64
 
+	// GetPendingSchemaInstallCollectionIDs returns collections with a durable,
+	// non-tombstoned AlterCollectionV2 schema-change task. RootCoord uses this
+	// recovery view to restore query topology gates before ACK callbacks and
+	// QueryCoord background schedulers can run.
+	GetPendingSchemaInstallCollectionIDs() []int64
+
 	// Close closes the broadcaster.
 	Close()
 }

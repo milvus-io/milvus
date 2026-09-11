@@ -89,6 +89,7 @@ type ShardDelegator interface {
 	QueryStream(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error
 	GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) ([]*internalpb.GetStatisticsResponse, error)
 	UpdateSchema(ctx context.Context, sch *schemapb.CollectionSchema, schemaBarrierTs uint64) error
+	InstallSchema(ctx context.Context, sch *schemapb.CollectionSchema, schemaBarrierTs uint64) error
 
 	// data
 	ProcessInsert(insertRecords map[int64]*InsertData)
@@ -1347,6 +1348,18 @@ func (sd *shardDelegator) CatchingUpStreamingData() bool {
 }
 
 func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.CollectionSchema, schemaBarrierTs uint64) error {
+	return sd.updateSchema(ctx, schema, schemaBarrierTs, false)
+}
+
+// InstallSchema is the coordinator-driven schema installation path. Unlike a
+// normal WAL schema event, an equal retry still propagates the schema to this
+// shard's workers. This is required when another shard delegator has already
+// advanced the Collection object shared by all delegators on the QueryNode.
+func (sd *shardDelegator) InstallSchema(ctx context.Context, schema *schemapb.CollectionSchema, schemaBarrierTs uint64) error {
+	return sd.updateSchema(ctx, schema, schemaBarrierTs, true)
+}
+
+func (sd *shardDelegator) updateSchema(ctx context.Context, schema *schemapb.CollectionSchema, schemaBarrierTs uint64, forceWorkers bool) error {
 	log := sd.getLogger(ctx)
 	if err := sd.lifetime.Add(sd.IsWorking); err != nil {
 		return err
@@ -1362,7 +1375,9 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 	sd.schemaChangeMutex.Lock()
 	defer sd.schemaChangeMutex.Unlock()
 
-	if !segments.ShouldUpdateCollectionSchema(sd.collection, schema, schemaBarrierTs) {
+	relation := segments.CompareCollectionSchemaBarrier(sd.collection, schema, schemaBarrierTs)
+	if relation == segments.SchemaBarrierStale ||
+		(relation == segments.SchemaBarrierCurrent && !forceWorkers) {
 		mlog.Info(ctx, "delegator skip stale or no-op schema event",
 			mlog.Uint64("schemaVersion", schemaVersion),
 			mlog.Uint64("schemaBarrierTs", schemaBarrierTs),
@@ -1420,10 +1435,13 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 		return err
 	}
 
-	// Apply the local collection update with the same barrier used for remote
-	// workers. collectionManager keeps schema.Version as the logical freshness key.
-	if err := sd.collectionManager.UpdateSchema(sd.collectionID, schema, schemaBarrierTs); err != nil {
-		return err
+	if relation == segments.SchemaBarrierNewer {
+		// Apply the local collection update with the same barrier used for remote
+		// workers. Equal retries still reach the workers above, which is required
+		// when another shard delegator advanced the shared Collection first.
+		if err := sd.collectionManager.UpdateSchema(sd.collectionID, schema, schemaBarrierTs); err != nil {
+			return err
+		}
 	}
 	if err := sd.updateDelegatorSchemaLocked(ctx); err != nil {
 		return err

@@ -38,6 +38,7 @@ import (
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/schemaevolution"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -66,6 +67,22 @@ type TargetObserverSuite struct {
 	nextTargetSegments []*datapb.SegmentInfo
 	nextTargetChannels []*datapb.VchannelInfo
 	ctx                context.Context
+}
+
+func TestTargetObserverSchemaInstallGateRejectsDirectSync(t *testing.T) {
+	paramtable.Init()
+	collectionID := int64(1000)
+	gate := schemaevolution.NewGateManager()
+	gate.Close(collectionID)
+	broker := meta.NewMockBroker(t)
+	observer := NewTargetObserver(nil, nil, nil, broker, nil, session.NewNodeManager(), gate)
+
+	ok := observer.syncNextTargetToDelegator(context.Background(), collectionID, []*meta.DmChannel{{
+		VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: "gated-channel"},
+	}}, 10)
+
+	assert.False(t, ok)
+	broker.AssertNotCalled(t, "DescribeCollection", mock.Anything, collectionID)
 }
 
 func (suite *TargetObserverSuite) SetupSuite() {

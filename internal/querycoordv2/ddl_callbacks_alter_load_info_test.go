@@ -25,11 +25,26 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
+	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/internal/schemaevolution"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+type mockLoadCollectionAckJob struct {
+	ctx          context.Context
+	collectionID int64
+	executed     bool
+}
+
+func (job *mockLoadCollectionAckJob) Context() context.Context { return job.ctx }
+func (job *mockLoadCollectionAckJob) CollectionID() int64      { return job.collectionID }
+func (job *mockLoadCollectionAckJob) Execute() error {
+	job.executed = true
+	return nil
+}
 
 func buildAlterLoadConfigBroadcastResult(collectionID int64) message.BroadcastResultAlterLoadConfigMessageV2 {
 	controlChannel := "_ctrl_channel"
@@ -57,6 +72,7 @@ func buildAlterLoadConfigBroadcastResult(collectionID int64) message.BroadcastRe
 // propagating any other error from the load job.
 func TestAlterLoadConfigV2AckCallback(t *testing.T) {
 	paramtable.Init()
+	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()
 	ctx := context.Background()
 	s := &Server{}
 	result := buildAlterLoadConfigBroadcastResult(1000)
@@ -76,5 +92,18 @@ func TestAlterLoadConfigV2AckCallback(t *testing.T) {
 		err := s.alterLoadConfigV2AckCallback(ctx, result)
 		assert.Error(t, err)
 		assert.True(t, errors.Is(err, expectedErr))
+	})
+
+	mockey.PatchConvey("closed schema install gate rejects delayed load callback", t, func() {
+		s := &Server{installGate: schemaevolution.NewGateManager()}
+		loadJob := &mockLoadCollectionAckJob{ctx: ctx, collectionID: result.Message.Header().GetCollectionId()}
+		s.installGate.Close(loadJob.collectionID)
+		err := s.executeLoadCollectionAckJob(loadJob)
+		assert.ErrorIs(t, err, merr.ErrServiceNotReady)
+		assert.False(t, loadJob.executed)
+
+		s.installGate.Open(loadJob.collectionID)
+		assert.NoError(t, s.executeLoadCollectionAckJob(loadJob))
+		assert.True(t, loadJob.executed)
 	})
 }

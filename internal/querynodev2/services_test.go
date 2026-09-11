@@ -2442,6 +2442,11 @@ func (suite *ServiceSuite) TestSyncDistribution_RemoveFailureAfterLeaderViewUpda
 	partitionID := suite.partitionIDs[0]
 	partitionStatsVersion := int64(10001)
 	partitionStatsVersions := map[int64]int64{}
+	schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
+	suite.Require().NoError(suite.node.manager.Collection.PutOrRef(suite.collectionID, schema, nil, &querypb.LoadMetaInfo{
+		CollectionID: suite.collectionID,
+		PartitionIDs: suite.partitionIDs,
+	}))
 	mockDelegator := delegator.NewMockShardDelegator(suite.T())
 	mockDelegator.EXPECT().Serviceable().Return(true).Maybe()
 	mockDelegator.EXPECT().Collection().Return(suite.collectionID).Maybe()
@@ -2931,6 +2936,54 @@ func (suite *ServiceSuite) TestUpdateSchema() {
 		defer suite.node.UpdateStateCode(commonpb.StateCode_Healthy)
 		status, err := suite.node.UpdateSchema(ctx, req)
 		suite.Error(merr.CheckRPCCall(status, err))
+	})
+
+	suite.Run("installs_all_collection_delegators", func() {
+		first := delegator.NewMockShardDelegator(suite.T())
+		second := delegator.NewMockShardDelegator(suite.T())
+		other := delegator.NewMockShardDelegator(suite.T())
+		first.EXPECT().Collection().Return(suite.collectionID).Once()
+		second.EXPECT().Collection().Return(suite.collectionID).Once()
+		other.EXPECT().Collection().Return(suite.collectionID + 1).Once()
+		first.EXPECT().InstallSchema(mock.Anything, schema, uint64(100)).Return(nil).Once()
+		second.EXPECT().InstallSchema(mock.Anything, schema, uint64(100)).Return(nil).Once()
+		suite.node.delegators.Insert("schema-install-first", first)
+		suite.node.delegators.Insert("schema-install-second", second)
+		suite.node.delegators.Insert("schema-install-other", other)
+		defer suite.node.delegators.GetAndRemove("schema-install-first")
+		defer suite.node.delegators.GetAndRemove("schema-install-second")
+		defer suite.node.delegators.GetAndRemove("schema-install-other")
+
+		coordinatorReq := &querypb.UpdateSchemaRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_AlterCollectionSchema,
+			},
+			CollectionID:    suite.collectionID,
+			Schema:          schema,
+			SchemaBarrierTs: uint64(100),
+		}
+		status, err := suite.node.UpdateSchema(ctx, coordinatorReq)
+		suite.NoError(merr.CheckRPCCall(status, err))
+	})
+
+	suite.Run("delegator_failure_fails_install", func() {
+		installErr := merr.WrapErrServiceUnavailableMsg("mocked schema install failure")
+		shardDelegator := delegator.NewMockShardDelegator(suite.T())
+		shardDelegator.EXPECT().Collection().Return(suite.collectionID).Once()
+		shardDelegator.EXPECT().InstallSchema(mock.Anything, schema, uint64(100)).Return(installErr).Once()
+		suite.node.delegators.Insert("schema-install-failure", shardDelegator)
+		defer suite.node.delegators.GetAndRemove("schema-install-failure")
+
+		failureReq := &querypb.UpdateSchemaRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_AlterCollectionSchema,
+			},
+			CollectionID:    suite.collectionID,
+			Schema:          schema,
+			SchemaBarrierTs: uint64(100),
+		}
+		status, err := suite.node.UpdateSchema(ctx, failureReq)
+		suite.ErrorIs(merr.CheckRPCCall(status, err), installErr)
 	})
 }
 
