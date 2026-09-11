@@ -237,6 +237,16 @@ class SegcoreConfig {
     }
 
     void
+    set_lazy_column_group_enabled(bool value) {
+        lazy_column_group_enabled_.store(value, std::memory_order_relaxed);
+    }
+
+    bool
+    get_lazy_column_group_enabled() const {
+        return lazy_column_group_enabled_.load(std::memory_order_relaxed);
+    }
+
+    void
     set_reject_remote_vector_output(bool value) {
         reject_remote_vector_output_ = value;
     }
@@ -316,6 +326,7 @@ class SegcoreConfig {
     inline static bool enable_gis_split_fusion_ = false;
     inline static bool scan_cursor_owns_pin_ = false;
     inline static bool prefer_field_data_when_index_has_raw_data_ = false;
+    inline static std::atomic<bool> lazy_column_group_enabled_ = false;
     inline static bool reject_remote_vector_output_ = false;
     inline static float interim_index_mem_expansion_rate_ = 1.15f;
     inline static int64_t max_group_by_groups_ = kDefaultMaxGroupByGroups;
