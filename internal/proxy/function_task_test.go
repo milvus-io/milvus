@@ -30,6 +30,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/util/function/validator"
+	"github.com/milvus-io/milvus/internal/util/schemautil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -41,35 +43,111 @@ func TestFunctionTask(t *testing.T) {
 	suite.Run(t, new(FunctionTaskSuite))
 }
 
-// TestAddFunctionRequiresStorageV3Gate guards the add_function_field V3 gate (issue #51167):
-// adding a function must be rejected unless StorageV3 (useLoonFFI), the schema-bump compaction
-// (bumpSchemaVersion.enabled), and the storage-version upgrade compaction (storageVersion.enabled)
-// are all on, so the new function output is actually backfilled into pre-existing segments.
-func (f *FunctionTaskSuite) TestAddFunctionRequiresStorageV3Gate() {
+// TestAddFunctionBackfillConfigGate verifies that Proxy wires all four
+// backfill prerequisites into add_function_field pre-execution.
+func (f *FunctionTaskSuite) TestAddFunctionBackfillConfigGate() {
+	compactionEnabled := paramtable.Get().DataCoordCfg.EnableCompaction.Key
+	autoCompactionEnabled := paramtable.Get().DataCoordCfg.EnableAutoCompaction.Key
 	useLoon := paramtable.Get().CommonCfg.UseLoonFFI.Key
 	bumpEnabled := paramtable.Get().DataCoordCfg.BumpSchemaVersionCompactionEnabled.Key
 	svEnabled := paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.Key
-	defer paramtable.Get().Reset(useLoon)
-	defer paramtable.Get().Reset(bumpEnabled)
-	defer paramtable.Get().Reset(svEnabled)
+	oldCompactionEnabled := paramtable.Get().DataCoordCfg.EnableCompaction.GetValue()
+	oldAutoCompactionEnabled := paramtable.Get().DataCoordCfg.EnableAutoCompaction.GetValue()
+	oldUseLoon := paramtable.Get().CommonCfg.UseLoonFFI.GetValue()
+	oldBumpEnabled := paramtable.Get().DataCoordCfg.BumpSchemaVersionCompactionEnabled.GetValue()
+	oldSVEnabled := paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.GetValue()
+	defer func() {
+		f.NoError(paramtable.Get().Save(compactionEnabled, oldCompactionEnabled))
+		f.NoError(paramtable.Get().Save(autoCompactionEnabled, oldAutoCompactionEnabled))
+		f.NoError(paramtable.Get().Save(useLoon, oldUseLoon))
+		f.NoError(paramtable.Get().Save(bumpEnabled, oldBumpEnabled))
+		f.NoError(paramtable.Get().Save(svEnabled, oldSVEnabled))
+	}()
+
+	buildTask := func() *alterCollectionSchemaTask {
+		return &alterCollectionSchemaTask{
+			AlterCollectionSchemaRequest: &milvuspb.AlterCollectionSchemaRequest{
+				Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+					Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
+						AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
+							FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{
+								{
+									FieldSchema: &schemapb.FieldSchema{
+										Name:             "sparse",
+										DataType:         schemapb.DataType_SparseFloatVector,
+										IsFunctionOutput: true,
+									},
+									ExtraParams: []*commonpb.KeyValuePair{
+										{Key: "index_type", Value: "SPARSE_INVERTED_INDEX"},
+										{Key: "metric_type", Value: "BM25"},
+									},
+								},
+							},
+							FuncSchema: []*schemapb.FunctionSchema{
+								{
+									Name:             "bm25",
+									Type:             schemapb.FunctionType_BM25,
+									InputFieldNames:  []string{"text"},
+									OutputFieldNames: []string{"sparse"},
+								},
+							},
+						},
+					},
+				},
+			},
+			oldSchema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:  100,
+						Name:     "text",
+						DataType: schemapb.DataType_VarChar,
+						TypeParams: []*commonpb.KeyValuePair{
+							{Key: "max_length", Value: "256"},
+							{Key: "enable_analyzer", Value: "true"},
+						},
+					},
+				},
+			},
+		}
+	}
+	validate := func() error {
+		return buildTask().preExecuteAdd(context.Background())
+	}
+	assertConfigError := func(expectedSubstring string) {
+		err := validate()
+		f.ErrorIs(err, merr.ErrServiceUnavailable)
+		f.Equal(merr.SystemError, merr.GetErrorType(err))
+		f.ErrorContains(err, expectedSubstring)
+	}
+
+	// master compaction switch off -> reject
+	f.NoError(paramtable.Get().Save(compactionEnabled, "false"))
+	f.NoError(paramtable.Get().Save(useLoon, "true"))
+	f.NoError(paramtable.Get().Save(bumpEnabled, "true"))
+	f.NoError(paramtable.Get().Save(svEnabled, "true"))
+	assertConfigError("dataCoord.enableCompaction")
 
 	// useLoonFFI off -> reject
-	paramtable.Get().Save(useLoon, "false")
-	f.ErrorContains(validateAddFunctionRequiresStorageV3(), "StorageV3")
+	f.NoError(paramtable.Get().Save(compactionEnabled, "true"))
+	f.NoError(paramtable.Get().Save(useLoon, "false"))
+	f.NoError(paramtable.Get().Save(bumpEnabled, "true"))
+	f.NoError(paramtable.Get().Save(svEnabled, "true"))
+	assertConfigError("StorageV3")
 
 	// useLoonFFI on but bumpSchemaVersion.enabled off -> reject
-	paramtable.Get().Save(useLoon, "true")
-	paramtable.Get().Save(bumpEnabled, "false")
-	f.ErrorContains(validateAddFunctionRequiresStorageV3(), "bumpSchemaVersion.enabled")
+	f.NoError(paramtable.Get().Save(useLoon, "true"))
+	f.NoError(paramtable.Get().Save(bumpEnabled, "false"))
+	assertConfigError("bumpSchemaVersion.enabled")
 
 	// bumpSchemaVersion on but storageVersion.enabled off -> reject
-	paramtable.Get().Save(bumpEnabled, "true")
-	paramtable.Get().Save(svEnabled, "false")
-	f.ErrorContains(validateAddFunctionRequiresStorageV3(), "storageVersion.enabled")
+	f.NoError(paramtable.Get().Save(bumpEnabled, "true"))
+	f.NoError(paramtable.Get().Save(svEnabled, "false"))
+	assertConfigError("storageVersion.enabled")
 
-	// all on -> pass
-	paramtable.Get().Save(svEnabled, "true")
-	f.NoError(validateAddFunctionRequiresStorageV3())
+	// The correctness backfill policy does not depend on ordinary auto-compaction.
+	f.NoError(paramtable.Get().Save(svEnabled, "true"))
+	f.NoError(paramtable.Get().Save(autoCompactionEnabled, "false"))
+	f.NoError(validate())
 }
 
 // TestValidateAddFunctionInputNotText guards the reject of a BM25/MinHash function whose
@@ -86,13 +164,13 @@ func (f *FunctionTaskSuite) TestValidateAddFunctionInputNotText() {
 	}
 
 	// TEXT input rejected for BM25 and MinHash
-	f.ErrorContains(validateAddFunctionInputNotText(schema, fn(schemapb.FunctionType_BM25, "text_in")), "TEXT input field")
-	f.ErrorContains(validateAddFunctionInputNotText(schema, fn(schemapb.FunctionType_MinHash, "text_in")), "TEXT input field")
+	f.ErrorContains(schemautil.ValidateAddFunctionInputNotText(schema, fn(schemapb.FunctionType_BM25, "text_in")), "TEXT input field")
+	f.ErrorContains(schemautil.ValidateAddFunctionInputNotText(schema, fn(schemapb.FunctionType_MinHash, "text_in")), "TEXT input field")
 	// VarChar input allowed
-	f.NoError(validateAddFunctionInputNotText(schema, fn(schemapb.FunctionType_BM25, "varchar_in")))
-	f.NoError(validateAddFunctionInputNotText(schema, fn(schemapb.FunctionType_MinHash, "varchar_in")))
+	f.NoError(schemautil.ValidateAddFunctionInputNotText(schema, fn(schemapb.FunctionType_BM25, "varchar_in")))
+	f.NoError(schemautil.ValidateAddFunctionInputNotText(schema, fn(schemapb.FunctionType_MinHash, "varchar_in")))
 	// non-materialized function type (e.g. TextEmbedding) is out of scope -> allowed even with TEXT input
-	f.NoError(validateAddFunctionInputNotText(schema, fn(schemapb.FunctionType_TextEmbedding, "text_in")))
+	f.NoError(schemautil.ValidateAddFunctionInputNotText(schema, fn(schemapb.FunctionType_TextEmbedding, "text_in")))
 }
 
 func (f *FunctionTaskSuite) TestFunctionOnType() {
