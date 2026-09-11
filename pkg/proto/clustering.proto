@@ -3,6 +3,7 @@ package milvus.proto.clustering;
 
 option go_package = "github.com/milvus-io/milvus/pkg/v3/proto/clusteringpb";
 import "schema.proto";
+import "index_cgo_msg.proto";
 
 // Synchronously modify StorageConfig in index_coord.proto/index_cgo_msg.proto file
 message StorageConfig {
@@ -50,6 +51,10 @@ message AnalyzeInfo {
   // segmentID -> manifest path. A non-empty entry marks a StorageV3 segment
   // read through the manifest; V1 segments use insert_files instead.
   map<int64, string> manifest_paths = 17;
+  int64 storage_version = 18;
+  map<int64, indexcgo.SegmentInsertFiles> segment_insert_files = 19;
+  int64 train_buffer_size = 20;
+  int64 assign_buffer_size = 21;
 }
 
 message ClusteringCentroidsStats {
