@@ -750,6 +750,8 @@ func withValidMixCoord() Opt {
 
 	mixc.EXPECT().DropSegmentsByTime(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
+	mixc.EXPECT().WaitForChannelCheckpoint(mock.Anything, mock.Anything).Return(nil).Maybe()
+
 	mixc.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(
 		&querypb.ShowCollectionsResponse{
 			Status: merr.Status(merr.WrapErrCollectionNotLoaded("test")),

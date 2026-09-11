@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -24,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/ce"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/timestamptz"
@@ -208,7 +210,7 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 		WithBody(&messagespb.AlterCollectionMessageBody{
 			Updates: udpates,
 		}).
-		WithBroadcast(channels).
+		WithBroadcast(channels, alterCollectionBroadcastOptions(header)...).
 		MustBuildBroadcast()
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
 		return err
@@ -321,22 +323,23 @@ func (c *Core) broadcastAlterCollectionForAlterDynamicField(ctx context.Context,
 		return err
 	}
 	// broadcast the put collection v2 message.
+	header := &messagespb.AlterCollectionMessageHeader{
+		DbId:         coll.DBID,
+		CollectionId: coll.CollectionID,
+		UpdateMask: &fieldmaskpb.FieldMask{
+			Paths: []string{message.FieldMaskCollectionSchema, message.FieldMaskCollectionProperties},
+		},
+		CacheExpirations: cacheExpirations,
+	}
 	msg := message.NewAlterCollectionMessageBuilderV2().
-		WithHeader(&messagespb.AlterCollectionMessageHeader{
-			DbId:         coll.DBID,
-			CollectionId: coll.CollectionID,
-			UpdateMask: &fieldmaskpb.FieldMask{
-				Paths: []string{message.FieldMaskCollectionSchema, message.FieldMaskCollectionProperties},
-			},
-			CacheExpirations: cacheExpirations,
-		}).
+		WithHeader(header).
 		WithBody(&messagespb.AlterCollectionMessageBody{
 			Updates: &messagespb.AlterCollectionMessageUpdates{
 				Schema:     schema,
 				Properties: properties,
 			},
 		}).
-		WithBroadcast(channels).
+		WithBroadcast(channels, alterCollectionBroadcastOptions(header)...).
 		MustBuildBroadcast()
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
 		return err
@@ -379,26 +382,27 @@ func (c *Core) broadcastDisableDynamicField(ctx context.Context, req *milvuspb.A
 	if err != nil {
 		return err
 	}
-	msg := message.NewAlterCollectionMessageBuilderV2().
-		WithHeader(&messagespb.AlterCollectionMessageHeader{
-			DbId:         coll.DBID,
-			CollectionId: coll.CollectionID,
-			UpdateMask: &fieldmaskpb.FieldMask{
-				Paths: []string{
-					message.FieldMaskCollectionSchema,
-					message.FieldMaskCollectionProperties,
-				},
+	header := &messagespb.AlterCollectionMessageHeader{
+		DbId:         coll.DBID,
+		CollectionId: coll.CollectionID,
+		UpdateMask: &fieldmaskpb.FieldMask{
+			Paths: []string{
+				message.FieldMaskCollectionSchema,
+				message.FieldMaskCollectionProperties,
 			},
-			CacheExpirations: cacheExpirations,
-			DroppedFieldIds:  []int64{dynamicFieldID},
-		}).
+		},
+		CacheExpirations: cacheExpirations,
+		DroppedFieldIds:  []int64{dynamicFieldID},
+	}
+	msg := message.NewAlterCollectionMessageBuilderV2().
+		WithHeader(header).
 		WithBody(&messagespb.AlterCollectionMessageBody{
 			Updates: &messagespb.AlterCollectionMessageUpdates{
 				Schema:     schema,
 				Properties: properties,
 			},
 		}).
-		WithBroadcast(channels).
+		WithBroadcast(channels, alterCollectionBroadcastOptions(header)...).
 		MustBuildBroadcast()
 	if _, err := bc.Broadcast(ctx, msg); err != nil {
 		return err
@@ -453,9 +457,38 @@ func (c *Core) getAlterLoadConfigOfAlterCollection(oldProps []*commonpb.KeyValue
 	}
 }
 
+func alterCollectionBroadcastOptions(header *messagespb.AlterCollectionMessageHeader) []message.OptBuildBroadcast {
+	if messageutil.IsSchemaChange(header) {
+		return []message.OptBuildBroadcast{message.OptBuildBroadcastAckSyncUp()}
+	}
+	return nil
+}
+
+func waitForAlterCollectionSchemaChangeFlush(ctx context.Context, mixCoord types.MixCoord, result message.BroadcastResultAlterCollectionMessageV2) error {
+	flushTsList := make(map[string]uint64)
+	for vchannel, appendResult := range result.Results {
+		if funcutil.IsControlChannel(vchannel) {
+			continue
+		}
+		flushTsList[vchannel] = appendResult.TimeTick
+	}
+	if len(flushTsList) == 0 {
+		return nil
+	}
+	if err := mixCoord.WaitForChannelCheckpoint(ctx, flushTsList); err != nil {
+		return merr.Wrap(err, "when waiting for alter collection schema change flush")
+	}
+	return nil
+}
+
 func (c *DDLCallback) alterCollectionV2AckCallback(ctx context.Context, result message.BroadcastResultAlterCollectionMessageV2) error {
 	header := result.Message.Header()
 	body := result.Message.MustBody()
+	if messageutil.IsSchemaChange(header) {
+		if err := waitForAlterCollectionSchemaChangeFlush(ctx, c.mixCoord, result); err != nil {
+			return err
+		}
+	}
 	if err := c.meta.AlterCollection(ctx, result); err != nil {
 		if errors.Is(err, errAlterCollectionNotFound) {
 			mlog.Warn(ctx, "alter a non-existent collection, ignore it", mlog.FieldMessage(result.Message))
