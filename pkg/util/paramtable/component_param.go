@@ -8975,8 +8975,8 @@ too few tombstones may lead to ABA issues in the state of milvus cluster.`,
 		Doc: `The max length in bytes of a client-supplied idempotency key, 256 by default.
 The key is stored in the message properties of every write it guards, so an
 oversized key inflates both the WAL entry and the in-memory dedup index.
-A value of 0 rejects every non-empty key, disabling idempotency keys entirely;
-requests that carry no key are accepted at any value.`,
+Zero disables the bound, as it does for the other streaming.idempotency.*
+limits; requests that carry no key are accepted at any value.`,
 		DefaultValue: "256",
 		Export:       false,
 	}

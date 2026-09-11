@@ -413,3 +413,29 @@ func TestUnmarshalIdempotencySectionsRejectsMisalignedSections(t *testing.T) {
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrStoreCorrupted))
 }
+
+// TestProbeChunkForwardStopsAtUnreadableTail covers a chunk found above the last
+// published manifest that cannot be decoded. Nothing depends on it yet -- the
+// persist that wrote it had to publish the manifest next, and failing that
+// leaves its records replayable from the WAL -- so it ends the probe rather
+// than the WAL open.
+func TestProbeChunkForwardStopsAtUnreadableTail(t *testing.T) {
+	ctx := context.Background()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+	store := NewStore(cm, "p1", 1)
+
+	for _, gen := range []uint64{0, 1} {
+		_, _, err := store.WriteChunk(ctx, gen, writeSections(map[string][]uint64{"v1": {100 + gen}}))
+		require.NoError(t, err)
+	}
+	// Generation 2 is garbage; 3 is valid but sits behind it.
+	require.NoError(t, cm.Write(ctx, store.ChunkKey(2), []byte("not a chunk")))
+	_, _, err := store.WriteChunk(ctx, 3, writeSections(map[string][]uint64{"v1": {103}}))
+	require.NoError(t, err)
+
+	entries, err := store.ProbeChunkForward(ctx, 0)
+	require.NoError(t, err, "an unreadable probed tail must not fail the open")
+	require.Len(t, entries, 2, "the probe adopts the contiguous run below the damage")
+	assert.Equal(t, uint64(0), entries[0].GetGeneration())
+	assert.Equal(t, uint64(1), entries[1].GetGeneration())
+}
