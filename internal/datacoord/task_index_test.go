@@ -124,6 +124,8 @@ func (s *indexTaskSuite) TestBasicTaskOperations() {
 		it.SetState(indexpb.JobState_JobStateInProgress, "test reason")
 		s.Equal(indexpb.JobState_JobStateInProgress, indexpb.JobState(it.IndexState))
 		s.Equal("test reason", it.FailReason)
+		it.SetState(indexpb.JobState_JobStateRetry, "retry")
+		s.Equal(taskcommon.Retry, it.GetTaskState(), "Index inspector owns Retry")
 	})
 }
 
@@ -165,6 +167,25 @@ func (s *indexTaskSuite) TestCreateTaskOnWorker() {
 		s.Equal(indexpb.JobState_JobStateNone, indexpb.JobState(it.IndexState))
 	})
 
+	s.Run("deleted task is not dispatched from a stale inspector snapshot", func() {
+		s.mt.indexMeta.segmentBuildInfo.buildID2SegmentIndex.Insert(s.taskID, &model.SegmentIndex{
+			CollectionID: s.collID,
+			PartitionID:  s.partID,
+			SegmentID:    s.segID,
+			IndexID:      s.indexID,
+			BuildID:      s.taskID,
+			IndexState:   commonpb.IndexState_Unissued,
+			NumRows:      65535,
+			IsDeleted:    true,
+		})
+		it.SetState(indexpb.JobState_JobStateInit, "")
+		cluster := session.NewMockCluster(s.T())
+
+		it.CreateTaskOnWorker(1, cluster)
+
+		s.Equal(indexpb.JobState_JobStateNone, indexpb.JobState(it.IndexState))
+	})
+
 	s.Run("segment not healthy", func() {
 		s.mt.indexMeta.segmentBuildInfo.buildID2SegmentIndex.Insert(s.taskID, &model.SegmentIndex{
 			CollectionID: s.collID,
@@ -178,7 +199,7 @@ func (s *indexTaskSuite) TestCreateTaskOnWorker() {
 		s.mt.segments.segments[s.segID].State = commonpb.SegmentState_Dropped
 		cluster := session.NewMockCluster(s.T())
 		it.CreateTaskOnWorker(1, cluster)
-		s.Equal(indexpb.JobState_JobStateNone, indexpb.JobState(it.IndexState))
+		s.Equal(indexpb.JobState_JobStateFailed, indexpb.JobState(it.IndexState))
 	})
 
 	s.Run("index not exist", func() {
@@ -189,14 +210,19 @@ func (s *indexTaskSuite) TestCreateTaskOnWorker() {
 		}()
 		cluster := session.NewMockCluster(s.T())
 		it.CreateTaskOnWorker(1, cluster)
-		s.Equal(indexpb.JobState_JobStateNone, indexpb.JobState(it.IndexState))
+		s.Equal(indexpb.JobState_JobStateFailed, indexpb.JobState(it.IndexState))
 	})
 
-	s.Run("update version failed", func() {
+	s.Run("assign task failed", func() {
 		it.SetState(indexpb.JobState_JobStateInit, "")
 		catalogMock := catalogmocks.NewDataCoordCatalog(s.T())
 		catalogMock.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(fmt.Errorf("mock error"))
 		s.mt.indexMeta.catalog = catalogMock
+		oldCtx := s.mt.ctx
+		canceledCtx, cancel := context.WithCancel(context.Background())
+		cancel()
+		s.mt.ctx = canceledCtx
+		defer func() { s.mt.ctx = oldCtx }()
 
 		cluster := session.NewMockCluster(s.T())
 		it.CreateTaskOnWorker(1, cluster)
@@ -212,21 +238,7 @@ func (s *indexTaskSuite) TestCreateTaskOnWorker() {
 		cluster.EXPECT().DropIndex(mock.Anything, mock.Anything).Return(nil)
 
 		it.CreateTaskOnWorker(1, cluster)
-		s.Equal(indexpb.JobState_JobStateInit, indexpb.JobState(it.IndexState))
-	})
-
-	s.Run("Update Inprogress failed", func() {
-		catalogMock := catalogmocks.NewDataCoordCatalog(s.T())
-		catalogMock.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil).Once()
-		catalogMock.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(fmt.Errorf("mock error")).Once()
-		s.mt.indexMeta.catalog = catalogMock
-
-		cluster := session.NewMockCluster(s.T())
-		cluster.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(nil)
-		cluster.EXPECT().DropIndex(mock.Anything, mock.Anything).Return(nil)
-
-		it.CreateTaskOnWorker(1, cluster)
-		s.Equal(indexpb.JobState_JobStateInit, indexpb.JobState(it.IndexState))
+		s.Equal(indexpb.JobState_JobStateRetry, indexpb.JobState(it.IndexState))
 	})
 
 	s.Run("successful creation", func() {
@@ -235,10 +247,13 @@ func (s *indexTaskSuite) TestCreateTaskOnWorker() {
 		s.mt.indexMeta.catalog = catalogMock
 
 		cluster := session.NewMockCluster(s.T())
-		cluster.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(nil)
+		cluster.EXPECT().CreateIndex(mock.Anything, mock.MatchedBy(func(req *workerpb.CreateJobRequest) bool {
+			return req.GetIndexVersion() == 1
+		})).Return(nil)
 
 		it.CreateTaskOnWorker(1, cluster)
 		s.Equal(indexpb.JobState_JobStateInProgress, indexpb.JobState(it.IndexState))
+		s.Equal(int64(1), it.IndexVersion)
 	})
 }
 
@@ -678,16 +693,15 @@ func (s *indexTaskSuite) TestPrepareJobRequestUsesNullableStructArrayParentForSu
 		},
 	}
 
-	handler := NewNMockHandler(s.T())
-	handler.EXPECT().GetCollection(mock.Anything, s.collID).Return(&collectionInfo{
+	collection := &collectionInfo{
 		ID:         s.collID,
 		Schema:     schema,
 		Partitions: []int64{s.partID},
-	}, nil)
+	}
 	cm := mocks.NewChunkManager(s.T())
 	cm.EXPECT().RootPath().Return("root")
 
-	it := newIndexBuildTask(segIndex, 1, mt, handler, cm, newIndexEngineVersionManager())
+	it := newIndexBuildTask(segIndex, 1, mt, nil, cm, newIndexEngineVersionManager())
 	req, err := it.prepareJobRequest(
 		context.Background(),
 		&SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
@@ -697,6 +711,7 @@ func (s *indexTaskSuite) TestPrepareJobRequestUsesNullableStructArrayParentForSu
 			NumOfRows:    4,
 		}},
 		segIndex,
+		collection,
 		[]*commonpb.KeyValuePair{
 			{Key: common.IndexTypeKey, Value: "HNSW"},
 			{Key: common.MetricTypeKey, Value: "MAX_SIM_COSINE"},
@@ -720,6 +735,7 @@ func (s *indexTaskSuite) TestQueryTaskOnWorker() {
 		IndexState:   commonpb.IndexState_InProgress,
 	}
 	it := newIndexBuildTask(t, 1, s.mt, nil, nil, nil)
+	it.IndexVersion = 7
 	it.NodeID = 1
 	s.Run("worker not found", func() {
 		catalogMock := catalogmocks.NewDataCoordCatalog(s.T())
@@ -730,7 +746,7 @@ func (s *indexTaskSuite) TestQueryTaskOnWorker() {
 		cluster.EXPECT().QueryIndex(mock.Anything, mock.Anything).Return(nil, merr.ErrNodeNotFound)
 		cluster.EXPECT().DropIndex(mock.Anything, mock.Anything).Return(nil)
 		it.QueryTaskOnWorker(cluster)
-		s.Equal(indexpb.JobState_JobStateInit, indexpb.JobState(it.IndexState))
+		s.Equal(indexpb.JobState_JobStateRetry, indexpb.JobState(it.IndexState))
 	})
 
 	s.Run("query failed", func() {
@@ -739,7 +755,7 @@ func (s *indexTaskSuite) TestQueryTaskOnWorker() {
 		cluster.EXPECT().QueryIndex(mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock error"))
 		cluster.EXPECT().DropIndex(mock.Anything, mock.Anything).Return(nil)
 		it.QueryTaskOnWorker(cluster)
-		s.Equal(indexpb.JobState_JobStateInit, indexpb.JobState(it.IndexState))
+		s.Equal(indexpb.JobState_JobStateRetry, indexpb.JobState(it.IndexState))
 	})
 
 	s.Run("task finished", func() {
@@ -760,6 +776,24 @@ func (s *indexTaskSuite) TestQueryTaskOnWorker() {
 		s.Equal(indexpb.JobState_JobStateFinished, indexpb.JobState(it.IndexState))
 	})
 
+	s.Run("finished result meta failure keeps assigned attempt", func() {
+		catalogMock := catalogmocks.NewDataCoordCatalog(s.T())
+		catalogMock.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(fmt.Errorf("mock error"))
+		s.mt.indexMeta.catalog = catalogMock
+
+		it.SetState(indexpb.JobState_JobStateInProgress, "")
+		cluster := session.NewMockCluster(s.T())
+		cluster.EXPECT().QueryIndex(mock.Anything, mock.Anything).Return(&workerpb.IndexJobResults{
+			Results: []*workerpb.IndexTaskInfo{{
+				BuildID: s.taskID,
+				State:   commonpb.IndexState_Finished,
+			}},
+		}, nil)
+
+		it.QueryTaskOnWorker(cluster)
+		s.Equal(indexpb.JobState_JobStateInProgress, indexpb.JobState(it.IndexState))
+	})
+
 	s.Run("return retry", func() {
 		catalogMock := catalogmocks.NewDataCoordCatalog(s.T())
 		catalogMock.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
@@ -777,7 +811,7 @@ func (s *indexTaskSuite) TestQueryTaskOnWorker() {
 		cluster.EXPECT().DropIndex(mock.Anything, mock.Anything).Return(nil)
 
 		it.QueryTaskOnWorker(cluster)
-		s.Equal(indexpb.JobState_JobStateInit, indexpb.JobState(it.IndexState))
+		s.Equal(indexpb.JobState_JobStateRetry, indexpb.JobState(it.IndexState))
 		s.Equal("mock error", it.FailReason)
 	})
 
@@ -797,7 +831,7 @@ func (s *indexTaskSuite) TestQueryTaskOnWorker() {
 		cluster.EXPECT().DropIndex(mock.Anything, mock.Anything).Return(nil)
 
 		it.QueryTaskOnWorker(cluster)
-		s.Equal(indexpb.JobState_JobStateInit, indexpb.JobState(it.IndexState))
+		s.Equal(indexpb.JobState_JobStateRetry, indexpb.JobState(it.IndexState))
 	})
 
 	s.Run("worker does not have task", func() {
@@ -808,9 +842,10 @@ func (s *indexTaskSuite) TestQueryTaskOnWorker() {
 		it.SetState(indexpb.JobState_JobStateInProgress, "")
 		cluster := session.NewMockCluster(s.T())
 		cluster.EXPECT().QueryIndex(mock.Anything, mock.Anything).Return(&workerpb.IndexJobResults{}, nil)
+		cluster.EXPECT().DropIndex(mock.Anything, mock.Anything).Return(nil)
 
 		it.QueryTaskOnWorker(cluster)
-		s.Equal(indexpb.JobState_JobStateInit, indexpb.JobState(it.IndexState))
+		s.Equal(indexpb.JobState_JobStateRetry, indexpb.JobState(it.IndexState))
 	})
 }
 
@@ -824,6 +859,7 @@ func (s *indexTaskSuite) TestDropTaskOnWorker() {
 		IndexState:   commonpb.IndexState_Unissued,
 	}
 	it := newIndexBuildTask(t, 1, s.mt, nil, nil, nil)
+	it.IndexVersion = 7
 	it.NodeID = 1
 
 	s.Run("worker not found", func() {
@@ -841,6 +877,13 @@ func (s *indexTaskSuite) TestDropTaskOnWorker() {
 	s.Run("drop success", func() {
 		cluster := session.NewMockCluster(s.T())
 		cluster.EXPECT().DropIndex(mock.Anything, mock.Anything).Return(nil)
+		it.DropTaskOnWorker(cluster)
+	})
+
+	s.Run("skip task without worker", func() {
+		cluster := session.NewMockCluster(s.T())
+		it.NodeID = 0
+
 		it.DropTaskOnWorker(cluster)
 	})
 }

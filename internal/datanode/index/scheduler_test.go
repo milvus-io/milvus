@@ -202,6 +202,23 @@ func newTask(cancelStage fakeTaskState, reterror map[fakeTaskState]error, expect
 	}
 }
 
+func TestStatsTaskNameIncludesAttemptVersion(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	statsV1 := NewStatsTask(ctx, cancel, &workerpb.CreateStatsRequest{
+		ClusterID:   "cluster",
+		TaskID:      3,
+		TaskVersion: 1,
+	}, nil, nil, nil)
+	statsV2 := NewStatsTask(ctx, cancel, &workerpb.CreateStatsRequest{
+		ClusterID:   "cluster",
+		TaskID:      3,
+		TaskVersion: 2,
+	}, nil, nil, nil)
+	assert.NotEqual(t, statsV1.Name(), statsV2.Name())
+}
+
 func TestIndexTaskScheduler(t *testing.T) {
 	paramtable.Init()
 

@@ -363,6 +363,19 @@ MakeDoubleArray(const std::vector<double>& vals,
     EXPECT_TRUE(b.Finish(&out).ok());
     return out;
 }
+
+template <typename Callable>
+void
+ExpectSegcoreErrorCode(Callable&& callable, milvus::ErrorCode expected_code) {
+    try {
+        callable();
+        FAIL() << "expected SegcoreError with code " << expected_code;
+    } catch (const milvus::SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), expected_code);
+    } catch (...) {
+        FAIL() << "expected SegcoreError with code " << expected_code;
+    }
+}
 }  // namespace
 
 // ===== Scalar numeric mismatch rejection (via NormalizeExternalArrow) =====
@@ -374,8 +387,9 @@ TEST(ScalarNumericMismatch, Int32RejectsInt8) {
         MakeInt32Array({0, 1, 99, -128, 127}, {true, true, true, true, true});
     auto field_meta = MakeExternalFieldMetaForTest(
         milvus::DataType::INT8, 0, false, milvus::DataType::NONE);
-    EXPECT_THROW(milvus::storage::NormalizeExternalArrow(in, field_meta),
-                 std::exception);
+    ExpectSegcoreErrorCode(
+        [&] { milvus::storage::NormalizeExternalArrow(in, field_meta); },
+        milvus::ErrorCode::DataTypeInvalid);
 }
 
 TEST(ScalarNumericMismatch, Int32RejectsInt16) {
@@ -422,8 +436,9 @@ TEST(NormalizeExternalArrow, Int64RejectsString) {
 
     auto field_meta = MakeExternalFieldMetaForTest(
         milvus::DataType::INT64, 0, false, milvus::DataType::NONE);
-    EXPECT_THROW(milvus::storage::NormalizeExternalArrow(input, field_meta),
-                 std::exception);
+    ExpectSegcoreErrorCode(
+        [&] { milvus::storage::NormalizeExternalArrow(input, field_meta); },
+        milvus::ErrorCode::DataTypeInvalid);
 }
 
 TEST(NormalizeExternalArrow, Issue49392ScalarMismatchesReject) {
@@ -495,13 +510,16 @@ TEST(NormalizeExternalArrow, StringLikeFieldsRejectInt64) {
                            milvus::DataType::GEOMETRY}) {
         auto field_meta = MakeExternalFieldMetaForTest(
             data_type, 0, false, milvus::DataType::NONE);
-        EXPECT_THROW(
-            milvus::storage::NormalizeExternalArrow(int64_input, field_meta),
-            std::exception);
+        ExpectSegcoreErrorCode(
+            [&] {
+                milvus::storage::NormalizeExternalArrow(int64_input,
+                                                        field_meta);
+            },
+            milvus::ErrorCode::DataTypeInvalid);
     }
 }
 
-TEST(NormalizeVectorArraysToFixedSizeBinary, ListDimMismatchAsserts) {
+TEST(NormalizeVectorArraysToFixedSizeBinary, ListDimMismatchIsDimNotMatch) {
     arrow::FloatBuilder values_builder;
     ASSERT_TRUE(values_builder.AppendValues({1.0f, 2.0f, 3.0f}).ok());
     std::shared_ptr<arrow::Array> values;
@@ -513,12 +531,16 @@ TEST(NormalizeVectorArraysToFixedSizeBinary, ListDimMismatchAsserts) {
     ASSERT_TRUE(offsets_builder.Finish(&offsets).ok());
 
     auto input = *arrow::ListArray::FromArrays(*offsets, *values);
-    EXPECT_THROW(NormalizeVectorArraysToFixedSizeBinaryForTest(
-                     {input}, milvus::DataType::VECTOR_FLOAT, 2),
-                 std::exception);
+    ExpectSegcoreErrorCode(
+        [&] {
+            NormalizeVectorArraysToFixedSizeBinaryForTest(
+                {input}, milvus::DataType::VECTOR_FLOAT, 2);
+        },
+        milvus::ErrorCode::DimNotMatch);
 }
 
-TEST(NormalizeVectorArraysToFixedSizeBinary, ListElementTypeMismatchAsserts) {
+TEST(NormalizeVectorArraysToFixedSizeBinary,
+     ListElementTypeMismatchIsDataTypeInvalid) {
     arrow::Int64Builder values_builder;
     ASSERT_TRUE(values_builder.AppendValues({1, 2}).ok());
     std::shared_ptr<arrow::Array> values;
@@ -530,9 +552,12 @@ TEST(NormalizeVectorArraysToFixedSizeBinary, ListElementTypeMismatchAsserts) {
     ASSERT_TRUE(offsets_builder.Finish(&offsets).ok());
 
     auto input = *arrow::ListArray::FromArrays(*offsets, *values);
-    EXPECT_THROW(NormalizeVectorArraysToFixedSizeBinaryForTest(
-                     {input}, milvus::DataType::VECTOR_FLOAT, 2),
-                 std::exception);
+    ExpectSegcoreErrorCode(
+        [&] {
+            NormalizeVectorArraysToFixedSizeBinaryForTest(
+                {input}, milvus::DataType::VECTOR_FLOAT, 2);
+        },
+        milvus::ErrorCode::DataTypeInvalid);
 }
 
 TEST(NormalizeVectorArraysToFixedSizeBinary, ListNullElementAsserts) {
@@ -964,8 +989,9 @@ TEST(NormalizeExternalArrow, NullableFloatVectorRejectsBinaryWidthMismatch) {
 
     auto field_meta = MakeExternalFieldMetaForTest(
         milvus::DataType::VECTOR_FLOAT, 2, true, milvus::DataType::NONE);
-    EXPECT_THROW(milvus::storage::NormalizeExternalArrow(input, field_meta),
-                 std::exception);
+    ExpectSegcoreErrorCode(
+        [&] { milvus::storage::NormalizeExternalArrow(input, field_meta); },
+        milvus::ErrorCode::DimNotMatch);
 }
 
 TEST(NormalizeExternalArrow, FloatVectorRejectsFixedSizeBinaryWidthMismatch) {
@@ -978,8 +1004,9 @@ TEST(NormalizeExternalArrow, FloatVectorRejectsFixedSizeBinaryWidthMismatch) {
 
     auto field_meta = MakeExternalFieldMetaForTest(
         milvus::DataType::VECTOR_FLOAT, 2, false, milvus::DataType::NONE);
-    EXPECT_THROW(milvus::storage::NormalizeExternalArrow(input, field_meta),
-                 std::exception);
+    ExpectSegcoreErrorCode(
+        [&] { milvus::storage::NormalizeExternalArrow(input, field_meta); },
+        milvus::ErrorCode::DimNotMatch);
 }
 
 TEST(NormalizeExternalArrow,
@@ -993,8 +1020,9 @@ TEST(NormalizeExternalArrow,
 
     auto field_meta = MakeExternalFieldMetaForTest(
         milvus::DataType::VECTOR_FLOAT, 2, true, milvus::DataType::NONE);
-    EXPECT_THROW(milvus::storage::NormalizeExternalArrow(input, field_meta),
-                 std::exception);
+    ExpectSegcoreErrorCode(
+        [&] { milvus::storage::NormalizeExternalArrow(input, field_meta); },
+        milvus::ErrorCode::DimNotMatch);
 }
 
 TEST(NormalizeExternalArrow, FloatVectorRejectsFixedSizeListInt64) {
@@ -1007,8 +1035,9 @@ TEST(NormalizeExternalArrow, FloatVectorRejectsFixedSizeListInt64) {
         arrow::fixed_size_list(arrow::int64(), 2), 1, values);
     auto field_meta = MakeExternalFieldMetaForTest(
         milvus::DataType::VECTOR_FLOAT, 2, false, milvus::DataType::NONE);
-    EXPECT_THROW(milvus::storage::NormalizeExternalArrow(input, field_meta),
-                 std::exception);
+    ExpectSegcoreErrorCode(
+        [&] { milvus::storage::NormalizeExternalArrow(input, field_meta); },
+        milvus::ErrorCode::DataTypeInvalid);
 }
 
 TEST(NormalizeExternalArrow, VectorArrayRejectsFixedSizeBinaryWidthMismatch) {
@@ -1031,8 +1060,9 @@ TEST(NormalizeExternalArrow, VectorArrayRejectsFixedSizeBinaryWidthMismatch) {
                                      2,
                                      false,
                                      milvus::DataType::VECTOR_FLOAT);
-    EXPECT_THROW(milvus::storage::NormalizeExternalArrow(input, field_meta),
-                 std::exception);
+    ExpectSegcoreErrorCode(
+        [&] { milvus::storage::NormalizeExternalArrow(input, field_meta); },
+        milvus::ErrorCode::DimNotMatch);
 }
 
 TEST(NormalizeExternalArrow, VectorArrayRejectsNonListInput) {
@@ -1042,8 +1072,9 @@ TEST(NormalizeExternalArrow, VectorArrayRejectsNonListInput) {
                                      2,
                                      false,
                                      milvus::DataType::VECTOR_FLOAT);
-    EXPECT_THROW(milvus::storage::NormalizeExternalArrow(input, field_meta),
-                 std::exception);
+    ExpectSegcoreErrorCode(
+        [&] { milvus::storage::NormalizeExternalArrow(input, field_meta); },
+        milvus::ErrorCode::DataTypeInvalid);
 }
 
 TEST(NormalizeExternalArrow, VectorArrayRejectsOuterNullRow) {
@@ -1118,8 +1149,9 @@ TEST(NormalizeExternalArrow, ArrayInt64RejectsStringList) {
     auto input = *arrow::ListArray::FromArrays(*offsets, *values);
     auto field_meta = MakeExternalFieldMetaForTest(
         milvus::DataType::ARRAY, 0, false, milvus::DataType::INT64);
-    EXPECT_THROW(milvus::storage::NormalizeExternalArrow(input, field_meta),
-                 std::exception);
+    ExpectSegcoreErrorCode(
+        [&] { milvus::storage::NormalizeExternalArrow(input, field_meta); },
+        milvus::ErrorCode::DataTypeInvalid);
 }
 
 TEST(NormalizeExternalArrow, ArrayInt64RejectsNullElement) {
@@ -1155,8 +1187,9 @@ TEST(NormalizeExternalArrow, ArrayVarcharRejectsInt64List) {
     auto input = *arrow::ListArray::FromArrays(*offsets, *values);
     auto field_meta = MakeExternalFieldMetaForTest(
         milvus::DataType::ARRAY, 0, false, milvus::DataType::VARCHAR);
-    EXPECT_THROW(milvus::storage::NormalizeExternalArrow(input, field_meta),
-                 std::exception);
+    ExpectSegcoreErrorCode(
+        [&] { milvus::storage::NormalizeExternalArrow(input, field_meta); },
+        milvus::ErrorCode::DataTypeInvalid);
 }
 
 TEST(NormalizeExternalArrow, ArrayVarcharAcceptsStringList) {

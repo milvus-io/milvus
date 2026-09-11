@@ -377,7 +377,6 @@ func createMetaForRecycleUnusedIndexes(catalog metastore.DataCoordCatalog) *meta
 	return &meta{
 		ctx:          ctx,
 		catalog:      catalog,
-		collections:  nil,
 		segments:     nil,
 		channelCPs:   newChannelCps(),
 		chunkManager: nil,
@@ -528,10 +527,9 @@ func createMetaForRecycleUnusedSegIndexes(catalog metastore.DataCoordCatalog) *m
 	segIndexes.Insert(segID, segIdx0)
 	segIndexes.Insert(segID+1, segIdx1)
 	meta := &meta{
-		ctx:         ctx,
-		catalog:     catalog,
-		collections: nil,
-		segments:    NewSegmentsInfo(),
+		ctx:      ctx,
+		catalog:  catalog,
+		segments: NewSegmentsInfo(),
 		indexMeta: &indexMeta{
 			catalog:          catalog,
 			segmentIndexes:   segIndexes,
@@ -785,6 +783,67 @@ func TestGarbageCollector_recycleUnusedSegIndexes(t *testing.T) {
 		_, ok := meta.indexMeta.segmentBuildInfo.Get(buildID)
 		assert.False(t, ok)
 	})
+
+	t.Run("worker drop failure keeps files and meta", func(t *testing.T) {
+		catalog := catalogmocks.NewDataCoordCatalog(t)
+		meta := createMetaForRecycleUnusedSegIndexes(catalog)
+		cm := mocks.NewChunkManager(t)
+		cm.EXPECT().RootPath().Return("root").Maybe()
+
+		mockIsBuildIDBlocked := mockey.Mock((*snapshotMeta).IsBuildIDGCBlocked).Return(false).Build()
+		defer mockIsBuildIDBlocked.UnPatch()
+
+		droppedBuildIDs := make([]int64, 0, 2)
+		gc := newGarbageCollector(meta, nil, GcOption{
+			cli: cm,
+			dropIndexTask: func(nodeID, buildID int64) error {
+				assert.Equal(t, int64(1), nodeID)
+				droppedBuildIDs = append(droppedBuildIDs, buildID)
+				return errors.New("worker unavailable")
+			},
+		})
+		gc.recycleUnusedSegIndexes(context.Background(), nil)
+
+		assert.ElementsMatch(t, []int64{buildID, buildID + 1}, droppedBuildIDs)
+		_, firstExists := meta.indexMeta.segmentBuildInfo.Get(buildID)
+		_, secondExists := meta.indexMeta.segmentBuildInfo.Get(buildID + 1)
+		assert.True(t, firstExists)
+		assert.True(t, secondExists)
+		catalog.AssertNotCalled(t, "DropSegmentIndex", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+		cm.AssertNotCalled(t, "Remove", mock.Anything, mock.Anything)
+	})
+}
+
+func TestGarbageCollector_dropIndexTaskBeforeGC(t *testing.T) {
+	segIdx := &model.SegmentIndex{NodeID: 11, BuildID: 22}
+
+	t.Run("unassigned task is still fenced", func(t *testing.T) {
+		called := false
+		gc := &garbageCollector{option: GcOption{dropIndexTask: func(nodeID, buildID int64) error {
+			called = true
+			require.Zero(t, nodeID)
+			require.Equal(t, int64(22), buildID)
+			return nil
+		}}}
+		require.True(t, gc.dropIndexTaskBeforeGC(context.Background(), &model.SegmentIndex{BuildID: 22}))
+		require.True(t, called)
+	})
+
+	t.Run("node not found permits cleanup", func(t *testing.T) {
+		gc := &garbageCollector{option: GcOption{dropIndexTask: func(nodeID, buildID int64) error {
+			require.Equal(t, int64(11), nodeID)
+			require.Equal(t, int64(22), buildID)
+			return merr.WrapErrNodeNotFound(nodeID)
+		}}}
+		require.True(t, gc.dropIndexTaskBeforeGC(context.Background(), segIdx))
+	})
+
+	t.Run("transient failure defers cleanup", func(t *testing.T) {
+		gc := &garbageCollector{option: GcOption{dropIndexTask: func(nodeID, buildID int64) error {
+			return errors.New("worker unavailable")
+		}}}
+		require.False(t, gc.dropIndexTaskBeforeGC(context.Background(), segIdx))
+	})
 }
 
 func createMetaTableForRecycleUnusedIndexFiles(catalog *datacoord.Catalog) *meta {
@@ -859,10 +918,9 @@ func createMetaTableForRecycleUnusedIndexFiles(catalog *datacoord.Catalog) *meta
 	segIndexes.Insert(segID, segIdx0)
 	segIndexes.Insert(segID+1, segIdx1)
 	meta := &meta{
-		ctx:         ctx,
-		catalog:     catalog,
-		collections: nil,
-		segments:    NewSegmentsInfo(),
+		ctx:      ctx,
+		catalog:  catalog,
+		segments: NewSegmentsInfo(),
 		indexMeta: &indexMeta{
 			catalog:        catalog,
 			segmentIndexes: segIndexes,
@@ -1242,26 +1300,21 @@ func TestGarbageCollector_recycleUnusedIndexFilesV1(t *testing.T) {
 			IndexStorePathVersion: 1,
 			IndexState:            commonpb.IndexState_Finished,
 			IsDeleted:             true,
-			IndexFileKeys:         []string{"file1"},
+			IndexFileKeys:         []string{"file1", "file2"},
 		})
 
-		removedPrefixes := make([]string, 0)
 		cm := mocks.NewChunkManager(t)
 		cm.EXPECT().RootPath().Return("root")
-		cm.EXPECT().RemoveWithPrefix(mock.Anything, mock.Anything).RunAndReturn(
-			func(ctx context.Context, s string) error {
-				removedPrefixes = append(removedPrefixes, s)
-				return nil
-			})
+		cm.EXPECT().WalkWithPrefix(mock.Anything, "root/index_v1/", true, mock.Anything).Return(nil)
+		cm.EXPECT().Remove(mock.Anything, "root/index_v1/100/200/300/2000/1/file1").Return(
+			merr.WrapErrIoKeyNotFound("root/index_v1/100/200/300/2000/1/file1"))
+		cm.EXPECT().Remove(mock.Anything, "root/index_v1/100/200/300/2000/1/file2").Return(nil)
 
 		gc := newGarbageCollector(meta, nil, GcOption{cli: cm})
 		gc.recycleUnusedIndexFilesV1(context.TODO())
 
-		// v1 path prefix should be removed
-		assert.Len(t, removedPrefixes, 1)
-		assert.Equal(t, "root/index_v1/100/200/300/2000/1/", removedPrefixes[0])
 		_, ok := meta.indexMeta.segmentBuildInfo.Get(2000)
-		assert.False(t, ok, "deleted v1 segment index tombstone should be removed after file deletion")
+		assert.False(t, ok, "deleted v1 segment index tombstone should be removed after idempotent file deletion")
 	})
 
 	t.Run("skip non-deleted v1 index", func(t *testing.T) {
@@ -1294,16 +1347,16 @@ func TestGarbageCollector_recycleUnusedIndexFilesV1(t *testing.T) {
 		})
 
 		cm := mocks.NewChunkManager(t)
-		cm.EXPECT().RootPath().Return("root").Maybe()
+		cm.EXPECT().RootPath().Return("root")
+		cm.EXPECT().WalkWithPrefix(mock.Anything, "root/index_v1/", true, mock.Anything).Return(nil)
 
 		gc := newGarbageCollector(meta, nil, GcOption{cli: cm})
 		gc.recycleUnusedIndexFilesV1(context.TODO())
 
-		// No RemoveWithPrefix should be called since index is not deleted
-		cm.AssertNotCalled(t, "RemoveWithPrefix", mock.Anything, mock.Anything)
+		cm.AssertNotCalled(t, "Remove", mock.Anything, mock.Anything)
 	})
 
-	t.Run("keep metadata when remove prefix fails", func(t *testing.T) {
+	t.Run("keep metadata when remove files fails", func(t *testing.T) {
 		catalog := catalogmocks.NewDataCoordCatalog(t)
 		segIndexes := typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]]()
 
@@ -1333,7 +1386,8 @@ func TestGarbageCollector_recycleUnusedIndexFilesV1(t *testing.T) {
 
 		cm := mocks.NewChunkManager(t)
 		cm.EXPECT().RootPath().Return("root")
-		cm.EXPECT().RemoveWithPrefix(mock.Anything, "root/index_v1/101/201/301/2001/1/").Return(errors.New("remove failed"))
+		cm.EXPECT().WalkWithPrefix(mock.Anything, "root/index_v1/", true, mock.Anything).Return(nil)
+		cm.EXPECT().Remove(mock.Anything, "root/index_v1/101/201/301/2001/1/file1").Return(errors.New("remove failed"))
 
 		gc := newGarbageCollector(meta, nil, GcOption{cli: cm})
 		gc.recycleUnusedIndexFilesV1(context.TODO())
@@ -1372,7 +1426,8 @@ func TestGarbageCollector_recycleUnusedIndexFilesV1(t *testing.T) {
 		})
 
 		cm := mocks.NewChunkManager(t)
-		cm.EXPECT().RootPath().Return("root").Maybe()
+		cm.EXPECT().RootPath().Return("root")
+		cm.EXPECT().WalkWithPrefix(mock.Anything, "root/index_v1/", true, mock.Anything).Return(nil)
 
 		mockIsBuildIDBlocked := mockey.Mock((*snapshotMeta).IsBuildIDGCBlocked).To(
 			func(sm *snapshotMeta, collID, buildID int64) bool {
@@ -1385,9 +1440,233 @@ func TestGarbageCollector_recycleUnusedIndexFilesV1(t *testing.T) {
 
 		_, ok := meta.indexMeta.segmentBuildInfo.Get(2002)
 		assert.True(t, ok, "snapshot-protected v1 metadata should remain")
-		cm.AssertNotCalled(t, "RemoveWithPrefix", mock.Anything, mock.Anything)
+		cm.AssertNotCalled(t, "Remove", mock.Anything, mock.Anything)
 		catalog.AssertNotCalled(t, "DropSegmentIndex", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 	})
+
+	t.Run("remove orphan retry build and keep current build", func(t *testing.T) {
+		catalog := catalogmocks.NewDataCoordCatalog(t)
+		meta := &meta{
+			segments: NewSegmentsInfo(),
+			indexMeta: &indexMeta{
+				catalog:          catalog,
+				segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+				indexes:          map[UniqueID]map[UniqueID]*model.Index{},
+				segmentBuildInfo: newSegmentIndexBuildInfo(),
+				keyLock:          lock.NewKeyLock[UniqueID](),
+			},
+			snapshotMeta: &snapshotMeta{},
+		}
+		meta.indexMeta.segmentBuildInfo.Add(&model.SegmentIndex{
+			BuildID:               2001,
+			CollectionID:          100,
+			PartitionID:           200,
+			SegmentID:             300,
+			IndexVersion:          1,
+			IndexStorePathVersion: 1,
+			IndexState:            commonpb.IndexState_InProgress,
+		})
+		meta.segments.SetSegment(302, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:           302,
+			CollectionID: 100,
+			PartitionID:  200,
+			State:        commonpb.SegmentState_Importing,
+			IsImporting:  true,
+		}})
+		meta.segments.SetSegment(303, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:           303,
+			CollectionID: 100,
+			PartitionID:  200,
+			State:        commonpb.SegmentState_Flushed,
+			IsImporting:  true,
+		}})
+
+		removedFiles := make([]string, 0)
+		cm := mocks.NewChunkManager(t)
+		cm.EXPECT().RootPath().Return("root")
+		cm.EXPECT().WalkWithPrefix(mock.Anything, "root/index_v1/", true, mock.Anything).RunAndReturn(
+			func(ctx context.Context, prefix string, recursive bool, walk storage.ChunkObjectWalkFunc) error {
+				walk(&storage.ChunkObjectInfo{FilePath: "root/index_v1/100/200/300/2000/1/old-file-1"})
+				walk(&storage.ChunkObjectInfo{FilePath: "root/index_v1/100/200/300/2000/1/old-file-2"})
+				walk(&storage.ChunkObjectInfo{FilePath: "root/index_v1/100/200/300/2001/1/current-file"})
+				walk(&storage.ChunkObjectInfo{FilePath: "root/index_v1/100/200/301/2001/1/wrong-segment"})
+				walk(&storage.ChunkObjectInfo{FilePath: "root/index_v1/100/200/300/2002/1/snapshot-file"})
+				walk(&storage.ChunkObjectInfo{FilePath: "root/index_v1/100/200/302/2004/1/copy-in-progress"})
+				walk(&storage.ChunkObjectInfo{FilePath: "root/index_v1/100/200/303/2005/1/import-retry-orphan"})
+				walk(&storage.ChunkObjectInfo{FilePath: "root/index_v1/100/200/303/2005/1/exports/uuid/files/index_v1/1/2/3/4/5/file"})
+				walk(&storage.ChunkObjectInfo{FilePath: "root/index_v1/not-a-collection/200/300/2003/1/file"})
+				return nil
+			})
+		cm.EXPECT().MultiRemove(mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, files []string) error {
+				removedFiles = append(removedFiles, files...)
+				return nil
+			}).Times(3)
+
+		mockIsBuildIDBlocked := mockey.Mock((*snapshotMeta).IsBuildIDGCBlocked).To(
+			func(sm *snapshotMeta, collID, buildID int64) bool {
+				assert.EqualValues(t, 100, collID)
+				return buildID == 2002
+			}).Build()
+		defer mockIsBuildIDBlocked.UnPatch()
+
+		gc := newGarbageCollector(meta, nil, GcOption{cli: cm})
+		gc.recycleUnusedIndexFilesV1(context.TODO())
+
+		assert.ElementsMatch(t, []string{
+			"root/index_v1/100/200/300/2000/1/old-file-1",
+			"root/index_v1/100/200/300/2000/1/old-file-2",
+			"root/index_v1/100/200/301/2001/1/wrong-segment",
+			"root/index_v1/100/200/303/2005/1/import-retry-orphan",
+		}, removedFiles)
+	})
+
+	t.Run("copy completion between owner checks keeps live build", func(t *testing.T) {
+		metaTable := &meta{
+			segments: NewSegmentsInfo(),
+			indexMeta: &indexMeta{
+				catalog:          catalogmocks.NewDataCoordCatalog(t),
+				segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+				indexes:          map[UniqueID]map[UniqueID]*model.Index{},
+				segmentBuildInfo: newSegmentIndexBuildInfo(),
+				keyLock:          lock.NewKeyLock[UniqueID](),
+			},
+		}
+
+		cm := mocks.NewChunkManager(t)
+		cm.EXPECT().RootPath().Return("root")
+		cm.EXPECT().WalkWithPrefix(mock.Anything, "root/index_v1/", true, mock.Anything).RunAndReturn(
+			func(ctx context.Context, prefix string, recursive bool, walk storage.ChunkObjectWalkFunc) error {
+				walk(&storage.ChunkObjectInfo{FilePath: "root/index_v1/100/200/300/2000/1/file"})
+				return nil
+			})
+
+		published := false
+		getSegment := mockey.Mock((*meta).GetSegment).To(
+			func(actual *meta, ctx context.Context, segmentID int64) *SegmentInfo {
+				require.EqualValues(t, 300, segmentID)
+				actual.indexMeta.segmentBuildInfo.Add(&model.SegmentIndex{
+					BuildID:               2000,
+					CollectionID:          100,
+					PartitionID:           200,
+					SegmentID:             300,
+					IndexStorePathVersion: 1,
+				})
+				published = true
+				return NewSegmentInfo(&datapb.SegmentInfo{
+					ID:           300,
+					CollectionID: 100,
+					PartitionID:  200,
+					IsImporting:  false,
+				})
+			}).Build()
+		defer getSegment.UnPatch()
+
+		gc := newGarbageCollector(metaTable, nil, GcOption{cli: cm})
+		gc.recycleUnusedIndexFilesV1(context.TODO())
+
+		assert.True(t, published)
+		cm.AssertNotCalled(t, "MultiRemove", mock.Anything, mock.Anything)
+	})
+
+	t.Run("late writer is reclaimed by the next scan", func(t *testing.T) {
+		meta := &meta{
+			segments: NewSegmentsInfo(),
+			indexMeta: &indexMeta{
+				catalog:          catalogmocks.NewDataCoordCatalog(t),
+				segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+				indexes:          map[UniqueID]map[UniqueID]*model.Index{},
+				segmentBuildInfo: newSegmentIndexBuildInfo(),
+				keyLock:          lock.NewKeyLock[UniqueID](),
+			},
+		}
+
+		objectExists := true
+		removeCount := 0
+		cm := mocks.NewChunkManager(t)
+		cm.EXPECT().RootPath().Return("root").Twice()
+		cm.EXPECT().WalkWithPrefix(mock.Anything, "root/index_v1/", true, mock.Anything).RunAndReturn(
+			func(ctx context.Context, prefix string, recursive bool, walk storage.ChunkObjectWalkFunc) error {
+				if objectExists {
+					walk(&storage.ChunkObjectInfo{FilePath: "root/index_v1/100/200/300/2000/1/file"})
+				}
+				return nil
+			}).Twice()
+		cm.EXPECT().MultiRemove(mock.Anything, []string{"root/index_v1/100/200/300/2000/1/file"}).RunAndReturn(
+			func(ctx context.Context, files []string) error {
+				require.True(t, objectExists)
+				objectExists = false
+				removeCount++
+				return nil
+			}).Twice()
+
+		gc := newGarbageCollector(meta, nil, GcOption{cli: cm})
+		gc.recycleUnusedIndexFilesV1(context.TODO())
+		require.False(t, objectExists)
+
+		// The retired DataNode attempt writes the same object after the first
+		// cleanup. No GC-side seen state exists, so the next scan finds it again.
+		objectExists = true
+		gc.recycleUnusedIndexFilesV1(context.TODO())
+		assert.False(t, objectExists)
+		assert.Equal(t, 2, removeCount)
+	})
+
+	t.Run("partial walk failure does not delete discovered builds", func(t *testing.T) {
+		meta := &meta{
+			segments: NewSegmentsInfo(),
+			indexMeta: &indexMeta{
+				catalog:          catalogmocks.NewDataCoordCatalog(t),
+				segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+				indexes:          map[UniqueID]map[UniqueID]*model.Index{},
+				segmentBuildInfo: newSegmentIndexBuildInfo(),
+				keyLock:          lock.NewKeyLock[UniqueID](),
+			},
+		}
+
+		cm := mocks.NewChunkManager(t)
+		cm.EXPECT().RootPath().Return("root")
+		cm.EXPECT().WalkWithPrefix(mock.Anything, "root/index_v1/", true, mock.Anything).RunAndReturn(
+			func(ctx context.Context, prefix string, recursive bool, walk storage.ChunkObjectWalkFunc) error {
+				walk(&storage.ChunkObjectInfo{FilePath: "root/index_v1/100/200/300/2000/1/file"})
+				return errors.New("partial listing failed")
+			})
+
+		gc := newGarbageCollector(meta, nil, GcOption{cli: cm})
+		gc.recycleUnusedIndexFilesV1(context.TODO())
+
+		cm.AssertNotCalled(t, "MultiRemove", mock.Anything, mock.Anything)
+	})
+}
+
+func TestParseIndexV1BuildPath(t *testing.T) {
+	prefix := "root/index_v1/"
+	candidate, err := parseIndexV1BuildPath(prefix, prefix+"1/2/3/4/5/file")
+	require.NoError(t, err)
+	assert.Equal(t, indexV1BuildCandidate{
+		collectionID: 1,
+		partitionID:  2,
+		segmentID:    3,
+		buildID:      4,
+		prefix:       "root/index_v1/1/2/3/4/",
+	}, candidate)
+
+	for name, filePath := range map[string]string{
+		"outside prefix":        "other/index_v1/1/2/3/4/5/file",
+		"missing index version": prefix + "1/2/3/4",
+		"directory marker":      prefix + "1/2/3/4/5/",
+		"nested export bundle":  prefix + "1/2/3/4/5/exports/uuid/files/index_v1/6/7/8/9/10/file",
+		"bad collection":        prefix + "x/2/3/4/5/file",
+		"bad partition":         prefix + "1/x/3/4/5/file",
+		"bad segment":           prefix + "1/2/x/4/5/file",
+		"bad build":             prefix + "1/2/3/x/5/file",
+		"bad index version":     prefix + "1/2/3/4/x/file",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := parseIndexV1BuildPath(prefix, filePath)
+			assert.Error(t, err)
+		})
+	}
 }
 
 func TestGarbageCollector_clearETCD(t *testing.T) {
@@ -1701,8 +1980,6 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 				},
 			},
 		},
-
-		collections: collections,
 	}
 
 	m.indexMeta.segmentBuildInfo.Add(&model.SegmentIndex{
@@ -1955,7 +2232,7 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 	signal := make(chan gcCmd)
 	gc := newGarbageCollector(
 		m,
-		newMockHandlerWithMeta(m),
+		newMockHandler(),
 		GcOption{
 			cli:           cm,
 			dropTolerance: 1,
@@ -2065,7 +2342,7 @@ func TestGarbageCollector_recycleChannelMeta(t *testing.T) {
 	broker := broker2.NewMockBroker(t)
 	broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(true, nil).Twice()
 
-	gc := newGarbageCollector(m, newMockHandlerWithMeta(m), GcOption{broker: broker})
+	gc := newGarbageCollector(m, newMockHandler(), GcOption{broker: broker})
 
 	t.Run("list channel cp fail", func(t *testing.T) {
 		catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, errors.New("mock error")).Once()
@@ -2750,6 +3027,37 @@ func setupDroppedSegmentWithIndexForGC(t *testing.T) (*meta, *SegmentInfo, *mode
 	}
 	require.NoError(t, m.indexMeta.AddSegmentIndex(ctx, segIdx))
 	return m, segment, segIdx, binlogPath
+}
+
+// A StorageV3 segment abandoned before it published anything carries an empty
+// ManifestPath. Treating that as a parse failure stops GC before DropSegment,
+// and the surviving meta entry then makes the binlog orphan scan keep every
+// object under the segment too -- both leak permanently. This is the ordinary
+// shape of an import or restore target dropped mid-flight, so it must retire
+// like any other dropped segment.
+func TestGarbageCollector_recycleDroppedSegments_V3WithoutManifestIsRetired(t *testing.T) {
+	ctx := context.Background()
+	m, segment, _, _ := setupDroppedSegmentWithIndexForGC(t)
+
+	require.NoError(t, m.UpdateSegmentsInfo(ctx,
+		UpdateStorageVersionOperator(segment.GetID(), storage.StorageV3)))
+	require.Equal(t, "", m.GetSegment(ctx, segment.GetID()).GetManifestPath())
+
+	cm := mocks.NewChunkManager(t)
+	cm.EXPECT().RootPath().Return("root").Maybe()
+	cm.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil).Maybe()
+	// No RemoveWithPrefix expectation: there is no manifest base path to remove,
+	// and asking for one with an empty path would be the bug this guards.
+
+	gc := newGarbageCollector(m, newMockHandler(), GcOption{
+		cli:           cm,
+		dropTolerance: 0,
+	})
+
+	gc.recycleDroppedSegments(ctx, nil)
+
+	assert.Nil(t, m.GetSegment(ctx, segment.GetID()),
+		"a V3 segment with no manifest must still retire, or its objects leak with it")
 }
 
 func TestGarbageCollector_recycleDroppedSegments_RecyclesSegmentIndexMeta(t *testing.T) {
@@ -4672,7 +4980,7 @@ func TestGarbageCollector_recycleSnapshots_OrphanCleanup(t *testing.T) {
 			segments:     &SegmentsInfo{segments: make(map[int64]*SegmentInfo)},
 			channelCPs:   newChannelCps(),
 		}
-		gc := newGarbageCollector(m, newMockHandlerWithMeta(m), GcOption{broker: broker})
+		gc := newGarbageCollector(m, newMockHandler(), GcOption{broker: broker})
 		return gc
 	}
 
@@ -4994,4 +5302,137 @@ func TestGarbageCollector_removeDroppedSegmentFiles_JSONStatsV2(t *testing.T) {
 	defer mu.Unlock()
 	assert.Contains(t, removed, expectedJSON)
 	assert.Contains(t, removed, indexFile)
+}
+
+// Clustering partition-stats objects have no other reclaim path. Every durable
+// owner must protect an object: an active clustering attempt, a partition-stats
+// record, or a segment carrying the version it was clustered into. The owner
+// snapshot is taken after the object walk so references published during the
+// listing are honored.
+func TestGarbageCollector_recycleUnusedPartitionStatsFiles(t *testing.T) {
+	const collectionID, partitionID = int64(100), int64(200)
+	vchannel := "by-dev-rootcoord-dml_0_100v0"
+
+	segments := NewSegmentsInfo()
+	segments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:                    1,
+		CollectionID:          collectionID,
+		PartitionID:           partitionID,
+		InsertChannel:         vchannel,
+		PartitionStatsVersion: 20,
+	}})
+	m := &meta{
+		segments: segments,
+		compactionTaskMeta: &compactionTaskMeta{
+			compactionTasks: map[int64]map[int64]*datapb.CompactionTask{
+				1: {
+					30: {
+						PlanID:       30,
+						CollectionID: collectionID,
+						PartitionID:  partitionID,
+						Channel:      vchannel,
+						Type:         datapb.CompactionType_ClusteringCompaction,
+						State:        datapb.CompactionTaskState_executing,
+					},
+					50: {
+						PlanID:       50,
+						CollectionID: collectionID,
+						PartitionID:  partitionID,
+						Channel:      vchannel,
+						Type:         datapb.CompactionType_ClusteringCompaction,
+						State:        datapb.CompactionTaskState_cleaned,
+					},
+				},
+			},
+		},
+		partitionStatsMeta: &partitionStatsMeta{
+			partitionStatsInfos: map[string]map[int64]*partitionStatsInfo{
+				vchannel: {
+					partitionID: {infos: map[int64]*datapb.PartitionStatsInfo{
+						10: {CollectionID: collectionID, PartitionID: partitionID, VChannel: vchannel, Version: 10},
+					}},
+				},
+			},
+		},
+	}
+
+	prefix := "root/part_stats/"
+	object := func(version int64, age time.Duration) *storage.ChunkObjectInfo {
+		return &storage.ChunkObjectInfo{
+			FilePath:   fmt.Sprintf("%s%d/%d/%s/%d", prefix, collectionID, partitionID, vchannel, version),
+			ModifyTime: time.Now().Add(-age),
+		}
+	}
+
+	removed := make([]string, 0)
+	var removedMu sync.Mutex
+	cm := mocks.NewChunkManager(t)
+	cm.EXPECT().RootPath().Return("root")
+	cm.EXPECT().WalkWithPrefix(mock.Anything, prefix, true, mock.Anything).RunAndReturn(
+		func(ctx context.Context, s string, b bool, walk storage.ChunkObjectWalkFunc) error {
+			walk(object(10, time.Hour))    // referenced by a partition stats record
+			walk(object(20, time.Hour))    // referenced by a segment's PartitionStatsVersion
+			walk(object(30, time.Hour))    // owned by an active clustering attempt
+			walk(object(40, time.Second))  // unreferenced but too fresh: may still be being written
+			walk(object(50, time.Hour))    // a cleaned task is no longer an owner
+			walk(object(60, time.Hour))    // its owner is published while the walk is in progress
+			walk(object(70, time.Hour))    // referenced by nothing -- the abandoned attempt
+			walk(&storage.ChunkObjectInfo{ // unparseable: never guessed at
+				FilePath:   prefix + "100/200/" + vchannel,
+				ModifyTime: time.Now().Add(-time.Hour),
+			})
+
+			// The owner snapshot must happen after WalkWithPrefix returns. This
+			// models the successful task handoff that publishes downstream
+			// ownership while a slow object listing is still in progress.
+			m.partitionStatsMeta.Lock()
+			m.partitionStatsMeta.partitionStatsInfos[vchannel][partitionID].infos[60] = &datapb.PartitionStatsInfo{
+				CollectionID: collectionID,
+				PartitionID:  partitionID,
+				VChannel:     vchannel,
+				Version:      60,
+			}
+			m.partitionStatsMeta.Unlock()
+			return nil
+		})
+	cm.EXPECT().Remove(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string) error {
+		removedMu.Lock()
+		defer removedMu.Unlock()
+		removed = append(removed, s)
+		return nil
+	}).Maybe()
+
+	gc := newGarbageCollector(m, nil, GcOption{cli: cm, missingTolerance: time.Minute})
+	defer gc.option.removeObjectPool.Release()
+	gc.recycleUnusedPartitionStatsFiles(context.TODO(), nil)
+	gc.option.removeObjectPool.Release()
+
+	assert.ElementsMatch(t, []string{object(50, 0).FilePath, object(70, 0).FilePath}, removed,
+		"only old versions with no durable owner may be removed")
+}
+
+// This parser decides what gets deleted, so anything that is not exactly the
+// documented shape has to be an error rather than a best guess.
+func TestParsePartitionStatsPath(t *testing.T) {
+	prefix := "root/part_stats/"
+	collectionID, partitionID, vchannel, version, err := parsePartitionStatsPath(prefix, prefix+"1/2/ch-1/3")
+	assert.NoError(t, err)
+	assert.EqualValues(t, 1, collectionID)
+	assert.EqualValues(t, 2, partitionID)
+	assert.Equal(t, "ch-1", vchannel)
+	assert.EqualValues(t, 3, version)
+
+	for name, filePath := range map[string]string{
+		"outside the prefix":      "other/1/2/ch-1/3",
+		"too few components":      prefix + "1/2/ch-1",
+		"too many components":     prefix + "1/2/ch-1/3/4",
+		"collection not a number": prefix + "a/2/ch-1/3",
+		"partition not a number":  prefix + "1/b/ch-1/3",
+		"version not a number":    prefix + "1/2/ch-1/c",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, _, _, _, err := parsePartitionStatsPath(prefix, filePath)
+			assert.Error(t, err)
+		})
+	}
 }

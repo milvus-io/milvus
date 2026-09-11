@@ -19,6 +19,7 @@ package metastore
 import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 )
 
@@ -59,9 +60,9 @@ type Entry interface {
 // SegmentEntry targets a single segment.
 //
 // For ActionAdd, Segment is the full new segment: its record and its binlog
-// KVs are persisted. For ActionUpdate, Segment is the segment's new value and
-// only its record is rewritten; AlterEncoding selects which legacy encoding
-// the record rewrite reproduces (see below).
+// KVs are persisted. For ActionUpdate, Segment is the segment's new value;
+// AlterEncoding selects which legacy encoding the update reproduces, and an
+// optional BinlogsIncrement carries the binlog KV delta (see below).
 //
 // Under the single-writer meta lock the caller holds the authoritative
 // in-memory value and supplies the already-mutated segment directly, so no
@@ -83,6 +84,16 @@ type SegmentEntry struct {
 	// leaves it false (via UpdateSegment) so an unbounded batch of dropped
 	// segments avoids a per-segment prefix-existence read.
 	AlterEncoding bool
+	// BinlogsIncrement carries the per-field binlog KV delta for an
+	// AlterEncoding update. It is nil for record-only updates and for retiring
+	// compaction inputs.
+	BinlogsIncrement *BinlogsIncrement
+}
+
+// SegmentIndexEntry targets one segment-index build record. The BuildID in
+// Index is both the catalog-key suffix and the worker attempt identity.
+type SegmentIndexEntry struct {
+	Index *model.SegmentIndex
 }
 
 // ChannelEntry targets a channel's removal tombstone.
@@ -103,6 +114,44 @@ type RefreshTaskEntry struct {
 	TaskID int64
 }
 
+// CopySegmentTaskEntry targets a single copy-segment task. For an ActionAdd,
+// Task is the full task record; for an ActionDelete, TaskID identifies the
+// record to remove.
+type CopySegmentTaskEntry struct {
+	Task   *datapb.CopySegmentTask
+	TaskID int64
+}
+
+// CopySegmentJobEntry targets a copy-segment job record.
+type CopySegmentJobEntry struct {
+	Job *datapb.CopySegmentJob
+}
+
+// ImportTaskEntry targets an import task record.
+type ImportTaskEntry struct {
+	Task   *datapb.ImportTaskV2
+	TaskID int64
+}
+
+// PreImportTaskEntry targets a pre-import task record.
+type PreImportTaskEntry struct {
+	Task   *datapb.PreImportTask
+	TaskID int64
+}
+
+// StatsTaskEntry targets a single stats task. For an ActionAdd, Task is the
+// full task record; for an ActionDelete, TaskID identifies the record to remove.
+type StatsTaskEntry struct {
+	Task   *indexpb.StatsTask
+	TaskID int64
+}
+
+// CompactionTaskEntry targets one persisted compaction attempt. Task carries
+// the complete record for ActionAdd and identifies the key for ActionDelete.
+type CompactionTaskEntry struct {
+	Task *datapb.CompactionTask
+}
+
 // RefreshJobEntry targets an external-collection-refresh job. The job is the
 // failover anchor for its tasks: a SaveRefreshJob action must be composed
 // after every AddRefreshTask action for the job (so a persisted job records
@@ -115,8 +164,10 @@ type RefreshJobEntry struct {
 	JobID int64
 }
 
-// AnalyzeTaskEntry targets a single analyze task's removal.
+// AnalyzeTaskEntry targets a single analyze task. For an ActionAdd, Task is the
+// full task record; for an ActionDelete, TaskID identifies the record to remove.
 type AnalyzeTaskEntry struct {
+	Task   *indexpb.AnalyzeTask
 	TaskID int64
 }
 
@@ -153,9 +204,16 @@ type ReplicaKeyEntry struct {
 }
 
 func (SegmentEntry) isEntry()               {}
+func (SegmentIndexEntry) isEntry()          {}
 func (ChannelEntry) isEntry()               {}
 func (CollectionEntry) isEntry()            {}
 func (RefreshTaskEntry) isEntry()           {}
+func (CopySegmentTaskEntry) isEntry()       {}
+func (CopySegmentJobEntry) isEntry()        {}
+func (ImportTaskEntry) isEntry()            {}
+func (PreImportTaskEntry) isEntry()         {}
+func (StatsTaskEntry) isEntry()             {}
+func (CompactionTaskEntry) isEntry()        {}
 func (RefreshJobEntry) isEntry()            {}
 func (AnalyzeTaskEntry) isEntry()           {}
 func (PartitionStatsEntry) isEntry()        {}
@@ -177,6 +235,16 @@ type UpdateAction struct {
 // (record plus its binlog KVs).
 func AddSegment(seg *datapb.SegmentInfo) UpdateAction {
 	return UpdateAction{Type: ActionAdd, Entry: SegmentEntry{Segment: seg}}
+}
+
+// AddSegmentIndex persists a segment-index build record.
+func AddSegmentIndex(index *model.SegmentIndex) UpdateAction {
+	return UpdateAction{Type: ActionAdd, Entry: SegmentIndexEntry{Index: index}}
+}
+
+// DropSegmentIndex removes a segment-index build record.
+func DropSegmentIndex(index *model.SegmentIndex) UpdateAction {
+	return UpdateAction{Type: ActionDelete, Entry: SegmentIndexEntry{Index: index}}
 }
 
 // UpdateSegment returns an UpdateAction that persists a change to an existing
@@ -202,6 +270,17 @@ func AlterSegment(seg *datapb.SegmentInfo) UpdateAction {
 	return UpdateAction{Type: ActionUpdate, Entry: SegmentEntry{Segment: seg, AlterEncoding: true}}
 }
 
+// AlterSegmentAndBinlogs persists an existing segment and its binlog KV
+// increment with the same encoding as Catalog.AlterSegments.
+func AlterSegmentAndBinlogs(seg *datapb.SegmentInfo, increment BinlogsIncrement) UpdateAction {
+	increment.Segment = seg
+	return UpdateAction{Type: ActionUpdate, Entry: SegmentEntry{
+		Segment:          seg,
+		AlterEncoding:    true,
+		BinlogsIncrement: &increment,
+	}}
+}
+
 // MarkChannelDropped returns an UpdateAction that marks channel as removed.
 func MarkChannelDropped(channel string) UpdateAction {
 	return UpdateAction{Type: ActionUpdate, Entry: ChannelEntry{Channel: channel}}
@@ -221,6 +300,61 @@ func DropCollection(coll *model.Collection) UpdateAction {
 // collection-refresh task record.
 func AddRefreshTask(task *datapb.ExternalCollectionRefreshTask) UpdateAction {
 	return UpdateAction{Type: ActionAdd, Entry: RefreshTaskEntry{Task: task}}
+}
+
+// AddCopySegmentTask returns an UpdateAction that persists a copy-segment task record.
+func AddCopySegmentTask(task *datapb.CopySegmentTask) UpdateAction {
+	return UpdateAction{Type: ActionAdd, Entry: CopySegmentTaskEntry{Task: task}}
+}
+
+// DropCopySegmentTask returns an UpdateAction that removes a copy-segment task.
+func DropCopySegmentTask(taskID int64) UpdateAction {
+	return UpdateAction{Type: ActionDelete, Entry: CopySegmentTaskEntry{TaskID: taskID}}
+}
+
+// SaveCopySegmentJob returns an UpdateAction that persists a copy-segment job.
+func SaveCopySegmentJob(job *datapb.CopySegmentJob) UpdateAction {
+	return UpdateAction{Type: ActionUpdate, Entry: CopySegmentJobEntry{Job: job}}
+}
+
+// SaveImportTask returns an UpdateAction that replaces an import task record.
+func SaveImportTask(task *datapb.ImportTaskV2) UpdateAction {
+	return UpdateAction{Type: ActionUpdate, Entry: ImportTaskEntry{Task: task}}
+}
+
+// DropImportTask returns an UpdateAction that removes an import task record.
+func DropImportTask(taskID int64) UpdateAction {
+	return UpdateAction{Type: ActionDelete, Entry: ImportTaskEntry{TaskID: taskID}}
+}
+
+// SavePreImportTask returns an UpdateAction that replaces a pre-import task record.
+func SavePreImportTask(task *datapb.PreImportTask) UpdateAction {
+	return UpdateAction{Type: ActionUpdate, Entry: PreImportTaskEntry{Task: task}}
+}
+
+// DropPreImportTask returns an UpdateAction that removes a pre-import task record.
+func DropPreImportTask(taskID int64) UpdateAction {
+	return UpdateAction{Type: ActionDelete, Entry: PreImportTaskEntry{TaskID: taskID}}
+}
+
+// AddStatsTask returns an UpdateAction that persists a stats task record.
+func AddStatsTask(task *indexpb.StatsTask) UpdateAction {
+	return UpdateAction{Type: ActionAdd, Entry: StatsTaskEntry{Task: task}}
+}
+
+// DropStatsTask returns an UpdateAction that removes a stats task record.
+func DropStatsTask(taskID int64) UpdateAction {
+	return UpdateAction{Type: ActionDelete, Entry: StatsTaskEntry{TaskID: taskID}}
+}
+
+// AddCompactionTask persists a compaction attempt.
+func AddCompactionTask(task *datapb.CompactionTask) UpdateAction {
+	return UpdateAction{Type: ActionAdd, Entry: CompactionTaskEntry{Task: task}}
+}
+
+// DropCompactionTask removes a compaction attempt.
+func DropCompactionTask(task *datapb.CompactionTask) UpdateAction {
+	return UpdateAction{Type: ActionDelete, Entry: CompactionTaskEntry{Task: task}}
 }
 
 // SaveRefreshJob returns an UpdateAction that persists job's record (an
@@ -246,6 +380,11 @@ func DropRefreshJob(jobID int64) UpdateAction {
 // DropAnalyzeTask returns an UpdateAction that removes an analyze task.
 func DropAnalyzeTask(taskID int64) UpdateAction {
 	return UpdateAction{Type: ActionDelete, Entry: AnalyzeTaskEntry{TaskID: taskID}}
+}
+
+// AddAnalyzeTask returns an UpdateAction that persists an analyze task.
+func AddAnalyzeTask(task *indexpb.AnalyzeTask) UpdateAction {
+	return UpdateAction{Type: ActionAdd, Entry: AnalyzeTaskEntry{Task: task}}
 }
 
 // AddPartitionStats returns an UpdateAction that persists info as a new

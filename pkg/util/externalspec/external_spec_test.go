@@ -281,6 +281,16 @@ func TestValidateSourceAndSpec(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("endpoint_error_does_not_echo_source_query", func(t *testing.T) {
+		// #nosec G101 -- test-only sentinel value asserting secrets never echo into errors, not a credential.
+		const secret = "ENDPOINT_QUERY_SECRET_SENTINEL"
+		err := ValidateSourceAndSpec("s3://bucket/prefix?sig="+secret,
+			`{"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK","region":"us-east-1","cloud_provider":"minio"}}`)
+		requireParameterInvalid(t, err)
+		assert.Contains(t, err.Error(), "cannot resolve endpoint for external source")
+		assert.NotContains(t, err.Error(), secret)
+	})
+
 	t.Run("minio_scheme_selects_minio_validation_semantics", func(t *testing.T) {
 		err := ValidateSourceAndSpec("minio://localhost:9000/mybucket/path",
 			`{"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK"}}`)

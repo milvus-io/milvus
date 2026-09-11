@@ -1055,8 +1055,10 @@ func collectInt64Chunks(t *testing.T, col *arrow.Chunked) [][]int64 {
 	return out
 }
 
-func assertNoSustainedJemallocGrowth(t *testing.T, runOnce func()) {
+func assertNoSustainedJemallocThreadGrowth(t *testing.T, runOnce func()) {
 	t.Helper()
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 
 	const (
 		warmupIterations       = 300
@@ -1066,18 +1068,16 @@ func assertNoSustainedJemallocGrowth(t *testing.T, runOnce func()) {
 		maxPositiveWindows     = 2
 	)
 
-	before := segcore.GetJemallocStats()
-	if !before.Success {
-		t.Skip("jemalloc stats not available on this platform")
+	if _, _, ok := segcore.GetJemallocThreadStatsForTest(); !ok {
+		t.Skip("jemalloc thread stats not available on this platform")
 	}
 
 	// Let allocator caches reach steady state before sampling.
 	for i := 0; i < warmupIterations; i++ {
 		runOnce()
 	}
-	runtime.GC()
-
-	windowBaseline := segcore.GetJemallocStats()
+	allocatedBefore, deallocatedBefore, ok := segcore.GetJemallocThreadStatsForTest()
+	require.True(t, ok)
 	positiveWindows := 0
 	windowGrowths := make([]int64, 0, measurementWindows)
 
@@ -1085,34 +1085,36 @@ func assertNoSustainedJemallocGrowth(t *testing.T, runOnce func()) {
 		for i := 0; i < windowIterations; i++ {
 			runOnce()
 		}
-		runtime.GC()
-
-		afterWindow := segcore.GetJemallocStats()
-		growth := int64(afterWindow.Allocated) - int64(windowBaseline.Allocated)
+		allocatedAfter, deallocatedAfter, ok := segcore.GetJemallocThreadStatsForTest()
+		require.True(t, ok)
+		growth := int64(allocatedAfter-allocatedBefore) - int64(deallocatedAfter-deallocatedBefore)
 		windowGrowths = append(windowGrowths, growth)
 		if growth > positiveWindowNoiseMax {
 			positiveWindows++
 		}
-		windowBaseline = afterWindow
+		allocatedBefore, deallocatedBefore = allocatedAfter, deallocatedAfter
 	}
 
-	// Assert sustained positive growth instead of a single noisy jemalloc delta.
+	// Measure synchronous C allocation/release on this thread. Process-wide
+	// stats.allocated includes unrelated threads and delayed tcache accounting.
 	assert.LessOrEqual(t, positiveWindows, maxPositiveWindows,
-		"jemalloc allocated had sustained positive growth over %d/%d windows (growths=%v, threshold=%d)",
+		"jemalloc thread allocations had sustained positive growth over %d/%d windows (growths=%v, threshold=%d)",
 		positiveWindows, measurementWindows, windowGrowths, positiveWindowNoiseMax)
 
-	t.Logf("jemalloc C heap growth windows=%v, positiveWindows=%d/%d",
+	t.Logf("jemalloc thread C heap growth windows=%v, positiveWindows=%d/%d",
 		windowGrowths, positiveWindows, measurementWindows)
 }
 
 // TestFillOutputFieldsOrdered_NoCMemoryLeak verifies that calling
 // FillOutputFieldsOrdered in a loop does not leak C heap memory.
 // The C++ side allocates via malloc; the Go side must C.free it after use.
-// Uses jemalloc stats to precisely measure C heap growth.
+// Uses thread-local jemalloc counters to measure synchronous C heap growth.
 func TestFillOutputFieldsOrdered_NoCMemoryLeak(t *testing.T) {
 	outputFieldIDs := []int64{103, 104} // Int32, Float
 
-	ts := setupTestSegments(t, 2, 2000, setupOpts{NQ: 2, TopK: 10, OutputFieldIDs: outputFieldIDs})
+	// One segment keeps materialization on the calling thread; multi-segment
+	// materialization allocates on a C++ pool and releases on the caller.
+	ts := setupTestSegments(t, 1, 2000, setupOpts{NQ: 2, TopK: 10, OutputFieldIDs: outputFieldIDs})
 	defer ts.cleanup()
 
 	reduceResult, segDFs := runGoReducePipeline(t, ts)
@@ -1142,10 +1144,10 @@ func TestFillOutputFieldsOrdered_NoCMemoryLeak(t *testing.T) {
 	}
 
 	plan := ts.searchReq.Plan()
-	assertNoSustainedJemallocGrowth(t, func() {
+	assertNoSustainedJemallocThreadGrowth(t, func() {
 		b, err := segcore.FillOutputFieldsOrdered(context.Background(), ts.searchResults, plan, segIndices, segOffsets)
 		require.NoError(t, err)
-		_ = b
+		require.NotEmpty(t, b)
 	})
 }
 
@@ -1165,11 +1167,6 @@ func TestExportSearchResultAsArrowRecordBatch_NoCMemoryLeak(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	before := segcore.GetJemallocStats()
-	if !before.Success {
-		t.Skip("jemalloc stats not available on this platform")
-	}
-
 	exportOnce := func() {
 		for _, res := range ts.searchResults {
 			record, _, err := segcore.ExportSearchResultAsArrowRecordBatch(context.Background(), res, ts.searchReq.Plan(), extraFieldIDs)
@@ -1178,7 +1175,7 @@ func TestExportSearchResultAsArrowRecordBatch_NoCMemoryLeak(t *testing.T) {
 		}
 	}
 
-	assertNoSustainedJemallocGrowth(t, exportOnce)
+	assertNoSustainedJemallocThreadGrowth(t, exportOnce)
 }
 
 // TestExecuteFilterOnly verifies that the Execute() method correctly handles

@@ -27,7 +27,12 @@ import (
 // externalRefreshOwnershipPlanVersion identifies the persisted task contract:
 // exclusive segment ownership with task results stored in object storage so
 // etcd metadata remains bounded.
-const externalRefreshOwnershipPlanVersion = int32(2)
+//
+// Version 4 stores baseline revision numbers instead of full manifest paths.
+// Older binaries cannot interpret the new baseline and must reject this plan;
+// in-flight version-2/3 jobs likewise fail with "retry refresh" on this binary.
+// Keep the gate exact rather than silently publishing without baseline checks.
+const externalRefreshOwnershipPlanVersion = int32(4)
 
 func isSupportedExternalRefreshOwnershipPlanVersion(version int32) bool {
 	return version == externalRefreshOwnershipPlanVersion

@@ -40,9 +40,8 @@ func GetMemoryAllocator() MemoryAllocator {
 
 // MemoryAllocator handles memory allocation and deallocation for import tasks
 type MemoryAllocator interface {
-	// BlockingAllocate blocks until memory is available and then allocates
-	// This method will block until memory becomes available
-	BlockingAllocate(taskID int64, size int64)
+	// BlockingAllocate blocks until memory is available, or ctx is canceled.
+	BlockingAllocate(ctx context.Context, taskID int64, size int64) error
 
 	// Release releases memory of the specified size
 	Release(taskID int64, size int64)
@@ -66,17 +65,30 @@ func NewMemoryAllocator(systemTotalMemory int64) MemoryAllocator {
 	return ma
 }
 
-// BlockingAllocate blocks until memory is available and then allocates
-func (ma *memoryAllocator) BlockingAllocate(taskID int64, size int64) {
+// BlockingAllocate blocks until memory is available, or ctx is canceled.
+func (ma *memoryAllocator) BlockingAllocate(ctx context.Context, taskID int64, size int64) error {
 	ma.mutex.Lock()
 	defer ma.mutex.Unlock()
+
+	// sync.Cond does not observe context cancellation. Wake all waiters when this
+	// context is canceled; each waiter rechecks its own context under the lock.
+	stopWakeup := context.AfterFunc(ctx, func() {
+		ma.mutex.Lock()
+		ma.cond.Broadcast()
+		ma.mutex.Unlock()
+	})
+	defer stopWakeup()
 
 	percentage := paramtable.Get().DataNodeCfg.ImportMemoryLimitPercentage.GetAsFloat()
 	memoryLimit := int64(float64(ma.systemTotalMemory) * percentage / 100.0)
 
 	// Wait until enough memory is available
 	for ma.usedMemory+size > memoryLimit {
-		mlog.Warn(context.TODO(), "task waiting for memory allocation...",
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		mlog.Warn(ctx, "task waiting for memory allocation...",
 			mlog.FieldTaskID(taskID),
 			mlog.Int64("requestedSize", size),
 			mlog.Int64("usedMemory", ma.usedMemory),
@@ -84,14 +96,18 @@ func (ma *memoryAllocator) BlockingAllocate(taskID int64, size int64) {
 
 		ma.cond.Wait()
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 
 	// Allocate memory
 	ma.usedMemory += size
-	mlog.Info(context.TODO(), "memory allocated successfully",
+	mlog.Info(ctx, "memory allocated successfully",
 		mlog.FieldTaskID(taskID),
 		mlog.Int64("allocatedSize", size),
 		mlog.Int64("usedMemory", ma.usedMemory),
 		mlog.Int64("availableMemory", memoryLimit-ma.usedMemory))
+	return nil
 }
 
 // Release releases memory of the specified size

@@ -19,7 +19,6 @@ package datacoord
 import (
 	"context"
 	"fmt"
-	"log"
 	"math/rand"
 	"os"
 	"path"
@@ -45,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	basekv "github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
@@ -1127,7 +1127,6 @@ func TestCatalog_AlterSegmentMultiIndexes(t *testing.T) {
 			MetaKv: metakv,
 		}
 		err := catalog.AlterIndexes(context.Background(), segIdx)
-		fmt.Println(err)
 		assert.NoError(t, err)
 	})
 }
@@ -1321,7 +1320,7 @@ func BenchmarkCatalog_List1000Segments(b *testing.B) {
 		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
 		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
 	if err != nil {
-		log.Fatal(err)
+		mlog.Fatal(context.TODO(), "failed to init etcd", mlog.Err(err))
 	}
 	defer etcdCli.Close()
 
@@ -1357,7 +1356,7 @@ func generateSegments(ctx context.Context, catalog *Catalog, n int, rootPath str
 		segment := addSegment(rootPath, collectionID, v, v, v)
 		err := catalog.AddSegment(ctx, segment)
 		if err != nil {
-			log.Fatal(err)
+			mlog.Fatal(context.TODO(), "failed to init etcd", mlog.Err(err))
 		}
 	}
 }

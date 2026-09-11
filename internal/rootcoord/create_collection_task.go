@@ -562,7 +562,7 @@ func (t *createCollectionTask) prepareMilvusTableSnapshotSchema(ctx context.Cont
 
 	mlog.Info(ctx, "aligned milvus-table external collection field IDs with source snapshot",
 		mlog.String("collection", t.Req.GetCollectionName()),
-		mlog.String("externalSource", schema.GetExternalSource()))
+		mlog.String("externalSource", externalspec.RedactExternalSource(schema.GetExternalSource())))
 	return nil
 }
 

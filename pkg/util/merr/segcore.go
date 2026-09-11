@@ -120,7 +120,7 @@ var segcoreCodeTable = map[int32]segcoreClass{
 	2028: {sentinel: ErrSegcore, inputError: true}, // ExprInvalid: filter expression invalid
 	2031: {sentinel: ErrSegcore, inputError: true}, // MetricTypeNotMatch
 	2032: {sentinel: ErrSegcore, inputError: true}, // DimNotMatch: query vector dim != schema
-	2042: {sentinel: ErrSegcore, inputError: true}, // InvalidParameter: rescorer params
+	2042: {sentinel: ErrSegcore, inputError: true}, // InvalidParameter: caller-supplied parameters or schema mappings
 
 	// Transient system errors (retriable: a retry / reroute to another replica
 	// can succeed).

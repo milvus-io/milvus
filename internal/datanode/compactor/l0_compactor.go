@@ -92,8 +92,12 @@ func (t *LevelZeroCompactionTask) Complete() {
 	t.done <- struct{}{}
 }
 
-func (t *LevelZeroCompactionTask) Stop() {
+func (t *LevelZeroCompactionTask) Cancel() {
 	t.cancel()
+}
+
+func (t *LevelZeroCompactionTask) Stop() {
+	t.Cancel()
 	<-t.done
 }
 

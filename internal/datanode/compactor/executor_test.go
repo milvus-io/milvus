@@ -71,6 +71,53 @@ func TestCompactionExecutor(t *testing.T) {
 		assert.Equal(t, 1, len(ex.taskCh))
 	})
 
+	t.Run("Test_RemoveExpiredTasks", func(t *testing.T) {
+		// DropCompaction is best-effort: sent once, never retried, and it can
+		// miss entirely (node briefly unreachable, drop outran the create,
+		// DataCoord dropped the record without sending one). This sweep is what
+		// keeps such an entry from staying resident until the process restarts.
+		ex := NewExecutor()
+
+		mockC := NewMockCompactor(t)
+		mockC.EXPECT().GetPlanID().Return(int64(1)).Maybe()
+		mockC.EXPECT().GetSlotUsage().Return(int64(8)).Maybe()
+		mockC.EXPECT().GetChannelName().Return("ch1").Maybe()
+		mockC.EXPECT().Cancel().Once()
+
+		succeed, err := ex.Enqueue(mockC)
+		assert.True(t, succeed)
+		assert.NoError(t, err)
+		now := time.Now()
+		cutoff := now.Add(-24 * time.Hour)
+
+		// An expired executing entry has cancellation requested, but removal is
+		// deferred because completeTask still owns the entry until Compact exits.
+		ex.mu.Lock()
+		ex.tasks[1].startedAt = cutoff.Add(-time.Hour)
+		ex.mu.Unlock()
+		assert.Equal(t, 1, ex.RemoveExpiredTasks(context.Background(), cutoff))
+		assert.Contains(t, ex.tasks, int64(1))
+		assert.True(t, ex.tasks[1].dropped)
+		assert.Equal(t, int64(8), ex.Slots(), "cancellation must not release a running task's slots")
+		assert.Zero(t, ex.RemoveExpiredTasks(context.Background(), cutoff), "cancellation is requested only once")
+
+		// A terminal entry newer than the cutoff still belongs to whoever may collect it.
+		ex.mu.Lock()
+		ex.tasks[1].state = datapb.CompactionTaskState_completed
+		ex.tasks[1].startedAt = now
+		ex.tasks[1].dropped = false
+		ex.mu.Unlock()
+		assert.Zero(t, ex.RemoveExpiredTasks(context.Background(), cutoff))
+		assert.Contains(t, ex.tasks, int64(1), "a fresh terminal task is still collectable")
+
+		// Past the cutoff nothing is going to collect it.
+		ex.mu.Lock()
+		ex.tasks[1].startedAt = cutoff
+		ex.mu.Unlock()
+		assert.Equal(t, 1, ex.RemoveExpiredTasks(context.Background(), cutoff))
+		assert.NotContains(t, ex.tasks, int64(1), "an uncollected terminal task must be reclaimed")
+	})
+
 	t.Run("Test_Slots_NotBlocked_WhenEnqueueWaitsOnFullQueue", func(t *testing.T) {
 		ex := NewExecutor()
 		for i := 0; i < cap(ex.taskCh); i++ {
@@ -273,6 +320,7 @@ func TestCompactionExecutor(t *testing.T) {
 
 		completedTask.compactor.(*MockCompactor).EXPECT().GetChannelName().Return("ch1").Maybe()
 		executingTask.compactor.(*MockCompactor).EXPECT().GetChannelName().Return("ch2").Maybe()
+		executingTask.compactor.(*MockCompactor).EXPECT().Cancel().Once()
 		failedTask.compactor.(*MockCompactor).EXPECT().GetChannelName().Return("ch3").Maybe()
 
 		ex.tasks[1] = completedTask
@@ -290,6 +338,65 @@ func TestCompactionExecutor(t *testing.T) {
 
 		_, exists := ex.tasks[2]
 		assert.True(t, exists)
+		assert.True(t, ex.tasks[2].cancelRequested)
+	})
+
+	t.Run("Test_RemoveTask_DeferredUntilExecutingTaskFinishes", func(t *testing.T) {
+		// DropTask reports success even for a task the node is still running, so
+		// DataCoord never asks again. The request must therefore be remembered and
+		// honored at completion, or the entry -- result binlogs included -- stays
+		// resident until this DataNode restarts.
+		ex := NewExecutor()
+
+		mockCompactor := NewMockCompactor(t)
+		mockCompactor.EXPECT().GetChannelName().Return("ch1").Maybe()
+		mockCompactor.EXPECT().Cancel().Once()
+		mockCompactor.EXPECT().GetSlotUsage().Return(int64(8)).Maybe()
+		mockCompactor.EXPECT().GetCompactionType().Return(datapb.CompactionType_MixCompaction).Maybe()
+		mockCompactor.EXPECT().Complete().Return().Once()
+		mockCompactor.EXPECT().GetStorageConfig().Return(nil).Maybe()
+
+		ex.tasks[1] = &taskState{
+			compactor: mockCompactor,
+			state:     datapb.CompactionTaskState_executing,
+		}
+		ex.usingSlots = 8
+
+		ex.RemoveTask(1)
+		require.Len(t, ex.tasks, 1, "an executing task cannot be removed yet")
+		assert.True(t, ex.tasks[1].dropped, "the drop request must be recorded, not discarded")
+		assert.True(t, ex.tasks[1].cancelRequested, "the running compactor must be canceled immediately")
+		// Repeated DropTask calls must not send duplicate cancellation requests.
+		ex.RemoveTask(1)
+
+		ex.completeTask(1, &datapb.CompactionPlanResult{PlanID: 1}, nil)
+
+		_, exists := ex.tasks[1]
+		assert.False(t, exists, "a dropped task must be removed once it finishes")
+		assert.Equal(t, int64(0), ex.Slots(), "its slots must still be returned exactly once")
+	})
+
+	t.Run("Test_CompleteTask_KeepsEntryWhenNotDropped", func(t *testing.T) {
+		// Without a drop request the entry must survive completion: DataCoord
+		// still has to fetch the result through QueryTask.
+		ex := NewExecutor()
+
+		mockCompactor := NewMockCompactor(t)
+		mockCompactor.EXPECT().GetSlotUsage().Return(int64(8)).Maybe()
+		mockCompactor.EXPECT().GetCompactionType().Return(datapb.CompactionType_MixCompaction).Maybe()
+		mockCompactor.EXPECT().Complete().Return().Once()
+		mockCompactor.EXPECT().GetStorageConfig().Return(nil).Maybe()
+
+		ex.tasks[1] = &taskState{
+			compactor: mockCompactor,
+			state:     datapb.CompactionTaskState_executing,
+		}
+		ex.usingSlots = 8
+
+		ex.completeTask(1, &datapb.CompactionPlanResult{PlanID: 1}, nil)
+
+		require.Len(t, ex.tasks, 1, "the result must remain fetchable until dropped")
+		assert.Equal(t, datapb.CompactionTaskState_completed, ex.tasks[1].state)
 	})
 
 	t.Run("Test_GetResults_SinglePlan", func(t *testing.T) {
@@ -426,7 +533,7 @@ func TestCompactionExecutor(t *testing.T) {
 		assert.Equal(t, slotUsage, ex.Slots())
 
 		result := &datapb.CompactionPlanResult{PlanID: planID}
-		ex.completeTask(planID, result)
+		ex.completeTask(planID, result, nil)
 
 		assert.Equal(t, int64(0), ex.Slots())
 
@@ -451,7 +558,7 @@ func TestCompactionExecutor(t *testing.T) {
 			state:     datapb.CompactionTaskState_executing,
 		}
 
-		ex.completeTask(1, nil)
+		ex.completeTask(1, nil, errors.New("compaction failed"))
 
 		assert.Equal(t, int64(0), ex.Slots())
 	})
@@ -477,7 +584,7 @@ func TestCompactionExecutor(t *testing.T) {
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
-			ex.completeTask(planID, &datapb.CompactionPlanResult{PlanID: planID})
+			ex.completeTask(planID, &datapb.CompactionPlanResult{PlanID: planID}, nil)
 		}()
 
 		select {

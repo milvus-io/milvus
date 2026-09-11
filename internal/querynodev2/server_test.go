@@ -106,6 +106,7 @@ func (suite *QueryNodeSuite) TestBasic() {
 	suite.node.SetEtcdClient(suite.etcd)
 	err = suite.node.Init()
 	suite.NoError(err)
+	suite.True(suite.node.session.V3StatsAttemptPath)
 
 	// node should be unhealthy before node start
 	suite.False(suite.node.lifetime.GetState() == commonpb.StateCode_Healthy)

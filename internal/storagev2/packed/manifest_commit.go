@@ -122,8 +122,8 @@ func CommitManifestUpdates(basePath string, baseVersion int64,
 		C.LOON_TRANSACTION_RESOLVE_OVERWRITE,
 		getRetryLimit(), &handle)
 	if err := HandleLoonFFIResult(res); err != nil {
-		// HandleLoonFFIResult returns a bare ErrLoonTransient chain; give it the
-		// storage wire code like transaction.go does, instead of leaking 65535.
+		// Keep the Loon retry/permanent sentinel in the cause chain while exposing
+		// the storage wire code like transaction.go does.
 		return "", merr.WrapErrStorage(err, "commit manifest begin")
 	}
 	defer C.loon_transaction_destroy(handle)

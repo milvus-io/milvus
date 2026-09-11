@@ -75,6 +75,11 @@ func FromCompactionState(s datapb.CompactionTaskState) State {
 		return Finished
 	case datapb.CompactionTaskState_failed:
 		return Failed
+	case datapb.CompactionTaskState_retrying:
+		// Retry is owned by the compaction inspector. The global scheduler treats
+		// every state other than Init/InProgress as released ownership, so the
+		// business state no longer needs to be disguised as Failed.
+		return Retry
 	case datapb.CompactionTaskState_timeout:
 		return Retry
 	}
@@ -107,6 +112,10 @@ func FromCopySegmentState(s datapb.CopySegmentTaskState) State {
 		return Finished
 	case datapb.CopySegmentTaskState_CopySegmentTaskFailed:
 		return Failed
+	case datapb.CopySegmentTaskState_CopySegmentTaskRetry:
+		// The copy inspector replaces this record under a fresh identity on its
+		// own inspection interval.
+		return Retry
 	}
 	return None
 }
@@ -122,8 +131,13 @@ func ToCopySegmentState(s State) datapb.CopySegmentTaskState {
 	case Failed:
 		return datapb.CopySegmentTaskState_CopySegmentTaskFailed
 	case Retry:
-		// CopySegmentTask does not support Retry state, map to Failed
-		return datapb.CopySegmentTaskState_CopySegmentTaskFailed
+		// Worker-reported transient failure. This mapping is the wire the
+		// classification rides on: the coordinator's QueryCopySegment wrapper
+		// answers a Retry-state poll with ToCopySegmentState(state) and never
+		// parses the payload for it, so collapsing Retry to Failed here silently
+		// turns every retriable copy failure into a permanent job failure -- the
+		// exact inversion CopySegmentTaskRetry exists to prevent.
+		return datapb.CopySegmentTaskState_CopySegmentTaskRetry
 	}
 	return datapb.CopySegmentTaskState_CopySegmentTaskNone
 }

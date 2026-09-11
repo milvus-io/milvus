@@ -47,6 +47,7 @@ type ClusteringCompactionPolicySuite struct {
 	inspector          *MockCompactionInspector
 	catalog            *mocks.DataCoordCatalog
 	meta               *meta
+	collections        *typeutil.ConcurrentMap[UniqueID, *collectionInfo]
 
 	clusteringCompactionPolicy *clusteringCompactionPolicy
 }
@@ -67,7 +68,6 @@ func (s *ClusteringCompactionPolicySuite) SetupTest() {
 
 	meta := &meta{
 		segments:           NewSegmentsInfo(),
-		collections:        typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		compactionTaskMeta: compactionTaskMeta,
 		partitionStatsMeta: partitionStatsMeta,
 		indexMeta:          indexMeta,
@@ -78,6 +78,7 @@ func (s *ClusteringCompactionPolicySuite) SetupTest() {
 	mockAllocator.EXPECT().AllocID(mock.Anything).Return(19530, nil).Maybe()
 	mockHandler := NewNMockHandler(s.T())
 	s.handler = mockHandler
+	s.collections = typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
 	s.clusteringCompactionPolicy = newClusteringCompactionPolicy(s.meta, mockAllocator, mockHandler)
 }
 
@@ -109,22 +110,30 @@ func (s *ClusteringCompactionPolicySuite) TestTriggerWithNoCollecitons() {
 
 func (s *ClusteringCompactionPolicySuite) TestTriggerWithCollections() {
 	// valid collection
-	s.meta.collections.Insert(1, &collectionInfo{
+	s.collections.Insert(1, &collectionInfo{
 		ID:     1,
 		Schema: newTestScalarClusteringKeySchema(),
 	})
 	// deleted collection
-	s.meta.collections.Insert(2, &collectionInfo{
+	s.collections.Insert(2, &collectionInfo{
 		ID:     2,
 		Schema: newTestScalarClusteringKeySchema(),
 	})
+	// Trigger discovers collection IDs from DataCoord-owned segment metadata;
+	// RootCoord supplies the collection details for those IDs.
+	s.meta.segments.SetSegment(101, NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 101, CollectionID: 1, State: commonpb.SegmentState_Growing,
+	}))
+	s.meta.segments.SetSegment(102, NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 102, CollectionID: 2, State: commonpb.SegmentState_Growing,
+	}))
 	s.clusteringCompactionPolicy.meta = s.meta
 
 	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, collectionID int64) (*collectionInfo, error) {
 		if collectionID == 2 {
 			return nil, errors.New("mock get collection fail error")
 		}
-		coll, exist := s.meta.collections.Get(collectionID)
+		coll, exist := s.collections.Get(collectionID)
 		if exist {
 			return coll, nil
 		}
@@ -281,26 +290,33 @@ func (s *ClusteringCompactionPolicySuite) TestTriggerOneCollectionCompacting() {
 func (s *ClusteringCompactionPolicySuite) TestCollectionIsClusteringCompacting() {
 	ctx := context.Background()
 	s.Run("no collection is compacting", func() {
-		compacting, triggerID := s.clusteringCompactionPolicy.collectionIsClusteringCompacting(collID)
+		compacting, triggerID := s.clusteringCompactionPolicy.collectionIsClusteringCompacting(context.Background(), collID)
 		s.False(compacting)
 		s.Equal(int64(0), triggerID)
 	})
 
 	s.Run("collection is compacting, different state", func() {
+		// An attempt that ended owing a rebuild still counts as compacting: the
+		// trigger keeps its ID across the replan, so letting a new one start
+		// here would run two clustering compactions on the same collection.
+		// timeout is settled -- nothing writes it any more, and a record that
+		// carries it predates the retrying state.
 		tests := []struct {
 			state        datapb.CompactionTaskState
+			retryTimes   int32
 			isCompacting bool
 			triggerID    int64
 		}{
-			{datapb.CompactionTaskState_pipelining, true, 1},
-			{datapb.CompactionTaskState_executing, true, 1},
-			{datapb.CompactionTaskState_completed, false, 1},
-			{datapb.CompactionTaskState_failed, false, 1},
-			{datapb.CompactionTaskState_timeout, false, 1},
-			{datapb.CompactionTaskState_analyzing, true, 1},
-			{datapb.CompactionTaskState_indexing, true, 1},
-			{datapb.CompactionTaskState_cleaned, false, 1},
-			{datapb.CompactionTaskState_meta_saved, true, 1},
+			{datapb.CompactionTaskState_pipelining, 0, true, 1},
+			{datapb.CompactionTaskState_executing, 0, true, 1},
+			{datapb.CompactionTaskState_completed, 0, false, 1},
+			{datapb.CompactionTaskState_failed, 0, false, 1},
+			{datapb.CompactionTaskState_retrying, 0, true, 1},
+			{datapb.CompactionTaskState_timeout, 0, false, 1},
+			{datapb.CompactionTaskState_analyzing, 0, true, 1},
+			{datapb.CompactionTaskState_indexing, 0, true, 1},
+			{datapb.CompactionTaskState_cleaned, 0, false, 1},
+			{datapb.CompactionTaskState_meta_saved, 0, true, 1},
 		}
 
 		for _, test := range tests {
@@ -315,9 +331,10 @@ func (s *ClusteringCompactionPolicySuite) TestCollectionIsClusteringCompacting()
 					PlanID:       10,
 					CollectionID: collID,
 					State:        test.state,
+					RetryTimes:   test.retryTimes,
 				})
 
-				compacting, triggerID := s.clusteringCompactionPolicy.collectionIsClusteringCompacting(collID)
+				compacting, triggerID := s.clusteringCompactionPolicy.collectionIsClusteringCompacting(context.Background(), collID)
 				s.Equal(test.isCompacting, compacting)
 				s.Equal(test.triggerID, triggerID)
 			})
@@ -335,7 +352,7 @@ func (s *ClusteringCompactionPolicySuite) TestTriggerOneCollectionNormal() {
 		Channel:      "ch-1",
 	}
 
-	s.meta.collections.Insert(testLabel.CollectionID, &collectionInfo{
+	s.collections.Insert(testLabel.CollectionID, &collectionInfo{
 		ID:     testLabel.CollectionID,
 		Schema: newTestScalarClusteringKeySchema(),
 	})
@@ -346,7 +363,7 @@ func (s *ClusteringCompactionPolicySuite) TestTriggerOneCollectionNormal() {
 	}
 
 	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, collectionID int64) (*collectionInfo, error) {
-		coll, exist := s.meta.collections.Get(collectionID)
+		coll, exist := s.collections.Get(collectionID)
 		if exist {
 			return coll, nil
 		}
@@ -370,7 +387,7 @@ func (s *ClusteringCompactionPolicySuite) TestTriggerOneCollectionAllowsMixedSch
 		Channel:      "ch-1",
 	}
 
-	s.meta.collections.Insert(testLabel.CollectionID, &collectionInfo{
+	s.collections.Insert(testLabel.CollectionID, &collectionInfo{
 		ID:     testLabel.CollectionID,
 		Schema: newTestScalarClusteringKeySchema(),
 	})
@@ -387,7 +404,7 @@ func (s *ClusteringCompactionPolicySuite) TestTriggerOneCollectionAllowsMixedSch
 	}
 
 	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, collectionID int64) (*collectionInfo, error) {
-		coll, exist := s.meta.collections.Get(collectionID)
+		coll, exist := s.collections.Get(collectionID)
 		if exist {
 			return coll, nil
 		}

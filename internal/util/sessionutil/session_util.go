@@ -132,6 +132,7 @@ type SessionRaw struct {
 	Version                  string             `json:"Version"`
 	IndexEngineVersion       IndexEngineVersion `json:"IndexEngineVersion,omitempty"`
 	ScalarIndexEngineVersion IndexEngineVersion `json:"ScalarIndexEngineVersion,omitempty"`
+	V3StatsAttemptPath       bool               `json:"V3StatsAttemptPath,omitempty"`
 	IndexNonEncoding         bool               `json:"IndexNonEncoding,omitempty"`
 	LeaseID                  *clientv3.LeaseID  `json:"LeaseID,omitempty"`
 
@@ -227,6 +228,12 @@ func WithScalarIndexEngineVersion(minimal, current, maximum int32) SessionOption
 		session.ScalarIndexEngineVersion.CurrentIndexVersion = current
 		session.ScalarIndexEngineVersion.MaximumIndexVersion = maximum
 	}
+}
+
+// WithV3StatsAttemptPath advertises that this QueryNode can load stats from
+// per-task directories. Missing on older sessions means unsupported.
+func WithV3StatsAttemptPath() SessionOption {
+	return func(session *Session) { session.V3StatsAttemptPath = true }
 }
 
 func WithIndexNonEncoding() SessionOption {
