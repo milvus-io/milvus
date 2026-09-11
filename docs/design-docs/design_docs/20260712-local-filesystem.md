@@ -190,6 +190,9 @@ survive, even between I/O operations. Closing all files does not remove it
 while that owner still holds a reference. The composition-level `FileSystem`
 retains its root while open; normal `Finish()` releases this reference after
 admission stops, allowing root cleanup once all other references disappear.
+Each business layer stores its directory reference in its owning object;
+ordinary users reuse that reference instead of resolving the directory again
+from its parent for each I/O operation (section 4.4).
 
 Opening a root transfers cleanup ownership of that exact directory, including
 pre-existing contents accepted during exclusive startup or migration. For
@@ -274,7 +277,71 @@ On successful cleanup, remove the registration only if its generation still
 matches. On failure, retain it. A retry is addressed by registration generation,
 not merely by a reusable path string.
 
-### 4.4 Kernel inspiration and limits
+### 4.4 Business ownership, acquisition, and reload
+
+Directory creation belongs to construction of the corresponding business
+owner. Each layer retains its own directory reference until that owner is
+unloaded or evicted. For example, node construction retains `local_chunk`, a
+loaded segment retains its segment directory, and an index object retains its
+index directory. These are examples of ownership placement, not distinct
+directory lifetime policies.
+
+```cpp
+// Illustrative business object; not an additional filesystem owner type.
+class LoadedSegment {
+ public:
+    explicit LoadedSegment(local::DirectoryPtr directory)
+        : directory_(std::move(directory)) {}
+
+    local::DirectoryPtr LocalDirectory() const { return directory_; }
+
+ private:
+    local::DirectoryPtr directory_;
+};
+
+// Construction, once for this business instance:
+auto loaded = std::make_shared<LoadedSegment>(segments->Child("100"));
+
+// Repeated use obtains the existing instance's directory:
+auto directory = loaded->LocalDirectory();
+auto file = directory->Open("index.bin", options);
+```
+
+The owner keeps the directory alive between operations even when there are
+no files open. Consumers first obtain a live business owner or a copy of its
+directory reference through the business registry's synchronized acquisition
+path. Unload stops publication under that same business synchronization,
+then releases the owner outside the registry lock. Existing consumers retain
+their references until their work completes. A raw owner pointer or an
+unsynchronized reference to its `shared_ptr` member is insufficient.
+
+Business owners hold actual usage references; the directory tree does not
+need an artificial base reference or `RemoveIfUnused()` API. This does not
+remove the low-level retirement reservation in section 4.3, which protects
+creation/cleanup races independently of normal business acquisition.
+
+Reload is a separate lifecycle event. Removing a segment from the business
+registry does not prove that old files, mappings, or tasks have finished. If
+they still retain the directory, `Child("100")` returns that same live node;
+it does not create a fresh segment generation or report that the old one is
+unloading. The business layer must not treat this successful lookup as
+permission to rebuild into the old instance's files.
+
+For reuse of the same physical path, the business lifecycle must retain an
+unloading marker and delay the next load until old users have released their
+references and old-directory cleanup has succeeded. Observe the registration's
+completion without retaining the directory itself, or the wait would prevent
+final release. Failed cleanup keeps reload blocked. Concurrent acquisition
+either obtains the published old instance before unload begins or follows the
+next-load admission path; it must not bypass admission with a direct `Child()`.
+
+This is the default migration rule and preserves existing paths. Where a
+consumer already uses distinct physical paths for load instances, preserve
+that generation scheme to permit overlap. An in-memory registration generation
+alone does not isolate two loads using the same disk path. Introducing new
+physical naming schemes is separate migration work, not required by this API.
+
+### 4.5 Kernel inspiration and limits
 
 The hierarchy borrows kernfs's explicit parent relationship and separation
 between a directory entry and the memory representing it. Linux kernfs itself
@@ -703,6 +770,8 @@ ownership domain, including ancestors that legacy code could recursively delete.
    obey the same ownership contract. There is no cleanup flag that makes
    mixed legacy and shared-directory lifetimes safe. After ownership transfer,
    every directory follows final-reference deletion.
+   Verify that business owners retain their directories and that same-path
+   unload/reload follows section 4.4 before removing legacy lifecycle guards.
 5. Migrate QueryNode/segcore and DataNode/index consumers domain by domain.
    Remove singleton access after the last production consumer has migrated.
 
@@ -736,6 +805,17 @@ revision itself does not execute or claim these tests.
 - A child retains its ancestors after business parent references are dropped.
 - An ordinary handle copy does not delete anything on destruction.
 - A business owner retains files between I/O operations.
+- Repeated operations reuse the directory stored in the business owner;
+  releasing temporary files does not trigger cleanup while that owner lives.
+- Business acquisition racing with unload either retains the published owner
+  before withdrawal or takes the next-load admission path, without a raw-pointer
+  lifetime gap or direct `Child()` bypass.
+- Reload while an old file/task still retains the same path cannot rebuild
+  into the old live node returned by `Child()`; admission waits for cleanup.
+- Same-path reload waits without holding the old directory alive, remains
+  blocked on failed cleanup, and proceeds after successful completion.
+- Existing distinct physical generation paths permit old/new overlap without
+  cross-deletion; in-memory generation IDs alone are not treated as isolation.
 - Files, mappings, native wrappers, queued tasks, and completion callbacks each
   keep the directory alive through actual resource release.
 - Last release races with weak lookup: no resurrection or same-name creation
@@ -823,6 +903,8 @@ and distinguish implemented guarantees from unverified follow-up work.
    through retirement and failed cleanup.
 3. Children retain parents; files, mappings, and tasks retain their actual
    owning directory. Parent-only retention cannot substitute for child ownership.
+   Each business owner stores its directory; acquisition and unload are
+   synchronized, and same-path reload waits for old-generation cleanup.
 4. Last strong release triggers cleanup for every directory, including the
    root; there is no cleanup-policy flag, writer lease, or public recursive
    deletion path.
