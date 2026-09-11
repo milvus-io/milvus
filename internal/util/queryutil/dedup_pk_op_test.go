@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // makeTimestampField creates a timestamp field (FieldID=1).
@@ -203,7 +204,9 @@ func TestDeduplicatePKOperator_MaxOutputSize(t *testing.T) {
 	}
 	_, err := op.Run(ctx, nil, []*internalpb.RetrieveResults{r})
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "maxOutputSize")
+	assert.Contains(t, err.Error(), "estimated: 8 bytes, maximum: 1 bytes")
+	assert.Contains(t, err.Error(), "Reduce output fields or row limit")
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 }
 
 func TestDeduplicatePKOperator_HasMoreResult(t *testing.T) {
@@ -376,5 +379,8 @@ func TestDeduplicatePKOperator_MaxOutputSize_OneBelowLimit(t *testing.T) {
 	}
 	_, err := op.Run(ctx, nil, []*internalpb.RetrieveResults{r})
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "maxOutputSize")
+	assert.Contains(t, err.Error(), "estimated: 24 bytes, maximum: 23 bytes")
+	assert.Contains(t, err.Error(), "fetch large fields separately")
+	assert.Contains(t, err.Error(), "only after checking memory impact")
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 }

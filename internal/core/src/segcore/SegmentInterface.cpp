@@ -244,7 +244,13 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
     if (output_data_size > limit_size) {
         ThrowInfo(
             RetrieveError,
-            fmt::format("query results exceed the limit size ", limit_size));
+            "Query result exceeds the byte-size limit (estimated: {} bytes, "
+            "maximum: {} bytes). Reduce output fields or row limit, paginate, "
+            "fetch large fields separately, or raise "
+            "quotaAndLimits.limits.maxOutputSize only after checking memory "
+            "impact",
+            output_data_size,
+            limit_size);
     }
 
     results->set_all_retrieve_count(retrieve_results.total_data_cnt_);

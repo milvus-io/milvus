@@ -325,11 +325,30 @@ TEST_P(RetrieveTest, Limit) {
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
     plan->plan_node_->plannodes_ = milvus::test::CreateRetrievePlanByExpr(expr);
 
-    // test query results exceed the limit size
+    // Test that the byte-size guard reports the estimate and configured
+    // maximum without changing the RetrieveError wire semantics.
     std::vector<FieldId> target_fields{TimestampFieldID, fid_64, fid_vec};
     plan->field_ids_ = target_fields;
-    EXPECT_THROW(segment->Retrieve(nullptr, plan.get(), N, 1, false),
-                 std::runtime_error);
+    constexpr int64_t max_output_size = 1;
+    int64_t estimated_output_size = 0;
+    for (auto field_id : target_fields) {
+        estimated_output_size += segment->get_field_avg_size(field_id) * N;
+    }
+    try {
+        segment->Retrieve(nullptr, plan.get(), N, max_output_size, false);
+        FAIL() << "expected Query result byte-size limit error";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), RetrieveError);
+        EXPECT_EQ(
+            std::string(error.what()),
+            "Query result exceeds the byte-size limit (estimated: " +
+                std::to_string(estimated_output_size) +
+                " bytes, maximum: " + std::to_string(max_output_size) +
+                " bytes). Reduce output fields or row limit, paginate, fetch "
+                "large fields separately, or raise "
+                "quotaAndLimits.limits.maxOutputSize only after checking "
+                "memory impact");
+    }
 
     auto retrieve_results = segment->Retrieve(
         nullptr, plan.get(), N, DEFAULT_MAX_OUTPUT_SIZE, false);
