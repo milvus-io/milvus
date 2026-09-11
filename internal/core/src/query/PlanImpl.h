@@ -64,6 +64,7 @@ struct Plan {
     // collections this drives manifest-column checks, not data readiness.
     std::vector<FieldId> access_entries_;
     std::vector<std::string> target_dynamic_fields_;
+    bool take_for_output_allowed_{true};
 
  public:
     std::optional<ExtractedPlanInfo> extra_info_opt_;
@@ -132,6 +133,7 @@ struct RetrievePlan {
     // collections this drives manifest-column checks, not data readiness.
     std::vector<FieldId> access_entries_;
     std::vector<std::string> target_dynamic_fields_;
+    bool take_for_output_allowed_{true};
 };
 
 using PlanPtr = std::unique_ptr<Plan>;
