@@ -19,6 +19,7 @@ const (
 	messageReplicateMesssageHeader          = "_rh"  // replicate message header.
 	messageUnreplicable                     = "_ur"  // mark the message as unsafe to replicate.
 	messagePartialUpdateCAS                 = "_puc" // partial update CAS transaction marker.
+	messageIdempotencyKey                   = "_ik"  // scoped idempotency key of an idempotent write, see `IdempotencyKey`.
 )
 
 var (
