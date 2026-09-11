@@ -1157,6 +1157,17 @@ func isTermExprTargetSupported(dataType schemapb.DataType) bool {
 
 // VisitTerm translates expr to term plan.
 func (v *ParserVisitor) VisitTerm(ctx *parser.TermContext) interface{} {
+	// A bracketed left-hand side of two or more plain fields, e.g.
+	// `[a, b] in [[1,2],[3,4]]`, is a correlated multi-column tuple IN, not a
+	// single-column term: dispatch to its own builder instead of falling into
+	// the single-column path below, whose generic Accept(v) would route
+	// through VisitArray and reject every column reference as "not a generic
+	// value". A single-element `[a]` (or a bracketed list of non-identifiers)
+	// is left to fall through unchanged, so it still produces today's error.
+	if lhsArray, ok := ctx.Expr(0).(*parser.ArrayContext); ok && isTupleTermLHS(lhsArray) {
+		return v.buildTupleTermExpr(ctx, lhsArray)
+	}
+
 	child := ctx.Expr(0).Accept(v)
 	if err := getError(child); err != nil {
 		return err
