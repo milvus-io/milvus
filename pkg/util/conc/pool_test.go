@@ -44,6 +44,7 @@ func TestPool(t *testing.T) {
 	for i, future := range futures {
 		res, err := future.Await()
 		assert.NoError(t, err)
+		assert.True(t, future.Done())
 		assert.Equal(t, err, future.Err())
 		assert.True(t, future.OK())
 		assert.Equal(t, res, future.Value())
@@ -86,4 +87,18 @@ func TestPoolWithPanic(t *testing.T) {
 	// make sure error returned when conceal panic
 	_, err := future.Await()
 	assert.Error(t, err)
+	assert.True(t, future.Done())
+}
+
+func TestPoolSubmitDoneWhenSubmitFails(t *testing.T) {
+	pool := NewPool[any](1)
+	pool.Release()
+
+	future := pool.Submit(func() (any, error) {
+		return nil, nil
+	})
+
+	_, err := future.Await()
+	assert.Error(t, err)
+	assert.True(t, future.Done())
 }
