@@ -1709,6 +1709,25 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                 }
                 break;
             }
+            case DataType::UUID: {
+                auto& bytes_data = data->scalars().bytes_data();
+                std::vector<milvus::UUID> data_raw(bytes_data.data_size());
+                for (int i = 0; i < bytes_data.data_size(); i++) {
+                    const auto& bytes = bytes_data.data(i);
+                    AssertInfo(bytes.size() == sizeof(milvus::UUID),
+                               "UUID bytes must be 16B, got {}",
+                               bytes.size());
+                    memcpy(data_raw[i].data.data(), bytes.data(), 16);
+                }
+                if (field_meta.is_nullable()) {
+                    auto raw_valid_data = row_valid_data.data();
+                    createNullableFieldData(
+                        data_raw.data(), raw_valid_data, DataType::UUID, dim);
+                } else {
+                    createFieldData(data_raw.data(), DataType::UUID, dim);
+                }
+                break;
+            }
             default: {
                 ThrowInfo(Unsupported, "unsupported");
             }

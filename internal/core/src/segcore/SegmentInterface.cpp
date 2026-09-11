@@ -484,6 +484,12 @@ SegmentInternalInterface::FillOrderByResult(
                 for (int i = 0; i < src.data_size(); ++i) {
                     *(str_ids->mutable_data()->Add()) = src.data(i);
                 }
+            } else if (pk_type == DataType::UUID) {
+                auto uuid_ids = ids->mutable_uuid_id();
+                auto& src = pk_data.scalars().bytes_data();
+                for (int i = 0; i < src.data_size(); ++i) {
+                    *(uuid_ids->mutable_data()->Add()) = src.data(i);
+                }
             }
         }
     }
