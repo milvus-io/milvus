@@ -135,7 +135,7 @@ class StringAggregateCleanupTest
             aggregates.push_back(
                 {std::make_unique<ObservedStringAggregate>(minimum(), counts),
                  {1},
-                 (grouped() ? 1 : 0) + i});
+                 static_cast<column_index_t>((grouped() ? 1 : 0) + i)});
         }
         auto input_type = std::make_shared<RowType>(
             std::vector<std::string>{"key", "value"},
