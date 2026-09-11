@@ -173,6 +173,58 @@ TEST_F(BsonBuilderTest, CreateValueNodeTest) {
                  std::runtime_error);
 }
 
+// The build scheduler decides retry-vs-fail from the SegcoreError code, so these
+// assertions pin the code itself, not just "something was thrown". A generic
+// catch(std::exception) inserted ahead of a SegcoreError guard would silently
+// send these back to UnexpectedError and to an unbounded retry loop.
+TEST_F(BsonBuilderTest, MalformedJsonArrayIsClassifiedAsInput) {
+    auto code_of = [](const std::string& input) {
+        try {
+            BuildBsonArrayBytesFromJsonString(input);
+        } catch (const SegcoreError& e) {
+            return e.get_error_code();
+        }
+        return ErrorCode::Success;
+    };
+
+    // Not an array: rejected by our own ThrowInfo, which the SegcoreError guard
+    // must let through unchanged.
+    EXPECT_EQ(code_of("{\"a\": 1}"), ErrorCode::JsonKeyInvalid);
+    // Malformed document: simdjson raises a content error.
+    EXPECT_EQ(code_of("[1, 2"), ErrorCode::JsonKeyInvalid);
+    EXPECT_EQ(code_of("[tru]"), ErrorCode::JsonKeyInvalid);
+}
+
+TEST_F(BsonBuilderTest, UnescapeJsonStringIsClassifiedAsInput) {
+    try {
+        // A backslash escape that does not decode to a JSON string.
+        UnescapeJsonString("\\uZZZZ");
+        FAIL() << "expected UnescapeJsonString to throw";
+    } catch (const SegcoreError& e) {
+        EXPECT_EQ(e.get_error_code(), ErrorCode::JsonKeyInvalid);
+    }
+}
+
+// simdjson codes that describe simdjson's own state must stay retriable, so the
+// allowlist in JsonParseErrorCode is asserted directly.
+TEST_F(BsonBuilderTest, JsonParseErrorCodeOnlyBlamesTheDocument) {
+    EXPECT_EQ(JsonParseErrorCode(simdjson::TAPE_ERROR),
+              ErrorCode::JsonKeyInvalid);
+    EXPECT_EQ(JsonParseErrorCode(simdjson::T_ATOM_ERROR),
+              ErrorCode::JsonKeyInvalid);
+    EXPECT_EQ(JsonParseErrorCode(simdjson::UTF8_ERROR),
+              ErrorCode::JsonKeyInvalid);
+
+    EXPECT_EQ(JsonParseErrorCode(simdjson::MEMALLOC),
+              ErrorCode::UnexpectedError);
+    EXPECT_EQ(JsonParseErrorCode(simdjson::IO_ERROR),
+              ErrorCode::UnexpectedError);
+    EXPECT_EQ(JsonParseErrorCode(simdjson::UNINITIALIZED),
+              ErrorCode::UnexpectedError);
+    EXPECT_EQ(JsonParseErrorCode(simdjson::UNEXPECTED_ERROR),
+              ErrorCode::UnexpectedError);
+}
+
 TEST_F(BsonBuilderTest, AppendToDomTest) {
     BsonBuilder builder;
     DomNode root(DomNode::Type::DOCUMENT);
