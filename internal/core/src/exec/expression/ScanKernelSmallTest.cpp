@@ -17,9 +17,13 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <ostream>
+#include <set>
 #include <string>
+#include <string_view>
+#include <type_traits>
 #include <vector>
 
 #include "common/Json.h"
@@ -27,6 +31,7 @@
 #include "common/ValidityView.h"
 #include "exec/expression/ExistsExpr.h"
 #include "exec/expression/Expr.h"
+#include "exec/expression/MembershipFilterExpr.h"
 #include "exec/expression/TimestamptzArithCompareExpr.h"
 #include "pb/plan.pb.h"
 #include "simdjson/padded_string.h"
@@ -215,6 +220,86 @@ TEST(ScanKernelSmallTest, TimestamptzUnknownArithComparesDirectly) {
         16};
     EXPECT_EQ(RunKernel(kernel, std::vector<int64_t>{15, 16}, nullptr, nullptr),
               (std::vector<Tri>{kF, kT}));
+}
+
+// -------------------------------------------------------------- Membership
+
+struct FakeProbe {
+    std::set<int64_t> ints;
+    std::set<std::string, std::less<>> strings;
+
+    template <typename V>
+    bool
+    operator()(const V& v) const {
+        if constexpr (std::is_same_v<V, std::string> ||
+                      std::is_same_v<V, std::string_view>) {
+            return strings.count(std::string_view(v)) != 0;
+        } else {
+            return ints.count(static_cast<int64_t>(v)) != 0;
+        }
+    }
+
+    bool
+    TestBytesValue(const void* data, size_t len) const {
+        return strings.count(
+                   std::string_view(static_cast<const char*>(data), len)) != 0;
+    }
+
+    bool
+    TestInt64Value(int64_t v) const {
+        return ints.count(v) != 0;
+    }
+};
+
+TEST(ScanKernelSmallTest, MembershipScalarNullAndPrunedRows) {
+    const FakeProbe probe{{7, -1}, {}};
+    const MembershipScalarKernel<int64_t, FakeProbe> kernel{&probe};
+
+    // Row 2: NULL member. Row 3: pruned NULL member.
+    const std::vector<int64_t> data = {7, 8, 7, 7, -1};
+    const bool valid[] = {true, true, false, false, true};
+    TargetBitmap candidates(5, true);
+    candidates[3] = false;
+
+    const auto raw = RunKernel(kernel, data, valid, &candidates);
+    EXPECT_EQ(raw, (std::vector<Tri>{kT, kF, kF, kF, kT}));
+    // Pruned NULL stays (false, valid): the pinned
+    // ScalarBitmapInputLeavesExcludedNullCandidatesUntouched contract.
+    EXPECT_EQ(FoldLikeScan(raw, valid, &candidates),
+              (std::vector<Tri>{kT, kF, kU, kF, kT}));
+}
+
+TEST(ScanKernelSmallTest, MembershipScalarStringView) {
+    const FakeProbe probe{{}, {"x"}};
+    const MembershipScalarKernel<std::string_view, FakeProbe> kernel{&probe};
+    const std::vector<std::string_view> data = {"x", "y"};
+    EXPECT_EQ(RunKernel(kernel, data, nullptr, nullptr),
+              (std::vector<Tri>{kT, kF}));
+}
+
+TEST(ScanKernelSmallTest, MembershipJsonTypedProbe) {
+    const FakeProbe probe{{5}, {"x"}};
+    const MembershipJsonKernel<FakeProbe> kernel{
+        &probe, milvus::Json::pointer({"uid"})};
+
+    const auto rows = MakeJsonRows({
+        R"({"uid": "x"})",   // 0 string member
+        R"({"uid": 5})",     // 1 int64 member
+        R"({"uid": 5.5})",   // 2 other number: FALSE, known
+        R"({"uid": true})",  // 3 bool: UNKNOWN
+        R"({"other": 1})",   // 4 missing key: UNKNOWN
+        R"({"uid": null})",  // 5 JSON null: UNKNOWN
+        R"({"uid": 5})",     // 6 whole-row NULL
+        R"({"uid": 5})",     // 7 pruned
+    });
+    const bool valid[] = {true, true, true, true, true, true, false, true};
+    TargetBitmap candidates(8, true);
+    candidates[7] = false;
+
+    const auto raw = RunKernel(kernel, rows, valid, &candidates);
+    EXPECT_EQ(raw, (std::vector<Tri>{kT, kT, kF, kU, kU, kU, kF, kF}));
+    EXPECT_EQ(FoldLikeScan(raw, valid, &candidates),
+              (std::vector<Tri>{kT, kT, kF, kU, kU, kU, kU, kF}));
 }
 
 }  // namespace

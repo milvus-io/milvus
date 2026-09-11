@@ -18,25 +18,24 @@
 
 // Unified execution chain for the membership-filter expression family.
 //
-// PhyMembershipFilterExpr<LogicalExpr, ProbePolicy> carries ALL control flow —
-// exec-path selection, batching, the raw-data and index-fallback skeletons,
-// cacheability — while each kind's data plane ("approximate vs exact") stays in
-// its probe policy: SplitBlockBloomFilterView for MBF1 blobs,
+// PhyMembershipFilterExpr<LogicalExpr, ProbePolicy> owns exec-path selection,
+// the FieldNotLoaded guards and cacheability, and evaluates rows through
+// SegmentExpr::EvalKernel with the membership kernels below. Each kind's data
+// plane ("approximate vs exact") stays in its probe policy:
+// SplitBlockBloomFilterView for MBF1 blobs,
 // RoaringMembership for MRB1 bitmaps. The two aliases below keep the historical
 // class names, so the factory and logs are unchanged.
 //
 // Semantics pinned here (do not fork per kind without a design-doc reason):
-//   * Upstream-excluded candidates (bitmap_input) are checked FIRST on the
-//     raw-data path and keep their initial (false, valid) even when the
-//     field value is NULL, mirroring the framework's index-path helpers —
-//     so raw and index-only load states return bit-identical columns. This
-//     is the contract master pins for bloom and roaring alike (see
+//   * Upstream-excluded candidates (bitmap_input) keep (false, valid) even
+//     when the field value is NULL, on the raw-data and index-only paths
+//     alike (EvalKernel finalizes non-candidate rows). This is the contract
+//     master pins for bloom and roaring alike (see
 //     BitmapInputPrunesByCandidatePosition,
 //     ScalarBitmapInputLeavesExcludedNullCandidatesUntouched). A probed
 //     NULL row never matches, under either polarity: res = valid = false.
-//   * The index-only fallback routes through the WithMask reverse-lookup
-//     helpers; an empty mask degenerates to the unmasked behavior, so one
-//     code path serves both.
+//   * The index-only fallback is EvalKernel's reverse-lookup branch;
+//     excluded candidates are never reverse-looked-up.
 //   * JSON probing exists only where the policy supports it (bloom kind).
 
 #include <cstddef>
@@ -49,6 +48,7 @@
 #include <vector>
 
 #include "common/EasyAssert.h"
+#include "common/Json.h"
 #include "common/RoaringMembership.h"
 #include "common/Types.h"
 #include "common/Vector.h"
@@ -67,7 +67,7 @@ struct BloomMembershipProbe {
     static constexpr const char* kKindName = "membership_match(type=bloom)";
     static constexpr bool kSupportsVarChar = true;
     // JSON probes the value at the column's nested path per row, hashing by
-    // the value's runtime type (strictly typed; see ExecVisitorImplJson).
+    // the value's runtime type (strictly typed; see MembershipJsonKernel).
     static constexpr bool kSupportsJson = true;
 
     SplitBlockBloomFilterView filter;
@@ -122,6 +122,77 @@ struct RoaringMembershipProbe {
         // two's-complement key: INT8(-1) must probe 0xffffffffffffffff,
         // which is where the client's builder put it.
         return membership->Contains(static_cast<int64_t>(v));
+    }
+};
+
+// Probes typed scalar values (integers or strings) against a membership policy.
+template <typename T, typename Probe>
+struct MembershipScalarKernel {
+    const Probe* probe;
+
+    template <FilterType filter_type>
+    void
+    Eval(const CandidateBatch<T>& b, TriStateOut out) const {
+        for (size_t i = 0; i < b.size; ++i) {
+            if (!b.IsCandidate(i)) {
+                continue;
+            }
+            if (b.validity && !b.validity[i]) {
+                continue;
+            }
+            if ((*probe)(b.data[i])) {
+                out.SetTrue(i);
+            }
+        }
+    }
+};
+
+// Probes the JSON value at `pointer`. STRICTLY TYPED: the hash domain has
+// exactly two kinds, int64 (8-byte LE) and raw UTF-8 bytes, and a JSON value
+// is hashed only when it is stored AS that type:
+//   - string -> raw UTF-8 bytes (same as a VARCHAR probe)
+//   - int64  -> 8-byte-LE int64 hash
+//   - double / uint64-beyond-int64 -> never a member: FALSE and known, so
+//     `not ...` returns the row. Exact `in` unifies 5.0 == 5 for JSON; this
+//     probe has no numeric canonicalization rule.
+//   - missing key / JSON null / bool / object / array -> UNKNOWN.
+// The blob's declared value domains gate the probes themselves, so a JSON
+// string cannot alias an int64-only filter.
+template <typename Probe>
+struct MembershipJsonKernel {
+    const Probe* probe;
+    std::string pointer;
+
+    template <FilterType filter_type>
+    void
+    Eval(const CandidateBatch<milvus::Json>& b, TriStateOut out) const {
+        for (size_t i = 0; i < b.size; ++i) {
+            if (!b.IsCandidate(i)) {
+                continue;
+            }
+            if (b.validity && !b.validity[i]) {
+                continue;
+            }
+            const auto value = b.data[i].at_string_or_int64(pointer);
+            switch (value.kind) {
+                case JsonStringOrInt64::Kind::String:
+                    if (probe->TestBytesValue(value.string_value.data(),
+                                              value.string_value.size())) {
+                        out.SetTrue(i);
+                    }
+                    break;
+                case JsonStringOrInt64::Kind::Int64:
+                    if (probe->TestInt64Value(value.int64_value)) {
+                        out.SetTrue(i);
+                    }
+                    break;
+                case JsonStringOrInt64::Kind::OtherNumber:
+                    break;
+                case JsonStringOrInt64::Kind::NoProbeValue:
+                    out.SetUnknown(i);
+                    break;
+            }
+        }
     }
 };
 
@@ -254,13 +325,6 @@ class PhyMembershipFilterExpr : public SegmentExpr {
     template <typename T>
     VectorPtr
     ExecVisitorImpl(EvalCtx& context);
-
-    // Index-only path: recover each value from the scalar index via
-    // Reverse_Lookup and probe it exactly as the raw-data path would,
-    // reusing the framework's mask-aware reverse-lookup helper.
-    template <typename T>
-    VectorPtr
-    ExecVisitorImplForIndex(EvalCtx& context);
 
     // Probe a JSON field at the column's nested path, hashing each value by
     // its runtime type. Data-path only: no scalar index offers a per-row
