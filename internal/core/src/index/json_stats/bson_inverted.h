@@ -25,6 +25,7 @@
 #include "index/json_stats/utils.h"
 #include "common/EasyAssert.h"
 #include "index/IndexStats.h"
+#include "common/OpContext.h"
 
 namespace milvus::index {
 
@@ -62,6 +63,14 @@ class BsonInvertedIndex {
               milvus::proto::common::LoadPriority priority,
               bool load_in_mmap);
 
+    // Selects the global async-load path; ctx may be null. The caller waits
+    // until reads, local writes and Tantivy opening drain, including on cancel.
+    void
+    LoadIndex(const std::vector<std::string>& index_files,
+              milvus::proto::common::LoadPriority priority,
+              bool load_in_mmap,
+              milvus::OpContext* ctx);
+
     IndexStatsPtr
     UploadIndex();
 
@@ -80,6 +89,11 @@ class BsonInvertedIndex {
     }
 
  private:
+    // Opens fully staged files on the calling thread, without owning transport
+    // admission. File cleanup remains the responsibility of the load path.
+    void
+    OpenIndex(bool load_in_mmap);
+
     std::string path_;
     bool is_load_;
     bool load_in_mmap_{false};
