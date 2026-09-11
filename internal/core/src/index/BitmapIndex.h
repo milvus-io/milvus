@@ -30,6 +30,9 @@
 namespace milvus {
 namespace index {
 
+// Frozen conversion keeps one batch plus at most one large bitmap.
+inline constexpr size_t BITMAP_FROZEN_BATCH_BYTES = 64 * 1024;
+
 enum class BitmapIndexBuildMode {
     ROARING,
     BITSET,
@@ -42,6 +45,7 @@ enum class BitmapIndexBuildMode {
 template <typename T>
 class BitmapIndex : public ScalarIndex<T> {
  public:
+    using ScalarIndex<T>::Load;
     explicit BitmapIndex(
         const storage::FileManagerContext& file_manager_context =
             storage::FileManagerContext(),
@@ -215,6 +219,22 @@ class BitmapIndex : public ScalarIndex<T> {
     LoadEntries(storage::IndexEntryReader& reader,
                 const Config& config) override;
 
+    storage::IndexLoadPlan
+    PlanLoad(const storage::IndexEntryCatalog& catalog,
+             const Config& config) override;
+
+    folly::coro::Task<void>
+    FinalizeLoad(storage::IndexLoadArtifact& artifact,
+                 const Config& config) override;
+
+ protected:
+    folly::coro::Task<void>
+    FinishLegacyLoadAsync(BinarySet binary,
+                          const Config& config,
+                          folly::CancellationToken token) override;
+
+ public:
+ public:
     bool
     SupportPatternMatch() const override {
         return std::is_same_v<T, std::string>;
@@ -429,6 +449,38 @@ class BitmapIndex : public ScalarIndex<T> {
     // Rebuilding validity from postings is lossy for ARRAY fields: empty
     // arrays have no element postings, so they cannot be distinguished from
     // null arrays during reconstruction.
+    using FrozenOffsets = std::map<T, std::pair<size_t, size_t>>;
+
+    struct FrozenIndexData {
+        const uint8_t* cursor;
+        size_t remaining;
+        size_t file_size{0};
+        FrozenOffsets offsets;
+        std::vector<uint8_t> buffer;
+    };
+
+    // Decode and freeze a bounded batch on the caller; no file operations.
+    void
+    BuildFrozenBatch(FrozenIndexData& data,
+                     bool rebuild_validity_from_postings);
+    // Open the prepared frozen file and restore query views, without deleting it.
+    void
+    MapFrozenIndex(const std::string& path,
+                   size_t file_size,
+                   const FrozenOffsets& offsets);
+    // Await writes only, then map on the calling async worker. The returned
+    // file guard must be retained on success or destroyed on LocalFileIOPool.
+    folly::coro::Task<std::unique_ptr<MmapFileRAII>>
+    MMapIndexDataAsync(const std::string& path,
+                       const uint8_t* data,
+                       size_t index_length,
+                       proto::common::LoadPriority priority,
+                       bool rebuild_validity_from_postings);
+    std::pair<size_t, bool>
+    LoadLegacyMetadata(const BinarySet& binary);
+    void
+    FinishLegacyLoad(const Config& config);
+
     void
     MMapIndexData(const std::string& filepath,
                   const uint8_t* data,

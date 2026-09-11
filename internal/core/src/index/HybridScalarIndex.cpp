@@ -32,6 +32,7 @@
 #include "glog/logging.h"
 #include "index/BitmapIndex.h"
 #include "index/HybridScalarIndex.h"
+#include "storage/EntryStreamUtils.h"
 #include "index/InvertedIndexTantivy.h"
 #include "index/Meta.h"
 #include "index/ScalarIndex.h"
@@ -87,7 +88,59 @@ ParsePhysicalTypeFromPackedFileName(const std::string& filename) {
     return std::nullopt;
 }
 
+template <typename Metadata>
+ScalarIndexType
+ResolvePackedHybridType(const Metadata& reader, const Config& config) {
+    ScalarIndexType type = ScalarIndexType::NONE;
+    if (reader.HasMeta(INDEX_TYPE)) {
+        type = static_cast<ScalarIndexType>(
+            reader.template GetMeta<uint8_t>(INDEX_TYPE));
+    } else {
+        // Legacy 3.0.0 bug (#52359/#52360): struct-array sub-field HYBRID
+        // indexes were built as a standalone STLSORT (or, hypothetically, other
+        // physical) file whose meta lacks the hybrid index_type key. Prefer the
+        // packed filename ("milvus_packed_<type>_index.v3") to recover the
+        // physical type; fall back to the file meta keys for robustness.
+        type = ScalarIndexType::NONE;
+        auto index_files =
+            GetValueFromConfig<std::vector<std::string>>(config, INDEX_FILES);
+        if (index_files.has_value() && !index_files.value().empty()) {
+            auto path = index_files.value()[0];
+            auto filename = path.substr(path.find_last_of('/') + 1);
+            if (auto physical_type =
+                    ParsePhysicalTypeFromPackedFileName(filename)) {
+                type = *physical_type;
+            }
+        }
+        if (type == ScalarIndexType::NONE) {
+            if (reader.HasMeta("version") || reader.HasMeta("index_length")) {
+                type = ScalarIndexType::STLSORT;
+            } else if (reader.HasMeta("file_names")) {
+                type = ScalarIndexType::INVERTED;
+            } else if (reader.HasMeta(BITMAP_INDEX_LENGTH)) {
+                type = ScalarIndexType::BITMAP;
+            } else {
+                ThrowInfo(UnexpectedError,
+                          "hybrid index file has neither index_type meta, a "
+                          "recognizable packed filename, nor a recognizable "
+                          "physical index meta");
+            }
+        }
+        LOG_WARN(
+            "hybrid index missing index_type meta, inferred physical type: {}",
+            ToString(type));
+    }
+
+    return type;
+}
+
 }  // namespace
+
+ScalarIndexType
+ResolvePackedHybridIndexType(const storage::IndexEntryCatalog& catalog,
+                             const Config& config) {
+    return ResolvePackedHybridType(catalog, config);
+}
 
 template <typename T>
 HybridScalarIndex<T>::HybridScalarIndex(
@@ -469,6 +522,34 @@ HybridScalarIndex<T>::Load(milvus::tracer::TraceContext ctx,
 }
 
 template <typename T>
+folly::coro::Task<void>
+HybridScalarIndex<T>::LoadLegacyAsync(const Config& config,
+                                      folly::CancellationToken token) {
+    token = folly::cancellation_token_merge(
+        token, co_await folly::coro::co_current_cancellation_token);
+    storage::ThrowIfCancelled(token, "HybridScalarIndex::LoadLegacy");
+    const auto files = config.at(INDEX_FILES).get<std::vector<std::string>>();
+    const auto type_file = GetRemoteIndexTypeFile(files);
+    const auto priority = GetValueFromConfig<proto::common::LoadPriority>(
+                              config, milvus::LOAD_PRIORITY)
+                              .value_or(proto::common::LoadPriority::HIGH);
+    const std::vector<std::string> type_files{type_file};
+    auto binary = co_await this->file_manager_->LoadIndexBinarySetAsync(
+        type_files, priority, token);
+    auto type = binary.GetByName(INDEX_TYPE);
+    if (type == nullptr || type->size != sizeof(uint8_t)) {
+        ThrowInfo(DataFormatBroken, "Invalid legacy Hybrid index_type");
+    }
+    DeserializeIndexType(binary);
+    // Await the child coroutine on the same executor, never its blocking Load.
+    auto index = GetInternalIndex();
+    co_await index->LoadLegacyAsync(config, token);
+    storage::ThrowIfCancelled(token, "HybridScalarIndex::FinalizeLegacy");
+    is_built_ = true;
+    ComputeByteSize();
+}
+
+template <typename T>
 void
 HybridScalarIndex<T>::WriteEntries(storage::IndexEntryWriter* writer) {
     AssertInfo(is_built_, "index has not been built yet");
@@ -487,43 +568,7 @@ template <typename T>
 void
 HybridScalarIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
                                   const Config& config) {
-    if (reader.HasMeta(INDEX_TYPE)) {
-        internal_index_type_ =
-            static_cast<ScalarIndexType>(reader.GetMeta<uint8_t>(INDEX_TYPE));
-    } else {
-        // Legacy 3.0.0 bug (#52359/#52360): struct-array sub-field HYBRID
-        // indexes were built as a standalone STLSORT (or, hypothetically, other
-        // physical) file whose meta lacks the hybrid index_type key. Prefer the
-        // packed filename ("milvus_packed_<type>_index.v3") to recover the
-        // physical type; fall back to the file meta keys for robustness.
-        internal_index_type_ = ScalarIndexType::NONE;
-        auto index_files =
-            GetValueFromConfig<std::vector<std::string>>(config, INDEX_FILES);
-        if (index_files.has_value() && !index_files.value().empty()) {
-            auto path = index_files.value()[0];
-            auto filename = path.substr(path.find_last_of('/') + 1);
-            if (auto type = ParsePhysicalTypeFromPackedFileName(filename)) {
-                internal_index_type_ = *type;
-            }
-        }
-        if (internal_index_type_ == ScalarIndexType::NONE) {
-            if (reader.HasMeta("version") || reader.HasMeta("index_length")) {
-                internal_index_type_ = ScalarIndexType::STLSORT;
-            } else if (reader.HasMeta("file_names")) {
-                internal_index_type_ = ScalarIndexType::INVERTED;
-            } else if (reader.HasMeta(BITMAP_INDEX_LENGTH)) {
-                internal_index_type_ = ScalarIndexType::BITMAP;
-            } else {
-                ThrowInfo(UnexpectedError,
-                          "hybrid index file has neither index_type meta, a "
-                          "recognizable packed filename, nor a recognizable "
-                          "physical index meta");
-            }
-        }
-        LOG_WARN(
-            "hybrid index missing index_type meta, inferred physical type: {}",
-            ToString(internal_index_type_));
-    }
+    internal_index_type_ = ResolvePackedHybridType(reader, config);
 
     LOG_INFO("LoadEntries hybrid index with internal index type: {}",
              ToString(internal_index_type_));
@@ -533,6 +578,30 @@ HybridScalarIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
 
     is_built_ = true;
     ComputeByteSize();
+}
+
+template <typename T>
+storage::IndexLoadPlan
+HybridScalarIndex<T>::PlanLoad(const storage::IndexEntryCatalog& catalog,
+                               const Config& config) {
+    internal_index_type_ = ResolvePackedHybridIndexType(catalog, config);
+    LOG_INFO("PlanLoad hybrid index with internal index type: {}",
+             ToString(internal_index_type_));
+    auto index = GetInternalIndex();
+    return index->PlanLoad(catalog, config);
+}
+
+template <typename T>
+folly::coro::Task<void>
+HybridScalarIndex<T>::FinalizeLoad(storage::IndexLoadArtifact& artifact,
+                                   const Config& config) {
+    AssertInfo(internal_index_ != nullptr,
+               "Hybrid internal index is unavailable during FinalizeLoad");
+    co_await internal_index_->FinalizeLoad(artifact, config);
+    is_built_ = true;
+    ComputeByteSize();
+    LOG_INFO("FinalizeLoad hybrid index with internal index type: {}",
+             ToString(internal_index_type_));
 }
 
 template class HybridScalarIndex<bool>;

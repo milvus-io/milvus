@@ -28,25 +28,16 @@
 #include "fmt/core.h"
 #include "glog/logging.h"
 #include "index/TextMatchIndex.h"
+#include "index/IndexFactory.h"
 #include "log/Log.h"
 #include "segcore/CacheMetricAttribution.h"
 #include "segcore/Utils.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/LegacyIndexLoader.h"
+#include "storage/AsyncLoadExecutor.h"
+#include <folly/coro/BlockingWait.h>
 
 namespace milvus::segcore::storagev1translator {
-
-namespace {
-
-int64_t
-EstimateValidityBitmapBytes(int64_t num_rows) {
-    constexpr int64_t kWordBytes = sizeof(uint64_t);
-    constexpr int64_t kBitsPerWord = kWordBytes * 8;
-    if (num_rows <= 0) {
-        return 0;
-    }
-    return ((num_rows - 1) / kBitsPerWord + 1) * kWordBytes;
-}
-
-}  // namespace
 
 TextMatchIndexTranslator::TextMatchIndexTranslator(
     TextMatchIndexLoadInfo load_info,
@@ -68,6 +59,46 @@ TextMatchIndexTranslator::TextMatchIndexTranslator(
             /* support_eviction */ true,
             std::nullopt,
             milvus::segcore::MetricAttributionFromShard(load_info_.shard)) {
+    auto files = config_.at(index::INDEX_FILES).get<std::vector<std::string>>();
+    const bool packed = files.size() == 1 && files.front().ends_with(".v3");
+    if (!packed) {
+        const auto base_path =
+            index::GetValueFromConfig<std::string>(config_, STATS_BASE_PATH_KEY)
+                .value_or("");
+        AssertInfo(!base_path.empty(),
+                   "stats_base_path is required for loading text index");
+        for (auto& file : files) {
+            file = base_path + "/" + file;
+        }
+        auto inspect = [&] {
+            return storage::InspectLegacyIndexFilesAsync(
+                files,
+                file_manager_context_.chunkManagerPtr,
+                file_manager_context_.fs,
+                proto::common::LoadPriority::HIGH);
+        };
+        file_manager_context_.legacy_index_files =
+            storagev2translator::StorageV2AsyncLoadEnabled()
+                ? folly::coro::blockingWait(
+                      inspect().scheduleOn(storage::ResolveAsyncLoadExecutor(
+                          {}, proto::common::LoadPriority::HIGH)))
+                : folly::coro::blockingWait(inspect());
+    }
+    // TextMatch persists Tantivy files and the same null-offset sidecar.
+    // Keep one estimate for both routes so cached reloads can switch modes.
+    auto resources =
+        index::IndexFactory::GetInstance().ScalarIndexFileLoadResource(
+            DataType::VARCHAR,
+            load_info_.index_size,
+            {{index::INDEX_TYPE, index::INVERTED_INDEX_TYPE},
+             {index::SCALAR_INDEX_ENGINE_VERSION, packed ? "3" : "2"}},
+            load_info_.enable_mmap,
+            load_info_.num_rows,
+            files,
+            file_manager_context_,
+            /*is_index_file=*/false);
+    load_resource_request_ = resources.request;
+    meta_.loading_overhead_config = std::move(resources.overhead);
 }
 
 size_t
@@ -84,18 +115,12 @@ std::pair<milvus::cachinglayer::ResourceUsage,
           milvus::cachinglayer::ResourceUsage>
 TextMatchIndexTranslator::estimated_byte_size_of_cell(
     milvus::cachinglayer::cid_t) const {
-    // ignore the cid checking, because there is only one cell
-    auto bitmap_bytes = EstimateValidityBitmapBytes(load_info_.num_rows);
-    if (load_info_.enable_mmap) {
-        return {{bitmap_bytes, load_info_.index_size},
-                {load_info_.index_size, 0}};
-    } else {
-        // The reason the maximum disk usage is not zero is that the text match index
-        // is first written to the disk, then loaded into memory. Only after that are
-        // the disk files deleted.
-        return {{load_info_.index_size + bitmap_bytes, 0},
-                {0, load_info_.index_size}};
-    }
+    return {{load_resource_request_.final_memory_cost,
+             load_resource_request_.final_disk_cost},
+            {load_resource_request_.max_memory_cost -
+                 load_resource_request_.final_memory_cost,
+             load_resource_request_.max_disk_cost -
+                 load_resource_request_.final_disk_cost}};
 }
 
 int64_t
@@ -130,10 +155,13 @@ TextMatchIndexTranslator::get_cells(
                 // no specific metric defined for text match index load yet
             },
             milvus::ScopedTimer::LogLevel::Info);
-        index->Load(config_);
+        index->Load(config_, ctx);
         index->RegisterAnalyzer("milvus_tokenizer",
                                 load_info_.analyzer_params.c_str());
     }
+
+    CheckCancellation(
+        ctx, load_info_.segment_id, "TextMatchIndexTranslator::get_cells()");
 
     LOG_INFO("load text match index success for field:{} of segment:{}",
              load_info_.field_id,

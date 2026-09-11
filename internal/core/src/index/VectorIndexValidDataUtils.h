@@ -37,6 +37,9 @@
 
 namespace milvus::index {
 
+inline constexpr const char* EMPTY_EMB_LIST_OFFSET_KEY =
+    "empty_emb_list_offsets";
+
 inline bool
 IsValidDataBinary(const std::string& name) {
     return name == VALID_DATA_COUNT_KEY || name == VALID_DATA_KEY;
@@ -75,11 +78,25 @@ FilterValidDataDiskFileSlices(const std::vector<std::string>& files) {
     return valid_data_files;
 }
 
+// Stream-capable backends still need Milvus-owned nullable/empty-list metadata.
 inline std::vector<std::string>
 GetCacheFilesForDiskIndexLoad(const std::vector<std::string>& index_files,
                               bool load_index_with_stream) {
-    return load_index_with_stream ? FilterValidDataDiskFileSlices(index_files)
-                                  : index_files;
+    if (!load_index_with_stream) {
+        return index_files;
+    }
+    auto metadata_files = FilterValidDataDiskFileSlices(index_files);
+    const auto empty_prefix = std::string(EMPTY_EMB_LIST_OFFSET_KEY) + "_";
+    for (const auto& file : index_files) {
+        const auto name = GetIndexFileName(file);
+        if (name.starts_with(empty_prefix) &&
+            name.size() > empty_prefix.size() &&
+            name.find_first_not_of("0123456789", empty_prefix.size()) ==
+                std::string::npos) {
+            metadata_files.push_back(file);
+        }
+    }
+    return metadata_files;
 }
 
 inline bool

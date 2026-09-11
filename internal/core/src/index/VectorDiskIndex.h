@@ -68,6 +68,13 @@ class VectorDiskAnnIndex : public VectorIndex {
     void
     Load(milvus::tracer::TraceContext ctx, const Config& config = {}) override;
 
+    // Admitted reads and synchronous Knowhere finalization use the shared async
+    // executor. File staging and cleanup run on LocalFileIOPool.
+    void
+    Load(milvus::tracer::TraceContext ctx,
+         const Config& config,
+         milvus::OpContext* op_ctx) override;
+
     void
     BuildWithDataset(const DatasetPtr& dataset,
                      const Config& config = {}) override;
@@ -134,6 +141,11 @@ class VectorDiskAnnIndex : public VectorIndex {
     }
 
  private:
+    // Reuses the existing disk/metadata-only finalizer after staging has closed
+    // its files. Knowhere retains control of internal deserialization parallelism.
+    void
+    FinalizeDiskLoad(milvus::tracer::TraceContext ctx, Config load_config);
+
     bool
     IsEmptyEmbListIndex() const {
         return elem_type_ != DataType::NONE && !empty_emb_list_offsets_.empty();

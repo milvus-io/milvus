@@ -14,10 +14,15 @@
 #include <boost/uuid/uuid_io.hpp>
 #include <memory>
 #include <shared_mutex>
+#include <folly/coro/BlockingWait.h>
 
 #include "index/TextMatchIndex.h"
+#include "common/OpContext.h"
 #include "index/InvertedIndexUtil.h"
 #include "index/Utils.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/AsyncLoadExecutor.h"
+#include "storage/EntryStreamUtils.h"
 #include "storage/ThreadPools.h"
 
 namespace milvus::index {
@@ -183,7 +188,10 @@ TextMatchIndex::UploadUnified(const Config& config) {
 }
 
 void
-TextMatchIndex::Load(const Config& config) {
+TextMatchIndex::Load(const Config& config, milvus::OpContext* op_ctx) {
+    const auto token =
+        op_ctx ? op_ctx->cancellation_token : folly::CancellationToken{};
+    storage::ThrowIfCancelled(token, "TextMatchIndex::Load");
     auto index_files =
         GetValueFromConfig<std::vector<std::string>>(config, INDEX_FILES);
     AssertInfo(index_files.has_value(),
@@ -191,15 +199,9 @@ TextMatchIndex::Load(const Config& config) {
 
     // Detect V3 format: single file ending with ".v3"
     auto& files_value = index_files.value();
-    if (files_value.size() == 1) {
-        const auto& file = files_value[0];
-        auto filename = file.substr(file.find_last_of('/') + 1);
-        if (filename.size() > 3 &&
-            filename.substr(filename.size() - 3) == ".v3") {
-            LOG_INFO("TextMatchIndex::Load V3 format detected: {}", file);
-            InvertedIndexTantivy<std::string>::LoadUnified(config);
-            return;
-        }
+    if (files_value.size() == 1 && files_value.front().ends_with(".v3")) {
+        InvertedIndexTantivy<std::string>::LoadUnified(config, op_ctx);
+        return;
     }
 
     auto load_priority =
@@ -217,6 +219,24 @@ TextMatchIndex::Load(const Config& config) {
                "stats_base_path is required for loading text index");
     for (auto& f : files_value) {
         f = base_path + "/" + f;
+    }
+
+    if (segcore::storagev2translator::StorageV2AsyncLoadEnabled()) {
+        auto load_config = config;
+        load_config[INDEX_FILES] = std::move(files_value);
+        try {
+            // The inherited Tantivy loader selects the text directory via
+            // is_index_file_. Opening the engine stays on the async worker.
+            folly::coro::blockingWait(
+                LoadLegacyAsync(load_config, token)
+                    .scheduleOn(
+                        storage::ResolveAsyncLoadExecutor({}, load_priority)));
+        } catch (const std::bad_alloc& error) {
+            throw SegcoreError(MemAllocateFailed, error.what());
+        } catch (const folly::OperationCancelled& error) {
+            throw SegcoreError(FollyCancel, error.what());
+        }
+        return;
     }
 
     // Reuse the base metadata loader so both the legacy single null-offset

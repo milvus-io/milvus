@@ -29,10 +29,16 @@
 #include "index/Index.h"
 #include "index/IndexInfo.h"
 #include "index/ScalarIndex.h"
+#include "cachinglayer/LoadingOverhead.h"
 #include "storage/FileManager.h"
 #include "storage/IndexEntryReader.h"
 
 namespace milvus::index {
+
+struct ScalarIndexLoadResources {
+    LoadResourceRequest request;
+    std::optional<cachinglayer::LoadingOverheadConfig> overhead;
+};
 
 class IndexFactory {
  public:
@@ -109,6 +115,20 @@ class IndexFactory {
         const storage::FileManagerContext& file_manager_context,
         std::optional<storage::EntryStreamLoadInfo>* stream_load_info = nullptr,
         bool* use_shared_memory_overhead_group = nullptr);
+
+    // Inspects persisted metadata and reserves for either rollout mode.
+    // The load switch and executor sizes can change before a cache reload.
+    // Packed TextMatch files use the text-log prefix (is_index_file=false).
+    ScalarIndexLoadResources
+    ScalarIndexFileLoadResource(
+        DataType field_type,
+        uint64_t index_size,
+        const std::map<std::string, std::string>& index_params,
+        bool mmap_enable,
+        int64_t num_rows,
+        const std::vector<std::string>& index_files,
+        const storage::FileManagerContext& context,
+        bool is_index_file = true);
 
     IndexBasePtr
     CreateIndex(const CreateIndexInfo& create_index_info,
@@ -190,6 +210,28 @@ class IndexFactory {
     // CreateIndex(DataType dtype, const IndexType& index_type);
  private:
     FRIEND_TEST(StringIndexMarisaTest, Reverse);
+
+    // File-aware legacy estimates also cover mode updates before cache reload.
+    LoadResourceRequest
+    ScalarIndexLegacyLoadResource(
+        DataType field_type,
+        uint64_t index_size,
+        const std::map<std::string, std::string>& index_params,
+        bool mmap_enable,
+        int64_t num_rows,
+        const std::vector<std::string>& index_files,
+        const storage::FileManagerContext& context,
+        bool use_async_load);
+
+    // Shared representation costs, parameterized by the reader's transient bytes.
+    LoadResourceRequest
+    ScalarIndexLoadResourceWithOverhead(
+        DataType field_type,
+        uint64_t index_size_in_bytes,
+        const std::map<std::string, std::string>& index_params,
+        bool mmap_enable,
+        int64_t num_rows,
+        uint64_t stream_memory_overhead);
 
     LoadResourceRequest
     ScalarIndexLoadResourceImpl(

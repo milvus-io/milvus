@@ -21,6 +21,8 @@ class SegmentExpr;
 
 namespace milvus::index {
 
+extern const std::string NGRAM_AVG_ROW_SIZE_FILE_NAME;
+
 // Extract runs of literal bytes from a regex pattern that are GUARANTEED to
 // appear in any matching string.  Used by ngram index for coarse filtering.
 // Returns empty vector if no safe literals can be extracted (e.g. alternation,
@@ -30,6 +32,7 @@ extract_literals_from_regex(const std::string& pattern);
 
 class NgramInvertedIndex : public InvertedIndexTantivy<std::string> {
  public:
+    using InvertedIndexTantivy<std::string>::Load;
     // for string/varchar type
     explicit NgramInvertedIndex(const storage::FileManagerContext& ctx,
                                 const NgramParams& params);
@@ -51,6 +54,9 @@ class NgramInvertedIndex : public InvertedIndexTantivy<std::string> {
     void
     LoadIndexMetas(const std::vector<std::string>& index_files,
                    const Config& config) override;
+
+    void
+    LoadIndexMetas(const BinarySet& metadata, const Config& config) override;
 
     void
     RetainTantivyIndexFiles(std::vector<std::string>& index_files) override;
@@ -117,6 +123,14 @@ class NgramInvertedIndex : public InvertedIndexTantivy<std::string> {
     void
     LoadEntries(storage::IndexEntryReader& reader,
                 const Config& config) override;
+
+    storage::IndexLoadPlan
+    PlanLoad(const storage::IndexEntryCatalog& catalog,
+             const Config& config) override;
+
+    folly::coro::Task<void>
+    FinalizeLoad(storage::IndexLoadArtifact& artifact,
+                 const Config& config) override;
 
  private:
     void

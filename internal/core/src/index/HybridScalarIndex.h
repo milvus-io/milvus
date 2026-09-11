@@ -37,6 +37,12 @@
 namespace milvus {
 namespace index {
 
+// Shares the persisted-type and legacy standalone-file compatibility rules
+// between async resource admission and actual hybrid loading.
+ScalarIndexType
+ResolvePackedHybridIndexType(const storage::IndexEntryCatalog& catalog,
+                             const Config& config);
+
 /*
 * @brief Implementation of hybrid index  
 * @details This index only for scalar type.
@@ -46,6 +52,7 @@ namespace index {
 template <typename T>
 class HybridScalarIndex : public ScalarIndex<T> {
  public:
+    using ScalarIndex<T>::Load;
     explicit HybridScalarIndex(
         uint32_t tantivy_index_version,
         const storage::FileManagerContext& file_manager_context =
@@ -65,6 +72,10 @@ class HybridScalarIndex : public ScalarIndex<T> {
 
     void
     Load(milvus::tracer::TraceContext ctx, const Config& config = {}) override;
+
+    folly::coro::Task<void>
+    LoadLegacyAsync(const Config& config,
+                    folly::CancellationToken token) override;
 
     int64_t
     Count() override {
@@ -196,6 +207,14 @@ class HybridScalarIndex : public ScalarIndex<T> {
     void
     LoadEntries(storage::IndexEntryReader& reader,
                 const Config& config) override;
+
+    storage::IndexLoadPlan
+    PlanLoad(const storage::IndexEntryCatalog& catalog,
+             const Config& config) override;
+
+    folly::coro::Task<void>
+    FinalizeLoad(storage::IndexLoadArtifact& artifact,
+                 const Config& config) override;
 
  protected:
     ScalarIndexType

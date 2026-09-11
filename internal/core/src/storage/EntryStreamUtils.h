@@ -40,6 +40,21 @@ constexpr size_t kFileStreamBufferMultiplier = 2;
 // and the returned plaintext buffer.
 constexpr size_t kEncryptedStreamBufferMultiplier = 3;
 
+// Stable request window shared by packed and legacy async index loads.
+inline constexpr size_t kMaxIndexLoadInflightBytes =
+    DEFAULT_FIELD_MAX_MEMORY_LIMIT;
+inline constexpr size_t kMaxIndexLoadInflightSlices =
+    DEFAULT_FIELD_MAX_MEMORY_LIMIT / DEFAULT_INDEX_FILE_SLICE_SIZE;
+
+// Includes the largest indivisible encrypted/encoded unit, even above the cap.
+inline size_t
+IndexLoadMaxTransientBytes(size_t max_unit_bytes) {
+    return std::max(max_unit_bytes,
+                    std::min(kMaxIndexLoadInflightBytes,
+                             SaturatingMultiply(max_unit_bytes,
+                                                kMaxIndexLoadInflightSlices)));
+}
+
 // Returns whether a positive slice size satisfies the stream alignment.
 [[nodiscard]] constexpr bool
 IsStreamSliceSizeAligned(size_t slice_size) noexcept {

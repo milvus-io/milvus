@@ -72,31 +72,26 @@ LoadOverheadController<Dimension>::CurrentPolicy() const {
                 static_cast<int64_t>(budget_bytes_));
         }
     }
-    return cachinglayer::LoadingOverheadPolicy::Executor(executor_workers_);
+    return SlotPolicy(admission_slots_);
 }
 
+// The existing multiplicative policy counts admitted runtime units here, not
+// CPU workers: suspended async reads keep their slot but release the worker.
 template <cachinglayer::LoadingOverheadDimension Dimension>
-bool
-LoadOverheadController<Dimension>::UsesExecutorPolicy() const {
-    if constexpr (Dimension ==
-                  cachinglayer::LoadingOverheadDimension::kMemory) {
-        return budget_bytes_ == 0;
+cachinglayer::LoadingOverheadPolicy
+LoadOverheadController<Dimension>::SlotPolicy(const size_t slots) {
+    if (slots == 0 ||
+        slots > static_cast<size_t>(std::numeric_limits<int64_t>::max())) {
+        return cachinglayer::LoadingOverheadPolicy::Passthrough();
     }
-    return true;
+    return cachinglayer::LoadingOverheadPolicy::Executor(
+        static_cast<int64_t>(slots));
 }
 
 template <cachinglayer::LoadingOverheadDimension Dimension>
 cachinglayer::LoadingOverheadGroupHandle
-LoadOverheadController<Dimension>::GetOrCreate(
-    int64_t initial_executor_workers) {
+LoadOverheadController<Dimension>::GetOrCreate() {
     std::lock_guard<std::mutex> lock(mutex_);
-    AssertInfo(initial_executor_workers >= 0,
-               "Load {} executor workers must be non-negative",
-               ResourceName<Dimension>());
-    if (!executor_workers_initialized_) {
-        executor_workers_ = initial_executor_workers;
-        executor_workers_initialized_ = true;
-    }
     if (group_handle_ == nullptr) {
         group_handle_ = cachinglayer::Manager::CreateLoadingOverheadGroup(
             Dimension, CurrentPolicy());
@@ -119,11 +114,10 @@ LoadOverheadController<Dimension>::UpdateBudgetBytes(size_t bytes)
     if (bytes == budget_bytes_) {
         return true;
     }
-    auto policy =
-        bytes == 0
-            ? cachinglayer::LoadingOverheadPolicy::Executor(executor_workers_)
-            : cachinglayer::LoadingOverheadPolicy::Budget(
-                  static_cast<int64_t>(bytes));
+    const auto policy = bytes == 0
+                            ? SlotPolicy(admission_slots_)
+                            : cachinglayer::LoadingOverheadPolicy::Budget(
+                                  static_cast<int64_t>(bytes));
     if (!UpdateGroupPolicy(group_handle_, policy, ResourceName<Dimension>())) {
         return false;
     }
@@ -133,25 +127,17 @@ LoadOverheadController<Dimension>::UpdateBudgetBytes(size_t bytes)
 
 template <cachinglayer::LoadingOverheadDimension Dimension>
 bool
-LoadOverheadController<Dimension>::UpdateExecutorWorkers(
-    int64_t executor_workers) {
+LoadOverheadController<Dimension>::UpdateAdmissionSlots(const size_t slots) {
     std::lock_guard<std::mutex> lock(mutex_);
-    AssertInfo(executor_workers >= 0,
-               "Load {} executor workers must be non-negative",
-               ResourceName<Dimension>());
-    if (executor_workers_initialized_ &&
-        executor_workers == executor_workers_) {
+    if (slots == admission_slots_) {
         return true;
     }
-    if (UsesExecutorPolicy() &&
+    if (budget_bytes_ == 0 &&
         !UpdateGroupPolicy(
-            group_handle_,
-            cachinglayer::LoadingOverheadPolicy::Executor(executor_workers),
-            ResourceName<Dimension>())) {
+            group_handle_, SlotPolicy(slots), ResourceName<Dimension>())) {
         return false;
     }
-    executor_workers_ = executor_workers;
-    executor_workers_initialized_ = true;
+    admission_slots_ = slots;
     return true;
 }
 

@@ -415,143 +415,15 @@ IndexEntryReader::ValidateMagic() {
 
 void
 IndexEntryReader::ReadFooterAndDirectory() {
-    CheckCancelled("IndexEntryReader::ReadFooterAndDirectory");
-    constexpr size_t kTailBufferSize = 64 * 1024UL;
-    size_t tail_size =
-        std::min(static_cast<size_t>(file_size_), kTailBufferSize);
-    size_t tail_offset = file_size_ - tail_size;
-
-    std::vector<uint8_t> tail_data(tail_size);
-    size_t bytes_read =
-        input_->ReadAt(tail_data.data(), tail_offset, tail_size);
-    CheckCancelled("IndexEntryReader::ReadFooterAndDirectory");
-    AssertInfo(bytes_read == tail_size, "Failed to read file tail");
-
-    // Parse 32-byte Footer from the last 32 bytes
-    AssertInfo(tail_size >= MILVUS_V3_FOOTER_SIZE,
-               "File too small for V3 footer");
-    const uint8_t* footer_ptr =
-        tail_data.data() + tail_size - MILVUS_V3_FOOTER_SIZE;
-
-    uint16_t version;
-    uint32_t meta_entry_size;
-    uint32_t dir_size;
-
-    milvus::fastmem::FastMemcpy(&version, footer_ptr + 0, sizeof(uint16_t));
-    milvus::fastmem::FastMemcpy(
-        &meta_entry_size, footer_ptr + 24, sizeof(uint32_t));
-    milvus::fastmem::FastMemcpy(&dir_size, footer_ptr + 28, sizeof(uint32_t));
-
-    AssertInfo(version == MILVUS_V3_FORMAT_VERSION,
-               "Unsupported V3 format version: {}",
-               version);
-    AssertInfo(dir_size > 0, "Directory table size is zero");
-    AssertInfo(static_cast<size_t>(dir_size) + meta_entry_size +
-                       MILVUS_V3_FOOTER_SIZE + MILVUS_V3_MAGIC_SIZE <=
-                   static_cast<size_t>(file_size_),
-               "Directory table + meta entry + footer size exceeds file size");
-
-    // Check if the directory itself needs a second read. The meta entry is
-    // loaded separately by Open() and is not needed for directory parsing.
-    size_t needed = static_cast<size_t>(dir_size) + MILVUS_V3_FOOTER_SIZE;
-    size_t available_before_footer = tail_size - MILVUS_V3_FOOTER_SIZE;
-
-    if (static_cast<size_t>(dir_size) > available_before_footer) {
-        size_t new_tail_size = needed;
-        size_t new_tail_offset = file_size_ - new_tail_size;
-
-        std::vector<uint8_t> full_tail_data(new_tail_size);
-        size_t need_more = new_tail_size - tail_size;
-
-        size_t additional_read =
-            input_->ReadAt(full_tail_data.data(), new_tail_offset, need_more);
-        CheckCancelled("IndexEntryReader::ReadFooterAndDirectory");
-        AssertInfo(additional_read == need_more,
-                   "Failed to read additional directory data");
-
-        milvus::fastmem::FastMemcpy(
-            full_tail_data.data() + need_more, tail_data.data(), tail_size);
-
-        tail_data = std::move(full_tail_data);
-        tail_size = new_tail_size;
-    }
-
-    // Parse Directory Table JSON
-    const uint8_t* dir_start =
-        tail_data.data() + tail_size - MILVUS_V3_FOOTER_SIZE - dir_size;
-    const uint8_t* dir_end = dir_start + dir_size;
-
-    nlohmann::json dir_json;
-    try {
-        dir_json = nlohmann::json::parse(dir_start, dir_end);
-    } catch (const nlohmann::json::parse_error& e) {
-        AssertInfo(false,
-                   "Failed to parse V3 index directory table JSON: {}",
-                   e.what());
-    }
-
-    AssertInfo(dir_json.contains("entries"), "Directory table missing entries");
-
-    if (dir_json.contains("__edek__")) {
-        is_encrypted_ = true;
-        stream_load_info_.encrypted = true;
-        edek_ = dir_json["__edek__"].get<std::string>();
-        ez_id_ = std::stoll(dir_json["__ez_id__"].get<std::string>());
-        slice_size_ = dir_json["slice_size"].get<size_t>();
-        AssertInfo(IsStreamSliceSizeAligned(slice_size_),
-                   "Encrypted entry slice_size must be {}-byte aligned, got {}",
-                   kStreamSliceAlignment,
-                   slice_size_);
-
-        for (const auto& entry : dir_json["entries"]) {
-            EntryMeta meta;
-            meta.encrypted = true;
-            meta.enc.original_size = entry["original_size"].get<uint64_t>();
-            meta.enc.crc32 = Crc32cFromHex(entry["crc32"].get<std::string>());
-            size_t output_offset = 0;
-            for (const auto& s : entry["slices"]) {
-                auto slice = SliceMeta{s["offset"].get<uint64_t>(),
-                                       s["size"].get<uint64_t>()};
-                meta.enc.slices.push_back(slice);
-
-                AssertInfo(output_offset < meta.enc.original_size,
-                           "Encrypted slice exceeds original entry size {}",
-                           meta.enc.original_size);
-                auto remaining =
-                    static_cast<size_t>(meta.enc.original_size - output_offset);
-                auto plain_len = std::min(remaining, slice_size_);
-                auto task_transient_bytes = EncryptedStreamBudgetBytes(
-                    static_cast<size_t>(slice.size), plain_len);
-                stream_load_info_.total_transient_bytes =
-                    SaturatingAdd(stream_load_info_.total_transient_bytes,
-                                  task_transient_bytes);
-                stream_load_info_.max_task_transient_bytes =
-                    std::max(stream_load_info_.max_task_transient_bytes,
-                             task_transient_bytes);
-                output_offset += plain_len;
-            }
-            AssertInfo(output_offset == meta.enc.original_size,
-                       "Encrypted slices cover {} bytes, expected {}",
-                       output_offset,
-                       meta.enc.original_size);
-            std::string name = entry["name"].get<std::string>();
-            entry_names_.push_back(name);
-            entry_index_.emplace(std::move(name), std::move(meta));
-        }
-    } else {
-        is_encrypted_ = false;
-
-        for (const auto& entry : dir_json["entries"]) {
-            EntryMeta meta;
-            meta.encrypted = false;
-            meta.plain.offset = entry["offset"].get<uint64_t>();
-            meta.plain.size = entry["size"].get<uint64_t>();
-            meta.plain.crc32 = Crc32cFromHex(entry["crc32"].get<std::string>());
-            std::string name = entry["name"].get<std::string>();
-            entry_names_.push_back(name);
-            entry_index_.emplace(std::move(name), std::move(meta));
-        }
-    }
+    auto directory =
+        ReadIndexEntryDirectory(input_, file_size_, cancellation_token_);
+    is_encrypted_ = directory.is_encrypted_;
+    edek_ = std::move(directory.edek_);
+    ez_id_ = directory.ez_id_;
+    slice_size_ = directory.slice_size_;
+    entry_index_ = std::move(directory.entry_index_);
+    stream_load_info_ = directory.stream_load_info_;
+    entry_names_ = std::move(directory.entry_names_);
 }
 
 std::vector<std::string>
@@ -581,7 +453,7 @@ IndexEntryReader::DownloadRangeCount(uint64_t size) {
 }
 
 size_t
-IndexEntryReader::DownloadTaskCount(const EntryMeta& meta) {
+IndexEntryReader::DownloadTaskCount(const IndexEntryMeta& meta) {
     if (meta.encrypted) {
         return meta.enc.slices.size();
     }
@@ -589,7 +461,7 @@ IndexEntryReader::DownloadTaskCount(const EntryMeta& meta) {
 }
 
 size_t
-IndexEntryReader::StreamDownloadTaskCount(const EntryMeta& meta) {
+IndexEntryReader::StreamDownloadTaskCount(const IndexEntryMeta& meta) {
     if (meta.encrypted) {
         return meta.enc.slices.size();
     }
@@ -624,7 +496,7 @@ IndexEntryReader::ReadEntry(const std::string& name) {
 }
 
 Entry
-IndexEntryReader::ReadPlainEntry(const EntryMeta& meta) {
+IndexEntryReader::ReadPlainEntry(const IndexEntryMeta& meta) {
     CheckCancelled("IndexEntryReader::ReadPlainEntry");
     const auto& pm = meta.plain;
     Entry result;
@@ -686,7 +558,7 @@ IndexEntryReader::ReadPlainEntry(const EntryMeta& meta) {
 }
 
 Entry
-IndexEntryReader::ReadEncryptedEntry(const EntryMeta& meta) {
+IndexEntryReader::ReadEncryptedEntry(const IndexEntryMeta& meta) {
     CheckCancelled("IndexEntryReader::ReadEncryptedEntry");
     const auto& em = meta.enc;
     Entry result;
@@ -754,7 +626,7 @@ IndexEntryReader::ReadEncryptedEntry(const EntryMeta& meta) {
 IndexEntryReader::EntryDownloadState
 IndexEntryReader::PrepareEntryDownload(const std::string& name,
                                        const std::string& local_path,
-                                       const EntryMeta& meta) {
+                                       const IndexEntryMeta& meta) {
     CheckCancelled("IndexEntryReader::PrepareEntryDownload");
 
     int fd = ::open(local_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
@@ -788,7 +660,7 @@ IndexEntryReader::PrepareEntryDownload(const std::string& name,
 
 void
 IndexEntryReader::SubmitEntryDownloadTasks(
-    const EntryMeta& meta,
+    const IndexEntryMeta& meta,
     EntryDownloadState& state,
     std::vector<std::future<void>>& futures) {
     auto& pool = ThreadPools::GetThreadPool(priority_);
@@ -912,7 +784,7 @@ IndexEntryReader::FinalizeEntryDownload(EntryDownloadState& state) {
 IndexEntryReader::EntryStreamDownloadState
 IndexEntryReader::PrepareEntryStreamDownload(const std::string& name,
                                              const std::string& local_path,
-                                             const EntryMeta& meta,
+                                             const IndexEntryMeta& meta,
                                              io::Priority write_priority) {
     CheckCancelled("IndexEntryReader::PrepareEntryStreamDownload");
     auto slice_size = DefaultEntryStreamSliceSize();
@@ -948,7 +820,7 @@ IndexEntryReader::PrepareEntryStreamDownload(const std::string& name,
 // before the caller drains futures. Future state may retain the task closure.
 void
 IndexEntryReader::SubmitEntryStreamDownloadTasks(
-    const EntryMeta& meta,
+    const IndexEntryMeta& meta,
     EntryStreamDownloadState& state,
     std::vector<std::future<void>>& futures) {
     auto& pool = ThreadPools::GetThreadPool(priority_);
@@ -1271,7 +1143,7 @@ IndexEntryReader::ReadEntryStream(
 
 void
 IndexEntryReader::ReadPlainEntryStream(
-    const PlainEntryMeta& pm,
+    const PlainIndexEntryMeta& pm,
     const std::function<void(const uint8_t* data, size_t len)>& slice_consumer,
     size_t slice_size) {
     AssertInfo(slice_size >= kMinStreamSliceSize,
@@ -1320,7 +1192,7 @@ IndexEntryReader::ReadPlainEntryStream(
 
 void
 IndexEntryReader::ReadEncryptedEntryStream(
-    const EncryptedEntryMeta& em,
+    const EncryptedIndexEntryMeta& em,
     const std::function<void(const uint8_t* data, size_t len)>&
         slice_consumer) {
     size_t num_slices = em.slices.size();

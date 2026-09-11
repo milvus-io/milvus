@@ -26,6 +26,8 @@
 #include "index/Index.h"
 #include "fmt/format.h"
 #include "index/Meta.h"
+#include "folly/coro/Task.h"
+#include "storage/IndexLoadPlan.h"
 
 namespace milvus::storage {
 class IndexEntryWriter;
@@ -118,6 +120,18 @@ class ScalarIndex : public IndexBase {
 
  public:
     using IndexBase::Build;
+    using IndexBase::Load;
+
+    // Selects the legacy load path once at the synchronous caller boundary.
+    void
+    Load(milvus::tracer::TraceContext ctx,
+         const Config& config,
+         milvus::OpContext* op_ctx) override;
+
+    // Coroutine entry for composed legacy scalar loads. The caller selects the
+    // async executor; Hybrid awaits its child here without a blocking wrapper.
+    virtual folly::coro::Task<void>
+    LoadLegacyAsync(const Config& config, folly::CancellationToken token);
 
     virtual ScalarIndexType
     GetIndexType() const = 0;
@@ -285,7 +299,35 @@ class ScalarIndex : public IndexBase {
         ThrowInfo(Unsupported, "LoadEntries is not implemented");
     }
 
+    // Describe final targets before IO; the new materializer owns byte transfer.
+    virtual storage::IndexLoadPlan
+    PlanLoad(const storage::IndexEntryCatalog& catalog, const Config& config) {
+        ThrowInfo(Unsupported, "Async V3 load planning is not implemented");
+    }
+
+    // Restore query state on the calling async worker from verified targets.
+    // Await local-file writes only; the caller owns artifact cleanup until return.
+    virtual folly::coro::Task<void>
+    FinalizeLoad(storage::IndexLoadArtifact& artifact, const Config& config) {
+        ThrowInfo(Unsupported, "Async V3 load finalization is not implemented");
+        co_return;
+    }
+
  protected:
+    // Restore legacy query state on the calling async worker. File-backed
+    // consumers await their writes and cleanup before returning.
+    virtual folly::coro::Task<void>
+    FinishLegacyLoadAsync(BinarySet binary,
+                          const Config& config,
+                          folly::CancellationToken token);
+
+    // Uses the shared async executor, with local-file phases on LocalFileIOPool.
+    folly::coro::Task<void>
+    LoadUnifiedAsync(const std::string& packed_file,
+                     const Config& config,
+                     proto::common::LoadPriority load_priority,
+                     folly::CancellationToken cancellation_token);
+
     // Execute a LIKE-pattern query inside PatternMatch implementations.
     // @param pattern: a raw SQL LIKE pattern (e.g. "%hello%", "abc_def"),
     //   NOT a regex. Implementations must convert internally if needed

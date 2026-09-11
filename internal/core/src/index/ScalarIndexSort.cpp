@@ -23,6 +23,7 @@
 #include <exception>
 #include <filesystem>
 #include <map>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -42,6 +43,8 @@
 #include "glog/logging.h"
 #include "index/ScalarIndex.h"
 #include "index/ScalarIndexSort.h"
+#include "storage/LocalFileIOPool.h"
+#include "storage/EntryStreamUtils.h"
 #include "index/Utils.h"
 #include "knowhere/binaryset.h"
 #include "log/Log.h"
@@ -56,6 +59,10 @@
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
+#include "storage/AsyncLoadExecutor.h"
+#include "storage/EntryStreamUtils.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
+#include "folly/coro/BlockingWait.h"
 
 namespace milvus::index {
 
@@ -75,6 +82,37 @@ IsScalarArrayField(const storage::FileManagerContext& file_manager_context) {
            file_manager_context.fieldDataMeta.field_schema.data_type() ==
                proto::schema::DataType::Array;
 }
+
+size_t
+MmapFileSize(size_t data_size) {
+    AssertInfo(data_size <= std::numeric_limits<size_t>::max() -
+                                (SCALAR_SORT_ALIGNMENT - 1),
+               "ScalarIndexSort mmap alignment size overflow");
+    auto aligned_size =
+        ((data_size + SCALAR_SORT_ALIGNMENT - 1) / SCALAR_SORT_ALIGNMENT) *
+        SCALAR_SORT_ALIGNMENT;
+    AssertInfo(aligned_size <= std::numeric_limits<size_t>::max() -
+                                   SCALAR_SORT_MMAP_INDEX_PADDING,
+               "ScalarIndexSort mmap padding size overflow");
+    return aligned_size + SCALAR_SORT_MMAP_INDEX_PADDING;
+}
+
+template <typename T>
+struct ScalarSortLoadContext {
+    size_t index_size{0};
+    size_t total_num_rows{0};
+    bool is_nested{false};
+    bool is_mmap{false};
+    bool has_persisted_aux{false};
+    size_t index_data_bytes{0};
+    size_t offsets_bytes{0};
+
+    std::shared_ptr<std::vector<IndexStructure<T>>> index_data;
+    std::shared_ptr<std::vector<int32_t>> offsets;
+    std::shared_ptr<TargetBitmap> valid_bitset;
+    std::shared_ptr<storage::MmapFileTarget> index_data_file;
+    std::shared_ptr<storage::MmapFileTarget> offsets_file;
+};
 
 }  // namespace
 
@@ -313,6 +351,20 @@ ScalarIndexSort<T>::SetupMmapFromData(
     const uint8_t* data,
     size_t size,
     milvus::proto::common::LoadPriority priority) {
+    WriteMmapIndexData(data, size, priority);
+    try {
+        MapIndexData();
+    } catch (...) {
+        remove(mmap_filepath_.c_str());
+        throw;
+    }
+}
+
+template <typename T>
+void
+ScalarIndexSort<T>::WriteMmapIndexData(const uint8_t* data,
+                                       size_t size,
+                                       proto::common::LoadPriority priority) {
     // Setup mmap file path
     mmap_filepath_ = disk_file_manager_ != nullptr
                          ? disk_file_manager_->GetLocalIndexObjectPrefix() +
@@ -341,25 +393,24 @@ ScalarIndexSort<T>::SetupMmapFromData(
         file_writer.Finish();
     }
 
+    mmap_size_ = aligned_size + SCALAR_SORT_MMAP_INDEX_PADDING;
+    data_size_ = size;
+}
+
+template <typename T>
+void
+ScalarIndexSort<T>::MapIndexData() {
     // mmap the file
     auto file = File::Open(mmap_filepath_, O_RDONLY);
-    mmap_data_ =
-        static_cast<char*>(mmap(NULL,
-                                aligned_size + SCALAR_SORT_MMAP_INDEX_PADDING,
-                                PROT_READ,
-                                MAP_PRIVATE,
-                                file.Descriptor(),
-                                0));
+    mmap_data_ = static_cast<char*>(
+        mmap(NULL, mmap_size_, PROT_READ, MAP_PRIVATE, file.Descriptor(), 0));
 
     if (mmap_data_ == MAP_FAILED) {
         file.Close();
-        remove(mmap_filepath_.c_str());
         ThrowInfo(
             ErrorCode::UnexpectedError, "failed to mmap: {}", strerror(errno));
     }
 
-    mmap_size_ = aligned_size + SCALAR_SORT_MMAP_INDEX_PADDING;
-    data_size_ = size;
     file.Close();
 }
 
@@ -367,6 +418,26 @@ template <typename T>
 void
 ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
                                         const Config& config) {
+    is_mmap_ = GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
+
+    auto index_data = index_binary.GetByName("index_data");
+
+    if (is_mmap_) {
+        auto load_priority =
+            GetValueFromConfig<milvus::proto::common::LoadPriority>(
+                config, milvus::LOAD_PRIORITY)
+                .value_or(milvus::proto::common::LoadPriority::HIGH);
+        SetupMmapFromData(
+            reinterpret_cast<const uint8_t*>(index_data->data.get()),
+            index_data->size,
+            load_priority);
+    }
+    FinishLegacyLoad(index_binary);
+}
+
+template <typename T>
+void
+ScalarIndexSort<T>::FinishLegacyLoad(const BinarySet& index_binary) {
     size_t index_size;
     auto index_length = index_binary.GetByName("index_length");
     milvus::fastmem::FastMemcpy(
@@ -381,20 +452,8 @@ ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
         is_nested_index_ = is_nested_index_ || loaded_is_nested_index;
     }
 
-    is_mmap_ = GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
-
-    auto index_data = index_binary.GetByName("index_data");
-
-    if (is_mmap_) {
-        auto load_priority =
-            GetValueFromConfig<milvus::proto::common::LoadPriority>(
-                config, milvus::LOAD_PRIORITY)
-                .value_or(milvus::proto::common::LoadPriority::HIGH);
-        SetupMmapFromData(
-            reinterpret_cast<const uint8_t*>(index_data->data.get()),
-            index_data->size,
-            load_priority);
-    } else {
+    if (!is_mmap_) {
+        auto index_data = index_binary.GetByName("index_data");
         data_.resize(index_size);
         milvus::fastmem::FastMemcpy(
             data_.data(), index_data->data.get(), (size_t)index_data->size);
@@ -431,6 +490,56 @@ ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
 }
 
 template <typename T>
+folly::coro::Task<void>
+ScalarIndexSort<T>::FinishLegacyLoadAsync(BinarySet binary,
+                                          const Config& config,
+                                          folly::CancellationToken token) {
+    token = folly::cancellation_token_merge(
+        token, co_await folly::coro::co_current_cancellation_token);
+    storage::ThrowIfCancelled(token, "Sort::FinalizeLegacy");
+    is_mmap_ = GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
+    if (!is_mmap_) {
+        co_await ScalarIndex<T>::FinishLegacyLoadAsync(
+            std::move(binary), config, token);
+        co_return;
+    }
+    const auto priority =
+        GetValueFromConfig<proto::common::LoadPriority>(config, LOAD_PRIORITY)
+            .value_or(proto::common::LoadPriority::HIGH);
+    const auto data = binary.GetByName("index_data");
+    std::exception_ptr failure;
+    try {
+        co_await storage::RunLocalFileIOAsync(
+            [&] {
+                storage::ThrowIfCancelled(token, "Sort::WriteLegacy");
+                WriteMmapIndexData(data->data.get(), data->size, priority);
+            },
+            priority);
+        storage::ThrowIfCancelled(token, "Sort::FinalizeLegacy");
+        MapIndexData();
+        FinishLegacyLoad(binary);
+        storage::ThrowIfCancelled(token, "Sort::FinalizeLegacy");
+    } catch (...) {
+        failure = std::current_exception();
+    }
+    if (failure) {
+        if (mmap_data_ != nullptr && mmap_data_ != MAP_FAILED) {
+            munmap(mmap_data_, mmap_size_);
+        }
+        mmap_data_ = nullptr;
+        mmap_size_ = 0;
+        co_await storage::RunLocalFileIOAsync(
+            [&] {
+                if (!mmap_filepath_.empty()) {
+                    remove(mmap_filepath_.c_str());
+                }
+            },
+            priority);
+        std::rethrow_exception(failure);
+    }
+}
+
+template <typename T>
 void
 ScalarIndexSort<T>::Load(const BinarySet& index_binary, const Config& config) {
     milvus::Assemble(const_cast<BinarySet&>(index_binary));
@@ -456,6 +565,52 @@ ScalarIndexSort<T>::Load(milvus::tracer::TraceContext ctx,
     // clear index_datas to free memory early
     index_datas.clear();
     LoadWithoutAssemble(binary_set, config);
+}
+
+template <typename T>
+folly::coro::Task<void>
+ScalarIndexSort<T>::LoadLegacyAsync(const Config& config,
+                                    folly::CancellationToken token) {
+    const auto files = config.at(INDEX_FILES).get<std::vector<std::string>>();
+    const auto priority = GetValueFromConfig<proto::common::LoadPriority>(
+                              config, milvus::LOAD_PRIORITY)
+                              .value_or(proto::common::LoadPriority::HIGH);
+    auto binary = co_await this->file_manager_->LoadIndexBinarySetAsync(
+        files, priority, token);
+    auto check = [](bool valid, const char* message) {
+        if (!valid) {
+            ThrowInfo(
+                DataFormatBroken, "Invalid legacy Sort index: {}", message);
+        }
+    };
+    const auto length = binary.GetByName("index_length");
+    check(length != nullptr && length->size == sizeof(size_t),
+          "invalid index_length");
+    size_t count;
+    std::memcpy(&count, length->data.get(), sizeof(count));
+    check(count <= static_cast<size_t>(std::numeric_limits<int32_t>::max()),
+          "index length exceeds offset representation");
+    const auto data = binary.GetByName("index_data");
+    check(data != nullptr && data->size == count * sizeof(IndexStructure<T>),
+          "invalid index_data length");
+    size_t rows = count;
+    if (auto row_data = binary.GetByName("index_num_rows")) {
+        check(row_data->size == sizeof(rows), "invalid index_num_rows");
+        std::memcpy(&rows, row_data->data.get(), sizeof(rows));
+    }
+    check(rows <= static_cast<size_t>(std::numeric_limits<int32_t>::max()),
+          "row count exceeds offset representation");
+    if (auto nested = binary.GetByName("is_nested_index")) {
+        check(nested->size == sizeof(bool) && nested->data[0] <= 1,
+              "invalid nested index flag");
+    }
+    const auto* values =
+        reinterpret_cast<const IndexStructure<T>*>(data->data.get());
+    for (size_t i = 0; i < count; ++i) {
+        check(values[i].idx_ >= 0 && static_cast<size_t>(values[i].idx_) < rows,
+              "index row offset out of bounds");
+    }
+    co_await this->FinishLegacyLoadAsync(std::move(binary), config, token);
 }
 
 template <typename T>
@@ -707,6 +862,256 @@ ScalarIndexSort<T>::WriteEntries(storage::IndexEntryWriter* writer) {
     writer->WriteEntry("valid_bitset",
                        reinterpret_cast<const uint8_t*>(valid_bitset_.data()),
                        valid_bitset_.size_in_bytes());
+}
+
+template <typename T>
+storage::IndexLoadPlan
+ScalarIndexSort<T>::PlanLoad(const storage::IndexEntryCatalog& catalog,
+                             const Config& config) {
+    auto context = std::make_shared<ScalarSortLoadContext<T>>();
+    context->index_size = catalog.GetMeta<size_t>("index_length");
+    context->total_num_rows = catalog.GetMeta<size_t>("num_rows");
+    context->is_nested = is_nested_index_ || catalog.GetMeta<bool>("is_nested");
+    context->is_mmap =
+        GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
+
+    AssertInfo(context->index_size <= std::numeric_limits<size_t>::max() /
+                                          sizeof(IndexStructure<T>),
+               "ScalarIndexSort index_data size overflow for {} elements",
+               context->index_size);
+    context->index_data_bytes = context->index_size * sizeof(IndexStructure<T>);
+    AssertInfo(context->index_data_bytes <=
+                   static_cast<size_t>(std::numeric_limits<int64_t>::max()),
+               "ScalarIndexSort index_data size {} exceeds int64 range",
+               context->index_data_bytes);
+    AssertInfo(
+        catalog.At("index_data").plaintext_size == context->index_data_bytes,
+        "invalid index_data size: expected {}, got {}",
+        context->index_data_bytes,
+        catalog.At("index_data").plaintext_size);
+
+    storage::IndexLoadPlan plan;
+    plan.finalize_context = context;
+    if (context->is_mmap) {
+        auto mmap_path = disk_file_manager_ != nullptr
+                             ? disk_file_manager_->GetLocalIndexObjectPrefix() +
+                                   STLSORT_INDEX_FILE_NAME
+                             : MMAP_PATH_FOR_TEST;
+        context->index_data_file = std::make_shared<storage::MmapFileTarget>(
+            storage::MmapFileTarget{mmap_path,
+                                    MmapFileSize(context->index_data_bytes),
+                                    true,
+                                    nullptr});
+        plan.entries.push_back(storage::EntryLoadPlan{
+            "index_data",
+            storage::MmapEntryTarget{
+                context->index_data_file, 0, context->index_data_bytes}});
+    } else {
+        context->index_data = std::make_shared<std::vector<IndexStructure<T>>>(
+            context->index_size);
+        plan.entries.push_back(storage::EntryLoadPlan{
+            "index_data",
+            storage::MemoryEntryTarget{
+                context->index_data,
+                reinterpret_cast<uint8_t*>(context->index_data->data()),
+                context->index_data_bytes}});
+    }
+
+    // Indexes built with scalar index engine version >= 3 always persist both
+    // auxiliary entries, so has_persisted_aux is true for newly built indexes.
+    // Keep the check for compatibility with older packed files.
+    context->has_persisted_aux =
+        catalog.HasEntry("idx_to_offsets") && catalog.HasEntry("valid_bitset");
+    if (!context->has_persisted_aux) {
+        return plan;
+    }
+
+    AssertInfo(context->total_num_rows <=
+                   std::numeric_limits<size_t>::max() / sizeof(int32_t),
+               "ScalarIndexSort idx_to_offsets size overflow for {} rows",
+               context->total_num_rows);
+    context->offsets_bytes = context->total_num_rows * sizeof(int32_t);
+    AssertInfo(
+        catalog.At("idx_to_offsets").plaintext_size == context->offsets_bytes,
+        "invalid idx_to_offsets size: expected {}, got {}",
+        context->offsets_bytes,
+        catalog.At("idx_to_offsets").plaintext_size);
+
+    context->valid_bitset =
+        std::make_shared<TargetBitmap>(context->total_num_rows, false);
+    auto valid_bitset_bytes = context->valid_bitset->size_in_bytes();
+    AssertInfo(catalog.At("valid_bitset").plaintext_size == valid_bitset_bytes,
+               "invalid valid_bitset size: expected {}, got {}",
+               valid_bitset_bytes,
+               catalog.At("valid_bitset").plaintext_size);
+
+    if (context->is_mmap) {
+        auto mmap_meta_path =
+            (disk_file_manager_ != nullptr
+                 ? disk_file_manager_->GetLocalIndexObjectPrefix()
+                 : MMAP_PATH_FOR_TEST) +
+            "stlsort-meta";
+        context->offsets_file =
+            std::make_shared<storage::MmapFileTarget>(storage::MmapFileTarget{
+                mmap_meta_path, context->offsets_bytes, true, nullptr});
+        plan.entries.push_back(storage::EntryLoadPlan{
+            "idx_to_offsets",
+            storage::MmapEntryTarget{
+                context->offsets_file, 0, context->offsets_bytes}});
+    } else {
+        context->offsets =
+            std::make_shared<std::vector<int32_t>>(context->total_num_rows);
+        plan.entries.push_back(storage::EntryLoadPlan{
+            "idx_to_offsets",
+            storage::MemoryEntryTarget{
+                context->offsets,
+                reinterpret_cast<uint8_t*>(context->offsets->data()),
+                context->offsets_bytes}});
+    }
+    plan.entries.push_back(storage::EntryLoadPlan{
+        "valid_bitset",
+        storage::MemoryEntryTarget{
+            context->valid_bitset,
+            reinterpret_cast<uint8_t*>(context->valid_bitset->data()),
+            valid_bitset_bytes}});
+    return plan;
+}
+
+template <typename T>
+folly::coro::Task<void>
+ScalarIndexSort<T>::FinalizeLoad(storage::IndexLoadArtifact& artifact,
+                                 const Config& config) {
+    (void)config;
+    auto context =
+        artifact.FinalizeContext<std::shared_ptr<ScalarSortLoadContext<T>>>();
+    AssertInfo(context != nullptr,
+               "ScalarIndexSort FinalizeLoad context is null");
+
+    char* new_mmap_data = nullptr;
+    char* new_mmap_meta_data = nullptr;
+    auto mmap_data_guard = folly::makeGuard([&]() {
+        if (new_mmap_data != nullptr && new_mmap_data != MAP_FAILED) {
+            munmap(new_mmap_data, context->index_data_file->file_size);
+        }
+    });
+    auto mmap_meta_guard = folly::makeGuard([&]() {
+        if (new_mmap_meta_data != nullptr && new_mmap_meta_data != MAP_FAILED) {
+            munmap(new_mmap_meta_data, context->offsets_file->file_size);
+        }
+    });
+
+    std::vector<IndexStructure<T>> new_index_data;
+    std::vector<int32_t> new_offsets;
+    TargetBitmap new_valid_bitset(context->total_num_rows, false);
+
+    if (context->is_mmap) {
+        AssertInfo(context->index_data_file != nullptr &&
+                       context->index_data_file->file != nullptr,
+                   "ScalarIndexSort index_data mmap target is not prepared");
+        auto file = File::Open(context->index_data_file->path, O_RDONLY);
+        new_mmap_data =
+            static_cast<char*>(mmap(nullptr,
+                                    context->index_data_file->file_size,
+                                    PROT_READ,
+                                    MAP_PRIVATE,
+                                    file.Descriptor(),
+                                    0));
+        file.Close();
+        AssertInfo(new_mmap_data != MAP_FAILED,
+                   "failed to mmap ScalarIndexSort index_data: {}",
+                   strerror(errno));
+    } else {
+        AssertInfo(context->index_data != nullptr,
+                   "ScalarIndexSort memory target is null");
+        new_index_data = std::move(*context->index_data);
+    }
+
+    if (context->has_persisted_aux) {
+        AssertInfo(context->valid_bitset != nullptr,
+                   "ScalarIndexSort valid_bitset target is null");
+        new_valid_bitset = std::move(*context->valid_bitset);
+        if (context->is_mmap) {
+            AssertInfo(context->offsets_file != nullptr &&
+                           context->offsets_file->file != nullptr,
+                       "ScalarIndexSort offsets mmap target is not prepared");
+            auto file = File::Open(context->offsets_file->path, O_RDONLY);
+            new_mmap_meta_data =
+                static_cast<char*>(mmap(nullptr,
+                                        context->offsets_file->file_size,
+                                        PROT_READ,
+                                        MAP_PRIVATE,
+                                        file.Descriptor(),
+                                        0));
+            file.Close();
+            AssertInfo(new_mmap_meta_data != MAP_FAILED,
+                       "failed to mmap ScalarIndexSort idx_to_offsets: {}",
+                       strerror(errno));
+        } else {
+            AssertInfo(context->offsets != nullptr,
+                       "ScalarIndexSort offsets memory target is null");
+            new_offsets = std::move(*context->offsets);
+        }
+    } else {
+        new_offsets.resize(context->total_num_rows);
+        auto* index_data =
+            context->is_mmap
+                ? reinterpret_cast<const IndexStructure<T>*>(new_mmap_data)
+                : new_index_data.data();
+        for (size_t i = 0; i < context->index_size; ++i) {
+            const auto& item = index_data[i];
+            AssertInfo(item.idx_ < context->total_num_rows,
+                       "ScalarIndexSort row offset {} exceeds row count {}",
+                       item.idx_,
+                       context->total_num_rows);
+            new_offsets[item.idx_] = i;
+            new_valid_bitset.set(item.idx_);
+        }
+    }
+
+    total_num_rows_ = context->total_num_rows;
+    is_nested_index_ = context->is_nested;
+    is_mmap_ = context->is_mmap;
+    data_size_ = static_cast<int64_t>(context->index_data_bytes);
+    if (is_mmap_) {
+        AssertInfo(context->index_data_file->file_size <=
+                       static_cast<size_t>(std::numeric_limits<int64_t>::max()),
+                   "ScalarIndexSort mmap size exceeds int64 range");
+        mmap_filepath_ = context->index_data_file->path;
+        mmap_size_ = static_cast<int64_t>(context->index_data_file->file_size);
+        mmap_data_ = new_mmap_data;
+        new_mmap_data = nullptr;
+    } else {
+        data_ = std::move(new_index_data);
+    }
+
+    valid_bitset_ = std::move(new_valid_bitset);
+    if (context->has_persisted_aux && is_mmap_) {
+        AssertInfo(context->offsets_file->file_size <=
+                       static_cast<size_t>(std::numeric_limits<int64_t>::max()),
+                   "ScalarIndexSort mmap meta size exceeds int64 range");
+        mmap_meta_filepath_ = context->offsets_file->path;
+        mmap_meta_size_ =
+            static_cast<int64_t>(context->offsets_file->file_size);
+        mmap_meta_data_ = new_mmap_meta_data;
+        new_mmap_meta_data = nullptr;
+        idx_to_offsets_ptr_ = reinterpret_cast<const int32_t*>(mmap_meta_data_);
+        idx_to_offsets_size_ = context->total_num_rows;
+    } else {
+        idx_to_offsets_ = std::move(new_offsets);
+        idx_to_offsets_ptr_ = idx_to_offsets_.data();
+        idx_to_offsets_size_ = idx_to_offsets_.size();
+    }
+
+    setup_data_pointers();
+    is_built_ = true;
+    ComputeByteSize();
+    LOG_INFO("FinalizeLoad ScalarIndexSort done, field_id: {}, is_mmap: {}",
+             field_id_,
+             is_mmap_);
+    storage::ThrowIfCancelled(
+        co_await folly::coro::co_current_cancellation_token,
+        "ScalarIndex::FinalizeLoad");
+    co_return;
 }
 
 template <typename T>

@@ -16,9 +16,14 @@
 
 #include "storage/MemFileManagerImpl.h"
 
+#include <set>
+
 #include <atomic>
 #include <exception>
 #include <future>
+#include <limits>
+#include <span>
+#include <cstring>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -28,6 +33,7 @@
 
 #include "common/Common.h"
 #include "common/Consts.h"
+#include "common/Slice.h"
 #include "common/EasyAssert.h"
 #include "common/FieldData.h"
 #include "common/FieldDataInterface.h"
@@ -45,8 +51,173 @@
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
+#include "storage/EntryStreamUtils.h"
 
 namespace milvus::storage {
+
+namespace {
+
+void
+CheckLegacyAssembly(bool condition, const char* message) {
+    if (!condition) {
+        ThrowInfo(
+            DataFormatBroken, "Invalid legacy index assembly: {}", message);
+    }
+}
+
+}  // namespace
+
+folly::coro::Task<BinarySet>
+MemFileManagerImpl::LoadIndexBinarySetAsync(
+    const std::vector<std::string>& remote_files,
+    proto::common::LoadPriority priority,
+    folly::CancellationToken token,
+    std::string_view entry_name) {
+    BinarySet result;
+    IndexEntryConsumerFactory prepare = [&](const std::string& name,
+                                            size_t size) {
+        auto data = std::shared_ptr<uint8_t[]>(new uint8_t[size]);
+        auto* destination = data.get();
+        result.Append(name, std::move(data), size);
+        return [destination](
+                   size_t offset,
+                   std::span<const uint8_t> bytes) -> folly::coro::Task<void> {
+            if (!bytes.empty()) {
+                std::memcpy(destination + offset, bytes.data(), bytes.size());
+            }
+            co_return;
+        };
+    };
+    co_await StreamIndexEntriesAsync(remote_files,
+                                     prepare,
+                                     priority,
+                                     token,
+                                     entry_name,
+                                     LegacyIndexConsumerOrder::Unordered);
+    co_return result;
+}
+
+folly::coro::Task<void>
+MemFileManagerImpl::StreamIndexEntriesAsync(
+    const std::vector<std::string>& remote_files,
+    const IndexEntryConsumerFactory& prepare,
+    proto::common::LoadPriority priority,
+    folly::CancellationToken token,
+    std::string_view entry_name,
+    LegacyIndexConsumerOrder order) {
+    token = folly::cancellation_token_merge(
+        token, co_await folly::coro::co_current_cancellation_token);
+    ThrowIfCancelled(token, "LegacyIndexLoader::Assemble");
+    std::map<std::string, LegacyIndexFile> files;
+    for (const auto& file : remote_files) {
+        auto name = file.substr(file.find_last_of('/') + 1);
+        if (!entry_name.empty() && name != INDEX_FILE_SLICE_META &&
+            name != entry_name) {
+            const auto suffix = std::string_view(name).substr(
+                std::min(name.size(), entry_name.size()));
+            if (!name.starts_with(entry_name) || suffix.size() < 2 ||
+                suffix.front() != '_' ||
+                suffix.substr(1).find_first_not_of("0123456789") !=
+                    std::string_view::npos) {
+                continue;
+            }
+        }
+        ThrowIfCancelled(token, "LegacyIndexLoader::Open");
+        auto info = co_await InspectLegacyIndexFileAsync(
+            file, rcm_, fs_, legacy_index_files_, priority, token);
+        CheckLegacyAssembly(
+            files.emplace(std::move(name), LegacyIndexFile{file, info}).second,
+            "duplicate object basename");
+    }
+    std::set<std::string> entries;
+    if (auto meta = files.find(INDEX_FILE_SLICE_META); meta != files.end()) {
+        const auto size = meta->second.info.payload_bytes;
+        auto raw_meta = std::make_unique<uint8_t[]>(size);
+        LegacyIndexConsumer consume =
+            [&](size_t offset,
+                std::span<const uint8_t> bytes) -> folly::coro::Task<void> {
+            if (!bytes.empty()) {
+                std::memcpy(
+                    raw_meta.get() + offset, bytes.data(), bytes.size());
+            }
+            co_return;
+        };
+        auto input = OpenLegacyIndexInput(rcm_, fs_, meta->second.path);
+        co_await StreamLegacyIndexFileAsync(
+            *input, meta->second.info, consume, priority, token);
+        Config metadata;
+        try {
+            metadata = Config::parse(raw_meta.get(), raw_meta.get() + size);
+        } catch (const nlohmann::json::exception& error) {
+            ThrowInfo(DataFormatBroken,
+                      "Invalid index slice metadata JSON: {}",
+                      error.what());
+        }
+        files.erase(meta);
+        raw_meta.reset();
+        CheckLegacyAssembly(
+            metadata.contains(META) && metadata.at(META).is_array(),
+            "missing slice list");
+        for (const auto& item : metadata.at(META)) {
+            CheckLegacyAssembly(item.contains(NAME) &&
+                                    item.at(NAME).is_string() &&
+                                    item.contains(SLICE_NUM) &&
+                                    item.at(SLICE_NUM).is_number_integer() &&
+                                    item.contains(TOTAL_LEN) &&
+                                    item.at(TOTAL_LEN).is_number_integer(),
+                                "invalid slice metadata fields");
+            const auto name = item.at(NAME).get<std::string>();
+            if (!entry_name.empty() && name != entry_name) {
+                continue;
+            }
+            const auto slices = item.at(SLICE_NUM).get<int64_t>();
+            const auto bytes = item.at(TOTAL_LEN).get<int64_t>();
+            CheckLegacyAssembly(
+                slices > 0 && static_cast<uint64_t>(slices) <= files.size() &&
+                    bytes >= 0,
+                "invalid slice count or total size");
+            CheckLegacyAssembly(
+                entries.insert(name).second && !files.contains(name),
+                "duplicate assembled entry");
+            // Validate the aggregate before allocating from slice metadata.
+            size_t remaining = bytes;
+            for (int64_t slice = 0; slice < slices; ++slice) {
+                const auto it = files.find(GenSlicedFileName(name, slice));
+                CheckLegacyAssembly(it != files.end(), "missing index slice");
+                CheckLegacyAssembly(it->second.info.payload_bytes <= remaining,
+                                    "slice exceeds declared total size");
+                remaining -= it->second.info.payload_bytes;
+            }
+            CheckLegacyAssembly(remaining == 0, "assembled length mismatch");
+            ThrowIfCancelled(token, "LegacyIndexLoader::Prepare");
+            const auto consume_entry = prepare(name, bytes);
+            std::vector<LegacyIndexFile> entry_files;
+            entry_files.reserve(slices);
+            for (int64_t slice = 0; slice < slices; ++slice) {
+                auto it = files.find(GenSlicedFileName(name, slice));
+                CheckLegacyAssembly(it != files.end(), "missing index slice");
+                entry_files.push_back(std::move(it->second));
+                files.erase(it);
+            }
+            co_await StreamLegacyIndexFilesAsync(
+                entry_files, rcm_, fs_, consume_entry, priority, token, order);
+        }
+    }
+    for (const auto& [name, path] : files) {
+        CheckLegacyAssembly(entries.insert(name).second,
+                            "duplicate assembled entry");
+        ThrowIfCancelled(token, "LegacyIndexLoader::Prepare");
+        const auto consume_entry = prepare(name, path.info.payload_bytes);
+        co_await StreamLegacyIndexFilesAsync(std::span{&path, size_t{1}},
+                                             rcm_,
+                                             fs_,
+                                             consume_entry,
+                                             priority,
+                                             token,
+                                             order);
+    }
+    ThrowIfCancelled(token, "LegacyIndexLoader::AssembleComplete");
+}
 
 MemFileManagerImpl::MemFileManagerImpl(
     const FileManagerContext& fileManagerContext)
@@ -54,6 +225,7 @@ MemFileManagerImpl::MemFileManagerImpl(
                       fileManagerContext.indexMeta) {
     rcm_ = fileManagerContext.chunkManagerPtr;
     fs_ = fileManagerContext.fs;
+    legacy_index_files_ = fileManagerContext.legacy_index_files;
     loon_ffi_properties_ = fileManagerContext.loon_ffi_properties;
     plugin_context_ = fileManagerContext.plugin_context;
     stats_base_path_ = fileManagerContext.stats_base_path;

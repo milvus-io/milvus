@@ -16,6 +16,7 @@
 #include <boost/filesystem/operations.hpp>
 #include <fmt/core.h>
 #include <folly/FBVector.h>
+#include <folly/coro/BlockingWait.h>
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 #include <stdlib.h>
@@ -48,6 +49,7 @@
 #include "index/Index.h"
 #include "index/InvertedIndexTantivy.h"
 #include "index/IndexFactory.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
 #include "index/IndexInfo.h"
 #include "index/IndexStats.h"
 #include "index/Meta.h"
@@ -62,11 +64,14 @@
 #include "storage/ChunkManager.h"
 #include "storage/FileManager.h"
 #include "storage/InsertData.h"
+#include "storage/IndexMaterializer.h"
+#include "storage/LoadOverheadController.h"
 #include "storage/PayloadReader.h"
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "test_utils/Constants.h"
+#include "test_utils/AsyncLoadTestUtils.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/indexbuilder_test_utils.h"
 #include "test_utils/storage_test_utils.h"
@@ -130,6 +135,168 @@ struct FileSliceSizeGuard {
 
     int64_t old_slice_size_;
 };
+
+class ExposedInvertedIndexTantivy
+    : public index::InvertedIndexTantivy<std::string> {
+ public:
+    using InvertedIndexTantivy<std::string>::InvertedIndexTantivy;
+    using InvertedIndexTantivy<std::string>::BuildWithFieldData;
+
+    void
+    LoadDirectForTest(storage::AsyncIndexEntryReader& reader,
+                      const Config& config,
+                      proto::common::LoadPriority priority) {
+        auto plan = PlanLoad(reader.Catalog(), config);
+        plan.priority = priority;
+        auto artifact = folly::coro::blockingWait(
+            storage::MaterializeIndexAsync(reader, std::move(plan)));
+        folly::coro::blockingWait(FinalizeLoad(artifact, config));
+        artifact.CommitTargets();
+    }
+};
+
+struct TantivyAsyncLoadFixture {
+    explicit TantivyAsyncLoadFixture(std::string test_name, bool nullable)
+        : root_path(TestLocalPath + "/" + std::move(test_name)) {
+        boost::filesystem::remove_all(root_path);
+        auto storage_config = gen_local_storage_config(root_path);
+        chunk_manager = storage::CreateChunkManager(storage_config);
+        fs = storage::InitArrowFileSystem(storage_config);
+        field_meta = milvus::segcore::gen_field_meta(
+            1, 2, 3, 101, DataType::VARCHAR, DataType::NONE, nullable);
+        index_meta = gen_index_meta(3, 101, 1000, 10000);
+        ctx = storage::FileManagerContext(
+            field_meta, index_meta, chunk_manager, fs);
+    }
+
+    ~TantivyAsyncLoadFixture() {
+        boost::filesystem::remove_all(root_path);
+    }
+
+    std::string root_path;
+    storage::FieldDataMeta field_meta;
+    storage::IndexMeta index_meta;
+    storage::ChunkManagerPtr chunk_manager;
+    milvus_storage::ArrowFileSystemPtr fs;
+    storage::FileManagerContext ctx;
+};
+
+void
+RunTantivyDirectLoad(bool enable_mmap, bool nullable) {
+    milvus::test::ScopedLoadTransientBudget budget_guard(0);
+    TantivyAsyncLoadFixture fixture(
+        enable_mmap ? "tantivy_async_mmap" : "tantivy_async_memory", nullable);
+    std::vector<std::string> data{"delta", "alpha", "charlie", "bravo"};
+
+    ExposedInvertedIndexTantivy build_index(index::TANTIVY_INDEX_LATEST_VERSION,
+                                            fixture.ctx);
+    if (nullable) {
+        auto field_data =
+            storage::CreateFieldData(DataType::VARCHAR, DataType::NONE, true);
+        uint8_t valid = 0b1101;
+        field_data->FillFieldData(data.data(), &valid, data.size(), 0);
+        build_index.BuildWithFieldData({field_data});
+    } else {
+        build_index.BuildWithRawDataForUT(data.size(), data.data());
+    }
+    auto stats = build_index.UploadUnified({});
+
+    milvus::test::ControlledDirectReadFile* remote_file = nullptr;
+    auto reader = milvus::test::OpenDirectIndexEntryReader(
+        milvus::test::ReadPackedIndexBytes(fixture.ctx, stats->GetIndexFiles()),
+        &remote_file);
+    auto read_at_calls_after_open = remote_file->ReadAtCalls();
+
+    fixture.ctx.set_for_loading_index(true);
+    const auto packed_size =
+        fixture.fs->GetFileInfo(stats->GetIndexFiles().front())
+            .ValueOrDie()
+            .size();
+    std::map<std::string, std::string> params{
+        {"index_type", index::INVERTED_INDEX_TYPE},
+        {index::SCALAR_INDEX_ENGINE_VERSION, "3"}};
+    auto estimate = [&] {
+        return index::IndexFactory::GetInstance().ScalarIndexFileLoadResource(
+            DataType::VARCHAR,
+            packed_size,
+            params,
+            enable_mmap,
+            data.size(),
+            stats->GetIndexFiles(),
+            fixture.ctx);
+    };
+    const auto resources = estimate();
+    const auto old_workers = storage::GetAsyncLoadThreadPoolSize();
+    const auto old_enabled =
+        segcore::storagev2translator::StorageV2AsyncLoadEnabled();
+    auto restore_config = folly::makeGuard([&] {
+        storage::SetAsyncLoadThreadPoolSize(old_workers);
+        segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(old_enabled);
+    });
+    for (const bool enabled : {false, true}) {
+        segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(enabled);
+        for (const int workers : {1, 3}) {
+            storage::SetAsyncLoadThreadPoolSize(workers);
+            const auto changed = estimate();
+            EXPECT_EQ(changed.request.final_memory_cost,
+                      resources.request.final_memory_cost);
+            EXPECT_EQ(changed.request.max_memory_cost,
+                      resources.request.max_memory_cost);
+            EXPECT_EQ(changed.request.final_disk_cost,
+                      resources.request.final_disk_cost);
+            EXPECT_EQ(changed.request.max_disk_cost,
+                      resources.request.max_disk_cost);
+            EXPECT_EQ(changed.overhead.has_value(),
+                      resources.overhead.has_value());
+            if (changed.overhead && resources.overhead) {
+                EXPECT_EQ(changed.overhead->memory->group,
+                          resources.overhead->memory->group);
+            }
+        }
+    }
+    EXPECT_EQ(resources.overhead.has_value(), !nullable);
+    if (resources.overhead.has_value()) {
+        ASSERT_TRUE(resources.overhead->memory.has_value());
+        EXPECT_EQ(
+            resources.overhead->memory->group,
+            storage::LoadMemoryOverheadController::GetInstance().GetOrCreate());
+    }
+    if (nullable) {
+        EXPECT_GE(resources.request.max_memory_cost,
+                  resources.request.final_memory_cost + sizeof(size_t));
+    }
+    ExposedInvertedIndexTantivy load_index(index::TANTIVY_INDEX_LATEST_VERSION,
+                                           fixture.ctx);
+    Config config;
+    config[index::ENABLE_MMAP] = enable_mmap;
+    load_index.LoadDirectForTest(
+        *reader, config, proto::common::LoadPriority::HIGH);
+
+    EXPECT_GE(remote_file->DirectReadCalls().size(), 1);
+    EXPECT_EQ(remote_file->AsyncReadCalls(), 0);
+    EXPECT_EQ(remote_file->ReadAtCalls(), read_at_calls_after_open);
+    EXPECT_EQ(load_index.Count(), data.size());
+    EXPECT_EQ(load_index.IsNull().count(), nullable ? 1 : 0);
+    EXPECT_EQ(load_index.IsNotNull().count(), nullable ? 3 : 4);
+    std::string needle = "charlie";
+    auto bitset = load_index.In(1, &needle);
+    ASSERT_EQ(bitset.size(), data.size());
+    EXPECT_FALSE(bitset[0]);
+    EXPECT_FALSE(bitset[1]);
+    EXPECT_TRUE(bitset[2]);
+    EXPECT_FALSE(bitset[3]);
+}
+
+TEST(InvertedIndexTantivyV3AsyncLoadTest,
+     MemoryPathUsesNativeDirectEntryReads) {
+    RunTantivyDirectLoad(false, false);
+    RunTantivyDirectLoad(false, true);
+}
+
+TEST(InvertedIndexTantivyV3AsyncLoadTest, MmapPathUsesNativeDirectEntryReads) {
+    RunTantivyDirectLoad(true, false);
+    RunTantivyDirectLoad(true, true);
+}
 }  // namespace milvus::test
 
 template <typename T,
