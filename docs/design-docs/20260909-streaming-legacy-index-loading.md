@@ -207,9 +207,9 @@ window in scalar and vector estimates. Writer buffers and retained BinarySet
 or sidecar data remain separate. Disk's coarse allowance covers the ordinary
 128 MiB window; the oversized-codec/backend limitations above still apply.
 
-Packed scalar V3 retains its existing materializer and resource accounting.
-Reconciling its independently sampled worker/mode settings is separate from
-this legacy-window bound.
+Packed scalar V3 uses its separate materializer with the same fixed window
+bounds. Its resource estimate covers both rollout modes; shared overhead follows
+the admission limits described in the [V3 design](20260907-async-scalar-index-v3-loading.md).
 
 ## File layout and Knowhere I/O boundary
 
@@ -276,10 +276,10 @@ their existing loaders. JSON shredding data already has its own async branch,
 but that does not migrate every stats file. These entry points do not pass
 through the sealed-index dispatch covered by this migration.
 
-HIGH/LOW pools therefore still exist. Existing V3 shared-overhead accounting
-also consults `ThreadPools::GetLoadExecutorWorkers()`, which can initialize those
-pools; this change does not claim to remove their construction. Enabled legacy
-payload tasks do not use that helper or submit to those pools.
+HIGH/LOW pools therefore still exist for compatibility and independent loaders.
+Shared-overhead accounting uses admission bytes and slots, with no worker-count
+lookup or pool construction. Enabled legacy payload tasks submit to the shared
+async executor.
 
 ## BSON shared-key loading
 

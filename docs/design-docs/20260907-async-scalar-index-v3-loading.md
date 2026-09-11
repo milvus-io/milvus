@@ -192,17 +192,31 @@ resident or staging memory. These estimates bound Milvus admission, not every
 allocation internal to a remote SDK or format decoder.
 
 Async scalar loads and field-data loads share the memory-overhead group from
-`LoadMemoryOverheadController::GetInstance()`. Scalar bindings use the same
-`GetOrCreate(ThreadPools::GetLoadExecutorWorkers())` initialization as the
-parent's bindings. The byte-budget policy, fallback policy, and runtime updates
-are provided by the existing controller; this child adds no separate controller
-or accounting group. Scalar staging files retain request-local reservations.
+`LoadMemoryOverheadController::GetInstance().GetOrCreate()`. Group creation does
+not inspect or initialize an executor, and the handle survives configuration
+changes. Scalar staging files retain request-local reservations.
 
-The parent's fallback when the byte budget is disabled still depends on HIGH/LOW
-worker counts. Removing that dependency belongs to the shared accounting
-follow-up. Async execution itself continues to use the shared async executor.
-Admission slots continue to limit outstanding work through the existing
-`LoadAdmissionController`, independently of the memory-accounting policy.
+`LoadAdmissionController` supplies the shared accounting limits for both load
+modes. With a nonzero byte budget, memory uses the existing Budget policy,
+including its oversized-unit allowance. Without that budget, memory uses the
+admission slot capacity multiplied by the largest bound runtime unit. Field-data
+file overhead uses the same slot bound. The existing multiplicative Executor
+policy implements this bound; its count is admission slots, not CPU workers.
+Suspended async I/O retains slots even when it releases a worker. A zero slot
+capacity uses Passthrough instead of assuming a concurrency bound; memory still
+uses Budget when its byte budget is enabled. Counts beyond the policy's signed
+range conservatively use Passthrough as well. With both limits disabled, this
+can reserve more overhead than the old worker-count heuristic.
+
+Byte and slot updates share one configuration mutex. Expansion updates the
+applicable overhead groups before allowing more admitted work; a rejected update
+keeps the admission limit unchanged. Group reservations retain the existing
+cache reconciliation behavior on reserve/release. Tightening restricts admission
+first. Slot-based accounting retains at least the already admitted slot count
+until it drains to the new limit, then applies that
+limit on release. This also covers a second resize before draining completes.
+Promise completion stays outside the configuration lock.
+HIGH/LOW and async executor resizes no longer update resource accounting.
 
 Scalar estimates reuse representation-cost calculations. The read peak is
 bounded by actual catalog slices and the fixed per-load window; the compatibility
@@ -357,3 +371,15 @@ cleanup. Regression includes the existing plain/encrypted V3 reader's large
 directory and metadata cases, scalar mmap/nullable paths, Knowhere, resource
 estimates, admission and finalizer failures. This is local correctness and
 routing validation, not an object-storage throughput or peak-RSS measurement.
+
+### Admission overhead validation (2026-09-11)
+
+Rebuilt `all_tests` and `json_stats_test` in the cached GCC 12 Release tree with
+at most 16 build jobs. The focused run passed 57 cases, the loading regression
+run passed 249, and JSON stats passed 84: 390 distinct executed cases, with no
+failures or skips. The pool-map-lock check also passed in a fresh process.
+The added cases inspect actual cache reservations across byte/slot policy
+changes, executor and rollout changes, unlimited capacities, and slot reductions
+with admitted work still in flight. An incompatible binding verifies that a
+rejected expansion keeps admission bounded and a subsequent retry can succeed.
+No remote-cluster or throughput validation was run for this accounting change.
