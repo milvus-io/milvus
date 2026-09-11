@@ -5571,22 +5571,36 @@ func TestIsEmbeddingListData(t *testing.T) {
 }
 
 func TestPrintStructArrayFieldsV2(t *testing.T) {
-	schema := buildStructArrayTestSchema()
-	schema.GetStructArrayFields()[0].Nullable = true
-	printed := printStructArrayFieldsV2(schema.GetStructArrayFields())
-	require.Len(t, printed, 1)
-	entry := printed[0]
-	assert.Equal(t, "my_struct", entry[HTTPReturnFieldName])
-	assert.Equal(t, schemapb.DataType_ArrayOfStruct.String(), entry[HTTPReturnFieldType])
-	assert.Equal(t, true, entry[HTTPReturnFieldNullable])
-	subs, ok := entry["fields"].([]gin.H)
-	require.True(t, ok)
-	require.Len(t, subs, 2)
-	assert.Equal(t, "sub_int", subs[0][HTTPReturnFieldName])
-	assert.Equal(t, schemapb.DataType_Array.String(), subs[0][HTTPReturnFieldType])
-	assert.Equal(t, schemapb.DataType_Int32.String(), subs[0][HTTPReturnFieldElementType])
-	assert.Equal(t, "sub_vec", subs[1][HTTPReturnFieldName])
-	assert.Equal(t, schemapb.DataType_FloatVector.String(), subs[1][HTTPReturnFieldElementType])
+	for _, parentNullable := range []bool{false, true} {
+		for _, subNullable := range []bool{false, true} {
+			t.Run(fmt.Sprintf("parent_nullable_%t/sub_nullable_%t", parentNullable, subNullable), func(t *testing.T) {
+				schema := buildStructArrayTestSchema()
+				schema.GetStructArrayFields()[0].Nullable = parentNullable
+				for _, subField := range schema.GetStructArrayFields()[0].GetFields() {
+					subField.Nullable = subNullable
+				}
+				printed := printStructArrayFieldsV2(schema.GetStructArrayFields())
+				require.Len(t, printed, 1)
+				entry := printed[0]
+				assert.Equal(t, "my_struct", entry[HTTPReturnFieldName])
+				assert.Equal(t, schemapb.DataType_ArrayOfStruct.String(), entry[HTTPReturnFieldType])
+				assert.Equal(t, parentNullable, entry[HTTPReturnFieldNullable])
+				subs, ok := entry["fields"].([]gin.H)
+				require.True(t, ok)
+				require.Len(t, subs, 2)
+				assert.Equal(t, "sub_int", subs[0][HTTPReturnFieldName])
+				assert.Equal(t, false, subs[0][HTTPReturnFieldNullable])
+				assert.Equal(t, schemapb.DataType_Array.String(), subs[0][HTTPReturnFieldType])
+				assert.Equal(t, schemapb.DataType_Int32.String(), subs[0][HTTPReturnFieldElementType])
+				assert.Equal(t, "sub_vec", subs[1][HTTPReturnFieldName])
+				assert.Equal(t, false, subs[1][HTTPReturnFieldNullable])
+				assert.Equal(t, schemapb.DataType_FloatVector.String(), subs[1][HTTPReturnFieldElementType])
+				for _, subField := range schema.GetStructArrayFields()[0].GetFields() {
+					assert.Equal(t, subNullable, subField.GetNullable(), "printing must not mutate the input schema")
+				}
+			})
+		}
+	}
 }
 
 func TestParseJSONInteger(t *testing.T) {
