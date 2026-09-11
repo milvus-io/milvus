@@ -120,7 +120,9 @@ func applySnapshotExternalSpecToConfig(
 			if err != nil {
 				return false, "", err
 			}
-			if !strings.EqualFold(configuredEndpoint, endpoint) {
+			// azure:// snapshot URIs are TLS; an explicit :443 on the URI host
+			// names the same endpoint as the canonical configured form.
+			if !strings.EqualFold(configuredEndpoint, stripDefaultEndpointPort(endpoint, true)) {
 				return false, "", merr.WrapErrParameterInvalidMsg(
 					"snapshot URI Azure account does not match the instance storage credential",
 				)
@@ -287,7 +289,9 @@ func applySnapshotURILocationToConfig(
 				if err != nil {
 					return storageEndpointIdentity{}, false, err
 				}
-				if !strings.EqualFold(configuredEndpoint, endpoint) {
+				// azure:// snapshot URIs are TLS; an explicit :443 on the URI
+				// host names the same endpoint as the canonical configured form.
+				if !strings.EqualFold(configuredEndpoint, stripDefaultEndpointPort(endpoint, true)) {
 					return storageEndpointIdentity{}, false, merr.WrapErrParameterInvalidMsg(
 						"Azure snapshot URI endpoint %q does not match the configured endpoint",
 						endpoint,

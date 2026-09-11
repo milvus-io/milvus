@@ -450,8 +450,9 @@ func azureEndpointCloudSuffix(cfg *objectstorage.Config) string {
 	if err != nil {
 		return ""
 	}
-	// effectiveAzureSnapshotEndpoint yields "<account>.blob.<suffix>"; both
-	// parts are single DNS labels by construction, so the first marker wins.
+	// effectiveAzureSnapshotEndpoint yields "<account>.blob.<suffix>" with the
+	// default port already stripped; account and suffix are single DNS labels
+	// by construction, so the first marker wins.
 	if i := strings.Index(strings.ToLower(endpoint), ".blob."); i >= 0 {
 		return endpoint[i+len(".blob."):]
 	}
