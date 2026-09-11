@@ -90,11 +90,12 @@ namespace milvus::segcore {
 namespace storagev2translator {
 class TimestampIndexCell;
 class PkIndexCell;
-struct ColumnSizeEstimateResult;
 }  // namespace storagev2translator
 
 class TimestampData;
 class TimestampIndex;
+struct ColumnSizeEstimateState;
+struct ManifestLoadTask;
 
 using namespace milvus::cachinglayer;
 
@@ -1406,6 +1407,43 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         StagedStateCommitter* committer = nullptr);
 
     bool
+    CanUseLazyManifestField(FieldId field_id,
+                            const FieldMeta& field_meta,
+                            const SegmentLoadInfo& segment_load_info,
+                            const SchemaPtr& schema_snapshot) const;
+
+    bool
+    CanUseLazyManifestColumnGroup(
+        const std::unordered_map<FieldId, FieldMeta>& field_metas,
+        const SegmentLoadInfo& segment_load_info,
+        const SchemaPtr& schema_snapshot) const;
+
+    [[nodiscard]] std::vector<ManifestLoadTask>
+    PrepareManifestLoadTasks(
+        const std::shared_ptr<milvus_storage::api::Reader>& reader,
+        const SchemaPtr& schema_snapshot,
+        const SegmentLoadInfo& segment_load_info,
+        const milvus::OpContext* op_ctx,
+        const bool enable_async_load,
+        std::vector<ManifestLoadTask> tasks);
+
+    void
+    LoadLazyColumnGroup(
+        const std::shared_ptr<milvus_storage::api::Reader>& reader,
+        int64_t index,
+        const std::vector<std::string>& column_group_columns,
+        const std::vector<FieldId>& milvus_field_ids,
+        const std::unordered_map<FieldId, FieldMeta>& field_metas,
+        const SegmentLoadInfo& segment_load_info,
+        const SchemaPtr& schema_snapshot,
+        bool enable_async_load,
+        bool use_mmap,
+        bool is_replace,
+        milvus::OpContext* op_ctx,
+        StagedStateCommitter& committer,
+        const std::shared_ptr<ColumnSizeEstimateState>& size_estimate_state);
+
+    bool
     IsIndexRefineEnabledLocked(
         milvus::OpContext* op_ctx,
         FieldId field_id,
@@ -1998,37 +2036,14 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         const SegmentLoadInfo& segment_load_info,
         const SchemaPtr& schema_snapshot,
         bool eager_load,
-        milvus::OpContext* op_ctx = nullptr,
-        bool is_replace = false,
-        RuntimeResourceState* runtime = nullptr);
-
-    // Loads one staged manifest projection. A non-null pre-opened reader marks
-    // the async path; null preserves synchronous reader opening on the worker.
-    void
-    LoadColumnGroup(
-        const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
-        const std::shared_ptr<milvus_storage::api::Properties>& properties,
-        int64_t index,
-        const std::vector<FieldId>& milvus_field_ids,
-        const SegmentLoadInfo& segment_load_info,
-        const SchemaPtr& schema_snapshot,
-        bool eager_load,
         milvus::OpContext* op_ctx,
         bool is_replace,
         StagedStateCommitter& committer,
-        storagev2translator::ColumnSizeEstimateResult column_size_estimate,
+        std::shared_ptr<ColumnSizeEstimateState> size_estimate_state,
         std::shared_ptr<milvus_storage::api::ChunkReader>
-            preopened_chunk_reader);
-
-    void
-    LoadColumnGroup(
-        const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
-        const std::shared_ptr<milvus_storage::api::Properties>& properties,
-        int64_t index,
-        const std::vector<FieldId>& milvus_field_ids,
-        bool eager_load,
-        milvus::OpContext* op_ctx = nullptr,
-        bool is_replace = false);
+            preopened_chunk_reader,
+        bool enable_async_load,
+        bool lazy_materialization);
 
     void
     ReloadColumns(const std::vector<FieldId>& field_ids_to_reload,
@@ -2360,6 +2375,52 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         const auto it = runtime->fields.find(field_ids.front());
         AssertInfo(it != runtime->fields.end(), "test field was not loaded");
         return it->second;
+    }
+
+    std::vector<std::shared_ptr<ChunkedColumnInterface>>
+    TestStageLoadColumnGroupsWithReader(
+        const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
+        const std::shared_ptr<milvus_storage::api::Properties>& properties,
+        std::vector<std::pair<int, std::vector<FieldId>>> cg_field_ids,
+        const SegmentLoadInfo& segment_load_info,
+        const SchemaPtr& schema_snapshot,
+        std::shared_ptr<milvus_storage::api::Reader> reader,
+        bool eager_load) {
+        auto current = CapturePublishedState();
+        auto runtime = CloneMutableRuntimeResourceState();
+        runtime->reader = std::move(reader);
+
+        auto staged = ClonePublishedState(current);
+        staged->schema = schema_snapshot;
+        staged->load_info =
+            std::make_shared<const SegmentLoadInfo>(segment_load_info);
+        staged->runtime = ToConstRuntimeState(runtime);
+        staged->commit_ts = current->commit_ts;
+        NormalizePublishedState(*staged);
+
+        StagedStateCommitter committer(*this, runtime.get(), staged.get());
+        LoadColumnGroups(column_groups,
+                         properties,
+                         cg_field_ids,
+                         segment_load_info,
+                         schema_snapshot,
+                         eager_load,
+                         nullptr,
+                         false,
+                         committer);
+
+        std::vector<std::shared_ptr<ChunkedColumnInterface>> columns;
+        for (const auto& [cg_index, field_ids] : cg_field_ids) {
+            (void)cg_index;
+            for (const auto& field_id : field_ids) {
+                auto it = runtime->fields.find(field_id);
+                AssertInfo(it != runtime->fields.end(),
+                           "test field {} was not loaded",
+                           field_id.get());
+                columns.push_back(it->second);
+            }
+        }
+        return columns;
     }
 
     void
