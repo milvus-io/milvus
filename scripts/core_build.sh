@@ -110,6 +110,7 @@ fi
 # Build acceleration options (override via env vars)
 : "${USE_PCH:="ON"}"
 : "${USE_UNITY_BUILD:="OFF"}"
+: "${USE_SPLIT_DWARF:="OFF"}"
 
 while getopts "p:t:s:n:a:y:x:f:S:ulcgbZh" arg; do
   case $arg in
@@ -255,7 +256,8 @@ ${CMAKE_EXTRA_ARGS} \
 -DENABLE_GCP_NATIVE=${ENABLE_GCP_NATIVE} \
 -DENABLE_AZURE_FS=${ENABLE_AZURE_FS} \
 -DMILVUS_USE_PCH=${USE_PCH} \
--DMILVUS_UNITY_BUILD=${USE_UNITY_BUILD} "
+-DMILVUS_UNITY_BUILD=${USE_UNITY_BUILD} \
+-DMILVUS_USE_SPLIT_DWARF=${USE_SPLIT_DWARF} "
 # Azure build variables removed as we now use Arrow with Azure support directly
 CMAKE_CMD=${CMAKE_CMD}"${CPP_SRC_DIR}"
 
