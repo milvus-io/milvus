@@ -1207,15 +1207,18 @@ split manager's rebase:
 
 - the primary-only trigger, and with it the size trigger and the reconciler
   that acts on a declared `collection.shardNum`;
-- deriving a task's `redistribution` mode (relabel vs. rewrite) from the
-  collection's routing mode — the ack callback deliberately does not set it,
-  and a task left `Unknown` must be refused rather than guessed;
-- reclaiming a terminal split task record. The catalog can delete one
-  (`DropSplitShardTask`) and `dataCoord.shardSplit.taskRetention` declares how
-  long to keep it, but nothing calls either yet, so today a finished split's
-  record stays in meta. Every place this document says a redelivered adoption
-  would ask about a reclaimed task describes the behaviour once the reaper
-  exists;
+- the redistribution itself (relabel vs. rewrite) and everything the manager
+  needs to drive it. The task record on this branch carries only what the ack
+  callback writes — id, collection, targets, state, fenced, start time, the
+  sources with their `T_switch`, and the routing modulus; the manager adds its
+  own fields (redistribution mode, pending segments, dispatched plans, failure
+  reason) when it lands, derived from the collection's routing mode, never
+  guessed;
+- reclaiming a terminal split task record. Nothing on this branch deletes one,
+  so today a finished split's record stays in meta
+  (`dataCoord.shardSplit.taskRetention` is declared but unread). Every place
+  this document says a redelivered adoption would ask about a reclaimed task
+  describes the behaviour once the reaper exists;
 - the proxy write path: the residue routing lookup, the reject-and-refetch loop
   on `SHARD_FENCED`, and the cache invalidation on adoption. The proxy still
   places rows by vchannel position, `internal/util/routing` has no proxy
@@ -1236,8 +1239,8 @@ separately rather than done here.
 **Rollout.** The feature is off by default (`dataCoord.shardSplit.enable=false`)
 and has no trigger on this branch, which is what makes the mixed-version cases
 below theoretical rather than live; they are the constraints for turning it on.
-All proto changes are additive (new fields, new enum values, message types 49
-with 50/51 reserved), and `etcd_meta.proto`'s `shard_infos` moved from a local
+All proto changes are additive (new fields, new enum values, message type 49),
+and `etcd_meta.proto`'s `shard_infos` moved from a local
 `CollectionShardInfo` to `schemapb.CollectionShardInfo` whose field 1 is the
 same `last_truncate_time_tick` varint, so the persisted bytes are compatible.
 What is not compatible is behaviour:

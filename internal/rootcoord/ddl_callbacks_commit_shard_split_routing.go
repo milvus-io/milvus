@@ -472,8 +472,9 @@ func shardStateMayAdvance(from, to schemapb.ShardState) bool {
 //   - a post-image the collection already carries;
 //   - a post-image a LATER routing commit has already overtaken.
 //
-// datacoord reclaims a split's task record once the split is done, so either
-// redelivery would ask about a task id nobody knows any more -- an answer that
+// Once datacoord reclaims a split's task record after the split is done (the
+// reaper is not on this branch), either redelivery would ask about a task id
+// nobody knows any more -- an answer that
 // is a System error by design, and one this callback would then retry forever,
 // wedging every later DDL of the collection behind it. And a superseded
 // post-image must not be WRITTEN either: applying it would put the retired

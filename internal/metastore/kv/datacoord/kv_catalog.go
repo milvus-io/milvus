@@ -1075,11 +1075,6 @@ func (kc *Catalog) SaveSplitShardTask(ctx context.Context, task *datapb.SplitSha
 	return kc.SaveByBatch(ctx, kvs)
 }
 
-func (kc *Catalog) DropSplitShardTask(ctx context.Context, task *datapb.SplitShardTask) error {
-	key := buildSplitShardTaskPath(task)
-	return kc.MetaKv.Remove(ctx, key)
-}
-
 func (kc *Catalog) ListAnalyzeTasks(ctx context.Context) ([]*indexpb.AnalyzeTask, error) {
 	tasks := make([]*indexpb.AnalyzeTask, 0)
 

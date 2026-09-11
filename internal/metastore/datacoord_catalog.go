@@ -132,7 +132,6 @@ type DataCoordCatalog interface {
 
 	ListSplitShardTask(ctx context.Context) ([]*datapb.SplitShardTask, error)
 	SaveSplitShardTask(ctx context.Context, task *datapb.SplitShardTask) error
-	DropSplitShardTask(ctx context.Context, task *datapb.SplitShardTask) error
 
 	ListAnalyzeTasks(ctx context.Context) ([]*indexpb.AnalyzeTask, error)
 	SaveAnalyzeTask(ctx context.Context, task *indexpb.AnalyzeTask) error

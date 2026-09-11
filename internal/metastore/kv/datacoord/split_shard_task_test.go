@@ -100,11 +100,4 @@ func TestCatalogSplitShardTask(t *testing.T) {
 		_, err = catalog.ListSplitShardTask(context.TODO())
 		assert.Error(t, err)
 	})
-
-	t.Run("drop", func(t *testing.T) {
-		metakv := mocks.NewMetaKv(t)
-		metakv.EXPECT().Remove(mock.Anything, SplitShardTaskPrefix+"/1/100").Return(nil).Once()
-		catalog := NewCatalog(metakv, rootPath, "")
-		assert.NoError(t, catalog.DropSplitShardTask(context.TODO(), task))
-	})
 }

@@ -1082,53 +1082,6 @@ func (_c *DataCoordCatalog_DropSnapshot_Call) RunAndReturn(run func(context.Cont
 	return _c
 }
 
-// DropSplitShardTask provides a mock function with given fields: ctx, task
-func (_m *DataCoordCatalog) DropSplitShardTask(ctx context.Context, task *datapb.SplitShardTask) error {
-	ret := _m.Called(ctx, task)
-
-	if len(ret) == 0 {
-		panic("no return value specified for DropSplitShardTask")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.SplitShardTask) error); ok {
-		r0 = rf(ctx, task)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// DataCoordCatalog_DropSplitShardTask_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropSplitShardTask'
-type DataCoordCatalog_DropSplitShardTask_Call struct {
-	*mock.Call
-}
-
-// DropSplitShardTask is a helper method to define mock.On call
-//   - ctx context.Context
-//   - task *datapb.SplitShardTask
-func (_e *DataCoordCatalog_Expecter) DropSplitShardTask(ctx interface{}, task interface{}) *DataCoordCatalog_DropSplitShardTask_Call {
-	return &DataCoordCatalog_DropSplitShardTask_Call{Call: _e.mock.On("DropSplitShardTask", ctx, task)}
-}
-
-func (_c *DataCoordCatalog_DropSplitShardTask_Call) Run(run func(ctx context.Context, task *datapb.SplitShardTask)) *DataCoordCatalog_DropSplitShardTask_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*datapb.SplitShardTask))
-	})
-	return _c
-}
-
-func (_c *DataCoordCatalog_DropSplitShardTask_Call) Return(_a0 error) *DataCoordCatalog_DropSplitShardTask_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *DataCoordCatalog_DropSplitShardTask_Call) RunAndReturn(run func(context.Context, *datapb.SplitShardTask) error) *DataCoordCatalog_DropSplitShardTask_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // DropStatsTask provides a mock function with given fields: ctx, taskID
 func (_m *DataCoordCatalog) DropStatsTask(ctx context.Context, taskID int64) error {
 	ret := _m.Called(ctx, taskID)

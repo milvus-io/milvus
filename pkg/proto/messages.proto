@@ -78,7 +78,6 @@ enum MessageType {
     // a target replica is the genesis of that target vchannel, the control
     // channel replica only orders the ack callback.
     SplitShard                   = 49;
-    reserved 50, 51; // CreateVChannel, DropVChannel: folded into SplitShard and AlterCollection(shard_split_routing).
 
     // AlterWAL is used to alter the wal configuration to the current cluster.
     AlterWAL             = 700;

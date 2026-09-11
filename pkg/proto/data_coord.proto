@@ -2132,22 +2132,8 @@ message SplitShardTaskTarget {
   // GetRecoveryInfoV2 seek path.
 }
 
-// SplitShardRedistribution names how a split moves the source data into its
-// targets. It is the ONE thing that differs between the two kinds of split;
-// everything else in the task -- the fence, the target genesis, the routing
-// commit, the adoption, the abort rule -- is shared.
-enum SplitShardRedistribution {
-  SplitShardRedistributionUnknown = 0;
-  // Relabel: a namespace's data lives wholly inside one shard, so a segment
-  // moves to its target by changing which vchannel owns it. No data is read.
-  SplitShardRelabel               = 1;
-  // Rewrite: a hash-routed shard's segments straddle every split boundary, so
-  // each is read and repartitioned into one output per target.
-  SplitShardRewrite               = 2;
-}
-
 // SplitShardTaskSource is one source shard of a split, with the state that is
-// inherently per-source: its own fence time tick and its own remaining work.
+// inherently per-source: its own fence time tick.
 //
 // A list rather than a single vchannel because a split does not always have one
 // source: a size-triggered split of either kind has exactly one, but a rehash to
@@ -2167,48 +2153,28 @@ message SplitShardTaskSource {
   // enforces that the routing never flips while a source still accepts writes
   // for keys the targets have already claimed.
   uint64 switch_time_tick = 2;
-  // Segments of this source whose data has not yet reached the targets. Drives
-  // the redistribution rounds and makes a restart resume where it left off.
-  repeated int64 pending_segments = 3;
 }
 
-// SplitShardTask is the persisted state of a shard split task. One task type
-// covers both kinds of split: they share every phase but the redistribution,
-// which `redistribution` selects.
+// SplitShardTask is the persisted state of a shard split task: what the
+// SplitShard ack callback records on every cluster the split reaches.
 message SplitShardTask {
-  // 3 and 10 were the singular source_vchannel and switch_time_tick of the
-  // one-source-at-a-time task; they are per-source and live in `sources` now.
-  reserved 3, 10;
-  reserved "source_vchannel", "switch_time_tick";
-
-  int64  task_id                       = 1;
-  int64  collection_id                 = 2;
-  repeated SplitShardTaskTarget targets = 4;
-  SplitShardTaskState state            = 5;
+  int64  task_id                        = 1;
+  int64  collection_id                  = 2;
+  repeated SplitShardTaskTarget targets = 3;
+  SplitShardTaskState state             = 4;
   // fenced is set once the SplitShard fence has been appended to the source
   // vchannel (the append succeeded or returned already-fenced). A fenced task
   // is forward-only and can no longer be aborted.
-  bool fenced                          = 6;
-  uint64 start_time                    = 7; // unix seconds.
-  uint64 end_time                      = 8; // unix seconds.
-  string fail_reason                   = 9;
-  // Compaction plans dispatched but not yet confirmed committed. Only a
-  // rewriting split uses them; on restart they are re-checked (and re-dispatched
-  // if lost), and because a rewrite is deterministic in its inputs a
-  // re-dispatch reproduces the same outputs, leaving a dead plan's partial
-  // outputs to be collected as ordinary failed-compaction garbage.
-  repeated int64 dispatched_plan_ids   = 11;
-  // The source shards being split, each with its own fence tick and remaining
-  // work.
-  repeated SplitShardTaskSource sources = 12;
-  // How this task moves the source data.
-  SplitShardRedistribution redistribution = 13;
+  bool fenced                           = 5;
+  uint64 start_time                     = 6; // unix seconds.
+  // The source shards being split, each with its own fence tick.
+  repeated SplitShardTaskSource sources = 7;
   // The collection's routing modulus AFTER this split, which the targets'
   // residues are taken against. It differs from the collection's current
   // modulus only when the split had to double it, and it is recorded rather
   // than recomputed so a retry of the routing commit reproduces the same
   // topology.
-  uint64 routing_modulus = 14;
+  uint64 routing_modulus                = 8;
 }
 
 // CommitShardSplitRequest is the datacoord half of the SplitShard broadcast ack

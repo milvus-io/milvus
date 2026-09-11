@@ -161,7 +161,7 @@ func TestCommitShardSplitTakesTheRequestSwitchTimeTick(t *testing.T) {
 		TaskId:       200,
 		CollectionId: 100,
 		State:        datapb.SplitShardTaskState_SplitShardTaskFencing,
-		Sources:      []*datapb.SplitShardTaskSource{{Vchannel: splitTestSource, PendingSegments: []int64{7}}},
+		Sources:      []*datapb.SplitShardTaskSource{{Vchannel: splitTestSource}},
 		Targets: []*datapb.SplitShardTaskTarget{
 			{Vchannel: splitTestTarget0, Buckets: []uint64{0}},
 			{Vchannel: splitTestTarget1, Buckets: []uint64{1}},
@@ -176,8 +176,6 @@ func TestCommitShardSplitTakesTheRequestSwitchTimeTick(t *testing.T) {
 	assert.Equal(t, uint64(2000), task.GetSources()[0].GetSwitchTimeTick())
 	assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskRedistributing, task.GetState())
 	assert.True(t, task.GetFenced())
-	// The task's own per-source work survives: only the fence tick is adopted.
-	assert.Equal(t, []int64{7}, task.GetSources()[0].GetPendingSegments())
 }
 
 func TestCommitShardSplitAdoptsSourcesTheLocalTaskDoesNotKnow(t *testing.T) {
