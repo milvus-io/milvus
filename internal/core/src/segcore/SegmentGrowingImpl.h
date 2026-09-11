@@ -672,7 +672,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
     struct ValidResult {
         int64_t valid_count = 0;
         std::unique_ptr<bool[]> valid_data;
-        std::vector<int64_t> valid_offsets;
+        // NULL filtering preserves logical segment offsets and their order.
+        std::vector<int64_t> valid_logical_offsets;
     };
 
     ValidResult
