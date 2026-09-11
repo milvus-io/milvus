@@ -160,6 +160,51 @@ func TestCommitBumpV3MaterializationHappyPath(t *testing.T) {
 	assert.EqualValues(t, 64, updated.GetStats().GetStatsBinlogSize())
 }
 
+func TestCommitBumpV3MaterializationRechecksSnapshotProtectionBeforePublication(t *testing.T) {
+	basePath := "/tmp/milvus/insert_log/1/10/500"
+	currentManifest := packed.MarshalManifestPath(basePath, 5)
+	newManifest := packed.MarshalManifestPath(basePath, 6)
+
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	addMaterializationSegment(t, meta, currentManifest, 3)
+	sm := createTestSnapshotMetaLoaded(t)
+	meta.snapshotMeta = sm
+
+	task := newMaterializationTask(meta, 7)
+	require.NoError(t, meta.ValidateSegmentStateBeforeCompleteCompactionMutation(task.GetTaskProto()))
+
+	commit := mockey.Mock(packed.CommitManifestUpdates).To(
+		func(string, int64, *indexpb.StorageConfig, *packed.ManifestUpdates) (string, error) {
+			// Reproduce the seam: snapshot creation begins after the task's initial
+			// validation but before the prepared manifest is published under segMu.
+			sm.SetSnapshotPending(1)
+			return newManifest, nil
+		},
+	).Build()
+	defer commit.UnPatch()
+
+	_, err = task.commitBumpV3Materialization(context.Background(), materializationResult(nil))
+	require.ErrorIs(t, err, merr.ErrCompactionBlocked)
+
+	updated := meta.GetSegment(context.Background(), materializationSegmentID)
+	require.Equal(t, currentManifest, updated.GetManifestPath())
+	require.EqualValues(t, 3, updated.GetSchemaVersion())
+	require.Empty(t, updated.GetBinlogs())
+
+	// Snapshot protection is a compaction admission gate, so ordinary manifest
+	// writers that do not opt into the precondition remain unaffected.
+	require.NoError(t, meta.CommitSegmentManifest(context.Background(), SegmentManifestCommit{
+		SegmentID:     materializationSegmentID,
+		StorageConfig: &indexpb.StorageConfig{},
+		Mutation: ManifestMutation{
+			Type:    ManifestMutationCommitUpdates,
+			Updates: &packed.ManifestUpdates{},
+		},
+	}))
+	require.Equal(t, newManifest, meta.GetSegment(context.Background(), materializationSegmentID).GetManifestPath())
+}
+
 func TestCommitBumpV3MaterializationReplayShortCircuits(t *testing.T) {
 	basePath := "/tmp/milvus/insert_log/1/10/500"
 	currentManifest := packed.MarshalManifestPath(basePath, 5)
