@@ -30,12 +30,8 @@ namespace {
 
 int
 MappingStatus(char* data, size_t size) {
-#ifdef __APPLE__
-    char residency;
-#else
-    unsigned char residency;
-#endif
-    return mincore(data, size, &residency);
+    // msync reports ENOMEM for unmapped pages on both Linux and macOS.
+    return msync(data, size, MS_ASYNC);
 }
 
 TEST(MemChunkTarget, DiscardedTargetUnmapsItsBuffer) {
