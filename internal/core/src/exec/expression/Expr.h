@@ -69,6 +69,19 @@ enum class DataAccessMode {
     Scan,
 };
 
+// Skip filtering may omit a nullable chunk only when its consumer treats
+// UNKNOWN like FALSE. Otherwise evaluate the data normally (e.g. below NOT).
+inline constexpr bool
+CanUseSkipFilter(bool is_nullable, bool null_rejecting) {
+    return !is_nullable || null_rejecting;
+}
+
+// Per-chunk skip verdict for one expression. The view was resolved once for
+// the expression's field (SegmentExpr::skip_view_), so implementations index
+// it by chunk_id and never repeat the field lookups.
+using SkipChunkFn =
+    std::function<bool(const FieldSkipMetricsView&, int64_t chunk_id)>;
+
 inline std::vector<PinWrapper<const index::IndexBase*>>
 PinIndex(milvus::OpContext* op_ctx,
          const segcore::SegmentInternalInterface* segment,
@@ -462,6 +475,7 @@ class SegmentExpr : public Expr {
         auto schema = segment_->get_schema_snapshot();
         auto& field_meta = (*schema)[field_id_];
         field_type_ = field_meta.get_data_type();
+        is_nullable_ = field_meta.is_nullable();
 
         if (schema->get_primary_field_id().has_value() &&
             schema->get_primary_field_id().value() == field_id_ &&
@@ -493,6 +507,27 @@ class SegmentExpr : public Expr {
                 num_data_chunk_ = upper_div(active_count_, size_per_chunk_);
             }
         }
+
+        // Resolve this field's skip metrics once, from the same
+        // construction-time view as num_data_chunk_ above. Prefetch and every
+        // scan path then index the view by chunk_id; the field lookups are not
+        // repeated per cell, and the view pins the column generation whose
+        // layout num_data_chunk_ describes.
+        skip_view_ = snapshot_
+                         ? snapshot_->GetDataScanResources(field_id_).second
+                         : segment_->GetFieldSkipMetrics(field_id_);
+    }
+
+    // A null-rejecting consumer (top-level filter, or AND/OR above -- see
+    // Expr::MarkNullRejecting) folds a NULL row into the excluded set and never
+    // distinguishes NULL from FALSE, so result validity is never observed. When
+    // our output feeds such a consumer, a chunk skipped by SkipIndex needs no
+    // validity even for a nullable column, which lets it skip the validity
+    // fetch (and thus materializing the row group) entirely. As a leaf we only
+    // capture the mark; we do not propagate it.
+    void
+    MarkNullRejecting() override {
+        null_rejecting_ = true;
     }
 
     // Pin the scalar index cell. Called by DetermineExecPath() only after the
@@ -526,6 +561,9 @@ class SegmentExpr : public Expr {
     void
     SetSnapshot(const segcore::SegmentReadSnapshot* snapshot) override {
         snapshot_ = snapshot;
+        skip_view_ = snapshot_
+                         ? snapshot_->GetDataScanResources(field_id_).second
+                         : segment_->GetFieldSkipMetrics(field_id_);
     }
 
     // Metadata reads through the pinned snapshot when available, else fall
@@ -685,69 +723,41 @@ class SegmentExpr : public Expr {
         return milvus::TargetTypeOf<T>();
     }
 
-    std::pair<std::shared_ptr<ChunkedColumnInterface>,
-              std::shared_ptr<const SkipIndex>>
+    std::pair<std::shared_ptr<ChunkedColumnInterface>, FieldSkipMetricsView>
     CaptureDataScanResources() const {
         return snapshot_ ? snapshot_->GetDataScanResources(field_id_)
                          : segment_->GetDataScanResources(field_id_);
     }
 
     void
-    EnsureDataTakeResources(
-        const std::function<bool(const milvus::SkipIndex&, FieldId, int)>&
-            skip_func) {
+    EnsureDataTakeResources(const SkipChunkFn& skip_func) {
         if (data_take_resources_initialized_) {
             return;
         }
         data_take_resources_initialized_ = true;
         auto resources = CaptureDataScanResources();
         data_take_column_ = std::move(resources.first);
-        if (data_take_column_ != nullptr) {
-            data_take_filter_ =
-                BindColumnFilter(skip_func, std::move(resources.second));
-        }
-    }
-
-    detail::ColumnFilter::PhysicalCellPredicate
-    BindCellSkipPredicate(
-        std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
-        std::shared_ptr<const SkipIndex> skip_index) const {
-        if (!skip_func || skip_index == nullptr) {
-            return {};
-        }
-        const auto field_id = field_id_;
-        return [skip_func = std::move(skip_func),
-                skip_index = std::move(skip_index),
-                field_id](int64_t cell_id) {
-            return skip_func(*skip_index, field_id, static_cast<int>(cell_id));
-        };
+        data_take_filter_ =
+            BindColumnFilter(skip_func, std::move(resources.second));
     }
 
     detail::ColumnFilterPtr
-    BindColumnFilter(
-        std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
-        std::shared_ptr<const SkipIndex> skip_index) const {
-        if (!skip_func || skip_index == nullptr) {
+    BindColumnFilter(const SkipChunkFn& skip_func,
+                     FieldSkipMetricsView view) const {
+        if (!skip_func || !view.HasMetrics()) {
             return {};
         }
-        const auto source = skip_index->GetMetricsSource(field_id_);
-        if (source == SkipIndex::MetricsSource::None) {
-            return {};
-        }
-        const auto filter_source =
-            source == SkipIndex::MetricsSource::PreloadedStatistics
-                ? detail::ColumnFilter::MetricsSource::PreloadedStatistics
-                : detail::ColumnFilter::MetricsSource::LoadedPayload;
         return std::make_shared<const detail::ColumnFilter>(
-            filter_source,
-            BindCellSkipPredicate(std::move(skip_func), std::move(skip_index)));
+            detail::ColumnFilter::MetricsSource::PreloadedStatistics,
+            [skip_func = skip_func, view = std::move(view)](int64_t cell_id) {
+                return skip_func(view, cell_id);
+            },
+            !CanUseSkipFilter(is_nullable_, null_rejecting_));
     }
 
     template <typename T>
     ChunkedColumnInterface::ScanCursor*
-    EnsureDataScanCursor(
-        const std::function<bool(const milvus::SkipIndex&, FieldId, int)>&
-            skip_func) {
+    EnsureDataScanCursor(const SkipChunkFn& skip_func) {
         const auto target_type = DataTargetType<T>();
         return EnsureDataScanCursor(target_type, skip_func);
     }
@@ -759,10 +769,8 @@ class SegmentExpr : public Expr {
     }
 
     ChunkedColumnInterface::ScanCursor*
-    EnsureDataScanCursor(
-        ChunkedColumnInterface::TargetType target_type,
-        const std::function<bool(const milvus::SkipIndex&, FieldId, int)>&
-            skip_func) {
+    EnsureDataScanCursor(ChunkedColumnInterface::TargetType target_type,
+                         const SkipChunkFn& skip_func) {
         if (data_access_mode_ == DataAccessMode::Chunk) {
             return nullptr;
         }
@@ -1213,14 +1221,12 @@ class SegmentExpr : public Expr {
     // does not move, but the callback may maintain a batch-local bitmap cursor.
     template <typename T, typename BatchEvaluator, typename... ValTypes>
     int64_t
-    ProcessDataByOffsetsByChunkFallback(
-        BatchEvaluator evaluate_batch,
-        const std::function<bool(const milvus::SkipIndex&, FieldId, int)>&
-            skip_func,
-        OffsetVector* input,
-        TargetBitmapView res,
-        TargetBitmapView valid_res,
-        const ValTypes&... values) {
+    ProcessDataByOffsetsByChunkFallback(BatchEvaluator evaluate_batch,
+                                        const SkipChunkFn& skip_func,
+                                        OffsetVector* input,
+                                        TargetBitmapView res,
+                                        TargetBitmapView valid_res,
+                                        const ValTypes&... values) {
         return ProcessDataByOffsetsImpl<T>(evaluate_batch,
                                            skip_func,
                                            input,
@@ -1235,15 +1241,13 @@ class SegmentExpr : public Expr {
     // per-row mask checks.
     template <typename T, typename BatchEvaluator, typename... ValTypes>
     int64_t
-    ProcessDataByOffsetsWithMask(
-        BatchEvaluator evaluate_batch,
-        const std::function<bool(const milvus::SkipIndex&, FieldId, int)>&
-            skip_func,
-        OffsetVector* input,
-        TargetBitmapView res,
-        TargetBitmapView valid_res,
-        const TargetBitmap& candidate_mask,
-        const ValTypes&... values) {
+    ProcessDataByOffsetsWithMask(BatchEvaluator evaluate_batch,
+                                 const SkipChunkFn& skip_func,
+                                 OffsetVector* input,
+                                 TargetBitmapView res,
+                                 TargetBitmapView valid_res,
+                                 const TargetBitmap& candidate_mask,
+                                 const ValTypes&... values) {
         if constexpr (!std::is_same_v<T, VectorArrayView> &&
                       !std::is_same_v<T, ArrayValueView>) {
             if (UseIndexCursor() && num_data_chunk_ == 0) {
@@ -1278,15 +1282,13 @@ class SegmentExpr : public Expr {
 
     template <typename T, typename BatchEvaluator, typename... ValTypes>
     int64_t
-    ProcessDataByOffsetsImpl(
-        BatchEvaluator evaluate_batch,
-        const std::function<bool(const milvus::SkipIndex&, FieldId, int)>&
-            skip_func,
-        OffsetVector* input,
-        TargetBitmapView res,
-        TargetBitmapView valid_res,
-        const TargetBitmap* candidate_mask,
-        const ValTypes&... values) {
+    ProcessDataByOffsetsImpl(BatchEvaluator evaluate_batch,
+                             const SkipChunkFn& skip_func,
+                             OffsetVector* input,
+                             TargetBitmapView res,
+                             TargetBitmapView valid_res,
+                             const TargetBitmap* candidate_mask,
+                             const ValTypes&... values) {
         int64_t processed_size = 0;
         const bool has_candidate_mask =
             candidate_mask != nullptr && !candidate_mask->empty();
@@ -1315,7 +1317,6 @@ class SegmentExpr : public Expr {
                                                           values...);
             }
         }
-        auto skip_index = segment_->GetSkipIndex();
 
         // Read arbitrary offsets from non-owning view columns. Input order is
         // preserved, while adjacent candidates in the same chunk share one
@@ -1348,6 +1349,30 @@ class SegmentExpr : public Expr {
                     ++input_pos;
                 }
 
+                // Decide before fetching. Offset input is used by the
+                // iterative-filter path, so fetching the run first would
+                // materialize a cell that the skip index already ruled out. A
+                // nullable cell is still fetched when its validity remains
+                // observable, matching the sequential path.
+                const bool skip =
+                    skip_func && skip_func(skip_view_, run_chunk_id);
+                if (skip && CanUseSkipFilter(is_nullable_, null_rejecting_)) {
+                    // Drive the callback once per row so callbacks with a
+                    // batch-local cursor remain aligned.
+                    for (size_t i = 0; i < batch_offsets.size(); ++i) {
+                        evaluate_batch.template operator()<FilterType::random>(
+                            nullptr,
+                            ValidityView{},
+                            nullptr,
+                            1,
+                            res + processed_size,
+                            valid_res + processed_size,
+                            values...);
+                        ++processed_size;
+                    }
+                    continue;
+                }
+
                 auto pw = segment_->chunk_views_by_offsets<ViewType>(
                     op_ctx_, field_id_, run_chunk_id, batch_offsets);
                 const auto& [data_vec, valid_data] = pw.get();
@@ -1356,9 +1381,6 @@ class SegmentExpr : public Expr {
                            data_vec.size(),
                            batch_offsets.size());
 
-                const bool skip =
-                    skip_func &&
-                    skip_func(*skip_index, field_id_, run_chunk_id);
                 for (size_t i = 0; i < batch_offsets.size(); ++i) {
                     const auto validity =
                         valid_data.empty()
@@ -1410,8 +1432,7 @@ class SegmentExpr : public Expr {
                     chunk_id,
                     std::make_pair(chunk_offset, int64_t{1}));
                 const auto& [data_vec, valid_data] = pw.get();
-                if (!skip_func ||
-                    !skip_func(*skip_index, field_id_, chunk_id)) {
+                if (!skip_func || !skip_func(skip_view_, chunk_id)) {
                     evaluate_batch.template operator()<FilterType::random>(
                         data_vec.data(),
                         valid_data,
@@ -1458,18 +1479,27 @@ class SegmentExpr : public Expr {
                 auto [chunk_id, chunk_offset] =
                     GetChunkByOffset(field_id_, offset);
                 if (chunk_id != cached_chunk_id) {
-                    pw.emplace(
-                        segment_->chunk_data<T>(op_ctx_, field_id_, chunk_id));
-                    auto chunk = pw->get();
-                    chunk_base = chunk.data();
-                    chunk_validity = chunk.validity();
                     // SkipIndex is keyed by chunk alone; evaluate it once per
-                    // chunk instead of once per row.
-                    cached_skip = skip_func &&
-                                  skip_func(*skip_index, field_id_, chunk_id);
+                    // chunk instead of once per row, and before pinning. A
+                    // nullable cell is still fetched when its validity remains
+                    // observable, matching the sequential path.
+                    cached_skip = skip_func && skip_func(skip_view_, chunk_id);
+                    if (!cached_skip ||
+                        !CanUseSkipFilter(is_nullable_, null_rejecting_)) {
+                        pw.emplace(segment_->chunk_data<T>(
+                            op_ctx_, field_id_, chunk_id));
+                        auto chunk = pw->get();
+                        chunk_base = chunk.data();
+                        chunk_validity = chunk.validity();
+                    } else {
+                        pw.reset();
+                        chunk_base = nullptr;
+                        chunk_validity = ValidityView{};
+                    }
                     cached_chunk_id = chunk_id;
                 }
-                const T* data = chunk_base + chunk_offset;
+                const T* data =
+                    chunk_base != nullptr ? chunk_base + chunk_offset : nullptr;
                 const auto validity = chunk_validity.Subview(chunk_offset);
                 if (!cached_skip) {
                     evaluate_batch.template operator()<FilterType::random>(
@@ -1520,8 +1550,7 @@ class SegmentExpr : public Expr {
                     chunk_validity = chunk.validity();
                     // SkipIndex is keyed by chunk alone; evaluate it once per
                     // chunk instead of once per row.
-                    cached_skip = skip_func &&
-                                  skip_func(*skip_index, field_id_, chunk_id);
+                    cached_skip = skip_func && skip_func(skip_view_, chunk_id);
                     cached_chunk_id = chunk_id;
                 }
                 const T* data = chunk_base + chunk_offset;
@@ -1558,15 +1587,13 @@ class SegmentExpr : public Expr {
 
     template <typename T, typename FUNC, typename... ValTypes>
     int64_t
-    ProcessDataByOffsetsByTake(
-        FUNC func,
-        const std::function<bool(const milvus::SkipIndex&, FieldId, int)>&
-            skip_func,
-        OffsetVector* input,
-        TargetBitmapView res,
-        TargetBitmapView valid_res,
-        const TargetBitmap* candidate_mask,
-        const ValTypes&... values) {
+    ProcessDataByOffsetsByTake(FUNC func,
+                               const SkipChunkFn& skip_func,
+                               OffsetVector* input,
+                               TargetBitmapView res,
+                               TargetBitmapView valid_res,
+                               const TargetBitmap* candidate_mask,
+                               const ValTypes&... values) {
         // VECTOR_ARRAY has a target tag for typed access, but neither Raw nor
         // Vortex implements Take for it. Fall back before building an O(N)
         // Cell plan that the backend must reject.
@@ -1586,15 +1613,13 @@ class SegmentExpr : public Expr {
 
     template <typename T, typename FUNC, typename... ValTypes>
     int64_t
-    ProcessDataByOffsetsByTakeWithTarget(
-        FUNC func,
-        const std::function<bool(const milvus::SkipIndex&, FieldId, int)>&
-            skip_func,
-        OffsetVector* input,
-        TargetBitmapView res,
-        TargetBitmapView valid_res,
-        const TargetBitmap* candidate_mask,
-        const ValTypes&... values) {
+    ProcessDataByOffsetsByTakeWithTarget(FUNC func,
+                                         const SkipChunkFn& skip_func,
+                                         OffsetVector* input,
+                                         TargetBitmapView res,
+                                         TargetBitmapView valid_res,
+                                         const TargetBitmap* candidate_mask,
+                                         const ValTypes&... values) {
         static_assert(milvus::HasTargetType<T>);
         if (input->empty()) {
             return 0;
@@ -1954,14 +1979,12 @@ class SegmentExpr : public Expr {
     // legacy chunk reader for backends or representations it does not support.
     template <typename T, typename FUNC, typename... ValTypes>
     int64_t
-    ProcessDataByOffsets(
-        FUNC func,
-        const std::function<bool(const milvus::SkipIndex&, FieldId, int)>&
-            skip_func,
-        OffsetVector* input,
-        TargetBitmapView res,
-        TargetBitmapView valid_res,
-        const ValTypes&... values) {
+    ProcessDataByOffsets(FUNC func,
+                         const SkipChunkFn& skip_func,
+                         OffsetVector* input,
+                         TargetBitmapView res,
+                         TargetBitmapView valid_res,
+                         const ValTypes&... values) {
         // index reverse lookup (only for ScalarIndex path)
         if constexpr (!std::is_same_v<T, VectorArrayView> &&
                       !std::is_same_v<T, ArrayValueView>) {
@@ -1987,13 +2010,12 @@ class SegmentExpr : public Expr {
               typename BatchEvaluator,
               typename... ValTypes>
     int64_t
-    ProcessElementLevelByOffsets(
-        BatchEvaluator evaluate_batch,
-        std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
-        OffsetVector* element_ids,
-        TargetBitmapView res,
-        TargetBitmapView valid_res,
-        const ValTypes&... values) {
+    ProcessElementLevelByOffsets(BatchEvaluator evaluate_batch,
+                                 const SkipChunkFn& skip_func,
+                                 OffsetVector* element_ids,
+                                 TargetBitmapView res,
+                                 TargetBitmapView valid_res,
+                                 const ValTypes&... values) {
         if (element_ids->empty()) {
             return 0;
         }
@@ -2005,8 +2027,6 @@ class SegmentExpr : public Expr {
         AssertInfo(array_offsets != nullptr,
                    "ArrayOffsets not found for field {}",
                    field_id_.get());
-
-        auto skip_index = segment_->GetSkipIndex();
 
         // The element ids arriving here come from
         // RowOffsetsToElementOffsets, which emits each row's element ids
@@ -2085,7 +2105,7 @@ class SegmentExpr : public Expr {
             const auto batch_size = i - batch_start;
             const auto eval_size = static_cast<int>(batch_size);
             const bool chunk_active =
-                !skip_func || !skip_func(*skip_index, field_id_, chunk_id);
+                !skip_func || !skip_func(skip_view_, chunk_id);
 
             if (!chunk_active) {
                 // Keep cursor-tracking evaluators aligned with offset input
@@ -2135,12 +2155,11 @@ class SegmentExpr : public Expr {
               typename BatchEvaluator,
               typename... ValTypes>
     int64_t
-    ProcessDataChunksForElementLevel(
-        BatchEvaluator evaluate_batch,
-        std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
-        TargetBitmapView res,
-        TargetBitmapView valid_res,
-        const ValTypes&... values) {
+    ProcessDataChunksForElementLevel(BatchEvaluator evaluate_batch,
+                                     const SkipChunkFn& skip_func,
+                                     TargetBitmapView res,
+                                     TargetBitmapView valid_res,
+                                     const ValTypes&... values) {
         static_assert(!std::is_same_v<ElementType, Json>,
                       "Json element type is not supported for "
                       "element-level filtering");
@@ -2181,9 +2200,7 @@ class SegmentExpr : public Expr {
                 return int64_t{end_range.first - start_range.first};
             };
 
-            auto skip_index = segment_->GetSkipIndex();
-            const bool chunk_active =
-                !skip_func || !skip_func(*skip_index, field_id_, i);
+            const bool chunk_active = !skip_func || !skip_func(skip_view_, i);
             if (!chunk_active) {
                 // ArrayOffsets defines the logical flattened address space:
                 // null ARRAY rows contribute zero elements even if storage
@@ -2243,14 +2260,12 @@ class SegmentExpr : public Expr {
               typename FUNC,
               typename... ValTypes>
     int64_t
-    ProcessDataChunksForSingleChunk(
-        FUNC func,
-        const std::function<bool(const milvus::SkipIndex&, FieldId, int)>&
-            skip_func,
-        TargetBitmapView res,
-        TargetBitmapView valid_res,
-        const TargetBitmap* candidate_mask,
-        const ValTypes&... values) {
+    ProcessDataChunksForSingleChunk(FUNC func,
+                                    const SkipChunkFn& skip_func,
+                                    TargetBitmapView res,
+                                    TargetBitmapView valid_res,
+                                    const TargetBitmap* candidate_mask,
+                                    const ValTypes&... values) {
         const auto expected_rows = GetNextBatchSize();
         int64_t processed_size = 0;
 
@@ -2264,10 +2279,8 @@ class SegmentExpr : public Expr {
                 continue;
             }
 
-            auto skip_index = segment_->GetSkipIndex();
             auto process_chunk = [&](const T* data, ValidityView valid_data) {
-                auto skipped =
-                    skip_func && skip_func(*skip_index, field_id_, i);
+                auto skipped = skip_func && skip_func(skip_view_, i);
                 if (!skipped) {
                     if constexpr (NeedSegmentOffsets) {
                         // For GIS functions: construct segment offsets array
@@ -2368,14 +2381,12 @@ class SegmentExpr : public Expr {
               typename FUNC,
               typename... ValTypes>
     int64_t
-    ProcessDataChunksByScan(
-        FUNC func,
-        const std::function<bool(const milvus::SkipIndex&, FieldId, int)>&
-            skip_func,
-        TargetBitmapView res,
-        TargetBitmapView valid_res,
-        const TargetBitmap* candidate_mask,
-        const ValTypes&... values) {
+    ProcessDataChunksByScan(FUNC func,
+                            const SkipChunkFn& skip_func,
+                            TargetBitmapView res,
+                            TargetBitmapView valid_res,
+                            const TargetBitmap* candidate_mask,
+                            const ValTypes&... values) {
         if constexpr (!milvus::HasTargetType<T>) {
             return -1;
         } else {
@@ -2389,14 +2400,12 @@ class SegmentExpr : public Expr {
               typename FUNC,
               typename... ValTypes>
     int64_t
-    ProcessDataChunksByScanWithTarget(
-        FUNC func,
-        const std::function<bool(const milvus::SkipIndex&, FieldId, int)>&
-            skip_func,
-        TargetBitmapView res,
-        TargetBitmapView valid_res,
-        const TargetBitmap* candidate_mask,
-        const ValTypes&... values) {
+    ProcessDataChunksByScanWithTarget(FUNC func,
+                                      const SkipChunkFn& skip_func,
+                                      TargetBitmapView res,
+                                      TargetBitmapView valid_res,
+                                      const TargetBitmap* candidate_mask,
+                                      const ValTypes&... values) {
         static_assert(milvus::HasTargetType<T>);
         const auto real_batch_size = GetNextBatchSize();
         const auto window_start = current_data_global_pos_;
@@ -2508,13 +2517,11 @@ class SegmentExpr : public Expr {
               typename FUNC,
               typename... ValTypes>
     int64_t
-    ProcessDataChunks(
-        FUNC func,
-        const std::function<bool(const milvus::SkipIndex&, FieldId, int)>&
-            skip_func,
-        TargetBitmapView res,
-        TargetBitmapView valid_res,
-        const ValTypes&... values) {
+    ProcessDataChunks(FUNC func,
+                      const SkipChunkFn& skip_func,
+                      TargetBitmapView res,
+                      TargetBitmapView valid_res,
+                      const ValTypes&... values) {
         return ProcessDataChunksImpl<T, NeedSegmentOffsets>(
             func, skip_func, res, valid_res, nullptr, values...);
     }
@@ -2524,14 +2531,12 @@ class SegmentExpr : public Expr {
               typename FUNC,
               typename... ValTypes>
     int64_t
-    ProcessDataChunksWithMask(
-        FUNC func,
-        const std::function<bool(const milvus::SkipIndex&, FieldId, int)>&
-            skip_func,
-        TargetBitmapView res,
-        TargetBitmapView valid_res,
-        const TargetBitmap& candidate_mask,
-        const ValTypes&... values) {
+    ProcessDataChunksWithMask(FUNC func,
+                              const SkipChunkFn& skip_func,
+                              TargetBitmapView res,
+                              TargetBitmapView valid_res,
+                              const TargetBitmap& candidate_mask,
+                              const ValTypes&... values) {
         AssertInfo(candidate_mask.empty() ||
                        candidate_mask.size() ==
                            static_cast<size_t>(GetNextBatchSize()),
@@ -2547,14 +2552,12 @@ class SegmentExpr : public Expr {
               typename FUNC,
               typename... ValTypes>
     int64_t
-    ProcessDataChunksImpl(
-        FUNC func,
-        const std::function<bool(const milvus::SkipIndex&, FieldId, int)>&
-            skip_func,
-        TargetBitmapView res,
-        TargetBitmapView valid_res,
-        const TargetBitmap* candidate_mask,
-        const ValTypes&... values) {
+    ProcessDataChunksImpl(FUNC func,
+                          const SkipChunkFn& skip_func,
+                          TargetBitmapView res,
+                          TargetBitmapView valid_res,
+                          const TargetBitmap* candidate_mask,
+                          const ValTypes&... values) {
         const auto processed_size =
             ProcessDataChunksByScan<T, NeedSegmentOffsets>(
                 func, skip_func, res, valid_res, candidate_mask, values...);
@@ -3714,6 +3717,15 @@ class SegmentExpr : public Expr {
     const segcore::SegmentReadSnapshot* snapshot_{nullptr};
     const FieldId field_id_;
     bool is_pk_field_{false};
+    // Whether the column carries a validity (null) bitmap. When false, a chunk
+    // skipped by SkipIndex needs no per-row validity work, so the multi-chunk
+    // scan can avoid pinning/materializing it (see ProcessDataChunksForMultipleChunk).
+    bool is_nullable_{false};
+    // Set when a null-rejecting parent (top-level filter / AND / OR) consumes
+    // this expr's output, so result validity (valid_res) is never observed and
+    // even a nullable skipped chunk needs no validity fetch. See MarkNullRejecting.
+    bool null_rejecting_{false};
+    FieldSkipMetricsView skip_view_;
     DataType pk_type_;
     int64_t batch_size_;
 

@@ -807,13 +807,6 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
         return expr_->column_.element_level_;
     }
 
-    void
-    PrefetchRawData() override;
-
-    template <typename T>
-    void
-    PrefetchRawData();
-
  private:
     template <typename T>
     VectorPtr
