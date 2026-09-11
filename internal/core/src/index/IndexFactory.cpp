@@ -1188,8 +1188,7 @@ IndexFactory::ScalarIndexFileLoadResource(
     // Both routes must lease the entire overhead before sharing its reservation.
     if (can_share) {
         auto memory_group =
-            storage::LoadMemoryOverheadController::GetInstance().GetOrCreate(
-                milvus::ThreadPools::GetLoadExecutorWorkers());
+            storage::LoadMemoryOverheadController::GetInstance().GetOrCreate();
         AssertInfo(max_task <= static_cast<uint64_t>(
                                    std::numeric_limits<int64_t>::max()),
                    "Async scalar task estimate exceeds resource policy range");

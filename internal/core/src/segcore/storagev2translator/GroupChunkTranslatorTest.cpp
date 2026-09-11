@@ -140,10 +140,9 @@ TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
         /* warmup_policy */ "",
         MmapChunkWritebackMode::Disabled);
 
-    auto executor_workers = milvus::ThreadPools::GetLoadExecutorWorkers();
     auto memory_group =
         milvus::storage::LoadMemoryOverheadController::GetInstance()
-            .GetOrCreate(executor_workers);
+            .GetOrCreate();
     ASSERT_TRUE(translator->meta()->loading_overhead_config.has_value());
     ASSERT_TRUE(
         translator->meta()->loading_overhead_config->memory.has_value());
@@ -160,7 +159,7 @@ TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
             translator->meta()->loading_overhead_config->file.has_value());
         EXPECT_EQ(translator->meta()->loading_overhead_config->file->group,
                   milvus::storage::LoadFileOverheadController::GetInstance()
-                      .GetOrCreate(executor_workers));
+                      .GetOrCreate());
         ASSERT_TRUE(
             translator->meta()
                 ->loading_overhead_config->file->max_runtime_unit.has_value());

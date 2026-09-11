@@ -478,10 +478,9 @@ ManifestGroupTranslator::ManifestGroupTranslator(
             std::max(FieldDataLoadBatchTargetBytes(), max_overhead_size);
         auto max_file_runtime_unit =
             std::max(FieldDataLoadBatchTargetBytes(), max_cell_sz);
-        auto executor_workers = milvus::ThreadPools::GetLoadExecutorWorkers();
         auto memory_group =
             milvus::storage::LoadMemoryOverheadController::GetInstance()
-                .GetOrCreate(executor_workers);
+                .GetOrCreate();
         meta_.loading_overhead_config =
             milvus::cachinglayer::LoadingOverheadConfig{
                 milvus::cachinglayer::LoadingOverheadGroupBinding{
@@ -491,7 +490,7 @@ ManifestGroupTranslator::ManifestGroupTranslator(
                           milvus::cachinglayer::LoadingOverheadGroupBinding{
                               milvus::storage::LoadFileOverheadController::
                                   GetInstance()
-                                      .GetOrCreate(executor_workers),
+                                      .GetOrCreate(),
                               max_file_runtime_unit})
                     : std::nullopt};
     }

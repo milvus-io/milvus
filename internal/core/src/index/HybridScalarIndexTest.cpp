@@ -1003,8 +1003,7 @@ TYPED_TEST_P(HybridIndexTestInverted,
         [&budget, old_capacity]() { budget.SetCapacityBytes(old_capacity); });
     budget.SetCapacityBytes(0);
     auto memory_group =
-        storage::LoadMemoryOverheadController::GetInstance().GetOrCreate(
-            milvus::ThreadPools::GetLoadExecutorWorkers());
+        storage::LoadMemoryOverheadController::GetInstance().GetOrCreate();
 
     std::map<std::string, std::string> index_params{
         {"index_type", milvus::index::HYBRID_INDEX_TYPE},

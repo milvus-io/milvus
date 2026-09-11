@@ -259,8 +259,7 @@ RunTantivyDirectLoad(bool enable_mmap, bool nullable) {
         ASSERT_TRUE(resources.overhead->memory.has_value());
         EXPECT_EQ(
             resources.overhead->memory->group,
-            storage::LoadMemoryOverheadController::GetInstance().GetOrCreate(
-                ThreadPools::GetLoadExecutorWorkers()));
+            storage::LoadMemoryOverheadController::GetInstance().GetOrCreate());
     }
     if (nullable) {
         EXPECT_GE(resources.request.max_memory_cost,
