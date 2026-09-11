@@ -5,6 +5,7 @@ mod jieba_tokenizer;
 mod lang_ident_tokenizer;
 mod lindera_tokenizer;
 mod ngram_tokenizer_with_chars;
+mod standard_tokenizer;
 mod thai_tokenizer;
 mod tokenizer;
 
@@ -15,6 +16,7 @@ pub use self::jieba_tokenizer::JiebaTokenizer;
 pub use self::lang_ident_tokenizer::LangIdentTokenizer;
 pub use self::lindera_tokenizer::LinderaTokenizer;
 pub use self::ngram_tokenizer_with_chars::NgramTokenizerWithChars;
+pub use self::standard_tokenizer::StandardTokenizer;
 pub use self::thai_tokenizer::ThaiTokenizer;
 
 pub(crate) use self::tokenizer::*;
