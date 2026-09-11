@@ -31,6 +31,8 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -44,6 +46,8 @@ import (
 // It returns true for:
 //   - ErrCompacted: the watched revision has been compacted; re-watch from a
 //     fresh revision (pre-existing behavior).
+//   - ErrLeaderChanged: an etcd leader transfer interrupted the runtime watch;
+//     re-list at a fresh revision and establish a new watch stream.
 //   - auth-token errors (ErrInvalidAuthToken, ErrUserEmpty, ErrAuthOldRevision):
 //     with etcd auth enabled, the auth token held by a client can be
 //     invalidated server-side (the default "simple" token is GC'd after idle
@@ -62,17 +66,49 @@ import (
 // back to these sentinels (v3rpc.Error), and ErrInvalidAuthToken is the only
 // source of Unauthenticated, so matching the sentinel is both sufficient and
 // narrower than trusting the code.
-//
-// Callers should wrap the re-watch in a bounded retry (retry.Attempts) so a
-// genuinely persistent failure does not loop forever.
 func IsRetriableWatchErr(err error) bool {
 	if err == nil {
 		return false
 	}
 	return errors.Is(err, rpctypes.ErrCompacted) ||
+		errors.Is(err, rpctypes.ErrLeaderChanged) ||
 		errors.Is(err, rpctypes.ErrInvalidAuthToken) ||
 		errors.Is(err, rpctypes.ErrUserEmpty) ||
 		errors.Is(err, rpctypes.ErrAuthOldRevision)
+}
+
+// IsRetriableEtcdRequestErr reports whether an etcd request used to
+// re-establish a watch failed because the service is temporarily unavailable.
+// It deliberately excludes context.Canceled so parent shutdown terminates the
+// recovery loop, and excludes authorization/configuration errors that cannot be
+// repaired by retrying the same request.
+func IsRetriableEtcdRequestErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	if IsRetriableWatchErr(err) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+
+	// etcd server errors are rpctypes.EtcdError values. They expose Code(),
+	// but do not implement gRPC's GRPCStatus interface, so status.Code below
+	// reports Unknown for them even when their code is retriable.
+	var etcdErr rpctypes.EtcdError
+	if errors.As(err, &etcdErr) {
+		switch etcdErr.Code() {
+		case codes.Unavailable, codes.DeadlineExceeded, codes.ResourceExhausted:
+			return true
+		default:
+			return false
+		}
+	}
+
+	switch status.Code(err) {
+	case codes.Unavailable, codes.DeadlineExceeded, codes.ResourceExhausted:
+		return true
+	default:
+		return false
+	}
 }
 
 type ClientOption func(*clientv3.Config)

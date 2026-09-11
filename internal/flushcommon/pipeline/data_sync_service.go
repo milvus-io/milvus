@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
@@ -41,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -321,7 +323,8 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 	// This'll reject any FlushChannel and FlushSegments calls to prevent inconsistency between DN and DC over flushTs
 	// if fail to init flowgraph nodes.
 	writeBufferOptions := []writebuffer.WriteBufferOption{
-		writebuffer.WithMetaWriter(syncmgr.BrokerMetaWriter(params.Broker, config.serverID)),
+		writebuffer.WithMetaWriter(syncmgr.BrokerMetaWriter(params.Broker, config.serverID,
+			retry.AttemptAlways(), retry.MaxSleepTime(10*time.Second), retry.RetryErr(func(error) bool { return true }))),
 		writebuffer.WithIDAllocator(params.Allocator),
 		writebuffer.WithTaskObserverCallback(wbTaskObserverCallback),
 	}

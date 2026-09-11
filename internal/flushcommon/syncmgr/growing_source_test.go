@@ -241,7 +241,7 @@ func TestGrowingSourceSyncTaskBuildFlushConfigBM25(t *testing.T) {
 
 	columnGroups, err := task.getColumnGroups(segment)
 	require.NoError(t, err)
-	config, err := task.buildFlushConfig(segment, columnGroups)
+	config, err := task.buildFlushConfig(context.Background(), segment, columnGroups)
 	require.NoError(t, err)
 	require.Equal(t, schema, config.Schema)
 	require.Equal(t, []int64{101}, config.TextFieldIDs)
@@ -272,7 +272,7 @@ func TestGrowingSourceSyncTaskBuildFlushConfigStartsFromEarliestManifest(t *test
 
 	columnGroups, err := task.getColumnGroups(segment)
 	require.NoError(t, err)
-	config, err := task.buildFlushConfig(segment, columnGroups)
+	config, err := task.buildFlushConfig(context.Background(), segment, columnGroups)
 	require.NoError(t, err)
 	require.EqualValues(t, packed.ManifestEarliest, config.ReadVersion)
 }
@@ -297,7 +297,7 @@ func TestGrowingSourceSyncTaskBuildFlushConfigBM25AllocatorError(t *testing.T) {
 
 	columnGroups, err := task.getColumnGroups(segment)
 	require.NoError(t, err)
-	_, err = task.buildFlushConfig(segment, columnGroups)
+	_, err = task.buildFlushConfig(context.Background(), segment, columnGroups)
 	require.ErrorContains(t, err, "alloc failed")
 }
 
@@ -320,7 +320,7 @@ func TestGrowingSourceSyncTaskBuildFlushConfigBM25RequiresAllocator(t *testing.T
 
 	columnGroups, err := task.getColumnGroups(segment)
 	require.NoError(t, err)
-	_, err = task.buildFlushConfig(segment, columnGroups)
+	_, err = task.buildFlushConfig(context.Background(), segment, columnGroups)
 	require.ErrorContains(t, err, "id allocator is nil")
 }
 
@@ -357,7 +357,7 @@ func TestGrowingSourceSyncTaskBuildFlushConfigUsesCurrentSplitPattern(t *testing
 
 	columnGroups, err := task.getColumnGroups(segment)
 	require.NoError(t, err)
-	config, err := task.buildFlushConfig(segment, columnGroups)
+	config, err := task.buildFlushConfig(context.Background(), segment, columnGroups)
 	require.NoError(t, err)
 	require.Equal(t, "100,101,102", config.SchemaBasedPattern)
 	require.Equal(t, "parquet,vortex,parquet", config.SchemaBasedFormats)
@@ -397,7 +397,7 @@ func TestGrowingSourceSyncTaskBuildFlushConfigRequiresCurrentSplitFormatForExist
 
 	columnGroups, err := task.getColumnGroups(segment)
 	require.NoError(t, err)
-	_, err = task.buildFlushConfig(segment, columnGroups)
+	_, err = task.buildFlushConfig(context.Background(), segment, columnGroups)
 	require.ErrorIs(t, err, merr.ErrDataIntegrity)
 	require.ErrorContains(t, err, "missing format")
 }
@@ -433,7 +433,7 @@ func TestGrowingSourceSyncTaskBuildFlushConfigAllowsMissingFormatForEarliestMani
 
 	columnGroups, err := task.getColumnGroups(segment)
 	require.NoError(t, err)
-	config, err := task.buildFlushConfig(segment, columnGroups)
+	config, err := task.buildFlushConfig(context.Background(), segment, columnGroups)
 	require.NoError(t, err)
 	require.EqualValues(t, packed.ManifestEarliest, config.ReadVersion)
 	require.NotEmpty(t, config.SchemaBasedFormats)
@@ -480,7 +480,7 @@ func TestGrowingSourceSyncTaskBuildFlushConfigProjectsToCurrentSplit(t *testing.
 
 	columnGroups, err := task.getColumnGroups(segment)
 	require.NoError(t, err)
-	config, err := task.buildFlushConfig(segment, columnGroups)
+	config, err := task.buildFlushConfig(context.Background(), segment, columnGroups)
 	require.NoError(t, err)
 	require.Equal(t, schema, config.Schema)
 	require.Equal(t, []int64{100, 101, 102}, config.AllowedFieldIDs)

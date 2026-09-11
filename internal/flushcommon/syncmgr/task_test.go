@@ -20,9 +20,12 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/apache/arrow/go/v17/arrow"
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
@@ -398,6 +401,77 @@ func (s *SyncTaskSuite) TestRunStorageV3ManifestPathUpdated() {
 	if len(task.insertBinlogs) > 0 {
 		s.NotEqual(originalManifestPath, capturedManifestPath)
 	}
+}
+
+func (s *SyncTaskSuite) TestRunStorageV3RetriesTransientInsertWrite() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(nil)
+
+	seg := s.createSegment(storage.StorageV3)
+	s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
+	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
+	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Run(func(action metacache.SegmentAction, filters ...metacache.SegmentFilter) {
+		action(seg)
+	}).Return()
+
+	var calls atomic.Int32
+	var writeRecordBatch func(*packed.FFIPackedWriter, arrow.Record) error
+	patch := mockey.Mock((*packed.FFIPackedWriter).WriteRecordBatch).
+		To(func(writer *packed.FFIPackedWriter, record arrow.Record) error {
+			if calls.Add(1) == 1 {
+				return errors.Wrap(packed.ErrLoonTransient, "temporary object storage failure")
+			}
+			return writeRecordBatch(writer, record)
+		}).
+		Origin(&writeRecordBatch).
+		Build()
+	defer patch.UnPatch()
+
+	task := s.getSuiteSyncTask(
+		new(SyncPack).
+			WithInsertData([]*storage.InsertData{s.getInsertBuffer()}).
+			WithCheckpoint(&msgpb.MsgPosition{
+				ChannelName: s.channelName,
+				MsgID:       []byte{1, 2, 3, 4},
+				Timestamp:   100,
+			})).
+		WithMetaWriter(BrokerMetaWriter(s.broker, 1)).
+		WithFailureCallback(func(err error) { panic(err) }).
+		WithWriteRetryOptions(retry.Attempts(2), retry.Sleep(time.Millisecond), retry.MaxSleepTime(time.Millisecond))
+
+	s.NotPanics(func() {
+		s.NoError(task.Run(ctx))
+	})
+	s.GreaterOrEqual(calls.Load(), int32(2))
+}
+
+func (s *SyncTaskSuite) TestRunStorageV3NonRecoverableWriteStopsAfterOneAttempt() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	seg := s.createSegment(storage.StorageV3)
+	s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
+
+	var calls atomic.Int32
+	patch := mockey.Mock((*packed.FFIPackedWriter).WriteRecordBatch).
+		To(func(*packed.FFIPackedWriter, arrow.Record) error {
+			calls.Add(1)
+			return errors.New("permanent writer failure")
+		}).Build()
+	defer patch.UnPatch()
+
+	var failureCalls atomic.Int32
+	task := s.getSuiteSyncTask(
+		new(SyncPack).WithInsertData([]*storage.InsertData{s.getInsertBuffer()})).
+		WithFailureCallback(func(error) { failureCalls.Add(1) }).
+		WithWriteRetryOptions(retry.Attempts(3), retry.Sleep(time.Millisecond), retry.MaxSleepTime(time.Millisecond))
+
+	err := task.Run(ctx)
+	s.ErrorContains(err, "permanent writer failure")
+	s.EqualValues(1, calls.Load())
+	s.EqualValues(1, failureCalls.Load())
 }
 
 func (s *SyncTaskSuite) TestRunL0Segment() {

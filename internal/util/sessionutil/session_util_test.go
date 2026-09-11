@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/blang/semver/v4"
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -21,6 +22,8 @@ import (
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus/internal/json"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -340,6 +343,101 @@ func TestWatcherHandleWatchResp(t *testing.T) {
 		assert.NoError(t, err)
 		assert.True(t, rewatched)
 		assert.NotNil(t, w.rch)
+	})
+
+	t.Run("leader change triggers rewatch instead of close", func(t *testing.T) {
+		rewatched := false
+		w := getWatcher(s, func(sessions map[string]*Session) error {
+			rewatched = true
+			return nil
+		})
+		err := w.handleWatchErr(v3rpc.ErrLeaderChanged)
+		assert.NoError(t, err)
+		assert.True(t, rewatched)
+		assert.NotNil(t, w.rch)
+	})
+
+	t.Run("recoverable request failure keeps retrying rewatch", func(t *testing.T) {
+		w := getWatcher(s, nil)
+		calls := 0
+		patch := mockey.Mock((*sessionWatcher).handleReWatch).
+			To(func(*sessionWatcher) error {
+				calls++
+				if calls == 1 {
+					return status.Error(codes.Unavailable, "etcd temporarily unavailable")
+				}
+				return nil
+			}).Build()
+		defer patch.UnPatch()
+
+		assert.NoError(t, w.retryRewatch())
+		assert.Equal(t, 2, calls)
+	})
+
+	t.Run("watcher stop during rewatch does not panic", func(t *testing.T) {
+		watchCtx, cancel := context.WithCancel(s.ctx)
+		w := getWatcher(s, nil)
+		w.ctx = watchCtx
+		w.cancel = cancel
+
+		attemptStarted := make(chan struct{})
+		releaseAttempt := make(chan struct{})
+		patch := mockey.Mock((*sessionWatcher).handleReWatch).
+			To(func(*sessionWatcher) error {
+				close(attemptStarted)
+				<-releaseAttempt
+				return v3rpc.ErrTimeout
+			}).Build()
+		defer patch.UnPatch()
+
+		panicCh := make(chan any, 1)
+		go func() {
+			defer func() {
+				panicCh <- recover()
+			}()
+			w.handleWatchResponse(clientv3.WatchResponse{CompactRevision: 1})
+		}()
+
+		<-attemptStarted
+		w.Stop()
+		close(releaseAttempt)
+
+		select {
+		case recovered := <-panicCh:
+			assert.Nil(t, recovered)
+		case <-time.After(time.Second):
+			t.Fatal("watch response handler did not stop after watcher cancellation")
+		}
+	})
+
+	t.Run("rewatch starts after snapshot revision", func(t *testing.T) {
+		prefix := "revision-test"
+		key := path.Join(metaRoot, DefaultServiceRoot, prefix, "node-1")
+		defer etcdCli.Delete(ctx, path.Join(metaRoot, DefaultServiceRoot, prefix), clientv3.WithPrefix())
+		value, err := json.Marshal(&Session{SessionRaw: SessionRaw{ServerID: 1, ServerName: "node-1"}})
+		require.NoError(t, err)
+		_, err = etcdCli.Put(ctx, key, string(value))
+		require.NoError(t, err)
+
+		w := getWatcher(s, nil)
+		w.prefix = prefix
+		require.NoError(t, w.handleReWatch())
+
+		select {
+		case response := <-w.rch:
+			t.Fatalf("snapshot revision was replayed by rewatch: %+v", response)
+		case <-time.After(100 * time.Millisecond):
+		}
+
+		_, err = etcdCli.Put(ctx, key, string(value))
+		require.NoError(t, err)
+		select {
+		case response := <-w.rch:
+			require.NoError(t, response.Err())
+			require.Len(t, response.Events, 1)
+		case <-time.After(2 * time.Second):
+			t.Fatal("rewatch did not receive the next revision")
+		}
 	})
 
 	t.Run("non-retriable error closes channel", func(t *testing.T) {

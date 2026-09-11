@@ -129,32 +129,37 @@ func (p *ProxyWatcher) startWatchEtcd(ctx context.Context, eventCh clientv3.Watc
 
 		case event, ok := <-eventCh:
 			if !ok {
-				mlog.Warn(ctx, "stop watching etcd loop due to closed etcd event channel")
-				panic("stop watching etcd loop due to closed etcd event channel")
+				mlog.Warn(ctx, "proxy watch channel closed, re-establishing watch")
+				if err := p.rewatchProxy(ctx); err != nil {
+					if ctx.Err() != nil || p.closeCh.IsClosed() {
+						return
+					}
+					mlog.Error(ctx, "failed to re-establish closed proxy watch", mlog.Err(err))
+					panic(err)
+				}
+				return
 			}
 			if err := event.Err(); err != nil {
-				// Recoverable watch errors (compaction, or auth-token
-				// invalidation when etcd auth is enabled) are handled by
+				// Recoverable watch errors (compaction, leader changes, or
+				// auth-token invalidation when etcd auth is enabled) are handled by
 				// re-establishing the watch instead of crashing. Re-watching
 				// issues a unary request that refreshes the etcd auth token, so
 				// the new watch stream recovers. See etcd.IsRetriableWatchErr.
 				if etcd.IsRetriableWatchErr(err) {
 					mlog.Warn(ctx, "proxy watch hit a recoverable error, re-establishing watch", mlog.Err(err))
-					// Re-watch with a bounded retry/backoff. WatchProxy first issues
+					// WatchProxy first issues
 					// a unary Get (getSessionsOnEtcd), which goes through clientv3's
 					// unary retry interceptor and refreshes the etcd auth token before
-					// a fresh watch stream is opened. retry.Do is bounded by its
-					// default attempt count and backoff; only transient errors are
-					// retried, a non-transient failure aborts immediately.
+					// a fresh watch stream is opened. Recoverable request failures keep
+					// retrying until the parent context is canceled; a non-recoverable
+					// failure aborts immediately.
 					//
 					// On success WatchProxy spawns a new startWatchEtcd goroutine, so
 					// this goroutine returns and hands the watch over to it (not a
 					// recursive call that would accumulate goroutines).
-					err2 := retry.Do(ctx, func() error {
-						return p.WatchProxy(ctx)
-					}, retry.RetryErr(etcd.IsRetriableWatchErr))
+					err2 := p.rewatchProxy(ctx)
 					if err2 != nil {
-						if ctx.Err() != nil {
+						if ctx.Err() != nil || p.closeCh.IsClosed() {
 							mlog.Warn(ctx, "stop re-watching proxy due to context done", mlog.Err(err2))
 							return
 						}
@@ -182,6 +187,24 @@ func (p *ProxyWatcher) startWatchEtcd(ctx context.Context, eventCh clientv3.Watc
 			}
 		}
 	}
+}
+
+func (p *ProxyWatcher) rewatchProxy(ctx context.Context) error {
+	retryCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go func() {
+		select {
+		case <-p.closeCh.CloseCh():
+			cancel()
+		case <-retryCtx.Done():
+		}
+	}()
+
+	return retry.Do(retryCtx, func() error {
+		// Keep the replacement watch on the caller's lifetime. retryCtx is only
+		// for interrupting the recovery loop when Stop closes closeCh.
+		return p.WatchProxy(ctx)
+	}, retry.AttemptAlways(), retry.MaxSleepTime(10*time.Second), retry.RetryErr(etcd.IsRetriableEtcdRequestErr))
 }
 
 func (p *ProxyWatcher) handlePutEvent(e *clientv3.Event) error {

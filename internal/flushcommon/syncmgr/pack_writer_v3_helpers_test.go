@@ -20,29 +20,45 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
-func TestClassifyLoonErr(t *testing.T) {
+func TestClassifyStorageV3Err(t *testing.T) {
 	t.Run("nil", func(t *testing.T) {
-		assert.NoError(t, classifyLoonErr(nil))
+		assert.NoError(t, classifyStorageV3Err(nil))
 	})
 	t.Run("transient stays retryable", func(t *testing.T) {
 		wrapped := fmt.Errorf("loon failed: %w", packed.ErrLoonTransient)
-		out := classifyLoonErr(wrapped)
+		out := classifyStorageV3Err(wrapped)
 		require.Error(t, out)
 		assert.True(t, errors.Is(out, packed.ErrLoonTransient),
 			"transient error must remain retryable")
 		assert.True(t, retry.IsRecoverable(out),
 			"transient error must remain recoverable so retry.Do retries")
 	})
+	t.Run("mapped storage transient stays retryable", func(t *testing.T) {
+		out := classifyStorageV3Err(merr.SegcoreError(2045, "storage temporarily unavailable"))
+		require.Error(t, out)
+		assert.True(t, merr.IsRetryableErr(out))
+		assert.True(t, retry.IsRecoverable(out))
+	})
 	t.Run("non-transient becomes unrecoverable", func(t *testing.T) {
-		out := classifyLoonErr(errors.New("permanent disk fault"))
+		out := classifyStorageV3Err(errors.New("permanent disk fault"))
 		require.Error(t, out)
 		assert.False(t, retry.IsRecoverable(out),
 			"non-transient error must be wrapped Unrecoverable so retry stops")
 	})
+}
+
+func TestStopStorageV3RetryAfterCommit(t *testing.T) {
+	assert.NoError(t, stopStorageV3RetryAfterCommit(nil))
+
+	err := stopStorageV3RetryAfterCommit(errors.Wrap(packed.ErrLoonTransient, "post-commit bookkeeping failed"))
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, packed.ErrLoonTransient))
+	assert.False(t, retry.IsRecoverable(err), "a committed manifest must never restart phase 1")
 }
 
 func TestBuildTextColumnConfigs(t *testing.T) {

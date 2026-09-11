@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/minio/minio-go/v7"
 	"github.com/stretchr/testify/assert"
@@ -41,6 +42,42 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
+
+func TestAllocOneWithRetry(t *testing.T) {
+	alloc := allocator.NewMockGIDAllocator()
+	calls := 0
+	patch := mockey.Mock(allocator.MockGIDAllocator.AllocOne).
+		To(func(allocator.MockGIDAllocator) (allocator.UniqueID, error) {
+			calls++
+			if calls == 1 {
+				return 0, merr.WrapErrServiceUnavailableMsg("mixcoord unavailable")
+			}
+			return 100, nil
+		}).Build()
+	defer patch.UnPatch()
+
+	id, err := allocOneWithRetry(context.Background(), alloc,
+		retry.Attempts(2), retry.Sleep(time.Millisecond), retry.RetryErr(func(error) bool { return true }))
+	require.NoError(t, err)
+	require.EqualValues(t, 100, id)
+	require.Equal(t, 2, calls)
+}
+
+func TestAllocOneWithRetryWithoutOptions(t *testing.T) {
+	alloc := allocator.NewMockGIDAllocator()
+	calls := 0
+	patch := mockey.Mock(allocator.MockGIDAllocator.AllocOne).
+		To(func(allocator.MockGIDAllocator) (allocator.UniqueID, error) {
+			calls++
+			return 101, nil
+		}).Build()
+	defer patch.UnPatch()
+
+	id, err := allocOneWithRetry(context.Background(), alloc)
+	require.NoError(t, err)
+	require.EqualValues(t, 101, id)
+	require.Equal(t, 1, calls)
+}
 
 func TestBulkPackWriter_Write(t *testing.T) {
 	paramtable.Get().Init(paramtable.NewBaseTable())
