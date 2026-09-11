@@ -53,13 +53,13 @@ impl LinderaSegmenter {
     /// Creates a new instance with the specified mode, dictionary, and optional user dictionary.
     pub fn new(
         mode: Mode,
-        dictionary: Dictionary,
+        dictionary: Arc<Dictionary>,
         user_dictionary: Option<UserDictionary>,
         sentence_split_chars: Vec<char>,
     ) -> Self {
         Self {
             mode,
-            dictionary: Arc::new(dictionary),
+            dictionary,
             user_dictionary: user_dictionary.map(|d| Arc::new(d)),
             sentence_split_chars: sentence_split_chars.into(),
         }
@@ -572,6 +572,86 @@ mod tests {
 
     fn default_helper() -> FileResourcePathHelper {
         FileResourcePathHelper::new(Arc::new(ResourceInfo::new()))
+    }
+
+    #[test]
+    #[cfg(feature = "lindera-ipadic")]
+    fn test_independent_lindera_tokenizers_share_dictionary() {
+        use tantivy::tokenizer::TokenStream;
+        let params = json::json!({"type": "lindera", "dict_kind": "ipadic"});
+        let mut tokenizers: Vec<_> = (0..100)
+            .map(|_| {
+                LinderaTokenizer::from_json(params.as_object().unwrap(), &mut default_helper())
+                    .unwrap()
+            })
+            .collect();
+        for tokenizer in &tokenizers {
+            assert!(Arc::ptr_eq(
+                &tokenizers[0].segmenter.dictionary,
+                &tokenizer.segmenter.dictionary
+            ));
+        }
+        let text = "東京スカイツリー";
+        let dictionary = lindera::dictionary::load_dictionary_from_kind(
+            lindera::dictionary::DictionaryKind::IPADIC,
+        )
+        .unwrap();
+        let mut reference = LinderaTokenizer::from_segmenter(super::LinderaSegmenter::new(
+            lindera::mode::Mode::Normal,
+            Arc::new(dictionary),
+            None,
+            DEFAULT_SENTENCE_SPLIT_CHARS.to_vec(),
+        ));
+        let expected: Vec<_> = reference
+            .token_stream(text)
+            .tokens
+            .into_iter()
+            .map(|token| {
+                (
+                    token.text.into_owned(),
+                    token.byte_start,
+                    token.byte_end,
+                    token.position,
+                )
+            })
+            .collect();
+        assert!(!expected.is_empty());
+        for tokenizer in &mut tokenizers {
+            let actual: Vec<_> = tokenizer
+                .token_stream(text)
+                .tokens
+                .into_iter()
+                .map(|token| {
+                    (
+                        token.text.into_owned(),
+                        token.byte_start,
+                        token.byte_end,
+                        token.position,
+                    )
+                })
+                .collect();
+            assert_eq!(expected, actual);
+        }
+        let nested = json::json!({"tokenizer": {
+            "type": "language_identifier",
+            "analyzers": {
+                "default": {"tokenizer": params},
+                "Japanese": {"tokenizer": params}
+            }
+        }});
+        for _ in 0..2 {
+            let mut analyzer = crate::analyzer::create_analyzer(&nested.to_string(), "").unwrap();
+            let mut actual = Vec::new();
+            analyzer.token_stream(text).process(&mut |token| {
+                actual.push((
+                    token.text.clone(),
+                    token.offset_from,
+                    token.offset_to,
+                    token.position,
+                ));
+            });
+            assert_eq!(expected, actual);
+        }
     }
 
     #[test]
