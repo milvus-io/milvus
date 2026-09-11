@@ -38,6 +38,9 @@ type Scheduler interface {
 type scheduler struct {
 	manager TaskManager
 
+	// futures tracks in-flight file futures by task ID.
+	futures map[int64][]*conc.Future[any]
+
 	closeOnce sync.Once
 	closeChan chan struct{}
 }
@@ -45,6 +48,7 @@ type scheduler struct {
 func NewScheduler(manager TaskManager) Scheduler {
 	return &scheduler{
 		manager:   manager,
+		futures:   make(map[int64][]*conc.Future[any]),
 		closeChan: make(chan struct{}),
 	}
 }
@@ -73,6 +77,8 @@ func (s *scheduler) Start() {
 }
 
 func (s *scheduler) scheduleTasks() {
+	s.reapCompletedTasks()
+
 	tasks := s.manager.GetBy(WithStates(datapb.ImportTaskStateV2_Pending))
 	sort.Slice(tasks, func(i, j int) bool {
 		return tasks[i].GetTaskID() < tasks[j].GetTaskID()
@@ -87,22 +93,39 @@ func (s *scheduler) scheduleTasks() {
 	})
 	mlog.Info(context.TODO(), "processing tasks...", mlog.Int64s("taskIDs", taskIDs))
 
-	futures := make(map[int64][]*conc.Future[any])
 	for _, task := range tasks {
-		fs := task.Execute()
-		futures[task.GetTaskID()] = fs
+		// Execute marks the task InProgress and returns its file futures.
+		s.futures[task.GetTaskID()] = task.Execute()
+		// Reap completed tasks after each submission.
+		s.reapCompletedTasks()
 	}
+}
 
-	for taskID, fs := range futures {
-		err := conc.AwaitAll(fs...)
-		if err != nil {
+// reapCompletedTasks marks successful tasks Completed and removes failed or
+// deleted tasks from tracking without waiting for unfinished futures.
+func (s *scheduler) reapCompletedTasks() {
+	for taskID, fs := range s.futures {
+		task := s.manager.Get(taskID)
+		if task == nil {
+			delete(s.futures, taskID)
+			continue
+		}
+		if task.GetState() == datapb.ImportTaskStateV2_Failed {
+			delete(s.futures, taskID)
+			mlog.Warn(context.TODO(), "preimport/import failed", WrapLogFields(task, mlog.String("reason", task.GetReason()))...)
+			continue
+		}
+		if !lo.EveryBy(fs, func(f *conc.Future[any]) bool { return f.Done() }) {
+			continue
+		}
+		delete(s.futures, taskID)
+		if err := conc.AwaitAll(fs...); err != nil {
+			mlog.Warn(context.TODO(), "preimport/import failed", WrapLogFields(task, mlog.Err(err))...)
 			continue
 		}
 		s.manager.Update(taskID, UpdateState(datapb.ImportTaskStateV2_Completed))
 		mlog.Info(context.TODO(), "preimport/import done", mlog.FieldTaskID(taskID))
 	}
-
-	mlog.Info(context.TODO(), "all tasks completed", mlog.Int64s("taskIDs", taskIDs))
 }
 
 // Slots returns the used slots for import
@@ -118,17 +141,4 @@ func (s *scheduler) Close() {
 	s.closeOnce.Do(func() {
 		close(s.closeChan)
 	})
-}
-
-func tryFreeFutures(futures map[int64][]*conc.Future[any]) {
-	for k, fs := range futures {
-		fs = lo.Filter(fs, func(f *conc.Future[any], _ int) bool {
-			if f.Done() {
-				_, err := f.Await()
-				return err != nil
-			}
-			return true
-		})
-		futures[k] = fs
-	}
 }
