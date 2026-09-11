@@ -182,9 +182,9 @@ func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 
 	// Check segment health and index existence
 	segment := it.meta.GetSegment(ctx, segIndex.SegmentID)
-	if !isSegmentHealthy(segment) || !it.meta.indexMeta.IsIndexExist(segIndex.CollectionID, segIndex.IndexID) {
-		log.Info(ctx, "task is no need to build index, removing it")
-		it.SetState(indexpb.JobState_JobStateNone, "task is no need to build index")
+	if reason, dropped := it.droppedTargetReason(segment, segIndex); dropped {
+		log.Info(ctx, "task is no need to build index, marking it failed", mlog.String("reason", reason))
+		it.abortForDroppedTarget(ctx, reason)
 		return
 	}
 
@@ -634,6 +634,14 @@ func (it *indexBuildTask) QueryTaskOnWorker(cluster session.Cluster) {
 		return
 	}
 
+	// The index or the segment may have been dropped while the task is in
+	// flight. Abort it now instead of letting the worker finish useless work.
+	if reason, dropped := it.droppedTargetReason(it.meta.GetSegment(ctx, segIndex.SegmentID), segIndex); dropped {
+		log.Info(ctx, "index task target dropped while in progress, aborting", mlog.String("reason", reason))
+		it.abortInflightTask(ctx, cluster, reason)
+		return
+	}
+
 	results, err := cluster.QueryIndex(it.NodeID, &workerpb.QueryJobsRequest{
 		ClusterID: Params.CommonCfg.ClusterPrefix.GetValue(),
 		TaskIDs:   []UniqueID{it.BuildID},
@@ -665,6 +673,98 @@ func (it *indexBuildTask) QueryTaskOnWorker(cluster session.Cluster) {
 	}
 	it.UpdateStateWithMeta(indexpb.JobState_JobStateInit, "index is not in info response")
 	// Task not found in results will be return error
+}
+
+const (
+	indexTaskAbortReasonSegmentDropped = "segment is dropped, index task aborted"
+	indexTaskAbortReasonIndexDropped   = "index is dropped, index task aborted"
+)
+
+// droppedTargetReason reports whether the task's build target is gone: the
+// segment is no longer healthy or the field index has been dropped. Both are
+// irreversible, so the task can never be needed again.
+func (it *indexBuildTask) droppedTargetReason(segment *SegmentInfo, segIndex *model.SegmentIndex) (string, bool) {
+	if !isSegmentHealthy(segment) {
+		return indexTaskAbortReasonSegmentDropped, true
+	}
+	if !it.meta.indexMeta.IsIndexExist(segIndex.CollectionID, segIndex.IndexID) {
+		return indexTaskAbortReasonIndexDropped, true
+	}
+	return "", false
+}
+
+// abortInflightTask cancels a dispatched task whose target is gone, in an
+// order that keeps every step retryable and never loses track of files the
+// worker may already have written:
+//
+//  1. Harvest: if the worker has already finished, persist its result (file
+//     keys included) so GC reclaims exactly those files. The scheduler drops
+//     the worker-side job on the terminal state.
+//  2. Cancel on the worker. A failed drop RPC returns without touching meta,
+//     so the task stays InProgress and the next check round retries; the
+//     drop is idempotent and a missing node counts as dropped.
+//  3. Persist the terminal state. Only now can the scheduler forget the
+//     task: the worker has acknowledged the cancellation, so no new upload
+//     starts. An upload already in flight cannot be interrupted; GC sweeps
+//     the build prefix for it once the drop tolerance has passed.
+func (it *indexBuildTask) abortInflightTask(ctx context.Context, cluster session.Cluster, reason string) {
+	log := mlog.With(mlog.Int64("taskID", it.BuildID), mlog.Int64("segmentID", it.SegmentID), mlog.Int64("nodeID", it.NodeID))
+
+	if it.harvestFinishedResult(ctx, cluster) {
+		return
+	}
+	if err := it.tryDropTaskOnWorker(cluster); err != nil {
+		log.Warn(ctx, "failed to cancel index task on worker, keeping it for the next round", mlog.Err(err))
+		return
+	}
+	it.abortForDroppedTarget(ctx, reason)
+}
+
+// harvestFinishedResult asks the worker for the task once more and, if the
+// worker has already reached a terminal state, records that result. It
+// returns true when the result was persisted and no cancellation is needed.
+func (it *indexBuildTask) harvestFinishedResult(ctx context.Context, cluster session.Cluster) bool {
+	results, err := cluster.QueryIndex(it.NodeID, &workerpb.QueryJobsRequest{
+		ClusterID: Params.CommonCfg.ClusterPrefix.GetValue(),
+		TaskIDs:   []UniqueID{it.BuildID},
+	})
+	if err != nil {
+		mlog.Info(ctx, "cannot query worker before aborting index task, canceling without a result",
+			mlog.Int64("taskID", it.BuildID), mlog.Int64("nodeID", it.NodeID), mlog.Err(err))
+		return false
+	}
+	for _, info := range results.GetResults() {
+		if info.GetBuildID() != it.BuildID {
+			continue
+		}
+		switch info.GetState() {
+		case commonpb.IndexState_Finished, commonpb.IndexState_Failed:
+			if err := it.setJobInfo(info); err != nil {
+				mlog.Warn(ctx, "failed to persist worker result of aborted index task, will retry",
+					mlog.Int64("taskID", it.BuildID), mlog.Err(err))
+				// Report harvested anyway: nothing else may run until the
+				// result is persisted, and the next round retries the query.
+				return true
+			}
+			mlog.Info(ctx, "worker had already finished the aborted index task, result kept for GC",
+				mlog.Int64("taskID", it.BuildID), mlog.String("state", info.GetState().String()),
+				mlog.Int("indexFiles", len(info.GetIndexFileKeys())))
+			return true
+		}
+	}
+	return false
+}
+
+// abortForDroppedTarget persists a terminal state for a task whose target is
+// gone. Writing only the in-memory state would leave the SegmentIndex
+// non-terminal in meta: GC skips non-terminal tasks, and every restart would
+// re-enqueue it. On a meta write failure the state is left untouched so the
+// next round retries.
+func (it *indexBuildTask) abortForDroppedTarget(ctx context.Context, reason string) {
+	if err := it.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, reason); err != nil {
+		mlog.Warn(ctx, "failed to persist aborted index task state, will retry",
+			mlog.Int64("taskID", it.BuildID), mlog.String("reason", reason), mlog.Err(err))
+	}
 }
 
 func (it *indexBuildTask) tryDropTaskOnWorker(cluster session.Cluster) error {

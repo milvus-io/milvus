@@ -2657,6 +2657,23 @@ func TestStoredIndexFilesSizeMetric(t *testing.T) {
 	})
 }
 
+func TestIndexMeta_UpdateIndexState_StampsFinishedTimeOnTerminalState(t *testing.T) {
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
+	m := createIndexMetaWithSegment(catalog, 1, 2, 3, 4, 5, 6)
+
+	require.NoError(t, m.UpdateIndexState(6, commonpb.IndexState_InProgress, ""))
+	job, ok := m.GetIndexJob(6)
+	require.True(t, ok)
+	assert.Zero(t, job.FinishedUTCTime, "non-terminal states carry no finish time")
+
+	require.NoError(t, m.UpdateIndexState(6, commonpb.IndexState_Failed, "aborted"))
+	job, ok = m.GetIndexJob(6)
+	require.True(t, ok)
+	assert.Equal(t, commonpb.IndexState_Failed, job.IndexState)
+	assert.NotZero(t, job.FinishedUTCTime, "terminal state records when the task ended so GC can apply its tolerance")
+}
+
 func TestIndexMeta_GetDeletedIndexesWithV1Path(t *testing.T) {
 	m := &indexMeta{
 		segmentBuildInfo: newSegmentIndexBuildInfo(),

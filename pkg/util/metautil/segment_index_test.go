@@ -75,3 +75,13 @@ func TestIsCollectionRooted(t *testing.T) {
 	assert.True(t, IsCollectionRooted(indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED))
 	assert.True(t, IsCollectionRooted(indexpb.IndexStorePathVersion(2)))
 }
+
+func TestIndexPathBuilder_V0_BuildIDPrefix(t *testing.T) {
+	b := NewIndexPathBuilder("files", 0, 100, 200, 300, 1000, 1)
+	assert.Equal(t, "files/index_files/1000", b.BuildIDPrefix())
+}
+
+func TestIndexPathBuilder_V1_BuildIDPrefix(t *testing.T) {
+	b := NewIndexPathBuilder("files", indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, 100, 200, 300, 1000, 1)
+	assert.Equal(t, "files/index_v1/100/200/300/1000", b.BuildIDPrefix())
+}

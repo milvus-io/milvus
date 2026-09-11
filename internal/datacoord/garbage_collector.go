@@ -983,9 +983,19 @@ func (gc *garbageCollector) recycleDroppedSegment(ctx context.Context, segmentID
 			mlog.Int("segmentIndexes", len(segIndexes)))
 		return
 	}
+	if segIdx, unsettled := gc.unsettledKeylessBuild(segIndexes); unsettled {
+		// Nothing of this segment may go yet: the ordering below (files, then
+		// index meta, then segment meta) only stays retryable while the index
+		// record survives, and that record is the only thing that still knows
+		// where a canceled worker's late upload will land.
+		log.RatedInfo(ctx, 60, "skip GC segment since an index build may still be uploading",
+			mlog.Int64("buildID", segIdx.BuildID), mlog.String("state", segIdx.IndexState.String()),
+			mlog.Uint64("finishedUTCTime", segIdx.FinishedUTCTime))
+		return
+	}
 
 	cloned := segment.Clone()
-	if err := gc.removeDroppedSegmentFiles(ctx, cloned, indexFiles); err != nil {
+	if err := gc.removeDroppedSegmentFiles(ctx, cloned, indexFiles, gc.keylessIndexBuildPrefixes(segIndexes)); err != nil {
 		log.Warn(ctx, "GC segment remove files failed", mlog.Err(err))
 		return
 	}
@@ -1043,7 +1053,58 @@ func (gc *garbageCollector) getAllSegmentIndexesForDroppedSegment(segmentID int6
 	return gc.meta.indexMeta.GetAllSegmentIndexes(segmentID)
 }
 
-func (gc *garbageCollector) removeDroppedSegmentFiles(ctx context.Context, cloned *SegmentInfo, indexFiles map[string]struct{}) error {
+// unsettledKeylessBuild returns the first build of a dropped segment whose
+// files may still be arriving: a dispatched collection-rooted build without
+// recorded keys (see keylessIndexBuildPrefix) that is either still in flight
+// or reached its terminal state less than the drop tolerance ago. It mirrors
+// the gate recycleUnusedSegIndexes applies to the same records.
+func (gc *garbageCollector) unsettledKeylessBuild(segIndexes []*model.SegmentIndex) (*model.SegmentIndex, bool) {
+	for _, segIdx := range segIndexes {
+		if _, keyless := gc.keylessIndexBuildPrefix(segIdx); !keyless {
+			continue
+		}
+		if isInflightIndexState(segIdx.IndexState) || !gc.isIndexBuildSettled(segIdx) {
+			return segIdx, true
+		}
+	}
+	return nil, false
+}
+
+// isInflightIndexState reports whether a build task may still be queued in the
+// scheduler or running on a worker.
+func isInflightIndexState(state commonpb.IndexState) bool {
+	return state == commonpb.IndexState_Unissued ||
+		state == commonpb.IndexState_InProgress ||
+		state == commonpb.IndexState_Retry
+}
+
+// keylessIndexBuildPrefixes collects the build prefixes that must be swept
+// for the given segment indexes; see keylessIndexBuildPrefix.
+func (gc *garbageCollector) keylessIndexBuildPrefixes(segIndexes []*model.SegmentIndex) []string {
+	prefixes := make([]string, 0)
+	for _, segIdx := range segIndexes {
+		if prefix, ok := gc.keylessIndexBuildPrefix(segIdx); ok {
+			prefixes = append(prefixes, prefix)
+		}
+	}
+	return prefixes
+}
+
+// sweepIndexBuildPrefixes removes every object under the given build prefixes.
+func (gc *garbageCollector) sweepIndexBuildPrefixes(ctx context.Context, prefixes []string) error {
+	for _, prefix := range prefixes {
+		if err := gc.option.cli.RemoveWithPrefix(ctx, prefix); err != nil {
+			mlog.Warn(ctx, "GC segment sweep index build prefix failed", mlog.String("prefix", prefix), mlog.Err(err))
+			return err
+		}
+	}
+	return nil
+}
+
+// removeDroppedSegmentFiles deletes the segment's own files, the index files
+// recorded in meta, and sweeps the build prefixes of index builds that were
+// aborted before their file keys were reported.
+func (gc *garbageCollector) removeDroppedSegmentFiles(ctx context.Context, cloned *SegmentInfo, indexFiles map[string]struct{}, indexBuildPrefixes []string) error {
 	log := mlog.With(mlog.Int64("segmentID", cloned.GetID()))
 
 	// V3 segment data lives under the manifest base path. Segment index files still
@@ -1065,15 +1126,14 @@ func (gc *garbageCollector) removeDroppedSegmentFiles(ctx context.Context, clone
 				mlog.Err(err))
 			return err
 		}
-		if len(indexFiles) == 0 {
-			log.Info(ctx, "GC V3 segment files done")
-			return nil
-		}
 		if err := gc.removeObjectFiles(ctx, indexFiles); err != nil {
 			log.Warn(ctx, "GC V3 segment remove index files failed", mlog.Err(err))
 			return err
 		}
-		log.Info(ctx, "GC V3 segment files done")
+		if err := gc.sweepIndexBuildPrefixes(ctx, indexBuildPrefixes); err != nil {
+			return err
+		}
+		log.Info(ctx, "GC V3 segment files done", mlog.Int("indexBuildPrefixes", len(indexBuildPrefixes)))
 		return nil
 	}
 
@@ -1095,12 +1155,13 @@ func (gc *garbageCollector) removeDroppedSegmentFiles(ctx context.Context, clone
 		mlog.Int("bm25_logs", len(cloned.GetBm25Statslogs())),
 		mlog.Int("text_logs", len(cloned.GetTextStatsLogs())),
 		mlog.Int("json_key_logs", len(cloned.GetJsonKeyStats())),
-		mlog.Int("index_files", len(indexFiles)))
+		mlog.Int("index_files", len(indexFiles)),
+		mlog.Int("index_build_prefixes", len(indexBuildPrefixes)))
 	if err := gc.removeObjectFiles(ctx, logs); err != nil {
 		log.Warn(ctx, "GC segment remove logs failed", mlog.Err(err))
 		return err
 	}
-	return nil
+	return gc.sweepIndexBuildPrefixes(ctx, indexBuildPrefixes)
 }
 
 func (gc *garbageCollector) removeDroppedSegmentIndexMeta(ctx context.Context, segIndexes []*model.SegmentIndex) error {
@@ -1279,13 +1340,19 @@ func getTextLogPaths(sinfo *SegmentInfo, rootPath string) map[string]struct{} {
 }
 
 func getJSONKeyLogs(sinfo *SegmentInfo, gc *garbageCollector) map[string]struct{} {
+	return getJSONKeyLogPaths(sinfo, gc.option.cli.RootPath())
+}
+
+// getJSONKeyLogPaths resolves the object paths of the segment's JSON key stats
+// under rootPath, honoring the per-entry data format the files were written in.
+func getJSONKeyLogPaths(sinfo *SegmentInfo, rootPath string) map[string]struct{} {
 	jsonkeyLogs := make(map[string]struct{})
 	for _, flog := range sinfo.GetJsonKeyStats() {
 		for _, file := range flog.GetFiles() {
 			var prefix string
 			if flog.GetJsonKeyStatsDataFormat() >= 2 {
 				prefix = metautil.BuildJSONKeyStatsPrefix(
-					gc.option.cli.RootPath(),
+					rootPath,
 					flog.GetJsonKeyStatsDataFormat(),
 					flog.GetBuildID(),
 					flog.GetVersion(),
@@ -1295,7 +1362,7 @@ func getJSONKeyLogs(sinfo *SegmentInfo, gc *garbageCollector) map[string]struct{
 					flog.GetFieldID(),
 				)
 			} else {
-				prefix = fmt.Sprintf("%s/%s/%d/%d/%d/%d/%d/%d", gc.option.cli.RootPath(), common.JSONIndexPath,
+				prefix = fmt.Sprintf("%s/%s/%d/%d/%d/%d/%d/%d", rootPath, common.JSONIndexPath,
 					flog.GetBuildID(), flog.GetVersion(), sinfo.GetCollectionID(), sinfo.GetPartitionID(), sinfo.GetID(), flog.GetFieldID())
 			}
 			file = path.Join(prefix, file)
@@ -1414,6 +1481,18 @@ func (gc *garbageCollector) recycleUnusedSegIndexes(ctx context.Context, signal 
 				mlog.Int64("nodeID", segIdx.NodeID),
 				mlog.Int("indexFiles", len(indexFiles)))
 
+			// A collection-rooted build without recorded keys (a task aborted
+			// while dispatched) may still own files the worker uploaded after
+			// the cancellation. Nothing else knows those paths, so the build
+			// prefix has to be swept before the meta goes; and only once the
+			// tolerance has passed, so a late upload cannot land after the sweep.
+			buildPrefix, sweepPrefix := gc.keylessIndexBuildPrefix(segIdx)
+			if sweepPrefix && !gc.isIndexBuildSettled(segIdx) {
+				log.Info(ctx, "skip GC segment index since aborted build may still be uploading",
+					mlog.Uint64("finishedUTCTime", segIdx.FinishedUTCTime))
+				continue
+			}
+
 			// Skip buildIDs protected by snapshot references. IsBuildIDGCBlocked is O(1)
 			// and embeds the "RefIndex not loaded → fail-closed" check.
 			if snapshotMeta := gc.meta.GetSnapshotMeta(); snapshotMeta != nil {
@@ -1431,6 +1510,13 @@ func (gc *garbageCollector) recycleUnusedSegIndexes(ctx context.Context, signal 
 			if err := gc.removeObjectFiles(ctx, indexFiles); err != nil {
 				log.Warn(ctx, "fail to remove index files for index", mlog.Err(err))
 				continue
+			}
+			if sweepPrefix {
+				if err := gc.option.cli.RemoveWithPrefix(ctx, buildPrefix); err != nil {
+					log.Warn(ctx, "fail to sweep build prefix of aborted index", mlog.String("prefix", buildPrefix), mlog.Err(err))
+					continue
+				}
+				log.Info(ctx, "swept build prefix of aborted index", mlog.String("prefix", buildPrefix))
 			}
 
 			// Remove meta from index meta.
@@ -1575,6 +1661,38 @@ func (gc *garbageCollector) recycleUnusedIndexFilesV0(ctx context.Context) {
 
 // getAllIndexFilesOfIndex returns all expected index files using the path version
 // recorded on the SegmentIndex: v0 builds index_files paths, v1 builds index_v1 paths.
+// keylessIndexBuildPrefix returns the buildID-level prefix (all index
+// versions) of a collection-rooted build that was dispatched to a worker at
+// least once (IndexVersion > 0) but whose file keys were never recorded, i.e.
+// a task aborted or failed after dispatch. Any attempt may have left files
+// under the prefix that nothing else knows about. A build that was never
+// dispatched has no files anywhere. Legacy v0 builds return false:
+// recycleUnusedIndexFilesV0 walks index_files/ by buildID and removes anything
+// without meta, so their late uploads are caught by that scan. There is no
+// such scan for index_v1/, which is why the prefix must be swept from meta.
+func (gc *garbageCollector) keylessIndexBuildPrefix(segIdx *model.SegmentIndex) (string, bool) {
+	if len(segIdx.IndexFileKeys) > 0 || segIdx.IndexVersion <= 0 ||
+		!metautil.IsCollectionRooted(segIdx.IndexStorePathVersion) {
+		return "", false
+	}
+	builder := metautil.NewIndexPathBuilder(gc.option.cli.RootPath(),
+		segIdx.IndexStorePathVersion, segIdx.CollectionID,
+		segIdx.PartitionID, segIdx.SegmentID,
+		segIdx.BuildID, segIdx.IndexVersion)
+	return builder.BuildIDPrefix() + "/", true
+}
+
+// isIndexBuildSettled reports whether enough time has passed since a build
+// reached its terminal state for any upload still in flight on the worker to
+// have completed. A build without an end time predates this bookkeeping and is
+// treated as settled.
+func (gc *garbageCollector) isIndexBuildSettled(segIdx *model.SegmentIndex) bool {
+	if segIdx.FinishedUTCTime == 0 {
+		return true
+	}
+	return time.Since(time.Unix(int64(segIdx.FinishedUTCTime), 0)) > gc.option.dropTolerance
+}
+
 func (gc *garbageCollector) getAllIndexFilesOfIndex(segmentIndex *model.SegmentIndex) map[string]struct{} {
 	builder := metautil.NewIndexPathBuilder(gc.option.cli.RootPath(),
 		segmentIndex.IndexStorePathVersion, segmentIndex.CollectionID,
