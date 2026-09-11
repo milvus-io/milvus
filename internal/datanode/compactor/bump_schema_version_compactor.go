@@ -333,7 +333,7 @@ func (t *bumpSchemaVersionCompactionTask) schemaBumpDecision() (*schemaBumpPhysi
 	}
 	schema := t.plan.GetSchema()
 
-	functionOutputFields, err := declaredFunctionOutputFields(schema)
+	functionOutputFields, err := validateSchemaBumpIntegrity(schema, existingFields)
 	if err != nil {
 		return nil, err
 	}
@@ -349,28 +349,6 @@ func (t *bumpSchemaVersionCompactionTask) schemaBumpDecision() (*schemaBumpPhysi
 		missingOutputFields:  missingOutputFields,
 		missingFunctions:     missingFunctions,
 	}, nil
-}
-
-// declaredFunctionOutputFields returns the field IDs declared as outputs by the
-// schema's functions. A field marked IsFunctionOutput that no function declares
-// is persisted-schema corruption: fail instead of silently backfilling a
-// non-nullable vector as an ordinary field.
-func declaredFunctionOutputFields(schema *schemapb.CollectionSchema) (map[int64]struct{}, error) {
-	declared := make(map[int64]struct{})
-	for _, functionSchema := range schema.GetFunctions() {
-		for _, outputFieldID := range functionSchema.GetOutputFieldIds() {
-			declared[outputFieldID] = struct{}{}
-		}
-	}
-	for _, field := range typeutil.GetAllFieldSchemas(schema) {
-		if field.GetIsFunctionOutput() {
-			if _, hasProducer := declared[field.GetFieldID()]; !hasProducer {
-				return nil, merr.WrapErrDataIntegrityMsg(
-					"function output field %d has no producing function", field.GetFieldID())
-			}
-		}
-	}
-	return declared, nil
 }
 
 // missingFunctionMaterializations derives, from the manifest-backed
@@ -713,7 +691,8 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 		}
 	}()
 
-	var totalRows int64
+	var readRows int64
+	var writtenRows int64
 	for {
 		record, err := reader.Next()
 		if err != nil {
@@ -722,6 +701,7 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 			}
 			return nil, err
 		}
+		readRows += int64(record.Len())
 
 		var selection *recordSelection
 		if preMaterializeFilter {
@@ -752,8 +732,22 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 			out.Release()
 		}
 
-		totalRows += int64(wrapped.Len())
+		writtenRows += int64(wrapped.Len())
 		cleanupMaterializedRecord(wrapped)
+	}
+
+	if readRows != t.plan.GetTotalRows() {
+		return nil, merr.WrapErrDataIntegrityMsg(
+			"schema bump full rewrite segment %d read %d rows, expected %d",
+			segment.GetSegmentID(), readRows, t.plan.GetTotalRows(),
+		)
+	}
+	filteredRows := int64(entityFilter.GetDeletedCount() + entityFilter.GetExpiredCount())
+	if writtenRows+filteredRows != readRows {
+		return nil, merr.WrapErrServiceInternalMsg(
+			"schema bump full rewrite segment %d row count mismatch: read %d, wrote %d, filtered %d",
+			segment.GetSegmentID(), readRows, writtenRows, filteredRows,
+		)
 	}
 
 	if err := writer.Close(); err != nil {
@@ -764,16 +758,11 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 	// Update per-LOB-file valid_rows for REUSE_ALL fields: rows dropped by
 	// delete/TTL during the rewrite reduce the number of live LOB references.
 	if t.lobContext != nil && t.lobContext.HasReuseAllFields() {
-		inputRows := t.plan.GetTotalRows()
-		deletedRows := inputRows - totalRows
-		if deletedRows < 0 {
-			deletedRows = 0
-		}
-		t.lobContext.SetSegmentRowStats(segment.GetSegmentID(), inputRows, deletedRows)
+		t.lobContext.SetSegmentRowStats(segment.GetSegmentID(), t.plan.GetTotalRows(), filteredRows)
 	}
 
 	insertLogs, statsLog, bm25StatsLogs, manifestPath, expirQuantiles := writer.GetLogs()
-	if totalRows > 0 && manifestPath == "" {
+	if writtenRows > 0 && manifestPath == "" {
 		return nil, merr.WrapErrServiceInternal("schema bump full rewrite produced empty manifest")
 	}
 	statEntries := make([]packed.StatEntry, 0, len(bm25StatsLogs)+1)
@@ -799,7 +788,7 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 
 	resultSegment := &datapb.CompactionSegment{
 		SegmentID:           newSegmentID,
-		NumOfRows:           totalRows,
+		NumOfRows:           writtenRows,
 		InsertLogs:          sortedInsertLogs,
 		Channel:             segment.GetInsertChannel(),
 		StorageVersion:      segment.GetStorageVersion(),
@@ -825,7 +814,7 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 		return nil, err
 	}
 
-	if totalRows > 0 {
+	if writtenRows > 0 {
 		// Text stats are built explicitly, matching sort compaction.
 		textStatsLogs, err := createTextIndex(t.ctx, t.chunkManager, t.plan, t.compactionParams, segment.GetStorageVersion(), collectionID, segment.GetPartitionID(), newSegmentID, t.plan.GetPlanID(), resultSegment)
 		if err != nil {

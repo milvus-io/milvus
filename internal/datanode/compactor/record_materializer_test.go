@@ -498,7 +498,7 @@ func TestBM25FunctionMaterializerMaterializesSparseOutput(t *testing.T) {
 	require.Equal(t, []any{[]string{"hello", "world"}}, runner.inputs)
 }
 
-func TestBM25FunctionMaterializerRejectsBinaryTextInputWithoutLOBDecoding(t *testing.T) {
+func TestBM25FunctionMaterializerRejectsTextInputWithoutLOBDecoding(t *testing.T) {
 	schema, functionSchema, inputField, outputField := materializerBM25Schema()
 	inputField.DataType = schemapb.DataType_Text
 	runner := &materializerTestFunctionRunner{
@@ -511,14 +511,18 @@ func TestBM25FunctionMaterializerRejectsBinaryTextInputWithoutLOBDecoding(t *tes
 		}},
 	}
 	materializer, err := newBM25FunctionMaterializer(schema, runner, []int{0}, false)
-	require.NoError(t, err)
-	defer materializer.Close()
+	require.Nil(t, materializer)
+	require.ErrorContains(t, err, "text input requires LOB decoding")
+	require.Nil(t, runner.inputs)
+}
 
+func TestStringInputsFromRecordRejectsBinaryTextWithoutLOBDecoding(t *testing.T) {
 	input := newBinaryArray(t, [][]byte{[]byte("encoded-lob-ref")})
 	defer input.Release()
-	_, err = materializer.Materialize(&materializerTestRecord{len: 1, columns: map[storage.FieldID]arrow.Array{100: input}})
+
+	_, err := stringInputsFromRecord(
+		&materializerTestRecord{len: 1, columns: map[storage.FieldID]arrow.Array{100: input}}, 100)
 	require.ErrorContains(t, err, "cannot materialize bm25 from text binary values without lob decoding")
-	require.Nil(t, runner.inputs)
 }
 
 func TestBM25FunctionMaterializerMaterializesNullableInputAsNonNullableOutput(t *testing.T) {
@@ -651,6 +655,30 @@ func TestNewRecordMaterializerRejectsPartiallyPresentFunctionOutputs(t *testing.
 	)
 	require.Nil(t, materializer)
 	require.ErrorIs(t, err, merr.ErrDataIntegrity)
+}
+
+func TestNewRecordMaterializerRejectsDuplicateFunctionOutputOwnership(t *testing.T) {
+	functions := []*schemapb.FunctionSchema{
+		{Name: "first", OutputFieldIds: []int64{102}},
+		{Name: "second", OutputFieldIds: []int64{102}},
+	}
+
+	materializer, err := NewRecordMaterializer(&schemapb.CollectionSchema{}, functions, nil)
+	require.Nil(t, materializer)
+	require.ErrorIs(t, err, merr.ErrDataIntegrity)
+	require.ErrorContains(t, err, "field 102")
+	require.ErrorContains(t, err, "first")
+	require.ErrorContains(t, err, "second")
+
+	functions[1].OutputFieldIds = []int64{103}
+	materializer, err = NewRecordMaterializer(
+		&schemapb.CollectionSchema{},
+		functions,
+		map[int64]struct{}{102: {}, 103: {}},
+	)
+	require.NoError(t, err)
+	require.NotNil(t, materializer)
+	materializer.Close()
 }
 
 func TestMaterializedRecordReaderReleasesPreviousRecordOnNextAndClose(t *testing.T) {

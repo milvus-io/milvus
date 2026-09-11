@@ -59,6 +59,40 @@ func TestGetManifestFieldIDs_InvalidManifestPath(t *testing.T) {
 	assert.Nil(t, fields)
 }
 
+func TestManifestFieldIDsFromColumnGroupsValidatesShape(t *testing.T) {
+	fieldID := "100"
+	tests := []struct {
+		name        string
+		columns     []*string
+		numColumns  int
+		wantFieldID bool
+		wantErr     string
+	}{
+		{name: "nil empty array", columns: nil, numColumns: 0},
+		{name: "non-nil empty array", columns: []*string{}, numColumns: 0},
+		{name: "positive count with nil array", columns: nil, numColumns: 1, wantErr: "columns array is nil"},
+		{name: "nil column element", columns: []*string{nil}, numColumns: 1, wantErr: "nil column name"},
+		{name: "valid column", columns: []*string{&fieldID}, numColumns: 1, wantFieldID: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fields, err := testManifestFieldIDsFromColumns(test.columns, test.numColumns)
+			if test.wantErr != "" {
+				require.ErrorContains(t, err, test.wantErr)
+				assert.Nil(t, fields)
+				return
+			}
+			require.NoError(t, err)
+			if test.wantFieldID {
+				assert.Contains(t, fields, int64(100))
+			} else {
+				assert.Empty(t, fields)
+			}
+		})
+	}
+}
+
 func TestGetManifestFieldIDs_InvalidColumnName(t *testing.T) {
 	paramtable.Init()
 	pt := paramtable.Get()
