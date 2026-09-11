@@ -25,14 +25,14 @@ import (
 	"github.com/google/btree"
 	"github.com/samber/lo"
 
-	"github.com/milvus-io/milvus/pkg/v3/kv"
+	kvpkg "github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // implementation assertion
-var _ kv.TxnKV = (*MemoryKV)(nil)
+var _ kvpkg.TxnKV = (*MemoryKV)(nil)
 
 // MemoryKV implements BaseKv interface and relies on underling btree.BTree.
 // As its name implies, all data is stored in memory.
@@ -324,6 +324,46 @@ func (kv *MemoryKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[
 		})
 	}
 	for _, item := range keys {
+		kv.tree.Delete(item)
+	}
+
+	for key, value := range saves {
+		kv.tree.ReplaceOrInsert(memoryKVItem{key, StringValue(value)})
+	}
+	return nil
+}
+
+// MultiSaveAndRemoveMixed saves key-value pairs in @saves, removes exact keys
+// in @removals and keys under the prefixes in @prefixRemovals in MemoryKV
+// atomically.
+func (kv *MemoryKV) MultiSaveAndRemoveMixed(ctx context.Context, saves map[string]string, removals []string, prefixRemovals []string, preds ...predicates.Predicate) error {
+	if len(preds) > 0 {
+		return merr.WrapErrServiceUnavailable("predicates not supported")
+	}
+	if err := kvpkg.ValidateNoSaveUnderRemovedPrefix(saves, prefixRemovals); err != nil {
+		return err
+	}
+	kv.Lock()
+	defer kv.Unlock()
+
+	// use complement to remove keys that are not in saves
+	saveKeys := typeutil.NewSet(lo.Keys(saves)...)
+	removeKeys := typeutil.NewSet(removals...)
+	removals = removeKeys.Complement(saveKeys).Collect()
+	for _, key := range removals {
+		kv.tree.Delete(memoryKVItem{key: key})
+	}
+
+	var items []memoryKVItem
+	for _, prefix := range prefixRemovals {
+		kv.tree.Ascend(func(i btree.Item) bool {
+			if strings.HasPrefix(i.(memoryKVItem).key, prefix) {
+				items = append(items, i.(memoryKVItem))
+			}
+			return true
+		})
+	}
+	for _, item := range items {
 		kv.tree.Delete(item)
 	}
 

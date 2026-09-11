@@ -19,6 +19,7 @@ package rootcoord
 import (
 	"context"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/txn"
 	pb "github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
@@ -38,49 +39,87 @@ import (
 func (kc *Catalog) Update(ctx context.Context, ts typeutil.Timestamp, actions ...metastore.UpdateAction) error {
 	b := txn.New()
 	for _, action := range actions {
-		ce, ok := action.Entry.(metastore.CollectionEntry)
-		if !ok {
-			return merr.WrapErrServiceInternalMsg("rootcoord catalog cannot apply entry %T", action.Entry)
-		}
-		coll := ce.Collection
-		switch action.Type {
-		case metastore.ActionAdd:
-			// CreateCollection appends the child kvs and the collection
-			// key/value (as the commit marker), using the same encoding as
-			// the legacy Catalog.CreateCollection. It keeps the legacy
-			// overwrite/idempotent-on-retry semantics (a duplicate create
-			// silently overwrites rather than failing). CommitSave marks
-			// the collection key as the visibility point, so children are
-			// persisted before the collection key on the ordered fallback
-			// path.
-			if coll.State != pb.CollectionState_CollectionCreated {
-				return merr.WrapErrServiceInternalMsg("collection state should be created, collection name: %s, collection id: %d, state: %s", coll.Name, coll.CollectionID, coll.State)
-			}
+		switch entry := action.Entry.(type) {
+		case metastore.CollectionEntry:
+			coll := entry.Collection
+			switch action.Type {
+			case metastore.ActionAdd:
+				// CreateCollection appends the child kvs and the collection
+				// key/value (as the commit marker), using the same encoding as
+				// the legacy Catalog.CreateCollection. It keeps the legacy
+				// overwrite/idempotent-on-retry semantics (a duplicate create
+				// silently overwrites rather than failing). CommitSave marks
+				// the collection key as the visibility point, so children are
+				// persisted before the collection key on the ordered fallback
+				// path.
+				if coll.State != pb.CollectionState_CollectionCreated {
+					return merr.WrapErrServiceInternalMsg("collection state should be created, collection name: %s, collection id: %d, state: %s", coll.Name, coll.CollectionID, coll.State)
+				}
 
-			k1, v1, err := buildCollectionKV(coll)
+				k1, v1, err := buildCollectionKV(coll)
+				if err != nil {
+					return err
+				}
+				kvs, err := buildCreateCollectionChildKvs(coll)
+				if err != nil {
+					return err
+				}
+
+				for k, v := range kvs {
+					b.Save(k, v)
+				}
+				b.CommitSave(k1, v1)
+			case metastore.ActionDelete:
+				// DropCollection appends the child metadata removals and the
+				// collection key removal (as the commit marker), using the same
+				// keys as the legacy Catalog.DropCollection.
+				collectionKey, delMetakeysSnap := buildDropCollectionKeys(coll)
+				for _, k := range delMetakeysSnap {
+					b.Remove(k)
+				}
+				b.CommitRemove(collectionKey)
+			default:
+				return merr.WrapErrServiceInternalMsg("rootcoord catalog cannot apply action type %v to CollectionEntry", action.Type)
+			}
+		case metastore.RoleEntry:
+			// DropRole appends the exact same keys as the legacy
+			// Catalog.DropRole: user-role mapping removals first, then the
+			// role record removal as the commit marker, so on the chunked
+			// fallback path the role stays visible (and the drop retryable)
+			// until everything else has landed.
+			if action.Type != metastore.ActionDelete {
+				return merr.WrapErrServiceInternalMsg("rootcoord catalog cannot apply action type %v to RoleEntry", action.Type)
+			}
+			deleteKeys, err := kc.dropRoleRemovals(ctx, entry.Tenant, entry.Name)
 			if err != nil {
 				return err
 			}
-			kvs, err := buildCreateCollectionChildKvs(coll)
-			if err != nil {
-				return err
-			}
-
-			for k, v := range kvs {
-				b.Save(k, v)
-			}
-			b.CommitSave(k1, v1)
-		case metastore.ActionDelete:
-			// DropCollection appends the child metadata removals and the
-			// collection key removal (as the commit marker), using the same
-			// keys as the legacy Catalog.DropCollection.
-			collectionKey, delMetakeysSnap := buildDropCollectionKeys(coll)
-			for _, k := range delMetakeysSnap {
+			for _, k := range deleteKeys[1:] {
 				b.Remove(k)
 			}
-			b.CommitRemove(collectionKey)
+			b.CommitRemove(deleteKeys[0])
+		case metastore.RoleGrantsEntry:
+			// DropRoleGrants appends the exact same prefixes as the legacy
+			// Catalog.DeleteGrant: the grantee-privileges subtree plus the
+			// unshared grantee-id subtrees. The grantee-privileges subtree is
+			// the only index from which a retry can rediscover the grantee-id
+			// subtrees, so on the chunked fallback path it must land last —
+			// otherwise a crash between prefix chunks permanently orphans the
+			// remaining grantee-id subtrees, and a same-name role re-grant
+			// would silently resurrect them (GranteeID is deterministic).
+			if action.Type != metastore.ActionDelete {
+				return merr.WrapErrServiceInternalMsg("rootcoord catalog cannot apply action type %v to RoleGrantsEntry", action.Type)
+			}
+			prefixes, err := kc.deleteGrantPrefixes(ctx, entry.Tenant, &milvuspb.RoleEntity{Name: entry.RoleName})
+			if err != nil {
+				return err
+			}
+			for _, p := range prefixes[1:] {
+				b.RemovePrefix(p)
+			}
+			b.RemovePrefix(prefixes[0])
 		default:
-			return merr.WrapErrServiceInternalMsg("rootcoord catalog cannot apply action type %v to CollectionEntry", action.Type)
+			return merr.WrapErrServiceInternalMsg("rootcoord catalog cannot apply entry %T", action.Entry)
 		}
 	}
 

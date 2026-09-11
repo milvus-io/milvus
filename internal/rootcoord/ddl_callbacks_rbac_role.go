@@ -116,12 +116,11 @@ func (c *Core) broadcastDropRole(ctx context.Context, in *milvuspb.DropRoleReque
 func (c *DDLCallback) dropRoleV2AckCallback(ctx context.Context, result message.BroadcastResultDropRoleMessageV2) error {
 	// There should always be only one message in the msgs slice.
 	msg := result.Message
+	// DropRole also removes every grant of the role in the same composite
+	// catalog write, so no separate DropGrant call is needed here.
 	err := c.meta.DropRole(ctx, util.DefaultTenant, msg.Header().RoleName)
 	if err != nil {
 		return merr.Wrap(err, "failed to drop role")
-	}
-	if err := c.meta.DropGrant(ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: msg.Header().RoleName}); err != nil {
-		return merr.Wrap(err, "failed to drop grant")
 	}
 	if err := c.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
 		OpType: int32(typeutil.CacheDropRole),
