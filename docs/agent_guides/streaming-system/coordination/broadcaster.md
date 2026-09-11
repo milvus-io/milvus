@@ -54,6 +54,8 @@ before Ack on each business VChannel, and the checker completes the job after
 all channel commits. The RPC is a no-op for new jobs when sent by old nodes.
 See [Import commit ownership](../../../design-docs/design_docs/wal/broadcast_ack_module.md#8-import-commit-ownership).
 
+GC removes eligible tombstones in batches bounded by `metastore.maxEtcdTxnNum` (default 64), using exact broadcast-task keys. Each successful batch retires its in-memory tasks and advances the queue; failures retain the batch for idempotent retry, including when the deletion result is ambiguous. Late ACKs on TOMBSTONE or DONE tasks are ignored, so GC deletion holds neither task nor manager locks. Manager shutdown cancels an in-flight deletion; recovery only enqueues records still present in the catalog and does not replay their completed callbacks.
+
 ## Resource Key Locking
 
 Each ResourceKey has: **Domain** (resource type), **Key** (entity identifier), **Shared** (read vs exclusive). Every broadcast automatically acquires SharedCluster.

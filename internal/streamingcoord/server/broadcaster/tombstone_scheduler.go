@@ -19,7 +19,7 @@ type tombstoneItem struct {
 	// makes the idempotency window the tombstone backs a lower bound rather than an
 	// exact one, so any retention coupled to maxLifetime must leave margin rather than
 	// match it exactly.
-	createTime time.Time // the time when the tombstone is created, when recovery, the createTime will be reset to the current time, but it's ok.
+	createTime time.Time
 }
 
 // tombstoneScheduler is a scheduler for the tombstone.
@@ -116,31 +116,44 @@ func (s *tombstoneScheduler) background() {
 
 // triggerGCTombstone triggers the garbage collection of the tombstone.
 func (s *tombstoneScheduler) triggerGCTombstone() {
+	ctx := s.notifier.Context()
 	maxTombstoneLifetime := paramtable.Get().StreamingCfg.WALBroadcasterTombstoneMaxLifetime.GetAsDurationByParse()
 	maxTombstoneCount := paramtable.Get().StreamingCfg.WALBroadcasterTombstoneMaxCount.GetAsInt()
+	batchSize := max(1, paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt())
 
 	expiredTime := time.Now().Add(-maxTombstoneLifetime)
 	expiredOffset := 0
 	if len(s.tombstones) > maxTombstoneCount {
 		expiredOffset = len(s.tombstones) - maxTombstoneCount
 	}
-	s.Logger().Info(context.TODO(),
+	s.Logger().Info(ctx,
 		"triggerGCTombstone",
 		mlog.Int("tombstone count", len(s.tombstones)),
 		mlog.Int("expired offset", expiredOffset),
 		mlog.Time("expired time", expiredTime))
-	for idx, tombstone := range s.tombstones {
-		// drop tombstone until the expired time or until the expired offset.
-		if idx >= expiredOffset && tombstone.createTime.After(expiredTime) {
-			s.tombstones = s.tombstones[idx:]
+	ids := make([]uint64, 0, min(batchSize, len(s.tombstones)))
+	for len(s.tombstones) > 0 && ctx.Err() == nil {
+		ids = ids[:0]
+		for idx, tombstone := range s.tombstones[:min(batchSize, len(s.tombstones))] {
+			if idx >= expiredOffset && tombstone.createTime.After(expiredTime) {
+				break
+			}
+			ids = append(ids, tombstone.broadcastID)
+		}
+		if len(ids) == 0 {
 			return
 		}
-		if err := s.bm.DropTombstone(s.notifier.Context(), tombstone.broadcastID); err != nil {
-			s.Logger().Error(context.TODO(), "failed to drop tombstone", mlog.Err(err))
-			s.tombstones = s.tombstones[idx:]
+		if err := s.bm.DropTombstones(ctx, ids); err != nil {
+			s.Logger().Warn(ctx, "failed to drop tombstone batch", mlog.Int("batchSize", len(ids)), mlog.Err(err))
 			return
 		}
+		// Advance only after the whole batch succeeds. A failed batch remains
+		// queued for idempotent retry, while earlier successful batches stay gone.
+		clear(s.tombstones[:len(ids)])
+		s.tombstones = s.tombstones[len(ids):]
+		expiredOffset -= len(ids)
 	}
-	// all the tombstones are dropped, reset the tombstones.
-	s.tombstones = make([]tombstoneItem, 0)
+	if len(s.tombstones) == 0 {
+		s.tombstones = nil
+	}
 }

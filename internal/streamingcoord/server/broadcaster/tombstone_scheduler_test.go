@@ -30,9 +30,10 @@ func TestAckCallbacksCompleteWhileTombstoneGCBlocked(t *testing.T) {
 	gcContext, releaseGC := context.WithCancel(context.Background())
 	defer releaseGC()
 	meta := mock_metastore.NewMockStreamingCoordCataLog(t)
-	meta.EXPECT().SaveBroadcastTask(mock.Anything, mock.Anything, mock.Anything).
-		RunAndReturn(func(ctx context.Context, id uint64, task *streamingpb.BroadcastTask) error {
-			if id == 0 {
+	meta.EXPECT().SaveBroadcastTask(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	meta.EXPECT().RemoveBroadcastTasks(mock.Anything, mock.Anything).
+		RunAndReturn(func(ctx context.Context, ids []uint64) error {
+			if len(ids) == 1 && ids[0] == 0 {
 				close(gcStarted)
 				select {
 				case <-gcContext.Done():
@@ -116,13 +117,14 @@ func TestTombstoneRecoveryAfterShutdownBeforeHandoff(t *testing.T) {
 	meta := mock_metastore.NewMockStreamingCoordCataLog(t)
 	meta.EXPECT().SaveBroadcastTask(mock.Anything, uint64(1), mock.Anything).
 		RunAndReturn(func(ctx context.Context, id uint64, task *streamingpb.BroadcastTask) error {
-			if task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE {
-				persisted = proto.Clone(task).(*streamingpb.BroadcastTask)
-			} else {
-				close(deleted)
-			}
+			persisted = proto.Clone(task).(*streamingpb.BroadcastTask)
 			return nil
-		}).Times(2)
+		}).Once()
+	meta.EXPECT().RemoveBroadcastTasks(mock.Anything, []uint64{1}).
+		RunAndReturn(func(ctx context.Context, ids []uint64) error {
+			close(deleted)
+			return nil
+		}).Once()
 	resource.InitForTest(resource.OptStreamingCatalog(meta))
 	task := newBroadcastTaskFromProto(createNewWaitAckBroadcastTaskFromMessage(
 		createNewBroadcastMsg([]string{"v1"}).WithBroadcastID(1),

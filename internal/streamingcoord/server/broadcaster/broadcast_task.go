@@ -362,6 +362,12 @@ func (b *broadcastTask) Ack(ctx context.Context, msgs message.ImmutableMessage) 
 // ack acknowledges the message at the specified vchannel.
 // The callback must be resolved before acquiring b.mu; invocation remains serialized.
 func (b *broadcastTask) ack(ctx context.Context, callback registry.ResolvedMessageAckOnceCallback, msgs ...message.ImmutableMessage) (err error) {
+	// A caller may have obtained this task before its callback completed. Never
+	// let a late ACK recreate a tombstone concurrently with catalog deletion.
+	if b.task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE ||
+		b.task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE {
+		return nil
+	}
 	isControlChannelAcked := b.copyAndSetAckedCheckpoints(msgs...)
 	if !b.dirty {
 		return nil
@@ -523,16 +529,15 @@ func (b *broadcastTask) FastAck(ctx context.Context, broadcastResult map[string]
 	return b.ack(ctx, callback, msgs...)
 }
 
-// DropTombstone drops the tombstone of the broadcast task.
-// It will remove the tombstone of the broadcast task in recovery storage.
-// After the tombstone is dropped, the idempotency and deduplication can not be guaranteed.
-func (b *broadcastTask) DropTombstone(ctx context.Context) error {
+// markTombstoneDropped retires a task after its catalog record was deleted.
+func (b *broadcastTask) markTombstoneDropped() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	b.task.State = streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE
-	b.dirty = true
-	return b.saveTaskIfDirty(ctx, b.Logger())
+	if b.task.State != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE {
+		b.task.State = streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE
+		b.ObserveStateChanged(b.task.State)
+	}
 }
 
 // isAllDone check if all the vchannels are acked.
@@ -615,7 +620,8 @@ func (b *broadcastTask) PendingSchemaFileResourceSnapshot() (int64, []int64, boo
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if b.task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE {
+	if b.task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE ||
+		b.task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE {
 		return 0, nil, false
 	}
 	switch b.messageTypeWithVersion {

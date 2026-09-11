@@ -240,6 +240,7 @@ func setupForcePromoteTest(
 	walBehaviors []appendBehavior,
 ) *forcePromoteTestEnv {
 	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	catalog.EXPECT().RemoveBroadcastTasks(mock.Anything, mock.Anything).Return(nil).Maybe()
 	catalog.EXPECT().ListBroadcastTask(mock.Anything).
 		Return(recoveryTasks, nil).Times(1)
 

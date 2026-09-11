@@ -43,6 +43,10 @@ type StreamingCoordCataLog interface {
 	// Only return error if the ctx is canceled, otherwise it will retry until success.
 	SaveBroadcastTask(ctx context.Context, broadcastID uint64, task *streamingpb.BroadcastTask) error
 
+	// RemoveBroadcastTasks removes completed tombstones with distinct IDs in bounded batches.
+	// An error may follow partially completed deletion; retrying the same IDs is safe.
+	RemoveBroadcastTasks(ctx context.Context, broadcastIDs []uint64) error
+
 	// SaveReplicateConfiguration saves the replicate configuration to metastore.
 	// Only return error if the ctx is canceled, otherwise it will retry until success.
 	SaveReplicateConfiguration(ctx context.Context, config *streamingpb.ReplicateConfigurationMeta, replicatingTasks []*streamingpb.ReplicatePChannelMeta) error
