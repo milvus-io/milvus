@@ -255,6 +255,13 @@ func (s *Server) start() error {
 		return err
 	}
 
+	// The extension seam sits after the coordinator is running, because an
+	// engine's first act is usually to read coordinator state.
+	if err := startCoordinatorEngine(s.ctx, s.mixCoord, s.mixCoordClient); err != nil {
+		mlog.Error(s.ctx, "coordinator engine start failed", mlog.Err(err))
+		return err
+	}
+
 	return nil
 }
 
@@ -274,6 +281,10 @@ func (s *Server) Stop() (err error) {
 	if s.tikvCli != nil {
 		defer s.tikvCli.Close()
 	}
+
+	// The extension seam sits before the coordinator is torn down, so an
+	// engine still sees a working coordinator while it stops.
+	stopCoordinatorEngine(s.ctx)
 
 	if s.mixCoord != nil {
 		mlog.Info(s.ctx, "graceful stop rootCoord")

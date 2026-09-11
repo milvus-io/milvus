@@ -28,8 +28,10 @@ import (
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
+	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -106,18 +108,15 @@ func RecoverAllCollection(m *meta.Meta) {
 	}
 }
 
-func AssignReplica(ctx context.Context, m *meta.Meta, resourceGroups []string, replicaNumber int32, checkNodeNum bool) (map[string]int, error) {
+// ReplicaNumberByResourceGroup is the layout a load request asks for: how
+// many replicas in which resource group. It is the first thing AssignReplica
+// decides, and a caller that has to compare the request with what the
+// collection already holds before deciding whether to admit it reads the
+// same answer from here.
+func ReplicaNumberByResourceGroup(resourceGroups []string, replicaNumber int32) (map[string]int, error) {
 	if len(resourceGroups) != 0 && len(resourceGroups) != 1 && len(resourceGroups) != int(replicaNumber) {
 		return nil, merr.WrapErrParameterInvalidMsg("replica=[%d] resource group=[%s], resource group num can only be 0, 1 or same as replica number", replicaNumber, strings.Join(resourceGroups, ","))
 	}
-
-	if streamingutil.IsStreamingServiceEnabled() && checkNodeNum {
-		streamingNodeCount := snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDs().Len()
-		if replicaNumber > int32(streamingNodeCount) {
-			return nil, merr.WrapErrStreamingNodeNotEnough(streamingNodeCount, int(replicaNumber), fmt.Sprintf("when load %d replica count", replicaNumber))
-		}
-	}
-
 	replicaNumInRG := make(map[string]int)
 	if len(resourceGroups) == 0 {
 		// All replicas should be spawned in default resource group.
@@ -129,6 +128,21 @@ func AssignReplica(ctx context.Context, m *meta.Meta, resourceGroups []string, r
 		// replicas should be spawned in different resource groups one by one.
 		for _, rgName := range resourceGroups {
 			replicaNumInRG[rgName] += 1
+		}
+	}
+	return replicaNumInRG, nil
+}
+
+func AssignReplica(ctx context.Context, m *meta.Meta, resourceGroups []string, replicaNumber int32, checkNodeNum bool) (map[string]int, error) {
+	replicaNumInRG, err := ReplicaNumberByResourceGroup(resourceGroups, replicaNumber)
+	if err != nil {
+		return nil, err
+	}
+
+	if streamingutil.IsStreamingServiceEnabled() && checkNodeNum {
+		streamingNodeCount := snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDs().Len()
+		if replicaNumber > int32(streamingNodeCount) {
+			return nil, merr.WrapErrStreamingNodeNotEnough(streamingNodeCount, int(replicaNumber), fmt.Sprintf("when load %d replica count", replicaNumber))
 		}
 	}
 
@@ -145,10 +159,42 @@ func AssignReplica(ctx context.Context, m *meta.Meta, resourceGroups []string, r
 			return nil, err
 		}
 
-		if num > len(nodes) {
+		// The regular count is master's rule: a group holds as many replicas
+		// as it has regular query nodes. Delegator capacity is checked over
+		// the collection's whole layout by CheckDelegatorCapacity, using the
+		// same pooling the assignment uses, and is not this rule's business.
+		//
+		// One waiver, for an installed form with the streaming service on: a
+		// group that has streaming query nodes passes the regular bound. The
+		// query node embedded in a streaming node is deliberately kept out of
+		// the resource manager (ResourceManager.handleNodeUp returns early
+		// for it) and reaches a replica through the streaming node manager,
+		// so such a group may have no regular node at all and still serve a
+		// replica; counting only the resource manager's nodes would refuse a
+		// load the spawn that follows would have placed perfectly well. Only
+		// a form runs a group on streaming nodes alone, so only a form takes
+		// the waiver and the stock admission stays exactly what it was.
+		//
+		// Under strict isolation a group with no streaming node of its own
+		// cannot host a delegator at all, whatever its regular count, and is
+		// refused here; with the flag off its delegators come from a pool
+		// the pool check bounds, and master's rule stands.
+		regularNodes := len(nodes)
+		enough := num <= regularNodes
+		if extension.FormInstalled() && streamingutil.IsStreamingServiceEnabled() {
+			switch {
+			case snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDsByResourceGroup()[rgName].Len() > 0:
+				enough = true
+			case paramtable.Get().StreamingCfg.StrictResourceGroupIsolationEnabled.GetAsBool():
+				enough = false
+				regularNodes = 0
+			}
+		}
+
+		if !enough {
 			mlog.Warn(ctx, "failed to check resource group", mlog.Err(err))
 			if checkNodeNum {
-				err := merr.WrapErrResourceGroupNodeNotEnough(rgName, len(nodes), num)
+				err := merr.WrapErrResourceGroupNodeNotEnough(rgName, regularNodes, num)
 				return nil, err
 			}
 		}

@@ -16,6 +16,17 @@
  * limitations under the License.
  */
 
+// Package hookutil installs and serves the proxy's request hook: the extension
+// seam a deployment form uses to answer, inspect or refuse an RPC without
+// forking milvus. A form supplies its hook either compiled into the binary
+// (pkg/extension.SetHook) or as a plug-in loaded from proxy.soPath; both are
+// initialized with the hook.* configuration, reconfigured when it changes, and
+// consulted by the same proxy interceptor (internal/proxy/hook_interceptor.go).
+// With no hook installed the default one does nothing and every RPC behaves as
+// it always did.
+//
+// The mechanism, and what a form may and may not do with it, is described in
+// docs/design-docs/design_docs/20260831-in_tree_extension_mechanism.md.
 package hookutil
 
 import (
@@ -28,6 +39,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 	"github.com/milvus-io/milvus/pkg/v3/config"
+	ext "github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -37,6 +49,7 @@ var (
 	hoo       atomic.Value // hook.Hook
 	extension atomic.Value // hook.Extension
 	initOnce  sync.Once
+	watchOnce sync.Once
 )
 
 // hookContainer is Container to wrap hook.Hook interface
@@ -72,6 +85,46 @@ func initHook() error {
 	storeExtension(DefaultExtension{})
 
 	path := paramtable.Get().ProxyCfg.SoPath.GetValue()
+
+	// A form compiled into this binary installs its hook by filling in the
+	// Hook capability, which is the same interface a plug-in provides and is
+	// consulted by the same interceptor. It is not merged with a plug-in:
+	// both answer VerifyAPIKey and the request interception, only one can,
+	// and picking silently would make which one wins depend on start-up
+	// order rather than on the deployment.
+	if compiled := ext.InstalledHook(); compiled != nil {
+		if path != "" {
+			return merr.WrapErrServiceInternalMsg(
+				"hookutil: proxy.soPath is set to %q and a hook is also compiled in; "+
+					"both answer VerifyAPIKey and the request interception, and only one can", path)
+		}
+		// The compiled-in hook is initialized exactly as a plug-in is, with the
+		// same configuration and the same consequence: a hook that cannot
+		// initialize is a proxy that does not start. It is also the one call
+		// that tells the hook it lives in the proxy process.
+		if err := compiled.Init(paramtable.GetHookParams().SoConfig.GetValue()); err != nil {
+			return merr.Wrap(err, "fail to init configs for the compiled-in hook")
+		}
+		storeHook(compiled)
+		// A plug-in ships its hook.Extension as a second symbol; a compiled-in
+		// hook ships it, if at all, as the same value implementing both
+		// interfaces. Store it when it does, or every Report/ReportAction on
+		// the DML, DQL and authorization paths silently no-ops for the form
+		// while a plug-in's would be heard.
+		if reporter, ok := compiled.(hook.Extension); ok {
+			storeExtension(reporter)
+		} else {
+			mlog.Warn(context.TODO(), "the compiled-in hook implements no hook.Extension, reports are dropped")
+		}
+		// And it is reconfigured exactly as a plug-in is: a hook.* edit
+		// re-initializes whichever hook is installed. Skipping this for the
+		// compiled-in hook would leave it on the configuration it started with
+		// while a plug-in picked the same edit up.
+		watchHookConfigReload()
+		mlog.Info(context.TODO(), "using the compiled-in hook")
+		return nil
+	}
+
 	if path == "" {
 		mlog.Info(context.TODO(), "empty so path, skip to load plugin")
 		return nil
@@ -86,18 +139,7 @@ func initHook() error {
 		return merr.Wrap(err, "fail to init configs for the hook")
 	}
 	storeHook((hookVal))
-	paramtable.GetHookParams().WatchHookWithPrefix("watch_hook", "", func(event *config.Event) {
-		mlog.Info(context.TODO(), "receive the hook refresh event", mlog.Any("event", event))
-		go func() {
-			hookVal := GetHook()
-			soConfig := paramtable.GetHookParams().SoConfig.GetValue()
-			mlog.Info(context.TODO(), "refresh hook configs", mlog.Any("config", soConfig))
-			if err = hookVal.Init(soConfig); err != nil {
-				mlog.Panic(context.TODO(), "fail to init configs for the hook when refreshing", mlog.Err(err))
-			}
-			storeHook(hookVal)
-		}()
-	})
+	watchHookConfigReload()
 
 	extVal, err := LoadPlugin[hook.Extension](path, "MilvusExtension")
 	if err != nil {
@@ -106,6 +148,52 @@ func initHook() error {
 	storeExtension(extVal)
 
 	return nil
+}
+
+// watchHookConfigReload re-initializes the installed hook whenever a hook.*
+// configuration key changes, which is how a hook is reconfigured without
+// restarting the proxy.
+//
+// It reads GetHook() rather than closing over one hook value, so it serves
+// whichever hook is installed - a plug-in loaded from proxy.soPath or a hook
+// compiled into this binary - and both branches register it for that reason.
+//
+// Registered at most once per process: the dispatcher appends handlers, and a
+// second registration would re-initialize the hook twice per config edit.
+func watchHookConfigReload() {
+	watchOnce.Do(func() {
+		paramtable.GetHookParams().WatchHookWithPrefix("watch_hook", "", func(event *config.Event) {
+			mlog.Info(context.TODO(), "receive the hook refresh event", mlog.Any("event", event))
+			go func() {
+				// The installed hook is reconfigured in place, and is not
+				// stored back afterwards: it is already the installed one, so
+				// storing it could only overwrite a hook installed while this
+				// goroutine was running.
+				hookVal := GetHook()
+				soConfig := paramtable.GetHookParams().SoConfig.GetValue()
+				mlog.Info(context.TODO(), "refresh hook configs", mlog.Any("config", soConfig))
+				if err := hookVal.Init(soConfig); err != nil {
+					if ext.InstalledHook() != nil {
+						// A refusal at start-up is a deployment that does not
+						// start, which is the plug-in's rule too. A refusal
+						// HERE is different: the proxy is already serving, and
+						// the only thing that changed is a configuration edit
+						// an operator can make at any moment. Killing every
+						// proxy of a deployment over one bad value is a worse
+						// answer than keeping the configuration that was
+						// working and saying loudly that the new one was not
+						// taken.
+						mlog.Error(context.TODO(),
+							"fail to init configs for the compiled-in hook when refreshing, keeping the previous configuration",
+							mlog.Err(err))
+						return
+					}
+					// The plug-in path keeps the behavior it has always had.
+					mlog.Panic(context.TODO(), "fail to init configs for the hook when refreshing", mlog.Err(err))
+				}
+			}()
+		})
+	})
 }
 
 func SetHook(connectionManager any) {

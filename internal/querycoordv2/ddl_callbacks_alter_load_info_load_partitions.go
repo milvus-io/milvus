@@ -21,6 +21,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -39,7 +40,7 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadPartitions(ctx conte
 		return err
 	}
 
-	replicaNumber, resourceGroups, userSpecifiedReplicaMode, err := s.getLoadReplicaConfigForRequest(
+	replicaNumber, resourceGroups, scopedResourceGroups, userSpecifiedReplicaMode, err := s.getLoadReplicaConfigForRequest(
 		ctx,
 		req.GetReplicaNumber(),
 		req.GetResourceGroups(),
@@ -49,12 +50,46 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadPartitions(ctx conte
 		return err
 	}
 
-	expectedReplicasNumber, err := utils.AssignReplica(ctx, s.meta, resourceGroups, replicaNumber, true)
+	currentLoadConfig := s.getCurrentLoadConfig(ctx, req.GetCollectionID())
+	// Node numbers are checked on every load_partitions, which is master's
+	// rule and stays the stock binary's. With a form, a scoped request that
+	// adds no replica to the groups it names - the same load re-sent while
+	// a node of the group restarts, or one that changes only its partitions
+	// at the same counts - places nothing and is not admitted against
+	// anything, exactly as in the LoadCollection callback: under strict
+	// isolation the per-group rule would otherwise refuse a re-send for a
+	// group whose streaming nodes are all away at once, against a
+	// collection that is still serving from its regular nodes.
+	requestedReplicasNumber, err := utils.ReplicaNumberByResourceGroup(resourceGroups, replicaNumber)
 	if err != nil {
 		return err
 	}
+	checkNodeNum := !extension.FormInstalled() || len(scopedResourceGroups) == 0 || currentLoadConfig.Collection == nil ||
+		scopedLoadAddsReplicas(requestedReplicasNumber, currentLoadConfig)
+	expectedReplicasNumber, err := utils.AssignReplica(ctx, s.meta, resourceGroups, replicaNumber, checkNodeNum)
+	if err != nil {
+		return err
+	}
+	// Same bound as the LoadCollection callback: the delegator capacity over
+	// the collection's whole layout, in the pools the assignment will use.
+	if checkNodeNum {
+		if err := utils.CheckDelegatorCapacity(ctx, s.meta, req.GetCollectionID(), expectedReplicasNumber, len(scopedResourceGroups) > 0); err != nil {
+			return err
+		}
+	}
 
-	currentLoadConfig := s.getCurrentLoadConfig(ctx, req.GetCollectionID())
+	// With a form installed, a request that names resource groups speaks only
+	// for those and leaves the placement of the others alone - same seam, same
+	// reason as the LoadCollection callback: without it a scoped
+	// LoadPartitions would be read as the whole placement and refused for
+	// "changing" the replica number of resource groups it never mentioned. A
+	// request that names none - and every request on a stock binary - states
+	// the whole placement and this returns what AssignReplica just produced;
+	// reading the defaulted list here instead would refuse a bare
+	// load_partitions on a collection loaded in another resource group for
+	// exactly that reason.
+	expectedReplicasNumber = completePlacementForOutOfScopeResourceGroups(
+		ctx, req.GetCollectionID(), scopedResourceGroups, expectedReplicasNumber, currentLoadConfig)
 	partitionIDsSet := typeutil.NewSet(currentLoadConfig.GetPartitionIDs()...)
 	// add new incoming partitionIDs.
 	for _, partition := range req.PartitionIDs {
@@ -72,6 +107,7 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadPartitions(ctx conte
 			ExpectedPriority:                 req.GetPriority(),
 			ExpectedUserSpecifiedReplicaMode: userSpecifiedReplicaMode,
 		},
+		ScopedResourceGroups: scopedResourceGroups,
 	}
 	if err := alterLoadConfigReq.CheckIfLoadPartitionsExecutable(); err != nil {
 		return err

@@ -222,6 +222,7 @@ func (suite *CollectionObserverSuite) SetupTest() {
 		suite.targetObserver,
 		suite.checkerController,
 		suite.proxyManager,
+		suite.nodeMgr,
 	)
 
 	for _, collection := range suite.collections {
@@ -616,7 +617,7 @@ func (suite *CollectionObserverSuite) load(collection int64) {
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collection).Return(dmChannels, allSegments, nil)
 	suite.targetMgr.UpdateCollectionNextTarget(ctx, collection)
 
-	suite.ob.LoadCollection(context.Background(), collection)
+	suite.ob.LoadCollection(context.Background(), collection, "")
 }
 
 func TestCollectionObserver(t *testing.T) {

@@ -119,3 +119,14 @@ func TestReplicaLoadPercentageUsesTheSuppliedSnapshots(t *testing.T) {
 	assert.EqualValues(t, 0, replicaLoadPercentage(replica, channelTargets, segmentTargets,
 		map[string][]*meta.DmChannel{}))
 }
+
+// TestMinReplicaLoadPercentageIsTheLaggard pins the fold from per-replica
+// figures to the group's: the slowest replica, and -1 -- the "no replica
+// here" outcome -- when there is nothing to fold.
+func TestMinReplicaLoadPercentageIsTheLaggard(t *testing.T) {
+	assert.EqualValues(t, -1, MinReplicaLoadPercentage(nil))
+	assert.EqualValues(t, -1, MinReplicaLoadPercentage(map[int64]int32{}))
+	assert.EqualValues(t, 100, MinReplicaLoadPercentage(map[int64]int32{1: 100}))
+	assert.EqualValues(t, 33, MinReplicaLoadPercentage(map[int64]int32{1: 100, 2: 33, 3: 66}))
+	assert.EqualValues(t, 0, MinReplicaLoadPercentage(map[int64]int32{1: 0, 2: 100}))
+}

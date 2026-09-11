@@ -7,7 +7,10 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
@@ -130,4 +133,49 @@ func TestAuthenticationInterceptor(t *testing.T) {
 		assert.Equal(t, "mockUser", user)
 	}
 	hookutil.SetTestHook(hookutil.DefaultHook{})
+}
+
+// streamForAuth is a minimal ServerStream carrying only the context the
+// interceptor reads and rewrites.
+type streamForAuth struct {
+	grpc.ServerStream
+	ctx context.Context
+}
+
+func (s *streamForAuth) Context() context.Context { return s.ctx }
+
+type ctxKeyAuthedUser struct{}
+
+// The stream interceptor is the unary one's counterpart: a failed
+// authentication ends the stream before the handler exists, and a successful
+// one hands the handler the authenticated context through ss.Context() - the
+// only channel a stream handler has - rather than the raw incoming one.
+func TestGrpcAuthStreamInterceptor(t *testing.T) {
+	info := &grpc.StreamServerInfo{FullMethod: "/milvus.proto.milvus.MilvusService/CreateReplicateStream"}
+
+	t.Run("a refused credential ends the stream unhandled", func(t *testing.T) {
+		intercept := GrpcAuthStreamInterceptor(func(ctx context.Context) (context.Context, error) {
+			return nil, status.Error(codes.Unauthenticated, "no")
+		})
+		handled := false
+		err := intercept(struct{}{}, &streamForAuth{ctx: context.Background()}, info,
+			func(any, grpc.ServerStream) error { handled = true; return nil })
+		assert.Error(t, err)
+		assert.False(t, handled, "an unauthenticated stream must never reach its handler")
+	})
+
+	t.Run("the handler reads the authenticated context", func(t *testing.T) {
+		intercept := GrpcAuthStreamInterceptor(func(ctx context.Context) (context.Context, error) {
+			return context.WithValue(ctx, ctxKeyAuthedUser{}, "alice"), nil
+		})
+		var seen any
+		err := intercept(struct{}{}, &streamForAuth{ctx: context.Background()}, info,
+			func(_ any, ss grpc.ServerStream) error {
+				seen = ss.Context().Value(ctxKeyAuthedUser{})
+				return nil
+			})
+		assert.NoError(t, err)
+		assert.Equal(t, "alice", seen,
+			"the rewritten context is the only way user identity reaches a stream handler")
+	})
 }

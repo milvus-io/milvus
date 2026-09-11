@@ -264,6 +264,7 @@ func (suite *ServiceSuite) SetupTest() {
 		suite.targetObserver,
 		&checkers.CheckerController{},
 		suite.proxyManager,
+		suite.nodeMgr,
 	)
 	suite.collectionObserver.Start()
 
