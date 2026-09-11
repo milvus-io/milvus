@@ -43,6 +43,7 @@ func InitEtcdServer(
 				cfgFromFile, err := embed.ConfigFromFile(path)
 				if err != nil {
 					initError = err
+					return
 				}
 				cfg = cfgFromFile
 			} else {
@@ -57,7 +58,6 @@ func InitEtcdServer(
 				initError = err
 				return
 			}
-			etcdServer = e
 			// embed.StartEtcd returns once the server is serving traffic, but a
 			// single-member cluster has not necessarily elected itself leader
 			// yet. Wait until etcd is ready (leader elected + member published)
@@ -69,6 +69,10 @@ func InitEtcdServer(
 				initError = err
 				return
 			}
+			// Only publish the singleton after etcd is fully ready. Assigning it
+			// earlier would leave HasServer()/GetEmbedEtcdClient() pointing at a
+			// stopped server if the readiness wait times out.
+			etcdServer = e
 			mlog.Info(context.TODO(), "finish init Etcd config", mlog.String("path", path), mlog.String("data", dataDir))
 		})
 		return initError

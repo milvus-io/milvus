@@ -435,12 +435,15 @@ func (mr *MilvusRoles) Run() {
 		params := paramtable.Get()
 		if params.EtcdCfg.UseEmbedEtcd.GetAsBool() {
 			// Start etcd server.
-			etcd.InitEtcdServer(
+			if err := etcd.InitEtcdServer(
 				params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
 				params.EtcdCfg.ConfigPath.GetValue(),
 				params.EtcdCfg.DataDir.GetValue(),
 				params.EtcdCfg.EtcdLogPath.GetValue(),
-				params.EtcdCfg.EtcdLogLevel.GetValue())
+				params.EtcdCfg.EtcdLogLevel.GetValue()); err != nil {
+				mlog.Error(context.TODO(), "failed to start embedded Etcd server", mlog.Err(err))
+				return
+			}
 			defer etcd.StopEtcdServer()
 		}
 		paramtable.SetRole(typeutil.StandaloneRole)
