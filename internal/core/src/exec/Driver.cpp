@@ -40,6 +40,7 @@
 #include "exec/operator/FilterBitsNode.h"
 #include "exec/operator/IterativeFilterNode.h"
 #include "exec/operator/MvccNode.h"
+#include "exec/operator/PrecomputedBitsetNode.h"
 #include "exec/operator/Operator.h"
 #include "exec/operator/ProjectNode.h"
 #include "exec/operator/RandomSampleNode.h"
@@ -94,6 +95,11 @@ DriverFactory::CreateDriver(
             tracer::AddEvent("create_operator: MvccNode");
             operators.push_back(
                 std::make_shared<PhyMvccNode>(id, ctx.get(), mvccnode));
+        } else if (auto precomputedbitsnode = std::dynamic_pointer_cast<
+                       const plan::PrecomputedBitsetNode>(plannode)) {
+            tracer::AddEvent("create_operator: PrecomputedBitsetNode");
+            operators.push_back(std::make_shared<PhyPrecomputedBitsetNode>(
+                id, ctx.get(), precomputedbitsnode));
         } else if (auto vectorsearchnode =
                        std::dynamic_pointer_cast<const plan::VectorSearchNode>(
                            plannode)) {

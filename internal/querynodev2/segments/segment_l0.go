@@ -150,6 +150,10 @@ func (s *L0Segment) Search(ctx context.Context, searchReq *segcore.SearchRequest
 	return nil, nil
 }
 
+func (s *L0Segment) SearchGrouped(ctx context.Context, searchReqs []*segcore.SearchRequest) ([]*segcore.SearchResult, error) {
+	return make([]*segcore.SearchResult, len(searchReqs)), nil
+}
+
 func (s *L0Segment) Retrieve(ctx context.Context, plan *segcore.RetrievePlan) (*segcorepb.RetrieveResults, error) {
 	return nil, nil
 }

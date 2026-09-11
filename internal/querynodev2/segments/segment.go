@@ -38,6 +38,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/atomic"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -803,6 +804,79 @@ func (s *LocalSegment) Search(ctx context.Context, searchReq *segcore.SearchRequ
 		log.Debug(ctx, "search segment done")
 	}
 	return result, nil
+}
+
+// SearchGrouped runs several branches that share one filter predicate against
+// a single evaluation of that filter.
+//
+// Phase 1 computes the shared prefix; phase 2 runs each branch's vector search
+// against it, concurrently -- the branches are independent given a read-only
+// bitset, and serializing them would trade the saved filter for lost overlap.
+// The fan-out lives here rather than inside one cgo call on purpose: a job
+// running on getSearchCPUExecutor that submits to that same bounded pool and
+// then blocks would deadlock once every thread held such a waiter.
+func (s *LocalSegment) SearchGrouped(ctx context.Context, searchReqs []*segcore.SearchRequest) ([]*segcore.SearchResult, error) {
+	if len(searchReqs) == 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("SearchGrouped requires at least one request")
+	}
+	if len(searchReqs) == 1 {
+		result, err := s.Search(ctx, searchReqs[0])
+		if err != nil {
+			return nil, err
+		}
+		return []*segcore.SearchResult{result}, nil
+	}
+
+	log := mlog.WithLazy(
+		mlog.Uint64("mvcc", searchReqs[0].MVCC()),
+		mlog.FieldCollectionID(s.Collection()),
+		mlog.FieldSegmentID(s.ID()),
+		mlog.String("segmentType", s.segmentType.String()),
+		mlog.Int("branches", len(searchReqs)),
+	)
+
+	if !s.ptrLock.PinIf(state.IsNotReleased) {
+		return nil, merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
+	}
+	defer s.ptrLock.Unpin()
+
+	tr := timerecord.NewTimeRecorder("cgoSearchGrouped")
+	prefix, err := s.csegment.ComputeFilterBitset(ctx, searchReqs[0])
+	if err != nil {
+		log.Warn(ctx, "compute shared filter bits failed")
+		return nil, err
+	}
+	defer prefix.Release()
+
+	results := make([]*segcore.SearchResult, len(searchReqs))
+	group, groupCtx := errgroup.WithContext(ctx)
+	for i := range searchReqs {
+		idx := i
+		group.Go(func() error {
+			result, err := s.csegment.SearchWithBitset(groupCtx, searchReqs[idx], prefix)
+			if err != nil {
+				return err
+			}
+			results[idx] = result
+			return nil
+		})
+	}
+	if err := group.Wait(); err != nil {
+		// Release whatever did come back before the group failed; the caller
+		// only cleans up on a nil error.
+		for _, result := range results {
+			if result != nil {
+				result.Release()
+			}
+		}
+		log.Warn(ctx, "grouped search failed")
+		return nil, err
+	}
+
+	metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(paramtable.GetStringNodeID(), metrics.SearchLabel).
+		Observe(float64(tr.ElapseSpan().Microseconds()) / 1000.0)
+	log.Debug(ctx, "grouped search segment done")
+	return results, nil
 }
 
 func (s *LocalSegment) retrieve(ctx context.Context, plan *segcore.RetrievePlan, log *mlog.Logger) (*segcore.RetrieveResult, error) {

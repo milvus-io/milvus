@@ -147,11 +147,7 @@ func (s *cSegmentImpl) Search(ctx context.Context, searchReq *SearchRequest) (*S
 	defer runtime.KeepAlive(searchReq)
 
 	// Use physical time for entity-level TTL (issue #47413)
-	physicalTimeUs := int64(searchReq.entityTTLPhysicalTime)
-	if physicalTimeUs == 0 {
-		physicalTimeMs, _ := tsoutil.ParseHybridTs(searchReq.mvccTimestamp)
-		physicalTimeUs = physicalTimeMs * 1000
-	}
+	physicalTimeUs := resolveTTLPhysicalTimeUs(searchReq)
 
 	future := cgo.Async(ctx,
 		func() cgo.CFuturePtr {
@@ -169,6 +165,86 @@ func (s *cSegmentImpl) Search(ctx context.Context, searchReq *SearchRequest) (*S
 			))
 		},
 		cgo.WithName("search"),
+	)
+	defer future.Release()
+
+	result, err := future.BlockAndLeakyGet()
+	if err != nil {
+		return nil, err
+	}
+	return &SearchResult{cSearchResult: (C.CSearchResult)(result)}, nil
+}
+
+// resolveTTLPhysicalTimeUs mirrors the TTL fallback used by Search: prefer the
+// explicit entity TTL physical time, otherwise derive it from the MVCC ts.
+func resolveTTLPhysicalTimeUs(searchReq *SearchRequest) int64 {
+	physicalTimeUs := int64(searchReq.entityTTLPhysicalTime)
+	if physicalTimeUs == 0 {
+		physicalTimeMs, _ := tsoutil.ParseHybridTs(searchReq.mvccTimestamp)
+		physicalTimeUs = physicalTimeMs * 1000
+	}
+	return physicalTimeUs
+}
+
+// ComputeFilterBitset evaluates the filter subtree of searchReq's plan once
+// and returns the bitset as an opaque handle for the branch searches to reuse.
+// enableExprCache is forwarded: whether the bitset comes from evaluation or
+// from the expression result cache is orthogonal to sharing it.
+func (s *cSegmentImpl) ComputeFilterBitset(ctx context.Context, searchReq *SearchRequest) (*SharedFilterBitsetResult, error) {
+	traceCtx := ParseCTraceContext(ctx)
+	defer runtime.KeepAlive(traceCtx)
+	defer runtime.KeepAlive(searchReq)
+
+	future := cgo.Async(ctx,
+		func() cgo.CFuturePtr {
+			return (cgo.CFuturePtr)(C.AsyncComputeFilterBitset(
+				traceCtx.ctx,
+				s.ptr,
+				searchReq.plan.cSearchPlan,
+				C.uint64_t(searchReq.mvccTimestamp),
+				C.int32_t(searchReq.consistencyLevel),
+				C.uint64_t(searchReq.collectionTTL),
+				C.uint64_t(resolveTTLPhysicalTimeUs(searchReq)),
+				C.bool(searchReq.enableExprCache),
+			))
+		},
+		cgo.WithName("compute-filter-bitset"),
+	)
+	defer future.Release()
+
+	result, err := future.BlockAndLeakyGet()
+	if err != nil {
+		return nil, err
+	}
+	return &SharedFilterBitsetResult{cSharedFilterBitsetResult: (C.CSharedFilterBitsetResult)(result)}, nil
+}
+
+// SearchWithBitset runs one branch's vector search against a shared filter
+// bitset. bitset is read-only here; concurrent calls may pass the same one.
+func (s *cSegmentImpl) SearchWithBitset(ctx context.Context, searchReq *SearchRequest, bitset *SharedFilterBitsetResult) (*SearchResult, error) {
+	if bitset == nil || bitset.cSharedFilterBitsetResult == nil {
+		return nil, merr.WrapErrServiceInternalMsg("SearchWithBitset called without a shared filter bitset")
+	}
+	traceCtx := ParseCTraceContext(ctx)
+	defer runtime.KeepAlive(traceCtx)
+	defer runtime.KeepAlive(searchReq)
+	defer runtime.KeepAlive(bitset)
+
+	future := cgo.Async(ctx,
+		func() cgo.CFuturePtr {
+			return (cgo.CFuturePtr)(C.AsyncSearchWithBitset(
+				traceCtx.ctx,
+				s.ptr,
+				searchReq.plan.cSearchPlan,
+				searchReq.cPlaceholderGroup,
+				bitset.cSharedFilterBitsetResult,
+				C.uint64_t(searchReq.mvccTimestamp),
+				C.int32_t(searchReq.consistencyLevel),
+				C.uint64_t(searchReq.collectionTTL),
+				C.uint64_t(resolveTTLPhysicalTimeUs(searchReq)),
+			))
+		},
+		cgo.WithName("search-with-bitset"),
 	)
 	defer future.Release()
 
