@@ -2258,8 +2258,14 @@ func (loader *segmentLoader) LoadIndex(ctx context.Context,
 	infos := loader.prepare(ctx, commonpb.SegmentState_SegmentStateNone, loadInfo)
 	defer loader.unregister(infos...)
 
-	indexInfo := lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *querypb.SegmentLoadInfo {
+	indexInfos := lo.FilterMap(infos, func(info *querypb.SegmentLoadInfo, _ int) (*querypb.SegmentLoadInfo, bool) {
 		info = typeutil.Clone(info)
+		info.IndexInfos = lo.Filter(info.GetIndexInfos(), func(indexInfo *querypb.FieldIndexInfo, _ int) bool {
+			return len(indexInfo.GetIndexFilePaths()) > 0
+		})
+		if len(info.GetIndexInfos()) == 0 {
+			return nil, false
+		}
 		// remain binlog paths whose field id is in index infos to estimate resource usage correctly
 		indexFields := typeutil.NewSet(lo.Map(info.GetIndexInfos(), func(indexInfo *querypb.FieldIndexInfo, _ int) int64 { return indexInfo.GetFieldID() })...)
 		var binlogPaths []*datapb.FieldBinlog
@@ -2271,35 +2277,30 @@ func (loader *segmentLoader) LoadIndex(ctx context.Context,
 		info.BinlogPaths = binlogPaths
 		info.Deltalogs = nil
 		info.Statslogs = nil
-		return info
+		return info, true
 	})
-	requestResourceResult, err := loader.requestResource(ctx, indexInfo...)
+	requestResourceResult, err := loader.requestResource(ctx, indexInfos...)
 	if err != nil {
 		return err
 	}
 	defer loader.freeRequestResource(requestResourceResult)
 
-	log.Info("segment loader start to load index", zap.Int("segmentNumAfterFilter", len(infos)))
+	log.Info("segment loader start to load index", zap.Int("segmentNumAfterFilter", len(indexInfos)))
 	metrics.QueryNodeLoadSegmentConcurrency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), "LoadIndex").Inc()
 	defer metrics.QueryNodeLoadSegmentConcurrency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), "LoadIndex").Dec()
 
 	tr := timerecord.NewTimeRecorder("segmentLoader.LoadIndex")
 	defer metrics.QueryNodeLoadIndexLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	for _, loadInfo := range infos {
+	for _, loadInfo := range indexInfos {
 		for _, info := range loadInfo.GetIndexInfos() {
-			if len(info.GetIndexFilePaths()) == 0 {
-				log.Warn("failed to add index for segment, index file list is empty, the segment may be too small")
-				return merr.WrapErrIndexNotFound("index file list empty")
-			}
-
 			err := loader.loadFieldIndex(ctx, segment, info)
 			if err != nil {
 				log.Warn("failed to load index for segment", zap.Error(err))
 				return err
 			}
 		}
-		loader.notifyLoadFinish(loadInfo)
 	}
+	loader.notifyLoadFinish(infos...)
 
 	return loader.waitSegmentLoadDone(ctx, commonpb.SegmentState_SegmentStateNone, []int64{loadInfo.GetSegmentID()}, version)
 }
