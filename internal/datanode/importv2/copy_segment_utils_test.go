@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -1343,14 +1344,15 @@ func TestBuildIndexInfoFromSource_PreservesIndexStorePathVersion(t *testing.T) {
 				IndexFilePaths:        []string{"files/index_files/1001/1/222/333/v0_file"},
 			},
 			{
-				FieldID:               101,
-				IndexID:               11,
-				BuildID:               1002,
-				IndexName:             "idx_v1",
-				IndexVersion:          1,
-				SerializedSize:        2048,
-				IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
-				IndexFilePaths:        []string{"files/index_v1/111/222/333/1002/1/v1_file"},
+				FieldID:                   101,
+				IndexID:                   11,
+				BuildID:                   1002,
+				IndexName:                 "idx_v1",
+				IndexVersion:              1,
+				SerializedSize:            2048,
+				IndexStorePathVersion:     indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+				CurrentScalarIndexVersion: common.MinScalarIndexVersionForJsonPathPresence,
+				IndexFilePaths:            []string{"files/index_v1/111/222/333/1002/1/v1_file"},
 			},
 		},
 	}
@@ -1368,7 +1370,9 @@ func TestBuildIndexInfoFromSource_PreservesIndexStorePathVersion(t *testing.T) {
 	indexInfos, _, _, err := buildIndexInfoFromSource(source, target, mappings)
 	assert.NoError(t, err)
 	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, indexInfos[2001].GetIndexStorePathVersion())
+	assert.Zero(t, indexInfos[2001].GetCurrentScalarIndexVersion())
 	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, indexInfos[2002].GetIndexStorePathVersion())
+	assert.Equal(t, common.MinScalarIndexVersionForJsonPathPresence, indexInfos[2002].GetCurrentScalarIndexVersion())
 }
 
 func TestCopySegmentAndIndexFiles_ReturnsFileList(t *testing.T) {

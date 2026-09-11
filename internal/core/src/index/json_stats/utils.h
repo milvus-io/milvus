@@ -16,8 +16,6 @@
 
 #pragma once
 
-#include <cstring>
-#include "common/FastMem.h"
 #include <map>
 #include <optional>
 #include <set>
@@ -31,7 +29,6 @@
 
 #include "arrow/api.h"
 #include "common/EasyAssert.h"
-#include "common/jsmn.h"
 #include "index/InvertedIndexTantivy.h"
 
 namespace milvus::index {
@@ -55,45 +52,23 @@ enum class JSONType {
     OBJECT
 };
 
-inline bool
-JsonStringHasEscape(std::string_view s) {
-    // Any JSON escape must start with a backslash
-    return std::memchr(s.data(), '\\', s.size()) != nullptr;
-}
-
-// Unescape a JSON-escaped string slice (without surrounding quotes)
-// Returns a decoded UTF-8 std::string or throws on error
-inline std::string
-UnescapeJsonString(const std::string& escaped) {
-    if (!JsonStringHasEscape(escaped)) {
-        return escaped;
-    }
-    try {
-        simdjson::dom::parser parser;
-        std::string quoted;
-        quoted.resize(escaped.size() + 2);
-        quoted[0] = '"';
-        milvus::fastmem::FastMemcpy(&quoted[1], escaped.data(), escaped.size());
-        quoted[quoted.size() - 1] = '"';
-        simdjson::dom::element elem = parser.parse(quoted);
-        if (elem.type() != simdjson::dom::element_type::STRING) {
-            ThrowInfo(ErrorCode::UnexpectedError,
-                      "input is not a JSON string: {}",
-                      escaped);
-        }
-        return std::string(std::string_view(elem.get_string()));
-    } catch (const simdjson::simdjson_error& e) {
-        ThrowInfo(ErrorCode::UnexpectedError,
-                  "Failed to unescape json string (simdjson): {}, {}",
-                  escaped,
-                  e.what());
-    } catch (const std::exception& e) {
-        ThrowInfo(ErrorCode::UnexpectedError,
-                  "Failed to unescape json string: {}, {}",
-                  escaped,
-                  e.what());
-    }
-    return {};
+// Both BSON and Parquet writers use raw JSON's get_number() contract, including
+// uint64-to-double conversion and rejection of unrepresentable numbers.
+inline double
+ParseJsonDoubleValue(const std::string& value) {
+    simdjson::padded_string padded(value.data(), value.size());
+    simdjson::ondemand::parser parser;
+    auto document = parser.iterate(padded);
+    AssertInfo(document.error() == simdjson::SUCCESS,
+               "invalid json number {}: {}",
+               value,
+               simdjson::error_message(document.error()));
+    auto number = document.get_number();
+    AssertInfo(number.error() == simdjson::SUCCESS,
+               "invalid json number {}: {}",
+               value,
+               simdjson::error_message(number.error()));
+    return number.value().as_double();
 }
 
 inline std::string

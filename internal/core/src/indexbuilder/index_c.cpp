@@ -481,7 +481,10 @@ BuildJsonKeyIndex(ProtoLayoutInterface result,
             build_index_info->json_stats_max_shredding_columns(),
             build_index_info->json_stats_shredding_ratio_threshold(),
             build_index_info->json_stats_write_batch_size(),
-            tantivy_index_version);
+            tantivy_index_version,
+            build_index_info->json_stats_data_format() == 0
+                ? JSON_STATS_DATA_FORMAT_V3
+                : build_index_info->json_stats_data_format());
         index->Build(config);
         auto create_index_result = index->Upload(config);
         create_index_result->SerializeAt(

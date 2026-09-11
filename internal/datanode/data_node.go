@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
@@ -160,7 +161,16 @@ func (node *DataNode) Register() error {
 }
 
 func (node *DataNode) initSession() error {
-	node.session = sessionutil.NewSession(node.ctx)
+	minimalIndexVersion, currentIndexVersion, maximumIndexVersion := index.GetIndexEngineVersion()
+	node.session = sessionutil.NewSession(node.ctx,
+		sessionutil.WithIndexEngineVersion(
+			minimalIndexVersion,
+			currentIndexVersion,
+			maximumIndexVersion),
+		sessionutil.WithScalarIndexEngineVersion(
+			common.MinimalScalarIndexEngineVersion,
+			common.CurrentScalarIndexEngineVersion,
+			common.MaximumScalarIndexEngineVersion))
 	if node.session == nil {
 		return merr.WrapErrServiceInternalMsg("failed to initialize session")
 	}

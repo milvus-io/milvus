@@ -222,20 +222,33 @@ func needDoJSONKeyIndex(segment *SegmentInfo, fieldIDs []UniqueID, allowUnsorted
 		return false
 	}
 
-	for _, fieldID := range fieldIDs {
-		if segment.GetJsonKeyStats() == nil {
-			return true
-		}
-		if segment.GetJsonKeyStats()[fieldID] == nil {
-			return true
-		}
-		// if the data format version is less than the current version, we need to do the stats task again
-		// because the data format is updated, the old data format need to be converted to the new data format
-		if segment.GetJsonKeyStats()[fieldID].GetJsonKeyStatsDataFormat() < common.JSONStatsDataFormatVersion {
-			return true
+	targetFormat := Params.DataCoordCfg.JSONStatsFormatVersion.GetAsInt64()
+	classification := classifyJSONStatsFormats(segment, fieldIDs, targetFormat)
+	if classification.hasNewer {
+		// Never overwrite a format produced by a newer binary after rollback.
+		return false
+	}
+	if targetFormat == common.JSONStatsDataFormatV4 && classification.hasOlder {
+		// Once any field has old stats, the migration policy owns the whole
+		// segment. This also prevents a missing-field stats task from racing with
+		// the single compaction that replaces the segment.
+		return false
+	}
+	// With an explicit V3 setting, legacy V1/V2 stats are refreshed in place.
+	return classification.hasMissing || classification.hasOlder
+}
+
+func getJSONStatsFieldIDs(collection *collectionInfo) []UniqueID {
+	if collection == nil {
+		return nil
+	}
+	fieldIDs := make([]UniqueID, 0)
+	for _, field := range collection.Schema.GetFields() {
+		if typeutil.CreateFieldSchemaHelper(field).EnableJSONKeyStatsIndex() {
+			fieldIDs = append(fieldIDs, field.GetFieldID())
 		}
 	}
-	return false
+	return fieldIDs
 }
 
 func canBuildExternalJSONKeyIndex(segment *SegmentInfo) bool {
@@ -247,15 +260,18 @@ func needDoBM25(segment *SegmentInfo, fieldIDs []UniqueID) bool {
 	return false
 }
 
-// canSubmitStatsTask reports whether the global scheduler still has room for a
-// new stats task. The pending queue is shared by every task type, so the count is
-// scoped to stats work: an index or compaction backlog must not starve text-index
-// and JSON-shredding submission. Stats tasks waiting on a retry backoff are
-// counted, because they still occupy queue depth. Discovery re-runs on every
-// TaskCheckInterval tick, so a segment skipped here is picked up again once the
-// stats queue drains.
+// canSubmitStatsTask scopes admission to the stats subjob. Paused JSON work
+// must not consume the text-index budget. Retry backoff still counts against
+// the same subjob's limit, so worker failures cannot bypass admission control.
 func (si *statsInspector) canSubmitStatsTask(subJobType indexpb.StatsSubJob) bool {
-	pendingTaskCount := si.scheduler.GetPendingTaskCount(taskcommon.Stats)
+	if subJobType == indexpb.StatsSubJob_JsonKeyIndexJob &&
+		(!Params.CommonCfg.EnabledJSONKeyStats.GetAsBool() || jsonShreddingDisabledByDeprecatedConfig()) {
+		return false
+	}
+	pendingTaskCount := si.scheduler.GetPendingTaskCount(taskcommon.Stats, func(t task.Task) bool {
+		stats, ok := t.(*statsTask)
+		return ok && stats.GetSubJobType() == subJobType
+	})
 	pendingTaskLimit := Params.DataCoordCfg.StatsTaskPendingLimit.GetAsInt()
 	if pendingTaskCount > pendingTaskLimit {
 		mlog.RatedInfo(si.ctx, rate.Limit(10), "skip submitting stats task because global scheduler has too many pending tasks",
@@ -327,6 +343,9 @@ func (si *statsInspector) triggerTextStatsTask() {
 }
 
 func (si *statsInspector) triggerJSONKeyIndexStatsTask() {
+	if !Params.CommonCfg.EnabledJSONKeyStats.GetAsBool() {
+		return
+	}
 	if jsonShreddingDisabledByDeprecatedConfig() {
 		mlog.RatedWarn(si.ctx, rate.Limit(0.1), "skip JSON key index stats task, dataCoord.jsonShreddingTriggerCount is set to 0",
 			mlog.String("suggestion", "set common.enabledJSONShredding to false instead"))
@@ -452,6 +471,10 @@ func (si *statsInspector) SubmitStatsTask(originSegmentID, targetSegmentID int64
 	subJobType indexpb.StatsSubJob, canRecycle bool,
 	resources []*internalpb.FileResourceInfo,
 ) error {
+	if subJobType == indexpb.StatsSubJob_JsonKeyIndexJob &&
+		(!Params.CommonCfg.EnabledJSONKeyStats.GetAsBool() || jsonShreddingDisabledByDeprecatedConfig()) {
+		return nil
+	}
 	originSegment := si.mt.GetHealthySegment(si.ctx, originSegmentID)
 	if originSegment == nil {
 		return merr.WrapErrSegmentNotFound(originSegmentID)
@@ -481,6 +504,24 @@ func (si *statsInspector) SubmitStatsTask(originSegmentID, targetSegmentID int64
 			mlog.String("subJobType", subJobType.String()))
 		return nil
 	}
+	jsonStatsDataFormat := Params.DataCoordCfg.JSONStatsFormatVersion.GetAsInt64()
+	var jsonStatsFieldIDs []int64
+	if subJobType == indexpb.StatsSubJob_JsonKeyIndexJob {
+		collection := si.mt.GetCollection(originSegment.GetCollectionID())
+		jsonStatsFieldIDs = getJSONStatsFieldIDs(collection)
+		classification := classifyJSONStatsFormats(
+			originSegment, getJSONStatsFieldIDs(collection), jsonStatsDataFormat)
+		if classification.hasNewer ||
+			(jsonStatsDataFormat == common.JSONStatsDataFormatV4 && classification.hasOlder) {
+			mlog.RatedInfo(si.ctx, rate.Limit(10), "skip in-place JSON stats task for segment with incompatible stats",
+				mlog.FieldCollectionID(originSegment.GetCollectionID()),
+				mlog.FieldSegmentID(originSegmentID),
+				mlog.Int64("targetFormat", jsonStatsDataFormat),
+				mlog.Bool("hasOlderFormat", classification.hasOlder),
+				mlog.Bool("hasNewerFormat", classification.hasNewer))
+			return nil
+		}
+	}
 	// The trigger loops check admission before getting here; this guard covers
 	// callers that reach the StatsInspector interface directly.
 	if !si.canSubmitStatsTask(subJobType) {
@@ -497,19 +538,21 @@ func (si *statsInspector) SubmitStatsTask(originSegmentID, targetSegmentID int64
 
 	taskSlot := calculateStatsTaskSlot(originSegmentSize)
 	t := &indexpb.StatsTask{
-		CollectionID:    originSegment.GetCollectionID(),
-		PartitionID:     originSegment.GetPartitionID(),
-		SegmentID:       originSegmentID,
-		InsertChannel:   originSegment.GetInsertChannel(),
-		TaskID:          taskID,
-		Version:         0,
-		NodeID:          0,
-		State:           indexpb.JobState_JobStateInit,
-		FailReason:      "",
-		TargetSegmentID: targetSegmentID,
-		SubJobType:      subJobType,
-		CanRecycle:      canRecycle,
-		FileResources:   resources,
+		CollectionID:        originSegment.GetCollectionID(),
+		PartitionID:         originSegment.GetPartitionID(),
+		SegmentID:           originSegmentID,
+		InsertChannel:       originSegment.GetInsertChannel(),
+		TaskID:              taskID,
+		Version:             0,
+		NodeID:              0,
+		State:               indexpb.JobState_JobStateInit,
+		FailReason:          "",
+		TargetSegmentID:     targetSegmentID,
+		SubJobType:          subJobType,
+		CanRecycle:          canRecycle,
+		FileResources:       resources,
+		JsonStatsDataFormat: jsonStatsDataFormat,
+		JsonStatsFieldIds:   jsonStatsFieldIDs,
 	}
 	if err = si.mt.statsTaskMeta.AddStatsTask(t); err != nil {
 		if errors.Is(err, merr.ErrTaskDuplicate) {

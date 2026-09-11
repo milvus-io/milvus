@@ -261,6 +261,46 @@ func (suite *IndexBuildTaskSuite) TestPostExecuteAcceptsEmptyIndexStats() {
 	suite.Equal(currentScalarIndexVersion, info.CurrentScalarIndexVersion)
 }
 
+func (suite *IndexBuildTaskSuite) TestScalarIndexVersionReachesCreateIndex() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var captured *indexcgopb.BuildIndexInfo
+	patch := mockey.Mock(indexcgowrapper.CreateIndex).To(
+		func(_ context.Context, info *indexcgopb.BuildIndexInfo) (indexcgowrapper.CodecIndex, error) {
+			captured = info
+			return nil, nil
+		}).Build()
+	defer patch.UnPatch()
+
+	indexParams := map[string]string{
+		common.IndexTypeKey:    "INVERTED",
+		common.JSONPathKey:     "/a",
+		common.JSONCastTypeKey: "DOUBLE",
+	}
+	req := &workerpb.CreateJobRequest{
+		BuildID:                   1,
+		CurrentScalarIndexVersion: 6,
+		Field: &schemapb.FieldSchema{
+			FieldID:  102,
+			Name:     "json",
+			DataType: schemapb.DataType_JSON,
+		},
+		StorageConfig: &indexpb.StorageConfig{},
+	}
+	task := NewIndexBuildTask(ctx, cancel, req, nil, NewTaskManager(context.Background()), nil)
+	task.newIndexParams = indexParams
+	task.newTypeParams = map[string]string{}
+	task.tr = timerecord.NewTimeRecorder("test-scalar-index-version")
+
+	for _, version := range []int32{5, 6} {
+		req.CurrentScalarIndexVersion = version
+		suite.NoError(task.Execute(ctx))
+		suite.Require().NotNil(captured)
+		suite.Equal(version, captured.GetCurrentScalarIndexVersion())
+	}
+}
+
 func (suite *IndexBuildTaskSuite) TestMaxConnectionsReachesCreateIndex() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

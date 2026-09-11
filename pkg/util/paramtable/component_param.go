@@ -208,6 +208,8 @@ func (p *ComponentParam) init(bt *BaseTable) {
 func (p *ComponentParam) versionGateItems() []*ParamItem {
 	return []*ParamItem{
 		&p.FunctionCfg.EnableWriteBeforeMaterialization,
+		&p.DataCoordCfg.TargetScalarIndexVersion,
+		&p.DataCoordCfg.JSONStatsFormatVersion,
 	}
 }
 
@@ -6205,6 +6207,7 @@ type dataCoordConfig struct {
 	JSONStatsMaxShreddingColumns     ParamItem `refreshable:"true"`
 	JSONStatsShreddingRatioThreshold ParamItem `refreshable:"true"`
 	JSONStatsWriteBatchSize          ParamItem `refreshable:"true"`
+	JSONStatsFormatVersion           ParamItem `refreshable:"true"`
 
 	RequestTimeoutSeconds ParamItem `refreshable:"true"`
 }
@@ -7401,8 +7404,16 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 		PanicIfEmpty: true,
 		Doc: `if param forceRebuildScalarSegmentIndex is enabled, the scalar index will be rebuilt to aligned with targetScalarIndexVersion.
 if param forceRebuildScalarSegmentIndex is not enabled, the newly created scalar index will be aligned with the newer one of scalar index engine's version and targetScalarIndexVersion.
-if param targetScalarIndexVersion is not set, the default value is -1, which means no target scalar index version, then the scalar index will be aligned with scalar index engine's version`,
+The default -1 follows the scalar engine's current version until all online sessions, including standby coordinators, reach 3.0.2 for one minute; the version gate then persists target 6.
+Explicit targets bypass the version gate and retain the existing force-rebuild semantics. Do not force V6 during a rolling upgrade.`,
 		Export: true,
+		VersionGateSwitcher: &VersionGateSwitcher{
+			EnableAutoSwitchValue: "-1",
+			PreSwitchValue:        "-1",
+			GateVersion:           "3.0.2",
+			TargetValue:           "6",
+			SwitchDelay:           time.Minute,
+		},
 	}
 	p.TargetScalarIndexVersion.Init(base.mgr)
 
@@ -7865,7 +7876,7 @@ re-ingesting. A job that timed out before applying carries 0 and left the collec
 	p.StatsTaskPendingLimit = ParamItem{
 		Key:          "dataCoord.statsTaskPendingLimit",
 		Version:      "3.0.0",
-		Doc:          "skip submitting new stats tasks when the global scheduler holds more pending tasks than this limit",
+		Doc:          "skip submitting new stats tasks when the global scheduler holds more pending tasks of the same stats subjob type than this limit; JSON and text-index backlogs are counted separately",
 		DefaultValue: "100",
 		PanicIfEmpty: false,
 		Export:       false,
@@ -7940,6 +7951,37 @@ re-ingesting. A job that timed out before applying carries 0 and left the collec
 		Export:       true,
 	}
 	p.JSONStatsWriteBatchSize.Init(base.mgr)
+
+	p.JSONStatsFormatVersion = ParamItem{
+		Key:          "dataCoord.jsonStatsFormatVersion",
+		Version:      "3.0.2",
+		DefaultValue: "auto",
+		Doc: `Data format used for newly created JSON stats. Supported values are auto, 3 and 4.
+auto writes V3 until all online sessions, including standby coordinators, reach 3.0.2 for one minute; the version gate then persists format 4. No manual switch or per-segment rebuild is required.
+Explicit 3 pins the legacy writer; explicit 4 bypasses the version gate and must not be forced during a rolling upgrade. Invalid values fall back to V3.
+V4 tasks wait for all online QueryNode readers and a compatible DataNode writer (bound workers are trusted). V3 or incomplete output cannot complete a V4 task.
+Published V3 stats keep serving. Running V3 tasks can finish; idle/retrying background V3 tasks are retired once V4 can be built safely, without changing serving artifacts.
+Eligible regular segments migrate gradually through Compaction V2. This requires dataCoord.enableCompaction=true at startup (not refreshable).
+Migration has an independent quota using dataCoord.compaction.storageVersion.rateLimitTokens and rateLimitInterval; zero tokens disable it. Explicit format-3 pins and disabled JSON shredding are respected.
+Unsorted replacements can use raw scans until sort compaction enables V4 stats. External segments retain V3 until refreshed or replaced; snapshot-protected segments wait.
+MixCoord upgrades DataCoord and QueryCoord together. After V4 publication, incompatible readers/coordinators must not rejoin or be used for rollback; setting this option to 3 does not convert V4 artifacts.`,
+		Export: true,
+		VersionGateSwitcher: &VersionGateSwitcher{
+			EnableAutoSwitchValue: "auto",
+			PreSwitchValue:        "3",
+			GateVersion:           "3.0.2",
+			TargetValue:           "4",
+			SwitchDelay:           time.Minute,
+		},
+		Formatter: func(value string) string {
+			version := getAsInt64(value)
+			if version != 3 && version != 4 {
+				return "3"
+			}
+			return strconv.FormatInt(version, 10)
+		},
+	}
+	p.JSONStatsFormatVersion.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

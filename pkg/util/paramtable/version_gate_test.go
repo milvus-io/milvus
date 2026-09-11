@@ -27,10 +27,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/blang/semver/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	etcdkv "github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
@@ -277,6 +279,140 @@ func TestStartVersionGatesEmbeddedEtcd(t *testing.T) {
 	item.manager.EvictCachedValue(item.Key)
 	assert.Equal(t, "false", item.GetValue())
 	assert.False(t, item.GetAsBool())
+}
+
+func TestJSONArtifactVersionGatesStandbyCoordinator(t *testing.T) {
+	cli, _ := setupEmbedEtcd(t)
+	metaRoot, configRoot := testRoots(t)
+	oldBaseTable := params.baseTable
+	t.Cleanup(func() { params.baseTable = oldBaseTable })
+	p := newJSONGateTestParams(t, cli, configRoot)
+	params.baseTable = p.baseTable
+	items := []*ParamItem{&p.DataCoordCfg.TargetScalarIndexVersion, &p.DataCoordCfg.JSONStatsFormatVersion}
+	c := newTestConfirmator(t, cli, metaRoot, configRoot)
+	for _, item := range items {
+		require.Contains(t, p.versionGateItems(), item)
+		require.Equal(t, "3.0.2", item.VersionGateSwitcher.GateVersion)
+		require.Equal(t, time.Minute, item.VersionGateSwitcher.SwitchDelay)
+		require.Equal(t, item.DefaultValue, item.VersionGateSwitcher.EnableAutoSwitchValue)
+		sw := *item.VersionGateSwitcher
+		sw.SwitchDelay = 20 * time.Millisecond
+		require.NoError(t, c.registerGate(item.Key, &sw))
+	}
+	setSession := func(name, version string) {
+		// Real coordinator keys include mixcoord-<id>, not just the active alias.
+		_, err := cli.Put(context.Background(), path.Join(metaRoot, "session", name), fmt.Sprintf(`{"Version":%q}`, version))
+		require.NoError(t, err)
+	}
+	for _, name := range []string{"mixcoord", "mixcoord-10", "querynode-1", "datanode-2", "proxy-3", "streamingnode-4"} {
+		setSession(name, "3.0.2")
+	}
+	setSession("mixcoord-20", "3.0.1")
+	require.NoError(t, c.start(context.Background()))
+	defer c.close()
+	assertNoFlip(t, cli, configRoot, items[0].Key)
+	assertConfigAbsent(t, cli, configRoot, items[1].Key)
+	require.Equal(t, int32(-1), items[0].GetAsInt32())
+	require.Equal(t, common.JSONStatsDataFormatV3, items[1].GetAsInt64())
+
+	// Failure of the new active does not leave behind either new write target.
+	setSession("mixcoord", "3.0.1")
+	assertNoFlip(t, cli, configRoot, items[1].Key)
+	assertConfigAbsent(t, cli, configRoot, items[0].Key)
+	setSession("mixcoord", "3.0.2")
+	setSession("mixcoord-20", "3.0.2-rc.1")
+	assertNoFlip(t, cli, configRoot, items[0].Key)
+	assertConfigAbsent(t, cli, configRoot, items[1].Key)
+
+	setSession("mixcoord-20", "3.0.2")
+	for _, item := range items {
+		waitConfigValue(t, cli, configRoot, item.Key, item.VersionGateSwitcher.TargetValue)
+	}
+	// Exercise the real etcd source refresh and typed-value cache, not Save().
+	require.Eventually(t, func() bool {
+		return items[0].GetAsInt32() == 6 && items[1].GetAsInt64() == common.JSONStatsDataFormatV4
+	}, 5*time.Second, 10*time.Millisecond)
+	c.close()
+
+	// A new coordinator reads the durable targets, without another confirmation.
+	restarted := newJSONGateTestParams(t, cli, configRoot)
+	require.Equal(t, int32(6), restarted.DataCoordCfg.TargetScalarIndexVersion.GetAsInt32())
+	require.Equal(t, common.JSONStatsDataFormatV4, restarted.DataCoordCfg.JSONStatsFormatVersion.GetAsInt64())
+}
+
+func TestJSONArtifactVersionGatesRespectPins(t *testing.T) {
+	for _, pinned := range []string{"path", "stats"} {
+		t.Run(pinned, func(t *testing.T) {
+			cli, _ := setupEmbedEtcd(t)
+			metaRoot, configRoot := testRoots(t)
+			key, value := "dataCoord.targetScalarIndexVersion", "5"
+			if pinned == "stats" {
+				key, value = "dataCoord.jsonStatsFormatVersion", "3"
+			}
+			putConfig(t, cli, configRoot, key, value)
+			oldBaseTable := params.baseTable
+			t.Cleanup(func() { params.baseTable = oldBaseTable })
+			p := newJSONGateTestParams(t, cli, configRoot)
+			params.baseTable = p.baseTable
+			putSession(t, cli, metaRoot, typeutil.MixCoordRole, "1", "3.0.2")
+			c := newTestConfirmator(t, cli, metaRoot, configRoot)
+			for _, item := range []*ParamItem{&p.DataCoordCfg.TargetScalarIndexVersion, &p.DataCoordCfg.JSONStatsFormatVersion} {
+				sw := *item.VersionGateSwitcher
+				sw.SwitchDelay = 20 * time.Millisecond
+				require.NoError(t, c.registerGate(item.Key, &sw))
+			}
+			require.NoError(t, c.start(context.Background()))
+			defer c.close()
+			if pinned == "path" {
+				waitConfigValue(t, cli, configRoot, p.DataCoordCfg.JSONStatsFormatVersion.Key, "4")
+			} else {
+				waitConfigValue(t, cli, configRoot, p.DataCoordCfg.TargetScalarIndexVersion.Key, "6")
+			}
+			actual, present := getConfigValue(t, cli, configRoot, key)
+			require.True(t, present)
+			require.Equal(t, value, actual)
+		})
+	}
+}
+
+func TestJSONArtifactVersionGatesEmbeddedEtcd(t *testing.T) {
+	t.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode)
+	oldVersion := common.Version
+	t.Cleanup(func() { common.Version = oldVersion })
+	for _, version := range []string{"3.0.1", "3.0.2-rc.1", "3.0.2"} {
+		t.Run(version, func(t *testing.T) {
+			common.Version = semver.MustParse(version)
+			p := &ComponentParam{}
+			bt := NewBaseTable(SkipRemote(true))
+			p.Init(bt)
+			bt.config.skipRemote = false
+			p.EtcdCfg.UseEmbedEtcd.SwapTempValue("true")
+			// Prime both typed caches before the local switch.
+			require.Equal(t, int32(-1), p.DataCoordCfg.TargetScalarIndexVersion.GetAsInt32())
+			require.Equal(t, common.JSONStatsDataFormatV3, p.DataCoordCfg.JSONStatsFormatVersion.GetAsInt64())
+			p.startVersionGates()
+			if version == "3.0.2" {
+				require.Equal(t, int32(6), p.DataCoordCfg.TargetScalarIndexVersion.GetAsInt32())
+				require.Equal(t, common.JSONStatsDataFormatV4, p.DataCoordCfg.JSONStatsFormatVersion.GetAsInt64())
+			} else {
+				require.Equal(t, int32(-1), p.DataCoordCfg.TargetScalarIndexVersion.GetAsInt32())
+				require.Equal(t, common.JSONStatsDataFormatV3, p.DataCoordCfg.JSONStatsFormatVersion.GetAsInt64())
+			}
+		})
+	}
+}
+
+func newJSONGateTestParams(t *testing.T, cli *clientv3.Client, configRoot string) *ComponentParam {
+	t.Helper()
+	bt := NewBaseTable(SkipRemote(true))
+	source, err := config.NewEtcdSource(cli, &config.EtcdInfo{KeyPrefix: configRoot, RefreshInterval: time.Hour})
+	require.NoError(t, err)
+	t.Cleanup(source.Close)
+	require.NoError(t, bt.Manager().AddSource(source))
+	source.SetEventHandler(bt.Manager())
+	p := &ComponentParam{}
+	p.Init(bt)
+	return p
 }
 
 func gateSwitcher(gateVersion string, delay time.Duration) *VersionGateSwitcher {
