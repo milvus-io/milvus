@@ -28,15 +28,15 @@ be explicitly unlinked earlier or left for directory cleanup. File closure
 alone does not imply unlink. The following example shows the proposed API:
 
 ```cpp
-auto files = local::FileSystem::Open(node_cache_root);
-auto node_cache = files.Root();
-auto local_chunk = node_cache->Child("local_chunk");
-auto segments = local_chunk->Child("segments");
-auto segment = segments->Child("100");
+auto local_file_system = local::FileSystem::Create(node_cache_root_path);
+auto root_dir = local_file_system.GetRootDirectory();
+auto local_chunk_dir = root_dir->Child("local_chunk");
+auto segments_dir = local_chunk_dir->Child("segments");
+auto segment_dir = segments_dir->Child("100");
 
-auto output = segment->Open(
+auto output_file = segment_dir->Open(
     "index.bin", {.mode = local::OpenMode::ReadWrite, .create = true});
-// output and any receiving I/O wrapper retain segment.
+// output_file and any receiving I/O wrapper retain segment_dir.
 ```
 
 Physical paths and on-disk formats remain unchanged. Persistent
@@ -109,14 +109,21 @@ injects directory references into consumers, and shuts it down after those
 consumers have stopped. Multiple independent physical roots are supported;
 there is no default instance or process-global lookup.
 
+`Create(root_path)` constructs this context once at the composition boundary.
+`GetRootDirectory()` returns a shared reference to its existing root directory.
+Ordinary consumers receive directory references directly. `Open(name, options)`
+is reserved for opening a file within a directory. Examples use `_dir` for
+directory references and `_path` for native paths to distinguish them from
+business objects such as segments and chunks.
+
 ```cpp
 class Directory;
 using DirectoryPtr = std::shared_ptr<Directory>;
 
 class FileSystem final {
  public:
-    static FileSystem Open(std::filesystem::path absolute_root);
-    DirectoryPtr Root() const;
+    static FileSystem Create(std::filesystem::path absolute_root_path);
+    DirectoryPtr GetRootDirectory() const;
 
     FileSystem(const FileSystem&) = delete;
     FileSystem& operator=(const FileSystem&) = delete;
@@ -171,13 +178,13 @@ empty names, NUL bytes, absolute paths, `.`, `..`, and directory separators.
 Operations address an immediate entry. For example:
 
 ```cpp
-auto segment = segments->Child("100");
-auto index = segment->Child("index");
-auto output = index->Open("data.bin", options);
+auto segment_dir = segments_dir->Child("100");
+auto index_dir = segment_dir->Child("index");
+auto output_file = index_dir->Open("data.bin", options);
 ```
 
-`segments->Open("100/index/data.bin", options)` is not allowed: holding only
-`segments` would not keep the independently owned `100` and `index` children
+`segments_dir->Open("100/index/data.bin", options)` is not allowed: holding only
+`segments_dir` would not keep the independently owned `100` and `index` children
 alive. A future convenience method for multi-component paths must resolve
 and retain the relevant directory nodes, rather than concatenate a prefix.
 
@@ -203,8 +210,8 @@ Each business layer stores its directory reference in its owning object;
 ordinary users reuse that reference instead of resolving the directory again
 from its parent for each I/O operation (section 4.4).
 
-Opening a root transfers cleanup ownership of that exact directory, including
-pre-existing contents accepted during exclusive startup or migration. For
+Creating a root context transfers cleanup ownership of that exact directory,
+including pre-existing contents accepted during exclusive startup or migration. For
 example, own `localStorage.path/cache/<node-id>`, not the shared
 `localStorage.path` containing unrelated or persistent data. Its containing
 directories are outside this tree and are not deleted. A caller requiring
@@ -299,21 +306,22 @@ directory lifetime policies.
 // Illustrative business object; not an additional filesystem owner type.
 class LoadedSegment {
  public:
-    explicit LoadedSegment(local::DirectoryPtr directory)
-        : directory_(std::move(directory)) {}
+    explicit LoadedSegment(local::DirectoryPtr segment_dir)
+        : segment_dir_(std::move(segment_dir)) {}
 
-    local::DirectoryPtr LocalDirectory() const { return directory_; }
+    local::DirectoryPtr GetDirectory() const { return segment_dir_; }
 
  private:
-    local::DirectoryPtr directory_;
+    local::DirectoryPtr segment_dir_;
 };
 
 // Construction, once for this business instance:
-auto loaded = std::make_shared<LoadedSegment>(segments->Child("100"));
+auto loaded_segment =
+    std::make_shared<LoadedSegment>(segments_dir->Child("100"));
 
 // Repeated use obtains the existing instance's directory:
-auto directory = loaded->LocalDirectory();
-auto file = directory->Open("index.bin", options);
+auto segment_dir = loaded_segment->GetDirectory();
+auto index_file = segment_dir->Open("index.bin", options);
 ```
 
 The owner keeps the directory alive between operations even when there are
@@ -359,13 +367,13 @@ concurrent mutation of the same `shared_ptr` variable still requires ordinary
 C++ synchronization.
 
 ```cpp
-auto segment = segments->Child("100");
+auto segment_dir = segments_dir->Child("100");
 {
-    auto file = segment->Open(
+    auto index_file = segment_dir->Open(
         "index.bin", {.mode = OpenMode::ReadWrite, .create = true});
 
-    segment.reset();  // file still retains the directory
-    // Positioned I/O uses file.Get() while file is alive.
+    segment_dir.reset();  // index_file still retains the directory
+    // Positioned I/O uses index_file.Get() while index_file is alive.
 }  // close fd, then release the directory reference
 ```
 
@@ -391,13 +399,13 @@ including callbacks, cancellation, exceptions, and native-library shutdown.
 Retaining it only during submission is insufficient.
 
 ```cpp
-auto segment = segments->Child("100");
-executor.Submit([segment] {
-    auto output = segment->Open(
+auto segment_dir = segments_dir->Child("100");
+executor.Submit([segment_dir] {
+    auto output_file = segment_dir->Open(
         "index.bin", {.mode = OpenMode::ReadWrite, .create = true});
-    BuildIndex(std::move(output));
+    BuildIndex(std::move(output_file));
 });
-segment.reset();  // the submitted task owns its reference
+segment_dir.reset();  // the submitted task owns its reference
 ```
 
 For asynchronous I/O that outlives `BuildIndex`, the completion state retains
@@ -459,10 +467,10 @@ can delay directory cleanup and disk reclamation. Migration must account for
 this retention when integrating cache eviction and segment unload.
 
 ```cpp
-auto region = segment->OpenMappedRegion(
+auto mapped_region = segment_dir->OpenMappedRegion(
     "field.bin", {.offset = offset, .length = length});
 // Demand paging is the default; populate remains false.
-auto bytes = region.Data();
+auto bytes = mapped_region.Data();
 ```
 
 Explicit file unlink remains possible while mapped. Eager population is an
@@ -602,16 +610,16 @@ cross-process coordination.
 
 ## 8. Paths, Namespace Stability, and Native Libraries
 
-### 8.1 Root opening and identity domain
+### 8.1 Root creation and identity domain
 
-`FileSystem::Open(absolute_root)` requires an absolute path. It creates missing
-root components, verifies a directory, and canonicalizes the resulting root
+`FileSystem::Create(absolute_root_path)` requires an absolute path. It creates
+missing root components, verifies a directory, and canonicalizes the resulting root
 before publishing the owned root node. Publication transfers cleanup ownership
 of that exact root as described in section 3.3. Failures are reported; a failed
-open does not recursively remove pre-existing root contents.
+context creation does not recursively remove pre-existing root contents.
 
-Runtime composition opens a physical ownership domain once and injects its
-references. Separate root contexts must not refer to the same directory,
+Runtime composition creates a context for a physical ownership domain once
+and injects its references. Separate root contexts must not refer to the same directory,
 overlap as ancestor/descendant, or alias through symlinks. A root-local registry
 cannot coordinate independently opened roots or other processes.
 
@@ -674,8 +682,9 @@ local ----------------X storage / cachinglayer policy
 ```
 
 The node owns the `FileSystem` context. Construction values carry
-`DirectoryPtr` fields for `local_chunk`, `growing_mmap`, `bm25`,
-`file_resource`, and `expr_cache`; each consumer receives its required scope.
+`DirectoryPtr` fields named `local_chunk_dir`, `growing_mmap_dir`, `bm25_dir`,
+`file_resource_dir`, and `expr_cache_dir`; each consumer receives its required
+scope.
 The context's child index coordinates directory identity. Cache admission
 and eviction remain with the business and cache owners.
 
@@ -774,7 +783,7 @@ cleanup must be resolved or fenced by terminal shutdown before reuse.
 
 | Component | Required change |
 | --- | --- |
-| Node construction | Open the owned cache root and inject directory references through construction contexts |
+| Node construction | Create the filesystem context for the owned cache root and inject directory references |
 | Segment and index owners | Store the directory for the business instance; synchronize acquisition, unload, and reload |
 | Local readers, writers, and mappings | Retain the owning directory through resource release and asynchronous completion |
 | Disk file managers and directory cleanup callers | Use the shared directory identity and lifetime; retire component-specific directory cleanup after complete cutover |
