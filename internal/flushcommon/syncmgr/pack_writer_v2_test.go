@@ -271,6 +271,25 @@ func (s *PackWriterV2Suite) TestWriteEmptyInsertData() {
 	s.NoError(err)
 }
 
+func (s *PackWriterV2Suite) TestWriteZeroRowInsertDataSkipsStorageWriter() {
+	s.logIDAlloc = allocator.NewLocalAllocator(1, 1)
+	collectionID := int64(123)
+	partitionID := int64(456)
+	segmentID := int64(789)
+	channelName := fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", collectionID)
+
+	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).
+		WithSegmentID(segmentID).WithChannelName(channelName).
+		WithInsertData(genEmptyInsertData(s.schema)).
+		WithBatchRows(0)
+	bw := NewBulkPackWriterV2(nil, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit)
+
+	gotInserts, manifest, err := bw.writeInserts(context.Background(), pack)
+	s.NoError(err)
+	s.Empty(gotInserts)
+	s.Empty(manifest)
+}
+
 func (s *PackWriterV2Suite) TestNoPkField() {
 	s.schema = &schemapb.CollectionSchema{
 		Name: "no pk field",
@@ -368,5 +387,10 @@ func genInsertData(size int, schema *schemapb.CollectionSchema) []*storage.Inser
 
 		buf.Append(data)
 	}
+	return []*storage.InsertData{buf}
+}
+
+func genEmptyInsertData(schema *schemapb.CollectionSchema) []*storage.InsertData {
+	buf, _ := storage.NewInsertData(schema)
 	return []*storage.InsertData{buf}
 }

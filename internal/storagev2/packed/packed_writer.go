@@ -131,7 +131,7 @@ func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64,
 }
 
 func (pw *PackedWriter) WriteRecordBatch(recordBatch arrow.Record) error {
-	if recordBatch == nil || recordBatch.NumCols() == 0 {
+	if recordBatch == nil || recordBatch.NumCols() == 0 || recordBatch.NumRows() == 0 {
 		return nil
 	}
 	if pw.cPackedWriter == nil {
