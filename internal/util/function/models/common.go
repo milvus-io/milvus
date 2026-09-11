@@ -128,6 +128,12 @@ const (
 	SiliconflowAKEnvStr string = "MILVUS_SILICONFLOW_API_KEY"
 )
 
+// orcarouter
+
+const (
+	OrcaRouterAKEnvStr string = "MILVUS_ORCAROUTER_API_KEY"
+)
+
 // Yandex Cloud
 
 const (
