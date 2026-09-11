@@ -31,6 +31,64 @@ type StructArraySuite struct {
 	suite.Suite
 }
 
+func (s *StructArraySuite) TestNewColumnStructArrayFromSchemaRejectsNilChild() {
+	column, err := NewColumnStructArrayFromSchema("profile", &entity.StructSchema{Fields: []*entity.Field{nil}})
+
+	s.Nil(column)
+	s.EqualError(err, "struct schema contains a nil child")
+}
+
+func (s *StructArraySuite) TestNewColumnStructArrayFromSchemaSupportsEveryChildType() {
+	const dim = 8
+	fields := []*entity.Field{
+		entity.NewField().WithName("bool").WithDataType(entity.FieldTypeBool),
+		entity.NewField().WithName("int8").WithDataType(entity.FieldTypeInt8),
+		entity.NewField().WithName("int16").WithDataType(entity.FieldTypeInt16),
+		entity.NewField().WithName("int32").WithDataType(entity.FieldTypeInt32),
+		entity.NewField().WithName("int64").WithDataType(entity.FieldTypeInt64),
+		entity.NewField().WithName("float").WithDataType(entity.FieldTypeFloat),
+		entity.NewField().WithName("double").WithDataType(entity.FieldTypeDouble),
+		entity.NewField().WithName("varchar").WithDataType(entity.FieldTypeVarChar).WithMaxLength(16),
+		entity.NewField().WithName("string").WithDataType(entity.FieldTypeString),
+		entity.NewField().WithName("float_vector").WithDataType(entity.FieldTypeFloatVector).WithDim(dim),
+		entity.NewField().WithName("float16_vector").WithDataType(entity.FieldTypeFloat16Vector).WithDim(dim),
+		entity.NewField().WithName("bfloat16_vector").WithDataType(entity.FieldTypeBFloat16Vector).WithDim(dim),
+		entity.NewField().WithName("binary_vector").WithDataType(entity.FieldTypeBinaryVector).WithDim(dim),
+		entity.NewField().WithName("int8_vector").WithDataType(entity.FieldTypeInt8Vector).WithDim(dim),
+	}
+
+	column, err := NewColumnStructArrayFromSchema("profile", &entity.StructSchema{Fields: fields})
+	s.Require().NoError(err)
+	s.Require().NotNil(column)
+	s.Len(column.FieldData().GetStructArrays().GetFields(), len(fields))
+}
+
+func (s *StructArraySuite) TestNewColumnStructArrayFromSchemaRejectsUnsupportedChildren() {
+	column, err := NewColumnStructArrayFromSchema("profile", nil)
+	s.Nil(column)
+	s.EqualError(err, "struct schema is required")
+
+	column, err = NewColumnStructArrayFromSchema("profile", &entity.StructSchema{Fields: []*entity.Field{
+		entity.NewField().WithName("json").WithDataType(entity.FieldTypeJSON),
+	}})
+	s.Nil(column)
+	s.ErrorContains(err, "unsupported struct sub-field type")
+
+	for _, dataType := range []entity.FieldType{
+		entity.FieldTypeFloatVector,
+		entity.FieldTypeFloat16Vector,
+		entity.FieldTypeBFloat16Vector,
+		entity.FieldTypeBinaryVector,
+		entity.FieldTypeInt8Vector,
+	} {
+		column, err = NewColumnStructArrayFromSchema("profile", &entity.StructSchema{Fields: []*entity.Field{
+			entity.NewField().WithName("missing_dim").WithDataType(dataType),
+		}})
+		s.Nil(column, dataType.String())
+		s.Error(err, dataType.String())
+	}
+}
+
 func (s *StructArraySuite) TestBasic() {
 	name := fmt.Sprintf("struct_array_%d", rand.Intn(100))
 

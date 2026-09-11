@@ -68,6 +68,23 @@ var (
 			Help:      "counter of vectors successfully deleted",
 		}, []string{nodeIDLabelName, databaseLabelName, collectionName})
 
+	ProxyPathReplaceParentOperations = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "path_replace_parent_operations_total",
+			Help:      "number of successfully resolved positional partial-update parent operations by category",
+		}, []string{nodeIDLabelName, databaseLabelName, collectionName, "parent_type"})
+
+	ProxyPathReplaceMergeLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "path_replace_merge_latency",
+			Help:      "latency of materializing positional partial updates",
+			Buckets:   buckets, // unit: ms
+		}, []string{nodeIDLabelName, databaseLabelName, collectionName})
+
 	// ProxySQLatency record the latency of search successfully.
 	ProxySQLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -491,6 +508,8 @@ func RegisterProxy(registry *prometheus.Registry) {
 	registry.MustRegister(ProxyInsertVectors)
 	registry.MustRegister(ProxyUpsertVectors)
 	registry.MustRegister(ProxyDeleteVectors)
+	registry.MustRegister(ProxyPathReplaceParentOperations)
+	registry.MustRegister(ProxyPathReplaceMergeLatency)
 
 	registry.MustRegister(ProxySQLatency)
 	registry.MustRegister(ProxyCollectionSQLatency)
@@ -579,6 +598,8 @@ func proxyCollectionScopedMetrics() []partialMatchDeleter {
 		ProxyInsertVectors,
 		ProxyUpsertVectors,
 		ProxyDeleteVectors,
+		ProxyPathReplaceParentOperations,
+		ProxyPathReplaceMergeLatency,
 		ProxySQLatency,
 		ProxyCollectionSQLatency,
 		ProxyMutationLatency,
