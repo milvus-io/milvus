@@ -69,9 +69,11 @@ IndexEntryDirectStreamWriter::WriteEntry(const std::string& name,
             if (bytes_read == -1 && errno == EINTR) {
                 continue;
             }
-            AssertInfo(bytes_read > 0,
-                       "Failed to read from file descriptor: {}",
-                       strerror(errno));
+            if (bytes_read <= 0) {
+                ThrowInfo(ErrorCode::FileReadFailed,
+                          "Failed to read from file descriptor: {}",
+                          strerror(errno));
+            }
             chunk_read += bytes_read;
         }
 

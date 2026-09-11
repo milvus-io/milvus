@@ -259,7 +259,13 @@ func (t *bumpSchemaVersionTask) QueryTaskOnWorker(cluster session.Cluster) {
 		PlanID: t.GetTaskProto().GetPlanID(),
 	})
 	if err != nil || result == nil {
-		if errors.Is(err, merr.ErrNodeNotFound) {
+		if errors.Is(err, merr.ErrCompactionResultNotFound) {
+			if dropErr := cluster.DropCompaction(t.GetTaskProto().GetNodeID(), t.GetTaskProto().GetPlanID()); dropErr != nil {
+				log.Warn(context.TODO(), "bumpSchemaVersionTask failed to drop task with unavailable result", mlog.Err(dropErr))
+				return
+			}
+		}
+		if errors.Is(err, merr.ErrNodeNotFound) || errors.Is(err, merr.ErrCompactionResultNotFound) {
 			if err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID)); err != nil {
 				log.Warn(context.TODO(), "bumpSchemaVersionTask failed to updateAndSaveTaskMeta", mlog.Err(err))
 			}
@@ -307,7 +313,7 @@ func (t *bumpSchemaVersionTask) QueryTaskOnWorker(cluster session.Cluster) {
 	case datapb.CompactionTaskState_failed:
 		log.Warn(context.TODO(), "bumpSchemaVersionTask fail in datanode")
 		if err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed),
-			setFailReason("compaction failed in datanode")); err != nil {
+			setFailReason(compactionFailReason(result))); err != nil {
 			log.Warn(context.TODO(), "bumpSchemaVersionTask failed to updateAndSaveTaskMeta", mlog.Err(err))
 		}
 	default:

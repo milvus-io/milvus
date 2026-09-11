@@ -117,6 +117,10 @@ class SegmentReadSnapshot {
 
     virtual int64_t
     get_row_count() const = 0;
+
+    virtual std::pair<std::shared_ptr<ChunkedColumnInterface>,
+                      std::shared_ptr<const SkipIndex>>
+    GetDataScanResources(FieldId field_id) const = 0;
 };
 
 // common interface of SegmentSealed and SegmentGrowing used by C API
@@ -450,6 +454,17 @@ class SegmentInternalInterface : public SegmentInterface {
                                  const int64_t* offsets,
                                  int64_t count,
                                  TargetBitmapView valid_result) const = 0;
+
+    virtual std::shared_ptr<ChunkedColumnInterface>
+    GetChunkedColumn(FieldId field_id) const {
+        return nullptr;
+    }
+
+    virtual std::pair<std::shared_ptr<ChunkedColumnInterface>,
+                      std::shared_ptr<const SkipIndex>>
+    GetDataScanResources(FieldId field_id) const {
+        return {GetChunkedColumn(field_id), GetSkipIndex()};
+    }
 
     template <typename T>
     PinWrapper<Span<T>>

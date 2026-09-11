@@ -396,9 +396,11 @@ RTreeIndex<T>::Upload(const Config& config) {
             continue;
         }
 
-        AssertInfo(disk_file_manager_->AddFile(it->path().string()),
-                   "failed to add index file: {}",
-                   it->path().string());
+        if (!(disk_file_manager_->AddFile(it->path().string()))) {
+            ThrowInfo(ErrorCode::FileWriteFailed,
+                      "failed to add index file: {}",
+                      it->path().string());
+        }
     }
 
     // 3. Collect remote paths to size mapping
@@ -778,7 +780,9 @@ RTreeIndex<T>::WriteEntries(storage::IndexEntryWriter* writer) {
     for (const auto& file_path : files) {
         auto file = file_path.string();
         auto fd = open(file.c_str(), O_RDONLY | O_CLOEXEC);
-        AssertInfo(fd != -1, "open file failed: {}", file);
+        if (!(fd != -1)) {
+            ThrowInfo(ErrorCode::FileOpenFailed, "open file failed: {}", file);
+        }
         auto file_size = boost::filesystem::file_size(file);
         auto file_name = file_path.filename().string();
         writer->WriteEntry(file_name, fd, file_size);

@@ -779,11 +779,6 @@ func SetupCoreConfigChangelCallback() {
 			return nil
 		})
 
-		paramtable.Get().QueryNodeCfg.TakeForOutputResultCountLimit.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
-			SyncTakeForOutputResultCountLimit(paramtable.Get())
-			return nil
-		})
-
 		paramtable.Get().QueryNodeCfg.InterimIndexGrowingBuildThreadRate.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
 			rate, err := strconv.ParseFloat(newValue, 32)
 			if err != nil {
@@ -896,6 +891,12 @@ func InitGeometryCache(params *paramtable.ComponentParam) error {
 func InitGISSplitFusion(params *paramtable.ComponentParam) error {
 	enableGISSplitFusion := C.bool(params.QueryNodeCfg.EnableGISSplitFusion.GetAsBool())
 	C.SegcoreSetEnableGISSplitFusion(enableGISSplitFusion)
+	return nil
+}
+
+func InitScanPinPolicy(params *paramtable.ComponentParam) error {
+	cursorOwnsPin := C.bool(params.QueryNodeCfg.ScanCursorOwnsPin.GetAsBool())
+	C.SegcoreSetScanCursorOwnsPin(cursorOwnsPin)
 	return nil
 }
 

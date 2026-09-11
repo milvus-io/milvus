@@ -19,13 +19,9 @@ package channelmgr
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"testing"
 
-	"github.com/stretchr/testify/require"
-
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func BenchmarkGenInsertMsgsByPartition(b *testing.B) {
@@ -59,9 +55,7 @@ func BenchmarkGenInsertMsgsByPartition(b *testing.B) {
 				{"single_row_batches", 1},
 			} {
 				b.Run(fmt.Sprintf("dim%d/%s/%s", dim, layout, batching.name), func(b *testing.B) {
-					key := paramtable.Get().PulsarCfg.MaxMessageSize.Key
-					require.NoError(b, paramtable.Get().Save(key, strconv.Itoa(batching.threshold)))
-					b.Cleanup(func() { paramtable.Get().Reset(key) })
+					savePackingThresholdForTest(b, batching.threshold)
 					b.ReportAllocs()
 					b.ResetTimer()
 					for i := 0; i < b.N; i++ {

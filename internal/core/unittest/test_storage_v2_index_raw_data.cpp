@@ -49,6 +49,7 @@
 #include "storage/BinlogReader.h"
 #include "storage/ChunkManager.h"
 #include "storage/DiskFileManagerImpl.h"
+#include "storage/MemFileManagerImpl.h"
 #include "storage/loon_ffi/property_singleton.h"
 #include "storage/FileManager.h"
 #include "storage/Types.h"
@@ -374,5 +375,60 @@ TEST_F(CacheRawDataToDiskTest, ManifestRoundTripHeaderAndPayload) {
               static_cast<std::streamsize>(payload.size() * sizeof(float)));
     for (size_t i = 0; i < payload.size(); ++i) {
         ASSERT_TRUE(std::isfinite(payload[i])) << "row-major offset " << i;
+    }
+}
+
+// The storage-v2 pagination parameters (num_rows / offset) are assembled by
+// Milvus-internal index-build code, never by the API caller, so a malformed
+// value must surface as UnexpectedError (System) rather than InvalidParameter
+// (Input). The message is asserted as well: the sibling data-type checks in
+// the same function are also UnexpectedError, so the code alone would not
+// prove which check fired.
+TEST_F(CacheRawDataToDiskTest, PaginationParamsAreInternalNotInput) {
+    auto field_meta = gen_field_meta(collection_id,
+                                     partition_id,
+                                     segment_id,
+                                     /*field_id=*/101,
+                                     DataType::VECTOR_FLOAT,
+                                     DataType::NONE,
+                                     false);
+    auto index_meta =
+        gen_index_meta(segment_id, 101, index_build_id, index_version);
+    storage::FileManagerContext ctx(field_meta, index_meta, cm_, fs_);
+    auto file_manager =
+        std::make_shared<milvus::storage::MemFileManagerImpl>(ctx);
+
+    auto expect_internal = [&](const milvus::Config& config,
+                               const std::string& needle) {
+        try {
+            file_manager->CacheRawDataToMemory(config);
+            FAIL() << "expected SegcoreError for " << needle;
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), ErrorCode::UnexpectedError);
+            EXPECT_NE(std::string(error.what()).find(needle), std::string::npos)
+                << error.what();
+        }
+    };
+
+    milvus::Config base;
+    base[STORAGE_VERSION_KEY] = STORAGE_V3;
+    base[DATA_TYPE_KEY] = DataType::VECTOR_FLOAT;
+    base[ELEMENT_TYPE_KEY] = DataType::NONE;
+
+    {
+        auto config = base;
+        config[NUM_ROWS_KEY] = int64_t(-1);
+        expect_internal(config, "num_rows must be non-negative");
+    }
+    {
+        auto config = base;
+        config[OFFSET_KEY] = int64_t(-1);
+        expect_internal(config, "offset must be non-negative");
+    }
+    {
+        auto config = base;
+        config[OFFSET_KEY] = int64_t(5);
+        config[NUM_ROWS_KEY] = int64_t(0);
+        expect_internal(config, "requires a positive num_rows");
     }
 }

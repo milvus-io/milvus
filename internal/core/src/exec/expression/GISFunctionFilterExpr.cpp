@@ -802,6 +802,13 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
                "expect batch size {}",
                batch_valid.size(),
                real_batch_size);
+    if (segment_->type() != SegmentType::Sealed) {
+        CommitLegacyDataProgress(processed_rows);
+        AssertInfo(current_data_global_pos_ == current_index_chunk_pos_,
+                   "growing GIS data cursor at {}, index cursor at {}",
+                   current_data_global_pos_,
+                   current_index_chunk_pos_);
+    }
     return std::make_shared<ColumnVector>(std::move(batch_result),
                                           std::move(batch_valid));
 }

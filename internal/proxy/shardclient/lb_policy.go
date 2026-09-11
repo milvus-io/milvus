@@ -452,7 +452,18 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			// other replicas cannot make it succeed, and blacklisting the
 			// (healthy) serving node would penalize it for a bad request. Abort
 			// immediately without retrying or touching the blacklist.
-			if merr.GetErrorType(err) == merr.InputError {
+			//
+			// ErrSegcoreUnsupported joins it for the same reason from the other
+			// direction: "unsupported" is a verdict about the binary's
+			// capabilities (an index_type x metric combination, a json cast type
+			// this build does not know), so every replica runs the same code and
+			// answers identically. Retrying elsewhere cannot help, and the
+			// blacklist -- which exists to route around a node that is
+			// misbehaving -- would sideline a node that did nothing wrong. It
+			// stays a system error on the wire: the cause may be a capability
+			// gap rather than the caller's request.
+			if merr.GetErrorType(err) == merr.InputError ||
+				errors.Is(err, merr.ErrSegcoreUnsupported) {
 				return false, err
 			}
 			if merr.IsRetryableErr(err) {

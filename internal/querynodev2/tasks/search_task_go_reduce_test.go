@@ -1055,54 +1055,85 @@ func collectInt64Chunks(t *testing.T, col *arrow.Chunked) [][]int64 {
 	return out
 }
 
-func assertNoSustainedJemallocGrowth(t *testing.T, runOnce func()) {
+// allocatorNoiseCeiling is the largest C-heap growth this suite has measured
+// with no leak present, rounded up. Repeated probing of the loops below (both
+// payload sizes, 400 to 16000 iterations) produced growth between -17MiB and
+// +41MiB with the buffers correctly freed, because jemalloc arenas and
+// segcore's own caches fill and are purged independently of what one call
+// retains. Crucially that spread barely moves with the iteration count --
+// quadrupling the work grew the worst case from 30MiB to 41MiB -- while a real
+// leak grows in proportion. That is what makes the budget below separable.
+const allocatorNoiseCeiling = 48 << 20
+
+// assertNoCHeapLeak fails when the C heap keeps what runOnce allocates.
+//
+// The guarded failure is a buffer that C allocates on every call and Go must
+// free; leaking it costs retainedPerCall bytes per iteration, so the pass/fail
+// line is a fraction of iterations*retainedPerCall rather than a fixed byte
+// count. That scales with the payload and, as long as the caller uses a payload
+// large enough for the sizing check below, sits far above allocator noise on
+// one side and far below a real leak on the other.
+//
+// Do not replace this with a per-window growth counter: allocator noise here is
+// hundreds of KiB to several MiB per window and changes sign, so such a counter
+// reports a leak on runs where total allocated *fell* by megabytes.
+func assertNoCHeapLeak(t *testing.T, retainedPerCall int64, runOnce func()) {
 	t.Helper()
 
 	const (
-		warmupIterations       = 300
-		windowIterations       = 1000
-		measurementWindows     = 5
-		positiveWindowNoiseMax = 96 * 1024
-		maxPositiveWindows     = 2
+		warmupIterations = 50
+		iterations       = 1600
 	)
 
-	before := segcore.GetJemallocStats()
-	if !before.Success {
-		t.Skip("jemalloc stats not available on this platform")
+	if stats := segcore.GetJemallocStats(); !stats.Success {
+		t.Skip("jemalloc stats unavailable; C heap growth cannot be measured " +
+			"(preload internal/core/output/lib/libjemalloc.so to run this locally)")
 	}
 
-	// Let allocator caches reach steady state before sampling.
+	require.Positive(t, retainedPerCall, "caller must report what one call retains")
+	leakIfUnfreed := int64(iterations) * retainedPerCall
+	budget := leakIfUnfreed / 2
+	require.GreaterOrEqual(t, budget, int64(2*allocatorNoiseCeiling),
+		"measurement is not sized to separate a leak from allocator noise: "+
+			"leaking every call would add only %d bytes over %d iterations. "+
+			"Raise NQ/TopK, the output fields, or the iteration count.",
+		leakIfUnfreed, iterations)
+
 	for i := 0; i < warmupIterations; i++ {
 		runOnce()
 	}
 	runtime.GC()
+	baseline := segcore.GetJemallocStats()
+	require.True(t, baseline.Success)
 
-	windowBaseline := segcore.GetJemallocStats()
-	positiveWindows := 0
-	windowGrowths := make([]int64, 0, measurementWindows)
-
-	for window := 0; window < measurementWindows; window++ {
-		for i := 0; i < windowIterations; i++ {
-			runOnce()
-		}
-		runtime.GC()
-
-		afterWindow := segcore.GetJemallocStats()
-		growth := int64(afterWindow.Allocated) - int64(windowBaseline.Allocated)
-		windowGrowths = append(windowGrowths, growth)
-		if growth > positiveWindowNoiseMax {
-			positiveWindows++
-		}
-		windowBaseline = afterWindow
+	for i := 0; i < iterations; i++ {
+		runOnce()
 	}
+	runtime.GC()
+	after := segcore.GetJemallocStats()
+	require.True(t, after.Success)
 
-	// Assert sustained positive growth instead of a single noisy jemalloc delta.
-	assert.LessOrEqual(t, positiveWindows, maxPositiveWindows,
-		"jemalloc allocated had sustained positive growth over %d/%d windows (growths=%v, threshold=%d)",
-		positiveWindows, measurementWindows, windowGrowths, positiveWindowNoiseMax)
+	growth := int64(after.Allocated) - int64(baseline.Allocated)
+	t.Logf("C heap grew %d bytes over %d calls retaining %d bytes each "+
+		"(a full leak would be %d, budget %d)",
+		growth, iterations, retainedPerCall, leakIfUnfreed, budget)
+	assert.LessOrEqual(t, growth, budget,
+		"C heap grew %d bytes over %d calls; leaking every call would cost %d",
+		growth, iterations, leakIfUnfreed)
+}
 
-	t.Logf("jemalloc C heap growth windows=%v, positiveWindows=%d/%d",
-		windowGrowths, positiveWindows, measurementWindows)
+// arrowRecordCBytes reports the bytes an arrow record holds in the C heap, so a
+// caller can tell assertNoCHeapLeak what one call retains.
+func arrowRecordCBytes(record arrow.Record) int64 {
+	var total int64
+	for _, col := range record.Columns() {
+		for _, buf := range col.Data().Buffers() {
+			if buf != nil {
+				total += int64(buf.Len())
+			}
+		}
+	}
+	return total
 }
 
 // TestFillOutputFieldsOrdered_NoCMemoryLeak verifies that calling
@@ -1112,7 +1143,10 @@ func assertNoSustainedJemallocGrowth(t *testing.T, runOnce func()) {
 func TestFillOutputFieldsOrdered_NoCMemoryLeak(t *testing.T) {
 	outputFieldIDs := []int64{103, 104} // Int32, Float
 
-	ts := setupTestSegments(t, 2, 2000, setupOpts{NQ: 2, TopK: 10, OutputFieldIDs: outputFieldIDs})
+	// NQ*TopK is large on purpose: leaking one buffer must cost far more than
+	// the allocator noise assertNoCHeapLeak has to see through. At 2/10 the
+	// buffer is ~140 bytes and a full leak disappears into that noise.
+	ts := setupTestSegments(t, 2, 2000, setupOpts{NQ: 200, TopK: 200, OutputFieldIDs: outputFieldIDs})
 	defer ts.cleanup()
 
 	reduceResult, segDFs := runGoReducePipeline(t, ts)
@@ -1142,17 +1176,21 @@ func TestFillOutputFieldsOrdered_NoCMemoryLeak(t *testing.T) {
 	}
 
 	plan := ts.searchReq.Plan()
-	assertNoSustainedJemallocGrowth(t, func() {
+	call := func() int64 {
 		b, err := segcore.FillOutputFieldsOrdered(context.Background(), ts.searchResults, plan, segIndices, segOffsets)
 		require.NoError(t, err)
-		_ = b
-	})
+		return int64(len(b))
+	}
+	retained := call()
+	assertNoCHeapLeak(t, retained, func() { call() })
 }
 
 func TestExportSearchResultAsArrowRecordBatch_NoCMemoryLeak(t *testing.T) {
 	extraFieldIDs := []int64{103} // Int32
 
-	ts := setupTestSegments(t, 1, 2000, setupOpts{NQ: 2, TopK: 10, OutputFieldIDs: extraFieldIDs})
+	// Same sizing reason as TestFillOutputFieldsOrdered_NoCMemoryLeak: the
+	// record has to be big enough that leaking it dwarfs allocator noise.
+	ts := setupTestSegments(t, 1, 2000, setupOpts{NQ: 200, TopK: 200, OutputFieldIDs: extraFieldIDs})
 	defer ts.cleanup()
 
 	_, err := segcore.PrepareSearchResultsForExport(
@@ -1178,7 +1216,15 @@ func TestExportSearchResultAsArrowRecordBatch_NoCMemoryLeak(t *testing.T) {
 		}
 	}
 
-	assertNoSustainedJemallocGrowth(t, exportOnce)
+	var retained int64
+	for _, res := range ts.searchResults {
+		record, _, err := segcore.ExportSearchResultAsArrowRecordBatch(context.Background(), res, ts.searchReq.Plan(), extraFieldIDs)
+		require.NoError(t, err)
+		retained += arrowRecordCBytes(record)
+		record.Release()
+	}
+
+	assertNoCHeapLeak(t, retained, exportOnce)
 }
 
 // TestExecuteFilterOnly verifies that the Execute() method correctly handles
@@ -1325,6 +1371,101 @@ func TestExecuteMergedSubTasks(t *testing.T) {
 		"distinct sub-tasks must get distinct slices")
 
 	t.Logf("merged slicing OK: sub-task NQs=%v, topK=%d", subTaskNqs, topK)
+}
+
+func TestExecuteSearchGroupTakeForOutputDecision(t *testing.T) {
+	ts := setupTestSegments(t, 2, 100, setupOpts{SkipSearchReq: true})
+	defer ts.cleanup()
+
+	for _, tc := range []struct {
+		name      string
+		topKs     []int64
+		planTopK  int64
+		groupSize int64
+		limit     int64
+		allowed   bool
+	}{
+		{"single request", []int64{5}, 5, 0, 5, true},
+		{"merged at limit", []int64{5, 5}, 5, 0, 10, true},
+		{"merged exceeds limit", []int64{5, 5}, 5, 0, 9, false},
+		{"limit disabled", []int64{5, 5}, 5, 0, 0, true},
+		{"maximum topK upper bound", []int64{3, 5}, 5, 0, 8, false},
+		{"optimizer lowered plan topK", []int64{5, 5}, 3, 0, 9, false},
+		{"group by exceeds limit", []int64{5, 5}, 5, 3, 29, false},
+		{"group by at limit", []int64{5, 5}, 5, 3, 30, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			params := paramtable.Get()
+			limitKey := params.QueryNodeCfg.TakeForOutputResultCountLimit.Key
+			oldLimit := params.QueryNodeCfg.TakeForOutputResultCountLimit.GetValue()
+			require.NoError(t, params.Save(limitKey, strconv.FormatInt(tc.limit, 10)))
+			t.Cleanup(func() { require.NoError(t, params.Save(limitKey, oldLimit)) })
+
+			var receiver *SearchTask
+			for _, topK := range tc.topKs {
+				req, err := mock_segcore.GenQueryRequest(
+					ts.collection.GetCCollection(), ts.segIDs, 1, tc.planTopK, testCollectionID)
+				require.NoError(t, err)
+				// Identical execution plans may retain different requested TopKs
+				// after optimization. Merge must budget the maximum requested one.
+				req.Req.Topk = topK
+				var plan planpb.PlanNode
+				require.NoError(t, proto.Unmarshal(req.GetReq().GetSerializedExprPlan(), &plan))
+				plan.OutputFieldIds = []int64{103}
+				if tc.groupSize > 0 {
+					plan.GetVectorAnns().QueryInfo.GroupByFieldId = 103
+					plan.GetVectorAnns().QueryInfo.GroupSize = tc.groupSize
+				}
+				req.Req.SerializedExprPlan, err = proto.Marshal(&plan)
+				require.NoError(t, err)
+				task := NewSearchTask(t.Context(), ts.collection, ts.manager, req, 1)
+				if receiver == nil {
+					receiver = task
+				} else {
+					require.True(t, receiver.Merge(task))
+				}
+			}
+
+			var decisions []bool
+			var setAllowed func(*segcore.SearchPlan, bool)
+			setter := mockey.Mock((*segcore.SearchPlan).SetTakeForOutputAllowed).To(
+				func(plan *segcore.SearchPlan, allowed bool) {
+					decisions = append(decisions, allowed)
+					setAllowed(plan, allowed)
+				}).Origin(&setAllowed).Build()
+			t.Cleanup(func() { setter.UnPatch() })
+
+			var searchHistorical func(context.Context, *segments.Manager, *segments.SearchRequest, int64, []int64, []int64) ([]*segments.SearchResult, []segments.Segment, error)
+			searcher := mockey.Mock(segments.SearchHistorical).To(
+				func(ctx context.Context, manager *segments.Manager, req *segments.SearchRequest, collectionID int64, partitionIDs, segmentIDs []int64) ([]*segments.SearchResult, []segments.Segment, error) {
+					require.Equal(t, []bool{tc.allowed}, decisions, "decide once before segment fan-out")
+					// A config refresh after the decision must not change later slices.
+					refreshedLimit := "0"
+					if tc.allowed {
+						refreshedLimit = "1"
+					}
+					require.NoError(t, params.Save(limitKey, refreshedLimit))
+					return searchHistorical(ctx, manager, req, collectionID, partitionIDs, segmentIDs)
+				}).Origin(&searchHistorical).Build()
+			t.Cleanup(func() { searcher.UnPatch() })
+
+			require.NoError(t, receiver.PreExecute())
+			require.NoError(t, receiver.Execute())
+			require.Equal(t, []bool{tc.allowed}, decisions, "output slices must not overwrite the group decision")
+			for i, topK := range tc.topKs {
+				result := receiver.subTaskAt(i).SearchResult()
+				require.NotNil(t, result)
+				require.Equal(t, topK, result.GetTopK())
+				data := result.GetResultData()
+				if data == nil {
+					data = &schemapb.SearchResultData{}
+					require.NoError(t, proto.Unmarshal(result.GetSlicedBlob(), data))
+				}
+				require.NotEmpty(t, data.GetScores())
+				require.Len(t, data.GetFieldsData(), 1, "exercise late output materialization")
+			}
+		})
+	}
 }
 
 func TestExecuteMergedSubTasks_MixedTopKWithL1Rerank(t *testing.T) {

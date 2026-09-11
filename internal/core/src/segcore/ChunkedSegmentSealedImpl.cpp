@@ -139,6 +139,7 @@
 #include "segcore/storagev2translator/StorageV2Config.h"
 #include "segcore/TextColumnCache.h"
 #include "storage/FileManager.h"
+#include "storage/StatusToErrorCode.h"
 #include "storage/KeyRetriever.h"
 #include "storage/LocalChunkManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
@@ -773,8 +774,10 @@ ChunkedSegmentSealedImpl::LoadVecIndex(LoadIndexInfo& info,
     auto field_id = FieldId(info.field_id);
     auto snapshot = CapturePublishedState();
 
-    AssertInfo(info.index_params.count("metric_type"),
-               "Can't get metric_type in index_params");
+    if (!(info.index_params.count("metric_type"))) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "Can't get metric_type in index_params");
+    }
     auto metric_type = info.index_params.at("metric_type");
 
     const auto& visible_state =
@@ -1191,6 +1194,15 @@ class ChunkedSegmentSealedImpl::SealedReadSnapshot
     int64_t
     get_row_count() const override {
         return state_->runtime->row_count;
+    }
+
+    std::pair<std::shared_ptr<ChunkedColumnInterface>,
+              std::shared_ptr<const SkipIndex>>
+    GetDataScanResources(FieldId field_id) const override {
+        auto it = state_->runtime->fields.find(field_id);
+        auto column =
+            it == state_->runtime->fields.end() ? nullptr : it->second;
+        return {std::move(column), state_->runtime->skip_index};
     }
 
  private:
@@ -2541,9 +2553,12 @@ LoadGroupChunkMetadata(const std::vector<std::string>& insert_files,
                 milvus_storage::DEFAULT_READ_BUFFER_SIZE,
                 storage::GetReaderProperties(),
                 storage::GetArrowReaderProperties());
-            AssertInfo(result.ok(),
-                       "[StorageV2] Failed to create file row group reader: " +
-                           result.status().ToString());
+            if (!result.ok()) {
+                ThrowInfo(
+                    milvus::storage::ArrowStatusToErrorCode(result.status()),
+                    "[StorageV2] Failed to create file row group reader: " +
+                        result.status().ToString());
+            }
 
             auto reader = result.ValueOrDie();
             FileMetadataLoadResult load_result;
@@ -2575,12 +2590,14 @@ LoadGroupChunkMetadata(const std::vector<std::string>& insert_files,
             }
 
             auto status = reader->Close();
-            AssertInfo(status.ok(),
-                       "[StorageV2] metadata loader {} failed to close "
-                       "file reader for {} with error {}",
-                       debug_key,
-                       file,
-                       status.ToString());
+            if (!status.ok()) {
+                ThrowInfo(milvus::storage::ArrowStatusToErrorCode(status),
+                          "[StorageV2] metadata loader {} failed to close "
+                          "file reader for {} with error {}",
+                          debug_key,
+                          file,
+                          status.ToString());
+            }
             return load_result;
         }));
     }
@@ -3780,6 +3797,16 @@ ChunkedSegmentSealedImpl::GetSkipIndexSnapshot() const {
         return std::make_shared<const SkipIndex>();
     }
     return runtime->skip_index;
+}
+
+std::pair<std::shared_ptr<ChunkedColumnInterface>,
+          std::shared_ptr<const SkipIndex>>
+ChunkedSegmentSealedImpl::GetDataScanResources(FieldId field_id) const {
+    auto runtime = CaptureRuntimeResourceState();
+    if (runtime == nullptr) {
+        return {nullptr, nullptr};
+    }
+    return {get_column(runtime, field_id), runtime->skip_index};
 }
 
 int64_t
@@ -6069,7 +6096,19 @@ ChunkedSegmentSealedImpl::get_raw_data(milvus::OpContext* op_ctx,
         }
 
         case DataType::TEXT: {
-            // TEXT type is only supported in StorageV3 with LOB files.
+            // External TEXT columns store their source values directly,
+            // while internal StorageV3 TEXT columns store encoded LOB refs.
+            if (field_meta.is_external_field()) {
+                bulk_subscript_ptr_impl<std::string>(op_ctx,
+                                                     column.get(),
+                                                     seg_offsets,
+                                                     count,
+                                                     ret->mutable_scalars()
+                                                         ->mutable_string_data()
+                                                         ->mutable_data());
+                break;
+            }
+
             auto runtime = snapshot->runtime != nullptr
                                ? snapshot->runtime
                                : BuildRuntimeResourceState();
@@ -7204,6 +7243,10 @@ ChunkedSegmentSealedImpl::load_field_data_common(
             const std::shared_ptr<ChunkedColumnInterface>& old_column,
             const PublishedSegmentState& state_snapshot) {
             prepare_array_offsets(target_runtime);
+
+            if (is_replace && target_runtime.skip_index != nullptr) {
+                target_runtime.skip_index->Erase(field_id);
+            }
 
             if (IsVariableDataType(data_type)) {
                 if (enable_mmap) {
@@ -9715,18 +9758,8 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
     milvus::OpContext* op_ctx) const {
     auto snapshot = CapturePublishedState();
     auto schema_snapshot = snapshot->schema;
-    if (size == 0 || !snapshot->use_take_for_output) {
-        return false;
-    }
-    auto result_count_limit = SegcoreConfig::default_config()
-                                  .get_take_for_output_result_count_limit();
-    if (result_count_limit > 0 && size > result_count_limit) {
-        LOG_DEBUG(
-            "[TakeAPI] retrieve skipped take() for segment {} because "
-            "result count {} exceeds limit {}",
-            id_,
-            size,
-            result_count_limit);
+    if (size == 0 || !snapshot->use_take_for_output ||
+        !plan->take_for_output_allowed_) {
         return false;
     }
     const bool is_external_collection =
@@ -10016,22 +10049,9 @@ ChunkedSegmentSealedImpl::TryTakeForSearch(const query::Plan* plan,
                                            milvus::OpContext* op_ctx) const {
     auto snapshot = CapturePublishedState();
     auto schema_snapshot = snapshot->schema;
-    if (size == 0 || !snapshot->use_take_for_output) {
+    if (size == 0 || !snapshot->use_take_for_output ||
+        !plan->take_for_output_allowed_) {
         return false;
-    }
-    auto result_count_limit = SegcoreConfig::default_config()
-                                  .get_take_for_output_result_count_limit();
-    if (plan->plan_node_ != nullptr) {
-        auto topk = plan->plan_node_->search_info_.topk_;
-        if (result_count_limit > 0 && topk > result_count_limit) {
-            LOG_DEBUG(
-                "[TakeAPI] search skipped take() for segment {} because "
-                "topk {} exceeds limit {}",
-                id_,
-                topk,
-                result_count_limit);
-            return false;
-        }
     }
     const bool is_external_collection =
         schema_snapshot->is_external_collection();
@@ -10063,16 +10083,6 @@ ChunkedSegmentSealedImpl::TryTakeForSearch(const query::Plan* plan,
     }
 
     auto ctx = BuildTakeContext(seg_offsets, size);
-    if (result_count_limit > 0 &&
-        ctx.unique_offsets.size() > static_cast<size_t>(result_count_limit)) {
-        LOG_DEBUG(
-            "[TakeAPI] search skipped take() for segment {} because "
-            "unique offset count {} exceeds limit {}",
-            id_,
-            ctx.unique_offsets.size(),
-            result_count_limit);
-        return false;
-    }
     if (SegcoreConfig::default_config().get_reject_remote_vector_output() &&
         has_vector_output) {
         LogTakeFallback("search",

@@ -306,7 +306,9 @@ BsonBuilder::ExtractOffsetsRecursive(
     milvus::fastmem::FastMemcpy(&length, current_base_ptr, 4);
 
     const uint8_t* end_ptr = current_base_ptr + length - 1;
-    AssertInfo(*(end_ptr) == 0x00, "miss bson document terminator");
+    if (!(*(end_ptr) == 0x00)) {
+        ThrowInfo(ErrorCode::DataFormatBroken, "miss bson document terminator");
+    }
 
     const uint8_t* ptr = current_base_ptr + 4;
 

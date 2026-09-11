@@ -4216,6 +4216,7 @@ type queryNodeConfig struct {
 	MultipleChunkedEnable              ParamItem `refreshable:"false"` // Deprecated
 	EnableGeometryCache                ParamItem `refreshable:"false"`
 	EnableGISSplitFusion               ParamItem `refreshable:"false"`
+	ScanCursorOwnsPin                  ParamItem `refreshable:"false"`
 
 	TieredWarmupScalarField         ParamItem `refreshable:"true"`
 	TieredWarmupScalarIndex         ParamItem `refreshable:"true"`
@@ -5001,6 +5002,15 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Export:       true,
 	}
 	p.EnableGISSplitFusion.Init(base.mgr)
+
+	p.ScanCursorOwnsPin = ParamItem{
+		Key:          "queryNode.segcore.scanCursorOwnsPin",
+		Version:      "2.6.6",
+		DefaultValue: "false",
+		Doc:          "Use cursor-owned rather than result-owned Cell pins for scalar Scan",
+		Export:       true,
+	}
+	p.ScanCursorOwnsPin.Init(base.mgr)
 
 	p.InterimIndexNProbe = ParamItem{
 		Key:     "queryNode.segcore.interimIndex.nprobe",
@@ -5950,7 +5960,7 @@ user-task-polling:
 		Key:          "queryNode.takeForOutput.resultCountLimit",
 		Version:      "3.0.0",
 		DefaultValue: defaultTakeForOutputResultCountLimit,
-		Doc:          `Maximum search topK, unique search offset count, or retrieve result row count that can use take() for output fields. Set to 0 to disable the limit`,
+		Doc:          `Maximum request-level output result count allowed to use take() for output fields. Set to 0 to disable the limit`,
 		Export:       false,
 		Formatter: func(v string) string {
 			limit, err := strconv.ParseInt(v, 10, 64)

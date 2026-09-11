@@ -131,9 +131,11 @@ TextMatchIndex::Upload(const Config& config) {
             LOG_WARN("{} is a directory", path_str);
         } else {
             LOG_INFO("trying to add text log: {}", path_str);
-            AssertInfo(disk_file_manager_->AddTextLog(path_str),
-                       "failed to add text log: {}",
-                       path_str);
+            if (!(disk_file_manager_->AddTextLog(path_str))) {
+                ThrowInfo(ErrorCode::FileWriteFailed,
+                          "failed to add text log: {}",
+                          path_str);
+            }
             LOG_INFO("text log: {} added", path_str);
         }
     }
@@ -226,8 +228,9 @@ TextMatchIndex::Load(const Config& config) {
     LoadIndexMetas(files_value, config);
     RetainTantivyIndexFiles(files_value);
     disk_file_manager_->CacheTextLogToDisk(files_value, load_priority);
-    AssertInfo(
-        tantivy_index_exist(prefix.c_str()), "index not exist: {}", prefix);
+    if (!(tantivy_index_exist(prefix.c_str()))) {
+        ThrowInfo(ErrorCode::DataFormatBroken, "index not exist: {}", prefix);
+    }
 
     auto load_in_mmap =
         GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);

@@ -39,6 +39,7 @@
 #include "common/Common.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
+#include "storage/StatusToErrorCode.h"
 #include "common/FieldMeta.h"
 #include "common/GroupChunk.h"
 #include "common/Schema.h"
@@ -63,7 +64,7 @@
 namespace milvus::segcore::storagev2translator {
 
 // See GroupChunkTranslator.cpp for explanation of g_mmap_path_generation.
-static std::atomic<uint64_t> g_mmap_path_generation{0};
+static std::atomic<uint64_t> g_manifest_mmap_path_generation{0};
 
 ColumnSizeEstimateResult
 FetchColumnSizeEstimates(milvus_storage::api::ChunkReader& chunk_reader) {
@@ -319,11 +320,14 @@ ManifestGroupTranslator::ManifestGroupTranslator(
         for (size_t i = 0; i < row_group_rows.size(); ++i) {
             if (row_group_rows[i] >
                 std::numeric_limits<uint64_t>::max() / fallback) {
-                throw std::runtime_error(fmt::format(
-                    "fallback row group size exceeds the uint64_t range, "
-                    "rows {}, bytes per row {}",
-                    row_group_rows[i],
-                    fallback_bytes_per_row));
+                ThrowInfo(
+                    ErrorCode::UnexpectedError,
+                    "{}",
+                    std::string(fmt::format(
+                        "fallback row group size exceeds the uint64_t range, "
+                        "rows {}, bytes per row {}",
+                        row_group_rows[i],
+                        fallback_bytes_per_row)));
             }
             row_group_sizes[i] = row_group_rows[i] * fallback;
         }
@@ -392,11 +396,14 @@ ManifestGroupTranslator::ManifestGroupTranslator(
         }
         if (row_group_rows[i] > std::numeric_limits<uint64_t>::max() /
                                     positive_fallback_bytes_per_row) {
-            throw std::runtime_error(fmt::format(
-                "positive fallback row group size exceeds the uint64_t "
-                "range, rows {}, bytes per row {}",
-                row_group_rows[i],
-                positive_fallback_bytes_per_row));
+            ThrowInfo(
+                ErrorCode::UnexpectedError,
+                "{}",
+                std::string(fmt::format(
+                    "positive fallback row group size exceeds the uint64_t "
+                    "range, rows {}, bytes per row {}",
+                    row_group_rows[i],
+                    positive_fallback_bytes_per_row)));
         }
         row_group_sizes[i] =
             row_group_rows[i] * positive_fallback_bytes_per_row;
@@ -770,8 +777,8 @@ ManifestGroupTranslator::load_group_chunk(
     } else {
         // Mmap mode — use unique generation suffix to avoid truncating files
         // that old MAP_SHARED mmaps still reference (see #48658).
-        const auto gen =
-            g_mmap_path_generation.fetch_add(1, std::memory_order_relaxed);
+        const auto gen = g_manifest_mmap_path_generation.fetch_add(
+            1, std::memory_order_relaxed);
         std::filesystem::path filepath;
         switch (group_chunk_type_) {
             case GroupChunkType::DEFAULT:

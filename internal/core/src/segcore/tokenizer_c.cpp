@@ -15,6 +15,7 @@
 #include <memory>
 #include <string>
 
+#include "common/CGoCatch.h"
 #include "tokenizer.h"
 
 CStatus
@@ -22,9 +23,8 @@ set_tokenizer_option(const char* params) {
     try {
         milvus::tantivy::set_tokenizer_options(params);
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -36,9 +36,8 @@ create_tokenizer(const char* params,
             std::make_unique<milvus::tantivy::Tokenizer>(params, extra_info);
         *tokenizer = impl.release();
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -47,9 +46,8 @@ clone_tokenizer(CTokenizer* tokenizer, CTokenizer* rst) {
         auto impl = reinterpret_cast<milvus::tantivy::Tokenizer*>(*tokenizer);
         *rst = impl->Clone().release();
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 void
@@ -58,10 +56,18 @@ free_tokenizer(CTokenizer tokenizer) {
     delete impl;
 }
 
-CTokenStream
-create_token_stream(CTokenizer tokenizer, const char* text, uint32_t text_len) {
-    auto impl = reinterpret_cast<milvus::tantivy::Tokenizer*>(tokenizer);
-    return impl->CreateTokenStream(std::string(text, text_len)).release();
+CStatus
+create_token_stream(CTokenizer tokenizer,
+                    const char* text,
+                    uint32_t text_len,
+                    CTokenStream* token_stream) {
+    try {
+        auto impl = reinterpret_cast<milvus::tantivy::Tokenizer*>(tokenizer);
+        *token_stream =
+            impl->CreateTokenStream(std::string(text, text_len)).release();
+        return milvus::SuccessCStatus();
+    }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CValidateResult
@@ -72,5 +78,10 @@ validate_tokenizer(const char* params, const char* extra_info) {
         return CValidateResult{ids, count, milvus::SuccessCStatus()};
     } catch (std::exception& e) {
         return CValidateResult{nullptr, 0, milvus::FailureCStatus(&e)};
+    } catch (...) {
+        return CValidateResult{nullptr,
+                               0,
+                               milvus::FailureCStatus(milvus::UnexpectedError,
+                                                      "unknown exception")};
     }
 }
