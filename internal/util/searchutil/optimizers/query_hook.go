@@ -73,13 +73,14 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 		if queryInfo == nil {
 			return nil, merr.WrapErrParameterInvalidMsg("missing search query info")
 		}
+		var params map[string]any
 		if useQueryHook {
 			// use shardNum * segments num in shard to estimate total segment number
 			estSegmentNum := numSegments * int(channelNum)
 			metrics.QueryNodeSearchHitSegmentNum.WithLabelValues(paramtable.GetStringNodeID(), fmt.Sprint(collectionId), metrics.SearchLabel).Observe(float64(estSegmentNum))
 
 			withFilter := (plan.GetVectorAnns().GetPredicates() != nil)
-			params := map[string]any{
+			params = map[string]any{
 				common.TopKKey:         queryInfo.GetTopk(),
 				common.SearchParamKey:  queryInfo.GetSearchParams(),
 				common.SegmentNumKey:   estSegmentNum,
@@ -111,12 +112,6 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 			finalTopk := params[common.TopKKey].(int64)
 			isTopkReduce := req.GetReq().GetIsTopkReduce() && (finalTopk < queryInfo.GetTopk()) && !isSecondStageSearch
 			queryInfo.Topk = finalTopk
-			if useKnowhereDefaults {
-				if err := paramtable.Get().KnowhereConfig.MergeIndexParamsJSON(indexType, paramtable.SearchStage, params); err != nil {
-					return nil, merr.WrapErrParameterInvalidMsg("invalid search params: %s", err.Error())
-				}
-			}
-			queryInfo.SearchParams = params[common.SearchParamKey].(string)
 			// Pass global refine decision to C++ via proto after hook validation
 			if globalRefineVal, ok := params[common.GlobalRefineKey]; ok && globalRefineVal.(bool) {
 				queryInfo.SearchTopkRatio = params[common.SearchTopkRatioKey].(float32)
@@ -134,11 +129,15 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 			}
 		}
 
-		if !useQueryHook && useKnowhereDefaults {
-			params := map[string]any{common.SearchParamKey: queryInfo.GetSearchParams()}
+		if useKnowhereDefaults {
+			if params == nil {
+				params = map[string]any{common.SearchParamKey: queryInfo.GetSearchParams()}
+			}
 			if err := paramtable.Get().KnowhereConfig.MergeIndexParamsJSON(indexType, paramtable.SearchStage, params); err != nil {
 				return nil, merr.WrapErrParameterInvalidMsg("invalid search params: %s", err.Error())
 			}
+		}
+		if params != nil {
 			queryInfo.SearchParams = params[common.SearchParamKey].(string)
 		}
 
