@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"reflect"
 
+	"github.com/samber/lo"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 )
 
@@ -77,20 +79,24 @@ func (f *Function) WithType(funcType FunctionType) *Function {
 }
 
 func (f *Function) WithParam(key string, value any) *Function {
-	// Handle slices by converting to JSON format
+	f.Params[key] = paramValueToString(value)
+	return f
+}
+
+// paramValueToString renders a Function/FunctionScore param value on the wire:
+// slices are JSON-encoded, everything else uses its default string form.
+func paramValueToString(value any) string {
 	valueType := reflect.TypeOf(value)
 	if valueType == nil {
-		f.Params[key] = "null"
-	} else if valueType.Kind() == reflect.Slice {
-		if jsonBytes, err := json.Marshal(value); err == nil {
-			f.Params[key] = string(jsonBytes)
-		} else {
-			f.Params[key] = fmt.Sprintf("%v", value)
-		}
-	} else {
-		f.Params[key] = fmt.Sprintf("%v", value)
+		return "null"
 	}
-	return f
+	if valueType.Kind() == reflect.Slice {
+		if jsonBytes, err := json.Marshal(value); err == nil {
+			return string(jsonBytes)
+		}
+		return fmt.Sprintf("%v", value)
+	}
+	return fmt.Sprintf("%v", value)
 }
 
 // ProtoMessage returns corresponding schemapb.FunctionSchema
@@ -122,4 +128,80 @@ func (f *Function) ReadProto(p *schemapb.FunctionSchema) *Function {
 	f.outputFieldIDs = p.GetOutputFieldIds()
 
 	return f
+}
+
+// FunctionScore models the search-time FunctionScore message: a set of scoring
+// Functions (e.g. boost rankers) plus score-option params such as boost_mode
+// and function_mode.
+type FunctionScore struct {
+	Functions []*Function
+	Params    map[string]string
+}
+
+func NewFunctionScore() *FunctionScore {
+	return &FunctionScore{
+		Params: make(map[string]string),
+	}
+}
+
+func (fs *FunctionScore) AddFunction(f *Function) *FunctionScore {
+	fs.Functions = append(fs.Functions, f)
+	return fs
+}
+
+func (fs *FunctionScore) WithParam(key string, value any) *FunctionScore {
+	fs.Params[key] = paramValueToString(value)
+	return fs
+}
+
+// Clone returns a deep copy of fs: functions and params are copied so the
+// returned score does not share mutable state with the source.
+func (fs *FunctionScore) Clone() *FunctionScore {
+	nf := NewFunctionScore()
+	for _, f := range fs.Functions {
+		nf.AddFunction(f.Clone())
+	}
+	for k, v := range fs.Params {
+		nf.Params[k] = v
+	}
+	return nf
+}
+
+// Clone returns a deep copy of f.
+func (f *Function) Clone() *Function {
+	nf := &Function{
+		Name:             f.Name,
+		Description:      f.Description,
+		Type:             f.Type,
+		InputFieldNames:  append([]string(nil), f.InputFieldNames...),
+		OutputFieldNames: append([]string(nil), f.OutputFieldNames...),
+		Params:           make(map[string]string, len(f.Params)),
+		id:               f.id,
+		inputFieldIDs:    append([]int64(nil), f.inputFieldIDs...),
+		outputFieldIDs:   append([]int64(nil), f.outputFieldIDs...),
+	}
+	for k, v := range f.Params {
+		nf.Params[k] = v
+	}
+	return nf
+}
+
+// ProtoMessage returns corresponding schemapb.FunctionScore
+func (fs *FunctionScore) ProtoMessage() *schemapb.FunctionScore {
+	r := &schemapb.FunctionScore{
+		Params: MapKvPairs(fs.Params),
+	}
+	for _, f := range fs.Functions {
+		r.Functions = append(r.Functions, f.ProtoMessage())
+	}
+	return r
+}
+
+// ReadProto parses proto FunctionScore
+func (fs *FunctionScore) ReadProto(p *schemapb.FunctionScore) *FunctionScore {
+	fs.Functions = lo.Map(p.GetFunctions(), func(fn *schemapb.FunctionSchema, _ int) *Function {
+		return NewFunction().ReadProto(fn)
+	})
+	fs.Params = KvPairsMap(p.GetParams())
+	return fs
 }
