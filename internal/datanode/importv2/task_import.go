@@ -183,8 +183,10 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 			return err
 		}
 		defer reader.Close()
-		// Deterministic autoID: each file owns a disjoint PK range replicated from
-		// the primary. A nil cursor (no range) falls back to the local allocator.
+		// Deterministic PK/RowID: each file owns a disjoint per-file range replicated
+		// from the primary (used for PK on autoID collections, for RowID on
+		// explicit-PK ones). A nil cursor (no range) falls back to the local
+		// allocator.
 		var cur *pkCursor
 		if r := file.GetPreAllocatedAutoIds(); r.GetEnd() > r.GetBegin() {
 			cur = &pkCursor{begin: r.GetBegin(), end: r.GetEnd(), next: r.GetBegin()}

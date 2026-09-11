@@ -118,8 +118,9 @@ func NewSyncTask(ctx context.Context,
 
 // newWriteRetryOptions builds the retry options for import writes. The options are
 // order-sensitive: retry.Sleep raises maxSleepTime to 2*initial, so MaxSleepTime must
-// be applied last. The paramtable formatters guarantee both intervals are positive,
+// follow Sleep. The paramtable formatters guarantee both intervals are positive,
 // which keeps retry.Do from degenerating into a zero-delay loop under attempts=0.
+// RetryErr is order-independent and is appended last.
 func newWriteRetryOptions() []retry.Option {
 	params := &paramtable.Get().DataNodeCfg
 	initialInterval := time.Duration(params.ImportWriteRetryInitialInterval.GetAsInt()) * time.Second
@@ -128,6 +129,16 @@ func newWriteRetryOptions() []retry.Option {
 		retry.Attempts(params.ImportMaxWriteRetryAttempts.GetAsUint()), // 0 = unlimited, preserved on purpose
 		retry.Sleep(initialInterval),
 		retry.MaxSleepTime(maxInterval),
+		// The write-retry loop only exists to absorb transient storage faults.
+		// ID exhaustion cannot be fixed by retrying against the same local
+		// allocator, so treat it as terminal. The caller-provided predicate
+		// replaces retry.Do's default InputError abort, so preserve that too.
+		retry.RetryErr(func(err error) bool {
+			if allocator.IsIDExhausted(err) {
+				return false
+			}
+			return merr.GetErrorType(err) != merr.InputError
+		}),
 	}
 }
 
@@ -429,27 +440,39 @@ func appendSystemFieldsDataWithCursor(task *ImportTask, data *storage.InsertData
 	if err != nil {
 		return err
 	}
-	ids := make([]int64, rowNum)
-	var start int64
-	if cur != nil && cur.end > cur.begin {
-		// Deterministic path: derive PKs from the primary-allocated per-file range.
-		start, err = cur.take(rowNum)
-		if err != nil {
-			return err
-		}
-	} else {
-		// Legacy path: allocate PKs from the task's local allocator.
-		start, _, err = task.allocator.Alloc(uint32(rowNum))
-		if err != nil {
-			return err
-		}
-	}
-	for i := 0; i < rowNum; i++ {
-		ids[i] = start + int64(i)
-	}
 	pkData, ok := data.Data[pkField.GetFieldID()]
 	allowInsertAutoID, _ := common.IsAllowInsertAutoID(task.req.Schema.GetProperties()...)
-	if pkField.GetAutoID() && (!ok || pkData == nil || pkData.RowNum() == 0 || !allowInsertAutoID) {
+	// A row only needs synthesized IDs when a primary key (autoID and none present
+	// in the file) or a RowID is missing. Backup/binlog restore carries its own PK,
+	// RowID and timestamp, so it must not burn one ID per row from the task's
+	// IDRange -- that is what made restore pre-allocate proportional to totalRows
+	// (and overflow uint32) instead of to its actual logID-only demand.
+	needPK := pkField.GetAutoID() && (!ok || pkData == nil || pkData.RowNum() == 0 || !allowInsertAutoID)
+	_, hasRowID := data.Data[common.RowIDField]
+	needRowID := !hasRowID
+
+	var ids []int64
+	if needPK || needRowID {
+		ids = make([]int64, rowNum)
+		var start int64
+		if cur != nil && cur.end > cur.begin {
+			// Deterministic path: derive PKs from the primary-allocated per-file range.
+			start, err = cur.take(rowNum)
+			if err != nil {
+				return err
+			}
+		} else {
+			// Legacy path: allocate PKs from the task's local allocator.
+			start, _, err = task.allocator.Alloc(uint32(rowNum))
+			if err != nil {
+				return err
+			}
+		}
+		for i := 0; i < rowNum; i++ {
+			ids[i] = start + int64(i)
+		}
+	}
+	if needPK {
 		switch pkField.GetDataType() {
 		case schemapb.DataType_Int64:
 			data.Data[pkField.GetFieldID()] = &storage.Int64FieldData{Data: ids}
@@ -460,7 +483,7 @@ func appendSystemFieldsDataWithCursor(task *ImportTask, data *storage.InsertData
 			data.Data[pkField.GetFieldID()] = &storage.StringFieldData{Data: strIDs}
 		}
 	}
-	if _, ok := data.Data[common.RowIDField]; !ok { // for binlog import, keep original rowID and ts
+	if needRowID {
 		data.Data[common.RowIDField] = &storage.Int64FieldData{Data: ids}
 	}
 	if _, ok := data.Data[common.TimeStampField]; !ok {

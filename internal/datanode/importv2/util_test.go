@@ -150,6 +150,140 @@ func Test_AppendSystemFieldsData_AllowInsertAutoID_KeepUserPK(t *testing.T) {
 	}
 }
 
+func Test_AppendSystemFieldsData_BackupKeepsRowIDAndSkipsPerRowAlloc(t *testing.T) {
+	const count = 10
+
+	pkField := &schemapb.FieldSchema{
+		FieldID:      100,
+		Name:         "pk",
+		DataType:     schemapb.DataType_Int64,
+		IsPrimaryKey: true,
+		AutoID:       true,
+	}
+	vecField := &schemapb.FieldSchema{
+		FieldID:  101,
+		Name:     "vec",
+		DataType: schemapb.DataType_FloatVector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.DimKey, Value: "4"},
+		},
+	}
+
+	schema := &schemapb.CollectionSchema{}
+	schema.Fields = []*schemapb.FieldSchema{pkField, vecField}
+
+	// Backup/binlog restore keeps its source PK/RowID/timestamp, so the datanode
+	// unsets autoID and must NOT burn one ID per row from the task IDRange. Use a
+	// one-ID allocator: if the old per-row allocation path were still taken the
+	// call would fail with ID exhausted, proving the fix.
+	task := &ImportTask{
+		req:       &datapb.ImportRequest{Ts: 1000, Schema: schema},
+		allocator: allocator.NewLocalAllocator(0, 1),
+	}
+
+	insertData, err := testutil.CreateInsertData(schema, count)
+	assert.NoError(t, err)
+
+	userPK := make([]int64, count)
+	for i := 0; i < count; i++ {
+		userPK[i] = 1000 + int64(i)
+	}
+	insertData.Data[pkField.GetFieldID()] = &storage.Int64FieldData{Data: userPK}
+	insertData.Data[common.RowIDField] = &storage.Int64FieldData{Data: userPK}
+	insertData.Data[common.TimeStampField] = &storage.Int64FieldData{Data: userPK}
+
+	// Mirror NewImportTask: restore unsets autoID so the primary key keeps the
+	// binlog value instead of being regenerated.
+	UnsetAutoID(schema)
+
+	rowNum, _ := GetInsertDataRowCount(insertData, task.GetSchema())
+	err = appendSystemFieldsDataWithCursor(task, insertData, rowNum, nil)
+	assert.NoError(t, err)
+
+	// PK must stay the user-provided (binlog) values, not regenerated IDs.
+	gotPK := insertData.Data[pkField.GetFieldID()].(*storage.Int64FieldData)
+	assert.Equal(t, count, gotPK.RowNum())
+	for i := 0; i < count; i++ {
+		assert.Equal(t, userPK[i], gotPK.Data[i])
+	}
+	// RowID and timestamp must also be preserved untouched.
+	gotRowID := insertData.Data[common.RowIDField].(*storage.Int64FieldData)
+	gotTS := insertData.Data[common.TimeStampField].(*storage.Int64FieldData)
+	for i := 0; i < count; i++ {
+		assert.Equal(t, userPK[i], gotRowID.Data[i])
+		assert.Equal(t, userPK[i], gotTS.Data[i])
+	}
+}
+
+func Test_AppendSystemFieldsData_ExplicitPKRowIDFromRange(t *testing.T) {
+	const count = 10
+
+	// Explicit-PK collection: the PK comes from the file, and the per-file
+	// PreAllocatedAutoIds range supplies the RowID. The task-level allocator must
+	// NOT be consumed per row (it only feeds logIDs after the per-file range
+	// mechanism is in place). Use a one-ID allocator: if the old per-row fallback
+	// were taken the call would fail with ID exhausted.
+	pkField := &schemapb.FieldSchema{
+		FieldID:      100,
+		Name:         "pk",
+		DataType:     schemapb.DataType_Int64,
+		IsPrimaryKey: true,
+		AutoID:       false,
+	}
+	vecField := &schemapb.FieldSchema{
+		FieldID:  101,
+		Name:     "vec",
+		DataType: schemapb.DataType_FloatVector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.DimKey, Value: "4"},
+		},
+	}
+
+	schema := &schemapb.CollectionSchema{}
+	schema.Fields = []*schemapb.FieldSchema{pkField, vecField}
+
+	task := &ImportTask{
+		req:       &datapb.ImportRequest{Ts: 1000, Schema: schema},
+		allocator: allocator.NewLocalAllocator(0, 1),
+	}
+
+	insertData, err := testutil.CreateInsertData(schema, count)
+	assert.NoError(t, err)
+
+	// PK comes from the file (explicit), RowID is absent (ordinary import has no
+	// system fields) -> the datanode must derive RowID from the per-file range.
+	userPK := make([]int64, count)
+	for i := 0; i < count; i++ {
+		userPK[i] = 1000 + int64(i)
+	}
+	insertData.Data[pkField.GetFieldID()] = &storage.Int64FieldData{Data: userPK}
+
+	// Per-file range replicated from the primary: [100, 100+count).
+	cur := &pkCursor{begin: 100, end: 100 + count, next: 100}
+	rowNum, _ := GetInsertDataRowCount(insertData, task.GetSchema())
+	err = appendSystemFieldsDataWithCursor(task, insertData, rowNum, cur)
+	assert.NoError(t, err)
+
+	// PK preserved from the file.
+	gotPK := insertData.Data[pkField.GetFieldID()].(*storage.Int64FieldData)
+	assert.Equal(t, count, gotPK.RowNum())
+	for i := 0; i < count; i++ {
+		assert.Equal(t, userPK[i], gotPK.Data[i])
+	}
+	// RowID derived from the per-file range, not from the task allocator.
+	gotRowID := insertData.Data[common.RowIDField].(*storage.Int64FieldData)
+	assert.Equal(t, count, gotRowID.RowNum())
+	for i := 0; i < count; i++ {
+		assert.Equal(t, int64(100+i), gotRowID.Data[i])
+	}
+	// Timestamp filled from the task.
+	gotTS := insertData.Data[common.TimeStampField].(*storage.Int64FieldData)
+	assert.Equal(t, count, gotTS.RowNum())
+	for i := 0; i < count; i++ {
+		assert.Equal(t, int64(1000), gotTS.Data[i])
+	}
+}
+
 func Test_UnsetAutoID(t *testing.T) {
 	pkField := &schemapb.FieldSchema{
 		FieldID:      100,
@@ -1089,6 +1223,29 @@ func TestNewWriteRetryOptions(t *testing.T) {
 	defer params.Reset(params.DataNodeCfg.ImportWriteRetryInitialInterval.Key)
 	defer params.Reset(params.DataNodeCfg.ImportWriteRetryMaxInterval.Key)
 	assert.LessOrEqual(t, runUntilCancel(), 2)
+}
+
+func TestNewWriteRetryOptions_StopsOnIDExhausted(t *testing.T) {
+	paramtable.Init()
+	calls := 0
+	err := retry.Do(context.Background(), func() error {
+		calls++
+		return allocator.NewIDExhaustedError(1, 1, 1)
+	}, newWriteRetryOptions()...)
+	assert.Error(t, err)
+	assert.Equal(t, 1, calls, "ID exhaustion must be terminal, not retried")
+	assert.True(t, allocator.IsIDExhausted(err))
+}
+
+func TestNewWriteRetryOptions_InputErrorStillTerminal(t *testing.T) {
+	paramtable.Init()
+	calls := 0
+	err := retry.Do(context.Background(), func() error {
+		calls++
+		return merr.WrapErrParameterInvalidMsg("bad write parameter")
+	}, newWriteRetryOptions()...)
+	assert.Error(t, err)
+	assert.Equal(t, 1, calls, "the RetryErr predicate must preserve the default InputError abort")
 }
 
 func Test_appendSystemFieldsDataWithCursor(t *testing.T) {

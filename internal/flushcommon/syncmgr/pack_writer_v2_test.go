@@ -65,6 +65,23 @@ type PackWriterV2Suite struct {
 	currentSplit []storagecommon.ColumnGroup
 }
 
+// countingAllocator is a minimal allocator.Interface for tests that only need to
+// observe how many IDs were drawn.
+type countingAllocator struct {
+	allocated int
+}
+
+func (a *countingAllocator) Alloc(count uint32) (int64, int64, error) {
+	start := int64(a.allocated)
+	a.allocated += int(count)
+	return start, start + int64(count), nil
+}
+
+func (a *countingAllocator) AllocOne() (int64, error) {
+	a.allocated++
+	return int64(a.allocated), nil
+}
+
 func (s *PackWriterV2Suite) SetupTest() {
 	s.ctx = context.Background()
 	s.logIDAlloc = allocator.NewLocalAllocator(1, math.MaxInt64)
@@ -119,6 +136,20 @@ func (s *PackWriterV2Suite) SetupTest() {
 
 func (s *PackWriterV2Suite) TearDownTest() {
 	paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+}
+
+func (s *PackWriterV2Suite) TestAllocInsertLogPathsReservesOnce() {
+	alloc := &countingAllocator{}
+	bw := NewBulkPackWriterV2(nil, s.schema, s.cm, alloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit)
+	pack := new(SyncPack).WithCollectionID(123).WithPartitionID(456).WithSegmentID(789)
+
+	paths, err := bw.allocInsertLogPaths(pack)
+	s.NoError(err)
+	s.Equal(len(s.currentSplit), alloc.allocated)
+	s.Equal(len(s.currentSplit), len(paths))
+	for _, path := range paths {
+		s.NotEmpty(path)
+	}
 }
 
 func (s *PackWriterV2Suite) TestPackWriterV2_Write() {

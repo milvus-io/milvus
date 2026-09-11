@@ -1772,6 +1772,22 @@ class TestImport2PCRestOperation(TestBase):
         assert rsp["code"] == 0, rsp
         return rsp["data"]["jobId"]
 
+    def _assert_missing_file_import_rejected(self, collection_name):
+        missing_file = f"import_2pc_missing_{uuid4()}.parquet"
+        payload = {
+            "collectionName": collection_name,
+            "files": [[missing_file]],
+            "options": {"auto_commit": "false"},
+        }
+        rsp = self.import_job_client.create_import_jobs(payload)
+        assert rsp["code"] != 0, rsp
+        readable_rsp = str(rsp).lower()
+        assert "jobId" not in str(rsp), rsp
+        assert any(keyword in readable_rsp for keyword in ("key not found", "not exist", "not found", "no such")), rsp
+
+        self.collection_client.refresh_load(collection_name)
+        assert self._query_count(collection_name) == 0
+
     def _query_imported_ids(self, collection_name, ids, partition_names=None, db_name="default"):
         payload = {
             "collectionName": collection_name,
@@ -8577,12 +8593,14 @@ class TestImport2PCRestOperation(TestBase):
         collection_name = gen_collection_name(prefix="import_2pc_commit_invalid")
         self._create_base_collection(collection_name)
 
-        missing_file = f"import_2pc_missing_{uuid4()}.parquet"
-        failed_job_id = self._create_import_job(
-            collection_name,
-            missing_file,
-            options={"auto_commit": "false"},
-        )
+        file_name = f"import_2pc_commit_invalid_failed_{uuid4()}.parquet"
+        file_path = self._write_parquet_and_upload(self._make_rows(9000, 3, phase=1), file_name)
+        failed_job_id = self._create_manual_import_job(collection_name, file_name)
+        rsp, ok = self.import_job_client.wait_import_job_state(failed_job_id, "Uncommitted", timeout=IMPORT_2PC_TIMEOUT)
+        assert ok, rsp
+
+        abort_rsp = self.import_job_client.abort_import_job(failed_job_id)
+        assert abort_rsp["code"] == 0, abort_rsp
         rsp, ok = self.import_job_client.wait_import_job_state(failed_job_id, "Failed", timeout=IMPORT_2PC_TIMEOUT)
         assert ok, rsp
 
@@ -8598,44 +8616,30 @@ class TestImport2PCRestOperation(TestBase):
         assert nonexistent_commit_rsp["code"] != 0, nonexistent_commit_rsp
         assert "not found" in str(nonexistent_commit_rsp).lower(), nonexistent_commit_rsp
 
+        if os.path.exists(file_path):
+            os.remove(file_path)
+
     @pytest.mark.tags(CaseLabel.L0)
-    def test_import_2pc_failed_job_exposes_actionable_reason_and_no_visible_rows(self):
+    def test_import_2pc_missing_file_create_rejected_explicit_pk(self):
         """
-        target: failed import job observability
-        method: import a missing parquet object and inspect progress/detail after Failed
-        expected: progress exposes an actionable reason and no rows become visible
+        target: missing-file import submission behavior
+        method: submit a missing parquet object to an explicit-PK collection
+        expected: create is rejected synchronously and no job/rows are produced
         """
-        collection_name = gen_collection_name(prefix="import_2pc_failed_reason")
+        collection_name = gen_collection_name(prefix="import_2pc_missing_create_explicit")
         self._create_base_collection(collection_name)
+        self._assert_missing_file_import_rejected(collection_name)
 
-        missing_file = f"import_2pc_missing_reason_{uuid4()}.parquet"
-        job_id = self._create_import_job(
-            collection_name,
-            missing_file,
-            options={"auto_commit": "false"},
-        )
-        rsp, ok = self.import_job_client.wait_import_job_state(job_id, "Failed", timeout=IMPORT_2PC_TIMEOUT)
-        assert ok, rsp
-        assert rsp["data"]["jobId"] == job_id, rsp
-        assert rsp["data"]["state"] == "Failed", rsp
-
-        reason_text = str(rsp["data"].get("reason", ""))
-        detail_text = " ".join(str(detail) for detail in rsp["data"].get("details", []))
-        combined_reason = f"{reason_text} {detail_text}"
-        assert combined_reason.strip(), rsp
-        assert missing_file in combined_reason, rsp
-        assert any(
-            keyword in combined_reason.lower()
-            for keyword in ("not found", "no such", "missing", "stat", "exist", "failed")
-        ), rsp
-
-        progress_rsp = self.import_job_client.get_import_job_progress(job_id)
-        assert progress_rsp["code"] == 0, progress_rsp
-        assert progress_rsp["data"]["state"] == "Failed", progress_rsp
-        assert str(progress_rsp["data"].get("reason", "") or progress_rsp["data"].get("details", "")), progress_rsp
-
-        self.collection_client.refresh_load(collection_name)
-        assert self._query_count(collection_name) == 0
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_import_2pc_missing_file_create_rejected_auto_id(self):
+        """
+        target: missing-file import submission behavior
+        method: submit a missing parquet object to an AutoID collection
+        expected: create is rejected synchronously and no job/rows are produced
+        """
+        collection_name = gen_collection_name(prefix="import_2pc_missing_create_auto_id")
+        self._create_auto_id_collection(collection_name)
+        self._assert_missing_file_import_rejected(collection_name)
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_import_2pc_manual_import_stops_at_uncommitted_and_invisible(self):
