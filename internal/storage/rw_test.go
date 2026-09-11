@@ -41,8 +41,10 @@ import (
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
@@ -702,6 +704,20 @@ func (s *PackedBinlogRecordSuite) TestV3StatsWrittenUnderBasePath() {
 		assert.NotContains(s.T(), p, "stats_log",
 			"bloom filter stat path must not use legacy stats_log/ layout")
 	}
+
+	// QueryNode resolves V3 bloom-filter paths from SegmentLoadInfo and passes
+	// them unchanged to ChunkManager.MultiRead. Exercise that exact boundary so
+	// a regression to bucket-relative local paths cannot be hidden by the test
+	// joining localStorage.path itself.
+	loadInfo := &querypb.SegmentLoadInfo{ManifestPath: manifestPath}
+	resolvedPaths, err := packed.NewStatsResolverFromLoadInfo(loadInfo).BloomFilterPaths(pkField.GetFieldID())
+	require.NoError(s.T(), err)
+	require.Equal(s.T(), bfStat.Paths, resolvedPaths)
+
+	chunkManager := NewLocalChunkManager(objectstorage.RootPath(dir))
+	values, err := chunkManager.MultiRead(s.ctx, resolvedPaths)
+	require.NoError(s.T(), err)
+	require.Len(s.T(), values, len(resolvedPaths))
 }
 
 func genRowWithBM25(magic int64) map[int64]interface{} {

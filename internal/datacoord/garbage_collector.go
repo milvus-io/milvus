@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -612,6 +613,32 @@ func (gc *garbageCollector) recycleUnusedBinlogFiles(ctx context.Context) {
 			label:             metrics.StatFileLabel,
 		},
 		{
+			prefix: path.Join(gc.option.cli.RootPath(), common.SegmentBm25LogPath),
+			checker: func(objectInfo *storage.ChunkObjectInfo, segment *SegmentInfo) bool {
+				if segment == nil {
+					return false
+				}
+				for _, fieldLogs := range segment.GetBm25Statslogs() {
+					for _, statsLog := range fieldLogs.GetBinlogs() {
+						key := statsLog.GetLogPath()
+						if key == "" {
+							// Catalog binlogs carry IDs, not paths. Match the field too:
+							// compound stats reuse the same log ID across fields.
+							key = metautil.BuildBm25LogPath(gc.option.cli.RootPath(),
+								segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID(),
+								fieldLogs.GetFieldID(), statsLog.GetLogID())
+						}
+						if key == objectInfo.FilePath {
+							return true
+						}
+					}
+				}
+				return false
+			},
+			segmentIDFromPath: storage.ParseSegmentIDByBinlog,
+			label:             common.SegmentBm25LogPath,
+		},
+		{
 			prefix: path.Join(gc.option.cli.RootPath(), common.SegmentDeltaLogPath),
 			checker: func(objectInfo *storage.ChunkObjectInfo, segment *SegmentInfo) bool {
 				logID, err := binlog.GetLogIDFromBingLogPath(objectInfo.FilePath)
@@ -1056,6 +1083,64 @@ func (gc *garbageCollector) removeDroppedSegmentFiles(ctx context.Context, clone
 				mlog.Err(err))
 			return err
 		}
+		if strings.Contains(basePath, "://") {
+			return merr.WrapErrDataIntegrityMsg("GC V3 segment %d has an unsafe manifest base path %q", cloned.GetID(), basePath)
+		}
+		// A manifest base path is a complete ChunkManager key on every backend:
+		// an absolute filesystem path on local storage, a bucket-relative object
+		// key (including minio.rootPath) on remote. A relative path on local
+		// storage is a legacy manifest that bypassed metadata load normalization;
+		// refuse to guess where it lives rather than delete against the CWD.
+		_, local := gc.option.cli.(*storage.LocalChunkManager)
+		if local {
+			if !path.IsAbs(basePath) {
+				return merr.WrapErrDataIntegrityMsg("GC V3 segment %d manifest base path %q is not a complete local path", cloned.GetID(), basePath)
+			}
+		} else if path.IsAbs(basePath) {
+			return merr.WrapErrDataIntegrityMsg("GC V3 segment %d manifest base path %q is not a bucket-relative object key", cloned.GetID(), basePath)
+		} else {
+			basePath = strings.TrimRight(basePath, "/")
+		}
+		// A matching segment suffix is not sufficient authority to delete:
+		// another instance can have the same IDs under a different storage root.
+		root := path.Clean(gc.option.cli.RootPath())
+		if local {
+			basePath = path.Clean(basePath)
+			rel, err := filepath.Rel(root, basePath)
+			if err != nil || rel == "." || !filepath.IsLocal(rel) {
+				return merr.WrapErrDataIntegrityMsg("GC V3 segment %d manifest base path %q is outside local storage root %q", cloned.GetID(), basePath, root)
+			}
+		} else if root != "." && !strings.HasPrefix(basePath, root+"/") {
+			// Empty / dot roots own the entire bucket. Otherwise require a
+			// component boundary, not a raw prefix such as files-other/...
+			return merr.WrapErrDataIntegrityMsg("GC V3 segment %d manifest base path %q is outside remote storage root %q", cloned.GetID(), basePath, root)
+		}
+
+		// Remote object keys retain their exact spelling; only local filesystem
+		// paths are normalized above.
+		// A deletion prefix must identify exactly this segment, not merely some
+		// path under the configured root. Storage roots may contain an extra
+		// layout prefix (for example, files/insert_log/...), so validate the
+		// canonical segment suffix rather than assuming insert_log is component 0.
+		parts := strings.Split(basePath, "/")
+		if len(parts) < 4 {
+			return merr.WrapErrDataIntegrityMsg("GC V3 segment %d has an invalid manifest base path", cloned.GetID())
+		}
+		segmentParts := parts[len(parts)-4:]
+		collectionID, collectionErr := strconv.ParseInt(segmentParts[1], 10, 64)
+		partitionID, partitionErr := strconv.ParseInt(segmentParts[2], 10, 64)
+		segmentID, segmentErr := strconv.ParseInt(segmentParts[3], 10, 64)
+		if segmentParts[0] != common.SegmentInsertLogPath ||
+			collectionErr != nil || partitionErr != nil || segmentErr != nil ||
+			collectionID != cloned.GetCollectionID() || partitionID != cloned.GetPartitionID() || segmentID != cloned.GetID() {
+			return merr.WrapErrDataIntegrityMsg("GC V3 segment %d manifest base path does not match segment identity", cloned.GetID())
+		}
+		// Prefix deletion must be segment-boundary aware: without the slash,
+		// segment 2001 also matches sibling segment 20010.
+		basePath = strings.TrimRight(basePath, "/") + "/"
+
+		// Removing an already-removed prefix is a no-op on every backend, so a
+		// retry after a partial run needs no special case here.
 		log.Info(ctx, "GC V3 segment start, removing basePath...",
 			mlog.String("basePath", basePath),
 			mlog.Int("indexFiles", len(indexFiles)))

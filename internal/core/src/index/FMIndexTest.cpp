@@ -1005,7 +1005,7 @@ TEST(FMIndex, ExecutorPathDeclinedOpsFallBackToScan) {
                                                       false);
     auto index_meta = gen_index_meta(
         segment_id, field_id.get(), index_build_id, index_version);
-    auto storage_config = gen_local_storage_config(TestLocalPath);
+    auto storage_config = get_default_local_storage_config();
     auto cm = CreateChunkManager(storage_config);
     auto fs = storage::InitArrowFileSystem(storage_config);
 
@@ -1034,8 +1034,8 @@ TEST(FMIndex, ExecutorPathDeclinedOpsFallBackToScan) {
     insert_data.SetFieldDataMeta(field_meta);
     insert_data.SetTimestamps(0, 100);
     auto serialized_bytes = insert_data.Serialize(storage::Remote);
-    auto log_path = fmt::format("{}{}/{}/{}/{}/{}",
-                                TestLocalPath,
+    auto log_path = fmt::format("{}insert_log/fm_index/{}/{}/{}/{}/{}",
+                                storage_config.root_path,
                                 collection_id,
                                 partition_id,
                                 segment_id,
@@ -1194,7 +1194,7 @@ TEST(FMIndex, ExecutorPathMatchRechecksVarchar) {
                                                       false);
     auto index_meta = gen_index_meta(
         segment_id, field_id.get(), index_build_id, index_version);
-    auto storage_config = gen_local_storage_config(TestLocalPath);
+    auto storage_config = get_default_local_storage_config();
     auto cm = CreateChunkManager(storage_config);
     auto fs = storage::InitArrowFileSystem(storage_config);
 
@@ -1235,8 +1235,8 @@ TEST(FMIndex, ExecutorPathMatchRechecksVarchar) {
     insert_data.SetFieldDataMeta(field_meta);
     insert_data.SetTimestamps(0, 100);
     auto serialized_bytes = insert_data.Serialize(storage::Remote);
-    auto log_path = fmt::format("{}{}/{}/{}/{}/{}",
-                                TestLocalPath,
+    auto log_path = fmt::format("{}insert_log/fm_index/{}/{}/{}/{}/{}",
+                                storage_config.root_path,
                                 collection_id,
                                 partition_id,
                                 segment_id,
@@ -1357,9 +1357,8 @@ struct SealedFMMatch {
     FieldId varchar_id;
     FieldId int_id;
     std::unique_ptr<segcore::SegmentSealed> segment;
-    // Owns the insert-log write and keeps TestLocalPath alive until the
-    // loaded segment is destroyed. ChunkManagerWrapper::dtor wipes the
-    // chunk-manager root.
+    // Owns the insert-log write and cleans the remote test root with this
+    // fixture. ChunkManagerWrapper::dtor wipes the chunk-manager root.
     std::unique_ptr<ChunkManagerWrapper> cm_w;
 };
 
@@ -1426,11 +1425,11 @@ LoadSealedFMMatch(int64_t collection_id,
                                                       /*max_length=*/65535);
     auto index_meta = gen_index_meta(
         segment_id, out.varchar_id.get(), index_build_id, index_build_id);
-    auto storage_config = gen_local_storage_config(TestLocalPath);
+    auto storage_config = get_default_local_storage_config();
     auto cm = CreateChunkManager(storage_config);
-    // Same FS handle as ExecutorPathMatchRechecksVarchar. UploadUnified writes
-    // through StorageV2FSCache; AppendIndexV2 reads through the process Arrow
-    // FS. Both are rooted at TestLocalPath, so the packed file is visible.
+    // AppendIndexV2 loads through RemoteChunkManagerSingleton, so build the
+    // index under that singleton's TestRemotePath root as well. TestLocalPath
+    // remains the mmap/local-temp root.
     auto fs = storage::InitArrowFileSystem(storage_config);
     out.cm_w = std::make_unique<ChunkManagerWrapper>(cm);
 
@@ -1482,8 +1481,8 @@ LoadSealedFMMatch(int64_t collection_id,
     insert_data.SetFieldDataMeta(field_meta);
     insert_data.SetTimestamps(0, 100);
     auto serialized_bytes = insert_data.Serialize(storage::Remote);
-    auto log_path = fmt::format("{}{}/{}/{}/{}/{}",
-                                TestLocalPath,
+    auto log_path = fmt::format("{}insert_log/fm_index/{}/{}/{}/{}/{}",
+                                storage_config.root_path,
                                 collection_id,
                                 partition_id,
                                 segment_id,

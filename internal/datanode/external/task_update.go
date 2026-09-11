@@ -42,7 +42,6 @@ package external
 import (
 	"context"
 	"fmt"
-	"path"
 	"sort"
 	"strconv"
 	"strings"
@@ -62,7 +61,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -1059,8 +1057,8 @@ func (t *RefreshExternalCollectionTask) createManifestForSegment(
 ) (string, error) {
 	// All segments now use final paths with real IDs (no temporary paths needed)
 	// Pre-allocated IDs ensure we can write directly to final locations
-	basePath := segmentInsertLogBasePath(
-		t.req.GetStorageConfig(),
+	basePath := storage.SegmentManifestBasePath(
+		t.req.GetStorageConfig().GetRootPath(),
 		t.req.GetCollectionID(),
 		t.req.GetPartitionID(),
 		segmentID,
@@ -1089,19 +1087,6 @@ func (t *RefreshExternalCollectionTask) createManifestForSegment(
 	return manifestPath, nil
 }
 
-func segmentInsertLogBasePath(
-	storageConfig *indexpb.StorageConfig,
-	collectionID int64,
-	partitionID int64,
-	segmentID int64,
-) string {
-	rootPath := ""
-	if storageConfig != nil {
-		rootPath = storageConfig.GetRootPath()
-	}
-	return path.Join(rootPath, common.SegmentInsertLogPath, metautil.JoinIDPath(collectionID, partitionID, segmentID))
-}
-
 // hasFunctions returns true if the schema defines any functions.
 func (t *RefreshExternalCollectionTask) hasFunctions() bool {
 	return len(t.req.GetSchema().GetFunctions()) > 0
@@ -1115,8 +1100,8 @@ func (t *RefreshExternalCollectionTask) createManifestWithFunctions(
 	segmentID int64,
 	fragments []packed.Fragment,
 ) (string, error) {
-	basePath := segmentInsertLogBasePath(
-		t.req.GetStorageConfig(),
+	basePath := storage.SegmentManifestBasePath(
+		t.req.GetStorageConfig().GetRootPath(),
 		t.req.GetCollectionID(),
 		t.req.GetPartitionID(),
 		segmentID,

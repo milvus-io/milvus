@@ -17,12 +17,30 @@
 package paramtable
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/config"
 )
+
+func TestForbiddenParamItemAllowsRuntimeOverride(t *testing.T) {
+	manager := config.NewManager()
+	manager.SetConfig("test.static.path", "initial")
+
+	param := &ParamItem{
+		Key:       "test.static.path",
+		Forbidden: true,
+		Formatter: strings.ToUpper,
+	}
+	param.Init(manager)
+	require.Equal(t, "INITIAL", param.GetValue())
+
+	manager.SetConfig("test.static.path", "runtime")
+	require.Equal(t, "RUNTIME", param.GetValue())
+}
 
 func TestGetWithRaw_FallbackKeyCacheSuccess(t *testing.T) {
 	// When primary key equals DefaultValue and a fallback key has a different value,

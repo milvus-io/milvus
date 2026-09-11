@@ -36,14 +36,32 @@ MakeInternalPropertiesFromStorageConfig(CStorageConfig c_storage_config);
 /**
  * @brief Create Properties for local filesystem storage
  *
- * Creates a minimal Properties object configured for local file storage
- * with the specified path as the root.
+ * Creates a minimal Properties object configured for local file storage.
+ * The filesystem root is "/" because local Milvus keys already include
+ * localStorage.path, so there is no prefix to pass in.
  *
- * @param c_path Local filesystem path to use as storage root
  * @return Shared pointer to Properties configured for local storage
  */
 std::shared_ptr<milvus_storage::api::Properties>
-MakeInternalLocalProperies(const char* c_path);
+MakeInternalLocalProperies();
+
+/**
+ * @brief fs.root_path handed to the loon / Arrow filesystem for a storage
+ * config.
+ *
+ * Milvus keys already carry the storage prefix: localStorage.path for local
+ * (`/var/lib/milvus/data/insert_log/...`) and minio.rootPath for remote
+ * (`files/insert_log/...`). The filesystem therefore has to be rooted at the
+ * namespace root, which is the bucket for remote (milvus-storage never
+ * applies root_path there) and "/" for local. Rooting the local
+ * SubTreeFileSystem at localStorage.path joins the prefix twice
+ * (milvus-storage #351, milvus #53051), making complete keys differ from their
+ * physical locations.
+ */
+inline constexpr const char* kLoonLocalFSRootPath = "/";
+
+std::string
+LoonFSRootPath(const std::string& storage_type, const std::string& root_path);
 
 /**
  * @brief Convert StorageConfig to C-style CStorageConfig

@@ -205,22 +205,23 @@ func (pi *ParamItem) getWithRaw() (result, raw string, err error) {
 	if s := pi.tempValue.Load(); s != nil {
 		return pi.gateValue(*s), *s, nil
 	}
-
 	if pi.manager == nil {
 		panic(fmt.Sprintf("manager is nil %s", pi.Key))
 	}
 	// raw is always the primary key's value, used for CAS comparison.
 	// effectiveRaw is the value actually used for computing result (may come from fallback).
-	_, raw, err = pi.manager.GetConfig(pi.Key)
+	source, raw, err := pi.manager.GetConfig(pi.Key)
 	effectiveRaw := raw
+	effectiveSource := source
 	if err != nil || raw == pi.DefaultValue {
 		// try fallback if the entry is not exist or default value,
 		//  because default value may already defined in milvus.yaml
 		//	and we don't want the fallback keys be overridden.
 		for _, key := range pi.FallbackKeys {
-			var fallbackRaw string
-			_, fallbackRaw, err = pi.manager.GetConfig(key)
+			fallbackSource, fallbackRaw, fallbackErr := pi.manager.GetConfig(key)
+			err = fallbackErr
 			if err == nil {
+				effectiveSource = fallbackSource
 				effectiveRaw = fallbackRaw
 				break
 			}
@@ -230,6 +231,15 @@ func (pi *ParamItem) getWithRaw() (result, raw string, err error) {
 		// use default value
 		effectiveRaw = pi.DefaultValue
 		raw = pi.DefaultValue
+	}
+	// Config sources replace their value before Manager.OnEvent can reject the
+	// change. Keep a forbidden item's formatted startup value when that happens.
+	// RuntimeSource remains an explicit process-local override used by tests and
+	// operational tooling.
+	if pi.Forbidden && effectiveSource != config.RuntimeSource {
+		if initial := pi.lastValue.Load(); initial != nil {
+			return *initial, raw, nil
+		}
 	}
 	result = pi.gateValue(effectiveRaw)
 	if pi.Formatter != nil {

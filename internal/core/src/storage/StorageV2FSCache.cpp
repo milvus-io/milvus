@@ -16,6 +16,7 @@
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/properties.h"
 #include "log/Log.h"
+#include "storage/loon_ffi/util.h"
 
 namespace milvus::storage {
 
@@ -39,7 +40,11 @@ StorageV2FSCache::Get(const Key& key) {
     props[PROPERTY_FS_BUCKET_NAME] = key.bucket_name;
     props[PROPERTY_FS_ACCESS_KEY_ID] = key.access_key_id;
     props[PROPERTY_FS_ACCESS_KEY_VALUE] = key.access_key_value;
-    props[PROPERTY_FS_ROOT_PATH] = key.root_path;
+    // Keys handed to this filesystem already carry the storage prefix, so the
+    // local filesystem is rooted at "/" (remote is rooted at the bucket by
+    // milvus-storage regardless of root_path). See LoonFSRootPath.
+    const auto fs_root_path = LoonFSRootPath(key.storage_type, key.root_path);
+    props[PROPERTY_FS_ROOT_PATH] = fs_root_path;
     props[PROPERTY_FS_STORAGE_TYPE] = key.storage_type;
     props[PROPERTY_FS_CLOUD_PROVIDER] = key.cloud_provider;
     props[PROPERTY_FS_IAM_ENDPOINT] = key.iam_endpoint;
@@ -60,11 +65,12 @@ StorageV2FSCache::Get(const Key& key) {
     props[PROPERTY_FS_USE_CRC32C_CHECKSUM] = key.use_crc32c_checksum;
 
     LOG_INFO(
-        "StorageV2FSCache::Get: address={}, bucket={}, root_path={}, "
-        "storage_type={}",
+        "StorageV2FSCache::Get: address={}, bucket={}, key_prefix={}, "
+        "fs_root_path={}, storage_type={}",
         key.address,
         key.bucket_name,
         key.root_path,
+        fs_root_path,
         key.storage_type);
 
     auto result = milvus_storage::FilesystemCache::getInstance().get(props, "");

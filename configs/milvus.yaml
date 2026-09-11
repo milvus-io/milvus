@@ -87,6 +87,8 @@ tikv:
 
 localStorage:
   # Local path to where vector data are stored during a search or a query to avoid repetitve access to MinIO or S3 service.
+  # Must be an absolute filesystem path. Milvus refuses to start if this value is relative or empty.
+  # Migration of data written using a relative path in older versions is not supported.
   # Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
   # It is recommended to change this parameter before starting Milvus for the first time.
   path: /var/lib/milvus/data/

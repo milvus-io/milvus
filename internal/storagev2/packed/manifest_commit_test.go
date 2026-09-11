@@ -46,7 +46,7 @@ func manifestTestStorageConfig(t *testing.T) *indexpb.StorageConfig {
 // loon transaction (and therefore without bumping the version).
 func TestCommitManifestUpdates_EmptyShortCircuit(t *testing.T) {
 	cfg := manifestTestStorageConfig(t)
-	basePath := "files/commit_empty_test/seg1"
+	basePath := path.Join(cfg.RootPath, "commit_empty_test/seg1")
 
 	cases := []struct {
 		name string
@@ -71,9 +71,9 @@ func TestCommitManifestUpdates_EmptyShortCircuit(t *testing.T) {
 // via a single CommitManifestUpdates call.
 func TestCommitManifestUpdates_StatsOnly(t *testing.T) {
 	cfg := manifestTestStorageConfig(t)
-	basePath := "files/commit_stats_only/seg1"
+	basePath := path.Join(cfg.RootPath, "commit_stats_only/seg1")
 
-	statPath := path.Join(cfg.RootPath, basePath, "_stats/bloom_filter.100/1")
+	statPath := path.Join(basePath, "_stats/bloom_filter.100/1")
 	require.NoError(t, WriteFile(cfg, statPath, []byte("bloom-blob")))
 
 	got, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, &ManifestUpdates{
@@ -98,11 +98,11 @@ func TestCommitManifestUpdates_StatsOnly(t *testing.T) {
 // BM25 memory_size while excluding text/JSON index stats.
 func TestStatsBinlogSizeFromManifest(t *testing.T) {
 	cfg := manifestTestStorageConfig(t)
-	basePath := "files/stats_binlog_size/seg1"
+	basePath := path.Join(cfg.RootPath, "stats_binlog_size/seg1")
 
-	bloomPath := path.Join(cfg.RootPath, basePath, "_stats/bloom_filter.100/1")
-	bm25Path := path.Join(cfg.RootPath, basePath, "_stats/bm25.101/1")
-	textPath := path.Join(cfg.RootPath, basePath, "_stats/text.102/1")
+	bloomPath := path.Join(basePath, "_stats/bloom_filter.100/1")
+	bm25Path := path.Join(basePath, "_stats/bm25.101/1")
+	textPath := path.Join(basePath, "_stats/text.102/1")
 	require.NoError(t, WriteFile(cfg, bloomPath, []byte("bloom-blob")))
 	require.NoError(t, WriteFile(cfg, bm25Path, []byte("bm25-blob")))
 	require.NoError(t, WriteFile(cfg, textPath, []byte("text-blob")))
@@ -132,9 +132,9 @@ func TestStatsBinlogSizeFromManifest_ReadError(t *testing.T) {
 // TestCommitManifestUpdates_DeltaOnly exercises the delta-only path.
 func TestCommitManifestUpdates_DeltaOnly(t *testing.T) {
 	cfg := manifestTestStorageConfig(t)
-	basePath := "files/commit_delta_only/seg1"
+	basePath := path.Join(cfg.RootPath, "commit_delta_only/seg1")
 
-	deltaPath := path.Join(cfg.RootPath, basePath, "_delta/delta-1")
+	deltaPath := path.Join(basePath, "_delta/delta-1")
 	require.NoError(t, WriteFile(cfg, deltaPath, []byte("delta-payload")))
 
 	got, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, &ManifestUpdates{
@@ -156,7 +156,7 @@ func TestCommitManifestUpdates_DeltaOnly(t *testing.T) {
 // bundle.
 func TestCommitManifestUpdates_AllSections(t *testing.T) {
 	cfg := manifestTestStorageConfig(t)
-	basePath := "files/commit_all_sections/seg1"
+	basePath := path.Join(cfg.RootPath, "commit_all_sections/seg1")
 
 	schema := arrow.NewSchema([]arrow.Field{
 		{
@@ -186,9 +186,9 @@ func TestCommitManifestUpdates_AllSections(t *testing.T) {
 	require.NoError(t, err)
 	defer out.Destroy()
 
-	statPath := path.Join(cfg.RootPath, basePath, "_stats/bloom_filter.100/1")
+	statPath := path.Join(basePath, "_stats/bloom_filter.100/1")
 	require.NoError(t, WriteFile(cfg, statPath, []byte("bloom-blob")))
-	deltaPath := path.Join(cfg.RootPath, basePath, "_delta/delta-1")
+	deltaPath := path.Join(basePath, "_delta/delta-1")
 	require.NoError(t, WriteFile(cfg, deltaPath, []byte("delta-payload")))
 
 	got, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, &ManifestUpdates{
@@ -212,7 +212,7 @@ func TestCommitManifestUpdates_AllSections(t *testing.T) {
 // add_column_group (function-backfill) branch in applyManifestUpdates.
 func TestCommitManifestUpdates_AddNewColumnGroups(t *testing.T) {
 	cfg := manifestTestStorageConfig(t)
-	basePath := "files/commit_new_cgs/seg1"
+	basePath := path.Join(cfg.RootPath, "commit_new_cgs/seg1")
 
 	schema := arrow.NewSchema([]arrow.Field{
 		{
@@ -254,7 +254,7 @@ func TestCommitManifestUpdates_AddNewColumnGroups(t *testing.T) {
 
 func TestCommitManifestUpdates_AddEmptyColumnGroup(t *testing.T) {
 	cfg := manifestTestStorageConfig(t)
-	basePath := "files/commit_empty_cg/seg1"
+	basePath := path.Join(cfg.RootPath, "commit_empty_cg/seg1")
 
 	schema := arrow.NewSchema([]arrow.Field{{
 		Name:     "101",
@@ -288,7 +288,7 @@ func TestCommitManifestUpdates_AddEmptyColumnGroup(t *testing.T) {
 // ColumnGroups handle multiple times (and on a nil receiver) is safe.
 func TestColumnGroups_DestroyIdempotent(t *testing.T) {
 	cfg := manifestTestStorageConfig(t)
-	basePath := "files/cg_destroy_test/seg1"
+	basePath := path.Join(cfg.RootPath, "cg_destroy_test/seg1")
 
 	schema := arrow.NewSchema([]arrow.Field{
 		{
@@ -330,7 +330,7 @@ func TestColumnGroups_DestroyIdempotent(t *testing.T) {
 // the close FFI on an exhausted handle.
 func TestFFIPackedWriter_DoubleCloseRejected(t *testing.T) {
 	cfg := manifestTestStorageConfig(t)
-	basePath := "files/ffi_double_close/seg1"
+	basePath := path.Join(cfg.RootPath, "ffi_double_close/seg1")
 
 	schema := arrow.NewSchema([]arrow.Field{
 		{

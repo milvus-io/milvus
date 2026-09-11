@@ -641,7 +641,6 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 		if err != nil {
 			return err
 		}
-
 		// Load collection information asynchronously
 		// HINT: please make sure this is the last step in the `reloadEtcdFn` function !!!
 		go func() {
