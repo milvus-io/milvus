@@ -67,7 +67,7 @@ func TestManifestReadBudgetSharedAndCancellable(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err := m.readManifestIndexes(ctx, "cancelled", nil)
+	_, err := m.readManifestIndexes(ctx, "canceled", nil)
 	require.ErrorIs(t, err, context.Canceled)
 	select {
 	case <-entered:
