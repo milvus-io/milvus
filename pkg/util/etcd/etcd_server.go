@@ -18,10 +18,18 @@ var (
 	initOnce   sync.Once
 	closeOnce  sync.Once
 	etcdServer *embed.Etcd
+	// initError records the singleton's first initialization result. It is a
+	// package-level variable on purpose: sync.Once never re-runs the init
+	// closure, so a later InitEtcdServer call must still observe the failure
+	// (otherwise it would return nil while etcdServer is nil).
+	initError error
 )
 
 // GetEmbedEtcdClient returns client of embed etcd server
 func GetEmbedEtcdClient() (*clientv3.Client, error) {
+	if etcdServer == nil {
+		return nil, merr.WrapErrServiceUnavailableMsg("embedded etcd server is not initialized")
+	}
 	client := v3client.New(etcdServer.Server)
 	return client, nil
 }
@@ -35,7 +43,6 @@ func InitEtcdServer(
 	logLevel string,
 ) error {
 	if useEmbedEtcd {
-		var initError error
 		initOnce.Do(func() {
 			path := configPath
 			var cfg *embed.Config
