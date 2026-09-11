@@ -48,6 +48,7 @@ type l0CompactionTask struct {
 
 	times                *taskcommon.Times
 	committedV3Manifests map[int64]string
+	resource             resourceCache
 }
 
 func (t *l0CompactionTask) GetTaskID() int64 {
@@ -60,6 +61,22 @@ func (t *l0CompactionTask) GetTaskType() taskcommon.Type {
 
 func (t *l0CompactionTask) GetTaskState() taskcommon.State {
 	return taskcommon.FromCompactionState(t.GetTaskProto().GetState())
+}
+
+// GetTaskResource prices an L0 compaction by the delete records it must hold
+// in memory: the delta logs of every input L0 segment.
+func (t *l0CompactionTask) GetTaskResource() taskcommon.Resource {
+	return t.resource.get(func() (taskcommon.Resource, bool) {
+		var deltaSize int64
+		for _, segID := range t.GetTaskProto().GetInputSegments() {
+			segment := t.meta.GetHealthySegment(context.TODO(), segID)
+			if segment == nil {
+				return defaultTaskResource(), false
+			}
+			deltaSize += segment.EnsureStats().GetDeltaBinlogSize()
+		}
+		return l0CompactionTaskResource(deltaSize), true
+	})
 }
 
 func (t *l0CompactionTask) GetTaskSlot() int64 {
@@ -122,7 +139,8 @@ func (t *l0CompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Clus
 		return
 	}
 
-	err = cluster.CreateCompaction(nodeID, plan, t.GetTaskProto().GetCollectionID())
+	resource := t.GetTaskResource()
+	err = cluster.CreateCompaction(nodeID, plan, t.GetTaskProto().GetCollectionID(), resource)
 	if err != nil {
 		originNodeID := t.GetTaskProto().GetNodeID()
 		log.Warn(context.TODO(), "l0CompactionTask failed to notify compaction tasks to DataNode",

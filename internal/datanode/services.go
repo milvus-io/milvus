@@ -51,6 +51,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/tracer"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -248,7 +249,13 @@ func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 
 // CompactionV2 handles compaction request from DataCoord
 // returns status as long as compaction task enqueued or invalid
+// CompactionV2 is the pre-CreateTask entry point. A coordinator reaching it
+// directly carries no resource estimate, so the plan books zero.
 func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPlan) (*commonpb.Status, error) {
+	return node.compactionV2(ctx, req, taskcommon.Resource{})
+}
+
+func (node *DataNode) compactionV2(ctx context.Context, req *datapb.CompactionPlan, resource taskcommon.Resource) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		mlog.Warn(context.TODO(), "DataNode.Compaction failed", mlog.Int64("nodeId", node.GetNodeID()), mlog.Err(err))
 		return merr.Status(err), nil
@@ -376,7 +383,7 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 		return merr.Status(merr.WrapErrServiceInternalMsg("Unknown compaction type: %v", req.GetType().String())), nil
 	}
 
-	succeed, err := node.compactionExecutor.Enqueue(task)
+	succeed, err := node.compactionExecutor.Enqueue(task, resource)
 	if succeed {
 		return merr.Success(), nil
 	} else {
@@ -428,7 +435,13 @@ func (node *DataNode) FlushChannels(ctx context.Context, req *datapb.FlushChanne
 	return merr.Success(), nil
 }
 
+// PreImport is the pre-CreateTask entry point. A coordinator reaching it
+// directly carries no resource estimate, so the task books zero.
 func (node *DataNode) PreImport(ctx context.Context, req *datapb.PreImportRequest) (*commonpb.Status, error) {
+	return node.preImport(ctx, req, taskcommon.Resource{})
+}
+
+func (node *DataNode) preImport(ctx context.Context, req *datapb.PreImportRequest, resource taskcommon.Resource) (*commonpb.Status, error) {
 	mlog.Info(context.TODO(), "datanode receive preimport request")
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
@@ -445,9 +458,9 @@ func (node *DataNode) PreImport(ctx context.Context, req *datapb.PreImportReques
 
 	var task importv2.Task
 	if importutilv2.IsL0Import(req.GetOptions()) {
-		task = importv2.NewL0PreImportTask(req, node.importTaskMgr, cm)
+		task = importv2.NewL0PreImportTask(req, node.importTaskMgr, cm, resource)
 	} else {
-		task = importv2.NewPreImportTask(req, node.importTaskMgr, cm)
+		task = importv2.NewPreImportTask(req, node.importTaskMgr, cm, resource)
 	}
 	node.importTaskMgr.Add(task)
 
@@ -455,7 +468,13 @@ func (node *DataNode) PreImport(ctx context.Context, req *datapb.PreImportReques
 	return merr.Success(), nil
 }
 
+// ImportV2 is the pre-CreateTask entry point. A coordinator reaching it
+// directly carries no resource estimate, so the task books zero.
 func (node *DataNode) ImportV2(ctx context.Context, req *datapb.ImportRequest) (*commonpb.Status, error) {
+	return node.importV2(ctx, req, taskcommon.Resource{})
+}
+
+func (node *DataNode) importV2(ctx context.Context, req *datapb.ImportRequest, resource taskcommon.Resource) (*commonpb.Status, error) {
 	mlog.Info(context.TODO(), "datanode receive import request")
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
@@ -471,9 +490,9 @@ func (node *DataNode) ImportV2(ctx context.Context, req *datapb.ImportRequest) (
 	}
 	var task importv2.Task
 	if importutilv2.IsL0Import(req.GetOptions()) {
-		task = importv2.NewL0ImportTask(req, node.importTaskMgr, node.syncMgr, cm)
+		task = importv2.NewL0ImportTask(req, node.importTaskMgr, node.syncMgr, cm, resource)
 	} else {
-		task = importv2.NewImportTask(req, node.importTaskMgr, node.syncMgr, cm)
+		task = importv2.NewImportTask(req, node.importTaskMgr, node.syncMgr, cm, resource)
 	}
 	node.importTaskMgr.Add(task)
 
@@ -574,7 +593,7 @@ func (node *DataNode) DropImport(ctx context.Context, req *datapb.DropImportRequ
 	return merr.Success(), nil
 }
 
-func (node *DataNode) copySegment(ctx context.Context, req *datapb.CopySegmentRequest, external bool) (*commonpb.Status, error) {
+func (node *DataNode) copySegment(ctx context.Context, req *datapb.CopySegmentRequest, external bool, resource taskcommon.Resource) (*commonpb.Status, error) {
 	// Extract collection ID from first target (all targets should have same collection)
 	var collectionID int64
 	if len(req.GetTargets()) > 0 {
@@ -651,6 +670,7 @@ func (node *DataNode) copySegment(ctx context.Context, req *datapb.CopySegmentRe
 		copier,
 		sourceBucket,
 		targetBucket,
+		resource,
 	)
 	node.importTaskMgr.Add(task)
 
@@ -751,24 +771,83 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 		availableSlots = 0
 	}
 
+	total := nodeTaskCapacity()
+	used := node.taskScheduler.TaskQueue.GetUsingResource().
+		Add(node.compactionExecutor.Resource()).
+		Add(node.importScheduler.Resource())
+	available := total.Sub(used)
+
 	mlog.Info(ctx, "query slots done",
 		mlog.Int64("totalSlots", totalSlots),
 		mlog.Int64("availableSlots", availableSlots),
 		mlog.Int64("indexStatsUsed", indexStatsUsed),
 		mlog.Int64("compactionUsed", compactionUsed),
 		mlog.Int64("importUsed", importUsed),
+		mlog.Stringer("totalResource", total),
+		mlog.Stringer("usedResource", used),
+		mlog.Stringer("availableResource", available),
 	)
 
-	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "available").Set(float64(availableSlots))
-	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "total").Set(float64(totalSlots))
-	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "indexStatsUsed").Set(float64(indexStatsUsed))
-	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "compactionUsed").Set(float64(compactionUsed))
-	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "importUsed").Set(float64(importUsed))
+	nodeID := fmt.Sprint(node.GetNodeID())
+	metrics.DataNodeSlot.WithLabelValues(nodeID, "available").Set(float64(availableSlots))
+	metrics.DataNodeSlot.WithLabelValues(nodeID, "total").Set(float64(totalSlots))
+	metrics.DataNodeSlot.WithLabelValues(nodeID, "indexStatsUsed").Set(float64(indexStatsUsed))
+	metrics.DataNodeSlot.WithLabelValues(nodeID, "compactionUsed").Set(float64(compactionUsed))
+	metrics.DataNodeSlot.WithLabelValues(nodeID, "importUsed").Set(float64(importUsed))
+	metrics.DataNodeTaskResource.WithLabelValues(nodeID, "cpu", "total").Set(float64(total.CPU))
+	metrics.DataNodeTaskResource.WithLabelValues(nodeID, "cpu", "available").Set(float64(available.CPU))
+	metrics.DataNodeTaskResource.WithLabelValues(nodeID, "memory", "total").Set(float64(total.Memory))
+	metrics.DataNodeTaskResource.WithLabelValues(nodeID, "memory", "available").Set(float64(available.Memory))
 
 	return &datapb.QuerySlotResponse{
-		Status:         merr.Success(),
-		AvailableSlots: availableSlots,
+		Status:          merr.Success(),
+		AvailableSlots:  availableSlots,
+		TotalCpu:        total.CPU,
+		AvailableCpu:    available.CPU,
+		TotalMemory:     total.Memory,
+		AvailableMemory: available.Memory,
 	}, nil
+}
+
+// nodeTaskCapacity is what this node offers coordinator-dispatched tasks: the
+// machine (cgroup-aware) in cluster mode, and the same fraction of it the
+// scalar slots already use in standalone mode, where a QueryNode shares the
+// process.
+//
+// The standalone role and the dataNode.standaloneSlotFactor ratio are applied
+// exactly as index.CalculateNodeSlots applies them to the scalar slot total, so
+// the two reports discount the same machine by the same rule. The one
+// difference is the floor: the scalar total and the CPU here are floored at 1,
+// memory is not, because "one byte" is not a meaningful unit of work.
+//
+// The whole cgroup limit is offered, with no headroom reserved. That is an
+// explicit decision for this version rather than an oversight: the unchanged
+// scalar slot gate still binds first, so nothing is admitted that the
+// pre-existing path would have refused. A configurable headroom ratio is a
+// follow-up if the memory filter turns out to refuse too little.
+func nodeTaskCapacity() taskcommon.Resource {
+	total := taskcommon.Resource{
+		CPU:    int64(hardware.GetCPUNum()),
+		Memory: int64(hardware.GetMemoryCount()),
+	}
+	if paramtable.GetRole() == typeutil.StandaloneRole {
+		ratio := paramtable.Get().DataNodeCfg.StandaloneSlotRatio.GetAsFloat()
+		rawMemory := total.Memory
+		total.CPU = max(int64(float64(total.CPU)*ratio), 1)
+		total.Memory = int64(float64(total.Memory) * ratio)
+		if total.Memory <= 0 {
+			// DataCoord reads total_memory <= 0 as "this worker does not report
+			// its ledger" and places the node through the scalar slot heap. A
+			// ratio of zero (or one small enough to round the machine away)
+			// therefore silently opts the node out of memory-aware placement,
+			// which is worth saying out loud.
+			mlog.Warn(context.TODO(),
+				"standalone-discounted memory total is zero; node reports as a scalar-only worker",
+				mlog.Float64("standaloneSlotFactor", ratio),
+				mlog.Int64("rawMemory", rawMemory))
+		}
+	}
+	return total
 }
 
 // Not in used now
@@ -793,6 +872,12 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 	if err != nil {
 		return merr.Status(err), nil
 	}
+	// DataCoord's estimate for this task, carried beside task_slot. Absent from
+	// a coordinator that predates the keys, in which case the worker books zero.
+	resource, err := properties.GetTaskResource()
+	if err != nil {
+		return merr.Status(err), nil
+	}
 	switch taskType {
 	case taskcommon.PreImport:
 		req := &datapb.PreImportRequest{}
@@ -802,7 +887,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
 		}
-		return node.PreImport(ctx, req)
+		return node.preImport(ctx, req, resource)
 	case taskcommon.Import:
 		req := &datapb.ImportRequest{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
@@ -811,7 +896,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
 		}
-		return node.ImportV2(ctx, req)
+		return node.importV2(ctx, req, resource)
 	case taskcommon.Compaction:
 		req := &datapb.CompactionPlan{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
@@ -820,7 +905,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
 		}
-		return node.CompactionV2(ctx, req)
+		return node.compactionV2(ctx, req, resource)
 	case taskcommon.Index:
 		req := &workerpb.CreateJobRequest{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
@@ -829,7 +914,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
 		}
-		return node.createIndexTask(ctx, req)
+		return node.createIndexTask(ctx, req, resource)
 	case taskcommon.Stats:
 		req := &workerpb.CreateStatsRequest{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
@@ -838,7 +923,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
 		}
-		return node.createStatsTask(ctx, req)
+		return node.createStatsTask(ctx, req, resource)
 	case taskcommon.Analyze:
 		req := &workerpb.AnalyzeRequest{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
@@ -847,7 +932,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
 		}
-		return node.createAnalyzeTask(ctx, req)
+		return node.createAnalyzeTask(ctx, req, resource)
 	case taskcommon.RefreshExternalCollection:
 		req := &datapb.RefreshExternalCollectionTaskRequest{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
@@ -871,7 +956,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		// external restores still use the legacy CopySegment task type.
 		external := taskType == taskcommon.ExternalCopySegment ||
 			req.GetExternalSpec() != "" || hasExternalSourceRoot(req.GetSources())
-		return node.copySegment(ctx, req, external)
+		return node.copySegment(ctx, req, external, resource)
 	default:
 		err := merr.Wrapf(merr.ErrServiceUnimplemented,
 			"unrecognized task type '%s', properties=%v", taskType, request.GetProperties())

@@ -246,6 +246,8 @@ func (s *MixCompactionTaskSuite) TestBuildCompactionRequestSchemaVersionGuard() 
 	} {
 		s.Run(test.name, func() {
 			meta := NewMockCompactionMeta(s.T())
+			// Pricing moved to dispatch, so building the plan reads the segment once
+			// for every compaction family.
 			meta.EXPECT().GetHealthySegment(mock.Anything, int64(200)).Return(&SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 				ID:            200,
 				State:         commonpb.SegmentState_Flushed,
