@@ -646,6 +646,7 @@ func RegisterStreamingNode(registry *prometheus.Registry) {
 	// TODO: after remove the implementation of old data node
 	// Such as flowgraph and writebuffer, we can remove these metrics from streaming node.
 	RegisterDataNode(registry)
+	RegisterQV(registry)
 }
 
 // registerWAL registers wal metrics
