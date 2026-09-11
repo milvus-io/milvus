@@ -469,6 +469,13 @@ func (s *mixCoordImpl) AlterCollectionField(ctx context.Context, req *milvuspb.A
 	return s.rootcoordServer.AlterCollectionField(ctx, req)
 }
 
+// CommitShardSplitRouting commits a shard-split routing change into the
+// collection meta; it is a rootcoord DDL, reached here because datacoord calls
+// it through the mixcoord surface.
+func (s *mixCoordImpl) CommitShardSplitRouting(ctx context.Context, req *rootcoordpb.CommitShardSplitRoutingRequest) (*commonpb.Status, error) {
+	return s.rootcoordServer.CommitShardSplitRouting(ctx, req)
+}
+
 func (s *mixCoordImpl) AlterCollectionSchema(ctx context.Context, req *milvuspb.AlterCollectionSchemaRequest) (*milvuspb.AlterCollectionSchemaResponse, error) {
 	return s.rootcoordServer.AlterCollectionSchema(ctx, req)
 }
@@ -1123,6 +1130,17 @@ func (s *mixCoordImpl) GetCompactionStateWithPlans(ctx context.Context, req *mil
 
 func (s *mixCoordImpl) WatchChannels(ctx context.Context, req *datapb.WatchChannelsRequest) (*datapb.WatchChannelsResponse, error) {
 	return s.datacoordServer.WatchChannels(ctx, req)
+}
+
+// CommitShardSplit records a committed shard split in datacoord.
+func (s *mixCoordImpl) CommitShardSplit(ctx context.Context, req *datapb.CommitShardSplitRequest) (*commonpb.Status, error) {
+	return s.datacoordServer.CommitShardSplit(ctx, req)
+}
+
+// CheckShardSplitDrained reports whether a committed shard split's sources
+// still hold data the targets have not taken.
+func (s *mixCoordImpl) CheckShardSplitDrained(ctx context.Context, req *datapb.CheckShardSplitDrainedRequest) (*datapb.CheckShardSplitDrainedResponse, error) {
+	return s.datacoordServer.CheckShardSplitDrained(ctx, req)
 }
 
 func (s *mixCoordImpl) GetFlushState(ctx context.Context, req *datapb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {

@@ -9,6 +9,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -101,13 +102,18 @@ type broadcastTask struct {
 	mlog.Binder
 	*taskMetricsGuard
 
-	mu                       sync.Mutex
-	msg                      message.BroadcastMutableMessage // protected by mu since MarkIgnore may mutate it.
-	task                     *streamingpb.BroadcastTask
-	dirty                    bool // a flag to indicate that the task has been modified and needs to be saved into the recovery info.
-	done                     chan struct{}
-	allAcked                 chan struct{}
-	allAckedClosed           bool
+	mu             sync.Mutex
+	msg            message.BroadcastMutableMessage // protected by mu since MarkIgnore may mutate it.
+	task           *streamingpb.BroadcastTask
+	dirty          bool // a flag to indicate that the task has been modified and needs to be saved into the recovery info.
+	done           chan struct{}
+	allAcked       chan struct{}
+	allAckedClosed bool
+	// vchannelAcked maps a vchannel of THIS broadcast to a channel that is
+	// closed once that vchannel's checkpoint is recorded. Created lazily, only
+	// for the vchannels somebody actually waits on -- a broadcast reaches every
+	// vchannel of a collection and nearly none of them is ever waited for.
+	vchannelAcked            map[string]chan struct{}
 	guards                   *lockGuards
 	ackCallbackScheduler     *ackCallbackScheduler
 	joinAckCallbackScheduled bool // a flag to indicate that the join ack callback is scheduled.
@@ -228,7 +234,7 @@ func (b *broadcastTask) PendingBroadcastMessages() []message.MutableMessage {
 	// filter out the vchannel that has been acked.
 	pendingMessages := make([]message.MutableMessage, 0, len(msgs))
 	for i, msg := range msgs {
-		if b.task.AckedVchannelBitmap[i] != 0 || (b.task.AckedCheckpoints != nil && b.task.AckedCheckpoints[i] != nil) {
+		if isVChannelAcked(b.task, i) {
 			continue
 		}
 		pendingMessages = append(pendingMessages, msg)
@@ -441,6 +447,7 @@ func (b *broadcastTask) copyAndSetAckedCheckpoints(msgs ...message.ImmutableMess
 		}
 		if cp := task.AckedCheckpoints[idx]; cp != nil && cp.TimeTick != 0 {
 			// after proto.Clone, the cp is always not nil, so we also need to check the time tick.
+			// TimeTick == 0 is the not-yet-acked sentinel this function relies on throughout.
 			continue
 		}
 		// the ack result is dirty, so we need to set the dirty flag to true.
@@ -451,6 +458,13 @@ func (b *broadcastTask) copyAndSetAckedCheckpoints(msgs ...message.ImmutableMess
 			LastConfirmedMessageId: msg.LastConfirmedMessageID().IntoProto(),
 			TimeTick:               msg.TimeTick(),
 		}
+		// Release the waiters BEFORE the task is persisted, and deliberately so.
+		// A waiter is asking whether this vchannel's replica is durable in the
+		// WAL, and it is: the ack only exists because the append landed. Saving
+		// the broadcast task is about the BROADCASTER's own recovery, not about
+		// the WAL fact the waiter orders itself by, and a save failure here must
+		// not hold an append-gated replica hostage.
+		b.closeVChannelAcked(vchannel)
 		if funcutil.IsControlChannel(vchannel) {
 			isControlChannelAcked = true
 		}
@@ -458,6 +472,118 @@ func (b *broadcastTask) copyAndSetAckedCheckpoints(msgs ...message.ImmutableMess
 	// update current task state.
 	b.task = task
 	return isControlChannelAcked
+}
+
+// closeVChannelAcked releases everyone blocked on the given vchannel's ack.
+// Must be called with b.mu held; idempotent, since a vchannel is acked once but
+// the map entry outlives that ack.
+func (b *broadcastTask) closeVChannelAcked(vchannel string) {
+	ch, ok := b.vchannelAcked[vchannel]
+	if !ok {
+		return
+	}
+	select {
+	case <-ch:
+	default:
+		close(ch)
+	}
+}
+
+// BlockUntilVChannelAcked blocks until the given vchannel of this broadcast has
+// a recorded ack, the context ends, the broadcaster starts closing, or the
+// vchannel turns out not to belong to this broadcast at all.
+//
+// closing is the broadcaster's shutdown signal; a nil channel means "no such
+// signal", which is what a caller that owns no broadcaster passes. Waiting past
+// shutdown is pointless -- no ack can arrive after it -- and it would keep the
+// broadcaster's lifetime, and with it the whole coord's shutdown, parked.
+//
+// A vchannel outside the broadcast is a Milvus bug rather than a caller mistake:
+// every waiter names vchannels taken from the broadcast header the task itself
+// was built from, so a name that is not in the header means the two disagree
+// about the broadcast's own topology.
+func (b *broadcastTask) BlockUntilVChannelAcked(ctx context.Context, vchannel string, closing <-chan struct{}) error {
+	ch, err := b.vchannelAckedChan(vchannel)
+	if err != nil {
+		return err
+	}
+	if ch == nil {
+		// already acked.
+		return nil
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-closing:
+		return status.NewOnShutdownError(
+			"broadcaster is closing, stop waiting for vchannel %s of broadcast %d", vchannel, b.Header().BroadcastID)
+	case <-ch:
+		return nil
+	}
+}
+
+// UnackedVChannels returns those of the given vchannels that have no recorded
+// ack yet. Reporting only, so a name that is not part of this broadcast is
+// counted as unacked rather than raised here.
+func (b *broadcastTask) UnackedVChannels(vchannels []string) []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	unacked := make([]string, 0, len(vchannels))
+	for _, vchannel := range vchannels {
+		idx := findIdxOfVChannel(vchannel, b.header().VChannels)
+		if idx >= 0 && isVChannelAcked(b.task, idx) {
+			continue
+		}
+		unacked = append(unacked, vchannel)
+	}
+	return unacked
+}
+
+// isVChannelAcked is THE predicate for "this vchannel's replica has landed",
+// shared by every reader of the ack state so they cannot drift apart.
+//
+// Both halves matter. The checkpoint is what the ack path writes today, and
+// TimeTick == 0 is its not-yet-acked sentinel (proto.Clone turns an absent
+// checkpoint into a zero-valued one rather than a nil, so the nil check alone
+// does not decide it). The bitmap is what a task persisted before 2.6.1 carries,
+// with no checkpoint beside it -- reading only the checkpoint would call such a
+// vchannel unacked forever, which for the append gate means a wait that never
+// ends.
+func isVChannelAcked(task *streamingpb.BroadcastTask, idx int) bool {
+	if idx < len(task.AckedVchannelBitmap) && task.AckedVchannelBitmap[idx] != 0 {
+		return true
+	}
+	if idx >= len(task.AckedCheckpoints) {
+		return false
+	}
+	cp := task.AckedCheckpoints[idx]
+	return cp != nil && cp.TimeTick != 0
+}
+
+// vchannelAckedChan returns the channel closed when the vchannel is acked, or a
+// nil channel when it is acked already.
+func (b *broadcastTask) vchannelAckedChan(vchannel string) (chan struct{}, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	idx := findIdxOfVChannel(vchannel, b.header().VChannels)
+	if idx < 0 {
+		return nil, merr.WrapErrServiceInternalMsg(
+			"vchannel %s is not a vchannel of broadcast %d", vchannel, b.header().BroadcastID)
+	}
+	if isVChannelAcked(b.task, idx) {
+		return nil, nil
+	}
+	if b.vchannelAcked == nil {
+		b.vchannelAcked = make(map[string]chan struct{}, 1)
+	}
+	ch, ok := b.vchannelAcked[vchannel]
+	if !ok {
+		ch = make(chan struct{})
+		b.vchannelAcked[vchannel] = ch
+	}
+	return ch, nil
 }
 
 // findIdxOfVChannel finds the index of the vchannel in the broadcast task's
@@ -493,6 +619,30 @@ func (b *broadcastTask) FastAck(ctx context.Context, broadcastResult map[string]
 	msgs := make([]message.ImmutableMessage, 0, len(broadcastResult))
 	for vchannel := range broadcastResult {
 		msgs = append(msgs, b.getImmutableMessageFromVChannel(vchannel, broadcastResult[vchannel]))
+	}
+	return b.ack(ctx, msgs...)
+}
+
+// AckPartial persists the append results of a subset of the broadcast's
+// vchannels without declaring the broadcast done. The broadcaster uses it to
+// land the append-first group durably before it appends the rest, so a restart
+// in between re-appends nothing that already reached the WAL. Never contains the
+// control channel, so it does not schedule the ack callback as long as the
+// control channel is not among the acked vchannels.
+func (b *broadcastTask) AckPartial(ctx context.Context, results map[string]*types.AppendResult) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if b.header().AckSyncUp {
+		panic("broadcast task invariant violated: an AckSyncUp broadcast cannot be partially acked at append time")
+	}
+
+	msgs := make([]message.ImmutableMessage, 0, len(results))
+	for vchannel, result := range results {
+		if funcutil.IsControlChannel(vchannel) {
+			panic("broadcast task invariant violated: the control channel is never acked partially")
+		}
+		msgs = append(msgs, b.getImmutableMessageFromVChannel(vchannel, result))
 	}
 	return b.ack(ctx, msgs...)
 }

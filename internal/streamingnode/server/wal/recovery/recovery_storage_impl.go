@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -74,6 +75,7 @@ func newRecoveryStorage(channel types.PChannelInfo, cp *utility.WALCheckpoint) *
 		persistNotifier:        make(chan struct{}, 1),
 		gracefulClosed:         false,
 		metrics:                newRecoveryStorageMetrics(channel),
+		retiredVChannels:       make(map[string]struct{}),
 	}
 }
 
@@ -101,6 +103,20 @@ type recoveryStorageImpl struct {
 	// pendingSalvageCheckpoint holds the salvage checkpoint captured during force promote.
 	// Set under r.mu; consumed and persisted by the background task to avoid holding the lock.
 	pendingSalvageCheckpoint *utility.ReplicateCheckpoint
+	// retiredVChannels is the set of vchannel names that are SPLITTED and
+	// Retired but not yet removed from vchannels -- still waiting for the
+	// flusher checkpoint to drain past their fence (see
+	// ConsumeDirtyAndGetSnapshot). Populated when ObserveRetire is applied
+	// and on reload from the catalog; an entry is deleted the moment its
+	// vchannel is actually removed from vchannels. Set under r.mu.
+	//
+	// Its sole purpose is to keep the persist gate (see consumeDirtySnapshot)
+	// from staying shut on an otherwise quiet pchannel: UpdateFlusherCheckpoint
+	// is the only signal that the flusher has passed a fence, and it neither
+	// bumps dirtyCounter nor is itself a WAL message, so without this a
+	// retired vchannel could sit collectable forever if nothing else ever
+	// touched the pchannel again.
+	retiredVChannels map[string]struct{}
 }
 
 // Metrics gets the metrics of the wal.
@@ -118,15 +134,53 @@ func (r *recoveryStorageImpl) Metrics() RecoveryMetrics {
 func (r *recoveryStorageImpl) UpdateFlusherCheckpoint(vchannel string, checkpoint *WALCheckpoint) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if vchannelInfo, ok := r.vchannels[vchannel]; ok {
-		if err := vchannelInfo.UpdateFlushCheckpoint(checkpoint); err != nil {
-			r.Logger().Warn(context.TODO(), "failed to update flush checkpoint", mlog.Err(err))
-			return
-		}
-		r.Logger().Info(context.TODO(), "update flush checkpoint", mlog.String("vchannel", vchannel), mlog.String("messageID", checkpoint.MessageID.String()), mlog.Uint64("timeTick", checkpoint.TimeTick))
+	vchannelInfo, ok := r.vchannels[vchannel]
+	if !ok {
+		r.Logger().Warn(context.TODO(), "vchannel not found", mlog.String("vchannel", vchannel))
 		return
 	}
-	r.Logger().Warn(context.TODO(), "vchannel not found", mlog.String("vchannel", vchannel))
+	if err := vchannelInfo.UpdateFlushCheckpoint(checkpoint); err != nil {
+		r.Logger().Warn(context.TODO(), "failed to update flush checkpoint", mlog.Err(err))
+		return
+	}
+	r.Logger().Info(context.TODO(), "update flush checkpoint", mlog.String("vchannel", vchannel), mlog.String("messageID", checkpoint.MessageID.String()), mlog.Uint64("timeTick", checkpoint.TimeTick))
+
+	// A retired SPLITTED vchannel only becomes collectable once the
+	// pchannel-wide minimum flusher checkpoint -- not just this one
+	// vchannel's own -- passes its fence, because that minimum is exactly
+	// what persistDirtySnapshot hands to ConsumeDirtyAndGetSnapshot. This is
+	// the only place that signal ever advances, so wake the persist loop the
+	// moment that minimum crosses any pending retirement's SplitTimeTick,
+	// instead of waiting on unrelated traffic to bump dirtyCounter or on the
+	// next periodic tick.
+	if r.hasCollectableRetiredVChannelLocked() {
+		r.notifyPersist()
+	}
+}
+
+// hasCollectableRetiredVChannelLocked reports whether some pending
+// retirement has now drained: the pchannel-wide minimum flusher checkpoint --
+// the very tick persistDirtySnapshot hands to ConsumeDirtyAndGetSnapshot --
+// has reached its fence, so the next snapshot would actually remove it from
+// the catalog. A retirement that has not drained yet is deliberately NOT
+// collectable: it is nothing the persist loop can act on, and treating it as
+// dirty would spin the graceful-shutdown loop (which persists for as long as
+// isDirty holds) until the timeout.
+// The caller must already hold r.mu.
+func (r *recoveryStorageImpl) hasCollectableRetiredVChannelLocked() bool {
+	if len(r.retiredVChannels) == 0 {
+		return false
+	}
+	minimumCheckpoint := r.getFlusherCheckpointLocked()
+	if minimumCheckpoint == nil {
+		return false
+	}
+	for retiredVChannel := range r.retiredVChannels {
+		if info, ok := r.vchannels[retiredVChannel]; ok && minimumCheckpoint.TimeTick >= info.meta.SplitTimeTick {
+			return true
+		}
+	}
+	return false
 }
 
 // GetSchema gets the schema of the collection at the given timetick.
@@ -182,10 +236,26 @@ func (r *recoveryStorageImpl) notifyPersist() {
 
 // consumeDirtySnapshot consumes the dirty state and returns a snapshot to persist.
 // A snapshot is always a consistent state (fully consume a message or a txn message) of the recovery storage.
-func (r *recoveryStorageImpl) consumeDirtySnapshot() *RecoverySnapshot {
+// flusherCheckpointTimeTick is the tick up to which the flusher has actually
+// drained this pchannel (0 if not yet known); it decides whether a retired
+// SPLITTED vchannel has drained past its fence and can be collected.
+func (r *recoveryStorageImpl) consumeDirtySnapshot(flusherCheckpointTimeTick uint64) *RecoverySnapshot {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.dirtyCounter == 0 && r.pendingSalvageCheckpoint == nil {
+	// A retirement that has DRAINED keeps the gate open even when nothing else
+	// is dirty: it is the only way a retired SPLITTED vchannel, sitting on an
+	// otherwise quiet pchannel, ever gets removed once the flusher checkpoint
+	// independently catches up to its fence (see retiredVChannels and
+	// UpdateFlusherCheckpoint, which notifies the persist loop the moment it
+	// crosses).
+	//
+	// The predicate is the same one isDirty uses, and deliberately so: a
+	// retirement that has NOT drained is nothing this pass can act on --
+	// ConsumeDirtyAndGetSnapshot would leave it exactly where it is -- so
+	// letting it open the gate would write a snapshot carrying nothing but the
+	// checkpoint to the catalog on every persistInterval, for the whole
+	// redistribution window, which is hours.
+	if r.dirtyCounter == 0 && r.pendingSalvageCheckpoint == nil && !r.hasCollectableRetiredVChannelLocked() {
 		return nil
 	}
 
@@ -201,9 +271,12 @@ func (r *recoveryStorageImpl) consumeDirtySnapshot() *RecoverySnapshot {
 		}
 	}
 	for _, vchannel := range r.vchannels {
-		dirtySnapshot, shouldBeRemoved := vchannel.ConsumeDirtyAndGetSnapshot()
+		dirtySnapshot, shouldBeRemoved := vchannel.ConsumeDirtyAndGetSnapshot(flusherCheckpointTimeTick)
 		if shouldBeRemoved {
 			delete(r.vchannels, vchannel.meta.Vchannel)
+			// No-op (and safe) if this vchannel was never a pending
+			// retirement -- e.g. a genuine DROPPED vchannel.
+			delete(r.retiredVChannels, vchannel.meta.Vchannel)
 		}
 		if dirtySnapshot != nil {
 			vchannels[vchannel.meta.Vchannel] = dirtySnapshot
@@ -326,8 +399,8 @@ func (r *recoveryStorageImpl) handleMessage(ctx context.Context, msg message.Imm
 		return
 	}
 
-	if msg.VChannel() != "" && !msg.IsPChannelLevel() && msg.MessageType() != message.MessageTypeCreateCollection &&
-		msg.MessageType() != message.MessageTypeDropCollection && r.vchannels[msg.VChannel()] == nil && !funcutil.IsControlChannel(msg.VChannel()) {
+	if msg.VChannel() != "" && !msg.IsPChannelLevel() && r.vchannels[msg.VChannel()] == nil &&
+		!funcutil.IsControlChannel(msg.VChannel()) && !exemptFromVChannelNotFound(msg) {
 		r.detectInconsistency(ctx, msg, "vchannel not found")
 	}
 
@@ -377,11 +450,80 @@ func (r *recoveryStorageImpl) handleMessage(ctx context.Context, msg message.Imm
 	case message.MessageTypeTruncateCollection:
 		immutableMsg := message.MustAsImmutableTruncateCollectionMessageV2(msg)
 		r.handleTruncateCollection(ctx, immutableMsg)
+	case message.MessageTypeSplitShard:
+		immutableMsg := message.MustAsImmutableSplitShardMessageV2(msg)
+		r.handleSplitShard(ctx, immutableMsg)
 	case message.MessageTypeTimeTick:
 		// nothing, the time tick message make no recovery operation.
 	case message.MessageTypeAlterWAL:
 		immutableMsg := message.MustAsImmutableAlterWALMessageV2(msg)
 		r.handleAlterWAL(ctx, immutableMsg)
+	}
+}
+
+// exemptFromVChannelNotFound lists the messages that may legitimately arrive on
+// a vchannel this recovery storage does not hold: the genesis messages, and the
+// teardowns, whose replay after the meta was dropped is not an inconsistency.
+func exemptFromVChannelNotFound(msg message.ImmutableMessage) bool {
+	switch msg.MessageType() {
+	case message.MessageTypeCreateCollection, message.MessageTypeDropCollection:
+		return true
+	case message.MessageTypeSplitShard:
+		header := message.MustAsImmutableSplitShardMessageV2(msg).Header()
+		return message.SplitShardRoleOf(header, msg.VChannel()) == message.SplitShardRoleTarget
+	case message.MessageTypeAlterCollection:
+		alter := message.MustAsImmutableAlterCollectionMessageV2(msg)
+		return messageutil.RetiresVChannel(alter.Header(), alter.MustBody().GetUpdates(), msg.VChannel())
+	}
+	return false
+}
+
+// handleSplitShard handles the split shard message.
+//
+// A SplitShard broadcast lands on more than one vchannel, and each replica's
+// role -- decided from the header, not from which switch case dispatched it --
+// says what it means here:
+//
+//   - the source replica fences the vchannel: no new DML is appended after it,
+//     so only the vchannel state flips here. The growing segments were already
+//     sealed by the interceptor while the fence was being built (there is no
+//     ManualFlush before it -- this message IS the seal record); flushing them
+//     again keeps the replay idempotent, since a replay can recreate GROWING
+//     segments after the fence was persisted.
+//
+//   - the target replica is the genesis of a new vchannel: it seeds the
+//     vchannel meta exactly as create collection does, so the new vchannel
+//     survives a streamingnode restart.
+//
+// Scoped by vchannel, not by collection: the fenced source is one shard of a
+// collection whose other shards are still taking writes, and flushing those
+// here would seal segments no message asked to seal.
+func (r *recoveryStorageImpl) handleSplitShard(ctx context.Context, msg message.ImmutableSplitShardMessageV2) {
+	switch message.SplitShardRoleOf(msg.Header(), msg.VChannel()) {
+	case message.SplitShardRoleSource:
+		r.flushAllSegmentOfVChannel(ctx, msg)
+		if vchannelInfo, ok := r.vchannels[msg.VChannel()]; ok {
+			vchannelInfo.ObserveSplitShard(msg)
+		}
+		r.Logger().Info(ctx, "split shard", mlog.FieldMessage(msg))
+	case message.SplitShardRoleTarget:
+		if _, ok := r.vchannels[msg.VChannel()]; ok {
+			return
+		}
+		r.vchannels[msg.VChannel()] = newVChannelRecoveryInfoFromSplitShardMessage(msg)
+		r.Logger().Info(ctx, "create vchannel from split shard genesis", mlog.FieldMessage(msg))
+	case message.SplitShardRoleBystander:
+		// The broadcast now covers every vchannel of the collection, so a
+		// bystander shard -- neither fenced nor created by this split -- is
+		// expected to receive a replica. It takes no recovery-storage action:
+		// nothing about its own vchannel meta changes, and this is not a
+		// misroute worth reporting.
+	default:
+		// A replica landing on a vchannel that is neither a source, a target
+		// nor even the same collection is a misroute, symmetric with the
+		// source and target arms above: report it instead of silently doing
+		// nothing.
+		r.detectInconsistency(ctx, msg, "split shard replica of unknown role")
 	}
 }
 
@@ -517,6 +659,26 @@ func (r *recoveryStorageImpl) handleCreateCollection(ctx context.Context, msg me
 	r.Logger().Info(ctx, "create collection", mlog.FieldMessage(msg))
 }
 
+// flushAllSegmentOfVChannel flushes every segment sitting on one vchannel.
+//
+// Scoped by InsertChannel rather than by collection: a reclaimed vchannel is
+// one shard of a collection that is still very much alive, and flushing the
+// collection's other shards here would be wrong.
+func (r *recoveryStorageImpl) flushAllSegmentOfVChannel(ctx context.Context, msg message.ImmutableMessage) {
+	segmentIDs := make([]int64, 0)
+	for _, segment := range r.segments {
+		if segment.meta.GetVchannel() != msg.VChannel() {
+			continue
+		}
+		segment.ObserveFlush(msg.TimeTick())
+		segmentIDs = append(segmentIDs, segment.meta.SegmentId)
+	}
+	if len(segmentIDs) > 0 {
+		r.Logger().Info(ctx, "flush all segments of vchannel", mlog.FieldMessage(msg),
+			mlog.Int64s("segmentIDs", segmentIDs))
+	}
+}
+
 // handleDropCollection handles the drop collection message.
 func (r *recoveryStorageImpl) handleDropCollection(ctx context.Context, msg message.ImmutableDropCollectionMessageV1) {
 	// Always flush first: during WAL replay, CreateSegment/Insert messages may have recreated
@@ -605,7 +767,32 @@ func (r *recoveryStorageImpl) handleSchemaChange(ctx context.Context, msg messag
 }
 
 // handlePutCollection handles the put collection message.
+//
+// A retiring replica -- a shard-split routing commit that delists this
+// vchannel -- marks the vchannel retired, not dropped: unlike
+// handleDropCollection's teardown, there is no flush here and the state
+// never moves to DROPPED. The vchannel was already fenced (SPLITTED) and had
+// its segments flushed by the earlier SplitShard broadcast, so there is
+// nothing left to flush by the time a retire lands; the source is left
+// SPLITTED so it can never be picked up by dropAllVirtualChannel and
+// mistakenly reported to DataCoord as dropped. ConsumeDirtyAndGetSnapshot is
+// what later collects the meta from the catalog, once the flusher checkpoint
+// proves the fence has fully drained.
 func (r *recoveryStorageImpl) handleAlterCollection(ctx context.Context, msg message.ImmutableAlterCollectionMessageV2) {
+	if messageutil.RetiresVChannel(msg.Header(), msg.MustBody().GetUpdates(), msg.VChannel()) {
+		if vchannelInfo, ok := r.vchannels[msg.VChannel()]; ok {
+			vchannelInfo.ObserveRetire(msg.TimeTick())
+			if vchannelInfo.meta.State == streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED && vchannelInfo.meta.Retired {
+				// Track it so the persist gate (consumeDirtySnapshot) keeps
+				// re-checking removability even if nothing else ever
+				// touches this pchannel again -- see retiredVChannels.
+				r.retiredVChannels[msg.VChannel()] = struct{}{}
+			}
+		}
+		r.Logger().Info(ctx, "retire vchannel", mlog.FieldMessage(msg))
+		return
+	}
+
 	// when put collection happens, we need to flush all segments in the collection.
 	segments := make(map[int64]struct{}, len(msg.Header().FlushedSegmentIds))
 	for _, segmentID := range msg.Header().FlushedSegmentIds {
@@ -669,7 +856,12 @@ func (r *recoveryStorageImpl) GetFlusherCheckpointByTimeTick(ctx context.Context
 func (r *recoveryStorageImpl) getFlusherCheckpoint() *WALCheckpoint {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.getFlusherCheckpointLocked()
+}
 
+// getFlusherCheckpointLocked is the lock-free core of getFlusherCheckpoint.
+// The caller must already hold r.mu.
+func (r *recoveryStorageImpl) getFlusherCheckpointLocked() *WALCheckpoint {
 	var minimumCheckpoint *WALCheckpoint
 	for _, vchannel := range r.vchannels {
 		if vchannel.GetFlushCheckpoint() == nil {

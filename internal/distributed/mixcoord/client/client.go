@@ -335,6 +335,21 @@ func (c *Client) AlterCollection(ctx context.Context, request *milvuspb.AlterCol
 	})
 }
 
+// CommitShardSplitRouting commits a shard-split routing change into the
+// collection meta. It carries the ADOPTION of a split's targets -- the commit
+// that delists the drained sources -- and not the write switch, whose routing
+// commit travels in the SplitShard broadcast's body instead.
+func (c *Client) CommitShardSplitRouting(ctx context.Context, request *rootcoordpb.CommitShardSplitRoutingRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	request = typeutil.Clone(request)
+	commonpbutil.UpdateMsgBase(
+		request.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
+		return client.CommitShardSplitRouting(ctx, request)
+	})
+}
+
 func (c *Client) AlterCollectionField(ctx context.Context, request *milvuspb.AlterCollectionFieldRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	request = typeutil.Clone(request)
 	commonpbutil.UpdateMsgBase(
@@ -1245,6 +1260,20 @@ func (c *Client) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.
 func (c *Client) WatchChannels(ctx context.Context, req *datapb.WatchChannelsRequest, opts ...grpc.CallOption) (*datapb.WatchChannelsResponse, error) {
 	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*datapb.WatchChannelsResponse, error) {
 		return client.WatchChannels(ctx, req)
+	})
+}
+
+// CommitShardSplit records a committed shard split in datacoord.
+func (c *Client) CommitShardSplit(ctx context.Context, req *datapb.CommitShardSplitRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
+		return client.CommitShardSplit(ctx, req)
+	})
+}
+
+// CheckShardSplitDrained reports whether a committed shard split's sources are drained.
+func (c *Client) CheckShardSplitDrained(ctx context.Context, req *datapb.CheckShardSplitDrainedRequest, opts ...grpc.CallOption) (*datapb.CheckShardSplitDrainedResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*datapb.CheckShardSplitDrainedResponse, error) {
+		return client.CheckShardSplitDrained(ctx, req)
 	})
 }
 

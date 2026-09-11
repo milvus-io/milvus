@@ -15,10 +15,11 @@ func newBroadcastHeaderFromProto(proto *messagespb.BroadcastHeader) *BroadcastHe
 		rks.Insert(NewResourceKeyFromProto(key))
 	}
 	return &BroadcastHeader{
-		BroadcastID:  proto.GetBroadcastId(),
-		VChannels:    proto.GetVchannels(),
-		ResourceKeys: rks,
-		AckSyncUp:    proto.GetAckSyncUp(),
+		BroadcastID:          proto.GetBroadcastId(),
+		VChannels:            proto.GetVchannels(),
+		ResourceKeys:         rks,
+		AckSyncUp:            proto.GetAckSyncUp(),
+		AppendFirstVChannels: proto.GetAppendFirstVchannels(),
 	}
 }
 
@@ -27,6 +28,9 @@ type BroadcastHeader struct {
 	VChannels    []string
 	ResourceKeys typeutil.Set[ResourceKey]
 	AckSyncUp    bool
+	// AppendFirstVChannels names the vchannels the broadcaster appends and
+	// persists before any other replica of the broadcast.
+	AppendFirstVChannels []string
 }
 
 // BroadcastResult is the result of broadcast operation.

@@ -55,6 +55,16 @@ func (r *recoveryStorageImpl) recoverRecoveryInfoFromMeta(ctx context.Context, c
 			return struct{}{}, errors.Wrap(err, "failed to get vchannel from catalog")
 		}
 		r.vchannels = newVChannelRecoveryInfoFromVChannelMeta(vchannels)
+		// A vchannel can be reloaded already SPLITTED and Retired (the
+		// routing commit that retired it was persisted before a restart);
+		// re-seed retiredVChannels so the persist gate keeps re-checking its
+		// removability even if the flusher checkpoint had already passed
+		// its fence before this streamingnode ever came back up.
+		for name, info := range r.vchannels {
+			if info.meta.State == streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED && info.meta.Retired {
+				r.retiredVChannels[name] = struct{}{}
+			}
+		}
 		r.Logger().Info(ctx, "recovery vchannel info done", mlog.Int("vchannels", len(r.vchannels)))
 		return struct{}{}, nil
 	})

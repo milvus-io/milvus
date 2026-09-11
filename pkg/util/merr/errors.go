@@ -85,6 +85,11 @@ var (
 	// ErrCollectionPartialUpdateConflict prevents clients from automatically
 	// replaying non-idempotent relative updates after a CAS rejection.
 	ErrCollectionPartialUpdateConflict = newMilvusError("partial update conflict", 111, false)
+	// Retriable on purpose: the caller's routing snapshot disagrees with the one
+	// the request's channel set came from, which is a real state while a shard
+	// split commits its routing. Refetching the collection meta resolves it, so
+	// this must not reach a retry consumer as terminal.
+	ErrCollectionRoutingStale = newMilvusError("collection routing is stale", 112, true)
 
 	// Partition related
 	ErrPartitionNotFound       = newMilvusError("partition not found", 200, false) // SystemError by default; the proxy GetPartitionInfo name chokepoint stamps InputError for user-supplied partition names, while id-based lookups stay system.

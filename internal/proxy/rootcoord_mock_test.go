@@ -1224,6 +1224,10 @@ func (coord *MixCoordMock) AlterCollection(ctx context.Context, request *milvusp
 	return &commonpb.Status{}, nil
 }
 
+func (coord *MixCoordMock) CommitShardSplitRouting(ctx context.Context, request *rootcoordpb.CommitShardSplitRoutingRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, nil
+}
+
 func (coord *MixCoordMock) AlterCollectionField(ctx context.Context, request *milvuspb.AlterCollectionFieldRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, nil
 }
@@ -1382,6 +1386,14 @@ func (coord *MixCoordMock) GetCompactionStateWithPlans(ctx context.Context, req 
 
 func (coord *MixCoordMock) WatchChannels(ctx context.Context, req *datapb.WatchChannelsRequest, opts ...grpc.CallOption) (*datapb.WatchChannelsResponse, error) {
 	return &datapb.WatchChannelsResponse{}, nil
+}
+
+func (coord *MixCoordMock) CommitShardSplit(ctx context.Context, req *datapb.CommitShardSplitRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return merr.Success(), nil
+}
+
+func (coord *MixCoordMock) CheckShardSplitDrained(ctx context.Context, req *datapb.CheckShardSplitDrainedRequest, opts ...grpc.CallOption) (*datapb.CheckShardSplitDrainedResponse, error) {
+	return &datapb.CheckShardSplitDrainedResponse{Status: merr.Success()}, nil
 }
 
 func (coord *MixCoordMock) GetFlushState(ctx context.Context, req *datapb.GetFlushStateRequest, opts ...grpc.CallOption) (*milvuspb.GetFlushStateResponse, error) {

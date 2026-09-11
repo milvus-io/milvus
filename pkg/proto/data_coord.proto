@@ -132,6 +132,12 @@ service DataCoord {
   rpc CommitImport(CommitImportRequest)                 returns (common.Status) {}
   rpc AbortImport(AbortImportRequest)                   returns (common.Status) {}
   rpc HandleCommitVchannel(HandleCommitVchannelRequest) returns (common.Status) {}
+
+  // Shard split RPCs -- internal only. CommitShardSplit is the datacoord half
+  // of the SplitShard broadcast ack callback; CheckShardSplitDrained answers
+  // whether the split's sources still hold data the targets have not taken.
+  rpc CommitShardSplit(CommitShardSplitRequest) returns (common.Status) {}
+  rpc CheckShardSplitDrained(CheckShardSplitDrainedRequest) returns (CheckShardSplitDrainedResponse) {}
 }
 
 service DataNode {
@@ -2097,4 +2103,145 @@ message GetExportSnapshotStateRequest {
 message GetExportSnapshotStateResponse {
   common.Status status = 1;
   ExportSnapshotJobInfo info = 2;
+}
+
+// SplitShardTaskState is the state of a shard split task.
+// The task rolls forward only: before the fence (Preparing) it can be
+// aborted, after the fence it can only advance.
+enum SplitShardTaskState {
+  SplitShardTaskUnknown        = 0;
+  SplitShardTaskPreparing      = 1; // target shards allocated, before the write fence; abortable.
+  SplitShardTaskFencing        = 2; // appending the SplitShard broadcast; its source replica is the fence.
+  SplitShardTaskRedistributing = 3; // window: targets initialized, the source data is being moved.
+  SplitShardTaskAdopting       = 4; // every segment redistributed, waiting for the adoption of the target shards.
+  SplitShardTaskDone           = 5;
+  SplitShardTaskAborted        = 6;
+}
+
+// SplitShardTaskTarget is one target shard of a shard split task.
+message SplitShardTaskTarget {
+  string vchannel          = 1;
+  // The routing residues this target owns, taken against the modulus of the
+  // message carrying it (SplitShardTask.routing_modulus). The targets of one
+  // task tile the sources' key space exactly.
+  repeated uint64 buckets  = 2;
+  // The target vchannel's consume start position is intentionally not persisted
+  // here: a split target is an ordinary vchannel, so its genesis checkpoint is
+  // recorded in the datacoord channel-checkpoint store, exactly like any other
+  // vchannel. The child delegators read it back through the normal
+  // GetRecoveryInfoV2 seek path.
+}
+
+// SplitShardRedistribution names how a split moves the source data into its
+// targets. It is the ONE thing that differs between the two kinds of split;
+// everything else in the task -- the fence, the target genesis, the routing
+// commit, the adoption, the abort rule -- is shared.
+enum SplitShardRedistribution {
+  SplitShardRedistributionUnknown = 0;
+  // Relabel: a namespace's data lives wholly inside one shard, so a segment
+  // moves to its target by changing which vchannel owns it. No data is read.
+  SplitShardRelabel               = 1;
+  // Rewrite: a hash-routed shard's segments straddle every split boundary, so
+  // each is read and repartitioned into one output per target.
+  SplitShardRewrite               = 2;
+}
+
+// SplitShardTaskSource is one source shard of a split, with the state that is
+// inherently per-source: its own fence time tick and its own remaining work.
+//
+// A list rather than a single vchannel because a split does not always have one
+// source: a size-triggered split of either kind has exactly one, but a rehash to
+// an arbitrary shard count makes every shard of the collection a source, each
+// fenced by its own independently sequenced message.
+message SplitShardTaskSource {
+  string vchannel = 1;
+  // T_switch for THIS source: the time tick of its own SplitShard fence, zero
+  // until the fence lands. Each source is fenced separately, so there is no
+  // single collection-wide T_switch. The targets need no barrier to clear it:
+  // every source replica is appended and persisted before any target replica
+  // is, and the targets take a fresh TSO batch, so a target's first tick is
+  // necessarily above the MAXIMUM over all sources.
+  //
+  // A non-zero value here is also the evidence the routing commit checks: a
+  // source may only be retired once its fence is recorded, which is what
+  // enforces that the routing never flips while a source still accepts writes
+  // for keys the targets have already claimed.
+  uint64 switch_time_tick = 2;
+  // Segments of this source whose data has not yet reached the targets. Drives
+  // the redistribution rounds and makes a restart resume where it left off.
+  repeated int64 pending_segments = 3;
+}
+
+// SplitShardTask is the persisted state of a shard split task. One task type
+// covers both kinds of split: they share every phase but the redistribution,
+// which `redistribution` selects.
+message SplitShardTask {
+  // 3 and 10 were the singular source_vchannel and switch_time_tick of the
+  // one-source-at-a-time task; they are per-source and live in `sources` now.
+  reserved 3, 10;
+  reserved "source_vchannel", "switch_time_tick";
+
+  int64  task_id                       = 1;
+  int64  collection_id                 = 2;
+  repeated SplitShardTaskTarget targets = 4;
+  SplitShardTaskState state            = 5;
+  // fenced is set once the SplitShard fence has been appended to the source
+  // vchannel (the append succeeded or returned already-fenced). A fenced task
+  // is forward-only and can no longer be aborted.
+  bool fenced                          = 6;
+  uint64 start_time                    = 7; // unix seconds.
+  uint64 end_time                      = 8; // unix seconds.
+  string fail_reason                   = 9;
+  // Compaction plans dispatched but not yet confirmed committed. Only a
+  // rewriting split uses them; on restart they are re-checked (and re-dispatched
+  // if lost), and because a rewrite is deterministic in its inputs a
+  // re-dispatch reproduces the same outputs, leaving a dead plan's partial
+  // outputs to be collected as ordinary failed-compaction garbage.
+  repeated int64 dispatched_plan_ids   = 11;
+  // The source shards being split, each with its own fence tick and remaining
+  // work.
+  repeated SplitShardTaskSource sources = 12;
+  // How this task moves the source data.
+  SplitShardRedistribution redistribution = 13;
+  // The collection's routing modulus AFTER this split, which the targets'
+  // residues are taken against. It differs from the collection's current
+  // modulus only when the split had to double it, and it is recorded rather
+  // than recomputed so a retry of the routing commit reproduces the same
+  // topology.
+  uint64 routing_modulus = 14;
+}
+
+// CommitShardSplitRequest is the datacoord half of the SplitShard broadcast ack
+// callback. Every replica's coordinator receives it, so it must be idempotent
+// by split_task_id: the primary already holds the task, a secondary does not
+// and creates it here.
+message CommitShardSplitRequest {
+  common.MsgBase base = 1;
+  int64 collection_id = 2;
+  int64 split_task_id = 3;
+  // The source shards with the T_switch each one's fence actually landed on,
+  // taken from the broadcast append result. The request's value is the
+  // authority: it is what the write path fenced on.
+  repeated SplitShardTaskSource sources = 4;
+  // The target shards with the residues they own.
+  repeated SplitShardTaskTarget targets = 5;
+  // Each target vchannel's genesis position, parallel to nothing -- matched to
+  // its target by ChannelName. Seeded as the target's first channel checkpoint
+  // unless the target already has one.
+  repeated msg.MsgPosition target_start_positions = 6;
+  // The collection's routing modulus AFTER this split.
+  uint64 routing_modulus = 7;
+}
+
+// CheckShardSplitDrainedRequest asks whether the split's sources still hold
+// anything the targets have not taken.
+message CheckShardSplitDrainedRequest {
+  common.MsgBase base = 1;
+  int64 collection_id = 2;
+  int64 split_task_id = 3;
+}
+
+message CheckShardSplitDrainedResponse {
+  common.Status status = 1;
+  bool drained = 2;
 }

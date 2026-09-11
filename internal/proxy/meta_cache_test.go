@@ -669,6 +669,16 @@ func (c *MockMixCoordClientInterface) WatchChannels(ctx context.Context, req *da
 	panic("implement me")
 }
 
+// CommitShardSplit records a committed shard split in datacoord.
+func (c *MockMixCoordClientInterface) CommitShardSplit(ctx context.Context, req *datapb.CommitShardSplitRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
+// CheckShardSplitDrained reports whether a committed shard split's sources are drained.
+func (c *MockMixCoordClientInterface) CheckShardSplitDrained(ctx context.Context, req *datapb.CheckShardSplitDrainedRequest, opts ...grpc.CallOption) (*datapb.CheckShardSplitDrainedResponse, error) {
+	panic("implement me")
+}
+
 // GetFlushState gets the flush state of the collection based on the provided flush ts and segment IDs.
 func (c *MockMixCoordClientInterface) GetFlushState(ctx context.Context, req *datapb.GetFlushStateRequest, opts ...grpc.CallOption) (*milvuspb.GetFlushStateResponse, error) {
 	panic("implement me")

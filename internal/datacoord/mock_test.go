@@ -379,6 +379,10 @@ func (m *mockMixCoord) AlterCollection(ctx context.Context, request *milvuspb.Al
 	panic("not implemented") // TODO: Implement
 }
 
+func (m *mockMixCoord) CommitShardSplitRouting(ctx context.Context, request *rootcoordpb.CommitShardSplitRoutingRequest) (*commonpb.Status, error) {
+	panic("not implemented") // TODO: Implement
+}
+
 func (m *mockMixCoord) AlterCollectionField(ctx context.Context, request *milvuspb.AlterCollectionFieldRequest) (*commonpb.Status, error) {
 	panic("not implemented") // TODO: Implement
 }
@@ -896,6 +900,14 @@ func (s *mockMixCoord) GetCompactionStateWithPlans(ctx context.Context, req *mil
 }
 
 func (s *mockMixCoord) WatchChannels(ctx context.Context, req *datapb.WatchChannelsRequest) (*datapb.WatchChannelsResponse, error) {
+	panic("implement me")
+}
+
+func (s *mockMixCoord) CommitShardSplit(ctx context.Context, req *datapb.CommitShardSplitRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
+func (s *mockMixCoord) CheckShardSplitDrained(ctx context.Context, req *datapb.CheckShardSplitDrainedRequest) (*datapb.CheckShardSplitDrainedResponse, error) {
 	panic("implement me")
 }
 

@@ -30,7 +30,8 @@ This design adds **online shard split** for namespace-enabled (multi-tenant)
 collections: a loaded shard is split into two shards without stopping reads
 or writes, with **zero data rewrite** — segments only need to be relabeled
 to their new shard, because every segment belongs to exactly one partition
-(namespace) and the split point always falls on a namespace boundary.
+(namespace) and a namespace has a single routing value, so a split never
+divides one.
 
 **Prerequisite.** Current master implements namespaces as a hidden VarChar
 partition-key field with isolation (`handleNamespaceField`,
@@ -41,7 +42,7 @@ yet. This design **depends on the in-progress namespace(=partition) work**
 delivering exactly those guarantees (every segment belongs to one
 namespace; L0 segments are namespace-scoped). Without them, the
 zero-data-rewrite relabel argument does not hold for segments containing
-multiple namespaces that straddle the split key.
+multiple namespaces that straddle the split.
 
 ### 1.2 Goals
 
@@ -85,27 +86,97 @@ The following properties of the current system shape the design:
 
 ## 3. Routing Design
 
-### 3.1 Range routing
+### 3.1 Residue routing
 
-A shard owns a contiguous range `[lower, upper)` of a byte-comparable
-routing-key space. For a namespace collection the routing key is
+A collection carries one **routing modulus** M, and each shard owns a set of
+**residues** modulo M. The sets partition `[0, M)`, so placement is a single
+array index:
 
 ```
-routing_key = big_endian(hash(namespace)) || namespace_utf8
+routing_value = hash(<the field shard_by names>)
+route(row)    = slots[routing_value % M]
 ```
 
-The hash prefix spreads namespaces uniformly to avoid hotspots; appending
-the original value makes the key unique and deterministic per namespace,
-and big-endian encoding keeps byte order equal to logical order. Lookup is
-a binary search over the shard ranges, `O(log #shards)`.
+`shard_by` names what is hashed: `hash($namespace_id)` for a namespace
+collection, the primary key otherwise. It says nothing about placement —
+`hash(pk)` does **not** mean `hash(pk) % shardNum`, which stops holding the
+moment a collection is split.
 
-A split picks a split key on a namespace boundary (chosen from per-namespace
-size statistics so the two halves are balanced) and divides one range into
-two. A single oversized namespace can be isolated into a dedicated shard
-(its range degenerates to a single key prefix).
+**Admission precondition for `hash($namespace_id)`.** The namespace routing
+key is only valid for a collection whose rows have ALWAYS been placed by it,
+and on master that is one build-time configuration, not every namespace
+collection. The proxy places a row by namespace only when
+`namespace.sharding.enabled=true` **and** `namespace.mode=partition_key`
+(`namespacePartitionKeyModeEnabled`, consulted by insert directly and by delete
+and upsert through `namespaceShardingChannelID`). `sharding.enabled` is written
+as `false` at create time unless the request sets it, and a `partition`-mode
+collection is always placed by `hash(pk)`. So the default namespace collection
+has every existing row spread over all shards by primary key. Back-filling
+`shard_by = hash($namespace_id)` onto such a collection at its first split would
+send a namespace's NEW rows to one shard while its existing rows stay
+everywhere, and a delete routed by the namespace hash would reach one shard and
+silently miss the rest; the zero-rewrite relabel argument above rests on the
+same premise. Both properties are immutable after creation
+(`ValidateNamespaceShardingEnabledNotAltered`, `validateNamespaceModeImmutable`),
+so "placement history equals the current rule" is decidable from the
+collection's own properties. The routing commit MUST check them before
+accepting a `hash($namespace_id)` back-fill; any other namespace collection
+splits under `hash(pk)` or is refused.
 
-Collections that do not enable namespaces keep the existing
-`hash(pk) % shardNum` routing unchanged.
+**Representation cost.** A shard's residues are stored as an explicit list,
+and that list is `O(M)`, not `O(shards)`. Every shard starts with a single
+residue, so a collection's FIRST split always doubles the modulus, and each
+later doubling re-expresses every untouched shard's list at the new modulus --
+doubling its length. At the cap, `M = 2^15`, the lists total 32,768 `uint64`s
+carried in the collection meta and in every `DescribeCollectionResponse`,
+including the ones SDK users receive. Accepted because a residue list is the
+only shape that makes the tiling check a set operation, the cap bounds the
+worst case at a few hundred kilobytes, and reaching it takes as many
+consecutive doublings as fit under the cap from the collection's initial
+shard count (fifteen from one shard, thirteen from three, since M starts at
+that count and only ever doubles); a compressed
+representation (ranges of residues) is a later optimization the wire format
+does not preclude.
+
+M is not the shard count. A never-split N-shard collection is M = N with one
+residue per shard, which is the legacy `hash % N` placement bit for bit —
+not a second code path, just a residue table built from the channel order.
+
+A split halves one shard by dividing its residue set in two, and **M does not
+move**; that is the common case. Only a shard down to a single residue `r`
+has nothing left to divide: M doubles and `r` becomes `{r}` and `{r+M}`, the
+same value space cut on one more hash bit. A doubling is collection-wide, so
+every untouched shard is first re-expressed at the new modulus, and both
+halves land in the one atomic meta update that commits the split.
+
+Lookup is an array index, `O(1)`. Deriving the table validates that the
+residue sets tile `[0, M)` exactly: a gap (some value routes nowhere) or an
+overlap (some value routes to two shards) is rejected, so malformed routing
+meta fails loudly instead of silently mis-placing writes.
+
+**Zero data rewrite still holds.** A namespace has exactly one routing value,
+so it falls in exactly one residue, and neither dividing a residue set nor
+doubling the modulus can put one namespace on both sides. A segment, which
+belongs to one namespace, therefore belongs to exactly one of the two halves
+and only needs relabeling.
+
+**What this model gives up.** An earlier revision of this design routed by
+byte-comparable `[lower, upper)` ranges over
+`big_endian(hash(namespace)) || namespace_utf8`, which let a split choose its
+key from per-namespace size statistics and carve a single oversized namespace
+into a dedicated shard. Residues cannot express that: the smallest unit is a
+residue, which holds many namespaces, and a doubling cuts on a hash bit
+rather than by size — so balancing is statistical, exact over residues and
+only in expectation over namespaces. **Isolating a named tenant into its own
+shard is therefore out of scope for this design**; it needs a second
+placement scheme, which is why `CollectionShardInfo.routing` is a `oneof`
+with room for one. What residues buy in exchange is a write path that is a
+single array index over a value the split's rewrite partitioner computes
+identically, and a "the shards tile the key space" invariant that is checked
+before a split commits rather than argued about.
+
+Collections that do not enable namespaces are unaffected until they are
+split, and split by the same model over `hash(pk)`.
 
 ### 3.2 Metadata
 
@@ -113,22 +184,32 @@ The collection meta is already the authoritative source of the vchannel
 list, so the shard routing facts live next to it and are updated in the
 same transaction:
 
-- `etcdpb.CollectionShardInfo` (parallel to `virtual_channel_names`) gains
-  a `ShardState` (`Normal / Creating / Splitting / Dropped`) and a routing
-  predicate carried as a `oneof`: `RangeRouting` — a *list* of
-  byte-comparable `[lower, upper)` ranges — or `HashRouting` — a list of
-  hash buckets (reserved for hash-table split). A shard owns a *list* of
-  pieces, not a single contiguous range, so it can hold multiple disjoint
-  ranges: this is required to carve a hot tenant out of the middle of a
-  shard (leaving the cold remainder as two ranges), and symmetrically to
-  merge non-buddy hash shards. The flat single `lower/upper` form cannot
-  express that. (Defined in milvus-proto #618; `model.ShardInfo` mirrors it.)
-- `etcdpb.CollectionInfo` gains `routing_mode` (`Hash` for legacy
-  collections, `Range` for namespace collections subject to split).
-
-All new fields default to legacy-compatible zero values, so existing
-collections are unaffected. The in-memory routing table is *derived* from
-the collection meta; it is not persisted separately.
+- `schema.CollectionShardInfo` (parallel to `virtual_channel_names`, and
+  reported on `DescribeCollectionResponse` as `shard_infos`) gains a
+  `ShardState` (`Normal / Creating / Splitting / Dropped`) and a routing
+  predicate carried as a `oneof`: `HashRouting` — the list of residues the
+  shard owns. A shard owns a *list*, not one value, because its share spans
+  more residues as the modulus grows. Unset means the collection has never
+  been split, or the shard is a fenced split source, whose predicate the
+  write switch strips. A state this build does not know may own keys, so the
+  table is refused as a whole -- every write to the collection fails, not only
+  the keys of that shard -- rather than that shard being silently dropped. The
+  choice is deliberate: an unknown state is a newer server talking to an older
+  proxy, and routing around it would place rows by a rule this build cannot
+  see. It is also the rolling-upgrade cost to plan for. (Defined in
+  milvus-proto #618; `model.ShardInfo` mirrors it.)
+- `DescribeCollectionResponse` gains `routing_modulus` — one number for the
+  whole collection, `0` before its first split — and `shard_by`. The
+  modulus, not the presence of residues, is what says a collection has been
+  split: a non-zero modulus with no residues behind it is malformed meta and
+  is refused, because falling back to the legacy modulo over a vchannel list
+  the split has already grown would re-place every row in the collection.
+- All new fields default to legacy-compatible zero values, so existing
+  collections are unaffected. The in-memory routing table is *derived* from
+  the collection meta (`internal/util/routing`); it is not persisted
+  separately, and the same derivation runs in rootcoord before a routing
+  change is committed, so a topology that does not tile is rejected while it
+  is still only a failed DDL.
 
 ### 3.3 Routing refresh on fence
 
@@ -162,7 +243,7 @@ existing collection-meta invalidation path and re-dispatches.
 
 ## 4. Design Overview
 
-Four principles work around the constraints of §2 simultaneously:
+Five principles work around the constraints of §2 simultaneously:
 
 1. **The old delegator spawns child delegators in place.** When the old
    delegator consumes the split message, it creates the two child
@@ -182,60 +263,122 @@ Four principles work around the constraints of §2 simultaneously:
 3. **Service ownership moves late, adoption is one-shot.** The DataCoord
    redistributes segment metadata in the background; the new shards become
    visible to QueryCoord only after *all* segments of the old shard are
-   processed. There is no partial ownership migration and no bidirectional
-   delete forwarding.
-4. **Fence first, then create the new shards.** A single `SplitShard`
-   message is appended into the old WAL; the StreamingNode that owns it
-   auto-flushes and fences the old vchannel on processing it, and its
-   TimeTick becomes `T_switch`. Only then are the new vchannels created —
-   each `CreateVChannel` carries a barrier timetick DataCoord allocates
-   after the fence ack, which (on a monotonic global TSO) is necessarily
-   after `T_switch`, so the new WALs are born strictly after `T_switch` and
-   creation doubles as activation (no separate step; the barrier is a lower
-   bound, not `T_switch`'s value). From then on new writes to the old
-   vchannel are rejected and the proxy re-routes them to the new
-   vchannels. Each message is sequenced exactly once, in its destination
-   WAL.
+   processed, and the routing commit that retires the source is applied by a
+   cluster only once *that cluster's* DataCoord reports the source drained.
+   There is no partial ownership migration and no bidirectional delete
+   forwarding.
+4. **The whole write switch is one broadcast.** A single `SplitShard`
+   message is broadcast to every vchannel the collection has today, to the
+   target vchannels the split creates, and to the control channel. Every
+   replica carries the same header and body; what a replica *does* is decided
+   by the role its own vchannel plays in that header
+   (`message.SplitShardRoleOf`):
+
+   - **source** — the write fence. The StreamingNode that owns the source
+     pchannel seals every growing segment of the vchannel, embeds their ids
+     in the header, and tears the vchannel's registration down, leaving a
+     fence tombstone by name. The replica's TimeTick is `T_switch`; after it
+     the vchannel never accepts DML again.
+   - **target** — the genesis of a new vchannel. The body carries the schema
+     (in `CreateCollection`'s own body shape) and the header the partition
+     snapshot, so the shard manager, the recovery storage and the flusher
+     register the vchannel exactly as `CreateCollection` does. There is no
+     separate creation message and no barrier timetick.
+   - **control channel** — no effect in any consumer; it exists only to give
+     the ack callback a TimeTick to order against.
+   - **bystander** — a shard of the same collection this split neither fences
+     nor creates. It receives the replica and passes it through every
+     consumer without effect. Bystanders are in the broadcast because the
+     message also carries the collection's routing post-image: a shard the
+     split leaves alone still has to be covered by the broadcast that
+     redefines the collection's channel list. A replica landing on a vchannel
+     of a *different* collection is a misroute and is refused.
+
+   Ordering inside the broadcast is what makes `T_switch` a boundary rather
+   than a race. `BroadcastHeader.append_first_vchannels` names the sources;
+   the broadcaster appends *and persists* that group before it appends any
+   other replica, and the `SplitShard` message type is `FreshTimeTick`, so
+   every other replica discards its node's prefetched TSO batch and takes a
+   freshly allocated tick. The source vchannel therefore holds no message
+   after `T_switch`, and the targets hold none at or before it. Each message
+   is still sequenced exactly once, in its destination WAL.
+5. **Only facts travel in the WAL; every coordinator action happens in the
+   ack callback.** The message states that the split happened, with
+   everything a cluster needs to reproduce the topology: collection id, task
+   id, partition ids, residues, modulus, schema, routing post-image. When to
+   redistribute, when a source has drained and when to adopt are local
+   decisions each cluster makes for itself and never travel in a message.
+   All collection-meta and DataCoord bookkeeping is done by the broadcast's
+   ack callback, so the cluster that planned the split and a cluster that
+   only replayed the message run the same code; the planner's extra step is
+   issuing the broadcast. That is what makes the split replicable (§6.5).
 
 ## 5. Roles and State Machine
 
-- **DataCoord** detects the need to split, creates the target shard
-  metadata, and drives the split task FSM entirely by appending messages
-  through the streaming client (`SplitShard` to fence the old WAL →
-  `CreateVChannel` on the new pchannels → routing commit; there is no
-  coordinator→StreamingNode RPC, and no separate flush or activate message
-  — flush is auto-triggered inside the source SN's handler, and the barrier
-  timetick DataCoord allocates after the fence ack and carries on
-  `CreateVChannel` doubles as activation. DataCoord records `T_switch`
-  (returned on the `SplitShard` ack) on the task, because the
-  redistribution drain gates on it — see §6.3). It
-  redistributes segments in rounds, finally makes the new
-  shards visible to QueryCoord, and freezes compaction/GC on the source
-  shard during the window.
+- **DataCoord (the cluster that plans the split)** detects the need to
+  split, allocates the task id, the target vchannel names and their target
+  pchannels (via StreamingCoord), the residues each target owns and the
+  routing post-image, and then issues **one** `SplitShard` broadcast. It
+  reads nothing back from that broadcast's return value: the ack callback is
+  what records the task and `T_switch` (§6.1). Afterwards it redistributes
+  segments in rounds, freezes compaction/GC on the source shard during the
+  window, and once its own drain predicate holds it issues the adoption
+  `AlterCollection` that retires the source.
+- **DataCoord (every cluster)** exposes two internal RPCs the ack callbacks
+  call: `CommitShardSplit`, which upserts the split task record by task id
+  and seeds each target vchannel's genesis channel checkpoint, and
+  `CheckShardSplitDrained`, which answers whether *this* cluster's sources
+  have drained (§6.3). A cluster that only replayed the broadcast learns of
+  the split solely through `CommitShardSplit`, and the record it leaves is
+  what later lets it answer the drain check and adopt the targets.
+- **RootCoord** owns both ack callbacks: the `SplitShard` one, which
+  validates the routing post-image, calls `CommitShardSplit`, applies the
+  post-image to the collection meta and expires the proxy caches (§6.1); and
+  the `AlterCollection` one, which gates a routing commit that delists a
+  vchannel on `CheckShardSplitDrained` before applying it (§6.3).
 - **StreamingCoord** allocates pchannels for the new vchannels. The
   invariant "one collection has at most one vchannel per pchannel" is
   kept, so the shard count of a collection is capped by the pchannel
   count; when pchannels run short they are expanded dynamically via
   `AddPChannels()`, and if the WAL backend cannot host more topics the
-  split round is skipped with an alert.
+  split round is skipped with an alert. Its Broadcaster is what enforces the
+  append-first ordering of the split's replicas, and its
+  `WaitVChannelsAcked` RPC is what a secondary cluster's append gate waits on
+  (§6.5).
 - **StreamingNode (source)** receives the fence on the normal append
   path, simply by being the current owner of the source pchannel: on
-  processing `SplitShard` its shard handler auto-flushes the growing
-  segments (embedding their IDs in the message, as the AlterCollection
-  schema-change path already does) and force-fails active transactions
-  under the vchannel-exclusive lock; afterwards the node rejects new
-  writes to the old vchannel. The target vchannels live on whichever
-  StreamingNodes own the target pchannels (a node cannot open a WAL for
-  another node) and are created by the `CreateVChannel` messages appended
-  there, each born at the barrier timetick DataCoord allocates after the
-  fence ack (necessarily past `T_switch`).
+  processing the source replica of `SplitShard` its shard handler
+  auto-flushes the growing segments (embedding their IDs in the message, as
+  the AlterCollection schema-change path already does) and force-fails active
+  transactions under the vchannel-exclusive lock. Three things then happen at
+  different times, and each has to happen where it does:
+  - the **shard-manager registration** is torn down in the same critical
+    section as the fence, leaving a `SplitFence{TimeTick, TaskID}` tombstone
+    keyed by vchannel *name*. Dropping the registration immediately frees the
+    pchannel's per-collection slot, so a successor vchannel can be placed
+    there without waiting for a routing commit; the tombstone is what still
+    answers a stale proxy route with `SHARD_FENCED` (rather than
+    `CollectionNotFound`) and what returns `T_switch` to a re-sent fence.
+  - the **data sync service** is *not* closed here. The sealed segments are
+    flushed asynchronously, so the flusher records the fence tick and lets
+    the service close itself once its own checkpoint passes it
+    (`flusherComponents.CloseIfDrained`). The drop-collection teardown is
+    deliberately not reused: it reaches DataCoord's `DropVirtualChannel`
+    through the sync manager, which must never fire for a split source.
+  - the **recovery meta** moves to `VCHANNEL_STATE_SPLITTED` with
+    `split_time_tick = T_switch`, and stays there. Moving it to `DROPPED`
+    would both call `DropVirtualChannel` and, once the row left the catalog,
+    lose the tombstone across a restart. Its collection is described in §6.5.
+  The target vchannels live on whichever StreamingNodes own the target
+  pchannels (a node cannot open a WAL for another node) and are created by
+  the target replicas of the same broadcast.
 - **delegator0 (old)** consumes up to the split message; from it learns
-  the target vchannels and key ranges, fetches their consume start
-  positions via a one-shot Coordinator RPC (the positions were persisted
-  to the collection meta when the targets were created), spawns
-  delegator1/2 in place, serves all sealed segments (including those
-  flushed during the window), fronts all queries, and applies the deletes
-  forwarded back from the children.
+  the target vchannels and the residues each owns, reads their consume
+  start positions through the ordinary channel-checkpoint seek path (the ack
+  callback seeded each target's genesis position into DataCoord's channel
+  checkpoints), spawns delegator1/2 in place, serves all sealed segments
+  (including those flushed during the window), fronts all queries, and
+  applies the deletes forwarded back from the children.
 - **delegator1/2 (children)** own no sealed segments, consume growing
   data and deletes of the new WALs from the start positions delegator0
   fetched, and forward every delete (and their TimeTick progress) to
@@ -244,23 +387,27 @@ Four principles work around the constraints of §2 simultaneously:
   shard is flagged so the balancer leaves it alone); after adoption it
   watches the new shards, converts the existing child delegators without
   a restart, and releases the old shard.
+- **Proxy (secondary cluster)** is where a replicated split enters: its
+  replicate service rewrites every channel name the message carries into the
+  local namespace and holds a non-append-first replica until this cluster has
+  landed the split's append-first replicas (§6.5). Every other role above is
+  the same code on both clusters.
 
 ```mermaid
 flowchart LR
-    IDLE["Normal"] -->|"split triggered"| PREP["Preparing, target shard meta and vchannel names allocated"]
+    IDLE["Normal"] -->|"split triggered"| PREP["Preparing, task id, target names, residues and routing post-image allocated"]
     PREP -->|"abort, no external side effects"| IDLE
-    PREP -->|"append SplitShard, SN auto-flush and fence"| FENCE["Fenced at T_switch, old vchannel rejects writes"]
-    FENCE -->|"forward-only, CreateVChannel barrier > T_switch, routing commit"| WIN["Window, in-place children and multi-round redistribute"]
-    WIN -->|"all segments processed"| ADOPT["Adopting, new shards visible, watch and load"]
-    ADOPT -->|"release source shard, bump routing"| DONE["Done"]
+    PREP -->|"one SplitShard broadcast, sources appended and persisted first"| FENCE["Fenced at T_switch, source rejects writes, targets born past T_switch"]
+    FENCE -->|"forward-only, ack callback records the task and commits the routing post-image"| WIN["Window, in-place children and multi-round redistribute"]
+    WIN -->|"this cluster's sources drained"| ADOPT["Adopting, AlterCollection(shard_split_routing) delists the source"]
+    ADOPT -->|"release source shard, retire its recovery meta"| DONE["Done"]
 ```
 
 ## 6. End-to-End Flow
 
 ### 6.1 Trigger and write switch
 
-The whole sequence is driven by the DataCoord split task FSM **appending
-messages through the streaming client** — there is no
+The write switch is **one broadcast and its ack callback** — there is no
 coordinator→StreamingNode RPC. The streaming client already solves owner
 discovery, retry across pchannel reassignment, and term fencing, exactly
 as existing WAL-visible operations do (`ManualFlush` is appended by the
@@ -280,112 +427,161 @@ interceptor chain.
    their target pchannels via StreamingCoord (so the fence message can
    carry the target names). Shards holding a single namespace are
    excluded from the trigger: they satisfy the size thresholds but cannot
-   be split further (the split point must fall on a namespace boundary),
+   be split usefully (its one namespace has one routing value and would land
+   wholly on one of the two halves),
    and writes to them are rejected at the namespace hard limit — without
    the exclusion the trigger would loop on them.
-2. **Fence.** DataCoord appends a single `SplitShard` message to
-   vchannel0, carrying the target vchannel names and their key ranges
-   (allocated in step 1) — but *not* start positions, which do not exist
-   yet. On processing it the source StreamingNode's shard handler
-   auto-flushes every growing segment of the vchannel (embedding the
-   sealed segment IDs into the message header, exactly as the
-   AlterCollection schema-change path does) and, because `SplitShard` is
-   `ExclusiveRequired`, force-fails active transactions under the
-   vchannel-exclusive lock. The message's TimeTick is `T_switch`.
-   Afterwards every new write to vchannel0 is rejected with `SHARD_FENCED`.
-3. **Create targets (after the fence; barrier doubles as activation).**
-   DataCoord **awaits the `SplitShard` append result** (so `T_switch` is
-   allocated and sequenced) and only then allocates a **barrier timetick**
-   from the global TSO and appends a `CreateVChannel` message — carrying the
-   collection schema, partition list, key range and that barrier
-   (`BarrierTimeTick`) — to each target pchannel (whose WALs are hosted by
-   whichever StreamingNodes own them; a node cannot open a WAL for another
-   node). The target StreamingNode floors the genesis timetick at the
-   barrier, so even a node holding a prefetched TSO batch older than
-   `T_switch` cannot place the genesis at or before it. The barrier value
-   matters only as a lower bound: because it is allocated **strictly after**
-   the fence ack and the global TSO is monotonic, it is necessarily
-   `> T_switch`, so the genesis message and every later message on the new
-   WAL are strictly greater than `T_switch`.
+2. **One broadcast.** DataCoord builds a single `SplitShard` message
+   (`streaming.NewSplitShardBroadcastMessage`) and broadcasts it. Its header
+   carries the collection id, the split task id, the source vchannels, the
+   targets with the residues each owns, the routing modulus, the partition
+   snapshot and the db id; its body carries the target genesis schema (in
+   `CreateCollection`'s body shape) and the **routing post-image** — the
+   grown vchannel list, every shard's state and residues, the modulus and
+   `shard_by`. Nothing is derived from mutable meta later, so a retry and a
+   replay commit the identical topology. The broadcast reaches every
+   vchannel of the collection, every target, and the control channel; the
+   broadcast is deduplicated by a collection-scoped idempotency key built
+   from the split task id, so a retry of the same task is the *same*
+   broadcast, not a second one. It holds `SharedDBName +
+   ExclusiveCollectionName` for its whole life, which is what keeps
+   collection DDL out of the switch.
+3. **Two-phase append and the fresh tick.** The broadcaster appends the
+   source replicas first — they are named in
+   `BroadcastHeader.append_first_vchannels` — and **persists** them with a
+   partial ack before it appends anything else. On processing a source
+   replica the StreamingNode's shard handler auto-flushes every growing
+   segment of the vchannel (embedding the sealed segment IDs into the
+   message header, exactly as the AlterCollection schema-change path does)
+   and, because `SplitShard` is `ExclusiveRequired`, force-fails active
+   transactions under the vchannel-exclusive lock. That replica's TimeTick
+   is `T_switch`; afterwards every new write to the source is rejected with
+   `SHARD_FENCED`.
 
-   > **The fence ack must precede the `CreateVChannel` append — never
-   > pipelined.** The `> T_switch` guarantee rests entirely on the barrier
-   > being allocated *after* `T_switch`. If the two appends were issued
-   > concurrently, the barrier (or a target's fresh fetch) could be sequenced
-   > before or concurrently with `T_switch`'s allocation on the source
-   > pchannel's AckManager, and `> T_switch` would break silently (an
-   > occasional ghost message `≤ T_switch` on the new WAL). The FSM therefore
-   > serializes: append `SplitShard`, await its ack, allocate the barrier,
-   > then append `CreateVChannel`.
+   The remaining replicas — targets, bystanders, control channel — are
+   appended only after the first group is durable, and `SplitShard` is
+   `FreshTimeTick`, so each of them discards its node's prefetched TSO batch
+   and takes a freshly allocated tick. A target's genesis is therefore
+   strictly greater than every `T_switch` of the same broadcast, without any
+   barrier value being computed, carried or compared. There is no separate
+   creation message and no `Creating`/`Activate` two-phase state: the three
+   consumers that special-case `CreateCollection` as the vchannel-genesis
+   message (the shard manager, which registers the collection for DML and
+   segment assignment; the RecoveryStorage, whose `vchannel not found` check
+   is exempted for it and which seeds the vchannel meta; and the flusher,
+   which spawns the data sync service) each read the target replica by its
+   role and share the existing schema parser.
 
-   Creation and activation are one step, with no
-   `Creating`/`Activate` two-phase state. Each consumer that special-cases `CreateCollection` as the
-   vchannel-genesis message needs a `CreateVChannel` handler; there are
-   three: the shard manager (registers the collection for DML and segment
-   assignment), the RecoveryStorage (its `vchannel not found` check exempts
-   only `CreateCollection`/`DropCollection` and needs the same exemption,
-   plus an observe handler seeding the vchannel meta), and the flusher (the
-   `CreateCollection` hook spawns the data sync service). The message body
-   keeps the same shape as `CreateCollection`'s, so the three handlers
-   share the existing schema parser. The append result yields the new
-   vchannel's consume start position (`LastConfirmedMessageID`), which
-   DataCoord persists into the collection meta — the same `StartPositions`
-   field `CreateCollection` already populates.
-4. **Routing commit.** DataCoord commits the routing meta in one
-   transaction: the target shards become routable for writes.
-5. On rejection the proxy refreshes the routing table. A write to the fenced
-   source vchannel is rejected with `SHARD_FENCED`; the proxy invalidates its
-   cached collection meta, refetches it, re-resolves to the new owning shard
-   and retries (bounded with backoff, since the refresh can race the routing
-   commit), then re-dispatches the writes in order. Writes go directly to
-   the new WALs from then on. The new shards are routable only after the
-   routing/meta commit (the proxy cannot see a shard before its
-   collection-meta write lands), so the write-unavailability window —
-   fence → routing commit → proxy refresh, scoped to the split shard's key
-   range — has the same shape in any ordering (§10), and fits the
-   short-latency-increase goal of §1.2.
+   > **The first group must be persisted before the rest is appended.** The
+   > `> T_switch` guarantee rests on that order alone. Appending the rest
+   > concurrently with the append-first group would leave every primary-side
+   > test green while allowing a target replica to take a tick below its
+   > source's — and, on a secondary, it would break the liveness argument of
+   > the append gate (§6.5), which assumes exactly this ordering.
+
+4. **Ack callback.** Once every replica has landed, the broadcaster runs the
+   ack callback (retried with backoff until it returns nil, holding the
+   collection's resource keys meanwhile). It runs on **every** cluster the
+   broadcast reached, in this order:
+
+   1. validate the routing post-image — the shards must tile `[0, M)` with
+      no gap or overlap, and the header's residues and modulus must agree
+      with the body's copy. This is the only place the two copies are read
+      together;
+   2. **DataCoord first** (`CommitShardSplit`): upsert the split task record
+      by task id, recording each source's `T_switch` *as its fence actually
+      landed*, and seed each target vchannel's genesis channel checkpoint
+      from that target's own append result;
+   3. apply the routing post-image to the collection meta
+      (`MetaTable.ApplyShardSplitRouting`, one atomic catalog write under
+      `ddLock`): the target shards become routable for writes;
+   4. `BroadcastAlteredCollection` and expire the proxy caches.
+
+   DataCoord goes first because it is the seeding step: until a target has a
+   channel checkpoint, a reader that discovered it would fall back to the
+   collection's creation position, and the routing post-image is what makes
+   the target discoverable. Both halves are independently idempotent, so a
+   crash between them is repaired by the retry. A post-image the collection
+   already carries is a no-op; one that a later commit has already overtaken
+   is skipped with a warning rather than failed, because failing it forever
+   would queue every later DDL of the collection behind it. Only **one**
+   refusal may be re-read that way — a shard whose state the post-image would
+   move backwards, which is exactly what an earlier commit redelivered after a
+   later one looks like, and which the refusal marks as such. Every other
+   refusal (an unroutable namespace key, a revoked or shrinking modulus, a
+   shard delisted from a state that never stopped taking writes) says the
+   post-image is incoherent, something no later commit could have made true,
+   and stays loud.
+5. On rejection the proxy **will** refresh the routing table — the one step of
+   this flow that is **not on this branch** (§11). A write to the fenced source
+   vchannel is rejected with `SHARD_FENCED`; the proxy is to invalidate its
+   cached collection meta, refetch it, re-resolve to the new owning shard and
+   retry (bounded with backoff, since the refresh can race the routing commit),
+   then re-dispatch the writes in order. Writes then go directly to the new
+   WALs. The new shards are routable only after the ack callback's meta commit
+   (the proxy cannot see a shard before its collection-meta write lands), so the
+   write-unavailability window — fence → routing commit → proxy refresh, scoped
+   to the residues the split moves — has the same shape in any ordering (§10),
+   and fits the short-latency-increase goal of §1.2.
+
+   What exists today is only the rejection. The proxy still places a row by
+   vchannel POSITION (`typeutil.HashPK2Channels` in `internal/proxy/util.go`,
+   `task_delete.go`, `task_upsert_streaming.go`); `internal/util/routing` has no
+   proxy consumer; `proxy.enableRoutingTable` has no reader; and the only
+   consumer of `SHARD_FENCED` is `status.IsUnrecoverable`, which stops the
+   producer from retrying — nothing refreshes routing on it. Were the write
+   switch enabled as it stands, the cache expiry at the end of step 4 would hand
+   the proxy a LONGER vchannel list and every row in the collection would
+   re-place against it: one write in N+k would land on the fenced source and
+   fail, and the rest would drift silently, sending a delete to a different
+   shard than the insert it removes. **The write switch must not be enabled
+   before the proxy routes by residue.**
 
 WAL transactions need no special machinery and there is no drain step:
 the `SplitShard` message type is marked `ExclusiveRequired`, so the lock
-interceptor appends it under the vchannel-exclusive lock and force-fails
-active transactions, which the client-side transaction retry loop already
-handles — the retried transaction hits the fence, triggers the routing
-refresh, and replays on the new vchannel. The only special case is a
-replicated transaction whose keepalive is infinite; split is therefore
-not allowed on clusters with replication enabled (see §8).
+interceptor appends each data replica under its own vchannel-exclusive lock
+and force-fails active transactions, which the client-side transaction retry
+loop already handles — the retried transaction hits the fence, triggers the
+routing refresh, and replays on the new vchannel. This is the same cost any
+AlterCollection broadcast already pays on the collection's vchannels.
 
-Collection DDL is fenced out of the critical section. DDL
+Collection DDL is fenced out of the switch by the broadcast itself. DDL
 (AlterCollection, CreatePartition, …) broadcasts to all of the
-collection's vchannels; if it interleaved between the fence and target
-creation it could change the schema/partition set that `CreateVChannel`
-embeds, leaving the new shards out of sync. The split task therefore
-holds the Broadcaster's `ExclusiveCollectionName` resource key — the same
-key CreateCollection and DropPartition already take — for the
-seconds-long fence → create → routing-commit section, so no collection
-DDL can interleave; afterwards the new vchannels join the collection's
-broadcast targets normally.
+collection's vchannels; if it interleaved with the split it could change the
+schema/partition set the target genesis embeds, leaving the new shards out of
+sync. The `SplitShard` broadcast holds the Broadcaster's `SharedDBName +
+ExclusiveCollectionName` resource keys — the same keys CreateCollection and
+DropPartition already take — from the moment it is issued until its ack
+callback returns, so no collection DDL can interleave and the partition
+snapshot the message carries is exact. Afterwards the new vchannels join the
+collection's broadcast targets normally.
 
 ```mermaid
 sequenceDiagram
     participant DC as DataCoord
-    participant SC as StreamingCoord
+    participant BC as Broadcaster (StreamingCoord)
     participant SNT as SN (target pchannel owners)
     participant SN0 as SN (source pchannel owner)
+    participant CB as ack callback (RootCoord)
     participant D0 as delegator0
     participant D12 as delegator1/2
     participant QC as QueryCoord
     participant PX as Proxy
-    DC->>SC: allocate target vchannel names
-    DC->>SN0: append SplitShard{targets, ranges} @T_switch
-    Note over SN0: handler auto-flushes growing + force-fails txns, vchannel0 fenced
-    DC->>SNT: append CreateVChannel, barrier > T_switch (create == activate)
-    SNT-->>DC: start position, persisted into collection meta
-    DC->>DC: routing commit: targets routable
+    DC->>BC: allocate target names, Broadcast(SplitShard) to all vchannels + targets + CChannel
+    BC->>SN0: first group: source replica(s), append_first
+    Note over SN0: handler auto-flushes growing + force-fails txns, vchannel0 fenced @T_switch
+    SN0-->>BC: AppendResult{T_switch}
+    BC->>BC: AckPartial persists the append-first group
+    BC->>SNT: second group: target replicas (fresh TSO batch, tick > T_switch)
+    Note over SNT: target genesis: shard manager, recovery meta, data sync service
+    BC->>CB: all replicas landed, run the ack callback
+    CB->>DC: CommitShardSplit: task record, per-source T_switch, target genesis checkpoints
+    CB->>CB: apply the routing post-image to the collection meta, expire caches
     PX->>SN0: write to old vchannel
     SN0-->>PX: reject (SHARD_FENCED)
     PX->>SNT: invalidate cache, refetch routing, write to WAL1/2
-    D0->>DC: consume SplitShard, RPC for target start positions
-    D0->>D12: spawn children at fetched positions
+    D0->>DC: consume SplitShard, read the targets' seeded checkpoints
+    D0->>D12: spawn children at those positions
     Note over D12: growing + deletes only, no sealed
     Note over D0: tsafe frozen, serves at min(tsafe1, tsafe2)
     DC->>DC: multi-round redistribute (incl. flushed growing)
@@ -400,14 +596,15 @@ sequenceDiagram
 1. delegator0 consumes WAL0 in order. The split message is the last entry,
    so every delete ≤ `T_switch` has already been applied to its sealed
    segments before the children exist — backlogged deletes cannot be lost.
-2. On the split message, delegator0 fetches the target vchannels' consume
-   start positions via a one-shot Coordinator RPC (persisted to the
-   collection meta when the targets were created, §6.1 step 3; it retries
-   until they appear, since creation runs just after the fence) and
-   creates delegator1/2 locally (empty sealed sets). Each child subscribes
-   at its start position, so it replays none of the target pchannel's
-   unrelated history; the new vchannels contain only data > `T_switch`
-   (their genesis message is already past the barrier).
+2. On the split message, delegator0 reads the target vchannels' consume
+   start positions from DataCoord (the ack callback seeded each target's
+   genesis position as that vchannel's first channel checkpoint, §6.1
+   step 4; it retries until they appear, since the callback runs just after
+   the replicas land) and creates delegator1/2 locally (empty sealed sets).
+   Each child subscribes at its start position, so it replays none of the
+   target pchannel's unrelated history; the new vchannels contain only data
+   > `T_switch` (their genesis replica already took a fresh tick after the
+   fence was persisted).
 3. Queries still arrive at delegator0 (QueryCoord keeps returning the old
    shard leader). delegator0 fans the query out to the children, searches
    the segments in its own view (sealed and pre-switch growing), reduces,
@@ -470,11 +667,15 @@ sequenceDiagram
    are picked up once flushed.
 2. Redistribution runs in rounds: each round processes the segments
    visible at that time. The source shard is "drained" only when **all
-   three** DC-local conditions hold: no healthy segment remains on the
-   source vchannel (any state — `isSegmentHealthy` already keeps `Importing`
-   segments visible until they reach a terminal state); the source channel
-   checkpoint has advanced to `≥ T_switch` (`fenceFlushed`); **and** no
-   active import job has the source vchannel in its `Vchannels`.
+   three** DataCoord-local conditions hold, per source
+   (`CheckShardSplitDrained`): no segment in a non-`Dropped` state remains on
+   the source vchannel; the source channel checkpoint exists and has advanced
+   to `≥ that source's own T_switch` — a source with no channel checkpoint at
+   all is not drained, and neither is one whose recorded `T_switch` is still
+   zero (its fence has not been recorded, so it may still be accepting
+   writes); **and** no unfinished import job has any
+   source vchannel in its `Vchannels`. The predicate is answered
+   independently by each cluster's own DataCoord — see §6.5.
 
    The checkpoint conjunct closes the **async-flush window**. The fence only
    *writes* the `SplitShard` WAL message; the growing segments it sealed are
@@ -485,9 +686,11 @@ sequenceDiagram
    segments holding that position's data are durably synced and reported
    (the write buffer holds the checkpoint at the earliest un-synced
    position), so `channelCheckpoint(source) ≥ T_switch` proves the entire
-   fence-sealed set is in DataCoord meta and relabelable. This is why
-   DataCoord records `T_switch` (§5): the drain needs its value. (`T_switch`
-   is recovered after a crash that lost it — see §10.)
+   fence-sealed set is in DataCoord meta and relabelable. This is why the
+   split task record carries a per-source `T_switch`, written by the ack
+   callback from the fence's own append result (§6.1 step 4): the drain needs
+   its value, and the value that matters is the one the fence actually landed
+   on in *this* cluster.
 
    The import conjunct closes another blind window: a job still in
    `Pending`/`PreImporting`
@@ -499,8 +702,24 @@ sequenceDiagram
    vchannels are fixed at creation (`ImportJob.GetVchannels()`), so this
    check is purely DataCoord-local and needs no import/split mutual
    exclusion.
-3. Only then do the target shards leave state `Creating`; QueryCoord picks
-   them up, issues `WatchDmChannel`, and — because the child delegators
+3. Only then is the **adoption** issued: an ordinary `AlterCollection`
+   broadcast under the `shard_split_routing` field mask, carrying the
+   post-image that moves the targets to `Normal` and drops the source from
+   the vchannel list, plus the `split_task_id` it belongs to. Its ack
+   callback asks *this* cluster's DataCoord whether that task has drained
+   (`CheckShardSplitDrained`) and refuses to apply the commit until the
+   answer is yes; the broadcaster retries with backoff. The broadcast reaches
+   the control channel, every vchannel the collection has today — the
+   delisted source included — and every vchannel the post-image names,
+   because the source's own replica is what retires it and a vchannel the
+   collection no longer names can receive nothing later. A commit that
+   delists a vchannel without naming a split task is refused outright, as is
+   one that would delist a shard not in state `Splitting`, one that would move
+   a shard's state backwards, and one that would take the routing modulus back
+   to zero or shrink it (the modulus is the divisor every residue the shards
+   already own was computed against; only growth keeps those residues meaning
+   what they meant). QueryCoord picks
+   the targets up, issues `WatchDmChannel`, and — because the child delegators
    already exist on that QueryNode with all segments loaded — converts
    them in place rather than building fresh ones:
    - **No re-subscribe / no new pipeline.** `WatchDmChannel` already
@@ -607,38 +826,195 @@ The view of one segment `S` across the phases:
   removing delegator0 only drops a reference — physical unload happens
   only when no distribution references the segment.
 
+### 6.5 Replication
+
+A shard split replicates. `SplitShard` and the adoption `AlterCollection`
+travel down the replicate streams like any other DDL, and a secondary cluster
+ends up with the same shard topology, the same task id, the same residues and
+the same modulus as the primary. Nothing flows back: there is no secondary→
+primary channel and no coordinator→StreamingNode RPC on either side.
+
+**Name remap.** Every channel name the message carries names a channel of the
+*primary*. The secondary's proxy rewrites all of them into its own namespace
+before the replica is appended (`replicateService.overwriteReplicateMessage`),
+by the same rule `CreateCollection` already uses: pchannels correspond by index
+position, and a vchannel name is the source name with its pchannel prefix
+replaced. Two message types need a case of their own:
+
+- `SplitShard` — the header's `source_vchannels` and `targets[].vchannel`, and
+  the body's routing post-image (its `virtual_channel_names`,
+  `physical_channel_names`, **and** each shard info's own `vchannel_name`,
+  which the routing table refuses if it disagrees with the list) and genesis
+  channel lists;
+- `AlterCollection` carrying the `shard_split_routing` mask — the same two
+  name lists and shard infos in its updates. Every other `AlterCollection` is
+  left alone; the routing mask is the only one whose updates carry channel
+  names at all.
+
+`BroadcastHeader.append_first_vchannels` is remapped with the broadcast's own
+vchannel list, position by position, so the two can never disagree. Collection
+id, partition ids, split task id, residues and modulus are **not** remapped:
+they are the same facts in both clusters, and rewriting them would break the
+correspondence replication exists to keep.
+
+**The append gate.** The primary's ordering — sources appended and persisted
+before anything else — is produced by the broadcaster and is *not* carried by
+the replicate streams, which deliver each pchannel independently and restore no
+order between them. Without a gate a target's genesis could be appended on the
+secondary before its source's fence, inverting the one invariant the split
+rests on and, with it, the order of a delete against an insert of the same
+primary key. So: **a replicated replica whose vchannel is not in the (remapped)
+`append_first_vchannels` may not be appended until every append-first replica
+of the same broadcast has been acked in this cluster.** The gate sits in the
+secondary proxy's `replicateService.Append`, after the remap and before the
+append, and waits on the streamingcoord RPC
+`StreamingCoordBroadcastService.WaitVChannelsAcked(broadcast_id, vchannels)`,
+which blocks until those vchannels have a recorded **ack** here — including
+waiting for the broadcast task itself to be created, since a secondary learns
+of a broadcast only from whichever replica arrives first.
+
+It has to be on the receiving side: the sender sees one replica at a time and
+cannot observe another cluster's ticks, while the streamingcoord ack state is a
+fact the receiver already has.
+
+*Why it cannot wedge replication.* "A source never waits, so the wait graph is
+acyclic" is **not** the argument — a gated replica blocks its whole pchannel
+stream, so a parked target also blocks every append-first replica queued behind
+it. Progress rests on three facts: (a) for each broadcast every append-first
+replica's tick is strictly below every other replica's, because the primary
+appends *and* `AckPartial`-persists that group before it starts on the rest;
+(b) ticks are totally ordered across pchannels, coming from one TSO; (c) each
+replicate stream delivers its pchannel in tick order. Take the minimum-tick
+message among all stream heads on this cluster: if it is append-first it is not
+gated; if it is gated, each of its append-first replicas has a strictly smaller
+tick and is therefore either already appended here or queued behind a head with
+a smaller tick, contradicting minimality. Something always moves. Fact (a)
+lives in the broadcaster, not in the gate — an "optimization" that appended the
+rest concurrently with the append-first group would keep every primary-side
+test green and wedge a secondary.
+
+The wait is observable, because head-of-line blocking is otherwise
+indistinguishable from wedged replication: a `Warn` after 30s naming the
+broadcast id and the vchannels it is waiting on, and a gauge of currently gated
+appends that an alert can watch. `broadcaster.Close()` releases every waiter
+with an on-shutdown error rather than holding the process until SIGKILL.
+
+**Callback parity.** Both clusters run the same `SplitShard` ack callback and
+therefore the same commit (§6.1 step 4). On the secondary, `CommitShardSplit`
+finds no task and creates one outright, already in `Redistributing` — the fence
+it acknowledges has by definition already landed — with the **local** append
+result's `T_switch` and the **local** genesis checkpoints. `T_switch` is a
+different number in the two clusters and neither ever reads the other's.
+Afterwards the secondary's DataCoord does only local relabel/rewrite and its
+own drain accounting; it broadcasts nothing.
+
+**Adoption is gated per cluster.** The adoption `AlterCollection` is
+replicated, and both clusters' callbacks check their own drain predicate first,
+because "the source's data has moved" is a per-cluster fact: a secondary
+replays the same WAL but compacts, imports and flushes on its own schedule. The
+primary is drained when it sends, so it passes immediately; a secondary refuses
+with a System error and the broadcaster retries with backoff, which queues the
+same collection's later DDL callbacks behind it and leaves other collections
+untouched. Two redeliveries are exempted and apply *nothing*: a post-image the
+collection already carries, and one a later commit has overtaken — once
+DataCoord reclaims a finished split's task record (the reaper lands with the
+split manager, §11), asking about it would be an error retried forever. A
+retiring post-image that names no split task at all cannot be answered by any
+DataCoord: the RPC refuses such a request outright, and if one is somehow
+already in the WAL the callback logs an Error naming the wedge it causes.
+
+**Retiring the source's WAL-side state.** When the adoption replica reaches the
+source's StreamingNode there is nothing left for the shard manager to do (the
+fence already tore the registration down) and the data sync service has either
+closed itself or will when its checkpoint passes the fence. The recovery
+storage marks the `SPLITTED` meta `retired`, and its background persist loop
+removes the row only once **both** local conditions hold: `retired`, and the
+flusher checkpoint has passed `split_time_tick`. The catalog has no
+"retired-and-drained" state of its own, so the snapshot handed to it at that
+moment is rewritten `DROPPED` — with `retired` still set, which is exactly how
+`dropAllVirtualChannel` tells it apart from a genuine drop and skips calling
+DataCoord's `DropVirtualChannel`. DataCoord retires the source itself, as part
+of its own bookkeeping. There is no `DropVChannel` message: when a source may
+be collected is a local fact, and a message announcing it would either arrive
+before a secondary had drained (and be refused, wedging replication) or be
+obeyed and lose data.
+
+**Operator rules.** Four, and they are rules rather than mechanisms:
+
+1. **`SplitShard` and `AlterCollection` must be replicated together.**
+   Skipping one while replicating the other leaves a secondary with targets
+   created but their routing never committed, or the reverse.
+2. **Do not perform a graceful switchover while a split is in flight.** No
+   code reconciles a half-replicated split across a planned role swap. A
+   *forced* promotion is handled **while the adoption has not yet replicated**:
+   `fixIncompleteBroadcastsForForcePromote` strips the replicate header from
+   the incomplete task's pending replicas and re-drives them through the normal
+   broadcast path, which reproduces the two-phase order; the ack callback then
+   creates or advances the task, and the new primary continues draining and
+   issues the adoption itself. Once the adoption HAS replicated, rule 4.
+3. The trigger must run on the primary only — a secondary's split tasks may
+   come from ack callbacks alone. The trigger is not in this branch; see §11.
+4. **Do not force-promote a secondary between an adoption replicating to it
+   and that secondary draining.** In that window the adoption's ack callback
+   refuses (the local drain predicate) and the broadcaster retries it with
+   backoff while holding the broadcast's resource keys. Those keys include
+   `SharedCluster`: `appendSharedClusterRK` adds it to EVERY broadcast that
+   does not already carry a cluster key, and the locker keys on domain+name
+   only, so `SharedCluster` and `ExclusiveCluster` are the same lock. Every
+   cluster-exclusive DDL callback therefore queues behind the drain — the
+   forced promotion's own ack callback (its broadcast *fix* still runs, only
+   the callback waits), `FlushAll`, resource-group DDL,
+   `UpdateReplicateConfiguration`. The drain is the split manager moving the
+   source's data and can take hours, so this is not a brief stall. Other
+   *collections* are still unaffected — only cluster-scoped DDL queues. The
+   mechanical fix — the adoption callback not holding the cluster
+   key across the drain wait — changes locker semantics and is a follow-up
+   (§11).
+
 ## 7. Consistency Guarantees
 
-- **Total order.** WAL0 holds only messages ≤ `T_switch`; the new
-  vchannels hold *no* message ≤ `T_switch` at all — because their
-  `CreateVChannel` genesis is floored at the barrier timetick, which
-  DataCoord allocates strictly after the fence ack, so even the creation
-  message is past `T_switch`. Collection DDL cannot interleave with the
-  fence→create section because the split task holds the Broadcaster's
-  `ExclusiveCollectionName` key (§6.1). All messages sit on the same global
-  TSO axis and each is sequenced exactly once. The TSO allocator is a
-  per-node singleton with prefetched batches, so a node hosting a new WAL
-  could otherwise hold a batch older than `T_switch`; the barrier floor on
-  `CreateVChannel` (§6.1) closes this hole regardless of any stale batch the
-  target node holds. The boundary needs only `> T_switch`, not the exact
-  value, for *this* invariant: the barrier is necessarily greater than any
-  earlier-allocated timetick (including `T_switch`) on the monotonic global
-  TSO. DataCoord does record `T_switch` itself — not for the barrier, which
-  needs only the lower bound, but for the redistribution drain (§6.3), which
+**Every invariant below is scoped to one cluster.** `T_switch` is a different
+number on the primary and on each secondary — it is the tick its own fence
+landed on — and each cluster's DataCoord only ever reads its own.
+
+- **Total order (within a cluster).** The source vchannel holds only messages
+  ≤ `T_switch`; the target vchannels hold *no* message ≤ `T_switch` at all,
+  their genesis included. On the cluster that issues the split this comes from
+  the broadcaster's two-phase append — the source replicas are appended and
+  persisted before any other replica is appended — plus the `FreshTimeTick`
+  property, which makes every later replica discard its node's prefetched TSO
+  batch and take a freshly allocated tick. That closes the one hole a
+  per-node, batch-prefetching TSO allocator opens: a node hosting a target
+  could otherwise stamp it from a batch older than `T_switch`. On a secondary
+  the same two facts hold for the same reason, with the append gate (§6.5)
+  supplying the ordering the replicate streams do not carry. No barrier value
+  is computed, carried or compared anywhere. Collection DDL cannot interleave,
+  because the broadcast holds the Broadcaster's `ExclusiveCollectionName` key
+  from issue until its ack callback returns (§6.1). All messages of a cluster
+  sit on that cluster's global TSO axis and each is sequenced exactly once.
+  `T_switch` is recorded per source on the split task — by the ack callback,
+  from the fence's own append result — because the redistribution drain (§6.3)
   gates on `channelCheckpoint(source) ≥ T_switch`.
 - **No loss, no duplication.** Writes go directly to their final WAL with
-  unchanged ack semantics. The fence rejects in the lock interceptor,
-  which runs before TimeTick allocation and the backend append
+  unchanged ack semantics. The fence rejects in the **shard** interceptor,
+  which runs after TimeTick allocation but before the backend append
   (interceptor order: redo → lock → replicate → timetick → shard), so a rejected
-  write was never sequenced nor persisted and the retry after refresh
-  cannot double-write. A transaction force-failed by the fence never
+  write is never appended to the WAL — it is never persisted and never visible
+  to any consumer, and the retry after refresh cannot double-write. (The
+  allocated tick is acked with the error, so a rejection does not hold the
+  watermark back either.) A transaction force-failed by the fence never
   committed — its body messages already in WAL0 are dropped by the
   consumer-side TxnBuffer — so retrying it as a whole on the new vchannel
-  cannot duplicate either. No append-level request deduplication is
-  needed; the split task's own appends are idempotent against the
-  vchannel state machine (a duplicate `CreateVChannel` is a no-op — the
-  vchannel already exists — and a duplicate `SplitShard` is recognized by
-  the persisted fence state).
+  cannot duplicate either. The split's own appends are idempotent against the
+  vchannel state machine: a duplicate target replica is a no-op — the vchannel
+  already exists — and a duplicate source replica is recognized by the
+  persisted fence state, appended again and accepted when it belongs to the
+  same task (raising the recorded tick to the later record's, which is safe
+  because the vchannel took no DML in between), and refused with
+  `SHARD_FENCED` when it belongs to any other task, including one whose task
+  id reads zero. Above the append path, the broadcast itself is deduplicated
+  by a collection-scoped idempotency key derived from the split task id, so a
+  retry of the same task resolves to the same broadcast.
 - **Ordering.** Within a WAL, order equals TimeTick order. Across the
   switch, the proxy re-dispatches rejected writes in order after the
   refresh.
@@ -657,17 +1033,19 @@ The view of one segment `S` across the phases:
   persist as L0 segments of the new vchannels. *Bake-in layer*: after
   adoption, the standard L0-forward / delete-buffer replay applies them to
   the relabeled sealed segments at load time.
-- **Crash recovery.** The split message is durable in WAL0 and the task
-  state in the meta store. If the QueryNode hosting delegator0 crashes,
-  QueryCoord rebuilds it, it re-consumes WAL0 up to the split message,
-  re-fetches the target start positions from the collection meta via the
-  Coordinator RPC, and re-spawns the children, whose state is then
-  reconstructed by replaying their vchannels. (The positions live in the
-  collection meta rather than in the `SplitShard` message, so recovery
-  depends on the Coordinator being reachable — an accepted trade for the
-  fence-first ordering, see §10.) If DataCoord crashes it resumes the task
-  FSM from the persisted state. If the StreamingNode crashes, standard WAL
-  recovery applies and the fence persists with the split message.
+- **Crash recovery.** The split message is durable in the source WAL and the
+  broadcast task in the streamingcoord catalog; the split task record and the
+  targets' genesis checkpoints are written by the ack callback, which the
+  broadcaster retries until it succeeds. If the QueryNode hosting delegator0
+  crashes, QueryCoord rebuilds it, it re-consumes the source WAL up to the
+  split message, re-reads the targets' seeded checkpoints from DataCoord, and
+  re-spawns the children, whose state is then reconstructed by replaying their
+  vchannels. If DataCoord crashes it re-drives the same broadcast under the
+  same idempotency key, which resolves to the original and returns its result.
+  If the StreamingNode crashes, standard WAL recovery applies: the fence
+  persists with the split message, and the fence tombstone is rebuilt by name
+  from every `SPLITTED` vchannel in the recovery snapshot. §10 has the full
+  table.
 
 ## 8. Engineering Constraints
 
@@ -688,19 +1066,27 @@ The view of one segment `S` across the phases:
    `GetShardLeaders` and no proxy read reaches it before adoption; the
    convert injects the QueryCoord target version, which flips it
    serviceable and routes reads onto it.
-4. **Old-vchannel lifecycle.** WAL0 stays replayable for the whole window
-   (no truncation); after adoption the vchannel is dropped. Its
+4. **Old-vchannel lifecycle.** The source WAL stays replayable for the whole
+   window (no truncation); after adoption the vchannel is *retired*, not
+   dropped — its recovery meta stays `SPLITTED` with a `retired` flag and is
+   collected locally once the flusher checkpoint passes `split_time_tick`,
+   and DataCoord's `DropVirtualChannel` is never called for it (§6.5). Its
    namespace-scoped L0 segments have been relabeled to the target shards
-   by then (§6.3), so dropping the vchannel discards no delete data.
+   by then (§6.3), so retiring the vchannel discards no delete data.
 5. **Shard count cap.** With the one-vchannel-per-pchannel-per-collection
    invariant, a collection's shard count is capped by the pchannel count
    (`rootCoord.dmlChannelNum`). pchannels are expanded dynamically via
    configuration; if the WAL backend's topic limit prevents expansion, the
    split round is skipped with an alert.
-6. **Replication exclusion.** Clusters with replication/CDC enabled reject
-   split (checked at the DataCoord trigger and again at the StreamingNode),
-   because replicated transactions never expire and the secondary cluster
-   maps pchannels by index position.
+6. **Replication.** Split *is* allowed with replication/CDC enabled: the
+   write switch is one replicable broadcast and the adoption is an ordinary
+   `AlterCollection`, both remapped and ordered on the secondary as §6.5
+   describes. The obligations that come with it are operational rather than
+   mechanical: replicate `SplitShard` and `AlterCollection` together or not at
+   all; do not perform a graceful switchover while a split is in flight (a
+   forced promotion is handled while the adoption has not yet replicated —
+   §6.5 rule 4); and let only the primary trigger splits, so
+   that a secondary's split tasks come from ack callbacks alone.
 7. **BM25 statistics** are shard-level and are rebuilt for the two new
    shards before adoption; per-namespace vector indexes move with their
    namespace folders and need no rebuild.
@@ -720,78 +1106,86 @@ The view of one segment `S` across the phases:
     already waits out every import that has registered segments, and
     relabel skips `IsImporting` segments (§6.3 step 1). The one case that
     needs handling is an import job *created during the split*: an `Import`
-    broadcast targets the collection's vchannels, so a job created in the
-    fence→activation gap includes the source vchannel and bounces with
-    `SHARD_FENCED`. Job creation is queued while the split task is in
-    `Fencing` (the same seconds-long critical section that already holds
-    the Broadcaster's `ExclusiveCollectionName` key, §6.1) and re-planned
-    against the new routing after activation. Jobs created after
-    activation plan against the new shards directly and are fully
-    orthogonal to redistribution.
+    broadcast targets the collection's vchannels, so a job planned against
+    the pre-split routing includes the source vchannel and bounces with
+    `SHARD_FENCED`. The write switch's own broadcast holds the collection's
+    exclusive key until its ack callback returns (§6.1), so no import can be
+    created between the fence and the routing commit; a job planned after it
+    plans against the new shards directly and is fully orthogonal to
+    redistribution.
 
 ## 9. Configuration
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `dataCoord.shardSplit.enable` | `false` | Master switch, refreshable. Gates the trigger (automatic and manual); disabling stops new tasks but never interrupts a task already past the fence. |
+| `dataCoord.shardSplit.enable` | `false` | Master switch, refreshable. Gates both ways of starting a split — the size trigger and a hand-set shard count; with it off, a request to change `collection.shardNum` is refused outright. It never interrupts a task already past the fence. |
+| `dataCoord.shardSplit.autoTriggerEnable` | `true` | Selects which of the two mutually exclusive sizing modes the cluster uses, and has no effect unless `enable` is on. `true`: the size trigger splits over-loaded shards on its own, and a hand-set `collection.shardNum` is **rejected** — letting both act would have them fence the same shards from two directions. `false`: the size trigger is off and the shard count is the user's to set. The mode is also settable per collection through `collection.shardSplitMode` (`auto` / `manual`), so one collection can be sized by hand beside a managed one; the cluster switch is the kill switch over the trigger. |
 | `dataCoord.shardSplit.checkInterval` | 3600s | Interval at which the trigger inspects the per-shard statistics. |
 | `dataCoord.shardSplit.maxShardSize` | 2048 (GB) | Per-shard data size that triggers a split. |
 | `dataCoord.shardSplit.maxShardRows` | 500M | Per-shard row count that triggers a split. |
 | `dataCoord.shardSplit.maxNamespaceCount` | 100K | Per-shard namespace count that triggers a split. |
 | `dataCoord.shardSplit.maxConcurrentTasks` | 1 | Cluster-wide concurrent split tasks. |
 | `dataCoord.shardSplit.relabelBatchSize` | 256 | Segments relabeled to the target shards per redistribution round. |
+| `dataCoord.shardSplit.rehashMaxCollectionSize` | 0 (GB, disabled) | The largest collection whose shard count may be changed by hand. A rehash rewrites every shard at once and cannot drop a source until the rewrite is adopted — until then it is the only readable copy — so the collection is resident twice for the length of the rewrite. An automatic doubling costs one shard's worth of that; a rehash costs the whole collection. Set it to the largest collection the query nodes can hold twice. |
+| `dataCoord.shardSplit.taskRetention` | 1800s | How long a terminal (Done/Aborted) split task record is kept before it is reaped from meta. Declared but not yet consumed — the reaper lands with the split manager (§11). |
+| `dataCoord.shardSplit.minSiblingRatio` | 0.05 (not exported) | Guard against re-doubling a shard a previous doubling did not relieve: a doubling cuts on the next hash bit, so its halves should end up comparable, which they do not when one primary key dominates the shard. The trigger refuses to double a shard whose sibling half is smaller than this fraction of it, and warns instead. 0 disables. |
 
-Even with the switch on, split stays disabled on clusters with replication
-enabled, and on WAL backends that cannot host additional topics. The
-thresholds never trigger on a shard holding a single namespace (§6.1,
-step 1): such a shard cannot be split further, and its growth is bounded
-by the namespace hard limit instead.
+Even with the switch on, split stays disabled on WAL backends that cannot host
+additional topics. The thresholds never trigger on a shard holding a single
+namespace (§6.1, step 1): such a shard cannot be split further, and its growth
+is bounded by the namespace hard limit instead. On a replicated deployment the
+trigger belongs to the primary alone; a secondary's split tasks come from ack
+callbacks (§6.5).
 
 ## 10. Failure Handling
 
-- **Ordering: fence first.** The `SplitShard` fence is the first WAL
-  action and the single commit point; the new vchannels are created only
-  *after* it, because the barrier (allocated by DataCoord strictly after the
-  fence ack) guarantees `> T_switch` only when the fence has already
-  committed — a timetick allocated after `T_switch` is necessarily past it
-  on the monotonic global TSO (§6.1). This
-  does not change write availability: in *either* ordering the new shards
-  become routable only at the final routing/meta commit (the proxy cannot
-  see a new shard before its collection-meta write lands), so the
-  write-unavailability window for the split key range is fence → routing
-  commit either way, gated on one idempotent post-fence append (here
-  `CreateVChannel`; create-first would instead gate on `Activate`). The
-  one property fence-first gives up is a clean abort on a *target-creation*
-  failure: in create-first the targets are built before the fence, so a
-  creation failure aborts with no commitment; in fence-first the fence is
-  already committed, so a creation failure must roll forward — the append
-  is idempotent and retried across pchannel reassignment to success. We
-  accept losing that clean-abort for fewer phases, a cleaner disjoint
-  axis, and CDC uniformity.
-- **Before the fence** (state `Preparing`): abort is allowed — drop the
+- **Ordering: sources first, inside one broadcast.** The source replicas are
+  the first WAL action and the single commit point; every other replica is
+  appended only after they are durable, which is what makes a target's fresh
+  tick necessarily greater than `T_switch` (§6.1). The write-unavailability
+  window for the residues being moved is fence → routing commit either way,
+  because the proxy cannot see a new shard before its collection-meta write
+  lands. What this ordering gives up is a clean abort on a *target-creation*
+  failure: the fence is already committed, so a failure to place a target
+  must roll forward — the append is idempotent and the broadcaster retries it
+  across pchannel reassignment until it succeeds. Accepted for fewer phases,
+  a cleaner disjoint axis, and replication uniformity.
+- **Before the broadcast** (state `Preparing`): abort is allowed — drop the
   target shard metadata and the allocated vchannel names; nothing has been
-  written to any WAL, so there are no external side effects.
-- **After the fence**: forward-only. DataCoord records `T_switch` (returned
-  on the fence ack) on the task because the drain gates on it (§6.3). The
-  one window is a crash *after* the `SplitShard` append succeeds but
-  *before* `T_switch` is persisted: on restart DataCoord re-drives the FSM
-  and re-sends `SplitShard`, which hits the already-fenced source and
-  returns `SHARD_FENCED` — **carrying `T_switch` back**. The StreamingNode
-  persists `T_switch` durably in `VChannelMeta.split_time_tick` when it
-  fences (restored into the shard manager on its own restart) and returns it
-  on that error, so DataCoord re-records it and the drain stays correct even
-  across a DataCoord-crash + StreamingNode-restart double fault. The rest of
-  recovery is idempotent re-sends: a re-sent `SplitShard` is a no-op fence
-  (persisted `VCHANNEL_STATE_SPLITTED`), and a re-sent `CreateVChannel` is a
-  no-op once the target vchannel exists (a fresh re-create still floors past
-  `T_switch`). Target creation,
-  routing commit and redistribution are all idempotent appends or metadata
-  transactions; shard states advance monotonically and never go backwards.
-  DataCoord's only
-  persisted state is which FSM step it is on — and even that can be probed
-  from the StreamingNode (is the source fenced? do the targets exist?). No
-  `T_switch` value is captured, persisted, or recovered anywhere on the
-  coordinator side.
+  written to any WAL, so there are no external side effects. Once the fence
+  is in the WAL the task is forward-only, and a target is never abandoned:
+  it is write-routable from the moment the post-image publishes it, so
+  moving it to `Dropped` would discard rows already accepted and leave its
+  residues unowned. A split that cannot finish is finished forward.
+- **Shard states advance monotonically.** `Normal → Splitting → Dropped` for
+  a source, `Creating → Normal` for a target; staying put is always legal,
+  which is what makes a redelivered commit a no-op rather than a rejection.
+  A commit that would move a shard backwards is refused — and that refusal
+  alone, because it is the one a correct system also produces, may be re-read
+  as "a later commit already overtook this one" and skipped, so a retrying
+  callback cannot wedge the collection's DDL queue. Every other refusal names
+  an incoherent post-image and stays an error.
+
+| Crash point | Behaviour |
+|---|---|
+| `Preparing` | Task can be aborted; no trace in any WAL or meta. After the fence, abort is no longer allowed. |
+| After the broadcast is persisted, before/after any replica's append | The broadcaster re-drives it: the append-first group already persisted by `AckPartial` is not re-appended; a re-appended source replica of the *same* task succeeds idempotently and raises the recorded tick; a re-appended target or bystander replica is a no-op in every consumer. |
+| During the ack callback | The callback is retried to success. The routing apply is idempotent over the whole topology, and `CommitShardSplit` upserts by split task id. |
+| DataCoord dies before `Broadcast()` returns | On restart it re-issues the same message under the same idempotency key; the broadcaster resolves it to the original broadcast and returns that result. The callback had already recorded the task. |
+| StreamingNode restart | `SPLITTED` vchannels are restored from the recovery snapshot and their fence tombstones rebuilt by name (`split_time_tick`, `split_task_id`); a target is rebuilt from its own recovery meta; a still-fenced source's data sync service is recovered with its fence tick so it can still close itself once drained. |
+| Secondary proxy restart while gated | The replicate stream reconnects, replays from its checkpoint, and re-enters the wait. |
+| Forced promotion mid-split, adoption not yet replicated | `fixIncompleteBroadcastsForForcePromote` strips the replicate header from the incomplete task's pending replicas and re-drives them through the normal broadcast path, reproducing the two-phase order; the ack callback then creates or advances the task, and the new primary drains and adopts as primary. |
+| Forced promotion after the adoption replicated but before the local drain | The broadcast fix still runs, but the promotion's own ack callback queues behind the adoption's retrying one, which holds the cluster key until the local drain finishes. **Operator rule: do not force-promote in that window** (§6.5 rule 4); the mechanical fix is a follow-up (§11). |
+| Graceful switchover mid-split | Not reconciled by any code. **Operator rule: do not switch over while a split is in flight** (§6.5). |
+
+- **A re-sent fence recovers `T_switch`.** The StreamingNode persists it in
+  `VChannelMeta.split_time_tick` when it fences and keeps it in the shard
+  manager's tombstone, so a fence from a *different* task is refused with
+  `SHARD_FENCED` carrying the recorded tick and task id, and a fence from the
+  *same* task is accepted, appended again, and raises the recorded tick to
+  the later record's. Both fence records of one task seal the same data — the
+  vchannel took no DML in between — and the tick the ack callback records is
+  the one the last record landed on, so the drain gate stays exact.
 - **BM25/index rebuild failure**: the new shards stay un-adopted (the
   window simply extends), the rebuild is retried.
 
@@ -799,10 +1193,64 @@ by the namespace hard limit instead.
 
 | Component | Work |
 |-----------|------|
-| Common | `SplitShard` / `CreateVChannel` message types (codegen; `SplitShard` is `ExclusiveRequired` and its handler auto-flushes growing; `CreateVChannel` carries a DataCoord-allocated `BarrierTimeTick` lower bound, not `T_switch`'s value); no separate `Activate` or `ManualFlush` message; `SHARD_FENCED` / `ROUTING_STALE` error codes (unrecoverable; `SHARD_FENCED` carries `fenced_time_tick` = `T_switch`, read back on a re-fence to recover it); `etcdpb` shard routing fields; range routing table derived from collection meta |
-| DataCoord | Split task FSM driving the sequence via streaming-client appends (`SplitShard` to fence → `CreateVChannel` → routing commit; `T_switch` recorded on the task for the drain gate and recovered on a re-fence; the barrier is a DataCoord-allocated lower bound carried on `CreateVChannel`; start positions persisted into the collection meta; Broadcaster `ExclusiveCollectionName` key held across fence→create→routing-commit; recovery re-sends idempotent messages), trigger and split-point selection, batched relabel (segments + L0, skipping `IsImporting`), multi-round redistribution with the three-way (no source segment / checkpoint ≥ `T_switch` / no active import job) drain check, import-job queueing during `Fencing`, source-shard freeze, adoption gate |
-| StreamingCoord | vchannel allocation for existing collections (per-collection increasing shard index, distinct pchannels), pchannel headroom and expansion |
-| StreamingNode | Source side: `SplitShard` handler auto-flushes growing segments (embedding their IDs) and fences the vchannel on the lock interceptor, persisted fence state (the `VCHANNEL_STATE_SPLITTED = 3` reservation in `streaming.proto` covers this fenced source vchannel), rejection codes. Target side: `CreateVChannel` handler runs the three genesis paths (shard manager / RecoveryStorage observe / flusher) and floors the genesis timetick at the `BarrierTimeTick` DataCoord allocates after the fence ack, so the vchannel is born past `T_switch` (the barrier is a lower bound, not `T_switch`'s value; no separate `Creating`/`Activate` state); it also persists `split_time_tick` on the source `VChannelMeta` so a re-fence can return `T_switch`. The append's `LastConfirmedMessageID` is returned so DataCoord can persist it as the child start position |
-| Proxy | Range routing lookup, reject-and-refetch loop, routing-version header, cache invalidation on adoption |
+| Common | The `SplitShard` message type (`ExclusiveRequired` + `FreshTimeTick`, replicable, passed by the delegator msgstream's message-type filter, `delegatorMessageTypes` in `internal/distributed/streaming/msgstream_adaptor.go` — the querynode filter node still drops it, so the read-path handling lands separately), its header (collection/task id, sources, targets with residues, modulus, partition ids, flushed segment ids) and body (target genesis schema + routing post-image); `message.SplitShardRoleOf` — the one place a replica's role is decided; `BroadcastHeader.append_first_vchannels`; `AlterCollectionMessageUpdates.split_task_id` and `messageutil.RetiresVChannel`; no `CreateVChannel`, `DropVChannel`, `Activate` or `ManualFlush` message (message-type numbers 50 and 51 are reserved for the two that were folded in); the `SHARD_FENCED` error code (unrecoverable; it carries the recorded `T_switch` and the task that placed it **only on a re-fence** — the DML rejection path passes zeros, since a write client refreshes routing and never reads them) and `ROUTING_STALE` (defined and reserved, no producer emits it today, §3.3); `schemapb` shard routing fields (`CollectionShardInfo`, `HashRouting`, `ShardState`, `routing_modulus`, `shard_by`); residue routing table derived from collection meta (`internal/util/routing`) |
+| DataCoord | Issue the one `SplitShard` broadcast and nothing else on the write switch (`broadcastShardSplit` reads nothing back from it); `CommitShardSplit` (idempotent upsert of the split task by task id, per-source `T_switch`, target genesis checkpoints) and `CheckShardSplitDrained` (no live source segment / checkpoint ≥ that source's `T_switch` / no unfinished import job) as internal RPCs; the persisted `SplitShardTask` record and its store; trigger and split-point selection; batched relabel (segments + L0, skipping `IsImporting`); multi-round redistribution; source-shard freeze; issuing the adoption `AlterCollection` once drained |
+| RootCoord | The `SplitShard` ack callback (validate the post-image and cross-check it against the header → `CommitShardSplit` → `MetaTable.ApplyShardSplitRouting` → `BroadcastAlteredCollection` → expire caches), the drain gate on an `AlterCollection` that delists a vchannel, `CommitShardSplitRouting` (the adoption broadcast, over CChannel ∪ the current vchannels ∪ the post-image's, taking the collection's own resource keys), the topology bookkeeping an alter that changes the vchannel list must now do (`generalCnt`, pchannel stats), and the **user-facing entry point** in `internal/rootcoord/alter_collection_shard_num.go`: the declarative `collection.shardNum` property (recorded as an intent that DataCoord reconciles toward by rehashing; deleting the property withdraws it), the per-collection `collection.shardSplitMode` (`auto`/`manual`), and the checks rootcoord can answer in the caller's own response — shard split disabled, auto mode forbidding a hand-set count, minimum of 2, the `proxy.maxShardNum` cap, and pchannel headroom for a rehash (which holds sources and targets at once, so it needs `len(current vchannels) + desired`) |
+| StreamingCoord | vchannel allocation for existing collections (per-collection increasing shard index, distinct pchannels), pchannel headroom and expansion; the broadcaster's two-phase append with `AckPartial`; `WaitVChannelsAcked` and its shutdown release |
+| StreamingNode | Source side: the source replica auto-flushes growing segments (embedding their IDs), fences the vchannel and tears its registration down leaving a named `SplitFence` tombstone; recovery meta `VCHANNEL_STATE_SPLITTED` with `split_time_tick`, later `retired` and collected locally; the data sync service closes itself when its checkpoint passes the fence. Target side: the target replica runs the three genesis paths (shard manager / RecoveryStorage / flusher) from the body's `CreateCollection`-shaped schema, with no barrier and no `Creating`/`Activate` state. Bystander replicas are a deliberate no-op in all three; an unknown-role replica is refused |
+| Proxy | On this branch: on a secondary, the replicate service's name remap for `SplitShard` and for `AlterCollection(shard_split_routing)`, and the append gate. **Not on this branch** (fourth item below): the residue routing lookup, the reject-and-refetch loop on `SHARD_FENCED`, cache invalidation on adoption |
 | QueryNode | In-place child delegator spawn, fronting fan-out + reduce, delete/TimeTick forwarding, `min(tsafe)` serving timestamp, idempotent re-spawn on recovery, in-place handoff |
 | QueryCoord | Splitting flag (balance freeze), one-shot adoption, in-place delegator conversion, source-shard release |
+
+Four pieces the design assumes are **not** on this branch and land with the
+split manager's rebase:
+
+- the primary-only trigger, and with it the size trigger and the reconciler
+  that acts on a declared `collection.shardNum`;
+- deriving a task's `redistribution` mode (relabel vs. rewrite) from the
+  collection's routing mode — the ack callback deliberately does not set it,
+  and a task left `Unknown` must be refused rather than guessed;
+- reclaiming a terminal split task record. The catalog can delete one
+  (`DropSplitShardTask`) and `dataCoord.shardSplit.taskRetention` declares how
+  long to keep it, but nothing calls either yet, so today a finished split's
+  record stays in meta. Every place this document says a redelivered adoption
+  would ask about a reclaimed task describes the behaviour once the reaper
+  exists;
+- the proxy write path: the residue routing lookup, the reject-and-refetch loop
+  on `SHARD_FENCED`, and the cache invalidation on adoption. The proxy still
+  places rows by vchannel position, `internal/util/routing` has no proxy
+  consumer, `proxy.enableRoutingTable` has no reader, and no consumer of
+  `SHARD_FENCED` refreshes routing (§6.1 step 5). **The write switch must not be
+  enabled before the proxy routes by residue** — with the switch on and the
+  proxy still hashing by position, a split silently re-places every row of the
+  collection.
+
+One follow-up on code that IS here: the adoption ack callback should not hold
+the cluster resource key across its drain wait. It does today, because every
+broadcast carries `SharedCluster` and the locker cannot tell it from
+`ExclusiveCluster`, which queues a secondary's cluster-level DDL — a forced
+promotion's own ack callback included — behind a drain that can take hours
+(§6.5 rule 4). Changing that means changing locker semantics, so it is tracked
+separately rather than done here.
+
+**Rollout.** The feature is off by default (`dataCoord.shardSplit.enable=false`)
+and has no trigger on this branch, which is what makes the mixed-version cases
+below theoretical rather than live; they are the constraints for turning it on.
+All proto changes are additive (new fields, new enum values, message types 49
+with 50/51 reserved), and `etcd_meta.proto`'s `shard_infos` moved from a local
+`CollectionShardInfo` to `schemapb.CollectionShardInfo` whose field 1 is the
+same `last_truncate_time_tick` varint, so the persisted bytes are compatible.
+What is not compatible is behaviour:
+
+- an **old StreamingNode** has no handler for message type 49, so its shard
+  interceptor falls through to a plain append: the replica lands in the WAL and
+  the source is never fenced;
+- an **old secondary's proxy** neither remaps a replicated `SplitShard` into its
+  own namespace nor holds the non-append-first replicas behind the fence, so the
+  secondary would create targets under the primary's channel names, in any
+  order;
+- **rolling back** to a version without `VCHANNEL_STATE_SPLITTED` (3) after a
+  split has fenced a source registers that source as a live shard again.
+
+So: upgrade every node before enabling the switch, and do not roll back across a
+split that has already fenced.

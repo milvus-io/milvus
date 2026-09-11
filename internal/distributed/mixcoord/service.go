@@ -544,6 +544,12 @@ func (s *Server) AlterCollectionField(ctx context.Context, request *milvuspb.Alt
 	return s.mixCoord.AlterCollectionField(ctx, request)
 }
 
+// CommitShardSplitRouting commits a shard-split routing change into the
+// collection meta.
+func (s *Server) CommitShardSplitRouting(ctx context.Context, request *rootcoordpb.CommitShardSplitRoutingRequest) (*commonpb.Status, error) {
+	return s.mixCoord.CommitShardSplitRouting(ctx, request)
+}
+
 func (s *Server) AlterCollectionSchema(ctx context.Context, request *milvuspb.AlterCollectionSchemaRequest) (*milvuspb.AlterCollectionSchemaResponse, error) {
 	return s.mixCoord.AlterCollectionSchema(ctx, request)
 }
@@ -845,6 +851,16 @@ func (s *Server) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.
 // WatchChannels starts watch channels by give request
 func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsRequest) (*datapb.WatchChannelsResponse, error) {
 	return s.mixCoord.WatchChannels(ctx, req)
+}
+
+// CommitShardSplit records a committed shard split in datacoord.
+func (s *Server) CommitShardSplit(ctx context.Context, req *datapb.CommitShardSplitRequest) (*commonpb.Status, error) {
+	return s.mixCoord.CommitShardSplit(ctx, req)
+}
+
+// CheckShardSplitDrained reports whether a committed shard split's sources are drained.
+func (s *Server) CheckShardSplitDrained(ctx context.Context, req *datapb.CheckShardSplitDrainedRequest) (*datapb.CheckShardSplitDrainedResponse, error) {
+	return s.mixCoord.CheckShardSplitDrained(ctx, req)
 }
 
 // GetFlushState gets the flush state of the collection based on the provided flush ts and segment IDs.

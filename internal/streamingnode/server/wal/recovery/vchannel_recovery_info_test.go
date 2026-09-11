@@ -28,7 +28,7 @@ func TestNewVChannelRecoveryInfoFromVChannelMeta(t *testing.T) {
 	assert.False(t, info["vchannel-1"].dirty)
 	assert.False(t, info["vchannel-2"].dirty)
 
-	snapshot, shouldBeRemoved := info["vchannel-1"].ConsumeDirtyAndGetSnapshot()
+	snapshot, shouldBeRemoved := info["vchannel-1"].ConsumeDirtyAndGetSnapshot(0)
 	assert.Nil(t, snapshot)
 	assert.False(t, shouldBeRemoved)
 }
@@ -70,13 +70,13 @@ func TestNewVChannelRecoveryInfoFromCreateCollectionMessage(t *testing.T) {
 	assert.True(t, proto.Equal(schema1, schema1Saved))
 	assert.True(t, info.dirty)
 
-	snapshot, shouldBeRemoved := info.ConsumeDirtyAndGetSnapshot()
+	snapshot, shouldBeRemoved := info.ConsumeDirtyAndGetSnapshot(0)
 	assert.NotNil(t, snapshot)
 	assert.False(t, shouldBeRemoved)
 	assert.False(t, info.dirty)
 	assert.Equal(t, 1, len(info.meta.CollectionInfo.Schemas))
 
-	snapshot, shouldBeRemoved = info.ConsumeDirtyAndGetSnapshot()
+	snapshot, shouldBeRemoved = info.ConsumeDirtyAndGetSnapshot(0)
 	assert.Nil(t, snapshot)
 	assert.False(t, shouldBeRemoved)
 
@@ -106,12 +106,12 @@ func TestNewVChannelRecoveryInfoFromCreateCollectionMessage(t *testing.T) {
 	assert.Len(t, info.meta.CollectionInfo.Partitions, 3)
 	assert.True(t, info.dirty)
 
-	snapshot, shouldBeRemoved = info.ConsumeDirtyAndGetSnapshot()
+	snapshot, shouldBeRemoved = info.ConsumeDirtyAndGetSnapshot(0)
 	assert.NotNil(t, snapshot)
 	assert.False(t, shouldBeRemoved)
 	assert.False(t, info.dirty)
 
-	snapshot, shouldBeRemoved = info.ConsumeDirtyAndGetSnapshot()
+	snapshot, shouldBeRemoved = info.ConsumeDirtyAndGetSnapshot(0)
 	assert.Nil(t, snapshot)
 	assert.False(t, shouldBeRemoved)
 	assert.False(t, info.dirty)
@@ -121,12 +121,12 @@ func TestNewVChannelRecoveryInfoFromCreateCollectionMessage(t *testing.T) {
 	// idempotent
 	info.ObserveCreatePartition(message.MustAsImmutableCreatePartitionMessageV1(immutableMsg3))
 	assert.Len(t, info.meta.CollectionInfo.Partitions, 3)
-	snapshot, shouldBeRemoved = info.ConsumeDirtyAndGetSnapshot()
+	snapshot, shouldBeRemoved = info.ConsumeDirtyAndGetSnapshot(0)
 	assert.Nil(t, snapshot)
 	assert.False(t, shouldBeRemoved)
 	assert.False(t, info.dirty)
 
-	snapshot, shouldBeRemoved = info.ConsumeDirtyAndGetSnapshot()
+	snapshot, shouldBeRemoved = info.ConsumeDirtyAndGetSnapshot(0)
 	assert.Nil(t, snapshot)
 	assert.False(t, shouldBeRemoved)
 	assert.False(t, info.dirty)
@@ -158,12 +158,12 @@ func TestNewVChannelRecoveryInfoFromCreateCollectionMessage(t *testing.T) {
 	assert.NotContains(t, info.meta.CollectionInfo.Partitions, int64(101))
 	assert.True(t, info.dirty)
 
-	snapshot, shouldBeRemoved = info.ConsumeDirtyAndGetSnapshot()
+	snapshot, shouldBeRemoved = info.ConsumeDirtyAndGetSnapshot(0)
 	assert.NotNil(t, snapshot)
 	assert.False(t, shouldBeRemoved)
 	assert.False(t, info.dirty)
 
-	snapshot, shouldBeRemoved = info.ConsumeDirtyAndGetSnapshot()
+	snapshot, shouldBeRemoved = info.ConsumeDirtyAndGetSnapshot(0)
 	assert.Nil(t, snapshot)
 	assert.False(t, shouldBeRemoved)
 	assert.False(t, info.dirty)
@@ -173,12 +173,12 @@ func TestNewVChannelRecoveryInfoFromCreateCollectionMessage(t *testing.T) {
 	// idempotent
 	info.ObserveDropPartition(message.MustAsImmutableDropPartitionMessageV1(immutableMsg4))
 	assert.Len(t, info.meta.CollectionInfo.Partitions, 2)
-	snapshot, shouldBeRemoved = info.ConsumeDirtyAndGetSnapshot()
+	snapshot, shouldBeRemoved = info.ConsumeDirtyAndGetSnapshot(0)
 	assert.Nil(t, snapshot)
 	assert.False(t, shouldBeRemoved)
 	assert.False(t, info.dirty)
 
-	snapshot, shouldBeRemoved = info.ConsumeDirtyAndGetSnapshot()
+	snapshot, shouldBeRemoved = info.ConsumeDirtyAndGetSnapshot(0)
 	assert.Nil(t, snapshot)
 	assert.False(t, shouldBeRemoved)
 	assert.False(t, info.dirty)
@@ -212,7 +212,7 @@ func TestNewVChannelRecoveryInfoFromCreateCollectionMessage(t *testing.T) {
 	assert.True(t, proto.Equal(schema1, schema2Saved))
 	assert.True(t, info.dirty)
 
-	snapshot, shouldBeRemoved = info.ConsumeDirtyAndGetSnapshot()
+	snapshot, shouldBeRemoved = info.ConsumeDirtyAndGetSnapshot(0)
 	assert.NotNil(t, snapshot)
 	assert.False(t, shouldBeRemoved)
 	assert.False(t, info.dirty)
@@ -242,7 +242,7 @@ func TestNewVChannelRecoveryInfoFromCreateCollectionMessage(t *testing.T) {
 	assert.Equal(t, streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL, info.meta.CollectionInfo.Schemas[idx].State)
 	assert.Equal(t, schema2.Name, schema2Saved.Name)
 
-	snapshot, shouldBeRemoved = info.ConsumeDirtyAndGetSnapshot()
+	snapshot, shouldBeRemoved = info.ConsumeDirtyAndGetSnapshot(0)
 	assert.NotNil(t, snapshot)
 	assert.False(t, shouldBeRemoved)
 	assert.False(t, info.dirty)
@@ -273,12 +273,12 @@ func TestNewVChannelRecoveryInfoFromCreateCollectionMessage(t *testing.T) {
 	assert.Len(t, info.meta.CollectionInfo.Partitions, 2)
 	assert.True(t, info.dirty)
 
-	snapshot, shouldBeRemoved = info.ConsumeDirtyAndGetSnapshot()
+	snapshot, shouldBeRemoved = info.ConsumeDirtyAndGetSnapshot(0)
 	assert.NotNil(t, snapshot)
 	assert.True(t, shouldBeRemoved)
 	assert.False(t, info.dirty)
 
-	snapshot, shouldBeRemoved = info.ConsumeDirtyAndGetSnapshot()
+	snapshot, shouldBeRemoved = info.ConsumeDirtyAndGetSnapshot(0)
 	assert.Nil(t, snapshot)
 	assert.True(t, shouldBeRemoved)
 }

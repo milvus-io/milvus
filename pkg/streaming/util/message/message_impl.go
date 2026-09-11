@@ -236,13 +236,19 @@ func (m *messageImpl) WithBroadcastID(id uint64) BroadcastMutableMessage {
 }
 
 // OverwriteReplicateVChannel overwrites the vchannel of the replicate message.
-func (m *messageImpl) OverwriteReplicateVChannel(vchannel string, broadcastVChannels ...[]string) {
+//
+// It returns an error only for a malformed BROADCAST HEADER, which arrives from
+// another cluster and must therefore fail the message rather than the process:
+// the replicate stream re-delivers the same bytes after every reconnect, so a
+// panic here is a crash loop, not a diagnosis. The other refusals stay panics --
+// they can only be reached by a local caller passing the wrong arguments.
+func (m *messageImpl) OverwriteReplicateVChannel(vchannel string, broadcastVChannels ...[]string) error {
 	if !m.properties.Exist(messageVChannel) {
 		panic("vchannel not set in properties of message")
 	}
 	m.properties.Set(messageVChannel, vchannel)
 	if !m.properties.Exist(messageBroadcastHeader) {
-		return
+		return nil
 	}
 	if len(broadcastVChannels) == 0 {
 		panic("broadcast vchannels not set when overwrite replicate vchannel")
@@ -250,6 +256,38 @@ func (m *messageImpl) OverwriteReplicateVChannel(vchannel string, broadcastVChan
 	bh := m.broadcastHeader()
 	if len(bh.Vchannels) != len(broadcastVChannels[0]) {
 		panic("broadcast vchannels length mismatch")
+	}
+	// AppendFirstVchannels names a SUBSET of Vchannels, so it is rewritten
+	// through the very mapping the caller just supplied for that list, position
+	// by position, rather than through a second mapping that could disagree
+	// with it. Leaving it in the source cluster's namespace would leave the
+	// secondary's append gate naming vchannels that exist nowhere in this
+	// cluster -- it would wait on them forever.
+	if len(bh.AppendFirstVchannels) > 0 {
+		mapping := make(map[string]string, len(bh.Vchannels))
+		for idx, vchannel := range bh.Vchannels {
+			mapping[vchannel] = broadcastVChannels[0][idx]
+		}
+		appendFirst := make([]string, 0, len(bh.AppendFirstVchannels))
+		for _, vchannel := range bh.AppendFirstVchannels {
+			mapped, ok := mapping[vchannel]
+			if !ok {
+				// A broadcast header whose append-first list is not a subset of
+				// its own vchannel list is malformed at the source; there is no
+				// name to map it to. Refuse the message -- carrying a foreign
+				// name through would leave the secondary's append gate waiting
+				// on a vchannel that exists nowhere here -- but refuse it as an
+				// error, since nothing local produced this header.
+				// Input-classed: the content of the message being remapped is
+				// what forces this branch, not any state of this cluster. The
+				// replicate path wraps it into a ReplicateViolation, which is
+				// what the stream reports.
+				return merr.WrapErrParameterInvalidMsg(
+					"append first vchannel %s is not one of the broadcast vchannels %v", vchannel, bh.Vchannels)
+			}
+			appendFirst = append(appendFirst, mapped)
+		}
+		bh.AppendFirstVchannels = appendFirst
 	}
 	bh.Vchannels = broadcastVChannels[0]
 	bhVal, err := EncodeProto(bh)
@@ -264,6 +302,7 @@ func (m *messageImpl) OverwriteReplicateVChannel(vchannel string, broadcastVChan
 		txnCtx.Keepalive = TxnKeepaliveInfinite
 		m.WithTxnContext(*txnCtx)
 	}
+	return nil
 }
 
 // OverwriteBroadcastHeader overwrites the broadcast header of the message.

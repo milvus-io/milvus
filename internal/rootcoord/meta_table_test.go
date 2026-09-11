@@ -48,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -4892,4 +4893,316 @@ func TestMetaTableReloadNormalizesMaxFieldIDProperty(t *testing.T) {
 	require.NoError(t, err)
 	props := common.CloneKeyValuePairs(coll.Properties).ToMap()
 	require.Equal(t, "105", props[common.MaxFieldIDKey])
+}
+
+// TestMetaTableAlterCollectionKeepsTopologyCountersInStep covers the two
+// counters that are maintained incrementally rather than recomputed, and so go
+// wrong when an alter moves a collection's shard topology.
+func TestMetaTableAlterCollectionKeepsTopologyCountersInStep(t *testing.T) {
+	channel.ResetStaticPChannelStatsManager()
+	channel.RecoverPChannelStatsManager([]string{})
+	t.Cleanup(channel.ResetStaticPChannelStatsManager)
+
+	partitions := []*model.Partition{
+		{PartitionID: 10, PartitionName: "_default", State: pb.PartitionState_PartitionCreated},
+		{PartitionID: 11, PartitionName: "p1", State: pb.PartitionState_PartitionCreated},
+	}
+	// One shard, two partitions: what the collection contributed when it was
+	// created.
+	oldColl := &model.Collection{
+		CollectionID:         100,
+		ShardsNum:            1,
+		VirtualChannelNames:  []string{"by-dev-rootcoord-dml_0_100v0"},
+		PhysicalChannelNames: []string{"by-dev-rootcoord-dml_0"},
+		Partitions:           partitions,
+	}
+	// A split fences that shard and creates two targets: the count of routable
+	// shards goes to 2 and the vchannel list grows to three.
+	newColl := &model.Collection{
+		CollectionID:         100,
+		ShardsNum:            2,
+		VirtualChannelNames:  []string{"by-dev-rootcoord-dml_0_100v0", "by-dev-rootcoord-dml_1_100v1", "by-dev-rootcoord-dml_2_100v2"},
+		PhysicalChannelNames: []string{"by-dev-rootcoord-dml_0", "by-dev-rootcoord-dml_1", "by-dev-rootcoord-dml_2"},
+		Partitions:           partitions,
+	}
+
+	// The state AddCollection would have left behind for oldColl.
+	mt := &MetaTable{generalCnt: oldColl.GetPartitionNum(true) * int(oldColl.ShardsNum)}
+	channel.StaticPChannelStatsManager.MustGet().AddVChannel(oldColl.VirtualChannelNames...)
+
+	mt.applyAlterCollectionTopologyLocked(oldColl, newColl)
+
+	// generalCnt now reflects the post-split shape, so the drop that later
+	// subtracts the current shape brings it back to zero instead of below it.
+	assert.Equal(t, newColl.GetPartitionNum(true)*int(newColl.ShardsNum), mt.generalCnt)
+	mt.generalCnt -= newColl.GetPartitionNum(true) * int(newColl.ShardsNum)
+	assert.Equal(t, 0, mt.generalCnt)
+
+	// The split targets are registered on their own pchannels; the fenced source
+	// stays registered because its vchannel is still in the list.
+	stats := channel.StaticPChannelStatsManager.MustGet()
+	for _, pchannel := range newColl.PhysicalChannelNames {
+		assert.Equal(t, 1, stats.GetPChannelStats(types.ChannelID{Name: pchannel}).VChannelCount(), pchannel)
+	}
+
+	// Retiring the source's vchannel deregisters it, and nothing else.
+	retired := &model.Collection{
+		CollectionID:         100,
+		ShardsNum:            2,
+		VirtualChannelNames:  newColl.VirtualChannelNames[1:],
+		PhysicalChannelNames: newColl.PhysicalChannelNames[1:],
+		Partitions:           partitions,
+	}
+	mt.applyAlterCollectionTopologyLocked(newColl, retired)
+	assert.Equal(t, 0, stats.GetPChannelStats(types.ChannelID{Name: "by-dev-rootcoord-dml_0"}).VChannelCount())
+	assert.Equal(t, 1, stats.GetPChannelStats(types.ChannelID{Name: "by-dev-rootcoord-dml_1"}).VChannelCount())
+}
+
+// TestApplyShardSplitRouting pins the meta half of the SplitShard ack callback:
+// the post-image the message carries -- the grown vchannel list, every shard's
+// state and residues, the modulus and shard_by -- lands on the collection
+// exactly as the shard_split_routing field mask lands it, and the two
+// incrementally-maintained topology counters move with it.
+func TestApplyShardSplitRouting(t *testing.T) {
+	channel.ResetStaticPChannelStatsManager()
+	channel.RecoverPChannelStatsManager([]string{})
+	t.Cleanup(channel.ResetStaticPChannelStatsManager)
+
+	const collectionID = int64(100)
+	v0, v1, v2 := "by-dev-rootcoord-dml_0_100v0", "by-dev-rootcoord-dml_1_100v1", "by-dev-rootcoord-dml_2_100v2"
+	p0, p1, p2 := "by-dev-rootcoord-dml_0", "by-dev-rootcoord-dml_1", "by-dev-rootcoord-dml_2"
+
+	postImage := func() *messagespb.AlterCollectionMessageUpdates {
+		return &messagespb.AlterCollectionMessageUpdates{
+			VirtualChannelNames:  []string{v0, v1, v2},
+			PhysicalChannelNames: []string{p0, p1, p2},
+			ShardInfos: []*schemapb.CollectionShardInfo{
+				{State: schemapb.ShardState_ShardSplitting},
+				pbShard(schemapb.ShardState_ShardCreating, 0),
+				pbShard(schemapb.ShardState_ShardCreating, 1),
+			},
+			RoutingModulus: 2,
+			ShardBy:        "hash(pk)",
+		}
+	}
+
+	newMeta := func() (*MetaTable, *mocks.RootCoordCatalog) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		mt := &MetaTable{
+			catalog: catalog,
+			names:   newNameDb(),
+			aliases: newNameDb(),
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				collectionID: {
+					CollectionID:         collectionID,
+					Name:                 "collection",
+					DBName:               "db",
+					DBID:                 1,
+					State:                pb.CollectionState_CollectionCreated,
+					ShardsNum:            1,
+					VirtualChannelNames:  []string{v0},
+					PhysicalChannelNames: []string{p0},
+					Partitions: []*model.Partition{
+						{PartitionID: 10, PartitionName: "_default", State: pb.PartitionState_PartitionCreated},
+					},
+				},
+			},
+		}
+		mt.names.insert("db", "collection", collectionID)
+		mt.generalCnt = 1
+		return mt, catalog
+	}
+
+	t.Run("commits the post-image", func(t *testing.T) {
+		mt, catalog := newMeta()
+		var savedNew *model.Collection
+		catalog.EXPECT().AlterCollection(mock.Anything, mock.Anything, mock.Anything, metastore.MODIFY, uint64(100), false).
+			Run(func(_ context.Context, _ *model.Collection, newColl *model.Collection, _ metastore.AlterType, _ uint64, _ bool) {
+				savedNew = newColl
+			}).Return(nil).Once()
+
+		require.NoError(t, mt.ApplyShardSplitRouting(context.Background(), collectionID, postImage(), 100))
+
+		coll := mt.collID2Meta[collectionID]
+		require.Equal(t, []string{v0, v1, v2}, coll.VirtualChannelNames)
+		require.Equal(t, []string{p0, p1, p2}, coll.PhysicalChannelNames)
+		require.EqualValues(t, 2, coll.RoutingModulus)
+		require.Equal(t, "hash(pk)", coll.ShardBy)
+		require.Equal(t, schemapb.ShardState_ShardSplitting, coll.ShardInfos[v0].State)
+		require.Equal(t, []uint64{0}, coll.ShardInfos[v1].Buckets)
+		require.Equal(t, []uint64{1}, coll.ShardInfos[v2].Buckets)
+		// Only the two Creating targets are routable; the fenced source is not.
+		require.EqualValues(t, 2, coll.ShardsNum)
+		require.EqualValues(t, 100, coll.UpdateTimestamp)
+		require.Same(t, coll, savedNew)
+
+		// The counters that are maintained incrementally moved with the topology.
+		require.Equal(t, 2, mt.generalCnt)
+		stats := channel.StaticPChannelStatsManager.MustGet()
+		for _, pchannel := range []string{p1, p2} {
+			require.Equal(t, 1, stats.GetPChannelStats(types.ChannelID{Name: pchannel}).VChannelCount(), pchannel)
+		}
+	})
+
+	t.Run("a catalog failure leaves the meta untouched", func(t *testing.T) {
+		mt, catalog := newMeta()
+		catalog.EXPECT().AlterCollection(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return(errors.New("etcd down")).Once()
+
+		require.Error(t, mt.ApplyShardSplitRouting(context.Background(), collectionID, postImage(), 100))
+		require.Equal(t, []string{v0}, mt.collID2Meta[collectionID].VirtualChannelNames)
+		require.EqualValues(t, 1, mt.collID2Meta[collectionID].ShardsNum)
+	})
+
+	t.Run("an unknown collection is reported, not created", func(t *testing.T) {
+		mt, _ := newMeta()
+		err := mt.ApplyShardSplitRouting(context.Background(), 424242, postImage(), 100)
+		require.ErrorIs(t, err, errAlterCollectionNotFound)
+	})
+
+	// The three no-write outcomes, decided here rather than by the caller: the
+	// caller cannot hold ddLock across its own datacoord call, so a decision it
+	// made on an earlier snapshot could be stale by the time the write lands.
+	t.Run("a post-image the collection already carries is reported, not rewritten", func(t *testing.T) {
+		mt, catalog := newMeta()
+		catalog.EXPECT().AlterCollection(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return(nil).Once()
+		require.NoError(t, mt.ApplyShardSplitRouting(context.Background(), collectionID, postImage(), 100))
+
+		err := mt.ApplyShardSplitRouting(context.Background(), collectionID, postImage(), 200)
+		require.ErrorIs(t, err, errShardSplitRoutingAlreadyApplied)
+		// No second catalog write, and the first apply's timestamp stands.
+		require.EqualValues(t, 100, mt.collID2Meta[collectionID].UpdateTimestamp)
+	})
+
+	t.Run("a post-image a later commit overtook is reported, not applied", func(t *testing.T) {
+		mt, catalog := newMeta()
+		catalog.EXPECT().AlterCollection(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return(nil).Twice()
+		require.NoError(t, mt.ApplyShardSplitRouting(context.Background(), collectionID, postImage(), 100))
+		// The adoption: source delisted, both targets adopted.
+		adoption := &messagespb.AlterCollectionMessageUpdates{
+			VirtualChannelNames:  []string{v1, v2},
+			PhysicalChannelNames: []string{p1, p2},
+			ShardInfos: []*schemapb.CollectionShardInfo{
+				pbShard(schemapb.ShardState_ShardNormal, 0),
+				pbShard(schemapb.ShardState_ShardNormal, 1),
+			},
+			RoutingModulus: 2,
+			ShardBy:        "hash(pk)",
+		}
+		require.NoError(t, mt.ApplyShardSplitRouting(context.Background(), collectionID, adoption, 200))
+
+		// The write switch redelivered after the adoption. Writing it would put
+		// the retired source back and un-adopt both targets.
+		err := mt.ApplyShardSplitRouting(context.Background(), collectionID, postImage(), 300)
+		require.ErrorIs(t, err, errShardSplitRoutingSuperseded)
+		require.Equal(t, []string{v1, v2}, mt.collID2Meta[collectionID].VirtualChannelNames)
+		require.EqualValues(t, 200, mt.collID2Meta[collectionID].UpdateTimestamp)
+	})
+
+	t.Run("a sideways post-image is an error, not a skip", func(t *testing.T) {
+		mt, catalog := newMeta()
+		catalog.EXPECT().AlterCollection(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return(nil).Twice()
+		require.NoError(t, mt.ApplyShardSplitRouting(context.Background(), collectionID, postImage(), 100))
+		// The source released, the targets not yet adopted.
+		released := postImage()
+		released.ShardInfos[0] = &schemapb.CollectionShardInfo{State: schemapb.ShardState_ShardDropped}
+		require.NoError(t, mt.ApplyShardSplitRouting(context.Background(), collectionID, released, 200))
+
+		// Incoherent in BOTH directions at once: it wants the released source
+		// back to fenced (the meta is ahead there) while adopting a target the
+		// meta has not adopted (the post-image is ahead there). Neither "already
+		// done" nor "overtaken" -- a coordinator bug, and it must stay loud.
+		sideways := postImage()
+		sideways.ShardInfos[0] = &schemapb.CollectionShardInfo{State: schemapb.ShardState_ShardSplitting}
+		sideways.ShardInfos[1] = pbShard(schemapb.ShardState_ShardNormal, 0)
+		err := mt.ApplyShardSplitRouting(context.Background(), collectionID, sideways, 300)
+		require.ErrorIs(t, err, merr.ErrServiceInternal)
+		require.NotErrorIs(t, err, errShardSplitRoutingSuperseded)
+		require.EqualValues(t, 200, mt.collID2Meta[collectionID].UpdateTimestamp)
+	})
+
+	// The namespace routing key is valid only for a collection whose rows have
+	// ALWAYS been placed by it; back-filling it onto a primary-key placed
+	// collection would send a namespace's new rows to one shard while its
+	// existing rows stay everywhere. Refused before any write.
+	t.Run("the namespace routing key on a primary-key placed collection", func(t *testing.T) {
+		mt, _ := newMeta()
+		mt.collID2Meta[collectionID].Properties = []*commonpb.KeyValuePair{
+			{Key: common.NamespaceShardingEnabledKey, Value: "false"},
+			{Key: common.NamespaceModeKey, Value: common.NamespaceModePartitionKey},
+		}
+		namespaced := postImage()
+		namespaced.ShardBy = namespaceShardBy
+
+		err := mt.ApplyShardSplitRouting(context.Background(), collectionID, namespaced, 100)
+		require.ErrorIs(t, err, merr.ErrServiceInternal)
+		require.ErrorContains(t, err, "placed by primary key")
+		require.Equal(t, []string{v0}, mt.collID2Meta[collectionID].VirtualChannelNames)
+	})
+
+	// Supersession answers a question about shard STATES only, so an incoherent
+	// post-image whose states happen to line up satisfies it by accident. Only a
+	// backwards shard transition -- the one refusal a later commit can also
+	// cause -- may be re-read as supersession; every other refusal names
+	// something no later commit could have made true, and must stay loud.
+	t.Run("the namespace routing key on an already-split collection is an error, not a skip", func(t *testing.T) {
+		mt, catalog := newMeta()
+		catalog.EXPECT().AlterCollection(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return(nil).Once()
+		mt.collID2Meta[collectionID].Properties = []*commonpb.KeyValuePair{
+			{Key: common.NamespaceShardingEnabledKey, Value: "false"},
+			{Key: common.NamespaceModeKey, Value: common.NamespaceModePartitionKey},
+		}
+		require.NoError(t, mt.ApplyShardSplitRouting(context.Background(), collectionID, postImage(), 100))
+
+		// Same topology, same modulus, same states -- so the collection is
+		// trivially "at or beyond" it -- but it back-fills a routing key this
+		// collection's rows were never placed by.
+		namespaced := postImage()
+		namespaced.ShardBy = namespaceShardBy
+		err := mt.ApplyShardSplitRouting(context.Background(), collectionID, namespaced, 200)
+		require.ErrorIs(t, err, merr.ErrServiceInternal)
+		require.NotErrorIs(t, err, errShardSplitRoutingSuperseded)
+		require.ErrorContains(t, err, "placed by primary key")
+		require.Equal(t, "hash(pk)", mt.collID2Meta[collectionID].ShardBy)
+		require.EqualValues(t, 100, mt.collID2Meta[collectionID].UpdateTimestamp)
+	})
+
+	t.Run("a shrinking modulus is an error, not a skip", func(t *testing.T) {
+		mt, catalog := newMeta()
+		catalog.EXPECT().AlterCollection(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return(nil).Once()
+		require.NoError(t, mt.ApplyShardSplitRouting(context.Background(), collectionID, postImage(), 100))
+
+		// Every shard stays where it is, so supersession would say yes; the
+		// modulus, which is the divisor every residue was computed against,
+		// goes backwards.
+		shrunk := postImage()
+		shrunk.RoutingModulus = 1
+		err := mt.ApplyShardSplitRouting(context.Background(), collectionID, shrunk, 200)
+		require.ErrorIs(t, err, merr.ErrServiceInternal)
+		require.NotErrorIs(t, err, errShardSplitRoutingSuperseded)
+		require.ErrorContains(t, err, "cannot take it down to")
+		require.EqualValues(t, 2, mt.collID2Meta[collectionID].RoutingModulus)
+		require.EqualValues(t, 100, mt.collID2Meta[collectionID].UpdateTimestamp)
+	})
+
+	// A shard_by back-fill leaves every state equal, so the collection is
+	// trivially "at or beyond" the post-image -- yet the commit still has work to
+	// do. Asking supersession before forward-legality would drop it silently.
+	t.Run("a shard_by back-fill on an otherwise identical topology still applies", func(t *testing.T) {
+		mt, catalog := newMeta()
+		catalog.EXPECT().AlterCollection(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return(nil).Twice()
+		noShardBy := postImage()
+		noShardBy.ShardBy = ""
+		require.NoError(t, mt.ApplyShardSplitRouting(context.Background(), collectionID, noShardBy, 100))
+		require.Empty(t, mt.collID2Meta[collectionID].ShardBy)
+
+		require.NoError(t, mt.ApplyShardSplitRouting(context.Background(), collectionID, postImage(), 200))
+		require.Equal(t, "hash(pk)", mt.collID2Meta[collectionID].ShardBy)
+	})
 }

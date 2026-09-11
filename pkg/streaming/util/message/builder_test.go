@@ -2,6 +2,7 @@ package message_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -258,8 +259,55 @@ func TestReplicateBuilder(t *testing.T) {
 	assert.True(t, msgID.EQ(replicateMsg.ReplicateHeader().MessageID))
 	assert.True(t, msgID.EQ(replicateMsg.ReplicateHeader().LastConfirmedMessageID))
 
-	replicateMsg.OverwriteReplicateVChannel("v11", []string{"v11", "v12"})
+	require.NoError(t, replicateMsg.OverwriteReplicateVChannel("v11", []string{"v11", "v12"}))
 	assert.Equal(t, "v11", replicateMsg.VChannel())
 	assert.Equal(t, []string{"v11", "v12"}, replicateMsg.BroadcastHeader().VChannels)
 	assert.Equal(t, uint64(1), replicateMsg.BroadcastHeader().BroadcastID)
+}
+
+// TestOverwriteReplicateVChannelRemapsAppendFirst asserts the broadcast header's
+// append-first list is rewritten through the SAME mapping as the vchannel list
+// it is a subset of.
+//
+// It is what a secondary cluster's append gate waits on, so a name left in the
+// source cluster's namespace does not merely look wrong: it names a vchannel
+// that exists nowhere here, and the gate waits on it until its context ends.
+func TestOverwriteReplicateVChannelRemapsAppendFirst(t *testing.T) {
+	msg := message.NewSplitShardMessageBuilderV2().
+		WithHeader(&message.SplitShardMessageHeader{CollectionId: 1}).
+		WithBody(&message.SplitShardMessageBody{}).
+		WithBroadcast(
+			[]string{"p0_1v0", "p1_1v1", "p0_vcchan"},
+			message.OptBuildBroadcastAppendFirst("p0_1v0"),
+		).
+		MustBuildBroadcast().
+		WithBroadcastID(9)
+
+	msgID := walimplstest.NewTestMessageID(1)
+	var immutableMsg message.ImmutableMessage
+	for _, replica := range msg.SplitIntoMutableMessage() {
+		if replica.VChannel() == "p1_1v1" {
+			immutableMsg = replica.WithTimeTick(100).WithLastConfirmed(msgID).IntoImmutableMessage(msgID)
+			break
+		}
+	}
+	require.NotNil(t, immutableMsg)
+
+	replicateMsg := message.MustNewReplicateMessage("by-dev", immutableMsg.IntoImmutableMessageProto())
+
+	// The mapping is POSITIONAL: the caller walks the header's own vchannel list
+	// and supplies one target name per position. The list's order is whatever
+	// the header was encoded with (it is deduplicated through a set), so the
+	// target list is derived from it rather than written out by hand.
+	sourceVChannels := replicateMsg.BroadcastHeader().VChannels
+	targetVChannels := make([]string, 0, len(sourceVChannels))
+	for _, vchannel := range sourceVChannels {
+		targetVChannels = append(targetVChannels, strings.Replace(vchannel, "p", "q", 1))
+	}
+	require.NoError(t, replicateMsg.OverwriteReplicateVChannel("q1_1v1", targetVChannels))
+
+	bh := replicateMsg.BroadcastHeader()
+	assert.Equal(t, targetVChannels, bh.VChannels)
+	assert.Equal(t, []string{"q0_1v0"}, bh.AppendFirstVChannels)
+	assert.Equal(t, "q1_1v1", replicateMsg.VChannel())
 }

@@ -62,6 +62,11 @@ type BroadcastService interface {
 
 	// Ack sends a broadcast ack to the streaming service.
 	Ack(ctx context.Context, msg message.ImmutableMessage) error
+
+	// WaitVChannelsAcked blocks until every named vchannel of the given
+	// broadcast has been acked in this cluster, or the context ends.
+	// The vchannels are named in THIS cluster's namespace.
+	WaitVChannelsAcked(ctx context.Context, broadcastID uint64, vchannels []string) error
 }
 
 // Client is the interface of log service client.

@@ -55,19 +55,39 @@ func (b *pendingBroadcastTask) Execute(ctx context.Context) error {
 		return err
 	}
 
+	// The append-first group lands, and is persisted, before anything else. A
+	// shard split puts its source vchannels here: the fence must be in the WAL
+	// before any target replica takes its time tick.
+	first, rest := b.splitAppendFirst()
+	if len(first) > 0 {
+		results, pending := b.appendGroup(ctx, first)
+		// Persist whatever landed before deciding whether to retry: a rehash
+		// can name several append-first vchannels, and a partial append (some
+		// land, some fail) must not lose the landed subset — it is genuine,
+		// durable progress and `ack` is per-vchannel idempotent, so acking it
+		// now is safe even if the rest of the group is later retried.
+		if len(results) > 0 {
+			if err := b.AckPartial(ctx, results); err != nil {
+				b.Logger().Warn(ctx, "broadcast task persist the append-first group failed", mlog.Err(err))
+				return err
+			}
+			b.Logger().Info(ctx, "broadcast task landed the append-first group", mlog.Int("count", len(results)))
+		}
+		if len(pending) > 0 {
+			b.pendingMessages = append(pending, rest...)
+			b.UpdateInstantWithNextBackOff()
+			return errBroadcastTaskIsNotDone
+		}
+		b.pendingMessages = rest
+	}
+
 	if len(b.pendingMessages) > 0 {
 		b.Logger().Debug(ctx, "broadcast task is polling to make sent...", mlog.Int("pendingMessages", len(b.pendingMessages)))
-		resps := streaming.WAL().AppendMessages(ctx, b.pendingMessages...)
-		newPendings := make([]message.MutableMessage, 0)
-		for idx, resp := range resps.Responses {
-			if resp.Error != nil {
-				b.Logger().Warn(ctx, "broadcast task append message failed", mlog.Int("idx", idx), mlog.Err(resp.Error))
-				newPendings = append(newPendings, b.pendingMessages[idx])
-				continue
-			}
-			b.appendResult[b.pendingMessages[idx].VChannel()] = resp.AppendResult
+		results, pending := b.appendGroup(ctx, b.pendingMessages)
+		for vchannel, result := range results {
+			b.appendResult[vchannel] = result
 		}
-		b.pendingMessages = newPendings
+		b.pendingMessages = pending
 		b.Logger().Info(ctx, "broadcast task make a new broadcast done", mlog.Int("backoffRetryMessages", len(b.pendingMessages)))
 	}
 	if len(b.pendingMessages) == 0 {
@@ -80,6 +100,49 @@ func (b *pendingBroadcastTask) Execute(ctx context.Context) error {
 	}
 	b.UpdateInstantWithNextBackOff()
 	return errBroadcastTaskIsNotDone
+}
+
+// splitAppendFirst partitions the still-pending replicas into the append-first
+// group named by the broadcast header and the rest. Already-acked replicas are
+// not pending, so after a restart that persisted the first group this returns
+// an empty first group and the task proceeds to the rest.
+//
+// A SECONDARY cluster's liveness depends on how Execute uses this split, not
+// merely on the tick ordering it gives this cluster: the whole group must be
+// appended (and AckPartial-persisted) BEFORE the rest is appended, so that every
+// append-first replica's tick is strictly below every other replica's. That is
+// premise (a) of the append gate's progress argument in
+// internal/distributed/streaming/replicate_service.go
+// (waitAppendFirstReplicas). Appending the rest concurrently with this group
+// would keep every test in this package green and wedge a secondary's replicate
+// streams.
+func (b *pendingBroadcastTask) splitAppendFirst() (first []message.MutableMessage, rest []message.MutableMessage) {
+	appendFirst := typeutil.NewSet(b.header().AppendFirstVChannels...)
+	for _, msg := range b.pendingMessages {
+		if appendFirst.Contain(msg.VChannel()) {
+			first = append(first, msg)
+		} else {
+			rest = append(rest, msg)
+		}
+	}
+	return first, rest
+}
+
+// appendGroup appends one group of replicas and returns the results of the ones
+// that landed and the ones to retry.
+func (b *pendingBroadcastTask) appendGroup(ctx context.Context, msgs []message.MutableMessage) (map[string]*types.AppendResult, []message.MutableMessage) {
+	resps := streaming.WAL().AppendMessages(ctx, msgs...)
+	results := make(map[string]*types.AppendResult, len(msgs))
+	pending := make([]message.MutableMessage, 0)
+	for idx, resp := range resps.Responses {
+		if resp.Error != nil {
+			b.Logger().Warn(ctx, "broadcast task append message failed", mlog.Int("idx", idx), mlog.FieldVChannel(msgs[idx].VChannel()), mlog.Err(resp.Error))
+			pending = append(pending, msgs[idx])
+			continue
+		}
+		results[msgs[idx].VChannel()] = resp.AppendResult
+	}
+	return results, pending
 }
 
 // pendingBroadcastTaskArray is a heap of pendingBroadcastTask.

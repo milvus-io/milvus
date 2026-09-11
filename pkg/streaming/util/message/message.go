@@ -137,7 +137,12 @@ type ReplicateMutableMessage interface {
 	MutableMessage
 
 	// OverwriteReplicateVChannel overwrites the vchannel of the replicate message.
-	OverwriteReplicateVChannel(vchannel string, broadcastVChannels ...[]string)
+	//
+	// Returns an error, rather than panicking, for the one inconsistency that a
+	// REMOTE cluster can put in the message: a broadcast header whose
+	// append-first list is not a subset of its own vchannel list. Everything
+	// else it refuses is a local programming error and still panics.
+	OverwriteReplicateVChannel(vchannel string, broadcastVChannels ...[]string) error
 }
 
 // BroadcastMutableMessage is the broadcast message interface.

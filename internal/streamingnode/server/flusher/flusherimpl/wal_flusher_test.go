@@ -6,20 +6,24 @@ package flusherimpl
 import (
 	"context"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/flushcommon/pipeline"
+	fcutil "github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/mock_storage"
@@ -39,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -774,4 +779,716 @@ func newMockWAL(t *testing.T, maybe bool) *mock_wal.MockWAL {
 		read.Maybe()
 	}
 	return w
+}
+
+// newFlusherSplitShardMessage builds one replica of a SplitShard broadcast,
+// landing on the given vchannel. Its role is decided from whether vchannel is
+// the source or one of the targets, exactly as production dispatch decides it.
+func newFlusherSplitShardMessage(t *testing.T, vchannel, source string, targets []string, collectionID int64, timetick uint64) message.ImmutableSplitShardMessageV2 {
+	t.Helper()
+	splitTargets := make([]*message.SplitShardTarget, 0, len(targets))
+	for i, target := range targets {
+		splitTargets = append(splitTargets, &message.SplitShardTarget{
+			Vchannel: target,
+			Routing:  &schemapb.HashRouting{Buckets: []uint64{uint64(i)}},
+		})
+	}
+	msg := message.NewSplitShardMessageBuilderV2().
+		WithVChannel(vchannel).
+		WithHeader(&message.SplitShardMessageHeader{
+			CollectionId:    collectionID,
+			SplitTaskId:     100,
+			PartitionIds:    []int64{2},
+			SourceVchannels: []string{source},
+			Targets:         splitTargets,
+		}).
+		WithBody(&message.SplitShardMessageBody{
+			Genesis: &msgpb.CreateCollectionRequest{
+				CollectionSchema: &schemapb.CollectionSchema{Name: "col"},
+			},
+		}).
+		MustBuildMutable().
+		WithTimeTick(timetick).
+		WithLastConfirmedUseMessageID().
+		IntoImmutableMessage(rmq.NewRmqID(4))
+	return message.MustAsImmutableSplitShardMessageV2(msg)
+}
+
+// newFlusherRetireMessage builds the AlterCollection replica of a shard-split
+// routing commit landing on the given vchannel: `kept` is the new vchannel
+// list. The replica retires vchannel exactly when kept omits it.
+func newFlusherRetireMessage(t *testing.T, vchannel string, collectionID int64, kept []string, timetick uint64) message.ImmutableAlterCollectionMessageV2 {
+	t.Helper()
+	msg := message.NewAlterCollectionMessageBuilderV2().
+		WithVChannel(vchannel).
+		WithHeader(&message.AlterCollectionMessageHeader{
+			CollectionId: collectionID,
+			UpdateMask:   &fieldmaskpb.FieldMask{Paths: []string{message.FieldMaskCollectionShardSplitRouting}},
+		}).
+		WithBody(&message.AlterCollectionMessageBody{
+			Updates: &message.AlterCollectionMessageUpdates{
+				VirtualChannelNames: kept,
+			},
+		}).
+		MustBuildMutable().
+		WithTimeTick(timetick).
+		WithLastConfirmedUseMessageID().
+		IntoImmutableMessage(rmq.NewRmqID(5))
+	return message.MustAsImmutableAlterCollectionMessageV2(msg)
+}
+
+func TestFlusherWhenCreateVChannelAlreadyBuilt(t *testing.T) {
+	rs := mock_recovery.NewMockRecoveryStorage(t)
+	rs.EXPECT().ObserveMessage(mock.Anything, mock.Anything).Return(nil).Once()
+	flusher := newTestWALFlusher(rs)
+	// a data sync service already exists for the target vchannel: skip the spawn.
+	flusher.flusherComponents.dataServices["v2"] = &dataSyncServiceWrapper{}
+	flusher.flusherComponents.WhenCreateVChannel(context.Background(), newFlusherSplitShardMessage(t, "v2", "v1", []string{"v2", "v3"}, 7, 100))
+	assert.Len(t, flusher.flusherComponents.dataServices, 1)
+}
+
+func TestFlusherWhenCreateVChannelOlderThanCheckpoint(t *testing.T) {
+	rs := mock_recovery.NewMockRecoveryStorage(t)
+	rs.EXPECT().ObserveMessage(mock.Anything, mock.Anything).Return(nil).Once()
+	flusher := newTestWALFlusher(rs)
+	flusher.flusherComponents.recoveryCheckPointTimeTick = 1000
+	// the genesis is older than the recovery checkpoint: skip the spawn.
+	flusher.flusherComponents.WhenCreateVChannel(context.Background(), newFlusherSplitShardMessage(t, "v2", "v1", []string{"v2", "v3"}, 7, 100))
+	assert.Empty(t, flusher.flusherComponents.dataServices)
+}
+
+// TestWALFlusher_DispatchSplitShardTargetDoesNotForward: dispatch must NOT
+// hand the target replica of a SplitShard broadcast to
+// flusherComponents.HandleMessage. The target replica is the genesis of a new
+// vchannel: it spawns the vchannel's data sync service (WhenCreateVChannel)
+// and stops there. The flow graph has no use for the genesis message itself,
+// and unlike the source replica, no dd_node needs to observe it.
+func TestWALFlusher_DispatchSplitShardTargetDoesNotForward(t *testing.T) {
+	rs := mock_recovery.NewMockRecoveryStorage(t)
+	rs.EXPECT().ObserveMessage(mock.Anything, mock.Anything).Return(nil)
+	flusher := newTestWALFlusher(rs)
+
+	spawned := 0
+	mockSpawn := mockey.Mock((*flusherComponents).WhenCreateVChannel).To(
+		func(_ *flusherComponents, ctx context.Context, msg message.ImmutableSplitShardMessageV2) error {
+			spawned++
+			return nil
+		}).Build()
+	defer mockSpawn.UnPatch()
+
+	handled := 0
+	mockHandle := mockey.Mock((*flusherComponents).HandleMessage).To(
+		func(_ *flusherComponents, ctx context.Context, msg message.ImmutableMessage) error {
+			handled++
+			return nil
+		}).Build()
+	defer mockHandle.UnPatch()
+
+	// vchannel "v2" is a target of the split.
+	msg := newFlusherSplitShardMessage(t, "v2", "v1", []string{"v2", "v3"}, 7, 100)
+
+	require.NotPanics(t, func() {
+		require.NoError(t, flusher.dispatch(msg))
+	})
+	assert.Equal(t, 1, spawned)
+	assert.Equal(t, 0, handled)
+}
+
+// TestWALFlusher_DispatchSplitShardSourceForwards: the source replica of a
+// SplitShard broadcast IS forwarded to flusherComponents.HandleMessage,
+// unlike the target replica. The dd_node needs it to seal the fenced segments
+// and set the flush timestamp.
+func TestWALFlusher_DispatchSplitShardSourceForwards(t *testing.T) {
+	rs := mock_recovery.NewMockRecoveryStorage(t)
+	rs.EXPECT().ObserveMessage(mock.Anything, mock.Anything).Return(nil)
+	flusher := newTestWALFlusher(rs)
+
+	spawned := 0
+	mockSpawn := mockey.Mock((*flusherComponents).WhenCreateVChannel).To(
+		func(_ *flusherComponents, ctx context.Context, msg message.ImmutableSplitShardMessageV2) error {
+			spawned++
+			return nil
+		}).Build()
+	defer mockSpawn.UnPatch()
+
+	handled := 0
+	mockHandle := mockey.Mock((*flusherComponents).HandleMessage).To(
+		func(_ *flusherComponents, ctx context.Context, msg message.ImmutableMessage) error {
+			handled++
+			return nil
+		}).Build()
+	defer mockHandle.UnPatch()
+
+	// vchannel "v1" is the source of the split: the replica lands on itself.
+	msg := newFlusherSplitShardMessage(t, "v1", "v1", []string{"v2", "v3"}, 7, 100)
+
+	require.NotPanics(t, func() {
+		require.NoError(t, flusher.dispatch(msg))
+	})
+	assert.Equal(t, 0, spawned)
+	assert.Equal(t, 1, handled)
+}
+
+// TestWALFlusher_DispatchSplitShardUnknownRoleDoesNotForward: a replica
+// landing on a vchannel the header names as neither a source nor a target
+// must not be forwarded to flusherComponents.HandleMessage either. There is
+// no data sync service action to take for it (unlike the target replica, it
+// is not a genesis; unlike the source replica, it fences nothing here), and
+// forwarding it would hand the dd_node a message it was never meant to see
+// on this vchannel.
+func TestWALFlusher_DispatchSplitShardUnknownRoleDoesNotForward(t *testing.T) {
+	rs := mock_recovery.NewMockRecoveryStorage(t)
+	rs.EXPECT().ObserveMessage(mock.Anything, mock.Anything).Return(nil)
+	flusher := newTestWALFlusher(rs)
+
+	spawned := 0
+	mockSpawn := mockey.Mock((*flusherComponents).WhenCreateVChannel).To(
+		func(_ *flusherComponents, ctx context.Context, msg message.ImmutableSplitShardMessageV2) error {
+			spawned++
+			return nil
+		}).Build()
+	defer mockSpawn.UnPatch()
+
+	handled := 0
+	mockHandle := mockey.Mock((*flusherComponents).HandleMessage).To(
+		func(_ *flusherComponents, ctx context.Context, msg message.ImmutableMessage) error {
+			handled++
+			return nil
+		}).Build()
+	defer mockHandle.UnPatch()
+
+	// vchannel "v9" is neither the source "v1" nor one of the targets.
+	msg := newFlusherSplitShardMessage(t, "v9", "v1", []string{"v2", "v3"}, 7, 100)
+
+	require.NotPanics(t, func() {
+		require.NoError(t, flusher.dispatch(msg))
+	})
+	assert.Equal(t, 0, spawned)
+	assert.Equal(t, 0, handled)
+}
+
+// TestWALFlusher_DispatchSplitShardBystanderDoesNotForward: the broadcast now
+// covers every vchannel of the collection, so a replica can land on a
+// vchannel that is registered as belonging to the same collection but is
+// neither the source nor one of the targets -- a bystander shard. It must not
+// be forwarded to flusherComponents.HandleMessage (there is no dd_node action
+// to take for it) and must not spawn a data sync service either (it is not a
+// genesis).
+func TestWALFlusher_DispatchSplitShardBystanderDoesNotForward(t *testing.T) {
+	rs := mock_recovery.NewMockRecoveryStorage(t)
+	rs.EXPECT().ObserveMessage(mock.Anything, mock.Anything).Return(nil)
+	flusher := newTestWALFlusher(rs)
+
+	spawned := 0
+	mockSpawn := mockey.Mock((*flusherComponents).WhenCreateVChannel).To(
+		func(_ *flusherComponents, ctx context.Context, msg message.ImmutableSplitShardMessageV2) error {
+			spawned++
+			return nil
+		}).Build()
+	defer mockSpawn.UnPatch()
+
+	handled := 0
+	mockHandle := mockey.Mock((*flusherComponents).HandleMessage).To(
+		func(_ *flusherComponents, ctx context.Context, msg message.ImmutableMessage) error {
+			handled++
+			return nil
+		}).Build()
+	defer mockHandle.UnPatch()
+
+	// vchannel "p0_7v9" is collection 7's own shard, but neither the source
+	// "v1" nor one of the targets "v2"/"v3": a bystander.
+	msg := newFlusherSplitShardMessage(t, "p0_7v9", "v1", []string{"v2", "v3"}, 7, 100)
+
+	require.NotPanics(t, func() {
+		require.NoError(t, flusher.dispatch(msg))
+	})
+	assert.Equal(t, 0, spawned)
+	assert.Equal(t, 0, handled)
+}
+
+// TestWALFlusher_DispatchRetireDoesNotCloseAnUndrainedDSS: an AlterCollection
+// replica that retires this vchannel (a shard-split routing commit whose new
+// vchannel list omits it) must NOT close its data sync service and must NOT
+// be handed to flusherComponents.HandleMessage either. On a secondary this
+// replica can arrive before the fenced segments are flushed, so closing the
+// data sync service here -- including by reusing the drop-collection
+// teardown (WhenDropCollection), which reaches DropVirtualChannel at
+// DataCoord -- would tear down a service that still has data to drain. Only
+// the data sync service's own checkpoint passing the fence tick
+// (flusherComponents.CloseIfDrained) may close it.
+func TestWALFlusher_DispatchRetireDoesNotCloseAnUndrainedDSS(t *testing.T) {
+	rs := mock_recovery.NewMockRecoveryStorage(t)
+	rs.EXPECT().ObserveMessage(mock.Anything, mock.Anything).Return(nil)
+	flusher := newTestWALFlusher(rs)
+	flusher.flusherComponents.dataServices["v0"] = newDataSyncServiceWrapper(
+		"v0",
+		make(chan *msgstream.MsgPack, 1),
+		&pipeline.DataSyncService{},
+		0,
+	)
+
+	closed := 0
+	mockClose := mockey.Mock((*flusherComponents).WhenDropCollection).To(
+		func(_ *flusherComponents, ctx context.Context, vchannel string) {
+			closed++
+		}).Build()
+	defer mockClose.UnPatch()
+
+	handled := 0
+	mockHandle := mockey.Mock((*flusherComponents).HandleMessage).To(
+		func(_ *flusherComponents, ctx context.Context, msg message.ImmutableMessage) error {
+			handled++
+			return nil
+		}).Build()
+	defer mockHandle.UnPatch()
+
+	// "v0" is retired: the new vchannel list ("v1") omits it.
+	msg := newFlusherRetireMessage(t, "v0", 1, []string{"v1"}, 100)
+
+	require.NotPanics(t, func() {
+		require.NoError(t, flusher.dispatch(msg))
+	})
+	assert.Equal(t, 0, closed, "retire must not reuse the drop-collection teardown")
+	assert.Equal(t, 0, handled, "retire must not be forwarded to the data sync service")
+	_, ok := flusher.flusherComponents.dataServices["v0"]
+	assert.True(t, ok, "the undrained data sync service must remain open")
+}
+
+// TestWALFlusher_DispatchAlterCollectionListedForwards: a normal
+// AlterCollection replica that does NOT retire this vchannel (it is still
+// listed in the new vchannel list) still reaches flusherComponents.HandleMessage,
+// exactly as any other plain message does.
+func TestWALFlusher_DispatchAlterCollectionListedForwards(t *testing.T) {
+	rs := mock_recovery.NewMockRecoveryStorage(t)
+	rs.EXPECT().ObserveMessage(mock.Anything, mock.Anything).Return(nil)
+	flusher := newTestWALFlusher(rs)
+
+	closed := 0
+	mockClose := mockey.Mock((*flusherComponents).WhenDropCollection).To(
+		func(_ *flusherComponents, ctx context.Context, vchannel string) {
+			closed++
+		}).Build()
+	defer mockClose.UnPatch()
+
+	handled := 0
+	mockHandle := mockey.Mock((*flusherComponents).HandleMessage).To(
+		func(_ *flusherComponents, ctx context.Context, msg message.ImmutableMessage) error {
+			handled++
+			return nil
+		}).Build()
+	defer mockHandle.UnPatch()
+
+	// "v1" stays listed in the new vchannel list: it is not retired.
+	msg := newFlusherRetireMessage(t, "v1", 1, []string{"v0", "v1"}, 100)
+
+	require.NotPanics(t, func() {
+		require.NoError(t, flusher.dispatch(msg))
+	})
+	assert.Equal(t, 0, closed)
+	assert.Equal(t, 1, handled)
+}
+
+// newSignaledWriteBufferManager returns a mock BufferManager whose
+// RemoveChannel closes the returned channel the first time it is called.
+// dataSyncServiceWrapper.Close calls resource.Resource().WriteBufferManager().
+// RemoveChannel as its last step, so this is a reliable signal that a
+// CloseIfDrained-spawned detached goroutine has fully finished touching the
+// (global, test-reinitialized) resource singleton -- unlike, say, the
+// service's input channel closing, which fires from the first line of
+// Close and would let the test return while the goroutine is still running.
+// A test that lets CloseIfDrained perform a real close must wait on this
+// signal before returning, or the leftover goroutine can race a later
+// test's resource.InitForTest.
+func newSignaledWriteBufferManager(t *testing.T) (writebuffer.BufferManager, <-chan struct{}) {
+	t.Helper()
+	wbMgr := writebuffer.NewMockBufferManager(t)
+	done := make(chan struct{})
+	var once sync.Once
+	wbMgr.EXPECT().RemoveChannel(mock.Anything).Run(func(string) {
+		once.Do(func() { close(done) })
+	}).Return()
+	return wbMgr, done
+}
+
+// TestWALFlusher_OnCheckpointUpdatedClosesTheFencedSourceOnceDrained: the
+// checkpoint-updater callback (onCheckpointUpdated) does its existing
+// checkpoint-persisting work first, then gives a fenced source's data sync
+// service the chance to close itself once this checkpoint proves it has
+// drained past the fence tick.
+func TestWALFlusher_OnCheckpointUpdatedClosesTheFencedSourceOnceDrained(t *testing.T) {
+	wbMgr, closed := newSignaledWriteBufferManager(t)
+	resource.InitForTest(t,
+		resource.OptChunkManager(mock_storage.NewMockChunkManager(t)),
+		resource.OptWriteBufferManager(wbMgr))
+
+	rs := mock_recovery.NewMockRecoveryStorage(t)
+	rs.EXPECT().UpdateFlusherCheckpoint(mock.Anything, mock.Anything).Return()
+
+	l := newMockWAL(t, true)
+	walFuture := syncutil.NewFuture[wal.WAL]()
+	walFuture.Set(l)
+
+	flusher := &WALFlusherImpl{
+		notifier:        syncutil.NewAsyncTaskNotifier[struct{}](),
+		logger:          mlog.With(),
+		wal:             walFuture,
+		RecoveryStorage: rs,
+		flusherComponents: &flusherComponents{
+			dataServices: make(map[string]*dataSyncServiceWrapper),
+			fenced:       map[string]uint64{"v1": 2000},
+			logger:       mlog.With(),
+			rs:           rs,
+		},
+	}
+	flusher.flusherComponents.dataServices["v1"] = newDataSyncServiceWrapper(
+		"v1",
+		make(chan *msgstream.MsgPack, 1),
+		&pipeline.DataSyncService{},
+		0,
+	)
+
+	msgID := adaptor.MustGetMQWrapperIDFromMessage(rmq.NewRmqID(1)).Serialize()
+
+	// A checkpoint short of the fence keeps the data sync service open.
+	flusher.onCheckpointUpdated(&msgpb.MsgPosition{ChannelName: "v1", MsgID: msgID, Timestamp: 1999})
+	_, ok := flusher.flusherComponents.dataServices["v1"]
+	assert.True(t, ok, "checkpoint before the fence must not close the data sync service")
+
+	// A checkpoint at the fence removes it from the map synchronously...
+	flusher.onCheckpointUpdated(&msgpb.MsgPosition{ChannelName: "v1", MsgID: msgID, Timestamp: 2000})
+	_, ok = flusher.flusherComponents.dataServices["v1"]
+	assert.False(t, ok, "checkpoint at the fence must close the data sync service")
+
+	// ...but the actual Close() runs on a detached goroutine, off the
+	// checkpoint-updater's own call path. Wait for it to fully finish before
+	// this test returns (see newSignaledWriteBufferManager).
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		t.Fatal("the data sync service must eventually close off the checkpoint-updater goroutine")
+	}
+}
+
+// TestFlusherClosesTheSourceDataSyncServiceOnceDrained: dispatching the
+// source replica of a SplitShard broadcast records the fence tick for its
+// vchannel (before the replica is forwarded to the data sync service). A
+// checkpoint short of that tick must not close the data sync service; a
+// checkpoint at or past it must close and remove it.
+func TestFlusherClosesTheSourceDataSyncServiceOnceDrained(t *testing.T) {
+	wbMgr, closed := newSignaledWriteBufferManager(t)
+	resource.InitForTest(t,
+		resource.OptChunkManager(mock_storage.NewMockChunkManager(t)),
+		resource.OptWriteBufferManager(wbMgr))
+
+	rs := mock_recovery.NewMockRecoveryStorage(t)
+	rs.EXPECT().ObserveMessage(mock.Anything, mock.Anything).Return(nil)
+	flusher := newTestWALFlusher(rs)
+	flusher.flusherComponents.dataServices["v1"] = newDataSyncServiceWrapper(
+		"v1",
+		make(chan *msgstream.MsgPack, 1),
+		&pipeline.DataSyncService{},
+		0,
+	)
+
+	handled := 0
+	mockHandle := mockey.Mock((*flusherComponents).HandleMessage).To(
+		func(_ *flusherComponents, ctx context.Context, msg message.ImmutableMessage) error {
+			handled++
+			return nil
+		}).Build()
+	defer mockHandle.UnPatch()
+
+	// "v1" is the source of the split, fenced at tick 2000.
+	msg := newFlusherSplitShardMessage(t, "v1", "v1", []string{"v2", "v3"}, 7, 2000)
+	require.NotPanics(t, func() {
+		require.NoError(t, flusher.dispatch(msg))
+	})
+	assert.Equal(t, 1, handled, "the source replica must still be forwarded to the data sync service")
+	assert.Equal(t, uint64(2000), flusher.flusherComponents.fenced["v1"])
+
+	// A checkpoint short of the fence tick keeps the data sync service open.
+	flusher.flusherComponents.CloseIfDrained(context.Background(), "v1", 1999)
+	_, ok := flusher.flusherComponents.dataServices["v1"]
+	assert.True(t, ok, "checkpoint before the fence must not close the data sync service")
+
+	// A checkpoint at the fence tick removes it from the map synchronously.
+	flusher.flusherComponents.CloseIfDrained(context.Background(), "v1", 2000)
+	_, ok = flusher.flusherComponents.dataServices["v1"]
+	assert.False(t, ok, "checkpoint at the fence must close the data sync service")
+
+	// The actual Close() runs on a detached goroutine: wait for it to fully
+	// finish before the test returns, so no background goroutine is left
+	// racing a later test's resource.InitForTest (see
+	// newSignaledWriteBufferManager).
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		t.Fatal("the data sync service must eventually close")
+	}
+
+	// Idempotent: a later checkpoint has nothing left to close.
+	require.NotPanics(t, func() {
+		flusher.flusherComponents.CloseIfDrained(context.Background(), "v1", 2500)
+	})
+}
+
+// TestFlusherComponentsCloseIfDrainedIgnoresAnUnfencedVChannel: a vchannel
+// that was never the source of a SplitShard has no fence tick recorded for
+// it, so CloseIfDrained must never touch its data sync service.
+func TestFlusherComponentsCloseIfDrainedIgnoresAnUnfencedVChannel(t *testing.T) {
+	resource.InitForTest(t, resource.OptChunkManager(mock_storage.NewMockChunkManager(t)))
+
+	fc := &flusherComponents{
+		dataServices: make(map[string]*dataSyncServiceWrapper),
+		logger:       mlog.With(),
+	}
+	fc.dataServices["v1"] = newDataSyncServiceWrapper(
+		"v1",
+		make(chan *msgstream.MsgPack, 1),
+		&pipeline.DataSyncService{},
+		0,
+	)
+
+	fc.CloseIfDrained(context.Background(), "v1", 100)
+	_, ok := fc.dataServices["v1"]
+	assert.True(t, ok, "an unfenced vchannel must never be closed")
+}
+
+// TestFlusherComponentsCloseIfDrainedWithoutADataSyncServiceIsANoop: a
+// vchannel can be fenced (recovered from the snapshot, or fenced then
+// dropped) without a data sync service present -- e.g. on restart, a
+// SPLITTED vchannel whose data sync service already fully drained and closed
+// before the restart. CloseIfDrained must not panic and must have nothing
+// left to do.
+func TestFlusherComponentsCloseIfDrainedWithoutADataSyncServiceIsANoop(t *testing.T) {
+	fc := &flusherComponents{
+		dataServices: make(map[string]*dataSyncServiceWrapper),
+		fenced:       map[string]uint64{"v1": 100},
+		logger:       mlog.With(),
+	}
+
+	require.NotPanics(t, func() {
+		fc.CloseIfDrained(context.Background(), "v1", 100)
+	})
+	assert.Empty(t, fc.dataServices)
+}
+
+// TestFlusherComponentsWhenDropCollectionClearsTheFence: the drop-collection
+// teardown must drop the vchannel's fence tick together with its data sync
+// service. A vchannel of the same name spawned afterwards -- only reachable
+// by a replay of the same collection id -- would otherwise inherit the stale
+// T_switch and be closed by the very first checkpoint past it, even though
+// nothing ever fenced it.
+func TestFlusherComponentsWhenDropCollectionClearsTheFence(t *testing.T) {
+	wbMgr, closed := newSignaledWriteBufferManager(t)
+	resource.InitForTest(t,
+		resource.OptChunkManager(mock_storage.NewMockChunkManager(t)),
+		resource.OptWriteBufferManager(wbMgr))
+
+	fc := &flusherComponents{
+		dataServices: make(map[string]*dataSyncServiceWrapper),
+		fenced:       map[string]uint64{"v1": 2000, "v2": 3000},
+		logger:       mlog.With(),
+	}
+	fc.dataServices["v1"] = newDataSyncServiceWrapper(
+		"v1",
+		make(chan *msgstream.MsgPack, 1),
+		&pipeline.DataSyncService{},
+		0,
+	)
+
+	fc.WhenDropCollection(context.Background(), "v1")
+	assert.Empty(t, fc.dataServices)
+	assert.Equal(t, map[string]uint64{"v2": 3000}, fc.fenced,
+		"the dropped vchannel's fence tick must be cleared, and only that one")
+
+	// WhenDropCollection closes the data sync service inline, so by now it
+	// is fully closed (see newSignaledWriteBufferManager).
+	select {
+	case <-closed:
+	default:
+		t.Fatal("the data sync service must be closed by the drop-collection teardown")
+	}
+
+	// A same-name vchannel spawned after the drop is not fenced, so no
+	// checkpoint may close it.
+	fc.dataServices["v1"] = newDataSyncServiceWrapper(
+		"v1",
+		make(chan *msgstream.MsgPack, 1),
+		&pipeline.DataSyncService{},
+		0,
+	)
+	fc.CloseIfDrained(context.Background(), "v1", 1<<62)
+	_, ok := fc.dataServices["v1"]
+	assert.True(t, ok, "a vchannel re-spawned after a drop must not inherit the old fence tick")
+}
+
+// TestFlusherComponentsWhenDropCollectionClearsTheFenceWithoutADataSyncService:
+// the fence tick is cleared even when the data sync service is already gone
+// (it closed itself once drained), so the map never retains an entry for a
+// vchannel whose collection has been dropped.
+func TestFlusherComponentsWhenDropCollectionClearsTheFenceWithoutADataSyncService(t *testing.T) {
+	fc := &flusherComponents{
+		dataServices: make(map[string]*dataSyncServiceWrapper),
+		fenced:       map[string]uint64{"v1": 2000},
+		logger:       mlog.With(),
+	}
+
+	require.NotPanics(t, func() {
+		fc.WhenDropCollection(context.Background(), "v1")
+	})
+	assert.Empty(t, fc.fenced)
+}
+
+// TestFlusherComponentsRecordFenceTakesTheLargerTick: a same-task re-fence
+// carries a larger tick than the fence before it (e.g. a retried SplitShard
+// broadcast). The drain threshold must be the largest tick ever observed,
+// not the first one, so a checkpoint that only clears the earlier fence must
+// not close the data sync service.
+func TestFlusherComponentsRecordFenceTakesTheLargerTick(t *testing.T) {
+	wbMgr, closed := newSignaledWriteBufferManager(t)
+	resource.InitForTest(t,
+		resource.OptChunkManager(mock_storage.NewMockChunkManager(t)),
+		resource.OptWriteBufferManager(wbMgr))
+
+	fc := &flusherComponents{
+		dataServices: make(map[string]*dataSyncServiceWrapper),
+		logger:       mlog.With(),
+	}
+	fc.dataServices["v1"] = newDataSyncServiceWrapper(
+		"v1",
+		make(chan *msgstream.MsgPack, 1),
+		&pipeline.DataSyncService{},
+		0,
+	)
+
+	fc.RecordFence("v1", 2000)
+	fc.RecordFence("v1", 3000)
+	require.Equal(t, uint64(3000), fc.fenced["v1"])
+
+	// A checkpoint that clears the first fence but not the second must not close it.
+	fc.CloseIfDrained(context.Background(), "v1", 2500)
+	_, ok := fc.dataServices["v1"]
+	assert.True(t, ok, "checkpoint between the two fences must not close the data sync service")
+
+	// A checkpoint at the largest fence closes it.
+	fc.CloseIfDrained(context.Background(), "v1", 3000)
+	_, ok = fc.dataServices["v1"]
+	assert.False(t, ok, "checkpoint at the largest fence must close the data sync service")
+
+	// Wait for the detached Close() to fully finish before the test returns
+	// (see newSignaledWriteBufferManager / the drain test above for why).
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		t.Fatal("the data sync service must eventually close")
+	}
+
+	// A smaller re-fence never lowers a fence already recorded.
+	fc.fenced = map[string]uint64{"v1": 3000}
+	fc.RecordFence("v1", 1000)
+	assert.Equal(t, uint64(3000), fc.fenced["v1"], "a smaller re-fence must not lower the recorded fence tick")
+}
+
+// TestFlusherRecoversTheFenceTickFromTheSnapshot: on restart the fence tick
+// is recovered from the recovery snapshot -- VChannelMeta.SplitTimeTick of
+// every SPLITTED vchannel -- so a source fenced before the restart still
+// closes once its recovered data sync service drains past T_switch. A
+// vchannel that is NORMAL or DROPPED contributes nothing.
+func TestFlusherRecoversTheFenceTickFromTheSnapshot(t *testing.T) {
+	vchannels := map[string]*streamingpb.VChannelMeta{
+		"v1": {
+			Vchannel:      "v1",
+			State:         streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED,
+			SplitTimeTick: 2000,
+		},
+		"v2": {
+			Vchannel: "v2",
+			State:    streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
+		},
+		"v3": {
+			Vchannel:      "v3",
+			State:         streamingpb.VChannelState_VCHANNEL_STATE_DROPPED,
+			SplitTimeTick: 500,
+		},
+	}
+
+	fenced := fencedTicksFromSnapshot(vchannels)
+	assert.Equal(t, map[string]uint64{"v1": 2000}, fenced)
+}
+
+// TestFlusherComponentsFenceAndCloseAreRaceFree exercises flusherComponents
+// under the Go race detector (run with -race; see task-4-report.md for the
+// exact command and its output). RecordFence, WhenCreateVChannel and
+// WhenDropCollection run in a tight loop on one goroutine, exactly as the
+// flusher's own consume goroutine would call them from dispatch; CloseIfDrained
+// runs concurrently in a loop on a second goroutine, exactly as the
+// checkpoint-updater's own goroutine calls it from onCheckpointUpdated. Both
+// sides read and write flusherComponents.dataServices and .fenced, so this
+// only passes under -race once both are guarded by the same lock.
+//
+// pipeline.NewEmptyStreamingNodeDataSyncService is mocked to skip building a
+// real flow graph (broker/schema plumbing irrelevant to the race being
+// tested) but WhenCreateVChannel's own locking logic (hasDataSyncService,
+// addNewDataSyncService) runs for real.
+func TestFlusherComponentsFenceAndCloseAreRaceFree(t *testing.T) {
+	resource.InitForTest(t, resource.OptChunkManager(mock_storage.NewMockChunkManager(t)))
+
+	rs := mock_recovery.NewMockRecoveryStorage(t)
+	rs.EXPECT().ObserveMessage(mock.Anything, mock.Anything).Return(nil)
+
+	mockNewDS := mockey.Mock(pipeline.NewEmptyStreamingNodeDataSyncService).To(
+		func(_ context.Context, _ *fcutil.PipelineParams, _ <-chan *msgstream.MsgPack, _ *datapb.VchannelInfo,
+			_ writebuffer.TaskObserverCallback, _ func(),
+		) *pipeline.DataSyncService {
+			return &pipeline.DataSyncService{}
+		}).Build()
+	defer mockNewDS.UnPatch()
+
+	// The race under test is flusherComponents' own map locking, not
+	// dataSyncServiceWrapper.Close's behavior (covered by the drain tests
+	// above). Stub it to a no-op so the detached goroutine CloseIfDrained
+	// spawns never touches the global resource singleton -- with real
+	// closes firing on every one of the iterations below, waiting for each
+	// one individually before this test returns would defeat the point of
+	// racing them.
+	mockClose := mockey.Mock((*dataSyncServiceWrapper).Close).To(func(_ *dataSyncServiceWrapper) {}).Build()
+	defer mockClose.UnPatch()
+
+	fc := &flusherComponents{
+		dataServices: make(map[string]*dataSyncServiceWrapper),
+		logger:       mlog.With(),
+		rs:           rs,
+	}
+
+	const vchannel = "race-v1"
+	const iterations = 300
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	// The flusher's own consume goroutine: fence, spawn, drop, repeat.
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iterations; i++ {
+			tick := uint64(1000 + i)
+			fc.RecordFence(vchannel, tick)
+			msg := newFlusherSplitShardMessage(t, vchannel, "sourceX", []string{"targetX"}, 7, tick)
+			assert.NoError(t, fc.WhenCreateVChannel(context.Background(), msg))
+			fc.WhenDropCollection(context.Background(), vchannel)
+		}
+	}()
+
+	// The checkpoint-updater's own goroutine: try to close whatever it finds.
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iterations; i++ {
+			fc.CloseIfDrained(context.Background(), vchannel, uint64(1000+i))
+		}
+	}()
+
+	wg.Wait()
+
+	// Whichever side last created it, nothing should be left dangling.
+	fc.WhenDropCollection(context.Background(), vchannel)
 }

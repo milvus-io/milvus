@@ -106,6 +106,17 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 		return err
 	}
 
+	// A shard-count change is declarative: the property records the target and
+	// datacoord reconciles toward it. Everything rootcoord can already decide is
+	// decided now, so the common mistakes land in this response instead of in a
+	// background task the caller never sees.
+	if err := validateShardSplitMode(req.GetProperties()); err != nil {
+		return err
+	}
+	if err := validateDesiredShardNum(coll, req.GetProperties(), req.GetDeleteKeys()); err != nil {
+		return err
+	}
+
 	cacheExpirations, err := c.getCacheExpireForCollection(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		return err
@@ -469,12 +480,29 @@ func (c *Core) getAlterLoadConfigOfAlterCollection(oldProps []*commonpb.KeyValue
 func (c *DDLCallback) alterCollectionV2AckCallback(ctx context.Context, result message.BroadcastResultAlterCollectionMessageV2) error {
 	header := result.Message.Header()
 	body := result.Message.MustBody()
-	if err := c.meta.AlterCollection(ctx, result); err != nil {
-		if errors.Is(err, errAlterCollectionNotFound) {
-			mlog.Warn(ctx, "alter a non-existent collection, ignore it", mlog.FieldMessage(result.Message))
-			return nil
+	// A shard split's adoption rides in as an ordinary AlterCollection, and it
+	// is the only alter whose apply is conditional: it retires a source, so it
+	// waits until this cluster has moved that source's data.
+	//
+	// It is also the only alter whose apply can be skipped outright. A
+	// redelivery the collection has already absorbed, or one a later routing
+	// commit has overtaken, has nothing left to write -- and writing it anyway
+	// would put the retired source back. Skipped, not failed: this callback is
+	// retried until it returns nil while it holds the collection's exclusive
+	// key, so a permanent refusal here queues every later DDL of the collection
+	// behind it with no way out.
+	skipRouting, err := c.checkShardSplitAdoptionDrained(ctx, result)
+	if err != nil {
+		return err
+	}
+	if !skipRouting {
+		if err := c.meta.AlterCollection(ctx, result); err != nil {
+			if errors.Is(err, errAlterCollectionNotFound) {
+				mlog.Warn(ctx, "alter a non-existent collection, ignore it", mlog.FieldMessage(result.Message))
+				return nil
+			}
+			return merr.Wrap(err, "failed to alter collection")
 		}
-		return merr.Wrap(err, "failed to alter collection")
 	}
 	// Refresh datacoord's cached collection schema BEFORE the bound index meta
 	// becomes visible: creating the index signals the index inspector, whose
