@@ -15,12 +15,12 @@
 #   BASE_REF      diff base ref. Auto-detected from the current branch's open PR
 #                 via `gh pr view`. If no PR exists, you MUST set it explicitly,
 #                 e.g.: make ci BASE_REF=origin/master
-#   RUFF_VERSION  ruff version (default: 0.15.11, pinned to .github/workflows/python-lint.yaml)
+#   RUFF_VERSION  ruff version (default: 0.16.1, pinned to .github/workflows/python-lint.yaml)
 #
 # Requires `uvx` (ships with `uv`). Ruff is fetched & cached on first run.
 # Auto-detection requires `gh` authenticated (`gh auth status`).
 
-RUFF_VERSION ?= 0.15.11
+RUFF_VERSION ?= 0.16.1
 RUFF         := uvx ruff@$(RUFF_VERSION)
 REPO_ROOT    := $(shell git rev-parse --show-toplevel)
 

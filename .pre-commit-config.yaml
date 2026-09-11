@@ -9,7 +9,7 @@ repos:
     hooks:
       - id: typos
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.11
+    rev: v0.16.1
     hooks:
       - id: ruff-check
         name: ruff-check (tests/)

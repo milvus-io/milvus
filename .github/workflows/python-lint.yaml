@@ -38,14 +38,14 @@ jobs:
         if: steps.changed.outputs.any_changed == 'true'
         uses: astral-sh/ruff-action@v4.0.0
         with:
-          version: "0.15.11"
+          version: "0.16.1"
           src: ${{ steps.changed.outputs.all_changed_files }}
 
       - name: ruff format --check
         if: steps.changed.outputs.any_changed == 'true'
         uses: astral-sh/ruff-action@v4.0.0
         with:
-          version: "0.15.11"
+          version: "0.16.1"
           src: ${{ steps.changed.outputs.all_changed_files }}
           args: "format --check --diff"
 
@@ -55,6 +55,6 @@ jobs:
         # ruff cannot load the config at all.
         uses: astral-sh/ruff-action@v4.0.0
         with:
-          version: "0.15.11"
+          version: "0.16.1"
           src: "tests/scripts"
           args: "check --exit-zero"

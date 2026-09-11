@@ -229,8 +229,7 @@ def _create_index_with_retry(client, collection_name, timeout=_POST_REFRESH_RECO
             last_error = exc
             log.warning(f"external table post-chaos create_index not ready yet: {exc}")
             sleep(5)
-    else:
-        raise AssertionError(f"external table create_index did not recover in {timeout}s: {last_error}")
+    raise AssertionError(f"external table create_index did not recover in {timeout}s: {last_error}")
 
 
 def _load_collection_with_retry(client, collection_name, timeout=_POST_REFRESH_RECOVERY_TIMEOUT):
@@ -244,8 +243,7 @@ def _load_collection_with_retry(client, collection_name, timeout=_POST_REFRESH_R
             last_error = exc
             log.warning(f"external table post-chaos load not ready yet: {exc}")
             sleep(5)
-    else:
-        raise AssertionError(f"external table load did not recover in {timeout}s: {last_error}")
+    raise AssertionError(f"external table load did not recover in {timeout}s: {last_error}")
 
 
 def _assert_queryable(client, collection_name, expected_rows):

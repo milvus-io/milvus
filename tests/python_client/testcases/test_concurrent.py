@@ -85,7 +85,7 @@ class TestOperations(TestBase):
         # start the monitor threads to check the milvus ops
         log.info("*********************Test Start**********************")
         log.info(connections.get_connection_addr("default"))
-        c_name = collection_name if collection_name else cf.gen_unique_str("Checker_")
+        c_name = collection_name or cf.gen_unique_str("Checker_")
         self.init_health_checkers(collection_name=c_name)
         cc.start_monitor_threads(self.health_checkers)
         log.info("*********************Load Start**********************")

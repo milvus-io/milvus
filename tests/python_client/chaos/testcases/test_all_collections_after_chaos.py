@@ -46,7 +46,7 @@ class TestAllCollection:
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_default(self, collection_name, milvus_client):
         # create
-        name = collection_name if collection_name else cf.gen_unique_str("Checker_")
+        name = collection_name or cf.gen_unique_str("Checker_")
         t0 = time.time()
 
         # Get schema from existing collection
