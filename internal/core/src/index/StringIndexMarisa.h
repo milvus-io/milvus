@@ -168,11 +168,22 @@ class StringIndexMarisa : public StringIndex {
     PlanLoad(const storage::IndexEntryCatalog& catalog,
              const Config& config) override;
 
-    void
+    folly::coro::Task<void>
     FinalizeLoad(storage::IndexLoadArtifact&& artifact,
                  const Config& config) override;
 
+ protected:
+    folly::coro::Task<void>
+    FinishLegacyLoadAsync(BinarySet binary,
+                          const Config& config,
+                          folly::CancellationToken token) override;
+
+ public:
  private:
+    // Rebuild legacy string IDs and CSR after the trie has been opened.
+    void
+    FinishLegacyLoad(const BinarySet& binary);
+
     Config config_;
     marisa::Trie trie_;
 

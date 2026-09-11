@@ -355,7 +355,7 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     PlanLoad(const storage::IndexEntryCatalog& catalog,
              const Config& config) override;
 
-    void
+    folly::coro::Task<void>
     FinalizeLoad(storage::IndexLoadArtifact&& artifact,
                  const Config& config) override;
 
@@ -394,6 +394,10 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     // Opens the completed local directory and restores sealed validity.
     void
     FinishLegacyLoad(const std::string& prefix, const Config& config);
+
+    // Remove this load's staging directory after the engine has released it.
+    void
+    RemoveLegacyFiles();
 
     // Filters out index files that are not belong to tantivy index.
     // For example, index files of json index may contain null offset files.

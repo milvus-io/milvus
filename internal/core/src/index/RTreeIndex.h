@@ -253,7 +253,7 @@ class RTreeIndex : public ScalarIndex<T> {
     PlanLoad(const storage::IndexEntryCatalog& catalog,
              const Config& config) override;
 
-    void
+    folly::coro::Task<void>
     FinalizeLoad(storage::IndexLoadArtifact&& artifact,
                  const Config& config) override;
 

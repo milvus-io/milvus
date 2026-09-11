@@ -252,7 +252,7 @@ class TestScalarIndexV3LoadRoute : public milvus::index::ScalarIndex<int32_t> {
         return plan;
     }
 
-    void
+    folly::coro::Task<void>
     FinalizeLoad(milvus::storage::IndexLoadArtifact&& artifact,
                  const milvus::Config&) override {
         finalized_thread_ = folly::getCurrentThreadName().value_or("");
@@ -264,7 +264,7 @@ class TestScalarIndexV3LoadRoute : public milvus::index::ScalarIndex<int32_t> {
         const auto& target = artifact.At("payload").target;
         if (const auto* memory =
                 std::get_if<milvus::storage::MemoryEntryTarget>(&target)) {
-            ASSERT_EQ(memory->bytes, sizeof(int32_t));
+            EXPECT_EQ(memory->bytes, sizeof(int32_t));
             std::memcpy(&finalized_payload_, memory->data, sizeof(int32_t));
         } else {
             const auto& mmap =
@@ -274,8 +274,9 @@ class TestScalarIndexV3LoadRoute : public milvus::index::ScalarIndex<int32_t> {
             std::ifstream file(mmap.staging->path, std::ios::binary);
             file.read(reinterpret_cast<char*>(&finalized_payload_),
                       sizeof(finalized_payload_));
-            ASSERT_TRUE(file.good());
+            EXPECT_TRUE(file.good());
         }
+        co_return;
     }
 
     std::string planned_thread_;
@@ -322,7 +323,7 @@ TEST(ScalarIndexV3AsyncLoadConfigTest, GlobalSwitchSelectsCompleteLoadPath) {
 }
 
 TEST(ScalarIndexV3AsyncLoadConfigTest,
-     FileTargetsFinalizeAndCleanUpOnLocalFileIOPool) {
+     FileTargetsFinalizeOnAsyncAndCleanUpOnLocalFileIOPool) {
     using namespace milvus;
     using namespace milvus::index;
     using namespace milvus::segcore::storagev2translator;
@@ -375,7 +376,8 @@ TEST(ScalarIndexV3AsyncLoadConfigTest,
                     const auto prefix = workers > 0 && file_target
                                             ? "MILVUS_LF_IO_"
                                             : "MILVUS_ASYNC";
-                    EXPECT_TRUE(loaded.finalized_thread_.starts_with(prefix));
+                    EXPECT_TRUE(
+                        loaded.finalized_thread_.starts_with("MILVUS_ASYNC"));
                     EXPECT_TRUE(loaded.cleanup_thread_.starts_with(prefix));
                     if (file_target) {
                         EXPECT_FALSE(

@@ -26,6 +26,9 @@
 #include "nlohmann/json.hpp"
 
 #include "index/BitmapIndex.h"
+#include "storage/LocalFileIOPool.h"
+#include "storage/EntryStreamUtils.h"
+#include "folly/coro/WithCancellation.h"
 
 #include "common/Consts.h"
 #include "common/File.h"
@@ -52,6 +55,7 @@ constexpr const char* BITMAP_INDEX_IS_NESTED_META = "is_nested";
 namespace {
 
 struct BitmapLoadContext {
+    std::unique_ptr<MmapFileRAII> final_file_cleanup;
     size_t index_length{0};
     size_t total_num_rows{0};
     bool is_nested{false};
@@ -589,91 +593,147 @@ BitmapIndex<T>::MMapIndexData(const std::string& file_name,
                               bool rebuild_validity_from_postings) {
     std::filesystem::create_directories(
         std::filesystem::path(file_name).parent_path());
-
-    auto file_offset = 0;
-    std::map<T, std::pair<int32_t, int32_t>> bitmaps;
+    auto cleanup = std::make_unique<MmapFileRAII>(file_name);
+    FrozenIndexData frozen{data_ptr, index_length};
     {
-        auto file_writer = storage::FileWriter(
+        storage::FileWriter writer(
             file_name, storage::io::GetPriorityFromLoadPriority(priority));
-        for (size_t i = 0; i < index_length; ++i) {
-            T key = ParseKey(&data_ptr);
-
-            roaring::Roaring value;
-            value =
-                roaring::Roaring::read(reinterpret_cast<const char*>(data_ptr));
-            if (rebuild_validity_from_postings) {
-                for (const auto& v : value) {
-                    valid_bitset_.set(v);
-                }
-            }
-
-            // convert roaring vaule to frozen mode
-            int32_t frozen_size = value.getFrozenSizeInBytes();
-            auto aligned_size = ((frozen_size + BITMAP_INDEX_ALIGNMENT - 1) /
-                                 BITMAP_INDEX_ALIGNMENT) *
-                                BITMAP_INDEX_ALIGNMENT;
-            std::vector<uint8_t> buf(aligned_size, 0);
-            value.writeFrozen(reinterpret_cast<char*>(buf.data()));
-
-            file_writer.Write(buf.data(), aligned_size);
-            bitmaps[key] = {file_offset, frozen_size};
-
-            file_offset += aligned_size;
-            data_ptr += value.getSizeInBytes();
+        while (frozen.remaining != 0) {
+            BuildFrozenBatch(frozen, rebuild_validity_from_postings);
+            writer.Write(frozen.buffer.data(), frozen.buffer.size());
         }
-        file_writer.Finish();
+        writer.Finish();
     }
+    MapFrozenIndex(file_name, frozen.file_size, frozen.offsets);
+    this->mmap_file_raii_ = std::move(cleanup);
+}
 
+template <typename T>
+void
+BitmapIndex<T>::BuildFrozenBatch(FrozenIndexData& data,
+                                 bool rebuild_validity_from_postings) {
+    auto& [data_ptr, remaining, file_offset, bitmaps, buffer] = data;
+    buffer.clear();
+    while (remaining != 0 && buffer.size() < BITMAP_FROZEN_BATCH_BYTES) {
+        auto key = ParseKey(&data_ptr);
+        auto value =
+            roaring::Roaring::read(reinterpret_cast<const char*>(data_ptr));
+        if (rebuild_validity_from_postings) {
+            for (const auto offset : value) {
+                valid_bitset_.set(offset);
+            }
+        }
+        const auto frozen_size = value.getFrozenSizeInBytes();
+        const auto aligned_size = ((frozen_size + BITMAP_INDEX_ALIGNMENT - 1) /
+                                   BITMAP_INDEX_ALIGNMENT) *
+                                  BITMAP_INDEX_ALIGNMENT;
+        const auto begin = buffer.size();
+        // One unusually large bitmap may exceed the batch target. Exact reserve
+        // avoids geometric growth beyond the batch plus largest-bitmap estimate.
+        if (begin + aligned_size > buffer.capacity()) {
+            buffer.reserve(
+                std::max(BITMAP_FROZEN_BATCH_BYTES, begin + aligned_size));
+        }
+        buffer.resize(begin + aligned_size, 0);
+        value.writeFrozen(reinterpret_cast<char*>(buffer.data() + begin));
+        bitmaps[std::move(key)] = {file_offset, frozen_size};
+        file_offset += aligned_size;
+        data_ptr += value.getSizeInBytes();
+        --remaining;
+    }
+}
+
+template <typename T>
+void
+BitmapIndex<T>::MapFrozenIndex(const std::string& file_name,
+                               size_t file_size,
+                               const FrozenOffsets& bitmaps) {
     auto file = File::Open(file_name, O_RDONLY);
     mmap_data_ = static_cast<char*>(
-        mmap(NULL, file_offset, PROT_READ, MAP_PRIVATE, file.Descriptor(), 0));
+        mmap(nullptr, file_size, PROT_READ, MAP_PRIVATE, file.Descriptor(), 0));
     if (mmap_data_ == MAP_FAILED) {
         file.Close();
-        remove(file_name.c_str());
         ThrowInfo(
             ErrorCode::UnexpectedError, "failed to mmap: {}", strerror(errno));
     }
-
-    mmap_size_ = file_offset;
-    this->mmap_file_raii_ = std::make_unique<MmapFileRAII>(file_name);
-
-    char* ptr = mmap_data_;
-    for (const auto& [key, value] : bitmaps) {
-        const auto& [offset, size] = value;
-        bitmap_info_map_[key] =
-            roaring::Roaring::frozenView(ptr + offset, size);
-    }
+    mmap_size_ = file_size;
     is_mmap_ = true;
+    for (const auto& [key, location] : bitmaps) {
+        const auto& [offset, size] = location;
+        bitmap_info_map_[key] =
+            roaring::Roaring::frozenView(mmap_data_ + offset, size);
+    }
+}
+
+template <typename T>
+folly::coro::Task<std::unique_ptr<MmapFileRAII>>
+BitmapIndex<T>::MMapIndexDataAsync(const std::string& file_name,
+                                   const uint8_t* data_ptr,
+                                   size_t index_length,
+                                   proto::common::LoadPriority priority,
+                                   bool rebuild_validity_from_postings) {
+    const auto token = co_await folly::coro::co_current_cancellation_token;
+    std::unique_ptr<storage::FileWriter> writer;
+    std::unique_ptr<MmapFileRAII> cleanup;
+    std::exception_ptr failure;
+    try {
+        co_await storage::RunLocalFileIOAsync(
+            [&] {
+                storage::ThrowIfCancelled(token, "Bitmap::WriteFrozen");
+                std::filesystem::create_directories(
+                    std::filesystem::path(file_name).parent_path());
+                cleanup = std::make_unique<MmapFileRAII>(file_name);
+                writer = std::make_unique<storage::FileWriter>(
+                    file_name,
+                    storage::io::GetPriorityFromLoadPriority(priority));
+            },
+            priority);
+        FrozenIndexData frozen{data_ptr, index_length};
+        while (frozen.remaining != 0) {
+            storage::ThrowIfCancelled(token, "Bitmap::ConvertFrozen");
+            BuildFrozenBatch(frozen, rebuild_validity_from_postings);
+            co_await storage::RunLocalFileIOAsync(
+                [&] {
+                    storage::ThrowIfCancelled(token, "Bitmap::WriteFrozen");
+                    writer->Write(frozen.buffer.data(), frozen.buffer.size());
+                },
+                priority);
+        }
+        co_await storage::RunLocalFileIOAsync(
+            [&] {
+                writer->Finish();
+                writer.reset();
+            },
+            priority);
+        storage::ThrowIfCancelled(token, "Bitmap::MapFrozen");
+        MapFrozenIndex(file_name, frozen.file_size, frozen.offsets);
+    } catch (...) {
+        failure = std::current_exception();
+    }
+    if (failure) {
+        if (is_mmap_) {
+            bitmap_info_map_.clear();
+            UnmapIndexData();
+            is_mmap_ = false;
+        }
+        co_await storage::RunLocalFileIOAsync(
+            [&] {
+                writer.reset();
+                cleanup.reset();
+            },
+            priority);
+        std::rethrow_exception(failure);
+    }
+    co_return cleanup;
 }
 
 template <typename T>
 void
 BitmapIndex<T>::LoadWithoutAssemble(const BinarySet& binary_set,
                                     const Config& config) {
-    auto enable_offset_cache =
-        GetValueFromConfig<bool>(config, ENABLE_OFFSET_CACHE);
-
-    auto index_meta_buffer = binary_set.GetByName(BITMAP_INDEX_META);
-    auto index_meta = DeserializeIndexMeta(index_meta_buffer->data.get(),
-                                           index_meta_buffer->size);
-    auto index_length = index_meta.first;
-    total_num_rows_ = index_meta.second;
-    valid_bitset_ =
-        TargetBitmap(total_num_rows_, is_nested_index_ || !schema_.nullable());
-    bool rebuild_validity_from_postings =
-        schema_.nullable() && !is_nested_index_;
-
-    auto valid_bitset_buffer = binary_set.GetByName(BITMAP_INDEX_VALID_BITSET);
-    if (valid_bitset_buffer != nullptr) {
-        DeserializeValidBitsetData(valid_bitset_buffer->data.get(),
-                                   valid_bitset_buffer->size);
-        rebuild_validity_from_postings = false;
-    }
-
-    auto index_data_buffer = binary_set.GetByName(BITMAP_INDEX_DATA);
-
-    ChooseIndexLoadMode(index_length);
-
+    const auto [index_length, rebuild_validity_from_postings] =
+        LoadLegacyMetadata(binary_set);
+    const auto index_data_buffer = binary_set.GetByName(BITMAP_INDEX_DATA);
     // only using mmap when build mode is raw roaring bitmap
     if (config.contains(MMAP_FILE_PATH) &&
         build_mode_ == BitmapIndexBuildMode::ROARING) {
@@ -697,6 +757,39 @@ BitmapIndex<T>::LoadWithoutAssemble(const BinarySet& binary_set,
                              rebuild_validity_from_postings);
     }
 
+    FinishLegacyLoad(config);
+}
+
+template <typename T>
+std::pair<size_t, bool>
+BitmapIndex<T>::LoadLegacyMetadata(const BinarySet& binary_set) {
+    auto index_meta_buffer = binary_set.GetByName(BITMAP_INDEX_META);
+    auto index_meta = DeserializeIndexMeta(index_meta_buffer->data.get(),
+                                           index_meta_buffer->size);
+    auto index_length = index_meta.first;
+    total_num_rows_ = index_meta.second;
+    valid_bitset_ =
+        TargetBitmap(total_num_rows_, is_nested_index_ || !schema_.nullable());
+    bool rebuild_validity_from_postings =
+        schema_.nullable() && !is_nested_index_;
+
+    auto valid_bitset_buffer = binary_set.GetByName(BITMAP_INDEX_VALID_BITSET);
+    if (valid_bitset_buffer != nullptr) {
+        DeserializeValidBitsetData(valid_bitset_buffer->data.get(),
+                                   valid_bitset_buffer->size);
+        rebuild_validity_from_postings = false;
+    }
+
+    ChooseIndexLoadMode(index_length);
+
+    return {index_length, rebuild_validity_from_postings};
+}
+
+template <typename T>
+void
+BitmapIndex<T>::FinishLegacyLoad(const Config& config) {
+    const auto enable_offset_cache =
+        GetValueFromConfig<bool>(config, ENABLE_OFFSET_CACHE);
     if (enable_offset_cache.has_value() && enable_offset_cache.value()) {
         BuildOffsetCache();
     }
@@ -713,6 +806,55 @@ BitmapIndex<T>::LoadWithoutAssemble(const BinarySet& binary_set,
 
     is_built_ = true;
     ComputeByteSize();
+}
+
+template <typename T>
+folly::coro::Task<void>
+BitmapIndex<T>::FinishLegacyLoadAsync(BinarySet binary,
+                                      const Config& config,
+                                      folly::CancellationToken token) {
+    token = folly::cancellation_token_merge(
+        token, co_await folly::coro::co_current_cancellation_token);
+    storage::ThrowIfCancelled(token, "Bitmap::FinalizeLegacy");
+    const auto [index_length, rebuild_validity] = LoadLegacyMetadata(binary);
+    const auto data = binary.GetByName(BITMAP_INDEX_DATA);
+    const auto priority =
+        GetValueFromConfig<proto::common::LoadPriority>(config, LOAD_PRIORITY)
+            .value_or(proto::common::LoadPriority::HIGH);
+    std::unique_ptr<MmapFileRAII> staged_file;
+    std::exception_ptr failure;
+    try {
+        if (config.contains(MMAP_FILE_PATH) &&
+            build_mode_ == BitmapIndexBuildMode::ROARING) {
+            staged_file = co_await folly::coro::co_withCancellation(
+                token,
+                MMapIndexDataAsync(
+                    GetValueFromConfig<std::string>(config, MMAP_FILE_PATH)
+                        .value(),
+                    data->data.get(),
+                    index_length,
+                    priority,
+                    rebuild_validity));
+        } else {
+            DeserializeIndexData(
+                data->data.get(), index_length, rebuild_validity);
+        }
+        FinishLegacyLoad(config);
+        storage::ThrowIfCancelled(token, "Bitmap::FinalizeLegacy");
+    } catch (...) {
+        failure = std::current_exception();
+    }
+    if (failure) {
+        if (is_mmap_) {
+            bitmap_info_map_.clear();
+            UnmapIndexData();
+            is_mmap_ = false;
+        }
+        co_await storage::RunLocalFileIOAsync([&] { staged_file.reset(); },
+                                              priority);
+        std::rethrow_exception(failure);
+    }
+    this->mmap_file_raii_ = std::move(staged_file);
 }
 
 template <typename T>
@@ -1522,7 +1664,7 @@ BitmapIndex<T>::PlanLoad(const storage::IndexEntryCatalog& catalog,
 }
 
 template <typename T>
-void
+folly::coro::Task<void>
 BitmapIndex<T>::FinalizeLoad(storage::IndexLoadArtifact&& artifact,
                              const Config& config) {
     (void)config;
@@ -1530,12 +1672,6 @@ BitmapIndex<T>::FinalizeLoad(storage::IndexLoadArtifact&& artifact,
         artifact.FinalizeContext<std::shared_ptr<BitmapLoadContext>>();
     AssertInfo(context != nullptr, "Bitmap FinalizeLoad context is null");
 
-    auto final_file_guard = folly::makeGuard([&] {
-        if (context->use_mmap) {
-            std::error_code error;
-            std::filesystem::remove(context->final_mmap_path, error);
-        }
-    });
     total_num_rows_ = context->total_num_rows;
     is_nested_index_ = context->is_nested;
     valid_bitset_ =
@@ -1568,12 +1704,12 @@ BitmapIndex<T>::FinalizeLoad(storage::IndexLoadArtifact&& artifact,
                    strerror(mmap_errno));
         auto raw_map_guard = folly::makeGuard(
             [raw_map, raw_size]() { munmap(raw_map, raw_size); });
-        MMapIndexData(context->final_mmap_path,
-                      static_cast<const uint8_t*>(raw_map),
-                      raw_size,
-                      context->index_length,
-                      context->priority,
-                      context->rebuild_validity_from_postings);
+        context->final_file_cleanup = co_await MMapIndexDataAsync(
+            context->final_mmap_path,
+            static_cast<const uint8_t*>(raw_map),
+            context->index_length,
+            context->priority,
+            context->rebuild_validity_from_postings);
     } else {
         AssertInfo(context->index_data != nullptr,
                    "Bitmap raw memory target is null");
@@ -1597,7 +1733,11 @@ BitmapIndex<T>::FinalizeLoad(storage::IndexLoadArtifact&& artifact,
         is_mmap_);
     is_built_ = true;
     ComputeByteSize();
-    final_file_guard.dismiss();
+    storage::ThrowIfCancelled(
+        co_await folly::coro::co_current_cancellation_token,
+        "ScalarIndex::FinalizeLoad");
+    this->mmap_file_raii_ = std::move(context->final_file_cleanup);
+    co_return;
 }
 
 template <typename T>

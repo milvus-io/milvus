@@ -62,7 +62,7 @@ class ExposedStringIndexSort : public StringIndexSort {
         plan.priority = priority;
         auto artifact = folly::coro::blockingWait(
             storage::MaterializeIndexAsync(reader, std::move(plan)));
-        FinalizeLoad(std::move(artifact), config);
+        folly::coro::blockingWait(FinalizeLoad(std::move(artifact), config));
         artifact.CommitTargets();
     }
 };

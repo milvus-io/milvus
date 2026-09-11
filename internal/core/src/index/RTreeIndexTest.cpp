@@ -2245,7 +2245,7 @@ class ExposedRTreeIndex : public milvus::index::RTreeIndex<std::string> {
         plan.priority = priority;
         auto artifact = folly::coro::blockingWait(
             milvus::storage::MaterializeIndexAsync(reader, std::move(plan)));
-        FinalizeLoad(std::move(artifact), config);
+        folly::coro::blockingWait(FinalizeLoad(std::move(artifact), config));
         artifact.CommitTargets();
     }
 };

@@ -7,6 +7,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 
 #include <gtest/gtest.h>
+#include <atomic>
 #include <filesystem>
 #include <fstream>
 #include <mutex>
@@ -36,6 +37,7 @@
 #include "storage/LegacyIndexLoader.h"
 #include "storage/LocalFileIOPool.h"
 #include "storage/LocalChunkManager.h"
+#include "storage/Util.h"
 #include "test_utils/AsyncLoadTestUtils.h"
 #include "test_utils/TmpPath.h"
 
@@ -77,11 +79,14 @@ class ObservedLegacyIndex : public Index {
  public:
     using Index::Index;
     void
-    LoadWithoutAssemble(const BinarySet& binary,
-                        const Config& config) override {
+    ComputeByteSize() override {
         finalizer_thread = folly::getCurrentThreadName().value_or("");
-        Index::LoadWithoutAssemble(binary, config);
+        if (on_finalize) {
+            on_finalize();
+        }
+        Index::ComputeByteSize();
     }
+    std::function<void()> on_finalize;
     void
     FinishForTest() {
         this->finish();
@@ -247,10 +252,7 @@ class LegacyScalarAsyncLoadTest : public ::testing::Test {
                     segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(
                         enabled);
                     source_->expect_async = enabled;
-                    using Loaded = std::conditional_t<
-                        std::is_same_v<Index, StringIndexMarisa>,
-                        Index,
-                        ObservedLegacyIndex<Index>>;
+                    using Loaded = ObservedLegacyIndex<Index>;
                     Loaded loaded(Context(type, true));
                     IndexBase& base = loaded;
                     OpContext context;
@@ -258,16 +260,135 @@ class LegacyScalarAsyncLoadTest : public ::testing::Test {
                               LoadConfig(files, mmap),
                               &context);
                     CheckNullable(loaded, values[0]);
-                    if constexpr (!std::is_same_v<Index, StringIndexMarisa>) {
-                        if (enabled) {
-                            EXPECT_TRUE(loaded.finalizer_thread.starts_with(
-                                mmap ? "MILVUS_LF_IO_" : "MILVUS_ASYNC"));
+                    if (enabled) {
+                        EXPECT_TRUE(loaded.finalizer_thread.starts_with(
+                            "MILVUS_ASYNC"));
+                    }
+                }
+            }
+        }
+    }
+    // Block real query-state restoration after engine opening. A single local
+    // worker must remain available, and admission must already be released.
+    template <typename Index>
+    void
+    CheckBlockedFinalizer(ObservedLegacyIndex<Index>& loaded,
+                          Config config,
+                          bool packed,
+                          int outcome) {
+        folly::Baton<> release;
+        std::promise<void> entered;
+        auto entered_future = entered.get_future();
+        std::atomic<bool> first{true};
+        loaded.on_finalize = [&] {
+            EXPECT_TRUE(folly::getCurrentThreadName().value_or("").starts_with(
+                "MILVUS_ASYNC"));
+            if (first.exchange(false)) {
+                entered.set_value();
+                release.wait();
+                if (outcome == 2) {
+                    ThrowInfo(FileReadFailed,
+                              "injected scalar state restoration failure");
+                }
+            }
+        };
+        folly::CancellationSource cancellation;
+        OpContext context;
+        context.cancellation_token = cancellation.getToken();
+        auto pending = std::async(std::launch::async, [&] {
+            if (packed) {
+                loaded.LoadUnified(config, &context);
+            } else {
+                IndexBase& base = loaded;
+                base.Load(tracer::TraceContext{}, config, &context);
+            }
+        });
+        auto drain = folly::makeGuard([&] { release.post(); });
+        ASSERT_EQ(entered_future.wait_for(std::chrono::seconds(10)),
+                  std::future_status::ready);
+        std::promise<void> local_probe;
+        auto local_future = local_probe.get_future();
+        storage::LocalFileIOPool::GetInstance().GetExecutor()->add(
+            [&] { local_probe.set_value(); });
+        EXPECT_EQ(local_future.wait_for(std::chrono::seconds(10)),
+                  std::future_status::ready);
+        auto& admission = storage::LoadAdmissionController::GetInstance();
+        const bool available =
+            admission.TryAcquire({1, 1}, storage::LoadAdmissionPriority::High);
+        EXPECT_TRUE(available);
+        if (available) {
+            admission.Release({1, 1});
+        }
+        if (outcome == 1) {
+            cancellation.requestCancellation();
+        }
+        EXPECT_EQ(pending.wait_for(std::chrono::milliseconds(0)),
+                  std::future_status::timeout);
+        release.post();
+        if (outcome == 0) {
+            EXPECT_NO_THROW(pending.get());
+        } else {
+            try {
+                pending.get();
+                FAIL() << "expected load failure";
+            } catch (const SegcoreError& error) {
+                EXPECT_EQ(error.get_error_code(),
+                          outcome == 1 ? FollyCancel : FileReadFailed);
+            }
+        }
+        // Join the queued probe even if its deadline exposed the old routing.
+        local_future.wait();
+        loaded.on_finalize = {};
+    }
+
+    template <typename T, typename Index>
+    void
+    CheckBinaryFinalizers(const std::vector<T>& values,
+                          proto::schema::DataType type) {
+        storage::StorageConfig storage_config;
+        storage_config.storage_type = "local";
+        storage_config.root_path = temporary_.get().string();
+        const auto fs = storage::InitArrowFileSystem(storage_config);
+        auto build_context = Context(type);
+        build_context.fs = fs;
+        Index build(build_context);
+        build.Build(values.size(), values.data());
+        const auto legacy_files = Persist(build.Serialize({}));
+        const auto packed_files = build.UploadUnified({})->GetIndexFiles();
+        for (const bool packed : {false, true}) {
+            for (const bool mmap : {false, true}) {
+                for (const int outcome : {0, 1, 2}) {
+                    SCOPED_TRACE(::testing::Message()
+                                 << type << '/' << packed << '/' << mmap << '/'
+                                 << outcome);
+                    auto load_context = Context(type, true);
+                    if (packed) {
+                        load_context.fs = fs;
+                    }
+                    ObservedLegacyIndex<Index> loaded(load_context);
+                    auto config =
+                        LoadConfig(packed ? packed_files : legacy_files, mmap);
+                    config[SCALAR_INDEX_ENGINE_VERSION] = packed ? 3 : 2;
+                    CheckBlockedFinalizer(loaded, config, packed, outcome);
+                    if (outcome == 0) {
+                        EXPECT_EQ(loaded.Count(), values.size());
+                        const T needles[]{values.front(), values.back()};
+                        const auto matches = loaded.In(2, needles);
+                        EXPECT_TRUE(matches[0]);
+                        EXPECT_TRUE(matches[values.size() - 1]);
+                    }
+                    if constexpr (std::is_same_v<Index, BitmapIndex<T>>) {
+                        if (mmap && outcome != 0) {
+                            EXPECT_FALSE(std::filesystem::exists(
+                                config[MMAP_FILE_PATH]
+                                    .template get<std::string>()));
                         }
                     }
                 }
             }
         }
     }
+
     test::TmpPath temporary_;
     std::shared_ptr<ObservedLegacySource> source_;
     test::ScopedLoadTransientBudget budget_{1024 * 1024};
@@ -276,6 +397,21 @@ class LegacyScalarAsyncLoadTest : public ::testing::Test {
     int old_workers_{};
     size_t old_slots_{};
 };
+
+TEST_F(LegacyScalarAsyncLoadTest,
+       ScalarFinalizersDoNotHoldLocalWorkerOrAdmission) {
+    CheckBinaryFinalizers<int64_t, ScalarIndexSort<int64_t>>(
+        {10, 20, 30, 10, 50}, proto::schema::DataType::Int64);
+    CheckBinaryFinalizers<std::string, StringIndexSort>(
+        {"cat", "dog", "owl", "cat", "ant"}, proto::schema::DataType::VarChar);
+    CheckBinaryFinalizers<std::string, StringIndexMarisa>(
+        {"cat", "dog", "owl", "cat", "ant"}, proto::schema::DataType::VarChar);
+    // Enough keys for mmap mode and multiple frozen conversion batches.
+    std::vector<int64_t> values(5000);
+    std::iota(values.begin(), values.end(), int64_t{0});
+    CheckBinaryFinalizers<int64_t, BitmapIndex<int64_t>>(
+        values, proto::schema::DataType::Int64);
+}
 
 TEST_F(LegacyScalarAsyncLoadTest, BitmapMemoryAndMmap) {
     RoundTripBinary<int64_t, BitmapIndex<int64_t>>(
@@ -299,7 +435,7 @@ TEST_F(LegacyScalarAsyncLoadTest, HighCardinalityBitmapUsesMmapFinalizer) {
     EXPECT_EQ(hits.count(), 2);
     EXPECT_TRUE(hits[0]);
     EXPECT_TRUE(hits[599]);
-    EXPECT_TRUE(loaded.finalizer_thread.starts_with("MILVUS_LF_IO_"));
+    EXPECT_TRUE(loaded.finalizer_thread.starts_with("MILVUS_ASYNC"));
 }
 
 TEST_F(LegacyScalarAsyncLoadTest, StringSortMemoryAndMmap) {
@@ -312,7 +448,7 @@ TEST_F(LegacyScalarAsyncLoadTest, MarisaMemoryAndMmap) {
         {"cat", "dog", "owl", "cat", "ant"}, proto::schema::DataType::VarChar);
 }
 
-TEST_F(LegacyScalarAsyncLoadTest, NumericSortMmapUsesLocalPool) {
+TEST_F(LegacyScalarAsyncLoadTest, NumericSortMmapRestoresOnAsyncWorker) {
     RoundTripBinary<int64_t, ScalarIndexSort<int64_t>>(
         {10, 20, 30, 10, 50}, proto::schema::DataType::Int64);
 }
@@ -358,10 +494,11 @@ TEST_F(LegacyScalarAsyncLoadTest, TantivyMetadataAndFilesMemoryAndMmap) {
     const auto files = PersistDirectory(build.Path(), build.Serialize({}));
     for (bool mmap : {false, true}) {
         source_->expect_async = true;
-        InvertedIndexTantivy<std::string> loaded(
+        ObservedLegacyIndex<InvertedIndexTantivy<std::string>> loaded(
             TANTIVY_INDEX_LATEST_VERSION,
             Context(proto::schema::DataType::VarChar, true));
-        loaded.Load(tracer::TraceContext{}, LoadConfig(files, mmap), nullptr);
+        CheckBlockedFinalizer(loaded, LoadConfig(files, mmap), false, 0);
+        EXPECT_TRUE(loaded.finalizer_thread.starts_with("MILVUS_ASYNC"));
         CheckNullable(loaded, values[0]);
     }
 }
@@ -429,8 +566,9 @@ TEST_F(LegacyScalarAsyncLoadTest, RTreeFilesAndNullSidecar) {
     }
     source_->expect_async = true;
     for (const auto& paths : {files, names}) {
-        RTreeIndex<std::string> loaded(context);
-        loaded.Load(tracer::TraceContext{}, LoadConfig(paths, false), nullptr);
+        ObservedLegacyIndex<RTreeIndex<std::string>> loaded(context);
+        CheckBlockedFinalizer(loaded, LoadConfig(paths, false), false, 0);
+        EXPECT_TRUE(loaded.finalizer_thread.starts_with("MILVUS_ASYNC"));
         EXPECT_EQ(loaded.Count(), 3);
         EXPECT_EQ(loaded.IsNull().count(), 1);
         EXPECT_TRUE(loaded.IsNull()[1]);

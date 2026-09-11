@@ -63,8 +63,13 @@ namespace {
 
 struct RTreeLoadContext {
     ~RTreeLoadContext() {
-        if (!keep_directory && disk_file_manager != nullptr &&
-            !directory.empty()) {
+        if ((files.empty() || !std::all_of(files.begin(),
+                                           files.end(),
+                                           [](const auto& file) {
+                                               return file->file != nullptr &&
+                                                      file->file->Committed();
+                                           })) &&
+            disk_file_manager != nullptr && !directory.empty()) {
             disk_file_manager->RemoveIndexFiles();
         }
     }
@@ -78,7 +83,6 @@ struct RTreeLoadContext {
     std::optional<storage::DiskFileManagerImpl::LocalDirWriteLease>
         local_dir_lease;
     bool has_null{false};
-    bool keep_directory{false};
 };
 
 template <typename T>
@@ -430,28 +434,20 @@ RTreeIndex<T>::LoadLegacyAsync(const Config& config,
     try {
         co_await disk_file_manager_->CacheIndexToDiskAsync(
             disk_files, prefix, priority, token);
-        co_await storage::RunLocalFileIOAsync(
-            [&] {
-                storage::ThrowIfCancelled(token, "RTree::FinalizeLegacy");
-                {
-                    std::unique_lock<folly::SharedMutexWritePriority> lock(
-                        mutex_);
-                    null_offset_ = std::move(null_offsets);
-                }
-                FinishLegacyLoad();
-                storage::ThrowIfCancelled(token, "RTree::FinalizeLegacy");
-            },
-            priority);
+        storage::ThrowIfCancelled(token, "RTree::FinalizeLegacy");
+        {
+            std::unique_lock<folly::SharedMutexWritePriority> lock(mutex_);
+            null_offset_ = std::move(null_offsets);
+        }
+        FinishLegacyLoad();
+        storage::ThrowIfCancelled(token, "RTree::FinalizeLegacy");
     } catch (...) {
         failure = std::current_exception();
     }
     if (failure) {
+        wrapper_.reset();
         co_await storage::RunLocalFileIOAsync(
-            [&] {
-                wrapper_.reset();
-                disk_file_manager_->RemoveIndexFiles();
-            },
-            priority);
+            [&] { disk_file_manager_->RemoveIndexFiles(); }, priority);
         std::rethrow_exception(failure);
     }
 }
@@ -1124,7 +1120,7 @@ RTreeIndex<T>::PlanLoad(const storage::IndexEntryCatalog& catalog,
 }
 
 template <typename T>
-void
+folly::coro::Task<void>
 RTreeIndex<T>::FinalizeLoad(storage::IndexLoadArtifact&& artifact,
                             const Config& config) {
     (void)config;
@@ -1156,7 +1152,6 @@ RTreeIndex<T>::FinalizeLoad(storage::IndexLoadArtifact&& artifact,
         path_ = context->base_path;
         is_built_ = true;
     }
-    context->keep_directory = true;
     ComputeByteSize();
     LOG_INFO(
         "FinalizeLoad RTreeIndex done, file_count: {}, has_null: {}, "
@@ -1164,6 +1159,10 @@ RTreeIndex<T>::FinalizeLoad(storage::IndexLoadArtifact&& artifact,
         context->file_names.size(),
         context->has_null,
         path_);
+    storage::ThrowIfCancelled(
+        co_await folly::coro::co_current_cancellation_token,
+        "ScalarIndex::FinalizeLoad");
+    co_return;
 }
 
 // Explicit template instantiation for std::string as we only support string field for now.

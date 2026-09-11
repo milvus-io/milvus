@@ -15,6 +15,8 @@
 // limitations under the License.
 
 #include "index/StringIndexSort.h"
+#include "storage/LocalFileIOPool.h"
+#include "storage/EntryStreamUtils.h"
 #include "common/FastMem.h"
 
 #include <assert.h>
@@ -161,6 +163,7 @@ StringSortMmapFileSize(size_t data_size) {
 }
 
 struct StringSortLoadContext {
+    std::unique_ptr<StringIndexSortImpl> pending_impl;
     size_t total_num_rows{0};
     bool is_nested{false};
     bool is_mmap{false};
@@ -406,6 +409,31 @@ StringIndexSort::Load(milvus::tracer::TraceContext ctx, const Config& config) {
 void
 StringIndexSort::LoadWithoutAssemble(const BinarySet& binary_set,
                                      const Config& config) {
+    LoadLegacyMetadata(binary_set, config);
+
+    // Check if mmap is enabled
+    if (config.contains(MMAP_FILE_PATH)) {
+        LOG_INFO("StringIndexSort: loading with mmap strategy");
+        auto mmap_impl = std::make_unique<StringIndexSortMmapImpl>();
+
+        auto mmap_path =
+            GetValueFromConfig<std::string>(config, MMAP_FILE_PATH).value();
+        mmap_impl->SetMmapFilePath(mmap_path);
+        mmap_impl->LoadFromBinary(
+            binary_set, total_num_rows_, valid_bitset_, idx_to_offsets_);
+        impl_ = std::move(mmap_impl);
+    } else {
+        LOG_INFO("StringIndexSort: loading with memory strategy");
+        impl_ = std::make_unique<StringIndexSortMemoryImpl>();
+        impl_->LoadFromBinary(
+            binary_set, total_num_rows_, valid_bitset_, idx_to_offsets_);
+    }
+    FinishLegacyLoad();
+}
+
+void
+StringIndexSort::LoadLegacyMetadata(const BinarySet& binary_set,
+                                    const Config& config) {
     config_ = config;
 
     auto index_num_rows = binary_set.GetByName("index_num_rows");
@@ -452,30 +480,67 @@ StringIndexSort::LoadWithoutAssemble(const BinarySet& binary_set,
                               version,
                               SERIALIZATION_VERSION));
     }
+}
 
-    // Check if mmap is enabled
-    if (config.contains(MMAP_FILE_PATH)) {
-        LOG_INFO("StringIndexSort: loading with mmap strategy");
-        auto mmap_impl = std::make_unique<StringIndexSortMmapImpl>();
-
-        auto mmap_path =
-            GetValueFromConfig<std::string>(config, MMAP_FILE_PATH).value();
-        mmap_impl->SetMmapFilePath(mmap_path);
-        mmap_impl->LoadFromBinary(
-            binary_set, total_num_rows_, valid_bitset_, idx_to_offsets_);
-        impl_ = std::move(mmap_impl);
-    } else {
-        LOG_INFO("StringIndexSort: loading with memory strategy");
-        impl_ = std::make_unique<StringIndexSortMemoryImpl>();
-        impl_->LoadFromBinary(
-            binary_set, total_num_rows_, valid_bitset_, idx_to_offsets_);
-    }
+void
+StringIndexSort::FinishLegacyLoad() {
     idx_to_offsets_ptr_ = idx_to_offsets_.data();
     idx_to_offsets_size_ = idx_to_offsets_.size();
 
     is_built_ = true;
     total_size_ = CalculateTotalSize();
     ComputeByteSize();
+}
+
+folly::coro::Task<void>
+StringIndexSort::FinishLegacyLoadAsync(BinarySet binary,
+                                       const Config& config,
+                                       folly::CancellationToken token) {
+    token = folly::cancellation_token_merge(
+        token, co_await folly::coro::co_current_cancellation_token);
+    if (!config.contains(MMAP_FILE_PATH)) {
+        co_await StringIndex::FinishLegacyLoadAsync(
+            std::move(binary), config, token);
+        co_return;
+    }
+    storage::ThrowIfCancelled(token, "StringSort::FinalizeLegacy");
+    LoadLegacyMetadata(binary, config);
+    const auto priority =
+        GetValueFromConfig<proto::common::LoadPriority>(config, LOAD_PRIORITY)
+            .value_or(proto::common::LoadPriority::HIGH);
+    auto staged = std::make_unique<StringIndexSortMmapImpl>();
+    staged->SetMmapFilePath(
+        GetValueFromConfig<std::string>(config, MMAP_FILE_PATH).value());
+    const auto data = binary.GetByName("index_data");
+    std::exception_ptr failure;
+    try {
+        co_await storage::RunLocalFileIOAsync(
+            [&] {
+                storage::ThrowIfCancelled(token, "StringSort::WriteLegacy");
+                staged->WriteMmapIndexData(
+                    data->data.get(),
+                    data->size,
+                    storage::io::GetPriorityFromLoadPriority(priority));
+            },
+            priority);
+        storage::ThrowIfCancelled(token, "StringSort::FinalizeLegacy");
+        staged->LoadFromFile(
+            data->size, total_num_rows_, valid_bitset_, idx_to_offsets_);
+        impl_ = std::move(staged);
+        FinishLegacyLoad();
+        storage::ThrowIfCancelled(token, "StringSort::FinalizeLegacy");
+    } catch (...) {
+        failure = std::current_exception();
+    }
+    if (failure) {
+        co_await storage::RunLocalFileIOAsync(
+            [&] {
+                staged.reset();
+                impl_.reset();
+            },
+            priority);
+        std::rethrow_exception(failure);
+    }
 }
 
 const TargetBitmap
@@ -737,7 +802,7 @@ StringIndexSort::PlanLoad(const storage::IndexEntryCatalog& catalog,
     return plan;
 }
 
-void
+folly::coro::Task<void>
 StringIndexSort::FinalizeLoad(storage::IndexLoadArtifact&& artifact,
                               const Config& config) {
     auto context =
@@ -757,7 +822,7 @@ StringIndexSort::FinalizeLoad(storage::IndexLoadArtifact&& artifact,
     if (!context->is_mmap || !context->has_persisted_offsets) {
         new_offsets.resize(context->total_num_rows);
     }
-    std::unique_ptr<StringIndexSortImpl> new_impl;
+    auto& new_impl = context->pending_impl;
     char* new_mmap_meta_data = nullptr;
     auto mmap_meta_guard = folly::makeGuard([&]() {
         if (new_mmap_meta_data != nullptr && new_mmap_meta_data != MAP_FAILED) {
@@ -769,7 +834,8 @@ StringIndexSort::FinalizeLoad(storage::IndexLoadArtifact&& artifact,
         AssertInfo(context->index_data_file != nullptr &&
                        context->index_data_file->file != nullptr,
                    "StringIndexSort index_data mmap target is not prepared");
-        auto mmap_impl = std::make_unique<StringIndexSortMmapImpl>();
+        new_impl = std::make_unique<StringIndexSortMmapImpl>();
+        auto* mmap_impl = static_cast<StringIndexSortMmapImpl*>(new_impl.get());
         mmap_impl->SetMmapFilePath(context->index_data_file->path);
         if (context->has_persisted_offsets) {
             AssertInfo(context->offsets_file != nullptr &&
@@ -793,7 +859,6 @@ StringIndexSort::FinalizeLoad(storage::IndexLoadArtifact&& artifact,
                                 new_valid_bitset,
                                 new_offsets,
                                 context->has_persisted_offsets);
-        new_impl = std::move(mmap_impl);
     } else {
         AssertInfo(context->index_data != nullptr,
                    "StringIndexSort memory target is null");
@@ -830,6 +895,10 @@ StringIndexSort::FinalizeLoad(storage::IndexLoadArtifact&& artifact,
     is_built_ = true;
     total_size_ = CalculateTotalSize();
     ComputeByteSize();
+    storage::ThrowIfCancelled(
+        co_await folly::coro::co_current_cancellation_token,
+        "ScalarIndex::FinalizeLoad");
+    co_return;
 }
 
 void
@@ -1646,6 +1715,14 @@ StringIndexSortMmapImpl::LoadFromData(const uint8_t* data,
                                       size_t total_num_rows,
                                       TargetBitmap& valid_bitset,
                                       std::vector<int32_t>& idx_to_offsets) {
+    WriteMmapIndexData(data, data_size, storage::io::Priority::MIDDLE);
+    MmapAndParse(data_size, total_num_rows, valid_bitset, idx_to_offsets);
+}
+
+void
+StringIndexSortMmapImpl::WriteMmapIndexData(const uint8_t* data,
+                                            size_t data_size,
+                                            storage::io::Priority priority) {
     AssertInfo(!mmap_filepath_.empty(), "mmap filepath is not set");
 
     std::filesystem::create_directories(
@@ -1655,7 +1732,7 @@ StringIndexSortMmapImpl::LoadFromData(const uint8_t* data,
         ((data_size + STRING_SORT_ALIGNMENT - 1) / STRING_SORT_ALIGNMENT) *
         STRING_SORT_ALIGNMENT;
     {
-        auto file_writer = storage::FileWriter(mmap_filepath_);
+        auto file_writer = storage::FileWriter(mmap_filepath_, priority);
         file_writer.Write(data, data_size);
 
         if (aligned_size > data_size) {
@@ -1667,8 +1744,6 @@ StringIndexSortMmapImpl::LoadFromData(const uint8_t* data,
         file_writer.Write(padding.data(), padding.size());
         file_writer.Finish();
     }
-
-    MmapAndParse(data_size, total_num_rows, valid_bitset, idx_to_offsets);
 }
 
 void

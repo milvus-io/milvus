@@ -305,15 +305,18 @@ class ScalarIndex : public IndexBase {
         ThrowInfo(Unsupported, "Async V3 load planning is not implemented");
     }
 
-    // Construct the query representation from fully verified targets, without remote IO.
-    virtual void
+    // Restore query state on the calling async worker from verified targets.
+    // Await local-file writes only; the caller owns artifact cleanup until return.
+    virtual folly::coro::Task<void>
     FinalizeLoad(storage::IndexLoadArtifact&& artifact, const Config& config) {
         ThrowInfo(Unsupported, "Async V3 load finalization is not implemented");
+        co_return;
     }
 
  protected:
-    // Reuses the BinarySet finalizer; file-backed finalization runs on local I/O.
-    folly::coro::Task<void>
+    // Restore legacy query state on the calling async worker. File-backed
+    // consumers await their writes and cleanup before returning.
+    virtual folly::coro::Task<void>
     FinishLegacyLoadAsync(BinarySet binary,
                           const Config& config,
                           folly::CancellationToken token);

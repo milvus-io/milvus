@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "index/FMIndex.h"
+#include "storage/EntryStreamUtils.h"
 
 #include <fcntl.h>
 
@@ -912,7 +913,7 @@ FMIndex::PlanLoad(const storage::IndexEntryCatalog& catalog,
     return plan;
 }
 
-void
+folly::coro::Task<void>
 FMIndex::FinalizeLoad(storage::IndexLoadArtifact&& artifact,
                       const Config& config) {
     (void)config;
@@ -1012,6 +1013,10 @@ FMIndex::FinalizeLoad(storage::IndexLoadArtifact&& artifact,
     LOG_INFO("FinalizeLoad FM index done, field id: {}, total rows: {}",
              field_id_,
              total_rows_);
+    storage::ThrowIfCancelled(
+        co_await folly::coro::co_current_cancellation_token,
+        "ScalarIndex::FinalizeLoad");
+    co_return;
 }
 
 }  // namespace milvus::index

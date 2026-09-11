@@ -48,6 +48,8 @@
 #include "folly/ScopeGuard.h"
 #include "index/Meta.h"
 #include "index/StringIndexMarisa.h"
+#include "storage/LocalFileIOPool.h"
+#include "storage/EntryStreamUtils.h"
 #include "index/Utils.h"
 #include "knowhere/binaryset.h"
 #include "marisa/agent.h"
@@ -73,6 +75,9 @@ constexpr const char* MARISA_CSR_FORMAT_VERSION_META =
     "marisa_csr_format_version";
 
 struct MarisaLoadContext {
+    std::unique_ptr<MmapFileRAII> trie_cleanup;
+    std::unique_ptr<MmapFileRAII> str_ids_cleanup;
+    std::unique_ptr<MmapFileRAII> csr_cleanup;
     bool is_mmap{false};
     bool has_csr{false};
     std::string file_name;
@@ -338,6 +343,11 @@ StringIndexMarisa::LoadWithoutAssemble(const BinarySet& set,
     // failures while writing or opening the trie. Mmap mode owns it above.
     trie_file_raii.reset();
 
+    FinishLegacyLoad(set);
+}
+
+void
+StringIndexMarisa::FinishLegacyLoad(const BinarySet& set) {
     auto str_ids = set.GetByName(MARISA_STR_IDS);
     auto str_ids_len = str_ids->size;
     ValidateMarisaEntryElementSize(
@@ -352,6 +362,57 @@ StringIndexMarisa::LoadWithoutAssemble(const BinarySet& set,
     built_ = true;
     total_size_ = CalculateTotalSize();
     ComputeByteSize();
+}
+
+folly::coro::Task<void>
+StringIndexMarisa::FinishLegacyLoadAsync(BinarySet binary,
+                                         const Config& config,
+                                         folly::CancellationToken token) {
+    token = folly::cancellation_token_merge(
+        token, co_await folly::coro::co_current_cancellation_token);
+    storage::ThrowIfCancelled(token, "Marisa::FinalizeLegacy");
+    const auto file_name =
+        "/tmp/" + boost::uuids::to_string(boost::uuids::random_generator()());
+    const auto priority =
+        GetValueFromConfig<proto::common::LoadPriority>(config, LOAD_PRIORITY)
+            .value_or(proto::common::LoadPriority::HIGH);
+    const auto index = binary.GetByName(MARISA_TRIE_INDEX);
+    std::unique_ptr<MmapFileRAII> staged_file;
+    std::exception_ptr failure;
+    try {
+        co_await storage::RunLocalFileIOAsync(
+            [&] {
+                storage::ThrowIfCancelled(token, "Marisa::WriteLegacy");
+                staged_file = std::make_unique<MmapFileRAII>(file_name);
+                storage::FileWriter writer(
+                    file_name,
+                    storage::io::GetPriorityFromLoadPriority(priority));
+                writer.Write(index->data.get(), index->size);
+                writer.Finish();
+            },
+            priority);
+        storage::ThrowIfCancelled(token, "Marisa::FinalizeLegacy");
+        if (config.contains(MMAP_FILE_PATH)) {
+            trie_.mmap(file_name.c_str());
+        } else {
+            auto file = File::Open(file_name, O_RDONLY);
+            trie_.read(file.Descriptor());
+        }
+        FinishLegacyLoad(binary);
+        storage::ThrowIfCancelled(token, "Marisa::FinalizeLegacy");
+    } catch (...) {
+        failure = std::current_exception();
+    }
+    // File ownership transfers only after successful engine work. On failure,
+    // the trie has returned and no writer can still reference this path.
+    if (!failure && config.contains(MMAP_FILE_PATH)) {
+        mmap_file_raii_.swap(staged_file);
+    }
+    co_await storage::RunLocalFileIOAsync([&] { staged_file.reset(); },
+                                          priority);
+    if (failure) {
+        std::rethrow_exception(failure);
+    }
 }
 
 void
@@ -1038,7 +1099,7 @@ StringIndexMarisa::PlanLoad(const storage::IndexEntryCatalog& catalog,
     return plan;
 }
 
-void
+folly::coro::Task<void>
 StringIndexMarisa::FinalizeLoad(storage::IndexLoadArtifact&& artifact,
                                 const Config& config) {
     auto context =
@@ -1047,9 +1108,8 @@ StringIndexMarisa::FinalizeLoad(storage::IndexLoadArtifact&& artifact,
                "StringIndexMarisa FinalizeLoad context is null");
 
     marisa::Trie new_trie;
-    std::unique_ptr<MmapFileRAII> new_trie_file_raii;
     if (context->is_mmap) {
-        new_trie_file_raii =
+        context->trie_cleanup =
             std::make_unique<MmapFileRAII>(context->trie_file->path);
         new_trie.mmap(context->trie_file->path.c_str());
     } else {
@@ -1072,14 +1132,12 @@ StringIndexMarisa::FinalizeLoad(storage::IndexLoadArtifact&& artifact,
                    context->csr_index_bytes + context->csr_offsets_bytes);
         }
     });
-    std::unique_ptr<MmapFileRAII> new_str_ids_file_raii;
-    std::unique_ptr<MmapFileRAII> new_csr_file_raii;
     std::vector<int64_t> new_str_ids;
     std::vector<uint32_t> new_csr_index;
     std::vector<uint32_t> new_csr_offsets;
 
     if (context->is_mmap) {
-        new_str_ids_file_raii =
+        context->str_ids_cleanup =
             std::make_unique<MmapFileRAII>(context->str_ids_file->path);
         auto file = File::Open(context->str_ids_file->path, O_RDONLY);
         new_str_ids_mmap_data = static_cast<char*>(mmap(nullptr,
@@ -1106,7 +1164,7 @@ StringIndexMarisa::FinalizeLoad(storage::IndexLoadArtifact&& artifact,
                    new_trie.num_keys(),
                    context->csr_num_keys);
         if (context->is_mmap) {
-            new_csr_file_raii =
+            context->csr_cleanup =
                 std::make_unique<MmapFileRAII>(context->csr_file->path);
             auto file = File::Open(context->csr_file->path, O_RDONLY);
             auto csr_size =
@@ -1129,7 +1187,7 @@ StringIndexMarisa::FinalizeLoad(storage::IndexLoadArtifact&& artifact,
 
     config_ = config;
     trie_.swap(new_trie);
-    mmap_file_raii_ = std::move(new_trie_file_raii);
+
     str_ids_size_ = new_str_ids_size;
     if (context->is_mmap) {
         AssertInfo(context->str_ids_bytes <=
@@ -1138,7 +1196,7 @@ StringIndexMarisa::FinalizeLoad(storage::IndexLoadArtifact&& artifact,
         str_ids_mmap_data_ = new_str_ids_mmap_data;
         new_str_ids_mmap_data = nullptr;
         str_ids_mmap_size_ = static_cast<int64_t>(context->str_ids_bytes);
-        str_ids_mmap_raii_ = std::move(new_str_ids_file_raii);
+
         str_ids_ptr_ = reinterpret_cast<const int64_t*>(str_ids_mmap_data_);
     } else {
         str_ids_ = std::move(new_str_ids);
@@ -1156,7 +1214,7 @@ StringIndexMarisa::FinalizeLoad(storage::IndexLoadArtifact&& artifact,
             csr_mmap_data_ = new_csr_mmap_data;
             new_csr_mmap_data = nullptr;
             csr_mmap_size_ = static_cast<int64_t>(csr_size);
-            csr_mmap_raii_ = std::move(new_csr_file_raii);
+
             csr_index_ptr_ = reinterpret_cast<const uint32_t*>(csr_mmap_data_);
             csr_offsets_ptr_ = reinterpret_cast<const uint32_t*>(
                 csr_mmap_data_ + context->csr_index_bytes);
@@ -1174,6 +1232,13 @@ StringIndexMarisa::FinalizeLoad(storage::IndexLoadArtifact&& artifact,
     total_size_ = CalculateTotalSize();
     ComputeByteSize();
     LOG_INFO("FinalizeLoad StringIndexMarisa done");
+    storage::ThrowIfCancelled(
+        co_await folly::coro::co_current_cancellation_token,
+        "ScalarIndex::FinalizeLoad");
+    mmap_file_raii_ = std::move(context->trie_cleanup);
+    str_ids_mmap_raii_ = std::move(context->str_ids_cleanup);
+    csr_mmap_raii_ = std::move(context->csr_cleanup);
+    co_return;
 }
 
 void

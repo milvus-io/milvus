@@ -168,7 +168,13 @@ BitmapMmapFrozenBufferBytes(int64_t num_rows, uint64_t index_size_in_bytes) {
     constexpr uint64_t kBitmapFrozenAlignment = 32;
     auto dense_bitmap_bytes =
         AlignUp(BitsetBytes(num_rows), kBitmapFrozenAlignment);
-    return std::max(dense_bitmap_bytes, index_size_in_bytes);
+    // Decoded Roaring and frozen output coexist. Growing the reusable output
+    // can briefly retain its old allocation too; each output allocation holds
+    // at most one batch prefix plus the largest bitmap.
+    return SaturatingAdd(
+        SaturatingMultiply(std::max(dense_bitmap_bytes, index_size_in_bytes),
+                           uint64_t{3}),
+        uint64_t{2 * BITMAP_FROZEN_BATCH_BYTES});
 }
 
 uint64_t
@@ -1102,6 +1108,10 @@ IndexFactory::ScalarIndexAsyncLoadResource(
                                                        mmap_enable,
                                                        num_rows,
                                                        read_peak);
+    if (type == BITMAP_INDEX_TYPE && mmap_enable) {
+        request.max_memory_cost = SaturatingAdd(
+            request.max_memory_cost, storage::FileWriter::MAX_BUFFER_SIZE);
+    }
     if (type == RTREE_INDEX_TYPE && catalog.HasEntry("index_null_offset")) {
         request.final_memory_cost =
             catalog.At("index_null_offset").plaintext_size;

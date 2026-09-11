@@ -52,22 +52,12 @@ folly::coro::Task<void>
 ScalarIndex<T>::FinishLegacyLoadAsync(BinarySet binary,
                                       const Config& config,
                                       folly::CancellationToken token) {
-    const auto priority = GetValueFromConfig<proto::common::LoadPriority>(
-                              config, milvus::LOAD_PRIORITY)
-                              .value_or(proto::common::LoadPriority::HIGH);
-    auto finalize = [&] {
-        storage::ThrowIfCancelled(token, "ScalarIndex::FinalizeLegacy");
-        LoadWithoutAssemble(binary, config);
-        storage::ThrowIfCancelled(token, "ScalarIndex::FinalizeLegacy");
-    };
-    // Marisa reads its trie through a temporary file even for memory loading.
-    if (GetIndexType() == ScalarIndexType::MARISA ||
-        config.contains(MMAP_FILE_PATH) ||
-        GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true)) {
-        co_await storage::RunLocalFileIOAsync(finalize, priority);
-    } else {
-        finalize();
-    }
+    token = folly::cancellation_token_merge(
+        token, co_await folly::coro::co_current_cancellation_token);
+    storage::ThrowIfCancelled(token, "ScalarIndex::FinalizeLegacy");
+    LoadWithoutAssemble(binary, config);
+    storage::ThrowIfCancelled(token, "ScalarIndex::FinalizeLegacy");
+    co_return;
 }
 
 template <typename T>
@@ -102,28 +92,30 @@ ScalarIndex<T>::LoadUnifiedAsync(const std::string& packed_file,
                         return std::holds_alternative<storage::MmapEntryTarget>(
                             entry.target);
                     });
-    // Keep the artifact local to this coroutine body so both finalization and
-    // destructor cleanup run on the selected executor, including on failure.
-    auto finalize = [&]() -> folly::coro::Task<void> {
-        auto owned_artifact = std::move(artifact);
+    // Borrow the artifact during engine work. Its files and directory leases
+    // survive every awaited operation, then leave scope on the local executor.
+    std::exception_ptr failure;
+    try {
         storage::ThrowIfCancelled(cancellation_token,
                                   "ScalarIndex::FinalizeLoad");
-        FinalizeLoad(std::move(owned_artifact), config);
-        owned_artifact.CommitTargets();
-        co_return;
+        co_await folly::coro::co_withCancellation(
+            cancellation_token, FinalizeLoad(std::move(artifact), config));
+    } catch (...) {
+        failure = std::current_exception();
+    }
+    auto release = [&] {
+        auto owned_artifact = std::move(artifact);
+        if (!failure) {
+            owned_artifact.CommitTargets();
+        }
     };
     if (has_file_targets) {
-        // Acquire the local-file executor only after remote reads have drained,
-        // so disabling that pool does not wait for unrelated network I/O.
-        co_await folly::coro::co_withCancellation(
-            folly::CancellationToken{},
-            folly::coro::co_withExecutor(
-                storage::ResolveAsyncLoadExecutor(
-                    storage::LocalFileIOPool::GetInstance().GetExecutor(),
-                    load_priority),
-                finalize()));
+        co_await storage::RunLocalFileIOAsync(release, load_priority);
     } else {
-        co_await finalize();
+        release();
+    }
+    if (failure) {
+        std::rethrow_exception(failure);
     }
 }
 

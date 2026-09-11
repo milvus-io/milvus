@@ -43,6 +43,8 @@
 #include "glog/logging.h"
 #include "index/ScalarIndex.h"
 #include "index/ScalarIndexSort.h"
+#include "storage/LocalFileIOPool.h"
+#include "storage/EntryStreamUtils.h"
 #include "index/Utils.h"
 #include "knowhere/binaryset.h"
 #include "log/Log.h"
@@ -349,6 +351,20 @@ ScalarIndexSort<T>::SetupMmapFromData(
     const uint8_t* data,
     size_t size,
     milvus::proto::common::LoadPriority priority) {
+    WriteMmapIndexData(data, size, priority);
+    try {
+        MapIndexData();
+    } catch (...) {
+        remove(mmap_filepath_.c_str());
+        throw;
+    }
+}
+
+template <typename T>
+void
+ScalarIndexSort<T>::WriteMmapIndexData(const uint8_t* data,
+                                       size_t size,
+                                       proto::common::LoadPriority priority) {
     // Setup mmap file path
     mmap_filepath_ = disk_file_manager_ != nullptr
                          ? disk_file_manager_->GetLocalIndexObjectPrefix() +
@@ -377,25 +393,24 @@ ScalarIndexSort<T>::SetupMmapFromData(
         file_writer.Finish();
     }
 
+    mmap_size_ = aligned_size + SCALAR_SORT_MMAP_INDEX_PADDING;
+    data_size_ = size;
+}
+
+template <typename T>
+void
+ScalarIndexSort<T>::MapIndexData() {
     // mmap the file
     auto file = File::Open(mmap_filepath_, O_RDONLY);
-    mmap_data_ =
-        static_cast<char*>(mmap(NULL,
-                                aligned_size + SCALAR_SORT_MMAP_INDEX_PADDING,
-                                PROT_READ,
-                                MAP_PRIVATE,
-                                file.Descriptor(),
-                                0));
+    mmap_data_ = static_cast<char*>(
+        mmap(NULL, mmap_size_, PROT_READ, MAP_PRIVATE, file.Descriptor(), 0));
 
     if (mmap_data_ == MAP_FAILED) {
         file.Close();
-        remove(mmap_filepath_.c_str());
         ThrowInfo(
             ErrorCode::UnexpectedError, "failed to mmap: {}", strerror(errno));
     }
 
-    mmap_size_ = aligned_size + SCALAR_SORT_MMAP_INDEX_PADDING;
-    data_size_ = size;
     file.Close();
 }
 
@@ -403,6 +418,26 @@ template <typename T>
 void
 ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
                                         const Config& config) {
+    is_mmap_ = GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
+
+    auto index_data = index_binary.GetByName("index_data");
+
+    if (is_mmap_) {
+        auto load_priority =
+            GetValueFromConfig<milvus::proto::common::LoadPriority>(
+                config, milvus::LOAD_PRIORITY)
+                .value_or(milvus::proto::common::LoadPriority::HIGH);
+        SetupMmapFromData(
+            reinterpret_cast<const uint8_t*>(index_data->data.get()),
+            index_data->size,
+            load_priority);
+    }
+    FinishLegacyLoad(index_binary);
+}
+
+template <typename T>
+void
+ScalarIndexSort<T>::FinishLegacyLoad(const BinarySet& index_binary) {
     size_t index_size;
     auto index_length = index_binary.GetByName("index_length");
     milvus::fastmem::FastMemcpy(
@@ -417,20 +452,8 @@ ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
         is_nested_index_ = is_nested_index_ || loaded_is_nested_index;
     }
 
-    is_mmap_ = GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
-
-    auto index_data = index_binary.GetByName("index_data");
-
-    if (is_mmap_) {
-        auto load_priority =
-            GetValueFromConfig<milvus::proto::common::LoadPriority>(
-                config, milvus::LOAD_PRIORITY)
-                .value_or(milvus::proto::common::LoadPriority::HIGH);
-        SetupMmapFromData(
-            reinterpret_cast<const uint8_t*>(index_data->data.get()),
-            index_data->size,
-            load_priority);
-    } else {
+    if (!is_mmap_) {
+        auto index_data = index_binary.GetByName("index_data");
         data_.resize(index_size);
         milvus::fastmem::FastMemcpy(
             data_.data(), index_data->data.get(), (size_t)index_data->size);
@@ -464,6 +487,56 @@ ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
     LOG_INFO("load ScalarIndexSort done, field_id: {}, is_mmap:{}",
              field_id_,
              is_mmap_);
+}
+
+template <typename T>
+folly::coro::Task<void>
+ScalarIndexSort<T>::FinishLegacyLoadAsync(BinarySet binary,
+                                          const Config& config,
+                                          folly::CancellationToken token) {
+    token = folly::cancellation_token_merge(
+        token, co_await folly::coro::co_current_cancellation_token);
+    storage::ThrowIfCancelled(token, "Sort::FinalizeLegacy");
+    is_mmap_ = GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
+    if (!is_mmap_) {
+        co_await ScalarIndex<T>::FinishLegacyLoadAsync(
+            std::move(binary), config, token);
+        co_return;
+    }
+    const auto priority =
+        GetValueFromConfig<proto::common::LoadPriority>(config, LOAD_PRIORITY)
+            .value_or(proto::common::LoadPriority::HIGH);
+    const auto data = binary.GetByName("index_data");
+    std::exception_ptr failure;
+    try {
+        co_await storage::RunLocalFileIOAsync(
+            [&] {
+                storage::ThrowIfCancelled(token, "Sort::WriteLegacy");
+                WriteMmapIndexData(data->data.get(), data->size, priority);
+            },
+            priority);
+        storage::ThrowIfCancelled(token, "Sort::FinalizeLegacy");
+        MapIndexData();
+        FinishLegacyLoad(binary);
+        storage::ThrowIfCancelled(token, "Sort::FinalizeLegacy");
+    } catch (...) {
+        failure = std::current_exception();
+    }
+    if (failure) {
+        if (mmap_data_ != nullptr && mmap_data_ != MAP_FAILED) {
+            munmap(mmap_data_, mmap_size_);
+        }
+        mmap_data_ = nullptr;
+        mmap_size_ = 0;
+        co_await storage::RunLocalFileIOAsync(
+            [&] {
+                if (!mmap_filepath_.empty()) {
+                    remove(mmap_filepath_.c_str());
+                }
+            },
+            priority);
+        std::rethrow_exception(failure);
+    }
 }
 
 template <typename T>
@@ -916,7 +989,7 @@ ScalarIndexSort<T>::PlanLoad(const storage::IndexEntryCatalog& catalog,
 }
 
 template <typename T>
-void
+folly::coro::Task<void>
 ScalarIndexSort<T>::FinalizeLoad(storage::IndexLoadArtifact&& artifact,
                                  const Config& config) {
     (void)config;
@@ -1046,6 +1119,10 @@ ScalarIndexSort<T>::FinalizeLoad(storage::IndexLoadArtifact&& artifact,
     LOG_INFO("FinalizeLoad ScalarIndexSort done, field_id: {}, is_mmap: {}",
              field_id_,
              is_mmap_);
+    storage::ThrowIfCancelled(
+        co_await folly::coro::co_current_cancellation_token,
+        "ScalarIndex::FinalizeLoad");
+    co_return;
 }
 
 template <typename T>
