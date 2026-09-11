@@ -342,6 +342,10 @@ func (m *GrpcRootCoordClient) GetQuotaMetrics(ctx context.Context, in *internalp
 	return &internalpb.GetQuotaMetricsResponse{}, m.Err
 }
 
+func (m *GrpcRootCoordClient) GetFeatureUsage(ctx context.Context, in *internalpb.GetFeatureUsageRequest, opts ...grpc.CallOption) (*internalpb.FeatureUsageReport, error) {
+	return &internalpb.FeatureUsageReport{}, m.Err
+}
+
 func (m *GrpcRootCoordClient) TruncateCollection(ctx context.Context, in *milvuspb.TruncateCollectionRequest, opts ...grpc.CallOption) (*milvuspb.TruncateCollectionResponse, error) {
 	return &milvuspb.TruncateCollectionResponse{}, m.Err
 }

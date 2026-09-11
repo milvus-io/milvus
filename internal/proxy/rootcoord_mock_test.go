@@ -1775,6 +1775,10 @@ func (coord *MixCoordMock) GetQuotaMetrics(ctx context.Context, in *internalpb.G
 	return &internalpb.GetQuotaMetricsResponse{}, nil
 }
 
+func (coord *MixCoordMock) GetFeatureUsage(ctx context.Context, in *internalpb.GetFeatureUsageRequest, opts ...grpc.CallOption) (*internalpb.FeatureUsageReport, error) {
+	return &internalpb.FeatureUsageReport{Status: merr.Success()}, nil
+}
+
 func (coord *MixCoordMock) ClearReadTaskQueue(ctx context.Context, in *internalpb.ClearReadTaskQueueRequest, opts ...grpc.CallOption) (*internalpb.ClearReadTaskQueueResponse, error) {
 	return &internalpb.ClearReadTaskQueueResponse{Status: merr.Success()}, nil
 }

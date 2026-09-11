@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
+	"github.com/milvus-io/milvus/internal/featureusage"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -3460,6 +3461,74 @@ func isVisibleCollectionForCurUser(collectionName string, visibleCollections typ
 
 func (c *Core) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error) {
 	return c.quotaCenter.getQuotaMetrics(), nil
+}
+
+// GetFeatureUsage computes the collection-derived groups of the feature usage
+// report from the in-memory metadata (see internal/featureusage). Every call
+// recomputes from scratch; nothing is cached or persisted.
+func (c *Core) GetFeatureUsage(ctx context.Context, req *internalpb.GetFeatureUsageRequest) (*internalpb.GetFeatureUsageResponse, error) {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return &internalpb.GetFeatureUsageResponse{Status: merr.Status(err)}, nil
+	}
+	in, err := c.collectFeatureUsageInput(ctx)
+	if err != nil {
+		mlog.Warn(ctx, "collect feature usage input failed", mlog.Err(err))
+		return &internalpb.GetFeatureUsageResponse{Status: merr.Status(err)}, nil
+	}
+	return &internalpb.GetFeatureUsageResponse{
+		Status:        merr.Success(),
+		Role:          typeutil.RootCoordRole,
+		NodeId:        paramtable.GetNodeID(),
+		NodeStartTime: paramtable.GetCreateTime().Unix(),
+		CollectedAt:   time.Now().Unix(),
+		Entries:       featureusage.ComputeCollectionEntries(in),
+	}, nil
+}
+
+// collectFeatureUsageInput gathers the metadata the report is computed from.
+// Only counts of RBAC objects are taken; no name leaves this function.
+func (c *Core) collectFeatureUsageInput(ctx context.Context) (featureusage.CollectionInput, error) {
+	var in featureusage.CollectionInput
+	ts := typeutil.MaxTimestamp
+
+	dbs, err := c.meta.ListDatabases(ctx, ts)
+	if err != nil {
+		return in, err
+	}
+	in.Databases = dbs
+	for _, db := range dbs {
+		cols, err := c.meta.ListCollections(ctx, db.Name, ts, true)
+		if err != nil {
+			return in, err
+		}
+		in.Collections = append(in.Collections, cols...)
+		for _, col := range cols {
+			in.AliasCount += len(c.meta.ListAliasesByID(ctx, col.CollectionID))
+		}
+	}
+
+	roles, err := c.meta.SelectRole(ctx, util.DefaultTenant, nil, false)
+	if err != nil {
+		return in, err
+	}
+	for _, r := range roles {
+		switch r.GetRole().GetName() {
+		case util.RoleAdmin, util.RolePublic:
+		default:
+			in.CustomRoleCount++
+		}
+	}
+	grants, err := c.meta.ListPolicy(ctx, util.DefaultTenant)
+	if err != nil {
+		return in, err
+	}
+	in.GrantCount = len(grants)
+	groups, err := c.meta.ListPrivilegeGroups(ctx)
+	if err != nil {
+		return in, err
+	}
+	in.PrivilegeGroupCount = len(groups)
+	return in, nil
 }
 
 func (c *Core) BackupEzk(ctx context.Context, req *internalpb.BackupEzkRequest) (*internalpb.BackupEzkResponse, error) {

@@ -735,6 +735,24 @@ func (m *indexMeta) GetIndexesForCollection(collID UniqueID, indexName string) [
 	return indexInfos
 }
 
+// ListAllIndexes returns a clone of every index that is not deleted, across all
+// collections. Used by the feature usage report.
+func (m *indexMeta) ListAllIndexes() []*model.Index {
+	m.fieldIndexLock.RLock()
+	defer m.fieldIndexLock.RUnlock()
+
+	out := make([]*model.Index, 0)
+	for _, indexes := range m.indexes {
+		for _, index := range indexes {
+			if index.IsDeleted {
+				continue
+			}
+			out = append(out, model.CloneIndex(index))
+		}
+	}
+	return out
+}
+
 func (m *indexMeta) GetFieldIndexes(collID, fieldID UniqueID, indexName string) []*model.Index {
 	m.fieldIndexLock.RLock()
 	defer m.fieldIndexLock.RUnlock()

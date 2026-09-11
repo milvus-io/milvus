@@ -1243,8 +1243,18 @@ common:
     defaultRootPassword: Milvus
     rootShouldBindRole: false # Whether the root user should bind a role when the authorization is enabled.
     enablePublicPrivilege: true # Whether to enable public privilege
+    # Whether to expose the feature usage report at GET /management/feature_usage on the Proxy
+    # management port. The endpoint requires HTTP Basic Auth as root. See
+    # docs/design-docs/design_docs/20260902-feature-usage-reporting.md.
+    featureUsageEnabled: false
     internaltlsEnabled: false
     tlsMode: 0
+  featureUsage:
+    # Whether the components count feature usage on their request paths (Proxy, QueryNode)
+    # and at task creation (DataCoord). One branch and one atomic add per counted feature.
+    # It is read once at component start; the report endpoint is gated separately by
+    # common.security.featureUsageEnabled.
+    countersEnabled: true
   session:
     ttl: 15 # ttl value when session granting a lease to register service
     retryTimes: 30 # retry times when session sending etcd requests

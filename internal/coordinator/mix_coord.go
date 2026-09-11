@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/datacoord"
+	"github.com/milvus-io/milvus/internal/featureusage"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/querycoordv2"
@@ -241,6 +242,8 @@ func (s *mixCoordImpl) Start() error {
 // - `activateFunc` when enableActiveStandBy is true
 func (s *mixCoordImpl) startAndUpdateHealthy() {
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
+	// task-creation feature counters (see internal/featureusage)
+	featureusage.SetEnabled(Params.CommonCfg.FeatureUsageCountersEnabled.GetAsBool())
 	s.startPosixCleanupTask()
 	RegisterMgrRoute(s)
 }

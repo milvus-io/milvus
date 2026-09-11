@@ -114,6 +114,10 @@ func (m *GrpcQueryNodeClient) GetMetrics(ctx context.Context, in *milvuspb.GetMe
 	return &milvuspb.GetMetricsResponse{}, m.Err
 }
 
+func (m *GrpcQueryNodeClient) GetFeatureUsage(ctx context.Context, in *internalpb.GetFeatureUsageRequest, opts ...grpc.CallOption) (*internalpb.GetFeatureUsageResponse, error) {
+	return &internalpb.GetFeatureUsageResponse{}, m.Err
+}
+
 func (m *GrpcQueryNodeClient) ShowConfigurations(ctx context.Context, in *internalpb.ShowConfigurationsRequest, opts ...grpc.CallOption) (*internalpb.ShowConfigurationsResponse, error) {
 	return &internalpb.ShowConfigurationsResponse{}, m.Err
 }

@@ -1283,6 +1283,10 @@ func (s *Server) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMe
 	return s.proxy.GetQuotaMetrics(ctx, req)
 }
 
+func (s *Server) GetFeatureUsage(ctx context.Context, req *internalpb.GetFeatureUsageRequest) (*internalpb.GetFeatureUsageResponse, error) {
+	return s.proxy.GetFeatureUsage(ctx, req)
+}
+
 func (s *Server) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error) {
 	return s.proxy.ClearReadTaskQueue(ctx, req)
 }

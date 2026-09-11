@@ -519,6 +519,52 @@ message GetQuotaMetricsResponse {
   string metrics_info = 2;
 }
 
+// Feature usage reporting (see docs/design-docs/design_docs/20260902-feature-usage-reporting.md)
+
+message GetFeatureUsageRequest {
+  common.MsgBase base = 1;
+}
+
+// FeatureEntry is one record of the feature usage report.
+// The meaning of value depends on group; see the design doc.
+message FeatureEntry {
+  string group = 1;          // field_types / index_types / metric_types / functions / providers / declared /
+                             // properties / db_properties / field_params / index_params / objects / dist / segment / request
+  string name = 2;           // feature identifier, drawn from a code-defined set; never a user string
+  int64 value = 3;           // count
+  string bucket = 4;         // only for group = "dist"
+  int64 last_used_at = 5;    // unix seconds of the most recent hit; only for group = "request", 0 otherwise
+}
+
+// GetFeatureUsageResponse is the view of one node.
+message GetFeatureUsageResponse {
+  common.Status status = 1;
+  string role = 2;
+  int64 node_id = 3;
+  int64 node_start_time = 4; // unix seconds; a change means request counters were reset
+  int64 collected_at = 5;    // unix seconds
+  repeated FeatureEntry entries = 6;
+}
+
+// FeatureUsageNode is one node inside the merged report.
+message FeatureUsageNode {
+  string role = 1;
+  int64 node_id = 2;
+  int64 node_start_time = 3;
+  bool reachable = 4;        // false: entries is empty and error explains why
+  string error = 5;
+  repeated FeatureEntry entries = 6;
+}
+
+// FeatureUsageReport is the merged report returned by MixCoord.
+message FeatureUsageReport {
+  common.Status status = 1;
+  int64 collected_at = 2;
+  string build_version = 3;
+  string deploy_mode = 4;
+  repeated FeatureUsageNode nodes = 5;
+}
+
 message FileResourceInfo {
   string name = 1;
   string path = 2;

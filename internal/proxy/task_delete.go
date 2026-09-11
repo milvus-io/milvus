@@ -376,6 +376,7 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 		metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "delete", metrics.FailLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
 		return merr.WrapErrAsInputError(wrapPlanCreationError(err, "failed to create delete plan"))
 	}
+	recordPlanExprFeatures(dr.plan, dr.req.GetExprTemplateValues())
 	metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "delete", metrics.SuccessLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
 
 	if planparserv2.IsAlwaysTruePlan(dr.plan) {

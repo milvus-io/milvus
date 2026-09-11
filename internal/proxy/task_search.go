@@ -159,6 +159,7 @@ func (t *searchTask) CanSkipAllocTimestamp() bool {
 }
 
 func (t *searchTask) PreExecute(ctx context.Context) error {
+	recordSearchRequestFeatures(t.request)
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Search-PreExecute")
 	defer sp.End()
 
@@ -225,6 +226,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 
 	var aggs []agg.AggregateBase
 	t.translatedOutputFields, t.userOutputFields, t.userDynamicFields, aggs, t.userRequestedPkFieldExplicitly, err = translateOutputFields(t.request.OutputFields, t.schema, true)
+	recordOutputDynamicField(t.userDynamicFields)
 	if err != nil {
 		log.Warn(ctx, "translate output fields failed", mlog.Err(err), mlog.FieldSchema(t.schema.CollectionSchema))
 		return err
@@ -503,6 +505,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	if t.request.FunctionScore != nil {
 		t.rerankMeta = newRerankMeta(t.schema.CollectionSchema, t.request.FunctionScore)
 	} else {
+		recordLegacyRankStrategy(t.request.GetSearchParams())
 		t.rerankMeta = newRerankMetaFromLegacy(t.request.GetSearchParams())
 	}
 
@@ -1208,6 +1211,7 @@ func (t *searchTask) tryGeneratePlan(
 		metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "search", metrics.FailLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
 		return nil, nil, 0, false, nil, internalpb.SearchType_DEFAULT, wrapPlanCreationError(planErr, "failed to create query plan")
 	}
+	recordPlanExprFeatures(plan, exprTemplateValues)
 	metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "search", metrics.SuccessLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
 	mlog.Debug(t.ctx, "create query plan",
 		mlog.Int("dsl_bytes", len(dsl)),

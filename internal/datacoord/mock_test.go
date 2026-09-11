@@ -231,6 +231,10 @@ func (m *mockMixCoord) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQ
 	panic("implement me")
 }
 
+func (m *mockMixCoord) GetFeatureUsage(ctx context.Context, req *internalpb.GetFeatureUsageRequest) (*internalpb.FeatureUsageReport, error) {
+	panic("implement me")
+}
+
 func (m *mockMixCoord) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error) {
 	return &internalpb.ClearReadTaskQueueResponse{Status: merr.Success()}, nil
 }

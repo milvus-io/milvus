@@ -646,6 +646,9 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 			"order_by is not supported when using search iterator")
 	}
 
+	recordSearchInfoFeatures(isIterator, isRangeSearch, groupByFieldId, planSearchIteratorV2Info != nil)
+	recordSearchParamKeyFeatures(searchParamsPair)
+
 	return &SearchInfo{
 		planInfo: &planpb.QueryInfo{
 			Topk:                 queryTopK,

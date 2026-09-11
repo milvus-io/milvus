@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/featureusage"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/internal/proxy/scheduler"
@@ -346,6 +347,9 @@ func (node *Proxy) Start() error {
 
 	mlog.Debug(node.ctx, "update state code", mlog.String("role", typeutil.ProxyRole), mlog.String("State", commonpb.StateCode_Healthy.String()))
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	// request-level feature counters (see internal/featureusage)
+	featureusage.SetEnabled(Params.CommonCfg.FeatureUsageCountersEnabled.GetAsBool())
 
 	// register devops api
 	RegisterMgrRoute(node)

@@ -221,6 +221,7 @@ func (node *DataNode) ShowConfigurations(ctx context.Context, req *internalpb.Sh
 }
 
 // GetMetrics return datanode metrics
+
 func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		mlog.Warn(ctx, "DataNode.GetMetrics failed", mlog.Int64("nodeId", node.GetNodeID()), mlog.Err(err))

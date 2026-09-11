@@ -22,6 +22,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/featureusage"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/metricsutil"
 	segcoreutil "github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -117,6 +118,9 @@ func searchSegmentsAttempt(ctx context.Context, mgr *Manager, segments []Segment
 		if !seg.ExistIndex(searchReq.SearchFieldID()) {
 			segmentsWithoutIndex = append(segmentsWithoutIndex, seg.ID())
 		}
+	}
+	if len(segmentsWithoutIndex) > 0 {
+		featureusage.Hit(featureusage.FeatureBruteForceSearch)
 	}
 
 	var err error

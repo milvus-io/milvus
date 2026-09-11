@@ -5625,6 +5625,80 @@ func (_c *MockMixCoordClient_GetExportSnapshotState_Call) RunAndReturn(run func(
 	return _c
 }
 
+// GetFeatureUsage provides a mock function with given fields: ctx, in, opts
+func (_m *MockMixCoordClient) GetFeatureUsage(ctx context.Context, in *internalpb.GetFeatureUsageRequest, opts ...grpc.CallOption) (*internalpb.FeatureUsageReport, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetFeatureUsage")
+	}
+
+	var r0 *internalpb.FeatureUsageReport
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.GetFeatureUsageRequest, ...grpc.CallOption) (*internalpb.FeatureUsageReport, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.GetFeatureUsageRequest, ...grpc.CallOption) *internalpb.FeatureUsageReport); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*internalpb.FeatureUsageReport)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *internalpb.GetFeatureUsageRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockMixCoordClient_GetFeatureUsage_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetFeatureUsage'
+type MockMixCoordClient_GetFeatureUsage_Call struct {
+	*mock.Call
+}
+
+// GetFeatureUsage is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *internalpb.GetFeatureUsageRequest
+//   - opts ...grpc.CallOption
+func (_e *MockMixCoordClient_Expecter) GetFeatureUsage(ctx interface{}, in interface{}, opts ...interface{}) *MockMixCoordClient_GetFeatureUsage_Call {
+	return &MockMixCoordClient_GetFeatureUsage_Call{Call: _e.mock.On("GetFeatureUsage",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockMixCoordClient_GetFeatureUsage_Call) Run(run func(ctx context.Context, in *internalpb.GetFeatureUsageRequest, opts ...grpc.CallOption)) *MockMixCoordClient_GetFeatureUsage_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*internalpb.GetFeatureUsageRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockMixCoordClient_GetFeatureUsage_Call) Return(_a0 *internalpb.FeatureUsageReport, _a1 error) *MockMixCoordClient_GetFeatureUsage_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockMixCoordClient_GetFeatureUsage_Call) RunAndReturn(run func(context.Context, *internalpb.GetFeatureUsageRequest, ...grpc.CallOption) (*internalpb.FeatureUsageReport, error)) *MockMixCoordClient_GetFeatureUsage_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetFlushAllState provides a mock function with given fields: ctx, in, opts
 func (_m *MockMixCoordClient) GetFlushAllState(ctx context.Context, in *milvuspb.GetFlushAllStateRequest, opts ...grpc.CallOption) (*milvuspb.GetFlushAllStateResponse, error) {
 	_va := make([]interface{}, len(opts))

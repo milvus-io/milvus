@@ -45,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/featureusage"
 	"github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
@@ -6888,6 +6889,22 @@ func (node *Proxy) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuota
 	mlog.Info(context.TODO(), "GetQuotaMetrics success", mlog.String("metrics", metricsResp.GetMetricsInfo()))
 
 	return metricsResp, nil
+}
+
+// GetFeatureUsage returns this Proxy's request-level feature counters. The
+// counters are monotonic since process start; reading them changes nothing.
+func (node *Proxy) GetFeatureUsage(ctx context.Context, req *internalpb.GetFeatureUsageRequest) (*internalpb.GetFeatureUsageResponse, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &internalpb.GetFeatureUsageResponse{Status: merr.Status(err)}, nil
+	}
+	return &internalpb.GetFeatureUsageResponse{
+		Status:        merr.Success(),
+		Role:          typeutil.ProxyRole,
+		NodeId:        paramtable.GetNodeID(),
+		NodeStartTime: paramtable.GetCreateTime().Unix(),
+		CollectedAt:   time.Now().Unix(),
+		Entries:       featureusage.SnapshotFor(featureusage.RoleProxy),
+	}, nil
 }
 
 // AddFileResource add file resource to rootcoord

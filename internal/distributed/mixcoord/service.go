@@ -974,6 +974,10 @@ func (s *Server) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMe
 	return s.mixCoord.GetQuotaMetrics(ctx, req)
 }
 
+func (s *Server) GetFeatureUsage(ctx context.Context, req *internalpb.GetFeatureUsageRequest) (*internalpb.FeatureUsageReport, error) {
+	return s.mixCoord.GetFeatureUsage(ctx, req)
+}
+
 func (s *Server) ListLoadedSegments(ctx context.Context, req *querypb.ListLoadedSegmentsRequest) (*querypb.ListLoadedSegmentsResponse, error) {
 	return s.mixCoord.ListLoadedSegments(ctx, req)
 }
