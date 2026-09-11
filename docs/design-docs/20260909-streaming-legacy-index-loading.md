@@ -1,9 +1,10 @@
-# Streaming legacy scalar and Knowhere index loads
+# Streaming legacy scalar, Knowhere and BSON shared-key index loads
 
 ## Scope
 
 This extends [async scalar-index V3 loading](20260907-async-scalar-index-v3-loading.md)
-to legacy scalar formats and Knowhere memory, mmap, and disk staging loads. It shares
+to legacy scalar formats, Knowhere memory, mmap, and disk staging loads, and
+BSON shared-key indexes. It shares
 `storage::AsyncLoadExecutor`, `LoadAdmissionController::GetInstance()`, and
 `LocalFileIOPool`. It adds no controller singleton or per-index executor.
 
@@ -19,7 +20,9 @@ Steps 1–5 are implemented at the Milvus load boundary. Internal remote reads
 in stream-capable Knowhere implementations retain
 their own admission contract, as detailed below. Index building,
 uploads, and independent text-match/JSON-key stats entries are outside these
-steps. Packed scalar V3 keeps its existing reader and materializer.
+five steps. The subsequent BSON shared-key increment is described below;
+other JSON stats entry points retain their existing loaders. Packed scalar V3
+keeps its existing reader and materializer.
 
 The context-aware sealed-index `Load(trace, config, OpContext*)` reads
 `StorageV2AsyncLoadEnabled()` directly. Enabled legacy scalar and vector loads
@@ -47,6 +50,7 @@ do not select the old HIGH/LOW worker pools.
 | Call memory Knowhere `Deserialize` | Same shared async worker | One synchronous call; it occupies this worker until Knowhere returns |
 | Create/write/flush/close mmap files or disk slices | `LocalFileIOPool` | Coroutine awaits the operation; a read/decode lease survives each write |
 | Restore file-backed nullable/empty-list metadata; invoke `DeserializeFromFile` or disk `Deserialize` | Shared async executor | Files are closed first; the synchronous call occupies this worker, with no slice admission or local-file executor held |
+| Open BSON shared-key Tantivy reader, including heap loading or mapping | Shared async executor | One synchronous engine call after all staged files close and slice admission releases |
 | Failure cleanup of files created by the load | `LocalFileIOPool` | Issued I/O and synchronous finalization drain before cleanup |
 | Parallel work inside `Deserialize` | Whatever workers / parallel runtime Knowhere selects | Milvus does not create deserialization tasks or impose an additional parallelism limit |
 | Publish a completed index | Existing cache-load caller after successful return | Cancellation or failure prevents publishing that result |
@@ -234,12 +238,13 @@ and its text/ngram/stats variants, `GetObjectData`, index metadata loaders,
 | Knowhere disk | Concurrent staging for the files selected by `LoadIndexWithStream`; backend-owned remote reads retain their existing contract |
 | Legacy Hybrid/Bitmap resource metadata | Admitted inspection and metadata assembly, scheduled on the shared executor when enabled |
 | Packed V3 and FMIndex | Existing `LoadUnifiedAsync` reader/materializer; not routed through the legacy decoder |
+| BSON shared-key `BsonInvertedIndexTranslator` | Context-aware `LoadIndex` uses the concurrent disk streamer, then opens Tantivy on the shared async worker |
 
 The remaining synchronous calls in those scalar/vector implementations belong
 to their two-argument compatibility loaders and associated metadata overloads.
 Index building uses `CacheRawDataToMemory`, `CacheRawDataToDisk`,
 `CacheOptFieldToDisk`, and field-data `GetObjectData` consumers. Independent
-`TextMatchIndex::Load`, BSON shared-key stats, and JSON stats metadata retain
+`TextMatchIndex::Load` and JSON stats metadata retain
 their existing loaders. JSON shredding data already has its own async branch,
 but that does not migrate every stats file. These entry points do not pass
 through the sealed-index dispatch covered by this migration.
@@ -248,6 +253,51 @@ HIGH/LOW pools therefore still exist. Existing V3 shared-overhead accounting
 also consults `ThreadPools::GetLoadExecutorWorkers()`, which can initialize those
 pools; this change does not claim to remove their construction. Enabled legacy
 payload tasks do not use that helper or submit to those pools.
+
+## BSON shared-key loading
+
+`BsonInvertedIndexTranslator` passes its `OpContext` to the four-argument
+`BsonInvertedIndex::LoadIndex`. This entry reads `StorageV2AsyncLoadEnabled()`
+directly. When disabled it calls the existing three-argument synchronous loader;
+that compatibility entry remains synchronous even when the global switch is on.
+When enabled, only the outer cache caller uses `blockingWait`.
+
+The coroutine reuses `DiskFileManagerImpl::CacheIndexToDiskAsync` with the
+manager's generated JSON shared-index directory. It restores the existing
+basename/numeric-suffix layout, including multi-slice files, using the same
+legacy decoder and bounded concurrent window as other disk loads. HIGH/LOW
+select priority on the shared executor and admission controller. They do not
+submit payload work to the old HIGH/LOW pools.
+
+Creation, writes, flush/close and load-time removal run on `LocalFileIOPool`.
+Tantivy opening runs synchronously on the resumed async worker with no slice
+lease or local-file executor held. Tantivy's internal local reads or mapping
+occupy that worker until opening completes. Heap loads remove staged files
+after opening; mmap loads retain them under the existing index ownership.
+Normal cache eviction/destruction keeps its existing cleanup behavior.
+
+Cancellation before admission prevents new reads. Issued reads and writes
+drain before the coroutine exits. Cancellation during Tantivy opening is
+observed after it returns. A failed or cancelled load releases the reader on
+the async worker, then awaits cleanup of its own generated directory before
+returning the original exception. Cleanup does not remove another load's
+generated directory. There is no new retry classification: the existing Rust
+Tantivy binding returns engine errors as strings and the C++ wrapper reports
+them through its existing assertion error. Local directory creation can still
+propagate the existing Boost filesystem exception; this increment preserves
+that exception rather than assigning a new error category.
+
+The translator inspects persisted envelopes once at construction. Its final
+size estimate is at least the decoded file total and retains a larger supplied
+JSON stats size estimate. Heap loads reserve that memory plus temporary disk;
+mmap loads reserve final disk. Temporary memory additionally covers
+`LegacyIndexMaxTransientBytes(largest_unit_scratch)` plus one
+`FileWriter::MAX_BUFFER_SIZE`, while retaining a larger compatibility download
+allowance for mmap. The estimate covers both switch settings and does not
+shrink with worker count, admission capacity, or the current writer-buffer
+setting. It is an estimate of engine residency, not a hard bound on allocations
+inside Tantivy. Shared-key loading does not introduce a BinarySet copy of all
+staged files.
 
 ## Cancellation and failures
 
@@ -314,3 +364,21 @@ infrastructure, admission, segment-resource estimates, and `FileWriter`
 failures. The vector cases exercise sparse engine versions 6 and 8 and MUVERA
 sidecars at version 11. DiskANN remains disabled in this build; its backend I/O
 boundary was inspected statically.
+
+On 2026-09-11 the BSON increment rebuilt `all_tests` and `json_stats_test` with
+GCC 12 Release, at most 16 build jobs and nested builders capped at one job.
+All eight `BsonInvertedIndexAsyncLoadTest` cases passed. They exercise real
+Tantivy build/upload/load/query in heap and mmap modes, HIGH/LOW priority,
+rollout changes between reloads, the synchronous compatibility entry, numeric
+multi-slice assembly, native read suspension and cancellation with one worker
+and one admission slot, cancellation while waiting for admission, read and
+envelope failures, invalid Tantivy metadata, failed destination creation,
+directory isolation, and estimates across configuration changes. The
+synchronous engine-open cancellation boundary was traced statically; no test
+hook pauses Tantivy internally.
+
+The broader run passed all 464 selected cases from 15 suites, including those
+eight BSON cases and the existing scalar/vector/storage/admission regression
+set. The separate JSON stats binary passed all 84 cases from 13 suites. Neither
+run had failures or skips. No remote-cluster or throughput test was run for this
+increment.
