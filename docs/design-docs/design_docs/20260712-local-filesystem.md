@@ -16,8 +16,8 @@ Milvus needs explicit ownership of node-local directories and files used by
 indexes, mmap, caches, and scratch operations. This proposal uses a tree of
 shared directory objects. A child retains its parent; open files, mappings,
 and asynchronous or native-library operations retain the directory they use.
-The final directory reference triggers cleanup according to that directory's
-immutable cleanup policy.
+The final directory reference triggers recursive deletion of the directory
+and its remaining contents. The root and every child follow the same rule.
 
 There is no separate writer lease, active-writer counter, or public recursive
 directory deletion API. A writer keeps the directory alive in exactly the
@@ -32,9 +32,9 @@ the intended interfaces, not APIs available in that PR today.
 ```cpp
 auto files = local::FileSystem::Open(node_cache_root);
 auto node_cache = files.Root();
-auto local_chunk = node_cache->Child("local_chunk", local::Cleanup::Keep);
-auto segments = local_chunk->Child("segments", local::Cleanup::Keep);
-auto segment = segments->Child("100");  // RemoveOnLastRelease by default
+auto local_chunk = node_cache->Child("local_chunk");
+auto segments = local_chunk->Child("segments");
+auto segment = segments->Child("100");
 
 auto output = segment->Open(
     "index.bin", {.mode = local::OpenMode::ReadWrite, .create = true});
@@ -101,11 +101,6 @@ there is no default instance or process-global lookup.
 class Directory;
 using DirectoryPtr = std::shared_ptr<Directory>;
 
-enum class Cleanup {
-    Keep,
-    RemoveOnLastRelease,
-};
-
 class FileSystem final {
  public:
     static FileSystem Open(std::filesystem::path absolute_root);
@@ -125,9 +120,7 @@ class FileSystem final {
 
 class Directory final {
  public:
-    DirectoryPtr Child(
-        std::string_view name,
-        Cleanup cleanup = Cleanup::RemoveOnLastRelease);
+    DirectoryPtr Child(std::string_view name);
 
     bool Exists(std::string_view name) const;
     uint64_t FileSize(std::string_view name) const;
@@ -183,21 +176,28 @@ directory under the startup/migration ownership rules in section 11.
 Opening a file does not implicitly create intermediate directory owners.
 The old `create_parent` option therefore disappears.
 
-### 3.3 Cleanup policy
+### 3.3 One lifetime rule for every directory
 
-The root uses `Keep`. Long-lived namespace directories explicitly use
-`Keep`; artifact and scratch directories use `RemoveOnLastRelease`.
-Policy is fixed for each registered node generation. Acquiring an existing
-node with a different policy fails instead of silently changing ownership.
+Every directory, including the root, owns its disk contents and is deleted
+after its last reference is released. There is no cleanup-policy enum or
+preserve-on-release option, and no directory category exempt from cleanup.
+A directory exists while consumers retain it. A live descendant also keeps
+its ancestors alive. Different callers may retain references for different
+durations; this does not change deletion semantics.
 
-`Keep` means releasing that node does not delete its disk contents. To make
-this promise meaningful, a `Keep` child is not allowed below a
-`RemoveOnLastRelease` ancestor. Removable subtrees consist of removable
-registered descendants and any opaque backend-owned contents.
+The business owner must retain a directory for as long as its contents should
+survive, even between I/O operations. Closing all files does not remove it
+while that owner still holds a reference. The composition-level `FileSystem`
+retains its root while open; normal `Finish()` releases this reference after
+admission stops, allowing root cleanup once all other references disappear.
 
-The business owner must retain a removable directory for as long as its
-contents should survive, even between I/O calls. Temporary absence of open
-files does not remove the directory if the segment/cache entry still owns it.
+Opening a root transfers cleanup ownership of that exact directory, including
+pre-existing contents accepted during exclusive startup or migration. For
+example, own `localStorage.path/cache/<node-id>`, not the shared
+`localStorage.path` containing unrelated or persistent data. Its containing
+directories are outside this tree and are not deleted. A caller requiring
+contents to survive final release must not place those contents in this
+ownership domain; it cannot achieve persistence by selecting a different flag.
 
 ## 4. Design Details: Directory Identity and References
 
@@ -237,7 +237,7 @@ cleanup, including failures.
 
 Under a short namespace lock, `Child()`:
 
-1. Validates the name and policy.
+1. Validates the name.
 2. Promotes an existing live weak reference and returns it.
 3. Returns a retryable busy result for an in-progress creation.
 4. Rejects retiring or failed-cleanup registrations.
@@ -280,7 +280,7 @@ The hierarchy borrows kernfs's explicit parent relationship and separation
 between a directory entry and the memory representing it. Linux kernfs itself
 uses an explicit base reference, removal, and separate active-operation
 references; this proposal deliberately uses a different final-reference
-cleanup policy.
+cleanup rule.
 
 There is no copied kernfs active counter here. The guarantee is that a
 directory remains available while any legitimate user retains it. Immediate
@@ -356,7 +356,7 @@ File closure, file unlink, and directory cleanup are separate events:
 | Regular handle closes | fd closes; directory reference is released |
 | `RemoveFile(name)` | Name is unlinked; existing open fd/mmap may remain usable |
 | Scoped temporary-file owner is destroyed | Its close/unlink sequence runs before releasing its directory |
-| Last directory reference disappears | Remaining contents are recursively removed if policy requires it |
+| Last directory reference disappears | Directory and remaining contents are recursively removed |
 
 A temporary-file owner may retain the directory and call `RemoveFile` during
 its destructor. Its name must remain exclusive until cleanup completes; it
@@ -420,9 +420,10 @@ starts only after the final strong reference is released. At that point:
 - the destructor/deleter invokes the internal cleanup path;
 - the parent is held until this directory's cleanup has completed.
 
-For `RemoveOnLastRelease`, cleanup recursively removes the remaining contents.
-For `Keep`, it releases the registration without deleting disk contents.
-There is no public operation that recursively deletes a live subtree.
+Cleanup recursively removes the directory and its remaining contents. This
+also applies to the root after its composition-level and consumer references
+have been released. There is no public operation that recursively deletes a
+live subtree.
 
 Physical cleanup is leaf-first as a consequence of references. A child keeps
 its parent alive through its own cleanup; releasing that parent may retire
@@ -437,8 +438,8 @@ final release, matching existing destructor-driven cleanup sites. This is
 an explicit latency cost, not an assertion that final release is cheap.
 
 The cleanup record is separate from the dying C++ object. It carries the
-path, generation, cleanup policy, parent reference, and attempt result. A
-cleanup engine processes ready records iteratively so a deep ancestor chain
+path, generation, parent reference, and attempt result. A cleanup engine
+processes ready records iteratively so a deep ancestor chain
 does not require recursive destructor-driven filesystem calls.
 
 If production latency requires offloading, the same records can be handed to
@@ -459,9 +460,7 @@ These states belong to the registration/cleanup record, not to active writers:
 ```text
 Absent -> Creating -> Live -> last reference -> Retiring
              |                                    |
-             |                    Keep: unregister +
-             |                                    |
-             |          RemoveOnLastRelease: Removing
+             |                                 Removing
              |                              /      \
              |                         success    failure
              |                            |           |
@@ -481,8 +480,8 @@ Absent -> Creating -> Live -> last reference -> Retiring
 A cleanly rolled-back creation releases its reservation. A rollback failure
 remains unavailable with its cleanup result, just like a failed removal.
 Its retry repeats the original rollback obligation, not normal directory
-cleanup: only changes owned by that failed creation may be undone, regardless
-of the requested Keep or RemoveOnLastRelease policy.
+cleanup: only changes owned by that failed creation may be undone. A failed
+attempt to attach pre-existing contents does not transfer their ownership.
 Successful unregister is terminal for that generation. Missing entries during
 recursive cleanup count as already removed; other failures remain visible.
 
@@ -529,10 +528,12 @@ Normal node shutdown:
    then free bookkeeping. No new generation can be created in that closed
    context, and its domain cannot be reopened while old native users survive.
 
-The `FileSystem` destructor performs a noexcept terminal fallback if normal
-shutdown was skipped. It must not leave directory users with a dangling
-supervisor pointer; the closed-context guard remains valid until those users
-finish, and their later release leaves disk contents for startup recovery.
+If explicit `Finish()` was skipped, the `FileSystem` destructor first attempts
+normal shutdown without throwing, including releasing and cleaning the root.
+Terminal fallback is only for failures or a violated shutdown order with live
+users; it is not a root-preservation policy. It must not leave those users with
+a dangling supervisor pointer. The closed-context guard remains valid until
+they finish; unfinished deletion is reported and left for startup recovery.
 
 A crash may leave disk artifacts because reference counting is in-memory.
 Before publishing a root on restart, existing Milvus startup/recovery logic
@@ -546,8 +547,9 @@ cross-process coordination.
 
 `FileSystem::Open(absolute_root)` requires an absolute path. It creates missing
 root components, verifies a directory, and canonicalizes the resulting root
-before publishing the `Keep` root node. Failures are reported; a failed open
-does not recursively remove pre-existing root contents.
+before publishing the owned root node. Publication transfers cleanup ownership
+of that exact root as described in section 3.3. Failures are reported; a failed
+open does not recursively remove pre-existing root contents.
 
 Runtime composition opens a physical ownership domain once and injects its
 references. Separate root contexts must not refer to the same directory,
@@ -672,9 +674,11 @@ is unverified until measured.
 ### 11.1 Compatibility
 
 Existing node-local paths, index formats, mmap layouts, and remote keys remain
-unchanged. No required user configuration is added. Persistent local object
-storage continues using `milvus::storage`; none of its directories become
-delete-on-last-reference merely because they use local disk.
+unchanged. Normal final release now deletes the owned cache root as well as
+its children; retaining cache contents across complete context teardown is
+not part of this contract. No required user configuration is added. Persistent
+local object storage continues using `milvus::storage`; none of its directories
+become delete-on-last-reference merely because they use local disk.
 
 This changes internal C++ lifetime contracts: mappings and open files retain
 directories, directory references are shared ownership, and cleanup no longer
@@ -688,16 +692,17 @@ Migration is incremental across directories, but atomic within each physical
 ownership domain, including ancestors that legacy code could recursively delete.
 
 1. Implement the directory tree, reference-carrying file/native/mmap handles,
-   generation-safe cleanup records, and supervisor without enabling automatic
-   deletion for partially migrated domains.
+   generation-safe cleanup records, and supervisor without attaching partially
+   migrated production domains to the new ownership model.
 2. Inventory every writer, reader, mapping, native path escape, fd transfer,
    directory deletion, and directory rename in the target domain.
 3. Quiesce legacy admission and drain legacy operations. Construct one root
    context, attach existing directories under exclusive ownership, inject the
    shared references, and remove legacy ancestor deletion paths.
-4. Enable `RemoveOnLastRelease` only when all users of those paths obey the
-   same ownership contract. A `Keep` migration stage alone does not make
-   legacy users safe once removable descendants are enabled.
+4. Switch the entire domain to the new API only when all users of those paths
+   obey the same ownership contract. There is no cleanup flag that makes
+   mixed legacy and shared-directory lifetimes safe. After ownership transfer,
+   every directory follows final-reference deletion.
 5. Migrate QueryNode/segcore and DataNode/index consumers domain by domain.
    Remove singleton access after the last production consumer has migrated.
 
@@ -723,7 +728,11 @@ revision itself does not execute or claim these tests.
 
 ### 12.1 Identity, ownership, and release races
 
-- Concurrent `Child` calls publish one node; policy conflicts fail.
+- Concurrent `Child` calls publish one node.
+- Every directory, including the root, deletes on final release; references
+  held by consumers delay cleanup without changing the deletion rule.
+- Root cleanup removes only the acquired ownership domain, leaving its
+  containing directory and unrelated siblings untouched.
 - A child retains its ancestors after business parent references are dropped.
 - An ordinary handle copy does not delete anything on destruction.
 - A business owner retains files between I/O operations.
@@ -761,6 +770,8 @@ revision itself does not execute or claim these tests.
 - Retry success permits same-name reuse; late old-generation completion cannot
   erase the new registration.
 - Shutdown with live references reports them without deleting their directories.
+- Normal destruction without an explicit `Finish()` also cleans the owned root;
+  it does not silently enter a disk-preserving fallback.
 - Failed child cleanup cannot trigger parent recursive deletion.
 - Terminal shutdown disables further deletion before dropping failed pins;
   late reference release cannot access a destroyed supervisor.
@@ -812,13 +823,14 @@ and distinguish implemented guarantees from unverified follow-up work.
    through retirement and failed cleanup.
 3. Children retain parents; files, mappings, and tasks retain their actual
    owning directory. Parent-only retention cannot substitute for child ownership.
-4. Last strong release triggers policy-driven cleanup; there is no writer lease
-   or public recursive deletion path.
+4. Last strong release triggers cleanup for every directory, including the
+   root; there is no cleanup-policy flag, writer lease, or public recursive
+   deletion path.
 5. File close and unlink remain distinct; early file removal and directory
    cleanup compose without deleting replacements owned by somebody else.
 6. Parent cleanup follows child cleanup, including asynchronous and failed work.
-7. Keep policies, stable directory paths, native ownership, and startup
-   exclusivity are explicit.
+7. Root ownership boundaries, stable directory paths, native ownership, and
+   startup exclusivity are explicit.
 8. No cleanup exception escapes a destructor or C ABI; failures remain
    attributable and recoverable while the context is open.
 9. No old-generation task can delete a reused path.
