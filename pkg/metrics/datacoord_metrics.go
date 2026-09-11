@@ -192,7 +192,10 @@ var (
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.DataCoordRole,
 			Name:      "compaction_task_num",
-			Help:      "Number of compaction tasks currently",
+			Help: "Number of compaction tasks. For status=pending/executing this is the number " +
+				"currently in that state. For status=done/failed/timeout this is a cumulative " +
+				"count of tasks that reached that terminal state since this process started " +
+				"(monotonically increasing, resets to 0 on DataCoord restart) -- not a live count.",
 		}, []string{
 			nodeIDLabelName,
 			compactionTypeLabelName,

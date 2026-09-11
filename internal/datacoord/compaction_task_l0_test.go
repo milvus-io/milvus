@@ -702,6 +702,39 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 		t.QueryTaskOnWorker(cluster)
 		s.Equal(datapb.CompactionTaskState_completed, t.GetTaskProto().GetState())
 	})
+	s.Run("test executing with result completed retryable validation error retries", func() {
+		paramtable.Get().Save(paramtable.Get().DataCoordCfg.CompactionMaxRetryTimes.Key, "3")
+		defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.CompactionMaxRetryTimes.Key)
+
+		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
+		t := s.generateTestL0Task(datapb.CompactionTaskState_executing)
+		t.updateAndSaveTaskMeta(setNodeID(100))
+
+		cluster := session.NewMockCluster(s.T())
+		cluster.EXPECT().QueryCompaction(t.GetTaskProto().NodeID, mock.Anything).
+			Return(&datapb.CompactionPlanResult{
+				PlanID: t.GetTaskProto().GetPlanID(),
+				State:  datapb.CompactionTaskState_completed,
+			}, nil)
+		s.mockMeta.EXPECT().ValidateSegmentStateBeforeCompleteCompactionMutation(mock.Anything).
+			Return(merr.WrapErrServiceUnavailable("transient"))
+
+		t.QueryTaskOnWorker(cluster)
+		s.Equal(datapb.CompactionTaskState_executing, t.GetTaskProto().GetState())
+		s.Equal(int32(1), t.GetTaskProto().GetRetryTimes())
+
+		t.QueryTaskOnWorker(cluster)
+		s.Equal(int32(2), t.GetTaskProto().GetRetryTimes())
+
+		t.QueryTaskOnWorker(cluster)
+		s.Equal(int32(3), t.GetTaskProto().GetRetryTimes())
+		s.Equal(datapb.CompactionTaskState_executing, t.GetTaskProto().GetState())
+
+		// 4th failure exceeds the budget (3 < 3 is false) and terminates the task.
+		t.QueryTaskOnWorker(cluster)
+		s.Equal(datapb.CompactionTaskState_failed, t.GetTaskProto().GetState())
+		s.NotEmpty(t.GetTaskProto().GetFailReason())
+	})
 	s.Run("test executing with result completed save segment meta failed", func() {
 		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil)
 		t := s.generateTestL0Task(datapb.CompactionTaskState_executing)

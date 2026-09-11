@@ -683,18 +683,34 @@ func (c *compactionInspector) checkCompaction() error {
 	c.executingGuard.Lock()
 	for _, t := range finishedTasks {
 		delete(c.executingTasks, t.GetTaskProto().GetPlanID())
-		mlog.Info(context.TODO(), "compaction task finished",
+		state := t.GetTaskProto().GetState()
+		terminal := state == datapb.CompactionTaskState_failed || state == datapb.CompactionTaskState_timeout
+		logFields := []mlog.Field{
 			mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
 			mlog.String("type", t.GetTaskProto().GetType().String()),
-			mlog.String("state", t.GetTaskProto().GetState().String()),
+			mlog.String("state", state.String()),
 			mlog.String("channel", t.GetTaskProto().GetChannel()),
 			mlog.String("label", t.GetLabel()),
 			mlog.FieldNodeID(t.GetTaskProto().GetNodeID()),
 			mlog.Int64s("inputSegments", t.GetTaskProto().GetInputSegments()),
 			mlog.String("reason", t.GetTaskProto().GetFailReason()),
-		)
+		}
+		if terminal {
+			mlog.Warn(context.TODO(), "compaction task finished with a failure or timeout", logFields...)
+			c.meta.GetCompactionTaskMeta().RecordTerminalFailure(t.GetTaskProto())
+		} else {
+			mlog.Info(context.TODO(), "compaction task finished", logFields...)
+		}
+
 		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", t.GetTaskProto().GetNodeID()), t.GetTaskProto().GetType().String(), metrics.Executing).Dec()
-		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", t.GetTaskProto().GetNodeID()), t.GetTaskProto().GetType().String(), metrics.Done).Inc()
+		switch state {
+		case datapb.CompactionTaskState_failed:
+			metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", t.GetTaskProto().GetNodeID()), t.GetTaskProto().GetType().String(), metrics.Failed).Inc()
+		case datapb.CompactionTaskState_timeout:
+			metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", t.GetTaskProto().GetNodeID()), t.GetTaskProto().GetType().String(), metrics.Timeout).Inc()
+		default:
+			metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", t.GetTaskProto().GetNodeID()), t.GetTaskProto().GetType().String(), metrics.Done).Inc()
+		}
 	}
 	c.executingGuard.Unlock()
 
