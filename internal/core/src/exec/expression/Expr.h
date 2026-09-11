@@ -1408,19 +1408,15 @@ class SegmentExpr : public Expr {
         }
     }
 
-    // Candidate evaluator contract:
-    // - every logical candidate position advances the evaluator exactly once;
-    // - an invalid value still carries a safe placeholder data pointer and
-    //   false validity, so each evaluator retains its existing NULL semantics;
-    // - an ordinary nullable Scan/Take row never uses data == nullptr; a null
-    //   pointer advances without evaluation when data was skipped, a candidate
-    //   is inactive, or an index reverse-lookup miss already applied its NULL
-    //   result;
-    // - inactive candidate-mask rows remain untouched, but still advance
-    //   position-indexed evaluator state.
-    //
-    // This contract keeps callback-local bitmap_input cursors aligned across
-    // raw-data, element-level, and scalar-index-only candidate paths.
+    // Reader callback contract. KernelAdapter (EvalKernel) is the only callback
+    // passed to the single-column readers below by leaf expressions:
+    // - data == nullptr only for SkipIndex-skipped rows, inactive candidates of
+    //   the *WithMask readers, and reverse-lookup misses whose result the reader
+    //   already wrote; the adapter returns without evaluating;
+    // - an invalid value carries a placeholder data pointer and false validity;
+    // - res / valid_res are always views into the batch result, so the adapter
+    //   derives the sub-batch position from res.offset();
+    // - the offsets argument is always nullptr.
 
     // when we have scalar index and index contains raw data, could go with index chunk by offsets
     template <typename T, typename BatchEvaluator, typename... ValTypes>

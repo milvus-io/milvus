@@ -2,33 +2,3 @@
 # (the reviewed inconsistency list). Every entry must also appear in the
 # PR "semantic changes" table with a pinning test.
 # Format: <case_id>\t<row>\t<old>\t<new>      ("-" = line absent)
-term_in_empty.i64|growing_raw|full	2	U	F
-term_in_empty.i64|growing_raw|full	8	U	F
-term_in_empty.i64|growing_raw|full_bitmap	2	U	F
-term_in_empty.i64|growing_raw|full_bitmap	8	U	F
-term_in_empty.i64|growing_raw|offsets	2	U	F
-term_in_empty.i64|growing_raw|offsets	8	U	F
-term_in_empty.i64|sealed_index_only|full	2	U	F
-term_in_empty.i64|sealed_index_only|full	8	U	F
-term_in_empty.i64|sealed_index_only|full_bitmap	2	U	F
-term_in_empty.i64|sealed_index_only|full_bitmap	8	U	F
-term_in_empty.i64|sealed_index_only|offsets	2	U	F
-term_in_empty.i64|sealed_index_only|offsets	8	U	F
-term_in_empty.i64|sealed_index_with_raw|full	2	U	F
-term_in_empty.i64|sealed_index_with_raw|full	8	U	F
-term_in_empty.i64|sealed_index_with_raw|full_bitmap	2	U	F
-term_in_empty.i64|sealed_index_with_raw|full_bitmap	8	U	F
-term_in_empty.i64|sealed_index_with_raw|offsets	2	U	F
-term_in_empty.i64|sealed_index_with_raw|offsets	8	U	F
-term_in_empty.i64|sealed_raw_2chunk|full	2	U	F
-term_in_empty.i64|sealed_raw_2chunk|full	8	U	F
-term_in_empty.i64|sealed_raw_2chunk|full_bitmap	2	U	F
-term_in_empty.i64|sealed_raw_2chunk|full_bitmap	8	U	F
-term_in_empty.i64|sealed_raw_2chunk|offsets	2	U	F
-term_in_empty.i64|sealed_raw_2chunk|offsets	8	U	F
-term_in_empty.i64|sealed_raw|full	2	U	F
-term_in_empty.i64|sealed_raw|full	8	U	F
-term_in_empty.i64|sealed_raw|full_bitmap	2	U	F
-term_in_empty.i64|sealed_raw|full_bitmap	8	U	F
-term_in_empty.i64|sealed_raw|offsets	2	U	F
-term_in_empty.i64|sealed_raw|offsets	8	U	F
