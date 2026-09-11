@@ -415,6 +415,16 @@ func (s *TwoPCImportSuite) TestQueryBeforeCommit() {
 	err = WaitForImportState(ctx, s.Cluster, jobID, internalpb.ImportJobState_Completed)
 	s.NoError(err)
 
+	// Completed means the commit fences have been processed, but the collection
+	// was loaded before these segments became visible. Refresh its load target
+	// and wait for the committed segments before querying.
+	loadStatus, err := s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+		CollectionName: collectionName,
+		Refresh:        true,
+	})
+	s.Require().NoError(merr.CheckRPCCall(loadStatus, err))
+	s.WaitForLoadRefresh(ctx, "", collectionName)
+
 	// Query AFTER commit - data should be visible
 	countAfter := s.queryRowCount(ctx, collectionName)
 	s.Equal(twoPCRowCount, countAfter, "data should be visible after commit")

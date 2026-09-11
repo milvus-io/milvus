@@ -18,8 +18,9 @@ package replication
 
 import (
 	"context"
-	"io"
+	"encoding/base64"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
@@ -31,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
@@ -39,25 +39,32 @@ type DataSalvageSuite struct {
 	integration.MiniClusterSuite
 }
 
+func (s *DataSalvageSuite) SetupSuite() {
+	// Persisted start positions below are decoded as Pulsar message IDs.
+	s.WithMilvusConfig("mq.type", "pulsar")
+	s.MiniClusterSuite.SetupSuite()
+}
+
 func TestDataSalvage(t *testing.T) {
 	suite.Run(t, new(DataSalvageSuite))
 }
 
 // TestGetReplicateInfoOnPrimaryCluster verifies that GetReplicateInfo
-// returns checkpoint info on a primary cluster. The salvage checkpoint
-// should be nil since no force promote has occurred.
+// returns no secondary checkpoint on a primary cluster. The salvage checkpoint
+// should also be nil since no force promote has occurred.
 func (s *DataSalvageSuite) TestGetReplicateInfoOnPrimaryCluster() {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
-	clusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
-	pchannel := clusterID + "-pchan0"
+	clusterID := s.Cluster.RootPath()
+	pchannel := replicationPChannels(clusterID)[0]
 
 	// First set up replication config to make the cluster a primary
 	config := &commonpb.ReplicateConfiguration{
 		Clusters: []*commonpb.MilvusCluster{
 			{
 				ClusterId: clusterID,
-				Pchannels: []string{pchannel},
+				Pchannels: replicationPChannels(clusterID),
 				ConnectionParam: &commonpb.ConnectionParam{
 					Uri:   "localhost:19530",
 					Token: "test-token",
@@ -71,18 +78,18 @@ func (s *DataSalvageSuite) TestGetReplicateInfoOnPrimaryCluster() {
 		ReplicateConfiguration: config,
 		ForcePromote:           false,
 	})
-	s.NoError(err)
-	s.NoError(merr.Error(updateResp))
+	s.Require().NoError(err)
+	s.Require().NoError(merr.Error(updateResp))
 
 	// Get replicate info
 	resp, err := s.Cluster.MilvusClient.GetReplicateInfo(ctx, &milvuspb.GetReplicateInfoRequest{
 		TargetPchannel: pchannel,
 	})
-	s.NoError(err)
+	s.Require().NoError(err)
 
-	// On a primary cluster, checkpoint should exist but salvage checkpoint should be nil
-	// (no force promote has occurred)
-	mlog.Info(context.TODO(), "GetReplicateInfo response",
+	// A primary has no live secondary checkpoint or saved salvage checkpoint.
+	s.Nil(resp.GetCheckpoint())
+	mlog.Info(ctx, "GetReplicateInfo response",
 		mlog.Any("checkpoint", resp.GetCheckpoint()),
 		mlog.Any("salvageCheckpoint", resp.GetSalvageCheckpoint()))
 
@@ -93,7 +100,7 @@ func (s *DataSalvageSuite) TestGetReplicateInfoOnPrimaryCluster() {
 // TestDumpMessagesBasic verifies that DumpMessages can stream messages
 // from a WAL channel after inserting some data.
 func (s *DataSalvageSuite) TestDumpMessagesBasic() {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	const (
@@ -107,7 +114,7 @@ func (s *DataSalvageSuite) TestDumpMessagesBasic() {
 	// Create collection
 	schema := integration.ConstructSchemaOfVecDataType(collectionName, dim, true, schemapb.DataType_FloatVector)
 	marshaledSchema, err := proto.Marshal(schema)
-	s.NoError(err)
+	s.Require().NoError(err)
 
 	createResp, err := s.Cluster.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         dbName,
@@ -115,8 +122,8 @@ func (s *DataSalvageSuite) TestDumpMessagesBasic() {
 		Schema:         marshaledSchema,
 		ShardsNum:      common.DefaultShardsNum,
 	})
-	s.NoError(err)
-	s.Equal(commonpb.ErrorCode_Success, createResp.GetErrorCode())
+	s.Require().NoError(err)
+	s.Require().Equal(commonpb.ErrorCode_Success, createResp.GetErrorCode())
 
 	// Insert some data
 	fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
@@ -128,31 +135,31 @@ func (s *DataSalvageSuite) TestDumpMessagesBasic() {
 		HashKeys:       hashKeys,
 		NumRows:        uint32(rowNum),
 	})
-	s.NoError(err)
-	s.Equal(commonpb.ErrorCode_Success, insertResp.GetStatus().GetErrorCode())
+	s.Require().NoError(err)
+	s.Require().Equal(commonpb.ErrorCode_Success, insertResp.GetStatus().GetErrorCode())
 
 	// Get pchannel for the collection
 	descResp, err := s.Cluster.MilvusClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
 		CollectionName: collectionName,
 	})
-	s.NoError(err)
-	s.NotEmpty(descResp.GetVirtualChannelNames())
+	s.Require().NoError(err)
+	s.Require().NotEmpty(descResp.GetVirtualChannelNames())
 
 	// Get pchannel from vchannel
 	vchannel := descResp.GetVirtualChannelNames()[0]
 	pchannel := funcutil.ToPhysicalChannel(vchannel)
 
-	mlog.Info(context.TODO(), "Testing DumpMessages",
+	mlog.Info(ctx, "Testing DumpMessages",
 		mlog.FieldPChannel(pchannel),
 		mlog.FieldVChannel(vchannel))
 
 	// Set up replication config first
-	clusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
+	clusterID := s.Cluster.RootPath()
 	config := &commonpb.ReplicateConfiguration{
 		Clusters: []*commonpb.MilvusCluster{
 			{
 				ClusterId: clusterID,
-				Pchannels: []string{pchannel},
+				Pchannels: replicationPChannels(clusterID),
 				ConnectionParam: &commonpb.ConnectionParam{
 					Uri:   "localhost:19530",
 					Token: "test-token",
@@ -166,71 +173,51 @@ func (s *DataSalvageSuite) TestDumpMessagesBasic() {
 		ReplicateConfiguration: config,
 		ForcePromote:           false,
 	})
-	s.NoError(err)
-	s.NoError(merr.Error(updateResp))
+	s.Require().NoError(err)
+	s.Require().NoError(merr.Error(updateResp))
 
-	// Get replicate checkpoint as start position
-	infoResp, err := s.Cluster.MilvusClient.GetReplicateInfo(ctx, &milvuspb.GetReplicateInfoRequest{
-		TargetPchannel: pchannel,
+	// The primary has no live replication checkpoint. Read the collection's
+	// persisted WAL start position from MixCoord instead.
+	internalDesc, err := s.Cluster.MixCoordClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
+		Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_DescribeCollection},
+		DbName:         "default",
+		CollectionName: collectionName,
 	})
-	s.NoError(err)
-	s.NotNil(infoResp.GetCheckpoint())
-	s.NotNil(infoResp.GetCheckpoint().GetMessageId())
-
-	// Dump messages from start position (exclusive - messages after the checkpoint)
-	stream, err := s.Cluster.MilvusClient.DumpMessages(ctx, &milvuspb.DumpMessagesRequest{
-		Pchannel:       pchannel,
-		StartMessageId: infoResp.GetCheckpoint().GetMessageId(),
-	})
-	s.NoError(err)
-
-	// Read some messages (with timeout via context cancellation)
-	messages := make([]*milvuspb.DumpMessagesResponse, 0)
-	readCtx, readCancel := context.WithCancel(ctx)
-
-	// Read in a goroutine with limit
-	go func() {
-		for i := 0; i < 10; i++ { // Read up to 10 messages
-			resp, err := stream.Recv()
-			if err == io.EOF {
-				break
-			}
-			if err != nil {
-				mlog.Warn(context.TODO(), "error receiving message", mlog.Err(err))
-				break
-			}
-			// Check if response contains a message (not a status)
-			if msg := resp.GetMessage(); msg != nil {
-				messages = append(messages, resp)
-				mlog.Info(context.TODO(), "received message", mlog.String("messageId", msg.GetId().GetId()))
-			} else if status := resp.GetStatus(); status != nil {
-				mlog.Warn(context.TODO(), "received status response", mlog.Any("status", status))
-				break
-			}
+	s.Require().NoError(err)
+	s.Require().NoError(merr.Error(internalDesc.GetStatus()))
+	var startPosition []byte
+	for _, position := range internalDesc.GetStartPositions() {
+		if position.GetKey() == pchannel {
+			startPosition = position.GetData()
+			break
 		}
-		readCancel()
-	}()
-
-	<-readCtx.Done()
-
-	mlog.Info(context.TODO(), "DumpMessages test completed", mlog.Int("messageCount", len(messages)))
-
-	// We should have received at least some messages
-	// Note: The exact count depends on timing and what messages are in the WAL
-	// For now, just verify the API works without error
+	}
+	s.Require().NotEmpty(startPosition)
+	stream, err := s.Cluster.MilvusClient.DumpMessages(ctx, &milvuspb.DumpMessagesRequest{
+		Pchannel: pchannel,
+		StartMessageId: &commonpb.MessageID{
+			Id:      base64.StdEncoding.EncodeToString(startPosition),
+			WALName: commonpb.WALName_Pulsar,
+		},
+	})
+	s.Require().NoError(err)
+	resp, err := stream.Recv()
+	s.Require().NoError(err)
+	s.Require().NotNil(resp.GetMessage())
 
 	// Clean up
 	dropResp, err := s.Cluster.MilvusClient.DropCollection(ctx, &milvuspb.DropCollectionRequest{
 		CollectionName: collectionName,
 	})
-	s.NoError(err)
+	s.Require().NoError(err)
 	s.Equal(commonpb.ErrorCode_Success, dropResp.GetErrorCode())
 }
 
 // TestDumpMessagesWithMissingPchannel verifies that DumpMessages returns
 // an error when pchannel is not provided.
 func (s *DataSalvageSuite) TestDumpMessagesWithMissingPchannel() {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	stream, err := s.Cluster.MilvusClient.DumpMessages(ctx, &milvuspb.DumpMessagesRequest{
 		Pchannel: "", // Missing pchannel
@@ -245,12 +232,14 @@ func (s *DataSalvageSuite) TestDumpMessagesWithMissingPchannel() {
 	}
 
 	s.Error(err)
+	s.NoError(ctx.Err(), "invalid requests must fail before the deadline")
 }
 
 // TestDumpMessagesWithMissingStartMessageId verifies that DumpMessages returns
 // an error when start_message_id is not provided.
 func (s *DataSalvageSuite) TestDumpMessagesWithMissingStartMessageId() {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	stream, err := s.Cluster.MilvusClient.DumpMessages(ctx, &milvuspb.DumpMessagesRequest{
 		Pchannel:       "test-pchannel",
@@ -263,13 +252,15 @@ func (s *DataSalvageSuite) TestDumpMessagesWithMissingStartMessageId() {
 	}
 
 	s.Error(err)
+	s.NoError(ctx.Err(), "invalid requests must fail before the deadline")
 }
 
 // TestDumpMessagesWithMalformedStartMessageId verifies that DumpMessages
 // returns an error (instead of panicking and crashing the process) when
 // start_message_id is non-empty but cannot be unmarshaled. See issue #50341.
 func (s *DataSalvageSuite) TestDumpMessagesWithMalformedStartMessageId() {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	stream, err := s.Cluster.MilvusClient.DumpMessages(ctx, &milvuspb.DumpMessagesRequest{
 		Pchannel: "test-pchannel",
@@ -285,10 +276,10 @@ func (s *DataSalvageSuite) TestDumpMessagesWithMalformedStartMessageId() {
 	}
 
 	s.Error(err)
+	s.NoError(ctx.Err(), "invalid requests must fail before the deadline")
 
 	// The server must stay up: a follow-up RPC should still succeed.
-	_, err = s.Cluster.MilvusClient.GetReplicateInfo(ctx, &milvuspb.GetReplicateInfoRequest{
-		TargetPchannel: "test-pchannel",
-	})
-	s.NoError(err)
+	resp, err := s.Cluster.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
+	s.Require().NoError(err)
+	s.NoError(merr.Error(resp.GetStatus()))
 }
