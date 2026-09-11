@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // LoadConfigComplianceState represents the compliance state of replica load configuration
@@ -54,6 +55,29 @@ func (s *mixCoordImpl) HandleReplicaLoadConfigCompliance(w http.ResponseWriter, 
 	ctx := req.Context()
 	logger := mlog.With(mlog.String("handler", "ReplicaLoadConfigCompliance"))
 
+	// Optional resource-group scope (?resourceGroups=rg1,rg2): when non-empty, the
+	// per-replica serviceability and query-visibility checks only consider replicas
+	// living in these groups. Replica count, RG distribution, and leaked-resource
+	// checks stay cluster-wide: layout and release completeness are properties of
+	// the whole collection, while a caller draining/restarting nodes of specific
+	// groups only needs serving readiness for the groups it touches.
+	rgFilter := typeutil.NewSet[string]()
+	if raw := strings.TrimSpace(req.URL.Query().Get("resourceGroups")); raw != "" {
+		for _, rg := range strings.Split(raw, ",") {
+			if rg = strings.TrimSpace(rg); rg != "" {
+				rgFilter.Insert(rg)
+			}
+		}
+	}
+	// A mistyped group would match no replica and silently pass the scoped checks,
+	// so reject unknown names as a bad request instead of reporting a vacuous Ready.
+	for _, rg := range rgFilter.Collect() {
+		if !s.queryCoordServer.ContainResourceGroup(ctx, rg) {
+			writeJSONError(w, fmt.Sprintf("unknown resource group: %s", rg), http.StatusBadRequest)
+			return
+		}
+	}
+
 	// Cluster-level check: WAL is fully migrated onto the configured primary resource group.
 	// Short-circuit before reading config / loading collections — a WAL-layout issue affects
 	// every collection and is independent of per-collection replica/RG config.
@@ -75,7 +99,8 @@ func (s *mixCoordImpl) HandleReplicaLoadConfigCompliance(w http.ResponseWriter, 
 	logger.Info(ctx, "checking replica load config compliance",
 		mlog.Int("clusterReplicaNum", clusterReplicaNum),
 		mlog.Strings("clusterResourceGroups", clusterResourceGroups),
-		mlog.Bool("forceOverrideUserReplicaMode", forceOverrideUserReplicaMode))
+		mlog.Bool("forceOverrideUserReplicaMode", forceOverrideUserReplicaMode),
+		mlog.Strings("resourceGroupsFilter", rgFilter.Collect()))
 
 	// Use ShowLoadCollections to get all loaded collections
 	showResp, err := s.ShowLoadCollections(ctx, &querypb.ShowCollectionsRequest{
@@ -122,7 +147,16 @@ func (s *mixCoordImpl) HandleReplicaLoadConfigCompliance(w http.ResponseWriter, 
 		// has a serviceable shard leader for every channel. This live dist check avoids
 		// the stale CollectionObserver-persisted LoadPercentage that can falsely report
 		// 100% during scale-up/scale-down transitions.
-		if err := s.queryCoordServer.CheckAllReplicasServiceable(ctx, collectionID); err != nil {
+		// Under a resource-group filter, only replicas living in the filtered groups
+		// are checked.
+		if rgFilter.Len() > 0 {
+			if err := s.queryCoordServer.CheckReplicasServiceableInRGs(ctx, collectionID, rgFilter.Collect()); err != nil {
+				reason := fmt.Sprintf("collection %d: %s", collectionID, err.Error())
+				logger.Info(ctx, "collection not serviceable in filtered resource groups", mlog.String("reason", reason))
+				s.writeComplianceResponse(w, LoadConfigComplianceStateNotReady, reason)
+				return
+			}
+		} else if err := s.queryCoordServer.CheckAllReplicasServiceable(ctx, collectionID); err != nil {
 			reason := fmt.Sprintf("collection %d: %s", collectionID, err.Error())
 			logger.Info(ctx, "collection not serviceable", mlog.String("reason", reason))
 			s.writeComplianceResponse(w, LoadConfigComplianceStateNotReady, reason)
@@ -130,6 +164,9 @@ func (s *mixCoordImpl) HandleReplicaLoadConfigCompliance(w http.ResponseWriter, 
 		}
 
 		for _, replica := range internalReplicas {
+			if rgFilter.Len() > 0 && !rgFilter.Contain(replica.GetResourceGroup()) {
+				continue
+			}
 			if !replica.IsQueryVisible() {
 				reason := fmt.Sprintf("collection %d: replica %d (rg=%s) is not query visible",
 					collectionID, replica.GetID(), replica.GetResourceGroup())
