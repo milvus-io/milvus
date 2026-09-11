@@ -219,19 +219,35 @@ func TestDDLCallbacksAlterCollectionProperties(t *testing.T) {
 	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
 }
 
-func TestAlterCollectionRejectsReservedMaxFieldIDProperty(t *testing.T) {
+func TestAlterCollectionRejectsReservedSchemaProperties(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
 		properties []*commonpb.KeyValuePair
 		deleteKeys []string
+		reserved   string
 	}{
 		{
-			name:       "alter",
+			name:       "alter max field id",
 			properties: []*commonpb.KeyValuePair{{Key: common.MaxFieldIDKey, Value: "999"}},
+			reserved:   common.MaxFieldIDKey,
 		},
 		{
-			name:       "delete",
+			name:       "delete max field id",
 			deleteKeys: []string{common.MaxFieldIDKey},
+			reserved:   common.MaxFieldIDKey,
+		},
+		{
+			name: "alter milvus table target-only ids",
+			properties: []*commonpb.KeyValuePair{{
+				Key:   common.MilvusTableTargetOnlyFieldIDsKey,
+				Value: "[106]",
+			}},
+			reserved: common.MilvusTableTargetOnlyFieldIDsKey,
+		},
+		{
+			name:       "delete milvus table target-only ids",
+			deleteKeys: []string{common.MilvusTableTargetOnlyFieldIDsKey},
+			reserved:   common.MilvusTableTargetOnlyFieldIDsKey,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -258,7 +274,7 @@ func TestAlterCollectionRejectsReservedMaxFieldIDProperty(t *testing.T) {
 				DeleteKeys:     tc.deleteKeys,
 			})
 			require.ErrorIs(t, err, merr.ErrParameterInvalid)
-			require.ErrorContains(t, err, common.MaxFieldIDKey)
+			require.ErrorContains(t, err, tc.reserved)
 		})
 	}
 }

@@ -18,6 +18,7 @@ package validator
 
 import (
 	"github.com/samber/lo"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
@@ -51,6 +52,16 @@ func ValidateFunction(coll *schemapb.CollectionSchema, needValidateFunctionName 
 				return merr.WrapErrParameterInvalidMsg("function input field not found: %s", name)
 			}
 			inputFields = append(inputFields, inputField)
+		}
+
+		if typeutil.IsExternalCollection(coll) &&
+			function.GetType() == schemapb.FunctionType_TextEmbedding &&
+			len(inputFields) == 1 &&
+			inputFields[0].GetNullable() &&
+			inputFields[0].GetExternalField() != "" {
+			inputField := proto.Clone(inputFields[0]).(*schemapb.FieldSchema)
+			inputField.Nullable = false
+			inputFields = []*schemapb.FieldSchema{inputField}
 		}
 
 		if err := CheckFunctionInputField(function, inputFields); err != nil {
