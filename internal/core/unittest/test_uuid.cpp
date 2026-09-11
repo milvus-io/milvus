@@ -11,15 +11,29 @@
 
 #include <gtest/gtest.h>
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <string>
 #include <vector>
 
+#include "common/Consts.h"
 #include "common/FieldData.h"
+#include "common/IndexMeta.h"
 #include "common/Schema.h"
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
+#include "knowhere/comp/index_param.h"
+#include "pb/plan.pb.h"
 #include "pb/schema.pb.h"
+#include "pb/segcore.pb.h"
+#include "query/PlanProto.h"
+#include "segcore/SegmentGrowing.h"
+#include "segcore/SegmentGrowingImpl.h"
+#include "test_utils/DataGen.h"
+#include "test_utils/storage_test_utils.h"
+
+using namespace milvus::query;
+using namespace milvus::segcore;
 
 using namespace milvus;
 
@@ -74,4 +88,126 @@ TEST(UuidTest, SchemaAddField) {
     auto& field_meta = schema->operator[](field_id);
     ASSERT_EQ(field_meta.get_data_type(), DataType::UUID);
     ASSERT_EQ(field_meta.get_name().get(), "uuid_field");
+}
+
+// Retrieve helper: term `id == <uuid_str>` (and the absent-value negative
+// control) against a segment. Silent 0-row matches on sealed segments are
+// the regression under test: the predicate must match exactly the rows whose
+// stored 16B value equals the literal, on both growing and sealed.
+namespace {
+constexpr int64_t kUuidTestRows = 100;
+
+std::shared_ptr<Schema>
+GenUuidPkSchema() {
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
+    auto uuid_fid = schema->AddDebugField("id", DataType::UUID);
+    schema->set_primary_field_id(uuid_fid);
+    return schema;
+}
+
+std::unique_ptr<milvus::query::RetrievePlan>
+GenUuidTermRetrievePlan(const std::shared_ptr<Schema>& schema,
+                        FieldId uuid_fid,
+                        const std::string& uuid_str) {
+    auto column_info = new proto::plan::ColumnInfo();
+    column_info->set_field_id(uuid_fid.get());
+    column_info->set_data_type(proto::schema::DataType::UUID);
+    column_info->set_is_primary_key(true);
+    auto term_expr = new proto::plan::TermExpr();
+    term_expr->add_values()->set_string_val(uuid_str);
+    term_expr->set_allocated_column_info(column_info);
+    auto expr = std::make_unique<proto::plan::Expr>();
+    expr->set_allocated_term_expr(term_expr);
+    auto plan_node = std::make_unique<proto::plan::PlanNode>();
+    plan_node->mutable_query()->set_allocated_predicates(expr.release());
+    return ProtoParser(schema).CreateRetrievePlan(*plan_node);
+}
+
+void
+AssertUuidTermRetrieve(segcore::SegmentInterface* segment,
+                       const std::shared_ptr<Schema>& schema,
+                       FieldId uuid_fid,
+                       const std::string& present_uuid,
+                       const std::string& absent_uuid) {
+    auto plan = GenUuidTermRetrievePlan(schema, uuid_fid, present_uuid);
+    auto retrieved = segment->Retrieve(
+        nullptr, plan.get(), MAX_TIMESTAMP, DEFAULT_MAX_OUTPUT_SIZE, false);
+    ASSERT_EQ(retrieved->offset().size(), 1)
+        << "present UUID must match exactly one row";
+    ASSERT_EQ(retrieved->ids().uuid_id().data_size(), 1);
+    const auto expected = UUID::FromString(present_uuid);
+    EXPECT_EQ(retrieved->ids().uuid_id().data(0),
+              std::string(reinterpret_cast<const char*>(expected.data.data()),
+                          expected.data.size()));
+
+    auto absent_plan = GenUuidTermRetrievePlan(schema, uuid_fid, absent_uuid);
+    auto absent = segment->Retrieve(nullptr,
+                                    absent_plan.get(),
+                                    MAX_TIMESTAMP,
+                                    DEFAULT_MAX_OUTPUT_SIZE,
+                                    false);
+    ASSERT_EQ(absent->offset().size(), 0) << "absent UUID must match no rows";
+}
+
+// get_col<UUID> cannot compile: the harness switch instantiates every scalar
+// arm, including int32 -> UUID assignment. Read the generated 16B entries
+// straight from the raw proto instead.
+std::string
+GetFirstUuidCanonical(const segcore::GeneratedData& dataset, FieldId uuid_fid) {
+    for (auto i = 0; i < dataset.raw_->fields_data_size(); ++i) {
+        const auto& field_data = dataset.raw_->fields_data(i);
+        if (field_data.field_id() != uuid_fid.get()) {
+            continue;
+        }
+        const auto& bytes_data = field_data.scalars().bytes_data();
+        if (bytes_data.data_size() == 0) {
+            break;
+        }
+        UUID uuid{};
+        memcpy(uuid.data.data(), bytes_data.data(0).data(), sizeof(uuid.data));
+        return uuid.ToString();
+    }
+    return "";
+}
+}  // namespace
+
+TEST(UuidTest, GrowingTermQueryMatchesInsertedUuid) {
+    auto schema = GenUuidPkSchema();
+    auto uuid_fid = schema->get_primary_field_id().value();
+
+    auto dataset = DataGen(schema, kUuidTestRows);
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    segment->PreInsert(kUuidTestRows);
+    segment->Insert(0,
+                    kUuidTestRows,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
+
+    const auto present_uuid = GetFirstUuidCanonical(dataset, uuid_fid);
+    ASSERT_EQ(present_uuid.size(), 36);
+    // Well-formed but absent value: valid RFC-4122 form, never inserted.
+    AssertUuidTermRetrieve(segment.get(),
+                           schema,
+                           uuid_fid,
+                           present_uuid,
+                           "12345678-1234-4234-8234-123456789abc");
+}
+
+TEST(UuidTest, SealedTermQueryMatchesLoadedUuid) {
+    auto schema = GenUuidPkSchema();
+    auto uuid_fid = schema->get_primary_field_id().value();
+
+    auto dataset = DataGen(schema, kUuidTestRows);
+    auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+
+    const auto present_uuid = GetFirstUuidCanonical(dataset, uuid_fid);
+    ASSERT_EQ(present_uuid.size(), 36);
+    AssertUuidTermRetrieve(sealed_segment.get(),
+                           schema,
+                           uuid_fid,
+                           present_uuid,
+                           "12345678-1234-4234-8234-123456789abc");
 }
