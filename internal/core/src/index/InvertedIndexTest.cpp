@@ -49,6 +49,7 @@
 #include "index/Index.h"
 #include "index/InvertedIndexTantivy.h"
 #include "index/IndexFactory.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
 #include "index/IndexInfo.h"
 #include "index/IndexStats.h"
 #include "index/Meta.h"
@@ -149,7 +150,7 @@ class ExposedInvertedIndexTantivy
         plan.priority = priority;
         auto artifact = folly::coro::blockingWait(
             storage::MaterializeIndexAsync(reader, std::move(plan)));
-        folly::coro::blockingWait(FinalizeLoad(std::move(artifact), config));
+        folly::coro::blockingWait(FinalizeLoad(artifact, config));
         artifact.CommitTargets();
     }
 };
@@ -214,8 +215,8 @@ RunTantivyDirectLoad(bool enable_mmap, bool nullable) {
     std::map<std::string, std::string> params{
         {"index_type", index::INVERTED_INDEX_TYPE},
         {index::SCALAR_INDEX_ENGINE_VERSION, "3"}};
-    const auto resources =
-        index::IndexFactory::GetInstance().ScalarIndexAsyncLoadResource(
+    auto estimate = [&] {
+        return index::IndexFactory::GetInstance().ScalarIndexFileLoadResource(
             DataType::VARCHAR,
             packed_size,
             params,
@@ -223,6 +224,36 @@ RunTantivyDirectLoad(bool enable_mmap, bool nullable) {
             data.size(),
             stats->GetIndexFiles(),
             fixture.ctx);
+    };
+    const auto resources = estimate();
+    const auto old_workers = storage::GetAsyncLoadThreadPoolSize();
+    const auto old_enabled =
+        segcore::storagev2translator::StorageV2AsyncLoadEnabled();
+    auto restore_config = folly::makeGuard([&] {
+        storage::SetAsyncLoadThreadPoolSize(old_workers);
+        segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(old_enabled);
+    });
+    for (const bool enabled : {false, true}) {
+        segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(enabled);
+        for (const int workers : {1, 3}) {
+            storage::SetAsyncLoadThreadPoolSize(workers);
+            const auto changed = estimate();
+            EXPECT_EQ(changed.request.final_memory_cost,
+                      resources.request.final_memory_cost);
+            EXPECT_EQ(changed.request.max_memory_cost,
+                      resources.request.max_memory_cost);
+            EXPECT_EQ(changed.request.final_disk_cost,
+                      resources.request.final_disk_cost);
+            EXPECT_EQ(changed.request.max_disk_cost,
+                      resources.request.max_disk_cost);
+            EXPECT_EQ(changed.overhead.has_value(),
+                      resources.overhead.has_value());
+            if (changed.overhead && resources.overhead) {
+                EXPECT_EQ(changed.overhead->memory->group,
+                          resources.overhead->memory->group);
+            }
+        }
+    }
     EXPECT_EQ(resources.overhead.has_value(), !nullable);
     if (resources.overhead.has_value()) {
         ASSERT_TRUE(resources.overhead->memory.has_value());

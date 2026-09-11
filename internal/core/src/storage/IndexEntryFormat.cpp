@@ -17,6 +17,7 @@
 #include "storage/IndexEntryFormat.h"
 #include <algorithm>
 #include <limits>
+#include "common/Utils.h"
 #include "common/FastMem.h"
 #include "nlohmann/json.hpp"
 #include "storage/Crc32cUtil.h"
@@ -33,22 +34,16 @@ EncryptedStreamBudgetBytes(size_t cipher_len, size_t plain_len) {
     return cipher_len + 2 * plain_len;
 }
 
-size_t
-SaturatingAdd(size_t lhs, size_t rhs) {
-    if (rhs > std::numeric_limits<size_t>::max() - lhs) {
-        return std::numeric_limits<size_t>::max();
-    }
-    return lhs + rhs;
-}
-
 }  // namespace
 
 IndexEntryDirectory
 ReadIndexEntryDirectory(const std::shared_ptr<milvus::InputStream>& input,
                         int64_t file_size,
                         const folly::CancellationToken& token) {
-    IndexEntryDirectory result;
     ThrowIfCancelled(token, "IndexEntryReader::ReadFooterAndDirectory");
+    AssertInfo(file_size >= MILVUS_V3_MAGIC_SIZE + MILVUS_V3_FOOTER_SIZE,
+               "V3 index file is too small: {}",
+               file_size);
     constexpr size_t kTailBufferSize = 64 * 1024UL;
     size_t tail_size =
         std::min(static_cast<size_t>(file_size), kTailBufferSize);
@@ -59,29 +54,8 @@ ReadIndexEntryDirectory(const std::shared_ptr<milvus::InputStream>& input,
     ThrowIfCancelled(token, "IndexEntryReader::ReadFooterAndDirectory");
     AssertInfo(bytes_read == tail_size, "Failed to read file tail");
 
-    // Parse 32-byte Footer from the last 32 bytes
-    AssertInfo(tail_size >= MILVUS_V3_FOOTER_SIZE,
-               "File too small for V3 footer");
-    const uint8_t* footer_ptr =
-        tail_data.data() + tail_size - MILVUS_V3_FOOTER_SIZE;
-
-    uint16_t version;
-    uint32_t meta_entry_size;
-    uint32_t dir_size;
-
-    milvus::fastmem::FastMemcpy(&version, footer_ptr + 0, sizeof(uint16_t));
-    milvus::fastmem::FastMemcpy(
-        &meta_entry_size, footer_ptr + 24, sizeof(uint32_t));
-    milvus::fastmem::FastMemcpy(&dir_size, footer_ptr + 28, sizeof(uint32_t));
-
-    AssertInfo(version == MILVUS_V3_FORMAT_VERSION,
-               "Unsupported V3 format version: {}",
-               version);
-    AssertInfo(dir_size > 0, "Directory table size is zero");
-    AssertInfo(static_cast<size_t>(dir_size) + meta_entry_size +
-                       MILVUS_V3_FOOTER_SIZE + MILVUS_V3_MAGIC_SIZE <=
-                   static_cast<size_t>(file_size),
-               "Directory table + meta entry + footer size exceeds file size");
+    const auto dir_size = IndexEntryDirectorySize(
+        std::span(tail_data).last(MILVUS_V3_FOOTER_SIZE), file_size);
 
     // Check if the directory itself needs a second read. The meta entry is
     // loaded separately by Open() and is not needed for directory parsing.
@@ -108,14 +82,45 @@ ReadIndexEntryDirectory(const std::shared_ptr<milvus::InputStream>& input,
         tail_size = new_tail_size;
     }
 
-    // Parse Directory Table JSON
-    const uint8_t* dir_start =
-        tail_data.data() + tail_size - MILVUS_V3_FOOTER_SIZE - dir_size;
-    const uint8_t* dir_end = dir_start + dir_size;
+    return ParseIndexEntryDirectory(std::span(tail_data).subspan(
+        tail_size - MILVUS_V3_FOOTER_SIZE - dir_size, dir_size));
+}
 
+size_t
+IndexEntryDirectorySize(std::span<const uint8_t> footer, int64_t file_size) {
+    AssertInfo(file_size >= MILVUS_V3_MAGIC_SIZE + MILVUS_V3_FOOTER_SIZE,
+               "V3 index file is too small: {}",
+               file_size);
+    AssertInfo(footer.size() == MILVUS_V3_FOOTER_SIZE,
+               "Invalid V3 footer size");
+    uint16_t version;
+    uint32_t meta_entry_size;
+    uint32_t dir_size;
+
+    milvus::fastmem::FastMemcpy(&version, footer.data() + 0, sizeof(uint16_t));
+    milvus::fastmem::FastMemcpy(
+        &meta_entry_size, footer.data() + 24, sizeof(uint32_t));
+    milvus::fastmem::FastMemcpy(
+        &dir_size, footer.data() + 28, sizeof(uint32_t));
+
+    AssertInfo(version == MILVUS_V3_FORMAT_VERSION,
+               "Unsupported V3 format version: {}",
+               version);
+    AssertInfo(dir_size > 0, "Directory table size is zero");
+    AssertInfo(static_cast<size_t>(dir_size) + meta_entry_size +
+                       MILVUS_V3_FOOTER_SIZE + MILVUS_V3_MAGIC_SIZE <=
+                   static_cast<size_t>(file_size),
+               "Directory table + meta entry + footer size exceeds file size");
+
+    return dir_size;
+}
+
+IndexEntryDirectory
+ParseIndexEntryDirectory(std::span<const uint8_t> bytes) {
+    IndexEntryDirectory result;
     nlohmann::json dir_json;
     try {
-        dir_json = nlohmann::json::parse(dir_start, dir_end);
+        dir_json = nlohmann::json::parse(bytes.begin(), bytes.end());
     } catch (const nlohmann::json::parse_error& e) {
         AssertInfo(false,
                    "Failed to parse V3 index directory table JSON: {}",

@@ -892,7 +892,6 @@ ScalarIndexSort<T>::PlanLoad(const storage::IndexEntryCatalog& catalog,
 
     storage::IndexLoadPlan plan;
     plan.finalize_context = context;
-    auto slice_size = storage::DefaultEntryStreamSliceSize();
     if (context->is_mmap) {
         auto mmap_path = disk_file_manager_ != nullptr
                              ? disk_file_manager_->GetLocalIndexObjectPrefix() +
@@ -903,23 +902,19 @@ ScalarIndexSort<T>::PlanLoad(const storage::IndexEntryCatalog& catalog,
                                     MmapFileSize(context->index_data_bytes),
                                     true,
                                     nullptr});
-        plan.entries.push_back(storage::MakeEntryLoadPlan(
-            catalog,
+        plan.entries.push_back(storage::EntryLoadPlan{
             "index_data",
             storage::MmapEntryTarget{
-                context->index_data_file, 0, context->index_data_bytes},
-            slice_size));
+                context->index_data_file, 0, context->index_data_bytes}});
     } else {
         context->index_data = std::make_shared<std::vector<IndexStructure<T>>>(
             context->index_size);
-        plan.entries.push_back(storage::MakeEntryLoadPlan(
-            catalog,
+        plan.entries.push_back(storage::EntryLoadPlan{
             "index_data",
             storage::MemoryEntryTarget{
                 context->index_data,
                 reinterpret_cast<uint8_t*>(context->index_data->data()),
-                context->index_data_bytes},
-            slice_size));
+                context->index_data_bytes}});
     }
 
     // Indexes built with scalar index engine version >= 3 always persist both
@@ -959,38 +954,32 @@ ScalarIndexSort<T>::PlanLoad(const storage::IndexEntryCatalog& catalog,
         context->offsets_file =
             std::make_shared<storage::MmapFileTarget>(storage::MmapFileTarget{
                 mmap_meta_path, context->offsets_bytes, true, nullptr});
-        plan.entries.push_back(storage::MakeEntryLoadPlan(
-            catalog,
+        plan.entries.push_back(storage::EntryLoadPlan{
             "idx_to_offsets",
             storage::MmapEntryTarget{
-                context->offsets_file, 0, context->offsets_bytes},
-            slice_size));
+                context->offsets_file, 0, context->offsets_bytes}});
     } else {
         context->offsets =
             std::make_shared<std::vector<int32_t>>(context->total_num_rows);
-        plan.entries.push_back(storage::MakeEntryLoadPlan(
-            catalog,
+        plan.entries.push_back(storage::EntryLoadPlan{
             "idx_to_offsets",
             storage::MemoryEntryTarget{
                 context->offsets,
                 reinterpret_cast<uint8_t*>(context->offsets->data()),
-                context->offsets_bytes},
-            slice_size));
+                context->offsets_bytes}});
     }
-    plan.entries.push_back(storage::MakeEntryLoadPlan(
-        catalog,
+    plan.entries.push_back(storage::EntryLoadPlan{
         "valid_bitset",
         storage::MemoryEntryTarget{
             context->valid_bitset,
             reinterpret_cast<uint8_t*>(context->valid_bitset->data()),
-            valid_bitset_bytes},
-        slice_size));
+            valid_bitset_bytes}});
     return plan;
 }
 
 template <typename T>
 folly::coro::Task<void>
-ScalarIndexSort<T>::FinalizeLoad(storage::IndexLoadArtifact&& artifact,
+ScalarIndexSort<T>::FinalizeLoad(storage::IndexLoadArtifact& artifact,
                                  const Config& config) {
     (void)config;
     auto context =

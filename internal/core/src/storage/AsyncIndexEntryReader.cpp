@@ -27,6 +27,7 @@
 #include "storage/EntryStreamUtils.h"
 #include "storage/IndexEntryFormat.h"
 #include "storage/IndexLoadPlan.h"
+#include "storage/IndexMaterializer.h"
 #include "storage/PluginLoader.h"
 #include "storage/RemoteInputStream.h"
 
@@ -68,14 +69,44 @@ AsyncIndexEntryReader::Open(std::shared_ptr<milvus::InputStream> input,
             std::dynamic_pointer_cast<RemoteInputStream>(reader->input_)) {
         reader->remote_file_ = remote->GetFile();
     }
-    uint8_t magic[MILVUS_V3_MAGIC_SIZE];
-    co_await reader->ReadRangeAsync(0, magic, sizeof(magic), token);
-    AssertInfo(std::memcmp(magic, MILVUS_V3_MAGIC, sizeof(magic)) == 0,
-               "Invalid V3 magic number");
-
-    // Directory parsing is shared format code and runs on this async worker;
-    // it never constructs or calls the legacy reader's download machinery.
-    auto directory = ReadIndexEntryDirectory(reader->input_, file_size, token);
+    auto admit = [&](size_t bytes) -> folly::coro::Task<LoadAdmissionLease> {
+        try {
+            co_return co_await LoadAdmissionController::GetInstance()
+                .AcquireAsync({bytes, 1},
+                              priority == proto::common::LoadPriority::LOW
+                                  ? LoadAdmissionPriority::Low
+                                  : LoadAdmissionPriority::High,
+                              token);
+        } catch (const folly::OperationCancelled&) {
+            ThrowInfo(FollyCancel, "Async V3 directory admission cancelled");
+        }
+    };
+    size_t directory_bytes;
+    {
+        auto lease =
+            co_await admit(MILVUS_V3_MAGIC_SIZE + MILVUS_V3_FOOTER_SIZE);
+        uint8_t magic[MILVUS_V3_MAGIC_SIZE];
+        co_await reader->ReadRangeAsync(0, magic, sizeof(magic), token);
+        AssertInfo(std::memcmp(magic, MILVUS_V3_MAGIC, sizeof(magic)) == 0,
+                   "Invalid V3 magic number");
+        uint8_t footer[MILVUS_V3_FOOTER_SIZE];
+        co_await reader->ReadRangeAsync(
+            file_size - sizeof(footer), footer, sizeof(footer), token);
+        directory_bytes = IndexEntryDirectorySize(footer, file_size);
+    }
+    // Keep directory bytes and parsed JSON/source descriptions admitted together.
+    auto directory_lease = co_await admit(SaturatingAdd(
+        SaturatingMultiply(directory_bytes, size_t{32}), size_t{4096}));
+    IndexEntryDirectory directory;
+    {
+        std::vector<uint8_t> bytes(directory_bytes);
+        co_await reader->ReadRangeAsync(
+            file_size - MILVUS_V3_FOOTER_SIZE - directory_bytes,
+            bytes.data(),
+            bytes.size(),
+            token);
+        directory = ParseIndexEntryDirectory(bytes);
+    }
     AssertInfo(directory.entry_names_.size() == directory.entry_index_.size(),
                "Duplicate entries in V3 directory");
     reader->edek_ = std::move(directory.edek_);
@@ -111,12 +142,14 @@ AsyncIndexEntryReader::Open(std::shared_ptr<milvus::InputStream> input,
             const auto bytes =
                 std::min(directory.slice_size_,
                          static_cast<size_t>(meta.enc.original_size - offset));
-            AssertInfo(slice.offset <= static_cast<uint64_t>(
-                                           file_size - MILVUS_V3_MAGIC_SIZE) &&
-                           slice.size <=
-                               file_size - MILVUS_V3_MAGIC_SIZE - slice.offset,
-                       "Encrypted entry '{}' range exceeds packed file",
-                       name);
+            AssertInfo(
+                slice.size > 0 &&
+                    slice.offset <= static_cast<uint64_t>(
+                                        file_size - MILVUS_V3_MAGIC_SIZE) &&
+                    slice.size <=
+                        file_size - MILVUS_V3_MAGIC_SIZE - slice.offset,
+                "Encrypted entry '{}' has an empty or out-of-bounds range",
+                name);
             source.slices.push_back({MILVUS_V3_MAGIC_SIZE + slice.offset,
                                      slice.size,
                                      offset,
@@ -132,35 +165,17 @@ AsyncIndexEntryReader::Open(std::shared_ptr<milvus::InputStream> input,
         });
     // Release the temporary parsed representation before entry materialization.
     directory = {};
+    directory_lease.Release();
 
     const auto& meta = reader->catalog_.At(MILVUS_V3_META_ENTRY_NAME);
     auto data = std::make_shared<std::vector<uint8_t>>(meta.plaintext_size);
-    auto plan =
-        MakeEntryLoadPlan(reader->catalog_,
-                          MILVUS_V3_META_ENTRY_NAME,
-                          MemoryEntryTarget{data, data->data(), data->size()},
-                          DefaultStreamSliceSize());
-    auto& budget = LoadAdmissionController::GetInstance();
-    const auto budget_priority = priority == proto::common::LoadPriority::LOW
-                                     ? LoadAdmissionPriority::Low
-                                     : LoadAdmissionPriority::High;
-    for (const auto& slice : plan.slices) {
-        LoadAdmissionLease lease;
-        try {
-            lease = co_await budget.AcquireAsync(
-                {slice.admission_bytes, 1}, budget_priority, token);
-        } catch (const folly::OperationCancelled&) {
-            ThrowInfo(ErrorCode::FollyCancel,
-                      "Async V3 metadata admission cancelled");
-        }
-        co_await reader->ReadSliceIntoAsync(MILVUS_V3_META_ENTRY_NAME,
-                                            slice.entry_offset,
-                                            data->data() + slice.target_offset,
-                                            slice.target_bytes,
-                                            token);
-    }
-    AssertInfo(Crc32cValue(data->data(), data->size()) == meta.expected_crc,
-               "CRC-32C mismatch for V3 metadata");
+    IndexLoadPlan plan;
+    plan.priority = priority;
+    plan.entries.push_back(
+        {MILVUS_V3_META_ENTRY_NAME,
+         MemoryEntryTarget{data, data->data(), data->size()}});
+    auto metadata =
+        co_await MaterializeIndexAsync(*reader, std::move(plan), token);
     if (!data->empty()) {
         try {
             reader->catalog_.metadata_ =

@@ -46,6 +46,7 @@
 #include <unordered_set>
 #include "index/InvertedIndexUtil.h"
 #include "index/Utils.h"
+#include "index/IndexLoadUtils.h"
 #include "knowhere/dataset.h"
 #include "log/Log.h"
 #include "nlohmann/detail/iterators/iter_impl.hpp"
@@ -67,63 +68,11 @@ namespace milvus::index {
 namespace {
 
 struct TantivyLoadContext {
-    ~TantivyLoadContext() {
-        if ((files.empty() || !std::all_of(files.begin(),
-                                           files.end(),
-                                           [](const auto& file) {
-                                               return file->file != nullptr &&
-                                                      file->file->Committed();
-                                           })) &&
-            disk_file_manager != nullptr && !path.empty()) {
-            disk_file_manager->RemoveIndexFiles();
-        }
-    }
-
-    std::shared_ptr<storage::DiskFileManagerImpl> disk_file_manager;
-    std::string path;
-    std::vector<std::string> file_names;
-    std::vector<std::shared_ptr<storage::MmapFileTarget>> files;
+    std::shared_ptr<IndexDirectoryLoadContext> directory;
     std::shared_ptr<std::vector<size_t>> null_offsets;
-    std::optional<storage::DiskFileManagerImpl::LocalDirWriteLease>
-        local_dir_lease;
     bool has_null{false};
     bool load_in_mmap{true};
 };
-
-template <typename T>
-T
-ReadRequiredTantivyMeta(const storage::IndexEntryCatalog& catalog,
-                        const char* key) {
-    if (!catalog.HasMeta(key)) {
-        ThrowInfo(ErrorCode::DataFormatBroken,
-                  "corrupt Tantivy index: required metadata '{}' is missing",
-                  key);
-    }
-    try {
-        return catalog.GetMeta<T>(key);
-    } catch (const SegcoreError&) {
-        throw;
-    } catch (const std::bad_alloc&) {
-        throw;
-    } catch (const std::exception& e) {
-        ThrowInfo(ErrorCode::DataFormatBroken,
-                  "corrupt Tantivy index: metadata '{}' has invalid "
-                  "type/value: {}",
-                  key,
-                  e.what());
-    }
-}
-
-void
-ValidateTantivyFileName(const std::string& file_name) {
-    auto path = std::filesystem::path(file_name);
-    if (file_name.empty() || path.is_absolute() || path.has_parent_path() ||
-        path.filename() != path || file_name == "." || file_name == "..") {
-        ThrowInfo(ErrorCode::DataFormatBroken,
-                  "corrupt Tantivy index: invalid file name '{}'",
-                  file_name);
-    }
-}
 
 }  // namespace
 
@@ -1207,53 +1156,14 @@ template <typename T>
 storage::IndexLoadPlan
 InvertedIndexTantivy<T>::PlanLoad(const storage::IndexEntryCatalog& catalog,
                                   const Config& config) {
-    AssertInfo(disk_file_manager_ != nullptr,
-               "Tantivy direct load requires DiskFileManager");
     auto context = std::make_shared<TantivyLoadContext>();
-    context->disk_file_manager = disk_file_manager_;
-    context->file_names = ReadRequiredTantivyMeta<std::vector<std::string>>(
-        catalog, "file_names");
-    context->has_null = ReadRequiredTantivyMeta<bool>(catalog, "has_null");
+    context->has_null = ReadRequiredIndexMeta<bool>(catalog, "has_null");
     context->load_in_mmap =
         GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
-    if (context->file_names.empty()) {
-        ThrowInfo(ErrorCode::DataFormatBroken,
-                  "corrupt Tantivy index: file_names is empty");
-    }
-
-    context->path = disk_file_manager_->GetLocalIndexObjectPrefix();
-    context->local_dir_lease.emplace(
-        disk_file_manager_->AcquireLocalDirWriteLease(context->path));
-
     storage::IndexLoadPlan plan;
     plan.finalize_context = context;
-    auto slice_size = storage::DefaultEntryStreamSliceSize();
-    std::unordered_set<std::string> unique_names;
-    for (const auto& file_name : context->file_names) {
-        ValidateTantivyFileName(file_name);
-        if (!unique_names.insert(file_name).second) {
-            ThrowInfo(ErrorCode::DataFormatBroken,
-                      "corrupt Tantivy index: duplicate file name '{}'",
-                      file_name);
-        }
-        if (!catalog.HasEntry(file_name)) {
-            ThrowInfo(ErrorCode::DataFormatBroken,
-                      "corrupt Tantivy index: file Entry '{}' is missing",
-                      file_name);
-        }
-        auto file_size = catalog.At(file_name).plaintext_size;
-        auto file = std::make_shared<storage::MmapFileTarget>(
-            storage::MmapFileTarget{context->path + "/" + file_name,
-                                    file_size,
-                                    context->load_in_mmap,
-                                    nullptr});
-        context->files.push_back(file);
-        plan.entries.push_back(storage::MakeEntryLoadPlan(
-            catalog,
-            file_name,
-            storage::MmapEntryTarget{file, 0, file_size},
-            slice_size));
-    }
+    context->directory = PlanIndexDirectory(
+        catalog, disk_file_manager_, context->load_in_mmap, plan);
 
     if (!context->has_null) {
         return plan;
@@ -1272,20 +1182,18 @@ InvertedIndexTantivy<T>::PlanLoad(const storage::IndexEntryCatalog& catalog,
     }
     context->null_offsets =
         std::make_shared<std::vector<size_t>>(null_bytes / sizeof(size_t));
-    plan.entries.push_back(storage::MakeEntryLoadPlan(
-        catalog,
+    plan.entries.push_back(storage::EntryLoadPlan{
         INDEX_NULL_OFFSET_FILE_NAME,
         storage::MemoryEntryTarget{
             context->null_offsets,
             reinterpret_cast<uint8_t*>(context->null_offsets->data()),
-            null_bytes},
-        slice_size));
+            null_bytes}});
     return plan;
 }
 
 template <typename T>
 folly::coro::Task<void>
-InvertedIndexTantivy<T>::FinalizeLoad(storage::IndexLoadArtifact&& artifact,
+InvertedIndexTantivy<T>::FinalizeLoad(storage::IndexLoadArtifact& artifact,
                                       const Config& config) {
     (void)config;
     auto context =
@@ -1294,7 +1202,7 @@ InvertedIndexTantivy<T>::FinalizeLoad(storage::IndexLoadArtifact&& artifact,
                "InvertedIndexTantivy FinalizeLoad context is null");
 
     auto new_wrapper =
-        std::make_shared<TantivyIndexWrapper>(context->path.c_str(),
+        std::make_shared<TantivyIndexWrapper>(context->directory->path.c_str(),
                                               context->load_in_mmap,
                                               milvus::index::SetBitsetSealed);
     std::vector<size_t> new_null_offsets;
@@ -1306,13 +1214,13 @@ InvertedIndexTantivy<T>::FinalizeLoad(storage::IndexLoadArtifact&& artifact,
 
     wrapper_ = std::move(new_wrapper);
     null_offset_ = std::move(new_null_offsets);
-    path_ = context->path;
+    path_ = context->directory->path;
     FinalizeSealed(/*release_null_offsets=*/true);
 
     LOG_INFO(
         "FinalizeLoad InvertedIndexTantivy done, file_count: {}, has_null: "
         "{}, mmap: {}",
-        context->file_names.size(),
+        context->directory->files.size(),
         context->has_null,
         context->load_in_mmap);
     storage::ThrowIfCancelled(

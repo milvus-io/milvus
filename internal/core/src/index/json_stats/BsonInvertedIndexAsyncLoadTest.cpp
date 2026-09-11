@@ -23,6 +23,7 @@
 #include "storage/LegacyIndexLoader.h"
 #include "storage/FileWriter.h"
 #include "storage/IndexData.h"
+#include "storage/Event.h"
 #include "storage/LocalFileIOPool.h"
 #include "test_utils/AsyncLoadTestUtils.h"
 #include "test_utils/TmpPath.h"
@@ -47,6 +48,13 @@ class BsonLoadSource : public storage::LocalChunkManager {
          uint64_t offset,
          void* data,
          uint64_t bytes) override {
+        // Encoded objects also start at zero when reading the whole payload.
+        // Only a descriptor-prefix read means the envelope was re-inspected.
+        storage::EventHeader header;
+        if (offset == 0 && bytes == sizeof(storage::MAGIC_NUM) +
+                                        storage::GetEventHeaderSize(header)) {
+            ++header_reads;
+        }
         Observe();
         return LocalChunkManager::Read(path, offset, data, bytes);
     }
@@ -71,6 +79,7 @@ class BsonLoadSource : public storage::LocalChunkManager {
     bool observe{false};
     bool expect_async{false};
     std::atomic<size_t> reads{0};
+    std::atomic<size_t> header_reads{0};
 };
 
 class BsonNativeFileSystem : public arrow::fs::SubTreeFileSystem {
@@ -211,7 +220,9 @@ TEST_F(BsonInvertedIndexAsyncLoadTest, HeapAndMmapRoutingAndReload) {
              {kPriority, proto::common::LoadPriority::LOW}) {
             auto info = LoadInfo(mmap);
             info.load_priority = priority;
+            source_->header_reads = 0;
             BsonInvertedIndexTranslator translator(info, Context());
+            EXPECT_GT(source_->header_reads.load(), 0);
             const auto estimate = translator.estimated_byte_size_of_cell(0);
             for (const bool enabled : {true, false, true}) {
                 segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(
@@ -219,9 +230,12 @@ TEST_F(BsonInvertedIndexAsyncLoadTest, HeapAndMmapRoutingAndReload) {
                 source_->observe = true;
                 source_->expect_async = enabled;
                 source_->reads = 0;
+                source_->header_reads = 0;
                 auto cells = translator.get_cells(nullptr, {0});
                 ASSERT_EQ(cells.size(), 1);
                 EXPECT_GT(source_->reads.load(), 0);
+                if (enabled)
+                    EXPECT_EQ(source_->header_reads.load(), 0);
                 CheckQuery(*cells.front().second);
                 const auto actual = cells.front().second->CellByteSize();
                 EXPECT_GE(estimate.first.memory_bytes, actual.memory_bytes);

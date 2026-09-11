@@ -1615,7 +1615,6 @@ BitmapIndex<T>::PlanLoad(const storage::IndexEntryCatalog& catalog,
 
     storage::IndexLoadPlan plan;
     plan.finalize_context = context;
-    auto slice_size = storage::DefaultEntryStreamSliceSize();
     if (context->use_mmap) {
         context->final_mmap_path =
             GetValueFromConfig<std::string>(config, MMAP_FILE_PATH).value();
@@ -1624,22 +1623,18 @@ BitmapIndex<T>::PlanLoad(const storage::IndexEntryCatalog& catalog,
                                     raw_data_size,
                                     false,
                                     nullptr});
-        plan.entries.push_back(storage::MakeEntryLoadPlan(
-            catalog,
+        plan.entries.push_back(storage::EntryLoadPlan{
             BITMAP_INDEX_DATA,
             storage::MmapEntryTarget{
-                context->index_data_file, 0, raw_data_size},
-            slice_size));
+                context->index_data_file, 0, raw_data_size}});
     } else {
         context->index_data =
             std::make_shared<std::vector<uint8_t>>(raw_data_size);
-        plan.entries.push_back(storage::MakeEntryLoadPlan(
-            catalog,
+        plan.entries.push_back(storage::EntryLoadPlan{
             BITMAP_INDEX_DATA,
             storage::MemoryEntryTarget{context->index_data,
                                        context->index_data->data(),
-                                       context->index_data->size()},
-            slice_size));
+                                       context->index_data->size()}});
     }
 
     if (context->has_valid_bitset) {
@@ -1652,20 +1647,18 @@ BitmapIndex<T>::PlanLoad(const storage::IndexEntryCatalog& catalog,
                    valid_bitset_size);
         context->valid_bitset =
             std::make_shared<std::vector<uint8_t>>(valid_bitset_size);
-        plan.entries.push_back(storage::MakeEntryLoadPlan(
-            catalog,
+        plan.entries.push_back(storage::EntryLoadPlan{
             BITMAP_INDEX_VALID_BITSET,
             storage::MemoryEntryTarget{context->valid_bitset,
                                        context->valid_bitset->data(),
-                                       context->valid_bitset->size()},
-            slice_size));
+                                       context->valid_bitset->size()}});
     }
     return plan;
 }
 
 template <typename T>
 folly::coro::Task<void>
-BitmapIndex<T>::FinalizeLoad(storage::IndexLoadArtifact&& artifact,
+BitmapIndex<T>::FinalizeLoad(storage::IndexLoadArtifact& artifact,
                              const Config& config) {
     (void)config;
     auto context =

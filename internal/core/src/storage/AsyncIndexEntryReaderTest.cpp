@@ -426,14 +426,74 @@ TEST_F(AsyncIndexEntryReaderTest,
             return error.get_error_code();
         }
     });
-    const bool started = direct_file->WaitForCallCount(1);
-    EXPECT_TRUE(started);
+    EXPECT_FALSE(
+        direct_file->WaitForCallCount(1, std::chrono::milliseconds(50)));
     EXPECT_EQ(load.wait_for(std::chrono::milliseconds(50)),
               std::future_status::timeout);
     cancel.requestCancellation();
     // Always release before asserting so a regression cannot strand the task.
     held.Release();
     EXPECT_EQ(load.get(), milvus::ErrorCode::FollyCancel);
+}
+
+TEST_F(AsyncIndexEntryReaderTest,
+       LargeDirectoryReadIsAdmittedAndDrainsOnCancel) {
+    const auto path = kV3FilePath + "_large_directory";
+    {
+        IndexEntryDirectStreamWriter writer(CreateOutputStream(path));
+        const uint8_t value = 42;
+        writer.WriteEntry(std::string(128 * 1024, 'x'), &value, 1);
+        writer.Finish();
+    }
+    milvus::test::ScopedLoadTransientBudget budget_guard(1024);
+    auto direct = std::make_shared<milvus::test::ControlledDirectReadFile>(
+        ReadLocalFileBytes(GetRootPath() + "/" + path));
+    direct->SetAutoComplete(false);
+    auto input = std::make_shared<RemoteInputStream>(direct);
+    folly::CancellationSource cancel;
+    auto load = std::async(std::launch::async, [&] {
+        return folly::coro::blockingWait(
+            AsyncIndexEntryReader::Open(
+                input,
+                input->Size(),
+                0,
+                milvus::proto::common::LoadPriority::HIGH,
+                cancel.getToken())
+                .scheduleOn(ResolveAsyncLoadExecutor(
+                    {}, milvus::proto::common::LoadPriority::HIGH)));
+    });
+    auto drain = folly::makeGuard([&] {
+        cancel.requestCancellation();
+        direct->SetAutoComplete(true);
+        for (size_t i = 0; i < direct->DirectReadCalls().size(); ++i)
+            direct->Complete(i);
+        load.wait();
+    });
+    for (size_t i = 0; i < 2; ++i) {
+        ASSERT_TRUE(direct->WaitForCallCount(i + 1));
+        direct->Complete(i);
+    }
+    ASSERT_TRUE(direct->WaitForCallCount(3));
+    EXPECT_GT(direct->DirectReadCalls()[2].nbytes, 64 * 1024);
+    auto& admission = LoadAdmissionController::GetInstance();
+    const bool acquired =
+        admission.TryAcquire({1, 0}, LoadAdmissionPriority::High);
+    if (acquired)
+        admission.Release({1, 0});
+    EXPECT_FALSE(acquired);
+    cancel.requestCancellation();
+    EXPECT_EQ(load.wait_for(std::chrono::milliseconds(30)),
+              std::future_status::timeout);
+    direct->Complete(2);
+    try {
+        (void)load.get();
+        FAIL() << "expected cancellation";
+    } catch (const milvus::SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), milvus::ErrorCode::FollyCancel);
+    }
+    drain.dismiss();
+    EXPECT_EQ(direct->ReadAtCalls(), 0);
+    EXPECT_EQ(direct->DirectReadCalls().size(), 3);
 }
 
 TEST_F(AsyncIndexEntryReaderTest, CatalogExposesStablePlainEntrySources) {
@@ -659,7 +719,7 @@ TEST_F(AsyncIndexEntryReaderTest,
        MaterializerCombinesOutOfOrderSlicesAcrossEntries) {
     milvus::test::ScopedLoadTransientBudget budget(/*capacity_bytes=*/0);
     const std::string file_path = kV3FilePath + "_materialize_round_robin";
-    const size_t slice_size = kStreamSliceAlignment;
+    const size_t slice_size = DefaultStreamSliceSize();
     auto data_a = GeneratePattern(2 * slice_size);
     auto data_b = GeneratePattern(2 * slice_size);
     std::reverse(data_b.begin(), data_b.end());
@@ -685,17 +745,11 @@ TEST_F(AsyncIndexEntryReaderTest,
     auto target_b = std::make_shared<std::vector<uint8_t>>(data_b.size());
     IndexLoadPlan plan;
     plan.priority = milvus::proto::common::LoadPriority::HIGH;
-    plan.max_inflight_slices = 4;
-    plan.entries.push_back(MakeEntryLoadPlan(
-        reader->Catalog(),
-        "a",
-        MemoryEntryTarget{target_a, target_a->data(), target_a->size()},
-        slice_size));
-    plan.entries.push_back(MakeEntryLoadPlan(
-        reader->Catalog(),
-        "b",
-        MemoryEntryTarget{target_b, target_b->data(), target_b->size()},
-        slice_size));
+
+    plan.entries.push_back(EntryLoadPlan{
+        "a", MemoryEntryTarget{target_a, target_a->data(), target_a->size()}});
+    plan.entries.push_back(EntryLoadPlan{
+        "b", MemoryEntryTarget{target_b, target_b->data(), target_b->size()}});
 
     auto materialize_future =
         std::async(std::launch::async,
@@ -736,8 +790,7 @@ TEST_F(AsyncIndexEntryReaderTest,
     auto artifact = materialize_future.get();
     EXPECT_EQ(*target_a, data_a);
     EXPECT_EQ(*target_b, data_b);
-    EXPECT_TRUE(artifact.At("a").ready);
-    EXPECT_TRUE(artifact.At("b").ready);
+
     EXPECT_EQ(direct_file->PeakInflight(), 4);
 }
 
@@ -745,7 +798,7 @@ TEST_F(AsyncIndexEntryReaderTest,
        MaterializerUsesBufferedAsyncReadWhenNativeReadIntoIsUnavailable) {
     milvus::test::ScopedLoadTransientBudget budget(/*capacity_bytes=*/0);
     const std::string file_path = kV3FilePath + "_materialize_buffered";
-    const size_t slice_size = kStreamSliceAlignment;
+    const size_t slice_size = DefaultStreamSliceSize();
     auto data = GeneratePattern(2 * slice_size);
     {
         auto output = CreateOutputStream(file_path);
@@ -764,17 +817,13 @@ TEST_F(AsyncIndexEntryReaderTest,
 
     auto target = std::make_shared<std::vector<uint8_t>>(data.size());
     IndexLoadPlan plan;
-    plan.max_inflight_slices = 2;
-    plan.entries.push_back(MakeEntryLoadPlan(
-        reader->Catalog(),
-        "data",
-        MemoryEntryTarget{target, target->data(), target->size()},
-        slice_size));
+
+    plan.entries.push_back(EntryLoadPlan{
+        "data", MemoryEntryTarget{target, target->data(), target->size()}});
 
     auto artifact = folly::coro::blockingWait(
         MaterializeIndexAsync(*reader, std::move(plan)));
 
-    EXPECT_TRUE(artifact.At("data").ready);
     EXPECT_EQ(*target, data);
     EXPECT_EQ(fallback_file->AsyncReadCalls(), 2);
     EXPECT_EQ(fallback_file->ReadAtCalls(), 0);
@@ -782,9 +831,18 @@ TEST_F(AsyncIndexEntryReaderTest,
 
 TEST_F(AsyncIndexEntryReaderTest, MaterializerHonorsMaxInflightSlices) {
     milvus::test::ScopedLoadTransientBudget budget(/*capacity_bytes=*/0);
+    auto& admission = LoadAdmissionController::GetInstance();
+    const auto old_slots = admission.CapacitySlots();
+    const auto old_workers = GetAsyncLoadThreadPoolSize();
+    auto restore = folly::makeGuard([&] {
+        admission.SetCapacitySlots(old_slots);
+        SetAsyncLoadThreadPoolSize(old_workers);
+    });
+    admission.SetCapacitySlots(0);
+    SetAsyncLoadThreadPoolSize(1);
     const std::string file_path = kV3FilePath + "_materialize_inflight";
-    const size_t slice_size = kStreamSliceAlignment;
-    auto data = GeneratePattern(4 * slice_size);
+    const size_t slice_size = DefaultStreamSliceSize();
+    auto data = GeneratePattern((kMaxIndexLoadInflightSlices + 2) * slice_size);
     {
         auto output = CreateOutputStream(file_path);
         IndexEntryDirectStreamWriter writer(output);
@@ -801,12 +859,9 @@ TEST_F(AsyncIndexEntryReaderTest, MaterializerHonorsMaxInflightSlices) {
     auto target = std::make_shared<std::vector<uint8_t>>(data.size());
     IndexLoadPlan plan;
     plan.priority = milvus::proto::common::LoadPriority::LOW;
-    plan.max_inflight_slices = 2;
-    plan.entries.push_back(MakeEntryLoadPlan(
-        reader->Catalog(),
-        "data",
-        MemoryEntryTarget{target, target->data(), target->size()},
-        slice_size));
+
+    plan.entries.push_back(EntryLoadPlan{
+        "data", MemoryEntryTarget{target, target->data(), target->size()}});
 
     auto materialize_future =
         std::async(std::launch::async,
@@ -822,28 +877,29 @@ TEST_F(AsyncIndexEntryReaderTest, MaterializerHonorsMaxInflightSlices) {
         }
     });
 
-    ASSERT_TRUE(direct_file->WaitForCallCount(2));
-    EXPECT_EQ(direct_file->DirectReadCalls().size(), 2);
-    direct_file->Complete(1);
-    ASSERT_TRUE(direct_file->WaitForCallCount(3));
-    EXPECT_EQ(direct_file->DirectReadCalls().size(), 3);
+    constexpr auto window = kMaxIndexLoadInflightSlices;
+    ASSERT_TRUE(direct_file->WaitForCallCount(window));
+    EXPECT_FALSE(direct_file->WaitForCallCount(window + 1,
+                                               std::chrono::milliseconds(50)));
     direct_file->Complete(0);
-    ASSERT_TRUE(direct_file->WaitForCallCount(4));
-    EXPECT_EQ(direct_file->DirectReadCalls().size(), 4);
-    direct_file->Complete(3);
-    direct_file->Complete(2);
+    ASSERT_TRUE(direct_file->WaitForCallCount(window + 1));
+    direct_file->Complete(1);
+    ASSERT_TRUE(direct_file->WaitForCallCount(window + 2));
+    for (size_t i = 2; i < window + 2; ++i) {
+        direct_file->Complete(i);
+    }
 
     auto artifact = materialize_future.get();
-    EXPECT_TRUE(artifact.At("data").ready);
+
     EXPECT_EQ(*target, data);
-    EXPECT_LE(direct_file->PeakInflight(), 2);
+    EXPECT_LE(direct_file->PeakInflight(), window);
 }
 
 TEST_F(AsyncIndexEntryReaderTest,
        MaterializerSharesSlotsAndObservesCapacityChanges) {
     milvus::test::ScopedLoadTransientBudget budget(/*capacity_bytes=*/0);
     const std::string file_path = kV3FilePath + "_materialize_joint_slots";
-    const size_t slice_size = kStreamSliceAlignment;
+    const size_t slice_size = DefaultStreamSliceSize();
     auto data = GeneratePattern(4 * slice_size);
     {
         auto output = CreateOutputStream(file_path);
@@ -869,12 +925,9 @@ TEST_F(AsyncIndexEntryReaderTest,
     auto target = std::make_shared<std::vector<uint8_t>>(data.size());
     IndexLoadPlan plan;
     plan.priority = milvus::proto::common::LoadPriority::LOW;
-    plan.max_inflight_slices = 4;
-    plan.entries.push_back(MakeEntryLoadPlan(
-        reader->Catalog(),
-        "data",
-        MemoryEntryTarget{target, target->data(), target->size()},
-        slice_size));
+
+    plan.entries.push_back(EntryLoadPlan{
+        "data", MemoryEntryTarget{target, target->data(), target->size()}});
 
     auto materialize_future =
         std::async(std::launch::async,
@@ -910,7 +963,7 @@ TEST_F(AsyncIndexEntryReaderTest,
     direct_file->Complete(2);
 
     auto artifact = materialize_future.get();
-    EXPECT_TRUE(artifact.At("data").ready);
+
     EXPECT_EQ(*target, data);
     EXPECT_LE(direct_file->PeakInflight(), 2);
     admission.SetCapacitySlots(2);
@@ -942,16 +995,12 @@ TEST_F(AsyncIndexEntryReaderTest,
     auto target =
         std::make_shared<std::vector<uint8_t>>(2 * entry_size, uint8_t{0});
     IndexLoadPlan plan;
-    plan.entries.push_back(
-        MakeEntryLoadPlan(reader->Catalog(),
-                          "a",
-                          MemoryEntryTarget{target, target->data(), entry_size},
-                          entry_size));
-    plan.entries.push_back(MakeEntryLoadPlan(
-        reader->Catalog(),
+    plan.entries.push_back(EntryLoadPlan{
+        "a", MemoryEntryTarget{target, target->data(), entry_size}});
+    plan.entries.push_back(EntryLoadPlan{
         "b",
-        MemoryEntryTarget{target, target->data() + entry_size / 2, entry_size},
-        entry_size));
+        MemoryEntryTarget{
+            target, target->data() + entry_size / 2, entry_size}});
 
     EXPECT_THROW(folly::coro::blockingWait(
                      MaterializeIndexAsync(*reader, std::move(plan))),
@@ -986,15 +1035,9 @@ TEST_F(AsyncIndexEntryReaderTest,
         MmapFileTarget{staging_path, 2 * entry_size, false, nullptr});
     IndexLoadPlan plan;
     plan.entries.push_back(
-        MakeEntryLoadPlan(reader->Catalog(),
-                          "a",
-                          MmapEntryTarget{staging, 0, entry_size},
-                          entry_size));
-    plan.entries.push_back(
-        MakeEntryLoadPlan(reader->Catalog(),
-                          "b",
-                          MmapEntryTarget{staging, entry_size / 2, entry_size},
-                          entry_size));
+        EntryLoadPlan{"a", MmapEntryTarget{staging, 0, entry_size}});
+    plan.entries.push_back(EntryLoadPlan{
+        "b", MmapEntryTarget{staging, entry_size / 2, entry_size}});
 
     EXPECT_THROW(folly::coro::blockingWait(
                      MaterializeIndexAsync(*reader, std::move(plan))),
@@ -1025,15 +1068,12 @@ TEST_F(AsyncIndexEntryReaderTest,
         MmapFileTarget{staging_path, data.size(), false, nullptr});
     IndexLoadPlan plan;
     plan.entries.push_back(
-        MakeEntryLoadPlan(reader->Catalog(),
-                          "data",
-                          MmapEntryTarget{staging, 0, data.size()},
-                          kStreamSliceAlignment));
+        EntryLoadPlan{"data", MmapEntryTarget{staging, 0, data.size()}});
 
     {
         auto artifact = folly::coro::blockingWait(
             MaterializeIndexAsync(*reader, std::move(plan)));
-        EXPECT_TRUE(artifact.At("data").ready);
+
         ASSERT_NE(staging->file, nullptr);
         EXPECT_THROW((void)staging->file->Region(0, 1), milvus::SegcoreError);
         EXPECT_TRUE(std::filesystem::exists(staging_path));
@@ -1046,7 +1086,7 @@ TEST_F(AsyncIndexEntryReaderTest,
     milvus::test::ScopedLoadTransientBudget budget(/*capacity_bytes=*/0);
     const std::string file_path = kV3FilePath + "_materialize_crc";
     const std::string staging_path = GetRootPath() + "/materialize_crc.mmap";
-    const size_t slice_size = kStreamSliceAlignment;
+    const size_t slice_size = DefaultStreamSliceSize();
     auto data = GeneratePattern(2 * slice_size);
     {
         auto output = CreateOutputStream(file_path);
@@ -1064,14 +1104,11 @@ TEST_F(AsyncIndexEntryReaderTest,
     direct_file->CorruptRemoteByte(source.remote_offset + slice_size + 7);
 
     IndexLoadPlan plan;
-    plan.max_inflight_slices = 2;
+
     auto staging = std::make_shared<MmapFileTarget>(
         MmapFileTarget{staging_path, data.size(), false, nullptr});
     plan.entries.push_back(
-        MakeEntryLoadPlan(reader->Catalog(),
-                          "data",
-                          MmapEntryTarget{staging, 0, data.size()},
-                          slice_size));
+        EntryLoadPlan{"data", MmapEntryTarget{staging, 0, data.size()}});
 
     EXPECT_THROW(folly::coro::blockingWait(
                      MaterializeIndexAsync(*reader, std::move(plan))),
@@ -1099,10 +1136,7 @@ TEST_F(AsyncIndexEntryReaderTest, MaterializerCancelsQueuedMmapPreparation) {
         MmapFileTarget{staging_path, data.size(), false, nullptr});
     IndexLoadPlan plan;
     plan.entries.push_back(
-        MakeEntryLoadPlan(reader->Catalog(),
-                          "data",
-                          MmapEntryTarget{staging, 0, data.size()},
-                          kStreamSliceAlignment));
+        EntryLoadPlan{"data", MmapEntryTarget{staging, 0, data.size()}});
     std::string cleanup_thread;
     plan.finalize_context = std::shared_ptr<void>(nullptr, [&](void*) {
         cleanup_thread = folly::getCurrentThreadName().value_or("");
@@ -1166,10 +1200,7 @@ TEST_F(AsyncIndexEntryReaderTest,
             cleanup_thread = folly::getCurrentThreadName().value_or("");
         });
         plan.entries.push_back(
-            MakeEntryLoadPlan(reader->Catalog(),
-                              "data",
-                              MmapEntryTarget{staging, 0, data.size()},
-                              kStreamSliceAlignment));
+            EntryLoadPlan{"data", MmapEntryTarget{staging, 0, data.size()}});
         folly::CancellationSource cancellation;
         auto load = std::async(std::launch::async, [&] {
             return folly::coro::blockingWait(MaterializeIndexAsync(
@@ -1210,7 +1241,7 @@ TEST_F(AsyncIndexEntryReaderTest,
             EXPECT_TRUE(cleanup_thread.starts_with("MILVUS_LF_IO_"));
         } else {
             auto artifact = load.get();
-            EXPECT_TRUE(artifact.At("data").ready);
+
             EXPECT_THROW((void)staging->file->Region(0, 1),
                          milvus::SegcoreError);
         }
@@ -1240,10 +1271,7 @@ TEST_F(AsyncIndexEntryReaderTest,
         MmapFileTarget{staging_path, data.size(), false, nullptr});
     IndexLoadPlan plan;
     plan.entries.push_back(
-        MakeEntryLoadPlan(reader->Catalog(),
-                          "data",
-                          MmapEntryTarget{staging, 0, data.size()},
-                          kStreamSliceAlignment));
+        EntryLoadPlan{"data", MmapEntryTarget{staging, 0, data.size()}});
     auto load = std::async(std::launch::async, [&] {
         return folly::coro::blockingWait(
             MaterializeIndexAsync(*reader, std::move(plan)));
@@ -1265,13 +1293,13 @@ TEST_F(AsyncIndexEntryReaderTest,
               std::future_status::timeout);
     direct_file->Complete(0);
     auto artifact = load.get();
-    EXPECT_TRUE(artifact.At("data").ready);
+
     EXPECT_THROW((void)staging->file->Region(0, 1), milvus::SegcoreError);
 }
 
 TEST_F(AsyncIndexEntryReaderTest,
        MaterializerCancelsPendingAdmissionAndDrainsIssuedReads) {
-    const size_t slice_size = kStreamSliceAlignment;
+    const size_t slice_size = DefaultStreamSliceSize();
     milvus::test::ScopedLoadTransientBudget budget(2 * slice_size);
     const std::string file_path = kV3FilePath + "_materialize_failure_drain";
     auto data = GeneratePattern(4 * slice_size);
@@ -1290,12 +1318,9 @@ TEST_F(AsyncIndexEntryReaderTest,
 
     auto target = std::make_shared<std::vector<uint8_t>>(data.size());
     IndexLoadPlan plan;
-    plan.max_inflight_slices = 4;
-    plan.entries.push_back(MakeEntryLoadPlan(
-        reader->Catalog(),
-        "data",
-        MemoryEntryTarget{target, target->data(), target->size()},
-        slice_size));
+
+    plan.entries.push_back(EntryLoadPlan{
+        "data", MemoryEntryTarget{target, target->data(), target->size()}});
 
     auto materialize_future =
         std::async(std::launch::async,
@@ -1362,21 +1387,18 @@ TEST_F(AsyncIndexEntryReaderTest, EncryptedMaterializationUsesSharedExecutor) {
         auto target = std::make_shared<std::vector<uint8_t>>(data.size());
         IndexLoadPlan plan;
         plan.priority = priority;
-        plan.entries.push_back(MakeEntryLoadPlan(
-            reader->Catalog(),
-            "data",
-            MemoryEntryTarget{target, target->data(), target->size()},
-            kStreamSliceAlignment));
-        ASSERT_EQ(plan.entries[0].slices.size(), 3);
-        const auto& first = plan.entries[0].slices.front();
-        EXPECT_EQ(first.admission_bytes,
-                  2 * (kStreamSliceAlignment + 1) + kStreamSliceAlignment);
+        plan.entries.push_back(EntryLoadPlan{
+            "data", MemoryEntryTarget{target, target->data(), target->size()}});
+        ASSERT_EQ(
+            std::get<EncryptedEntrySource>(reader->Catalog().At("data").source)
+                .slices.size(),
+            3);
         auto artifact = folly::coro::blockingWait(
             MaterializeIndexAsync(*reader, std::move(plan))
                 .scheduleOn(
                     milvus::storage::ResolveAsyncLoadExecutor({}, priority)));
         EXPECT_EQ(*target, data);
-        EXPECT_TRUE(artifact.At("data").ready);
+
         for (const auto& read : input->ReadRanges()) {
             EXPECT_TRUE(read.thread_name.starts_with("MILVUS_ASYNC"))
                 << read.thread_name;

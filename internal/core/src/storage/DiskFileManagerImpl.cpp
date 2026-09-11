@@ -149,6 +149,7 @@ DiskFileManagerImpl::DiskFileManagerImpl(
           g_file_path_generation.fetch_add(1, std::memory_order_relaxed)) {
     rcm_ = fileManagerContext.chunkManagerPtr;
     fs_ = fileManagerContext.fs;
+    legacy_index_files_ = fileManagerContext.legacy_index_files;
     plugin_context_ = fileManagerContext.plugin_context;
     loon_ffi_properties_ = fileManagerContext.loon_ffi_properties;
     stats_base_path_ = fileManagerContext.stats_base_path;
@@ -598,9 +599,8 @@ DiskFileManagerImpl::CacheIndexToDiskAsync(
                 DataFormatBroken, "Invalid legacy disk slice number: {}", path);
         }
         ThrowIfCancelled(token, "DiskFileManager::InspectLegacy");
-        auto input = OpenLegacyIndexInput(rcm_, fs_, path);
-        auto info =
-            co_await InspectLegacyIndexFileAsync(*input, priority, token);
+        auto info = co_await InspectLegacyIndexFileAsync(
+            path, rcm_, fs_, legacy_index_files_, priority, token);
         files[path.substr(0, separator)].push_back({number, path, info});
     }
     std::set<std::string> names;

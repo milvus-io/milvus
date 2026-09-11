@@ -250,22 +250,19 @@ NgramInvertedIndex::PlanLoad(const storage::IndexEntryCatalog& catalog,
                sizeof(size_t),
                avg_row_size_bytes);
     auto avg_row_size = std::make_shared<size_t>(0);
-    plan.entries.push_back(storage::MakeEntryLoadPlan(
-        catalog,
+    plan.entries.push_back(storage::EntryLoadPlan{
         NGRAM_AVG_ROW_SIZE_FILE_NAME,
         storage::MemoryEntryTarget{
             avg_row_size,
             reinterpret_cast<uint8_t*>(avg_row_size.get()),
-            sizeof(size_t)},
-        storage::DefaultEntryStreamSliceSize()));
+            sizeof(size_t)}});
     return plan;
 }
 
 folly::coro::Task<void>
-NgramInvertedIndex::FinalizeLoad(storage::IndexLoadArtifact&& artifact,
+NgramInvertedIndex::FinalizeLoad(storage::IndexLoadArtifact& artifact,
                                  const Config& config) {
     const auto& avg_row_entry = artifact.At(NGRAM_AVG_ROW_SIZE_FILE_NAME);
-    AssertInfo(avg_row_entry.ready, "ngram avg_row_size Entry is not ready");
     const auto& avg_row_target =
         std::get<storage::MemoryEntryTarget>(avg_row_entry.target);
     AssertInfo(avg_row_target.bytes == sizeof(size_t),
@@ -277,8 +274,7 @@ NgramInvertedIndex::FinalizeLoad(storage::IndexLoadArtifact&& artifact,
     milvus::fastmem::FastMemcpy(
         &new_avg_row_size, avg_row_target.data, sizeof(size_t));
 
-    co_await InvertedIndexTantivy<std::string>::FinalizeLoad(
-        std::move(artifact), config);
+    co_await InvertedIndexTantivy<std::string>::FinalizeLoad(artifact, config);
     avg_row_size_ = new_avg_row_size;
     LOG_INFO("FinalizeLoad NgramInvertedIndex done, avg_row_size: {} bytes",
              avg_row_size_);
@@ -368,6 +364,9 @@ NgramInvertedIndex::Load(milvus::tracer::TraceContext ctx,
         tantivy_index_exist(path_.c_str()), "index not exist: {}", path_);
 
     FinishLegacyLoad(path_, config);
+    if (!GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true)) {
+        RemoveLegacyFiles();
+    }
 
     LOG_INFO(
         "load ngram index done for field id:{} with dir:{}", field_id_, path_);

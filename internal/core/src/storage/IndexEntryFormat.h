@@ -19,6 +19,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -62,6 +63,14 @@ struct IndexEntryDirectory {
     EntryStreamLoadInfo stream_load_info_;
     std::vector<std::string> entry_names_;
 };
+
+// Validate footer bounds and return the directory byte count.
+size_t
+IndexEntryDirectorySize(std::span<const uint8_t> footer, int64_t file_size);
+
+// Parse already-read directory bytes; no I/O or executor selection.
+IndexEntryDirectory
+ParseIndexEntryDirectory(std::span<const uint8_t> bytes);
 
 // Reads the V3 directory using the caller's input stream; never schedules work.
 IndexEntryDirectory

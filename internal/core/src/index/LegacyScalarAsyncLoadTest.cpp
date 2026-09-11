@@ -466,7 +466,7 @@ TEST_F(LegacyScalarAsyncLoadTest,
     loaded.Load(tracer::TraceContext{}, LoadConfig(files, false), nullptr);
     CheckNullable<int64_t>(loaded, 10);
     const auto request =
-        IndexFactory::GetInstance().ScalarIndexAsyncLoadResource(
+        IndexFactory::GetInstance().ScalarIndexFileLoadResource(
             DataType::INT64,
             1,
             {{INDEX_TYPE, HYBRID_INDEX_TYPE},
@@ -518,17 +518,23 @@ TEST_F(LegacyScalarAsyncLoadTest, NgramMetadataAndFiles) {
     auto average_bytes =
         std::shared_ptr<uint8_t[]>(new uint8_t[sizeof(average)]);
     std::memcpy(average_bytes.get(), &average, sizeof(average));
-    metadata.Append(
-        NGRAM_AVG_ROW_SIZE_FILE_NAME, average_bytes, sizeof(average));
-    const auto files = PersistDirectory(build.Path(), metadata);
-    source_->expect_async = true;
-    for (const bool mmap : {false, true}) {
-        NgramInvertedIndex loaded(
-            Context(proto::schema::DataType::VarChar, true),
-            NgramParams{true, 2, 3});
-        loaded.Load(tracer::TraceContext{}, LoadConfig(files, mmap), nullptr);
-        EXPECT_EQ(loaded.Count(), 5);
-        EXPECT_EQ(loaded.IsNull().count(), 2);
+    auto files = PersistDirectory(build.Path(), metadata);
+    // The compatibility Ngram format stores this scalar as an unsliced object.
+    files.push_back(PersistBytes(
+        NGRAM_AVG_ROW_SIZE_FILE_NAME, average_bytes.get(), sizeof(average)));
+    for (const bool enabled : {false, true}) {
+        segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(enabled);
+        source_->expect_async = enabled;
+        for (const bool mmap : {false, true}) {
+            ObservedLegacyIndex<NgramInvertedIndex> loaded(
+                Context(proto::schema::DataType::VarChar, true),
+                NgramParams{true, 2, 3});
+            loaded.Load(
+                tracer::TraceContext{}, LoadConfig(files, mmap), nullptr);
+            EXPECT_EQ(loaded.Count(), 5);
+            EXPECT_EQ(loaded.IsNull().count(), 2);
+            EXPECT_EQ(std::filesystem::exists(loaded.Path()), mmap);
+        }
     }
 }
 
@@ -579,16 +585,15 @@ TEST_F(LegacyScalarAsyncLoadTest, RTreeFilesAndNullSidecar) {
             geometry,
             hits);
         EXPECT_EQ(hits, std::vector<int64_t>{0});
-        auto resource =
-            IndexFactory::GetInstance().ScalarIndexAsyncLoadResource(
-                DataType::GEOMETRY,
-                1,
-                {{INDEX_TYPE, RTREE_INDEX_TYPE},
-                 {SCALAR_INDEX_ENGINE_VERSION, "2"}},
-                false,
-                3,
-                paths,
-                context);
+        auto resource = IndexFactory::GetInstance().ScalarIndexFileLoadResource(
+            DataType::GEOMETRY,
+            1,
+            {{INDEX_TYPE, RTREE_INDEX_TYPE},
+             {SCALAR_INDEX_ENGINE_VERSION, "2"}},
+            false,
+            3,
+            paths,
+            context);
         EXPECT_GT(resource.request.final_memory_cost, 0);
     }
 }
@@ -741,7 +746,7 @@ TEST_F(LegacyScalarAsyncLoadTest,
     };
     source_->expect_async = true;
     const auto resource =
-        IndexFactory::GetInstance().ScalarIndexAsyncLoadResource(
+        IndexFactory::GetInstance().ScalarIndexFileLoadResource(
             DataType::INT64,
             1,
             {{INDEX_TYPE, BITMAP_INDEX_TYPE},
@@ -799,7 +804,7 @@ TEST_F(LegacyScalarAsyncLoadTest,
         EXPECT_TRUE(hits[0]);
         EXPECT_TRUE(hits[3]);
         const auto resource =
-            IndexFactory::GetInstance().ScalarIndexAsyncLoadResource(
+            IndexFactory::GetInstance().ScalarIndexFileLoadResource(
                 DataType::ARRAY,
                 1,
                 {{INDEX_TYPE, bitmap ? BITMAP_INDEX_TYPE : ASCENDING_SORT},

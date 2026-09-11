@@ -123,9 +123,8 @@ MemFileManagerImpl::StreamIndexEntriesAsync(
             }
         }
         ThrowIfCancelled(token, "LegacyIndexLoader::Open");
-        auto input = OpenLegacyIndexInput(rcm_, fs_, file);
-        auto info =
-            co_await InspectLegacyIndexFileAsync(*input, priority, token);
+        auto info = co_await InspectLegacyIndexFileAsync(
+            file, rcm_, fs_, legacy_index_files_, priority, token);
         CheckLegacyAssembly(
             files.emplace(std::move(name), LegacyIndexFile{file, info}).second,
             "duplicate object basename");
@@ -226,6 +225,7 @@ MemFileManagerImpl::MemFileManagerImpl(
                       fileManagerContext.indexMeta) {
     rcm_ = fileManagerContext.chunkManagerPtr;
     fs_ = fileManagerContext.fs;
+    legacy_index_files_ = fileManagerContext.legacy_index_files;
     loon_ffi_properties_ = fileManagerContext.loon_ffi_properties;
     plugin_context_ = fileManagerContext.plugin_context;
     stats_base_path_ = fileManagerContext.stats_base_path;

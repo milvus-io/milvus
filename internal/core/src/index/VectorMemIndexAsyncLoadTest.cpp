@@ -1319,7 +1319,7 @@ TEST_F(VectorMemIndexAsyncLoadTest,
             nullptr);
         EXPECT_GE(request.max_memory_cost,
                   request.final_memory_cost + retained +
-                      storage::LegacyIndexMaxTransientBytes(scratch));
+                      storage::IndexLoadMaxTransientBytes(scratch));
         if (initial_peak) {
             EXPECT_EQ(request.max_memory_cost, *initial_peak);
         } else {

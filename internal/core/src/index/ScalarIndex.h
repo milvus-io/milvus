@@ -308,7 +308,7 @@ class ScalarIndex : public IndexBase {
     // Restore query state on the calling async worker from verified targets.
     // Await local-file writes only; the caller owns artifact cleanup until return.
     virtual folly::coro::Task<void>
-    FinalizeLoad(storage::IndexLoadArtifact&& artifact, const Config& config) {
+    FinalizeLoad(storage::IndexLoadArtifact& artifact, const Config& config) {
         ThrowInfo(Unsupported, "Async V3 load finalization is not implemented");
         co_return;
     }

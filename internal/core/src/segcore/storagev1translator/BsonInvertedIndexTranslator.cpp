@@ -37,6 +37,7 @@
 #include "segcore/storagev2translator/StorageV2Config.h"
 #include "storage/AsyncLoadExecutor.h"
 #include "storage/LegacyIndexLoader.h"
+#include "storage/EntryStreamUtils.h"
 #include "storage/FileWriter.h"
 
 namespace milvus::segcore::storagev1translator {
@@ -71,13 +72,15 @@ BsonInvertedIndexTranslator::BsonInvertedIndexTranslator(
         size_t scratch = 0;
         const auto priority =
             static_cast<proto::common::LoadPriority>(load_info_.load_priority);
-        for (const auto& file : load_info_.index_files) {
-            auto input = storage::OpenLegacyIndexInput(
+        file_manager_context_.legacy_index_files =
+            co_await storage::InspectLegacyIndexFilesAsync(
+                load_info_.index_files,
                 file_manager_context_.chunkManagerPtr,
                 file_manager_context_.fs,
-                file);
-            const auto info =
-                co_await storage::InspectLegacyIndexFileAsync(*input, priority);
+                priority);
+        for (const auto& file : load_info_.index_files) {
+            const auto& info =
+                file_manager_context_.legacy_index_files->at(file);
             payload_bytes = SaturatingAdd(payload_bytes, info.payload_bytes);
             scratch = std::max(scratch, info.max_transient_bytes);
         }
@@ -86,7 +89,7 @@ BsonInvertedIndexTranslator::BsonInvertedIndexTranslator(
             load_info_.index_size,
             static_cast<int64_t>(std::min<size_t>(payload_bytes, max_size)));
         stream_memory_overhead_ = static_cast<int64_t>(std::min<size_t>(
-            SaturatingAdd(storage::LegacyIndexMaxTransientBytes(scratch),
+            SaturatingAdd(storage::IndexLoadMaxTransientBytes(scratch),
                           storage::FileWriter::MAX_BUFFER_SIZE),
             max_size));
     };

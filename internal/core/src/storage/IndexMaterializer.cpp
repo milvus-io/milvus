@@ -82,18 +82,60 @@ class FailureState {
     folly::CancellationSource cancellation_source_;
 };
 
+struct Slice {
+    size_t offset;
+    size_t bytes;
+    size_t admission_bytes;
+};
+
+// Slice layout is derived once from the catalog, never supplied by index code.
+std::vector<Slice>
+BuildSlices(const IndexEntryCatalogEntry& entry) {
+    std::vector<Slice> slices;
+    if (const auto* encrypted =
+            std::get_if<EncryptedEntrySource>(&entry.source)) {
+        slices.reserve(encrypted->slices.size());
+        for (const auto& slice : encrypted->slices) {
+            AssertInfo(
+                slice.remote_bytes <=
+                    (std::numeric_limits<size_t>::max() - slice.target_bytes) /
+                        2,
+                "Encrypted slice budget overflow for '{}'",
+                entry.name);
+            slices.push_back({slice.target_offset,
+                              slice.target_bytes,
+                              2 * slice.remote_bytes + slice.target_bytes});
+        }
+    } else {
+        const auto slice_size = DefaultStreamSliceSize();
+        slices.reserve(entry.plaintext_size == 0
+                           ? 0
+                           : 1 + (entry.plaintext_size - 1) / slice_size);
+        for (size_t offset = 0; offset < entry.plaintext_size;) {
+            const auto bytes =
+                std::min(slice_size, entry.plaintext_size - offset);
+            slices.push_back({offset, bytes, bytes});
+            offset += bytes;
+        }
+    }
+    return slices;
+}
+
 struct EntryState {
-    explicit EntryState(EntryLoadPlan entry_plan)
+    EntryState(EntryLoadPlan entry_plan, const IndexEntryCatalogEntry& source)
         : plan(std::move(entry_plan)),
-          slice_crcs(plan.slices.size()),
-          remaining_slices(plan.slices.size()) {
+          expected_crc(source.expected_crc),
+          slices(BuildSlices(source)),
+          slice_crcs(slices.size()),
+          remaining_slices(slices.size()) {
     }
 
     EntryLoadPlan plan;
+    uint32_t expected_crc;
+    std::vector<Slice> slices;
     std::vector<RangeCrc> slice_crcs;
     std::atomic<size_t> remaining_slices;
     std::atomic<bool> failed{false};
-    std::atomic<bool> ready{false};
 };
 
 LoadAdmissionPriority
@@ -124,106 +166,33 @@ ValidatePlan(const IndexEntryCatalog& catalog, const IndexLoadPlan& plan) {
                    "Duplicate Entry '{}' in IndexLoadPlan",
                    entry.name);
         const auto& catalog_entry = catalog.At(entry.name);
-        AssertInfo(entry.entry_size == catalog_entry.plaintext_size,
-                   "Entry '{}' plan size {} differs from catalog size {}",
-                   entry.name,
-                   entry.entry_size,
-                   catalog_entry.plaintext_size);
-        AssertInfo(entry.expected_crc == catalog_entry.expected_crc,
-                   "Entry '{}' plan CRC differs from catalog CRC",
-                   entry.name);
-        AssertInfo(EntryTargetSize(entry.target) >= entry.entry_size,
-                   "Entry '{}' target size {} is smaller than Entry size {}",
-                   entry.name,
-                   EntryTargetSize(entry.target),
-                   entry.entry_size);
-
-        size_t next_entry_offset = 0;
-        for (size_t i = 0; i < entry.slices.size(); ++i) {
-            const auto& slice = entry.slices[i];
-            AssertInfo(slice.seq == i,
-                       "Entry '{}' Slice seq {} is not contiguous at {}",
-                       entry.name,
-                       slice.seq,
-                       i);
-            AssertInfo(slice.entry_offset == next_entry_offset,
-                       "Entry '{}' Slice {} starts at {}, expected {}",
-                       entry.name,
-                       slice.seq,
-                       slice.entry_offset,
-                       next_entry_offset);
-            AssertInfo(slice.target_offset == slice.entry_offset,
-                       "Entry '{}' Slice {} target offset {} differs from "
-                       "logical offset {}",
-                       entry.name,
-                       slice.seq,
-                       slice.target_offset,
-                       slice.entry_offset);
-            if (const auto* encrypted =
-                    std::get_if<EncryptedEntrySource>(&catalog_entry.source)) {
-                AssertInfo(entry.slices.size() == encrypted->slices.size(),
-                           "Encrypted entry '{}' has an invalid slice count",
-                           entry.name);
-                const auto& source = encrypted->slices[i];
-                AssertInfo(slice.entry_offset == source.target_offset &&
-                               slice.target_bytes == source.target_bytes &&
-                               slice.remote_bytes == source.remote_bytes,
-                           "Encrypted entry '{}' slice differs from directory",
-                           entry.name);
-                AssertInfo(
-                    source.remote_bytes <= (std::numeric_limits<size_t>::max() -
-                                            source.target_bytes) /
-                                               2 &&
-                        slice.admission_bytes >=
-                            2 * source.remote_bytes + source.target_bytes,
-                    "Encrypted entry '{}' slice admission is too small",
-                    entry.name);
-            } else {
-                AssertInfo(slice.remote_bytes == slice.target_bytes &&
-                               slice.admission_bytes >= slice.remote_bytes,
-                           "Plain entry '{}' slice has invalid sizes",
-                           entry.name);
-            }
-            AssertInfo(slice.remote_bytes > 0,
-                       "Entry '{}' Slice {} is empty",
-                       entry.name,
-                       slice.seq);
-            AssertInfo(slice.admission_bytes > 0,
-                       "Entry '{}' Slice {} admission charge is zero",
-                       entry.name,
-                       slice.seq);
-            AssertInfo(
-                slice.target_bytes <= entry.entry_size - next_entry_offset,
-                "Entry '{}' Slice {} exceeds Entry size {}",
-                entry.name,
-                slice.seq,
-                entry.entry_size);
-            next_entry_offset += slice.target_bytes;
-        }
-        AssertInfo(next_entry_offset == entry.entry_size,
-                   "Entry '{}' Slices cover {} bytes, expected {}",
-                   entry.name,
-                   next_entry_offset,
-                   entry.entry_size);
+        AssertInfo(
+            EntryTargetSize(entry.target) >= catalog_entry.plaintext_size,
+            "Entry '{}' target size {} is smaller than entry size {}",
+            entry.name,
+            EntryTargetSize(entry.target),
+            catalog_entry.plaintext_size);
 
         if (const auto* memory =
                 std::get_if<MemoryEntryTarget>(&entry.target)) {
-            AssertInfo(memory->data != nullptr || entry.entry_size == 0,
-                       "Memory target for Entry '{}' is null",
-                       entry.name);
+            AssertInfo(
+                memory->data != nullptr || catalog_entry.plaintext_size == 0,
+                "Memory target for Entry '{}' is null",
+                entry.name);
             const auto begin = reinterpret_cast<uintptr_t>(memory->data);
             AssertInfo(
-                entry.entry_size <=
+                catalog_entry.plaintext_size <=
                     std::numeric_limits<uintptr_t>::max() - begin,
                 "Memory target range for Entry '{}' overflows address space",
                 entry.name);
-            target_ranges.push_back(TargetWriteRange{entry.name,
-                                                     memory,
-                                                     nullptr,
-                                                     begin,
-                                                     begin + entry.entry_size,
-                                                     0,
-                                                     0});
+            target_ranges.push_back(
+                TargetWriteRange{entry.name,
+                                 memory,
+                                 nullptr,
+                                 begin,
+                                 begin + catalog_entry.plaintext_size,
+                                 0,
+                                 0});
         } else {
             const auto& mmap = std::get<MmapEntryTarget>(entry.target);
             AssertInfo(mmap.staging != nullptr,
@@ -249,7 +218,7 @@ ValidatePlan(const IndexEntryCatalog& catalog, const IndexLoadPlan& plan) {
                                  0,
                                  0,
                                  mmap.offset,
-                                 mmap.offset + entry.entry_size});
+                                 mmap.offset + catalog_entry.plaintext_size});
         }
     }
 
@@ -294,13 +263,12 @@ FinalizeEntry(EntryState& state) {
     if (first) {
         combined_crc = Crc32cValue(nullptr, 0);
     }
-    AssertInfo(combined_crc == state.plan.expected_crc,
+    AssertInfo(combined_crc == state.expected_crc,
                "CRC-32C mismatch for materialized Entry '{}': expected {}, "
                "got {}",
                state.plan.name,
-               Crc32cToHex(state.plan.expected_crc),
+               Crc32cToHex(state.expected_crc),
                Crc32cToHex(combined_crc));
-    state.ready.store(true, std::memory_order_release);
 }
 
 folly::coro::Task<void>
@@ -382,20 +350,20 @@ MaterializeSliceAsync(
     LoadAdmissionLease lease,
     folly::CancellationToken cancellation_token,
     std::shared_ptr<FailureState> failure_state,
-    folly::coro::SmallUnboundedQueue<folly::Unit, false, true>* completions) {
+    folly::coro::SmallUnboundedQueue<size_t, false, true>* completions) {
     bool decremented = false;
     try {
-        const auto& slice = state->plan.slices[slice_index];
-        auto target = EntryTargetRegion(
-            state->plan.target, slice.target_offset, slice.target_bytes);
+        const auto& slice = state->slices[slice_index];
+        auto target =
+            EntryTargetRegion(state->plan.target, slice.offset, slice.bytes);
         co_await reader->ReadSliceIntoAsync(state->plan.name,
-                                            slice.entry_offset,
+                                            slice.offset,
                                             target.data(),
                                             target.size(),
                                             cancellation_token);
         ThrowIfCancelled(cancellation_token,
                          "IndexMaterializer::SliceFinalize");
-        state->slice_crcs[slice.seq] =
+        state->slice_crcs[slice_index] =
             RangeCrc{Crc32cValue(target.data(), target.size()), target.size()};
 
         auto remaining =
@@ -416,9 +384,9 @@ MaterializeSliceAsync(
     }
 
     // The lease stays live through read, CRC, and target placement and is
-    // released when this coroutine frame returns.
-    (void)lease;
-    completions->enqueue(folly::unit);
+    // released before publishing completion to the dispatcher.
+    lease.Release();
+    completions->enqueue(state->slices[slice_index].admission_bytes);
     co_return;
 }
 
@@ -431,8 +399,7 @@ NextRoundRobinSlice(const std::vector<std::shared_ptr<EntryState>>& states,
     }
     for (size_t checked = 0; checked < states.size(); ++checked) {
         auto entry_index = (cursor + checked) % states.size();
-        if (next_slices[entry_index] <
-            states[entry_index]->plan.slices.size()) {
+        if (next_slices[entry_index] < states[entry_index]->slices.size()) {
             auto slice_index = next_slices[entry_index]++;
             cursor = (entry_index + 1) % states.size();
             return std::pair{entry_index, slice_index};
@@ -455,9 +422,7 @@ class IndexMaterializerAccess {
         artifact.entries_.reserve(states.size());
         for (auto& state : states) {
             artifact.entries_.push_back(MaterializedEntry{
-                state->plan.name,
-                std::move(state->plan.target),
-                state->ready.load(std::memory_order_acquire)});
+                state->plan.name, std::move(state->plan.target)});
         }
         artifact.finalize_context_ = std::move(finalize_context);
         artifact.cleanup_targets_ = std::move(cleanup_targets);
@@ -492,8 +457,9 @@ MaterializeIndexAsyncImpl(
     std::vector<std::shared_ptr<EntryState>> states;
     states.reserve(plan.entries.size());
     for (auto& entry : plan.entries) {
-        auto state = std::make_shared<EntryState>(std::move(entry));
-        if (state->plan.slices.empty()) {
+        const auto& source = reader.Catalog().At(entry.name);
+        auto state = std::make_shared<EntryState>(std::move(entry), source);
+        if (state->slices.empty()) {
             FinalizeEntry(*state);
         }
         states.push_back(std::move(state));
@@ -502,24 +468,19 @@ MaterializeIndexAsyncImpl(
     auto failure_state = std::make_shared<FailureState>();
     auto effective_cancellation_token = folly::cancellation_token_merge(
         operation_cancellation_token, failure_state->Token());
-    auto max_inflight = plan.max_inflight_slices == 0
-                            ? static_cast<size_t>(std::max<int64_t>(
-                                  1, GetAsyncLoadThreadPoolSize()))
-                            : plan.max_inflight_slices;
-    AssertInfo(max_inflight > 0,
-               "Index materializer max_inflight_slices must be positive");
-
     auto& budget = LoadAdmissionController::GetInstance();
     auto budget_priority = BudgetPriority(plan.priority);
-    folly::coro::SmallUnboundedQueue<folly::Unit, false, true> completions;
+    folly::coro::SmallUnboundedQueue<size_t, false, true> completions;
     folly::coro::AsyncScope scope;
     std::vector<size_t> next_slices(states.size(), 0);
     size_t cursor = 0;
     size_t inflight = 0;
+    size_t inflight_bytes = 0;
 
     auto wait_for_completion = [&]() -> folly::coro::Task<void> {
-        co_await folly::coro::co_withCancellation(folly::CancellationToken{},
-                                                  completions.dequeue());
+        const auto bytes = co_await folly::coro::co_withCancellation(
+            folly::CancellationToken{}, completions.dequeue());
+        inflight_bytes -= bytes;
         AssertInfo(inflight > 0, "Index materializer inflight Slice underflow");
         --inflight;
         co_return;
@@ -530,12 +491,16 @@ MaterializeIndexAsyncImpl(
         if (!next.has_value()) {
             break;
         }
-        while (inflight >= max_inflight) {
+        auto [entry_index, slice_index] = *next;
+        const auto& slice = states[entry_index]->slices[slice_index];
+        const auto charge = slice.admission_bytes;
+        while (inflight >= kMaxIndexLoadInflightSlices ||
+               (inflight != 0 &&
+                (charge > kMaxIndexLoadInflightBytes ||
+                 inflight_bytes > kMaxIndexLoadInflightBytes - charge))) {
             co_await wait_for_completion();
         }
 
-        auto [entry_index, slice_index] = *next;
-        const auto& slice = states[entry_index]->plan.slices[slice_index];
         try {
             auto lease =
                 co_await budget.AcquireAsync({slice.admission_bytes, 1},
@@ -556,6 +521,7 @@ MaterializeIndexAsyncImpl(
                                       failure_state,
                                       &completions)));
             ++inflight;
+            inflight_bytes += charge;
         } catch (...) {
             if (failure_state->FirstError() == nullptr) {
                 try {
@@ -586,12 +552,6 @@ MaterializeIndexAsyncImpl(
     }
     if (auto error = failure_state->FirstError()) {
         std::rethrow_exception(error);
-    }
-    for (const auto& state : states) {
-        AssertInfo(!state->plan.required ||
-                       state->ready.load(std::memory_order_acquire),
-                   "Required Entry '{}' is not READY",
-                   state->plan.name);
     }
     if (!cleanup_targets.empty()) {
         co_await folly::coro::co_withExecutor(

@@ -231,6 +231,60 @@ TEST_F(LegacyIndexLoaderTest, ConcurrentEncryptedUnitsReuseDecoder) {
     EXPECT_EQ(output, (std::vector<uint8_t>{1, 2, 3, 4, 5, 6}));
 }
 
+TEST_F(LegacyIndexLoaderTest, ManagersReuseImmutableEnvelopeInspection) {
+    LocalFileIOPool::GetInstance().Configure(1);
+    auto stop =
+        folly::makeGuard([] { LocalFileIOPool::GetInstance().Configure(0); });
+    test::TmpPath directory;
+    const std::vector<uint8_t> payload{1, 2, 3, 4};
+    auto file = MakeFile("entry_0", payload);
+    CompleteReads();
+    FileManagerContext context{
+        FieldDataMeta{1, 2, 3, 101},
+        IndexMeta{3, 101, 93002, 2},
+        std::make_shared<LocalChunkManager>(directory.get().string()),
+        fs_};
+    const std::vector<std::string> paths{file.path};
+    context.legacy_index_files = Run(InspectLegacyIndexFilesAsync(
+        paths, context.chunkManagerPtr, context.fs, kPriority));
+    folly::CancellationSource cancelled;
+    cancelled.requestCancellation();
+    file_->ResetCounters();
+    EXPECT_THROW(Run(InspectLegacyIndexFileAsync(file.path,
+                                                 context.chunkManagerPtr,
+                                                 context.fs,
+                                                 context.legacy_index_files,
+                                                 kPriority,
+                                                 cancelled.getToken())),
+                 SegcoreError);
+    EXPECT_TRUE(file_->DirectReadCalls().empty());
+    for (const bool disk : {false, true}) {
+        file_->ResetCounters();
+        if (disk) {
+            DiskFileManagerImpl manager(context);
+            Run(manager.CacheIndexToDiskAsync(
+                paths, directory.get().string(), kPriority));
+            std::ifstream input(directory.get() / "entry", std::ios::binary);
+            const std::vector<uint8_t> actual(
+                (std::istreambuf_iterator<char>(input)), {});
+            EXPECT_EQ(actual, payload);
+        } else {
+            MemFileManagerImpl manager(context);
+            auto binary =
+                Run(manager.LoadIndexBinarySetAsync(paths, kPriority));
+            const auto entry = binary.GetByName("entry_0");
+            ASSERT_NE(entry, nullptr);
+            EXPECT_EQ(std::vector<uint8_t>(entry->data.get(),
+                                           entry->data.get() + entry->size),
+                      payload);
+        }
+        const auto reads = file_->DirectReadCalls();
+        ASSERT_EQ(reads.size(), 1);
+        EXPECT_EQ(reads.front().position, file.info.payload_offset);
+        EXPECT_EQ(reads.front().nbytes, payload.size());
+    }
+}
+
 TEST_F(LegacyIndexLoaderTest, ManagersPlaceReversedSlicesAndDrainLocalWrites) {
     budget_.SetCapacitySlots(3);
     LocalFileIOPool::GetInstance().Configure(1);
@@ -494,7 +548,7 @@ TEST_F(LegacyIndexLoaderTest, LocalByteWindowAndOversizedDecodeRunAlone) {
         }
         EXPECT_FALSE(source_->files.at(std::to_string(active))
                          ->WaitForCallCount(1, std::chrono::milliseconds(30)));
-        EXPECT_EQ(LegacyIndexMaxTransientBytes(charge), charge * active);
+        EXPECT_EQ(IndexLoadMaxTransientBytes(charge), charge * active);
         CompleteReads();
         EXPECT_NO_THROW(load.get());
         drain.dismiss();

@@ -102,25 +102,11 @@ EntryTargetRegion(EntryTarget& target, size_t offset, size_t bytes) {
         target);
 }
 
-struct SlicePlan {
-    size_t seq;
-    uint64_t entry_offset;
-    size_t remote_bytes;
-    size_t target_offset;
-    size_t target_bytes;
-
-    // Conservative Milvus admission charge. This is not CRT's actual
-    // allocation and does not establish a hard memory bound.
-    size_t admission_bytes;
-};
-
+// Index code chooses destinations; the materializer derives slices and CRCs
+// from the immutable catalog.
 struct EntryLoadPlan {
     std::string name;
-    size_t entry_size;
-    uint32_t expected_crc;
-    std::vector<SlicePlan> slices;
     EntryTarget target;
-    bool required{true};
 };
 
 struct IndexLoadPlan {
@@ -130,74 +116,11 @@ struct IndexLoadPlan {
     // Index-specific metadata needed only by FinalizeLoad(). The common
     // materializer carries it without interpreting it.
     std::any finalize_context;
-
-    // Internal request/callback pressure bound. Zero selects the shared
-    // LoadExecutor worker count.
-    size_t max_inflight_slices{0};
 };
-
-inline EntryLoadPlan
-MakeEntryLoadPlan(const IndexEntryCatalog& catalog,
-                  std::string_view name,
-                  EntryTarget target,
-                  size_t slice_size,
-                  bool required = true) {
-    AssertInfo(slice_size > 0, "Plain Entry Slice size must be positive");
-    const auto& entry = catalog.At(name);
-    AssertInfo(EntryTargetSize(target) >= entry.plaintext_size,
-               "Entry '{}' target size {} is smaller than Entry size {}",
-               name,
-               EntryTargetSize(target),
-               entry.plaintext_size);
-
-    EntryLoadPlan plan{std::string(name),
-                       entry.plaintext_size,
-                       entry.expected_crc,
-                       {},
-                       std::move(target),
-                       required};
-    if (const auto* encrypted =
-            std::get_if<EncryptedEntrySource>(&entry.source)) {
-        plan.slices.reserve(encrypted->slices.size());
-        for (size_t seq = 0; seq < encrypted->slices.size(); ++seq) {
-            const auto& slice = encrypted->slices[seq];
-            AssertInfo(
-                slice.remote_bytes <=
-                    (std::numeric_limits<size_t>::max() - slice.target_bytes) /
-                        2,
-                "Encrypted slice budget overflow for '{}'",
-                name);
-            plan.slices.push_back(
-                {seq,
-                 slice.target_offset,
-                 slice.remote_bytes,
-                 slice.target_offset,
-                 slice.target_bytes,
-                 2 * slice.remote_bytes + slice.target_bytes});
-        }
-    } else {
-        const auto& source = std::get<PlainEntrySource>(entry.source);
-        AssertInfo(source.remote_bytes == entry.plaintext_size,
-                   "Plain entry '{}' source size differs from plaintext size",
-                   name);
-        plan.slices.reserve(entry.plaintext_size == 0
-                                ? 0
-                                : 1 + (entry.plaintext_size - 1) / slice_size);
-        for (size_t offset = 0, seq = 0; offset < entry.plaintext_size; ++seq) {
-            const auto bytes =
-                std::min(slice_size, entry.plaintext_size - offset);
-            plan.slices.push_back(
-                SlicePlan{seq, offset, bytes, offset, bytes, bytes});
-            offset += bytes;
-        }
-    }
-    return plan;
-}
 
 struct MaterializedEntry {
     std::string name;
     EntryTarget target;
-    bool ready{false};
 };
 
 inline std::vector<std::shared_ptr<MmapFileTarget>>

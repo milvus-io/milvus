@@ -478,12 +478,12 @@ IndexFactory::IndexLoadResource(
             uint64_t retained = 0;
             uint64_t scratch = 0;
             for (const auto& file : index_files) {
-                auto input = storage::OpenLegacyIndexInput(
+                const auto info = co_await storage::InspectLegacyIndexFileAsync(
+                    file,
                     file_manager_context.chunkManagerPtr,
                     file_manager_context.fs,
-                    file);
-                const auto info = co_await storage::InspectLegacyIndexFileAsync(
-                    *input, proto::common::LoadPriority::HIGH);
+                    file_manager_context.legacy_index_files,
+                    proto::common::LoadPriority::HIGH);
                 const auto name = GetIndexFileBaseName(file);
                 const bool sidecar =
                     name.starts_with(VALID_DATA_KEY) ||
@@ -515,7 +515,7 @@ IndexFactory::IndexLoadResource(
                         uint64_t{element_type == DataType::NONE ? 1 : 3}));
             }
             co_return SaturatingAdd(
-                retained, storage::LegacyIndexMaxTransientBytes(scratch));
+                retained, storage::IndexLoadMaxTransientBytes(scratch));
         };
         // Enabled inspection uses the same shared async executor as loading;
         // disabled inspection stays at the synchronous planning boundary.
@@ -987,8 +987,8 @@ IndexFactory::ScalarIndexLoadResourceWithOverhead(
 
 namespace {
 folly::coro::Task<std::unique_ptr<storage::AsyncIndexEntryReader>>
-InspectAsyncScalarIndex(const std::vector<std::string>& files,
-                        const storage::FileManagerContext& context) {
+InspectPackedScalarIndex(const std::vector<std::string>& files,
+                         const storage::FileManagerContext& context) {
     AssertInfo(files.size() == 1 && context.Valid(),
                "Async scalar load requires one V3 file and a valid context");
     storage::MemFileManagerImpl manager(context);
@@ -1004,8 +1004,8 @@ InspectAsyncScalarIndex(const std::vector<std::string>& files,
 }
 }  // namespace
 
-AsyncScalarIndexLoadResource
-IndexFactory::ScalarIndexAsyncLoadResource(
+ScalarIndexLoadResources
+IndexFactory::ScalarIndexFileLoadResource(
     DataType field_type,
     uint64_t index_size,
     const std::map<std::string, std::string>& index_params,
@@ -1017,7 +1017,9 @@ IndexFactory::ScalarIndexAsyncLoadResource(
         GetValueFromConfig<int32_t>(ParseConfigFromIndexParams(index_params),
                                     SCALAR_INDEX_ENGINE_VERSION)
             .value_or(1);
-    if (version < 3) {
+    const bool use_async_load =
+        segcore::storagev2translator::StorageV2AsyncLoadEnabled();
+    if (version < 3 && index_params.at(INDEX_TYPE) != FMINDEX_INDEX_TYPE) {
         return {ScalarIndexLegacyLoadResource(field_type,
                                               index_size,
                                               index_params,
@@ -1025,13 +1027,17 @@ IndexFactory::ScalarIndexAsyncLoadResource(
                                               num_rows,
                                               index_files,
                                               context,
-                                              true),
+                                              use_async_load),
                 std::nullopt};
     }
-    auto reader = folly::coro::blockingWait(
-        InspectAsyncScalarIndex(index_files, context)
-            .scheduleOn(storage::ResolveAsyncLoadExecutor(
-                {}, proto::common::LoadPriority::HIGH)));
+    auto inspect = [&]() {
+        return InspectPackedScalarIndex(index_files, context);
+    };
+    auto reader = use_async_load
+                      ? folly::coro::blockingWait(inspect().scheduleOn(
+                            storage::ResolveAsyncLoadExecutor(
+                                {}, proto::common::LoadPriority::HIGH)))
+                      : folly::coro::blockingWait(inspect());
     const auto& catalog = reader->Catalog();
     auto resolved_params = index_params;
     if (resolved_params.at("index_type") == HYBRID_INDEX_TYPE) {
@@ -1044,15 +1050,24 @@ IndexFactory::ScalarIndexAsyncLoadResource(
                    static_cast<int>(type));
         resolved_params["index_type"] = resolved;
     }
+    storage::EntryStreamLoadInfo legacy_stream;
     uint64_t total_transient = 0;
     uint64_t max_task = 0;
     for (const auto& entry : catalog.Entries()) {
         if (const auto* encrypted =
                 std::get_if<storage::EncryptedEntrySource>(&entry.source)) {
+            legacy_stream.encrypted = true;
             for (const auto& slice : encrypted->slices) {
                 const auto bytes = SaturatingAdd(
                     milvus::SaturatingMultiply(slice.remote_bytes, uint64_t{2}),
                     slice.target_bytes);
+                const auto legacy_bytes = SaturatingAdd(
+                    slice.remote_bytes,
+                    SaturatingMultiply(slice.target_bytes, uint64_t{2}));
+                legacy_stream.total_transient_bytes = SaturatingAdd(
+                    legacy_stream.total_transient_bytes, legacy_bytes);
+                legacy_stream.max_task_transient_bytes = std::max(
+                    legacy_stream.max_task_transient_bytes, legacy_bytes);
                 total_transient = SaturatingAdd(total_transient, bytes);
                 max_task = std::max(max_task, bytes);
             }
@@ -1065,13 +1080,25 @@ IndexFactory::ScalarIndexAsyncLoadResource(
                                             storage::DefaultStreamSliceSize()));
         }
     }
-    const auto workers = storage::GetAsyncLoadThreadPoolSize();
-    // Bound one load by its materializer's in-flight slice count. Request-local
-    // reservations must remain valid even if the byte budget expands later.
     const auto read_peak = std::min(
         total_transient,
-        milvus::SaturatingMultiply(max_task, static_cast<uint64_t>(workers)));
-    const auto& type = resolved_params.at("index_type");
+        static_cast<uint64_t>(storage::IndexLoadMaxTransientBytes(max_task)));
+    const auto& type = resolved_params.at(INDEX_TYPE);
+    const bool file_stream = type == INVERTED_INDEX_TYPE ||
+                             type == NGRAM_INDEX_TYPE ||
+                             type == RTREE_INDEX_TYPE;
+    const auto legacy_peak =
+        ScalarIndexStreamMemoryOverhead(index_size,
+                                        std::max(version, 3),
+                                        legacy_stream.encrypted,
+                                        file_stream,
+                                        legacy_stream);
+    const auto legacy = ScalarIndexLoadResourceWithOverhead(field_type,
+                                                            index_size,
+                                                            resolved_params,
+                                                            mmap_enable,
+                                                            num_rows,
+                                                            legacy_peak);
     uint64_t staging_bytes = 0;
     if ((type == INVERTED_INDEX_TYPE || type == NGRAM_INDEX_TYPE) &&
         catalog.HasEntry(INDEX_NULL_OFFSET_FILE_NAME)) {
@@ -1129,11 +1156,37 @@ IndexFactory::ScalarIndexAsyncLoadResource(
         std::max(request.max_memory_cost,
                  SaturatingAdd(request.final_memory_cost,
                                SaturatingAdd(staging_bytes, read_peak)));
+    // Preserve both routes' final and request-local overhead estimates. A cell
+    // can be reloaded after either rollout or executor configuration changes.
+    const bool can_share =
+        staging_bytes == 0 && type != BITMAP_INDEX_TYPE &&
+        request.max_memory_cost - request.final_memory_cost <= read_peak &&
+        legacy.max_memory_cost - legacy.final_memory_cost <= legacy_peak;
+    const auto memory_overhead =
+        std::max(request.max_memory_cost - request.final_memory_cost,
+                 legacy.max_memory_cost - legacy.final_memory_cost);
+    const auto disk_overhead =
+        std::max(request.max_disk_cost - request.final_disk_cost,
+                 legacy.max_disk_cost - legacy.final_disk_cost);
+    request.final_memory_cost =
+        std::max(request.final_memory_cost, legacy.final_memory_cost);
+    request.final_disk_cost =
+        std::max(request.final_disk_cost, legacy.final_disk_cost);
+    request.max_memory_cost =
+        SaturatingAdd(request.final_memory_cost, memory_overhead);
+    request.max_disk_cost =
+        SaturatingAdd(request.final_disk_cost, disk_overhead);
+    max_task = std::max<uint64_t>(
+        max_task,
+        legacy_stream.encrypted
+            ? legacy_stream.max_task_transient_bytes
+            : SaturatingMultiply(storage::MaxEntryStreamTaskBytes(),
+                                 file_stream
+                                     ? storage::kFileStreamBufferMultiplier
+                                     : size_t{1}));
     std::optional<cachinglayer::LoadingOverheadConfig> overhead;
-    // Only fold actual, leased slice buffers into the shared resource group.
-    // Conversion scratch and whole-entry staging stay in the per-load peak.
-    if (staging_bytes == 0 && type != BITMAP_INDEX_TYPE &&
-        request.max_memory_cost - request.final_memory_cost <= read_peak) {
+    // Both routes must lease the entire overhead before sharing its reservation.
+    if (can_share) {
         auto memory_group =
             storage::LoadMemoryOverheadController::GetInstance().GetOrCreate(
                 milvus::ThreadPools::GetLoadExecutorWorkers());
@@ -1300,10 +1353,12 @@ IndexFactory::ScalarIndexLegacyLoadResource(
                         file.find('/') == std::string::npos
                     ? manager.GetRemoteIndexObjectPrefix() + "/" + file
                     : file;
-            auto input = storage::OpenLegacyIndexInput(
-                context.chunkManagerPtr, context.fs, path);
-            const auto info =
-                co_await storage::InspectLegacyIndexFileAsync(*input, priority);
+            const auto info = co_await storage::InspectLegacyIndexFileAsync(
+                path,
+                context.chunkManagerPtr,
+                context.fs,
+                context.legacy_index_files,
+                priority);
             result.payload_bytes =
                 SaturatingAdd(result.payload_bytes, info.payload_bytes);
             result.max_transient_bytes =
@@ -1453,7 +1508,7 @@ IndexFactory::ScalarIndexLegacyLoadResource(
     // estimates made before a cached load remain valid after those updates.
     auto transient = SaturatingAdd(
         info.retained_bytes,
-        storage::LegacyIndexMaxTransientBytes(info.max_transient_bytes));
+        storage::IndexLoadMaxTransientBytes(info.max_transient_bytes));
     if (info.disk_files || mmap_enable || info.type == MARISA_TRIE ||
         info.type == MARISA_TRIE_UPPER) {
         // FileWriter's buffer setting is refreshable before a cache reload.

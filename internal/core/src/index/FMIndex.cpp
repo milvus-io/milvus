@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "index/FMIndex.h"
+#include "index/IndexLoadUtils.h"
 #include "storage/EntryStreamUtils.h"
 
 #include <fcntl.h>
@@ -102,28 +103,6 @@ BuildFMIndexLibrary(fmindex::FMIndex& fm,
         ThrowInfo(ErrorCode::IndexBuildError,
                   "failed to build FM index for field {}: {}",
                   field_id,
-                  e.what());
-    }
-}
-
-template <typename T, typename MetadataSource>
-T
-ReadRequiredFMIndexMeta(const MetadataSource& source, const char* key) {
-    if (!source.HasMeta(key)) {
-        ThrowInfo(ErrorCode::DataFormatBroken,
-                  "corrupt FM index: required metadata '{}' is missing",
-                  key);
-    }
-    try {
-        return source.template GetMeta<T>(key);
-    } catch (const SegcoreError&) {
-        throw;
-    } catch (const std::bad_alloc&) {
-        throw;
-    } catch (const std::exception& e) {
-        ThrowInfo(ErrorCode::DataFormatBroken,
-                  "corrupt FM index: metadata '{}' has invalid type/value: {}",
-                  key,
                   e.what());
     }
 }
@@ -637,9 +616,8 @@ FMIndex::LoadEntries(storage::IndexEntryReader& reader, const Config& config) {
                   schema_.data_type());
     }
     total_rows_ =
-        ReadRequiredFMIndexMeta<int64_t>(reader, FMINDEX_META_TOTAL_ROWS);
-    bool nullable =
-        ReadRequiredFMIndexMeta<bool>(reader, FMINDEX_META_NULLABLE);
+        ReadRequiredIndexMeta<int64_t>(reader, FMINDEX_META_TOTAL_ROWS);
+    bool nullable = ReadRequiredIndexMeta<bool>(reader, FMINDEX_META_NULLABLE);
     if (total_rows_ < 0) {
         ThrowInfo(ErrorCode::DataFormatBroken,
                   "corrupt FM index: total_rows is negative ({})",
@@ -819,9 +797,9 @@ FMIndex::PlanLoad(const storage::IndexEntryCatalog& catalog,
 
     auto context = std::make_shared<FMIndexLoadContext>();
     context->total_rows =
-        ReadRequiredFMIndexMeta<int64_t>(catalog, FMINDEX_META_TOTAL_ROWS);
+        ReadRequiredIndexMeta<int64_t>(catalog, FMINDEX_META_TOTAL_ROWS);
     context->nullable =
-        ReadRequiredFMIndexMeta<bool>(catalog, FMINDEX_META_NULLABLE);
+        ReadRequiredIndexMeta<bool>(catalog, FMINDEX_META_NULLABLE);
     if (context->total_rows < 0) {
         ThrowInfo(ErrorCode::DataFormatBroken,
                   "corrupt FM index: total_rows is negative ({})",
@@ -847,7 +825,6 @@ FMIndex::PlanLoad(const storage::IndexEntryCatalog& catalog,
 
     storage::IndexLoadPlan plan;
     plan.finalize_context = context;
-    auto slice_size = storage::DefaultEntryStreamSliceSize();
     if (context->use_mmap) {
         if (context->blob_size >
             std::numeric_limits<size_t>::max() - kFMIndexMmapPadding) {
@@ -864,20 +841,17 @@ FMIndex::PlanLoad(const storage::IndexEntryCatalog& catalog,
         context->blob_file =
             std::make_shared<storage::MmapFileTarget>(storage::MmapFileTarget{
                 mmap_path, context->mmap_size, true, nullptr});
-        plan.entries.push_back(storage::MakeEntryLoadPlan(
-            catalog,
+        plan.entries.push_back(storage::EntryLoadPlan{
             FMINDEX_BLOB_FILE_NAME,
-            storage::MmapEntryTarget{context->blob_file, 0, context->blob_size},
-            slice_size));
+            storage::MmapEntryTarget{
+                context->blob_file, 0, context->blob_size}});
     } else {
         context->blob =
             std::make_shared<std::vector<uint8_t>>(context->blob_size);
-        plan.entries.push_back(storage::MakeEntryLoadPlan(
-            catalog,
+        plan.entries.push_back(storage::EntryLoadPlan{
             FMINDEX_BLOB_FILE_NAME,
             storage::MemoryEntryTarget{
-                context->blob, context->blob->data(), context->blob->size()},
-            slice_size));
+                context->blob, context->blob->data(), context->blob->size()}});
     }
 
     if (!context->nullable) {
@@ -903,18 +877,16 @@ FMIndex::PlanLoad(const storage::IndexEntryCatalog& catalog,
     }
     context->packed_null_bitmap =
         std::make_shared<std::vector<uint8_t>>(expected_null_bytes);
-    plan.entries.push_back(storage::MakeEntryLoadPlan(
-        catalog,
+    plan.entries.push_back(storage::EntryLoadPlan{
         FMINDEX_NULL_BITMAP_FILE_NAME,
         storage::MemoryEntryTarget{context->packed_null_bitmap,
                                    context->packed_null_bitmap->data(),
-                                   context->packed_null_bitmap->size()},
-        slice_size));
+                                   context->packed_null_bitmap->size()}});
     return plan;
 }
 
 folly::coro::Task<void>
-FMIndex::FinalizeLoad(storage::IndexLoadArtifact&& artifact,
+FMIndex::FinalizeLoad(storage::IndexLoadArtifact& artifact,
                       const Config& config) {
     (void)config;
     auto context =

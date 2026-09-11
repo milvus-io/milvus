@@ -748,7 +748,6 @@ StringIndexSort::PlanLoad(const storage::IndexEntryCatalog& catalog,
 
     storage::IndexLoadPlan plan;
     plan.finalize_context = context;
-    auto slice_size = storage::DefaultEntryStreamSliceSize();
     if (context->is_mmap) {
         auto mmap_path =
             GetValueFromConfig<std::string>(config, MMAP_FILE_PATH).value();
@@ -760,31 +759,25 @@ StringIndexSort::PlanLoad(const storage::IndexEntryCatalog& catalog,
                 StringSortMmapFileSize(context->index_data_bytes),
                 true,
                 nullptr});
-        plan.entries.push_back(storage::MakeEntryLoadPlan(
-            catalog,
+        plan.entries.push_back(storage::EntryLoadPlan{
             "index_data",
             storage::MmapEntryTarget{
-                context->index_data_file, 0, context->index_data_bytes},
-            slice_size));
+                context->index_data_file, 0, context->index_data_bytes}});
     } else {
         context->index_data =
             std::make_shared<std::vector<uint8_t>>(context->index_data_bytes);
-        plan.entries.push_back(storage::MakeEntryLoadPlan(
-            catalog,
+        plan.entries.push_back(storage::EntryLoadPlan{
             "index_data",
             storage::MemoryEntryTarget{context->index_data,
                                        context->index_data->data(),
-                                       context->index_data->size()},
-            slice_size));
+                                       context->index_data->size()}});
     }
 
-    plan.entries.push_back(storage::MakeEntryLoadPlan(
-        catalog,
+    plan.entries.push_back(storage::EntryLoadPlan{
         "valid_bitset",
         storage::MemoryEntryTarget{context->valid_bitset,
                                    context->valid_bitset->data(),
-                                   context->valid_bitset->size()},
-        slice_size));
+                                   context->valid_bitset->size()}});
 
     if (context->is_mmap && context->has_persisted_offsets) {
         context->offsets_file = std::make_shared<storage::MmapFileTarget>(
@@ -792,18 +785,16 @@ StringIndexSort::PlanLoad(const storage::IndexEntryCatalog& catalog,
                                     context->offsets_bytes,
                                     true,
                                     nullptr});
-        plan.entries.push_back(storage::MakeEntryLoadPlan(
-            catalog,
+        plan.entries.push_back(storage::EntryLoadPlan{
             "idx_to_offsets",
             storage::MmapEntryTarget{
-                context->offsets_file, 0, context->offsets_bytes},
-            slice_size));
+                context->offsets_file, 0, context->offsets_bytes}});
     }
     return plan;
 }
 
 folly::coro::Task<void>
-StringIndexSort::FinalizeLoad(storage::IndexLoadArtifact&& artifact,
+StringIndexSort::FinalizeLoad(storage::IndexLoadArtifact& artifact,
                               const Config& config) {
     auto context =
         artifact.FinalizeContext<std::shared_ptr<StringSortLoadContext>>();

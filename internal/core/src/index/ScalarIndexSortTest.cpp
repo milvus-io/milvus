@@ -49,7 +49,7 @@ class ExposedScalarIndexSort : public ScalarIndexSort<int64_t> {
         plan.priority = priority;
         auto artifact = folly::coro::blockingWait(
             storage::MaterializeIndexAsync(reader, std::move(plan)));
-        folly::coro::blockingWait(FinalizeLoad(std::move(artifact), config));
+        folly::coro::blockingWait(FinalizeLoad(artifact, config));
         artifact.CommitTargets();
     }
 };
@@ -485,7 +485,7 @@ TEST_F(ScalarIndexSortLegacyAsyncLoadTest,
             std::max(max_transient_bytes, info.max_transient_bytes);
     }
     const auto resource =
-        IndexFactory::GetInstance().ScalarIndexAsyncLoadResource(
+        IndexFactory::GetInstance().ScalarIndexFileLoadResource(
             DataType::INT64,
             1,
             {{"index_type", ASCENDING_SORT},

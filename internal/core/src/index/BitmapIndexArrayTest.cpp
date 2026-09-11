@@ -1493,7 +1493,7 @@ TEST(ScalarIndexSortArrayNestedTest, LegacyStreamRoundTrip) {
     EXPECT_TRUE(hits[1]);
     EXPECT_TRUE(hits[3]);
     const auto resource =
-        index::IndexFactory::GetInstance().ScalarIndexAsyncLoadResource(
+        index::IndexFactory::GetInstance().ScalarIndexFileLoadResource(
             DataType::ARRAY,
             stats->GetMemSize(),
             {{index::INDEX_TYPE, index::ASCENDING_SORT},

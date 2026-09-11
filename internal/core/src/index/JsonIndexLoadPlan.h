@@ -34,12 +34,10 @@ AppendJsonNonExistOffsetsPlan(storage::IndexLoadPlan& plan,
                bytes);
     auto offsets =
         std::make_shared<std::vector<size_t>>(bytes / sizeof(size_t));
-    plan.entries.push_back(storage::MakeEntryLoadPlan(
-        catalog,
+    plan.entries.push_back(storage::EntryLoadPlan{
         INDEX_NON_EXIST_OFFSET_FILE_NAME,
         storage::MemoryEntryTarget{
-            offsets, reinterpret_cast<uint8_t*>(offsets->data()), bytes},
-        storage::DefaultStreamSliceSize()));
+            offsets, reinterpret_cast<uint8_t*>(offsets->data()), bytes}});
 }
 
 inline std::vector<size_t>
@@ -53,7 +51,7 @@ TakeJsonNonExistOffsets(storage::IndexLoadArtifact& artifact) {
     if (entry == artifact.Entries().end()) {
         return {};
     }
-    AssertInfo(entry->ready, "non_exist_offsets Entry is not ready");
+
     const auto& target = std::get<storage::MemoryEntryTarget>(entry->target);
     // AppendJsonNonExistOffsetsPlan owns this typed vector. Transfer it into
     // the index rather than allocating/copying the full sidecar again.

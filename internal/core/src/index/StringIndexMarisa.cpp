@@ -1020,12 +1020,9 @@ StringIndexMarisa::PlanLoad(const storage::IndexEntryCatalog& catalog,
 
     storage::IndexLoadPlan plan;
     plan.finalize_context = context;
-    auto slice_size = storage::DefaultEntryStreamSliceSize();
-    plan.entries.push_back(storage::MakeEntryLoadPlan(
-        catalog,
+    plan.entries.push_back(storage::EntryLoadPlan{
         MARISA_TRIE_INDEX,
-        storage::MmapEntryTarget{context->trie_file, 0, trie_bytes},
-        slice_size));
+        storage::MmapEntryTarget{context->trie_file, 0, trie_bytes}});
 
     if (context->is_mmap) {
         context->str_ids_file = std::make_shared<storage::MmapFileTarget>(
@@ -1033,23 +1030,19 @@ StringIndexMarisa::PlanLoad(const storage::IndexEntryCatalog& catalog,
                                     context->str_ids_bytes,
                                     true,
                                     nullptr});
-        plan.entries.push_back(storage::MakeEntryLoadPlan(
-            catalog,
+        plan.entries.push_back(storage::EntryLoadPlan{
             MARISA_STR_IDS,
             storage::MmapEntryTarget{
-                context->str_ids_file, 0, context->str_ids_bytes},
-            slice_size));
+                context->str_ids_file, 0, context->str_ids_bytes}});
     } else {
         context->str_ids = std::make_shared<std::vector<int64_t>>(
             context->str_ids_bytes / sizeof(int64_t), MARISA_NULL_KEY_ID);
-        plan.entries.push_back(storage::MakeEntryLoadPlan(
-            catalog,
+        plan.entries.push_back(storage::EntryLoadPlan{
             MARISA_STR_IDS,
             storage::MemoryEntryTarget{
                 context->str_ids,
                 reinterpret_cast<uint8_t*>(context->str_ids->data()),
-                context->str_ids_bytes},
-            slice_size));
+                context->str_ids_bytes}});
     }
 
     if (!context->has_csr) {
@@ -1061,46 +1054,38 @@ StringIndexMarisa::PlanLoad(const storage::IndexEntryCatalog& catalog,
         context->csr_file =
             std::make_shared<storage::MmapFileTarget>(storage::MmapFileTarget{
                 context->file_name + ".csr", csr_file_size, true, nullptr});
-        plan.entries.push_back(storage::MakeEntryLoadPlan(
-            catalog,
+        plan.entries.push_back(storage::EntryLoadPlan{
             MARISA_CSR_INDEX,
             storage::MmapEntryTarget{
-                context->csr_file, 0, context->csr_index_bytes},
-            slice_size));
-        plan.entries.push_back(storage::MakeEntryLoadPlan(
-            catalog,
+                context->csr_file, 0, context->csr_index_bytes}});
+        plan.entries.push_back(storage::EntryLoadPlan{
             MARISA_CSR_OFFSETS,
             storage::MmapEntryTarget{context->csr_file,
                                      context->csr_index_bytes,
-                                     context->csr_offsets_bytes},
-            slice_size));
+                                     context->csr_offsets_bytes}});
     } else {
         context->csr_index = std::make_shared<std::vector<uint32_t>>(
             context->csr_index_bytes / sizeof(uint32_t));
         context->csr_offsets = std::make_shared<std::vector<uint32_t>>(
             context->csr_offsets_bytes / sizeof(uint32_t));
-        plan.entries.push_back(storage::MakeEntryLoadPlan(
-            catalog,
+        plan.entries.push_back(storage::EntryLoadPlan{
             MARISA_CSR_INDEX,
             storage::MemoryEntryTarget{
                 context->csr_index,
                 reinterpret_cast<uint8_t*>(context->csr_index->data()),
-                context->csr_index_bytes},
-            slice_size));
-        plan.entries.push_back(storage::MakeEntryLoadPlan(
-            catalog,
+                context->csr_index_bytes}});
+        plan.entries.push_back(storage::EntryLoadPlan{
             MARISA_CSR_OFFSETS,
             storage::MemoryEntryTarget{
                 context->csr_offsets,
                 reinterpret_cast<uint8_t*>(context->csr_offsets->data()),
-                context->csr_offsets_bytes},
-            slice_size));
+                context->csr_offsets_bytes}});
     }
     return plan;
 }
 
 folly::coro::Task<void>
-StringIndexMarisa::FinalizeLoad(storage::IndexLoadArtifact&& artifact,
+StringIndexMarisa::FinalizeLoad(storage::IndexLoadArtifact& artifact,
                                 const Config& config) {
     auto context =
         artifact.FinalizeContext<std::shared_ptr<MarisaLoadContext>>();

@@ -40,12 +40,6 @@
 namespace milvus::storage {
 namespace {
 
-// Keep the existing download allowance and default slice-count pressure bound.
-// Neither changes when the executor or global admission limits are refreshed.
-constexpr size_t kMaxInflightBytes = DEFAULT_FIELD_MAX_MEMORY_LIMIT;
-constexpr size_t kMaxInflightSlices =
-    DEFAULT_FIELD_MAX_MEMORY_LIMIT / DEFAULT_INDEX_FILE_SLICE_SIZE;
-
 // Preserves legacy ChunkManager-only contexts. These synchronous reads run on
 // the selected async executor; native Arrow inputs use asynchronous range I/O.
 class LegacyChunkInput final : public milvus::InputStream {
@@ -228,14 +222,6 @@ ParseDescriptor(const std::shared_ptr<uint8_t[]>& data,
 }
 
 }  // namespace
-
-size_t
-LegacyIndexMaxTransientBytes(size_t max_unit_bytes) {
-    return std::max(
-        max_unit_bytes,
-        std::min(kMaxInflightBytes,
-                 SaturatingMultiply(max_unit_bytes, kMaxInflightSlices)));
-}
 
 std::shared_ptr<milvus::InputStream>
 OpenLegacyIndexInput(const ChunkManagerPtr& chunk_manager,
@@ -495,10 +481,11 @@ StreamLegacyIndexFilesAsync(std::span<const LegacyIndexFile> files,
                 const auto charge = info.raw_payload
                                         ? SaturatingMultiply(bytes, size_t{2})
                                         : info.max_transient_bytes;
-                while (pending.size() >= kMaxInflightSlices ||
-                       (!pending.empty() &&
-                        (charge > kMaxInflightBytes ||
-                         inflight_bytes > kMaxInflightBytes - charge))) {
+                while (
+                    pending.size() >= kMaxIndexLoadInflightSlices ||
+                    (!pending.empty() &&
+                     (charge > kMaxIndexLoadInflightBytes ||
+                      inflight_bytes > kMaxIndexLoadInflightBytes - charge))) {
                     co_await folly::coro::co_withCancellation(
                         folly::CancellationToken{}, wait_for_completion());
                 }
@@ -534,6 +521,44 @@ StreamLegacyIndexFilesAsync(std::span<const LegacyIndexFile> files,
         std::rethrow_exception(first_error);
     }
     ThrowIfCancelled(token, "LegacyIndexLoader::StreamFilesComplete");
+}
+
+folly::coro::Task<LegacyIndexFileInfo>
+InspectLegacyIndexFileAsync(
+    const std::string& path,
+    const ChunkManagerPtr& chunk_manager,
+    const milvus_storage::ArrowFileSystemPtr& fs,
+    const std::shared_ptr<const LegacyIndexFileInfos>& infos,
+    proto::common::LoadPriority priority,
+    folly::CancellationToken token) {
+    ThrowIfCancelled(token, "LegacyIndexLoader::Inspect");
+    if (infos) {
+        if (auto it = infos->find(path); it != infos->end()) {
+            co_return it->second;
+        }
+    }
+    auto input = OpenLegacyIndexInput(chunk_manager, fs, path);
+    co_return co_await InspectLegacyIndexFileAsync(*input, priority, token);
+}
+
+folly::coro::Task<std::shared_ptr<const LegacyIndexFileInfos>>
+InspectLegacyIndexFilesAsync(std::span<const std::string> files,
+                             const ChunkManagerPtr& chunk_manager,
+                             const milvus_storage::ArrowFileSystemPtr& fs,
+                             proto::common::LoadPriority priority,
+                             folly::CancellationToken token) {
+    auto infos = std::make_shared<LegacyIndexFileInfos>();
+    infos->reserve(files.size());
+    for (const auto& path : files) {
+        ThrowIfCancelled(token, "LegacyIndexLoader::InspectFiles");
+        if (!infos->contains(path)) {
+            auto input = OpenLegacyIndexInput(chunk_manager, fs, path);
+            infos->emplace(
+                path,
+                co_await InspectLegacyIndexFileAsync(*input, priority, token));
+        }
+    }
+    co_return infos;
 }
 
 }  // namespace milvus::storage

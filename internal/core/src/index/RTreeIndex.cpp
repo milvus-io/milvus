@@ -43,6 +43,7 @@
 #include "storage/LocalFileIOPool.h"
 #include "storage/EntryStreamUtils.h"
 #include "index/Utils.h"
+#include "index/IndexLoadUtils.h"
 #include "knowhere/dataset.h"
 #include "log/Log.h"
 #include "nlohmann/json.hpp"
@@ -62,63 +63,11 @@ namespace milvus::index {
 namespace {
 
 struct RTreeLoadContext {
-    ~RTreeLoadContext() {
-        if ((files.empty() || !std::all_of(files.begin(),
-                                           files.end(),
-                                           [](const auto& file) {
-                                               return file->file != nullptr &&
-                                                      file->file->Committed();
-                                           })) &&
-            disk_file_manager != nullptr && !directory.empty()) {
-            disk_file_manager->RemoveIndexFiles();
-        }
-    }
-
-    std::shared_ptr<storage::DiskFileManagerImpl> disk_file_manager;
-    std::string directory;
-    std::string base_path;
-    std::vector<std::string> file_names;
-    std::vector<std::shared_ptr<storage::MmapFileTarget>> files;
+    std::shared_ptr<IndexDirectoryLoadContext> directory;
     std::shared_ptr<std::vector<size_t>> null_offsets;
-    std::optional<storage::DiskFileManagerImpl::LocalDirWriteLease>
-        local_dir_lease;
+    std::string base_path;
     bool has_null{false};
 };
-
-template <typename T>
-T
-ReadRequiredRTreeMeta(const storage::IndexEntryCatalog& catalog,
-                      const char* key) {
-    if (!catalog.HasMeta(key)) {
-        ThrowInfo(ErrorCode::DataFormatBroken,
-                  "corrupt RTree index: required metadata '{}' is missing",
-                  key);
-    }
-    try {
-        return catalog.GetMeta<T>(key);
-    } catch (const SegcoreError&) {
-        throw;
-    } catch (const std::bad_alloc&) {
-        throw;
-    } catch (const std::exception& e) {
-        ThrowInfo(ErrorCode::DataFormatBroken,
-                  "corrupt RTree index: metadata '{}' has invalid "
-                  "type/value: {}",
-                  key,
-                  e.what());
-    }
-}
-
-void
-ValidateRTreeFileName(const std::string& file_name) {
-    auto path = std::filesystem::path(file_name);
-    if (file_name.empty() || path.is_absolute() || path.has_parent_path() ||
-        path.filename() != path || file_name == "." || file_name == "..") {
-        ThrowInfo(ErrorCode::DataFormatBroken,
-                  "corrupt RTree index: invalid file name '{}'",
-                  file_name);
-    }
-}
 
 }  // namespace
 
@@ -1024,70 +973,27 @@ storage::IndexLoadPlan
 RTreeIndex<T>::PlanLoad(const storage::IndexEntryCatalog& catalog,
                         const Config& config) {
     (void)config;
-    AssertInfo(disk_file_manager_ != nullptr,
-               "RTree direct load requires DiskFileManager");
     auto context = std::make_shared<RTreeLoadContext>();
-    context->disk_file_manager = disk_file_manager_;
-    context->file_names =
-        ReadRequiredRTreeMeta<std::vector<std::string>>(catalog, "file_names");
-    context->has_null = ReadRequiredRTreeMeta<bool>(catalog, "has_null");
-    if (context->file_names.empty()) {
-        ThrowInfo(ErrorCode::DataFormatBroken,
-                  "corrupt RTree index: file_names is empty");
-    }
-
-    context->directory = disk_file_manager_->GetLocalIndexObjectPrefix();
-    context->local_dir_lease.emplace(
-        disk_file_manager_->AcquireLocalDirWriteLease(context->directory));
-
+    context->has_null = ReadRequiredIndexMeta<bool>(catalog, "has_null");
     storage::IndexLoadPlan plan;
     plan.finalize_context = context;
-    auto slice_size = storage::DefaultEntryStreamSliceSize();
-    std::unordered_set<std::string> unique_names;
-    for (const auto& file_name : context->file_names) {
-        ValidateRTreeFileName(file_name);
-        if (!unique_names.insert(file_name).second) {
-            ThrowInfo(ErrorCode::DataFormatBroken,
-                      "corrupt RTree index: duplicate file name '{}'",
-                      file_name);
-        }
-        if (!catalog.HasEntry(file_name)) {
-            ThrowInfo(ErrorCode::DataFormatBroken,
-                      "corrupt RTree index: file Entry '{}' is missing",
-                      file_name);
-        }
-        auto file_size = catalog.At(file_name).plaintext_size;
-        auto file = std::make_shared<storage::MmapFileTarget>(
-            storage::MmapFileTarget{context->directory + "/" + file_name,
-                                    file_size,
-                                    true,
-                                    nullptr});
-        context->files.push_back(file);
-        plan.entries.push_back(storage::MakeEntryLoadPlan(
-            catalog,
-            file_name,
-            storage::MmapEntryTarget{file, 0, file_size},
-            slice_size));
-
-        auto local = context->directory + "/" + file_name;
-        if (context->base_path.empty() && ends_with(local, ".bgi")) {
+    context->directory =
+        PlanIndexDirectory(catalog, disk_file_manager_, true, plan);
+    for (const auto& file : context->directory->files) {
+        const auto& local = file->path;
+        if (ends_with(local, ".bgi")) {
             context->base_path = local.substr(0, local.size() - 4);
+            break;
+        }
+        if (context->base_path.empty() && ends_with(local, ".meta.json")) {
+            context->base_path =
+                local.substr(0, local.size() - kMetaJsonSuffixLen);
         }
     }
     if (context->base_path.empty()) {
-        for (const auto& file_name : context->file_names) {
-            auto local = context->directory + "/" + file_name;
-            if (ends_with(local, ".meta.json")) {
-                context->base_path =
-                    local.substr(0, local.size() - kMetaJsonSuffixLen);
-                break;
-            }
-        }
-    }
-    if (context->base_path.empty()) {
-        ThrowInfo(ErrorCode::DataFormatBroken,
-                  "corrupt RTree index: cannot determine base path from "
-                  "file_names");
+        ThrowInfo(
+            ErrorCode::DataFormatBroken,
+            "corrupt RTree index: cannot determine base path from file_names");
     }
 
     if (!context->has_null) {
@@ -1108,20 +1014,18 @@ RTreeIndex<T>::PlanLoad(const storage::IndexEntryCatalog& catalog,
     }
     context->null_offsets =
         std::make_shared<std::vector<size_t>>(null_bytes / sizeof(size_t));
-    plan.entries.push_back(storage::MakeEntryLoadPlan(
-        catalog,
-        kNullEntry,
+    plan.entries.push_back(storage::EntryLoadPlan{
+        std::string(kNullEntry),
         storage::MemoryEntryTarget{
             context->null_offsets,
             reinterpret_cast<uint8_t*>(context->null_offsets->data()),
-            null_bytes},
-        slice_size));
+            null_bytes}});
     return plan;
 }
 
 template <typename T>
 folly::coro::Task<void>
-RTreeIndex<T>::FinalizeLoad(storage::IndexLoadArtifact&& artifact,
+RTreeIndex<T>::FinalizeLoad(storage::IndexLoadArtifact& artifact,
                             const Config& config) {
     (void)config;
     auto context =
@@ -1156,7 +1060,7 @@ RTreeIndex<T>::FinalizeLoad(storage::IndexLoadArtifact&& artifact,
     LOG_INFO(
         "FinalizeLoad RTreeIndex done, file_count: {}, has_null: {}, "
         "base_path: {}",
-        context->file_names.size(),
+        context->directory->files.size(),
         context->has_null,
         path_);
     storage::ThrowIfCancelled(

@@ -83,7 +83,7 @@ class ExposedBitmapIndex : public BitmapIndex<int32_t> {
         auto plan = PlanLoad(reader.Catalog(), config);
         auto artifact = folly::coro::blockingWait(
             milvus::storage::MaterializeIndexAsync(reader, std::move(plan)));
-        folly::coro::blockingWait(FinalizeLoad(std::move(artifact), config));
+        folly::coro::blockingWait(FinalizeLoad(artifact, config));
         artifact.CommitTargets();
     }
 };

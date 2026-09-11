@@ -35,7 +35,7 @@
 
 namespace milvus::index {
 
-struct AsyncScalarIndexLoadResource {
+struct ScalarIndexLoadResources {
     LoadResourceRequest request;
     std::optional<cachinglayer::LoadingOverheadConfig> overhead;
 };
@@ -116,10 +116,10 @@ class IndexFactory {
         std::optional<storage::EntryStreamLoadInfo>* stream_load_info = nullptr,
         bool* use_shared_memory_overhead_group = nullptr);
 
-    // Inspects async scalar metadata and estimates only that load path.
-    // Supports packed V3 indexes and legacy scalar indexes.
-    AsyncScalarIndexLoadResource
-    ScalarIndexAsyncLoadResource(
+    // Inspects persisted metadata and reserves for either rollout mode.
+    // The load switch and executor sizes can change before a cache reload.
+    ScalarIndexLoadResources
+    ScalarIndexFileLoadResource(
         DataType field_type,
         uint64_t index_size,
         const std::map<std::string, std::string>& index_params,

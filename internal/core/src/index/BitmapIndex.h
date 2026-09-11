@@ -224,7 +224,7 @@ class BitmapIndex : public ScalarIndex<T> {
              const Config& config) override;
 
     folly::coro::Task<void>
-    FinalizeLoad(storage::IndexLoadArtifact&& artifact,
+    FinalizeLoad(storage::IndexLoadArtifact& artifact,
                  const Config& config) override;
 
  protected:

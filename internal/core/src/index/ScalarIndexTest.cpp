@@ -244,16 +244,13 @@ class TestScalarIndexV3LoadRoute : public milvus::index::ScalarIndex<int32_t> {
                     mmap_target_path_, bytes, false, nullptr});
             target = milvus::storage::MmapEntryTarget{staging, 0, bytes};
         }
-        plan.entries.push_back(milvus::storage::MakeEntryLoadPlan(
-            catalog,
-            "payload",
-            std::move(target),
-            milvus::storage::DefaultEntryStreamSliceSize()));
+        plan.entries.push_back(
+            milvus::storage::EntryLoadPlan{"payload", std::move(target)});
         return plan;
     }
 
     folly::coro::Task<void>
-    FinalizeLoad(milvus::storage::IndexLoadArtifact&& artifact,
+    FinalizeLoad(milvus::storage::IndexLoadArtifact& artifact,
                  const milvus::Config&) override {
         finalized_thread_ = folly::getCurrentThreadName().value_or("");
         finalize_load_calls_++;

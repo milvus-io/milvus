@@ -99,7 +99,7 @@ ScalarIndex<T>::LoadUnifiedAsync(const std::string& packed_file,
         storage::ThrowIfCancelled(cancellation_token,
                                   "ScalarIndex::FinalizeLoad");
         co_await folly::coro::co_withCancellation(
-            cancellation_token, FinalizeLoad(std::move(artifact), config));
+            cancellation_token, FinalizeLoad(artifact, config));
     } catch (...) {
         failure = std::current_exception();
     }
