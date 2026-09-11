@@ -112,8 +112,15 @@ ownership. The matching V3 phase split is described in the
 
 ## Slice ownership and memory estimates
 
-`MemFileManagerImpl::StreamIndexEntriesAsync` inspects persisted envelopes,
-validates slice counts and aggregate lengths, prepares one destination per logical
+The translator inspects each immutable legacy object once at construction and
+passes the envelope snapshot through `FileManagerContext`. Resource estimates,
+`MemFileManagerImpl` and `DiskFileManagerImpl` reuse it by exact object path;
+RTree basenames are resolved before inspection. Snapshots retain sizes and
+encoding information, not remote readers. Direct load callers without a snapshot
+still inspect normally. There is no global cache or refresh/invalidation state.
+This reuse also applies to memory/mmap Knowhere and BSON shared-key loads.
+
+`MemFileManagerImpl::StreamIndexEntriesAsync` validates slice counts and aggregate lengths, prepares one destination per logical
 entry, then streams slices into its awaited consumer. `LoadIndexBinarySetAsync`
 uses that reader to allocate and fill each required BinarySet entry. It reuses
 `LegacyIndexLoader` rather than retaining a map of every decoded slice. Unsliced
@@ -307,7 +314,8 @@ them through its existing assertion error. Local directory creation can still
 propagate the existing Boost filesystem exception; this increment preserves
 that exception rather than assigning a new error category.
 
-The translator inspects persisted envelopes once at construction. Its final
+The translator inspects persisted envelopes once at construction and reuses that
+snapshot on async loads and reloads. Its final
 size estimate is at least the decoded file total and retains a larger supplied
 JSON stats size estimate. Heap loads reserve that memory plus temporary disk;
 mmap loads reserve final disk. Temporary memory additionally covers
@@ -416,3 +424,18 @@ The regression set includes typed synchronous Bitmap mmap/array/nullable cases
 and existing writer, streamer, admission, vector and BSON checks. See the
 [packed scalar validation](20260907-async-scalar-index-v3-loading.md#scalar-finalizer-executor-validation-2026-09-11)
 for the coverage boundary.
+
+
+### Design review follow-up (2026-09-11)
+
+Immutable envelope snapshots now reach both file managers through the loading
+context. Tests verify that actual loads reuse the inspection and BSON reloads
+do not reread descriptor prefixes; whole encoded-object payload reads still
+start at offset zero. Ngram's synchronous heap path again removes its staging
+directory after engine restoration. The shared fixed streaming window also
+bounds packed V3 loads independently of worker-count changes.
+
+Both test targets built successfully, and 838 distinct selected cases passed
+without failures or skips. See the
+[review validation](20260907-async-scalar-index-v3-loading.md#design-review-follow-up-validation-2026-09-11)
+for the executed coverage and its limits.

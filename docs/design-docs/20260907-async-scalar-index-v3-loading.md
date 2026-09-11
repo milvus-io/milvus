@@ -21,11 +21,11 @@ load entry reads `StorageV2AsyncLoadEnabled()` directly. There is no per-index
 override, native-reader eligibility switch, or encrypted fallback to a legacy
 executor.
 
-Runtime-update limitation: the scalar translator selects its resource estimate
-and overhead group at construction, while execution reads the rollout switch
-again at load entry. A switch update between these points can make their modes
-differ. Aligning these decisions remains necessary before relying on scalar
-rollout updates during a translator's lifetime.
+The scalar translator reserves the larger final and temporary costs of the two
+load paths. It binds the shared memory-overhead group only when both paths'
+overhead is fully covered by slice leases. Execution still reads the live
+rollout switch at load entry, so a cache reload can change paths without
+invalidating its original resource estimate.
 
 When disabled, scalar loading uses `IndexEntryReader` with its existing HIGH/LOW
 pool scheduling. When enabled, `AsyncIndexEntryReader` owns the scalar pipeline.
@@ -47,17 +47,18 @@ Async CPU work shares one `folly::CPUThreadPoolExecutor`, configured through
 `queryNode.segcore.storageV2.asyncLoadThreadPoolSize` and defaulting to
 `max(1, min(CPU_NUM, 16))`. HIGH and LOW map to priority views of this executor.
 The parent resizes that executor in place; legacy pool resizing is independent.
-The child reuses its priority resolver and `GetAsyncLoadThreadPoolSize()`.
-Each scalar materialization captures its slice limit once. Resource estimation
-reads the same getter independently, so increasing the worker limit between
-estimation and materialization can exceed the earlier request-local estimate.
-That estimate/lifetime alignment remains unverified after this rebase.
+The child reuses its priority resolver. Packed and legacy async index loads
+share a fixed window of eight slices and 128 MiB of transient charges per load.
+An indivisible encrypted/encoded unit above that byte window runs alone.
+Worker-count and global-admission updates do not enlarge this local window.
 
 The implementations share mechanisms that have the same semantics:
 
-- `IndexEntryFormat` reads and parses the V3 footer/directory. The legacy reader
-  retains its original entry-download methods and state. The new reader converts
-  the parsed directory to an immutable catalog and discards the temporary parse.
+- `IndexEntryFormat` shares pure footer validation and directory parsing. The
+  legacy reader retains synchronous directory reads. The new reader reads magic,
+  footer and directory through its asynchronous range reader under admission,
+  converts the directory to an immutable catalog and discards the temporary parse.
+  Directory admission includes the serialized bytes and estimated parsing scratch.
 - Index `PlanLoad`/`FinalizeLoad` reuse existing representation parsers, null
   handling, and index constructors. JSON sidecar planning and ownership transfer
   are shared by the two JSON wrappers. Hybrid type recovery shares the existing
@@ -107,8 +108,8 @@ Cancellation is checked before finalization and after synchronous engine/state
 restoration, and between Bitmap conversion/write batches. Engine calls are
 not interrupted; they return before borrowed inputs or staging resources are
 released. Cleanup is awaited with cancellation disabled before rethrowing the
-original failure. The outer coroutine owns the artifact while `FinalizeLoad`
-borrows it, then moves it into the local-file operation that commits retained
+original failure. The outer coroutine owns the artifact while
+`FinalizeLoad(IndexLoadArtifact&)` borrows it, then moves it into the local-file operation that commits retained
 targets and releases staging resources. Directory retention follows committed
 targets, so a failed or cancelled finalizer does not retain its directory.
 Tantivy heap-mode removal and pending Marisa/StringSort/Bitmap file guards are
@@ -120,11 +121,13 @@ This routing covers materialization and finalization. Planning that throws
 before returning a plan and later index destruction/eviction keep their
 existing lifetimes; it does not relocate destruction of a completed index.
 
-All index-specific plans allocate final heap destinations or describe staging
-mmap files. The materializer validates full, non-overlapping entry coverage
-before preparing targets, interleaves entries in round-robin order, and issues
-at most one executor-worker-count of slices per load. It limits both request
-count and transient bytes, including when the byte limit is disabled.
+Index plans contain entry names and final heap or staging-file destinations.
+The materializer derives offsets, slice sizes and expected CRCs from the catalog,
+validates destination capacity and overlap, then interleaves entries in
+round-robin order within the fixed slice/byte window. Successful return of the
+complete artifact is the readiness boundary; plans have no per-entry ready state.
+Tantivy and RTree share directory-name validation, file-target planning and
+lease/cleanup ownership. Their engine-specific finalizers remain separate.
 
 Plain native readers use `NonBlockingRandomAccessFile::ReadAtAsyncInto` to write into
 the caller-owned destination. Other Arrow files use `ReadAsync` and copy the
@@ -134,8 +137,8 @@ slice boundaries; decryption writes to the same planned plaintext destinations.
 These backend differences do not change the selected Milvus executor.
 
 Each slice computes CRC-32C after its write. Entry CRCs are combined in logical
-slice order so out-of-order completions need no second full-entry scan. A failed
-entry never becomes ready. Only a complete successful artifact is finalized.
+slice order so out-of-order completions need no second full-entry scan. Only a
+complete successful artifact is finalized.
 
 Writable files reserve blocks before mapping, reporting allocation failure
 before a writer can fault on an unbacked page. The materializer keeps mappings
@@ -202,7 +205,8 @@ Admission slots continue to limit outstanding work through the existing
 `LoadAdmissionController`, independently of the memory-accounting policy.
 
 Scalar estimates reuse representation-cost calculations. The read peak is
-bounded by actual catalog slices and executor concurrency. Full-entry buffers
+bounded by actual catalog slices and the fixed per-load window; the compatibility
+path contributes its conservative full-stream estimate. Full-entry buffers
 that survive individual leases, including nullable Tantivy sidecars, Bitmap
 conversion inputs and packed validity metadata, stay in request-local peak
 reservations. JSON non-existence offsets transfer their vector ownership into
@@ -274,7 +278,7 @@ Failure tracing and controlled tests establish the following boundaries:
 | Short read, CRC mismatch, or overlapping targets | Load fails; incomplete staging files are removed and no successful artifact is returned. |
 | Async lease release racing with cancellation | Admission resolves once and returns its byte/slot reservation. |
 | Slot limit changes during scalar materialization | Other loads share the limit; shrinking waits for existing reads, and disabling it wakes pending work. |
-| Scalar artifact contains file targets | Finalization and artifact cleanup run on the configured local-file executor, including when final mmap is disabled; memory-only artifacts stay on the async executor. |
+| Scalar artifact contains file targets | Engine/state finalization runs on the async worker; file writes and artifact cleanup use the local-file executor, including when final mmap is disabled. |
 | Cancel queued file preparation or an issued scalar read | Queued preparation skips file creation; issued reads drain before local-file cleanup, preserving `FollyCancel`. |
 | Disable local-file pool while a remote read is pending | Pool shutdown completes independently; subsequent file phases use the parent's async-executor fallback. |
 
@@ -335,3 +339,21 @@ loads, resource estimates, storage/admission, Knowhere and BSON. The separate
 JSON stats binary passed all 84 cases. These are 783 distinct selected cases,
 with no failures or skips. This increment does not measure real object-storage
 throughput or process-wide peak memory.
+
+
+### Design review follow-up validation (2026-09-11)
+
+Both cached Release targets, `all_tests` and `json_stats_test`, built with at
+most 16 concurrent compiler jobs. The final targeted run passed 43 cases;
+the related regression run passed 736 and the JSON stats binary passed 84.
+These cover 838 distinct selected cases, with no failures or skips.
+
+The added checks exercise directory admission before any read, cancellation
+while a large native directory read is pending, the fixed materialization
+window with one async worker and unlimited global admission, and estimates
+across rollout/worker changes. They also check legacy envelope reuse in both
+file managers and BSON translator reloads, plus synchronous/async Ngram heap
+cleanup. Regression includes the existing plain/encrypted V3 reader's large
+directory and metadata cases, scalar mmap/nullable paths, Knowhere, resource
+estimates, admission and finalizer failures. This is local correctness and
+routing validation, not an object-storage throughput or peak-RSS measurement.
