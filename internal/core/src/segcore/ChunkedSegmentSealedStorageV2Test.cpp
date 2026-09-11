@@ -21,30 +21,44 @@
 #include <arrow/filesystem/filesystem.h>
 #include <arrow/record_batch.h>
 #include <arrow/type_fwd.h>
+#include <folly/CancellationToken.h>
+#include <folly/ScopeGuard.h>
 #include <gtest/gtest.h>
+#include <boost/filesystem/operations.hpp>
 #include <parquet/properties.h>
 #include <stdlib.h>
 #include <time.h>
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <exception>
+#include <functional>
 #include <map>
 #include <memory>
 #include <numeric>
 #include <string>
+#include <thread>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 #include "segcore/default_fs.h"
 
 #include "NamedType/named_type_impl.hpp"
+#include "cachinglayer/Manager.h"
 #include "cachinglayer/CacheSlot.h"
+#include "common/Common.h"
 #include "common/Consts.h"
+#include "common/JsonCastType.h"
 #include "common/LoadInfo.h"
 #include "common/Schema.h"
 #include "common/Span.h"
+#include "common/SystemProperty.h"
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
+#include "exec/QueryContext.h"
+#include "exec/Task.h"
 #include "exec/expression/EvalCtx.h"
 #include "exec/expression/Expr.h"
 #include "expr/ITypeExpr.h"
@@ -53,6 +67,7 @@
 #include "index/Index.h"
 #include "index/IndexFactory.h"
 #include "index/IndexInfo.h"
+#include "index/JsonFlatIndex.h"
 #include "index/Meta.h"
 #include "index/ScalarIndex.h"
 #include "milvus-storage/common/config.h"
@@ -66,15 +81,21 @@
 #include "query/PlanImpl.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/SegcoreConfig.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
 #include "segcore/SegmentChunkReader.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/search_result_export_c.h"
 #include "segcore/Types.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
+#include "segcore/storagev2translator/SystemIndexTranslator.h"
 #include "segcore/storagev1translator/ChunkTranslator.h"
 #include "storage/FileManager.h"
 #include "storage/Types.h"
+#include "storage/loon_ffi/property_singleton.h"
+#include "test_utils/Constants.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/GenExprProto.h"
+#include "test_utils/ManifestTestUtil.h"
 #include "test_utils/cachinglayer_test_utils.h"
 
 using namespace milvus;
@@ -82,6 +103,111 @@ using namespace milvus::segcore;
 using namespace milvus::segcore::storagev1translator;
 
 namespace {
+std::string
+UniqueManifestTestPath(const std::string& prefix) {
+    return boost::filesystem::unique_path(prefix + "_%%%%-%%%%-%%%%-%%%%")
+        .string();
+}
+
+bool
+IsLazyColumnForTest(const std::shared_ptr<ChunkedColumnInterface>& column) {
+    auto proxy = std::dynamic_pointer_cast<ProxyChunkColumn>(column);
+    EXPECT_NE(proxy, nullptr);
+    return proxy != nullptr && proxy->IsLazy();
+}
+
+class LazyColumnGroupGuard {
+ public:
+    explicit LazyColumnGroupGuard(bool enabled)
+        : previous_(SegcoreConfig::default_config()
+                        .get_lazy_column_group_enabled()) {
+        SegcoreConfig::default_config().set_lazy_column_group_enabled(
+            enabled);
+    }
+
+    ~LazyColumnGroupGuard() {
+        SegcoreConfig::default_config().set_lazy_column_group_enabled(
+            previous_);
+    }
+
+ private:
+    bool previous_;
+};
+
+class CacheWarmupPolicyGuard {
+ public:
+    explicit CacheWarmupPolicyGuard(
+        milvus::cachinglayer::CacheWarmupPolicies warmup_policies)
+        : previous_(milvus::cachinglayer::TieredStorageConfig::GetInstance()
+                        .GetSnapshot()) {
+        milvus::cachinglayer::Manager::UpdateConfig(
+            previous_.loading_timeout,
+            previous_.warmup_loading_timeout,
+            previous_.storage_usage_tracking_enabled,
+            warmup_policies);
+    }
+
+    ~CacheWarmupPolicyGuard() {
+        milvus::cachinglayer::Manager::UpdateConfig(
+            previous_.loading_timeout,
+            previous_.warmup_loading_timeout,
+            previous_.storage_usage_tracking_enabled,
+            previous_.warmup_policies);
+    }
+
+ private:
+    milvus::cachinglayer::TieredStorageConfig::Snapshot previous_;
+};
+
+SchemaPtr
+CreateTextMatchManifestSchema(bool pk_is_string) {
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField("int64", DataType::INT64, true);
+    auto pk_fid = schema->AddDebugField(
+        "pk", pk_is_string ? DataType::VARCHAR : DataType::INT64, false);
+    std::map<std::string, std::string> analyzer_params;
+    schema->AddDebugVarcharField(FieldName("string1"),
+                                 DataType::VARCHAR,
+                                 65535,
+                                 true,
+                                 true,
+                                 true,
+                                 analyzer_params,
+                                 std::nullopt);
+    schema->AddDebugField("string2", DataType::VARCHAR, true);
+    schema->AddField(FieldName("ts"),
+                     TimestampFieldID,
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+    schema->set_primary_field_id(pk_fid);
+    return schema;
+}
+
+// Keep system fields and PK in separate physical groups so ordinary user-field
+// Tasks can exercise lazy materialization independently of those blockers.
+std::string
+LazyManifestTestGroupPattern(const SchemaPtr& schema) {
+    std::string user_fields;
+    std::string other_groups;
+    auto primary_field_id = schema->get_primary_field_id();
+    for (const auto& field_id : schema->get_field_ids()) {
+        if (SystemProperty::Instance().IsSystem(field_id) ||
+            (primary_field_id.has_value() &&
+             primary_field_id.value() == field_id) ||
+            IsVectorDataType((*schema)[field_id].get_data_type())) {
+            other_groups += "," + std::to_string(field_id.get());
+        } else {
+            if (!user_fields.empty()) {
+                user_fields += "|";
+            }
+            user_fields += std::to_string(field_id.get());
+        }
+    }
+    return user_fields.empty() ? other_groups.substr(1)
+                               : user_fields + other_groups;
+}
+
 class RawLookupOnlyIndex : public index::ScalarIndex<int64_t> {
  public:
     RawLookupOnlyIndex() : index::ScalarIndex<int64_t>("raw_lookup_only") {
@@ -318,11 +444,13 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
 
     segcore::SegmentSealedUPtr
     CreateSegmentByLoadInfo(proto::segcore::SegmentLoadInfo proto,
-                            bool is_sorted_by_pk) {
+                            const SchemaPtr& schema,
+                            bool is_sorted_by_pk,
+                            Timestamp commit_ts = 0) {
         auto seg = segcore::CreateSealedSegment(
-            schema_,
+            schema,
             nullptr,
-            -1,
+            proto.segmentid(),
             segcore::SegcoreConfig::default_config(),
             is_sorted_by_pk);
         auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(seg.get());
@@ -331,10 +459,47 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
             return seg;
         }
         sealed->SetLoadInfo(std::move(proto));
+        if (commit_ts != 0) {
+            sealed->SetCommitTimestamp(commit_ts);
+        }
         milvus::OpContext op_ctx;
         milvus::tracer::TraceContext trace_ctx;
         sealed->Load(trace_ctx, &op_ctx);
         return seg;
+    }
+
+    segcore::SegmentSealedUPtr
+    CreateSegmentByLoadInfo(proto::segcore::SegmentLoadInfo proto,
+                            bool is_sorted_by_pk,
+                            Timestamp commit_ts = 0) {
+        return CreateSegmentByLoadInfo(
+            std::move(proto), schema_, is_sorted_by_pk, commit_ts);
+    }
+
+    proto::segcore::SegmentLoadInfo
+    MakeV3ManifestLoadInfo(const milvus::test::V3SegmentTestData& test_data,
+                           int64_t segment_id) {
+        proto::segcore::SegmentLoadInfo load_info;
+        load_info.set_segmentid(segment_id);
+        load_info.set_partitionid(1);
+        load_info.set_collectionid(1);
+        load_info.set_num_of_rows(test_data.TotalRows());
+        load_info.set_storageversion(STORAGE_V3);
+        load_info.set_manifest_path(test_data.ManifestPathJson());
+        load_info.set_priority(proto::common::LoadPriority::LOW);
+        return load_info;
+    }
+
+    segcore::SegmentSealedUPtr
+    CreateV3ManifestSegment(const milvus::test::V3SegmentTestData& test_data,
+                            int64_t segment_id,
+                            Timestamp commit_ts = 0,
+                            const SchemaPtr& schema = nullptr) {
+        return CreateSegmentByLoadInfo(
+            MakeV3ManifestLoadInfo(test_data, segment_id),
+            schema != nullptr ? schema : schema_,
+            false,
+            commit_ts);
     }
 
     void
@@ -596,6 +761,1273 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
 INSTANTIATE_TEST_SUITE_P(TestChunkSegmentStorageV2,
                          TestChunkSegmentStorageV2,
                          testing::Bool());
+
+class TestLazyManifest : public TestChunkSegmentStorageV2 {
+ protected:
+    void
+    SetUp() override {
+        // Manifest tests create their own V3 data; no V2 segment is needed.
+        schema_ = segcore::GenChunkedSegmentTestSchema(GetParam());
+        fields = {{"int64", schema_->get_field_id(FieldName("int64"))},
+                  {"pk", schema_->get_field_id(FieldName("pk"))},
+                  {"ts", TimestampFieldID},
+                  {"string1", schema_->get_field_id(FieldName("string1"))},
+                  {"string2", schema_->get_field_id(FieldName("string2"))}};
+    }
+};
+
+INSTANTIATE_TEST_SUITE_P(TestLazyManifest,
+                         TestLazyManifest,
+                         testing::Bool());
+
+TEST_P(TestLazyManifest, LazyManifestPreparesInterimIndex) {
+    LazyColumnGroupGuard lazy_group_guard(true);
+    auto schema = GenChunkedSegmentTestSchema(GetParam());
+    auto vec = schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
+    auto schema_proto = schema->ToProto();
+    for (auto& field : *schema_proto.mutable_fields()) {
+        if (field.fieldid() == TimestampFieldID.get()) {
+            field.set_name("Timestamp");
+        }
+    }
+    // Admit a lazy raw-vector Task independently of interim index warmup.
+    AddWarmupProperty(schema_proto, "warmup.vectorIndex", "disable");
+    schema = Schema::ParseFrom(schema_proto);
+
+    FieldIndexMeta field_index_meta(
+        vec,
+        {{"index_type", knowhere::IndexEnum::INDEX_FAISS_IVFFLAT},
+         {"metric_type", knowhere::metric::L2},
+         {"nlist", "64"}},
+        {{"dim", "4"}});
+    auto index_meta = std::make_shared<CollectionIndexMeta>(
+        100000, std::map<FieldId, FieldIndexMeta>{{vec, field_index_meta}});
+    auto& config = SegcoreConfig::default_config();
+    const auto previous_interim = config.get_enable_interim_segment_index();
+    const auto previous_chunk_rows = config.get_chunk_rows();
+    const auto previous_index_type =
+        config.get_dense_vector_intermin_index_type();
+    const auto previous_nlist = config.get_nlist();
+    const auto previous_nprobe = config.get_nprobe();
+    auto restore_config = folly::makeGuard([&]() {
+        config.set_enable_interim_segment_index(previous_interim);
+        config.set_chunk_rows(previous_chunk_rows);
+        config.set_dense_vector_intermin_index_type(previous_index_type);
+        config.set_nlist(previous_nlist);
+        config.set_nprobe(previous_nprobe);
+    });
+    config.set_enable_interim_segment_index(true);
+    config.set_chunk_rows(1024);
+    config.set_dense_vector_intermin_index_type(
+        knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC);
+    config.set_nlist(16);
+    config.set_nprobe(16);
+
+    for (int64_t num_rows : {1, 1000}) {
+        const auto base_path = UniqueManifestTestPath(
+            std::string("lazy_manifest_interim_") +
+            (GetParam() ? "varchar_" : "int64_") +
+            std::to_string(num_rows));
+        auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+        StorageV2TempDirGuard dir_guard(fs, base_path);
+        milvus::test::V3SegmentTestData test_data(
+            schema, 1, num_rows, 4, TestLocalPath, base_path);
+
+        for (auto warmup : {CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+                            CacheWarmupPolicy::CacheWarmupPolicy_Sync,
+                            CacheWarmupPolicy::CacheWarmupPolicy_Async}) {
+            SCOPED_TRACE(::testing::Message()
+                         << "rows=" << num_rows
+                         << ", warmup=" << static_cast<int>(warmup));
+            auto policies = cachinglayer::TieredStorageConfig::GetInstance()
+                                .warmup_policies();
+            policies.vectorIndexCacheWarmupPolicy = warmup;
+            CacheWarmupPolicyGuard warmup_guard(policies);
+
+            auto seg = CreateSealedSegment(schema, index_meta, 3190, config);
+            auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(seg.get());
+            ASSERT_NE(sealed, nullptr);
+            sealed->SetLoadInfo(MakeV3ManifestLoadInfo(test_data, 3190));
+            milvus::OpContext op_ctx;
+            milvus::tracer::TraceContext trace_ctx;
+            sealed->Load(trace_ctx, &op_ctx);
+
+            auto snapshot = sealed->TestGetPublishedStateSnapshot();
+            auto column = std::dynamic_pointer_cast<ProxyChunkColumn>(
+                snapshot->runtime->fields.at(vec));
+            ASSERT_NE(column, nullptr);
+            ASSERT_TRUE(column->IsLazy());
+            if (num_rows == 1) {
+                EXPECT_FALSE(column->IsMaterialized());
+                EXPECT_EQ(snapshot->runtime->vector_indexings.count(vec), 0);
+                EXPECT_FALSE(snapshot->binlog_index_bitset[vec.get() -
+                                                           START_USER_FIELDID]);
+                continue;
+            }
+
+            ASSERT_TRUE(snapshot->runtime->vector_indexings.count(vec));
+            EXPECT_TRUE(snapshot->binlog_index_bitset[vec.get() -
+                                                      START_USER_FIELDID]);
+            auto slot = snapshot->runtime->vector_indexings.at(vec)->indexing_;
+            ASSERT_NE(slot, nullptr);
+            if (warmup == CacheWarmupPolicy::CacheWarmupPolicy_Disable) {
+                EXPECT_FALSE(column->IsMaterialized());
+                EXPECT_FALSE(slot->IsCached(0));
+            } else if (warmup == CacheWarmupPolicy::CacheWarmupPolicy_Sync) {
+                EXPECT_TRUE(column->IsMaterialized());
+                EXPECT_TRUE(slot->IsCached(0));
+            }
+
+            auto first =
+                cachinglayer::SemiInlineGet(slot->PinCells(&op_ctx, {0}));
+            EXPECT_TRUE(column->IsMaterialized());
+            EXPECT_EQ(first->get_cell_of(0)->Count(), num_rows);
+            auto second =
+                cachinglayer::SemiInlineGet(slot->PinCells(&op_ctx, {0}));
+            EXPECT_EQ(first->get_cell_of(0), second->get_cell_of(0));
+        }
+    }
+}
+
+TEST_P(TestLazyManifest, LazyManifestPreservesInitialMultiFieldTask) {
+    LazyColumnGroupGuard lazy_group_guard(true);
+    auto warmup_policies =
+        milvus::cachinglayer::TieredStorageConfig::GetInstance()
+            .warmup_policies();
+    warmup_policies.scalarFieldCacheWarmupPolicy =
+        CacheWarmupPolicy::CacheWarmupPolicy_Disable;
+    CacheWarmupPolicyGuard warmup_guard(warmup_policies);
+
+    const auto base_path = UniqueManifestTestPath(
+        std::string("lazy_manifest_initial_task_") +
+        (GetParam() ? "varchar" : "int64"));
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    StorageV2TempDirGuard dir_guard(fs, base_path);
+    milvus::test::V3SegmentTestData test_data(
+        schema_,
+        1,
+        64,
+        128,
+        TestLocalPath,
+        base_path,
+        LazyManifestTestGroupPattern(schema_));
+    auto manifest_segment =
+        CreateV3ManifestSegment(test_data, 3150 + (GetParam() ? 100 : 0));
+    auto* segment_impl =
+        dynamic_cast<ChunkedSegmentSealedImpl*>(manifest_segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    auto int64_column =
+        segment_impl->TestGetPublishedStateSnapshot()->runtime->fields.at(
+            fields.at("int64"));
+    auto string_column =
+        segment_impl->TestGetPublishedStateSnapshot()->runtime->fields.at(
+            fields.at("string1"));
+    ASSERT_NE(int64_column, nullptr);
+    ASSERT_NE(string_column, nullptr);
+    auto snapshot = segment_impl->TestGetPublishedStateSnapshot();
+
+    const std::vector<
+        std::pair<FieldId, std::shared_ptr<ChunkedColumnInterface>>>
+        lazy_columns = {
+            {fields.at("int64"), int64_column},
+            {fields.at("string1"), string_column},
+        };
+    for (const auto& [field_id, column] : lazy_columns) {
+        (void)field_id;
+        EXPECT_TRUE(column->IsInMultiFieldColumnGroup());
+        int64_t offset = 0;
+        EXPECT_FALSE(column->CellsLoaded(&offset, 1));
+        EXPECT_TRUE(column->CellsLoaded(nullptr, 0));
+        EXPECT_TRUE(IsLazyColumnForTest(column));
+    }
+
+    auto memory_before_materialize = segment_impl->GetMemoryUsageInBytes();
+    constexpr int kThreadCount = 16;
+    std::atomic<int> ready{0};
+    std::atomic<bool> start{false};
+    std::atomic<bool> failed{false};
+    std::vector<std::thread> workers;
+    workers.reserve(kThreadCount);
+    for (int i = 0; i < kThreadCount; ++i) {
+        auto column = i % 2 == 0 ? int64_column : string_column;
+        workers.emplace_back([column, &ready, &start, &failed]() {
+            ready.fetch_add(1, std::memory_order_acq_rel);
+            while (!start.load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
+            try {
+                auto data = column->DataOfChunk(nullptr, 0);
+                if (data.get() == nullptr) {
+                    failed.store(true, std::memory_order_release);
+                }
+            } catch (...) {
+                failed.store(true, std::memory_order_release);
+            }
+        });
+    }
+    while (ready.load(std::memory_order_acquire) != kThreadCount) {
+        std::this_thread::yield();
+    }
+    start.store(true, std::memory_order_release);
+    for (auto& worker : workers) {
+        worker.join();
+    }
+
+    EXPECT_FALSE(failed.load(std::memory_order_acquire));
+    EXPECT_GT(int64_column->DataByteSize(), 0);
+    EXPECT_GT(string_column->DataByteSize(), 0);
+    // The untouched user-field sibling shares the same Task.
+    int64_t first_offset = 0;
+    auto sibling_column = snapshot->runtime->fields.at(fields.at("string2"));
+    EXPECT_TRUE(sibling_column->CellsLoaded(&first_offset, 1));
+    EXPECT_EQ(segment_impl->GetMemoryUsageInBytes(), memory_before_materialize);
+
+    segment_impl->DropFieldData(fields.at("int64"));
+    EXPECT_EQ(segment_impl->GetMemoryUsageInBytes(), memory_before_materialize);
+    auto dropped_column_snapshot =
+        segment_impl->TestGetPublishedStateSnapshot();
+    EXPECT_EQ(
+        dropped_column_snapshot->runtime->fields.count(fields.at("int64")), 0);
+
+}
+
+TEST_P(TestLazyManifest,
+       LazyManifestDefersTextMatchAfterIndexCreation) {
+    LazyColumnGroupGuard lazy_group_guard(true);
+    auto warmup_policies =
+        milvus::cachinglayer::TieredStorageConfig::GetInstance()
+            .warmup_policies();
+    warmup_policies.scalarFieldCacheWarmupPolicy =
+        CacheWarmupPolicy::CacheWarmupPolicy_Disable;
+    CacheWarmupPolicyGuard warmup_guard(warmup_policies);
+
+    auto text_schema = CreateTextMatchManifestSchema(GetParam());
+    auto text_field = text_schema->get_field_id(FieldName("string1"));
+    const auto suffix = GetParam() ? "varchar" : "int64";
+    const auto base_path_a = UniqueManifestTestPath(
+        std::string("lazy_manifest_text_match_a_") + suffix);
+    const auto base_path_b = UniqueManifestTestPath(
+        std::string("lazy_manifest_text_match_b_") + suffix);
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    StorageV2TempDirGuard dir_guard_a(fs, base_path_a);
+    StorageV2TempDirGuard dir_guard_b(fs, base_path_b);
+    milvus::test::V3SegmentTestData test_data_a(
+        text_schema,
+        1,
+        64,
+        128,
+        TestLocalPath,
+        base_path_a,
+        LazyManifestTestGroupPattern(text_schema));
+    milvus::test::V3SegmentTestData test_data_b(
+        text_schema,
+        1,
+        64,
+        128,
+        TestLocalPath,
+        base_path_b,
+        LazyManifestTestGroupPattern(text_schema));
+
+    constexpr int64_t segment_id = 3178;
+    auto manifest_segment =
+        CreateV3ManifestSegment(test_data_a, segment_id, 0, text_schema);
+    auto* segment_impl =
+        dynamic_cast<ChunkedSegmentSealedImpl*>(manifest_segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    auto initial_snapshot = segment_impl->TestGetPublishedStateSnapshot();
+    auto initial_column = initial_snapshot->runtime->fields.at(text_field);
+    ASSERT_NE(initial_column, nullptr);
+    EXPECT_FALSE(IsLazyColumnForTest(initial_column));
+    ASSERT_NE(initial_snapshot->load_info, nullptr);
+    EXPECT_TRUE(initial_snapshot->load_info->HasTextIndexCreated(text_field));
+
+    milvus::OpContext op_ctx;
+    segment_impl->Reopen(&op_ctx,
+                         MakeV3ManifestLoadInfo(test_data_b, segment_id));
+
+    auto reopened_snapshot = segment_impl->TestGetPublishedStateSnapshot();
+    auto reopened_column = reopened_snapshot->runtime->fields.at(text_field);
+    ASSERT_NE(reopened_column, nullptr);
+    EXPECT_TRUE(IsLazyColumnForTest(reopened_column));
+    int64_t offset = 0;
+    EXPECT_FALSE(reopened_column->CellsLoaded(&offset, 1));
+
+    auto data = reopened_column->DataOfChunk(nullptr, 0);
+    EXPECT_NE(data.get(), nullptr);
+    EXPECT_TRUE(reopened_column->CellsLoaded(&offset, 1));
+}
+
+TEST_P(TestLazyManifest,
+       LazyManifestFieldPreCancellationAllowsFreshContextRetry) {
+    LazyColumnGroupGuard lazy_group_guard(true);
+    auto warmup_policies =
+        milvus::cachinglayer::TieredStorageConfig::GetInstance()
+            .warmup_policies();
+    warmup_policies.scalarFieldCacheWarmupPolicy =
+        CacheWarmupPolicy::CacheWarmupPolicy_Disable;
+    CacheWarmupPolicyGuard warmup_guard(warmup_policies);
+
+    const auto base_path = UniqueManifestTestPath(
+        std::string("lazy_manifest_field_cancel_") +
+        (GetParam() ? "varchar" : "int64"));
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    StorageV2TempDirGuard dir_guard(fs, base_path);
+    constexpr int64_t kNumRows = 64;
+    milvus::test::V3SegmentTestData test_data(
+        schema_,
+        1,
+        kNumRows,
+        128,
+        TestLocalPath,
+        base_path,
+        LazyManifestTestGroupPattern(schema_));
+    auto manifest_segment =
+        CreateV3ManifestSegment(test_data, 3171 + (GetParam() ? 100 : 0));
+    auto* segment_impl =
+        dynamic_cast<ChunkedSegmentSealedImpl*>(manifest_segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    auto snapshot = segment_impl->TestGetPublishedStateSnapshot();
+    ASSERT_NE(snapshot->runtime, nullptr);
+    auto column = snapshot->runtime->fields.at(fields.at("int64"));
+    ASSERT_NE(column, nullptr);
+    EXPECT_TRUE(IsLazyColumnForTest(column));
+    int64_t first_offset = 0;
+    EXPECT_FALSE(column->CellsLoaded(&first_offset, 1));
+
+    folly::CancellationSource source;
+    source.requestCancellation();
+    milvus::OpContext cancelled_ctx(source.getToken());
+    try {
+        (void)column->DataOfChunk(&cancelled_ctx, 0);
+        FAIL() << "expected cancelled field materialization";
+    } catch (const SegcoreError& err) {
+        EXPECT_EQ(err.get_error_code(), ErrorCode::FollyCancel);
+    }
+    EXPECT_FALSE(column->CellsLoaded(&first_offset, 1));
+
+    milvus::OpContext fresh_ctx;
+    auto data = column->DataOfChunk(&fresh_ctx, 0);
+    ASSERT_NE(data.get(), nullptr);
+    EXPECT_TRUE(column->CellsLoaded(&first_offset, 1));
+    EXPECT_GT(column->DataByteSize(), 0);
+}
+
+TEST_P(TestLazyManifest,
+       LazyManifestFirstNonCancellationFailureIsRetryable) {
+    LazyColumnGroupGuard lazy_group_guard(true);
+    auto warmup_policies =
+        milvus::cachinglayer::TieredStorageConfig::GetInstance()
+            .warmup_policies();
+    warmup_policies.scalarFieldCacheWarmupPolicy =
+        CacheWarmupPolicy::CacheWarmupPolicy_Disable;
+    CacheWarmupPolicyGuard warmup_guard(warmup_policies);
+
+    const auto base_path = UniqueManifestTestPath(
+        std::string("lazy_manifest_failure_retry_") +
+        (GetParam() ? "varchar" : "int64"));
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    StorageV2TempDirGuard dir_guard(fs, base_path);
+    constexpr int64_t kNumRows = 64;
+    milvus::test::V3SegmentTestData test_data(
+        schema_,
+        1,
+        kNumRows,
+        128,
+        TestLocalPath,
+        base_path,
+        LazyManifestTestGroupPattern(schema_));
+    auto manifest_segment =
+        CreateV3ManifestSegment(test_data, 3174 + (GetParam() ? 100 : 0));
+    auto* segment_impl =
+        dynamic_cast<ChunkedSegmentSealedImpl*>(manifest_segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+    auto snapshot = segment_impl->TestGetPublishedStateSnapshot();
+    ASSERT_NE(snapshot->runtime, nullptr);
+    ASSERT_NE(snapshot->runtime->reader, nullptr);
+
+    auto column_groups = snapshot->runtime->reader->get_column_groups();
+    ASSERT_NE(column_groups, nullptr);
+    auto field_id = fields.at("int64");
+    auto storage_name = schema_->get_storage_column_name(field_id);
+    auto group_it = std::find_if(
+        column_groups->begin(), column_groups->end(), [&](const auto& group) {
+            return group != nullptr &&
+                   std::find(group->columns.begin(),
+                             group->columns.end(),
+                             storage_name) != group->columns.end();
+        });
+    ASSERT_NE(group_it, column_groups->end());
+    auto target_group = *group_it;
+    ASSERT_FALSE(target_group->files.empty());
+    const auto original_path = target_group->files.front().path;
+    const auto unavailable_path = original_path + ".lazy-retry-unavailable";
+    ASSERT_TRUE(fs->Move(original_path, unavailable_path).ok());
+    auto restore_file = folly::makeGuard([&]() {
+        static_cast<void>(fs->Move(unavailable_path, original_path));
+    });
+
+    auto column =
+        segment_impl->TestGetPublishedStateSnapshot()->runtime->fields.at(
+            field_id);
+    ASSERT_NE(column, nullptr);
+    int64_t first_offset = 0;
+    EXPECT_FALSE(column->CellsLoaded(&first_offset, 1));
+
+    std::optional<ErrorCode> first_error;
+    try {
+        (void)column->DataOfChunk(nullptr, 0);
+    } catch (const SegcoreError& err) {
+        first_error = err.get_error_code();
+    }
+
+    proto::plan::GenericValue value;
+    value.set_int64_val(17);
+    auto term_expr = std::make_shared<expr::TermFilterExpr>(
+        expr::ColumnInfo(field_id, DataType::INT64),
+        std::vector<proto::plan::GenericValue>{value});
+    auto filter_node =
+        std::make_shared<plan::FilterBitsNode>("filter_1", term_expr);
+    auto query_context =
+        std::make_shared<exec::QueryContext>("lazy_manifest_failure_retry",
+                                             manifest_segment.get(),
+                                             kNumRows,
+                                             MAX_TIMESTAMP);
+    auto task = exec::Task::Create("lazy_manifest_failure_retry_task",
+                                   plan::PlanFragment(filter_node),
+                                   0,
+                                   query_context);
+    std::optional<ErrorCode> operator_error;
+    std::exception_ptr unexpected_error;
+    try {
+        while (task->Next()) {
+        }
+    } catch (const SegcoreError& err) {
+        operator_error = err.get_error_code();
+    } catch (...) {
+        unexpected_error = std::current_exception();
+    }
+
+    if (unexpected_error != nullptr) {
+        std::rethrow_exception(unexpected_error);
+    }
+
+    ASSERT_TRUE(first_error.has_value());
+    EXPECT_NE(*first_error, ErrorCode::FollyCancel);
+    ASSERT_TRUE(operator_error.has_value());
+    EXPECT_EQ(*operator_error, *first_error);
+    EXPECT_NE(*operator_error, ErrorCode::UnexpectedError);
+    EXPECT_FALSE(column->CellsLoaded(&first_offset, 1));
+
+    ASSERT_TRUE(fs->Move(unavailable_path, original_path).ok());
+    restore_file.dismiss();
+    auto data = column->DataOfChunk(nullptr, 0);
+    ASSERT_NE(data.get(), nullptr);
+    EXPECT_GT(column->DataByteSize(), 0);
+}
+
+TEST_P(TestLazyManifest,
+       LazyManifestKeepsWarmupDisabledAfterGlobalConfigChanges) {
+    LazyColumnGroupGuard lazy_group_guard(true);
+    StorageV2CellTargetGuard cell_target_guard(1);
+    auto warmup_policies =
+        milvus::cachinglayer::TieredStorageConfig::GetInstance()
+            .warmup_policies();
+    warmup_policies.scalarFieldCacheWarmupPolicy =
+        CacheWarmupPolicy::CacheWarmupPolicy_Disable;
+    CacheWarmupPolicyGuard disable_warmup_guard(warmup_policies);
+
+    const auto base_path = UniqueManifestTestPath(
+        std::string("lazy_manifest_fixed_warmup_") +
+        (GetParam() ? "varchar" : "int64"));
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    StorageV2TempDirGuard dir_guard(fs, base_path);
+    constexpr int64_t kRowsPerBatch = 64;
+    milvus::test::V3SegmentTestData test_data(
+        schema_,
+        2,
+        kRowsPerBatch,
+        128,
+        TestLocalPath,
+        base_path,
+        LazyManifestTestGroupPattern(schema_));
+    auto manifest_segment =
+        CreateV3ManifestSegment(test_data, 3154 + (GetParam() ? 100 : 0));
+    auto* segment_impl =
+        dynamic_cast<ChunkedSegmentSealedImpl*>(manifest_segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+    auto column =
+        segment_impl->TestGetPublishedStateSnapshot()->runtime->fields.at(
+            fields.at("int64"));
+    ASSERT_NE(column, nullptr);
+    int64_t first_offset = 0;
+    EXPECT_FALSE(column->CellsLoaded(&first_offset, 1));
+
+    auto sync_policies = warmup_policies;
+    sync_policies.scalarFieldCacheWarmupPolicy =
+        CacheWarmupPolicy::CacheWarmupPolicy_Sync;
+    CacheWarmupPolicyGuard sync_warmup_guard(sync_policies);
+
+    ASSERT_GT(column->num_chunks(), 0);
+    EXPECT_FALSE(column->CellsLoaded(&first_offset, 1));
+
+    int64_t value = 0;
+    column->BulkPrimitiveValueAt(nullptr, &value, &first_offset, 1);
+    EXPECT_TRUE(column->CellsLoaded(&first_offset, 1));
+}
+
+TEST_P(TestLazyManifest, LazyManifestRetrieveSizeAndValuesAreCorrect) {
+    LazyColumnGroupGuard lazy_group_guard(true);
+    auto warmup_policies =
+        milvus::cachinglayer::TieredStorageConfig::GetInstance()
+            .warmup_policies();
+    warmup_policies.scalarFieldCacheWarmupPolicy =
+        CacheWarmupPolicy::CacheWarmupPolicy_Disable;
+    CacheWarmupPolicyGuard warmup_guard(warmup_policies);
+
+    const auto base_path = UniqueManifestTestPath(
+        std::string("lazy_manifest_retrieve_size_") +
+        (GetParam() ? "varchar" : "int64"));
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    StorageV2TempDirGuard dir_guard(fs, base_path);
+    constexpr int64_t kNumRows = 64;
+    constexpr Timestamp kCommitTs = 1000;
+    milvus::test::V3SegmentTestData test_data(
+        schema_,
+        1,
+        kNumRows,
+        128,
+        TestLocalPath,
+        base_path,
+        LazyManifestTestGroupPattern(schema_));
+    int64_t eager_avg_size = 0;
+    {
+        LazyColumnGroupGuard eager_group_guard(false);
+        auto eager_segment = CreateSegmentByLoadInfo(
+            MakeV3ManifestLoadInfo(test_data, 3156 + (GetParam() ? 100 : 0)),
+            true,
+            kCommitTs);
+        eager_avg_size = static_cast<SegmentInterface*>(eager_segment.get())
+                             ->get_field_avg_size(fields.at("string1"));
+    }
+    ASSERT_GT(eager_avg_size, 0);
+
+    auto manifest_segment = CreateSegmentByLoadInfo(
+        MakeV3ManifestLoadInfo(test_data, 3155 + (GetParam() ? 100 : 0)),
+        true,
+        kCommitTs);
+    auto* segment_impl =
+        dynamic_cast<ChunkedSegmentSealedImpl*>(manifest_segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    auto string_column =
+        segment_impl->TestGetPublishedStateSnapshot()->runtime->fields.at(
+            fields.at("string1"));
+    ASSERT_NE(string_column, nullptr);
+    auto proxy = std::dynamic_pointer_cast<ProxyChunkColumn>(string_column);
+    ASSERT_NE(proxy, nullptr);
+    ASSERT_TRUE(proxy->IsLazy());
+    ASSERT_FALSE(proxy->IsMaterialized());
+
+    auto* segment_interface =
+        static_cast<SegmentInterface*>(manifest_segment.get());
+
+    auto plan = std::make_unique<query::RetrievePlan>(schema_);
+    plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
+    plan->plan_node_->plannodes_ = milvus::test::CreateRetrievePlanByExpr(
+        std::make_shared<expr::AlwaysTrueExpr>());
+    plan->field_ids_ = {fields.at("string1")};
+
+    segment_interface->set_field_avg_size(
+        fields.at("string1"), kNumRows, kNumRows);
+    try {
+        auto unexpected = manifest_segment->Retrieve(
+            nullptr, plan.get(), MAX_TIMESTAMP, 1, false);
+        (void)unexpected;
+        FAIL() << "expected Retrieve size guard to reject the result";
+    } catch (const SegcoreError& err) {
+        EXPECT_EQ(err.get_error_code(), RetrieveError);
+        EXPECT_NE(std::string(err.what()).find("query results exceed"),
+                  std::string::npos);
+    }
+    EXPECT_GT(string_column->DataByteSize(), 0);
+    EXPECT_EQ(segment_interface->get_field_avg_size(fields.at("string1")),
+              eager_avg_size);
+
+    auto results = manifest_segment->Retrieve(
+        nullptr, plan.get(), MAX_TIMESTAMP, DEFAULT_MAX_OUTPUT_SIZE, false);
+    EXPECT_EQ(manifest_segment->get_max_timestamp(), kCommitTs);
+    ASSERT_EQ(results->fields_data_size(), 1);
+    const auto& values = results->fields_data(0).scalars().string_data();
+    ASSERT_EQ(values.data_size(), kNumRows);
+    auto expected_data = DataGen(schema_, kNumRows, 42);
+    const auto expected =
+        expected_data.get_col<std::string>(fields.at("string1"));
+    const auto expected_valid = expected_data.get_col_valid(fields.at("string1"));
+    const auto& actual_valid = GetFieldDataRowValidData(results->fields_data(0));
+    ASSERT_EQ(actual_valid.size(), kNumRows);
+    for (int64_t i = 0; i < kNumRows; ++i) {
+        EXPECT_EQ(actual_valid[i], expected_valid[i]) << "row " << i;
+        if (expected_valid[i]) {
+            EXPECT_EQ(values.data(i), expected[i]) << "row " << i;
+        }
+    }
+}
+
+TEST_P(TestLazyManifest, LazyManifestSystemFieldTaskUsesRegularLoad) {
+    LazyColumnGroupGuard lazy_group_guard(true);
+    auto warmup_policies =
+        milvus::cachinglayer::TieredStorageConfig::GetInstance()
+            .warmup_policies();
+    warmup_policies.scalarFieldCacheWarmupPolicy =
+        CacheWarmupPolicy::CacheWarmupPolicy_Disable;
+    CacheWarmupPolicyGuard warmup_guard(warmup_policies);
+
+    auto schema = std::make_shared<Schema>();
+    schema->AddField(
+        FieldName("RowID"), RowFieldID, DataType::INT64, false, std::nullopt);
+    auto pk = schema->AddDebugField(
+        "pk", GetParam() ? DataType::VARCHAR : DataType::INT64, false);
+    schema->AddField(FieldName("Timestamp"),
+                     TimestampFieldID,
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+    schema->set_primary_field_id(pk);
+
+    for (bool separate_timestamp : {false, true}) {
+        SCOPED_TRACE(separate_timestamp);
+        const auto base_path = UniqueManifestTestPath(
+            std::string("lazy_manifest_system_fields_") +
+            (GetParam() ? "varchar" : "int64") +
+            (separate_timestamp ? "_split_ts" : "_shared_ts"));
+        auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+        StorageV2TempDirGuard dir_guard(fs, base_path);
+        constexpr int64_t kNumRows = 64;
+        milvus::test::V3SegmentTestData test_data(
+            schema,
+            1,
+            kNumRows,
+            1,
+            TestLocalPath,
+            base_path,
+            separate_timestamp ? fmt::format("{}|{},{}",
+                                             RowFieldID.get(),
+                                             pk.get(),
+                                             TimestampFieldID.get())
+                               : "");
+        ASSERT_EQ(test_data.NumColumnGroups(), separate_timestamp ? 2 : 1);
+
+        auto manifest_segment = CreateV3ManifestSegment(
+            test_data,
+            3161 + (GetParam() ? 100 : 0) + (separate_timestamp ? 1000 : 0),
+            0,
+            schema);
+        auto* segment_impl =
+            dynamic_cast<ChunkedSegmentSealedImpl*>(manifest_segment.get());
+        ASSERT_NE(segment_impl, nullptr);
+        auto snapshot = segment_impl->TestGetPublishedStateSnapshot();
+        ASSERT_NE(snapshot->runtime, nullptr);
+        ASSERT_TRUE(snapshot->system_field_ready);
+        ASSERT_NE(snapshot->runtime->pk_index_slot, nullptr);
+        ASSERT_NE(snapshot->runtime->timestamp_index_slot, nullptr);
+        EXPECT_NE(snapshot->runtime->timestamps, nullptr);
+        EXPECT_NE(snapshot->runtime->timestamp_index, nullptr);
+        EXPECT_FALSE(snapshot->runtime->pk_index_slot->IsCached(0));
+        EXPECT_TRUE(snapshot->runtime->timestamp_index_slot->IsCached(0));
+
+        auto row_id_column = snapshot->runtime->fields.at(RowFieldID);
+        auto pk_column = snapshot->runtime->fields.at(pk);
+        auto timestamp_column = snapshot->runtime->fields.at(TimestampFieldID);
+        for (const auto& [field_id, column] : std::vector<
+                 std::pair<FieldId, std::shared_ptr<ChunkedColumnInterface>>>{
+                 {RowFieldID, row_id_column},
+                 {pk, pk_column},
+                 {TimestampFieldID, timestamp_column}}) {
+            ASSERT_NE(column, nullptr);
+            EXPECT_EQ(column->IsInMultiFieldColumnGroup(),
+                      !separate_timestamp || field_id != TimestampFieldID);
+            EXPECT_FALSE(IsLazyColumnForTest(column));
+        }
+
+        int64_t offsets[] = {0, kNumRows - 1};
+        auto timestamps = manifest_segment->bulk_subscript(
+            nullptr, TimestampFieldID, offsets, 2);
+        ASSERT_EQ(timestamps->scalars().long_data().data_size(), 2);
+        EXPECT_EQ(timestamps->scalars().long_data().data(0), 0);
+        EXPECT_EQ(timestamps->scalars().long_data().data(1), kNumRows - 1);
+
+        BitsetType timestamp_mask(kNumRows);
+        BitsetTypeView timestamp_mask_view(timestamp_mask);
+        static_cast<SegmentInternalInterface*>(manifest_segment.get())
+            ->mask_with_timestamps(timestamp_mask_view, 31, 0);
+        for (int64_t i = 0; i < kNumRows; ++i) {
+            EXPECT_EQ(timestamp_mask[i], i >= kNumRows / 2);
+        }
+
+        // PK shares the regular-load Task; delete application must still work.
+        PkType missing_pk = GetParam() ? PkType(std::string("__missing__"))
+                                       : PkType(int64_t{-1});
+        EXPECT_FALSE(segment_impl->Contain(missing_pk));
+        EXPECT_TRUE(snapshot->runtime->pk_index_slot->IsCached(0));
+        auto pk_values =
+            manifest_segment->bulk_subscript(nullptr, pk, offsets, 1);
+        IdArray delete_ids;
+        if (GetParam()) {
+            delete_ids.mutable_str_id()->add_data(
+                pk_values->scalars().string_data().data(0));
+        } else {
+            delete_ids.mutable_int_id()->add_data(
+                pk_values->scalars().long_data().data(0));
+        }
+        Timestamp delete_ts = MAX_TIMESTAMP;
+        ASSERT_TRUE(manifest_segment->Delete(1, &delete_ids, &delete_ts).ok());
+        auto* segment_internal =
+            dynamic_cast<SegmentInternalInterface*>(manifest_segment.get());
+        ASSERT_NE(segment_internal, nullptr);
+        BitsetType delete_mask(kNumRows);
+        BitsetTypeView delete_mask_view(delete_mask);
+        segment_internal->mask_with_delete(
+            delete_mask_view, kNumRows, MAX_TIMESTAMP);
+        EXPECT_EQ(delete_mask.count(), 1);
+        EXPECT_TRUE(delete_mask[0]);
+        EXPECT_GT(pk_column->DataByteSize(), 0);
+        EXPECT_GT(timestamp_column->DataByteSize(), 0);
+    }
+}
+
+TEST_P(TestLazyManifest, LazyManifestPkTasksUseRegularLoad) {
+    LazyColumnGroupGuard lazy_group_guard(true);
+    auto warmup_policies =
+        milvus::cachinglayer::TieredStorageConfig::GetInstance()
+            .warmup_policies();
+    warmup_policies.scalarFieldCacheWarmupPolicy =
+        CacheWarmupPolicy::CacheWarmupPolicy_Disable;
+    warmup_policies.scalarIndexCacheWarmupPolicy =
+        CacheWarmupPolicy::CacheWarmupPolicy_Disable;
+    CacheWarmupPolicyGuard warmup_guard(warmup_policies);
+
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField(
+        "pk", GetParam() ? DataType::VARCHAR : DataType::INT64, false);
+    auto value = schema->AddDebugField("value", DataType::INT64, false);
+    schema->AddField(FieldName("Timestamp"),
+                     TimestampFieldID,
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+    schema->set_primary_field_id(pk);
+    constexpr int64_t kNumRows = 64;
+
+    for (bool share_pk_task : {false, true}) {
+        SCOPED_TRACE(share_pk_task);
+        const auto base_path = UniqueManifestTestPath(
+            std::string("lazy_manifest_pk_regular_") +
+            (GetParam() ? "varchar" : "int64") +
+            (share_pk_task ? "_shared" : "_single"));
+        auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+        StorageV2TempDirGuard dir_guard_a(fs, base_path + "_a");
+        StorageV2TempDirGuard dir_guard_b(fs, base_path + "_b");
+        auto pattern =
+            share_pk_task
+                ? fmt::format(
+                      "{}|{},{}", pk.get(), value.get(), TimestampFieldID.get())
+                : fmt::format("{},{},{}",
+                              pk.get(),
+                              value.get(),
+                              TimestampFieldID.get());
+        milvus::test::V3SegmentTestData test_data_a(
+            schema, 1, kNumRows, 1, TestLocalPath, base_path + "_a", pattern);
+        milvus::test::V3SegmentTestData test_data_b(
+            schema, 1, kNumRows, 1, TestLocalPath, base_path + "_b", pattern);
+        ASSERT_EQ(test_data_a.NumColumnGroups(), share_pk_task ? 2 : 3);
+        const auto segment_id =
+            3180 + (GetParam() ? 100 : 0) + (share_pk_task ? 1000 : 0);
+        auto segment =
+            CreateV3ManifestSegment(test_data_a, segment_id, 0, schema);
+        auto* impl = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+        ASSERT_NE(impl, nullptr);
+        auto old_pk_column =
+            impl->TestGetPublishedStateSnapshot()->runtime->fields.at(pk);
+
+        for (bool reopen : {false, true}) {
+            SCOPED_TRACE(reopen);
+            if (reopen) {
+                milvus::OpContext ctx;
+                impl->Reopen(&ctx,
+                             MakeV3ManifestLoadInfo(test_data_b, segment_id));
+            }
+            auto snapshot = impl->TestGetPublishedStateSnapshot();
+            auto pk_column = snapshot->runtime->fields.at(pk);
+            auto value_column = snapshot->runtime->fields.at(value);
+            EXPECT_FALSE(IsLazyColumnForTest(pk_column));
+            EXPECT_EQ(IsLazyColumnForTest(value_column), !share_pk_task);
+            EXPECT_EQ(pk_column->IsInMultiFieldColumnGroup(), share_pk_task);
+            ASSERT_NE(snapshot->runtime->pk_index_slot, nullptr);
+            // Excluding PK from Lazy Manifest does not force its index to build.
+            EXPECT_FALSE(snapshot->runtime->pk_index_slot->IsCached(0));
+            if (reopen) {
+                EXPECT_NE(pk_column, old_pk_column);
+            }
+        }
+
+        int64_t offset = 0;
+        auto pk_values = segment->bulk_subscript(nullptr, pk, &offset, 1);
+        IdArray delete_ids;
+        if (GetParam()) {
+            delete_ids.mutable_str_id()->add_data(
+                pk_values->scalars().string_data().data(0));
+        } else {
+            delete_ids.mutable_int_id()->add_data(
+                pk_values->scalars().long_data().data(0));
+        }
+        Timestamp delete_ts = MAX_TIMESTAMP;
+        ASSERT_TRUE(segment->Delete(1, &delete_ids, &delete_ts).ok());
+        auto* internal = dynamic_cast<SegmentInternalInterface*>(segment.get());
+        ASSERT_NE(internal, nullptr);
+        BitsetType delete_mask(kNumRows);
+        BitsetTypeView delete_mask_view(delete_mask);
+        internal->mask_with_delete(delete_mask_view, kNumRows, MAX_TIMESTAMP);
+        EXPECT_EQ(delete_mask.count(), 1);
+        EXPECT_TRUE(delete_mask[0]);
+    }
+}
+
+TEST_P(TestLazyManifest, LazyManifestReopenRebindsGeneration) {
+    LazyColumnGroupGuard lazy_group_guard(true);
+    auto warmup_policies =
+        milvus::cachinglayer::TieredStorageConfig::GetInstance()
+            .warmup_policies();
+    warmup_policies.scalarFieldCacheWarmupPolicy =
+        CacheWarmupPolicy::CacheWarmupPolicy_Disable;
+    CacheWarmupPolicyGuard warmup_guard(warmup_policies);
+
+    const auto suffix = GetParam() ? "varchar" : "int64";
+    const auto base_path_a = UniqueManifestTestPath(
+        std::string("lazy_manifest_reopen_a_") + suffix);
+    const auto base_path_b = UniqueManifestTestPath(
+        std::string("lazy_manifest_reopen_b_") + suffix);
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    StorageV2TempDirGuard dir_guard_a(fs, base_path_a);
+    StorageV2TempDirGuard dir_guard_b(fs, base_path_b);
+    milvus::test::V3SegmentTestData test_data_a(
+        schema_,
+        1,
+        64,
+        128,
+        TestLocalPath,
+        base_path_a,
+        LazyManifestTestGroupPattern(schema_));
+    milvus::test::V3SegmentTestData test_data_b(
+        schema_,
+        2,
+        32,
+        128,
+        TestLocalPath,
+        base_path_b,
+        LazyManifestTestGroupPattern(schema_));
+
+    auto manifest_segment =
+        CreateV3ManifestSegment(test_data_a, 3164 + (GetParam() ? 100 : 0));
+    auto* segment_impl =
+        dynamic_cast<ChunkedSegmentSealedImpl*>(manifest_segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+    auto old_snapshot = segment_impl->TestGetPublishedStateSnapshot();
+    auto old_column = old_snapshot->runtime->fields.at(fields.at("int64"));
+    ASSERT_NE(old_column, nullptr);
+    ASSERT_NE(old_snapshot->runtime->pk_index_slot, nullptr);
+    ASSERT_NE(old_snapshot->runtime->timestamp_index_slot, nullptr);
+
+    const auto string_field = fields.at("string1");
+    static_cast<SegmentInterface*>(manifest_segment.get())
+        ->set_field_avg_size(string_field, 64, 64 * 123);
+    ASSERT_GT(segment_impl->TestGetPublishedStateSnapshot()
+                  ->runtime->variable_fields_avg_size.count(string_field),
+              0);
+    auto mmap_proto = schema_->ToProto();
+    for (auto& field : *mmap_proto.mutable_fields()) {
+        if (field.fieldid() == TimestampFieldID.get()) {
+            field.set_name("Timestamp");
+        }
+        if (field.fieldid() == string_field.get()) {
+            auto* mmap = field.add_type_params();
+            mmap->set_key(MMAP_ENABLED_KEY);
+            mmap->set_value("true");
+        }
+    }
+    auto mmap_schema = Schema::ParseFrom(mmap_proto);
+    milvus::OpContext op_ctx;
+    segment_impl->Reopen(
+        &op_ctx,
+        MakeV3ManifestLoadInfo(test_data_b, 3164 + (GetParam() ? 100 : 0)),
+        mmap_schema);
+    auto new_snapshot = segment_impl->TestGetPublishedStateSnapshot();
+    ASSERT_NE(new_snapshot, old_snapshot);
+    auto new_column = new_snapshot->runtime->fields.at(fields.at("int64"));
+    ASSERT_NE(new_column, nullptr);
+    EXPECT_NE(new_column, old_column);
+    EXPECT_EQ(new_snapshot->runtime->mmap_field_ids.count(string_field), 1);
+    EXPECT_EQ(new_snapshot->runtime->variable_fields_avg_size.count(string_field),
+              0);
+    auto mmap_column = std::dynamic_pointer_cast<ProxyChunkColumn>(
+        new_snapshot->runtime->fields.at(string_field));
+    ASSERT_NE(mmap_column, nullptr);
+    ASSERT_TRUE(mmap_column->IsLazy());
+    ASSERT_FALSE(mmap_column->IsMaterialized());
+    auto* segment_interface =
+        static_cast<SegmentInterface*>(manifest_segment.get());
+    EXPECT_EQ(segment_interface->get_field_avg_size(string_field), 0);
+    EXPECT_FALSE(mmap_column->IsMaterialized());
+    ASSERT_NE(new_snapshot->runtime->pk_index_slot, nullptr);
+    ASSERT_NE(new_snapshot->runtime->timestamp_index_slot, nullptr);
+    EXPECT_NE(new_snapshot->runtime->pk_index_slot,
+              old_snapshot->runtime->pk_index_slot);
+    EXPECT_NE(new_snapshot->runtime->timestamp_index_slot,
+              old_snapshot->runtime->timestamp_index_slot);
+
+    auto read_value = [](const std::shared_ptr<ChunkedColumnInterface>& column,
+                         int64_t offset) {
+        int64_t value = -1;
+        column->BulkPrimitiveValueAt(nullptr, &value, &offset, 1);
+        return value;
+    };
+    EXPECT_EQ(read_value(old_column, 40), 40);
+
+    EXPECT_EQ(read_value(new_column, 40), 8);
+    EXPECT_TRUE(mmap_column->IsMaterialized());
+    EXPECT_EQ(segment_interface->get_field_avg_size(string_field), 0);
+    segment_impl->DropFieldData(fields.at("string1"));
+    auto dropped_column_snapshot =
+        segment_impl->TestGetPublishedStateSnapshot();
+    EXPECT_EQ(
+        dropped_column_snapshot->runtime->fields.count(fields.at("string1")),
+        0);
+
+    EXPECT_EQ(read_value(new_column, 40), 8);
+    EXPECT_EQ(read_value(old_column, 40), 40);
+    EXPECT_EQ(old_snapshot->runtime->fields.at(fields.at("int64")), old_column);
+}
+
+TEST_P(TestLazyManifest, LazyManifestSchemaOnlyDropKeepsSurvivorTask) {
+    LazyColumnGroupGuard lazy_group_guard(true);
+    auto warmup_policies =
+        milvus::cachinglayer::TieredStorageConfig::GetInstance()
+            .warmup_policies();
+    warmup_policies.scalarFieldCacheWarmupPolicy =
+        CacheWarmupPolicy::CacheWarmupPolicy_Disable;
+    CacheWarmupPolicyGuard warmup_guard(warmup_policies);
+
+    auto old_schema = std::make_shared<Schema>(*schema_);
+    old_schema->set_schema_version(1);
+
+    const auto suffix = GetParam() ? "varchar" : "int64";
+    const auto base_path = UniqueManifestTestPath(
+        std::string("lazy_manifest_schema_drop_") + suffix);
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    StorageV2TempDirGuard dir_guard(fs, base_path);
+
+    constexpr int64_t kNumRows = 64;
+    constexpr int64_t kOffset = 40;
+    const auto segment_id = 3167 + (GetParam() ? 100 : 0);
+    milvus::test::V3SegmentTestData test_data(
+        old_schema,
+        1,
+        kNumRows,
+        128,
+        TestLocalPath,
+        base_path,
+        LazyManifestTestGroupPattern(old_schema));
+
+    auto manifest_segment =
+        CreateV3ManifestSegment(test_data, segment_id, 0, old_schema);
+    auto* segment_impl =
+        dynamic_cast<ChunkedSegmentSealedImpl*>(manifest_segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    const auto survivor_field = fields.at("int64");
+    const auto dropped_field = fields.at("string1");
+    const auto peer_field = fields.at("string2");
+
+    auto old_snapshot = segment_impl->TestGetPublishedStateSnapshot();
+    ASSERT_NE(old_snapshot, nullptr);
+    ASSERT_NE(old_snapshot->runtime, nullptr);
+    auto old_survivor = old_snapshot->runtime->fields.at(survivor_field);
+    auto old_dropped = old_snapshot->runtime->fields.at(dropped_field);
+    auto old_peer = old_snapshot->runtime->fields.at(peer_field);
+    ASSERT_NE(old_survivor, nullptr);
+    ASSERT_NE(old_dropped, nullptr);
+    ASSERT_NE(old_peer, nullptr);
+    EXPECT_TRUE(old_survivor->IsInMultiFieldColumnGroup());
+
+    auto schema_proto = old_schema->ToProto();
+    bool removed = false;
+    for (int i = 0; i < schema_proto.fields_size(); ++i) {
+        if (schema_proto.fields(i).fieldid() == dropped_field.get()) {
+            schema_proto.mutable_fields()->DeleteSubrange(i, 1);
+            removed = true;
+            break;
+        }
+    }
+    ASSERT_TRUE(removed);
+    for (auto& field : *schema_proto.mutable_fields()) {
+        if (field.fieldid() == TimestampFieldID.get()) {
+            // GenChunkedSegmentTestSchema uses the debug-only name "ts";
+            // Schema::ParseFrom validates production system-field names.
+            field.set_name("Timestamp");
+        }
+    }
+    auto new_schema = Schema::ParseFrom(schema_proto);
+    new_schema->set_schema_version(2);
+
+    segment_impl->Reopen(new_schema);
+
+    auto new_snapshot = segment_impl->TestGetPublishedStateSnapshot();
+    ASSERT_NE(new_snapshot, old_snapshot);
+    ASSERT_NE(new_snapshot->runtime, nullptr);
+    EXPECT_TRUE(old_snapshot->schema->has_field(dropped_field));
+    EXPECT_FALSE(new_snapshot->schema->has_field(dropped_field));
+    EXPECT_EQ(new_snapshot->runtime->fields.count(dropped_field), 0);
+
+    auto new_survivor = new_snapshot->runtime->fields.at(survivor_field);
+    auto new_peer = new_snapshot->runtime->fields.at(peer_field);
+    ASSERT_NE(new_survivor, nullptr);
+    ASSERT_NE(new_peer, nullptr);
+    EXPECT_EQ(new_survivor, old_survivor);
+    EXPECT_EQ(new_peer, old_peer);
+    EXPECT_TRUE(new_survivor->IsInMultiFieldColumnGroup());
+
+    // A schema-only drop removes the dropped facade from the new runtime but
+    // keeps the unchanged physical Task for surviving fields.
+    auto read_int64 = [](const std::shared_ptr<ChunkedColumnInterface>& column,
+                         int64_t offset) {
+        int64_t value = -1;
+        column->BulkPrimitiveValueAt(nullptr, &value, &offset, 1);
+        return value;
+    };
+
+    EXPECT_EQ(read_int64(new_survivor, kOffset), kOffset);
+    auto old_dropped_data = old_dropped->DataOfChunk(nullptr, 0);
+    EXPECT_NE(old_dropped_data.get(), nullptr);
+
+    auto current_dropped_snapshot =
+        segment_impl->TestGetPublishedStateSnapshot();
+    EXPECT_EQ(current_dropped_snapshot->runtime->fields.count(dropped_field),
+              0);
+}
+
+TEST_P(TestLazyManifest, LazyManifestDisabledKeepsEagerColumnGroup) {
+    LazyColumnGroupGuard lazy_group_guard(false);
+    auto warmup_policies =
+        milvus::cachinglayer::TieredStorageConfig::GetInstance()
+            .warmup_policies();
+    warmup_policies.scalarFieldCacheWarmupPolicy =
+        CacheWarmupPolicy::CacheWarmupPolicy_Disable;
+    CacheWarmupPolicyGuard warmup_guard(warmup_policies);
+
+    const auto base_path = UniqueManifestTestPath(
+        std::string("lazy_manifest_disabled_") +
+        (GetParam() ? "varchar" : "int64"));
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    StorageV2TempDirGuard dir_guard(fs, base_path);
+    milvus::test::V3SegmentTestData test_data(
+        schema_,
+        1,
+        32,
+        128,
+        TestLocalPath,
+        base_path,
+        LazyManifestTestGroupPattern(schema_));
+    auto manifest_segment =
+        CreateV3ManifestSegment(test_data, 3170 + (GetParam() ? 100 : 0));
+    auto* segment_impl =
+        dynamic_cast<ChunkedSegmentSealedImpl*>(manifest_segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    auto int64_column =
+        segment_impl->TestGetPublishedStateSnapshot()->runtime->fields.at(
+            fields.at("int64"));
+    auto pk_column =
+        segment_impl->TestGetPublishedStateSnapshot()->runtime->fields.at(
+            fields.at("pk"));
+    ASSERT_NE(int64_column, nullptr);
+    ASSERT_NE(pk_column, nullptr);
+    EXPECT_TRUE(int64_column->IsInMultiFieldColumnGroup());
+    // The test layout keeps PK in its own physical group.
+    EXPECT_FALSE(pk_column->IsInMultiFieldColumnGroup());
+    EXPECT_FALSE(IsLazyColumnForTest(int64_column));
+    EXPECT_FALSE(IsLazyColumnForTest(pk_column));
+
+    auto& config = SegcoreConfig::default_config();
+    config.set_lazy_column_group_enabled(true);
+    auto lazy_segment =
+        CreateV3ManifestSegment(test_data, 3180 + (GetParam() ? 100 : 0));
+    auto* lazy_impl =
+        dynamic_cast<ChunkedSegmentSealedImpl*>(lazy_segment.get());
+    ASSERT_NE(lazy_impl, nullptr);
+    auto lazy_column = std::dynamic_pointer_cast<ProxyChunkColumn>(
+        lazy_impl->TestGetPublishedStateSnapshot()->runtime->fields.at(
+            fields.at("int64")));
+    ASSERT_NE(lazy_column, nullptr);
+    EXPECT_TRUE(lazy_column->IsLazy());
+    EXPECT_FALSE(lazy_column->IsMaterialized());
+    EXPECT_FALSE(IsLazyColumnForTest(int64_column));
+
+    config.set_lazy_column_group_enabled(false);
+    auto next_segment =
+        CreateV3ManifestSegment(test_data, 3181 + (GetParam() ? 100 : 0));
+    auto* next_impl =
+        dynamic_cast<ChunkedSegmentSealedImpl*>(next_segment.get());
+    ASSERT_NE(next_impl, nullptr);
+    EXPECT_FALSE(IsLazyColumnForTest(
+        next_impl->TestGetPublishedStateSnapshot()->runtime->fields.at(
+            fields.at("int64"))));
+    EXPECT_FALSE(lazy_column->IsMaterialized());
+    EXPECT_TRUE(lazy_column->IsLazy());
+}
+
+TEST(LazyManifest, ExternalMappedColumnsStayColdUntilRead) {
+    for (bool async_enabled : {false, true}) {
+        SCOPED_TRACE(async_enabled);
+        const auto previous_async =
+            storagev2translator::StorageV2AsyncLoadEnabled();
+        auto restore_async = folly::makeGuard([previous_async] {
+            storagev2translator::SetStorageV2AsyncLoadEnabled(previous_async);
+        });
+        storagev2translator::SetStorageV2AsyncLoadEnabled(async_enabled);
+        LazyColumnGroupGuard lazy_group_guard(true);
+        auto policies =
+            cachinglayer::TieredStorageConfig::GetInstance().warmup_policies();
+        policies.scalarFieldCacheWarmupPolicy =
+            CacheWarmupPolicy::CacheWarmupPolicy_Disable;
+        CacheWarmupPolicyGuard warmup_guard(policies);
+
+        const FieldId number(100), text(101), pk(102);
+        auto source_schema = std::make_shared<Schema>();
+        source_schema->AddField(FieldMeta(FieldName("number"),
+                                          number,
+                                          DataType::INT64,
+                                          true,
+                                          std::nullopt,
+                                          "source_number"));
+        source_schema->AddField(FieldMeta(FieldName("text"),
+                                          text,
+                                          DataType::VARCHAR,
+                                          65535,
+                                          true,
+                                          std::nullopt,
+                                          "source_text"));
+        source_schema->set_external_source("s3://test-bucket/data");
+        source_schema->set_external_spec(R"({"format":"parquet"})");
+        const auto path = UniqueManifestTestPath("lazy_manifest_external");
+        auto fs = GetDefaultArrowFileSystem();
+        StorageV2TempDirGuard dir_guard(fs, path);
+        constexpr int64_t rows = 8;
+        milvus::test::V3SegmentTestData data(source_schema,
+                                             1,
+                                             rows,
+                                             1,
+                                             TestLocalPath,
+                                             path,
+                                             "source_number|source_text");
+        ASSERT_EQ(data.NumColumnGroups(), 1);
+
+        auto schema = std::make_shared<Schema>(*source_schema);
+        schema->AddField(FieldMeta(
+            FieldName("virtual_pk"), pk, DataType::INT64, false, std::nullopt));
+        schema->AddField(FieldName("RowID"),
+                         RowFieldID,
+                         DataType::INT64,
+                         false,
+                         std::nullopt);
+        schema->AddField(FieldName("Timestamp"),
+                         TimestampFieldID,
+                         DataType::INT64,
+                         false,
+                         std::nullopt);
+        schema->set_primary_field_id(pk);
+
+        // A cold external load must not need even the Parquet footer.
+        const auto parquet_path =
+            data.GetColumnGroups()->at(0)->files.front().path;
+        const auto hidden_path = parquet_path + ".hidden";
+        ASSERT_TRUE(fs->Move(parquet_path, hidden_path).ok());
+        auto restore_file = folly::makeGuard(
+            [&] { static_cast<void>(fs->Move(hidden_path, parquet_path)); });
+        constexpr int64_t segment_id = 3190;
+        auto segment = CreateSealedSegment(schema, nullptr, segment_id);
+        proto::segcore::SegmentLoadInfo info;
+        info.set_segmentid(segment_id);
+        info.set_collectionid(1);
+        info.set_partitionid(1);
+        info.set_num_of_rows(rows);
+        info.set_storageversion(STORAGE_V3);
+        info.set_manifest_path(data.ManifestPathJson());
+        segment->SetLoadInfo(info);
+        milvus::tracer::TraceContext trace_ctx;
+        ASSERT_NO_THROW(segment->Load(trace_ctx, nullptr));
+        auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+        ASSERT_NE(sealed, nullptr);
+        auto state = sealed->TestGetPublishedStateSnapshot();
+        auto number_column = std::dynamic_pointer_cast<ProxyChunkColumn>(
+            state->runtime->fields.at(number));
+        auto text_column = std::dynamic_pointer_cast<ProxyChunkColumn>(
+            state->runtime->fields.at(text));
+        ASSERT_NE(number_column, nullptr);
+        ASSERT_NE(text_column, nullptr);
+        ASSERT_TRUE(number_column->IsLazy());
+        ASSERT_TRUE(text_column->IsLazy());
+        EXPECT_FALSE(number_column->IsMaterialized());
+        EXPECT_FALSE(text_column->IsMaterialized());
+        EXPECT_NE(state->runtime->virtual_pk2offset, nullptr);
+        EXPECT_EQ(state->runtime->pk_index_slot, nullptr);
+        EXPECT_EQ(state->runtime->timestamp_index_slot, nullptr);
+
+        int64_t offsets[] = {6, 0, 2, 6};
+        auto pks = segment->bulk_subscript(nullptr, pk, offsets, 4);
+        ASSERT_EQ(pks->scalars().long_data().data_size(), 4);
+        Timestamp timestamps[4];
+        static_cast<SegmentInternalInterface*>(segment.get())
+            ->bulk_subscript(
+                nullptr, SystemFieldType::Timestamp, offsets, 4, timestamps);
+        for (int i = 0; i < 4; ++i) {
+            EXPECT_EQ(pks->scalars().long_data().data(i),
+                      (segment_id << 32) | offsets[i]);
+            EXPECT_EQ(timestamps[i], 0);
+        }
+        EXPECT_FALSE(number_column->IsMaterialized());
+        EXPECT_FALSE(text_column->IsMaterialized());
+
+        ASSERT_TRUE(fs->Move(hidden_path, parquet_path).ok());
+        restore_file.dismiss();
+        int64_t values[4];
+        number_column->BulkPrimitiveValueAt(
+            nullptr, values, offsets, 4, /*small_int_raw_type=*/false);
+        for (int i = 0; i < 4; ++i) {
+            EXPECT_EQ(values[i], offsets[i]);
+        }
+        EXPECT_TRUE(number_column->IsMaterialized());
+        // Separate Tasks from the same physical CG materialize independently.
+        EXPECT_FALSE(text_column->IsMaterialized());
+        auto expected =
+            DataGen(source_schema, rows, 42).get_col<std::string>(text);
+        size_t seen = 0;
+        text_column->BulkRawStringAt(
+            nullptr,
+            [&](std::string_view value, size_t i, bool valid) {
+                ASSERT_LT(i, 4);
+                EXPECT_TRUE(valid);
+                EXPECT_EQ(value, expected[offsets[i]]);
+                ++seen;
+            },
+            offsets,
+            4);
+        EXPECT_EQ(seen, 4);
+        EXPECT_TRUE(text_column->IsMaterialized());
+    }
+}
 
 TEST_P(TestChunkSegmentStorageV2, ReduceStringPkWithSimulatedAnnResult) {
     constexpr int64_t nq = 4;
