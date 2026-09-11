@@ -33,6 +33,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/config"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/fips"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -394,7 +395,8 @@ type commonConfig struct {
 	DynamicFieldLengthAvg ParamItem `refreshable:"true"`
 	SparseFloatVectorSize ParamItem `refreshable:"true"`
 
-	MetricsPort ParamItem `refreshable:"false"`
+	MetricsPort                ParamItem `refreshable:"false"`
+	CollectionLevelMetricsMode ParamItem `refreshable:"false"`
 
 	// lock related params
 	EnableLockMetrics           ParamItem `refreshable:"false"`
@@ -1258,6 +1260,15 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 		DefaultValue: "9091",
 	}
 	p.MetricsPort.Init(base.mgr)
+
+	p.CollectionLevelMetricsMode = ParamItem{
+		Key:          "common.metrics.collectionLevelMode",
+		Version:      "3.0.0",
+		DefaultValue: metrics.CollectionLevelMetricsModeFull,
+		Doc:          "controls collection/VChannel-scoped Prometheus metrics: full keeps collection and VChannel values, aggregate replaces them with all and suppresses gauges without a truthful aggregate",
+		Export:       true,
+	}
+	p.CollectionLevelMetricsMode.Init(base.mgr)
 
 	p.EnableLockMetrics = ParamItem{
 		Key:          "common.locks.metrics.enable",

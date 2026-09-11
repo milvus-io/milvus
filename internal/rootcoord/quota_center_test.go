@@ -25,13 +25,16 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
@@ -1072,6 +1075,111 @@ func TestQuotaCenter(t *testing.T) {
 		assert.Equal(t, getRate(limiters, internalpb.RateType_DQLQuery), float64(4))
 		assert.Equal(t, getRate(limiters, internalpb.RateType_DQLSearch), float64(5))
 	})
+}
+
+func TestQuotaCenterAggregatesCollectionEntityMetrics(t *testing.T) {
+	previousMode := metrics.CollectionLevelMetricsMode()
+	metrics.SetCollectionLevelMetricsMode(metrics.CollectionLevelMetricsModeAggregate)
+	t.Cleanup(func() {
+		metrics.SetCollectionLevelMetricsMode(previousMode)
+		metrics.RootCoordNumEntities.Reset()
+		metrics.RootCoordIndexedNumEntities.Reset()
+	})
+
+	const databaseName = "aggregate-db"
+	collections := map[int64]*model.Collection{
+		1: {
+			DBID:         10,
+			CollectionID: 1,
+			DBName:       databaseName,
+			Name:         "collection-1",
+			Fields: []*model.Field{{
+				FieldID:  100,
+				DataType: schemapb.DataType_FloatVector,
+			}},
+		},
+		2: {
+			DBID:         10,
+			CollectionID: 2,
+			DBName:       databaseName,
+			Name:         "collection-2",
+			Fields: []*model.Field{{
+				FieldID:  100,
+				DataType: schemapb.DataType_FloatVector,
+			}},
+		},
+	}
+
+	queryTopology := &metricsinfo.QueryCoordTopology{
+		Cluster: metricsinfo.QueryClusterTopology{
+			ConnectedNodes: []metricsinfo.QueryNodeInfos{{
+				BaseComponentInfos: metricsinfo.BaseComponentInfos{ID: 11},
+				QuotaMetrics: &metricsinfo.QueryNodeQuotaMetrics{
+					Effect: metricsinfo.NodeEffect{NodeID: 11, CollectionIDs: []int64{1, 2}},
+				},
+				CollectionMetrics: &metricsinfo.QueryNodeCollectionMetrics{
+					CollectionRows: map[int64]int64{1: 10, 2: 20},
+				},
+			}},
+		},
+	}
+	dataTopology := &metricsinfo.DataCoordTopology{
+		Cluster: metricsinfo.DataClusterTopology{
+			Self: metricsinfo.DataCoordInfos{
+				CollectionMetrics: &metricsinfo.DataCoordCollectionMetrics{
+					Collections: map[int64]*metricsinfo.DataCoordCollectionInfo{
+						1: {
+							NumEntitiesTotal: 100,
+							IndexInfo: []*metricsinfo.DataCoordIndexInfo{{
+								NumEntitiesIndexed: 80,
+								IndexName:          "vector-index",
+								FieldID:            100,
+							}},
+						},
+						2: {
+							NumEntitiesTotal: 200,
+							IndexInfo: []*metricsinfo.DataCoordIndexInfo{{
+								NumEntitiesIndexed: 160,
+								IndexName:          "vector-index",
+								FieldID:            100,
+							}},
+						},
+					},
+				},
+			},
+			ConnectedDataNodes: []metricsinfo.DataNodeInfos{{
+				BaseComponentInfos: metricsinfo.BaseComponentInfos{ID: 12},
+				QuotaMetrics: &metricsinfo.DataNodeQuotaMetrics{
+					Effect: metricsinfo.NodeEffect{NodeID: 12, CollectionIDs: []int64{1, 2}},
+				},
+			}},
+		},
+	}
+
+	mixCoord := mocks.NewMixCoord(t)
+	mixCoord.EXPECT().GetQueryCoordTopology(mock.Anything, mock.Anything).Return(queryTopology, nil).Once()
+	mixCoord.EXPECT().GetDataCoordTopology(mock.Anything, mock.Anything).Return(dataTopology, nil).Once()
+	proxyManager := proxyutil.NewMockProxyClientManager(t)
+	proxyManager.EXPECT().GetProxyMetrics(mock.Anything).Return(nil, nil).Once()
+	meta := mockrootcoord.NewIMetaTable(t)
+	meta.EXPECT().GetCollectionByIDWithMaxTs(mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, collectionID int64) (*model.Collection, error) {
+			return collections[collectionID], nil
+		}).Times(4)
+	meta.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return([]*model.Database{{
+		ID:   10,
+		Name: databaseName,
+	}}, nil).Once()
+
+	quotaCenter := NewQuotaCenter(proxyManager, mixCoord, nil, meta)
+	require.NoError(t, quotaCenter.collectMetrics())
+	assert.Equal(t, float64(30), testutil.ToFloat64(
+		metrics.RootCoordNumEntities.WithLabelValues(databaseName, metrics.AllLabel, metrics.LoadedLabel)))
+	assert.Equal(t, float64(300), testutil.ToFloat64(
+		metrics.RootCoordNumEntities.WithLabelValues(databaseName, metrics.AllLabel, metrics.TotalLabel)))
+	assert.Equal(t, float64(240), testutil.ToFloat64(
+		metrics.RootCoordIndexedNumEntities.WithLabelValues(
+			databaseName, metrics.AllLabel, "vector-index", "true")))
 }
 
 type QuotaCenterSuite struct {

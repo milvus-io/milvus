@@ -65,7 +65,7 @@ var (
 			Help:      "number of collections",
 		}, []string{})
 
-	DataCoordSizeStoredL0Segment = prometheus.NewHistogramVec(
+	DataCoordSizeStoredL0Segment = newCollectionHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.DataCoordRole,
@@ -76,7 +76,7 @@ var (
 			collectionIDLabelName,
 		})
 
-	DataCoordL0DeleteEntriesNum = prometheus.NewGaugeVec(
+	DataCoordL0DeleteEntriesNum = newCollectionGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.DataCoordRole,
@@ -85,11 +85,11 @@ var (
 		}, []string{
 			databaseLabelName,
 			collectionIDLabelName,
-		})
+		}, collectionGaugeAggregateSum)
 
 	// DataCoordNumStoredRows all metrics will be cleaned up after removing matched collectionID and
 	// segment state labels in CleanupDataCoordNumStoredRows method.
-	DataCoordNumStoredRows = prometheus.NewGaugeVec(
+	DataCoordNumStoredRows = newCollectionGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.DataCoordRole,
@@ -100,9 +100,9 @@ var (
 			collectionIDLabelName,
 			collectionName,
 			segmentStateLabelName,
-		})
+		}, collectionGaugeAggregateSum)
 
-	DataCoordBulkVectors = prometheus.NewCounterVec(
+	DataCoordBulkVectors = newCollectionCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.DataCoordRole,
@@ -124,7 +124,7 @@ var (
 			channelNameLabelName,
 		})
 
-	DataCoordCheckpointUnixSeconds = prometheus.NewGaugeVec(
+	DataCoordCheckpointUnixSeconds = newVChannelGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.DataCoordRole,
@@ -133,9 +133,9 @@ var (
 		}, []string{
 			nodeIDLabelName,
 			channelNameLabelName,
-		})
+		}, collectionGaugeAggregateDisabled)
 
-	DataCoordStoredBinlogSize = prometheus.NewGaugeVec(
+	DataCoordStoredBinlogSize = newCollectionGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.DataCoordRole,
@@ -145,8 +145,8 @@ var (
 			databaseLabelName,
 			collectionIDLabelName,
 			segmentStateLabelName,
-		})
-	DataCoordSegmentBinLogFileCount = prometheus.NewGaugeVec(
+		}, collectionGaugeAggregateSum)
+	DataCoordSegmentBinLogFileCount = newCollectionGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.DataCoordRole,
@@ -154,9 +154,9 @@ var (
 			Help:      "number of binlog files for each segment",
 		}, []string{
 			collectionIDLabelName,
-		})
+		}, collectionGaugeAggregateSum)
 
-	DataCoordStoredIndexFilesSize = prometheus.NewGaugeVec(
+	DataCoordStoredIndexFilesSize = newCollectionGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.DataCoordRole,
@@ -166,7 +166,7 @@ var (
 			databaseLabelName,
 			collectionName,
 			collectionIDLabelName,
-		})
+		}, collectionGaugeAggregateDisabled)
 
 	DataCoordDmlChannelNum = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -199,7 +199,7 @@ var (
 			statusLabelName,
 		})
 
-	DataCoordCompactionLatency = prometheus.NewHistogramVec(
+	DataCoordCompactionLatency = newVChannelHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.DataCoordRole,
@@ -313,13 +313,13 @@ var (
 
 	// IndexTaskNum records the number of index tasks of each type.
 	// Deprecated: please ues TaskNum after v2.5.5.
-	IndexTaskNum = prometheus.NewGaugeVec(
+	IndexTaskNum = newCollectionGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.DataCoordRole,
 			Name:      "index_task_count",
 			Help:      "number of index tasks of each type",
-		}, []string{collectionIDLabelName, indexTaskStatusLabelName})
+		}, []string{collectionIDLabelName, indexTaskStatusLabelName}, collectionGaugeAggregateDisabled)
 
 	// IndexNodeNum records the number of IndexNodes managed by IndexCoord.
 	IndexNodeNum = prometheus.NewGaugeVec(
@@ -427,13 +427,13 @@ var (
 	// held on source snapshots — primarily by restore jobs. Lets operators see
 	// which snapshots are currently protected from drop, flag drift vs. active
 	// CopySegmentJob count, and spot TTL expiry approaching for long-running restores.
-	DataCoordSnapshotActivePins = prometheus.NewGaugeVec(
+	DataCoordSnapshotActivePins = newCollectionGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.DataCoordRole,
 			Name:      "snapshot_active_pins",
 			Help:      "number of active (un-expired) pins on a given source snapshot",
-		}, []string{collectionIDLabelName, "snapshot_name"})
+		}, []string{collectionIDLabelName, "snapshot_name"}, collectionGaugeAggregateDisabled)
 
 	DataCoordSnapshotExportActiveJobs = prometheus.NewGauge(
 		prometheus.GaugeOpts{

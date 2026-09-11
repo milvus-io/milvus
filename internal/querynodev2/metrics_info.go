@@ -79,6 +79,12 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 
 	nodeID := fmt.Sprint(node.GetNodeID())
 	collectionIDs := node.manager.Collection.List()
+	aggregateCollectionMetrics := metrics.IsCollectionLevelMetricsAggregateMode()
+	if aggregateCollectionMetrics {
+		node.collectionMetricsMu.Lock()
+		defer node.collectionMetricsMu.Unlock()
+		metrics.CleanupQueryNodeAggregateEntityMetrics(node.GetNodeID())
+	}
 
 	growingStatsByCollection := make(map[int64]segmentMetricStats, len(collectionIDs))
 	node.manager.Segment.RangeBy(func(seg segments.Segment) bool {
@@ -91,6 +97,7 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 	}, segments.WithType(segments.SegmentTypeGrowing))
 
 	var totalGrowingSize int64
+	growingRowsByDB := make(map[string]int64)
 	for _, collection := range collectionIDs {
 		coll := node.manager.Collection.Get(collection)
 		if coll == nil {
@@ -98,16 +105,33 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 		}
 		stats := growingStatsByCollection[collection]
 		totalGrowingSize += stats.size
-		metrics.QueryNodeEntitiesSize.WithLabelValues(nodeID, fmt.Sprint(collection),
-			segments.SegmentTypeGrowing.String()).Set(float64(stats.size))
+		if aggregateCollectionMetrics {
+			growingRowsByDB[coll.GetDBName()] += stats.rows
+		} else {
+			metrics.QueryNodeEntitiesSize.WithLabelValues(nodeID, fmt.Sprint(collection),
+				segments.SegmentTypeGrowing.String()).Set(float64(stats.size))
 
-		metrics.QueryNodeNumEntities.WithLabelValues(
-			coll.GetDBName(),
-			coll.Schema().GetName(),
-			nodeID,
-			fmt.Sprint(collection),
-			segments.SegmentTypeGrowing.String(),
-		).Set(float64(stats.rows))
+			metrics.QueryNodeNumEntities.WithLabelValues(
+				coll.GetDBName(),
+				coll.Schema().GetName(),
+				nodeID,
+				fmt.Sprint(collection),
+				segments.SegmentTypeGrowing.String(),
+			).Set(float64(stats.rows))
+		}
+	}
+	if aggregateCollectionMetrics {
+		metrics.QueryNodeEntitiesSize.WithLabelValues(
+			nodeID, metrics.AllLabel, segments.SegmentTypeGrowing.String()).Set(float64(totalGrowingSize))
+		for dbName, rows := range growingRowsByDB {
+			metrics.QueryNodeNumEntities.WithLabelValues(
+				dbName,
+				metrics.AllLabel,
+				nodeID,
+				metrics.AllLabel,
+				segments.SegmentTypeGrowing.String(),
+			).Set(float64(rows))
+		}
 	}
 
 	sealedStatsByCollection := make(map[int64]segmentMetricStats, len(collectionIDs))
@@ -119,22 +143,42 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 		sealedStatsByCollection[collectionID] = stats
 		return true
 	}, segments.WithType(segments.SegmentTypeSealed))
+	var totalSealedSize int64
+	sealedRowsByDB := make(map[string]int64)
 	for _, collection := range collectionIDs {
 		coll := node.manager.Collection.Get(collection)
 		if coll == nil {
 			continue
 		}
 		stats := sealedStatsByCollection[collection]
-		metrics.QueryNodeEntitiesSize.WithLabelValues(nodeID, fmt.Sprint(collection),
-			segments.SegmentTypeSealed.String()).Set(float64(stats.size))
+		totalSealedSize += stats.size
+		if aggregateCollectionMetrics {
+			sealedRowsByDB[coll.GetDBName()] += stats.rows
+		} else {
+			metrics.QueryNodeEntitiesSize.WithLabelValues(nodeID, fmt.Sprint(collection),
+				segments.SegmentTypeSealed.String()).Set(float64(stats.size))
 
-		metrics.QueryNodeNumEntities.WithLabelValues(
-			coll.GetDBName(),
-			coll.Schema().GetName(),
-			nodeID,
-			fmt.Sprint(collection),
-			segments.SegmentTypeSealed.String(),
-		).Set(float64(stats.rows))
+			metrics.QueryNodeNumEntities.WithLabelValues(
+				coll.GetDBName(),
+				coll.Schema().GetName(),
+				nodeID,
+				fmt.Sprint(collection),
+				segments.SegmentTypeSealed.String(),
+			).Set(float64(stats.rows))
+		}
+	}
+	if aggregateCollectionMetrics {
+		metrics.QueryNodeEntitiesSize.WithLabelValues(
+			nodeID, metrics.AllLabel, segments.SegmentTypeSealed.String()).Set(float64(totalSealedSize))
+		for dbName, rows := range sealedRowsByDB {
+			metrics.QueryNodeNumEntities.WithLabelValues(
+				dbName,
+				metrics.AllLabel,
+				nodeID,
+				metrics.AllLabel,
+				segments.SegmentTypeSealed.String(),
+			).Set(float64(rows))
+		}
 	}
 
 	deleteBufferNum := make(map[int64]int64)

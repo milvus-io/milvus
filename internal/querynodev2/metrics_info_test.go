@@ -21,8 +21,10 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
@@ -31,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/pipeline"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -166,4 +169,95 @@ func TestStreamingQuotaMetrics(t *testing.T) {
 	local.EXPECT().GetMetricsIfLocal(mock.Anything).Return(nil, errors.New("test"))
 	m = getStreamingQuotaMetrics()
 	assert.Nil(t, m)
+}
+
+func TestGetQuotaMetricsAggregatesCollectionGauges(t *testing.T) {
+	paramtable.Init()
+	previousMode := metrics.CollectionLevelMetricsMode()
+	metrics.SetCollectionLevelMetricsMode(metrics.CollectionLevelMetricsModeAggregate)
+	t.Cleanup(func() {
+		metrics.SetCollectionLevelMetricsMode(previousMode)
+		metrics.QueryNodeEntitiesSize.Reset()
+		metrics.QueryNodeNumEntities.Reset()
+	})
+
+	collectionManager := segments.NewMockCollectionManager(t)
+	collectionManager.EXPECT().List().Return([]int64{1, 2}).Once()
+	collectionManager.EXPECT().Get(int64(1)).Return(segments.NewTestCollection(
+		1, querypb.LoadType_LoadCollection, &schemapb.CollectionSchema{Name: "collection-1"})).Times(2)
+	collectionManager.EXPECT().Get(int64(2)).Return(segments.NewTestCollection(
+		2, querypb.LoadType_LoadCollection, &schemapb.CollectionSchema{Name: "collection-2"})).Times(2)
+
+	growing1 := segments.NewMockSegment(t)
+	growing1.EXPECT().Collection().Return(int64(1)).Once()
+	growing1.EXPECT().MemSize().Return(int64(100)).Once()
+	growing1.EXPECT().RowNum().Return(int64(10)).Once()
+	growing2 := segments.NewMockSegment(t)
+	growing2.EXPECT().Collection().Return(int64(2)).Once()
+	growing2.EXPECT().MemSize().Return(int64(200)).Once()
+	growing2.EXPECT().RowNum().Return(int64(20)).Once()
+	sealed1 := segments.NewMockSegment(t)
+	sealed1.EXPECT().Collection().Return(int64(1)).Once()
+	sealed1.EXPECT().MemSize().Return(int64(300)).Once()
+	sealed1.EXPECT().RowNum().Return(int64(30)).Once()
+	sealed2 := segments.NewMockSegment(t)
+	sealed2.EXPECT().Collection().Return(int64(2)).Once()
+	sealed2.EXPECT().MemSize().Return(int64(400)).Once()
+	sealed2.EXPECT().RowNum().Return(int64(40)).Once()
+
+	segmentManager := segments.NewMockSegmentManager(t)
+	growingCall := segmentManager.EXPECT().RangeBy(mock.Anything, mock.Anything).
+		Run(func(visitor segments.SegmentVisitor, _ ...segments.SegmentFilter) {
+			visitor(growing1)
+			visitor(growing2)
+		}).Once()
+	sealedCall := segmentManager.EXPECT().RangeBy(mock.Anything, mock.Anything).
+		Run(func(visitor segments.SegmentVisitor, _ ...segments.SegmentFilter) {
+			visitor(sealed1)
+			visitor(sealed2)
+		}).Once()
+	mock.InOrder(growingCall, sealedCall)
+	segmentManager.EXPECT().GetLoadedBinlogSize().Return(int64(0)).Once()
+
+	manager := &segments.Manager{
+		Collection: collectionManager,
+		Segment:    segmentManager,
+	}
+	delegators := typeutil.NewConcurrentMap[string, delegator.ShardDelegator]()
+	node := &QueryNode{
+		manager:         manager,
+		pipelineManager: pipeline.NewManager(manager, nil, delegators),
+		delegators:      delegators,
+		serverID:        7,
+	}
+	metrics.QueryNodeEntitiesSize.WithLabelValues(
+		"8", "other-collection", segments.SegmentTypeGrowing.String()).Set(999)
+	metrics.QueryNodeNumEntities.WithLabelValues(
+		"", "other-collection", "8", "88", segments.SegmentTypeGrowing.String()).Set(999)
+
+	wal := mock_streaming.NewMockWALAccesser(t)
+	local := mock_streaming.NewMockLocal(t)
+	local.EXPECT().GetMetricsIfLocal(mock.Anything).Return(nil, errors.New("not local")).Once()
+	wal.EXPECT().Local().Return(local).Once()
+	previousWAL := streaming.WAL()
+	streaming.SetWALForTest(wal)
+	t.Cleanup(func() {
+		streaming.SetWALForTest(previousWAL)
+	})
+
+	quotaMetrics, err := getQuotaMetrics(node)
+	require.NoError(t, err)
+	assert.Equal(t, int64(300), quotaMetrics.GrowingSegmentsSize)
+	assert.Equal(t, float64(300), testutil.ToFloat64(metrics.QueryNodeEntitiesSize.WithLabelValues(
+		"7", metrics.AllLabel, segments.SegmentTypeGrowing.String())))
+	assert.Equal(t, float64(700), testutil.ToFloat64(metrics.QueryNodeEntitiesSize.WithLabelValues(
+		"7", metrics.AllLabel, segments.SegmentTypeSealed.String())))
+	assert.Equal(t, float64(30), testutil.ToFloat64(metrics.QueryNodeNumEntities.WithLabelValues(
+		"", metrics.AllLabel, "7", metrics.AllLabel, segments.SegmentTypeGrowing.String())))
+	assert.Equal(t, float64(70), testutil.ToFloat64(metrics.QueryNodeNumEntities.WithLabelValues(
+		"", metrics.AllLabel, "7", metrics.AllLabel, segments.SegmentTypeSealed.String())))
+	assert.Equal(t, float64(999), testutil.ToFloat64(metrics.QueryNodeEntitiesSize.WithLabelValues(
+		"8", metrics.AllLabel, segments.SegmentTypeGrowing.String())))
+	assert.Equal(t, float64(999), testutil.ToFloat64(metrics.QueryNodeNumEntities.WithLabelValues(
+		"", metrics.AllLabel, "8", metrics.AllLabel, segments.SegmentTypeGrowing.String())))
 }

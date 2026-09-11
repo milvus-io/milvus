@@ -36,7 +36,7 @@ var (
 			nodeIDLabelName,
 		})
 
-	QueryNodeConsumeTimeTickLag = prometheus.NewGaugeVec(
+	QueryNodeConsumeTimeTickLag = newCollectionGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
@@ -46,7 +46,7 @@ var (
 			nodeIDLabelName,
 			msgTypeLabelName,
 			collectionIDLabelName,
-		})
+		}, collectionGaugeAggregateDisabled)
 
 	QueryNodeProcessCost = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -95,7 +95,7 @@ var (
 			msgTypeLabelName,
 		})
 
-	QueryNodeConsumerMsgCount = prometheus.NewCounterVec(
+	QueryNodeConsumerMsgCount = newCollectionCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
@@ -107,7 +107,7 @@ var (
 			collectionIDLabelName,
 		})
 
-	QueryNodeSkippedInsertFieldCount = prometheus.NewCounterVec(
+	QueryNodeSkippedInsertFieldCount = newCollectionCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
@@ -128,7 +128,7 @@ var (
 			nodeIDLabelName,
 		})
 
-	QueryNodeNumSegments = prometheus.NewGaugeVec(
+	QueryNodeNumSegments = newCollectionGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
@@ -139,9 +139,9 @@ var (
 			collectionIDLabelName,
 			segmentStateLabelName,
 			segmentLevelLabelName,
-		})
+		}, collectionGaugeAggregateDisabled)
 
-	QueryNodeGrowingSourceRetainedBytes = prometheus.NewGaugeVec(
+	QueryNodeGrowingSourceRetainedBytes = newVChannelGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
@@ -150,9 +150,9 @@ var (
 		}, []string{
 			nodeIDLabelName,
 			channelNameLabelName,
-		})
+		}, collectionGaugeAggregateDisabled)
 
-	QueryNodeGrowingSourceRetainedSegments = prometheus.NewGaugeVec(
+	QueryNodeGrowingSourceRetainedSegments = newVChannelGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
@@ -161,7 +161,7 @@ var (
 		}, []string{
 			nodeIDLabelName,
 			channelNameLabelName,
-		})
+		}, collectionGaugeAggregateDisabled)
 
 	QueryNodeNumDmlChannels = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -183,7 +183,7 @@ var (
 			nodeIDLabelName,
 		})
 
-	QueryNodeSQCount = prometheus.NewCounterVec(
+	QueryNodeSQCount = newCollectionCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
@@ -421,7 +421,7 @@ var (
 			nodeIDLabelName,
 		})
 
-	QueryNodeSearchFTSNumTokens = prometheus.NewHistogramVec(
+	QueryNodeSearchFTSNumTokens = newCollectionHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
@@ -445,7 +445,7 @@ var (
 			nodeIDLabelName,
 		})
 
-	QueryNodeSearchHitSegmentNum = prometheus.NewHistogramVec(
+	QueryNodeSearchHitSegmentNum = newCollectionHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
@@ -457,7 +457,7 @@ var (
 			queryTypeLabelName,
 		})
 
-	QueryNodeSegmentFilterHitSegmentNum = prometheus.NewHistogramVec(
+	QueryNodeSegmentFilterHitSegmentNum = newCollectionHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
@@ -470,7 +470,7 @@ var (
 			queryTypeLabelName,
 		})
 
-	QueryNodeSegmentFilterSkippedSegmentNum = prometheus.NewHistogramVec(
+	QueryNodeSegmentFilterSkippedSegmentNum = newCollectionHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
@@ -483,7 +483,7 @@ var (
 			queryTypeLabelName,
 		})
 
-	QueryNodeSegmentFilterTotalSegmentNum = prometheus.NewHistogramVec(
+	QueryNodeSegmentFilterTotalSegmentNum = newCollectionHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
@@ -496,7 +496,7 @@ var (
 			queryTypeLabelName,
 		})
 
-	QueryNodeSegmentPruneRatio = prometheus.NewGaugeVec(
+	QueryNodeSegmentPruneRatio = newCollectionGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
@@ -506,9 +506,9 @@ var (
 			nodeIDLabelName,
 			collectionIDLabelName,
 			segmentPruneLabelName,
-		})
+		}, collectionGaugeAggregateDisabled)
 
-	QueryNodeSegmentPruneBias = prometheus.NewGaugeVec(
+	QueryNodeSegmentPruneBias = newCollectionGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
@@ -518,9 +518,9 @@ var (
 			nodeIDLabelName,
 			collectionIDLabelName,
 			segmentPruneLabelName,
-		})
+		}, collectionGaugeAggregateDisabled)
 
-	QueryNodeSegmentPruneLatency = prometheus.NewHistogramVec(
+	QueryNodeSegmentPruneLatency = newCollectionHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
@@ -553,7 +553,7 @@ var (
 			nodeIDLabelName,
 		})
 
-	QueryNodeNumEntities = prometheus.NewGaugeVec(
+	QueryNodeNumEntities = newCollectionGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
@@ -565,9 +565,9 @@ var (
 			nodeIDLabelName,
 			collectionIDLabelName,
 			segmentStateLabelName,
-		})
+		}, collectionGaugeAggregateSum)
 
-	QueryNodeEntitiesSize = prometheus.NewGaugeVec(
+	QueryNodeEntitiesSize = newCollectionGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
@@ -577,9 +577,9 @@ var (
 			nodeIDLabelName,
 			collectionIDLabelName,
 			segmentStateLabelName,
-		})
+		}, collectionGaugeAggregateSum)
 
-	QueryNodeLevelZeroSize = prometheus.NewGaugeVec(
+	QueryNodeLevelZeroSize = newCollectionVChannelGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
@@ -589,7 +589,7 @@ var (
 			nodeIDLabelName,
 			collectionIDLabelName,
 			channelNameLabelName,
-		})
+		}, collectionGaugeAggregateDisabled)
 
 	// QueryNodeConsumeCounter counts the bytes QueryNode consumed from message storage.
 	QueryNodeConsumeCounter = prometheus.NewCounterVec(
@@ -609,7 +609,7 @@ var (
 			Help:      "",
 		}, []string{nodeIDLabelName, msgTypeLabelName})
 
-	QueryNodeMsgDispatcherTtLag = prometheus.NewGaugeVec(
+	QueryNodeMsgDispatcherTtLag = newVChannelGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
@@ -618,7 +618,7 @@ var (
 		}, []string{
 			nodeIDLabelName,
 			channelNameLabelName,
-		})
+		}, collectionGaugeAggregateDisabled)
 
 	QueryNodeSegmentSearchLatencyPerVector = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -888,7 +888,7 @@ var (
 			nodeIDLabelName,
 		})
 
-	QueryNodeDeleteBufferSize = prometheus.NewGaugeVec(
+	QueryNodeDeleteBufferSize = newVChannelGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
@@ -898,9 +898,10 @@ var (
 			nodeIDLabelName,
 			channelNameLabelName,
 		},
+		collectionGaugeAggregateDisabled,
 	)
 
-	QueryNodeDeleteBufferRowNum = prometheus.NewGaugeVec(
+	QueryNodeDeleteBufferRowNum = newVChannelGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
@@ -910,6 +911,7 @@ var (
 			nodeIDLabelName,
 			channelNameLabelName,
 		},
+		collectionGaugeAggregateDisabled,
 	)
 
 	QueryNodeCGOCallLatency = prometheus.NewHistogramVec(
@@ -925,7 +927,7 @@ var (
 			cgoTypeLabelName,
 		})
 
-	QueryNodePartialResultCount = prometheus.NewCounterVec(
+	QueryNodePartialResultCount = newCollectionCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
@@ -937,7 +939,7 @@ var (
 			collectionIDLabelName,
 		})
 
-	QueryNodeTwoStageFilterLatency = prometheus.NewHistogramVec(
+	QueryNodeTwoStageFilterLatency = newCollectionHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
@@ -949,7 +951,7 @@ var (
 			collectionIDLabelName,
 		})
 
-	QueryNodeTwoStageSearchLatency = prometheus.NewHistogramVec(
+	QueryNodeTwoStageSearchLatency = newCollectionHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
@@ -961,7 +963,7 @@ var (
 			collectionIDLabelName,
 		})
 
-	QueryNodeTwoStageSearchFallbackCount = prometheus.NewCounterVec(
+	QueryNodeTwoStageSearchFallbackCount = newCollectionCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
@@ -973,7 +975,7 @@ var (
 			reasonLabelName,
 		})
 
-	QueryNodeGlobalRefineCount = prometheus.NewCounterVec(
+	QueryNodeGlobalRefineCount = newCollectionCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
@@ -1123,6 +1125,18 @@ func CleanupQueryNodeCollectionMetrics(nodeID int64, collectionID int64) {
 	QueryNodeTwoStageSearchFallbackCount.DeletePartialMatch(labels)
 	QueryNodeGlobalRefineCount.DeletePartialMatch(labels)
 	QueryNodeSearchFTSNumTokens.DeletePartialMatch(labels)
+}
+
+// CleanupQueryNodeAggregateEntityMetrics removes the snapshot gauges owned by
+// one QueryNode before that node rebuilds its aggregate collection metrics.
+// It deliberately omits collection labels so aggregate-mode deletion remains
+// allowed and metrics from another QueryNode in the same process survive.
+func CleanupQueryNodeAggregateEntityMetrics(nodeID int64) {
+	labels := prometheus.Labels{
+		nodeIDLabelName: fmt.Sprint(nodeID),
+	}
+	QueryNodeNumEntities.DeletePartialMatch(labels)
+	QueryNodeEntitiesSize.DeletePartialMatch(labels)
 }
 
 // PoolStats holds the snapshot of a single pool's state.
