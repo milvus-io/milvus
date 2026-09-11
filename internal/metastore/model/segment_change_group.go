@@ -287,14 +287,22 @@ func MarshalSegmentChangeGroup(g *SegmentChangeGroup) ([]byte, error) {
 	return json.Marshal(g)
 }
 
-// UnmarshalSegmentChangeGroup deserializes a group from etcd. A malformed or
-// zero-valued record is returned as a data-integrity error so the caller fails
-// recovery instead of silently orphaning the record's staged members (a group
-// is the sole owner of its members' visibility — SegmentInfo has no
-// change_group_id field).
+// UnmarshalSegmentChangeGroup deserializes a group from etcd AND validates it.
+// A malformed, zero-valued, or otherwise invalid record (e.g. an out-of-range
+// State after a corrupt write or version downgrade) is returned as a
+// data-integrity error so the kv catalog fails the recovery walk
+// (fail-closed) instead of loading it: the alive-group whitelists in the meta
+// layer silently skip an out-of-range State, orphaning its members and
+// bypassing the anti-duplication invariant, while IsTerminal/CanTransitionTo
+// both fall through false, leaving the record neither deletable nor
+// transitionable (C34). A group is the sole owner of its members' visibility —
+// SegmentInfo has no change_group_id field.
 func UnmarshalSegmentChangeGroup(data []byte) (*SegmentChangeGroup, error) {
 	group := &SegmentChangeGroup{}
 	if err := json.Unmarshal(data, group); err != nil {
+		return nil, err
+	}
+	if err := group.Validate(); err != nil {
 		return nil, err
 	}
 	return group, nil

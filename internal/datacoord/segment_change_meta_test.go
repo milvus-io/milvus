@@ -436,6 +436,33 @@ func TestMeta_LoadSegmentChangeGroups_L0ExemptionPersistedStable(t *testing.T) {
 	require.Empty(t, superseded, "L0-exempt superseded parents are never indexed")
 }
 
+// TestMeta_LoadSegmentChangeGroups_InvalidStateFailsClosed verifies C34: a
+// persisted record with an out-of-range State is rejected at recovery
+// (UnmarshalSegmentChangeGroup validates), so its members cannot be orphaned
+// and re-claimed by a second group.
+func TestMeta_LoadSegmentChangeGroups_InvalidStateFailsClosed(t *testing.T) {
+	m, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	g1 := newTestGroup()
+	require.NoError(t, m.AddSegmentChangeGroup(ctx, g1))
+
+	// A group with otherwise-valid fields but an out-of-range State, persisted
+	// directly (bypassing write-time Validate, as a corrupt write/downgrade would).
+	invalid := &model.SegmentChangeGroup{
+		GroupID:       5,
+		CollectionID:  10,
+		Source:        model.SegmentChangeSourceMixCompaction,
+		State:         model.SegmentChangeState(99),
+		NewSegmentIDs: []int64{1001},
+	}
+	require.NoError(t, m.catalog.Update(ctx, metastore.SaveSegmentChangeGroup(invalid)))
+
+	_, _, _, err = m.loadSegmentChangeGroups(ctx)
+	require.Error(t, err, "an out-of-range-state persisted group must fail recovery")
+}
+
 // TestMeta_LoadSegmentChangeGroups_ZeroGroupFailsClosed verifies C14: a
 // persisted record that decodes to a zero-valued group (e.g. "{}" or "null")
 // must fail recovery, not be silently dropped — dropping it would orphan its
