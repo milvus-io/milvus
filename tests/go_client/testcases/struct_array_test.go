@@ -139,6 +139,73 @@ func TestStructArrayCreateWithScalarFields(t *testing.T) {
 	require.True(t, has)
 }
 
+func TestStructArrayNullableSchemaDescribeCreateRoundTrip(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	sourceName := common.GenRandomString(hp.StructArrayPrefix+"_nullable_source", 6)
+	schema, _ := hp.CreateStructArraySchema(hp.DefaultStructArraySchemaOption(sourceName))
+	var clips *entity.Field
+	for _, field := range schema.Fields {
+		if field.Name == "clips" {
+			clips = field
+			break
+		}
+	}
+	require.NotNil(t, clips)
+	clips.WithNullable(true)
+
+	common.CheckErr(t, mc.CreateCollection(ctx,
+		client.NewCreateCollectionOption(sourceName, schema)), true)
+	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		_ = mc.DropCollection(cleanupCtx, client.NewDropCollectionOption(sourceName))
+	})
+
+	described, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(sourceName))
+	common.CheckErr(t, err, true)
+	var describedClips *entity.Field
+	for _, field := range described.Schema.Fields {
+		if field.Name == "clips" {
+			describedClips = field
+			break
+		}
+	}
+	require.NotNil(t, describedClips)
+	require.True(t, describedClips.Nullable)
+	require.NotNil(t, describedClips.StructSchema)
+	for _, subField := range describedClips.StructSchema.Fields {
+		require.False(t, subField.Nullable)
+	}
+	require.NoError(t, described.Schema.Validate())
+
+	replayedName := common.GenRandomString(hp.StructArrayPrefix+"_nullable_replay", 6)
+	common.CheckErr(t, mc.CreateCollection(ctx,
+		client.NewCreateCollectionOption(replayedName, described.Schema)), true)
+	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		_ = mc.DropCollection(cleanupCtx, client.NewDropCollectionOption(replayedName))
+	})
+
+	replayed, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(replayedName))
+	common.CheckErr(t, err, true)
+	var replayedClips *entity.Field
+	for _, field := range replayed.Schema.Fields {
+		if field.Name == "clips" {
+			replayedClips = field
+			break
+		}
+	}
+	require.NotNil(t, replayedClips)
+	require.True(t, replayedClips.Nullable)
+	require.NotNil(t, replayedClips.StructSchema)
+	for _, subField := range replayedClips.StructSchema.Fields {
+		require.False(t, subField.Nullable)
+	}
+}
+
 // TestStructArrayInsertBasic ports test_insert_struct_array_basic.
 func TestStructArrayInsertBasic(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
