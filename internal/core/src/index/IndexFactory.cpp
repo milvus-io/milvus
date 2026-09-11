@@ -988,11 +988,12 @@ IndexFactory::ScalarIndexLoadResourceWithOverhead(
 namespace {
 folly::coro::Task<std::unique_ptr<storage::AsyncIndexEntryReader>>
 InspectPackedScalarIndex(const std::vector<std::string>& files,
-                         const storage::FileManagerContext& context) {
+                         const storage::FileManagerContext& context,
+                         bool is_index_file) {
     AssertInfo(files.size() == 1 && context.Valid(),
                "Async scalar load requires one V3 file and a valid context");
     storage::MemFileManagerImpl manager(context);
-    auto input = manager.OpenInputStream(files.front());
+    auto input = manager.OpenInputStream(files.front(), is_index_file);
     AssertInfo(input != nullptr, "Failed to open packed scalar index");
     const auto size = input->Size();
     co_return co_await storage::AsyncIndexEntryReader::Open(
@@ -1012,7 +1013,8 @@ IndexFactory::ScalarIndexFileLoadResource(
     bool mmap_enable,
     int64_t num_rows,
     const std::vector<std::string>& index_files,
-    const storage::FileManagerContext& context) {
+    const storage::FileManagerContext& context,
+    bool is_index_file) {
     const auto version =
         GetValueFromConfig<int32_t>(ParseConfigFromIndexParams(index_params),
                                     SCALAR_INDEX_ENGINE_VERSION)
@@ -1031,7 +1033,7 @@ IndexFactory::ScalarIndexFileLoadResource(
                 std::nullopt};
     }
     auto inspect = [&]() {
-        return InspectPackedScalarIndex(index_files, context);
+        return InspectPackedScalarIndex(index_files, context, is_index_file);
     };
     auto reader = use_async_load
                       ? folly::coro::blockingWait(inspect().scheduleOn(

@@ -118,6 +118,7 @@ class IndexFactory {
 
     // Inspects persisted metadata and reserves for either rollout mode.
     // The load switch and executor sizes can change before a cache reload.
+    // Packed TextMatch files use the text-log prefix (is_index_file=false).
     ScalarIndexLoadResources
     ScalarIndexFileLoadResource(
         DataType field_type,
@@ -126,7 +127,8 @@ class IndexFactory {
         bool mmap_enable,
         int64_t num_rows,
         const std::vector<std::string>& index_files,
-        const storage::FileManagerContext& context);
+        const storage::FileManagerContext& context,
+        bool is_index_file = true);
 
     IndexBasePtr
     CreateIndex(const CreateIndexInfo& create_index_info,

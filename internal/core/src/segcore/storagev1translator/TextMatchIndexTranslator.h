@@ -18,6 +18,7 @@
 #include "cachinglayer/Translator.h"
 #include "common/Types.h"
 #include "common/LoadInfo.h"
+#include "common/resource_c.h"
 #include "index/TextMatchIndex.h"
 #include "storage/FileManager.h"
 
@@ -79,6 +80,7 @@ class TextMatchIndexTranslator
     milvus::Config config_;
     std::string key_;
     milvus::cachinglayer::Meta meta_;
+    LoadResourceRequest load_resource_request_{};
 };
 
 }  // namespace milvus::segcore::storagev1translator
