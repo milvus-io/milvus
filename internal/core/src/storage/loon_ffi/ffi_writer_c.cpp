@@ -12,80 +12,71 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <arrow/c/bridge.h>
+#include <string.h>
+#include <cstdlib>
 #include <exception>
 #include <memory>
 #include <string>
 #include <utility>
 
+#include <arrow/util/base64.h>
+
 #include "PluginInterface.h"
 #include "common/EasyAssert.h"
 #include "common/common_type_c.h"
-#include "milvus-storage/common/extend_status.h"
-#include "milvus-storage/properties.h"
-#include "milvus-storage/writer.h"
 #include "storage/KeyRetriever.h"
 #include "storage/PluginLoader.h"
 #include "storage/loon_ffi/ffi_writer_c.h"
 
+/**
+ * @brief Implementation of GetEncParams - retrieves encryption parameters for CMEK.
+ *
+ * @details This function performs the following steps:
+ *   1. Loads the cipher plugin from PluginLoader singleton
+ *   2. Updates the plugin with encryption zone ID, collection ID, and key
+ *   3. Retrieves the encryptor for the given zone and collection
+ *   4. Encodes key metadata containing zone ID, collection ID, and key version
+ *   5. Returns the Base64-encoded key and metadata as newly allocated strings
+ *
+ * @see GetEncParams declaration in ffi_writer_c.h for parameter documentation
+ */
 CStatus
-NewPackedFFIWriterWithCMEK(const char* base_path,
-                           struct ArrowSchema* schema,
-                           const LoonProperties* properties,
-                           CPluginContext* plugin_context,
-                           LoonWriterHandle* out_handle) {
+GetEncParams(CPluginContext* c_plugin_context,
+             char** out_key,
+             char** out_meta) {
     try {
-        AssertInfo(out_handle != nullptr, "writer output handle is nullptr");
-        *out_handle = 0;
-        AssertInfo(base_path != nullptr && schema != nullptr &&
-                       properties != nullptr && plugin_context != nullptr &&
-                       plugin_context->key != nullptr,
-                   "invalid encrypted writer arguments");
-
-        milvus_storage::api::Properties properties_map;
-        auto error = milvus_storage::api::ConvertFFIProperties(properties_map,
-                                                               properties);
-        AssertInfo(!error.has_value(),
-                   "invalid packed writer properties: {}",
-                   error.value_or(""));
-
-        auto plugin =
+        AssertInfo(out_key != nullptr && out_meta != nullptr,
+                   "encryption parameter outputs must not be null");
+        *out_key = nullptr;
+        *out_meta = nullptr;
+        AssertInfo(c_plugin_context != nullptr, "c_plugin_context is nullptr");
+        auto plugin_ptr =
             milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
-        AssertInfo(plugin != nullptr, "cipher plugin is nullptr");
-        plugin->Update(plugin_context->ez_id,
-                       plugin_context->collection_id,
-                       std::string(plugin_context->key));
-        auto [encryptor, edek] = plugin->GetEncryptor(
-            plugin_context->ez_id, plugin_context->collection_id);
+        AssertInfo(plugin_ptr != nullptr, "plugin_ptr is nullptr");
 
-        // DEKs are binary. Keep the key in a C++ string: GetEncParams followed
-        // by Go/C string properties truncated it at the first NUL byte.
-        properties_map[PROPERTY_WRITER_ENC_ENABLE] = true;
-        properties_map[PROPERTY_WRITER_ENC_KEY] = encryptor->GetKey();
-        properties_map[PROPERTY_WRITER_ENC_META] =
-            milvus::storage::EncodeKeyMetadata(
-                plugin_context->ez_id, plugin_context->collection_id, edek);
-        properties_map[PROPERTY_WRITER_ENC_ALGORITHM] =
-            std::string("AES_GCM_V1");
-
-        auto schema_result = arrow::ImportSchema(schema);
-        if (!schema_result.ok()) {
-            throw milvus_storage::ToSegcoreError(schema_result.status());
+        plugin_ptr->Update(c_plugin_context->ez_id,
+                           c_plugin_context->collection_id,
+                           std::string(c_plugin_context->key));
+        auto got = plugin_ptr->GetEncryptor(c_plugin_context->ez_id,
+                                            c_plugin_context->collection_id);
+        auto metadata =
+            milvus::storage::EncodeKeyMetadata(c_plugin_context->ez_id,
+                                               c_plugin_context->collection_id,
+                                               got.second);
+        // Both cgo and Loon properties use NUL-terminated strings. Encode the
+        // binary DEK before crossing either boundary; loon_writer_new decodes it.
+        auto key = arrow::util::base64_encode(got.first->GetKey());
+        auto key_buffer =
+            std::unique_ptr<char, decltype(&free)>(strdup(key.c_str()), free);
+        auto metadata_buffer = std::unique_ptr<char, decltype(&free)>(
+            strdup(metadata.c_str()), free);
+        if (!key_buffer || !metadata_buffer) {
+            throw std::bad_alloc();
         }
-        auto arrow_schema = schema_result.ValueOrDie();
-        auto policy_result =
-            milvus_storage::api::ColumnGroupPolicy::create_column_group_policy(
-                properties_map, arrow_schema);
-        if (!policy_result.ok()) {
-            throw milvus_storage::ToSegcoreError(policy_result.status());
-        }
-        auto writer = milvus_storage::api::Writer::create(
-            std::string(base_path),
-            arrow_schema,
-            std::move(policy_result).ValueOrDie(),
-            properties_map);
-        *out_handle = reinterpret_cast<LoonWriterHandle>(writer.release());
+        *out_key = key_buffer.release();
+        *out_meta = metadata_buffer.release();
         return milvus::SuccessCStatus();
+
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);
     } catch (...) {
