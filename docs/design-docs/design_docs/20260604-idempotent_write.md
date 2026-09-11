@@ -98,7 +98,7 @@ a collection's inserts to be idempotent.
 | `streaming.idempotency.maxBytesPerWindow` | `16MiB` | Per-vchannel in-memory window cap. Nothing is evicted until this is reached; then oldest-first. |
 | `streaming.idempotency.maxRetainedBytes` | `256MiB` | Pchannel-wide soft budget of the retained chunk objects. `0` disables that bound. |
 | `streaming.idempotency.maxRetainedChunks` | `256` | Pchannel-wide cap on the NUMBER of retained chunk objects. `0` disables that bound. |
-| `streaming.idempotency.maxKeyLength` | `1024` | Maximum accepted explicit key length in bytes. |
+| `streaming.idempotency.maxKeyLength` | `256` | Maximum accepted explicit key length in bytes. |
 
 There is **no persist interval and no chunk size trigger**. A chunk is written
 synchronously from the WAL checkpoint's dirty persist and from nowhere else, so
@@ -1241,6 +1241,22 @@ message id, timetick and last-confirmed position unchanged.
   Fixing it means making a predicate mismatch distinguishable from a transient failure at
   the kv layer — TiKV already marks it internally (`errPredicateNotMet`, unexported) and
   etcd reports it as a generic transaction failure — which is outside this PR.
+- **A DDL that empties a collection also forgets explicit keys.** The tombstone is what
+  keeps a derived key from answering a re-insert of the same rows after the data under it
+  is gone, and the record it is applied to does not say whether its key was supplied by the
+  client or derived from the payload — so the tombstone cannot spare one and bury the other.
+  An explicit key is therefore executable again after `DropCollection`, `TruncateCollection`
+  or `DropPartition`, which is not what a request identity should mean. Separating the two
+  would mean carrying the distinction in every persisted record and keeping explicit keys
+  alive past a drop, and the case handling that costs is not worth putting in the middle of
+  the write path for it. The narrower contract stands: within a collection's life a key
+  identifies one logical insert; a DDL that empties the collection ends that life.
+- **The consume checkpoint's fence does not extend to the rest of the snapshot.** The
+  compare-and-swap guards the checkpoint, but when a snapshot exceeds the store's txn op
+  limit the segment, vchannel and salvage writes go out in unguarded batches before it, so a
+  superseded publisher can still overwrite those before its own commit is refused. Closing it
+  needs the metastore txn layer to offer a conditional multi-batch commit — the same layer
+  work the lost-claim limitation above needs — rather than anything in this feature.
 - **Collecting a superseded term's leftovers needs retention to roll.** The objects a
   superseded owner wrote after its successor's probe are collected when retention retires
   the last chunk of their term, so a pchannel whose retention never rolls never collects

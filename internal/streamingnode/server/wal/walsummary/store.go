@@ -171,10 +171,18 @@ func (s *Store) WriteChunk(
 	// actually contains instead, so an identical rewrite stays idempotent and
 	// only genuinely different content is corruption.
 	if existingRecords, existingFooter, decodeErr := unmarshalChunk(existingPayload); decodeErr == nil {
-		if existingFooter.GetGeneration() == footer.GetGeneration() &&
+		if existingFooter.GetPchannel() == footer.GetPchannel() &&
+			existingFooter.GetGeneration() == footer.GetGeneration() &&
 			existingFooter.GetTerm() == footer.GetTerm() &&
 			chunkSectionsByVChannelEqual(existingRecords, sectionsByVChannel) {
-			return footer, uint64(len(payload)), nil
+			// The STORED footer and size, not the ones just built. The records
+			// match but the encodings do not, and the manifest carries the
+			// footer's per-vchannel section offsets verbatim -- publishing the
+			// new encoding's offsets against the old object's bytes would make
+			// every later ranged read slice the wrong range. The object is not
+			// rewritten, so what the manifest describes has to be the object
+			// that is there.
+			return existingFooter, uint64(len(existingPayload)), nil
 		}
 	}
 	return nil, 0, storeCorruptedf("summary chunk already exists with different payload: %s", key)
@@ -364,25 +372,41 @@ func (s *Store) ProbeChunkForwardOfTerm(ctx context.Context, term int64, fromGen
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, errors.Wrapf(err, "failed to list summary chunks under %s", prefix)
 	}
-	entries := make([]*streamingpb.PChannelSummaryChunkIndexEntry, 0, len(keys))
+	type candidate struct {
+		generation uint64
+		key        string
+	}
+	candidates := make([]candidate, 0, len(keys))
 	for _, key := range keys {
 		generation, keyTerm, ok := parseChunkKey(strings.TrimPrefix(key, prefix))
 		if !ok || keyTerm != term || generation < fromGeneration {
 			continue
 		}
-		payload, err := s.chunkManager.Read(ctx, key)
+		candidates = append(candidates, candidate{generation: generation, key: key})
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].generation < candidates[j].generation
+	})
+
+	// An object found here sits ABOVE the last published manifest, so nothing
+	// yet depends on it: the persist that wrote it had to publish the manifest
+	// next, and failing that fails the whole checkpoint persist, which leaves
+	// its records replayable from the WAL. One that cannot be read or decoded
+	// therefore ends the probe rather than the WAL open -- this term adopts the
+	// contiguous run below it and replay rebuilds the rest. Corruption of a
+	// chunk the manifest DOES name stays fatal; that one has no second copy.
+	entries := make([]*streamingpb.PChannelSummaryChunkIndexEntry, 0, len(candidates))
+	for _, c := range candidates {
+		payload, err := s.chunkManager.Read(ctx, c.key)
 		if err != nil {
-			return nil, errors.Wrapf(err, "failed to read probed summary chunk %s", key)
+			break
 		}
 		_, footer, err := unmarshalChunk(payload)
 		if err != nil {
-			return nil, err
+			break
 		}
 		entries = append(entries, chunkIndexEntryFromFooter(footer, uint64(len(payload))))
 	}
-	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].GetGeneration() < entries[j].GetGeneration()
-	})
 	return entries, nil
 }
 
