@@ -512,8 +512,21 @@ proxy:
     # cost. Disabling restores the old always-decode behavior.
     dqlAdmissionEnabled: true
     readHeaderTimeout: 5s # HTTP server timeout for reading request headers
-    readTimeout: 0s # HTTP server timeout for reading the entire request, including the body. 0 disables this timeout
-    writeTimeout: 0s # HTTP server timeout for handling requests and writing responses. 0 disables this timeout
+    # REST-only budget for reading a single request's body, in addition to its headers. 0 disables this
+    # timeout. Applied per-request via http.ResponseController inside httpserver.BodyDeadlineMiddleware, NOT via
+    # http.Server.ReadTimeout: in the default (shared-port) deployment this proxy's http.Server also carries external
+    # gRPC traffic, and a Server-wide ReadTimeout would also cut long-running gRPC RPCs (Go's HTTP/2 implementation
+    # arms per-stream deadlines directly from Server.ReadTimeout). This value is a hard, connection-level ceiling
+    # independent of the per-request Request-Timeout header that proxy.http.requestTimeoutMs otherwise honors -- a
+    # client cannot raise its body-read budget past this value via that header.
+    readTimeout: 30s
+    # REST-only budget for writing a response, in addition to handler processing time. 0 disables this
+    # timeout. Applied per-request via http.ResponseController inside httpserver.BodyDeadlineMiddleware, NOT via
+    # http.Server.WriteTimeout, for the same shared-port/gRPC reason documented on proxy.http.readTimeout. Kept above
+    # proxy.http.requestTimeoutMs so the graceful in-app timeout response (see timeoutMiddleware) has a chance to be
+    # written before this deadline would otherwise abort the connection mid-write; unlike Server.WriteTimeout this is a
+    # per-request deadline set from request-start, so it does not also need to account for readTimeout separately.
+    writeTimeout: 60s
     idleTimeout: 300s # HTTP server keep-alive idle timeout
     maxHeaderBytes: 16777216 # Maximum number of bytes the HTTP server reads from request headers. Defaults to 16MiB to match grpc-go's max header list size, since in shared-port mode this server also serves external gRPC over HTTP/2
     hstsMaxAge: 31536000 # Strict-Transport-Security max-age in seconds

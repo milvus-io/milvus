@@ -210,6 +210,11 @@ func (s *Server) serveHTTP(listener net.Listener) error {
 func (s *Server) startHTTPServer(errChan chan error) {
 	defer s.wg.Done()
 	ginHandler := gin.New()
+	// Must run before any middleware (e.g. timeoutMiddleware) that swaps
+	// gin.Context.Writer for a non-connection-backed value -- see
+	// BodyDeadlineMiddleware's doc comment for why this is a per-request
+	// deadline rather than http.Server.ReadTimeout/WriteTimeout.
+	ginHandler.Use(httpserver.BodyDeadlineMiddleware())
 	ginHandler.Use(httpserver.MetricsHandlerFunc)
 	ginHandler.Use(httpserver.TraceIDHandlerFunc)
 	ginHandler.Use(accesslog.AccessLogMiddleware)
@@ -229,10 +234,15 @@ func (s *Server) startHTTPServer(errChan chan error) {
 	http2Server := &http2.Server{}
 	Params := &proxy.Params.HTTPCfg
 	s.httpServer = &http.Server{
-		Handler:           h2c.NewHandler(s.httpHandler(ginHandler), http2Server),
+		Handler: h2c.NewHandler(s.httpHandler(ginHandler), http2Server),
+		// ReadTimeout/WriteTimeout are deliberately left unset (0 = disabled)
+		// here: in the default (shared-port) deployment this Server also
+		// carries external gRPC traffic (see httpHandler below), and Go's
+		// HTTP/2 implementation arms per-stream deadlines directly from
+		// these two fields, which would cut long-running gRPC RPCs. The
+		// REST-only equivalent is BodyDeadlineMiddleware, registered as
+		// gin middleware above.
 		ReadHeaderTimeout: Params.ReadHeaderTimeout.GetAsDurationByParse(),
-		ReadTimeout:       Params.ReadTimeout.GetAsDurationByParse(),
-		WriteTimeout:      Params.WriteTimeout.GetAsDurationByParse(),
 		IdleTimeout:       Params.IdleTimeout.GetAsDurationByParse(),
 		MaxHeaderBytes:    Params.MaxHeaderBytes.GetAsInt(),
 	}

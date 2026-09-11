@@ -894,6 +894,11 @@ func Test_NewServer_HTTPServer_TimeoutDefaults(t *testing.T) {
 	startProxyHTTPServerForTest(t, server)
 
 	assert.Equal(t, 5*time.Second, server.httpServer.ReadHeaderTimeout)
+	// ReadTimeout/WriteTimeout are intentionally NOT set on the shared http.Server:
+	// in the default (shared-port) deployment this Server also carries external
+	// gRPC traffic, and Go's HTTP/2 implementation arms per-stream deadlines
+	// directly from these two fields, which would cut long-running gRPC RPCs.
+	// The REST-only equivalent is httpserver.BodyDeadlineMiddleware.
 	assert.Equal(t, time.Duration(0), server.httpServer.ReadTimeout)
 	assert.Equal(t, time.Duration(0), server.httpServer.WriteTimeout)
 	assert.Equal(t, 300*time.Second, server.httpServer.IdleTimeout)
@@ -919,8 +924,12 @@ func Test_NewServer_HTTPServer_TimeoutConfigOverrides(t *testing.T) {
 	startProxyHTTPServerForTest(t, server)
 
 	assert.Equal(t, 7*time.Second, server.httpServer.ReadHeaderTimeout)
-	assert.Equal(t, 8*time.Second, server.httpServer.ReadTimeout)
-	assert.Equal(t, 9*time.Second, server.httpServer.WriteTimeout)
+	// proxy.http.readTimeout/writeTimeout must never reach the shared http.Server
+	// regardless of value -- they are consumed only by BodyDeadlineMiddleware,
+	// which is REST-specific and cannot affect gRPC traffic. This guards against
+	// accidentally re-wiring them into the http.Server{} literal again.
+	assert.Equal(t, time.Duration(0), server.httpServer.ReadTimeout)
+	assert.Equal(t, time.Duration(0), server.httpServer.WriteTimeout)
 	assert.Equal(t, 10*time.Second, server.httpServer.IdleTimeout)
 	assert.Equal(t, 2048, server.httpServer.MaxHeaderBytes)
 }
