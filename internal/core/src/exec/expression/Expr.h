@@ -35,6 +35,7 @@
 #include "common/Types.h"
 #include "exec/expression/EvalCtx.h"
 #include "exec/expression/ExprCacheHelper.h"
+#include "exec/expression/ScanKernel.h"
 #include "exec/expression/Utils.h"
 #include "exec/QueryContext.h"
 #include "expr/ITypeExpr.h"
@@ -50,8 +51,6 @@
 #include "segcore/SegmentGrowingImpl.h"
 namespace milvus {
 namespace exec {
-
-enum class FilterType { sequential = 0, random = 1 };
 
 // Execution path for expression evaluation.
 // Determines how the expression result bitmap is produced.
@@ -266,6 +265,126 @@ ApplyValidMaskForCandidates(ValidityView validity,
         }
     }
 }
+
+// Callback that SegmentExpr::EvalKernel hands to the readers. It turns one
+// reader sub-batch into a CandidateBatch, calls the kernel and folds the
+// sub-batch's NULL rows. Readers write through views into the batch result,
+// so a sub-batch's position is res.offset() minus the batch offset.
+template <typename T, typename K>
+class KernelAdapter {
+ public:
+    KernelAdapter(K* kernel,
+                  const TargetBitmap* bitmap_input,
+                  TargetBitmapView batch_match,
+                  TargetBitmapView batch_known)
+        : kernel_(kernel),
+          bitmap_input_(bitmap_input),
+          batch_match_data_(static_cast<const void*>(batch_match.data())),
+          batch_known_data_(static_cast<const void*>(batch_known.data())),
+          batch_offset_(static_cast<int64_t>(batch_match.offset())),
+          batch_size_(static_cast<int64_t>(batch_match.size())) {
+        AssertInfo(batch_known.offset() == batch_match.offset() &&
+                       batch_known.size() == batch_match.size(),
+                   "kernel adapter match and known bitmaps are misaligned");
+    }
+
+    template <FilterType filter_type = FilterType::sequential>
+    void
+    operator()(const T* data,
+               ValidityView valid_data,
+               const int32_t* offsets,
+               int64_t size,
+               TargetBitmapView res,
+               TargetBitmapView valid_res) const {
+        AssertInfo(offsets == nullptr,
+                   "kernel adapter does not accept reader offsets");
+        Run<filter_type>(data, valid_data, nullptr, size, res, valid_res);
+    }
+
+    template <FilterType filter_type = FilterType::sequential>
+    void
+    operator()(const T* data,
+               ValidityView valid_data,
+               const int32_t* offsets,
+               const int32_t* segment_offsets,
+               int64_t size,
+               TargetBitmapView res,
+               TargetBitmapView valid_res) const {
+        AssertInfo(offsets == nullptr,
+                   "kernel adapter does not accept reader offsets");
+        Run<filter_type>(
+            data, valid_data, segment_offsets, size, res, valid_res);
+    }
+
+ private:
+    template <FilterType filter_type>
+    void
+    Run(const T* data,
+        ValidityView valid_data,
+        const int32_t* segment_offsets,
+        int64_t size,
+        TargetBitmapView res,
+        TargetBitmapView valid_res) const {
+        if (size <= 0) {
+            return;
+        }
+        AssertInfo(static_cast<const void*>(res.data()) == batch_match_data_ &&
+                       static_cast<const void*>(valid_res.data()) ==
+                           batch_known_data_ &&
+                       res.offset() == valid_res.offset(),
+                   "kernel adapter sub-batch does not view its batch result");
+        const int64_t position =
+            static_cast<int64_t>(res.offset()) - batch_offset_;
+        AssertInfo(position >= 0 && position + size <= batch_size_,
+                   "kernel adapter sub-batch [{}, {}) is outside its batch "
+                   "of {} rows",
+                   position,
+                   position + size,
+                   batch_size_);
+        if (data == nullptr) {
+            return;
+        }
+
+        CandidateBatch<T> batch;
+        batch.data = data;
+        batch.validity = valid_data;
+        if (bitmap_input_ != nullptr && !bitmap_input_->empty()) {
+            batch.candidates = bitmap_input_->view(position, size);
+        }
+        if constexpr (kKernelNeedsSegmentOffsets<K>) {
+            batch.segment_offsets = segment_offsets;
+        }
+        batch.size = static_cast<size_t>(size);
+
+        TriStateOut out{res.view(0, size), valid_res.view(0, size)};
+        kernel_->template Eval<filter_type>(batch, out);
+        if constexpr (kKernelNullRowsKnownFalse<K>) {
+            // Aliased destinations: only match is cleared for NULL rows.
+            ApplyValidMask(
+                valid_data, out.match, out.match, static_cast<int>(size));
+        } else {
+            ApplyValidMask(
+                valid_data, out.match, out.known, static_cast<int>(size));
+        }
+    }
+
+    K* kernel_;
+    const TargetBitmap* bitmap_input_;
+    const void* batch_match_data_;
+    const void* batch_known_data_;
+    int64_t batch_offset_;
+    int64_t batch_size_;
+};
+
+template <typename T>
+inline constexpr bool kElementLevelScannable =
+    !std::is_same_v<T, milvus::Json> && !std::is_same_v<T, ArrayView> &&
+    !std::is_same_v<T, VectorArrayView>;
+
+template <typename T>
+inline constexpr bool kIndexLookupScannable =
+    std::is_arithmetic_v<T> || std::is_same_v<T, std::string> ||
+    std::is_same_v<T, std::string_view>;
 
 class Expr : public std::enable_shared_from_this<Expr> {
  public:
@@ -1024,6 +1143,207 @@ class SegmentExpr : public Expr {
             index_ptr, values..., input->data()));
         return std::make_shared<ColumnVector>(std::move(result),
                                               std::move(valid_res));
+    }
+
+    // Single raw-data entry for leaf expressions. Kernel interface:
+    // ScanKernel.h. Reader callback: KernelAdapter.
+    template <typename T, typename K>
+        requires ScanKernel<std::remove_reference_t<K>, T>
+    VectorPtr
+    EvalKernel(EvalCtx& context, K&& kernel, bool element_level) {
+        using Kernel = std::remove_cvref_t<K>;
+        using KernelRef = std::remove_reference_t<K>;
+        static_assert(
+            !(kKernelNullRowsKnownFalse<Kernel> && KernelCanSkip<Kernel>),
+            "kNullRowsKnownFalse kernels cannot use SkipIndex");
+
+        auto* input = context.get_offset_input();
+        const auto& bitmap_input = context.get_bitmap_input();
+        auto next_batch_size = GetNextRealBatchSize(input, element_level);
+        if (!next_batch_size.has_value()) {
+            return nullptr;
+        }
+        const int64_t batch_size = *next_batch_size;
+        if (auto res =
+                AdvanceEmptyElementBatch(input, element_level, batch_size)) {
+            return res;
+        }
+        AssertInfo(bitmap_input.empty() ||
+                       bitmap_input.size() == static_cast<size_t>(batch_size),
+                   "{} bitmap input size {} does not match batch size {}",
+                   name_,
+                   bitmap_input.size(),
+                   batch_size);
+
+        auto res_vec =
+            std::make_shared<ColumnVector>(TargetBitmap(batch_size, false),
+                                           TargetBitmap(batch_size, true));
+        TargetBitmapView res(res_vec->GetRawData(), batch_size);
+        TargetBitmapView valid_res(res_vec->GetValidRawData(), batch_size);
+
+        if constexpr (KernelAlwaysFalse<Kernel> || KernelAlwaysTrue<Kernel>) {
+            std::optional<bool> constant;
+            if constexpr (KernelAlwaysFalse<Kernel>) {
+                if (kernel.AlwaysFalse()) {
+                    constant = false;
+                }
+            }
+            if constexpr (KernelAlwaysTrue<Kernel>) {
+                if (!constant.has_value() && kernel.AlwaysTrue()) {
+                    constant = true;
+                }
+            }
+            if (constant.has_value()) {
+                EvalConstantKernelBatch<T>(input,
+                                           element_level,
+                                           batch_size,
+                                           *constant,
+                                           kKernelNullRowsKnownFalse<Kernel>,
+                                           res,
+                                           valid_res);
+                FinalizeKernelBatch(res, valid_res, bitmap_input, batch_size);
+                return res_vec;
+            }
+        }
+
+        if constexpr (kKernelNullRowsKnownFalse<Kernel>) {
+            AssertInfo(!(UseIndexCursor() && num_data_chunk_ == 0),
+                       "{} cannot evaluate a kNullRowsKnownFalse kernel by "
+                       "index reverse lookup",
+                       name_);
+        }
+
+        // The kernel is copied into skip_func: readers may bind skip_func into
+        // a column filter that outlives this call (EnsureDataScanCursor,
+        // EnsureDataTakeResources).
+        std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func;
+        if constexpr (KernelCanSkip<Kernel>) {
+            skip_func = [skip_kernel = Kernel(kernel)](
+                            const milvus::SkipIndex& skip_index,
+                            FieldId field_id,
+                            int chunk_id) {
+                return skip_kernel.CanSkip(skip_index, field_id, chunk_id);
+            };
+        }
+
+        KernelAdapter<T, KernelRef> adapter(
+            std::addressof(kernel), &bitmap_input, res, valid_res);
+        const bool has_mask = !bitmap_input.empty();
+        int64_t processed_size = 0;
+        if (input != nullptr) {
+            if (element_level) {
+                if constexpr (kElementLevelScannable<T>) {
+                    processed_size = ProcessElementLevelByOffsets<T>(
+                        adapter, skip_func, input, res, valid_res);
+                } else {
+                    ThrowInfo(UnexpectedError,
+                              "element-level evaluation is not supported "
+                              "for expression {}",
+                              name_);
+                }
+            } else if (has_mask) {
+                processed_size = ProcessDataByOffsetsWithMask<T>(
+                    adapter, skip_func, input, res, valid_res, bitmap_input);
+            } else {
+                processed_size = ProcessDataByOffsets<T>(
+                    adapter, skip_func, input, res, valid_res);
+            }
+        } else if (element_level) {
+            if constexpr (kElementLevelScannable<T>) {
+                processed_size = ProcessDataChunksForElementLevel<T>(
+                    adapter, skip_func, res, valid_res);
+            } else {
+                ThrowInfo(UnexpectedError,
+                          "element-level evaluation is not supported for "
+                          "expression {}",
+                          name_);
+            }
+        } else if (kIndexLookupScannable<T> && UseIndexCursor() &&
+                   num_data_chunk_ == 0) {
+            if constexpr (kIndexLookupScannable<T>) {
+                processed_size = ProcessIndexLookupSequentialWithMask<T>(
+                    adapter,
+                    current_index_chunk_pos_,
+                    batch_size,
+                    res,
+                    valid_res,
+                    bitmap_input);
+                MoveCursor();
+            }
+        } else if (has_mask) {
+            processed_size =
+                ProcessDataChunksWithMask<T, kKernelNeedsSegmentOffsets<Kernel>>(
+                    adapter, skip_func, res, valid_res, bitmap_input);
+        } else {
+            processed_size =
+                ProcessDataChunks<T, kKernelNeedsSegmentOffsets<Kernel>>(
+                    adapter, skip_func, res, valid_res);
+        }
+        AssertInfo(processed_size == batch_size,
+                   "internal error: expr {} processed rows {} not equal "
+                   "expect batch size {}",
+                   name_,
+                   processed_size,
+                   batch_size);
+        FinalizeKernelBatch(res, valid_res, bitmap_input, batch_size);
+        return res_vec;
+    }
+
+    // Rows whose known bit is 0 cannot match; rows outside bitmap_input are
+    // FALSE and known.
+    static void
+    FinalizeKernelBatch(TargetBitmapView res,
+                        TargetBitmapView valid_res,
+                        const TargetBitmap& bitmap_input,
+                        int64_t size) {
+        res.inplace_and(valid_res, size);
+        if (bitmap_input.empty()) {
+            return;
+        }
+        auto candidates = bitmap_input.view(0, size);
+        res.inplace_and(candidates, size);
+        TargetBitmap pruned(candidates);
+        pruned.flip();
+        valid_res.inplace_or(pruned, size);
+    }
+
+    // Constant result for every non-NULL row. Validity comes from the index
+    // when the index cursor is in use and from the field otherwise; both
+    // helpers advance the data cursor themselves.
+    template <typename T>
+    void
+    EvalConstantKernelBatch(OffsetVector* input,
+                            bool element_level,
+                            int64_t batch_size,
+                            bool value,
+                            bool null_rows_known_false,
+                            TargetBitmapView res,
+                            TargetBitmapView valid_res) {
+        if (element_level) {
+            // ArrayOffsets never yields elements of NULL rows.
+            if (input == nullptr) {
+                MoveCursor();
+            }
+            if (value) {
+                res.set();
+            }
+            return;
+        }
+        TargetBitmap valid =
+            input != nullptr
+                ? ProcessChunksForValidByOffsets<T>(UseIndexCursor(), *input)
+                : ProcessChunksForValid<T>(UseIndexCursor());
+        AssertInfo(valid.size() == static_cast<size_t>(batch_size),
+                   "validity rows {} not equal expect batch size {}",
+                   valid.size(),
+                   batch_size);
+        if (value) {
+            res.set();
+            res.inplace_and(valid, batch_size);
+        }
+        if (!null_rows_known_false) {
+            valid_res.inplace_and(valid, batch_size);
+        }
     }
 
     // Candidate evaluator contract:

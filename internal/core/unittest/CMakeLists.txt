@@ -44,6 +44,7 @@ set(MILVUS_TEST_FILES
         test_timestamptz_arith_compare.cpp
         test_timestamptz_compare.cpp
         test_offsets_eval_correctness.cpp
+        test_kernel_adapter_contract.cpp
         test_expr_tristate_audit.cpp
         test_expr_materialized_view.cpp
         test_float16.cpp
