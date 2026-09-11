@@ -1373,3 +1373,97 @@ func createReplicateControlChannelMessages() []message.ReplicateMutableMessage {
 	replicateMsg := message.MustNewReplicateMessage("primary", immutableMsg.IntoImmutableMessageProto())
 	return []message.ReplicateMutableMessage{replicateMsg}
 }
+
+// A CreateCollection that enters through the replicate ingress never passes the
+// proxy, which is where struct array sub-field names are normally qualified to
+// struct[sub]. A producer that built the message from a DescribeCollection result
+// sends the bare names DescribeCollection hands back; the ingress has to qualify
+// them before the append so the WAL, the streaming node and RootCoord agree.
+func TestReplicateService_OverwriteCreateCollectionQualifiesStructSubFields(t *testing.T) {
+	sourceCluster := replicateutil.MustNewConfigHelper("by-dev", &commonpb.ReplicateConfiguration{
+		Clusters: []*commonpb.MilvusCluster{
+			{ClusterId: "primary", Pchannels: []string{"primary-rootcoord-dml_0"}},
+			{ClusterId: "by-dev", Pchannels: []string{"by-dev-rootcoord-dml_0"}},
+		},
+		CrossClusterTopology: []*commonpb.CrossClusterTopology{
+			{SourceClusterId: "primary", TargetClusterId: "by-dev"},
+		},
+	}).MustGetCluster("primary")
+	rs := replicateService{walAccesserImpl: &walAccesserImpl{clusterID: "by-dev"}}
+
+	structSchema := func(sub1, sub2 string) *schemapb.CollectionSchema {
+		return &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+			},
+			StructArrayFields: []*schemapb.StructArrayFieldSchema{
+				{FieldID: 138, Name: "duplicate_radar_struct", Fields: []*schemapb.FieldSchema{
+					{FieldID: 139, Name: sub1, DataType: schemapb.DataType_Array},
+					{FieldID: 141, Name: sub2, DataType: schemapb.DataType_ArrayOfVector},
+				}},
+			},
+		}
+	}
+	buildMsg := func(body *msgpb.CreateCollectionRequest) message.ReplicateMutableMessage {
+		body.CollectionID = 1
+		body.CollectionName = "collection"
+		body.PhysicalChannelNames = []string{"primary-rootcoord-dml_0"}
+		body.VirtualChannelNames = []string{"primary-rootcoord-dml_0_1v0"}
+		msg := message.NewCreateCollectionMessageBuilderV1().
+			WithHeader(&message.CreateCollectionMessageHeader{CollectionId: 1, PartitionIds: []int64{2}}).
+			WithBody(body).
+			WithBroadcast([]string{"primary-rootcoord-dml_0_1v0"}).
+			MustBuildBroadcast()
+		mutable := msg.WithBroadcastID(100).SplitIntoMutableMessage()[0]
+		immutable := mutable.WithLastConfirmedUseMessageID().WithTimeTick(1).
+			IntoImmutableMessage(pulsar2.NewPulsarID(pulsar.NewMessageID(1, 2, 3, 4)))
+		return message.MustNewReplicateMessage("primary", immutable.IntoImmutableMessageProto())
+	}
+	subFieldNames := func(msg message.ReplicateMutableMessage) []string {
+		body := message.MustAsMutableCreateCollectionMessageV1(msg).MustBody()
+		var out []string
+		for _, sf := range body.GetCollectionSchema().GetStructArrayFields() {
+			for _, f := range sf.GetFields() {
+				out = append(out, f.GetName())
+			}
+		}
+		return out
+	}
+	qualified := []string{"duplicate_radar_struct[chunk_number]", "duplicate_radar_struct[chunk_vector]"}
+
+	t.Run("bare names in collection_schema are qualified", func(t *testing.T) {
+		msg := buildMsg(&msgpb.CreateCollectionRequest{CollectionSchema: structSchema("chunk_number", "chunk_vector")})
+		assert.NoError(t, rs.overwriteCreateCollectionMessage(context.Background(), sourceCluster, msg))
+		assert.Equal(t, qualified, subFieldNames(msg))
+	})
+
+	// What a peer cluster's own WAL carries: already qualified by its proxy.
+	t.Run("qualified names are left as they are", func(t *testing.T) {
+		msg := buildMsg(&msgpb.CreateCollectionRequest{CollectionSchema: structSchema(qualified[0], qualified[1])})
+		assert.NoError(t, rs.overwriteCreateCollectionMessage(context.Background(), sourceCluster, msg))
+		assert.Equal(t, qualified, subFieldNames(msg))
+	})
+
+	// The legacy serialized schema field, set by producers predating collection_schema.
+	t.Run("bare names in the legacy schema bytes are qualified", func(t *testing.T) {
+		bytes, err := proto.Marshal(structSchema("chunk_number", "chunk_vector"))
+		assert.NoError(t, err)
+		msg := buildMsg(&msgpb.CreateCollectionRequest{Schema: bytes})
+		assert.NoError(t, rs.overwriteCreateCollectionMessage(context.Background(), sourceCluster, msg))
+
+		body := message.MustAsMutableCreateCollectionMessageV1(msg).MustBody()
+		got := &schemapb.CollectionSchema{}
+		assert.NoError(t, proto.Unmarshal(body.GetSchema(), got))
+		assert.Equal(t, qualified[0], got.StructArrayFields[0].Fields[0].Name)
+		assert.Equal(t, qualified[1], got.StructArrayFields[0].Fields[1].Name)
+	})
+
+	// The channel rewrite this function already did keeps working alongside.
+	t.Run("channel names are still rewritten to the target's", func(t *testing.T) {
+		msg := buildMsg(&msgpb.CreateCollectionRequest{CollectionSchema: structSchema("chunk_number", "chunk_vector")})
+		assert.NoError(t, rs.overwriteCreateCollectionMessage(context.Background(), sourceCluster, msg))
+		body := message.MustAsMutableCreateCollectionMessageV1(msg).MustBody()
+		assert.Equal(t, []string{"by-dev-rootcoord-dml_0"}, body.PhysicalChannelNames)
+		assert.Equal(t, []string{"by-dev-rootcoord-dml_0_1v0"}, body.VirtualChannelNames)
+	})
+}
