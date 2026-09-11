@@ -54,15 +54,18 @@ type SegmentInfo struct {
 	lastFlushTime   time.Time
 	isCompacting    bool
 	lastWrittenTime time.Time
+
+	pendingL0ManifestUpdates []*l0ManifestUpdate
+	pendingMutationErr       error
+	pendingMutationSkip      bool
 }
 
 // EnsureStats returns a non-nil Statistics view for read-only aggregate
-// queries. It does NOT mutate s — concurrent readers under m.segMu.RLock()
-// would race otherwise. The persisted s.Stats is populated eagerly by
-// NewSegmentInfo on construction and by the array-mutating operators
-// (AddBinlogsOperator, UpdateBinlogsFromSaveBinlogPathsOperator,
-// UpdateSegmentStats), both of which run under m.segMu.Lock(). When a
-// caller hands us a SegmentInfo built via the struct literal
+// queries. It does NOT mutate s because cached SegmentInfo snapshots can be
+// read concurrently. The persisted s.Stats is populated eagerly by
+// NewSegmentInfo on construction and refreshed by binlog mutation operators
+// before their cloned result is CAS-published. When a caller hands us a
+// SegmentInfo built via the struct literal
 // `&SegmentInfo{SegmentInfo: ...}` with a nil Stats (the only remaining
 // path is now legacy tests), we fall back to a transient recompute so
 // readers see the right number; we just don't write it back.
@@ -370,7 +373,7 @@ func (s *SegmentInfo) Clone(opts ...SegmentInfoOption) *SegmentInfo {
 	info := proto.Clone(s.SegmentInfo).(*datapb.SegmentInfo)
 	cloned := &SegmentInfo{
 		SegmentInfo:     info,
-		allocations:     s.allocations,
+		allocations:     append([]*Allocation(nil), s.allocations...),
 		lastFlushTime:   s.lastFlushTime,
 		isCompacting:    s.isCompacting,
 		lastWrittenTime: s.lastWrittenTime,
@@ -385,7 +388,7 @@ func (s *SegmentInfo) Clone(opts ...SegmentInfoOption) *SegmentInfo {
 func (s *SegmentInfo) ShadowClone(opts ...SegmentInfoOption) *SegmentInfo {
 	cloned := &SegmentInfo{
 		SegmentInfo:     s.SegmentInfo,
-		allocations:     s.allocations,
+		allocations:     append([]*Allocation(nil), s.allocations...),
 		lastFlushTime:   s.lastFlushTime,
 		isCompacting:    s.isCompacting,
 		lastWrittenTime: s.lastWrittenTime,
@@ -483,7 +486,7 @@ func SetStartPosition(pos *msgpb.MsgPosition) SegmentInfoOption {
 // SetAllocations is the option to set allocations for segment info
 func SetAllocations(allocations []*Allocation) SegmentInfoOption {
 	return func(segment *SegmentInfo) {
-		segment.allocations = allocations
+		segment.allocations = append([]*Allocation(nil), allocations...)
 	}
 }
 

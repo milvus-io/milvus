@@ -66,7 +66,7 @@ func (s *ClusteringCompactionPolicySuite) SetupTest() {
 	indexMeta, _ := newIndexMeta(context.TODO(), s.catalog, nil)
 
 	meta := &meta{
-		segments:           NewSegmentsInfo(),
+		segments:           NewCachedSegmentsInfo(),
 		collections:        typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		compactionTaskMeta: compactionTaskMeta,
 		partitionStatsMeta: partitionStatsMeta,
@@ -342,7 +342,7 @@ func (s *ClusteringCompactionPolicySuite) TestTriggerOneCollectionNormal() {
 
 	segments := genSegmentsForMeta(testLabel)
 	for id, segment := range segments {
-		s.meta.segments.SetSegment(id, segment)
+		s.meta.segments.SetSegment(id, segment, 0)
 	}
 
 	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, collectionID int64) (*collectionInfo, error) {
@@ -383,7 +383,7 @@ func (s *ClusteringCompactionPolicySuite) TestTriggerOneCollectionAllowsMixedSch
 		segments[id] = segment
 	}
 	for id, segment := range segments {
-		s.meta.segments.SetSegment(id, segment)
+		s.meta.segments.SetSegment(id, segment, 0)
 	}
 
 	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, collectionID int64) (*collectionInfo, error) {

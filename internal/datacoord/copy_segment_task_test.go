@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -838,7 +839,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_CompletedUpdatesSegment()
 	segment := m.GetSegment(ctx, 2001)
 	s.Equal(commonpb.SegmentState_Flushed, segment.GetState())
 	s.Equal("manifest-path", segment.GetManifestPath())
-	s.Equal(insertBinlogs, segment.GetBinlogs())
+	s.True(proto.Equal(&datapb.SegmentInfo{Binlogs: insertBinlogs}, &datapb.SegmentInfo{Binlogs: segment.GetBinlogs()}))
 
 	updatedTask := copyMeta.GetTask(ctx, 1001)
 	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskCompleted, updatedTask.GetState())
@@ -894,7 +895,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_UpdateSegmentsInfoErrorMa
 					{
 						FieldID: 100,
 						Binlogs: []*datapb.Binlog{
-							{LogID: 1, LogPath: "invalid-log-path"},
+							{LogPath: "invalid-log-path"},
 						},
 					},
 				},
@@ -905,7 +906,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_UpdateSegmentsInfoErrorMa
 
 	updatedTask := copyMeta.GetTask(ctx, 1001)
 	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskFailed, updatedTask.GetState())
-	s.Contains(updatedTask.GetReason(), "fieldBinlog no need to store logpath")
+	s.Contains(updatedTask.GetReason(), "invalid log id")
 }
 
 // createTestIndexMeta creates an indexMeta with pre-registered index definitions for testing.
@@ -980,14 +981,18 @@ func newTestCopyJob(jobID int64, state datapb.CopySegmentJobState) CopySegmentJo
 func newCopySegmentTaskTestMeta(t *testing.T, task *copySegmentTask) (CopySegmentMeta, *meta) {
 	ctx := context.Background()
 	catalog := kvdatacoord.NewCatalog(NewMetaMemoryKV(), "", "")
-	m := &meta{
-		catalog:  catalog,
-		segments: NewSegmentsInfo(),
-	}
+	m := newTestMetaFromCache(t, nil, nil)
+	m.catalog = catalog
 	copyMeta, err := NewCopySegmentMeta(ctx, catalog, m, nil, nil)
 	assert.NoError(t, err)
 	assert.NoError(t, copyMeta.AddTask(ctx, task))
 	return copyMeta, m
+}
+
+func newCopySegmentTaskMetaWithSegment(t *testing.T, segment *SegmentInfo) *meta {
+	segments := NewCachedSegmentsInfo()
+	segments.SetSegment(segment.GetID(), segment, 0)
+	return newTestMetaFromCache(t, segments, nil)
 }
 
 func newTestCopySegment(segmentID int64) *SegmentInfo {
@@ -1030,12 +1035,12 @@ func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_SingleIndex() {
 		300: {CollectionID: collectionID, FieldID: 101, IndexID: 300, IndexName: "vec_idx"},
 	}
 	im := createTestIndexMeta(s.T(), collectionID, indexes)
-	m := &meta{indexMeta: im, segments: NewSegmentsInfo()}
+	m := &meta{indexMeta: im, segments: NewCachedSegmentsInfo()}
 	m.segments.SetSegment(segmentID, NewSegmentInfo(&datapb.SegmentInfo{
 		ID:           segmentID,
 		CollectionID: collectionID,
 		NumOfRows:    4321,
-	}))
+	}), 0)
 
 	result := &datapb.CopySegmentResult{
 		SegmentId:    segmentID,
@@ -1242,17 +1247,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ClearsImportingFlagOnComp
 	collectionID := int64(1)
 	segmentID := int64(100)
 
-	catalog := catalogmocks.NewDataCoordCatalog(s.T())
-	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, segs []*datapb.SegmentInfo, _ ...metastore.BinlogsIncrement) error {
-		s.Require().Len(segs, 1)
-		seg := segs[0]
-		assert.Equal(s.T(), segmentID, seg.GetID())
-		assert.Equal(s.T(), commonpb.SegmentState_Flushed, seg.GetState())
-		assert.False(s.T(), seg.GetIsImporting())
-		return nil
-	}).Once()
-	mt := &meta{ctx: context.Background(), catalog: catalog, segments: NewSegmentsInfo()}
-	mt.segments.SetSegment(segmentID, NewSegmentInfo(&datapb.SegmentInfo{
+	mt := newCopySegmentTaskMetaWithSegment(s.T(), NewSegmentInfo(&datapb.SegmentInfo{
 		ID:            segmentID,
 		CollectionID:  collectionID,
 		PartitionID:   10,
@@ -1292,10 +1287,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_EmptyManifestStillClearsI
 	collectionID := int64(1)
 	segmentID := int64(101)
 
-	catalog := catalogmocks.NewDataCoordCatalog(s.T())
-	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
-	mt := &meta{ctx: context.Background(), catalog: catalog, segments: NewSegmentsInfo()}
-	mt.segments.SetSegment(segmentID, NewSegmentInfo(&datapb.SegmentInfo{
+	mt := newCopySegmentTaskMetaWithSegment(s.T(), NewSegmentInfo(&datapb.SegmentInfo{
 		ID:             segmentID,
 		CollectionID:   collectionID,
 		PartitionID:    10,
@@ -1339,12 +1331,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ManifestUpdateAndClearImp
 	segmentID := int64(102)
 	manifestPath := `{"ver":3,"base_path":"files/insert_log/1/10/102"}`
 
-	catalog := catalogmocks.NewDataCoordCatalog(s.T())
-	// A fresh StorageV3 copy target publishes its first manifest inline via
-	// UpdateManifest/UpdateSegmentsInfo, which writes through AlterSegments.
-	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
-	mt := &meta{ctx: context.Background(), catalog: catalog, segments: NewSegmentsInfo()}
-	mt.segments.SetSegment(segmentID, NewSegmentInfo(&datapb.SegmentInfo{
+	mt := newCopySegmentTaskMetaWithSegment(s.T(), NewSegmentInfo(&datapb.SegmentInfo{
 		ID:             segmentID,
 		CollectionID:   collectionID,
 		PartitionID:    10,
@@ -1387,14 +1374,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_PreservesImportingFlagOnF
 	collectionID := int64(1)
 	segmentID := int64(103)
 
-	catalog := catalogmocks.NewDataCoordCatalog(s.T())
-	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("alter failed")).Once()
-	catalog.EXPECT().ListCopySegmentJobs(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListCopySegmentTasks(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Maybe()
-	catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Maybe()
-	mt := &meta{ctx: context.Background(), catalog: catalog, segments: NewSegmentsInfo()}
-	mt.segments.SetSegment(segmentID, NewSegmentInfo(&datapb.SegmentInfo{
+	mt := newCopySegmentTaskMetaWithSegment(s.T(), NewSegmentInfo(&datapb.SegmentInfo{
 		ID:            segmentID,
 		CollectionID:  collectionID,
 		PartitionID:   10,
@@ -1402,7 +1382,14 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_PreservesImportingFlagOnF
 		State:         commonpb.SegmentState_Importing,
 		IsImporting:   true,
 	}))
-	copyMeta, err := NewCopySegmentMeta(context.Background(), catalog, nil, nil, nil)
+	mt.segmentPersist = NewSegmentTxnWrapper(failCommitPersist{err: errors.New("alter failed")})
+
+	copyCatalog := catalogmocks.NewDataCoordCatalog(s.T())
+	copyCatalog.EXPECT().ListCopySegmentJobs(mock.Anything).Return(nil, nil)
+	copyCatalog.EXPECT().ListCopySegmentTasks(mock.Anything).Return(nil, nil)
+	copyCatalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Maybe()
+	copyCatalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Maybe()
+	copyMeta, err := NewCopySegmentMeta(context.Background(), copyCatalog, nil, nil, nil)
 	s.Require().NoError(err)
 
 	result := &datapb.QueryCopySegmentResponse{

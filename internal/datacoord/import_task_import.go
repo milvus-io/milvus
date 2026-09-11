@@ -25,6 +25,7 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/json"
@@ -224,8 +225,15 @@ func (t *importTask) QueryTaskOnWorker(cluster session.Cluster) {
 				continue // rows not changed, no need to update
 			}
 			diff := info.GetImportedRows() - segment.GetNumOfRows()
-			op := UpdateImportedRows(info.GetSegmentID(), info.GetImportedRows())
-			err = t.meta.UpdateSegmentsInfo(context.TODO(), op)
+			importedRows := info.GetImportedRows()
+			mutations := map[int64][]SegmentOperator{
+				info.GetSegmentID(): {func(seg *SegmentInfo) (BinlogIncrement, bool) {
+					seg.NumOfRows = importedRows
+					seg.MaxRowNum = importedRows
+					return BinlogIncrement{}, true
+				}},
+			}
+			err = t.meta.UpdateSegmentsInfo(context.TODO(), mutations)
 			if err != nil {
 				mlog.Warn(context.TODO(), "update import segment rows failed", WrapTaskLog(t, mlog.Err(err))...)
 				return
@@ -269,15 +277,39 @@ func (t *importTask) QueryTaskOnWorker(cluster session.Cluster) {
 				maxTs = importStats.GetTimestampTo()
 			}
 
-			opBinlog := UpdateBinlogsOperator(info.GetSegmentID(), info.GetBinlogs(), info.GetStatslogs(), info.GetDeltalogs(), info.GetBm25Logs())
-			opManifest := UpdateManifest(info.GetSegmentID(), info.GetManifestPath())
-			opState := UpdateStatusOperator(info.GetSegmentID(), commonpb.SegmentState_Flushed)
-			opPosition := UpdateImportSegmentPosition(info.GetSegmentID(), minTs, maxTs)
-			// Persist the producer-built Statistics wholesale (chained after
-			// UpdateBinlogsOperator so it wins over the array-derived value);
-			// when nil it array-derives from the arrays just set above.
-			opStats := UpdateSegmentStats(info.GetSegmentID(), info.GetStats())
-			err = t.meta.UpdateSegmentsInfo(context.TODO(), opBinlog, opManifest, opState, opPosition, opStats)
+			segInfo := info // capture
+			binlogs := cloneAndClearBinlogPaths(segInfo.GetBinlogs())
+			statslogs := cloneAndClearBinlogPaths(segInfo.GetStatslogs())
+			deltalogs := cloneAndClearBinlogPaths(segInfo.GetDeltalogs())
+			bm25Statslogs := cloneAndClearBinlogPaths(segInfo.GetBm25Logs())
+			mutations := map[int64][]SegmentOperator{
+				info.GetSegmentID(): {func(seg *SegmentInfo) (BinlogIncrement, bool) {
+					seg.Binlogs = binlogs
+					seg.Statslogs = statslogs
+					seg.Deltalogs = deltalogs
+					seg.Bm25Statslogs = bm25Statslogs
+					seg.Stats = importStats
+					if segInfo.GetManifestPath() != "" {
+						seg.ManifestPath = segInfo.GetManifestPath()
+					}
+					seg.State = commonpb.SegmentState_Flushed
+					seg.StartPosition = &msgpb.MsgPosition{
+						ChannelName: seg.GetInsertChannel(),
+						Timestamp:   minTs,
+					}
+					seg.DmlPosition = &msgpb.MsgPosition{
+						ChannelName: seg.GetInsertChannel(),
+						Timestamp:   maxTs,
+					}
+					return BinlogIncrement{
+						Binlogs:       seg.Binlogs,
+						Statslogs:     seg.Statslogs,
+						Deltalogs:     seg.Deltalogs,
+						Bm25Statslogs: seg.Bm25Statslogs,
+					}, true
+				}},
+			}
+			err = t.meta.UpdateSegmentsInfo(context.TODO(), mutations)
 			if err != nil {
 				updateErr := t.importMeta.UpdateJob(context.TODO(), t.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(err.Error()))
 				if updateErr != nil {

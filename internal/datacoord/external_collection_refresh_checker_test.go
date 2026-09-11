@@ -1265,14 +1265,14 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 		// carries no source/spec, so an empty one matches and these cases keep
 		// nudging exactly as before.
 		mt := &meta{
-			segments:    NewSegmentsInfo(),
+			segments:    NewCachedSegmentsInfo(),
 			collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		}
 		mt.collections.Insert(100, &collectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{Name: "coll"}})
 		for _, id := range append(append([]int64{}, indexedSegments...), *debt...) {
 			mt.segments.SetSegment(id, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 				ID: id, CollectionID: 100, State: commonpb.SegmentState_Flushed,
-			}})
+			}}, 0)
 		}
 		// GetUnindexedSegments is the debt oracle; stub it rather than build a
 		// full index meta - what matters here is the wait, not index bookkeeping.
@@ -1297,13 +1297,13 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 			mt.segments.SetSegment(999, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 				ID: 999, CollectionID: 100, State: commonpb.SegmentState_Flushed,
 				Level: datapb.SegmentLevel_L0,
-			}})
+			}}, 0)
 
 			var asked []int64
 			mockey.Mock((*meta).SelectSegments).To(
 				func(m *meta, ctx context.Context, filters ...SegmentFilter) []*SegmentInfo {
 					out := make([]*SegmentInfo, 0)
-					for _, s := range m.segments.segments {
+					for _, s := range m.segments.GetSegments() {
 						keep := true
 						for _, f := range filters {
 							if ff, ok := f.(SegmentFilterFunc); ok && !ff(s) {
@@ -1602,14 +1602,14 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 			require.NoError(t, err)
 
 			mt := &meta{
-				segments:    NewSegmentsInfo(),
+				segments:    NewCachedSegmentsInfo(),
 				indexMeta:   &indexMeta{},
 				collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 			}
 			mt.collections.Insert(100, &collectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{Name: "coll"}})
 			mt.segments.SetSegment(556, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 				ID: 556, CollectionID: 100, State: commonpb.SegmentState_Flushed,
-			}})
+			}}, 0)
 
 			checker := newRefreshChecker(ctx, mt, refreshMeta, make(chan struct{}), nil,
 				func(context.Context, *datapb.ExternalCollectionRefreshJob) error { return nil },
@@ -1647,14 +1647,14 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 
 			debt := []int64{556}
 			mt := &meta{
-				segments:    NewSegmentsInfo(),
+				segments:    NewCachedSegmentsInfo(),
 				indexMeta:   &indexMeta{},
 				collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 			}
 			mt.collections.Insert(100, &collectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{Name: "coll"}})
 			mt.segments.SetSegment(556, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 				ID: 556, CollectionID: 100, State: commonpb.SegmentState_Flushed,
-			}})
+			}}, 0)
 			mockey.Mock((*indexMeta).GetUnindexedSegments).To(
 				func(_ *indexMeta, _ int64, _ []int64) []int64 { return debt }).Build()
 
@@ -1702,14 +1702,14 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 
 			debt := []int64{556}
 			mt := &meta{
-				segments:    NewSegmentsInfo(),
+				segments:    NewCachedSegmentsInfo(),
 				indexMeta:   &indexMeta{},
 				collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 			}
 			mt.collections.Insert(100, &collectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{Name: "coll"}})
 			mt.segments.SetSegment(556, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 				ID: 556, CollectionID: 100, State: commonpb.SegmentState_Flushed,
-			}})
+			}}, 0)
 			mockey.Mock((*indexMeta).GetUnindexedSegments).To(
 				func(_ *indexMeta, _ int64, _ []int64) []int64 { return debt }).Build()
 
@@ -2106,10 +2106,10 @@ func TestExternalCollectionRefreshChecker_IndexWait_TimeoutInEntryPassPublishes(
 		// debt in the same pass, so a collection with nothing to index would
 		// finish there and the ordering this test exists for would never be
 		// reached.
-		mt := &meta{segments: NewSegmentsInfo(), indexMeta: &indexMeta{}, collections: collections}
+		mt := &meta{segments: NewCachedSegmentsInfo(), indexMeta: &indexMeta{}, collections: collections}
 		mt.segments.SetSegment(556, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 556, CollectionID: 100, State: commonpb.SegmentState_Flushed,
-		}})
+		}}, 0)
 		mockey.Mock((*indexMeta).GetUnindexedSegments).Return([]int64{556}).Build()
 
 		cm := &recordingChunkManager{}
@@ -2204,10 +2204,10 @@ func TestExternalCollectionRefreshChecker_IndexWait_NudgeWaitsForPublish(t *test
 			ExternalSource: "s3://old",
 			ExternalSpec:   `{"format":"parquet"}`,
 		}})
-		mt := &meta{segments: NewSegmentsInfo(), indexMeta: &indexMeta{}, collections: collections}
+		mt := &meta{segments: NewCachedSegmentsInfo(), indexMeta: &indexMeta{}, collections: collections}
 		mt.segments.SetSegment(556, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 556, CollectionID: 100, State: commonpb.SegmentState_Flushed,
-		}})
+		}}, 0)
 		mockey.Mock((*indexMeta).GetUnindexedSegments).Return([]int64{556}).Build()
 
 		checker := newRefreshChecker(ctx, mt, refreshMeta, make(chan struct{}), nil,
@@ -2282,7 +2282,7 @@ func TestExternalCollectionRefreshChecker_IndexWait_DataStaysQueryVisible(t *tes
 		require.NoError(t, err)
 
 		mt := &meta{
-			segments:           NewSegmentsInfo(),
+			segments:           NewCachedSegmentsInfo(),
 			collections:        typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 			indexMeta:          &indexMeta{},
 			partitionStatsMeta: &partitionStatsMeta{partitionStatsInfos: map[string]map[int64]*partitionStatsInfo{}},
@@ -2297,7 +2297,7 @@ func TestExternalCollectionRefreshChecker_IndexWait_DataStaysQueryVisible(t *tes
 			NumOfRows:   1024,
 			DmlPosition: &msgpb.MsgPosition{ChannelName: channel, Timestamp: 100},
 			Binlogs:     []*datapb.FieldBinlog{{FieldID: 1}},
-		}})
+		}}, 0)
 		mt.channelCPs.checkpoints[channel] = &msgpb.MsgPosition{ChannelName: channel, Timestamp: 100}
 
 		// The segment carries no index, so it is still debt for the whole wait.

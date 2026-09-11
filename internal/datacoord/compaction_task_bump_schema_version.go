@@ -373,10 +373,10 @@ func (t *bumpSchemaVersionTask) saveSegmentMeta(result *datapb.CompactionPlanRes
 	var newSegmentIDs []UniqueID
 	if isMaterializationResult(result) {
 		// In-place schema-bump materialization: DataCoord runs the StorageV3
-		// manifest transaction itself via CommitSegmentManifest, which acquires
-		// the per-segment lock then segMu and therefore MUST NOT run inside the
-		// segMu-held CompleteCompactionMutation. Commit it out here, mirroring how
-		// L0 commits V3 deltalogs (see l0CompactionTask.saveSegmentMeta).
+		// manifest transaction itself via CommitSegmentManifest, then publishes
+		// the manifest pointer and catalog fields through optimistic segment CAS.
+		// Keep this separate from the conventional compaction completion path,
+		// mirroring how L0 commits V3 deltalogs.
 		ids, err := t.commitBumpV3Materialization(context.TODO(), result)
 		if err != nil {
 			return err
@@ -419,13 +419,13 @@ func isMaterializationResult(result *datapb.CompactionPlanResult) bool {
 // commitBumpV3Materialization publishes an in-place schema-bump materialization
 // through CommitSegmentManifest: DataCoord runs the StorageV3 manifest
 // transaction on the segment's CURRENT manifest from the datanode-shipped
-// descriptors (rebasing against concurrent commits) and, atomically under segMu,
-// upserts the new column groups, advances the schema version, and folds in the
-// Stats increment. It returns the segment IDs to enqueue for index building.
+// descriptors (rebasing against concurrent commits), then CAS-publishes the new
+// pointer together with the column groups, schema version, and Stats increment.
+// It returns the segment IDs to enqueue for index building.
 //
 // This is the schema-bump analog of l0CompactionTask.buildL0V3ManifestCommit
 // (which now batches its targets through CommitSegmentManifests) and obeys the
-// same lock contract: it never runs while segMu is held.
+// same per-segment manifest-lock and optimistic-publication contract.
 func (t *bumpSchemaVersionTask) commitBumpV3Materialization(ctx context.Context, result *datapb.CompactionPlanResult) ([]UniqueID, error) {
 	if len(t.GetTaskProto().GetInputSegments()) != 1 {
 		return nil, merr.WrapErrIllegalCompactionPlan("schema bump compaction should have exactly one input segment")
@@ -515,7 +515,7 @@ func (t *bumpSchemaVersionTask) commitBumpV3Materialization(ctx context.Context,
 			},
 		},
 		CatalogMutation: SegmentCatalogMutation{
-			Operators: []UpdateOperator{
+			Operators: []SegmentOperator{
 				UpdateBumpSchemaVersionMaterializationOperator(segmentID, newSchemaVersion, resultSegment.GetInsertLogs(), resultSegment.GetStats()),
 			},
 		},

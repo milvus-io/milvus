@@ -25,11 +25,8 @@ import (
 
 func (c *DDLCallbacks) batchUpdateManifestV2AckCallback(ctx context.Context, result message.BroadcastResultBatchUpdateManifestMessageV2) error {
 	body := result.Message.MustBody()
-	var (
-		operators []UpdateOperator
-		v2Count   int
-		v3Count   int
-	)
+	mutations := make(map[int64][]SegmentOperator, len(body.GetItems()))
+	var v2Count, v3Count int
 	for _, item := range body.GetItems() {
 		segID := item.GetSegmentId()
 		cg := item.GetV2ColumnGroups()
@@ -41,38 +38,22 @@ func (c *DDLCallbacks) batchUpdateManifestV2AckCallback(ctx context.Context, res
 				mlog.FieldSegmentID(segID))
 			continue
 		case hasV2:
-			operators = append(operators, UpdateSegmentColumnGroupsOperator(segID, cg.GetColumnGroups()))
+			mutations[segID] = append(mutations[segID], UpdateSegmentColumnGroupsOperator(segID, cg.GetColumnGroups()))
 			v2Count++
 		case hasV3:
-			// TODO(segment-manifest-commit): a batch broadcast carries up to 512
-			// items and this V3 payload is a pure manifest-version bump (no
-			// object-storage I/O). We deliberately keep it as an UpdateManifestVersion
-			// operator so the whole batch — V2 column groups and V3 version bumps —
-			// commits in a single atomic UpdateSegmentsInfo (one AlterSegments).
-			//
-			// Routing each item through meta.CommitSegmentManifest instead would take
-			// the per-segment manifest lock plus segMu twice per item and issue one
-			// catalog.Update per item, and a mid-loop failure would return before the
-			// accumulated V2 operators are applied — i.e. the batch would no longer be
-			// applied as a unit. The tension is that CommitSegmentManifest's per-segment
-			// serialization is what protects against concurrent writers
-			// (stats/index/GC/compaction) racing the manifest pointer; skipping it here
-			// trades that protection for batch atomicity. meta.CommitSegmentManifests now
-			// resolves that trade-off — it takes every segment's manifest lock as one
-			// atomic operation yet still commits in a single UpdateSegmentsInfo (L0
-			// compaction already uses it) — and because this V3 payload is an I/O-free
-			// pointer adoption it maps to a ManifestMutationNoop commit. Routing this
-			// callback (and the external collection refresh path) through it is the
-			// remaining follow-up.
-			operators = append(operators, UpdateManifestVersion(segID, item.GetManifestVersion()))
+			// Keep V3 version adoption in the same logical batch as V2 column-group
+			// updates. The optimistic persistence layer may split a large logical
+			// batch into backend transactions and will report/compensate partial
+			// progress so the caller can retry safely.
+			mutations[segID] = append(mutations[segID], UpdateManifestVersion(segID, item.GetManifestVersion()))
 			v3Count++
 		default:
 			mlog.Warn(ctx, "batch update manifest item has no payload; skipping",
 				mlog.FieldSegmentID(segID))
 		}
 	}
-	if len(operators) > 0 {
-		if err := c.meta.UpdateSegmentsInfo(ctx, operators...); err != nil {
+	if len(mutations) > 0 {
+		if err := c.meta.UpdateSegmentsInfo(ctx, mutations); err != nil {
 			mlog.Warn(ctx, "batch update manifest failed", mlog.Err(err))
 			return err
 		}

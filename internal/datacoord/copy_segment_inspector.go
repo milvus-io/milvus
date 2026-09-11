@@ -281,8 +281,14 @@ func (s *copySegmentInspector) processFailed(task CopySegmentTask) {
 			continue
 		}
 
-		op := UpdateStatusOperator(targetSegID, commonpb.SegmentState_Dropped)
-		err := s.meta.UpdateSegmentsInfo(s.ctx, op)
+		mutations := map[int64][]SegmentOperator{
+			targetSegID: {func(seg *SegmentInfo) (BinlogIncrement, bool) {
+				seg.State = commonpb.SegmentState_Dropped
+				seg.DroppedAt = uint64(time.Now().UnixNano())
+				return BinlogIncrement{}, true
+			}},
+		}
+		err := s.meta.UpdateSegmentsInfo(s.ctx, mutations)
 		if err != nil {
 			mlog.Warn(s.ctx, "failed to drop target segment after copy task failed",
 				WrapCopySegmentTaskLog(task, mlog.Int64("segmentID", targetSegID), mlog.Err(err))...)

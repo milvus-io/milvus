@@ -26,7 +26,6 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	datacoordkv "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
@@ -401,6 +400,129 @@ func (s *ServerSuite) TestSaveBinlogPath_SaveDroppedSegment() {
 	}
 }
 
+func TestSaveBinlogPathCASRetryDiscardsDroppedSegment(t *testing.T) {
+	const segmentID = int64(20)
+	segments := newTestCachedSegmentsInfo(map[int64]*SegmentInfo{
+		segmentID: NewSegmentInfo(&datapb.SegmentInfo{
+			ID:             segmentID,
+			CollectionID:   1,
+			PartitionID:    2,
+			InsertChannel:  "ch1",
+			State:          commonpb.SegmentState_Sealed,
+			Level:          datapb.SegmentLevel_L1,
+			StorageVersion: storage.StorageV1,
+		}),
+	})
+	mt := newTestMetaFromCache(t, segments, nil)
+	mt.collections = typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+	mt.AddCollection(&collectionInfo{ID: 1})
+
+	originalPersist := mt.segmentPersist
+	failing := newFailOnceCASPersist(originalPersist.inner)
+	mt.segmentPersist = NewSegmentTxnWrapper(failing).WithMetaRootPath(mt.metaRootPath)
+	failing.onFailure = func() {
+		require.NoError(t, mt.SetState(context.Background(), segmentID, commonpb.SegmentState_Dropped))
+	}
+
+	server := CreateServer(context.Background(), nil)
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+	server.meta = mt
+	resp, err := server.SaveBinlogPaths(context.Background(), &datapb.SaveBinlogPathsRequest{
+		SegmentID:      segmentID,
+		CollectionID:   1,
+		PartitionID:    2,
+		SegLevel:       datapb.SegmentLevel_L1,
+		StorageVersion: storage.StorageV1,
+		Field2BinlogPaths: []*datapb.FieldBinlog{
+			{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 10, EntriesNum: 1}}},
+		},
+	})
+
+	require.NoError(t, err)
+	require.True(t, merr.Ok(resp))
+	segment := mt.GetSegment(context.Background(), segmentID)
+	require.NotNil(t, segment)
+	require.Equal(t, commonpb.SegmentState_Dropped, segment.GetState())
+	require.Empty(t, segment.GetBinlogs(), "the rejected retry must not publish binlogs")
+}
+
+func TestSaveBinlogPathRowCountSemantics(t *testing.T) {
+	tests := []struct {
+		name           string
+		storageVersion int64
+		level          datapb.SegmentLevel
+		binlogs        []*datapb.FieldBinlog
+		expectedRows   int64
+	}{
+		{
+			name:           "StorageV2 ignores checkpoint rows without insert binlogs",
+			storageVersion: storage.StorageV2,
+			level:          datapb.SegmentLevel_L1,
+			expectedRows:   0,
+		},
+		{
+			name:           "StorageV3 checkpoint overrides partial in-memory binlogs",
+			storageVersion: storage.StorageV3,
+			level:          datapb.SegmentLevel_L1,
+			binlogs: []*datapb.FieldBinlog{{
+				FieldID: 1,
+				Binlogs: []*datapb.Binlog{{LogID: 10, EntriesNum: 10}},
+			}},
+			expectedRows: 100,
+		},
+		{
+			name:           "L0 retains checkpoint fallback without insert binlogs",
+			storageVersion: storage.StorageV2,
+			level:          datapb.SegmentLevel_L0,
+			expectedRows:   100,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			const segmentID = int64(30)
+			mt := newTestMetaFromCache(t, newTestCachedSegmentsInfo(map[int64]*SegmentInfo{
+				segmentID: NewSegmentInfo(&datapb.SegmentInfo{
+					ID:             segmentID,
+					CollectionID:   1,
+					PartitionID:    2,
+					State:          commonpb.SegmentState_Growing,
+					Level:          test.level,
+					StorageVersion: test.storageVersion,
+				}),
+			}), nil)
+			mt.collections = typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+			mt.AddCollection(&collectionInfo{ID: 1})
+
+			server := CreateServer(context.Background(), nil)
+			server.stateCode.Store(commonpb.StateCode_Healthy)
+			server.meta = mt
+			if test.level == datapb.SegmentLevel_L0 {
+				triggerManager := NewMockTriggerManager(t)
+				triggerManager.EXPECT().OnCollectionUpdate(int64(1)).Once()
+				server.compactionTriggerManager = triggerManager
+			}
+			resp, err := server.SaveBinlogPaths(context.Background(), &datapb.SaveBinlogPathsRequest{
+				SegmentID:         segmentID,
+				CollectionID:      1,
+				PartitionID:       2,
+				SegLevel:          test.level,
+				StorageVersion:    test.storageVersion,
+				Field2BinlogPaths: test.binlogs,
+				CheckPoints: []*datapb.CheckPoint{{
+					SegmentID: segmentID,
+					NumOfRows: 100,
+					Position:  &msgpb.MsgPosition{Timestamp: 100},
+				}},
+			})
+
+			require.NoError(t, err)
+			require.True(t, merr.Ok(resp))
+			require.Equal(t, test.expectedRows, mt.GetSegment(context.Background(), segmentID).GetNumOfRows())
+		})
+	}
+}
+
 func (s *ServerSuite) TestSaveBinlogPath_TextRequiresStorageV3Manifest() {
 	s.testServer.meta.AddCollection(&collectionInfo{
 		ID: 0,
@@ -519,6 +641,16 @@ func (s *ServerSuite) TestSaveBinlogPath_L0Segment() {
 				NumOfRows: 12,
 			},
 		},
+		StartPositions: []*datapb.SegmentStartPosition{
+			{
+				SegmentID: 1,
+				StartPosition: &msgpb.MsgPosition{
+					ChannelName: "ch1",
+					MsgID:       []byte{4, 5, 6},
+					Timestamp:   0,
+				},
+			},
+		},
 		Flushed: true,
 	})
 	s.NoError(err)
@@ -527,6 +659,57 @@ func (s *ServerSuite) TestSaveBinlogPath_L0Segment() {
 	segment = s.testServer.meta.GetHealthySegment(context.TODO(), 1)
 	s.NotNil(segment)
 	s.EqualValues(datapb.SegmentLevel_L0, segment.GetLevel())
+	s.EqualValues(12, segment.GetNumOfRows())
+	s.Require().Len(segment.GetDeltalogs(), 1)
+	s.Require().Len(segment.GetDeltalogs()[0].GetBinlogs(), 2)
+	s.NotNil(segment.GetDmlPosition())
+	s.EqualValues([]byte{1, 2, 3}, segment.GetDmlPosition().GetMsgID())
+	s.NotNil(segment.GetStartPosition())
+	s.EqualValues([]byte{4, 5, 6}, segment.GetStartPosition().GetMsgID())
+
+	resp, err = s.testServer.SaveBinlogPaths(ctx, &datapb.SaveBinlogPathsRequest{
+		Base: &commonpb.MsgBase{
+			Timestamp: uint64(time.Now().Unix()),
+		},
+		SegmentID:    1,
+		PartitionID:  1,
+		CollectionID: 0,
+		SegLevel:     datapb.SegmentLevel_L0,
+		Channel:      "ch1",
+		Deltalogs: []*datapb.FieldBinlog{
+			{
+				FieldID: 1,
+				Binlogs: []*datapb.Binlog{
+					{
+						LogPath:    "/by-dev/test/0/1/1/1/3",
+						EntriesNum: 1,
+					},
+				},
+			},
+		},
+		CheckPoints: []*datapb.CheckPoint{
+			{
+				SegmentID: 1,
+				Position: &msgpb.MsgPosition{
+					ChannelName: "ch1",
+					MsgID:       []byte{7, 8, 9},
+					Timestamp:   1,
+				},
+				NumOfRows: 13,
+			},
+		},
+		Flushed: true,
+	})
+	s.NoError(err)
+	s.EqualValues(commonpb.ErrorCode_Success, resp.GetErrorCode())
+
+	segment = s.testServer.meta.GetHealthySegment(context.TODO(), 1)
+	s.NotNil(segment)
+	s.EqualValues(13, segment.GetNumOfRows())
+	s.Require().Len(segment.GetDeltalogs(), 1)
+	s.Require().Len(segment.GetDeltalogs()[0].GetBinlogs(), 3)
+	s.NotNil(segment.GetDmlPosition())
+	s.EqualValues([]byte{7, 8, 9}, segment.GetDmlPosition().GetMsgID())
 }
 
 func (s *ServerSuite) TestSaveBinlogPath_NormalCase() {
@@ -1872,15 +2055,15 @@ func TestGetChannelRecoveryInfo(t *testing.T) {
 	handler.EXPECT().GetDataVChanPositions(mock.Anything, mock.Anything).Return(channelInfo)
 	s.handler = handler
 	s.meta = &meta{
-		segments: NewSegmentsInfo(),
+		segments: NewCachedSegmentsInfo(),
 	}
-	s.meta.segments.segments[1] = NewSegmentInfo(&datapb.SegmentInfo{
+	s.meta.segments.SetSegment(1, NewSegmentInfo(&datapb.SegmentInfo{
 		ID:                   1,
 		CollectionID:         0,
 		PartitionID:          0,
 		State:                commonpb.SegmentState_Growing,
 		IsCreatedByStreaming: false,
-	})
+	}), 0)
 
 	assert.NoError(t, err)
 	resp, err = s.GetChannelRecoveryInfo(ctx, &datapb.GetChannelRecoveryInfoRequest{
@@ -2042,7 +2225,7 @@ func createTestFlushAllServer() *Server {
 		meta: &meta{
 			collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 			channelCPs:  newChannelCps(),
-			segments:    NewSegmentsInfo(),
+			segments:    NewCachedSegmentsInfo(),
 		},
 		// handler will be set to a mock in individual tests when needed
 	}
@@ -2414,9 +2597,10 @@ func TestServer_DropSegmentsByTime(t *testing.T) {
 		// Add segments to drop (timestamp <= flushTs)
 		seg1 := &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
-				ID:           1,
-				CollectionID: collectionID,
-				State:        commonpb.SegmentState_Flushed,
+				ID:            1,
+				CollectionID:  collectionID,
+				InsertChannel: channelName,
+				State:         commonpb.SegmentState_Flushed,
 				DmlPosition: &msgpb.MsgPosition{
 					Timestamp: flushTs - 100, // less than flushTs
 				},
@@ -2428,9 +2612,10 @@ func TestServer_DropSegmentsByTime(t *testing.T) {
 		// Add segment that should not be dropped (timestamp > flushTs)
 		seg2 := &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
-				ID:           2,
-				CollectionID: collectionID,
-				State:        commonpb.SegmentState_Flushed,
+				ID:            2,
+				CollectionID:  collectionID,
+				InsertChannel: channelName,
+				State:         commonpb.SegmentState_Flushed,
 				DmlPosition: &msgpb.MsgPosition{
 					Timestamp: flushTs + 100, // greater than flushTs
 				},
@@ -2438,12 +2623,6 @@ func TestServer_DropSegmentsByTime(t *testing.T) {
 		}
 		err = meta.AddSegment(ctx, seg2)
 		assert.NoError(t, err)
-
-		// Set segment channel
-		seg1.InsertChannel = channelName
-		seg2.InsertChannel = channelName
-		meta.segments.SetSegment(seg1.ID, seg1)
-		meta.segments.SetSegment(seg2.ID, seg2)
 
 		err = s.DropSegmentsByTime(ctx, collectionID, map[string]uint64{channelName: flushTs})
 		assert.NoError(t, err)
@@ -5156,14 +5335,14 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 		registry.ResetRegistration()
 
 		mockUpdateSegmentsInfo := mockey.Mock((*meta).UpdateSegmentsInfo).To(
-			func(m *meta, ctx context.Context, operators ...UpdateOperator) error {
+			func(m *meta, ctx context.Context, mutations map[int64][]SegmentOperator, newSegments ...*datapb.SegmentInfo) error {
 				return nil
 			}).Build()
 		defer mockUpdateSegmentsInfo.UnPatch()
 
 		server := &Server{
 			ctx:  ctx,
-			meta: &meta{segments: NewSegmentsInfo()},
+			meta: &meta{segments: NewCachedSegmentsInfo()},
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 		RegisterDDLCallbacks(server)
@@ -5198,7 +5377,7 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 
 		server := &Server{
 			ctx:  ctx,
-			meta: &meta{segments: NewSegmentsInfo()},
+			meta: &meta{segments: NewCachedSegmentsInfo()},
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 		RegisterDDLCallbacks(server)
@@ -5227,14 +5406,14 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 		registry.ResetRegistration()
 
 		mockUpdateSegmentsInfo := mockey.Mock((*meta).UpdateSegmentsInfo).To(
-			func(m *meta, ctx context.Context, operators ...UpdateOperator) error {
+			func(m *meta, ctx context.Context, mutations map[int64][]SegmentOperator, newSegments ...*datapb.SegmentInfo) error {
 				return errors.New("update segments info failed")
 			}).Build()
 		defer mockUpdateSegmentsInfo.UnPatch()
 
 		server := &Server{
 			ctx:  ctx,
-			meta: &meta{segments: NewSegmentsInfo()},
+			meta: &meta{segments: NewCachedSegmentsInfo()},
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 		RegisterDDLCallbacks(server)
@@ -5268,15 +5447,17 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 
 		var capturedOps int
 		mockUpdate := mockey.Mock((*meta).UpdateSegmentsInfo).To(
-			func(m *meta, ctx context.Context, operators ...UpdateOperator) error {
-				capturedOps = len(operators)
+			func(m *meta, ctx context.Context, mutations map[int64][]SegmentOperator, newSegments ...*datapb.SegmentInfo) error {
+				for _, operators := range mutations {
+					capturedOps += len(operators)
+				}
 				return nil
 			}).Build()
 		defer mockUpdate.UnPatch()
 
 		server := &Server{
 			ctx:  ctx,
-			meta: &meta{segments: NewSegmentsInfo()},
+			meta: &meta{segments: NewCachedSegmentsInfo()},
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 		RegisterDDLCallbacks(server)
@@ -5322,15 +5503,17 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 
 		var capturedOps int
 		mockUpdate := mockey.Mock((*meta).UpdateSegmentsInfo).To(
-			func(m *meta, ctx context.Context, operators ...UpdateOperator) error {
-				capturedOps = len(operators)
+			func(m *meta, ctx context.Context, mutations map[int64][]SegmentOperator, newSegments ...*datapb.SegmentInfo) error {
+				for _, operators := range mutations {
+					capturedOps += len(operators)
+				}
 				return nil
 			}).Build()
 		defer mockUpdate.UnPatch()
 
 		server := &Server{
 			ctx:  ctx,
-			meta: &meta{segments: NewSegmentsInfo()},
+			meta: &meta{segments: NewCachedSegmentsInfo()},
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 		RegisterDDLCallbacks(server)
@@ -6315,7 +6498,7 @@ func TestHandleCommitVchannelRPC_StoresCommitTimestamp(t *testing.T) {
 		Return(segIDs).Build()
 	defer getSegIDsMock.UnPatch()
 
-	segments := NewSegmentsInfo()
+	segments := NewCachedSegmentsInfo()
 	for _, segID := range segIDs {
 		segments.SetSegment(segID, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID:            segID,
@@ -6331,15 +6514,12 @@ func TestHandleCommitVchannelRPC_StoresCommitTimestamp(t *testing.T) {
 					TimestampTo: 100,
 				}},
 			}},
-		}})
+		}}, 0)
 	}
 
 	server := &Server{
 		importMeta: importMetaMock,
-		meta: &meta{
-			catalog:  &datacoordkv.Catalog{MetaKv: NewMetaMemoryKV()},
-			segments: segments,
-		},
+		meta:       newTestMetaFromCache(t, segments, nil),
 	}
 	server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -6372,7 +6552,7 @@ func TestHandleCommitVchannelRPC_RejectsCommitTimestampBelowBinlogTimestamp(t *t
 		Return(segIDs).Build()
 	defer getSegIDsMock.UnPatch()
 
-	segments := NewSegmentsInfo()
+	segments := NewCachedSegmentsInfo()
 	segments.SetSegment(10, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 		ID:            10,
 		CollectionID:  100,
@@ -6387,14 +6567,12 @@ func TestHandleCommitVchannelRPC_RejectsCommitTimestampBelowBinlogTimestamp(t *t
 				TimestampTo: 500,
 			}},
 		}},
-	}})
+	}}, 0)
+	meta := newTestMetaFromCache(t, segments, nil)
 
 	server := &Server{
 		importMeta: importMetaMock,
-		meta: &meta{
-			catalog:  &datacoordkv.Catalog{MetaKv: NewMetaMemoryKV()},
-			segments: segments,
-		},
+		meta:       meta,
 	}
 	server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -6536,7 +6714,7 @@ func TestHandleCommitVchannelRPC_V3SegmentIsNotFencedYet(t *testing.T) {
 		Return(segIDs).Build()
 	defer getSegIDsMock.UnPatch()
 
-	segments := NewSegmentsInfo()
+	segments := NewCachedSegmentsInfo()
 	// Exactly the shape a reloaded V3 import segment has: a manifest, no binlog
 	// arrays, and Stats carrying the row timestamps that did survive the restart.
 	segments.SetSegment(11, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
@@ -6548,14 +6726,12 @@ func TestHandleCommitVchannelRPC_V3SegmentIsNotFencedYet(t *testing.T) {
 		IsImporting:   true,
 		ManifestPath:  "files/insert_log/100/10/11/manifest",
 		Stats:         &datapb.Statistics{TimestampTo: 500},
-	}})
+	}}, 0)
+	meta := newTestMetaFromCache(t, segments, nil)
 
 	server := &Server{
 		importMeta: importMetaMock,
-		meta: &meta{
-			catalog:  &datacoordkv.Catalog{MetaKv: NewMetaMemoryKV()},
-			segments: segments,
-		},
+		meta:       meta,
 	}
 	server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -6571,6 +6747,6 @@ func TestHandleCommitVchannelRPC_V3SegmentIsNotFencedYet(t *testing.T) {
 	require.NotNil(t, seg)
 	assert.EqualValues(t, 300, seg.GetCommitTimestamp())
 	assert.False(t, seg.GetIsImporting())
-	assert.EqualValues(t, 0, maxBinlogTimestampTo(seg.GetBinlogs()),
-		"the bound the fence compares against is 0 despite Stats.TimestampTo=500")
+	assert.Empty(t, seg.GetBinlogs(),
+		"the fence sees no binlog timestamp even though Stats.TimestampTo=500")
 }

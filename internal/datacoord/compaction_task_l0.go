@@ -475,13 +475,10 @@ func buildL0V3DeltaLogEntries(segmentID int64, deltalogs []*datapb.FieldBinlog) 
 
 func (t *l0CompactionTask) saveSegmentMeta(outputSegs []*datapb.CompactionSegment) error {
 	ctx := t.context()
-	var operators []UpdateOperator
+	mutations := make(map[int64][]SegmentOperator)
 	v3Deltalogs := make(map[int64][]*datapb.FieldBinlog)
 	for _, seg := range outputSegs {
 		if len(seg.GetDeltalogs()) > 0 {
-			// The manifest transaction must run outside UpdateSegmentsInfo: that
-			// method holds segMu, whereas CommitSegmentManifest only holds the
-			// per-segment lock while it performs object-storage I/O.
 			current := t.meta.GetSegment(ctx, seg.GetSegmentID())
 			if current != nil && current.GetStorageVersion() == storage.StorageV3 && current.GetManifestPath() != "" {
 				// A target retired by a concurrent compaction while the L0 plan
@@ -502,51 +499,59 @@ func (t *l0CompactionTask) saveSegmentMeta(outputSegs []*datapb.CompactionSegmen
 				v3Deltalogs[seg.GetSegmentID()] = append(v3Deltalogs[seg.GetSegmentID()], seg.GetDeltalogs()...)
 				continue
 			}
-			operators = append(operators, AddL0DeltalogsAndUpdateManifestOperator(
+			mergeSegmentMutations(mutations, AddL0DeltalogsAndUpdateManifestOperator(
 				seg.GetSegmentID(),
 				seg.GetDeltalogs(),
 				compaction.CreateStorageConfig(),
 				t.committedV3Manifests,
 			))
+			continue
+		}
+		if manifest := seg.GetManifest(); manifest != "" {
+			mutations[seg.GetSegmentID()] = append(mutations[seg.GetSegmentID()], func(s *SegmentInfo) (BinlogIncrement, bool) {
+				s.ManifestPath = manifest
+				return BinlogIncrement{}, true
+			})
 		}
 	}
 
-	// Retire the compacted L0 input segments in the same catalog transaction that
-	// publishes the targets' merged deltalogs, so the whole L0 result is atomic:
-	// either every target gains its deltalogs and every input turns
-	// Dropped/Compacted, or nothing changes. For V3 targets both halves fold into
-	// one CommitSegmentManifests call (manifest pointer advance + these operators
-	// in a single UpdateSegmentsInfo); with no V3 target the operators alone go
-	// through UpdateSegmentsInfo.
+	// Publish target deltalogs before retiring the compacted L0 inputs as one
+	// logical update. On etcd the update may span backend transactions;
+	// UpdateSegmentsInfo applies a committed prefix to the cache and retries the
+	// remainder.
 	for _, segID := range t.GetTaskProto().InputSegments {
-		operators = append(operators, UpdateStatusOperator(segID, commonpb.SegmentState_Dropped), UpdateCompactedOperator(segID))
+		segID := segID
+		mutations[segID] = append(mutations[segID], func(s *SegmentInfo) (BinlogIncrement, bool) {
+			s.State = commonpb.SegmentState_Dropped
+			s.DroppedAt = uint64(time.Now().UnixNano())
+			s.Compacted = true
+			return BinlogIncrement{}, true
+		})
 	}
 
-	mlog.Info(context.TODO(), "meta update: update segments info for level zero compaction",
+	mlog.Info(ctx, "meta update: update segments info for level zero compaction",
 		mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
 	)
 
 	if len(v3Deltalogs) > 0 {
-		return t.commitL0V3DeltalogsBatch(ctx, v3Deltalogs, operators...)
+		return t.commitL0V3DeltalogsBatch(ctx, v3Deltalogs, mutations)
 	}
-	return t.meta.UpdateSegmentsInfo(ctx, operators...)
+	return t.meta.UpdateSegmentsInfo(ctx, mutations)
 }
 
-// commitL0V3DeltalogsBatch publishes every V3 target's deltalogs together with
-// extraOperators — the L0 input-segment retirement — in ONE catalog transaction.
-// CommitSegmentManifests acquires all targets' manifest locks as a single atomic
-// operation, runs the loon transactions in parallel outside segMu (from the same
-// dataCoord.compaction.levelzero.manifestUpdatePoolSize pool), and lands every pointer
-// advance plus extraOperators in one catalog transaction (a single UpdateSegmentsInfo).
-// Folding the input drops in makes the whole L0 result atomic — the targets gain their
-// merged deltalogs and the inputs turn Dropped/Compacted together, or nothing does —
-// while also collapsing the former per-segment CommitSegmentManifest fan-out that issued
-// one catalog.Update each.
+// commitL0V3DeltalogsBatch creates target manifest revisions under their
+// per-segment locks, then publishes the pointers, deltalog metadata, and input
+// retirement as one logical catalog update. The optimistic persistence layer
+// compensates and retries any committed etcd prefix.
 // A target dropped during the plan is skipped by the primitive itself as a benign
 // terminal outcome, so no ErrSegmentNotFound reaches here; only a real failure (stale
 // manifest, manifest I/O error) is returned, failing the save so the scheduler retries.
-// extraOperators still commit even when every target was skipped (commits empty).
-func (t *l0CompactionTask) commitL0V3DeltalogsBatch(ctx context.Context, deltalogsBySegment map[int64][]*datapb.FieldBinlog, extraOperators ...UpdateOperator) error {
+// extraMutations still commit even when every target was skipped (commits empty).
+func (t *l0CompactionTask) commitL0V3DeltalogsBatch(
+	ctx context.Context,
+	deltalogsBySegment map[int64][]*datapb.FieldBinlog,
+	extraMutations map[int64][]SegmentOperator,
+) error {
 	commits := make([]SegmentManifestCommit, 0, len(deltalogsBySegment))
 	for segmentID, deltalogs := range deltalogsBySegment {
 		commit, err := t.buildL0V3ManifestCommit(ctx, segmentID, deltalogs)
@@ -558,15 +563,15 @@ func (t *l0CompactionTask) commitL0V3DeltalogsBatch(ctx context.Context, deltalo
 		}
 	}
 	manifestMeta, ok := t.meta.(interface {
-		CommitSegmentManifests(context.Context, []SegmentManifestCommit, ...UpdateOperator) error
+		CommitSegmentManifests(context.Context, []SegmentManifestCommit, ...map[int64][]SegmentOperator) error
 	})
 	if !ok {
 		return merr.WrapErrServiceInternalMsg("L0 StorageV3 batch manifest commit requires DataCoord meta implementation")
 	}
 	// Delegate even when commits is empty: CommitSegmentManifests still publishes
-	// extraOperators through a plain UpdateSegmentsInfo, so the input retirement
+	// extraMutations through a plain UpdateSegmentsInfo, so the input retirement
 	// lands when every target was skipped mid-plan.
-	return manifestMeta.CommitSegmentManifests(ctx, commits, extraOperators...)
+	return manifestMeta.CommitSegmentManifests(ctx, commits, extraMutations)
 }
 
 // buildL0V3ManifestCommit assembles one target's manifest commit, or returns a nil
@@ -612,7 +617,7 @@ func (t *l0CompactionTask) buildL0V3ManifestCommit(ctx context.Context, segmentI
 	}
 
 	// No ExpectedManifest: the batch generates each revision from the pointer
-	// current under the atomically held manifest locks, and publication aborts on
+	// current while all manifest locks are held, and publication aborts on
 	// mid-I/O pointer movement. Pinning this pre-lock read would abort the whole
 	// batch whenever a benign commit (e.g. a stats publication) advanced any
 	// target's pointer between here and lock acquisition.
@@ -627,7 +632,7 @@ func (t *l0CompactionTask) buildL0V3ManifestCommit(ctx context.Context, segmentI
 			// Keep the catalog half of L0 exactly on the established mutation
 			// path so merging, stats accumulation, and retry deduplication are
 			// shared with the legacy implementation.
-			Operators: []UpdateOperator{AddL0DeltalogsOperator(segmentID, deltalogs)},
+			Operators: []SegmentOperator{AddL0DeltalogsOperator(segmentID, deltalogs)},
 		},
 	}, nil
 }

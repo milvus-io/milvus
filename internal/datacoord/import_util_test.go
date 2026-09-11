@@ -127,7 +127,6 @@ func TestImportUtil_NewImportTasks(t *testing.T) {
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
-	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
@@ -139,7 +138,7 @@ func TestImportUtil_NewImportTasks(t *testing.T) {
 
 	broker := broker.NewMockBroker(t)
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-	meta, err := newMeta(context.TODO(), catalog, nil, broker)
+	meta, err := newMeta(context.TODO(), catalog, nil, broker, newTestSegmentPersist(), "")
 	assert.NoError(t, err)
 
 	tasks, err := NewImportTasks(fileGroups, job, alloc, meta, nil, 1*1024*1024*1024)
@@ -204,7 +203,6 @@ func TestImportUtil_NewImportTasksWithDataTt(t *testing.T) {
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
-	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
@@ -215,7 +213,7 @@ func TestImportUtil_NewImportTasksWithDataTt(t *testing.T) {
 
 	broker := broker.NewMockBroker(t)
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{}, nil)
-	meta, err := newMeta(context.TODO(), catalog, nil, broker)
+	meta, err := newMeta(context.TODO(), catalog, nil, broker, newTestSegmentPersist(), "")
 	assert.NoError(t, err)
 
 	tasks, err := NewImportTasks(fileGroups, job, alloc, meta, nil, 1*1024*1024*1024)
@@ -267,7 +265,6 @@ func TestImportUtil_AssembleRequest(t *testing.T) {
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
-	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
@@ -286,7 +283,7 @@ func TestImportUtil_AssembleRequest(t *testing.T) {
 
 	broker := broker.NewMockBroker(t)
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-	meta, err := newMeta(context.TODO(), catalog, nil, broker)
+	meta, err := newMeta(context.TODO(), catalog, nil, broker, newTestSegmentPersist(), "")
 	assert.NoError(t, err)
 	segment := &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{ID: 5, IsImporting: true},
@@ -346,7 +343,6 @@ func TestImportUtil_AssembleRequestWithDataTt(t *testing.T) {
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
-	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
@@ -364,7 +360,7 @@ func TestImportUtil_AssembleRequestWithDataTt(t *testing.T) {
 
 	broker := broker.NewMockBroker(t)
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{}, nil)
-	meta, err := newMeta(context.TODO(), catalog, nil, broker)
+	meta, err := newMeta(context.TODO(), catalog, nil, broker, newTestSegmentPersist(), "")
 	assert.NoError(t, err)
 	segment := &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{ID: 5, IsImporting: true},
@@ -440,7 +436,6 @@ func TestImportUtil_L0ImportUsesStorageV2WhenLoonFFIEnabled(t *testing.T) {
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
-	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
@@ -451,7 +446,7 @@ func TestImportUtil_L0ImportUsesStorageV2WhenLoonFFIEnabled(t *testing.T) {
 
 	broker := broker.NewMockBroker(t)
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-	meta, err := newMeta(context.TODO(), catalog, nil, broker)
+	meta, err := newMeta(context.TODO(), catalog, nil, broker, newTestSegmentPersist(), "")
 	assert.NoError(t, err)
 
 	segments, err := AssignSegments(job, task, alloc, meta, 1024)
@@ -518,7 +513,6 @@ func TestImportUtil_CheckDiskQuota(t *testing.T) {
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
@@ -533,7 +527,7 @@ func TestImportUtil_CheckDiskQuota(t *testing.T) {
 
 	broker := broker.NewMockBroker(t)
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-	meta, err := newMeta(context.TODO(), catalog, nil, broker)
+	meta, err := newMeta(context.TODO(), catalog, nil, broker, newTestSegmentPersist(), "")
 	assert.NoError(t, err)
 
 	job := &importJob{
@@ -710,8 +704,6 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().SavePreImportTask(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
-	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
-	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
@@ -726,7 +718,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 
 	broker := broker.NewMockBroker(t)
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-	meta, err := newMeta(context.TODO(), catalog, nil, broker)
+	meta, err := newMeta(context.TODO(), catalog, nil, broker, newTestSegmentPersist(), "")
 	assert.NoError(t, err)
 
 	file1 := &internalpb.ImportFile{
@@ -880,18 +872,16 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	assert.Equal(t, "", reason)
 
 	// importing state, segmentImportedRows/totalRows = 1
-	err = meta.UpdateSegmentsInfo(context.TODO(), UpdateImportedRows(10, 100))
-	assert.NoError(t, err)
-	err = meta.UpdateSegmentsInfo(context.TODO(), UpdateImportedRows(20, 100))
-	assert.NoError(t, err)
-	err = meta.UpdateSegmentsInfo(context.TODO(), UpdateImportedRows(11, 100))
-	assert.NoError(t, err)
-	err = meta.UpdateSegmentsInfo(context.TODO(), UpdateImportedRows(12, 100))
-	assert.NoError(t, err)
-	err = meta.UpdateSegmentsInfo(context.TODO(), UpdateImportedRows(21, 100))
-	assert.NoError(t, err)
-	err = meta.UpdateSegmentsInfo(context.TODO(), UpdateImportedRows(22, 100))
-	assert.NoError(t, err)
+	for _, segID := range []int64{10, 20, 11, 12, 21, 22} {
+		err = meta.UpdateSegmentsInfo(context.TODO(), map[int64][]SegmentOperator{
+			segID: {func(seg *SegmentInfo) (BinlogIncrement, bool) {
+				seg.NumOfRows = 100
+				seg.MaxRowNum = 100
+				return BinlogIncrement{}, true
+			}},
+		})
+		assert.NoError(t, err)
+	}
 	progress, state, _, _, reason = GetJobProgress(ctx, job.GetJobID(), importMeta, meta)
 	assert.Equal(t, int64(float32(10+30+30)), progress)
 	assert.Equal(t, internalpb.ImportJobState_Importing, state)
@@ -1083,7 +1073,7 @@ func TestLogResultSegmentsInfo(t *testing.T) {
 	// Create mock catalog and broker
 	mockCatalog := mocks.NewDataCoordCatalog(t)
 	meta := &meta{
-		segments: NewSegmentsInfo(),
+		segments: NewCachedSegmentsInfo(),
 		catalog:  mockCatalog,
 	}
 
@@ -1123,7 +1113,7 @@ func TestLogResultSegmentsInfo(t *testing.T) {
 
 	// Add segments to meta
 	for _, segment := range segments {
-		meta.segments.SetSegment(segment.ID, segment)
+		meta.segments.SetSegment(segment.ID, segment, 0)
 	}
 
 	jobID := int64(2)
@@ -1393,7 +1383,6 @@ func TestImportUtil_AssembleRequestCarriesPKRange(t *testing.T) {
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
-	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
@@ -1411,7 +1400,7 @@ func TestImportUtil_AssembleRequestCarriesPKRange(t *testing.T) {
 
 	broker := broker.NewMockBroker(t)
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-	meta, err := newMeta(context.TODO(), catalog, nil, broker)
+	meta, err := newMeta(context.TODO(), catalog, nil, broker, newTestSegmentPersist(), "")
 	assert.NoError(t, err)
 	err = meta.AddSegment(context.Background(), &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 5, IsImporting: true}})
 	assert.NoError(t, err)

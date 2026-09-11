@@ -173,7 +173,7 @@ func TestSubmitRefreshJobWithIDStoresJobMetadata(t *testing.T) {
 	}
 	mt := &meta{
 		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 	}
 	mt.collections.Insert(collectionID, &collectionInfo{
 		ID:            collectionID,
@@ -222,13 +222,13 @@ func TestCreateTasksForJob_PersistedOwnershipDrivesWorkerRequest(t *testing.T) {
 			{FieldID: 100, Name: "id", ExternalField: "id"},
 		},
 	}
-	segments := NewSegmentsInfo()
+	segments := NewCachedSegmentsInfo()
 	segments.SetSegment(10, NewSegmentInfo(&datapb.SegmentInfo{
 		ID:           10,
 		CollectionID: collectionID,
 		State:        commonpb.SegmentState_Flushed,
 		ManifestPath: "manifest-10",
-	}))
+	}), 0)
 	mt := &meta{
 		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		segments:    segments,
@@ -342,13 +342,13 @@ func TestCreateTasksForJob_UnreadableBaselineManifest(t *testing.T) {
 	collectionID := int64(100)
 	jobID := int64(1001)
 
-	segments := NewSegmentsInfo()
+	segments := NewCachedSegmentsInfo()
 	segments.SetSegment(10, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 		ID:           10,
 		CollectionID: collectionID,
 		State:        commonpb.SegmentState_Flushed,
 		ManifestPath: "baseline-manifest",
-	}})
+	}}, 0)
 	mt := &meta{
 		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		segments:    segments,
@@ -405,7 +405,7 @@ func TestCreateTasksForJob_CompositePersistenceFailureIsUnpublished(t *testing.T
 
 	mt := &meta{
 		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 	}
 	cm := &recordingChunkManager{}
 	mgr := NewExternalCollectionRefreshManager(
@@ -463,7 +463,7 @@ func TestCreateTasksForJob_TerminalJobRejectsLatePlanAndCleansExplore(t *testing
 
 	mt := &meta{
 		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 	}
 	cm := &recordingChunkManager{}
 	mgr := NewExternalCollectionRefreshManager(
@@ -520,30 +520,28 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsMergesTaskResu
 	}, 2)
 	publishManagerTestTasks(t, refreshMeta, 1, 100, 1001, 1002)
 
-	segments := NewSegmentsInfo()
+	segments := NewCachedSegmentsInfo()
 	segments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 		ID:           1,
 		CollectionID: 100,
 		State:        commonpb.SegmentState_Flushed,
 		NumOfRows:    5,
-	}})
+	}}, 0)
 	segments.SetSegment(2, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 		ID:           2,
 		CollectionID: 100,
 		State:        commonpb.SegmentState_Flushed,
 		NumOfRows:    6,
-	}})
+	}}, 0)
 	segments.SetSegment(3, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 		ID:           3,
 		CollectionID: 100,
 		State:        commonpb.SegmentState_Flushed,
 		NumOfRows:    9,
-	}})
-	mt := &meta{
-		catalog:     catalog,
-		segments:    segments,
-		collections: newTestCollections(100),
-	}
+	}}, 0)
+	mt := newTestMetaFromCache(t, segments, nil)
+	mt.catalog = catalog
+	mt.collections = newTestCollections(100)
 	mgr := &externalCollectionRefreshManager{
 		mt:          mt,
 		refreshMeta: refreshMeta,
@@ -640,9 +638,10 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsWithoutBaselin
 	publishManagerTestTasks(t, refreshMeta, 1, 100, 1001)
 
 	mt := &meta{
-		catalog:     catalog,
-		segments:    NewSegmentsInfo(),
-		collections: newTestCollections(100),
+		catalog:        catalog,
+		segmentPersist: newTestSegmentPersist(),
+		segments:       NewCachedSegmentsInfo(),
+		collections:    newTestCollections(100),
 	}
 	mgr := &externalCollectionRefreshManager{mt: mt, refreshMeta: refreshMeta}
 	err = mgr.applyFinishedJobSegments(ctx, &datapb.ExternalCollectionRefreshJob{
@@ -677,11 +676,11 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsRejectsNonFini
 
 	mt := &meta{
 		catalog:     catalog,
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 		collections: newTestCollections(100),
 	}
 	updateCalls := 0
-	mockUpdate := mockey.Mock((*meta).UpdateSegmentsInfo).To(func(_ *meta, _ context.Context, _ ...UpdateOperator) error {
+	mockUpdate := mockey.Mock((*meta).UpdateSegmentsInfo).To(func(_ *meta, _ context.Context, _ map[int64][]SegmentOperator, _ ...*datapb.SegmentInfo) error {
 		updateCalls++
 		return nil
 	}).Build()
@@ -727,11 +726,11 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsRejectsDuplica
 
 	mt := &meta{
 		catalog:     catalog,
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 		collections: newTestCollections(100),
 	}
 	updateCalls := 0
-	mockUpdate := mockey.Mock((*meta).UpdateSegmentsInfo).To(func(_ *meta, _ context.Context, _ ...UpdateOperator) error {
+	mockUpdate := mockey.Mock((*meta).UpdateSegmentsInfo).To(func(_ *meta, _ context.Context, _ map[int64][]SegmentOperator, _ ...*datapb.SegmentInfo) error {
 		updateCalls++
 		return nil
 	}).Build()
@@ -776,11 +775,11 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsRejectsMissing
 
 	mt := &meta{
 		catalog:     catalog,
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 		collections: newTestCollections(100),
 	}
 	updateCalls := 0
-	mockUpdate := mockey.Mock((*meta).UpdateSegmentsInfo).To(func(_ *meta, _ context.Context, _ ...UpdateOperator) error {
+	mockUpdate := mockey.Mock((*meta).UpdateSegmentsInfo).To(func(_ *meta, _ context.Context, _ map[int64][]SegmentOperator, _ ...*datapb.SegmentInfo) error {
 		updateCalls++
 		return nil
 	}).Build()
@@ -938,7 +937,7 @@ func TestExternalCollectionRefreshManager_SubmitRefreshJobWithID(t *testing.T) {
 		})
 		mt := &meta{
 			collections: collections,
-			segments:    NewSegmentsInfo(),
+			segments:    NewCachedSegmentsInfo(),
 		}
 
 		// Mock IsExternalCollection to return true
@@ -1052,7 +1051,7 @@ func TestExternalCollectionRefreshManager_SubmitRefreshJobWithID(t *testing.T) {
 		})
 		mt := &meta{
 			collections: collections,
-			segments:    NewSegmentsInfo(),
+			segments:    NewCachedSegmentsInfo(),
 		}
 
 		// Mock IsExternalCollection to return true

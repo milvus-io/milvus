@@ -27,7 +27,6 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
-	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -345,154 +344,112 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 	}
 	upsertSegmentMap = normalizedUpsertSegmentMap
 
-	// Build update operators
-	var operators []UpdateOperator
-	// Segments whose incoming result the collection already carries - a new
-	// segment written by an earlier apply, or a baseline patch already
-	// installed. Both are skipped by the upsert operators below.
-	alreadyAppliedSegments := make(map[int64]struct{})
+	mutations := make(map[int64][]SegmentOperator, len(segmentsToDrop)+len(normalizedUpdatedSegments))
+	missingSegmentErrors := make(map[int64]error)
+	newSegments := make([]*datapb.SegmentInfo, 0, len(normalizedUpdatedSegments))
+	droppedAt := uint64(time.Now().UnixNano())
 
-	validationOperator := func(modPack *updateSegmentPack) bool {
-		for segmentID := range baselineSegmentMap {
-			existing := modPack.meta.segments.GetSegment(segmentID)
-			incoming := upsertSegmentMap[segmentID]
-			kept := keptSegmentMap[segmentID]
+	for segmentID := range baselineSegmentMap {
+		segmentID := segmentID
+		existing := mt.segments.GetSegment(segmentID)
+		incoming := upsertSegmentMap[segmentID]
+		kept := keptSegmentMap[segmentID]
 
-			if existing == nil {
-				if !kept && incoming == nil {
-					// A missing segment already satisfies the desired removal state.
-					continue
+		if existing == nil {
+			if !kept && incoming == nil {
+				continue
+			}
+			return merr.WrapErrServiceInternalMsg("baseline segment %d not found", segmentID)
+		}
+		if existing.GetCollectionID() != collectionID {
+			return merr.WrapErrServiceInternalMsg(
+				"baseline segment %d belongs to collection %d, expected %d",
+				segmentID, existing.GetCollectionID(), collectionID)
+		}
+		if kept {
+			if existing.GetState() == commonpb.SegmentState_Dropped {
+				return merr.WrapErrServiceInternalMsg("cannot keep dropped segment %d", segmentID)
+			}
+			continue
+		}
+		if incoming == nil {
+			if existing.GetState() == commonpb.SegmentState_Dropped {
+				continue
+			}
+			mutations[segmentID] = append(mutations[segmentID], func(segment *SegmentInfo) (BinlogIncrement, bool) {
+				if segment.GetCollectionID() != collectionID {
+					segment.pendingMutationErr = merr.WrapErrServiceInternalMsg(
+						"baseline segment %d belongs to collection %d, expected %d",
+						segmentID, segment.GetCollectionID(), collectionID)
+					return BinlogIncrement{}, false
 				}
-				return modPack.fail(merr.WrapErrServiceInternalMsg("baseline segment %d not found", segmentID))
-			}
-			if existing.GetCollectionID() != collectionID {
-				return modPack.fail(merr.WrapErrServiceInternalMsg(
-					"baseline segment %d belongs to collection %d, expected %d",
-					segmentID,
-					existing.GetCollectionID(),
-					collectionID,
-				))
-			}
-			if kept {
-				if existing.GetState() == commonpb.SegmentState_Dropped {
-					return modPack.fail(merr.WrapErrServiceInternalMsg("cannot keep dropped segment %d", segmentID))
+				if segment.GetState() == commonpb.SegmentState_Dropped {
+					return BinlogIncrement{}, false
 				}
-				continue
-			}
-			if incoming == nil {
-				// Dropped is the replay-safe terminal state for an inferred removal.
-				continue
-			}
-			if externalRefreshManifestAlreadyApplied(existing, incoming) {
-				// Replaying a patch is NOT harmless: applyExternalRefreshPatch
-				// clears TextStatsLogs and JsonKeyStats, so a second write
-				// would discard a text index or JSON key stats built since the
-				// first one, orphaning their files. A genuine patch always
-				// installs a strictly newer manifest, so it still applies.
-				alreadyAppliedSegments[segmentID] = struct{}{}
-				mlog.Info(ctx, "external refresh segment patch already applied, skipping replay",
-					mlog.FieldSegmentID(segmentID))
-				continue
-			}
-			if err := validateExternalRefreshPatch(existing, incoming, collectionID); err != nil {
-				mlog.Warn(ctx, "invalid external refresh segment patch",
-					mlog.FieldSegmentID(incoming.GetID()),
-					mlog.Err(err))
-				return modPack.fail(err)
-			}
+				segment.State = commonpb.SegmentState_Dropped
+				segment.DroppedAt = droppedAt
+				return BinlogIncrement{}, true
+			})
+			mlog.Info(ctx, "marking segment as dropped",
+				mlog.FieldSegmentID(segmentID),
+				mlog.Int64("numRows", existing.GetNumOfRows()))
+			continue
 		}
 
-		for segmentID := range upsertSegmentMap {
-			if _, isPatch := baselineSegmentMap[segmentID]; isPatch {
-				continue
+		if externalRefreshManifestAlreadyApplied(existing, incoming) {
+			mlog.Info(ctx, "external refresh segment patch already applied, skipping replay",
+				mlog.FieldSegmentID(segmentID))
+			continue
+		}
+		if err := validateExternalRefreshPatch(existing, incoming, collectionID); err != nil {
+			return err
+		}
+		incomingPatch := incoming
+		mutations[segmentID] = append(mutations[segmentID], func(segment *SegmentInfo) (BinlogIncrement, bool) {
+			if externalRefreshManifestAlreadyApplied(segment, incomingPatch) {
+				return BinlogIncrement{}, false
 			}
-			existing := modPack.meta.segments.GetSegment(segmentID)
-			if existing == nil {
-				continue
+			if err := validateExternalRefreshPatch(segment, incomingPatch, collectionID); err != nil {
+				segment.pendingMutationErr = err
+				return BinlogIncrement{}, false
 			}
-			if externalRefreshNewSegmentAlreadyApplied(existing, upsertSegmentMap[segmentID]) {
-				alreadyAppliedSegments[segmentID] = struct{}{}
+			patched := applyExternalRefreshPatch(segment, incomingPatch)
+			segment.SegmentInfo = patched.SegmentInfo
+			return BinlogIncrement{
+				Binlogs:       segment.Binlogs,
+				Statslogs:     segment.Statslogs,
+				Deltalogs:     segment.Deltalogs,
+				Bm25Statslogs: segment.Bm25Statslogs,
+			}, true
+		})
+		missingSegmentErrors[segmentID] = merr.WrapErrServiceInternalMsg("baseline segment %d not found", segmentID)
+		mlog.Info(ctx, "patching existing segment",
+			mlog.FieldSegmentID(segmentID),
+			mlog.Int64("numRows", incoming.GetNumOfRows()),
+			mlog.String("manifestPath", incoming.GetManifestPath()))
+	}
+
+	for segmentID, incoming := range upsertSegmentMap {
+		if _, isPatch := baselineSegmentMap[segmentID]; isPatch {
+			continue
+		}
+		if existing := mt.segments.GetSegment(segmentID); existing != nil {
+			if externalRefreshNewSegmentAlreadyApplied(existing, incoming) {
 				mlog.Info(ctx, "new external refresh segment already applied, skipping replay",
 					mlog.FieldSegmentID(segmentID))
 				continue
 			}
-			return modPack.fail(merr.WrapErrServiceInternalMsg(
-				"new external refresh segment %d collides with existing metadata",
-				segmentID,
-			))
+			return merr.WrapErrServiceInternalMsg(
+				"new external refresh segment %d collides with existing metadata", segmentID)
 		}
-		return true
-	}
-	operators = append(operators, validationOperator)
-
-	// Operator 1: Drop only the segment IDs selected during validation. For an
-	// ownership plan this list is limited to its immutable baseline.
-	dropOperator := func(modPack *updateSegmentPack) bool {
-		for _, segmentID := range segmentsToDrop {
-			current := modPack.meta.segments.GetSegment(segmentID)
-			if current == nil || current.GetState() == commonpb.SegmentState_Dropped {
-				continue
-			}
-			segment := modPack.Get(segmentID)
-			updateSegStateAndPrepareMetrics(segment, commonpb.SegmentState_Dropped, modPack.metricMutation)
-			segment.DroppedAt = uint64(time.Now().UnixNano())
-			modPack.segments[segmentID] = segment
-			mlog.Info(ctx, "marking segment as dropped",
-				mlog.FieldSegmentID(segmentID),
-				mlog.Int64("numRows", segment.GetNumOfRows()))
-		}
-		return true
-	}
-	operators = append(operators, dropOperator)
-
-	// Operator 2: Add new segments or patch existing active segments.
-	for _, seg := range normalizedUpdatedSegments {
-		incoming := seg
-		upsertOperator := func(modPack *updateSegmentPack) bool {
-			if _, ok := alreadyAppliedSegments[incoming.GetID()]; ok {
-				return true
-			}
-			existing := modPack.Get(incoming.GetID())
-			if existing != nil {
-				patched := applyExternalRefreshPatch(existing, incoming)
-				modPack.segments[incoming.GetID()] = patched
-				modPack.increments[incoming.GetID()] = metastore.BinlogsIncrement{
-					Segment: patched.SegmentInfo,
-				}
-				mlog.Info(ctx, "patching existing segment",
-					mlog.FieldSegmentID(incoming.GetID()),
-					mlog.Int64("numRows", incoming.GetNumOfRows()),
-					mlog.String("manifestPath", incoming.GetManifestPath()))
-				return true
-			}
-
-			segInfo := NewSegmentInfo(incoming)
-			modPack.segments[incoming.GetID()] = segInfo
-
-			modPack.increments[incoming.GetID()] = metastore.BinlogsIncrement{
-				Segment: incoming,
-			}
-
-			modPack.metricMutation.addNewSeg(
-				commonpb.SegmentState_Flushed,
-				incoming.GetLevel(),
-				incoming.GetIsSorted(),
-				incoming.GetStorageVersion(),
-				segmentMetricFormatLabel(segInfo),
-				incoming.GetNumOfRows(),
-			)
-
-			mlog.Info(ctx, "adding new segment",
-				mlog.FieldSegmentID(incoming.GetID()),
-				mlog.Int64("numRows", incoming.GetNumOfRows()))
-			return true
-		}
-		operators = append(operators, upsertOperator)
+		newSegments = append(newSegments, incoming)
+		mlog.Info(ctx, "adding new segment",
+			mlog.FieldSegmentID(segmentID),
+			mlog.Int64("numRows", incoming.GetNumOfRows()))
 	}
 
-	// Execute all operators atomically
-	if err := mt.UpdateSegmentsInfo(ctx, operators...); err != nil {
-		mlog.Warn(ctx, "failed to update segments atomically", mlog.Err(err))
+	if err := mt.updateSegmentsInfo(ctx, mutations, nil, missingSegmentErrors, newSegments...); err != nil {
+		mlog.Warn(ctx, "failed to update external collection segments", mlog.Err(err))
 		return err
 	}
 
@@ -649,13 +606,10 @@ func applyExternalRefreshPatch(oldSeg *SegmentInfo, incoming *datapb.SegmentInfo
 	return cloned
 }
 
-// getExternalRefreshSegmentSnapshots returns clones in the same order as
-// segmentIDs while holding segMu across the full read, preventing one worker
-// request from observing segment metadata from different update generations.
+// getExternalRefreshSegmentSnapshots returns immutable cache entries in the
+// same order as segmentIDs. CachedSegmentsInfo publishes each entry by CAS, so
+// a reader never observes a partially mutated SegmentInfo.
 func getExternalRefreshSegmentSnapshots(mt *meta, segmentIDs []int64) []*SegmentInfo {
-	mt.segMu.RLock()
-	defer mt.segMu.RUnlock()
-
 	result := make([]*SegmentInfo, len(segmentIDs))
 	for i, segmentID := range segmentIDs {
 		if segment := mt.segments.GetSegment(segmentID); segment != nil {

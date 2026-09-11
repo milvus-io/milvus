@@ -96,67 +96,28 @@ func (s *statsTaskSuite) SetupSuite() {
 	secondaryKey := createSecondaryIndexKey(statsTask.GetSegmentID(), statsTask.GetSubJobType().String())
 	secondaryIndex.Insert(secondaryKey, statsTask)
 
-	s.mt = &meta{
-		segments: &SegmentsInfo{
-			segments: map[int64]*SegmentInfo{
-				s.segID: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:            s.segID,
-						CollectionID:  s.collID,
-						PartitionID:   s.partID,
-						InsertChannel: "ch1",
-						NumOfRows:     65535,
-						State:         commonpb.SegmentState_Flushed,
-						MaxRowNum:     65535,
-						Level:         datapb.SegmentLevel_L2,
-						Stats:         &datapb.Statistics{InsertBinlogSize: 512 * 1024 * 1024},
-					},
-				},
+	segments := newTestCachedSegmentsInfo(map[int64]*SegmentInfo{
+		s.segID: {
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            s.segID,
+				CollectionID:  s.collID,
+				PartitionID:   s.partID,
+				InsertChannel: "ch1",
+				NumOfRows:     65535,
+				State:         commonpb.SegmentState_Flushed,
+				MaxRowNum:     65535,
+				Level:         datapb.SegmentLevel_L2,
+				Stats:         &datapb.Statistics{InsertBinlogSize: 512 * 1024 * 1024},
 			},
-			secondaryIndexes: segmentInfoIndexes{
-				coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
-					s.collID: {
-						s.segID: {
-							SegmentInfo: &datapb.SegmentInfo{
-								ID:            s.segID,
-								CollectionID:  s.collID,
-								PartitionID:   s.partID,
-								InsertChannel: "ch1",
-								NumOfRows:     65535,
-								State:         commonpb.SegmentState_Flushed,
-								MaxRowNum:     65535,
-								Level:         datapb.SegmentLevel_L2,
-							},
-						},
-					},
-				},
-				channel2Segments: map[string]map[UniqueID]*SegmentInfo{
-					"ch1": {
-						s.segID: {
-							SegmentInfo: &datapb.SegmentInfo{
-								ID:            s.segID,
-								CollectionID:  s.collID,
-								PartitionID:   s.partID,
-								InsertChannel: "ch1",
-								NumOfRows:     65535,
-								State:         commonpb.SegmentState_Flushed,
-								MaxRowNum:     65535,
-								Level:         datapb.SegmentLevel_L2,
-							},
-						},
-					},
-				},
-			},
-			compactionTo: map[UniqueID][]UniqueID{},
 		},
-
-		statsTaskMeta: &statsTaskMeta{
-			keyLock:         lock.NewKeyLock[UniqueID](),
-			ctx:             context.Background(),
-			catalog:         nil,
-			tasks:           tasks,
-			segmentID2Tasks: secondaryIndex,
-		},
+	})
+	s.mt = newTestMetaFromCache(s.T(), segments, nil)
+	s.mt.statsTaskMeta = &statsTaskMeta{
+		keyLock:         lock.NewKeyLock[UniqueID](),
+		ctx:             context.Background(),
+		catalog:         nil,
+		tasks:           tasks,
+		segmentID2Tasks: secondaryIndex,
 	}
 }
 
@@ -260,7 +221,7 @@ func (s *statsTaskSuite) TestResetTask() {
 		st.resetTask(context.Background(), "reset task")
 		s.Equal(indexpb.JobState_JobStateInit, st.GetState())
 		s.Equal("reset task", st.GetFailReason())
-		s.False(s.mt.segments.segments[s.segID].isCompacting)
+		s.False(s.mt.segments.GetSegment(s.segID).isCompacting)
 	})
 
 	s.Run("reset with update failure", func() {
@@ -294,7 +255,7 @@ func (s *statsTaskSuite) TestHandleEmptySegment() {
 	s.Run("handle empty segment with update failure", func() {
 		catalog := catalogmocks.NewDataCoordCatalog(s.T())
 		s.mt.statsTaskMeta.catalog = catalog
-		s.mt.segments.segments[s.segID].State = commonpb.SegmentState_Flushed
+		s.mt.segments.GetSegment(s.segID).State = commonpb.SegmentState_Flushed
 		catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).
 			Return(errors.New("mock error"))
 		err := st.handleEmptySegment(context.Background())
@@ -313,7 +274,7 @@ func (s *statsTaskSuite) TestCreateTaskOnWorker() {
 
 	s.Run("segment not healthy", func() {
 		// Set up a temporary nil segment return
-		s.mt.segments.segments[s.segID].State = commonpb.SegmentState_Dropped
+		s.mt.segments.GetSegment(s.segID).State = commonpb.SegmentState_Dropped
 
 		s.Run("drop task failed", func() {
 			catalog := catalogmocks.NewDataCoordCatalog(s.T())
@@ -324,7 +285,7 @@ func (s *statsTaskSuite) TestCreateTaskOnWorker() {
 		})
 
 		s.Run("drop task success", func() {
-			s.mt.segments.segments[s.segID].isCompacting = false
+			s.mt.segments.GetSegment(s.segID).isCompacting = false
 			catalog := catalogmocks.NewDataCoordCatalog(s.T())
 			catalog.EXPECT().DropStatsTask(mock.Anything, mock.Anything).Return(nil)
 			st.meta.statsTaskMeta.catalog = catalog
@@ -339,9 +300,9 @@ func (s *statsTaskSuite) TestCreateTaskOnWorker() {
 		st.meta.statsTaskMeta.catalog = catalog
 		st.meta.catalog = catalog
 		s.NoError(s.mt.statsTaskMeta.AddStatsTask(st.StatsTask))
-		s.mt.segments.segments[s.segID].NumOfRows = 0
-		s.mt.segments.segments[s.segID].isCompacting = false
-		s.mt.segments.segments[s.segID].State = commonpb.SegmentState_Flushed
+		s.mt.segments.GetSegment(s.segID).NumOfRows = 0
+		s.mt.segments.GetSegment(s.segID).isCompacting = false
+		s.mt.segments.GetSegment(s.segID).State = commonpb.SegmentState_Flushed
 
 		st.CreateTaskOnWorker(1, session.NewMockCluster(s.T()))
 		s.Equal(indexpb.JobState_JobStateFinished, st.GetState())
@@ -349,9 +310,9 @@ func (s *statsTaskSuite) TestCreateTaskOnWorker() {
 
 	s.Run("update version failed", func() {
 		st.SetState(indexpb.JobState_JobStateInit, "")
-		s.mt.segments.segments[s.segID].isCompacting = false
-		s.mt.segments.segments[s.segID].State = commonpb.SegmentState_Flushed
-		s.mt.segments.segments[s.segID].NumOfRows = 1000
+		s.mt.segments.GetSegment(s.segID).isCompacting = false
+		s.mt.segments.GetSegment(s.segID).State = commonpb.SegmentState_Flushed
+		s.mt.segments.GetSegment(s.segID).NumOfRows = 1000
 		catalog := catalogmocks.NewDataCoordCatalog(s.T())
 		catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(errors.New("mock error"))
 		st.meta.statsTaskMeta.catalog = catalog
@@ -362,8 +323,8 @@ func (s *statsTaskSuite) TestCreateTaskOnWorker() {
 
 	s.Run("prepare job request failed", func() {
 		st.SetState(indexpb.JobState_JobStateInit, "")
-		s.mt.segments.segments[s.segID].isCompacting = false
-		s.mt.segments.segments[s.segID].State = commonpb.SegmentState_Flushed
+		s.mt.segments.GetSegment(s.segID).isCompacting = false
+		s.mt.segments.GetSegment(s.segID).State = commonpb.SegmentState_Flushed
 		catalog := catalogmocks.NewDataCoordCatalog(s.T())
 		catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil)
 		st.meta.statsTaskMeta.catalog = catalog
@@ -378,8 +339,8 @@ func (s *statsTaskSuite) TestCreateTaskOnWorker() {
 
 	s.Run("send job to worker failed", func() {
 		st.SetState(indexpb.JobState_JobStateInit, "")
-		s.mt.segments.segments[s.segID].isCompacting = false
-		s.mt.segments.segments[s.segID].State = commonpb.SegmentState_Flushed
+		s.mt.segments.GetSegment(s.segID).isCompacting = false
+		s.mt.segments.GetSegment(s.segID).State = commonpb.SegmentState_Flushed
 		catalog := catalogmocks.NewDataCoordCatalog(s.T())
 		catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil)
 		st.meta.statsTaskMeta.catalog = catalog
@@ -406,8 +367,8 @@ func (s *statsTaskSuite) TestCreateTaskOnWorker() {
 
 	s.Run("update InProgress failed", func() {
 		st.SetState(indexpb.JobState_JobStateInit, "")
-		s.mt.segments.segments[s.segID].isCompacting = false
-		s.mt.segments.segments[s.segID].State = commonpb.SegmentState_Flushed
+		s.mt.segments.GetSegment(s.segID).isCompacting = false
+		s.mt.segments.GetSegment(s.segID).State = commonpb.SegmentState_Flushed
 		catalog := catalogmocks.NewDataCoordCatalog(s.T())
 		catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil).Once()
 		catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
@@ -423,7 +384,7 @@ func (s *statsTaskSuite) TestCreateTaskOnWorker() {
 	})
 
 	s.Run("success case", func() {
-		s.mt.segments.segments[s.segID].isCompacting = false
+		s.mt.segments.GetSegment(s.segID).isCompacting = false
 		catalog := catalogmocks.NewDataCoordCatalog(s.T())
 		catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil)
 		st.meta.statsTaskMeta.catalog = catalog
@@ -455,8 +416,11 @@ func (s *statsTaskSuite) TestCreateTaskOnWorkerDropsExternalJSONWithoutV3Manifes
 			StorageVersion: storage.StorageV2,
 		},
 	}
-	s.mt.segments.segments[segmentID] = segment
-	defer delete(s.mt.segments.segments, segmentID)
+	s.mt.segments.SetSegment(segmentID, segment, 0)
+	defer func() {
+		s.mt.segments.DropSegment(segmentID, 1)
+		s.mt.segments.PruneSegment(segmentID)
+	}()
 
 	statsTask := &indexpb.StatsTask{
 		CollectionID:    s.collID,
@@ -599,27 +563,7 @@ func (s *statsTaskSuite) TestSetJobInfo() {
 		NumRows:      1000,
 	}
 
-	// Temporarily replace the segment with one we control
-	origSegments := s.mt.segments
-
-	// Create test segment for testing
-	testSegment := &SegmentInfo{
-		SegmentInfo: &datapb.SegmentInfo{
-			ID:            s.segID,
-			CollectionID:  s.collID,
-			PartitionID:   s.partID,
-			InsertChannel: "ch1",
-			State:         commonpb.SegmentState_Flushed,
-		},
-	}
-
-	s.mt.segments.segments[s.segID] = testSegment
-
 	s.Run("set job info success for different sub job types", func() {
-		catalog := &mockeyDataCoordCatalog{}
-		s.mt.statsTaskMeta.catalog = catalog
-		s.mt.catalog = catalog
-
 		st.SubJobType = indexpb.StatsSubJob_JsonKeyIndexJob
 		err := st.SetJobInfo(context.Background(), result)
 		s.NoError(err)
@@ -634,9 +578,27 @@ func (s *statsTaskSuite) TestSetJobInfo() {
 		err = st.SetJobInfo(context.Background(), result)
 		s.NoError(err)
 	})
+}
 
-	// Restore original segments
-	s.mt.segments = origSegments
+func (s *statsTaskSuite) TestSetJobInfoDiscardsMissingSegment() {
+	originalSegments := s.mt.segments
+	s.mt.segments = newTestCachedSegmentsInfo(map[int64]*SegmentInfo{})
+	defer func() {
+		s.mt.segments = originalSegments
+	}()
+
+	err := s.newJSONStatsTask().SetJobInfo(context.Background(), &workerpb.StatsResult{
+		TaskID:       s.taskID,
+		CollectionID: s.collID,
+		PartitionID:  s.partID,
+		SegmentID:    s.segID,
+		Channel:      "ch1",
+		JsonKeyStatsLogs: map[int64]*datapb.JsonKeyStats{
+			500: {FieldID: 500, BuildID: s.taskID},
+		},
+	})
+
+	s.ErrorIs(err, errStatsResultDiscarded)
 }
 
 // TestSetJobInfoJSONStatsResultManifestHandling exercises the structured-delta
@@ -701,8 +663,11 @@ func (s *statsTaskSuite) TestSetJobInfoJSONStatsResultManifestHandling() {
 			restore := s.installJSONStatsSegment(currentManifest)
 			defer restore()
 			if testCase.preStats != nil {
-				s.mt.segments.segments[s.segID].JsonKeyStats = testCase.preStats
+				s.mt.segments.updateSegment(s.segID, func(segment *SegmentInfo) {
+					segment.JsonKeyStats = testCase.preStats
+				})
 			}
+			_, beforeVersion := s.mt.segments.GetSegmentWithVersion(s.segID)
 
 			commitCalled := false
 			mockCommit := mockey.Mock(packed.CommitManifestUpdates).To(
@@ -742,6 +707,7 @@ func (s *statsTaskSuite) TestSetJobInfoJSONStatsResultManifestHandling() {
 
 			segment := s.mt.GetHealthySegment(context.Background(), s.segID)
 			s.Require().NotNil(segment)
+			_, afterVersion := s.mt.segments.GetSegmentWithVersion(s.segID)
 			s.Equal(testCase.expectManifest, segment.GetManifestPath())
 			if testCase.expectStats {
 				s.Require().Contains(segment.GetJsonKeyStats(), int64(500))
@@ -750,13 +716,14 @@ func (s *statsTaskSuite) TestSetJobInfoJSONStatsResultManifestHandling() {
 				s.Empty(segment.GetJsonKeyStats())
 			}
 			if testCase.expectCommit {
-				s.Equal(1, catalogWrites)
+				s.Greater(afterVersion, beforeVersion)
 				// The SegmentInfo dual-write keeps paths relative; only the manifest
 				// entry carries the reconstructed absolute form.
 				s.Equal(relativeFiles, segment.GetJsonKeyStats()[500].GetFiles())
 			} else {
-				s.Equal(0, catalogWrites)
+				s.Equal(beforeVersion, afterVersion)
 			}
+			s.Equal(0, catalogWrites, "segment publication must use the optimistic persistence path, not the legacy catalog update")
 		})
 	}
 }
@@ -821,8 +788,11 @@ func (s *statsTaskSuite) TestSetJobInfoTextStatsResultManifestHandling() {
 			restore := s.installJSONStatsSegment(currentManifest)
 			defer restore()
 			if testCase.preStats != nil {
-				s.mt.segments.segments[s.segID].TextStatsLogs = testCase.preStats
+				s.mt.segments.updateSegment(s.segID, func(segment *SegmentInfo) {
+					segment.TextStatsLogs = testCase.preStats
+				})
 			}
+			_, beforeVersion := s.mt.segments.GetSegmentWithVersion(s.segID)
 
 			commitCalled := false
 			mockCommit := mockey.Mock(packed.CommitManifestUpdates).To(
@@ -863,6 +833,7 @@ func (s *statsTaskSuite) TestSetJobInfoTextStatsResultManifestHandling() {
 
 			segment := s.mt.GetHealthySegment(context.Background(), s.segID)
 			s.Require().NotNil(segment)
+			_, afterVersion := s.mt.segments.GetSegmentWithVersion(s.segID)
 			s.Equal(testCase.expectManifest, segment.GetManifestPath())
 			if testCase.expectStats {
 				s.Require().Contains(segment.GetTextStatsLogs(), int64(500))
@@ -871,10 +842,11 @@ func (s *statsTaskSuite) TestSetJobInfoTextStatsResultManifestHandling() {
 				s.Empty(segment.GetTextStatsLogs())
 			}
 			if testCase.expectCommit {
-				s.Equal(1, catalogWrites)
+				s.Greater(afterVersion, beforeVersion)
 			} else {
-				s.Equal(0, catalogWrites)
+				s.Equal(beforeVersion, afterVersion)
 			}
+			s.Equal(0, catalogWrites, "segment publication must use the optimistic persistence path, not the legacy catalog update")
 		})
 	}
 }
@@ -1115,10 +1087,10 @@ func (s *statsTaskSuite) installStatsTaskCollection(external bool) func() {
 }
 
 func (s *statsTaskSuite) installJSONStatsSegment(manifest string) func() {
-	origSegment := s.mt.segments.segments[s.segID]
+	origSegment := s.mt.segments.GetSegment(s.segID).Clone()
 	origCatalog := s.mt.catalog
-	s.mt.segments.segments[s.segID] = &SegmentInfo{
-		SegmentInfo: &datapb.SegmentInfo{
+	s.mt.segments.updateSegment(s.segID, func(segment *SegmentInfo) {
+		segment.SegmentInfo = &datapb.SegmentInfo{
 			ID:             s.segID,
 			CollectionID:   s.collID,
 			PartitionID:    s.partID,
@@ -1128,10 +1100,12 @@ func (s *statsTaskSuite) installJSONStatsSegment(manifest string) func() {
 			Level:          datapb.SegmentLevel_L1,
 			ManifestPath:   manifest,
 			StorageVersion: 3,
-		},
-	}
+		}
+	})
 	return func() {
-		s.mt.segments.segments[s.segID] = origSegment
+		s.mt.segments.updateSegment(s.segID, func(segment *SegmentInfo) {
+			segment.SegmentInfo = origSegment.Clone().SegmentInfo
+		})
 		s.mt.catalog = origCatalog
 	}
 }
