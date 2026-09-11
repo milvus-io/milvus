@@ -84,7 +84,7 @@ type AnnRequest struct {
 	offset          int
 	templateParams  map[string]any
 
-	functionRerankers []*entity.Function
+	functionScore *entity.FunctionScore
 }
 
 func NewAnnRequest(annField string, limit int, vectors ...entity.Vector) *AnnRequest {
@@ -173,11 +173,11 @@ func (r *AnnRequest) searchRequest() (*milvuspb.SearchRequest, error) {
 		request.ExprTemplateValues[key] = tmplVal
 	}
 
-	if len(r.functionRerankers) > 0 {
-		request.FunctionScore = &schemapb.FunctionScore{}
-		for _, fr := range r.functionRerankers {
-			request.FunctionScore.Functions = append(request.FunctionScore.Functions, fr.ProtoMessage())
+	if r.functionScore != nil {
+		if len(r.functionScore.Functions) == 0 {
+			return nil, errors.New("FunctionScore has no functions")
 		}
+		request.FunctionScore = r.functionScore.ProtoMessage()
 	}
 
 	return request, nil
@@ -371,8 +371,30 @@ func (r *AnnRequest) WithIgnoreGrowing(ignoreGrowing bool) *AnnRequest {
 	return r
 }
 
+// WithFunctionReranker adds a scoring Function to the request. On a hybrid
+// search the score is attached to this sub-request and applied to this leg on
+// the server (server support for per-sub-request FunctionScore is in flight,
+// see https://github.com/milvus-io/milvus/issues/52956); to apply the same
+// score to every leg today, use HybridSearchOption.WithFunctionRerankers or
+// HybridSearchOption.WithFunctionScore instead.
 func (r *AnnRequest) WithFunctionReranker(fr *entity.Function) *AnnRequest {
-	r.functionRerankers = append(r.functionRerankers, fr)
+	if r.functionScore == nil {
+		r.functionScore = entity.NewFunctionScore()
+	}
+	r.functionScore.AddFunction(fr)
+	return r
+}
+
+// WithFunctionScore sets the search FunctionScore (functions plus score
+// options such as boost_mode / function_mode). It replaces any functions
+// accumulated via WithFunctionReranker, and stores a copy so the caller's
+// FunctionScore is never mutated or shared with other options.
+func (r *AnnRequest) WithFunctionScore(fs *entity.FunctionScore) *AnnRequest {
+	if fs == nil {
+		r.functionScore = nil
+		return r
+	}
+	r.functionScore = fs.Clone()
 	return r
 }
 
@@ -508,6 +530,11 @@ func (opt *searchOption) WithFunctionReranker(fr *entity.Function) *searchOption
 	return opt
 }
 
+func (opt *searchOption) WithFunctionScore(fs *entity.FunctionScore) *searchOption {
+	opt.annRequest.WithFunctionScore(fs)
+	return opt
+}
+
 // NewSearchOption creates a new search option for traditional vector search.
 // Provide the query vectors to search for similar vectors in the collection.
 // For search by primary key IDs, use NewSearchByIDsOption instead.
@@ -603,10 +630,10 @@ type hybridSearchOption struct {
 	useDefaultConsistency bool
 	consistencyLevel      entity.ConsistencyLevel
 
-	limit             int
-	offset            int
-	reranker          Reranker
-	functionRerankers []*entity.Function
+	limit         int
+	offset        int
+	reranker      Reranker
+	functionScore *entity.FunctionScore
 }
 
 func (opt *hybridSearchOption) WithConsistencyLevel(cl entity.ConsistencyLevel) *hybridSearchOption {
@@ -640,8 +667,28 @@ func (opt *hybridSearchOption) WithReranker(reranker Reranker) *hybridSearchOpti
 	return opt
 }
 
+// WithFunctionRerankers adds a scoring Function applied to every leg of the
+// hybrid search on the server. For per-sub-request scores (server support in
+// flight, see https://github.com/milvus-io/milvus/issues/52956), attach the
+// Function to the sub-request's AnnRequest instead.
 func (opt *hybridSearchOption) WithFunctionRerankers(functionReranker *entity.Function) *hybridSearchOption {
-	opt.functionRerankers = append(opt.functionRerankers, functionReranker)
+	if opt.functionScore == nil {
+		opt.functionScore = entity.NewFunctionScore()
+	}
+	opt.functionScore.AddFunction(functionReranker)
+	return opt
+}
+
+// WithFunctionScore sets the search FunctionScore (functions plus score
+// options such as boost_mode / function_mode). It replaces any functions
+// accumulated via WithFunctionRerankers, and stores a copy so the caller's
+// FunctionScore is never mutated or shared with other options.
+func (opt *hybridSearchOption) WithFunctionScore(fs *entity.FunctionScore) *hybridSearchOption {
+	if fs == nil {
+		opt.functionScore = nil
+		return opt
+	}
+	opt.functionScore = fs.Clone()
 	return opt
 }
 
@@ -680,11 +727,11 @@ func (opt *hybridSearchOption) HybridRequest() (*milvuspb.HybridSearchRequest, e
 		RankParams:            params,
 	}
 
-	if len(opt.functionRerankers) > 0 {
-		r.FunctionScore = &schemapb.FunctionScore{}
-		for _, fr := range opt.functionRerankers {
-			r.FunctionScore.Functions = append(r.FunctionScore.Functions, fr.ProtoMessage())
+	if opt.functionScore != nil {
+		if len(opt.functionScore.Functions) == 0 {
+			return nil, errors.New("FunctionScore has no functions")
 		}
+		r.FunctionScore = opt.functionScore.ProtoMessage()
 	}
 
 	return r, nil
