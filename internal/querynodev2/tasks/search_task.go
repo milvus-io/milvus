@@ -158,6 +158,12 @@ func (t *SearchTask) Execute() error {
 		return err
 	}
 	defer searchReq.Delete()
+	// Use the merged NQ and maximum requested topK as the group's output
+	// upper bound; the optimizer may lower the C++ plan topK. Keep this
+	// decision unchanged when materializing each original request's output.
+	resultCount := searchTakeForOutputResultCount(t.nq, t.topk, searchReq.Plan().GetGroupSize())
+	takeAllowed := requestAllowsTakeForOutput(resultCount)
+	searchReq.Plan().SetTakeForOutputAllowed(takeAllowed)
 
 	var (
 		results          []*segments.SearchResult
