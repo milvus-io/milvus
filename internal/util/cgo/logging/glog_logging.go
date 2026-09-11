@@ -21,8 +21,12 @@ package logging
 
 /*
 #cgo pkg-config: milvus_core
+#include <stdbool.h>
 #include <stdlib.h>
 #include "common/logging_c.h"
+
+extern bool tantivy_index_exist(const char* path);
+extern bool tantivy_test_log_from_background_thread(void);
 */
 import "C"
 import "unsafe"
@@ -39,4 +43,14 @@ func InitGoogleLoggingWithZapSink() {
 
 func InitGoogleLogging() {
 	C.InitGoogleLoggingWithoutZapSink()
+}
+
+func tantivyIndexExist(path string) bool {
+	cpath := C.CString(path)
+	defer C.free(unsafe.Pointer(cpath))
+	return bool(C.tantivy_index_exist(cpath))
+}
+
+func tantivyTestLogFromBackgroundThread() bool {
+	return bool(C.tantivy_test_log_from_background_thread())
 }
