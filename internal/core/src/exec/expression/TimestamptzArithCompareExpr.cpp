@@ -135,6 +135,9 @@ CompareTimestamp(int64_t lhs, int64_t rhs, proto::plan::OpType compare_op) {
     }
 }
 
+}  // namespace
+
+namespace detail {
 bool
 EvaluateTimestamp(int64_t current_ts_us,
                   proto::plan::ArithOpType arith_op,
@@ -145,8 +148,7 @@ EvaluateTimestamp(int64_t current_ts_us,
         ApplyTimestampInterval(current_ts_us, arith_op, interval);
     return CompareTimestamp(final_us, compare_us, compare_op);
 }
-
-}  // namespace
+}  // namespace detail
 
 std::string
 PhyTimestamptzArithCompareExpr::ToString() const {
@@ -186,16 +188,16 @@ PhyTimestamptzArithCompareExpr::Eval(EvalCtx& context, VectorPtr& result) {
     WaitPrefetch();
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
-    result = ExecCompareVisitorImpl<int64_t>(input);
+    result = ExecCompareVisitorImpl<int64_t>(context);
 }
 
 template <typename T>
 VectorPtr
-PhyTimestamptzArithCompareExpr::ExecCompareVisitorImpl(OffsetVector* input) {
+PhyTimestamptzArithCompareExpr::ExecCompareVisitorImpl(EvalCtx& context) {
     if (exec_path_ == ExprExecPath::ScalarIndex) {
-        return ExecCompareVisitorImplForIndex<T>(input);
+        return ExecCompareVisitorImplForIndex<T>(context.get_offset_input());
     }
-    return ExecCompareVisitorImplForAll<T>(input);
+    return ExecCompareVisitorImplForAll<T>(context);
 }
 
 template <typename T>
@@ -237,7 +239,7 @@ PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForIndex(
             }
             auto raw = index_ptr->Reverse_Lookup(offset);
             if (raw.has_value()) {
-                result[i] = EvaluateTimestamp(
+                result[i] = detail::EvaluateTimestamp(
                     raw.value(), arith_op, interval, compare_op, compare_value);
             }
         }
@@ -263,84 +265,19 @@ PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForIndex(
 template <typename T>
 VectorPtr
 PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForAll(
-    OffsetVector* input) {
+    EvalCtx& context) {
     if (!arg_inited_) {
         interval_ = expr_->interval_;
         compare_value_.SetValue<T>(expr_->compare_value_);
         arg_inited_ = true;
     }
-
-    auto arith_op = expr_->arith_op_;
-    auto compare_op = expr_->compare_op_;
-    auto compare_value = this->compare_value_.GetValue<T>();
-    auto interval = interval_;
-
-    auto real_batch_size =
-        has_offset_input_ ? input->size() : GetNextBatchSize();
-    if (real_batch_size == 0) {
-        return nullptr;
-    }
-
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
-
-    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
-    auto exec_sub_batch =
-        [ arith_op,
-          compare_op ]<FilterType filter_type = FilterType::sequential>(
-            const T* data,
-            ValidityView valid_data,
-            const int32_t* offsets,
-            const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
-            T compare_value,
-            proto::plan::Interval interval) {
-        if (data == nullptr) {
-            return;
-        }
-        const int64_t compare_us = compare_value;
-        for (int i = 0; i < size; ++i) {
-            int32_t offset = i;
-            if constexpr (filter_type == FilterType::random) {
-                offset = offsets == nullptr ? i : offsets[i];
-            }
-            if (valid_data && !valid_data[offset]) {
-                // NULL never matches, under either polarity (three-valued
-                // logic); do not evaluate the storage placeholder value.
-                res[i] = valid_res[i] = false;
-                continue;
-            }
-            res[i] = EvaluateTimestamp(
-                data[offset], arith_op, interval, compare_op, compare_us);
-        }
-    };
-    int64_t processed_size;
-    if (has_offset_input_) {
-        processed_size = ProcessDataByOffsets<T>(exec_sub_batch,
-                                                 std::nullptr_t{},
-                                                 input,
-                                                 res,
-                                                 valid_res,
-                                                 compare_value,
-                                                 interval);
-    } else {
-        processed_size = ProcessDataChunks<T>(exec_sub_batch,
-                                              std::nullptr_t{},
-                                              res,
-                                              valid_res,
-                                              compare_value,
-                                              interval);
-    }
-    AssertInfo(processed_size == real_batch_size,
-               "internal error: expr processed rows {} not equal "
-               "expect batch size {}",
-               processed_size,
-               real_batch_size);
-
-    return res_vec;
+    return EvalKernel<T>(
+        context,
+        TimestamptzArithCompareKernel{expr_->arith_op_,
+                                      expr_->compare_op_,
+                                      &interval_,
+                                      compare_value_.GetValue<T>()},
+        /*element_level=*/false);
 }
 
 }  // namespace exec

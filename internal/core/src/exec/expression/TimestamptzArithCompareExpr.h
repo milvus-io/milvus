@@ -20,6 +20,41 @@
 
 namespace milvus::exec {
 
+namespace detail {
+bool
+EvaluateTimestamp(int64_t current_ts_us,
+                  proto::plan::ArithOpType arith_op,
+                  const proto::plan::Interval& interval,
+                  proto::plan::OpType compare_op,
+                  int64_t compare_us);
+}  // namespace detail
+
+// TIMESTAMPTZ `column (+|-) interval <cmp> value` over raw int64 microseconds.
+struct TimestamptzArithCompareKernel {
+    proto::plan::ArithOpType arith_op;
+    proto::plan::OpType compare_op;
+    const proto::plan::Interval* interval;
+    int64_t compare_us;
+
+    template <FilterType filter_type>
+    void
+    Eval(const CandidateBatch<int64_t>& b, TriStateOut out) const {
+        for (size_t i = 0; i < b.size; ++i) {
+            // A NULL row's payload is a placeholder; arithmetic on it may throw.
+            if (b.validity && !b.validity[i]) {
+                continue;
+            }
+            if (!b.IsCandidate(i)) {
+                continue;
+            }
+            if (detail::EvaluateTimestamp(
+                    b.data[i], arith_op, *interval, compare_op, compare_us)) {
+                out.SetTrue(i);
+            }
+        }
+    }
+};
+
 class PhyTimestamptzArithCompareExpr : public SegmentExpr {
  public:
     PhyTimestamptzArithCompareExpr(
@@ -68,11 +103,11 @@ class PhyTimestamptzArithCompareExpr : public SegmentExpr {
  private:
     template <typename T>
     VectorPtr
-    ExecCompareVisitorImpl(OffsetVector* input);
+    ExecCompareVisitorImpl(EvalCtx& context);
 
     template <typename T>
     VectorPtr
-    ExecCompareVisitorImplForAll(OffsetVector* input);
+    ExecCompareVisitorImplForAll(EvalCtx& context);
 
     template <typename T>
     VectorPtr

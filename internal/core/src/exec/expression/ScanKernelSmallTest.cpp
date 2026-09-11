@@ -17,6 +17,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <limits>
 #include <ostream>
 #include <string>
 #include <vector>
@@ -26,6 +27,8 @@
 #include "common/ValidityView.h"
 #include "exec/expression/ExistsExpr.h"
 #include "exec/expression/Expr.h"
+#include "exec/expression/TimestamptzArithCompareExpr.h"
+#include "pb/plan.pb.h"
 #include "simdjson/padded_string.h"
 
 namespace milvus::exec {
@@ -170,6 +173,48 @@ TEST(ScanKernelSmallTest, ExistsSkipsPrunedCandidates) {
     EXPECT_EQ(raw, (std::vector<Tri>{kT, kF, kF, kT}));
     EXPECT_EQ(FoldLikeScan(raw, valid, &candidates, true),
               (std::vector<Tri>{kT, kF, kF, kT}));
+}
+
+// ------------------------------------------------------- Timestamptz arith
+
+TEST(ScanKernelSmallTest, TimestamptzSkipsNullAndPrunedPlaceholders) {
+    proto::plan::Interval one_month;
+    one_month.set_months(1);
+    constexpr int64_t kUsPerDay = 86400LL * 1000000;
+    const int64_t feb_1st = 31 * kUsPerDay;  // 1970-01-01 + 1 month
+    const TimestamptzArithCompareKernel kernel{proto::plan::ArithOpType::Add,
+                                               proto::plan::OpType::LessThan,
+                                               &one_month,
+                                               feb_1st + 16};
+    const int64_t kOverflow = std::numeric_limits<int64_t>::max();
+
+    // A placeholder that overflows interval arithmetic must actually throw,
+    // otherwise the skip assertions below prove nothing.
+    EXPECT_ANY_THROW(
+        RunKernel(kernel, std::vector<int64_t>{kOverflow}, nullptr, nullptr));
+
+    // Row 2: NULL with an overflowing placeholder. Row 3: pruned overflow.
+    const std::vector<int64_t> data = {0, 20, kOverflow, kOverflow, 16, 15};
+    const bool valid[] = {true, true, false, true, true, true};
+    TargetBitmap candidates(6, true);
+    candidates[3] = false;
+
+    const auto raw = RunKernel(kernel, data, valid, &candidates);
+    EXPECT_EQ(raw, (std::vector<Tri>{kT, kF, kF, kF, kF, kT}));
+    EXPECT_EQ(FoldLikeScan(raw, valid, &candidates),
+              (std::vector<Tri>{kT, kF, kU, kF, kF, kT}));
+}
+
+TEST(ScanKernelSmallTest, TimestamptzUnknownArithComparesDirectly) {
+    proto::plan::Interval ignored;
+    ignored.set_months(1);
+    const TimestamptzArithCompareKernel kernel{
+        proto::plan::ArithOpType::Unknown,
+        proto::plan::OpType::GreaterEqual,
+        &ignored,
+        16};
+    EXPECT_EQ(RunKernel(kernel, std::vector<int64_t>{15, 16}, nullptr, nullptr),
+              (std::vector<Tri>{kF, kT}));
 }
 
 }  // namespace
