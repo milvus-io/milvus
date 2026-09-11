@@ -747,31 +747,35 @@ func TestRLSEnabled(t *testing.T) {
 		assert.False(t, force)
 	})
 
-	t.Run("rejects enable until runtime enforcement lands", func(t *testing.T) {
-		for _, value := range []string{"1", "t", "T", "TRUE", "true", "True"} {
-			err := ValidateRLSProperties(&commonpb.KeyValuePair{Key: RLSEnabledKey, Value: value})
-			assert.ErrorContains(t, err, "runtime enforcement is not available")
-		}
-	})
-
-	t.Run("accepts standard disabled values", func(t *testing.T) {
-		for _, value := range []string{"0", "f", "F", "FALSE", "false", "False"} {
+	t.Run("accepts standard boolean values", func(t *testing.T) {
+		for _, value := range []string{"1", "t", "T", "TRUE", "true", "True", "0", "f", "F", "FALSE", "false", "False"} {
 			err := ValidateRLSProperties(&commonpb.KeyValuePair{Key: RLSEnabledKey, Value: value})
 			assert.NoError(t, err, "value %q should be accepted", value)
 		}
 	})
 
-	t.Run("rejects force until runtime enforcement lands", func(t *testing.T) {
-		for _, value := range []string{"1", "t", "T", "TRUE", "true", "True"} {
+	t.Run("accepts force values", func(t *testing.T) {
+		for _, value := range []string{"1", "t", "T", "TRUE", "true", "True", "0", "f", "F", "FALSE", "false", "False"} {
 			err := ValidateRLSProperties(&commonpb.KeyValuePair{Key: RLSForceKey, Value: value})
-			assert.ErrorContains(t, err, "runtime enforcement is not available")
+			assert.NoError(t, err)
 		}
 	})
 
-	t.Run("accepts standard force-disabled values", func(t *testing.T) {
-		for _, value := range []string{"0", "f", "F", "FALSE", "false", "False"} {
-			err := ValidateRLSProperties(&commonpb.KeyValuePair{Key: RLSForceKey, Value: value})
-			assert.NoError(t, err, "value %q should be accepted", value)
+	t.Run("force requires enabled RLS in effective properties", func(t *testing.T) {
+		assert.NoError(t, ValidateRLSForceRequiresEnabled(
+			&commonpb.KeyValuePair{Key: RLSEnabledKey, Value: "true"},
+			&commonpb.KeyValuePair{Key: RLSForceKey, Value: "true"},
+		))
+		assert.NoError(t, ValidateRLSForceRequiresEnabled(
+			&commonpb.KeyValuePair{Key: RLSForceKey, Value: "false"},
+		))
+		for _, properties := range [][]*commonpb.KeyValuePair{
+			{{Key: RLSForceKey, Value: "true"}},
+			{{Key: RLSEnabledKey, Value: "false"}, {Key: RLSForceKey, Value: "true"}},
+		} {
+			err := ValidateRLSForceRequiresEnabled(properties...)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.ErrorContains(t, err, RLSForceKey+"=true requires "+RLSEnabledKey+"=true")
 		}
 	})
 

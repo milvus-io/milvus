@@ -81,6 +81,14 @@ const (
 	RootCoord_DropPrivilegeGroup_FullMethodName            = "/milvus.proto.rootcoord.RootCoord/DropPrivilegeGroup"
 	RootCoord_ListPrivilegeGroups_FullMethodName           = "/milvus.proto.rootcoord.RootCoord/ListPrivilegeGroups"
 	RootCoord_OperatePrivilegeGroup_FullMethodName         = "/milvus.proto.rootcoord.RootCoord/OperatePrivilegeGroup"
+	RootCoord_CreateRowPolicy_FullMethodName               = "/milvus.proto.rootcoord.RootCoord/CreateRowPolicy"
+	RootCoord_DropRowPolicy_FullMethodName                 = "/milvus.proto.rootcoord.RootCoord/DropRowPolicy"
+	RootCoord_ListRowPolicies_FullMethodName               = "/milvus.proto.rootcoord.RootCoord/ListRowPolicies"
+	RootCoord_UpdateRowPolicy_FullMethodName               = "/milvus.proto.rootcoord.RootCoord/UpdateRowPolicy"
+	RootCoord_SetRLSPrincipalTags_FullMethodName           = "/milvus.proto.rootcoord.RootCoord/SetRLSPrincipalTags"
+	RootCoord_GetRLSPrincipalTags_FullMethodName           = "/milvus.proto.rootcoord.RootCoord/GetRLSPrincipalTags"
+	RootCoord_ListRLSPrincipals_FullMethodName             = "/milvus.proto.rootcoord.RootCoord/ListRLSPrincipals"
+	RootCoord_DeleteRLSPrincipalTags_FullMethodName        = "/milvus.proto.rootcoord.RootCoord/DeleteRLSPrincipalTags"
 	RootCoord_GetRLSMetadata_FullMethodName                = "/milvus.proto.rootcoord.RootCoord/GetRLSMetadata"
 	RootCoord_CheckHealth_FullMethodName                   = "/milvus.proto.rootcoord.RootCoord/CheckHealth"
 	RootCoord_RenameCollection_FullMethodName              = "/milvus.proto.rootcoord.RootCoord/RenameCollection"
@@ -238,6 +246,15 @@ type RootCoordClient interface {
 	DropPrivilegeGroup(ctx context.Context, in *milvuspb.DropPrivilegeGroupRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	ListPrivilegeGroups(ctx context.Context, in *milvuspb.ListPrivilegeGroupsRequest, opts ...grpc.CallOption) (*milvuspb.ListPrivilegeGroupsResponse, error)
 	OperatePrivilegeGroup(ctx context.Context, in *milvuspb.OperatePrivilegeGroupRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	// Row-Level Security (RLS) management APIs.
+	CreateRowPolicy(ctx context.Context, in *milvuspb.CreateRowPolicyRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	DropRowPolicy(ctx context.Context, in *milvuspb.DropRowPolicyRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	ListRowPolicies(ctx context.Context, in *milvuspb.ListRowPoliciesRequest, opts ...grpc.CallOption) (*milvuspb.ListRowPoliciesResponse, error)
+	UpdateRowPolicy(ctx context.Context, in *milvuspb.UpdateRowPolicyRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	SetRLSPrincipalTags(ctx context.Context, in *milvuspb.SetRLSPrincipalTagsRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	GetRLSPrincipalTags(ctx context.Context, in *milvuspb.GetRLSPrincipalTagsRequest, opts ...grpc.CallOption) (*milvuspb.GetRLSPrincipalTagsResponse, error)
+	ListRLSPrincipals(ctx context.Context, in *milvuspb.ListRLSPrincipalsRequest, opts ...grpc.CallOption) (*milvuspb.ListRLSPrincipalsResponse, error)
+	DeleteRLSPrincipalTags(ctx context.Context, in *milvuspb.DeleteRLSPrincipalTagsRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	// Internal collection-scoped snapshot API used by Proxy RLS caches.
 	GetRLSMetadata(ctx context.Context, in *GetRLSMetadataRequest, opts ...grpc.CallOption) (*GetRLSMetadataResponse, error)
 	CheckHealth(ctx context.Context, in *milvuspb.CheckHealthRequest, opts ...grpc.CallOption) (*milvuspb.CheckHealthResponse, error)
@@ -792,6 +809,78 @@ func (c *rootCoordClient) OperatePrivilegeGroup(ctx context.Context, in *milvusp
 	return out, nil
 }
 
+func (c *rootCoordClient) CreateRowPolicy(ctx context.Context, in *milvuspb.CreateRowPolicyRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, RootCoord_CreateRowPolicy_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *rootCoordClient) DropRowPolicy(ctx context.Context, in *milvuspb.DropRowPolicyRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, RootCoord_DropRowPolicy_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *rootCoordClient) ListRowPolicies(ctx context.Context, in *milvuspb.ListRowPoliciesRequest, opts ...grpc.CallOption) (*milvuspb.ListRowPoliciesResponse, error) {
+	out := new(milvuspb.ListRowPoliciesResponse)
+	err := c.cc.Invoke(ctx, RootCoord_ListRowPolicies_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *rootCoordClient) UpdateRowPolicy(ctx context.Context, in *milvuspb.UpdateRowPolicyRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, RootCoord_UpdateRowPolicy_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *rootCoordClient) SetRLSPrincipalTags(ctx context.Context, in *milvuspb.SetRLSPrincipalTagsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, RootCoord_SetRLSPrincipalTags_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *rootCoordClient) GetRLSPrincipalTags(ctx context.Context, in *milvuspb.GetRLSPrincipalTagsRequest, opts ...grpc.CallOption) (*milvuspb.GetRLSPrincipalTagsResponse, error) {
+	out := new(milvuspb.GetRLSPrincipalTagsResponse)
+	err := c.cc.Invoke(ctx, RootCoord_GetRLSPrincipalTags_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *rootCoordClient) ListRLSPrincipals(ctx context.Context, in *milvuspb.ListRLSPrincipalsRequest, opts ...grpc.CallOption) (*milvuspb.ListRLSPrincipalsResponse, error) {
+	out := new(milvuspb.ListRLSPrincipalsResponse)
+	err := c.cc.Invoke(ctx, RootCoord_ListRLSPrincipals_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *rootCoordClient) DeleteRLSPrincipalTags(ctx context.Context, in *milvuspb.DeleteRLSPrincipalTagsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, RootCoord_DeleteRLSPrincipalTags_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *rootCoordClient) GetRLSMetadata(ctx context.Context, in *GetRLSMetadataRequest, opts ...grpc.CallOption) (*GetRLSMetadataResponse, error) {
 	out := new(GetRLSMetadataResponse)
 	err := c.cc.Invoke(ctx, RootCoord_GetRLSMetadata_FullMethodName, in, out, opts...)
@@ -1099,6 +1188,15 @@ type RootCoordServer interface {
 	DropPrivilegeGroup(context.Context, *milvuspb.DropPrivilegeGroupRequest) (*commonpb.Status, error)
 	ListPrivilegeGroups(context.Context, *milvuspb.ListPrivilegeGroupsRequest) (*milvuspb.ListPrivilegeGroupsResponse, error)
 	OperatePrivilegeGroup(context.Context, *milvuspb.OperatePrivilegeGroupRequest) (*commonpb.Status, error)
+	// Row-Level Security (RLS) management APIs.
+	CreateRowPolicy(context.Context, *milvuspb.CreateRowPolicyRequest) (*commonpb.Status, error)
+	DropRowPolicy(context.Context, *milvuspb.DropRowPolicyRequest) (*commonpb.Status, error)
+	ListRowPolicies(context.Context, *milvuspb.ListRowPoliciesRequest) (*milvuspb.ListRowPoliciesResponse, error)
+	UpdateRowPolicy(context.Context, *milvuspb.UpdateRowPolicyRequest) (*commonpb.Status, error)
+	SetRLSPrincipalTags(context.Context, *milvuspb.SetRLSPrincipalTagsRequest) (*commonpb.Status, error)
+	GetRLSPrincipalTags(context.Context, *milvuspb.GetRLSPrincipalTagsRequest) (*milvuspb.GetRLSPrincipalTagsResponse, error)
+	ListRLSPrincipals(context.Context, *milvuspb.ListRLSPrincipalsRequest) (*milvuspb.ListRLSPrincipalsResponse, error)
+	DeleteRLSPrincipalTags(context.Context, *milvuspb.DeleteRLSPrincipalTagsRequest) (*commonpb.Status, error)
 	// Internal collection-scoped snapshot API used by Proxy RLS caches.
 	GetRLSMetadata(context.Context, *GetRLSMetadataRequest) (*GetRLSMetadataResponse, error)
 	CheckHealth(context.Context, *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error)
@@ -1300,6 +1398,30 @@ func (UnimplementedRootCoordServer) ListPrivilegeGroups(context.Context, *milvus
 }
 func (UnimplementedRootCoordServer) OperatePrivilegeGroup(context.Context, *milvuspb.OperatePrivilegeGroupRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method OperatePrivilegeGroup not implemented")
+}
+func (UnimplementedRootCoordServer) CreateRowPolicy(context.Context, *milvuspb.CreateRowPolicyRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateRowPolicy not implemented")
+}
+func (UnimplementedRootCoordServer) DropRowPolicy(context.Context, *milvuspb.DropRowPolicyRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DropRowPolicy not implemented")
+}
+func (UnimplementedRootCoordServer) ListRowPolicies(context.Context, *milvuspb.ListRowPoliciesRequest) (*milvuspb.ListRowPoliciesResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListRowPolicies not implemented")
+}
+func (UnimplementedRootCoordServer) UpdateRowPolicy(context.Context, *milvuspb.UpdateRowPolicyRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateRowPolicy not implemented")
+}
+func (UnimplementedRootCoordServer) SetRLSPrincipalTags(context.Context, *milvuspb.SetRLSPrincipalTagsRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SetRLSPrincipalTags not implemented")
+}
+func (UnimplementedRootCoordServer) GetRLSPrincipalTags(context.Context, *milvuspb.GetRLSPrincipalTagsRequest) (*milvuspb.GetRLSPrincipalTagsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetRLSPrincipalTags not implemented")
+}
+func (UnimplementedRootCoordServer) ListRLSPrincipals(context.Context, *milvuspb.ListRLSPrincipalsRequest) (*milvuspb.ListRLSPrincipalsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListRLSPrincipals not implemented")
+}
+func (UnimplementedRootCoordServer) DeleteRLSPrincipalTags(context.Context, *milvuspb.DeleteRLSPrincipalTagsRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DeleteRLSPrincipalTags not implemented")
 }
 func (UnimplementedRootCoordServer) GetRLSMetadata(context.Context, *GetRLSMetadataRequest) (*GetRLSMetadataResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetRLSMetadata not implemented")
@@ -2414,6 +2536,150 @@ func _RootCoord_OperatePrivilegeGroup_Handler(srv interface{}, ctx context.Conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RootCoord_CreateRowPolicy_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.CreateRowPolicyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).CreateRowPolicy(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_CreateRowPolicy_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).CreateRowPolicy(ctx, req.(*milvuspb.CreateRowPolicyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RootCoord_DropRowPolicy_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.DropRowPolicyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).DropRowPolicy(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_DropRowPolicy_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).DropRowPolicy(ctx, req.(*milvuspb.DropRowPolicyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RootCoord_ListRowPolicies_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.ListRowPoliciesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).ListRowPolicies(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_ListRowPolicies_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).ListRowPolicies(ctx, req.(*milvuspb.ListRowPoliciesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RootCoord_UpdateRowPolicy_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.UpdateRowPolicyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).UpdateRowPolicy(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_UpdateRowPolicy_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).UpdateRowPolicy(ctx, req.(*milvuspb.UpdateRowPolicyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RootCoord_SetRLSPrincipalTags_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.SetRLSPrincipalTagsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).SetRLSPrincipalTags(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_SetRLSPrincipalTags_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).SetRLSPrincipalTags(ctx, req.(*milvuspb.SetRLSPrincipalTagsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RootCoord_GetRLSPrincipalTags_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.GetRLSPrincipalTagsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).GetRLSPrincipalTags(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_GetRLSPrincipalTags_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).GetRLSPrincipalTags(ctx, req.(*milvuspb.GetRLSPrincipalTagsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RootCoord_ListRLSPrincipals_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.ListRLSPrincipalsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).ListRLSPrincipals(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_ListRLSPrincipals_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).ListRLSPrincipals(ctx, req.(*milvuspb.ListRLSPrincipalsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RootCoord_DeleteRLSPrincipalTags_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.DeleteRLSPrincipalTagsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).DeleteRLSPrincipalTags(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_DeleteRLSPrincipalTags_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).DeleteRLSPrincipalTags(ctx, req.(*milvuspb.DeleteRLSPrincipalTagsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _RootCoord_GetRLSMetadata_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetRLSMetadataRequest)
 	if err := dec(in); err != nil {
@@ -2994,6 +3260,38 @@ var RootCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "OperatePrivilegeGroup",
 			Handler:    _RootCoord_OperatePrivilegeGroup_Handler,
+		},
+		{
+			MethodName: "CreateRowPolicy",
+			Handler:    _RootCoord_CreateRowPolicy_Handler,
+		},
+		{
+			MethodName: "DropRowPolicy",
+			Handler:    _RootCoord_DropRowPolicy_Handler,
+		},
+		{
+			MethodName: "ListRowPolicies",
+			Handler:    _RootCoord_ListRowPolicies_Handler,
+		},
+		{
+			MethodName: "UpdateRowPolicy",
+			Handler:    _RootCoord_UpdateRowPolicy_Handler,
+		},
+		{
+			MethodName: "SetRLSPrincipalTags",
+			Handler:    _RootCoord_SetRLSPrincipalTags_Handler,
+		},
+		{
+			MethodName: "GetRLSPrincipalTags",
+			Handler:    _RootCoord_GetRLSPrincipalTags_Handler,
+		},
+		{
+			MethodName: "ListRLSPrincipals",
+			Handler:    _RootCoord_ListRLSPrincipals_Handler,
+		},
+		{
+			MethodName: "DeleteRLSPrincipalTags",
+			Handler:    _RootCoord_DeleteRLSPrincipalTags_Handler,
 		},
 		{
 			MethodName: "GetRLSMetadata",

@@ -3118,6 +3118,24 @@ func (s *SearchPipelineSuite) TestRoundAggHitScores() {
 	s.Equal(float32(1), buckets[0].SubAggBuckets[0].Hits[0].Score)
 }
 
+func (s *SearchPipelineSuite) TestRequerySkipsRuntimeRLS() {
+	mocker := mockey.Mock((*Proxy).query).To(func(_ *Proxy, _ context.Context, qt *queryTask, _ trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
+		s.True(qt.skipRuntimeRLS)
+		return &milvuspb.QueryResults{Status: merr.Success()}, segcore.StorageCost{}, nil
+	}).Build()
+	defer mocker.UnPatch()
+
+	op := &requeryOperator{
+		traceCtx:           context.Background(),
+		primaryFieldSchema: &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		node:               &Proxy{},
+	}
+	_, _, err := op.requery(context.Background(), s.span, &schemapb.IDs{
+		IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}},
+	}, nil)
+	s.NoError(err)
+}
+
 func (s *SearchPipelineSuite) TestRoundAggHitScoresDisabled() {
 	buckets := []*search_agg.AggBucketResult{
 		{Hits: []*search_agg.HitResult{{Score: 0.49}, {Score: 0.36}}},
