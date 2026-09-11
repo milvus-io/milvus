@@ -61,7 +61,7 @@ func ConvertToArrowSchemaWithNameResolver(
 			elementType = field.GetElementType()
 		}
 
-		arrowType := serdeMap[field.DataType].arrowType(dim, elementType)
+		arrowType := serdeMap[field.DataType].arrowType(dim, elementType, field.GetElementNullable())
 
 		if field.GetNullable() {
 			switch field.DataType {
