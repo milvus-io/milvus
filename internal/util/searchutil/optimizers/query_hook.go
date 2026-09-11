@@ -28,12 +28,14 @@ type QueryHook interface {
 	CalculateEffectiveSegmentNum(rowCounts []int64, topk int64) int
 }
 
-// OptimizeSearchParams optimizes search parameters using the query hook.
+// OptimizeSearchParams optimizes search parameters using the query hook and applies Knowhere search defaults.
 // numSegments is the effective segment number, pre-computed by the caller via CalculateEffectiveSegmentNum.
 // isSecondStageSearch is true for the vector search stage of two-stage search, refer to delegator_twostage.go.
 // At this time, we need to set WithFilterKey to false to allow some aggressive optimizations.
-func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, queryHook QueryHook, numSegments int, isSecondStageSearch bool, dimFunc func(fieldID int64) int64) (*querypb.SearchRequest, error) {
+func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, queryHook QueryHook, numSegments int, isSecondStageSearch bool, dimFunc func(fieldID int64) int64, indexType string) (*querypb.SearchRequest, error) {
 	useQueryHook := queryHook != nil && paramtable.Get().AutoIndexConfig.Enable.GetAsBool()
+	useKnowhereDefaults := paramtable.Get().KnowhereConfig.Enable.GetAsBool() &&
+		paramtable.Get().KnowhereConfig.HasIndexParams(indexType, paramtable.SearchStage)
 	if !useQueryHook {
 		req.Req.IsTopkReduce = false
 		req.Req.IsRecallEvaluation = false
@@ -45,7 +47,7 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 	serializedPlan := req.GetReq().GetSerializedExprPlan()
 	// plan not found
 	if serializedPlan == nil {
-		if !useQueryHook {
+		if !useQueryHook && !useKnowhereDefaults {
 			return req, nil
 		}
 		log.Warn(ctx, "serialized plan not found")
@@ -71,13 +73,14 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 		if queryInfo == nil {
 			return nil, merr.WrapErrParameterInvalidMsg("missing search query info")
 		}
+		var params map[string]any
 		if useQueryHook {
 			// use shardNum * segments num in shard to estimate total segment number
 			estSegmentNum := numSegments * int(channelNum)
 			metrics.QueryNodeSearchHitSegmentNum.WithLabelValues(paramtable.GetStringNodeID(), fmt.Sprint(collectionId), metrics.SearchLabel).Observe(float64(estSegmentNum))
 
 			withFilter := (plan.GetVectorAnns().GetPredicates() != nil)
-			params := map[string]any{
+			params = map[string]any{
 				common.TopKKey:         queryInfo.GetTopk(),
 				common.SearchParamKey:  queryInfo.GetSearchParams(),
 				common.SegmentNumKey:   estSegmentNum,
@@ -109,7 +112,6 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 			finalTopk := params[common.TopKKey].(int64)
 			isTopkReduce := req.GetReq().GetIsTopkReduce() && (finalTopk < queryInfo.GetTopk()) && !isSecondStageSearch
 			queryInfo.Topk = finalTopk
-			queryInfo.SearchParams = params[common.SearchParamKey].(string)
 			// Pass global refine decision to C++ via proto after hook validation
 			if globalRefineVal, ok := params[common.GlobalRefineKey]; ok && globalRefineVal.(bool) {
 				queryInfo.SearchTopkRatio = params[common.SearchTopkRatioKey].(float32)
@@ -126,11 +128,24 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 				req.Req.IsRecallEvaluation = false
 			}
 		}
+
+		if useKnowhereDefaults {
+			if params == nil {
+				params = map[string]any{common.SearchParamKey: queryInfo.GetSearchParams()}
+			}
+			if err := paramtable.Get().KnowhereConfig.MergeIndexParamsJSON(indexType, paramtable.SearchStage, params); err != nil {
+				return nil, merr.WrapErrParameterInvalidMsg("invalid search params: %s", err.Error())
+			}
+		}
+		if params != nil {
+			queryInfo.SearchParams = params[common.SearchParamKey].(string)
+		}
+
 		changed, err := applyStrictGroupSettings(queryInfo)
 		if err != nil {
 			return nil, err
 		}
-		if useQueryHook || changed {
+		if useQueryHook || useKnowhereDefaults || changed {
 			serializedExprPlan, err := proto.Marshal(&plan)
 			if err != nil {
 				log.Warn(ctx, "failed to marshal optimized plan", mlog.Err(err))
@@ -138,7 +153,6 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 			}
 			req.Req.SerializedExprPlan = serializedExprPlan
 		}
-
 		log.Debug(ctx, "optimized search params done", mlog.Any("queryInfo", queryInfo))
 	default:
 		log.Warn(ctx, "not supported node type", mlog.String("nodeType", fmt.Sprintf("%T", plan.GetNode())))
