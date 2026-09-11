@@ -1175,9 +1175,8 @@ class SegmentExpr : public Expr {
                    bitmap_input.size(),
                    batch_size);
 
-        auto res_vec =
-            std::make_shared<ColumnVector>(TargetBitmap(batch_size, false),
-                                           TargetBitmap(batch_size, true));
+        auto res_vec = std::make_shared<ColumnVector>(
+            TargetBitmap(batch_size, false), TargetBitmap(batch_size, true));
         TargetBitmapView res(res_vec->GetRawData(), batch_size);
         TargetBitmapView valid_res(res_vec->GetValidRawData(), batch_size);
 
@@ -1272,7 +1271,8 @@ class SegmentExpr : public Expr {
             }
         } else if (has_mask) {
             processed_size =
-                ProcessDataChunksWithMask<T, kKernelNeedsSegmentOffsets<Kernel>>(
+                ProcessDataChunksWithMask<T,
+                                          kKernelNeedsSegmentOffsets<Kernel>>(
                     adapter, skip_func, res, valid_res, bitmap_input);
         } else {
             processed_size =

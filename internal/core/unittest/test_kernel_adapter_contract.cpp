@@ -420,8 +420,9 @@ struct NullableSegments {
 
     std::vector<bool>
     Valid(bool is_growing) const {
-        return is_growing ? Validity({&growing_data}, value_fid)
-                          : Validity({&sealed_first, &sealed_second}, value_fid);
+        return is_growing
+                   ? Validity({&growing_data}, value_fid)
+                   : Validity({&sealed_first, &sealed_second}, value_fid);
     }
 
     std::vector<int64_t>
@@ -516,11 +517,12 @@ TEST(KernelAdapterContractUnitTest, DerivesPositionFromResultView) {
                              int64_t{1},
                              TargetBitmapView(other),
                              TargetBitmapView(other_valid)));
-    EXPECT_ANY_THROW(
-        adapter(nullptr, ValidityView{}, nullptr, int64_t{2}, res + 7, valid + 7));
+    EXPECT_ANY_THROW(adapter(
+        nullptr, ValidityView{}, nullptr, int64_t{2}, res + 7, valid + 7));
 }
 
-TEST(KernelAdapterContractUnitTest, RandomBatchSlicesCandidatesAndPackedValidity) {
+TEST(KernelAdapterContractUnitTest,
+     RandomBatchSlicesCandidatesAndPackedValidity) {
     // Validity of rows 5-10 is 1, 0, 1, 1, 0, 1, stored as packed bits 3-8.
     const uint8_t packed[2] = {0b01101000, 0b00000001};
     const auto validity = ValidityView::FromPacked(packed).Subview(3);
@@ -659,9 +661,9 @@ class KernelAdapterContractTest : public ::testing::Test {
 
     const SegmentInternalInterface*
     SegmentFor(bool is_growing) const {
-        return is_growing
-                   ? static_cast<const SegmentInternalInterface*>(growing_.get())
-                   : sealed_.get();
+        return is_growing ? static_cast<const SegmentInternalInterface*>(
+                                growing_.get())
+                          : sealed_.get();
     }
 
     static constexpr int64_t kChunkRows = 8;
@@ -679,10 +681,8 @@ class KernelAdapterContractTest : public ::testing::Test {
 TEST_F(KernelAdapterContractTest, OffsetsSkipKeepsCandidatesAligned) {
     VerifyOffsetsSkip<int64_t>(
         growing_.get(), i64_fid_, DataType::INT64, {0, 1, 2, 3, 8, 9, 10, 11});
-    VerifyOffsetsSkip<int64_t>(sealed_.get(),
-                               i64_fid_,
-                               DataType::INT64,
-                               {0, 1, 2, 3, 16, 17, 18, 19});
+    VerifyOffsetsSkip<int64_t>(
+        sealed_.get(), i64_fid_, DataType::INT64, {0, 1, 2, 3, 16, 17, 18, 19});
     VerifyOffsetsSkip<std::string_view>(sealed_.get(),
                                         varchar_fid_,
                                         DataType::VARCHAR,
@@ -696,14 +696,14 @@ TEST_F(KernelAdapterContractTest, OffsetsSkipKeepsCandidatesAligned) {
 TEST_F(KernelAdapterContractTest, ElementOffsetsSkipKeepsCandidatesAligned) {
     for (const bool is_growing : {true, false}) {
         const SegmentInternalInterface* segment =
-            is_growing ? static_cast<const SegmentInternalInterface*>(
-                             growing_.get())
-                       : sealed_.get();
+            is_growing
+                ? static_cast<const SegmentInternalInterface*>(growing_.get())
+                : sealed_.get();
         auto query_context = std::make_shared<QueryContext>(
             DEAFULT_QUERY_ID, segment, N, MAX_TIMESTAMP);
         ExecContext exec_context(query_context.get());
-        auto expr =
-            MakeExpr(segment, array_fid_, DataType::INT64, *query_context, N, N);
+        auto expr = MakeExpr(
+            segment, array_fid_, DataType::INT64, *query_context, N, N);
         expr->SetHasOffsetInput(true);
 
         OffsetVector element_ids =
@@ -725,15 +725,15 @@ TEST_F(KernelAdapterContractTest, ElementOffsetsSkipKeepsCandidatesAligned) {
 TEST_F(KernelAdapterContractTest, ElementFullScanSkipsWholeChunk) {
     for (const bool is_growing : {true, false}) {
         const SegmentInternalInterface* segment =
-            is_growing ? static_cast<const SegmentInternalInterface*>(
-                             growing_.get())
-                       : sealed_.get();
+            is_growing
+                ? static_cast<const SegmentInternalInterface*>(growing_.get())
+                : sealed_.get();
         const int64_t skipped = is_growing ? kChunkRows : N / 2;
         auto query_context = std::make_shared<QueryContext>(
             DEAFULT_QUERY_ID, segment, N, MAX_TIMESTAMP);
         ExecContext exec_context(query_context.get());
-        auto expr =
-            MakeExpr(segment, array_fid_, DataType::INT64, *query_context, N, N);
+        auto expr = MakeExpr(
+            segment, array_fid_, DataType::INT64, *query_context, N, N);
 
         EvalCtx ctx(&exec_context);
         int64_t rows_seen = 0;
@@ -752,13 +752,13 @@ TEST_F(KernelAdapterContractTest, FullScanMultiBatchMatchesValues) {
 
     for (const bool is_growing : {true, false}) {
         const SegmentInternalInterface* segment =
-            is_growing ? static_cast<const SegmentInternalInterface*>(
-                             growing_.get())
-                       : sealed_.get();
+            is_growing
+                ? static_cast<const SegmentInternalInterface*>(growing_.get())
+                : sealed_.get();
         const auto values =
-            is_growing ? Int64Values({&growing_data_}, i64_fid_)
-                       : Int64Values({&sealed_first_, &sealed_second_},
-                                     i64_fid_);
+            is_growing
+                ? Int64Values({&growing_data_}, i64_fid_)
+                : Int64Values({&sealed_first_, &sealed_second_}, i64_fid_);
         std::string expected;
         for (int64_t i = 0; i < N; ++i) {
             expected.push_back(
@@ -805,9 +805,9 @@ TEST_F(KernelAdapterContractTest, PrunedRowsResetToFalseKnown) {
 TEST_F(KernelAdapterContractTest, SegmentOffsetsOnlyForKernelsThatAskForThem) {
     for (const bool is_growing : {true, false}) {
         const SegmentInternalInterface* segment =
-            is_growing ? static_cast<const SegmentInternalInterface*>(
-                             growing_.get())
-                       : sealed_.get();
+            is_growing
+                ? static_cast<const SegmentInternalInterface*>(growing_.get())
+                : sealed_.get();
         auto query_context = std::make_shared<QueryContext>(
             DEAFULT_QUERY_ID, segment, N, MAX_TIMESTAMP);
         ExecContext exec_context(query_context.get());
@@ -883,13 +883,14 @@ TEST_F(KernelAdapterContractTest, SequentialMaskSkipsChunkAndPassesOffsets) {
             ctx.set_bitmap_input(IrregularBitmap(0, N));
             std::string expected;
             for (int64_t i = 0; i < N; ++i) {
-                expected.push_back(
-                    i >= skipped && IrregularCandidate(i) ? 'T' : 'F');
+                expected.push_back(i >= skipped && IrregularCandidate(i) ? 'T'
+                                                                         : 'F');
             }
             int64_t rows_seen = 0;
-            EXPECT_EQ(TriStates(expr->EvalKernel<int64_t>(
-                          ctx, SkipChunkKernel<int64_t>{{&rows_seen}, 0}, false)),
-                      expected)
+            EXPECT_EQ(
+                TriStates(expr->EvalKernel<int64_t>(
+                    ctx, SkipChunkKernel<int64_t>{{&rows_seen}, 0}, false)),
+                expected)
                 << where;
             EXPECT_LE(rows_seen, N - skipped) << where;
         }
@@ -923,8 +924,12 @@ TEST_F(KernelAdapterContractTest, ElementLevelConstantBatches) {
 
         for (const bool always_true : {false, true}) {
             const ConstantKernel<int64_t> kernel{!always_true, always_true};
-            auto expr = MakeExpr(
-                segment, array_fid_, DataType::INT64, *query_context, N, kBatch);
+            auto expr = MakeExpr(segment,
+                                 array_fid_,
+                                 DataType::INT64,
+                                 *query_context,
+                                 N,
+                                 kBatch);
             std::string out;
             while (true) {
                 EvalCtx ctx(&exec_context);
@@ -939,8 +944,8 @@ TEST_F(KernelAdapterContractTest, ElementLevelConstantBatches) {
             EXPECT_EQ(out, std::string(N, always_true ? 'T' : 'F')) << where;
         }
 
-        auto expr =
-            MakeExpr(segment, array_fid_, DataType::INT64, *query_context, N, N);
+        auto expr = MakeExpr(
+            segment, array_fid_, DataType::INT64, *query_context, N, N);
         expr->SetHasOffsetInput(true);
         OffsetVector element_ids{0, 5, 17, 30};
         EvalCtx ctx(&exec_context, &element_ids);
@@ -1028,7 +1033,7 @@ TEST(KernelAdapterContractNullableTest, OffsetsFoldNullsWithMask) {
         auto expected = [&](char on_valid, char on_null) {
             std::string out;
             for (size_t k = 0; k < offsets.size(); ++k) {
-                out.push_back(bits[k] == '0'        ? 'F'
+                out.push_back(bits[k] == '0'      ? 'F'
                               : valid[offsets[k]] ? on_valid
                                                   : on_null);
             }
@@ -1058,9 +1063,11 @@ TEST(KernelAdapterContractNullableTest, OffsetsFoldNullsWithMask) {
             << where;
         EXPECT_EQ(eval(NullKnownFalseTrueKernel<int64_t>{}), expected('T', 'F'))
             << where;
-        EXPECT_EQ(eval(ConstantKernel<int64_t>{false, true}), expected('T', 'U'))
+        EXPECT_EQ(eval(ConstantKernel<int64_t>{false, true}),
+                  expected('T', 'U'))
             << where;
-        EXPECT_EQ(eval(ConstantKernel<int64_t>{true, false}), expected('F', 'U'))
+        EXPECT_EQ(eval(ConstantKernel<int64_t>{true, false}),
+                  expected('F', 'U'))
             << where;
         EXPECT_EQ(eval(NullKnownFalseConstantKernel<int64_t>{{false, true}}),
                   expected('T', 'F'))
@@ -1103,10 +1110,10 @@ TEST(KernelAdapterContractNullableTest, BatchesCrossBitmapWords) {
                 *expr, exec_context, kernel, kBatch, kRows, IrregularBitmap);
         };
 
-        EXPECT_EQ(eval(DivisibleValueKernel{4}),
-                  expected(
-                      [&](int64_t i) { return values[i] % 4 == 0 ? 'T' : 'F'; },
-                      'U'))
+        EXPECT_EQ(
+            eval(DivisibleValueKernel{4}),
+            expected([&](int64_t i) { return values[i] % 4 == 0 ? 'T' : 'F'; },
+                     'U'))
             << where;
         EXPECT_EQ(eval(NullKnownFalseTrueKernel<int64_t>{}),
                   expected(always_t, 'F'))
@@ -1158,8 +1165,8 @@ MakeIndexOnlySealed() {
     load_index_info.index_engine_version =
         knowhere::Version::GetCurrentVersion().VersionNumber();
     load_index_info.index_params = GenIndexParams(scalar_index.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("kernel-adapter-index-only", std::move(scalar_index));
+    load_index_info.cache_index = CreateTestCacheIndex(
+        "kernel-adapter-index-only", std::move(scalar_index));
     out.segment->LoadIndex(load_index_info);
     out.segment->DropFieldData(out.value_fid);
     AssertInfo(!out.segment->HasFieldData(out.value_fid),
@@ -1169,7 +1176,8 @@ MakeIndexOnlySealed() {
 
 }  // namespace
 
-TEST(KernelAdapterContractIndexOnlyTest, OffsetsReverseLookupFoldsNullAndPrunes) {
+TEST(KernelAdapterContractIndexOnlyTest,
+     OffsetsReverseLookupFoldsNullAndPrunes) {
     constexpr int64_t kRows = 8;
     auto fixture = MakeIndexOnlySealed();
     auto query_context = std::make_shared<QueryContext>(
@@ -1197,7 +1205,8 @@ TEST(KernelAdapterContractIndexOnlyTest, OffsetsReverseLookupFoldsNullAndPrunes)
     EXPECT_EQ(rows_seen, 2);
 }
 
-TEST(KernelAdapterContractIndexOnlyTest, SequentialReverseLookupAdvancesCursor) {
+TEST(KernelAdapterContractIndexOnlyTest,
+     SequentialReverseLookupAdvancesCursor) {
     constexpr int64_t kRows = 8;
     auto fixture = MakeIndexOnlySealed();
     auto query_context = std::make_shared<QueryContext>(
@@ -1213,8 +1222,8 @@ TEST(KernelAdapterContractIndexOnlyTest, SequentialReverseLookupAdvancesCursor) 
     EvalCtx ctx(&exec_context);
     ctx.set_bitmap_input(BitmapFrom("11101111"));
     int64_t rows_seen = 0;
-    auto res = expr->EvalKernel<int64_t>(
-        ctx, ProbeKernel<int64_t>{&rows_seen}, false);
+    auto res =
+        expr->EvalKernel<int64_t>(ctx, ProbeKernel<int64_t>{&rows_seen}, false);
     EXPECT_EQ(TriStates(res), "TUTFTTTT");
     EXPECT_EQ(rows_seen, 6);
 

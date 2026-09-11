@@ -50,7 +50,8 @@ operator<<(std::ostream& os, Tri t) {
     return os << (t == Tri::True ? "T" : t == Tri::False ? "F" : "U");
 }
 
-// Output buffers initialized the way Scan initializes them: match=0, known=1.
+// Output buffers initialized the way EvalKernel initializes them: match=0,
+// known=1.
 struct OutBuffers {
     explicit OutBuffers(size_t n) : match(n, false), known(n, true) {
     }

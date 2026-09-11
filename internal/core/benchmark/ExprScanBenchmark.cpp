@@ -363,7 +363,8 @@ RegisterExprScanBenchmarks() {
                         name.c_str(),
                         [k, sealed, nullable, with_bitmap](
                             benchmark::State& state) {
-                            RunExprScan(state, k, sealed, nullable, with_bitmap);
+                            RunExprScan(
+                                state, k, sealed, nullable, with_bitmap);
                         });
                     for (auto n : rows) {
                         bench->Arg(n);

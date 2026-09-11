@@ -132,30 +132,114 @@ struct AuditRow {
 const std::vector<AuditRow>&
 AuditRows() {
     static const std::vector<AuditRow> rows = {
-        {"normal", true, 1, 0, R"({"a":1,"arr":[1,2]})", {1, 2}, {1, 5},
-         JKind::Number, JKind::Array},
-        {"normal", true, 5, 40, R"({"a":5,"arr":[3]})", {3}, {5},
-         JKind::Number, JKind::Array},
-        {"column_null", false, 0, 0, "{}", {}, {},
-         JKind::ColumnNull, JKind::ColumnNull},
-        {"json_missing_path", true, 10, 10, R"({"b":1})", {1, 3}, {2, 3},
-         JKind::Missing, JKind::Missing},
-        {"json_type_mismatch", true, -1, 20, R"({"a":"x","arr":"x"})", {2},
-         {7}, JKind::String, JKind::String},
-        {"json_null_value", true, 3, 30, R"({"a":null,"arr":null})", {1}, {},
-         JKind::JsonNull, JKind::JsonNull},
-        {"empty_array", true, 2, 50, R"({"a":2,"arr":[]})", {}, {},
-         JKind::Number, JKind::EmptyArray},
-        {"mixed_type_array", true, 7, 60, R"({"a":1.5,"arr":[1,"x",true]})",
-         {1, 2, 3}, {9, 1}, JKind::Number, JKind::MixedArray},
-        {"column_null", false, 0, 0, "{}", {}, {},
-         JKind::ColumnNull, JKind::ColumnNull},
-        {"normal", true, 6, 5, R"({"a":6,"arr":[2,3]})", {2, 3}, {4, 6},
-         JKind::Number, JKind::Array},
-        {"json_object_at_path", true, 4, 15, R"({"a":{"c":1}})", {5}, {3, 4},
-         JKind::Object, JKind::Missing},
-        {"normal", true, 8, 70, R"({"a":8,"arr":[1,3]})", {1, 3}, {8},
-         JKind::Number, JKind::Array},
+        {"normal",
+         true,
+         1,
+         0,
+         R"({"a":1,"arr":[1,2]})",
+         {1, 2},
+         {1, 5},
+         JKind::Number,
+         JKind::Array},
+        {"normal",
+         true,
+         5,
+         40,
+         R"({"a":5,"arr":[3]})",
+         {3},
+         {5},
+         JKind::Number,
+         JKind::Array},
+        {"column_null",
+         false,
+         0,
+         0,
+         "{}",
+         {},
+         {},
+         JKind::ColumnNull,
+         JKind::ColumnNull},
+        {"json_missing_path",
+         true,
+         10,
+         10,
+         R"({"b":1})",
+         {1, 3},
+         {2, 3},
+         JKind::Missing,
+         JKind::Missing},
+        {"json_type_mismatch",
+         true,
+         -1,
+         20,
+         R"({"a":"x","arr":"x"})",
+         {2},
+         {7},
+         JKind::String,
+         JKind::String},
+        {"json_null_value",
+         true,
+         3,
+         30,
+         R"({"a":null,"arr":null})",
+         {1},
+         {},
+         JKind::JsonNull,
+         JKind::JsonNull},
+        {"empty_array",
+         true,
+         2,
+         50,
+         R"({"a":2,"arr":[]})",
+         {},
+         {},
+         JKind::Number,
+         JKind::EmptyArray},
+        {"mixed_type_array",
+         true,
+         7,
+         60,
+         R"({"a":1.5,"arr":[1,"x",true]})",
+         {1, 2, 3},
+         {9, 1},
+         JKind::Number,
+         JKind::MixedArray},
+        {"column_null",
+         false,
+         0,
+         0,
+         "{}",
+         {},
+         {},
+         JKind::ColumnNull,
+         JKind::ColumnNull},
+        {"normal",
+         true,
+         6,
+         5,
+         R"({"a":6,"arr":[2,3]})",
+         {2, 3},
+         {4, 6},
+         JKind::Number,
+         JKind::Array},
+        {"json_object_at_path",
+         true,
+         4,
+         15,
+         R"({"a":{"c":1}})",
+         {5},
+         {3, 4},
+         JKind::Object,
+         JKind::Missing},
+        {"normal",
+         true,
+         8,
+         70,
+         R"({"a":8,"arr":[1,3]})",
+         {1, 3},
+         {8},
+         JKind::Number,
+         JKind::Array},
     };
     return rows;
 }
@@ -386,9 +470,8 @@ BuildMrb1(const std::vector<int64_t>& values) {
     PutU64(blob, 8, bitmap.cardinality());
     PutU64(blob, 16, body.size());
     PutU64(blob, 24, 0);
-    std::memcpy(blob.data() + RoaringMembership::kHeaderSize,
-                body.data(),
-                body.size());
+    std::memcpy(
+        blob.data() + RoaringMembership::kHeaderSize, body.data(), body.size());
     return blob;
 }
 
@@ -399,8 +482,8 @@ MakeNullableJsonArray(const std::vector<std::string>& json_strings,
     arrow::BinaryBuilder builder;
     for (size_t i = 0; i < json_strings.size(); ++i) {
         const bool valid = ((valid_data[i >> 3] >> (i & 0x07)) & 1) != 0;
-        auto status = valid ? builder.Append(json_strings[i])
-                            : builder.AppendNull();
+        auto status =
+            valid ? builder.Append(json_strings[i]) : builder.AppendNull();
         AssertInfo(status.ok(), "append JSON: {}", status.ToString());
     }
     std::shared_ptr<arrow::Array> array;
@@ -436,11 +519,8 @@ BuildJsonStats(FieldId json_fid) {
     field_schema.set_data_type(proto::schema::DataType::JSON);
     field_schema.set_fieldid(json_fid.get());
     field_schema.set_nullable(true);
-    storage::FieldDataMeta field_meta{collection_id,
-                                      partition_id,
-                                      segment_id,
-                                      json_fid.get(),
-                                      field_schema};
+    storage::FieldDataMeta field_meta{
+        collection_id, partition_id, segment_id, json_fid.get(), field_schema};
     storage::IndexMeta index_meta{
         segment_id, json_fid.get(), build_id, version_id};
     insert_data.SetFieldDataMeta(field_meta);
@@ -509,9 +589,9 @@ LoadSortIndex(SegmentSealed* segment, FieldId field_id, DataType field_type) {
     info.index_engine_version =
         knowhere::Version::GetCurrentVersion().VersionNumber();
     info.index_params = GenIndexParams(scalar_index.get());
-    info.cache_index = CreateTestCacheIndex(
-        fmt::format("tristate-sort-{}", NextBuildId()),
-        std::move(scalar_index));
+    info.cache_index =
+        CreateTestCacheIndex(fmt::format("tristate-sort-{}", NextBuildId()),
+                             std::move(scalar_index));
     segment->LoadIndex(info);
 }
 
@@ -531,8 +611,8 @@ LoadJsonPathIndex(SegmentSealed* segment, FieldId json_fid) {
         },
         ctx);
     using JsonIndex = milvus::index::JsonInvertedIndex<double>;
-    auto json_index = std::unique_ptr<JsonIndex>(
-        static_cast<JsonIndex*>(created.release()));
+    auto json_index =
+        std::unique_ptr<JsonIndex>(static_cast<JsonIndex*>(created.release()));
 
     auto field_data =
         std::make_shared<FieldData<milvus::Json>>(DataType::JSON, true);
@@ -729,23 +809,22 @@ AuditCases() {
             });
     }
 
-    cases.push_back({"exists.json_a",
-                     Target::JsonA,
-                     Rule::JsonExists,
-                     [](const AuditFields& f) -> expr::TypedExprPtr {
-                         return std::make_shared<expr::ExistsExpr>(
-                             expr::ColumnInfo(
-                                 f.json, DataType::JSON, {"a"}, true));
-                     }});
     cases.push_back(
-        {"membership_roaring.i64",
-         Target::ScalarI64,
-         Rule::ColumnNullUnknown,
+        {"exists.json_a",
+         Target::JsonA,
+         Rule::JsonExists,
          [](const AuditFields& f) -> expr::TypedExprPtr {
-             return std::make_shared<expr::RoaringFilterExpr>(
-                 expr::ColumnInfo(f.i64, DataType::INT64, {}, true),
-                 RoaringMembership::Parse(BuildMrb1({1, 5, 10})));
+             return std::make_shared<expr::ExistsExpr>(
+                 expr::ColumnInfo(f.json, DataType::JSON, {"a"}, true));
          }});
+    cases.push_back({"membership_roaring.i64",
+                     Target::ScalarI64,
+                     Rule::ColumnNullUnknown,
+                     [](const AuditFields& f) -> expr::TypedExprPtr {
+                         return std::make_shared<expr::RoaringFilterExpr>(
+                             expr::ColumnInfo(f.i64, DataType::INT64, {}, true),
+                             RoaringMembership::Parse(BuildMrb1({1, 5, 10})));
+                     }});
     cases.push_back(
         {"tstz_add_month_lt.ts",
          Target::Tstz,
@@ -778,31 +857,29 @@ AuditCases() {
     for (const auto& contains : contains_ops) {
         const auto op = contains.op;
         const auto vals = I64Vals(contains.values);
-        cases.push_back({"json_" + contains.name + ".json_arr",
-                         Target::JsonArr,
-                         Rule::JsonContainsPath,
-                         [op, vals](const AuditFields& f) -> expr::TypedExprPtr {
-                             return std::make_shared<expr::JsonContainsExpr>(
-                                 expr::ColumnInfo(
-                                     f.json, DataType::JSON, {"arr"}, true),
-                                 op,
-                                 true,
-                                 vals);
-                         }});
-        cases.push_back({"array_" + contains.name + ".arr",
-                         Target::ArrayCol,
-                         Rule::ArrayContains,
-                         [op, vals](const AuditFields& f) -> expr::TypedExprPtr {
-                             return std::make_shared<expr::JsonContainsExpr>(
-                                 expr::ColumnInfo(f.arr,
-                                                  DataType::ARRAY,
-                                                  DataType::INT64,
-                                                  {},
-                                                  true),
-                                 op,
-                                 true,
-                                 vals);
-                         }});
+        cases.push_back(
+            {"json_" + contains.name + ".json_arr",
+             Target::JsonArr,
+             Rule::JsonContainsPath,
+             [op, vals](const AuditFields& f) -> expr::TypedExprPtr {
+                 return std::make_shared<expr::JsonContainsExpr>(
+                     expr::ColumnInfo(f.json, DataType::JSON, {"arr"}, true),
+                     op,
+                     true,
+                     vals);
+             }});
+        cases.push_back(
+            {"array_" + contains.name + ".arr",
+             Target::ArrayCol,
+             Rule::ArrayContains,
+             [op, vals](const AuditFields& f) -> expr::TypedExprPtr {
+                 return std::make_shared<expr::JsonContainsExpr>(
+                     expr::ColumnInfo(
+                         f.arr, DataType::ARRAY, DataType::INT64, {}, true),
+                     op,
+                     true,
+                     vals);
+             }});
     }
     cases.push_back(
         {"unary_eq_index0.arr",
@@ -823,13 +900,14 @@ AuditCases() {
                          return std::make_shared<expr::UnaryRangeFilterExpr>(
                              ElementColumn(f.elem), Op::GreaterThan, I64Val(2));
                      }});
-    cases.push_back({"elem_binary_range.elem",
-                     Target::Element,
-                     Rule::ElementLevel,
-                     [](const AuditFields& f) -> expr::TypedExprPtr {
-                         return std::make_shared<expr::BinaryRangeFilterExpr>(
-                             ElementColumn(f.elem), I64Val(1), I64Val(5), true, true);
-                     }});
+    cases.push_back(
+        {"elem_binary_range.elem",
+         Target::Element,
+         Rule::ElementLevel,
+         [](const AuditFields& f) -> expr::TypedExprPtr {
+             return std::make_shared<expr::BinaryRangeFilterExpr>(
+                 ElementColumn(f.elem), I64Val(1), I64Val(5), true, true);
+         }});
     cases.push_back({"elem_term_in.elem",
                      Target::Element,
                      Rule::ElementLevel,
@@ -843,7 +921,11 @@ AuditCases() {
          Rule::ElementLevel,
          [](const AuditFields& f) -> expr::TypedExprPtr {
              return std::make_shared<expr::BinaryArithOpEvalRangeExpr>(
-                 ElementColumn(f.elem), Op::Equal, Arith::Mod, I64Val(1), I64Val(2));
+                 ElementColumn(f.elem),
+                 Op::Equal,
+                 Arith::Mod,
+                 I64Val(1),
+                 I64Val(2));
          }});
     // Prunes the second sealed_raw_2chunk chunk by SkipIndex (max 8 < 9).
     cases.push_back({"unary_gt.i64",
@@ -865,14 +947,14 @@ AuditCases() {
                        ? expr::ColumnInfo(f.json, DataType::JSON, {"a"}, true)
                        : expr::ColumnInfo(f.i64, DataType::INT64, {}, true);
         };
-        cases.push_back(
-            {"term_in_empty" + suffix,
-             target,
-             Rule::AnyKnown,
-             [column](const AuditFields& f) -> expr::TypedExprPtr {
-                 return std::make_shared<expr::TermFilterExpr>(
-                     column(f), std::vector<proto::plan::GenericValue>{});
-             }});
+        cases.push_back({"term_in_empty" + suffix,
+                         target,
+                         Rule::AnyKnown,
+                         [column](const AuditFields& f) -> expr::TypedExprPtr {
+                             return std::make_shared<expr::TermFilterExpr>(
+                                 column(f),
+                                 std::vector<proto::plan::GenericValue>{});
+                         }});
     }
     return cases;
 }
@@ -938,9 +1020,9 @@ enum class Variant {
 enum class InputMode { Full, Offsets, FullBitmap, OffsetsBitmap };
 
 constexpr std::array<InputMode, 4> kInputModes = {InputMode::Full,
-                                                   InputMode::Offsets,
-                                                   InputMode::FullBitmap,
-                                                   InputMode::OffsetsBitmap};
+                                                  InputMode::Offsets,
+                                                  InputMode::FullBitmap,
+                                                  InputMode::OffsetsBitmap};
 
 const char*
 VariantName(Variant variant) {
@@ -1095,8 +1177,7 @@ EvalCase(const expr::TypedExprPtr& logical,
         auto compiled =
             exec::CompileExpressions({logical}, &exec_context, {}, false);
         AssertInfo(compiled.size() == 1, "expected one compiled expression");
-        exec::EvalCtx eval_ctx(&exec_context,
-                               use_offsets ? &offsets : nullptr);
+        exec::EvalCtx eval_ctx(&exec_context, use_offsets ? &offsets : nullptr);
         if (use_bitmap) {
             TargetBitmap bitmap_input(expected, false);
             for (int64_t i = 0; i < expected; ++i) {
@@ -1193,8 +1274,8 @@ ComputeAudit() {
                                "path",
                                PathOf(logical, sut.segment.get(), rows)});
             for (auto mode : kInputModes) {
-                auto outcome = EvalCase(
-                    logical, sut.segment.get(), rows, full_size, mode);
+                auto outcome =
+                    EvalCase(logical, sut.segment.get(), rows, full_size, mode);
                 AuditRecord base{audit_case.name,
                                  audit_case.target,
                                  sut.variant,
@@ -1262,10 +1343,8 @@ ToSnapshot(const std::vector<AuditRecord>& records) {
     for (const auto& record : records) {
         auto [it, inserted] = snapshot.emplace(
             SnapshotKey{record.CaseId(), record.row}, record.value);
-        AssertInfo(inserted,
-                   "duplicate audit key {} {}",
-                   record.CaseId(),
-                   record.row);
+        AssertInfo(
+            inserted, "duplicate audit key {} {}", record.CaseId(), record.row);
     }
     return snapshot;
 }
@@ -1302,7 +1381,8 @@ ReadSnapshot(const stdfs::path& path) {
 }
 
 void
-WriteSnapshot(const stdfs::path& path, const std::vector<AuditRecord>& records) {
+WriteSnapshot(const stdfs::path& path,
+              const std::vector<AuditRecord>& records) {
     std::ofstream out(path, std::ios::trunc);
     AssertInfo(out.good(), "cannot write {}", path.string());
     out << "# Tri-state audit golden snapshot, generated by "
@@ -1374,8 +1454,8 @@ TEST(TriStateAudit, MatchesGoldenSnapshot) {
 
     if (EnvIsTrue("MILVUS_TRISTATE_AUDIT_UPDATE")) {
         WriteSnapshot(golden_path, records);
-        std::cout << "[tristate-audit] wrote " << records.size()
-                  << " lines to " << golden_path << std::endl;
+        std::cout << "[tristate-audit] wrote " << records.size() << " lines to "
+                  << golden_path << std::endl;
         return;
     }
     ASSERT_TRUE(stdfs::exists(golden_path))
@@ -1384,8 +1464,8 @@ TEST(TriStateAudit, MatchesGoldenSnapshot) {
 
     const auto allowlist_path = dir / kAllowlistFile;
     const auto allowlist = ReadAllowlist(allowlist_path);
-    const auto diffs = DiffSnapshots(ReadSnapshot(golden_path),
-                                     ToSnapshot(records));
+    const auto diffs =
+        DiffSnapshots(ReadSnapshot(golden_path), ToSnapshot(records));
 
     std::set<DiffEntry> seen_allowed;
     size_t not_allowed = 0;
@@ -1484,8 +1564,8 @@ TEST(TriStateAudit, CrossPathAndRuleReport) {
                    << '\n';
             if (allowed->size() == 1) {
                 report << "ALLOW_SUGGEST\t" << record.CaseId() << '\t'
-                       << record.row << '\t' << record.value << '\t'
-                       << *allowed << '\n';
+                       << record.row << '\t' << record.value << '\t' << *allowed
+                       << '\n';
             }
         }
     }

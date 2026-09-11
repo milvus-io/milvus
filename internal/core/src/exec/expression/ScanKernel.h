@@ -107,22 +107,26 @@ concept KernelCanSkip = requires(const K& kernel,
                                  const SkipIndex& skip_index,
                                  FieldId field_id,
                                  int64_t chunk_id) {
-    {
-        kernel.CanSkip(skip_index, field_id, chunk_id)
-    } -> std::convertible_to<bool>;
-};
+                            {
+                                kernel.CanSkip(skip_index, field_id, chunk_id)
+                                } -> std::convertible_to<bool>;
+                        };
 
 // Optional: the predicate is FALSE for every non-NULL row of the batch.
 template <typename K>
 concept KernelAlwaysFalse = requires(const K& kernel) {
-    { kernel.AlwaysFalse() } -> std::convertible_to<bool>;
-};
+                                {
+                                    kernel.AlwaysFalse()
+                                    } -> std::convertible_to<bool>;
+                            };
 
 // Optional: the predicate is TRUE for every non-NULL row of the batch.
 template <typename K>
 concept KernelAlwaysTrue = requires(const K& kernel) {
-    { kernel.AlwaysTrue() } -> std::convertible_to<bool>;
-};
+                               {
+                                   kernel.AlwaysTrue()
+                                   } -> std::convertible_to<bool>;
+                           };
 
 // Optional: the kernel reads CandidateBatch::segment_offsets.
 template <typename K>

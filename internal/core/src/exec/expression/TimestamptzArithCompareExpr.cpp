@@ -264,8 +264,7 @@ PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForIndex(
 
 template <typename T>
 VectorPtr
-PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForAll(
-    EvalCtx& context) {
+PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForAll(EvalCtx& context) {
     if (!arg_inited_) {
         interval_ = expr_->interval_;
         compare_value_.SetValue<T>(expr_->compare_value_);
