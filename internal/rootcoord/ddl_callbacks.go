@@ -105,6 +105,10 @@ type CacheExpirationsGetter interface {
 
 // ExpireCaches handles the cache
 func (c *DDLCallback) ExpireCaches(ctx context.Context, expirations any) error {
+	return c.expireCaches(ctx, expirations)
+}
+
+func (c *DDLCallback) expireCaches(ctx context.Context, expirations any, opts ...proxyutil.ExpireCacheOpt) error {
 	var cacheExpirations *message.CacheExpirations
 	if g, ok := expirations.(CacheExpirationsGetter); ok {
 		cacheExpirations = g.GetCacheExpirations()
@@ -116,14 +120,14 @@ func (c *DDLCallback) ExpireCaches(ctx context.Context, expirations any) error {
 		panic(fmt.Sprintf("invalid getter type: %T", expirations))
 	}
 	for _, cacheExpiration := range cacheExpirations.CacheExpirations {
-		if err := c.expireCache(ctx, cacheExpiration); err != nil {
+		if err := c.expireCache(ctx, cacheExpiration, opts...); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (c *DDLCallback) expireCache(ctx context.Context, cacheExpiration *message.CacheExpiration) error {
+func (c *DDLCallback) expireCache(ctx context.Context, cacheExpiration *message.CacheExpiration, opts ...proxyutil.ExpireCacheOpt) error {
 	ts, err := c.tsoAllocator.GenerateTSO(1)
 	if err != nil {
 		return merr.Wrap(err, "failed to generate timestamp")
@@ -131,6 +135,9 @@ func (c *DDLCallback) expireCache(ctx context.Context, cacheExpiration *message.
 	switch cacheExpiration.Cache.(type) {
 	case *messagespb.CacheExpiration_LegacyProxyCollectionMetaCache:
 		legacyProxyCollectionMetaCache := cacheExpiration.GetLegacyProxyCollectionMetaCache()
+		expireOpts := append([]proxyutil.ExpireCacheOpt{
+			proxyutil.SetMsgType(legacyProxyCollectionMetaCache.MsgType),
+		}, opts...)
 		return c.ExpireMetaCache(
 			ctx,
 			legacyProxyCollectionMetaCache.DbName,
@@ -138,7 +145,7 @@ func (c *DDLCallback) expireCache(ctx context.Context, cacheExpiration *message.
 			legacyProxyCollectionMetaCache.CollectionId,
 			legacyProxyCollectionMetaCache.PartitionName,
 			ts,
-			proxyutil.SetMsgType(legacyProxyCollectionMetaCache.MsgType))
+			expireOpts...)
 	}
 	return nil
 }
