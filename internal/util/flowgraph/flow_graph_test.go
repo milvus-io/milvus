@@ -227,6 +227,72 @@ func TestTimeTickedFlowGraph_Close(t *testing.T) {
 	fg.Close()
 }
 
+// nodeBlocking simulates a pipeline node stuck in an external call (e.g. a
+// hung object-storage flush): its Operate blocks until releaseCh is closed.
+type nodeBlocking struct {
+	BaseNode
+	releaseCh chan struct{}
+}
+
+func (n *nodeBlocking) Name() string { return "NodeBlocking" }
+
+func (n *nodeBlocking) Operate(in []Msg) []Msg {
+	<-n.releaseCh
+	return nil
+}
+
+// TestTimeTickedFlowGraph_CloseBoundedWhenNodeBlocked verifies that Close()
+// returns within a bounded time even when a node in the pipeline is blocked
+// on an external call that never completes. Regression test for
+// https://github.com/milvus-io/milvus/issues/53237: an unbounded drain here
+// stalled the WAL close chain (and thus RemoveWAL / StreamingNode shutdown)
+// until the balancer operation timeout.
+func TestTimeTickedFlowGraph_CloseBoundedWhenNodeBlocked(t *testing.T) {
+	const MaxQueueLength = 1024
+	const drainTimeout = 200 * time.Millisecond
+
+	inputChan := make(chan float64, MaxQueueLength)
+	releaseCh := make(chan struct{})
+
+	fg := NewTimeTickedFlowGraph(context.Background())
+	// Use a short drain timeout so the test stays fast.
+	fg.closeDrainTimeout = drainTimeout
+
+	var a Node = &nodeA{
+		InputNode: InputNode{
+			BaseNode: BaseNode{
+				maxQueueLength: MaxQueueLength,
+			},
+		},
+		inputChan: inputChan,
+	}
+	var b Node = &nodeBlocking{
+		BaseNode: BaseNode{
+			maxQueueLength: MaxQueueLength,
+		},
+		releaseCh: releaseCh,
+	}
+
+	fg.AddNode(a)
+	fg.AddNode(b)
+	assert.NoError(t, fg.SetEdges(a.Name(), []string{b.Name()}))
+
+	fg.Start()
+	// Feed a message so the pipeline goroutine enters the blocking node and
+	// stays stuck until releaseCh is closed.
+	inputChan <- 1
+
+	start := time.Now()
+	fg.Close()
+	elapsed := time.Since(start)
+	assert.Less(t, elapsed, drainTimeout*5,
+		"Close() must be bounded even when a node is blocked on a hung external call")
+
+	// Release the blocked node; the pipeline goroutine then exits by itself
+	// (or stays idle waiting for input) without panicking.
+	close(releaseCh)
+}
+
 func TestBlockAll(t *testing.T) {
 	fg := NewTimeTickedFlowGraph(context.Background())
 	fg.AddNode(&nodeA{})

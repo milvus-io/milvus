@@ -141,15 +141,18 @@ func (m *managerImpl) Metrics() (*types.StreamingNodeMetrics, error) {
 
 // Close these manager and release all managed WAL.
 func (m *managerImpl) Close() {
-	m.lifetime.SetState(managerRemoveable)
+	// Reject all operations (including Remove) right away, so a RemoveWAL that
+	// arrives during shutdown fails fast instead of being accepted and waiting
+	// on the wal lifetime background task. The wait below only covers the
+	// operations that were already in flight; with a bounded WAL close chain
+	// those converge within the graceful close timeout.
+	m.lifetime.SetState(managerStopped)
 	m.lifetime.Wait()
 	// close all underlying walLifetime.
 	m.wltMap.Range(func(channel string, wlt *walLifetime) bool {
 		wlt.Close()
 		return true
 	})
-	m.lifetime.SetState(managerStopped)
-	m.lifetime.Wait()
 
 	// close all underlying wal instance by allocator if there's resource leak.
 	m.opener.Close()
