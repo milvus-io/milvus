@@ -130,7 +130,8 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
             filter_->Source() ==
                 ColumnFilter::MetricsSource::PreloadedStatistics &&
             ShouldSkipFilteredCell(location.source_cell_id);
-        if (!nullable_ && preloaded_skip) {
+        if (preloaded_skip &&
+            (!nullable_ || !filter_->SkippedValidityRequired())) {
             return {true, true};
         }
         auto* chunk = PinCell(location.source_cell_id);

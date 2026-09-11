@@ -36,13 +36,22 @@ class ColumnFilter final {
 
     using PhysicalCellPredicate = std::function<bool(int64_t)>;
 
-    ColumnFilter(MetricsSource source, PhysicalCellPredicate predicate)
-        : source_(source), predicate_(std::move(predicate)) {
+    ColumnFilter(MetricsSource source,
+                 PhysicalCellPredicate predicate,
+                 bool skipped_validity_required = true)
+        : source_(source),
+          predicate_(std::move(predicate)),
+          skipped_validity_required_(skipped_validity_required) {
     }
 
     MetricsSource
     Source() const {
         return source_;
+    }
+
+    bool
+    SkippedValidityRequired() const {
+        return skipped_validity_required_;
     }
 
     bool
@@ -53,6 +62,8 @@ class ColumnFilter final {
  private:
     MetricsSource source_;
     PhysicalCellPredicate predicate_;
+    // False only when the expression's consumer does not observe UNKNOWN.
+    bool skipped_validity_required_;
 };
 
 using ColumnFilterPtr = std::shared_ptr<const ColumnFilter>;

@@ -61,7 +61,6 @@
 #include "index/SkipIndex.h"
 #include "index/TextMatchIndex.h"
 #include "mmap/ChunkedColumnInterface.h"
-#include "parquet/statistics.h"
 #include "pb/plan.pb.h"
 #include "pb/segcore.pb.h"
 #include "query/PlanImpl.h"
@@ -119,7 +118,7 @@ class SegmentReadSnapshot {
     get_row_count() const = 0;
 
     virtual std::pair<std::shared_ptr<ChunkedColumnInterface>,
-                      std::shared_ptr<const SkipIndex>>
+                      FieldSkipMetricsView>
     GetDataScanResources(FieldId field_id) const = 0;
 };
 
@@ -461,9 +460,11 @@ class SegmentInternalInterface : public SegmentInterface {
     }
 
     virtual std::pair<std::shared_ptr<ChunkedColumnInterface>,
-                      std::shared_ptr<const SkipIndex>>
+                      FieldSkipMetricsView>
     GetDataScanResources(FieldId field_id) const {
-        return {GetChunkedColumn(field_id), GetSkipIndex()};
+        auto column = GetChunkedColumn(field_id);
+        auto view = FieldSkipMetricsView::FromProvider(column);
+        return {std::move(column), std::move(view)};
     }
 
     template <typename T>
@@ -672,24 +673,13 @@ class SegmentInternalInterface : public SegmentInterface {
         return false;
     }
 
-    std::shared_ptr<const SkipIndex>
-    GetSkipIndex() const;
-
-    void
-    LoadSkipIndex(FieldId field_id,
-                  DataType data_type,
-                  std::shared_ptr<ChunkedColumnInterface> column) {
-        skip_index_->LoadSkip(get_segment_id(), field_id, data_type, column);
-    }
-
-    void
-    LoadSkipIndexFromStatistics(
-        FieldId field_id,
-        DataType data_type,
-        std::vector<std::shared_ptr<parquet::Statistics>> statistics) {
-        skip_index_->LoadSkipFromStatistics(
-            get_segment_id(), field_id, data_type, statistics);
-    }
+    // Resolve skip metrics from the field column owned by the current sealed
+    // segment generation. The column is the authoritative field lifecycle;
+    // there is no second segment-level field -> provider map. Callers that
+    // combine this view with layout/data reads while Reopen may run must hold
+    // a SegmentReadLease for the whole operation, as the production C API does.
+    virtual FieldSkipMetricsView
+    GetFieldSkipMetrics(FieldId field_id) const;
 
     virtual DataType
     GetFieldDataType(FieldId fieldId) const = 0;
@@ -978,7 +968,6 @@ class SegmentInternalInterface : public SegmentInterface {
     // fieldID -> std::pair<num_rows, avg_size>
     std::unordered_map<FieldId, std::pair<int64_t, int64_t>>
         variable_fields_avg_size_;  // bytes;
-    std::shared_ptr<SkipIndex> skip_index_ = std::make_shared<SkipIndex>();
 
     // text-indexes used to do match.
     std::unordered_map<

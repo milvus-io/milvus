@@ -26,6 +26,7 @@
 #include "common/GroupChunk.h"
 #include "common/FieldMeta.h"
 #include "common/Types.h"
+#include "index/skipindex_stats/SkipIndexStats.h"
 #include "mmap/ChunkedColumnGroup.h"
 #include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/storage_test_utils.h"
@@ -280,4 +281,29 @@ TEST_F(ChunkedColumnGroupTest, ProxyChunkColumn) {
     EXPECT_EQ(proxy_string->NumRows(), 5);
     EXPECT_EQ(proxy_string->num_chunks(), 1);
     EXPECT_FALSE(proxy_string->IsNullable());
+}
+
+TEST_F(ChunkedColumnGroupTest, ProxyExposesGroupOwnedSkipMetrics) {
+    const FieldId field_id(1);
+    segcore::storagev2translator::SkipMetricsByField metrics_by_field;
+    metrics_by_field[field_id.get()].push_back(
+        std::make_shared<index::IntFieldChunkMetrics<int64_t>>(0, 10, nullptr));
+
+    std::vector<std::unique_ptr<GroupChunk>> group_chunks(1);
+    auto translator =
+        std::make_unique<TestGroupChunkTranslator>(1,
+                                                   std::vector<int64_t>{5},
+                                                   "group_owned_skip_metrics",
+                                                   std::move(group_chunks),
+                                                   std::move(metrics_by_field));
+    auto column_group =
+        std::make_shared<ChunkedColumnGroup>(std::move(translator));
+    ProxyChunkColumn column(column_group, field_id, int64_field_meta);
+
+    auto stored = column.GetSkipMetrics(0);
+    ASSERT_NE(stored, nullptr);
+    EXPECT_TRUE(
+        stored->CanSkipUnaryRange(OpType::Equal, index::Metrics{int64_t(100)}));
+    EXPECT_EQ(column.GetSkipMetrics(-1), nullptr);
+    EXPECT_EQ(column.GetSkipMetrics(1), nullptr);
 }

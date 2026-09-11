@@ -16,8 +16,9 @@
 
 #pragma once
 
-#include <any>
 #include <functional>
+#include <mutex>
+#include <typeinfo>
 #include <fmt/core.h>
 
 #include "common/EasyAssert.h"
@@ -110,6 +111,10 @@ class PhyTermFilterExpr : public SegmentExpr {
     PrefetchRawData();
 
  private:
+    template <typename T>
+    const std::vector<index::Metrics>&
+    GetSkipIndexValues();
+
     void
     InitPkCacheOffset();
 
@@ -179,8 +184,13 @@ class PhyTermFilterExpr : public SegmentExpr {
     // variant construction. Set once during init; nullptr when arg_set_ is not
     // SetElement<string> (e.g. FlatVectorElement for small IN).
     SetElement<std::string>* cached_str_set_elem_{nullptr};
-    // Cached element values for skip_index (avoids per-chunk vector copy).
-    std::any cached_skip_elements_;
+    std::once_flag skip_values_once_;
+    std::vector<index::Metrics> cached_skip_values_;
+    // The cache above is built for one ValueType and reused by every later
+    // call, while PrefetchRawData and Eval reach it through two independent
+    // dispatch switches. Record the type so a future divergence between those
+    // switches fails loudly instead of reinterpreting the cached variants.
+    const std::type_info* skip_values_type_{nullptr};
 };
 }  //namespace exec
 }  // namespace milvus

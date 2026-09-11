@@ -1998,12 +1998,13 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
         processed_cursor += size;
     };
 
-    auto skip_index_func =
-        [op_ctx = op_ctx_, expr_type, val](
-            const SkipIndex& skip_index, FieldId field_id, int64_t chunk_id) {
-            return skip_index.CanSkipUnaryRange<T>(
-                op_ctx, field_id, chunk_id, expr_type, val);
+    SkipChunkFn skip_index_func;
+    if (CanUseSkipFilter(is_nullable_, null_rejecting_)) {
+        skip_index_func = [expr_type, val](const FieldSkipMetricsView& view,
+                                           int64_t chunk_id) {
+            return view.CanSkipUnaryRange<T>(chunk_id, expr_type, val);
         };
+    }
 
     int64_t processed_size;
     if (has_offset_input_) {
@@ -2666,21 +2667,55 @@ PhyUnaryRangeFilterExpr::PrefetchRawData() {
 template <typename T>
 void
 PhyUnaryRangeFilterExpr::PrefetchRawData() {
+    if (!CanUseSkipFilter(is_nullable_, null_rejecting_)) {
+        SegmentExpr::PrefetchRawData(field_id_);
+        return;
+    }
     using U =
         std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
+    using H =
+        std::conditional_t<std::is_integral_v<U> && !std::is_same_v<bool, T>,
+                           int64_t,
+                           U>;
     auto op_type = expr_->op_type_;
-    auto skip_index = segment_->GetSkipIndex();
-    U val = GetValueFromProto<U>(expr_->val_);
 
-    std::vector<int64_t> chunks_may_hit;
-    for (size_t i = RawDataPrefetchStartChunk(); i < num_data_chunk_; i++) {
-        if (skip_index->CanSkipUnaryRange<U>(field_id_, i, op_type, val)) {
-            continue;
+    auto prefetch = [&](const auto& val) {
+        using ValueType = std::decay_t<decltype(val)>;
+        std::vector<int64_t> chunks_may_hit;
+        for (size_t i = RawDataPrefetchStartChunk(); i < num_data_chunk_; i++) {
+            const bool skip =
+                skip_view_.CanSkipUnaryRange<ValueType>(i, op_type, val);
+            if (skip) {
+                continue;
+            }
+            chunks_may_hit.push_back(i);
         }
-        chunks_may_hit.push_back(i);
-    }
+        segment_->prefetch_chunks(op_ctx_, field_id_, chunks_may_hit);
+    };
 
-    segment_->prefetch_chunks(op_ctx_, field_id_, chunks_may_hit);
+    H val = GetValueWithCastNumber<H>(expr_->val_);
+    if constexpr (std::is_integral_v<U> && !std::is_same_v<bool, T>) {
+        // Skip metrics use the field's physical type, so keep the literal wide
+        // for the bounds check and narrow it only when it is representable.
+        // An out-of-range literal must never reach CanSkipUnaryRange: the
+        // previous GetValueFromProto<U> truncated it to U{} without reporting
+        // the overflow, and the bounds comparison then pruned an arbitrary
+        // subset of cells. The scan never applies that value either --
+        // PreCheckOverflow<T> answers the whole predicate from the literal
+        // alone and touches the column only to materialize validity, which
+        // ApplyFieldValidData skips outright for a non-nullable field and
+        // which the element-level branch fills in without any read. Prefetch
+        // exactly what that path will read: all cells, or none.
+        if (query::out_of_range<U>(val)) {
+            if (is_nullable_ && !expr_->column_.element_level_) {
+                SegmentExpr::PrefetchRawData(field_id_);
+            }
+            return;
+        }
+        prefetch(static_cast<U>(val));
+    } else {
+        prefetch(val);
+    }
 }
 
 }  // namespace exec

@@ -174,8 +174,14 @@ PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
 template <typename T>
 bool
 PhyTermFilterExpr::CanSkipSegment() {
-    auto skip_index = segment_->GetSkipIndex();
-    T min, max;
+    if (expr_->vals_.empty()) {
+        // No literal means no bound to build a range from; min/max would stay
+        // indeterminate and the skip verdict would be read off uninitialised
+        // storage. Nothing to prune on, so fail open.
+        return false;
+    }
+    T min{};
+    T max{};
     for (auto i = 0; i < expr_->vals_.size(); i++) {
         auto val = GetValueFromProto<T>(expr_->vals_[i]);
         max = i == 0 ? val : std::max(val, max);
@@ -184,8 +190,7 @@ PhyTermFilterExpr::CanSkipSegment() {
     auto can_skip = [&]() -> bool {
         bool res = false;
         for (int i = 0; i < num_data_chunk_; ++i) {
-            if (!skip_index->CanSkipBinaryRange<T>(
-                    op_ctx_, field_id_, i, min, max, true, true)) {
+            if (!skip_view_.CanSkipBinaryRange<T>(i, min, max, true, true)) {
                 return false;
             } else {
                 res = true;
@@ -1116,8 +1121,6 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
             cached_str_set_elem_ =
                 dynamic_cast<SetElement<std::string>*>(arg_set_.get());
         }
-        // Cache element values for skip_index (avoids per-chunk copy)
-        cached_skip_elements_ = GetElementValues<T>(arg_set_);
         arg_inited_ = true;
     }
 
@@ -1193,16 +1196,14 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
         processed_cursor += size;
     };
 
-    auto skip_index_func =
-        [op_ctx = op_ctx_, &cached_elements = cached_skip_elements_](
-            const SkipIndex& skip_index, FieldId field_id, int64_t chunk_id) {
-            auto* elements = std::any_cast<std::vector<T>>(&cached_elements);
-            if (elements == nullptr) {
-                return false;
-            }
-            return skip_index.CanSkipInQuery<T>(
-                op_ctx, field_id, chunk_id, *elements);
+    SkipChunkFn skip_index_func;
+    if (CanUseSkipFilter(is_nullable_, null_rejecting_)) {
+        const auto& skip_values = GetSkipIndexValues<T>();
+        skip_index_func = [&skip_values](const FieldSkipMetricsView& view,
+                                         int64_t chunk_id) {
+            return view.CanSkipInQuery(chunk_id, skip_values);
         };
+    }
 
     int64_t processed_size;
     if (has_offset_input_) {
@@ -1350,14 +1351,7 @@ PhyTermFilterExpr::PrefetchRawData() {
             PrefetchRawData<double>();
             break;
         case DataType::VARCHAR:
-            if (segment_->type() == SegmentType::Growing &&
-                !storage::MmapManager::GetInstance()
-                     .GetMmapConfig()
-                     .growing_enable_mmap) {
-                PrefetchRawData<std::string>();
-            } else {
-                PrefetchRawData<std::string_view>();
-            }
+            PrefetchRawData<std::string_view>();
             break;
         default:
             SegmentExpr::PrefetchRawData(expr_->column_.field_id_);
@@ -1366,23 +1360,65 @@ PhyTermFilterExpr::PrefetchRawData() {
 }
 
 template <typename T>
+const std::vector<index::Metrics>&
+PhyTermFilterExpr::GetSkipIndexValues() {
+    // Both owning and view scan templates borrow the same immutable literals.
+    // Do not extract from arg_set_: its representation depends on IN-list size
+    // and it need not have been initialized when driver prefetch runs.
+    using ValueType =
+        std::conditional_t<std::is_same_v<T, std::string>, std::string_view, T>;
+    std::call_once(skip_values_once_, [this]() {
+        std::vector<index::Metrics> values;
+        values.reserve(expr_->vals_.size());
+        for (const auto& value : expr_->vals_) {
+            if constexpr (std::is_floating_point_v<ValueType>) {
+                // GetValueFromProtoWithOverflow asserts kFloatVal, but an
+                // int64 literal legitimately reaches float/double dispatch
+                // (see the int-to-double cast note above), and this runs on
+                // the prefetch executor where an assert surfaces as an opaque
+                // query failure. Accept both encodings, as the
+                // GetValueWithCastNumber this replaced did.
+                values.emplace_back(GetValueWithCastNumber<ValueType>(value));
+            } else {
+                bool overflowed = false;
+                auto converted =
+                    GetValueFromProtoWithOverflow<ValueType>(value, overflowed);
+                if (!overflowed) {
+                    values.emplace_back(converted);
+                }
+            }
+        }
+        cached_skip_values_ = std::move(values);
+        skip_values_type_ = &typeid(ValueType);
+    });
+    if (skip_values_type_ == nullptr ||
+        *skip_values_type_ != typeid(ValueType)) {
+        // The PrefetchRawData and Eval dispatch switches disagree on the value
+        // type for this column, so the cache holds variants of another
+        // alternative and CanSkipIn would compare the wrong thing. Fail open
+        // rather than assert: this also runs on the prefetch executor, where a
+        // throw would surface as an opaque query failure.
+        static const std::vector<index::Metrics> kNoSkipValues;
+        return kNoSkipValues;
+    }
+    return cached_skip_values_;
+}
+
+template <typename T>
 void
 PhyTermFilterExpr::PrefetchRawData() {
-    auto skip_index = segment_->GetSkipIndex();
-
-    std::vector<T> elements;
-    elements.reserve(expr_->vals_.size());
-    for (const auto& val : expr_->vals_) {
-        auto e = GetValueWithCastNumber<T>(val);
-        elements.push_back(e);
+    if (!CanUseSkipFilter(is_nullable_, null_rejecting_)) {
+        SegmentExpr::PrefetchRawData(field_id_);
+        return;
     }
-
+    const auto& elements = GetSkipIndexValues<T>();
     std::vector<int64_t> chunks_may_hit;
     for (size_t i = RawDataPrefetchStartChunk(); i < num_data_chunk_; ++i) {
-        auto skip = skip_index->CanSkipInQuery(field_id_, i, elements);
-        if (!skip) {
-            chunks_may_hit.push_back(i);
+        auto skip = skip_view_.CanSkipInQuery(i, elements);
+        if (skip) {
+            continue;
         }
+        chunks_may_hit.push_back(i);
     }
 
     segment_->prefetch_chunks(op_ctx_, field_id_, chunks_may_hit);

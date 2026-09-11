@@ -336,4 +336,15 @@ TEST(ConjunctExprTest, MarkNullRejectingStopsAtNonConjunctNodes) {
     EXPECT_FALSE(hidden_and->IsNullRejecting());
 }
 
+TEST(ConjunctExprTest, SkipFilterEligibility) {
+    EXPECT_TRUE(CanUseSkipFilter(/*is_nullable=*/false,
+                                 /*null_rejecting=*/false));
+    EXPECT_TRUE(CanUseSkipFilter(/*is_nullable=*/false,
+                                 /*null_rejecting=*/true));
+    EXPECT_FALSE(CanUseSkipFilter(/*is_nullable=*/true,
+                                  /*null_rejecting=*/false));
+    EXPECT_TRUE(CanUseSkipFilter(/*is_nullable=*/true,
+                                 /*null_rejecting=*/true));
+}
+
 }  // namespace milvus::exec
