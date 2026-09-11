@@ -23,8 +23,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
 
@@ -527,18 +529,45 @@ func (suite *SegmentLoaderSuite) TestLoadDupDeltaLogs() {
 	}
 }
 
-func (suite *SegmentLoaderSuite) TestLoadIndex() {
+func TestLoadIndexSkipsFlatAndLoadsOtherIndexes(t *testing.T) {
+	paramtable.Init()
+	loaderCtx, cancel := context.WithCancel(context.Background())
+	loader := NewLoader(loaderCtx, NewManager(), nil)
+	cancel()
+
 	ctx := context.Background()
 	loadInfo := &querypb.SegmentLoadInfo{
-		SegmentID:    1,
-		PartitionID:  suite.partitionID,
-		CollectionID: suite.collectionID,
+		SegmentID:    3,
+		PartitionID:  2,
+		CollectionID: 1,
 		IndexInfos: []*querypb.FieldIndexInfo{
 			{
+				FieldID:        107,
 				IndexFilePaths: []string{},
+				IndexParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.IndexTypeKey,
+						Value: mock_segcore.IndexFaissIDMap,
+					},
+				},
+			},
+			{
+				FieldID:        1,
+				IndexFilePaths: []string{"index-file"},
+				IndexParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.IndexTypeKey,
+						Value: indexparamcheck.IndexINVERTED,
+					},
+				},
 			},
 		},
-		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+		BinlogPaths: []*datapb.FieldBinlog{
+			{
+				FieldID: 1,
+			},
+		},
+		InsertChannel: "by-dev-rootcoord-dml_0_1v0",
 	}
 	segment := &LocalSegment{
 		baseSegment: baseSegment{
@@ -546,11 +575,37 @@ func (suite *SegmentLoaderSuite) TestLoadIndex() {
 		},
 	}
 
-	err := suite.loader.LoadIndex(ctx, segment, loadInfo, 0)
-	suite.ErrorIs(err, merr.ErrIndexNotFound)
+	resourceRequests := 0
+	requestResourcePatch := mockey.Mock((*segmentLoader).requestResource).To(
+		func(_ *segmentLoader, _ context.Context, infos ...*querypb.SegmentLoadInfo) (requestResourceResult, error) {
+			resourceRequests++
+			require.Len(t, infos, 1)
+			require.Len(t, infos[0].GetIndexInfos(), 1)
+			require.EqualValues(t, 1, infos[0].GetIndexInfos()[0].GetFieldID())
+			require.Equal(t, []string{"index-file"}, infos[0].GetIndexInfos()[0].GetIndexFilePaths())
+			require.Len(t, infos[0].GetBinlogPaths(), 1)
+			require.EqualValues(t, 1, infos[0].GetBinlogPaths()[0].GetFieldID())
+			return requestResourceResult{}, nil
+		}).Build()
+	defer requestResourcePatch.UnPatch()
+
+	indexLoads := 0
+	loadFieldIndexPatch := mockey.Mock((*segmentLoader).loadFieldIndex).To(
+		func(_ *segmentLoader, _ context.Context, _ *LocalSegment, indexInfo *querypb.FieldIndexInfo) error {
+			indexLoads++
+			require.EqualValues(t, 1, indexInfo.GetFieldID())
+			require.Equal(t, []string{"index-file"}, indexInfo.GetIndexFilePaths())
+			return nil
+		}).Build()
+	defer loadFieldIndexPatch.UnPatch()
+
+	err := loader.LoadIndex(ctx, segment, loadInfo, 0)
+	require.NoError(t, err)
+	require.Equal(t, 1, resourceRequests)
+	require.Equal(t, 1, indexLoads)
 }
 
-func (suite *SegmentLoaderSuite) TestLoadIndexWithLimitedResource() {
+func (suite *SegmentLoaderSuite) TestLoadIndexWithoutIndexFilesSkipsResourceCheck() {
 	ctx := context.Background()
 	loadInfo := &querypb.SegmentLoadInfo{
 		SegmentID:    1,
@@ -589,7 +644,7 @@ func (suite *SegmentLoaderSuite) TestLoadIndexWithLimitedResource() {
 	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.Key, "100000")
 	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.Key)
 	err := suite.loader.LoadIndex(ctx, segment, loadInfo, 0)
-	suite.Error(err)
+	suite.NoError(err)
 }
 
 func (suite *SegmentLoaderSuite) TestLoadWithMmap() {
