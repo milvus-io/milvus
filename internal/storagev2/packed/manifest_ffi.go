@@ -65,6 +65,7 @@ type Fragment struct {
 	EndRow     int64                 // End row index within the file (exclusive)
 	RowCount   int64                 // Number of rows (EndRow - StartRow)
 	Deltalogs  []*datapb.FieldBinlog // Source delete logs for milvus-table fragments
+	Properties map[string]string     // Immutable file properties shared by splits of the same file
 }
 
 type manifestColumnGroup struct {
@@ -73,6 +74,9 @@ type manifestColumnGroup struct {
 	Format    string
 }
 
+// External-table refresh assumes existing file ranges are immutable; overwrite
+// is unsupported. Properties are preserved for reads, but are deliberately not
+// hashed into fragment identity.
 func fragmentIdentity(f Fragment) string {
 	return fmt.Sprintf("%s:%d:%d", f.FilePath, f.StartRow, f.EndRow)
 }
@@ -307,8 +311,7 @@ func CreateMilvusTableManifestFromSegmentManifests(
 	return manifestPath, nil
 }
 
-// createColumnGroups creates a LoonColumnGroups structure from fragments.
-// This is an internal function used by CreateManifestForSegment.
+// createColumnGroups creates storage-owned column groups, including all file properties.
 func createColumnGroups(
 	columns []string,
 	format string,
@@ -333,6 +336,12 @@ func createColumnGroups(
 	cPaths := make([]*C.char, len(fragments))
 	cStartIndices := make([]C.int64_t, len(fragments))
 	cEndIndices := make([]C.int64_t, len(fragments))
+	cFileProperties := make([]C.LoonProperties, len(fragments))
+	defer func() {
+		for i := range cFileProperties {
+			C.loon_properties_free(&cFileProperties[i])
+		}
+	}()
 
 	for i, f := range fragments {
 		cPaths[i] = C.CString(f.FilePath)
@@ -345,11 +354,33 @@ func createColumnGroups(
 		}
 	}()
 
+	// Storage copies the per-file properties and owns the resulting column groups.
+	for i, fragment := range fragments {
+		if len(fragment.Properties) == 0 {
+			continue
+		}
+		cKeys := make([]*C.char, 0, len(fragment.Properties))
+		cValues := make([]*C.char, 0, len(fragment.Properties))
+		for key, value := range fragment.Properties {
+			cKeys = append(cKeys, C.CString(key))
+			cValues = append(cValues, C.CString(value))
+		}
+		result := C.loon_properties_create(&cKeys[0], &cValues[0], C.size_t(len(cKeys)), &cFileProperties[i])
+		for j := range cKeys {
+			C.free(unsafe.Pointer(cKeys[j]))
+			C.free(unsafe.Pointer(cValues[j]))
+		}
+		if err := HandleLoonFFIResult(result); err != nil {
+			return nil, merr.Wrap(err, "loon_properties_create for fragment failed")
+		}
+	}
+
 	var outColumnGroups *C.LoonColumnGroups
 	var cColumnsPtr **C.char
 	var cPathsPtr **C.char
 	var cStartIndicesPtr *C.int64_t
 	var cEndIndicesPtr *C.int64_t
+	var cFilePropertiesPtr *C.LoonProperties
 
 	if len(cColumns) > 0 {
 		cColumnsPtr = &cColumns[0]
@@ -360,6 +391,7 @@ func createColumnGroups(
 	if len(fragments) > 0 {
 		cStartIndicesPtr = &cStartIndices[0]
 		cEndIndicesPtr = &cEndIndices[0]
+		cFilePropertiesPtr = &cFileProperties[0]
 	}
 
 	result := C.loon_column_groups_create(
@@ -369,12 +401,13 @@ func createColumnGroups(
 		cPathsPtr,
 		cStartIndicesPtr,
 		cEndIndicesPtr,
+		cFilePropertiesPtr,
 		C.size_t(len(fragments)),
 		&outColumnGroups,
 	)
 
 	if err := HandleLoonFFIResult(result); err != nil {
-		return nil, merr.WrapErrStorage(err, "loon_column_groups_create failed")
+		return nil, merr.Wrap(err, "loon_column_groups_create failed")
 	}
 
 	return outColumnGroups, nil
@@ -652,12 +685,17 @@ func readColumnGroupsFromManifest(
 					continue
 				}
 
+				properties, err := columnGroupFileProperties(file)
+				if err != nil {
+					return nil, merr.Wrapf(err, "column group %d file %d", i, j)
+				}
 				group.Fragments = append(group.Fragments, Fragment{
 					FragmentID: int64(len(group.Fragments)),
 					FilePath:   filePath,
 					StartRow:   startRow,
 					EndRow:     endRow,
 					RowCount:   endRow - startRow,
+					Properties: properties,
 				})
 			}
 		}

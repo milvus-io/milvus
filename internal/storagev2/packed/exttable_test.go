@@ -399,7 +399,7 @@ func TestNewFragmentIDGenerator(t *testing.T) {
 
 func TestSplitFileToFragments_SmallFile(t *testing.T) {
 	gen := NewFragmentIDGenerator(0)
-	fragments := SplitFileToFragments("/data/small.parquet", 500, 1000, gen)
+	fragments := SplitFileToFragments("/data/small.parquet", 500, 1000, nil, gen)
 
 	assert.Len(t, fragments, 1)
 	assert.Equal(t, int64(0), fragments[0].FragmentID)
@@ -411,7 +411,7 @@ func TestSplitFileToFragments_SmallFile(t *testing.T) {
 
 func TestSplitFileToFragments_ExactLimit(t *testing.T) {
 	gen := NewFragmentIDGenerator(0)
-	fragments := SplitFileToFragments("/data/exact.parquet", 1000, 1000, gen)
+	fragments := SplitFileToFragments("/data/exact.parquet", 1000, 1000, nil, gen)
 
 	assert.Len(t, fragments, 1)
 	assert.Equal(t, int64(0), fragments[0].StartRow)
@@ -420,7 +420,7 @@ func TestSplitFileToFragments_ExactLimit(t *testing.T) {
 
 func TestSplitFileToFragments_LargeFile(t *testing.T) {
 	gen := NewFragmentIDGenerator(0)
-	fragments := SplitFileToFragments("/data/large.parquet", 2500, 1000, gen)
+	fragments := SplitFileToFragments("/data/large.parquet", 2500, 1000, nil, gen)
 
 	assert.Len(t, fragments, 3)
 	// Fragment 0: [0, 1000)
@@ -439,9 +439,23 @@ func TestSplitFileToFragments_LargeFile(t *testing.T) {
 	assert.Equal(t, int64(500), fragments[2].RowCount)
 }
 
+func TestSplitFileToFragments_Properties(t *testing.T) {
+	properties := map[string]string{"dataset_version": "10", "extra": "preserved"}
+	for _, tc := range []struct {
+		rows      int64
+		fragments int
+	}{{0, 1}, {500, 1}, {1000, 1}, {2500, 3}} {
+		fragments := SplitFileToFragments("/data/file.parquet", tc.rows, 1000, properties, NewFragmentIDGenerator(0))
+		require.Len(t, fragments, tc.fragments)
+		for _, fragment := range fragments {
+			assert.Equal(t, properties, fragment.Properties)
+		}
+	}
+}
+
 func TestSplitFileToFragments_FragmentIDContinuity(t *testing.T) {
 	gen := NewFragmentIDGenerator(10)
-	fragments := SplitFileToFragments("/data/f.parquet", 3000, 1000, gen)
+	fragments := SplitFileToFragments("/data/f.parquet", 3000, 1000, nil, gen)
 
 	assert.Len(t, fragments, 3)
 	assert.Equal(t, int64(10), fragments[0].FragmentID)

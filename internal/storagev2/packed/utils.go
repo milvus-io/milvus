@@ -52,10 +52,12 @@ func NewFragmentIDGenerator(start int64) FragmentIDGenerator {
 // SplitFileToFragments splits a large file into multiple fragments based on row count.
 // If totalRows <= rowLimit, returns a single fragment covering the entire file.
 // Otherwise, splits the file into multiple fragments with rowLimit rows each.
+// Every fragment shares the source file's immutable properties.
 func SplitFileToFragments(
 	filePath string,
 	totalRows int64,
 	rowLimit int64,
+	properties map[string]string,
 	fragmentIDGenerator FragmentIDGenerator,
 ) []Fragment {
 	if totalRows <= rowLimit {
@@ -65,6 +67,7 @@ func SplitFileToFragments(
 			StartRow:   0,
 			EndRow:     totalRows,
 			RowCount:   totalRows,
+			Properties: properties,
 		}}
 	}
 
@@ -80,6 +83,7 @@ func SplitFileToFragments(
 			StartRow:   start,
 			EndRow:     end,
 			RowCount:   end - start,
+			Properties: properties,
 		})
 	}
 	return fragments
@@ -266,7 +270,7 @@ func FetchFragmentsFromExternalSourceWithRange(
 			})
 			continue
 		}
-		fragments = append(fragments, SplitFileToFragments(fi.FilePath, rowCounts[i], rowLimit, fragmentIDGenerator)...)
+		fragments = append(fragments, SplitFileToFragments(fi.FilePath, rowCounts[i], rowLimit, fi.Properties, fragmentIDGenerator)...)
 	}
 	if len(fragments) == 0 {
 		return nil, merr.WrapErrServiceInternalMsg("no data files in range [%d, %d)", fileIndexBegin, fileIndexEnd)
