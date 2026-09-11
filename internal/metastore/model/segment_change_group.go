@@ -231,19 +231,20 @@ func (g *SegmentChangeGroup) Validate() error {
 	if g == nil {
 		return merr.WrapErrServiceInternalMsg("segment change group is nil")
 	}
-	// C21: bound the enum ranges. Every alive-group predicate in the meta layer
+	// C21: bound the State range. Every alive-group predicate in the meta layer
 	// is a whitelist that skips anything outside STAGED/READY, so an out-of-range
 	// State would never enter the reverse indexes — its members/superseded become
 	// claimable by a second group (bypassing the anti-duplication invariant) —
 	// while IsTerminal/CanTransitionTo both fall through to false, leaving the
 	// record neither deletable nor able to transition.
+	//
+	// C35: Source is deliberately NOT bounded — it has no behavioral consumer in
+	// the repo (only String()), so rejecting an out-of-range Source would brick
+	// recovery on a downgrade from a newer version that persisted an added
+	// source, with no invariant protected in exchange.
 	if g.State < SegmentChangeStateStaged || g.State > SegmentChangeStateAborted {
 		return merr.WrapErrDataIntegrityMsg(
 			"segment change group %d has invalid state %d", g.GroupID, int32(g.State))
-	}
-	if g.Source < SegmentChangeSourceImportJob || g.Source > SegmentChangeSourceCDCReplicated {
-		return merr.WrapErrDataIntegrityMsg(
-			"segment change group %d has invalid source %d", g.GroupID, int32(g.Source))
 	}
 	if g.GroupID <= 0 {
 		return merr.WrapErrServiceInternalMsg("segment change group %d requires a positive group ID", g.GroupID)
@@ -294,8 +295,8 @@ func MarshalSegmentChangeGroup(g *SegmentChangeGroup) ([]byte, error) {
 // (fail-closed) instead of loading it: the alive-group whitelists in the meta
 // layer silently skip an out-of-range State, orphaning its members and
 // bypassing the anti-duplication invariant, while IsTerminal/CanTransitionTo
-// both fall through false, leaving the record neither deletable nor
-// transitionable (C34). A group is the sole owner of its members' visibility —
+// both fall through false, leaving the record neither deletable nor able to
+// transition (C34). A group is the sole owner of its members' visibility —
 // SegmentInfo has no change_group_id field.
 func UnmarshalSegmentChangeGroup(data []byte) (*SegmentChangeGroup, error) {
 	group := &SegmentChangeGroup{}

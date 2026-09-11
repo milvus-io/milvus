@@ -139,12 +139,14 @@ func TestSegmentChangeGroup_Validate(t *testing.T) {
 		g.State = SegmentChangeState(99)
 		require.Error(t, g.Validate())
 	})
-	t.Run("out-of-range source", func(t *testing.T) {
+	t.Run("out-of-range source is tolerated (C35)", func(t *testing.T) {
+		// Source has no behavioral consumer; bounding it would brick recovery
+		// on a downgrade from a newer version with more sources.
 		g := testGroup()
 		g.Source = SegmentChangeSource(0)
-		require.Error(t, g.Validate())
+		require.NoError(t, g.Validate())
 		g.Source = SegmentChangeSource(99)
-		require.Error(t, g.Validate())
+		require.NoError(t, g.Validate())
 	})
 }
 
