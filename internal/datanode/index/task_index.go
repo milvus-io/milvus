@@ -389,6 +389,16 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 		return err
 	}
 
+	// Ensure the native index is freed if cancellation between stages
+	// prevents PostExecute from running gcIndex. Delete is idempotent,
+	// so the normal PostExecute path is unaffected.
+	defer func() {
+		if it.index != nil {
+			it.index.Delete()
+			it.index = nil
+		}
+	}()
+
 	buildIndexLatency := it.tr.RecordSpan()
 	metrics.DataNodeKnowhereBuildIndexLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(buildIndexLatency.Seconds())
 

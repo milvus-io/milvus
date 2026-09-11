@@ -143,7 +143,12 @@ func (t *ImportTask) GetSegmentsInfo() []*datapb.ImportSegmentInfo {
 }
 
 func (t *ImportTask) Clone() Task {
-	ctx, cancel := context.WithCancel(t.ctx)
+	// Use context.Background() as the parent, not t.ctx: Cancel() on the
+	// clone's ctx propagates child→parent is false, so RemoveTask canceling
+	// the leaf clone can never cancel the root ctx captured by the running
+	// goroutines. Deriving from Background() gives the manager a direct
+	// cancel handle for the task's actual execution lifetime.
+	ctx, cancel := context.WithCancel(context.Background())
 	infos := make(map[int64]*datapb.ImportSegmentInfo)
 	for id, info := range t.segmentsInfo {
 		infos[id] = typeutil.Clone(info)
