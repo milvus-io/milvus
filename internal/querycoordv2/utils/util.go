@@ -26,8 +26,10 @@ import (
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -96,41 +98,55 @@ func CheckSegmentDataReady(ctx context.Context, collectionID int64, distManager 
 	for segmentID, segmentInfo := range segmentDist {
 		segments := distBySegmentID[segmentID]
 		if len(segments) == 0 {
-			mlog.RatedInfo(context.TODO(), rate.Limit(10), "segment is not available", mlog.Int64("segmentID", segmentID))
+			mlog.RatedInfo(ctx, rate.Limit(10), "segment is not available", mlog.Int64("segmentID", segmentID))
 			return merr.WrapErrSegmentLack(segmentID)
 		}
 
 		for _, segment := range segments {
-			cmp, err := packed.CompareManifestPath(segment.ManifestPath, segmentInfo.GetManifestPath())
+			ready, err := IsSegmentDataReadyForTarget(segment, segmentInfo)
 			if err != nil {
-				mlog.RatedWarn(context.TODO(), rate.Limit(10), "segment manifest path not comparable",
+				mlog.RatedWarn(ctx, rate.Limit(10), "segment manifest path not comparable",
 					mlog.Int64("segmentID", segmentID),
 					mlog.String("distManifest", segment.ManifestPath),
 					mlog.String("targetManifest", segmentInfo.GetManifestPath()),
 					mlog.Err(err))
 				return err
 			}
-			if cmp < 0 {
-				// dist manifest is older than target, segment data is not ready yet
-				mlog.RatedInfo(context.TODO(), rate.Limit(10), "segment manifest is outdated",
+
+			if !ready {
+				mlog.RatedInfo(ctx, rate.Limit(10), "segment data is outdated",
 					mlog.Int64("segmentID", segmentID),
 					mlog.String("distManifest", segment.ManifestPath),
-					mlog.String("targetManifest", segmentInfo.GetManifestPath()))
-				return merr.WrapErrSegmentNotLoaded(segmentID)
-			}
-			// cmp >= 0: dist manifest is same or newer than target.
-			// Still check DataVersion for storage v2 binlog changes that don't move the manifest.
-			// Skip when the QueryNode did not report DataVersion (old node in mixed-version rollout).
-			if segment.DataVersion != nil && *segment.DataVersion < segmentInfo.GetDataVersion() {
-				mlog.RatedInfo(context.TODO(), rate.Limit(10), "segment data version is outdated",
-					mlog.Int64("segmentID", segmentID),
-					mlog.Int32("distDataVersion", *segment.DataVersion),
+					mlog.String("targetManifest", segmentInfo.GetManifestPath()),
+					mlog.Int64("distStorageVersion", segment.GetStorageVersion()),
+					mlog.Int64("targetStorageVersion", segmentInfo.GetStorageVersion()),
+					mlog.Int32p("distDataVersion", segment.DataVersion),
 					mlog.Int32("targetDataVersion", segmentInfo.GetDataVersion()))
 				return merr.WrapErrSegmentNotLoaded(segmentID)
 			}
 		}
 	}
 	return nil
+}
+
+// IsSegmentDataReadyForTarget reports whether the distributed segment is
+// compatible with the target DataVersion and manifest. Storage v3 readiness
+// is represented by its manifest, so DataVersion is ignored. Legacy targets
+// with StorageVersion 0 still compare DataVersion because storage v2 binlog
+// updates may not change the manifest. A nil DataVersion is compatible during
+// mixed-version rollout.
+func IsSegmentDataReadyForTarget(segment *meta.Segment, target *datapb.SegmentInfo) (bool, error) {
+	if target.GetStorageVersion() != storage.StorageV3 &&
+		segment.DataVersion != nil &&
+		*segment.DataVersion < target.GetDataVersion() {
+		return false, nil
+	}
+
+	cmp, err := packed.CompareManifestPath(segment.ManifestPath, target.GetManifestPath())
+	if err != nil {
+		return false, err
+	}
+	return cmp >= 0, nil
 }
 
 func checkLoadStatus(ctx context.Context, m *meta.Meta, collectionID int64, withUnserviceableShards bool) error {

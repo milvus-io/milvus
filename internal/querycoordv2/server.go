@@ -312,7 +312,7 @@ func (s *Server) initQueryCoord() error {
 	// Init schedulers
 	mlog.Info(s.ctx, "init schedulers")
 	s.jobScheduler = job.NewScheduler()
-	s.taskScheduler = task.NewScheduler(
+	taskScheduler := task.NewScheduler(
 		s.ctx,
 		s.meta,
 		s.dist,
@@ -321,6 +321,7 @@ func (s *Server) initQueryCoord() error {
 		s.cluster,
 		s.nodeMgr,
 	)
+	s.taskScheduler = taskScheduler
 
 	// init proxy client manager
 	s.proxyClientManager = proxyutil.NewProxyClientManager(proxyutil.DefaultProxyCreator)
@@ -353,6 +354,7 @@ func (s *Server) initQueryCoord() error {
 
 	// Init observers
 	s.initObserver()
+	taskScheduler.SetNextTargetStaleHandler(s.targetObserver.MarkNextTargetStale)
 
 	// Init heartbeat
 	mlog.Info(s.ctx, "init dist controller")

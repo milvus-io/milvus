@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -356,15 +357,16 @@ func (suite *UtilTestSuite) TestCheckSegmentDataReady_DataVersion() {
 		return dm
 	}
 
-	newTargetMgr := func(targetDataVersion int32) meta.TargetManagerInterface {
+	newTargetMgr := func(storageVersion int64, targetDataVersion int32) meta.TargetManagerInterface {
 		m := meta.NewMockTargetManager(suite.T())
 		m.EXPECT().GetSealedSegmentsByCollection(mock.Anything, collectionID, mock.Anything).
 			Return(map[int64]*datapb.SegmentInfo{
 				segmentID: {
-					ID:           segmentID,
-					CollectionID: collectionID,
-					ManifestPath: manifest,
-					DataVersion:  targetDataVersion,
+					ID:             segmentID,
+					CollectionID:   collectionID,
+					ManifestPath:   manifest,
+					DataVersion:    targetDataVersion,
+					StorageVersion: storageVersion,
 				},
 			}).Maybe()
 		return m
@@ -372,35 +374,74 @@ func (suite *UtilTestSuite) TestCheckSegmentDataReady_DataVersion() {
 
 	int32Ptr := func(v int32) *int32 { return &v }
 
-	suite.Run("dist data version older than target - not ready", func() {
+	// Zero may mean a legacy V1 target or an older recovery response that did
+	// not populate StorageVersion. Keep the DataVersion check conservative.
+	suite.Run("zero storage version conservatively checks data version", func() {
 		err := CheckSegmentDataReady(context.Background(), collectionID,
-			newDistManager(int32Ptr(1)), newTargetMgr(5), meta.NextTarget)
+			newDistManager(int32Ptr(1)), newTargetMgr(storage.StorageV1, 5), meta.NextTarget)
+		suite.Error(err)
+	})
+
+	suite.Run("storage v2 checks data version", func() {
+		err := CheckSegmentDataReady(context.Background(), collectionID,
+			newDistManager(int32Ptr(1)), newTargetMgr(storage.StorageV2, 5), meta.NextTarget)
 		suite.Error(err)
 	})
 
 	suite.Run("dist data version equals target - ready", func() {
 		err := CheckSegmentDataReady(context.Background(), collectionID,
-			newDistManager(int32Ptr(5)), newTargetMgr(5), meta.NextTarget)
+			newDistManager(int32Ptr(5)), newTargetMgr(storage.StorageV2, 5), meta.NextTarget)
 		suite.NoError(err)
 	})
 
 	suite.Run("dist data version newer than target - ready", func() {
 		err := CheckSegmentDataReady(context.Background(), collectionID,
-			newDistManager(int32Ptr(10)), newTargetMgr(5), meta.NextTarget)
+			newDistManager(int32Ptr(10)), newTargetMgr(storage.StorageV2, 5), meta.NextTarget)
 		suite.NoError(err)
+	})
+
+	suite.Run("storage v3 ignores data version", func() {
+		err := CheckSegmentDataReady(context.Background(), collectionID,
+			newDistManager(int32Ptr(1)), newTargetMgr(storage.StorageV3, 5), meta.NextTarget)
+		suite.NoError(err)
+	})
+
+	suite.Run("storage v3 still checks manifest", func() {
+		ready, err := IsSegmentDataReadyForTarget(&meta.Segment{
+			ManifestPath: packed.MarshalManifestPath(basePath, 1),
+			DataVersion:  int32Ptr(10),
+		}, &datapb.SegmentInfo{
+			ManifestPath:   packed.MarshalManifestPath(basePath, 5),
+			StorageVersion: storage.StorageV3,
+		})
+		suite.NoError(err)
+		suite.False(ready)
+	})
+
+	suite.Run("stale data version takes precedence over manifest error", func() {
+		ready, err := IsSegmentDataReadyForTarget(&meta.Segment{
+			ManifestPath: "invalid-dist-manifest",
+			DataVersion:  int32Ptr(1),
+		}, &datapb.SegmentInfo{
+			ManifestPath:   "invalid-target-manifest",
+			DataVersion:    5,
+			StorageVersion: storage.StorageV2,
+		})
+		suite.NoError(err)
+		suite.False(ready)
 	})
 
 	// mixed-version rollout: an old QueryNode does not report DataVersion,
 	// so the dist-side pointer is nil. Skip the check rather than loop Reopen forever.
 	suite.Run("dist data version nil (old QueryNode) - ready", func() {
 		err := CheckSegmentDataReady(context.Background(), collectionID,
-			newDistManager(nil), newTargetMgr(5), meta.NextTarget)
+			newDistManager(nil), newTargetMgr(storage.StorageV2, 5), meta.NextTarget)
 		suite.NoError(err)
 	})
 
 	suite.Run("dist data version nil and target zero - ready", func() {
 		err := CheckSegmentDataReady(context.Background(), collectionID,
-			newDistManager(nil), newTargetMgr(0), meta.NextTarget)
+			newDistManager(nil), newTargetMgr(storage.StorageV2, 0), meta.NextTarget)
 		suite.NoError(err)
 	})
 }

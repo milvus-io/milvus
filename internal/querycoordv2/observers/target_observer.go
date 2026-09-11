@@ -74,6 +74,15 @@ type targetUpdateRequest struct {
 
 type initRequest struct{}
 
+type nextTargetProgress struct {
+	targetVersion        int64
+	readySegmentReplicas int
+	readyReplicaChannels int
+	// lastUpdated records when this target version was installed or when its
+	// readiness last advanced.
+	lastUpdated time.Time
+}
+
 type TargetObserver struct {
 	cancel    context.CancelFunc
 	wg        sync.WaitGroup
@@ -85,11 +94,17 @@ type TargetObserver struct {
 	nodeMgr   *session.NodeManager
 
 	initChan chan initRequest
-	// nextTargetLastUpdate map[int64]time.Time
-	nextTargetLastUpdate *typeutil.ConcurrentMap[int64, time.Time]
-	updateChan           chan targetUpdateRequest
-	mut                  sync.Mutex                // Guard readyNotifiers
-	readyNotifiers       map[int64][]chan struct{} // CollectionID -> Notifiers
+	// nextTargetProgresses records the loading progress checkpoint for each
+	// collection's next target.
+	nextTargetProgresses *typeutil.ConcurrentMap[int64, nextTargetProgress]
+	// nextTargetStaleSegments records the target segments that failed with
+	// ErrSegmentNotFound. A refresh only resolves a cause after that segment is
+	// absent from the refreshed next target.
+	nextTargetStaleMu       sync.RWMutex
+	nextTargetStaleSegments map[int64]typeutil.UniqueSet
+	updateChan              chan targetUpdateRequest
+	mut                     sync.Mutex                // Guard readyNotifiers
+	readyNotifiers          map[int64][]chan struct{} // CollectionID -> Notifiers
 
 	// loadingDispatcher updates targets for collections that are loading (also collections without a current target).
 	loadingDispatcher *taskDispatcher[int64]
@@ -111,17 +126,18 @@ func NewTargetObserver(
 	nodeMgr *session.NodeManager,
 ) *TargetObserver {
 	result := &TargetObserver{
-		meta:                 meta,
-		targetMgr:            targetMgr,
-		distMgr:              distMgr,
-		broker:               broker,
-		cluster:              cluster,
-		nodeMgr:              nodeMgr,
-		nextTargetLastUpdate: typeutil.NewConcurrentMap[int64, time.Time](),
-		updateChan:           make(chan targetUpdateRequest, 10),
-		readyNotifiers:       make(map[int64][]chan struct{}),
-		initChan:             make(chan initRequest),
-		keylocks:             lock.NewKeyLock[int64](),
+		meta:                    meta,
+		targetMgr:               targetMgr,
+		distMgr:                 distMgr,
+		broker:                  broker,
+		cluster:                 cluster,
+		nodeMgr:                 nodeMgr,
+		nextTargetProgresses:    typeutil.NewConcurrentMap[int64, nextTargetProgress](),
+		nextTargetStaleSegments: make(map[int64]typeutil.UniqueSet),
+		updateChan:              make(chan targetUpdateRequest, 10),
+		readyNotifiers:          make(map[int64][]chan struct{}),
+		initChan:                make(chan initRequest),
+		keylocks:                lock.NewKeyLock[int64](),
 	}
 
 	result.loadingDispatcher = newTaskDispatcher(result.check)
@@ -299,6 +315,31 @@ func (ob *TargetObserver) TriggerUpdateCurrentTarget(collectionID int64) {
 	ob.loadingDispatcher.AddTask(collectionID)
 }
 
+// MarkNextTargetStale marks the collection's next target as stale when the
+// failed segment still belongs to that target.
+func (ob *TargetObserver) MarkNextTargetStale(collectionID, segmentID int64) {
+	ob.nextTargetStaleMu.Lock()
+	defer ob.nextTargetStaleMu.Unlock()
+
+	if ob.targetMgr.GetSealedSegment(context.TODO(), collectionID, segmentID, meta.NextTarget) == nil {
+		return
+	}
+
+	staleSegments := ob.nextTargetStaleSegments[collectionID]
+	if staleSegments == nil {
+		staleSegments = typeutil.NewUniqueSet()
+		ob.nextTargetStaleSegments[collectionID] = staleSegments
+	}
+	staleSegments.Insert(segmentID)
+}
+
+func (ob *TargetObserver) isNextTargetStale(collectionID int64) bool {
+	ob.nextTargetStaleMu.RLock()
+	defer ob.nextTargetStaleMu.RUnlock()
+
+	return ob.nextTargetStaleSegments[collectionID].Len() > 0
+}
+
 func (ob *TargetObserver) check(ctx context.Context, collectionID int64) {
 	ob.keylocks.Lock(collectionID)
 	defer ob.keylocks.Unlock(collectionID)
@@ -314,7 +355,9 @@ func (ob *TargetObserver) check(ctx context.Context, collectionID int64) {
 
 	if ob.shouldUpdateNextTarget(ctx, collectionID) {
 		// update next target in collection level
-		ob.updateNextTarget(ctx, collectionID)
+		if err := ob.updateNextTarget(ctx, collectionID); err != nil {
+			return
+		}
 
 		// sync next target to delegator if current target not exist, to support partial search
 		if !ob.targetMgr.IsCurrentTargetExist(ctx, collectionID, -1) {
@@ -328,6 +371,7 @@ func (ob *TargetObserver) check(ctx context.Context, collectionID int64) {
 }
 
 func (ob *TargetObserver) init(ctx context.Context, collectionID int64) {
+	ob.keylocks.Lock(collectionID)
 	// pull next target first if not exist
 	if !ob.targetMgr.IsNextTargetExist(ctx, collectionID) {
 		ob.updateNextTarget(ctx, collectionID)
@@ -337,6 +381,8 @@ func (ob *TargetObserver) init(ctx context.Context, collectionID int64) {
 	if ob.shouldUpdateCurrentTarget(ctx, collectionID) {
 		ob.updateCurrentTarget(ctx, collectionID)
 	}
+	ob.keylocks.Unlock(collectionID)
+
 	// refresh collection loading status upon restart
 	ob.check(ctx, collectionID)
 }
@@ -397,13 +443,20 @@ func (ob *TargetObserver) ReleasePartition(collectionID int64, partitionID ...in
 
 func (ob *TargetObserver) clean() {
 	collectionSet := typeutil.NewUniqueSet(ob.meta.GetAll(context.TODO())...)
-	// for collection which has been removed from target, try to clear nextTargetLastUpdate
-	ob.nextTargetLastUpdate.Range(func(collectionID int64, _ time.Time) bool {
+	// Clear next target progress for collections that have been removed.
+	ob.nextTargetProgresses.Range(func(collectionID int64, _ nextTargetProgress) bool {
 		if !collectionSet.Contain(collectionID) {
-			ob.nextTargetLastUpdate.Remove(collectionID)
+			ob.nextTargetProgresses.Remove(collectionID)
 		}
 		return true
 	})
+	ob.nextTargetStaleMu.Lock()
+	for collectionID := range ob.nextTargetStaleSegments {
+		if !collectionSet.Contain(collectionID) {
+			delete(ob.nextTargetStaleSegments, collectionID)
+		}
+	}
+	ob.nextTargetStaleMu.Unlock()
 
 	ob.mut.Lock()
 	defer ob.mut.Unlock()
@@ -417,20 +470,68 @@ func (ob *TargetObserver) clean() {
 	}
 }
 
+// shouldUpdateNextTarget determines whether the observer should refresh the
+// collection's next target. A missing next target is created normally. An
+// existing next target is force-refreshed by either of these mechanisms:
+//  1. The scheduler marks it stale after a target segment can no longer be
+//     loaded, for example when a load task returns ErrSegmentNotFound.
+//  2. Replica-scoped segment and channel readiness does not advance during
+//     NextTargetSurviveTime. A target version change or progress in any tracked
+//     readiness dimension establishes a new baseline and restarts the timer.
 func (ob *TargetObserver) shouldUpdateNextTarget(ctx context.Context, collectionID int64) bool {
-	return !ob.targetMgr.IsNextTargetExist(ctx, collectionID) || ob.isNextTargetExpired(collectionID)
-}
-
-func (ob *TargetObserver) isNextTargetExpired(collectionID int64) bool {
-	lastUpdated, has := ob.nextTargetLastUpdate.Get(collectionID)
-	if !has {
+	if ob.isNextTargetStale(collectionID) {
+		mlog.Info(ctx, "force update next target",
+			mlog.FieldCollectionID(collectionID),
+			mlog.String("reason", "next target is marked stale"))
 		return true
 	}
-	return time.Since(lastUpdated) > params.Params.QueryCoordCfg.NextTargetSurviveTime.GetAsDuration(time.Second)
+
+	if !ob.targetMgr.IsNextTargetExist(ctx, collectionID) {
+		return true
+	}
+
+	nextVersion := ob.targetMgr.GetCollectionTargetVersion(ctx, collectionID, meta.NextTarget)
+	progress, hasProgress := ob.nextTargetProgresses.Get(collectionID)
+	if !hasProgress {
+		mlog.Info(ctx, "force update next target",
+			mlog.FieldCollectionID(collectionID),
+			mlog.Int64("targetVersion", nextVersion),
+			mlog.String("reason", "next target progress is missing"))
+		return true
+	}
+	if progress.targetVersion != nextVersion {
+		ob.recordNextTargetProgress(collectionID, ob.sampleNextTargetProgress(ctx, collectionID, nextVersion))
+		return false
+	}
+
+	if time.Since(progress.lastUpdated) <= params.Params.QueryCoordCfg.NextTargetSurviveTime.GetAsDuration(time.Second) {
+		return false
+	}
+
+	currentProgress := ob.sampleNextTargetProgress(ctx, collectionID, nextVersion)
+	if currentProgress.readySegmentReplicas > progress.readySegmentReplicas ||
+		currentProgress.readyReplicaChannels > progress.readyReplicaChannels {
+		// Preserve high-water counts so readiness oscillation cannot reset the timer.
+		currentProgress.readySegmentReplicas = max(currentProgress.readySegmentReplicas, progress.readySegmentReplicas)
+		currentProgress.readyReplicaChannels = max(currentProgress.readyReplicaChannels, progress.readyReplicaChannels)
+		ob.recordNextTargetProgress(collectionID, currentProgress)
+		return false
+	}
+
+	mlog.Info(ctx, "force update next target",
+		mlog.FieldCollectionID(collectionID),
+		mlog.Int64("targetVersion", nextVersion),
+		mlog.Int("previousReadySegmentReplicas", progress.readySegmentReplicas),
+		mlog.Int("readySegmentReplicas", currentProgress.readySegmentReplicas),
+		mlog.Int("previousReadyReplicaChannels", progress.readyReplicaChannels),
+		mlog.Int("readyReplicaChannels", currentProgress.readyReplicaChannels),
+		mlog.String("reason", "next target loading made no progress"))
+	return true
 }
 
 func (ob *TargetObserver) updateNextTarget(ctx context.Context, collectionID int64) error {
 	log := mlog.With(mlog.FieldCollectionID(collectionID))
+	oldVersion := ob.targetMgr.GetCollectionTargetVersion(ctx, collectionID, meta.NextTarget)
 
 	log.RatedInfo(ctx, rate.Limit(10), "observer trigger update next target")
 	err := ob.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
@@ -439,15 +540,126 @@ func (ob *TargetObserver) updateNextTarget(ctx context.Context, collectionID int
 			mlog.Err(err))
 		return err
 	}
-	ob.updateNextTargetTimestamp(collectionID)
+
+	newVersion := ob.targetMgr.GetCollectionTargetVersion(ctx, collectionID, meta.NextTarget)
+	if newVersion <= oldVersion {
+		log.RatedInfo(ctx, rate.Limit(10), "next target refresh did not install a new version",
+			mlog.Int64("oldVersion", oldVersion),
+			mlog.Int64("newVersion", newVersion))
+		return nil
+	}
+
+	ob.nextTargetStaleMu.Lock()
+	staleSegments := ob.nextTargetStaleSegments[collectionID]
+	for segmentID := range staleSegments {
+		if ob.targetMgr.GetSealedSegment(ctx, collectionID, segmentID, meta.NextTarget) == nil {
+			staleSegments.Remove(segmentID)
+		}
+	}
+	remainingStaleSegments := staleSegments.Collect()
+	if len(remainingStaleSegments) == 0 {
+		delete(ob.nextTargetStaleSegments, collectionID)
+	}
+	ob.nextTargetStaleMu.Unlock()
+
+	if len(remainingStaleSegments) > 0 {
+		log.RatedInfo(ctx, rate.Limit(10), "next target refresh still contains stale segments",
+			mlog.Int64s("segmentIDs", remainingStaleSegments),
+			mlog.Int64("oldVersion", oldVersion),
+			mlog.Int64("newVersion", newVersion))
+		return nil
+	}
+
+	ob.recordNextTargetProgress(collectionID, ob.sampleNextTargetProgress(ctx, collectionID, newVersion))
 	return nil
 }
 
-func (ob *TargetObserver) updateNextTargetTimestamp(collectionID int64) {
-	ob.nextTargetLastUpdate.Insert(collectionID, time.Now())
+func (ob *TargetObserver) recordNextTargetProgress(collectionID int64, progress nextTargetProgress) {
+	progress.lastUpdated = time.Now()
+	ob.nextTargetProgresses.Insert(collectionID, progress)
+}
+
+func (ob *TargetObserver) sampleNextTargetProgress(ctx context.Context, collectionID, targetVersion int64) nextTargetProgress {
+	return nextTargetProgress{
+		targetVersion:        targetVersion,
+		readySegmentReplicas: ob.countReadyNextTargetSegmentReplicas(ctx, collectionID),
+		readyReplicaChannels: ob.countReadyNextTargetReplicaChannels(ctx, collectionID, targetVersion),
+	}
+}
+
+func (ob *TargetObserver) countReadyNextTargetSegmentReplicas(ctx context.Context, collectionID int64) int {
+	targetSegments := ob.targetMgr.GetSealedSegmentsByCollection(ctx, collectionID, meta.NextTarget)
+	distSegments := ob.distMgr.SegmentDistManager.GetByFilter(meta.WithCollectionID(collectionID))
+	readySegmentReplicas := 0
+
+	for _, replica := range ob.meta.GetByCollection(ctx, collectionID) {
+		replicaSegments := make(map[int64][]*meta.Segment)
+		for _, segment := range distSegments {
+			if _, ok := targetSegments[segment.GetID()]; ok && replica.Contains(segment.Node) {
+				replicaSegments[segment.GetID()] = append(replicaSegments[segment.GetID()], segment)
+			}
+		}
+
+		for segmentID, targetSegment := range targetSegments {
+			segments := replicaSegments[segmentID]
+			if len(segments) == 0 {
+				continue
+			}
+
+			ready := lo.ContainsBy(segments, func(segment *meta.Segment) bool {
+				segmentReady, err := utils.IsSegmentDataReadyForTarget(segment, targetSegment)
+				// Progress sampling treats comparison errors as not ready. Detailed
+				// diagnostics remain in CheckSegmentDataReady, avoiding log noise from
+				// repeated periodic samples.
+				return err == nil && segmentReady
+			})
+			if ready {
+				readySegmentReplicas++
+			}
+		}
+	}
+
+	return readySegmentReplicas
+}
+
+func (ob *TargetObserver) countReadyNextTargetReplicaChannels(ctx context.Context, collectionID, targetVersion int64) int {
+	targetChannels := ob.targetMgr.GetDmChannelsByCollection(ctx, collectionID, meta.NextTarget)
+	readyReplicaChannels := 0
+
+	for _, replica := range ob.meta.GetByCollection(ctx, collectionID) {
+		for channelName := range targetChannels {
+			delegators := ob.distMgr.ChannelDistManager.GetByFilter(
+				meta.WithReplica2Channel(replica),
+				meta.WithChannelName2Channel(channelName),
+			)
+
+			if lo.ContainsBy(delegators, func(delegator *meta.DmChannel) bool {
+				delegatorDataReady, delegatorSynced, _ := ob.getDelegatorReadiness(delegator, targetVersion)
+				return delegatorDataReady || delegatorSynced
+			}) {
+				readyReplicaChannels++
+			}
+		}
+	}
+
+	return readyReplicaChannels
+}
+
+func (ob *TargetObserver) getDelegatorReadiness(channel *meta.DmChannel, targetVersion int64) (bool, bool, error) {
+	if channel == nil || channel.View == nil {
+		return false, false, nil
+	}
+	err := utils.CheckDelegatorDataReady(ob.nodeMgr, ob.targetMgr, channel.View, meta.NextTarget)
+	dataReady := err == nil
+	synced := targetVersion == channel.View.TargetVersion && channel.IsServiceable()
+	return dataReady, synced, err
 }
 
 func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collectionID int64) bool {
+	if ob.isNextTargetStale(collectionID) {
+		return false
+	}
+
 	replicaNum := ob.meta.GetReplicaNumber(ctx, collectionID)
 	log := mlog.With(
 		mlog.FieldCollectionID(collectionID),
@@ -469,22 +681,28 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 	// 1. Its target version matches the new version and it is serviceable, OR
 	// 2. Its data is ready for the next target (all segments and channels are loaded)
 	checkDelegatorDataReady := func(replica *meta.Replica, channel *meta.DmChannel) bool {
-		err := utils.CheckDelegatorDataReady(ob.nodeMgr, ob.targetMgr, channel.View, meta.NextTarget)
-		dataReadyForNextTarget := err == nil
+		if channel == nil {
+			return false
+		}
+		dataReadyForNextTarget, syncedWithNextTarget, err := ob.getDelegatorReadiness(channel, newVersion)
 		if !dataReadyForNextTarget {
+			delegatorTargetVersion := int64(0)
+			if channel.View != nil {
+				delegatorTargetVersion = channel.View.TargetVersion
+			}
 			log.Info(ctx, "check delegator",
 				mlog.FieldCollectionID(collectionID),
 				mlog.Int64("replicaID", replica.GetID()),
 				mlog.FieldNodeID(channel.Node),
 				mlog.String("channelName", channel.GetChannelName()),
-				mlog.Int64("targetVersion", channel.View.TargetVersion),
+				mlog.Int64("targetVersion", delegatorTargetVersion),
 				mlog.Int64("newTargetVersion", newVersion),
 				mlog.Bool("isServiceable", channel.IsServiceable()),
 				mlog.Int64("version", channel.Version),
 				mlog.Err(err),
 			)
 		}
-		return (newVersion == channel.View.TargetVersion && channel.IsServiceable()) || dataReadyForNextTarget
+		return syncedWithNextTarget || dataReadyForNextTarget
 	}
 
 	// Iterate through each replica to check if all its delegators are ready.
@@ -494,19 +712,14 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 	readyDelegatorsInCollection := make([]*meta.DmChannel, 0)
 	replicas := ob.meta.GetByCollection(ctx, collectionID)
 	for _, replica := range replicas {
-		readyDelegatorsInReplica := make([]*meta.DmChannel, 0)
 		for channel := range channelNames {
 			// Filter delegators by replica to ensure we only check delegators belonging to this replica
 			delegatorList := ob.distMgr.ChannelDistManager.GetByFilter(meta.WithReplica2Channel(replica), meta.WithChannelName2Channel(channel))
-			readyDelegatorsInChannel := lo.Filter(delegatorList, func(ch *meta.DmChannel, _ int) bool {
-				return checkDelegatorDataReady(replica, ch)
-			})
-
-			if len(readyDelegatorsInChannel) > 0 {
-				readyDelegatorsInReplica = append(readyDelegatorsInReplica, readyDelegatorsInChannel...)
-			}
+			readyDelegatorsInCollection = append(readyDelegatorsInCollection,
+				lo.Filter(delegatorList, func(ch *meta.DmChannel, _ int) bool {
+					return checkDelegatorDataReady(replica, ch)
+				})...)
 		}
-		readyDelegatorsInCollection = append(readyDelegatorsInCollection, readyDelegatorsInReplica...)
 	}
 
 	syncSuccess := ob.syncNextTargetToDelegator(ctx, collectionID, readyDelegatorsInCollection, newVersion)
