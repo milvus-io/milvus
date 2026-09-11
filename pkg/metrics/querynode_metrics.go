@@ -470,6 +470,20 @@ var (
 			queryTypeLabelName,
 		})
 
+	// QueryNodeSharedFilterFallbackTotal counts hybrid searches where filter
+	// sharing was considered but rejected, labelled by why.
+	QueryNodeSharedFilterFallbackTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "hybrid_shared_filter_fallback_total",
+			Help:      "hybrid searches that could not share a filter evaluation, by reason",
+		}, []string{
+			nodeIDLabelName,
+			collectionIDLabelName,
+			"reason",
+		})
+
 	QueryNodeSegmentFilterSkippedSegmentNum = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
@@ -1074,6 +1088,7 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeForwardDeleteCost)
 	registry.MustRegister(QueryNodeSearchHitSegmentNum)
 	registry.MustRegister(QueryNodeSegmentFilterHitSegmentNum)
+	registry.MustRegister(QueryNodeSharedFilterFallbackTotal)
 	registry.MustRegister(QueryNodeSegmentFilterSkippedSegmentNum)
 	registry.MustRegister(QueryNodeSegmentFilterTotalSegmentNum)
 	registry.MustRegister(QueryNodeDeleteBufferSize)
