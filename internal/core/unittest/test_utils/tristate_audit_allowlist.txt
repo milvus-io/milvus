@@ -1,0 +1,4 @@
+# Tri-state audit allowlist: accepted differences from tristate_audit_golden.txt
+# (the reviewed inconsistency list). Every entry must also appear in the
+# PR "semantic changes" table with a pinning test.
+# Format: <case_id>\t<row>\t<old>\t<new>      ("-" = line absent)

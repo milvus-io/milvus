@@ -18,3 +18,36 @@ add_executable(fastmem_benchmark FastMemBenchmark.cpp)
 target_include_directories(fastmem_benchmark PRIVATE ${CMAKE_HOME_DIRECTORY}/src)
 target_link_libraries(fastmem_benchmark PRIVATE benchmark::benchmark)
 install(TARGETS fastmem_benchmark DESTINATION benchmark)
+
+# Expression scan benchmark; compare two runs with compare_expr_bench.py.
+set(EXPR_BENCH_PLANPARSER_LIB_DIR ${CMAKE_HOME_DIRECTORY}/output/lib)
+
+add_executable(expr_scan_benchmark ExprScanBenchmark.cpp)
+target_include_directories(expr_scan_benchmark PRIVATE
+    ${CMAKE_HOME_DIRECTORY}/src
+    ${CMAKE_HOME_DIRECTORY}/src/thirdparty
+    ${CMAKE_HOME_DIRECTORY}/unittest
+    ${KNOWHERE_INCLUDE_DIR}
+    ${SIMDJSON_INCLUDE_DIR}
+    ${TANTIVY_INCLUDE_DIR}
+    ${MILVUS_STORAGE_INCLUDE_DIR}
+    ${CMAKE_HOME_DIRECTORY}/output/include
+)
+target_link_options(expr_scan_benchmark PRIVATE "-L${EXPR_BENCH_PLANPARSER_LIB_DIR}")
+if (LINUX)
+    target_link_options(expr_scan_benchmark PRIVATE "LINKER:--allow-multiple-definition")
+endif()
+target_link_libraries(expr_scan_benchmark PRIVATE
+    benchmark::benchmark
+    GTest::gtest
+    milvus_core
+    milvus_conan_deps
+    knowhere
+    milvus-storage
+    milvus-planparser-cpp
+)
+set_target_properties(expr_scan_benchmark PROPERTIES
+    BUILD_RPATH "${EXPR_BENCH_PLANPARSER_LIB_DIR}"
+    INSTALL_RPATH "${EXPR_BENCH_PLANPARSER_LIB_DIR}"
+)
+install(TARGETS expr_scan_benchmark DESTINATION benchmark)
