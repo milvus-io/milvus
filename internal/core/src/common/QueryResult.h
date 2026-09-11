@@ -19,6 +19,7 @@
 #include <memory>
 #include <map>
 #include <limits>
+#include <optional>
 #include <string>
 #include <queue>
 #include <utility>
@@ -78,20 +79,19 @@ struct OffsetDisPairComparator {
     }
 
     bool
-    operator()(const std::shared_ptr<OffsetDisPair>& left,
-               const std::shared_ptr<OffsetDisPair>& right) const {
+    operator()(const OffsetDisPair& left, const OffsetDisPair& right) const {
         // For priority_queue: return true if left has lower priority than right
         // We want the element with better (closer) distance at the top
-        if (left->GetOffDis().second != right->GetOffDis().second) {
+        if (left.GetOffDis().second != right.GetOffDis().second) {
             if (larger_is_closer_) {
                 // IP/Cosine: larger distance is better, smaller has lower priority
-                return left->GetOffDis().second < right->GetOffDis().second;
+                return left.GetOffDis().second < right.GetOffDis().second;
             } else {
                 // L2: smaller distance is better, larger has lower priority
-                return left->GetOffDis().second > right->GetOffDis().second;
+                return left.GetOffDis().second > right.GetOffDis().second;
             }
         }
-        return left->GetOffDis().first < right->GetOffDis().first;
+        return left.GetOffDis().first < right.GetOffDis().first;
     }
 };
 
@@ -106,14 +106,85 @@ class VectorIterator {
     Next() = 0;
 };
 
+namespace detail {
+
+inline std::optional<std::pair<int64_t, float>>
+FetchNextFromKnowhereIterator(
+    const knowhere::IndexNode::IteratorPtr& iterator) {
+    if (iterator == nullptr) {
+        return std::nullopt;
+    }
+    auto has_next = iterator->HasNext();
+    AssertInfo(has_next.has_value(),
+               "knowhere iterator HasNext failed: {}",
+               has_next.what());
+    if (!has_next.value()) {
+        return std::nullopt;
+    }
+    auto next = iterator->Next();
+    AssertInfo(
+        next.has_value(), "knowhere iterator Next failed: {}", next.what());
+    return next.value();
+}
+
+}  // namespace detail
+
+// Adapts one Knowhere iterator without routing every result through a
+// single-element merge heap.
+class KnowhereVectorIteratorAdapter : public VectorIterator {
+ public:
+    explicit KnowhereVectorIteratorAdapter(
+        knowhere::IndexNode::IteratorPtr iterator)
+        : iterator_(std::move(iterator)) {
+        LoadNext();
+    }
+
+    bool
+    HasNext() override {
+        return next_.has_value();
+    }
+
+    std::optional<std::pair<int64_t, float>>
+    Next() override {
+        if (!next_.has_value()) {
+            return std::nullopt;
+        }
+        auto result = next_;
+        LoadNext();
+        return result;
+    }
+
+ private:
+    void
+    LoadNext() {
+        next_ = detail::FetchNextFromKnowhereIterator(iterator_);
+    }
+
+    knowhere::IndexNode::IteratorPtr iterator_;
+    std::optional<std::pair<int64_t, float>> next_;
+};
+
 // Multi-way merge iterator for vector search results from multiple chunks
 //
 // Merges knowhere iterators from different chunks using a min-heap,
 // returning results in distance-sorted order.
 class ChunkMergeIterator : public VectorIterator {
+    using Cursor = OffsetDisPair;
+    using Comparator = OffsetDisPairComparator;
+    using HeapStorage = std::vector<Cursor>;
+    using Heap = std::priority_queue<Cursor, HeapStorage, Comparator>;
+
+    static Heap
+    CreateHeap(int chunk_count, bool larger_is_closer) {
+        HeapStorage storage;
+        // The heap holds at most one cursor per iterator.
+        storage.reserve(chunk_count);
+        return Heap(Comparator(larger_is_closer), std::move(storage));
+    }
+
  public:
     ChunkMergeIterator(int chunk_count, bool larger_is_closer = false)
-        : heap_(OffsetDisPairComparator(larger_is_closer)) {
+        : heap_(CreateHeap(chunk_count, larger_is_closer)) {
         iterators_.reserve(chunk_count);
     }
 
@@ -127,21 +198,13 @@ class ChunkMergeIterator : public VectorIterator {
         if (!heap_.empty()) {
             auto top = heap_.top();
             heap_.pop();
-            auto& iter = iterators_[top->GetIteratorIdx()];
-            auto has_next = iter->HasNext();
-            AssertInfo(has_next.has_value(),
-                       "knowhere iterator HasNext failed: {}",
-                       has_next.what());
-            if (has_next.value()) {
-                auto origin_pair = iter->Next();
-                AssertInfo(origin_pair.has_value(),
-                           "knowhere iterator Next failed: {}",
-                           origin_pair.what());
-                auto off_dis_pair = std::make_shared<OffsetDisPair>(
-                    origin_pair.value(), top->GetIteratorIdx());
-                heap_.push(off_dis_pair);
+            auto iterator_idx = top.GetIteratorIdx();
+            auto& iter = iterators_[iterator_idx];
+            auto next = detail::FetchNextFromKnowhereIterator(iter);
+            if (next.has_value()) {
+                heap_.emplace(next.value(), iterator_idx);
             }
-            return top->GetOffDis();
+            return top.GetOffDis();
         }
         return std::nullopt;
     }
@@ -166,28 +229,16 @@ class ChunkMergeIterator : public VectorIterator {
         // results from the merged top-k.
         for (int idx = 0; idx < static_cast<int>(iterators_.size()); ++idx) {
             auto& iter = iterators_[idx];
-            auto has_next = iter->HasNext();
-            AssertInfo(has_next.has_value(),
-                       "knowhere iterator HasNext failed: {}",
-                       has_next.what());
-            if (has_next.value()) {
-                auto origin_pair = iter->Next();
-                AssertInfo(origin_pair.has_value(),
-                           "knowhere iterator Next failed: {}",
-                           origin_pair.what());
-                auto off_dis_pair =
-                    std::make_shared<OffsetDisPair>(origin_pair.value(), idx);
-                heap_.push(off_dis_pair);
+            auto next = detail::FetchNextFromKnowhereIterator(iter);
+            if (next.has_value()) {
+                heap_.emplace(next.value(), idx);
             }
         }
     }
 
  private:
     std::vector<knowhere::IndexNode::IteratorPtr> iterators_;
-    std::priority_queue<std::shared_ptr<OffsetDisPair>,
-                        std::vector<std::shared_ptr<OffsetDisPair>>,
-                        OffsetDisPairComparator>
-        heap_;
+    Heap heap_;
     bool sealed = false;
     //currently, ChunkMergeIterator is guaranteed to be used serially without concurrent problem, in the future
     //we may need to add mutex to protect the variable sealed
@@ -223,6 +274,15 @@ struct SearchResult {
                    nq * chunk_count);
         std::vector<std::shared_ptr<VectorIterator>> vector_iterators;
         vector_iterators.reserve(nq);
+        if (chunk_count == 1) {
+            for (const auto& kw_iterator : kw_iterators) {
+                vector_iterators.emplace_back(
+                    std::make_shared<KnowhereVectorIteratorAdapter>(
+                        kw_iterator));
+            }
+            this->vector_iterators_ = std::move(vector_iterators);
+            return;
+        }
         for (int i = 0, vec_iter_idx = 0; i < kw_iterators.size(); i++) {
             vec_iter_idx = vec_iter_idx % nq;
             if (vector_iterators.size() < nq) {
@@ -242,7 +302,7 @@ struct SearchResult {
                 std::static_pointer_cast<ChunkMergeIterator>(vector_iter);
             chunk_merge_iter->seal();
         }
-        this->vector_iterators_ = vector_iterators;
+        this->vector_iterators_ = std::move(vector_iterators);
     }
 
     BitsetView
