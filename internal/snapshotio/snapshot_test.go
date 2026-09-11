@@ -66,9 +66,13 @@ func TestParseSnapshotMetadataWithVersionCheck(t *testing.T) {
 	assert.Equal(t, int32(3), metadata.GetFormatVersion())
 	assert.Equal(t, int64(10), metadata.GetSnapshotInfo().GetId())
 
-	metadata, err = ParseSnapshotMetadataWithVersionCheck([]byte(`{"format_version":4}`))
+	metadata, err = ParseSnapshotMetadataWithVersionCheck([]byte(`{
+		"format_version": 4,
+		"snapshot_info": {"skip_index": true}
+	}`))
 	require.NoError(t, err)
 	assert.Equal(t, int32(SnapshotFormatVersion), metadata.GetFormatVersion())
+	assert.True(t, metadata.GetSnapshotInfo().GetSkipIndex())
 
 	_, err = ParseSnapshotMetadataWithVersionCheck([]byte(`{"format_version":99}`))
 	require.Error(t, err)

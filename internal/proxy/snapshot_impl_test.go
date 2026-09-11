@@ -596,6 +596,7 @@ func TestRestoreExternalSnapshotTask_Execute_ForwardsForeignStorageFields(t *tes
 		TargetCollectionName: "restored_collection",
 		SnapshotMetadataUri:  "s3://foreign-bucket/export-root/snapshots/100/metadata/1.json",
 		ExternalSpec:         externalSpec,
+		SkipIndex:            true,
 	}
 
 	var gotReq *datapb.RestoreSnapshotRequest
@@ -618,6 +619,7 @@ func TestRestoreExternalSnapshotTask_Execute_ForwardsForeignStorageFields(t *tes
 	if assert.NotNil(t, gotReq) {
 		assert.True(t, gotReq.GetExternal())
 		assert.Equal(t, externalSpec, gotReq.GetExternalSpec())
+		assert.True(t, gotReq.GetSkipIndex())
 	}
 }
 

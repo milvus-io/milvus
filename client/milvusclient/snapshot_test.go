@@ -54,11 +54,13 @@ func (s *SnapshotSuite) TestCreateSnapshot() {
 			s.Equal(collectionName, req.GetCollectionName())
 			s.Equal(snapshotName, req.GetName())
 			s.Equal(description, req.GetDescription())
+			s.True(req.GetSkipIndex())
 			return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
 		}).Once()
 
 		opt := NewCreateSnapshotOption(snapshotName, collectionName).
-			WithDescription(description)
+			WithDescription(description).
+			WithSkipIndex(true)
 		err := s.client.CreateSnapshot(ctx, opt)
 		s.NoError(err)
 	})
@@ -186,6 +188,7 @@ func (s *SnapshotSuite) TestDescribeSnapshot() {
 			CreateTs:       1234567890,
 			S3Location:     "s3://test-bucket/snapshot",
 			PartitionNames: []string{"partition1", "partition2"},
+			SkipIndex:      true,
 		}
 
 		s.mock.EXPECT().DescribeSnapshot(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.DescribeSnapshotRequest) (*milvuspb.DescribeSnapshotResponse, error) {
@@ -203,6 +206,7 @@ func (s *SnapshotSuite) TestDescribeSnapshot() {
 		s.Equal(expectedResp.GetCreateTs(), resp.GetCreateTs())
 		s.Equal(expectedResp.GetS3Location(), resp.GetS3Location())
 		s.Equal(expectedResp.GetPartitionNames(), resp.GetPartitionNames())
+		s.Equal(expectedResp.GetSkipIndex(), resp.GetSkipIndex())
 	})
 
 	s.Run("service error", func() {
@@ -257,13 +261,15 @@ func (s *SnapshotSuite) TestRestoreSnapshot() {
 			s.Equal(snapshotName, req.GetName())
 			s.Equal(collectionName, req.GetCollectionName())
 			s.Equal(targetCollectionName, req.GetTargetCollectionName())
+			s.True(req.GetSkipIndex())
 			return &milvuspb.RestoreSnapshotResponse{
 				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 				JobId:  expectedJobID,
 			}, nil
 		}).Once()
 
-		opt := NewRestoreSnapshotOption(snapshotName, collectionName, targetCollectionName)
+		opt := NewRestoreSnapshotOption(snapshotName, collectionName, targetCollectionName).
+			WithSkipIndex(true)
 		jobID, err := s.client.RestoreSnapshot(ctx, opt)
 		s.NoError(err)
 		s.Equal(expectedJobID, jobID)
@@ -301,6 +307,7 @@ func (s *SnapshotSuite) TestRestoreExternalSnapshot() {
 		s.mock.EXPECT().RestoreExternalSnapshot(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.RestoreExternalSnapshotRequest) (*milvuspb.RestoreExternalSnapshotResponse, error) {
 			s.Equal(targetCollectionName, req.GetTargetCollectionName())
 			s.Equal(metadataURI, req.GetSnapshotMetadataUri())
+			s.True(req.GetSkipIndex())
 			return &milvuspb.RestoreExternalSnapshotResponse{
 				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 				JobId:  expectedJobID,
@@ -308,7 +315,7 @@ func (s *SnapshotSuite) TestRestoreExternalSnapshot() {
 		}).Once()
 
 		jobID, err := s.client.RestoreExternalSnapshot(ctx,
-			NewRestoreExternalSnapshotOption(targetCollectionName, metadataURI))
+			NewRestoreExternalSnapshotOption(targetCollectionName, metadataURI).WithSkipIndex(true))
 		s.NoError(err)
 		s.Equal(expectedJobID, jobID)
 	})
@@ -445,15 +452,18 @@ func (s *SnapshotSuite) TestSnapshotOptions() {
 		description := "test description"
 		dbName := "test_db"
 
-		opt := NewCreateSnapshotOption(snapshotName, collectionName).
-			WithDescription(description).
-			WithDbName(dbName)
+		opt := NewCreateSnapshotOption(snapshotName, collectionName)
+		s.False(opt.Request().GetSkipIndex())
+		opt.WithDescription(description).
+			WithDbName(dbName).
+			WithSkipIndex(true)
 
 		req := opt.Request()
 		s.Equal(collectionName, req.GetCollectionName())
 		s.Equal(snapshotName, req.GetName())
 		s.Equal(description, req.GetDescription())
 		s.Equal(dbName, req.GetDbName())
+		s.True(req.GetSkipIndex())
 	})
 
 	s.Run("DropSnapshotOption", func() {
@@ -514,9 +524,11 @@ func (s *SnapshotSuite) TestSnapshotOptions() {
 		targetCollection := "restored_collection"
 		targetDb := "target_db"
 
-		opt := NewRestoreSnapshotOption(snapshotName, sourceCollection, targetCollection).
-			WithDbName(sourceDb).
-			WithTargetDbName(targetDb)
+		opt := NewRestoreSnapshotOption(snapshotName, sourceCollection, targetCollection)
+		s.False(opt.Request().GetSkipIndex())
+		opt.WithDbName(sourceDb).
+			WithTargetDbName(targetDb).
+			WithSkipIndex(true)
 
 		req := opt.Request()
 		s.Equal(snapshotName, req.GetName())
@@ -524,6 +536,7 @@ func (s *SnapshotSuite) TestSnapshotOptions() {
 		s.Equal(sourceDb, req.GetDbName())
 		s.Equal(targetCollection, req.GetTargetCollectionName())
 		s.Equal(targetDb, req.GetTargetDbName())
+		s.True(req.GetSkipIndex())
 	})
 
 	s.Run("RestoreExternalSnapshotOption", func() {
@@ -532,9 +545,11 @@ func (s *SnapshotSuite) TestSnapshotOptions() {
 		metadataURI := "s3://bucket/files/snapshots/meta.json"
 		externalSpec := `{"extfs":{"cloud_provider":"aws","region":"us-west-2","use_iam":"true"}}`
 
-		opt := NewRestoreExternalSnapshotOption(targetCollection, metadataURI).
-			WithDbName(dbName).
-			WithExternalSpec(externalSpec)
+		opt := NewRestoreExternalSnapshotOption(targetCollection, metadataURI)
+		s.False(opt.Request().GetSkipIndex())
+		opt.WithDbName(dbName).
+			WithExternalSpec(externalSpec).
+			WithSkipIndex(true)
 
 		req := opt.Request()
 		s.NotNil(req.GetBase())
@@ -542,6 +557,7 @@ func (s *SnapshotSuite) TestSnapshotOptions() {
 		s.Equal(targetCollection, req.GetTargetCollectionName())
 		s.Equal(metadataURI, req.GetSnapshotMetadataUri())
 		s.Equal(externalSpec, req.GetExternalSpec())
+		s.True(req.GetSkipIndex())
 	})
 
 	s.Run("ExportSnapshotOption", func() {

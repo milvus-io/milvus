@@ -222,6 +222,10 @@ func collectSegmentFiles(
 		}
 		basePath = snapshotstorage.NormalizeSnapshotObjectPath(basePath)
 
+		// Copy the complete StorageV3 manifest root. Manifest data and reusable
+		// index artifacts share this directory, and the source manifest is not
+		// rewritten. Restore controls index availability through the metadata it
+		// publishes, so StatsResolver ignores unregistered entries on load.
 		allFiles, listErr := listAllFiles(ctx, sourceCM, basePath)
 		if listErr != nil {
 			return nil, merr.Wrapf(listErr, "failed to list files from manifest base path %q for segment %d", basePath, source.GetSegmentId())

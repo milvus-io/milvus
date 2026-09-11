@@ -146,6 +146,7 @@ type CopySegmentJob interface {
 	GetSnapshotS3Location() string
 	GetExternalSpec() string
 	GetSnapshotFingerprint() string
+	GetSkipIndex() bool
 	GetTR() *timerecord.TimeRecorder
 	Clone() CopySegmentJob
 }

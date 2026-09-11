@@ -34,6 +34,10 @@ import (
 
 const (
 	// SnapshotFormatVersion is the current snapshot metadata and manifest format.
+	// skip_index stays on version 4 because it adds optional protobuf metadata
+	// without changing the Avro manifest layout. Snapshot compatibility is
+	// forward-only across upgrades: an older binary may discard this field and
+	// does not have to preserve skip-index behavior when reading a newer snapshot.
 	SnapshotFormatVersion = 4
 )
 

@@ -23,6 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -332,30 +333,71 @@ func TestStatsResolverManifest(t *testing.T) {
 		assert.Equal(t, bm25Path, paths[200][0])
 	})
 
-	t.Run("TextAndJSONIndexStatsWithBasePaths hides json stats without metadata placeholder", func(t *testing.T) {
+	t.Run("TextAndJSONIndexStatsWithBasePaths hides index stats without metadata placeholders", func(t *testing.T) {
 		result := resolver.TextAndJSONIndexStatsWithBasePaths()
 		require.NoError(t, result.Err())
 
+		assert.Empty(t, result.TextIndexStats)
+		assert.Empty(t, result.TextBasePaths)
 		assert.Empty(t, result.JSONKeyStats)
 		assert.Empty(t, result.JSONBasePaths)
-		require.Contains(t, result.TextIndexStats, int64(400))
-		assert.Equal(t, []string{"milvus_packed_inverted_index.v3"}, result.TextIndexStats[400].GetFiles())
-		assert.Equal(t, int64(7), result.TextIndexStats[400].GetVersion())
-		assert.Equal(t, filepath.ToSlash(filepath.Dir(textPath)), filepath.ToSlash(result.TextBasePaths[400]))
 	})
 
-	t.Run("TextAndJSONIndexStatsWithBasePaths returns json stats with metadata placeholder", func(t *testing.T) {
-		resolverWithPlaceholder := NewStatsResolver(newManifest, storageConfig).WithJSONKeyStats(map[int64]*datapb.JsonKeyStats{
-			300: {FieldID: 300, Version: 7, BuildID: 7000, JsonKeyStatsDataFormat: 3},
-		})
+	t.Run("TextAndJSONIndexStatsWithBasePaths returns registered index stats", func(t *testing.T) {
+		resolverWithPlaceholder := NewStatsResolver(newManifest, storageConfig).
+			WithTextStatsLogs(map[int64]*datapb.TextIndexStats{
+				400: {FieldID: 400, Version: 7, BuildID: 9001},
+			}).
+			WithJSONKeyStats(map[int64]*datapb.JsonKeyStats{
+				300: {FieldID: 300, Version: 7, BuildID: 7000, JsonKeyStatsDataFormat: 3},
+			})
 		result := resolverWithPlaceholder.TextAndJSONIndexStatsWithBasePaths()
 		require.NoError(t, result.Err())
 
+		require.Contains(t, result.TextIndexStats, int64(400))
+		assert.Equal(t, []string{"milvus_packed_inverted_index.v3"}, result.TextIndexStats[400].GetFiles())
+		assert.Equal(t, int64(7), result.TextIndexStats[400].GetVersion())
+		assert.Equal(t, int64(9001), result.TextIndexStats[400].GetBuildID())
+		assert.Equal(t, filepath.ToSlash(filepath.Dir(textPath)), filepath.ToSlash(result.TextBasePaths[400]))
 		require.Contains(t, result.JSONKeyStats, int64(300))
 		assert.Equal(t, []string{"shared_key_index/.managed.json_0"}, result.JSONKeyStats[300].GetFiles())
 		assert.Equal(t, filepath.ToSlash(filepath.Join(bp, "_stats/json_stats.300")), filepath.ToSlash(result.JSONBasePaths[300]))
 		assert.Equal(t, int64(7), result.JSONKeyStats[300].GetVersion())
 		assert.Equal(t, int64(7000), result.JSONKeyStats[300].GetBuildID())
 		assert.Equal(t, int64(3), result.JSONKeyStats[300].GetJsonKeyStatsDataFormat())
+	})
+
+	t.Run("manifest indexes require registered metadata", func(t *testing.T) {
+		filtered := NewStatsResolverFromLoadInfo(&querypb.SegmentLoadInfo{
+			ManifestPath: newManifest,
+		})
+		result := filtered.TextAndJSONIndexStatsWithBasePaths()
+		require.NoError(t, result.Err())
+		assert.Empty(t, result.TextIndexStats)
+		assert.Empty(t, result.JSONKeyStats)
+
+		filteredSegment := NewStatsResolverFromSegmentInfo(&datapb.SegmentInfo{
+			ManifestPath: newManifest,
+		})
+		result = filteredSegment.TextAndJSONIndexStatsWithBasePaths()
+		require.NoError(t, result.Err())
+		assert.Empty(t, result.TextIndexStats)
+		assert.Empty(t, result.JSONKeyStats)
+
+		registered := NewStatsResolverFromLoadInfo(&querypb.SegmentLoadInfo{
+			ManifestPath: newManifest,
+			TextStatsLogs: map[int64]*datapb.TextIndexStats{
+				400: {FieldID: 400, Version: 7, BuildID: 9001},
+			},
+			JsonKeyStatsLogs: map[int64]*datapb.JsonKeyStats{
+				300: {FieldID: 300, Version: 7, BuildID: 7000},
+			},
+		})
+		result = registered.TextAndJSONIndexStatsWithBasePaths()
+		require.NoError(t, result.Err())
+		require.Contains(t, result.TextIndexStats, int64(400))
+		assert.Equal(t, []string{"milvus_packed_inverted_index.v3"}, result.TextIndexStats[400].GetFiles())
+		assert.Equal(t, int64(9001), result.TextIndexStats[400].GetBuildID())
+		require.Contains(t, result.JSONKeyStats, int64(300))
 	})
 }
