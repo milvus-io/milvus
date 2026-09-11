@@ -1,4 +1,4 @@
-package rewriter
+package rules
 
 import (
 	"math"

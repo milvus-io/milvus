@@ -126,10 +126,10 @@ func TestRewrite_JSON_InWithRangePreservesLargeInt64Precision(t *testing.T) {
 	expr, err := parser.ParseExpr(helper,
 		`JSONField["v"] in [9007199254740992, 9007199254740993] and JSONField["v"] >= 9007199254740993`, nil)
 	require.NoError(t, err)
-	term := expr.GetTermExpr()
-	require.NotNil(t, term)
-	require.Len(t, term.GetValues(), 1)
-	require.Equal(t, int64(9007199254740993), term.GetValues()[0].GetInt64Val())
+	unaryRange := expr.GetUnaryRangeExpr()
+	require.NotNil(t, unaryRange)
+	require.Equal(t, planpb.OpType_Equal, unaryRange.GetOp())
+	require.Equal(t, int64(9007199254740993), unaryRange.GetValue().GetInt64Val())
 }
 
 func TestRewrite_JSON_InWithRangeTypeMismatchSkipsOptimization(t *testing.T) {
