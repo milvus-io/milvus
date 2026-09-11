@@ -44,6 +44,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
@@ -163,6 +164,7 @@ func (r *CRegistry) Gather() (res []*dto.MetricFamily, err error) {
 		return res, err
 	}
 
+	metrics.ProcessCoreMetrics(out1)
 	maps.Copy(out, out1)
 
 	// Add jemalloc stats metrics

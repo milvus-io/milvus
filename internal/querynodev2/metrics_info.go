@@ -20,6 +20,10 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strconv"
+
+	dto "github.com/prometheus/client_model/go"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
@@ -31,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -329,4 +334,54 @@ func getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, 
 	metricsinfo.FillDeployMetricsWithEnv(&nodeInfos.SystemInfo)
 
 	return metricsinfo.MarshalComponentInfos(nodeInfos)
+}
+
+// appendQueryNodeCollectionMemoryUsage aggregates sealed and growing memory from the current core scrape.
+// It leaves the source metrics unchanged and does not retain usage between scrapes.
+func appendQueryNodeCollectionMemoryUsage(nodeID string, families map[string]*dto.MetricFamily) {
+	usage := make(map[int64]float64)
+	for _, metric := range families["internal_cache_shard_memory_usage_bytes"].GetMetric() {
+		for _, label := range metric.GetLabel() {
+			if label.GetName() != "shard" {
+				continue
+			}
+			_, collectionID, _, err := funcutil.ParseVChannel(label.GetValue())
+			if err == nil && collectionID > 0 {
+				usage[collectionID] += metric.GetGauge().GetValue()
+			}
+			break
+		}
+	}
+	for _, metric := range families["internal_growing_segment_memory_usage_bytes"].GetMetric() {
+		for _, label := range metric.GetLabel() {
+			if label.GetName() != "collection_id" {
+				continue
+			}
+			collectionID, err := strconv.ParseInt(label.GetValue(), 10, 64)
+			if err == nil && collectionID > 0 {
+				usage[collectionID] += metric.GetGauge().GetValue()
+			}
+			break
+		}
+	}
+	if len(usage) == 0 {
+		return
+	}
+
+	name := "milvus_querynode_collection_memory_usage_bytes"
+	family := &dto.MetricFamily{
+		Name: proto.String(name),
+		Help: proto.String("Collection memory usage in bytes."),
+		Type: dto.MetricType_GAUGE.Enum(),
+	}
+	for collectionID, memoryBytes := range usage {
+		family.Metric = append(family.Metric, &dto.Metric{
+			Label: []*dto.LabelPair{
+				{Name: proto.String("collection_id"), Value: proto.String(strconv.FormatInt(collectionID, 10))},
+				{Name: proto.String("node_id"), Value: proto.String(nodeID)},
+			},
+			Gauge: &dto.Gauge{Value: proto.Float64(memoryBytes)},
+		})
+	}
+	families[name] = family
 }

@@ -39,6 +39,7 @@
 
 #include "NamedType/named_type_impl.hpp"
 #include "cachinglayer/CacheSlot.h"
+#include "cachinglayer/Metrics.h"
 #include "common/Consts.h"
 #include "common/LoadInfo.h"
 #include "common/Schema.h"
@@ -71,6 +72,7 @@
 #include "segcore/search_result_export_c.h"
 #include "segcore/Types.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
+#include "segcore/storagev2translator/SystemIndexTranslator.h"
 #include "segcore/storagev1translator/ChunkTranslator.h"
 #include "storage/FileManager.h"
 #include "storage/Types.h"
@@ -299,17 +301,25 @@ TEST(ChunkedSegmentSealedStorageV2,
 class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
  protected:
     segcore::SegmentSealedUPtr
-    CreateSegment(bool is_sorted_by_pk) {
+    CreateSegment(bool is_sorted_by_pk, const std::string& shard = "") {
         auto seg = segcore::CreateSealedSegment(
             schema_,
             nullptr,
             -1,
             segcore::SegcoreConfig::default_config(),
             is_sorted_by_pk);
+        if (!shard.empty()) {
+            proto::segcore::SegmentLoadInfo proto;
+            proto.set_insert_channel(shard);
+            proto.set_storageversion(2);
+            proto.set_num_of_rows(RowCount());
+            seg->SetLoadInfo(std::move(proto));
+        }
         seg->AddFieldDataInfoForSealed(load_info_);
         for (auto& [id, info] : load_info_.field_infos) {
             LoadFieldDataInfo load_field_info;
             load_field_info.storage_version = 2;
+            load_field_info.shard = shard;
             load_field_info.field_infos.emplace(id, info);
             seg->LoadFieldData(load_field_info);
         }
@@ -1449,4 +1459,42 @@ TEST_P(TestChunkSegmentStorageV2, TestLazySystemIndexesOnSortedSegment) {
         ASSERT_EQ(pk_result->scalars().long_data().data(0), 0);
         ASSERT_EQ(pk_result->scalars().long_data().data(1), 42);
     }
+}
+
+TEST_P(TestChunkSegmentStorageV2, SystemIndexMemoryUsageByShard) {
+    constexpr auto kShard = "by-dev-rootcoord-dml_0_987654322v0";
+    const auto memory_usage = [&](cachinglayer::CellDataType type) {
+        return cachinglayer::monitor::cache_shard_usage_bytes_value(
+            type, kShard, cachinglayer::StorageType::MEMORY);
+    };
+    auto tracked_segment = CreateSegment(false, kShard);
+    auto* segment_impl =
+        dynamic_cast<ChunkedSegmentSealedImpl*>(tracked_segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+    PkType existing_pk =
+        GetParam() ? PkType(std::string("test42")) : PkType(int64_t(42));
+    ASSERT_TRUE(segment_impl->Contain(existing_pk));
+    {
+        auto runtime = segment_impl->TestGetPublishedStateSnapshot()->runtime;
+        ASSERT_NE(runtime->pk_index_slot, nullptr);
+        ASSERT_NE(runtime->timestamp_index_slot, nullptr);
+        auto pk = cachinglayer::SemiInlineGet(
+            runtime->pk_index_slot->PinCells(nullptr, {0}));
+        auto timestamp = cachinglayer::SemiInlineGet(
+            runtime->timestamp_index_slot->PinCells(nullptr, {0}));
+        ASSERT_NE(pk->get_cell_of(0), nullptr);
+        ASSERT_NE(timestamp->get_cell_of(0), nullptr);
+        auto pk_memory = pk->get_cell_of(0)->CellByteSize().memory_bytes;
+        auto timestamp_memory =
+            timestamp->get_cell_of(0)->CellByteSize().memory_bytes;
+        EXPECT_GT(pk_memory, 0);
+        EXPECT_GT(timestamp_memory, 0);
+        EXPECT_EQ(memory_usage(cachinglayer::CellDataType::OTHER), pk_memory);
+        EXPECT_EQ(memory_usage(cachinglayer::CellDataType::SCALAR_INDEX),
+                  timestamp_memory);
+    }
+    tracked_segment.reset();
+    EXPECT_EQ(memory_usage(cachinglayer::CellDataType::OTHER), std::nullopt);
+    EXPECT_EQ(memory_usage(cachinglayer::CellDataType::SCALAR_INDEX),
+              std::nullopt);
 }

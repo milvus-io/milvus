@@ -22,7 +22,12 @@ import (
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
+
+	pkgmetrics "github.com/milvus-io/milvus/pkg/v3/metrics"
 )
 
 func TestMilvusRegistryGather_NilGoRegistry(t *testing.T) {
@@ -46,4 +51,42 @@ func TestMilvusRegistryGather_NilCRegistry(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, res)
 	assert.Greater(t, len(res), 0)
+}
+
+func TestCRegistryGatherCoreMetricsProcessor(t *testing.T) {
+	const name = "test_core_metrics_processor"
+	calls := 0
+	pkgmetrics.SetCoreMetricsProcessor(func(families map[string]*dto.MetricFamily) {
+		calls++
+		families[name] = &dto.MetricFamily{
+			Name: proto.String(name),
+			Type: dto.MetricType_GAUGE.Enum(),
+			Metric: []*dto.Metric{
+				{Gauge: &dto.Gauge{Value: proto.Float64(42)}},
+			},
+		}
+	})
+	t.Cleanup(func() { pkgmetrics.SetCoreMetricsProcessor(nil) })
+
+	registry := NewCRegistry()
+	families, err := registry.Gather()
+	require.NoError(t, err)
+	require.Equal(t, 1, calls)
+	found := false
+	for _, family := range families {
+		if family.GetName() == name {
+			require.Len(t, family.GetMetric(), 1)
+			assert.Equal(t, float64(42), family.Metric[0].GetGauge().GetValue())
+			found = true
+		}
+	}
+	require.True(t, found)
+
+	pkgmetrics.SetCoreMetricsProcessor(nil)
+	families, err = registry.Gather()
+	require.NoError(t, err)
+	require.Equal(t, 1, calls)
+	for _, family := range families {
+		require.NotEqual(t, name, family.GetName())
+	}
 }

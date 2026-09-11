@@ -25,6 +25,7 @@ import (
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
@@ -572,4 +573,49 @@ func vecVariableLabels(expr ast.Expr, labelIdentByValue map[string]string) (map[
 		}
 	}
 	return labels, true
+}
+
+func TestCoreMetricsProcessor(t *testing.T) {
+	coreMetricsProcessorMu.RLock()
+	original := coreMetricsProcessor
+	coreMetricsProcessorMu.RUnlock()
+	t.Cleanup(func() { SetCoreMetricsProcessor(original) })
+
+	families := map[string]*dto.MetricFamily{"source": {}}
+	SetCoreMetricsProcessor(nil)
+	ProcessCoreMetrics(families)
+	require.Len(t, families, 1)
+
+	calls := 0
+	SetCoreMetricsProcessor(func(snapshot map[string]*dto.MetricFamily) {
+		calls++
+		require.Same(t, families["source"], snapshot["source"])
+		snapshot["derived"] = &dto.MetricFamily{}
+		// Registration must not be locked while the processor runs.
+		SetCoreMetricsProcessor(nil)
+	})
+	ProcessCoreMetrics(families)
+	require.Contains(t, families, "derived")
+	ProcessCoreMetrics(families)
+	require.Equal(t, 1, calls)
+
+	group := &errgroup.Group{}
+	group.Go(func() error {
+		for i := 0; i < 100; i++ {
+			SetCoreMetricsProcessor(func(snapshot map[string]*dto.MetricFamily) {
+				snapshot["derived"] = &dto.MetricFamily{}
+			})
+			SetCoreMetricsProcessor(nil)
+		}
+		return nil
+	})
+	for i := 0; i < 4; i++ {
+		group.Go(func() error {
+			for j := 0; j < 100; j++ {
+				ProcessCoreMetrics(make(map[string]*dto.MetricFamily))
+			}
+			return nil
+		})
+	}
+	require.NoError(t, group.Wait())
 }

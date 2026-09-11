@@ -30,7 +30,7 @@ GetCoreMetrics() {
     milvus::storage::LoadAdmissionController::GetInstance().UpdateMetrics();
     UpdateArrowIOThreadPoolMetrics();
     static_cast<void>(
-        milvus::cachinglayer::monitor::collect_cache_shard_disk_usage_stats());
+        milvus::cachinglayer::monitor::collect_cache_shard_usage_stats());
     auto str = milvus::monitor::getPrometheusClient().GetMetrics();
     auto len = str.length();
     char* res = static_cast<char*>(malloc(len + 1));

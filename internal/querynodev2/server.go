@@ -38,6 +38,7 @@ import (
 	"sync"
 	"time"
 
+	dto "github.com/prometheus/client_model/go"
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -452,6 +453,10 @@ func (node *QueryNode) Start() error {
 			fmt.Sprint(node.GetNodeID()),
 			segments.CollectPoolStats,
 		)
+		nodeID := fmt.Sprint(node.GetNodeID())
+		metrics.SetCoreMetricsProcessor(func(families map[string]*dto.MetricFamily) {
+			appendQueryNodeCollectionMemoryUsage(nodeID, families)
+		})
 
 		registry.GetInMemoryResolver().RegisterQueryNode(node.GetNodeID(), node)
 		mlog.Info(node.ctx, "query node start successfully",
@@ -497,6 +502,7 @@ func (node *QueryNode) hasOtherActiveQueryNode() (bool, error) {
 // Stop mainly stop QueryNode's query service, historical loop and streaming loop.
 func (node *QueryNode) Stop() error {
 	node.stopOnce.Do(func() {
+		defer metrics.SetCoreMetricsProcessor(nil)
 		mlog.Info(node.ctx, "Query node stop...")
 		err := node.session.GoingStop()
 		if err != nil {
