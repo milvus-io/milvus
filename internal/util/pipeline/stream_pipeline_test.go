@@ -20,6 +20,7 @@ import (
 	context2 "context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -170,6 +171,44 @@ func (suite *StreamPipelineSuite) TestDMLMsgPackBatcherKeepsBufferedInsertPacksS
 	suite.Len(second.Msgs, 1)
 }
 
+func (suite *StreamPipelineSuite) TestClosePreClosesNodesBeforeWaitingWorkDone() {
+	node := &preCloseBlockingNode{
+		BaseNode:  NewBaseNode("pre-close-blocking", 8),
+		operating: make(chan struct{}),
+		preClosed: make(chan struct{}),
+	}
+	suite.pipeline.Add(node)
+
+	err := suite.pipeline.ConsumeMsgStream(context2.Background(), &msgpb.MsgPosition{})
+	suite.NoError(err)
+	suite.NoError(suite.pipeline.Start())
+	suite.inChannel <- &msgstream.MsgPack{BeginTs: 1001}
+
+	suite.Eventually(func() bool {
+		select {
+		case <-node.operating:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, time.Millisecond)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		suite.pipeline.Close()
+	}()
+
+	suite.Eventually(func() bool {
+		select {
+		case <-done:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, time.Millisecond)
+}
+
 func TestDMLMsgPackBatcherLimitsByTotalMessageNum(t *testing.T) {
 	maxMsgNum := 3
 	batcher := NewDMLMsgPackBatcher(func() int { return maxMsgNum })
@@ -277,6 +316,22 @@ type captureMsgPackNode struct {
 func (node *captureMsgPackNode) Operate(in Msg) Msg {
 	node.outChannel <- in.(*msgstream.MsgPack)
 	return nil
+}
+
+type preCloseBlockingNode struct {
+	*BaseNode
+	operating chan struct{}
+	preClosed chan struct{}
+}
+
+func (node *preCloseBlockingNode) Operate(in Msg) Msg {
+	close(node.operating)
+	<-node.preClosed
+	return in
+}
+
+func (node *preCloseBlockingNode) PreClose() {
+	close(node.preClosed)
 }
 
 func newDMLMsgPack(beginTs, endTs uint64, msgs ...msgstream.TsMsg) *msgstream.MsgPack {

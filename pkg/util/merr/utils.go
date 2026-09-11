@@ -700,6 +700,14 @@ func WrapErrCollectionPartialUpdateConflictErr(err error, format string, args ..
 	return wrapInner(ErrCollectionPartialUpdateConflict, formatMsg(format, args...), err)
 }
 
+func WrapErrCollectionSchemaVersionNotReadyWithVersion(collection any, currentVersion, requiredVersion uint64) error {
+	return wrapFieldsWithDesc(
+		ErrCollectionSchemaVersionNotReady,
+		fmt.Sprintf("current schema version %d, required schema version %d", currentVersion, requiredVersion),
+		value("collection", collection),
+	)
+}
+
 func WrapErrAliasNotFound(db any, alias any, msg ...string) error {
 	err := wrapFields(ErrAliasNotFound,
 		value("database", db),

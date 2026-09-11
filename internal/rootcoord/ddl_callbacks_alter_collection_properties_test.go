@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -381,6 +382,23 @@ func TestDDLCallbacksAlterCollectionV2AckCallback_UpdateLoadConfigRPCError(t *te
 	require.Error(t, err)
 }
 
+func TestValidateAlterCollectionSchemaPayloadVersion(t *testing.T) {
+	header := &messagespb.AlterCollectionMessageHeader{
+		UpdateMask: &fieldmaskpb.FieldMask{
+			Paths: []string{message.FieldMaskCollectionSchema},
+		},
+	}
+
+	require.NoError(t, validateAlterCollectionSchemaPayloadVersion(10, &messagespb.AlterCollectionMessageHeader{}, nil))
+	require.Error(t, validateAlterCollectionSchemaPayloadVersion(10, header, nil))
+	require.Error(t, validateAlterCollectionSchemaPayloadVersion(10, header, &messagespb.AlterCollectionMessageUpdates{
+		Schema: &schemapb.CollectionSchema{Version: 10},
+	}))
+	require.NoError(t, validateAlterCollectionSchemaPayloadVersion(10, header, &messagespb.AlterCollectionMessageUpdates{
+		Schema: &schemapb.CollectionSchema{Version: 11},
+	}))
+}
+
 func TestDDLCallbacksAlterCollectionV2AckCallback_UpdateLoadConfigNonRGNotFoundError(t *testing.T) {
 	ctx := context.Background()
 
@@ -719,14 +737,14 @@ func TestDDLCallbacksAlterCollectionProperties_TTLFieldShouldBroadcastSchema(t *
 	require.NoError(t, merr.CheckRPCCall(resp, err))
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 0)
 
-	// Alter properties to set ttl field should succeed and should NOT change schema version in meta.
+	// Alter properties to set ttl field should bump schema version because it broadcasts a schema payload.
 	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Properties:     []*commonpb.KeyValuePair{{Key: common.CollectionTTLFieldKey, Value: "ttl"}},
 	})
 	require.NoError(t, merr.CheckRPCCall(resp, err))
-	assertSchemaVersion(t, ctx, core, dbName, collectionName, 0)
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 1)
 }
 
 func TestDDLCallbacksAlterCollectionProperties_TTLFieldPreservesExternalSpec(t *testing.T) {
@@ -772,6 +790,7 @@ func TestDDLCallbacksAlterCollectionProperties_TTLFieldPreservesExternalSpec(t *
 	require.NoError(t, merr.CheckRPCCall(resp, err))
 	assertExternalSource(t, ctx, core, dbName, collectionName, "s3://bucket/ttl-path")
 	assertExternalSpec(t, ctx, core, dbName, collectionName, `{"format":"parquet","extfs":{"anonymous":"true","region":"us-east-1","cloud_provider":"aws"}}`)
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 0)
 
 	// Alter TTL field only — must preserve previously persisted external source/spec.
 	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
@@ -784,6 +803,7 @@ func TestDDLCallbacksAlterCollectionProperties_TTLFieldPreservesExternalSpec(t *
 	require.NoError(t, merr.CheckRPCCall(resp, err))
 	assertExternalSource(t, ctx, core, dbName, collectionName, "s3://bucket/ttl-path")
 	assertExternalSpec(t, ctx, core, dbName, collectionName, `{"format":"parquet","extfs":{"anonymous":"true","region":"us-east-1","cloud_provider":"aws"}}`)
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 1)
 
 	// TTL with invalid field name still rejected.
 	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
@@ -852,6 +872,7 @@ func TestDDLCallbacksAlterCollectionProperties_AcceptExternalSourceSpec(t *testi
 	require.NoError(t, merr.CheckRPCCall(resp, err))
 	assertExternalSource(t, ctx, core, dbName, collectionName, "s3://bucket/new/")
 	assertExternalSpec(t, ctx, core, dbName, collectionName, `{"format":"parquet","extfs":{"anonymous":"true","region":"us-east-1","cloud_provider":"aws"}}`)
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 1)
 }
 
 // Regression for #49335: refresh override path may carry source-only updates
@@ -895,6 +916,7 @@ func TestDDLCallbacksAlterCollectionProperties_PartialExternalUpdatePreservesOth
 	require.NoError(t, merr.CheckRPCCall(resp, err))
 	assertExternalSource(t, ctx, core, dbName, collectionName, "s3://bucket/new/")
 	assertExternalSpec(t, ctx, core, dbName, collectionName, `{"format":"parquet","extfs":{"anonymous":"true","region":"us-east-1","cloud_provider":"aws"}}`)
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 1)
 }
 
 // Regression for #49335: alter that mixes external_source with a regular
@@ -939,6 +961,7 @@ func TestDDLCallbacksAlterCollectionProperties_MixedExternalAndRegular(t *testin
 	require.NoError(t, merr.CheckRPCCall(resp, err))
 	assertExternalSource(t, ctx, core, dbName, collectionName, "s3://bucket/new/")
 	assertReplicaNumber(t, ctx, core, dbName, collectionName, 2)
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 1)
 }
 
 func createCollectionForTest(t *testing.T, ctx context.Context, core *Core, dbName string, collectionName string, properties ...*commonpb.KeyValuePair) {

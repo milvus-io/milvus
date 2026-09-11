@@ -1335,44 +1335,87 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 	})
 }
 
-func (s *DelegatorDataSuite) TestSyncCollectionMetaUpdatesFunctionRunners() {
+func (s *DelegatorDataSuite) TestLoadSegmentsSchemaVersionGate() {
+	newSchema := typeutil.Clone(s.delegator.collection.Schema())
+	newSchema.Version = s.delegator.collection.Schema().GetVersion() + 1
+	req := &querypb.LoadSegmentsRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		DstNodeID:    1,
+		CollectionID: s.collectionID,
+		Schema:       newSchema,
+		LoadScope:    querypb.LoadScope_Reopen,
+		Infos: []*querypb.SegmentLoadInfo{
+			{
+				SegmentID:     100,
+				PartitionID:   500,
+				StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				Level:         datapb.SegmentLevel_L1,
+				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
+			},
+		},
+	}
+
+	err := s.delegator.LoadSegments(context.Background(), req)
+	s.ErrorIs(err, merr.ErrCollectionSchemaVersionNotReady)
+
+	// UpdateSchema broadcasts to the local node even with no online segments
+	// (skipEmpty=false for the streaming scope), so stub the local worker.
+	worker := &cluster.MockWorker{}
+	worker.EXPECT().UpdateSchema(mock.Anything, mock.AnythingOfType("*querypb.UpdateSchemaRequest")).Return(merr.Success(), nil).Once()
+	s.workerManager.EXPECT().GetWorker(mock.Anything, int64(paramtable.GetNodeID())).Return(worker, nil).Once()
+
+	s.Require().NoError(s.delegator.UpdateSchema(context.Background(), newSchema, 100))
+	_, version := s.delegator.delegatorSchemaSnapshot()
+	s.Equal(uint64(newSchema.GetVersion()), version)
+
+	worker.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).Return(nil).Once()
+	s.workerManager.EXPECT().GetWorker(mock.Anything, int64(1)).Return(worker, nil).Once()
+
+	err = s.delegator.LoadSegments(context.Background(), req)
+	s.NoError(err)
+
+	staleSchema := typeutil.Clone(newSchema)
+	staleSchema.Version--
+	staleReq := typeutil.Clone(req)
+	staleReq.Schema = staleSchema
+	err = s.delegator.LoadSegments(context.Background(), staleReq)
+	s.ErrorIs(err, merr.ErrCollectionSchemaVersionNotReady)
+}
+
+func (s *DelegatorDataSuite) TestSyncCollectionIndexMetaDoesNotUpdateFunctionRunners() {
 	ctx := context.Background()
 	s.delegator.Start()
-	schema := newFunctionRuntimeTestSchemaWithVersion(1, newBM25FunctionSchema())
-	s.Require().Nil(s.delegator.getIDFOracle())
-	err := s.delegator.syncCollectionMeta(ctx, &querypb.LoadSegmentsRequest{
+	// Seed the delegator function-runner key with a schema that contains field
+	// 102 as a plain field but has no BM25 output registered yet. The version
+	// bump is required so function.GetManager().Update actually applies.
+	s.Require().NoError(function.GetManager().Update(s.collectionID, delegatorFunctionRunnerKey(s.vchannelName), newFunctionRuntimeTestSchemaWithVersion(1)))
+	schema := newFunctionRuntimeTestSchemaWithVersion(2, newBM25FunctionSchema())
+	err := s.delegator.syncCollectionIndexMeta(ctx, &querypb.LoadSegmentsRequest{
 		CollectionID:  s.collectionID,
 		Schema:        schema,
 		LoadMeta:      &querypb.LoadMetaInfo{SchemaBarrierTs: 1},
 		IndexInfoList: mock_segcore.GenTestIndexInfoList(s.collectionID, schema),
 	})
 	s.Require().NoError(err)
-	s.Equal(uint64(1), s.delegator.collectionVersion.Load())
-	s.Equal(uint64(1), s.delegator.schemaBarrierTs)
-	s.Require().NotNil(s.delegator.getIDFOracle())
 
-	// The load path has already advanced the collection snapshot, so the DDL
-	// event is skipped as a no-op. The function runner key must still point at
-	// the schema installed by the load path.
-	s.Require().NoError(s.delegator.UpdateSchema(ctx, schema, 1))
 	ok, err := function.GetManager().RunWithRunner(ctx, s.collectionID, delegatorFunctionRunnerKey(s.vchannelName), 102, func(function.FunctionRunner) error {
 		return nil
 	})
 	s.Require().NoError(err)
+	s.False(ok)
+
+	// Only the WAL UpdateSchema path advances the delegator schema/function view.
+	worker := &cluster.MockWorker{}
+	worker.EXPECT().UpdateSchema(mock.Anything, mock.AnythingOfType("*querypb.UpdateSchemaRequest")).Return(merr.Success(), nil).Once()
+	s.workerManager.EXPECT().GetWorker(mock.Anything, int64(paramtable.GetNodeID())).Return(worker, nil).Once()
+
+	s.Require().NoError(s.delegator.UpdateSchema(ctx, schema, 100))
+	ok, err = function.GetManager().RunWithRunner(ctx, s.collectionID, delegatorFunctionRunnerKey(s.vchannelName), 102, func(function.FunctionRunner) error {
+		return nil
+	})
+	s.Require().NoError(err)
 	s.True(ok)
-}
-
-func (s *DelegatorDataSuite) TestSyncCollectionMetaWithoutIndexInfoUpdatesDelegatorSchema() {
-	ctx := context.Background()
-	s.delegator.Start()
-	schema := proto.Clone(s.delegator.collection.Schema()).(*schemapb.CollectionSchema)
-	schema.Version = 1
-	s.Require().NoError(s.manager.Collection.PutOrRef(s.collectionID, schema, nil, &querypb.LoadMetaInfo{SchemaBarrierTs: 100}))
-	s.manager.Collection.Unref(s.collectionID, 1)
-
-	s.Require().NoError(s.delegator.syncCollectionMeta(ctx, &querypb.LoadSegmentsRequest{CollectionID: s.collectionID}))
-	s.Equal(uint64(1), s.delegator.collectionVersion.Load())
-	s.Equal(uint64(100), s.delegator.schemaBarrierTs)
 }
 
 func (s *DelegatorDataSuite) TestLoadSegmentsWithoutBloomFilter() {
