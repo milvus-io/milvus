@@ -148,72 +148,44 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegment(EvalCtx& context) {
 
 VectorPtr
 PhyExistsFilterExpr::EvalJsonExistsForDataSegmentByStats() {
-    auto real_batch_size = GetNextBatchSize();
-    if (real_batch_size == 0) {
-        return nullptr;
-    }
+    return EvalByStats([this](TriStateOut out) {
+        auto pointer = milvus::index::JsonPointer(expr_->column_.nested_path_);
+        auto segment = static_cast<const segcore::SegmentSealed*>(segment_);
+        auto index = segment->GetJsonStats(op_ctx_, expr_->column_.field_id_);
+        Assert(index.get() != nullptr);
 
-    auto pointer = milvus::index::JsonPointer(expr_->column_.nested_path_);
-    if (cached_index_chunk_id_ != 0 &&
-        segment_->type() == SegmentType::Sealed) {
-        cached_index_chunk_id_ = 0;
+        // EXISTS is never UNKNOWN: a NULL row or a missing path is FALSE.
+        out.known.set();
 
-        auto cached = ExprCacheHelper::GetOrCompute(
-            segment_,
-            this->ToString(),
-            active_count_,
-            [&]() -> ExprCacheHelper::ComputeResult {
-                auto segment =
-                    static_cast<const segcore::SegmentSealed*>(segment_);
-                auto field_id = expr_->column_.field_id_;
-                auto index = segment->GetJsonStats(op_ctx_, field_id);
-                Assert(index.get() != nullptr);
+        // process shredding data
+        {
+            milvus::ScopedTimer timer(
+                "exists_json_stats_shredding_data",
+                [this](double us) { json_stats_shredding_latency_us_ += us; });
+            auto shredding_fields =
+                index->GetShreddingFieldsWithPrefix(pointer);
+            for (const auto& field : shredding_fields) {
+                TargetBitmap temp_valid(active_count_, true);
+                TargetBitmapView temp_valid_view(temp_valid);
+                index->ExecutorForGettingValid(op_ctx_, field, temp_valid_view);
+                out.match |= temp_valid_view;
+            }
+        }
 
-                TargetBitmap res(active_count_);
-                TargetBitmapView res_view(res);
-
-                // process shredding data
-                {
-                    milvus::ScopedTimer timer(
-                        "exists_json_stats_shredding_data", [this](double us) {
-                            json_stats_shredding_latency_us_ += us;
-                        });
-                    auto shredding_fields =
-                        index->GetShreddingFieldsWithPrefix(pointer);
-                    for (const auto& field : shredding_fields) {
-                        TargetBitmap temp_valid(active_count_, true);
-                        TargetBitmapView temp_valid_view(temp_valid);
-                        index->ExecutorForGettingValid(
-                            op_ctx_, field, temp_valid_view);
-                        res_view |= temp_valid_view;
-                    }
-                }
-
-                // process shared data
-                {
-                    milvus::ScopedTimer timer(
-                        "exists_json_stats_shared_data", [this](double us) {
-                            json_stats_shared_latency_us_ += us;
-                        });
-                    index->ExecuteForSharedData(
-                        op_ctx_,
-                        bson_index_,
-                        pointer,
-                        [&](BsonView bson, uint32_t row_id, uint32_t offset) {
-                            res_view[row_id] = !bson.IsBsonValueEmpty(offset);
-                        });
-                }
-
-                TargetBitmap valid(active_count_, true);
-                return {std::move(res), std::move(valid)};
-            });
-        cached_index_chunk_res_ = cached.result;
-    }
-
-    auto res = MoveOrSliceBitmap(
-        *cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
-    MoveCursor();
-    return res;
+        // process shared data
+        {
+            milvus::ScopedTimer timer(
+                "exists_json_stats_shared_data",
+                [this](double us) { json_stats_shared_latency_us_ += us; });
+            index->ExecuteForSharedData(
+                op_ctx_,
+                bson_index_,
+                pointer,
+                [&](BsonView bson, uint32_t row_id, uint32_t offset) {
+                    out.match[row_id] = !bson.IsBsonValueEmpty(offset);
+                });
+        }
+    });
 }
 
 }  //namespace exec

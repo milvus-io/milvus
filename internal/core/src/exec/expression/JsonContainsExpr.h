@@ -1160,6 +1160,14 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
     VectorPtr
     ExecJsonContains(EvalCtx& context);
 
+    // JsonStats compute shared by the six json_contains variants.
+    template <typename MakeShreddingExecutor, typename MakeSharedExecutor>
+    VectorPtr
+    ScanArrayPathByStats(std::string_view shredding_timer_name,
+                         std::string_view shared_timer_name,
+                         MakeShreddingExecutor&& make_shredding_executor,
+                         MakeSharedExecutor&& make_shared_executor);
+
     template <typename ExprValueType>
     VectorPtr
     ExecJsonContainsByStats();

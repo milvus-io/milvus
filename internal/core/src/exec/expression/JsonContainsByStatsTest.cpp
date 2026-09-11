@@ -33,6 +33,7 @@
 #include "common/protobuf_utils.h"
 #include "exec/expression/BinaryRangeExpr.h"
 #include "exec/expression/ExprBatchTestUtils.h"
+#include "exec/expression/ExprCache.h"
 #include "exec/expression/TermExpr.h"
 #include "exec/expression/UnaryExpr.h"
 #include "expr/ITypeExpr.h"
@@ -1187,5 +1188,195 @@ TEST(JsonStatsThreeValuedAuditTest,
                 proto::plan::JSONContainsExpr_JSONOp_Contains,
                 true,
                 std::vector<proto::plan::GenericValue>{value})));
+    }
+}
+
+TEST(JsonStatsScanByStatsTest, ContainsFamilyStatsMatchRawThreeValued) {
+    auto schema = std::make_shared<Schema>();
+    auto json_fid = schema->AddDebugField("json", DataType::JSON, true);
+
+    // /a is an ARRAY in most rows (shredded). /s is an ARRAY in 2 of 10
+    // rows so it is expected to land in shared data.
+    const std::vector<std::string> json_raw_data = {
+        R"({"a": [1, 2, 3], "s": [1, "x"]})",   // 0
+        R"({"a": [4, 5]})",                     // 1
+        R"({"a": []})",                         // 2 empty array
+        R"({"a": "str"})",                      // 3 not an array
+        R"({"b": [1]})",                        // 4 path missing
+        R"({"a": null})",                       // 5 JSON null
+        R"({"a": [1.0, "x"], "s": [[1, 2]]})",  // 6
+        R"({"a": [[1, 2], [3]]})",              // 7
+        R"({"a": [1, 2]})",                     // 8 field-level NULL
+        R"({"a": [2, 1]})",                     // 9
+    };
+    const std::vector<uint8_t> valid_data{0b11111111, 0b00000010};
+
+    auto stats = BuildAndLoadJsonKeyStats(json_raw_data,
+                                          json_fid,
+                                          TestLocalPath,
+                                          1301,
+                                          2301,
+                                          3301,
+                                          json_fid.get(),
+                                          5301,
+                                          1,
+                                          &valid_data);
+    ASSERT_FALSE(stats->GetShreddingField("/a", JSONType::ARRAY).empty());
+    // If JSON stats thresholds shred /s, add rows without /s until it is
+    // shared again; the shared-data branch must stay covered.
+    EXPECT_TRUE(stats->GetShreddingField("/s", JSONType::ARRAY).empty());
+
+    auto stats_segment = segcore::CreateSealedSegment(schema);
+    auto* sealed =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(stats_segment.get());
+    ASSERT_NE(sealed, nullptr);
+    sealed->SetJsonStatsForTesting(json_fid, stats);
+    auto raw_segment = segcore::CreateSealedSegment(schema);
+
+    auto make_json_field = [&] {
+        auto field =
+            std::make_shared<FieldData<milvus::Json>>(DataType::JSON, true);
+        field->FillFieldData(MakeNullableJsonArray(json_raw_data, valid_data));
+        return field;
+    };
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    stats_segment->LoadFieldData(PrepareSingleFieldInsertBinlog(
+        0, 0, 0, json_fid.get(), {make_json_field()}, cm));
+    stats_segment->DropFieldData(json_fid);
+    ASSERT_FALSE(stats_segment->HasFieldData(json_fid));
+    raw_segment->LoadFieldData(PrepareSingleFieldInsertBinlog(
+        0, 0, 0, json_fid.get(), {make_json_field()}, cm));
+
+    const auto n = static_cast<int64_t>(json_raw_data.size());
+    auto evaluate = [&](const expr::TypedExprPtr& filter_expr,
+                        const segcore::SegmentInternalInterface* segment) {
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           filter_expr);
+        return milvus::test::gen_filter_res(
+            plan.get(), segment, n, MAX_TIMESTAMP);
+    };
+    auto expect_same = [](const ColumnVectorPtr& raw,
+                          const ColumnVectorPtr& stats_result,
+                          const std::string& label) {
+        ASSERT_EQ(raw->size(), stats_result->size()) << label;
+        TargetBitmapView raw_result(raw->GetRawData(), raw->size());
+        TargetBitmapView raw_valid(raw->GetValidRawData(), raw->size());
+        TargetBitmapView got_result(stats_result->GetRawData(),
+                                    stats_result->size());
+        TargetBitmapView got_valid(stats_result->GetValidRawData(),
+                                   stats_result->size());
+        for (size_t i = 0; i < raw->size(); ++i) {
+            EXPECT_EQ(got_valid[i], raw_valid[i]) << label << " row " << i;
+            EXPECT_EQ(got_result[i], raw_result[i]) << label << " row " << i;
+        }
+    };
+
+    auto contains = [&](const std::string& path,
+                        proto::plan::JSONContainsExpr_JSONOp op,
+                        bool same_type,
+                        std::vector<proto::plan::GenericValue> vals) {
+        return std::make_shared<expr::JsonContainsExpr>(
+            expr::ColumnInfo(json_fid, DataType::JSON, {path}),
+            op,
+            same_type,
+            std::move(vals));
+    };
+    auto int64_value = [](int64_t v) {
+        proto::plan::GenericValue value;
+        value.set_int64_val(v);
+        return value;
+    };
+    auto string_value = [](const std::string& v) {
+        proto::plan::GenericValue value;
+        value.set_string_val(v);
+        return value;
+    };
+    auto array_value = [&](std::vector<int64_t> items) {
+        proto::plan::GenericValue value;
+        for (auto item : items) {
+            *value.mutable_array_val()->add_array() = int64_value(item);
+        }
+        return value;
+    };
+
+    const auto any = proto::plan::JSONContainsExpr_JSONOp_ContainsAny;
+    const auto all = proto::plan::JSONContainsExpr_JSONOp_ContainsAll;
+    for (const std::string path : {"a", "s"}) {
+        // ExecJsonContainsByStats / AllByStats / ArrayByStats /
+        // AllArrayByStats / WithDiffTypeByStats / AllWithDiffTypeByStats.
+        const std::vector<std::pair<std::string, expr::TypedExprPtr>> cases = {
+            {"any_int", contains(path, any, true, {int64_value(1)})},
+            {"all_int",
+             contains(path, all, true, {int64_value(1), int64_value(2)})},
+            {"any_array", contains(path, any, true, {array_value({1, 2})})},
+            {"all_array",
+             contains(
+                 path, all, true, {array_value({1, 2}), array_value({3})})},
+            {"any_diff",
+             contains(path, any, false, {int64_value(1), string_value("x")})},
+            {"all_diff",
+             contains(path, all, false, {int64_value(1), string_value("x")})},
+        };
+        for (const auto& [name, filter_expr] : cases) {
+            const auto label = path + "/" + name;
+            expect_same(evaluate(filter_expr, raw_segment.get()),
+                        evaluate(filter_expr, stats_segment.get()),
+                        label + "/whole");
+
+            milvus::test::ExprBatchSizeGuard batch_size_guard(3);
+            auto raw_batches = milvus::test::EvalExprInBatches(
+                filter_expr, raw_segment.get(), n);
+            auto stats_batches = milvus::test::EvalExprInBatches(
+                filter_expr, stats_segment.get(), n);
+            EXPECT_EQ(stats_batches.batch_sizes,
+                      (std::vector<int64_t>{3, 3, 3, 1}))
+                << label;
+            expect_same(
+                raw_batches.result, stats_batches.result, label + "/batches");
+        }
+    }
+
+    // Pin the three-valued outcome of json_contains_any(a, 1) on stats.
+    auto pinned = evaluate(contains("a", any, true, {int64_value(1)}),
+                           stats_segment.get());
+    const std::vector<bool> expected_valid = {
+        true, true, true, false, false, false, true, true, false, true};
+    const std::vector<bool> expected_match = {
+        true, false, false, false, false, false, true, false, false, true};
+    TargetBitmapView pinned_result(pinned->GetRawData(), pinned->size());
+    TargetBitmapView pinned_valid(pinned->GetValidRawData(), pinned->size());
+    for (size_t i = 0; i < expected_valid.size(); ++i) {
+        EXPECT_EQ(pinned_valid[i], expected_valid[i]) << "row " << i;
+        EXPECT_EQ(pinned_result[i], expected_match[i]) << "row " << i;
+    }
+
+    // Cache round trip: the second leaf evaluation reads the cached pair.
+    milvus::exec::CacheConfig cache_config;
+    cache_config.mode = milvus::exec::CacheMode::Memory;
+    cache_config.admission_threshold = 1;
+    cache_config.mem_min_eval_duration_us = 0;
+    auto& cache = milvus::exec::ExprResCacheManager::Instance();
+    milvus::exec::ExprResCacheManager::SetEnabled(true);
+    std::shared_ptr<void> cache_reset(nullptr, [&cache](void*) {
+        cache.Clear();
+        milvus::exec::ExprResCacheManager::SetEnabled(false);
+    });
+    ASSERT_TRUE(cache.SetConfig(cache_config));
+    cache.Clear();
+    {
+        auto filter_expr =
+            contains("a", all, true, {int64_value(1), int64_value(2)});
+        milvus::test::ExprBatchSizeGuard batch_size_guard(3);
+        auto first = milvus::test::EvalExprInBatches(
+            filter_expr, stats_segment.get(), n);
+        ASSERT_EQ(cache.GetEntryCount(), 1u);
+        auto second = milvus::test::EvalExprInBatches(
+            filter_expr, stats_segment.get(), n);
+        EXPECT_EQ(cache.GetEntryCount(), 1u);
+        auto raw =
+            milvus::test::EvalExprInBatches(filter_expr, raw_segment.get(), n);
+        expect_same(first.result, second.result, "cache/first-vs-second");
+        expect_same(raw.result, second.result, "cache/raw-vs-second");
     }
 }

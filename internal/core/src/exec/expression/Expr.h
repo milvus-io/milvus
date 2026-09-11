@@ -1019,6 +1019,68 @@ class SegmentExpr : public Expr {
         return std::max<int64_t>(elapsed_us, 1);
     }
 
+    // Single JsonStats-path entry. On the first batch (cache miss) `compute`
+    // writes whole-segment tri-state results into a (match=0, known=0) pair;
+    // rows it never marks stay UNKNOWN. Later batches, and cache hits, only
+    // slice the cached pair at current_data_global_pos_.
+    template <typename Compute>
+    VectorPtr
+    EvalByStats(Compute&& compute) {
+        const auto real_batch_size = GetNextBatchSize();
+        if (real_batch_size == 0) {
+            return nullptr;
+        }
+        if (cached_index_chunk_id_ != 0 && !TryCacheGet()) {
+            AssertInfo(segment_->type() == SegmentType::Sealed,
+                       "JsonStats scan requires a sealed segment, segment {}",
+                       segment_->get_segment_id());
+            const auto compute_start = CacheClock::now();
+            cached_index_chunk_res_ =
+                std::make_shared<TargetBitmap>(active_count_, false);
+            cached_index_chunk_valid_res_ =
+                std::make_shared<TargetBitmap>(active_count_, false);
+            TriStateOut whole_segment{
+                TargetBitmapView(*cached_index_chunk_res_),
+                TargetBitmapView(*cached_index_chunk_valid_res_)};
+            std::forward<Compute>(compute)(whole_segment);
+            // UNKNOWN rows must carry match = 0.
+            whole_segment.match.inplace_and(whole_segment.known, active_count_);
+            cached_index_chunk_id_ = 0;
+            CachePut(CacheElapsedUs(compute_start));
+        }
+        auto res = MoveOrSliceBitmap(*cached_index_chunk_res_,
+                                     *cached_index_chunk_valid_res_,
+                                     current_data_global_pos_,
+                                     real_batch_size);
+        MoveCursor();
+        return res;
+    }
+
+    // Runs `executor` over one shredded typed column with a scratch pair
+    // (match=0, known=1), then ORs both bitmaps into `out`. Executors clear
+    // scratch known for rows the column holds as NULL, so those rows stay
+    // UNKNOWN unless another column or shared data marks them.
+    template <typename ColType, typename Stats, typename Executor>
+    void
+    OrShreddingColumn(Stats& stats,
+                      const std::string& field,
+                      Executor&& executor,
+                      TriStateOut out) {
+        TargetBitmap column_match(active_count_, false);
+        TargetBitmap column_known(active_count_, true);
+        TargetBitmapView column_match_view(column_match);
+        TargetBitmapView column_known_view(column_known);
+        stats.template ExecutorForShreddingData<ColType>(
+            op_ctx_,
+            field,
+            std::forward<Executor>(executor),
+            nullptr,
+            column_match_view,
+            column_known_view);
+        out.match.inplace_or_with_count(column_match_view, active_count_);
+        out.known.inplace_or_with_count(column_known_view, active_count_);
+    }
+
     // The IsNotNull() virtual rebuilds a segment-sized bitmap on every
     // call (allocation + fill + AND); per-batch callers must reuse one
     // copy. The all-valid flag short-circuits per-row bitmap reads.
