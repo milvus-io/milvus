@@ -230,11 +230,12 @@ func manifestIndexParams(manifestIndex packed.ManifestIndexInfo) []*commonpb.Key
 }
 
 // reloadSegmentIndexesFromManifests rebuilds completed index records from
-// healthy StorageV3 manifests marked manifest_has_index. It runs independently
-// of the current write-mode switch: records published while the switch was on
-// must remain visible after it is turned off. Existing etcd rows win on buildID
-// conflicts, so active, failed, fake-finished, and record-resident results stay
-// authoritative.
+// retained StorageV3 manifests marked manifest_has_index. Dropped compaction
+// parents still need their indexes for query fallback and orphan-GC protection.
+// Recovery is independent of the current write-mode switch: records published
+// while the switch was on must remain visible after it is turned off. Existing
+// etcd rows win on buildID conflicts, so active, failed, fake-finished, and
+// record-resident results stay authoritative.
 //
 // A manifest that cannot be read fails startup. Skipping it would
 // leave meta silently incomplete, and a silently incomplete indexMeta is not
@@ -248,7 +249,8 @@ func manifestIndexParams(manifestIndex packed.ManifestIndexInfo) []*commonpb.Key
 func (m *meta) reloadSegmentIndexesFromManifests(ctx context.Context) error {
 	record := timerecord.NewTimeRecorder("indexMeta-reloadFromManifests")
 	segments := m.SelectSegments(ctx, SegmentFilterFunc(func(segment *SegmentInfo) bool {
-		return isSegmentHealthy(segment) && segment.GetStorageVersion() >= storage.StorageV3 &&
+		return (isSegmentHealthy(segment) || segment.GetState() == commonpb.SegmentState_Dropped) &&
+			segment.GetStorageVersion() >= storage.StorageV3 &&
 			segment.GetManifestHasIndex() && segment.GetLevel() != datapb.SegmentLevel_L0
 	}))
 	for _, segment := range segments {
@@ -277,6 +279,7 @@ func (m *meta) reloadSegmentIndexesFromManifests(ctx context.Context) error {
 	for start := 0; start < len(segments); start += concurrency {
 		batch := segments[start:min(start+concurrency, len(segments))]
 		recovered := make([][]*model.SegmentIndex, len(batch))
+		removedManifests := make([]bool, len(batch))
 		futures := make([]*conc.Future[any], 0, len(batch))
 		for i, segment := range batch {
 			i, segment := i, segment
@@ -290,6 +293,25 @@ func (m *meta) reloadSegmentIndexesFromManifests(ctx context.Context) error {
 					return readErr
 				}, retry.Attempts(3), retry.Sleep(200*time.Millisecond))
 				if err != nil {
+					// GC removes files before the catalog row. A restart in that
+					// window must let the remaining Dropped row finish GC, but a
+					// read error alone cannot prove the manifest was removed.
+					if segment.GetState() == commonpb.SegmentState_Dropped && m.chunkManager != nil {
+						manifestFile, pathErr := packed.ManifestFilePath(segment.GetManifestPath())
+						if pathErr != nil {
+							return nil, merr.Wrap(pathErr, "resolve dropped segment manifest during recovery")
+						}
+						exists, existErr := m.chunkManager.Exist(ctx, manifestFile)
+						if existErr != nil {
+							return nil, merr.Wrap(existErr, "check dropped segment manifest during recovery")
+						}
+						if !exists {
+							removedManifests[i] = true
+							mlog.Info(ctx, "dropped segment manifest already removed before recovery",
+								mlog.FieldSegmentID(segment.GetID()))
+							return nil, nil
+						}
+					}
 					return nil, merr.Wrapf(err, "recover segment %d indexes from manifest %s",
 						segment.GetID(), segment.GetManifestPath())
 				}
@@ -312,7 +334,7 @@ func (m *meta) reloadSegmentIndexesFromManifests(ctx context.Context) error {
 		// a catalog failure leaves the conservative true marker for the next start.
 		var emptyMarkers []UpdateOperator
 		for i, indexes := range recovered {
-			if len(indexes) == 0 {
+			if len(indexes) == 0 && !removedManifests[i] {
 				emptyMarkers = append(emptyMarkers, clearEmptyManifestIndexMarker(batch[i].GetID(), batch[i].GetManifestPath()))
 			}
 		}

@@ -145,7 +145,9 @@ revision the transaction is opened at and carries the expected build ID, so a
 drop issued from stale GC metadata cannot delete an artifact a rebuild
 republished under the same index ID. A drop for an entry that is already gone
 is skipped rather than committed as an empty revision, which keeps a retried GC
-cycle idempotent.
+cycle idempotent. GC refreshes the segment marker and pointer after selecting
+terminal build records, so a completion observed during the scan is classified
+against its published manifest rather than the segment's earlier revision.
 
 ### Copy / restore
 
@@ -238,12 +240,15 @@ made complete at startup and publication updates it atomically:
   the matching record in memory in the same commit, or by the copy worker, whose
   target records `syncVectorScalarIndexes` writes from the same worker result;
   GC retracts an entry and removes its record in one catalog transaction; and
-  reload rebuilds manifest-resident records from every healthy non-L0
-  StorageV3 segment marked `manifest_has_index` before the server serves,
+  reload rebuilds manifest-resident records from every retained healthy or Dropped
+  non-L0 StorageV3 segment marked `manifest_has_index` before the server serves,
   independently of the current write mode. A marked segment without a manifest
   pointer fails startup. Reads run in bounded batches with per-segment retries;
   an exhausted read fails startup without replaying all successful reads through
-  the outer metastore retry loop.
+  the outer metastore retry loop. Dropped compaction parents retain their records
+  for query fallback and orphan-GC protection. If a failed read is followed by a
+  successful existence check proving a Dropped segment's manifest is absent,
+  startup leaves its marker unchanged and lets pending GC remove the catalog row.
 - a finished record with no `index_file_keys` has no manifest entry either: the
   only build that records no files is a fake-finished one (a segment too small
   to train), which `publishIndexToManifest` skips.
@@ -309,7 +314,7 @@ any target, and keeps the verified BuildID-to-IndexID mapping for installation.
 Historical sticky markers are normalized once at startup: after an empty index
 section is read, recovery persists false against that exact manifest pointer.
 Subsequent startups skip the segment. A failed read or catalog write aborts
-recovery. A pointer change prevents clearing its marker. The candidate set still
+recovery, except for the confirmed-absent Dropped manifest case described above. A pointer change prevents clearing its marker. The candidate set still
 includes entries for dropped definitions so their files remain discoverable by GC.
 No extra count field or scan of collection index definitions is required.
 
@@ -321,11 +326,32 @@ This optimization changes wire size for capable workers; it does not remove the
 legacy workers' payload-size limit.
 
 Before dispatch, DataCoord persists the newly allocated target index directories
-and the V3 target segment directory on the copy task. Importing targets receive
-a version-zero manifest base so normal segment GC can find them even if result
+and task-owned segment directories for every storage version on the copy task.
+Only Importing V3 targets receive a version-zero manifest base so normal segment GC can find them even if result
 validation refuses the first real pointer. If a completed worker result is
 rejected, a durable cleanup intent keeps the failed task until the inspector
-successfully removes its planned directories. Cleanup uses coordinator-derived
+successfully removes its planned directories. A single cleanup worker runs
+independently of pending-task dispatch, with no in-memory cleanup queue. It waits
+for ordinary segment GC to remove every target SegmentInfo, preserving its
+loaded-reader, snapshot and GC-pause protections before any prefix deletion.
+This also follows the configured GC retention delays. It skips tasks whose
+result installation holds the per-task lock. Under the same lock it rechecks
+failure and cleanup intent;
+late completed results for failed tasks with a cleanup plan are refused, even
+once cleanup has cleared the intent. Admission persists (or re-arms) the cleanup
+intent before refusing the result. If that write fails, a runtime scheduling
+flag keeps the failed task polling without changing its durable Failed state.
+Startup also re-enqueues failed tasks with cleanup plans and an assigned worker.
+Pending or InProgress worker responses retain that polling without authorizing
+deletion or reviving the durable Failed state. A completed response retries
+admission; confirmed worker loss admits cleanup and clears the assignment
+without re-dispatching the failed task. If the worker is lost after Completed
+result admission but before installation finished, the task fails while retaining
+cleanup responsibility: its targets may already be partly published, so it is
+not redispatched. Loss before result admission keeps the ordinary retry path. Transient
+query errors do not authorize deletion. Missing local prefix directories are a
+successful no-op; other storage failures retain the intent for retry.
+Cleanup uses coordinator-derived
 paths, including each retry's new BuildIDs, and retries object-storage failures
 across DataCoord restart without relying on the worker's in-memory file list.
 The plan applies to dispatches made by this implementation; it cannot recover

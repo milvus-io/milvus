@@ -1183,7 +1183,8 @@ func (gc *garbageCollector) removeDroppedSegmentFiles(ctx context.Context, clone
 			log.Warn(ctx, "GC V3 segment remove index files failed", mlog.Err(err))
 			return err
 		}
-		if err := gc.option.cli.RemoveWithPrefix(ctx, basePath); err != nil {
+		prefix := strings.TrimSuffix(basePath, "/") + "/"
+		if err := gc.option.cli.RemoveWithPrefix(ctx, prefix); err != nil && !isAbsentLocalPrefix(gc.option.cli, prefix, err) {
 			log.Warn(ctx, "GC V3 segment remove basePath failed",
 				mlog.String("basePath", basePath),
 				mlog.Err(err))
@@ -1568,8 +1569,13 @@ func (gc *garbageCollector) recycleUnusedSegIndexesForSegment(ctx context.Contex
 		return
 	}
 
+	// Task refresh can observe a completion published after the initial segment
+	// snapshot. Read placement after admitting terminal tasks, or an old marker
+	// or revision could send a manifest-resident result through record-only GC.
+	segment = gc.meta.GetSegment(ctx, segmentID)
+
 	// Only a healthy, marked StorageV3 segment can contain entries to retract.
-	// A false marker proves the section has always been empty and preserves the
+	// A false marker proves the published section is empty and preserves the
 	// legacy path with zero manifest I/O. Dropped/missing segments publish no
 	// further revision and are likewise handled record-by-record below.
 	manifestEntries := make(map[manifestIndexIdentity]packed.ManifestIndexInfo)

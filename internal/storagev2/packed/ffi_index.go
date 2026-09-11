@@ -252,8 +252,8 @@ func stageIndexInfo(handle C.LoonTransactionHandle, index ManifestIndexInfo) err
 	return nil
 }
 
-// stageDropIndex stages the removal of one index's metadata. Artifact files are
-// untouched; the caller deletes them only after publishing the new manifest.
+// stageDropIndex stages metadata removal without touching artifact files.
+// The lifecycle caller owns the ordering of file deletion and metadata retraction.
 func stageDropIndex(handle C.LoonTransactionHandle, indexID int64) error {
 	if err := HandleLoonFFIResult(C.loon_transaction_drop_index(handle, C.int64_t(indexID))); err != nil {
 		return merr.WrapErrStorage(err, "commit manifest drop_index")

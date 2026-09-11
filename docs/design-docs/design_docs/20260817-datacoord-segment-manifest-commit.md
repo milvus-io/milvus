@@ -143,7 +143,19 @@ Single-writer manifest writes do not serialize and are published inline via
   manifest pointer and sets the target to `Flushed`. Copy finalization reads back non-empty
   index metadata to verify target identity and artifact paths; it creates no new
   revision. These state filters exclude regular stats/index/compaction work;
-  they do not serialize copy finalization with task failure and cleanup.
+  they do not serialize copy finalization with task failure. A separate per-task
+  lock excludes the new rejected-result cleanup from result installation. Cleanup
+  rechecks failed state and waits for ordinary GC to remove all target metadata,
+  so its snapshot, loaded-reader and pause protections also precede prefix
+  deletion. Failed tasks with cleanup plans reject late completed results, including after cleanup or restart, only
+  after persisting cleanup intent. Admission failures retain scheduler polling;
+  restart resumes failed tasks that still have cleanup plans and an assigned
+  worker. Pending/InProgress worker responses keep that polling active until a
+  terminal response or confirmed worker loss. Their durable state remains Failed.
+  Worker loss after Completed-result admission fails the task and preserves its
+  cleanup intent instead of redispatching potentially partly published targets.
+  Worker loss before admission remains retryable. This does not serialize task
+  failure with a result installation that is already in progress.
 
 These paths use `UpdateManifest` to adopt a worker-produced pointer; that
 operator has no StorageV3 guard. Participating post-flush writers instead hand
@@ -322,13 +334,19 @@ published, so restart cannot resurrect an old InProgress state over a Finished
 manifest entry.
 
 Reload follows durable placement rather than the switch's current value. It
-first loads etcd task records, then reads each healthy, non-L0 StorageV3
-segment whose `manifest_has_index` marker says a manifest entry has been
+first loads etcd task records, then reads each retained healthy or Dropped,
+non-L0 StorageV3 segment whose `manifest_has_index` marker says a manifest entry has been
 published. Entries whose build IDs are absent from etcd are projected into
 in-memory `SegmentIndex` records; etcd wins conflicts, preserving task states
 and record-resident results. A marked manifest that cannot be read fails
 startup: silently omitting its entries could make GC classify live index files
-as orphaned. Startup logs scanned, read, and recovered counts. The
+as orphaned. Dropped compaction parents still need their indexes for query
+fallback and orphan-GC protection. GC removes files before removing catalog
+metadata, so a failed read may instead be followed by a successful existence
+check proving that a Dropped segment's manifest is absent. Only in that case
+does startup continue without its indexes; the marker remains unchanged until
+pending GC removes the catalog row. Existence-check failures and unreadable
+manifests that still exist fail startup. Startup logs scanned, read, and recovered counts. The
 object-storage fan-out is bounded by
 `dataCoord.index.segmentIndexManifestLoadConcurrency`.
 
@@ -350,7 +368,7 @@ precisely the entry the system still needs: a manifest entry whose definition is
 already dropped has no `SegmentIndex` record by construction, and GC is entirely
 record-driven (`GetAllSegIndexes`, `GetDeletedIndexesWithV1Path`), so an entry
 with no record is never visited again and its bytes leak for the
-COLLECTION_ROOTED layout. The reload filter is therefore: healthy, non-L0,
+COLLECTION_ROOTED layout. The reload filter is therefore: healthy or Dropped, non-L0,
 StorageV3, non-empty manifest path, and `manifest_has_index`.
 
 Every entry read is validated with the same predicate the other manifest
@@ -359,7 +377,7 @@ the reload is the one path that promotes a manifest entry into a record whose
 file keys later reach `removeObjectFiles`. A malformed entry fails startup for
 the same reason an unreadable manifest does.
 
-The cost is one object read per marked healthy non-L0 StorageV3 segment at
+The cost is one object read per marked healthy or Dropped non-L0 StorageV3 segment at
 startup. An all-etcd cluster has no marked segments and performs no manifest
 GETs. Reads use `dataCoord.index.segmentIndexManifestLoadConcurrency` (default
 64, clamped to 1–256), further bounded by `minio.maxConnections`. Each active

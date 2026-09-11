@@ -73,9 +73,9 @@ type ManifestUpdates struct {
 	// any existing entry carrying the same index_id, so republishing a
 	// rebuilt index supersedes its predecessor instead of duplicating it.
 	Indexes []ManifestIndexInfo
-	// DropIndexes removes index metadata. The index files themselves are not
-	// touched; a caller deletes them only after the returned manifest path
-	// has been published to the segment.
+	// DropIndexes removes index metadata without deleting artifact files.
+	// The lifecycle caller owns deletion ordering; DataCoord GC deletes unused
+	// bytes first, then retracts their metadata so failures remain retryable.
 	DropIndexes []DropIndexEntry
 }
 

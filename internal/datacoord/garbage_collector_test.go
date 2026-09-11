@@ -3103,7 +3103,7 @@ func TestGarbageCollector_removeDroppedSegmentFilesV3(t *testing.T) {
 
 	t.Run("success with index files", func(t *testing.T) {
 		cm := mocks.NewChunkManager(t)
-		cm.EXPECT().RemoveWithPrefix(mock.Anything, basePath).Return(nil).Once()
+		cm.EXPECT().RemoveWithPrefix(mock.Anything, basePath+"/").Return(nil).Once()
 		cm.EXPECT().Remove(mock.Anything, "root/index_files/40/1/10/2001/idx-file").Return(nil).Once()
 		gc := newGarbageCollector(nil, nil, GcOption{cli: cm})
 
@@ -3124,7 +3124,7 @@ func TestGarbageCollector_removeDroppedSegmentFilesV3(t *testing.T) {
 
 	t.Run("remove base path failed", func(t *testing.T) {
 		cm := mocks.NewChunkManager(t)
-		cm.EXPECT().RemoveWithPrefix(mock.Anything, basePath).Return(errors.New("remove failed")).Once()
+		cm.EXPECT().RemoveWithPrefix(mock.Anything, basePath+"/").Return(errors.New("remove failed")).Once()
 		gc := newGarbageCollector(nil, nil, GcOption{cli: cm})
 
 		assert.Error(t, gc.removeDroppedSegmentFiles(ctx, segment, nil))
@@ -3157,7 +3157,7 @@ func TestGarbageCollector_removeDroppedSegmentFilesV3(t *testing.T) {
 			calls = append(calls, file)
 			return nil
 		})
-		cm.EXPECT().RemoveWithPrefix(mock.Anything, basePath).RunAndReturn(func(_ context.Context, prefix string) error {
+		cm.EXPECT().RemoveWithPrefix(mock.Anything, basePath+"/").RunAndReturn(func(_ context.Context, prefix string) error {
 			mu.Lock()
 			defer mu.Unlock()
 			calls = append(calls, prefix)
@@ -3170,7 +3170,7 @@ func TestGarbageCollector_removeDroppedSegmentFilesV3(t *testing.T) {
 			"root/index_files/40/1/10/2001/idx-file2": {},
 		}))
 		require.Len(t, calls, 3)
-		assert.Equal(t, basePath, calls[len(calls)-1])
+		assert.Equal(t, basePath+"/", calls[len(calls)-1])
 	})
 }
 
@@ -4509,7 +4509,7 @@ func TestGarbageCollector_recycleDroppedSegments_V3(t *testing.T) {
 
 	// V3 segment should use RemoveWithPrefix with basePath
 	assert.True(t, removeWithPrefixCalled, "V3 segment should use RemoveWithPrefix")
-	assert.Equal(t, basePath, removeWithPrefixArg, "RemoveWithPrefix should be called with basePath")
+	assert.Equal(t, basePath+"/", removeWithPrefixArg, "RemoveWithPrefix should name the segment directory")
 
 	// V1 segment should use removeObjectFiles
 	assert.True(t, removeObjectFilesCalled, "V1 segment should use removeObjectFiles")
@@ -5479,20 +5479,10 @@ func TestGarbageCollector_recycleUnusedSegIndexes_NonManifestKeepsLegacyOrder(t 
 	assert.True(t, ok, "files-first ordering must leave the record for the next cycle")
 }
 
-// The manifest fallback in getDroppedSegmentIndexFiles is NOT redundant with
-// the SegmentIndex records, because "in-memory records and manifest agree" does
-// not hold for a dropped segment after manifest publication retires its etcd
-// record.
-//
-// reloadSegmentIndexesFromManifests filters on isSegmentHealthy, so a segment
-// already Dropped at restart is never rebuilt from its manifest - deliberately,
-// since reading manifests for segments that GC is actively deleting would make
-// a fail-closed boot depend on files being concurrently removed. The records
-// are therefore legitimately absent while the manifest still names the
-// artifacts, and only the manifest can tell GC what to delete. Restoring the
-// old "no records -> nothing to delete" early return leaks those artifacts:
-// BUILD_ROOTED bytes are still swept as V0 orphans, but a COLLECTION_ROOTED
-// artifact leaks permanently because recycleUnusedIndexFilesV1 is record-driven.
+// Recovery must restore a retained dropped segment's index records. Also exercise
+// GC's manifest fallback independently of recovery by removing the in-memory
+// projection after checking it was restored: the manifest remains authoritative
+// when a caller has an incomplete record view.
 func TestGarbageCollector_DroppedSegmentIndexFilesComeFromManifestAfterReload(t *testing.T) {
 	withSegmentIndexManifestWrites(t, true)
 
@@ -5500,6 +5490,7 @@ func TestGarbageCollector_DroppedSegmentIndexFilesComeFromManifestAfterReload(t 
 	basePath := "/tmp/test-gc-dropped-reload/insert_log/100/10/3101"
 	m, err := newMemoryMeta(t)
 	require.NoError(t, err)
+	m.chunkManager = storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test"))
 	require.NoError(t, m.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
 		ID:               segmentID,
 		CollectionID:     100,
@@ -5527,11 +5518,14 @@ func TestGarbageCollector_DroppedSegmentIndexFilesComeFromManifestAfterReload(t 
 	}}, nil).Build()
 	defer infos.UnPatch()
 
-	// Restart: the reload deliberately walks past the dropped segment, so the
-	// records GC would normally use simply do not exist.
 	require.NoError(t, m.reloadSegmentIndexesFromManifests(context.TODO()))
-	require.Empty(t, m.indexMeta.GetAllSegmentIndexes(segmentID),
-		"reload must skip an unhealthy segment - this is the precondition that makes the fallback load-bearing")
+	recovered := m.indexMeta.GetAllSegmentIndexes(segmentID)
+	require.Len(t, recovered, 1, "retained dropped segments need their index records after restart")
+	require.EqualValues(t, 5300, recovered[0].BuildID)
+
+	// Model a missing projection separately from the restart contract.
+	m.indexMeta.segmentBuildInfo.Remove(5300)
+	m.indexMeta.segmentIndexes.Remove(segmentID)
 
 	gc := newGarbageCollector(m, newMockHandler(), GcOption{
 		cli: storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test")),
@@ -5543,12 +5537,9 @@ func TestGarbageCollector_DroppedSegmentIndexFilesComeFromManifestAfterReload(t 
 		"with no records, the manifest is the only thing naming the artifacts; without the fallback they leak")
 }
 
-// After a DataCoord restart a dropped StorageV3 segment can hold both kinds of
-// index metadata at once: a manifest-only entry (published while manifest
-// writes were on, never rebuilt because the reload skips unhealthy
-// segments) and a record-only one (finished after the drop, so no manifest
-// revision carries it). The delete list must be the union of both sides, or
-// whichever side loses the early return leaks its artifact.
+// A dropped StorageV3 segment can have manifest artifacts and record-only
+// results completed after the drop. Exercise the union with an incomplete
+// in-memory projection so neither source of file ownership can hide the other.
 func TestGarbageCollector_getDroppedSegmentIndexFiles_UnionsRecordsAndManifest(t *testing.T) {
 	withSegmentIndexManifestWrites(t, true)
 	const (

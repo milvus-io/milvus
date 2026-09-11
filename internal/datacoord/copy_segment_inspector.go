@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 )
 
 // Copy Segment Task Inspector
@@ -137,6 +138,19 @@ func (s *copySegmentInspector) Start() {
 	ticker := time.NewTicker(inspectInterval)
 	defer ticker.Stop()
 
+	// One cleanup worker bounds storage work independently of task dispatch.
+	// Pending cleanup lives in metadata, so there is no in-memory work queue.
+	cleanupCtx, cancelCleanup := context.WithCancel(s.ctx)
+	cleanupDone := make(chan struct{})
+	go func() {
+		defer close(cleanupDone)
+		s.runCleanup(cleanupCtx, inspectInterval)
+	}()
+	defer func() {
+		cancelCleanup()
+		<-cleanupDone
+	}()
+
 	for {
 		select {
 		case <-s.closeChan:
@@ -189,7 +203,8 @@ func (s *copySegmentInspector) reloadFromMeta() {
 	for _, job := range jobs {
 		tasks := s.copyMeta.GetTasksByJobID(s.ctx, job.GetJobId())
 		for _, task := range tasks {
-			if task.GetState() == datapb.CopySegmentTaskState_CopySegmentTaskInProgress {
+			// Failed tasks can retain scheduler polling for cleanup admission.
+			if task.GetTaskState() == taskcommon.InProgress {
 				s.scheduler.Enqueue(task)
 			}
 		}
@@ -273,7 +288,6 @@ func (s *copySegmentInspector) processPending(task CopySegmentTask) {
 // - Logs warnings if drop fails but continues processing other segments
 // - Failed drops will be retried on next inspection cycle
 func (s *copySegmentInspector) processFailed(task CopySegmentTask) {
-	allDropped := true
 	// Drop target segments if copy failed
 	for _, mapping := range task.GetIdMappings() {
 		targetSegID := mapping.GetTargetSegmentId()
@@ -285,7 +299,6 @@ func (s *copySegmentInspector) processFailed(task CopySegmentTask) {
 		op := UpdateStatusOperator(targetSegID, commonpb.SegmentState_Dropped)
 		err := s.meta.UpdateSegmentsInfo(s.ctx, op)
 		if err != nil {
-			allDropped = false
 			mlog.Warn(s.ctx, "failed to drop target segment after copy task failed",
 				WrapCopySegmentTaskLog(task, mlog.Int64("segmentID", targetSegID), mlog.Err(err))...)
 		} else {
@@ -293,9 +306,26 @@ func (s *copySegmentInspector) processFailed(task CopySegmentTask) {
 				WrapCopySegmentTaskLog(task, mlog.Int64("segmentID", targetSegID))...)
 		}
 	}
-	if allDropped {
-		if err := cleanupRejectedCopy(s.ctx, task, s.meta, s.copyMeta); err != nil {
-			mlog.Warn(s.ctx, "retry rejected copy cleanup", mlog.FieldTaskID(task.GetTaskId()), mlog.Err(err))
+}
+
+func (s *copySegmentInspector) runCleanup(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			for _, copyTask := range s.copyMeta.GetTaskBy(ctx, func(t CopySegmentTask) bool {
+				return t.GetState() == datapb.CopySegmentTaskState_CopySegmentTaskFailed && t.GetCleanupRequired()
+			}) {
+				if ctx.Err() != nil {
+					return
+				}
+				if err := cleanupRejectedCopy(ctx, copyTask, s.meta, s.copyMeta); err != nil {
+					mlog.Warn(ctx, "retry rejected copy cleanup", mlog.FieldTaskID(copyTask.GetTaskId()), mlog.Err(err))
+				}
+			}
 		}
 	}
 }

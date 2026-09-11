@@ -576,8 +576,8 @@ func manifestObjectPath(basePath string, version int64) string {
 // A caller that copies a segment directory wholesale needs this to tell the
 // revision files apart from the data it is copying: milvus-storage discovers
 // the current version by listing ManifestDir and taking the highest revision
-// number it finds, so which revision objects exist at the destination decides
-// what the next commit there is built on.
+// number it finds to allocate the next revision number. OVERWRITE applies the
+// updates to the explicitly selected input revision, which determines contents.
 func IsManifestRevisionObject(objectPath string) bool {
 	dir, name := path.Split(objectPath)
 	if path.Base(path.Clean(dir)) != ManifestDir {

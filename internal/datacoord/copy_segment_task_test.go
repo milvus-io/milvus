@@ -1660,6 +1660,60 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_IndexWritePlacementMatrix
 	}
 }
 
+func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_LegacyStorageRetainsEtcdIndexes() {
+	for _, version := range []int64{storage.StorageV1, storage.StorageV2} {
+		for _, enabled := range []bool{false, true} {
+			s.Run(strconv.FormatInt(version, 10)+"/manifest="+strconv.FormatBool(enabled), func() {
+				ctx := context.Background()
+				// Result handling must follow persisted placement even after a switch flip.
+				withSegmentIndexManifestWrites(s.T(), !enabled)
+				catalog := kvdatacoord.NewCatalog(NewMetaMemoryKV(), "", "")
+				m := bootMetaForRestart(s.T(), catalog, 100)
+				s.Require().NoError(m.indexMeta.CreateIndex(ctx, &model.Index{
+					CollectionID: 100, FieldID: 101, IndexID: 300, IndexName: "vec_idx",
+					IndexParams: []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "HNSW"}},
+				}))
+				segment := newTestCopySegment(2001)
+				segment.StorageVersion = version
+				segment.IsImporting = true
+				s.Require().NoError(m.AddSegment(ctx, segment))
+				task := createTestCopyTask(100, 2001).(*copySegmentTask)
+				task.task.Load().IndexWriteToManifest = proto.Bool(enabled)
+				copies, err := NewCopySegmentMeta(ctx, catalog, m, nil, nil)
+				s.Require().NoError(err)
+				s.Require().NoError(copies.AddTask(ctx, task))
+				copies, err = NewCopySegmentMeta(ctx, catalog, m, nil, nil)
+				s.Require().NoError(err)
+				task = copies.GetTask(ctx, task.GetTaskId()).(*copySegmentTask)
+				reader := mockey.Mock(packed.GetManifestIndexInfos).Return(nil, merr.ErrServiceUnavailable).Build()
+				defer reader.UnPatch()
+				s.Require().NoError(SyncCopySegmentTask(task, &datapb.QueryCopySegmentResponse{
+					State: datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
+					SegmentResults: []*datapb.CopySegmentResult{{
+						SegmentId: 2001, ImportedRows: 100, Binlogs: makeTestCopySegmentBinlogs(),
+						IndexInfos: map[int64]*datapb.VectorScalarIndexInfo{9001: {
+							BuildId: 9001, FieldId: 101, IndexName: "vec_idx", IndexFilePaths: []string{"index.bin"},
+						}},
+					}},
+				}, copies, m))
+				s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskCompleted, task.GetState())
+				s.Equal(commonpb.SegmentState_Flushed, m.GetSegment(ctx, 2001).GetState())
+				s.False(m.GetSegment(ctx, 2001).GetIsImporting())
+				persisted, err := catalog.ListSegmentIndexes(ctx, 100)
+				s.Require().NoError(err)
+				s.Require().Len(persisted, 1)
+				s.EqualValues(9001, persisted[0].BuildID)
+				s.Equal([]string{"index.bin"}, persisted[0].IndexFileKeys)
+				restarted := bootMetaForRestart(s.T(), catalog, 100)
+				indexes := restarted.indexMeta.GetSegmentIndexes(100, 2001)
+				s.Require().Len(indexes, 1)
+				s.EqualValues(9001, indexes[300].BuildID)
+				s.Equal(commonpb.IndexState_Finished, indexes[300].IndexState)
+			})
+		}
+	}
+}
+
 func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_PreservesImportingFlagOnFailure() {
 	collectionID := int64(1)
 	segmentID := int64(103)
