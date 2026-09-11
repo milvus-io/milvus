@@ -102,7 +102,11 @@ The observable behavior changes are:
 - AutoID partial update becomes update-only: every supplied PK must exist in the
   query snapshot, and the merged Insert preserves that PK.
 
-Ordinary non-partial AutoID upsert continues to allocate a new PK.
+Ordinary non-partial AutoID Upsert follows
+[Preserve Primary Keys in Full AutoID Upsert](20260803-autoid-upsert-primary-key-preservation.md):
+it preserves an existing PK and inserts with a newly generated AutoID when the
+lookup PK is missing. That behavior is independent of
+the Partial Upsert CAS protocol described here.
 
 ### Internal protocol
 

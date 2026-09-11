@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -41,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -50,10 +52,79 @@ func TestQueryTaskAppliesFixedSnapshotTimestamp(t *testing.T) {
 		RetrieveRequest:        &internalpb.RetrieveRequest{MvccTimestamp: 200},
 		fixedSnapshotTimestamp: snapshotTS,
 	}
-
 	guaranteeTS := task.applyFixedSnapshotTimestamp(300)
 	require.Equal(t, snapshotTS, guaranteeTS)
 	require.Equal(t, snapshotTS, task.GetMvccTimestamp())
+}
+
+func TestQueryTaskPreExecuteUsesStandardVisibility(t *testing.T) {
+	const (
+		collectionID = int64(100)
+		partitionID  = int64(200)
+	)
+	beginTime := time.Unix(1_700_000_000, 0)
+	beginTS := tsoutil.ComposeTSByTime(beginTime)
+	queryUpdateTime := beginTime.Add(time.Second)
+	queryUpdateTS := tsoutil.ComposeTSByTime(queryUpdateTime)
+	schedulerTime := beginTime.Add(2 * time.Second)
+	schedulerTS := tsoutil.ComposeTSByTime(schedulerTime)
+	collectionTTL := time.Hour
+
+	schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
+		Name: "test_collection",
+		Fields: []*schemapb.FieldSchema{{
+			FieldID:      100,
+			Name:         "id",
+			IsPrimaryKey: true,
+			DataType:     schemapb.DataType_Int64,
+		}},
+	})
+	collectionInfo := &collectionInfo{
+		CollID:          collectionID,
+		Schema:          schema,
+		UpdateTimestamp: queryUpdateTS,
+		CollectionTTL:   uint64(collectionTTL),
+	}
+	metaCache := &MetaCache{}
+	collectionIDMocker := mockey.Mock((*MetaCache).GetCollectionID).Return(collectionID, nil).Build()
+	defer collectionIDMocker.UnPatch()
+	collectionInfoMocker := mockey.Mock((*MetaCache).GetCollectionInfo).Return(collectionInfo, nil).Build()
+	defer collectionInfoMocker.UnPatch()
+	collectionSchemaMocker := mockey.Mock((*MetaCache).GetCollectionSchema).Return(schema, nil).Build()
+	defer collectionSchemaMocker.UnPatch()
+	partitionsMocker := mockey.Mock((*MetaCache).GetPartitions).Return(map[string]UniqueID{
+		Params.CommonCfg.DefaultPartitionName.GetValue(): partitionID,
+	}, nil).Build()
+	defer partitionsMocker.UnPatch()
+
+	ctx := context.Background()
+	task := &queryTask{
+		baseTask:  baseTask{MetaCache: metaCache},
+		Condition: NewTaskCondition(ctx),
+		RetrieveRequest: &internalpb.RetrieveRequest{
+			Base: &commonpb.MsgBase{},
+		},
+		ctx: ctx,
+		request: &milvuspb.QueryRequest{
+			Base:               &commonpb.MsgBase{},
+			DbName:             "default",
+			CollectionName:     "test_collection",
+			Expr:               "id in [1]",
+			OutputFields:       []string{"id"},
+			ConsistencyLevel:   commonpb.ConsistencyLevel_Customized,
+			GuaranteeTimestamp: beginTS,
+		},
+	}
+	require.NoError(t, task.OnEnqueue())
+	task.SetTs(schedulerTS)
+
+	require.NoError(t, task.PreExecute(ctx))
+	require.Equal(t, queryUpdateTS, task.GetGuaranteeTimestamp())
+	// Standard Query retains its metadata wait fence and lets QueryNode choose
+	// the readable MVCC timestamp. TTL clocks follow normal Query preprocessing.
+	require.Zero(t, task.GetMvccTimestamp())
+	require.Equal(t, uint64(queryUpdateTime.UnixMilli()*1000), task.GetEntityTtlPhysicalTime())
+	require.Equal(t, tsoutil.ComposeTSByTime(schedulerTime.Add(-collectionTTL)), task.GetCollectionTtlTimestamps())
 }
 
 func TestQueryTask_all(t *testing.T) {

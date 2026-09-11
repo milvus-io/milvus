@@ -200,6 +200,26 @@ func (s *HelloMilvusSuite) TestUpsertAutoIDTrue() {
 	s.True(merr.Ok(showCollectionsResp.GetStatus()))
 	mlog.Info(context.TODO(), "ShowCollections result", mlog.Any("showCollectionsResp", showCollectionsResp))
 
+	// Full AutoID Upsert classifies caller-supplied primary keys before writing,
+	// so the collection must be queryable before the request is submitted.
+	createIndexStatus, err := c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+		CollectionName: collectionName,
+		FieldName:      integration.FloatVecField,
+		IndexName:      "_default",
+		ExtraParams:    integration.ConstructIndexParam(dim, integration.IndexFaissIvfFlat, metric.IP),
+	})
+	s.NoError(err)
+	s.NoError(merr.Error(createIndexStatus))
+	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
+
+	loadStatus, err := c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+	})
+	s.NoError(err)
+	s.NoError(merr.Error(loadStatus))
+	s.WaitForLoad(ctx, collectionName)
+
 	pkFieldData := integration.NewInt64FieldDataWithStart(integration.Int64Field, rowNum, 0)
 	fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
 	hashKeys := integration.GenerateHashKeys(rowNum)
@@ -210,7 +230,8 @@ func (s *HelloMilvusSuite) TestUpsertAutoIDTrue() {
 		HashKeys:       hashKeys,
 		NumRows:        uint32(rowNum),
 	})
-	s.NoError(err)
+	s.Require().NoError(err)
+	s.Require().NotNil(upsertResult)
 	s.True(merr.Ok(upsertResult.GetStatus()))
 
 	// flush
@@ -234,32 +255,6 @@ func (s *HelloMilvusSuite) TestUpsertAutoIDTrue() {
 		mlog.Info(context.TODO(), "ShowSegments result", mlog.String("segment", segment.String()))
 	}
 
-	// create index
-	createIndexStatus, err := c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
-		CollectionName: collectionName,
-		FieldName:      integration.FloatVecField,
-		IndexName:      "_default",
-		ExtraParams:    integration.ConstructIndexParam(dim, integration.IndexFaissIvfFlat, metric.IP),
-	})
-	s.NoError(err)
-	err = merr.Error(createIndexStatus)
-	if err != nil {
-		mlog.Warn(context.TODO(), "createIndexStatus fail reason", mlog.Err(err))
-	}
-
-	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
-
-	// load
-	loadStatus, err := c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
-		DbName:         dbName,
-		CollectionName: collectionName,
-	})
-	s.NoError(err)
-	err = merr.Error(loadStatus)
-	if err != nil {
-		mlog.Warn(context.TODO(), "LoadCollection fail reason", mlog.Err(err))
-	}
-	s.WaitForLoad(ctx, collectionName)
 	// search
 	expr := fmt.Sprintf("%s > 0", integration.Int64Field)
 	nq := 10

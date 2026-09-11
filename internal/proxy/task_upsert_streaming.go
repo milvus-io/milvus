@@ -228,7 +228,11 @@ func (ut *upsertTask) packInsertMessage(ctx context.Context, ez *message.CipherC
 		mlog.Duration("get cache duration", getCacheDur),
 		mlog.Duration("get msgStream duration", getMsgStreamDur))
 
-	// start to repack insert data
+	// Route inserts by finalized PKs, not lookup IDs: a missing AutoID row
+	// receives a generated PK that may hash to a different channel.
+	if ut.result.GetIDs() == nil {
+		return nil, merr.WrapErrServiceInternalMsg("upsert insert routing primary keys are unavailable")
+	}
 	var msgs []message.MutableMessage
 	if ut.partitionKeys == nil {
 		msgs, err = repackInsertDataForStreamingService(ut.TraceCtx(), ut.GetMetaCache(), channelNames, ut.upsertMsg.InsertMsg, ut.result, ez, ut.schemaVersion, ut.partialUpdateCASGroups)
@@ -244,12 +248,16 @@ func (ut *upsertTask) packInsertMessage(ctx context.Context, ez *message.CipherC
 }
 
 func (ut *upsertTask) packDeleteMessage(ctx context.Context, ez *message.CipherConfig) ([]message.MutableMessage, error) {
-	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy deleteExecute upsert %d", ut.ID()))
-	collID := ut.upsertMsg.DeleteMsg.CollectionID
 	if ut.upsertMsg.DeleteMsg.PrimaryKeys == nil {
-		// if primary keys are not set by queryPreExecute, use oldIDs to delete all given records
+		// Fall back only when no delete subset was prepared; an empty subset
+		// means no lookup IDs should be deleted.
 		ut.upsertMsg.DeleteMsg.PrimaryKeys = ut.oldIDs
 	}
+	if typeutil.GetSizeOfIDs(ut.upsertMsg.DeleteMsg.PrimaryKeys) == 0 {
+		return nil, nil
+	}
+	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy deleteExecute upsert %d", ut.ID()))
+	collID := ut.upsertMsg.DeleteMsg.CollectionID
 	log := mlog.With(
 		mlog.FieldCollectionID(collID))
 	// hash primary keys to channels

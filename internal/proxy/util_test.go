@@ -2450,7 +2450,7 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 				Status: merr.Success(),
 			},
 		}
-		_, _, err := checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg, false)
+		_, err := checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg)
 		assert.NotEqual(t, nil, err)
 	})
 
@@ -2494,7 +2494,7 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 				Status: merr.Success(),
 			},
 		}
-		_, _, err := checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg, false)
+		_, err := checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg)
 		assert.NotEqual(t, nil, err)
 	})
 
@@ -2535,7 +2535,7 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 				Status: merr.Success(),
 			},
 		}
-		_, _, err := checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg, false)
+		_, err := checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg)
 		assert.NotEqual(t, nil, err)
 	})
 
@@ -2580,7 +2580,7 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 				Status: merr.Success(),
 			},
 		}
-		_, _, err := checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg, false)
+		_, err := checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg)
 		assert.NotEqual(t, nil, err)
 	})
 
@@ -2631,11 +2631,11 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 				Status: merr.Success(),
 			},
 		}
-		_, _, err := checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg, false)
+		_, err := checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg)
 		assert.NotEqual(t, nil, err)
 	})
 
-	t.Run("upsert must assign pk", func(t *testing.T) {
+	t.Run("upsert rejects empty pk payload", func(t *testing.T) {
 		// autoid==true
 		task := insertTask{
 			schema: &schemapb.CollectionSchema{
@@ -2672,8 +2672,8 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 				Status: merr.Success(),
 			},
 		}
-		_, _, err := checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg, false)
-		assert.NoError(t, nil, err)
+		_, err := checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg)
+		assert.Error(t, err)
 
 		// autoid==false
 		task = insertTask{
@@ -2711,8 +2711,8 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 				Status: merr.Success(),
 			},
 		}
-		_, _, err = checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg, false)
-		assert.NoError(t, nil, err)
+		_, err = checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg)
+		assert.Error(t, err)
 	})
 
 	t.Run("handle autoid primary key modes", func(t *testing.T) {
@@ -2762,16 +2762,10 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 				Status: merr.Success(),
 			},
 		}
-		ids, oldIDs, err := checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg, true)
+		ids, err := checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg)
 		assert.NoError(t, err)
 		assert.Equal(t, []int64{2}, task.insertMsg.FieldsData[0].GetScalars().GetLongData().GetData())
 		assert.Equal(t, []int64{2}, ids.GetIntId().GetData())
-		assert.Equal(t, []int64{2}, oldIDs.GetIntId().GetData())
-
-		_, _, err = checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg, false)
-		newPK := task.insertMsg.FieldsData[0].GetScalars().GetLongData().GetData()
-		assert.Equal(t, newPK, task.insertMsg.RowIDs)
-		assert.NoError(t, err)
 	})
 }
 
