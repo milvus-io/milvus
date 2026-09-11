@@ -93,6 +93,7 @@ type FileInfo struct {
 	NumRows         int64
 	SourceSegmentID int64
 	Deltalogs       []*datapb.FieldBinlog
+	Properties      map[string]string `json:"properties,omitempty"`
 }
 
 // ExploreFiles scans an external directory and returns file information.
@@ -438,9 +439,14 @@ func ReadFileInfosFromManifestPath(
 			if fileArray[j].path == nil {
 				return nil, merr.WrapErrServiceInternalMsg("file path is nil in column group %d, file %d", i, j)
 			}
+			properties, err := columnGroupFileProperties(&fileArray[j])
+			if err != nil {
+				return nil, merr.Wrapf(err, "column group %d file %d", i, j)
+			}
 			fileInfos = append(fileInfos, FileInfo{
-				FilePath: C.GoString(fileArray[j].path),
-				NumRows:  int64(fileArray[j].end_index),
+				FilePath:   C.GoString(fileArray[j].path),
+				NumRows:    int64(fileArray[j].end_index),
+				Properties: properties,
 			})
 		}
 	}

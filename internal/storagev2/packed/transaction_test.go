@@ -15,6 +15,7 @@
 package packed
 
 import (
+	"context"
 	"fmt"
 	"path"
 	"path/filepath"
@@ -30,6 +31,62 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+func TestExternalFilePropertiesRoundTrip(t *testing.T) {
+	paramtable.Init()
+	for _, tc := range []struct {
+		format     string
+		properties map[string]string
+	}{
+		{"parquet", map[string]string{"extra": "preserved"}},
+		{"lance-table", map[string]string{"dataset_version": "10", "extra": "preserved"}},
+		{"iceberg-table", map[string]string{"metadata": `[{"path":"delete.parquet","file_type":"position"}]`, "extra": "preserved"}},
+	} {
+		t.Run(tc.format, func(t *testing.T) {
+			dir := t.TempDir()
+			config := &indexpb.StorageConfig{StorageType: "local", RootPath: dir}
+			exploreBase := filepath.Join(dir, "explore")
+			filePath := filepath.Join(dir, "source.parquet")
+			exploreManifest, err := CommitManifestUpdates(exploreBase, ManifestEarliest, config, &ManifestUpdates{
+				ColumnGroups: []ColumnGroupEntry{{
+					Columns: []string{"id"}, Format: tc.format,
+					Files: []ColumnGroupFileEntry{{Path: filePath, StartIndex: 0, EndIndex: 4, Properties: tc.properties}},
+				}},
+			})
+			require.NoError(t, err)
+			_, version, err := UnmarshalManifestPath(exploreManifest)
+			require.NoError(t, err)
+			explorePath := filepath.Join(exploreBase, "_metadata", fmt.Sprintf("manifest-%d.avro", version))
+
+			fileInfos, err := ReadFileInfosFromManifestPath(explorePath, config)
+			require.NoError(t, err)
+			require.Len(t, fileInfos, 1)
+			assert.Equal(t, tc.properties, fileInfos[0].Properties)
+
+			fragments, err := FetchFragmentsFromExternalSourceWithRange(context.Background(), tc.format,
+				[]string{"id"}, "", config, 0, 1, explorePath, ExternalFetchOptions{RowLimit: 2})
+			require.NoError(t, err)
+			require.Len(t, fragments, 2)
+			for i, fragment := range fragments {
+				assert.Equal(t, tc.properties, fragment.Properties)
+				assert.Equal(t, int64(i*2), fragment.StartRow)
+				assert.Equal(t, int64(i*2+2), fragment.EndRow)
+			}
+
+			manifestPath, err := CreateManifestForSegment(filepath.Join(dir, "segment"), []string{"id"}, tc.format, fragments, config)
+			require.NoError(t, err)
+			readBack, err := ReadFragmentsFromManifest(manifestPath, config, []string{"id"})
+			require.NoError(t, err)
+			assert.Equal(t, fragments, readBack)
+
+			manifestPath, err = AppendSegmentManifestColumns(context.Background(), manifestPath, tc.format, []string{"extra_column"}, readBack, config)
+			require.NoError(t, err)
+			readBack, err = ReadFragmentsFromManifest(manifestPath, config, []string{"extra_column"})
+			require.NoError(t, err)
+			assert.Equal(t, fragments, readBack)
+		})
+	}
+}
 
 func TestDeltaLogEntry(t *testing.T) {
 	entry := DeltaLogEntry{
