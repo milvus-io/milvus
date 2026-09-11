@@ -176,7 +176,7 @@ We highly recommend you refer to and comply to the following style guides when y
 
 ### Golang coding style
 
-- Coding style: refer to the [Effictive Go Style Guide](https://golang.org/doc/effective_go)
+- Coding style: refer to the [Effective Go Style Guide](https://golang.org/doc/effective_go)
 
 We also use `golangci-lint` to perform code check. Run the following command before submitting your pull request and make sure there is no issue reported:
 
