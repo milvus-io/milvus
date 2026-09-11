@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -133,6 +134,33 @@ func (suite *StatsInterceptorSuite) TestUnaryRequestStatsInterceptor() {
 				suite.MetricsEqual(metrics.ProxyFunctionCall.WithLabelValues(labels...), 1)
 			}
 			metrics.ProxyFunctionCall.DeletePartialMatch(prometheus.Labels{})
+		})
+	}
+}
+
+func (suite *StatsInterceptorSuite) TestDropCollectionDoesNotRecordProxyFunctionCall() {
+	for _, tc := range []struct {
+		name string
+		resp interface{}
+		err  error
+	}{
+		{name: "success", resp: merr.Success()},
+		{name: "failure", resp: merr.Status(merr.WrapErrServiceInternal("mock failure"))},
+	} {
+		suite.Run(tc.name, func() {
+			metrics.ProxyFunctionCall.Reset()
+			suite.T().Cleanup(metrics.ProxyFunctionCall.Reset)
+
+			UnaryRequestStatsInterceptor(
+				context.Background(),
+				&milvuspb.DropCollectionRequest{DbName: "default", CollectionName: "test"},
+				&grpc.UnaryServerInfo{FullMethod: milvuspb.MilvusService_DropCollection_FullMethodName},
+				func(context.Context, any) (interface{}, error) {
+					return tc.resp, tc.err
+				},
+			)
+
+			suite.Zero(testutil.CollectAndCount(metrics.ProxyFunctionCall))
 		})
 	}
 }
