@@ -110,8 +110,10 @@ TEST(Futures, Future) {
         std::mutex mu;
         mu.lock();
         future->registerReadyCallback(
-            [](CLockedGoMutex* mutex) { ((std::mutex*)(mutex))->unlock(); },
-            (CLockedGoMutex*)(&mu));
+            [](CFutureCallbackToken token) {
+                reinterpret_cast<std::mutex*>(token)->unlock();
+            },
+            reinterpret_cast<CFutureCallbackToken>(&mu));
         mu.lock();
         ASSERT_TRUE(future->isReady());
         auto [r, s] = future->leakyGet();
@@ -138,8 +140,10 @@ TEST(Futures, Future) {
         std::mutex mu;
         mu.lock();
         future->registerReadyCallback(
-            [](CLockedGoMutex* mutex) { ((std::mutex*)(mutex))->unlock(); },
-            (CLockedGoMutex*)(&mu));
+            [](CFutureCallbackToken token) {
+                reinterpret_cast<std::mutex*>(token)->unlock();
+            },
+            reinterpret_cast<CFutureCallbackToken>(&mu));
         mu.lock();
         ASSERT_TRUE(future->isReady());
         auto [r, s] = future->leakyGet();
@@ -163,8 +167,10 @@ TEST(Futures, Future) {
         std::mutex mu;
         mu.lock();
         future->registerReadyCallback(
-            [](CLockedGoMutex* mutex) { ((std::mutex*)(mutex))->unlock(); },
-            (CLockedGoMutex*)(&mu));
+            [](CFutureCallbackToken token) {
+                reinterpret_cast<std::mutex*>(token)->unlock();
+            },
+            reinterpret_cast<CFutureCallbackToken>(&mu));
         mu.lock();
         ASSERT_TRUE(future->isReady());
         auto [r, s] = future->leakyGet();
@@ -187,8 +193,10 @@ TEST(Futures, Future) {
         std::mutex mu;
         mu.lock();
         future->registerReadyCallback(
-            [](CLockedGoMutex* mutex) { ((std::mutex*)(mutex))->unlock(); },
-            (CLockedGoMutex*)(&mu));
+            [](CFutureCallbackToken token) {
+                reinterpret_cast<std::mutex*>(token)->unlock();
+            },
+            reinterpret_cast<CFutureCallbackToken>(&mu));
         mu.lock();
         ASSERT_TRUE(future->isReady());
         auto [r, s] = future->leakyGet();
@@ -215,8 +223,10 @@ TEST(Futures, Future) {
         std::mutex mu;
         mu.lock();
         future->registerReadyCallback(
-            [](CLockedGoMutex* mutex) { ((std::mutex*)(mutex))->unlock(); },
-            (CLockedGoMutex*)(&mu));
+            [](CFutureCallbackToken token) {
+                reinterpret_cast<std::mutex*>(token)->unlock();
+            },
+            reinterpret_cast<CFutureCallbackToken>(&mu));
         mu.lock();
         ASSERT_TRUE(future->isReady());
         auto [r, s] = future->leakyGet();
