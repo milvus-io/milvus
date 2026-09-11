@@ -54,6 +54,7 @@ const (
 	ExtfsKeyGCPTargetServiceAccount = specutil.ExtfsKeyGCPTargetServiceAccount
 	ExtfsKeyRegion                  = specutil.ExtfsKeyRegion
 	ExtfsKeyCloudProvider           = specutil.ExtfsKeyCloudProvider
+	ExtfsKeyEndpointURL             = specutil.ExtfsKeyEndpointURL
 	ExtfsKeyBucketName              = specutil.ExtfsKeyBucketName
 	ExtfsKeyIAMEndpoint             = specutil.ExtfsKeyIAMEndpoint
 	ExtfsKeyStorageType             = specutil.ExtfsKeyStorageType
@@ -199,6 +200,74 @@ func ValidateExternalSource(source string) error {
 	return nil
 }
 
+// validateEndpointURL validates the explicit endpoint mode. The presence of
+// endpoint_url makes external_source use the standard scheme://bucket/key
+// shape; the endpoint URL supplies the physical storage address.
+func validateEndpointURL(sourceScheme string, extfs map[string]string) (bool, error) {
+	endpointURL, ok := extfs[ExtfsKeyEndpointURL]
+	if !ok {
+		return false, nil
+	}
+	if endpointURL == "" || strings.TrimSpace(endpointURL) != endpointURL {
+		return false, merr.WrapErrParameterInvalidMsg("extfs.endpoint_url must be a non-empty URL without surrounding whitespace")
+	}
+
+	switch sourceScheme {
+	case SchemeS3, SchemeS3A, SchemeAWS, SchemeMinIO:
+	default:
+		return false, merr.WrapErrParameterInvalidMsg(
+			"extfs.endpoint_url is only supported for S3-compatible source schemes [aws, minio, s3, s3a], got %q",
+			sourceScheme)
+	}
+
+	u, err := url.Parse(endpointURL)
+	if err != nil {
+		return false, merr.WrapErrParameterInvalidErr(err, "invalid extfs.endpoint_url")
+	}
+	endpointScheme := strings.ToLower(u.Scheme)
+	if endpointScheme != "http" && endpointScheme != "https" {
+		return false, merr.WrapErrParameterInvalidMsg(
+			"extfs.endpoint_url scheme must be http or https, got %q", u.Scheme)
+	}
+	if u.Hostname() == "" {
+		return false, merr.WrapErrParameterInvalidMsg("extfs.endpoint_url must have a non-empty host")
+	}
+	if strings.HasSuffix(u.Host, ":") {
+		return false, merr.WrapErrParameterInvalidMsg("extfs.endpoint_url must not contain an empty port")
+	}
+	if port := u.Port(); port != "" {
+		portNumber, err := strconv.Atoi(port)
+		if err != nil || portNumber < 1 || portNumber > 65535 {
+			return false, merr.WrapErrParameterInvalidMsg("extfs.endpoint_url has invalid port %q", port)
+		}
+	}
+	if u.User != nil {
+		return false, merr.WrapErrParameterInvalidMsg("extfs.endpoint_url must not embed credentials")
+	}
+	if u.RawQuery != "" || u.ForceQuery {
+		return false, merr.WrapErrParameterInvalidMsg("extfs.endpoint_url must not contain a query")
+	}
+	if u.Fragment != "" {
+		return false, merr.WrapErrParameterInvalidMsg("extfs.endpoint_url must not contain a fragment")
+	}
+	if escapedPath := u.EscapedPath(); escapedPath != "" && escapedPath != "/" {
+		return false, merr.WrapErrParameterInvalidMsg("extfs.endpoint_url must not contain a path, got %q", u.Path)
+	}
+	if _, ok := extfs[ExtfsKeyBucketName]; ok {
+		return false, merr.WrapErrParameterInvalidMsg(
+			"extfs.bucket_name cannot be set with extfs.endpoint_url; the bucket comes from external_source")
+	}
+	if useSSL, ok := extfs[ExtfsKeyUseSSL]; ok {
+		expectedUseSSL := strconv.FormatBool(endpointScheme == "https")
+		if useSSL != expectedUseSSL {
+			return false, merr.WrapErrParameterInvalidMsg(
+				"extfs.use_ssl=%q conflicts with extfs.endpoint_url scheme %q; expected %q",
+				useSSL, endpointScheme, expectedUseSSL)
+		}
+	}
+	return true, nil
+}
+
 // ValidateSourceAndSpec validates URL + JSON shape + ValidateExtfsComplete.
 // Errors retain their typed validation code while adding field context.
 // Called from Proxy and RootCoord (defense in depth) on create-collection.
@@ -286,20 +355,29 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 	if err == nil {
 		scheme = strings.ToLower(u.Scheme)
 	}
+	hasEndpointURL, err := validateEndpointURL(scheme, extfs)
+	if err != nil {
+		return err
+	}
 
 	// extfs.cloud_provider is required and must be from the allowed set, except
-	// for minio:// where the scheme selects MinIO validation semantics. This is
-	// a local classification only; it is not written back to external_spec.
-	// Inferring cloud_provider from s3:// is ambiguous (AWS S3 vs self-hosted
-	// MinIO), so s3-family URIs still require the caller to be explicit.
+	// when the source scheme or endpoint_url already selects S3-compatible
+	// semantics. This is a local classification only; it is not written back to
+	// external_spec. In explicit-endpoint mode, the runtime uses the generic AWS
+	// S3-compatible client with endpoint override, so requiring the caller to
+	// repeat a provider adds no information.
 	rawCP := extfs[ExtfsKeyCloudProvider]
 	cp := strings.ToLower(rawCP)
 	if rawCP != cp {
 		return merr.WrapErrParameterInvalidMsg(
 			"extfs.cloud_provider=%q must use the canonical lowercase value %q", rawCP, cp)
 	}
-	if scheme == SchemeMinIO && cp == "" {
-		cp = CloudProviderMinIO
+	if cp == "" {
+		if scheme == SchemeMinIO {
+			cp = CloudProviderMinIO
+		} else if hasEndpointURL {
+			cp = CloudProviderAWS
+		}
 	}
 	if cp == "" {
 		return merr.WrapErrParameterMissingMsg("extfs.cloud_provider is required: one of [aws, gcp, aliyun, tencent, huawei, azure, minio]; inferring from URI scheme is ambiguous (e.g. s3:// matches both AWS S3 and self-hosted MinIO)")
@@ -401,7 +479,7 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 	// region. Reject AWS-form configurations whose DeriveEndpoint returns
 	// empty — the endpoint would resolve to the URI host (= bucket) at
 	// runtime and fail opaquely.
-	if u != nil {
+	if u != nil && !hasEndpointURL {
 		// Cloud-family URI.host → Milvus-form, URI is authoritative.
 		// Covers global/accelerate/dualstack/FIPS/VPC/sovereign endpoint
 		// variants that DeriveEndpoint does not produce verbatim.
