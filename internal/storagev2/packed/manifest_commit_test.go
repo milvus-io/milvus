@@ -11,6 +11,7 @@
 package packed
 
 import (
+	"fmt"
 	"path"
 	"testing"
 
@@ -22,6 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -64,6 +66,69 @@ func TestCommitManifestUpdates_EmptyShortCircuit(t *testing.T) {
 				"empty updates must return the unchanged manifest path")
 		})
 	}
+}
+
+func TestRemoveUnpublishedManifestKeepsSuccessorReadable(t *testing.T) {
+	cfg := manifestTestStorageConfig(t)
+	basePath := "files/remove_unpublished_manifest/seg1"
+	firstStatPath := path.Join(cfg.RootPath, basePath, "_stats/text_index.100/1")
+	secondStatPath := path.Join(cfg.RootPath, basePath, "_stats/json_stats.101/1")
+	require.NoError(t, WriteFile(cfg, firstStatPath, []byte("text-stats")))
+	require.NoError(t, WriteFile(cfg, secondStatPath, []byte("json-stats")))
+
+	intermediate, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, &ManifestUpdates{
+		Stats: []StatEntry{{Key: "text_index.100", Files: []string{firstStatPath}}},
+	})
+	require.NoError(t, err)
+	_, intermediateVersion, err := UnmarshalManifestPath(intermediate)
+	require.NoError(t, err)
+
+	finalManifest, err := CommitManifestUpdates(basePath, intermediateVersion, cfg, &ManifestUpdates{
+		Stats: []StatEntry{{Key: "json_stats.101", Files: []string{secondStatPath}}},
+	})
+	require.NoError(t, err)
+
+	intermediateFilePath := fmt.Sprintf("%s/_metadata/manifest-%d.avro", basePath, intermediateVersion)
+	_, err = ReadFile(cfg, intermediateFilePath)
+	require.NoError(t, err, "the intermediate manifest must exist before removal")
+
+	require.NoError(t, RemoveUnpublishedManifest(intermediate, cfg))
+	// Read through the filesystem instead of GetManifestStats: manifests are
+	// immutable and milvus-storage may still serve a previously opened version
+	// from its in-process manifest cache after the physical file is deleted.
+	_, err = ReadFile(cfg, intermediateFilePath)
+	require.Error(t, err, "the exact unpublished manifest version must be removed")
+
+	stats, err := GetManifestStats(finalManifest, cfg)
+	require.NoError(t, err, "a manifest is a complete snapshot and must not depend on its predecessor")
+	require.Contains(t, stats, "text_index.100")
+	require.Contains(t, stats, "json_stats.101")
+
+	_, finalVersion, err := UnmarshalManifestPath(finalManifest)
+	require.NoError(t, err)
+	nextManifest, err := CommitManifestUpdates(basePath, finalVersion, cfg, &ManifestUpdates{
+		Stats: []StatEntry{{Key: "text_index.100", Files: []string{firstStatPath}}},
+	})
+	require.NoError(t, err, "future commits must tolerate a gap in manifest versions")
+	_, nextVersion, err := UnmarshalManifestPath(nextManifest)
+	require.NoError(t, err)
+	require.Greater(t, nextVersion, finalVersion)
+}
+
+func TestRemoveUnpublishedManifestErrors(t *testing.T) {
+	cfg := manifestTestStorageConfig(t)
+
+	err := DeleteFile(cfg, "")
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+
+	err = RemoveUnpublishedManifest("not-a-manifest", cfg)
+	require.ErrorIs(t, err, merr.ErrDataIntegrity)
+
+	err = RemoveUnpublishedManifest(MarshalManifestPath("files/non_persisted", ManifestEarliest), cfg)
+	require.ErrorIs(t, err, merr.ErrDataIntegrity)
+
+	err = RemoveUnpublishedManifest(MarshalManifestPath("files/missing_manifest", 1), cfg)
+	require.ErrorIs(t, err, merr.ErrStorage)
 }
 
 // TestCommitManifestUpdates_StatsOnly exercises the stats-without-inserts
