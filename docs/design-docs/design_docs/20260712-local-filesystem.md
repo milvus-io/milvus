@@ -1,317 +1,374 @@
 # MEP: Rooted Local File System
 
 - **Created:** 2026-07-12
-- **Updated:** 2026-09-08
+- **Updated:** 2026-09-11
 - **Author(s):** @sparknack
 - **Status:** Draft
 - **Component:** Local filesystem / Segcore / Index / Caching layer
 - **Related Issues:** #51507
-- **Related code:** `internal/core/src/local`,
-  `internal/core/src/storage`, `internal/core/src/index`,
-  `internal/core/src/segcore`
+- **Related code:** `internal/core/src/local`, `internal/core/src/storage`,
+  `internal/core/src/index`, `internal/core/src/segcore`,
+  `internal/core/src/exec/expression`
 
 ## 1. Summary
 
-Milvus needs an explicit abstraction for files that live on the node running a
-component. These files include downloaded index artifacts, mmap backing files,
-and operation-scoped scratch data. They are different from persisted objects
-in S3-compatible storage even when both happen to be accessed through file-like
-APIs.
+Milvus needs explicit ownership of node-local directories and files used by
+indexes, mmap, caches, and scratch operations. This proposal uses a tree of
+shared directory objects. A child retains its parent; open files, mappings,
+and asynchronous or native-library operations retain the directory they use.
+The final directory reference triggers cleanup according to that directory's
+immutable cleanup policy.
 
-This design introduces `milvus::local`:
+There is no separate writer lease, active-writer counter, or public recursive
+directory deletion API. A writer keeps the directory alive in exactly the
+same way as any other user. A file may be explicitly unlinked earlier, or
+left for directory cleanup. File closure alone does not imply unlink.
 
-```text
-milvus::storage
-    persisted object/key storage and remote transfer
-
-milvus::local::FileSystem
-    a rooted capability for one local filesystem namespace
-
-milvus::local::FileHandle
-    move-only ownership of one opened native file
-
-milvus::local::io::MappedRegion
-    RAII ownership of one mapped region
-
-milvus::cachinglayer
-    cache loading, pinning, accounting, and eviction policy
-```
-
-`FileSystem` is a small, copyable value handle. `FileSystem::Open()` binds
-a canonical absolute root path once; it does not pin a directory inode.
-All operations below that root use validated
-relative `local::Path` values. `Subtree()` derives a narrower capability
-without introducing another configured service or global registry.
+This revision replaces the initial proposal's lexical `Subtree()` views and
+independent `ManagedSubtree` owners. It is a proposed redesign, not a
+description of behavior already implemented by PR #51509. Code below shows
+the intended interfaces, not APIs available in that PR today.
 
 ```cpp
-auto node_cache = local::FileSystem::Open(node_cache_root);
-auto local_chunk = node_cache.Subtree(local::Path("local_chunk"));
-auto growing_mmap = node_cache.Subtree(local::Path("growing_mmap"));
+auto files = local::FileSystem::Open(node_cache_root);
+auto node_cache = files.Root();
+auto local_chunk = node_cache->Child("local_chunk", local::Cleanup::Keep);
+auto segments = local_chunk->Child("segments", local::Cleanup::Keep);
+auto segment = segments->Child("100");  // RemoveOnLastRelease by default
+
+auto output = segment->Open(
+    "index.bin", {.mode = local::OpenMode::ReadWrite, .create = true});
+// output and any receiving I/O wrapper retain segment.
 ```
 
-Directories that need writer-versus-cleanup coordination explicitly use
-`ManagedSubtree`. Ordinary filesystem operations remain immediate and do not
-hide cache or lifecycle policy.
+Physical paths and on-disk formats remain unchanged. Persistent
+`storageType=local` stays under `milvus::storage`; cache admission and eviction
+decisions stay with the existing cache and business owners.
 
-## 2. Motivation
+## 2. Motivation and Existing Behavior
 
-### 2.1 Local files are not object storage
+### 2.1 Ownership must follow the directory hierarchy
 
-`ChunkManager` models objects addressed by keys. Its implementations cover
-remote object storage and persistent `storageType=local` compatibility.
-Node-local artifacts have different requirements:
+The initial proposal has a path prefix and an independent cleanup state.
+Two `ManageSubtree("segments/100")` calls create unrelated owners. A parent
+filesystem view can recursively delete `segments` without consulting either
+owner. Callers must separately acquire a lease, keep it longer than every
+file or asynchronous operation, and avoid all ancestor deletion and rename.
 
-- directory creation and recursive removal;
-- validated paths below a configured root;
-- POSIX file descriptors and positioned I/O;
-- mmap lifetime ownership;
-- third-party libraries that require native paths;
-- coordination between active writers and cleanup.
+The tree proposed here represents those dependencies directly. A live child
+keeps its ancestors alive. Repeated acquisition of the same child shares its
+identity. Business eviction releases references instead of bypassing users
+with a recursive deletion call.
 
-Putting these operations under `milvus::storage` blurs persistent storage,
-remote transfer, node-local cache, and scratch lifetimes.
+### 2.2 Both file and directory cleanup already exist
 
-Persistent `storageType=local` remains under `milvus::storage`. The new
-namespace is for local filesystem mechanisms used by node-local artifacts.
+The existing production code has several cleanup granularities:
 
-### 2.2 Absolute path strings spread authority
+| Existing code | Cleanup mechanism |
+| --- | --- |
+| `LocalChunkManager::Remove` | Single-entry `boost::filesystem::remove` |
+| `LocalChunkManager::RemoveDir` | Recursive `boost::filesystem::remove_all` |
+| `ExprResCacheManager::RemoveDiskSegmentFile` | Close and remove one segment cache file |
+| `TextLobSpillover::~TextLobSpillover` | Close and remove its spillover file |
+| `IndexEntryEncryptedLocalWriter` | Unlink its temporary file during cleanup |
+| `InvertedIndexTantivy` and `MmapChunkManager` | Remove an owned directory during teardown |
 
-Passing strings such as
-`/var/lib/milvus/data/cache/<node-id>/local_chunk/...` through business code
-duplicates root construction and lets every consumer address sibling
-directories. It also makes tests depend on process-global setup.
+The design preserves these choices. An independent temporary file need not
+wait for an entire segment directory to disappear. Conversely, every file in
+an index directory need not acquire a separate delete-on-destruction object.
 
-A rooted handle centralizes the absolute root and gives leaf components only
-the subtree they need.
+### 2.3 Scope
 
-### 2.3 One physical root contains several logical namespaces
+Goals are explicit dependencies, shared directory identity, lifetime-safe
+cleanup, native-library compatibility, and incremental migration by complete
+ownership domains.
 
-The node cache currently contains logical children such as:
+This work does not introduce cache eviction policy, a filesystem plugin
+framework, a registry of every on-disk file, or an OS security sandbox. It
+does not promise immediate reclamation while consumers still hold references.
 
-```text
-localStorage.path/cache/<node-id>/
-├── local_chunk/
-├── growing_mmap/
-├── bm25/
-├── file_resource/
-└── expr_cache/
-```
+## 3. Public Interfaces
 
-These are subtrees, not five independent filesystem services. A configured
-mmap directory may still be opened as a separate root when it points at a
-different disk or mount.
+### 3.1 Root context and shared directories
 
-## 3. Goals and Non-goals
-
-### 3.1 Goals
-
-- represent local filesystem access as an explicit dependency;
-- bind absolute paths at composition boundaries;
-- use relative paths inside rooted namespaces;
-- reject absolute paths and `..` root escape;
-- support multiple roots in one process and in tests;
-- provide move-only RAII file and mmap handles;
-- preserve existing writer behavior and native-library compatibility;
-- make concurrent writer/cleanup coordination explicit;
-- preserve current on-disk paths and formats;
-- allow incremental migration from legacy local file access.
-
-### 3.2 Non-goals
-
-- replace `milvus::cachinglayer`;
-- introduce another cache namespace or eviction policy;
-- move S3 APIs into `milvus::local`;
-- remove persistent `storageType=local`;
-- redesign index layouts or remote object names;
-- migrate every direct filesystem call in one change;
-- introduce io_uring, a buffer pool, or a virtual filesystem plugin system.
-
-## 4. Namespace and Ownership Model
-
-```text
-internal/core/src/local/
-├── Path.h
-├── FileHandle.h
-├── FileHandle.cpp
-├── FileSystem.h
-├── FileSystem.cpp
-├── ManagedSubtree.h
-├── ManagedSubtree.cpp
-└── io/
-    ├── FileWriter.h
-    ├── FileWriter.cpp
-    ├── MappedRegion.h
-    └── MappedRegion.cpp
-```
+`FileSystem` is the composition-level owner of a root context and cleanup
+supervisor. It is not a copyable path view. Runtime construction creates it,
+injects directory references into consumers, and shuts it down after those
+consumers have stopped. Multiple independent physical roots are supported;
+there is no default instance or process-global lookup.
 
 ```cpp
-namespace milvus::local {
-class Path;
-class FileHandle;
-class FileSystem;
-class ManagedSubtree;
-}
+class Directory;
+using DirectoryPtr = std::shared_ptr<Directory>;
 
-namespace milvus::local::io {
-class FileWriter;
-class PositionedFileWriter;
-class MappedRegion;
-}
-```
-
-The dependency direction is:
-
-```text
-storage transfer -----> local
-index / segcore ------> storage + local + cachinglayer
-cachinglayer policy --> local-backed values
-local ----------------X storage
-local ----------------X cachinglayer
-```
-
-`milvus::local` supplies mechanisms. It does not decide whether a file is a
-cache entry, scratch data, or persistent data.
-
-## 5. Relative Paths
-
-`local::Path` always represents a path relative to a `FileSystem` handle:
-
-```cpp
-class Path {
- public:
-    explicit Path(std::string value);
-    std::string_view String() const noexcept;
+enum class Cleanup {
+    Keep,
+    RemoveOnLastRelease,
 };
-```
 
-Construction rejects:
-
-- absolute paths;
-- embedded NUL bytes;
-- any normalized path containing `..`;
-- values that would escape the handle root.
-
-The absolute root appears only at `FileSystem::Open()`. Code below the
-composition boundary carries `Path` rather than absolute strings.
-
-## 6. FileSystem Value Handles
-
-```cpp
 class FileSystem final {
  public:
     static FileSystem Open(std::filesystem::path absolute_root);
+    DirectoryPtr Root() const;
 
-    FileSystem Subtree(const Path& path) const;
-    std::shared_ptr<ManagedSubtree> ManageSubtree(const Path& path) const;
+    FileSystem(const FileSystem&) = delete;
+    FileSystem& operator=(const FileSystem&) = delete;
+    FileSystem(FileSystem&&) noexcept;
+    FileSystem& operator=(FileSystem&&) noexcept;
+    ~FileSystem() noexcept;
 
-    bool Exists(const Path& path) const;
-    uint64_t FileSize(const Path& path) const;
-    std::vector<Path> List(const Path& directory, bool recursive) const;
-
-    void CreateDirectories(const Path& path) const;
-    void RemoveFile(const Path& path) const;
-    void RemoveAll(const Path& path) const;
-    void Rename(const Path& from, const Path& to) const;
-
-    FileHandle Open(const Path& path, const OpenOptions& options) const;
-    io::MappedRegion OpenMappedRegion(const Path& path,
-                                      const MapOptions& options) const;
-
-    std::filesystem::path ResolveNativePath(const Path& path) const;
-    Path PathFromNativePath(std::filesystem::path native_path) const;
+    // Supervisor operations concern already-retired directories only.
+    // Their result types must expose per-attempt failures (section 7).
+    CleanupReport RetryFailedCleanup();
+    CleanupReport Finish();
 };
-```
 
-The handle contains immutable shared root state plus a subtree prefix. Copies
-are cheap and may be used concurrently. Sharing implementation state does not
-make the handle a process-wide service.
-
-There is no default filesystem, global registry, or `GetInstance()`.
-Consumers receive a handle through construction context.
-
-### 6.1 Subtree narrows authority
-
-```cpp
-auto node_cache = FileSystem::Open("/var/lib/milvus/data/cache/1001");
-auto local_chunk = node_cache.Subtree(Path("local_chunk"));
-
-auto file = local_chunk.Open(
-    Path("index_files/10/index"),
-    OpenOptions{.mode = OpenMode::ReadOnly});
-```
-
-The resolved native path is:
-
-```text
-/var/lib/milvus/data/cache/1001
-    + local_chunk
-    + index_files/10/index
-```
-
-The holder of `local_chunk` cannot construct a relative path that traverses
-to `expr_cache`. Owners must also prevent symlink aliases between independently
-owned artifact directories; a lexical subtree prefix does not bind a directory
-inode or establish an OS security boundary.
-
-### 6.2 Isolation contract
-
-This API operates on trusted node-local artifact directories. It prevents
-accidental absolute paths and parent traversal, and checks current symlink
-targets before native I/O. It is not a filesystem sandbox: canonicalization
-and the subsequent native operation are separate, so owners must prevent
-concurrent replacement of path components or symlink targets during an
-operation. The same requirement applies to roots and subtree ancestors.
-
-The configured root may resolve through a symlink at `Open()`. Below it,
-Milvus-owned layouts should use ordinary directories and avoid directory
-aliases. Existing file symlinks are supported when their targets stay within
-the handle's resolved scope. Native-library adapters must obey the same
-ownership and path-stability contract. `ResolveNativePath()` validates the
-current path only; it cannot protect future operations using the returned
-string. Protection against untrusted concurrent path replacement would require
-a separate directory-fd-based design, including deletion and rename semantics.
-
-### 6.3 Native path compatibility
-
-Knowhere, Tantivy, Arrow, and other third-party libraries sometimes require
-native paths. `ResolveNativePath()` is the explicit escape hatch. It accepts
-only a validated relative `Path` and produces a path below the scoped root.
-
-Milvus-owned I/O should prefer opened handles. Native paths should remain at
-third-party boundaries.
-
-### 6.4 Directory enumeration
-
-`List(directory, recursive)` returns sorted regular-file entry paths relative
-to the handle's scope. File symlinks retain their entry names, not the names of
-their targets, and their targets must stay inside the scope. Directory symlinks
-are neither returned nor recursively traversed. Deleting a listed file symlink
-therefore deletes the link, not its target.
-
-Relative entry paths are computed lexically using a scope calculated once per
-listing. Ordinary entries do not each trigger canonicalization of their path
-and root; file symlinks receive a separate boundary check. Failures while
-constructing or advancing either iterator are converted to `FileReadFailed`.
-Boundary-check failures retain `FileOpenFailed`. Listings are not snapshots;
-callers needing consistency must coordinate concurrent mutations.
-
-## 7. Opened File Handles
-
-`FileHandle` is a small move-only RAII owner for one native descriptor. Its
-destructor closes the descriptor. It deliberately does not define read, write,
-truncate, sync, buffering, rate limiting, or completion policy.
-
-```cpp
-struct FileHandle final {
+class Directory final {
  public:
-    int Get() const noexcept;
-    int Release() noexcept;
-    const std::filesystem::path& DebugPath() const noexcept;
-    bool DirectIOEnabled() const noexcept;
+    DirectoryPtr Child(
+        std::string_view name,
+        Cleanup cleanup = Cleanup::RemoveOnLastRelease);
+
+    bool Exists(std::string_view name) const;
+    uint64_t FileSize(std::string_view name) const;
+    FileHandle Open(std::string_view name, const OpenOptions& options);
+    io::MappedRegion OpenMappedRegion(
+        std::string_view name, const MapOptions& options);
+
+    void RemoveFile(std::string_view name);
+    void RenameFile(std::string_view from, std::string_view to);
+    NativePath ResolveNativePath(std::string_view name) const;
+    NativePath NativeDirectory() const;
+
+    // Streaming enumeration; visitor receives metadata, not new owners.
+    void VisitEntries(const EntryVisitor& visitor) const;
+
+    ~Directory() noexcept;
+
+    Directory(const Directory&) = delete;
+    Directory& operator=(const Directory&) = delete;
+    // Directory objects stay at stable addresses; share DirectoryPtr.
 };
 ```
 
-`FileSystem::Open()` accepts typed options rather than exposing POSIX flags:
+These declarations summarize responsibilities; reporting and visitor types
+will be specified in the implementation PR. Directory constructors are private;
+only root/child factories establish registration and the shared control block.
+There is no `Subtree()`,
+`ManageSubtree()`, `AcquireWriter()`, `RemoveWhenIdle()`, `RemoveAndWait()`,
+or public `RemoveAll()` in the new directory API. Existing low-level
+recursive deletion remains an internal cleanup primitive.
+
+### 3.2 String arguments and namespace boundaries
+
+Public calls accept strings. Callers do not write `local::Path(...)`.
+Validation is centralized internally and rejects empty names, NUL bytes,
+absolute paths, `.`, `..`, and directory separators.
+
+Operations address an immediate entry. For example:
+
+```cpp
+auto segment = segments->Child("100");
+auto index = segment->Child("index");
+auto output = index->Open("data.bin", options);
+```
+
+`segments->Open("100/index/data.bin", options)` is not allowed: holding only
+`segments` would not keep the independently owned `100` and `index` children
+alive. A future convenience method for multi-component paths must resolve
+and retain the relevant directory nodes, rather than concatenate a prefix.
+
+`Child()` creates a missing directory or attaches to an existing ordinary
+directory under the startup/migration ownership rules in section 11.
+Opening a file does not implicitly create intermediate directory owners.
+The old `create_parent` option therefore disappears.
+
+### 3.3 Cleanup policy
+
+The root uses `Keep`. Long-lived namespace directories explicitly use
+`Keep`; artifact and scratch directories use `RemoveOnLastRelease`.
+Policy is fixed for each registered node generation. Acquiring an existing
+node with a different policy fails instead of silently changing ownership.
+
+`Keep` means releasing that node does not delete its disk contents. To make
+this promise meaningful, a `Keep` child is not allowed below a
+`RemoveOnLastRelease` ancestor. Removable subtrees consist of removable
+registered descendants and any opaque backend-owned contents.
+
+The business owner must retain a removable directory for as long as its
+contents should survive, even between I/O calls. Temporary absence of open
+files does not remove the directory if the segment/cache entry still owns it.
+
+## 4. Design Details: Directory Identity and References
+
+### 4.1 Reference graph
+
+```mermaid
+flowchart LR
+    B["Business owner / asynchronous task"] -->|"shared_ptr"| D["Directory"]
+    F["FileHandle / MappedRegion / NativePath"] -->|"shared_ptr"| D
+    C["Child Directory"] -->|"shared_ptr"| D
+    D -->|"shared_ptr"| P["Parent Directory"]
+    P -.->|"weak child lookup"| D
+```
+
+Each child holds a strong parent reference. Parent lookup tables store weak
+references and registration metadata, not owning references to live children.
+There is no bidirectional strong ownership cycle in the live directory tree.
+
+The lookup table must not itself keep a removable directory alive. Strong
+references belong to actual consumers: business objects, children, open
+files, mappings, I/O wrappers, and tasks. Registering a child is not a reason
+to retain its contents indefinitely.
+
+A cached `DirectoryPtr` is an ownership decision. In particular, putting all
+children in an additional strong-reference map would prevent reclamation.
+Eviction removes the business map entry; outstanding consumers finish normally.
+A parent remains able to provide `Child()` to other callers, so the business
+layer must also stop publishing an evicted logical resource. The local layer
+does not implement an admission fence before the last reference disappears.
+
+### 4.2 Child lookup and creation
+
+Within a root context, identity is the parent generation plus entry name.
+A synchronized child registration contains a generation identifier, a weak
+live reference, and lifecycle status. It is reserved through creation and
+cleanup, including failures.
+
+Under a short namespace lock, `Child()`:
+
+1. Validates the name and policy.
+2. Promotes an existing live weak reference and returns it.
+3. Returns a retryable busy result for an in-progress creation.
+4. Rejects retiring or failed-cleanup registrations.
+5. Reserves an absent name as `Creating`, then performs filesystem work
+   outside the namespace lock and publishes one `Live` object.
+
+A failed creation must account for any directory already created. It may
+release the reservation only after rollback succeeds or after proving that
+no cleanup is owed. It must not recursively remove a pre-existing directory
+as compensation for a later allocation or publication failure.
+
+Allocate the registration and first cleanup record before publishing the
+directory. Admission failure must occur before handing ownership to callers.
+Filesystem I/O, callbacks, and releases that may destroy the last strong
+reference run outside namespace locks. Promoted lookup references must be
+moved out of locked scopes before they can be dropped; otherwise a destructor
+could reenter registration cleanup while the same lock is held.
+
+### 4.3 Expired weak references are not vacant names
+
+There is a race between the last strong decrement and entry into the
+destructor: the weak reference may already be expired while the old directory
+has not yet been deleted.
+
+`Child()` must treat an expired weak reference with an existing registration
+as unavailable. It must not erase it and create a new directory. Only the
+old generation's cleanup completion can release that reservation.
+
+A destructor or explicit shared-pointer deleter transitions its preallocated
+registration to `Retiring`. It never resurrects a `DirectoryPtr` with
+`shared_from_this()` after the final reference has gone away.
+
+On successful cleanup, remove the registration only if its generation still
+matches. On failure, retain it. A retry is addressed by registration generation,
+not merely by a reusable path string.
+
+### 4.4 Kernel inspiration and limits
+
+The hierarchy borrows kernfs's explicit parent relationship and separation
+between a directory entry and the memory representing it. Linux kernfs itself
+uses an explicit base reference, removal, and separate active-operation
+references; this proposal deliberately uses a different final-reference
+cleanup policy.
+
+There is no copied kernfs active counter here. The guarantee is that a
+directory remains available while any legitimate user retains it. Immediate
+subtree deactivation with users still alive would be a different design.
+
+## 5. Files, Writers, and Mappings
+
+### 5.1 File lifetime
+
+`FileHandle` remains move-only and owns a native fd. It additionally retains
+the directory containing the entry. Copying a `DirectoryPtr` is allowed;
+concurrent mutation of the same `shared_ptr` variable still requires ordinary
+C++ synchronization.
+
+```cpp
+auto segment = segments->Child("100");
+{
+    auto file = segment->Open(
+        "index.bin", {.mode = OpenMode::ReadWrite, .create = true});
+
+    segment.reset();  // file still retains the directory
+    // Positioned I/O uses file.Get() while file is alive.
+}  // close fd, then release the directory reference
+```
+
+A regular file handle closes its fd but does not unlink the entry. Move
+assignment must close the destination fd before releasing its old directory,
+then transfer the source fd and directory together. Default/moved-from
+handles own neither.
+
+A borrowed `Get()` fd must not outlive the file handle. Remove the naked
+`Release() -> int` ownership escape from the managed interface. An adapter
+that takes fd ownership must also take its directory reference, either by
+moving the complete handle or an explicit ownership bundle. Duplicated fds
+need their own retained directory. This rule applies to read handles as well
+as write handles for a uniform directory-lifetime contract.
+
+### 5.2 Writers have no second lifecycle protocol
+
+`local::io::FileWriter`, buffering, positioned I/O, alignment, sync, rate
+limiting, and completion policies remain separate I/O concerns. A writer
+owns a `FileHandle` or `DirectoryPtr`; it does not acquire a write lease.
+
+Tasks retain the directory from submission through actual I/O completion,
+including callbacks, cancellation, exceptions, and native-library shutdown.
+Retaining it only during submission is insufficient.
+
+```cpp
+auto segment = segments->Child("100");
+executor.Submit([segment] {
+    auto output = segment->Open(
+        "index.bin", {.mode = OpenMode::ReadWrite, .create = true});
+    BuildIndex(std::move(output));
+});
+segment.reset();  // the submitted task owns its reference
+```
+
+For asynchronous I/O that outlives `BuildIndex`, the completion state retains
+the file or directory until the operation is finished. No new writer state
+machine is required.
+
+### 5.3 Individual file deletion
+
+`RemoveFile(name)` removes an immediate non-directory entry and is idempotent
+for an already absent entry. It must reject a real directory, even an empty
+one. It never falls back to recursive removal. A symlink deletion unlinks the
+entry itself without following its target.
+
+File closure, file unlink, and directory cleanup are separate events:
+
+| Event | Result |
+| --- | --- |
+| Regular handle closes | fd closes; directory reference is released |
+| `RemoveFile(name)` | Name is unlinked; existing open fd/mmap may remain usable |
+| Scoped temporary-file owner is destroyed | Its close/unlink sequence runs before releasing its directory |
+| Last directory reference disappears | Remaining contents are recursively removed if policy requires it |
+
+A temporary-file owner may retain the directory and call `RemoveFile` during
+its destructor. Its name must remain exclusive until cleanup completes; it
+must not unlink a replacement created by another owner. Shared ownership of
+the directory does not serialize mutation or reuse of individual file names.
+Callers coordinate `Open`, `RemoveFile`, and `RenameFile` for the same entry.
+
+Unlink does not cancel existing writes and does not imply immediate disk-space
+reclamation. Early file unlink and later directory cleanup are compatible;
+the recursive cleanup accepts files already removed.
+
+### 5.4 Open options
 
 ```cpp
 enum class OpenMode { ReadOnly, ReadWrite };
@@ -320,317 +377,464 @@ struct OpenOptions {
     OpenMode mode{OpenMode::ReadOnly};
     bool create{false};
     bool truncate{false};
-    bool create_parent{false};
     bool direct_io{false};
 };
 ```
 
-The handle records ownership and open metadata. The receiving reader, writer,
-or native-library adapter performs I/O appropriate to its own contract. Small
-internal helpers may centralize partial-transfer and `EINTR` handling, but they
-are not methods on `FileHandle`.
+Validate all options before any I/O. Read-only creation or truncation is
+rejected. Read-write truncation without creation is valid for an existing
+file; `create` controls missing-file creation independently. Unsupported
+direct-I/O combinations must fail explicitly, not silently change mode.
 
-Higher-level writer policy such as buffering, direct I/O alignment, priority,
-rate limiting, and completion remains in `milvus::local::io::FileWriter`.
+This revision does not add a parent-creation flag because directory creation
+goes through `Child()`. Implementation must preserve native failure details
+through existing error handling rather than convert every failure to absence.
 
-## 8. Mapped Regions
+### 5.5 Mapped regions
 
-`FileSystem::OpenMappedRegion()` returns a move-only
-`local::io::MappedRegion`. It stores both the page-aligned OS mapping and
-the caller-visible byte range. Destruction calls `munmap`.
+`MappedRegion` remains a move-only owner of the OS mapping and caller-visible
+byte range. It also retains the directory until after `munmap`. This extends
+directory retention for read mappings compared with the initial proposal;
+migration must account for delayed disk reclamation.
 
 ```cpp
-auto region = files.OpenMappedRegion(
-    Path("field.bin"),
-    MapOptions{.offset = offset, .length = length, .populate = true});
+auto region = segment->OpenMappedRegion(
+    "field.bin", {.offset = offset, .length = length});
+// Demand paging is the default; populate remains false.
 auto bytes = region.Data();
 ```
 
-Mapping is a filesystem operation rather than a method on `FileHandle`. This
-keeps descriptor ownership and OS mapping lifetime as separate mechanisms.
-Higher-level chunk and segment layout remains outside `milvus::local::io`.
+Explicit file unlink remains possible while mapped. Eager population is an
+opt-in for bounded ranges known to be immediately hot. The design does not
+make large cold mappings resident or add per-page lifecycle tracking.
 
-Unlinking a mapped file is valid on supported POSIX systems: the mapping keeps
-the inode alive until `munmap`. Components that require path-level cleanup
-coordination use `ManagedSubtree`; they do not retain artificial reader
-leases solely for mmap lifetime.
+## 6. Directory Cleanup
 
-## 9. ManagedSubtree
+### 6.1 Final-reference cleanup
 
-Ordinary deletion stays immediate:
+Dropping one shared directory reference does not request closure. Cleanup
+starts only after the final strong reference is released. At that point:
 
-```cpp
-files.RemoveAll(path);
-```
+- no open managed file, mapping, task, or registered live child retains it;
+- its expired registration prevents reacquisition during cleanup;
+- the destructor/deleter invokes the internal cleanup path;
+- the parent is held until this directory's cleanup has completed.
 
-Only directories with a real writer-versus-cleanup race use
-`ManagedSubtree`.
+For `RemoveOnLastRelease`, cleanup recursively removes the remaining contents.
+For `Keep`, it releases the registration without deleting disk contents.
+There is no public operation that recursively deletes a live subtree.
 
-`ManageSubtree(path)` creates a new lifecycle owner; it does not find or
-intern an owner by path. The composition/cache owner must call it once for a
-directory and distribute the same `shared_ptr<ManagedSubtree>` to every writer
-and cleanup caller. Independently managed directories must not be identical,
-aliases, or ancestor/descendant pairs. A parent owner must drain its child
-owners before removing their containing directory.
+Physical cleanup is leaf-first as a consequence of references. A child keeps
+its parent alive through its own cleanup; releasing that parent may retire
+the next level. A child left alive after the business parent releases its
+reference remains fully usable. There is no early `Closing` state that rejects
+writes while valid strong references remain.
 
-`Files()` exposes ordinary filesystem operations and does not automatically
-acquire leases. All writers, including native-library operations, must retain
-a lease until writing finishes. Owners must prevent direct ancestor deletion
-and path reuse until managed cleanup succeeds, including any retries. The
-`ManagedSubtree` destructor itself does not request removal; cleanup remains
-an explicit owner responsibility.
+### 6.2 Destruction and execution policy
 
-```cpp
-auto directory = files.ManageSubtree(Path("index_files/10"));
+The initial implementation executes recursive cleanup synchronously at
+final release, matching existing destructor-driven cleanup sites. This is
+an explicit latency cost, not an assertion that final release is cheap.
 
-{
-    auto lease = directory->AcquireWriter();
-    auto output = directory->Files().Open(
-        Path("index"),
-        OpenOptions{.mode = OpenMode::ReadWrite,
-                    .create = true,
-                    .create_parent = true});
-    // Materialize the artifact.
-}
+The cleanup record is separate from the dying C++ object. It carries the
+path, generation, cleanup policy, parent reference, and attempt result. A
+cleanup engine processes ready records iteratively so a deep ancestor chain
+does not require recursive destructor-driven filesystem calls.
 
-directory->RemoveWhenIdle();
-```
+If production latency requires offloading, the same records can be handed to
+a bounded, injected cleanup executor. The record must retain the parent and
+name reservation until completion. Offloading cannot weaken these invariants
+or silently drop work when a queue is full. Admission must provision cleanup
+record capacity before directory publication; pending memory is accounted
+with the directories it represents. Do not enqueue a separate task per file.
 
-The state machine is:
+The executor decision and concurrency must be justified by the performance
+measurements in section 12. No asynchronous cleanup performance benefit has
+been verified by this document.
 
-```text
-OPEN
-  |-- AcquireWriter -------------> OPEN, writers + 1
-  |-- removal requested ---------> CLOSING
+### 6.3 State transitions
 
-CLOSING
-  |-- AcquireWriter -------------> rejected
-  |-- no active writers ---------> REMOVING
-
-REMOVING
-  |-- removal succeeds ----------> REMOVED
-  |-- removal throws ------------> FAILED, original exception retained
-
-FAILED
-  |-- AcquireWriter -------------> rejected
-  |-- RemoveWhenIdle ------------> no-op
-  |-- RemoveAndWait -------------> REMOVING, new attempt
-
-REMOVED
-  |-- AcquireWriter -------------> rejected
-  |-- removal requested ---------> no-op
-```
-
-`RemoveWhenIdle()` is `noexcept` and initiates only the first attempt. It can
-perform synchronous deletion on the caller or final writer's thread; it is
-not an asynchronous executor and does not automatically retry failures. An
-owner requiring recovery must retain the object and call `RemoveAndWait()`.
-
-`RemoveAndWait()` starts the first attempt, joins an outstanding attempt, or
-retries a previously failed attempt once. It waits for that attempt and
-rethrows the original exception, including its code and path/cause details.
-Each attempt has its own shared completion result: a later retry cannot
-overwrite the result observed by earlier waiters. Removal runs outside the
-lifecycle mutex; completion is published under that mutex before notifying
-waiters. Failure leaves the object closed to new writers and may leave a
-partially deleted directory, which the next explicit retry removes.
-
-The first attempt is allocated when the owner is constructed. Failure to
-allocate a retry leaves the previous failed attempt intact. Successful cleanup
-is terminal and subsequent requests do not delete a newly created directory at
-the same path. Callers must never wait for removal while holding one of the
-owner's writer leases, since removal cannot complete until those leases exit.
-
-## 10. Composition and Lifetimes
-
-Runtime code opens roots from configuration and derives scoped handles:
-
-```cpp
-auto node_cache = local::FileSystem::Open(
-    local_storage_path / "cache" / std::to_string(node_id));
-
-NodeLocalFiles files{
-    .local_chunk = node_cache.Subtree(Path("local_chunk")),
-    .growing_mmap = node_cache.Subtree(Path("growing_mmap")),
-    .bm25 = node_cache.Subtree(Path("bm25")),
-    .file_resource = node_cache.Subtree(Path("file_resource")),
-    .expr_cache = node_cache.Subtree(Path("expr_cache")),
-};
-```
-
-`NodeLocalFiles` is a construction value, not a global registry. A leaf
-object receives only the handle it needs.
-
-Across CGo, Go owns an opaque C++ `FileSystem` value and passes it explicitly
-to collections, segments, index tasks, or file-manager contexts. Leaf code
-does not fetch a global fallback.
-
-The intended lifetime order is:
+These states belong to the registration/cleanup record, not to active writers:
 
 ```text
-consumer stops using bytes
-    -> MappedRegion unmaps
-    -> file handles close
-    -> operation/cache owner requests subtree cleanup
-    -> directory is removed when active writers reach zero
+Absent -> Creating -> Live -> last reference -> Retiring
+             |                                    |
+             |                    Keep: unregister +
+             |                                    |
+             |          RemoveOnLastRelease: Removing
+             |                              /      \
+             |                         success    failure
+             |                            |           |
+             |                       unregister      Failed
+             |                                        |
+             |                                 explicit retry
+             |                                        |
+             |                                     Removing
+             |
+             +-- creation failure -> rollback owned changes
+                                       /              \
+                                  success            failure
+                                     |                  |
+                                unregister      retain rollback record
 ```
 
-Cache policy remains in `milvus::cachinglayer`. Scratch operations may use
-the same filesystem mechanisms without becoming cache entries.
+A cleanly rolled-back creation releases its reservation. A rollback failure
+remains unavailable with its cleanup result, just like a failed removal.
+Its retry repeats the original rollback obligation, not normal directory
+cleanup: only changes owned by that failed creation may be undone, regardless
+of the requested Keep or RemoveOnLastRelease policy.
+Successful unregister is terminal for that generation. Missing entries during
+recursive cleanup count as already removed; other failures remain visible.
 
-## 11. Error and Concurrency Semantics
+## 7. Failure Recovery and Root Shutdown
 
-Local I/O must preserve distinct failures including:
+All filesystem deletion failures are caught by the destructor/deleter. The
+root cleanup supervisor retains a failed cleanup record with its original
+error, generation, and parent reference. A root-local tombstone keeps the
+name unavailable. Logging alone is not recovery, and an expired weak pointer
+must not discard the failure.
 
-- path not found;
-- permission denied;
-- disk full or quota exhaustion;
-- read, write, truncate, sync, or mmap failure;
-- invalid internal relative path;
-- writer acquisition after cleanup begins;
-- cleanup failure.
+`RetryFailedCleanup()` retries already-retired records, never live directories.
+Only one attempt can execute for a record at a time. Each attempt has its own
+completion result; a later successful retry does not rewrite the failure
+observed by an earlier waiter. Partial recursive deletion is retryable while
+the path remains reserved and stable.
 
-For valid internal load/build requests these are system failures unless the
-request content itself directly forces the error. Adding context must not
-erase an existing error category at the CGo boundary.
+A failed child keeps its parent alive. Otherwise the parent destructor could
+recursively remove the failed child behind the supervisor and invalidate
+recovery bookkeeping. Failed-record storage is owned by the composition-level
+supervisor, not a strong children map on the live parent.
 
-Thread-safety contracts are explicit:
+The root context and supervisor lifetimes must be explicit. `FileSystem`
+owns the supervisor; directory objects share the root context, which refers
+weakly to the supervisor. The supervisor owns failed records, whose parent
+pins may retain directories and the context, but not the supervisor itself.
+This avoids a permanent strong cycle on cleanup failure. Cleanup acquires a
+temporary supervisor reference through a context guard synchronized with
+terminal shutdown. There are no unguarded raw supervisor pointers.
 
-- copied `FileSystem` handles are safe for concurrent use;
-- `FileHandle` is move-only and does not serialize operations on its fd;
-- receiving readers and writers define their own concurrency contracts;
-- `MappedRegion` and write leases are move-only;
-- `ManagedSubtree` serializes lifecycle transitions for one shared owner;
-  path identity and overlapping directories are coordinated by its owner;
-- copied handles do not serialize filesystem mutations or protect against
-  concurrent symlink/path replacement.
+Normal node shutdown:
 
-## 12. Compatibility
+1. Stop admission and join tasks/native consumers; release files, mappings,
+   business directory references, and the root handle.
+2. `Finish()` stops context admission, releases any root reference held solely
+   by the composition object, drains already-retired work, and reports
+   outstanding live users or cleanup failures. It must not forcibly delete
+   live directories or wait indefinitely for references held by its own caller.
+3. Explicit retries may resolve failures. Persistent failure remains a shutdown
+   result, not a successful cleanup.
+4. If the process must exit with failures, enter terminal shutdown: reject
+   future acquisition/retry, join in-flight cleanup, and suppress new disk
+   deletion before releasing failed parent pins. Report the remaining paths,
+   then free bookkeeping. No new generation can be created in that closed
+   context, and its domain cannot be reopened while old native users survive.
 
-The migration preserves existing physical paths:
+The `FileSystem` destructor performs a noexcept terminal fallback if normal
+shutdown was skipped. It must not leave directory users with a dangling
+supervisor pointer; the closed-context guard remains valid until those users
+finish, and their later release leaves disk contents for startup recovery.
+
+A crash may leave disk artifacts because reference counting is in-memory.
+Before publishing a root on restart, existing Milvus startup/recovery logic
+must reconcile leftovers under exclusive ownership. The design does not
+promise persistent retry records, crash-atomic recursive deletion, or
+cross-process coordination.
+
+## 8. Paths, Namespace Stability, and Native Libraries
+
+### 8.1 Root opening and identity domain
+
+`FileSystem::Open(absolute_root)` requires an absolute path. It creates missing
+root components, verifies a directory, and canonicalizes the resulting root
+before publishing the `Keep` root node. Failures are reported; a failed open
+does not recursively remove pre-existing root contents.
+
+Runtime composition opens a physical ownership domain once and injects its
+references. Separate root contexts must not refer to the same directory,
+overlap as ancestor/descendant, or alias through symlinks. A root-local registry
+cannot coordinate independently opened roots or other processes.
+
+### 8.2 Stable paths
+
+Registered directories and their ancestors cannot be renamed, replaced, or
+unlinked while live or awaiting cleanup. The public API provides only
+`RenameFile` within one directory and rejects directory operands; it does not
+export directory rename, recursive deletion, or mutable filesystem views.
+
+File operations validate supported symlink targets within their owning scope.
+Directory aliases are not supported for registered children. Recursive cleanup
+unlinks symlinks themselves instead of traversing their targets. Validation and
+native I/O remain separate under the trusted-directory contract. A retained
+C++ object does not pin a filesystem inode or prevent external path replacement.
+
+Directory-fd-based protection against untrusted concurrent replacement would
+be separate work. This proposal does not claim it.
+
+### 8.3 Native-path ownership
+
+Returning a bare path string encourages asynchronous lifetime escape.
+`NativePath` therefore bundles the resolved path with a `DirectoryPtr`.
+Borrowing the string is valid only while that owner remains alive.
+
+An adapter passes the path to Knowhere, Tantivy, Arrow, or another library and
+retains the directory until all corresponding native objects, background work,
+and callbacks finish. A wrapper must destroy its native consumer before
+releasing that reference. Extracting and storing only the path is not a valid
+ownership transfer.
+
+Holding an ancestor is not enough to keep an independently managed child
+alive. A native operation spanning registered children must retain each child
+it uses. Alternatively, an opaque native-owned directory tree is represented
+by one directory owner, with its internal subdirectories left unregistered.
+Do not independently manage children inside that opaque tree while a library
+can still access or delete them recursively.
+
+### 8.4 Enumeration
+
+`VisitEntries` streams immediate-entry metadata and preserves entry names.
+It neither creates directory owners nor builds a sorted vector of the whole
+subtree. Iterator construction and advancement errors must be propagated.
+
+A recursive transfer adapter must retain every registered directory it visits,
+including its descendants, or operate entirely within one opaque owner.
+Returned metadata is not an ownership handle or a snapshot. Sorting and
+materializing a list are caller choices where deterministic ordering is needed.
+Recursive cleanup uses the internal deletion primitive, not this listing API.
+
+## 9. Composition and CGo Ownership
+
+The dependency direction remains:
 
 ```text
-localStorage.path/cache/<node-id>/local_chunk
-localStorage.path/cache/<node-id>/growing_mmap
-localStorage.path/cache/<node-id>/bm25
-localStorage.path/cache/<node-id>/file_resource
-localStorage.path/cache/<node-id>/expr_cache
+storage transfer ------> local
+index / segcore -------> storage + local + cachinglayer
+cachinglayer policy ---> local-backed resources
+local ----------------X storage / cachinglayer policy
 ```
 
-Index contents, mmap layouts, remote object names, and persistent
-`storageType=local` behavior do not change. No required configuration is
-added.
+The node owns the `FileSystem` context. Construction values carry
+`DirectoryPtr` fields for `local_chunk`, `growing_mmap`, `bm25`,
+`file_resource`, and `expr_cache`; each consumer receives its required scope.
+The context's child index is an identity mechanism, not a cache policy or a
+replacement singleton.
 
-## 13. Migration
+Across CGo, an opaque directory handle owns one C++ `DirectoryPtr`:
 
-1. Introduce `Path`, `FileSystem`, `FileHandle`,
-   `MappedRegion`, and `ManagedSubtree` without changing production
-   callers.
-2. Move local writers, readers, and file managers onto rooted handles.
-3. Pass scoped handles through QueryNode/segcore construction.
-4. Pass scoped handles through DataNode/index construction.
-5. Remove legacy adapters and process-global local filesystem access after
-   every production consumer has an explicit handle.
+- Create/acquire constructs a wrapper containing a strong reference.
+- Retain/clone creates a separately destroyable wrapper sharing that reference.
+- Destroy releases exactly that wrapper's reference, not the live subtree.
+- A collection, segment, or task accepting a handle borrows the wrapper only
+  for the call and copies its `DirectoryPtr` before returning or scheduling work.
+- Go must synchronize wrapper destruction against concurrent C calls. A
+  finalizer is a fallback; explicit Close defines release timing.
+- A root-context wrapper follows the explicit shutdown contract in section 7.
 
-Removing `LocalChunkManagerSingleton` is the final migration step, not the
-identity of this design. `LocalChunkManager` remains for persistent
-`storageType=local` object-storage compatibility.
+This does not require each receiver to clone a C wrapper: copying the contained
+`DirectoryPtr` in C++ is sufficient. No receiver keeps a raw pointer to a
+Go-owned wrapper after the call. No C++ exception crosses the C ABI.
+Cancellation releases ownership only after the underlying operation has stopped.
 
-## 14. Verification
+## 10. Cost Model
 
-### 14.1 Path and filesystem tests
+Let D be the number of registered directory generations (including pending
+cleanup), H the number of open files/mappings/native wrappers, and F the number
+of disk files.
 
-- reject absolute paths and root escape;
-- open multiple roots in one process;
-- verify subtree composition and sibling isolation;
-- create, list, rename, and remove files and directories;
-- preserve listed file-symlink entry names and reject out-of-scope targets;
-- preserve typed errors when recursive iteration encounters permission denial;
-- round-trip validated native paths;
-- prove cwd changes do not affect rooted operations.
+The model uses O(D + H) ownership metadata plus names/paths; it does not retain
+O(F) file nodes for unopened files. Path storage costs O(sum of registered
+path lengths), not merely O(D) bytes. For example, 100,000 retained paths of
+200 bytes alone consume about 20 MB before node, index, allocator, and reference
+control-block overhead. Failed records and retained ancestor chains count
+toward the same resource accounting.
 
-### 14.2 File and mmap tests
+A per-parent hash index gives expected O(1) child lookup plus name processing.
+Only acquisition, registration, and retirement require namespace coordination.
+Read/write loops use the already-owned fd and perform no repeated child lookup,
+root canonicalization, or ancestor reference increments. One child pins its
+parent for its whole lifetime.
 
-- positional reads and writes;
-- create, truncate, sync, and file-size behavior;
-- descriptor closure on normal and exceptional paths;
-- aligned and unaligned mmap offsets;
-- mappings remain valid after source descriptor closure;
-- mmap failure categories.
+Deleting F files across T on-disk directories still requires visiting their
+entries; T can exceed D for opaque native-owned subtrees. Existing recursive
+deletion already performs that metadata work. Per-file early unlink is
+compatible with directory cleanup.
+There is no assumed bulk filesystem deletion primitive, no required sort,
+and no task per file.
 
-### 14.3 ManagedSubtree tests
+The added costs to measure are shared-reference traffic, directory lookup
+contention, path validation, cleanup scheduling, and final-release latency.
+A long-lived reader now retains its directory too, potentially delaying space
+reclamation. Root-level and business-level strong-reference caches must be
+audited for accidental retention. Performance equivalence to existing cleanup
+is unverified until measured.
 
-- multiple concurrent writers;
-- cleanup with active writers;
-- rejection of writers after closing begins;
-- removal on final writer release;
-- repeated removal requests;
-- synchronous cleanup error propagation;
-- original cleanup exception context and explicit retry after failure;
-- multiple waiters on a shared owner observe their own attempt's result;
-- destructor-safe cleanup does not automatically retry failures;
-- independent managed subtrees under one root.
+## 11. Compatibility, Deprecation, and Migration Plan
 
-### 14.4 Integration and repository audit
+### 11.1 Compatibility
 
-- scalar/vector index build, upload, and load;
-- mmap and non-mmap segment load;
-- concurrent load, release, and cleanup;
-- QueryNode and DataNode shutdown;
-- persistent local storage beside node-local handles;
-- no production dependency on a global/default local filesystem.
+Existing node-local paths, index formats, mmap layouts, and remote keys remain
+unchanged. No required user configuration is added. Persistent local object
+storage continues using `milvus::storage`; none of its directories become
+delete-on-last-reference merely because they use local disk.
 
-## 15. Rejected Alternatives
+This changes internal C++ lifetime contracts: mappings and open files retain
+directories, directory references are shared ownership, and cleanup no longer
+depends on separate writer leases. CGo projections must migrate with receivers.
+Cache accounting must distinguish releasing a business entry from completion
+of physical deletion; outstanding references can delay reclaim.
 
-### Keep node-local I/O under `milvus::storage`
+### 11.2 Complete ownership-domain cutover
 
-Rejected because object storage and node-local POSIX filesystem mechanisms
-have different ownership and lifetime semantics.
+Migration is incremental across directories, but atomic within each physical
+ownership domain, including ancestors that legacy code could recursively delete.
 
-### Replace the old singleton with a global `FileSystem`
+1. Implement the directory tree, reference-carrying file/native/mmap handles,
+   generation-safe cleanup records, and supervisor without enabling automatic
+   deletion for partially migrated domains.
+2. Inventory every writer, reader, mapping, native path escape, fd transfer,
+   directory deletion, and directory rename in the target domain.
+3. Quiesce legacy admission and drain legacy operations. Construct one root
+   context, attach existing directories under exclusive ownership, inject the
+   shared references, and remove legacy ancestor deletion paths.
+4. Enable `RemoveOnLastRelease` only when all users of those paths obey the
+   same ownership contract. A `Keep` migration stage alone does not make
+   legacy users safe once removable descendants are enabled.
+5. Migrate QueryNode/segcore and DataNode/index consumers domain by domain.
+   Remove singleton access after the last production consumer has migrated.
 
-Rejected because a global getter or registry preserves hidden dependencies,
-test interference, and implicit shutdown order.
+Rollback also quiesces admission, drains references and pending cleanup, and
+closes the new context before legacy code can reuse paths. Outstanding failed
+cleanup must be resolved or fenced by terminal shutdown before reuse.
 
-### Create one service per logical directory
+### 11.3 Implementation checkpoints
 
-Rejected because logical cache directories are subtrees below a small number
-of physical roots. `Subtree()` expresses the boundary more directly.
+The initial implementation PR's rooted-path validation and fd/mmap mechanisms
+can be reused. Its `ManagedSubtree`, separate write leases, naked fd release,
+and lexical filesystem views do not implement this revision.
 
-### Put lifecycle tracking in every filesystem operation
+Port existing cleanup behavior explicitly: index directories can use shared
+directory lifetime; independently evicted expression-cache files and temporary
+writers keep individual file deletion. Update this design's implementation
+status only after those production paths and failure modes are verified.
 
-Rejected because ordinary removal would gain surprising deferred behavior.
-Only directories with an actual writer/cleanup race use `ManagedSubtree`.
+## 12. Test Plan
 
-### Add another cache namespace
+This section specifies future implementation verification. The document
+revision itself does not execute or claim these tests.
 
-Rejected because `milvus::cachinglayer` already owns cache policy. The local
-filesystem layer provides mechanisms and composes with it.
+### 12.1 Identity, ownership, and release races
 
-### Require `FileHandle::Map()`
+- Concurrent `Child` calls publish one node; policy conflicts fail.
+- A child retains its ancestors after business parent references are dropped.
+- An ordinary handle copy does not delete anything on destruction.
+- A business owner retains files between I/O operations.
+- Files, mappings, native wrappers, queued tasks, and completion callbacks each
+  keep the directory alive through actual resource release.
+- Last release races with weak lookup: no resurrection or same-name creation
+  occurs before old-generation cleanup completes.
+- Weak child indexes and business eviction release nodes without live cycles.
+- Final child cleanup precedes parent cleanup, including deep directory chains.
 
-Rejected because positional reads and path-rooted OS mapping are distinct
-capabilities.
+### 12.2 File behavior and namespace boundaries
 
-## 16. Review Invariants
+- Direct string APIs reject invalid names and multi-component bypasses.
+- Missing roots and children are created; failed creation does not delete
+  pre-existing contents or publish two owners.
+- Invalid open options fail before creating or truncating anything.
+- File close preserves the entry; explicit unlink and scoped-file cleanup work.
+- Single-file deletion/rename rejects real directories.
+- A file unlinked before directory cleanup is accepted as already absent.
+- File moves, fd transfer, duplicates, and mapping release preserve reference
+  order; mapping defaults to demand paging.
+- Entry enumeration preserves symlink names, reports advancement failures, and
+  does not accidentally acquire/destruct removable child owners.
+- Native consumers retain every managed child they access or use one opaque
+  subtree owner; ancestor-only retention is not accepted as a substitute.
 
-1. `FileSystem` is a normal value handle with no global getter or registry.
-2. Business code uses validated relative paths below injected roots.
-3. `Subtree()` narrows lexical scope under the trusted-directory and
-   path-stability contract; it does not provide OS sandbox isolation.
-4. Ordinary filesystem operations do not hide lease or cache policy.
-5. `ManagedSubtree` is created once per owned directory and shared by all
-   writers/cleanup callers; independently managed scopes never overlap.
-6. Open files and mappings use move-only RAII ownership.
-7. Native paths are limited to compatibility boundaries.
-8. Cache policy remains in `milvus::cachinglayer`.
-9. Persistent `storageType=local` remains under `milvus::storage`.
-10. Existing paths, formats, and error categories remain compatible.
+### 12.3 Cleanup failure and shutdown
 
-## 17. References
+- Permission/I/O errors during partial recursive deletion preserve the
+  generation, original failure, parent pin, and unavailable name.
+- Retry is serialized; old waiters retain their own attempt's result.
+- Failure during directory creation/publication has correct rollback ownership.
+- Cleanup-record admission failure occurs before publication; destructor paths
+  do not require allocating an unbounded new work item.
+- Retry success permits same-name reuse; late old-generation completion cannot
+  erase the new registration.
+- Shutdown with live references reports them without deleting their directories.
+- Failed child cleanup cannot trigger parent recursive deletion.
+- Terminal shutdown disables further deletion before dropping failed pins;
+  late reference release cannot access a destroyed supervisor.
+- Startup reconciles crash leftovers before new roots are published.
+
+### 12.4 Production migration and performance
+
+Exercise scalar/vector index build, upload, load, cache eviction, mmap release,
+native background completion, cancellation, and node shutdown. Include the
+single-file and directory cleanup sites in section 2.2. Audit all legacy
+ancestor deletion and raw-path users before enabling a migrated domain.
+
+Compare existing cleanup with the new model using representative file sizes,
+file counts, directory depth, storage devices, and concurrent load. Measure
+total cleanup throughput, final-release p95/p99 latency, peak metadata memory,
+reference retention, and disk reclaim delay. Include at least a large
+many-small-file workload and large mmap-backed files. Evaluate a bounded
+cleanup executor if synchronous final-release latency is unacceptable.
+
+Neither happy-path tests alone nor ownership-wrapper tests prove migration
+safety. Trace or inject the actual failure origin through the real receiver,
+and distinguish implemented guarantees from unverified follow-up work.
+
+## 13. Rejected Alternatives
+
+- **Lexical views plus independent cleanup owners:** path containment and
+  lifetime containment can diverge; callers must manually prevent overlap.
+- **Separate writer leases:** duplicate the chosen shared ownership guarantee.
+  Early rejection of new writers is not required by this lifetime model.
+- **Public recursive deletion:** can invalidate a live child held by another
+  consumer and defeats reference-based reclamation.
+- **One unique RAII Directory owner with borrowed users:** requires a second
+  protocol to keep asynchronous users alive after that owner is destroyed.
+- **Strong parent and strong child ownership:** forms cycles or requires
+  explicit tree teardown, defeating final-reference cleanup.
+- **Only weak lookup, without a retiring reservation:** allows same-name
+  recreation before the old destructor or failed retry finishes.
+- **Every file unlinks when its fd closes:** makes ordinary reopen/read flows
+  surprising; scoped temporary owners and explicit unlink cover early removal.
+- **A global filesystem registry:** recreates hidden dependencies and shutdown
+  ordering problems. Root contexts are explicitly composed.
+- **Copy kernfs active-reference removal literally:** serves early deactivation;
+  this proposal deliberately waits for all shared directory users instead.
+
+## 14. Review Invariants
+
+1. Every managed physical ownership domain has one injected root context.
+2. Child identity is unique within a parent generation; names remain reserved
+   through retirement and failed cleanup.
+3. Children retain parents; files, mappings, and tasks retain their actual
+   owning directory. Parent-only retention cannot substitute for child ownership.
+4. Last strong release triggers policy-driven cleanup; there is no writer lease
+   or public recursive deletion path.
+5. File close and unlink remain distinct; early file removal and directory
+   cleanup compose without deleting replacements owned by somebody else.
+6. Parent cleanup follows child cleanup, including asynchronous and failed work.
+7. Keep policies, stable directory paths, native ownership, and startup
+   exclusivity are explicit.
+8. No cleanup exception escapes a destructor or C ABI; failures remain
+   attributable and recoverable while the context is open.
+9. No old-generation task can delete a reused path.
+10. Directory trees track ownership, not cache policy or all on-disk files.
+11. Migration enables automatic cleanup only after complete domain cutover.
+12. This proposal's safety and performance claims require implementation-level
+    verification; existing PRs are not evidence that the redesign is complete.
+
+## 15. References
 
 - [Rooted local filesystem proposal](https://github.com/milvus-io/milvus/issues/51507)
 - [Initial implementation](https://github.com/milvus-io/milvus/pull/51509)
 - [Local storage I/O migration](https://github.com/milvus-io/milvus/pull/51518)
 - [Query segment dependency injection](https://github.com/milvus-io/milvus/pull/51519)
 - [Local chunk manager singleton removal](https://github.com/milvus-io/milvus/pull/51520)
+- [Linux kernfs node definitions](https://github.com/torvalds/linux/blob/master/include/linux/kernfs.h)
+- [Linux kernfs directory and reference management](https://github.com/torvalds/linux/blob/master/fs/kernfs/dir.c)
+- [Linux unlink semantics](https://man7.org/linux/man-pages/man2/unlink.2.html)
+- [Linux rmdir semantics](https://man7.org/linux/man-pages/man2/rmdir.2.html)
