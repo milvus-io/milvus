@@ -100,7 +100,11 @@ func waitEtcdServerReady(e *embed.Etcd) error {
 	case <-e.Server.ReadyNotify():
 		return nil
 	case <-time.After(60 * time.Second):
-		e.Server.Stop()
+		// Close releases the client/peer listeners (2379/2380) in addition to
+		// stopping the server (Close already stops the server internally), so
+		// the ports are freed even if the process keeps running (e.g. the
+		// cmd/embedded export path).
+		e.Close()
 		return merr.WrapErrServiceInternalMsg("embedded etcd took too long to become ready")
 	}
 }

@@ -441,8 +441,11 @@ func (mr *MilvusRoles) Run() {
 				params.EtcdCfg.DataDir.GetValue(),
 				params.EtcdCfg.EtcdLogPath.GetValue(),
 				params.EtcdCfg.EtcdLogLevel.GetValue()); err != nil {
+				// Panic (non-zero exit) so restart policies such as systemd
+				// Restart=on-failure or docker --restart on-failure treat the
+				// startup failure as a crash rather than a clean exit.
 				mlog.Error(context.TODO(), "failed to start embedded Etcd server", mlog.Err(err))
-				return
+				panic(err)
 			}
 			defer etcd.StopEtcdServer()
 		}
