@@ -243,21 +243,6 @@ ReadDiskRawDataRows(const LocalChunkManagerPtr& local_chunk_manager,
     return static_cast<size_t>(rows);
 }
 
-void
-ApplyDiskAnnBuildThreadConfig(const IndexType& index_type,
-                              knowhere::Json& build_config) {
-    if (index_type != knowhere::IndexEnum::INDEX_DISKANN) {
-        return;
-    }
-
-    auto num_threads = GetValueFromConfig<std::string>(
-        build_config, DISK_ANN_BUILD_THREAD_NUM);
-    AssertInfo(num_threads.has_value(),
-               "param {} is empty",
-               DISK_ANN_BUILD_THREAD_NUM);
-    build_config[DISK_ANN_THREADS_NUM] = std::atoi(num_threads.value().c_str());
-}
-
 template <typename LocalChunkManagerPtr>
 void
 WriteDiskValidData(const LocalChunkManagerPtr& local_chunk_manager,
@@ -557,7 +542,6 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
     }
 
     build_config[DISK_ANN_PREFIX_PATH] = local_index_path_prefix;
-    ApplyDiskAnnBuildThreadConfig(GetIndexType(), build_config);
 
     auto opt_fields = GetValueFromConfig<OptFieldT>(config, VEC_OPT_FIELDS);
     auto is_partition_key_isolation =
@@ -648,7 +632,29 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
         return;
     }
 
-    ApplyDiskAnnBuildThreadConfig(GetIndexType(), build_config);
+    if (is_embedding_list && milvus::GetDatasetRows(dataset) == 0) {
+        auto offsets =
+            dataset->Get<const size_t*>(knowhere::meta::EMB_LIST_OFFSET);
+        if (offsets == nullptr) {
+            ThrowInfo(ErrorCode::UnexpectedError,
+                      "Embedding list offsets is empty when build index");
+        }
+        auto num_offsets = GetEmbListNumOffsets(dataset, offsets, 0);
+        auto empty_offsets =
+            std::vector<size_t>(offsets, offsets + num_offsets);
+        auto empty_offsets_path =
+            local_index_path_prefix + "/" + EMPTY_EMB_LIST_OFFSET_KEY;
+        WriteDiskEmptyEmbListOffsets(local_chunk_manager,
+                                     empty_offsets_path,
+                                     dataset->GetDim(),
+                                     empty_offsets);
+        file_manager_->AddFile(empty_offsets_path);
+        SetDim(dataset->GetDim());
+        empty_emb_list_offsets_ = std::move(empty_offsets);
+        file_manager_->RemoveRawDataFiles();
+        return;
+    }
+
     if (!local_chunk_manager->Exist(local_data_path)) {
         local_chunk_manager->CreateFile(local_data_path);
     }
@@ -958,15 +964,6 @@ VectorDiskAnnIndex<T>::update_load_json(const Config& config) {
         // set base info
         load_config[DISK_ANN_PREPARE_WARM_UP] = false;
         load_config[DISK_ANN_PREPARE_USE_BFS_CACHE] = false;
-
-        // set threads number
-        auto num_threads = GetValueFromConfig<std::string>(
-            load_config, DISK_ANN_LOAD_THREAD_NUM);
-        AssertInfo(num_threads.has_value(),
-                   "param {} is empty",
-                   DISK_ANN_LOAD_THREAD_NUM);
-        load_config[DISK_ANN_THREADS_NUM] =
-            std::atoi(num_threads.value().c_str());
 
         // update search_beamwidth
         auto beamwidth = GetValueFromConfig<std::string>(
