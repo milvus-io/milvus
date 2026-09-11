@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <iosfwd>
+#include <optional>
 #include <string_view>
 
 #include "bitset/bitset.h"
@@ -42,200 +43,6 @@
 namespace milvus {
 namespace exec {
 
-#define GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON(_DataType, method)            \
-    auto execute_sub_batch = [this](const _DataType* data,                       \
-                                    ValidityView valid_data,                     \
-                                    const int32_t* offsets,                      \
-                                    const int32_t* segment_offsets,              \
-                                    const int size,                              \
-                                    TargetBitmapView res,                        \
-                                    TargetBitmapView valid_res,                  \
-                                    const Geometry& right_source) {              \
-        AssertInfo(segment_offsets != nullptr,                                   \
-                   "segment_offsets should not be nullptr");                     \
-        auto geometry_cache = this->segment_->GetGeometryCache(field_id_);       \
-        if (geometry_cache) {                                                    \
-            auto cache_lock = geometry_cache->AcquireReadLock();                 \
-            /* Cache-owned geometries share one GEOS context; drive the        \
-             * predicate on a per-thread context so concurrent read-locked      \
-             * queries never touch the same non-thread-safe context. */ \
-            GEOSContextHandle_t tls_ctx = GetThreadLocalGEOSContext();           \
-            for (int i = 0; i < size; ++i) {                                     \
-                if (valid_data && !valid_data[i]) {                              \
-                    res[i] = valid_res[i] = false;                               \
-                    continue;                                                    \
-                }                                                                \
-                auto absolute_offset = segment_offsets[i];                       \
-                auto cached_geometry =                                           \
-                    geometry_cache->GetByOffsetUnsafe(absolute_offset);          \
-                /* nullptr = empty/corrupt placeholder row (the write paths    \
-                 * keep such rows, see SimpleGeometryCache::AppendDataAt); it   \
-                 * can never satisfy the predicate, so evaluate it to false     \
-                 * instead of failing the whole query. */ \
-                if (cached_geometry == nullptr) {                                \
-                    res[i] = false;                                              \
-                    continue;                                                    \
-                }                                                                \
-                res[i] = cached_geometry->method(right_source, tls_ctx);         \
-            }                                                                    \
-        } else {                                                                 \
-            /* Thread-local context: a throwing row can no longer leak a       \
-             * per-batch GEOS_init_r context. TryParseFromWkb throws only on    \
-             * pre-parse allocation failure; a corrupt/placeholder WKB row --   \
-             * or a GEOS-swallowed parse-time OOM, indistinguishable from it    \
-             * (see the KNOWN LIMIT note on TryParseFromWkb) -- evaluates to    \
-             * false, matching the cache branch above. */ \
-            GEOSContextHandle_t tls_ctx = GetThreadLocalGEOSContext();           \
-            for (int i = 0; i < size; ++i) {                                     \
-                if (valid_data && !valid_data[i]) {                              \
-                    res[i] = valid_res[i] = false;                               \
-                    continue;                                                    \
-                }                                                                \
-                Geometry left;                                                   \
-                if (!left.TryParseFromWkb(                                       \
-                        tls_ctx, data[i].data(), data[i].size())) {              \
-                    res[i] = false;                                              \
-                    continue;                                                    \
-                }                                                                \
-                res[i] = left.method(right_source, tls_ctx);                     \
-            }                                                                    \
-        }                                                                        \
-    };                                                                           \
-    int64_t processed_size = ProcessDataChunks<_DataType, true>(                 \
-        execute_sub_batch, std::nullptr_t{}, res, valid_res, right_source);      \
-    AssertInfo(processed_size == real_batch_size,                                \
-               "internal error: expr processed rows {} not equal "               \
-               "expect batch size {}",                                           \
-               processed_size,                                                   \
-               real_batch_size);                                                 \
-    return res_vec;
-// Specialized macro for distance-based operations (ST_DWITHIN)
-#define GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON_DISTANCE(_DataType, method)   \
-    auto execute_sub_batch = [this](const _DataType* data,                       \
-                                    ValidityView valid_data,                     \
-                                    const int32_t* offsets,                      \
-                                    const int32_t* segment_offsets,              \
-                                    const int size,                              \
-                                    TargetBitmapView res,                        \
-                                    TargetBitmapView valid_res,                  \
-                                    const Geometry& right_source) {              \
-        AssertInfo(segment_offsets != nullptr,                                   \
-                   "segment_offsets should not be nullptr");                     \
-        auto geometry_cache = this->segment_->GetGeometryCache(field_id_);       \
-        if (geometry_cache) {                                                    \
-            auto cache_lock = geometry_cache->AcquireReadLock();                 \
-            /* Cache-owned geometries share one GEOS context; drive the        \
-             * predicate on a per-thread context so concurrent read-locked      \
-             * queries never touch the same non-thread-safe context. */ \
-            GEOSContextHandle_t tls_ctx = GetThreadLocalGEOSContext();           \
-            for (int i = 0; i < size; ++i) {                                     \
-                if (valid_data && !valid_data[i]) {                              \
-                    res[i] = valid_res[i] = false;                               \
-                    continue;                                                    \
-                }                                                                \
-                auto absolute_offset = segment_offsets[i];                       \
-                auto cached_geometry =                                           \
-                    geometry_cache->GetByOffsetUnsafe(absolute_offset);          \
-                /* nullptr = empty/corrupt placeholder row: evaluate to false  \
-                 * instead of failing the query (see the comparison macro). */ \
-                if (cached_geometry == nullptr) {                                \
-                    res[i] = false;                                              \
-                    continue;                                                    \
-                }                                                                \
-                res[i] = cached_geometry->method(                                \
-                    right_source, expr_->distance_, tls_ctx);                    \
-            }                                                                    \
-        } else {                                                                 \
-            /* Thread-local context + non-throwing parse: no context leak,     \
-             * corrupt rows evaluate to false (see the comparison macro). */ \
-            GEOSContextHandle_t tls_ctx = GetThreadLocalGEOSContext();           \
-            for (int i = 0; i < size; ++i) {                                     \
-                if (valid_data && !valid_data[i]) {                              \
-                    res[i] = valid_res[i] = false;                               \
-                    continue;                                                    \
-                }                                                                \
-                Geometry left;                                                   \
-                if (!left.TryParseFromWkb(                                       \
-                        tls_ctx, data[i].data(), data[i].size())) {              \
-                    res[i] = false;                                              \
-                    continue;                                                    \
-                }                                                                \
-                res[i] = left.method(right_source, expr_->distance_, tls_ctx);   \
-            }                                                                    \
-        }                                                                        \
-    };                                                                           \
-    int64_t processed_size = ProcessDataChunks<_DataType, true>(                 \
-        execute_sub_batch, std::nullptr_t{}, res, valid_res, right_source);      \
-    AssertInfo(processed_size == real_batch_size,                                \
-               "internal error: expr processed rows {} not equal "               \
-               "expect batch size {}",                                           \
-               processed_size,                                                   \
-               real_batch_size);                                                 \
-    return res_vec;
-
-// Macro for unary operations (like IsValid) that don't need a right_source
-#define GEOMETRY_EXECUTE_SUB_BATCH_UNARY(_DataType, method)                      \
-    auto execute_sub_batch = [this](const _DataType* data,                       \
-                                    ValidityView valid_data,                     \
-                                    const int32_t* offsets,                      \
-                                    const int32_t* segment_offsets,              \
-                                    const int size,                              \
-                                    TargetBitmapView res,                        \
-                                    TargetBitmapView valid_res) {                \
-        AssertInfo(segment_offsets != nullptr,                                   \
-                   "segment_offsets should not be nullptr");                     \
-        auto geometry_cache = this->segment_->GetGeometryCache(field_id_);       \
-        if (geometry_cache) {                                                    \
-            auto cache_lock = geometry_cache->AcquireReadLock();                 \
-            /* Cache-owned geometries share one GEOS context; drive the        \
-             * predicate on a per-thread context so concurrent read-locked      \
-             * queries never touch the same non-thread-safe context. */ \
-            GEOSContextHandle_t tls_ctx = GetThreadLocalGEOSContext();           \
-            for (int i = 0; i < size; ++i) {                                     \
-                if (valid_data && !valid_data[i]) {                              \
-                    res[i] = valid_res[i] = false;                               \
-                    continue;                                                    \
-                }                                                                \
-                auto absolute_offset = segment_offsets[i];                       \
-                auto cached_geometry =                                           \
-                    geometry_cache->GetByOffsetUnsafe(absolute_offset);          \
-                /* nullptr = empty/corrupt placeholder row: it is not a valid  \
-                 * geometry, so the unary predicate is false (see the           \
-                 * comparison macro). */ \
-                if (cached_geometry == nullptr) {                                \
-                    res[i] = false;                                              \
-                    continue;                                                    \
-                }                                                                \
-                res[i] = cached_geometry->method(tls_ctx);                       \
-            }                                                                    \
-        } else {                                                                 \
-            /* Thread-local context + non-throwing parse: no context leak,     \
-             * corrupt rows evaluate to false (see the comparison macro). */ \
-            GEOSContextHandle_t tls_ctx = GetThreadLocalGEOSContext();           \
-            for (int i = 0; i < size; ++i) {                                     \
-                if (valid_data && !valid_data[i]) {                              \
-                    res[i] = valid_res[i] = false;                               \
-                    continue;                                                    \
-                }                                                                \
-                Geometry left;                                                   \
-                if (!left.TryParseFromWkb(                                       \
-                        tls_ctx, data[i].data(), data[i].size())) {              \
-                    res[i] = false;                                              \
-                    continue;                                                    \
-                }                                                                \
-                res[i] = left.method(tls_ctx);                                   \
-            }                                                                    \
-        }                                                                        \
-    };                                                                           \
-    int64_t processed_size = ProcessDataChunks<_DataType, true>(                 \
-        execute_sub_batch, std::nullptr_t{}, res, valid_res);                    \
-    AssertInfo(processed_size == real_batch_size,                                \
-               "internal error: expr processed rows {} not equal "               \
-               "expect batch size {}",                                           \
-               processed_size,                                                   \
-               real_batch_size);                                                 \
-    return res_vec;
-
 void
 PhyGISFunctionFilterExpr::DetermineExecPath() {
     SegmentExpr::DetermineExecPath();
@@ -257,142 +64,55 @@ PhyGISFunctionFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     if (exec_path_ == ExprExecPath::ScalarIndex) {
         result = EvalForIndexSegment();
     } else {
-        result = EvalForDataSegment();
+        result = EvalForDataSegment(context);
     }
 }
 
 VectorPtr
-PhyGISFunctionFilterExpr::EvalForDataSegment() {
-    auto real_batch_size = GetNextBatchSize();
-    if (real_batch_size == 0) {
-        return nullptr;
-    }
-    auto res_vec = std::make_shared<ColumnVector>(
-        TargetBitmap(real_batch_size), TargetBitmap(real_batch_size));
-    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
-    valid_res.set();
-
-    if (expr_->op_ == proto::plan::GISFunctionFilterExpr_GISOp_STIsValid) {
-        if (segment_->type() == SegmentType::Growing &&
-            !storage::MmapManager::GetInstance()
-                 .GetMmapConfig()
-                 .growing_enable_mmap) {
-            GEOMETRY_EXECUTE_SUB_BATCH_UNARY(std::string, is_valid);
-        } else {
-            GEOMETRY_EXECUTE_SUB_BATCH_UNARY(std::string_view, is_valid);
-        }
-        return res_vec;
-    }
-
-    auto right_source =
-        Geometry(GetThreadLocalGEOSContext(), expr_->geometry_wkt_.c_str());
-
-    // Choose underlying data type according to segment type to avoid element
-    // size mismatch: Sealed segments and growing segments with mmap use std::string_view;
-    // Growing segments without mmap use std::string.
-    switch (expr_->op_) {
-        case proto::plan::GISFunctionFilterExpr_GISOp_Equals: {
-            if (segment_->type() == SegmentType::Growing &&
-                !storage::MmapManager::GetInstance()
-                     .GetMmapConfig()
-                     .growing_enable_mmap) {
-                GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON(std::string, equals);
-            } else {
-                GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON(std::string_view,
-                                                           equals);
-            }
-        }
-        case proto::plan::GISFunctionFilterExpr_GISOp_Touches: {
-            if (segment_->type() == SegmentType::Growing &&
-                !storage::MmapManager::GetInstance()
-                     .GetMmapConfig()
-                     .growing_enable_mmap) {
-                GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON(std::string,
-                                                           touches);
-            } else {
-                GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON(std::string_view,
-                                                           touches);
-            }
-        }
-        case proto::plan::GISFunctionFilterExpr_GISOp_Overlaps: {
-            if (segment_->type() == SegmentType::Growing &&
-                !storage::MmapManager::GetInstance()
-                     .GetMmapConfig()
-                     .growing_enable_mmap) {
-                GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON(std::string,
-                                                           overlaps);
-            } else {
-                GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON(std::string_view,
-                                                           overlaps);
-            }
-        }
-        case proto::plan::GISFunctionFilterExpr_GISOp_Crosses: {
-            if (segment_->type() == SegmentType::Growing &&
-                !storage::MmapManager::GetInstance()
-                     .GetMmapConfig()
-                     .growing_enable_mmap) {
-                GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON(std::string,
-                                                           crosses);
-            } else {
-                GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON(std::string_view,
-                                                           crosses);
-            }
-        }
-        case proto::plan::GISFunctionFilterExpr_GISOp_Contains: {
-            if (segment_->type() == SegmentType::Growing &&
-                !storage::MmapManager::GetInstance()
-                     .GetMmapConfig()
-                     .growing_enable_mmap) {
-                GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON(std::string,
-                                                           contains);
-            } else {
-                GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON(std::string_view,
-                                                           contains);
-            }
-        }
-        case proto::plan::GISFunctionFilterExpr_GISOp_Intersects: {
-            if (segment_->type() == SegmentType::Growing &&
-                !storage::MmapManager::GetInstance()
-                     .GetMmapConfig()
-                     .growing_enable_mmap) {
-                GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON(std::string,
-                                                           intersects);
-            } else {
-                GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON(std::string_view,
-                                                           intersects);
-            }
-        }
-        case proto::plan::GISFunctionFilterExpr_GISOp_Within: {
-            if (segment_->type() == SegmentType::Growing &&
-                !storage::MmapManager::GetInstance()
-                     .GetMmapConfig()
-                     .growing_enable_mmap) {
-                GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON(std::string, within);
-            } else {
-                GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON(std::string_view,
-                                                           within);
-            }
-        }
-        case proto::plan::GISFunctionFilterExpr_GISOp_DWithin: {
-            if (segment_->type() == SegmentType::Growing &&
-                !storage::MmapManager::GetInstance()
-                     .GetMmapConfig()
-                     .growing_enable_mmap) {
-                GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON_DISTANCE(std::string,
-                                                                    dwithin);
-            } else {
-                GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON_DISTANCE(
-                    std::string_view, dwithin);
-            }
-        }
-        default: {
+PhyGISFunctionFilterExpr::EvalForDataSegment(EvalCtx& context) {
+    AssertInfo(context.get_offset_input() == nullptr,
+               "GIS raw-data path does not support offset input");
+    const auto op = expr_->op_;
+    std::optional<Geometry> right_source;
+    switch (op) {
+        case proto::plan::GISFunctionFilterExpr_GISOp_STIsValid:
+            break;
+        case proto::plan::GISFunctionFilterExpr_GISOp_Equals:
+        case proto::plan::GISFunctionFilterExpr_GISOp_Touches:
+        case proto::plan::GISFunctionFilterExpr_GISOp_Overlaps:
+        case proto::plan::GISFunctionFilterExpr_GISOp_Crosses:
+        case proto::plan::GISFunctionFilterExpr_GISOp_Contains:
+        case proto::plan::GISFunctionFilterExpr_GISOp_Intersects:
+        case proto::plan::GISFunctionFilterExpr_GISOp_Within:
+        case proto::plan::GISFunctionFilterExpr_GISOp_DWithin:
+            right_source.emplace(GetThreadLocalGEOSContext(),
+                                 expr_->geometry_wkt_.c_str());
+            break;
+        default:
             ThrowInfo(NotImplemented,
                       "internal error: unknown GIS op : {}",
-                      static_cast<int>(expr_->op_));
-        }
+                      static_cast<int>(op));
     }
-    return res_vec;
+    const Geometry* right = right_source ? &*right_source : nullptr;
+    auto geometry_cache = segment_->GetGeometryCache(field_id_);
+
+    // Growing segments without mmap store std::string; sealed segments and
+    // growing segments with mmap expose std::string_view.
+    if (segment_->type() == SegmentType::Growing &&
+        !storage::MmapManager::GetInstance()
+             .GetMmapConfig()
+             .growing_enable_mmap) {
+        return EvalKernel<std::string>(
+            context,
+            GeometryScanKernel<std::string>{
+                op, right, expr_->distance_, std::move(geometry_cache)},
+            /*element_level=*/false);
+    }
+    return EvalKernel<std::string_view>(
+        context,
+        GeometryScanKernel<std::string_view>{
+            op, right, expr_->distance_, std::move(geometry_cache)},
+        /*element_level=*/false);
 }
 
 // Helper function to calculate bounding box for range_within query optimization
@@ -815,7 +535,3 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
 
 }  //namespace exec
 }  // namespace milvus
-
-#undef GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON
-#undef GEOMETRY_EXECUTE_SUB_BATCH_WITH_COMPARISON_DISTANCE
-#undef GEOMETRY_EXECUTE_SUB_BATCH_UNARY

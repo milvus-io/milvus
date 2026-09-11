@@ -22,6 +22,7 @@
 
 #include "common/EasyAssert.h"
 #include "common/Geometry.h"
+#include "common/GeometryCache.h"
 #include "common/OpContext.h"
 #include "common/PreparedGeometry.h"
 #include "common/Types.h"
@@ -121,6 +122,111 @@ PromoteShortGISCoarseBitmap(TargetBitmap& coarse, int64_t active_count) {
     return true;
 }
 
+// Evaluates `op` with `left` as the row geometry and `*right` as the query
+// geometry, on the caller's per-thread GEOS context. `right` is unused (may be
+// nullptr) for STIsValid.
+inline bool
+EvaluateGISUnpreparedOp(proto::plan::GISFunctionFilterExpr_GISOp op,
+                        const Geometry& left,
+                        const Geometry* right,
+                        double distance,
+                        GEOSContextHandle_t ctx) {
+    switch (op) {
+        case proto::plan::GISFunctionFilterExpr_GISOp_Equals:
+            return left.equals(*right, ctx);
+        case proto::plan::GISFunctionFilterExpr_GISOp_Touches:
+            return left.touches(*right, ctx);
+        case proto::plan::GISFunctionFilterExpr_GISOp_Overlaps:
+            return left.overlaps(*right, ctx);
+        case proto::plan::GISFunctionFilterExpr_GISOp_Crosses:
+            return left.crosses(*right, ctx);
+        case proto::plan::GISFunctionFilterExpr_GISOp_Contains:
+            return left.contains(*right, ctx);
+        case proto::plan::GISFunctionFilterExpr_GISOp_Intersects:
+            return left.intersects(*right, ctx);
+        case proto::plan::GISFunctionFilterExpr_GISOp_Within:
+            return left.within(*right, ctx);
+        case proto::plan::GISFunctionFilterExpr_GISOp_DWithin:
+            return left.dwithin(*right, distance, ctx);
+        case proto::plan::GISFunctionFilterExpr_GISOp_STIsValid:
+            return left.is_valid(ctx);
+        default:
+            ThrowInfo(NotImplemented,
+                      "internal error: unknown GIS op : {}",
+                      static_cast<int>(op));
+    }
+}
+
+// Exact GIS predicate over raw WKB rows. With a geometry cache, rows are
+// resolved by absolute segment offset; without one, the WKB is parsed per row.
+// Empty or unparseable geometries are FALSE.
+template <typename T>  // std::string (growing, no mmap) or std::string_view
+struct GeometryScanKernel {
+    static constexpr bool kNeedsSegmentOffsets = true;
+
+    proto::plan::GISFunctionFilterExpr_GISOp op;
+    const Geometry* right_source;  // nullptr for STIsValid
+    double distance;
+    std::shared_ptr<SimpleGeometryCache> geometry_cache;  // may be nullptr
+
+    template <FilterType filter_type>
+    void
+    Eval(const CandidateBatch<T>& b, TriStateOut out) const {
+        AssertInfo(b.segment_offsets != nullptr,
+                   "segment_offsets should not be nullptr");
+        const bool has_candidates = !b.candidates.empty();
+        // Cache-owned geometries share one GEOS context; drive the predicate
+        // on a per-thread context so concurrent read-locked queries never touch
+        // the same non-thread-safe context. A throwing row cannot leak a
+        // per-batch GEOS_init_r context either.
+        GEOSContextHandle_t tls_ctx = GetThreadLocalGEOSContext();
+        if (geometry_cache) {
+            auto cache_lock = geometry_cache->AcquireReadLock();
+            for (size_t i = 0; i < b.size; ++i) {
+                if ((b.validity && !b.validity[i]) ||
+                    (has_candidates && !b.candidates[i])) {
+                    continue;
+                }
+                const auto* cached =
+                    geometry_cache->GetByOffsetUnsafe(b.segment_offsets[i]);
+                // nullptr = empty/corrupt placeholder row (the write paths keep
+                // such rows, see SimpleGeometryCache::AppendDataAt); it can
+                // never satisfy the predicate.
+                if (cached == nullptr) {
+                    continue;
+                }
+                if (EvaluateGISUnpreparedOp(
+                        op, *cached, right_source, distance, tls_ctx)) {
+                    out.SetTrue(i);
+                }
+            }
+            return;
+        }
+        for (size_t i = 0; i < b.size; ++i) {
+            if ((b.validity && !b.validity[i]) ||
+                (has_candidates && !b.candidates[i])) {
+                continue;
+            }
+            // TryParseFromWkb throws only on pre-parse allocation failure; a
+            // corrupt/placeholder WKB row -- or a GEOS-swallowed parse-time OOM,
+            // indistinguishable from it (see the KNOWN LIMIT note on
+            // TryParseFromWkb) -- evaluates to FALSE, matching the cache branch.
+            Geometry left;
+            if (!left.TryParseFromWkb(
+                    tls_ctx, b.data[i].data(), b.data[i].size())) {
+                continue;
+            }
+            if (EvaluateGISUnpreparedOp(
+                    op, left, right_source, distance, tls_ctx)) {
+                out.SetTrue(i);
+            }
+        }
+    }
+};
+
+static_assert(kKernelNeedsSegmentOffsets<GeometryScanKernel<std::string>> &&
+              kKernelNeedsSegmentOffsets<GeometryScanKernel<std::string_view>>);
+
 class PhyGISFunctionFilterExpr : public SegmentExpr {
  public:
     PhyGISFunctionFilterExpr(
@@ -169,10 +275,11 @@ class PhyGISFunctionFilterExpr : public SegmentExpr {
         return fmt::format("{}", expr_->ToString());
     }
 
-    // The GIS filter slices by its own batch cursor (GetNextBatchSize) and never
-    // reads the offset-input list, so it cannot serve the offset-input
-    // (iterative-filter / rescore) path. Report false so IterativeFilterNode
-    // takes its non-native fallback instead of feeding offsets into Eval.
+    // The index path ignores the offset-input list, and the raw path needs
+    // segment offsets that the offset readers do not provide, so the GIS filter
+    // cannot serve the offset-input (iterative-filter / rescore) path. Report
+    // false so IterativeFilterNode takes its non-native fallback instead of
+    // feeding offsets into Eval.
     bool
     SupportOffsetInput() override {
         return false;
@@ -203,7 +310,7 @@ class PhyGISFunctionFilterExpr : public SegmentExpr {
     EvalForIndexSegment();
 
     VectorPtr
-    EvalForDataSegment();
+    EvalForDataSegment(EvalCtx& context);
 
  private:
     std::shared_ptr<const milvus::expr::GISFunctionFilterExpr> expr_;

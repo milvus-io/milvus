@@ -26,11 +26,14 @@
 #include <type_traits>
 #include <vector>
 
+#include "common/Geometry.h"
+#include "common/GeometryCache.h"
 #include "common/Json.h"
 #include "common/Types.h"
 #include "common/ValidityView.h"
 #include "exec/expression/ExistsExpr.h"
 #include "exec/expression/Expr.h"
+#include "exec/expression/GISFunctionFilterExpr.h"
 #include "exec/expression/MembershipFilterExpr.h"
 #include "exec/expression/TimestamptzArithCompareExpr.h"
 #include "pb/plan.pb.h"
@@ -301,6 +304,67 @@ TEST(ScanKernelSmallTest, MembershipJsonTypedProbe) {
     EXPECT_EQ(raw, (std::vector<Tri>{kT, kT, kF, kU, kU, kU, kF, kF}));
     EXPECT_EQ(FoldLikeScan(raw, valid, &candidates),
               (std::vector<Tri>{kT, kT, kF, kU, kU, kU, kU, kF}));
+}
+
+// --------------------------------------------------------------------- GIS
+
+TEST(ScanKernelSmallTest, GeometryWkbAndCacheBranchesAgree) {
+    GEOSContextHandle_t ctx = GetThreadLocalGEOSContext();
+    const Geometry square(ctx, "POLYGON((0 0, 2 0, 2 2, 0 2, 0 0))");
+    const std::string inside = Geometry(ctx, "POINT(1 1)").to_wkb_string();
+    const std::string outside = Geometry(ctx, "POINT(5 5)").to_wkb_string();
+    const std::string corrupt = "not-wkb";
+
+    // Row 2: NULL whose payload intersects. Row 3: corrupt WKB. Row 4: pruned.
+    const std::vector<std::string> wkb = {
+        inside, outside, inside, corrupt, inside, inside};
+    const bool valid[] = {true, true, false, true, true, true};
+    TargetBitmap candidates(6, true);
+    candidates[4] = false;
+    const std::vector<int32_t> segment_offsets = {100, 101, 102, 103, 104, 105};
+    const std::vector<Tri> expected_raw = {kT, kF, kF, kF, kF, kT};
+    const std::vector<Tri> expected_folded = {kT, kF, kU, kF, kF, kT};
+
+    ASSERT_TRUE(GeometryScanKernel<std::string>::kNeedsSegmentOffsets);
+
+    const GeometryScanKernel<std::string> wkb_kernel{
+        proto::plan::GISFunctionFilterExpr_GISOp_Intersects,
+        &square,
+        0.0,
+        nullptr};
+    auto raw =
+        RunKernel(wkb_kernel, wkb, valid, &candidates, segment_offsets.data());
+    EXPECT_EQ(raw, expected_raw);
+    EXPECT_EQ(FoldLikeScan(raw, valid, &candidates), expected_folded);
+
+    // Cache branch resolves rows by absolute segment offset; `data` is unused.
+    auto cache = std::make_shared<SimpleGeometryCache>();
+    for (size_t i = 0; i < wkb.size(); ++i) {
+        cache->AppendDataAt(segment_offsets[i], wkb[i].data(), wkb[i].size());
+    }
+    const std::vector<std::string_view> unused(wkb.size(), "unused");
+    const GeometryScanKernel<std::string_view> cache_kernel{
+        proto::plan::GISFunctionFilterExpr_GISOp_Intersects,
+        &square,
+        0.0,
+        cache};
+    raw = RunKernel(
+        cache_kernel, unused, valid, &candidates, segment_offsets.data());
+    EXPECT_EQ(raw, expected_raw);
+}
+
+TEST(ScanKernelSmallTest, GeometryIsValidNeedsNoQueryGeometry) {
+    GEOSContextHandle_t ctx = GetThreadLocalGEOSContext();
+    const std::vector<std::string> wkb = {
+        Geometry(ctx, "POINT(1 1)").to_wkb_string(), "not-wkb"};
+    const std::vector<int32_t> segment_offsets = {0, 1};
+    const GeometryScanKernel<std::string> kernel{
+        proto::plan::GISFunctionFilterExpr_GISOp_STIsValid,
+        nullptr,
+        0.0,
+        nullptr};
+    EXPECT_EQ(RunKernel(kernel, wkb, nullptr, nullptr, segment_offsets.data()),
+              (std::vector<Tri>{kT, kF}));
 }
 
 }  // namespace
