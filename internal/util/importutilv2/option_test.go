@@ -227,3 +227,73 @@ func TestIsAutoCommit(t *testing.T) {
 	opts = []*commonpb.KeyValuePair{{Key: AutoCommitKey, Value: "false"}}
 	assert.False(t, IsAutoCommit(opts))
 }
+
+func TestValidateNoDuplicateKeys(t *testing.T) {
+	assert.NoError(t, ValidateNoDuplicateKeys(nil))
+	assert.NoError(t, ValidateNoDuplicateKeys(Options{
+		{Key: "backup", Value: "true"},
+		{Key: "l0_import", Value: "false"},
+	}))
+
+	err := ValidateNoDuplicateKeys(Options{
+		{Key: "backup", Value: "false"},
+		{Key: "backup", Value: "true"},
+	})
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	assert.Contains(t, err.Error(), "backup")
+
+	// ParseTimeRange matches keys with strings.EqualFold, so case variants of one
+	// target key are duplicates too: accepting them leaves getTimestamp to pick a
+	// value by map iteration order.
+	err = ValidateNoDuplicateKeys(Options{
+		{Key: StartTs, Value: "1"},
+		{Key: "START_TS", Value: "2"},
+	})
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	assert.Contains(t, err.Error(), "START_TS")
+
+	// U+017F folds to "s" but is unchanged by strings.ToLower, so a ToLower-based
+	// dedup would admit this pair while getTimestamp still matches both.
+	err = ValidateNoDuplicateKeys(Options{
+		{Key: StartTs, Value: "1"},
+		{Key: "ſtart_ts", Value: "2"},
+	})
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+
+	// The start_ts/startTs alias pair differs in length, so EqualFold never
+	// matches them against each other and both remain legal in one request.
+	assert.NoError(t, ValidateNoDuplicateKeys(Options{
+		{Key: StartTs, Value: "1"},
+		{Key: StartTs2, Value: "2"},
+	}))
+}
+
+// Nothing bounds how many options an ImportV2 request carries -- the only ceiling
+// is the 256 MiB gRPC body, and 50k keys fit in under 1 MB. This check runs first
+// in proxy PreExecute, ahead of even the collection lookup, on the task pool shared
+// with insert and delete, and again in datacoord.
+//
+// Measured under the -N -l build these tests use: linear ~30ms, pairwise ~28s.
+//
+// The bound is 10s rather than something tight, because this assertion is a
+// complexity gate, not a latency budget: the only regression it exists to catch
+// costs ~28s, so 10s still fails on it. The coverage job adds -race,
+// -covermode=atomic and -coverpkg=./... on top of -N -l (scripts/run_go_codecov.sh)
+// and runs with -p PARALLEL on a contended box, which is roughly a 7x multiplier;
+// a tight bound would turn that into a flake, and -failfast would abort the whole
+// internal run on a failure pointing nowhere near this logic.
+
+func TestValidateNoDuplicateKeys_ScalesLinearly(t *testing.T) {
+	const n = 50000
+	opts := make(Options, 0, n)
+	for i := 0; i < n; i++ {
+		opts = append(opts, &commonpb.KeyValuePair{Key: fmt.Sprintf("k%08d", i), Value: "v"})
+	}
+
+	start := time.Now()
+	assert.NoError(t, ValidateNoDuplicateKeys(opts))
+	elapsed := time.Since(start)
+
+	assert.Less(t, elapsed, 10*time.Second,
+		"validating %d options took %s -- a pairwise scan is back", n, elapsed)
+}
