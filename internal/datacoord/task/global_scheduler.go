@@ -261,39 +261,43 @@ func (s *globalTaskScheduler) pickNode(slotHeap typeutil.Heap[*nodeSlotEntry], t
 }
 
 func (s *globalTaskScheduler) schedule() {
-	pendingNum := s.pendingTasks.TaskCount()
-	if pendingNum == 0 {
+	taskIDs := s.pendingTasks.TaskIDsByPriority()
+	if len(taskIDs) == 0 {
 		return
 	}
+	// A round visits each candidate once in the queue's priority order.
+	// Keep candidates in pending until a worker callback acquires their task lock.
 	nodeSlots := s.cluster.QuerySlot()
-	mlog.Info(s.ctx, "scheduling pending tasks...", mlog.Int("num", pendingNum), mlog.Any("nodeSlots", nodeSlots))
+	mlog.Info(s.ctx, "scheduling pending tasks...", mlog.Int("num", len(taskIDs)), mlog.Any("nodeSlots", nodeSlots))
 
 	// Build the node-slot max-heap once per round and reuse it across all picks,
 	// so each task is placed on the currently least-loaded node.
 	slotHeap := newNodeSlotHeap(nodeSlots)
 	futures := make([]*conc.Future[struct{}], 0)
-	var delayed []Task
-	for {
-		task := s.pendingTasks.Pop()
+	for _, taskID := range taskIDs {
+		task := s.pendingTasks.Get(taskID)
 		if task == nil {
-			break
+			continue
 		}
-		// A task in failure backoff gives way: it re-enters the queue after
-		// this round and is dispatched once its delay elapses, so one
-		// persistently failing task cannot occupy the scheduler.
+		// Backoff tasks remain visible to Abort without blocking other candidates.
 		if s.taskInBackoff(task) {
-			delayed = append(delayed, task)
 			continue
 		}
 		taskSlot := task.GetTaskSlot()
 		nodeID := s.pickNode(slotHeap, taskSlot)
 		if nodeID == NullNodeID {
-			s.pendingTasks.Push(task)
 			break
 		}
 		future := s.execPool.Submit(func() (struct{}, error) {
 			s.mu.RLock(task.GetTaskID())
 			defer s.mu.RUnlock(task.GetTaskID())
+			// Submit may wait for pool capacity. Abort can remove the task during
+			// that wait, so recheck and dequeue only after acquiring its lock.
+			// Queue locks are released before any worker RPC.
+			if s.pendingTasks.Get(task.GetTaskID()) == nil {
+				return struct{}{}, nil
+			}
+			s.pendingTasks.Remove(task.GetTaskID())
 			mlog.Info(s.ctx, "processing task...", WrapTaskLog(task)...)
 			if task.GetTaskState() == taskcommon.Init {
 				task.CreateTaskOnWorker(nodeID, s.cluster)
@@ -326,10 +330,7 @@ func (s *globalTaskScheduler) schedule() {
 		})
 		futures = append(futures, future)
 	}
-	for _, task := range delayed {
-		s.pendingTasks.Push(task)
-	}
-	_ = conc.AwaitAll(futures...)
+	_ = conc.BlockOnAll(futures...)
 }
 
 func (s *globalTaskScheduler) check() {
@@ -344,6 +345,9 @@ func (s *globalTaskScheduler) check() {
 		future := s.checkPool.Submit(func() (struct{}, error) {
 			s.mu.RLock(task.GetTaskID())
 			defer s.mu.RUnlock(task.GetTaskID())
+			if !s.runningTasks.Contain(task.GetTaskID()) {
+				return struct{}{}, nil
+			}
 			task.QueryTaskOnWorker(s.cluster)
 			switch task.GetTaskState() {
 			case taskcommon.None:
@@ -363,7 +367,7 @@ func (s *globalTaskScheduler) check() {
 		})
 		futures = append(futures, future)
 	}
-	_ = conc.AwaitAll(futures...)
+	_ = conc.BlockOnAll(futures...)
 }
 
 func (s *globalTaskScheduler) updateTaskTimeMetrics() {

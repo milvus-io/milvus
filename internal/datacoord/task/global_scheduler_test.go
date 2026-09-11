@@ -18,15 +18,18 @@ package task
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	mock "github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	taskcommon "github.com/milvus-io/milvus/pkg/v3/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -137,6 +140,43 @@ func TestGlobalScheduler_AbortAndRemoveTask(t *testing.T) {
 	assert.Equal(t, 1, scheduler.(*globalTaskScheduler).runningTasks.Len())
 	scheduler.AbortAndRemoveTask(2)
 	assert.Equal(t, 0, scheduler.(*globalTaskScheduler).runningTasks.Len())
+}
+
+type orderedSnapshotQueue struct {
+	PriorityQueue
+	ids []int64
+}
+
+func (q *orderedSnapshotQueue) TaskIDsByPriority() []int64 {
+	return append([]int64(nil), q.ids...)
+}
+
+func TestGlobalScheduler_UsesQueuePriority(t *testing.T) {
+	cluster := session.NewMockCluster(t)
+	cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{
+		10: {AvailableSlots: 1},
+	}).Once()
+	s := NewGlobalTaskScheduler(context.Background(), cluster).(*globalTaskScheduler)
+	t.Cleanup(s.execPool.Release)
+	t.Cleanup(s.checkPool.Release)
+	// The queue prioritizes task 2, independently of its task ID.
+	s.pendingTasks = &orderedSnapshotQueue{PriorityQueue: s.pendingTasks, ids: []int64{2, 1}}
+	var dispatched atomic.Int64
+	for _, id := range []int64{1, 2} {
+		task := NewMockTask(t)
+		task.EXPECT().GetTaskID().Return(id)
+		task.EXPECT().GetTaskType().Return(taskcommon.Compaction).Maybe()
+		task.EXPECT().GetTaskSlot().Return(int64(1))
+		task.EXPECT().GetTaskState().Return(taskcommon.Init).Maybe()
+		task.EXPECT().CreateTaskOnWorker(int64(10), cluster).Run(func(int64, session.Cluster) {
+			dispatched.Store(id)
+		}).Maybe()
+		s.pendingTasks.Push(task)
+	}
+
+	s.schedule()
+
+	assert.Equal(t, int64(2), dispatched.Load(), "the only slot must go to the queue's highest-priority task")
 }
 
 func TestGlobalScheduler_pickNode(t *testing.T) {
@@ -544,4 +584,237 @@ func TestGlobalScheduler_TerminalTaskClearsBackoff(t *testing.T) {
 	assert.False(t, ok, "backoff entry must be removed once the task reaches a terminal state")
 	assert.Equal(t, 0, scheduler.runningTasks.Len())
 	assert.Equal(t, 0, len(scheduler.pendingTasks.TaskIDs()))
+}
+
+// Pause after a task leaves the pending queue, before worker execution.
+// Pop exercises the old path; Remove exercises dispatch under the task lock.
+type dispatchPausedQueue struct {
+	PriorityQueue
+	once    sync.Once
+	removed chan struct{}
+	release chan struct{}
+}
+
+func (q *dispatchPausedQueue) Pop() Task {
+	task := q.PriorityQueue.Pop()
+	if task != nil {
+		q.once.Do(func() { close(q.removed); <-q.release })
+	}
+	return task
+}
+
+func (q *dispatchPausedQueue) Remove(id int64) {
+	q.PriorityQueue.Remove(id)
+	q.once.Do(func() { close(q.removed); <-q.release })
+}
+
+func TestGlobalScheduler_AbortWaitsForDispatch(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		afterCreate taskcommon.State
+		blockRPC    bool
+	}{
+		{name: "dispatch", afterCreate: taskcommon.InProgress},
+		{name: "retry", afterCreate: taskcommon.Init},
+		{name: "worker RPC", afterCreate: taskcommon.InProgress, blockRPC: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cluster := session.NewMockCluster(t)
+			cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{1: {NodeID: 1, AvailableSlots: 10}}).Once()
+			s := NewGlobalTaskScheduler(context.Background(), cluster).(*globalTaskScheduler)
+			selected, release := make(chan struct{}), make(chan struct{})
+			releaseOnce := sync.OnceFunc(func() { close(release) })
+			t.Cleanup(releaseOnce)
+			if !tc.blockRPC {
+				s.pendingTasks = &dispatchPausedQueue{PriorityQueue: s.pendingTasks, removed: selected, release: release}
+			}
+			var state atomic.Int32
+			state.Store(int32(taskcommon.Init))
+			task := NewMockTask(t)
+			task.EXPECT().GetTaskID().Return(int64(1))
+			task.EXPECT().GetTaskType().Return(taskcommon.Compaction)
+			task.EXPECT().GetTaskState().RunAndReturn(func() taskcommon.State { return taskcommon.State(state.Load()) })
+			task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Maybe()
+			task.EXPECT().GetTaskSlot().Return(int64(1)).Once()
+			task.EXPECT().CreateTaskOnWorker(mock.Anything, mock.Anything).Run(func(int64, session.Cluster) {
+				if tc.blockRPC {
+					close(selected)
+					<-release
+				}
+				state.Store(int32(tc.afterCreate))
+			}).Once()
+			task.EXPECT().DropTaskOnWorker(mock.Anything).Once()
+			s.Enqueue(task)
+			scheduled := make(chan struct{})
+			go func() { defer close(scheduled); s.schedule() }()
+			select {
+			case <-selected:
+			case <-time.After(5 * time.Second):
+				t.Fatal("dispatch did not remove the pending task")
+			}
+			aborted := make(chan struct{})
+			go func() { defer close(aborted); s.AbortAndRemoveTask(1) }()
+			select {
+			case <-aborted:
+				t.Error("Abort returned while dispatch could still start Create")
+			case <-time.After(100 * time.Millisecond):
+			}
+			// A waiting cancel for task 1 must not hold the queue or another task's lock.
+			otherDone := make(chan struct{})
+			go func() { defer close(otherDone); s.AbortAndRemoveTask(2) }()
+			select {
+			case <-otherDone:
+			case <-time.After(5 * time.Second):
+				t.Error("canceling another task was blocked")
+			}
+			releaseOnce()
+			select {
+			case <-scheduled:
+			case <-time.After(5 * time.Second):
+				t.Fatal("dispatch deadlocked")
+			}
+			select {
+			case <-aborted:
+			case <-time.After(5 * time.Second):
+				t.Fatal("Abort deadlocked")
+			}
+			assert.Nil(t, s.pendingTasks.Get(1))
+			assert.False(t, s.runningTasks.Contain(1))
+		})
+	}
+}
+
+func TestGlobalScheduler_AbortSkipsQueuedQuery(t *testing.T) {
+	cluster := session.NewMockCluster(t)
+	s := NewGlobalTaskScheduler(context.Background(), cluster).(*globalTaskScheduler)
+	s.checkPool = conc.NewPool[struct{}](1)
+	release := make(chan struct{})
+	releaseOnce := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(releaseOnce)
+	blocker := s.checkPool.Submit(func() (struct{}, error) { <-release; return struct{}{}, nil })
+	task := NewMockTask(t)
+	task.EXPECT().GetTaskID().Return(int64(1))
+	task.EXPECT().GetTaskType().Return(taskcommon.Compaction)
+	task.EXPECT().GetTaskState().Return(taskcommon.InProgress)
+	task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Maybe()
+	task.EXPECT().DropTaskOnWorker(mock.Anything).Once()
+	var queries atomic.Int32
+	task.EXPECT().QueryTaskOnWorker(mock.Anything).Run(func(session.Cluster) { queries.Add(1) }).Maybe()
+	s.Enqueue(task)
+	checked := make(chan struct{})
+	go func() { defer close(checked); s.check() }()
+	require.Eventually(t, func() bool { return s.checkPool.Waiting() == 1 }, 5*time.Second, time.Millisecond)
+	s.AbortAndRemoveTask(1)
+	releaseOnce()
+	select {
+	case <-checked:
+	case <-time.After(5 * time.Second):
+		t.Fatal("query callback deadlocked")
+	}
+	_, err := blocker.Await()
+	require.NoError(t, err)
+	assert.Zero(t, queries.Load(), "a query queued before Abort must not run afterward")
+	assert.False(t, s.runningTasks.Contain(1))
+}
+
+func TestGlobalScheduler_AbortWhileExecPoolFull(t *testing.T) {
+	cluster := session.NewMockCluster(t)
+	cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{1: {NodeID: 1, AvailableSlots: 10}}).Once()
+	s := NewGlobalTaskScheduler(context.Background(), cluster).(*globalTaskScheduler)
+	s.execPool = conc.NewPool[struct{}](1)
+	release := make(chan struct{})
+	releaseOnce := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(releaseOnce)
+	blocker := s.execPool.Submit(func() (struct{}, error) { <-release; return struct{}{}, nil })
+	for _, id := range []int64{1, 2} {
+		task := NewMockTask(t)
+		task.EXPECT().GetTaskID().Return(id)
+		task.EXPECT().GetTaskType().Return(taskcommon.Compaction)
+		task.EXPECT().GetTaskState().Return(taskcommon.Init)
+		task.EXPECT().GetTaskSlot().Return(int64(1)).Maybe()
+		task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Maybe()
+		task.EXPECT().DropTaskOnWorker(mock.Anything).Once()
+		s.Enqueue(task)
+	}
+	// Task 1 stays in backoff while task 2 waits for execution-pool capacity.
+	s.backoffs.Insert(1, &taskBackoff{failures: 1, notBefore: time.Now().Add(time.Hour)})
+	scheduled := make(chan struct{})
+	go func() { defer close(scheduled); s.schedule() }()
+	require.Eventually(t, func() bool { return s.execPool.Waiting() == 1 }, 5*time.Second, time.Millisecond)
+	assert.Equal(t, 2, s.GetPendingTaskCount(taskcommon.Compaction))
+	aborted := make(chan struct{})
+	go func() { defer close(aborted); s.AbortAndRemoveTask(1); s.AbortAndRemoveTask(2) }()
+	select {
+	case <-aborted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Abort waited for an unrelated pool worker")
+	}
+	releaseOnce()
+	select {
+	case <-scheduled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("dispatch deadlocked after cancellation")
+	}
+	_, err := blocker.Await()
+	require.NoError(t, err)
+	assert.Zero(t, s.pendingTasks.TaskCount())
+	assert.Zero(t, s.runningTasks.Len())
+	assert.Zero(t, s.backoffs.Len())
+}
+
+func TestGlobalScheduler_RejectedDispatchKeepsTaskPending(t *testing.T) {
+	cluster := session.NewMockCluster(t)
+	cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{1: {NodeID: 1, AvailableSlots: 10}}).Once()
+	s := NewGlobalTaskScheduler(context.Background(), cluster).(*globalTaskScheduler)
+	s.execPool.Release()
+	task := NewMockTask(t)
+	task.EXPECT().GetTaskID().Return(int64(1))
+	task.EXPECT().GetTaskType().Return(taskcommon.Compaction)
+	task.EXPECT().GetTaskState().Return(taskcommon.Init)
+	task.EXPECT().GetTaskSlot().Return(int64(1))
+	task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Maybe()
+	task.EXPECT().DropTaskOnWorker(mock.Anything).Once()
+	s.Enqueue(task)
+	s.schedule()
+	assert.Same(t, task, s.pendingTasks.Get(1))
+	aborted := make(chan struct{})
+	go func() { defer close(aborted); s.AbortAndRemoveTask(1) }()
+	select {
+	case <-aborted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("rejected submission leaked the task lock")
+	}
+	assert.Zero(t, s.pendingTasks.TaskCount())
+}
+
+func TestGlobalScheduler_AbortBeforeNoSlotDecision(t *testing.T) {
+	cluster := session.NewMockCluster(t)
+	cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{}).Once()
+	s := NewGlobalTaskScheduler(context.Background(), cluster).(*globalTaskScheduler)
+	selected, release := make(chan struct{}), make(chan struct{})
+	releaseOnce := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(releaseOnce)
+	task := NewMockTask(t)
+	task.EXPECT().GetTaskID().Return(int64(1))
+	task.EXPECT().GetTaskType().Return(taskcommon.Compaction)
+	task.EXPECT().GetTaskState().Return(taskcommon.Init)
+	task.EXPECT().GetTaskSlot().RunAndReturn(func() int64 { close(selected); <-release; return 1 }).Once()
+	task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Maybe()
+	task.EXPECT().DropTaskOnWorker(mock.Anything).Once()
+	s.Enqueue(task)
+	scheduled := make(chan struct{})
+	go func() { defer close(scheduled); s.schedule() }()
+	select {
+	case <-selected:
+	case <-time.After(5 * time.Second):
+		t.Fatal("scheduler did not reach slot selection")
+	}
+	s.AbortAndRemoveTask(1)
+	releaseOnce()
+	select {
+	case <-scheduled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("scheduler deadlocked after no-slot decision")
+	}
+	assert.Zero(t, s.pendingTasks.TaskCount(), "no-slot handling must not requeue a canceled task")
 }
