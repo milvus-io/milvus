@@ -1500,7 +1500,7 @@ TEST(ScalarIndexSortArrayNestedTest, ArraySortIndexDoesNotExposeRawArrayData) {
 
 TEST(BitmapIndexLoadResourceTest,
      EncryptedNonMmapIncludesTargetAndStreamMemory) {
-    auto& budget = storage::TransientMemoryBudget::GetLoadTransientBudget();
+    auto& budget = storage::LoadAdmissionController::GetInstance();
     auto old_capacity = budget.CapacityBytes();
     auto& plugin_loader = storage::PluginLoader::GetInstance();
     auto cleanup = folly::makeGuard([&]() {

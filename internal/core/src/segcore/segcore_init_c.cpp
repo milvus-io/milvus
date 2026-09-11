@@ -104,6 +104,13 @@ SegcoreSetEnableGISSplitFusion(const bool value) {
 }
 
 extern "C" void
+SegcoreSetScanCursorOwnsPin(const bool value) {
+    milvus::segcore::SegcoreConfig& config =
+        milvus::segcore::SegcoreConfig::default_config();
+    config.set_scan_cursor_owns_pin(value);
+}
+
+extern "C" void
 SegcoreSetVisibilityFilterEnabled(const bool value) {
     // Deprecated compatibility shim: row visibility filtering is always
     // enforced and this value is ignored. The symbol survives so callers
@@ -117,20 +124,6 @@ SegcoreSetPreferFieldDataWhenIndexHasRawData(const bool value) {
     milvus::segcore::SegcoreConfig& config =
         milvus::segcore::SegcoreConfig::default_config();
     config.set_prefer_field_data_when_index_has_raw_data(value);
-}
-
-extern "C" void
-SegcoreSetTakeForOutputResultCountLimit(const int64_t value) {
-    milvus::segcore::SegcoreConfig& config =
-        milvus::segcore::SegcoreConfig::default_config();
-    config.set_take_for_output_result_count_limit(value);
-}
-
-extern "C" int64_t
-SegcoreGetTakeForOutputResultCountLimit() {
-    milvus::segcore::SegcoreConfig& config =
-        milvus::segcore::SegcoreConfig::default_config();
-    return config.get_take_for_output_result_count_limit();
 }
 
 extern "C" void

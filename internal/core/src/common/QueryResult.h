@@ -194,6 +194,8 @@ class ChunkMergeIterator : public VectorIterator {
 };
 
 struct SearchResult {
+    using VectorIteratorRecreateFn =
+        std::function<void(const BitsetView&, SearchResult&)>;
     SearchResult() = default;
 
     int64_t
@@ -251,6 +253,88 @@ struct SearchResult {
         return view;
     }
 
+    void
+    SetVectorIteratorRecreator(const BitsetView& base_filter,
+                               VectorIteratorRecreateFn recreate_fn) {
+        vector_iterator_base_filter_.reset();
+        vector_iterator_base_filter_view_ = base_filter;
+        // The execution pipeline shares its input column. Direct low-level
+        // callers without an owner retain the original defensive-copy contract.
+        if (!vector_iterator_filter_owner_) {
+            GetVectorIteratorBaseFilter();
+        }
+        vector_iterator_recreate_fn_ = std::move(recreate_fn);
+    }
+
+    void
+    ClearVectorIteratorRecreator() {
+        vector_iterator_recreate_fn_ = {};
+        vector_iterator_base_filter_view_ = {};
+        vector_iterator_base_filter_.reset();
+        vector_iterator_filter_owner_.reset();
+    }
+
+    bool
+    CanRecreateVectorIterator() const {
+        return allow_vector_iterator_recreation_ &&
+               static_cast<bool>(vector_iterator_recreate_fn_);
+    }
+
+    const TargetBitmap*
+    GetVectorIteratorBaseFilter() {
+        const auto& base_filter = vector_iterator_base_filter_view_;
+        if (!vector_iterator_base_filter_ && !base_filter.empty()) {
+            auto copied_filter =
+                std::make_unique<TargetBitmap>(base_filter.size(), false);
+            if (!base_filter.has_out_ids()) {
+                std::memcpy(copied_filter->data(),
+                            base_filter.data(),
+                            base_filter.byte_size());
+            } else {
+                for (size_t i = 0; i < base_filter.size(); ++i) {
+                    (*copied_filter)[i] = base_filter.test(i);
+                }
+            }
+            vector_iterator_base_filter_ = std::move(copied_filter);
+            vector_iterator_base_filter_view_ =
+                BitsetView(*vector_iterator_base_filter_);
+        }
+        return vector_iterator_base_filter_.get();
+    }
+
+    // The returned SearchResult owns every bitmap and raw chunk buffer used by
+    // its iterators. Keep it alive while consuming the batch, then release it
+    // before recreating the next batch.
+    std::optional<std::unique_ptr<SearchResult>>
+    RecreateVectorIterators(TargetBitmap additional_filter) {
+        if (!CanRecreateVectorIterator()) {
+            return std::nullopt;
+        }
+        GetVectorIteratorBaseFilter();
+        if (vector_iterator_base_filter_ != nullptr &&
+            vector_iterator_base_filter_->size() != additional_filter.size()) {
+            return std::nullopt;
+        }
+
+        auto combined_filter = std::move(additional_filter);
+        if (vector_iterator_base_filter_ != nullptr) {
+            combined_filter |= *vector_iterator_base_filter_;
+        }
+
+        auto recreated_result = std::make_unique<SearchResult>();
+        recreated_result->allow_vector_iterator_recreation_ = false;
+        auto combined_view =
+            recreated_result->PinBitset(std::move(combined_filter));
+        vector_iterator_recreate_fn_(combined_view, *recreated_result);
+        if (!recreated_result->vector_iterators_.has_value()) {
+            // The combined filter may exclude every row. The provider ran
+            // successfully, but there is no iterator to assemble.
+            recreated_result->vector_iterators_ =
+                std::vector<std::shared_ptr<VectorIterator>>{};
+        }
+        return recreated_result;
+    }
+
  public:
     int64_t total_nq_{0};
     int64_t unity_topK_{0};
@@ -305,6 +389,11 @@ struct SearchResult {
     std::shared_ptr<const IArrayOffsets> array_offsets_{nullptr};
     std::vector<std::unique_ptr<uint8_t[]>> chunk_buffers_{};
     std::vector<TargetBitmapPtr> pinned_bitsets_{};
+    VectorIteratorRecreateFn vector_iterator_recreate_fn_{};
+    TargetBitmapPtr vector_iterator_base_filter_{};
+    BitsetView vector_iterator_base_filter_view_{};
+    std::shared_ptr<const void> vector_iterator_filter_owner_{};
+    bool allow_vector_iterator_recreation_{true};
 
     // For two-stage search: count of rows that pass the filter in this segment
     // Set to -1 when not applicable (normal search mode)

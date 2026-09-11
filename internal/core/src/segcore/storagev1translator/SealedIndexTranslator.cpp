@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "common/EasyAssert.h"
+#include "common/Utils.h"
 #include "common/common_type_c.h"
 #include "common/resource_c.h"
 #include "fmt/core.h"
@@ -97,7 +98,7 @@ SealedIndexTranslator::SealedIndexTranslator(
     load_resource_request_ = EstimateLoadResource(
         &stream_load_info, &use_shared_memory_overhead_group);
 
-    auto scalar_version =
+    const auto scalar_version =
         milvus::index::GetValueFromConfig<int32_t>(
             config_, milvus::index::SCALAR_INDEX_ENGINE_VERSION)
             .value_or(1);
@@ -105,10 +106,10 @@ SealedIndexTranslator::SealedIndexTranslator(
         AssertInfo(stream_load_info.has_value(),
                    "missing stream load info for packed scalar V3 index");
         if (use_shared_memory_overhead_group) {
-            auto max_task_overhead =
+            const auto max_task_overhead =
                 stream_load_info->encrypted
                     ? stream_load_info->max_task_transient_bytes
-                    : milvus::storage::SaturatingMultiply(
+                    : milvus::SaturatingMultiply(
                           milvus::storage::MaxEntryStreamTaskBytes(),
                           milvus::storage::kFileStreamBufferMultiplier);
             auto memory_group =

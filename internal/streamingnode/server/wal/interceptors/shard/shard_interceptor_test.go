@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func allocWALSchemaForTest(t *testing.T, collectionID int64, vchannel string, schemaVersion int32) {
@@ -360,6 +361,13 @@ func TestShardInterceptorDeleteAppliesBeforeAppend(t *testing.T) {
 }
 
 func TestShardInterceptorPassesExplicitNonZeroSchemaVersion(t *testing.T) {
+	// This test exercises the write-before materialization path, so the version
+	// gate must be activated (otherwise materialization is skipped and the
+	// append falls through to segment assignment).
+	item := &paramtable.Get().FunctionCfg.EnableWriteBeforeMaterialization
+	old := item.SwapTempValue("true")
+	defer item.SwapTempValue(old)
+
 	allocWALSchemaForTest(t, 1, "v1", 3)
 	b := NewInterceptorBuilder()
 	shardManager := mock_shards.NewMockShardManager(t)
@@ -399,6 +407,13 @@ func TestShardInterceptorPassesExplicitNonZeroSchemaVersion(t *testing.T) {
 }
 
 func TestShardInterceptorPassesExplicitZeroSchemaVersion(t *testing.T) {
+	// This test exercises the write-before materialization path, so the version
+	// gate must be activated (otherwise materialization is skipped and the
+	// append falls through to segment assignment).
+	item := &paramtable.Get().FunctionCfg.EnableWriteBeforeMaterialization
+	old := item.SwapTempValue("true")
+	defer item.SwapTempValue(old)
+
 	allocWALSchemaForTest(t, 1, "v1", 0)
 	b := NewInterceptorBuilder()
 	shardManager := mock_shards.NewMockShardManager(t)
@@ -439,6 +454,13 @@ func TestShardInterceptorPassesExplicitZeroSchemaVersion(t *testing.T) {
 }
 
 func TestShardInterceptorRejectsMissingWALFunctionSnapshot(t *testing.T) {
+	// This test exercises the write-before materialization failure path, so the
+	// version gate must be activated (otherwise materialization is skipped and
+	// the append falls through to segment assignment).
+	item := &paramtable.Get().FunctionCfg.EnableWriteBeforeMaterialization
+	old := item.SwapTempValue("true")
+	defer item.SwapTempValue(old)
+
 	b := NewInterceptorBuilder()
 	shardManager := mock_shards.NewMockShardManager(t)
 	shardManager.EXPECT().Logger().Return(mlog.With()).Maybe()

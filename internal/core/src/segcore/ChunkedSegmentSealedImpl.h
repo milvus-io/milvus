@@ -85,10 +85,6 @@
 #include "storage/MmapChunkManager.h"
 #include "segcore/TextColumnCache.h"
 
-#ifdef MILVUS_UNIT_TEST
-#include "segcore/storagev2translator/ManifestGroupTranslator.h"
-#endif
-
 namespace milvus::segcore {
 
 namespace storagev2translator {
@@ -397,6 +393,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
             published_index_has_raw_data;
     };
 
+    // State-only read view over a captured immutable PublishedSegmentState.
+    // Defined out-of-line in ChunkedSegmentSealedImpl.cpp; reads derive purely
+    // from the state (no segment pointer). See CaptureReadSnapshot().
+    class SealedReadSnapshot;
+
     static std::shared_ptr<const RuntimeResourceState>
     BuildRuntimeResourceState();
 
@@ -535,6 +536,12 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     int64_t
     chunk_size(FieldId field_id, int64_t chunk_id) const override;
 
+    // Capture the current published snapshot once per request. Returns a
+    // state-only SegmentReadSnapshot; nullptr is never returned (sealed
+    // segments always have a published state).
+    std::shared_ptr<const SegmentReadSnapshot>
+    CaptureReadSnapshot() const override;
+
     std::pair<int64_t, int64_t>
     get_chunk_by_offset(FieldId field_id, int64_t offset) const override;
 
@@ -613,6 +620,15 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                                  const int64_t* offsets,
                                  int64_t count,
                                  TargetBitmapView valid_result) const override;
+
+    std::shared_ptr<ChunkedColumnInterface>
+    GetChunkedColumn(FieldId field_id) const override {
+        return get_column(field_id);
+    }
+
+    std::pair<std::shared_ptr<ChunkedColumnInterface>,
+              std::shared_ptr<const SkipIndex>>
+    GetDataScanResources(FieldId field_id) const override;
 
  protected:
     // blob and row_count
@@ -1660,7 +1676,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     MutatePublishedStateLocked(Mutator&& mutator,
                                milvus::OpContext* op_ctx = nullptr) {
-        auto current = CapturePublishedState();
+        const auto current = CapturePublishedState();
         auto next = ClonePublishedState(current);
         mutator(*next);
         NormalizePublishedState(*next);
@@ -1957,7 +1973,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     LoadColumnGroups(
         const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
         const std::shared_ptr<milvus_storage::api::Properties>& properties,
-        std::vector<std::pair<int, std::vector<FieldId>>>& cg_field_ids,
+        const std::vector<std::pair<int, std::vector<FieldId>>>& cg_field_ids,
         const SegmentLoadInfo& segment_load_info,
         const SchemaPtr& schema_snapshot,
         bool eager_load,
@@ -1986,6 +2002,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         bool is_replace = false,
         RuntimeResourceState* runtime = nullptr);
 
+    // Loads one staged manifest projection. A non-null pre-opened reader marks
+    // the async path; null preserves synchronous reader opening on the worker.
     void
     LoadColumnGroup(
         const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
@@ -1998,7 +2016,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         milvus::OpContext* op_ctx,
         bool is_replace,
         StagedStateCommitter& committer,
-        storagev2translator::ColumnSizeEstimateResult column_size_estimate);
+        storagev2translator::ColumnSizeEstimateResult column_size_estimate,
+        std::shared_ptr<milvus_storage::api::ChunkReader>
+            preopened_chunk_reader);
 
     void
     LoadColumnGroup(
@@ -2316,24 +2336,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                    "segment {}",
                    get_segment_id());
 
-        auto estimate_columns = std::make_shared<std::vector<std::string>>();
-        estimate_columns->reserve(field_ids.size());
-        for (const auto& field_id : field_ids) {
-            estimate_columns->push_back(
-                schema_snapshot->get_storage_column_name(field_id));
-        }
-        auto estimate_reader_result =
-            runtime->reader->get_chunk_reader(index, estimate_columns);
-        AssertInfo(estimate_reader_result.ok(),
-                   "get estimate chunk reader failed, segment {}, column "
-                   "group index {}, status msg: {}",
-                   get_segment_id(),
-                   index,
-                   estimate_reader_result.status().ToString());
-        auto estimate_reader = std::move(estimate_reader_result).ValueOrDie();
-        auto size_estimate =
-            storagev2translator::FetchColumnSizeEstimates(*estimate_reader);
-
         auto staged = ClonePublishedState(current);
         staged->schema = schema_snapshot;
         staged->load_info =
@@ -2343,19 +2345,19 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         NormalizePublishedState(*staged);
 
         StagedStateCommitter committer(*this, runtime.get(), staged.get());
-        LoadColumnGroup(column_groups,
-                        properties,
-                        index,
-                        field_ids,
-                        segment_load_info,
-                        schema_snapshot,
-                        eager_load,
-                        nullptr,
-                        false,
-                        committer,
-                        std::move(size_estimate));
+        const std::vector<std::pair<int, std::vector<FieldId>>> cg_field_ids = {
+            {static_cast<int>(index), field_ids}};
+        LoadColumnGroups(column_groups,
+                         properties,
+                         cg_field_ids,
+                         segment_load_info,
+                         schema_snapshot,
+                         eager_load,
+                         nullptr,
+                         false,
+                         committer);
 
-        auto it = runtime->fields.find(field_ids.front());
+        const auto it = runtime->fields.find(field_ids.front());
         AssertInfo(it != runtime->fields.end(), "test field was not loaded");
         return it->second;
     }
@@ -2468,6 +2470,33 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         const std::shared_ptr<const PublishedSegmentState>& current,
         StateDelta& final_delta,
         Verifier&& verifier) {
+        TestStageLoadFieldDataThenPublish(field_id,
+                                          column,
+                                          num_rows,
+                                          data_type,
+                                          schema_snapshot,
+                                          std::move(runtime),
+                                          staged_state,
+                                          current,
+                                          final_delta,
+                                          /*is_proxy_column=*/false,
+                                          std::forward<Verifier>(verifier));
+    }
+
+    template <typename Verifier>
+    void
+    TestStageLoadFieldDataThenPublish(
+        FieldId field_id,
+        const std::shared_ptr<ChunkedColumnInterface>& column,
+        size_t num_rows,
+        DataType data_type,
+        const SchemaPtr& schema_snapshot,
+        std::shared_ptr<RuntimeResourceState> runtime,
+        PublishedSegmentState* staged_state,
+        const std::shared_ptr<const PublishedSegmentState>& current,
+        StateDelta& final_delta,
+        bool is_proxy_column,
+        Verifier&& verifier) {
         std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
         StagedStateCommitter committer(*this, runtime.get(), staged_state);
         load_field_data_common(field_id,
@@ -2475,7 +2504,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                                num_rows,
                                data_type,
                                /*enable_mmap=*/false,
-                               /*is_proxy_column=*/false,
+                               is_proxy_column,
                                *current->load_info,
                                schema_snapshot,
                                runtime.get(),

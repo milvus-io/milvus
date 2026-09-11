@@ -35,6 +35,22 @@ import (
 
 const minWALMessageSizeForTest = 256 * 1024
 
+// savePackingThresholdForTest pins the proxy packing threshold for one test.
+//
+// It goes through SwapTempValue rather than Save because walMessageSizeFormatter
+// raises pulsar.maxMessageSize to minWALMessageSize (256KiB) for any smaller
+// value: that floor protects real WAL writes, but it also makes a saved
+// threshold below it unobservable, so a packing test would silently run at
+// 256KiB and never split. The temp-value path bypasses the formatter, which is
+// what it exists for, and lets these tests keep byte-sized payloads instead of
+// allocating megabytes per case.
+func savePackingThresholdForTest(tb testing.TB, threshold int) {
+	tb.Helper()
+	item := &paramtable.Get().PulsarCfg.MaxMessageSize
+	old := item.SwapTempValue(strconv.Itoa(threshold))
+	tb.Cleanup(func() { item.SwapTempValue(old) })
+}
+
 func TestGenInsertMsgsByPartitionRejectsSingleOversizedRow(t *testing.T) {
 	params := paramtable.Get()
 	assert.NoError(t, params.Save(params.PulsarCfg.MaxMessageSize.Key, strconv.Itoa(minWALMessageSizeForTest)))

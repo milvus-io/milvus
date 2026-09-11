@@ -1,289 +1,112 @@
 # Array Element-Level Null
 
-## Background
+## Scope
 
-Milvus already supports row-level null. For `Array` and `ArrayOfVector`, this
-means the entire row can be null. This design allows individual elements
-inside a valid row to be null:
+This design extends row-level null support to individual elements of `Array`
+and `ArrayOfVector`, such as `[1, null, 3]` and `[vec0, null, vec2]`.
+`nullable` controls whether the whole row can be null; `element_nullable`
+independently controls whether an element can be null.
 
-```text
-int_array    = [1, null, 3]
-vector_array = [vec0, null, vec2]
-```
-
-The two schema flags are independent:
-
-```text
-nullable          controls whether the whole row can be null
-element_nullable  controls whether an array element can be null
-```
-
-This design targets Storage V2 and later. Storage V1 does not encode element
-validity and must reject element-nullable fields.
-
-Element-level nullability for recursively nested Array fields is out of scope.
-Nullable nodes in `TypeSchema` remain unsupported.
+The design targets Storage V2 and later; Storage V1 must reject
+element-nullable fields. `ArrayOfVector` retains its restriction to
+`StructArray` sub-fields. Element-level nullability for recursively nested
+Arrays and nullable nodes in `TypeSchema` are out of scope.
 
 ## Semantics
 
-Row null and element null are different predicates:
+`array IS NULL` tests the whole row. An empty array and an array containing
+only null elements are both non-null rows. `array[index]` evaluates to `NULL`
+when the row is null, the index is out of range, or the selected element is
+null:
+
+| State | `array[index] > 1` | `array[index] IS NULL` | `array[index] IS NOT NULL` |
+| --- | --- | --- | --- |
+| Null row | `NULL` | `true` | `false` |
+| Index out of range | `NULL` | `true` | `false` |
+| Null element | `NULL` | `true` | `false` |
+| Non-null element `x` | `x > 1` | `false` | `true` |
+
+Here `NULL` means an unknown predicate result, not a valid `false`.
+Comparisons, term tests, and string predicates on an accessed element
+propagate that result. Array membership operations (`array_contains*`) skip
+null slots. Null vectors do not participate in similarity search.
+`array_length` and capacity limits count logical slots, including null slots.
+
+## Representation and Data Flow
+
+The existing `ScalarField` and `VectorField` messages carry `valid_data` for
+their immediate logical values; no nullable wrapper messages are needed.
+On the outer field message it represents row validity. On a child message in
+`ArrayArray.data[row]` or `VectorArray.data[row]` it represents element validity.
+Go storage containers retain row validity separately from each child message's
+element validity.
+
+For an element-nullable array, the child bitmap has one entry per logical
+element. At the Proxy input boundary, element payloads are compact:
 
 ```text
-array is null       row-level null
-array[0] is null    element-level null
+len(child.valid_data)             = logical element count
+count(child.valid_data == true)   = physical payload element count
 ```
 
-Array element access evaluates to SQL `NULL` when the row is null, the index is
-out of range, or the selected element is null. Value predicates propagate that
-null result, while null predicates return valid booleans:
+Proxy validates this relationship before normalization. Row payloads are also compact and 
+restores null row positions without changing child validity. Element-level
+normalization depends on the payload type:
+
+| Type | Logical value | Input payload | Payload after Proxy |
+| --- | --- | --- | --- |
+| Scalar Array | `[10, null, 30]` | `[10, 30]` | `[10, 0, 30]` |
+| ArrayOfVector | `[vec0, null, vec2]` | `[vec0, vec2]` | `[vec0, vec2]` |
+
+Both examples retain child validity `[true, false, true]`. Scalar arrays use
+dense placeholders to simplify downstream logical-index access.The placeholder has no 
+semantic value and costs additional payload space. Vector arrays stay compact because 
+a placeholder would occupy an entire vector. Empty and all-null arrays retain their 
+element type even when their physical payload is empty.
+
+The insert-to-query flow is:
 
 ```text
-array[index] > 1         -> invalid
-array[index] is null     -> valid true
-array[index] is not null -> valid false
+Insert request -> Proxy validation and normalization -> WAL
+  -> flusher -> Storage V2 (Arrow -> Parquet / Vortex)
+  -> QueryNode load -> runtime data -> queries and indexes
 ```
 
-An element expression reads a value only after checking:
+WAL preserves the normalized payload without interpreting element nulls.
+Sorting, merging, flattening, and retrieval must preserve each element's
+logical position and validity together with its value.
 
-1. the row is valid;
-2. the index is in range;
-3. the element is valid when `element_nullable=true`.
+Storage V2 preserves the two validity levels as follows:
 
-Value operators skip null elements. `array_length` counts logical slots,
-including null slots.
+| Field | Arrow representation | Row validity | Element validity |
+| --- | --- | --- | --- |
+| Scalar Array | `Binary` containing a serialized `ScalarField` | Outer bitmap | Child proto `valid_data` |
+| ArrayOfVector, non-element-nullable | `List<FixedSizeBinary>` | List bitmap | All elements valid |
+| ArrayOfVector, element-nullable | `List<Binary>` | List bitmap | Child Binary bitmap |
 
-## Write Data Flow
-
-```text
-SDK payload
-  -> Proxy validation
-  -> schemapb.FieldData
-  -> WAL msgpb.InsertRequest
-  -> storage.InsertData
-  -> Storage V2 Arrow Record
-  -> Parquet / Vortex
-  -> QueryNode load
-  -> segcore runtime data
-  -> query / search expressions and indexes
-```
-
-The WAL stores the insert request and does not reinterpret array contents.
-Element-null compatibility is determined by the payload producers and
-consumers, not by a separate WAL format.
-
-## Proto Representation
-
-`valid_data` belongs to the message that carries the immediate logical values:
-
-```protobuf
-message ScalarField {
-  oneof data {
-    ...
-    ArrayArray array_data = 8;
-  }
-  repeated bool valid_data = 17;
-}
-
-message VectorField {
-  int64 dim = 1;
-  oneof data {
-    ...
-    VectorArray vector_array = 8;
-  }
-  repeated bool valid_data = 9;
-}
-```
-
-The same fields have different scopes at different nesting levels:
-
-```text
-FieldData.scalars.valid_data              row validity for a scalar field
-FieldData.vectors.valid_data              row validity for a vector field
-ArrayArray.data[row].valid_data            element validity in one scalar array
-VectorArray.data[row].valid_data           element validity in one vector array
-```
-
-`FieldData.valid_data` remains a legacy row-validity source. Readers accept it
-as a fallback. A payload may populate both legacy and field-specific row
-validity only when their values are identical; conflicting values are rejected.
-At the input boundary, matching duplicate values are normalized to the
-field-specific location. New writers store row validity on `ScalarField` or
-`VectorField`.
-
-No nullable wrapper message or `nullable_data` field is needed. An array row is
-still represented by its existing `ScalarField` or `VectorField`, with
-`valid_data` attached directly to that row message.
-
-### Scalar Array
-
-`ArrayArray.data` always carries `ScalarField` rows:
-
-```text
-int_array = [10, null, 30]
-
-SDK payload before Proxy normalization:
-ScalarField {
-  long_data.data = [10, 30]
-  valid_data = [true, false, true]
-}
-```
-
-Scalar array payload is compact at the Proxy input boundary. Proxy validates
-the compact payload and expands it before the insert message enters the WAL:
-
-```text
-Normalized ScalarField {
-  long_data.data = [10, 0, 30]
-  valid_data = [true, false, true]
-}
-```
-
-The normalized payload is dense in logical element space. A null element keeps
-a typed placeholder, and the placeholder value has no semantic meaning.
-
-The Proxy input invariant is:
-
-```text
-count(row.valid_data == true) = number of compact scalar payload values
-```
-
-### ArrayOfVector
-
-`VectorArray.data` always carries `VectorField` rows. Vector payload is compact
-when element validity is present:
-
-```text
-logical elements: [vec0, null, vec2]
-row.valid_data:   [true, false, true]
-physical payload: [vec0, vec2]
-```
-
-The required invariants are:
-
-```text
-len(row.valid_data) = logical vector count
-count(row.valid_data == true) = physical vector count
-```
-
-## Proxy and Go Data
-
-Proxy validates the request against the schema:
-
-- child `valid_data` is allowed only when `element_nullable=true`;
-- scalar array physical value count equals the number of valid elements;
-- scalar array child payload is expanded to dense form after validation;
-- ArrayOfVector physical vector count equals the number of valid elements;
-- max capacity counts logical elements, including null elements;
-- row validity has exactly one source;
-- row-level null expansion does not overwrite child element validity.
-
-The Go storage structures keep one row container for each type:
-
-```go
-type ArrayFieldData struct {
-    ElementType     schemapb.DataType
-    Data            []*schemapb.ScalarField
-    ValidData       []bool
-    Nullable        bool
-    ElementNullable bool
-}
-
-type VectorArrayFieldData struct {
-    Dim             int64
-    ElementType     schemapb.DataType
-    Data            []*schemapb.VectorField
-    ValidData       []bool
-    Nullable        bool
-    ElementNullable bool
-}
-```
-
-The top-level `ValidData` member of `ArrayFieldData` or `VectorArrayFieldData`
-is row validity. Element validity stays in each `Data[row].ValidData` proto
-message. Sorting, merging, result slicing, struct flattening, and conversion
-back to `InsertRecord` move the row message as a unit, preserving its child
-validity.
-
-## Storage V2
-
-Scalar `Array` remains Arrow `Binary`. Each non-null Arrow value is the
-serialized `ScalarField` row, so its child `valid_data` is preserved in the
-protobuf bytes:
-
-```text
-Arrow Binary value = proto.Marshal(ArrayArray.data[row])
-```
-
-`ArrayOfVector` remains Arrow native list data. Non-element-nullable fields use
-fixed-width children:
-
-```text
-List<FixedSizeBinary(vector_bytes)>
-```
-
-Element-nullable fields use variable-width children:
-
-```text
-List<Binary>
-```
-
-Arrow list validity represents row null. Child `Binary` validity represents
-vector-element null:
-
-```text
-ListArray
-  offsets  = [0, 3, 3, 5]
-  validity = [true, false, true]        # row validity
-
-  values = BinaryArray
-    validity = [true, false, true, ...] # element validity
-```
-
-The writer expands compact vector payload into Arrow child positions. The
-reader compacts valid child vectors back into `VectorField` payload and writes
-the child bitmap to `VectorField.valid_data`. A null `Binary` child advances
-only its offset and validity metadata; it does not reserve a full
-`vector_bytes` slot. Since variable-width Arrow data does not enforce vector
-width, storage serde validates every non-null child against the schema `dim`.
-
-Parquet and Vortex consume the Arrow representation; neither changes the
-Milvus-level null semantics.
-
-## Load and Runtime
-
-Load reconstructs both validity levels separately:
-
-- row validity enters the existing row-level valid bitset;
-- scalar array element validity is reconstructed from serialized
-  `ScalarField.valid_data`;
-- ArrayOfVector element validity is reconstructed from Arrow child validity.
-
-Element null does not require a global element-level filter bitset. Expression
-result granularity determines the result bitset: normal filters produce row
-bits, while element-filter internals may temporarily produce element bits.
+`List<Binary>` preserves null vector positions without allocating a full
+vector placeholder for each null. Its non-null children must still match the
+schema's vector width. Serialization maps compact vectors to logical child
+positions; deserialization restores compact vectors and child validity.
+Parquet, Vortex, and runtime loading preserve these semantics.
 
 ## Query and Index
 
-The affected raw-data expressions include indexed access, comparisons, term
-queries, string `like` / regex, `array_contains*`, and null predicates.
+Element access accounts for row validity, bounds, and element validity before
+reading a value. Raw-data and index-backed execution must produce the same
+predicate results.
 
-```text
-array is null        uses row validity
-array[index] is null uses the selected row's child validity
-```
+Element nullability does not determine result bitmap granularity. Ordinary
+filters produce row bits; `element_filter` and `MATCH` child expressions
+operate on element bits. Validity must be applied in the corresponding space.
 
-Nested indexes use element document IDs, so they need element validity in
-addition to the existing row validity. Index primitives should return results
-in their own document-ID space; the execution layer remains responsible for
-converting nested element results to row results when required.
+Nested scalar indexes therefore preserve both row and element validity.
+Term and range lookups return element document IDs; row-null queries use row
+validity, and element-null queries use element validity. The execution layer
+aggregates element matches into row results for operations such as
+`array_contains`. Null elements contribute no value postings but retain their
+logical positions for validity and result mapping.
 
-## Compatibility
-
-The added schema and `valid_data` fields are protobuf wire-compatible, but old
-nodes do not understand their semantics and will treat placeholders as real
-values. Therefore element-nullable fields require a cluster-version gate and
-must not be inserted, loaded, or queried by old nodes.
-
-Within the supported version, readers accept legacy `FieldData.valid_data` for
-row validity. New payloads use `ScalarField.valid_data` or
-`VectorField.valid_data`, and dual row-validity sources are rejected.
+Vector search excludes null elements. Any compact physical vector IDs and
+filter positions must be mapped consistently to logical element positions,
+so returned element indices still refer to the original array.
