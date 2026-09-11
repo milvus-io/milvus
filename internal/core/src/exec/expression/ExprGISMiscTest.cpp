@@ -739,7 +739,7 @@ TEST(ExprTest, TestBinaryRangeExprMixedTypesForJSON) {
 TEST_P(ExprTest, TestDivisionByZero) {
     // The division by zero protection is implemented at multiple levels:
     // 1. Low-level: ArithCompareOperator returns false (tested implicitly)
-    // 2. Mid-level: ArithOpElementFunc/ArithOpIndexFunc entry validation (tested implicitly)
+    // 2. Mid-level: BinaryArithScalarKernel/ArithOpIndexFunc entry validation (tested implicitly)
     // 3. High-level: JSON/Array field handlers (tested implicitly)
     //
     // These protections are tested through the integration test in
