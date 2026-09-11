@@ -38,6 +38,8 @@ IsFixedSizeType(DataType type) {
             return TypeTraits<DataType::INT64>::IsFixedWidth;
         case DataType::TIMESTAMPTZ:
             return TypeTraits<DataType::TIMESTAMPTZ>::IsFixedWidth;
+        case DataType::DECIMAL:
+            return TypeTraits<DataType::DECIMAL>::IsFixedWidth;
         case DataType::FLOAT:
             return TypeTraits<DataType::FLOAT>::IsFixedWidth;
         case DataType::DOUBLE:

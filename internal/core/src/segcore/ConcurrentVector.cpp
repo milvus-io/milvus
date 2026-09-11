@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cstdint>
 
+#include "common/Decimal.h"
 #include "common/Types.h"
 #include "common/Utils.h"
 #include "fmt/core.h"
@@ -136,6 +137,21 @@ VectorBase::set_data_raw(ssize_t element_offset,
             return set_data_raw(element_offset,
                                 FIELD_DATA(data, timestamptz).data(),
                                 element_count);
+        }
+        case DataType::DECIMAL: {
+            auto& bytes_data = FIELD_DATA(data, bytes);
+            const auto& valid_data = GetFieldDataRowValidData(*data);
+            bool has_valid_data = field_meta.is_nullable() &&
+                                  valid_data.size() == bytes_data.size();
+            std::vector<int64_t> data_raw(bytes_data.size());
+            for (int i = 0; i < bytes_data.size(); ++i) {
+                if (has_valid_data && !valid_data[i]) {
+                    data_raw[i] = 0;
+                    continue;
+                }
+                data_raw[i] = DecodeDecimalBytes(bytes_data[i]);
+            }
+            return set_data_raw(element_offset, data_raw.data(), element_count);
         }
         case DataType::STRING:
         case DataType::VARCHAR:

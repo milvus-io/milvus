@@ -145,6 +145,9 @@ func (r *PayloadReader) GetDataFromPayload() (interface{}, []bool, int, error) {
 	case schemapb.DataType_Timestamptz:
 		val, validData, err := r.GetTimestamptzFromPayload()
 		return val, validData, 0, err
+	case schemapb.DataType_Decimal:
+		val, validData, err := r.GetDecimalFromPayload()
+		return val, validData, 0, err
 	case schemapb.DataType_BinaryVector:
 		val, dim, validData, _, err := r.GetBinaryVectorFromPayload()
 		return val, validData, dim, err
@@ -446,6 +449,41 @@ func (r *PayloadReader) GetDoubleFromPayload() ([]float64, []bool, error) {
 func (r *PayloadReader) GetTimestamptzFromPayload() ([]int64, []bool, error) {
 	if r.colType != schemapb.DataType_Timestamptz {
 		return nil, nil, merr.WrapErrDataIntegrityMsg("failed to get timestamptz from datatype %v", r.colType.String())
+	}
+
+	values := make([]int64, r.numRows)
+	if r.nullable {
+		validData := make([]bool, r.numRows)
+		valuesRead, err := ReadData[int64, *array.Int64](r.reader, values, validData, r.numRows)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		if valuesRead != r.numRows {
+			return nil, nil, merr.WrapErrDataIntegrityMsg("valuesRead is not equal to rows: expected=%d actual=%d", r.numRows, valuesRead)
+		}
+
+		return values, validData, nil
+	}
+	valuesRead, err := ReadDataFromAllRowGroups[int64, *file.Int64ColumnChunkReader](r.reader, values, 0, r.numRows)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if valuesRead != r.numRows {
+		return nil, nil, merr.WrapErrDataIntegrityMsg("valuesRead is not equal to rows: expected=%d actual=%d", r.numRows, valuesRead)
+	}
+
+	return values, nil, nil
+}
+
+// GetDecimalFromPayload reads a Decimal column back as its unscaled int64
+// representation — the same form it was written in (see AddDecimalToPayload),
+// and the same form segcore stores. The canonical 8-byte wire encoding applies
+// only to the proto boundary, never to the binlog.
+func (r *PayloadReader) GetDecimalFromPayload() ([]int64, []bool, error) {
+	if r.colType != schemapb.DataType_Decimal {
+		return nil, nil, merr.WrapErrDataIntegrityMsg("failed to get decimal from datatype %v", r.colType.String())
 	}
 
 	values := make([]int64, r.numRows)

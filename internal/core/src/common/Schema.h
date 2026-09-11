@@ -111,6 +111,25 @@ class Schema {
     }
 
     FieldId
+    AddDebugField(const std::string& name,
+                  DataType data_type,
+                  int64_t precision,
+                  int64_t scale,
+                  bool nullable = false) {
+        auto field_id = FieldId(debug_id);
+        debug_id++;
+        auto field_meta = FieldMeta(FieldName(name),
+                                    field_id,
+                                    data_type,
+                                    precision,
+                                    scale,
+                                    nullable,
+                                    std::nullopt);
+        this->AddField(std::move(field_meta));
+        return field_id;
+    }
+
+    FieldId
     AddDebugFieldWithDefaultValue(const std::string& name,
                                   DataType data_type,
                                   DefaultValueType value,
