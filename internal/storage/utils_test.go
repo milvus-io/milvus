@@ -2350,6 +2350,38 @@ func TestMergeInsertData(t *testing.T) {
 	})
 }
 
+func TestMergeFieldDataPreservesMetadata(t *testing.T) {
+	tests := []struct {
+		name string
+		data FieldData
+	}{
+		{name: "bool", data: &BoolFieldData{Nullable: true}},
+		{name: "int8", data: &Int8FieldData{Nullable: true}},
+		{name: "int16", data: &Int16FieldData{Nullable: true}},
+		{name: "int32", data: &Int32FieldData{Nullable: true}},
+		{name: "int64", data: &Int64FieldData{Nullable: true}},
+		{name: "float", data: &FloatFieldData{Nullable: true}},
+		{name: "double", data: &DoubleFieldData{Nullable: true}},
+		{name: "timestamptz", data: &TimestamptzFieldData{Nullable: true}},
+		{name: "varchar", data: &StringFieldData{DataType: schemapb.DataType_VarChar, Nullable: true}},
+		{name: "array", data: &ArrayFieldData{ElementType: schemapb.DataType_Int64, Nullable: true}},
+		{name: "json", data: &JSONFieldData{Nullable: true}},
+		{name: "geometry", data: &GeometryFieldData{Nullable: true}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			mergedData := &InsertData{Data: make(map[FieldID]FieldData)}
+			MergeFieldData(mergedData, 100, test.data)
+
+			merged, ok := mergedData.Data[100]
+			require.True(t, ok)
+			assert.Equal(t, test.data.GetNullable(), merged.GetNullable())
+			assert.Equal(t, test.data.GetDataType(), merged.GetDataType())
+		})
+	}
+}
+
 func TestMergeFloat16VectorField(t *testing.T) {
 	data := &InsertData{
 		Data: make(map[FieldID]FieldData),
