@@ -959,7 +959,8 @@ TYPED_TEST_P(HybridIndexTestInverted,
         index_size += 1024;
     }
     auto stream_overhead = static_cast<uint64_t>(milvus::SaturatingMultiply(
-        index_size, storage::kFileStreamBufferMultiplier));
+        index_size,
+        static_cast<uint64_t>(storage::kFileStreamBufferMultiplier)));
     auto bounded_stream_overhead = storage::EntryStreamMaxTransientBytes(
         stream_overhead, max_task_transient_bytes);
     ASSERT_GT(stream_overhead, bounded_stream_overhead);
