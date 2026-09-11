@@ -1530,3 +1530,46 @@ func TestImportIdempotencyParams(t *testing.T) {
 		params.DataCoordCfg.ImportTaskRetention.GetAsDuration(time.Second),
 		2*params.StreamingCfg.WALBroadcasterTombstoneMaxLifetime.GetAsDurationByParse())
 }
+
+func TestWriteSegmentIndexToManifest(t *testing.T) {
+	params := ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true)))
+
+	// Off by default: manifest publication is opt-in, and the legacy
+	// etcd-only path must be what a cluster gets without configuration.
+	assert.False(t, params.DataCoordCfg.WriteSegmentIndexToManifest.GetAsBool())
+
+	params.Save(params.DataCoordCfg.WriteSegmentIndexToManifest.Key, "true")
+	assert.True(t, params.DataCoordCfg.WriteSegmentIndexToManifest.GetAsBool())
+
+	// A value that does not parse as a boolean reads as false, i.e. the
+	// legacy behavior. Under the old etcd-write polarity this silently
+	// entered the one-way off state; with publication opt-in the failure is
+	// merely "the operator thinks it is on", with no durability consequence.
+	params.Save(params.DataCoordCfg.WriteSegmentIndexToManifest.Key, "yes")
+	assert.False(t, params.DataCoordCfg.WriteSegmentIndexToManifest.GetAsBool())
+}
+
+func TestSegmentIndexManifestLoadConcurrency(t *testing.T) {
+	params := ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true)))
+
+	// The manifest reload is object-storage IO behind cgo, not metastore IO:
+	// borrowing metastore.readConcurrency (32, and shared with the querycoord
+	// and rootcoord catalogs) would cap a fail-closed startup scan that runs
+	// once per healthy V3 segment.
+	assert.Equal(t, 64, params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.GetAsInt())
+	assert.NotEqual(t,
+		params.MetaStoreCfg.ReadConcurrency.Key,
+		params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.Key)
+
+	// A pool size below 1 would deadlock the scan, so it is clamped, not trusted.
+	params.Save(params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.Key, "0")
+	assert.Equal(t, 1, params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.GetAsInt())
+	params.Save(params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.Key, "-8")
+	assert.Equal(t, 1, params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.GetAsInt())
+
+	// Excessive native concurrency is clamped independently of integer overflow.
+	params.Save(params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.Key, "2147483648")
+	assert.Equal(t, 256, params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.GetAsInt())
+}

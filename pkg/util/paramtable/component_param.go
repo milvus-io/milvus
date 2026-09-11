@@ -6086,6 +6086,8 @@ type dataCoordConfig struct {
 	// Index related configuration
 	IndexMemSizeEstimateMultiplier      ParamItem `refreshable:"true"`
 	IndexStorePathVersion               ParamItem `refreshable:"true"`
+	WriteSegmentIndexToManifest         ParamItem `refreshable:"false"`
+	SegmentIndexManifestLoadConcurrency ParamItem `refreshable:"false"`
 	HybridIndexLowCardinalityIndexType  ParamItem `refreshable:"true"`
 	HybridIndexHighCardinalityIndexType ParamItem `refreshable:"true"`
 
@@ -6854,6 +6856,30 @@ Layout 1 is additionally gated on no QueryNode still reporting an older release 
 		Export: true,
 	}
 	p.IndexStorePathVersion.Init(base.mgr)
+
+	p.WriteSegmentIndexToManifest = ParamItem{
+		Key:          "dataCoord.index.writeSegmentIndexToManifest",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc: `Whether completed StorageV3 index artifacts are published in segment manifests. Off (the default) keeps the legacy path: every SegmentIndex task record stays in etcd and no manifest index entry is produced. On still persists Unissued, InProgress, Failed, fake-finished, and other task states in etcd; only a successful build with artifact files is published to the manifest, and that commit atomically deletes the corresponding Finished etcd row. StorageV1/V2 always use etcd.
+The setting may be switched in either direction. Turning it off changes where new completions are written; records already published to manifests remain recoverable through the segment's sticky manifest_has_index marker.
+The value must be exactly true or false. A value that does not parse as a boolean, such as yes, is silently read as false, i.e. the legacy etcd behavior.`,
+		Export: true,
+	}
+	p.WriteSegmentIndexToManifest.Init(base.mgr)
+
+	p.SegmentIndexManifestLoadConcurrency = ParamItem{
+		Key:          "dataCoord.index.segmentIndexManifestLoadConcurrency",
+		Version:      "3.0.0",
+		DefaultValue: "64",
+		Formatter: func(v string) string {
+			return strconv.Itoa(min(256, max(1, getAsInt(v))))
+		},
+		Doc: `Concurrency of StorageV3 manifest index reads during startup and snapshot restore. Each read blocks a native thread. Values are clamped to [1, 256], and the process-wide limit is also capped by positive minio.maxConnections values. Zero leaves the storage default in effect. Restore assembly and verification share the same budget.
+Startup processes fixed-size batches and retries failed reads per segment. An exhausted read or invalid manifest fails startup without replaying successful reads through the metastore retry loop. Recovery follows the durable manifest_has_index marker independently of the current write-mode switch.`,
+		Export: true,
+	}
+	p.SegmentIndexManifestLoadConcurrency.Init(base.mgr)
 
 	p.HybridIndexLowCardinalityIndexType = ParamItem{
 		Key:          "dataCoord.index.hybridIndex.lowCardinalityIndexType",
