@@ -65,12 +65,14 @@ class LoonFFIPropertiesSingleton {
         }
     }
 
+    // Local storage needs no configuration: its keys already carry
+    // localStorage.path and the loon filesystem is rooted at "/".
     void
-    Init(const char* root_path) {
+    InitLocal() {
         std::unique_lock lck(mutex_);
 
         if (properties_ == nullptr) {
-            properties_ = MakeInternalLocalProperies(root_path);
+            properties_ = MakeInternalLocalProperies();
             ApplyArrowReaderConfig(*properties_);
         }
     }

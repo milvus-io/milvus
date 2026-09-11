@@ -18,6 +18,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus/internal/storagev2"
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -76,10 +77,9 @@ func ExtfsPrefixForCollection(collectionID int64) string {
 	return fmt.Sprintf("extfs.%d.", collectionID)
 }
 
-// MakePropertiesFromStorageConfig creates a Properties object from StorageConfig
-// This function converts a StorageConfig structure into a Properties object by
-// calling the FFI properties_create function. All configuration fields from
-// StorageConfig are mapped to corresponding key-value pairs in Properties.
+// MakePropertiesFromStorageConfig creates a Properties object from StorageConfig.
+// All configuration fields are mapped to corresponding property key-value pairs,
+// with the local filesystem root normalized separately from the key prefix.
 func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extraKVs map[string]string) (*C.LoonProperties, error) {
 	if storageConfig == nil {
 		return nil, merr.WrapErrStorageMsg("storageConfig is required")
@@ -106,9 +106,9 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 		keys = append(keys, PropertyFSAccessKeyValue)
 		values = append(values, storageConfig.GetSecretAccessKey())
 	}
-	if storageConfig.GetRootPath() != "" {
+	if fsRoot := storagev2.LoonFSRootPath(storageConfig); fsRoot != "" {
 		keys = append(keys, PropertyFSRootPath)
-		values = append(values, storageConfig.GetRootPath())
+		values = append(values, fsRoot)
 	}
 	if storageConfig.GetStorageType() != "" {
 		keys = append(keys, PropertyFSStorageType)

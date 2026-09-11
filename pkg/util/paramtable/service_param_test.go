@@ -17,17 +17,116 @@
 package paramtable
 
 import (
+	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+// Every local storage key is a complete filesystem path that starts with
+// localStorage.path, and the loon local filesystem is rooted at "/", so the
+// configured value must never depend on the process working directory.
+func TestLocalStorageConfig_PathIsAbsolute(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		configured string
+		want       string
+	}{
+		{name: "default", want: filepath.Clean(defaultLocalStoragePath)},
+		{name: "absolute", configured: "/var/lib/milvus/data", want: "/var/lib/milvus/data"},
+		{name: "clean_absolute", configured: "  /var/lib/milvus/./old/../data/  ", want: "/var/lib/milvus/data"},
+		{name: "filesystem_root", configured: "/", want: "/"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bt := NewBaseTable(SkipRemote(true), SkipEnv(true), Files([]string{}))
+			t.Cleanup(bt.mgr.Close)
+			if tc.configured != "" {
+				require.NoError(t, bt.Save("localStorage.path", tc.configured))
+			}
+			var params ServiceParam
+			require.NotPanics(t, func() { params.init(bt) })
+			require.Equal(t, tc.want, params.LocalStorageCfg.Path.GetValue())
+			require.True(t, filepath.IsAbs(params.LocalStorageCfg.Path.GetValue()))
+		})
+	}
+}
+
+// The layout migration blocks startup, so it runs on a bounded budget. A
+// non-positive value disables the limit for a root too large to move in an hour.
+func TestLocalStorageConfig_LayoutMigrationTimeout(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		configured string
+		want       time.Duration
+	}{
+		{name: "default", want: time.Hour},
+		{name: "configured", configured: "120", want: 2 * time.Minute},
+		{name: "disabled", configured: "0", want: 0},
+		{name: "negative_disables", configured: "-1", want: -time.Second},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bt := NewBaseTable(SkipRemote(true), SkipEnv(true), Files([]string{}))
+			t.Cleanup(bt.mgr.Close)
+			if tc.configured != "" {
+				require.NoError(t, bt.Save("localStorage.layoutMigrationTimeout", tc.configured))
+			}
+			var params ServiceParam
+			require.NotPanics(t, func() { params.init(bt) })
+			require.Equal(t, tc.want, params.LocalStorageCfg.LayoutMigrationTimeout.GetAsDuration(time.Second))
+		})
+	}
+}
+
+func TestLocalStorageConfig_RejectsInvalidPathDuringInit(t *testing.T) {
+	assertInvalidInit := func(t *testing.T, bt *BaseTable) {
+		t.Helper()
+		t.Cleanup(bt.mgr.Close)
+		var panicValue any
+		func() {
+			defer func() { panicValue = recover() }()
+			var params ServiceParam
+			params.init(bt)
+		}()
+		require.NotNil(t, panicValue, "service initialization must reject the configured path before starting components")
+		panicErr, ok := panicValue.(error)
+		require.True(t, ok, "initialization must panic with a typed configuration error, got %T", panicValue)
+		require.ErrorIs(t, panicErr, merr.ErrParameterInvalid)
+		require.Contains(t, panicErr.Error(), "localStorage.path must be an absolute filesystem path")
+	}
+	for _, tc := range []struct {
+		name  string
+		value string
+	}{
+		{name: "relative", value: "relative/data"},
+		{name: "current_directory_relative", value: "./data"},
+		{name: "parent_directory_relative", value: "../data"},
+		{name: "current_directory", value: "."},
+		{name: "empty", value: ""},
+		{name: "blank", value: " \t\n "},
+	} {
+		t.Run("saved/"+tc.name, func(t *testing.T) {
+			bt := NewBaseTable(SkipRemote(true), SkipEnv(true), Files([]string{}))
+			// Save before initialization exercises the startup path, rather
+			// than calling the formatter through a later GetValue.
+			require.NoError(t, bt.Save("localStorage.path", tc.value))
+			assertInvalidInit(t, bt)
+		})
+		t.Run("environment/"+tc.name, func(t *testing.T) {
+			t.Setenv("LOCALSTORAGE_PATH", tc.value)
+			bt := NewBaseTable(SkipRemote(true), Files([]string{}))
+			assertInvalidInit(t, bt)
+		})
+	}
+}
 
 func TestServiceParam(t *testing.T) {
 	var SParams ServiceParam

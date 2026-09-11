@@ -33,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -154,14 +153,10 @@ func (gc *garbageCollector) recycleUnusedLOBFiles(ctx context.Context) {
 		logger.Info(ctx, "recycleUnusedLOBFiles done", mlog.Duration("timeCost", time.Since(start)))
 	}()
 
-	storageConfig := gc.getStorageConfig()
-	if storageConfig == nil {
-		logger.Warn(ctx, "failed to get storage config, skip LOB GC")
-		return
-	}
-
 	lobCtx := newLOBGCContext(gc)
-	lobCtx.storageConfig = storageConfig
+	// Same builder as every other primary-storage caller: under local storage
+	// the key prefix is localStorage.path, not minio.rootPath.
+	lobCtx.storageConfig = createStorageConfig()
 
 	// Step 1: Collect all used LOB files from active segments.
 	// If any manifest read fails, abort the entire GC run to avoid
@@ -185,30 +180,6 @@ func (gc *garbageCollector) recycleUnusedLOBFiles(ctx context.Context) {
 	}
 
 	lobCtx.cache.Cleanup()
-}
-
-// getStorageConfig returns the storage configuration for FFI calls
-func (gc *garbageCollector) getStorageConfig() *indexpb.StorageConfig {
-	params := paramtable.Get()
-
-	return &indexpb.StorageConfig{
-		Address:           params.MinioCfg.Address.GetValue(),
-		AccessKeyID:       params.MinioCfg.AccessKeyID.GetValue(),
-		SecretAccessKey:   params.MinioCfg.SecretAccessKey.GetValue(),
-		UseSSL:            params.MinioCfg.UseSSL.GetAsBool(),
-		SslCACert:         params.MinioCfg.SslCACert.GetValue(),
-		BucketName:        params.MinioCfg.BucketName.GetValue(),
-		RootPath:          params.MinioCfg.RootPath.GetValue(),
-		UseIAM:            params.MinioCfg.UseIAM.GetAsBool(),
-		IAMEndpoint:       params.MinioCfg.IAMEndpoint.GetValue(),
-		StorageType:       params.CommonCfg.StorageType.GetValue(),
-		Region:            params.MinioCfg.Region.GetValue(),
-		UseVirtualHost:    params.MinioCfg.UseVirtualHost.GetAsBool(),
-		CloudProvider:     params.MinioCfg.CloudProvider.GetValue(),
-		RequestTimeoutMs:  params.MinioCfg.RequestTimeoutMs.GetAsInt64(),
-		MaxConnections:    uint32(params.MinioCfg.MaxConnections.GetAsInt()),
-		GcpCredentialJSON: params.MinioCfg.GcpCredentialJSON.GetValue(),
-	}
 }
 
 // collectUsedLOBFiles collects all LOB file paths that are referenced by active segments
@@ -290,6 +261,10 @@ func (lobCtx *lobGCContext) scanOrphanLOBFiles(ctx context.Context, usedFiles ty
 	safetyWindow := Params.DataCoordCfg.GCLOBSafetyWindow.GetAsDuration(time.Second)
 
 	// LOB files are stored at: {root_path}/insert_log/{coll}/{part}/lobs/{field_id}/_data/{file_id}.vx
+	// TODO: Cover the legacy local namespace when upgrading from 3.0.0/3.0.1
+	// with LOB enabled. Files under localStorage.path/minio.rootPath/insert_log
+	// remain readable in place, but this scan misses their partition-level LOBs,
+	// so unreferenced LOB files there are not reclaimed.
 	lobBasePath := path.Join(lobCtx.gc.option.cli.RootPath(), common.SegmentInsertLogPath)
 
 	// Walk through all files under insert_log to find LOB files

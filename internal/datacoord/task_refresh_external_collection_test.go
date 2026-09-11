@@ -913,6 +913,7 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker(t *testing.T) {
 	})
 
 	t.Run("task_failed_on_worker", func(t *testing.T) {
+		paramtable.Init()
 		catalog := &stubCatalog{}
 		refreshMeta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
 		assert.NoError(t, err)
@@ -924,6 +925,7 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker(t *testing.T) {
 			State:          indexpb.JobState_JobStateInProgress,
 			ExternalSource: "s3://bucket/path",
 			ExternalSpec:   "iceberg",
+			TaskIds:        []int64{1001, 1002},
 		}
 		err = refreshMeta.AddJob(job)
 		assert.NoError(t, err)
@@ -939,16 +941,26 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker(t *testing.T) {
 		}
 		err = refreshMeta.AddTask(protoTask)
 		assert.NoError(t, err)
+		// A failed task must terminate the job without waiting for siblings.
+		sibling := proto.Clone(protoTask).(*datapb.ExternalCollectionRefreshTask)
+		sibling.TaskId = 1002
+		assert.NoError(t, refreshMeta.AddTask(sibling))
 
 		alloc := &stubAllocator{nextID: 99999}
 		task := newRefreshExternalCollectionTask(protoTask, refreshMeta, nil, alloc)
+		var failedJobs []int64
+		checker := newRefreshChecker(t.Context(), nil, refreshMeta, make(chan struct{}), nil, nil,
+			func(jobID int64) { failedJobs = append(failedJobs, jobID) }, nil, nil)
+		task.processFinishedJob = checker.processJobByID
 
 		cluster := &stubCluster{}
 
-		// Mock QueryRefreshExternalCollectionTask to return failed state
+		// Missing explore manifests surface as a worker failure, even when
+		// the native reader classifies the underlying error as transient.
+		failReason := "failed to read explore manifest: File not found: loon FFI transient error"
 		mockQuery := mockey.Mock((*stubCluster).QueryRefreshExternalCollectionTask).Return(&datapb.RefreshExternalCollectionTaskResponse{
 			State:      indexpb.JobState_JobStateFailed,
-			FailReason: "worker error",
+			FailReason: failReason,
 		}, nil).Build()
 		defer mockQuery.UnPatch()
 
@@ -957,7 +969,11 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker(t *testing.T) {
 		// Task should be marked as failed
 		metaTask := refreshMeta.GetTask(1001)
 		assert.Equal(t, indexpb.JobState_JobStateFailed, metaTask.GetState())
-		assert.Contains(t, metaTask.GetFailReason(), "worker error")
+		assert.Equal(t, failReason, metaTask.GetFailReason())
+		assert.Equal(t, indexpb.JobState_JobStateFailed, refreshMeta.GetJob(1).GetState())
+		assert.Equal(t, failReason, refreshMeta.GetJob(1).GetFailReason())
+		assert.Equal(t, []int64{1}, failedJobs)
+		assert.Equal(t, indexpb.JobState_JobStateInProgress, refreshMeta.GetTask(1002).GetState())
 	})
 
 	t.Run("task_finished_success", func(t *testing.T) {

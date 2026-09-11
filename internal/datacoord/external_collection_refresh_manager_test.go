@@ -19,6 +19,8 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"path"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -33,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -1841,11 +1844,25 @@ func TestHandleJobFinished_SourceChangedOnly(t *testing.T) {
 type recordingChunkManager struct {
 	storage.ChunkManager
 	mu               sync.Mutex
+	rootPath         string
+	objects          map[string][]byte
 	prefixCalls      []string
 	removeCalls      []string
 	prefixErr        error
 	removeErr        error
 	prefixBlockUntil <-chan struct{}
+}
+
+func (r *recordingChunkManager) RootPath() string { return r.rootPath }
+
+func (r *recordingChunkManager) Write(_ context.Context, key string, value []byte) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.objects == nil {
+		r.objects = make(map[string][]byte)
+	}
+	r.objects[key] = append([]byte(nil), value...)
+	return nil
 }
 
 func (r *recordingChunkManager) RemoveWithPrefix(ctx context.Context, prefix string) error {
@@ -1858,6 +1875,13 @@ func (r *recordingChunkManager) RemoveWithPrefix(ctx context.Context, prefix str
 	}
 	r.mu.Lock()
 	r.prefixCalls = append(r.prefixCalls, prefix)
+	if r.prefixErr == nil {
+		for key := range r.objects {
+			if strings.HasPrefix(key, prefix) {
+				delete(r.objects, key)
+			}
+		}
+	}
 	r.mu.Unlock()
 	return r.prefixErr
 }
@@ -1865,6 +1889,9 @@ func (r *recordingChunkManager) RemoveWithPrefix(ctx context.Context, prefix str
 func (r *recordingChunkManager) Remove(ctx context.Context, key string) error {
 	r.mu.Lock()
 	r.removeCalls = append(r.removeCalls, key)
+	if r.removeErr == nil {
+		delete(r.objects, key)
+	}
 	r.mu.Unlock()
 	return r.removeErr
 }
@@ -1893,6 +1920,50 @@ func TestCleanupExploreTempForJob_Success(t *testing.T) {
 	prefixes, removes := cm.snapshot()
 	assert.Equal(t, []string{"__explore_temp__/coord_42/"}, prefixes)
 	assert.Equal(t, []string{"__explore_temp__/coord_42"}, removes)
+}
+
+func TestCleanupExploreTempForJob_PreservesRemoteProducerNamespace(t *testing.T) {
+	ctx := context.Background()
+	cm := &recordingChunkManager{rootPath: "files"}
+	mgr := newManagerWithChunkManager(t, cm)
+	// ExploreFilesReturnManifestPath writes baseDir directly through loon's
+	// bucket-root filesystem. Use that producer's path builder, with a nonempty
+	// configured root, to verify cleanup deletes the objects actually written.
+	manifestKey := path.Join(exploreTempDirForAttempt(42, 1), "_metadata/manifest-1.avro")
+	otherJobKey := path.Join(exploreTempDirForAttempt(420, 1), "_metadata/manifest-1.avro")
+	prefixedKey := path.Join(cm.RootPath(), manifestKey)
+	for _, key := range []string{manifestKey, otherJobKey, prefixedKey} {
+		require.NoError(t, cm.Write(ctx, key, []byte("manifest")))
+	}
+
+	mgr.cleanupExploreTempForJob(42)
+
+	prefixes, removes := cm.snapshot()
+	assert.Equal(t, []string{"__explore_temp__/coord_42/"}, prefixes)
+	assert.Equal(t, []string{"__explore_temp__/coord_42"}, removes)
+	assert.NotContains(t, cm.objects, manifestKey)
+	assert.Contains(t, cm.objects, otherJobKey)
+	assert.Contains(t, cm.objects, prefixedKey)
+}
+
+func TestCleanupExploreTempForJob_LocalProducerNamespace(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(root))
+	mgr := newManagerWithChunkManager(t, cm)
+	manifestPath := path.Join(root, exploreTempDirForAttempt(42, 1), "_metadata/manifest-1.avro")
+	sentinelPath := path.Join(root, exploreTempDirForAttempt(420, 1), "_metadata/manifest-1.avro")
+	require.NoError(t, cm.Write(ctx, manifestPath, []byte("manifest")))
+	require.NoError(t, cm.Write(ctx, sentinelPath, []byte("keep")))
+
+	mgr.cleanupExploreTempForJob(42)
+
+	exists, err := cm.Exist(ctx, manifestPath)
+	require.NoError(t, err)
+	assert.False(t, exists)
+	sentinel, err := cm.Read(ctx, sentinelPath)
+	require.NoError(t, err)
+	assert.Equal(t, []byte("keep"), sentinel)
 }
 
 func TestCleanupExploreTempForJob_NilChunkManager(t *testing.T) {

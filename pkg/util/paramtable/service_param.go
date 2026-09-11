@@ -22,6 +22,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -32,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 )
 
@@ -585,7 +587,8 @@ func (p *TiKVConfig) Init(base *BaseTable) {
 }
 
 type LocalStorageConfig struct {
-	Path ParamItem `refreshable:"false"`
+	Path                   ParamItem `refreshable:"false"`
+	LayoutMigrationTimeout ParamItem `refreshable:"false"`
 }
 
 func (p *LocalStorageConfig) Init(base *BaseTable) {
@@ -594,11 +597,35 @@ func (p *LocalStorageConfig) Init(base *BaseTable) {
 		Version:      "2.0.0",
 		DefaultValue: defaultLocalStoragePath,
 		Doc: `Local path to where vector data are stored during a search or a query to avoid repetitve access to MinIO or S3 service.
+Must be an absolute filesystem path. Milvus refuses to start if this value is relative or empty.
+Migration of data written using a relative path in older versions is not supported.
 Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
 It is recommended to change this parameter before starting Milvus for the first time.`,
+		// Every local storage key is a complete filesystem path that starts
+		// with this value, and the loon local filesystem is rooted at "/", so
+		// a relative path here would silently depend on the process working
+		// directory. Reject it during configuration initialization.
+		Formatter: func(v string) string {
+			v = strings.TrimSpace(v)
+			if !filepath.IsAbs(v) {
+				panic(merr.WrapErrParameterInvalidMsg("localStorage.path must be an absolute filesystem path, got %q", v))
+			}
+			return filepath.Clean(v)
+		},
 		Export: true,
 	}
 	p.Path.Init(base.mgr)
+
+	p.LayoutMigrationTimeout = ParamItem{
+		Key:          "localStorage.layoutMigrationTimeout",
+		Version:      "3.0.0",
+		DefaultValue: "3600",
+		Doc: `Time budget for the startup migration of the legacy 3.0.0 / 3.0.1 local storage layout, unit: second.
+The migration is resumable, so exceeding the budget aborts startup rather than serving a half-migrated root:
+raise this value and restart to continue where it stopped. A value <= 0 disables the limit.`,
+		Export: false,
+	}
+	p.LayoutMigrationTimeout.Init(base.mgr)
 }
 
 type MetaStoreConfig struct {

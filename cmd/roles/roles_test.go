@@ -77,7 +77,9 @@ func TestFilesystemMetricsRegisteredWithRolesRegistry(t *testing.T) {
 		"milvus_storage_filesystem_multi_part_upload_created":  {},
 		"milvus_storage_filesystem_multi_part_upload_finished": {},
 	}
-	expectedDisplayKeyPrefix := "file://" + dir + "#fs:"
+	// Local storage shares one loon filesystem rooted at "/", whatever the
+	// configured localStorage.path is (see storagev2.LoonFSRootPath).
+	expectedDisplayKeyPrefix := "file://" + storagev2.LoonLocalFSRootPath + "#fs:"
 	for _, family := range gathered {
 		if _, ok := missingFamilies[family.GetName()]; !ok {
 			continue

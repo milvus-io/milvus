@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"path"
 	"sync"
 	"time"
 
@@ -69,6 +70,19 @@ func exploreTempDirForJob(jobID int64) string {
 // attempts while keeping the parent job directory as the cleanup boundary.
 func exploreTempDirForAttempt(jobID, attemptID int64) string {
 	return fmt.Sprintf("%s/attempt_%d", exploreTempDirForJob(jobID), attemptID)
+}
+
+// exploreDirForChunkManager turns an explore temp dir into the complete key
+// for the primary chunk manager. On remote storage explore manifests have
+// always lived at the bucket root, outside minio.rootPath, so the key is the
+// dir itself. On local storage every key is a complete filesystem path, so the
+// dir is placed under localStorage.path. Producer (explore) and cleanup must
+// agree on this or cleanup silently misses the files.
+func (m *externalCollectionRefreshManager) exploreDirForChunkManager(dir string) string {
+	if _, local := m.chunkManager.(*storage.LocalChunkManager); local {
+		return path.Join(m.chunkManager.RootPath(), dir)
+	}
+	return dir
 }
 
 // External Collection Refresh Manager
@@ -317,7 +331,7 @@ func (m *externalCollectionRefreshManager) cleanupExploreTempForJob(jobID int64)
 	if m.chunkManager == nil {
 		return
 	}
-	exploreBaseDir := exploreTempDirForJob(jobID)
+	exploreBaseDir := m.exploreDirForChunkManager(exploreTempDirForJob(jobID))
 	explorePrefix := exploreBaseDir + "/"
 	// Derive from m.ctx so shutdown cancels in-flight cleanup instead of
 	// blocking Stop() on a slow object-store call.
@@ -1168,7 +1182,7 @@ func (m *externalCollectionRefreshManager) exploreExternalFiles(
 	if err != nil {
 		return nil, "", merr.Wrap(err, "allocate external refresh Explore attempt ID")
 	}
-	exploreBaseDir := exploreTempDirForAttempt(job.GetJobId(), attemptID)
+	exploreBaseDir := m.exploreDirForChunkManager(exploreTempDirForAttempt(job.GetJobId(), attemptID))
 	fileInfos, manifestPath, err := packed.ExploreFilesReturnManifestPath(
 		columns,
 		spec.Format,

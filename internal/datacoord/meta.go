@@ -397,9 +397,23 @@ func (m *meta) reloadFromKV(ctx context.Context, collectionIDs []int64) error {
 	metrics.DataCoordNumSegments.Reset()
 	numStoredRows := int64(0)
 	numSegments := 0
+	local, localStorage := m.chunkManager.(*storage.LocalChunkManager)
 	for _, segments := range collectionSegments {
 		numSegments += len(segments)
 		for _, segment := range segments {
+			if localStorage && segment.GetStorageVersion() == storage.StorageV3 {
+				manifestPath, err := normalizeLocalManifestPath(segment.GetManifestPath(), local.RootPath(),
+					Params.MinioCfg.RootPath.GetValue(), segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
+				if err != nil {
+					return err
+				}
+				if manifestPath != segment.GetManifestPath() {
+					// Resolve only the loaded view. Startup does not write the
+					// catalog; a later ordinary update can persist the new path.
+					segment = proto.Clone(segment).(*datapb.SegmentInfo)
+					segment.ManifestPath = manifestPath
+				}
+			}
 			// segments from catalog.ListSegments will not have logPath
 			m.segments.SetSegment(segment.ID, NewSegmentInfo(segment))
 			metrics.DataCoordNumSegments.WithLabelValues(segmentMetricLabelValues(NewSegmentInfo(segment))...).Inc()
