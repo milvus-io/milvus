@@ -2914,7 +2914,7 @@ func Test_compactionTrigger_generatePlans(t *testing.T) {
 	zeroCompactTime := &compactTime{}
 
 	tests := []struct {
-		name   string
+		name    string
 		fields  fields
 		args    args
 		want    []wantBucket
