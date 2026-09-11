@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/client/v3/milvusclient"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
@@ -58,6 +59,11 @@ const (
 	creatorID32Field  = "creatorId32" // INT32
 	creatorIDStrField = "creatorIdStr"
 	metaJSONField     = "meta"
+
+	// HYBRID is an internal-only scalar index type. Exercise it through the
+	// supported AUTOINDEX entry point and pin the resolution policy used by
+	// this suite so the tested physical path cannot drift with defaults.
+	scalarAutoIndexBuildParams = `{"int":"HYBRID","varchar":"HYBRID","bool":"BITMAP","float":"HYBRID","json":"HYBRID","geometry":"RTREE","timestamptz":"STL_SORT"}`
 )
 
 // intWidthFields are the integer fields (each carrying the same creatorId value,
@@ -71,6 +77,7 @@ func (s *BloomMatchTestSuite) SetupSuite() {
 	// it (default is off). Harmless for the other tests, whose fields keep their
 	// raw data. Must be set before the cluster starts.
 	s.WithMilvusConfig(paramtable.Get().QueryNodeCfg.IndexOffsetCacheEnabled.Key, "true")
+	s.WithMilvusConfig(paramtable.Get().AutoIndexConfig.ScalarAutoIndexParams.Key, scalarAutoIndexBuildParams)
 	s.MiniClusterSuite.SetupSuite()
 	s.dbName = ""
 	s.dim = 128
@@ -342,9 +349,40 @@ func (s *BloomMatchTestSuite) insertGrowing(collectionName string, creators []in
 
 // scalarIndexSpec is one scalar index to build on a field.
 type scalarIndexSpec struct {
-	field     string
-	indexName string
-	params    []*commonpb.KeyValuePair
+	field             string
+	indexName         string
+	params            []*commonpb.KeyValuePair
+	expectedBuiltType string
+}
+
+// assertBuiltIndexTypes checks DataCoord's build parameters rather than the
+// user-facing DescribeIndex response, which deliberately preserves AUTOINDEX.
+// This makes the internal HYBRID coverage explicit without exposing HYBRID as
+// a user-creatable index type.
+func (s *BloomMatchTestSuite) assertBuiltIndexTypes(ctx context.Context, collectionName string, specs []scalarIndexSpec) {
+	collectionResp, err := s.Cluster.MilvusClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
+		DbName:         s.dbName,
+		CollectionName: collectionName,
+	})
+	s.Require().NoError(err)
+	s.Require().NoError(merr.Error(collectionResp.GetStatus()))
+
+	for _, spec := range specs {
+		if spec.expectedBuiltType == "" {
+			continue
+		}
+		indexResp, err := s.Cluster.MixCoordClient.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
+			CollectionID: collectionResp.GetCollectionID(),
+			IndexName:    spec.indexName,
+		})
+		s.Require().NoError(err)
+		s.Require().NoError(merr.Error(indexResp.GetStatus()))
+		s.Require().Lenf(indexResp.GetIndexInfos(), 1, "describe internal index %s", spec.indexName)
+
+		builtType, err := funcutil.GetAttrByKeyFromRepeatedKV(common.IndexTypeKey, indexResp.GetIndexInfos()[0].GetIndexParams())
+		s.Require().NoError(err)
+		s.Equalf(spec.expectedBuiltType, builtType, "built index type for %s", spec.indexName)
+	}
 }
 
 // buildScalarIndexesAndReload releases the already-loaded collection, builds every
@@ -378,6 +416,7 @@ func (s *BloomMatchTestSuite) buildScalarIndexesAndReload(collectionName string,
 	for _, spec := range specs {
 		s.WaitForIndexBuiltWithIndexName(ctx, collectionName, spec.field, spec.indexName)
 	}
+	s.assertBuiltIndexTypes(ctx, collectionName, specs)
 
 	loadResp, err := c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         s.dbName,
@@ -690,39 +729,47 @@ func (s *BloomMatchTestSuite) TestQueryScalarIndexTypeMatrix() {
 	strBlob := s.bloomBlobStr(strMembers)
 
 	rounds := []struct {
-		indexType string
-		onInts    bool
-		onVarchar bool
+		name              string
+		requestIndexType  string
+		expectedBuiltType string
+		onInts            bool
+		onVarchar         bool
 	}{
-		{"STL_SORT", true, true},
-		{"BITMAP", true, true},
-		{"INVERTED", true, true},
-		{"HYBRID", true, true},
-		{"TRIE", false, true}, // varchar only
+		{"STL_SORT", "STL_SORT", "STL_SORT", true, true},
+		{"BITMAP", "BITMAP", "BITMAP", true, true},
+		{"INVERTED", "INVERTED", "INVERTED", true, true},
+		{"HYBRID", "AUTOINDEX", "HYBRID", true, true},
+		{"TRIE", "TRIE", "TRIE", false, true}, // varchar only
 	}
 	for _, r := range rounds {
-		s.Run(r.indexType, func() {
-			collectionName := "test_bloom_match_idx_" + strings.ToLower(r.indexType) + "_" + funcutil.GenRandomStr()
+		s.Run(r.name, func() {
+			collectionName := "test_bloom_match_idx_" + strings.ToLower(r.name) + "_" + funcutil.GenRandomStr()
 			s.setupCollection(collectionName)
 
 			var specs []scalarIndexSpec
 			if r.onInts {
 				for _, f := range intWidthFields {
-					specs = append(specs, scalarIndexSpec{field: f, indexName: "idx_" + f, params: scalarIndexParams(r.indexType)})
+					specs = append(specs, scalarIndexSpec{
+						field: f, indexName: "idx_" + f,
+						params: scalarIndexParams(r.requestIndexType), expectedBuiltType: r.expectedBuiltType,
+					})
 				}
 			}
 			if r.onVarchar {
-				specs = append(specs, scalarIndexSpec{field: creatorIDStrField, indexName: "idx_" + creatorIDStrField, params: scalarIndexParams(r.indexType)})
+				specs = append(specs, scalarIndexSpec{
+					field: creatorIDStrField, indexName: "idx_" + creatorIDStrField,
+					params: scalarIndexParams(r.requestIndexType), expectedBuiltType: r.expectedBuiltType,
+				})
 			}
 			s.buildScalarIndexesAndReload(collectionName, specs)
 
 			if r.onInts {
 				for _, f := range intWidthFields {
-					s.assertBloomSupersetInt(collectionName, f, intMembers, intBlob, r.indexType+"/"+f)
+					s.assertBloomSupersetInt(collectionName, f, intMembers, intBlob, r.name+"/"+f)
 				}
 			}
 			if r.onVarchar {
-				s.assertBloomSupersetStr(collectionName, creatorIDStrField, strMembers, strBlob, r.indexType+"/varchar")
+				s.assertBloomSupersetStr(collectionName, creatorIDStrField, strMembers, strBlob, r.name+"/varchar")
 			}
 		})
 	}
@@ -735,20 +782,29 @@ func (s *BloomMatchTestSuite) TestQueryScalarIndexTypeMatrix() {
 // yet the raw JSON survives — the direct refutation of the "index drops raw JSON,
 // bloom fails after seal" concern.
 func (s *BloomMatchTestSuite) TestQueryJsonPathIndexTypeMatrix() {
-	for _, indexType := range []string{"INVERTED", "HYBRID"} {
-		s.Run(indexType, func() {
-			collectionName := "test_bloom_match_jsonidx_" + strings.ToLower(indexType) + "_" + funcutil.GenRandomStr()
+	rounds := []struct {
+		name              string
+		requestIndexType  string
+		expectedBuiltType string
+	}{
+		{"INVERTED", "INVERTED", "INVERTED"},
+		{"HYBRID", "AUTOINDEX", "HYBRID"},
+	}
+	for _, r := range rounds {
+		s.Run(r.name, func() {
+			collectionName := "test_bloom_match_jsonidx_" + strings.ToLower(r.name) + "_" + funcutil.GenRandomStr()
 			creators, _ := s.setupCollection(collectionName)
 			s.buildScalarIndexesAndReload(collectionName, []scalarIndexSpec{{
-				field:     metaJSONField,
-				indexName: "idx_meta_creator",
+				field:             metaJSONField,
+				indexName:         "idx_meta_creator",
+				expectedBuiltType: r.expectedBuiltType,
 				params: []*commonpb.KeyValuePair{
-					{Key: common.IndexTypeKey, Value: indexType},
+					{Key: common.IndexTypeKey, Value: r.requestIndexType},
 					{Key: "json_path", Value: fmt.Sprintf(`%s["creator"]`, metaJSONField)},
 					{Key: "json_cast_type", Value: "double"},
 				},
 			}})
-			s.assertJSONPathStrictMembership(collectionName, creators, indexType)
+			s.assertJSONPathStrictMembership(collectionName, creators, r.name)
 		})
 	}
 }
