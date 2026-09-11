@@ -2196,9 +2196,9 @@ the new incoming write operation will be dropped if it exceeds the timeout.`,
 		Key:          "log.asyncWrite.nonDroppableLevel",
 		DefaultValue: "error",
 		Version:      "2.6.7",
-		Doc: `The level that will not be dropped when the buffer is full.
-Once the level is greater or equal to the non-droppable level, 
-the write operation will not be dropped because the buffer is full`,
+		Doc: `The level at which a new log gets priority when the buffer is full.
+Once the level is greater than or equal to the non-droppable level,
+the oldest pending log is dropped to make room instead of blocking the caller.`,
 		Export: false,
 	}
 	l.AsyncWriteNonDroppableLevel.Init(base.mgr)

@@ -25,8 +25,13 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/prometheus/client_golang/prometheus/testutil"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 )
 
 func TestAsyncBufferedWriteSyncer(t *testing.T) {
@@ -83,4 +88,160 @@ func (s *blockWriter) Sync() error {
 		return errors.New("sync error")
 	}
 	return nil
+}
+
+func TestAsyncBufferedWriteSyncerPrioritizesErrorWithoutBlocking(t *testing.T) {
+	writer := newBlockingWriteSyncer()
+	defer writer.unblock()
+	syncer := newAsyncTextIOCoreForBlockedWriter(writer)
+
+	require.NoError(t, syncer.Write(zapcore.Entry{Level: zap.InfoLevel, Message: "writing"}, nil))
+	writer.waitUntilBlocked(t)
+	require.NoError(t, syncer.Write(zapcore.Entry{Level: zap.InfoLevel, Message: "pending"}, nil))
+
+	done := make(chan error, 1)
+	go func() {
+		done <- syncer.Write(zapcore.Entry{Level: zap.ErrorLevel, Message: "important"}, nil)
+	}()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		require.FailNow(t, "error log blocked on a full pending queue")
+	}
+
+	replacement := <-syncer.pending.entries
+	assert.Equal(t, zap.ErrorLevel, replacement.level)
+	syncer.pending.entries <- replacement
+
+	writer.unblock()
+	syncer.Stop()
+}
+
+func TestAsyncBufferedWriteSyncerPrioritizesErrorOverWaitingInfo(t *testing.T) {
+	writer := newBlockingWriteSyncer()
+	defer writer.unblock()
+	syncer := newAsyncTextIOCoreForBlockedWriter(writer)
+
+	require.NoError(t, syncer.Write(zapcore.Entry{Level: zap.InfoLevel, Message: "writing"}, nil))
+	writer.waitUntilBlocked(t)
+	require.NoError(t, syncer.Write(zapcore.Entry{Level: zap.InfoLevel, Message: "pending"}, nil))
+
+	droppedBefore := testutil.ToFloat64(metrics.LoggingDroppedWriteTotal)
+	pendingBefore := testutil.ToFloat64(metrics.LoggingPendingWriteTotal)
+	waitingInfoDone := make(chan error, 1)
+	go func() {
+		waitingInfoDone <- syncer.Write(zapcore.Entry{Level: zap.InfoLevel, Message: "waiting"}, nil)
+	}()
+	require.Eventually(t, func() bool {
+		syncer.pending.mu.Lock()
+		defer syncer.pending.mu.Unlock()
+		return syncer.pending.waiters == 1
+	}, time.Second, time.Millisecond, "info log did not start waiting for queue space")
+
+	require.NoError(t, syncer.Write(zapcore.Entry{Level: zap.ErrorLevel, Message: "important"}, nil))
+
+	syncer.pending.mu.Lock()
+	replacement := <-syncer.pending.entries
+	assert.Equal(t, zap.ErrorLevel, replacement.level)
+	syncer.pending.entries <- replacement
+	syncer.pending.mu.Unlock()
+	assert.Equal(t, droppedBefore+1, testutil.ToFloat64(metrics.LoggingDroppedWriteTotal))
+	assert.Equal(t, pendingBefore, testutil.ToFloat64(metrics.LoggingPendingWriteTotal))
+
+	select {
+	case <-waitingInfoDone:
+		require.FailNow(t, "waiting info log took the error log's queue slot")
+	default:
+	}
+
+	writer.unblock()
+	select {
+	case err := <-waitingInfoDone:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		require.FailNow(t, "waiting info log did not resume after queue space became available")
+	}
+	syncer.Stop()
+}
+
+func TestAsyncBufferedWriteSyncerStopTimesOutOnBlockedWriter(t *testing.T) {
+	writer := newBlockingWriteSyncer()
+	defer writer.unblock()
+	syncer := newAsyncTextIOCoreForBlockedWriter(writer)
+
+	require.NoError(t, syncer.Write(zapcore.Entry{Level: zap.InfoLevel, Message: "writing"}, nil))
+	writer.waitUntilBlocked(t)
+
+	done := make(chan struct{})
+	go func() {
+		syncer.Stop()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		require.FailNow(t, "async logger stop blocked on the underlying writer")
+	}
+
+	writer.unblock()
+	select {
+	case <-syncer.notifier.FinishChan():
+	case <-time.After(time.Second):
+		require.FailNow(t, "async logger did not finish after the writer was unblocked")
+	}
+}
+
+func newAsyncTextIOCoreForBlockedWriter(writer zapcore.WriteSyncer) *asyncTextIOCore {
+	return NewAsyncTextIOCore(
+		&Config{
+			Format:                      "text",
+			AsyncWriteFlushInterval:     time.Hour,
+			AsyncWriteDroppedTimeout:    time.Second,
+			AsyncWriteNonDroppableLevel: zap.ErrorLevel.String(),
+			AsyncWriteStopTimeout:       50 * time.Millisecond,
+			AsyncWritePendingLength:     1,
+			AsyncWriteBufferSize:        1,
+			AsyncWriteMaxBytesPerLog:    1024,
+		},
+		writer,
+		zap.DebugLevel,
+	)
+}
+
+type blockingWriteSyncer struct {
+	started     chan struct{}
+	release     chan struct{}
+	startedOnce sync.Once
+	releaseOnce sync.Once
+}
+
+func newBlockingWriteSyncer() *blockingWriteSyncer {
+	return &blockingWriteSyncer{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+}
+
+func (s *blockingWriteSyncer) Write(p []byte) (int, error) {
+	s.startedOnce.Do(func() { close(s.started) })
+	<-s.release
+	return len(p), nil
+}
+
+func (s *blockingWriteSyncer) Sync() error {
+	return nil
+}
+
+func (s *blockingWriteSyncer) waitUntilBlocked(t *testing.T) {
+	t.Helper()
+	select {
+	case <-s.started:
+	case <-time.After(time.Second):
+		require.FailNow(t, "writer was not called")
+	}
+}
+
+func (s *blockingWriteSyncer) unblock() {
+	s.releaseOnce.Do(func() { close(s.release) })
 }

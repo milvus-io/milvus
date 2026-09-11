@@ -18,6 +18,7 @@ package mlog
 
 import (
 	"fmt"
+	"sync"
 	"time"
 	"unsafe"
 
@@ -45,7 +46,7 @@ func NewAsyncTextIOCore(cfg *Config, ws zapcore.WriteSyncer, enab zapcore.LevelE
 		notifier:            syncutil.NewAsyncTaskNotifier[struct{}](),
 		enc:                 enc,
 		bws:                 bws,
-		pending:             make(chan entryItem, cfg.AsyncWritePendingLength),
+		pending:             newAsyncWriteQueue(cfg.AsyncWritePendingLength),
 		writeDroppedTimeout: cfg.AsyncWriteDroppedTimeout,
 		nonDroppableLevel:   nonDroppableLevel,
 		stopTimeout:         cfg.AsyncWriteStopTimeout,
@@ -62,7 +63,7 @@ type asyncTextIOCore struct {
 	notifier            *syncutil.AsyncTaskNotifier[struct{}]
 	enc                 zapcore.Encoder
 	bws                 *zapcore.BufferedWriteSyncer
-	pending             chan entryItem // the incoming new write requests
+	pending             *asyncWriteQueue // the incoming new write requests
 	writeDroppedTimeout time.Duration
 	nonDroppableLevel   zapcore.Level
 	stopTimeout         time.Duration
@@ -159,20 +160,119 @@ func (s *asyncTextIOCore) WriteWithCEntry(ent CEntry) {
 func (s *asyncTextIOCore) write(ent entryItem) {
 	length := ent.buf.Len()
 	if length == 0 {
+		ent.buf.Free()
 		return
 	}
-	var writeDroppedTimeout <-chan time.Time
-	if ent.level < s.nonDroppableLevel {
-		writeDroppedTimeout = time.After(s.writeDroppedTimeout)
+
+	if ent.level >= s.nonDroppableLevel {
+		// Logging must never block the caller indefinitely. Give important entries
+		// priority by replacing the oldest pending entry when the queue is full.
+		if dropped, ok := s.pending.enqueueWithReplacement(ent); ok {
+			s.dropEntry(dropped)
+		}
+		return
 	}
+
+	if !s.pending.enqueueWithTimeout(ent, s.writeDroppedTimeout) {
+		s.dropEntry(ent)
+	}
+}
+
+type asyncWriteQueue struct {
+	entries chan entryItem
+
+	mu             sync.Mutex
+	spaceAvailable chan struct{}
+	waiters        int
+}
+
+func newAsyncWriteQueue(capacity int) *asyncWriteQueue {
+	return &asyncWriteQueue{
+		entries:        make(chan entryItem, capacity),
+		spaceAvailable: make(chan struct{}),
+	}
+}
+
+func (q *asyncWriteQueue) enqueueWithReplacement(ent entryItem) (entryItem, bool) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	if q.tryEnqueueLocked(ent) {
+		return entryItem{}, false
+	}
+
+	var dropped entryItem
 	select {
-	case s.pending <- ent:
+	case dropped = <-q.entries:
+		metrics.LoggingPendingWriteTotal.Dec()
+		// No producer can take the released slot while q.mu is held, and
+		// consumers can only create more space, so this send cannot block.
+		q.entries <- ent
 		metrics.LoggingPendingWriteTotal.Inc()
-	case <-writeDroppedTimeout:
-		metrics.LoggingDroppedWriteTotal.Inc()
-		// drop the entry if the write is dropped due to timeout
-		ent.buf.Free()
+		return dropped, true
+	default:
+		// The consumer may have dequeued the entry since the first enqueue
+		// attempt. Retry while other producers remain excluded.
+		if q.tryEnqueueLocked(ent) {
+			return entryItem{}, false
+		}
+		return ent, true
 	}
+}
+
+func (q *asyncWriteQueue) enqueueWithTimeout(ent entryItem, timeout time.Duration) bool {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	for {
+		q.mu.Lock()
+		if q.tryEnqueueLocked(ent) {
+			q.mu.Unlock()
+			return true
+		}
+		spaceAvailable := q.spaceAvailable
+		q.waiters++
+		q.mu.Unlock()
+
+		var timedOut bool
+		select {
+		case <-spaceAvailable:
+		case <-timer.C:
+			timedOut = true
+		}
+
+		q.mu.Lock()
+		q.waiters--
+		q.mu.Unlock()
+		if timedOut {
+			return false
+		}
+	}
+}
+
+func (q *asyncWriteQueue) tryEnqueueLocked(ent entryItem) bool {
+	select {
+	case q.entries <- ent:
+		metrics.LoggingPendingWriteTotal.Inc()
+		return true
+	default:
+		return false
+	}
+}
+
+func (q *asyncWriteQueue) notifySpaceAvailable() {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.waiters == 0 {
+		return
+	}
+	close(q.spaceAvailable)
+	q.spaceAvailable = make(chan struct{})
+}
+
+func (s *asyncTextIOCore) dropEntry(ent entryItem) {
+	metrics.LoggingDroppedWriteTotal.Inc()
+	ent.buf.Free()
 }
 
 type CEntryTextIOCore interface {
@@ -205,7 +305,8 @@ func (s *asyncTextIOCore) background() {
 		select {
 		case <-s.notifier.Context().Done():
 			return
-		case ent := <-s.pending:
+		case ent := <-s.pending.entries:
+			s.pending.notifySpaceAvailable()
 			s.consumeEntry(ent)
 		}
 	}
@@ -276,7 +377,8 @@ func (s *asyncTextIOCore) flushAllPendingWrites(done chan struct{}) {
 
 	for {
 		select {
-		case ent := <-s.pending:
+		case ent := <-s.pending.entries:
+			s.pending.notifySpaceAvailable()
 			s.consumeEntry(ent)
 		default:
 			return
@@ -284,7 +386,14 @@ func (s *asyncTextIOCore) flushAllPendingWrites(done chan struct{}) {
 	}
 }
 
+// Stop requests shutdown and waits for at most the configured timeout. If the
+// underlying writer is blocked, its background goroutine may outlive Stop.
 func (s *asyncTextIOCore) Stop() {
 	s.notifier.Cancel()
-	s.notifier.BlockUntilFinish()
+	timer := time.NewTimer(s.stopTimeout)
+	defer timer.Stop()
+	select {
+	case <-s.notifier.FinishChan():
+	case <-timer.C:
+	}
 }

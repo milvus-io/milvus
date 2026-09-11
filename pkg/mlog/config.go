@@ -81,7 +81,7 @@ type Config struct {
 	// AsyncWriteDroppedTimeout is the timeout to drop the write request if the buffer is full
 	AsyncWriteDroppedTimeout time.Duration `toml:"async-write-dropped-timeout" json:"async-write-dropped-timeout"`
 
-	// AsyncWriteNonDroppableLevel is the level that will not be dropped when the buffer is full
+	// AsyncWriteNonDroppableLevel is the level at which a new log replaces the oldest pending log when the buffer is full.
 	AsyncWriteNonDroppableLevel string `toml:"async-write-non-droppable-level" json:"async-write-non-droppable-level"`
 
 	// AsyncWriteStopTimeout is the timeout to stop the async write
