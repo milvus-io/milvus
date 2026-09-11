@@ -98,6 +98,7 @@ struct CacheConfig {
     // Memory mode
     size_t mem_max_bytes{256ULL * 1024 * 1024};
     bool compression_enabled{true};
+    bool mem_enable_growing{false};
     int64_t mem_min_eval_duration_us{1000};
     // Disk mode
     std::string disk_base_path;
@@ -139,6 +140,16 @@ class ExprResCacheManager {
             0};  // eval duration in us, 0 = skip cost check
     };
 
+    // A forward-admission decision for batched evaluators that need to know
+    // whether a miss is frequent enough before allocating full-segment capture
+    // buffers. Tickets are valid only for the config epoch and expression
+    // signature that produced them.
+    struct AdmissionTicket {
+        uint64_t config_epoch{0};
+        uint64_t signature_hash{0};
+        bool admitted{false};
+    };
+
  public:
     static ExprResCacheManager&
     Instance();
@@ -153,6 +164,11 @@ class ExprResCacheManager {
 
     CacheMode
     GetMode() const;
+
+    // Sealed segments are supported by both backends. Growing segments are
+    // opt-in and supported only by the memory backend.
+    bool
+    CanCacheSegment(SegmentType segment_type) const;
 
     // Backward-compatible shim: maps old SetDiskConfig parameters to CacheConfig.
     void
@@ -179,6 +195,20 @@ class ExprResCacheManager {
     // Insert or update cache entry. The provided value.result must be non-null.
     void
     Put(const Key& key, const Value& value);
+
+    // Observe one real cache-miss evaluation and decide frequency admission
+    // before the caller allocates a full-segment result. Call at most once per
+    // physical expression instance, not once per batch.
+    AdmissionTicket
+    ObserveMiss(const Key& key);
+
+    // Put a value using a ticket returned by ObserveMiss. This bypasses only
+    // the duplicate frequency check; latency, backend eligibility, capacity,
+    // compression, and eviction policies still apply.
+    void
+    PutAdmitted(const Key& key,
+                const Value& value,
+                const AdmissionTicket& ticket);
 
     void
     Clear();
@@ -211,6 +241,11 @@ class ExprResCacheManager {
     void
     SyncUsageMetrics(size_t memory_bytes, size_t disk_bytes);
 
+    void
+    PutInternal(const Key& key,
+                const Value& value,
+                const AdmissionTicket* ticket);
+
     static std::atomic<bool> enabled_;
 
     mutable std::shared_mutex state_mutex_;
@@ -230,6 +265,7 @@ class ExprResCacheManager {
     size_t disk_clock_hand_{0};
 
     FrequencyTracker frequency_tracker_;
+    std::atomic<uint64_t> config_epoch_{1};
     std::atomic<size_t> reported_memory_bytes_{0};
     std::atomic<size_t> reported_disk_bytes_{0};
 };

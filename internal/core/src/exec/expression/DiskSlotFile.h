@@ -107,9 +107,6 @@ class DiskSlotFile {
     uint32_t
     GetUsedCount() const;
 
-    bool
-    HasSignature(const std::string& signature) const;
-
     uint32_t
     GetSlotSize() const {
         return slot_size_;

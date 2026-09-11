@@ -1578,7 +1578,7 @@ TEST(EntryPoolV2Test, ActiveCountStaleness) {
     ASSERT_FALSE(pool.Get(100, "expr_stale", N - 1, out_r, out_v));
 }
 
-TEST(EntryPoolV2Test, SameSignatureActiveCountCreatesDistinctSnapshots) {
+TEST(EntryPoolV2Test, SameSignatureKeepsNewestActiveCountSnapshot) {
     milvus::exec::EntryPool pool(1 << 20);
 
     const size_t old_n = 256;
@@ -1589,28 +1589,18 @@ TEST(EntryPoolV2Test, SameSignatureActiveCountCreatesDistinctSnapshots) {
     auto new_valid = MakeBits(new_n, true);
 
     pool.Put(100, "expr_replace", old_n, old_result, old_valid);
-    pool.Configure(1 << 20,
-                   /*compression_enabled=*/true,
-                   /*min_eval_duration_us=*/100000);
-    pool.Put(100,
-             "expr_replace",
-             new_n,
-             new_result,
-             new_valid,
-             /*eval_duration_us=*/1);
+    pool.Put(100, "expr_replace", new_n, new_result, new_valid);
+    // Simulate an older growing-segment query finishing after the newer one.
+    pool.Put(100, "expr_replace", old_n, old_result, old_valid);
 
     milvus::TargetBitmap out_r, out_v;
-    ASSERT_TRUE(pool.Get(100, "expr_replace", old_n, out_r, out_v));
-    ASSERT_EQ(out_r.size(), old_n);
-    for (size_t i = 0; i < old_n; ++i) {
-        ASSERT_FALSE(out_r[i]) << "old result bit " << i;
-    }
+    ASSERT_FALSE(pool.Get(100, "expr_replace", old_n, out_r, out_v));
     ASSERT_TRUE(pool.Get(100, "expr_replace", new_n, out_r, out_v));
     ASSERT_EQ(out_r.size(), new_n);
     for (size_t i = 0; i < new_n; ++i) {
         ASSERT_TRUE(out_r[i]) << "new result bit " << i;
     }
-    ASSERT_EQ(pool.GetEntryCount(), 2u);
+    ASSERT_EQ(pool.GetEntryCount(), 1u);
 }
 
 TEST(EntryPoolV2Test, ClockEviction) {
@@ -2071,7 +2061,7 @@ TEST(ExprResCacheManagerV2Test, MemoryModePutGet) {
     ExprResCacheManager::SetEnabled(false);
 }
 
-TEST(ExprResCacheManagerV2Test, MemoryModeActiveCountRefreshesSnapshot) {
+TEST(ExprResCacheManagerV2Test, MemoryModeKeepsNewestActiveCountSnapshot) {
     auto& mgr = ExprResCacheManager::Instance();
     ExprResCacheManager::SetEnabled(true);
     mgr.Clear();
@@ -2106,6 +2096,16 @@ TEST(ExprResCacheManagerV2Test, MemoryModeActiveCountRefreshesSnapshot) {
     ASSERT_TRUE(mgr.Get(k, got));
     ASSERT_EQ(got.result->size(), 256u);
     ASSERT_TRUE((*got.result)[0]);
+
+    // A late result from the older snapshot must not move the cache backward.
+    mgr.Put(k, v1);
+    got.active_count = 256;
+    ASSERT_TRUE(mgr.Get(k, got));
+    ASSERT_TRUE((*got.result)[0]);
+
+    got.active_count = 128;
+    ASSERT_FALSE(mgr.Get(k, got));
+    ASSERT_EQ(mgr.GetEntryCount(), 1u);
 
     mgr.Clear();
     ExprResCacheManager::SetEnabled(false);
@@ -2519,15 +2519,14 @@ TEST(ExprResCacheManagerV2Test, DiskModeLatencyFilter) {
     got.active_count = 128;
     ASSERT_TRUE(mgr.Get(k2, got));
 
-    // Existing same-row-count entry must be replaceable even if the recompute is
-    // below the current latency admission threshold.
+    // A cheap recompute is rejected even when the signature already exists.
     v.result = std::make_shared<milvus::TargetBitmap>(MakeBits(128, false));
     v.valid_result = std::make_shared<milvus::TargetBitmap>(MakeBits(128));
     v.eval_duration_us = 1;
     mgr.Put(k2, v);
     got.active_count = 128;
     ASSERT_TRUE(mgr.Get(k2, got));
-    ASSERT_FALSE((*got.result)[0]);
+    ASSERT_TRUE((*got.result)[0]);
 
     // eval_duration_us=0 means skip cost check: admitted
     ExprResCacheManager::Key k3{500, "no_dur_disk_expr"};

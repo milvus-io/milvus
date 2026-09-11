@@ -65,9 +65,8 @@ class ExprCacheHelper {
 
     // Try cache; on miss, call `compute`, put result into cache, return.
     // Backend semantics:
-    //   - Memory mode supports sealed and growing segments. `active_count`
-    //     participates in the memory cache key, so growing-segment snapshots
-    //     with different row counts are isolated from each other.
+    //   - Memory mode always supports sealed segments. Growing segments are
+    //     supported only when explicitly enabled.
     //   - Disk mode is sealed-segment only. DiskSlotFile uses fixed-size slots
     //     derived from row_count; if a segment's row_count changes, the manager
     //     drops that disk file and skips disk caching for the segment.
@@ -90,13 +89,10 @@ class ExprCacheHelper {
                  int64_t active_count,
                  ComputeFn&& compute,
                  bool enable_cache_write = true) {
-        bool cache_eligible =
-            segment != nullptr && ExprResCacheManager::IsEnabled();
-        if (cache_eligible &&
-            ExprResCacheManager::Instance().GetMode() == CacheMode::Disk &&
-            segment->type() != SegmentType::Sealed) {
-            cache_eligible = false;
-        }
+        auto& manager = ExprResCacheManager::Instance();
+        bool cache_eligible = segment != nullptr &&
+                              ExprResCacheManager::IsEnabled() &&
+                              manager.CanCacheSegment(segment->type());
 
         if (cache_eligible) {
             // Try Get
@@ -104,7 +100,7 @@ class ExprCacheHelper {
                                          expr_signature};
             ExprResCacheManager::Value got;
             got.active_count = active_count;
-            if (ExprResCacheManager::Instance().Get(key, got)) {
+            if (manager.Get(key, got)) {
                 return {got.result, got.valid_result};
             }
         }
@@ -133,7 +129,7 @@ class ExprCacheHelper {
         v.valid_result = valid;
         v.active_count = active_count;
         v.eval_duration_us = eval_us;
-        ExprResCacheManager::Instance().Put(key, v);
+        manager.Put(key, v);
 
         return {result, valid};
     }
