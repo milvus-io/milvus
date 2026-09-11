@@ -2586,7 +2586,7 @@ TEST(ExternalTakeAccessMode, RequestGateDisabledFallsBackForExternalText) {
     ASSERT_EQ(retrieve_results->fields_data_size(), 1);
     const auto& retrieved = retrieve_results->fields_data(0);
     EXPECT_EQ(retrieved.field_id(), text_id.get());
-    const auto& retrieve_valid = GetFieldDataRowValidData(retrieved);
+    const auto& retrieve_valid = retrieved.valid_data();
     ASSERT_EQ(retrieve_valid.size(), offsets.size());
     EXPECT_TRUE(retrieve_valid[0]);
     EXPECT_FALSE(retrieve_valid[1]);
@@ -2606,7 +2606,7 @@ TEST(ExternalTakeAccessMode, RequestGateDisabledFallsBackForExternalText) {
     segment->TestFillTargetEntry(search_plan.get(), search_results);
 
     const auto& searched = *search_results.output_fields_data_.at(text_id);
-    const auto& search_valid = GetFieldDataRowValidData(searched);
+    const auto& search_valid = searched.valid_data();
     ASSERT_EQ(search_valid.size(), offsets.size());
     EXPECT_TRUE(search_valid[0]);
     EXPECT_FALSE(search_valid[1]);
