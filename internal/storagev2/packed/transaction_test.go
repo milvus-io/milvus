@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -435,6 +436,30 @@ func TestGetDeltaLogPathsFromManifest(t *testing.T) {
 		sameManifest, err := AddDeltaLogsToManifest(manifestPath, storageConfig, []DeltaLogEntry{})
 		require.NoError(t, err)
 		assert.Equal(t, manifestPath, sameManifest)
+	})
+}
+
+func TestValidateDeltaLogMetadata(t *testing.T) {
+	manifestPath := MarshalManifestPath("backup/insert_log/1/2/3", 7)
+
+	t.Run("zero-entry marker may omit path", func(t *testing.T) {
+		assert.NoError(t, validateDeltaLogMetadata(manifestPath, "", 0))
+	})
+
+	t.Run("negative entries are corrupt", func(t *testing.T) {
+		err := validateDeltaLogMetadata(manifestPath, "delta/1", -1)
+		assert.ErrorIs(t, err, merr.ErrDataIntegrity)
+		assert.ErrorContains(t, err, "negative entries_num")
+	})
+
+	t.Run("positive entries require path", func(t *testing.T) {
+		err := validateDeltaLogMetadata(manifestPath, "  ", 1)
+		assert.ErrorIs(t, err, merr.ErrDataIntegrity)
+		assert.ErrorContains(t, err, "but no path")
+	})
+
+	t.Run("positive entries with path are readable", func(t *testing.T) {
+		assert.NoError(t, validateDeltaLogMetadata(manifestPath, "delta/1", 1))
 	})
 }
 

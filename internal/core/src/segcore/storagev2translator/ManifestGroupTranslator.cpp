@@ -62,7 +62,8 @@
 
 namespace milvus::segcore::storagev2translator {
 
-// See GroupChunkTranslator.cpp for explanation of g_mmap_path_generation.
+// Keep the name distinct in unity builds; see GroupChunkTranslator.cpp for
+// why mmap paths need a generation suffix.
 static std::atomic<uint64_t> g_manifest_mmap_path_generation{0};
 
 ColumnSizeEstimateResult

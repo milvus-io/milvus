@@ -27,6 +27,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -55,6 +56,45 @@ import (
 // ================================
 // Import Callbacks Test Suite
 // ================================
+
+func TestBroadcastSnapshotImportMultipleTargetPartitions(t *testing.T) {
+	ctx := context.Background()
+	// Exercise the real broadcast path while replacing external validation,
+	// metadata I/O, and WAL transport. Source expansion does not select targets.
+	validation := mockey.Mock((*Server).validateImportRequest).Return(nil).Build()
+	defer validation.UnPatch()
+	expansion := mockey.Mock(expandSnapshotImportFiles).Return(
+		[]*internalpb.ImportFile{{Paths: []string{"root/data/manifest"}}}, nil).Build()
+	defer expansion.UnPatch()
+	replication := mockey.Mock((*Server).validateImportReplication).Return(nil).Build()
+	defer replication.UnPatch()
+	api := newMockBroadcastAPIImpl()
+	start := mockey.Mock((*Server).startBroadcastWithCollectionID).Return(api, nil).Build()
+	defer start.UnPatch()
+	type testBroker struct{ broker.Broker }
+	fakeBroker := &testBroker{}
+	describe := mockey.Mock((*testBroker).DescribeCollectionInternal).Return(
+		&milvuspb.DescribeCollectionResponse{Status: merr.Success(), DbName: "default"}, nil).Build()
+	defer describe.UnPatch()
+	var received []int64
+	transport := mockey.Mock((*mockBroadcastAPIImpl).Broadcast).To(
+		func(_ *mockBroadcastAPIImpl, _ context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
+			decoded, err := message.AsBroadcastImportMessageV1(msg)
+			require.NoError(t, err)
+			received = decoded.MustBody().GetPartitionIDs()
+			return &types.BroadcastAppendResult{}, nil
+		}).Build()
+	defer transport.UnPatch()
+	server := &Server{broker: fakeBroker}
+	partitionIDs := []int64{20, 10}
+	_, duplicated, err := server.broadcastImport(ctx, "target", 100, partitionIDs,
+		[]*internalpb.ImportFile{{Paths: []string{"s3://source/root/snapshots/1/metadata/2.json"}}},
+		snapshotImportTestOptions(), &schemapb.CollectionSchema{}, 1000, []string{"target_v1"}, "")
+	require.NoError(t, err)
+	require.False(t, duplicated)
+	require.Equal(t, partitionIDs, received)
+	require.True(t, api.closeCalled.Load())
+}
 
 type ImportCallbacksSuite struct {
 	suite.Suite

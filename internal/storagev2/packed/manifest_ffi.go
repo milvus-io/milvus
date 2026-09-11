@@ -571,7 +571,7 @@ func readColumnGroupsFromManifest(
 	defer C.loon_manifest_destroy(manifest)
 
 	cgroups := &manifest.column_groups
-	manifestDeltalogs, err := deltaLogsFromManifest(manifest)
+	manifestDeltalogs, err := deltaLogsFromManifest(manifestPath, manifest)
 	if err != nil {
 		return nil, merr.Wrapf(err, "read delta logs from manifest %s", manifestPath)
 	}
@@ -668,7 +668,7 @@ func readColumnGroupsFromManifest(
 	return groups, nil
 }
 
-func deltaLogsFromManifest(manifest *C.LoonManifest) ([]*datapb.FieldBinlog, error) {
+func deltaLogsFromManifest(manifestPath string, manifest *C.LoonManifest) ([]*datapb.FieldBinlog, error) {
 	if manifest == nil {
 		return nil, nil
 	}
@@ -677,18 +677,30 @@ func deltaLogsFromManifest(manifest *C.LoonManifest) ([]*datapb.FieldBinlog, err
 		return nil, nil
 	}
 	if manifest.delta_logs.delta_log_paths == nil || manifest.delta_logs.delta_log_num_entries == nil {
-		return nil, merr.WrapErrServiceInternalMsg("manifest has %d delta logs but missing delta log paths or entry counts", numDeltaLogs)
+		return nil, merr.WrapErrDataIntegrityMsg(
+			"manifest %s has %d delta logs but is missing delta log paths or entry counts",
+			manifestPath,
+			numDeltaLogs,
+		)
 	}
 	cPaths := unsafe.Slice(manifest.delta_logs.delta_log_paths, numDeltaLogs)
 	cNumEntries := unsafe.Slice(manifest.delta_logs.delta_log_num_entries, numDeltaLogs)
 	binlogs := make([]*datapb.Binlog, 0, numDeltaLogs)
 	for i, cPath := range cPaths {
-		if cPath == nil {
+		entriesNum := int64(cNumEntries[i])
+		path := ""
+		if cPath != nil {
+			path = C.GoString(cPath)
+		}
+		if err := validateDeltaLogMetadata(manifestPath, path, entriesNum); err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(path) == "" {
 			continue
 		}
 		binlogs = append(binlogs, &datapb.Binlog{
-			LogPath:    C.GoString(cPath),
-			EntriesNum: int64(cNumEntries[i]),
+			LogPath:    path,
+			EntriesNum: entriesNum,
 		})
 	}
 	if len(binlogs) == 0 {

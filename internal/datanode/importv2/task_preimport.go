@@ -147,8 +147,8 @@ func (t *PreImportTask) Execute() []*conc.Future[any] {
 			return fileStat.GetImportFile()
 		})
 
-	fn := func(i int, file *internalpb.ImportFile) error {
-		reader, err := importutilv2.NewReader(t.ctx, t.cm, t.GetSchema(), file, t.options, bufferSize, t.req.GetStorageConfig())
+	fn := func(i int, file *internalpb.ImportFile, deleteBudget int64) error {
+		reader, err := importutilv2.NewReader(t.ctx, t.cm, t.GetSchema(), file, t.options, bufferSize, t.req.GetStorageConfig(), deleteBudget)
 		if err != nil {
 			mlog.Warn(t.ctx, "new reader failed", WrapLogFields(t, mlog.String("file", file.String()), mlog.Err(err))...)
 			reason := fmt.Sprintf("error: %v, file: %s", err, file.String())
@@ -177,7 +177,17 @@ func (t *PreImportTask) Execute() []*conc.Future[any] {
 			defer func() {
 				debug.FreeOSMemory()
 			}()
-			err := fn(i, file)
+			var deleteBudget int64
+			if file.GetSnapshotSource() != nil {
+				budget, release, err := reserveSnapshotRead(t.ctx, t.GetTaskID(), int64(bufferSize))
+				if err != nil {
+					t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(err.Error()))
+					return nil, err
+				}
+				defer release() // fn closes the reader before this reservation.
+				deleteBudget = budget
+			}
+			err := fn(i, file, deleteBudget)
 			return err, err
 		})
 		futures = append(futures, f)

@@ -74,11 +74,15 @@ type rwOptions struct {
 	neededFields        typeutil.Set[int64]
 	useLoonFFI          bool
 	pluginContext       *indexcgopb.StoragePluginContext
-	textColumnConfigs   []packed.TextColumnConfig // TEXT column configurations for REWRITE_ALL mode
-	textRefsAsBinary    bool                      // TEXT columns already contain encoded LOB refs and should be copied as-is
-	externalReader      packed.ExternalReaderContext
-	writerFormat        string
-	presentFields       map[FieldID]struct{} // reader: caller-known physically-present field IDs, skips a manifest re-read
+	// pluginContextSet distinguishes an explicit plaintext source from
+	// destination-schema fallback.
+	pluginContextSet  bool
+	textColumnConfigs []packed.TextColumnConfig // TEXT column configurations for REWRITE_ALL mode
+	textRefsAsBinary  bool                      // TEXT columns already contain encoded LOB refs and should be copied as-is
+	resolveTextLob    bool                      // decode manifest TEXT LOB refs into ordinary UTF8 values
+	externalReader    packed.ExternalReaderContext
+	writerFormat      string
+	presentFields     map[FieldID]struct{} // reader: caller-known physically-present field IDs, skips a manifest re-read
 }
 
 func (o *rwOptions) validate() error {
@@ -202,9 +206,13 @@ func WithUseLoonFFI(useLoonFFI bool) RwOption {
 	}
 }
 
+// WithPluginContext supplies an already-resolved storage encryption context.
+// For manifest readers, calling it with nil explicitly marks a plaintext
+// source and disables fallback to the destination schema's CMEK properties.
 func WithPluginContext(pluginContext *indexcgopb.StoragePluginContext) RwOption {
 	return func(options *rwOptions) {
 		options.pluginContext = pluginContext
+		options.pluginContextSet = true
 	}
 }
 
@@ -223,6 +231,15 @@ func WithTextColumnConfigs(configs []packed.TextColumnConfig) RwOption {
 func WithTextRefsAsBinary() RwOption {
 	return func(options *rwOptions) {
 		options.textRefsAsBinary = true
+	}
+}
+
+// WithResolveTextLob makes a manifest reader resolve internal TEXT LOB
+// references into ordinary UTF8 values. It is opt-in because compaction paths
+// need the physical binary references for reuse and rewrite strategies.
+func WithResolveTextLob() RwOption {
+	return func(options *rwOptions) {
+		options.resolveTextLob = true
 	}
 }
 
@@ -395,11 +412,25 @@ func NewManifestRecordReader(ctx context.Context, manifestPath string, neededSch
 	if err := rwOptions.validate(); err != nil {
 		return nil, err
 	}
+	// WithResolveTextLob selects milvus-storage SegmentReader, whose current C
+	// API cannot receive the source backup's key-retriever context. Reject the
+	// explicit source key here even when cluster encryption is disabled; letting
+	// it fall through would silently discard the key before opening the backup.
+	// CMEK sources without TEXT/LOB use PackedReader and remain supported.
+	if rwOptions.resolveTextLob && rwOptions.pluginContext != nil {
+		return nil, merr.WrapErrOperationNotSupportedMsg(
+			"CMEK-protected StorageV3 import does not support TEXT/LOB fields",
+		)
+	}
 
 	var pluginContext *indexcgopb.StoragePluginContext
-	if hookutil.IsClusterEncryptionEnabled() {
-		// Reader pluginContext from import tasks
-		if rwOptions.pluginContext != nil {
+	// In snapshot-source import, neededSchema describes the destination
+	// collection. WithPluginContext marks that the source context has already
+	// been resolved, including an explicit nil for a plaintext source, so target
+	// CMEK properties are never reused to read the source. Destination encryption
+	// is applied independently by the import write path.
+	if hookutil.IsClusterEncryptionEnabled() && !rwOptions.resolveTextLob {
+		if rwOptions.pluginContextSet {
 			pluginContext = rwOptions.pluginContext
 		} else {
 			ez := hookutil.GetEzByCollProperties(neededSchema.GetProperties(), rwOptions.collectionID)

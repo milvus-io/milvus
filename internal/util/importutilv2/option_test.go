@@ -19,6 +19,7 @@ package importutilv2
 import (
 	"fmt"
 	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -28,6 +29,30 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
+
+func TestSnapshotExternalSourceOptions(t *testing.T) {
+	base := Options{{Key: BackupFlag, Value: "true"}, {Key: SourceType, Value: SourceTypeSnapshot}}
+	spec := &commonpb.KeyValuePair{Key: ExternalSpec, Value: `{"extfs":{"access_key_id":"reader","access_key_value":"secret"}}`}
+	assert.NoError(t, ValidateSnapshotSourceRequest(append(base, spec)))
+	for _, options := range []Options{
+		{spec},
+		{{Key: BackupFlag, Value: "true"}, spec},
+		append(base, &commonpb.KeyValuePair{Key: ExternalSpec}),
+		append(base, &commonpb.KeyValuePair{Key: ExternalSpec, Value: strings.Repeat("x", 64*1024+1)}),
+		append(base, spec, spec),
+		append(base, &commonpb.KeyValuePair{Key: SnapshotSourceURI, Value: "s3://source/key"}),
+	} {
+		assert.Error(t, ValidateSnapshotSourceRequest(options))
+	}
+	internal := append(base, spec, &commonpb.KeyValuePair{Key: SnapshotSourceURI, Value: "s3://source/key"})
+	assert.NoError(t, ValidateSnapshotSourceOptions(internal))
+	assert.Error(t, ValidateSnapshotSourceOptions(append(base, &commonpb.KeyValuePair{Key: SnapshotSourceURI, Value: "s3://source/key"})))
+	assert.Error(t, ValidateSnapshotSourceOptions(Options{{Key: BackupFlag, Value: "true"}, {Key: StorageVersion, Value: "invalid"}}))
+	assert.Error(t, ValidateSnapshotSourceRequest(internal))
+	redacted := RedactOptions(append(internal, nil, &commonpb.KeyValuePair{Key: EZK, Value: "key-secret"}))
+	assert.NotContains(t, fmt.Sprint(redacted), "secret")
+	assert.Contains(t, spec.Value, "secret", "redaction must not change live options")
+}
 
 func TestOption_GetTimeout(t *testing.T) {
 	const delta = 3 * time.Second
@@ -206,6 +231,92 @@ func TestOption_GetStorageVersion(t *testing.T) {
 	version, err = GetStorageVersion(options)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(2), version) // StorageV2 = 2
+}
+
+func TestOption_ValidateSnapshotSourceOptions(t *testing.T) {
+	valid := Options{
+		{Key: BackupFlag, Value: "true"},
+		{Key: SourceType, Value: SourceTypeSnapshot},
+	}
+	assert.NoError(t, ValidateSnapshotSourceOptions(valid))
+	assert.True(t, IsSnapshotSource(valid))
+	// Public requests cannot silently turn a former partition selection into
+	// a whole-snapshot import. Persisted tasks already have their file scope.
+	oldOptions := append(append(Options(nil), valid...), &commonpb.KeyValuePair{Key: "source_partition_name", Value: "p1"})
+	assert.ErrorIs(t, ValidateSnapshotSourceRequest(oldOptions), merr.ErrImportFailed)
+	assert.NoError(t, ValidateSnapshotSourceOptions(oldOptions))
+	assert.NoError(t, ValidateSnapshotSourceOptions(Options{
+		{Key: BackupFlag, Value: "true"},
+		{Key: SourceType, Value: SourceTypeSnapshot},
+		{Key: EZK, Value: "encoded-key"},
+	}))
+	assert.NoError(t, ValidateSnapshotSourceOptions(Options{
+		{Key: BackupFlag, Value: "true"},
+		{Key: StorageVersion, Value: "2"},
+	}))
+
+	tests := []struct {
+		name    string
+		options Options
+		err     error
+	}{
+		{
+			name: "legacy StorageV3 backup source",
+			options: Options{
+				{Key: BackupFlag, Value: "true"},
+				{Key: StorageVersion, Value: "3"},
+			},
+			err: merr.ErrImportFailed,
+		},
+		{
+			name: "unknown source type",
+			options: Options{
+				{Key: BackupFlag, Value: "true"},
+				{Key: SourceType, Value: "directory"},
+			},
+			err: merr.ErrImportFailed,
+		},
+		{
+			name: "duplicate contract option",
+			options: Options{
+				{Key: BackupFlag, Value: "true"},
+				{Key: SourceType, Value: SourceTypeSnapshot},
+				{Key: SourceType, Value: "directory"},
+			},
+			err: merr.ErrImportFailed,
+		},
+		{
+			name: "snapshot source without backup",
+			options: Options{
+				{Key: SourceType, Value: SourceTypeSnapshot},
+			},
+			err: merr.ErrImportFailed,
+		},
+		{
+			name: "snapshot source with l0 import",
+			options: Options{
+				{Key: BackupFlag, Value: "true"},
+				{Key: SourceType, Value: SourceTypeSnapshot},
+				{Key: L0Import, Value: "true"},
+			},
+			err: merr.ErrImportFailed,
+		},
+		{
+			name: "snapshot source with storage version",
+			options: Options{
+				{Key: BackupFlag, Value: "true"},
+				{Key: SourceType, Value: SourceTypeSnapshot},
+				{Key: StorageVersion, Value: "3"},
+			},
+			err: merr.ErrImportFailed,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := ValidateSnapshotSourceOptions(test.options)
+			assert.ErrorIs(t, err, test.err)
+		})
+	}
 }
 
 func TestSimple(t *testing.T) {

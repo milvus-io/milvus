@@ -52,6 +52,146 @@ func (w *MockRecordWriter) GetWrittenUncompressed() uint64 {
 	return 0
 }
 
+type deserializeTrackedRecord struct {
+	Record
+	releaseCount int
+}
+
+func (r *deserializeTrackedRecord) Release() {
+	r.releaseCount++
+	// Keep a double-release regression observable without letting the test
+	// corrupt Arrow's reference count before assertions run.
+	if r.releaseCount == 1 {
+		r.Record.Release()
+	}
+}
+
+type deserializeRecordReader struct {
+	records    []Record
+	pos        int
+	current    Record
+	closeCount int
+}
+
+func (r *deserializeRecordReader) Next() (Record, error) {
+	r.releaseCurrent()
+	if r.pos >= len(r.records) {
+		return nil, io.EOF
+	}
+	r.current = r.records[r.pos]
+	r.pos++
+	return r.current, nil
+}
+
+func (r *deserializeRecordReader) Close() error {
+	r.releaseCurrent()
+	r.closeCount++
+	return nil
+}
+
+func (r *deserializeRecordReader) releaseCurrent() {
+	if r.current != nil {
+		r.current.Release()
+		r.current = nil
+	}
+}
+
+func newDeserializeTrackedRecord(allocator memory.Allocator, values ...int64) *deserializeTrackedRecord {
+	builder := array.NewInt64Builder(allocator)
+	builder.AppendValues(values, nil)
+	column := builder.NewArray()
+	builder.Release()
+
+	record := array.NewRecord(
+		arrow.NewSchema([]arrow.Field{{Name: "100", Type: arrow.PrimitiveTypes.Int64}}, nil),
+		[]arrow.Array{column},
+		int64(len(values)),
+	)
+	column.Release()
+	return &deserializeTrackedRecord{
+		Record: NewSimpleArrowRecord(record, map[FieldID]int{100: 0}),
+	}
+}
+
+func deserializeInt64Values(record Record, values []int64) error {
+	column := record.Column(100).(*array.Int64)
+	for i := range values {
+		values[i] = column.Value(i)
+	}
+	return nil
+}
+
+func TestDeserializeReaderBorrowedRecordLifecycle(t *testing.T) {
+	t.Run("source releases each consumed record when reading the next", func(t *testing.T) {
+		allocator := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		first := newDeserializeTrackedRecord(allocator, 10, 20)
+		second := newDeserializeTrackedRecord(allocator, 30)
+		source := &deserializeRecordReader{records: []Record{first, second}}
+		reader := NewDeserializeReader[int64](source, deserializeInt64Values)
+
+		value, err := reader.NextValue()
+		assert.NoError(t, err)
+		assert.Equal(t, int64(10), *value)
+		assert.Equal(t, 0, first.releaseCount)
+
+		value, err = reader.NextValue()
+		assert.NoError(t, err)
+		assert.Equal(t, int64(20), *value)
+		assert.Equal(t, 0, first.releaseCount)
+
+		value, err = reader.NextValue()
+		assert.NoError(t, err)
+		assert.Equal(t, int64(30), *value)
+		assert.Equal(t, 1, first.releaseCount)
+		assert.Equal(t, 0, second.releaseCount)
+
+		_, err = reader.NextValue()
+		assert.ErrorIs(t, err, io.EOF)
+		assert.Equal(t, 1, second.releaseCount)
+
+		assert.NoError(t, reader.Close())
+		assert.Equal(t, 1, first.releaseCount)
+		assert.Equal(t, 1, second.releaseCount)
+		assert.Equal(t, 1, source.closeCount)
+		allocator.AssertSize(t, 0)
+	})
+
+	t.Run("source releases current record when closed before the batch is consumed", func(t *testing.T) {
+		allocator := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		record := newDeserializeTrackedRecord(allocator, 10, 20)
+		source := &deserializeRecordReader{records: []Record{record}}
+		reader := NewDeserializeReader[int64](source, deserializeInt64Values)
+
+		value, err := reader.NextValue()
+		assert.NoError(t, err)
+		assert.Equal(t, int64(10), *value)
+		assert.Equal(t, 0, record.releaseCount)
+
+		assert.NoError(t, reader.Close())
+		assert.Equal(t, 1, record.releaseCount)
+		assert.Equal(t, 1, source.closeCount)
+		allocator.AssertSize(t, 0)
+	})
+
+	t.Run("source retains current record until close after deserialization fails", func(t *testing.T) {
+		allocator := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		record := newDeserializeTrackedRecord(allocator, 10)
+		source := &deserializeRecordReader{records: []Record{record}}
+		reader := NewDeserializeReader[int64](source, func(Record, []int64) error {
+			return fmt.Errorf("deserialize failed")
+		})
+
+		_, err := reader.NextValue()
+		assert.ErrorContains(t, err, "deserialize failed")
+		assert.Equal(t, 0, record.releaseCount)
+
+		assert.NoError(t, reader.Close())
+		assert.Equal(t, 1, record.releaseCount)
+		assert.Equal(t, 1, source.closeCount)
+		allocator.AssertSize(t, 0)
+	})
+}
+
 func TestSerDe(t *testing.T) {
 	type args struct {
 		dt schemapb.DataType
