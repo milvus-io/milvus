@@ -809,14 +809,9 @@ dataCoord:
     # The max number of binlog (which is equal to the binlog file num of primary key) for one segment,
     # the segment will be sealed if the number of binlog file reaches to max value.
     maxBinlogFileNumber: 32
-    smallProportion: 0.5 # The segment is considered as "small segment" when its # of rows is smaller than
-    # (smallProportion * segment max # of rows).
-    # A compaction will happen on small segments if the segment after compaction will have
-    compactableProportion: 0.85
-    # over (compactableProportion * segment max # of rows) rows.
-    # MUST BE GREATER THAN OR EQUAL TO <smallProportion>!!!
-    # During compaction, the size of segment # of rows is able to exceed segment max # of rows by (expansionRate-1) * 100%. 
-    expansionRate: 1.25
+    smallProportion: 0.5 # Deprecated: unused since two-tier compaction. Replaced by middleSize (idealSize/4) × fillRate.
+    compactableProportion: 0.85 # Deprecated: fill rate is now a hardcoded constant (0.85) in the two-tier compaction algorithm.
+    expansionRate: 1.25 # Deprecated: no longer used by the mix compaction planner. Still read by v2 trigger and import paths.
   sealPolicy:
     channel:
       # The size threshold in MB, if the total size of growing segments of each shard
@@ -884,6 +879,7 @@ dataCoord:
         maxnum: 200 # The deltalog count of a segment to trigger a compaction, default as 200
       expiredlog:
         maxsize: 10485760 # The expired log size of a segment to trigger a compaction, default as 10MB
+    maxFragmentsPerGroup: 8 # maximum number of fragment segments allowed per channel-partition group before fragment-tier compaction triggers
     clustering:
       enable: true # Enable clustering compaction
       autoEnable: false # Enable auto clustering compaction
