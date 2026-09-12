@@ -125,6 +125,43 @@ GenUuidTermRetrievePlan(const std::shared_ptr<Schema>& schema,
     return ProtoParser(schema).CreateRetrievePlan(*plan_node);
 }
 
+std::unique_ptr<milvus::query::RetrievePlan>
+GenUuidUnaryRangeRetrievePlan(const std::shared_ptr<Schema>& schema,
+                              FieldId uuid_fid,
+                              proto::plan::OpType op,
+                              const std::string& uuid_str) {
+    auto column_info = new proto::plan::ColumnInfo();
+    column_info->set_field_id(uuid_fid.get());
+    column_info->set_data_type(proto::schema::DataType::UUID);
+    column_info->set_is_primary_key(true);
+    auto value = new proto::plan::GenericValue();
+    value->set_string_val(uuid_str);
+    auto unary_range_expr = new proto::plan::UnaryRangeExpr();
+    unary_range_expr->set_op(op);
+    unary_range_expr->set_allocated_value(value);
+    unary_range_expr->set_allocated_column_info(column_info);
+    auto expr = std::make_unique<proto::plan::Expr>();
+    expr->set_allocated_unary_range_expr(unary_range_expr);
+    auto plan_node = std::make_unique<proto::plan::PlanNode>();
+    plan_node->mutable_query()->set_allocated_predicates(expr.release());
+    return ProtoParser(schema).CreateRetrievePlan(*plan_node);
+}
+
+void
+AssertUuidRangeRetrieveCount(segcore::SegmentInterface* segment,
+                             const std::shared_ptr<Schema>& schema,
+                             FieldId uuid_fid,
+                             proto::plan::OpType op,
+                             const std::string& uuid_str,
+                             int64_t expected_count) {
+    auto plan = GenUuidUnaryRangeRetrievePlan(schema, uuid_fid, op, uuid_str);
+    auto retrieved = segment->Retrieve(
+        nullptr, plan.get(), MAX_TIMESTAMP, DEFAULT_MAX_OUTPUT_SIZE, false);
+    ASSERT_EQ(retrieved->offset().size(), expected_count)
+        << "range over UUID PK returned wrong row count";
+    ASSERT_EQ(retrieved->ids().uuid_id().data_size(), expected_count);
+}
+
 void
 AssertUuidTermRetrieve(segcore::SegmentInterface* segment,
                        const std::shared_ptr<Schema>& schema,
@@ -210,4 +247,52 @@ TEST(UuidTest, SealedTermQueryMatchesLoadedUuid) {
                            uuid_fid,
                            present_uuid,
                            "12345678-1234-4234-8234-123456789abc");
+}
+
+TEST(UuidTest, SealedRangeQueryMatchesLoadedUuid) {
+    auto schema = GenUuidPkSchema();
+    auto uuid_fid = schema->get_primary_field_id().value();
+
+    auto dataset = DataGen(schema, kUuidTestRows);
+    auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+
+    AssertUuidRangeRetrieveCount(sealed_segment.get(),
+                                 schema,
+                                 uuid_fid,
+                                 proto::plan::OpType::GreaterEqual,
+                                 "00000000-0000-4000-8000-000000000000",
+                                 kUuidTestRows);
+    AssertUuidRangeRetrieveCount(sealed_segment.get(),
+                                 schema,
+                                 uuid_fid,
+                                 proto::plan::OpType::GreaterThan,
+                                 "ffffffff-ffff-ffff-ffff-ffffffffffff",
+                                 0);
+}
+
+TEST(UuidTest, GrowingRangeQueryMatchesInsertedUuid) {
+    auto schema = GenUuidPkSchema();
+    auto uuid_fid = schema->get_primary_field_id().value();
+
+    auto dataset = DataGen(schema, kUuidTestRows);
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    segment->PreInsert(kUuidTestRows);
+    segment->Insert(0,
+                    kUuidTestRows,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
+
+    AssertUuidRangeRetrieveCount(segment.get(),
+                                 schema,
+                                 uuid_fid,
+                                 proto::plan::OpType::GreaterEqual,
+                                 "00000000-0000-4000-8000-000000000000",
+                                 kUuidTestRows);
+    AssertUuidRangeRetrieveCount(segment.get(),
+                                 schema,
+                                 uuid_fid,
+                                 proto::plan::OpType::GreaterThan,
+                                 "ffffffff-ffff-ffff-ffff-ffffffffffff",
+                                 0);
 }

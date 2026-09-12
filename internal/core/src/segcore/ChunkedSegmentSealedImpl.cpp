@@ -4379,6 +4379,7 @@ ChunkedSegmentSealedImpl::search_pks(BitsetType& bitset,
     auto snapshot = CapturePublishedState();
     auto runtime = snapshot->runtime;
     BitsetTypeView bitset_view(bitset);
+    LOG_INFO("search_pks sorted_by_pk={}", is_sorted_by_pk_);
 
     // See Contain() — same zero-storage pk2offset fast path.
     if (runtime != nullptr && runtime->virtual_pk2offset != nullptr) {
@@ -4657,6 +4658,7 @@ ChunkedSegmentSealedImpl::pk_range(milvus::OpContext* op_ctx,
                                    BitsetTypeView& bitset) const {
     auto snapshot = CapturePublishedState();
     auto runtime = snapshot->runtime;
+    LOG_INFO("pk_range sorted_by_pk={}", is_sorted_by_pk_);
     // See Contain() — same zero-storage pk2offset fast path.
     if (runtime != nullptr && runtime->virtual_pk2offset != nullptr) {
         runtime->virtual_pk2offset->find_range(
