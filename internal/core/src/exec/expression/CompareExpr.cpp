@@ -218,14 +218,16 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
             left_current_chunk_id_,
             left_current_chunk_pos_,
             LeftPinnedIndexForRawLookup(),
-            real_batch_size);
+            real_batch_size,
+            &left_string_scan_state_);
         auto right = segment_chunk_reader_.GetMultipleChunkDataAccessor(
             expr_->right_data_type_,
             expr_->right_field_id_,
             right_current_chunk_id_,
             right_current_chunk_pos_,
             RightPinnedIndexForRawLookup(),
-            real_batch_size);
+            real_batch_size,
+            &right_string_scan_state_);
         for (int i = 0; i < real_batch_size; ++i) {
             auto left_value = left(), right_value = right();
             if (!left_value.has_value() || !right_value.has_value()) {
