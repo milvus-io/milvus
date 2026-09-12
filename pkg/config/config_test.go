@@ -20,11 +20,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
@@ -420,4 +423,57 @@ func TestFormatKeyMemoIsStrictlyBoundedUnderConcurrency(t *testing.T) {
 	wg.Wait()
 
 	assert.LessOrEqual(t, formattedKeys.Len(), maxFormattedKeys)
+}
+
+// A count bound alone still retains megabytes per entry when HTTP callers send
+// large unknown keys. Normalization must work without retaining those strings.
+func TestFormatKeyMemoRejectsOversizedKeys(t *testing.T) {
+	saved := formattedKeys
+	formattedKeys = typeutil.NewConcurrentMap[string, string]()
+	t.Cleanup(func() { formattedKeys = saved })
+
+	for i := 0; i < 16; i++ {
+		suffix := fmt.Sprint(i)
+		key := strings.Repeat("A._/É", 1024) + suffix
+		assert.Equal(t, strings.Repeat("aé", 1024)+suffix, FormatKey(key))
+	}
+	assert.Zero(t, formattedKeys.Len(), "oversized keys must not enter the memo")
+
+	// Unicode case folding can grow UTF-8 output past the input's byte length.
+	key := strings.Repeat("Ⱥ", 512)
+	assert.Equal(t, strings.Repeat("ⱥ", 512), FormatKey(key))
+	assert.Zero(t, formattedKeys.Len(), "oversized normalized values must not enter the memo")
+
+	special := NotFormatPrefix + strings.Repeat("A._/", 1024)
+	assert.Equal(t, special, FormatKey(special), "knowhere keys retain their existing identity")
+	assert.Zero(t, formattedKeys.Len())
+	assert.Equal(t, "commonsecurityadminauthenabled", FormatKey("common.security.adminAuthEnabled"))
+	assert.Equal(t, 1, formattedKeys.Len(), "ordinary config keys still use the memo")
+}
+
+// URL.Query can return a short key as a substring of an otherwise huge request.
+// Retaining that substring keeps the entire request allocation alive even when
+// the memo checks len(key). Both memo strings must own only their small bytes.
+func TestFormatKeyMemoDoesNotRetainRequestBackingString(t *testing.T) {
+	saved := formattedKeys
+	formattedKeys = typeutil.NewConcurrentMap[string, string]()
+	t.Cleanup(func() { formattedKeys = saved })
+
+	for _, name := range []string{"shortkey", "SHORTKEY"} {
+		requestURL := &url.URL{RawQuery: "keys=" + name + "&padding=" + strings.Repeat("padding", 1<<15)}
+		key := requestURL.Query().Get("keys")
+		assert.Equal(t, "shortkey", FormatKey(key))
+		found := false
+		formattedKeys.Range(func(cachedKey, cachedValue string) bool {
+			if cachedKey == key {
+				found = true
+				assert.False(t, unsafe.StringData(key) == unsafe.StringData(cachedKey),
+					"the cached key must not retain a caller's large backing string")
+				assert.False(t, unsafe.StringData(key) == unsafe.StringData(cachedValue),
+					"the cached value must not retain a caller's large backing string")
+			}
+			return true
+		})
+		assert.True(t, found, "ordinary short keys must remain memoized")
+	}
 }
