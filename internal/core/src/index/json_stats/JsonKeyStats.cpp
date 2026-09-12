@@ -170,8 +170,6 @@ namespace {
 
 // Reader::create() exposes this synthetic JSON-stats group at index zero.
 constexpr int64_t kJsonStatsReaderColumnGroupIndex = 0;
-constexpr const char* kGroupByScalarReadVersion =
-    "group_by_scalar_read_version";
 
 struct JsonStatsParquetMetadata {
     std::shared_ptr<arrow::Schema> schema;
@@ -939,7 +937,7 @@ JsonKeyStats::WriteMetaFile() {
     json_stats_meta_.SetInt64(META_KEY_NUM_ROWS, num_rows_);
     json_stats_meta_.SetInt64(META_KEY_NUM_SHREDDING_COLUMNS,
                               column_keys_.size());
-    json_stats_meta_.SetInt64(kGroupByScalarReadVersion,
+    json_stats_meta_.SetInt64(META_KEY_GROUP_BY_SCALAR_READ_VERSION,
                               group_by_scalar_reads_safe_ ? 1 : 0);
 
     auto meta_content = json_stats_meta_.Serialize();
@@ -975,10 +973,8 @@ JsonKeyStats::LoadMetaFile(const std::string& local_meta_file_path) {
     local_chunk_manager->Read(
         local_meta_file_path, meta_content.data(), file_size);
 
-    key_field_map_ = JsonStatsMeta::DeserializeToKeyFieldMap(meta_content);
-    group_by_scalar_reads_safe_ = JsonStatsMeta::Deserialize(meta_content)
-                                      .GetInt64(kGroupByScalarReadVersion)
-                                      .value_or(0) == 1;
+    key_field_map_ = JsonStatsMeta::DeserializeToKeyFieldMap(
+        meta_content, &group_by_scalar_reads_safe_);
 
     LOG_INFO(
         "loaded meta file with {} key field entries for segment {} for field "
@@ -1021,7 +1017,7 @@ JsonKeyStats::AddBucketName(const std::string& remote_prefix) {
 void
 JsonKeyStats::BuildWithFieldData(const std::vector<FieldDataPtr>& field_datas,
                                  bool nullable) {
-    group_by_scalar_reads_safe_ = true;
+    group_by_scalar_reads_safe_ = false;
     // collect key stats info and classify key type
     auto infos = CollectKeyInfo(field_datas, nullable);
     LOG_INFO("collect key infos: {} for segment {} for field {}",
@@ -1040,6 +1036,13 @@ JsonKeyStats::BuildWithFieldData(const std::vector<FieldDataPtr>& field_datas,
             column_keys_.insert(json_key);
         }
     }
+    // Certify only when classification produced a supported scalar column.
+    // Decide before the first row; traversal may only disable certification.
+    group_by_scalar_reads_safe_ = std::any_of(
+        column_keys_.begin(), column_keys_.end(), [](const JsonKey& key) {
+            return key.type_ == JSONType::STRING ||
+                   key.type_ == JSONType::BOOL || key.type_ == JSONType::INT64;
+        });
 
     // for storage v2, we need to add bucket name to remote prefix
     auto remote_prefix =
