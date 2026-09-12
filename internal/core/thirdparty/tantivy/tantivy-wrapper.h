@@ -99,7 +99,8 @@ struct TantivyIndexWrapper {
                         uintptr_t num_threads = DEFAULT_NUM_THREADS,
                         uintptr_t overall_memory_budget_in_bytes =
                             DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES,
-                        bool enable_background_merge = false) {
+                        bool enable_background_merge = false)
+        : path_(path) {
         RustResultWrapper res;
         if (inverted_single_semgnent) {
             AssertInfo(tantivy_index_version == 5,
@@ -120,20 +121,18 @@ struct TantivyIndexWrapper {
         }
         AssertTantivyOk(res, "failed to create index: {}", res.result_->error);
         writer_ = res.result_->value.ptr._0;
-        path_ = std::string(path);
     }
 
     // load index. create index reader.
     explicit TantivyIndexWrapper(const char* path,
                                  bool load_in_mmap,
                                  SetBitsetFn set_bitset)
-        : load_in_mmap_(load_in_mmap) {
+        : path_(path), load_in_mmap_(load_in_mmap) {
         assert(tantivy_index_exist(path));
         auto res = RustResultWrapper(
             tantivy_load_index(path, load_in_mmap_, set_bitset));
         AssertTantivyOk(res, "failed to load index: {}", res.result_->error);
         reader_ = res.result_->value.ptr._0;
-        path_ = std::string(path);
     }
 
     // create index writer for text type with tokenizer.
@@ -151,7 +150,8 @@ struct TantivyIndexWrapper {
                         uintptr_t num_threads = DEFAULT_NUM_THREADS,
                         uintptr_t overall_memory_budget_in_bytes =
                             DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES,
-                        bool enable_background_merge = false) {
+                        bool enable_background_merge = false)
+        : path_(path) {
         auto res = RustResultWrapper(
             tantivy_create_text_writer(field_name,
                                        path,
@@ -166,7 +166,6 @@ struct TantivyIndexWrapper {
         AssertTantivyOk(
             res, "failed to create text writer: {}", res.result_->error);
         writer_ = res.result_->value.ptr._0;
-        path_ = std::string(path);
     }
 
     // create index writer for json key stats
@@ -176,7 +175,8 @@ struct TantivyIndexWrapper {
                         bool in_ram = false,
                         uintptr_t num_threads = DEFAULT_NUM_THREADS,
                         uintptr_t overall_memory_budget_in_bytes =
-                            DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES) {
+                            DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES)
+        : path_(path) {
         auto res = RustResultWrapper(
             tantivy_create_json_key_stats_writer(field_name,
                                                  path,
@@ -187,7 +187,6 @@ struct TantivyIndexWrapper {
         AssertTantivyOk(
             res, "failed to create text writer: {}", res.result_->error);
         writer_ = res.result_->value.ptr._0;
-        path_ = std::string(path);
     }
 
     // create index writer for ngram
@@ -197,7 +196,8 @@ struct TantivyIndexWrapper {
                         uintptr_t max_gram,
                         uintptr_t num_threads = DEFAULT_NUM_THREADS,
                         uintptr_t overall_memory_budget_in_bytes =
-                            DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES) {
+                            DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES)
+        : path_(path) {
         auto res = RustResultWrapper(
             tantivy_create_ngram_writer(field_name,
                                         path,
@@ -209,7 +209,6 @@ struct TantivyIndexWrapper {
         AssertTantivyOk(
             res, "failed to create ngram writer: {}", res.result_->error);
         writer_ = res.result_->value.ptr._0;
-        path_ = std::string(path);
     }
 
     // create reader.

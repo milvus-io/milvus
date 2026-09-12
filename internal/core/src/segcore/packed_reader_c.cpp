@@ -234,9 +234,12 @@ NewPackedReader(char** paths,
 
 CStatus
 ReadNext(CPackedReader c_packed_reader,
-         CArrowArray* out_array,
-         CArrowSchema* out_schema) {
+         struct ArrowArray* out_array,
+         struct ArrowSchema* out_schema) {
     SCOPE_CGO_CALL_METRIC();
+
+    *out_array = {};
+    *out_schema = {};
 
     try {
         auto packed_reader =
@@ -251,19 +254,12 @@ ReadNext(CPackedReader c_packed_reader,
         if (record_batch == nullptr) {
             // end of file
             return milvus::SuccessCStatus();
-        } else {
-            std::unique_ptr<ArrowArray> arr = std::make_unique<ArrowArray>();
-            std::unique_ptr<ArrowSchema> schema =
-                std::make_unique<ArrowSchema>();
-            auto status = arrow::ExportRecordBatch(
-                *record_batch, arr.get(), schema.get());
-            if (!status.ok()) {
-                return milvus::FailureCStatus(milvus::ErrorCode::FileReadFailed,
-                                              status.ToString());
-            }
-            *out_array = arr.release();
-            *out_schema = schema.release();
-            return milvus::SuccessCStatus();
+        }
+        auto export_status =
+            arrow::ExportRecordBatch(*record_batch, out_array, out_schema);
+        if (!export_status.ok()) {
+            return milvus::FailureCStatus(milvus::ErrorCode::FileReadFailed,
+                                          export_status.ToString());
         }
         return milvus::SuccessCStatus();
     }
