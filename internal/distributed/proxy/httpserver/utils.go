@@ -140,6 +140,12 @@ func setTraceIDHeaderTo(header http.Header, traceID string) {
 }
 
 func ParseUsernamePassword(c *gin.Context) (string, string, bool) {
+	return ParseUsernamePasswordWithChallenge(c, true)
+}
+
+// ParseUsernamePasswordWithChallenge lets a caller suppress the legacy Basic
+// challenge before a response is written, without changing credential parsing.
+func ParseUsernamePasswordWithChallenge(c *gin.Context, challenge bool) (string, string, bool) {
 	username, password, ok := c.Request.BasicAuth()
 	if !ok {
 		token := GetAuthorization(c)
@@ -148,6 +154,8 @@ func ParseUsernamePassword(c *gin.Context) (string, string, bool) {
 			username = token[:i]
 			password = token[i+1:]
 		}
+	} else if challenge {
+		c.Header("WWW-Authenticate", `Basic realm="restricted", charset="UTF-8"`)
 	}
 	return username, password, username != "" && password != ""
 }

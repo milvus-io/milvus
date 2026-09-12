@@ -233,6 +233,7 @@ func TestTelemetryAuthMiddleware_UsesManagementCheckWhenAdminAuthEnabled(t *test
 		called := false
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.SetBasicAuth("alice", "s3cr3t")
+		req.Header.Set(internalhttp.AdminRequestHeader, "true")
 		recorder := httptest.NewRecorder()
 		newRouter(&called).ServeHTTP(recorder, req)
 		assert.False(t, called)
@@ -243,6 +244,7 @@ func TestTelemetryAuthMiddleware_UsesManagementCheckWhenAdminAuthEnabled(t *test
 		called := false
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.SetBasicAuth(util.UserRoot, "s3cr3t")
+		req.Header.Set(internalhttp.AdminRequestHeader, "true")
 		recorder := httptest.NewRecorder()
 		newRouter(&called).ServeHTTP(recorder, req)
 		assert.True(t, called)
@@ -263,6 +265,7 @@ func TestTelemetryAuthMiddleware_UsesManagementCheckWhenAdminAuthEnabled(t *test
 
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.SetBasicAuth(util.UserRoot, "s3cr3t")
+		req.Header.Set(internalhttp.AdminRequestHeader, "true")
 		recorder := httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
 

@@ -467,6 +467,7 @@ func (suite *HTTPServerTestSuite) TestAdminAuthGatesManagementPlane() {
 	get := func(path, user, pass string) *http.Response {
 		req, err := http.NewRequest(http.MethodGet, base+path, nil)
 		suite.Require().NoError(err)
+		req.Header.Set(AdminRequestHeader, "true")
 		if user != "" {
 			req.SetBasicAuth(user, pass)
 		}

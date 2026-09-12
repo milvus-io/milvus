@@ -27,6 +27,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/cockroachdb/errors"
+	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -120,6 +121,7 @@ func TestWrapAdminAuth_GateOffSkipsCheck(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req.SetBasicAuth(util.UserRoot, "unused")
 	wrapped.ServeHTTP(rec, req)
 
 	assert.True(t, inv.called)
@@ -138,6 +140,90 @@ func TestWrapAdminAuth_NoCredentialsReturns401(t *testing.T) {
 	assert.False(t, inv.called, "handler must NOT be invoked when auth fails")
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 	assert.Contains(t, rec.Body.String(), "authentication required")
+}
+
+// Browser requests on insecure origins may omit both Fetch Metadata and Origin.
+// Cached Basic credentials alone therefore do not identify an intentional client.
+func TestAdminAuthRequiresRequestContext(t *testing.T) {
+	enableAdminAuth(t)
+	verifierCalls := 0
+	setVerifyFunc(t, func(_ context.Context, username, password string) bool {
+		verifierCalls++
+		return username == util.UserRoot && password == "right"
+	})
+
+	for _, adapter := range []string{"net/http", "gin"} {
+		t.Run(adapter, func(t *testing.T) {
+			for _, tc := range []struct {
+				name        string
+				credentials bool
+				challenge   bool
+				wantPrompt  bool
+				headers     map[string]string
+				status      int
+			}{
+				{name: "anonymous API", status: http.StatusUnauthorized},
+				{name: "anonymous document needs HTTPS", challenge: true, status: http.StatusForbidden},
+				{name: "anonymous browser document", challenge: true, wantPrompt: true, headers: map[string]string{"Sec-Fetch-Site": "none"}, status: http.StatusUnauthorized},
+				{name: "anonymous explicit client document", challenge: true, wantPrompt: true, headers: map[string]string{"X-Milvus-Admin-Request": "true"}, status: http.StatusUnauthorized},
+				{name: "Basic without context", credentials: true, status: http.StatusForbidden},
+				{name: "Referer and User-Agent cannot establish context", credentials: true, headers: map[string]string{"Referer": "http://milvus.local:9091/", "User-Agent": "curl/8.0"}, status: http.StatusForbidden},
+				{name: "Basic with wrong opt-in value", credentials: true, headers: map[string]string{"X-Milvus-Admin-Request": "false"}, status: http.StatusForbidden},
+				{name: "explicit client", credentials: true, headers: map[string]string{"X-Milvus-Admin-Request": "true"}, status: http.StatusOK},
+				{name: "same-origin browser", credentials: true, headers: map[string]string{"Sec-Fetch-Site": "same-origin"}, status: http.StatusOK},
+				{name: "address bar", credentials: true, headers: map[string]string{"Sec-Fetch-Site": "none"}, status: http.StatusOK},
+				{name: "matching origin", credentials: true, headers: map[string]string{"Origin": "http://milvus.local:9091"}, status: http.StatusOK},
+				{name: "TLS termination with matching origin", credentials: true, headers: map[string]string{"Origin": "https://milvus.local:9091"}, status: http.StatusOK},
+				{name: "opt-in cannot override cross-site", credentials: true, headers: map[string]string{"X-Milvus-Admin-Request": "true", "Sec-Fetch-Site": "cross-site"}, status: http.StatusForbidden},
+				{name: "opt-in cannot override same-site", credentials: true, headers: map[string]string{"X-Milvus-Admin-Request": "true", "Sec-Fetch-Site": "same-site"}, status: http.StatusForbidden},
+				{name: "opt-in cannot override unknown site", credentials: true, headers: map[string]string{"X-Milvus-Admin-Request": "true", "Sec-Fetch-Site": "unknown"}, status: http.StatusForbidden},
+				{name: "opt-in cannot override null origin", credentials: true, headers: map[string]string{"X-Milvus-Admin-Request": "true", "Origin": "null"}, status: http.StatusForbidden},
+				{name: "opt-in cannot override foreign origin", credentials: true, headers: map[string]string{"X-Milvus-Admin-Request": "true", "Origin": "http://other.local:9091"}, status: http.StatusForbidden},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					called := false
+					var handler http.Handler
+					if adapter == "net/http" {
+						handler = wrapAdminAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+							called = true
+							w.WriteHeader(http.StatusOK)
+						}), "/test", tc.challenge)
+					} else {
+						router := gin.New()
+						router.GET("/test", GinAdminAuthMiddleware(tc.challenge), func(c *gin.Context) {
+							called = true
+							c.Status(http.StatusOK)
+						})
+						handler = router
+					}
+					req := httptest.NewRequest(http.MethodGet, "http://milvus.local:9091/test", nil)
+					if tc.credentials {
+						req.SetBasicAuth(util.UserRoot, "right")
+					}
+					for name, value := range tc.headers {
+						req.Header.Set(name, value)
+					}
+					before := verifierCalls
+					rec := httptest.NewRecorder()
+					handler.ServeHTTP(rec, req)
+					assert.Equal(t, tc.status, rec.Code, rec.Body.String())
+					assert.Equal(t, tc.status == http.StatusOK, called)
+					if tc.wantPrompt {
+						assert.Contains(t, rec.Header().Get("WWW-Authenticate"), "Basic realm=")
+					} else {
+						assert.Empty(t, rec.Header().Get("WWW-Authenticate"))
+					}
+					if tc.status == http.StatusForbidden {
+						assert.Equal(t, before, verifierCalls, "origin refusal must precede credential verification")
+					}
+					if tc.name == "anonymous document needs HTTPS" || tc.name == "Basic without context" {
+						assert.Contains(t, rec.Body.String(), "HTTPS")
+						assert.Contains(t, rec.Body.String(), "X-Milvus-Admin-Request: true")
+					}
+				})
+			}
+		})
+	}
 }
 
 func TestWrapAdminAuth_NonRootUserReturns403(t *testing.T) {
@@ -161,6 +247,7 @@ func TestWrapAdminAuth_NonRootUserReturns403(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 	req.SetBasicAuth("alice", "anything")
+	req.Header.Set(AdminRequestHeader, "true")
 	wrapped.ServeHTTP(rec, req)
 
 	assert.False(t, inv.called)
@@ -180,6 +267,7 @@ func TestWrapAdminAuth_WrongPasswordReturns401(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 	req.SetBasicAuth("root", "wrong")
+	req.Header.Set(AdminRequestHeader, "true")
 	wrapped.ServeHTTP(rec, req)
 
 	assert.False(t, inv.called)
@@ -199,6 +287,7 @@ func TestWrapAdminAuth_ValidRootCredentialsPass(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 	req.SetBasicAuth("root", "correct-horse")
+	req.Header.Set(AdminRequestHeader, "true")
 	wrapped.ServeHTTP(rec, req)
 
 	assert.True(t, inv.called, "handler must run when credentials are valid")
@@ -213,6 +302,7 @@ func TestCheckAdminRequestCarriesAuthenticatedPrincipal(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/management/stop", nil)
 	req.SetBasicAuth(util.UserRoot, "correct-horse")
+	req.Header.Set(AdminRequestHeader, "true")
 	decision := CheckAdminRequest(req, "/management/stop", false)
 	require.True(t, decision.Allowed())
 
@@ -238,6 +328,7 @@ func TestWrapAdminAuth_VerifierUnavailableReturns503(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 	req.SetBasicAuth("root", "anything")
+	req.Header.Set(AdminRequestHeader, "true")
 	wrapped.ServeHTTP(rec, req)
 
 	assert.False(t, inv.called)
@@ -287,6 +378,7 @@ func TestWrapAdminAuth_ChallengeOnlyOn401(t *testing.T) {
 
 			rec := httptest.NewRecorder()
 			req := httptest.NewRequest(http.MethodGet, "/webui/", nil)
+			req.Header.Set("Sec-Fetch-Site", "none")
 			if tc.user != "" {
 				req.SetBasicAuth(tc.user, tc.pass)
 			}
@@ -316,13 +408,14 @@ func TestWrapAdminAuth_RejectsCrossSiteRequests(t *testing.T) {
 	})
 
 	for _, tc := range []struct {
-		name       string
-		document   bool // the handler is a browser page, not an API
-		fetchSite  string
-		fetchMode  string
-		fetchDest  string
-		origin     string
-		wantCalled bool
+		name         string
+		document     bool // the handler is a browser page, not an API
+		fetchSite    string
+		fetchMode    string
+		fetchDest    string
+		origin       string
+		adminRequest string
+		wantCalled   bool
 	}{
 		{name: "browser cross-site", fetchSite: "cross-site"},
 		{name: "browser same-origin", fetchSite: "same-origin", wantCalled: true},
@@ -332,9 +425,9 @@ func TestWrapAdminAuth_RejectsCrossSiteRequests(t *testing.T) {
 		{name: "browser same-site", fetchSite: "same-site"},
 		{name: "foreign origin without fetch metadata", origin: "http://evil.example"},
 		{name: "matching origin without fetch metadata", origin: "http://milvus.local:9091", wantCalled: true},
-		// curl, the operator's scripts and the Milvus operator send neither
-		// header; they must keep working exactly as before.
-		{name: "non-browser client", wantCalled: true},
+		// Non-browser clients explicitly opt in when they send no origin metadata.
+		{name: "non-browser client without opt-in"},
+		{name: "non-browser client", adminRequest: "true", wantCalled: true},
 		// A link to the console from a wiki or a chat message: showing a page
 		// is not an action, so it is allowed — but only because the handler
 		// says it is a document.
@@ -359,10 +452,11 @@ func TestWrapAdminAuth_RejectsCrossSiteRequests(t *testing.T) {
 			req.Host = "milvus.local:9091"
 			req.SetBasicAuth("root", "right")
 			for h, v := range map[string]string{
-				"Sec-Fetch-Site": tc.fetchSite,
-				"Sec-Fetch-Mode": tc.fetchMode,
-				"Sec-Fetch-Dest": tc.fetchDest,
-				"Origin":         tc.origin,
+				"Sec-Fetch-Site":   tc.fetchSite,
+				"Sec-Fetch-Mode":   tc.fetchMode,
+				"Sec-Fetch-Dest":   tc.fetchDest,
+				"Origin":           tc.origin,
+				AdminRequestHeader: tc.adminRequest,
 			} {
 				if v != "" {
 					req.Header.Set(h, v)
@@ -508,6 +602,7 @@ func TestWrapAdminAuth_FallbackVerifierAuthenticates(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/management/stop", nil)
 	req.SetBasicAuth("root", "correct-horse")
+	req.Header.Set(AdminRequestHeader, "true")
 	wrapped.ServeHTTP(rec, req)
 
 	assert.True(t, inv.called, "valid root credentials must pass via the fallback verifier")
@@ -535,6 +630,7 @@ func TestWrapAdminAuth_UnreachableCredentialStoreReturns503(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil)
 	req.SetBasicAuth("root", "correct-horse")
+	req.Header.Set(AdminRequestHeader, "true")
 	wrapped.ServeHTTP(rec, req)
 
 	assert.False(t, inv.called)
@@ -558,6 +654,7 @@ func TestWrapAdminAuth_ErrorBodyLeaksNoInternals(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil)
 	req.SetBasicAuth("root", "correct-horse")
+	req.Header.Set(AdminRequestHeader, "true")
 	wrapAdminAuth((&invoked{}).handler(), "/test", false).ServeHTTP(rec, req)
 
 	body := rec.Body.String()
@@ -593,11 +690,16 @@ func TestAdminAuthMetricRecordsEachOutcomeOnce(t *testing.T) {
 		{metrics.AdminAuthUnauthenticated, func(r *http.Request) { r.SetBasicAuth(util.UserRoot, "wrong") }},
 		{metrics.AdminAuthForbidden, func(r *http.Request) { r.SetBasicAuth("alice", "s3cr3t") }},
 		{metrics.AdminAuthCrossSite, func(r *http.Request) { r.Header.Set("Sec-Fetch-Site", "cross-site") }},
+		{metrics.AdminAuthCrossSite, func(r *http.Request) {
+			r.SetBasicAuth(util.UserRoot, "s3cr3t")
+			r.Header.Del(AdminRequestHeader)
+		}},
 		{metrics.AdminAuthAllowed, func(r *http.Request) { r.SetBasicAuth(util.UserRoot, "s3cr3t") }},
 	} {
 		before := count(tc.result)
 		// The caller-controlled part of the path must not reach the label.
 		req := httptest.NewRequest(http.MethodGet, route+"heap?seconds=1", nil)
+		req.Header.Set(AdminRequestHeader, "true")
 		tc.prepare(req)
 		wrapped.ServeHTTP(httptest.NewRecorder(), req)
 		assert.Equal(t, before+1, count(tc.result), tc.result)
@@ -643,7 +745,8 @@ func TestRejectCrossSiteFailsClosed(t *testing.T) {
 		headers  func(*http.Request)
 		rejected bool
 	}{
-		{"no headers at all is a non-browser client", func(*http.Request) {}, false},
+		{"anonymous API without headers", func(*http.Request) {}, false},
+		{"credential-bearing API without context", func(r *http.Request) { r.Header.Set("Authorization", "Bearer token") }, true},
 		{"same-origin", func(r *http.Request) { r.Header.Set("Sec-Fetch-Site", "same-origin") }, false},
 		{"none, a user-initiated navigation", func(r *http.Request) { r.Header.Set("Sec-Fetch-Site", "none") }, false},
 		{"cross-site", func(r *http.Request) { r.Header.Set("Sec-Fetch-Site", "cross-site") }, true},
@@ -658,6 +761,12 @@ func TestRejectCrossSiteFailsClosed(t *testing.T) {
 		{"other Origin", func(r *http.Request) { r.Header.Set("Origin", "http://evil.example.com") }, true},
 		{"Origin null is a sandboxed frame, not this origin", func(r *http.Request) {
 			r.Header.Set("Origin", "null")
+		}, true},
+		{"Origin without scheme is not an origin", func(r *http.Request) {
+			r.Header.Set("Origin", "milvus.example.com:9091")
+		}, true},
+		{"Origin with path is not an origin", func(r *http.Request) {
+			r.Header.Set("Origin", "http://milvus.example.com:9091/path")
 		}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -675,6 +784,24 @@ func TestRejectCrossSiteFailsClosed(t *testing.T) {
 	assert.False(t, RejectCrossSite(request(navigation), true))
 	assert.True(t, RejectCrossSite(request(navigation), false),
 		"only surfaces that opt in may be linked to")
+	for _, headers := range []map[string]string{
+		{"Sec-Fetch-Site": "unknown"},
+		{"Origin": "null"},
+	} {
+		req := request(navigation)
+		req.Header.Set(AdminRequestHeader, "true")
+		for name, value := range headers {
+			req.Header.Set(name, value)
+		}
+		assert.True(t, RejectCrossSite(req, true),
+			"neither document navigation nor client opt-in may override opaque or unknown context")
+	}
+	req := request(func(r *http.Request) {
+		r.SetBasicAuth(util.UserRoot, "right")
+		r.Header.Set("Sec-Fetch-Mode", "navigate")
+		r.Header.Set("Sec-Fetch-Dest", "document")
+	})
+	assert.True(t, RejectCrossSite(req, true), "navigation mode alone cannot establish the request's origin")
 
 	subresource := func(r *http.Request) {
 		r.Header.Set("Sec-Fetch-Site", "cross-site")
@@ -740,6 +867,7 @@ func TestManagementVerifierRegistryIsRaceFree(t *testing.T) {
 			for j := 0; j < 200; j++ {
 				req := httptest.NewRequest(http.MethodGet, "/management/stop", nil)
 				req.SetBasicAuth(util.UserRoot, "whatever")
+				req.Header.Set(AdminRequestHeader, "true")
 				// Either verdict is fine: which one depends on whether a
 				// verifier happens to be registered. Not crashing, and not
 				// tripping the race detector, is the point.
