@@ -28,7 +28,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-var errBadRequest = errors.New("bad request")
+var (
+	errBadRequest   = errors.New("bad request")
+	errUnauthorized = errors.New("unauthorized")
+	errForbidden    = errors.New("forbidden")
+)
 
 // badRequestf wraps err with the package-internal errBadRequest sentinel and
 // a contextual message, preserving the inner error chain. wrapHandler maps
@@ -62,6 +66,20 @@ func wrapHandler(handle handlerFunc) gin.HandlerFunc {
 					Reason:    err.Error(),
 				}
 				c.Negotiate(http.StatusBadRequest, bodyFormatNegotiate)
+				return
+			case errors.Is(err, errUnauthorized):
+				bodyFormatNegotiate.Data = ErrResponse{
+					ErrorCode: merr.Code(merr.ErrNeedAuthenticate),
+					Reason:    err.Error(),
+				}
+				c.Negotiate(http.StatusUnauthorized, bodyFormatNegotiate)
+				return
+			case errors.Is(err, errForbidden):
+				bodyFormatNegotiate.Data = ErrResponse{
+					ErrorCode: merr.Code(err),
+					Reason:    err.Error(),
+				}
+				c.Negotiate(http.StatusForbidden, bodyFormatNegotiate)
 				return
 			default:
 				bodyFormatNegotiate.Data = ErrResponse{
