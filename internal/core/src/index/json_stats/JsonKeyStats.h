@@ -64,6 +64,7 @@
 #include "mmap/ChunkedColumnInterface.h"
 #include "pb/common.pb.h"
 #include "pb/schema.pb.h"
+#include "segcore/SegcoreConfig.h"
 #include "storage/ChunkManager.h"
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/FileManager.h"
@@ -291,10 +292,12 @@ class JsonKeyStats : public ScalarIndex<std::string> {
                    "Shredding scan output is shorter than column {} rows {}",
                    path,
                    num_rows);
+        const auto pin_policy =
+            segcore::SegcoreConfig::default_config().get_scan_cursor_owns_pin()
+                ? ChunkedColumnInterface::ScanPinPolicy::CursorOwned
+                : ChunkedColumnInterface::ScanPinPolicy::ResultOwned;
         auto options = ChunkedColumnInterface::ScanOptions::ForData(
-            0,
-            TargetTypeOf<T>(),
-            ChunkedColumnInterface::ScanPinPolicy::CursorOwned);
+            0, TargetTypeOf<T>(), pin_policy);
         if (skip_func) {
             options.filter = std::make_shared<detail::ColumnFilter>(
                 detail::ColumnFilter::MetricsSource::PreloadedStatistics,
@@ -308,8 +311,8 @@ class JsonKeyStats : public ScalarIndex<std::string> {
                    path);
         ChunkedColumnInterface::ScanBatch batch;
         // The caller still computes and caches one full-column bitmap. Only
-        // the temporary value window is bounded here; CursorOwned reuses the
-        // same pin until the scan crosses a physical boundary.
+        // the temporary value window is bounded here. The configured policy
+        // owns the pin in each result or reuses it in this local cursor.
         while (
             cursor->Next(DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE,
                          ChunkedColumnInterface::ScanReadMode::DataAndValidity,
