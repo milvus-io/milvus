@@ -35,8 +35,9 @@ import (
 )
 
 const (
-	// fetchTimeout bounds a credential lookup, whose own retry policy would
-	// otherwise run for ~53s on everyone's behalf.
+	// fetchTimeout bounds each caller's wait and is also passed to the shared
+	// lookup. Address resolution can ignore the lookup context, so callers must
+	// enforce the deadline independently.
 	fetchTimeout = 5 * time.Second
 
 	// hashTTL bounds how long a fetched root hash is reused, and with it how
@@ -57,8 +58,8 @@ const (
 	// shared credential lookup, including its leader. singleflight collapses the
 	// backend work, but DoChan still retains one result channel per caller until
 	// the lookup finishes; without a separate bound a slow coordinator lets an
-	// unauthenticated burst grow both handler goroutines and retained channels for
-	// the whole of fetchTimeout.
+	// unauthenticated burst grow both handler goroutines and retained channels
+	// as long as the backend remains blocked.
 	maxCredentialLookupCallers int32 = 32
 
 	// bcrypt accepts at most 72 password bytes. Rejecting a longer value before
@@ -307,8 +308,11 @@ func (c *CachedRootVerifier) refresh(ctx context.Context) (string, error) {
 	}()
 
 	// DoChan rather than Do: the shared lookup runs to completion for whoever
-	// needs it, but a caller whose own deadline expires -- or whose client hung
-	// up -- must not be pinned to it for the whole of fetchTimeout.
+	// needs it, but each caller leaves at its own deadline or fetchTimeout.
+	// The backend context alone cannot bound this wait: MixCoord address
+	// resolution uses the client's lifetime context before issuing the RPC.
+	waitCtx, cancelWait := context.WithTimeout(ctx, fetchTimeout)
+	defer cancelWait()
 	result := c.fetches.DoChan("root", func() (any, error) {
 		// Another caller may have refreshed while we queued.
 		if hash := c.freshHash(); hash != "" {
@@ -340,10 +344,10 @@ func (c *CachedRootVerifier) refresh(ctx context.Context) (string, error) {
 		}
 		hash, _ := r.Val.(string)
 		return hash, nil
-	case <-ctx.Done():
+	case <-waitCtx.Done():
 		// The caller can leave immediately, but singleflight retains its buffered
 		// result channel until the lookup completes. Retain the matching slot for
-		// exactly as long, using one bounded cleanup goroutine for this canceled
+		// exactly as long, using one bounded cleanup goroutine for this departing
 		// caller, so neither resource can grow past maxRefreshCallers.
 		releaseRefreshSlot = false
 		go func() {
@@ -351,7 +355,7 @@ func (c *CachedRootVerifier) refresh(ctx context.Context) (string, error) {
 			c.refreshCallers.Add(-1)
 		}()
 		return "", merr.WrapErrServiceUnavailable(
-			"credential lookup did not complete before the request deadline")
+			"credential lookup did not complete before the lookup or request deadline")
 	}
 }
 
