@@ -8173,8 +8173,9 @@ func Test_ValidateUtil_ArrayOfVectorRowDimensions(t *testing.T) {
 			newField := func() *schemapb.FieldData {
 				return &schemapb.FieldData{
 					FieldId: 100, FieldName: "vectors", Type: schemapb.DataType_ArrayOfVector,
+					ValidData: []bool{true, false},
 					Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-						Dim: dim, ValidData: []bool{true, false},
+						Dim: dim,
 						Data: &schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{
 							Dim: dim, ElementType: tc.elementType, Data: []*schemapb.VectorField{tc.row},
 						}},
