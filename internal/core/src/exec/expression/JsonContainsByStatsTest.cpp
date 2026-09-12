@@ -1306,6 +1306,44 @@ TEST(JsonContainsByStatsTest, GroupByReaderRetainsEmptyStringRawFallback) {
     EXPECT_EQ(raw.at<std::string_view>("/s").value(), "");
 }
 
+TEST(JsonContainsByStatsTest, GroupByCertificationNeedsSupportedScalarColumn) {
+    auto schema = std::make_shared<Schema>();
+    auto field = schema->AddDebugField("json", DataType::JSON);
+    const std::vector<std::vector<std::string>> documents{
+        {R"({"a":[1,2]})", R"({"a":[3]})"},
+        {R"({"d":1.5})", R"({"d":2.5})"},
+        {R"({"s":"rare","b":true,"n":1})", R"({})", R"({})", R"({})"},
+    };
+    for (size_t i = 0; i < documents.size(); ++i) {
+        SCOPED_TRACE(i);
+        auto built = BuildJsonStatsIndex(documents[i],
+                                         field,
+                                         TestLocalPath,
+                                         1271 + i,
+                                         2271 + i,
+                                         3271 + i,
+                                         field.get(),
+                                         5271 + i,
+                                         1);
+        auto path = built.stats_base_path + "/" + JSON_STATS_META_FILE_NAME;
+        auto cm = built.ctx.chunkManagerPtr;
+        std::string bytes(cm->Size(path), '\0');
+        cm->Read(path, bytes.data(), bytes.size());
+        auto metadata = nlohmann::json::parse(bytes);
+        EXPECT_EQ(metadata[META_KEY_GROUP_BY_SCALAR_READ_VERSION], 0);
+        const auto& layout = metadata[META_KEY_LAYOUT_TYPE_MAP];
+        if (i == 0) {
+            EXPECT_EQ(layout["/a_ARRAY"], "TYPED");
+        } else if (i == 1) {
+            EXPECT_EQ(layout["/d_DOUBLE"], "TYPED");
+        } else {
+            for (const auto* column : {"/s_STRING", "/b_BOOL", "/n_INT64"}) {
+                EXPECT_EQ(layout[column], "SHARED");
+            }
+        }
+    }
+}
+
 TEST(JsonContainsByStatsTest, GroupByReaderRejectsOldAndAmbiguousStats) {
     auto schema = std::make_shared<Schema>();
     auto field = schema->AddDebugField("json", DataType::JSON);
@@ -1359,6 +1397,26 @@ TEST(JsonContainsByStatsTest, GroupByCertificationRequiresCompleteJsonSyntax) {
         3270,
         field.get(),
         5270,
+        1);
+    EXPECT_FALSE(stats->GetShreddingField("/s", JSONType::STRING).empty());
+    EXPECT_EQ(stats->CreateShreddingReader("/s", JSONType::STRING, 2), nullptr);
+}
+
+TEST(JsonContainsByStatsTest, GroupByCertificationChecksBeforeFirstScalarRow) {
+    auto schema = std::make_shared<Schema>();
+    auto field = schema->AddDebugField("json", DataType::JSON);
+    // The first row has only DOUBLE data and invalid JSON syntax that the
+    // legacy writer accepts. The later STRING column requires checking both
+    // rows from the start, even though the first row has no supported scalar.
+    auto stats = BuildAndLoadJsonKeyStats(
+        {R"({"d":01.5})", R"({"s":"later valid row","d":2.5})"},
+        field,
+        TestLocalPath,
+        1274,
+        2274,
+        3274,
+        field.get(),
+        5274,
         1);
     EXPECT_FALSE(stats->GetShreddingField("/s", JSONType::STRING).empty());
     EXPECT_EQ(stats->CreateShreddingReader("/s", JSONType::STRING, 2), nullptr);

@@ -1,7 +1,8 @@
 # Group-by scalar reads from JSON shredding
 
 - Created: 2026-09-12
-- Status: Proposed; implementation accompanies this document
+- Author(s): @liliu-z
+- Status: Under Review
 - Component: segcore / JSON stats
 - Related issue: [milvus-io/milvus#53409](https://github.com/milvus-io/milvus/issues/53409)
 
@@ -38,7 +39,10 @@ Do not change these persisted values, the Parquet layout, or existing Search
 stats behavior in this feature. Add the optional integer metadata entry
 `group_by_scalar_read_version = 1` only for certified new builds:
 
-- Start eligible once at the beginning of a complete build.
+- After classification, start eligible only if an actual shredded STRING,
+  BOOL or INT64 column exists. Decide once before the first row is processed;
+  a build with only ARRAY, DOUBLE or SHARED keys skips certification. Never
+  enable certification after an earlier row has skipped validation.
 - Reuse one simdjson DOM parser to validate each non-null document completely
   while eligibility remains true. This is a full parse, not lazy ondemand
   document initialization. Allocation failure propagates as
@@ -55,9 +59,12 @@ stats behavior in this feature. Add the optional integer metadata entry
   Correcting that existing behavior is outside this change.
 
 The existing extensible JSON metadata serializer accepts this integer key.
-Old readers ignore it. New readers require exactly version 1; absent, zero
-or unknown versions do not enable the feature. Existing stats therefore
-retain raw group-by behavior until a normal rebuild produces certification.
+Old readers ignore it. New readers check the marker during the existing
+metadata parse that constructs only the non-SHARED key map; there is no second
+parse or reconstruction of the complete layout. They require integer version
+1; absent, zero, unknown or non-integer versions do not enable the feature.
+Existing stats therefore retain raw group-by behavior until a normal rebuild
+produces certification.
 No automatic rewrite/rebuild is introduced. A segment containing even one
 ambiguous document conservatively retains raw behavior for every path.
 
@@ -121,7 +128,9 @@ Regression coverage includes:
 - Build → upload → load → getter using real STRING, BOOL and INT64 columns,
   including INT64 limits, narrow integer casts and escaped pointer tokens.
 - Duplicate and escaped object keys, nested shadowing, monotonic disabling,
-  and removal of the capability marker to simulate old metadata.
+  and absent, unknown or non-integer capability markers.
+- Skipping certification when classification produces no supported scalar
+  column, including supported scalar keys that remain SHARED.
 - Existing writer empty-string representation followed by reader fallback.
 
 The source-extracted ASAN harness verifies getter/reader semantics and a
@@ -132,8 +141,11 @@ any measured production latency reduction.
 
 Build-time certification adds one complete DOM parse per eligible row and
 sibling-key tracking during the existing traversal. The parser reuses its
-buffer; work stops after the first unsafe row. Build throughput and peak
-memory must be measured separately before tuning this conservative check.
+buffer; work stops after the first unsafe row and is skipped entirely when
+classification produces no supported scalar column. A source-body probe of
+the parse/traverse step measured additional work for eligible builds; it
+excludes classification, Parquet/BSON writing and storage I/O. Complete-build
+throughput and peak memory remain unmeasured, and certification is not free.
 Query-time pins remain proportional to touched chunks, matching the raw
 getter's existing retention policy. Bounded pin eviction is not introduced.
 
