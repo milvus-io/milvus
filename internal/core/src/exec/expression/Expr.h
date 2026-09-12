@@ -25,6 +25,7 @@
 #include <optional>
 #include <string>
 #include <type_traits>
+#include <typeinfo>
 #include <vector>
 
 #include "common/Array.h"
@@ -89,15 +90,33 @@ PinIndex(milvus::OpContext* op_ctx,
     }
 }
 
+// ANDs the 64 bits of `mask` into `bitmap` starting at bit `pos` of the view.
+// The caller guarantees pos + 64 <= bitmap.size().
+inline void
+AndWordAt(TargetBitmapView bitmap, int64_t pos, uint64_t mask) {
+    using Word = TargetBitmapView::data_type;
+    constexpr int64_t kWordBits = sizeof(Word) * 8;
+    const auto bit = static_cast<int64_t>(bitmap.offset()) + pos;
+    const auto word = bit / kWordBits;
+    const auto shift = bit % kWordBits;
+    Word* data = bitmap.data();
+    if (shift == 0) {
+        data[word] &= mask;
+        return;
+    }
+    const Word low = (Word{1} << shift) - 1;
+    data[word] &= (mask << shift) | low;
+    data[word + 1] &= (mask >> (kWordBits - shift)) | ~low;
+}
+
 // Mask null rows out of a filter result: wherever valid_data marks a row null
 // (false), clear both the result bit and the validity bit. No-op when
 // valid_data is null (a non-nullable column carries no validity array). This
 // is the shared validity-masking primitive used by SegmentExpr::ApplyValidData
 // and by the per-kernel sequential masking sites.
 //
-// Packs 64 rows into a word (the fixed-trip inner loop vectorizes) and then
-// walks only the null bits via std::countr_zero. An all-valid block has no null
-// bits set, so the common no-null case costs nothing. Bit-identical to the
+// Packs 64 rows into a word (the fixed-trip inner loop vectorizes) and ANDs it
+// into both destinations; an all-valid block is skipped. Bit-identical to the
 // straightforward `if (!valid_data[i]) res[i] = valid_res[i] = false;` loop.
 //
 // SEQUENTIAL only: row i maps to position i. The scattered / by-offsets case
@@ -121,12 +140,12 @@ ApplyValidMask(const bool* valid_data,
         for (int k = 0; k < 64; ++k) {
             m |= uint64_t(valid_data[i + k] != 0) << k;
         }
-        for (uint64_t nulls = ~m; nulls != 0; nulls &= nulls - 1) {
-            const int k = std::countr_zero(nulls);
-            res[i + k] = false;
-            if (!valid_res_aliases_res) {
-                valid_res[i + k] = false;
-            }
+        if (m == ~uint64_t{0}) {
+            continue;
+        }
+        AndWordAt(res, i, m);
+        if (!valid_res_aliases_res) {
+            AndWordAt(valid_res, i, m);
         }
     }
     for (; i < size; i++) {
@@ -1274,16 +1293,26 @@ class SegmentExpr : public Expr {
                        name_);
         }
 
-        // The kernel is copied into skip_func: readers may bind skip_func into
-        // a column filter that outlives this call (EnsureDataScanCursor,
-        // EnsureDataTakeResources).
+        // Readers may bind skip_func into a column filter that outlives this
+        // call (EnsureDataScanCursor, EnsureDataTakeResources), so skip_func
+        // points at a kernel copy owned by the expression. CanSkip state is
+        // fixed for the expression's lifetime (ScanKernel.h), so the first copy
+        // answers every batch, and skip_func needs no allocation per batch.
         std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func;
         if constexpr (KernelCanSkip<Kernel>) {
-            skip_func = [skip_kernel = Kernel(kernel)](
-                            const milvus::SkipIndex& skip_index,
-                            FieldId field_id,
-                            int chunk_id) {
-                return skip_kernel.CanSkip(skip_index, field_id, chunk_id);
+            if (skip_kernel_ == nullptr) {
+                skip_kernel_ = std::make_shared<Kernel>(kernel);
+                skip_kernel_type_ = &typeid(Kernel);
+            }
+            AssertInfo(*skip_kernel_type_ == typeid(Kernel),
+                       "{} evaluated two SkipIndex kernel types",
+                       name_);
+            const auto* skip_kernel =
+                static_cast<const Kernel*>(skip_kernel_.get());
+            skip_func = [skip_kernel](const milvus::SkipIndex& skip_index,
+                                      FieldId field_id,
+                                      int chunk_id) {
+                return skip_kernel->CanSkip(skip_index, field_id, chunk_id);
             };
         }
 
@@ -1358,15 +1387,36 @@ class SegmentExpr : public Expr {
                         TargetBitmapView valid_res,
                         const TargetBitmap& bitmap_input,
                         int64_t size) {
-        res.inplace_and(valid_res, size);
+        using Word = TargetBitmapView::data_type;
+        constexpr int64_t kWordBits = sizeof(Word) * 8;
+        AssertInfo(res.offset() == 0 && valid_res.offset() == 0,
+                   "kernel batch result must start at bit 0");
+        // One pass over the batch words; bits past `size` are left untouched.
+        // The three bitmaps never overlap.
+        Word* __restrict match = res.data();
+        Word* __restrict known = valid_res.data();
+        const int64_t full_words = size / kWordBits;
+        const int64_t tail_bits = size % kWordBits;
+        const Word tail_mask = (Word{1} << tail_bits) - 1;
         if (bitmap_input.empty()) {
+            for (int64_t w = 0; w < full_words; ++w) {
+                match[w] &= known[w];
+            }
+            if (tail_bits != 0) {
+                match[full_words] &= known[full_words] | ~tail_mask;
+            }
             return;
         }
-        auto candidates = bitmap_input.view(0, size);
-        res.inplace_and(candidates, size);
-        TargetBitmap pruned(candidates);
-        pruned.flip();
-        valid_res.inplace_or(pruned, size);
+        const Word* __restrict candidates = bitmap_input.data();
+        for (int64_t w = 0; w < full_words; ++w) {
+            match[w] &= known[w] & candidates[w];
+            known[w] |= ~candidates[w];
+        }
+        if (tail_bits != 0) {
+            match[full_words] &=
+                (known[full_words] & candidates[full_words]) | ~tail_mask;
+            known[full_words] |= ~candidates[full_words] & tail_mask;
+        }
     }
 
     // Constant result for every non-NULL row. Validity comes from the index
@@ -4170,6 +4220,10 @@ class SegmentExpr : public Expr {
     // (single-index-chunk only); see GetCachedIndexValidBitmap().
     std::shared_ptr<TargetBitmap> cached_index_valid_res_{nullptr};
     bool cached_index_all_valid_{false};
+
+    // Kernel copy that EvalKernel's skip_func points at; see EvalKernel.
+    std::shared_ptr<void> skip_kernel_{nullptr};
+    const std::type_info* skip_kernel_type_{nullptr};
 
     // Legacy cache fields — TODO: remove after all subclasses migrated to cached_result_.
     int64_t cached_index_chunk_id_{-1};

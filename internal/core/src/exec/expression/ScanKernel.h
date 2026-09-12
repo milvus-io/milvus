@@ -98,10 +98,10 @@ concept ScanKernel =
     };
 
 // Optional: prune a whole data chunk by SkipIndex statistics. EvalKernel
-// copies the kernel into the reader's skip function on every call, and the
-// Scan and Take readers keep the copy from the first call for the rest of the
-// expression. Everything CanSkip reads must be held by value or owned by the
-// expression, never by a per-batch local.
+// copies the kernel once per expression, on its first call, and every later
+// skip function uses that copy. Everything CanSkip reads must stay unchanged
+// for the expression's lifetime: held by value or owned by the expression,
+// never by a per-batch local.
 template <typename K>
 concept KernelCanSkip = requires(const K& kernel,
                                  const SkipIndex& skip_index,
