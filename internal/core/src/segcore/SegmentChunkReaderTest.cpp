@@ -21,6 +21,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <tuple>
 
 #include "gtest/gtest.h"
 #include "common/Common.h"
@@ -397,11 +398,18 @@ class ReaderStringSnapshot : public SegmentReadSnapshot {
     std::shared_ptr<ChunkedColumnInterface> column_;
 };
 
-class SegmentChunkReaderStringTest : public ::testing::TestWithParam<bool> {
+class SegmentChunkReaderStringTest
+    : public ::testing::TestWithParam<std::tuple<bool, bool>> {
  protected:
+    bool
+    CursorOwnsPin() const {
+        return std::get<1>(GetParam());
+    }
     void
     SetUp() override {
-        const auto nullable = GetParam();
+        SegcoreConfig::default_config().set_scan_cursor_owns_pin(
+            CursorOwnsPin());
+        const auto nullable = std::get<0>(GetParam());
         auto schema = std::make_shared<Schema>();
         auto pk = schema->AddDebugField("pk", DataType::INT64);
         schema->set_primary_field_id(pk);
@@ -414,12 +422,17 @@ class SegmentChunkReaderStringTest : public ::testing::TestWithParam<bool> {
         ASSERT_NE(column_, nullptr);
         segment_ = std::make_unique<ReaderStringSegment>(schema, column_);
     }
+    void
+    TearDown() override {
+        SegcoreConfig::default_config().set_scan_cursor_owns_pin(
+            saved_cursor_owns_pin_);
+    }
     std::shared_ptr<ReaderStringColumn>
     MakeColumn(const std::vector<int64_t>& rows_per_chunk,
                const std::shared_ptr<StringReadStats>& stats,
                std::vector<std::optional<std::string>>& expected,
                bool other = false) {
-        const auto nullable = GetParam();
+        const auto nullable = std::get<0>(GetParam());
         std::vector<std::unique_ptr<Chunk>> chunks;
         int64_t row = 0;
         for (auto rows : rows_per_chunk) {
@@ -498,6 +511,8 @@ class SegmentChunkReaderStringTest : public ::testing::TestWithParam<bool> {
     std::unique_ptr<ReaderStringSegment> segment_;
     std::vector<std::optional<std::string>> expected_;
     std::vector<std::weak_ptr<ChunkMmapGuard>> lifetimes_;
+    const bool saved_cursor_owns_pin_ =
+        SegcoreConfig::default_config().get_scan_cursor_owns_pin();
 };
 }  // namespace
 
@@ -522,7 +537,8 @@ TEST_P(SegmentChunkReaderStringTest, SmallWindowsDoNotRebuildWholeChunkViews) {
     EXPECT_EQ(stats_->scanned_rows, expected_.size());
     EXPECT_LE(stats_->largest_scan, batch);
     EXPECT_EQ(stats_->scans, 1);
-    EXPECT_EQ(stats_->pins, 3);
+    // ResultOwned pins each bounded batch: 484 windows plus two Cell splits.
+    EXPECT_EQ(stats_->pins, CursorOwnsPin() ? 3 : 486);
 }
 
 TEST_P(SegmentChunkReaderStringTest, StringAccessorsUseBoundSnapshot) {
@@ -660,7 +676,7 @@ TEST_P(SegmentChunkReaderStringTest, OneAccessorCanScanAcrossManyWindows) {
         Check(accessor(), i);
     }
     EXPECT_EQ(stats_->scanned_rows, expected_.size());
-    EXPECT_EQ(stats_->pins, 3);
+    EXPECT_EQ(stats_->pins, CursorOwnsPin() ? 3 : 486);
 }
 
 TEST_P(SegmentChunkReaderStringTest,
@@ -705,14 +721,15 @@ TEST_P(SegmentChunkReaderStringTest,
     EXPECT_FALSE(lifetimes_[1].expired());
     Check(value, 8192);
     Check(accessor(), 8193);
-    Check(accessor(), 8194);  // Next window reuses the cursor's chunk pin.
-    EXPECT_EQ(stats_->pins, 1);
+    Check(accessor(), 8194);  // Next window retains the same Scan cursor.
+    EXPECT_EQ(stats_->pins, CursorOwnsPin() ? 1 : 2);
     accessor = {};
     column_->ManualEvictCache();
     EXPECT_TRUE(lifetimes_[1].expired());
 }
 
-TEST_P(SegmentChunkReaderStringTest, PersistentScanPinOutlivesWindowAccessor) {
+TEST_P(SegmentChunkReaderStringTest,
+       PersistentScanUsesConfiguredPinLifetimeAcrossWindows) {
     SegmentChunkReader reader(nullptr, segment_.get(), expected_.size());
     StringScanState scan_state;
     int64_t chunk = 1, pos = 0;
@@ -722,16 +739,24 @@ TEST_P(SegmentChunkReaderStringTest, PersistentScanPinOutlivesWindowAccessor) {
         Check(accessor(), 8192);
         Check(accessor(), 8193);
     }
-    column_->ManualEvictCache();
-    EXPECT_FALSE(lifetimes_[1].expired());
+    // The startup setting is captured once per Scan, even if the global value
+    // is changed before the next window. TearDown restores the original value.
+    SegcoreConfig::default_config().set_scan_cursor_owns_pin(!CursorOwnsPin());
     {
         auto accessor = reader.GetMultipleChunkDataAccessor(
             DataType::VARCHAR, field_, chunk, pos, {}, 2, &scan_state);
         Check(accessor(), 8194);
         Check(accessor(), 8195);
+        column_->ManualEvictCache();
+        EXPECT_FALSE(lifetimes_[1].expired());
     }
-    EXPECT_EQ(stats_->pins, 1);
+    EXPECT_EQ(stats_->pins, CursorOwnsPin() ? 1 : 2);
     EXPECT_EQ(stats_->scans, 1);
+    // Keep the persistent cursor alive while testing the window owner's
+    // release. This fixture cannot reload evicted payload, so eviction is
+    // checked after both windows have been consumed.
+    column_->ManualEvictCache();
+    EXPECT_EQ(lifetimes_[1].expired(), !CursorOwnsPin());
     scan_state = {};
     column_->ManualEvictCache();
     EXPECT_TRUE(lifetimes_[1].expired());
@@ -780,8 +805,9 @@ TEST_P(SegmentChunkReaderStringTest, ReadFailureKeepsItsCode) {
     }
 }
 
-INSTANTIATE_TEST_SUITE_P(NullableAndRequired,
+INSTANTIATE_TEST_SUITE_P(NullabilityAndPinPolicy,
                          SegmentChunkReaderStringTest,
-                         ::testing::Bool());
+                         ::testing::Combine(::testing::Bool(),
+                                            ::testing::Bool()));
 
 }  // namespace milvus::segcore
