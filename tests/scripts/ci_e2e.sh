@@ -73,10 +73,38 @@ if [ "${DISABLE_PIP_INSTALL:-}" = "" ]; then
 fi
 
 
-# Pytest is not able to have both --timeout & --workers, so do not add --timeout or --workers in the shell script
-if [[ -n "${TEST_TIMEOUT:-}" ]]; then
-  
-  timeout  "${TEST_TIMEOUT}" pytest --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME} --etcd_host ${ETCD_SERVICE_NAME} --etcd_port ${ETCD_SERVICE_PORT} --etcd_root_path ${ETCD_ROOT_PATH} ${@:-}
-else
-  pytest --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME} --etcd_host ${ETCD_SERVICE_NAME} --etcd_port ${ETCD_SERVICE_PORT} --etcd_root_path ${ETCD_ROOT_PATH} ${@:-}
+run_pytest() {
+  local pytest_args=(
+    --host "${MILVUS_SERVICE_NAME}"
+    --port "${MILVUS_SERVICE_PORT}"
+    --minio_host "${MINIO_SERVICE_NAME}"
+    --etcd_host "${ETCD_SERVICE_NAME}"
+    --etcd_port "${ETCD_SERVICE_PORT}"
+    --etcd_root_path "${ETCD_ROOT_PATH}"
+    "$@"
+  )
+  if [[ -n "${TEST_TIMEOUT:-}" ]]; then
+    timeout "${TEST_TIMEOUT}" pytest "${pytest_args[@]}"
+  else
+    pytest "${pytest_args[@]}"
+  fi
+}
+
+pytest_user_args=()
+for pytest_user_arg in "$@"; do
+  read -r -a split_pytest_user_args <<< "${pytest_user_arg}"
+  pytest_user_args+=("${split_pytest_user_args[@]}")
+done
+
+# The ordinary suite keeps its configured xdist behavior; marked compaction-integrity cases skip this stage.
+run_pytest "${pytest_user_args[@]}"
+
+# Nightly or a dedicated caller opts into the cluster-global stage after all parallel workers have exited.
+if [[ "${RUN_COMPACTION_INTEGRITY_SERIAL:-false}" == "true" ]]; then
+  run_pytest \
+    --run-compaction-integrity-serial \
+    --tags L3 \
+    -n 0 \
+    -m compaction_data_integrity_serial \
+    milvus_client/test_milvus_client_data_integrity.py
 fi

@@ -39,6 +39,12 @@ def pytest_addoption(parser):
     parser.addoption("--handler", action="store", default="GRPC", help="handler of request")
     parser.addoption("--tag", action="store", default="all", help="only run tests matching the tag.")
     parser.addoption("--dry_run", action="store_true", default=False, help="")
+    parser.addoption(
+        "--run-compaction-integrity-serial",
+        action="store_true",
+        default=False,
+        help="run cluster-global compaction data-integrity workloads in a non-xdist stage",
+    )
     parser.addoption("--database_name", action="store", default="default", help="name of database")
     parser.addoption("--partition_name", action="store", default="partition_name", help="name of partition")
     parser.addoption("--connect_name", action="store", default="connect_name", help="name of connect")
@@ -359,6 +365,11 @@ def pytest_configure(config):
 
 
 def pytest_runtest_setup(item):
+    if item.get_closest_marker("compaction_data_integrity_serial") is not None:
+        if not item.config.getoption("--run-compaction-integrity-serial"):
+            pytest.skip("compaction data-integrity workloads require the dedicated serial E2E stage")
+        if hasattr(item.config, "workerinput"):
+            pytest.fail("compaction data-integrity workloads must run with pytest -n 0")
     tags = list()
     for marker in item.iter_markers(name="tag"):
         for tag in marker.args:
