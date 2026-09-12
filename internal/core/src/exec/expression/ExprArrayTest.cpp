@@ -23,9 +23,11 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -43,6 +45,7 @@
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
 #include "index/BitmapIndex.h"
+#include "index/InvertedIndexTantivy.h"
 #include "knowhere/comp/index_param.h"
 #include "pb/plan.pb.h"
 #include "plan/PlanNode.h"
@@ -52,6 +55,7 @@
 #include "query/PlanNode.h"
 #include "query/Utils.h"
 #include "segcore/SegcoreConfig.h"
+#include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "test_utils/DataGen.h"
@@ -110,6 +114,58 @@ AssertColumnVector(const ColumnVectorPtr& vec,
         EXPECT_EQ(valid[i], expected_valid[i]) << label << ", row " << i;
     }
 }
+
+// Keep the real sealed loading and expression paths, but count the legacy
+// materialization that used to create a complete ArrayView vector per hit.
+class ArrayEqualityCountingSegment : public ChunkedSegmentSealedImpl {
+ public:
+    using ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl;
+    mutable int64_t materialized_array_rows = 0;
+    mutable int64_t data_resource_reads = 0;
+
+    std::pair<std::shared_ptr<ChunkedColumnInterface>,
+              std::shared_ptr<const SkipIndex>>
+    GetDataScanResources(FieldId field_id) const override {
+        ++data_resource_reads;
+        return ChunkedSegmentSealedImpl::GetDataScanResources(field_id);
+    }
+
+ protected:
+    PinWrapper<std::pair<std::vector<ArrayView>, ValidityView>>
+    chunk_array_view_impl(
+        milvus::OpContext* op_ctx,
+        FieldId field_id,
+        int64_t chunk_id,
+        std::optional<std::pair<int64_t, int64_t>> offset_len) const override {
+        auto views = ChunkedSegmentSealedImpl::chunk_array_view_impl(
+            op_ctx, field_id, chunk_id, offset_len);
+        materialized_array_rows += views.get().first.size();
+        return views;
+    }
+};
+
+class ArrayEqualityCountingIndex : public index::InvertedIndexTantivy<int64_t> {
+ public:
+    using InvertedIndexTantivy::InvertedIndexTantivy;
+    int64_t callback_calls = 0;
+
+    void
+    BuildForTest(const FieldDataPtr& data) {
+        BuildWithFieldData({data});
+        wrapper_->create_reader(milvus::index::SetBitsetSealed);
+        finish();
+        wrapper_->reload();
+        FinalizeSealed();
+    }
+
+    void
+    InApplyCallback(size_t n,
+                    const int64_t* values,
+                    const std::function<void(size_t)>& callback) override {
+        ++callback_calls;
+        InvertedIndexTantivy::InApplyCallback(n, values, callback);
+    }
+};
 
 }  // namespace
 
@@ -702,6 +758,198 @@ TEST(Expr, TestArrayEqual) {
             ASSERT_EQ(ans, ref);
             if (i % 2 == 0) {
                 ASSERT_EQ(view[int(i / 2)], ref);
+            }
+        }
+    }
+}
+
+TEST(Expr, TestArrayIndexEqualityReadsOnlyCandidates) {
+    constexpr int64_t N = 1536;
+    for (bool nested : {false, true}) {
+        for (bool mmap : {false, true}) {
+            for (bool sparse : {false, true}) {
+                SCOPED_TRACE(fmt::format(
+                    "nested={}, mmap={}, sparse={}", nested, mmap, sparse));
+                auto schema = std::make_shared<Schema>();
+                const auto pk = schema->AddDebugField("id", DataType::INT64);
+                const auto field_name = nested ? "structA[array]" : "array";
+                const auto field = schema->AddDebugField(
+                    field_name, DataType::ARRAY, DataType::INT64, true);
+                schema->set_primary_field_id(pk);
+                auto raw_data = DataGen(schema, N);
+                const std::vector<std::vector<int64_t>> patterns{
+                    {1, 2, 1}, {1, 1, 2}, {1, 2}, {1, 2, 1, 1}, {}, {4, 5}};
+                std::vector<std::vector<int64_t>> rows(N);
+                std::vector<bool> validity(N, true);
+                for (int64_t i = 0; i < N; ++i) {
+                    rows[i] = sparse ? std::vector<int64_t>{4, 5}
+                                     : patterns[i % patterns.size()];
+                    validity[i] = i % 11 != 0;
+                }
+                if (sparse) {
+                    rows[1] = {1, 2, 1};
+                    rows[N / 2] = {1, 1, 2};
+                    rows[N - 1] = {1, 2, 1};
+                }
+                ArrayEqualityCountingSegment segment(
+                    schema,
+                    empty_index_meta,
+                    SegcoreConfig::default_config(),
+                    kSegmentID + nested * 4 + mmap * 2 + sparse);
+                LoadGeneratedDataIntoSegment(
+                    raw_data, &segment, mmap, {field.get()});
+
+                FixedVector<Array> arrays;
+                std::vector<uint8_t> valid_bitmap((N + 7) / 8, 0);
+                for (int64_t i = 0; i < N; ++i) {
+                    ScalarFieldProto row;
+                    for (auto value : rows[i]) {
+                        row.mutable_long_data()->add_data(value);
+                    }
+                    arrays.emplace_back(row);
+                    if (validity[i]) {
+                        valid_bitmap[i >> 3] |= 1 << (i & 7);
+                    }
+                }
+                auto field_data = storage::CreateFieldData(
+                    DataType::ARRAY, DataType::INT64, true);
+                field_data->FillFieldData(
+                    arrays.data(), valid_bitmap.data(), N, 0);
+                // Different physical chunk sizes exercise global candidate
+                // offsets on both sides of the boundary.
+                constexpr int64_t split = 513;
+                auto first = storage::CreateFieldData(
+                    DataType::ARRAY, DataType::INT64, true);
+                auto second = storage::CreateFieldData(
+                    DataType::ARRAY, DataType::INT64, true);
+                first->FillFieldData(
+                    arrays.data(), valid_bitmap.data(), split, 0);
+                second->FillFieldData(arrays.data() + split,
+                                      valid_bitmap.data(),
+                                      N - split,
+                                      split);
+                auto load_info = PrepareSingleFieldInsertBinlog(
+                    kCollectionID,
+                    kPartitionID,
+                    kSegmentID,
+                    field.get(),
+                    {first, second},
+                    storage::RemoteChunkManagerSingleton::GetInstance()
+                        .GetRemoteChunkManager(),
+                    mmap ? "./data/mmap-test" : "");
+                segment.LoadFieldData(load_info);
+                ASSERT_EQ(segment.num_chunk_data(field), 2);
+                if (nested) {
+                    ASSERT_NE(segment.GetArrayOffsets(field), nullptr);
+                }
+                proto::schema::FieldSchema field_schema;
+                field_schema.set_name(field_name);
+                field_schema.set_fieldid(field.get());
+                field_schema.set_data_type(proto::schema::DataType::Array);
+                field_schema.set_element_type(proto::schema::DataType::Int64);
+                field_schema.set_nullable(true);
+                storage::FileManagerContext index_ctx;
+                index_ctx.fieldDataMeta = storage::FieldDataMeta{kCollectionID,
+                                                                 kPartitionID,
+                                                                 kSegmentID,
+                                                                 field.get(),
+                                                                 field_schema};
+                index_ctx.indexMeta =
+                    storage::IndexMeta{kSegmentID, field.get(), 4100, 4100};
+                auto index = std::make_unique<ArrayEqualityCountingIndex>(
+                    index::TANTIVY_INDEX_LATEST_VERSION,
+                    index_ctx,
+                    false,
+                    true,
+                    nested);
+                index->BuildForTest(field_data);
+                auto* index_ptr = index.get();
+                LoadIndexInfo info;
+                info.field_id = field.get();
+                info.field_type = DataType::ARRAY;
+                info.element_type = DataType::INT64;
+                info.index_params = GenIndexParams(index.get());
+                info.cache_index = CreateTestCacheIndex(
+                    "array_equality_candidates", std::move(index));
+                segment.LoadIndex(info);
+                ASSERT_TRUE(segment.HasIndex(field));
+
+                const std::vector<std::vector<int64_t>> targets{
+                    {1, 2, 1}, {9, 9}, {}};
+                for (const auto& target : targets) {
+                    for (bool reverse : {false, true}) {
+                        proto::plan::GenericValue value;
+                        auto* array = value.mutable_array_val();
+                        array->set_element_type(proto::schema::DataType::Int64);
+                        array->set_same_type(true);
+                        for (auto element : target) {
+                            array->add_array()->set_int64_val(element);
+                        }
+                        auto expression =
+                            std::make_shared<expr::UnaryRangeFilterExpr>(
+                                expr::ColumnInfo(field,
+                                                 DataType::ARRAY,
+                                                 DataType::INT64,
+                                                 {},
+                                                 true),
+                                reverse ? proto::plan::NotEqual
+                                        : proto::plan::Equal,
+                                value);
+                        auto query_config = std::make_shared<exec::QueryConfig>(
+                            std::unordered_map<std::string, std::string>{
+                                {exec::QueryConfig::kExprEvalBatchSize,
+                                 "128"}});
+                        auto query_context =
+                            std::make_shared<exec::QueryContext>(
+                                DEAFULT_QUERY_ID,
+                                &segment,
+                                N,
+                                MAX_TIMESTAMP,
+                                0,
+                                0,
+                                query::PlanOptions(),
+                                query_config);
+                        exec::ExecContext exec_context(query_context.get());
+                        exec::ExprSet exprs({expression}, &exec_context);
+                        exec::EvalCtx eval_ctx(&exec_context);
+                        segment.materialized_array_rows = 0;
+                        segment.data_resource_reads = 0;
+                        index_ptr->callback_calls = 0;
+                        int64_t processed = 0;
+                        while (processed < N) {
+                            std::vector<VectorPtr> results;
+                            exprs.Eval(0, 1, true, eval_ctx, results);
+                            ASSERT_EQ(results.size(), 1);
+                            ASSERT_NE(results[0], nullptr);
+                            auto result = milvus::test::GetColumnVectorForTest(
+                                results[0]);
+                            ASSERT_GT(result->size(), 0);
+                            ASSERT_LE(result->size(), 128);
+                            BitsetTypeView bits(result->GetRawData(),
+                                                result->size());
+                            BitsetTypeView valid(result->GetValidRawData(),
+                                                 result->size());
+                            for (int64_t i = 0; i < result->size(); ++i) {
+                                const auto row = processed + i;
+                                EXPECT_EQ(valid[i], validity[row]) << row;
+                                EXPECT_EQ(bits[i],
+                                          validity[row] &&
+                                              ((rows[row] == target) ^ reverse))
+                                    << row;
+                            }
+                            processed += result->size();
+                        }
+                        ASSERT_EQ(processed, N);
+                        if (!target.empty()) {
+                            // Both the index and exact array recheck execute;
+                            // later expression batches reuse the cached bitmap.
+                            EXPECT_GT(index_ptr->callback_calls, 0);
+                            EXPECT_EQ(segment.data_resource_reads,
+                                      target.front() == 1 ? 1 : 0);
+                            EXPECT_EQ(segment.materialized_array_rows, 0);
+                        }
+                    }
+                }
             }
         }
     }
