@@ -15,6 +15,7 @@
 // limitations under the License.
 #include "segcore/SegmentChunkReader.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <memory>
 #include <string_view>
@@ -63,7 +64,8 @@ SegmentChunkReader::GetMultipleChunkDataAccessor(
     FieldId field_id,
     int64_t& current_chunk_id,
     int64_t& current_chunk_pos,
-    PinnedIndexView pinned_index) const {
+    PinnedIndexView pinned_index,
+    int64_t /*scan_batch_size*/) const {
     const index::IndexBase* index = nullptr;
     if (current_chunk_id < pinned_index.size()) {
         index = pinned_index[current_chunk_id].get();
@@ -131,7 +133,8 @@ SegmentChunkReader::GetMultipleChunkDataAccessor<std::string>(
     FieldId field_id,
     int64_t& current_chunk_id,
     int64_t& current_chunk_pos,
-    PinnedIndexView pinned_index) const {
+    PinnedIndexView pinned_index,
+    int64_t scan_batch_size) const {
     const index::IndexBase* index = nullptr;
     if (current_chunk_id < pinned_index.size()) {
         index = pinned_index[current_chunk_id].get();
@@ -159,6 +162,64 @@ SegmentChunkReader::GetMultipleChunkDataAccessor<std::string>(
                field_id.get(),
                current_chunk_id,
                num_chunks);
+    if (segment_->type() == SegmentType::Sealed) {
+        AssertInfo(scan_batch_size > 0,
+                   "string scan batch size must be positive");
+        // The accessor is recreated for each expression window. Bound every
+        // Next() to that window instead of rebuilding all views in its chunk.
+        struct ScanState {
+            std::shared_ptr<ChunkedColumnInterface> column;
+            ScanResult cursor;
+            ScanBatch batch;
+            const std::string_view* values = nullptr;
+            int64_t batch_pos = 0;
+        };
+        auto state = std::make_shared<ScanState>();
+        state->column = segment_->GetChunkedColumn(field_id);
+        AssertInfo(state->column != nullptr, "string field has no column");
+        const auto start =
+            NumRowsUntilChunk(field_id, current_chunk_id) + current_chunk_pos;
+        state->cursor = state->column->Scan(
+            op_ctx_,
+            ScanOptions::ForData(
+                start, TargetType::StringView, ScanPinPolicy::CursorOwned));
+        AssertInfo(state->cursor != nullptr,
+                   "string field does not support data Scan");
+        auto current_chunk_size = ChunkSize(field_id, current_chunk_id);
+        return [=,
+                this,
+                window_remaining = scan_batch_size,
+                &current_chunk_id,
+                &current_chunk_pos]() mutable -> const data_access_type {
+            if (state->batch_pos == state->batch.size) {
+                if (window_remaining == 0) {
+                    window_remaining = scan_batch_size;
+                }
+                const auto remaining =
+                    active_count_ - state->cursor->Position();
+                const auto has_data =
+                    state->cursor->Next(std::min(window_remaining, remaining),
+                                        ScanReadMode::DataAndValidity,
+                                        &state->batch);
+                AssertInfo(has_data && state->batch.size > 0,
+                           "string scan exhausted before accessor consumption");
+                state->batch_pos = 0;
+                state->values = state->batch.values.data_as<std::string_view>();
+            }
+            if (current_chunk_pos >= current_chunk_size) {
+                ++current_chunk_id;
+                current_chunk_pos = 0;
+                current_chunk_size = ChunkSize(field_id, current_chunk_id);
+            }
+            ++current_chunk_pos;
+            --window_remaining;
+            const auto pos = state->batch_pos++;
+            if (state->batch.validity && !state->batch.validity[pos]) {
+                return std::nullopt;
+            }
+            return data_access_type(state->values[pos]);
+        };
+    }
     if (segment_->type() == SegmentType::Growing &&
         !storage::MmapManager::GetInstance()
              .GetMmapConfig()
@@ -238,35 +299,63 @@ SegmentChunkReader::GetMultipleChunkDataAccessor(
     FieldId field_id,
     int64_t& current_chunk_id,
     int64_t& current_chunk_pos,
-    PinnedIndexView pinned_index) const {
+    PinnedIndexView pinned_index,
+    int64_t scan_batch_size) const {
     switch (data_type) {
         case DataType::BOOL:
-            return GetMultipleChunkDataAccessor<bool>(
-                field_id, current_chunk_id, current_chunk_pos, pinned_index);
+            return GetMultipleChunkDataAccessor<bool>(field_id,
+                                                      current_chunk_id,
+                                                      current_chunk_pos,
+                                                      pinned_index,
+                                                      scan_batch_size);
         case DataType::INT8:
-            return GetMultipleChunkDataAccessor<int8_t>(
-                field_id, current_chunk_id, current_chunk_pos, pinned_index);
+            return GetMultipleChunkDataAccessor<int8_t>(field_id,
+                                                        current_chunk_id,
+                                                        current_chunk_pos,
+                                                        pinned_index,
+                                                        scan_batch_size);
         case DataType::INT16:
-            return GetMultipleChunkDataAccessor<int16_t>(
-                field_id, current_chunk_id, current_chunk_pos, pinned_index);
+            return GetMultipleChunkDataAccessor<int16_t>(field_id,
+                                                         current_chunk_id,
+                                                         current_chunk_pos,
+                                                         pinned_index,
+                                                         scan_batch_size);
         case DataType::INT32:
-            return GetMultipleChunkDataAccessor<int32_t>(
-                field_id, current_chunk_id, current_chunk_pos, pinned_index);
+            return GetMultipleChunkDataAccessor<int32_t>(field_id,
+                                                         current_chunk_id,
+                                                         current_chunk_pos,
+                                                         pinned_index,
+                                                         scan_batch_size);
         case DataType::INT64:
-            return GetMultipleChunkDataAccessor<int64_t>(
-                field_id, current_chunk_id, current_chunk_pos, pinned_index);
+            return GetMultipleChunkDataAccessor<int64_t>(field_id,
+                                                         current_chunk_id,
+                                                         current_chunk_pos,
+                                                         pinned_index,
+                                                         scan_batch_size);
         case DataType::TIMESTAMPTZ:
-            return GetMultipleChunkDataAccessor<int64_t>(
-                field_id, current_chunk_id, current_chunk_pos, pinned_index);
+            return GetMultipleChunkDataAccessor<int64_t>(field_id,
+                                                         current_chunk_id,
+                                                         current_chunk_pos,
+                                                         pinned_index,
+                                                         scan_batch_size);
         case DataType::FLOAT:
-            return GetMultipleChunkDataAccessor<float>(
-                field_id, current_chunk_id, current_chunk_pos, pinned_index);
+            return GetMultipleChunkDataAccessor<float>(field_id,
+                                                       current_chunk_id,
+                                                       current_chunk_pos,
+                                                       pinned_index,
+                                                       scan_batch_size);
         case DataType::DOUBLE:
-            return GetMultipleChunkDataAccessor<double>(
-                field_id, current_chunk_id, current_chunk_pos, pinned_index);
+            return GetMultipleChunkDataAccessor<double>(field_id,
+                                                        current_chunk_id,
+                                                        current_chunk_pos,
+                                                        pinned_index,
+                                                        scan_batch_size);
         case DataType::VARCHAR: {
-            return GetMultipleChunkDataAccessor<std::string>(
-                field_id, current_chunk_id, current_chunk_pos, pinned_index);
+            return GetMultipleChunkDataAccessor<std::string>(field_id,
+                                                             current_chunk_id,
+                                                             current_chunk_pos,
+                                                             pinned_index,
+                                                             scan_batch_size);
         }
         default:
             ThrowInfo(DataTypeInvalid, "unsupported data type: {}", data_type);
@@ -337,6 +426,18 @@ SegmentChunkReader::GetChunkDataAccessor<std::string>(
                field_id.get(),
                chunk_id,
                num_chunks);
+    if (segment_->type() == SegmentType::Sealed) {
+        auto column = segment_->GetChunkedColumn(field_id);
+        AssertInfo(column != nullptr, "string field has no column");
+        auto pin = column->GetChunk(op_ctx_, chunk_id);
+        return [pin = std::move(pin)](int i) -> const data_access_type {
+            const auto* chunk = static_cast<const StringChunk*>(pin.get());
+            if (!chunk->isValid(i)) {
+                return std::nullopt;
+            }
+            return data_access_type((*chunk)[i]);
+        };
+    }
     if (segment_->type() == SegmentType::Growing &&
         !storage::MmapManager::GetInstance()
              .GetMmapConfig()
@@ -363,6 +464,37 @@ SegmentChunkReader::GetChunkDataAccessor<std::string>(
             return data_access_type(chunk_data[i]);
         };
     }
+}
+
+ChunkDataAccessor
+SegmentChunkReader::GetStringDataAccessorByOffsets(
+    FieldId field_id, OffsetView offsets, PinnedIndexView pinned_index) const {
+    AssertInfo(segment_->type() == SegmentType::Sealed,
+               "string Take accessor requires a sealed segment");
+    if (!pinned_index.empty()) {
+        const auto* index =
+            dynamic_cast<const index::ScalarIndex<std::string>*>(
+                pinned_index.front().get());
+        if (index != nullptr && index->HasRawData()) {
+            // A sealed scalar index addresses the entire field. Keep its
+            // reverse lookup and the caller-owned pin instead of loading raw.
+            return [index, offsets](int i) -> const data_access_type {
+                auto value = index->Reverse_Lookup(offsets[i]);
+                return value.has_value() ? data_access_type(std::move(*value))
+                                         : std::nullopt;
+            };
+        }
+    }
+    auto column = segment_->GetChunkedColumn(field_id);
+    AssertInfo(column != nullptr, "string field has no column");
+    std::shared_ptr<TakeResult> take =
+        column->Take(op_ctx_, TakeOptions{offsets, TargetType::StringView});
+    AssertInfo(take != nullptr, "string field does not support Take");
+    auto values = take->Access<std::string_view>();
+    return [take = std::move(take), values](int i) -> const data_access_type {
+        auto item = values[i];
+        return item.is_valid ? data_access_type(*item.value) : std::nullopt;
+    };
 }
 
 ChunkDataAccessor

@@ -1046,6 +1046,103 @@ TEST_P(TestChunkSegmentStorageV2, TestColumnExprWithScalarIndexRawData) {
 }
 
 TEST_P(TestChunkSegmentStorageV2,
+       TestStringExpressionsWithSmallScanWindowsAndOffsets) {
+    // Both fields contain identical strings in separate physical column groups.
+    // Exercise the real ColumnExpr and CompareExpr consumers, including raw
+    // fallback from an index that cannot reverse-lookup its string values.
+    for (const bool indexed : {false, true}) {
+        if (indexed) {
+            LoadString1ScalarIndex(index::INVERTED_INDEX_TYPE);
+            ASSERT_FALSE(segment->HasRawData(fields.at("string1").get()));
+        }
+        auto config = std::make_shared<exec::QueryConfig>(
+            std::unordered_map<std::string, std::string>{
+                {exec::QueryConfig::kExprEvalBatchSize, "17"}});
+        exec::QueryContext query_context("string_reader_scan_take",
+                                         segment.get(),
+                                         RowCount(),
+                                         MAX_TIMESTAMP,
+                                         0,
+                                         0,
+                                         query::PlanOptions(),
+                                         config);
+        exec::ExecContext exec_context(&query_context);
+        std::vector<expr::TypedExprPtr> exprs{
+            std::make_shared<expr::ColumnExpr>(
+                expr::ColumnInfo(fields.at("string1"), DataType::VARCHAR)),
+            std::make_shared<expr::CompareExpr>(fields.at("string1"),
+                                                fields.at("string2"),
+                                                DataType::VARCHAR,
+                                                DataType::VARCHAR,
+                                                proto::plan::OpType::Equal)};
+        exec::ExprSet expr_set(exprs, &exec_context);
+        exec::EvalCtx eval_context(&exec_context);
+        int64_t offset = 0;
+        while (offset < RowCount()) {
+            std::vector<VectorPtr> results;
+            expr_set.Eval(eval_context, results);
+            ASSERT_EQ(results.size(), 2);
+            auto values = std::dynamic_pointer_cast<ColumnVector>(results[0]);
+            auto matches = std::dynamic_pointer_cast<ColumnVector>(results[1]);
+            ASSERT_NE(values, nullptr);
+            ASSERT_NE(matches, nullptr);
+            const auto count = std::min<int64_t>(17, RowCount() - offset);
+            ASSERT_EQ(values->size(), count);
+            TargetBitmapView bits(matches->GetRawData(), count);
+            for (int64_t i = 0; i < count; ++i) {
+                ASSERT_TRUE(values->ValidAt(i));
+                EXPECT_EQ(values->RawAsValues<std::string>()[i],
+                          string_data[offset + i]);
+                EXPECT_TRUE(bits[i]);
+            }
+            offset += count;
+        }
+        exec::OffsetVector offsets;
+        for (int32_t row :
+             {static_cast<int32_t>(RowCount() - 1), 0, 10000, 16, 10000, 0}) {
+            offsets.push_back(row);
+        }
+        exec::ExprSet offset_expr_set(exprs, &exec_context);
+        exec::EvalCtx offset_context(&exec_context, &offsets);
+        std::vector<VectorPtr> results;
+        offset_expr_set.Eval(offset_context, results);
+        ASSERT_EQ(results.size(), 2);
+        auto values = std::dynamic_pointer_cast<ColumnVector>(results[0]);
+        auto matches = std::dynamic_pointer_cast<ColumnVector>(results[1]);
+        ASSERT_NE(values, nullptr);
+        ASSERT_NE(matches, nullptr);
+        TargetBitmapView bits(matches->GetRawData(), offsets.size());
+        ASSERT_EQ(values->size(), offsets.size());
+        for (int64_t i = 0; i < offsets.size(); ++i) {
+            EXPECT_EQ(values->RawAsValues<std::string>()[i],
+                      string_data[offsets[i]]);
+            EXPECT_TRUE(bits[i]);
+        }
+    }
+}
+
+TEST_P(TestChunkSegmentStorageV2,
+       TestStringTakeAccessorRetainsIndexReverseLookup) {
+    LoadString1ScalarIndex(index::MARISA_TRIE);
+    ASSERT_TRUE(segment->HasRawData(fields.at("string1").get()));
+    auto pins = segment->PinIndex(nullptr, fields.at("string1"));
+    ASSERT_EQ(pins.size(), 1);
+    SegmentChunkReader reader(nullptr, segment.get(), RowCount());
+    const std::vector<int32_t> offsets{10007, 7, 10007, 0};
+    auto accessor = reader.GetStringDataAccessorByOffsets(
+        fields.at("string1"),
+        OffsetView::From(offsets.data(), offsets.size()),
+        {pins.data(), pins.size()});
+    for (int64_t i = 0; i < offsets.size(); ++i) {
+        auto value = accessor(i);
+        ASSERT_TRUE(value.has_value());
+        // Index values deliberately differ from raw values in this fixture.
+        EXPECT_EQ(segcore::get_from_variant<std::string>(value),
+                  "test" + std::to_string(offsets[i]));
+    }
+}
+
+TEST_P(TestChunkSegmentStorageV2,
        TestChunkDataAccessorFallsBackWhenPinnedIndexViewIsEmpty) {
     SegmentChunkReader reader(nullptr, segment.get(), RowCount());
 

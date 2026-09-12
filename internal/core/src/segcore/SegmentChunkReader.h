@@ -107,12 +107,24 @@ class SegmentChunkReader {
           op_ctx_(op_ctx) {
     }
 
+    // A sequential string accessor materializes at most scan_batch_size rows
+    // per window. It may serve multiple windows; consume borrowed values before
+    // advancing it into the next window or Cell.
     MultipleChunkDataAccessor
     GetMultipleChunkDataAccessor(DataType data_type,
                                  FieldId field_id,
                                  int64_t& current_chunk_id,
                                  int64_t& current_chunk_pos,
-                                 PinnedIndexView pinned_index) const;
+                                 PinnedIndexView pinned_index,
+                                 int64_t scan_batch_size = 1024) const;
+
+    // Sealed string access over one expression's finite offset input. Offsets
+    // and pinned indexes must outlive the accessor. Borrowed strings must be
+    // consumed before the next access that switches the underlying Cell.
+    ChunkDataAccessor
+    GetStringDataAccessorByOffsets(FieldId field_id,
+                                   OffsetView offsets,
+                                   PinnedIndexView pinned_index) const;
 
     ChunkDataAccessor
     GetChunkDataAccessor(DataType data_type,
@@ -220,7 +232,8 @@ class SegmentChunkReader {
     GetMultipleChunkDataAccessor(FieldId field_id,
                                  int64_t& current_chunk_id,
                                  int64_t& current_chunk_pos,
-                                 PinnedIndexView pinned_index) const;
+                                 PinnedIndexView pinned_index,
+                                 int64_t scan_batch_size) const;
 
     template <typename T>
     ChunkDataAccessor
