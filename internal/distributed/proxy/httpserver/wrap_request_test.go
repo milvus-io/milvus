@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestFieldData_AsSchemapb(t *testing.T) {
@@ -302,8 +303,19 @@ func TestFieldData_AsSchemapb(t *testing.T) {
 		}
 		raw, _ := json.Marshal(fieldData)
 		json.Unmarshal(raw, &fieldData)
-		_, err := fieldData.AsSchemapb()
-		assert.NoError(t, err)
+		converted, err := fieldData.AsSchemapb()
+		require.NoError(t, err)
+		sparse := converted.GetVectors().GetSparseFloatVector()
+		require.Len(t, sparse.GetContents(), 3)
+		assert.Equal(t, int64(7), sparse.GetDim())
+		for i, indices := range [][]uint32{{1, 2}, {3, 5}, {4, 6}} {
+			expected, err := typeutil.CreateSparseFloatRowFromMap(map[string]interface{}{
+				"indices": []interface{}{float64(indices[0]), float64(indices[1])},
+				"values":  []interface{}{0.1, 0.2},
+			})
+			require.NoError(t, err)
+			assert.Equal(t, expected, sparse.GetContents()[i])
+		}
 	})
 
 	t.Run("sparsefloatvector_ok_2", func(t *testing.T) {
@@ -317,8 +329,19 @@ func TestFieldData_AsSchemapb(t *testing.T) {
 		}
 		raw, _ := json.Marshal(fieldData)
 		json.Unmarshal(raw, &fieldData)
-		_, err := fieldData.AsSchemapb()
-		assert.NoError(t, err)
+		converted, err := fieldData.AsSchemapb()
+		require.NoError(t, err)
+		sparse := converted.GetVectors().GetSparseFloatVector()
+		require.Len(t, sparse.GetContents(), 3)
+		assert.Equal(t, int64(7), sparse.GetDim())
+		for i, indices := range [][]uint32{{1, 2}, {3, 5}, {4, 6}} {
+			expected, err := typeutil.CreateSparseFloatRowFromMap(map[string]interface{}{
+				"indices": []interface{}{float64(indices[0]), float64(indices[1])},
+				"values":  []interface{}{0.1, 0.2},
+			})
+			require.NoError(t, err)
+			assert.Equal(t, expected, sparse.GetContents()[i])
+		}
 	})
 
 	t.Run("sparsefloatvector_ok_3", func(t *testing.T) {
@@ -332,8 +355,19 @@ func TestFieldData_AsSchemapb(t *testing.T) {
 		}
 		raw, _ := json.Marshal(fieldData)
 		json.Unmarshal(raw, &fieldData)
-		_, err := fieldData.AsSchemapb()
-		assert.NoError(t, err)
+		converted, err := fieldData.AsSchemapb()
+		require.NoError(t, err)
+		sparse := converted.GetVectors().GetSparseFloatVector()
+		require.Len(t, sparse.GetContents(), 3)
+		assert.Equal(t, int64(7), sparse.GetDim())
+		for i, indices := range [][]uint32{{1, 2}, {3, 5}, {4, 6}} {
+			expected, err := typeutil.CreateSparseFloatRowFromMap(map[string]interface{}{
+				"indices": []interface{}{float64(indices[0]), float64(indices[1])},
+				"values":  []interface{}{0.1, 0.2},
+			})
+			require.NoError(t, err)
+			assert.Equal(t, expected, sparse.GetContents()[i])
+		}
 	})
 
 	t.Run("sparsefloatvector_empty_err", func(t *testing.T) {
