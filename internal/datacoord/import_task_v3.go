@@ -420,6 +420,12 @@ func (t *importTaskV3) QueryTaskOnWorker(cluster session.Cluster) {
 			mlog.Warn(context.TODO(), "accept import result failed transiently, will retry", WrapTaskLog(t, mlog.Err(err))...)
 			return
 		}
+		if results := resp.GetSegments(); len(results) == 1 && results[0].GetRows() > 0 {
+			select {
+			case getBuildIndexChSingleton() <- p.GetSegmentId():
+			default:
+			}
+		}
 		if err := t.importMeta.UpdateTask(context.TODO(), t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Completed)); err != nil {
 			mlog.Warn(context.TODO(), "persist accepted import v3 result marker failed", WrapTaskLog(t, mlog.Err(err))...)
 			return

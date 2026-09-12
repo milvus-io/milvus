@@ -41,7 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	importbinlog "github.com/milvus-io/milvus/internal/util/importutilv2/binlog"
 	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
-	importparquet "github.com/milvus-io/milvus/internal/util/importutilv2/parquet"
+	"github.com/milvus-io/milvus/internal/util/importutilv2/reshardmem"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -647,18 +647,16 @@ func calculateV3Slots(workingSet, memoryPerSlot int64) int64 {
 	return max((workingSet+memoryPerSlot-1)/memoryPerSlot, 1)
 }
 
-// calculateReshardTaskSlot sizes a reshard task's working set from the same
-// physical components the reader actually holds: the fixed parquet read
-// buffered stream (charged once, sources are read sequentially), the in-flight
-// source/normalized/routed batches, the resident bucket plus its Sort
-// materialization, and the packed writer buffer. Source reading runs one
-// batch ahead of the routing side (the reshard prefetcher holds one buffered
-// batch plus one in-flight Read while the main goroutine flushes), so the
-// read buffers are charged one extra batch. No churn/GC multiplier is
-// applied; that headroom is still being measured.
-func calculateReshardTaskSlot(parquetReadBuffer, readBuffer, fragmentTarget, writerBuffer, memoryPerSlot int64) int64 {
-	workingSet := parquetReadBuffer + 4*readBuffer + 2*fragmentTarget + writerBuffer
-	return calculateV3Slots(workingSet, memoryPerSlot)
+// calculateReshardTaskSlot converts the shared reshard memory model
+// (importutilv2/reshardmem -- the single source of truth also used by the
+// DataNode runtime) into slots. The charge is a CEILING, not a reservation:
+// the DataNode spills resident data once it exceeds slot x memoryLimitPerSlot,
+// and its dynamic free-memory checkpoint spills below that ceiling whenever
+// the real process memory is tighter than the per-task budgets assumed. No
+// churn/GC multiplier is applied on top; that headroom is still being
+// measured.
+func calculateReshardTaskSlot(mem reshardmem.Model, memoryPerSlot, buckets, bucketCap int64) int64 {
+	return calculateV3Slots(mem.WorkingSet(buckets, bucketCap), memoryPerSlot)
 }
 
 func calculateV3ImportTaskSlot(readBuffer, writerBuffer, memoryPerSlot int64, fanIn int) int64 {
@@ -737,12 +735,12 @@ func (c *importCheckerV3) createReshardTask(job ImportJob, taskID int64, sources
 	if err != nil {
 		return err
 	}
-	slot := calculateReshardTaskSlot(
-		importparquet.TotalReadBufferSize,
-		Params.DataNodeCfg.ImportBaseBufferSize.GetAsInt64(),
-		fragmentSize,
-		packed.DefaultWriteBufferSize,
-		Params.DataCoordCfg.ImportMemoryLimitPerSlot.GetAsInt64(),
+	slot := calculateReshardTaskSlot(reshardmem.Model{
+		ReadBuffer:     Params.DataNodeCfg.ImportBaseBufferSize.GetAsInt64(),
+		FragmentTarget: fragmentSize,
+	}, Params.DataCoordCfg.ImportMemoryLimitPerSlot.GetAsInt64(),
+		int64(len(job.GetVchannels())*len(job.GetPartitionIDs())),
+		Params.DataCoordCfg.ReshardResidentBucketCap.GetAsInt64(),
 	)
 	task := newReshardTask(&datapb.ReshardTask{JobId: job.GetJobID(), TaskId: taskID, CollectionId: job.GetCollectionID(), State: datapb.ImportTaskStateV2_Pending, RunId: 1, NodeId: NullNodeID, Slot: slot, SourceIds: sourceIDs}, c.importMeta, c.meta, c.alloc)
 	return c.importMeta.AddTask(c.ctx, task)
