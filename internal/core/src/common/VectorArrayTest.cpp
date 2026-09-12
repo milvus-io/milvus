@@ -217,7 +217,7 @@ TEST(VectorArray, RejectsInvalidDimensions) {
         proto::schema::VectorField field;
         field.set_dim(dim);
         field.mutable_float_vector()->add_data(1.0f);
-        EXPECT_ANY_THROW({ VectorArray array(field); });
+        EXPECT_ANY_THROW({ milvus::VectorArray array(field); });
     }
 }
 
@@ -238,7 +238,7 @@ TEST(VectorArray, RejectsPartialVectors) {
 
     for (const auto& field : fields) {
         SCOPED_TRACE(static_cast<int>(field.data_case()));
-        EXPECT_ANY_THROW({ VectorArray array(field); });
+        EXPECT_ANY_THROW({ milvus::VectorArray array(field); });
     }
 }
 
@@ -257,11 +257,11 @@ TEST(VectorArray, OwnedBytesRoundTripForEveryEncoding) {
 
     for (const auto& field : fields) {
         SCOPED_TRACE(static_cast<int>(field.data_case()));
-        VectorArray array(field);
+        milvus::VectorArray array(field);
         EXPECT_EQ(array.length(), 2);
         EXPECT_EQ(array.output_data().SerializeAsString(),
                   field.SerializeAsString());
-        VectorArray copy(array);
+        milvus::VectorArray copy(array);
         EXPECT_NE(copy.data(), array.data());
         EXPECT_EQ(copy.output_data().SerializeAsString(),
                   field.SerializeAsString());
@@ -277,7 +277,7 @@ TEST(VectorArray, EmptyRowsPreserveEncoding) {
     fields[4].mutable_int8_vector();
     for (auto& field : fields) {
         field.set_dim(16);
-        VectorArray array(field);
+        milvus::VectorArray array(field);
         EXPECT_EQ(array.length(), 0);
         EXPECT_EQ(array.byte_size(), 0);
         EXPECT_EQ(array.output_data().SerializeAsString(),
