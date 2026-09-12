@@ -12,6 +12,7 @@ package importv3
 import (
 	"context"
 	"io"
+	"runtime/debug"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -113,6 +114,7 @@ func (e *MergeExecutor) Execute(
 			if err != nil {
 				return 0, err
 			}
+			debug.FreeOSMemory()
 			next = append(next, source)
 		}
 		inputs = next

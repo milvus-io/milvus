@@ -964,6 +964,7 @@ dataCoord:
     memoryLimitPerSlot: 160 # The memory limit (in MB) of buffer size per slot for pre-import/import task.
     fragmentSizeInMB: 128 # Target logical size in MiB for one sorted ImportTaskV3 fragment.
     fragmentMergeFanIn: 16 # Maximum direct merge fan-in used by ImportTaskV3. Values must be in [2,1024].
+    reshardResidentBucketCap: 16 # Number of (vchannel, partition) buckets whose full in-flight working set (cap x fragmentSizeInMB) the ImportTaskV3 reshard slot estimate keeps memory-resident as a ceiling, so a job with at most this many buckets can reshard without local spill on an idle node. The DataNode's dynamic memory probe may still spill below this ceiling when the real process memory is tight. Jobs with more buckets spill the excess; the cap also bounds per-task slot demand so the task stays schedulable on small nodes.
     maxSegmentsPerCopyTask: 100 # Maximum number of segments that can be grouped into a single copy task during snapshot restore.
   gracefulStopTimeout: 5 # seconds. force stop node without graceful stop
   slot:

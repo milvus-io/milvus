@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -239,6 +240,76 @@ var retryTestSchema = &schemapb.CollectionSchema{
 	Fields: []*schemapb.FieldSchema{
 		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 	},
+}
+
+// TestImportTaskV3AcceptanceNotifiesIndexBuild pins the per-segment index
+// wakeup: accepting a Completed worker result persists the segment as
+// Flushed+IsSorted and must push it to the indexInspector's build channel in
+// the same tick. Without the push, a burst of finishing import tasks leaves
+// every accepted segment waiting for the next TaskCheckInterval (60s) scan,
+// which makes index building effectively start only after the whole merge
+// stage (V2 parity: postFlush and mixCompaction push each finished segment).
+// A zero-row placeholder is dropped at acceptance and must NOT be pushed:
+// the buildIndexCh consumer does not re-check the segment state.
+func TestImportTaskV3AcceptanceNotifiesIndexBuild(t *testing.T) {
+	ctx := context.Background()
+	drainBuildIndexCh()
+	defer drainBuildIndexCh()
+
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	meta.AddCollection(&collectionInfo{ID: 2, Schema: retryTestSchema})
+	importMeta := NewMockImportMeta(t)
+	cluster := session.NewMockCluster(t)
+
+	job := &importJob{ImportJob: &datapb.ImportJob{
+		JobID: 1, CollectionID: 2, State: internalpb.ImportJobState_Importing, DataTs: 1, Schema: retryTestSchema,
+	}}
+
+	// Non-empty result: accepted segment is Flushed and pushed.
+	_, err = addImportSegment(ctx, meta, 100, 1, 10, 2, 3, "v0", datapb.SegmentLevel_L1, storage.StorageV2, 0)
+	require.NoError(t, err)
+	task := newImportTaskV3(&datapb.ImportTaskV3{
+		JobId: 1, TaskId: 10, CollectionId: 2, State: datapb.ImportTaskStateV2_InProgress,
+		RunId: 1, NodeId: 5, SegmentId: 100, LogRange: &datapb.IDRange{Begin: 1000, End: 2000},
+	}, importMeta, meta, nil)
+
+	cluster.EXPECT().QueryImportV3(int64(5), mock.Anything).Return(&datapb.QueryImportTaskV3Response{
+		Status: merr.Success(), State: datapb.ImportTaskStateV2_Completed,
+		Segments: []*datapb.SegmentResult{{
+			Rows:       10,
+			Statistics: &datapb.Statistics{TimestampFrom: 10, TimestampTo: 20},
+		}},
+	}, nil).Once()
+	// One GetJob for the Completed-race guard, one inside acceptResult.
+	importMeta.EXPECT().GetJob(mock.Anything, int64(1)).Return(job).Twice()
+	importMeta.EXPECT().UpdateTask(mock.Anything, int64(10), mock.Anything).Return(nil).Once()
+
+	task.QueryTaskOnWorker(cluster)
+
+	seg := meta.GetSegment(ctx, 100)
+	require.Equal(t, commonpb.SegmentState_Flushed, seg.GetState())
+	require.True(t, seg.GetIsSorted())
+	require.Equal(t, []int64{100}, drainBuildIndexCh())
+
+	// Zero-row result: placeholder dropped at acceptance, nothing pushed.
+	_, err = addImportSegment(ctx, meta, 101, 1, 11, 2, 3, "v0", datapb.SegmentLevel_L1, storage.StorageV2, 0)
+	require.NoError(t, err)
+	task2 := newImportTaskV3(&datapb.ImportTaskV3{
+		JobId: 1, TaskId: 11, CollectionId: 2, State: datapb.ImportTaskStateV2_InProgress,
+		RunId: 1, NodeId: 5, SegmentId: 101, LogRange: &datapb.IDRange{Begin: 2000, End: 3000},
+	}, importMeta, meta, nil)
+	cluster.EXPECT().QueryImportV3(int64(5), mock.Anything).Return(&datapb.QueryImportTaskV3Response{
+		Status: merr.Success(), State: datapb.ImportTaskStateV2_Completed,
+		Segments: []*datapb.SegmentResult{{Rows: 0}},
+	}, nil).Once()
+	importMeta.EXPECT().GetJob(mock.Anything, int64(1)).Return(job).Twice()
+	importMeta.EXPECT().UpdateTask(mock.Anything, int64(11), mock.Anything).Return(nil).Once()
+
+	task2.QueryTaskOnWorker(cluster)
+
+	require.Equal(t, commonpb.SegmentState_Dropped, meta.GetSegment(ctx, 101).GetState())
+	require.Empty(t, drainBuildIndexCh())
 }
 
 func TestReconcileOrphanImportSegments(t *testing.T) {

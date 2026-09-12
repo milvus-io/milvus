@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"sync"
@@ -36,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/binlog"
+	"github.com/milvus-io/milvus/internal/util/importutilv2/reshardmem"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -43,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -345,7 +348,8 @@ func executeReshardPlan(ctx context.Context, cm storage.ChunkManager, req *datap
 	// sources get theirs computed here so fragments are uniform either way.
 	runFunctions := !plan.GetBackup()
 
-	effectiveFragmentInput := effectiveReshardFragmentInput(memoryBudget, fragmentTarget, bufferSize)
+	memModel := reshardmem.Model{ReadBuffer: bufferSize, FragmentTarget: fragmentTarget}
+	effectiveFragmentInput := memModel.SortInput(memoryBudget)
 	var counters reshardRunCounters
 	// flushBucket sorts and writes one bucket's fragments synchronously while
 	// the prepare stage keeps reading ahead, so the source side no longer stalls
@@ -381,6 +385,7 @@ func executeReshardPlan(ctx context.Context, cm storage.ChunkManager, req *datap
 			_ = os.Remove(chunk)
 		}
 		*b = reshardBucket{vchannelOrdinal: b.vchannelOrdinal, partitionOrdinal: b.partitionOrdinal}
+		debug.FreeOSMemory()
 		return nil
 	}
 
@@ -544,13 +549,32 @@ func executeReshardPlan(ctx context.Context, cm storage.ChunkManager, req *datap
 							return err
 						}
 						residentBytes -= freed
-					} else if residentBytes > reshardSpillThreshold(memoryBudget, effectiveFragmentInput, bufferSize) {
+					} else if residentBytes > memoryBudget {
 						spilled, err := spillLargest()
 						if err != nil {
 							return err
 						}
 						residentBytes -= spilled
 					}
+				}
+			}
+			// Natural checkpoint: exactly one memory read per source batch --
+			// the batch cadence itself rate-limits the check, so no sampling
+			// timer is needed. Converges on REMAINING memory: while free is
+			// below the model's checkpoint floor (one flush spike + the
+			// system-memory reserve), spill the largest bucket once per
+			// batch. Free memory sees what the per-task budget misses
+			// (concurrent tasks, V2 import, compaction, GC churn, cgo
+			// buffers); this can only push usage below the static ceiling,
+			// never above it. See importutilv2/reshardmem.
+			if residentBytes > 0 {
+				total := int64(hardware.GetMemoryCount())
+				if total-int64(hardware.GetUsedMemoryCount()) < memModel.CheckpointFloor(memoryBudget, total) {
+					spilled, err := spillLargest()
+					if err != nil {
+						return err
+					}
+					residentBytes -= spilled
 				}
 			}
 		}
@@ -563,6 +587,7 @@ func executeReshardPlan(ctx context.Context, cm storage.ChunkManager, req *datap
 		if err := readReshardSource(source); err != nil {
 			return err
 		}
+		debug.FreeOSMemory()
 	}
 
 	keys := make([]reshardBucketKey, 0, len(buckets))
@@ -698,34 +723,6 @@ type reshardFragmentGroup struct {
 	batches      []*storage.InsertData
 	rows         int64
 	logicalBytes int64
-}
-
-// effectiveReshardFragmentInput returns the largest logical input one Sort may
-// consume inside the current task budget. It is a runtime calculation, not a
-// validation gate: when the configured fragment target no longer fits the
-// budget (for example memoryLimitPerSlot was lowered after planning), buckets
-// are split into several smaller fragments and the excess data stays in the
-// existing Arrow IPC spill files until its turn.
-func effectiveReshardFragmentInput(memoryBudget, fragmentTarget, bufferSize int64) int64 {
-	if memoryBudget <= 0 || fragmentTarget <= 0 {
-		return 0
-	}
-	// 3 read buffers cover source/normalized/routed batches; 2x the fragment
-	// input covers Sort record/row-index working space; the packed writer buffer
-	// is accounted by the slot estimate and does not consume bucket bytes.
-	safe := (memoryBudget - 3*bufferSize) / 2
-	if safe < 1 {
-		return 1
-	}
-	return min(fragmentTarget, safe)
-}
-
-// reshardSpillThreshold is the resident-byte level that spills the largest
-// bucket to local Arrow IPC files. Flushing one bucket materializes up to
-// effectiveFragmentInput bytes a second time through the Sort input copy, so
-// spill early enough that the copy still fits inside memoryBudget.
-func reshardSpillThreshold(memoryBudget, effectiveFragmentInput, bufferSize int64) int64 {
-	return memoryBudget - effectiveFragmentInput - 3*bufferSize
 }
 
 // splitReshardBucketForSort packs spill chunks and the in-memory tail into
