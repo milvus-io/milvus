@@ -25,6 +25,8 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	storage "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
@@ -206,6 +208,39 @@ func TestOption_GetStorageVersion(t *testing.T) {
 	version, err = GetStorageVersion(options)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(2), version) // StorageV2 = 2
+}
+
+func TestOption_ValidateImportStorageVersion(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:  100,
+				Name:     "pk",
+				DataType: schemapb.DataType_UUID,
+			},
+		},
+	}
+
+	// V1 with a UUID field is rejected
+	err := ValidateImportStorageVersion(schema, storage.StorageV1)
+	assert.Error(t, err)
+	assert.ErrorContains(t, err, "UUID")
+
+	// V2/V3 with a UUID field is accepted
+	assert.NoError(t, ValidateImportStorageVersion(schema, storage.StorageV2))
+	assert.NoError(t, ValidateImportStorageVersion(schema, storage.StorageV3))
+
+	// V1 without a UUID field is accepted
+	schemaNoUUID := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:  100,
+				Name:     "pk",
+				DataType: schemapb.DataType_Int64,
+			},
+		},
+	}
+	assert.NoError(t, ValidateImportStorageVersion(schemaNoUUID, storage.StorageV1))
 }
 
 func TestSimple(t *testing.T) {

@@ -67,5 +67,8 @@ func CopyPk(dst *schemapb.IDs, src *schemapb.IDs, offset int) {
 	case *schemapb.IDs_StrId:
 		v := src.GetStrId().Data[offset]
 		dst.GetStrId().Data = append(dst.GetStrId().Data, v)
+	case *schemapb.IDs_UuidId:
+		v := src.GetUuidId().Data[offset]
+		dst.GetUuidId().Data = append(dst.GetUuidId().Data, v)
 	}
 }

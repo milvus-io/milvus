@@ -383,7 +383,8 @@ func TestFieldDataBuilder_Build(t *testing.T) {
 				builder = builder.Add(input)
 			}
 
-			got := builder.Build()
+			got, err := builder.Build()
+			assert.NoError(t, err)
 			assert.Equal(t, tt.want.Type, got.Type)
 			assert.Equal(t, GetFieldDataValidData(tt.want), got.GetScalars().GetValidData())
 			assert.True(t, ValidateAndNormalizeFieldDataValidData(got))

@@ -266,7 +266,7 @@ func readBoolListLikeData(field *schemapb.FieldSchema, listReader *listLikeArray
 	}, outputArray)
 }
 
-func readStringListLikeData(field *schemapb.FieldSchema, listReader *listLikeArray, checkValue func(string) error, outputArray func(arr []string, valid bool)) error {
+func readStringListLikeData(field *schemapb.FieldSchema, listReader *listLikeArray, checkValue func(string) (string, error), outputArray func(arr []string, valid bool)) error {
 	valueReader := listReader.ListValues()
 	stringReader, ok := valueReader.(*array.String)
 	if !ok {
@@ -277,9 +277,10 @@ func readStringListLikeData(field *schemapb.FieldSchema, listReader *listLikeArr
 			return "", WrapNullElementErr(field)
 		}
 		val := stringReader.Value(i)
-		if err := checkValue(val); err != nil {
+		newVal, err := checkValue(val)
+		if err != nil {
 			return val, err
 		}
-		return val, nil
+		return newVal, nil
 	}, outputArray)
 }

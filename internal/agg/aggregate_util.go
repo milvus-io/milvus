@@ -25,6 +25,8 @@ func NewFieldAccessor(fieldType schemapb.DataType) (FieldAccessor, error) {
 		return newTimestamptzFieldAccessor(), nil
 	case schemapb.DataType_VarChar, schemapb.DataType_String:
 		return newStringFieldAccessor(), nil
+	case schemapb.DataType_UUID:
+		return newUUIDFieldAccessor(), nil
 	case schemapb.DataType_Float:
 		return newFloat32FieldAccessor(), nil
 	case schemapb.DataType_Double:
@@ -368,6 +370,49 @@ func newStringFieldAccessor() FieldAccessor {
 	return &StringFieldAccessor{hasher: fnv.New64a()}
 }
 
+// UUIDFieldAccessor
+type UUIDFieldAccessor struct {
+	vals      [][]byte
+	validData []bool
+	hasher    hash.Hash64
+}
+
+func (uuidField *UUIDFieldAccessor) Hash(idx int) uint64 {
+	if idx < 0 || idx >= len(uuidField.vals) {
+		panic(fmt.Sprintf("UUIDFieldAccessor.Hash: index %d out of range [0,%d)", idx, len(uuidField.vals)))
+	}
+	if uuidField.IsNullAt(idx) {
+		return nullHashValue
+	}
+	uuidField.hasher.Reset()
+	uuidField.hasher.Write(uuidField.vals[idx])
+	return uuidField.hasher.Sum64()
+}
+
+func (uuidField *UUIDFieldAccessor) SetVals(fieldData *schemapb.FieldData) {
+	uuidField.vals = fieldData.GetScalars().GetBytesData().GetData()
+	uuidField.validData = typeutil.GetFieldDataValidData(fieldData)
+}
+
+func (uuidField *UUIDFieldAccessor) RowCount() int {
+	return len(uuidField.vals)
+}
+
+func (uuidField *UUIDFieldAccessor) ValAt(idx int) interface{} {
+	return uuidField.vals[idx]
+}
+
+func (uuidField *UUIDFieldAccessor) IsNullAt(idx int) bool {
+	if len(uuidField.validData) == 0 {
+		return false
+	}
+	return !uuidField.validData[idx]
+}
+
+func newUUIDFieldAccessor() FieldAccessor {
+	return &UUIDFieldAccessor{hasher: fnv.New64a()}
+}
+
 func AssembleBucket(bucket *Bucket, fieldDatas []*schemapb.FieldData) error {
 	colCount := len(fieldDatas)
 	for r := 0; r < bucket.RowCount(); r++ {
@@ -411,6 +456,8 @@ func AssembleSingleValue(fv *FieldValue, fieldData *schemapb.FieldData) error {
 			fieldData.GetScalars().GetDoubleData().Data = append(fieldData.GetScalars().GetDoubleData().GetData(), 0)
 		case schemapb.DataType_VarChar, schemapb.DataType_String:
 			fieldData.GetScalars().GetStringData().Data = append(fieldData.GetScalars().GetStringData().GetData(), "")
+		case schemapb.DataType_UUID:
+			fieldData.GetScalars().GetBytesData().Data = append(fieldData.GetScalars().GetBytesData().GetData(), make([]byte, 16))
 		default:
 			return merr.WrapErrParameterInvalidMsg("unsupported DataType:%d", fieldData.GetType())
 		}
@@ -462,6 +509,17 @@ func AssembleSingleValue(fv *FieldValue, fieldData *schemapb.FieldData) error {
 			return merr.WrapErrServiceInternalMsg("type assertion failed: expected string, got %T", val)
 		}
 		fieldData.GetScalars().GetStringData().Data = append(fieldData.GetScalars().GetStringData().GetData(), stringVal)
+	case schemapb.DataType_UUID:
+		switch byteVal := val.(type) {
+		case []byte:
+			fieldData.GetScalars().GetBytesData().Data = append(fieldData.GetScalars().GetBytesData().GetData(), byteVal)
+		case [16]byte:
+			fieldData.GetScalars().GetBytesData().Data = append(fieldData.GetScalars().GetBytesData().GetData(), byteVal[:])
+		case string:
+			fieldData.GetScalars().GetBytesData().Data = append(fieldData.GetScalars().GetBytesData().GetData(), []byte(byteVal))
+		default:
+			return merr.WrapErrServiceInternalMsg("type assertion failed for UUID, got %T", val)
+		}
 	default:
 		return merr.WrapErrParameterInvalidMsg("unsupported DataType:%d", fieldData.GetType())
 	}

@@ -1,6 +1,8 @@
 package importv2
 
 import (
+	"fmt"
+	"hash/crc32"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -9,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestNewHashedData(t *testing.T) {
@@ -35,88 +38,203 @@ func TestNewHashedData(t *testing.T) {
 }
 
 func TestHashData(t *testing.T) {
-	schema := &schemapb.CollectionSchema{
-		Fields: []*schemapb.FieldSchema{
-			{
-				FieldID:      100,
-				Name:         "pk",
-				DataType:     schemapb.DataType_Int64,
-				IsPrimaryKey: true,
+	t.Run("test int64 pk and int64 partition key", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "pk",
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+				},
+				{
+					FieldID:        101,
+					Name:           "partition_key",
+					DataType:       schemapb.DataType_Int64,
+					IsPartitionKey: true,
+				},
 			},
-			{
-				FieldID:        101,
-				Name:           "partition_key",
-				DataType:       schemapb.DataType_Int64,
-				IsPartitionKey: true,
-			},
-		},
-	}
-
-	mockTask := NewMockTask(t)
-	mockTask.On("GetSchema").Return(schema).Maybe()
-	mockTask.On("GetVchannels").Return([]string{"channel1", "channel2"}).Maybe()
-	mockTask.On("GetPartitionIDs").Return([]int64{1, 2}).Maybe()
-	mockTask.On("Execute").Return([]*conc.Future[any]{}).Maybe()
-	mockTask.On("GetJobID").Return(int64(1)).Maybe()
-	mockTask.On("GetTaskID").Return(int64(1)).Maybe()
-	mockTask.On("GetCollectionID").Return(int64(1)).Maybe()
-
-	rows, err := storage.NewInsertData(schema)
-	assert.NoError(t, err)
-
-	// Add 1000 rows of test data
-	for i := 0; i < 1000; i++ {
-		rows.Append(map[int64]interface{}{
-			100: int64(i),       // primary key
-			101: int64(i%2 + 1), // partition key, alternates between 1 and 2
-		})
-	}
-
-	got, err := HashData(mockTask, rows)
-	assert.NoError(t, err)
-	assert.Equal(t, 2, len(got))
-
-	// Verify data distribution
-	totalRows := 0
-	for i := 0; i < 2; i++ {
-		assert.Equal(t, 2, len(got[i]))
-		for j := 0; j < 2; j++ {
-			assert.NotNil(t, got[i][j])
-			totalRows += got[i][j].GetRowNum()
 		}
-	}
-	assert.Equal(t, 1000, totalRows)
+
+		mockTask := NewMockTask(t)
+		mockTask.On("GetSchema").Return(schema).Maybe()
+		mockTask.On("GetVchannels").Return([]string{"channel1", "channel2"}).Maybe()
+		mockTask.On("GetPartitionIDs").Return([]int64{1, 2}).Maybe()
+		mockTask.On("Execute").Return([]*conc.Future[any]{}).Maybe()
+		mockTask.On("GetJobID").Return(int64(1)).Maybe()
+		mockTask.On("GetTaskID").Return(int64(1)).Maybe()
+		mockTask.On("GetCollectionID").Return(int64(1)).Maybe()
+
+		rows, err := storage.NewInsertData(schema)
+		assert.NoError(t, err)
+
+		// Add 1000 rows of test data
+		for i := 0; i < 1000; i++ {
+			rows.Append(map[int64]interface{}{
+				100: int64(i),       // primary key
+				101: int64(i%2 + 1), // partition key, alternates between 1 and 2
+			})
+		}
+
+		got, err := HashData(mockTask, rows)
+		assert.NoError(t, err)
+		assert.Equal(t, 2, len(got))
+
+		// Verify data distribution
+		totalRows := 0
+		for i := 0; i < 2; i++ {
+			assert.Equal(t, 2, len(got[i]))
+			for j := 0; j < 2; j++ {
+				assert.NotNil(t, got[i][j])
+				totalRows += got[i][j].GetRowNum()
+			}
+		}
+		assert.Equal(t, 1000, totalRows)
+	})
+
+	t.Run("test uuid pk and uuid partition key", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "pk",
+					DataType:     schemapb.DataType_UUID,
+					IsPrimaryKey: true,
+				},
+				{
+					FieldID:        101,
+					Name:           "partition_key",
+					DataType:       schemapb.DataType_UUID,
+					IsPartitionKey: true,
+				},
+			},
+		}
+
+		mockTask := NewMockTask(t)
+		mockTask.On("GetSchema").Return(schema).Maybe()
+		mockTask.On("GetVchannels").Return([]string{"channel1", "channel2"}).Maybe()
+		mockTask.On("GetPartitionIDs").Return([]int64{1, 2}).Maybe()
+		mockTask.On("Execute").Return([]*conc.Future[any]{}).Maybe()
+		mockTask.On("GetJobID").Return(int64(1)).Maybe()
+		mockTask.On("GetTaskID").Return(int64(1)).Maybe()
+		mockTask.On("GetCollectionID").Return(int64(1)).Maybe()
+
+		rows, err := storage.NewInsertData(schema)
+		assert.NoError(t, err)
+
+		var pks, partKeys [1000]string
+		// Add 1000 rows of test data
+		for i := 0; i < 1000; i++ {
+			pks[i] = fmt.Sprintf("00000000-0000-0000-0000-%012d", i)
+			partKeys[i] = "00000000-0000-0000-0000-000000000001"
+			if i%2 == 0 {
+				partKeys[i] = "00000000-0000-0000-0000-000000000002"
+			}
+			rows.Append(map[int64]interface{}{
+				100: pks[i],
+				101: partKeys[i],
+			})
+		}
+
+		got, err := HashData(mockTask, rows)
+		assert.NoError(t, err)
+		assert.Equal(t, 2, len(got))
+
+		totalRows := 0
+		for i := 0; i < 2; i++ {
+			assert.Equal(t, 2, len(got[i]))
+			for j := 0; j < 2; j++ {
+				assert.NotNil(t, got[i][j])
+				totalRows += got[i][j].GetRowNum()
+			}
+		}
+		assert.Equal(t, 1000, totalRows)
+
+		expectedChannelCount := make([]int64, 2)
+		expectedPartitionCount := make([]int64, 2)
+		for i := 0; i < 1000; i++ {
+			uPK, errPK := typeutil.ParseUUID(pks[i])
+			assert.NoError(t, errPK)
+			uPart, errPart := typeutil.ParseUUID(partKeys[i])
+			assert.NoError(t, errPart)
+			expectedChannelCount[int64(crc32.ChecksumIEEE(uPK[:]))%2]++
+			expectedPartitionCount[int64(crc32.ChecksumIEEE(uPart[:]))%2]++
+		}
+		channelCounts := make([]int64, 2)
+		partitionCounts := make([]int64, 2)
+		for channelIndex, channel := range got {
+			for partitionIndex, data := range channel {
+				channelCounts[channelIndex] += int64(data.GetRowNum())
+				partitionCounts[partitionIndex] += int64(data.GetRowNum())
+			}
+		}
+		assert.Equal(t, expectedChannelCount, channelCounts)
+		assert.Equal(t, expectedPartitionCount, partitionCounts)
+	})
 }
 
 func TestHashDeleteData(t *testing.T) {
-	schema := &schemapb.CollectionSchema{
-		Fields: []*schemapb.FieldSchema{
-			{
-				FieldID:      100,
-				Name:         "pk",
-				DataType:     schemapb.DataType_Int64,
-				IsPrimaryKey: true,
+	t.Run("test int64 pk", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "pk",
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+				},
 			},
-		},
-	}
+		}
 
-	mockTask := NewMockTask(t)
-	mockTask.On("GetSchema").Return(schema).Maybe()
-	mockTask.On("GetVchannels").Return([]string{"channel1", "channel2"}).Maybe()
-	mockTask.On("Execute").Return([]*conc.Future[any]{}).Maybe()
-	mockTask.On("GetJobID").Return(int64(1)).Maybe()
-	mockTask.On("GetTaskID").Return(int64(1)).Maybe()
-	mockTask.On("GetCollectionID").Return(int64(1)).Maybe()
+		mockTask := NewMockTask(t)
+		mockTask.On("GetSchema").Return(schema).Maybe()
+		mockTask.On("GetVchannels").Return([]string{"channel1", "channel2"}).Maybe()
+		mockTask.On("Execute").Return([]*conc.Future[any]{}).Maybe()
+		mockTask.On("GetJobID").Return(int64(1)).Maybe()
+		mockTask.On("GetTaskID").Return(int64(1)).Maybe()
+		mockTask.On("GetCollectionID").Return(int64(1)).Maybe()
 
-	delData := storage.NewDeleteData(nil, nil)
-	delData.Append(storage.NewInt64PrimaryKey(1), 1)
+		delData := storage.NewDeleteData(nil, nil)
+		delData.Append(storage.NewInt64PrimaryKey(1), 1)
 
-	got, err := HashDeleteData(mockTask, delData)
-	assert.NoError(t, err)
-	assert.Equal(t, 2, len(got))
-	for i := 0; i < 2; i++ {
-		assert.NotNil(t, got[i])
-	}
+		got, err := HashDeleteData(mockTask, delData)
+		assert.NoError(t, err)
+		assert.Equal(t, 2, len(got))
+		for i := 0; i < 2; i++ {
+			assert.NotNil(t, got[i])
+		}
+	})
+
+	t.Run("test uuid pk", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "pk",
+					DataType:     schemapb.DataType_UUID,
+					IsPrimaryKey: true,
+				},
+			},
+		}
+
+		mockTask := NewMockTask(t)
+		mockTask.On("GetSchema").Return(schema).Maybe()
+		mockTask.On("GetVchannels").Return([]string{"channel1", "channel2"}).Maybe()
+		mockTask.On("Execute").Return([]*conc.Future[any]{}).Maybe()
+		mockTask.On("GetJobID").Return(int64(1)).Maybe()
+		mockTask.On("GetTaskID").Return(int64(1)).Maybe()
+		mockTask.On("GetCollectionID").Return(int64(1)).Maybe()
+
+		delData := storage.NewDeleteData(nil, nil)
+		delData.Append(storage.NewVarCharPrimaryKey("00000000-0000-0000-0000-000000000001"), 1)
+
+		got, err := HashDeleteData(mockTask, delData)
+		assert.NoError(t, err)
+		assert.Equal(t, 2, len(got))
+		for i := 0; i < 2; i++ {
+			assert.NotNil(t, got[i])
+		}
+	})
 }
 
 func TestGetRowsStats(t *testing.T) {
@@ -155,6 +273,67 @@ func TestGetRowsStats(t *testing.T) {
 			rows.Append(map[int64]interface{}{
 				100: int64(i),       // primary key
 				101: int64(i%2 + 1), // partition key, alternates between 1 and 2
+			})
+		}
+
+		got, err := GetRowsStats(mockTask, rows)
+		assert.NoError(t, err)
+		assert.Equal(t, 2, len(got))
+
+		// Verify statistics
+		totalRows := int64(0)
+		for _, stats := range got {
+			assert.NotNil(t, stats)
+			assert.NotNil(t, stats.PartitionRows)
+			assert.NotNil(t, stats.PartitionDataSize)
+
+			for _, count := range stats.PartitionRows {
+				totalRows += count
+			}
+		}
+		assert.Equal(t, int64(1000), totalRows)
+	})
+
+	t.Run("test uuid pk and uuid partition key", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "pk",
+					DataType:     schemapb.DataType_UUID,
+					IsPrimaryKey: true,
+				},
+				{
+					FieldID:        101,
+					Name:           "partition_key",
+					DataType:       schemapb.DataType_UUID,
+					IsPartitionKey: true,
+				},
+			},
+		}
+
+		mockTask := NewMockTask(t)
+		mockTask.On("GetSchema").Return(schema).Maybe()
+		mockTask.On("GetVchannels").Return([]string{"channel1", "channel2"}).Maybe()
+		mockTask.On("GetPartitionIDs").Return([]int64{1, 2}).Maybe()
+		mockTask.On("Execute").Return([]*conc.Future[any]{}).Maybe()
+		mockTask.On("GetJobID").Return(int64(1)).Maybe()
+		mockTask.On("GetTaskID").Return(int64(1)).Maybe()
+		mockTask.On("GetCollectionID").Return(int64(1)).Maybe()
+
+		rows, err := storage.NewInsertData(schema)
+		assert.NoError(t, err)
+
+		// Add 1000 rows of test data
+		for i := 0; i < 1000; i++ {
+			pk := fmt.Sprintf("00000000-0000-0000-0000-%012d", i)
+			partKey := "00000000-0000-0000-0000-000000000001"
+			if i%2 == 0 {
+				partKey = "00000000-0000-0000-0000-000000000002"
+			}
+			rows.Append(map[int64]interface{}{
+				100: pk,
+				101: partKey,
 			})
 		}
 
@@ -250,37 +429,73 @@ func TestGetRowsStats(t *testing.T) {
 }
 
 func TestGetDeleteStats(t *testing.T) {
-	schema := &schemapb.CollectionSchema{
-		Fields: []*schemapb.FieldSchema{
-			{
-				FieldID:      100,
-				Name:         "pk",
-				DataType:     schemapb.DataType_Int64,
-				IsPrimaryKey: true,
+	t.Run("test int64 pk", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "pk",
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+				},
 			},
-		},
-	}
+		}
 
-	mockTask := NewMockTask(t)
-	mockTask.On("GetSchema").Return(schema).Maybe()
-	mockTask.On("GetVchannels").Return([]string{"channel1", "channel2"}).Maybe()
-	mockTask.On("GetPartitionIDs").Return([]int64{1}).Maybe()
-	mockTask.On("Execute").Return([]*conc.Future[any]{}).Maybe()
-	mockTask.On("GetJobID").Return(int64(1)).Maybe()
-	mockTask.On("GetTaskID").Return(int64(1)).Maybe()
-	mockTask.On("GetCollectionID").Return(int64(1)).Maybe()
+		mockTask := NewMockTask(t)
+		mockTask.On("GetSchema").Return(schema).Maybe()
+		mockTask.On("GetVchannels").Return([]string{"channel1", "channel2"}).Maybe()
+		mockTask.On("GetPartitionIDs").Return([]int64{1}).Maybe()
+		mockTask.On("Execute").Return([]*conc.Future[any]{}).Maybe()
+		mockTask.On("GetJobID").Return(int64(1)).Maybe()
+		mockTask.On("GetTaskID").Return(int64(1)).Maybe()
+		mockTask.On("GetCollectionID").Return(int64(1)).Maybe()
 
-	delData := storage.NewDeleteData(nil, nil)
-	delData.Append(storage.NewInt64PrimaryKey(1), 1)
+		delData := storage.NewDeleteData(nil, nil)
+		delData.Append(storage.NewInt64PrimaryKey(1), 1)
 
-	got, err := GetDeleteStats(mockTask, delData)
-	assert.NoError(t, err)
-	assert.Equal(t, 2, len(got))
-	for _, stats := range got {
-		assert.NotNil(t, stats)
-		assert.NotNil(t, stats.PartitionRows)
-		assert.NotNil(t, stats.PartitionDataSize)
-	}
+		got, err := GetDeleteStats(mockTask, delData)
+		assert.NoError(t, err)
+		assert.Equal(t, 2, len(got))
+		for _, stats := range got {
+			assert.NotNil(t, stats)
+			assert.NotNil(t, stats.PartitionRows)
+			assert.NotNil(t, stats.PartitionDataSize)
+		}
+	})
+
+	t.Run("test uuid pk", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "pk",
+					DataType:     schemapb.DataType_UUID,
+					IsPrimaryKey: true,
+				},
+			},
+		}
+
+		mockTask := NewMockTask(t)
+		mockTask.On("GetSchema").Return(schema).Maybe()
+		mockTask.On("GetVchannels").Return([]string{"channel1", "channel2"}).Maybe()
+		mockTask.On("GetPartitionIDs").Return([]int64{1}).Maybe()
+		mockTask.On("Execute").Return([]*conc.Future[any]{}).Maybe()
+		mockTask.On("GetJobID").Return(int64(1)).Maybe()
+		mockTask.On("GetTaskID").Return(int64(1)).Maybe()
+		mockTask.On("GetCollectionID").Return(int64(1)).Maybe()
+
+		delData := storage.NewDeleteData(nil, nil)
+		delData.Append(storage.NewVarCharPrimaryKey("00000000-0000-0000-0000-000000000001"), 1)
+
+		got, err := GetDeleteStats(mockTask, delData)
+		assert.NoError(t, err)
+		assert.Equal(t, 2, len(got))
+		for _, stats := range got {
+			assert.NotNil(t, stats)
+			assert.NotNil(t, stats.PartitionRows)
+			assert.NotNil(t, stats.PartitionDataSize)
+		}
+	})
 }
 
 func TestMergeHashedStats(t *testing.T) {

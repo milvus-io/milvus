@@ -96,6 +96,7 @@ const (
 	testFloatField       = "float"
 	testDoubleField      = "double"
 	testVarCharField     = "varChar"
+	testUUIDField        = "uuid"
 	testFloatVecField    = "fvec"
 	testBinaryVecField   = "bvec"
 	testFloat16VecField  = "f16vec"

@@ -202,6 +202,39 @@ func (w *NativePayloadWriter) AddDataToPayloadForUT(data interface{}, validData 
 			isValid = validData[0]
 		}
 		return w.AddOneStringToPayload(val, isValid)
+	case schemapb.DataType_UUID:
+		isValid := true
+		if len(validData) > 1 {
+			return merr.WrapErrParameterInvalidMsg("wrong input length when add data to payload")
+		}
+		if len(validData) == 0 && w.nullable {
+			return merr.WrapErrParameterInvalidMsg("need pass valid_data when nullable==true")
+		}
+		if len(validData) == 1 {
+			if !w.nullable {
+				return merr.WrapErrParameterInvalidMsg("no need pass valid_data when nullable==false")
+			}
+			isValid = validData[0]
+		}
+		var uuidBytes []byte
+		switch v := data.(type) {
+		case string:
+			parsed, err := typeutil.ParseUUID(v)
+			if err != nil {
+				return err
+			}
+			uuidBytes = parsed[:]
+		case []byte:
+			if len(v) != 16 {
+				return merr.WrapErrParameterInvalidMsg("incorrect UUID byte length %d", len(v))
+			}
+			uuidBytes = v
+		case [16]byte:
+			uuidBytes = v[:]
+		default:
+			return merr.WrapErrParameterInvalidMsg("incorrect data type for UUID, expected string or 16-byte array")
+		}
+		return w.AddOneBinaryToPayload(uuidBytes, isValid)
 	case schemapb.DataType_Array:
 		val, ok := data.(*schemapb.ScalarField)
 		if !ok {
@@ -577,6 +610,29 @@ func (w *NativePayloadWriter) AddOneStringToPayload(data string, isValid bool) e
 	builder, ok := w.builder.(*array.StringBuilder)
 	if !ok {
 		return merr.WrapErrServiceInternalMsg("failed to cast StringBuilder")
+	}
+
+	if !isValid {
+		builder.AppendNull()
+	} else {
+		builder.Append(data)
+	}
+
+	return nil
+}
+
+func (w *NativePayloadWriter) AddOneBinaryToPayload(data []byte, isValid bool) error {
+	if w.finished {
+		return merr.WrapErrServiceInternalMsg("can't append data to finished binary payload")
+	}
+
+	if !w.nullable && !isValid {
+		return merr.WrapErrParameterInvalidMsg("not support null when nullable is false")
+	}
+
+	builder, ok := w.builder.(*array.FixedSizeBinaryBuilder)
+	if !ok {
+		return merr.WrapErrServiceInternalMsg("failed to cast FixedSizeBinaryBuilder")
 	}
 
 	if !isValid {

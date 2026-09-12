@@ -48,6 +48,8 @@ func (t FieldType) Name() string {
 		return "Double"
 	case FieldTypeTimestamptz:
 		return "Timestamptz"
+	case FieldTypeUUID:
+		return "UUID"
 	case FieldTypeString:
 		return "String"
 	case FieldTypeVarChar:
@@ -100,6 +102,8 @@ func (t FieldType) String() string {
 		return "string"
 	case FieldTypeText:
 		return "string"
+	case FieldTypeUUID:
+		return "string"
 	case FieldTypeArray:
 		return "Array"
 	case FieldTypeJSON:
@@ -146,6 +150,8 @@ func (t FieldType) PbFieldType() (string, string) {
 		return "VarChar", "string"
 	case FieldTypeText:
 		return "Text", "string"
+	case FieldTypeUUID:
+		return "UUID", "string"
 	case FieldTypeJSON:
 		return "JSON", "JSON"
 	case FieldTypeGeometry:
@@ -197,6 +203,8 @@ const (
 	FieldTypeText FieldType = 25 // variable-length strings without a required max_length
 	// FieldTypeTimestamptz field type timestamptz
 	FieldTypeTimestamptz FieldType = 26
+	// FieldTypeUUID field type UUID
+	FieldTypeUUID FieldType = 31
 	// FieldTypeBinaryVector field type binary vector
 	FieldTypeBinaryVector FieldType = 100
 	// FieldTypeFloatVector field type float vector

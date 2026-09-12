@@ -33,7 +33,8 @@ func isSupportedAggFieldType(aggregateName string, dt schemapb.DataType) bool {
 			schemapb.DataType_Double,
 			schemapb.DataType_VarChar,
 			schemapb.DataType_String,
-			schemapb.DataType_Timestamptz:
+			schemapb.DataType_Timestamptz,
+			schemapb.DataType_UUID:
 			return true
 		default:
 			return false
