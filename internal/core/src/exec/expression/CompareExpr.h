@@ -625,6 +625,8 @@ class PhyCompareFilterExpr : public Expr {
     int64_t current_chunk_pos_{0};
     std::optional<bool> can_use_both_data_sequential_fast_path_;
 
+    segcore::StringScanState left_string_scan_state_;
+    segcore::StringScanState right_string_scan_state_;
     const segcore::SegmentChunkReader segment_chunk_reader_;
     int64_t batch_size_;
     std::shared_ptr<const milvus::expr::CompareExpr> expr_;
