@@ -30,6 +30,7 @@
 #include <vector>
 
 #include "cachinglayer/CacheSlot.h"
+#include "common/Chunk.h"
 #include "common/EasyAssert.h"
 #include "common/Json.h"
 #include "common/JsonUtils.h"
@@ -199,12 +200,9 @@ class SealedDataGetter : public DataGetter<OutputType> {
         str_pw_map;
 
     PinWrapper<const index::IndexBase*> index_ptr_;
-    // Getting str_view from segment is cpu-costly, this map is to cache this view for performance.
+    // Keep the JSON bytes pinned without materializing views for unused rows.
     // Shares the same single-thread contract as str_pw_map above.
-    mutable std::unordered_map<
-        int64_t,
-        PinWrapper<std::pair<std::vector<milvus::Json>, ValidityView>>>
-        json_pw_map;
+    mutable std::unordered_map<int64_t, PinWrapper<Chunk*>> json_pw_map;
 
  public:
     SealedDataGetter(milvus::OpContext* op_ctx,
@@ -253,17 +251,22 @@ class SealedDataGetter : public DataGetter<OutputType> {
                 std::string_view str_val_view = str_chunk_view[inner_offset];
                 return std::string(str_val_view.data(), str_val_view.length());
             } else if constexpr (std::is_same_v<InnerRawType, milvus::Json>) {
-                if (json_pw_map.find(chunk_id) == json_pw_map.end()) {
-                    auto pw = segment_.chunk_view<milvus::Json>(
-                        op_ctx_, field_id_, chunk_id);
-                    json_pw_map[chunk_id] = std::move(pw);
+                auto it = json_pw_map.find(chunk_id);
+                if (it == json_pw_map.end()) {
+                    auto column = segment_.GetChunkedColumn(field_id_);
+                    AssertInfo(column != nullptr,
+                               "JSON group-by field {} has no raw column",
+                               field_id_.get());
+                    auto pw = column->GetChunk(op_ctx_, chunk_id);
+                    it = json_pw_map.emplace(chunk_id, std::move(pw)).first;
                 }
-                auto& pw = json_pw_map[chunk_id];
-                auto& [json_chunk_view, valid_data] = pw.get();
-                if (valid_data && !valid_data[inner_offset]) {
+                auto* chunk = static_cast<JSONChunk*>(it->second.get());
+                if (!chunk->isValid(inner_offset)) {
                     return std::nullopt;
                 }
-                auto& json_val = json_chunk_view[inner_offset];
+                // JSONChunkWriter provides SIMDJSON_PADDING after the final
+                // row. The cached pin keeps both the bytes and padding alive.
+                milvus::Json json_val((*chunk)[inner_offset]);
                 JSON_TYPE_CASES(OutputType)
                 JSON_STRING_CASE(OutputType)
                 return std::nullopt;
