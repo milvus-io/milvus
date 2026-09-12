@@ -289,8 +289,12 @@ JsonStatsMeta::Deserialize(const std::string& json_str) {
 }
 
 std::unordered_map<std::string, std::set<std::string>>
-JsonStatsMeta::DeserializeToKeyFieldMap(const std::string& json_str) {
+JsonStatsMeta::DeserializeToKeyFieldMap(const std::string& json_str,
+                                        bool* group_by_scalar_reads_safe) {
     std::unordered_map<std::string, std::set<std::string>> key_field_map;
+    if (group_by_scalar_reads_safe != nullptr) {
+        *group_by_scalar_reads_safe = false;
+    }
 
     try {
         nlohmann::json root = nlohmann::json::parse(json_str);
@@ -305,6 +309,14 @@ JsonStatsMeta::DeserializeToKeyFieldMap(const std::string& json_str) {
                 auto json_pointer = GetKeyFromColumnName(column_name);
                 key_field_map[json_pointer].insert(column_name);
             }
+        }
+        if (group_by_scalar_reads_safe != nullptr) {
+            // Read the optional capability in this same parse, without
+            // reconstructing layout entries for SHARED keys.
+            auto version = root.find(META_KEY_GROUP_BY_SCALAR_READ_VERSION);
+            *group_by_scalar_reads_safe = version != root.end() &&
+                                          version->is_number_integer() &&
+                                          *version == 1;
         }
     } catch (const std::exception& e) {
         ThrowInfo(ErrorCode::DataFormatBroken,
