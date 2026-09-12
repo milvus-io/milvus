@@ -177,7 +177,9 @@ func metricsPortAuthMiddleware() gin.HandlerFunc {
 					return
 				}
 			}
-			authenticate(c)
+			// Suppress the legacy Basic challenge only for secured metrics
+			// data routes. The main port and flag-off behavior retain it.
+			authenticateWithChallenge(c, !gateOn)
 		case gateOn:
 			dataPlaneAuth(c)
 		}
@@ -207,7 +209,11 @@ func isOpenMetricsPortPath(c *gin.Context) bool {
 }
 
 func authenticate(c *gin.Context) {
-	username, password, ok := httpserver.ParseUsernamePassword(c)
+	authenticateWithChallenge(c, true)
+}
+
+func authenticateWithChallenge(c *gin.Context, challenge bool) {
+	username, password, ok := httpserver.ParseUsernamePasswordWithChallenge(c, challenge)
 	if ok {
 		if proxy.PasswordVerify(c, username, password) {
 			mlog.Debug(c.Request.Context(), "auth successful", mlog.String("username", username))

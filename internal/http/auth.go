@@ -19,6 +19,7 @@ package http
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -113,8 +114,17 @@ func rejectedAuthDecision(status int, message string) AuthDecision {
 const crossSiteRejection = "cross-site requests are not accepted on this endpoint; " +
 	"open it directly rather than following a link from another site"
 
-// RejectCrossSite reports whether a browser says another site initiated this
-// request.
+// AdminRequestHeader lets non-browser clients explicitly identify a management
+// request when neither Fetch Metadata nor Origin is available. It must not be
+// added to the CORS allow-list: cross-origin scripts must not be able to send
+// it with the browser's cached Basic credentials.
+const AdminRequestHeader = "X-Milvus-Admin-Request"
+
+const missingRequestContextRejection = "request origin cannot be verified; use HTTPS for browser access " +
+	"or send " + AdminRequestHeader + ": true from a non-browser client"
+
+// RejectCrossSite reports whether a request has an untrusted origin or carries
+// credentials without evidence that the client deliberately sent the request.
 //
 // WriteBasicAuthChallenge is what makes this necessary: the challenge teaches
 // the browser to hold root's credential for this origin, so any page the
@@ -126,8 +136,15 @@ const crossSiteRejection = "cross-site requests are not accepted on this endpoin
 // same registrable domain, so trusting it would extend the management plane to
 // whoever controls a sibling subdomain.
 func RejectCrossSite(req *http.Request, allowTopLevelNavigation bool) bool {
-	if allowTopLevelNavigation && isTopLevelNavigation(req) {
-		return false
+	return crossSiteRejectionReason(req, allowTopLevelNavigation, false) != ""
+}
+
+func crossSiteRejectionReason(req *http.Request, allowTopLevelNavigation, challenge bool) string {
+	origin := req.Header.Get("Origin")
+	if origin != "" && originHost(origin) == "" {
+		// An opaque (null) or malformed Origin cannot establish a trustworthy
+		// browser context, including on document navigation surfaces.
+		return crossSiteRejection
 	}
 	// Default-deny, lower-cased: an unrecognized value is not a browser
 	// following the spec, and must not fall through to Origin, which a
@@ -135,21 +152,31 @@ func RejectCrossSite(req *http.Request, allowTopLevelNavigation bool) bool {
 	// it is a sibling subdomain, not this origin.
 	switch strings.ToLower(req.Header.Get("Sec-Fetch-Site")) {
 	case "same-origin", "none":
-		return false
+		return ""
+	case "cross-site", "same-site":
+		if allowTopLevelNavigation && isTopLevelNavigation(req) {
+			return ""
+		}
+		return crossSiteRejection
 	case "":
-		// Not a browser, or one predating Fetch Metadata: try Origin.
+		// Fetch Metadata can be absent on insecure browser origins too.
 	default:
-		return true
+		return crossSiteRejection
 	}
-	origin := req.Header.Get("Origin")
-	switch {
-	case origin == "":
-		return false
-	case strings.EqualFold(origin, "null"):
-		// Sandboxed frame or cross-origin redirect: cannot be checked.
-		return true
+	if origin != "" {
+		if !strings.EqualFold(originHost(origin), req.Host) {
+			return crossSiteRejection
+		}
+		return ""
 	}
-	return !strings.EqualFold(originHost(origin), req.Host)
+	// Without either header, Basic Auth may be an ambient browser credential.
+	// API requests without credentials still receive the usual 401. Challenge
+	// surfaces instead explain how to establish a usable browser context before
+	// prompting for a password that the following request cannot safely use.
+	if (challenge || req.Header.Get("Authorization") != "") && req.Header.Get(AdminRequestHeader) != "true" {
+		return missingRequestContextRejection
+	}
+	return ""
 }
 
 // isTopLevelNavigation reports whether the browser is loading this URL as a
@@ -165,10 +192,13 @@ func isTopLevelNavigation(req *http.Request) bool {
 // https on the same authority are indistinguishable here. A reverse proxy that
 // rewrites Host defeats it; those deployments have Sec-Fetch-Site.
 func originHost(origin string) string {
-	if i := strings.Index(origin, "://"); i >= 0 {
-		origin = origin[i+3:]
+	u, err := url.Parse(origin)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") ||
+		u.Host == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" ||
+		(u.Path != "" && u.Path != "/") {
+		return ""
 	}
-	return strings.TrimSuffix(origin, "/") // some clients send one anyway
+	return u.Host
 }
 
 // CheckCrossSite refuses a request another site initiated, before any
@@ -177,9 +207,13 @@ func originHost(origin string) string {
 // own rule authenticates. route is the registered route pattern, used as a
 // metric label and therefore never the raw request path.
 func CheckCrossSite(req *http.Request, route string, allowTopLevelNavigation bool) AuthDecision {
-	if RejectCrossSite(req, allowTopLevelNavigation) {
+	return checkCrossSite(req, route, allowTopLevelNavigation, false)
+}
+
+func checkCrossSite(req *http.Request, route string, allowTopLevelNavigation, challenge bool) AuthDecision {
+	if reason := crossSiteRejectionReason(req, allowTopLevelNavigation, challenge); reason != "" {
 		metrics.AdminAuthTotal.WithLabelValues(route, metrics.AdminAuthCrossSite).Inc()
-		decision := rejectedAuthDecision(http.StatusForbidden, crossSiteRejection)
+		decision := rejectedAuthDecision(http.StatusForbidden, reason)
 		decision.result = metrics.AdminAuthCrossSite
 		return decision
 	}
@@ -191,7 +225,11 @@ func CheckCrossSite(req *http.Request, route string, allowTopLevelNavigation boo
 // so the net/http handlers and the proxy's gin routes cannot drift apart.
 // allowTopLevelNavigation is for document surfaces only; see Handler.AuthChallenge.
 func CheckAdminRequest(req *http.Request, route string, allowTopLevelNavigation bool) AuthDecision {
-	if decision := CheckCrossSite(req, route, allowTopLevelNavigation); !decision.Allowed() {
+	return checkAdminRequest(req, route, allowTopLevelNavigation, allowTopLevelNavigation)
+}
+
+func checkAdminRequest(req *http.Request, route string, allowTopLevelNavigation, challenge bool) AuthDecision {
+	if decision := checkCrossSite(req, route, allowTopLevelNavigation, challenge); !decision.Allowed() {
 		return decision
 	}
 	// Management endpoints act on process lifecycle and cluster-wide runtime
@@ -235,7 +273,7 @@ func GinAdminAuthMiddleware(challenge bool) gin.HandlerFunc {
 			return
 		}
 		ApplyGinAuthDecision(c,
-			CheckAdminRequest(c.Request, c.FullPath(), false), challenge)
+			checkAdminRequest(c.Request, c.FullPath(), false, challenge), challenge)
 	}
 }
 

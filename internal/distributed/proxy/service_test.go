@@ -1451,6 +1451,84 @@ func TestHttpAuthenticate(t *testing.T) {
 	}
 }
 
+func TestLegacyAuthenticationChallengeCompatibility(t *testing.T) {
+	require.NoError(t, paramtable.Get().Save(proxy.Params.CommonCfg.AuthorizationEnabled.Key, "true"))
+	t.Cleanup(func() {
+		paramtable.Get().Reset(proxy.Params.CommonCfg.AuthorizationEnabled.Key)
+		paramtable.Get().Reset(proxy.Params.CommonCfg.AdminAuthEnabled.Key)
+	})
+	passwordMock := mockey.Mock(proxy.PasswordVerify).To(func(_ context.Context, username, password string) bool {
+		return username == "alice" && password == "right"
+	}).Build()
+	defer passwordMock.UnPatch()
+	apiKeyMock := mockey.Mock(proxy.VerifyAPIKey).Return("", errors.New("invalid API key")).Build()
+	defer apiKeyMock.UnPatch()
+
+	// The main port installs authenticate directly. Keep this same middleware
+	// independent of the management flag, including the legacy challenge on a
+	// successful Basic request. Drive the actual metrics router alongside it.
+	mainRouter := gin.New()
+	mainRouter.Use(authenticate)
+	mainRouter.GET("/v1/test", func(c *gin.Context) { c.String(http.StatusOK, "ok") })
+	metricsRouter := metricsPortEngine(t)
+
+	for _, gateOn := range []bool{false, true, false} {
+		require.NoError(t, paramtable.Get().Save(proxy.Params.CommonCfg.AdminAuthEnabled.Key, strconv.FormatBool(gateOn)))
+		for _, surface := range []struct {
+			name, method, path string
+			router             http.Handler
+			challenge          bool
+		}{
+			{"main", http.MethodGet, "/v1/test", mainRouter, true},
+			{"metrics data", http.MethodDelete, apiPathPrefix + "/collection", metricsRouter, !gateOn},
+			{"metrics health", http.MethodGet, apiPathPrefix + "/health", metricsRouter, true},
+			{"metrics console", http.MethodGet, apiPathPrefix + mhttp.ClusterConfigsPath, metricsRouter, true},
+		} {
+			if gateOn && surface.name == "metrics console" {
+				// The enabled console uses its separate root-only realm.
+				continue
+			}
+			t.Run(fmt.Sprintf("%s/admin=%t", surface.name, gateOn), func(t *testing.T) {
+				for _, credential := range []struct {
+					name, username, password string
+					basic                    bool
+					status                   int
+				}{
+					{"Basic correct", "alice", "right", true, http.StatusOK},
+					{"Basic wrong", "alice", "wrong", true, http.StatusUnauthorized},
+					{"Basic empty username", "", "right", true, http.StatusUnauthorized},
+					{"Basic empty password", "alice", "", true, http.StatusUnauthorized},
+					{"Bearer correct", "alice", "right", false, http.StatusOK},
+					{"Bearer wrong", "alice", "wrong", false, http.StatusUnauthorized},
+					{"missing", "", "", false, http.StatusUnauthorized},
+				} {
+					t.Run(credential.name, func(t *testing.T) {
+						req := httptest.NewRequest(surface.method, surface.path, nil)
+						if credential.basic {
+							req.SetBasicAuth(credential.username, credential.password)
+						} else if credential.username != "" {
+							req.Header.Set("Authorization", "Bearer "+credential.username+":"+credential.password)
+						}
+						if surface.name == "metrics data" && gateOn {
+							req.Header.Set(mhttp.AdminRequestHeader, "true")
+						}
+						w := httptest.NewRecorder()
+						surface.router.ServeHTTP(w, req)
+						assert.Equal(t, credential.status, w.Code, w.Body.String())
+						wantChallenge := ""
+						if credential.basic && surface.challenge {
+							wantChallenge = `Basic realm="restricted", charset="UTF-8"`
+						}
+						// Result captures headers at the first write, so deleting a
+						// challenge after an authentication failure cannot pass.
+						assert.Equal(t, wantChallenge, w.Result().Header.Get("WWW-Authenticate"))
+					})
+				}
+			})
+		}
+	}
+}
+
 // runAdminAuthMiddleware drives a console request through the whole assembled
 // chain rather than the middleware alone: a middleware exercised on its own
 // cannot show that something ahead of it answered first, which is the failure
@@ -1499,6 +1577,7 @@ func TestAdminAuthMiddlewarePreservesManagementStoreFailure(t *testing.T) {
 
 	w := runAdminAuthMiddleware(t, func(req *http.Request) {
 		req.SetBasicAuth(util.UserRoot, "correct-password")
+		req.Header.Set(mhttp.AdminRequestHeader, "true")
 	})
 
 	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
@@ -1522,6 +1601,7 @@ func TestAdminAuthMiddlewareRejectsNonRootBeforePasswordVerification(t *testing.
 	for _, password := range []string{"wrong-password", "otherwise-valid-password"} {
 		w := runAdminAuthMiddleware(t, func(req *http.Request) {
 			req.SetBasicAuth("alice", password)
+			req.Header.Set(mhttp.AdminRequestHeader, "true")
 		})
 		assert.Equal(t, http.StatusForbidden, w.Code)
 		assert.Contains(t, w.Body.String(), "only root user")
@@ -1535,6 +1615,13 @@ func TestAdminAuthMiddlewareRequiresCredentials(t *testing.T) {
 	t.Cleanup(func() { paramtable.Get().Reset(proxy.Params.CommonCfg.AdminAuthEnabled.Key) })
 
 	w := runAdminAuthMiddleware(t, nil)
+	assert.Equal(t, http.StatusForbidden, w.Code)
+	assert.Contains(t, w.Body.String(), "HTTPS")
+	assert.Empty(t, w.Header().Get("WWW-Authenticate"))
+
+	w = runAdminAuthMiddleware(t, func(req *http.Request) {
+		req.Header.Set("Sec-Fetch-Site", "same-origin")
+	})
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 	// These routes are what the web console fetches, and it has no login form:
 	// without the challenge the browser swallows the 401 and every panel shows
@@ -1631,9 +1718,9 @@ func runDataPlaneAuthMiddleware(t *testing.T, setAuth func(*http.Request)) *http
 // answer the console's 401 before the middleware that sets that header — which
 // is exactly what a second, stacked credential check would do.
 //
-// The data plane must NOT send it. The challenge is what makes a browser hold
-// root's credential for a path, and holding it for a route that drops
-// collections is the thing the cross-site check then has to defend.
+// Secured metrics-port data routes must not send it. The main port and metrics
+// routes outside the gate retain their legacy challenge behavior. A challenge
+// teaches browsers to retain credentials, which the cross-site check defends.
 func TestChallengeOnConsoleRoutesOnly(t *testing.T) {
 	paramtable.Get().Save(proxy.Params.CommonCfg.AdminAuthEnabled.Key, "true")
 	t.Cleanup(func() {
@@ -1641,7 +1728,9 @@ func TestChallengeOnConsoleRoutesOnly(t *testing.T) {
 		paramtable.Get().Reset(proxy.Params.CommonCfg.AuthorizationEnabled.Key)
 	})
 
-	w := requestMetricsPort(t, http.MethodGet, mhttp.ClusterConfigsPath, nil)
+	w := requestMetricsPort(t, http.MethodGet, mhttp.ClusterConfigsPath, func(req *http.Request) {
+		req.Header.Set("Sec-Fetch-Site", "same-origin")
+	})
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 	assert.Contains(t, w.Header().Get("WWW-Authenticate"), "Basic realm=",
 		"without this the browser swallows the 401 and the console cannot sign in")
@@ -1652,9 +1741,8 @@ func TestChallengeOnConsoleRoutesOnly(t *testing.T) {
 		"a browser must not be taught to hold root's credential for the data plane")
 
 	// The authorization-enabled branch uses the legacy data-plane verifier.
-	// A syntactically valid Basic header used to make ParseUsernamePassword set
-	// the challenge as a parsing side effect, even though this route must never
-	// teach the browser to retain credentials.
+	// A syntactically valid Basic header normally makes the legacy parser set
+	// the challenge, but the secured metrics data plane must suppress it.
 	paramtable.Get().Save(proxy.Params.CommonCfg.AuthorizationEnabled.Key, "true")
 	passwordMock := mockey.Mock(proxy.PasswordVerify).Return(false).Build()
 	defer passwordMock.UnPatch()
@@ -1663,6 +1751,7 @@ func TestChallengeOnConsoleRoutesOnly(t *testing.T) {
 
 	w = runDataPlaneAuthMiddleware(t, func(req *http.Request) {
 		req.SetBasicAuth("alice", "wrong-password")
+		req.Header.Set(mhttp.AdminRequestHeader, "true")
 	})
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 	assert.Empty(t, w.Header().Get("WWW-Authenticate"),
@@ -1736,6 +1825,7 @@ func TestDataPlaneRequiresRootWhenAuthorizationDisabled(t *testing.T) {
 
 	w = runDataPlaneAuthMiddleware(t, func(req *http.Request) {
 		req.SetBasicAuth("alice", "any-password")
+		req.Header.Set(mhttp.AdminRequestHeader, "true")
 	})
 	assert.Equal(t, http.StatusForbidden, w.Code)
 	assert.Zero(t, verifierCalls,
@@ -1743,6 +1833,7 @@ func TestDataPlaneRequiresRootWhenAuthorizationDisabled(t *testing.T) {
 
 	w = runDataPlaneAuthMiddleware(t, func(req *http.Request) {
 		req.SetBasicAuth(util.UserRoot, "any-password")
+		req.Header.Set(mhttp.AdminRequestHeader, "true")
 	})
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, 1, verifierCalls)
@@ -1763,6 +1854,7 @@ func TestDataPlaneKeepsNonRootCallersWhenAuthorizationEnabled(t *testing.T) {
 
 	w := runDataPlaneAuthMiddleware(t, func(req *http.Request) {
 		req.Header.Set("Authorization", "Bearer some-api-key")
+		req.Header.Set(mhttp.AdminRequestHeader, "true")
 	})
 	assert.Equal(t, http.StatusOK, w.Code,
 		"enabling the operator gate must not lock non-root callers out of the data plane")
@@ -1785,6 +1877,7 @@ func TestMetricsPortRefusesCrossSiteOnEveryGatedBranch(t *testing.T) {
 
 	crossSite := func(req *http.Request) {
 		req.SetBasicAuth(util.UserRoot, "any-password")
+		req.Header.Set(mhttp.AdminRequestHeader, "true")
 		req.Header.Set("Sec-Fetch-Site", "cross-site")
 	}
 	for _, tc := range []struct{ name, method, path string }{
@@ -1802,6 +1895,88 @@ func TestMetricsPortRefusesCrossSiteOnEveryGatedBranch(t *testing.T) {
 	// not something a browser replays credentials at.
 	w := requestMetricsPort(t, http.MethodGet, "/health", crossSite)
 	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+// Neither the legacy Basic/Bearer branch nor the root gate may treat absent
+// browser metadata as proof that an authenticated request came from a script.
+func TestMetricsPortRequiresExplicitClientWithoutOrigin(t *testing.T) {
+	require.NoError(t, paramtable.Get().Save(proxy.Params.CommonCfg.AdminAuthEnabled.Key, "true"))
+	mhttp.RegisterManagementVerifier(mhttp.VerifierSlotProxy, func(context.Context, string, string) error {
+		return nil
+	})
+	passwordMock := mockey.Mock(proxy.PasswordVerify).Return(true).Build()
+	defer passwordMock.UnPatch()
+	hookutil.SetMockAPIHook("alice", nil)
+	t.Cleanup(func() {
+		paramtable.Get().Reset(proxy.Params.CommonCfg.AdminAuthEnabled.Key)
+		paramtable.Get().Reset(proxy.Params.CommonCfg.AuthorizationEnabled.Key)
+		mhttp.RegisterManagementVerifier(mhttp.VerifierSlotProxy, nil)
+		hookutil.SetMockAPIHook("", nil)
+	})
+
+	for _, tc := range []struct {
+		name, method, path string
+		legacy, bearer     bool
+	}{
+		{name: "root data plane", method: http.MethodDelete, path: "/collection"},
+		{name: "console API", method: http.MethodGet, path: mhttp.ClusterConfigsPath},
+		{name: "legacy Basic", method: http.MethodDelete, path: "/collection", legacy: true},
+		{name: "legacy Bearer", method: http.MethodDelete, path: "/collection", legacy: true, bearer: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.NoError(t, paramtable.Get().Save(proxy.Params.CommonCfg.AuthorizationEnabled.Key, strconv.FormatBool(tc.legacy)))
+			for _, explicit := range []bool{false, true} {
+				w := requestMetricsPort(t, tc.method, tc.path, func(req *http.Request) {
+					if tc.bearer {
+						req.Header.Set("Authorization", "Bearer some-api-key")
+					} else {
+						req.SetBasicAuth(util.UserRoot, "right")
+					}
+					if explicit {
+						req.Header.Set(mhttp.AdminRequestHeader, "true")
+					}
+				})
+				if explicit {
+					assert.Equal(t, http.StatusOK, w.Code, w.Body.String())
+				} else {
+					assert.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+					assert.Contains(t, w.Body.String(), "X-Milvus-Admin-Request: true")
+				}
+				assert.Empty(t, w.Header().Get("WWW-Authenticate"))
+			}
+		})
+	}
+}
+
+func TestAdminRequestHeaderIsNotAllowedByCORS(t *testing.T) {
+	// Exercise the production preflight handler as well as the real metrics
+	// router. Allowing this header would remove its value as explicit opt-in.
+	router := gin.New()
+	router.Use(httpserver.RequestHandlerFunc)
+	router.OPTIONS("/preflight", func(c *gin.Context) {
+		t.Error("preflight must stop before reaching a route handler")
+	})
+	req := httptest.NewRequest(http.MethodOptions, "/preflight", nil)
+	req.Header.Set("Origin", "http://other.local")
+	req.Header.Set("Access-Control-Request-Method", http.MethodGet)
+	req.Header.Set("Access-Control-Request-Headers", mhttp.AdminRequestHeader)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusNoContent, w.Code)
+	allowedHeaders := strings.ToLower(w.Header().Get("Access-Control-Allow-Headers"))
+	assert.Contains(t, allowedHeaders, "authorization")
+	assert.NotContains(t, allowedHeaders, strings.ToLower(mhttp.AdminRequestHeader))
+	assert.NotContains(t, allowedHeaders, "*")
+
+	require.NoError(t, paramtable.Get().Save(proxy.Params.CommonCfg.AdminAuthEnabled.Key, "true"))
+	t.Cleanup(func() { paramtable.Get().Reset(proxy.Params.CommonCfg.AdminAuthEnabled.Key) })
+	w = requestMetricsPort(t, http.MethodGet, mhttp.ClusterConfigsPath, func(req *http.Request) {
+		req.Header.Set("Origin", "http://other.local")
+		req.Header.Set(mhttp.AdminRequestHeader, "true")
+		req.SetBasicAuth(util.UserRoot, "right")
+	})
+	assert.Equal(t, http.StatusForbidden, w.Code)
+	assert.NotContains(t, strings.ToLower(w.Header().Get("Access-Control-Allow-Headers")), strings.ToLower(mhttp.AdminRequestHeader))
 }
 
 // The Register guard in internal/http cannot see this gin tree, so nothing else
@@ -1833,7 +2008,9 @@ func TestEveryMetricsPortRouteIsGated(t *testing.T) {
 		// would otherwise 404 and quietly prove nothing.
 		concrete := paramSegment.ReplaceAllString(route.Path, "/x")
 		w := httptest.NewRecorder()
-		engine.ServeHTTP(w, httptest.NewRequest(route.Method, concrete, nil))
+		req := httptest.NewRequest(route.Method, concrete, nil)
+		req.Header.Set("Sec-Fetch-Site", "same-origin")
+		engine.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusUnauthorized, w.Code,
 			"%s %s answered an anonymous caller while the gate is on", route.Method, concrete)
 		gated++
