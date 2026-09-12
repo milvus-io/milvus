@@ -2516,6 +2516,7 @@ type proxyConfig struct {
 	NameValidationAllowedChars        ParamItem `refreshable:"true"`
 	RoleNameValidationAllowedChars    ParamItem `refreshable:"true"`
 	MaxTaskNum                        ParamItem `refreshable:"false"`
+	MaxExpressionDepth                ParamItem `refreshable:"true"`
 	DDLConcurrency                    ParamItem `refreshable:"true"`
 	DCLConcurrency                    ParamItem `refreshable:"true"`
 	ShardLeaderCacheInterval          ParamItem `refreshable:"false"`
@@ -2788,6 +2789,21 @@ For migration, enable streaming.splitChunkSN first, then disable proxy.splitChun
 		Export:       true,
 	}
 	p.MaxTaskNum.Init(base.mgr)
+
+	p.MaxExpressionDepth = ParamItem{
+		Key:          "proxy.maxExpressionDepth",
+		Version:      "3.0.3",
+		DefaultValue: "1000",
+		Formatter:    positiveProxyLimitFormatter("1000"),
+		Doc: `Maximum structural nesting depth a boolean expression may use. Parsing walks the expression
+recursively (ANTLR recursive descent, then the plan visitor), so an unbounded depth lets a single
+request exhaust the goroutine stack and crash the process; requests past the bound are rejected as
+invalid before parsing starts. When the limit is applied, values above 10000 are clamped to 10000
+(far shallower nesting already exceeds any legitimate filter) and values below 1 fall back to the
+default.`,
+		Export: true,
+	}
+	p.MaxExpressionDepth.Init(base.mgr)
 
 	p.DDLConcurrency = ParamItem{
 		Key:          "proxy.ddlConcurrency",
