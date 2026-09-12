@@ -18,11 +18,13 @@
 
 #include <cstring>
 #include <numeric>
+#include <optional>
 #include <stdexcept>
 
 #include "common/Chunk.h"
 #include "index/json_stats/JsonKeyStats.h"
 #include "mmap/ChunkedColumn.h"
+#include "segcore/SegcoreConfig.h"
 #include "test_utils/cachinglayer_test_utils.h"
 
 class JsonStatsScanTestAccessor {
@@ -37,8 +39,28 @@ class JsonStatsScanTestAccessor {
 namespace milvus::index {
 namespace {
 
+class JsonKeyStatsScanTest : public ::testing::TestWithParam<bool> {
+ protected:
+    void
+    SetUp() override {
+        auto& config = segcore::SegcoreConfig::default_config();
+        previous_cursor_owns_pin_ = config.get_scan_cursor_owns_pin();
+        config.set_scan_cursor_owns_pin(GetParam());
+    }
+
+    void
+    TearDown() override {
+        segcore::SegcoreConfig::default_config().set_scan_cursor_owns_pin(
+            previous_cursor_owns_pin_);
+    }
+
+ private:
+    bool previous_cursor_owns_pin_ = false;
+};
+
 struct ScanTrace {
     std::vector<int64_t> pinned_chunks;
+    std::optional<ScanPinPolicy> pin_policy;
     int64_t scans = 0;
     int64_t legacy_string_views = 0;
     int64_t returned_rows = 0;
@@ -102,6 +124,7 @@ class RecordingColumn : public Base {
     ScanResult
     Scan(OpContext* ctx, const ScanOptions& options) const override {
         ++trace_->scans;
+        trace_->pin_policy = options.pin_policy;
         return std::make_unique<RecordingCursor>(Base::Scan(ctx, options),
                                                  trace_);
     }
@@ -215,7 +238,7 @@ MakeStats(const std::shared_ptr<ChunkedColumnInterface>& column) {
     return stats;
 }
 
-TEST(JsonKeyStatsScanTest, StringWindowsBorrowViewsAndPinEachChunkOnce) {
+TEST_P(JsonKeyStatsScanTest, StringWindowsBorrowViewsAndHonorPinPolicy) {
     const int64_t rows = DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE * 3 + 17;
     std::vector<std::string> values(rows);
     for (int64_t i = 0; i < rows; ++i) {
@@ -251,14 +274,19 @@ TEST(JsonKeyStatsScanTest, StringWindowsBorrowViewsAndPinEachChunkOnce) {
     EXPECT_EQ(fixture.trace->returned_rows, rows);
     EXPECT_LE(fixture.trace->largest_batch, DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE);
     EXPECT_EQ(fixture.trace->legacy_string_views, 0);
-    EXPECT_EQ(fixture.trace->pinned_chunks, (std::vector<int64_t>{0, 1}));
+    EXPECT_EQ(
+        fixture.trace->pin_policy,
+        GetParam() ? ScanPinPolicy::CursorOwned : ScanPinPolicy::ResultOwned);
+    EXPECT_EQ(fixture.trace->pinned_chunks,
+              GetParam() ? (std::vector<int64_t>{0, 1})
+                         : (std::vector<int64_t>{0, 0, 0, 0, 1}));
     for (int64_t i = 0; i < rows; ++i) {
         EXPECT_EQ(valid[i], ValidRow(i));
         EXPECT_EQ(result[i], ValidRow(i) && i % 3 == 0);
     }
 }
 
-TEST(JsonKeyStatsScanTest, BinaryStringValuesKeepEmptyAndEmbeddedNulBytes) {
+TEST_P(JsonKeyStatsScanTest, BinaryStringValuesKeepEmptyAndEmbeddedNulBytes) {
     // Shredded ARRAY columns use STRING storage for BSON bytes. Reading must
     // not apply string terminators or reinterpret them as schema ARRAY views.
     const std::vector<std::string> values{
@@ -272,6 +300,7 @@ TEST(JsonKeyStatsScanTest, BinaryStringValuesKeepEmptyAndEmbeddedNulBytes) {
                          int64_t size,
                          TargetBitmapView res,
                          TargetBitmapView) {
+        EXPECT_EQ(data, fixture.trace->last_values);
         EXPECT_FALSE(validity);
         for (int64_t i = 0; i < size; ++i) {
             EXPECT_EQ(data[i], values[row++]);
@@ -290,7 +319,7 @@ TEST(JsonKeyStatsScanTest, BinaryStringValuesKeepEmptyAndEmbeddedNulBytes) {
     EXPECT_EQ(result.count(), 4);
 }
 
-TEST(JsonKeyStatsScanTest, SkipUsesPhysicalCellOnceAndPreservesIncomingBits) {
+TEST_P(JsonKeyStatsScanTest, SkipUsesPhysicalCellOnceAndPreservesIncomingBits) {
     for (bool nullable : {false, true}) {
         SCOPED_TRACE(nullable);
         const int64_t first_rows = DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE + 3;
@@ -310,11 +339,12 @@ TEST(JsonKeyStatsScanTest, SkipUsesPhysicalCellOnceAndPreservesIncomingBits) {
             return chunk == 0;
         };
         int64_t evaluated_rows = 0;
-        auto predicate = [&](const std::string_view*,
+        auto predicate = [&](const std::string_view* data,
                              ValidityView validity,
                              int64_t size,
                              TargetBitmapView res,
                              TargetBitmapView valid_res) {
+            EXPECT_EQ(data, fixture.trace->last_values);
             evaluated_rows += size;
             for (int64_t i = 0; i < size; ++i) {
                 valid_res[i] = !validity || validity[i];
@@ -332,7 +362,8 @@ TEST(JsonKeyStatsScanTest, SkipUsesPhysicalCellOnceAndPreservesIncomingBits) {
         EXPECT_EQ(skip_calls, (std::vector<int>{0, 1}));
         EXPECT_EQ(evaluated_rows, 5);
         EXPECT_EQ(fixture.trace->pinned_chunks,
-                  nullable ? (std::vector<int64_t>{0, 1})
+                  nullable ? (GetParam() ? (std::vector<int64_t>{0, 1})
+                                         : (std::vector<int64_t>{0, 0, 1}))
                            : (std::vector<int64_t>{1}));
         for (int64_t i = 0; i < rows; ++i) {
             const bool is_valid = !nullable || ValidRow(i);
@@ -375,14 +406,14 @@ CheckFixedWidth(DataType type, const std::vector<T>& values) {
     EXPECT_EQ(fixture.trace->pinned_chunks, (std::vector<int64_t>{0, 1}));
 }
 
-TEST(JsonKeyStatsScanTest, FixedWidthKeepsTypesAndDenseRowPositions) {
+TEST_P(JsonKeyStatsScanTest, FixedWidthKeepsTypesAndDenseRowPositions) {
     CheckFixedWidth<int64_t>(
         DataType::INT64, {9007199254740993LL, 0, -9007199254740993LL, 7, -3});
     CheckFixedWidth<double>(DataType::DOUBLE, {0.5, 0, -1.25, 1e100, -1e100});
     CheckFixedWidth<bool>(DataType::BOOL, {true, false, false, true, false});
 }
 
-TEST(JsonKeyStatsScanTest, MissingPathDoesNotScanAndPinFailurePropagates) {
+TEST_P(JsonKeyStatsScanTest, MissingPathDoesNotScanAndPinFailurePropagates) {
     auto fixture =
         MakeColumn<std::string>({2}, {"a", "b"}, DataType::STRING, false);
     auto stats = MakeStats(fixture.column);
@@ -412,6 +443,13 @@ TEST(JsonKeyStatsScanTest, MissingPathDoesNotScanAndPinFailurePropagates) {
                      TargetBitmapView(valid)),
                  std::runtime_error);
 }
+
+INSTANTIATE_TEST_SUITE_P(ScanPinPolicy,
+                         JsonKeyStatsScanTest,
+                         ::testing::Values(false, true),
+                         [](const ::testing::TestParamInfo<bool>& info) {
+                             return info.param ? "CursorOwned" : "ResultOwned";
+                         });
 
 }  // namespace
 }  // namespace milvus::index
