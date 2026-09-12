@@ -1732,7 +1732,6 @@ func verifyCapacityPerRow(arrayArray *schemapb.ArrayArray, maxCapacity int64, el
 				return merr.WrapErrParameterInvalid("valid array element type", "array element type is not supported", msg)
 			}
 		}
-		}
 
 		if int64(arrayLen) <= maxCapacity {
 			continue

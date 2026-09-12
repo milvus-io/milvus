@@ -428,10 +428,10 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 	m[schemapb.DataType_String] = stringEntry
 
 	uuidEntry := serdeEntry{
-		arrowType: func(_ int, _ schemapb.DataType) arrow.DataType {
+		arrowType: func(_ int, _ schemapb.DataType, _ bool) arrow.DataType {
 			return &arrow.FixedSizeBinaryType{ByteWidth: 16}
 		},
-		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, dim int, shouldCopy bool) (any, error) {
+		deserialize: func(a arrow.Array, i int, _ schemapb.DataType, dim int, shouldCopy bool, _ bool) (any, error) {
 			if a.IsNull(i) {
 				return nil, nil
 			}
@@ -446,7 +446,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			}
 			return nil, merr.WrapErrServiceInternalMsg("expected *array.FixedSizeBinary, got %T", a)
 		},
-		serialize: func(b array.Builder, v any, _ schemapb.DataType) error {
+		serialize: func(b array.Builder, v any, _ schemapb.DataType, _ int, _ bool) error {
 			if v == nil {
 				b.AppendNull()
 				return nil
