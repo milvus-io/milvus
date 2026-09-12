@@ -80,10 +80,98 @@
 
 namespace milvus::index {
 
+std::optional<JsonKeyStats::ShreddingReader::Value>
+JsonKeyStats::ShreddingReader::Get(milvus::OpContext* op_ctx, int64_t row_id) {
+    AssertInfo(row_id >= 0 && row_id < column_->NumRows(),
+               "JSON stats row {} is outside column bounds {}",
+               row_id,
+               column_->NumRows());
+    const auto [chunk_id, offset] = column_->GetChunkIDByOffset(row_id);
+    auto it = pins_.find(chunk_id);
+    if (it == pins_.end()) {
+        auto pin = column_->GetChunk(op_ctx, chunk_id);
+        it = pins_.emplace(chunk_id, std::move(pin)).first;
+    }
+    auto* chunk = it->second.get();
+    AssertInfo(chunk != nullptr && offset < chunk->RowNums(),
+               "JSON stats chunk does not cover row {}",
+               row_id);
+    if (!chunk->isValid(offset)) {
+        return std::nullopt;
+    }
+    switch (type_) {
+        case JSONType::STRING: {
+            auto* strings = dynamic_cast<StringChunk*>(chunk);
+            AssertInfo(strings != nullptr,
+                       "JSON stats string column has an incompatible chunk");
+            return Value(std::string((*strings)[offset]));
+        }
+        case JSONType::BOOL: {
+            bool value;
+            std::memcpy(&value, chunk->ValueAt(offset), sizeof(value));
+            return Value(value);
+        }
+        case JSONType::INT64: {
+            int64_t value;
+            std::memcpy(&value, chunk->ValueAt(offset), sizeof(value));
+            return Value(value);
+        }
+        default:
+            ThrowInfo(ErrorCode::UnexpectedError,
+                      "unsupported JSON stats scalar reader type");
+    }
+}
+
+std::unique_ptr<JsonKeyStats::ShreddingReader>
+JsonKeyStats::CreateShreddingReader(const std::string& pointer,
+                                    JSONType type,
+                                    int64_t segment_rows) const {
+    if (!group_by_scalar_reads_safe_ || pointer.empty() ||
+        pointer.front() != '/' ||
+        (type != JSONType::STRING && type != JSONType::BOOL &&
+         type != JSONType::INT64)) {
+        return nullptr;
+    }
+    // A numeric component may address an array position in raw JSON. Stats
+    // store arrays whole; do not infer object-only semantics from a column.
+    for (const auto& token : ParseJsonPointerPath(pointer)) {
+        if (!token.empty() &&
+            std::all_of(token.begin(), token.end(), [](unsigned char c) {
+                return c >= '0' && c <= '9';
+            })) {
+            return nullptr;
+        }
+    }
+    auto fields = key_field_map_.find(pointer);
+    if (fields == key_field_map_.end()) {
+        return nullptr;
+    }
+    for (const auto& field : fields->second) {
+        auto field_type = shred_field_data_type_map_.find(field);
+        if (field_type == shred_field_data_type_map_.end() ||
+            field_type->second != type) {
+            continue;
+        }
+        auto column = shredding_columns_.find(field);
+        AssertInfo(column != shredding_columns_.end() && column->second,
+                   "JSON stats field {} has no column",
+                   field);
+        AssertInfo(num_rows_ == segment_rows &&
+                       column->second->NumRows() == segment_rows,
+                   "JSON stats rows do not match segment rows {}",
+                   segment_rows);
+        return std::unique_ptr<ShreddingReader>(
+            new ShreddingReader(column->second, type));
+    }
+    return nullptr;
+}
+
 namespace {
 
 // Reader::create() exposes this synthetic JSON-stats group at index zero.
 constexpr int64_t kJsonStatsReaderColumnGroupIndex = 0;
+constexpr const char* kGroupByScalarReadVersion =
+    "group_by_scalar_read_version";
 
 struct JsonStatsParquetMetadata {
     std::shared_ptr<arrow::Schema> schema;
@@ -582,6 +670,7 @@ JsonKeyStats::TraverseJsonForBuildStats(
             return;
         }
         int j = 1;
+        std::unordered_set<std::string> object_keys;
         for (int i = 0; i < current.size; i++) {
             if (!(tokens[j].type == JSMN_STRING && tokens[j].size != 0)) {
                 ThrowInfo(ErrorCode::DataFormatBroken,
@@ -596,6 +685,13 @@ JsonKeyStats::TraverseJsonForBuildStats(
 
             std::string key(json + tokens[j].start,
                             tokens[j].end - tokens[j].start);
+            // The stats map overwrites duplicate paths, whereas ondemand
+            // lookup returns the first key. Escaped keys are not decoded by
+            // this writer. Neither representation can certify raw equivalence.
+            if (group_by_scalar_reads_safe_ &&
+                (JsonStringHasEscape(key) || !object_keys.insert(key).second)) {
+                group_by_scalar_reads_safe_ = false;
+            }
             path.push_back(key);
             j++;
             int consumed = 0;
@@ -774,6 +870,7 @@ void
 JsonKeyStats::BuildKeyStats(const std::vector<FieldDataPtr>& field_datas,
                             bool nullable) {
     uint32_t row_id = 0;
+    simdjson::dom::parser validation_parser;
     for (const auto& data : field_datas) {
         auto n = data->get_num_rows();
         for (uint32_t i = 0; i < n; i++) {
@@ -786,8 +883,24 @@ JsonKeyStats::BuildKeyStats(const std::vector<FieldDataPtr>& field_datas,
                 // some situations, such as empty json string,
                 // should be handled as null row
                 if (json_str.empty()) {
+                    group_by_scalar_reads_safe_ = false;
                     BuildKeyStatsForNullRow();
                 } else {
+                    if (group_by_scalar_reads_safe_) {
+                        // jsmn accepts some non-JSON primitive syntax. Do not
+                        // certify such values merely because the typed writer
+                        // can convert them. Reuse one parser during the build.
+                        auto error =
+                            validation_parser
+                                .parse(json_str.data(), json_str.size())
+                                .error();
+                        if (error == simdjson::MEMALLOC) {
+                            ThrowInfo(ErrorCode::MemAllocateFailed,
+                                      "failed to validate JSON stats input");
+                        }
+                        group_by_scalar_reads_safe_ =
+                            error == simdjson::SUCCESS;
+                    }
                     BuildKeyStatsForRow(json_str, row_id);
                 }
             }
@@ -826,6 +939,8 @@ JsonKeyStats::WriteMetaFile() {
     json_stats_meta_.SetInt64(META_KEY_NUM_ROWS, num_rows_);
     json_stats_meta_.SetInt64(META_KEY_NUM_SHREDDING_COLUMNS,
                               column_keys_.size());
+    json_stats_meta_.SetInt64(kGroupByScalarReadVersion,
+                              group_by_scalar_reads_safe_ ? 1 : 0);
 
     auto meta_content = json_stats_meta_.Serialize();
     auto meta_file_path = GetMetaFilePath();
@@ -861,6 +976,9 @@ JsonKeyStats::LoadMetaFile(const std::string& local_meta_file_path) {
         local_meta_file_path, meta_content.data(), file_size);
 
     key_field_map_ = JsonStatsMeta::DeserializeToKeyFieldMap(meta_content);
+    group_by_scalar_reads_safe_ = JsonStatsMeta::Deserialize(meta_content)
+                                      .GetInt64(kGroupByScalarReadVersion)
+                                      .value_or(0) == 1;
 
     LOG_INFO(
         "loaded meta file with {} key field entries for segment {} for field "
@@ -903,6 +1021,7 @@ JsonKeyStats::AddBucketName(const std::string& remote_prefix) {
 void
 JsonKeyStats::BuildWithFieldData(const std::vector<FieldDataPtr>& field_datas,
                                  bool nullable) {
+    group_by_scalar_reads_safe_ = true;
     // collect key stats info and classify key type
     auto infos = CollectKeyInfo(field_datas, nullable);
     LOG_INFO("collect key infos: {} for segment {} for field {}",

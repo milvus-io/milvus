@@ -34,6 +34,7 @@
 #include <type_traits>
 #include <unordered_map>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "bitset/bitset.h"
@@ -71,6 +72,7 @@ class CollectSingleJsonStatsInfoAccessor;
 // Forward declaration of test accessor in global namespace for friend declaration
 class TraverseJsonForBuildStatsAccessor;
 class JsonStatsProjectionTestAccessor;
+class JsonStatsGroupByTestAccessor;
 
 namespace milvus::index {
 class JsonKeyStats : public ScalarIndex<std::string> {
@@ -207,6 +209,35 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     }
 
  public:
+    // A query-local reader for one exact scalar path. A missing value means
+    // "read raw JSON", not JSON null: typed validity also excludes other
+    // types, absent paths and legacy empty strings. Returned keys own data.
+    class ShreddingReader {
+     public:
+        using Value = std::variant<bool, int64_t, std::string>;
+
+        std::optional<Value>
+        Get(milvus::OpContext* op_ctx, int64_t row_id);
+
+     private:
+        friend class JsonKeyStats;
+        ShreddingReader(std::shared_ptr<ChunkedColumnInterface> column,
+                        JSONType type)
+            : column_(std::move(column)), type_(type) {
+        }
+
+        std::shared_ptr<ChunkedColumnInterface> column_;
+        JSONType type_;
+        std::unordered_map<int64_t, PinWrapper<Chunk*>> pins_;
+    };
+
+    // Returns nullptr for unsupported paths/types or uncertified old stats.
+    // Storage failures and inconsistent row counts propagate to the caller.
+    std::unique_ptr<ShreddingReader>
+    CreateShreddingReader(const std::string& pointer,
+                          JSONType type,
+                          int64_t segment_rows) const;
+
     PinWrapper<BsonInvertedIndex*>
     GetBsonIndex(milvus::OpContext* op_ctx) const {
         if (bson_index_cache_slot_ == nullptr) {
@@ -611,6 +642,9 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     mutable std::mutex mtx_;
     int64_t num_rows_{0};
     bool is_built_ = false;
+    // Only new builds that verify unique, unescaped object keys and valid
+    // JSON syntax can certify typed values for group-by. Old stats stay raw.
+    bool group_by_scalar_reads_safe_ = false;
     std::string path_;
     milvus::storage::FileManagerContext file_manager_context_;
     milvus::storage::ChunkManagerPtr rcm_;
@@ -660,6 +694,7 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     friend class ::TraverseJsonForBuildStatsAccessor;
     friend class ::CollectSingleJsonStatsInfoAccessor;
     friend class ::JsonStatsProjectionTestAccessor;
+    friend class ::JsonStatsGroupByTestAccessor;
 };
 
 }  // namespace milvus::index
