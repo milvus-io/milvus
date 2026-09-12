@@ -19,12 +19,23 @@ package integration
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func TestCaseTimeoutFromEnvironment(t *testing.T) {
+	timeout, err := caseTimeoutFromEnvironment(func(key string) string {
+		assert.Equal(t, integrationCaseTimeoutEnv, key)
+		return "20m"
+	})
+
+	assert.NoError(t, err)
+	assert.Equal(t, 20*time.Minute, timeout)
+}
 
 func TestGenerateBalancedInt64PKs(t *testing.T) {
 	t.Run("basic_functionality", func(t *testing.T) {

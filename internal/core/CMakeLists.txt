@@ -84,19 +84,6 @@ endif ()
 set( CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake" )
 include( Utils )
 
-# ---- Split DWARF (Linux only) ----
-# Moves debug info into .dwo files, dramatically reducing .o file sizes
-# and link time. Requires GCC 4.8+ or Clang 3.7+.
-if (LINUX AND NOT USE_ASAN STREQUAL "ON")
-    check_cxx_compiler_flag("-gsplit-dwarf" HAS_SPLIT_DWARF)
-    if (HAS_SPLIT_DWARF)
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -gsplit-dwarf")
-        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -gsplit-dwarf")
-        message(STATUS "Using -gsplit-dwarf for faster linking")
-    endif ()
-endif ()
-
-
 # **************************** Build time, type and code version ****************************
 get_current_time( BUILD_TIME )
 message( STATUS "Build time = ${BUILD_TIME}" )
@@ -115,13 +102,11 @@ set( CMAKE_EXPORT_COMPILE_COMMANDS ON )
 # **************************** Project ****************************
 project( milvus VERSION "${MILVUS_VERSION}" )
 
-# Unity (jumbo) build: merge multiple .cpp files per target into fewer
-# translation units, dramatically reducing redundant header parsing.
+# Unity (jumbo) build is applied to Milvus-owned targets in src/CMakeLists.txt.
+# Do not set CMAKE_UNITY_BUILD globally: that also changes vendored dependency
+# targets such as Knowhere/FAISS, some of which are not unity-build compatible.
 if ( MILVUS_UNITY_BUILD )
-    set( CMAKE_UNITY_BUILD ON )
-    # ~8 sources per unity chunk is a good balance between speed and memory.
-    set( CMAKE_UNITY_BUILD_BATCH_SIZE 8 )
-    message( STATUS "Unity build enabled (batch size ${CMAKE_UNITY_BUILD_BATCH_SIZE})" )
+    message( STATUS "Unity build enabled for Milvus-owned targets" )
 endif ()
 
 set( CMAKE_CXX_STANDARD 20 )
@@ -203,7 +188,18 @@ find_package(Azure REQUIRED)
 include( CTest )
 include( BuildUtils )
 include( DefineOptions )
-using_ccache_if_defined(MILVUS_USE_CCACHE)
+
+# ---- Split DWARF (Linux only) ----
+# Keep this opt-in: .dwo files stay in the build tree and are not included in
+# installed artifacts or the published debug image by default.
+if (LINUX AND MILVUS_USE_SPLIT_DWARF AND NOT USE_ASAN STREQUAL "ON")
+    check_cxx_compiler_flag("-gsplit-dwarf" HAS_SPLIT_DWARF)
+    if (HAS_SPLIT_DWARF)
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -gsplit-dwarf")
+        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -gsplit-dwarf")
+        message(STATUS "Using -gsplit-dwarf for faster linking")
+    endif ()
+endif ()
 
 include( ExternalProject )
 include( GNUInstallDirs )
@@ -400,7 +396,11 @@ ADD_DEFINITIONS(-DBOOST_GEOMETRY_INDEX_DETAIL_EXPERIMENTAL)
 
 # Warning: add_subdirectory(src) must be after append_flags("-ftest-coverage"),
 # otherwise cpp code coverage tool will miss src folder
+using_ccache_if_defined(MILVUS_USE_CCACHE)
 add_subdirectory( thirdparty )
+# Vendored projects may set global launch rules while they configure. Their
+# targets already retain the compiler launcher configured above.
+clear_global_ccache_launchers()
 add_subdirectory( src )
 
 # Unittest lib

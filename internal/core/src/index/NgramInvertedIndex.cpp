@@ -305,8 +305,9 @@ NgramInvertedIndex::Load(milvus::tracer::TraceContext ctx,
             config, milvus::LOAD_PRIORITY)
             .value_or(milvus::proto::common::LoadPriority::HIGH);
     disk_file_manager_->CacheNgramIndexToDisk(files_value, load_priority);
-    AssertInfo(
-        tantivy_index_exist(path_.c_str()), "index not exist: {}", path_);
+    if (!(tantivy_index_exist(path_.c_str()))) {
+        ThrowInfo(ErrorCode::DataFormatBroken, "index not exist: {}", path_);
+    }
 
     auto load_in_mmap =
         GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
@@ -323,36 +324,6 @@ NgramInvertedIndex::Load(milvus::tracer::TraceContext ctx,
 
     LOG_INFO(
         "load ngram index done for field id:{} with dir:{}", field_id_, path_);
-}
-
-std::vector<std::string>
-split_by_wildcard(const std::string& literal) {
-    std::vector<std::string> result;
-    std::string r;
-    r.reserve(literal.size());
-    bool escape_mode = false;
-    for (char c : literal) {
-        if (escape_mode) {
-            r += c;
-            escape_mode = false;
-        } else {
-            if (c == '\\') {
-                // consider case "\\%", we should reserve %
-                escape_mode = true;
-            } else if (c == '%' || c == '_') {
-                if (r.length() > 0) {
-                    result.push_back(std::move(r));
-                    r.clear();
-                }
-            } else {
-                r += c;
-            }
-        }
-    }
-    if (r.length() > 0) {
-        result.push_back(std::move(r));
-    }
-    return result;
 }
 
 // Extract runs of literal bytes from a regex pattern that are GUARANTEED to

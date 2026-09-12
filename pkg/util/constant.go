@@ -63,8 +63,9 @@ const (
 
 	IdentifierKey = "identifier"
 
-	HeaderUserAgent = "user-agent"
-	HeaderDBName    = "dbName"
+	HeaderUserAgent      = "user-agent"
+	HeaderDBName         = "dbName"
+	HeaderIdempotencyKey = "idempotency-key"
 
 	RoleConfigPrivileges = "privileges"
 	RoleConfigObjectType = "object_type"

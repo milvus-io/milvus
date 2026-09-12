@@ -103,6 +103,13 @@ func (i *RestfulInfo) MethodName() string {
 	return i.params.Path
 }
 
+func (i *RestfulInfo) MethodNameForFormatter() string {
+	if i.ctx == nil || i.ctx.Request == nil || i.ctx.Request.URL == nil {
+		return i.MethodName()
+	}
+	return i.ctx.Request.URL.Path
+}
+
 func (i *RestfulInfo) Address() string {
 	return i.params.ClientIP
 }

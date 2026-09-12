@@ -103,7 +103,8 @@ PhySearchGroupByNode::GetOutput() {
                                     search_result.topk_per_nq_prefix_sum_,
                                     search_result.element_level_
                                         ? &search_result.element_indices_
-                                        : nullptr);
+                                        : nullptr,
+                                    &search_result);
         search_result.composite_group_by_values_ =
             std::move(composite_group_by_values);
         search_result.group_size_ = search_info_.group_size_;

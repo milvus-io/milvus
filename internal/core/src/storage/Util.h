@@ -41,6 +41,7 @@
 #include "common/FieldDataInterface.h"
 #include "common/FieldMeta.h"
 #include "common/LoadInfo.h"
+#include "arrow/status.h"
 #include "common/Types.h"
 #include "common/type_c.h"
 #include "milvus-storage/common/metadata.h"
@@ -54,10 +55,21 @@
 #include "storage/MemFileManagerImpl.h"
 #include "storage/PayloadReader.h"
 #include "storage/PayloadStream.h"
+#include "storage/StatusToErrorCode.h"
 #include "storage/ThreadPools.h"
+#include "storage/StorageV2FSCache.h"
 #include "storage/Types.h"
 
 namespace milvus::storage {
+
+// Controls how parent-valid external dense-vector rows with a mixture of
+// valid and null child elements are normalized. All-null child ranges are
+// always normalized to a row-level null when the field is nullable.
+void
+SetExternalVectorPartialNullAsRowNull(bool enabled);
+
+bool
+GetExternalVectorPartialNullAsRowNull();
 
 void
 ReadMediumType(BinlogReaderPtr reader);
@@ -319,7 +331,9 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                            DataType data_type,
                            DataType element_type,
                            int64_t dim,
-                           milvus_storage::ArrowFileSystemPtr fs);
+                           milvus_storage::ArrowFileSystemPtr fs,
+                           size_t max_rows = 0,
+                           size_t offset = 0);
 
 // Streams the field's data out of a storage-v3 manifest batch by batch,
 // invoking `consumer` on the calling thread in batch order. Batch decoding
@@ -358,7 +372,9 @@ IterateFieldDataFromManifest(
     std::optional<DataType> element_type,
     std::optional<StorageColumnMapping> storage_column_mapping,
     const std::function<void(FieldDataPtr)>& consumer,
-    int64_t max_inflight_bytes = kStreamingInflightBytes);
+    int64_t max_inflight_bytes = kStreamingInflightBytes,
+    size_t max_rows = 0,
+    size_t offset = 0);
 
 std::vector<FieldDataPtr>
 GetFieldDatasFromManifest(
@@ -368,6 +384,8 @@ GetFieldDatasFromManifest(
     std::optional<DataType> data_type,
     int64_t dim,
     std::optional<DataType> element_type,
+    size_t max_rows = 0,
+    size_t offset = 0,
     std::optional<StorageColumnMapping> storage_column_mapping = std::nullopt);
 
 std::vector<FieldDataPtr>
@@ -394,6 +412,29 @@ ReleaseArrowUnused();
 ChunkManagerPtr
 CreateChunkManager(const StorageConfig& storage_config);
 
+// Build a legacy chunk manager (LocalChunkManager / the AWS-SDK based
+// MinioChunkManager family) for this storage config, bypassing the
+// ArrowFileSystem switch. Used both as the fallback inside CreateChunkManager
+// and as the remote control-plane delegate of ArrowFileSystemChunkManager.
+ChunkManagerPtr
+CreateLegacyChunkManager(const StorageConfig& storage_config);
+
+// Process-wide switch selecting the remote ChunkManager backend built by
+// CreateChunkManager: legacy AWS-SDK based managers (default) vs the
+// milvus-storage ArrowFileSystem backed ArrowFileSystemChunkManager.
+// Delivered from Go via SetArrowFileSystemChunkManagerEnabled (storage_c.h),
+// sourced from `common.storage.useArrowFileSystemChunkManager`.
+void
+SetUseArrowFileSystemChunkManager(bool use);
+
+bool
+UseArrowFileSystemChunkManager();
+
+// Translate a segcore StorageConfig into the StorageV2FSCache key used to
+// build/lookup the shared milvus-storage ArrowFileSystem.
+StorageV2FSCache::Key
+ToStorageV2FSCacheKey(const StorageConfig& storage_config);
+
 milvus_storage::ArrowFileSystemPtr
 InitArrowFileSystem(milvus::storage::StorageConfig storage_config);
 
@@ -404,6 +445,17 @@ CreateFieldData(
     bool nullable = false,
     int64_t dim = 1,
     int64_t total_num_rows = 0,
+    std::optional<proto::schema::TypeSchema> array_type = std::nullopt);
+
+// Creates field data whose rows are initialized from a schema default value.
+// Initialization completes before the FieldData is published and does not
+// acquire its mutation lock.
+FieldDataPtr
+CreateFieldDataFromDefaultValue(
+    const DataType& type,
+    bool nullable,
+    int64_t element_count,
+    const std::optional<DefaultValueType>& default_value,
     std::optional<proto::schema::TypeSchema> array_type = std::nullopt);
 
 int64_t

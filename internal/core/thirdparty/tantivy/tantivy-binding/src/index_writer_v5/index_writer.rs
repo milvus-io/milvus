@@ -26,7 +26,6 @@ pub(crate) struct IndexWriterWrapperImpl {
     pub(crate) index_writer: Either<IndexWriter, SingleSegmentIndexWriter>,
     pub(crate) id_field: Option<Field>,
     pub(crate) _index: Arc<Index>,
-    pub(crate) enable_background_merge: bool,
 }
 
 #[inline]
@@ -116,9 +115,9 @@ impl IndexWriterWrapperImpl {
         let index_writer =
             index.writer_with_num_threads(num_threads, overall_memory_budget_in_bytes)?;
         if !enable_background_merge {
-            // Sealed index builds end with an explicit merge-all in finish();
-            // background policy-driven merges would only waste IO and race
-            // with it, so disable them entirely for build-mode writers.
+            // Sealed index builds keep the segments produced by the writer's
+            // memory-budget flushes. Disable policy-driven background merges to
+            // avoid additional write amplification during the build.
             index_writer.set_merge_policy(Box::new(tantivy_5::merge_policy::NoMergePolicy));
         }
         Ok(IndexWriterWrapperImpl {
@@ -126,7 +125,6 @@ impl IndexWriterWrapperImpl {
             index_writer: Either::Left(index_writer),
             id_field: Some(id_field),
             _index: Arc::new(index),
-            enable_background_merge,
         })
     }
 
@@ -149,8 +147,6 @@ impl IndexWriterWrapperImpl {
             index_writer: Either::Right(index_writer),
             id_field: None,
             _index: Arc::new(index),
-            // Single-segment writer never runs finish()'s merge-all; value unused.
-            enable_background_merge: false,
         })
     }
 
@@ -295,23 +291,9 @@ impl IndexWriterWrapperImpl {
     }
 
     pub fn finish(self) -> Result<()> {
-        let enable_background_merge = self.enable_background_merge;
         match self.index_writer {
             Either::Left(mut index_writer) => {
                 index_writer.commit()?;
-
-                if !enable_background_merge {
-                    // Build-mode writers use NoMergePolicy (set in new()), so no
-                    // background merge can race this explicit merge-all. Collapse
-                    // the auto-flushed segments into a single one. Background-merge
-                    // writers (e.g. growing segments) keep their own policy and are
-                    // not forced to a single segment here.
-                    let segment_ids = index_writer.index().searchable_segment_ids()?;
-                    if segment_ids.len() > 1 {
-                        index_writer.merge(&segment_ids).wait()?;
-                    }
-                }
-
                 index_writer.garbage_collect_files().wait()?;
 
                 index_writer.wait_merging_threads()?;

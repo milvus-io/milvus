@@ -19,6 +19,7 @@
 
 #include "NamedType/named_type_impl.hpp"
 #include "NamedType/underlying_functionalities.hpp"
+#include "common/CGoCatch.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
 #include "common/IndexMeta.h"
@@ -81,11 +82,12 @@ CreateSearchPlanByExpr(CCollection c_col,
         *res_plan = nullptr;
         return status;
     } catch (std::exception& e) {
-        auto status = CStatus();
-        status.error_code = milvus::UnexpectedError;
-        status.error_msg = strdup(e.what());
         *res_plan = nullptr;
-        return status;
+        return milvus::FailureCStatus(&e);
+    } catch (...) {
+        *res_plan = nullptr;
+        return milvus::FailureCStatus(milvus::UnexpectedError,
+                                      "unknown exception");
     }
 }
 
@@ -107,11 +109,12 @@ ParsePlaceholderGroup(CSearchPlan c_plan,
         *res_placeholder_group = group;
         return status;
     } catch (std::exception& e) {
-        auto status = CStatus();
-        status.error_code = milvus::UnexpectedError;
-        status.error_msg = strdup(e.what());
         *res_placeholder_group = nullptr;
-        return status;
+        return milvus::FailureCStatus(&e);
+    } catch (...) {
+        *res_placeholder_group = nullptr;
+        return milvus::FailureCStatus(milvus::UnexpectedError,
+                                      "unknown exception");
     }
 }
 
@@ -128,15 +131,26 @@ GetTopK(CSearchPlan plan) {
     return res;
 }
 
+int64_t
+GetGroupSize(CSearchPlan plan) {
+    auto search_plan = static_cast<milvus::query::Plan*>(plan);
+    return search_plan->plan_node_->search_info_.group_size_;
+}
+
+void
+SetSearchPlanTakeForOutputAllowed(CSearchPlan plan, bool allowed) {
+    auto search_plan = static_cast<milvus::query::Plan*>(plan);
+    search_plan->take_for_output_allowed_ = allowed;
+}
+
 CStatus
 GetFieldID(CSearchPlan plan, int64_t* field_id) {
     try {
         auto p = static_cast<const milvus::query::Plan*>(plan);
         *field_id = milvus::query::GetFieldID(p);
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 const char*
@@ -198,11 +212,12 @@ CreateRetrievePlanByExpr(CCollection c_col,
         *res_plan = nullptr;
         return status;
     } catch (std::exception& e) {
-        auto status = CStatus();
-        status.error_code = milvus::UnexpectedError;
-        status.error_msg = strdup(e.what());
         *res_plan = nullptr;
-        return status;
+        return milvus::FailureCStatus(&e);
+    } catch (...) {
+        *res_plan = nullptr;
+        return milvus::FailureCStatus(milvus::UnexpectedError,
+                                      "unknown exception");
     }
 }
 
@@ -210,6 +225,12 @@ void
 DeleteRetrievePlan(CRetrievePlan c_plan) {
     auto plan = static_cast<milvus::query::RetrievePlan*>(c_plan);
     delete plan;
+}
+
+void
+SetRetrievePlanTakeForOutputAllowed(CRetrievePlan c_plan, bool allowed) {
+    auto plan = static_cast<milvus::query::RetrievePlan*>(c_plan);
+    plan->take_for_output_allowed_ = allowed;
 }
 
 bool

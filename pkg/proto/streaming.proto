@@ -708,12 +708,32 @@ message SegmentAssignmentMeta {
     SegmentAssignmentStat stat   = 6;
     int64 storage_version        = 7; // only available if level is L1 or Legacy.
     uint64 checkpoint_time_tick  = 8; // The timetick of checkpoint, the meta already see the message at this timetick.
+    L1SegmentPersistedStorage persisted_storage = 9;
+    bool l1_commit_done = 10; // DataCoord accepted the final L1 binlog commit.
+    int32 schema_version = 11; // The schema version the segment was created with, propagated to AllocSegment.
+}
+
+message L1SegmentPersistedStorage {
+    string manifest_path = 1;
+    repeated L1SegmentBinLogs binlogs = 2;
+    data.FieldBinlog merged_stats_binlog = 3;
+    data.Statistics statistics = 4;
+    repeated data.FieldBinlog delta_binlog = 5;
+}
+
+message L1SegmentBinLogs {
+    repeated data.FieldBinlog field_binlog = 1;
+    repeated data.FieldBinlog stats_binlog = 2;
+    repeated data.FieldBinlog bm25_binlog = 3;
+    uint64 from_time_tick = 4;
+    uint64 to_time_tick = 5;
 }
 
 enum SegmentAssignmentState {
     SEGMENT_ASSIGNMENT_STATE_UNKNOWN = 0;  // should never used.
     SEGMENT_ASSIGNMENT_STATE_GROWING = 1;
     SEGMENT_ASSIGNMENT_STATE_FLUSHED = 2;
+    SEGMENT_ASSIGNMENT_STATE_TOMBSTONED = 3;
 }
 
 // SegmentAssignmentStat is the stat of segment assignment.

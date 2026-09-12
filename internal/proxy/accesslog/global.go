@@ -121,7 +121,7 @@ func (l *AccessLogger) Write(info info.AccessInfo) bool {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 
-	method := info.MethodName()
+	method := info.MethodNameForFormatter()
 	formatter, ok := l.formatters.GetByMethod(method)
 	if !ok {
 		return false

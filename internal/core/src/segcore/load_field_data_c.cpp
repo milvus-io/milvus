@@ -22,6 +22,7 @@
 #include <string>
 #include <vector>
 
+#include "common/CGoCatch.h"
 #include "common/EasyAssert.h"
 #include "common/LoadInfo.h"
 #include "monitor/scope_metric.h"
@@ -38,9 +39,8 @@ NewLoadFieldDataInfo(CLoadFieldDataInfo* c_load_field_data_info,
         load_field_data_info->storage_version = storage_version;
         *c_load_field_data_info = load_field_data_info.release();
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 void
@@ -70,9 +70,8 @@ AppendLoadFieldInfo(CLoadFieldDataInfo c_load_field_data_info,
         binlog_info.row_count = row_count;
         load_field_data_info->field_infos[field_id] = binlog_info;
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 void
@@ -103,9 +102,8 @@ SetLoadFieldInfoChildFields(CLoadFieldDataInfo c_load_field_data_info,
         iter->second.child_field_ids = std::vector<int64_t>(
             child_field_ids, child_field_ids + child_field_num);
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -129,9 +127,8 @@ AppendLoadFieldDataPath(CLoadFieldDataInfo c_load_field_data_info,
         field_info.entries_nums.emplace_back(entries_num);
         field_info.memory_sizes.emplace_back(memory_size);
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 namespace {

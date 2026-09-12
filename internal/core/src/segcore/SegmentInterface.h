@@ -60,7 +60,6 @@
 #include "index/NgramInvertedIndex.h"
 #include "index/SkipIndex.h"
 #include "index/TextMatchIndex.h"
-#include "index/json_stats/JsonKeyStats.h"
 #include "mmap/ChunkedColumnInterface.h"
 #include "parquet/statistics.h"
 #include "pb/plan.pb.h"
@@ -71,6 +70,10 @@
 
 namespace milvus::exec {
 class SimpleGeometryCache;
+}
+
+namespace milvus::index {
+class JsonKeyStats;
 }
 
 namespace milvus::segcore {
@@ -90,6 +93,35 @@ NextSegmentInstanceUid() {
     static std::atomic<uint64_t> counter{0};
     return counter.fetch_add(1, std::memory_order_relaxed) + 1;
 }
+
+// Request-scoped read snapshot for sealed segments. Captured exactly once per
+// search/retrieve request while the request read lease is held; it reads the
+// immutable published state without locks or per-chunk re-capture. Growing
+// segments and non-pinned paths return nullptr and fall back to per-call
+// segment access with identical semantics.
+class SegmentReadSnapshot {
+ public:
+    virtual ~SegmentReadSnapshot() = default;
+
+    virtual int64_t
+    chunk_size(FieldId f, int64_t c) const = 0;
+
+    virtual int64_t
+    num_rows_until_chunk(FieldId f, int64_t c) const = 0;
+
+    virtual std::pair<int64_t, int64_t>
+    get_chunk_by_offset(FieldId f, int64_t off) const = 0;
+
+    virtual int64_t
+    num_chunk_data(FieldId f) const = 0;
+
+    virtual int64_t
+    get_row_count() const = 0;
+
+    virtual std::pair<std::shared_ptr<ChunkedColumnInterface>,
+                      std::shared_ptr<const SkipIndex>>
+    GetDataScanResources(FieldId field_id) const = 0;
+};
 
 // common interface of SegmentSealed and SegmentGrowing used by C API
 class SegmentInterface {
@@ -423,6 +455,17 @@ class SegmentInternalInterface : public SegmentInterface {
                                  int64_t count,
                                  TargetBitmapView valid_result) const = 0;
 
+    virtual std::shared_ptr<ChunkedColumnInterface>
+    GetChunkedColumn(FieldId field_id) const {
+        return nullptr;
+    }
+
+    virtual std::pair<std::shared_ptr<ChunkedColumnInterface>,
+                      std::shared_ptr<const SkipIndex>>
+    GetDataScanResources(FieldId field_id) const {
+        return {GetChunkedColumn(field_id), GetSkipIndex()};
+    }
+
     template <typename T>
     PinWrapper<Span<T>>
     chunk_data(milvus::OpContext* op_ctx,
@@ -716,6 +759,14 @@ class SegmentInternalInterface : public SegmentInterface {
     // element size in each chunk
     virtual int64_t
     size_per_chunk() const = 0;
+
+    // Capture a request-scoped read snapshot, or return nullptr when the
+    // segment does not use an immutable published snapshot (growing segments).
+    // Called once per request; see SegmentReadSnapshot.
+    virtual std::shared_ptr<const SegmentReadSnapshot>
+    CaptureReadSnapshot() const {
+        return nullptr;
+    }
 
     virtual int64_t
     get_active_count(Timestamp ts) const = 0;

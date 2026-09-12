@@ -27,7 +27,6 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/internal/datanode/taskcost"
-	"github.com/milvus-io/milvus/internal/storagev2"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -219,8 +218,9 @@ func NewTaskScheduler(ctx context.Context) *TaskScheduler {
 func getStateFromError(err error) indexpb.JobState {
 	if errors.Is(err, errCancel) {
 		return indexpb.JobState_JobStateRetry
-	} else if errors.Is(err, merr.ErrIoKeyNotFound) || errors.Is(err, merr.ErrSegcoreUnsupported) {
-		// NoSuchKey or unsupported error
+	} else if errors.Is(err, merr.ErrIoKeyNotFound) || errors.Is(err, merr.ErrSegcoreUnsupported) ||
+		merr.IsSegcoreDataFormatBroken(err) {
+		// NoSuchKey, unsupported, or malformed persisted data cannot be fixed by retrying.
 		return indexpb.JobState_JobStateFailed
 	} else if errors.Is(err, merr.ErrSegcorePretendFinished) {
 		return indexpb.JobState_JobStateFinished
@@ -286,13 +286,6 @@ func (sched *TaskScheduler) processTask(t Task) {
 	} else {
 		t.SetState(indexpb.JobState_JobStateFinished, "")
 		mlog.Debug(t.Ctx(), "process task completed", mlog.String("task", t.Name()))
-	}
-
-	// Publish filesystem metrics after index task completion
-	if indexTask != nil {
-		if indexTask.req != nil && indexTask.req.GetStorageConfig() != nil {
-			storagev2.PublishFilesystemMetricsWithConfig(indexTask.req.GetStorageConfig())
-		}
 	}
 }
 

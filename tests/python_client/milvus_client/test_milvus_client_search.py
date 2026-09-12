@@ -2071,7 +2071,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
                     data=vectors, anns_field=ct.default_float_vec_field_name,
                     search_params=search_params, limit=100,
                     check_task=CheckTasks.err_res,
-                    check_items={"err_code": 2000,
+                    check_items={"err_code": 2042,
                                  "err_msg": "ef(10) should be larger than k(100)"})
 
 

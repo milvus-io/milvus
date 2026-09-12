@@ -111,15 +111,23 @@ template <typename T>
 inline void
 CheckMetricTypeSupport(const MetricType& metric_type) {
     if constexpr (std::is_same_v<T, bin1>) {
-        AssertInfo(
-            IsBinaryVectorMetricType(metric_type),
-            "binary vector does not support metric type: " + metric_type);
+        if (!(IsBinaryVectorMetricType(metric_type))) {
+            ThrowInfo(
+                ErrorCode::Unsupported,
+                "binary vector does not support metric type: " + metric_type);
+        }
     } else if constexpr (std::is_same_v<T, int8>) {
-        AssertInfo(IsIntVectorMetricType(metric_type),
-                   "int vector does not support metric type: " + metric_type);
+        if (!(IsIntVectorMetricType(metric_type))) {
+            ThrowInfo(
+                ErrorCode::Unsupported,
+                "int vector does not support metric type: " + metric_type);
+        }
     } else {
-        AssertInfo(IsFloatVectorMetricType(metric_type),
-                   "float vector does not support metric type: " + metric_type);
+        if (!(IsFloatVectorMetricType(metric_type))) {
+            ThrowInfo(
+                ErrorCode::Unsupported,
+                "float vector does not support metric type: " + metric_type);
+        }
     }
 }
 

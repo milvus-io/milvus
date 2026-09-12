@@ -22,6 +22,7 @@ import (
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/bitutil"
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
@@ -30,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestGenerateEmptyArray(t *testing.T) {
@@ -246,7 +248,7 @@ func TestGenerateEmptyArray(t *testing.T) {
 				assert.NoError(t, err)
 				assert.EqualValues(t, rowNum, a.Len())
 				for i := range rowNum {
-					value, deserErr := serdeMap[tc.field.DataType].deserialize(a, i, schemapb.DataType_None, 0, false)
+					value, deserErr := serdeMap[tc.field.DataType].deserialize(a, i, schemapb.DataType_None, 0, false, false)
 					assert.True(t, a.IsValid(i))
 					assert.NoError(t, deserErr)
 					assert.Equal(t, tc.expectValue, value)
@@ -421,6 +423,113 @@ func TestGenerateEmptyArrayFromSchemaNullableVectorAppendsToRecordBuilder(t *tes
 	for i := 0; i < arr.Len(); i++ {
 		assert.True(t, rebuilt.Column(field.FieldID).IsNull(i))
 	}
+}
+
+func TestAppendValueAtRejectsNullFixedSizeBinaryChild(t *testing.T) {
+	valueType := &arrow.FixedSizeBinaryType{ByteWidth: 8}
+	sourceBuilder := array.NewListBuilder(memory.DefaultAllocator, valueType)
+	defer sourceBuilder.Release()
+	sourceBuilder.Append(true)
+	sourceValues := sourceBuilder.ValueBuilder().(*array.FixedSizeBinaryBuilder)
+	sourceValues.Append(make([]byte, valueType.ByteWidth))
+	sourceValues.AppendNull()
+	sourceValues.Append(make([]byte, valueType.ByteWidth))
+	source := sourceBuilder.NewArray()
+	defer source.Release()
+
+	targetBuilder := array.NewListBuilder(memory.DefaultAllocator, valueType)
+	defer targetBuilder.Release()
+	size, err := appendValueAt(
+		targetBuilder,
+		source,
+		0,
+		&schemapb.FieldSchema{DataType: schemapb.DataType_ArrayOfVector},
+		appendValueDefault{},
+	)
+	require.ErrorContains(t, err, "contains null child")
+	require.ErrorIs(t, err, merr.ErrDataIntegrity)
+	require.Zero(t, size)
+}
+
+func TestAppendValueAtElementNullableArrayOfVectorUsesCompactBinaryPayload(t *testing.T) {
+	const dim = 2
+	sourceBuilder := array.NewListBuilder(memory.DefaultAllocator, arrow.BinaryTypes.Binary)
+	defer sourceBuilder.Release()
+	sourceBuilder.Append(true)
+	sourceValues := sourceBuilder.ValueBuilder().(*array.BinaryBuilder)
+	sourceValues.Append(make([]byte, dim*4))
+	sourceValues.AppendNull()
+	sourceValues.Append(make([]byte, dim*4))
+	source := sourceBuilder.NewArray()
+	defer source.Release()
+
+	targetBuilder := array.NewListBuilder(memory.DefaultAllocator, arrow.BinaryTypes.Binary)
+	defer targetBuilder.Release()
+	size, err := appendValueAt(
+		targetBuilder,
+		source,
+		0,
+		&schemapb.FieldSchema{
+			DataType:        schemapb.DataType_ArrayOfVector,
+			ElementType:     schemapb.DataType_FloatVector,
+			ElementNullable: true,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.DimKey, Value: "2"},
+			},
+		},
+		appendValueDefault{arrayOfVectorByteWidth: dim * 4},
+	)
+	require.NoError(t, err)
+	const childCount = 3
+	expectedSize := uint64(2*dim*4+childCount*arrow.Int32SizeBytes) +
+		uint64(bitutil.BytesForBits(childCount))
+	require.Equal(t, expectedSize, size)
+
+	result := targetBuilder.NewArray().(*array.List)
+	defer result.Release()
+	child := result.ListValues().(*array.Binary)
+	require.Equal(t, 3, child.Len())
+	require.True(t, child.IsNull(1))
+}
+
+func TestAppendValueAtElementNullableArrayOfVectorCountsNullChildMetadata(t *testing.T) {
+	const (
+		dim        = 2
+		childCount = 4096
+	)
+	sourceBuilder := array.NewListBuilder(memory.DefaultAllocator, arrow.BinaryTypes.Binary)
+	defer sourceBuilder.Release()
+	sourceBuilder.Append(true)
+	sourceValues := sourceBuilder.ValueBuilder().(*array.BinaryBuilder)
+	for range childCount {
+		sourceValues.AppendNull()
+	}
+	source := sourceBuilder.NewArray()
+	defer source.Release()
+
+	targetBuilder := array.NewListBuilder(memory.DefaultAllocator, arrow.BinaryTypes.Binary)
+	defer targetBuilder.Release()
+	size, err := appendValueAt(
+		targetBuilder,
+		source,
+		0,
+		&schemapb.FieldSchema{
+			DataType:        schemapb.DataType_ArrayOfVector,
+			ElementType:     schemapb.DataType_FloatVector,
+			ElementNullable: true,
+		},
+		appendValueDefault{arrayOfVectorByteWidth: dim * 4},
+	)
+	require.NoError(t, err)
+	expectedSize := uint64(childCount*arrow.Int32SizeBytes) +
+		uint64(bitutil.BytesForBits(childCount))
+	require.Equal(t, expectedSize, size)
+
+	result := targetBuilder.NewArray().(*array.List)
+	defer result.Release()
+	child := result.ListValues().(*array.Binary)
+	require.Equal(t, childCount, child.Len())
+	require.Equal(t, childCount, child.NullN())
 }
 
 func TestRecordBuilderNullableDenseVectorPreservesDimMetadata(t *testing.T) {

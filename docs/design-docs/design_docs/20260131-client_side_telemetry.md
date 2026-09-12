@@ -579,6 +579,28 @@ The server computes it over the configs **already filtered to this client's scop
 sends persistent configs only when `request.ConfigHash != serverHash`. The response has no
 "new hash" field — the client recomputes it locally after processing commands.
 
+An empty command list is otherwise ambiguous: it can mean either that a non-empty client
+hash already matches or that the last matching config was deleted. Clearing the hash for
+every empty response would make a matching non-empty config alternate between suppression
+and re-delivery. To let existing SDKs converge without a protobuf change, the server uses a
+reserved empty-config sentinel only when the effective config set is empty and the client
+reports some other non-empty hash:
+
+```
+ID:          00000000-0000-0000-0000-000000000000
+Type:        push_config
+Payload:     {}
+Persistent:  true
+CreateTime:  0
+Hash:        d34aea1518ff0217
+```
+
+Every telemetry SDK treats this as a successful no-op and adopts its hash. The server
+accepts both `""` and `d34aea1518ff0217` as an empty effective-config hash, so fresh clients
+receive no sentinel and transitioned clients do not receive it again. The command is
+synthesized in the heartbeat response, never stored in etcd or exposed through List/Delete,
+and its acknowledgement is omitted from ordinary command reply history.
+
 #### Command delivery and deduplication
 
 One-time commands are returned only when `command.CreateTime > request.LastCommandTimestamp`

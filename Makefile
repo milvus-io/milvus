@@ -64,6 +64,11 @@ ifdef USE_SVS
 	use_svs = ${USE_SVS}
 endif
 
+with_crt = OFF
+ifdef WITH_CRT
+	with_crt = ${WITH_CRT}
+endif
+
 # FIPS: default OFF. Set MILVUS_FIPS_ENABLED=ON to enable BoringCrypto.
 GOEXPERIMENT_FLAG :=
 ifeq ($(MILVUS_FIPS_ENABLED),ON)
@@ -234,6 +239,8 @@ static-check: getdeps
 	@source $(PWD)/scripts/setenv.sh && cd client && GO111MODULE=on GOFLAGS=-buildvcs=false $(INSTALL_PATH)/golangci-lint run --timeout=30m --config $(PWD)/client/.golangci.yml
 	@echo "Start check go_client e2e package"
 	@source $(PWD)/scripts/setenv.sh && cd tests/go_client && GO111MODULE=on GOFLAGS=-buildvcs=false $(INSTALL_PATH)/golangci-lint run --build-tags L0,L1,L2,test --timeout=30m --config $(PWD)/tests/go_client/.golangci.yml
+	@echo "Start check segcore error boundaries"
+	@$(PWD)/scripts/check_segcore_error_boundaries.sh
 
 verifiers: build-cpp getdeps cppcheck rustcheck fmt static-check
 
@@ -253,9 +260,25 @@ meta-migration:
     		-tags dynamic -o $(INSTALL_PATH)/meta-migration $(MIGRATION_PATH)/main.go 1>/dev/null
 
 INTERATION_PATH = $(PWD)/tests/integration
-integration-test: getdeps
-	@echo "Building integration tests ..."
-	@(env bash $(PWD)/scripts/run_intergration_test.sh "$(INSTALL_PATH)/gotestsum --")
+CMEK_FIXTURE_PATH = $(INSTALL_PATH)/cmek-fixtures
+
+.PHONY: build-cmek-fixtures integration-test integration-test-base integration-test-cmek
+.NOTPARALLEL: integration-test
+
+build-cmek-fixtures:
+	@echo "Building CMEK fixture plugins ..."
+	@(env GO="$(GO)" bash $(PWD)/scripts/build_cmek_fixtures.sh "$(CMEK_FIXTURE_PATH)")
+
+integration-test: MILVUS_INTEGRATION_COVERAGE_APPEND = true
+integration-test: integration-test-base integration-test-cmek
+
+integration-test-base: getdeps
+	@echo "Running integration tests excluding CMEK ..."
+	@(bash $(PWD)/scripts/run_intergration_test.sh --exclude-package ./cmek "$(INSTALL_PATH)/gotestsum --")
+
+integration-test-cmek: getdeps build-cmek-fixtures
+	@echo "Running CMEK scalar-index integration tests ..."
+	@(env MILVUS_CMEK_FIXTURE_DIR="$(CMEK_FIXTURE_PATH)" MILVUS_INTEGRATION_COVERAGE_APPEND="$(MILVUS_INTEGRATION_COVERAGE_APPEND)" bash $(PWD)/scripts/run_intergration_test.sh --package ./cmek "$(INSTALL_PATH)/gotestsum --")
 
 BUILD_TAGS = $(shell git describe --tags --always --dirty="-dev")
 BUILD_TAGS_GPU = ${BUILD_TAGS}-gpu
@@ -297,21 +320,33 @@ generated-proto: download-milvus-proto build-3rdparty get-proto-deps
 	@echo "Generate proto ..."
 	@(env bash $(PWD)/scripts/generate_proto.sh ${INSTALL_PATH})
 
+generate-segcore-codes:
+	@echo "Generating segcore error code list from milvus-common ..."
+	@(env bash $(PWD)/scripts/generate_segcore_codes.sh)
+
+# CI gate: regenerate the segcore code list and fail on drift, so a
+# milvus-common pin bump that adds an ErrorCode cannot ship without the
+# generated snapshot (and therefore the classForCode switch) catching up.
+# Mirrors check-proto-product.
+check-segcore-codes-product: generate-segcore-codes
+	@git diff --exit-code -- pkg/util/merr/segcore_codes_gen.go || \
+		(echo "segcore_codes_gen.go is out of date with milvus-common's EasyAssert.h; run 'make generate-segcore-codes' and classify any new code in classForCode" && exit 1)
+
 build-cpp: generated-proto plan-parser-lib
 	@echo "Building Milvus cpp library ..."
-	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -a ${use_asan} -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -f $(tantivy_features) -S ${use_svs})
+	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -a ${use_asan} -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -f $(tantivy_features) -S ${use_svs} -R ${with_crt})
 
 build-cpp-gpu: generated-proto plan-parser-lib
 	@echo "Building Milvus cpp gpu library ... "
-	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -g -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -f $(tantivy_features) -S ${use_svs})
+	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -g -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -f $(tantivy_features) -S ${use_svs} -R ${with_crt})
 
 build-cpp-with-unittest: generated-proto plan-parser-lib
 	@echo "Building Milvus cpp library with unittest ... "
-	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -a ${use_asan} -u -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -f $(tantivy_features) -S ${use_svs})
+	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -a ${use_asan} -u -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -f $(tantivy_features) -S ${use_svs} -R ${with_crt})
 
 build-cpp-with-coverage: generated-proto plan-parser-lib
 	@echo "Building Milvus cpp library with coverage and unittest ..."
-	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -a ${use_asan} -u -c -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -f $(tantivy_features) -S ${use_svs})
+	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -a ${use_asan} -u -c -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -f $(tantivy_features) -S ${use_svs} -R ${with_crt})
 
 check-proto-product: generated-proto
 	 @(env bash $(PWD)/scripts/check_proto_product.sh)

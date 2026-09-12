@@ -32,6 +32,7 @@ import (
 	internalhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
+	"github.com/milvus-io/milvus/internal/proxy/scheduler"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/adminauth"
@@ -98,7 +99,7 @@ type Proxy struct {
 
 	chMgr channelmgr.ChannelsMgr
 
-	sched *taskScheduler
+	sched *scheduler.TaskScheduler
 
 	rowIDAllocator *allocator.IDAllocator
 	tsoAllocator   *timestampAllocator
@@ -179,6 +180,13 @@ func (node *Proxy) setMetaCache(cache Cache) {
 
 func (node *Proxy) GetMetaCache() Cache {
 	return node.getMetaCache()
+}
+
+// IsDQLQueueFull reports whether the next DQL enqueue would be rejected with
+// TooManyRequests. The REST layer probes it (via interface assertion, like
+// GetMetaCache) to reject search/query before paying for body decoding.
+func (node *Proxy) IsDQLQueueFull() bool {
+	return node.sched != nil && node.sched.DqQueue.IsFull()
 }
 
 // Register registers proxy at etcd
@@ -289,7 +297,7 @@ func (node *Proxy) Init() error {
 	node.chMgr = chMgr
 	mlog.Debug(node.ctx, "create channels manager done", mlog.String("role", typeutil.ProxyRole))
 
-	node.sched, err = newTaskScheduler(node.ctx, node.tsoAllocator)
+	node.sched, err = scheduler.NewTaskScheduler(node.ctx, node.tsoAllocator)
 	if err != nil {
 		mlog.Warn(node.ctx, "failed to create task scheduler", mlog.String("role", typeutil.ProxyRole), mlog.Err(err))
 		return err
@@ -399,7 +407,7 @@ func (node *Proxy) Stop() error {
 		node.resourceManager.Close()
 	}
 
-	if metaCache := node.getMetaCache(); metaCache != nil {
+	if metaCache := node.GetMetaCache(); metaCache != nil {
 		metaCache.Close()
 	}
 

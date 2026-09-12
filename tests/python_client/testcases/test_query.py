@@ -3389,7 +3389,7 @@ class TestQueryTextMatchNegative(TestcaseBase):
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
         ]
         default_schema = CollectionSchema(fields=default_fields, description="test collection")
-        error = {ct.err_code: 2000, ct.err_msg: "unsupported tokenizer"}
+        error = {ct.err_code: 2001, ct.err_msg: "unsupported tokenizer"}
         self.init_collection_wrap(
             name=cf.gen_unique_str(prefix),
             schema=default_schema,
@@ -3494,7 +3494,7 @@ class TestQueryFunction(TestcaseBase):
             FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
         ]
         default_schema = CollectionSchema(fields=default_fields, description="test collection")
-        error = {ct.err_code: 2000, ct.err_msg: "field type is not supported"}
+        error = {ct.err_code: 2001, ct.err_msg: "field type is not supported"}
         self.init_collection_wrap(
             name=cf.gen_unique_str(prefix),
             schema=default_schema,

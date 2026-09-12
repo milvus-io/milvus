@@ -1,5 +1,11 @@
 # Bloom Filter Membership Expression: `bloom_match`
 
+> **Superseded.** `bloom_match` never shipped in a release. Its syntax is
+> superseded by the unified `membership_match` surface (identical MBF1 blob,
+> magic-header dispatch); see
+> [20260822-membership-match-expression.md](./20260822-membership-match-expression.md).
+> No deprecation period is needed because the name was never part of a release.
+
 - Status: Draft
 - Date: 2026-07-07
 - Issue: https://github.com/milvus-io/milvus/issues/51139
@@ -143,7 +149,7 @@ not bloom_match(...)
 - `<blob>`: an expression template placeholder resolved from `expr_template_values`, carrying
   a **client pre-built filter blob** as a **raw bytes** template value
   (`schemapb.TemplateValue.bytes_val`). There is no proxy-side build and no raw-list path: the
-  client always builds the MBF1/SBBF blob (`client/sbbf`, reproducible cross-language) and
+  client always builds the MBF1/SBBF blob (`client/membership/sbbf`, reproducible cross-language) and
   ships the compact ~32 MiB blob. proto3 `bytes` carries the blob with **zero base64 inflation**.
   The proxy validates the MBF1 envelope (`sbbf.Parse`) and embeds it verbatim.
 - **No `<fpr>` argument.** The FPR is chosen by the client at build time
@@ -403,7 +409,7 @@ Java, ...) must reproduce the vectors bit-for-bit.
 
 ### Build path (client builds, proxy validates & embeds)
 
-1. **Client** builds the SBBF with the spec-conformant Go package `client/sbbf`
+1. **Client** builds the SBBF with the spec-conformant Go package `client/membership/sbbf`
    (`NewBloomFilterBlob(members, fpr)`; XXH64 via `cespare/xxhash/v2`), sizes it from (n, fpr)
    per the SBBF formula, and wraps it in the MBF1 envelope. Any SDK reproduces the same bytes
    from the shared spec. There is **no proxy-side build** and no raw-list path.
@@ -468,13 +474,15 @@ framework, and the delete-safety guard are all encoding-agnostic and reused unch
   in [64 MiB, 128 MiB) admits the same Bloom filters, so the default is set to the smallest
   of them and states the real ceiling. The 128 MiB MBF1 num_blocks format cap remains the
   hard Bloom per-blob ceiling. The legacy `proxy.maxBloomFilterSize` key remains a fallback.
-- **`proxy.maxMembershipFilterPlanSize`** (default 128 MiB, refreshable): request-wide cap
-  on the serialized size of every membership-filter-bearing plan, enforced with
-  `proto.Size(plan)` before `proto.Marshal`. Reusing one template in multiple expressions
-  therefore consumes the budget for every embedded copy. Hybrid search accumulates all
-  membership-filter-bearing sub-plans against the same request budget, and scorer filters are
-  included: a membership expression is allowed in a scorer filter and its blob is charged to
-  the same budget.
+- **`proxy.maxMembershipFilterPlanSize`** (default 128 MiB, refreshable): request-wide
+  membership budget. It independently caps the serialized size of every
+  membership-filter-bearing plan and, for Roaring filters, the aggregate estimated decoded
+  size. The serialized total is enforced with `proto.Size(plan)` before `proto.Marshal`;
+  Roaring decoded estimates are charged before materialization. Every embedded copy consumes
+  the serialized total; only Roaring occurrences additionally consume the decoded total.
+  Hybrid search accumulates all membership-filter-bearing sub-plans against the same request
+  budget, and scorer filters are included: a membership expression is allowed in a scorer
+  filter and its applicable costs are charged to the same budget.
   Exceeding the cap returns
   `ErrParameterTooLarge` (1102, InputError, non-retriable) at the proxy, before QueryNode routing,
   so an over-budget Bloom request cannot turn into a gRPC `ResourceExhausted` or blacklist a
@@ -517,7 +525,7 @@ framework, and the delete-safety guard are all encoding-agnostic and reused unch
 
 ## Testing plan
 
-1. Go unit: `client/sbbf` golden vectors; empirical FPR check (build from set A, probe
+1. Go unit: `client/membership/sbbf` golden vectors; empirical FPR check (build from set A, probe
    disjoint set B, assert measured FPR ≈ declared within tolerance); envelope validation
    fuzz (truncated/corrupt headers).
 2. Parser unit: syntax, arg validation (exactly two args; second must be a `{template}` bytes

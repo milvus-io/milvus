@@ -410,6 +410,34 @@ func GetVirtualChannel(pchannel string, collectionID int64, idx int) string {
 	return fmt.Sprintf("%s_%dv%d", pchannel, collectionID, idx)
 }
 
+// ParseVChannel parses a canonical virtual channel name formatted as
+// {pchannel}_{collectionID}v{index}.
+func ParseVChannel(vchannel string) (string, int64, int, error) {
+	separator := strings.LastIndexByte(vchannel, '_')
+	if separator <= 0 || separator == len(vchannel)-1 {
+		return "", 0, 0, merr.WrapErrServiceInternalMsg("invalid vchannel %q", vchannel)
+	}
+
+	suffix := vchannel[separator+1:]
+	versionSeparator := strings.IndexByte(suffix, 'v')
+	if versionSeparator <= 0 || versionSeparator == len(suffix)-1 {
+		return "", 0, 0, merr.WrapErrServiceInternalMsg("invalid vchannel %q", vchannel)
+	}
+
+	collectionComponent := suffix[:versionSeparator]
+	collectionID, err := strconv.ParseInt(collectionComponent, 10, 64)
+	if err != nil || collectionID < 0 || strconv.FormatInt(collectionID, 10) != collectionComponent {
+		return "", 0, 0, merr.WrapErrServiceInternalMsg("invalid vchannel %q", vchannel)
+	}
+	indexComponent := suffix[versionSeparator+1:]
+	indexValue, err := strconv.ParseInt(indexComponent, 10, strconv.IntSize)
+	if err != nil || indexValue < 0 || strconv.FormatInt(indexValue, 10) != indexComponent {
+		return "", 0, 0, merr.WrapErrServiceInternalMsg("invalid vchannel %q", vchannel)
+	}
+
+	return vchannel[:separator], collectionID, int(indexValue), nil
+}
+
 // ConvertChannelName assembles channel name according to parameters.
 func ConvertChannelName(chanName string, tokenFrom string, tokenTo string) (string, error) {
 	if tokenFrom == "" {
@@ -544,18 +572,35 @@ func getVectorFieldPhysicalRowsWithDim(fieldName string, dataType schemapb.DataT
 }
 
 func ValidateNullableVectorCompactRows(fieldName string, validData []bool, physicalRows uint64, logicalRows uint64, requireValidData bool) error {
+	return validateNullableVectorCompactRows(fieldName, 0, false, validData, physicalRows, logicalRows, requireValidData)
+}
+
+// ValidateNullableVectorCompactRow validates one row in an ArrayOfVector
+// without formatting the row-qualified field name on the success path.
+func ValidateNullableVectorCompactRow(fieldName string, rowIdx int, validData []bool, physicalRows uint64, logicalRows uint64, requireValidData bool) error {
+	return validateNullableVectorCompactRows(fieldName, rowIdx, true, validData, physicalRows, logicalRows, requireValidData)
+}
+
+func nullableVectorFieldLabel(fieldName string, rowIdx int, includeRow bool) string {
+	if includeRow {
+		return fmt.Sprintf("%s[%d]", fieldName, rowIdx)
+	}
+	return fieldName
+}
+
+func validateNullableVectorCompactRows(fieldName string, rowIdx int, includeRow bool, validData []bool, physicalRows uint64, logicalRows uint64, requireValidData bool) error {
 	if len(validData) == 0 {
 		if requireValidData {
-			return merr.WrapErrParameterInvalidMsg("nullable vector field %s requires valid_data", fieldName)
+			return merr.WrapErrParameterInvalidMsg("nullable vector field %s requires valid_data", nullableVectorFieldLabel(fieldName, rowIdx, includeRow))
 		}
 		return nil
 	}
 	if logicalRows > 0 && uint64(len(validData)) != logicalRows {
-		return merr.WrapErrParameterInvalidMsg("nullable vector field %s valid_data length mismatch: valid_data=%d, logical rows=%d", fieldName, len(validData), logicalRows)
+		return merr.WrapErrParameterInvalidMsg("nullable vector field %s valid_data length mismatch: valid_data=%d, logical rows=%d", nullableVectorFieldLabel(fieldName, rowIdx, includeRow), len(validData), logicalRows)
 	}
 	validRows := CountValidRows(validData)
 	if physicalRows != validRows {
-		return merr.WrapErrParameterInvalidMsg("nullable vector field %s has %d valid rows, but compact physical payload rows is %d", fieldName, validRows, physicalRows)
+		return merr.WrapErrParameterInvalidMsg("nullable vector field %s has %d valid rows, but compact physical payload rows is %d", nullableVectorFieldLabel(fieldName, rowIdx, includeRow), validRows, physicalRows)
 	}
 	return nil
 }

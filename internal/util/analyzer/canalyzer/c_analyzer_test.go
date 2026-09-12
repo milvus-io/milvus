@@ -40,7 +40,8 @@ func TestAnalyzer(t *testing.T) {
 		assert.NoError(t, err)
 		defer analyzer.Destroy()
 
-		tokenStream := analyzer.NewTokenStream("football, basketball, pingpang")
+		tokenStream, err := analyzer.NewTokenStream("football, basketball, pingpang")
+		assert.NoError(t, err)
 		defer tokenStream.Destroy()
 
 		tokens := []string{}
@@ -56,7 +57,8 @@ func TestAnalyzer(t *testing.T) {
 		assert.NoError(t, err)
 		defer analyzer.Destroy()
 
-		tokenStream := analyzer.NewTokenStream("football, basketball, pingpang")
+		tokenStream, err := analyzer.NewTokenStream("football, basketball, pingpang")
+		assert.NoError(t, err)
 		defer tokenStream.Destroy()
 
 		tokens := []string{}
@@ -73,7 +75,8 @@ func TestAnalyzer(t *testing.T) {
 		assert.NoError(t, err)
 		defer analyzer.Destroy()
 
-		tokenStream := analyzer.NewTokenStream("football, basketball, pingpang")
+		tokenStream, err := analyzer.NewTokenStream("football, basketball, pingpang")
+		assert.NoError(t, err)
 		defer tokenStream.Destroy()
 
 		tokens := []string{}
@@ -90,7 +93,8 @@ func TestAnalyzer(t *testing.T) {
 		assert.NoError(t, err)
 		defer analyzer.Destroy()
 
-		tokenStream := analyzer.NewTokenStream("张华考上了北京大学；李萍进了中等技术学校；我在百货公司当售货员：我们都有光明的前途")
+		tokenStream, err := analyzer.NewTokenStream("张华考上了北京大学；李萍进了中等技术学校；我在百货公司当售货员：我们都有光明的前途")
+		assert.NoError(t, err)
 		defer tokenStream.Destroy()
 		for tokenStream.Advance() {
 			assert.NotEmpty(t, tokenStream.Token())
@@ -132,7 +136,8 @@ func TestAnalyzer(t *testing.T) {
 		assert.NoError(t, err)
 		defer analyzer.Destroy()
 
-		tokenStream := analyzer.NewTokenStream("football, basketball, pingpang")
+		tokenStream, err := analyzer.NewTokenStream("football, basketball, pingpang")
+		assert.NoError(t, err)
 		defer tokenStream.Destroy()
 		for tokenStream.Advance() {
 			fmt.Println(tokenStream.Token())
@@ -146,7 +151,8 @@ func TestAnalyzer(t *testing.T) {
 		require.NoError(t, err)
 		defer tokenizer.Destroy()
 
-		tokenStream := tokenizer.NewTokenStream("東京スカイツリーの最寄り駅はとうきょうスカイツリー駅です")
+		tokenStream, err := tokenizer.NewTokenStream("東京スカイツリーの最寄り駅はとうきょうスカイツリー駅です")
+		assert.NoError(t, err)
 		defer tokenStream.Destroy()
 		for tokenStream.Advance() {
 			fmt.Println(tokenStream.Token())

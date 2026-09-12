@@ -139,7 +139,7 @@ RTreeIndex<T>::~RTreeIndex() {
 }
 
 static std::string
-GetFileName(const std::string& path) {
+GetRTreeFileName(const std::string& path) {
     auto pos = path.find_last_of('/');
     return pos == std::string::npos ? path : path.substr(pos + 1);
 }
@@ -165,7 +165,7 @@ RTreeIndex<T>::Load(milvus::tracer::TraceContext ctx, const Config& config) {
         auto find_file = [&](const std::string& target) -> auto{
             return std::find_if(
                 files.begin(), files.end(), [&](const std::string& filename) {
-                    return GetFileName(filename) == target;
+                    return GetRTreeFileName(filename) == target;
                 });
         };
 
@@ -196,7 +196,7 @@ RTreeIndex<T>::Load(milvus::tracer::TraceContext ctx, const Config& config) {
             // sliced case: collect all parts with prefix index_null_offset
             null_offset_files.push_back(*it);
             for (auto& f : files) {
-                auto filename = GetFileName(f);
+                auto filename = GetRTreeFileName(f);
                 static constexpr std::string_view kName = "index_null_offset_";
                 if (filename.size() > kName.size() &&
                     filename.compare(
@@ -396,9 +396,11 @@ RTreeIndex<T>::Upload(const Config& config) {
             continue;
         }
 
-        AssertInfo(disk_file_manager_->AddFile(it->path().string()),
-                   "failed to add index file: {}",
-                   it->path().string());
+        if (!(disk_file_manager_->AddFile(it->path().string()))) {
+            ThrowInfo(ErrorCode::FileWriteFailed,
+                      "failed to add index file: {}",
+                      it->path().string());
+        }
     }
 
     // 3. Collect remote paths to size mapping
@@ -778,7 +780,9 @@ RTreeIndex<T>::WriteEntries(storage::IndexEntryWriter* writer) {
     for (const auto& file_path : files) {
         auto file = file_path.string();
         auto fd = open(file.c_str(), O_RDONLY | O_CLOEXEC);
-        AssertInfo(fd != -1, "open file failed: {}", file);
+        if (!(fd != -1)) {
+            ThrowInfo(ErrorCode::FileOpenFailed, "open file failed: {}", file);
+        }
         auto file_size = boost::filesystem::file_size(file);
         auto file_name = file_path.filename().string();
         writer->WriteEntry(file_name, fd, file_size);

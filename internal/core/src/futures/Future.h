@@ -342,9 +342,9 @@ class Future : public IFuture {
 
             try {
                 return fn(cancellation_token);
-            } catch (const folly::FutureCancellation& e) {
+            } catch (const folly::FutureCancellation&) {
                 metrics_.withDuringCancel();
-                throw e;
+                throw;
             } catch (const milvus::SegcoreError& e) {
                 // A cancellation raised inside execution does not always reach
                 // here as a raw folly::FutureCancellation: the exec driver's
@@ -393,6 +393,16 @@ class Future : public IFuture {
                            ready->setValue(LeakyResult<R>(
                                static_cast<int>(e.get_error_code()), e.what()));
                        })
+            // An async producer's OOM must reach Go as the same retriable
+            // MemAllocateFailed the synchronous CGo boundary reports
+            // (CGoCatch.h); the generic std::exception arm below would flatten
+            // it to a permanent UnexpectedError and skip retry/reroute.
+            .thenError(
+                folly::tag_t<std::bad_alloc>{},
+                [ready = ready_](const std::bad_alloc& e) {
+                    ready->setValue(LeakyResult<R>(
+                        static_cast<int>(milvus::MemAllocateFailed), e.what()));
+                })
             .thenError(
                 folly::tag_t<std::exception>{},
                 [ready = ready_](const std::exception& e) {

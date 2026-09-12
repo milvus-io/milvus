@@ -28,7 +28,6 @@
 #include "exec/expression/AlwaysTrueExpr.h"
 #include "exec/expression/BinaryArithOpEvalRangeExpr.h"
 #include "exec/expression/BinaryRangeExpr.h"
-#include "exec/expression/BloomFilterExpr.h"
 #include "exec/expression/CallExpr.h"
 #include "exec/expression/ColumnExpr.h"
 #include "exec/expression/CompareExpr.h"
@@ -40,8 +39,8 @@
 #include "exec/expression/LogicalBinaryExpr.h"
 #include "exec/expression/LogicalUnaryExpr.h"
 #include "exec/expression/MatchExpr.h"
+#include "exec/expression/MembershipFilterExpr.h"
 #include "exec/expression/NullExpr.h"
-#include "exec/expression/RoaringFilterExpr.h"
 #include "exec/expression/TermExpr.h"
 #include "exec/expression/TimestamptzArithCompareExpr.h"
 #include "exec/expression/UnaryExpr.h"
@@ -482,6 +481,10 @@ CompileExpression(const expr::TypedExprPtr& expr,
     } else {
         ThrowInfo(UnexpectedError, "unsupport expr: {}", expr->ToString());
     }
+    // Bind the request-scoped sealed read snapshot (nullptr for growing /
+    // non-pinned paths) to this expression. Runs for the whole compiled tree
+    // because CompileExpression is recursive over inputs.
+    result->SetSnapshot(context->get_read_snapshot().get());
     return result;
 }
 
@@ -777,7 +780,17 @@ ReorderConjunctExpr(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
         // indexed predicates that can prune what it has to probe.
         if (input->name() == "PhyBloomFilterExpr" ||
             input->name() == "PhyRoaringFilterExpr") {
-            membership_expr.push_back(i);
+            // A JSON-path membership probe parses JSON and resolves a pointer
+            // per evaluated row, which is a heavy operation; bucket it with
+            // the other JSON predicates instead of the string-compare tier so
+            // it runs after cheaper predicates that can prune its rows.
+            if (input->IsSource() && input->GetColumnInfo().has_value() &&
+                IsJsonDataType(input->GetColumnInfo()->data_type_)) {
+                json_expr.push_back(i);
+                has_heavy_operation = true;
+            } else {
+                membership_expr.push_back(i);
+            }
             continue;
         }
 

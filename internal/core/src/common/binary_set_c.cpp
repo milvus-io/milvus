@@ -45,6 +45,11 @@ NewBinarySet(CBinarySet* c_binary_set) {
         status.error_code = milvus::ErrorCode::UnexpectedError;
         status.error_msg = strdup(e.what());
         return status;
+    } catch (...) {
+        auto status = CStatus();
+        status.error_code = milvus::ErrorCode::UnexpectedError;
+        status.error_msg = strdup("unknown exception");
+        return status;
     }
 }
 
@@ -78,6 +83,9 @@ AppendIndexBinary(CBinarySet c_binary_set,
     } catch (std::exception& e) {
         status.error_code = milvus::ErrorCode::UnexpectedError;
         status.error_msg = strdup(e.what());
+    } catch (...) {
+        status.error_code = milvus::ErrorCode::UnexpectedError;
+        status.error_msg = strdup("unknown exception");
     }
     return status;
 }
@@ -114,6 +122,7 @@ GetBinarySetValueSize(CBinarySet c_binary_set, const char* key) {
         auto binary = binary_set->GetByName(key_);
         ret_ = binary->size;
     } catch (std::exception& e) {
+    } catch (...) {
     }
     return ret_;
 }
@@ -133,6 +142,9 @@ CopyBinarySetValue(void* data, const char* key, CBinarySet c_binary_set) {
     } catch (std::exception& e) {
         status.error_code = milvus::ErrorCode::UnexpectedError;
         status.error_msg = strdup(e.what());
+    } catch (...) {
+        status.error_code = milvus::ErrorCode::UnexpectedError;
+        status.error_msg = strdup("unknown exception");
     }
     return status;
 }

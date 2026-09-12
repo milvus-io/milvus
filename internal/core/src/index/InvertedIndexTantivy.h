@@ -456,4 +456,28 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     // every element in the array is treated as a separate document in the index.
     bool is_nested_index_{false};
 };
+
+template <>
+const TargetBitmap
+InvertedIndexTantivy<std::string>::Query(const DatasetPtr& dataset);
+
+template <>
+void
+InvertedIndexTantivy<std::string>::build_index_for_array(
+    const std::vector<std::shared_ptr<FieldDataBase>>& field_datas);
+
+template <>
+void
+InvertedIndexTantivy<std::string>::build_index_for_array_nested(
+    const std::vector<std::shared_ptr<FieldDataBase>>& field_datas);
+
+extern template class InvertedIndexTantivy<bool>;
+extern template class InvertedIndexTantivy<int8_t>;
+extern template class InvertedIndexTantivy<int16_t>;
+extern template class InvertedIndexTantivy<int32_t>;
+extern template class InvertedIndexTantivy<int64_t>;
+extern template class InvertedIndexTantivy<uint64_t>;
+extern template class InvertedIndexTantivy<float>;
+extern template class InvertedIndexTantivy<double>;
+extern template class InvertedIndexTantivy<std::string>;
 }  // namespace milvus::index

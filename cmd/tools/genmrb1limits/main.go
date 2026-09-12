@@ -31,7 +31,7 @@
 //
 // The Go values live in pkg/util/roaringfilter, the proxy validator, because
 // that is the side segcore has to agree with: a blob only reaches a querynode
-// after Validate admitted it. The SDK's copy (client/v3/roaringfilter) is a
+// after Validate admitted it. The SDK's copy (client/v3/membership/roaringfilter) is a
 // separate module that must not depend on pkg, so it stays a copy, held to
 // these values by TestClientBuiltBlobsPassProxyValidation.
 //

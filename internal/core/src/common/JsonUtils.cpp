@@ -6,6 +6,7 @@
 #include <utility>
 #include <cstddef>
 #include <stdexcept>
+#include "common/EasyAssert.h"
 
 namespace milvus {
 
@@ -16,8 +17,9 @@ parse_json_pointer(const std::string& pointer) {
     if (pointer.empty())
         return tokens;  // Root path (entire document)
     if (pointer[0] != '/') {
-        throw std::invalid_argument(
-            "Invalid JSON Pointer: must start with '/'");
+        ThrowInfo(ErrorCode::InvalidParameter,
+                  "{}",
+                  std::string("Invalid JSON Pointer: must start with '/'"));
     }
     size_t start = 1;
     while (start < pointer.size()) {

@@ -199,9 +199,8 @@ func (m *partitionManager) assignSegment(req *AssignSegmentRequest) (*AssignSegm
 		if err == nil {
 			return result, nil
 		}
-		if errors.IsAny(err, ErrTooLargeInsert, ErrTimeTickTooOld) {
+		if errors.Is(err, ErrTimeTickTooOld) {
 			// Return error directly.
-			// If the insert message is too large to hold by single segment, it can not be inserted anymore.
 			lastErr = err
 		}
 	}
