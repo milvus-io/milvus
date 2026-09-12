@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
@@ -4872,6 +4873,36 @@ func TestGenFunctionChainsInvalid(t *testing.T) {
 
 func TestParseUsernamePassword(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+
+	t.Run("Basic keeps legacy challenge", func(t *testing.T) {
+		for _, credentials := range [][2]string{{"testuser", "testpass"}, {"", "testpass"}, {"testuser", ""}} {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodGet, "/", nil)
+			c.Request.SetBasicAuth(credentials[0], credentials[1])
+
+			username, password, ok := ParseUsernamePassword(c)
+			assert.Equal(t, credentials[0], username)
+			assert.Equal(t, credentials[1], password)
+			assert.Equal(t, username != "" && password != "", ok)
+			assert.Equal(t, `Basic realm="restricted", charset="UTF-8"`, w.Header().Get("WWW-Authenticate"))
+		}
+	})
+
+	t.Run("Basic challenge can be suppressed before the response", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodGet, "/", nil)
+		c.Request.SetBasicAuth("testuser", "testpass")
+
+		username, password, ok := ParseUsernamePasswordWithChallenge(c, false)
+		assert.True(t, ok)
+		assert.Equal(t, "testuser", username)
+		assert.Equal(t, "testpass", password)
+		c.Status(http.StatusOK)
+		c.Writer.WriteHeaderNow()
+		assert.Empty(t, w.Result().Header.Get("WWW-Authenticate"))
+	})
 
 	t.Run("token with credential separator", func(t *testing.T) {
 		w := httptest.NewRecorder()

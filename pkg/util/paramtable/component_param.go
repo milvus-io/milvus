@@ -375,6 +375,7 @@ type commonConfig struct {
 	DiskWriteRateLimiterLowPriorityRatio    ParamItem `refreshable:"true"`
 
 	AuthorizationEnabled  ParamItem `refreshable:"false"`
+	AdminAuthEnabled      ParamItem `refreshable:"true"`
 	SuperUsers            ParamItem `refreshable:"true"`
 	DefaultRootPassword   ParamItem `refreshable:"false"`
 	RootShouldBindRole    ParamItem `refreshable:"true"`
@@ -1113,6 +1114,34 @@ For example, if the rate limit is 100KB/s, and the high priority ratio is 2, the
 		Export:       true,
 	}
 	p.AuthorizationEnabled.Init(base.mgr)
+
+	p.AdminAuthEnabled = ParamItem{
+		Key:          "common.security.adminAuthEnabled",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc: `Whether the metrics port (default 9091) requires root HTTP Basic authentication
+for /management/*, /log/level, /eventlog, /debug/pprof/* and the web console.
+Probes and scrapes remain open; /api/v1/health retains any existing data-plane auth.
+Legacy /api/v1 data operations keep valid-user/API-key auth when
+common.security.authorizationEnabled is true, and otherwise require root.
+Requests without Origin or Fetch Metadata must include X-Milvus-Admin-Request: true.
+Use HTTPS for the browser console and preserve Fetch Metadata at the reverse proxy.
+Root hashes are cached for 10 seconds; a failed refresh may reuse the last hash for
+up to 10 minutes after its last fetch, including a password rotated during an outage.
+Update graceful-shutdown and profiling clients before enabling. The eventlog gRPC
+stream becomes loopback-only. This port remains plaintext: use a trusted network
+or TLS proxy and rotate root with UpdateCredential, not defaultRootPassword.
+Not settable through /management/config/alter. Watch milvus_admin_auth_total.`,
+		Export: true,
+		// Deliberately NOT Immutable. ProcessImmutableConfigs persists an
+		// Immutable key's value into etcd on first startup, and the etcd source
+		// outranks file and env, so the first boot of any cluster would pin
+		// "false" there and an operator later setting adminAuthEnabled: true in
+		// yaml would get no gate and no warning. /management/config/alter
+		// instead rejects this key unconditionally, including while the gate
+		// is off, so an anonymous request cannot persist a disabling value.
+	}
+	p.AdminAuthEnabled.Init(base.mgr)
 
 	p.SuperUsers = ParamItem{
 		Key:     "common.security.superUsers",
