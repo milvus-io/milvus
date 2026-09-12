@@ -7,6 +7,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -203,6 +204,62 @@ TEST_F(JsonStatsMetaTest, DeserializeInvalidJsonTest) {
     EXPECT_THROW(JsonStatsMeta::Deserialize(invalid_json), std::exception);
     EXPECT_THROW(JsonStatsMeta::DeserializeToKeyFieldMap(invalid_json),
                  std::exception);
+}
+
+TEST_F(JsonStatsMetaTest, GroupByCapabilityUsesFilteredMetadataParse) {
+    JsonStatsMeta meta;
+    std::map<JsonKey, JsonKeyLayoutType> layout_map = {
+        {JsonKey("/s", JSONType::STRING), JsonKeyLayoutType::TYPED},
+        {JsonKey("/n", JSONType::INT64), JsonKeyLayoutType::DYNAMIC}};
+    for (int i = 0; i < 4096; ++i) {
+        layout_map.emplace(
+            JsonKey("/sparse/" + std::to_string(i), JSONType::STRING),
+            JsonKeyLayoutType::SHARED);
+    }
+    meta.SetLayoutTypeMap(layout_map);
+    const auto serialized = meta.Serialize();
+    auto check = [&](const std::string& bytes, bool expected) {
+        bool certified = !expected;
+        auto fields =
+            JsonStatsMeta::DeserializeToKeyFieldMap(bytes, &certified);
+        EXPECT_EQ(certified, expected);
+        ASSERT_EQ(fields.size(), 2);
+        EXPECT_EQ(fields.at("/s"), std::set<std::string>{"/s_STRING"});
+        EXPECT_EQ(fields.at("/n"), std::set<std::string>{"/n_INT64"});
+    };
+
+    check(serialized, false);  // Old metadata has no capability marker.
+    for (const std::string version : {"0",
+                                      "-1",
+                                      "2",
+                                      "18446744073709551615",
+                                      "1.0",
+                                      "1e0",
+                                      "\"1\"",
+                                      "true",
+                                      "null",
+                                      "{}",
+                                      "[]",
+                                      "1"}) {
+        SCOPED_TRACE(version);
+        auto bytes = serialized;
+        bytes.pop_back();
+        bytes += ",\"" + std::string(META_KEY_GROUP_BY_SCALAR_READ_VERSION) +
+                 "\":" + version + "}";
+        check(bytes, version == "1");
+    }
+
+    // A valid marker must not turn a corrupt layout or JSON into fallback.
+    for (
+        const std::string bytes :
+        {R"({"group_by_scalar_read_version":1,"layout_type_map":{"/s_STRING":true}})",
+         R"({"group_by_scalar_read_version":1,)",
+         "not JSON"}) {
+        bool certified = true;
+        EXPECT_THROW(JsonStatsMeta::DeserializeToKeyFieldMap(bytes, &certified),
+                     std::exception);
+        EXPECT_FALSE(certified);
+    }
 }
 
 TEST_F(JsonStatsMetaTest, GetSerializedSizeTest) {

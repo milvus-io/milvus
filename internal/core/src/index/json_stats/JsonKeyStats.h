@@ -71,15 +71,17 @@
 #include "storage/FileManager.h"
 #include "storage/MemFileManagerImpl.h"
 
+class JsonStatsGroupByTestAccessor;
 class CollectSingleJsonStatsInfoAccessor;
 // Forward declaration of test accessor in global namespace for friend declaration
 class TraverseJsonForBuildStatsAccessor;
 class JsonStatsProjectionTestAccessor;
 class JsonStatsScanTestAccessor;
-class JsonStatsGroupByTestAccessor;
 
 namespace milvus::index {
 class JsonKeyStats : public ScalarIndex<std::string> {
+    friend class ::JsonStatsGroupByTestAccessor;
+
  public:
     explicit JsonKeyStats(
         const storage::FileManagerContext& ctx,
@@ -720,7 +722,6 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     friend class ::CollectSingleJsonStatsInfoAccessor;
     friend class ::JsonStatsProjectionTestAccessor;
     friend class ::JsonStatsScanTestAccessor;
-    friend class ::JsonStatsGroupByTestAccessor;
 };
 
 }  // namespace milvus::index
