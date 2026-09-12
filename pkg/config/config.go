@@ -107,18 +107,29 @@ func FormatKey(key string) string { return formatKey(key) }
 // normalize caller-supplied keys, and both answer anonymously while
 // common.security.adminAuthEnabled is off. An unbounded memo therefore lets
 // anyone who can reach the metrics port grow it without limit. Past the bound
-// the result is still correct, it is just recomputed.
-const maxFormattedKeys = 4096
+// the result is still correct, it is just recomputed. Bound both stored strings
+// to 1 KiB as well: a count limit alone still permits huge request keys to pin
+// gigabytes, and Unicode lowercasing can grow a normalized string.
+const (
+	maxFormattedKeys     = 4096
+	maxFormattedKeyBytes = 1024
+)
 
 func formatKey(key string) string {
 	if strings.HasPrefix(key, NotFormatPrefix) {
 		return key
+	}
+	if len(key) > maxFormattedKeyBytes {
+		return normalizeKey(key)
 	}
 	cached, ok := formattedKeys.Get(key)
 	if ok {
 		return cached
 	}
 	result := normalizeKey(key)
+	if len(result) > maxFormattedKeyBytes {
+		return result
+	}
 	formattedKeysMu.Lock()
 	defer formattedKeysMu.Unlock()
 	// A concurrent miss may have populated this key while this goroutine waited.
@@ -126,7 +137,9 @@ func formatKey(key string) string {
 		return cached
 	}
 	if formattedKeys.Len() < maxFormattedKeys {
-		formattedKeys.Insert(key, result)
+		// A short query key can be a substring of a much larger HTTP request.
+		// Own the cached bytes so the byte limits also bound retained memory.
+		formattedKeys.Insert(strings.Clone(key), strings.Clone(result))
 	}
 	return result
 }
