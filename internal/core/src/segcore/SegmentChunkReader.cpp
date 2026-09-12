@@ -28,6 +28,7 @@
 #include "folly/FBVector.h"
 #include "index/Index.h"
 #include "index/ScalarIndex.h"
+#include "segcore/SegcoreConfig.h"
 #include "storage/MmapManager.h"
 #include "storage/Types.h"
 
@@ -179,10 +180,14 @@ SegmentChunkReader::GetMultipleChunkDataAccessor<std::string>(
             scan = std::make_shared<StringScanState::State>();
             scan->column = GetStringColumn(field_id);
             AssertInfo(scan->column != nullptr, "string field has no column");
+            const auto pin_policy =
+                SegcoreConfig::default_config().get_scan_cursor_owns_pin()
+                    ? ScanPinPolicy::CursorOwned
+                    : ScanPinPolicy::ResultOwned;
             scan->cursor = scan->column->Scan(
                 op_ctx_,
                 ScanOptions::ForData(
-                    start, TargetType::StringView, ScanPinPolicy::CursorOwned));
+                    start, TargetType::StringView, pin_policy));
             AssertInfo(scan->cursor != nullptr,
                        "string field does not support data Scan");
             if (scan_state) {
