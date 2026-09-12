@@ -414,6 +414,13 @@ proxy:
   roleNameValidation:
     allowedChars: $ # Additional characters allowed in role names beyond underscores, letters and numbers. Add '-' to allow hyphens in role names.
   maxTaskNum: 1024 # The maximum number of tasks in the task queue of the proxy.
+  # Maximum structural nesting depth a boolean expression may use. Parsing walks the expression
+  # recursively (ANTLR recursive descent, then the plan visitor), so an unbounded depth lets a single
+  # request exhaust the goroutine stack and crash the process; requests past the bound are rejected as
+  # invalid before parsing starts. When the limit is applied, values above 10000 are clamped to 10000
+  # (far shallower nesting already exceeds any legitimate filter) and values below 1 fall back to the
+  # default.
+  maxExpressionDepth: 1000
   ddlConcurrency: 16 # The concurrent execution number of DDL at proxy.
   dclConcurrency: 16 # The concurrent execution number of DCL at proxy.
   mustUsePartitionKey: false # switch for whether proxy must use partition key for the collection
