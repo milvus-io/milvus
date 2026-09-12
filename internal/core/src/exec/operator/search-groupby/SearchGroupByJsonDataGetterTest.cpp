@@ -34,6 +34,25 @@
 #include "mmap/ChunkedColumnGroup.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
 #include "test_utils/cachinglayer_test_utils.h"
+#include "test_utils/Constants.h"
+#include "storage/Util.h"
+
+class JsonStatsGroupByTestAccessor {
+ public:
+    static void
+    AddColumn(milvus::index::JsonKeyStats& stats,
+              const std::string& path,
+              milvus::index::JSONType type,
+              std::shared_ptr<milvus::ChunkedColumnInterface> column,
+              bool certified = true) {
+        auto name = milvus::index::JsonKey(path, type).ToColumnName();
+        stats.key_field_map_[path].insert(name);
+        stats.shred_field_data_type_map_[name] = type;
+        stats.num_rows_ = column->NumRows();
+        stats.shredding_columns_[name] = std::move(column);
+        stats.group_by_scalar_reads_safe_ = certified;
+    }
+};
 
 namespace milvus::exec {
 namespace {
@@ -105,6 +124,17 @@ class JsonColumnSegment : public segcore::ChunkedSegmentSealedImpl {
     }
 
     bool hide_column = false;
+    std::shared_ptr<index::JsonKeyStats> json_stats;
+
+    std::shared_ptr<index::JsonKeyStats>
+    GetJsonStats(milvus::OpContext*, FieldId) const override {
+        return json_stats;
+    }
+
+    int64_t
+    get_row_count() const override {
+        return column_->NumRows();
+    }
 
  protected:
     PinWrapper<std::pair<std::vector<std::string_view>, ValidityView>>
@@ -219,6 +249,67 @@ class GroupByJsonGetterTest
             default:
                 return std::nullopt;
         }
+    }
+
+    std::shared_ptr<JsonAccessStats>
+    InstallShreddedStrings(bool certified = true) {
+        storage::FieldDataMeta field_meta{1, 2, 36, field_id_.get(), {}};
+        storage::IndexMeta index_meta{36, field_id_.get(), 6, 1};
+        storage::StorageConfig config;
+        config.storage_type = "local";
+        config.root_path = TestLocalPath;
+        storage::FileManagerContext context(
+            field_meta,
+            index_meta,
+            storage::CreateChunkManager(config),
+            storage::InitArrowFileSystem(config));
+        auto json_stats = std::make_shared<index::JsonKeyStats>(context, true);
+        std::vector<std::unique_ptr<Chunk>> chunks;
+        const std::vector<int64_t> rows_per_chunk{64, 8, 4128};
+        int64_t row = 0;
+        for (auto rows : rows_per_chunk) {
+            arrow::StringBuilder builder;
+            for (int64_t i = 0; i < rows; ++i, ++row) {
+                const auto& value = expected_[row];
+                // Reproduce the existing stats writer's empty-string/null
+                // representation. The getter must recover the raw empty key.
+                auto status = value && !value->empty() ? builder.Append(*value)
+                                                       : builder.AppendNull();
+                EXPECT_TRUE(status.ok());
+            }
+            std::shared_ptr<arrow::Array> array;
+            EXPECT_TRUE(builder.Finish(&array).ok());
+            StringChunkWriter writer(true);
+            const arrow::ArrayVector arrays{array};
+            const auto [size, count] = writer.calculate_size(arrays);
+            auto target = std::make_shared<MemChunkTarget>(size);
+            writer.write_to_target(arrays, target);
+            auto* data = target->release();
+            auto guard = std::make_shared<ChunkMmapGuard>(data, size, "");
+            chunks.push_back(std::make_unique<StringChunk>(
+                count, data, size, true, std::move(guard)));
+        }
+        auto counts = std::make_shared<JsonAccessStats>();
+        auto translator = std::make_unique<TestChunkTranslator>(
+            rows_per_chunk, "group_by_shredding", std::move(chunks));
+        auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot<Chunk>(
+            std::move(translator), nullptr);
+        FieldMeta typed_meta(FieldName("value"),
+                             FieldId(600),
+                             DataType::VARCHAR,
+                             65535,
+                             true,
+                             std::nullopt);
+        auto typed_column = std::make_shared<
+            CountingJsonColumn<ChunkedVariableColumn<std::string>>>(
+            counts, std::move(slot), typed_meta);
+        JsonStatsGroupByTestAccessor::AddColumn(*json_stats,
+                                                "/value",
+                                                index::JSONType::STRING,
+                                                typed_column,
+                                                certified);
+        segment_->json_stats = std::move(json_stats);
+        return counts;
     }
 
     const std::vector<std::string> documents_{
@@ -381,6 +472,89 @@ TEST_P(GroupByJsonGetterTest, MissingColumnDoesNotPoisonCache) {
     segment_->hide_column = false;
     EXPECT_EQ(getter->Get(37), expected_[37]);
     EXPECT_EQ(stats_->pinned_chunks, (std::vector<int64_t>{1}));
+}
+
+TEST_P(GroupByJsonGetterTest, ShreddedCandidatesAvoidRawAndReusePins) {
+    auto typed = InstallShreddedStrings();
+    auto getter = MakeGetter<std::string>(DataType::VARCHAR);
+    for (auto row : {1, 73, 61, 4093, 1}) {
+        ASSERT_TRUE(expected_[row].has_value());
+        EXPECT_EQ(getter->Get(row), expected_[row]);
+    }
+    EXPECT_TRUE(stats_->pinned_chunks.empty());
+    EXPECT_EQ(typed->pinned_chunks, (std::vector<int64_t>{0, 2}));
+    EXPECT_EQ(typed->full_views, 0);
+    // Reader owns the column and touched pins even when stats are replaced.
+    auto saved = getter->Get(1);
+    segment_->json_stats.reset();
+    EXPECT_EQ(getter->Get(4093), expected_[4093]);
+    getter.reset();
+    EXPECT_EQ(saved, expected_[1]);
+}
+
+TEST_P(GroupByJsonGetterTest, ShreddingFallbackPreservesRawSemantics) {
+    auto raw = MakeGetter<std::string>(DataType::VARCHAR);
+    auto typed = InstallShreddedStrings();
+    auto getter = MakeGetter<std::string>(DataType::VARCHAR);
+    for (auto row : {0, 2, 3, 4, 5, 6, 7, 31, 64, 72, 4199}) {
+        EXPECT_EQ(getter->Get(row), raw->Get(row));
+    }
+    EXPECT_EQ(getter->Get(0), "");
+    auto strict = MakeGetter<std::string>(DataType::VARCHAR, true);
+    EXPECT_EQ(strict->Get(0), "");
+    for (auto row : {2, 3, 4, 5, 6, 7}) {
+        EXPECT_THROW(strict->Get(row), SegcoreError);
+    }
+    auto before = typed->pinned_chunks;
+    auto untyped = MakeGetter<std::string>(std::nullopt);
+    EXPECT_EQ(untyped->Get(0), R"("")");
+    EXPECT_EQ(untyped->Get(2), "42");
+    EXPECT_EQ(untyped->Get(6), R"([1,"x",false])");
+    EXPECT_EQ(typed->pinned_chunks, before);
+}
+
+TEST_P(GroupByJsonGetterTest, UncertifiedStatsAndUnsupportedPathsStayRaw) {
+    auto typed = InstallShreddedStrings(false);
+    EXPECT_EQ(MakeGetter<std::string>(DataType::VARCHAR)->Get(1), expected_[1]);
+    EXPECT_TRUE(typed->pinned_chunks.empty());
+    auto stats = segment_->json_stats;
+    EXPECT_EQ(
+        stats->CreateShreddingReader("/value", index::JSONType::STRING, 4200),
+        nullptr);
+    InstallShreddedStrings();
+    stats = segment_->json_stats;
+    for (const auto& path : {"", "/value/0", "/0/value", "/unknown"}) {
+        EXPECT_EQ(
+            stats->CreateShreddingReader(path, index::JSONType::STRING, 4200),
+            nullptr);
+    }
+    EXPECT_EQ(
+        stats->CreateShreddingReader("/value", index::JSONType::ARRAY, 4200),
+        nullptr);
+    EXPECT_THROW(
+        stats->CreateShreddingReader("/value", index::JSONType::STRING, 4199),
+        SegcoreError);
+    auto reader =
+        stats->CreateShreddingReader("/value", index::JSONType::STRING, 4200);
+    ASSERT_NE(reader, nullptr);
+    EXPECT_THROW(reader->Get(nullptr, -1), SegcoreError);
+    EXPECT_THROW(reader->Get(nullptr, 4200), SegcoreError);
+}
+
+TEST_P(GroupByJsonGetterTest, ShreddingReadErrorsNeverFallBackToRaw) {
+    auto typed = InstallShreddedStrings();
+    auto getter = MakeGetter<std::string>(DataType::VARCHAR);
+    typed->fail_pin = true;
+    try {
+        getter->Get(1);
+        FAIL() << "expected injected typed-column I/O error";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::FileReadFailed);
+    }
+    EXPECT_TRUE(stats_->pinned_chunks.empty());
+    typed->fail_pin = false;
+    EXPECT_EQ(getter->Get(1), expected_[1]);
+    EXPECT_EQ(typed->pinned_chunks, (std::vector<int64_t>{0}));
 }
 
 INSTANTIATE_TEST_SUITE_P(ColumnBackends,

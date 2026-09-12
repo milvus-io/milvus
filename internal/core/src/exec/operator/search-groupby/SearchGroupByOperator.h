@@ -41,6 +41,7 @@
 #include "common/protobuf_utils.h"
 #include "index/Index.h"
 #include "index/ScalarIndex.h"
+#include "index/json_stats/JsonKeyStats.h"
 #include "knowhere/comp/index_param.h"
 #include "segcore/ConcurrentVector.h"
 #include "segcore/InsertRecord.h"
@@ -203,6 +204,7 @@ class SealedDataGetter : public DataGetter<OutputType> {
     // Keep the JSON bytes pinned without materializing views for unused rows.
     // Shares the same single-thread contract as str_pw_map above.
     mutable std::unordered_map<int64_t, PinWrapper<Chunk*>> json_pw_map;
+    std::unique_ptr<index::JsonKeyStats::ShreddingReader> shredding_reader_;
 
  public:
     SealedDataGetter(milvus::OpContext* op_ctx,
@@ -228,10 +230,47 @@ class SealedDataGetter : public DataGetter<OutputType> {
         this->json_path_ = json_path;
         this->specific_json_type_ = json_type.has_value();
         this->strict_cast_ = strict_cast;
+        if constexpr (std::is_same_v<InnerRawType, milvus::Json>) {
+            if (from_data_ && json_path.has_value() && json_type.has_value()) {
+                auto stats = segment_.GetJsonStats(op_ctx_, field_id_);
+                if (stats != nullptr) {
+                    constexpr auto type =
+                        std::is_same_v<OutputType, std::string>
+                            ? index::JSONType::STRING
+                        : std::is_same_v<OutputType, bool>
+                            ? index::JSONType::BOOL
+                        : std::is_same_v<OutputType, int8_t> ||
+                                std::is_same_v<OutputType, int16_t> ||
+                                std::is_same_v<OutputType, int32_t> ||
+                                std::is_same_v<OutputType, int64_t>
+                            ? index::JSONType::INT64
+                            : index::JSONType::UNKNOWN;
+                    shredding_reader_ = stats->CreateShreddingReader(
+                        json_path.value(), type, segment_.get_row_count());
+                }
+            }
+        }
     }
 
     std::optional<OutputType>
     Get(int64_t idx) const {
+        if constexpr (std::is_same_v<InnerRawType, milvus::Json>) {
+            if (shredding_reader_) {
+                auto value = shredding_reader_->Get(op_ctx_, idx);
+                if (value.has_value()) {
+                    if constexpr (std::is_same_v<OutputType, std::string> ||
+                                  std::is_same_v<OutputType, bool>) {
+                        return std::get<OutputType>(std::move(value.value()));
+                    } else {
+                        return static_cast<OutputType>(
+                            std::get<int64_t>(value.value()));
+                    }
+                }
+                // Invalid typed rows include missing paths, other JSON types
+                // and legacy empty strings. Raw parsing preserves strict_cast
+                // and null semantics; real read failures are never swallowed.
+            }
+        }
         if (from_data_) {
             auto id_offset_pair = segment_.get_chunk_by_offset(field_id_, idx);
             auto chunk_id = id_offset_pair.first;

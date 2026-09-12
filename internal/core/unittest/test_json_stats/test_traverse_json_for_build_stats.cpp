@@ -36,6 +36,16 @@ using milvus::index::JSONType;
 class TraverseJsonForBuildStatsAccessor {
  public:
     static void
+    EnableGroupByCertification(JsonKeyStats& stats) {
+        stats.group_by_scalar_reads_safe_ = true;
+    }
+
+    static bool
+    GroupByCertified(const JsonKeyStats& stats) {
+        return stats.group_by_scalar_reads_safe_;
+    }
+
+    static void
     Call(JsonKeyStats& s,
          const char* json,
          jsmntok_t* tokens,
@@ -82,6 +92,58 @@ Tokenize(const char* json) {
 }
 
 }  // namespace
+
+TEST(TraverseJsonForBuildStatsTest, GroupByCertificationRejectsAmbiguousKeys) {
+    milvus::storage::FieldDataMeta field_meta{1, 2, 37, 100, {}};
+    milvus::storage::IndexMeta index_meta{37, 100, 6, 1};
+    milvus::storage::StorageConfig config;
+    config.storage_type = "local";
+    config.root_path = TestLocalPath;
+    milvus::storage::FileManagerContext context(
+        field_meta,
+        index_meta,
+        milvus::storage::CreateChunkManager(config),
+        milvus::storage::InitArrowFileSystem(config));
+    JsonKeyStats stats(context, true);
+    auto collect = [&](const std::string& input) {
+        auto tokens = Tokenize(input.c_str());
+        std::vector<std::string> path;
+        std::map<JsonKey, std::string> values;
+        int index = 0;
+        TraverseJsonForBuildStatsAccessor::Call(
+            stats, input.c_str(), tokens.data(), index, path, values);
+        return values;
+    };
+    for (const std::string input :
+         {R"({"value":"first","value":"last"})",
+          R"({"value":false,"value":"last"})",
+          R"({"nested":{"value":1},"nested":{"other":2}})",
+          R"({"value":"first","\u0076alue":"last"})",
+          R"({"nested":{"\u0076alue":"escaped"}})"}) {
+        TraverseJsonForBuildStatsAccessor::EnableGroupByCertification(stats);
+        collect(input);
+        EXPECT_FALSE(
+            TraverseJsonForBuildStatsAccessor::GroupByCertified(stats));
+        collect(R"({"value":"unambiguous later row"})");
+        EXPECT_FALSE(
+            TraverseJsonForBuildStatsAccessor::GroupByCertified(stats));
+    }
+    TraverseJsonForBuildStatsAccessor::EnableGroupByCertification(stats);
+    const std::string input = R"({"":{"a/b":{"~key":"v"}},"value":""})";
+    auto values = collect(input);
+    EXPECT_TRUE(TraverseJsonForBuildStatsAccessor::GroupByCertified(stats));
+    EXPECT_EQ(values.at(JsonKey("//a~1b/~0key", JSONType::STRING)), "v");
+    EXPECT_EQ(values.at(JsonKey("/value", JSONType::STRING)), "");
+    milvus::Json raw{simdjson::padded_string(input)};
+    EXPECT_EQ(raw.at<std::string_view>("//a~1b/~0key").value(), "v");
+
+    const std::string duplicate = R"({"value":"first","value":"last"})";
+    auto duplicate_values = collect(duplicate);
+    milvus::Json duplicate_raw{simdjson::padded_string(duplicate)};
+    EXPECT_EQ(duplicate_raw.at<std::string_view>("/value").value(), "first");
+    EXPECT_EQ(duplicate_values.at(JsonKey("/value", JSONType::STRING)), "last");
+    EXPECT_FALSE(TraverseJsonForBuildStatsAccessor::GroupByCertified(stats));
+}
 
 TEST(TraverseJsonForBuildStatsTest,
      HandlesPrimitivesArraysNestedAndEmptyObject) {

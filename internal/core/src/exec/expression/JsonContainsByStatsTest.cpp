@@ -35,6 +35,7 @@
 #include "exec/expression/ExprBatchTestUtils.h"
 #include "exec/expression/TermExpr.h"
 #include "exec/expression/UnaryExpr.h"
+#include "exec/operator/search-groupby/SearchGroupByOperator.h"
 #include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
@@ -1188,4 +1189,177 @@ TEST(JsonStatsThreeValuedAuditTest,
                 true,
                 std::vector<proto::plan::GenericValue>{value})));
     }
+}
+
+namespace {
+class ShreddedOnlyGroupBySegment : public segcore::ChunkedSegmentSealedImpl {
+ public:
+    ShreddedOnlyGroupBySegment(SchemaPtr schema,
+                               std::shared_ptr<JsonKeyStats> stats)
+        : ChunkedSegmentSealedImpl(schema,
+                                   empty_index_meta,
+                                   segcore::SegcoreConfig::default_config(),
+                                   66),
+          stats_(std::move(stats)) {
+    }
+
+    bool
+    HasFieldData(FieldId) const override {
+        return true;
+    }
+
+    int64_t
+    get_row_count() const override {
+        return stats_->Count();
+    }
+
+    std::shared_ptr<JsonKeyStats>
+    GetJsonStats(milvus::OpContext*, FieldId) const override {
+        return stats_;
+    }
+
+    std::pair<int64_t, int64_t>
+    get_chunk_by_offset(FieldId, int64_t) const override {
+        ThrowInfo(ErrorCode::UnexpectedError,
+                  "valid shredded group-by must not access raw JSON");
+    }
+
+ private:
+    std::shared_ptr<JsonKeyStats> stats_;
+};
+}  // namespace
+
+TEST(JsonContainsByStatsTest, GroupByScalarReadersSurviveBuildUploadLoad) {
+    auto schema = std::make_shared<Schema>();
+    auto field = schema->AddDebugField("json", DataType::JSON);
+    const std::vector<std::string> documents{
+        R"({"s":"one","n":9223372036854775807,"b":true,"":{"a/b":{"~key":"x"}}})",
+        R"({"s":"two\n\u4e2d","n":-9223372036854775808,"b":false,"":{"a/b":{"~key":"y"}}})",
+        R"({"s":"one","n":-17,"b":true,"":{"a/b":{"~key":"x"}}})",
+    };
+    auto stats = BuildAndLoadJsonKeyStats(documents,
+                                          field,
+                                          TestLocalPath,
+                                          1266,
+                                          2266,
+                                          3266,
+                                          field.get(),
+                                          5266,
+                                          1);
+    ShreddedOnlyGroupBySegment segment(schema, stats);
+    auto strings = exec::GetDataGetter<std::string, Json>(
+        nullptr, segment, field, "/s", DataType::VARCHAR);
+    auto integers = exec::GetDataGetter<int64_t, Json>(
+        nullptr, segment, field, "/n", DataType::INT64);
+    auto booleans = exec::GetDataGetter<bool, Json>(
+        nullptr, segment, field, "/b", DataType::BOOL);
+    auto nested = exec::GetDataGetter<std::string, Json>(
+        nullptr, segment, field, "//a~1b/~0key", DataType::VARCHAR);
+    std::map<std::string, int> groups;
+    for (auto row : {2, 0, 1, 0}) {
+        Json raw{simdjson::padded_string(documents[row])};
+        EXPECT_EQ(strings->Get(row), raw.at<std::string_view>("/s").value());
+        EXPECT_EQ(integers->Get(row), raw.at<int64_t>("/n").value());
+        EXPECT_EQ(booleans->Get(row), raw.at<bool>("/b").value());
+        EXPECT_EQ(nested->Get(row),
+                  raw.at<std::string_view>("//a~1b/~0key").value());
+        ++groups[strings->Get(row).value()];
+    }
+    EXPECT_EQ(groups["one"], 3);
+    EXPECT_EQ(groups["two\n中"], 1);
+    EXPECT_EQ((exec::GetDataGetter<int8_t, Json>(
+                   nullptr, segment, field, "/n", DataType::INT8)
+                   ->Get(2)),
+              -17);
+    EXPECT_EQ((exec::GetDataGetter<int16_t, Json>(
+                   nullptr, segment, field, "/n", DataType::INT16)
+                   ->Get(2)),
+              -17);
+    EXPECT_EQ((exec::GetDataGetter<int32_t, Json>(
+                   nullptr, segment, field, "/n", DataType::INT32)
+                   ->Get(2)),
+              -17);
+}
+
+TEST(JsonContainsByStatsTest, GroupByReaderRetainsEmptyStringRawFallback) {
+    auto schema = std::make_shared<Schema>();
+    auto field = schema->AddDebugField("json", DataType::JSON);
+    const std::vector<std::string> documents{
+        R"({"s":""})", R"({"s":"value"})", R"({"s":null})", R"({})"};
+    auto stats = BuildAndLoadJsonKeyStats(documents,
+                                          field,
+                                          TestLocalPath,
+                                          1267,
+                                          2267,
+                                          3267,
+                                          field.get(),
+                                          5267,
+                                          1);
+    auto reader = stats->CreateShreddingReader("/s", JSONType::STRING, 4);
+    ASSERT_NE(reader, nullptr);
+    EXPECT_FALSE(reader->Get(nullptr, 0).has_value());
+    ASSERT_TRUE(reader->Get(nullptr, 1).has_value());
+    EXPECT_EQ(std::get<std::string>(*reader->Get(nullptr, 1)), "value");
+    EXPECT_FALSE(reader->Get(nullptr, 2).has_value());
+    EXPECT_FALSE(reader->Get(nullptr, 3).has_value());
+    Json raw{simdjson::padded_string(documents[0])};
+    EXPECT_EQ(raw.at<std::string_view>("/s").value(), "");
+}
+
+TEST(JsonContainsByStatsTest, GroupByReaderRejectsOldAndAmbiguousStats) {
+    auto schema = std::make_shared<Schema>();
+    auto field = schema->AddDebugField("json", DataType::JSON);
+    const std::vector<std::string> ambiguous{
+        R"({"s":"first","s":"last"})", R"({"s":"later unambiguous row"})"};
+    auto stats = BuildAndLoadJsonKeyStats(ambiguous,
+                                          field,
+                                          TestLocalPath,
+                                          1268,
+                                          2268,
+                                          3268,
+                                          field.get(),
+                                          5268,
+                                          1);
+    EXPECT_EQ(stats->CreateShreddingReader("/s", JSONType::STRING, 2), nullptr);
+
+    auto built = BuildJsonStatsIndex({R"({"s":"value"})"},
+                                     field,
+                                     TestLocalPath,
+                                     1269,
+                                     2269,
+                                     3269,
+                                     field.get(),
+                                     5269,
+                                     1);
+    auto path = built.stats_base_path + "/" + JSON_STATS_META_FILE_NAME;
+    auto cm = built.ctx.chunkManagerPtr;
+    std::string bytes(cm->Size(path), '\0');
+    cm->Read(path, bytes.data(), bytes.size());
+    auto metadata = nlohmann::json::parse(bytes);
+    ASSERT_EQ(metadata["group_by_scalar_read_version"], 1);
+    metadata.erase("group_by_scalar_read_version");
+    bytes = metadata.dump();
+    cm->Write(path, bytes.data(), bytes.size());
+    auto old = LoadBuiltJsonStatsIndex(built);
+    EXPECT_FALSE(old->GetShreddingField("/s", JSONType::STRING).empty());
+    EXPECT_EQ(old->CreateShreddingReader("/s", JSONType::STRING, 1), nullptr);
+}
+
+TEST(JsonContainsByStatsTest, GroupByCertificationRequiresCompleteJsonSyntax) {
+    auto schema = std::make_shared<Schema>();
+    auto field = schema->AddDebugField("json", DataType::JSON);
+    // jsmn and the integer writer accept 01, but JSON syntax does not. The
+    // valid string preceding it must not certify the complete document.
+    auto stats = BuildAndLoadJsonKeyStats(
+        {R"({"s":"value","n":01})", R"({"s":"later valid row","n":2})"},
+        field,
+        TestLocalPath,
+        1270,
+        2270,
+        3270,
+        field.get(),
+        5270,
+        1);
+    EXPECT_FALSE(stats->GetShreddingField("/s", JSONType::STRING).empty());
+    EXPECT_EQ(stats->CreateShreddingReader("/s", JSONType::STRING, 2), nullptr);
 }
