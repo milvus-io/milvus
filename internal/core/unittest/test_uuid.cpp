@@ -122,6 +122,7 @@ GenUuidTermRetrievePlan(const std::shared_ptr<Schema>& schema,
     expr->set_allocated_term_expr(term_expr);
     auto plan_node = std::make_unique<proto::plan::PlanNode>();
     plan_node->mutable_query()->set_allocated_predicates(expr.release());
+    plan_node->add_output_field_ids(uuid_fid.get());
     return ProtoParser(schema).CreateRetrievePlan(*plan_node);
 }
 
@@ -144,6 +145,7 @@ GenUuidUnaryRangeRetrievePlan(const std::shared_ptr<Schema>& schema,
     expr->set_allocated_unary_range_expr(unary_range_expr);
     auto plan_node = std::make_unique<proto::plan::PlanNode>();
     plan_node->mutable_query()->set_allocated_predicates(expr.release());
+    plan_node->add_output_field_ids(uuid_fid.get());
     return ProtoParser(schema).CreateRetrievePlan(*plan_node);
 }
 
