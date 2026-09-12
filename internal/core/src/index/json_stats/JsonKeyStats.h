@@ -39,6 +39,7 @@
 #include "bitset/bitset.h"
 #include "cachinglayer/CacheSlot.h"
 #include "cachinglayer/Utils.h"
+#include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/FieldData.h"
 #include "common/OpContext.h"
@@ -59,9 +60,11 @@
 #include "index/json_stats/parquet_writer.h"
 #include "index/json_stats/utils.h"
 #include "log/Log.h"
+#include "mmap/ChunkedColumnFilter.h"
 #include "mmap/ChunkedColumnInterface.h"
 #include "pb/common.pb.h"
 #include "pb/schema.pb.h"
+#include "segcore/SegcoreConfig.h"
 #include "storage/ChunkManager.h"
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/FileManager.h"
@@ -71,6 +74,7 @@ class CollectSingleJsonStatsInfoAccessor;
 // Forward declaration of test accessor in global namespace for friend declaration
 class TraverseJsonForBuildStatsAccessor;
 class JsonStatsProjectionTestAccessor;
+class JsonStatsScanTestAccessor;
 
 namespace milvus::index {
 class JsonKeyStats : public ScalarIndex<std::string> {
@@ -282,50 +286,65 @@ class JsonKeyStats : public ScalarIndex<std::string> {
         if (shredding_columns_.find(path) == shredding_columns_.end()) {
             return processed_size;
         }
-        auto column = shredding_columns_[path];
-        auto num_data_chunk = column->num_chunks();
-        auto num_rows = column->NumRows();
-
-        for (size_t i = 0; i < num_data_chunk; i++) {
-            auto chunk_size = column->chunk_row_nums(i);
-
-            if (!skip_func || !skip_func(skip_index_, path, i)) {
-                if constexpr (std::is_same_v<T, std::string_view>) {
-                    // first is the raw data, second is valid_data
-                    // use valid_data to see if raw data is null
-                    auto pw = column->StringViews(op_ctx, i);
-                    auto [data_vec, valid_data] = pw.get();
-
-                    func(data_vec.data(),
-                         valid_data,
-                         chunk_size,
-                         res + processed_size,
-                         valid_res + processed_size,
-                         values...);
-                } else {
-                    auto pw = column->Span(op_ctx, i);
-                    auto chunk = pw.get();
-                    const T* data = static_cast<const T*>(chunk.data());
-                    const auto validity = chunk.validity();
-                    func(data,
-                         validity,
-                         chunk_size,
-                         res + processed_size,
-                         valid_res + processed_size,
-                         values...);
-                }
-            } else {
-                if (column->IsNullable()) {
-                    auto pw = column->GetChunk(op_ctx, i);
-                    auto chunk = pw.get();
-                    chunk->ApplyValidityMask(
-                        0, chunk_size, res + processed_size);
-                    chunk->ApplyValidityMask(
-                        0, chunk_size, valid_res + processed_size);
+        const auto& column = shredding_columns_.at(path);
+        const auto num_rows = column->NumRows();
+        AssertInfo(res.size() >= num_rows && valid_res.size() >= num_rows,
+                   "Shredding scan output is shorter than column {} rows {}",
+                   path,
+                   num_rows);
+        const auto pin_policy =
+            segcore::SegcoreConfig::default_config().get_scan_cursor_owns_pin()
+                ? ChunkedColumnInterface::ScanPinPolicy::CursorOwned
+                : ChunkedColumnInterface::ScanPinPolicy::ResultOwned;
+        auto options = ChunkedColumnInterface::ScanOptions::ForData(
+            0, TargetTypeOf<T>(), pin_policy);
+        if (skip_func) {
+            options.filter = std::make_shared<detail::ColumnFilter>(
+                detail::ColumnFilter::MetricsSource::PreloadedStatistics,
+                [&](int64_t cell_id) {
+                    return skip_func(skip_index_, path, cell_id);
+                });
+        }
+        auto cursor = column->Scan(op_ctx, options);
+        AssertInfo(cursor != nullptr,
+                   "Shredding column {} does not support data scan",
+                   path);
+        ChunkedColumnInterface::ScanBatch batch;
+        // The caller still computes and caches one full-column bitmap. Only
+        // the temporary value window is bounded here. The configured policy
+        // owns the pin in each result or reuses it in this local cursor.
+        while (
+            cursor->Next(DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE,
+                         ChunkedColumnInterface::ScanReadMode::DataAndValidity,
+                         &batch)) {
+            AssertInfo(batch.row_id_start == processed_size && batch.size > 0 &&
+                           batch.size <= DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE &&
+                           batch.size <= num_rows - processed_size,
+                       "Invalid shredding scan batch at {}: start {}, size {}",
+                       processed_size,
+                       batch.row_id_start,
+                       batch.size);
+            auto batch_res = res + processed_size;
+            auto batch_valid_res = valid_res + processed_size;
+            if (!batch.data_skipped) {
+                func(batch.values.template data_as<T>(),
+                     batch.validity,
+                     batch.size,
+                     batch_res,
+                     batch_valid_res,
+                     values...);
+            } else if (batch.validity) {
+                // Skipping data must preserve both incoming bits for valid
+                // rows and the stats column's real NULLs (not raw JSON's).
+                for (int64_t i = 0; i < batch.size; ++i) {
+                    if (!batch.validity[i]) {
+                        batch_res[i] = false;
+                        batch_valid_res[i] = false;
+                    }
                 }
             }
-
-            processed_size += chunk_size;
+            // Consume borrowed values before advancing the cursor again.
+            processed_size += batch.size;
         }
         AssertInfo(processed_size == num_rows,
                    "Processed size {} is not equal to num_rows {}",
@@ -660,6 +679,7 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     friend class ::TraverseJsonForBuildStatsAccessor;
     friend class ::CollectSingleJsonStatsInfoAccessor;
     friend class ::JsonStatsProjectionTestAccessor;
+    friend class ::JsonStatsScanTestAccessor;
 };
 
 }  // namespace milvus::index
