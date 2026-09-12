@@ -270,6 +270,20 @@ TEST(UuidTest, SealedRangeQueryMatchesLoadedUuid) {
                                  proto::plan::OpType::GreaterThan,
                                  "ffffffff-ffff-ffff-ffff-ffffffffffff",
                                  0);
+    const auto present_uuid = GetFirstUuidCanonical(dataset, uuid_fid);
+    ASSERT_EQ(present_uuid.size(), 36);
+    AssertUuidRangeRetrieveCount(sealed_segment.get(),
+                                 schema,
+                                 uuid_fid,
+                                 proto::plan::OpType::Equal,
+                                 present_uuid,
+                                 1);
+    AssertUuidRangeRetrieveCount(sealed_segment.get(),
+                                 schema,
+                                 uuid_fid,
+                                 proto::plan::OpType::NotEqual,
+                                 present_uuid,
+                                 kUuidTestRows - 1);
 }
 
 TEST(UuidTest, GrowingRangeQueryMatchesInsertedUuid) {
@@ -297,4 +311,18 @@ TEST(UuidTest, GrowingRangeQueryMatchesInsertedUuid) {
                                  proto::plan::OpType::GreaterThan,
                                  "ffffffff-ffff-ffff-ffff-ffffffffffff",
                                  0);
+    const auto present_uuid = GetFirstUuidCanonical(dataset, uuid_fid);
+    ASSERT_EQ(present_uuid.size(), 36);
+    AssertUuidRangeRetrieveCount(segment.get(),
+                                 schema,
+                                 uuid_fid,
+                                 proto::plan::OpType::Equal,
+                                 present_uuid,
+                                 1);
+    AssertUuidRangeRetrieveCount(segment.get(),
+                                 schema,
+                                 uuid_fid,
+                                 proto::plan::OpType::NotEqual,
+                                 present_uuid,
+                                 kUuidTestRows - 1);
 }
