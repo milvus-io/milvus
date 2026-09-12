@@ -4659,10 +4659,15 @@ ChunkedSegmentSealedImpl::pk_range(milvus::OpContext* op_ctx,
     auto snapshot = CapturePublishedState();
     auto runtime = snapshot->runtime;
     LOG_INFO("pk_range sorted_by_pk={}", is_sorted_by_pk_);
+    const bool is_uuid_probe = std::holds_alternative<UUID>(pk);
     // See Contain() — same zero-storage pk2offset fast path.
     if (runtime != nullptr && runtime->virtual_pk2offset != nullptr) {
         runtime->virtual_pk2offset->find_range(
             pk, op, bitset, [](int64_t) { return true; });
+        if (is_uuid_probe) {
+            LOG_INFO(
+                "pk_range uuid virtual op={} matched={}", op, bitset.count());
+        }
         return;
     }
     if (!is_sorted_by_pk_) {
@@ -4670,12 +4675,22 @@ ChunkedSegmentSealedImpl::pk_range(milvus::OpContext* op_ctx,
         auto* pk_cell = pk_index.get();
         AssertInfo(pk_cell != nullptr && pk_cell->has_pk2offset(),
                    "primary key index is not ready");
+        if (is_uuid_probe) {
+            LOG_INFO("pk_range uuid map_empty={}",
+                     pk_cell->pk2offset().empty());
+        }
         pk_cell->pk2offset().find_range(
             pk, op, bitset, [](int64_t offset) { return true; });
+        if (is_uuid_probe) {
+            LOG_INFO("pk_range uuid op={} matched={}", op, bitset.count());
+        }
         return;
     }
 
     search_sorted_pk_range(op_ctx, op, pk, bitset, snapshot);
+    if (is_uuid_probe) {
+        LOG_INFO("pk_range uuid sorted op={} matched={}", op, bitset.count());
+    }
 }
 
 void
