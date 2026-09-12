@@ -24,8 +24,6 @@ import (
 	"fmt"
 	"sync"
 
-	"golang.org/x/sync/singleflight"
-
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
@@ -44,14 +42,20 @@ type RootCredentialVerifier struct {
 	cancel    context.CancelFunc
 	newClient func(ctx context.Context) (types.MixCoordClient, error)
 
-	// creations collapses concurrent first requests into one constructor call
-	// and runs it off the request goroutine; see getClient. x/sync directly, so
-	// a wedged constructor holds one goroutine rather than one per caller.
-	creations singleflight.Group
+	mu       sync.Mutex
+	client   types.MixCoordClient
+	creation *clientCreation
+	closed   bool
+}
 
-	mu     sync.Mutex
+// clientCreation broadcasts one constructor result to all current waiters.
+// Unlike singleflight.DoChan, it retains no channel per canceled request: a
+// wedged constructor can outlive arbitrarily many credential-fetch deadlines.
+// The result fields are published by closing done and are immutable afterward.
+type clientCreation struct {
+	done   chan struct{}
 	client types.MixCoordClient
-	closed bool
+	err    error
 }
 
 // NewRootCredentialVerifier returns the worker-node credential verifier.
@@ -79,9 +83,10 @@ func NewRootCredentialVerifier(
 
 // fetchRootHash reads root's stored bcrypt hash from the mix coord. Every
 // failure means "could not check", not "wrong password", so it is returned as a
-// non-authentication error and renders 503. ctx carries fetchTimeout; it bounds
-// the RPC, and bounds how long this waits on a client construction that may
-// itself never finish (see getClient).
+// non-authentication error and renders 503. ctx carries fetchTimeout to the RPC
+// and bounds this function's wait for client construction (see getClient).
+// CachedRootVerifier separately bounds each caller's wait because the RPC's
+// address resolution can use a lifetime context instead of this deadline.
 func (v *RootCredentialVerifier) fetchRootHash(ctx context.Context) (string, error) {
 	cli, err := v.getClient(ctx)
 	if err != nil {
@@ -124,24 +129,41 @@ func RootHashFromResponse(resp *rootcoordpb.GetCredentialResponse) (string, erro
 // constructor bounds out at ctx instead of holding every gated request on this
 // node, and publishes the client for the next request.
 func (v *RootCredentialVerifier) getClient(ctx context.Context) (types.MixCoordClient, error) {
-	if client, err := v.loadClient(); client != nil || err != nil {
-		return client, err
+	v.mu.Lock()
+	if v.closed {
+		v.mu.Unlock()
+		return nil, merr.WrapErrServiceUnavailable("root credential verifier is closed")
 	}
-	select {
-	case result := <-v.creations.DoChan("client", v.createClient):
-		if result.Err != nil {
-			return nil, result.Err
-		}
-		client, _ := result.Val.(types.MixCoordClient)
+	if v.client != nil {
+		client := v.client
+		v.mu.Unlock()
 		return client, nil
+	}
+	creation := v.creation
+	if creation == nil {
+		creation = &clientCreation{done: make(chan struct{})}
+		v.creation = creation
+		go func() {
+			creation.client, creation.err = v.createClient()
+			v.mu.Lock()
+			v.creation = nil
+			close(creation.done)
+			v.mu.Unlock()
+		}()
+	}
+	v.mu.Unlock()
+
+	select {
+	case <-creation.done:
+		return creation.client, creation.err
 	case <-ctx.Done():
 		return nil, merr.WrapErrServiceUnavailable("mix coord client is not ready yet")
 	}
 }
 
-// createClient runs on the singleflight goroutine, so a panic here would take
+// createClient runs on the constructor goroutine, so a panic here would take
 // the process down rather than being recovered per connection by net/http.
-func (v *RootCredentialVerifier) createClient() (client any, err error) {
+func (v *RootCredentialVerifier) createClient() (client types.MixCoordClient, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			mlog.Warn(v.ctx, "panic while creating mix coord client", mlog.Any("panic", r))

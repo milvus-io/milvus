@@ -18,6 +18,7 @@ package adminauth
 
 import (
 	"context"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -79,7 +80,7 @@ func credentialFor(req *rootcoordpb.GetCredentialRequest, passwordHash string) *
 }
 
 // ctxHolder records the lifetime context handed to newClient. The constructor
-// runs on the singleflight goroutine, so the test may not read it barefoot.
+// runs on the constructor goroutine, so the test may not read it barefoot.
 type ctxHolder struct {
 	mu  sync.Mutex
 	ctx context.Context
@@ -572,6 +573,109 @@ func TestVerifier_ClientConstructorPanicBecomesAnError(t *testing.T) {
 	clock.advance(failureTTL + time.Second)
 	assert.Error(t, verifier.Verify(context.Background(), "root", testPassword))
 	assert.Equal(t, int32(2), attempts.Load())
+}
+
+func TestVerifier_CanceledClientWaitersDoNotAccumulate(t *testing.T) {
+	release := make(chan struct{})
+	defer close(release)
+	started := make(chan struct{})
+	var attempts atomic.Int32
+	verifier := newTestVerifier(t, context.Background(), func(context.Context) (types.MixCoordClient, error) {
+		attempts.Add(1)
+		close(started)
+		<-release // The production constructor may ignore its context too.
+		return nil, merr.WrapErrServiceUnavailable("constructor unavailable")
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := verifier.getClient(ctx)
+	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	<-started
+
+	// Every expired outer credential refresh reaches this same constructor.
+	// The outer lookup bound is released on its deadline, so it cannot bound
+	// result channels retained by an inner singleflight that never completes.
+	runtime.GC()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	for range 10000 {
+		_, err = verifier.getClient(ctx)
+		require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	}
+	runtime.GC()
+	runtime.ReadMemStats(&after)
+	runtime.KeepAlive(verifier)
+	retained := int64(after.HeapObjects) - int64(before.HeapObjects)
+	t.Logf("retained heap objects after 10000 canceled waiters: %d", retained)
+	assert.Less(t, retained, int64(1024),
+		"canceled callers must not retain a result channel until construction completes")
+	assert.Equal(t, int32(1), attempts.Load(), "cancellation must not start extra constructors")
+}
+
+func TestVerifier_ClientConstructionOutlivesCanceledWaiters(t *testing.T) {
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
+	started := make(chan struct{})
+	var attempts atomic.Int32
+	cli := &fakeMixCoord{}
+	verifier := newTestVerifier(t, context.Background(), func(context.Context) (types.MixCoordClient, error) {
+		attempts.Add(1)
+		close(started)
+		<-release
+		return cli, nil
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := verifier.getClient(ctx)
+	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	<-started
+
+	const waiters = 32
+	var waiting, done sync.WaitGroup
+	waiting.Add(waiters)
+	done.Add(waiters)
+	for range waiters {
+		go func() {
+			defer done.Done()
+			waiting.Done()
+			client, err := verifier.getClient(context.Background())
+			assert.NoError(t, err)
+			assert.Same(t, cli, client)
+		}()
+	}
+	waiting.Wait()
+	releaseOnce.Do(func() { close(release) })
+	done.Wait()
+	assert.Equal(t, int32(1), attempts.Load())
+	assert.Zero(t, cli.closes.Load(), "a canceled waiter must not close a client another request needs")
+}
+
+func TestVerifier_CloseDuringClientConstruction(t *testing.T) {
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
+	started := make(chan struct{})
+	cli := &fakeMixCoord{}
+	verifier := newTestVerifier(t, context.Background(), func(context.Context) (types.MixCoordClient, error) {
+		close(started)
+		<-release
+		return cli, nil
+	})
+	result := make(chan error, 1)
+	go func() {
+		_, err := verifier.getClient(context.Background())
+		result <- err
+	}()
+	<-started
+	require.NoError(t, verifier.Close())
+	releaseOnce.Do(func() { close(release) })
+	require.ErrorIs(t, <-result, merr.ErrServiceUnavailable)
+	assert.Equal(t, int32(1), cli.closes.Load(), "a client completed after shutdown must be released")
+	_, err := verifier.getClient(context.Background())
+	assert.ErrorIs(t, err, merr.ErrServiceUnavailable)
 }
 
 func TestVerifier_CachesRootHashWithinTTL(t *testing.T) {
