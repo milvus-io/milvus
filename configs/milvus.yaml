@@ -1235,16 +1235,19 @@ common:
     lowPriorityRatio: -1 # amplification ratio for low priority tasks if disk rate limiter is enabled, value <= 0 means ratio limit is disabled
   security:
     authorizationEnabled: false
-    # Whether the metrics port (default 9091) requires the root credential via HTTP
-    # Basic Auth. When true it covers the operator surface -- /management/*, /log/level,
-    # /eventlog, /debug/pprof/* and the web console -- while probe and scrape endpoints
-    # (/healthz, /livez, /metrics, /metrics_default, /management/check/ready, /api/v1/health)
-    # stay open, and the legacy REST data plane on this port follows
-    # common.security.authorizationEnabled. Enabling it breaks callers that use the port
-    # anonymously, including Milvus Operator's graceful shutdown and profiling scripts, and
-    # moves /eventlog's gRPC stream to loopback. The port is plaintext HTTP, so keep it on a
-    # trusted network and rotate the root password with UpdateCredential first. Not settable
-    # through /management/config/alter; watch milvus_admin_auth_total for what this rejects.
+    # Whether the metrics port (default 9091) requires root HTTP Basic authentication
+    # for /management/*, /log/level, /eventlog, /debug/pprof/* and the web console.
+    # Probes and scrapes remain open; /api/v1/health retains any existing data-plane auth.
+    # Legacy /api/v1 data operations keep valid-user/API-key auth when
+    # common.security.authorizationEnabled is true, and otherwise require root.
+    # Requests without Origin or Fetch Metadata must include X-Milvus-Admin-Request: true.
+    # Use HTTPS for the browser console and preserve Fetch Metadata at the reverse proxy.
+    # Root hashes are cached for 10 seconds; a failed refresh may reuse the last hash for
+    # up to 10 minutes after its last fetch, including a password rotated during an outage.
+    # Update graceful-shutdown and profiling clients before enabling. The eventlog gRPC
+    # stream becomes loopback-only. This port remains plaintext: use a trusted network
+    # or TLS proxy and rotate root with UpdateCredential, not defaultRootPassword.
+    # Not settable through /management/config/alter. Watch milvus_admin_auth_total.
     adminAuthEnabled: false
     # The superusers will ignore some system check processes,
     # like the old password verification when updating the credential
