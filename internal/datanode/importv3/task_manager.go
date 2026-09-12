@@ -7,6 +7,7 @@ package importv3
 
 import (
 	"context"
+	"runtime/debug"
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
@@ -113,6 +114,7 @@ func (m *TaskManager) Add(taskID, runID, slot int64, execute Run) error {
 		t.state = StateRunning
 		t.mu.Unlock()
 		segments, err := execute(ctx, runID)
+		debug.FreeOSMemory()
 		t.mu.Lock()
 		defer t.mu.Unlock()
 		if err != nil {

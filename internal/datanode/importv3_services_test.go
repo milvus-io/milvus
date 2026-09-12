@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -347,11 +348,46 @@ func TestImportV3FinalWriterBackupRejectsBadTimestampColumn(t *testing.T) {
 	})
 }
 
-func TestReshardSpillThreshold(t *testing.T) {
-	// budget 640MB, fragment input 256MB, 3x16MB read buffers.
-	require.Equal(t, int64(640<<20-256<<20-3*(16<<20)), reshardSpillThreshold(640<<20, 256<<20, 16<<20))
-	// Degenerate budget leaves no room: spill on any resident bytes.
-	require.LessOrEqual(t, reshardSpillThreshold(16<<20, 64<<20, 16<<20), int64(0))
+// TestExecuteReshardPlanSpillsAtMemoryCheckpoint pins the dynamic spill path
+// end to end: with a roomy slot budget (static ceiling far above the data)
+// but a process pinned near the high-water mark, every source-batch
+// checkpoint spills the largest bucket, and the end-of-input flush replays
+// all chunks with rows intact.
+func TestExecuteReshardPlanSpillsAtMemoryCheckpoint(t *testing.T) {
+	initReshardPipelineParams(t)
+	const mib = int64(1024 * 1024)
+	totalMock := mockey.Mock(hardware.GetMemoryCount).Return(uint64(1024 * mib)).Build()
+	defer totalMock.UnPatch()
+	usedMock := mockey.Mock(hardware.GetUsedMemoryCount).Return(uint64(1000 * mib)).Build()
+	defer usedMock.UnPatch()
+
+	fix := newReshardPipelineFixture()
+	readers := map[int64]reshardReaderBuilder{
+		1: staticReshardReader(&scriptReader{batches: []*storage.InsertData{
+			fix.wideBatch(1), fix.wideBatch(3000), fix.wideBatch(6000),
+		}, size: 100}),
+	}
+	// slot=3 x default 160MiB per slot: the static ceiling is the full
+	// 480MiB budget, never hit by the ~18.6MiB of test data -- only the
+	// dynamic free-memory checkpoint can spill (free=24MiB is far below the
+	// flush spike plus the 20% reserve).
+	plan := fix.plan([]*datapb.SourceFileSpec{fix.source(1)}, 30*mib)
+	recorder := &reshardCallRecorder{}
+	mockReshardBoundaries(t, readers, recorder)
+
+	require.NoError(t, executeReshardPlan(context.Background(), nil, fix.request(plan, 3), plan, nil))
+	require.Equal(t, int64(1), recorder.publishCalled.Load())
+	require.Len(t, recorder.published, 1)
+	// One spill per source-batch checkpoint; the single end-of-input flush
+	// (18.6MiB <= 30MiB sort input) replays all three chunks as one group.
+	require.Equal(t, []int{3}, recorder.spillChunks,
+		"every source-batch checkpoint must have spilled under memory pressure")
+	require.Equal(t, []int64{0}, recorder.seqs)
+	var totalRows int64
+	for _, fragment := range recorder.published[0].GetFragments() {
+		totalRows += fragment.GetRows()
+	}
+	require.Equal(t, int64(6000), totalRows, "spilled bytes must survive the spill and come back through flush")
 }
 
 // sentinelPackedWriter is a fake importV3PackedRecordWriter whose
@@ -499,17 +535,6 @@ func TestSplitReshardBucketForSortAccountsDecodedBytes(t *testing.T) {
 	sumBytes, sumRows = sumGroups(groups)
 	require.Equal(t, totalBytes, sumBytes)
 	require.Equal(t, totalRows, sumRows)
-}
-
-// TestEffectiveReshardFragmentInput pins the sort-input budget helper: the
-// fragment target survives when the budget covers it, and degenerate budgets
-// clamp instead of producing a zero or negative sort input.
-func TestEffectiveReshardFragmentInput(t *testing.T) {
-	const mib = int64(1024 * 1024)
-	require.Equal(t, 128*mib, effectiveReshardFragmentInput(480*mib, 128*mib, 16*mib))
-	require.Equal(t, int64(0), effectiveReshardFragmentInput(0, 128*mib, 16*mib))
-	require.Equal(t, int64(0), effectiveReshardFragmentInput(480*mib, 0, 16*mib))
-	require.Equal(t, int64(1), effectiveReshardFragmentInput(3*16*mib, 128*mib, 16*mib))
 }
 
 // scriptReader is a fake importutilv2.Reader that replays canned batches. It
@@ -1099,18 +1124,25 @@ func TestExecuteReshardPlanRunsFunctionsInPrepareStage(t *testing.T) {
 	require.Equal(t, 3, totalRows)
 }
 
-// TestExecuteReshardPlanSpillsAndReplaysThroughFlush pins the spill escape
-// hatch end to end: with a 32MiB budget, a 30MiB fragment target and a 16MiB
-// read buffer the spill threshold clamps below zero, so every routed batch
-// spills to a real local Arrow IPC file; the end-of-input flush replays those
-// chunks through the fragment writer with all rows intact, and the flush-side
-// removal plus the run-end directory cleanup leave no spill file behind.
+// TestExecuteReshardPlanSpillsAndReplaysThroughFlush pins the static spill
+// ceiling end to end: with a 16MiB budget (1 slot x 16MiB per slot) and
+// ~18.6MiB of routed data, resident bytes cross the budget during the third
+// batch and the whole bucket spills to one real local Arrow IPC file; the
+// degenerate budget also clamps the sort input to 1 byte, so the
+// end-of-input flush replays the chunk as its own group with all rows
+// intact, and the flush-side removal plus the run-end directory cleanup
+// leave no spill file behind. The memory mocks pin the dynamic checkpoint
+// open (unlimited free memory) so only the static ceiling can spill.
 // The 30MiB target exceeds the three batches' combined logical size (~18.6MiB):
 // fragmentTarget gates on logicalBytes, which accumulates across spills, so a
-// smaller target would flush mid-run instead of spilling every batch.
+// smaller target would flush mid-run instead of spilling.
 func TestExecuteReshardPlanSpillsAndReplaysThroughFlush(t *testing.T) {
 	initReshardPipelineParams(t)
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.ImportMemoryLimitPerSlot.Key, "32")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.ImportMemoryLimitPerSlot.Key, "16")
+	totalMock := mockey.Mock(hardware.GetMemoryCount).Return(uint64(1) << 40).Build()
+	defer totalMock.UnPatch()
+	usedMock := mockey.Mock(hardware.GetUsedMemoryCount).Return(uint64(0)).Build()
+	defer usedMock.UnPatch()
 	fix := newReshardPipelineFixture()
 	readers := map[int64]reshardReaderBuilder{
 		1: staticReshardReader(&scriptReader{batches: []*storage.InsertData{
@@ -1125,11 +1157,12 @@ func TestExecuteReshardPlanSpillsAndReplaysThroughFlush(t *testing.T) {
 	require.NoError(t, executeReshardPlan(context.Background(), nil, fix.request(plan, 1), plan, nil))
 	require.Equal(t, int64(1), recorder.publishCalled.Load())
 	require.Len(t, recorder.published, 1)
-	// The clamped sort input (1 byte) keeps every spill chunk alone, so the
-	// single end-of-input flush replays one group per chunk.
-	require.Equal(t, []int{1, 1, 1}, recorder.spillChunks,
-		"every batch must have spilled before the final flush")
-	require.Equal(t, []int64{0, 1, 2}, recorder.seqs)
+	// One spill event once resident crossed the 16MiB budget: the single
+	// bucket's three batches land in one chunk, and the clamped sort input
+	// (1 byte) keeps that chunk alone in its group.
+	require.Equal(t, []int{1}, recorder.spillChunks,
+		"resident crossing the budget must have spilled the bucket before the final flush")
+	require.Equal(t, []int64{0}, recorder.seqs)
 	var totalRows int64
 	for _, fragment := range recorder.published[0].GetFragments() {
 		totalRows += fragment.GetRows()
