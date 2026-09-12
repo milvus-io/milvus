@@ -17,6 +17,7 @@
 
 #include <stdint.h>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -45,6 +46,15 @@ using data_access_type = std::optional<boost::variant<bool,
 using ChunkDataAccessor = std::function<const data_access_type(int)>;
 using MultipleChunkDataAccessor = std::function<const data_access_type()>;
 using PinnedIndexView = boost::span<const PinWrapper<const index::IndexBase*>>;
+
+// One sealed raw string consumer owns this handle across complete execution
+// windows of one field and request snapshot. Two consumers of the same field
+// must use separate handles. A default handle does not allocate Scan state.
+class StringScanState {
+    friend class SegmentChunkReader;
+    struct State;
+    std::shared_ptr<State> state_;
+};
 
 // Helper to extract a value of type T from data_access_type.
 // For std::string, handles both std::string and std::string_view in the variant.
@@ -116,7 +126,8 @@ class SegmentChunkReader {
                                  int64_t& current_chunk_id,
                                  int64_t& current_chunk_pos,
                                  PinnedIndexView pinned_index,
-                                 int64_t scan_batch_size = 1024) const;
+                                 int64_t scan_batch_size = 1024,
+                                 StringScanState* scan_state = nullptr) const;
 
     // Sealed string access over one expression's finite offset input. Offsets
     // and pinned indexes must outlive the accessor. Borrowed strings must be
@@ -227,13 +238,20 @@ class SegmentChunkReader {
     mutable const segcore::SegmentReadSnapshot* snapshot_{nullptr};
 
  private:
+    std::shared_ptr<ChunkedColumnInterface>
+    GetStringColumn(FieldId field_id) const {
+        return snapshot_ ? snapshot_->GetDataScanResources(field_id).first
+                         : segment_->GetChunkedColumn(field_id);
+    }
+
     template <typename T>
     MultipleChunkDataAccessor
     GetMultipleChunkDataAccessor(FieldId field_id,
                                  int64_t& current_chunk_id,
                                  int64_t& current_chunk_pos,
                                  PinnedIndexView pinned_index,
-                                 int64_t scan_batch_size) const;
+                                 int64_t scan_batch_size,
+                                 StringScanState* scan_state) const;
 
     template <typename T>
     ChunkDataAccessor

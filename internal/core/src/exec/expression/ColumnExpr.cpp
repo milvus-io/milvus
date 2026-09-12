@@ -183,7 +183,8 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
             current_chunk_id_,
             current_chunk_pos_,
             PinnedIndexForRawLookup(),
-            real_batch_size);
+            real_batch_size,
+            &string_scan_state_);
         for (int i = 0; i < real_batch_size; ++i) {
             auto data = cda();
             if (!data.has_value()) {
