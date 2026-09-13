@@ -2165,6 +2165,160 @@ func Test_GetSegmentsInfo(t *testing.T) {
 	})
 }
 
+func Test_GetPersistentSegmentInfoWithStates(t *testing.T) {
+	mockCache := NewMockCache(t)
+	mockCache.EXPECT().GetCollectionID(mock.Anything, "db", "collection").Return(int64(1), nil)
+	mockMixCoord := mocks.NewMockMixCoordClient(t)
+	mockMixCoord.EXPECT().GetSegmentsByStates(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, request *datapb.GetSegmentsByStatesRequest, opts ...grpc.CallOption) (*datapb.GetSegmentsByStatesResponse, error) {
+		require.Equal(t, int64(1), request.GetCollectionID())
+		require.Equal(t, int64(-1), request.GetPartitionID())
+		require.ElementsMatch(t, []commonpb.SegmentState{commonpb.SegmentState_Growing, commonpb.SegmentState_Dropped}, request.GetStates())
+		return &datapb.GetSegmentsByStatesResponse{
+			Status:   merr.Success(),
+			Segments: []int64{10},
+		}, nil
+	})
+	mockMixCoord.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, request *datapb.GetSegmentInfoRequest, opts ...grpc.CallOption) (*datapb.GetSegmentInfoResponse, error) {
+		require.True(t, request.GetIncludeUnHealthy())
+		return &datapb.GetSegmentInfoResponse{
+			Status: merr.Success(),
+			Infos: []*datapb.SegmentInfo{
+				{
+					ID:             10,
+					CollectionID:   1,
+					PartitionID:    2,
+					InsertChannel:  "ch-1",
+					State:          commonpb.SegmentState_Dropped,
+					CompactionFrom: []int64{7, 8},
+				},
+			},
+		}, nil
+	})
+
+	proxy := &Proxy{mixCoord: mockMixCoord, metaCache: mockCache}
+	proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+	resp, err := proxy.GetPersistentSegmentInfo(context.Background(), &milvuspb.GetPersistentSegmentInfoRequest{
+		DbName:         "db",
+		CollectionName: "collection",
+		States:         []commonpb.SegmentState{commonpb.SegmentState_Growing, commonpb.SegmentState_Dropped},
+	})
+	require.NoError(t, err)
+	require.NoError(t, merr.Error(resp.GetStatus()))
+	require.Len(t, resp.GetInfos(), 1)
+	require.Equal(t, "ch-1", resp.GetInfos()[0].GetInsertChannel())
+	require.Equal(t, []int64{7, 8}, resp.GetInfos()[0].GetCompactionFrom())
+}
+
+func Test_GetCompactionPlansDatabaseHeaderRouting(t *testing.T) {
+	cache := NewMockCache(t)
+	// Both databases contain the same collection name, with different IDs.
+	cache.EXPECT().GetCollectionID(mock.Anything, "dbA", "collection").Return(int64(101), nil)
+	cache.EXPECT().GetCollectionID(mock.Anything, "default", "collection").Return(int64(202), nil)
+	coord := mocks.NewMockMixCoordClient(t)
+	coord.EXPECT().GetCompactionStateWithPlans(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.GetCompactionPlansRequest, opts ...grpc.CallOption) (*milvuspb.GetCompactionPlansResponse, error) {
+		if req.GetDbName() == "dbA" {
+			require.Equal(t, int64(101), req.GetCollectionId())
+		} else {
+			require.Equal(t, "default", req.GetDbName())
+			require.Equal(t, int64(202), req.GetCollectionId())
+		}
+		return &milvuspb.GetCompactionPlansResponse{Status: merr.Success()}, nil
+	})
+	proxy := &Proxy{mixCoord: coord, metaCache: cache}
+	proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(util.HeaderDBName, "dbA"))
+	for _, bodyDB := range []string{"", "default"} {
+		resp, err := DatabaseInterceptor()(ctx, &milvuspb.GetCompactionPlansRequest{CollectionName: "collection", DbName: bodyDB}, &grpc.UnaryServerInfo{}, func(ctx context.Context, req interface{}) (interface{}, error) {
+			return proxy.GetCompactionStateWithPlans(ctx, req.(*milvuspb.GetCompactionPlansRequest))
+		})
+		require.NoError(t, err)
+		require.NoError(t, merr.Error(resp.(*milvuspb.GetCompactionPlansResponse).GetStatus()))
+	}
+}
+
+func Test_GetPersistentSegmentInfoFiltersChangedStates(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		states []commonpb.SegmentState
+		want   []int64
+	}{
+		{"flushed", []commonpb.SegmentState{commonpb.SegmentState_Flushed}, []int64{2}},
+		{"sealed_all_filtered", []commonpb.SegmentState{commonpb.SegmentState_Sealed}, []int64{}},
+		{"dropped_history", []commonpb.SegmentState{commonpb.SegmentState_Dropped}, []int64{1}},
+		{"default", nil, []int64{2}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cache := NewMockCache(t)
+			cache.EXPECT().GetCollectionID(mock.Anything, "db", "collection").Return(int64(1), nil)
+			coord := mocks.NewMockMixCoordClient(t)
+			coord.EXPECT().GetSegmentsByStates(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *datapb.GetSegmentsByStatesRequest, opts ...grpc.CallOption) (*datapb.GetSegmentsByStatesResponse, error) {
+				states := tc.states
+				if len(states) == 0 {
+					states = []commonpb.SegmentState{commonpb.SegmentState_Flushing, commonpb.SegmentState_Flushed, commonpb.SegmentState_Sealed}
+				}
+				require.ElementsMatch(t, states, req.GetStates())
+				return &datapb.GetSegmentsByStatesResponse{Status: merr.Success(), Segments: []int64{1, 2}}, nil
+			})
+			coord.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *datapb.GetSegmentInfoRequest, opts ...grpc.CallOption) (*datapb.GetSegmentInfoResponse, error) {
+				includeDropped := tc.name == "dropped_history"
+				require.Equal(t, includeDropped, req.GetIncludeUnHealthy())
+				firstState := commonpb.SegmentState_Growing
+				if includeDropped {
+					firstState = commonpb.SegmentState_Dropped
+				}
+				return &datapb.GetSegmentInfoResponse{Status: merr.Success(), Infos: []*datapb.SegmentInfo{
+					{ID: 1, State: firstState},
+					{ID: 2, State: commonpb.SegmentState_Flushed},
+				}}, nil
+			})
+			proxy := &Proxy{mixCoord: coord, metaCache: cache}
+			proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+			resp, err := proxy.GetPersistentSegmentInfo(context.Background(), &milvuspb.GetPersistentSegmentInfoRequest{DbName: "db", CollectionName: "collection", States: tc.states})
+			require.NoError(t, merr.CheckRPCCall(resp, err))
+			ids := make([]int64, 0, len(resp.GetInfos()))
+			for _, info := range resp.GetInfos() {
+				require.NotNil(t, info)
+				ids = append(ids, info.GetSegmentID())
+			}
+			require.Equal(t, tc.want, ids)
+		})
+	}
+}
+
+func Test_GetPersistentSegmentInfoPreservesDroppedRaceError(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		states []commonpb.SegmentState
+	}{
+		{"default", nil},
+		{"flushed", []commonpb.SegmentState{commonpb.SegmentState_Flushed}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cache := NewMockCache(t)
+			cache.EXPECT().GetCollectionID(mock.Anything, "db", "collection").Return(int64(1), nil)
+			coord := mocks.NewMockMixCoordClient(t)
+			coord.EXPECT().GetSegmentsByStates(mock.Anything, mock.Anything).Return(
+				&datapb.GetSegmentsByStatesResponse{Status: merr.Success(), Segments: []int64{10}}, nil,
+			)
+			coord.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *datapb.GetSegmentInfoRequest, opts ...grpc.CallOption) (*datapb.GetSegmentInfoResponse, error) {
+				require.Equal(t, []int64{10}, req.GetSegmentIDs())
+				require.False(t, req.GetIncludeUnHealthy())
+				// The source was dropped after its ID was selected; DataCoord's
+				// healthy-only lookup must remain visible as a retriable error.
+				return &datapb.GetSegmentInfoResponse{Status: merr.Status(merr.WrapErrSegmentNotFound(10))}, nil
+			})
+			proxy := &Proxy{mixCoord: coord, metaCache: cache}
+			proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+			resp, err := proxy.GetPersistentSegmentInfo(context.Background(), &milvuspb.GetPersistentSegmentInfoRequest{
+				DbName: "db", CollectionName: "collection", States: tc.states,
+			})
+			require.NoError(t, err)
+			require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrSegmentNotFound)
+			require.Empty(t, resp.GetInfos())
+		})
+	}
+}
+
 func TestProxy_AddFileResource(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		proxy := &Proxy{}
