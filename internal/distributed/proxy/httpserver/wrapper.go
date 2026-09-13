@@ -69,14 +69,14 @@ func wrapHandler(handle handlerFunc) gin.HandlerFunc {
 				return
 			case errors.Is(err, errUnauthorized):
 				bodyFormatNegotiate.Data = ErrResponse{
-					ErrorCode: merr.Code(merr.ErrNeedAuthenticate),
+					ErrorCode: commonpb.ErrorCode(merr.Code(merr.ErrNeedAuthenticate)),
 					Reason:    err.Error(),
 				}
 				c.Negotiate(http.StatusUnauthorized, bodyFormatNegotiate)
 				return
 			case errors.Is(err, errForbidden):
 				bodyFormatNegotiate.Data = ErrResponse{
-					ErrorCode: merr.Code(err),
+					ErrorCode: commonpb.ErrorCode(merr.Code(err)),
 					Reason:    err.Error(),
 				}
 				c.Negotiate(http.StatusForbidden, bodyFormatNegotiate)
