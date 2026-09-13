@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"sort"
 	"strconv"
 	"time"
 
@@ -1248,6 +1249,11 @@ func (s *Server) GetSegmentsByStates(ctx context.Context, req *datapb.GetSegment
 			Status: merr.Status(err),
 		}, nil
 	}
+	statesDict := make(map[commonpb.SegmentState]bool)
+	for _, state := range states {
+		statesDict[state] = true
+	}
+
 	var segmentIDs []UniqueID
 	channels, err := s.getChannelsByCollectionID(ctx, collectionID)
 	if err != nil {
@@ -1265,16 +1271,26 @@ func (s *Server) GetSegmentsByStates(ctx context.Context, req *datapb.GetSegment
 		segmentIDs = append(segmentIDs, channelSegmentsView.L0SegmentIDs...)
 		segmentIDs = append(segmentIDs, channelSegmentsView.ImportingSegmentIDs...)
 	}
-	ret := make([]UniqueID, 0, len(segmentIDs))
 
-	statesDict := make(map[commonpb.SegmentState]bool)
-	for _, state := range states {
-		statesDict[state] = true
-	}
+	ret := make([]UniqueID, 0, len(segmentIDs))
 	for _, id := range segmentIDs {
 		segment := s.meta.GetHealthySegment(ctx, id)
 		if segment != nil && statesDict[segment.GetState()] {
 			ret = append(ret, id)
+		}
+	}
+
+	if statesDict[commonpb.SegmentState_Dropped] {
+		droppedSegments := s.meta.SelectSegments(ctx,
+			WithCollection(collectionID),
+			SegmentFilterFunc(func(segment *SegmentInfo) bool {
+				return segment != nil &&
+					segment.GetState() == commonpb.SegmentState_Dropped &&
+					(partitionID < 0 || segment.GetPartitionID() == partitionID)
+			}),
+		)
+		for _, segment := range droppedSegments {
+			ret = append(ret, segment.GetID())
 		}
 	}
 
@@ -1433,14 +1449,21 @@ func (s *Server) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.
 		return resp, nil
 	}
 
-	info := s.compactionInspector.getCompactionInfo(ctx, req.GetCompactionID())
+	var info *compactionInfo
+	if req.GetCollectionId() != 0 {
+		tasksByTrigger := s.meta.GetCompactionTaskMeta().GetCompactionTasksByCollection(req.GetCollectionId())
+		tasks := lo.Flatten(lo.Values(tasksByTrigger))
+		info = summaryCompactionState(0, tasks)
+	} else {
+		info = s.compactionInspector.getCompactionInfo(ctx, req.GetCompactionID())
+	}
 	resp.State = info.state
-	resp.MergeInfos = lo.MapToSlice[int64, *milvuspb.CompactionMergeInfo](info.mergeInfos, func(_ int64, merge *milvuspb.CompactionMergeInfo) *milvuspb.CompactionMergeInfo {
-		return merge
-	})
-
-	planIDs := lo.MapToSlice[int64, *milvuspb.CompactionMergeInfo](info.mergeInfos, func(planID int64, _ *milvuspb.CompactionMergeInfo) int64 { return planID })
-	mlog.Info(context.TODO(), "success to get state with plans", mlog.Any("state", info.state), mlog.Any("merge infos", resp.MergeInfos),
+	planIDs := lo.Keys(info.mergeInfos)
+	sort.Slice(planIDs, func(i, j int) bool { return planIDs[i] < planIDs[j] })
+	for _, planID := range planIDs {
+		resp.MergeInfos = append(resp.MergeInfos, info.mergeInfos[planID])
+	}
+	mlog.Info(ctx, "success to get state with plans", mlog.Any("state", info.state), mlog.Any("merge infos", resp.MergeInfos),
 		mlog.Int64s("plans", planIDs))
 	return resp, nil
 }
