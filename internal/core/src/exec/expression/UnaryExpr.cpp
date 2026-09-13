@@ -22,16 +22,18 @@
 #include <simdjson.h>
 #include <algorithm>
 #include <chrono>
+#include <climits>
 #include <cstdint>
 #include <functional>
 #include <iterator>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <cctype>
 #include <set>
 #include <string_view>
-#include <unordered_set>
 #include <variant>
+#include <vector>
 
 #include "boost/container/vector.hpp"
 #include "boost/cstdint.hpp"
@@ -66,6 +68,88 @@ namespace milvus {
 class SkipIndex;
 
 namespace exec {
+
+namespace {
+
+// ARRAY equality candidates are sparse for selective terms and dense for
+// common terms. Keep offsets inline until their storage would exceed a bitmap;
+// this avoids segment-sized temporary bitmaps without regressing dense cases.
+class ArrayEqualityCandidates {
+ public:
+    explicit ArrayEqualityCandidates(size_t row_count)
+        : row_count_(row_count),
+          dense_threshold_(
+              std::max<size_t>(1,
+                               (row_count + sizeof(size_t) * CHAR_BIT - 1) /
+                                   (sizeof(size_t) * CHAR_BIT))) {
+    }
+
+    void
+    Add(size_t offset) {
+        if (dense_ != nullptr) {
+            dense_->set(offset);
+            return;
+        }
+        if (!offsets_.empty() && offsets_.back() == offset) {
+            return;
+        }
+        offsets_.push_back(offset);
+        if (offsets_.size() >= dense_threshold_) {
+            Densify();
+        }
+    }
+
+    void
+    Finish() {
+        if (dense_ == nullptr) {
+            std::sort(offsets_.begin(), offsets_.end());
+            offsets_.erase(std::unique(offsets_.begin(), offsets_.end()),
+                           offsets_.end());
+        }
+    }
+
+    bool
+    Contains(size_t offset) const {
+        if (dense_ != nullptr) {
+            return (*dense_)[offset];
+        }
+        return std::binary_search(offsets_.begin(), offsets_.end(), offset);
+    }
+
+    size_t
+    Count() const {
+        return dense_ != nullptr ? dense_->count() : offsets_.size();
+    }
+
+    const TargetBitmap*
+    DenseBitmap() const {
+        return dense_.get();
+    }
+
+    const std::vector<size_t>&
+    Offsets() const {
+        return offsets_;
+    }
+
+ private:
+    void
+    Densify() {
+        dense_ = std::make_unique<TargetBitmap>(row_count_, false);
+        for (auto offset : offsets_) {
+            dense_->set(offset);
+        }
+        std::vector<size_t>().swap(offsets_);
+    }
+
+ private:
+    size_t row_count_;
+    size_t dense_threshold_;
+    std::vector<size_t> offsets_;
+    std::unique_ptr<TargetBitmap> dense_;
+};
+
+}  // namespace
+
 template <typename T>
 bool
 PhyUnaryRangeFilterExpr::CanUseIndexForArray() {
@@ -745,77 +829,94 @@ PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(EvalCtx& context,
                 return static_cast<size_t>(row_id);
             };
 
-            // filtering by index, get candidates.
-            std::function<bool(milvus::proto::plan::Array& /*val*/,
-                               int64_t /*offset*/)>
-                is_same;
-
-            if (segment_->is_chunked()) {
-                is_same = [this, reverse](milvus::proto::plan::Array& val,
-                                          int64_t offset) -> bool {
-                    auto [chunk_idx, chunk_offset] =
-                        GetChunkByOffset(field_id_, offset);
-                    auto pw = segment_->template chunk_view<milvus::ArrayView>(
-                        op_ctx_, field_id_, chunk_idx);
-                    auto chunk = pw.get();
-                    return chunk.first[chunk_offset].is_same_array(val) ^
-                           reverse;
-                };
-            } else {
-                auto size_per_chunk = segment_->size_per_chunk();
-                is_same = [this, size_per_chunk, reverse](
-                              milvus::proto::plan::Array& val,
-                              int64_t offset) -> bool {
-                    auto chunk_idx = offset / size_per_chunk;
-                    auto chunk_offset = offset % size_per_chunk;
-                    auto pw = segment_->template chunk_data<milvus::ArrayView>(
-                        op_ctx_, field_id_, chunk_idx);
-                    auto chunk = pw.get();
-                    auto array_view = chunk.data() + chunk_offset;
-                    return array_view->is_same_array(val) ^ reverse;
-                };
-            }
-
-            // collect all candidates.
-            std::unordered_set<size_t> candidates;
-            std::unordered_set<size_t> tmp_candidates;
-            auto first_callback =
-                [this, &candidates, &to_row_offset](size_t offset) -> void {
-                auto row_offset = to_row_offset(offset);
-                if (row_offset < static_cast<size_t>(active_count_)) {
-                    candidates.insert(row_offset);
-                }
-            };
-            auto callback = [this,
-                             &candidates,
-                             &tmp_candidates,
-                             &to_row_offset](size_t offset) -> void {
-                auto row_offset = to_row_offset(offset);
-                if (row_offset < static_cast<size_t>(active_count_) &&
-                    candidates.find(row_offset) != candidates.end()) {
-                    tmp_candidates.insert(row_offset);
-                }
-            };
-            // run in-filter.
+            // Stream each term's hits into an adaptive row-domain candidate
+            // set. Sparse terms retain only matching offsets; common terms
+            // switch to a bitmap once that representation becomes smaller.
+            ArrayEqualityCandidates candidates(active_count_);
             for (size_t idx = 0; idx < elems.size(); idx++) {
-                if (idx == 0) {
-                    index_ptr->InApplyCallback(1, &elems[idx], first_callback);
-                } else {
-                    tmp_candidates.clear();
-                    index_ptr->InApplyCallback(1, &elems[idx], callback);
-                    candidates = std::move(tmp_candidates);
-                }
-                // the size of candidates is small enough.
-                if (candidates.size() * 100 < active_count_) {
+                ArrayEqualityCandidates next_candidates(active_count_);
+                index_ptr->InApplyCallback(1, &elems[idx], [&](size_t offset) {
+                    auto row_offset = to_row_offset(offset);
+                    if (row_offset < static_cast<size_t>(active_count_) &&
+                        (idx == 0 || candidates.Contains(row_offset))) {
+                        next_candidates.Add(row_offset);
+                    }
+                });
+                next_candidates.Finish();
+                candidates = std::move(next_candidates);
+                // The remaining candidates are selective enough that exact
+                // array comparison is cheaper than another posting lookup.
+                if (candidates.Count() * 100 <
+                    static_cast<size_t>(active_count_)) {
                     break;
                 }
             }
-            TargetBitmap res(active_count_, reverse);
-            // run post-filter. The filter will only be executed once in the framework.
-            for (const auto& candidate : candidates) {
-                res[candidate] = is_same(val, candidate);
+
+            // Element postings cannot encode array order, length, or duplicate
+            // counts, so exact comparison is still required for survivors.
+            // Candidates are visited in row order, allowing one pin to be
+            // shared by all survivors in the same raw-data chunk.
+            size_t sparse_cursor = 0;
+            std::optional<size_t> dense_cursor;
+            bool dense_started = false;
+            auto next_candidate = [&]() -> std::optional<size_t> {
+                if (const auto* dense = candidates.DenseBitmap();
+                    dense != nullptr) {
+                    dense_cursor = dense_started
+                                       ? dense->find_next(dense_cursor.value())
+                                       : dense->find_first();
+                    dense_started = true;
+                    return dense_cursor;
+                }
+                const auto& offsets = candidates.Offsets();
+                if (sparse_cursor == offsets.size()) {
+                    return std::nullopt;
+                }
+                return offsets[sparse_cursor++];
+            };
+
+            TargetBitmap result(active_count_, reverse);
+            auto candidate = next_candidate();
+            if (segment_->is_chunked()) {
+                while (candidate.has_value()) {
+                    const auto [chunk_idx, _] =
+                        GetChunkByOffset(field_id_, candidate.value());
+                    auto pw = segment_->template chunk_view<milvus::ArrayView>(
+                        op_ctx_, field_id_, chunk_idx);
+                    const auto& views = pw.get().first;
+                    while (candidate.has_value()) {
+                        const auto [next_chunk_idx, chunk_offset] =
+                            GetChunkByOffset(field_id_, candidate.value());
+                        if (next_chunk_idx != chunk_idx) {
+                            break;
+                        }
+                        result[candidate.value()] =
+                            views[chunk_offset].is_same_array(val) ^ reverse;
+                        candidate = next_candidate();
+                    }
+                }
+            } else {
+                const auto size_per_chunk = segment_->size_per_chunk();
+                while (candidate.has_value()) {
+                    const auto chunk_idx = candidate.value() / size_per_chunk;
+                    auto pw = segment_->template chunk_data<milvus::ArrayView>(
+                        op_ctx_, field_id_, chunk_idx);
+                    const auto chunk = pw.get();
+                    while (candidate.has_value()) {
+                        const auto next_chunk_idx =
+                            candidate.value() / size_per_chunk;
+                        if (next_chunk_idx != chunk_idx) {
+                            break;
+                        }
+                        const auto chunk_offset =
+                            candidate.value() % size_per_chunk;
+                        result[candidate.value()] =
+                            chunk[chunk_offset].is_same_array(val) ^ reverse;
+                        candidate = next_candidate();
+                    }
+                }
             }
-            return res;
+            return result;
         },
         IndexValidityMode::Default);
     if (reverse) {

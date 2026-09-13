@@ -8,6 +8,7 @@ mod direct_bitset_collector;
 mod docid_collector;
 mod error;
 mod hashmap_c;
+mod hit_callback_collector;
 mod index_json_key_stats_writer;
 mod index_json_key_stats_writer_c;
 mod index_ngram_writer;

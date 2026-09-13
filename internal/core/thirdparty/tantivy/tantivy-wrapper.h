@@ -773,6 +773,49 @@ struct TantivyIndexWrapper {
                    "TantivyIndexWrapper.terms_query: invalid result type");
     }
 
+    template <typename T>
+    void
+    term_query_with_callback(const T& term,
+                             void* context,
+                             SetBitsetFn callback) {
+        auto result = [&]() {
+            if constexpr (std::is_same_v<T, bool>) {
+                return tantivy_term_query_bool_with_callback(
+                    reader_, term, context, callback);
+            }
+
+            if constexpr (std::is_integral_v<T>) {
+                return tantivy_term_query_i64_with_callback(
+                    reader_, static_cast<int64_t>(term), context, callback);
+            }
+
+            if constexpr (std::is_floating_point_v<T>) {
+                return tantivy_term_query_f64_with_callback(
+                    reader_, static_cast<double>(term), context, callback);
+            }
+
+            if constexpr (std::is_same_v<T, std::string>) {
+                return tantivy_term_query_keyword_with_callback(
+                    reader_, term.c_str(), context, callback);
+            }
+
+            ThrowInfo(
+                milvus::ErrorCode::Unsupported,
+                "InvertedIndex.term_query_with_callback: unsupported data "
+                "type: {}",
+                typeid(T).name());
+        }();
+
+        auto res = RustResultWrapper(result);
+        AssertTantivyOk(res,
+                        "TantivyIndexWrapper.term_query_with_callback: {}",
+                        res.result_->error);
+        AssertInfo(
+            res.result_->value.tag == Value::Tag::None,
+            "TantivyIndexWrapper.term_query_with_callback: invalid result "
+            "type");
+    }
+
     RustArrayI64Wrapper
     term_query_i64(std::string term) {
         auto array = [&]() {

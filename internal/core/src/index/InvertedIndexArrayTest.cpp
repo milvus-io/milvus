@@ -13,8 +13,10 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 #include <stdint.h>
+#include <algorithm>
 #include <cstddef>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <unordered_set>
 #include <utility>
@@ -377,6 +379,46 @@ MakeInt64ArrayValue(const std::vector<int64_t>& values) {
 
 }  // namespace
 
+TEST(ArrayInvertedIndexRegression, SingleTermCallbackStreamsHits) {
+    const std::vector<boost::container::vector<int64_t>> arrays = {
+        {1, 2}, {1}, {2, 1}, {}, {3}};
+    index::InvertedIndexTantivy<int64_t> index;
+    Config config;
+    config["is_array"] = true;
+    index.BuildWithRawDataForUT(arrays.size(), arrays.data(), config);
+
+    int64_t term = 1;
+    std::vector<size_t> hits;
+    index.InApplyCallback(
+        1, &term, [&](size_t offset) { hits.push_back(offset); });
+    std::sort(hits.begin(), hits.end());
+    EXPECT_EQ(hits, (std::vector<size_t>{0, 1, 2}));
+
+    EXPECT_THROW(index.InApplyCallback(1,
+                                       &term,
+                                       [](size_t) {
+                                           throw std::runtime_error(
+                                               "injected callback failure");
+                                       }),
+                 std::runtime_error);
+}
+
+TEST(ArrayInvertedIndexRegression, MultiTermCallbackKeepsUniqueHits) {
+    const std::vector<boost::container::vector<int64_t>> arrays = {
+        {1, 2}, {1}, {2, 1}, {}, {3}};
+    index::InvertedIndexTantivy<int64_t> index;
+    Config config;
+    config["is_array"] = true;
+    index.BuildWithRawDataForUT(arrays.size(), arrays.data(), config);
+
+    const int64_t terms[] = {1, 2};
+    std::vector<size_t> hits;
+    index.InApplyCallback(
+        2, terms, [&](size_t offset) { hits.push_back(offset); });
+    std::sort(hits.begin(), hits.end());
+    EXPECT_EQ(hits, (std::vector<size_t>{0, 1, 2}));
+}
+
 TEST(ArrayInvertedIndexRegression,
      NestedSealedValidityUsesMaterializedElementDomain) {
     const std::vector<boost::container::vector<int64_t>> arrays = {
@@ -412,8 +454,103 @@ TEST(ArrayInvertedIndexRegression,
 }
 
 TEST(ArrayInvertedIndexRegression,
+     DenseArrayEqualityMatchesRawOnChunkedSegment) {
+    constexpr int64_t row_count = 512;
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField(
+        "fvec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto array_fid =
+        schema->AddDebugArrayField("array", DataType::INT64, false);
+    schema->set_primary_field_id(pk_fid);
+
+    auto raw_data = DataGen(schema, row_count, 42, 0, 1, 3);
+    proto::schema::FieldData* array_field = nullptr;
+    for (auto& field : *raw_data.raw_->mutable_fields_data()) {
+        if (field.field_id() == array_fid.get()) {
+            array_field = &field;
+            break;
+        }
+    }
+    ASSERT_NE(array_field, nullptr);
+    auto* array_data = array_field->mutable_scalars()->mutable_array_data();
+    ASSERT_EQ(array_data->data_size(), row_count);
+
+    std::vector<boost::container::vector<int64_t>> index_arrays;
+    index_arrays.reserve(row_count);
+    for (int64_t row = 0; row < row_count; ++row) {
+        std::vector<int64_t> values;
+        switch (row % 4) {
+            case 0:
+                values = {1, 2};
+                break;
+            case 1:
+                values = {2, 1};
+                break;
+            case 2:
+                values = {1, 2, 3};
+                break;
+            default:
+                values = {1, 3};
+                break;
+        }
+        auto* field_values =
+            array_data->mutable_data(row)->mutable_long_data()->mutable_data();
+        field_values->Clear();
+        field_values->Add(values.begin(), values.end());
+        index_arrays.emplace_back(values.begin(), values.end());
+    }
+
+    auto raw_segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+    auto indexed_segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+    ASSERT_NE(dynamic_cast<ChunkedSegmentSealedImpl*>(raw_segment.get()),
+              nullptr);
+    ASSERT_NE(dynamic_cast<ChunkedSegmentSealedImpl*>(indexed_segment.get()),
+              nullptr);
+
+    auto index = std::make_unique<index::InvertedIndexTantivy<int64_t>>();
+    Config config;
+    config["is_array"] = true;
+    index->BuildWithRawDataForUT(row_count, index_arrays.data(), config);
+
+    LoadIndexInfo load_info{};
+    load_info.field_id = array_fid.get();
+    load_info.field_type = DataType::ARRAY;
+    load_info.element_type = DataType::INT64;
+    load_info.index_params = GenIndexParams(index.get());
+    load_info.cache_index =
+        CreateTestCacheIndex("array_equal_dense", std::move(index));
+    indexed_segment->LoadIndex(load_info);
+
+    auto equality = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(
+            array_fid, DataType::ARRAY, DataType::INT64, {}, false),
+        proto::plan::OpType::Equal,
+        MakeInt64ArrayValue({1, 2}),
+        std::vector<proto::plan::GenericValue>{});
+
+    // row_count=512 makes the adaptive densify threshold 8. Term 1 matches
+    // all 512 rows and term 2 matches 384, covering dense Contains and dense
+    // find_first/find_next result iteration.
+    EXPECT_TRUE(milvus::test::CanExprExecuteAllAtOnce(
+        equality, indexed_segment.get(), row_count));
+    auto raw_eval =
+        milvus::test::EvalExprInBatches(equality, raw_segment.get(), row_count);
+    auto indexed_eval = milvus::test::EvalExprInBatches(
+        equality, indexed_segment.get(), row_count);
+
+    TargetBitmapView raw_values(raw_eval.result->GetRawData(), row_count);
+    TargetBitmapView indexed_values(indexed_eval.result->GetRawData(),
+                                    row_count);
+    for (int64_t row = 0; row < row_count; ++row) {
+        EXPECT_EQ(indexed_values[row], raw_values[row]) << "row=" << row;
+        EXPECT_EQ(indexed_values[row], row % 4 == 0) << "row=" << row;
+    }
+}
+
+TEST(ArrayInvertedIndexRegression,
      ArrayNotEqualUsesIndexCandidatesAsRowLevelPrefilter) {
-    const std::vector<std::vector<int64_t>> arrays = {
+    std::vector<std::vector<int64_t>> arrays = {
         {1, 1, 2},     // equal
         {},            // null
         {1, 2},        // missing duplicate
@@ -429,9 +566,13 @@ TEST(ArrayInvertedIndexRegression,
         {3, 4},        // no indexed element
         {},            // null
     };
+    // Keep the literal's postings below the adaptive candidate bitmap
+    // threshold so this also exercises the sparse-offset representation.
+    arrays.resize(512, {3, 4});
     const auto row_count = static_cast<int64_t>(arrays.size());
     std::vector<bool> expected_validity(row_count);
     std::vector<bool> expected_values(row_count);
+    const std::vector<int64_t> expected_batch_sizes(row_count / 4, 4);
     const std::vector<int64_t> literal = {1, 1, 2};
     for (int64_t row = 0; row < row_count; ++row) {
         const bool valid = row % 2 == 0;
@@ -499,7 +640,7 @@ TEST(ArrayInvertedIndexRegression,
 
         auto raw_eval = milvus::test::EvalExprInBatches(
             logical_expr, raw_segment.get(), row_count);
-        EXPECT_EQ(raw_eval.batch_sizes, (std::vector<int64_t>{4, 4, 4, 2}));
+        EXPECT_EQ(raw_eval.batch_sizes, expected_batch_sizes);
         EXPECT_FALSE(milvus::test::CanExprExecuteAllAtOnce(
             logical_expr, raw_segment.get(), row_count));
 
@@ -527,7 +668,7 @@ TEST(ArrayInvertedIndexRegression,
             logical_expr, indexed_segment.get(), row_count));
         auto indexed_eval = milvus::test::EvalExprInBatches(
             logical_expr, indexed_segment.get(), row_count);
-        EXPECT_EQ(indexed_eval.batch_sizes, (std::vector<int64_t>{4, 4, 4, 2}));
+        EXPECT_EQ(indexed_eval.batch_sizes, expected_batch_sizes);
 
         TargetBitmapView raw_values(raw_eval.result->GetRawData(), row_count);
         TargetBitmapView raw_validity(raw_eval.result->GetValidRawData(),
