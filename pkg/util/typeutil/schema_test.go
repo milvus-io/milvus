@@ -3440,6 +3440,21 @@ func TestGetDataIterator(t *testing.T) {
 			want: []any{int64(1), int64(2), int64(3)},
 		},
 		{
+			name: "ints with empty validity",
+			field: &schemapb.FieldData{
+				Type: schemapb.DataType_Int64,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						ValidData: []bool{},
+						Data: &schemapb.ScalarField_LongData{
+							LongData: &schemapb.LongArray{Data: []int64{1}},
+						},
+					},
+				},
+			},
+			want: []any{int64(1)},
+		},
+		{
 			name: "ints with nulls",
 			field: &schemapb.FieldData{
 				Type: schemapb.DataType_Int64,
