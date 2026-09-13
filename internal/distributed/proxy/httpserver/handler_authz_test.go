@@ -115,7 +115,7 @@ func TestLowLevelRESTAuthorization(t *testing.T) {
 		require.NotNil(t, privCache)
 		require.NoError(t, privCache.RefreshPolicyInfo(typeutil.CacheOp{
 			OpType: typeutil.CacheGrantPrivilege,
-			OpKey:  funcutil.PolicyForPrivilege(util.RolePublic, commonpb.ObjectType_Global.String(), util.AnyWord, commonpb.ObjectPrivilege_PrivilegeCreateUser.String(), util.AnyWord),
+			OpKey:  funcutil.PolicyForPrivilege(util.RolePublic, commonpb.ObjectType_Global.String(), util.AnyWord, commonpb.ObjectPrivilege_PrivilegeCreateOwnership.String(), util.AnyWord),
 		}))
 
 		w := postCreateCredential(t, "lowpriv")
