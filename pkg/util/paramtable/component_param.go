@@ -2551,6 +2551,7 @@ type proxyConfig struct {
 	RLSMaxTagKeyLength                ParamItem `refreshable:"true"`
 	RLSMaxTagValueLength              ParamItem `refreshable:"true"`
 	RLSMaxArrayLiteralElements        ParamItem `refreshable:"true"`
+	RLSMetaRefreshInterval            ParamItem `refreshable:"true"`
 
 	AccessLog AccessLogConfig
 
@@ -3289,6 +3290,17 @@ Disabled if the value is less or equal to 0.`,
 		Formatter:    positiveProxyLimitFormatter("1024"),
 	}
 	p.RLSMaxArrayLiteralElements.Init(base.mgr)
+
+	p.RLSMetaRefreshInterval = ParamItem{
+		Key:          "proxy.rls.metaRefreshInterval",
+		Version:      "3.0.0",
+		DefaultValue: "3600",
+		PanicIfEmpty: true,
+		Doc:          "Maximum policy-cache age before request-time refresh, and principal-cache age before periodic eviction and refresh on next use, in seconds.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("3600"),
+	}
+	p.RLSMetaRefreshInterval.Init(base.mgr)
 
 	p.EnableCachedServiceProvider = ParamItem{
 		Key:          "proxy.enableCachedServiceProvider",
