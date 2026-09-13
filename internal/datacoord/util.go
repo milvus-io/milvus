@@ -320,9 +320,19 @@ func getCompactionMergeInfo(task *datapb.CompactionTask) *milvuspb.CompactionMer
 	if len(task.GetResultSegments()) > 0 {
 		target = task.GetResultSegments()[0]
 	}
+	// Public and internal compaction enums share the same wire values.
 	return &milvuspb.CompactionMergeInfo{
-		Sources: task.GetInputSegments(),
-		Target:  target,
+		Sources:       task.GetInputSegments(),
+		Target:        target,
+		PlanId:        task.GetPlanID(),
+		TriggerId:     task.GetTriggerID(),
+		CollectionId:  task.GetCollectionID(),
+		PartitionId:   task.GetPartitionID(),
+		Channel:       task.GetChannel(),
+		Type:          commonpb.CompactionType(task.GetType()),
+		State:         commonpb.CompactionTaskState(task.GetState()),
+		FailureReason: task.GetFailReason(),
+		Targets:       task.GetResultSegments(),
 	}
 }
 

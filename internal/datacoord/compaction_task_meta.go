@@ -139,8 +139,6 @@ func (csm *compactionTaskMeta) GetCompactionTasksByCollection(collectionID int64
 					res[task.TriggerID] = make([]*datapb.CompactionTask, 0)
 				}
 				res[task.TriggerID] = append(res[task.TriggerID], proto.Clone(task).(*datapb.CompactionTask))
-			} else {
-				break
 			}
 		}
 	}
