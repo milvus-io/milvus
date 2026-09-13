@@ -574,7 +574,19 @@ func (st *statsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResul
 				},
 			}))
 		} else {
-			updateErr = st.meta.UpdateSegmentsInfo(ctx, UpdateManifest(segID, manifest))
+			mutations := map[int64][]SegmentOperator{
+				segID: {func(seg *SegmentInfo) (BinlogIncrement, bool) {
+					if manifest == "" || seg.GetManifestPath() == manifest {
+						return BinlogIncrement{}, false
+					}
+					if err := updateManifestPathIfNewer(seg, manifest); err != nil {
+						seg.pendingMutationErr = err
+						return BinlogIncrement{}, false
+					}
+					return BinlogIncrement{}, true
+				}},
+			}
+			updateErr = st.meta.UpdateSegmentsInfo(ctx, mutations)
 		}
 		if updateErr != nil {
 			mlog.Warn(ctx, "failed to update manifest after stats task",
@@ -608,7 +620,7 @@ func (st *statsTask) commitTextIndexStats(ctx context.Context, result *workerpb.
 		// V2 segment, or one retired by compaction while the task ran: the operator
 		// persists stats when no manifest is present and discards the obsolete
 		// result otherwise, so the task still reaches a terminal state.
-		return st.meta.UpdateSegmentsInfo(ctx, updateStatsResultIfManifestMatches(ctx, st.GetSegmentID(), st.GetTaskID(), result))
+		return st.persistStatsResultIfManifestMatches(ctx, result)
 	}
 	textStats := result.GetTextStatsLogs()
 	if len(textStats) == 0 {
@@ -649,7 +661,7 @@ func (st *statsTask) commitTextIndexStats(ctx context.Context, result *workerpb.
 func (st *statsTask) commitJSONKeyStats(ctx context.Context, result *workerpb.StatsResult) error {
 	segment := st.meta.GetSegment(ctx, st.GetSegmentID())
 	if !canCommitStatsManifestDelta(segment) {
-		return st.meta.UpdateSegmentsInfo(ctx, updateStatsResultIfManifestMatches(ctx, st.GetSegmentID(), st.GetTaskID(), result))
+		return st.persistStatsResultIfManifestMatches(ctx, result)
 	}
 	jsonStats := result.GetJsonKeyStatsLogs()
 	if len(jsonStats) == 0 {
@@ -787,62 +799,77 @@ func (st *statsTask) shouldPublishPreparedManifest(ctx context.Context, segmentI
 		result.GetManifest() != segment.GetManifestPath()
 }
 
-func updateStatsResultIfManifestMatches(ctx context.Context, segmentID, taskID int64, result *workerpb.StatsResult) UpdateOperator {
-	return func(modPack *updateSegmentPack) bool {
-		current := modPack.meta.segments.GetSegment(segmentID)
-		if current == nil || !isSegmentHealthy(current) {
-			mlog.Warn(ctx, "discard stats result for missing or unhealthy segment",
-				mlog.FieldTaskID(taskID),
-				mlog.FieldSegmentID(segmentID),
-				mlog.Bool("segmentMissing", current == nil))
-			return modPack.fail(errStatsResultDiscarded)
-		}
-		if result.GetBaseManifest() != "" && current.GetManifestPath() != result.GetBaseManifest() {
-			mlog.Info(ctx, "discard stale stats result",
-				mlog.FieldTaskID(taskID),
-				mlog.FieldSegmentID(segmentID),
-				mlog.String("baseManifest", result.GetBaseManifest()),
-				mlog.String("currentManifest", current.GetManifestPath()),
-				mlog.String("resultManifest", result.GetManifest()))
-			return modPack.fail(errStatsResultStale)
-		}
-
-		hasTextStats := len(result.GetTextStatsLogs()) > 0
-		hasJSONStats := len(result.GetJsonKeyStatsLogs()) > 0
-		manifestChanged := result.GetManifest() != "" && current.GetManifestPath() != result.GetManifest()
-		if !hasTextStats && !hasJSONStats && !manifestChanged {
-			return false
-		}
-		if manifestChanged && current.GetStorageVersion() == storage.StorageV3 {
-			return modPack.fail(merr.WrapErrServiceInternalMsg(
-				"StorageV3 stats manifest publication must use CommitSegmentManifest, segmentID=%d", segmentID))
-		}
-
-		segment := modPack.Get(segmentID)
-		if segment == nil {
-			return modPack.fail(errStatsResultDiscarded)
-		}
-
-		if hasTextStats {
-			if segment.TextStatsLogs == nil {
-				segment.TextStatsLogs = make(map[int64]*datapb.TextIndexStats)
+func updateStatsResultIfManifestMatches(
+	ctx context.Context,
+	segmentID, taskID int64,
+	result *workerpb.StatsResult,
+) map[int64][]SegmentOperator {
+	return map[int64][]SegmentOperator{
+		segmentID: {func(segment *SegmentInfo) (BinlogIncrement, bool) {
+			if !isSegmentHealthy(segment) {
+				mlog.Warn(ctx, "discard stats result for missing or unhealthy segment",
+					mlog.FieldTaskID(taskID),
+					mlog.FieldSegmentID(segmentID))
+				segment.pendingMutationErr = errStatsResultDiscarded
+				return BinlogIncrement{}, false
 			}
-			for fieldID, logs := range result.GetTextStatsLogs() {
-				segment.TextStatsLogs[fieldID] = logs
+			if result.GetBaseManifest() != "" && segment.GetManifestPath() != result.GetBaseManifest() {
+				mlog.Info(ctx, "discard stale stats result",
+					mlog.FieldTaskID(taskID),
+					mlog.FieldSegmentID(segmentID),
+					mlog.String("baseManifest", result.GetBaseManifest()),
+					mlog.String("currentManifest", segment.GetManifestPath()),
+					mlog.String("resultManifest", result.GetManifest()))
+				segment.pendingMutationErr = errStatsResultStale
+				return BinlogIncrement{}, false
 			}
-		}
 
-		if hasJSONStats {
-			if segment.JsonKeyStats == nil {
-				segment.JsonKeyStats = make(map[int64]*datapb.JsonKeyStats)
+			hasTextStats := len(result.GetTextStatsLogs()) > 0
+			hasJSONStats := len(result.GetJsonKeyStatsLogs()) > 0
+			manifestChanged := result.GetManifest() != "" && segment.GetManifestPath() != result.GetManifest()
+			if !hasTextStats && !hasJSONStats && !manifestChanged {
+				return BinlogIncrement{}, false
 			}
-			for fieldID, logs := range result.GetJsonKeyStatsLogs() {
-				segment.JsonKeyStats[fieldID] = logs
+			if manifestChanged && segment.GetStorageVersion() == storage.StorageV3 {
+				segment.pendingMutationErr = merr.WrapErrServiceInternalMsg(
+					"StorageV3 stats manifest publication must use CommitSegmentManifest, segmentID=%d", segmentID)
+				return BinlogIncrement{}, false
 			}
-		}
-		if result.GetManifest() != "" && segment.GetManifestPath() != result.GetManifest() {
-			segment.ManifestPath = result.GetManifest()
-		}
-		return true
+
+			if hasTextStats {
+				if segment.TextStatsLogs == nil {
+					segment.TextStatsLogs = make(map[int64]*datapb.TextIndexStats)
+				}
+				for fieldID, logs := range result.GetTextStatsLogs() {
+					segment.TextStatsLogs[fieldID] = logs
+				}
+			}
+			if hasJSONStats {
+				if segment.JsonKeyStats == nil {
+					segment.JsonKeyStats = make(map[int64]*datapb.JsonKeyStats)
+				}
+				for fieldID, logs := range result.GetJsonKeyStatsLogs() {
+					segment.JsonKeyStats[fieldID] = logs
+				}
+			}
+			if manifestChanged {
+				segment.ManifestPath = result.GetManifest()
+			}
+			return BinlogIncrement{}, true
+		}},
 	}
+}
+
+// persistStatsResultIfManifestMatches preserves the terminal-discard contract
+// for a worker result whose segment has already been physically removed. The
+// generic batch update intentionally skips missing segments, so this call marks
+// its one target as required and maps that case to errStatsResultDiscarded.
+func (st *statsTask) persistStatsResultIfManifestMatches(ctx context.Context, result *workerpb.StatsResult) error {
+	segmentID := st.GetSegmentID()
+	return st.meta.updateSegmentsInfo(
+		ctx,
+		updateStatsResultIfManifestMatches(ctx, segmentID, st.GetTaskID(), result),
+		nil,
+		map[int64]error{segmentID: errStatsResultDiscarded},
+	)
 }

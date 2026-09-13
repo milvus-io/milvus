@@ -16,66 +16,631 @@
 
 package datacoord
 
-import "github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+import (
+	"context"
+	"fmt"
+	"sort"
 
-// SegmentOperator is function type to update segment info.
-type SegmentOperator func(segment *SegmentInfo) bool
+	"github.com/samber/lo"
+	"google.golang.org/protobuf/proto"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/segmentutil"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
+)
+
+// SegmentOperator mutates a segment in place and reports:
+//   - the binlog fields it changed (if any) so the caller can rewrite the
+//     matching side-prefix KVs;
+//   - whether this operator changed the segment.
+//
+// Return (BinlogIncrement{}, true) for state-only mutations.
+// Return (_, false) for an idempotent no-op; later operators in the same
+// per-segment chain still run. Operators that must skip the whole chain set
+// pendingMutationSkip, while failures set pendingMutationErr.
+type SegmentOperator func(segment *SegmentInfo) (BinlogIncrement, bool)
 
 func SetMaxRowCount(maxRow int64) SegmentOperator {
-	return func(segment *SegmentInfo) bool {
+	return func(segment *SegmentInfo) (BinlogIncrement, bool) {
 		if segment.MaxRowNum == maxRow {
-			return false
+			return BinlogIncrement{}, false
 		}
 		segment.MaxRowNum = maxRow
-		return true
+		return BinlogIncrement{}, true
 	}
 }
 
 func SetTextIndexLogs(textIndexLogs map[int64]*datapb.TextIndexStats) SegmentOperator {
-	return func(segment *SegmentInfo) bool {
+	return func(segment *SegmentInfo) (BinlogIncrement, bool) {
 		if segment.TextStatsLogs == nil {
 			segment.TextStatsLogs = make(map[int64]*datapb.TextIndexStats)
 		}
 		for field, logs := range textIndexLogs {
 			segment.TextStatsLogs[field] = logs
 		}
-		return true
+		return BinlogIncrement{}, true
 	}
 }
 
 func SetStatslogs(statslogs []*datapb.FieldBinlog) SegmentOperator {
-	return func(segment *SegmentInfo) bool {
+	return func(segment *SegmentInfo) (BinlogIncrement, bool) {
 		segment.Statslogs = statslogs
-		return true
+		return BinlogIncrement{Statslogs: statslogs}, true
 	}
 }
 
 func SetBm25Statslogs(bm25Statslogs []*datapb.FieldBinlog) SegmentOperator {
-	return func(segment *SegmentInfo) bool {
+	return func(segment *SegmentInfo) (BinlogIncrement, bool) {
 		segment.Bm25Statslogs = bm25Statslogs
-		return true
+		return BinlogIncrement{Bm25Statslogs: bm25Statslogs}, true
 	}
 }
 
 func SetJSONKeyIndexLogs(jsonKeyIndexLogs map[int64]*datapb.JsonKeyStats) SegmentOperator {
-	return func(segment *SegmentInfo) bool {
+	return func(segment *SegmentInfo) (BinlogIncrement, bool) {
 		if segment.JsonKeyStats == nil {
 			segment.JsonKeyStats = make(map[int64]*datapb.JsonKeyStats)
 		}
 		for field, logs := range jsonKeyIndexLogs {
 			segment.JsonKeyStats[field] = logs
 		}
-		return true
+		return BinlogIncrement{}, true
 	}
 }
 
 func SetSchemaVersion(schemaVersion int32) SegmentOperator {
-	return func(segment *SegmentInfo) bool {
+	return func(segment *SegmentInfo) (BinlogIncrement, bool) {
 		if segment.GetSchemaVersion() == schemaVersion {
-			return false
+			return BinlogIncrement{}, false
 		}
 		segment.SchemaVersion = schemaVersion
-		return true
+		return BinlogIncrement{}, true
+	}
+}
+
+// UpdateSegmentStats stores the producer-reported cumulative statistics. A
+// nil report is the rolling-upgrade fallback and is rebuilt from the segment's
+// currently materialized binlog arrays.
+func UpdateSegmentStats(segmentID int64, requestStats *datapb.Statistics) map[int64][]SegmentOperator {
+	return map[int64][]SegmentOperator{
+		segmentID: {func(segment *SegmentInfo) (BinlogIncrement, bool) {
+			if requestStats != nil {
+				segment.Stats = requestStats
+			} else {
+				segment.Stats = storage.BuildStatsFromFieldBinlogs(
+					segment.GetBinlogs(), segment.GetStatslogs(), segment.GetBm25Statslogs(), segment.GetDeltalogs())
+			}
+			return BinlogIncrement{}, true
+		}},
+	}
+}
+
+func UpdateIsImporting(segmentID int64, isImporting bool) SegmentOperator {
+	return func(segment *SegmentInfo) (BinlogIncrement, bool) {
+		segment.IsImporting = isImporting
+		return BinlogIncrement{}, true
+	}
+}
+
+// UpdateManifest publishes a worker-produced manifest pointer on paths with a
+// single manifest writer, such as WAL flush or fresh copy/import completion.
+func UpdateManifest(segmentID int64, manifestPath string) SegmentOperator {
+	return func(segment *SegmentInfo) (BinlogIncrement, bool) {
+		if manifestPath == "" || segment.GetManifestPath() == manifestPath {
+			return BinlogIncrement{}, false
+		}
+		segment.ManifestPath = manifestPath
+		return BinlogIncrement{}, true
+	}
+}
+
+func UpdateCheckPointOperator(segmentID int64, checkpoints []*datapb.CheckPoint, skipDmlPositionCheck ...bool) map[int64][]SegmentOperator {
+	return map[int64][]SegmentOperator{
+		segmentID: {func(segment *SegmentInfo) (BinlogIncrement, bool) {
+			var cpNumRows int64
+			for _, cp := range checkpoints {
+				if cp.GetSegmentID() != segmentID {
+					mlog.Warn(context.TODO(), "checkpoint in segment is not same as flush segment to update, ignore",
+						mlog.Int64("current", segmentID),
+						mlog.Int64("checkpoint segment", cp.GetSegmentID()))
+					continue
+				}
+				if cp.GetPosition() == nil {
+					mlog.Warn(context.TODO(), "checkpoint has nil position, skip", mlog.Int64("segmentID", segmentID))
+					continue
+				}
+				if segment.GetDmlPosition() != nil &&
+					segment.GetDmlPosition().GetTimestamp() >= cp.GetPosition().GetTimestamp() &&
+					(len(skipDmlPositionCheck) == 0 || !skipDmlPositionCheck[0]) {
+					mlog.Warn(context.TODO(), "checkpoint in segment is larger than reported",
+						mlog.Any("current", segment.GetDmlPosition()),
+						mlog.Any("reported", cp.GetPosition()))
+					continue
+				}
+				cpNumRows = cp.GetNumOfRows()
+				segment.DmlPosition = cp.GetPosition()
+			}
+
+			count := segmentutil.CalcRowCountFromBinLog(segment.SegmentInfo)
+			// StorageV3 checkpoints carry the authoritative cumulative row count.
+			// Their in-memory binlog arrays may be empty or contain only the newest
+			// flush delta, so an array-derived count must not override the checkpoint.
+			if segment.GetStorageVersion() == storage.StorageV3 {
+				if cpNumRows > 0 {
+					if cpNumRows != count && count > 0 {
+						mlog.Info(context.TODO(), "check point reported row count inconsistent with binlog row count",
+							mlog.FieldSegmentID(segmentID),
+							mlog.Int64("binlog reported (wrong)", cpNumRows),
+							mlog.Int64("segment binlog row count (correct)", count))
+					}
+					segment.NumOfRows = cpNumRows
+				}
+			} else if count > 0 {
+				if cpNumRows != count {
+					mlog.Info(context.TODO(), "check point reported row count inconsistent with binlog row count",
+						mlog.Int64("segmentID", segmentID),
+						mlog.Int64("binlog reported (wrong)", cpNumRows),
+						mlog.Int64("segment binlog row count (correct)", count))
+				}
+				segment.NumOfRows = count
+			}
+			return BinlogIncrement{}, true
+		}},
+	}
+}
+
+// mergeSegmentColumnGroups upserts incoming column groups by top-level
+// FieldID, removes incoming child fields from their previous groups, and
+// reports any group made empty so its side-prefix KV can be deleted. Sorting
+// makes replay byte-stable and idempotent.
+func mergeSegmentColumnGroups(
+	existing []*datapb.FieldBinlog,
+	groups map[int64]*datapb.FieldBinlog,
+) ([]*datapb.FieldBinlog, []int64) {
+	incomingChildFields := typeutil.NewSet[int64]()
+	for _, group := range groups {
+		incomingChildFields.Insert(group.GetChildFields()...)
+	}
+
+	var droppedFieldIDs []int64
+	merged := make([]*datapb.FieldBinlog, 0, len(existing)+len(groups))
+	for _, fieldBinlog := range existing {
+		if _, replaced := groups[fieldBinlog.GetFieldID()]; replaced {
+			continue
+		}
+		if len(fieldBinlog.GetChildFields()) > 0 {
+			fieldBinlog.ChildFields = lo.Filter(fieldBinlog.GetChildFields(), func(fieldID int64, _ int) bool {
+				return !incomingChildFields.Contain(fieldID)
+			})
+			if len(fieldBinlog.GetChildFields()) == 0 {
+				droppedFieldIDs = append(droppedFieldIDs, fieldBinlog.GetFieldID())
+				continue
+			}
+		}
+		merged = append(merged, fieldBinlog)
+	}
+	for _, group := range groups {
+		merged = append(merged, group)
+	}
+	sort.Slice(merged, func(i, j int) bool {
+		return merged[i].GetFieldID() < merged[j].GetFieldID()
+	})
+	return merged, droppedFieldIDs
+}
+
+// UpdateSegmentColumnGroupsOperator upserts storage-v2 column groups on a
+// segment's FieldBinlogs. It is idempotent by top-level FieldID.
+func UpdateSegmentColumnGroupsOperator(segmentID int64, groups map[int64]*datapb.FieldBinlog) SegmentOperator {
+	return func(segment *SegmentInfo) (BinlogIncrement, bool) {
+		merged, droppedFieldIDs := mergeSegmentColumnGroups(segment.Binlogs, groups)
+		segment.Binlogs = merged
+		segment.DataVersion++
+		return BinlogIncrement{
+			Binlogs:               segment.Binlogs,
+			DroppedBinlogFieldIDs: droppedFieldIDs,
+		}, true
+	}
+}
+
+// UpdateBumpSchemaVersionMaterializationOperator applies the catalog half of a
+// StorageV3 schema-bump materialization. CommitSegmentManifest owns the pointer
+// advance; this operator only merges column groups, advances schema version,
+// and folds the compactor-reported statistics delta into the segment.
+func UpdateBumpSchemaVersionMaterializationOperator(
+	segmentID int64,
+	newSchemaVersion int32,
+	newGroups []*datapb.FieldBinlog,
+	statsDelta *datapb.Statistics,
+) SegmentOperator {
+	return func(segment *SegmentInfo) (BinlogIncrement, bool) {
+		before := proto.Clone(segment.SegmentInfo).(*datapb.SegmentInfo)
+		var increment BinlogIncrement
+		if len(newGroups) > 0 {
+			merged, droppedFieldIDs := mergeSegmentColumnGroups(segment.Binlogs,
+				lo.KeyBy(newGroups, func(fieldBinlog *datapb.FieldBinlog) int64 {
+					return fieldBinlog.GetFieldID()
+				}))
+			if len(droppedFieldIDs) > 0 {
+				segment.pendingMutationErr = merr.WrapErrServiceInternalMsg(
+					"schema bump materialization dropped column groups %v for segment %d",
+					droppedFieldIDs, segmentID)
+				return BinlogIncrement{}, false
+			}
+			segment.Binlogs = merged
+			increment.Binlogs = segment.Binlogs
+		}
+		if newSchemaVersion > segment.GetSchemaVersion() {
+			segment.SchemaVersion = newSchemaVersion
+		}
+		if statsDelta != nil {
+			segment.Stats = addStatsDelta(context.TODO(), segmentID, segment.GetStats(), statsDelta)
+		}
+		if proto.Equal(before, segment.SegmentInfo) {
+			return BinlogIncrement{}, false
+		}
+		segment.DataVersion++
+		return increment, true
+	}
+}
+
+func UpdateManifestVersion(segmentID int64, manifestVersion int64) SegmentOperator {
+	return func(segment *SegmentInfo) (BinlogIncrement, bool) {
+		if segment.GetManifestPath() == "" {
+			mlog.Warn(context.TODO(), "meta update: update manifest version failed - no manifest path",
+				mlog.Int64("segmentID", segmentID))
+			return BinlogIncrement{}, false
+		}
+		basePath, currentVer, err := packed.UnmarshalManifestPath(segment.GetManifestPath())
+		if err != nil {
+			return BinlogIncrement{}, false
+		}
+		// Guard against version rollback. classifyBackfillSegments pre-checks
+		// monotonicity at broadcast time, but a concurrent compaction may advance
+		// ManifestPath between pre-check and this apply.
+		if currentVer >= manifestVersion {
+			if currentVer > manifestVersion {
+				mlog.Warn(context.TODO(), "meta update: update manifest version rejected - would regress",
+					mlog.Int64("segmentID", segmentID),
+					mlog.Int64("currentVer", currentVer),
+					mlog.Int64("incomingVer", manifestVersion))
+			}
+			return BinlogIncrement{}, false
+		}
+		segment.ManifestPath = packed.MarshalManifestPath(basePath, manifestVersion)
+		return BinlogIncrement{}, true
+	}
+}
+
+func updateManifestPathIfNewer(segment *SegmentInfo, manifestPath string) error {
+	if manifestPath == "" || segment.GetManifestPath() == manifestPath {
+		return nil
+	}
+	if segment.GetManifestPath() == "" {
+		if _, _, err := packed.UnmarshalManifestPath(manifestPath); err != nil {
+			return err
+		}
+		segment.ManifestPath = manifestPath
+		return nil
+	}
+
+	currentBase, currentVersion, err := packed.UnmarshalManifestPath(segment.GetManifestPath())
+	if err != nil {
+		return err
+	}
+	incomingBase, incomingVersion, err := packed.UnmarshalManifestPath(manifestPath)
+	if err != nil {
+		return err
+	}
+	if currentBase != incomingBase {
+		return merr.WrapErrServiceInternal(fmt.Sprintf("manifest base path mismatch for segment %d: current %s, incoming %s", segment.GetID(), currentBase, incomingBase))
+	}
+	if incomingVersion > currentVersion {
+		segment.ManifestPath = manifestPath
+	}
+	return nil
+}
+
+func clearBinlogPaths(fieldBinlogs []*datapb.FieldBinlog) {
+	for _, fieldBinlog := range fieldBinlogs {
+		for _, binlog := range fieldBinlog.GetBinlogs() {
+			binlog.LogPath = ""
+		}
+	}
+}
+
+func cloneAndClearBinlogPaths(fieldBinlogs []*datapb.FieldBinlog) []*datapb.FieldBinlog {
+	cloned := make([]*datapb.FieldBinlog, 0, len(fieldBinlogs))
+	for _, fieldBinlog := range fieldBinlogs {
+		if fieldBinlog == nil {
+			cloned = append(cloned, nil)
+			continue
+		}
+		cloned = append(cloned, typeutil.Clone(fieldBinlog))
+	}
+	clearBinlogPaths(cloned)
+	return cloned
+}
+
+func mergeSegmentMutations(dst map[int64][]SegmentOperator, src map[int64][]SegmentOperator) {
+	for segmentID, operators := range src {
+		dst[segmentID] = append(dst[segmentID], operators...)
+	}
+}
+
+type l0ManifestUpdate struct {
+	segmentID            int64
+	deltalogs            []*datapb.FieldBinlog
+	storageConfig        *indexpb.StorageConfig
+	committedV3Manifests map[int64]string
+	segment              *SegmentInfo
+	manifestPath         string
+	entries              []packed.DeltaLogEntry
+}
+
+func (u *l0ManifestUpdate) prepare(segment *SegmentInfo) (bool, error) {
+	u.segment = segment
+	u.deltalogs = cloneFieldBinlogs(u.deltalogs)
+	if len(u.deltalogs) == 0 {
+		return false, nil
+	}
+
+	if u.segment.GetManifestPath() == "" {
+		if err := binlog.CompressFieldBinlogs(u.deltalogs); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+
+	if u.committedV3Manifests != nil {
+		u.manifestPath = u.committedV3Manifests[u.segmentID]
+	}
+	if u.manifestPath != "" {
+		return true, nil
+	}
+
+	entries, err := buildL0V3DeltaLogEntries(u.segmentID, u.deltalogs)
+	if err != nil {
+		return false, err
+	}
+	if len(entries) == 0 {
+		return false, nil
+	}
+	u.entries = entries
+	return true, nil
+}
+
+func (u *l0ManifestUpdate) commitManifest() error {
+	if u.segment.GetManifestPath() == "" || u.manifestPath != "" || len(u.entries) == 0 {
+		return nil
+	}
+	manifestPath, err := packed.AddDeltaLogsToManifestOverwrite(u.segment.GetManifestPath(), u.storageConfig, u.entries)
+	if err != nil {
+		return err
+	}
+	u.manifestPath = manifestPath
+	return nil
+}
+
+func commitL0ManifestUpdates(updates []*l0ManifestUpdate) error {
+	updates = lo.Filter(updates, func(update *l0ManifestUpdate, _ int) bool {
+		return update.segment.GetManifestPath() != ""
+	})
+	if len(updates) == 0 {
+		return nil
+	}
+
+	groups := make(map[int64][]*l0ManifestUpdate)
+	for _, update := range updates {
+		groups[update.segmentID] = append(groups[update.segmentID], update)
+	}
+
+	poolSize := paramtable.Get().DataCoordCfg.L0ManifestUpdatePoolSize.GetAsInt()
+	if poolSize < 1 {
+		poolSize = 1
+	}
+	if poolSize > len(groups) {
+		poolSize = len(groups)
+	}
+
+	pool := conc.NewPool[struct{}](poolSize)
+	defer pool.Release()
+
+	futures := make([]*conc.Future[struct{}], 0, len(groups))
+	for _, group := range groups {
+		group := group
+		futures = append(futures, pool.Submit(func() (struct{}, error) {
+			return struct{}{}, commitL0ManifestUpdateGroup(group)
+		}))
+	}
+	if err := conc.BlockOnAll(futures...); err != nil {
+		return err
+	}
+	for _, update := range updates {
+		if update.committedV3Manifests != nil && update.manifestPath != "" {
+			update.committedV3Manifests[update.segmentID] = update.manifestPath
+		}
+	}
+	return nil
+}
+
+func commitL0ManifestUpdateGroup(updates []*l0ManifestUpdate) error {
+	for _, update := range updates {
+		if update.manifestPath != "" {
+			if err := updateManifestPathIfNewer(update.segment, update.manifestPath); err != nil {
+				return err
+			}
+			continue
+		}
+		if len(update.entries) == 0 {
+			continue
+		}
+		if err := update.commitManifest(); err != nil {
+			return err
+		}
+		if err := updateManifestPathIfNewer(update.segment, update.manifestPath); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (u *l0ManifestUpdate) apply() (BinlogIncrement, bool, error) {
+	deltalogs := u.deltalogs
+	if u.segment.GetManifestPath() != "" {
+		if err := updateManifestPathIfNewer(u.segment, u.manifestPath); err != nil {
+			return BinlogIncrement{}, false, err
+		}
+		deltalogs = cloneAndClearBinlogPaths(deltalogs)
+	}
+
+	increment, ok := addL0DeltalogsToSegment(u.segmentID, u.segment, deltalogs)
+	return increment, ok, nil
+}
+
+// addL0DeltalogsToSegment is the catalog half shared by the legacy manifest
+// adapter and CommitSegmentManifest. De-duplication makes task replay safe;
+// statistics are accumulated because V3 reloads may not reconstruct per-log
+// delta metadata from side-prefix KVs.
+func addL0DeltalogsToSegment(
+	segmentID int64,
+	segment *SegmentInfo,
+	deltalogs []*datapb.FieldBinlog,
+) (BinlogIncrement, bool) {
+	deltalogs = filterDuplicateFieldBinlogs(segment.GetDeltalogs(), deltalogs)
+	if len(deltalogs) == 0 {
+		return BinlogIncrement{}, false
+	}
+
+	segment.Deltalogs = mergeFieldBinlogs(segment.GetDeltalogs(), deltalogs)
+	if segment.Stats == nil {
+		segment.Stats = &datapb.Statistics{}
+	}
+	for _, fieldBinlog := range deltalogs {
+		for _, log := range fieldBinlog.GetBinlogs() {
+			segment.Stats.DeltaBinlogSize += log.GetMemorySize()
+			segment.Stats.DeleteNumRows += log.GetEntriesNum()
+			segment.Stats.DeltaBinlogCount++
+			if from := log.GetTimestampFrom(); from > 0 && (segment.Stats.DeltaTimestampFrom == 0 || from < segment.Stats.DeltaTimestampFrom) {
+				segment.Stats.DeltaTimestampFrom = from
+			}
+			if to := log.GetTimestampTo(); to > segment.Stats.DeltaTimestampTo {
+				segment.Stats.DeltaTimestampTo = to
+			}
+		}
+	}
+	return BinlogIncrement{Deltalogs: segment.Deltalogs}, true
+}
+
+// AddL0DeltalogsOperator applies an L0 result after the manifest revision has
+// been created by CommitSegmentManifest. It performs no manifest I/O.
+func AddL0DeltalogsOperator(segmentID int64, deltalogs []*datapb.FieldBinlog) SegmentOperator {
+	return func(segment *SegmentInfo) (BinlogIncrement, bool) {
+		deltalogs := cloneFieldBinlogs(deltalogs)
+		if segment.GetManifestPath() != "" {
+			clearBinlogPaths(deltalogs)
+		}
+		return addL0DeltalogsToSegment(segmentID, segment, deltalogs)
+	}
+}
+
+func cloneFieldBinlogs(fieldBinlogs []*datapb.FieldBinlog) []*datapb.FieldBinlog {
+	cloned := make([]*datapb.FieldBinlog, 0, len(fieldBinlogs))
+	for _, fieldBinlog := range fieldBinlogs {
+		if fieldBinlog == nil {
+			cloned = append(cloned, nil)
+			continue
+		}
+		cloned = append(cloned, typeutil.Clone(fieldBinlog))
+	}
+	return cloned
+}
+
+func AddL0DeltalogsAndUpdateManifestOperator(
+	segmentID int64,
+	deltalogs []*datapb.FieldBinlog,
+	storageConfig *indexpb.StorageConfig,
+	committedV3Manifests map[int64]string,
+) map[int64][]SegmentOperator {
+	return map[int64][]SegmentOperator{
+		segmentID: {func(segment *SegmentInfo) (BinlogIncrement, bool) {
+			update := &l0ManifestUpdate{
+				segmentID:            segmentID,
+				deltalogs:            deltalogs,
+				storageConfig:        storageConfig,
+				committedV3Manifests: committedV3Manifests,
+			}
+			ok, err := update.prepare(segment)
+			if err != nil {
+				segment.pendingMutationErr = err
+				return BinlogIncrement{}, false
+			}
+			if !ok {
+				return BinlogIncrement{}, false
+			}
+			segment.pendingL0ManifestUpdates = append(segment.pendingL0ManifestUpdates, update)
+			return BinlogIncrement{}, true
+		}},
+	}
+}
+
+// ResetImportingSegmentRows clears NumOfRows and MaxRowNum on importing
+// segments. It returns the mutation map consumed by meta.UpdateSegmentsInfo.
+func ResetImportingSegmentRows(segmentIDs ...int64) map[int64][]SegmentOperator {
+	mutations := make(map[int64][]SegmentOperator, len(segmentIDs))
+	for _, segmentID := range segmentIDs {
+		segID := segmentID
+		mutations[segID] = []SegmentOperator{func(segment *SegmentInfo) (BinlogIncrement, bool) {
+			if segment.GetState() != commonpb.SegmentState_Importing {
+				mlog.Warn(context.TODO(), "meta update: reset importing segment rows skipped - segment not in Importing state",
+					mlog.Int64("segmentID", segID),
+					mlog.String("state", segment.GetState().String()))
+				return BinlogIncrement{}, false
+			}
+			segment.NumOfRows = 0
+			segment.MaxRowNum = 0
+			return BinlogIncrement{}, true
+		}}
+	}
+	return mutations
+}
+
+// UpdateCommitTimestamp sets the commit_timestamp on an import/CDC segment.
+// It returns the mutation map consumed by meta.UpdateSegmentsInfo.
+func UpdateCommitTimestamp(segmentID int64, ts uint64) map[int64][]SegmentOperator {
+	return map[int64][]SegmentOperator{
+		segmentID: {func(segment *SegmentInfo) (BinlogIncrement, bool) {
+			if ts != 0 {
+				var maxTsTo uint64
+				for _, fieldBinlogs := range segment.GetBinlogs() {
+					for _, l := range fieldBinlogs.GetBinlogs() {
+						if l.GetTimestampTo() > maxTsTo {
+							maxTsTo = l.GetTimestampTo()
+						}
+					}
+				}
+				if ts < maxTsTo {
+					mlog.Error(context.TODO(), "meta update: update commit timestamp rejected - commit_ts < max(binlog.TimestampTo)",
+						mlog.Int64("segmentID", segmentID),
+						mlog.Uint64("commitTs", ts),
+						mlog.Uint64("maxBinlogTimestampTo", maxTsTo))
+					segment.pendingMutationErr = merr.WrapErrImportSysFailedMsg(
+						"commit timestamp %d is less than max binlog timestamp %d for import segment %d",
+						ts, maxTsTo, segmentID)
+					return BinlogIncrement{}, false
+				}
+			}
+			segment.CommitTimestamp = ts
+			return BinlogIncrement{}, true
+		}},
 	}
 }
 

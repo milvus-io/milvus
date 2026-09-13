@@ -23,12 +23,9 @@ import (
 	"time"
 
 	"github.com/bytedance/mockey"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus/internal/metastore"
-	metastoremocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -37,7 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-func TestCommitSegmentManifestPublishesOnlyAfterCatalogSuccess(t *testing.T) {
+func TestCommitSegmentManifestPublishesOnlyAfterPersistSuccess(t *testing.T) {
 	basePath := "/tmp/milvus/insert_log/1/10/200"
 	oldManifest := packed.MarshalManifestPath(basePath, 7)
 	newManifest := packed.MarshalManifestPath(basePath, 8)
@@ -70,7 +67,7 @@ func TestCommitSegmentManifestPublishesOnlyAfterCatalogSuccess(t *testing.T) {
 				NumEntries: 3,
 			}}},
 		},
-		CatalogMutation: SegmentCatalogMutation{Operators: []UpdateOperator{AddL0DeltalogsOperator(200, []*datapb.FieldBinlog{{
+		CatalogMutation: SegmentCatalogMutation{Operators: []SegmentOperator{AddL0DeltalogsOperator(200, []*datapb.FieldBinlog{{
 			Binlogs: []*datapb.Binlog{{LogID: 9001, LogPath: basePath + "/_delta/9001", EntriesNum: 3, MemorySize: 128}},
 		}})}},
 	})
@@ -88,7 +85,7 @@ func TestCommitSegmentManifestPublishesOnlyAfterCatalogSuccess(t *testing.T) {
 			Type:         ManifestMutationNoop,
 			ManifestPath: manifest9,
 		},
-		CatalogMutation: SegmentCatalogMutation{Operators: []UpdateOperator{
+		CatalogMutation: SegmentCatalogMutation{Operators: []SegmentOperator{
 			UpdateIsImporting(200, true),
 		}},
 	}))
@@ -152,7 +149,7 @@ func TestCommitSegmentManifestAllowsOmittedExpectedManifest(t *testing.T) {
 			Type:         ManifestMutationNoop,
 			ManifestPath: manifest9,
 		},
-		CatalogMutation: SegmentCatalogMutation{Operators: []UpdateOperator{
+		CatalogMutation: SegmentCatalogMutation{Operators: []SegmentOperator{
 			UpdateIsImporting(209, true),
 		}},
 	}))
@@ -185,7 +182,7 @@ func TestCommitSegmentManifestCreatesSegmentWithInitialPointer(t *testing.T) {
 	require.Equal(t, storage.StorageV3, segment.GetStorageVersion())
 }
 
-func TestCommitSegmentManifestLeavesMemoryUntouchedOnCatalogFailure(t *testing.T) {
+func TestCommitSegmentManifestLeavesMemoryUntouchedOnPersistFailure(t *testing.T) {
 	basePath := "/tmp/milvus/insert_log/1/10/201"
 	oldManifest := packed.MarshalManifestPath(basePath, 7)
 	newManifest := packed.MarshalManifestPath(basePath, 8)
@@ -197,9 +194,9 @@ func TestCommitSegmentManifestLeavesMemoryUntouchedOnCatalogFailure(t *testing.T
 		StorageVersion: storage.StorageV3,
 		ManifestPath:   oldManifest,
 	})))
-	catalog := metastoremocks.NewDataCoordCatalog(t)
-	catalog.EXPECT().Update(mock.Anything, mock.Anything).Return(merr.WrapErrServiceUnavailableMsg("catalog unavailable")).Once()
-	meta.catalog = catalog
+	meta.segmentPersist = NewSegmentTxnWrapper(failCommitPersist{
+		err: merr.WrapErrServiceUnavailableMsg("segment persist unavailable"),
+	})
 
 	commit := mockey.Mock(packed.CommitManifestUpdates).Return(newManifest, nil).Build()
 	defer commit.UnPatch()
@@ -313,7 +310,9 @@ func TestCommitSegmentManifestRebasesCatalogMutationAfterManifestIO(t *testing.T
 	}()
 
 	<-entered
-	require.NoError(t, meta.UpdateSegmentsInfo(context.Background(), UpdateIsImporting(segmentID, true)))
+	require.NoError(t, meta.UpdateSegmentsInfo(context.Background(), map[int64][]SegmentOperator{
+		segmentID: {UpdateIsImporting(segmentID, true)},
+	}))
 	close(release)
 	require.NoError(t, <-result)
 
@@ -362,7 +361,7 @@ func TestCommitSegmentManifestFailsStaleWhenPointerAdvancesDuringManifestIO(t *t
 				Type:    ManifestMutationCommitUpdates,
 				Updates: &packed.ManifestUpdates{},
 			},
-			CatalogMutation: SegmentCatalogMutation{Operators: []UpdateOperator{
+			CatalogMutation: SegmentCatalogMutation{Operators: []SegmentOperator{
 				UpdateIsImporting(segmentID, true),
 			}},
 		})
@@ -370,7 +369,9 @@ func TestCommitSegmentManifestFailsStaleWhenPointerAdvancesDuringManifestIO(t *t
 
 	<-entered
 	// The real out-of-lock writer: the batch-update-manifest ack adopting v8.
-	require.NoError(t, meta.UpdateSegmentsInfo(context.Background(), UpdateManifestVersion(segmentID, 8)))
+	require.NoError(t, meta.UpdateSegmentsInfo(context.Background(), map[int64][]SegmentOperator{
+		segmentID: {UpdateManifestVersion(segmentID, 8)},
+	}))
 	close(release)
 
 	err = <-result
@@ -383,7 +384,7 @@ func TestCommitSegmentManifestFailsStaleWhenPointerAdvancesDuringManifestIO(t *t
 	require.False(t, updated.GetIsImporting())
 }
 
-func TestCommitSegmentManifestSerializesCatalogWritesForDifferentSegments(t *testing.T) {
+func TestCommitSegmentManifestAllowsDifferentSegmentsToPrepareConcurrently(t *testing.T) {
 	meta, err := newMemoryMeta(t)
 	require.NoError(t, err)
 	basePaths := map[int64]string{
@@ -401,51 +402,41 @@ func TestCommitSegmentManifestSerializesCatalogWritesForDifferentSegments(t *tes
 
 	entered := make(chan struct{}, len(basePaths))
 	release := make(chan struct{})
-	meta.catalog = &blockingManifestCatalog{
-		entered: entered,
-		release: release,
-	}
+	commit := mockey.Mock(packed.CommitManifestUpdates).To(
+		func(base string, version int64, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (string, error) {
+			entered <- struct{}{}
+			<-release
+			return packed.MarshalManifestPath(base, version+1), nil
+		},
+	).Build()
+	defer commit.UnPatch()
 
 	errs := make(chan error, len(basePaths))
 	for segmentID, basePath := range basePaths {
 		go func(segmentID int64, basePath string) {
 			errs <- meta.CommitSegmentManifest(context.Background(), SegmentManifestCommit{
-				SegmentID:        segmentID,
-				ExpectedManifest: packed.MarshalManifestPath(basePath, 1),
+				SegmentID:     segmentID,
+				StorageConfig: &indexpb.StorageConfig{},
 				Mutation: ManifestMutation{
-					Type:         ManifestMutationNoop,
-					ManifestPath: packed.MarshalManifestPath(basePath, 2),
+					Type:    ManifestMutationCommitUpdates,
+					Updates: &packed.ManifestUpdates{},
 				},
 			})
 		}(segmentID, basePath)
 	}
 
-	select {
-	case <-entered:
-	case <-time.After(time.Second):
-		require.FailNow(t, "first catalog write did not start")
-	}
-	select {
-	case <-entered:
-		require.FailNow(t, "different segment entered catalog write while segMu was held")
-	case <-time.After(200 * time.Millisecond):
+	for range basePaths {
+		select {
+		case <-entered:
+		case <-time.After(time.Second):
+			close(release)
+			require.FailNow(t, "different-segment manifest preparations did not overlap")
+		}
 	}
 	close(release)
 	for range basePaths {
 		require.NoError(t, <-errs)
 	}
-}
-
-type blockingManifestCatalog struct {
-	metastore.DataCoordCatalog
-	entered chan<- struct{}
-	release <-chan struct{}
-}
-
-func (c *blockingManifestCatalog) Update(context.Context, ...metastore.UpdateAction) error {
-	c.entered <- struct{}{}
-	<-c.release
-	return nil
 }
 
 // Two structured commits for the same segment are serialized by the per-segment
@@ -547,7 +538,9 @@ func TestUpdateManifestAllowsStorageV3Advancement(t *testing.T) {
 		ManifestPath:   oldManifest,
 	})))
 
-	err = meta.UpdateSegmentsInfo(context.Background(), UpdateManifest(205, newManifest))
+	err = meta.UpdateSegmentsInfo(context.Background(), map[int64][]SegmentOperator{
+		205: {UpdateManifest(205, newManifest)},
+	})
 	require.NoError(t, err)
 	require.Equal(t, newManifest, meta.GetSegment(context.Background(), 205).GetManifestPath())
 }
@@ -566,7 +559,9 @@ func TestUpdateManifestAllowsStorageV3FirstPublication(t *testing.T) {
 		// No ManifestPath: this is the segment's first publication.
 	})))
 
-	err = meta.UpdateSegmentsInfo(context.Background(), UpdateManifest(206, firstManifest))
+	err = meta.UpdateSegmentsInfo(context.Background(), map[int64][]SegmentOperator{
+		206: {UpdateManifest(206, firstManifest)},
+	})
 	require.NoError(t, err)
 	require.Equal(t, firstManifest, meta.GetSegment(context.Background(), 206).GetManifestPath())
 }

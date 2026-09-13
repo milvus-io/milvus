@@ -356,9 +356,9 @@ func Test_sealByBlockingL0(t *testing.T) {
 			pt.Save(pt.DataCoordCfg.BlockingL0EntryNum.Key, strconv.FormatInt(tc.entryNumLimit, 10))
 			defer pt.Reset(pt.DataCoordCfg.BlockingL0EntryNum.Key)
 
-			segments := NewSegmentsInfo()
+			segments := NewCachedSegmentsInfo()
 			for _, l0segment := range tc.l0Segments {
-				segments.SetSegment(l0segment.GetID(), l0segment)
+				segments.SetSegment(l0segment.GetID(), l0segment, 0)
 			}
 
 			meta := &meta{

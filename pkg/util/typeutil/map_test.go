@@ -147,6 +147,16 @@ func (suite *MapUtilSuite) TestConcurrentMap() {
 		currMap.Remove(100)
 		suite.Equal(0, currMap.Len())
 	})
+
+	suite.Run("TestCompareAndDelete", func() {
+		currMap := NewConcurrentMap[int64, string]()
+		currMap.Insert(100, "v-100")
+
+		suite.False(currMap.CompareAndDelete(100, "stale"))
+		suite.Equal(1, currMap.Len())
+		suite.True(currMap.CompareAndDelete(100, "v-100"))
+		suite.Equal(0, currMap.Len())
+	})
 }
 
 func TestMapUtil(t *testing.T) {

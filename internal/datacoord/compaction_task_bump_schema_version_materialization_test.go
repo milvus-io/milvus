@@ -257,9 +257,13 @@ func TestUpdateBumpSchemaVersionMaterializationOperatorApplies(t *testing.T) {
 	})
 
 	newGroups := []*datapb.FieldBinlog{{FieldID: materializationOutputFID, ChildFields: []int64{materializationOutputFID}, Binlogs: []*datapb.Binlog{{LogID: 9001}}}}
-	err = meta.UpdateSegmentsInfo(context.Background(), UpdateBumpSchemaVersionMaterializationOperator(
-		materializationSegmentID, 7, newGroups, &datapb.Statistics{InsertBinlogSize: 100},
-	))
+	err = meta.UpdateSegmentsInfo(context.Background(), map[int64][]SegmentOperator{
+		materializationSegmentID: {
+			UpdateBumpSchemaVersionMaterializationOperator(
+				materializationSegmentID, 7, newGroups, &datapb.Statistics{InsertBinlogSize: 100},
+			),
+		},
+	})
 	require.NoError(t, err)
 
 	updated := meta.GetSegment(context.Background(), materializationSegmentID)
@@ -279,9 +283,11 @@ func TestUpdateBumpSchemaVersionMaterializationOperatorNeverRegressesSchemaVersi
 	require.NoError(t, err)
 	addMaterializationSegment(t, meta, packed.MarshalManifestPath("/tmp/milvus/insert_log/1/10/500", 5), 9)
 
-	err = meta.UpdateSegmentsInfo(context.Background(), UpdateBumpSchemaVersionMaterializationOperator(
-		materializationSegmentID, 7, nil, nil,
-	))
+	err = meta.UpdateSegmentsInfo(context.Background(), map[int64][]SegmentOperator{
+		materializationSegmentID: {
+			UpdateBumpSchemaVersionMaterializationOperator(materializationSegmentID, 7, nil, nil),
+		},
+	})
 	require.NoError(t, err)
 	assert.EqualValues(t, 9, meta.GetSegment(context.Background(), materializationSegmentID).GetSchemaVersion())
 }
@@ -298,9 +304,11 @@ func TestUpdateBumpSchemaVersionMaterializationOperatorRejectsDroppedGroups(t *t
 	// Materialization only ever ADDS output-field groups, so this must be refused
 	// rather than silently orphan a pre-existing group's data.
 	newGroups := []*datapb.FieldBinlog{{FieldID: materializationOutputFID, ChildFields: []int64{materializationOutputFID}, Binlogs: []*datapb.Binlog{{LogID: 9001}}}}
-	err = meta.UpdateSegmentsInfo(context.Background(), UpdateBumpSchemaVersionMaterializationOperator(
-		materializationSegmentID, 7, newGroups, nil,
-	))
+	err = meta.UpdateSegmentsInfo(context.Background(), map[int64][]SegmentOperator{
+		materializationSegmentID: {
+			UpdateBumpSchemaVersionMaterializationOperator(materializationSegmentID, 7, newGroups, nil),
+		},
+	})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, merr.ErrServiceInternal)
 }

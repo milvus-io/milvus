@@ -1007,6 +1007,7 @@ func (gc *garbageCollector) recycleDroppedSegment(ctx context.Context, segmentID
 		log.Warn(ctx, "GC segment meta failed to drop segment", mlog.Err(err))
 		return
 	}
+	gc.meta.PruneSegment(cloned.GetID())
 	log.Info(ctx, "GC segment meta drop segment done", mlog.Int("segmentIndexes", len(segIndexes)))
 }
 

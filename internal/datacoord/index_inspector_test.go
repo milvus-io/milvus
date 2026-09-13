@@ -54,7 +54,7 @@ func TestIndexInspector_inspect(t *testing.T) {
 		catalog := mocks2.NewDataCoordCatalog(t)
 
 		meta := &meta{
-			segments:    NewSegmentsInfo(),
+			segments:    NewCachedSegmentsInfo(),
 			collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 			indexMeta: &indexMeta{
 				keyLock:          lock.NewKeyLock[UniqueID](),
@@ -78,7 +78,7 @@ func TestIndexInspector_inspect(t *testing.T) {
 				},
 			},
 		}
-		meta.segments.SetSegment(segment.GetID(), segment)
+		meta.segments.SetSegment(segment.GetID(), segment, 0)
 
 		meta.indexMeta.indexes[2] = map[UniqueID]*model.Index{
 			5: {
@@ -147,7 +147,7 @@ func TestIndexInspector_ReloadFromMeta(t *testing.T) {
 	catalog := mocks2.NewDataCoordCatalog(t)
 
 	meta := &meta{
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		indexMeta: &indexMeta{
 			keyLock:          lock.NewKeyLock[UniqueID](),
@@ -173,7 +173,7 @@ func TestIndexInspector_ReloadFromMeta(t *testing.T) {
 			}},
 		},
 	}
-	meta.segments.SetSegment(seg1.ID, seg1)
+	meta.segments.SetSegment(seg1.ID, seg1, 0)
 
 	segIndex1 := &model.SegmentIndex{
 		SegmentID:  seg1.ID,
@@ -219,7 +219,7 @@ func TestIndexInspector_CreateIndexForSegment_FMIndexUsesMemoryBasedSlots(t *tes
 	catalog := mocks2.NewDataCoordCatalog(t)
 
 	meta := &meta{
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		indexMeta: &indexMeta{
 			keyLock:          lock.NewKeyLock[UniqueID](),
@@ -240,7 +240,7 @@ func TestIndexInspector_CreateIndexForSegment_FMIndexUsesMemoryBasedSlots(t *tes
 			Binlogs: []*datapb.Binlog{{MemorySize: 200 * 1024 * 1024}},
 		}},
 	}}
-	meta.segments.SetSegment(segment.GetID(), segment)
+	meta.segments.SetSegment(segment.GetID(), segment, 0)
 	meta.indexMeta.indexes[2] = map[UniqueID]*model.Index{
 		5: {
 			CollectionID: 2,
@@ -273,7 +273,7 @@ func TestIndexInspector_isExternalCollection(t *testing.T) {
 	versionManager := newIndexEngineVersionManager()
 
 	m := &meta{
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		indexMeta: &indexMeta{
 			keyLock:          lock.NewKeyLock[UniqueID](),
@@ -333,7 +333,7 @@ func TestIndexInspector_CreateIndexesForSegment_ExternalUnsorted(t *testing.T) {
 	catalog := mocks2.NewDataCoordCatalog(t)
 
 	m := &meta{
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		indexMeta: &indexMeta{
 			keyLock:          lock.NewKeyLock[UniqueID](),
@@ -373,7 +373,7 @@ func TestIndexInspector_CreateIndexesForSegment_ExternalUnsorted(t *testing.T) {
 				IsSorted:     false,
 			},
 		}
-		m.segments.SetSegment(segment.GetID(), segment)
+		m.segments.SetSegment(segment.GetID(), segment, 0)
 
 		err := inspector.createIndexesForSegment(ctx, segment)
 		assert.NoError(t, err)
@@ -402,7 +402,7 @@ func TestIndexInspector_CreateIndexesForSegment_ExternalUnsorted(t *testing.T) {
 				},
 			},
 		}
-		m.segments.SetSegment(segment.GetID(), segment)
+		m.segments.SetSegment(segment.GetID(), segment, 0)
 
 		handler.EXPECT().GetCollection(mock.Anything, int64(2)).Return(&collectionInfo{
 			ID: 2,
@@ -430,7 +430,7 @@ func TestIndexInspector_CreateIndexForSegment_OverrideIndexType(t *testing.T) {
 	catalog := mocks2.NewDataCoordCatalog(t)
 
 	meta := &meta{
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		indexMeta: &indexMeta{
 			keyLock:          lock.NewKeyLock[UniqueID](),
@@ -452,7 +452,7 @@ func TestIndexInspector_CreateIndexForSegment_OverrideIndexType(t *testing.T) {
 			Level:        datapb.SegmentLevel_L1,
 		},
 	}
-	meta.segments.SetSegment(segment.GetID(), segment)
+	meta.segments.SetSegment(segment.GetID(), segment, 0)
 
 	meta.indexMeta.indexes[2] = map[UniqueID]*model.Index{
 		5: {
@@ -497,7 +497,7 @@ func TestIndexInspector_FunctionOutputSchemaVersionGate(t *testing.T) {
 	catalog := mocks2.NewDataCoordCatalog(t)
 
 	m := &meta{
-		segments:    NewSegmentsInfo(),
+		segments:    NewCachedSegmentsInfo(),
 		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		indexMeta: &indexMeta{
 			keyLock:          lock.NewKeyLock[UniqueID](),
@@ -540,7 +540,7 @@ func TestIndexInspector_FunctionOutputSchemaVersionGate(t *testing.T) {
 				StorageVersion: storage.StorageV3,
 			},
 		}
-		m.segments.SetSegment(segment.GetID(), segment)
+		m.segments.SetSegment(segment.GetID(), segment, 0)
 
 		alloc.EXPECT().AllocID(mock.Anything).Return(int64(12346), nil).Once()
 		catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil).Once()
@@ -564,7 +564,7 @@ func TestIndexInspector_FunctionOutputSchemaVersionGate(t *testing.T) {
 				StorageVersion: storage.StorageV3,
 			},
 		}
-		m.segments.SetSegment(segment.GetID(), segment)
+		m.segments.SetSegment(segment.GetID(), segment, 0)
 
 		alloc.EXPECT().AllocID(mock.Anything).Return(int64(12347), nil).Once()
 		catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil).Once()
@@ -594,7 +594,7 @@ func TestIndexInspector_FunctionOutputSchemaVersionGate(t *testing.T) {
 				SchemaVersion:  3,
 			},
 		}
-		m.segments.SetSegment(segment.GetID(), segment)
+		m.segments.SetSegment(segment.GetID(), segment, 0)
 
 		err := inspector.createIndexesForSegment(ctx, segment)
 		assert.NoError(t, err)
@@ -621,7 +621,7 @@ func TestIndexInspector_FunctionOutputSchemaVersionGate(t *testing.T) {
 				},
 			},
 		}
-		m.segments.SetSegment(segment.GetID(), segment)
+		m.segments.SetSegment(segment.GetID(), segment, 0)
 
 		err := inspector.createIndexesForSegment(ctx, segment)
 		assert.NoError(t, err)
@@ -643,7 +643,7 @@ func TestIndexInspector_FunctionOutputSchemaVersionGate(t *testing.T) {
 				},
 			},
 		}
-		m.segments.SetSegment(segment.GetID(), segment)
+		m.segments.SetSegment(segment.GetID(), segment, 0)
 
 		err := inspector.createIndexesForSegment(ctx, segment)
 		assert.NoError(t, err)
@@ -669,7 +669,7 @@ func TestIndexInspector_FunctionOutputSchemaVersionGate(t *testing.T) {
 				},
 			},
 		}
-		m.segments.SetSegment(segment.GetID(), segment)
+		m.segments.SetSegment(segment.GetID(), segment, 0)
 
 		alloc.EXPECT().AllocID(mock.Anything).Return(int64(12349), nil).Once()
 		catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil).Once()
@@ -699,7 +699,7 @@ func TestIndexInspector_FunctionOutputSchemaVersionGate(t *testing.T) {
 				},
 			},
 		}
-		m.segments.SetSegment(segment.GetID(), segment)
+		m.segments.SetSegment(segment.GetID(), segment, 0)
 
 		err := inspector.createIndexesForSegment(ctx, segment)
 		assert.NoError(t, err)
@@ -725,7 +725,7 @@ func TestIndexInspector_FunctionOutputSchemaVersionGate(t *testing.T) {
 				},
 			},
 		}
-		m.segments.SetSegment(segment.GetID(), segment)
+		m.segments.SetSegment(segment.GetID(), segment, 0)
 
 		alloc.EXPECT().AllocID(mock.Anything).Return(int64(12350), nil).Once()
 		catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil).Once()

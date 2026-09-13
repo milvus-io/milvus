@@ -75,7 +75,7 @@ func TestL0CompactionCommitsDeltalogsToV3Manifest(t *testing.T) {
 	defer commit.UnPatch()
 
 	task := &l0CompactionTask{meta: meta, committedV3Manifests: make(map[int64]string)}
-	require.NoError(t, task.commitL0V3DeltalogsBatch(context.Background(), map[int64][]*datapb.FieldBinlog{200: deltalogs}))
+	require.NoError(t, task.commitL0V3DeltalogsBatch(context.Background(), map[int64][]*datapb.FieldBinlog{200: deltalogs}, nil))
 
 	updated := meta.GetSegment(context.Background(), 200)
 	require.Equal(t, newManifest, updated.GetManifestPath())
@@ -115,10 +115,10 @@ func TestL0CompactionV3ManifestCommitIsIdempotentOnRetry(t *testing.T) {
 
 	task := &l0CompactionTask{meta: meta}
 	// First attempt publishes the manifest and records the deltalog on the segment.
-	require.NoError(t, task.commitL0V3DeltalogsBatch(context.Background(), map[int64][]*datapb.FieldBinlog{201: freshDeltalogs()}))
+	require.NoError(t, task.commitL0V3DeltalogsBatch(context.Background(), map[int64][]*datapb.FieldBinlog{201: freshDeltalogs()}, nil))
 	// A retry (saveSegmentMeta re-run after a failed meta_saved/etcd write) with
 	// the same output must not append the deltalog to the manifest a second time.
-	require.NoError(t, task.commitL0V3DeltalogsBatch(context.Background(), map[int64][]*datapb.FieldBinlog{201: freshDeltalogs()}))
+	require.NoError(t, task.commitL0V3DeltalogsBatch(context.Background(), map[int64][]*datapb.FieldBinlog{201: freshDeltalogs()}, nil))
 
 	require.Equal(t, 1, commitCount, "manifest must be committed exactly once across retries")
 	updated := meta.GetSegment(context.Background(), 201)
@@ -179,7 +179,7 @@ func TestL0CompactionSaveSegmentMetaSkipsDroppedV3Target(t *testing.T) {
 
 	var commitCount atomic.Int32
 	mockCommit := mockey.Mock((*meta).CommitSegmentManifests).To(
-		func(m *meta, ctx context.Context, commits []SegmentManifestCommit, extraOps ...UpdateOperator) error {
+		func(m *meta, ctx context.Context, commits []SegmentManifestCommit, extraMutationSets ...map[int64][]SegmentOperator) error {
 			commitCount.Add(int32(len(commits)))
 			return nil
 		}).Build()
@@ -218,12 +218,17 @@ func TestL0CompactionSaveSegmentMetaSwallowsNotFoundFromManifestCommit(t *testin
 
 	var batchCalls atomic.Int32
 	mockCommit := mockey.Mock((*meta).CommitSegmentManifests).To(
-		func(m *meta, ctx context.Context, commits []SegmentManifestCommit, extraOps ...UpdateOperator) error {
+		func(m *meta, ctx context.Context, commits []SegmentManifestCommit, extraMutationSets ...map[int64][]SegmentOperator) error {
 			batchCalls.Add(1)
 			// The primitive skips a target that vanished during manifest I/O and
 			// still returns success, but the input-segment retirement folded into
 			// the same batch (extraOps) still commits — simulate both.
-			return m.UpdateSegmentsInfo(ctx, extraOps...)
+			for _, mutations := range extraMutationSets {
+				if err := m.UpdateSegmentsInfo(ctx, mutations); err != nil {
+					return err
+				}
+			}
+			return nil
 		}).Build()
 	defer mockCommit.UnPatch()
 
@@ -255,7 +260,7 @@ func TestL0CompactionSaveSegmentMetaFailsOnManifestCommitError(t *testing.T) {
 	})
 
 	mockCommit := mockey.Mock((*meta).CommitSegmentManifests).To(
-		func(m *meta, ctx context.Context, commits []SegmentManifestCommit, extraOps ...UpdateOperator) error {
+		func(m *meta, ctx context.Context, commits []SegmentManifestCommit, extraMutationSets ...map[int64][]SegmentOperator) error {
 			return merr.WrapErrServiceInternalMsg("manifest commit failed")
 		}).Build()
 	defer mockCommit.UnPatch()
@@ -362,9 +367,11 @@ func (s *L0CompactionTaskSuite) TestSaveSegmentMetaUsesAtomicDeltalogOperator() 
 	// operator. StorageV3 destinations are committed by meta directly.
 	s.mockMeta.EXPECT().GetSegment(mock.Anything, int64(200)).Return(nil).Once()
 
-	s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
-		func(ctx context.Context, operators ...UpdateOperator) error {
-			s.Len(operators, 5)
+	s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, mutations map[int64][]SegmentOperator, newSegments ...*datapb.SegmentInfo) error {
+			s.Empty(newSegments)
+			s.Len(mutations, 3)
+			s.Contains(mutations, int64(200))
 			s.Equal(actualDeltaPath, output[0].GetDeltalogs()[0].GetBinlogs()[0].GetLogPath())
 			s.EqualValues(9001, output[0].GetDeltalogs()[0].GetBinlogs()[0].GetLogID())
 			return nil
@@ -695,7 +702,7 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 			}, nil).Once()
 
 		s.mockMeta.EXPECT().ValidateSegmentStateBeforeCompleteCompactionMutation(mock.Anything).Return(nil).Once()
-		s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+		s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything).Return(nil).Once()
 		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Times(2)
 		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything, false).Return().Once()
 
@@ -716,7 +723,7 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 			}, nil).Once()
 
 		s.mockMeta.EXPECT().ValidateSegmentStateBeforeCompleteCompactionMutation(mock.Anything).Return(nil).Once()
-		s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything).
 			Return(errors.New("mock error")).Once()
 
 		t.QueryTaskOnWorker(cluster)
@@ -736,7 +743,7 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 			}, nil).Once()
 
 		s.mockMeta.EXPECT().ValidateSegmentStateBeforeCompleteCompactionMutation(mock.Anything).Return(nil).Once()
-		s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+		s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything).Return(nil).Once()
 		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
 
 		t.QueryTaskOnWorker(cluster)

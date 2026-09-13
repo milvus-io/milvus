@@ -586,7 +586,7 @@ func enableCompactionTargetReconciler(t *testing.T) {
 
 func newCompactionTargetReconcilerTestMeta(targetMeta *compactionTargetMeta, segments ...*SegmentInfo) *meta {
 	meta := &meta{
-		segments:             NewSegmentsInfo(),
+		segments:             NewCachedSegmentsInfo(),
 		collections:          typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		compactionTargetMeta: targetMeta,
 		indexMeta: &indexMeta{
@@ -594,7 +594,7 @@ func newCompactionTargetReconcilerTestMeta(targetMeta *compactionTargetMeta, seg
 		},
 	}
 	for _, segment := range segments {
-		meta.segments.SetSegment(segment.GetID(), segment)
+		meta.segments.SetSegment(segment.GetID(), segment, 0)
 	}
 	return meta
 }
