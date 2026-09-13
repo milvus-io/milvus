@@ -572,7 +572,18 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
         for (int64_t i = 0; i < RowCount(); ++i) {
             data.push_back("test" + std::to_string(i));
         }
-        index->BuildWithRawDataForUT(data.size(), data.data());
+        if (index_type == index::MARISA_TRIE) {
+            // MARISA inherits the protobuf-based string UT builder; the
+            // inverted index overload accepts std::string objects directly.
+            proto::schema::StringArray values;
+            for (const auto& value : data) {
+                values.add_data(value);
+            }
+            const auto serialized = values.SerializeAsString();
+            index->BuildWithRawDataForUT(serialized.size(), serialized.data());
+        } else {
+            index->BuildWithRawDataForUT(data.size(), data.data());
+        }
 
         segcore::LoadIndexInfo load_index_info;
         load_index_info.index_params = GenIndexParams(index.get());
