@@ -299,8 +299,9 @@ class JsonKeyStats : public ScalarIndex<std::string> {
         auto options = ChunkedColumnInterface::ScanOptions::ForData(
             0, TargetTypeOf<T>(), pin_policy);
         if (skip_func) {
-            options.filter = std::make_shared<detail::ColumnFilter>(
-                detail::ColumnFilter::MetricsSource::PreloadedStatistics,
+            options.filter = std::make_shared<milvus::detail::ColumnFilter>(
+                milvus::detail::ColumnFilter::MetricsSource::
+                    PreloadedStatistics,
                 [&](int64_t cell_id) {
                     return skip_func(skip_index_, path, cell_id);
                 });
