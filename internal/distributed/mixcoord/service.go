@@ -536,6 +536,38 @@ func (s *Server) ListPolicy(ctx context.Context, request *internalpb.ListPolicyR
 	return s.mixCoord.ListPolicy(ctx, request)
 }
 
+func (s *Server) CreateRowPolicy(ctx context.Context, request *milvuspb.CreateRowPolicyRequest) (*commonpb.Status, error) {
+	return s.mixCoord.CreateRowPolicy(ctx, request)
+}
+
+func (s *Server) UpdateRowPolicy(ctx context.Context, request *milvuspb.UpdateRowPolicyRequest) (*commonpb.Status, error) {
+	return s.mixCoord.UpdateRowPolicy(ctx, request)
+}
+
+func (s *Server) DropRowPolicy(ctx context.Context, request *milvuspb.DropRowPolicyRequest) (*commonpb.Status, error) {
+	return s.mixCoord.DropRowPolicy(ctx, request)
+}
+
+func (s *Server) ListRowPolicies(ctx context.Context, request *milvuspb.ListRowPoliciesRequest) (*milvuspb.ListRowPoliciesResponse, error) {
+	return s.mixCoord.ListRowPolicies(ctx, request)
+}
+
+func (s *Server) SetRLSPrincipalTags(ctx context.Context, request *milvuspb.SetRLSPrincipalTagsRequest) (*commonpb.Status, error) {
+	return s.mixCoord.SetRLSPrincipalTags(ctx, request)
+}
+
+func (s *Server) GetRLSPrincipalTags(ctx context.Context, request *milvuspb.GetRLSPrincipalTagsRequest) (*milvuspb.GetRLSPrincipalTagsResponse, error) {
+	return s.mixCoord.GetRLSPrincipalTags(ctx, request)
+}
+
+func (s *Server) ListRLSPrincipals(ctx context.Context, request *milvuspb.ListRLSPrincipalsRequest) (*milvuspb.ListRLSPrincipalsResponse, error) {
+	return s.mixCoord.ListRLSPrincipals(ctx, request)
+}
+
+func (s *Server) DeleteRLSPrincipalTags(ctx context.Context, request *milvuspb.DeleteRLSPrincipalTagsRequest) (*commonpb.Status, error) {
+	return s.mixCoord.DeleteRLSPrincipalTags(ctx, request)
+}
+
 func (s *Server) AlterCollection(ctx context.Context, request *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
 	return s.mixCoord.AlterCollection(ctx, request)
 }

@@ -97,7 +97,7 @@ func (ut *upsertTask) preparePartialUpdateRetryAttempt(ctx context.Context) erro
 	if err := ut.preparePartialUpdateCASGroups(ctx); err != nil {
 		return err
 	}
-	if err := ut.queryPreExecute(ctx); err != nil {
+	if err := ut.queryPreExecute(ctx, true); err != nil {
 		return err
 	}
 	ut.upsertMsg.InsertMsg.FieldsData = ut.insertFieldData

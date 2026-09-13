@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/proxy/search_agg"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/function/chain"
@@ -1221,6 +1222,7 @@ func (op *rerankOperator) run(ctx context.Context, span trace.Span, inputs ...an
 
 type requeryOperator struct {
 	traceCtx         context.Context
+	rlsPredicate     *planpb.Expr
 	outputFieldNames []string
 
 	timestamp          uint64
@@ -1271,8 +1273,13 @@ func newRequeryOperator(t *searchTask, _ map[string]any) (operator, error) {
 			return true
 		})
 	}
+	var rlsPredicate *planpb.Expr
+	if t.rlsPredicate != nil {
+		rlsPredicate = proto.Clone(t.rlsPredicate).(*planpb.Expr)
+	}
 	return &requeryOperator{
 		traceCtx:           t.TraceCtx(),
+		rlsPredicate:       rlsPredicate,
 		outputFieldNames:   outputFieldNames.Collect(),
 		timestamp:          t.BeginTs(),
 		dbName:             t.request.GetDbName(),
@@ -1326,6 +1333,11 @@ func (op *requeryOperator) requery(ctx context.Context, span trace.Span, ids *sc
 	}
 	plan := planparserv2.CreateRequeryPlan(op.primaryFieldSchema, ids)
 	plan.Namespace = op.planNamespace
+	// Reuse the exact top-level Search/HybridSearch predicate. queryTask must
+	// not resolve a separate Query-action policy for this internal retrieval.
+	if err := rls.MergePredicateToPlan(plan, op.rlsPredicate); err != nil {
+		return nil, segcore.StorageCost{}, err
+	}
 	channelsMvcc := make(map[string]Timestamp)
 	for k, v := range op.queryChannelsTs {
 		channelsMvcc[k] = v
@@ -1359,6 +1371,7 @@ func (op *requeryOperator) requery(ctx context.Context, span trace.Span, ids *sc
 		preferredNodes: preferredNodes,
 		fastSkip:       true,
 		reQuery:        true,
+		skipRuntimeRLS: true,
 		chMgr:          op.node.(*Proxy).chMgr,
 	}
 	queryResult, storageCost, err := op.node.(*Proxy).query(op.traceCtx, qt, span)

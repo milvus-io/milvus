@@ -1814,7 +1814,7 @@ func TestPartialUpdateQueryAccumulatesStorageCost(t *testing.T) {
 	}, nil).Build()
 	defer retrievePatch.UnPatch()
 
-	require.NoError(t, task.queryPreExecute(context.Background()))
+	require.NoError(t, task.queryPreExecute(context.Background(), true))
 	require.EqualValues(t, 12, task.storageCost.ScannedRemoteBytes)
 	require.EqualValues(t, 30, task.storageCost.ScannedTotalBytes)
 }
@@ -2229,23 +2229,27 @@ func TestRetrieveByPKs_Success(t *testing.T) {
 
 		mockey.Mock(planparserv2.CreateRequeryPlan).Return(&planpb.PlanNode{}).Build()
 
-		mockey.Mock((*Proxy).query).Return(&milvuspb.QueryResults{
-			Status: merr.Success(),
-			FieldsData: []*schemapb.FieldData{
-				{
-					FieldName: "id",
-					FieldId:   100,
-					Type:      schemapb.DataType_Int64,
-					Field: &schemapb.FieldData_Scalars{
-						Scalars: &schemapb.ScalarField{
-							Data: &schemapb.ScalarField_LongData{
-								LongData: &schemapb.LongArray{Data: []int64{1, 2}},
+		requestedOutputFields := []string{"id", "name"}
+		mockey.Mock((*Proxy).query).To(func(_ *Proxy, _ context.Context, qt *queryTask, _ trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
+			assert.Equal(t, requestedOutputFields, qt.request.GetOutputFields())
+			return &milvuspb.QueryResults{
+				Status: merr.Success(),
+				FieldsData: []*schemapb.FieldData{
+					{
+						FieldName: "id",
+						FieldId:   100,
+						Type:      schemapb.DataType_Int64,
+						Field: &schemapb.FieldData_Scalars{
+							Scalars: &schemapb.ScalarField{
+								Data: &schemapb.ScalarField_LongData{
+									LongData: &schemapb.LongArray{Data: []int64{1, 2}},
+								},
 							},
 						},
 					},
 				},
-			},
-		}, segcore.StorageCost{}, nil).Build()
+			}, segcore.StorageCost{}, nil
+		}).Build()
 
 		// Execute test
 		task := createTestUpdateTask()
@@ -2269,7 +2273,7 @@ func TestRetrieveByPKs_Success(t *testing.T) {
 			},
 		}
 
-		result, _, err := retrieveByPKs(context.Background(), task, ids, []string{"*"})
+		result, _, err := retrieveByPKs(context.Background(), task, ids, requestedOutputFields)
 
 		// Verify results
 		assert.NoError(t, err)
@@ -2364,6 +2368,22 @@ func TestRetrieveByPKsRejectsMissingPartialUpdateReadTs(t *testing.T) {
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "partial update read timestamp is unavailable")
+}
+
+func TestUpsertRetrieveOutputFields(t *testing.T) {
+	schema := createTestSchema()
+	predicate, err := planparserv2.ParseExpr(schema.SchemaHelper, `name == "alice"`, nil)
+	require.NoError(t, err)
+	primaryField, err := typeutil.GetPrimaryFieldSchema(schema.CollectionSchema)
+	require.NoError(t, err)
+
+	outputFields, err := upsertRetrieveOutputFields(schema.SchemaHelper, primaryField, predicate, false)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"id", "name"}, outputFields)
+
+	outputFields, err = upsertRetrieveOutputFields(schema.SchemaHelper, primaryField, predicate, true)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"*"}, outputFields)
 }
 
 func TestRetrieveByPKs_GetPrimaryFieldSchemaError(t *testing.T) {
@@ -2544,7 +2564,7 @@ func TestUpdateTask_queryPreExecute_Success(t *testing.T) {
 			},
 		}
 
-		err := task.queryPreExecute(context.Background())
+		err := task.queryPreExecute(context.Background(), true)
 
 		// Verify results
 		assert.NoError(t, err)
@@ -2561,7 +2581,7 @@ func TestUpdateTask_queryPreExecute_GetPrimaryFieldSchemaError(t *testing.T) {
 		task := createTestUpdateTask()
 		task.schema = createTestSchema()
 
-		err := task.queryPreExecute(context.Background())
+		err := task.queryPreExecute(context.Background(), true)
 
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "primary field not found")
@@ -2583,7 +2603,7 @@ func TestUpdateTask_queryPreExecute_GetPrimaryFieldDataError(t *testing.T) {
 		task := createTestUpdateTask()
 		task.schema = createTestSchema()
 
-		err := task.queryPreExecute(context.Background())
+		err := task.queryPreExecute(context.Background(), true)
 
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "must assign pk when upsert")
@@ -2612,7 +2632,7 @@ func TestUpdateTask_queryPreExecute_EmptyOldIDs(t *testing.T) {
 		task := createTestUpdateTask()
 		task.schema = createTestSchema()
 
-		err := task.queryPreExecute(context.Background())
+		err := task.queryPreExecute(context.Background(), true)
 
 		assert.NoError(t, err)
 		assert.NotNil(t, task.deletePKs)
@@ -2875,7 +2895,7 @@ func TestUpsertTask_queryPreExecute_MixLogic(t *testing.T) {
 	mockRetrieve := mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
 	defer mockRetrieve.UnPatch()
 
-	err := task.queryPreExecute(context.Background())
+	err := task.queryPreExecute(context.Background(), true)
 	assert.NoError(t, err)
 
 	// Verify delete PKs
@@ -2956,7 +2976,7 @@ func TestUpsertTaskQueryPreExecuteRejectsMissingAutoIDPrimaryKey(t *testing.T) {
 	mockRetrieve := mockey.Mock(retrieveByPKs).Return(queryResult, segcore.StorageCost{}, nil).Build()
 	defer mockRetrieve.UnPatch()
 
-	err := task.queryPreExecute(context.Background())
+	err := task.queryPreExecute(context.Background(), true)
 	require.ErrorIs(t, err, merr.ErrParameterInvalid)
 	require.Contains(t, err.Error(), "requires every primary key to exist")
 }
@@ -3005,8 +3025,11 @@ func TestUpsertTask_queryPreExecute_PureInsert(t *testing.T) {
 		ctx:    context.Background(),
 		schema: schema,
 		req: &milvuspb.UpsertRequest{
-			FieldsData: upsertData,
-			NumRows:    uint32(numRows),
+			DbName:         "db",
+			CollectionName: "test_merge_collection",
+			FieldsData:     upsertData,
+			NumRows:        uint32(numRows),
+			RlsPrincipal:   "alice",
 		},
 		upsertMsg: &msgstream.UpsertMsg{
 			InsertMsg: &msgstream.InsertMsg{
@@ -3016,13 +3039,15 @@ func TestUpsertTask_queryPreExecute_PureInsert(t *testing.T) {
 				},
 			},
 		},
-		node: &Proxy{},
+		node:         &Proxy{},
+		collectionID: 100,
+		rlsEnabled:   true,
 	}
 
 	mockRetrieve := mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
 	defer mockRetrieve.UnPatch()
 
-	err := task.queryPreExecute(context.Background())
+	err := task.queryPreExecute(context.Background(), true)
 	assert.NoError(t, err)
 
 	// Verify delete PKs
@@ -3110,7 +3135,7 @@ func TestUpsertTask_queryPreExecute_PureUpdate(t *testing.T) {
 	mockRetrieve := mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
 	defer mockRetrieve.UnPatch()
 
-	err := task.queryPreExecute(context.Background())
+	err := task.queryPreExecute(context.Background(), true)
 	assert.NoError(t, err)
 
 	// Verify delete PKs
@@ -3241,7 +3266,7 @@ func TestUpsertTask_queryPreExecute_StructWholeReplace(t *testing.T) {
 		}
 		mockRetrieve := mockey.Mock(retrieveByPKs).Return(queryResult(), segcore.StorageCost{}, nil).Build()
 		defer mockRetrieve.UnPatch()
-		return task, task.queryPreExecute(context.Background())
+		return task, task.queryPreExecute(context.Background(), true)
 	}
 	structValues := func(field *schemapb.FieldData) []int32 {
 		rows := field.GetStructArrays().GetFields()[0].GetScalars().GetArrayData().GetData()
@@ -3349,7 +3374,7 @@ func TestUpsertTask_queryPreExecute_StructWholeReplace(t *testing.T) {
 		}, segcore.StorageCost{}, nil).Build()
 		defer mockRetrieve.UnPatch()
 
-		err := task.queryPreExecute(context.Background())
+		err := task.queryPreExecute(context.Background(), true)
 		assert.NoError(t, err)
 		profile := findProfile(task)
 		if assert.NotNil(t, profile) {
@@ -4684,7 +4709,7 @@ func TestUpsertTask_queryPreExecute_NullableFields(t *testing.T) {
 		}
 		mock := mockey.Mock(retrieveByPKs).Return(mockResult, segcore.StorageCost{}, nil).Build()
 		defer mock.UnPatch()
-		err := task.queryPreExecute(context.Background())
+		err := task.queryPreExecute(context.Background(), true)
 		assert.NoError(t, err)
 		return task
 	}
@@ -4929,7 +4954,7 @@ func TestUpsertTask_queryPreExecute_DefaultValueWithValidData(t *testing.T) {
 	mockRetrieve := mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
 	defer mockRetrieve.UnPatch()
 
-	err := task.queryPreExecute(context.Background())
+	err := task.queryPreExecute(context.Background(), true)
 	assert.NoError(t, err)
 
 	// Verify default_col was expanded: "a", "b", "default_val"
@@ -5018,7 +5043,7 @@ func TestUpsertTask_queryPreExecute_DefaultValueError(t *testing.T) {
 	mockRetrieve := mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
 	defer mockRetrieve.UnPatch()
 
-	err := task.queryPreExecute(context.Background())
+	err := task.queryPreExecute(context.Background(), true)
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 }
@@ -5112,7 +5137,7 @@ func TestUpsertTask_queryPreExecute_DynamicFieldValidData(t *testing.T) {
 		mockRetrieve := mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
 		defer mockRetrieve.UnPatch()
 
-		err := task.queryPreExecute(context.Background())
+		err := task.queryPreExecute(context.Background(), true)
 		assert.NoError(t, err)
 
 		// Verify merged $meta has 3 entries with correct ValidData length
@@ -5199,7 +5224,7 @@ func TestUpsertTask_queryPreExecute_DynamicFieldValidData(t *testing.T) {
 		mockRetrieve := mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
 		defer mockRetrieve.UnPatch()
 
-		err := task.queryPreExecute(context.Background())
+		err := task.queryPreExecute(context.Background(), true)
 		assert.NoError(t, err)
 
 		// queryPreExecute auto-fills ValidData on $meta, so merge produces correct length 3
@@ -5304,7 +5329,7 @@ func TestUpsertTask_queryPreExecute_DynamicFieldValidData(t *testing.T) {
 		mockRetrieve := mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
 		defer mockRetrieve.UnPatch()
 
-		err := task.queryPreExecute(context.Background())
+		err := task.queryPreExecute(context.Background(), true)
 		assert.NoError(t, err, "queryPreExecute should not fail for 2.5-style non-nullable $meta")
 
 		var metaField *schemapb.FieldData

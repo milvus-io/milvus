@@ -598,6 +598,54 @@ func Test_NewServer(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("CreateRowPolicy", func(t *testing.T) {
+		mockProxy.EXPECT().CreateRowPolicy(mock.Anything, mock.Anything).Return(nil, nil)
+		_, err := server.CreateRowPolicy(ctx, nil)
+		assert.NoError(t, err)
+	})
+
+	t.Run("UpdateRowPolicy", func(t *testing.T) {
+		mockProxy.EXPECT().UpdateRowPolicy(mock.Anything, mock.Anything).Return(nil, nil)
+		_, err := server.UpdateRowPolicy(ctx, nil)
+		assert.NoError(t, err)
+	})
+
+	t.Run("DropRowPolicy", func(t *testing.T) {
+		mockProxy.EXPECT().DropRowPolicy(mock.Anything, mock.Anything).Return(nil, nil)
+		_, err := server.DropRowPolicy(ctx, nil)
+		assert.NoError(t, err)
+	})
+
+	t.Run("ListRowPolicies", func(t *testing.T) {
+		mockProxy.EXPECT().ListRowPolicies(mock.Anything, mock.Anything).Return(nil, nil)
+		_, err := server.ListRowPolicies(ctx, nil)
+		assert.NoError(t, err)
+	})
+
+	t.Run("SetRLSPrincipalTags", func(t *testing.T) {
+		mockProxy.EXPECT().SetRLSPrincipalTags(mock.Anything, mock.Anything).Return(nil, nil)
+		_, err := server.SetRLSPrincipalTags(ctx, nil)
+		assert.NoError(t, err)
+	})
+
+	t.Run("GetRLSPrincipalTags", func(t *testing.T) {
+		mockProxy.EXPECT().GetRLSPrincipalTags(mock.Anything, mock.Anything).Return(nil, nil)
+		_, err := server.GetRLSPrincipalTags(ctx, nil)
+		assert.NoError(t, err)
+	})
+
+	t.Run("ListRLSPrincipals", func(t *testing.T) {
+		mockProxy.EXPECT().ListRLSPrincipals(mock.Anything, mock.Anything).Return(nil, nil)
+		_, err := server.ListRLSPrincipals(ctx, nil)
+		assert.NoError(t, err)
+	})
+
+	t.Run("DeleteRLSPrincipalTags", func(t *testing.T) {
+		mockProxy.EXPECT().DeleteRLSPrincipalTags(mock.Anything, mock.Anything).Return(nil, nil)
+		_, err := server.DeleteRLSPrincipalTags(ctx, nil)
+		assert.NoError(t, err)
+	})
+
 	t.Run("SelectGrant", func(t *testing.T) {
 		mockProxy.EXPECT().SelectGrant(mock.Anything, mock.Anything).Return(nil, nil)
 		_, err := server.SelectGrant(ctx, nil)
