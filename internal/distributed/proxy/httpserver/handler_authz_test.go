@@ -53,20 +53,25 @@ func (m *authzProbeProxy) CreateCredential(ctx context.Context, req *milvuspb.Cr
 }
 
 // newLowLevelServerForAuthzTest builds the low-level REST server the way the
-// metrics port serves it, with an authentication middleware that only records
-// the parsed username, so the test exercises the authorization added on top.
-func newLowLevelServerForAuthzTest(t *testing.T, pxy types.ProxyComponent) *gin.Engine {
+// metrics port serves it. The authentication middleware is installed only
+// when requested, mirroring registerHTTPServer.
+func newLowLevelServerForAuthzTest(t *testing.T, pxy types.ProxyComponent, authMiddleware bool) *gin.Engine {
 	t.Helper()
 	h := NewHandlers(pxy)
 	ginHandler := gin.Default()
-	apiv1 := ginHandler.Group("/api/v1", func(c *gin.Context) {
-		username, _, ok := ParseUsernamePassword(c)
-		if !ok || username == "" {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: merr.Code(merr.ErrNeedAuthenticate), HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
-			return
-		}
-		c.Set(ContextUsername, username)
-	})
+	// registerHTTPServer installs the authenticate middleware only when
+	// authorization is enabled, so the harness takes it as a flag.
+	apiv1 := ginHandler.Group("/api/v1")
+	if authMiddleware {
+		apiv1.Use(func(c *gin.Context) {
+			username, _, ok := ParseUsernamePassword(c)
+			if !ok || username == "" {
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: merr.Code(merr.ErrNeedAuthenticate), HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
+				return
+			}
+			c.Set(ContextUsername, username)
+		})
+	}
 	h.RegisterRoutesTo(apiv1)
 	return ginHandler
 }
@@ -83,9 +88,9 @@ func TestLowLevelRESTAuthorization(t *testing.T) {
 	require.NotNil(t, cache)
 
 	mp := &authzProbeProxy{}
-	testEngine := newLowLevelServerForAuthzTest(t, proxyComponentWithMetaCache{ProxyComponent: mp, metaCache: cache})
+	testEngine := newLowLevelServerForAuthzTest(t, proxyComponentWithMetaCache{ProxyComponent: mp, metaCache: cache}, true)
 
-	postCreateCredential := func(t *testing.T, user string) *httptest.ResponseRecorder {
+	postCreateCredential := func(t *testing.T, engine *gin.Engine, user string) *httptest.ResponseRecorder {
 		t.Helper()
 		body := `{"username":"backdoor","password":"QmFja2Rvb3IjMTIz"}`
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/credential", strings.NewReader(body))
@@ -94,18 +99,18 @@ func TestLowLevelRESTAuthorization(t *testing.T) {
 			req.SetBasicAuth(user, "pwd")
 		}
 		w := httptest.NewRecorder()
-		testEngine.ServeHTTP(w, req)
+		engine.ServeHTTP(w, req)
 		return w
 	}
 
 	t.Run("user without grants is denied", func(t *testing.T) {
-		w := postCreateCredential(t, "lowpriv")
+		w := postCreateCredential(t, testEngine, "lowpriv")
 		assert.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
 		assert.Equal(t, int32(0), mp.createCredentialCalls.Load())
 	})
 
 	t.Run("request without credentials is rejected", func(t *testing.T) {
-		w := postCreateCredential(t, "")
+		w := postCreateCredential(t, testEngine, "")
 		assert.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
 		assert.Equal(t, int32(0), mp.createCredentialCalls.Load())
 	})
@@ -118,7 +123,7 @@ func TestLowLevelRESTAuthorization(t *testing.T) {
 			OpKey:  funcutil.PolicyForPrivilege(util.RolePublic, commonpb.ObjectType_Global.String(), util.AnyWord, commonpb.ObjectPrivilege_PrivilegeCreateOwnership.String(), util.AnyWord),
 		}))
 
-		w := postCreateCredential(t, "lowpriv")
+		w := postCreateCredential(t, testEngine, "lowpriv")
 		assert.Equal(t, http.StatusOK, w.Code, w.Body.String())
 		assert.Equal(t, int32(1), mp.createCredentialCalls.Load())
 	})
@@ -127,7 +132,12 @@ func TestLowLevelRESTAuthorization(t *testing.T) {
 		paramtable.Get().Save(proxy.Params.CommonCfg.AuthorizationEnabled.Key, "false")
 		t.Cleanup(func() { paramtable.Get().Reset(proxy.Params.CommonCfg.AuthorizationEnabled.Key) })
 
-		w := postCreateCredential(t, "")
+		// registerHTTPServer installs the authenticate middleware only when
+		// authorization is enabled, so the disabled case serves the data
+		// plane without it and the request reaches the handler anonymously.
+		engineNoAuth := newLowLevelServerForAuthzTest(t, proxyComponentWithMetaCache{ProxyComponent: mp, metaCache: cache}, false)
+
+		w := postCreateCredential(t, engineNoAuth, "")
 		assert.Equal(t, http.StatusOK, w.Code, w.Body.String())
 		assert.Equal(t, int32(2), mp.createCredentialCalls.Load())
 	})
