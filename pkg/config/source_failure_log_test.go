@@ -115,7 +115,7 @@ func TestFileSourceFailureLogsProtectConfig(t *testing.T) {
 			if periodic {
 				content = []byte("minio:\n  secretAccessKey: old\n")
 			}
-			require.NoError(t, os.WriteFile(filename, content, 0600))
+			require.NoError(t, os.WriteFile(filename, content, 0o600))
 			mgr := NewManager()
 			t.Cleanup(mgr.Close)
 			mgr.RegisterConfigKey("minio.secretAccessKey")
@@ -125,7 +125,7 @@ func TestFileSourceFailureLogsProtectConfig(t *testing.T) {
 			err := mgr.AddSource(fs)
 			if periodic {
 				require.NoError(t, err)
-				require.NoError(t, os.WriteFile(filename, invalid, 0600))
+				require.NoError(t, os.WriteFile(filename, invalid, 0o600))
 				require.Eventually(t, func() bool { return strings.Contains(sink.String(), "can not pull configs") }, time.Second, time.Millisecond)
 				fs.Close()
 				_, err = fs.GetConfigurations()
@@ -144,8 +144,10 @@ func TestConfigInitFailureLogsProtectConfig(t *testing.T) {
 	}
 	const canary = "yaml-init-secret-canary"
 	filename := filepath.Join(t.TempDir(), "milvus.yaml")
-	require.NoError(t, os.WriteFile(filename, []byte("minio:\n  secretAccessKey: !!int "+canary+"\n"), 0600))
-	cmd := exec.Command(os.Args[0], "-test.run=^TestConfigInitFailureLogsProtectConfig$")
+	require.NoError(t, os.WriteFile(filename, []byte("minio:\n  secretAccessKey: !!int "+canary+"\n"), 0o600))
+	executable, err := os.Executable()
+	require.NoError(t, err)
+	cmd := exec.Command(executable, "-test.run=^TestConfigInitFailureLogsProtectConfig$") // #nosec G204 -- Re-exec the current test binary with a fixed test filter.
 	cmd.Env = append(os.Environ(), childEnv+"="+filename)
 	output, err := cmd.CombinedOutput()
 	var exitErr *exec.ExitError
@@ -158,7 +160,7 @@ func TestConfigInitFailureLogsProtectConfig(t *testing.T) {
 func TestYAMLFlattenFailureLogsProtectConfig(t *testing.T) {
 	const canary = "yaml-dynamic-key-canary"
 	filename := filepath.Join(t.TempDir(), "hook.yaml")
-	require.NoError(t, os.WriteFile(filename, []byte(canary+":\n  - key: .nan\n"), 0600))
+	require.NoError(t, os.WriteFile(filename, []byte(canary+":\n  - key: .nan\n"), 0o600))
 	sink := mlog.CaptureGlobalLogs(t, &mlog.Config{Level: "debug"})
 	stdout := os.Stdout
 	reader, writer, err := os.Pipe()

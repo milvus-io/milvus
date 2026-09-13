@@ -156,7 +156,9 @@ func TestHookStartupFailureLogsProtectConfig(t *testing.T) {
 func TestHookRefreshFailureLogsProtectConfig(t *testing.T) {
 	const childEnv = "MILVUS_TEST_HOOK_REFRESH_FAILURE"
 	if os.Getenv(childEnv) != "1" {
-		cmd := exec.Command(os.Args[0], "-test.run=^TestHookRefreshFailureLogsProtectConfig$")
+		executable, err := os.Executable()
+		require.NoError(t, err)
+		cmd := exec.Command(executable, "-test.run=^TestHookRefreshFailureLogsProtectConfig$") // #nosec G204 -- Re-exec the current test binary with a fixed test filter.
 		cmd.Env = append(os.Environ(), childEnv+"=1")
 		output, err := cmd.CombinedOutput()
 		require.Error(t, err, "the refresh failure must still panic")

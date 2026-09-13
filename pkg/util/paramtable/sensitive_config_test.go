@@ -37,7 +37,7 @@ func TestBaseTableFailureLogsProtectConfig(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("MILVUSCONF", dir)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "milvus.yaml"),
-		[]byte("minio:\n  secretAccessKey: !!int "+canary+"\n"), 0600))
+		[]byte("minio:\n  secretAccessKey: !!int "+canary+"\n"), 0o600))
 	sink := mlog.CaptureGlobalLogs(t, &mlog.Config{Level: "debug"})
 	base := NewBaseTable(SkipRemote(true), SkipEnv(true))
 	t.Cleanup(base.Manager().Close)
@@ -69,8 +69,10 @@ func TestBaseTablePublicGroupEnvironmentOverride(t *testing.T) {
 			mgr := base.Manager()
 			require.Equal(t, "false", params.GetTextEmbeddingProviderConfig("openai")["enable"])
 			require.Equal(t, "credential-env-canary", params.GetTextEmbeddingProviderConfig("openai")["credential"])
-			for _, alias := range []string{key, strings.ReplaceAll(key, ".", "/"),
-				"FUNCTION_TEXTEMBEDDING_PROVIDERS_OPENAI_ENABLE", config.EtcdConfigKey(key)} {
+			for _, alias := range []string{
+				key, strings.ReplaceAll(key, ".", "/"),
+				"FUNCTION_TEXTEMBEDDING_PROVIDERS_OPENAI_ENABLE", config.EtcdConfigKey(key),
+			} {
 				source, value, err := mgr.GetRegisteredConfig(alias)
 				require.NoError(t, err, alias)
 				assert.Equal(t, "EnvironmentSource", source)
@@ -85,8 +87,10 @@ func TestBaseTablePublicGroupEnvironmentOverride(t *testing.T) {
 				config.RemovePrefix("function.textEmbedding.providers."))["openai.enable"])
 			_, _, err := mgr.GetRegisteredConfig(credential)
 			require.ErrorIs(t, err, config.ErrKeySensitive)
-			for _, envOnly := range []string{opaque, "FUNCTION_TEXTEMBEDDING_PROVIDERS_OPAQUE_ENABLE",
-				config.EtcdConfigKey(opaque), "UNRELATED_DATABASE_URL"} {
+			for _, envOnly := range []string{
+				opaque, "FUNCTION_TEXTEMBEDDING_PROVIDERS_OPAQUE_ENABLE",
+				config.EtcdConfigKey(opaque), "UNRELATED_DATABASE_URL",
+			} {
 				_, _, err := mgr.GetRegisteredConfig(envOnly)
 				require.ErrorIs(t, err, config.ErrKeyUnregistered, envOnly)
 				assert.Equal(t, ConfigMutationUnregistered, EvaluateConfigMutation(mgr, envOnly, ConfigMutationSet).Rejection)
@@ -128,8 +132,10 @@ func TestBaseTableFileRefreshCannotEndorseOpaqueEnvironment(t *testing.T) {
 	require.ErrorIs(t, err, config.ErrKeySensitive)
 	assert.Empty(t, value)
 	assert.Equal(t, ConfigMutationSensitive, EvaluateConfigMutation(mgr, key, ConfigMutationSet).Rejection)
-	for _, projection := range []map[string]string{mgr.ProjectConfigs(), mgr.GetConfigsView(),
-		mgr.ProjectBy(config.WithPrefix("function"))} {
+	for _, projection := range []map[string]string{
+		mgr.ProjectConfigs(), mgr.GetConfigsView(),
+		mgr.ProjectBy(config.WithPrefix("function")),
+	} {
 		for _, value := range projection {
 			assert.NotContains(t, value, canary)
 		}

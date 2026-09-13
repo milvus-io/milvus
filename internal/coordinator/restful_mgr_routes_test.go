@@ -375,12 +375,12 @@ func TestHandleAlterConfigValidation(t *testing.T) {
 			params.CommonCfg.AuthorizationEnabled.Key,
 			params.CommonCfg.SuperUsers.Key,
 			params.CommonCfg.DefaultRootPassword.Key,
-			// The privilege tables and the /expr switches are the ones the
-			// original two-name fence let through.
+			// Privilege tables were missed by the original two-name fence.
 			params.RbacConfig.ClusterAdminPrivileges.Key,
 			params.CommonCfg.EnablePublicPrivilege.Key,
-			params.CommonCfg.ExprEnabled.Key,
-			params.CommonCfg.ExprAuthMode.Key,
+			// Retired /expr keys remain fenced even without ParamItem declarations.
+			"common.security.exprEnabled",
+			"common.security.exprAuthMode",
 			// Declared outside common.security. but decides RBAC alias handling.
 			params.ProxyCfg.ResolveAliasForPrivilege.Key,
 			// Undeclared legacy alias read by EnablePublicPrivilege's Formatter:

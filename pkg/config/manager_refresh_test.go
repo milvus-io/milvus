@@ -31,9 +31,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
-const refreshPublicKey = "function.textembedding.providers.demo.enable"
-const refreshSecretKey = "function.textembedding.providers.demo_enable"
-const refreshCanary = "refresh-secret-canary"
+const (
+	refreshPublicKey = "function.textembedding.providers.demo.enable"
+	refreshSecretKey = "function.textembedding.providers.demo_enable"
+	refreshCanary    = "refresh-secret-canary"
+)
 
 func newRefreshManager() *Manager {
 	mgr := NewManager()
