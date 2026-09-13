@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strings"
 
 	"github.com/zilliztech/woodpecker/common/config"
 	wpMetrics "github.com/zilliztech/woodpecker/common/metrics"
@@ -42,6 +43,14 @@ func (b *builderImpl) Build() (walimpls.OpenerImpls, error) {
 	if err != nil {
 		return nil, err
 	}
+	// woodpecker service storage mode (woodpecker.storage.type=service) is not
+	// supported in this version. Fail fast with a clear message so a mis-configured
+	// deployment is caught at startup, before any storage/etcd client is created.
+	if cfg.Woodpecker.Storage.IsStorageService() {
+		panic("woodpecker service storage mode (woodpecker.storage.type=service) is not supported in this version, please set woodpecker.storage.type to 'minio' or 'local'")
+	}
+	wpMetrics.RegisterClientMetricsWithRegisterer(metrics.GetRegisterer())
+	wpMetrics.RegisterServerMetricsWithRegisterer(metrics.GetRegisterer())
 	var storageClient wpStorageClient.ObjectStorage
 	if cfg.Woodpecker.Storage.IsStorageMinio() {
 		storageClient, err = wpStorageClient.NewObjectStorage(context.Background(), cfg)
@@ -50,7 +59,7 @@ func (b *builderImpl) Build() (walimpls.OpenerImpls, error) {
 		}
 		log.Ctx(context.Background()).Info("create minio handler finish while building wp opener")
 	}
-	etcdCli, err := b.getEtcdClient(context.TODO())
+	etcdCli, err := getEtcdClient(context.TODO())
 	if err != nil {
 		return nil, err
 	}
@@ -60,7 +69,6 @@ func (b *builderImpl) Build() (walimpls.OpenerImpls, error) {
 		return nil, err
 	}
 	log.Ctx(context.Background()).Info("build wp opener finish", zap.String("wpClientInstance", fmt.Sprintf("%p", wpClient)))
-	wpMetrics.RegisterWoodpeckerWithRegisterer(metrics.GetRegisterer())
 	return &openerImpl{
 		c: wpClient,
 	}, nil
@@ -71,36 +79,59 @@ func (b *builderImpl) getWpConfig() (*config.Configuration, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = b.setCustomWpConfig(wpConfig, &paramtable.Get().WoodpeckerCfg)
+	err = setCustomWpConfig(wpConfig, &paramtable.Get().WoodpeckerCfg)
 	if err != nil {
 		return nil, err
 	}
 	return wpConfig, nil
 }
 
-func (b *builderImpl) setCustomWpConfig(wpConfig *config.Configuration, cfg *paramtable.WoodpeckerConfig) error {
+func setCustomWpConfig(wpConfig *config.Configuration, cfg *paramtable.WoodpeckerConfig) error {
 	// set the rootPath as the prefix for wp object storage
-	wpConfig.Woodpecker.Meta.Prefix = fmt.Sprintf("%s/wp", paramtable.Get().EtcdCfg.RootPath.GetValue())
+	wpConfig.Woodpecker.Meta.Prefix = cfg.MetaPrefix.GetValue()
+	wpConfig.Etcd.RootPath = paramtable.Get().EtcdCfg.RootPath.GetValue()
 	// logClient
-	wpConfig.Woodpecker.Client.Auditor.MaxInterval = int(cfg.AuditorMaxInterval.GetAsDurationByParse().Seconds())
+	wpConfig.Woodpecker.Client.Auditor.MaxInterval = config.NewDurationSecondsFromInt(int(cfg.AuditorMaxInterval.GetAsDurationByParse().Seconds()))
 	wpConfig.Woodpecker.Client.SegmentAppend.MaxRetries = cfg.AppendMaxRetries.GetAsInt()
 	wpConfig.Woodpecker.Client.SegmentAppend.QueueSize = cfg.AppendQueueSize.GetAsInt()
-	wpConfig.Woodpecker.Client.SegmentRollingPolicy.MaxSize = cfg.SegmentRollingMaxSize.GetAsSize()
-	wpConfig.Woodpecker.Client.SegmentRollingPolicy.MaxInterval = int(cfg.SegmentRollingMaxTime.GetAsDurationByParse().Seconds())
+	// GetAsInt/GetAsSize return 0 on a parse failure (e.g. a typo like "1,000"),
+	// indistinguishable from an explicit 0 by return value alone. maxBatchEntries<=0
+	// would be clamped by woodpecker to 1 (silently disabling batching), so any
+	// non-positive value keeps woodpecker's built-in default (already populated by
+	// NewConfiguration: 1000 / 2000000) with a warn. maxBatchBytes==0 is legal
+	// ("no byte limit"), so an explicit "0" is passed through and only a real
+	// parse failure falls back.
+	if v := cfg.AppendMaxBatchEntries.GetAsInt(); v > 0 {
+		wpConfig.Woodpecker.Client.SegmentAppend.MaxBatchEntries = v
+	} else {
+		log.Ctx(context.TODO()).Warn("invalid woodpecker maxBatchEntries, keeping woodpecker built-in default",
+			zap.String("value", cfg.AppendMaxBatchEntries.GetValue()))
+	}
+	if v := cfg.AppendMaxBatchBytes.GetAsSize(); v > 0 {
+		wpConfig.Woodpecker.Client.SegmentAppend.MaxBatchBytes = config.NewByteSize(v)
+	} else if strings.TrimSpace(cfg.AppendMaxBatchBytes.GetValue()) == "0" {
+		wpConfig.Woodpecker.Client.SegmentAppend.MaxBatchBytes = config.NewByteSize(0)
+	} else {
+		log.Ctx(context.TODO()).Warn("invalid woodpecker maxBatchBytes, keeping woodpecker built-in default",
+			zap.String("value", cfg.AppendMaxBatchBytes.GetValue()))
+	}
+	wpConfig.Woodpecker.Client.SegmentRollingPolicy.MaxSize = config.NewByteSize(cfg.SegmentRollingMaxSize.GetAsSize())
+	wpConfig.Woodpecker.Client.SegmentRollingPolicy.MaxInterval = config.NewDurationSecondsFromInt(int(cfg.SegmentRollingMaxTime.GetAsDurationByParse().Seconds()))
 	wpConfig.Woodpecker.Client.SegmentRollingPolicy.MaxBlocks = cfg.SegmentRollingMaxBlocks.GetAsInt64()
+
 	// logStore
-	wpConfig.Woodpecker.Logstore.SegmentSyncPolicy.MaxInterval = int(cfg.SyncMaxInterval.GetAsDurationByParse().Milliseconds())
-	wpConfig.Woodpecker.Logstore.SegmentSyncPolicy.MaxIntervalForLocalStorage = int(cfg.SyncMaxIntervalForLocalStorage.GetAsDurationByParse().Milliseconds())
+	wpConfig.Woodpecker.Logstore.SegmentSyncPolicy.MaxInterval = config.NewDurationMillisecondsFromInt(int(cfg.SyncMaxInterval.GetAsDurationByParse().Milliseconds()))
+	wpConfig.Woodpecker.Logstore.SegmentSyncPolicy.MaxIntervalForLocalStorage = config.NewDurationMillisecondsFromInt(int(cfg.SyncMaxIntervalForLocalStorage.GetAsDurationByParse().Milliseconds()))
 	wpConfig.Woodpecker.Logstore.SegmentSyncPolicy.MaxEntries = cfg.SyncMaxEntries.GetAsInt()
-	wpConfig.Woodpecker.Logstore.SegmentSyncPolicy.MaxBytes = cfg.SyncMaxBytes.GetAsSize()
+	wpConfig.Woodpecker.Logstore.SegmentSyncPolicy.MaxBytes = config.NewByteSize(cfg.SyncMaxBytes.GetAsSize())
 	wpConfig.Woodpecker.Logstore.SegmentSyncPolicy.MaxFlushRetries = cfg.FlushMaxRetries.GetAsInt()
-	wpConfig.Woodpecker.Logstore.SegmentSyncPolicy.MaxFlushSize = cfg.FlushMaxSize.GetAsSize()
+	wpConfig.Woodpecker.Logstore.SegmentSyncPolicy.MaxFlushSize = config.NewByteSize(cfg.FlushMaxSize.GetAsSize())
 	wpConfig.Woodpecker.Logstore.SegmentSyncPolicy.MaxFlushThreads = cfg.FlushMaxThreads.GetAsInt()
-	wpConfig.Woodpecker.Logstore.SegmentSyncPolicy.RetryInterval = int(cfg.RetryInterval.GetAsDurationByParse().Milliseconds())
-	wpConfig.Woodpecker.Logstore.SegmentCompactionPolicy.MaxBytes = cfg.CompactionSize.GetAsSize()
+	wpConfig.Woodpecker.Logstore.SegmentSyncPolicy.RetryInterval = config.NewDurationMillisecondsFromInt(int(cfg.RetryInterval.GetAsDurationByParse().Milliseconds()))
+	wpConfig.Woodpecker.Logstore.SegmentCompactionPolicy.MaxBytes = config.NewByteSize(cfg.CompactionSize.GetAsSize())
 	wpConfig.Woodpecker.Logstore.SegmentCompactionPolicy.MaxParallelUploads = cfg.CompactionMaxParallelUploads.GetAsInt()
 	wpConfig.Woodpecker.Logstore.SegmentCompactionPolicy.MaxParallelReads = cfg.CompactionMaxParallelReads.GetAsInt()
-	wpConfig.Woodpecker.Logstore.SegmentReadPolicy.MaxBatchSize = cfg.ReaderMaxBatchSize.GetAsSize()
+	wpConfig.Woodpecker.Logstore.SegmentReadPolicy.MaxBatchSize = config.NewByteSize(cfg.ReaderMaxBatchSize.GetAsSize())
 	wpConfig.Woodpecker.Logstore.SegmentReadPolicy.MaxFetchThreads = cfg.ReaderMaxFetchThreads.GetAsInt()
 	wpConfig.Woodpecker.Logstore.RetentionPolicy.TTL = int(cfg.RetentionTTL.GetAsDurationByParse().Milliseconds() / 1000) // convert to seconds
 	wpConfig.Woodpecker.Logstore.FencePolicy.ConditionWrite = cfg.FencePolicyConditionWrite.GetValue()
@@ -140,7 +171,7 @@ func (b *builderImpl) setCustomWpConfig(wpConfig *config.Configuration, cfg *par
 	wpConfig.Minio.CreateBucket = true
 	wpConfig.Minio.IamEndpoint = paramtable.Get().MinioCfg.IAMEndpoint.GetValue()
 	wpConfig.Minio.UseVirtualHost = paramtable.Get().MinioCfg.UseVirtualHost.GetAsBool()
-	wpConfig.Minio.RequestTimeoutMs = paramtable.Get().MinioCfg.RequestTimeoutMs.GetAsInt()
+	wpConfig.Minio.RequestTimeoutMs = config.NewDurationMillisecondsFromInt(paramtable.Get().MinioCfg.RequestTimeoutMs.GetAsInt())
 	wpConfig.Minio.LogLevel = paramtable.Get().LogCfg.Level.GetValue()
 
 	// set log
@@ -155,7 +186,7 @@ func (b *builderImpl) setCustomWpConfig(wpConfig *config.Configuration, cfg *par
 	return nil
 }
 
-func (b *builderImpl) getEtcdClient(ctx context.Context) (*clientv3.Client, error) {
+func getEtcdClient(ctx context.Context) (*clientv3.Client, error) {
 	params := paramtable.Get()
 	etcdConfig := &params.EtcdCfg
 	log := log.Ctx(ctx)
