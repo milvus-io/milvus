@@ -334,6 +334,21 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
             }
             return FillFieldData(array_info.first, array_info.second);
         }
+        case DataType::DECIMAL: {
+            // On-disk representation is already the decoded unscaled int64 (see
+            // ColumnBasedInsertMsgToInsertData / serde.go on the Go write side) —
+            // a plain Int64 column read, identical to TIMESTAMPTZ.
+            auto array_info =
+                GetDataInfoFromArray<arrow::Int64Array,
+                                     arrow::Type::type::INT64>(array);
+            if (nullable_) {
+                return FillFieldData(array_info.first,
+                                     array->null_bitmap_data(),
+                                     element_count,
+                                     array->offset());
+            }
+            return FillFieldData(array_info.first, array_info.second);
+        }
         case DataType::STRING:
         case DataType::VARCHAR: {
             if (!(array->type()->id() == arrow::Type::type::STRING)) {
@@ -754,6 +769,7 @@ InitScalarFieldData(const DataType& type, bool nullable, int64_t cap_rows) {
             return std::make_shared<FieldData<double>>(
                 type, nullable, cap_rows);
         case DataType::TIMESTAMPTZ:
+        case DataType::DECIMAL:
             return std::make_shared<FieldData<int64_t>>(
                 type, nullable, cap_rows);
         case DataType::STRING:
@@ -786,6 +802,7 @@ InitScalarFieldDataWithLength(const DataType& type, int64_t length) {
             return InitScalarFieldDataWithLengthImpl<int32_t>(type, length);
         case DataType::INT64:
         case DataType::TIMESTAMPTZ:
+        case DataType::DECIMAL:
             return InitScalarFieldDataWithLengthImpl<int64_t>(type, length);
         case DataType::FLOAT:
             return InitScalarFieldDataWithLengthImpl<float>(type, length);
@@ -835,6 +852,7 @@ ResizeScalarFieldData(const DataType& type,
             return;
         }
         case DataType::TIMESTAMPTZ:
+        case DataType::DECIMAL:
         case DataType::INT64: {
             auto inner_field_data =
                 std::dynamic_pointer_cast<FieldData<int64_t>>(field_data);

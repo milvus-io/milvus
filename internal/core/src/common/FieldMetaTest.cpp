@@ -1,18 +1,13 @@
-// Licensed to the LF AI & Data foundation under one
-// or more contributor license agreements. See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership. The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <string>
 
@@ -219,6 +214,56 @@ TEST(FieldMetaTest, LocalFormatRoundTrip) {
     auto reparsed = FieldMeta::ParseFrom(serialized);
     EXPECT_EQ(reparsed.get_local_format(), LOCAL_FORMAT_VORTEX);
     EXPECT_EQ(reparsed.get_max_len(), 128);
+}
+
+TEST(FieldMetaTest, DecimalEnumMirrorsProto) {
+    // Proto->internal conversion casts the raw enum value (see
+    // FieldMeta::ParseFrom and the static_casts in query/PlanProto.cpp), so
+    // the internal value must mirror schema.proto exactly. A drift here makes
+    // every `case DataType::DECIMAL` branch silently unreachable.
+    EXPECT_EQ(static_cast<int>(DataType::DECIMAL),
+              static_cast<int>(milvus::proto::schema::DataType::Decimal));
+}
+
+TEST(FieldMetaTest, DecimalParseFromRoundTrip) {
+    milvus::proto::schema::FieldSchema proto;
+    proto.set_fieldid(204);
+    proto.set_name("price");
+    proto.set_data_type(milvus::proto::schema::DataType::Decimal);
+    proto.set_nullable(true);
+    auto* precision = proto.add_type_params();
+    precision->set_key(DECIMAL_PRECISION);
+    precision->set_value("18");
+    auto* scale = proto.add_type_params();
+    scale->set_key(DECIMAL_SCALE);
+    scale->set_value("4");
+
+    auto field = FieldMeta::ParseFrom(proto);
+    EXPECT_EQ(field.get_data_type(), DataType::DECIMAL);
+    EXPECT_EQ(field.get_decimal_precision(), 18);
+    EXPECT_EQ(field.get_decimal_scale(), 4);
+    EXPECT_TRUE(field.is_nullable());
+
+    auto serialized = field.ToProto();
+    EXPECT_EQ(serialized.data_type(), milvus::proto::schema::DataType::Decimal);
+    int precision_count = 0;
+    int scale_count = 0;
+    for (const auto& param : serialized.type_params()) {
+        if (param.key() == DECIMAL_PRECISION) {
+            ++precision_count;
+            EXPECT_EQ(param.value(), "18");
+        } else if (param.key() == DECIMAL_SCALE) {
+            ++scale_count;
+            EXPECT_EQ(param.value(), "4");
+        }
+    }
+    EXPECT_EQ(precision_count, 1);
+    EXPECT_EQ(scale_count, 1);
+
+    auto reparsed = FieldMeta::ParseFrom(serialized);
+    EXPECT_EQ(reparsed.get_data_type(), DataType::DECIMAL);
+    EXPECT_EQ(reparsed.get_decimal_precision(), 18);
+    EXPECT_EQ(reparsed.get_decimal_scale(), 4);
 }
 
 TEST(FieldMetaTest, RawLocalFormatIsDefaultAndNotSerialized) {

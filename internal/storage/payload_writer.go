@@ -183,6 +183,12 @@ func (w *NativePayloadWriter) AddDataToPayloadForUT(data interface{}, validData 
 			return merr.WrapErrParameterInvalidMsg("incorrect data type")
 		}
 		return w.AddTimestamptzToPayload(val, validData)
+	case schemapb.DataType_Decimal:
+		val, ok := data.([]int64)
+		if !ok {
+			return merr.WrapErrParameterInvalidMsg("incorrect data type")
+		}
+		return w.AddDecimalToPayload(val, validData)
 	case schemapb.DataType_String, schemapb.DataType_VarChar:
 		val, ok := data.(string)
 		if !ok {
@@ -538,6 +544,36 @@ func (w *NativePayloadWriter) AddDoubleToPayload(data []float64, validData []boo
 }
 
 func (w *NativePayloadWriter) AddTimestamptzToPayload(data []int64, validData []bool) error {
+	if w.finished {
+		return merr.WrapErrServiceInternalMsg("can't append data to finished int64 payload")
+	}
+
+	if len(data) == 0 {
+		return merr.WrapErrServiceInternalMsg("can't add empty msgs into int64 payload")
+	}
+
+	if !w.nullable && len(validData) != 0 {
+		msg := fmt.Sprintf("length of validData(%d) must be 0 when not nullable", len(validData))
+		return merr.WrapErrParameterInvalidMsg(msg)
+	}
+
+	if w.nullable && len(data) != len(validData) {
+		msg := fmt.Sprintf("length of validData(%d) must equal to data(%d) when nullable", len(validData), len(data))
+		return merr.WrapErrParameterInvalidMsg(msg)
+	}
+
+	builder, ok := w.builder.(*array.Int64Builder)
+	if !ok {
+		return merr.WrapErrServiceInternalMsg("failed to cast Int64Builder")
+	}
+	builder.AppendValues(data, validData)
+
+	return nil
+}
+
+// AddDecimalToPayload writes Decimal data already decoded to its unscaled int64
+// representation (see ColumnBasedInsertMsgToInsertData) — never the original decimal text.
+func (w *NativePayloadWriter) AddDecimalToPayload(data []int64, validData []bool) error {
 	if w.finished {
 		return merr.WrapErrServiceInternalMsg("can't append data to finished int64 payload")
 	}
@@ -1128,7 +1164,7 @@ func MilvusDataTypeToArrowType(dataType schemapb.DataType, dim int) arrow.DataTy
 		return &arrow.Int16Type{}
 	case schemapb.DataType_Int32:
 		return &arrow.Int32Type{}
-	case schemapb.DataType_Int64, schemapb.DataType_Timestamptz:
+	case schemapb.DataType_Int64, schemapb.DataType_Timestamptz, schemapb.DataType_Decimal:
 		return &arrow.Int64Type{}
 	case schemapb.DataType_Float:
 		return &arrow.Float32Type{}

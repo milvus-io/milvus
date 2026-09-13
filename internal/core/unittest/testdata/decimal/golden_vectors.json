@@ -1,0 +1,25 @@
+{
+  "comment": [
+    "Cross-language golden vectors for the canonical Decimal wire encoding:",
+    "the signed unscaled integer (value * 10^scale) as exactly 8 bytes,",
+    "little-endian, two's complement. See the BytesArray comment in",
+    "milvus-proto schema.proto for the contract.",
+    "",
+    "Every implementation (Go, C++, and each SDK) must map literal -> unscaled",
+    "-> bytes_le_hex identically. An identical copy of this file lives at",
+    "internal/core/unittest/testdata/decimal/golden_vectors.json for the C++",
+    "side; keep the two in sync."
+  ],
+  "cases": [
+    {"name": "zero", "literal": "0", "precision": 18, "scale": 4, "unscaled": 0, "bytes_le_hex": "0000000000000000"},
+    {"name": "positive_simple", "literal": "19.99", "precision": 18, "scale": 4, "unscaled": 199900, "bytes_le_hex": "dc0c030000000000"},
+    {"name": "negative_simple", "literal": "-19.99", "precision": 18, "scale": 4, "unscaled": -199900, "bytes_le_hex": "24f3fcffffffffff"},
+    {"name": "smallest_positive_unit", "literal": "0.0001", "precision": 18, "scale": 4, "unscaled": 1, "bytes_le_hex": "0100000000000000"},
+    {"name": "smallest_negative_unit", "literal": "-0.0001", "precision": 18, "scale": 4, "unscaled": -1, "bytes_le_hex": "ffffffffffffffff"},
+    {"name": "scale_zero_integer", "literal": "12345", "precision": 18, "scale": 0, "unscaled": 12345, "bytes_le_hex": "3930000000000000"},
+    {"name": "max_precision_18", "literal": "999999999999999999", "precision": 18, "scale": 0, "unscaled": 999999999999999999, "bytes_le_hex": "ffff63a7b3b6e00d"},
+    {"name": "min_precision_18", "literal": "-999999999999999999", "precision": 18, "scale": 0, "unscaled": -999999999999999999, "bytes_le_hex": "01009c584c491ff2"},
+    {"name": "trailing_zero_padding", "literal": "19.9", "precision": 18, "scale": 4, "unscaled": 199000, "bytes_le_hex": "5809030000000000"},
+    {"name": "max_scale_equals_precision", "literal": "0.999999999999999999", "precision": 18, "scale": 18, "unscaled": 999999999999999999, "bytes_le_hex": "ffff63a7b3b6e00d"}
+  ]
+}

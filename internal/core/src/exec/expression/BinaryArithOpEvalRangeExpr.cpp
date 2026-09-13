@@ -75,6 +75,10 @@ PhyBinaryArithOpEvalRangeExpr::Eval(EvalCtx& context, VectorPtr& result) {
             result = ExecRangeVisitorImpl<int64_t>(input);
             break;
         }
+        case DataType::DECIMAL: {
+            result = ExecRangeVisitorImpl<int64_t>(input);
+            break;
+        }
         case DataType::FLOAT: {
             result = ExecRangeVisitorImpl<float>(input);
             break;
@@ -3065,6 +3069,10 @@ PhyBinaryArithOpEvalRangeExpr::PrefetchRawData() {
             break;
         }
         case DataType::INT64: {
+            PrefetchRawData<int64_t>();
+            break;
+        }
+        case DataType::DECIMAL: {
             PrefetchRawData<int64_t>();
             break;
         }

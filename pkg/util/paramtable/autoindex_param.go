@@ -59,6 +59,7 @@ type AutoIndexConfig struct {
 	ScalarJSONIndexType        ParamItem `refreshable:"true"`
 	ScalarGeometryIndexType    ParamItem `refreshable:"true"`
 	ScalarTimestampTzIndexType ParamItem `refreshable:"true"`
+	ScalarDecimalIndexType     ParamItem `refreshable:"true"`
 
 	BitmapCardinalityLimit ParamItem `refreshable:"true"`
 
@@ -217,7 +218,7 @@ func (p *AutoIndexConfig) init(base *BaseTable) {
 	p.ScalarAutoIndexParams = ParamItem{
 		Key:          "scalarAutoIndex.params.build",
 		Version:      "2.4.0",
-		DefaultValue: `{"int": "HYBRID","varchar": "HYBRID","bool": "BITMAP", "float": "HYBRID", "json": "HYBRID", "geometry": "RTREE", "timestamptz": "STL_SORT"}`,
+		DefaultValue: `{"int": "HYBRID","varchar": "HYBRID","bool": "BITMAP", "float": "HYBRID", "json": "HYBRID", "geometry": "RTREE", "timestamptz": "STL_SORT", "decimal": "STL_SORT"}`,
 	}
 	p.ScalarAutoIndexParams.Init(base.mgr)
 
@@ -293,6 +294,18 @@ func (p *AutoIndexConfig) init(base *BaseTable) {
 		},
 	}
 	p.ScalarTimestampTzIndexType.Init(base.mgr)
+
+	p.ScalarDecimalIndexType = ParamItem{
+		Version: "2.6.0",
+		Formatter: func(v string) string {
+			m := p.ScalarAutoIndexParams.GetAsJSONMap()
+			if m == nil {
+				return ""
+			}
+			return m["decimal"]
+		},
+	}
+	p.ScalarDecimalIndexType.Init(base.mgr)
 
 	p.BitmapCardinalityLimit = ParamItem{
 		Key:          "scalarAutoIndex.params.bitmapCardinalityLimit",
