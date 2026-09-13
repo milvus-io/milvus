@@ -83,6 +83,28 @@ func (suite *CompactionTaskMetaSuite) TestGetCompactionTasksByCollectionAbnormal
 	suite.Equal(1, len(res))
 }
 
+func (suite *CompactionTaskMetaSuite) TestSharedTriggerCollections() {
+	for id := int64(1); id <= 8; id++ {
+		suite.NoError(suite.meta.SaveCompactionTask(context.Background(), &datapb.CompactionTask{
+			TriggerID: 1, PlanID: id, CollectionID: id % 2,
+			State: datapb.CompactionTaskState_executing,
+		}))
+	}
+	// Neither collection can see all of its tasks if iteration stops on a foreign task.
+	for collectionID := int64(0); collectionID < 2; collectionID++ {
+		tasks := suite.meta.GetCompactionTasksByCollection(collectionID)[1]
+		suite.Len(tasks, 4)
+		for _, task := range tasks {
+			suite.Equal(collectionID, task.GetCollectionID())
+			suite.Equal(datapb.CompactionTaskState_executing, task.GetState())
+			task.State = datapb.CompactionTaskState_failed
+		}
+		for _, task := range suite.meta.GetCompactionTasksByCollection(collectionID)[1] {
+			suite.Equal(datapb.CompactionTaskState_executing, task.GetState(), "returned tasks must be clones")
+		}
+	}
+}
+
 func (suite *CompactionTaskMetaSuite) TestTaskStatsJSON() {
 	task1 := &datapb.CompactionTask{
 		PlanID:         1,

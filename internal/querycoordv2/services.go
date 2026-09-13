@@ -414,7 +414,15 @@ func (s *Server) GetLoadSegmentInfo(ctx context.Context, req *querypb.GetSegment
 
 	infos := make([]*querypb.SegmentInfo, 0, len(req.GetSegmentIDs()))
 	if len(req.GetSegmentIDs()) == 0 {
-		infos = s.getCollectionSegmentInfo(ctx, req.GetCollectionID())
+		collectionSegmentInfos, err := s.getCollectionSegmentInfo(ctx, req.GetCollectionID())
+		if err != nil {
+			msg := "failed to get collection segment info"
+			mlog.Warn(ctx, msg, mlog.Err(err))
+			return &querypb.GetSegmentInfoResponse{
+				Status: merr.Status(merr.Wrap(err, msg)),
+			}, nil
+		}
+		infos = collectionSegmentInfos
 	} else {
 		for _, segmentID := range req.GetSegmentIDs() {
 			segments := s.dist.SegmentDistManager.GetByFilter(meta.WithSegmentID(segmentID))
