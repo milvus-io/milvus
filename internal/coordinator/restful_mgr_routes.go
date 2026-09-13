@@ -1148,7 +1148,8 @@ func (s *mixCoordImpl) HandleAlterWAL(w http.ResponseWriter, req *http.Request) 
 	}
 
 	if err := json.NewDecoder(req.Body).Decode(&requestBody); err != nil {
-		logger.Info(req.Context(), "HandleAlterWAL failed to decode request body", mlog.Err(err))
+		// Decoder errors may quote request keys and credential values.
+		logger.Info(req.Context(), "HandleAlterWAL failed to decode request body")
 		http.Error(w, `{"msg": "Invalid request body"}`, http.StatusBadRequest)
 		return
 	}
@@ -1301,7 +1302,8 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 	}
 
 	if err := json.NewDecoder(request.Body).Decode(&requestBody); err != nil {
-		logger.Info(request.Context(), "HandleAlterConfig failed to decode request body", mlog.Err(err))
+		// Decoder errors may quote request keys and credential values.
+		logger.Info(request.Context(), "HandleAlterConfig failed to decode request body")
 		writeJSONError(writer, "Invalid request body", http.StatusBadRequest)
 		return
 	}

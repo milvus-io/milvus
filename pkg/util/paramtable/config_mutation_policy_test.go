@@ -20,9 +20,54 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/config"
 )
+
+func TestBuiltinRolesCannotBeMutatedByGenericConfig(t *testing.T) {
+	base := NewBaseTable(SkipRemote(true), SkipEnv(true))
+	t.Cleanup(base.Manager().Close)
+	var roles roleConfig
+	roles.init(base)
+	// Rootcoord consumes these grants at startup, even for an existing role.
+	const grants = `{"public":{"privileges":[{"object_type":"Global","object_name":"*","privilege":"All","db_name":"*"}]}}`
+	require.NoError(t, base.Save(roles.Enabled.Key, "true"))
+	require.NoError(t, base.Save(roles.Roles.Key, grants))
+	require.True(t, roles.Enabled.GetAsBool())
+	require.Equal(t, "All", roles.Roles.GetAsRoleDetails()["public"]["privileges"][0]["privilege"])
+	for _, item := range []*ParamItem{&roles.Enabled, &roles.Roles} {
+		// Like common.security.superUsers, role metadata remains readable;
+		// changing which grants startup installs is the protected operation.
+		_, value, err := base.Manager().GetRegisteredConfig(item.Key)
+		require.NoError(t, err)
+		assert.Equal(t, item.GetValue(), value)
+		for _, key := range spellingsOf(item.Key) {
+			if config.EtcdConfigKey(key) != config.EtcdConfigKey(item.Key) {
+				continue // The sensitivity helper also generates non-alias hyphens.
+			}
+			for _, operation := range []ConfigMutationOperation{ConfigMutationSet, ConfigMutationDelete} {
+				assert.Equal(t, ConfigMutationSecurityGoverning,
+					EvaluateConfigMutation(base.Manager(), key, operation).Rejection, key)
+			}
+		}
+	}
+}
+
+func TestAuthenticationPluginCannotBeMutatedByGenericConfig(t *testing.T) {
+	params := newSensitiveAuditParams(t)
+	for _, item := range []*ParamItem{&params.ProxyCfg.SoPath, &params.CommonCfg.PanicWhenPluginFail} {
+		for _, key := range spellingsOf(item.Key) {
+			if config.EtcdConfigKey(key) != config.EtcdConfigKey(item.Key) {
+				continue
+			}
+			for _, operation := range []ConfigMutationOperation{ConfigMutationSet, ConfigMutationDelete} {
+				assert.Equal(t, ConfigMutationSecurityGoverning,
+					EvaluateConfigMutation(params.baseTable.Manager(), key, operation).Rejection, key)
+			}
+		}
+	}
+}
 
 func TestEvaluateConfigMutation(t *testing.T) {
 	manager := config.NewManager()

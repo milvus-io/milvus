@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/samber/lo"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -86,6 +85,11 @@ func filterate(key string, filters ...Filter) (string, bool) {
 }
 
 type Manager struct {
+	// snapshotMutex keeps source/overlay values and the spelling policy used
+	// by external reads in the same generation. Acquire it before a source
+	// lock; never retain it while refreshing sources or dispatching callbacks.
+	// Raw runtime getters deliberately retain their existing locking contract.
+	snapshotMutex        sync.RWMutex
 	Dispatcher           *EventDispatcher
 	sources              *typeutil.ConcurrentMap[string, Source]
 	keySourceMap         *typeutil.ConcurrentMap[string, string] // store the key to config source, example: key is A.B.C and source is file which means the A.B.C's value is from file
@@ -114,7 +118,9 @@ type Manager struct {
 	// collidedSpellings remembers identities two different keys have been seen
 	// under, so the refusal to learn one survives the events that arrive after
 	// the initial load. Without it a later updateEvent re-learns whichever
-	// spelling it happens to carry.
+	// spelling it happens to carry. An identity first published without an
+	// endorsed spelling is also permanently ambiguous, even before its source
+	// events reach keySourceMap or after that value is removed.
 	collidedSpellings *typeutil.ConcurrentSet[string]
 	// spellingMutex protects the cross-map invariant between dottedSpellings
 	// and collidedSpellings. The maps are independently concurrent, but learning
@@ -240,6 +246,8 @@ func (m *Manager) ResolveRegisteredConfigKey(key string) (string, RegisteredConf
 // ParamGroup declares, and refuses sensitive values. Callers distinguish the two
 // with errors.Is against ErrKeyUnregistered and ErrKeySensitive.
 func (m *Manager) GetRegisteredConfig(key string) (string, string, error) {
+	m.snapshotMutex.RLock()
+	defer m.snapshotMutex.RUnlock()
 	resolved := m.resolveRegisteredKey(key)
 	if resolved.kind == RegisteredConfigUnknown {
 		return "", "", errors.Wrap(ErrKeyUnregistered, key)
@@ -332,10 +340,17 @@ func (m *Manager) AddSource(source Source) error {
 // Update config at runtime, which can be called by others
 // The most used scenario is UT
 func (m *Manager) SetConfig(key, value string) {
+	m.snapshotMutex.Lock()
+	defer m.snapshotMutex.Unlock()
+	if value != TombValue {
+		m.rememberValueIdentity(formatKey(key))
+	}
 	m.overlays.Insert(formatKey(key), value)
 }
 
 func (m *Manager) SetMapConfig(key, value string) {
+	m.snapshotMutex.Lock()
+	defer m.snapshotMutex.Unlock()
 	// Learn the pairing, for the same reason isStoredKey treats an overlay as
 	// vouching for a segmentation: the two have to agree. While only isStoredKey
 	// knew about overlays, a member written here was readable under the dotted
@@ -345,6 +360,9 @@ func (m *Manager) SetMapConfig(key, value string) {
 	// RuntimeSource, not a config source: this is written through the package's
 	// own setter by BaseTable.SaveGroup, so it is as trustworthy as a file.
 	m.rememberSpelling(key, RuntimeSource)
+	if value != TombValue {
+		m.rememberValueIdentity(mapConfigKey(key))
+	}
 	m.overlays.Insert(mapConfigKey(key), value)
 }
 
@@ -360,24 +378,40 @@ func mapConfigKey(key string) string {
 	return lowerKey(key)
 }
 
-// Delete config at runtime, which has the highest priority to override all other sources.
-// Tombstones the identity SetMapConfig writes as well as the formatted one,
-// because covering only the latter would leave a ParamGroup member in force
-// after it was deleted. The two coincide for keys that have no separators left
-// and for everything under NotFormatPrefix, in which case this writes one entry.
-func (m *Manager) DeleteConfig(key string) {
-	m.overlays.Insert(formatKey(key), TombValue)
-	m.overlays.Insert(mapConfigKey(key), TombValue)
+// overlayKeys returns every stored spelling of an identity, plus the two
+// historical setter spellings. A caller may remove a group value through any
+// alias, and collided group spellings share that same identity as well.
+// The caller holds snapshotMutex exclusively so setters cannot add a spelling
+// between enumeration and removal. formatKey preserves knowhere suffix case.
+func (m *Manager) overlayKeys(key string) []string {
+	identity := formatKey(key)
+	keys := []string{identity, mapConfigKey(key)}
+	m.overlays.Range(func(stored, _ string) bool {
+		if formatKeyUncached(stored) == identity {
+			keys = append(keys, stored)
+		}
+		return true
+	})
+	return keys
 }
 
-// Remove the config which set at runtime, use config from sources.
-// Clears the identity SetMapConfig writes as well as the one SetConfig writes,
-// because clearing only the latter would leave a group value set by
-// BaseTable.SaveGroup in place forever. The two coincide for keys that have no
-// separators left and for everything under NotFormatPrefix.
+// DeleteConfig hides every spelling of this identity, including source values.
+// Raw getters retain the historical tombstones; effective views omit them.
+func (m *Manager) DeleteConfig(key string) {
+	m.snapshotMutex.Lock()
+	defer m.snapshotMutex.Unlock()
+	for _, stored := range m.overlayKeys(key) {
+		m.overlays.Insert(stored, TombValue)
+	}
+}
+
+// ResetConfig removes runtime overrides through any alias and reveals sources.
 func (m *Manager) ResetConfig(key string) {
-	m.overlays.Remove(formatKey(key))
-	m.overlays.Remove(mapConfigKey(key))
+	m.snapshotMutex.Lock()
+	defer m.snapshotMutex.Unlock()
+	for _, stored := range m.overlayKeys(key) {
+		m.overlays.Remove(stored)
+	}
 }
 
 // Ignore any of update events, which means the config cannot auto refresh anymore
@@ -411,13 +445,17 @@ func (m *Manager) pullSourceConfigs(source string) error {
 
 	configs, err := configSource.GetConfigurations()
 	if err != nil {
-		mlog.Info(context.TODO(), "Get configuration by items failed", mlog.Err(err))
+		// Source parse errors may embed protected configuration values.
+		mlog.Info(context.TODO(), "Get configuration by items failed",
+			mlog.String("source", source), mlog.String("error", RedactedValue))
 		return err
 	}
 
+	m.snapshotMutex.Lock()
+	defer m.snapshotMutex.Unlock()
 	sourcePriority := configSource.GetPriority()
+	m.rememberSourceSnapshot(configs, source)
 	for key := range configs {
-		m.rememberSpelling(key, source)
 		sourceName, ok := m.keySourceMap.Get(key)
 		if !ok { // if key do not exist then add source
 			m.keySourceMap.Insert(key, source)
@@ -449,6 +487,8 @@ func (m *Manager) getConfigValueBySource(configKey, sourceName string) (string, 
 }
 
 func (m *Manager) updateEvent(e *Event) error {
+	m.snapshotMutex.Lock()
+	defer m.snapshotMutex.Unlock()
 	// refresh all configuration one by one
 	if e.HasUpdated {
 		return nil
@@ -456,6 +496,7 @@ func (m *Manager) updateEvent(e *Event) error {
 	switch e.EventType {
 	case CreateType, UpdateType:
 		m.rememberSpelling(e.Key, e.EventSource)
+		m.rememberValueIdentity(e.Key)
 		sourceName, ok := m.keySourceMap.Get(e.Key)
 		if !ok {
 			m.keySourceMap.Insert(e.Key, e.EventSource)
@@ -493,30 +534,41 @@ func (m *Manager) updateEvent(e *Event) error {
 	}
 
 	e.HasUpdated = true
-	mlog.Info(context.TODO(), "receive update event",
-		mlog.String("eventSource", e.EventSource),
-		mlog.String("eventType", e.EventType),
-		mlog.String("key", e.Key),
-		mlog.String("value", m.RedactValue(e.Key, e.Value)),
-		mlog.Bool("hasUpdated", e.HasUpdated))
+	mlog.Info(context.TODO(), "receive update event", m.eventLogFields(e)...)
 	return nil
+}
+
+// eventLogFields does not print dynamic names: both a group member name and
+// its value may be caller-supplied. Etcd events can originate in a management
+// mutation, so their entire payload is omitted, including declared scalars.
+// File-backed scalar diagnostics use the declaration's name, never an alias
+// from the source, and retain the existing value redaction policy.
+func (m *Manager) eventLogFields(event *Event) []mlog.Field {
+	key, value := RedactedValue, RedactedValue
+	resolved := m.resolveRegisteredKey(event.Key)
+	if event.EventSource != "EtcdSource" && resolved.kind == RegisteredConfigScalar {
+		key = resolved.dotted
+		value = m.RedactValue(event.Key, event.Value)
+	}
+	return []mlog.Field{
+		mlog.String("eventSource", event.EventSource),
+		mlog.String("eventType", event.EventType),
+		mlog.String("key", key),
+		mlog.String("value", value),
+		mlog.Bool("hasUpdated", event.HasUpdated),
+	}
 }
 
 // OnEvent Triggers actions when an event is generated
 func (m *Manager) OnEvent(event *Event) {
 	if m.forbiddenKeys.Contain(formatKey(event.Key)) {
-		mlog.Info(context.TODO(), "ignore event for forbidden key", mlog.String("key", event.Key))
+		mlog.Info(context.TODO(), "ignore event for forbidden key", m.eventLogFields(event)...)
 		return
 	}
 	err := m.updateEvent(event)
 	if err != nil {
 		mlog.Warn(context.TODO(), "failed in updating event with error",
-			mlog.Err(err),
-			mlog.String("eventSource", event.EventSource),
-			mlog.String("eventType", event.EventType),
-			mlog.String("key", event.Key),
-			mlog.String("value", m.RedactValue(event.Key, event.Value)),
-			mlog.Bool("hasUpdated", event.HasUpdated))
+			append(m.eventLogFields(event), mlog.Err(err))...)
 		return
 	}
 
@@ -675,12 +727,12 @@ func (m *Manager) SaveConfigToEtcd(etcdSource *EtcdSource, key, value string) er
 	}
 	if !resp.Succeeded {
 		mlog.Info(context.TODO(), "config already exists in etcd, skip writing",
-			mlog.String("etcdKey", etcdKey), mlog.String("configKey", key),
+			mlog.String("etcdKey", RedactedValue), mlog.String("configKey", key),
 			mlog.String("value", m.RedactValue(key, value)))
 		return nil
 	}
 	mlog.Info(context.TODO(), "config atomically saved to etcd",
-		mlog.String("etcdKey", etcdKey), mlog.String("configKey", key),
+		mlog.String("etcdKey", RedactedValue), mlog.String("configKey", key),
 		mlog.String("value", m.RedactValue(key, value)))
 
 	return nil
@@ -734,12 +786,10 @@ func (m *Manager) AlterConfigsInEtcd(etcdSource *EtcdSource, updates map[string]
 		return err
 	}
 
-	// Keys only. Whether a value is safe to print depends on a classification
-	// that can be wrong; the key names are enough to audit what was changed.
+	// Both names and values are request payload, including unknown delete keys.
+	// Keep only aggregate transaction information across this entire path.
 	mlog.Info(context.TODO(), "configs atomically altered in etcd",
 		mlog.Int("updates", len(updates)),
-		mlog.Int("deletes", len(deletes)),
-		mlog.Strings("updatedKeys", lo.Keys(updates)),
-		mlog.Strings("deleted", deletes))
+		mlog.Int("deletes", len(deletes)))
 	return nil
 }

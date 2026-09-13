@@ -77,11 +77,9 @@ func NewEtcdSource(etcdCli *clientv3.Client, etcdInfo *EtcdInfo) (*EtcdSource, e
 		return nil, merr.WrapErrServiceInternal("nil etcd client")
 	}
 	// Do not log EtcdInfo directly: it contains the etcd username/password and
-	// certificate paths. Keep only non-secret operational shape information.
+	// certificate paths. Auth and TLS enablement are protected settings too.
 	mlog.Debug(context.TODO(), "init etcd source",
 		mlog.Bool("useEmbed", etcdInfo.UseEmbed),
-		mlog.Bool("authEnabled", etcdInfo.EnableAuth),
-		mlog.Bool("tlsEnabled", etcdInfo.UseSSL),
 		mlog.Int("endpointCount", len(etcdInfo.Endpoints)))
 	es := &EtcdSource{
 		etcdCli:        etcdCli,
@@ -213,17 +211,29 @@ func (es *EtcdSource) update(configs map[string]string) error {
 	es.updateMu.Lock()
 	defer es.updateMu.Unlock()
 
-	es.Lock()
-	events, err := PopulateEvents(es.GetSourceName(), es.currentConfigs, configs)
+	es.RLock()
+	manager := es.manager
+	es.RUnlock()
+	var events []*Event
+	err := publishSourceSnapshot(manager, es.GetSourceName(), configs, func() error {
+		es.Lock()
+		defer es.Unlock()
+		var err error
+		events, err = PopulateEvents(es.GetSourceName(), es.currentConfigs, configs)
+		if err != nil {
+			return err
+		}
+		es.currentConfigs = configs
+		return nil
+	})
 	if err != nil {
-		es.Unlock()
 		mlog.Warn(es.ctx, "generating event error", mlog.Err(err))
 		return err
 	}
-	es.currentConfigs = configs
-	es.Unlock()
-	if es.manager != nil {
-		es.manager.EvictCacheValueByFormat(lo.Map(events, func(event *Event, _ int) string { return event.Key })...)
+	// Cache eviction and callbacks may read configuration; keep them outside
+	// both the source lock and the manager snapshot publication section.
+	if manager != nil {
+		manager.EvictCacheValueByFormat(lo.Map(events, func(event *Event, _ int) string { return event.Key })...)
 	}
 
 	es.configRefresher.fireEvents(events...)

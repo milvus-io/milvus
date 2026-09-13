@@ -322,7 +322,25 @@ InitPluginLoader(const char* plugin_path) {
         milvus::storage::PluginLoader::GetInstance().load(plugin_path);
         return milvus::SuccessCStatus();
     }
-    CGO_CATCH_AND_RETURN_CSTATUS
+    // Plugin callbacks can throw opaque messages containing configuration.
+    // Sanitize before FailureCStatus: its untyped-exception observer also logs
+    // the message. Keep the same code/OOM/fallback rules as the shared macro.
+    catch (const std::bad_alloc&) {
+        return milvus::FailureCStatus(
+            milvus::MemAllocateFailed,
+            "Plugin initialization ran out of memory");
+    } catch (const milvus::SegcoreError& error) {
+        return milvus::FailureCStatus(error.get_error_code(),
+                                      "Native plugin initialization failed");
+    } catch (const std::exception&) {
+        const std::runtime_error safe_error(
+            "Native plugin initialization failed");
+        return milvus::FailureCStatus(&safe_error);
+    } catch (...) {
+        return milvus::FailureCStatus(
+            milvus::UnexpectedError,
+            "Unknown exception during native plugin initialization");
+    }
 }
 
 CStatus

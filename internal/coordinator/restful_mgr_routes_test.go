@@ -29,9 +29,35 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	pkgconfig "github.com/milvus-io/milvus/pkg/v3/config"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+func TestMalformedConfigRequestLogsDoNotContainPayload(t *testing.T) {
+	paramtable.Init()
+	coord := &mixCoordImpl{}
+	for _, test := range []struct {
+		name    string
+		handler http.HandlerFunc
+		body    string
+	}{
+		{"wal", coord.HandleAlterWAL, `{"target_wal_name":"kafka","config":{"sasl.password":"payload-canary","key-canary":!}}`},
+		{"config", coord.HandleAlterConfig, `{"configs":[{"key":"key-canary","value":"payload-canary","bad":!}]}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			sink := mlog.CaptureGlobalLogs(t, &mlog.Config{Level: "debug"})
+			request := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(test.body))
+			response := httptest.NewRecorder()
+			test.handler(response, request)
+			assert.Equal(t, http.StatusBadRequest, response.Code)
+			assert.Contains(t, response.Body.String(), "Invalid request body")
+			assert.Contains(t, sink.String(), "failed to decode request body")
+			assert.NotContains(t, sink.String(), "payload-canary")
+			assert.NotContains(t, sink.String(), "key-canary")
+		})
+	}
+}
 
 func TestHandleAlterConfig(t *testing.T) {
 	paramtable.Init()

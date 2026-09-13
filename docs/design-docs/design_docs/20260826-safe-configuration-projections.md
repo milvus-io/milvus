@@ -45,6 +45,10 @@ This design makes those audiences explicit:
   routes. That boundary is handled by #52580.
 - It does not encrypt configuration at rest.
 - It does not change configuration-source priority.
+- It does not audit application-wide backend connection diagnostics or logs
+  emitted inside external plugins. Logging changes cover configuration views,
+  management payloads, and the configuration initialization/refresh boundaries
+  described below.
 - It does not cache projections. These views are used by diagnostics and
   management operations, where avoiding invalidation races is more important
   than optimizing a small, infrequent full-table walk.
@@ -78,6 +82,21 @@ security verdicts. If two dotted spellings collapse to one lookup identity,
 the manager records the collision and fails closed instead of choosing one by
 map iteration order.
 
+Learning a spelling must not retroactively make an unsegmented value eligible
+for a public suffix exemption. For each complete source generation, the manager
+first learns all supplied spellings, then permanently marks identities with no
+endorsed spelling ambiguous before publishing values. This history is independent
+of the ownership index, which CREATE events update later. It survives value
+removal so delayed events and later spellings cannot reclassify an earlier
+generation. Initial pulls and runtime overlays record the same history. This
+also covers a new lower-priority file entry or overlay that would otherwise
+endorse a higher-priority value. Established spellings continue to apply to
+ordinary environment and etcd overrides. Startup loads the initial local file
+snapshot before importing environment overrides so file-backed group members
+have their spellings established first. Source priority still gives environment
+values precedence over files. A spelling first introduced by a later refresh
+cannot endorse an existing unsegmented environment, persisted, or overlay value.
+
 ### 4.3 Sensitivity
 
 Sensitive values include:
@@ -85,7 +104,10 @@ Sensitive values include:
 - credentials and private key material;
 - values that govern access or impersonation;
 - topology capable of redirecting credential-bearing traffic, including all
-  parts of a connection target such as host/IP and port.
+  parts of a connection target such as host/IP and port;
+- transport and trust controls, including TLS enablement, certificate and CA
+  paths, minimum TLS versions, authentication mechanisms, SNI, and object-store
+  provider, routing, identity, and payload-signing options.
 
 Explicit `Sensitive` and `NonSensitive` declarations take precedence. Dynamic
 groups default to their prefix policy and may expose only reviewed leaf
@@ -128,6 +150,13 @@ The policy module returns a decision rather than HTTP strings. The transport
 owns status codes and response compatibility; the policy owns key identity and
 security semantics.
 
+Read visibility and permission to change a setting are separate decisions.
+Readable authorization settings, including `builtinRoles.enable` and
+`builtinRoles.roles`, are fenced against generic writes and deletes, as are the
+authentication plugin selector and its initialization-failure policy. Configured
+role grants are applied when the coordinator initializes, so a setting does not
+need to be immediately refreshable to require this protection.
+
 ## 7. Logging
 
 Configuration values are passed through manager redaction before logging.
@@ -135,6 +164,43 @@ Maps carried by `AlterWAL` are different: both their keys and values are
 caller-controlled request payload and the map is persisted into recovery
 state. WAL broadcast, recovery, and callback logs therefore emit only a
 configuration count.
+
+The same rule applies to the etcd mutation transaction, its refresh events,
+and configuration callbacks. Dynamic group names are omitted from manager
+event logs. JSON decode errors can contain request snippets, and URL parse
+errors can contain credentials, so configuration parser diagnostics must not
+attach those raw errors. Access-log formatter validation describes the
+required key shape without echoing the rejected name. File-backed scalar
+event diagnostics use the declared key name and the value's sensitivity policy.
+
+Callback and plugin initialization errors are opaque: even a public timing
+setting can trigger a reload that reads a full credential-bearing configuration
+map. Milvus omits their raw error text at initialization and reload log/panic
+boundaries while preserving callback arguments, error propagation, and failure
+behavior. Initial and periodic YAML parsing diagnostics likewise omit parser
+input fragments before any sensitivity metadata has been applied.
+
+Native cipher-plugin initialization follows the same rule. Milvus omits the
+configured library path and plugin-provided name from startup logs. Loader
+failures identify the failed stage without the path or `dlerror` text, including
+the output that `ThrowInfo` emits before throwing. The plugin initialization C
+boundary also replaces opaque exception text before invoking the shared
+untyped-exception observer or returning a CStatus. Existing native codes,
+out-of-memory handling, untyped-exception counting, and startup failure behavior
+remain; verbatim native initialization error text does not. This keeps ordinary
+Go C-status logging and downstream QueryNode/DataNode logs and StreamingNode
+panic messages safe without changing other native operation diagnostics.
+
+Remote configuration initialization also omits raw etcd client errors, which
+can carry certificate/key/CA paths or rejected TLS settings. The immediate
+shared etcd client constructors and config-source constructor log endpoint
+counts and embedded-mode information; they omit connection targets, TLS
+settings, and authentication settings. Client arguments and returned errors
+remain unchanged. This constructor coverage does not extend to unrelated
+operational etcd diagnostics throughout the application.
+Immutable configuration persistence at startup masks the composite etcd key
+because it contains the protected root prefix; the declared configuration key
+and its value continue to use the existing diagnostic policy.
 
 Broadcast IDs use the well-known `FieldBroadcastID` constructor with their
 native `uint64` type. RPC propagation has a distinct unsigned metadata tag so
@@ -144,7 +210,9 @@ values above `MaxInt64` round-trip without sign loss.
 
 - Raw manager APIs remain raw and keep their historical tombstone behavior.
 - `ParamGroup` changes only for deleted or otherwise inert runtime overlays;
-  live values and source priority are unchanged.
+  live values and source priority are unchanged. Deleting or resetting through
+  an alias removes every stored overlay spelling of that identity; raw delete
+  views continue to carry tombstones.
 - The management GET response keeps its ordered per-key shape. Sensitive keys
   now carry `value: "*****"`; undeclared and missing keys keep error entries.
 - Kafka's printable configuration form intentionally masks credentials. It is
@@ -157,9 +225,29 @@ values above `MaxInt64` round-trip without sign loss.
 ## 9. Performance and Concurrency
 
 Projection walks remain O(number of manager entries) and allocate the returned
-map. They do not mutate the manager and use its concurrent maps and policy
-registries. Management reads and diagnostic dumps are low-frequency relative
-to query and insert paths. A cache would add invalidation obligations across
+map. Safe readers hold a manager snapshot read lock across classification and
+value reads. Built-in file and etcd sources publish the complete generation's
+spelling policy and values under the corresponding write lock, acquired before
+the source lock. The policy includes the history of unsegmented publications,
+including values whose CREATE events have not reached the ownership index.
+Runtime overlay mutations use the same publication lock.
+This prevents a reader from applying an old public classification to a newly
+published sensitive value, including the interval before refresh events reach
+the manager. Raw runtime getters keep their existing locking behavior.
+
+Sources already refresh while configuration declarations initialize. Scalar
+primary and fallback sensitivity metadata is therefore installed before any
+of their declarations become visible. Dynamic groups and the directly declared
+cluster TLS/authority prefixes likewise publish policy before their namespace.
+The hook table installs its sensitive empty namespace before declaring the
+`soPath` scalar that inherits that policy. Reviewed scalar overrides and group
+suffix exemptions retain their final public-read behavior.
+
+Source refreshes, cache eviction, and event callbacks run outside the snapshot
+lock, since they can call safe getters. In particular, file projection triggers
+its refresh before taking the read lock. Management reads and diagnostic dumps
+are low-frequency relative to query and insert paths. A cache would add
+invalidation obligations across
 source refreshes, runtime overlays, key declarations, and policy registration;
 without evidence that projection time is material, that tradeoff is not
 justified.
@@ -174,11 +262,35 @@ Tests cover:
 - all spellings of scalar and group keys;
 - source-backed and environment-only group members;
 - collision handling and suffix-exemption fail-closed behavior;
+- file and etcd publication before event dispatch, point reads racing a
+  refresh, and lower-priority spelling changes that must not expose an
+  existing unsegmented value; both source-order directions and overlay spelling
+  changes during delayed CREATE dispatch, including reset/fallback to the
+  earlier value and retained ambiguity after removal;
 - tombstone removal from the effective `ParamGroup` view;
+- overlay deletion and reset across dotted, slash, underscore, and folded
+  aliases;
 - positive inventories of sensitive scalars, groups, direct prefixes, and all
   parts of representative connection targets;
 - management set/delete decisions and redacted GET responses;
 - WAL recovery log fields containing neither payload keys nor values;
+- real etcd mutation/event logs and access-log initialization failure logs
+  containing neither request-name nor request-value canaries;
+- malformed management JSON, protected URL/JSON parsing, and configuration
+  callback failure logs omitting payload fragments;
+- actual remote configuration startup failures for missing TLS certificate,
+  key, and CA files and invalid minimum TLS versions, with authentication on
+  and off, preserving original in-process error details while keeping
+  protected values out of the entire initialization log sequence;
+- immutable configuration startup writes and create-if-absent races keeping
+  the protected etcd root prefix out of logs while preserving the pinned value;
+- actual scalar/fallback, group, hook, and cluster-prefix initialization paused
+  during metadata registration, with real file refreshes keeping protected
+  values out of logs and projections throughout the publication interval;
+- missing native plugin libraries keeping their paths out of pre-throw stdout,
+  CStatus messages, and Go startup logs; isolated native loader probes also
+  cover missing factories, null factories, opaque factory/name exceptions,
+  out-of-memory and unknown exceptions, and successful loading;
 - full-range unsigned BroadcastID propagation.
 
 The positive inventory is intentionally reviewed data. Heuristic tests remain

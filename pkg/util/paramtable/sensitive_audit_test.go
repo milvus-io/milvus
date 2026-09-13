@@ -58,6 +58,106 @@ var knownSensitive = []string{
 	"trace.jaeger.url",
 	"trace.otlp.endpoint",
 	"trace.otlp.headers",
+	"woodpecker.client.quorum.quorumbufferpools",
+}
+
+// Connection authentication, transport, trust roots and routing are one
+// security boundary even when their names contain no credential keyword.
+var sensitiveConnectionControls = []string{
+	"trace.otlp.secure",
+	"indexCoord.bindIndexNodeMode.withCred",
+	"proxy.http.enableHSTS",
+	"proxy.http.hstsMaxAge",
+	"proxy.http.hstsIncludeSubDomains",
+	"etcd.ssl.enabled",
+	"etcd.ssl.tlsCert",
+	"etcd.ssl.tlsKey",
+	"etcd.ssl.tlsCACert",
+	"etcd.ssl.tlsMinVersion",
+	"etcd.auth.enabled",
+	"tikv.ssl.enabled",
+	"tikv.ssl.tlsCert",
+	"tikv.ssl.tlsKey",
+	"tikv.ssl.tlsCACert",
+	"pulsar.authPlugin",
+	"kafka.saslMechanisms",
+	"kafka.securityProtocol",
+	"kafka.ssl.enabled",
+	"kafka.ssl.tlsCert",
+	"kafka.ssl.tlsKey",
+	"kafka.ssl.tlsCaCert",
+	"minio.useSSL",
+	"minio.ssl.tlsCACert",
+	"minio.ssl.tlsMinVersion",
+	"minio.useIAM",
+	"minio.cloudProvider",
+	"minio.useVirtualHost",
+	"minio.region",
+	"minio.disableAWSChunkedEncoding",
+	"tls.serverPemPath",
+	"tls.serverKeyPath",
+	"tls.caPemPath",
+	"internaltls.serverPemPath",
+	"internaltls.serverKeyPath",
+	"internaltls.caPemPath",
+	"internaltls.sni",
+}
+
+func TestSensitiveTransportAndTopologyControls(t *testing.T) {
+	params := newSensitiveAuditParams(t)
+	manager := params.baseTable.mgr
+	for _, test := range []struct {
+		item  *ParamItem
+		value string
+	}{
+		{&params.TraceCfg.OtlpSecure, "true"},
+		{&params.DataCoordCfg.WithCredential, "true"},
+		{&params.HTTPCfg.EnableHSTS, "true"},
+		{&params.HTTPCfg.HSTSMaxAge, "31536000"},
+		{&params.HTTPCfg.HSTSIncludeSubDomains, "true"},
+		{&params.WoodpeckerCfg.QuorumBufferPools, `[{"name":"audit-pool","seeds":["private-seed.invalid:1234"]}]`},
+	} {
+		item := test.item
+		t.Run(item.Key, func(t *testing.T) {
+			require.NoError(t, params.Save(item.Key, test.value))
+			require.Equal(t, test.value, item.GetValue(), "internal connection consumers need the raw value")
+			for _, alias := range []string{item.Key, strings.ReplaceAll(item.Key, ".", "/"), strings.ToUpper(strings.ReplaceAll(item.Key, ".", "_")), config.EtcdConfigKey(item.Key)} {
+				t.Run(alias, func(t *testing.T) {
+					for _, operation := range []ConfigMutationOperation{ConfigMutationSet, ConfigMutationDelete} {
+						t.Run(map[ConfigMutationOperation]string{ConfigMutationSet: "set", ConfigMutationDelete: "delete"}[operation], func(t *testing.T) {
+							require.Equal(t, ConfigMutationSensitive, EvaluateConfigMutation(manager, alias, operation).Rejection)
+						})
+					}
+					_, _, err := manager.GetRegisteredConfig(alias)
+					require.ErrorIs(t, err, config.ErrKeySensitive)
+				})
+			}
+			require.Equal(t, config.RedactedValue, manager.ProjectConfigs()[config.EtcdConfigKey(item.Key)])
+		})
+	}
+}
+
+func TestSensitiveConnectionControls(t *testing.T) {
+	params := newSensitiveAuditParams(t)
+	manager := params.baseTable.mgr
+	for _, key := range sensitiveConnectionControls {
+		t.Run(key, func(t *testing.T) {
+			var declaration *ParamItem
+			walkParamItems(reflect.ValueOf(params).Elem(), func(item *ParamItem) {
+				if item.Key == key {
+					declaration = item
+				}
+			})
+			require.NotNil(t, declaration, "inventory must name a live declaration")
+			require.True(t, declaration.Sensitive, "connection controls need explicit sensitivity metadata")
+			for _, alias := range []string{key, strings.ReplaceAll(key, ".", "/"), strings.ToUpper(strings.ReplaceAll(key, ".", "_")), config.EtcdConfigKey(key)} {
+				require.True(t, manager.IsSensitive(alias), alias)
+				for _, operation := range []ConfigMutationOperation{ConfigMutationSet, ConfigMutationDelete} {
+					require.NotEqual(t, ConfigMutationAllowed, EvaluateConfigMutation(manager, alias, operation).Rejection, alias)
+				}
+			}
+		})
+	}
 }
 
 // knownSensitiveParamGroupPrefixes are dynamic groups whose members are

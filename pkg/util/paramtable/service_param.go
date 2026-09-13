@@ -310,6 +310,7 @@ please adjust in embedded Milvus: /tmp/milvus/logs/etcd.log`,
 
 	p.EtcdUseSSL = ParamItem{
 		Key:          "etcd.ssl.enabled",
+		Sensitive:    true,
 		DefaultValue: "false",
 		Version:      "2.0.0",
 		Doc:          "Whether to support ETCD secure connection mode",
@@ -318,31 +319,35 @@ please adjust in embedded Milvus: /tmp/milvus/logs/etcd.log`,
 	p.EtcdUseSSL.Init(base.mgr)
 
 	p.EtcdTLSCert = ParamItem{
-		Key:     "etcd.ssl.tlsCert",
-		Version: "2.0.0",
-		Doc:     "path to your cert file",
-		Export:  true,
+		Key:       "etcd.ssl.tlsCert",
+		Sensitive: true,
+		Version:   "2.0.0",
+		Doc:       "path to your cert file",
+		Export:    true,
 	}
 	p.EtcdTLSCert.Init(base.mgr)
 
 	p.EtcdTLSKey = ParamItem{
-		Key:     "etcd.ssl.tlsKey",
-		Version: "2.0.0",
-		Doc:     "path to your key file",
-		Export:  true,
+		Key:       "etcd.ssl.tlsKey",
+		Sensitive: true,
+		Version:   "2.0.0",
+		Doc:       "path to your key file",
+		Export:    true,
 	}
 	p.EtcdTLSKey.Init(base.mgr)
 
 	p.EtcdTLSCACert = ParamItem{
-		Key:     "etcd.ssl.tlsCACert",
-		Version: "2.0.0",
-		Doc:     "path to your CACert file",
-		Export:  true,
+		Key:       "etcd.ssl.tlsCACert",
+		Sensitive: true,
+		Version:   "2.0.0",
+		Doc:       "path to your CACert file",
+		Export:    true,
 	}
 	p.EtcdTLSCACert.Init(base.mgr)
 
 	p.EtcdTLSMinVersion = ParamItem{
 		Key:          "etcd.ssl.tlsMinVersion",
+		Sensitive:    true,
 		DefaultValue: "1.3",
 		Version:      "2.0.0",
 		Doc: `TLS min version
@@ -390,6 +395,7 @@ We recommend using version 1.2 and above.`,
 
 	p.EtcdEnableAuth = ParamItem{
 		Key:          "etcd.auth.enabled",
+		Sensitive:    true,
 		DefaultValue: "true",
 		Version:      "2.3.7",
 		Doc:          "Whether to enable authentication",
@@ -559,6 +565,7 @@ func (p *TiKVConfig) Init(base *BaseTable) {
 
 	p.TiKVUseSSL = ParamItem{
 		Key:          "tikv.ssl.enabled",
+		Sensitive:    true,
 		DefaultValue: "false",
 		Version:      "2.3.0",
 		Doc:          "Whether to support TiKV secure connection mode",
@@ -567,26 +574,29 @@ func (p *TiKVConfig) Init(base *BaseTable) {
 	p.TiKVUseSSL.Init(base.mgr)
 
 	p.TiKVTLSCert = ParamItem{
-		Key:     "tikv.ssl.tlsCert",
-		Version: "2.3.0",
-		Doc:     "path to your cert file",
-		Export:  true,
+		Key:       "tikv.ssl.tlsCert",
+		Sensitive: true,
+		Version:   "2.3.0",
+		Doc:       "path to your cert file",
+		Export:    true,
 	}
 	p.TiKVTLSCert.Init(base.mgr)
 
 	p.TiKVTLSKey = ParamItem{
-		Key:     "tikv.ssl.tlsKey",
-		Version: "2.3.0",
-		Doc:     "path to your key file",
-		Export:  true,
+		Key:       "tikv.ssl.tlsKey",
+		Sensitive: true,
+		Version:   "2.3.0",
+		Doc:       "path to your key file",
+		Export:    true,
 	}
 	p.TiKVTLSKey.Init(base.mgr)
 
 	p.TiKVTLSCACert = ParamItem{
-		Key:     "tikv.ssl.tlsCACert",
-		Version: "2.3.0",
-		Doc:     "path to your CACert file",
-		Export:  true,
+		Key:       "tikv.ssl.tlsCACert",
+		Sensitive: true,
+		Version:   "2.3.0",
+		Doc:       "path to your CACert file",
+		Export:    true,
 	}
 	p.TiKVTLSCACert.Init(base.mgr)
 }
@@ -996,7 +1006,8 @@ Example configuration below:
     seeds: [n1,n2,n3] # List of seed node addresses for this pool
   - name: region2 # Name of the region pool
     seeds: [n4,n5,n6] # List of seed node addresses for this pool`,
-		Export: true,
+		Export:    true,
+		Sensitive: true,
 	}
 	p.QuorumBufferPools.Init(base.mgr)
 
@@ -1371,7 +1382,8 @@ Empty by default, in which case http://<host of pulsar.address>:<pulsar.webport>
 			}
 			pulsarURL, err := url.ParseRequestURI(p.Address.GetValue())
 			if err != nil {
-				mlog.Info(context.TODO(), "failed to parse pulsar config, assume pulsar not used", mlog.Err(err))
+				// URL parser errors include the input, which can carry credentials.
+				mlog.Info(context.TODO(), "failed to parse pulsar config, assume pulsar not used")
 				return ""
 			}
 			// pulsar.address may be a multi-host service url such as
@@ -1446,8 +1458,9 @@ To share a Pulsar instance among multiple Milvus instances, you can change this 
 	p.Namespace.Init(base.mgr)
 
 	p.AuthPlugin = ParamItem{
-		Key:     "pulsar.authPlugin",
-		Version: "2.2.0",
+		Key:       "pulsar.authPlugin",
+		Sensitive: true,
+		Version:   "2.2.0",
 	}
 	p.AuthPlugin.Init(base.mgr)
 
@@ -1556,6 +1569,7 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 
 	k.SaslMechanisms = ParamItem{
 		Key:          "kafka.saslMechanisms",
+		Sensitive:    true,
 		DefaultValue: "",
 		Version:      "2.1.0",
 		Export:       true,
@@ -1564,6 +1578,7 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 
 	k.SecurityProtocol = ParamItem{
 		Key:          "kafka.securityProtocol",
+		Sensitive:    true,
 		DefaultValue: "",
 		Version:      "2.1.0",
 		Export:       true,
@@ -1572,6 +1587,7 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 
 	k.KafkaUseSSL = ParamItem{
 		Key:          "kafka.ssl.enabled",
+		Sensitive:    true,
 		DefaultValue: "false",
 		Version:      "2.3.11",
 		Doc:          "whether to enable ssl mode",
@@ -1580,26 +1596,29 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 	k.KafkaUseSSL.Init(base.mgr)
 
 	k.KafkaTLSCert = ParamItem{
-		Key:     "kafka.ssl.tlsCert",
-		Version: "2.3.11",
-		Doc:     "path to client's public key (PEM) used for authentication",
-		Export:  true,
+		Key:       "kafka.ssl.tlsCert",
+		Sensitive: true,
+		Version:   "2.3.11",
+		Doc:       "path to client's public key (PEM) used for authentication",
+		Export:    true,
 	}
 	k.KafkaTLSCert.Init(base.mgr)
 
 	k.KafkaTLSKey = ParamItem{
-		Key:     "kafka.ssl.tlsKey",
-		Version: "2.3.11",
-		Doc:     "path to client's private key (PEM) used for authentication",
-		Export:  true,
+		Key:       "kafka.ssl.tlsKey",
+		Sensitive: true,
+		Version:   "2.3.11",
+		Doc:       "path to client's private key (PEM) used for authentication",
+		Export:    true,
 	}
 	k.KafkaTLSKey.Init(base.mgr)
 
 	k.KafkaTLSCACert = ParamItem{
-		Key:     "kafka.ssl.tlsCaCert",
-		Version: "2.3.11",
-		Doc:     "file or directory path to CA certificate(s) for verifying the broker's key",
-		Export:  true,
+		Key:       "kafka.ssl.tlsCaCert",
+		Sensitive: true,
+		Version:   "2.3.11",
+		Doc:       "file or directory path to CA certificate(s) for verifying the broker's key",
+		Export:    true,
 	}
 	k.KafkaTLSCACert.Init(base.mgr)
 
@@ -1862,6 +1881,7 @@ The default value applies to MinIO or S3 service that started with the default d
 
 	p.UseSSL = ParamItem{
 		Key:          "minio.useSSL",
+		Sensitive:    true,
 		Version:      "2.0.0",
 		DefaultValue: "false",
 		PanicIfEmpty: true,
@@ -1872,6 +1892,7 @@ The default value applies to MinIO or S3 service that started with the default d
 
 	p.DisableAWSChunkedEncoding = ParamItem{
 		Key:          "minio.disableAWSChunkedEncoding",
+		Sensitive:    true,
 		Version:      "2.6.20",
 		DefaultValue: "false",
 		Doc: `When enabled, PutObject requests use UNSIGNED-PAYLOAD to support S3-compatible endpoints that are incompatible with AWS chunked encoding.
@@ -1882,6 +1903,7 @@ HTTPS is recommended because payload integrity is then protected by TLS rather t
 
 	p.SslCACert = ParamItem{
 		Key:          "minio.ssl.tlsCACert",
+		Sensitive:    true,
 		Version:      "2.3.12",
 		DefaultValue: "",
 		Doc:          "path to your CACert file",
@@ -1891,6 +1913,7 @@ HTTPS is recommended because payload integrity is then protected by TLS rather t
 
 	p.SslTLSMinVersion = ParamItem{
 		Key:          "minio.ssl.tlsMinVersion",
+		Sensitive:    true,
 		DefaultValue: "default",
 		Version:      "2.6.11",
 		Doc: `TLS minimum version for MinIO/S3 SSL connections.
@@ -1940,6 +1963,7 @@ Changing this for an already running Milvus instance may result in failures to r
 
 	p.UseIAM = ParamItem{
 		Key:          "minio.useIAM",
+		Sensitive:    true,
 		DefaultValue: DefaultMinioUseIAM,
 		Version:      "2.0.0",
 		Doc: `Whether to useIAM role to access S3/GCS instead of access/secret keys
@@ -1954,6 +1978,7 @@ aliyun (ecs): https://www.alibabacloud.com/help/en/elastic-compute-service/lates
 
 	p.CloudProvider = ParamItem{
 		Key:          "minio.cloudProvider",
+		Sensitive:    true,
 		DefaultValue: DefaultMinioCloudProvider,
 		Version:      "2.4.1",
 		Doc: `Cloud Provider of S3. Supports: "aws", "gcp", "aliyun".
@@ -1999,6 +2024,7 @@ Leave it empty if you want to use AWS default endpoint`,
 	p.LogLevel.Init(base.mgr)
 	p.Region = ParamItem{
 		Key:          "minio.region",
+		Sensitive:    true,
 		DefaultValue: DefaultMinioRegion,
 		Version:      "2.3.0",
 		Doc:          `Specify minio storage system location region`,
@@ -2008,6 +2034,7 @@ Leave it empty if you want to use AWS default endpoint`,
 
 	p.UseVirtualHost = ParamItem{
 		Key:          "minio.useVirtualHost",
+		Sensitive:    true,
 		Version:      "2.3.0",
 		DefaultValue: DefaultMinioUseVirtualHost,
 		PanicIfEmpty: false,

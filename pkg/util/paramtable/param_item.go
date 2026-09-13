@@ -147,10 +147,6 @@ func (pi *ParamItem) Init(manager *config.Manager) {
 		// misconfigured switcher is a coding error and must fail fast.
 		pi.VersionGateSwitcher.Validate()
 	}
-	pi.manager.RegisterConfigKey(pi.Key)
-	for _, key := range pi.FallbackKeys {
-		pi.manager.RegisterConfigKey(key)
-	}
 	if pi.Forbidden {
 		pi.manager.ForbidUpdate(pi.Key)
 	}
@@ -168,6 +164,13 @@ func (pi *ParamItem) Init(manager *config.Manager) {
 		for _, key := range pi.FallbackKeys {
 			pi.manager.RegisterNonSensitiveKey(key)
 		}
+	}
+	// Sources already refresh while ParamItems initialize. Publish policy for
+	// every spelling before declaring any key visible to logs or projections.
+	// Until declaration, those boundaries omit or redact the value.
+	pi.manager.RegisterConfigKey(pi.Key)
+	for _, key := range pi.FallbackKeys {
+		pi.manager.RegisterConfigKey(key)
 	}
 
 	currentValue := pi.GetValue()
@@ -207,15 +210,24 @@ func (pi *ParamItem) handleConfigChange(event *config.Event) {
 		return
 	}
 
-	logOldValue := pi.configValueForLog(oldValue)
-	logNewValue := pi.configValueForLog(newValue)
+	// Etcd updates may contain management-request payload even for a public
+	// scalar. Callback errors may embed the same payload in their message or
+	// verbose chain, so protect them along with the old and new values.
+	redactPayload := event.EventSource == "EtcdSource" || pi.manager == nil || pi.manager.IsSensitive(pi.Key)
+	logOldValue, logNewValue := config.RedactedValue, config.RedactedValue
+	if !redactPayload {
+		logOldValue = pi.configValueForLog(oldValue)
+		logNewValue = pi.configValueForLog(newValue)
+	}
 
 	if err := pi.callback(context.Background(), pi.Key, oldValue, newValue); err != nil {
+		// A callback may read other sensitive settings, even when this key is
+		// public (for example, cipher rotation reloads all KMS credentials).
 		mlog.Error(context.TODO(), "param change callback failed",
 			mlog.String("key", pi.Key),
 			mlog.String("oldValue", logOldValue),
 			mlog.String("newValue", logNewValue),
-			mlog.Err(err))
+			mlog.String("error", config.RedactedValue))
 	} else {
 		mlog.Info(context.TODO(), "param value changed",
 			mlog.String("key", pi.Key),
@@ -547,13 +559,15 @@ func (pg *ParamGroup) Init(manager *config.Manager) {
 		panic(fmt.Sprintf("%s declares NonSensitiveSuffixes without Sensitive", pg.KeyPrefix))
 	}
 	pg.manager = manager
-	pg.manager.RegisterConfigPrefix(pg.KeyPrefix)
 	if pg.Sensitive {
 		pg.manager.RegisterSensitivePrefix(pg.KeyPrefix)
 		for _, suffix := range pg.NonSensitiveSuffixes {
 			pg.manager.RegisterNonSensitiveSuffix(pg.KeyPrefix, suffix)
 		}
 	}
+	// Keep the namespace hidden until its default and reviewed exemptions are
+	// installed, including the empty-prefix hook configuration namespace.
+	pg.manager.RegisterConfigPrefix(pg.KeyPrefix)
 }
 
 func (pg *ParamGroup) GetValue() map[string]string {

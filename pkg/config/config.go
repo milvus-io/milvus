@@ -17,9 +17,9 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
-	"fmt"
-	"log"
+	"os"
 	"strings"
 
 	"github.com/cockroachdb/errors"
@@ -71,7 +71,10 @@ func Init(opts ...Option) (*Manager, error) {
 		s := NewFileSource(o.FileInfo)
 		err := sourceManager.AddSource(s)
 		if err != nil {
-			log.Fatal("failed to add FileSource config", mlog.Err(err))
+			// Parser errors can quote configuration values. Keep the original
+			// process-exit behavior independently of the logger's fatal hook.
+			mlog.Error(context.TODO(), "failed to add FileSource config", mlog.String("error", RedactedValue))
+			os.Exit(1)
 		}
 	}
 	if o.EnvKeyFormatter != nil {
@@ -190,7 +193,7 @@ func flattenAndMergeMap(prefix string, m map[string]interface{}, result map[stri
 				jsonCompatible := convertToJSONCompatible(val)
 				jsonBytes, err := json.Marshal(jsonCompatible)
 				if err != nil {
-					fmt.Printf("marshal to json failed %s, error = %s\n", fullKey, err.Error())
+					mlog.Warn(context.TODO(), "marshal configuration to json failed", mlog.String("error", RedactedValue))
 					continue
 				}
 				str = string(jsonBytes)
@@ -213,7 +216,7 @@ func flattenAndMergeMap(prefix string, m map[string]interface{}, result map[stri
 		default:
 			str, err := cast.ToStringE(val)
 			if err != nil {
-				fmt.Printf("cast to string failed %s, error = %s\n", fullKey, err.Error())
+				mlog.Warn(context.TODO(), "cast configuration to string failed", mlog.String("error", RedactedValue))
 				continue
 			}
 			result[lowerKey(fullKey)] = str

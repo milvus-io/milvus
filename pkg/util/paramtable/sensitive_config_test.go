@@ -18,6 +18,8 @@ package paramtable
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
@@ -27,7 +29,128 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/config"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
+
+func TestBaseTableFailureLogsProtectConfig(t *testing.T) {
+	const canary = "yaml-base-table-secret-canary"
+	dir := t.TempDir()
+	t.Setenv("MILVUSCONF", dir)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "milvus.yaml"),
+		[]byte("minio:\n  secretAccessKey: !!int "+canary+"\n"), 0600))
+	sink := mlog.CaptureGlobalLogs(t, &mlog.Config{Level: "debug"})
+	base := NewBaseTable(SkipRemote(true), SkipEnv(true))
+	t.Cleanup(base.Manager().Close)
+	assert.Contains(t, sink.String(), "init baseTable with file failed")
+	assert.NotContains(t, sink.String(), canary)
+}
+
+func TestBaseTablePublicGroupEnvironmentOverride(t *testing.T) {
+	const key = "function.textEmbedding.providers.openai.enable"
+	const credential = "function.textEmbedding.providers.openai.credential"
+	const opaque = "function.textEmbedding.providers.opaque.enable"
+	for _, envPrefix := range []string{"", config.DefaultEnvPrefix} {
+		t.Run(envPrefix, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Setenv("MILVUSCONF", dir)
+			t.Setenv(envPrefix+"FUNCTION_TEXTEMBEDDING_PROVIDERS_OPENAI_ENABLE", "false")
+			t.Setenv("FUNCTION_TEXTEMBEDDING_PROVIDERS_OPENAI_CREDENTIAL", "credential-env-canary")
+			t.Setenv("FUNCTION_TEXTEMBEDDING_PROVIDERS_OPAQUE_ENABLE", "opaque-env-canary")
+			t.Setenv("UNRELATED_DATABASE_URL", "unrelated-env-canary")
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "milvus.yaml"),
+				[]byte(key+": true\n"+credential+": from-file\n"), 0o600))
+
+			// Exercise BaseTable's actual source initialization order and the
+			// production group's declarations together.
+			base := NewBaseTable(SkipRemote(true), Interval(0))
+			t.Cleanup(base.Manager().Close)
+			params := functionConfig{}
+			params.init(base)
+			mgr := base.Manager()
+			require.Equal(t, "false", params.GetTextEmbeddingProviderConfig("openai")["enable"])
+			require.Equal(t, "credential-env-canary", params.GetTextEmbeddingProviderConfig("openai")["credential"])
+			for _, alias := range []string{key, strings.ReplaceAll(key, ".", "/"),
+				"FUNCTION_TEXTEMBEDDING_PROVIDERS_OPENAI_ENABLE", config.EtcdConfigKey(key)} {
+				source, value, err := mgr.GetRegisteredConfig(alias)
+				require.NoError(t, err, alias)
+				assert.Equal(t, "EnvironmentSource", source)
+				assert.Equal(t, "false", value)
+				assert.Equal(t, ConfigMutationAllowed, EvaluateConfigMutation(mgr, alias, ConfigMutationSet).Rejection)
+				assert.Equal(t, ConfigMutationAllowed, EvaluateConfigMutation(mgr, alias, ConfigMutationDelete).Rejection)
+			}
+			assert.Equal(t, "false", mgr.ProjectConfigs()[strings.ToLower(key)])
+			assert.Equal(t, "false", mgr.ProjectConfigs()[config.EtcdConfigKey(key)])
+			assert.Equal(t, "false[EnvironmentSource]", mgr.GetConfigsView()[strings.ToLower(key)])
+			assert.Equal(t, "false", mgr.ProjectBy(config.WithPrefix("function.textEmbedding.providers."),
+				config.RemovePrefix("function.textEmbedding.providers."))["openai.enable"])
+			_, _, err := mgr.GetRegisteredConfig(credential)
+			require.ErrorIs(t, err, config.ErrKeySensitive)
+			for _, envOnly := range []string{opaque, "FUNCTION_TEXTEMBEDDING_PROVIDERS_OPAQUE_ENABLE",
+				config.EtcdConfigKey(opaque), "UNRELATED_DATABASE_URL"} {
+				_, _, err := mgr.GetRegisteredConfig(envOnly)
+				require.ErrorIs(t, err, config.ErrKeyUnregistered, envOnly)
+				assert.Equal(t, ConfigMutationUnregistered, EvaluateConfigMutation(mgr, envOnly, ConfigMutationSet).Rejection)
+			}
+			for _, projection := range []map[string]string{mgr.ProjectConfigs(), mgr.GetConfigsView()} {
+				for _, value := range projection {
+					assert.NotContains(t, value, "env-canary")
+				}
+			}
+		})
+	}
+}
+
+func TestBaseTableFileRefreshCannotEndorseOpaqueEnvironment(t *testing.T) {
+	const key = "function.textEmbedding.providers.future.enable"
+	const canary = "opaque-environment-refresh-canary"
+	dir := t.TempDir()
+	t.Setenv("MILVUSCONF", dir)
+	t.Setenv("FUNCTION_TEXTEMBEDDING_PROVIDERS_FUTURE_ENABLE", canary)
+	filename := filepath.Join(dir, "milvus.yaml")
+	require.NoError(t, os.WriteFile(filename, []byte("{}\n"), 0o600))
+	base := NewBaseTable(SkipRemote(true), Interval(0))
+	t.Cleanup(base.Manager().Close)
+	params := functionConfig{}
+	params.init(base)
+	mgr := base.Manager()
+	_, _, err := mgr.GetRegisteredConfig(key)
+	require.ErrorIs(t, err, config.ErrKeyUnregistered)
+
+	// A spelling first introduced after startup cannot lend its public leaf
+	// to a value that was previously only an arbitrary environment variable.
+	require.NoError(t, os.WriteFile(filename, []byte(key+": true\n"), 0o600))
+	assert.Equal(t, config.RedactedValue, mgr.ProjectFileConfigs()[strings.ToLower(key)])
+	source, raw, err := mgr.GetConfig(key)
+	require.NoError(t, err)
+	assert.Equal(t, "EnvironmentSource", source)
+	assert.Equal(t, canary, raw)
+	_, value, err := mgr.GetRegisteredConfig(key)
+	require.ErrorIs(t, err, config.ErrKeySensitive)
+	assert.Empty(t, value)
+	assert.Equal(t, ConfigMutationSensitive, EvaluateConfigMutation(mgr, key, ConfigMutationSet).Rejection)
+	for _, projection := range []map[string]string{mgr.ProjectConfigs(), mgr.GetConfigsView(),
+		mgr.ProjectBy(config.WithPrefix("function"))} {
+		for _, value := range projection {
+			assert.NotContains(t, value, canary)
+		}
+	}
+}
+
+func TestSensitivePulsarConfigParseFailureLogs(t *testing.T) {
+	base := NewBaseTable(SkipRemote(true), SkipEnv(true))
+	t.Cleanup(base.Manager().Close)
+	address := "pulsar://private-user:password-canary@private-broker.invalid:%"
+	require.NoError(t, base.Save("pulsar.address", address))
+	sink := mlog.CaptureGlobalLogs(t, &mlog.Config{Level: "debug"})
+	var params PulsarConfig
+	params.Init(base)
+	assert.Empty(t, params.WebAddress.GetValue(), "invalid address keeps the existing fallback")
+	assert.Equal(t, address, params.Address.GetValue(), "runtime address remains raw")
+	assert.Contains(t, sink.String(), "failed to parse pulsar config")
+	for _, canary := range []string{"private-user", "password-canary", "private-broker.invalid"} {
+		assert.NotContains(t, sink.String(), canary)
+	}
+}
 
 func TestSensitiveConfigMetadata(t *testing.T) {
 	base := NewBaseTable(SkipRemote(true), SkipEnv(true))

@@ -161,6 +161,8 @@ func (m *Manager) IsImmutable(key string) bool {
 // contain arbitrary values, including every process environment variable, so
 // safe projections must distinguish declared Milvus configuration from source
 // implementation details.
+// Register restrictive metadata before declaring the key: source refreshes
+// can run concurrently, and undeclared values remain hidden at safe boundaries.
 func (m *Manager) RegisterConfigKey(key string) {
 	formattedKey := formatKey(key)
 	if formattedKey != "" {
@@ -169,6 +171,8 @@ func (m *Manager) RegisterConfigKey(key string) {
 }
 
 // RegisterConfigPrefix records a declared dynamic configuration prefix.
+// Install sensitivity and suffix metadata before publishing the declaration,
+// just as for RegisterConfigKey.
 //
 // An empty prefix declares every key of this manager to be Milvus
 // configuration, which is correct only for a table whose sources are all
@@ -266,6 +270,41 @@ type resolvedKey struct {
 	// name — and a leaf name is a property of the segmentation. So that rule
 	// may only be applied to a segmentation nothing outside the process chose.
 	segmented bool
+}
+
+// rememberSourceSnapshot records a complete generation's spelling history.
+// The caller holds snapshotMutex exclusively. Learn every supplied spelling
+// before marking any remaining identities ambiguous: a source normally stores
+// both dotted and folded aliases, and map iteration order must not decide which
+// alias gets to endorse the value. Repeating a snapshot during initial pull or
+// event dispatch is harmless.
+func (m *Manager) rememberSourceSnapshot(configs map[string]string, source string) {
+	for key := range configs {
+		m.rememberSpelling(key, source)
+	}
+	for key := range configs {
+		m.rememberValueIdentity(key)
+	}
+}
+
+// rememberValueIdentity makes a first unsegmented publication permanently
+// ambiguous. Source maps become readable before CREATE events populate the
+// ownership index, so keySourceMap cannot serve as publication history. Keep
+// this decision after deletion as well: a delayed event or a later spelling
+// must not retroactively endorse an earlier generation. Ordinary overrides of
+// an already endorsed identity keep its spelling.
+func (m *Manager) rememberValueIdentity(key string) {
+	lookup := formatKey(key)
+	if strings.Contains(lookup, ".") {
+		// The formatter preserved the namespace (knowhere.*), so no
+		// segmentation was lost and there is nothing to recover.
+		return
+	}
+	m.spellingMutex.Lock()
+	defer m.spellingMutex.Unlock()
+	if !m.dottedSpellings.Contain(lookup) {
+		m.collidedSpellings.Insert(lookup)
+	}
 }
 
 // rememberSpelling records that one configuration key can be addressed under

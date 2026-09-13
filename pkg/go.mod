@@ -12,6 +12,7 @@ require (
 	github.com/apache/pulsar-client-go v0.19.0
 	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b
 	github.com/blang/semver/v4 v4.0.0
+	github.com/bytedance/mockey v1.4.6
 	github.com/cenkalti/backoff/v4 v4.2.1
 	github.com/cockroachdb/errors v1.9.1
 	github.com/confluentinc/confluent-kafka-go v1.9.1
@@ -68,9 +69,14 @@ require (
 
 require (
 	github.com/ebitengine/purego v0.9.0 // indirect
+	github.com/gopherjs/gopherjs v1.12.80 // indirect
 	github.com/iskorotkov/avro/v2 v2.33.1 // indirect
+	github.com/jtolds/gls v4.20.0+incompatible // indirect
 	github.com/shirou/gopsutil/v3 v3.23.12 // indirect
+	github.com/smartystreets/assertions v1.2.0 // indirect
+	github.com/smartystreets/goconvey v1.7.2 // indirect
 	github.com/spaolacci/murmur3 v1.1.0 // indirect
+	golang.org/x/arch v0.11.0 // indirect
 )
 
 require (

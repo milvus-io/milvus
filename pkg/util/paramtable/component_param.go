@@ -1967,6 +1967,7 @@ Fractions >= 1 will always sample. Fractions < 0 are treated as zero.`,
 		Version:      "2.4.0",
 		DefaultValue: "true",
 		Export:       true,
+		Sensitive:    true,
 	}
 	t.OtlpSecure.Init(base.mgr)
 
@@ -7331,6 +7332,7 @@ Startup processes fixed-size batches and retries failed reads per segment. An ex
 		Version:      "2.0.0",
 		DefaultValue: "false",
 		Export:       true,
+		Sensitive:    true,
 	}
 	p.WithCredential.Init(base.mgr)
 

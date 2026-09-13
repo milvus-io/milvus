@@ -111,6 +111,8 @@ func (m *Manager) GetConfigs() map[string]string {
 // returns an empty map rather than an error. Call it after the owning ParamTable
 // is built.
 func (m *Manager) ProjectConfigs() map[string]string {
+	m.snapshotMutex.RLock()
+	defer m.snapshotMutex.RUnlock()
 	return m.getConfigs(true)
 }
 
@@ -185,6 +187,8 @@ func (m *Manager) walkProjection(includeInertOverlays bool, accept func(string) 
 // GetConfigsView returns a safe projection of all key values annotated with
 // the source that supplied them.
 func (m *Manager) GetConfigsView() map[string]string {
+	m.snapshotMutex.RLock()
+	defer m.snapshotMutex.RUnlock()
 	config := make(map[string]string)
 	m.walkProjection(false, everyKey, func(key, storedKey, value, source string) {
 		switch m.classify(storedKey) {
@@ -219,6 +223,8 @@ func (m *Manager) GetEffectiveBy(filters ...Filter) map[string]string {
 
 // ProjectBy returns a safe projection of the matching values.
 func (m *Manager) ProjectBy(filters ...Filter) map[string]string {
+	m.snapshotMutex.RLock()
+	defer m.snapshotMutex.RUnlock()
 	return m.getBy(true, false, filters...)
 }
 
@@ -243,7 +249,33 @@ func (m *Manager) FileConfigs() map[string]string {
 
 // ProjectFileConfigs returns a safe projection of the file-source values.
 func (m *Manager) ProjectFileConfigs() map[string]string {
-	return m.fileConfigs(true)
+	var source *FileSource
+	m.sources.Range(func(_ string, candidate Source) bool {
+		if file, ok := candidate.(*FileSource); ok {
+			source = file
+			return false
+		}
+		return true
+	})
+	if source == nil {
+		return map[string]string{}
+	}
+	// Refresh can publish a new generation and dispatch handlers that call
+	// safe getters themselves. Never enter it while holding snapshotMutex.
+	if _, err := source.GetConfigurations(); err != nil {
+		return map[string]string{}
+	}
+	m.snapshotMutex.RLock()
+	defer m.snapshotMutex.RUnlock()
+	source.RLock()
+	defer source.RUnlock()
+	projected := make(map[string]string, len(source.configs))
+	for key, value := range source.configs {
+		if value, include := m.projectValue(key, value, true); include {
+			projected[key] = value
+		}
+	}
+	return projected
 }
 
 func (m *Manager) fileConfigs(redact bool) map[string]string {

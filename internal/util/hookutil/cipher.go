@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -445,11 +446,11 @@ func InitOnceCipher() {
 	initCipherOnce.Do(func() {
 		err := initCipher()
 		if err != nil {
-			mlog.Panic(context.TODO(),
-				fmt.Sprintf("fail to init cipher plugin, go_so_path=%s, cpp_so_path=%s, error=%v",
-					paramtable.GetCipherParams().SoPathGo.GetValue(),
-					paramtable.GetCipherParams().SoPathCpp.GetValue(),
-					err))
+			// Init receives credentials and topology; its error can echo either.
+			mlog.Panic(context.TODO(), "fail to init cipher plugin",
+				mlog.String("go_so_path", config.RedactedValue),
+				mlog.String("cpp_so_path", config.RedactedValue),
+				mlog.String("error", config.RedactedValue))
 		}
 	})
 }
@@ -487,7 +488,7 @@ func reloadCipherConfig(ctx context.Context, key, _, _ string) error {
 	if err := cipher.Init(initConfigs); err != nil {
 		mlog.Error(ctx, "fail to reload cipher plugin config",
 			mlog.String("key", key),
-			mlog.Err(err))
+			mlog.String("error", config.RedactedValue))
 		return err
 	}
 

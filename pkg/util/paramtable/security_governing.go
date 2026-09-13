@@ -25,16 +25,17 @@ import (
 // SecurityGoverningConfigPrefix covers everything that decides whether Milvus
 // authenticates, who counts as privileged, and what each role may do — the
 // authorization switch, the superuser list, the root password, the TLS modes and
-// every RBAC privilege table are all declared under it, and none of them is an
-// operational knob a configuration endpoint needs to write.
+// RBAC privilege tables are declared under it. Built-in role grants use a
+// separate namespace fenced below. None is an operational knob a generic
+// configuration endpoint needs to write.
 const SecurityGoverningConfigPrefix = "common.security."
 
 // securityGoverningConfigKeys are the authorization-deciding keys that were not
 // declared under that prefix. Compared after lower-casing, which is the form
 // config.Manager.ResolveRegisteredConfigKey returns.
 //
-// TestSecurityGoverningPrefixCoversTheSecuritySection is what finds entries for
-// this list; it is not meant to be curated by hand.
+// Declaration audits and positive tests of startup security consumers keep
+// this list complete; names alone cannot identify plugin-selection controls.
 var securityGoverningConfigKeys = []string{
 	// Turning this off stops RBAC checks resolving an alias to its collection,
 	// so a grant on the collection no longer covers access through the alias.
@@ -46,13 +47,17 @@ var securityGoverningConfigKeys = []string{
 	// etcd entry an operator used to disable public privileges restores the
 	// permissive default.
 	"proxy.enablepublicprivilege",
+	// Selects the hook that implements API-key verification and request checks.
+	"proxy.sopath",
+	// Permits startup to continue with DefaultHook after plugin loading fails.
+	"common.panicwhenpluginfail",
 }
 
 // IsSecurityGoverningConfig reports whether a key decides authentication or
 // authorization, and so must stay out of reach of endpoints that do not
 // themselves authenticate.
 //
-// Deliberately a prefix plus a short list rather than an enumeration of names:
+// Deliberately namespaces plus a short list rather than an enumeration of names:
 // an enumeration has to be remembered every time someone adds a key, and the
 // first version of this fence named two of the six keys that mattered.
 func IsSecurityGoverningConfig(key string) bool {
@@ -67,7 +72,10 @@ func IsSecurityGoverningConfig(key string) bool {
 	// matches a hypothetical "common.securityFoo". That over-match is the safe
 	// direction for a fence, and no such key exists.
 	identity := config.EtcdConfigKey(key)
-	if strings.HasPrefix(identity, securityGoverningConfigPrefixIdentity) {
+	if strings.HasPrefix(identity, securityGoverningConfigPrefixIdentity) ||
+		strings.HasPrefix(identity, "builtinroles") {
+		// Startup grants these configured privileges as root, including grants
+		// to existing roles. Persisted changes take effect after restart.
 		return true
 	}
 	_, ok := securityGoverningConfigIdentities[identity]

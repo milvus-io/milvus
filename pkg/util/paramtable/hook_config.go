@@ -19,13 +19,6 @@ type hookConfig struct {
 func (h *hookConfig) init(base *BaseTable) {
 	h.hookBase = base
 
-	h.SoPath = ParamItem{
-		Key:          "soPath",
-		Version:      "2.0.0",
-		DefaultValue: "",
-	}
-	h.SoPath.Init(base.mgr)
-
 	h.SoConfig = ParamGroup{
 		// The hook table is built by NewBaseTableFromYamlOnly, so hook.yaml is
 		// its only source and every key in it really is plugin configuration.
@@ -40,6 +33,14 @@ func (h *hookConfig) init(base *BaseTable) {
 		Sensitive: true,
 	}
 	h.SoConfig.Init(base.mgr)
+	// SoPath inherits this namespace's sensitivity. Install the group policy
+	// before declaring the scalar while the file source is already refreshing.
+	h.SoPath = ParamItem{
+		Key:          "soPath",
+		Version:      "2.0.0",
+		DefaultValue: "",
+	}
+	h.SoPath.Init(base.mgr)
 
 	// No values, and no count either: hook.yaml is plugin-defined and may carry
 	// credentials under names the core cannot classify, and every nested key is
