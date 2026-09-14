@@ -4,6 +4,10 @@ import (
 	"context"
 	"strconv"
 
+	"github.com/cockroachdb/errors"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -44,6 +48,9 @@ func (w *segmentLifecycleWriter) CommitL1Segment(ctx context.Context, meta *stre
 	err := retry.Do(ctx, func() error {
 		resp, err := w.coord.SaveBinlogPaths(ctx, req)
 		if err := merr.CheckRPCCall(resp, err); err != nil {
+			if errors.Is(err, merr.ErrSegmentNotFound) {
+				return nil
+			}
 			return err
 		}
 		version = dataVersionFromStatus(resp.GetExtraInfo())
@@ -77,6 +84,7 @@ func buildEnsureGrowingSegmentRequest(meta *streamingpb.SegmentAssignmentMeta) *
 		SegmentId:            meta.GetSegmentId(),
 		Vchannel:             meta.GetVchannel(),
 		StorageVersion:       meta.GetStorageVersion(),
+		SchemaVersion:        meta.GetSchemaVersion(),
 		IsCreatedByStreaming: true,
 	}
 }
@@ -107,12 +115,16 @@ func buildCommitL1SegmentRequest(serverID int64, meta *streamingpb.SegmentAssign
 		Field2BinlogPaths:   binlogs,
 		Field2StatslogPaths: statslogs,
 		Field2Bm25LogPaths:  bm25logs,
+		Deltalogs:           storage.GetDeltaBinlog(),
+		Stats:               storage.GetStatistics(),
 		CheckPoints: []*datapb.CheckPoint{
 			{
 				SegmentID: meta.GetSegmentId(),
 				NumOfRows: int64(meta.GetStat().GetModifiedRows()),
+				Position:  &msgpb.MsgPosition{ChannelName: meta.GetVchannel(), Timestamp: meta.GetCheckpointTimeTick()},
 			},
 		},
+		StartPositions:                []*datapb.SegmentStartPosition{{SegmentID: meta.GetSegmentId(), StartPosition: &msgpb.MsgPosition{ChannelName: meta.GetVchannel(), Timestamp: meta.GetStat().GetCreateSegmentTimeTick()}}},
 		Flushed:                       true,
 		Channel:                       meta.GetVchannel(),
 		SegLevel:                      meta.GetStat().GetLevel(),

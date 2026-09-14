@@ -98,6 +98,8 @@ func TestStaleFinalCommitTaskSkipsAfterDataVersionAdvances(t *testing.T) {
 	require.NoError(t, stale.Execute(ctx))
 	assert.True(t, stale.Done())
 	assert.Equal(t, []int64{100, 200}, recorder.commitSegmentIDs)
+	assert.True(t, first.AssignmentMeta().GetL1CommitDone())
+	assert.True(t, newer.AssignmentMeta().GetL1CommitDone())
 	assert.Equal(t, int64(1), first.AssignmentMeta().GetSealedAtDataVersion().GetStreamingVersion())
 }
 

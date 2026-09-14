@@ -84,7 +84,6 @@ type openerAdaptorImpl struct {
 
 var (
 	walSwitchFlushCheckInterval = time.Second
-	walSwitchFlushTimeout       = time.Minute
 )
 
 // Open opens a wal instance for the channel.
@@ -364,6 +363,7 @@ func (o *openerAdaptorImpl) handleAlterWALFlushingStage(ctx context.Context, opt
 	ticker := time.NewTicker(walSwitchFlushCheckInterval)
 	defer ticker.Stop()
 
+	// The caller owns the deadline; keep draining while the WAL remains available.
 	// Periodically check recovery-owned data progress until target time tick is reached.
 	var dataCP *utility.WALCheckpoint
 	for dataCP == nil || dataCP.TimeTick < targetTimeTick {

@@ -100,7 +100,7 @@ func (w *segmentAllocWorker) do() {
 				mlog.Err(w.ctx.Err()),
 			)
 			return
-		case <-w.wal.Available():
+		case <-w.wal.Unavailable():
 			w.Logger().Warn(w.ctx, "wal is unavailable, stop alloc new segment",
 				mlog.FieldVChannel(w.vchannel),
 				mlog.FieldCollectionID(w.collectionID),

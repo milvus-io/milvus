@@ -15,7 +15,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
-	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
 // coordStub is a minimal MixCoordClient that only implements AllocSegment and
@@ -57,14 +56,11 @@ func TestCommitL1SegmentIgnoresSegmentNotFound(t *testing.T) {
 			return merr.Status(merr.WrapErrSegmentNotFound(1)), nil
 		}},
 	}
-	require.NoError(t, w.CommitL1Segment(context.Background(), newCommitL1SegmentTestMeta()))
+	_, err := w.CommitL1Segment(context.Background(), newCommitL1SegmentTestMeta())
+	require.NoError(t, err)
 }
 
-// TestCommitL1SegmentFailsOnInputError covers the Unrecoverable
-// classification for request-content rejections (e.g. a TEXT segment saved
-// with a pre-V3 storage version): DataCoord will never accept the same
-// request, so the error is marked unrecoverable and fails the segment
-// instead of hot-looping on it.
+// Input errors return from the lifecycle RPC retry loop.
 func TestCommitL1SegmentFailsOnInputError(t *testing.T) {
 	w := &segmentLifecycleWriter{
 		serverID: 1,
@@ -72,25 +68,22 @@ func TestCommitL1SegmentFailsOnInputError(t *testing.T) {
 			return merr.Status(merr.WrapErrParameterInvalid("v2", "v3")), nil
 		}},
 	}
-	err := w.CommitL1Segment(context.Background(), newCommitL1SegmentTestMeta())
+	_, err := w.CommitL1Segment(context.Background(), newCommitL1SegmentTestMeta())
 	require.Error(t, err)
-	require.False(t, retry.IsRecoverable(err))
+	require.Equal(t, merr.InputError, merr.GetErrorType(err))
 }
 
-// TestEnsureGrowingSegmentTaskFailsOnCoordInputError drives the full
-// classification chain end to end: DataCoord rejects the AllocSegment request
-// with an InputError status, the lifecycle writer marks it unrecoverable, and
-// the task layer fails the segment with a clean (non-ErrDelay) error instead
-// of requeueing a terminal failure.
-func TestEnsureGrowingSegmentTaskFailsOnCoordInputError(t *testing.T) {
+// qv task scheduling keeps incomplete operations pending for WAL recovery.
+func TestEnsureGrowingSegmentTaskRetainsInputErrorForRetry(t *testing.T) {
 	w := &segmentLifecycleWriter{
 		serverID: 1,
 		coord: &coordStub{allocSegment: func(_ context.Context, _ *datapb.AllocSegmentRequest) (*datapb.AllocSegmentResponse, error) {
 			return &datapb.AllocSegmentResponse{Status: merr.Status(merr.WrapErrParameterInvalid("v2", "v3"))}, nil
 		}},
 	}
-	view := newSegmentView(
+	view := NewSegmentView(
 		&streamingpb.SegmentAssignmentMeta{SegmentId: 1, Vchannel: "v1"},
+		0,
 		0,
 		false,
 		writeOnlyInsertBuffer{},
@@ -106,6 +99,6 @@ func TestEnsureGrowingSegmentTaskFailsOnCoordInputError(t *testing.T) {
 
 	err := task.Execute(context.Background())
 	require.Error(t, err)
-	require.False(t, errors.Is(err, nodescheduler.ErrDelay), "terminal error must not be requeued")
-	require.Error(t, view.unrecoverableErr())
+	require.True(t, errors.Is(err, nodescheduler.ErrDelay))
+	require.False(t, task.Done())
 }

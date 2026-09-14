@@ -285,14 +285,11 @@ func TestHandleAlterWALAdvanceCheckpointsStageMovesDataCheckpointToNewWAL(t *tes
 	require.NoError(t, err)
 }
 
-func TestHandleAlterWALFlushingStageTimesOutWhenDataCheckpointStalls(t *testing.T) {
+func TestHandleAlterWALFlushingStageHonorsContextWhenDataCheckpointStalls(t *testing.T) {
 	oldCheckInterval := walSwitchFlushCheckInterval
-	oldTimeout := walSwitchFlushTimeout
 	walSwitchFlushCheckInterval = 10 * time.Millisecond
-	walSwitchFlushTimeout = 30 * time.Millisecond
 	defer func() {
 		walSwitchFlushCheckInterval = oldCheckInterval
-		walSwitchFlushTimeout = oldTimeout
 	}()
 
 	channel := types.PChannelInfo{
@@ -322,13 +319,15 @@ func TestHandleAlterWALFlushingStageTimesOutWhenDataCheckpointStalls(t *testing.
 			AlterWALTs:       100,
 		},
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
 	start := time.Now()
 	param := &interceptors.InterceptorBuildParam{RecoveryStorage: rs}
 	resources := &walOpenResources{param: param}
 	err := (&openerAdaptorImpl{}).handleAlterWALFlushingStage(
-		context.Background(),
+		ctx,
 		&wal.OpenOption{Channel: channel},
-		nil,
+		&roWALAdaptorImpl{availableCtx: context.Background()},
 		rs,
 		resources,
 		snapshot,
@@ -336,7 +335,7 @@ func TestHandleAlterWALFlushingStageTimesOutWhenDataCheckpointStalls(t *testing.
 	resources.Close()
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "timeout waiting for flush completion")
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.Less(t, time.Since(start), 500*time.Millisecond)
 	assert.Equal(t, streamingpb.AlterWALStage_FLUSHING, snapshot.Checkpoint.AlterWalState.Stage)
 }
@@ -428,7 +427,7 @@ func TestHandleAlterWALAdvanceCheckpointsStageKeepsReplicateCheckpoint(t *testin
 	assert.Equal(t, sourceMessageID.Marshal(), replicateCheckpoint.GetMessageId().GetId())
 }
 
-func TestHandleAlterWALFlushingStageReturnsWhenFlusherFails(t *testing.T) {
+func TestHandleAlterWALFlushingStageReturnsWhenWALUnavailable(t *testing.T) {
 	channel := types.PChannelInfo{
 		Name:       "alter-wal-flusher-failure-test",
 		Term:       1,
@@ -436,7 +435,7 @@ func TestHandleAlterWALFlushingStageReturnsWhenFlusherFails(t *testing.T) {
 	}
 	resource.InitForTest(t)
 
-	roWAL := adaptImplsToROWAL(&firstTimeTickWALImpls{
+	roWAL := adaptImplsToROWAL(&recoveryBarrierWALImpls{
 		channel: channel,
 		appendFunc: func(context.Context, message.MutableMessage) (message.MessageID, error) {
 			return rmq.NewRmqID(1), nil
@@ -462,26 +461,11 @@ func TestHandleAlterWALFlushingStageReturnsWhenFlusherFails(t *testing.T) {
 		},
 	}
 
-	mockRecoverFlusher := mockey.Mock(flusherimpl.RecoverWALFlusher).
-		To(func(param *flusherimpl.RecoverWALFlusherParam) *flusherimpl.WALFlusherImpl {
-			require.NotNil(t, param.OnFatal)
-			param.OnFatal(errors.New("flusher failed"))
-			return &flusherimpl.WALFlusherImpl{}
-		}).
-		Build()
-	defer mockRecoverFlusher.UnPatch()
-
-	mockFlusherClose := mockey.Mock((*flusherimpl.WALFlusherImpl).Close).
-		To(func(*flusherimpl.WALFlusherImpl) {
-			rs.Close()
-		}).
-		Build()
-	defer mockFlusherClose.UnPatch()
+	roWAL.markUnavailable(errors.New("background recovery failed"))
 
 	resources := &walOpenResources{
-		roWAL:           roWAL,
-		param:           &interceptors.InterceptorBuildParam{},
-		recoveryStorage: rs,
+		roWAL: roWAL,
+		param: &interceptors.InterceptorBuildParam{RecoveryStorage: rs},
 	}
 	defer resources.Close()
 

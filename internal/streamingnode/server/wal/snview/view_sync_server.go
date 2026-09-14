@@ -40,7 +40,7 @@ func (s *PChannelViewSyncServer) SyncQueryView(stream viewpb.ViewSyncService_Syn
 	return handler.NewViewSyncServer(&pchannelScopedQueryViewHandler{
 		pchannel: pchannel.Name,
 		handler:  queryViewHandler,
-	}).SyncQueryViewUntil(stream, rawWAL.Available())
+	}).SyncQueryViewUntil(stream, rawWAL.Unavailable())
 }
 
 func asViewSyncStreamingGRPCError(err error) error {

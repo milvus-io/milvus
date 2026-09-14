@@ -105,6 +105,7 @@ func (t *commitL1SegmentTask) Execute(ctx context.Context) error {
 		segment.mu.Lock()
 		handles := segment.markPendingDataDurableLocked(t.timetick)
 		segment.finalCommitDone = true
+		segment.meta.L1CommitDone = true
 		sealedEvent, sealed := segment.markSealedAtDataVersionLocked(sealedAt)
 		segment.mu.Unlock()
 		segment.NotifyDataUpdated()

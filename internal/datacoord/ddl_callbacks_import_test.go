@@ -37,8 +37,8 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
-	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	datacoordkv "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
+	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
@@ -1413,7 +1413,7 @@ func TestImportAckCallbacks_CommitVsAbort_Race(t *testing.T) {
 // captureBroadcastAPI is a BroadcastAPI mock that records the message passed
 // to Broadcast so a test can assert its broadcast target vchannels.
 type captureBroadcastAPI struct {
-	captured message.BroadcastMutableMessage
+	capturedMsg message.BroadcastMutableMessage
 }
 
 func (c *captureBroadcastAPI) Broadcast(_ context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {

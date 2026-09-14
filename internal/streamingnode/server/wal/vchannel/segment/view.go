@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
@@ -124,6 +125,7 @@ func newSegmentAssignmentMetaFromCreateSegmentMessage(msg message.ImmutableCreat
 		Vchannel:           msg.VChannel(),
 		State:              streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING,
 		StorageVersion:     header.StorageVersion,
+		SchemaVersion:      header.SchemaVersion,
 		CheckpointTimeTick: msg.TimeTick(),
 		PersistedStorage:   &streamingpb.L1SegmentPersistedStorage{},
 		Stat: &streamingpb.SegmentAssignmentStat{
@@ -893,6 +895,12 @@ func (s *SegmentView) appendPersistedStorage(storage *streamingpb.L1SegmentPersi
 	)
 	if storage.GetMergedStatsBinlog() != nil {
 		s.meta.PersistedStorage.MergedStatsBinlog = cloneFieldBinlog(storage.GetMergedStatsBinlog())
+	}
+	if storage.GetStatistics() != nil {
+		s.meta.PersistedStorage.Statistics = proto.Clone(storage.GetStatistics()).(*datapb.Statistics)
+	}
+	for _, binlog := range storage.GetDeltaBinlog() {
+		s.meta.PersistedStorage.DeltaBinlog = append(s.meta.PersistedStorage.DeltaBinlog, cloneFieldBinlog(binlog))
 	}
 }
 

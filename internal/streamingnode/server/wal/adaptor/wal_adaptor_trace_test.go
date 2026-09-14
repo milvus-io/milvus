@@ -29,7 +29,7 @@ import (
 )
 
 type chunkRetryTestWALImpls struct {
-	*firstTimeTickWALImpls
+	*recoveryBarrierWALImpls
 }
 
 const testMinWALMessageSize = 256 * 1024
@@ -92,7 +92,7 @@ func TestAppendWithOptionalChunkingUsesSuccessfulHeadIDOnDurableAssembly(t *test
 		}
 		return id, nil
 	})
-	walImpls := &chunkRetryTestWALImpls{firstTimeTickWALImpls: inner}
+	walImpls := &chunkRetryTestWALImpls{recoveryBarrierWALImpls: inner}
 	roWAL := adaptImplsToROWAL(walImpls, func() {})
 	defer roWAL.Close()
 	writeMetrics := metricsutil.NewWriteMetrics(walImpls.Channel(), walImpls.WALName())
@@ -156,7 +156,7 @@ func TestAppendWithOptionalChunkingDisabledUsesSingleRecord(t *testing.T) {
 		return walimplstest.NewTestMessageID(int64(len(persisted))), nil
 	})
 	w := &walAdaptorImpl{
-		rwWALImpls: &chunkRetryTestWALImpls{firstTimeTickWALImpls: inner},
+		rwWALImpls: &chunkRetryTestWALImpls{recoveryBarrierWALImpls: inner},
 	}
 	msg := newOversizedTestInsertMessage(t, chunkBudget).
 		WithTimeTick(100).
@@ -191,7 +191,7 @@ func TestAppendWithOptionalChunkingObservesSplitChunkSNHotUpdate(t *testing.T) {
 		return walimplstest.NewTestMessageID(int64(len(persisted))), nil
 	})
 	w := &walAdaptorImpl{
-		rwWALImpls: &chunkRetryTestWALImpls{firstTimeTickWALImpls: inner},
+		rwWALImpls: &chunkRetryTestWALImpls{recoveryBarrierWALImpls: inner},
 	}
 
 	appendWithSwitch := func(timeTick uint64, enabled bool) []message.MutableMessage {

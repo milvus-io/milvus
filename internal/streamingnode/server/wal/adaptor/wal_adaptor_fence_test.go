@@ -128,7 +128,7 @@ func TestAppendWaitingBehindAlterWALIsFenced(t *testing.T) {
 
 func TestOversizedAppendWithSNChunkingDisabledUsesLegacySingleRecordPath(t *testing.T) {
 	var persisted atomic.Int32
-	walImpls := &chunkRetryTestWALImpls{firstTimeTickWALImpls: newFirstTimeTickWALImpls(
+	walImpls := &chunkRetryTestWALImpls{recoveryBarrierWALImpls: newFirstTimeTickWALImpls(
 		func(ctx context.Context, _ message.MutableMessage) (message.MessageID, error) {
 			persisted.Add(1)
 			return finishFenceTestAppend(ctx, 1), nil

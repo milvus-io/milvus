@@ -99,7 +99,7 @@ func TestScannerAdaptorStopsOnCorruptedChunk(t *testing.T) {
 
 	s := newScannerAdaptor("corrupted-chunk", l, wal.ReadOption{
 		DeliverPolicy: options.DeliverPolicyAll(),
-	}, metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics(), func() {}, true)
+	}, metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics(), func() {})
 
 	select {
 	case <-s.Done():

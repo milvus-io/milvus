@@ -248,10 +248,7 @@ func TestCapacityScanRecoversDroppedSealNotification(t *testing.T) {
 		segmentIndex:  map[int64]SegmentBelongs{11: belongs},
 		sealOperators: make(map[string]SealOperator),
 	}
-	worker := &sealWorker{
-		statsManager: m,
-		sealNotifier: make(chan sealSegmentIDWithPolicy, 1),
-	}
+	worker := newSealWorker(m)
 	m.worker = worker
 
 	sealed := make(chan utils.SealSegmentSignal, 1)
@@ -263,8 +260,8 @@ func TestCapacityScanRecoversDroppedSealNotification(t *testing.T) {
 	}).Once()
 	m.sealOperators[belongs.PChannel] = sealOperator
 
-	// Saturate the best-effort notifier so the capacity hint is dropped.
-	worker.sealNotifier <- sealSegmentIDWithPolicy{segmentID: 999, sealPolicy: policy.PolicyCapacity()}
+	// Saturate the notifier so the wakeup is dropped while the pending seal is retained.
+	worker.sealNotifier <- struct{}{}
 	worker.NotifySealSegment(11, policy.PolicyCapacity())
 	select {
 	case signal := <-sealed:
