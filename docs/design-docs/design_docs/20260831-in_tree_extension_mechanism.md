@@ -219,8 +219,14 @@ hook in every role it runs, not only in the proxy.
     across its replicas, so one pod still pending drags a loaded group to 0).
     Unknown *pauses* the clock: the last known figure is kept and the timeout
     is only ever measured over ticks that learned something. A task whose
-    group never becomes readable simply stays paused until the collection is
-    released or dropped, which removes it.
+    group never becomes readable stays paused until the collection is
+    released or dropped, which removes it; once its figure has been unknown
+    for longer than the load timeout it stops counting as a load in progress,
+    so it no longer makes every tick run the checkers, which keep their own
+    intervals, and a tick that reads a figure makes it count again. A task
+    whose group no longer holds any replica of the collection - a
+    `TransferReplica` moved the last one out - has nothing left to watch and
+    is removed.
   - Before the timeout tears anything down, the group is asked the question
     the proxy asks of it: can its shard leaders serve every shard of the
     collection right now (`utils.ShardLeaderReadinessByResourceGroup`,
@@ -319,7 +325,9 @@ them through `user.yaml` or the environment.
   with no session) - plus a request naming no resource group, a load
   percentage that regresses, the three ways a serving group reads as an
   unreliable 0 (failed read, no target, a replica that has not reported), a
-  ready group whose percentage sits at 99 for the whole timeout, a load
+  ready group whose percentage sits at 99 for the whole timeout, a group that
+  stays unknown past the load timeout and one that loses its last replica
+  (neither may keep pushing the checkers), a load
   timeout that may not unload a serving collection, a replayed expansion,
   the rebuild of scoped load tasks after a restart, and an index engine
   version override clamped with no QueryNode registered.

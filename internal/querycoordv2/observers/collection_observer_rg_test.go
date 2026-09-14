@@ -1060,6 +1060,95 @@ func (s *CollectionObserverRGSuite) TestATaskKeptByTheReadinessShieldDoesNotDriv
 	s.True(s.ob.loadTasks.Contain(key), "and the Ready task is still there, contributing nothing")
 }
 
+// ageUnknownSince backdates when the task's figure became unknown, which is how
+// a test gets a task that has been unknown for longer than the load timeout
+// without waiting for one.
+func (s *CollectionObserverRGSuite) ageUnknownSince(key string, age time.Duration) {
+	task, ok := s.ob.loadTasks.Get(key)
+	s.Require().True(ok)
+	s.Require().False(task.UnknownSince.IsZero(), "only a task whose figure is unknown has a run to age")
+	task.UnknownSince = time.Now().Add(-age)
+	s.ob.loadTasks.Insert(key, task)
+}
+
+// TestATaskWhoseGroupStaysUnknownStopsDrivingTheCheckers pins the cost of a
+// scoped task whose group's figure cannot be read for good - here no delegator
+// ever reports, as happens when a replica's only node goes away. An unknown
+// figure pauses the clock, so the timeout never ends the task and the readiness
+// shield is never reached; before this, every tick counted the task as a load
+// in progress and ran every checker at the observer's rate for the life of the
+// process.
+//
+// Within the load timeout the task still drives the checkers: nothing has
+// reported yet is exactly how a load starts. Past it the task stops pushing,
+// is still never torn down, and drives them again on the first tick that reads
+// a figure.
+func (s *CollectionObserverRGSuite) TestATaskWhoseGroupStaysUnknownStopsDrivingTheCheckers() {
+	s.registerLoadingCollection(1700, 1701, "1700-dmc0", 1, 17001, 17002)
+	s.putReplica(1700, 170001, 81, rgA)
+	// No delegator anywhere: nothing reports on collection 1700.
+
+	s.ob.LoadCollection(s.ctx, 1700, rgA)
+	key := s.taskKey(1700, rgA)
+	s.Require().EqualValues(-1, s.ob.observeResourceGroupProgress(s.ctx)[key].Percentage)
+	calls := s.countCheckerRuns()
+
+	s.ob.Observe(s.ctx)
+	s.Equal(1, *calls, "a figure unknown for less than the load timeout is a load starting, and drives the checkers")
+	task, _ := s.ob.loadTasks.Get(key)
+	s.False(task.UnknownSince.IsZero(), "the task records when its figure became unknown")
+
+	s.ageUnknownSince(key, time.Hour)
+	for tick := 0; tick < 4; tick++ {
+		s.ob.Observe(s.ctx)
+		s.Require().True(s.ob.loadTasks.Contain(key), "tick %d: an unknown figure never ends the task", tick)
+		s.Len(s.replicaIDsInRG(1700, rgA), 1, "tick %d: nor tears its replica down", tick)
+	}
+	s.Equal(1, *calls, "a task unknown for longer than the load timeout must not run every checker on every tick")
+
+	// A delegator reports, carrying the channel and one of the two segments:
+	// the figure is known, the run of unknown ticks is over, and the task is a
+	// load in progress again.
+	s.putDelegator(1700, 81, "1700-dmc0", 17001)
+	s.ob.Observe(s.ctx)
+	task, ok := s.ob.loadTasks.Get(key)
+	s.Require().True(ok)
+	s.True(task.UnknownSince.IsZero(), "a tick that reads a figure clears the mark")
+	s.EqualValues(66, task.LastProgress, "and records the figure it read")
+	s.Equal(2, *calls, "and the task drives the checkers again")
+}
+
+// TestATaskWhoseGroupLostItsLastReplicaIsRemoved covers the other way a scoped
+// task's figure stays unknown for good: its resource group no longer holds any
+// replica of the collection, because a TransferReplica moved the last one out.
+// There is nothing left for the task to load, time out or tear down, so it is
+// removed on the next tick - without touching the collection or the replica
+// that moved, and without pushing the checkers, then or later.
+func (s *CollectionObserverRGSuite) TestATaskWhoseGroupLostItsLastReplicaIsRemoved() {
+	s.registerLoadingCollection(1800, 1801, "1800-dmc0", 2, 18001, 18002)
+	s.putReplica(1800, 180001, 91, rgA)
+	s.putServiceableDelegator(1800, 91, "1800-dmc0", 18001, 18002)
+	s.putReplica(1800, 180002, 92, rgB)
+	s.putServiceableDelegator(1800, 92, "1800-dmc0", 18001, 18002)
+	s.Require().True(s.targetMgr.UpdateCollectionCurrentTarget(s.ctx, 1800))
+	s.markCollectionLoaded(1800, 1801)
+
+	s.ob.LoadCollection(s.ctx, 1800, rgB)
+	key := s.taskKey(1800, rgB)
+	s.Require().NoError(s.meta.TransferReplica(s.ctx, 1800, rgB, rgA, 1))
+	s.Require().Empty(s.replicaIDsInRG(1800, rgB))
+	calls := s.countCheckerRuns()
+
+	for tick := 0; tick < 3; tick++ {
+		s.ob.Observe(s.ctx)
+		s.False(s.ob.loadTasks.Contain(key), "tick %d: a group with no replica left has no load task", tick)
+	}
+	s.Zero(*calls, "a task for a group with nothing left to load must not drive the checkers")
+	s.ElementsMatch([]int64{180001, 180002}, s.replicaIDsInRG(1800, rgA), "the replica that moved is left where it went")
+	s.Equal(querypb.LoadStatus_Loaded, s.meta.GetCollection(s.ctx, 1800).GetStatus(),
+		"and the collection keeps serving")
+}
+
 func TestCollectionObserverRG(t *testing.T) {
 	suite.Run(t, new(CollectionObserverRGSuite))
 }
