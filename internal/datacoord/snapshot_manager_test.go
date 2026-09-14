@@ -4386,13 +4386,16 @@ func TestSnapshotExportManager_Observability(t *testing.T) {
 
 func TestSanitizeSnapshotExportReason(t *testing.T) {
 	secret := "SUPERSECRET"
-	externalSpec := `{"extfs":{"access_key_id":"AKIAEXAMPLE","access_key_value":"` + secret + `"}}`
-	err := errors.New("copy failed for AKIAEXAMPLE using " + secret + strings.Repeat("x", snapshotExportFailureReasonLimit))
+	sas := "sv=2024-08-04&sig=SECRETSAS&sp=r"
+	externalSpec := `{"extfs":{"access_key_id":"AKIAEXAMPLE","access_key_value":"` + secret + `","source_sas_token":"` + sas + `"}}`
+	err := errors.New("copy failed for AKIAEXAMPLE using " + secret +
+		" from https://src.blob.core.windows.net/c/o?" + sas + strings.Repeat("x", snapshotExportFailureReasonLimit))
 
 	reason := sanitizeSnapshotExportReason(err, externalSpec)
 
 	assert.NotContains(t, reason, "AKIAEXAMPLE")
 	assert.NotContains(t, reason, secret)
+	assert.NotContains(t, reason, "SECRETSAS")
 	assert.LessOrEqual(t, len(reason), snapshotExportFailureReasonLimit)
 
 	truncated := sanitizeSnapshotExportReason(
