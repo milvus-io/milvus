@@ -72,20 +72,31 @@ func searchSegmentsGrouped(ctx context.Context, mgr *Manager, segments []Segment
 		totalNq += searchReq.GetNumOfQuery()
 	}
 
-	// The scheduler admits this whole call as one task, however many branches
-	// and segments it covers. branchLimiter is shared by every segment here, so
-	// the task has at most GetCPUNum() phase-2 branch searches in flight no
-	// matter how the fan-out is shaped. The independent segment limit below
-	// bounds how many segments can hold their phase-1 filter bitsets while they
-	// wait for those branch units. Both are for grouped requests only: an
-	// ungrouped one evaluates no shared bitset and keeps the unbounded segment
+	// The scheduler sees this whole call as one task, however many branches and
+	// segments it covers. The two task-scoped bounds below prevent it from
+	// turning the full branch-by-segment fan-out into in-flight search work at
+	// once. branchLimiter is shared by every segment, so the task never has more
+	// than GetCPUNum() branch searches in flight. segmentSearchLimiter covers
+	// SearchGrouped itself, from phase 1 through the filter-bitset lifetime, but
+	// deliberately not DiskCache.Do: lazy segment loading has cache capacity and
+	// loader resource admission of its own. Both bounds are for grouped requests
+	// only; an ungrouped one evaluates no shared bitset and keeps the segment
 	// fan-out it has always had.
-	var branchLimiter *semaphore.Weighted
+	var branchLimiter, segmentSearchLimiter *semaphore.Weighted
 	if len(searchReqs) > 1 {
-		branchLimiter = semaphore.NewWeighted(int64(hardware.GetCPUNum()))
+		limit := int64(hardware.GetCPUNum())
+		branchLimiter = semaphore.NewWeighted(limit)
+		segmentSearchLimiter = semaphore.NewWeighted(limit)
 	}
 
 	searcher := func(ctx context.Context, s Segment, idx int) error {
+		if segmentSearchLimiter != nil {
+			if err := segmentSearchLimiter.Acquire(ctx, 1); err != nil {
+				return err
+			}
+			defer segmentSearchLimiter.Release(1)
+		}
+
 		// record search time
 		tr := timerecord.NewTimeRecorder("searchOnSegments")
 		results, err := s.SearchGrouped(ctx, searchReqs, branchLimiter)
@@ -120,9 +131,6 @@ func searchSegmentsGrouped(ctx context.Context, mgr *Manager, segments []Segment
 
 	// calling segment search in goroutines
 	errGroup, ctx := errgroup.WithContext(ctx)
-	if branchLimiter != nil {
-		errGroup.SetLimit(hardware.GetCPUNum())
-	}
 	segmentsWithoutIndex := make([]int64, 0)
 	for i, segment := range segments {
 		seg := segment

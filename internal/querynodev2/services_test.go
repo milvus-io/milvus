@@ -21,6 +21,7 @@ import (
 	"io"
 	"math/rand"
 	"path"
+	"runtime"
 	"strconv"
 	"sync"
 	"testing"
@@ -63,6 +64,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/resource"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -1568,6 +1570,65 @@ func (suite *ServiceSuite) TestSearchSegments_Normal() {
 	suite.Equal(rsp.GetIsTopkReduce(), true)
 	suite.Equal(rsp.GetIsRecallEvaluation(), true)
 	suite.Equal(commonpb.ErrorCode_Success, rsp.GetStatus().GetErrorCode())
+}
+
+// A shared-filter group's branch results are lifted into one envelope. Under
+// zero-copy the envelope owns the temporary branch pins, so the blobs remain
+// valid through marshal/release even if the temporary objects would otherwise
+// be collectible. The streaming task cannot execute a group, so a grouped
+// request must take the regular task even when stream computing is on.
+func (suite *ServiceSuite) TestSearchSegments_SharedFilterGroupZeroCopy() {
+	ctx := context.Background()
+	// pre
+	suite.TestWatchDmChannelsInt64()
+	suite.TestLoadSegments_Int64()
+
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.EnableResultZeroCopy.Key, "true")
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.UseStreamComputing.Key, "true")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.EnableResultZeroCopy.Key)
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.UseStreamComputing.Key)
+
+	creq, err := suite.genCSearchRequest(10, schemapb.DataType_FloatVector, 107, defaultMetricType, false, false)
+	suite.NoError(err)
+	creq.Topk = defaultTopK
+	req := &querypb.SearchRequest{
+		Req:             creq,
+		DmlChannels:     []string{suite.vchannel},
+		TotalChannelNum: 2,
+		SegmentIDs:      suite.validSegmentIDs,
+		Scope:           querypb.DataScope_Historical,
+		ExtraFilterSharingReqs: []*internalpb.SubSearchRequest{{
+			SerializedExprPlan: creq.GetSerializedExprPlan(),
+			PlaceholderGroup:   creq.GetPlaceholderGroup(),
+			DslType:            creq.GetDslType(),
+			Nq:                 creq.GetNq(),
+			Topk:               creq.GetTopk(),
+			FieldId:            creq.GetFieldId(),
+			PartitionIDs:       creq.GetPartitionIDs(),
+		}},
+	}
+
+	rsp, err := suite.node.SearchSegments(ctx, req)
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_Success, rsp.GetStatus().GetErrorCode())
+	suite.True(rsp.GetIsAdvanced())
+	suite.Len(rsp.GetSubResults(), 2)
+	defer resource.MsgPins.Release(rsp)
+
+	suite.True(resource.MsgPins.HasPinned(rsp), "the envelope must own its branch pins")
+
+	runtime.GC()
+	runtime.GC()
+	suite.True(resource.MsgPins.HasPinned(rsp), "a live envelope must retain its C-backed blobs")
+	for i, sub := range rsp.GetSubResults() {
+		suite.EqualValues(i, sub.GetReqIndex())
+		suite.NotEmpty(sub.GetSlicedBlob())
+		var data schemapb.SearchResultData
+		suite.NoError(proto.Unmarshal(sub.GetSlicedBlob(), &data), "branch %d blob must still decode after GC", i)
+		suite.EqualValues(creq.GetNq(), data.GetNumQueries())
+	}
+	resource.MsgPins.Release(rsp)
+	suite.False(resource.MsgPins.HasPinned(rsp))
 }
 
 func (suite *ServiceSuite) TestStreamingSearch() {

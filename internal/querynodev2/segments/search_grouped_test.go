@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/util/cache"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -227,6 +228,73 @@ func parkedMockSegment(t *testing.T, arrived chan<- struct{}, gate <-chan struct
 	return m
 }
 
+// groupedLazyTestCache separates the point where a cache load starts from the
+// point where its loaded segment enters the pinned callback. This lets the
+// grouped fan-out tests verify that cache admission is not governed by the
+// segment search semaphore, while every callback still returns before its
+// simulated pin is released.
+type groupedLazyTestCache struct {
+	cache.Cache[int64, Segment]
+
+	segments        map[int64]Segment
+	loadGate        <-chan struct{}
+	loadEntered     chan<- int64
+	callbackEntered chan<- int64
+	callbackExited  chan<- int64
+	activeCallbacks atomic.Int64
+}
+
+func (c *groupedLazyTestCache) Do(ctx context.Context, key int64, doer func(context.Context, Segment) error) (bool, error) {
+	if c.loadEntered != nil {
+		c.loadEntered <- key
+	}
+	select {
+	case <-ctx.Done():
+		return true, ctx.Err()
+	case <-c.loadGate:
+	}
+
+	c.activeCallbacks.Add(1)
+	if c.callbackEntered != nil {
+		c.callbackEntered <- key
+	}
+	defer func() {
+		c.activeCallbacks.Add(-1)
+		if c.callbackExited != nil {
+			c.callbackExited <- key
+		}
+	}()
+	return true, doer(ctx, c.segments[key])
+}
+
+func groupedLazyMockSegment(
+	t *testing.T,
+	id int64,
+	searchCalls *atomic.Int64,
+	searchStarted chan<- int64,
+	searchGate <-chan struct{},
+) Segment {
+	t.Helper()
+	m := NewMockSegment(t)
+	m.EXPECT().ID().Return(id).Maybe()
+	m.EXPECT().DatabaseName().Return("default").Maybe()
+	m.EXPECT().ResourceGroup().Return("rg").Maybe()
+	m.EXPECT().ExistIndex(mock.Anything).Return(true).Maybe()
+	m.EXPECT().IsLazyLoad().Return(true).Once()
+	m.EXPECT().SearchGrouped(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, reqs []*SearchRequest, _ *semaphore.Weighted) ([]*SearchResult, error) {
+			searchCalls.Add(1)
+			searchStarted <- id
+			<-searchGate
+			out := make([]*SearchResult, len(reqs))
+			for i := range out {
+				out[i] = new(SearchResult)
+			}
+			return out, nil
+		}).Maybe()
+	return m
+}
+
 // The scheduler admits a grouped request as one task however many branches and
 // segments it covers, so the bound on its branch searches has to be the task's
 // too: one limiter for every segment. A per-segment bound would still be
@@ -335,6 +403,168 @@ func TestSearchSegmentsGroupedBoundsSegmentFanOut(t *testing.T) {
 		arrived := fanOut(t, cpus+2, []*SearchRequest{req})
 		expectArrivals(t, arrived, cpus+2)
 	})
+}
+
+// Lazy loading owns separate cache and resource admission. Both cache misses
+// must be allowed to start even with one CPU, while the loaded segments still
+// enter SearchGrouped one at a time and therefore hold at most one shared
+// filter bitset concurrently.
+func TestSearchSegmentsGroupedDoesNotThrottleLazyLoadWithSearchLimit(t *testing.T) {
+	const cpus = 1
+	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(cpus))
+	require.Equal(t, cpus, hardware.GetCPUNum())
+
+	req, manager := groupedTestRequest(t)
+	loadGate := make(chan struct{})
+	searchGate := make(chan struct{})
+	var closeLoad, closeSearch sync.Once
+	t.Cleanup(func() {
+		closeLoad.Do(func() { close(loadGate) })
+		closeSearch.Do(func() { close(searchGate) })
+	})
+
+	loadEntered := make(chan int64, 2)
+	searchStarted := make(chan int64, 2)
+	var searchCalls atomic.Int64
+	segments := map[int64]Segment{
+		1: groupedLazyMockSegment(t, 1, &searchCalls, searchStarted, searchGate),
+		2: groupedLazyMockSegment(t, 2, &searchCalls, searchStarted, searchGate),
+	}
+	testCache := &groupedLazyTestCache{
+		segments:    segments,
+		loadGate:    loadGate,
+		loadEntered: loadEntered,
+	}
+	manager.DiskCache = testCache
+
+	type searchOutcome struct {
+		results [][]*SearchResult
+		err     error
+	}
+	done := make(chan searchOutcome, 1)
+	go func() {
+		results, err := searchSegmentsGrouped(context.Background(), manager,
+			[]Segment{segments[1], segments[2]}, SegmentTypeSealed, []*SearchRequest{req, req})
+		done <- searchOutcome{results: results, err: err}
+	}()
+
+	for i := 0; i < 2; i++ {
+		select {
+		case <-loadEntered:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("only %d of 2 lazy loads entered before the search limit", i)
+		}
+	}
+	closeLoad.Do(func() { close(loadGate) })
+
+	select {
+	case <-searchStarted:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the first loaded segment did not start searching")
+	}
+	select {
+	case <-searchStarted:
+		t.Fatal("more than one loaded segment entered SearchGrouped with one CPU")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	closeSearch.Do(func() { close(searchGate) })
+	select {
+	case outcome := <-done:
+		require.NoError(t, outcome.err)
+		require.Len(t, outcome.results, 2)
+	case <-time.After(10 * time.Second):
+		t.Fatal("grouped lazy search did not finish")
+	}
+	assert.EqualValues(t, 2, searchCalls.Load())
+	assert.Zero(t, testCache.activeCallbacks.Load())
+}
+
+// Canceling while one loaded segment owns the search token must let another
+// pinned cache callback leave without entering SearchGrouped. The active
+// callback is then released, the cache sees both callbacks return, and the
+// grouped call exposes no partial result matrix on its error path.
+func TestSearchSegmentsGroupedCancellationReleasesWaitingLazyCallback(t *testing.T) {
+	const cpus = 1
+	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(cpus))
+	require.Equal(t, cpus, hardware.GetCPUNum())
+
+	req, manager := groupedTestRequest(t)
+	loadGate := make(chan struct{})
+	close(loadGate)
+	searchGate := make(chan struct{})
+	var closeSearch sync.Once
+	t.Cleanup(func() { closeSearch.Do(func() { close(searchGate) }) })
+
+	searchStarted := make(chan int64, 2)
+	callbackEntered := make(chan int64, 2)
+	callbackExited := make(chan int64, 2)
+	var searchCalls atomic.Int64
+	segments := map[int64]Segment{
+		1: groupedLazyMockSegment(t, 1, &searchCalls, searchStarted, searchGate),
+		2: groupedLazyMockSegment(t, 2, &searchCalls, searchStarted, searchGate),
+	}
+	testCache := &groupedLazyTestCache{
+		segments:        segments,
+		loadGate:        loadGate,
+		callbackEntered: callbackEntered,
+		callbackExited:  callbackExited,
+	}
+	manager.DiskCache = testCache
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	type searchOutcome struct {
+		results [][]*SearchResult
+		err     error
+	}
+	done := make(chan searchOutcome, 1)
+	go func() {
+		results, err := searchSegmentsGrouped(ctx, manager,
+			[]Segment{segments[1], segments[2]}, SegmentTypeSealed, []*SearchRequest{req, req})
+		done <- searchOutcome{results: results, err: err}
+	}()
+
+	for i := 0; i < 2; i++ {
+		select {
+		case <-callbackEntered:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("only %d of 2 loaded cache callbacks entered", i)
+		}
+	}
+	select {
+	case <-searchStarted:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the token-owning segment did not enter SearchGrouped")
+	}
+
+	cancel()
+	select {
+	case <-callbackExited:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the callback waiting for the segment token did not exit on cancellation")
+	}
+	assert.EqualValues(t, 1, searchCalls.Load())
+	select {
+	case <-searchStarted:
+		t.Fatal("the canceled token waiter entered SearchGrouped")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	closeSearch.Do(func() { close(searchGate) })
+	select {
+	case outcome := <-done:
+		assert.ErrorIs(t, outcome.err, context.Canceled)
+		assert.Nil(t, outcome.results)
+	case <-time.After(10 * time.Second):
+		t.Fatal("grouped search did not finish after releasing the active callback")
+	}
+	select {
+	case <-callbackExited:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the token-owning cache callback did not exit")
+	}
+	assert.Zero(t, testCache.activeCallbacks.Load())
 }
 
 // The limiter belongs to the task, so several segments running their branches
