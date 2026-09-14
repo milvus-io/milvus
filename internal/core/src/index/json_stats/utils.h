@@ -83,6 +83,12 @@ UnescapeJsonString(const std::string& escaped) {
                       escaped);
         }
         return std::string(std::string_view(elem.get_string()));
+    } catch (const SegcoreError&) {
+        // Already classified above (DataFormatBroken); SegcoreError derives from
+        // std::runtime_error, so without this the generic handler below would
+        // rewrap it as UnexpectedError and the build scheduler would retry a
+        // document that fails identically on every attempt.
+        throw;
     } catch (const simdjson::simdjson_error& e) {
         ThrowInfo(SimdjsonParseErrorToErrorCode(e.error()),
                   "Failed to unescape json string (simdjson): {}, {}",
