@@ -1,7 +1,7 @@
 # MEP: Rooted Local File System
 
 - **Created:** 2026-07-12
-- **Updated:** 2026-09-11
+- **Updated:** 2026-09-14
 - **Author(s):** @sparknack
 - **Status:** Draft
 - **Component:** Local filesystem / Segcore / Index / Caching layer
@@ -30,12 +30,12 @@ alone does not imply unlink. The following example shows the proposed API:
 ```cpp
 auto local_file_system = local::FileSystem::Create(node_cache_root_path);
 auto root_dir = local_file_system.GetRootDirectory();
-auto local_chunk_dir = root_dir->Child("local_chunk");
-auto segments_dir = local_chunk_dir->Child("segments");
-auto segment_dir = segments_dir->Child("100");
+auto local_chunk_dir = root_dir->ChildDirectory("local_chunk");
+auto segments_dir = local_chunk_dir->ChildDirectory("segments");
+auto segment_dir = segments_dir->ChildDirectory("100");
 
-auto output_file = segment_dir->Open(
-    "index.bin", {.mode = local::OpenMode::ReadWrite, .create = true});
+auto output_file = local::FileSystem::Open(
+    segment_dir, "index.bin", {.mode = local::OpenMode::ReadWrite, .create = true});
 // output_file and any receiving I/O wrapper retain segment_dir.
 ```
 
@@ -101,28 +101,156 @@ does not promise immediate reclamation while consumers still hold references.
 
 ## 3. Public Interfaces
 
-### 3.1 Root context and shared directories
+### 3.1 Complete proposed `local` namespace API
 
-`FileSystem` is the composition-level owner of a root context and cleanup
-supervisor. Runtime construction creates it,
-injects directory references into consumers, and shuts it down after those
-consumers have stopped. Multiple independent physical roots are supported;
-there is no default instance or process-global lookup.
+`milvus::local` manages owned node-local artifacts. `Directory` represents a
+shared directory identity; `FileSystem` provides operations on a directory
+and an immediate entry name. There is no separate public path value or generic
+file/directory node. Runtime construction creates one `FileSystem` per owned
+root and injects directory references into business objects. Static file
+operations derive their context from the supplied directory, not a singleton.
 
-`Create(root_path)` constructs this context once at the composition boundary.
-`GetRootDirectory()` returns a shared reference to its existing root directory.
-Ordinary consumers receive directory references directly. `Open(name, options)`
-is reserved for opening a file within a directory. Examples use `_dir` for
-directory references and `_path` for native paths to distinguish them from
-business objects such as segments and chunks.
+The declarations below specify the proposed public surface, including option,
+metadata, and cleanup-report types. They are a design contract, not an installed
+header. Private state and factory-only constructors are omitted. Examples below
+use `namespace local = milvus::local;` outside the `milvus` namespace.
 
 ```cpp
+#include <cstddef>
+#include <cstdint>
+#include <exception>
+#include <filesystem>
+#include <functional>
+#include <memory>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace milvus::local {
+
 class Directory;
 using DirectoryPtr = std::shared_ptr<Directory>;
 
+enum class OpenMode { ReadOnly, ReadWrite };
+
+struct OpenOptions {
+    OpenMode mode{OpenMode::ReadOnly};
+    bool create{false};
+    bool truncate{false};
+    bool exclusive{false};  // Requires create; fail if the entry already exists.
+    bool direct_io{false};
+};
+
+struct MapOptions {
+    uint64_t offset{0};  // Byte offset in the file; need not be page-aligned.
+    size_t length{0};    // Exact byte count; zero means an empty range.
+    bool populate{false};
+};
+
+enum class EntryType { RegularFile, Directory, Symlink, Other };
+
+struct EntryInfo {
+    std::string name;  // Immediate name, never an absolute or recursive path.
+    EntryType type;
+};
+
+// Called synchronously without namespace locks; false stops enumeration.
+using EntryVisitor = std::function<bool(const EntryInfo&)>;
+
+enum class CleanupOperation { RemoveDirectory, RollbackCreation };
+
+struct CleanupFailure {
+    std::filesystem::path path;  // Diagnostic path, not an ownership handle.
+    uint64_t generation;
+    uint64_t attempt;
+    CleanupOperation operation;
+    std::exception_ptr error;    // Original failure, not only its message.
+};
+
+struct CleanupReport {
+    uint64_t live_directories{0};  // Includes ancestors retained by failed work.
+    uint64_t pending_cleanup{0};   // Retired records still owing cleanup.
+    std::vector<CleanupFailure> failures;  // Latest unresolved attempt per record.
+
+    // True only when no live directory or cleanup obligation remains.
+    bool IsComplete() const noexcept;
+};
+
+class Directory final {
+ public:
+    // Get the shared live child, or create/adopt an ordinary directory.
+    // Busy while creation or old-generation cleanup owns this name.
+    DirectoryPtr ChildDirectory(std::string_view name);
+
+    Directory(const Directory&) = delete;
+    Directory& operator=(const Directory&) = delete;
+    Directory(Directory&&) = delete;
+    Directory& operator=(Directory&&) = delete;
+
+    // Final reference starts recursive cleanup; failures go to the supervisor.
+    ~Directory() noexcept;
+};
+
+class FileHandle final {
+ public:
+    FileHandle() noexcept;  // Empty; Get() == -1 and GetDirectory() == nullptr.
+    FileHandle(const FileHandle&) = delete;
+    FileHandle& operator=(const FileHandle&) = delete;
+    FileHandle(FileHandle&&) noexcept;
+    FileHandle& operator=(FileHandle&&) noexcept;
+    ~FileHandle() noexcept;
+
+    // Borrow the fd; ownership remains with this handle.
+    int Get() const noexcept;
+    // Copy the owning directory reference, e.g. for a native fd adapter.
+    DirectoryPtr GetDirectory() const noexcept;
+    // Observe the mode established at open; empty handles return false.
+    bool DirectIOEnabled() const noexcept;
+    // Close fd before releasing the directory; report close failures.
+    // Idempotent on an empty handle; does not unlink or imply fsync.
+    void Close();
+};
+
+class NativePath final {
+ public:
+    // Copies retain the same directory; moves transfer that reference.
+    NativePath(const NativePath&);
+    NativePath& operator=(const NativePath&);
+    NativePath(NativePath&&) noexcept;
+    NativePath& operator=(NativePath&&) noexcept;
+    ~NativePath() noexcept;
+
+    // Borrow the resolved native path while this owner stays alive.
+    const std::filesystem::path& Get() const & noexcept;
+    const std::filesystem::path& Get() const && = delete;
+};
+
+namespace io {
+
+class MappedRegion final {
+ public:
+    MappedRegion() noexcept;  // Empty range with no directory reference.
+    MappedRegion(const MappedRegion&) = delete;
+    MappedRegion& operator=(const MappedRegion&) = delete;
+    MappedRegion(MappedRegion&&) noexcept;
+    MappedRegion& operator=(MappedRegion&&) noexcept;
+    ~MappedRegion() noexcept;
+
+    // Borrow a read-only span; valid until reset, move assignment, or destruction.
+    std::span<const std::byte> Data() const noexcept;
+    // Unmap before releasing the directory; idempotent when empty.
+    void Reset() noexcept;
+};
+
+}  // namespace io
+
 class FileSystem final {
  public:
+    // Create/adopt this exact owned cache root under exclusive composition.
+    // The root must be absolute; existing contents are preserved on success.
     static FileSystem Create(std::filesystem::path absolute_root_path);
+    // Copy the existing root reference; fail after Finish starts.
     DirectoryPtr GetRootDirectory() const;
 
     FileSystem(const FileSystem&) = delete;
@@ -131,66 +259,139 @@ class FileSystem final {
     FileSystem& operator=(FileSystem&&) noexcept;
     ~FileSystem() noexcept;
 
-    // Supervisor operations concern already-retired directories only.
-    // Their result types must expose per-attempt failures (section 7).
+    // Open a regular file and retain its actual containing directory.
+    static FileHandle Open(const DirectoryPtr& dir, std::string_view name,
+                           const OpenOptions& options = {});
+    // Map an existing regular file read-only; retain dir until unmap.
+    static io::MappedRegion OpenMappedRegion(
+        const DirectoryPtr& dir, std::string_view name,
+        const MapOptions& options);
+    // Check entry presence without following symlinks or acquiring a child.
+    static bool Exists(const DirectoryPtr& dir, std::string_view name);
+    // Return regular-file size in bytes; fail for missing/wrong-type entries.
+    static uint64_t FileSize(const DirectoryPtr& dir, std::string_view name);
+    // Unlink a file/symlink; missing is success, real directories are rejected.
+    static void RemoveFile(const DirectoryPtr& dir, std::string_view name);
+    // Rename a regular file within dir, replacing an existing regular file.
+    // Reject directory/symlink operands; callers coordinate name reuse.
+    static void RenameFile(const DirectoryPtr& dir, std::string_view from,
+                           std::string_view to);
+    // Return a path plus dir ownership for a regular or not-yet-created file.
+    static NativePath ResolveNativePath(const DirectoryPtr& dir,
+                                        std::string_view name);
+    // Return this directory's native path plus ownership of this exact node.
+    static NativePath NativeDirectory(const DirectoryPtr& dir);
+    // Stream immediate metadata; does not acquire child ownership or sort.
+    static void VisitEntries(const DirectoryPtr& dir,
+                             const EntryVisitor& visitor);
+
+    // Retry each failed record at most once per invocation, including rollback.
+    // Return a snapshot; retain original failures if another attempt fails.
     CleanupReport RetryFailedCleanup();
+    // Stop new acquisition, release the context's root reference, and report
+    // remaining users/work. Repeatable; never wait for caller-held references.
     CleanupReport Finish();
 };
 
-class Directory final {
- public:
-    DirectoryPtr Child(std::string_view name);
-
-    bool Exists(std::string_view name) const;
-    uint64_t FileSize(std::string_view name) const;
-    FileHandle Open(std::string_view name, const OpenOptions& options);
-    io::MappedRegion OpenMappedRegion(
-        std::string_view name, const MapOptions& options);
-
-    void RemoveFile(std::string_view name);
-    void RenameFile(std::string_view from, std::string_view to);
-    NativePath ResolveNativePath(std::string_view name) const;
-    NativePath NativeDirectory() const;
-
-    // Streaming enumeration; visitor receives metadata, not new owners.
-    void VisitEntries(const EntryVisitor& visitor) const;
-
-    ~Directory() noexcept;
-
-    Directory(const Directory&) = delete;
-    Directory& operator=(const Directory&) = delete;
-    // Directory objects stay at stable addresses; share DirectoryPtr.
-};
+}  // namespace milvus::local
 ```
 
-These declarations summarize responsibilities; reporting and visitor types
-will be specified in the implementation PR. Directory constructors are private;
-only root/child factories establish registration and the shared control block.
-Recursive directory deletion is an internal cleanup primitive, invoked when
-directory ownership ends. Callers explicitly remove individual files through
-`RemoveFile()`.
+Every operation taking a `DirectoryPtr` requires a non-null reference and
+copies it before accessing native state. New child/file/mapping/native-path
+acquisition and metadata/name operations reject a context after `Finish()`
+closes admission. Operations admitted before shutdown retain a context guard
+until their results are published or rolled back. Shutdown accounts for those
+in-flight operations and cannot report complete while they can publish an
+owner. Existing file I/O, mappings, and native consumers keep their resources
+until release; closing admission does not invalidate them. The caller must
+keep its argument variable stable during that call; mutating the same `shared_ptr` variable
+concurrently remains a data race. Successful files, mappings, and native-path
+results retain their own reference. Entry metadata and diagnostic paths do not.
 
-### 3.2 String arguments and namespace boundaries
+Resource constructors are factory-only except the explicitly empty handles.
+Moved-from resource handles are empty. A moved-from `FileSystem` owns no root
+or shutdown obligation; only destruction or assignment is valid. Move assignment
+performs nonthrowing teardown of the destination before taking the source's
+ownership. Directory objects are neither copied nor moved.
 
-Public calls accept strings. Validation is centralized internally and rejects
-empty names, NUL bytes, absolute paths, `.`, `..`, and directory separators.
+File byte I/O reuses the existing reader/writer and positioned-I/O mechanisms.
+Their migrated constructors accept a complete `FileHandle`; no new buffering,
+rate-limiting, or writer lifecycle API is introduced here. A native adapter
+borrowing `Get()` keeps the handle alive and does not close the borrowed fd.
+An adapter that duplicates the fd also retains `GetDirectory()` until that
+copy is closed. There is no public bare-fd ownership release operation.
 
-Operations address an immediate entry. For example:
+Operations report errors through the existing C++ exception conventions;
+no new public error hierarchy or numeric error codes are introduced here.
+Busy creation/retirement is distinguishable from missing and type conflict.
+A report captures the original exception and operation for cleanup failures.
+Implementation must preserve native failure details and audit the actual
+construction/translation sites before claiming end-to-end classification.
+Destructors never throw. Explicit `Close()` invalidates the handle even if it
+reports a native close error; the same numeric fd must not be blindly retried.
+Callers requiring write durability use their I/O adapter's explicit sync/finish.
+
+`CleanupReport` is a non-owning snapshot of directory lifecycle state, not a
+way to keep directories alive. `pending_cleanup` includes removing and failed
+records; `failures` contains only unresolved latest attempts at the snapshot.
+Previously returned reports remain unchanged after retry. Snapshot collection
+copies metadata under synchronization and invokes no callbacks there. Shutdown
+and retry methods are serialized by the composition owner; they may observe
+concurrent last-reference releases. After admission is closed, a complete
+report is terminal for that context.
+
+### 3.2 Names, entry types, and existing directories
+
+Names are borrowed for the call; stored names are copied. Central validation
+rejects empty names, NUL bytes, absolute paths, `.`, `..`, and directory
+separators. Each operation addresses an immediate entry:
 
 ```cpp
-auto segment_dir = segments_dir->Child("100");
-auto index_dir = segment_dir->Child("index");
-auto output_file = index_dir->Open("data.bin", options);
+auto segment_dir = segments_dir->ChildDirectory("100");
+auto index_dir = segment_dir->ChildDirectory("index");
+auto output_file = local::FileSystem::Open(index_dir, "data.bin", options);
 ```
 
-`segments_dir->Open("100/index/data.bin", options)` is not allowed: holding only
-`segments_dir` would not keep the independently owned `100` and `index` children
-alive. A future convenience method for multi-component paths must resolve
-and retain the relevant directory nodes, rather than concatenate a prefix.
+`Open(segments_dir, "100/index/data.bin", options)` is invalid. Keeping only
+`segments_dir` alive does not retain the independently managed descendants.
+Directory creation goes through `ChildDirectory()` before opening a file.
 
-`Child()` creates a missing directory or attaches to an existing ordinary
-directory under the startup/migration ownership rules in section 11.
-Directory creation goes through `Child()` before opening a file inside it.
+`ChildDirectory()` always returns `DirectoryPtr`; it does not infer an API
+return type from the entry name. Parent registration is checked before disk:
+
+| Parent registration | Disk state | Result |
+| --- | --- | --- |
+| Live, weak promotion succeeds | Stable owned directory | Return the same live object |
+| Creating, expired, removing, or failed cleanup | Any | Busy; do not adopt or replace |
+| Absent | Missing | Create, register, and return a new directory |
+| Absent | Ordinary directory | Preserve contents, adopt, register, and return |
+| Absent | File, symlink, or another type | Type conflict; leave the entry untouched |
+
+Adoption transfers cleanup ownership only on successful publication. Existing
+contents are not cleared or recursively registered. Files can be opened as
+needed; subdirectories receive individual identities only when acquired through
+`ChildDirectory()`. Remaining unregistered contents are still owned by their
+nearest managed ancestor and will be removed with it. A caller must not acquire
+and immediately discard child handles merely to list or inspect a directory.
+
+For example, adopting `segments/100` preserves an existing `index.bin`; final
+release of the resulting directory later deletes both the directory and that
+file. This is allowed only within a root already assigned exclusive ownership
+at composition/startup. Directory existence alone is not evidence of ownership.
+There is no supported mode that borrows arbitrary external directories.
+
+A cached live entry relies on the stable-namespace contract. A missing or
+externally replaced live directory is a contract violation, not permission to
+silently recreate it. Creation/adoption validates the actual native result;
+an `Exists()` check is not a substitute for handling creation/open errors.
+
+`Open`, mapping, `FileSize`, and `ResolveNativePath` reject symlinks and
+non-regular existing targets. `NativeDirectory` exports an already-acquired
+node. `Exists` and enumeration describe entry presence/type without following
+symlinks; only an absent entry returns false, while access/I/O errors propagate.
+`RemoveFile` may unlink a symlink itself. Existing native file aliases must be
+inventoried and removed or adapted before domain cutover. Directory aliases
+are never eligible for ownership registration.
 
 ### 3.3 One lifetime rule for every directory
 
@@ -218,6 +419,188 @@ directories are outside this tree and are not deleted. A caller requiring
 contents to survive final release must not place those contents in this
 ownership domain.
 
+### 3.4 Examples: composition, files, mappings, and shutdown
+
+`WriteIndexContents`, `ConsumeIndexBytes`, `HandleEntry`, and
+`ReportCleanupFailure` below are application helpers, not additional `local`
+APIs. The examples additionally use `<cassert>`, `<limits>`, `<stdexcept>`,
+and `<utility>`. The write helper borrows the fd, handles short writes/errors, and performs
+any required sync before returning. Its caller retains the complete handle.
+
+```cpp
+namespace local = milvus::local;
+
+// Called once by node composition, after exclusive startup reconciliation.
+auto local_file_system = local::FileSystem::Create(node_cache_root_path);
+{
+    auto root_dir = local_file_system.GetRootDirectory();
+    auto local_chunk_dir = root_dir->ChildDirectory("local_chunk");
+    auto segments_dir = local_chunk_dir->ChildDirectory("segments");
+    auto segment_dir = segments_dir->ChildDirectory("100");
+
+    // Repeated acquisition returns the same live object, preserving files.
+    auto same_segment_dir = segments_dir->ChildDirectory("100");
+    assert(same_segment_dir == segment_dir);
+    same_segment_dir.reset();
+
+    // Names are coordinated by the segment owner. Exclusive creation prevents
+    // accidentally truncating a file left by an earlier build attempt.
+    auto output_file = local::FileSystem::Open(
+        segment_dir, "index.building",
+        {.mode = local::OpenMode::ReadWrite, .create = true, .exclusive = true});
+    WriteIndexContents(output_file.Get());
+    output_file.Close();  // Leaves the file present and reports close errors.
+
+    // Same-directory rename replaces an existing regular index.bin, if any.
+    local::FileSystem::RenameFile(segment_dir, "index.building", "index.bin");
+    assert(local::FileSystem::Exists(segment_dir, "index.bin"));
+    const auto size_bytes = local::FileSystem::FileSize(segment_dir, "index.bin");
+
+    if (size_bytes > std::numeric_limits<size_t>::max()) {
+        throw std::overflow_error("index mapping exceeds addressable size");
+    }
+    auto mapped_region = local::FileSystem::OpenMappedRegion(
+        segment_dir, "index.bin",
+        {.offset = 0, .length = static_cast<size_t>(size_bytes)});
+    ConsumeIndexBytes(mapped_region.Data());
+
+    local::FileSystem::VisitEntries(segment_dir, [](const local::EntryInfo& entry) {
+        HandleEntry(entry.name, entry.type);
+        return true;  // Continue; returning false would stop early.
+    });
+
+    // Early removal is optional. Existing mapping stays usable on Linux;
+    // future opens by this filename fail. This does not request dir cleanup.
+    local::FileSystem::RemoveFile(segment_dir, "index.bin");
+    segment_dir.reset();
+    ConsumeIndexBytes(mapped_region.Data());  // Mapping still retains 100.
+    mapped_region.Reset();  // Unmap, release last reference, then clean 100.
+}  // Other directory owners release; context still retains its root.
+
+// All application tasks/native users must have finished before this point.
+auto cleanup_report = local_file_system.Finish();
+if (!cleanup_report.failures.empty()) {
+    for (const auto& failure : cleanup_report.failures) {
+        ReportCleanupFailure(failure);
+    }
+    // Retry after the reported cause has been addressed; not a tight loop.
+    cleanup_report = local_file_system.RetryFailedCleanup();
+}
+if (!cleanup_report.IsComplete()) {
+    // Shutdown is incomplete: surface remaining users/cleanup to node shutdown.
+    ReportIncompleteShutdown(cleanup_report);
+}
+```
+
+This example demonstrates the success path. If exclusive creation finds a
+leftover file, application recovery decides whether it belongs to a failed
+build; it is not silently deleted. On a write/open exception, resource RAII
+still releases references and the last directory owner triggers cleanup.
+`Close` does not promise durable rename; applications needing crash durability
+must also supply the appropriate file/directory synchronization protocol.
+
+### 3.5 Examples: business ownership and asynchronous work
+
+Each business level stores its own directory. Consumers acquire the business
+object through its synchronized registry before accessing its directory.
+
+```cpp
+class LoadedSegment {
+ public:
+    explicit LoadedSegment(local::DirectoryPtr segment_dir)
+        : segment_dir_(std::move(segment_dir)) {}
+
+    local::DirectoryPtr GetDirectory() const { return segment_dir_; }
+
+ private:
+    local::DirectoryPtr segment_dir_;
+};
+
+auto loaded_segment = std::make_shared<LoadedSegment>(
+    segments_dir->ChildDirectory("100"));
+
+// Acquired while the business instance is still published.
+auto segment_dir = loaded_segment->GetDirectory();
+executor.Submit([segment_dir] {
+    auto output_file = local::FileSystem::Open(
+        segment_dir, "index.bin",
+        {.mode = local::OpenMode::ReadWrite, .create = true});
+    BuildIndex(std::move(output_file));  // Receiver owns the full handle.
+});
+segment_dir.reset();
+loaded_segment.reset();  // Queued/running work still retains the directory.
+```
+
+`BuildIndex` is an application operation whose completion state retains the
+handle if I/O continues after the call. Cancellation releases the reference
+only after the underlying work stops. The executor must retain captures until
+execution completes or the queued operation is safely discarded.
+
+A same-path reload must not call `ChildDirectory("100")` while old users still
+hold that node: the call would legitimately return the old directory. The
+business unload marker can store a `std::weak_ptr<local::Directory>` captured
+before releasing its strong owner. After that weak reference expires, a
+serialized reload attempt may call `ChildDirectory("100")`: busy means old
+cleanup is incomplete; success creates/adopts the next instance after the old
+registration has been removed. Failed cleanup requires supervisor recovery.
+The marker never retains the old directory, and reload follows the business
+scheduler's retry path rather than busy-waiting. All users must follow that
+business admission path (section 4.4).
+
+### 3.6 Examples: native libraries and individual temporary files
+
+A native library that opens a file by path must retain the `NativePath`, not
+just copy its string. For a library that owns an opaque directory tree:
+
+```cpp
+auto index_dir = segment_dir->ChildDirectory("text_index");
+{
+    auto native_index_path = local::FileSystem::NativeDirectory(index_dir);
+    auto native_index = OpenNativeIndex(native_index_path.Get());
+    index_dir.reset();  // NativePath retains this exact directory.
+    UseNativeIndex(native_index);
+    CloseAndJoinNativeIndex(native_index);
+}  // Native consumer is gone before NativePath releases the directory.
+```
+
+`OpenNativeIndex`, `UseNativeIndex`, and `CloseAndJoinNativeIndex` stand for
+existing native-library calls. Exception paths need a native RAII owner that
+also closes/joins; returning a wrapper requires moving the path and native
+consumer together, with destruction ordered consumer first. The library may
+manage internal subdirectories itself; those are not independently registered
+through `ChildDirectory()` while the library can access the whole tree.
+
+For a native library opening one existing file:
+
+```cpp
+auto native_file_path = local::FileSystem::ResolveNativePath(
+    segment_dir, "index.bin");
+// Retain native_file_path until all native accesses to this file have ended.
+ReadWithNativeLibrary(native_file_path.Get());
+```
+
+`ResolveNativePath` can also return a missing file location for a native writer;
+it does not create or open that file. It cannot export a directory entry as a
+substitute for acquiring and retaining the child directory itself.
+
+An independent temporary-file owner uses the same directory and file APIs:
+
+```cpp
+// The surrounding owner keeps this unique name exclusive through cleanup.
+auto temp_file = local::FileSystem::Open(
+    segment_dir, unique_temp_name,
+    {.mode = local::OpenMode::ReadWrite, .create = true, .exclusive = true});
+UseTemporaryFile(temp_file.Get());
+temp_file.Close();
+local::FileSystem::RemoveFile(segment_dir, unique_temp_name);
+```
+
+The last example shows the normal sequence. The existing temporary-file RAII
+owner must run close/unlink on failure paths too, handle cleanup errors without
+throwing from its destructor, and retain `segment_dir` until that sequence
+finishes. Only remove the name if exclusive creation succeeded. No per-file
+ownership registry or new temporary-file framework is required.
+
 ## 4. Design Details: Directory Identity and References
 
 ### 4.1 Reference graph
@@ -243,25 +626,27 @@ to retain its contents indefinitely.
 A cached `DirectoryPtr` is an ownership decision. In particular, putting all
 children in an additional strong-reference map would prevent reclamation.
 Eviction removes the business map entry; outstanding consumers finish normally.
-A parent remains able to provide `Child()` to other callers, so the business
-layer must also stop publishing an evicted logical resource. The local layer
+A parent remains able to provide `ChildDirectory()` to other callers, so the
+business layer must also stop publishing an evicted logical resource. The local layer
 does not implement an admission fence before the last reference disappears.
 
 ### 4.2 Child lookup and creation
 
 Within a root context, identity is the parent generation plus entry name.
-A synchronized child registration contains a generation identifier, a weak
-live reference, and lifecycle status. It is reserved through creation and
+A synchronized child registration contains a root-unique generation identifier,
+a weak live reference, and lifecycle status. It is reserved through creation and
 cleanup, including failures.
 
-Under a short namespace lock, `Child()`:
+Under a short namespace lock, `ChildDirectory()`:
 
 1. Validates the name.
 2. Promotes an existing live weak reference and returns it.
-3. Returns a retryable busy result for an in-progress creation.
-4. Rejects retiring or failed-cleanup registrations.
+3. Returns a retryable busy error for an in-progress creation.
+4. Returns busy for expired, retiring, or failed-cleanup registrations.
 5. Reserves an absent name as `Creating`, then performs filesystem work
-   outside the namespace lock and publishes one `Live` object.
+   outside the per-parent namespace lock and publishes one `Live` object.
+   An existing ordinary directory is adopted without clearing its contents;
+   a file or symlink at that name is a type conflict, never a child directory.
 
 A failed creation must account for any directory already created. It may
 release the reservation only after rollback succeeds or after proving that
@@ -281,8 +666,8 @@ There is a race between the last strong decrement and entry into the
 destructor: the weak reference may already be expired while the old directory
 has not yet been deleted.
 
-`Child()` must treat an expired weak reference with an existing registration
-as unavailable. It must not erase it and create a new directory. Only the
+`ChildDirectory()` must treat an expired weak reference with an existing
+registration as unavailable. It must not erase it and create a new directory. Only the
 old generation's cleanup completion can release that reservation.
 
 A destructor or explicit shared-pointer deleter transitions its preallocated
@@ -302,27 +687,7 @@ loaded segment retains its segment directory, and an index object retains its
 index directory. These are examples of ownership placement, not distinct
 directory lifetime policies.
 
-```cpp
-// Illustrative business object; not an additional filesystem owner type.
-class LoadedSegment {
- public:
-    explicit LoadedSegment(local::DirectoryPtr segment_dir)
-        : segment_dir_(std::move(segment_dir)) {}
-
-    local::DirectoryPtr GetDirectory() const { return segment_dir_; }
-
- private:
-    local::DirectoryPtr segment_dir_;
-};
-
-// Construction, once for this business instance:
-auto loaded_segment =
-    std::make_shared<LoadedSegment>(segments_dir->Child("100"));
-
-// Repeated use obtains the existing instance's directory:
-auto segment_dir = loaded_segment->GetDirectory();
-auto index_file = segment_dir->Open("index.bin", options);
-```
+Section 3.5 shows the construction and asynchronous ownership pattern.
 
 The owner keeps the directory alive between operations even when there are
 no files open. Consumers first obtain a live business owner or a copy of its
@@ -338,18 +703,19 @@ normal business acquisition.
 
 Reload is a separate lifecycle event. Removing a segment from the business
 registry does not prove that old files, mappings, or tasks have finished. If
-they still retain the directory, `Child("100")` returns that same live node;
-it does not create a fresh segment generation or report that the old one is
+they still retain the directory, `ChildDirectory("100")` returns that same live
+node; it does not create a fresh segment generation or report that the old one is
 unloading. The business layer must not treat this successful lookup as
 permission to rebuild into the old instance's files.
 
 For reuse of the same physical path, the business lifecycle must retain an
 unloading marker and delay the next load until old users have released their
-references and old-directory cleanup has succeeded. Observe the registration's
-completion without retaining the directory itself, or the wait would prevent
-final release. Failed cleanup keeps reload blocked. Concurrent acquisition
-either obtains the published old instance before unload begins or follows the
-next-load admission path; it must not bypass admission with a direct `Child()`.
+references and old-directory cleanup has succeeded. The weak unload marker
+and subsequent `ChildDirectory()` attempt in section 3.5 observe this without
+retaining the old directory itself. Failed cleanup keeps reload blocked. Concurrent
+acquisition either obtains the published old instance before unload begins or
+follows the next-load admission path; it must not bypass admission with a
+direct `ChildDirectory()`.
 
 This is the default migration rule and preserves existing paths. Where a
 consumer already uses distinct physical paths for load instances, preserve
@@ -367,10 +733,10 @@ concurrent mutation of the same `shared_ptr` variable still requires ordinary
 C++ synchronization.
 
 ```cpp
-auto segment_dir = segments_dir->Child("100");
+auto segment_dir = segments_dir->ChildDirectory("100");
 {
-    auto index_file = segment_dir->Open(
-        "index.bin", {.mode = OpenMode::ReadWrite, .create = true});
+    auto index_file = local::FileSystem::Open(
+        segment_dir, "index.bin", {.mode = local::OpenMode::ReadWrite, .create = true});
 
     segment_dir.reset();  // index_file still retains the directory
     // Positioned I/O uses index_file.Get() while index_file is alive.
@@ -390,31 +756,23 @@ as write handles for a uniform directory-lifetime contract.
 
 ### 5.2 Writers and asynchronous operations
 
-`local::io::FileWriter`, buffering, positioned I/O, alignment, sync, rate
-limiting, and completion policies remain separate I/O concerns. A writer
+Existing reader/writer adapters, buffering, positioned I/O, alignment, sync,
+rate limiting, and completion policies remain separate I/O concerns. A writer
 owns a `FileHandle` or `DirectoryPtr` for its complete lifetime.
 
 Tasks retain the directory from submission through actual I/O completion,
 including callbacks, cancellation, exceptions, and native-library shutdown.
 Retaining it only during submission is insufficient.
 
-```cpp
-auto segment_dir = segments_dir->Child("100");
-executor.Submit([segment_dir] {
-    auto output_file = segment_dir->Open(
-        "index.bin", {.mode = OpenMode::ReadWrite, .create = true});
-    BuildIndex(std::move(output_file));
-});
-segment_dir.reset();  // the submitted task owns its reference
-```
+Section 3.5 shows directory capture and full file-handle transfer.
 
 For asynchronous I/O that outlives `BuildIndex`, the completion state retains
 the file or directory until the operation is finished.
 
 ### 5.3 Individual file deletion
 
-`RemoveFile(name)` removes an immediate non-directory entry and is idempotent
-for an already absent entry. It must reject a real directory, even an empty
+`FileSystem::RemoveFile(dir, name)` removes an immediate non-directory entry
+and is idempotent for an already absent entry. It must reject a real directory, even an empty
 one. It never falls back to recursive removal. A symlink deletion unlinks the
 entry itself without following its target.
 
@@ -423,12 +781,12 @@ File closure, file unlink, and directory cleanup are separate events:
 | Event | Result |
 | --- | --- |
 | Regular handle closes | fd closes; directory reference is released |
-| `RemoveFile(name)` | Name is unlinked; existing open fd/mmap may remain usable |
+| `FileSystem::RemoveFile(dir, name)` | Name is unlinked; existing open fd/mmap may remain usable |
 | Scoped temporary-file owner is destroyed | Its close/unlink sequence runs before releasing its directory |
 | Last directory reference disappears | Directory and remaining contents are recursively removed |
 
-A temporary-file owner may retain the directory and call `RemoveFile` during
-its destructor. Its name must remain exclusive until cleanup completes; it
+A temporary-file owner may retain the directory and call
+`FileSystem::RemoveFile` during its destructor. Its name must remain exclusive until cleanup completes; it
 must not unlink a replacement created by another owner. Shared ownership of
 the directory does not serialize mutation or reuse of individual file names.
 Callers coordinate `Open`, `RemoveFile`, and `RenameFile` for the same entry.
@@ -439,24 +797,16 @@ the recursive cleanup accepts files already removed.
 
 ### 5.4 Open options
 
-```cpp
-enum class OpenMode { ReadOnly, ReadWrite };
-
-struct OpenOptions {
-    OpenMode mode{OpenMode::ReadOnly};
-    bool create{false};
-    bool truncate{false};
-    bool direct_io{false};
-};
-```
+The option types and defaults are declared in section 3.1.
 
 Validate all options before any I/O. Read-only creation or truncation is
-rejected. Read-write truncation without creation is valid for an existing
-file; `create` controls missing-file creation independently. Unsupported
-direct-I/O combinations must fail explicitly, not silently change mode.
+rejected. `exclusive` requires `create` and atomically rejects an existing
+entry; it supports callers that own one unique temporary filename. Read-write
+truncation without creation is valid for an existing file; `create` controls
+missing-file creation independently. Unsupported direct-I/O combinations must fail explicitly, not silently change mode.
 
-Directory creation goes through `Child()`. Implementation must preserve native
-failure details through existing error handling rather than convert every
+Directory creation goes through `ChildDirectory()`. Implementation must
+preserve native failure details through existing error handling rather than convert every
 failure to absence.
 
 ### 5.5 Mapped regions
@@ -467,11 +817,19 @@ can delay directory cleanup and disk reclamation. Migration must account for
 this retention when integrating cache eviction and segment unload.
 
 ```cpp
-auto mapped_region = segment_dir->OpenMappedRegion(
-    "field.bin", {.offset = offset, .length = length});
+auto mapped_region = local::FileSystem::OpenMappedRegion(
+    segment_dir, "field.bin", {.offset = offset, .length = length});
 // Demand paging is the default; populate remains false.
 auto bytes = mapped_region.Data();
 ```
+
+Mapping validates the requested range against the opened fd's size, checks
+`offset + length` and page-alignment arithmetic for overflow, and rejects a
+range beyond EOF. It does not extend or truncate the file. A zero-length range
+is empty and performs no `mmap`, but the returned owner still retains the
+directory until reset. The fd can close after a successful mapping. Borrowed
+spans do not retain ownership; do not use them after reset/destruction. A caller
+must prevent concurrent file truncation while readers are mapped.
 
 Explicit file unlink remains possible while mapped. Eager population is an
 opt-in for bounded ranges known to be immediately hot. The design does not
@@ -563,8 +921,8 @@ must not discard the failure.
 `RetryFailedCleanup()` retries already-retired records, never live directories.
 Only one attempt can execute for a record at a time. Each attempt has its own
 completion result; a later successful retry does not rewrite the failure
-observed by an earlier waiter. Partial recursive deletion is retryable while
-the path remains reserved and stable.
+captured in a previously returned report. Partial recursive deletion is
+retryable while the path remains reserved and stable.
 
 A failed child keeps its parent alive. Otherwise the parent destructor could
 recursively remove the failed child behind the supervisor and invalidate
@@ -614,8 +972,9 @@ cross-process coordination.
 
 `FileSystem::Create(absolute_root_path)` requires an absolute path. It creates
 missing root components, verifies a directory, and canonicalizes the resulting root
-before publishing the owned root node. Publication transfers cleanup ownership
-of that exact root as described in section 3.3. Failures are reported; a failed
+before publishing the owned root node. The caller establishes exclusive
+ownership before this call; canonicalization detects a location, not competing
+owners. Publication transfers cleanup ownership of that exact root as described in section 3.3. Failures are reported; a failed
 context creation does not recursively remove pre-existing root contents.
 
 Runtime composition creates a context for a physical ownership domain once
@@ -630,8 +989,8 @@ unlinked while live or awaiting cleanup. The public API provides only
 `RenameFile` within one directory and rejects directory operands; it does not
 export directory rename, recursive deletion, or mutable filesystem views.
 
-File operations validate supported symlink targets within their owning scope.
-Directory aliases are not supported for registered children. Recursive cleanup
+File open/mapping/native-file export reject symlinks; directory aliases are
+not supported for registered children. Recursive cleanup
 unlinks symlinks themselves instead of traversing their targets. Validation and
 native I/O remain separate under the trusted-directory contract. A retained
 C++ object does not pin a filesystem inode or prevent external path replacement.
@@ -663,6 +1022,9 @@ can still access or delete them recursively.
 `VisitEntries` streams immediate-entry metadata and preserves entry names.
 It neither creates directory owners nor builds a sorted vector of the whole
 subtree. Iterator construction and advancement errors must be propagated.
+The visitor runs synchronously without namespace locks; its entry reference is valid only
+for that callback. Visitor exceptions propagate and release enumeration state.
+An empty visitor is rejected before iteration. Returning false stops early.
 
 A recursive transfer adapter must retain every registered directory it visits,
 including its descendants, or operate entirely within one opaque owner.
@@ -719,6 +1081,9 @@ toward the same resource accounting.
 
 A per-parent hash index gives expected O(1) child lookup plus name processing.
 Only acquisition, registration, and retirement require namespace coordination.
+Reports cost O(D) to inspect lifecycle metadata and O(E) copied failure data,
+where E is the number of unresolved failed records; they are shutdown/recovery
+operations, not per-I/O polling APIs.
 Read/write loops use the already-owned fd and perform no repeated child lookup,
 root canonicalization, or ancestor reference increments. One child pins its
 parent for its whole lifetime.
@@ -800,7 +1165,8 @@ The implementation must verify the following behavior before production cutover.
 
 ### 12.1 Identity, ownership, and release races
 
-- Concurrent `Child` calls publish one node.
+- Concurrent `ChildDirectory` calls publish one node and return the same live
+  object on successful repeated acquisition; failed contenders can retry busy.
 - Every directory, including the root, deletes on final release; references
   held by consumers delay cleanup without changing the deletion rule.
 - Root cleanup removes only the acquired ownership domain, leaving its
@@ -812,9 +1178,9 @@ The implementation must verify the following behavior before production cutover.
   releasing temporary files does not trigger cleanup while that owner lives.
 - Business acquisition racing with unload either retains the published owner
   before withdrawal or takes the next-load admission path, without a raw-pointer
-  lifetime gap or direct `Child()` bypass.
+  lifetime gap or direct `ChildDirectory()` bypass.
 - Reload while an old file/task still retains the same path cannot rebuild
-  into the old live node returned by `Child()`; admission waits for cleanup.
+  into the old live node returned by `ChildDirectory()`; admission waits for cleanup.
 - Same-path reload waits without holding the old directory alive, remains
   blocked on failed cleanup, and proceeds after successful completion.
 - Existing distinct physical generation paths permit old/new overlap without
@@ -831,12 +1197,25 @@ The implementation must verify the following behavior before production cutover.
 - Direct string APIs reject invalid names and multi-component bypasses.
 - Missing roots and children are created; failed creation does not delete
   pre-existing contents or publish two owners.
+- Successful adoption preserves existing files, then removes them at final
+  release. Unregistered descendants remain owned by the nearest managed ancestor.
+- Existing files/symlinks cannot be adopted as child directories; live child
+  lookup does not recreate an externally removed directory.
+- Root composition rejects/configures out overlapping ownership domains before
+  publication; independent contexts are not assumed to share a registry.
+- Static file calls retain the supplied actual directory and reject null,
+  closed-context, wrong-type, and symlink operands as specified.
+- Exclusive file creation never truncates an existing file; rename replacement
+  is limited to regular-file entries within one directory.
 - Invalid open options fail before creating or truncating anything.
 - File close preserves the entry; explicit unlink and scoped-file cleanup work.
 - Single-file deletion/rename rejects real directories.
 - A file unlinked before directory cleanup is accepted as already absent.
-- File moves, fd transfer, duplicates, and mapping release preserve reference
-  order; mapping defaults to demand paging.
+- File moves, close, fd duplicates, and mapping release preserve reference
+  order; mapping defaults to demand paging. Close errors cannot lead to a
+  second close of a reused fd number.
+- Mapping range validation covers EOF, zero length, unaligned offsets, and
+  integer overflow; borrowed spans never substitute for retained mappings.
 - Entry enumeration preserves symlink names, reports advancement failures, and
   does not accidentally acquire/destruct removable child owners.
 - Native consumers retain every managed child they access or use one opaque
@@ -846,13 +1225,17 @@ The implementation must verify the following behavior before production cutover.
 
 - Permission/I/O errors during partial recursive deletion preserve the
   generation, original failure, parent pin, and unavailable name.
-- Retry is serialized; old waiters retain their own attempt's result.
+- Retry is serialized; previously returned reports retain their attempt's
+  original result and do not hold directory references.
 - Failure during directory creation/publication has correct rollback ownership.
 - Cleanup-record admission failure occurs before publication; destructor paths
   do not require allocating an unbounded new work item.
 - Retry success permits same-name reuse; late old-generation completion cannot
   erase the new registration.
 - Shutdown with live references reports them without deleting their directories.
+- Admission racing with Finish either fails before native effects or remains
+  accounted for through publication/rollback; no complete report can precede
+  a late owner publication. Previously returned files remain usable until close.
 - Normal destruction without an explicit `Finish()` also cleans the owned root;
   it does not silently enter a disk-preserving fallback.
 - Failed child cleanup cannot trigger parent recursive deletion.
