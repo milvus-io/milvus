@@ -623,6 +623,7 @@ class SegmentInternalInterface : public SegmentInterface {
     int64_t
     get_real_count() const override;
 
+    // The caller must hold mutex_ when concurrent updates are possible.
     int64_t
     get_field_avg_size(FieldId field_id) const override;
 

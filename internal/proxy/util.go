@@ -2329,7 +2329,7 @@ func LackOfFieldsDataBySchema(schema *schemapb.CollectionSchema, fieldsData []*s
 			}
 
 			log.Info(context.TODO(), "no corresponding fieldData pass in", mlog.String("fieldSchema", fieldSchema.GetName()))
-			return merr.WrapErrParameterInvalidMsg("fieldSchema(%s) has no corresponding fieldData pass in", fieldSchema.GetName())
+			return merr.WrapErrParameterInvalidMsg("missing required field %q", fieldSchema.GetName())
 		}
 	}
 	for _, structSchema := range schema.GetStructArrayFields() {
@@ -2338,7 +2338,7 @@ func LackOfFieldsDataBySchema(schema *schemapb.CollectionSchema, fieldsData []*s
 		}
 		if _, ok := dataNameMap[structSchema.GetName()]; !ok {
 			log.Info(context.TODO(), "no corresponding struct fieldData pass in", mlog.String("structFieldSchema", structSchema.GetName()))
-			return merr.WrapErrParameterInvalidMsg("structFieldSchema(%s) has no corresponding fieldData pass in", structSchema.GetName())
+			return merr.WrapErrParameterInvalidMsg("missing required struct field %q", structSchema.GetName())
 		}
 	}
 
@@ -2385,6 +2385,71 @@ func checkInputUtf8Compatiable(allFields []*schemapb.FieldSchema, insertMsg *msg
 		}
 	}
 	return nil
+}
+
+// checkPartialUpdatePrimaryFieldData validates the PK column and applies only
+// explicitly allocated AutoIDs. A nil allocation map preserves every PK. The
+// working column is replaced only after validation, collision checking, and
+// parsing succeed; allocation and retry state belong to the caller.
+func checkPartialUpdatePrimaryFieldData(
+	schema *schemaInfo,
+	fields []*schemapb.FieldData,
+	numRows uint64,
+	allocatedIDs map[int]int64,
+) (*schemapb.IDs, error) {
+	pkSchema, err := typeutil.GetPrimaryFieldSchema(schema.CollectionSchema)
+	if err != nil {
+		return nil, err
+	}
+	primaryField, err := typeutil.GetPrimaryFieldData(fields, pkSchema)
+	if err != nil {
+		return nil, err
+	}
+	pk := proto.Clone(primaryField).(*schemapb.FieldData)
+	if err := fieldvalidator.NewValidateUtil().Validate([]*schemapb.FieldData{pk}, schema.SchemaHelper, numRows); err != nil {
+		return nil, err
+	}
+	if len(allocatedIDs) > 0 {
+		ids := make([]int64, 0, len(allocatedIDs))
+		rows := make([]int64, 0, len(allocatedIDs))
+		indices := make([]int64, 0, len(allocatedIDs))
+		for row, id := range allocatedIDs {
+			if row < 0 || row >= typeutil.GetPKSize(pk) {
+				return nil, merr.WrapErrServiceInternalMsg("partial update allocated AutoID row %d is out of range", row)
+			}
+			indices = append(indices, int64(len(ids)))
+			ids = append(ids, id)
+			rows = append(rows, int64(row))
+		}
+		generated, err := autoGenPrimaryFieldData(pkSchema, ids)
+		if err != nil {
+			return nil, err
+		}
+		if err := typeutil.UpdateFieldDataByColumn(pk, generated, rows, indices); err != nil {
+			return nil, err
+		}
+		// Supplied PKs can contain arbitrary values, including a generated ID.
+		duplicate, err := CheckDuplicatePkExist(pkSchema, []*schemapb.FieldData{pk})
+		if err != nil {
+			return nil, err
+		}
+		if duplicate {
+			return nil, merr.WrapErrServiceInternalMsg("partial update: duplicate primary keys after applying allocated AutoIDs")
+		}
+	}
+	ids, err := parsePrimaryFieldData2IDs(pk)
+	if err != nil {
+		return nil, err
+	}
+	if len(allocatedIDs) > 0 {
+		for index, field := range fields {
+			if field == primaryField {
+				fields[index] = pk
+				break
+			}
+		}
+	}
+	return ids, nil
 }
 
 func checkUpsertPrimaryFieldData(
@@ -3517,6 +3582,7 @@ func extractFieldsFromResults(results []*schemapb.FieldData, timezone string, fi
 }
 
 func genFunctionFields(ctx context.Context, insertMsg *msgstream.InsertMsg, schema *schemaInfo, partialUpdate bool) error {
+	functions := schema.GetFunctions()
 	allowNonBM25Outputs := common.GetCollectionAllowInsertNonBM25FunctionOutputs(schema.Properties)
 	fieldIDs := lo.Map(insertMsg.FieldsData, func(fieldData *schemapb.FieldData, _ int) int64 {
 		id, _ := schema.MapFieldID(fieldData.FieldName)
@@ -3524,13 +3590,13 @@ func genFunctionFields(ctx context.Context, insertMsg *msgstream.InsertMsg, sche
 	})
 
 	// Since PartialUpdate is supported, the field_data here may not be complete
-	needProcessFunctions, err := typeutil.GetNeedProcessFunctions(fieldIDs, schema.Functions, allowNonBM25Outputs, partialUpdate)
+	needProcessFunctions, err := typeutil.GetNeedProcessFunctions(fieldIDs, functions, allowNonBM25Outputs, partialUpdate)
 	if err != nil {
 		mlog.Warn(context.TODO(), "Check upsert field error,", mlog.String("collectionName", schema.Name), mlog.Err(err))
 		return err
 	}
 
-	if embedding.HasNonBM25AndMinHashFunctions(schema.Functions, []int64{}) {
+	if embedding.HasNonBM25AndMinHashFunctions(functions, []int64{}) {
 		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-genFunctionFields-call-function-udf")
 		defer sp.End()
 		exec, err := embedding.NewFunctionExecutor(schema.CollectionSchema, needProcessFunctions, &models.ModelExtraInfo{ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), DBName: insertMsg.GetDbName()})

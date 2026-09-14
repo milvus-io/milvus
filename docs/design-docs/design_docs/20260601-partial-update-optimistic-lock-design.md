@@ -11,6 +11,12 @@
 
 ## Summary
 
+The Strong-read extension at the end of this document replaces the first
+fixed-snapshot reads with Strong reads for both initial attempts and CAS
+retries. It assumes every participating component is upgraded and adds actual
+query snapshot reporting and a WAL lifecycle history floor. The extension is
+pending review; the review metadata above applies to the original CAS design.
+
 Milvus partial update currently uses a read-merge-write flow. Proxy reads the
 current row, merges the user-provided fields into a complete row, and writes a
 standard Delete/Insert transaction. Two concurrent requests can read the same
@@ -22,8 +28,7 @@ admission at StreamingNode. Every attempt follows this order:
 
 ```text
 resolve all touched PChannel terms
-  -> allocate an attempt-scoped readTS
-  -> query at readTS
+  -> Strong query and collect actual per-channel readTS
   -> merge
   -> commit(term, readTS)
 ```
@@ -99,8 +104,9 @@ The observable behavior changes are:
   `ErrCollectionPartialUpdateConflict` with `Retriable=false`.
 - A replacement update that exhausts its retry budget returns
   `ErrServiceUnavailable` with `Retriable=true`.
-- AutoID partial update becomes update-only: every supplied PK must exist in the
-  query snapshot, and the merged Insert preserves that PK.
+- AutoID partial update preserves existing PKs. Missing rows receive new AutoIDs
+  and use insert semantics; the mutation result returns the destination PKs in
+  request order.
 
 Ordinary non-partial AutoID upsert continues to allocate a new PK.
 
@@ -165,9 +171,9 @@ No persistent PK index, schema migration, or restore-time gate is introduced.
 The design depends on six invariants:
 
 1. **Attempt proof:** a term snapshot and `readTS` belong to the same attempt,
-   and terms are resolved before `readTS` is allocated.
-2. **Exact query snapshot:** QueryNode receives
-   `GuaranteeTimestamp = MvccTimestamp = readTS`.
+   and terms are resolved before the Strong query starts.
+2. **Exact query snapshot:** every CAS `readTS` is the nonzero snapshot
+   reported by that channel's successful Strong query.
 3. **Atomic admission boundary:** local CAS validation, CommitTxn append, write
    publication, and transaction transition are serialized by the same
    vchannel write lock.
@@ -222,9 +228,8 @@ sequenceDiagram
     participant W as WAL
 
     P->>A: Resolve every touched PChannel term
-    P->>A: Allocate attempt readTS
-    P->>Q: Query with GuaranteeTS = MvccTS = readTS
-    Q-->>P: Complete rows at readTS
+    P->>Q: Strong Query with initial GuaranteeTS = MvccTS = 0
+    Q-->>P: Complete rows and actual readTS for each channel
     P->>P: Merge fields and build Delete / Insert
     P->>R: AppendMessages with CAS metadata
     R->>S: BeginTxn
@@ -250,37 +255,31 @@ make a multi-vchannel request atomic.
 
 ### Proxy attempt construction
 
-Proxy builds each attempt in the following order:
+Proxy builds the first attempt and every eligible retry in the same order:
 
 ```text
-route original PKs to vchannels
-  -> resolve and snapshot every touched PChannel term
-  -> allocate readTS from TSO
-  -> query at readTS
-  -> merge
-  -> attach the same term and readTS to every CAS Insert chunk
+clone original user fields and overlay previously allocated AutoIDs by row
+  -> generate function output
+  -> resolve and record terms for all candidate write channels
+     (all collection shards for AutoID, or the fixed namespace channel)
+  -> enqueue a new Strong Query with GuaranteeTimestamp = MvccTimestamp = 0
+  -> collect actual nonzero readTS from each candidate write channel's successful response
+  -> normalize fields and validate row alignment
+  -> classify existing and missing rows, validate insert fields for missing rows
+  -> if an unconverted AutoID PK is missing: allocate
+     its destination PK, record the row-to-ID mapping, update the working PK column
+  -> select final write channels from this query's captured terms and read timestamps
+  -> merge without querying freshly allocated IDs
+  -> attach that channel's term and readTS to every CAS Insert chunk
 ```
 
-Resolving terms before allocating `readTS` is required. A new WAL owner starts
-with an empty per-term PK index. If Proxy allocated `readTS` before observing
-the new term, the empty index could not prove that writes between the two
-events were absent.
-
-The task ID and `BeginTs` remain stable across retries. `readTS` is a separate,
-attempt-scoped timestamp and is regenerated for the first attempt and every
-retry.
-
-The internal query uses customized consistency:
-
-```text
-ConsistencyLevel = Customized
-GuaranteeTimestamp = readTS
-MvccTimestamp = readTS
-```
-
-Generic query preprocessing can adjust consistency and schema fences. The
-partial-update query therefore reapplies the fixed snapshot after preprocessing
-so the actual QueryNode request and CAS metadata use the same timestamp.
+The outer task ID and `BeginTs` remain stable across retries. Each Strong query
+receives its own BeginTs from normal query scheduling; Proxy does not allocate
+a separate CAS read timestamp. Strong optimization may use the current WAL MVCC
+barrier, and QueryNode reports the snapshot actually used for the returned rows.
+Every retry discards prior proofs and query results before rebuilding. WAL
+lifecycle floor validation ensures a snapshot cannot precede the history covered
+by the current owner's index, even if the PChannel term did not change.
 
 ### Query and merge semantics
 
@@ -293,15 +292,71 @@ Proxy retains the existing merge implementation, including:
 - compact nullable-vector representation;
 - partition-key immutability validation.
 
-For AutoID collections, partial update requires every request PK to be present
-in the query snapshot. A missing PK rejects the complete request before WAL
-append. The merged Insert preserves the request PK so Delete, Insert, routing,
-and CAS all address the same row.
+For AutoID collections, a PK present in the query snapshot keeps its identity.
+A missing PK selects insert semantics and receives a fresh AutoID. This decision
+uses the source row's query snapshot; a later insert of the supplied source PK
+does not redirect the newly allocated entity back to that source PK. Required
+insert fields must be supplied, while nullable/default fields use the ordinary
+partial-update insert merge rules.
+
+If a required field is missing, Proxy returns a non-retriable parameter error
+identifying the first missing PK, explaining
+that the PK was absent from the query scope and insert fallback needs the named
+field. For example: `partial update: primary key 100 does not exist
+in the query scope; cannot insert a new entity: missing required field "vector"`.
+The query scope includes the requested partition and namespace; absence here
+must not be interpreted as absence from every partition in the collection.
+
+Proxy keeps the original user fields immutable and stores allocated AutoIDs in
+a separate map keyed by the original request row offset. Initial preparation
+and CAS retries share the same entry point: clone the original fields, overlay
+allocated IDs, generate function output, prepare CAS terms, query, and merge.
+`checkPartialUpdatePrimaryFieldData` centralizes PK validation, conversion,
+replacement, collision checking, and ID parsing. It reuses the existing
+primary-field generation and field-update helpers and publishes a replaced
+column only after all checks pass. The task owns allocation and retry state;
+the PK helper does not access the allocator or WAL. The PK payload type and row count are
+validated before allocating IDs. Primary keys are not supported as function
+inputs; allocating AutoIDs retains the existing function outputs.
+Field normalization and alignment validation precede row classification and
+allocation. Allocation replaces only the working PK column; it does not restore
+the original payload or discard normalized values.
+Each attempt executes one Strong query. Freshly allocated AutoIDs take insert
+semantics without another existence query. Before reading, Proxy captures terms
+for every possible destination channel (all collection shards for AutoID, unless
+namespace routing fixes one channel), then binds the actual query snapshots.
+After allocation it retains only the final write channels and their original
+proofs; missing proofs fail closed. Terms and timestamps are not resampled after
+allocation. This relies on the normal AutoID allocator's uniqueness guarantee.
+AutoID and non-AutoID collections share row classification, required-field
+validation, and merge. Allocation consumes the missing-row offsets, and merge
+uses the same classification.
+The original input is never overwritten by allocated IDs or merged values.
+After each successful allocation, Proxy saves the complete destination IDs in
+request order. Message packing continues to use merge order; `PostExecute`
+publishes the saved IDs without looking up or parsing the PK column again.
+
+Allocated IDs remain stable throughout the request's internal CAS retries,
+even when still absent. If another vchannel already committed a generated row,
+the next read sees that destination row and rebuilds an update at the same PK.
+This retains the existing REPLACE retry behavior without allocating duplicate
+entities. Relative operations still do not retry automatically, and unknown
+append outcomes still stop retries. This is not cross-request deduplication:
+a new client request has a new allocation lifecycle.
+
+A missing source PK produces no Delete. An insert under its new AutoID therefore
+writes only the destination vchannel; if later retried as an update, its Delete
+and Insert both use that same AutoID. A batch can still span multiple vchannels,
+whose transactions commit independently; there is no cross-vchannel atomicity.
+After successful execution, Proxy returns destination IDs in input-row order,
+while message packing continues to use the merged row order.
 
 ### CAS metadata and encryption
 
-Proxy derives the touched vchannels from the original request PKs. CAS metadata
-contains only the attempt `readTS` and observed PChannel term; it does not
+Proxy derives the final write vchannels from the current request PKs, including
+allocated destination AutoIDs. It selects their proofs from those captured by
+the single query; the missing source PK is not included in Delete or final CAS
+solely because it was used for the initial lookup. CAS metadata contains only the attempt `readTS` and observed PChannel term; it does not
 duplicate the collection ID, schema version, PK field ID, or PK list.
 
 For every CAS Insert, StreamingNode:
@@ -535,10 +590,10 @@ release entries and recover from an incomplete window.
 
 ### Recovery and term changes
 
-A newly opened WAL term starts with empty partial-update indexes and no warm-up
-period. This is safe because a valid attempt observes the current term before
-allocating `readTS`. Any term change between query and commit produces a term
-mismatch and forces a new attempt.
+A newly opened WAL lifecycle starts with empty partial-update indexes and no
+warm-up period. Admission requires readTS >= historyStartTs as well as a matching
+term. A term change or a snapshot older than the new lifecycle floor rejects
+the attempt; only eligible replacement updates are automatically retried.
 
 TxnManager preserves its existing recovery behavior. The partial-update
 interceptor uses whether it observed BeginTxn in its own lifecycle as the
@@ -581,12 +636,14 @@ Promotion creates a new term and therefore a new empty per-term index.
 Proxy automatically retries only when every partial-update field operation is
 `REPLACE`. Each retry:
 
-1. restores the original partial payload captured before function generation;
+1. restores the original partial field values, retaining any destination AutoIDs
+   already allocated for this request;
 2. regenerates function output;
-3. re-routes the original PKs;
-4. resolves all touched terms;
-5. allocates a new `readTS`;
-6. re-queries and re-merges;
+3. determines all possible write channels;
+4. resolves their terms before reading;
+5. runs one Strong query and binds its actual per-channel snapshots; any
+   newly missing original AutoID row receives a fresh ID without another read;
+6. re-merges the original user payload with the new query results;
 7. rebuilds Insert/Delete preprocessing and MutationResult counts;
 8. accumulates storage cost from the new query;
 9. creates new per-vchannel transactions.
@@ -657,3 +714,86 @@ Production-scale benchmarks are still required for:
   update?
 - Should Streaming transactions add a persistent request token to provide an
   exactly-once client outcome?
+
+
+## Strong-read extension (2026-09-09, pending review)
+
+### Read and commit contract
+
+Every initial attempt and eligible retry uses the following Strong-read flow:
+
+```text
+resolve terms for all candidate write channels
+  -> enqueue a Strong Query (GuaranteeTimestamp=0, MvccTimestamp=0)
+  -> Query receives its own BeginTs from TSO
+  -> each delegator waits for its guarantee and fixes its actual snapshot S[c]
+  -> successful channel response reports S[c], including empty results
+  -> Proxy validates all candidate write channels have nonzero S[c]
+  -> allocate new PKs for missing AutoID rows without another query
+  -> retain captured proofs for the final destination channels
+  -> merge, then commit(term[c], readTS=S[c])
+```
+
+The outer Upsert BeginTs is not reused. This lets the existing Strong-read
+optimization use the WAL MVCC barrier without waiting for a separately allocated
+fixed read timestamp. QueryNode reports the request's executed MVCC snapshot,
+not a later sample of tSafe. Internal `RetrieveResults.mvcc_timestamp` (field 20)
+is an additive response field. Proxy's per-channel read timestamp map is separate from
+query input overrides and is populated only by successful channel responses.
+Different channels may use different snapshots; cross-channel atomicity is not
+provided.
+
+### WAL lifecycle history floor
+
+Each partial-update interceptor records immutable `historyStartTs = F` from
+`InterceptorBuildParam.LastTimeTickMessage.TimeTick()`. The WAL adaptor creates
+this message by synchronizing TSO and durably appending the first TimeTick before
+making the WAL available. The floor belongs to a WAL open lifecycle, even when a
+WAL is reopened with the same PChannel term. It is not the recovered checkpoint
+or a timestamp sampled at commit.
+
+After the existing replication bypass and term validation, local CAS admission
+requires `F != 0` and `readTS >= F`. An unavailable floor fails closed as an
+internal unrecoverable error. A snapshot older than F returns the existing typed
+partial-update retryable error before appending CommitTxn. The existing PK
+conflict index, retention window, missed-write fence, and collection fence checks
+still apply under the vchannel write lock.
+
+For example, B committed at 80 in the old lifecycle, and the new lifecycle starts
+at F=90. Its index may not contain B. A read at S=70 is rejected even if its term
+matches. A read at S>=90 includes B under the normal WAL visibility contract;
+subsequent conflicting commits are covered by the current lifecycle's index.
+Uncommitted recovered transactions retain their existing recovery fencing.
+Import, restore, and backfill remain subject to the original non-goals.
+
+### Missing proofs and retries
+
+A missing or zero read timestamp means a channel response cannot support CAS proof.
+Proxy rejects the attempt before merge or any DML. Query errors propagate.
+No compatibility fallback or feature flag is provided for old QueryNodes.
+
+After a deterministic CAS rejection, existing eligible replacement updates
+restore the original user fields and rebuild using a new Strong query.
+Relative array operations keep their existing no-replay rule. Unknown commit
+outcomes and mixed CAS/non-CAS failures do not become automatic retries.
+
+Both first reads and retries start with zero internal MVCC and guarantee
+placeholders, then let normal Strong query scheduling and execution determine
+snapshots. No partial-update-specific read timestamp allocator or read-mode
+switch remains. Ordinary non-partial query and Search requery timestamp
+handling retain their existing contracts.
+
+Strong snapshots remain subject to the existing 30-second CAS history window.
+If a read is too old or the history index is incomplete, admission rejects it;
+repeated rejections can exhaust the existing bounded retry budget. This design
+does not force snapshot advancement with a fixed-timestamp fallback.
+
+### Deployment assumption
+
+All participating Proxies, QueryNodes, and StreamingNodes must run this protocol.
+Every possible WAL owner must enforce the history floor, and every QueryNode
+must report the executed snapshot. Mixed-version rollout and downgrade are
+outside this design's scope; there is no capability negotiation or runtime
+switch. QueryNode snapshot reporting alone does not prove WAL floor enforcement.
+Reopens and frequent conflicts can increase Strong-query retries. Performance
+improvement requires measurement and is not established by unit tests.
