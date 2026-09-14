@@ -18,9 +18,10 @@
 
 package extension
 
-// ResetForTest uninstalls the hook and the engine, so tests start from a stock
-// binary.
+// ResetForTest uninstalls everything a distribution can install, so tests
+// start from a stock binary.
 func ResetForTest() {
 	installedHook.Store(nil)
 	installedEngine.Store(nil)
+	installedQueryHook.Store(nil)
 }

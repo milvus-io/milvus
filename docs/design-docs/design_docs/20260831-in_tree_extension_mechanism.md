@@ -9,13 +9,14 @@
 
 ## Summary
 
-A distribution that compiles its own behavior into the milvus binary needs two
-things from milvus: a way to install a request hook without a `.so`, and a
-callback that starts its control-plane engine when the coordinator becomes
-active and stops it on shutdown. `pkg/extension` is those two setters, plus
-the one context mark the proxy reads. Everything else such a distribution
-does is either the hook's own reach, a coordinator RPC, or a configuration
-item. A stock binary installs nothing and behaves exactly as before.
+A distribution that compiles its own behavior into the milvus binary needs
+little from milvus: a way to install a request hook, the QueryNode's tuning
+hook and the cipher without a `.so`, and a callback that starts its
+control-plane engine when the coordinator becomes active and stops it on
+shutdown. `pkg/extension` is those setters, plus the one context mark the
+proxy reads. Everything else such a distribution does is either the hook's
+own reach, a coordinator RPC, or a configuration item. A stock binary installs
+nothing and behaves exactly as before.
 
 ## Motivation
 
@@ -38,6 +39,10 @@ func SetHook(h hook.Hook)                     // hookutil prefers it over proxy.
 func InstalledHook() hook.Hook
 func FormInstalled() bool                     // InstalledHook() != nil; read by the coordinators too
 
+type QueryHook interface { ... }              // the queryNode.soPath plug-in's method set
+func SetQueryHook(h QueryHook)                // the QueryNode prefers it over queryNode.soPath
+func InstalledQueryHook() QueryHook
+
 type Coordinator interface {                  // the coordinator as its own clients see it
 	rootcoordpb.RootCoordClient
 	querypb.QueryCoordClient
@@ -54,7 +59,7 @@ func WithQueryResourceGroup(ctx, rg) context.Context   // set by a hook's Before
 func QueryResourceGroupFromContext(ctx) string
 ```
 
-A distribution calls the two setters, then `cmd/milvus.Main(os.Args)`.
+A distribution calls the setters it needs, then `cmd/milvus.Main(os.Args)`.
 
 ### The request hook
 
@@ -80,6 +85,23 @@ gets the same `Init` call with the `hook.*` configuration before it is
 installed, a failure to initialize keeps the proxy from starting, and it is
 registered with the same watcher, so editing a `hook.*` key re-initializes it
 with the new configuration without a restart.
+
+### The query hook
+
+The QueryNode's search-parameter tuning hook - the `QueryNodePlugin` symbol a
+`queryNode.soPath` plug-in exports - can be compiled in the same way
+(`SetQueryHook`). A compiled-in query hook is used in preference to
+`queryNode.soPath`, and a deployment that configures both is refused at
+start-up: both would tune every search, and only one can. The refusal is
+reported the way a plug-in's load failure is: the QueryNode treats it as
+fatal when `autoIndex.enable` is on, and with tuning off it starts without
+either hook, as it always has. It is otherwise treated exactly as the plug-in
+is: it gets the same two `Init` calls with the
+`autoIndex.params.search` and `autoIndex.params.tuning` configuration before it
+is installed, and the same watchers re-initialize it when those keys change.
+`autoIndex.enable` still decides whether tuning happens at all, whichever way
+the hook got there. `optimizers.QueryHook` is now an alias of
+`extension.QueryHook`, so nothing in the tree changes.
 
 ### The coordinator engine
 
@@ -247,6 +269,8 @@ them through `user.yaml` or the environment.
   empty as "no scope".
 - Every configuration item defaults to the stock behavior.
 - `hook.Hook` is milvus-proto's and unchanged.
+- `optimizers.QueryHook` is an alias of `extension.QueryHook` with the same
+  method set; a `QueryNodePlugin` built against either loads unchanged.
 - The default configuration file is `milvus.yaml`; a distribution that ships
   its configuration under another name places it as `user.yaml` in
   `MILVUSCONF`, which the existing file list already reads last.
@@ -257,6 +281,9 @@ them through `user.yaml` or the environment.
 - hookutil: a compiled-in hook is used, refused beside a plug-in, absent by
   default, initialized with the `hook.*` configuration, and re-initialized
   when that configuration changes.
+- querynode: a compiled-in query hook is used, refused beside a plug-in,
+  absent by default, initialized with the `autoIndex.params.*` configuration,
+  and not installed when it cannot initialize.
 - proxy: a hook-pinned resource group reaches the search task; per-resource-
   group latency series exist only for pinned requests.
 - mixcoord: the engine starts on activation only, receives the coordinator

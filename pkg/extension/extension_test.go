@@ -47,6 +47,7 @@ func TestNothingIsInstalledByDefault(t *testing.T) {
 	ResetForTest()
 	assert.Nil(t, InstalledHook(), "a stock binary has no compiled-in hook")
 	assert.Nil(t, InstalledCoordinatorEngine(), "a stock binary has no coordinator engine")
+	assert.Nil(t, InstalledQueryHook(), "a stock binary has no compiled-in query hook")
 }
 
 func TestSetHookInstallsTheHook(t *testing.T) {
@@ -88,8 +89,36 @@ func TestSetNilLeavesNothingInstalled(t *testing.T) {
 	t.Cleanup(ResetForTest)
 	SetHook(stubHook{name: "form"})
 	SetCoordinatorEngine(&fakeCoordinatorEngine{})
+	SetQueryHook(stubQueryHook{name: "tuner"})
 	SetHook(nil)
 	SetCoordinatorEngine(nil)
+	SetQueryHook(nil)
 	assert.Nil(t, InstalledHook())
 	assert.Nil(t, InstalledCoordinatorEngine())
+	assert.Nil(t, InstalledQueryHook())
+}
+
+// stubQueryHook is a QueryHook that tunes nothing; the tests only ask
+// whether it is the one installed.
+type stubQueryHook struct{ name string }
+
+func (stubQueryHook) Run(map[string]any) error                        { return nil }
+func (stubQueryHook) Init(string) error                               { return nil }
+func (stubQueryHook) InitTuningConfig(map[string]string) error        { return nil }
+func (stubQueryHook) DeleteTuningConfig(string) error                 { return nil }
+func (stubQueryHook) CalculateEffectiveSegmentNum([]int64, int64) int { return 0 }
+
+var _ QueryHook = stubQueryHook{}
+
+func TestSetQueryHookInstallsTheQueryHook(t *testing.T) {
+	ResetForTest()
+	t.Cleanup(ResetForTest)
+	SetQueryHook(stubQueryHook{name: "tuner"})
+	assert.Equal(t, stubQueryHook{name: "tuner"}, InstalledQueryHook())
+	assert.Nil(t, InstalledHook(), "installing a query hook must not conjure a request hook")
+	assert.Nil(t, InstalledCoordinatorEngine(), "installing a query hook must not conjure an engine")
+	assert.False(t, FormInstalled(), "a query hook is not the mark of a form")
+
+	SetQueryHook(nil)
+	assert.Nil(t, InstalledQueryHook())
 }
