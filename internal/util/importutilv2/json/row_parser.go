@@ -50,6 +50,10 @@ type rowParser struct {
 	structArraySubFields     map[string]string
 	allowInsertAutoID        bool
 
+	// rowNum is the 1-based index of the data row currently being parsed,
+	// used to locate invalid values (e.g. malformed UUIDs) in error messages.
+	rowNum int64
+
 	timezone string
 }
 
@@ -215,6 +219,7 @@ func reconstructArrayForStructArray(raw any, subFieldNames []string) (map[string
 }
 
 func (r *rowParser) Parse(raw any) (Row, error) {
+	r.rowNum++
 	stringMap, ok := raw.(map[string]any)
 	if !ok {
 		return nil, merr.WrapErrImportFailed(
@@ -617,6 +622,12 @@ func (r *rowParser) parseEntity(fieldID int64, obj any) (any, error) {
 			return nil, err
 		}
 		return value, nil
+	case schemapb.DataType_UUID:
+		value, ok := obj.(string)
+		if !ok {
+			return nil, r.wrapTypeError(obj, fieldID)
+		}
+		return common.ValidateAndNormalizeUUID(field.GetName(), r.rowNum, value)
 	case schemapb.DataType_JSON:
 		// for JSON data, we accept two kinds input: string and map[string]interface
 		// user can write JSON content as {"FieldJSON": "{\"x\": 8}"} or {"FieldJSON": {"x": 8}}

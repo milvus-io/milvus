@@ -123,9 +123,9 @@ func TestMembershipFilterRejectedInElementPredicates(t *testing.T) {
 
 	t.Run("bloom_match on struct sub-field rejected", func(t *testing.T) {
 		// A struct-array sub-field is an ARRAY type, which bloom_match does not
-		// support (only INT8/16/32/64/VARCHAR/JSON paths).
+		// support (only INT8/16/32/64/VARCHAR/UUID/JSON paths).
 		err := query(`membership_match(structA[int_val], {bf}, type=bloom)`, "bf", bloomBlob)
-		common.CheckErr(t, err, false, "membership_match only supports INT8/INT16/INT32/INT64/VARCHAR fields and JSON paths")
+		common.CheckErr(t, err, false, "membership_match only supports INT8/INT16/INT32/INT64/VARCHAR/UUID fields and JSON paths")
 	})
 
 	t.Run("roaring_match on struct sub-field rejected", func(t *testing.T) {
@@ -138,12 +138,12 @@ func TestMembershipFilterRejectedInElementPredicates(t *testing.T) {
 		strBlob, err := client.NewBloomFilterBlob([]string{"a", "b"}, 0.001)
 		require.NoError(t, err)
 		err = query(`membership_match(structA[str_val], {bf}, type=bloom)`, "bf", strBlob)
-		common.CheckErr(t, err, false, "membership_match only supports INT8/INT16/INT32/INT64/VARCHAR fields and JSON paths")
+		common.CheckErr(t, err, false, "membership_match only supports INT8/INT16/INT32/INT64/VARCHAR/UUID fields and JSON paths")
 	})
 
 	t.Run("bloom_match on struct float sub-field rejected", func(t *testing.T) {
 		err := query(`membership_match(structA[float_val], {bf}, type=bloom)`, "bf", bloomBlob)
-		common.CheckErr(t, err, false, "membership_match only supports INT8/INT16/INT32/INT64/VARCHAR fields and JSON paths")
+		common.CheckErr(t, err, false, "membership_match only supports INT8/INT16/INT32/INT64/VARCHAR/UUID fields and JSON paths")
 	})
 
 	t.Run("roaring_match on struct varchar sub-field rejected", func(t *testing.T) {

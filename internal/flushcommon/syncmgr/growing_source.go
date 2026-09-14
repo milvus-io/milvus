@@ -981,7 +981,9 @@ func (t *GrowingSourceSyncTask) fillPrimaryKeyStatsConfig(ctx context.Context, s
 		return err
 	}
 	for _, pk := range pks {
-		if pk.Type() != pkField.GetDataType() {
+		pkTypeOK := pk.Type() == pkField.GetDataType() ||
+			(typeutil.IsUUIDType(pkField.GetDataType()) && pk.Type() == schemapb.DataType_VarChar)
+		if !pkTypeOK {
 			return merr.WrapErrDataIntegrityMsg(
 				"growing source primary key type mismatch, segmentID=%d expected=%s actual=%s",
 				t.segmentID, pkField.GetDataType().String(), pk.Type().String())

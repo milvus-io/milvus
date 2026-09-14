@@ -275,8 +275,18 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 			ts := r.Column(common.TimeStampField).(*array.Int64).Value(i)
 			return !entityFilter.Filtered(pk, uint64(ts), -1)
 		}
+	case schemapb.DataType_UUID:
+		predicate = func(r storage.Record, ri, i int) bool {
+			fbArr := r.Column(pkField.FieldID).(*array.FixedSizeBinary)
+			var u [16]byte
+			copy(u[:], fbArr.Value(i))
+			pk := u
+			ts := r.Column(common.TimeStampField).(*array.Int64).Value(i)
+			return !entityFilter.Filtered(pk, uint64(ts), -1)
+		}
 	default:
-		log.Warn(ctx, "sort task only support int64 and varchar pk field")
+		srw.Close()
+		return nil, merr.WrapErrServiceInternalMsg("sort compaction unsupported pk type %s", pkField.GetDataType().String())
 	}
 
 	rr, err := storage.NewBinlogRecordReader(ctx, st.req.InsertLogs, st.req.Schema,

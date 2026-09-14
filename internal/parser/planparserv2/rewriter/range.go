@@ -23,7 +23,8 @@ func isSupportedScalarForRange(dt schemapb.DataType) bool {
 		schemapb.DataType_Int64,
 		schemapb.DataType_Float,
 		schemapb.DataType_Double,
-		schemapb.DataType_VarChar:
+		schemapb.DataType_VarChar,
+		schemapb.DataType_UUID:
 		return true
 	default:
 		return false
@@ -104,7 +105,7 @@ func valueMatchesType(dt schemapb.DataType, v *planpb.GenericValue) bool {
 		default:
 			return false
 		}
-	case schemapb.DataType_VarChar:
+	case schemapb.DataType_VarChar, schemapb.DataType_UUID:
 		_, ok := v.GetVal().(*planpb.GenericValue_StringVal)
 		return ok
 	case schemapb.DataType_JSON:
@@ -500,7 +501,8 @@ func cmpGeneric(dt schemapb.DataType, a, b *planpb.GenericValue) int {
 		// Should not happen because callers gate supported literal kinds.
 		return 0
 	case schemapb.DataType_String,
-		schemapb.DataType_VarChar:
+		schemapb.DataType_VarChar,
+		schemapb.DataType_UUID:
 		as, bs := a.GetStringVal(), b.GetStringVal()
 		if as < bs {
 			return -1

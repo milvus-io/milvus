@@ -224,6 +224,12 @@ func pkFromGenericValue(dataType schemapb.DataType, value *planpb.GenericValue) 
 		return storage.NewInt64PrimaryKey(value.GetInt64Val()), true
 	case schemapb.DataType_VarChar:
 		return storage.NewVarCharPrimaryKey(value.GetStringVal()), true
+	case schemapb.DataType_UUID:
+		pk, err := storage.NewUUIDPrimaryKeyFromString(value.GetStringVal())
+		if err != nil {
+			return nil, false
+		}
+		return pk, true
 	default:
 		mlog.Warn(context.TODO(), "unknown pk type", mlog.Int("type", int(dataType)))
 		return nil, false

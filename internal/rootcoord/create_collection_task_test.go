@@ -946,6 +946,30 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 		assert.Contains(t, err.Error(), "field data type: None is not supported")
 	})
 
+	t.Run("array field - UUID element type", func(t *testing.T) {
+		collectionName := funcutil.GenRandomStr()
+		task := createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+			},
+		}
+		schema := &schemapb.CollectionSchema{
+			Name: collectionName,
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:        "array_field",
+					DataType:    schemapb.DataType_Array,
+					ElementType: schemapb.DataType_UUID,
+					TypeParams:  []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "100"}},
+				},
+			},
+		}
+		err := task.validateSchema(context.TODO(), schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "UUID")
+	})
+
 	t.Run("struct array field - valid case", func(t *testing.T) {
 		collectionName := funcutil.GenRandomStr()
 		task := createCollectionTask{

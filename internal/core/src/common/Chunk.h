@@ -473,9 +473,15 @@ class ArrayChunk : public Chunk {
         auto data_ptr = data_ + offset;
         uint32_t offsets_bytes_len = 0;
         uint32_t* offsets_ptr = nullptr;
+        // IsStringDataType(UUID)==false — UUID is FixedSizeBinary(16) fixed-width via IsUuidDataType + IsFixedWidth true, no offsets
+        // Returns FixedSizeBinaryArray for UUID, StringArray only for IsStringDataType true
         if (IsStringDataType(element_type_)) {
+            AssertInfo(!IsUuidDataType(element_type_),
+                       "UUID must not use StringArray path");
             offsets_bytes_len = len * sizeof(uint32_t);
             offsets_ptr = reinterpret_cast<uint32_t*>(data_ptr);
+        } else if (IsUuidDataType(element_type_)) {
+            // IsFixedWidth(UUID)==true, GetDataTypeSize(UUID)==16: fixed width, no offsets
         }
 
         return ArrayView(data_ptr + offsets_bytes_len,

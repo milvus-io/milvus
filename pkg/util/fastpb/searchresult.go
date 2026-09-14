@@ -244,7 +244,7 @@ func (d dec) ids(b []byte, ids *schemapb.IDs) error {
 			return errMalformed
 		}
 		b = b[vn:]
-		if num == 1 || num == 2 || num == 3 {
+		if num >= 1 && num <= 3 {
 			if oneofNum == num {
 				return fallbackUnmarshal(full, ids)
 			}

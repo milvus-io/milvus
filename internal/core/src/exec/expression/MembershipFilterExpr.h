@@ -66,6 +66,7 @@ namespace exec {
 struct BloomMembershipProbe {
     static constexpr const char* kKindName = "membership_match(type=bloom)";
     static constexpr bool kSupportsVarChar = true;
+    static constexpr bool kSupportsUuid = true;
     // JSON probes the value at the column's nested path per row, hashing by
     // the value's runtime type (strictly typed; see ExecVisitorImplJson).
     static constexpr bool kSupportsJson = true;
@@ -103,6 +104,7 @@ struct BloomMembershipProbe {
 struct RoaringMembershipProbe {
     static constexpr const char* kKindName = "membership_match(type=roaring)";
     static constexpr bool kSupportsVarChar = false;
+    static constexpr bool kSupportsUuid = false;
     static constexpr bool kSupportsJson = false;
 
     // Declared in namespace milvus (not milvus::expr).
@@ -164,6 +166,14 @@ class PhyMembershipFilterExpr : public SegmentExpr {
                 break;
             case DataType::JSON:
                 if constexpr (!ProbePolicy::kSupportsJson) {
+                    ThrowInfo(ExprInvalid,
+                              "{} does not support field data type: {}",
+                              ProbePolicy::kKindName,
+                              expr_->column_.data_type_);
+                }
+                break;
+            case DataType::UUID:
+                if constexpr (!ProbePolicy::kSupportsUuid) {
                     ThrowInfo(ExprInvalid,
                               "{} does not support field data type: {}",
                               ProbePolicy::kKindName,
@@ -297,6 +307,11 @@ class PhyMembershipFilterExpr : public SegmentExpr {
             case DataType::VARCHAR:
                 if constexpr (ProbePolicy::kSupportsVarChar) {
                     return IndexUsableForReverseLookup<std::string>();
+                }
+                return false;
+            case DataType::UUID:
+                if constexpr (ProbePolicy::kSupportsUuid) {
+                    return IndexUsableForReverseLookup<milvus::UUID>();
                 }
                 return false;
             default:

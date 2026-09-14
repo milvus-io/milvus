@@ -3,6 +3,7 @@ package planparserv2
 import (
 	"fmt"
 	"math/rand"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -19,8 +20,19 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func TestMain(m *testing.M) {
+	dir, _ := os.MkdirTemp("", "milvus_plan_test_*")
+	os.Setenv("LOCAL_STORAGE_PATH", dir)
+	paramtable.Init()
+	paramtable.Get().Save("localStorage.path", dir)
+	exitCode := m.Run()
+	os.RemoveAll(dir)
+	os.Exit(exitCode)
+}
 
 // generatedFieldIDBase is the offset newTestSchema adds to each schemapb.DataType
 // enum value to derive that type's field ID, so the generated block spans
@@ -67,6 +79,11 @@ func newTestSchema(EnableDynamicField bool) *schemapb.CollectionSchema {
 		FieldID: stringArrayFieldID, Name: "StringArrayField", IsPrimaryKey: false, Description: "string array field",
 		DataType:    schemapb.DataType_Array,
 		ElementType: schemapb.DataType_VarChar,
+	})
+
+	fields = append(fields, &schemapb.FieldSchema{
+		FieldID: 135, Name: "UUIDTestField", IsPrimaryKey: false, Description: "uuid field",
+		DataType: schemapb.DataType_UUID,
 	})
 
 	structArrayField := &schemapb.StructArrayFieldSchema{
@@ -139,6 +156,7 @@ func TestExpr_Term(t *testing.T) {
 		`DoubleField in [11.0, 12.0]`,
 		`StringField in ["str13", "str14"]`,
 		`VarCharField in ["str15", "str16"]`,
+		`UUIDTestField in ["a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", "550e8400-e29b-41d4-a716-446655440000"]`,
 		`FloatField in [1373, 115]`,
 		`Int64Field in [17]`,
 		`Int64Field in []`,
@@ -5070,4 +5088,107 @@ func TestExpr_BooleanLiteral(t *testing.T) {
 		_, err := ParseExpr(helper, "\"hello\" and (Int64Field > 50)", nil)
 		assert.Error(t, err)
 	})
+}
+
+func TestCreateRequeryPlan_UUID(t *testing.T) {
+	upperUUID := "3F2504E0-4F89-41D3-9A0C-0305E82C3301"
+	lowerUUID := "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
+
+	pkField := &schemapb.FieldSchema{
+		FieldID:      100,
+		Name:         "uuid_pk",
+		DataType:     schemapb.DataType_UUID,
+		IsPrimaryKey: true,
+	}
+
+	t.Run("canonicalizes uppercase", func(t *testing.T) {
+		ids := &schemapb.IDs{
+			IdField: &schemapb.IDs_StrId{
+				StrId: &schemapb.StringArray{Data: []string{upperUUID}},
+			},
+		}
+
+		plan := CreateRequeryPlan(pkField, ids)
+		termExpr := plan.GetQuery().GetPredicates().GetTermExpr()
+		require.NotNil(t, termExpr)
+		require.Len(t, termExpr.GetValues(), 1)
+		assert.Equal(t, schemapb.DataType_UUID, termExpr.GetColumnInfo().GetDataType())
+		assert.Equal(t, lowerUUID, termExpr.GetValues()[0].GetStringVal())
+		assert.Equal(t, "3f2504e0-4f89-41d3-9a0c-0305e82c3301", termExpr.GetValues()[0].GetStringVal())
+	})
+
+	t.Run("canonicalizes non-canonical forms", func(t *testing.T) {
+		// The same non-canonical forms insert accepts (32 hex digits, braces,
+		// URN prefix) must canonicalize to the same lowercase form on requery.
+		nonCanonical := []string{
+			"3f2504e04f8941d39a0c0305e82c3301",
+			"{3f2504e0-4f89-41d3-9a0c-0305e82c3301}",
+			"urn:uuid:3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+		}
+		for _, id := range nonCanonical {
+			ids := &schemapb.IDs{
+				IdField: &schemapb.IDs_StrId{
+					StrId: &schemapb.StringArray{Data: []string{id}},
+				},
+			}
+
+			plan := CreateRequeryPlan(pkField, ids)
+			termExpr := plan.GetQuery().GetPredicates().GetTermExpr()
+			require.NotNil(t, termExpr)
+			require.Len(t, termExpr.GetValues(), 1)
+			assert.Equal(t, "3f2504e0-4f89-41d3-9a0c-0305e82c3301", termExpr.GetValues()[0].GetStringVal(), id)
+		}
+	})
+}
+
+func TestExpr_UUIDFieldToFieldComparison(t *testing.T) {
+	schema := newTestSchemaHelper(t)
+
+	// Both UUIDTestField (fid 135) and the auto-generated UUIDField (fid 231)
+	// exist in the test schema. UUID is string-backed, so field-to-field
+	// comparison is supported via the string comparison path (like VARCHAR).
+	fieldToField := []string{
+		`UUIDField == UUIDTestField`,
+		`UUIDField != UUIDTestField`,
+		`UUIDField < UUIDTestField`,
+		`UUIDField <= UUIDTestField`,
+		`UUIDField > UUIDTestField`,
+		`UUIDField >= UUIDTestField`,
+		`UUIDTestField == UUIDField`,
+	}
+	for _, expr := range fieldToField {
+		plan, err := ParseExpr(schema, expr, nil)
+		assert.NoError(t, err, expr)
+		require.NotNil(t, plan, expr)
+		assert.NotNil(t, plan.GetCompareExpr(), expr)
+	}
+
+	// Field-vs-literal comparisons and IN lists must also parse, including
+	// the non-canonical literal forms insert accepts.
+	valid := []string{
+		`UUIDTestField == "550e8400-e29b-41d4-a716-446655440000"`,
+		`UUIDTestField != "550e8400-e29b-41d4-a716-446655440000"`,
+		`UUIDField == "550e8400-e29b-41d4-a716-446655440000"`,
+		`UUIDTestField in ["550e8400-e29b-41d4-a716-446655440000"]`,
+		`UUIDTestField in ["a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", "550e8400-e29b-41d4-a716-446655440000"]`,
+		`UUIDTestField == "550E8400-E29B-41D4-A716-446655440000"`,
+		`UUIDTestField == "550e8400e29b41d4a716446655440000"`,
+		`UUIDTestField == "{550e8400-e29b-41d4-a716-446655440000}"`,
+		`UUIDTestField == "urn:uuid:550e8400-e29b-41d4-a716-446655440000"`,
+		`UUIDTestField in ["550e8400e29b41d4a716446655440000", "{550e8400-e29b-41d4-a716-446655440000}"]`,
+	}
+	for _, expr := range valid {
+		assertValidExpr(t, schema, expr)
+	}
+
+	// Malformed UUID literals are now rejected at parse time instead of
+	// being silently lowercased.
+	malformed := []string{
+		`UUIDTestField == "not-a-uuid"`,
+		`UUIDTestField in ["550e8400"]`,
+		`UUIDTestField == ""`,
+	}
+	for _, expr := range malformed {
+		assertInvalidExpr(t, schema, expr)
+	}
 }

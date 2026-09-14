@@ -48,7 +48,7 @@ func (c *INVERTEDChecker) CheckTrain(dataType schemapb.DataType, elementType sch
 func (c *INVERTEDChecker) CheckValidDataType(indexType IndexType, field *schemapb.FieldSchema) error {
 	dType := field.GetDataType()
 	if !typeutil.IsBoolType(dType) && !typeutil.IsArithmetic(dType) && !typeutil.IsStringType(dType) &&
-		!typeutil.IsArrayType(dType) && !typeutil.IsJSONType(dType) {
+		!typeutil.IsArrayType(dType) && !typeutil.IsJSONType(dType) && dType != schemapb.DataType_UUID {
 		return merr.WrapErrParameterInvalidMsg("INVERTED are not supported on %s field", dType.String())
 	}
 	return nil

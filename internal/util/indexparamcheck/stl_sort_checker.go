@@ -44,8 +44,9 @@ func (c *STLSORTChecker) CheckValidDataType(indexType IndexType, field *schemapb
 	if typeutil.IsJSONType(dataType) {
 		return nil
 	}
-	if !typeutil.IsArithmetic(dataType) && !typeutil.IsStringType(dataType) && !typeutil.IsTimestamptzType(dataType) {
-		return merr.WrapErrParameterInvalidMsg("STL_SORT are only supported on numeric, varchar or timestamptz field, got %s", field.GetDataType())
+	if !typeutil.IsArithmetic(dataType) && !typeutil.IsStringType(dataType) && !typeutil.IsTimestamptzType(dataType) &&
+		dataType != schemapb.DataType_UUID {
+		return merr.WrapErrParameterInvalidMsg("STL_SORT are only supported on numeric, varchar, timestamptz or uuid field, got %s", field.GetDataType())
 	}
 	return nil
 }

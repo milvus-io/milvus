@@ -37,6 +37,7 @@ type PayloadWriterInterface interface {
 	AddDoubleToPayload([]float64, []bool) error
 	AddTimestamptzToPayload([]int64, []bool) error
 	AddOneStringToPayload(string, bool) error
+	AddOneBinaryToPayload([]byte, bool) error
 	AddOneArrayToPayload(*schemapb.ScalarField, bool) error
 	AddOneJSONToPayload([]byte, bool) error
 	AddOneGeometryToPayload(msg []byte, isValid bool) error
@@ -68,6 +69,7 @@ type PayloadReaderInterface interface {
 	GetDoubleFromPayload() ([]float64, []bool, error)
 	GetTimestamptzFromPayload() ([]int64, []bool, error)
 	GetStringFromPayload() ([]string, []bool, error)
+	GetUUIDFromPayload() ([][]byte, []bool, error)
 	GetArrayFromPayload() ([]*schemapb.ScalarField, []bool, error)
 	GetVectorArrayFromPayload() ([]*schemapb.VectorField, error)
 	GetJSONFromPayload() ([][]byte, []bool, error)

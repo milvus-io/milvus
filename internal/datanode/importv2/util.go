@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/google/uuid"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -458,6 +459,12 @@ func appendSystemFieldsDataWithCursor(task *ImportTask, data *storage.InsertData
 				return strconv.FormatInt(id, 10)
 			})
 			data.Data[pkField.GetFieldID()] = &storage.StringFieldData{Data: strIDs}
+		case schemapb.DataType_UUID:
+			uuids := make([][16]byte, rowNum)
+			for i := 0; i < rowNum; i++ {
+				uuids[i] = [16]byte(uuid.New())
+			}
+			data.Data[pkField.GetFieldID()] = &storage.UUIDFieldData{Data: uuids}
 		}
 	}
 	if _, ok := data.Data[common.RowIDField]; !ok { // for binlog import, keep original rowID and ts
@@ -614,6 +621,14 @@ func AppendNullableDefaultFieldsData(schema *schemapb.CollectionSchema, data *st
 			appender := &nullDefaultAppender[string]{}
 			if defaultVal != nil {
 				v := defaultVal.GetStringData()
+				err = appender.AppendDefault(fieldData, v, rowNum)
+			} else if nullable {
+				err = appender.AppendNull(fieldData, rowNum)
+			}
+		case schemapb.DataType_UUID:
+			appender := &nullDefaultAppender[[16]byte]{}
+			if defaultVal != nil {
+				v := storage.GetDefaultValue(field).([16]byte)
 				err = appender.AppendDefault(fieldData, v, rowNum)
 			} else if nullable {
 				err = appender.AppendNull(fieldData, rowNum)

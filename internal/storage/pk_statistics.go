@@ -76,6 +76,15 @@ func (st *PkStatistics) UpdatePKRange(ids FieldData) error {
 			}
 			st.PkFilter.AddString(pk)
 		}
+	case *UUIDFieldData:
+		for _, pk := range pks.Data {
+			id := NewUUIDPrimaryKey(pk)
+			err := st.UpdateMinMax(id)
+			if err != nil {
+				return err
+			}
+			st.PkFilter.Add(pk[:])
+		}
 	default:
 		return merr.WrapErrServiceInternalMsg("invalid data type for primary key: %T", ids)
 	}
@@ -102,6 +111,9 @@ func (st *PkStatistics) PkExist(pk PrimaryKey) bool {
 	case schemapb.DataType_VarChar:
 		varCharPk := pk.(*VarCharPrimaryKey)
 		return st.PkFilter.TestString(varCharPk.Value)
+	case schemapb.DataType_UUID:
+		uuidPk := pk.(*UUIDPrimaryKey)
+		return st.PkFilter.Test(uuidPk.Value[:])
 	default:
 		// TODO::
 	}
@@ -120,6 +132,9 @@ func Locations(pk PrimaryKey, k uint, bfType bloomfilter.BFType) []uint64 {
 	case schemapb.DataType_VarChar:
 		varCharPk := pk.(*VarCharPrimaryKey)
 		return bloomfilter.Locations(unsafe.Slice(unsafe.StringData(varCharPk.Value), len(varCharPk.Value)), k, bfType)
+	case schemapb.DataType_UUID:
+		uuidPk := pk.(*UUIDPrimaryKey)
+		return bloomfilter.Locations(uuidPk.Value[:], k, bfType)
 	default:
 		// TODO::
 	}

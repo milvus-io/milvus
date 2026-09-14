@@ -17,6 +17,7 @@
 package storage
 
 import (
+	"bytes"
 	"io"
 	"slices"
 	"time"
@@ -32,6 +33,7 @@ import (
 const (
 	keyInt64 = iota
 	keyString
+	keyUUID
 )
 
 // SortTimings holds phase-level timing information from the Sort function.
@@ -80,7 +82,7 @@ func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader
 				ri := len(records)
 				records = append(records, rec)
 				for i := 0; i < rec.Len(); i++ {
-					if predicate(rec, ri, i) {
+					if predicate == nil || predicate(rec, ri, i) {
 						indices = append(indices, rowIndex{int32(ri), int32(i)})
 					}
 				}
@@ -104,8 +106,9 @@ func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader
 		kinds := make([]int, len(sortByFieldIDs))
 		int64Keys := make([][][]int64, len(sortByFieldIDs))
 		stringKeys := make([][][]string, len(sortByFieldIDs))
+		uuidKeys := make([][][][]byte, len(sortByFieldIDs))
 		for fp, fid := range sortByFieldIDs {
-			switch records[0].Column(fid).(type) {
+			switch v := records[0].Column(fid).(type) {
 			case *array.Int64:
 				kinds[fp] = keyInt64
 				cols := make([][]int64, len(records))
@@ -125,6 +128,24 @@ func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader
 					cols[ri] = vals
 				}
 				stringKeys[fp] = cols
+			case *array.FixedSizeBinary:
+				if dt, ok := v.DataType().(*arrow.FixedSizeBinaryType); !ok || dt.ByteWidth != 16 {
+					return 0, nil, merr.WrapErrStorageMsg("unsupported type for sorting key")
+				}
+				kinds[fp] = keyUUID
+				cols := make([][][]byte, len(records))
+				for ri, rec := range records {
+					a := rec.Column(fid).(*array.FixedSizeBinary)
+					vals := make([][]byte, a.Len())
+					for i := range vals {
+						v := a.Value(i)
+						cp := make([]byte, len(v))
+						copy(cp, v)
+						vals[i] = cp
+					}
+					cols[ri] = vals
+				}
+				uuidKeys[fp] = cols
 			default:
 				return 0, nil, merr.WrapErrStorageMsg("unsupported type for sorting key")
 			}
@@ -154,6 +175,11 @@ func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader
 								return -1
 							}
 							return 1
+						}
+					case keyUUID:
+						xv, yv := uuidKeys[fp][x.ri][x.i], uuidKeys[fp][y.ri][y.i]
+						if c := bytes.Compare(xv, yv); c != 0 {
+							return c
 						}
 					}
 				}
@@ -287,6 +313,7 @@ type sortKeyCol struct {
 	kind int
 	i64  []int64
 	str  *array.String
+	uuid *array.FixedSizeBinary
 }
 
 // radixSortByInt64 sorts indices in place so that keys[indices[k].ri][indices[k].i]
@@ -386,6 +413,11 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 				cols[fp] = sortKeyCol{kind: keyInt64, i64: a.Int64Values()}
 			case *array.String:
 				cols[fp] = sortKeyCol{kind: keyString, str: a}
+			case *array.FixedSizeBinary:
+				if dt, ok := a.DataType().(*arrow.FixedSizeBinaryType); !ok || dt.ByteWidth != 16 {
+					return merr.WrapErrStorageMsg("unsupported type for sorting key")
+				}
+				cols[fp] = sortKeyCol{kind: keyUUID, uuid: a}
 			default:
 				return merr.WrapErrStorageMsg("unsupported type for sorting key")
 			}
@@ -426,6 +458,11 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 						return -1
 					}
 					return 1
+				}
+			case keyUUID:
+				xv, yv := cx.uuid.Value(int(x.i)), cy.uuid.Value(int(y.i))
+				if c := bytes.Compare(xv, yv); c != 0 {
+					return c
 				}
 			}
 		}
@@ -506,6 +543,7 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 	// string per row would reintroduce exactly the per-row allocation this
 	// rewrite removes. Comparing via string(buf) does not allocate.
 	lastStrBuf := make([][]byte, nk)
+	lastUUIDBuf := make([][]byte, nk)
 	hasLast := false
 
 	compareWithLast := func(x rowIndex) int {
@@ -528,6 +566,11 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 					}
 					return 1
 				}
+			case keyUUID:
+				xv := cx.uuid.Value(int(x.i))
+				if c := bytes.Compare(xv, lastUUIDBuf[fp]); c != 0 {
+					return c
+				}
 			}
 		}
 		return 0
@@ -541,6 +584,8 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 				lastI64[fp] = cx.i64[x.i]
 			case keyString:
 				lastStrBuf[fp] = append(lastStrBuf[fp][:0], cx.str.Value(int(x.i))...)
+			case keyUUID:
+				lastUUIDBuf[fp] = append(lastUUIDBuf[fp][:0], cx.uuid.Value(int(x.i))...)
 			}
 		}
 		hasLast = true

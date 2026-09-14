@@ -188,6 +188,7 @@ EmptyExtraFieldArrowType(const milvus::FieldMeta& field_meta) {
         case milvus::DataType::STRING:
         case milvus::DataType::VARCHAR:
         case milvus::DataType::TEXT:
+        case milvus::DataType::UUID:
             return arrow::utf8();
         case milvus::DataType::JSON:
             return arrow::binary();
@@ -259,7 +260,8 @@ BuildEmptyBatch(milvus::query::Plan* plan,
     auto pk_type = arrow::int64();
     if (pk_field_id.has_value()) {
         auto& pk_meta = schema->operator[](pk_field_id.value());
-        if (pk_meta.get_data_type() == milvus::DataType::VARCHAR) {
+        if (pk_meta.get_data_type() == milvus::DataType::VARCHAR ||
+            pk_meta.get_data_type() == milvus::DataType::UUID) {
             pk_type = arrow::utf8();
         }
     }
@@ -434,6 +436,7 @@ BuildGroupByArray(const std::vector<milvus::GroupByValueType>& values,
             return BuildGroupByTypedArray<bool, arrow::BooleanBuilder>(values);
         case milvus::DataType::VARCHAR:
         case milvus::DataType::STRING:
+        case milvus::DataType::UUID:
             return BuildGroupByTypedArray<std::string, arrow::StringBuilder>(
                 values);
         default:
@@ -545,6 +548,17 @@ BuildSearchResultBatch(
             std::shared_ptr<arrow::Array> id_array;
             ARROW_RETURN_NOT_OK(id_builder.Finish(&id_array));
             fields.push_back(arrow::field("$id", arrow::int64()));
+            arrays.push_back(id_array);
+        } else if (search_result->pk_type_ == milvus::DataType::UUID) {
+            arrow::StringBuilder id_builder;
+            for (size_t i = 0; i < total_valid; ++i) {
+                auto& pk = search_result->primary_keys_[i];
+                ARROW_RETURN_NOT_OK(
+                    id_builder.Append(std::get<milvus::UUID>(pk).ToString()));
+            }
+            std::shared_ptr<arrow::Array> id_array;
+            ARROW_RETURN_NOT_OK(id_builder.Finish(&id_array));
+            fields.push_back(arrow::field("$id", arrow::utf8()));
             arrays.push_back(id_array);
         } else {
             arrow::StringBuilder id_builder;

@@ -1111,3 +1111,76 @@ func TestParseTextFieldValue(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, longText, val)
 }
+
+func TestParseUUIDFieldValue(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      100,
+				Name:         "pk",
+				IsPrimaryKey: true,
+				DataType:     schemapb.DataType_Int64,
+				AutoID:       true,
+			},
+			{
+				FieldID:  101,
+				Name:     "uuid",
+				DataType: schemapb.DataType_UUID,
+			},
+		},
+	}
+
+	parser, err := NewRowParser(schema)
+	assert.NoError(t, err)
+
+	t.Run("valid uuid parsed and normalized to lowercase", func(t *testing.T) {
+		row := map[string]any{
+			"uuid": "550E8400-E29B-41D4-A716-446655440000",
+		}
+		rowData, err := json.Marshal(row)
+		assert.NoError(t, err)
+
+		var rawRow any
+		err = json.Unmarshal(rowData, &rawRow)
+		assert.NoError(t, err)
+
+		result, err := parser.Parse(rawRow)
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+
+		val, ok := result[int64(101)]
+		assert.True(t, ok)
+		assert.Equal(t, "550e8400-e29b-41d4-a716-446655440000", val)
+	})
+
+	t.Run("malformed uuid rejected", func(t *testing.T) {
+		row := map[string]any{
+			"uuid": "not-a-uuid",
+		}
+		rowData, err := json.Marshal(row)
+		assert.NoError(t, err)
+
+		var rawRow any
+		err = json.Unmarshal(rowData, &rawRow)
+		assert.NoError(t, err)
+
+		_, err = parser.Parse(rawRow)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid UUID format")
+	})
+
+	t.Run("non-string uuid value rejected", func(t *testing.T) {
+		row := map[string]any{
+			"uuid": 123,
+		}
+		rowData, err := json.Marshal(row)
+		assert.NoError(t, err)
+
+		var rawRow any
+		err = json.Unmarshal(rowData, &rawRow)
+		assert.NoError(t, err)
+
+		_, err = parser.Parse(rawRow)
+		assert.Error(t, err)
+	})
+}

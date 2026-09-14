@@ -736,6 +736,7 @@ func (df *DataFactory) GenMsgStreamDeleteMsg(pks []storage.PrimaryKey, chanName 
 	for i := 0; i < len(pks); i++ {
 		timestamps[i] = typeutil.Timestamp(i) + 1000
 	}
+	ids, _ := storage.ParsePrimaryKeys2IDs(pks)
 	msg := &msgstream.DeleteMsg{
 		BaseMsg: msgstream.BaseMsg{
 			HashValues: []uint32{uint32(idx)},
@@ -751,7 +752,7 @@ func (df *DataFactory) GenMsgStreamDeleteMsg(pks []storage.PrimaryKey, chanName 
 			PartitionName:  "default",
 			PartitionID:    1,
 			ShardName:      chanName,
-			PrimaryKeys:    storage.ParsePrimaryKeys2IDs(pks),
+			PrimaryKeys:    ids,
 			Timestamps:     timestamps,
 			NumRows:        int64(len(pks)),
 		},
@@ -760,6 +761,7 @@ func (df *DataFactory) GenMsgStreamDeleteMsg(pks []storage.PrimaryKey, chanName 
 }
 
 func (df *DataFactory) GenMsgStreamDeleteMsgWithTs(idx int, pks []storage.PrimaryKey, chanName string, ts typeutil.Timestamp) *msgstream.DeleteMsg {
+	ids, _ := storage.ParsePrimaryKeys2IDs(pks)
 	msg := &msgstream.DeleteMsg{
 		BaseMsg: msgstream.BaseMsg{
 			HashValues:     []uint32{uint32(idx)},
@@ -778,7 +780,7 @@ func (df *DataFactory) GenMsgStreamDeleteMsgWithTs(idx int, pks []storage.Primar
 			PartitionID:    1,
 			CollectionID:   typeutil.UniqueID(0),
 			ShardName:      chanName,
-			PrimaryKeys:    storage.ParsePrimaryKeys2IDs(pks),
+			PrimaryKeys:    ids,
 			Timestamps:     []typeutil.Timestamp{ts},
 			NumRows:        int64(len(pks)),
 		},

@@ -155,6 +155,15 @@ func genEmptyFieldDataByType(dataType schemapb.DataType) (*schemapb.FieldData, e
 				},
 			},
 		}, nil
+	case schemapb.DataType_UUID:
+		return &schemapb.FieldData{
+			Type: dataType,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_BytesData{BytesData: &schemapb.BytesArray{Data: [][]byte{}}},
+				},
+			},
+		}, nil
 	case schemapb.DataType_Timestamptz:
 		return genEmptyLongFieldData(dataType, []int64{0}), nil
 	default:

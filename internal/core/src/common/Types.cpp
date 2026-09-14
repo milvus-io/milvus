@@ -46,6 +46,8 @@ IsFixedSizeType(DataType type) {
             return TypeTraits<DataType::STRING>::IsFixedWidth;
         case DataType::VARCHAR:
             return TypeTraits<DataType::VARCHAR>::IsFixedWidth;
+        case DataType::UUID:
+            return TypeTraits<DataType::UUID>::IsFixedWidth;
         case DataType::ARRAY:
             return TypeTraits<DataType::ARRAY>::IsFixedWidth;
         case DataType::JSON:

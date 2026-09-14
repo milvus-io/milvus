@@ -415,6 +415,20 @@ func newDeltalogMultiFieldWriter(eventWriter *MultiFieldDeltalogStreamWriter, ba
 				pk := vv.Pk.GetValue().(string)
 				pb.Append(pk)
 			}
+		case schemapb.DataType_UUID:
+			pb := builder.Field(0).(*array.FixedSizeBinaryBuilder)
+			for _, vv := range v {
+				var u [16]byte
+				switch val := vv.Pk.GetValue().(type) {
+				case [16]byte:
+					u = val
+				case []byte:
+					copy(u[:], val)
+				case string:
+					u, _ = typeutil.ParseUUID(val)
+				}
+				pb.Append(u[:])
+			}
 		default:
 			return nil, merr.WrapErrServiceInternalMsg("unexpected pk type %v", v[0].PkType)
 		}
@@ -460,6 +474,18 @@ func newDeltalogMultiFieldReader(blobs []*Blob) (*DeserializeReaderImpl[*DeleteL
 					v[j] = &DeleteLog{}
 				}
 				v[j].Pk = NewVarCharPrimaryKey(arr.Value(j))
+			}
+		case arrow.FIXED_SIZE_BINARY:
+			arr := r.Column(0).(*array.FixedSizeBinary)
+			for j := 0; j < r.Len(); j++ {
+				if v[j] == nil {
+					v[j] = &DeleteLog{}
+				}
+				pk, err := NewUUIDPrimaryKeyFromBytes(arr.Value(j))
+				if err != nil {
+					return err
+				}
+				v[j].Pk = pk
 			}
 		default:
 			return merr.WrapErrServiceInternalMsg("unexpected delta log pkType %v", fields[0].Type.Name())
@@ -560,6 +586,22 @@ func (w *LegacyDeltalogWriter) Write(rec Record) error {
 		case schemapb.DataType_VarChar:
 			pk := NewVarCharPrimaryKey(rec.Column(0).(*array.String).Value(i))
 			return NewDeleteLog(pk, ts), nil
+		case schemapb.DataType_UUID:
+			val := rec.Column(0)
+			if fsb, ok := val.(*array.FixedSizeBinary); ok {
+				pk, err := NewUUIDPrimaryKeyFromBytes(fsb.Value(i))
+				if err != nil {
+					return nil, err
+				}
+				return NewDeleteLog(pk, ts), nil
+			} else if strArr, ok := val.(*array.String); ok {
+				pk, err := NewUUIDPrimaryKeyFromString(strArr.Value(i))
+				if err != nil {
+					return nil, err
+				}
+				return NewDeleteLog(pk, ts), nil
+			}
+			return nil, merr.WrapErrServiceInternalMsg("unexpected array type for UUID deltalog: %T", val)
 		default:
 			return nil, merr.WrapErrServiceInternalMsg("unexpected pk type %v", w.pkType)
 		}
@@ -641,6 +683,22 @@ func (r *deleteLogToRecordReader) Next() (Record, error) {
 			builder.Append(dl.Pk.GetValue().(string))
 		}
 		pkArray = builder.NewArray()
+	case schemapb.DataType_UUID:
+		builder := array.NewFixedSizeBinaryBuilder(allocator, &arrow.FixedSizeBinaryType{ByteWidth: 16})
+		defer builder.Release()
+		for _, dl := range deleteLogs {
+			var u [16]byte
+			switch v := dl.Pk.GetValue().(type) {
+			case [16]byte:
+				u = v
+			case []byte:
+				copy(u[:], v)
+			case string:
+				u, _ = typeutil.ParseUUID(v)
+			}
+			builder.Append(u[:])
+		}
+		pkArray = builder.NewArray()
 	default:
 		return nil, merr.WrapErrParameterInvalidMsg("unsupported pk type: %v", r.pkType)
 	}
@@ -654,10 +712,13 @@ func (r *deleteLogToRecordReader) Next() (Record, error) {
 
 	// Create arrow schema
 	var pkFieldType arrow.DataType
-	if r.pkType == schemapb.DataType_Int64 {
+	switch r.pkType {
+	case schemapb.DataType_Int64:
 		pkFieldType = arrow.PrimitiveTypes.Int64
-	} else {
+	case schemapb.DataType_VarChar:
 		pkFieldType = arrow.BinaryTypes.String
+	case schemapb.DataType_UUID:
+		pkFieldType = &arrow.FixedSizeBinaryType{ByteWidth: 16}
 	}
 
 	schema := arrow.NewSchema([]arrow.Field{

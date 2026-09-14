@@ -637,8 +637,8 @@ func (v *ParserVisitor) VisitLike(ctx *parser.LikeContext) interface{} {
 		return err
 	}
 
-	if !typeutil.IsStringType(leftExpr.dataType) && !typeutil.IsJSONType(leftExpr.dataType) &&
-		(!typeutil.IsArrayType(leftExpr.dataType) || !typeutil.IsStringType(column.GetElementType())) {
+	if !typeutil.IsStringType(leftExpr.dataType) && !typeutil.IsUUIDType(leftExpr.dataType) && !typeutil.IsJSONType(leftExpr.dataType) &&
+		(!typeutil.IsArrayType(leftExpr.dataType) || (!typeutil.IsStringType(column.GetElementType()) && !typeutil.IsUUIDType(column.GetElementType()))) {
 		return merr.WrapErrQueryPlanMsg("like operation on non-string or no-json field is unsupported")
 	}
 
@@ -811,9 +811,9 @@ func validateAndOptimizeRegexPattern(pattern string) (planpb.OpType, string, err
 }
 
 func isRegexMatchSupportedType(dataType schemapb.DataType, elementType schemapb.DataType) bool {
-	return typeutil.IsStringType(dataType) ||
+	return typeutil.IsStringType(dataType) || typeutil.IsUUIDType(dataType) ||
 		typeutil.IsJSONType(dataType) ||
-		(typeutil.IsArrayType(dataType) && typeutil.IsStringType(elementType))
+		(typeutil.IsArrayType(dataType) && (typeutil.IsStringType(elementType) || typeutil.IsUUIDType(elementType)))
 }
 
 // VisitRegexMatch handles =~ regex match operations.
@@ -1585,6 +1585,9 @@ func (v *ParserVisitor) VisitRange(ctx *parser.RangeContext) interface{} {
 	if typeutil.IsArrayType(columnInfo.GetDataType()) {
 		fieldDataType = columnInfo.GetElementType()
 	}
+	if typeutil.IsUUIDType(fieldDataType) {
+		return merr.WrapErrParameterInvalidMsg("range operations are not supported on uuid field")
+	}
 
 	lowerValue := lowerValueExpr.GetValue()
 	upperValue := upperValueExpr.GetValue()
@@ -1665,6 +1668,9 @@ func (v *ParserVisitor) VisitReverseRange(ctx *parser.ReverseRangeContext) inter
 	fieldDataType := columnInfo.GetDataType()
 	if typeutil.IsArrayType(columnInfo.GetDataType()) {
 		fieldDataType = columnInfo.GetElementType()
+	}
+	if typeutil.IsUUIDType(fieldDataType) {
+		return merr.WrapErrParameterInvalidMsg("range operations are not supported on uuid field")
 	}
 
 	lowerValue := lowerValueExpr.GetValue()

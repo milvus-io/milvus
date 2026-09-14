@@ -321,9 +321,16 @@ func primaryKeysFromFieldData(field *schemapb.FieldData, fieldID int64) (primary
 		return primaryKeysFromIDs(&schemapb.IDs{
 			IdField: &schemapb.IDs_StrId{StrId: values.StringData},
 		})
+	case *schemapb.ScalarField_BytesData:
+		if values == nil {
+			return primaryKeys{}, status.NewUnrecoverableError("partial update uuid primary keys are nil")
+		}
+		return primaryKeysFromIDs(&schemapb.IDs{
+			IdField: &schemapb.IDs_UuidId{UuidId: &schemapb.UUIDArray{Data: values.BytesData.GetData()}},
+		})
 	default:
 		return primaryKeys{}, status.NewUnrecoverableError(
-			"partial update insert primary key field %d must be int64 or varchar",
+			"partial update insert primary key field %d must be int64, varchar or uuid",
 			fieldID,
 		)
 	}
@@ -356,6 +363,25 @@ func primaryKeysFromIDs(ids *schemapb.IDs) (primaryKeys, error) {
 			kind:         primaryKeyKindString,
 			stringValues: values.StrId.GetData(),
 		}, nil
+	case *schemapb.IDs_UuidId:
+		if values == nil || values.UuidId == nil {
+			return primaryKeys{}, status.NewUnrecoverableError("partial update uuid primary keys are nil")
+		}
+		if len(values.UuidId.GetData()) == 0 {
+			return primaryKeys{}, status.NewUnrecoverableError("partial update primary keys are empty")
+		}
+		stringValues := make([]string, 0, len(values.UuidId.GetData()))
+		for _, b := range values.UuidId.GetData() {
+			u, err := typeutil.BytesToUUID(b)
+			if err != nil {
+				return primaryKeys{}, status.NewUnrecoverableError("partial update uuid primary key is invalid: %v", err)
+			}
+			stringValues = append(stringValues, typeutil.UUIDToString(u))
+		}
+		return primaryKeys{
+			kind:         primaryKeyKindString,
+			stringValues: stringValues,
+		}, nil
 	default:
 		return primaryKeys{}, status.NewUnrecoverableError("unsupported partial update primary key ids type %T", values)
 	}
@@ -367,6 +393,10 @@ func validatePrimaryKeysScalarType(pks primaryKeys, dataType schemapb.DataType) 
 	case schemapb.DataType_Int64:
 		expected = primaryKeyKindInt64
 	case schemapb.DataType_VarChar:
+		expected = primaryKeyKindString
+	case schemapb.DataType_UUID:
+		// UUID PKs are tracked by canonical string form (see UuidId
+		// conversion in primaryKeysFromIDs).
 		expected = primaryKeyKindString
 	default:
 		return status.NewUnrecoverableError(

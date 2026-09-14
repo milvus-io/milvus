@@ -309,9 +309,11 @@ func (s *L0WriteBufferSuite) composeTextInsertMsg(segmentID int64, rowCount int)
 }
 
 func (s *L0WriteBufferSuite) composeDeleteMsg(pks []storage.PrimaryKey) *msgstream.DeleteMsg {
+	ids, err := storage.ParsePrimaryKeys2IDs(pks)
+	s.Require().NoError(err)
 	delMsg := &msgstream.DeleteMsg{
 		DeleteRequest: &msgpb.DeleteRequest{
-			PrimaryKeys: storage.ParsePrimaryKeys2IDs(pks),
+			PrimaryKeys: ids,
 			Timestamps:  lo.RepeatBy(len(pks), func(idx int) uint64 { return tsoutil.ComposeTSByTimeWithLogical(time.Now(), int64(idx)+1) }),
 		},
 	}

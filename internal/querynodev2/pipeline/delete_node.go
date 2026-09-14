@@ -40,8 +40,12 @@ type deleteNode struct {
 }
 
 // addDeleteData find the segment of delete column in DeleteMsg and save in deleteData
-func (dNode *deleteNode) addDeleteData(deleteDatas map[UniqueID]*delegator.DeleteData, msg *DeleteMsg) {
+func (dNode *deleteNode) addDeleteData(deleteDatas map[UniqueID]*delegator.DeleteData, msg *DeleteMsg) error {
 	ctx := msg.TraceCtx()
+	pks, err := storage.ParseIDs2PrimaryKeys(msg.PrimaryKeys)
+	if err != nil {
+		return err
+	}
 	deleteData, ok := deleteDatas[msg.PartitionID]
 	if !ok {
 		deleteData = &delegator.DeleteData{
@@ -49,7 +53,6 @@ func (dNode *deleteNode) addDeleteData(deleteDatas map[UniqueID]*delegator.Delet
 		}
 		deleteDatas[msg.PartitionID] = deleteData
 	}
-	pks := storage.ParseIDs2PrimaryKeys(msg.PrimaryKeys)
 	deleteData.PrimaryKeys = append(deleteData.PrimaryKeys, pks...)
 	deleteData.Timestamps = append(deleteData.Timestamps, msg.Timestamps...)
 	deleteData.RowCount += int64(len(pks))
@@ -60,6 +63,7 @@ func (dNode *deleteNode) addDeleteData(deleteDatas map[UniqueID]*delegator.Delet
 		mlog.Int("deleteRowNum", len(pks)),
 		mlog.Uint64("timestampMin", msg.BeginTimestamp),
 		mlog.Uint64("timestampMax", msg.EndTimestamp))
+	return nil
 }
 
 func (dNode *deleteNode) Operate(in Msg) Msg {
@@ -80,7 +84,10 @@ func (dNode *deleteNode) Operate(in Msg) Msg {
 				deleteDataByTs[ts] = deleteDatas
 				tsOrder = append(tsOrder, ts)
 			}
-			dNode.addDeleteData(deleteDatas, msg)
+			if err := dNode.addDeleteData(deleteDatas, msg); err != nil {
+				mlog.Warn(msg.TraceCtx(), "failed to parse delete primary keys, skip msg", mlog.Err(err))
+				continue
+			}
 		}
 
 		batches := make([]delegator.DeleteBatch, 0, len(tsOrder))
