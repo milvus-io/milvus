@@ -159,6 +159,7 @@ class GroupByJsonGetterTest
             ASSERT_EQ(target->tell(), size);
             auto* data = target->release();
             auto guard = std::make_shared<ChunkMmapGuard>(data, size, "");
+            target->TransferOwnership();
             chunk_lifetimes_.push_back(guard);
             auto chunk = std::make_unique<JSONChunk>(
                 rows, data, size, nullable, std::move(guard));
