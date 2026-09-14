@@ -21,7 +21,9 @@
 > splitting the residual. The accepting DataNode then refines the estimate in
 > `CreateTask` (`internal/datanode/taskresource`) with the exact field bytes,
 > a per-index-type build model and its own machine, and books the corrected
-> value.
+> value. A field's size is min(schema bound, column group size) everywhere
+> (`taskcommon.EstimateFieldSize`): the index task's scalar slot, the
+> DataCoord memory estimate and the DataNode correction.
 
 ## Global Constraints
 

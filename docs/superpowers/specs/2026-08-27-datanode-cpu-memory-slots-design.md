@@ -104,20 +104,37 @@ the cap never fires there.
 Every memory estimate is clamped to at least `minTaskMemory` (64MB). A task
 whose inputs cannot be resolved yet is priced at the floor and not cached.
 
-### fieldSize / segmentSize fallback
+### fieldSize
 
-V3 segments do not persist per-field binlog KVs (`kv_catalog.go`), so after a
-DataCoord restart the per-field binlog size is 0, and external-collection
-segments also lack `Stats`. Then `apportionFieldSize` prices the field:
+Every place that sizes one field of a segment uses the same rule
+(`taskcommon.EstimateFieldSize`): the field is the **smaller of two upper
+bounds**.
 
-- fixed-width fields (numbers, bool, timestamps, dense vectors): `rows x width`,
-  exact on every storage version
-- variable-width fields: the segment's insert bytes minus every fixed-width
-  field and the two system fields (16 bytes per row) is the residual that
-  belongs to them; it is split in proportion to `typeutil.EstimateSizePerRecord`
-  of each. Only the split is a guess, never the residual
-- no insert size at all (external collection): `rows x EstimateSizePerRecord(field)`
-- unknown field or nil schema: the whole segment
+- the schema's: `rows x width` for a fixed-width type (numbers, bool,
+  timestamps, dense vectors), `rows x (max_length + 4)` for a varchar (the
+  proxy rejects a value longer than `max_length` bytes; 4 is the Arrow
+  offset), plus the validity bitmap when nullable. json, text, array,
+  geometry, sparse and array-of-vector fields have no schema bound;
+- the container's: the memory size of the binlogs holding the field. In
+  storage v2/v3 one binlog holds a whole column group (the system group, or
+  the group of all remaining short fields), so this is the group, not the
+  field.
+
+Neither bound alone is the field: the schema cannot see that a varchar is
+short, and a column group cannot tell its fields apart.
+
+V3 segments do not persist the column-group binlogs (`kv_catalog.go`), so after
+a DataCoord restart the container is unknown. A fixed-width field is exact
+anyway; a variable-width field is then bounded by the segment's insert size
+minus every fixed-width field and the system fields (16 bytes a row). With no
+bound at all (an unbounded type in a segment without size statistics) the
+schema's per-row estimate is used, then the whole segment. An unknown field is
+charged its group, else the whole segment.
+
+The **scalar task slot** of an index task is derived from this same field size
+(`calculateIndexTaskSlot`, at creation and at reload); without a cached schema
+it falls back to the binlog size it used before. The **memory** of index and
+stats tasks is this field size times the expansion factor.
 
 ## DataNode correction
 
@@ -141,8 +158,8 @@ What the worker knows better, per family:
 
 | task | corrected memory |
 |---|---|
-| index | exact input: dense vector `rows x dim x elemSize`, otherwise the field's binlog memory sizes in the request (struct-array children through their parent), plus the optional scalar fields the build loads; expansion: the build model of the index type, below |
-| stats | per target field from its binlogs: text `raw + min(tantivy budget, 2 x raw)`, json key `2 x raw + json_key_stats_tantivy_memory`, bm25 `2 x raw`; any target field without binlog bytes keeps the estimate |
+| index | input: min(schema bound, column group in the request's binlogs) for the indexed field and the optional scalar fields the build loads; without binlogs only an exact fixed-width size is used, otherwise the estimate stands; expansion: the build model of the index type, below |
+| stats | per target field, sized the same way: text `raw + min(tantivy budget, 2 x raw)`, json key `2 x raw + json_key_stats_tantivy_memory`, bm25 `2 x raw`; any target field that cannot be sized keeps the estimate |
 | analyze | `min(raw, machine x max_train_size_ratio) x analyzeMemoryFactor` |
 | sort compaction | `insert + rows x 8 + binlogMaxSize + 2 x deltas` |
 | mix / bump | `min(insert, plan.max_size) + 2 x deltas` |
