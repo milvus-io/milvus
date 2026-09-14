@@ -135,7 +135,10 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             if (exec_path_ == ExprExecPath::ScalarIndex &&
                 !use_json_flat_raw_offsets) {
                 if (is_numeric) {
+                    const auto cast_type = PinnedJsonIndexCastElementType();
                     if (!use_double && PinnedJsonIndexIsFlat()) {
+                        result = ExecRangeVisitorImplForIndex<int64_t>(input);
+                    } else if (!use_double && cast_type == DataType::INT64) {
                         result = ExecRangeVisitorImplForIndex<int64_t>(input);
                     } else {
                         proto::plan::GenericValue double_lower_val;
@@ -291,11 +294,9 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonPreciseNumeric(
                 continue;
             }
             auto lower_comparison =
-                CompareJsonNumberToBoundWithUint64DoubleFallback(number.value(),
-                                                                 lower_bound);
+                CompareJsonNumberToBound(number.value(), lower_bound);
             auto upper_comparison =
-                CompareJsonNumberToBoundWithUint64DoubleFallback(number.value(),
-                                                                 upper_bound);
+                CompareJsonNumberToBound(number.value(), upper_bound);
             if (!lower_comparison.has_value() ||
                 !upper_comparison.has_value()) {
                 res[i] = false;
@@ -1196,6 +1197,13 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForPk(EvalCtx& context) {
 
 void
 PhyBinaryRangeFilterExpr::DetermineExecPath() {
+    // Both bounds must fit the selected projection, including when the lower
+    // bound is an integer and only the upper bound is floating-point.
+    if (field_type_ == DataType::JSON && expr_->lower_val_.has_int64_val() &&
+        expr_->upper_val_.has_float_val()) {
+        value_type_ = DataType::DOUBLE;
+    }
+
     // PkIndex (binary range only supports PK on sealed segments)
     if (is_pk_field_ && segment_->type() == SegmentType::Sealed) {
         exec_path_ = ExprExecPath::PkIndex;
@@ -1211,25 +1219,6 @@ PhyBinaryRangeFilterExpr::DetermineExecPath() {
     auto data_type = expr_->column_.data_type_;
     if (expr_->column_.element_level_) {
         data_type = expr_->column_.element_type_;
-    }
-
-    if (data_type == DataType::JSON) {
-        const auto lower_type = expr_->lower_val_.val_case();
-        const auto upper_type = expr_->upper_val_.val_case();
-        const auto is_numeric =
-            (lower_type == proto::plan::GenericValue::ValCase::kInt64Val ||
-             lower_type == proto::plan::GenericValue::ValCase::kFloatVal) &&
-            (upper_type == proto::plan::GenericValue::ValCase::kInt64Val ||
-             upper_type == proto::plan::GenericValue::ValCase::kFloatVal);
-        const auto requires_precise_int64_comparison =
-            is_numeric &&
-            (JsonNumericBoundRequiresPreciseInt64Comparison(
-                 expr_->lower_val_) ||
-             JsonNumericBoundRequiresPreciseInt64Comparison(expr_->upper_val_));
-        if (requires_precise_int64_comparison) {
-            exec_path_ = ExprExecPath::RawData;
-            return;
-        }
     }
 
     // ARRAY type cannot use scalar index.

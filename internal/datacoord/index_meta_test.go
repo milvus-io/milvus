@@ -1533,13 +1533,17 @@ func TestMeta_FinishTask(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		err := m.FinishTask(&workerpb.IndexTaskInfo{
-			BuildID:        buildID,
-			State:          commonpb.IndexState_Finished,
-			IndexFileKeys:  []string{"file1", "file2"},
-			SerializedSize: 1024,
-			FailReason:     "",
+			BuildID:                   buildID,
+			State:                     commonpb.IndexState_Finished,
+			IndexFileKeys:             []string{"file1", "file2"},
+			SerializedSize:            1024,
+			FailReason:                "",
+			CurrentScalarIndexVersion: common.MinScalarIndexVersionForJsonPathPresence,
 		})
 		assert.NoError(t, err)
+		segIdx, ok := m.GetIndexJob(buildID)
+		assert.True(t, ok)
+		assert.Equal(t, common.MinScalarIndexVersionForJsonPathPresence, segIdx.CurrentScalarIndexVersion)
 	})
 
 	t.Run("fail", func(t *testing.T) {

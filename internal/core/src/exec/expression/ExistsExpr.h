@@ -94,7 +94,7 @@ class PhyExistsFilterExpr : public SegmentExpr {
     EvalJsonExistsForDataSegment(EvalCtx& context);
 
     VectorPtr
-    EvalJsonExistsForIndex();
+    EvalJsonExistsForIndex(const OffsetVector* input);
 
     VectorPtr
     EvalJsonExistsForDataSegmentByStats();

@@ -6,6 +6,8 @@ changing that subsystem.
 
 - [Observability](observability/README.md): logging, metrics, tracing, and
   observability debugging.
+- [JSON filtering](json-filtering/README.md): cross-path query semantics for
+  raw scans, JSON stats, path indexes, and flat indexes.
 - [Streaming system](streaming-system/streaming-system.md): WAL, channels,
   DDL/DCL execution, recovery storage, and replication.
 

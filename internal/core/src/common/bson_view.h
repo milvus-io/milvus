@@ -158,57 +158,11 @@ class BsonView {
         : data_(data.data()), size_(data.size()) {
     }
 
-    // Core implementation: check if a BSON value is "empty" (null or recursively contains only nulls/empties)
-    // Following the same semantics as Json::isObjectEmpty/isDocEmpty in Json.h
-    static bool
-    IsBsonValueEmpty(const milvus::bson::value_view& val) {
-        switch (val.type()) {
-            case milvus::bson::type::k_null:
-                return true;
-            case milvus::bson::type::k_document:
-                return IsBsonValueEmpty(val.get_document().value);
-            case milvus::bson::type::k_array:
-                return IsBsonValueEmpty(val.get_array().value);
-            default:
-                return false;
-        }
-    }
-
-    static bool
-    IsBsonValueEmpty(const milvus::bson::document_view& doc) {
-        for (auto&& elem : doc) {
-            if (!IsBsonValueEmpty(elem.get_value())) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    static bool
-    IsBsonValueEmpty(const milvus::bson::array_view& arr) {
-        for (auto&& elem : arr) {
-            if (!IsBsonValueEmpty(elem.get_value())) {
-                return false;
-            }
-        }
-        return true;
-    }
-
+    // EXISTS inspects only the target value; empty containers are present.
     bool
-    IsBsonValueEmpty(size_t offset) const {
+    IsBsonValuePresentForExists(size_t offset) const {
         AssertInfo(offset < size_, "bson offset out of range");
-        auto field = ParseBsonField(data_, offset);
-
-        switch (field.type) {
-            case milvus::bson::type::k_null:
-                return true;
-            case milvus::bson::type::k_document:
-                return IsBsonValueEmpty(ParseAsDocument(field.value_ptr));
-            case milvus::bson::type::k_array:
-                return IsBsonValueEmpty(ParseAsArray(field.value_ptr));
-            default:
-                return false;
-        }
+        return ParseBsonField(data_, offset).type != milvus::bson::type::k_null;
     }
 
     explicit BsonView(const uint8_t* data, size_t size)
@@ -410,6 +364,8 @@ class BsonView {
                             return ParseAsArray(ptr);
                         }
                         break;
+                    case milvus::bson::type::k_null:
+                        return std::nullopt;
                     default:
                         return std::nullopt;
                 }
@@ -432,6 +388,8 @@ class BsonView {
                     break;
                 case milvus::bson::type::k_bool:
                     ptr += 1;
+                    break;
+                case milvus::bson::type::k_null:
                     break;
                 case milvus::bson::type::k_array:
                 case milvus::bson::type::k_document: {

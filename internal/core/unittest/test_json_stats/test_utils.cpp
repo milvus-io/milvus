@@ -25,6 +25,19 @@ class UtilsTest : public ::testing::Test {
     }
 };
 
+TEST_F(UtilsTest, InvalidNumberRetainsParseErrorClassification) {
+    for (const std::string value : {"\"", "1e400", "{}"}) {
+        SCOPED_TRACE(value);
+        try {
+            ParseJsonDoubleValue(value);
+            FAIL() << "expected a classified parse error";
+        } catch (const milvus::SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(),
+                      milvus::ErrorCode::DataFormatBroken);
+        }
+    }
+}
+
 TEST_F(UtilsTest, CreateSharedArrowBuilderTest) {
     auto builder = CreateSharedArrowBuilder();
     EXPECT_NE(builder, nullptr);

@@ -25,6 +25,7 @@ namespace exec {
 void
 PhyLogicalBinaryExpr::Eval(EvalCtx& context, VectorPtr& result) {
     tracer::AutoSpan span("PhyLogicalBinaryExpr::Eval", tracer::GetRootSpan());
+    SetHasOffsetInput(context.get_offset_input() != nullptr);
 
     AssertInfo(
         inputs_.size() == 2,

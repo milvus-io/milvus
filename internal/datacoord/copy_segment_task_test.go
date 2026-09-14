@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -1088,12 +1089,13 @@ func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_PreservesIndexStorePa
 				IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
 			},
 			2002: {
-				FieldId:               102,
-				IndexId:               1002,
-				BuildId:               2002,
-				IndexName:             "idx_v1",
-				IndexFilePaths:        []string{"v1_file"},
-				IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+				FieldId:                   102,
+				IndexId:                   1002,
+				BuildId:                   2002,
+				IndexName:                 "idx_v1",
+				IndexFilePaths:            []string{"v1_file"},
+				IndexStorePathVersion:     indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+				CurrentScalarIndexVersion: common.MinScalarIndexVersionForJsonPathPresence,
 			},
 		},
 	}
@@ -1105,10 +1107,12 @@ func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_PreservesIndexStorePa
 	segIdxV0, ok := im.segmentBuildInfo.Get(2001)
 	s.True(ok)
 	s.Equal(indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, segIdxV0.IndexStorePathVersion)
+	s.Zero(segIdxV0.CurrentScalarIndexVersion)
 
 	segIdxV1, ok := im.segmentBuildInfo.Get(2002)
 	s.True(ok)
 	s.Equal(indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, segIdxV1.IndexStorePathVersion)
+	s.Equal(common.MinScalarIndexVersionForJsonPathPresence, segIdxV1.CurrentScalarIndexVersion)
 }
 
 func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_MultipleIndexesPerField() {

@@ -648,6 +648,46 @@ func (s *indexTaskSuite) TestEstimateVectorArrayElementCountForIndexBuild_Manife
 	s.False(estimate.emptyOnStaleSchema)
 }
 
+func (s *indexTaskSuite) TestPrepareJobRequestFollowsScalarVersionGate() {
+	Params.Save(Params.DataCoordCfg.TargetScalarIndexVersion.Key, "-1")
+	Params.Save(Params.DataCoordCfg.ForceRebuildScalarSegmentIndex.Key, "false")
+	s.T().Cleanup(func() {
+		Params.Reset(Params.DataCoordCfg.TargetScalarIndexVersion.Key)
+		Params.Reset(Params.DataCoordCfg.ForceRebuildScalarSegmentIndex.Key)
+	})
+	segIndex, ok := s.mt.indexMeta.segmentBuildInfo.Get(s.taskID)
+	s.Require().True(ok)
+	handler := NewNMockHandler(s.T())
+	handler.EXPECT().GetCollection(mock.Anything, s.collID).Return(&collectionInfo{
+		ID: s.collID,
+		Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+			{FieldID: s.fieldID, Name: "json", DataType: schemapb.DataType_JSON},
+		}},
+	}, nil)
+	cm := mocks.NewChunkManager(s.T())
+	cm.EXPECT().RootPath().Return("root")
+	versions := newIndexEngineVersionManager()
+	reader := jsonStatsNode(1, common.CurrentScalarIndexEngineVersion)
+	reader.ScalarIndexEngineVersion.MaximumIndexVersion = common.MaximumScalarIndexEngineVersion
+	versions.AddNode(reader)
+	it := newIndexBuildTask(segIndex, 1, s.mt, handler, cm, versions)
+	for _, tc := range []struct {
+		target string
+		want   int32
+	}{{"-1", 5}, {"6", 6}, {"5", 5}} {
+		Params.Save(Params.DataCoordCfg.TargetScalarIndexVersion.Key, tc.target)
+		req, err := it.prepareJobRequest(context.Background(), &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: s.segID, CollectionID: s.collID, PartitionID: s.partID, NumOfRows: 4,
+		}}, segIndex, []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "INVERTED"},
+			{Key: common.JSONPathKey, Value: "json[\"n\"]"},
+			{Key: common.JSONCastTypeKey, Value: "DOUBLE"},
+		}, "INVERTED")
+		s.Require().NoError(err)
+		s.Equal(tc.want, req.GetCurrentScalarIndexVersion())
+	}
+}
+
 func (s *indexTaskSuite) TestPrepareJobRequestUsesNullableStructArrayParentForSubField() {
 	const dim = 128
 
