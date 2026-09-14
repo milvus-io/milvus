@@ -1010,4 +1010,3 @@ message ReplicatePChannelMeta {
     common.ReplicateCheckpoint initialized_checkpoint = 4;
     bool skip_get_replicate_checkpoint  = 5;
 }
-
