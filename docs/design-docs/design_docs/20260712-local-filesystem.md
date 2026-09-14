@@ -681,11 +681,19 @@ not merely by a reusable path string.
 ### 4.4 Business ownership, acquisition, and reload
 
 Directory creation belongs to construction of the corresponding business
-owner. Each layer retains its own directory reference until that owner is
-unloaded or evicted. For example, node construction retains `local_chunk`, a
-loaded segment retains its segment directory, and an index object retains its
-index directory. These are examples of ownership placement, not distinct
-directory lifetime policies.
+owner. Each layer retains its own directory reference for as long as it needs
+the directory's disk contents, including gaps between I/O operations. This
+period may end before the business object is unloaded or evicted. For example,
+node construction retains `local_chunk`, a loaded segment retains its segment
+directory, and an index retains the directory while it needs its files.
+
+For Tantivy non-mmap loading, retain the temporary directory through download
+and loading into memory, then release all directory references held by that
+phase, including file-manager and native-path references. Final release reclaims
+the disk copy while the in-memory index remains usable. With mmap enabled,
+the reader retains the directory until its mappings and native accesses end.
+Closing file handles alone does not reclaim files while a directory owner
+remains; explicit individual-file removal is still available (section 5.3).
 
 Section 3.5 shows the construction and asynchronous ownership pattern.
 
@@ -977,6 +985,14 @@ ownership before this call; canonicalization detects a location, not competing
 owners. Publication transfers cleanup ownership of that exact root as described in section 3.3. Failures are reported; a failed
 context creation does not recursively remove pre-existing root contents.
 
+If root creation fails after filesystem changes, roll back only changes owned
+by that attempt. If rollback also fails, terminate the unpublished context,
+report the original creation error, cleanup error, and remaining paths, and
+leave the residue for exclusive reconciliation at the next startup. Stop all
+cleanup from the failed context before releasing its bookkeeping; no retryable
+`FileSystem` is returned. Reconcile the residue before publishing a replacement
+root context, preserving pre-existing contents outside the failed attempt.
+
 Runtime composition creates a context for a physical ownership domain once
 and injects its references. Separate root contexts must not refer to the same directory,
 overlap as ancestor/descendant, or alias through symlinks. A root-local registry
@@ -1005,10 +1021,11 @@ Returning a bare path string encourages asynchronous lifetime escape.
 Borrowing the string is valid only while that owner remains alive.
 
 An adapter passes the path to Knowhere, Tantivy, Arrow, or another library and
-retains the directory until all corresponding native objects, background work,
-and callbacks finish. A wrapper must destroy its native consumer before
-releasing that reference. Extracting and storing only the path is not a valid
-ownership transfer.
+retains the directory through the last filesystem access by its native objects,
+background work, and callbacks. A consumer that continues to depend on the files
+must be destroyed before its wrapper releases that reference. A fully in-memory
+consumer may outlive the directory once all filesystem use has ended, as in
+section 4.4. Extracting and storing only the path is not a valid ownership transfer.
 
 Holding an ancestor is not enough to keep an independently managed child
 alive. A native operation spanning registered children must retain each child
