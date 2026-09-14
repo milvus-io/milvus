@@ -55,6 +55,7 @@ set(MILVUS_TEST_FILES
         test_scorer.cpp
         test_sealed.cpp
         test_storage.cpp
+        test_gcp_chunk_manager.cpp
         test_string_expr.cpp
         test_rust_result.cpp
         test_storage_v2_index_raw_data.cpp
