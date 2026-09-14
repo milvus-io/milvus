@@ -67,9 +67,20 @@ cannot be done correctly for autoID collections at all.
 
 ### Non-goals
 
-- `Delete` and `Upsert`. Both are rejected with an explicit error when an idempotency
-  key is supplied. Deleting the same rows twice is already effectively a no-op;
-  `Upsert` needs its delete leg deduped as well, which is a separate design.
+- **Encrypted collections.** An insert into a collection with an encryption zone is
+  refused outright when idempotency is asked for, by key or by property. The duplicate
+  answer is the first attempt's primary keys and it rides in the message HEADER, which the
+  builder serializes into a plaintext property — the cipher covers the body only — and the
+  client key sits beside it in another plaintext property. The summary store then writes
+  both again to object storage. Supporting this means giving the header, the key property
+  and the durable record a cipher-protected representation of their own; until then the
+  combination is rejected rather than quietly weakened.
+- `Delete` and `Upsert`. Only `Insert` reads the key: the proxy takes it from the
+  incoming metadata in `Proxy.Insert` and nowhere else, so a key sent on either of the
+  others is **ignored, not refused**. The Go client refuses one on `Upsert` before it is
+  sent (`client/milvusclient`), but REST, pymilvus and raw gRPC callers reach the server,
+  where it is dropped silently. Deleting the same rows twice is already effectively a
+  no-op; `Upsert` needs its delete leg deduped as well, which is a separate design.
 - Cross-cluster dedup. Replicated writes bypass the window entirely (see
   [Replication and CDC](#replication-and-cdc)).
 - Unbounded retention. Duplicate visibility is a bounded window (see
@@ -1241,6 +1252,16 @@ message id, timetick and last-confirmed position unchanged.
   Fixing it means making a predicate mismatch distinguishable from a transient failure at
   the kv layer — TiKV already marks it internally (`errPredicateNotMet`, unexported) and
   etcd reports it as a generic transaction failure — which is outside this PR.
+- **Under `autoID`, a derived key cannot tell an intentional duplicate from a retry.**
+  With no client key the proxy hashes the destination and the payload, and for an `autoID`
+  collection the primary column is deliberately left out of that hash, because a retry is
+  allocated different ids. Two intentional inserts of the same column data therefore derive
+  the same key: the second is answered as a duplicate, its rows never reach the WAL, and the
+  response carries the FIRST batch's primary keys. Nothing reports this — and because the
+  window rolls by byte and chunk budgets, the same pair of calls writes once on a busy shard
+  and twice on a quiet one. A client that may legitimately send the same payload twice must
+  send its own key per logical request; deriving one is a convenience for callers that
+  cannot, not a substitute for a request identity.
 - **A DDL that empties a collection also forgets explicit keys.** The tombstone is what
   keeps a derived key from answering a re-insert of the same rows after the data under it
   is gone, and the record it is applied to does not say whether its key was supplied by the
