@@ -468,6 +468,8 @@ inline constexpr const char* META_KEY_LAYOUT_TYPE_MAP = "layout_type_map";
 inline constexpr const char* META_KEY_NUM_ROWS = "num_rows";
 inline constexpr const char* META_KEY_NUM_SHREDDING_COLUMNS =
     "num_shredding_columns";
+inline constexpr const char* META_KEY_GROUP_BY_SCALAR_READ_VERSION =
+    "group_by_scalar_read_version";
 inline constexpr const char* META_CURRENT_VERSION = "1";
 
 // Generic metadata container for JSON stats
@@ -529,7 +531,8 @@ class JsonStatsMeta {
     Deserialize(const std::string& json_str);
 
     static std::unordered_map<std::string, std::set<std::string>>
-    DeserializeToKeyFieldMap(const std::string& json_str);
+    DeserializeToKeyFieldMap(const std::string& json_str,
+                             bool* group_by_scalar_reads_safe = nullptr);
 
     size_t
     GetSerializedSize() const {

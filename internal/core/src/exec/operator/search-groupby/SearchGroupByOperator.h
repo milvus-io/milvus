@@ -30,6 +30,7 @@
 #include <vector>
 
 #include "cachinglayer/CacheSlot.h"
+#include "common/Chunk.h"
 #include "common/EasyAssert.h"
 #include "common/Json.h"
 #include "common/JsonUtils.h"
@@ -40,7 +41,9 @@
 #include "common/protobuf_utils.h"
 #include "index/Index.h"
 #include "index/ScalarIndex.h"
+#include "index/json_stats/JsonKeyStats.h"
 #include "knowhere/comp/index_param.h"
+#include "mmap/ChunkedColumnInterface.h"
 #include "segcore/ConcurrentVector.h"
 #include "segcore/InsertRecord.h"
 #include "segcore/SegmentGrowingImpl.h"
@@ -187,24 +190,35 @@ class SealedDataGetter : public DataGetter<OutputType> {
     const FieldId field_id_;
     bool from_data_;
 
-    // Thread-safety contract: str_pw_map / json_pw_map are `mutable` and
-    // accessed without locks inside Get(). This is safe ONLY because each
-    // SealedDataGetter instance is scoped to a single SearchGroupBy invocation
-    // on a single segment, executed on one Driver thread (Velox-style single-
-    // threaded operator pipeline). If groupby is ever parallelized per-nq or
-    // shared across queries, this cache must be guarded — data race otherwise.
-    mutable std::unordered_map<
-        int64_t,
-        PinWrapper<std::pair<std::vector<std::string_view>, ValidityView>>>
-        str_pw_map;
+    // Thread-safety contract: string_chunk_pins_ is mutable and accessed
+    // without locks inside Get(). Each getter belongs to one SearchGroupBy
+    // invocation on one segment and is used on a single Driver thread.
+    // Sharing a getter across threads would require synchronizing this cache.
+    mutable std::unordered_map<int64_t, PinWrapper<Chunk*>> string_chunk_pins_;
 
     PinWrapper<const index::IndexBase*> index_ptr_;
-    // Getting str_view from segment is cpu-costly, this map is to cache this view for performance.
-    // Shares the same single-thread contract as str_pw_map above.
-    mutable std::unordered_map<
-        int64_t,
-        PinWrapper<std::pair<std::vector<milvus::Json>, ValidityView>>>
-        json_pw_map;
+    std::unique_ptr<index::JsonKeyStats::ShreddingReader> shredding_reader_;
+
+    // VARCHAR and raw JSON share StringChunk storage. Keep visited chunks
+    // pinned for the getter's lifetime and construct only the requested view.
+    // The returned view borrows from this cache and must not outlive the getter.
+    std::optional<std::string_view>
+    GetStringRow(int64_t chunk_id, int64_t inner_offset) const {
+        auto it = string_chunk_pins_.find(chunk_id);
+        if (it == string_chunk_pins_.end()) {
+            auto column = segment_.GetChunkedColumn(field_id_);
+            AssertInfo(column != nullptr,
+                       "group-by field {} has no raw string column",
+                       field_id_.get());
+            auto pin = column->GetChunk(op_ctx_, chunk_id);
+            it = string_chunk_pins_.emplace(chunk_id, std::move(pin)).first;
+        }
+        const auto* chunk = static_cast<const StringChunk*>(it->second.get());
+        if (!chunk->isValid(inner_offset)) {
+            return std::nullopt;
+        }
+        return (*chunk)[inner_offset];
+    }
 
  public:
     SealedDataGetter(milvus::OpContext* op_ctx,
@@ -230,40 +244,65 @@ class SealedDataGetter : public DataGetter<OutputType> {
         this->json_path_ = json_path;
         this->specific_json_type_ = json_type.has_value();
         this->strict_cast_ = strict_cast;
+        if constexpr (std::is_same_v<InnerRawType, milvus::Json>) {
+            if (from_data_ && json_path.has_value() && json_type.has_value()) {
+                auto stats = segment_.GetJsonStats(op_ctx_, field_id_);
+                if (stats != nullptr) {
+                    constexpr auto type =
+                        std::is_same_v<OutputType, std::string>
+                            ? index::JSONType::STRING
+                        : std::is_same_v<OutputType, bool>
+                            ? index::JSONType::BOOL
+                        : std::is_same_v<OutputType, int8_t> ||
+                                std::is_same_v<OutputType, int16_t> ||
+                                std::is_same_v<OutputType, int32_t> ||
+                                std::is_same_v<OutputType, int64_t>
+                            ? index::JSONType::INT64
+                            : index::JSONType::UNKNOWN;
+                    shredding_reader_ = stats->CreateShreddingReader(
+                        json_path.value(), type, segment_.get_row_count());
+                }
+            }
+        }
     }
 
     std::optional<OutputType>
     Get(int64_t idx) const {
+        if constexpr (std::is_same_v<InnerRawType, milvus::Json>) {
+            if (shredding_reader_) {
+                auto value = shredding_reader_->Get(op_ctx_, idx);
+                if (value.has_value()) {
+                    if constexpr (std::is_same_v<OutputType, std::string> ||
+                                  std::is_same_v<OutputType, bool>) {
+                        return std::get<OutputType>(std::move(value.value()));
+                    } else {
+                        return static_cast<OutputType>(
+                            std::get<int64_t>(value.value()));
+                    }
+                }
+                // Invalid typed rows include missing paths, other JSON types
+                // and legacy empty strings. Raw parsing preserves strict_cast
+                // and null semantics; real read failures are never swallowed.
+            }
+        }
         if (from_data_) {
             auto id_offset_pair = segment_.get_chunk_by_offset(field_id_, idx);
             auto chunk_id = id_offset_pair.first;
             auto inner_offset = id_offset_pair.second;
             if constexpr (std::is_same_v<InnerRawType, std::string>) {
-                if (str_pw_map.find(chunk_id) == str_pw_map.end()) {
-                    // for now, search_group_by does not handle null values
-                    auto pw = segment_.chunk_view<std::string_view>(
-                        op_ctx_, field_id_, chunk_id);
-                    str_pw_map[chunk_id] = std::move(pw);
-                }
-                auto& pw = str_pw_map[chunk_id];
-                auto& [str_chunk_view, valid_data] = pw.get();
-                if (valid_data && !valid_data[inner_offset]) {
+                auto row = GetStringRow(chunk_id, inner_offset);
+                if (!row.has_value()) {
                     return std::nullopt;
                 }
-                std::string_view str_val_view = str_chunk_view[inner_offset];
-                return std::string(str_val_view.data(), str_val_view.length());
+                return std::string(*row);
             } else if constexpr (std::is_same_v<InnerRawType, milvus::Json>) {
-                if (json_pw_map.find(chunk_id) == json_pw_map.end()) {
-                    auto pw = segment_.chunk_view<milvus::Json>(
-                        op_ctx_, field_id_, chunk_id);
-                    json_pw_map[chunk_id] = std::move(pw);
-                }
-                auto& pw = json_pw_map[chunk_id];
-                auto& [json_chunk_view, valid_data] = pw.get();
-                if (valid_data && !valid_data[inner_offset]) {
+                auto row = GetStringRow(chunk_id, inner_offset);
+                if (!row.has_value()) {
                     return std::nullopt;
                 }
-                auto& json_val = json_chunk_view[inner_offset];
+                // JSONChunkWriter provides SIMDJSON_PADDING after the final
+                // row. The cached pin keeps both the bytes and padding alive.
+                milvus::Json json_val(*row);
                 JSON_TYPE_CASES(OutputType)
                 JSON_STRING_CASE(OutputType)
                 return std::nullopt;
