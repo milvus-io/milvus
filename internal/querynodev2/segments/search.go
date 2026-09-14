@@ -127,13 +127,15 @@ func searchSegmentsGroupedAttempt(ctx context.Context, mgr *Manager, segments []
 		totalNq += searchReq.GetNumOfQuery()
 	}
 
-	// The scheduler admits this whole call as one task, however many branches
-	// and segments it covers. branchLimiter is shared by every segment, so the
-	// task has at most GetCPUNum() branch searches in flight across the complete
-	// fan-out. The independent segment limit below bounds how many segments can
-	// sit between phase 1 and phase 2 while holding a filter bitset. Both limits
-	// apply only to grouped requests; an ungrouped request computes no shared
-	// bitset and keeps its existing segment fan-out.
+	// The scheduler sees this whole call as one task, however many branches and
+	// segments it covers. The two bounds below prevent that task from turning
+	// the full branch-by-segment fan-out into in-flight work at once:
+	// branchLimiter is shared by every segment, so the task never has more than
+	// GetCPUNum() branch searches in flight, while the segment loop is capped at
+	// the same width so no more than that many segments sit between phase 1 and
+	// phase 2 holding a filter bitset. Both are for grouped requests only: an
+	// ungrouped one evaluates no shared bitset and keeps the unbounded segment
+	// fan-out it has always had.
 	var branchLimiter *semaphore.Weighted
 	if len(searchReqs) > 1 {
 		branchLimiter = semaphore.NewWeighted(int64(hardware.GetCPUNum()))

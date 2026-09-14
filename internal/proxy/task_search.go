@@ -559,6 +559,18 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	t.SubReqs = make([]*internalpb.SubSearchRequest, len(t.request.GetSubReqs()))
 	t.queryInfos = make([]*planpb.QueryInfo, len(t.request.GetSubReqs()))
 	t.hybridSubSearchInfos = make([]hybridSubSearchInfo, len(t.request.GetSubReqs()))
+	// Computing the filter-sharing hint costs a JSON probe per sub-request plus
+	// a fingerprint over its predicate and template values. Skip all of it when
+	// the query node will not consume the hint -- the flag is off by default,
+	// and a hint the delegator ignores buys nothing. A node that has sharing on
+	// while this proxy has it off sees every hint at 0, reads that as "nothing
+	// to share", and searches exactly as it does today; it reports those
+	// sub-requests on its unshareable fallback counter.
+	shareFilters := Params.QueryNodeCfg.HybridSearchSharedFilterEnabled.GetAsBool()
+	var filterSharingCandidates []filterSharingCandidate
+	if shareFilters {
+		filterSharingCandidates = make([]filterSharingCandidate, len(t.request.GetSubReqs()))
+	}
 	t.hybridElementLevel = false
 	queryFieldIDs := []int64{}
 	for index, subReq := range t.request.GetSubReqs() {
@@ -707,11 +719,21 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			metrics.ProxySearchSparseNumNonZeros.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), t.collectionName, metrics.HybridSearchLabel, strconv.FormatInt(internalSubReq.FieldId, 10)).Observe(float64(typeutil.EstimateSparseVectorNNZFromPlaceholderGroup(internalSubReq.PlaceholderGroup, int(internalSubReq.GetNq()))))
 		}
 		internalSubReq.PlaceholderGroup = convertedPlaceholder
+		if shareFilters {
+			filterSharingCandidates[index] = filterSharingCandidateOf(
+				subReq.GetDsl(), subReq.GetExprTemplateValues(), plan, queryInfo)
+		}
 		t.SubReqs[index] = internalSubReq
 		t.queryInfos[index] = queryInfo
 		log.Debug(ctx, "proxy init search request",
 			mlog.Int64s("plan.OutputFieldIds", plan.GetOutputFieldIds()),
 			mlog.Stringer("plan", planparserv2.RedactPlanForLog(plan))) // may be very large if a large term is passed; membership blobs are redacted.
+	}
+
+	// Every plan is built, so predicates can now be compared against each other.
+	// With sharing off there are no candidates and every hint stays at 0.
+	for index, group := range assignFilterSharingGroups(filterSharingCandidates) {
+		t.SubReqs[index].FilterSharingGroup = group
 	}
 
 	t.hybridElementLevel = inferElementLevelHybrid(t.hybridSubSearchInfos)
