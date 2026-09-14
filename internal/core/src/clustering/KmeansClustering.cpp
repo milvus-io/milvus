@@ -308,7 +308,7 @@ KmeansClustering::StreamingAssignandUpload(
                     }
 
                     if (!res.has_value()) {
-                        ThrowInfo(ErrorCode::UnexpectedError,
+                        ThrowInfo(KnowhereStatusToErrorCode(res.error()),
                                   fmt::format("failed to kmeans assign: {}: {}",
                                               KnowhereStatusString(res.error()),
                                               res.what()));
@@ -525,7 +525,7 @@ KmeansClustering::Run(const milvus::proto::clustering::AnalyzeInfo& config) {
         auto res = cluster_node.Train(
             *dataset, knowhere::Json{{NUM_CLUSTERS, num_clusters}});
         if (!res.has_value()) {
-            ThrowInfo(ErrorCode::UnexpectedError,
+            ThrowInfo(KnowhereStatusToErrorCode(res.error()),
                       fmt::format("failed to kmeans train: {}: {}",
                                   KnowhereStatusString(res.error()),
                                   res.what()));
