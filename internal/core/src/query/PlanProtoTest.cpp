@@ -97,3 +97,95 @@ TEST(PlanProto, VectorArrayFieldIdGapInStructArray) {
     ASSERT_EQ(involved_fields.size(), 49);
     EXPECT_TRUE(involved_fields[48]);
 }
+
+TEST(PlanProto, StrictGroupSettings) {
+    using namespace milvus;
+    auto schema = std::make_shared<Schema>();
+    auto vec = schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    proto::plan::PlanNode node;
+    auto* anns = node.mutable_vector_anns();
+    anns->set_vector_type(proto::plan::VectorType::FloatVector);
+    anns->set_field_id(vec.get());
+    anns->set_placeholder_tag("$0");
+    auto* info = anns->mutable_query_info();
+    info->set_metric_type("L2");
+    info->set_topk(10);
+    info->set_round_decimal(-1);
+    for (int64_t budget :
+         {int64_t(0), int64_t(7000), std::numeric_limits<int64_t>::max()}) {
+        for (bool skip : {false, true}) {
+            info->set_search_params(knowhere::Json{
+                {kStrictGroupPhase1MaxCandidates, budget},
+                {kStrictGroupSkipRefine,
+                 skip}}.dump());
+            auto parsed = query::ProtoParser(schema).PlanNodeFromProto(node);
+            EXPECT_EQ(parsed->search_info_.strict_group_phase1_max_candidates_,
+                      budget);
+            EXPECT_EQ(parsed->search_info_.strict_group_skip_refine_, skip);
+            EXPECT_TRUE(parsed->search_info_.search_params_.empty());
+        }
+    }
+    for (const auto& value : {knowhere::Json(-1),
+                              knowhere::Json(1.0),
+                              knowhere::Json(uint64_t(1) << 63),
+                              knowhere::Json("7000"),
+                              knowhere::Json(nullptr),
+                              knowhere::Json(true)}) {
+        info->set_search_params(
+            knowhere::Json{{kStrictGroupPhase1MaxCandidates, value}}.dump());
+        EXPECT_THROW(query::ProtoParser(schema).PlanNodeFromProto(node),
+                     SegcoreError);
+    }
+    for (const auto& value :
+         {knowhere::Json("true"), knowhere::Json(1), knowhere::Json(nullptr)}) {
+        info->set_search_params(
+            knowhere::Json{{kStrictGroupSkipRefine, value}}.dump());
+        EXPECT_THROW(query::ProtoParser(schema).PlanNodeFromProto(node),
+                     SegcoreError);
+    }
+    info->set_search_params(R"({"nprobe":128})");
+    auto defaults = query::ProtoParser(schema).PlanNodeFromProto(node);
+    EXPECT_EQ(defaults->search_info_.strict_group_strategy_,
+              StrictGroupStrategy::PerGroup);
+    EXPECT_EQ(defaults->search_info_.search_params_["nprobe"], 128);
+    for (const auto& [strategy, expected] :
+         std::vector<std::pair<std::string, StrictGroupStrategy>>{
+             {"original", StrictGroupStrategy::Original},
+             {"per_group", StrictGroupStrategy::PerGroup}}) {
+        info->set_search_params(
+            knowhere::Json{{kStrictGroupStrategy, strategy}}.dump());
+        auto parsed = query::ProtoParser(schema).PlanNodeFromProto(node);
+        EXPECT_EQ(parsed->search_info_.strict_group_strategy_, expected);
+        EXPECT_FALSE(
+            parsed->search_info_.search_params_.contains(kStrictGroupStrategy));
+    }
+    for (bool debug : {false, true}) {
+        info->set_search_params(
+            knowhere::Json{{kStrictGroupDebug, debug}}.dump());
+        auto parsed = query::ProtoParser(schema).PlanNodeFromProto(node);
+        EXPECT_EQ(parsed->search_info_.strict_group_debug_, debug);
+        EXPECT_FALSE(
+            parsed->search_info_.search_params_.contains(kStrictGroupDebug));
+    }
+    for (const auto& value :
+         {knowhere::Json("true"), knowhere::Json(1), knowhere::Json(nullptr)}) {
+        info->set_search_params(
+            knowhere::Json{{kStrictGroupDebug, value}}.dump());
+        EXPECT_THROW(query::ProtoParser(schema).PlanNodeFromProto(node),
+                     SegcoreError);
+    }
+    for (const auto& value : {knowhere::Json("invalid"),
+                              knowhere::Json("sampling"),
+                              knowhere::Json("filtered_iterator"),
+                              knowhere::Json(1),
+                              knowhere::Json(nullptr),
+                              knowhere::Json(true)}) {
+        info->set_search_params(
+            knowhere::Json{{kStrictGroupStrategy, value}}.dump());
+        EXPECT_THROW(query::ProtoParser(schema).PlanNodeFromProto(node),
+                     SegcoreError);
+    }
+}
