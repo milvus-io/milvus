@@ -5688,9 +5688,9 @@ func TestRestoreExternalSnapshot_BroadcastCarriesExternalSpec(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(77), jobID)
 	assert.True(t, phase0Lock.closeCalled.Load())
-	require.NotNil(t, capture.captured)
+	require.NotNil(t, capture.capturedMsg)
 
-	restoreMsg := message.MustAsBroadcastRestoreSnapshotMessageV2(capture.captured)
+	restoreMsg := message.MustAsBroadcastRestoreSnapshotMessageV2(capture.capturedMsg)
 	header := restoreMsg.Header()
 	assert.Equal(t, "snapshot-1", header.GetSnapshotName())
 	assert.Equal(t, int64(200), header.GetCollectionId())

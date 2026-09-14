@@ -37,7 +37,7 @@ func TestPChannelViewSyncServerRejectsUnavailableWAL(t *testing.T) {
 func TestPChannelViewSyncServerClosesStreamWhenWALCloses(t *testing.T) {
 	walDone := make(chan struct{})
 	server := NewPChannelViewSyncServer(&fakeViewSyncWALManager{
-		wal: fakeViewSyncWAL{available: walDone},
+		wal: fakeViewSyncWAL{unavailable: walDone},
 	})
 	stream := newTestSyncQueryViewServerStream(newIncomingViewSyncContext(types.PChannelInfo{
 		Name:       "p0",
@@ -65,7 +65,7 @@ func TestPChannelViewSyncServerClosesStreamWhenWALCloses(t *testing.T) {
 
 func TestPChannelViewSyncServerUsesWrappedWALProvider(t *testing.T) {
 	walDone := make(chan struct{})
-	raw := fakeViewSyncWAL{available: walDone}
+	raw := fakeViewSyncWAL{unavailable: walDone}
 	server := NewPChannelViewSyncServer(&fakeViewSyncWALManager{
 		wal: wrappedTestWAL{WAL: raw, raw: raw},
 	})
@@ -134,11 +134,11 @@ func (m *fakeViewSyncWALManager) Close() {}
 
 type fakeViewSyncWAL struct {
 	wal.WAL
-	available <-chan struct{}
+	unavailable <-chan struct{}
 }
 
-func (w fakeViewSyncWAL) Available() <-chan struct{} {
-	return w.available
+func (w fakeViewSyncWAL) Unavailable() <-chan struct{} {
+	return w.unavailable
 }
 
 func (w fakeViewSyncWAL) QueryViewHandler() worknodehandler.QueryViewHandler {

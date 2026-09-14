@@ -99,7 +99,7 @@ func newTestTimeTickAppendInterceptor(t *testing.T) *timeTickAppendInterceptor {
 	resource.InitForTest(t)
 
 	lastConfirmed := walimplstest.NewTestMessageID(0)
-	lastTimeTick := NewTimeTickMsg(1, lastConfirmed, 0, true).IntoImmutableMessage(lastConfirmed)
+	lastTimeTick := NewTimeTickMsg(1, lastConfirmed, 0).IntoImmutableMessage(lastConfirmed)
 	txnManager := txn.NewTxnManager(types.PChannelInfo{Name: "test"}, nil)
 	<-txnManager.RecoverDone()
 

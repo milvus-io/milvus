@@ -97,9 +97,9 @@ func TestScannerAdaptorStopsOnCorruptedChunk(t *testing.T) {
 	l.EXPECT().Channel().Return(types.PChannelInfo{})
 	l.EXPECT().Read(mock.Anything, mock.Anything).Return(innerScanner, nil).Once()
 
-	s := newScannerAdaptor("corrupted-chunk", l, wal.ReadOption{
-		DeliverPolicy: options.DeliverPolicyAll(),
-	}, metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics(), func() {})
+	s := newRecoveryScannerAdaptor(l, walimplstest.NewTestMessageID(1),
+		metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics(), false)
+	t.Cleanup(func() { _ = s.Close() })
 
 	select {
 	case <-s.Done():
