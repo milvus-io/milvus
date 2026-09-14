@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <memory>
 #include <vector>
 
 #include <roaring/roaring.h>
@@ -61,8 +62,10 @@ CacheCompressor::CompressRoaring(const TargetBitmap& bset) {
     constexpr size_t WORDS_PER_CONTAINER = 1024;
     constexpr int32_t ARRAY_THRESHOLD = 4096;
 
-    roaring_bitmap_t* r = roaring_bitmap_create_with_capacity(
-        static_cast<uint32_t>(num_containers));
+    std::unique_ptr<roaring_bitmap_t, decltype(&roaring_bitmap_free)> r(
+        roaring_bitmap_create_with_capacity(
+            static_cast<uint32_t>(num_containers)),
+        roaring_bitmap_free);
 
     for (size_t c = 0; c < num_containers; ++c) {
         uint16_t key = static_cast<uint16_t>(c);
@@ -112,12 +115,11 @@ CacheCompressor::CompressRoaring(const TargetBitmap& bset) {
     }
 
     // runOptimize: convert bitmap/array → run containers where smaller
-    roaring_bitmap_run_optimize(r);
+    roaring_bitmap_run_optimize(r.get());
 
-    size_t ser_size = roaring_bitmap_size_in_bytes(r);
+    size_t ser_size = roaring_bitmap_size_in_bytes(r.get());
     std::vector<char> buf(ser_size);
-    roaring_bitmap_serialize(r, buf.data());
-    roaring_bitmap_free(r);
+    roaring_bitmap_serialize(r.get(), buf.data());
     return buf;
 }
 
@@ -128,18 +130,19 @@ CacheCompressor::DecompressRoaring(const char* data,
                                    uint32_t data_len,
                                    uint32_t num_bits,
                                    TargetBitmap& out) {
-    roaring_bitmap_t* r = roaring_bitmap_deserialize_safe(data, data_len);
+    std::unique_ptr<roaring_bitmap_t, decltype(&roaring_bitmap_free)> r(
+        roaring_bitmap_deserialize_safe(data, data_len), roaring_bitmap_free);
     if (!r) {
         LOG_WARN("CacheCompressor::DecompressRoaring: deserialize failed");
         return false;
     }
 
     TargetBitmap result(num_bits, false);
-    uint64_t card = roaring_bitmap_get_cardinality(r);
+    uint64_t card = roaring_bitmap_get_cardinality(r.get());
     if (card > 0) {
         // Extract all set-bit positions and set them in dense bitset
         std::vector<uint32_t> positions(card);
-        roaring_bitmap_to_uint32_array(r, positions.data());
+        roaring_bitmap_to_uint32_array(r.get(), positions.data());
 
         uint64_t* words = reinterpret_cast<uint64_t*>(result.data());
         for (uint32_t pos : positions) {
@@ -148,7 +151,6 @@ CacheCompressor::DecompressRoaring(const char* data,
             }
         }
     }
-    roaring_bitmap_free(r);
     out = std::move(result);
     return true;
 }

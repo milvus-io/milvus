@@ -256,14 +256,16 @@ MmapChunkManager::~MmapChunkManager() {
 
 MmapChunkDescriptorPtr
 MmapChunkManager::Register() {
-    std::unique_lock<std::shared_mutex> lck(mtx_);
+    // Construct the owner before taking mtx_: shared_ptr allocation failure
+    // invokes its deleter, which takes this same lock in UnRegister().
     auto new_descriptor = std::shared_ptr<MmapChunkDescriptor>(
-        new MmapChunkDescriptor(descriptor_counter_.load()),
+        new MmapChunkDescriptor(descriptor_counter_.fetch_add(1)),
         [this](MmapChunkDescriptor* ptr) {
             UnRegister(ptr->GetId());
             delete ptr;
         });
-    descriptor_counter_.fetch_add(1);
+    // If emplace throws, lck must be destroyed before new_descriptor.
+    std::unique_lock<std::shared_mutex> lck(mtx_);
     blocks_table_.emplace(new_descriptor->GetId(), std::vector<MmapBlockPtr>());
     return new_descriptor;
 }
