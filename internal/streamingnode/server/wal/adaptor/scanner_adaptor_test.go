@@ -8,6 +8,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/interceptors/mock_wab"
@@ -24,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/helper"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v3/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -70,6 +72,63 @@ func TestScannerAdaptorReadError(t *testing.T) {
 	<-s.Chan()
 	<-s.Done()
 	assert.NoError(t, s.Error())
+}
+
+func TestScannerAdaptorStopsOnCorruptedChunk(t *testing.T) {
+	resource.InitForTest(t)
+
+	corrupted := message.NewMutableMessageBeforeAppend([]byte("broken"), map[string]string{
+		"_t":  "x",
+		"_tt": "!",
+		"_ci": "0",
+		"_ct": "2",
+		"_v":  message.VersionV1.String(),
+	}).IntoImmutableMessage(walimplstest.NewTestMessageID(1))
+	upstream := make(chan message.ImmutableMessage, 1)
+	upstream <- corrupted
+
+	innerScanner := mock_walimpls.NewMockScannerImpls(t)
+	innerScanner.EXPECT().Chan().Return(upstream)
+	innerScanner.EXPECT().Close().Return(nil).Once()
+
+	l := mock_walimpls.NewMockWALImpls(t)
+	l.EXPECT().Channel().Return(types.PChannelInfo{})
+	l.EXPECT().Read(mock.Anything, mock.Anything).Return(innerScanner, nil).Once()
+
+	s := newScannerAdaptor("corrupted-chunk", l, wal.ReadOption{
+		DeliverPolicy: options.DeliverPolicyAll(),
+	}, metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics(), func() {}, true)
+
+	select {
+	case <-s.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("scanner did not stop after corrupted chunk")
+	}
+	require.ErrorIs(t, s.Error(), message.ErrCorruptedChunk)
+	_, ok := <-s.Chan()
+	assert.False(t, ok)
+	require.ErrorIs(t, s.Close(), message.ErrCorruptedChunk)
+}
+
+func TestCatchupScannerDeliversOnlyReassembledLogicalMessages(t *testing.T) {
+	resource.InitForTest(t)
+
+	messageID := walimplstest.NewTestMessageID(1)
+	logical := message.CreateTestEmptyInsertMesage(1, nil).
+		WithTimeTick(100).
+		WithLastConfirmed(messageID)
+	payload := logical.IntoMessageProto().GetPayload()
+	chunks := message.SplitIntoChunks(logical, (len(payload)+1)/2)
+	require.Len(t, chunks, 2)
+
+	physical := make([]message.ImmutableMessage, 0, len(chunks))
+	for i, chunk := range chunks {
+		physical = append(physical, chunk.IntoImmutableMessage(walimplstest.NewTestMessageID(int64(i+1))))
+	}
+	captured := runTraceTestCatchupScanner(t, physical...)
+	require.Len(t, captured, 1)
+	assert.Equal(t, payload, captured[0].IntoImmutableMessageProto().GetPayload())
+	assert.False(t, message.IsChunkedPayload(captured[0]))
 }
 
 func TestPauseConsumption(t *testing.T) {

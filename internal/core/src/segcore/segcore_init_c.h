@@ -45,6 +45,9 @@ void
 SegcoreSetEnableGISSplitFusion(const bool);
 
 void
+SegcoreSetScanCursorOwnsPin(const bool);
+
+void
 SegcoreSetNlist(const int64_t);
 
 // FM-index count-first guard threshold (queryNode.fmindexCostRatio).
@@ -65,6 +68,9 @@ SegcoreSetRefineRatio(const float);
 
 void
 SegcoreSetIndexBuildRatio(const float);
+
+void
+SegcoreSetGrowingIndexBuildThreadRate(const float);
 
 CStatus
 SegcoreSetDenseVectorInterminIndexRefineQuantType(const char*);
@@ -108,12 +114,6 @@ SegcoreSetVisibilityFilterEnabled(const bool value);
 
 void
 SegcoreSetPreferFieldDataWhenIndexHasRawData(const bool value);
-
-void
-SegcoreSetTakeForOutputResultCountLimit(const int64_t value);
-
-int64_t
-SegcoreGetTakeForOutputResultCountLimit();
 
 void
 SegcoreCloseGlog();

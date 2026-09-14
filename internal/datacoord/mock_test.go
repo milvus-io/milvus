@@ -558,6 +558,10 @@ func (m *mockMixCoord) GetDataCoordTopology(ctx context.Context, req *milvuspb.G
 	panic("not implemented") // TODO: Implement
 }
 
+func (m *mockMixCoord) GetConnectedDataNodeMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) ([]metricsinfo.DataNodeInfos, error) {
+	panic("not implemented") // TODO: Implement
+}
+
 func (m *mockMixCoord) GetQueryCoordTopology(ctx context.Context, req *milvuspb.GetMetricsRequest) (*metricsinfo.QueryCoordTopology, error) {
 	panic("not implemented") // TODO: Implement
 }

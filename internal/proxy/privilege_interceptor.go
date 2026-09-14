@@ -60,7 +60,7 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 	return PrivilegeInterceptorWithMetaCache(func() Cache { return nil })(ctx, req)
 }
 
-func PrivilegeInterceptorWithMetaCache(getMetaCache func() Cache) PrivilegeFunc {
+func PrivilegeInterceptorWithMetaCache(GetMetaCache func() Cache) PrivilegeFunc {
 	return func(ctx context.Context, req interface{}) (context.Context, error) {
 		if !Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
 			return ctx, nil
@@ -129,7 +129,7 @@ func PrivilegeInterceptorWithMetaCache(getMetaCache func() Cache) PrivilegeFunc 
 		// Resolve alias to actual collection name for RBAC checks
 		if Params.ProxyCfg.ResolveAliasForPrivilege.GetAsBool() && objectType == commonpb.ObjectType_Collection.String() && objectNameIndex != 0 {
 			if objectName != util.AnyWord && objectName != "" {
-				if actualCollectionName, resolveErr := resolveCollectionAlias(ctx, getMetaCache(), dbName, objectName); resolveErr != nil {
+				if actualCollectionName, resolveErr := resolveCollectionAlias(ctx, GetMetaCache(), dbName, objectName); resolveErr != nil {
 					mlog.RatedWarn(ctx, rate.Limit(60), "failed to resolve collection alias for RBAC, using original name",
 						mlog.String("objectName", objectName), mlog.FieldDbName(dbName), mlog.Err(resolveErr))
 				} else {
@@ -157,7 +157,7 @@ func PrivilegeInterceptorWithMetaCache(getMetaCache func() Cache) PrivilegeFunc 
 					resolvedNames = append(resolvedNames, name)
 					continue
 				}
-				if actualName, resolveErr := resolveCollectionAlias(ctx, getMetaCache(), dbName, name); resolveErr != nil {
+				if actualName, resolveErr := resolveCollectionAlias(ctx, GetMetaCache(), dbName, name); resolveErr != nil {
 					mlog.RatedWarn(ctx, rate.Limit(60), "failed to resolve collection alias for RBAC, using original name",
 						mlog.String("objectName", name), mlog.FieldDbName(dbName), mlog.Err(resolveErr))
 					resolvedNames = append(resolvedNames, name)

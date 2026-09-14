@@ -280,7 +280,7 @@ JsonStatsMeta::Deserialize(const std::string& json_str) {
             // Other types can be added as needed
         }
     } catch (const std::exception& e) {
-        ThrowInfo(ErrorCode::UnexpectedError,
+        ThrowInfo(ErrorCode::DataFormatBroken,
                   "Failed to deserialize JsonStatsMeta: {}",
                   e.what());
     }
@@ -307,7 +307,7 @@ JsonStatsMeta::DeserializeToKeyFieldMap(const std::string& json_str) {
             }
         }
     } catch (const std::exception& e) {
-        ThrowInfo(ErrorCode::UnexpectedError,
+        ThrowInfo(ErrorCode::DataFormatBroken,
                   "Failed to deserialize JsonStatsMeta to key_field_map: {}",
                   e.what());
     }

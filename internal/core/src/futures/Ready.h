@@ -16,6 +16,7 @@
 #include <optional>
 #include <stdexcept>
 #include <vector>
+#include "common/EasyAssert.h"
 
 namespace milvus::futures {
 
@@ -58,7 +59,9 @@ class Ready {
     getValue() && {
         std::lock_guard<std::mutex> lock(mutex_);
         if (!is_ready_) {
-            throw std::runtime_error("Value is not ready");
+            ThrowInfo(ErrorCode::UnexpectedError,
+                      "{}",
+                      std::string("Value is not ready"));
         }
         auto v(std::move(value_.value()));
         value_.reset();

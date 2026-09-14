@@ -718,7 +718,7 @@ StringIndexSort::LoadEntries(storage::IndexEntryReader& reader,
             if (mmap_meta_data_ == MAP_FAILED) {
                 meta_file.Close();
                 remove(mmap_meta_filepath_.c_str());
-                ThrowInfo(ErrorCode::UnexpectedError,
+                ThrowInfo(ErrorCode::MmapError,
                           "failed to mmap idx_to_offsets meta: {}",
                           strerror(errno));
             }

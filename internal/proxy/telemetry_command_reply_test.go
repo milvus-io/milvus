@@ -32,7 +32,16 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+func disableTelemetryAuthorization(t *testing.T) {
+	t.Helper()
+	require.NoError(t, paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "false"))
+	t.Cleanup(func() {
+		require.NoError(t, paramtable.Get().Reset(Params.CommonCfg.AuthorizationEnabled.Key))
+	})
+}
 
 // telemetryRespWithReply builds the shape the server actually returns: replies are JSON
 // encoded into ClientInfo.Reserved["command_replies"], not a dedicated proto field.
@@ -200,6 +209,7 @@ func TestCommandReplyPayload(t *testing.T) {
 }
 
 func TestGetTelemetryCommandReplyHandler(t *testing.T) {
+	disableTelemetryAuthorization(t)
 	gin.SetMode(gin.TestMode)
 
 	newCtx := func(url string, commandID string) (*httptest.ResponseRecorder, *gin.Context) {
@@ -354,6 +364,7 @@ func TestGetTelemetryCommandReplyHandler(t *testing.T) {
 // sync.Map handed back one arbitrary client's answer as though it were the cluster's --
 // non-deterministically, and with no hint that more existed.
 func TestBroadcastCommandReturnsEveryReply(t *testing.T) {
+	disableTelemetryAuthorization(t)
 	gin.SetMode(gin.TestMode)
 
 	mixCoord := mocks.NewMockMixCoordClient(t)
@@ -400,6 +411,7 @@ func TestBroadcastCommandReturnsEveryReply(t *testing.T) {
 // client keeps the singular convenience fields, so the shared response shape did not become
 // harder to read for the endpoints that can only ever have one answer.
 func TestTargetedLookupStillReturnsOneReply(t *testing.T) {
+	disableTelemetryAuthorization(t)
 	gin.SetMode(gin.TestMode)
 
 	mixCoord := mocks.NewMockMixCoordClient(t)

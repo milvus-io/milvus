@@ -215,13 +215,21 @@ func getQueryCoordMetrics(ctx context.Context, mixCoord types.MixCoord) (*metric
 	return mixCoord.GetQueryCoordTopology(ctx, req)
 }
 
-func getDataCoordMetrics(ctx context.Context, mixCoord types.MixCoord) (*metricsinfo.DataCoordTopology, error) {
+func getDataCoordTopology(ctx context.Context, mixCoord types.MixCoord) (*metricsinfo.DataCoordTopology, error) {
 	req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
 	if err != nil {
 		return nil, err
 	}
 	// Use direct topology method to avoid JSON marshal/unmarshal overhead in MixCoord mode
 	return mixCoord.GetDataCoordTopology(ctx, req)
+}
+
+func getConnectedDataNodeMetrics(ctx context.Context, mixCoord types.MixCoord) ([]metricsinfo.DataNodeInfos, error) {
+	req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
+	if err != nil {
+		return nil, err
+	}
+	return mixCoord.GetConnectedDataNodeMetrics(ctx, req)
 }
 
 func getProxyMetrics(ctx context.Context, proxies proxyutil.ProxyClientManagerInterface) ([]*metricsinfo.ProxyInfos, error) {
@@ -276,12 +284,12 @@ func CheckTimeTickLagExceeded(ctx context.Context, mixcoord types.MixCoord, maxD
 
 	// get Data cluster metrics
 	group.Go(func() error {
-		dataCoordTopology, err := getDataCoordMetrics(ctx, mixcoord)
+		dataNodeMetrics, err := getConnectedDataNodeMetrics(ctx, mixcoord)
 		if err != nil {
 			return err
 		}
 
-		for _, dataNodeMetric := range dataCoordTopology.Cluster.ConnectedDataNodes {
+		for _, dataNodeMetric := range dataNodeMetrics {
 			dm := dataNodeMetric.QuotaMetrics
 			if dm != nil {
 				if dm.Fgm.NumFlowGraph > 0 && dm.Fgm.MinFlowGraphChannel != "" {

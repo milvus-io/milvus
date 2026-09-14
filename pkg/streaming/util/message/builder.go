@@ -124,10 +124,21 @@ func newMutableMessageBuilder[H proto.Message, B proto.Message]() *mutableMesasg
 	}
 }
 
+// BodyEncoder encodes a body of type B directly into a caller-provided buffer.
+// EncodedSize must return the exact number of bytes MarshalTo writes. BodyType
+// is a compile-time type marker; builders consume the encoder synchronously and
+// retain only the encoded payload.
+type BodyEncoder[B proto.Message] interface {
+	EncodedSize() (int, error)
+	MarshalTo([]byte) (int, error)
+	BodyType() B
+}
+
 // mutableMesasgeBuilder is the builder for message.
 type mutableMesasgeBuilder[H proto.Message, B proto.Message] struct {
 	header       H
 	body         B
+	bodyEncoder  BodyEncoder[B]
 	properties   propertiesImpl
 	cipherConfig *CipherConfig
 	allVChannel  bool
@@ -158,6 +169,13 @@ func (b *mutableMesasgeBuilder[H, B]) WithUnreplicable() *mutableMesasgeBuilder[
 // WithBody creates a new builder with message body.
 func (b *mutableMesasgeBuilder[H, B]) WithBody(body B) *mutableMesasgeBuilder[H, B] {
 	b.body = body
+	return b
+}
+
+// WithBodyEncoder creates a new builder with a body encoder that writes the
+// encoded body directly into the message payload during Build.
+func (b *mutableMesasgeBuilder[H, B]) WithBodyEncoder(bodyEncoder BodyEncoder[B]) *mutableMesasgeBuilder[H, B] {
+	b.bodyEncoder = bodyEncoder
 	return b
 }
 
@@ -274,6 +292,31 @@ func (b *mutableMesasgeBuilder[H, B]) WithProperties(kvs map[string]string) *mut
 	return b
 }
 
+// WithIdempotencyKey creates a new builder carrying the idempotency key of an
+// idempotent write. A zero key is a no-op, so callers can pass the key
+// unconditionally without materializing an empty property.
+//
+// The parameter is an `IdempotencyKey` rather than a string because a key is
+// meaningless without the scope it deduplicates within: it is built by one of the
+// New*ScopedIdempotencyKey constructors, which is what keeps a caller from
+// shipping an accidentally unscoped key.
+//
+// The key is a property rather than a per-message-type header field so that every
+// producer and consumer reads it the same way (see `IdempotencyKeyOf`), and so
+// that a broadcast message carries it without any per-type schema change.
+//
+// A deduplicated broadcast returns the ORIGINAL broadcast's per-channel append
+// results, so a caller reading `BroadcastAppendResult.GetAppendResult(...)` needs no
+// special handling for the duplicate path. The one exception is an original that has
+// not finished being acked, which leaves the results nil; a caller that dereferences
+// them without a nil check would panic there — a branch no success-path test reaches.
+func (b *mutableMesasgeBuilder[H, B]) WithIdempotencyKey(key IdempotencyKey) *mutableMesasgeBuilder[H, B] {
+	if key != "" {
+		b.properties.Set(messageIdempotencyKey, string(key))
+	}
+	return b
+}
+
 // WithCipher creates a new builder with cipher property.
 func (b *mutableMesasgeBuilder[H, B]) WithCipher(cipherConfig *CipherConfig) *mutableMesasgeBuilder[H, B] {
 	b.cipherConfig = cipherConfig
@@ -336,8 +379,13 @@ func (b *mutableMesasgeBuilder[H, B]) build() (*messageImpl, error) {
 	if reflect.ValueOf(b.header).IsNil() {
 		panic("message builder not ready for header field")
 	}
-	if reflect.ValueOf(b.body).IsNil() {
+	bodySet := !reflect.ValueOf(b.body).IsNil()
+	bodyEncoderSet := !isNilBodyEncoder(b.bodyEncoder)
+	if !bodySet && !bodyEncoderSet {
 		panic("message builder not ready for body field")
+	}
+	if bodySet && bodyEncoderSet {
+		panic("message builder must set exactly one of body or body encoder")
 	}
 
 	// setup header.
@@ -347,9 +395,17 @@ func (b *mutableMesasgeBuilder[H, B]) build() (*messageImpl, error) {
 	}
 	b.properties.Set(messageHeader, sp)
 
-	payload, err := proto.Marshal(b.body)
+	var payload []byte
+	if bodyEncoderSet {
+		payload, err = marshalBodyEncoder(b.bodyEncoder)
+	} else {
+		payload, err = proto.Marshal(b.body)
+		if err != nil {
+			err = errors.Wrap(err, "failed to marshal body")
+		}
+	}
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to marshal body")
+		return nil, err
 	}
 	if b.cipherConfig != nil {
 		messageType := MustGetMessageTypeWithVersion[H, B]()
@@ -381,6 +437,40 @@ func (b *mutableMesasgeBuilder[H, B]) build() (*messageImpl, error) {
 		payload:    payload,
 		properties: b.properties,
 	}, nil
+}
+
+func isNilBodyEncoder[B proto.Message](bodyEncoder BodyEncoder[B]) bool {
+	if bodyEncoder == nil {
+		return true
+	}
+
+	value := reflect.ValueOf(bodyEncoder)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
+}
+
+func marshalBodyEncoder[B proto.Message](bodyEncoder BodyEncoder[B]) ([]byte, error) {
+	size, err := bodyEncoder.EncodedSize()
+	if err != nil {
+		return nil, merr.Wrap(err, "failed to get encoded body size")
+	}
+	if size < 0 {
+		return nil, merr.WrapErrServiceInternalMsg("body encoder returned negative encoded size %d", size)
+	}
+
+	payload := make([]byte, size)
+	written, err := bodyEncoder.MarshalTo(payload)
+	if err != nil {
+		return nil, merr.Wrap(err, "failed to marshal body")
+	}
+	if written != size {
+		return nil, merr.WrapErrServiceInternalMsg("body encoder wrote %d bytes, expected %d", written, size)
+	}
+	return payload, nil
 }
 
 // NewImmutableTxnMessageBuilder creates a new txn builder.

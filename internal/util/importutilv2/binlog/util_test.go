@@ -18,14 +18,17 @@ package binlog
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -122,4 +125,39 @@ func TestListInsertLogs_ParseFieldIDError(t *testing.T) {
 
 	assert.Error(t, err)
 	assert.True(t, errors.Is(err, merr.ErrImportSysFailed), "parse-field-id IO error must be wrapped as a server-side import failure")
+}
+
+// TestVerify_StorageV2V3_NullableVectorOptional pins that a nullable vector field
+// without a column group (added via AddCollectionField after the segment was
+// flushed) is accepted by the StorageV2/V3 branch, while a non-nullable vector
+// field without binlogs is still rejected.
+func TestVerify_StorageV2V3_NullableVectorOptional(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+			{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector},
+			{FieldID: 102, Name: "added_sparse", DataType: schemapb.DataType_SparseFloatVector, Nullable: true},
+			{FieldID: 103, Name: "added_scalar", DataType: schemapb.DataType_Int64, Nullable: true},
+		},
+	}
+	genLogs := func(fieldIDs ...int64) map[int64][]string {
+		logs := make(map[int64][]string, len(fieldIDs))
+		for _, id := range fieldIDs {
+			logs[id] = []string{fmt.Sprintf("insert_log/1/2/3/%d/1", id)}
+		}
+		return logs
+	}
+
+	for _, version := range []int64{storage.StorageV2, storage.StorageV3} {
+		// nullable vector column group absent: accepted, schema and logs passed through unchanged
+		logs := genLogs(storagecommon.DefaultShortColumnGroupID, 101)
+		gotLogs, gotSchema, err := verify(schema, version, logs)
+		assert.NoError(t, err, "version %d", version)
+		assert.Equal(t, logs, gotLogs)
+		assert.Equal(t, schema, gotSchema)
+
+		// non-nullable vector column group absent: still rejected
+		_, _, err = verify(schema, version, genLogs(storagecommon.DefaultShortColumnGroupID, 102))
+		assert.ErrorContains(t, err, "no binlog for field:vec", "version %d", version)
+	}
 }

@@ -528,6 +528,16 @@
         },
         {
             "MessageSpecializedType": {
+                "HeaderType": "messagespb.RecoveryBarrierMessageHeader",
+                "BodyType": "messagespb.RecoveryBarrierMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeRecoveryBarrier",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
                 "HeaderType": "messagespb.BatchUpdateManifestMessageHeader",
                 "BodyType": "messagespb.BatchUpdateManifestMessageBody"
             },
@@ -543,6 +553,26 @@
             },
             "MessageTypeWithVersion": {
                 "MessageType": "MessageTypeRefreshExternalCollection",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.AlterRLSMetadataMessageHeader",
+                "BodyType": "messagespb.AlterRLSMetadataMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeAlterRLSMetadata",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.DropRLSMetadataMessageHeader",
+                "BodyType": "messagespb.DropRLSMetadataMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeDropRLSMetadata",
                 "Version": 2
             }
         }

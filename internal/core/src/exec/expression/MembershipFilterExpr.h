@@ -74,9 +74,9 @@ struct BloomMembershipProbe {
 
     // Envelope parsed and validated exactly once per physical expr; throws
     // SegcoreError{ExprInvalid} on malformed blobs. The view aliases
-    // expr.filter_blob_, owned by the logical node held via shared_ptr.
+    // *expr.filter_blob_, owned by the logical node held via shared_ptr.
     explicit BloomMembershipProbe(const milvus::expr::BloomFilterExpr& expr)
-        : filter(SplitBlockBloomFilterView::Parse(expr.filter_blob_)) {
+        : filter(SplitBlockBloomFilterView::Parse(*expr.filter_blob_)) {
     }
 
     template <typename T>

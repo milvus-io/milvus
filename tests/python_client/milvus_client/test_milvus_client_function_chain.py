@@ -1646,10 +1646,13 @@ class TestMilvusClientFunctionChainXGBoost(TestMilvusClientV2Base):
             )
             self._assert_scores_match(recovered, fixture["expected_scores"])
             assert error_is_explicit, error_text
-            assert error_code == 2000, f"unexpected wire error code {error_code}: {error_text}"
+            # The original segcore code (2042 = ModelInvalid) now travels the
+            # wire directly instead of being collapsed to the generic 2000 with
+            # a "segcoreCode=" decoration in the message.
+            assert error_code == 2042, f"unexpected wire error code {error_code}: {error_text}"
             assert error_is_input is True, f"corrupted user model was not classified as input error: {error_text}"
             assert error_retriable is False, f"corrupted user model was unexpectedly retriable: {error_text}"
-            assert "segcoreCode=2042" in error_text, f"precise segcore error code was not preserved: {error_text}"
+            assert "segcoreCode=" not in error_text, f"legacy segcoreCode decoration reappeared: {error_text}"
         finally:
             self._cleanup_file_resource(
                 client,

@@ -49,9 +49,9 @@ impl IndexWriterWrapper {
         index.tokenizers().register(NGRAM_TOKENIZER, tokenizer);
         let index_writer =
             index.writer_with_num_threads(num_threads, overall_memory_budget_in_bytes)?;
-        // Ngram writers are only used for sealed index builds, which end with
-        // an explicit merge-all in finish(); background merges would only
-        // waste IO and race with it.
+        // Ngram writers are only used for sealed index builds. Keep
+        // memory-budget-flushed segments and avoid background merge write
+        // amplification.
         index_writer.set_merge_policy(Box::new(tantivy::merge_policy::NoMergePolicy));
 
         Ok(IndexWriterWrapper::V7(IndexWriterWrapperImpl {
@@ -60,8 +60,6 @@ impl IndexWriterWrapper {
             index: Arc::new(index),
             enable_user_specified_doc_id: true,
             id_field: None,
-            // Sealed-build only; merge-all runs in finish().
-            enable_background_merge: false,
         }))
     }
 }

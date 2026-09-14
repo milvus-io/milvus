@@ -12,7 +12,6 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 from base.testbase import TestBase
-from pymilvus import Collection, utility
 from sklearn import preprocessing
 from utils.constant import CaseLabel
 from utils.util_log import test_log as logger
@@ -41,8 +40,111 @@ def write_parquet_with_string_columns(df, file_path, string_columns):
     pq.write_table(table, file_path)
 
 
+class RestImportTestBase(TestBase):
+    """REST-only helpers for import-job setup and result verification."""
+
+    connect_with_pymilvus = False
+
+    def _query_count(self, collection_name, filter_expr=" ", partition_names=None, db_name="default"):
+        payload = {
+            "collectionName": collection_name,
+            "filter": filter_expr,
+            "limit": 0,
+            "outputFields": ["count(*)"],
+        }
+        if partition_names is not None:
+            payload["partitionNames"] = partition_names
+        rsp = self.vector_client.vector_query(payload, db_name=db_name, timeout=30)
+        assert rsp.get("code") == 0, rsp
+        assert len(rsp.get("data", [])) == 1, rsp
+        return rsp["data"][0]["count(*)"]
+
+    def _wait_for_count(
+        self,
+        collection_name,
+        expected_count,
+        timeout=120,
+        partition_names=None,
+        db_name="default",
+    ):
+        t0 = time.time()
+        last_count = None
+        last_refresh_rsp = None
+        while time.time() - t0 < timeout:
+            last_refresh_rsp = self.collection_client.refresh_load(collection_name, db_name=db_name)
+            assert last_refresh_rsp.get("code") == 0, last_refresh_rsp
+            last_count = self._query_count(
+                collection_name,
+                partition_names=partition_names,
+                db_name=db_name,
+            )
+            if last_count == expected_count:
+                return last_count
+            time.sleep(2)
+        raise AssertionError(
+            f"collection {collection_name} count did not reach {expected_count} within {timeout}s; "
+            f"last_count={last_count}, last_refresh_response={last_refresh_rsp}"
+        )
+
+    def _query_rows(
+        self,
+        collection_name,
+        filter_expr,
+        output_fields,
+        limit=100,
+        expected_count=1,
+        db_name="default",
+    ):
+        payload = {
+            "collectionName": collection_name,
+            "filter": filter_expr,
+            "outputFields": output_fields,
+            "limit": limit,
+        }
+        rsp = self.vector_client.vector_query(payload, db_name=db_name, timeout=30)
+        assert rsp.get("code") == 0, rsp
+        rows = rsp.get("data", [])
+        assert len(rows) == expected_count, rsp
+        return rows
+
+    def _flush_collection(self, collection_name, timeout=90, interval=11):
+        t0 = time.time()
+        last_rsp = None
+        while time.time() - t0 < timeout:
+            last_rsp = self.collection_client.flush(collection_name)
+            if last_rsp.get("code") == 0:
+                return last_rsp
+            if last_rsp.get("code") != 1807:
+                raise AssertionError(last_rsp)
+            time.sleep(interval)
+        raise AssertionError(f"collection {collection_name} flush timed out; last_response={last_rsp}")
+
+    def _create_database(self, db_name):
+        rsp = self.database_client.database_create({"dbName": db_name})
+        assert rsp.get("code") == 0, rsp
+
+    def _wait_for_index_ready(self, collection_name, index_name, timeout=120):
+        t0 = time.time()
+        last_rsp = None
+        while time.time() - t0 < timeout:
+            last_rsp = self.index_client.index_describe(
+                collection_name=collection_name,
+                index_name=index_name,
+            )
+            assert last_rsp.get("code") == 0, last_rsp
+            assert len(last_rsp.get("data", [])) == 1, last_rsp
+            index = last_rsp["data"][0]
+            if index.get("indexState") == "Finished":
+                assert index.get("failReason", "") == "", index
+                return index
+            time.sleep(1)
+        raise AssertionError(
+            f"index {index_name} of collection {collection_name} not ready within {timeout}s; last_response={last_rsp}"
+        )
+
+
 @pytest.mark.tags(CaseLabel.L0)
-class TestCreateImportJob(TestBase):
+class TestCreateImportJob(RestImportTestBase):
     @pytest.mark.parametrize("insert_num", [3000])
     @pytest.mark.parametrize("import_task_num", [2])
     @pytest.mark.parametrize("auto_id", [True])
@@ -150,13 +252,7 @@ class TestCreateImportJob(TestBase):
                 time.sleep(5)
                 if time.time() - t0 > IMPORT_TIMEOUT:
                     assert False, "import job timeout"
-        c = Collection(name)
-        c.load(_refresh=True, timeou=120)
-        res = c.query(
-            expr="",
-            output_fields=["count(*)"],
-        )
-        assert res[0]["count(*)"] == insert_num * import_task_num
+        self._wait_for_count(name, insert_num * import_task_num)
         # query data
         payload = {
             "collectionName": name,
@@ -251,13 +347,7 @@ class TestCreateImportJob(TestBase):
                 time.sleep(5)
                 if time.time() - t0 > IMPORT_TIMEOUT:
                     assert False, "import job timeout"
-        c = Collection(name)
-        c.load(_refresh=True, timeou=120)
-        res = c.query(
-            expr="",
-            output_fields=["count(*)"],
-        )
-        assert res[0]["count(*)"] == insert_num * import_task_num
+        self._wait_for_count(name, insert_num * import_task_num)
         # query data
         payload = {
             "collectionName": name,
@@ -362,8 +452,8 @@ class TestCreateImportJob(TestBase):
     @pytest.mark.parametrize("is_partition_key", [True])
     @pytest.mark.parametrize("enable_dynamic_field", [True])
     def test_import_job_with_db(self, insert_num, import_task_num, auto_id, is_partition_key, enable_dynamic_field):
-        self.create_database(db_name="test_job")
-        self.update_database(db_name="test_job")
+        db_name = f"test_job_{uuid4().hex[:8]}"
+        self._create_database(db_name)
         # create collection
         name = gen_collection_name()
         dim = 128
@@ -386,8 +476,9 @@ class TestCreateImportJob(TestBase):
             },
             "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}],
         }
-        self.collection_client.collection_create(payload)
-        self.wait_load_completed(name)
+        rsp = self.collection_client.collection_create(payload, db_name=db_name)
+        assert rsp["code"] == 0, rsp
+        self.wait_load_completed(name, db_name=db_name)
         # upload file to storage
         data = []
         for i in range(insert_num):
@@ -415,12 +506,14 @@ class TestCreateImportJob(TestBase):
             "files": [[file_name]],
         }
         for i in range(import_task_num):
-            rsp = self.import_job_client.create_import_jobs(payload)
+            rsp = self.import_job_client.create_import_jobs(payload, db_name=db_name)
+            assert rsp["code"] == 0, rsp
         # list import job
         payload = {
             "collectionName": name,
         }
-        rsp = self.import_job_client.list_import_jobs(payload)
+        rsp = self.import_job_client.list_import_jobs(payload, db_name=db_name)
+        assert rsp["code"] == 0, rsp
 
         # get import job progress
         for task in rsp["data"]["records"]:
@@ -429,26 +522,20 @@ class TestCreateImportJob(TestBase):
             t0 = time.time()
 
             while not finished:
-                rsp = self.import_job_client.get_import_job_progress(task_id)
+                rsp = self.import_job_client.get_import_job_progress(task_id, db_name=db_name)
                 if rsp["data"]["state"] == "Completed":
                     finished = True
                 time.sleep(5)
                 if time.time() - t0 > IMPORT_TIMEOUT:
                     assert False, "import job timeout"
-        c = Collection(name)
-        c.load(_refresh=True, timeou=120)
-        res = c.query(
-            expr="",
-            output_fields=["count(*)"],
-        )
-        assert res[0]["count(*)"] == insert_num * import_task_num
+        self._wait_for_count(name, insert_num * import_task_num, db_name=db_name)
         # query data
         payload = {
             "collectionName": name,
             "filter": "book_id > 0",
             "outputFields": ["*"],
         }
-        rsp = self.vector_client.vector_query(payload)
+        rsp = self.vector_client.vector_query(payload, db_name=db_name)
         assert rsp["code"] == 0
 
     @pytest.mark.parametrize("insert_num", [5000])
@@ -534,21 +621,14 @@ class TestCreateImportJob(TestBase):
                 time.sleep(5)
                 if time.time() - t0 > IMPORT_TIMEOUT:
                     assert False, "import job timeout"
-        c = Collection(name)
-        c.load(_refresh=True, timeou=120)
-        res = c.query(
-            expr="",
-            output_fields=["count(*)"],
-        )
-        logger.info(f"count in collection: {res}")
-        assert res[0]["count(*)"] == insert_num * import_task_num
-        res = c.query(
-            expr="",
+        collection_count = self._wait_for_count(name, insert_num * import_task_num)
+        logger.info(f"count in collection: {collection_count}")
+        partition_count = self._wait_for_count(
+            name,
+            insert_num * import_task_num,
             partition_names=[partition_name],
-            output_fields=["count(*)"],
         )
-        logger.info(f"count in partition {[partition_name]}: {res}")
-        assert res[0]["count(*)"] == insert_num * import_task_num
+        logger.info(f"count in partition {[partition_name]}: {partition_count}")
         # query data
         payload = {
             "collectionName": name,
@@ -627,11 +707,8 @@ class TestCreateImportJob(TestBase):
                 time.sleep(5)
                 if time.time() - t0 > IMPORT_TIMEOUT:
                     assert False, "import job timeout"
-        time.sleep(10)
         # assert data count
-        c = Collection(name)
-        c.load(_refresh=True, timeou=120)
-        assert c.num_entities == 2000
+        self._wait_for_count(name, 2000)
         # assert import data can be queried
         payload = {
             "collectionName": name,
@@ -712,11 +789,8 @@ class TestCreateImportJob(TestBase):
                 time.sleep(5)
                 if time.time() - t0 > IMPORT_TIMEOUT:
                     assert False, "import job timeout"
-        time.sleep(10)
         # assert data count
-        c = Collection(name)
-        c.load(_refresh=True, timeou=120)
-        assert c.num_entities == 2000
+        self._wait_for_count(name, 2000)
         # assert import data can be queried
         payload = {
             "collectionName": name,
@@ -802,11 +876,8 @@ class TestCreateImportJob(TestBase):
                 time.sleep(5)
                 if time.time() - t0 > IMPORT_TIMEOUT:
                     assert False, "import job timeout"
-        time.sleep(10)
         # assert data count
-        c = Collection(name)
-        c.load(_refresh=True, timeou=120)
-        assert c.num_entities == 2000
+        self._wait_for_count(name, 2000)
         # assert import data can be queried
         payload = {
             "collectionName": name,
@@ -937,11 +1008,8 @@ class TestCreateImportJob(TestBase):
                 time.sleep(5)
                 if time.time() - t0 > IMPORT_TIMEOUT:
                     assert False, "import job timeout"
-        time.sleep(10)
         # assert data count
-        c = Collection(name)
-        c.load(_refresh=True, timeou=120)
-        assert c.num_entities == 6000
+        self._wait_for_count(name, 6000)
         # assert import data can be queried
         payload = {
             "collectionName": name,
@@ -1070,22 +1138,22 @@ class TestCreateImportJob(TestBase):
             assert rsp["code"] == 0
             assert rsp["data"]["insertCount"] == nb
         # flush data to generate binlog file
-        c = Collection(name)
-        c.flush()
+        self._flush_collection(name)
         # wait for index building to complete, which ensures sort compaction is done
         for field_name in ["text_emb", "image_emb"]:
-            utility.wait_for_index_building_complete(name, field_name)
+            self._wait_for_index_ready(name, field_name)
 
         # query data to make sure the data is inserted
         rsp = self.vector_client.vector_query({"collectionName": name, "filter": "user_id > 0", "limit": 50})
         assert rsp["code"] == 0
         assert len(rsp["data"]) == 50
         # get collection id
-        c = Collection(name)
-        res = c.describe()
-        collection_id = res["collection_id"]
+        rsp = self.collection_client.collection_describe(name)
+        assert rsp["code"] == 0, rsp
+        collection_id = rsp["data"]["collectionID"]
         # get binlog files
         binlog_files = self.storage_client.get_collection_binlog(collection_id)
+        assert binlog_files, f"no binlog files found for collection {collection_id}"
         files = []
         for file in binlog_files:
             files.append([file, ""])
@@ -1119,12 +1187,10 @@ class TestCreateImportJob(TestBase):
                 time.sleep(5)
                 if time.time() - t0 > IMPORT_TIMEOUT:
                     assert False, "import job timeout"
-        time.sleep(10)
-        c_restore = Collection(restore_collection_name)
         # since we import both original and sorted segments, the number of entities should be 2x
-        time.sleep(10)
-        logger.info(f"c.num_entities: {c.num_entities}, c_restore.num_entities: {c_restore.num_entities}")
-        assert c.num_entities * 2 == c_restore.num_entities
+        source_count = self._wait_for_count(name, nb * insert_round)
+        restore_count = self._wait_for_count(restore_collection_name, source_count * 2)
+        logger.info(f"source count: {source_count}, restore count: {restore_count}")
 
     def test_import_json_with_nullable_fields(self):
         """Test JSON import with nullable and default_value fields - fields should be auto-filled"""
@@ -1210,20 +1276,18 @@ class TestCreateImportJob(TestBase):
         assert result, f"Import job failed: {res}"
 
         # Verify data
-        c = Collection(name)
-        c.load(_refresh=True)
-        assert c.num_entities == num_entities
+        self._wait_for_count(name, num_entities)
 
         # Query and verify nullable/default fields were filled correctly
         # Check even id (missing fields)
-        res = c.query(expr="id == 0", output_fields=["*"])
+        res = self._query_rows(name, "id == 0", ["*"])
         assert res[0]["nullable_int"] is None
         assert res[0]["default_int"] == default_int_value
         assert res[0]["nullable_varchar"] is None
         assert res[0]["default_varchar"] == default_varchar_value
 
         # Check odd id (provided fields)
-        res = c.query(expr="id == 1", output_fields=["*"])
+        res = self._query_rows(name, "id == 1", ["*"])
         assert res[0]["nullable_int"] == 201
         assert res[0]["default_int"] == 301
         assert res[0]["nullable_varchar"] == "provided_value_1"
@@ -1374,12 +1438,10 @@ class TestCreateImportJob(TestBase):
         assert result, f"Import job failed: {res}"
 
         # Verify data imported successfully
-        c = Collection(name)
-        c.load(_refresh=True)
-        assert c.num_entities == num_entities
+        self._wait_for_count(name, num_entities)
 
         # Verify only defined fields exist (sample check)
-        res = c.query(expr="id in [0, 1, 2]", output_fields=["*"])
+        res = self._query_rows(name, "id in [0, 1, 2]", ["*"], limit=3, expected_count=3)
         for item in res:
             assert "id" in item
             assert "title" in item
@@ -1443,12 +1505,10 @@ class TestCreateImportJob(TestBase):
         assert result, f"Import job failed: {res}"
 
         # Verify data
-        c = Collection(name)
-        c.load(_refresh=True)
-        assert c.num_entities == num_entities
+        self._wait_for_count(name, num_entities)
 
         # Verify nullable fields are null and default fields have default value
-        res = c.query(expr="id == 0", output_fields=["*"])
+        res = self._query_rows(name, "id == 0", ["*"])
         assert res[0]["nullable_int"] is None
         assert res[0]["default_value"] == default_value
 
@@ -1665,9 +1725,7 @@ class TestCreateImportJob(TestBase):
         assert result, f"Import job failed: {res}"
 
         # Verify data
-        c = Collection(name)
-        c.load(_refresh=True)
-        assert c.num_entities == num_entities
+        self._wait_for_count(name, num_entities)
 
     def test_import_json_without_non_bm25_function_output_field(self, tei_endpoint):
         """Test JSON import without non-BM25 function output field - should succeed with auto-generation"""
@@ -1721,9 +1779,7 @@ class TestCreateImportJob(TestBase):
         assert result, f"Import job failed: {res}"
 
         # Verify data
-        c = Collection(name)
-        c.load(_refresh=True)
-        assert c.num_entities == num_entities
+        self._wait_for_count(name, num_entities)
 
     def test_import_csv_with_non_bm25_function_output_rejected_by_default(self, tei_endpoint):
         """Test CSV import with non-BM25 function output field is rejected by default"""
@@ -1853,9 +1909,7 @@ class TestCreateImportJob(TestBase):
         assert result, f"Import job failed: {res}"
 
         # Verify data
-        c = Collection(name)
-        c.load(_refresh=True)
-        assert c.num_entities == num_entities
+        self._wait_for_count(name, num_entities)
 
     def test_import_csv_without_non_bm25_function_output_field(self, tei_endpoint):
         """Test CSV import without non-BM25 function output field - should succeed with auto-generation"""
@@ -1912,9 +1966,7 @@ class TestCreateImportJob(TestBase):
         assert result, f"Import job failed: {res}"
 
         # Verify data
-        c = Collection(name)
-        c.load(_refresh=True)
-        assert c.num_entities == num_entities
+        self._wait_for_count(name, num_entities)
 
     def test_import_parquet_with_non_bm25_function_output_rejected_by_default(self, tei_endpoint):
         """Test Parquet import with non-BM25 function output field is rejected by default"""
@@ -2044,9 +2096,7 @@ class TestCreateImportJob(TestBase):
         assert result, f"Import job failed: {res}"
 
         # Verify data
-        c = Collection(name)
-        c.load(_refresh=True)
-        assert c.num_entities == num_entities
+        self._wait_for_count(name, num_entities)
 
     def test_import_parquet_without_non_bm25_function_output_field(self, tei_endpoint):
         """Test Parquet import without non-BM25 function output field - should succeed with auto-generation"""
@@ -2100,9 +2150,7 @@ class TestCreateImportJob(TestBase):
         assert result, f"Import job failed: {res}"
 
         # Verify data
-        c = Collection(name)
-        c.load(_refresh=True)
-        assert c.num_entities == num_entities
+        self._wait_for_count(name, num_entities)
 
     def test_import_json_bm25_output_rejected_even_with_property(self):
         """Test JSON import with BM25 function output field is still rejected even with property enabled"""
@@ -2251,9 +2299,7 @@ class TestCreateImportJob(TestBase):
         assert result, f"Import job failed: {res}"
 
         # Verify data
-        c = Collection(name)
-        c.load(_refresh=True)
-        assert c.num_entities == num_entities
+        self._wait_for_count(name, num_entities)
 
     def test_import_csv_default_value_with_nullkey(self):
         """Test CSV import where default_value field has nullkey - should use default value"""
@@ -2325,16 +2371,14 @@ class TestCreateImportJob(TestBase):
         assert result, f"Import job failed: {res}"
 
         # Verify data
-        c = Collection(name)
-        c.load(_refresh=True)
-        assert c.num_entities == num_entities
+        self._wait_for_count(name, num_entities)
 
         # Verify default_value field uses default when nullkey, nullable field is null
-        res = c.query(expr="id == 0", output_fields=["*"])
+        res = self._query_rows(name, "id == 0", ["*"])
         assert res[0]["default_int"] == default_value  # Should use default value
         assert res[0]["nullable_int"] is None  # Should be null
 
-        res = c.query(expr="id == 1", output_fields=["*"])
+        res = self._query_rows(name, "id == 1", ["*"])
         assert res[0]["default_int"] == 124  # Should use provided value (123 + 1)
         assert res[0]["nullable_int"] == 457  # Should use provided value (456 + 1)
 
@@ -2404,12 +2448,10 @@ class TestCreateImportJob(TestBase):
         assert result, f"Import job failed: {res}"
 
         # Verify data
-        c = Collection(name)
-        c.load(_refresh=True)
-        assert c.num_entities == num_entities
+        self._wait_for_count(name, num_entities)
 
         # Verify only expected fields exist
-        res = c.query(expr="id >= 0", limit=1, output_fields=["*"])
+        res = self._query_rows(name, "id >= 0", ["*"], limit=1)
         assert "id" in res[0]
         assert "text" in res[0]
         assert "extra_column1" not in res[0]
@@ -2469,12 +2511,10 @@ class TestCreateImportJob(TestBase):
         assert result, f"Import job failed: {res}"
 
         # Verify data
-        c = Collection(name)
-        c.load(_refresh=True)
-        assert c.num_entities == num_entities
+        self._wait_for_count(name, num_entities)
 
         # Verify nullable field is null and default field has default value
-        res = c.query(expr="id == 0", output_fields=["*"])
+        res = self._query_rows(name, "id == 0", ["*"])
         assert res[0]["nullable_field"] is None
         assert res[0]["default_field"] == default_value
 
@@ -2678,12 +2718,10 @@ class TestCreateImportJob(TestBase):
         assert result, f"Import job failed: {res}"
 
         # Verify data imported successfully
-        c = Collection(name)
-        c.load(_refresh=True)
-        assert c.num_entities == 20
+        self._wait_for_count(name, 20)
 
         # Verify only expected fields exist
-        res = c.query(expr="id == 0", output_fields=["*"])
+        res = self._query_rows(name, "id == 0", ["*"])
         assert "id" in res[0]
         assert "name" in res[0]
         assert "extra_col1" not in res[0]
@@ -3076,12 +3114,10 @@ class TestCreateImportJob(TestBase):
         assert result, f"Import job failed: {res}"
 
         # Verify data
-        c = Collection(name)
-        c.load(_refresh=True)
-        assert c.num_entities == num_entities
+        self._wait_for_count(name, num_entities)
 
         # Verify nullable fields are null and default fields have default value
-        res = c.query(expr="id == 0", output_fields=["*"])
+        res = self._query_rows(name, "id == 0", ["*"])
         assert res[0]["nullable_int"] is None
         assert res[0]["default_int"] == default_int_value
         assert res[0]["nullable_varchar"] is None
@@ -3134,12 +3170,10 @@ class TestCreateImportJob(TestBase):
         assert result, f"Import job failed: {res}"
 
         # Verify data
-        c = Collection(name)
-        c.load(_refresh=True)
-        assert c.num_entities == num_entities
+        self._wait_for_count(name, num_entities)
 
         # Verify dynamic fields are stored
-        res = c.query(expr="id == 0", output_fields=["extra_str", "extra_int"])
+        res = self._query_rows(name, "id == 0", ["extra_str", "extra_int"])
         assert res[0]["extra_str"] == "dynamic_value_0"
         assert res[0]["extra_int"] == 1000
 
@@ -3189,12 +3223,10 @@ class TestCreateImportJob(TestBase):
         assert result, f"Import job failed: {res}"
 
         # Verify data
-        c = Collection(name)
-        c.load(_refresh=True)
-        assert c.num_entities == num_entities
+        self._wait_for_count(name, num_entities)
 
         # Verify dynamic fields are stored
-        res = c.query(expr="id == 0", output_fields=["extra_str", "extra_int"])
+        res = self._query_rows(name, "id == 0", ["extra_str", "extra_int"])
         assert res[0]["extra_str"] == "dynamic_value_0"
 
     def test_import_parquet_extra_fields_with_dynamic(self):
@@ -3246,12 +3278,10 @@ class TestCreateImportJob(TestBase):
         assert result, f"Import job failed: {res}"
 
         # Verify data
-        c = Collection(name)
-        c.load(_refresh=True)
-        assert c.num_entities == num_entities
+        self._wait_for_count(name, num_entities)
 
         # Verify dynamic fields are stored via $meta
-        res = c.query(expr="id == 0", output_fields=["extra_str", "extra_int"])
+        res = self._query_rows(name, "id == 0", ["extra_str", "extra_int"])
         assert res[0]["extra_str"] == "dynamic_value_0"
         assert res[0]["extra_int"] == 1000
 
@@ -3318,9 +3348,7 @@ class TestCreateImportJob(TestBase):
         assert result, f"Import job failed: {res}"
 
         # Verify data
-        c = Collection(name)
-        c.load(_refresh=True)
-        assert c.num_entities == num_entities
+        self._wait_for_count(name, num_entities)
 
     def test_import_csv_bm25_output_rejected_even_with_property(self):
         """Test CSV import with BM25 function output field is still rejected even with property enabled"""
@@ -3548,9 +3576,7 @@ class TestCreateImportJob(TestBase):
         assert result, f"Import job failed: {res}"
 
         # Verify data
-        c = Collection(name)
-        c.load(_refresh=True)
-        assert c.num_entities == num_entities
+        self._wait_for_count(name, num_entities)
 
     def test_import_parquet_bm25_output_rejected_even_with_property(self):
         """Test Parquet import with BM25 function output field is still rejected even with property enabled"""
@@ -3636,7 +3662,7 @@ class TestCreateImportJob(TestBase):
 
 
 @pytest.mark.tags(CaseLabel.L2)
-class TestImportJobAdvance(TestBase):
+class TestImportJobAdvance(RestImportTestBase):
     def test_job_import_recovery_after_chaos(self, release_name):
         # create collection
         name = gen_collection_name()
@@ -3721,12 +3747,10 @@ class TestImportJobAdvance(TestBase):
                 except Exception as e:
                     logger.error(f"get import job progress failed: {e}")
                     time.sleep(5)
-        time.sleep(10)
         rsp = self.import_job_client.list_import_jobs(payload)
+        assert rsp["code"] == 0, rsp
         # assert data count
-        c = Collection(name)
-        c.load(_refresh=True, timeou=120)
-        assert c.num_entities == file_nums * batch_size
+        self._wait_for_count(name, file_nums * batch_size)
         # assert import data can be queried
         payload = {
             "collectionName": name,
@@ -3740,7 +3764,7 @@ class TestImportJobAdvance(TestBase):
 
 
 @pytest.mark.tags(CaseLabel.L2)
-class TestCreateImportJobAdvance(TestBase):
+class TestCreateImportJobAdvance(RestImportTestBase):
     def test_job_import_with_multi_task_and_datanode(self, release_name):
         # create collection
         name = gen_collection_name()
@@ -3818,12 +3842,10 @@ class TestCreateImportJobAdvance(TestBase):
                 except Exception as e:
                     logger.error(f"get import job progress failed: {e}")
                     time.sleep(5)
-        time.sleep(10)
         rsp = self.import_job_client.list_import_jobs(payload)
+        assert rsp["code"] == 0, rsp
         # assert data count
-        c = Collection(name)
-        c.load(_refresh=True, timeou=120)
-        assert c.num_entities == file_nums * batch_size * task_num
+        self._wait_for_count(name, file_nums * batch_size * task_num)
         # assert import data can be queried
         payload = {
             "collectionName": name,
@@ -3912,12 +3934,10 @@ class TestCreateImportJobAdvance(TestBase):
                 except Exception as e:
                     logger.error(f"get import job progress failed: {e}")
                     time.sleep(5)
-        time.sleep(10)
         rsp = self.import_job_client.list_import_jobs(payload)
+        assert rsp["code"] == 0, rsp
         # assert data count
-        c = Collection(name)
-        c.load(_refresh=True, timeou=120)
-        assert c.num_entities == file_nums * batch_size * task_num
+        self._wait_for_count(name, file_nums * batch_size * task_num)
         # assert import data can be queried
         payload = {
             "collectionName": name,
@@ -3931,7 +3951,7 @@ class TestCreateImportJobAdvance(TestBase):
 
 
 @pytest.mark.tags(CaseLabel.L1)
-class TestCreateImportJobNegative(TestBase):
+class TestCreateImportJobNegative(RestImportTestBase):
     @pytest.mark.parametrize("insert_num", [2])
     @pytest.mark.parametrize("import_task_num", [1])
     @pytest.mark.parametrize("auto_id", [True])
@@ -4217,8 +4237,7 @@ class TestCreateImportJobNegative(TestBase):
         # wait import job to be completed
         res, result = self.import_job_client.wait_import_job_completed(job_id)
         assert result
-        c = Collection(name)
-        assert c.num_entities == 0
+        self._wait_for_count(name, 0)
 
     @pytest.mark.tags(CaseLabel.RBAC)
     def test_create_import_job_with_new_user(self):
@@ -4363,14 +4382,7 @@ class TestCreateImportJobNegative(TestBase):
                 time.sleep(5)
                 if time.time() - t0 > IMPORT_TIMEOUT:
                     assert False, "import job timeout"
-        c = Collection(name)
-        time.sleep(10)
-        c.load(_refresh=True, timeou=120)
-        res = c.query(
-            expr="",
-            output_fields=["count(*)"],
-        )
-        assert res[0]["count(*)"] == insert_num * import_task_num
+        self._wait_for_count(name, insert_num * import_task_num)
         # query data
         payload = {
             "collectionName": name,
@@ -4382,11 +4394,12 @@ class TestCreateImportJobNegative(TestBase):
 
 
 @pytest.mark.tags(CaseLabel.L1)
-class TestListImportJob(TestBase):
+class TestListImportJob(RestImportTestBase):
     def test_list_job_e2e(self):
         # create two db
-        self.create_database(db_name="db1")
-        self.create_database(db_name="db2")
+        db_names = [f"db1_{uuid4().hex[:8]}", f"db2_{uuid4().hex[:8]}"]
+        for db_name in db_names:
+            self._create_database(db_name)
 
         # create collection
         insert_num = 5000
@@ -4415,8 +4428,9 @@ class TestListImportJob(TestBase):
             },
             "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}],
         }
-        for db_name in ["db1", "db2"]:
+        for db_name in db_names:
             rsp = self.collection_client.collection_create(payload, db_name=db_name)
+            assert rsp["code"] == 0, rsp
 
         # upload file to storage
         data = []
@@ -4440,16 +4454,17 @@ class TestListImportJob(TestBase):
         self.storage_client.upload_file(file_path, file_name)
 
         # create import job
-        for db in ["db1", "db2"]:
+        for db_name in db_names:
             payload = {
                 "collectionName": name,
                 "files": [[file_name]],
             }
             for i in range(import_task_num):
-                rsp = self.import_job_client.create_import_jobs(payload, db_name=db)
+                rsp = self.import_job_client.create_import_jobs(payload, db_name=db_name)
+                assert rsp["code"] == 0, rsp
         # list import job
         payload = {}
-        for db_name in [None, "db1", "db2", "default"]:
+        for db_name in [None, *db_names, "default"]:
             try:
                 rsp = self.import_job_client.list_import_jobs(payload, db_name=db_name)
                 logger.info(f"job num: {len(rsp['data']['records'])}")
@@ -4458,11 +4473,12 @@ class TestListImportJob(TestBase):
 
 
 @pytest.mark.tags(CaseLabel.L1)
-class TestGetImportJobProgress(TestBase):
+class TestGetImportJobProgress(RestImportTestBase):
     def test_list_job_e2e(self):
         # create two db
-        self.create_database(db_name="db1")
-        self.create_database(db_name="db2")
+        db_names = [f"db1_{uuid4().hex[:8]}", f"db2_{uuid4().hex[:8]}"]
+        for db_name in db_names:
+            self._create_database(db_name)
 
         # create collection
         insert_num = 5000
@@ -4491,8 +4507,9 @@ class TestGetImportJobProgress(TestBase):
             },
             "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}],
         }
-        for db_name in ["db1", "db2"]:
+        for db_name in db_names:
             rsp = self.collection_client.collection_create(payload, db_name=db_name)
+            assert rsp["code"] == 0, rsp
 
         # upload file to storage
         data = []
@@ -4514,28 +4531,29 @@ class TestGetImportJobProgress(TestBase):
             json.dump(data, f, cls=NumpyEncoder)
         # upload file to minio storage
         self.storage_client.upload_file(file_path, file_name)
-        job_id_list = []
+        jobs = []
         # create import job
-        for db in ["db1", "db2"]:
+        for db_name in db_names:
             payload = {
                 "collectionName": name,
                 "files": [[file_name]],
             }
             for i in range(import_task_num):
-                rsp = self.import_job_client.create_import_jobs(payload, db_name=db)
-                job_id_list.append(rsp["data"]["jobId"])
+                rsp = self.import_job_client.create_import_jobs(payload, db_name=db_name)
+                assert rsp["code"] == 0, rsp
+                jobs.append((rsp["data"]["jobId"], db_name))
         time.sleep(5)
         # get import job progress
-        for job_id in job_id_list:
+        for job_id, db_name in jobs:
             try:
-                rsp = self.import_job_client.get_import_job_progress(job_id)
+                rsp = self.import_job_client.get_import_job_progress(job_id, db_name=db_name)
                 logger.info(f"job progress: {rsp}")
             except Exception as e:
                 logger.error(f"get import job progress failed: {e}")
 
 
 @pytest.mark.tags(CaseLabel.L1)
-class TestGetImportJobProgressNegative(TestBase):
+class TestGetImportJobProgressNegative(RestImportTestBase):
     def test_list_job_with_invalid_job_id(self):
         # get import job progress with invalid job id
         job_id_list = ["invalid_job_id", None]

@@ -81,15 +81,26 @@ class AzureChunkManagerTest : public testing::Test {
 
     virtual void
     SetUp() {
+        // This suite tests the legacy AzureChunkManager specifically; pin
+        // CreateChunkManager to the legacy path even when the suite-level
+        // ArrowFileSystem switch (MILVUS_USE_ARROW_FS_CHUNK_MANAGER) is on.
+        prev_use_arrow_fs_ = milvus::storage::UseArrowFileSystemChunkManager();
+        milvus::storage::SetUseArrowFileSystemChunkManager(false);
         configs_ = get_default_storage_config(false);
         chunk_manager_ = make_unique<AzureChunkManager>(configs_);
         chunk_manager_ptr_ = CreateChunkManager(configs_);
+    }
+
+    virtual void
+    TearDown() {
+        milvus::storage::SetUseArrowFileSystemChunkManager(prev_use_arrow_fs_);
     }
 
  protected:
     AzureChunkManagerPtr chunk_manager_;
     ChunkManagerPtr chunk_manager_ptr_;
     StorageConfig configs_;
+    bool prev_use_arrow_fs_ = false;
 };
 
 TEST_F(AzureChunkManagerTest, AzureLogger) {

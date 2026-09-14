@@ -2,6 +2,7 @@ package adaptor
 
 import (
 	"context"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -124,6 +125,54 @@ func TestAppendWaitingBehindAlterWALIsFenced(t *testing.T) {
 	defer mu.Unlock()
 	assert.Equal(t, []message.MessageType{message.MessageTypeAlterWAL}, appendedTypes)
 }
+
+func TestOversizedAppendWithSNChunkingDisabledUsesLegacySingleRecordPath(t *testing.T) {
+	var persisted atomic.Int32
+	walImpls := &chunkRetryTestWALImpls{firstTimeTickWALImpls: newFirstTimeTickWALImpls(
+		func(ctx context.Context, _ message.MutableMessage) (message.MessageID, error) {
+			persisted.Add(1)
+			return finishFenceTestAppend(ctx, 1), nil
+		},
+	)}
+	observer := &countingAppendInterceptor{}
+	w := newFenceTestWAL(t, walImpls, observer)
+
+	const chunkBudget = 2048
+	params := paramtable.Get()
+	oldSplitChunkSN := params.StreamingCfg.SplitChunkSN.SwapTempValue("false")
+	t.Cleanup(func() { params.StreamingCfg.SplitChunkSN.SwapTempValue(oldSplitChunkSN) })
+	maxMessageSizeKey := params.PulsarCfg.MaxMessageSize.Key
+	reserveSizeKey := params.PulsarCfg.MessageReserveSize.Key
+	require.NoError(t, params.Save(maxMessageSizeKey, strconv.Itoa(testMinWALMessageSize)))
+	require.NoError(t, params.Save(reserveSizeKey, strconv.Itoa(testMinWALMessageSize-chunkBudget)))
+	t.Cleanup(func() {
+		assert.NoError(t, params.Reset(reserveSizeKey))
+		assert.NoError(t, params.Reset(maxMessageSizeKey))
+	})
+
+	msg := newOversizedTestInsertMessage(t, chunkBudget).
+		WithTimeTick(100).
+		WithLastConfirmedUseMessageID()
+	_, err := w.Append(context.Background(), msg)
+	require.NoError(t, err)
+	assert.Equal(t, int32(1), observer.calls.Load())
+	assert.Equal(t, int32(1), persisted.Load())
+}
+
+type countingAppendInterceptor struct {
+	calls atomic.Int32
+}
+
+func (i *countingAppendInterceptor) DoAppend(
+	ctx context.Context,
+	msg message.MutableMessage,
+	append interceptors.Append,
+) (message.MessageID, error) {
+	i.calls.Add(1)
+	return append(ctx, msg)
+}
+
+func (i *countingAppendInterceptor) Close() {}
 
 type fenceTestGateInterceptor struct {
 	insertEntered chan struct{}

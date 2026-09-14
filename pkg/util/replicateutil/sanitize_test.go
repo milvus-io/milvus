@@ -158,3 +158,100 @@ func TestSanitizeReplicateConfiguration_PreservesClusterIDs(t *testing.T) {
 	assert.Equal(t, "token-a", config.Clusters[0].ConnectionParam.Token)
 	assert.Equal(t, "token-b", config.Clusters[1].ConnectionParam.Token)
 }
+
+func TestFillRedactedConnectionTokens(t *testing.T) {
+	current := &commonpb.ReplicateConfiguration{
+		Clusters: []*commonpb.MilvusCluster{
+			{
+				ClusterId:       "cluster-1",
+				ConnectionParam: &commonpb.ConnectionParam{Uri: "localhost:19530", Token: "secret-token-1"},
+				Pchannels:       []string{"channel-1"},
+			},
+			{
+				ClusterId:       "cluster-2",
+				ConnectionParam: &commonpb.ConnectionParam{Uri: "localhost:19531", Token: "secret-token-2"},
+				Pchannels:       []string{"channel-1"},
+			},
+		},
+	}
+
+	t.Run("redacted tokens are taken from the stored configuration", func(t *testing.T) {
+		incoming := SanitizeReplicateConfiguration(current)
+		filled := FillRedactedConnectionTokens(incoming, current)
+		assert.Equal(t, "secret-token-1", filled.Clusters[0].ConnectionParam.Token)
+		assert.Equal(t, "secret-token-2", filled.Clusters[1].ConnectionParam.Token)
+		// The caller's configuration is not modified.
+		assert.Empty(t, incoming.Clusters[0].ConnectionParam.Token)
+	})
+
+	t.Run("a token the caller supplied is left alone", func(t *testing.T) {
+		incoming := SanitizeReplicateConfiguration(current)
+		incoming.Clusters[0].ConnectionParam.Token = "a-different-token"
+		filled := FillRedactedConnectionTokens(incoming, current)
+		assert.Equal(t, "a-different-token", filled.Clusters[0].ConnectionParam.Token)
+		assert.Equal(t, "secret-token-2", filled.Clusters[1].ConnectionParam.Token)
+	})
+
+	t.Run("a cluster that is not in the stored configuration is left alone", func(t *testing.T) {
+		incoming := &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{
+				{
+					ClusterId:       "cluster-3",
+					ConnectionParam: &commonpb.ConnectionParam{Uri: "localhost:19532"},
+				},
+			},
+		}
+		filled := FillRedactedConnectionTokens(incoming, current)
+		assert.Empty(t, filled.Clusters[0].ConnectionParam.Token)
+	})
+
+	t.Run("nil arguments and empty stored tokens are passed through", func(t *testing.T) {
+		assert.Nil(t, FillRedactedConnectionTokens(nil, current))
+		incoming := SanitizeReplicateConfiguration(current)
+		assert.Same(t, incoming, FillRedactedConnectionTokens(incoming, nil))
+		assert.Same(t, incoming, FillRedactedConnectionTokens(incoming, SanitizeReplicateConfiguration(current)))
+	})
+
+	t.Run("a nil connection param is left alone", func(t *testing.T) {
+		incoming := &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{{ClusterId: "cluster-1"}},
+		}
+		filled := FillRedactedConnectionTokens(incoming, current)
+		assert.Nil(t, filled.Clusters[0].ConnectionParam)
+	})
+}
+
+// A configuration that was read back from the cluster must be writable again.
+// The read redacts the connection tokens, and the validator requires connection
+// parameters to be unchanged, so the two together used to make the
+// read-modify-write round trip impossible.
+func TestValidateConfigurationReadBackFromTheCluster(t *testing.T) {
+	current := createValidValidatorConfig()
+	pchannels := []string{"channel-1", "channel-2"}
+
+	t.Run("rejected without the tokens being restored", func(t *testing.T) {
+		incoming := SanitizeReplicateConfiguration(current)
+		err := NewReplicateConfigValidator(incoming, current, "cluster-1", pchannels).Validate()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "connection_param.token cannot be changed")
+	})
+
+	t.Run("accepted once the tokens are restored", func(t *testing.T) {
+		incoming := FillRedactedConnectionTokens(SanitizeReplicateConfiguration(current), current)
+		assert.NoError(t, NewReplicateConfigValidator(incoming, current, "cluster-1", pchannels).Validate())
+	})
+
+	t.Run("the topology can be edited on the round trip", func(t *testing.T) {
+		incoming := FillRedactedConnectionTokens(SanitizeReplicateConfiguration(current), current)
+		incoming.CrossClusterTopology = nil
+		assert.NoError(t, NewReplicateConfigValidator(incoming, current, "cluster-1", pchannels).Validate())
+	})
+
+	t.Run("changing a token is still rejected", func(t *testing.T) {
+		incoming := FillRedactedConnectionTokens(SanitizeReplicateConfiguration(current), current)
+		incoming.Clusters[0].ConnectionParam.Token = "a-new-token"
+		err := NewReplicateConfigValidator(incoming, current, "cluster-1", pchannels).Validate()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "connection_param.token cannot be changed")
+	})
+}

@@ -116,9 +116,10 @@ BsonInvertedIndex::LoadIndex(const std::vector<std::string>& index_files,
         // index_files are absolute remote paths (basePath already prepended by caller)
         disk_file_manager_->CacheJsonStatsSharedIndexToDisk(index_files,
                                                             priority);
-        AssertInfo(tantivy_index_exist(path_.c_str()),
-                   "index dir not exist: {}",
-                   path_);
+        if (!(tantivy_index_exist(path_.c_str()))) {
+            ThrowInfo(
+                ErrorCode::DataFormatBroken, "index dir not exist: {}", path_);
+        }
         wrapper_ = std::make_shared<TantivyIndexWrapper>(
             path_.c_str(), load_in_mmap, milvus::index::SetBitsetUnused);
         if (!load_in_mmap) {
@@ -152,9 +153,11 @@ BsonInvertedIndex::UploadIndex() {
             LOG_WARN("{} is a directory", file_path);
         } else {
             LOG_INFO("trying to add bson inverted index file: {}", file_path);
-            AssertInfo(disk_file_manager_->AddJsonSharedIndexLog(file_path),
-                       "failed to add bson inverted index file: {}",
-                       file_path);
+            if (!(disk_file_manager_->AddJsonSharedIndexLog(file_path))) {
+                ThrowInfo(ErrorCode::FileWriteFailed,
+                          "failed to add bson inverted index file: {}",
+                          file_path);
+            }
             LOG_INFO("bson inverted index file: {} added", file_path);
         }
     }

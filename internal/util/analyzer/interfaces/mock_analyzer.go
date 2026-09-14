@@ -107,7 +107,7 @@ func (_c *MockAnalyzer_Destroy_Call) RunAndReturn(run func()) *MockAnalyzer_Dest
 }
 
 // NewTokenStream provides a mock function with given fields: text
-func (_m *MockAnalyzer) NewTokenStream(text string) TokenStream {
+func (_m *MockAnalyzer) NewTokenStream(text string) (TokenStream, error) {
 	ret := _m.Called(text)
 
 	if len(ret) == 0 {
@@ -115,6 +115,10 @@ func (_m *MockAnalyzer) NewTokenStream(text string) TokenStream {
 	}
 
 	var r0 TokenStream
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) (TokenStream, error)); ok {
+		return rf(text)
+	}
 	if rf, ok := ret.Get(0).(func(string) TokenStream); ok {
 		r0 = rf(text)
 	} else {
@@ -123,7 +127,13 @@ func (_m *MockAnalyzer) NewTokenStream(text string) TokenStream {
 		}
 	}
 
-	return r0
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(text)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
 }
 
 // MockAnalyzer_NewTokenStream_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'NewTokenStream'
@@ -144,12 +154,12 @@ func (_c *MockAnalyzer_NewTokenStream_Call) Run(run func(text string)) *MockAnal
 	return _c
 }
 
-func (_c *MockAnalyzer_NewTokenStream_Call) Return(_a0 TokenStream) *MockAnalyzer_NewTokenStream_Call {
-	_c.Call.Return(_a0)
+func (_c *MockAnalyzer_NewTokenStream_Call) Return(_a0 TokenStream, _a1 error) *MockAnalyzer_NewTokenStream_Call {
+	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockAnalyzer_NewTokenStream_Call) RunAndReturn(run func(string) TokenStream) *MockAnalyzer_NewTokenStream_Call {
+func (_c *MockAnalyzer_NewTokenStream_Call) RunAndReturn(run func(string) (TokenStream, error)) *MockAnalyzer_NewTokenStream_Call {
 	_c.Call.Return(run)
 	return _c
 }

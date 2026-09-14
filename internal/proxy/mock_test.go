@@ -23,13 +23,11 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/pkg/v3/mq/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
@@ -93,145 +91,6 @@ func (m *mockIDAllocatorInterface) Alloc(count uint32) (UniqueID, UniqueID, erro
 
 func newMockIDAllocatorInterface() allocator.Interface {
 	return &mockIDAllocatorInterface{}
-}
-
-type mockTask struct {
-	baseTask
-	*TaskCondition
-	id    UniqueID
-	name  string
-	tType commonpb.MsgType
-	ts    Timestamp
-}
-
-func (m *mockTask) CanSkipAllocTimestamp() bool {
-	return false
-}
-
-func (m *mockTask) TraceCtx() context.Context {
-	return m.ctx
-}
-
-func (m *mockTask) ID() UniqueID {
-	return m.id
-}
-
-func (m *mockTask) SetID(uid UniqueID) {
-	m.id = uid
-}
-
-func (m *mockTask) Name() string {
-	return m.name
-}
-
-func (m *mockTask) Type() commonpb.MsgType {
-	return m.tType
-}
-
-func (m *mockTask) BeginTs() Timestamp {
-	return m.ts
-}
-
-func (m *mockTask) EndTs() Timestamp {
-	return m.ts
-}
-
-func (m *mockTask) SetTs(ts Timestamp) {
-	m.ts = ts
-}
-
-func (m *mockTask) OnEnqueue() error {
-	return nil
-}
-
-func (m *mockTask) PreExecute(ctx context.Context) error {
-	return nil
-}
-
-func (m *mockTask) Execute(ctx context.Context) error {
-	return nil
-}
-
-func (m *mockTask) PostExecute(ctx context.Context) error {
-	return nil
-}
-
-func newMockTask(ctx context.Context) *mockTask {
-	return &mockTask{
-		TaskCondition: NewTaskCondition(ctx),
-		id:            UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
-		name:          funcutil.GenRandomStr(),
-		tType:         commonpb.MsgType_Undefined,
-		ts:            Timestamp(time.Now().Nanosecond()),
-	}
-}
-
-func newDefaultMockTask() *mockTask {
-	return newMockTask(context.Background())
-}
-
-type mockDdlTask struct {
-	*mockTask
-}
-
-func newMockDdlTask(ctx context.Context) *mockDdlTask {
-	return &mockDdlTask{
-		mockTask: newMockTask(ctx),
-	}
-}
-
-func newDefaultMockDdlTask() *mockDdlTask {
-	return newMockDdlTask(context.Background())
-}
-
-type mockDmlTask struct {
-	*mockTask
-	vchans []vChan
-	pchans []pChan
-}
-
-func (m *mockDmlTask) setChannels() error {
-	return nil
-}
-
-func (m *mockDmlTask) getChannels() []vChan {
-	return m.vchans
-}
-
-func newMockDmlTask(ctx context.Context) *mockDmlTask {
-	shardNum := 2
-
-	vchans := make([]vChan, 0, shardNum)
-	pchans := make([]pChan, 0, shardNum)
-
-	for i := 0; i < shardNum; i++ {
-		vchans = append(vchans, funcutil.GenRandomStr())
-		pchans = append(pchans, funcutil.GenRandomStr())
-	}
-
-	return &mockDmlTask{
-		mockTask: newMockTask(ctx),
-		vchans:   vchans,
-		pchans:   pchans,
-	}
-}
-
-func newDefaultMockDmlTask() *mockDmlTask {
-	return newMockDmlTask(context.Background())
-}
-
-type mockDqlTask struct {
-	*mockTask
-}
-
-func newMockDqlTask(ctx context.Context) *mockDqlTask {
-	return &mockDqlTask{
-		mockTask: newMockTask(ctx),
-	}
-}
-
-func newDefaultMockDqlTask() *mockDqlTask {
-	return newMockDqlTask(context.Background())
 }
 
 type simpleMockMsgStream struct {

@@ -53,7 +53,6 @@ func TestGetServerIDConcurrently(t *testing.T) {
 	res := make([]int64, 0)
 
 	getIDFunc := func() {
-		s.checkIDExist()
 		id, err := s.getServerID()
 		assert.NoError(t, err)
 		muList.Lock()
