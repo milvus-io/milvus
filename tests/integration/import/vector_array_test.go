@@ -316,11 +316,13 @@ func (s *BulkInsertSuite) TestImportWithVectorArray() {
 
 	for _, fileType := range fileTypeArr {
 		for _, vtConfig := range vectorTypeConfigs {
-			s.fileType = fileType
-			s.vecType = vtConfig.vecType
-			s.indexType = vtConfig.indexType
-			s.metricType = vtConfig.metricType
-			s.runForStructArray()
+			s.Run(fmt.Sprintf("%s/%s", fileType, vtConfig.vecType), func() {
+				s.fileType = fileType
+				s.vecType = vtConfig.vecType
+				s.indexType = vtConfig.indexType
+				s.metricType = vtConfig.metricType
+				s.runForStructArray()
+			})
 		}
 	}
 }
