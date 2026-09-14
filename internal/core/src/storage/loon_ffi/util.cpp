@@ -620,9 +620,8 @@ InjectExternalSpecProperties(
         }
         auto endpoint_scheme_end = effective_endpoint.find("://");
         AssertInfo(endpoint_scheme_end != std::string::npos,
-                   "extfs.endpoint_url for collection {} missing scheme: {}",
-                   collection_id,
-                   spec_endpoint_url);
+                   "extfs.endpoint_url for collection {} missing scheme",
+                   collection_id);
         std::string endpoint_scheme =
             effective_endpoint.substr(0, endpoint_scheme_end);
         std::transform(endpoint_scheme.begin(),
@@ -631,18 +630,21 @@ InjectExternalSpecProperties(
                        [](unsigned char c) { return std::tolower(c); });
         AssertInfo(endpoint_scheme == "http" || endpoint_scheme == "https",
                    "extfs.endpoint_url for collection {} must use http or "
-                   "https: {}",
-                   collection_id,
-                   spec_endpoint_url);
+                   "https",
+                   collection_id);
         std::string endpoint_authority =
             effective_endpoint.substr(endpoint_scheme_end + 3);
         AssertInfo(
             !endpoint_authority.empty() &&
                 endpoint_authority.find_first_of("/@?#") == std::string::npos,
             "extfs.endpoint_url for collection {} must contain only "
-            "scheme and authority: {}",
-            collection_id,
-            spec_endpoint_url);
+            "scheme and authority",
+            collection_id);
+        AssertInfo(
+            host.find(':') == std::string::npos,
+            "external_source host for collection {} must be a bucket name "
+            "without a port when extfs.endpoint_url is set",
+            collection_id);
 
         effective_endpoint = endpoint_scheme + "://" + endpoint_authority;
         milvus_storage::api::SetValue(properties,

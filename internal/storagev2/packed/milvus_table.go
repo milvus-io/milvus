@@ -232,7 +232,7 @@ func ReadMilvusTableSnapshotMetadata(
 	if err != nil {
 		return nil, err
 	}
-	metadataBytes, err := ReadFileWithExternalSpec(
+	metadataBytes, err := readExternalSourceFile(
 		storageConfig,
 		metadataPath,
 		milvusTableReadFileExtfs(externalSource, extfs),
