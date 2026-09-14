@@ -29,8 +29,6 @@ struct ArrowSchema;
 struct ArrowArray;
 
 typedef void* CPackedReader;
-typedef void* CArrowArray;
-typedef void* CArrowSchema;
 
 CStatus
 NewPackedReaderWithStorageConfig(char** paths,
@@ -72,13 +70,15 @@ NewPackedReader(char** paths,
  *        By default, the maximum return batch is 1024 rows.
  *
  * @param c_packed_reader The packed reader to read.
- * @param out_array The output pointer of the arrow array.
- * @param out_schema The output pointer of the arrow schema.
+ * @param out_array Caller-owned array, with release == nullptr on entry.
+ *                  A null release callback on success indicates end of stream.
+ * @param out_schema Caller-owned schema, with release == nullptr on entry.
+ *                   The caller releases both outputs, including on failure.
  */
 CStatus
 ReadNext(CPackedReader c_packed_reader,
-         CArrowArray* out_array,
-         CArrowSchema* out_schema);
+         struct ArrowArray* out_array,
+         struct ArrowSchema* out_schema);
 
 /**
  * @brief Close the packed reader and release the resources.

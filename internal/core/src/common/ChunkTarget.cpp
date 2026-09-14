@@ -30,6 +30,17 @@ MmapChunkTarget::~MmapChunkTarget() {
     }
 }
 
+MemChunkTarget::~MemChunkTarget() {
+    if (data_ != nullptr) {
+        munmap(data_, cap_);
+    }
+}
+
+void
+MemChunkTarget::TransferOwnership() noexcept {
+    data_ = nullptr;
+}
+
 void
 MemChunkTarget::write(const void* data, size_t size) {
     AssertInfo(size + size_ <= cap_, "can not exceed target capacity");

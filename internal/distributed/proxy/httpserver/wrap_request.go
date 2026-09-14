@@ -331,7 +331,7 @@ func (f *FieldData) AsSchemapb() (*schemapb.FieldData, error) {
 		if len(wrappedData) < 1 {
 			return nil, merr.WrapErrParameterInvalidMsg("at least one row for insert")
 		}
-		data := make([][]byte, len(wrappedData))
+		data := make([][]byte, 0, len(wrappedData))
 		dim := int64(0)
 		for _, row := range wrappedData {
 			rowData, err := typeutil.CreateSparseFloatRowFromMap(row)
