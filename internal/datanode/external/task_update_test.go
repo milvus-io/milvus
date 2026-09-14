@@ -1325,7 +1325,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_NewFragmentsAd
 
 func (s *RefreshExternalCollectionTaskSuite) TestSplitFileToFragments_SmallFile() {
 	// File smaller than limit - should return single fragment
-	fragments := packed.SplitFileToFragments("/data/small.parquet", 500000, packed.DefaultFragmentRowLimit, packed.NewFragmentIDGenerator(0))
+	fragments := packed.SplitFileToFragments("/data/small.parquet", 500000, packed.DefaultFragmentRowLimit, nil, packed.NewFragmentIDGenerator(0))
 
 	s.Len(fragments, 1)
 	s.Equal(int64(0), fragments[0].FragmentID)
@@ -1337,7 +1337,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestSplitFileToFragments_SmallFile(
 
 func (s *RefreshExternalCollectionTaskSuite) TestSplitFileToFragments_ExactLimit() {
 	// File exactly at limit - should return single fragment
-	fragments := packed.SplitFileToFragments("/data/exact.parquet", packed.DefaultFragmentRowLimit, packed.DefaultFragmentRowLimit, packed.NewFragmentIDGenerator(0))
+	fragments := packed.SplitFileToFragments("/data/exact.parquet", packed.DefaultFragmentRowLimit, packed.DefaultFragmentRowLimit, nil, packed.NewFragmentIDGenerator(0))
 
 	s.Len(fragments, 1)
 	s.Equal(int64(0), fragments[0].FragmentID)
@@ -1349,7 +1349,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestSplitFileToFragments_ExactLimit
 func (s *RefreshExternalCollectionTaskSuite) TestSplitFileToFragments_LargeFile() {
 	// File with 2.5 million rows - should split into 3 fragments
 	totalRows := int64(2500000)
-	fragments := packed.SplitFileToFragments("/data/large.parquet", totalRows, packed.DefaultFragmentRowLimit, packed.NewFragmentIDGenerator(0))
+	fragments := packed.SplitFileToFragments("/data/large.parquet", totalRows, packed.DefaultFragmentRowLimit, nil, packed.NewFragmentIDGenerator(0))
 
 	s.Len(fragments, 3)
 
@@ -1377,7 +1377,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestSplitFileToFragments_LargeFile(
 
 func (s *RefreshExternalCollectionTaskSuite) TestSplitFileToFragments_BaseFragmentID() {
 	// Test with non-zero base fragment ID
-	fragments := packed.SplitFileToFragments("/data/test.parquet", 2500000, packed.DefaultFragmentRowLimit, packed.NewFragmentIDGenerator(100))
+	fragments := packed.SplitFileToFragments("/data/test.parquet", 2500000, packed.DefaultFragmentRowLimit, nil, packed.NewFragmentIDGenerator(100))
 
 	s.Len(fragments, 3)
 	s.Equal(int64(100), fragments[0].FragmentID)
@@ -1387,7 +1387,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestSplitFileToFragments_BaseFragme
 
 func (s *RefreshExternalCollectionTaskSuite) TestSplitFileToFragments_ZeroRows() {
 	// Empty file - should return single fragment with zero rows
-	fragments := packed.SplitFileToFragments("/data/empty.parquet", 0, packed.DefaultFragmentRowLimit, packed.NewFragmentIDGenerator(0))
+	fragments := packed.SplitFileToFragments("/data/empty.parquet", 0, packed.DefaultFragmentRowLimit, nil, packed.NewFragmentIDGenerator(0))
 
 	s.Len(fragments, 1)
 	s.Equal(int64(0), fragments[0].RowCount)
@@ -1396,7 +1396,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestSplitFileToFragments_ZeroRows()
 func (s *RefreshExternalCollectionTaskSuite) TestSplitFileToFragments_TenMillionRows() {
 	// 10 million rows - should split into 10 fragments
 	totalRows := int64(10000000)
-	fragments := packed.SplitFileToFragments("/data/huge.parquet", totalRows, packed.DefaultFragmentRowLimit, packed.NewFragmentIDGenerator(0))
+	fragments := packed.SplitFileToFragments("/data/huge.parquet", totalRows, packed.DefaultFragmentRowLimit, nil, packed.NewFragmentIDGenerator(0))
 
 	s.Len(fragments, 10)
 
