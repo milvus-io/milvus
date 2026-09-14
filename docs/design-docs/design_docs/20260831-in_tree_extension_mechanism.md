@@ -67,10 +67,13 @@ A distribution calls the setters it needs, then `cmd/milvus.Main(os.Args)`.
 ### The request hook
 
 `hook.Hook` (milvus-proto) is consulted by the proxy's unary interceptor for
-every RPC on both the gRPC and the REST surface, and by `CreateReplicateStream`,
-which is a stream and so consults it by hand - the same way, `Mock`, `Before`
-and `After` in order, with an empty `ReplicateRequest` as the request and the
-stream run under the context `Before` returned. A compiled-in hook that also
+every RPC on both the gRPC and the REST surface, and by the service's two
+streams, `CreateReplicateStream` and `DumpMessages`, which consult it by hand -
+the same way, `Mock`, `Before` and `After` in order, with the stream's request
+(`DumpMessagesRequest`, or an empty `ReplicateRequest` for the replicate
+stream, which carries none of its own) and the stream run under the context
+`Before` returned. A test fails as soon as the service declares a stream that
+does not consult it. A compiled-in hook that also
 implements `hook.Extension` is stored as the extension, so `Report` and
 `ReportAction` reach it as they reach a plug-in's `MilvusExtension`.
 `Mock` answers without forwarding, `Before` may rewrite the request in place,
@@ -316,7 +319,8 @@ them through `user.yaml` or the environment.
   absent by default, initialized with the `autoIndex.params.*` configuration,
   and not installed when it cannot initialize.
 - proxy: a hook-pinned resource group reaches the search task; per-resource-
-  group latency series exist only for pinned requests.
+  group latency series exist only for pinned requests; both streams consult
+  the hook, and every stream the service declares is one of them.
 - mixcoord: the engine starts on activation only, receives the coordinator
   client, and is stopped once.
 - querycoord / datacoord: each hook-gated behavior with and without a form
