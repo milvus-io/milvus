@@ -32,7 +32,7 @@ class FieldChunkMetricsTranslatorFromStatistics
         int64_t segment_id,
         FieldId field_id,
         milvus::DataType data_type,
-        std::vector<std::shared_ptr<parquet::Statistics>> statistics)
+        const std::vector<std::shared_ptr<parquet::Statistics>>& statistics)
         : key_(fmt::format("skip_seg_{}_f_{}", segment_id, field_id.get())),
           data_type_(data_type),
           meta_(cachinglayer::StorageType::MEMORY,
@@ -500,7 +500,7 @@ class SkipIndex {
         int64_t segment_id,
         milvus::FieldId field_id,
         milvus::DataType data_type,
-        std::vector<std::shared_ptr<parquet::Statistics>> statistics) {
+        const std::vector<std::shared_ptr<parquet::Statistics>>& statistics) {
         auto translator =
             std::make_unique<FieldChunkMetricsTranslatorFromStatistics>(
                 segment_id, field_id, data_type, statistics);

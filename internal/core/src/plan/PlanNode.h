@@ -56,7 +56,7 @@ class PlanNode {
     virtual RowTypePtr
     output_type() const = 0;
 
-    virtual std::vector<std::shared_ptr<PlanNode>>
+    virtual const std::vector<std::shared_ptr<PlanNode>>&
     sources() const = 0;
 
     virtual std::string
@@ -103,7 +103,7 @@ class IterativeFilterNode : public PlanNode {
         return RowType::None;
     }
 
-    std::vector<PlanNodePtr>
+    const std::vector<PlanNodePtr>&
     sources() const override {
         return sources_;
     }
@@ -148,7 +148,7 @@ class FilterBitsNode : public PlanNode {
         return RowType::None;
     }
 
-    std::vector<PlanNodePtr>
+    const std::vector<PlanNodePtr>&
     sources() const override {
         return sources_;
     }
@@ -205,7 +205,7 @@ class IterativeElementFilterNode : public PlanNode {
         return RowType::None;
     }
 
-    std::vector<PlanNodePtr>
+    const std::vector<PlanNodePtr>&
     sources() const override {
         return sources_;
     }
@@ -270,7 +270,7 @@ class ElementFilterBitsNode : public PlanNode {
         return RowType::None;
     }
 
-    std::vector<PlanNodePtr>
+    const std::vector<PlanNodePtr>&
     sources() const override {
         return sources_;
     }
@@ -325,7 +325,7 @@ class ProjectNode : public PlanNode {
                                                  std::move(field_types))) {
     }
 
-    std::vector<PlanNodePtr>
+    const std::vector<PlanNodePtr>&
     sources() const override {
         return sources_;
     }
@@ -369,7 +369,7 @@ class MvccNode : public PlanNode {
         return RowType::None;
     }
 
-    std::vector<PlanNodePtr>
+    const std::vector<PlanNodePtr>&
     sources() const override {
         return sources_;
     }
@@ -402,7 +402,7 @@ class RandomSampleNode : public PlanNode {
         return RowType::None;
     }
 
-    std::vector<PlanNodePtr>
+    const std::vector<PlanNodePtr>&
     sources() const override {
         return sources_;
     }
@@ -440,7 +440,7 @@ class VectorSearchNode : public PlanNode {
         return RowType::None;
     }
 
-    std::vector<PlanNodePtr>
+    const std::vector<PlanNodePtr>&
     sources() const override {
         return sources_;
     }
@@ -473,7 +473,7 @@ class SearchGroupByNode : public PlanNode {
         return RowType::None;
     }
 
-    std::vector<PlanNodePtr>
+    const std::vector<PlanNodePtr>&
     sources() const override {
         return sources_;
     }
@@ -513,7 +513,7 @@ class RescoresNode : public PlanNode {
             std::vector<milvus::DataType>{DataType::INT64});
     }
 
-    std::vector<PlanNodePtr>
+    const std::vector<PlanNodePtr>&
     sources() const override {
         return sources_;
     }
@@ -572,7 +572,7 @@ class AggregationNode : public PlanNode {
         return output_type_;
     }
 
-    std::vector<PlanNodePtr>
+    const std::vector<PlanNodePtr>&
     sources() const override {
         return sources_;
     }
@@ -669,7 +669,7 @@ class OrderByNode : public PlanNode {
         return output_type_;
     }
 
-    std::vector<PlanNodePtr>
+    const std::vector<PlanNodePtr>&
     sources() const override {
         return sources_;
     }

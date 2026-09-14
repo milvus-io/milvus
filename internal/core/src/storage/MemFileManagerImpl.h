@@ -69,7 +69,7 @@ class MemFileManagerImpl : public FileManagerImpl {
     bool
     AddTextLog(const BinarySet& binary_set);
 
-    std::map<std::string, int64_t>
+    const std::map<std::string, int64_t>&
     GetRemotePathsToFileSize() const {
         return remote_paths_to_size_;
     }

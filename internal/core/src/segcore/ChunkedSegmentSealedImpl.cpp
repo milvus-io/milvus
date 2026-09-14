@@ -2786,7 +2786,7 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                                    segment_load_info,
                                    schema_snapshot,
                                    runtime,
-                                   statistics_opt,
+                                   std::move(statistics_opt),
                                    op_ctx,
                                    is_replace);
             if (field_id == TimestampFieldID) {
@@ -2940,7 +2940,7 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                                    segment_load_info,
                                    schema_snapshot,
                                    nullptr,
-                                   statistics_opt,
+                                   std::move(statistics_opt),
                                    op_ctx,
                                    is_replace,
                                    &committer);
@@ -3085,7 +3085,7 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
 
             storage::SortByPath(file_infos);
 
-            auto field_meta = schema_snapshot->operator[](field_id);
+            const auto& field_meta = schema_snapshot->operator[](field_id);
             if (field_meta.is_nested_array() &&
                 load_info.storage_version < STORAGE_V2) {
                 ThrowInfo(ErrorCode::Unsupported,
@@ -3254,7 +3254,7 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
 
             storage::SortByPath(file_infos);
 
-            auto field_meta = schema_snapshot->operator[](field_id);
+            const auto& field_meta = schema_snapshot->operator[](field_id);
             if (field_meta.is_nested_array() &&
                 load_info.storage_version < STORAGE_V2) {
                 ThrowInfo(ErrorCode::Unsupported,

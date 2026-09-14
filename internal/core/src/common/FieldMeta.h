@@ -315,7 +315,7 @@ class FieldMeta {
         return default_value_.has_value();
     }
 
-    std::optional<DefaultValueType>
+    const std::optional<DefaultValueType>&
     default_value() const {
         return default_value_;
     }

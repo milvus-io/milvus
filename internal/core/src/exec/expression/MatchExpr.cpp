@@ -248,7 +248,7 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     SetHasOffsetInput(input != nullptr);
 
     auto schema = segment_->get_schema_snapshot();
-    auto field_meta =
+    const auto& field_meta =
         schema->GetFirstArrayFieldInStruct(expr_->get_struct_name());
 
     auto array_offsets = segment_->GetArrayOffsets(field_meta.get_id());

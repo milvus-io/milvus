@@ -72,7 +72,7 @@ class IndexEntryReader {
         return stream_load_info_;
     }
 
-    std::vector<std::string>
+    const std::vector<std::string>&
     GetEntryNames() const;
 
     Entry

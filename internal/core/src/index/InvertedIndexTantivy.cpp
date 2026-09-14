@@ -187,11 +187,12 @@ InvertedIndexTantivy<T>::Upload(const Config& config) {
         }
     }
 
-    auto remote_paths_to_size = disk_file_manager_->GetRemotePathsToFileSize();
+    const auto& remote_paths_to_size =
+        disk_file_manager_->GetRemotePathsToFileSize();
 
     auto binary_set = Serialize(config);
     this->file_manager_->AddFile(binary_set);
-    auto remote_mem_path_to_size =
+    const auto& remote_mem_path_to_size =
         this->file_manager_->GetRemotePathsToFileSize();
 
     std::vector<SerializedIndexFileInfo> index_files;
@@ -224,7 +225,7 @@ InvertedIndexTantivy<T>::Load(milvus::tracer::TraceContext ctx,
         GetValueFromConfig<std::vector<std::string>>(config, INDEX_FILES);
     AssertInfo(index_files.has_value(),
                "index file paths is empty when load disk ann index data");
-    auto inverted_index_files = index_files.value();
+    auto& inverted_index_files = index_files.value();
 
     // TODO: remove this log when #45590 is solved
     auto segment_id = disk_file_manager_->GetFieldDataMeta().segment_id;

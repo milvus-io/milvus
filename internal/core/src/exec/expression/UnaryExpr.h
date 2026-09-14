@@ -633,7 +633,9 @@ struct UnaryIndexFuncForMatch {
         std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
     using Index = index::ScalarIndex<IndexInnerType>;
     TargetBitmap
-    operator()(Index* index, IndexInnerType val, proto::plan::OpType op) {
+    operator()(Index* index,
+               const IndexInnerType& val,
+               proto::plan::OpType op) {
         AssertInfo(op == proto::plan::OpType::Match ||
                        op == proto::plan::OpType::PostfixMatch ||
                        op == proto::plan::OpType::InnerMatch ||
@@ -691,7 +693,7 @@ struct UnaryIndexFunc {
         std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
     using Index = index::ScalarIndex<IndexInnerType>;
     TargetBitmap
-    operator()(Index* index, IndexInnerType val) {
+    operator()(Index* index, const IndexInnerType& val) {
         if constexpr (op == proto::plan::OpType::Equal) {
             return index->In(1, &val);
         } else if constexpr (op == proto::plan::OpType::NotEqual) {
@@ -960,7 +962,7 @@ class ShreddingArrayBsonExecutor {
 class PhyUnaryRangeFilterExpr : public SegmentExpr {
  public:
     PhyUnaryRangeFilterExpr(
-        const std::vector<std::shared_ptr<Expr>>& input,
+        std::vector<std::shared_ptr<Expr>> input,
         const std::shared_ptr<const milvus::expr::UnaryRangeFilterExpr>& expr,
         const std::string& name,
         milvus::OpContext* op_ctx,
@@ -998,7 +1000,7 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
             // try to pin ngram index for json
             auto field_id = expr_->column_.field_id_;
             auto schema = segment->get_schema_snapshot();
-            auto field_meta = (*schema)[field_id];
+            const auto& field_meta = (*schema)[field_id];
 
             if (field_meta.is_json()) {
                 auto pointer =

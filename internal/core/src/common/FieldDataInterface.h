@@ -552,6 +552,14 @@ class FieldDataImpl : public FieldDataBase {
     }
 
  protected:
+    // Consume decoded ARRAY rows. Nullable VECTOR_ARRAY input contains only
+    // valid rows; ordinary ARRAY input retains one slot per logical row.
+    void
+    AppendOwnedRows(std::vector<Type>&& values,
+                    const std::shared_ptr<arrow::Array>& array)
+        requires(std::is_same_v<Type, Array> ||
+                 std::is_same_v<Type, VectorArray>);
+
     FixedVector<Type> data_{};
     FixedVector<uint8_t> valid_data_{};
     // number of elements data_ can hold
