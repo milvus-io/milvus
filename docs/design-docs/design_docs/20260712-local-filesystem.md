@@ -709,6 +709,32 @@ Business owners hold actual usage references. The low-level retirement
 reservation in section 4.3 protects creation/cleanup races independently of
 normal business acquisition.
 
+For each independently closable directory scope, `DiskFileManager` keeps a
+`closed` flag initialized to false, its `DirectoryPtr`, and a mutex (reusing
+existing business synchronization where available). `closed` belongs to the
+business scope; it does not close the shared `Directory` for other consumers.
+
+1. **Admission:** under the mutex, reject a closed scope or copy its directory
+   reference into the new task's ownership. Check and copy are one synchronized
+   operation; an atomic `closed` check alone is insufficient. Submit outside
+   the lock. Submission failure releases the acquired reference outside the lock.
+2. **Close:** under the same mutex, set `closed = true` and move the business
+   directory reference out of the scope. Release it after unlocking, since final
+   release may run cleanup. Repeated close is harmless. Tasks admitted before
+   close remain valid and may enqueue or run after close; closing this scope
+   neither cancels them nor waits for their completion.
+3. **Completion:** each task retains the directory from admission through actual
+   I/O and callback completion, including cancellation until the work has stopped.
+   It also owns any other context it accesses asynchronously. Final directory
+   release triggers cleanup, whether it occurs in close or task completion.
+
+`closed` is the only business lifecycle flag needed for this admission contract.
+Directory ownership replaces `active_writers` and `delete_on_zero` when they
+serve only to defer directory deletion. Separate task waiting, cancellation,
+or result tracking, if needed, remains with existing business mechanisms.
+A closed scope stays closed; reload creates a new business scope under the
+generation and admission rules below.
+
 Reload is a separate lifecycle event. Removing a segment from the business
 registry does not prove that old files, mappings, or tasks have finished. If
 they still retain the directory, `ChildDirectory("100")` returns that same live
@@ -1153,7 +1179,8 @@ ownership domain, including ancestors that legacy code could recursively delete.
    obey the same ownership contract. After ownership transfer,
    every directory follows final-reference deletion.
    Verify that business owners retain their directories and that same-path
-   unload/reload follows section 4.4 before removing legacy lifecycle guards.
+   unload/reload follows section 4.4 before removing deletion-only guards;
+   preserve business admission through `closed` under the same synchronization.
 5. Migrate QueryNode/segcore and DataNode/index consumers domain by domain.
    Remove singleton access after the last production consumer has migrated.
 
@@ -1168,7 +1195,7 @@ cleanup must be resolved or fenced by terminal shutdown before reuse.
 | Node construction | Create the filesystem context for the owned cache root and inject directory references |
 | Segment and index owners | Store the directory for the business instance; synchronize acquisition, unload, and reload |
 | Local readers, writers, and mappings | Retain the owning directory through resource release and asynchronous completion |
-| Disk file managers and directory cleanup callers | Use the shared directory identity and lifetime; retire component-specific directory cleanup after complete cutover |
+| Disk file managers and directory cleanup callers | Retain per-scope `closed` admission; replace deletion-only writer counts and flags with directory ownership after complete cutover |
 | Expression cache and temporary-file owners | Retain explicit individual file unlink where independently needed |
 | Native-library and CGo adapters | Transfer or copy the directory reference with the native resource |
 
@@ -1196,6 +1223,12 @@ The implementation must verify the following behavior before production cutover.
 - Business acquisition racing with unload either retains the published owner
   before withdrawal or takes the next-load admission path, without a raw-pointer
   lifetime gap or direct `ChildDirectory()` bypass.
+- `DiskFileManager` admission racing with close either acquires a task directory
+  reference before closure or is rejected; repeated close is harmless and final
+  reference release runs outside the business lock.
+- Work admitted before close retains its directory even if still awaiting enqueue;
+  submission failure or actual task completion releases it, and cancellation
+  cannot release it before underlying I/O and callbacks stop.
 - Reload while an old file/task still retains the same path cannot rebuild
   into the old live node returned by `ChildDirectory()`; admission waits for cleanup.
 - Same-path reload waits without holding the old directory alive, remains
