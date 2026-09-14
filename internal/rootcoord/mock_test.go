@@ -751,7 +751,7 @@ func withValidMixCoord() Opt {
 			Status: merr.Status(merr.WrapErrIndexNotFound("")),
 		}, nil,
 	)
-	mixc.EXPECT().NotifyDropPartition(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	mixc.EXPECT().NotifyDropPartition(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 	mixc.EXPECT().DropSegmentsByTime(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 

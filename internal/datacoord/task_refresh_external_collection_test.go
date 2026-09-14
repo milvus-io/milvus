@@ -71,10 +71,16 @@ func (s *stubCatalog) ListExternalCollectionRefreshTasks(ctx context.Context) ([
 }
 
 func (s *stubCatalog) SaveExternalCollectionRefreshJob(ctx context.Context, job *datapb.ExternalCollectionRefreshJob) error {
+	// Append gives the body enough instructions for mockey to patch (a bare
+	// `return nil` compiles to a single ret and cannot be patched).
+	s.jobs = append(s.jobs, job)
 	return nil
 }
 
 func (s *stubCatalog) SaveExternalCollectionRefreshTask(ctx context.Context, task *datapb.ExternalCollectionRefreshTask) error {
+	// Append gives the body enough instructions for mockey to patch (a bare
+	// `return nil` compiles to a single ret and cannot be patched).
+	s.tasks = append(s.tasks, task)
 	return nil
 }
 

@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -498,6 +499,63 @@ func (kc *Catalog) DropSegment(ctx context.Context, segment *datapb.SegmentInfo)
 	}
 
 	return nil
+}
+
+func (kc *Catalog) SaveDataView(ctx context.Context, dataView *viewpb.DataViewOfCollection) error {
+	key := buildDataViewVersionKey(
+		dataView.GetCollectionId(),
+		dataView.GetDataVersion().GetStreamingVersion(),
+		dataView.GetDataVersion().GetCompactVersion(),
+	)
+	value, err := proto.Marshal(dataView)
+	if err != nil {
+		return err
+	}
+	return kc.MetaKv.Save(ctx, key, string(value))
+}
+
+func (kc *Catalog) ListDataViews(ctx context.Context, collectionID int64) ([]*viewpb.DataViewOfCollection, error) {
+	return kc.listDataViewsWithPrefix(ctx, buildDataViewVersionPrefix(collectionID))
+}
+
+func (kc *Catalog) ListAllDataViews(ctx context.Context) ([]*viewpb.DataViewOfCollection, error) {
+	return kc.listDataViewsWithPrefix(ctx, DataViewPrefix+"/")
+}
+
+func (kc *Catalog) listDataViewsWithPrefix(ctx context.Context, prefix string) ([]*viewpb.DataViewOfCollection, error) {
+	dataViews := make([]*viewpb.DataViewOfCollection, 0)
+	applyFn := func(key []byte, value []byte) error {
+		dataView := &viewpb.DataViewOfCollection{}
+		if err := proto.Unmarshal(value, dataView); err != nil {
+			// Skip one corrupt value instead of aborting the whole walk: a
+			// single unmarshalable key would otherwise fail ListAllDataViews
+			// on every attempt and block Coordinator startup (the manager's
+			// per-view validation can only run on values that unmarshal).
+			mlog.Warn(context.TODO(), "skip unmarshalable DataView key during ListAllDataViews",
+				mlog.String("key", string(key)),
+				mlog.Err(err))
+			return nil
+		}
+		dataViews = append(dataViews, dataView)
+		return nil
+	}
+
+	if err := kc.MetaKv.WalkWithPrefix(ctx, prefix, kc.paginationSize, applyFn); err != nil {
+		return nil, err
+	}
+	return dataViews, nil
+}
+
+func (kc *Catalog) DropDataView(ctx context.Context, collectionID int64, dataVersion *viewpb.DataVersion) error {
+	return kc.MetaKv.Remove(ctx, buildDataViewVersionKey(
+		collectionID,
+		dataVersion.GetStreamingVersion(),
+		dataVersion.GetCompactVersion(),
+	))
+}
+
+func (kc *Catalog) DropDataViews(ctx context.Context, collectionID int64) error {
+	return kc.MetaKv.RemoveWithPrefix(ctx, buildDataViewVersionPrefix(collectionID))
 }
 
 func (kc *Catalog) MarkChannelAdded(ctx context.Context, channel string) error {

@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	task2 "github.com/milvus-io/milvus/internal/datacoord/task"
+	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/metastore"
 	kvdatacoord "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
@@ -843,6 +844,44 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_CompletedUpdatesSegment()
 	updatedTask := copyMeta.GetTask(ctx, 1001)
 	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskCompleted, updatedTask.GetState())
 	s.NotZero(updatedTask.(*copySegmentTask).task.Load().GetCompleteTs())
+}
+
+func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ReconcilesDataView() {
+	ctx := context.Background()
+	task := createTestCopyTask(100, 2001).(*copySegmentTask)
+	copyMeta, m := newCopySegmentTaskTestMeta(s.T(), task)
+	s.Require().NoError(m.AddSegment(ctx, newTestCopySegment(2001)))
+
+	catalog, ok := m.catalog.(dataview.Catalog)
+	s.Require().True(ok)
+	m.dataViewManager = dataview.NewManager(catalog, nil)
+
+	resp := &datapb.QueryCopySegmentResponse{
+		TaskID: 1001,
+		State:  datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
+		SegmentResults: []*datapb.CopySegmentResult{
+			{SegmentId: 2001, ImportedRows: 100, Binlogs: makeTestCopySegmentBinlogs()},
+		},
+	}
+
+	// Copy completion no longer synchronously publishes the DataView; the
+	// SegmentMeta mutation commits and the async recompute converges the
+	// snapshot. Drive the same projection the queue worker would run.
+	err := SyncCopySegmentTask(task, resp, copyMeta, m)
+	s.NoError(err)
+
+	segments, err := m.loadableProjection(ctx, 100)
+	s.NoError(err)
+	_, err = m.dataViewManager.RecomputeNow(ctx, 100, func(_ context.Context, _ int64) ([]dataview.LoadableSegment, error) {
+		return segments, nil
+	})
+	s.NoError(err)
+
+	ref, err := m.dataViewManager.Latest(ctx, 100)
+	s.NoError(err)
+	s.Require().NotNil(ref)
+	s.Equal([]int64{2001}, ref.DataView().GetShards()[0].GetPartitions()[0].GetSegmentIds())
+	ref.Deref()
 }
 
 func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_FailedResponseUpdatesTask() {

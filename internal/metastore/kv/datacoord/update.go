@@ -104,6 +104,30 @@ func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction
 				return unsupportedAction(action)
 			}
 			b.Remove(buildAnalyzeTaskKey(e.TaskID))
+		case metastore.DataViewEntry:
+			if action.Type != metastore.ActionAdd {
+				return unsupportedAction(action)
+			}
+			if e.DataView == nil || e.DataView.GetDataVersion() == nil {
+				return merr.WrapErrServiceInternalMsg("datacoord catalog: nil DataView or DataVersion in UpdateAction")
+			}
+			key := buildDataViewVersionKey(
+				e.DataView.GetCollectionId(),
+				e.DataView.GetDataVersion().GetStreamingVersion(),
+				e.DataView.GetDataVersion().GetCompactVersion(),
+			)
+			value, err := proto.Marshal(e.DataView)
+			if err != nil {
+				return err
+			}
+			// The snapshot key is immutable per version; a new version always
+			// writes a fresh key, so the write is idempotent-safe. CommitSave
+			// marks the DataView key as the visibility point of the whole
+			// composite write: in the over-limit fallback, every SegmentMeta op
+			// recorded before it is flushed first and the DataView lands in the
+			// final guarded txn, so a visible DataView implies its SegmentMeta
+			// is committed.
+			b.CommitSave(key, string(value))
 		case metastore.PartitionStatsVersionEntry:
 			if action.Type != metastore.ActionUpdate {
 				return unsupportedAction(action)
@@ -180,7 +204,7 @@ func (kc *Catalog) applySegmentEntry(ctx context.Context, b *txn.Builder, t meta
 			// handleDroppedSegment GC-compat write when the segment predates
 			// binlog-prefix persistence, keeping compaction's compactFrom
 			// retirement byte-identical to catalog.AlterSegments.
-			kvs, removals, err := kc.buildAlterSegmentsKvs(ctx, []*datapb.SegmentInfo{e.Segment}, nil)
+			kvs, removals, err := kc.buildAlterSegmentsKvs(ctx, []*datapb.SegmentInfo{e.Segment}, e.Binlogs)
 			if err != nil {
 				return err
 			}

@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -49,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
@@ -101,6 +103,7 @@ type meta struct {
 	// segment. It must be acquired before segMu. Manifest I/O runs outside
 	// segMu; final full-record catalog and memory publication runs under segMu.
 	segmentManifestLocks *lock.KeyLock[int64]
+	dataViewManager      DataViewManager
 
 	channelCPs   *channelCPs // vChannel -> channel checkpoint/see position
 	chunkManager storage.ChunkManager
@@ -2029,49 +2032,14 @@ func UpdateAsDroppedIfEmptyWhenFlushing(segmentID int64) UpdateOperator {
 func (m *meta) UpdateSegmentsInfo(ctx context.Context, operators ...UpdateOperator) error {
 	m.segMu.Lock()
 	defer m.segMu.Unlock()
-	updatePack := &updateSegmentPack{
-		meta:       m,
-		segments:   make(map[int64]*SegmentInfo),
-		increments: make(map[int64]metastore.BinlogsIncrement),
-		metricMutation: &segMetricMutation{
-			stateChange:             make(segmentMetricStateChange),
-			deferSegmentLabelChange: true,
-		},
-	}
 
-	for _, operator := range operators {
-		operator(updatePack)
-		if updatePack.err != nil {
-			return updatePack.err
-		}
-	}
-	if err := commitL0ManifestUpdates(updatePack.l0ManifestUpdates); err != nil {
+	updatePack, err := m.buildUpdateSegmentPack(ctx, operators)
+	if err != nil {
 		return err
 	}
-	for _, update := range updatePack.l0ManifestUpdates {
-		if !update.apply(updatePack) {
-			return updatePack.err
-		}
-	}
-
-	// skip if all segment not exist
-	if len(updatePack.segments) == 0 {
+	if updatePack == nil {
 		return nil
 	}
-
-	// Validate the update pack.
-	if err := updatePack.Validate(); err != nil {
-		// A stale save-binlog-paths update (segment already flushed, or an
-		// outdated time tick) is a benign no-op: skip the meta write and
-		// report success so the caller does not retry. The signal stays
-		// inside this package on purpose; see errIgnoredSegmentMetaOperation.
-		if errors.Is(err, errIgnoredSegmentMetaOperation) {
-			mlog.Info(ctx, "meta update: ignored stale segment meta operation", mlog.Err(err))
-			return nil
-		}
-		return err
-	}
-	updatePack.prepareSegmentMetricUpdates()
 
 	segments := lo.MapToSlice(updatePack.segments, func(_ int64, segment *SegmentInfo) *datapb.SegmentInfo { return segment.SegmentInfo })
 	increments := lo.Values(updatePack.increments)
@@ -2089,6 +2057,135 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, operators ...UpdateOperat
 	}
 	mlog.Info(ctx, "meta update: update flush segments info - update flush segments info successfully")
 	return nil
+}
+
+// UpdateSegmentsInfoAndDataView applies operators to SegmentMeta and commits
+// SegmentMeta together with the supplied DataView snapshot in one atomic
+// catalog txn (flush path). The DataView entry is the visibility marker of
+// the composite write (see DataViewEntry encoding): on the over-limit
+// fallback the DataView key lands in the final guarded txn after every
+// SegmentMeta op, so a visible DataView implies its SegmentMeta is committed.
+// dataView may be nil to commit SegmentMeta alone.
+// UpdateSegmentsInfoAndDataView returns whether the composite txn actually
+// ran. The DataView snapshot is persisted even when the SegmentMeta update
+// short-circuits (updatePack == nil, e.g. a replayed flush of an
+// already-flushed segment): the flush must synchronously advance
+// streaming_version. Catalog failures are retried in-function until the
+// version is durably published (catalog.Update is an idempotent KV
+// overwrite, so an in-function retry is safe; retrying the whole
+// SaveBinlogPaths from the caller would not be idempotent). Only when both
+// sides are empty (no SegmentMeta mutation and no DataView snapshot) does it
+// return (false, nil); the caller then discards any prepared in-memory
+// snapshot instead of committing a version that does not exist in etcd.
+func (m *meta) UpdateSegmentsInfoAndDataView(ctx context.Context, dataView *viewpb.DataViewOfCollection, operators ...UpdateOperator) (bool, error) {
+	m.segMu.Lock()
+	defer m.segMu.Unlock()
+
+	updatePack, err := m.buildUpdateSegmentPack(ctx, operators)
+	if err != nil {
+		return false, err
+	}
+	if updatePack == nil && dataView == nil {
+		return false, nil
+	}
+
+	actions := make([]metastore.UpdateAction, 0, 1)
+	if updatePack != nil {
+		actions = make([]metastore.UpdateAction, 0, len(updatePack.segments)+1)
+		for _, segment := range updatePack.segments {
+			// Pair each segment with its binlog increment (if any) so the legacy
+			// AlterSegments encoding persists record + binlog KVs together.
+			var binlogs []metastore.BinlogsIncrement
+			if inc, ok := updatePack.increments[segment.GetID()]; ok {
+				binlogs = []metastore.BinlogsIncrement{inc}
+			}
+			actions = append(actions, metastore.UpdateAction{
+				Type: metastore.ActionUpdate,
+				Entry: metastore.SegmentEntry{
+					Segment:       segment.SegmentInfo,
+					Binlogs:       binlogs,
+					AlterEncoding: true,
+				},
+			})
+		}
+	}
+	if dataView != nil {
+		actions = append(actions, metastore.SaveDataView(dataView))
+	}
+	// The flush publish must keep retrying: catalog.Update is an idempotent
+	// overwrite of the same actions, so an in-function retry converges to a
+	// durable streaming_version without replaying caller-side effects
+	// (retrying SaveBinlogPaths from the caller is not idempotent).
+	// retry.Do short-circuits InputError-typed errors unless an explicit
+	// RetryErr predicate is supplied, so AttemptAlways alone is not enough.
+	if err := retry.Do(ctx, func() error {
+		return m.catalog.Update(ctx, actions...)
+	}, retry.AttemptAlways(), retry.MaxSleepTime(10*time.Second),
+		retry.RetryErr(func(error) bool { return true })); err != nil {
+		mlog.Error(ctx, "meta update: update flush segments info and DataView - failed to store into Etcd",
+			mlog.Err(err))
+		return false, err
+	}
+	// Apply metric mutation after a successful meta update.
+	if updatePack != nil {
+		updatePack.metricMutation.commit()
+		// update memory status
+		for id, s := range updatePack.segments {
+			m.segments.SetSegment(id, s)
+		}
+	}
+	mlog.Info(ctx, "meta update: update flush segments info and DataView successfully")
+	return true, nil
+}
+
+// buildUpdateSegmentPack applies operators to a fresh updateSegmentPack and
+// validates it. It returns (nil, nil) when the update touches no segment or is
+// a benign stale no-op, and (pack, nil) otherwise. Caller must hold segMu.
+func (m *meta) buildUpdateSegmentPack(ctx context.Context, operators []UpdateOperator) (*updateSegmentPack, error) {
+	updatePack := &updateSegmentPack{
+		meta:       m,
+		segments:   make(map[int64]*SegmentInfo),
+		increments: make(map[int64]metastore.BinlogsIncrement),
+		metricMutation: &segMetricMutation{
+			stateChange:             make(segmentMetricStateChange),
+			deferSegmentLabelChange: true,
+		},
+	}
+
+	for _, operator := range operators {
+		operator(updatePack)
+		if updatePack.err != nil {
+			return nil, updatePack.err
+		}
+	}
+	if err := commitL0ManifestUpdates(updatePack.l0ManifestUpdates); err != nil {
+		return nil, err
+	}
+	for _, update := range updatePack.l0ManifestUpdates {
+		if !update.apply(updatePack) {
+			return nil, updatePack.err
+		}
+	}
+
+	// skip if all segment not exist
+	if len(updatePack.segments) == 0 {
+		return nil, nil
+	}
+
+	// Validate the update pack.
+	if err := updatePack.Validate(); err != nil {
+		// A stale save-binlog-paths update (segment already flushed, or an
+		// outdated time tick) is a benign no-op: skip the meta write and
+		// report success so the caller does not retry. The signal stays
+		// inside this package on purpose; see errIgnoredSegmentMetaOperation.
+		if errors.Is(err, errIgnoredSegmentMetaOperation) {
+			mlog.Info(ctx, "meta update: ignored stale segment meta operation", mlog.Err(err))
+			return nil, nil
+		}
+		return nil, err
+	}
+	updatePack.prepareSegmentMetricUpdates()
+	return updatePack, nil
 }
 
 // UpdateDropChannelSegmentInfo updates segment checkpoints and binlogs before drop
@@ -2832,9 +2929,13 @@ func (m *meta) ValidateSegmentStateBeforeCompleteCompactionMutation(t *datapb.Co
 		}
 	}
 
+	mutationApplied := m.compactionMutationAppliedLocked(t.GetInputSegments())
 	for _, segmentID := range t.GetInputSegments() {
 		segment := m.segments.GetSegment(segmentID)
 		if !isSegmentHealthy(segment) {
+			if mutationApplied {
+				continue
+			}
 			// SHOULD NOT HAPPEN: input segment was dropped.
 			// This indicates that compaction tasks, which should be mutually exclusive,
 			// may have executed concurrently.
@@ -2851,20 +2952,148 @@ func (m *meta) ValidateSegmentStateBeforeCompleteCompactionMutation(t *datapb.Co
 	return nil
 }
 
-func (m *meta) CompleteCompactionMutation(ctx context.Context, t *datapb.CompactionTask, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error) {
+func (m *meta) compactionMutationAppliedLocked(inputSegments []int64) bool {
+	if len(inputSegments) == 0 {
+		return false
+	}
+	for _, segmentID := range inputSegments {
+		segment := m.segments.GetSegment(segmentID)
+		if segment == nil || !segment.GetCompacted() {
+			return false
+		}
+	}
+	return true
+}
+
+func (m *meta) appliedCompactionResultLocked(
+	task *datapb.CompactionTask,
+	result *datapb.CompactionPlanResult,
+) ([]*SegmentInfo, bool, error) {
+	switch task.GetType() {
+	case datapb.CompactionType_MixCompaction,
+		datapb.CompactionType_SortCompaction,
+		datapb.CompactionType_BumpSchemaVersionCompaction:
+	default:
+		return nil, false, nil
+	}
+	if !m.compactionMutationAppliedLocked(task.GetInputSegments()) {
+		return nil, false, nil
+	}
+
+	actual := make(map[int64]*SegmentInfo)
+	for _, segmentID := range task.GetInputSegments() {
+		compactTo, _ := m.segments.GetCompactionTo(segmentID)
+		for _, segment := range compactTo {
+			actual[segment.GetID()] = segment
+		}
+	}
+	if len(actual) != len(result.GetSegments()) {
+		return nil, true, merr.WrapErrIllegalCompactionPlanMsg(
+			"compaction inputs were already committed to %d outputs, but worker result contains %d",
+			len(actual),
+			len(result.GetSegments()),
+		)
+	}
+
+	compactTo := make([]*SegmentInfo, 0, len(result.GetSegments()))
+	for _, resultSegment := range result.GetSegments() {
+		segment := actual[resultSegment.GetSegmentID()]
+		if segment == nil {
+			return nil, true, merr.WrapErrIllegalCompactionPlanMsg(
+				"compaction inputs were already committed to different outputs than worker result Segment %d",
+				resultSegment.GetSegmentID(),
+			)
+		}
+		compactTo = append(compactTo, segment)
+	}
+	return compactTo, true, nil
+}
+
+func (m *meta) CompleteCompactionMutation(ctx context.Context, t *datapb.CompactionTask, result *datapb.CompactionPlanResult) (newSegments []*SegmentInfo, metricMutation *segMetricMutation, retErr error) {
 	m.segMu.Lock()
 	defer m.segMu.Unlock()
-	switch t.GetType() {
-	case datapb.CompactionType_MixCompaction:
-		return m.completeMixCompactionMutation(t, result)
-	case datapb.CompactionType_ClusteringCompaction:
-		return m.completeClusterCompactionMutation(t, result)
-	case datapb.CompactionType_SortCompaction:
-		return m.completeSortCompactionMutation(t, result)
-	case datapb.CompactionType_BumpSchemaVersionCompaction:
-		return m.completeBumpSchemaVersionCompactionMutation(t, result)
+	if appliedSegments, applied, appliedErr := m.appliedCompactionResultLocked(t, result); applied {
+		newSegments = appliedSegments
+		metricMutation = &segMetricMutation{stateChange: make(segmentMetricStateChange)}
+		retErr = appliedErr
+	} else {
+		switch t.GetType() {
+		case datapb.CompactionType_MixCompaction:
+			newSegments, metricMutation, retErr = m.completeMixCompactionMutation(t, result)
+		case datapb.CompactionType_ClusteringCompaction:
+			newSegments, metricMutation, retErr = m.completeClusterCompactionMutation(t, result)
+		case datapb.CompactionType_SortCompaction:
+			newSegments, metricMutation, retErr = m.completeSortCompactionMutation(t, result)
+		case datapb.CompactionType_BumpSchemaVersionCompaction:
+			newSegments, metricMutation, retErr = m.completeBumpSchemaVersionCompactionMutation(t, result)
+		default:
+			retErr = merr.WrapErrIllegalCompactionPlan("illegal compaction type")
+		}
 	}
-	return nil, nil, merr.WrapErrIllegalCompactionPlan("illegal compaction type")
+	if retErr != nil {
+		return nil, nil, retErr
+	}
+	return newSegments, metricMutation, nil
+}
+
+// loadableProjection computes the loadable Segment projection of a Collection
+// from SegmentMeta, the single loadable criterion shared by Recompute,
+// recovery rebuild and bootstrap. A segment is loadable iff it is flushed
+// (Flushing or Flushed - growing/sealed segments stay on the streaming side,
+// matching handler.go's GetQueryVChanPositions classification), healthy (not
+// Dropped/NotExist), not invisible, not importing, and not an L0 delta
+// segment, and has a data footprint (a non-empty binlog set or a StorageV3
+// manifest path). The Manifest version is parsed from the segment's manifest
+// path (0 when absent). The SegmentMeta snapshot is taken under segMu.RLock;
+// manifest path parsing runs outside the lock (pure string ops on the
+// snapshot). Callers must hold the DataView Collection lock (lock order:
+// DataView -> segMu).
+func (m *meta) loadableProjection(ctx context.Context, collectionID int64) ([]dataview.LoadableSegment, error) {
+	segments := m.SelectSegments(ctx, WithCollection(collectionID))
+	loadable := make([]dataview.LoadableSegment, 0, len(segments))
+	for _, segment := range segments {
+		if segment.GetLevel() == datapb.SegmentLevel_L0 ||
+			segment.GetIsImporting() ||
+			segment.GetIsInvisible() ||
+			!isSegmentHealthy(segment) ||
+			!isFlushState(segment.GetState()) {
+			continue
+		}
+		if len(segment.GetBinlogs()) == 0 && segment.GetManifestPath() == "" {
+			// No data footprint: not loadable (matches GetQueryVChanPositions).
+			continue
+		}
+		manifestVersion := int64(0)
+		if segment.GetManifestPath() != "" {
+			var err error
+			_, manifestVersion, err = packed.UnmarshalManifestPath(segment.GetManifestPath())
+			if err != nil {
+				return nil, merr.WrapErrStorage(err, "failed to parse Manifest path for Segment %d", segment.GetID())
+			}
+		}
+		loadable = append(loadable, dataview.LoadableSegment{
+			SegmentID:       segment.GetID(),
+			VChannel:        segment.GetInsertChannel(),
+			PartitionID:     segment.GetPartitionID(),
+			ManifestVersion: manifestVersion,
+		})
+	}
+	return loadable, nil
+}
+
+// recomputeDataView requests an asynchronous DataView snapshot reconciliation
+// for collectionID after a Flushed->Flushed SegmentMeta mutation committed.
+// All reconciliation logic lives inside the DataView manager (deduplicated
+// queue + worker); this is only a nil-safe request forwarder. It is a no-op
+// when DataView management is disabled (nil manager).
+func (m *meta) recomputeDataView(ctx context.Context, collectionID int64) {
+	// collectionID == 0 (e.g. a 2PC import job without import tasks) would
+	// persist an orphan DataView key that recovery never reclaims; refuse it
+	// at the entry point so no caller can create one.
+	if m.dataViewManager == nil || collectionID == 0 {
+		return
+	}
+	_ = m.dataViewManager.Recompute(ctx, collectionID)
 }
 
 // buildSegment utility function for compose datapb.SegmentInfo struct with provided info
@@ -3455,6 +3684,13 @@ func (m *meta) completeSortCompactionMutation(
 	t *datapb.CompactionTask,
 	result *datapb.CompactionPlanResult,
 ) ([]*SegmentInfo, *segMetricMutation, error) {
+	if len(t.GetInputSegments()) != 1 || len(result.GetSegments()) != 1 {
+		return nil, nil, merr.WrapErrIllegalCompactionPlan("sort compaction requires exactly one input and one output Segment")
+	}
+	if t.GetSchema() == nil {
+		return nil, nil, merr.WrapErrIllegalCompactionPlan("sort compaction task schema is nil")
+	}
+
 	metricMutation := &segMetricMutation{stateChange: make(segmentMetricStateChange)}
 	compactFromSegID := t.GetInputSegments()[0]
 	oldSegment := m.segments.GetSegment(compactFromSegID)
@@ -3465,6 +3701,20 @@ func (m *meta) completeSortCompactionMutation(
 	// Re-validate segment health to prevent race condition with drop collection
 	// between ValidateSegmentStateBeforeCompleteCompactionMutation and here
 	if !isSegmentHealthy(oldSegment) {
+		resultSegmentID := result.GetSegments()[0].GetSegmentID()
+		compactTo, _ := m.segments.GetCompactionTo(compactFromSegID)
+		for _, segment := range compactTo {
+			if segment.GetID() == resultSegmentID {
+				return []*SegmentInfo{segment}, metricMutation, nil
+			}
+		}
+		if len(compactTo) > 0 {
+			return nil, nil, merr.WrapErrIllegalCompactionPlanMsg(
+				"sort compaction input Segment %d was already compacted to a different output than %d",
+				compactFromSegID,
+				resultSegmentID,
+			)
+		}
 		mlog.Warn(m.ctx, "input segment was dropped during compaction mutation",
 			mlog.Int64("planID", t.GetPlanID()),
 			mlog.Int64("segmentID", compactFromSegID),
@@ -3488,9 +3738,6 @@ func (m *meta) completeSortCompactionMutation(
 		normalizePositionTimestamp(oldSegment.GetStartPosition(), commitTs),
 		normalizePositionTimestamp(oldSegment.GetDmlPosition(), commitTs))
 
-	if t.GetSchema() == nil {
-		return nil, nil, merr.WrapErrIllegalCompactionPlan("sort compaction task schema is nil")
-	}
 	outputSchemaVersion := t.GetSchema().GetVersion()
 
 	segmentInfo := &datapb.SegmentInfo{

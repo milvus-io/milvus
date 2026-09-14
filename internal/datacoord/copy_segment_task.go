@@ -937,6 +937,12 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 			if err = syncJSONKeyIndexes(ctx, result, task, meta, copyMeta); err != nil {
 				return err
 			}
+			// The SegmentMeta mutation is committed; schedule an asynchronous
+			// DataView snapshot reconciliation instead of a synchronous event
+			// publish (materialized-view model).
+			if meta.dataViewManager != nil {
+				meta.recomputeDataView(context.TODO(), task.GetCollectionId())
+			}
 
 			mlog.Info(context.TODO(), "update copy segment info done",
 				WrapCopySegmentTaskLog(task, mlog.Int64("segmentID", result.GetSegmentId()),
