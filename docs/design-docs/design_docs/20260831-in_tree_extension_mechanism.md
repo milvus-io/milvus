@@ -43,6 +43,9 @@ type QueryHook interface { ... }              // the queryNode.soPath plug-in's 
 func SetQueryHook(h QueryHook)                // the QueryNode prefers it over queryNode.soPath
 func InstalledQueryHook() QueryHook
 
+func SetCipher(c hook.Cipher)                 // hookutil prefers it over cipherPlugin.soPathGo
+func InstalledCipher() hook.Cipher
+
 type Coordinator interface {                  // the coordinator as its own clients see it
 	rootcoordpb.RootCoordClient
 	querypb.QueryCoordClient
@@ -102,6 +105,22 @@ is installed, and the same watchers re-initialize it when those keys change.
 `autoIndex.enable` still decides whether tuning happens at all, whichever way
 the hook got there. `optimizers.QueryHook` is now an alias of
 `extension.QueryHook`, so nothing in the tree changes.
+
+### The cipher
+
+The Go half of the cipher plug-in pair - the `CipherPlugin` symbol a
+`cipherPlugin.soPathGo` plug-in exports - can be compiled in the same way
+(`SetCipher`). A compiled-in cipher is used in preference to
+`cipherPlugin.soPathGo`, and a deployment that configures both is refused at
+start-up: both would answer for the encryption keys, and only one can. Only
+that half changes hands: the C++ half is still loaded by the core from
+`cipherPlugin.soPathCpp`, and that path stays the deployment's declaration
+that encryption is on. A compiled-in cipher in a deployment without
+`soPathCpp` is left idle and `IsClusterEncryptionEnabled` stays false,
+exactly as with no plug-in. When it is used it is treated exactly as the
+plug-in is: it gets the same `Init` with the `cipherPlugin.*` configuration
+before it is installed, and the same reload callbacks re-initialize it when
+those keys change.
 
 ### The coordinator engine
 
@@ -269,6 +288,8 @@ them through `user.yaml` or the environment.
   empty as "no scope".
 - Every configuration item defaults to the stock behavior.
 - `hook.Hook` is milvus-proto's and unchanged.
+- `hook.Cipher` is milvus-proto's and unchanged; `cipherPlugin.soPathCpp`
+  keeps its meaning.
 - `optimizers.QueryHook` is an alias of `extension.QueryHook` with the same
   method set; a `QueryNodePlugin` built against either loads unchanged.
 - The default configuration file is `milvus.yaml`; a distribution that ships
@@ -281,6 +302,10 @@ them through `user.yaml` or the environment.
 - hookutil: a compiled-in hook is used, refused beside a plug-in, absent by
   default, initialized with the `hook.*` configuration, and re-initialized
   when that configuration changes.
+- hookutil: a compiled-in cipher is used when `cipherPlugin.soPathCpp` is
+  set, refused beside `cipherPlugin.soPathGo`, idle without `soPathCpp`,
+  absent by default, not installed when it cannot initialize, and
+  re-initialized on a `cipherPlugin.*` edit.
 - querynode: a compiled-in query hook is used, refused beside a plug-in,
   absent by default, initialized with the `autoIndex.params.*` configuration,
   and not installed when it cannot initialize.

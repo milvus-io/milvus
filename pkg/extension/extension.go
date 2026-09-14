@@ -37,12 +37,14 @@ var (
 	installedHook      atomic.Pointer[hookBox]
 	installedEngine    atomic.Pointer[engineBox]
 	installedQueryHook atomic.Pointer[queryHookBox]
+	installedCipher    atomic.Pointer[cipherBox]
 )
 
 type (
 	hookBox      struct{ hook hook.Hook }
 	engineBox    struct{ engine CoordinatorEngine }
 	queryHookBox struct{ hook QueryHook }
+	cipherBox    struct{ cipher hook.Cipher }
 )
 
 // SetHook installs a compiled-in request hook. hookutil prefers it over
