@@ -54,6 +54,8 @@ fail=0
 #                                         across milvus's own C-ABI export tail
 #   ExecOperatorException / ExecDriverException
 #                                         typed, derive from SegcoreError
+#   PyUDFFunctionError                    derives from SegcoreError and carries
+#                                         the existing FunctionFailed(2400) code
 #   folly::Future*                        folly's own control-flow signals,
 #                                         consumed by the futures layer and
 #                                         never projected to a CStatus
@@ -84,7 +86,7 @@ fail=0
 #                                         deliberately NOT allowed: it rethrows
 #                                         by the CAUGHT type, slicing a derived
 #                                         SegcoreError back to its base
-ALLOWED_THROW='^(milvus::)?(SegcoreError|ExecOperatorException|ExecDriverException|LoonFFIError)\(|^milvus_storage::ToSegcoreError\(|^folly::Future[A-Za-z]*\(|^std::bad_alloc\(|^;'
+ALLOWED_THROW='^(milvus::)?(SegcoreError|ExecOperatorException|ExecDriverException|LoonFFIError)\(|^(milvus::pyudf::)?PyUDFFunctionError\(|^milvus_storage::ToSegcoreError\(|^folly::Future[A-Za-z]*\(|^std::bad_alloc\(|^;'
 
 # `throw` is matched anywhere on the line, not just at its start: `if (bad)
 # throw ...;` and `} else throw ...;` are throws too. Line comments are stripped

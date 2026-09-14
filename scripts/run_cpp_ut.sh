@@ -43,6 +43,7 @@ while [ -h "$SOURCE" ]; do
 done
 ROOT_DIR="$(cd -P "$(dirname "$SOURCE")/.." && pwd)"
 source ${ROOT_DIR}/scripts/setenv.sh
+${ROOT_DIR}/scripts/prepare_pyudf_test_runtime.sh
 
 MILVUS_CORE_DIR="${ROOT_DIR}/internal/core"
 MILVUS_CORE_UNITTEST_DIR="${MILVUS_CORE_DIR}/output/unittest"
