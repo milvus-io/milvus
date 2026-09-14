@@ -95,6 +95,15 @@ type CollectionObserver struct {
 // It is cleared when the task is re-armed to watch what a teardown left
 // behind, since that group has just proven it is not serving.
 //
+// UnknownSince is set on the first tick of a run of ticks whose percentage is
+// unknown, and cleared by the next tick that reads one. An unknown figure
+// pauses the clock (observeResourceGroupTimeout), so the timeout never ends
+// such a run and the readiness shield is never reached; a task whose run has
+// lasted longer than the load timeout no longer counts as "loading" for the
+// purpose of pushing the checkers (observeLoadStatus). Nothing is being
+// learned that a push would speed up - a replica whose node went away reports
+// nothing, possibly for good - and the checkers keep their own intervals.
+//
 // ReplicaNumberPending is set when a teardown removed replicas but the write
 // of the collection's ReplicaNumber that must follow was refused. The two are
 // separate catalog writes by separate managers, so the deletion can be
@@ -122,6 +131,8 @@ type LoadTask struct {
 	LastProgressTargetVersion int64
 
 	ReadySince time.Time
+
+	UnknownSince time.Time
 
 	ReplicaNumberPending bool
 }
@@ -216,8 +227,10 @@ func NewCollectionObserver(
 //     and a group with a single serviceable leader is never torn down at all
 //     (observeResourceGroupTimeout's readiness shield).
 //
-// A task whose group never becomes readable simply stays paused until the
-// collection leaves meta, where observeTimeout's first check removes it.
+// A task whose group never becomes readable stays paused until the collection
+// leaves meta, where observeTimeout's first check removes it; past the load
+// timeout it no longer pushes the checkers, and a task whose group holds no
+// replica at all is removed (observeResourceGroupTimeout).
 func (ob *CollectionObserver) recoverResourceGroupTasks(ctx context.Context, collectionID int64) {
 	recovered := typeutil.NewSet[string]()
 	for _, replica := range ob.meta.GetByCollection(ctx, collectionID) {
@@ -672,13 +685,27 @@ func (ob *CollectionObserver) observeResourceGroupTimeout(ctx context.Context, k
 			return
 		}
 		task.ReplicaNumberPending = false
-		if !ob.groupHoldsReplicas(ctx, task) {
-			// Nothing left to watch and nothing left to write: the task
-			// only lived to retry the count.
-			ob.loadTasks.Remove(key)
-			return
-		}
 		ob.loadTasks.Insert(key, task)
+	}
+
+	// A task watches the replicas its resource group holds. A group that
+	// holds none has nothing left to load, to time out or to tear down: its
+	// last replica went with a teardown whose count is now written back, or
+	// was moved to another group (TransferReplica). Its figure is then
+	// unknown for good - everyReplicaHasReported answers false for a group
+	// with no replica - so a task kept would pause forever and count as a
+	// load in progress on every tick. It is removed instead. This never
+	// removes a task whose load has not committed yet: a scoped task is only
+	// registered for a group that already holds replicas (the expansion
+	// spawns them first, and a restart rebuilds tasks only for groups that
+	// hold one).
+	if !ob.groupHoldsReplicas(ctx, task) {
+		mlog.Info(ctx, "resource group holds no replica of the collection any more, dropping its load task",
+			mlog.FieldCollectionID(task.CollectionID),
+			mlog.String("resourceGroup", task.ResourceGroup),
+			mlog.String("traceID", key))
+		ob.loadTasks.Remove(key)
+		return
 	}
 
 	// An unknown percentage PAUSES the clock: the watermark keeps the last
@@ -693,6 +720,9 @@ func (ob *CollectionObserver) observeResourceGroupTimeout(ctx context.Context, k
 	// resource group of every loaded collection at once. A task whose group
 	// never becomes readable is not leaked: it is removed by observeTimeout's
 	// first check as soon as the collection leaves meta (release or drop).
+	// Until then it is marked UnknownSince, and once the run of unknown ticks
+	// outlasts the load timeout it stops making the tick push the checkers
+	// (observeLoadStatus).
 	if percentage < 0 {
 		mlog.RatedWarn(ctx, 0.1, "resource group load percentage unknown, pausing the load timeout",
 			mlog.FieldCollectionID(task.CollectionID),
@@ -700,8 +730,19 @@ func (ob *CollectionObserver) observeResourceGroupTimeout(ctx context.Context, k
 			mlog.String("traceID", key),
 			mlog.Int32("lastKnownProgress", task.LastProgress))
 		task.LastProgressAt = now
+		if task.UnknownSince.IsZero() {
+			task.UnknownSince = now
+		}
 		ob.loadTasks.Insert(key, task)
 		return
+	}
+
+	// A figure was read, so any run of unknown ticks is over and the task
+	// counts as a load in progress again, unless the readiness shield says
+	// otherwise. Stored here because not every branch below stores the task.
+	if !task.UnknownSince.IsZero() {
+		task.UnknownSince = time.Time{}
+		ob.loadTasks.Insert(key, task)
 	}
 
 	// Refresh the watermark whenever the percentage MOVED, in either
@@ -981,6 +1022,7 @@ func (ob *CollectionObserver) releaseResourceGroupOnTimeout(ctx context.Context,
 		task.LastProgress = -1
 		task.LastProgressAt = time.Now()
 		task.ReadySince = time.Time{}
+		task.UnknownSince = time.Time{}
 		ob.loadTasks.Insert(key, task)
 		return
 	}
@@ -1031,6 +1073,12 @@ func (ob *CollectionObserver) groupHoldsReplicas(ctx context.Context, task LoadT
 	return false
 }
 
+// unknownForLongerThan answers whether task's figure has been unknown, with no
+// tick in between that read one, for longer than d as of now.
+func unknownForLongerThan(task LoadTask, now time.Time, d time.Duration) bool {
+	return !task.UnknownSince.IsZero() && now.Sub(task.UnknownSince) > d
+}
+
 func (ob *CollectionObserver) readyToObserve(ctx context.Context, collectionID int64) bool {
 	metaExist := (ob.meta.GetCollection(ctx, collectionID) != nil)
 	targetExist := ob.targetMgr.IsNextTargetExist(ctx, collectionID) || ob.targetMgr.IsCurrentTargetExist(ctx, collectionID, common.AllPartitionsID)
@@ -1042,12 +1090,19 @@ func (ob *CollectionObserver) observeLoadStatus(ctx context.Context, progress ma
 	loading := false
 	observeTaskNum := 0
 	observeStart := time.Now()
+	loadTimeout := Params.QueryCoordCfg.LoadTimeoutSeconds.GetAsDuration(time.Second)
 	ob.loadTasks.Range(func(traceID string, task LoadTask) bool {
 		// Every task is a load in progress, and pushes the checkers below,
-		// except a scoped task the readiness shield keeps alive: its group is
-		// serving, and master pushes nothing for a serving collection. An
-		// unscoped task never carries the mark and behaves as it always has.
-		if task.ReadySince.IsZero() {
+		// except two kinds of scoped task. One the readiness shield keeps
+		// alive: its group is serving, and master pushes nothing for a
+		// serving collection. And one whose group's figure has been unknown
+		// for longer than the load timeout: the paused clock never ends it,
+		// so pushing for it would run every checker at the observer's rate
+		// for as long as the process lives. The checkers keep their own
+		// intervals for it, and a tick that reads a figure makes it count
+		// again. An unscoped task carries neither mark and behaves as it
+		// always has.
+		if task.ReadySince.IsZero() && !unknownForLongerThan(task, observeStart, loadTimeout) {
 			loading = true
 		}
 		observeTaskNum++
