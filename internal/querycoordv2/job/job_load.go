@@ -140,6 +140,10 @@ func (job *LoadCollectionJob) Execute() error {
 		fieldIDs = append(fieldIDs, loadField.GetFieldId())
 	}
 	replicaNumber := int32(len(replicas))
+	replicaNumbers := make(map[string]int32)
+	for _, replica := range replicas {
+		replicaNumbers[replica.GetResourceGroupName()]++
+	}
 	partitions := lo.Map(req.GetPartitionIds(), func(partID int64, _ int) *meta.Partition {
 		return &meta.Partition{
 			PartitionLoadInfo: &querypb.PartitionLoadInfo{
@@ -156,14 +160,15 @@ func (job *LoadCollectionJob) Execute() error {
 	ctx, sp := otel.Tracer(typeutil.QueryCoordRole).Start(job.ctx, "LoadCollection", trace.WithNewRoot())
 	collection := &meta.Collection{
 		CollectionLoadInfo: &querypb.CollectionLoadInfo{
-			CollectionID:             req.GetCollectionId(),
-			ReplicaNumber:            replicaNumber,
-			Status:                   querypb.LoadStatus_Loading,
-			FieldIndexID:             fieldIndexIDs,
-			LoadType:                 querypb.LoadType_LoadCollection,
-			LoadFields:               fieldIDs,
-			DbID:                     req.GetDbId(),
-			UserSpecifiedReplicaMode: req.GetUserSpecifiedReplicaMode(),
+			CollectionID:                req.GetCollectionId(),
+			ReplicaNumber:               replicaNumber,
+			Status:                      querypb.LoadStatus_Loading,
+			FieldIndexID:                fieldIndexIDs,
+			LoadType:                    querypb.LoadType_LoadCollection,
+			LoadFields:                  fieldIDs,
+			DbID:                        req.GetDbId(),
+			UserSpecifiedReplicaMode:    req.GetUserSpecifiedReplicaMode(),
+			ResourceGroupReplicaNumbers: replicaNumbers,
 		},
 		CreatedAt: time.Now(),
 		LoadSpan:  sp,
