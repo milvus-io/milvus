@@ -182,24 +182,24 @@ func (pr *PackedReader) ReadNext() (arrow.Record, error) {
 		pr.currentBatch.Release()
 		pr.currentBatch = nil
 	}
-	var cArr C.CArrowArray
-	var cSchema C.CArrowSchema
+	// The caller owns the Arrow structs; importing transfers their buffers only.
+	var cArr C.struct_ArrowArray
+	var cSchema C.struct_ArrowSchema
+	goCArr := (*cdata.CArrowArray)(unsafe.Pointer(&cArr))
+	goCSchema := (*cdata.CArrowSchema)(unsafe.Pointer(&cSchema))
+	defer func() {
+		cdata.ReleaseCArrowArray(goCArr)
+		cdata.ReleaseCArrowSchema(goCSchema)
+	}()
 	status := C.ReadNext(pr.cPackedReader, &cArr, &cSchema)
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		return nil, err
 	}
 
-	if cArr == nil {
+	if cArr.release == nil {
 		return nil, io.EOF // end of stream, no more records to read
 	}
 
-	// Convert ArrowArray to Go RecordBatch using cdata
-	goCArr := (*cdata.CArrowArray)(unsafe.Pointer(cArr))
-	goCSchema := (*cdata.CArrowSchema)(unsafe.Pointer(cSchema))
-	defer func() {
-		cdata.ReleaseCArrowArray(goCArr)
-		cdata.ReleaseCArrowSchema(goCSchema)
-	}()
 	recordBatch, err := cdata.ImportCRecordBatch(goCArr, goCSchema)
 	if err != nil {
 		return nil, merr.WrapErrStorage(err, "failed to convert ArrowArray to Record")
