@@ -75,11 +75,11 @@ func TestPut_PersistsReplicaNumberFromReplicaAssignments(t *testing.T) {
 	store, catalog := newTestStore(t)
 	cfg := sampleConfig()
 
-	var saved querypb.CollectionLoadInfo
+	var savedReplicaNumber int32
 	catalog.EXPECT().
 		SaveCollection(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 		Run(func(_ context.Context, collection *querypb.CollectionLoadInfo, _ ...*querypb.PartitionLoadInfo) {
-			saved = *collection
+			savedReplicaNumber = collection.GetReplicaNumber()
 		}).
 		Return(nil).
 		Once()
@@ -87,7 +87,7 @@ func TestPut_PersistsReplicaNumberFromReplicaAssignments(t *testing.T) {
 		Return(nil).Once()
 
 	require.NoError(t, store.Put(context.Background(), cfg))
-	assert.Equal(t, int32(len(cfg.Replicas)), saved.GetReplicaNumber())
+	assert.Equal(t, int32(len(cfg.Replicas)), savedReplicaNumber)
 }
 
 func TestLoadConfigPersistedStatusIsLoaded(t *testing.T) {
