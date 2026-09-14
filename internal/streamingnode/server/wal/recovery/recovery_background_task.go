@@ -131,8 +131,18 @@ func (rs *recoveryStorageImpl) persistDirtySnapshot(ctx context.Context, lvl mlo
 	// A failure here fails the whole persist, so the checkpoint stays put and
 	// the records are still replayable from the WAL.
 	if rs.summaryManager != nil {
-		if err := rs.summaryManager.Persist(ctx); err != nil {
-			logger.Warn(ctx, "failed to persist the wal summary", mlog.Err(err))
+		// Retried like every other failure source here. persistDirtySnapshot's
+		// only non-context failure surface has to stay empty: the background
+		// loop treats a returned error as "we are closing" and stops, and a
+		// stopped loop never advances the consume checkpoint again -- the WAL
+		// is never truncated and the summary's staged records, which nothing
+		// else bounds, grow until the node runs out of memory. One object
+		// storage 500 must not do that.
+		if err := rs.retryOperationWithBackoff(ctx,
+			logger.With(mlog.String("op", "persistWALSummary")),
+			func(ctx context.Context) error {
+				return rs.summaryManager.Persist(ctx)
+			}); err != nil {
 			return err
 		}
 	}

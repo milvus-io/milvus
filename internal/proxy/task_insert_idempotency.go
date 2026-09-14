@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
@@ -62,6 +63,21 @@ func validateInsertIdempotencyProperty(props []*commonpb.KeyValuePair) error {
 func (it *insertTask) prepareAutoIdempotencyKeyIfEnabled(ctx context.Context, collectionProperties []*commonpb.KeyValuePair, excludeAutoIDPrimary bool) error {
 	globalIdempotencyEnabled := Params.StreamingCfg.IdempotencyEnabled.GetAsBool()
 	collectionIdempotencyEnabled := collectionInsertIdempotencyEnabled(collectionProperties)
+	// An encrypted collection cannot have both. The duplicate answer is the
+	// first attempt's primary keys, and it is carried in the message HEADER,
+	// which the builder serializes into a plaintext property -- the cipher
+	// covers the body only. The client key travels beside it in another
+	// plaintext property, and the summary store writes both again to object
+	// storage. Enabling idempotency here would move exactly the values
+	// collection encryption exists to protect into the clear, so it is refused
+	// rather than silently weakened.
+	if hookutil.IsClusterEncryptionEnabled() &&
+		hookutil.GetEzByCollProperties(collectionProperties, it.collectionID).AsMessageConfig() != nil {
+		if it.idempotencyKey != "" || collectionIdempotencyEnabled {
+			return merr.WrapErrParameterInvalidMsg(
+				"idempotent write is not supported for an encrypted collection: the duplicate result and the key would be stored unencrypted")
+		}
+	}
 	it.idempotencyEnabled = globalIdempotencyEnabled && collectionIdempotencyEnabled
 	if it.idempotencyKey != "" && !globalIdempotencyEnabled {
 		return merr.WrapErrParameterInvalidMsg("idempotency key is not accepted when idempotent write is globally disabled")

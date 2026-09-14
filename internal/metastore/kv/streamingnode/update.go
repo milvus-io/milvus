@@ -151,14 +151,31 @@ func (c *catalog) SaveRecoverySnapshot(ctx context.Context, pChannelName string,
 			b.CommitSaveIfValue(checkpointKey, current, checkpointValue)
 		}
 	}
-	if err := txn.Commit(ctx, c.metaKV, b); err != nil {
-		return err
+	// A guarded commit is not retried by the kv wrapper, because its predicate
+	// cannot be re-sent: a leader change or a timeout can apply the transaction
+	// and still report an error, and the guard would then compare against a
+	// value this very attempt replaced. The error therefore arrives here, and it
+	// does not say whether the write landed -- only a read does. Re-read before
+	// deciding: finding our own value there means the commit applied and the
+	// error described the reply, not the write.
+	commitErr := txn.Commit(ctx, c.metaKV, b)
+	if commitErr != nil && (snapshot.ConsumeCheckpoint == nil || checkpointFirstCreation) {
+		return commitErr
 	}
-	// The guarded commit reports success even when the guard fails (etcd txn
-	// returns Succeeded=false without an error), so the checkpoint write is
-	// verified after the commit: a stale publisher that lost the CAS must be
-	// told the write did not land, or it would keep advancing components
-	// against a checkpoint it no longer owns.
+	if commitErr != nil {
+		after, err := c.metaKV.Load(ctx, checkpointKey)
+		if err != nil {
+			return commitErr
+		}
+		if after != checkpointValue {
+			return commitErr
+		}
+	}
+	// The guard can also fail silently on a store that reports a rejected
+	// predicate as a successful commit, so the checkpoint write is verified
+	// either way: a stale publisher that lost the CAS must be told the write did
+	// not land, or it would keep advancing components against a checkpoint it no
+	// longer owns.
 	if snapshot.ConsumeCheckpoint != nil {
 		if checkpointFirstCreation {
 			ok, err := c.metaKV.CompareVersionAndSwap(ctx, checkpointKey, 0, checkpointValue)

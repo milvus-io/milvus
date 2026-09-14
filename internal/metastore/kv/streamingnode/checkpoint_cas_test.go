@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // checkpointBytesOf serializes a checkpoint the way SaveRecoverySnapshot
@@ -133,4 +134,47 @@ func TestSaveRecoverySnapshotCheckpointLostCAS(t *testing.T) {
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "concurrently")
+}
+
+// TestSaveRecoverySnapshotGuardedCommitAppliedDespiteError covers the ambiguity a
+// guarded commit carries: a leader change or a timeout can apply the transaction
+// and still report an error. Re-sending the guard is not an option -- it compares
+// against the value this attempt replaced -- so the error must be resolved by
+// reading, and finding our own value there means the write landed.
+func TestSaveRecoverySnapshotGuardedCommitAppliedDespiteError(t *testing.T) {
+	kv := mocks.NewMetaKv(t)
+	key := buildConsumeCheckpointKey("p1")
+	current := checkpointBytesOf(t, &streamingpb.WALCheckpoint{TimeTick: 10, Term: 1})
+	next := &streamingpb.WALCheckpoint{TimeTick: 20, Term: 1}
+	applied := checkpointBytesOf(t, next)
+
+	kv.EXPECT().MaxTxnOps().Return(128).Maybe()
+	// The pre-check reads the old value; every later read sees the applied one.
+	kv.EXPECT().Load(mock.Anything, key).Return(current, nil).Once()
+	kv.EXPECT().Load(mock.Anything, key).Return(applied, nil)
+	kv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return(merr.WrapErrIoFailedReason("etcd leader changed"))
+
+	err := NewCataLog(kv).SaveRecoverySnapshot(context.Background(), "p1", &metastore.WALRecoverySnapshot{
+		ConsumeCheckpoint: next,
+	})
+	assert.NoError(t, err, "a commit whose value is already stored has landed")
+}
+
+// TestSaveRecoverySnapshotGuardedCommitNotApplied covers the other half: the
+// error stands when the read shows the write did not land.
+func TestSaveRecoverySnapshotGuardedCommitNotApplied(t *testing.T) {
+	kv := mocks.NewMetaKv(t)
+	key := buildConsumeCheckpointKey("p1")
+	current := checkpointBytesOf(t, &streamingpb.WALCheckpoint{TimeTick: 10, Term: 1})
+
+	kv.EXPECT().MaxTxnOps().Return(128).Maybe()
+	kv.EXPECT().Load(mock.Anything, key).Return(current, nil)
+	kv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return(merr.WrapErrIoFailedReason("failed to execute transaction"))
+
+	err := NewCataLog(kv).SaveRecoverySnapshot(context.Background(), "p1", &metastore.WALRecoverySnapshot{
+		ConsumeCheckpoint: &streamingpb.WALCheckpoint{TimeTick: 20, Term: 1},
+	})
+	assert.Error(t, err)
 }
