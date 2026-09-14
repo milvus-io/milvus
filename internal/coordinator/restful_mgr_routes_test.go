@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -500,6 +501,51 @@ func TestHandleGetConfig(t *testing.T) {
 
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assert.Contains(t, w.Body.String(), "keys")
+	})
+
+	t.Run("group member is readable after Remove and Save", func(t *testing.T) {
+		const key = "test.getconfig.group.member"
+		mgr.RegisterConfigPrefix("test.getconfig.group.")
+		mgr.SetMapConfig(key, "old-value")
+		t.Cleanup(func() { mgr.ResetConfig(key) })
+		base := paramtable.GetBaseTable()
+		require.NoError(t, base.Remove(key))
+		require.NoError(t, base.Save(key, "restored-value"))
+		req := httptest.NewRequest(http.MethodGet, "/management/config/get?keys="+key, nil)
+		w := httptest.NewRecorder()
+		coord.HandleGetConfig(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		configs := parseResponse(t, w)
+		require.Len(t, configs, 1)
+		assert.Equal(t, key, configs[0].Key)
+		assert.Equal(t, "restored-value", configs[0].Value)
+		assert.Equal(t, pkgconfig.RuntimeSource, configs[0].Source)
+		assert.Empty(t, configs[0].Error)
+	})
+
+	t.Run("missing sensitive keys return errors", func(t *testing.T) {
+		const scalar = "test.getconfig.missing.sensitive"
+		mgr.RegisterConfigKey(scalar)
+		mgr.RegisterSensitiveKey(scalar)
+		keys := []string{scalar, "credential.getconfig.missing"}
+		for _, key := range keys {
+			_, _, err := mgr.GetConfig(key)
+			require.ErrorIs(t, err, pkgconfig.ErrKeyNotFound)
+		}
+		req := httptest.NewRequest(http.MethodGet, "/management/config/get?keys="+strings.Join(keys, ","), nil)
+		w := httptest.NewRecorder()
+		coord.HandleGetConfig(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		configs := parseResponse(t, w)
+		require.Len(t, configs, len(keys))
+		for i, result := range configs {
+			assert.Equal(t, keys[i], result.Key)
+			assert.Contains(t, result.Error, "key not found")
+			assert.Empty(t, result.Value)
+			assert.Empty(t, result.Source)
+		}
 	})
 
 	t.Run("sensitive keys are redacted", func(t *testing.T) {

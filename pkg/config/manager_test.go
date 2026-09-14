@@ -474,6 +474,80 @@ func TestRegisteredGroupMemberSeesEtcdOverride(t *testing.T) {
 	assert.Equal(t, live, value)
 }
 
+func TestRegisteredSensitiveConfigMissing(t *testing.T) {
+	for _, key := range []string{"private.scalar", "private.group.member"} {
+		t.Run(key, func(t *testing.T) {
+			mgr := NewManager()
+			mgr.RegisterConfigKey("private.scalar")
+			mgr.RegisterSensitiveKey("private.scalar")
+			mgr.RegisterConfigPrefix("private.group.")
+			mgr.RegisterSensitivePrefix("private.group.")
+
+			assertMissing := func() {
+				t.Helper()
+				source, value, err := mgr.GetRegisteredConfig(key)
+				require.ErrorIs(t, err, ErrKeyNotFound)
+				assert.Empty(t, source)
+				assert.Empty(t, value)
+			}
+			assertMissing()
+			for _, storedValue := range []string{"", "private-value"} {
+				mgr.SetConfig(key, storedValue)
+				source, value, err := mgr.GetRegisteredConfig(key)
+				require.ErrorIs(t, err, ErrKeySensitive)
+				assert.Empty(t, source)
+				assert.Empty(t, value)
+			}
+			mgr.DeleteConfig(key)
+			assertMissing()
+			mgr.ResetConfig(key)
+			assertMissing()
+		})
+	}
+}
+
+func TestRegisteredSensitiveConfigSourceMissing(t *testing.T) {
+	const key = "private.scalar"
+	storedKey := formatKey(key)
+	mgr := NewManager()
+	mgr.RegisterConfigKey(key)
+	mgr.RegisterSensitiveKey(key)
+	source := &mapSource{name: "test", configs: map[string]string{storedKey: "private-value"}}
+	require.NoError(t, mgr.AddSource(source))
+	// Source publication can remove a value before its ownership DELETE event.
+	delete(source.configs, storedKey)
+	_, _, err := mgr.GetRegisteredConfig(key)
+	require.ErrorIs(t, err, ErrKeyNotFound)
+}
+
+func TestSetConfigAfterGroupDelete(t *testing.T) {
+	const key = "public.group.member"
+	spellings := []string{key, "public/group/member", "PUBLIC_GROUP_MEMBER", "PUBLICGROUPMEMBER"}
+	for _, removed := range spellings {
+		for _, saved := range spellings {
+			t.Run(removed+"/"+saved, func(t *testing.T) {
+				mgr := NewManager()
+				mgr.RegisterConfigPrefix("public.group.")
+				mgr.SetMapConfig(key, "old-value")
+				mgr.DeleteConfig(removed)
+				mgr.DeleteConfig("public.group.other")
+				mgr.SetConfig(saved, "restored-value")
+				for _, requested := range spellings {
+					_, raw, err := mgr.GetConfig(requested)
+					require.NoError(t, err)
+					source, projected, err := mgr.GetRegisteredConfig(requested)
+					require.NoError(t, err)
+					assert.Equal(t, "restored-value", raw)
+					assert.Equal(t, raw, projected)
+					assert.Equal(t, RuntimeSource, source)
+				}
+				_, _, err := mgr.GetRegisteredConfig("public.group.other")
+				require.ErrorIs(t, err, ErrKeyNotFound)
+			})
+		}
+	}
+}
+
 // A ParamGroup member has to be creatable, readable and deletable through the
 // management endpoints even when no yaml ever mentioned it: AlterConfigsInEtcd
 // stores it under the separator-free identity only, so a rule that demanded the

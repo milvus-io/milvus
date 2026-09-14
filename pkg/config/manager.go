@@ -251,10 +251,17 @@ func (m *Manager) GetRegisteredConfig(key string) (string, string, error) {
 	if resolved.kind == RegisteredConfigUnknown {
 		return "", "", errors.Wrap(ErrKeyUnregistered, key)
 	}
+	source, value, err := m.readResolved(resolved, key)
+	// Missing values, including deletion tombstones, retain the point-read
+	// contract even for sensitive keys. Other source errors remain protected
+	// by the sensitivity check because their text may contain configuration.
+	if errors.Is(err, ErrKeyNotFound) {
+		return "", "", err
+	}
 	if m.isSensitiveResolved(resolved) {
 		return "", "", errors.Wrap(ErrKeySensitive, key)
 	}
-	return m.readResolved(resolved, key)
+	return source, value, err
 }
 
 // readResolved reads a declared key under whichever of the two identities its
@@ -341,10 +348,19 @@ func (m *Manager) AddSource(source Source) error {
 func (m *Manager) SetConfig(key, value string) {
 	m.snapshotMutex.Lock()
 	defer m.snapshotMutex.Unlock()
+	realKey := formatKey(key)
 	if value != TombValue {
-		m.rememberValueIdentity(formatKey(key))
+		// DeleteConfig marks every alias. A later Save must retire those
+		// markers without replacing live dotted overlays from SaveGroup.
+		// The lookup spelling is overwritten below, so keep it until then.
+		for _, stored := range m.overlayKeys(key) {
+			if previous, ok := m.overlays.Get(stored); stored != realKey && ok && previous == TombValue {
+				m.overlays.Remove(stored)
+			}
+		}
+		m.rememberValueIdentity(realKey)
 	}
-	m.overlays.Insert(formatKey(key), value)
+	m.overlays.Insert(realKey, value)
 }
 
 func (m *Manager) SetMapConfig(key, value string) {

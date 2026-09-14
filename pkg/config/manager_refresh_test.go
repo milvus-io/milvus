@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -74,7 +75,12 @@ func assertRefreshSafe(t *testing.T, mgr *Manager) {
 	}
 	for _, key := range []string{refreshPublicKey, refreshSecretKey, formatKey(refreshPublicKey)} {
 		_, value, err := mgr.GetRegisteredConfig(key)
-		assert.ErrorIs(t, err, ErrKeySensitive)
+		assert.True(t, mgr.IsSensitive(key), "sensitivity history must survive removal")
+		// A removed or not-yet-indexed value now reports absence even when
+		// its identity remains sensitive.
+		if !errors.Is(err, ErrKeyNotFound) {
+			assert.ErrorIs(t, err, ErrKeySensitive)
+		}
 		assert.Empty(t, value)
 	}
 }
