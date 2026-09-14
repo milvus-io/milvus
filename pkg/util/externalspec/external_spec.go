@@ -174,8 +174,10 @@ func sortedKeys(m map[string]bool) []string {
 // Accepts two URI shapes — Milvus form (host=endpoint, path[0]=bucket) and
 // AWS form (host=bucket, endpoint from spec.extfs).
 //
-// For minio://, URI.host is treated as the endpoint; callers should use
-// minio://<endpoint>/<bucket>/<key>.
+// For minio:// without extfs.endpoint_url, use
+// minio://<endpoint>/<bucket>/<key> (host=endpoint).
+// With extfs.endpoint_url, use minio://<bucket>/<key> (host=bucket);
+// endpoint_url supplies the physical storage address.
 func ValidateExternalSource(source string) error {
 	if source == "" {
 		return merr.WrapErrParameterInvalidMsg("external_source is empty")
@@ -204,7 +206,7 @@ func ValidateExternalSource(source string) error {
 // validateEndpointURL validates the explicit endpoint mode. The presence of
 // endpoint_url makes external_source use the standard scheme://bucket/key
 // shape; the endpoint URL supplies the physical storage address.
-func validateEndpointURL(sourceScheme string, extfs map[string]string) (bool, error) {
+func validateEndpointURL(sourceURL *url.URL, extfs map[string]string) (bool, error) {
 	endpointURL, ok := extfs[ExtfsKeyEndpointURL]
 	if !ok {
 		return false, nil
@@ -213,6 +215,10 @@ func validateEndpointURL(sourceScheme string, extfs map[string]string) (bool, er
 		return false, merr.WrapErrParameterInvalidMsg("extfs.endpoint_url must be a non-empty URL without surrounding whitespace")
 	}
 
+	sourceScheme := ""
+	if sourceURL != nil {
+		sourceScheme = strings.ToLower(sourceURL.Scheme)
+	}
 	switch sourceScheme {
 	case SchemeS3, SchemeS3A, SchemeAWS, SchemeMinIO:
 	default:
@@ -223,12 +229,11 @@ func validateEndpointURL(sourceScheme string, extfs map[string]string) (bool, er
 
 	u, err := url.Parse(endpointURL)
 	if err != nil {
-		return false, merr.WrapErrParameterInvalidErr(err, "invalid extfs.endpoint_url")
+		return false, merr.WrapErrParameterInvalidMsg("extfs.endpoint_url is not a valid URL")
 	}
 	endpointScheme := strings.ToLower(u.Scheme)
 	if endpointScheme != "http" && endpointScheme != "https" {
-		return false, merr.WrapErrParameterInvalidMsg(
-			"extfs.endpoint_url scheme must be http or https, got %q", u.Scheme)
+		return false, merr.WrapErrParameterInvalidMsg("extfs.endpoint_url scheme must be http or https")
 	}
 	if u.Hostname() == "" {
 		return false, merr.WrapErrParameterInvalidMsg("extfs.endpoint_url must have a non-empty host")
@@ -239,7 +244,7 @@ func validateEndpointURL(sourceScheme string, extfs map[string]string) (bool, er
 	if port := u.Port(); port != "" {
 		portNumber, err := strconv.Atoi(port)
 		if err != nil || portNumber < 1 || portNumber > 65535 {
-			return false, merr.WrapErrParameterInvalidMsg("extfs.endpoint_url has invalid port %q", port)
+			return false, merr.WrapErrParameterInvalidMsg("extfs.endpoint_url has an invalid port")
 		}
 	}
 	if u.User != nil {
@@ -248,11 +253,16 @@ func validateEndpointURL(sourceScheme string, extfs map[string]string) (bool, er
 	if u.RawQuery != "" || u.ForceQuery {
 		return false, merr.WrapErrParameterInvalidMsg("extfs.endpoint_url must not contain a query")
 	}
-	if u.Fragment != "" {
+	if strings.Contains(endpointURL, "#") {
 		return false, merr.WrapErrParameterInvalidMsg("extfs.endpoint_url must not contain a fragment")
 	}
 	if escapedPath := u.EscapedPath(); escapedPath != "" && escapedPath != "/" {
-		return false, merr.WrapErrParameterInvalidMsg("extfs.endpoint_url must not contain a path, got %q", u.Path)
+		return false, merr.WrapErrParameterInvalidMsg("extfs.endpoint_url must not contain a path")
+	}
+	// Port() misses empty ports; any colon is invalid in a bucket-only host.
+	if sourceURL != nil && strings.Contains(sourceURL.Host, ":") {
+		return false, merr.WrapErrParameterInvalidMsg(
+			"external_source host must be a bucket name without a port when extfs.endpoint_url is set")
 	}
 	if _, ok := extfs[ExtfsKeyBucketName]; ok {
 		return false, merr.WrapErrParameterInvalidMsg(
@@ -356,7 +366,7 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 	if err == nil {
 		scheme = strings.ToLower(u.Scheme)
 	}
-	hasEndpointURL, err := validateEndpointURL(scheme, extfs)
+	hasEndpointURL, err := validateEndpointURL(u, extfs)
 	if err != nil {
 		return err
 	}
