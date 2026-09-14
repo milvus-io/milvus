@@ -662,7 +662,10 @@ func (suite *ServerSuite) expectGetRecoverInfo(collection int64) {
 			})
 		}
 	}
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collection, mock.Anything).Maybe().Return(vChannels, segmentInfos, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collection, mock.Anything, mock.Anything).Maybe().Return(vChannels, segmentInfos, nil)
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collection).Maybe().Return(vChannels, segmentInfos, nil)
+	suite.broker.EXPECT().GetIndexInfo(mock.Anything, collection, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Maybe().Return(map[int64][]*querypb.FieldIndexInfo{}, nil)
 }
 
 func (suite *ServerSuite) expectLoadAndReleasePartitions(querynode *mocks.MockQueryNode) {

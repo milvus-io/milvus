@@ -2435,13 +2435,20 @@ func (t *loadCollectionTask) Execute(ctx context.Context) (err error) {
 		zap.Any("schema", request.Schema),
 		zap.Int32("priority", int32(request.GetPriority())))
 	t.result, err = t.mixCoord.LoadCollection(ctx, request)
-	if err = merr.CheckRPCCall(t.result, err); err != nil {
+	if err != nil {
 		return merr.Wrap(err, "call query coordinator LoadCollection")
+	}
+	if t.result == nil {
+		return merr.CheckRPCCall(t.result, nil)
 	}
 	return nil
 }
 
 func (t *loadCollectionTask) PostExecute(ctx context.Context) error {
+	if t.result != nil && !merr.Ok(t.result) {
+		return nil
+	}
+
 	collID, err := globalMetaCache.GetCollectionID(ctx, t.GetDbName(), t.CollectionName)
 	log.Ctx(ctx).Debug("loadCollectionTask PostExecute",
 		zap.String("role", typeutil.ProxyRole),
@@ -2704,8 +2711,11 @@ func (t *loadPartitionsTask) Execute(ctx context.Context) error {
 		zap.Any("schema", request.Schema),
 		zap.Int32("priority", int32(request.GetPriority())))
 	t.result, err = t.mixCoord.LoadPartitions(ctx, request)
-	if err = merr.CheckRPCCall(t.result, err); err != nil {
+	if err != nil {
 		return err
+	}
+	if t.result == nil {
+		return merr.CheckRPCCall(t.result, nil)
 	}
 
 	return nil

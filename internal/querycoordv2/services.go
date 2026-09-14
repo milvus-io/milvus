@@ -229,7 +229,7 @@ func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 	if err := s.broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx, req); err != nil {
 		logger.Warn("failed to load collection", zap.Error(err))
 		metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
-		return merr.Status(err), nil
+		return statusWithLoadResourcePrecheckSuggestion(err), nil
 	}
 
 	logger.Info("load collection done")
@@ -302,7 +302,7 @@ func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitions
 	if err := s.broadcastAlterLoadConfigCollectionV2ForLoadPartitions(ctx, req); err != nil {
 		logger.Warn("failed to load partitions", zap.Error(err))
 		metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
-		return merr.Status(err), nil
+		return statusWithLoadResourcePrecheckSuggestion(err), nil
 	}
 	logger.Info("load partitions done")
 	metrics.QueryCoordLoadCount.WithLabelValues(metrics.SuccessLabel).Inc()
