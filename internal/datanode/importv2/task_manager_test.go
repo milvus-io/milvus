@@ -184,3 +184,70 @@ func TestUpdateSegmentInfoRefreshesStatsOnMerge(t *testing.T) {
 	assert.EqualValues(t, 250, got.GetStats().GetInsertBinlogSize(), "stats must reflect the latest cumulative snapshot")
 	assert.EqualValues(t, 3, got.GetStats().GetInsertBinlogCount())
 }
+
+// The task map stores a Clone on every Update, while the goroutines started by
+// Execute keep running against the context of the task that was originally
+// added. Remove cancels whatever the map holds, so Clone must carry that same
+// context forward -- a derived one would leave DropImport unable to stop the
+// import that is actually in flight.
+func TestTaskManagerRemoveCancelsRunningTask(t *testing.T) {
+	ctx1, cancel1 := context.WithCancel(context.Background())
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	ctx3, cancel3 := context.WithCancel(context.Background())
+	ctx4, cancel4 := context.WithCancel(context.Background())
+
+	cases := []struct {
+		task Task
+		ctx  context.Context
+	}{
+		{
+			task: &ImportTask{
+				ImportTaskV2: &datapb.ImportTaskV2{TaskID: 1, State: datapb.ImportTaskStateV2_Pending},
+				ctx:          ctx1,
+				cancel:       cancel1,
+			},
+			ctx: ctx1,
+		},
+		{
+			task: &L0ImportTask{
+				ImportTaskV2: &datapb.ImportTaskV2{TaskID: 2, State: datapb.ImportTaskStateV2_Pending},
+				ctx:          ctx2,
+				cancel:       cancel2,
+			},
+			ctx: ctx2,
+		},
+		{
+			task: &PreImportTask{
+				PreImportTask: &datapb.PreImportTask{TaskID: 3, State: datapb.ImportTaskStateV2_Pending},
+				ctx:           ctx3,
+				cancel:        cancel3,
+			},
+			ctx: ctx3,
+		},
+		{
+			task: &L0PreImportTask{
+				PreImportTask: &datapb.PreImportTask{TaskID: 4, State: datapb.ImportTaskStateV2_Pending},
+				ctx:           ctx4,
+				cancel:        cancel4,
+			},
+			ctx: ctx4,
+		},
+	}
+
+	manager := NewTaskManager()
+	for _, c := range cases {
+		manager.Add(c.task)
+		// Execute's first statement, which replaces the map entry with a clone.
+		manager.Update(c.task.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress))
+	}
+
+	for _, c := range cases {
+		manager.Remove(c.task.GetTaskID())
+		select {
+		case <-c.ctx.Done():
+		default:
+			assert.Failf(t, "running task was not canceled",
+				"task %d is still running after Remove", c.task.GetTaskID())
+		}
+	}
+}
