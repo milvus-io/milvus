@@ -22,6 +22,7 @@
 #include <arrow/util/base64.h>
 
 #include "PluginInterface.h"
+#include "common/CGoCatch.h"
 #include "common/EasyAssert.h"
 #include "common/common_type_c.h"
 #include "storage/KeyRetriever.h"
@@ -77,11 +78,6 @@ GetEncParams(CPluginContext* c_plugin_context,
         *out_key = key_buffer.release();
         *out_meta = metadata_buffer.release();
         return milvus::SuccessCStatus();
-
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
-    } catch (...) {
-        return milvus::FailureCStatus(milvus::ErrorCode::UnexpectedError,
-                                      "unknown exception");
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }

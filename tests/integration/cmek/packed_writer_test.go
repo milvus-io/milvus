@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -135,6 +136,22 @@ func TestFFIPackedWriterPreservesBinaryKey(t *testing.T) {
 			require.Equal(t, values, actual)
 		})
 	}
+
+	t.Run("key_allocation_failure", func(t *testing.T) {
+		t.Setenv("MILVUS_CMEK_FIXTURE_GET_KEY_BAD_ALLOC", "1")
+		cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}
+		writer, err := packed.NewFFIPackedWriter("allocation-failure", schema,
+			[]storagecommon.ColumnGroup{{Columns: []int{0}, GroupID: storagecommon.DefaultShortColumnGroupID}},
+			cfg, pluginContext, map[string]string{packed.PropertyWriterFormat: "parquet"})
+		if writer != nil {
+			defer writer.Destroy()
+		}
+		require.Error(t, err)
+		require.Nil(t, writer)
+		require.EqualValues(t, merr.CodeMemAllocateFailed, merr.Code(err))
+		require.Equal(t, merr.SystemError, merr.GetErrorType(err))
+		require.True(t, merr.Status(err).GetRetriable())
+	})
 }
 
 func fixtureHMAC(key []byte, domain string, nonce []byte, ids ...int64) []byte {

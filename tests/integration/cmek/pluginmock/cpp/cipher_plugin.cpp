@@ -25,6 +25,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <iomanip>
+#include <new>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -233,6 +234,11 @@ class FixtureEncryptor final : public IEncryptor {
 
     std::string
     GetKey() const override {
+        if (const char* failure =
+                std::getenv("MILVUS_CMEK_FIXTURE_GET_KEY_BAD_ALLOC");
+            failure != nullptr && std::string_view(failure) == "1") {
+            throw std::bad_alloc();
+        }
         return key_;
     }
 
