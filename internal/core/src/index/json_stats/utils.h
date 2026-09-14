@@ -61,6 +61,38 @@ JsonStringHasEscape(std::string_view s) {
     return std::memchr(s.data(), '\\', s.size()) != nullptr;
 }
 
+// Only the simdjson codes that describe the document itself are terminal: those
+// reproduce on every worker, so retrying the task cannot help. Everything else --
+// allocation and IO failures, but also the codes simdjson raises for its own
+// internal state (UNEXPECTED_ERROR, PARSER_IN_USE, UNINITIALIZED,
+// UNSUPPORTED_ARCHITECTURE, ...) -- keeps the generic classification and stays
+// retriable. The list is an allowlist on purpose: a simdjson upgrade that adds a
+// code must not silently turn it into a user-input error.
+inline ErrorCode
+JsonParseErrorCode(simdjson::error_code code) {
+    switch (code) {
+        case simdjson::TAPE_ERROR:
+        case simdjson::DEPTH_ERROR:
+        case simdjson::STRING_ERROR:
+        case simdjson::T_ATOM_ERROR:
+        case simdjson::F_ATOM_ERROR:
+        case simdjson::N_ATOM_ERROR:
+        case simdjson::NUMBER_ERROR:
+        case simdjson::UTF8_ERROR:
+        case simdjson::EMPTY:
+        case simdjson::UNESCAPED_CHARS:
+        case simdjson::UNCLOSED_STRING:
+        case simdjson::INCORRECT_TYPE:
+        case simdjson::NUMBER_OUT_OF_RANGE:
+        case simdjson::TRAILING_CONTENT:
+        case simdjson::INCOMPLETE_ARRAY_OR_OBJECT:
+        case simdjson::SCALAR_DOCUMENT_AS_VALUE:
+            return ErrorCode::JsonKeyInvalid;
+        default:
+            return ErrorCode::UnexpectedError;
+    }
+}
+
 // Unescape a JSON-escaped string slice (without surrounding quotes)
 // Returns a decoded UTF-8 std::string or throws on error
 inline std::string
@@ -77,17 +109,29 @@ UnescapeJsonString(const std::string& escaped) {
         quoted[quoted.size() - 1] = '"';
         simdjson::dom::element elem = parser.parse(quoted);
         if (elem.type() != simdjson::dom::element_type::STRING) {
-            ThrowInfo(ErrorCode::UnexpectedError,
+            // The value comes straight from the user document, so this is the
+            // caller's data being wrong, not an internal failure. Reporting it as
+            // the generic UnexpectedError makes the build task look retriable and
+            // it is then re-dispatched forever.
+            ThrowInfo(ErrorCode::JsonKeyInvalid,
                       "input is not a JSON string: {}",
                       escaped);
         }
         return std::string(std::string_view(elem.get_string()));
+    } catch (const SegcoreError&) {
+        // Already classified above; SegcoreError derives from std::runtime_error,
+        // so without this it would be swallowed by the generic handler below and
+        // rewrapped with a different error code.
+        throw;
     } catch (const simdjson::simdjson_error& e) {
-        ThrowInfo(ErrorCode::UnexpectedError,
+        // simdjson only fails here because the document itself is malformed.
+        ThrowInfo(JsonParseErrorCode(e.error()),
                   "Failed to unescape json string (simdjson): {}, {}",
                   escaped,
                   e.what());
     } catch (const std::exception& e) {
+        // Anything else (e.g. bad_alloc) is an internal condition that may well
+        // succeed on a retry, so it keeps the generic retriable classification.
         ThrowInfo(ErrorCode::UnexpectedError,
                   "Failed to unescape json string: {}, {}",
                   escaped,
