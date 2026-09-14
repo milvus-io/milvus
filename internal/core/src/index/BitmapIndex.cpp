@@ -382,7 +382,8 @@ BitmapIndex<T>::Upload(const Config& config) {
 
     this->file_manager_->AddFile(binary_set);
 
-    auto remote_path_to_size = this->file_manager_->GetRemotePathsToFileSize();
+    const auto& remote_path_to_size =
+        this->file_manager_->GetRemotePathsToFileSize();
     return IndexStats::NewFromSizeMap(
         this->file_manager_->GetAddedTotalMemSize(), remote_path_to_size);
 }
@@ -1448,7 +1449,7 @@ BitmapIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
     bool rebuild_validity_from_postings =
         schema_.nullable() && !is_nested_index_;
 
-    auto entry_names = reader.GetEntryNames();
+    const auto& entry_names = reader.GetEntryNames();
     if (std::find(entry_names.begin(),
                   entry_names.end(),
                   BITMAP_INDEX_VALID_BITSET) != entry_names.end()) {

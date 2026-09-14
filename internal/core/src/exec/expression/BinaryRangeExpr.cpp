@@ -684,8 +684,8 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJson(EvalCtx& context) {
         upper_arg_.SetValue<ValueType>(expr_->upper_val_);
         arg_inited_ = true;
     }
-    ValueType val1 = lower_arg_.GetValue<ValueType>();
-    ValueType val2 = upper_arg_.GetValue<ValueType>();
+    const ValueType& val1 = lower_arg_.GetValue<ValueType>();
+    const ValueType& val2 = upper_arg_.GetValue<ValueType>();
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
 
     size_t processed_cursor = 0;
@@ -703,8 +703,8 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJson(EvalCtx& context) {
             const int size,
             TargetBitmapView res,
             TargetBitmapView valid_res,
-            ValueType val1,
-            ValueType val2) {
+            const ValueType& val1,
+            const ValueType& val2) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.
         if (data == nullptr) {
@@ -1036,8 +1036,8 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForArray(EvalCtx& context) {
         upper_arg_.SetValue<ValueType>(expr_->upper_val_);
         arg_inited_ = true;
     }
-    ValueType val1 = lower_arg_.GetValue<ValueType>();
-    ValueType val2 = upper_arg_.GetValue<ValueType>();
+    const ValueType& val1 = lower_arg_.GetValue<ValueType>();
+    const ValueType& val2 = upper_arg_.GetValue<ValueType>();
 
     int index = -1;
     if (expr_->column_.nested_path_.size() > 0) {
@@ -1054,8 +1054,8 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForArray(EvalCtx& context) {
             const int size,
             TargetBitmapView res,
             TargetBitmapView valid_res,
-            ValueType val1,
-            ValueType val2,
+            const ValueType& val1,
+            const ValueType& val2,
             int index) {
         AssertInfo(index >= 0,
                    "array element range predicate requires nested path");

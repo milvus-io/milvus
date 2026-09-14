@@ -191,6 +191,48 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
     length_ += element_count;
 }
 
+template <typename Type, bool is_type_entire_row>
+void
+FieldDataImpl<Type, is_type_entire_row>::AppendOwnedRows(
+    std::vector<Type>&& values, const std::shared_ptr<arrow::Array>& array)
+    requires(std::is_same_v<Type, Array> || std::is_same_v<Type, VectorArray>)
+{
+    const auto element_count = array->length();
+    if (element_count == 0) {
+        return;
+    }
+    std::lock_guard lck(tell_mutex_);
+    const bool compact = nullable_ && std::is_same_v<Type, VectorArray>;
+    if (compact) {
+        std::lock_guard capacity_lock(num_rows_mutex_);
+        if (length_ + element_count > num_rows_) {
+            num_rows_ = length_ + element_count;
+            valid_data_.resize((num_rows_ + 7) / 8, 0xFF);
+        }
+        data_.resize(valid_count_ + values.size());
+    } else if (length_ + element_count > get_num_rows()) {
+        resize_field_data(length_ + element_count);
+    }
+
+    const auto target_offset = compact ? valid_count_ : length_;
+    if (!values.empty()) {
+        std::move(values.begin(), values.end(), data_.data() + target_offset);
+    }
+    if (nullable_ && array->null_bitmap_data() != nullptr) {
+        bitset::detail::ElementWiseBitsetPolicy<uint8_t>::op_copy(
+            array->null_bitmap_data(),
+            array->offset(),
+            valid_data_.data(),
+            length_,
+            element_count);
+    }
+    if (compact) {
+        valid_count_ += values.size();
+        null_count_ += element_count - values.size();
+    }
+    length_ += element_count;
+}
+
 template <typename ArrayType, arrow::Type::type ArrayDataType>
 std::pair<const void*, int64_t>
 GetDataInfoFromArray(const std::shared_ptr<arrow::Array> array) {
@@ -443,6 +485,13 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
                 }
                 values[index] = Array(field_data);
             }
+            if constexpr (std::is_same_v<Type, Array>) {
+                if (!nullable_) {
+                    AssertInfo(null_number == 0,
+                               "get empty string when not nullable");
+                }
+                return AppendOwnedRows(std::move(values), array);
+            }
             if (nullable_) {
                 return FillFieldData(values.data(),
                                      array->null_bitmap_data(),
@@ -555,23 +604,21 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
 
                         auto data_size = num_vectors * bytes_per_vec;
                         auto data_ptr =
-                            data_size > 0
-                                ? std::make_unique<uint8_t[]>(data_size)
-                                : nullptr;
+                            data_size > 0 ? std::make_unique<char[]>(data_size)
+                                          : nullptr;
 
                         for (int64_t i = 0; i < num_vectors; i++) {
                             const uint8_t* binary_data =
                                 binary_array->GetValue(start_offset + i);
-                            uint8_t* dest = data_ptr.get() + i * bytes_per_vec;
+                            char* dest = data_ptr.get() + i * bytes_per_vec;
                             milvus::fastmem::FastMemcpy(
                                 dest, binary_data, bytes_per_vec);
                         }
 
-                        values.emplace_back(
-                            static_cast<const void*>(data_ptr.get()),
-                            num_vectors,
-                            dim,
-                            element_type);
+                        values.emplace_back(std::move(data_ptr),
+                                            num_vectors,
+                                            dim,
+                                            element_type);
                     }
                     break;
                 }
@@ -579,6 +626,9 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
                     ThrowInfo(DataTypeInvalid,
                               "Unsupported element type {} in VectorArray",
                               GetDataTypeName(element_type));
+            }
+            if constexpr (std::is_same_v<Type, VectorArray>) {
+                return AppendOwnedRows(std::move(values), array);
             }
             if (nullable_) {
                 return FillFieldData(values.data(),

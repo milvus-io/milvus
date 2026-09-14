@@ -581,7 +581,7 @@ IndexEntryReader::ReadFooterAndDirectory() {
     }
 }
 
-std::vector<std::string>
+const std::vector<std::string>&
 IndexEntryReader::GetEntryNames() const {
     return entry_names_;
 }

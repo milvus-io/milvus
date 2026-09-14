@@ -155,12 +155,12 @@ class DiskFileManagerImpl : public FileManagerImpl {
     std::string
     GetLocalRawDataObjectPrefix();
 
-    std::map<std::string, int64_t>
+    const std::map<std::string, int64_t>&
     GetRemotePathsToFileSize() const {
         return remote_paths_to_size_;
     }
 
-    std::vector<std::string>
+    const std::vector<std::string>&
     GetLocalFilePaths() const {
         return local_paths_;
     }

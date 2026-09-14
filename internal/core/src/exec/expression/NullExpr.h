@@ -30,7 +30,7 @@ namespace exec {
 
 class PhyNullExpr : public SegmentExpr {
  public:
-    PhyNullExpr(const std::vector<std::shared_ptr<Expr>>& input,
+    PhyNullExpr(std::vector<std::shared_ptr<Expr>> input,
                 const std::shared_ptr<const milvus::expr::NullExpr>& expr,
                 const std::string& name,
                 milvus::OpContext* op_ctx,

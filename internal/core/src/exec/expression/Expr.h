@@ -270,7 +270,7 @@ ApplyValidMaskForCandidates(ValidityView validity,
 class Expr : public std::enable_shared_from_this<Expr> {
  public:
     Expr(DataType type,
-         const std::vector<std::shared_ptr<Expr>>&& inputs,
+         std::vector<std::shared_ptr<Expr>>&& inputs,
          const std::string& name,
          milvus::OpContext* op_ctx)
         : type_(type),
@@ -423,12 +423,12 @@ using ExprPtr = std::shared_ptr<milvus::exec::Expr>;
  */
 class SegmentExpr : public Expr {
  public:
-    SegmentExpr(const std::vector<ExprPtr>&& input,
+    SegmentExpr(std::vector<ExprPtr>&& input,
                 const std::string& name,
                 milvus::OpContext* op_ctx,
                 const segcore::SegmentInternalInterface* segment,
                 const FieldId field_id,
-                const std::vector<std::string> nested_path,
+                const std::vector<std::string>& nested_path,
                 const DataType value_type,
                 int64_t active_count,
                 int64_t batch_size,

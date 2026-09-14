@@ -92,8 +92,9 @@ class SingleElement : public BaseElement {
         }
     }
 
+    // Borrow the cached value until the next SetValue or destruction.
     template <typename T>
-    T
+    const T&
     GetValue() const {
         try {
             return std::get<T>(value_);

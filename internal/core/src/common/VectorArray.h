@@ -35,6 +35,21 @@ class VectorArray : public milvus::VectorTrait {
 
     ~VectorArray() = default;
 
+    VectorArray(std::unique_ptr<char[]> data,
+                int num_vectors,
+                int64_t dim,
+                DataType element_type)
+        : dim_(dim),
+          data_(std::move(data)),
+          length_(num_vectors),
+          size_(num_vectors *
+                milvus::vector_bytes_per_element(element_type, dim)),
+          element_type_(element_type) {
+        assert(data_ != nullptr || num_vectors == 0);
+        assert(num_vectors >= 0);
+        assert(dim > 0);
+    }
+
     VectorArray(const void* data,
                 int num_vectors,
                 int64_t dim,
