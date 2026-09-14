@@ -84,7 +84,7 @@ func (s *rawDataSuite) setupRawData(storageVersion int64) {
 	s.WithMilvusConfig("queryNode.segcore.interimIndex.enableIndex", "false")
 	s.WithMilvusConfig("queryNode.segcore.tieredStorage.warmup.scalarField", "sync")
 	s.WithMilvusConfig("queryNode.segcore.tieredStorage.warmup.vectorField", "sync")
-	s.MiniClusterSuite.SetupSuite()
+	s.SetupSuite()
 
 	ctx := s.Cluster.GetContext()
 	s.dbName = fmt.Sprintf("cmek_raw_v%d_%s", storageVersion, funcutil.GenRandomStr())

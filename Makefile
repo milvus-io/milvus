@@ -20,6 +20,9 @@ OBJPREFIX := "github.com/milvus-io/milvus/cmd/milvus"
 SONIC_PLUGIN_SYNC_TAG := bytedance_tango
 SONIC_PLUGIN_SYNC_LDFLAG := -checklinkname=0
 MILVUS_GO_BUILD_TAGS := dynamic,sonic,with_jemalloc,$(SONIC_PLUGIN_SYNC_TAG)
+ifeq ($(CMEK_TEST_OBSERVER),1)
+MILVUS_GO_BUILD_TAGS := $(MILVUS_GO_BUILD_TAGS),cmektest
+endif
 
 INSTALL_PATH := $(PWD)/bin
 LIBRARY_PATH := $(PWD)/lib
@@ -277,7 +280,7 @@ integration-test-base: getdeps
 	@(bash $(PWD)/scripts/run_intergration_test.sh --exclude-package ./cmek "$(INSTALL_PATH)/gotestsum --")
 
 integration-test-cmek: getdeps build-cmek-fixtures
-	@echo "Running CMEK scalar-index integration tests ..."
+	@echo "Running CMEK integration tests ..."
 	@(env MILVUS_CMEK_FIXTURE_DIR="$(CMEK_FIXTURE_PATH)" MILVUS_INTEGRATION_COVERAGE_APPEND="$(MILVUS_INTEGRATION_COVERAGE_APPEND)" bash $(PWD)/scripts/run_intergration_test.sh --package ./cmek "$(INSTALL_PATH)/gotestsum --")
 
 BUILD_TAGS = $(shell git describe --tags --always --dirty="-dev")

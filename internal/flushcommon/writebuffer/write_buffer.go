@@ -341,7 +341,7 @@ func newWriteBufferBase(channel string, metacache metacache.MetaCache, syncMgr s
 		syncPolicies:               option.syncPolicies,
 		flushTimestamp:             flushTs,
 		errHandler:                 option.errorHandler,
-		taskObserverCallback:       option.taskObserverCallback,
+		taskObserverCallback:       syncmgr.WithCMEKTaskObserver(channel, metacache.Collection(), option.taskObserverCallback),
 		allowGrowingSourceFlush:    allowGrowingSourceFlush,
 		growingSourceResolver:      growingSourceResolver,
 		growingSourceProgress:      make(map[int64]*growingSourceProgress),

@@ -18,26 +18,20 @@ package cmek
 
 import (
 	"bytes"
-	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"testing"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
-	"github.com/apache/arrow/go/v17/parquet"
-	"github.com/apache/arrow/go/v17/parquet/metadata"
-	"github.com/apache/arrow/go/v17/parquet/pqarrow"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/storagecommon"
@@ -98,24 +92,7 @@ func TestFFIPackedWriterPreservesBinaryKey(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, "PARE", string(raw[:4]))
 			require.Equal(t, "PARE", string(raw[len(raw)-4:]))
-			footerSize := int(binary.LittleEndian.Uint32(raw[len(raw)-8 : len(raw)-4]))
-			md, err := metadata.NewFileCryptoMetaData(raw[len(raw)-8-footerSize : len(raw)-8])
-			require.NoError(t, err)
-			parts := strings.SplitN(string(md.KeyMetadata()), "_", 3)
-			require.Len(t, parts, 3)
-			require.Equal(t, strconv.FormatInt(ezID, 10), parts[0])
-			require.Equal(t, strconv.FormatInt(collectionID, 10), parts[1])
-			// Derive the test fixture key independently of the C++ plugin.
-			edek := strings.Split(parts[2], ":")
-			require.Len(t, edek, 3)
-			require.Equal(t, "v1", edek[0])
-			nonce, err := hex.DecodeString(edek[1])
-			require.NoError(t, err)
-			require.Len(t, nonce, 16)
-			tag, err := hex.DecodeString(edek[2])
-			require.NoError(t, err)
-			require.True(t, hmac.Equal(tag, fixtureHMAC(ezKey, "edek-v1\x00", nonce, ezID, collectionID)))
-			key := fixtureHMAC(ezKey, "dek-v1\x00", nonce, ezID, collectionID)
+			key := fixtureParquetKey(t, raw, ezID, collectionID)
 			require.Len(t, key, 32)
 			require.Equal(t, offset, bytes.IndexByte(key, 0))
 			table, err := readParquetWithFooterKey(raw, key)
@@ -158,23 +135,6 @@ func TestFFIPackedWriterPreservesBinaryKey(t *testing.T) {
 			require.Equal(t, values, actual)
 		})
 	}
-}
-
-// Arrow Go reports GCM authentication failures as a panic. Convert only that
-// known footer-open failure into a test result; unexpected panics still fail.
-func readParquetWithFooterKey(raw, key []byte) (table arrow.Table, err error) {
-	defer func() {
-		if failure := recover(); failure != nil {
-			authError, ok := failure.(error)
-			if !ok || authError.Error() != "cipher: message authentication failed" {
-				panic(failure)
-			}
-			err = authError
-		}
-	}()
-	props := parquet.NewReaderProperties(memory.DefaultAllocator)
-	props.FileDecryptProps = parquet.NewFileDecryptionProperties(parquet.WithFooterKey(string(key)))
-	return pqarrow.ReadTable(context.Background(), bytes.NewReader(raw), props, pqarrow.ArrowReadProperties{}, memory.DefaultAllocator)
 }
 
 func fixtureHMAC(key []byte, domain string, nonce []byte, ids ...int64) []byte {

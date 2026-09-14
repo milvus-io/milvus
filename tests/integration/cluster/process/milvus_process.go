@@ -298,6 +298,11 @@ func (mp *MilvusProcess) GetNodeID() int64 {
 	return mp.nodeID
 }
 
+// GetPID identifies the actual child process that produces test observations.
+func (mp *MilvusProcess) GetPID() int {
+	return mp.cmd.Process.Pid
+}
+
 // IsWorking returns true if the Milvus process is working
 func (mp *MilvusProcess) IsWorking() bool {
 	return !mp.graceful.IsClosed()
