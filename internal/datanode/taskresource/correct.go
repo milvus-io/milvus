@@ -18,9 +18,9 @@
 // cpu/memory estimate DataCoord shipped with it.
 //
 // DataCoord prices a task from its meta and places it on the workers' ledgers.
-// The worker that receives the task knows more: the exact bytes of the fields
-// the task reads (a dense vector field is rows x dim x element size, every
-// other field is the sum of its binlog memory sizes carried in the request),
+// The worker that receives the task knows more: the size of the fields the
+// task reads, from the binlogs carried in the request bounded by the schema
+// (taskcommon.EstimateFieldSize),
 // how much the requested index type expands its input while it builds, and its
 // own machine, which bounds the families whose buffers are a share of it. The
 // functions here turn a request and DataCoord's estimate into the memory this
@@ -45,9 +45,15 @@
 package taskresource
 
 import (
+	"strconv"
+
+	"google.golang.org/protobuf/proto"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
@@ -73,18 +79,8 @@ func CorrectIndex(req *workerpb.CreateJobRequest, estimate taskcommon.Resource) 
 	if estimate.IsZero() {
 		return estimate
 	}
-	dataType := req.GetField().GetDataType()
-	if req.GetField() == nil {
-		dataType = req.GetFieldType()
-	}
-	fieldID := req.GetFieldID()
-	if req.GetField() != nil {
-		fieldID = req.GetField().GetFieldID()
-	}
-	raw := denseVectorBytes(dataType, req.GetDim(), req.GetNumRows())
-	if raw <= 0 {
-		raw = fieldBinlogMemory(req.GetInsertLogs(), fieldID)
-	}
+	field := indexedField(req)
+	raw := fieldSize(field, req.GetNumRows(), req.GetInsertLogs())
 	if raw <= 0 {
 		return estimate
 	}
@@ -93,11 +89,12 @@ func CorrectIndex(req *workerpb.CreateJobRequest, estimate taskcommon.Resource) 
 		raw:      raw,
 		rows:     req.GetNumRows(),
 		dim:      req.GetDim(),
-		dataType: dataType,
+		dataType: field.GetDataType(),
 		params:   params,
 	})
 	for _, optional := range req.GetOptionalScalarFields() {
-		memory += fieldBinlogMemory(req.GetInsertLogs(), optional.GetFieldID())
+		optionalField := &schemapb.FieldSchema{FieldID: optional.GetFieldID(), DataType: schemapb.DataType(optional.GetFieldType())}
+		memory += fieldSize(optionalField, req.GetNumRows(), req.GetInsertLogs())
 	}
 	return corrected(estimate, memory)
 }
@@ -113,16 +110,16 @@ func CorrectStats(req *workerpb.CreateStatsRequest, estimate taskcommon.Resource
 	logs := req.GetInsertLogs()
 	switch req.GetSubJobType() {
 	case indexpb.StatsSubJob_TextIndexJob:
-		return correctPerField(estimate, logs, textMatchFields(schema), tantivyBuild)
+		return correctPerField(estimate, schema, req.GetNumRows(), logs, textMatchFields(schema), tantivyBuild)
 	case indexpb.StatsSubJob_JsonKeyIndexJob:
 		tantivyMemory := max(req.GetJsonKeyStatsTantivyMemory(), 0)
-		return correctPerField(estimate, logs, jsonKeyStatsFields(schema), func(raw int64) int64 {
+		return correctPerField(estimate, schema, req.GetNumRows(), logs, jsonKeyStatsFields(schema), func(raw int64) int64 {
 			// The parsed documents and the shredded columns written from them,
 			// plus the key index writer's budget.
 			return 2*raw + tantivyMemory
 		})
 	case indexpb.StatsSubJob_BM25Job:
-		return correctPerField(estimate, logs, bm25OutputFields(schema), func(raw int64) int64 {
+		return correctPerField(estimate, schema, req.GetNumRows(), logs, bm25OutputFields(schema), func(raw int64) int64 {
 			return 2 * raw
 		})
 	case indexpb.StatsSubJob_Sort:
@@ -150,8 +147,11 @@ func CorrectAnalyze(req *workerpb.AnalyzeRequest, estimate taskcommon.Resource) 
 	for _, stats := range req.GetSegmentStats() {
 		rows += stats.GetNumRows()
 	}
-	raw := denseVectorBytes(req.GetFieldType(), req.GetDim(), rows)
-	if raw <= 0 {
+	raw, _, ok := taskcommon.SchemaFieldSize(&schemapb.FieldSchema{
+		DataType:   req.GetFieldType(),
+		TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: strconv.FormatInt(req.GetDim(), 10)}},
+	}, rows)
+	if !ok || raw <= 0 {
 		return estimate
 	}
 	train := raw
@@ -263,21 +263,59 @@ func corrected(estimate taskcommon.Resource, memory int64) taskcommon.Resource {
 }
 
 // correctPerField prices each target field with model and sums them. Without a
-// target field, or when any target field has no binlog bytes in the request,
-// the estimate stands: a partial sum would under-price the task.
-func correctPerField(estimate taskcommon.Resource, logs []*datapb.FieldBinlog, fields []int64, model func(raw int64) int64) taskcommon.Resource {
+// target field, or when any target field cannot be sized from the request, the
+// estimate stands: a partial sum would under-price the task.
+func correctPerField(estimate taskcommon.Resource, schema *schemapb.CollectionSchema, rows int64,
+	logs []*datapb.FieldBinlog, fields []int64, model func(raw int64) int64,
+) taskcommon.Resource {
 	if len(fields) == 0 {
 		return estimate
 	}
 	var memory int64
 	for _, fieldID := range fields {
-		raw := fieldBinlogMemory(logs, fieldID)
+		field := typeutil.GetFieldByID(schema, fieldID)
+		if field == nil {
+			return estimate
+		}
+		raw := fieldSize(field, rows, logs)
 		if raw <= 0 {
 			return estimate
 		}
 		memory += model(raw)
 	}
 	return corrected(estimate, memory)
+}
+
+// fieldSize is the size of rows values of field on this node: the smaller of
+// the schema's bound and the column group holding the field in logs
+// (taskcommon.EstimateFieldSize). Without the field's binlogs in the request
+// only an exact schema size counts; any other bound is no better than what
+// DataCoord priced on, so 0 tells the caller to keep the estimate.
+func fieldSize(field *schemapb.FieldSchema, rows int64, logs []*datapb.FieldBinlog) int64 {
+	if group := taskcommon.ColumnGroupSize(logs, field.GetFieldID()); group > 0 {
+		return taskcommon.EstimateFieldSize(field, rows, group)
+	}
+	if size, exact, _ := taskcommon.SchemaFieldSize(field, rows); exact {
+		return size
+	}
+	return 0
+}
+
+// indexedField is the schema of the indexed field. A request from a
+// coordinator that does not send the schema carries only its type and type
+// params; a dim carried outside the type params is folded in so a vector
+// field stays sizeable.
+func indexedField(req *workerpb.CreateJobRequest) *schemapb.FieldSchema {
+	field := req.GetField()
+	if field == nil {
+		field = &schemapb.FieldSchema{FieldID: req.GetFieldID(), DataType: req.GetFieldType(), TypeParams: req.GetTypeParams()}
+	} else {
+		field = proto.Clone(field).(*schemapb.FieldSchema)
+	}
+	if _, err := typeutil.GetDim(field); err != nil && req.GetDim() > 0 {
+		field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{Key: common.DimKey, Value: strconv.FormatInt(req.GetDim(), 10)})
+	}
+	return field
 }
 
 func textMatchFields(schema *schemapb.CollectionSchema) []int64 {
@@ -308,31 +346,6 @@ func bm25OutputFields(schema *schemapb.CollectionSchema) []int64 {
 		}
 	}
 	return fields
-}
-
-// denseVectorBytes is the exact size of rows fixed-dimension vectors, or 0
-// when the type is not one or the dim or rows are unknown.
-func denseVectorBytes(dataType schemapb.DataType, dim, rows int64) int64 {
-	if !typeutil.IsFixDimVectorType(dataType) || dim <= 0 || rows <= 0 {
-		return 0
-	}
-	return int64(float64(rows) * float64(dim) * typeutil.VectorTypeSize(dataType))
-}
-
-// fieldBinlogMemory sums the memory size of one field's binlogs, including a
-// struct-array parent's binlogs that carry the field as a child.
-func fieldBinlogMemory(logs []*datapb.FieldBinlog, fieldID int64) int64 {
-	var size int64
-	for _, fieldBinlog := range logs {
-		match := fieldBinlog.GetFieldID() == fieldID
-		for _, child := range fieldBinlog.GetChildFields() {
-			match = match || child == fieldID
-		}
-		if match {
-			size += binlogMemory([]*datapb.FieldBinlog{fieldBinlog})
-		}
-	}
-	return size
 }
 
 func binlogMemory(logs []*datapb.FieldBinlog) int64 {

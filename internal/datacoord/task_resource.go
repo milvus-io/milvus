@@ -261,135 +261,71 @@ func estimateSegmentSize(segment *SegmentInfo, schema *schemapb.CollectionSchema
 	return size
 }
 
-// estimateFieldSize returns the bytes of one field in a segment.
+// estimateFieldSize returns the bytes of one field in a segment: the smaller
+// of the schema's bound and the bytes of the binlogs that hold the field
+// (taskcommon.EstimateFieldSize). The scalar index task slot and the index and
+// stats memory estimates are all derived from this one size.
 //
-// The per-field binlog arrays are authoritative when present, but V3 segments
-// do not persist them (kv_catalog: paths live in the LOON manifest), so after
-// a DataCoord restart they are empty. Then the field is apportioned out of
-// the segment's insert size, see apportionFieldSize.
+// In storage v2/v3 a binlog holds a whole column group, so the container bound
+// is the group. V3 segments do not persist those binlogs (kv_catalog: paths
+// live in the LOON manifest), so after a DataCoord restart the group is
+// unknown; a variable-width field is then bounded by what the segment holds
+// beyond its fixed-width fields instead. A fixed-width field needs no
+// container: its schema size is exact.
 func estimateFieldSize(segment *SegmentInfo, schema *schemapb.CollectionSchema, fieldID int64) int64 {
 	if segment == nil || segment.SegmentInfo == nil {
 		return 0
 	}
-	if size := rawFieldBinlogSize(segment, fieldID); size > 0 {
-		return size
-	}
+	group := taskcommon.ColumnGroupSize(segment.GetBinlogs(), fieldID)
 	field := typeutil.GetFieldByID(schema, fieldID)
 	if field == nil {
-		// Unknown field: be conservative and charge the whole segment.
+		// Unknown field: be conservative, its group or the whole segment.
+		if group > 0 {
+			return group
+		}
 		return estimateSegmentSize(segment, schema)
 	}
-	size := apportionFieldSize(segment, schema, field)
-	if size <= 0 {
-		return estimateSegmentSize(segment, schema)
+	rows := segment.GetNumOfRows()
+	container := group
+	if _, exact, _ := taskcommon.SchemaFieldSize(field, rows); container <= 0 && !exact {
+		container = variableWidthResidual(segment, schema)
 	}
-	mlog.Warn(context.TODO(), "field has no binlog size, estimated from schema and segment statistics",
-		mlog.FieldSegmentID(segment.GetID()), mlog.FieldFieldID(fieldID), mlog.Int64("estimatedSize", size))
-	return size
+	if size := taskcommon.EstimateFieldSize(field, rows, container); size > 0 {
+		return size
+	}
+	// Neither bound is known (an unbounded type in a segment without size
+	// statistics, i.e. an external collection): the schema's per-row estimate.
+	if size := rows * fieldBytesPerRow(field); size > 0 {
+		mlog.Warn(context.TODO(), "field has neither a schema bound nor a known container, estimated per row",
+			mlog.FieldSegmentID(segment.GetID()), mlog.FieldFieldID(fieldID), mlog.Int64("estimatedSize", size))
+		return size
+	}
+	return estimateSegmentSize(segment, schema)
 }
 
-// apportionFieldSize sizes a field without binlogs from what is known exactly
-// and what is not.
-//
-// Fixed-width fields (numbers, bool, timestamps, dense vectors) are exact:
-// rows x width. The rest of the segment's insert bytes -- what is left after
-// every fixed-width field and the two system fields are subtracted -- belongs
-// to the variable-width fields (varchar, text, json, array, geometry, sparse
-// and array-of-vector), and is split among them in proportion to the schema's
-// per-row estimate of each. So the only guess is how the variable-width
-// fields share their residual, never the residual itself, and a segment with
-// one variable-width field prices it exactly.
-//
-// Without an insert size at all (an external collection) a variable-width
-// field falls back to rows x its per-row estimate.
-func apportionFieldSize(segment *SegmentInfo, schema *schemapb.CollectionSchema, field *schemapb.FieldSchema) int64 {
+// variableWidthResidual is an upper bound on the bytes of the segment's
+// variable-width fields together: its insert size minus every fixed-width
+// field and the system fields. 0 when the insert size is unknown or the
+// statistics are inconsistent.
+func variableWidthResidual(segment *SegmentInfo, schema *schemapb.CollectionSchema) int64 {
+	residual := segment.EnsureStats().GetInsertBinlogSize()
+	if residual <= 0 {
+		return 0
+	}
 	rows := segment.GetNumOfRows()
-	if rows <= 0 {
-		return 0
-	}
-	if width := fixedFieldWidth(field); width > 0 {
-		return rows * width
-	}
-
-	fieldEstimate := fieldBytesPerRow(field)
-	if fieldEstimate <= 0 {
-		return 0
-	}
-	insertSize := segment.EnsureStats().GetInsertBinlogSize()
-	if insertSize <= 0 {
-		return rows * fieldEstimate
-	}
-
-	// Residual: the insert bytes not accounted for by fixed-width fields.
-	residual := insertSize
-	var variableEstimate int64
 	hasSystemFields := false
 	for _, f := range typeutil.GetAllFieldSchemas(schema) {
 		if common.IsSystemField(f.GetFieldID()) {
 			hasSystemFields = true
 		}
-		if width := fixedFieldWidth(f); width > 0 {
-			residual -= rows * width
-			continue
+		if size, exact, _ := taskcommon.SchemaFieldSize(f, rows); exact {
+			residual -= size
 		}
-		variableEstimate += fieldBytesPerRow(f)
 	}
 	if !hasSystemFields {
-		// RowID and Timestamp are written with every segment but are not part of
-		// the collection schema DataCoord holds.
-		residual -= rows * systemFieldsWidth
+		residual -= rows * taskcommon.SystemFieldsBytesPerRow
 	}
-	if residual <= 0 || variableEstimate <= 0 {
-		return rows * fieldEstimate
-	}
-	return residual * fieldEstimate / variableEstimate
-}
-
-// systemFieldsWidth is the bytes per row of RowID and Timestamp, both int64.
-const systemFieldsWidth = 16
-
-// fixedFieldWidth returns the exact bytes per row of a fixed-width field, or 0
-// for a variable-width one.
-func fixedFieldWidth(field *schemapb.FieldSchema) int64 {
-	switch field.GetDataType() {
-	case schemapb.DataType_Bool, schemapb.DataType_Int8:
-		return 1
-	case schemapb.DataType_Int16:
-		return 2
-	case schemapb.DataType_Int32, schemapb.DataType_Float:
-		return 4
-	case schemapb.DataType_Int64, schemapb.DataType_Double, schemapb.DataType_Timestamptz:
-		return 8
-	case schemapb.DataType_FloatVector, schemapb.DataType_BinaryVector,
-		schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector, schemapb.DataType_Int8Vector:
-		return vectorFieldBytes(field, 1)
-	default:
-		return 0
-	}
-}
-
-// rawFieldBinlogSize is getFieldBinlogSize WITHOUT its whole-segment fallback,
-// so the caller can tell "no binlog bytes" from "small field".
-func rawFieldBinlogSize(segment *SegmentInfo, fieldID int64) int64 {
-	var size int64
-	for _, binlogs := range segment.GetBinlogs() {
-		match := binlogs.GetFieldID() == fieldID
-		if !match {
-			for _, child := range binlogs.GetChildFields() {
-				if child == fieldID {
-					match = true
-					break
-				}
-			}
-		}
-		if !match {
-			continue
-		}
-		for _, l := range binlogs.GetBinlogs() {
-			size += l.GetMemorySize()
-		}
-	}
-	return size
+	return max(residual, 0)
 }
 
 // vectorFieldBytes is the exact size of rows dense vectors, or 0 when the
@@ -398,16 +334,11 @@ func vectorFieldBytes(field *schemapb.FieldSchema, rows int64) int64 {
 	if !typeutil.IsVectorType(field.GetDataType()) || typeutil.IsSparseFloatVectorType(field.GetDataType()) {
 		return 0
 	}
-	dim, err := typeutil.GetDim(field)
-	if err != nil || dim <= 0 {
-		return 0
-	}
-	return int64(float64(rows) * float64(dim) * typeutil.VectorTypeSize(field.GetDataType()))
+	return rows * taskcommon.FixedFieldWidth(field)
 }
 
-// fieldBytesPerRow reuses EstimateSizePerRecord on a one-field schema so the
-// variable-width apportioning uses exactly the estimator the rest of DataCoord
-// uses.
+// fieldBytesPerRow reuses EstimateSizePerRecord on a one-field schema, the
+// estimator the rest of DataCoord uses, for a field no bound applies to.
 func fieldBytesPerRow(field *schemapb.FieldSchema) int64 {
 	n, err := typeutil.EstimateSizePerRecord(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}})
 	if err != nil {

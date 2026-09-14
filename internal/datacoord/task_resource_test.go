@@ -224,11 +224,13 @@ func TestEstimateSegmentSize(t *testing.T) {
 
 func TestEstimateFieldSize(t *testing.T) {
 	paramtable.Init()
-	schema := testResourceSchema()
+	schema := testResourceSchema() // pk int64 100, vec float32 dim 128 101, str varchar(64) 102
+	const rows = int64(1000)
+	varCharBound := rows * (64 + 4)
 
-	// Binlog bytes for the field exist: use them.
+	// storage v1: one binlog per field, bounded by the schema.
 	v1 := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
-		ID: 1, NumOfRows: 1000,
+		ID: 1, NumOfRows: rows,
 		Binlogs: []*datapb.FieldBinlog{
 			{FieldID: 101, Binlogs: []*datapb.Binlog{{MemorySize: 512000}}},
 			{FieldID: 102, Binlogs: []*datapb.Binlog{{MemorySize: 64000}}},
@@ -237,156 +239,108 @@ func TestEstimateFieldSize(t *testing.T) {
 	assert.Equal(t, int64(512000), estimateFieldSize(v1, schema, 101))
 	assert.Equal(t, int64(64000), estimateFieldSize(v1, schema, 102))
 
-	// A struct-array parent binlog carries its children's bytes.
-	withChildren := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
-		ID: 5, NumOfRows: 1000,
+	// storage v2/v3 with binlogs: the pk and the varchar share a 5MB short column
+	// group. Each is the smaller of its schema size and the group, not the group.
+	v2 := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID: 6, NumOfRows: rows, StorageVersion: 2,
 		Binlogs: []*datapb.FieldBinlog{
-			{FieldID: 200, ChildFields: []int64{101}, Binlogs: []*datapb.Binlog{{MemorySize: 4096}}},
+			{FieldID: 0, ChildFields: []int64{100, 102}, Binlogs: []*datapb.Binlog{{MemorySize: 5 * testMiB}}},
+			{FieldID: 101, ChildFields: []int64{101}, Binlogs: []*datapb.Binlog{{MemorySize: 4096}}},
 		},
 	}}
-	assert.Equal(t, int64(4096), estimateFieldSize(withChildren, schema, 101))
+	assert.Equal(t, rows*8, estimateFieldSize(v2, schema, 100))
+	assert.Equal(t, varCharBound, estimateFieldSize(v2, schema, 102))
+	// A group smaller than the schema size bounds the field.
+	assert.Equal(t, int64(4096), estimateFieldSize(v2, schema, 101))
 
-	// V3 after a DataCoord restart: Binlogs empty, Stats present. The vector
-	// field and the pk are exact (rows x width); the varchar, the only
-	// variable-width field, gets whatever the segment holds beyond them and the
-	// two system fields -- here its true 40 bytes per row, not the 64 its
-	// max_length would suggest.
-	strBytes := fieldBytesPerRow(typeutil.GetFieldByID(schema, 102))
-	assert.Greater(t, strBytes, int64(0))
-
-	total := int64(1000) * (systemFieldsWidth + 8 + 128*4 + 40)
+	// V3 after a DataCoord restart: no binlogs, Stats present. Fixed-width
+	// fields are exact; the varchar is bounded by what the segment holds beyond
+	// the fixed-width and system fields, 40 bytes a row here, below max_length.
+	total := rows * (taskcommon.SystemFieldsBytesPerRow + 8 + 128*4 + 40)
 	v3 := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
-		ID: 2, NumOfRows: 1000, StorageVersion: 3, ManifestPath: "m",
+		ID: 2, NumOfRows: rows, StorageVersion: 3, ManifestPath: "m",
 		Stats: &datapb.Statistics{InsertBinlogSize: total},
 	}}
-	assert.Equal(t, int64(1000*128*4), estimateFieldSize(v3, schema, 101))
-	assert.Equal(t, int64(1000*8), estimateFieldSize(v3, schema, 100))
-	assert.Equal(t, int64(1000*40), estimateFieldSize(v3, schema, 102))
+	assert.Equal(t, rows*128*4, estimateFieldSize(v3, schema, 101))
+	assert.Equal(t, rows*8, estimateFieldSize(v3, schema, 100))
+	assert.Equal(t, rows*40, estimateFieldSize(v3, schema, 102))
 
-	// External collection: no Stats either -> rows x per-field bytes.
-	external := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 3, NumOfRows: 1000, ManifestPath: "m"}}
-	assert.Equal(t, int64(1000*128*4), estimateFieldSize(external, schema, 101))
-	assert.Equal(t, int64(1000)*strBytes, estimateFieldSize(external, schema, 102))
+	// External collection: no Stats either, so the schema bound alone.
+	external := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 3, NumOfRows: rows, ManifestPath: "m"}}
+	assert.Equal(t, rows*128*4, estimateFieldSize(external, schema, 101))
+	assert.Equal(t, varCharBound, estimateFieldSize(external, schema, 102))
 
-	// Unknown field / nil schema: fall back to the whole segment size (conservative).
+	// Unknown field: its group, else the whole segment. Nil schema or segment.
+	assert.Equal(t, 5*testMiB, estimateFieldSize(v2, &schemapb.CollectionSchema{}, 100))
 	assert.Equal(t, total, estimateFieldSize(v3, schema, 999))
 	assert.Equal(t, int64(0), estimateFieldSize(external, nil, 101))
 	assert.Equal(t, int64(0), estimateFieldSize(nil, schema, 101))
 	assert.Equal(t, int64(0), estimateFieldSize(&SegmentInfo{}, schema, 101))
 
-	// A vector field whose dim cannot be resolved is neither fixed-width nor
-	// estimable, so it falls back to the whole segment; with no size known at
-	// all there is nothing to fall back to.
+	// No bound and no container: the per-row estimate, else the segment size.
+	jsonSchema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 103, Name: "meta", DataType: schemapb.DataType_JSON},
+	}}
+	jsonPerRow := fieldBytesPerRow(jsonSchema.Fields[0])
+	assert.Greater(t, jsonPerRow, int64(0))
+	assert.Equal(t, rows*jsonPerRow, estimateFieldSize(external, jsonSchema, 103))
 	dimless := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 		{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector},
 	}}
 	assert.Equal(t, int64(0), estimateFieldSize(external, dimless, 101))
-
-	// A field the estimator rejects outright (varchar without max_length) has no
-	// per-row size, so apportioning is abandoned for the whole-segment fallback.
 	unsizable := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 		{FieldID: 102, Name: "str", DataType: schemapb.DataType_VarChar},
 	}}
 	assert.Equal(t, int64(0), fieldBytesPerRow(unsizable.Fields[0]))
 	assert.Equal(t, int64(0), estimateFieldSize(external, unsizable, 102))
+
+	// vectorFieldBytes refuses sparse vectors: they have no dim to multiply.
+	dim := []*commonpb.KeyValuePair{{Key: "dim", Value: "8"}}
+	assert.Equal(t, int64(0), vectorFieldBytes(&schemapb.FieldSchema{DataType: schemapb.DataType_SparseFloatVector, TypeParams: dim}, 10))
+	assert.Equal(t, int64(320), vectorFieldBytes(&schemapb.FieldSchema{DataType: schemapb.DataType_FloatVector, TypeParams: dim}, 10))
 }
 
-func TestApportionFieldSize(t *testing.T) {
+func TestVariableWidthResidual(t *testing.T) {
 	paramtable.Init()
 	schema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
 			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 			{FieldID: 101, Name: "vec", DataType: schemapb.DataType_Float16Vector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "16"}}},
 			{FieldID: 102, Name: "short", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "max_length", Value: "40"}}},
-			{FieldID: 103, Name: "long", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "max_length", Value: "160"}}},
+			{FieldID: 103, Name: "meta", DataType: schemapb.DataType_JSON},
 			{FieldID: 104, Name: "flag", DataType: schemapb.DataType_Bool},
 		},
 	}
-	field := func(id int64) *schemapb.FieldSchema { return typeutil.GetFieldByID(schema, id) }
 	const rows = int64(1000)
-	// Exact part: 16 system + 8 pk + 32 vec + 1 bool = 57 bytes per row.
-	const exactPerRow = systemFieldsWidth + 8 + 16*2 + 1
-	// The two varchars really hold 200 bytes per row between them.
+	// Fixed part: 16 system + 8 pk + 32 vec + 1 bool = 57 bytes a row; the
+	// varchar and the json hold 300 bytes a row between them.
 	segment := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 		ID: 1, NumOfRows: rows, StorageVersion: 3,
-		Stats: &datapb.Statistics{InsertBinlogSize: rows * (exactPerRow + 200)},
+		Stats: &datapb.Statistics{InsertBinlogSize: rows * (taskcommon.SystemFieldsBytesPerRow + 8 + 32 + 1 + 300)},
 	}}
+	assert.Equal(t, rows*300, variableWidthResidual(segment, schema))
 
-	// Fixed-width fields are exact whatever the residual.
-	assert.Equal(t, rows*8, apportionFieldSize(segment, schema, field(100)))
-	assert.Equal(t, rows*32, apportionFieldSize(segment, schema, field(101)))
-	assert.Equal(t, rows*1, apportionFieldSize(segment, schema, field(104)))
+	// The varchar is its max_length bound, below the residual; the unbounded
+	// json is the whole residual, which is conservative.
+	assert.Equal(t, rows*(40+4), estimateFieldSize(segment, schema, 102))
+	assert.Equal(t, rows*300, estimateFieldSize(segment, schema, 103))
+	// Fixed-width fields never take the residual as their container.
+	assert.Equal(t, rows*8, estimateFieldSize(segment, schema, 100))
+	assert.Equal(t, rows*1, estimateFieldSize(segment, schema, 104))
 
-	// The residual (200 bytes per row) is split by the schema's per-row
-	// estimate of each variable-width field: 40 : 160. Together they account
-	// for exactly the residual, never more.
-	short := apportionFieldSize(segment, schema, field(102))
-	long := apportionFieldSize(segment, schema, field(103))
-	assert.Equal(t, rows*40, short)
-	assert.Equal(t, rows*160, long)
-	assert.Equal(t, rows*200, short+long)
-
-	// A schema that already lists the system fields is not charged for them twice.
+	// A schema that already lists the system fields is not charged twice.
 	withSystem := &schemapb.CollectionSchema{Fields: append([]*schemapb.FieldSchema{
 		{FieldID: common.RowIDField, Name: "RowID", DataType: schemapb.DataType_Int64},
 		{FieldID: common.TimeStampField, Name: "Timestamp", DataType: schemapb.DataType_Int64},
 	}, schema.Fields...)}
-	assert.Equal(t, rows*40, apportionFieldSize(segment, withSystem, field(102)))
+	assert.Equal(t, rows*300, variableWidthResidual(segment, withSystem))
 
-	// Insert size smaller than the exact part (inconsistent stats): the
-	// variable-width field falls back to rows x its per-row estimate.
+	// Inconsistent or missing statistics give no residual.
 	inconsistent := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 		ID: 2, NumOfRows: rows, Stats: &datapb.Statistics{InsertBinlogSize: rows * 10},
 	}}
-	assert.Equal(t, rows*fieldBytesPerRow(field(102)), apportionFieldSize(inconsistent, schema, field(102)))
-	// So does a segment with no insert size at all.
-	unsized := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 3, NumOfRows: rows}}
-	assert.Equal(t, rows*fieldBytesPerRow(field(103)), apportionFieldSize(unsized, schema, field(103)))
-	// Fixed-width fields stay exact without an insert size.
-	assert.Equal(t, rows*32, apportionFieldSize(unsized, schema, field(101)))
-
-	// No rows, nothing to apportion; an unsizable field (varchar without
-	// max_length) has no share to claim.
-	assert.Equal(t, int64(0), apportionFieldSize(&SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 4}}, schema, field(102)))
-	assert.Equal(t, int64(0), apportionFieldSize(segment, schema, &schemapb.FieldSchema{FieldID: 105, DataType: schemapb.DataType_VarChar}))
-
-	// A struct-array child field counts among the variable-width fields.
-	nested := &schemapb.CollectionSchema{
-		Fields: schema.Fields[:2],
-		StructArrayFields: []*schemapb.StructArrayFieldSchema{{FieldID: 200, Fields: []*schemapb.FieldSchema{
-			{
-				FieldID: 201, Name: "tags", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_VarChar,
-				TypeParams: []*commonpb.KeyValuePair{{Key: "max_length", Value: "8"}, {Key: "max_capacity", Value: "4"}},
-			},
-		}}},
-	}
-	nestedSeg := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
-		ID: 5, NumOfRows: rows, Stats: &datapb.Statistics{InsertBinlogSize: rows * (systemFieldsWidth + 8 + 32 + 20)},
-	}}
-	assert.Equal(t, rows*20, apportionFieldSize(nestedSeg, nested, nested.StructArrayFields[0].Fields[0]))
-}
-
-func TestFixedFieldWidth(t *testing.T) {
-	dim := []*commonpb.KeyValuePair{{Key: "dim", Value: "8"}}
-	for dt, want := range map[schemapb.DataType]int64{
-		schemapb.DataType_Bool: 1, schemapb.DataType_Int8: 1, schemapb.DataType_Int16: 2,
-		schemapb.DataType_Int32: 4, schemapb.DataType_Float: 4,
-		schemapb.DataType_Int64: 8, schemapb.DataType_Double: 8, schemapb.DataType_Timestamptz: 8,
-		schemapb.DataType_VarChar: 0, schemapb.DataType_JSON: 0, schemapb.DataType_Array: 0,
-		schemapb.DataType_SparseFloatVector: 0, schemapb.DataType_ArrayOfVector: 0,
-	} {
-		assert.Equal(t, want, fixedFieldWidth(&schemapb.FieldSchema{DataType: dt, TypeParams: dim}), dt.String())
-	}
-	for dt, want := range map[schemapb.DataType]int64{
-		schemapb.DataType_FloatVector: 32, schemapb.DataType_Float16Vector: 16, schemapb.DataType_BFloat16Vector: 16,
-		schemapb.DataType_BinaryVector: 1, schemapb.DataType_Int8Vector: 8,
-	} {
-		assert.Equal(t, want, fixedFieldWidth(&schemapb.FieldSchema{DataType: dt, TypeParams: dim}), dt.String())
-	}
-	// A dense vector without a dim is not sizeable.
-	assert.Equal(t, int64(0), fixedFieldWidth(&schemapb.FieldSchema{DataType: schemapb.DataType_FloatVector}))
-	// vectorFieldBytes refuses sparse vectors: they have no dim to multiply.
-	assert.Equal(t, int64(0), vectorFieldBytes(&schemapb.FieldSchema{DataType: schemapb.DataType_SparseFloatVector, TypeParams: dim}, 10))
+	assert.Equal(t, int64(0), variableWidthResidual(inconsistent, schema))
+	assert.Equal(t, int64(0), variableWidthResidual(&SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 3, NumOfRows: rows}}, schema))
 }
 
 func TestResourceCache(t *testing.T) {

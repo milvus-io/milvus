@@ -37,7 +37,7 @@ import (
 // familySegmentSize is the segment size the fixture below reports through
 // Stats: 1000 rows of (RowID + Timestamp + int64 pk + 128-dim float vector +
 // 64-byte varchar), the system fields included as every segment writes them.
-const familySegmentSize = int64(1000 * (systemFieldsWidth + 8 + 512 + 64))
+const familySegmentSize = int64(1000 * (taskcommon.SystemFieldsBytesPerRow + 8 + 512 + 64))
 
 // familyMeta builds a meta with one collection (schema from testResourceSchema),
 // one segment (V3 shape: no binlogs, Stats present) and one HNSW index on the
@@ -104,7 +104,7 @@ func bigFamilyMeta(t *testing.T) *meta {
 	mt := familyMeta(t)
 	seg := mt.segments.segments[3]
 	seg.NumOfRows = bigFamilyRows
-	seg.Stats = &datapb.Statistics{InsertBinlogSize: bigFamilyRows * (systemFieldsWidth + 8 + 512 + 64)}
+	seg.Stats = &datapb.Statistics{InsertBinlogSize: bigFamilyRows * (taskcommon.SystemFieldsBytesPerRow + 8 + 512 + 64)}
 	return mt
 }
 
@@ -211,6 +211,35 @@ func TestTaskResource_Stats(t *testing.T) {
 	assert.Equal(t, defaultTaskResource(), orphan.GetTaskResource())
 }
 
+// TestIndexInspector_EstimateIndexFieldSize: the scalar task slot is derived
+// from the same field size the memory estimate uses, so an Int64 sharing a big
+// short column group gets the slot of its own bytes, not of the group.
+func TestIndexInspector_EstimateIndexFieldSize(t *testing.T) {
+	paramtable.Init()
+	mt := bigFamilyMeta(t)
+	seg := mt.segments.segments[3]
+	seg.Binlogs = []*datapb.FieldBinlog{
+		{FieldID: 0, ChildFields: []int64{100, 102}, Binlogs: []*datapb.Binlog{{MemorySize: 150 * testMiB}}},
+	}
+	inspector := &indexInspector{meta: mt}
+
+	fieldSize := inspector.estimateIndexFieldSize(seg, 100)
+	assert.Equal(t, bigFamilyRows*8, fieldSize)
+	assert.Equal(t, int64(1), calculateIndexTaskSlot(fieldSize, false))
+	assert.Equal(t, int64(4), calculateIndexTaskSlot(seg.getFieldBinlogSize(100), false), "the group alone would take 4 slots")
+
+	// Without a cached schema the slot falls back to the binlog size, as before.
+	mt.collections = typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+	assert.Equal(t, 150*testMiB, inspector.estimateIndexFieldSize(seg, 100))
+
+	// Nothing to estimate at all: the old fallback, whatever it yields.
+	mt.collections.Insert(1, &collectionInfo{ID: 1, Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector},
+	}}})
+	empty := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 9, CollectionID: 1}}
+	assert.Equal(t, empty.getFieldBinlogSize(101), inspector.estimateIndexFieldSize(empty, 101))
+}
+
 // TestTaskResource_StatsTargetsFields: a text-match stats task reads only the
 // fields with enable_match, so it is priced on those, not on the vector that
 // dominates the segment.
@@ -230,7 +259,7 @@ func TestTaskResource_StatsTargetsFields(t *testing.T) {
 	// The varchar is the only variable-width field: exactly 64 bytes per row.
 	assert.Equal(t, statsTaskResource(bigFamilyRows*64), st.GetTaskResource())
 	assert.Equal(t, statsTaskResource(bigFamilyRows*64), st.GetTaskResource()) // cached
-	assert.Less(t, st.GetTaskResource().Memory, statsTaskResource(bigFamilyRows*(systemFieldsWidth+8+512+64)).Memory)
+	assert.Less(t, st.GetTaskResource().Memory, statsTaskResource(bigFamilyRows*(taskcommon.SystemFieldsBytesPerRow+8+512+64)).Memory)
 }
 
 // TestTaskResource_StatsSchemaCacheMiss: without a schema the targeted fields
@@ -239,7 +268,7 @@ func TestTaskResource_StatsTargetsFields(t *testing.T) {
 func TestTaskResource_StatsSchemaCacheMiss(t *testing.T) {
 	paramtable.Init()
 	mt := bigFamilyMeta(t)
-	segmentSize := bigFamilyRows * (systemFieldsWidth + 8 + 512 + 64)
+	segmentSize := bigFamilyRows * (taskcommon.SystemFieldsBytesPerRow + 8 + 512 + 64)
 	schema := testResourceSchema()
 	str := typeutil.GetFieldByID(schema, 102)
 	str.TypeParams = append(str.TypeParams,

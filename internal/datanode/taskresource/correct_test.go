@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -114,20 +115,48 @@ func TestCorrectIndex_VectorFieldIsExact(t *testing.T) {
 }
 
 func TestCorrectIndex_ScalarFieldFromBinlogs(t *testing.T) {
+	// An Int64 in a 200MB short column group: the field is the smaller of its
+	// schema size (10M x 8 = 80MB) and the group, not the whole group.
+	const rows = int64(10_000_000)
 	req := &workerpb.CreateJobRequest{
 		Field:       &schemapb.FieldSchema{FieldID: 102, DataType: schemapb.DataType_Int64},
-		NumRows:     1000,
+		NumRows:     rows,
 		IndexParams: []*commonpb.KeyValuePair{kv("index_type", "STL_SORT")},
-		InsertLogs:  []*datapb.FieldBinlog{binlogs(101, gib), binlogs(102, 100*mib, 100*mib)},
+		InsertLogs: []*datapb.FieldBinlog{
+			binlogs(101, gib),
+			{FieldID: 1, ChildFields: []int64{102, 103}, Binlogs: []*datapb.Binlog{{MemorySize: 100 * mib}, {MemorySize: 100 * mib}}},
+		},
 	}
-	raw := 200 * mib
-	assert.Equal(t, 2*raw+1000*4+1000/8+1, CorrectIndex(req, estimate).Memory)
+	raw := rows * 8
+	sortMemory := 2*raw + rows*4 + rows/8 + 1
+	assert.Equal(t, sortMemory, CorrectIndex(req, estimate).Memory)
 
-	// Optional scalar fields the build loads are added.
+	// A group smaller than the schema size bounds the field instead.
+	small := proto.Clone(req).(*workerpb.CreateJobRequest)
+	small.InsertLogs[1].Binlogs = []*datapb.Binlog{{MemorySize: 50 * mib}}
+	assert.Equal(t, 2*50*mib+rows*4+rows/8+1, CorrectIndex(small, estimate).Memory)
+
+	// Optional scalar fields the build loads are added, sized the same way: an
+	// untyped one by its binlogs, a typed fixed-width one by its schema size.
 	req.OptionalScalarFields = []*indexpb.OptionalFieldInfo{{FieldID: 101}}
-	assert.Equal(t, 2*raw+1000*4+1000/8+1+gib, CorrectIndex(req, estimate).Memory)
+	assert.Equal(t, sortMemory+gib, CorrectIndex(req, estimate).Memory)
+	req.OptionalScalarFields = []*indexpb.OptionalFieldInfo{{FieldID: 101, FieldType: int32(schemapb.DataType_Int32)}}
+	assert.Equal(t, sortMemory+rows*4, CorrectIndex(req, estimate).Memory)
 
-	// A struct-array child is counted through its parent's binlogs.
+	// A varchar is bounded by max_length when its group is larger.
+	varChar := &workerpb.CreateJobRequest{
+		Field: &schemapb.FieldSchema{
+			FieldID: 104, DataType: schemapb.DataType_VarChar,
+			TypeParams: []*commonpb.KeyValuePair{kv("max_length", "16")},
+		},
+		NumRows:     rows,
+		IndexParams: []*commonpb.KeyValuePair{kv("index_type", "SOME_FUTURE_INDEX")},
+		InsertLogs:  []*datapb.FieldBinlog{{FieldID: 1, ChildFields: []int64{104}, Binlogs: []*datapb.Binlog{{MemorySize: 4 * gib}}}},
+	}
+	factor := paramtable.Get().DataCoordCfg.TaskResourceIndexMemoryFactor.GetAsFloat()
+	assert.Equal(t, int64(float64(rows*(16+4))*factor), CorrectIndex(varChar, estimate).Memory)
+
+	// A struct-array child has no schema bound: its parent's binlogs.
 	child := &workerpb.CreateJobRequest{
 		Field:       &schemapb.FieldSchema{FieldID: 201, DataType: schemapb.DataType_Array},
 		NumRows:     1000,
@@ -135,6 +164,14 @@ func TestCorrectIndex_ScalarFieldFromBinlogs(t *testing.T) {
 		InsertLogs:  []*datapb.FieldBinlog{{FieldID: 200, ChildFields: []int64{201}, Binlogs: []*datapb.Binlog{{MemorySize: 80 * mib}}}},
 	}
 	assert.Equal(t, 80*mib+160*mib, CorrectIndex(child, estimate).Memory)
+
+	// Without binlogs a fixed-width field is still exact.
+	noLogs := &workerpb.CreateJobRequest{
+		Field:       &schemapb.FieldSchema{FieldID: 102, DataType: schemapb.DataType_Int64},
+		NumRows:     rows,
+		IndexParams: []*commonpb.KeyValuePair{kv("index_type", "STL_SORT")},
+	}
+	assert.Equal(t, sortMemory, CorrectIndex(noLogs, estimate).Memory)
 }
 
 // The V3-after-restart shape: no binlogs for a scalar field. The request has
@@ -301,6 +338,11 @@ func TestCorrectStats(t *testing.T) {
 	// added later): a partial sum would under-price, so the estimate stands.
 	partial := &workerpb.CreateStatsRequest{SubJobType: indexpb.StatsSubJob_TextIndexJob, Schema: schema, InsertLogs: logs[:2]}
 	assert.Equal(t, estimate, CorrectStats(partial, estimate))
+	// A BM25 output field the schema does not list.
+	orphanBM25 := &workerpb.CreateStatsRequest{SubJobType: indexpb.StatsSubJob_BM25Job, InsertLogs: logs, Schema: &schemapb.CollectionSchema{
+		Functions: []*schemapb.FunctionSchema{{Type: schemapb.FunctionType_BM25, OutputFieldIds: []int64{104}}},
+	}}
+	assert.Equal(t, estimate, CorrectStats(orphanBM25, estimate))
 	// No target field at all.
 	noText := &workerpb.CreateStatsRequest{SubJobType: indexpb.StatsSubJob_TextIndexJob, Schema: &schemapb.CollectionSchema{Fields: schema.Fields[:1]}, InsertLogs: logs}
 	assert.Equal(t, estimate, CorrectStats(noText, estimate))
