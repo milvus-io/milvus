@@ -65,31 +65,43 @@ namespace {
 void
 ParseStrictGroupSettings(SearchInfo& info) {
     auto& params = info.search_params_;
-    if (auto it = params.find(kStrictGroupAcceptanceThreshold);
-        it != params.end()) {
-        if (!it->is_number()) {
+    if (auto it = params.find(kStrictGroupSkipRefine); it != params.end()) {
+        if (!it->is_boolean()) {
             ThrowInfo(InvalidParameter,
-                      "strict group acceptance must be numeric");
+                      "strict group skip refine must be boolean");
         }
-        auto value = it->get<double>();
-        if (!std::isfinite(value) || value < 0 || value > 1) {
-            ThrowInfo(InvalidParameter,
-                      "strict group acceptance must be in [0,1]");
-        }
-        info.strict_group_acceptance_threshold_ = value;
+        info.strict_group_skip_refine_ = it->get<bool>();
         params.erase(it);
     }
-    if (auto it = params.find(kStrictGroupProbeCandidates);
+    if (auto it = params.find(kStrictGroupPhase1MaxCandidates);
         it != params.end()) {
         if (!it->is_number_integer() ||
             (it->is_number_unsigned() &&
              it->get<uint64_t>() >
                  static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) ||
-            it->get<int64_t>() <= 0) {
-            ThrowInfo(InvalidParameter,
-                      "strict group probe must be a positive int64");
+            it->get<int64_t>() < 0) {
+            ThrowInfo(
+                InvalidParameter,
+                "strict group phase-one budget must be a nonnegative int64");
         }
-        info.strict_group_probe_candidates_ = it->get<int64_t>();
+        info.strict_group_phase1_max_candidates_ = it->get<int64_t>();
+        params.erase(it);
+    }
+    if (auto it = params.find(kStrictGroupDebug); it != params.end()) {
+        if (!it->is_boolean()) {
+            ThrowInfo(InvalidParameter, "strict group debug must be boolean");
+        }
+        info.strict_group_debug_ = it->get<bool>();
+        params.erase(it);
+    }
+    if (auto it = params.find(kStrictGroupStrategy); it != params.end()) {
+        if (!it->is_string() || (*it != "original" && *it != "per_group")) {
+            ThrowInfo(InvalidParameter,
+                      "strict group strategy must be original or per_group");
+        }
+        info.strict_group_strategy_ = *it == "per_group"
+                                          ? StrictGroupStrategy::PerGroup
+                                          : StrictGroupStrategy::Original;
         params.erase(it);
     }
 }

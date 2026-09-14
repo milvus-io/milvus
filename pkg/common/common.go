@@ -339,8 +339,10 @@ const (
 	WithOptimizeKey                   = "with_optimize"
 	CollectionKey                     = "collection"
 	RecallEvalKey                     = "recall_eval"
-	StrictGroupAcceptanceThresholdKey = "strict_group_acceptance_threshold"
-	StrictGroupProbeCandidatesKey     = "strict_group_probe_candidates"
+	StrictGroupStrategyKey            = "strict_group_strategy"
+	StrictGroupDebugKey               = "strict_group_debug"
+	StrictGroupPhase1MaxCandidatesKey = "strict_group_phase1_max_candidates"
+	StrictGroupSkipRefineKey          = "strict_group_skip_refine"
 
 	GlobalRefineKey    = "global_refine"
 	SearchTopkRatioKey = "search_topk_ratio"

@@ -18,9 +18,8 @@
 
 #include <algorithm>
 #include <memory>
-#include <unordered_set>
+#include <unordered_map>
 
-#include "index/ScalarIndex.h"
 #include "segcore/SegmentChunkReader.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/Utils.h"
@@ -34,70 +33,6 @@ using GroupKey = std::optional<T>;
 bool
 IsEligible(const TargetBitmap* base_filter, size_t offset) {
     return base_filter == nullptr || !(*base_filter)[offset];
-}
-
-void
-ApplyBaseFilter(TargetBitmap& membership, const TargetBitmap* base_filter) {
-    if (base_filter == nullptr) {
-        return;
-    }
-    membership -= *base_filter;
-}
-
-template <typename T>
-std::optional<TargetBitmap>
-BuildIndexMembership(const segcore::PinnedIndexView& pinned_indexes,
-                     size_t row_count,
-                     const std::vector<GroupKey<T>>& groups,
-                     const TargetBitmap* base_filter) {
-    if (pinned_indexes.empty()) {
-        return std::nullopt;
-    }
-
-    // Avoid vector<bool>: ScalarIndex<bool>::In needs a contiguous bool array.
-    auto values = std::make_unique<T[]>(groups.size());
-    size_t value_count = 0;
-    bool include_null = false;
-    for (const auto& group : groups) {
-        if (group.has_value()) {
-            values[value_count++] = *group;
-        } else {
-            include_null = true;
-        }
-    }
-    TargetBitmap membership;
-    membership.reserve(row_count);
-    size_t remaining = row_count;
-    for (auto& pinned_index : pinned_indexes) {
-        auto scalar_index =
-            dynamic_cast<const index::ScalarIndex<T>*>(pinned_index.get());
-        if (scalar_index == nullptr) {
-            return std::nullopt;
-        }
-        auto* mutable_index = const_cast<index::ScalarIndex<T>*>(scalar_index);
-        auto chunk_membership =
-            value_count > 0 ? mutable_index->In(value_count, values.get())
-                            : TargetBitmap(mutable_index->Count(), false);
-        if (include_null) {
-            auto matches = mutable_index->IsNull();
-            if (matches.size() != chunk_membership.size()) {
-                return std::nullopt;
-            }
-            chunk_membership |= matches;
-        }
-
-        auto append_size = std::min(remaining, chunk_membership.size());
-        membership.append(chunk_membership, 0, append_size);
-        remaining -= append_size;
-        if (remaining == 0) {
-            break;
-        }
-    }
-    if (membership.size() != row_count) {
-        return std::nullopt;
-    }
-    ApplyBaseFilter(membership, base_filter);
-    return membership;
 }
 
 template <typename T, typename Visitor>
@@ -190,81 +125,56 @@ ScanRawField(milvus::OpContext* op_ctx,
 }  // namespace
 
 template <typename T>
-std::optional<TargetBitmap>
-BuildGroupMembership(milvus::OpContext* op_ctx,
-                     const segcore::SegmentInternalInterface& segment,
-                     FieldId field_id,
-                     int64_t row_count,
-                     const std::vector<GroupKey<T>>& groups,
-                     const TargetBitmap* base_filter) {
-    if (row_count < 0 ||
-        (base_filter != nullptr &&
-         base_filter->size() != static_cast<size_t>(row_count))) {
+std::optional<std::vector<std::vector<int64_t>>>
+BuildGroupOffsets(milvus::OpContext* op_ctx,
+                  const segcore::SegmentInternalInterface& segment,
+                  FieldId field_id,
+                  int64_t row_count,
+                  const std::vector<GroupKey<T>>& groups,
+                  const TargetBitmap* base_filter) {
+    if (row_count < 0 || (base_filter && base_filter->size() !=
+                                             static_cast<size_t>(row_count))) {
         return std::nullopt;
     }
-    auto count = static_cast<size_t>(row_count);
-    // Match phase one's raw-first access policy. Do not pin an unused index.
-    if (segment.HasFieldData(field_id)) {
-        std::unordered_set<GroupKey<T>> target_groups(groups.begin(),
-                                                      groups.end());
-        TargetBitmap membership(count, false);
-        auto scanned = ScanRawField<T>(
-            op_ctx, segment, field_id, count, [&](size_t offset, auto group) {
-                if (IsEligible(base_filter, offset) &&
-                    target_groups.find(group) != target_groups.end()) {
-                    membership[offset] = true;
-                }
-            });
-        if (scanned) {
-            return membership;
+    std::unordered_map<GroupKey<T>, size_t> group_ids;
+    for (size_t i = 0; i < groups.size(); ++i) {
+        if (!group_ids.emplace(groups[i], i).second) {
+            return std::nullopt;
         }
     }
-    auto indexes = segment.PinIndex(op_ctx, field_id);
-    return BuildIndexMembership<T>(indexes, count, groups, base_filter);
+    std::vector<std::vector<int64_t>> offsets(groups.size());
+    if (!ScanRawField<T>(op_ctx,
+                         segment,
+                         field_id,
+                         row_count,
+                         [&](size_t offset, const auto& group) {
+                             if (IsEligible(base_filter, offset)) {
+                                 auto it = group_ids.find(group);
+                                 if (it != group_ids.end()) {
+                                     offsets[it->second].push_back(offset);
+                                 }
+                             }
+                         })) {
+        return std::nullopt;
+    }
+    return offsets;
 }
 
-template std::optional<TargetBitmap>
-BuildGroupMembership<bool>(milvus::OpContext*,
-                           const segcore::SegmentInternalInterface&,
-                           FieldId,
-                           int64_t,
-                           const std::vector<std::optional<bool>>&,
-                           const TargetBitmap*);
-template std::optional<TargetBitmap>
-BuildGroupMembership<int8_t>(milvus::OpContext*,
-                             const segcore::SegmentInternalInterface&,
-                             FieldId,
-                             int64_t,
-                             const std::vector<std::optional<int8_t>>&,
-                             const TargetBitmap*);
-template std::optional<TargetBitmap>
-BuildGroupMembership<int16_t>(milvus::OpContext*,
-                              const segcore::SegmentInternalInterface&,
-                              FieldId,
-                              int64_t,
-                              const std::vector<std::optional<int16_t>>&,
-                              const TargetBitmap*);
-template std::optional<TargetBitmap>
-BuildGroupMembership<int32_t>(milvus::OpContext*,
-                              const segcore::SegmentInternalInterface&,
-                              FieldId,
-                              int64_t,
-                              const std::vector<std::optional<int32_t>>&,
-                              const TargetBitmap*);
-template std::optional<TargetBitmap>
-BuildGroupMembership<int64_t>(milvus::OpContext*,
-                              const segcore::SegmentInternalInterface&,
-                              FieldId,
-                              int64_t,
-                              const std::vector<std::optional<int64_t>>&,
-                              const TargetBitmap*);
-template std::optional<TargetBitmap>
-BuildGroupMembership<std::string>(
-    milvus::OpContext*,
-    const segcore::SegmentInternalInterface&,
-    FieldId,
-    int64_t,
-    const std::vector<std::optional<std::string>>&,
-    const TargetBitmap*);
+#define INSTANTIATE_GROUP_OFFSETS(T)                               \
+    template std::optional<std::vector<std::vector<int64_t>>>      \
+    BuildGroupOffsets<T>(milvus::OpContext*,                       \
+                         const segcore::SegmentInternalInterface&, \
+                         FieldId,                                  \
+                         int64_t,                                  \
+                         const std::vector<std::optional<T>>&,     \
+                         const TargetBitmap*);
+
+INSTANTIATE_GROUP_OFFSETS(bool)
+INSTANTIATE_GROUP_OFFSETS(int8_t)
+INSTANTIATE_GROUP_OFFSETS(int16_t)
+INSTANTIATE_GROUP_OFFSETS(int32_t)
+INSTANTIATE_GROUP_OFFSETS(int64_t)
+INSTANTIATE_GROUP_OFFSETS(std::string)
+#undef INSTANTIATE_GROUP_OFFSETS
 
 }  // namespace milvus::exec

@@ -16,6 +16,7 @@
 #include "SearchGroupByOperator.h"
 
 #include <chrono>
+#include <atomic>
 #include <limits>
 #include <unordered_set>
 
@@ -26,6 +27,7 @@
 #include "fmt/format.h"
 #include "monitor/Monitor.h"
 #include "query/Utils.h"
+#include "segcore/Utils.h"
 
 namespace milvus::exec {
 template <typename T>
@@ -64,6 +66,11 @@ struct GroupByMap {
     size_t
     GetGroupCount() const {
         return group_map_.size();
+    }
+
+    void
+    LockCurrentGroups() {
+        group_capacity_ = static_cast<int>(group_map_.size());
     }
 
     int
@@ -158,19 +165,6 @@ class GroupByResultCollector {
     }
 
     void
-    ExcludeAcceptedOffsets(TargetBitmap& invalid) const {
-        for (const auto& result : results_) {
-            const auto offset = std::get<0>(result);
-            AssertInfo(
-                offset >= 0 && static_cast<size_t>(offset) < invalid.size(),
-                "group-by result offset {} exceeds row count {}",
-                offset,
-                invalid.size());
-            invalid[offset] = true;
-        }
-    }
-
-    void
     SortAndAppend(const knowhere::MetricType& metrics_type,
                   std::vector<GroupByValueType>& group_by_values,
                   std::vector<int64_t>& offsets,
@@ -198,27 +192,48 @@ namespace {
 
 enum class StrictGroupPhase2FallbackReason {
     None,
-    MissingRecreator,
+    MissingSearchProvider,
     InvalidRowCount,
     Phase1Exhausted,
     Phase2NotNeeded,
     MembershipUnavailable,
-    ProbeAcceptanceHigh,
-    RecreateUnavailable,
-    RecreatedExhausted,
+    SearchUnavailable,
 };
 
-enum class StrictGroupDecision { NotEvaluated, AcceptanceHigh, AcceptanceLow };
+enum class StrictGroupCompletionReason {
+    None,
+    QuotaSatisfied,
+    NoAvailableRows,
+    InsufficientAvailableRows,
+    SearchShortResult,
+};
+
+const char*
+CompletionReasonName(StrictGroupCompletionReason reason) {
+    switch (reason) {
+        case StrictGroupCompletionReason::None:
+            return "none";
+        case StrictGroupCompletionReason::QuotaSatisfied:
+            return "quota_satisfied";
+        case StrictGroupCompletionReason::NoAvailableRows:
+            return "no_available_rows";
+        case StrictGroupCompletionReason::InsufficientAvailableRows:
+            return "insufficient_available_rows";
+        case StrictGroupCompletionReason::SearchShortResult:
+            return "search_short_result";
+    }
+    return "unknown";
+}
+
+enum class StrictGroupDecision { NotEvaluated, PerGroup };
 
 const char*
 DecisionName(StrictGroupDecision decision) {
     switch (decision) {
         case StrictGroupDecision::NotEvaluated:
             return "not_evaluated";
-        case StrictGroupDecision::AcceptanceHigh:
-            return "acceptance_high";
-        case StrictGroupDecision::AcceptanceLow:
-            return "acceptance_low";
+        case StrictGroupDecision::PerGroup:
+            return "per_group";
     }
     return "unknown";
 }
@@ -226,16 +241,17 @@ DecisionName(StrictGroupDecision decision) {
 struct StrictGroupPhase2Stats {
     bool attempted = false;
     bool used = false;
+    bool original_iterator_skipped = false;
+    StrictGroupCompletionReason completion_reason =
+        StrictGroupCompletionReason::None;
     size_t phase1_candidates = 0;
     size_t phase2_candidates = 0;
-    size_t probe_candidates = 0;
-    size_t probe_accepted = 0;
-    size_t probe_group_hits = 0;
     size_t original_remaining_candidates = 0;
     StrictGroupDecision decision = StrictGroupDecision::NotEvaluated;
     size_t batch_count = 0;
     uint64_t membership_build_us = 0;
     uint64_t bitmap_build_us = 0;
+    uint64_t search_us = 0;
     StrictGroupPhase2FallbackReason fallback_reason =
         StrictGroupPhase2FallbackReason::None;
 };
@@ -246,17 +262,29 @@ struct StrictGroupPhase2Context {
     FieldId group_by_field_id;
     SearchResult* search_result;
     bool eligible;
-    double acceptance_threshold;
-    int64_t probe_candidates;
+    StrictGroupStrategy strategy;
+    const SearchInfo* search_info;
+    bool controls_eligible;
 };
+
+const char*
+StrategyName(StrictGroupStrategy strategy) {
+    switch (strategy) {
+        case StrictGroupStrategy::Original:
+            return "original";
+        case StrictGroupStrategy::PerGroup:
+            return "per_group";
+    }
+    return "unknown";
+}
 
 const char*
 FallbackReasonName(StrictGroupPhase2FallbackReason reason) {
     switch (reason) {
         case StrictGroupPhase2FallbackReason::None:
             return "none";
-        case StrictGroupPhase2FallbackReason::MissingRecreator:
-            return "missing_recreator";
+        case StrictGroupPhase2FallbackReason::MissingSearchProvider:
+            return "missing_search_provider";
         case StrictGroupPhase2FallbackReason::InvalidRowCount:
             return "invalid_row_count";
         case StrictGroupPhase2FallbackReason::Phase1Exhausted:
@@ -265,12 +293,8 @@ FallbackReasonName(StrictGroupPhase2FallbackReason reason) {
             return "phase2_not_needed";
         case StrictGroupPhase2FallbackReason::MembershipUnavailable:
             return "membership_unavailable";
-        case StrictGroupPhase2FallbackReason::ProbeAcceptanceHigh:
-            return "probe_acceptance_high";
-        case StrictGroupPhase2FallbackReason::RecreateUnavailable:
-            return "recreate_unavailable";
-        case StrictGroupPhase2FallbackReason::RecreatedExhausted:
-            return "recreated_exhausted";
+        case StrictGroupPhase2FallbackReason::SearchUnavailable:
+            return "search_unavailable";
     }
     return "unknown";
 }
@@ -286,12 +310,6 @@ RecordStrictGroupPhase2Stats(const StrictGroupPhase2Stats& stats) {
         .Observe(stats.phase2_candidates);
     milvus::monitor::internal_core_strict_group_phase2_batch_count.Observe(
         stats.batch_count);
-    milvus::monitor::internal_core_strict_group_phase2_probe_candidates.Observe(
-        stats.probe_candidates);
-    milvus::monitor::internal_core_strict_group_phase2_probe_accepted.Observe(
-        stats.probe_accepted);
-    milvus::monitor::internal_core_strict_group_phase2_probe_group_hits.Observe(
-        stats.probe_group_hits);
     milvus::monitor::
         internal_core_strict_group_phase2_original_remaining_candidates.Observe(
             stats.original_remaining_candidates);
@@ -299,15 +317,11 @@ RecordStrictGroupPhase2Stats(const StrictGroupPhase2Stats& stats) {
         .Observe(stats.membership_build_us / 1000.0);
     milvus::monitor::internal_core_strict_group_phase2_bitmap_build_latency
         .Observe(stats.bitmap_build_us / 1000.0);
-    if (stats.probe_candidates > 0) {
-        milvus::monitor::internal_core_strict_group_phase2_acceptance_ratio
-            .Observe(static_cast<double>(stats.probe_accepted) /
-                     stats.probe_candidates);
-    }
+    milvus::monitor::internal_core_strict_group_phase2_search_latency.Observe(
+        stats.search_us / 1000.0);
     tracer::AddEvent(fmt::format(
         "strict_group_phase2: used={}, fallback={}, phase1_candidates={}, "
-        "phase2_candidates={}, probe_candidates={}, probe_accepted={}, "
-        "probe_group_hits={}, "
+        "phase2_candidates={}, "
         "original_remaining_candidates={}, decision={}, batches={}, "
         "membership_ms={:.3f}, "
         "bitmap_ms={:.3f}",
@@ -315,9 +329,6 @@ RecordStrictGroupPhase2Stats(const StrictGroupPhase2Stats& stats) {
         FallbackReasonName(stats.fallback_reason),
         stats.phase1_candidates,
         stats.phase2_candidates,
-        stats.probe_candidates,
-        stats.probe_accepted,
-        stats.probe_group_hits,
         stats.original_remaining_candidates,
         DecisionName(stats.decision),
         stats.batch_count,
@@ -333,9 +344,7 @@ ConsumeGroupByIteratorUntil(
     GroupByMap<T>& group_map,
     GroupByResultCollector<T>& collector,
     StopPredicate&& should_stop,
-    size_t max_candidates = std::numeric_limits<size_t>::max(),
-    size_t* accepted = nullptr,
-    size_t* locked_group_hits = nullptr) {
+    size_t max_candidates = std::numeric_limits<size_t>::max()) {
     size_t candidates = 0;
     while (candidates < max_candidates && !should_stop() &&
            iterator->HasNext()) {
@@ -351,14 +360,8 @@ ConsumeGroupByIteratorUntil(
             continue;
         }
         auto group = data_getter->Get(offset);
-        if (locked_group_hits != nullptr && group_map.Contains(group)) {
-            ++*locked_group_hits;
-        }
         if (group_map.Push(group)) {
             collector.Add(offset, distance, std::move(group));
-            if (accepted != nullptr) {
-                ++*accepted;
-            }
         }
     }
     return candidates;
@@ -371,17 +374,128 @@ TryStrictGroupFilteredPhase2(const std::shared_ptr<VectorIterator>& iterator,
                              GroupByMap<T>& group_map,
                              GroupByResultCollector<T>& collector,
                              const StrictGroupPhase2Context* context) {
-    if (context == nullptr || !context->eligible ||
-        context->search_result == nullptr) {
+    if (context == nullptr) {
         return false;
     }
 
     StrictGroupPhase2Stats stats;
+    bool phase1_truncated = false;
+    const bool debug = context->search_info->strict_group_debug_;
+    using Clock = std::chrono::steady_clock;
+    Clock::time_point debug_start{}, last_log{};
+    uint64_t diagnostic_id = 0;
+    std::string trace_id;
+    if (debug) {
+        // Local ID correlates stages even when tracing was not propagated.
+        // It is process-local, not a substitute for a cross-segment request ID.
+        static std::atomic<uint64_t> next_id{0};
+        diagnostic_id = ++next_id;
+        debug_start = last_log = Clock::now();
+        if (context->search_info->trace_ctx_.traceID != nullptr) {
+            trace_id =
+                tracer::GetTraceIDAsHexStr(&context->search_info->trace_ctx_);
+        }
+    }
+    auto diagnostic = [&](const char* stage,
+                          int64_t available_rows = -1,
+                          int64_t group_ordinal = -1,
+                          int64_t requested_k = -1) {
+        if (!debug) {
+            return;
+        }
+        const auto now = Clock::now();
+        int64_t remaining_rows = 0;
+        for (const auto& group : group_map.GetGroupOrder()) {
+            remaining_rows += group_map.GetRemainingGroupSize(group);
+        }
+        // Unknown values are -1. No customer field values or vector payloads.
+        knowhere::Json record = {
+            {"stage", stage},
+            {"diagnostic_id", diagnostic_id},
+            {"trace_id", trace_id},
+            {"segment_id", context->segment.get_segment_id()},
+            {"strategy", StrategyName(context->strategy)},
+            {"eligible", context->eligible},
+            {"controls_eligible", context->controls_eligible},
+            {"phase1_max_candidates",
+             context->search_info->strict_group_phase1_max_candidates_},
+            {"phase1_truncated", phase1_truncated},
+            {"skip_refine",
+             context->controls_eligible &&
+                 context->search_info->strict_group_skip_refine_},
+            {"topk", context->search_info->topk_},
+            {"group_size", context->search_info->group_size_},
+            {"segment_rows",
+             context->search_result == nullptr
+                 ? -1
+                 : context->search_result->total_data_cnt_},
+            {"locked_groups", group_map.GetGroupCount()},
+            {"unfinished_groups",
+             group_map.GetGroupCount() - group_map.GetEnoughGroupCount()},
+            {"remaining_locked_rows", remaining_rows},
+            {"accepted_rows", collector.Size()},
+            {"available_rows", available_rows},
+            {"group_ordinal", group_ordinal},
+            {"requested_k", requested_k},
+            {"fallback", FallbackReasonName(stats.fallback_reason)},
+            {"completion_reason",
+             CompletionReasonName(stats.completion_reason)},
+            {"original_iterator_skipped", stats.original_iterator_skipped},
+            {"decision", DecisionName(stats.decision)},
+            {"phase1_candidates", stats.phase1_candidates},
+            {"phase2_candidates", stats.phase2_candidates},
+            {"original_remaining_candidates",
+             stats.original_remaining_candidates},
+            {"batches", stats.batch_count},
+            {"membership_us", stats.membership_build_us},
+            {"bitmap_us", stats.bitmap_build_us},
+            {"search_us", stats.search_us},
+            {"since_previous_log_us",
+             std::chrono::duration_cast<std::chrono::microseconds>(now -
+                                                                   last_log)
+                 .count()},
+            {"elapsed_us",
+             std::chrono::duration_cast<std::chrono::microseconds>(now -
+                                                                   debug_start)
+                 .count()}};
+        LOG_INFO("strict_group_diagnostic {}", record.dump());
+        last_log = now;
+    };
+    diagnostic(context->eligible ? "begin" : "ineligible_original");
+    const auto phase1_budget =
+        context->search_info->strict_group_phase1_max_candidates_;
+    if (context->controls_eligible && phase1_budget > 0) {
+        // Independent of the completion strategy and provider support.
+        // Even the original-iterator fallback must honor the frozen group set.
+        stats.phase1_candidates = ConsumeGroupByIteratorUntil(
+            iterator,
+            data_getter,
+            group_map,
+            collector,
+            [&] { return group_map.IsGroupCapacityReached(); },
+            static_cast<size_t>(phase1_budget));
+        if (stats.phase1_candidates == static_cast<size_t>(phase1_budget) &&
+            !group_map.IsGroupCapacityReached()) {
+            group_map.LockCurrentGroups();
+            phase1_truncated = true;
+        }
+        diagnostic("phase1_budget_checked");
+    }
+    if (!context->eligible || context->search_result == nullptr) {
+        return false;
+    }
     stats.attempted = true;
-    auto finish = [&] { RecordStrictGroupPhase2Stats(stats); };
-    if (!context->search_result->CanRecreateVectorIterator()) {
+    auto finish = [&] {
+        if (group_map.IsGroupResEnough()) {
+            stats.completion_reason =
+                StrictGroupCompletionReason::QuotaSatisfied;
+        }
+        RecordStrictGroupPhase2Stats(stats);
+        diagnostic("finish");
+    };
+    if (!context->search_result->CanSearchFilteredVectors()) {
         stats.fallback_reason =
-            StrictGroupPhase2FallbackReason::MissingRecreator;
+            StrictGroupPhase2FallbackReason::MissingSearchProvider;
         finish();
         return false;
     }
@@ -392,10 +506,11 @@ TryStrictGroupFilteredPhase2(const std::shared_ptr<VectorIterator>& iterator,
         return false;
     }
 
-    stats.phase1_candidates = ConsumeGroupByIteratorUntil(
+    stats.phase1_candidates += ConsumeGroupByIteratorUntil(
         iterator, data_getter, group_map, collector, [&] {
             return group_map.IsGroupCapacityReached();
         });
+    diagnostic("groups_locked");
 
     if (!group_map.IsGroupCapacityReached()) {
         stats.fallback_reason =
@@ -410,123 +525,155 @@ TryStrictGroupFilteredPhase2(const std::shared_ptr<VectorIterator>& iterator,
         return true;
     }
 
-    // Probe once, using consumer candidates rather than backend graph visits.
-    stats.probe_candidates = ConsumeGroupByIteratorUntil(
-        iterator,
-        data_getter,
-        group_map,
-        collector,
-        [&] { return group_map.IsGroupResEnough(); },
-        context->probe_candidates,
-        &stats.probe_accepted,
-        &stats.probe_group_hits);
-    stats.phase1_candidates += stats.probe_candidates;
-    if (group_map.IsGroupResEnough() || !iterator->HasNext()) {
-        stats.fallback_reason =
-            StrictGroupPhase2FallbackReason::Phase2NotNeeded;
-        finish();
-        return true;
-    }
-
     auto continue_original = [&] {
+        diagnostic("original_begin");
         stats.original_remaining_candidates = ConsumeGroupByIteratorUntil(
             iterator, data_getter, group_map, collector, [&] {
                 return group_map.IsGroupResEnough();
             });
+        diagnostic("original_end");
         finish();
         return true;
     };
-    // Equality keeps the original iterator; never re-evaluate this decision later.
-    if (static_cast<double>(stats.probe_accepted) / stats.probe_candidates >=
-        context->acceptance_threshold) {
-        stats.decision = StrictGroupDecision::AcceptanceHigh;
-        stats.fallback_reason =
-            StrictGroupPhase2FallbackReason::ProbeAcceptanceHigh;
-        return continue_original();
-    }
 
-    std::vector<std::optional<T>> unfinished_groups;
-    for (const auto& group : group_map.GetGroupOrder()) {
-        if (!group_map.IsGroupFull(group)) {
-            unfinished_groups.emplace_back(group);
+    if (context->strategy == StrictGroupStrategy::PerGroup) {
+        stats.decision = StrictGroupDecision::PerGroup;
+        if (!context->search_result->CanSearchFilteredVectors()) {
+            stats.fallback_reason =
+                StrictGroupPhase2FallbackReason::SearchUnavailable;
+            return continue_original();
         }
-    }
-    AssertInfo(!unfinished_groups.empty(),
-               "strict group phase2 has no unfinished group");
-
-    stats.decision = StrictGroupDecision::AcceptanceLow;
-
-    auto prepare = [&]() -> std::optional<std::unique_ptr<SearchResult>> {
-        auto membership_start = std::chrono::steady_clock::now();
-        auto membership = BuildGroupMembership<T>(
+        std::vector<std::optional<T>> groups;
+        for (const auto& group : group_map.GetGroupOrder()) {
+            if (!group_map.IsGroupFull(group)) {
+                groups.emplace_back(group);
+            }
+        }
+        const auto start = std::chrono::steady_clock::now();
+        auto offsets = BuildGroupOffsets<T>(
             context->op_ctx,
             context->segment,
             context->group_by_field_id,
             context->search_result->total_data_cnt_,
-            unfinished_groups,
-            context->search_result->GetVectorIteratorBaseFilter());
+            groups,
+            context->search_result->GetVectorSearchBaseFilter());
         stats.membership_build_us =
             std::chrono::duration_cast<std::chrono::microseconds>(
-                std::chrono::steady_clock::now() - membership_start)
+                std::chrono::steady_clock::now() - start)
                 .count();
-        if (!membership.has_value()) {
+        diagnostic("per_group_membership_ready");
+        if (!offsets) {
             stats.fallback_reason =
                 StrictGroupPhase2FallbackReason::MembershipUnavailable;
-            return std::nullopt;
+            return continue_original();
         }
 
         auto bitmap_start = std::chrono::steady_clock::now();
-        membership->flip();
-        collector.ExcludeAcceptedOffsets(*membership);
-        stats.bitmap_build_us =
+        auto filter = std::make_shared<TargetBitmap>(
+            context->search_result->total_data_cnt_, false);
+        // Flip only logical rows: Knowhere counts every bit in the last byte,
+        // so padding bits must stay zero even for an all-invalid filter.
+        filter->flip();
+        stats.bitmap_build_us +=
             std::chrono::duration_cast<std::chrono::microseconds>(
                 std::chrono::steady_clock::now() - bitmap_start)
                 .count();
-        return context->search_result->RecreateVectorIterators(
-            std::move(*membership));
-    };
-    std::optional<std::unique_ptr<SearchResult>> recreated;
-    try {
-        recreated = prepare();
-    } catch (const std::exception& error) {
-        LOG_WARN("strict group iterator preparation failed: {}", error.what());
-        throw;
-    }
-    if (!recreated.has_value()) {
-        if (stats.fallback_reason == StrictGroupPhase2FallbackReason::None) {
-            stats.fallback_reason =
-                StrictGroupPhase2FallbackReason::RecreateUnavailable;
+        collector.EnableOffsetDeduplication();
+        bool insufficient_available = false;
+        bool had_available_rows = false;
+        for (size_t i = 0; i < groups.size(); ++i) {
+            segcore::CheckCancellation(context->op_ctx,
+                                       context->segment.get_segment_id(),
+                                       context->group_by_field_id.get(),
+                                       "strict per-group search");
+            bitmap_start = std::chrono::steady_clock::now();
+            size_t available = 0;
+            for (auto offset : (*offsets)[i]) {
+                if (!collector.IsAcceptedOffset(offset)) {
+                    (*filter)[offset] = false;
+                    ++available;
+                }
+            }
+            stats.bitmap_build_us +=
+                std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::steady_clock::now() - bitmap_start)
+                    .count();
+            const auto remaining = group_map.GetRemainingGroupSize(groups[i]);
+            diagnostic("group_search_begin", available, i, remaining);
+            if (available < remaining) {
+                insufficient_available = true;
+                diagnostic(
+                    "group_search_insufficient", available, i, remaining);
+            }
+            if (available == 0) {
+                diagnostic("group_search_empty", available, i, remaining);
+                continue;
+            }
+            had_available_rows = true;
+            auto search_start = std::chrono::steady_clock::now();
+            auto batch = context->search_result->SearchFilteredVectors(
+                filter, remaining);
+            stats.search_us +=
+                std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::steady_clock::now() - search_start)
+                    .count();
+            if (!batch) {
+                stats.fallback_reason =
+                    StrictGroupPhase2FallbackReason::SearchUnavailable;
+                return continue_original();
+            }
+            auto& result = **batch;
+            AssertInfo(result.seg_offsets_.size() == result.distances_.size() &&
+                           result.seg_offsets_.size() <= remaining,
+                       "invalid strict per-group Search result shape");
+            stats.used = true;
+            ++stats.batch_count;
+            for (size_t j = 0; j < result.seg_offsets_.size(); ++j) {
+                auto offset = result.seg_offsets_[j];
+                if (offset == INVALID_SEG_OFFSET) {
+                    continue;
+                }
+                // Consumer results, not internal ANN distance computations.
+                ++stats.phase2_candidates;
+                AssertInfo(offset >= 0 && offset < filter->size() &&
+                               !(*filter)[offset],
+                           "filtered group Search returned an excluded row");
+                if (!collector.IsAcceptedOffset(offset) &&
+                    group_map.Push(groups[i])) {
+                    collector.Add(offset, result.distances_[j], groups[i]);
+                }
+            }
+            context->search_result->search_storage_cost_.scanned_remote_bytes +=
+                result.search_storage_cost_.scanned_remote_bytes;
+            context->search_result->search_storage_cost_.scanned_total_bytes +=
+                result.search_storage_cost_.scanned_total_bytes;
+            diagnostic("group_search_end", available, i, remaining);
+            // Search is synchronous; release temporary buffers before reuse.
+            batch.reset();
+            bitmap_start = std::chrono::steady_clock::now();
+            for (auto offset : (*offsets)[i]) {
+                (*filter)[offset] = true;
+            }
+            stats.bitmap_build_us +=
+                std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::steady_clock::now() - bitmap_start)
+                    .count();
         }
-        return continue_original();
+        // A successful ordinary Search may return fewer rows than requested.
+        // Preserve those rows for reduction; never chase the missing quota in
+        // the original, unfiltered iterator (local groups may be too small).
+        stats.original_iterator_skipped = true;
+        stats.completion_reason =
+            !had_available_rows
+                ? StrictGroupCompletionReason::NoAvailableRows
+                : (insufficient_available
+                       ? StrictGroupCompletionReason::InsufficientAvailableRows
+                       : StrictGroupCompletionReason::SearchShortResult);
+        finish();
+        return true;
     }
-    auto& batch_result = **recreated;
-    AssertInfo(batch_result.vector_iterators_.has_value(),
-               "strict group recreated result has no iterator container");
-    AssertInfo(batch_result.vector_iterators_->size() <= 1,
-               "strict group expected at most one iterator, got {}",
-               batch_result.vector_iterators_->size());
-    collector.EnableOffsetDeduplication();
-    stats.used = true;
-    stats.batch_count = 1;
-    if (!batch_result.vector_iterators_->empty()) {
-        stats.phase2_candidates = ConsumeGroupByIteratorUntil(
-            batch_result.vector_iterators_->front(),
-            data_getter,
-            group_map,
-            collector,
-            [&] { return group_map.IsGroupResEnough(); });
-    }
-    context->search_result->search_storage_cost_.scanned_remote_bytes +=
-        batch_result.search_storage_cost_.scanned_remote_bytes;
-    context->search_result->search_storage_cost_.scanned_total_bytes +=
-        batch_result.search_storage_cost_.scanned_total_bytes;
-    if (!group_map.IsGroupResEnough()) {
-        stats.fallback_reason =
-            StrictGroupPhase2FallbackReason::RecreatedExhausted;
-        return continue_original();
-    }
-    finish();
-    return true;
+
+    return false;
 }
 
 }  // namespace
@@ -549,13 +696,15 @@ TrySingleFieldStrictGroup(
                                    std::nullopt,
                                    std::nullopt,
                                    false);
-    StrictGroupPhase2Context context{op_ctx,
-                                     segment,
-                                     info.group_by_field_ids_.front(),
-                                     result,
-                                     true,
-                                     info.strict_group_acceptance_threshold_,
-                                     info.strict_group_probe_candidates_};
+    StrictGroupPhase2Context context{
+        op_ctx,
+        segment,
+        info.group_by_field_ids_.front(),
+        result,
+        query::CanUseStrictGroupSearch(info, iterators.size()),
+        info.strict_group_strategy_,
+        &info,
+        query::CanUseStrictGroupControls(info, iterators.size())};
     prefix.push_back(0);
     for (const auto& iterator : iterators) {
         GroupByMap<T> map(info.topk_, info.group_size_, true);
@@ -590,14 +739,14 @@ TryStrictGroupFilteredSearch(
     std::vector<int64_t>& offsets,
     std::vector<float>& distances,
     std::vector<size_t>& prefix) {
-    Defer clear_recreator([&] {
+    Defer clear_search_provider([&] {
         if (result != nullptr) {
-            result->ClearVectorIteratorRecreator();
+            result->ClearVectorSearchProvider();
         }
     });
-    if (!result ||
-        !query::CanUseStrictGroupFilteredIterator(info, result->total_nq_) ||
-        !result->CanRecreateVectorIterator()) {
+    if (!query::CanUseStrictGroupControls(info, iterators.size()) ||
+        (info.strict_group_strategy_ == StrictGroupStrategy::Original &&
+         info.strict_group_phase1_max_candidates_ == 0)) {
         return false;
     }
     switch (segment.GetFieldDataType(info.group_by_field_ids_.front())) {
