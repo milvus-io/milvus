@@ -132,14 +132,6 @@ func formatKey(key string) string {
 	return result
 }
 
-// FormatKey formats a config key for storage/retrieval in the config sources
-// (lowercased, with '/', '_' and '.' stripped). It is the exported form of
-// formatKey for callers that must address config keys directly, e.g. writing
-// to the config center from outside pkg/config.
-func FormatKey(key string) string {
-	return formatKey(key)
-}
-
 // formatKeyUncached is formatKey without the memo. Use it for keys that arrive
 // from outside the process: formattedKeys is global and unbounded, so caching
 // arbitrary caller input would let a request grow it without limit.
@@ -160,6 +152,14 @@ func formatKeyUncached(key string) string {
 // to it.
 func strippedKey(key string) string {
 	return keyFormatReplacer.Replace(strings.ToLower(key))
+}
+
+// FormatKey formats a config key for storage/retrieval in the config sources
+// (lowercased, with '/', '_' and '.' stripped). It is the exported form of
+// formatKey for callers that must address config keys directly, e.g. writing
+// to the config center from outside pkg/config.
+func FormatKey(key string) string {
+	return formatKey(key)
 }
 
 func flattenAndMergeMap(prefix string, m map[string]interface{}, result map[string]string) {

@@ -1364,10 +1364,10 @@ Default value applies when Pulsar is running on the same network with Milvus.`,
 		Key:          "pulsar.webaddress",
 		Version:      "2.0.0",
 		DefaultValue: "",
+		Sensitive:    true,
 		Doc: `Web address of the Pulsar admin REST API, used to clean up subscriptions. It must be a full url with scheme, e.g. http://pulsar-web:8080.
 Empty by default, in which case http://<host of pulsar.address>:<pulsar.webport> is used. Set it only if the admin API is not reachable there, e.g. behind a proxy or over https.`,
-		Export:    true,
-		Sensitive: true,
+		Export: true,
 		Formatter: func(add string) string {
 			add = strings.TrimSpace(add)
 			if add != "" {
@@ -1377,8 +1377,8 @@ Empty by default, in which case http://<host of pulsar.address>:<pulsar.webport>
 				if err == nil && u.Host != "" && (u.Scheme == "http" || u.Scheme == "https") {
 					return add
 				}
-				mlog.Warn(context.TODO(), "pulsar.webaddress is not an http(s) url, using the address derived from pulsar.address",
-					mlog.String("configured", add))
+				// The configured URL may contain credentials or private topology.
+				mlog.Warn(context.TODO(), "pulsar.webaddress is not an http(s) url, using the address derived from pulsar.address")
 			}
 			pulsarURL, err := url.ParseRequestURI(p.Address.GetValue())
 			if err != nil {
@@ -1638,11 +1638,11 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 		Doc:          "Maximum size of a Kafka producer message in bytes. Values below 256 KiB are clamped to 256 KiB; invalid or out-of-range values fall back to the default 10 MiB. Kafka broker/topic limits must support the configured value. Requires a restart to take effect.",
 		Export:       true,
 		Immutable:    true,
-		Formatter:    walMessageSizeFormatter(KafkaProducerConfigPrefix+"message.max.bytes", 10*1024*1024),
 		// A size bound that happens to live below the kafka.producer. prefix,
 		// which is sensitive because librdkafka options are arbitrary. This one
 		// is declared here, so it is not arbitrary.
 		NonSensitive: true,
+		Formatter:    walMessageSizeFormatter(KafkaProducerConfigPrefix+"message.max.bytes", 10*1024*1024),
 	}
 	k.ProducerMessageMaxBytes.Init(base.mgr)
 
