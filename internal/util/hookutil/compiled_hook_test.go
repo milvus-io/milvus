@@ -141,18 +141,50 @@ func (h *initRecordingHook) initParams() map[string]string {
 	return h.params
 }
 
+// storeAwareHook is an initRecordingHook that also counts the Init calls made
+// before it was stored. Saving a hook.* key re-initializes whichever hook is
+// installed, from the config watcher's own goroutine, and the watcher is
+// registered once for the whole package: a key a test saves before initHook
+// can therefore reach this hook through a watcher an earlier test registered,
+// after initHook has stored it. Only the calls made before it is stored are
+// initHook's.
+type storeAwareHook struct {
+	initRecordingHook
+	beforeStore int
+}
+
+func (h *storeAwareHook) Init(params map[string]string) error {
+	// Read the stored hook directly. GetHook would run InitOnceHook, and on a
+	// package state no earlier test initialized that re-enters the same
+	// sync.Once that is calling this Init, which never returns.
+	container, _ := hoo.Load().(hookContainer)
+	stored, _ := container.hook.(*storeAwareHook)
+	h.mu.Lock()
+	if stored != h {
+		h.beforeStore++
+	}
+	h.mu.Unlock()
+	return h.initRecordingHook.Init(params)
+}
+
+func (h *storeAwareHook) initsBeforeStore() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.beforeStore
+}
+
 // A compiled-in hook is initialized the way a plug-in is: once, with the hook
 // configuration, before it is stored. It is the one call that tells the hook
 // it runs in the proxy process.
 func TestInitHookInitializesTheCompiledInHookWithTheHookConfig(t *testing.T) {
 	paramtable.Init()
 	saveHookKey(t, "somekey", "someValue")
-	h := &initRecordingHook{MockAPIHook: MockAPIHook{User: "root"}}
+	h := &storeAwareHook{initRecordingHook: initRecordingHook{MockAPIHook: MockAPIHook{User: "root"}}}
 	installHook(t, h)
 
 	require.NoError(t, initHook())
 
-	assert.Equal(t, 1, h.initCount(), "initialized exactly once")
+	assert.Equal(t, 1, h.initsBeforeStore(), "initialized exactly once, before it is stored")
 	assert.Equal(t, "someValue", h.initParams()["somekey"], "the hook sees the hook.* configuration, as a plug-in does")
 	assert.Same(t, h, GetHook(), "the initialized hook is the one stored")
 }
@@ -178,11 +210,11 @@ func TestInitHookFailsWhenTheCompiledInHookCannotInitialize(t *testing.T) {
 // up, and the two would answer the same config edit differently.
 func TestConfigChangeReinitializesTheCompiledInHook(t *testing.T) {
 	paramtable.Init()
-	h := &initRecordingHook{MockAPIHook: MockAPIHook{User: "root"}}
+	h := &storeAwareHook{initRecordingHook: initRecordingHook{MockAPIHook: MockAPIHook{User: "root"}}}
 	installHook(t, h)
 
 	require.NoError(t, initHook())
-	require.Equal(t, 1, h.initCount())
+	require.Equal(t, 1, h.initsBeforeStore(), "initHook initializes the hook once, before it is stored")
 
 	saveHookKey(t, "reloadedkey", "reloadedValue")
 
