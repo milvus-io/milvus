@@ -95,6 +95,14 @@ func TestComponentParam_DataCoordSnapshotExportCopyConcurrency(t *testing.T) {
 	}
 }
 
+func TestComponentParam_ClusteringCompactionLayout(t *testing.T) {
+	params := &ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true)))
+
+	assert.Equal(t, int64(8*1024*1024), params.DataCoordCfg.ClusteringCompactionLayoutChunkSizePerCentroid.GetAsSize())
+	assert.Equal(t, int64(1_000_000), params.DataCoordCfg.ClusteringCompactionMaxCentroidsNum.GetAsInt64())
+}
+
 func TestMembershipFilterConfig(t *testing.T) {
 	base := NewBaseTable(SkipRemote(true))
 	params := proxyConfig{}
