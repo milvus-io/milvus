@@ -6215,7 +6215,7 @@ func TestUpdateTaskPreExecuteStopsRejectedRequestsBeforeWriting(t *testing.T) {
 			if implicit {
 				task.req.PartialUpdate = false
 			}
-			patch(validateFieldPartialUpdateOps, implicit, failure("field_ops"))
+			patch(resolveFieldPartialUpdateOps, map[string]*fieldPartialUpdatePlan(nil), implicit, failure("field_ops"))
 			patch(resolveNamespacePartitionName, "namespace_partition", implicit, failure("namespace"))
 			patch(isPartitionKeyMode, false, failure("partition_mode"))
 			if stage == "partition_info" {
