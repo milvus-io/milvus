@@ -59,4 +59,5 @@ message ClusteringCentroidsStats {
 message ClusteringCentroidIdMappingStats {
   repeated uint32 centroid_id_mapping = 1;
   repeated int64 num_in_centroid = 2;
+  repeated float distance_to_centroid = 3;
 }

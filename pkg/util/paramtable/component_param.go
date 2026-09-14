@@ -6175,21 +6175,22 @@ type dataCoordConfig struct {
 	HybridIndexHighCardinalityIndexType ParamItem `refreshable:"true"`
 
 	// Clustering Compaction
-	ClusteringCompactionEnable                 ParamItem `refreshable:"true"`
-	ClusteringCompactionAutoEnable             ParamItem `refreshable:"true"`
-	ClusteringCompactionTriggerInterval        ParamItem `refreshable:"true"`
-	ClusteringCompactionMinInterval            ParamItem `refreshable:"true"`
-	ClusteringCompactionMaxInterval            ParamItem `refreshable:"true"`
-	ClusteringCompactionNewDataSizeThreshold   ParamItem `refreshable:"true"`
-	ClusteringCompactionPreferSegmentSizeRatio ParamItem `refreshable:"true"`
-	ClusteringCompactionMaxSegmentSizeRatio    ParamItem `refreshable:"true"`
-	ClusteringCompactionMaxTrainSizeRatio      ParamItem `refreshable:"true"`
-	ClusteringCompactionTimeoutInSeconds       ParamItem `refreshable:"true"` // deprecated
-	ClusteringCompactionMaxCentroidsNum        ParamItem `refreshable:"true"`
-	ClusteringCompactionMinCentroidsNum        ParamItem `refreshable:"true"`
-	ClusteringCompactionMinClusterSizeRatio    ParamItem `refreshable:"true"`
-	ClusteringCompactionMaxClusterSizeRatio    ParamItem `refreshable:"true"`
-	ClusteringCompactionMaxClusterSize         ParamItem `refreshable:"true"`
+	ClusteringCompactionEnable                     ParamItem `refreshable:"true"`
+	ClusteringCompactionAutoEnable                 ParamItem `refreshable:"true"`
+	ClusteringCompactionTriggerInterval            ParamItem `refreshable:"true"`
+	ClusteringCompactionMinInterval                ParamItem `refreshable:"true"`
+	ClusteringCompactionMaxInterval                ParamItem `refreshable:"true"`
+	ClusteringCompactionNewDataSizeThreshold       ParamItem `refreshable:"true"`
+	ClusteringCompactionPreferSegmentSizeRatio     ParamItem `refreshable:"true"`
+	ClusteringCompactionMaxSegmentSizeRatio        ParamItem `refreshable:"true"`
+	ClusteringCompactionMaxTrainSizeRatio          ParamItem `refreshable:"true"`
+	ClusteringCompactionTimeoutInSeconds           ParamItem `refreshable:"true"` // deprecated
+	ClusteringCompactionMaxCentroidsNum            ParamItem `refreshable:"true"`
+	ClusteringCompactionMinCentroidsNum            ParamItem `refreshable:"true"`
+	ClusteringCompactionMinClusterSizeRatio        ParamItem `refreshable:"true"`
+	ClusteringCompactionMaxClusterSizeRatio        ParamItem `refreshable:"true"`
+	ClusteringCompactionMaxClusterSize             ParamItem `refreshable:"true"`
+	ClusteringCompactionLayoutChunkSizePerCentroid ParamItem `refreshable:"true"`
 
 	// LevelZero Segment
 	LevelZeroCompactionTriggerMinSize        ParamItem `refreshable:"true"`
@@ -7090,7 +7091,7 @@ Startup processes fixed-size batches and retries failed reads per segment. An ex
 	p.ClusteringCompactionMaxCentroidsNum = ParamItem{
 		Key:          "dataCoord.compaction.clustering.maxCentroidsNum",
 		Version:      "2.4.7",
-		DefaultValue: "10240",
+		DefaultValue: "1000000",
 		Doc:          "maximum centroids number in Kmeans train",
 		Export:       true,
 	}
@@ -7131,6 +7132,15 @@ Startup processes fixed-size batches and retries failed reads per segment. An ex
 		Export:       true,
 	}
 	p.ClusteringCompactionMaxClusterSize.Init(base.mgr)
+
+	p.ClusteringCompactionLayoutChunkSizePerCentroid = ParamItem{
+		Key:          "dataCoord.compaction.clustering.layout.chunkSizePerCentroid",
+		Version:      "3.1.0",
+		DefaultValue: "8MB",
+		Doc:          "target vector bytes represented by one centroid in clustering layout",
+		Export:       true,
+	}
+	p.ClusteringCompactionLayoutChunkSizePerCentroid.Init(base.mgr)
 
 	p.EnableGarbageCollection = ParamItem{
 		Key:          "dataCoord.enableGarbageCollection",
