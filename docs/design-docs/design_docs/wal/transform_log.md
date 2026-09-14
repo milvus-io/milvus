@@ -10,8 +10,10 @@ transform records of the pchannel-scoped WALSummary into DataCoord-managed L0
 segments. Delete is the initial transform payload. QueryNode and StreamingNode
 query resources consume the L0 output to advance transform visibility.
 
-Per-message ownership is defined by
-[WAL Message Ack Design](message_ack.md).
+The module is implemented, but its production recovery wiring is pending.
+The active recovery path uses synchronous summary `Persist` for idempotency.
+A caller wiring TransformLog enables `ManagerConfig.EnableTransform`, restores
+GC positions, and loads `PendingTransformEntries` before constructing modules.
 
 ## 1. Ownership
 
@@ -44,32 +46,24 @@ TransformLog owns:
 
 ## 2. Persistence Model
 
-The transform records are persisted by the WALSummary as pchannel chunks with
-a per-vchannel section, plus a manifest. The summary decides **entirely on its
-own** when records become durable:
+The transform records are persisted by the WALSummary as pchannel chunks
+with an independent transform section and a manifest. `Manager.Persist(ctx)`
+seals and writes staged records synchronously before recovery publishes the
+checkpoint. There is no asynchronous summary flush or separate summary
+confirmation frontier in this implementation.
 
-- autonomous flush at the binary size threshold;
-- forced persistence through `RequestFlushThrough` (tracker stall / under
-  pressure).
-
-There is no barrier trigger: external write APIs never force a summary flush.
-The TransformLog never reads the summary store and never triggers persistence,
-and — crucially — **never waits for persistence either**: it observes the
-vchannel's messages directly and keeps its own window. L0 materialization and
-WALSummary persistence are not ordered against each other in any way. The
-summary retains no WAL message handle: it keeps each record's WAL position and
-advances its confirmation frontier only after the covering chunk and manifest
-are durable, which still guarantees
-**WAL checkpoint <= durable summary frontier**; the materialization frontier
-may be ahead of or behind the durable frontier at any moment without losing
-data (see Recovery).
+TransformLog never triggers persistence or waits for it. It observes messages
+directly and keeps its own materialization window. The summary copies records
+without retaining source messages; checkpoint safety comes from persisting
+the covering summary before committing the recovery snapshot. Materialization
+may run ahead of or behind summary persistence without losing data (see Recovery).
 
 ## 3. Message Classification
 
 | Kind | WAL messages | Effect |
 |---|---|---|
 | Payload | Delete, committed Txn containing Delete | the summary's `Manager.ObserveMessage` (pchannel-level) appends one ordered Delete record to the summary staging; `TransformLog.ObserveMessage` appends the same record to its own materialization window. |
-| Barrier | RecoveryBarrier, Flush, ManualFlush, FlushAll, DropPartition, DropCollection, TruncateCollection, CreateCollection, schema-changing AlterCollection, AlterWAL | VChannel-level handlers only (segment flush etc.). No transform effect: neither the summary nor the TransformLog reacts to barriers. |
+| Barrier | RecoveryBarrier, Flush, ManualFlush, FlushAll, DropPartition, DropCollection, TruncateCollection, CreateCollection, schema-changing AlterCollection, AlterWAL | VChannel-level handlers only (segment flush etc.). No transform effect; the summary may separately invalidate idempotency keys. |
 | None | Insert and other messages | No transform effect. |
 
 A committed Txn creates one record at the outer Txn TimeTick and stores Delete
@@ -83,7 +77,7 @@ There is one Observe path for recovery and live messages:
 2. return for `None`;
 3. the summary's `Manager.ObserveMessage`: build the transform record (a
    standalone proto), append it to the summary staging, keep its WAL position,
-   and let the summary decide about flushing (size threshold);
+   and let recovery persist the summary before its checkpoint;
 4. `TransformLog.ObserveMessage`: build the same record, skip it when its
    timetick is at or below the committed frontier or the recovery-loaded
    window coverage, append it to `pending` otherwise, and schedule a
@@ -183,20 +177,20 @@ Consistency argument (no ordering between materialization and persistence):
 
 The summary releases chunk objects by retention budget, bounded below by the
 per-vchannel GC positions (`Manager.AdvanceGCTimeTick`, restored by
-`Manager.Restore` from the vchannel metas). A chunk fully covered by the
-materialization frontier is guaranteed to have been materialized (its L0
+`Manager.RestoreTransformGCTimeTicks` from durable vchannel metadata). A chunk
+fully covered by the materialization frontier is guaranteed to have been materialized (its L0
 output is durable), so releasing it cannot lose transform data.
 
 ## 9. Invariants
 
 1. TransformLog is VChannel-owned; persistence is pchannel-owned (WALSummary).
 2. All entry positions use source WAL TimeTick.
-3. `WAL checkpoint <= durable summary frontier` (handle lifecycle, summary
-   owns the handles); the materialization frontier has **no** ordering
-   relation with either.
-4. A Delete handle releases only after the chunk and manifest are durable
-   (summary-owned).
-5. Barriers have no effect on the summary or the TransformLog.
+3. A recovery checkpoint is committed only after the covering summary chunk
+   and manifest are durable. Materialization has no ordering relation with
+   summary persistence.
+4. The summary retains no Delete handle; records are copied at observation.
+5. Barriers produce no transform record. DDLs may invalidate idempotency keys
+   independently of transform retention.
 6. L0 materialization does not gate source-message Ack.
 7. The transform consumer never triggers persistence and never reads the
    summary store at runtime (except the one-time recovery window load).

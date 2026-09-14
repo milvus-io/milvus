@@ -35,12 +35,12 @@ vchannel:
 
 ```text
 walsummary.Manager (one per pchannel)
-  +-- pending: staged transform records of the current unsealed chunk span
+  +-- pending: staged records of the current unsealed chunk span
   +-- pendingSealed: sealed chunks waiting for their object + manifest write
   +-- manifest: the chunk index of the current term
   +-- durableFrontiers: newest durable record timetick per vchannel
   +-- gcFrontiers: retention GC position per vchannel
-  +-- lastAcked: the summary's own confirmation frontier
+  +-- pendingInvalidations: idempotency DDL tombstones awaiting publication
 ```
 
 ### 2.2 Objects (object storage)
@@ -75,25 +75,21 @@ is split between two other mechanisms:
 
 - the object keys are term-scoped (`<generation>_<term>`, `manifest/<term>`),
   so a superseded owner can never collide with the successor's chunks;
-- the consume-checkpoint advancement is NOT yet fenced on this branch: the
-  checkpoint is the last-write commit point of the snapshot, and a superseded
-  older-term publisher can still overwrite it. The intended compare-and-swap
-  (fenced-commit) design lands together with the recovery async refactor.
+- the recovery layer claims the checkpoint term with compare-and-swap before
+  restoring the summary. Later checkpoint writes carry that term, preventing
+  a superseded publisher from advancing the checkpoint past unadopted chunks.
 
 ### 2.4 Protos
 
-```proto
-message PChannelSummaryManifest { repeated PChannelSummaryChunkIndexEntry chunks = 1; }
-message PChannelSummaryChunkIndexEntry {
-    uint64 generation = 1;
-    uint64 start_timetick = 2;
-    uint64 end_timetick = 3;
-    uint64 object_size = 4;
-    repeated VChannelSummaryChunkIndex vchannels = 5; // per-vchannel section offsets
-}
-message PChannelSummaryChunkFooter { int64 term = 1; ... }
-message VChannelSummaryTransformRecord { uint64 time_tick = 1; TransformDeleteEntry delete = 2; }
-```
+`PChannelSummaryManifest` indexes chunks and pending GC objects and carries
+idempotency invalidation timeticks. Each `VChannelSummaryChunkIndex` has
+independent `idempotency` (field 4), `inserts` (field 5), and `transform`
+(field 6) section references. The first two sections are paired by position;
+transform records are independently ordered by WAL timetick.
+
+`transform_end_timetick` (field 7) bounds transform retention without waiting
+for later inserts in the same chunk. Readers fall back to the vchannel span's
+end for older transform-only chunks that do not carry this field.
 
 Legacy per-vchannel formats (`VChannelTransformLogMeta`,
 `TransformLogChunk`) are deprecated: the proto definitions are retained with
@@ -102,63 +98,60 @@ Legacy per-vchannel formats (`VChannelTransformLogMeta`,
 ## 3. Lifecycle And Persistence
 
 ```text
-Manager.ObserveMessage(retained)
-  -> classify the message; only delete-carrying messages produce a record
-  -> build TransformLogEntry (standalone proto, message NOT retained)
-  -> if record timetick > durable frontier of its vchannel: stage into pending
-  -> if pendingBytes >= FlushMaxBytes: requestSeal
-write task (summary-owned decision)
-  -> seal pending into a chunk (generation)
-  -> write chunk object + publish manifest
-  -> advance durableFrontiers and lastAcked   (WAL checkpoint may now advance)
+Manager.ObserveMessage(immutable)
+  -> build idempotency/insert records for keyed inserts
+  -> with EnableTransform: also build delete transform records
+  -> stage records beyond the durable frontier; retain no WAL message handle
+RecoveryStorage.persistDirtySnapshot
+  -> Manager.Persist(ctx): seal pending, write chunk, publish manifest
+  -> save the recovery snapshot and fenced consume checkpoint
 ```
 
-The summary alone decides when persistence happens:
+`Persist` is synchronous. It writes all staged records and DDL invalidations
+before the checkpoint that covers them is committed. A persistence failure
+is retried by recovery and prevents checkpoint advancement. Observation does
+not schedule a background flush, and there is no separate summary `LastAcked`
+frontier or `RequestFlushThrough` API in this implementation.
 
-| Trigger | Path |
-|---|---|
-| size threshold | `FlushMaxBytes` (staging binary size, configured as `FlushL0MaxSize`) |
-| forced persist | `Manager.RequestFlushThrough(tt)` (tracker stall / pressure) |
+The active recovery path enables only the idempotency consumer. The
+TransformLog/VChannel modules are available for the later recovery integration;
+that caller must opt into `ManagerConfig.EnableTransform`, restore transform
+GC frontiers, and feed the module's recovery window. This keeps the current
+idempotency path from accumulating unconsumed deletes. Asynchronous recovery
+persistence remains future work.
 
-There is no barrier trigger: external write APIs (flush / flush-all /
-manual-flush / drop / truncate) never force a flush. Their semantics still
-hold — the checkpoint cannot advance past a delete until the covering chunk is
-durable, so a flush request waits on the tracker path
-(`RequestFlushThrough`) for whatever the summary has not persisted yet.
-
-The summary retains **no WAL message handle**: it copies the record into the
-pending buffer and keeps only its WAL position. It advances its own
-confirmation frontier (`lastAcked`) strictly after the chunk object AND the
-manifest record are durable, and the recovery storage merges this frontier
-with the ack tracker's completed point when persisting a snapshot, so the
-global WAL checkpoint can never outrun an un-durable delete record:
-
-```text
-WAL checkpoint <= durable summary frontier
-```
+DDL invalidations affect idempotency records only. Staged transform records,
+including transforms sharing a transaction with an insert, remain until they
+are persisted and their materialization or cleanup frontier is durable.
 
 ## 4. Retention GC
 
-`Manager.GCOnce` releases chunks above `RetentionMaxBytes`
-(`streaming.summary.maxBytesPerPChannel`, default 4 GB), bounded below by the
-per-vchannel GC positions (`gcFrontiers`): records not yet consumed by a
-dependent component must never be released. A chunk is releasable only when
-every vchannel it covers has a GC position at or above the chunk's end
-timetick, so a chunk that still holds a not-yet-consumed record is never
-released whatever the budget pressure.
+`Manager.GCOnce` releases the oldest chunks above `RetentionMaxBytes` or
+`MaxRetainedChunks`. The active idempotency recovery path supplies
+`streaming.idempotency.maxRetainedBytes` and
+`streaming.idempotency.maxRetainedChunks`. Each zero value disables that bound.
 
-The GC positions are restored by `Manager.Restore` from the vchannel metas
-(the persisted materialization frontier, or `DroppedVChannelTimeTick` for a
-dropped/tombstoned vchannel) and advanced at runtime by
-`Manager.AdvanceGCTimeTick` — with `walsummary.DroppedVChannelTimeTick`
-(= `math.MaxUint64`) when a vchannel's cleanup snapshot is durable, releasing
-everything of that vchannel regardless of consumption.
+A chunk with a transform section stays pinned until every transform-bearing
+vchannel has a GC position at or above its `transform_end_timetick`. Vchannels
+with only inserts do not pin transform retention. These bounds are soft:
+retention cannot discard unmaterialized deletes to satisfy the budget.
+
+`RestoreTransformGCTimeTicks` initializes GC positions from durable VChannel
+metadata when `PChannelRecoveryManager` is constructed. Missing metadata does
+not prove cleanup and leaves records pinned. `AdvanceGCTimeTick` advances the
+frontier only after the corresponding snapshot is durable; dropped/tombstoned
+channels use `DroppedVChannelTimeTick` (`math.MaxUint64`).
+
+Released objects first move into the manifest's `pending_gc` queue and are
+deleted only after publication. The target branch's retired-term sweep also
+collects objects left by superseded writers when retention retires their term.
 
 ## 5. Consumers: TransformLog
 
-[TransformLog](transform_log.md) is the **first** VChannel-level consumer of
-the summary, and today the only one. It is deliberately decoupled from the
-summary:
+The idempotency consumer is wired into RecoveryStorage and reads the insert
+and idempotency sections. [TransformLog](transform_log.md) is the additional
+consumer module, with production recovery wiring still pending. It is decoupled
+from the summary:
 
 - on the write path it only materializes the vchannel's transform records into
   DataCoord-managed L0 segments — it owns no persistent buffer, no chunk
@@ -178,26 +171,22 @@ summary:
 
 ## 6. Recovery And Term Takeover
 
-`Manager.Restore` is read-only with respect to the catalog:
+The recovery layer fences the consume checkpoint **before** summary recovery.
+`Manager.Restore(ctx)` changes no catalog records:
 
-1. read the manifest of the own term; if absent, probe forward for chunks of
-   the own term and seal them into a fresh manifest;
-2. on a term handoff, walk back past empty intermediate terms (a term can be
-   assigned and die before ever sealing a manifest) and inherit the most
-   recent non-empty earlier term's index, so un-consumed records of the
-   superseded owner stay reachable; seal the union into the own manifest;
-3. restore the per-vchannel durable frontiers from the manifest and the GC
-   positions from the vchannel metas;
-4. the manifest is the durable chunk index for the live flush path.
+1. read the current term's manifest and probe its unrecorded chunk tail;
+2. if necessary, list prior manifest terms and inherit the most recent
+   non-empty term, including its probed tail;
+3. publish the inherited index under the current term and restore per-vchannel
+   durable frontiers;
+4. continue chunk generations after the inherited set.
 
-The takeover of the checkpoint happens in the recovery layer, after
-`Manager.Restore` seals the inherited manifest. The consume checkpoint is
-currently a plain last-write commit point, **not** a compare-and-swap: a
-superseded older-term publisher can still overwrite it. The intended
-fenced-commit design lands together with the recovery async refactor.
+A term publishes a manifest before its first chunk so successors can discover
+it even if it crashes before publishing the chunk index. Probing stops at a
+hole or corrupt tail. The transform module's caller separately restores its
+GC frontiers from VChannel metadata and reads its durable backlog once.
 
-Write arbitration across terms: an `Exist -> Write` of a chunk key is not
-atomic; on a byte mismatch the footer is decoded — a footer term greater than
-the own term fences the writer, a smaller term is overwritten, an equal term
-with identical content is an idempotent retry, and an equal term with
-different content is corruption.
+Chunk keys are term-scoped, so different owners write different objects. A
+same-key rewrite succeeds only when its contents match; otherwise it reports
+corruption. If the encoding differs but the contents match, the stored footer
+and size are returned so manifest offsets continue to describe the stored bytes.

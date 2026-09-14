@@ -617,8 +617,8 @@ func (m *VChannelRecoveryModule) tryFinalizeSegmentLocked(segmentID int64, view 
 // vchannel snapshot dirty, so the frontier persists with the next catalog
 // checkpoint. The transform consumer calls it after every committed batch; it
 // must not call back into the TransformLog. The summary retention frontier is
-// updated by the recovery persistence flow once the vchannel meta is durable
-// (see recoveryStorageImpl.persistDirtySnapshot), so the summary only ever
+// must be updated by the future recovery integration once the vchannel meta
+// is durable, so the summary only ever
 // releases records below a frontier that a crash-recovery would observe.
 func (m *VChannelRecoveryModule) markTransformMaterialized(timeTick uint64) {
 	m.mu.Lock()

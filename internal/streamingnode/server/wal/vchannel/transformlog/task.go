@@ -171,6 +171,4 @@ func compactTransformMaterializeTasks(tasks []*transformMaterializeTask) []*tran
 	return pending
 }
 
-var (
-	_ nodescheduler.Task = (*transformMaterializeTask)(nil)
-)
+var _ nodescheduler.Task = (*transformMaterializeTask)(nil)

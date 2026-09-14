@@ -8,8 +8,10 @@
 `VChannelRecoveryModule` owns all recovery state for one VChannel and is
 indexed by `PChannelRecoveryManager`.
 
-Message completion is defined by
-[WAL Message Ack Design](message_ack.md).
+This document describes the module boundary. Production RecoveryStorage does
+not yet dispatch through these modules; that integration remains follow-up
+work. The currently wired summary persistence is synchronous (see
+[WALSummary](summary.md)).
 
 ## 1. Ownership
 

@@ -37,8 +37,8 @@ type PChannelManagerConfig struct {
 	SummaryManager *walsummary.Manager
 	// PendingTransformEntries is the recovery-loaded initial materialization
 	// window per vchannel: the durable records after the restored
-	// transform_materialized_time_tick. Runtime flushes replace it through
-	// the summary's flush listener.
+	// transform_materialized_time_tick. Live observation feeds the window
+	// after this one-time recovery load.
 	PendingTransformEntries map[string][]*streamingpb.TransformLogEntry
 	// TransformLogMaterializer writes the L0 segments of the transform
 	// consumer.

@@ -21,16 +21,19 @@ func newTransformTestManager(t *testing.T, store *Store, retention uint64) *Mana
 	m.cfg.EnableTransform = true
 	return m
 }
+
 func newTransformTestManagerWithStore(t *testing.T) (*Manager, *Store) {
 	t.Helper()
 	store := newTestStore(t)
 	return newTransformTestManager(t, store, 1<<30), store
 }
+
 func flushTransform(t *testing.T, manager *Manager, vchannel string, tt uint64, finalized *bool) {
 	t.Helper()
 	observeTransformDelete(t, manager, vchannel, tt, finalized)
 	require.NoError(t, manager.Persist(context.Background()))
 }
+
 func observeTransformDelete(t *testing.T, manager *Manager, vchannel string, timetick uint64, finalized *bool) {
 	t.Helper()
 	msg := newTestDeleteMessage(t, vchannel, timetick, 10, int64(timetick))
@@ -258,4 +261,64 @@ func TestTransformSectionRejectsCorruptRefs(t *testing.T) {
 			require.ErrorIs(t, err, ErrStoreCorrupted)
 		})
 	}
+}
+
+func TestTransformReadBoundsAndMissingObject(t *testing.T) {
+	ctx := context.Background()
+	manager, store := newTransformTestManagerWithStore(t)
+	var finalized bool
+	flushTransform(t, manager, "v1", 100, &finalized)
+	flushTransform(t, manager, "v1", 200, &finalized)
+	records, err := manager.ReadTransformEntries(ctx, "v1", 0, 99)
+	require.NoError(t, err)
+	require.Empty(t, records)
+	// A legacy index has no per-section end; fall back to the vchannel span.
+	index := manager.manifest.Chunks[0].Vchannels[0]
+	index.TransformEndTimetick = 0
+	manager.AdvanceGCTimeTick("v1", 100)
+	require.True(t, manager.chunkReleasedLocked(manager.manifest.Chunks[0]))
+	require.NoError(t, store.DeleteChunk(ctx, 0, store.Term()))
+	_, err = manager.ReadTransformEntries(ctx, "v1", 0, 100)
+	require.Error(t, err, "a missing durable transform object must fail recovery")
+}
+
+func TestTransformSectionRejectsMalformedPayload(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	index := &streamingpb.VChannelSummaryChunkIndex{Vchannel: "v1"}
+	_, err := unmarshalTransformSection(newChunkHeader(), chunkHeaderSize, index)
+	require.ErrorIs(t, err, ErrStoreCorrupted)
+	payload := append(newChunkHeader(), byte(0xff))
+	index.Transform = &streamingpb.VChannelSummarySectionRef{Offset: chunkHeaderSize, Length: 1, RecordCount: 1}
+	_, err = unmarshalTransformSection(payload, uint64(len(payload)), index)
+	require.ErrorIs(t, err, ErrStoreCorrupted)
+	require.NoError(t, store.chunkManager.Write(ctx, store.ChunkKey(0), payload))
+	_, err = store.ReadTransformSection(ctx, 0, store.Term(), "v1", index)
+	require.ErrorIs(t, err, ErrStoreCorrupted, "invalid object framing must be rejected before reading a section")
+}
+
+func TestMixedTransactionSurvivesIdempotencyInvalidation(t *testing.T) {
+	ctx := context.Background()
+	original := message.AsImmutableTxnMessage(newTestIdempotentTxnMessage(t, "v1", 100, "txn-key", [][]int64{{1}, {2}}))
+	builder := message.NewImmutableTxnMessageBuilder(message.MustAsImmutableBeginTxnMessageV2(original.Begin()))
+	builder.Add(newTestIdempotentInsertMessage(t, "v1", 101, "", []int64{1}, []uint32{0}))
+	builder.Add(newTestDeleteMessage(t, "v1", 102, 10, 99))
+	txn, err := builder.Build(message.MustAsImmutableCommitTxnMessageV2(original.Commit()))
+	require.NoError(t, err)
+	manager, _ := newTransformTestManagerWithStore(t)
+	manager.ObserveMessage(ctx, txn)
+	require.Len(t, manager.pending, 1)
+	require.NotNil(t, manager.pending[0].entry)
+	require.NotNil(t, manager.pending[0].insert)
+	manager.invalidateVChannel("v1", 200)
+	require.Len(t, manager.pending, 1, "a transaction's transform must survive invalidation of its insert key")
+	require.NoError(t, manager.Persist(ctx))
+	transforms, err := manager.ReadTransformEntries(ctx, "v1", 0, 200)
+	require.NoError(t, err)
+	require.Len(t, transforms, 1)
+	require.Equal(t, txn.TimeTick(), transforms[0].GetTimeTick())
+	require.Equal(t, []int64{99}, transforms[0].GetDelete().GetBlocks()[0].GetPrimaryKeys().GetIntId().GetData())
+	keys, err := manager.ReadIdempotencyEntries(ctx, "v1", 0, 200)
+	require.NoError(t, err)
+	require.Empty(t, keys.Idempotency)
 }
