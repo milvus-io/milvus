@@ -311,15 +311,19 @@ class JsonKeyStats : public ScalarIndex<std::string> {
                    "Shredding column {} does not support data scan",
                    path);
         ChunkedColumnInterface::ScanBatch batch;
-        // The caller still computes and caches one full-column bitmap. Only
-        // the temporary value window is bounded here. The configured policy
-        // owns the pin in each result or reuses it in this local cursor.
+        // Bound temporary string/BSON view arrays. Fixed-width values borrow
+        // the chunk's span without materializing a view array, so let Scan
+        // stop at physical chunk boundaries rather than repinning every 8192
+        // rows under ResultOwned. The full-column output bitmap is unchanged.
+        const int64_t max_batch_size = std::is_arithmetic_v<T>
+                                           ? num_rows
+                                           : DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE;
         while (
-            cursor->Next(DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE,
+            cursor->Next(max_batch_size,
                          ChunkedColumnInterface::ScanReadMode::DataAndValidity,
                          &batch)) {
             AssertInfo(batch.row_id_start == processed_size && batch.size > 0 &&
-                           batch.size <= DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE &&
+                           batch.size <= max_batch_size &&
                            batch.size <= num_rows - processed_size,
                        "Invalid shredding scan batch at {}: start {}, size {}",
                        processed_size,

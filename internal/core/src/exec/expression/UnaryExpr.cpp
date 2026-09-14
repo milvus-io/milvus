@@ -1272,12 +1272,13 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
                 } else {
                     ShreddingExecutor<ColType, ValType> executor(
                         op_type, pointer, val);
-                    index->ExecutorForShreddingData<ColType>(op_ctx_,
-                                                             target_field,
-                                                             executor,
-                                                             nullptr,
-                                                             target_res_view,
-                                                             target_valid_view);
+                    index->ExecutorForShreddingData<ColType>(
+                        op_ctx_,
+                        target_field,
+                        std::move(executor),
+                        nullptr,
+                        target_res_view,
+                        target_valid_view);
                 }
                 res_view.inplace_or_with_count(target_res_view, active_count_);
                 valid_res_view.inplace_or_with_count(target_valid_view,

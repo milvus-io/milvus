@@ -22,6 +22,7 @@
 #include <stdexcept>
 
 #include "common/Chunk.h"
+#include "exec/expression/UnaryExpr.h"
 #include "index/json_stats/JsonKeyStats.h"
 #include "mmap/ChunkedColumn.h"
 #include "segcore/SegcoreConfig.h"
@@ -375,10 +376,13 @@ TEST_P(JsonKeyStatsScanTest, SkipUsesPhysicalCellOnceAndPreservesIncomingBits) {
 
 template <typename T>
 void
-CheckFixedWidth(DataType type, const std::vector<T>& values) {
-    auto fixture = MakeColumn({2, 3}, values, type, true);
+CheckFixedWidth(DataType type,
+                const std::vector<T>& values,
+                const std::vector<int64_t>& chunk_rows = {2, 3}) {
+    const int64_t rows = values.size();
+    auto fixture = MakeColumn(chunk_rows, values, type, true);
     auto stats = MakeStats(fixture.column);
-    TargetBitmap result(5), valid(5, true);
+    TargetBitmap result(rows), valid(rows, true);
     int64_t row = 0;
     auto predicate = [&](const T* data,
                          ValidityView validity,
@@ -400,10 +404,15 @@ CheckFixedWidth(DataType type, const std::vector<T>& values) {
                                                     nullptr,
                                                     TargetBitmapView(result),
                                                     TargetBitmapView(valid)),
-        5);
-    EXPECT_EQ(row, 5);
-    EXPECT_EQ(valid.count(), 4);
+        rows);
+    EXPECT_EQ(row, rows);
+    for (int64_t i = 0; i < rows; ++i) {
+        EXPECT_EQ(result[i], ValidRow(i));
+        EXPECT_EQ(valid[i], ValidRow(i));
+    }
     EXPECT_EQ(fixture.trace->pinned_chunks, (std::vector<int64_t>{0, 1}));
+    EXPECT_EQ(fixture.trace->largest_batch,
+              *std::max_element(chunk_rows.begin(), chunk_rows.end()));
 }
 
 TEST_P(JsonKeyStatsScanTest, FixedWidthKeepsTypesAndDenseRowPositions) {
@@ -411,6 +420,105 @@ TEST_P(JsonKeyStatsScanTest, FixedWidthKeepsTypesAndDenseRowPositions) {
         DataType::INT64, {9007199254740993LL, 0, -9007199254740993LL, 7, -3});
     CheckFixedWidth<double>(DataType::DOUBLE, {0.5, 0, -1.25, 1e100, -1e100});
     CheckFixedWidth<bool>(DataType::BOOL, {true, false, false, true, false});
+}
+
+TEST_P(JsonKeyStatsScanTest, LargeFixedWidthChunksPinOncePerChunk) {
+    const int64_t first_rows = DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE * 16 + 3;
+    const int64_t rows = first_rows + 5;
+    std::vector<int64_t> integers(rows);
+    std::vector<double> doubles(rows);
+    std::vector<bool> booleans(rows);
+    for (int64_t i = 0; i < rows; ++i) {
+        integers[i] = 9007199254740993LL + i;
+        doubles[i] = i * 0.5 - rows;
+        booleans[i] = i % 2 == 0;
+    }
+    CheckFixedWidth(DataType::INT64, integers, {first_rows, 5});
+    CheckFixedWidth(DataType::DOUBLE, doubles, {first_rows, 5});
+    CheckFixedWidth(DataType::BOOL, booleans, {first_rows, 5});
+}
+
+TEST_P(JsonKeyStatsScanTest,
+       PatternPredicatesKeepResultsAcrossWindowsAndChunks) {
+    const int64_t first_rows = DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE * 3 + 3;
+    const int64_t rows = first_rows + 5;
+    const std::vector<std::string> samples{"ab猫-tail",
+                                           "ab-tail",
+                                           "ab",
+                                           "other",
+                                           "ab\nx",
+                                           std::string("ab\0x", 4)};
+    std::vector<std::string> values(rows);
+    for (int64_t i = 0; i < rows; ++i) {
+        values[i] = samples[i % samples.size()];
+    }
+    auto fixture = MakeColumn({first_rows, 5}, values, DataType::STRING, true);
+    auto stats = MakeStats(fixture.column);
+    const std::vector<std::pair<proto::plan::OpType, std::string>> patterns{
+        {proto::plan::Match, "ab_%"},
+        {proto::plan::RegexMatch, "^ab.(?:-tail|tail|x)$"},
+        {proto::plan::Match, "other"},
+        {proto::plan::RegexMatch, "^other$"}};
+    for (size_t pattern_id = 0; pattern_id < patterns.size(); ++pattern_id) {
+        SCOPED_TRACE(pattern_id);
+        const auto& [op, pattern] = patterns[pattern_id];
+        exec::ShreddingExecutor<std::string_view, std::string> executor(
+            op, "/test", pattern);
+        TargetBitmap result(rows), valid(rows, true);
+        EXPECT_EQ(stats->ExecutorForShreddingData<std::string_view>(
+                      nullptr,
+                      "test_path",
+                      std::move(executor),
+                      nullptr,
+                      TargetBitmapView(result),
+                      TargetBitmapView(valid)),
+                  rows);
+        for (int64_t i = 0; i < rows; ++i) {
+            const auto sample = i % samples.size();
+            const bool matched =
+                pattern_id < 2 ? sample != 2 && sample != 3 : sample == 3;
+            EXPECT_EQ(valid[i], ValidRow(i));
+            EXPECT_EQ(result[i], ValidRow(i) && matched);
+        }
+    }
+    EXPECT_LE(fixture.trace->largest_batch, DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE);
+}
+
+TEST_P(JsonKeyStatsScanTest, SkippedPatternDoesNotCompileInvalidRegex) {
+    auto fixture = MakeColumn<std::string>(
+        {DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE + 1},
+        std::vector<std::string>(DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE + 1,
+                                 "value"),
+        DataType::STRING,
+        true);
+    auto stats = MakeStats(fixture.column);
+    const auto rows = fixture.column->NumRows();
+    TargetBitmap result(rows), valid(rows, true);
+    auto skip = [](const SkipIndex&, std::string, int) { return true; };
+    exec::ShreddingExecutor<std::string_view, std::string> executor(
+        proto::plan::RegexMatch, "/test", "[");
+    EXPECT_EQ(stats->ExecutorForShreddingData<std::string_view>(
+                  nullptr,
+                  "test_path",
+                  std::move(executor),
+                  skip,
+                  TargetBitmapView(result),
+                  TargetBitmapView(valid)),
+              rows);
+    exec::ShreddingExecutor<std::string_view, std::string> evaluated(
+        proto::plan::RegexMatch, "/test", "[");
+    try {
+        stats->ExecutorForShreddingData<std::string_view>(
+            nullptr,
+            "test_path",
+            std::move(evaluated),
+            nullptr,
+            TargetBitmapView(result),
+            TargetBitmapView(valid));
+        FAIL() << "Invalid regex must fail when a batch is evaluated";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::InvalidParameter);
+    }
 }
 
 TEST_P(JsonKeyStatsScanTest, MissingPathDoesNotScanAndPinFailurePropagates) {
