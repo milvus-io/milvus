@@ -39,7 +39,7 @@ import (
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
-type BulkInsertSuite struct {
+type importTestBase struct {
 	integration.MiniClusterSuite
 
 	failed       bool
@@ -55,16 +55,20 @@ type BulkInsertSuite struct {
 	testType   schemapb.DataType
 }
 
-func (s *BulkInsertSuite) SetupSuite() {
+type BulkInsertSuite struct {
+	importTestBase
+}
+
+type MultiFileTypeImportSuite struct {
+	importTestBase
+}
+
+func (s *importTestBase) SetupSuite() {
 	s.WithMilvusConfig(paramtable.Get().RootCoordCfg.DmlChannelNum.Key, "4")
-	// The binlog-import cases restore legacy L0 (delete-only) segments, which is
-	// disabled by default (dataCoord.import.enableL0Import=false); re-enable it
-	// so they keep covering the legacy path.
-	s.WithMilvusConfig(paramtable.Get().DataCoordCfg.EnableL0Import.Key, "true")
 	s.MiniClusterSuite.SetupSuite()
 }
 
-func (s *BulkInsertSuite) SetupTest() {
+func (s *importTestBase) SetupTest() {
 	s.failed = false
 	s.fileType = importutilv2.Parquet
 	s.pkType = schemapb.DataType_Int64
@@ -76,7 +80,7 @@ func (s *BulkInsertSuite) SetupTest() {
 	s.testType = schemapb.DataType_None
 }
 
-func (s *BulkInsertSuite) run() {
+func (s *importTestBase) run() {
 	const (
 		rowCount = 100
 	)
@@ -234,43 +238,34 @@ func (s *BulkInsertSuite) TestGeometryTypes() {
 	s.run()
 }
 
-func (s *BulkInsertSuite) TestMultiFileTypes() {
+func (s *MultiFileTypeImportSuite) TestMultiFileTypes() {
 	fileTypeArr := []importutilv2.FileType{importutilv2.JSON, importutilv2.Numpy, importutilv2.Parquet, importutilv2.CSV}
+	vectorTypes := []struct {
+		vecType    schemapb.DataType
+		indexType  indexparamcheck.IndexType
+		metricType metric.MetricType
+	}{
+		{schemapb.DataType_BinaryVector, "BIN_IVF_FLAT", metric.HAMMING},
+		{schemapb.DataType_FloatVector, "HNSW", metric.L2},
+		{schemapb.DataType_Float16Vector, "HNSW", metric.L2},
+		{schemapb.DataType_BFloat16Vector, "HNSW", metric.L2},
+		{schemapb.DataType_Int8Vector, "HNSW", metric.L2},
+		{schemapb.DataType_SparseFloatVector, "SPARSE_WAND", metric.IP},
+	}
 
 	for _, fileType := range fileTypeArr {
-		s.fileType = fileType
-
-		s.vecType = schemapb.DataType_BinaryVector
-		s.indexType = "BIN_IVF_FLAT"
-		s.metricType = metric.HAMMING
-		s.run()
-
-		s.vecType = schemapb.DataType_FloatVector
-		s.indexType = "HNSW"
-		s.metricType = metric.L2
-		s.run()
-
-		s.vecType = schemapb.DataType_Float16Vector
-		s.indexType = "HNSW"
-		s.metricType = metric.L2
-		s.run()
-
-		s.vecType = schemapb.DataType_BFloat16Vector
-		s.indexType = "HNSW"
-		s.metricType = metric.L2
-		s.run()
-
-		s.vecType = schemapb.DataType_Int8Vector
-		s.indexType = "HNSW"
-		s.metricType = metric.L2
-		s.run()
-
-		// TODO: not support numpy for SparseFloatVector by now
-		if fileType != importutilv2.Numpy {
-			s.vecType = schemapb.DataType_SparseFloatVector
-			s.indexType = "SPARSE_WAND"
-			s.metricType = metric.IP
-			s.run()
+		for _, vectorType := range vectorTypes {
+			// Numpy does not support sparse vectors.
+			if fileType == importutilv2.Numpy && vectorType.vecType == schemapb.DataType_SparseFloatVector {
+				continue
+			}
+			s.Run(fmt.Sprintf("%s/%s", fileType, vectorType.vecType), func() {
+				s.fileType = fileType
+				s.vecType = vectorType.vecType
+				s.indexType = vectorType.indexType
+				s.metricType = vectorType.metricType
+				s.run()
+			})
 		}
 	}
 }
@@ -489,6 +484,12 @@ func (s *BulkInsertSuite) TestDiskQuotaExceeded() {
 	s.failed = true
 	s.failedReason = "disk quota exceeded"
 	s.run()
+}
+
+// The format matrix has its own MiniCluster lifetime so it does not exhaust
+// BulkInsertSuite's deadline before the remaining import scenarios run.
+func TestMultiFileTypeImport(t *testing.T) {
+	suite.Run(t, new(MultiFileTypeImportSuite))
 }
 
 func TestBulkInsert(t *testing.T) {

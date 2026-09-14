@@ -123,9 +123,12 @@ func generateFixedSizeListParquetFile(
 	float32List := buildFixedSizeFloat32List(mem, int32(vectorDim), rowCount)
 	defer float32List.Release()
 
+	// Arrow v17 inherits the outer field nullability when writing FixedSizeList
+	// element definition levels, while its Parquet schema always uses optional
+	// elements. Use nullable outer fields to encode the non-null values correctly.
 	pqSchema := arrow.NewSchema([]arrow.Field{
-		{Name: arrayFieldName, Type: int32List.DataType(), Nullable: false},
-		{Name: vectorFieldName, Type: float32List.DataType(), Nullable: false},
+		{Name: arrayFieldName, Type: int32List.DataType(), Nullable: true},
+		{Name: vectorFieldName, Type: float32List.DataType(), Nullable: true},
 	}, nil)
 
 	buf := bytes.NewBuffer(make([]byte, 0, 10240))

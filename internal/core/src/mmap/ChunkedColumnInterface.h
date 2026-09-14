@@ -16,21 +16,43 @@
 #pragma once
 
 #include <atomic>
+#include <functional>
+#include <memory>
 #include <mutex>
+#include <optional>
 #include <vector>
 
 #include "cachinglayer/CacheSlot.h"
 #include "common/ArrayValue.h"
 #include "common/Chunk.h"
+#include "common/EasyAssert.h"
 #include "common/OffsetMapping.h"
 #include "common/SealedOffsetMapping.h"
 #include "common/bson_view.h"
+#include "mmap/ChunkedColumnScanCommon.h"
 namespace milvus {
 
 using namespace milvus::cachinglayer;
 
 class ChunkedColumnInterface {
  public:
+    using TargetType = milvus::TargetType;
+    using ValueView = milvus::ValueView;
+    using ScanBatch = milvus::ScanBatch;
+    using ScanReadMode = milvus::ScanReadMode;
+    using ScanCursor = milvus::ScanCursor;
+    using ScanPinPolicy = milvus::ScanPinPolicy;
+    using ScanOptions = milvus::ScanOptions;
+    using ScanResult = milvus::ScanResult;
+    using OffsetView = milvus::OffsetView;
+    using OwnedTakeData = milvus::OwnedTakeData;
+    template <typename T>
+    using TakeItem = milvus::TakeItem<T>;
+    using TakeItemState = milvus::TakeItemState;
+    using TakeOptions = milvus::TakeOptions;
+    using TakeResult = milvus::TakeResult;
+    using TakeResultPtr = milvus::TakeResultPtr;
+
     virtual ~ChunkedColumnInterface() = default;
 
     // Check if this column is part of a multi-field column group.
@@ -181,6 +203,15 @@ class ChunkedColumnInterface {
                    chunk->RowNums());
         chunk->ApplyValidityMask(offset, size, valid_result);
     }
+
+    virtual ScanResult
+    Scan(milvus::OpContext* op_ctx, const ScanOptions& options) const;
+
+    // Convenience positional access. Backends consume segment offsets without
+    // exposing physical Cell/file locations. Results preserve input order and
+    // duplicates.
+    virtual TakeResultPtr
+    Take(milvus::OpContext* op_ctx, TakeOptions options) const;
 
     // Get number of rows before a specific chunk
     virtual int64_t
@@ -390,6 +421,37 @@ class ChunkedColumnInterface {
     }
 
  protected:
+    using TakeCellPin = std::function<PinWrapper<Chunk*>(int64_t)>;
+
+    // Return a generation-stable accessor used by the default Raw Take
+    // implementation to pin one Cell at a time after Take() returns. The
+    // accessor must own the cache resources it needs; it must not capture a
+    // bare column pointer. The caller keeps op_ctx alive until borrowed access
+    // and any GetOwn() materialization are complete.
+    virtual TakeCellPin
+    MakeTakeCellPin(milvus::OpContext* op_ctx) const {
+        return {};
+    }
+
+    // Return the immutable physical planner owned by this Column generation.
+    // Scan/Take implementations may use it, but callers must not observe Cell
+    // geometry through the Column API.
+    const ColumnPlanner&
+    Planner() const;
+
+    // Keep immutable generation geometry alive for lazy backend work that may
+    // outlive the concrete Column object (for example a Raw TakeResult).
+    std::shared_ptr<const ColumnPlanner>
+    PlannerHandle() const;
+
+    virtual std::unique_ptr<ColumnPlanner>
+    BuildPlanner() const;
+
+    virtual std::optional<DataType>
+    GetDefaultScanDataType() const {
+        return std::nullopt;
+    }
+
     FixedVector<bool> valid_data_;
     std::vector<int64_t> valid_count_per_chunk_;
     std::vector<int64_t> num_valid_rows_until_chunk_;
@@ -457,6 +519,10 @@ class ChunkedColumnInterface {
         }
         return std::make_pair(std::move(cids), std::move(offsets_in_chunk));
     }
+
+ private:
+    mutable std::once_flag planner_once_;
+    mutable std::shared_ptr<ColumnPlanner> planner_;
 };
 
 }  // namespace milvus

@@ -418,7 +418,10 @@ HybridScalarIndex<T>::GetRemoteIndexTypeFile(
             break;
         }
     }
-    AssertInfo(!ret.empty(), "index type file not found for hybrid index");
+    if (!(!ret.empty())) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "index type file not found for hybrid index");
+    }
     return ret;
 }
 

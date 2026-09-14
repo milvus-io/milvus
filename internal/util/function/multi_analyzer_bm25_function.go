@@ -167,7 +167,10 @@ func (v *MultiAnalyzerBM25FunctionRunner) run(text []string, analyzerName []stri
 			return err
 		}
 
-		tokenStream := analyzer.NewTokenStream(text[i])
+		tokenStream, err := analyzer.NewTokenStream(text[i])
+		if err != nil {
+			return err
+		}
 
 		for tokenStream.Advance() {
 			token := tokenStream.Token()
@@ -257,7 +260,10 @@ func (v *MultiAnalyzerBM25FunctionRunner) analyze(data []string, analyzerName []
 			return err
 		}
 
-		tokenStream := analyzer.NewTokenStream(data[i])
+		tokenStream, err := analyzer.NewTokenStream(data[i])
+		if err != nil {
+			return err
+		}
 		for tokenStream.Advance() {
 			var token *milvuspb.AnalyzerToken
 			if withDetail {

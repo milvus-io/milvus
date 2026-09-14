@@ -906,6 +906,7 @@ func (m *externalCollectionRefreshManager) createTasksForJob(
 		if merr.GetErrorType(err) == merr.InputError ||
 			errors.Is(err, errMilvusTableRefreshSchemaInvalid) ||
 			errors.Is(err, packed.ErrLoonTransient) ||
+			errors.Is(err, packed.ErrLoonPermanent) ||
 			packed.IsMilvusTableStorageV2ManifestListMissing(err) {
 			return nil, newNonRetriableJobError("explore external files failed: %v", err)
 		}

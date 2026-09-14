@@ -17,6 +17,8 @@
 package datacoord
 
 import (
+	"fmt"
+
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
@@ -53,6 +55,19 @@ func setNodeID(nodeID int64) compactionTaskOpt {
 	return func(task *datapb.CompactionTask) {
 		task.NodeID = nodeID
 	}
+}
+
+// compactionFailReason renders the typed failure a worker carried back in
+// CompactionPlanResult.FailStatus into a persistable fail_reason. Before the
+// worker carried a status, every failure was reduced to a bare `failed` state
+// with no code or reason to diagnose from.
+func compactionFailReason(result *datapb.CompactionPlanResult) string {
+	st := result.GetFailStatus()
+	if st == nil {
+		return "compaction failed in datanode"
+	}
+	return fmt.Sprintf("compaction failed in datanode: code=%d, retriable=%t, %s",
+		st.GetCode(), st.GetRetriable(), st.GetReason())
 }
 
 func setFailReason(reason string) compactionTaskOpt {

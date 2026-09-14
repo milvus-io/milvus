@@ -103,7 +103,7 @@ Task::SetError(const std::exception_ptr& exception) {
 void
 Task::SetError(const std::string& message) {
     try {
-        throw std::runtime_error(message);
+        ThrowInfo(ErrorCode::UnexpectedError, "{}", std::string(message));
     } catch (const std::runtime_error& e) {
         SetError(std::current_exception());
     }

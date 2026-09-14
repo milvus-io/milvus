@@ -1480,24 +1480,31 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
         load_index_info->index_id,
         load_index_info->mmap_dir_path);
     // get index type
-    AssertInfo(index_params.find("index_type") != index_params.end(),
-               "index type is empty");
+    if (!(index_params.find("index_type") != index_params.end())) {
+        ThrowInfo(ErrorCode::DataFormatBroken, "index type is empty");
+    }
     index_info.index_type = index_params.at("index_type");
 
     // get metric type
     if (milvus::IsVectorDataType(field_type)) {
-        AssertInfo(index_params.find("metric_type") != index_params.end(),
-                   "metric type is empty for vector index");
+        if (!(index_params.find("metric_type") != index_params.end())) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "metric type is empty for vector index");
+        }
         index_info.metric_type = index_params.at("metric_type");
     }
 
     if (index_info.index_type == milvus::index::NGRAM_INDEX_TYPE) {
-        AssertInfo(
-            index_params.find(milvus::index::MIN_GRAM) != index_params.end(),
-            "min_gram is empty for ngram index");
-        AssertInfo(
-            index_params.find(milvus::index::MAX_GRAM) != index_params.end(),
-            "max_gram is empty for ngram index");
+        if (!(index_params.find(milvus::index::MIN_GRAM) !=
+              index_params.end())) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "min_gram is empty for ngram index");
+        }
+        if (!(index_params.find(milvus::index::MAX_GRAM) !=
+              index_params.end())) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "max_gram is empty for ngram index");
+        }
 
         // get min_gram and max_gram and convert to uintptr_t
         milvus::index::NgramParams ngram_params{};

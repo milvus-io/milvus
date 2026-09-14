@@ -435,12 +435,18 @@ func (mr *MilvusRoles) Run() {
 		params := paramtable.Get()
 		if params.EtcdCfg.UseEmbedEtcd.GetAsBool() {
 			// Start etcd server.
-			etcd.InitEtcdServer(
+			if err := etcd.InitEtcdServer(
 				params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
 				params.EtcdCfg.ConfigPath.GetValue(),
 				params.EtcdCfg.DataDir.GetValue(),
 				params.EtcdCfg.EtcdLogPath.GetValue(),
-				params.EtcdCfg.EtcdLogLevel.GetValue())
+				params.EtcdCfg.EtcdLogLevel.GetValue()); err != nil {
+				// Panic (non-zero exit) so restart policies such as systemd
+				// Restart=on-failure or docker --restart on-failure treat the
+				// startup failure as a crash rather than a clean exit.
+				mlog.Error(context.TODO(), "failed to start embedded Etcd server", mlog.Err(err))
+				panic(err)
+			}
 			defer etcd.StopEtcdServer()
 		}
 		paramtable.SetRole(typeutil.StandaloneRole)
@@ -528,6 +534,11 @@ func (mr *MilvusRoles) Run() {
 
 	if (mr.EnableRootCoord && mr.EnableDataCoord && mr.EnableQueryCoord) || mr.EnableMixCoord {
 		paramtable.SetLocalComponentEnabled(typeutil.MixCoordRole)
+		// The version-gate switcher is a cluster-wide, one-shot capability:
+		// only the MixCoord role starts it, so a single coordinator drives the
+		// flip of every version-gated config item. Other roles observe the
+		// flipped value through the regular config refresh.
+		paramtable.StartVersionGateSwitcher()
 		mixCoord := mr.runMixCoord(ctx, local)
 		componentFutureMap[typeutil.MixCoordRole] = mixCoord
 	}

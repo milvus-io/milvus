@@ -303,14 +303,18 @@ PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForAll(
         }
         const int64_t compare_us = compare_value;
         for (int i = 0; i < size; ++i) {
-            if (valid_data && !valid_data[i]) {
+            int32_t offset = i;
+            if constexpr (filter_type == FilterType::random) {
+                offset = offsets == nullptr ? i : offsets[i];
+            }
+            if (valid_data && !valid_data[offset]) {
                 // NULL never matches, under either polarity (three-valued
                 // logic); do not evaluate the storage placeholder value.
                 res[i] = valid_res[i] = false;
                 continue;
             }
             res[i] = EvaluateTimestamp(
-                data[i], arith_op, interval, compare_op, compare_us);
+                data[offset], arith_op, interval, compare_op, compare_us);
         }
     };
     int64_t processed_size;
