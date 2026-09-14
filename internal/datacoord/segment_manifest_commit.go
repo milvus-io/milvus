@@ -99,6 +99,9 @@ type SegmentManifestCommit struct {
 	StorageConfig    *indexpb.StorageConfig
 	Mutation         ManifestMutation
 	CatalogMutation  SegmentCatalogMutation
+	// CompactionTask opts this commit into a final snapshot-protection check
+	// while segMu is held. Ordinary manifest writers leave it nil.
+	CompactionTask *datapb.CompactionTask
 }
 
 // CommitSegmentManifest is the only DataCoord primitive that both creates a
@@ -184,6 +187,11 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 	// apply the catalog mutation to the latest clone rather than the I/O input.
 	m.segMu.Lock()
 	defer m.segMu.Unlock()
+	if commit.CompactionTask != nil {
+		if err := m.validateCompactionProtectionLocked(commit.CompactionTask); err != nil {
+			return err
+		}
+	}
 	latest := m.segments.GetSegment(commit.SegmentID)
 	if isNewSegment {
 		if latest != nil {
