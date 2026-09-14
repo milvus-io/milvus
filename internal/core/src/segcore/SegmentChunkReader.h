@@ -51,6 +51,16 @@ using PinnedIndexView = boost::span<const PinWrapper<const index::IndexBase*>>;
 // windows of one field and request snapshot. Two consumers of the same field
 // must use separate handles. A default handle does not allocate Scan state.
 class StringScanState {
+ public:
+    StringScanState() = default;
+    StringScanState(const StringScanState&) = delete;
+    StringScanState&
+    operator=(const StringScanState&) = delete;
+    StringScanState(StringScanState&&) noexcept = default;
+    StringScanState&
+    operator=(StringScanState&&) noexcept = default;
+
+ private:
     friend class SegmentChunkReader;
     struct State;
     std::shared_ptr<State> state_;
@@ -249,9 +259,15 @@ class SegmentChunkReader {
     GetMultipleChunkDataAccessor(FieldId field_id,
                                  int64_t& current_chunk_id,
                                  int64_t& current_chunk_pos,
-                                 PinnedIndexView pinned_index,
-                                 int64_t scan_batch_size,
-                                 StringScanState* scan_state) const;
+                                 PinnedIndexView pinned_index) const;
+
+    MultipleChunkDataAccessor
+    GetMultipleChunkStringDataAccessor(FieldId field_id,
+                                       int64_t& current_chunk_id,
+                                       int64_t& current_chunk_pos,
+                                       PinnedIndexView pinned_index,
+                                       int64_t scan_batch_size,
+                                       StringScanState* scan_state) const;
 
     template <typename T>
     ChunkDataAccessor

@@ -70,9 +70,7 @@ SegmentChunkReader::GetMultipleChunkDataAccessor(
     FieldId field_id,
     int64_t& current_chunk_id,
     int64_t& current_chunk_pos,
-    PinnedIndexView pinned_index,
-    int64_t /*scan_batch_size*/,
-    StringScanState* /*scan_state*/) const {
+    PinnedIndexView pinned_index) const {
     const index::IndexBase* index = nullptr;
     if (current_chunk_id < pinned_index.size()) {
         index = pinned_index[current_chunk_id].get();
@@ -134,9 +132,8 @@ SegmentChunkReader::GetMultipleChunkDataAccessor(
     };
 }
 
-template <>
 MultipleChunkDataAccessor
-SegmentChunkReader::GetMultipleChunkDataAccessor<std::string>(
+SegmentChunkReader::GetMultipleChunkStringDataAccessor(
     FieldId field_id,
     int64_t& current_chunk_id,
     int64_t& current_chunk_pos,
@@ -321,68 +318,36 @@ SegmentChunkReader::GetMultipleChunkDataAccessor(
     StringScanState* scan_state) const {
     switch (data_type) {
         case DataType::BOOL:
-            return GetMultipleChunkDataAccessor<bool>(field_id,
+            return GetMultipleChunkDataAccessor<bool>(
+                field_id, current_chunk_id, current_chunk_pos, pinned_index);
+        case DataType::INT8:
+            return GetMultipleChunkDataAccessor<int8_t>(
+                field_id, current_chunk_id, current_chunk_pos, pinned_index);
+        case DataType::INT16:
+            return GetMultipleChunkDataAccessor<int16_t>(
+                field_id, current_chunk_id, current_chunk_pos, pinned_index);
+        case DataType::INT32:
+            return GetMultipleChunkDataAccessor<int32_t>(
+                field_id, current_chunk_id, current_chunk_pos, pinned_index);
+        case DataType::INT64:
+            return GetMultipleChunkDataAccessor<int64_t>(
+                field_id, current_chunk_id, current_chunk_pos, pinned_index);
+        case DataType::TIMESTAMPTZ:
+            return GetMultipleChunkDataAccessor<int64_t>(
+                field_id, current_chunk_id, current_chunk_pos, pinned_index);
+        case DataType::FLOAT:
+            return GetMultipleChunkDataAccessor<float>(
+                field_id, current_chunk_id, current_chunk_pos, pinned_index);
+        case DataType::DOUBLE:
+            return GetMultipleChunkDataAccessor<double>(
+                field_id, current_chunk_id, current_chunk_pos, pinned_index);
+        case DataType::VARCHAR: {
+            return GetMultipleChunkStringDataAccessor(field_id,
                                                       current_chunk_id,
                                                       current_chunk_pos,
                                                       pinned_index,
                                                       scan_batch_size,
                                                       scan_state);
-        case DataType::INT8:
-            return GetMultipleChunkDataAccessor<int8_t>(field_id,
-                                                        current_chunk_id,
-                                                        current_chunk_pos,
-                                                        pinned_index,
-                                                        scan_batch_size,
-                                                        scan_state);
-        case DataType::INT16:
-            return GetMultipleChunkDataAccessor<int16_t>(field_id,
-                                                         current_chunk_id,
-                                                         current_chunk_pos,
-                                                         pinned_index,
-                                                         scan_batch_size,
-                                                         scan_state);
-        case DataType::INT32:
-            return GetMultipleChunkDataAccessor<int32_t>(field_id,
-                                                         current_chunk_id,
-                                                         current_chunk_pos,
-                                                         pinned_index,
-                                                         scan_batch_size,
-                                                         scan_state);
-        case DataType::INT64:
-            return GetMultipleChunkDataAccessor<int64_t>(field_id,
-                                                         current_chunk_id,
-                                                         current_chunk_pos,
-                                                         pinned_index,
-                                                         scan_batch_size,
-                                                         scan_state);
-        case DataType::TIMESTAMPTZ:
-            return GetMultipleChunkDataAccessor<int64_t>(field_id,
-                                                         current_chunk_id,
-                                                         current_chunk_pos,
-                                                         pinned_index,
-                                                         scan_batch_size,
-                                                         scan_state);
-        case DataType::FLOAT:
-            return GetMultipleChunkDataAccessor<float>(field_id,
-                                                       current_chunk_id,
-                                                       current_chunk_pos,
-                                                       pinned_index,
-                                                       scan_batch_size,
-                                                       scan_state);
-        case DataType::DOUBLE:
-            return GetMultipleChunkDataAccessor<double>(field_id,
-                                                        current_chunk_id,
-                                                        current_chunk_pos,
-                                                        pinned_index,
-                                                        scan_batch_size,
-                                                        scan_state);
-        case DataType::VARCHAR: {
-            return GetMultipleChunkDataAccessor<std::string>(field_id,
-                                                             current_chunk_id,
-                                                             current_chunk_pos,
-                                                             pinned_index,
-                                                             scan_batch_size,
-                                                             scan_state);
         }
         default:
             ThrowInfo(DataTypeInvalid, "unsupported data type: {}", data_type);
