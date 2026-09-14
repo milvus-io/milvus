@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -46,6 +47,46 @@ type analyzeTask struct {
 }
 
 var _ globalTask.Task = (*analyzeTask)(nil)
+
+func calculateVectorCentroidCount(rows, dim int64, dataType schemapb.DataType, chunkSize int64) (int64, error) {
+	if rows < 0 {
+		return 0, merr.WrapErrServiceInternalMsg("analyze row count must be non-negative, got %d", rows)
+	}
+	if rows == 0 {
+		return 0, nil
+	}
+	if dim <= 0 {
+		return 0, merr.WrapErrServiceInternalMsg("analyze vector dimension must be positive, got %d", dim)
+	}
+	if chunkSize <= 0 {
+		return 0, merr.WrapErrServiceInternalMsg("clustering layout chunk size per centroid must be positive, got %d", chunkSize)
+	}
+
+	var bytesPerDimension int64
+	switch dataType {
+	case schemapb.DataType_FloatVector:
+		bytesPerDimension = 4
+	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
+		bytesPerDimension = 2
+	default:
+		return 0, merr.WrapErrServiceInternalMsg("unsupported clustering layout vector type %s", dataType.String())
+	}
+
+	if dim > math.MaxInt64/bytesPerDimension {
+		return 0, merr.WrapErrServiceInternalMsg("clustering layout vector byte width overflows int64, dim=%d, bytesPerDimension=%d", dim, bytesPerDimension)
+	}
+	bytesPerRow := dim * bytesPerDimension
+	if rows > math.MaxInt64/bytesPerRow {
+		return 0, merr.WrapErrServiceInternalMsg("clustering layout total vector bytes overflow int64, rows=%d, bytesPerRow=%d", rows, bytesPerRow)
+	}
+	totalBytes := rows * bytesPerRow
+	numClusters := totalBytes / chunkSize
+	if totalBytes%chunkSize != 0 {
+		numClusters++
+	}
+	// Kmeans needs at least one training row per centroid.
+	return min(numClusters, rows), nil
+}
 
 func newAnalyzeTask(t *indexpb.AnalyzeTask, meta *meta) *analyzeTask {
 	task := &analyzeTask{
@@ -203,9 +244,27 @@ func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 				}
 				req.Dim = int64(dim)
 
-				// Calculate the number of clusters based on total data size.
+				// Dense float vector clustering uses the global layout granularity. Keep
+				// the legacy segment-size calculation for every other clustering mode.
 				totalSegmentsRawDataSize := float64(totalSegmentsRows) * float64(dim) * typeutil.VectorTypeSize(task.FieldType)
-				numClusters := int64(math.Ceil(totalSegmentsRawDataSize / (Params.DataCoordCfg.SegmentMaxSize.GetAsFloat() * 1024 * 1024 * Params.DataCoordCfg.ClusteringCompactionMaxSegmentSizeRatio.GetAsFloat())))
+				var numClusters int64
+				if typeutil.IsDenseFloatVectorType(task.FieldType) {
+					numClusters, err = calculateVectorCentroidCount(
+						totalSegmentsRows,
+						int64(dim),
+						task.FieldType,
+						Params.DataCoordCfg.ClusteringCompactionLayoutChunkSizePerCentroid.GetAsSize(),
+					)
+					if err != nil {
+						log.Warn(context.TODO(), "failed to calculate clustering layout centroid count", mlog.Err(err))
+						if updateErr := at.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, err.Error()); updateErr != nil {
+							log.Warn(context.TODO(), "failed to persist the failed state of the analyze task", mlog.Err(updateErr))
+						}
+						return
+					}
+				} else {
+					numClusters = int64(math.Ceil(totalSegmentsRawDataSize / (Params.DataCoordCfg.SegmentMaxSize.GetAsFloat() * 1024 * 1024 * Params.DataCoordCfg.ClusteringCompactionMaxSegmentSizeRatio.GetAsFloat())))
+				}
 				if numClusters < Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.GetAsInt64() {
 					log.Info(context.TODO(), "data size is too small, skip analyze task",
 						mlog.Float64("raw data size", totalSegmentsRawDataSize),
