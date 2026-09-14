@@ -41,7 +41,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/fieldvalidator"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/adminauth"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
@@ -1654,7 +1653,7 @@ func passwordVerify(ctx context.Context, username, rawPwd string, privilegeCache
 	// the management-plane verifier rather than calling bcrypt here, so the
 	// stored-credential format, the cost parameter and the "wrong password"
 	// versus "unusable hash" split cannot drift between the two.
-	if err := adminauth.VerifyStoredPassword(credInfo.EncryptedPassword, rawPwd); err != nil {
+	if err := crypto.VerifyStoredPassword(credInfo.EncryptedPassword, rawPwd); err != nil {
 		mlog.Error(ctx, "Verify password failed", mlog.Err(err))
 		return false
 	}

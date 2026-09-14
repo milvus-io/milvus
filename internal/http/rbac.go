@@ -152,7 +152,7 @@ func CheckPrivilege(ctx context.Context, req *http.Request, objectType commonpb.
 	// Verify password with the proxy-owned RBAC verifier. The management-plane
 	// verifier is deliberately not consulted: it is root-only, and MixCoord may
 	// have registered one in this same process.
-	if err := verifyRBACPassword(ctx, username, password, ""); err != nil {
+	if err := verifyRBACPassword(ctx, username, password); err != nil {
 		if IsAuthenticationError(err) {
 			mlog.Warn(ctx, "invalid credentials for HTTP RBAC check", mlog.String("username", username))
 		}

@@ -87,6 +87,13 @@ principal together for the HTTP and Gin adapters. A successful decision carries
 root through a private typed request-context key. In-process telemetry calls
 consume that verified identity without copying the password into RPC metadata.
 
+The password format and bcrypt comparison live in `pkg/util/crypto`, shared
+with ordinary user authentication. That helper returns a mismatch separately
+from a malformed stored hash; it has no root-only policy, HTTP dependency,
+management cache, or resource limiter. `adminauth` owns root-only verification
+and management resource bounds. The HTTP verifier registry and error translation
+live in `internal/http/verifier.go`; server assembly only wires the routes.
+
 ### Browser requests and explicit client intent
 
 The gate checks browser request metadata before checking credentials. A reported
@@ -120,8 +127,8 @@ and scrapes retain their existing policy.
 
 All roles share `CachedRootVerifier` semantics:
 
-- A successfully fetched hash is fresh for 10 seconds. Password rotation can
-  therefore take up to that freshness window to be observed by a verifier.
+- A successfully fetched hash is fresh for 10 seconds. Without a credential notification,
+  password rotation can take up to that window to be observed by a verifier.
 - If refresh fails, a previously fetched hash is usable for up to 10 minutes
   from its last successful fetch. This allows a node to be drained during a
   coordinator outage, but can also retain acceptance of a previous password
@@ -147,10 +154,32 @@ All roles share `CachedRootVerifier` semantics:
   stored hash. A changed hash invalidates that cache. Passwords over bcrypt's
   72-byte limit are rejected before lookup or comparison.
 
-`Forget` advances a generation so an old in-flight fetch cannot repopulate a
-discarded cache. Worker `Close` cancels its lifetime context, drops its cache,
-and closes its client. A construction completing after close must release the
-new client instead of publishing it.
+On a successful root `UpdateCredentialCache` or `InvalidateCredentialCache`
+notification, Proxy also calls its management verifier's `Forget`. The update
+payload is a salted SHA256 value for the business cache, not a bcrypt hash;
+the management verifier must fetch the current stored hash instead of installing
+that payload. The coordinator persists the credential before sending the
+notification. Notifications for other users leave the management cache alone.
+
+`Forget` drops the fresh hash, stale fallback, verified-password SHA, and negative
+cache, and advances a generation. Both cache snapshots and shared lookup results
+carry their generation. Comparison checks it before using the hash and before
+returning a verdict, preventing obsolete lookup or bcrypt results from admitting
+a request. A request authenticated before invalidation may finish its operation.
+
+Invalidation does not detach blocked singleflight work or spawn another lookup.
+A caller receiving an obsolete result gets 503 and can retry after that lookup
+finishes. If the current credential cannot be fetched after invalidation, the
+Proxy returns 503; it cannot fall back to the revoked hash. This intentionally
+trades outage access for revocation on Proxies that received the notification.
+Workers, MixCoord, and Proxies that did not receive it retain the TTL policy;
+this does not promise immediate cluster-wide revocation. In standalone, the
+registered Proxy verifier has priority while Proxy is running; after its removal,
+resolution may fall back to another role's independent TTL cache.
+
+Worker `Close` cancels its lifetime context, drops its cache, and closes its
+client. A construction completing after close must release the new client instead
+of publishing it.
 
 ### Configuration and event logs
 
@@ -169,7 +198,10 @@ individual incoming request body.
 The HTTP `/eventlog` endpoint only discovers an otherwise unauthenticated gRPC
 stream. With the flag enabled that stream binds to loopback, including when an
 existing listener is switched. A failed security upgrade closes the old wildcard
-listener. Event-log shutdown closes a separate notification channel and stops
+listener. Config callbacks read the uncached effective flag under the listener
+mode lock: on the first higher-priority source override, typed-cache eviction
+can follow exact-key handlers, so reading the memoized bool there can preserve
+the old wildcard listener. Event-log shutdown closes a separate notification channel and stops
 the gRPC server so recording concurrently cannot send on a closed event queue.
 
 ## Compatibility, Deprecation, and Migration Plan
@@ -192,7 +224,10 @@ operators must review that exposure before enabling browser authentication.
 Unit tests exercise authentication decisions, real HTTP/Gin route assembly,
 credential response validation, stale and failed refreshes, saturation,
 cancellation, password rotation, role priority, event-log listener switching,
-and configuration aliases. These tests do not replace a real coordinator
+and configuration aliases. Regression cases cover the first real config-source
+override before typed-cache eviction, Proxy root/non-root notifications, revoked
+stale fallback, a post-notification caller joining an obsolete lookup, and
+invalidation during password comparison. These tests do not replace a real coordinator
 failover or browser console acceptance test. Native-linked packages require
 Milvus C++ dependencies and must also compile and run in CI.
 

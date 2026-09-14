@@ -215,7 +215,7 @@ func TestManagementVerifierFailureDoesNotBypassProxy(t *testing.T) {
 	}{
 		{
 			name:                 "password mismatch is authoritative",
-			proxyErr:             NewAuthenticationError("invalid root password"),
+			proxyErr:             merr.WrapErrPrivilegeNotAuthenticated("invalid root password"),
 			expectAuthentication: true,
 		},
 		{
@@ -417,7 +417,7 @@ func (s *CheckPrivilegeTestSuite) TestManagementVerifierDoesNotOverrideRBACVerif
 	})
 	RegisterManagementVerifier(VerifierSlotProxy, func(_ context.Context, username, _ string) error {
 		if username != util.UserRoot {
-			return NewAuthenticationError("invalid root password")
+			return merr.WrapErrPrivilegeNotAuthenticated("invalid root password")
 		}
 		return nil
 	})
@@ -439,9 +439,9 @@ func (s *CheckPrivilegeTestSuite) TestManagementVerifierDoesNotOverrideRBACVerif
 	s.True(IsServiceUnavailableError(err))
 	s.False(IsAuthenticationError(err), "the root-only management verifier must not authenticate RBAC requests")
 
-	s.NoError(verifyRBACPassword(s.ctx, "alice", "alice-password", ""),
+	s.NoError(verifyRBACPassword(s.ctx, "alice", "alice-password"),
 		"a root-only management verifier must not replace ordinary RBAC password verification")
-	s.Error(verifyRBACPassword(s.ctx, "alice", "wrong", ""))
+	s.Error(verifyRBACPassword(s.ctx, "alice", "wrong"))
 }
 
 func (s *CheckPrivilegeTestSuite) TestRootUserBypassWhenRootShouldBindRoleIsFalse() {

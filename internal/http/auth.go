@@ -123,7 +123,7 @@ const AdminRequestHeader = "X-Milvus-Admin-Request"
 const missingRequestContextRejection = "request origin cannot be verified; use HTTPS for browser access " +
 	"or send " + AdminRequestHeader + ": true from a non-browser client"
 
-// RejectCrossSite reports whether a request has an untrusted origin or carries
+// crossSiteRejectionReason explains why a request has an untrusted origin or carries
 // credentials without evidence that the client deliberately sent the request.
 //
 // WriteBasicAuthChallenge is what makes this necessary: the challenge teaches
@@ -135,10 +135,6 @@ const missingRequestContextRejection = "request origin cannot be verified; use H
 // preflight. same-site is refused as well: it is a different origin under the
 // same registrable domain, so trusting it would extend the management plane to
 // whoever controls a sibling subdomain.
-func RejectCrossSite(req *http.Request, allowTopLevelNavigation bool) bool {
-	return crossSiteRejectionReason(req, allowTopLevelNavigation, false) != ""
-}
-
 func crossSiteRejectionReason(req *http.Request, allowTopLevelNavigation, challenge bool) string {
 	origin := req.Header.Get("Origin")
 	if origin != "" && originHost(origin) == "" {

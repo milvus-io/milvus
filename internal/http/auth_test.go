@@ -58,7 +58,7 @@ func setVerifyFunc(t *testing.T, fn func(ctx context.Context, username, password
 	if fn != nil {
 		typed = func(ctx context.Context, username, password string) error {
 			if !fn(ctx, username, password) {
-				return NewAuthenticationError("invalid root password")
+				return merr.WrapErrPrivilegeNotAuthenticated("invalid root password")
 			}
 			return nil
 		}
@@ -574,7 +574,7 @@ func TestGetPasswordVerifyFunc_FallbackUsedWhenNoPrimary(t *testing.T) {
 		if password == "fallback-accepts" {
 			return nil
 		}
-		return NewAuthenticationError("invalid root password")
+		return merr.WrapErrPrivilegeNotAuthenticated("invalid root password")
 	})
 
 	assert.NoError(t, verifyManagementPassword(context.Background(), "root", "fallback-accepts", "/test"))
@@ -593,7 +593,7 @@ func TestWrapAdminAuth_FallbackVerifierAuthenticates(t *testing.T) {
 		if username == "root" && password == "correct-horse" {
 			return nil
 		}
-		return NewAuthenticationError("invalid root password")
+		return merr.WrapErrPrivilegeNotAuthenticated("invalid root password")
 	})
 
 	inv := &invoked{}
@@ -732,7 +732,7 @@ func TestTruncateForLog(t *testing.T) {
 // The cross-site check is the only thing standing between a browser that has
 // cached root's credential for this origin and any page the operator later
 // visits, so it has to fail closed on anything it does not understand.
-func TestRejectCrossSiteFailsClosed(t *testing.T) {
+func TestCheckCrossSiteFailsClosed(t *testing.T) {
 	request := func(setHeaders func(*http.Request)) *http.Request {
 		req := httptest.NewRequest(http.MethodGet, "/management/stop", nil)
 		req.Host = "milvus.example.com:9091"
@@ -770,7 +770,7 @@ func TestRejectCrossSiteFailsClosed(t *testing.T) {
 		}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.rejected, RejectCrossSite(request(tc.headers), false))
+			assert.Equal(t, tc.rejected, !CheckCrossSite(request(tc.headers), "/management/stop", false).Allowed())
 		})
 	}
 
@@ -781,8 +781,8 @@ func TestRejectCrossSiteFailsClosed(t *testing.T) {
 		r.Header.Set("Sec-Fetch-Mode", "navigate")
 		r.Header.Set("Sec-Fetch-Dest", "document")
 	}
-	assert.False(t, RejectCrossSite(request(navigation), true))
-	assert.True(t, RejectCrossSite(request(navigation), false),
+	assert.True(t, CheckCrossSite(request(navigation), "/management/stop", true).Allowed())
+	assert.False(t, CheckCrossSite(request(navigation), "/management/stop", false).Allowed(),
 		"only surfaces that opt in may be linked to")
 	for _, headers := range []map[string]string{
 		{"Sec-Fetch-Site": "unknown"},
@@ -793,7 +793,7 @@ func TestRejectCrossSiteFailsClosed(t *testing.T) {
 		for name, value := range headers {
 			req.Header.Set(name, value)
 		}
-		assert.True(t, RejectCrossSite(req, true),
+		assert.False(t, CheckCrossSite(req, "/management/stop", true).Allowed(),
 			"neither document navigation nor client opt-in may override opaque or unknown context")
 	}
 	req := request(func(r *http.Request) {
@@ -801,18 +801,18 @@ func TestRejectCrossSiteFailsClosed(t *testing.T) {
 		r.Header.Set("Sec-Fetch-Mode", "navigate")
 		r.Header.Set("Sec-Fetch-Dest", "document")
 	})
-	assert.True(t, RejectCrossSite(req, true), "navigation mode alone cannot establish the request's origin")
+	assert.False(t, CheckCrossSite(req, "/management/stop", true).Allowed(), "navigation mode alone cannot establish the request's origin")
 
 	subresource := func(r *http.Request) {
 		r.Header.Set("Sec-Fetch-Site", "cross-site")
 		r.Header.Set("Sec-Fetch-Mode", "no-cors")
 		r.Header.Set("Sec-Fetch-Dest", "image")
 	}
-	assert.True(t, RejectCrossSite(request(subresource), true))
+	assert.False(t, CheckCrossSite(request(subresource), "/management/stop", true).Allowed())
 
 	post := httptest.NewRequest(http.MethodPost, "/management/stop", nil)
 	navigation(post)
-	assert.True(t, RejectCrossSite(post, true),
+	assert.False(t, CheckCrossSite(post, "/management/stop", true).Allowed(),
 		"a navigation that mutates state is the CSRF this guards against")
 }
 

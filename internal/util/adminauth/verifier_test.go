@@ -34,7 +34,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
@@ -830,7 +829,7 @@ func TestCachedRootVerifier_RejectsOverlongPasswordBeforeLookup(t *testing.T) {
 	})
 
 	err := verifier.Verify(context.Background(), "root",
-		strings.Repeat("x", bcryptMaxPasswordBytes+1))
+		strings.Repeat("x", crypto.BcryptMaxPasswordBytes+1))
 	assert.True(t, isMismatch(err))
 	assert.Zero(t, lookups.Load(),
 		"a password bcrypt cannot represent must not drive a credential lookup")
@@ -1066,35 +1065,6 @@ func TestVerifier_CloseReleasesClientAndStopsNewChecks(t *testing.T) {
 	assert.NoError(t, verifier.Close(), "Close should be idempotent")
 }
 
-// The short-circuit is what keeps the console affordable, so the guard that
-// binds it to one specific stored hash is a security property, not a detail:
-// without it a password verified against the pre-rotation hash would keep
-// opening the gate against the post-rotation one. storeHash makes the
-// production state unreachable, so exercise the guard directly.
-func TestCachedRootVerifier_ShortCircuitIsBoundToTheStoredHash(t *testing.T) {
-	before, after := hashed(t, testPassword), hashed(t, "rotated")
-	sha := crypto.SHA256(testPassword, util.UserRoot)
-
-	verifier := NewCachedRootVerifier(func(context.Context) (string, error) {
-		return before, nil
-	})
-	verifier.storeHash(verifier.currentGeneration(), before)
-	verifier.rememberVerified(before, sha)
-
-	assert.True(t, verifier.matchesVerified(before, sha))
-	assert.False(t, verifier.matchesVerified(after, sha),
-		"a password verified against one hash must not be honored against another")
-
-	verifier.storeHash(verifier.currentGeneration(), after)
-	assert.False(t, verifier.matchesVerified(after, sha),
-		"a refresh that changes the hash must drop the short-circuit")
-
-	// And a comparison racing that refresh must not re-arm it against the hash
-	// it no longer holds.
-	verifier.rememberVerified(before, sha)
-	assert.False(t, verifier.matchesVerified(before, sha))
-}
-
 // These three windows are the contract the config documentation states: how
 // long a rotated root password takes to take effect, how long a node that has
 // lost its coordinator keeps answering, and how often a failing node retries.
@@ -1115,24 +1085,4 @@ func TestSaturationRendersAsServiceUnavailable(t *testing.T) {
 	assert.False(t, isNotPermitted(errComparisonSaturated()))
 	assert.True(t, errors.Is(errComparisonSaturated(), merr.ErrServiceUnavailable),
 		"shedding must reach the boundary as an unavailable dependency, which renders 503")
-}
-
-// The comparison is the one place a wrong password and a corrupt credential
-// store look alike, and telling them apart is what keeps an operator holding
-// the right password from being sent to look for a wrong one.
-func TestVerifyStoredPassword(t *testing.T) {
-	hash := hashed(t, testPassword)
-	maxLengthPassword := strings.Repeat("x", bcryptMaxPasswordBytes)
-
-	assert.NoError(t, VerifyStoredPassword(hash, testPassword))
-	assert.NoError(t, VerifyStoredPassword(hashed(t, maxLengthPassword), maxLengthPassword))
-	assert.True(t, isMismatch(VerifyStoredPassword(hash, "wrong-password")))
-	assert.True(t, isMismatch(VerifyStoredPassword(hash,
-		strings.Repeat("x", bcryptMaxPasswordBytes+1))))
-
-	err := VerifyStoredPassword("malformed-bcrypt-hash", testPassword)
-	assert.Error(t, err)
-	assert.False(t, isMismatch(err),
-		"a corrupt stored hash is a credential-store failure, not a bad password")
-	assert.False(t, isNotPermitted(err))
 }

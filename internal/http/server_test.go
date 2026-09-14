@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -439,7 +440,7 @@ func rootOnlyVerifier(_ context.Context, username, password string) error {
 	if username == util.UserRoot && password == "s3cr3t" {
 		return nil
 	}
-	return NewAuthenticationError("invalid root password")
+	return merr.WrapErrPrivilegeNotAuthenticated("invalid root password")
 }
 
 // TestAdminAuthGatesManagementPlane exercises the gate against the real server

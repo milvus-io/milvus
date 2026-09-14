@@ -202,7 +202,7 @@ func TestTelemetryAuthMiddleware_UsesManagementCheckWhenAdminAuthEnabled(t *test
 		if username == util.UserRoot && password == "s3cr3t" {
 			return nil
 		}
-		return internalhttp.NewAuthenticationError("invalid root password")
+		return merr.WrapErrPrivilegeNotAuthenticated("invalid root password")
 	})
 	internalhttp.RegisterPasswordVerifyFunc(func(context.Context, string, string) bool {
 		// Error, not Fatal: this runs on the request's goroutine, where

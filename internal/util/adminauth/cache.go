@@ -23,8 +23,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/cockroachdb/errors"
-	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/sync/singleflight"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -61,11 +59,6 @@ const (
 	// unauthenticated burst grow both handler goroutines and retained channels
 	// as long as the backend remains blocked.
 	maxCredentialLookupCallers int32 = 32
-
-	// bcrypt accepts at most 72 password bytes. Rejecting a longer value before
-	// hashing it or fetching root's stored hash keeps attacker-sized Basic Auth
-	// headers off both the CPU-heavy and coordinator-facing paths.
-	bcryptMaxPasswordBytes = 72
 )
 
 // comparisonLimiter bounds the cost of password comparison. Three bounds, not
@@ -116,10 +109,6 @@ func errCredentialLookupSaturated() error {
 		"credential lookup is saturated on this node; retry")
 }
 
-func errInvalidPassword() error {
-	return merr.WrapErrPrivilegeNotAuthenticated("invalid root password")
-}
-
 // do runs fn while holding a comparison slot, or returns
 // errComparisonSaturated without running it.
 func (l *comparisonLimiter) do(ctx context.Context, fn func() error) error {
@@ -149,28 +138,8 @@ func (l *comparisonLimiter) do(ctx context.Context, fn func() error) error {
 
 func compareBounded(ctx context.Context, storedHash, password string) error {
 	return passwordComparisons().do(ctx, func() error {
-		return VerifyStoredPassword(storedHash, password)
+		return crypto.VerifyStoredPassword(storedHash, password)
 	})
-}
-
-// VerifyStoredPassword compares a plaintext password with a stored bcrypt hash.
-// A candidate that bcrypt cannot represent is a mismatch just like one that
-// does not match. A malformed stored hash is instead a credential-store failure
-// and must not be reported as a bad password, or an operator holding the right
-// one goes looking for the wrong problem.
-func VerifyStoredPassword(storedHash, password string) error {
-	if len(password) > bcryptMaxPasswordBytes {
-		return errInvalidPassword()
-	}
-	err := bcrypt.CompareHashAndPassword([]byte(storedHash), []byte(password))
-	switch {
-	case err == nil:
-		return nil
-	case errors.Is(err, bcrypt.ErrMismatchedHashAndPassword):
-		return errInvalidPassword()
-	default:
-		return merr.WrapErrServiceInternalErr(err, "stored root credential hash is invalid")
-	}
 }
 
 // CachedRootVerifier answers root credential checks from a cached bcrypt hash,
@@ -201,8 +170,15 @@ type CachedRootVerifier struct {
 	hashStaleExpiry time.Time
 	lastFailure     error
 	failureExpiry   time.Time
-	// generation increments on Forget so a lookup already in flight cannot
-	// repopulate the cache of a component that has stopped.
+	// generation increments on Forget to revoke both cached credentials and
+	// results of lookups or comparisons already in flight.
+	generation uint64
+}
+
+// credentialSnapshot binds a hash to the invalidation generation in which it
+// was read. Singleflight may deliver an old lookup to a post-invalidation caller.
+type credentialSnapshot struct {
+	hash       string
 	generation uint64
 }
 
@@ -228,19 +204,20 @@ func (c *CachedRootVerifier) Verify(ctx context.Context, username, password stri
 		// caller from driving lookups with invented usernames.
 		return merr.WrapErrPrivilegeNotPermitted("only root user can access this endpoint")
 	}
-	if len(password) > bcryptMaxPasswordBytes {
-		return errInvalidPassword()
+	// Reject oversized candidates before hashing or fetching the root hash.
+	if len(password) > crypto.BcryptMaxPasswordBytes {
+		return merr.WrapErrPrivilegeNotAuthenticated("invalid root password")
 	}
 
-	if hash := c.freshHash(); hash != "" {
-		return c.compare(ctx, hash, password)
+	if snapshot := c.freshHash(); snapshot.hash != "" {
+		return c.compare(ctx, snapshot, password)
 	}
 
-	hash, err := c.refresh(ctx)
+	snapshot, err := c.refresh(ctx)
 	if err != nil {
 		// Losing the credential owner must not also lose the ability to stop
 		// this node; see staleHashTTL.
-		if stale := c.staleHash(); stale != "" {
+		if stale := c.staleHash(); stale.hash != "" {
 			// Rated: during a coordinator restart this is every gated request
 			// on every node, for the whole staleHashTTL window.
 			mlog.RatedWarn(ctx, 1.0, "verifying root credential against a stale cached hash",
@@ -249,46 +226,49 @@ func (c *CachedRootVerifier) Verify(ctx context.Context, username, password stri
 		}
 		return err
 	}
-	return c.compare(ctx, hash, password)
+	return c.compare(ctx, snapshot, password)
 }
 
-// compare checks password against storedHash, skipping bcrypt when this exact
-// password has already been shown to match this exact hash.
-func (c *CachedRootVerifier) compare(ctx context.Context, storedHash, password string) error {
+// compare validates the snapshot before spending CPU and again before returning
+// a verdict. The final locked check orders authentication against Forget; a
+// request already authenticated before Forget can finish its operation.
+func (c *CachedRootVerifier) compare(ctx context.Context, snapshot credentialSnapshot, password string) error {
 	sha := crypto.SHA256(password, util.UserRoot)
-	if c.matchesVerified(storedHash, sha) {
+	c.mu.Lock()
+	if c.generation != snapshot.generation {
+		c.mu.Unlock()
+		return errCredentialChanged()
+	}
+	if c.verifiedSha != "" && c.hash == snapshot.hash && c.verifiedSha == sha {
+		c.mu.Unlock()
 		return nil
 	}
-	if err := compareBounded(ctx, storedHash, password); err != nil {
-		return err
+	c.mu.Unlock()
+
+	err := compareBounded(ctx, snapshot.hash, password)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.generation != snapshot.generation {
+		return errCredentialChanged()
 	}
-	c.rememberVerified(storedHash, sha)
-	return nil
-}
-
-func (c *CachedRootVerifier) matchesVerified(storedHash, sha string) bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.verifiedSha != "" && c.hash == storedHash && c.verifiedSha == sha
-}
-
-func (c *CachedRootVerifier) rememberVerified(storedHash, sha string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	// Only if the hash is still the one that was matched: a refresh may have
-	// replaced it while bcrypt was running.
-	if c.hash == storedHash {
+	if err == nil && c.hash == snapshot.hash {
+		// A normal TTL refresh may have replaced the hash during comparison.
 		c.verifiedSha = sha
 	}
+	return err
+}
+
+func errCredentialChanged() error {
+	return merr.WrapErrServiceUnavailable("root credential changed during verification; retry")
 }
 
 // refresh returns a fresh hash, doing at most one lookup across concurrent
 // callers and at most one lookup per failureTTL while lookups keep failing.
-func (c *CachedRootVerifier) refresh(ctx context.Context) (string, error) {
+func (c *CachedRootVerifier) refresh(ctx context.Context) (credentialSnapshot, error) {
 	// Check the negative cache before queueing: a caller that is going to be
 	// answered from it has no reason to wait behind someone else's lookup.
 	if err := c.cachedFailure(); err != nil {
-		return "", err
+		return credentialSnapshot{}, err
 	}
 
 	// singleflight bounds backend work, not the number of callers it retains.
@@ -298,7 +278,7 @@ func (c *CachedRootVerifier) refresh(ctx context.Context) (string, error) {
 	// short-lived connections.
 	if c.refreshCallers.Add(1) > c.maxRefreshCallers {
 		c.refreshCallers.Add(-1)
-		return "", errCredentialLookupSaturated()
+		return credentialSnapshot{}, errCredentialLookupSaturated()
 	}
 	releaseRefreshSlot := true
 	defer func() {
@@ -315,11 +295,11 @@ func (c *CachedRootVerifier) refresh(ctx context.Context) (string, error) {
 	defer cancelWait()
 	result := c.fetches.DoChan("root", func() (any, error) {
 		// Another caller may have refreshed while we queued.
-		if hash := c.freshHash(); hash != "" {
-			return hash, nil
+		if snapshot := c.freshHash(); snapshot.hash != "" {
+			return snapshot, nil
 		}
 		if err := c.cachedFailure(); err != nil {
-			return "", err
+			return credentialSnapshot{}, err
 		}
 
 		gen := c.currentGeneration()
@@ -332,18 +312,17 @@ func (c *CachedRootVerifier) refresh(ctx context.Context) (string, error) {
 		hash, err := c.fetch(fetchCtx)
 		if err != nil {
 			c.storeFailure(gen, err)
-			return "", err
+			return credentialSnapshot{}, err
 		}
 		c.storeHash(gen, hash)
-		return hash, nil
+		return credentialSnapshot{hash: hash, generation: gen}, nil
 	})
 	select {
 	case r := <-result:
 		if r.Err != nil {
-			return "", r.Err
+			return credentialSnapshot{}, r.Err
 		}
-		hash, _ := r.Val.(string)
-		return hash, nil
+		return r.Val.(credentialSnapshot), nil
 	case <-waitCtx.Done():
 		// The caller can leave immediately, but singleflight retains its buffered
 		// result channel until the lookup completes. Retain the matching slot for
@@ -354,7 +333,7 @@ func (c *CachedRootVerifier) refresh(ctx context.Context) (string, error) {
 			<-result
 			c.refreshCallers.Add(-1)
 		}()
-		return "", merr.WrapErrServiceUnavailable(
+		return credentialSnapshot{}, merr.WrapErrServiceUnavailable(
 			"credential lookup did not complete before the lookup or request deadline")
 	}
 }
@@ -365,24 +344,24 @@ func (c *CachedRootVerifier) currentGeneration() uint64 {
 	return c.generation
 }
 
-func (c *CachedRootVerifier) freshHash() string {
+func (c *CachedRootVerifier) freshHash() credentialSnapshot {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.hash == "" || c.now().After(c.hashExpiry) {
-		return ""
+		return credentialSnapshot{}
 	}
-	return c.hash
+	return credentialSnapshot{hash: c.hash, generation: c.generation}
 }
 
 // staleHash returns the last known root hash past its freshness window but
 // within staleHashTTL. It is used only after a refresh has already failed.
-func (c *CachedRootVerifier) staleHash() string {
+func (c *CachedRootVerifier) staleHash() credentialSnapshot {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.hash == "" || c.now().After(c.hashStaleExpiry) {
-		return ""
+		return credentialSnapshot{}
 	}
-	return c.hash
+	return credentialSnapshot{hash: c.hash, generation: c.generation}
 }
 
 func (c *CachedRootVerifier) cachedFailure() error {
@@ -423,8 +402,11 @@ func (c *CachedRootVerifier) storeFailure(gen uint64, err error) {
 	c.failureExpiry = c.now().Add(failureTTL)
 }
 
-// Forget drops everything cached. Call it on shutdown so a stopped component
-// stops holding a credential hash it no longer has any business holding.
+// Forget revokes cached credentials and in-flight verification results. Call it
+// on a root credential notification or shutdown. No stale fallback survives it.
+// Keep the shared lookup running: replacing it on each notification would let
+// blocked backend work accumulate. Its obsolete result will be rejected, and a
+// subsequent request can fetch the new credential once that work finishes.
 func (c *CachedRootVerifier) Forget() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
