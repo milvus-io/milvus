@@ -52,8 +52,48 @@ type LoadConfigComplianceResponse struct {
 	ResourceGroups *[]ResourceGroupComplianceState `json:"resourceGroups,omitempty"`
 }
 
-// HandleReplicaLoadConfigCompliance checks query and WAL obligations independently.
-// Both output modes use the same result; output only controls its presentation.
+// HandleReplicaLoadConfigCompliance serves GET /management/replica/loadconfig/compliance.
+//
+// A resource group (RG) is Ready only when all of its obligations are satisfied:
+//   - Each relevant collection has the expected number of replicas in that RG,
+//     according to the collection's effective load target.
+//   - Every replica is query-visible and every shard in it is serviceable.
+//   - Replicas and segment/channel resources that should be released are gone,
+//     including resources on draining RO/RO SQ nodes and resources of collections
+//     whose load registration has already been removed.
+//   - Its WAL migration obligations, both incoming and outgoing, are complete.
+//
+// Effective targets are independent of observed replica placement. A valid
+// cluster-level load configuration overrides a collection's persisted target only
+// when the collection is cluster-managed or forceOverride is enabled. Otherwise,
+// the persisted collection target applies; user-specified collections are still
+// checked. A single configured RG receives all requested replicas, while repeated
+// RG names in a multi-entry configuration specify per-RG replica counts.
+//
+// When streaming.primaryResourceGroup is configured, every RW pchannel must be
+// assigned in that RG. Uninitialized, assigning, unavailable, or misplaced WAL
+// channels block the target RG and any identifiable current/historical source RG
+// with unfinished migration obligations, even if no collections are loaded.
+// Without a primary RG, this endpoint imposes no primary-RG placement requirement;
+// RO pchannels are outside that placement check.
+//
+// Global Ready requires every involved RG to be Ready, all collection/global
+// constraints (including total replica counts) to hold, and no unknown effective
+// target or unattributable violation. Node quota and node ownership convergence
+// are not additional readiness conditions; residual resources on draining nodes
+// still block readiness, whereas empty RO node metadata alone does not.
+//
+// Involved RGs come from effective targets, actual replicas, residual resources,
+// and WAL obligations. An entirely drained RG with no remaining obligation may
+// disappear from the report. WAL violations and collection count mismatches must
+// not skip checks needed to establish other RGs' readiness.
+//
+// Both summary (the default) and per_resource_group use the same global result;
+// output only controls presentation. Per-RG output includes a sorted array (even
+// when empty), retaining the first reason per RG. Global reasons take precedence
+// over RG reasons; WAL reasons take precedence within an RG. Metadata read errors
+// return HTTP 500 rather than a readiness report. Results reflect asynchronously
+// observed state, not an atomic snapshot across components or a future guarantee.
 func (s *mixCoordImpl) HandleReplicaLoadConfigCompliance(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodGet {
 		writeJSONError(w, "Method not allowed, use GET", http.StatusMethodNotAllowed)
