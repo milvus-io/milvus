@@ -616,17 +616,32 @@ func (c *compactionInspector) enqueueCompaction(task *datapb.CompactionTask) err
 	t.SetTask(t.ShadowClone(setStartTime(startTime), setCreateTs(taskCreateTS)))
 	err = t.SaveTaskMeta()
 	if err != nil {
-		c.meta.SetSegmentsCompacting(context.TODO(), t.GetTaskProto().GetInputSegments(), false)
 		log.Warn(context.TODO(), "Failed to enqueue compaction task, unable to save task meta", mlog.Err(err))
+		c.rejectUnscheduledTask(t, err)
 		return err
 	}
 	if err = c.submitTask(t); err != nil {
 		log.Warn(context.TODO(), "submit compaction task failed", mlog.Err(err))
-		c.meta.SetSegmentsCompacting(context.Background(), t.GetTaskProto().GetInputSegments(), false)
+		c.rejectUnscheduledTask(t, err)
 		return err
 	}
 	log.Info(context.TODO(), "Compaction plan submitted")
 	return nil
+}
+
+// rejectUnscheduledTask handles a task that was never handed to a worker, but
+// whose metadata may already be durable even if SaveTaskMeta returned an error.
+// Keep its input ownership until cleanup persists cleaned so an unscheduled
+// pipelining record cannot survive without an owner or block snapshots forever.
+func (c *compactionInspector) rejectUnscheduledTask(t CompactionTask, cause error) {
+	t.SetTask(t.ShadowClone(setState(datapb.CompactionTaskState_failed), setFailReason(cause.Error())))
+	if err := t.SaveTaskMeta(); err != nil {
+		mlog.Warn(context.TODO(), "failed to persist rejected compaction state, cleanup will retry",
+			mlog.Int64("planID", t.GetTaskProto().GetPlanID()), mlog.Err(err))
+	}
+	c.cleaningGuard.Lock()
+	c.cleaningTasks[t.GetTaskProto().GetPlanID()] = t
+	c.cleaningGuard.Unlock()
 }
 
 // set segments compacting, one segment can only participate one compactionTask

@@ -130,6 +130,21 @@ func (impl *msgHandlerImpl) HandleFlushAll(vchannel string, flushAllMsg message.
 	return nil
 }
 
+func (impl *msgHandlerImpl) HandleCreateSnapshot(vchannel string, createSnapshotMsg message.ImmutableCreateSnapshotMessageV2) error {
+	// Same shape as HandleFlushAll: the snapshot seals every growing segment of
+	// the collection at its own position, so the buffer is sealed by channel
+	// rather than by a segment list carried in the message.
+	if err := impl.wbMgr.SealAllSegments(context.Background(), vchannel); err != nil {
+		return errors.Wrap(err, "failed to seal all segments")
+	}
+	// The snapshot's own timetick is the flush ts, which is what makes "before the
+	// snapshot" mean the same thing to the buffer and to the boundary.
+	if err := impl.wbMgr.FlushChannel(context.Background(), vchannel, createSnapshotMsg.TimeTick()); err != nil {
+		return errors.Wrap(err, "failed to flush channel")
+	}
+	return nil
+}
+
 func (impl *msgHandlerImpl) HandleSchemaChange(ctx context.Context, msg message.ImmutableSchemaChangeMessageV2) error {
 	return impl.wbMgr.SealSegments(context.Background(), msg.VChannel(), msg.Header().FlushedSegmentIds)
 }

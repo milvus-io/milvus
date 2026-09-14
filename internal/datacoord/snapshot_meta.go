@@ -1176,7 +1176,7 @@ func (sm *snapshotMeta) removeFromSecondaryIndexes(snapshotInfo *datapb.Snapshot
 // IsCollectionCompactionBlocked checks if compaction is blocked for a collection.
 // Returns true if:
 //   - A protected snapshot's RefIndex hasn't been loaded yet (fail-closed), OR
-//   - The collection is currently in the process of creating a snapshot (intent-based blocking).
+//   - The collection is capturing a snapshot.
 func (sm *snapshotMeta) IsCollectionCompactionBlocked(collectionID int64) bool {
 	sm.segmentProtectionMu.RLock()
 	defer sm.segmentProtectionMu.RUnlock()
@@ -1276,10 +1276,10 @@ func (sm *snapshotMeta) IsSegmentCompactionProtected(segmentID int64) bool {
 //
 // Fail-closed semantics, layered from coarse to precise:
 //  1. If collectionID is non-negative and that collection is in gcBlockedCollections
-//     (some snapshot's RefIndex has not been loaded from S3 yet), return true — we
-//     cannot know the precise referenced set, so we keep the segment.
+//     (some snapshot's RefIndex has not been loaded from S3 yet) or capture is
+//     pending, return true: the precise referenced set is not available yet.
 //  2. If collectionID is negative (orphan file walk with no collection context), any
-//     unloaded RefIndex in any collection triggers a fail-closed return.
+//     unloaded RefIndex or pending capture triggers a fail-closed return.
 //  3. Otherwise, return whether the segment is in segmentReferencedByGC.
 //
 // collectionID == 0 takes the non-negative branch (same as any positive ID). Since
@@ -1291,15 +1291,15 @@ func (sm *snapshotMeta) IsSegmentCompactionProtected(segmentID int64) bool {
 // elapsed still contribute to the precise set, because PIT recovery still needs the
 // underlying files.
 //
-// Cost: O(1) — all state is precomputed by rebuildAllSegmentProtection.
+// Cost: O(1) — reference state is precomputed; pending is direct set membership.
 func (sm *snapshotMeta) IsSegmentGCBlocked(collectionID, segmentID int64) bool {
 	sm.segmentProtectionMu.RLock()
 	defer sm.segmentProtectionMu.RUnlock()
 	if collectionID < 0 {
-		if sm.gcBlockedCollections.Len() > 0 {
+		if sm.gcBlockedCollections.Len() > 0 || sm.snapshotPendingCollections.Len() > 0 {
 			return true
 		}
-	} else if sm.gcBlockedCollections.Contain(collectionID) {
+	} else if sm.gcBlockedCollections.Contain(collectionID) || sm.snapshotPendingCollections.Contain(collectionID) {
 		return true
 	}
 	return sm.segmentReferencedByGC.Contain(segmentID)
@@ -1321,10 +1321,10 @@ func (sm *snapshotMeta) IsBuildIDGCBlocked(collectionID, buildID int64) bool {
 	sm.segmentProtectionMu.RLock()
 	defer sm.segmentProtectionMu.RUnlock()
 	if collectionID < 0 {
-		if sm.gcBlockedCollections.Len() > 0 {
+		if sm.gcBlockedCollections.Len() > 0 || sm.snapshotPendingCollections.Len() > 0 {
 			return true
 		}
-	} else if sm.gcBlockedCollections.Contain(collectionID) {
+	} else if sm.gcBlockedCollections.Contain(collectionID) || sm.snapshotPendingCollections.Contain(collectionID) {
 		return true
 	}
 	return sm.buildIDReferencedByGC.Contain(buildID)

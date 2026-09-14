@@ -148,6 +148,11 @@ func (cst *createSnapshotTask) Execute(ctx context.Context) error {
 		Description:                 cst.req.GetDescription(),
 		CollectionId:                cst.collectionID,
 		CompactionProtectionSeconds: cst.req.GetCompactionProtectionSeconds(),
+		// Protected snapshots must let sort publish the sealed replacement before
+		// pinning its layout. Protecting an invisible input would block the sort
+		// that completes its growing-to-sealed handoff, leaving backfill manifest
+		// updates invisible to queries. Unprotected snapshots skip this wait.
+		WaitForSortedSegments: cst.req.GetCompactionProtectionSeconds() > 0,
 	})
 	if err = merr.CheckRPCCall(cst.result, err); err != nil {
 		return err

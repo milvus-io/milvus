@@ -970,6 +970,15 @@ func (p *updateSegmentPack) Get(segmentID int64) *SegmentInfo {
 
 type UpdateOperator func(*updateSegmentPack) bool
 
+// CheckSnapshotCompactionOperator checks protection under UpdateSegmentsInfo's
+// segMu write lock, in the same critical section as the publication it guards.
+func CheckSnapshotCompactionOperator(task *datapb.CompactionTask) UpdateOperator {
+	return func(pack *updateSegmentPack) bool {
+		pack.err = pack.meta.checkSnapshotBlocksCompaction(task)
+		return pack.err == nil
+	}
+}
+
 func CreateL0Operator(collectionID, partitionID, segmentID int64, channel string) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
 		segment := modPack.meta.segments.GetSegment(segmentID)
@@ -2424,7 +2433,10 @@ func (m *meta) CheckAndSetSegmentsCompacting(ctx context.Context, segmentIDs []U
 	for _, segmentID := range segmentIDs {
 		seg := m.segments.GetSegment(segmentID)
 		if seg != nil {
-			if seg.isCompacting {
+			if seg.isCompacting || (seg.GetLevel() != datapb.SegmentLevel_L0 &&
+				(m.isCollectionCompactionBlocked(seg.GetCollectionID()) || m.isSegmentCompactionProtected(segmentID))) {
+				// Admission shares segMu with capture pending. A plan validated
+				// earlier must not start computing after capture checked its inputs.
 				hasCompacting = true
 			}
 		} else {
@@ -2432,13 +2444,50 @@ func (m *meta) CheckAndSetSegmentsCompacting(ctx context.Context, segmentIDs []U
 			break
 		}
 	}
-	canDo = exist && !hasCompacting
+	canDo = exist && !hasCompacting && !m.hasUnfinishedClusteringOutput(segmentIDs)
 	if canDo {
 		for _, segmentID := range segmentIDs {
 			m.segments.SetIsCompacting(segmentID, true)
 		}
 	}
 	return exist, canDo
+}
+
+// hasUnfinishedClusteringOutput keeps a published clustering result available
+// until its parent finishes retiring inputs or rolling back results. Otherwise
+// a second compaction can replace the result while rollback only drops its old
+// ID, leaving the original inputs and a live descendant with duplicate rows.
+// Invisible intermediate outputs remain eligible for the parent's sort step.
+// Caller holds segMu; task metadata is durable, including before recovery has
+// restored in-memory task ownership.
+func (m *meta) hasUnfinishedClusteringOutput(segmentIDs []UniqueID) bool {
+	if m.compactionTaskMeta == nil {
+		return false
+	}
+	candidates := typeutil.NewUniqueSet()
+	collections := typeutil.NewUniqueSet()
+	for _, id := range segmentIDs {
+		segment := m.segments.GetSegment(id)
+		if segment != nil && segment.GetCreatedByCompaction() && !segment.GetIsInvisible() {
+			candidates.Insert(id)
+			collections.Insert(segment.GetCollectionID())
+		}
+	}
+	for _, collectionID := range collections.Collect() {
+		for _, tasks := range m.compactionTaskMeta.GetCompactionTasksByCollection(collectionID) {
+			for _, task := range tasks {
+				if task.GetType() != datapb.CompactionType_ClusteringCompaction || task.GetState() == datapb.CompactionTaskState_cleaned {
+					continue
+				}
+				for _, id := range task.GetResultSegments() {
+					if candidates.Contain(id) {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
 }
 
 func (m *meta) SetSegmentsCompacting(ctx context.Context, segmentIDs []UniqueID, compacting bool) {
@@ -2634,7 +2683,14 @@ func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 	for _, seg := range compactToInfos {
 		binlogs = append(binlogs, metastore.BinlogsIncrement{Segment: seg})
 	}
-	// only add new segments
+	// Only add new segments. Unlike mix and sort, clustering does not retire its
+	// inputs in this write: the outputs are born IsInvisible and cannot serve
+	// until indexed, so the inputs keep serving until completeTask drops them.
+	//
+	// Readers must therefore expect both generations to be live in between, and
+	// must dedup by CompactionFrom -- IsInvisible only separates them until
+	// markResultSegmentsVisible, after which both are visible. See
+	// retrieveSegment (query) and dropSupersededByLineage (snapshot).
 	if err := m.catalog.AlterSegments(m.ctx, compactToInfos, binlogs...); err != nil {
 		mlog.Warn(m.ctx, "fail to alter compactTo segments", mlog.Err(err))
 		return nil, nil, err
@@ -2791,45 +2847,72 @@ func (m *meta) completeMixCompactionMutation(
 	return compactToSegments, metricMutation, nil
 }
 
-func (m *meta) ValidateSegmentStateBeforeCompleteCompactionMutation(t *datapb.CompactionTask) error {
-	m.segMu.RLock()
-	defer m.segMu.RUnlock()
-
+// checkSnapshotBlocksCompaction reports whether snapshot state forbids this
+// compaction from committing.
+//
+// Caller must already hold m.segMu, in either mode. This only takes
+// snapshotMeta's own segmentProtectionMu, so it preserves the segMu ->
+// segmentProtectionMu ordering used everywhere else and cannot deadlock against
+// the write-locked commit path.
+//
+// It is deliberately asked twice: once cheaply up front by
+// ValidateSegmentStateBeforeCompleteCompactionMutation, and again by
+// CompleteCompactionMutation under the write lock. The early call releases
+// segMu before the commit reacquires it, and a snapshot can set its pending
+// flag inside that gap -- so the early call alone is an unsynchronized read,
+// not a guarantee.
+func (m *meta) checkSnapshotBlocksCompaction(t *datapb.CompactionTask) error {
 	// Snapshot compaction protection exists to keep the sealed-segment list stable during
 	// backfill — if an L1/L2 segment gets merged away mid-backfill, the backfill breaks.
 	// L0 segments are transient delete-log carriers, not part of that stable list, and
 	// L0 compaction only appends deltalogs to L1/L2 targets without touching L1/L2 binlogs.
 	// So L0 delete compaction is outside the protection's concern and must not be blocked.
-	if t.GetType() != datapb.CompactionType_Level0DeleteCompaction {
-		// Check if compaction is blocked for this collection (snapshot pending or RefIndex not loaded).
-		if m.isCollectionCompactionBlocked(t.GetCollectionID()) {
-			mlog.Info(m.ctx, "compaction rejected: collection has pending snapshot or unloaded RefIndex",
+	if t.GetType() == datapb.CompactionType_Level0DeleteCompaction {
+		return nil
+	}
+
+	// Check if compaction is blocked for this collection (snapshot pending or
+	// or RefIndex not loaded).
+	if m.isCollectionCompactionBlocked(t.GetCollectionID()) {
+		mlog.Info(m.ctx, "compaction rejected: collection has pending snapshot or unloaded RefIndex",
+			mlog.Int64("planID", t.GetPlanID()),
+			mlog.String("type", t.GetType().String()),
+			mlog.Int64("collectionID", t.GetCollectionID()),
+			mlog.String("channel", t.GetChannel()),
+			mlog.Int64s("inputSegments", t.GetInputSegments()),
+		)
+		return merr.WrapErrCompactionBlocked(
+			fmt.Sprintf("collection %d has pending snapshot or unloaded snapshot RefIndex",
+				t.GetCollectionID()))
+	}
+
+	// Check if any input segment is protected by a snapshot.
+	for _, segmentID := range t.GetInputSegments() {
+		if m.isSegmentCompactionProtected(segmentID) {
+			mlog.Info(m.ctx, "compaction rejected: input segment is protected by snapshot",
 				mlog.Int64("planID", t.GetPlanID()),
 				mlog.String("type", t.GetType().String()),
 				mlog.Int64("collectionID", t.GetCollectionID()),
 				mlog.String("channel", t.GetChannel()),
+				mlog.Int64("segmentID", segmentID),
 				mlog.Int64s("inputSegments", t.GetInputSegments()),
 			)
 			return merr.WrapErrCompactionBlocked(
-				fmt.Sprintf("collection %d has pending snapshot or unloaded snapshot RefIndex",
-					t.GetCollectionID()))
+				fmt.Sprintf("input segment %d is protected by a snapshot", segmentID))
 		}
+	}
+	return nil
+}
 
-		// Check if any input segment is protected by a snapshot.
-		for _, segmentID := range t.GetInputSegments() {
-			if m.isSegmentCompactionProtected(segmentID) {
-				mlog.Info(m.ctx, "compaction rejected: input segment is protected by snapshot",
-					mlog.Int64("planID", t.GetPlanID()),
-					mlog.String("type", t.GetType().String()),
-					mlog.Int64("collectionID", t.GetCollectionID()),
-					mlog.String("channel", t.GetChannel()),
-					mlog.Int64("segmentID", segmentID),
-					mlog.Int64s("inputSegments", t.GetInputSegments()),
-				)
-				return merr.WrapErrCompactionBlocked(
-					fmt.Sprintf("input segment %d is protected by a snapshot", segmentID))
-			}
-		}
+func (m *meta) ValidateSegmentStateBeforeCompleteCompactionMutation(t *datapb.CompactionTask) error {
+	m.segMu.RLock()
+	defer m.segMu.RUnlock()
+
+	if err := m.checkSnapshotBlocksCompaction(t); err != nil {
+		return err
+	}
+	if m.hasUnfinishedClusteringOutput(t.GetInputSegments()) {
+		return merr.WrapErrCompactionBlocked("input is a published output of an unfinished clustering task")
 	}
 
 	for _, segmentID := range t.GetInputSegments() {
@@ -2854,6 +2937,16 @@ func (m *meta) ValidateSegmentStateBeforeCompleteCompactionMutation(t *datapb.Co
 func (m *meta) CompleteCompactionMutation(ctx context.Context, t *datapb.CompactionTask, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error) {
 	m.segMu.Lock()
 	defer m.segMu.Unlock()
+
+	// Recheck under the publication lock: snapshot pending may have been set
+	// after the earlier validation returned.
+	if err := m.checkSnapshotBlocksCompaction(t); err != nil {
+		return nil, nil, err
+	}
+	if m.hasUnfinishedClusteringOutput(t.GetInputSegments()) {
+		return nil, nil, merr.WrapErrCompactionBlocked("input is a published output of an unfinished clustering task")
+	}
+
 	switch t.GetType() {
 	case datapb.CompactionType_MixCompaction:
 		return m.completeMixCompactionMutation(t, result)

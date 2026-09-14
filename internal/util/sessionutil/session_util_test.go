@@ -397,6 +397,24 @@ func TestSessionUnmarshal(t *testing.T) {
 	})
 }
 
+func TestSessionSnapshotFlushCapability(t *testing.T) {
+	var legacy Session
+	require.NoError(t, json.Unmarshal([]byte(`{"ServerName":"streamingnode","Version":"3.0.0-beta"}`), &legacy))
+	require.False(t, legacy.SnapshotFlush, "old sessions with the same release version must not advertise the capability")
+
+	current := &Session{Version: common.Version}
+	current.apply(WithSnapshotFlush())
+	encoded, err := json.Marshal(current)
+	require.NoError(t, err)
+	var discovered Session
+	require.NoError(t, json.Unmarshal(encoded, &discovered))
+	require.True(t, discovered.SnapshotFlush, "capability must survive session registration and discovery")
+
+	unadvertised, err := json.Marshal(&Session{Version: common.Version})
+	require.NoError(t, err)
+	require.NotContains(t, string(unadvertised), "SnapshotFlush")
+}
+
 type SessionWithVersionSuite struct {
 	suite.Suite
 	tmpDir string
