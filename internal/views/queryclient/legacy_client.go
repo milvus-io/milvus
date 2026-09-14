@@ -2,12 +2,15 @@ package queryclient
 
 import (
 	"context"
+	"errors"
+	"io"
 	"sync"
 
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/searchutil"
 	"github.com/milvus-io/milvus/internal/views/queryclient/resolver"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -21,7 +24,7 @@ type Client interface {
 	Legacy() LegacyClient
 }
 
-// LegacyClient executes proxy-generated legacy internal requests and returns raw results.
+// LegacyClient returns batch results or the final iterator ReduceStream.
 // Errors are business merr errors; ViewError and StreamingError remain internal.
 type LegacyClient interface {
 	// Statistics uses the outer BarrierMVCC; zero selects ordinary Strong sampling.
@@ -42,6 +45,7 @@ type LegacySearchRequest struct {
 
 type LegacySearchResult struct {
 	Results []*internalpb.SearchResults
+	Stream  searchutil.ReduceStream
 	Plans   []ShardPlan
 }
 
@@ -75,8 +79,34 @@ func (c *legacyOnlyClient) Legacy() LegacyClient {
 }
 
 type legacyClient struct {
-	shardClient   *shardViewQueryClient
-	shardResolver resolver.ShardResolver
+	shardClient           *shardViewQueryClient
+	shardResolver         resolver.ShardResolver
+	enableSearchStreaming bool
+	searchStreamChunkSize int
+}
+
+type prefetchedReduceStream struct {
+	stream     searchutil.ReduceStream
+	firstChunk *internalpb.SearchResults
+}
+
+func (s *prefetchedReduceStream) Recv() (*internalpb.SearchResults, error) {
+	if s.firstChunk != nil {
+		chunk := s.firstChunk
+		s.firstChunk = nil
+		return chunk, nil
+	}
+	return s.stream.Recv()
+}
+
+func (s *prefetchedReduceStream) Close() error {
+	s.firstChunk = nil
+	return s.stream.Close()
+}
+
+func (s *prefetchedReduceStream) Interrupt() (*internalpb.SearchResults, error) {
+	s.firstChunk = nil
+	return s.stream.Interrupt()
 }
 
 func NewLegacyViewQueryClient(
@@ -99,17 +129,35 @@ func newLegacyClient(
 	if cfg.MaxRetries <= 0 {
 		cfg.MaxRetries = defaultMaxRetries
 	}
+	if cfg.SearchStreamChunkSize <= 0 {
+		cfg.SearchStreamChunkSize = defaultSearchStreamChunkSize
+	}
 	shardClient := newShardViewQueryClient(cfg.MaxRetries, queryPlanClient, queryServiceClient)
 	shardClient.queryHook = cfg.QueryHook
 	shardClient.loadChecks = newCollectionLoadChecks(cfg.LoadInfoClient)
 	return &legacyClient{
-		shardClient:   shardClient,
-		shardResolver: shardResolver,
+		shardClient:           shardClient,
+		shardResolver:         shardResolver,
+		enableSearchStreaming: cfg.EnableSearchStreaming,
+		searchStreamChunkSize: cfg.SearchStreamChunkSize,
 	}
+}
+
+func supportsSearchStream(req *internalpb.SearchRequest) bool {
+	return req != nil &&
+		req.GetIsIterator() &&
+		!req.GetIsAdvanced() &&
+		len(req.GetSubReqs()) == 0 &&
+		req.GetGroupByFieldId() <= 0 &&
+		len(req.GetGroupByFieldIds()) == 0
 }
 
 func (c *legacyClient) Search(ctx context.Context, req *LegacySearchRequest) (result *LegacySearchResult, err error) {
 	defer func() { err = toMilvusError(err) }()
+	if c.enableSearchStreaming && supportsSearchStream(req.Req) {
+		return c.searchStream(ctx, req)
+	}
+
 	vchannels, err := c.shardResolver.ResolveVChannels(ctx, req.Req.CollectionID)
 	if err != nil {
 		return nil, err
@@ -147,6 +195,77 @@ func (c *legacyClient) Search(ctx context.Context, req *LegacySearchRequest) (re
 		Results: results,
 		Plans:   shardPlans,
 	}, nil
+}
+
+func (c *legacyClient) searchStream(ctx context.Context, req *LegacySearchRequest) (*LegacySearchResult, error) {
+	var lastErr error
+	for attempt := 0; attempt < c.shardClient.maxRetries; attempt++ {
+		vchannels, err := c.shardResolver.ResolveVChannels(ctx, req.Req.GetCollectionID())
+		if err != nil {
+			return nil, err
+		}
+
+		vchannelStreams := make([]searchutil.ReduceStream, len(vchannels))
+		shardPlans := make([]ShardPlan, len(vchannels))
+		var g errgroup.Group
+		for i := range vchannels {
+			i := i
+			g.Go(func() error {
+				stream, plan, err := c.shardClient.SearchStream(ctx, vchannels[i], req.Req, c.searchStreamChunkSize)
+				if err != nil {
+					return err
+				}
+				vchannelStreams[i] = stream
+				shardPlans[i] = *plan
+				return nil
+			})
+		}
+
+		if err := g.Wait(); err != nil {
+			for _, stream := range vchannelStreams {
+				if stream != nil {
+					err = errors.Join(err, stream.Close())
+				}
+			}
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			lastErr = err
+			continue
+		}
+
+		finalStream, err := searchutil.NewReduceStream(req.Req, vchannelStreams, c.searchStreamChunkSize)
+		if err != nil {
+			for _, stream := range vchannelStreams {
+				err = errors.Join(err, stream.Close())
+			}
+			return nil, err
+		}
+
+		firstChunk, recvErr := finalStream.Recv()
+		if recvErr != nil && !errors.Is(recvErr, io.EOF) {
+			err = errors.Join(recvErr, finalStream.Close())
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			lastErr = err
+			continue
+		}
+
+		stream := finalStream
+		if firstChunk != nil {
+			stream = &prefetchedReduceStream{
+				stream:     finalStream,
+				firstChunk: firstChunk,
+			}
+		}
+
+		return &LegacySearchResult{
+			Stream: stream,
+			Plans:  shardPlans,
+		}, nil
+	}
+	return nil, lastErr
 }
 
 func (c *legacyClient) Query(ctx context.Context, req *LegacyQueryRequest) (result *LegacyQueryResult, err error) {

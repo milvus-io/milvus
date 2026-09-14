@@ -63,6 +63,45 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+func TestAppendFinalSearchChunkPreservesOrderAndAppliesOffset(t *testing.T) {
+	output := &schemapb.SearchResultData{
+		NumQueries: 2,
+		TopK:       2,
+		Ids:        &schemapb.IDs{},
+		Topks:      make([]int64, 2),
+	}
+	seenPerQuery := make([]int64, 2)
+	chunks := []*schemapb.SearchResultData{
+		{
+			NumQueries: 2,
+			TopK:       3,
+			Topks:      []int64{3, 1},
+			Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{Data: []int64{10, 11, 12, 20}},
+			}},
+			Scores: []float32{-0.1, -0.2, -0.3, -1.0},
+		},
+		{
+			NumQueries: 2,
+			TopK:       3,
+			Topks:      []int64{0, 2},
+			Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{Data: []int64{21, 22}},
+			}},
+			Scores: []float32{-1.1, -1.2},
+		},
+	}
+
+	for _, chunk := range chunks {
+		_, err := appendFinalSearchChunk(output, chunk, seenPerQuery, 1, 2, metric.L2)
+		require.NoError(t, err)
+	}
+
+	require.Equal(t, []int64{11, 12, 21, 22}, output.GetIds().GetIntId().GetData())
+	require.Equal(t, []float32{0.2, 0.3, 1.1, 1.2}, output.GetScores())
+	require.Equal(t, []int64{2, 2}, output.GetTopks())
+}
+
 func TestSearchTaskFillResultSkipsTopksInsufficientForSearchAggregation(t *testing.T) {
 	aggCtx, err := search_agg.NewContext(1, []search_agg.LevelContext{{OwnFieldIDs: []int64{101}, Size: 1}}, nil, nil)
 	require.NoError(t, err)
