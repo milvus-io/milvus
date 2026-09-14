@@ -94,6 +94,13 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     void
     Load(milvus::tracer::TraceContext ctx, const Config& config = {}) override;
 
+    // Uses admitted async metadata reads when enabled. Cancellation is checked
+    // before publishing metadata and forwarded to shared-key index warmup.
+    void
+    Load(milvus::tracer::TraceContext ctx,
+         const Config& config,
+         milvus::OpContext* op_ctx) override;
+
     void
     Load(const BinarySet& binary_set, const Config& config) override {
         ThrowInfo(ErrorCode::NotImplemented,
@@ -573,13 +580,21 @@ class JsonKeyStats : public ScalarIndex<std::string> {
         return JSONType::UNKNOWN;
     }
 
+    // Async metadata preparation releases all admission before opening data readers.
     void
     LoadShreddingData(const std::vector<std::string>& index_files,
-                      const std::string& warmup_policy = "");
+                      const std::string& warmup_policy,
+                      milvus::OpContext* op_ctx);
 
+    // Populate field names, IDs and JSON types from an already decoded schema.
     void
-    GetColumnSchemaFromParquet(int64_t column_group_id,
-                               const std::string& file);
+    LoadColumnSchema(const std::shared_ptr<arrow::Schema>& schema);
+
+    // Restore legacy layout metadata from an already decoded footer.
+    void
+    LoadCommonMeta(
+        const std::shared_ptr<const arrow::KeyValueMetadata>& metadata,
+        const std::string& file);
 
     void
     GetCommonMetaFromParquet(const std::string& file);
@@ -589,6 +604,15 @@ class JsonKeyStats : public ScalarIndex<std::string> {
                     const std::vector<int64_t>& file_ids,
                     const std::string& warmup_policy = "",
                     const std::string& override_prefix = "");
+
+    // Shared column construction after either metadata preparation path completes.
+    void
+    LoadColumnGroupFromMetadata(int64_t column_group_id,
+                                std::vector<std::string> files,
+                                const std::vector<int64_t>& file_num_rows,
+                                const std::shared_ptr<arrow::Schema>& schema,
+                                const std::string& warmup_policy,
+                                milvus::OpContext* op_ctx);
 
     void
     LoadShreddingMeta(
@@ -602,7 +626,8 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     LoadSharedKeyIndex(const std::vector<std::string>& shared_key_index_files,
                        bool enable_mmap,
                        int64_t index_size,
-                       const std::string& warmup_policy = "");
+                       const std::string& warmup_policy,
+                       milvus::OpContext* op_ctx);
 
  private:
     proto::schema::FieldSchema schema_;

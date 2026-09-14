@@ -5922,7 +5922,7 @@ ChunkedSegmentSealedImpl::BuildJsonKeyStatsIndex(
                     us / 1000.0);
             },
             milvus::ScopedTimer::LogLevel::Info);
-        index->Load(trace_ctx, config);
+        index->Load(trace_ctx, config, op_ctx);
     } catch (std::exception& e) {
         LOG_WARN(
             "failed load json key stats, segment:{}, field:{}, build:{}, "
