@@ -503,7 +503,7 @@ func NewSegment(ctx context.Context,
 		logger.Warn(ctx, "create segment failed", mlog.Err(err))
 		return nil, err
 	}
-	logger.Info(ctx, "create segment done")
+	logger.Debug(ctx, "create segment done")
 
 	segment := &LocalSegment{
 		baseSegment:        base,
@@ -1177,13 +1177,13 @@ func GetCLoadInfoWithFunc(ctx context.Context,
 	// Add warmup policy to index_params if not already present
 	// C++ will pass it to Knowhere for index loading
 	if existingWarmup, exists := indexParams[common.WarmupKey]; exists {
-		mlog.Info(ctx, "warmup policy already in index params (from QueryCoord)",
+		mlog.Debug(ctx, "warmup policy already in index params (from QueryCoord)",
 			mlog.FieldSegmentID(loadInfo.GetSegmentID()),
 			mlog.FieldFieldID(indexInfo.GetFieldID()),
 			mlog.String("warmup", existingWarmup))
 	} else {
 		warmupPolicy := getIndexWarmupPolicy(fieldSchema, indexInfo)
-		mlog.Info(ctx, "warmup policy from getIndexWarmupPolicy",
+		mlog.Debug(ctx, "warmup policy from getIndexWarmupPolicy",
 			mlog.FieldSegmentID(loadInfo.GetSegmentID()),
 			mlog.FieldFieldID(indexInfo.GetFieldID()),
 			mlog.String("warmup", warmupPolicy))

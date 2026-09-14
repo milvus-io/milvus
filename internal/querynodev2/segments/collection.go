@@ -135,12 +135,11 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 	}
 	defer m.mut.Unlock()
 
-	mlog.Info(context.TODO(), "put new collection", mlog.Int64("collectionID", collectionID), mlog.FieldSchema(schema))
 	collection, err := NewCollection(collectionID, schema, meta, loadMeta)
-	mlog.Info(context.TODO(), "new collection created", mlog.Int64("collectionID", collectionID), mlog.FieldSchema(schema), mlog.Err(err))
 	if err != nil {
 		return err
 	}
+	mlog.Debug(context.TODO(), "new collection created", mlog.Int64("collectionID", collectionID))
 
 	collection.Ref(1)
 	m.collections[collectionID] = collection
