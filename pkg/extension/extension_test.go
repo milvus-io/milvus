@@ -48,6 +48,7 @@ func TestNothingIsInstalledByDefault(t *testing.T) {
 	assert.Nil(t, InstalledHook(), "a stock binary has no compiled-in hook")
 	assert.Nil(t, InstalledCoordinatorEngine(), "a stock binary has no coordinator engine")
 	assert.Nil(t, InstalledQueryHook(), "a stock binary has no compiled-in query hook")
+	assert.Nil(t, InstalledCipher(), "a stock binary has no compiled-in cipher")
 }
 
 func TestSetHookInstallsTheHook(t *testing.T) {
@@ -90,12 +91,15 @@ func TestSetNilLeavesNothingInstalled(t *testing.T) {
 	SetHook(stubHook{name: "form"})
 	SetCoordinatorEngine(&fakeCoordinatorEngine{})
 	SetQueryHook(stubQueryHook{name: "tuner"})
+	SetCipher(stubCipher{name: "kms"})
 	SetHook(nil)
 	SetCoordinatorEngine(nil)
 	SetQueryHook(nil)
+	SetCipher(nil)
 	assert.Nil(t, InstalledHook())
 	assert.Nil(t, InstalledCoordinatorEngine())
 	assert.Nil(t, InstalledQueryHook())
+	assert.Nil(t, InstalledCipher())
 }
 
 // stubQueryHook is a QueryHook that tunes nothing; the tests only ask
@@ -121,4 +125,31 @@ func TestSetQueryHookInstallsTheQueryHook(t *testing.T) {
 
 	SetQueryHook(nil)
 	assert.Nil(t, InstalledQueryHook())
+}
+
+// stubCipher is a hook.Cipher that encrypts nothing; the tests only ask
+// whether it is the one installed.
+type stubCipher struct{ name string }
+
+func (stubCipher) Init(map[string]string) error { return nil }
+func (stubCipher) GetEncryptor(int64, int64) (hook.Encryptor, []byte, error) {
+	return nil, nil, nil
+}
+func (stubCipher) GetDecryptor(int64, int64, []byte) (hook.Decryptor, error) { return nil, nil }
+func (stubCipher) GetUnsafeKey(int64, int64) []byte                          { return nil }
+
+var _ hook.Cipher = stubCipher{}
+
+func TestSetCipherInstallsTheCipher(t *testing.T) {
+	ResetForTest()
+	t.Cleanup(ResetForTest)
+	SetCipher(stubCipher{name: "kms"})
+	assert.Equal(t, stubCipher{name: "kms"}, InstalledCipher())
+	assert.Nil(t, InstalledHook(), "installing a cipher must not conjure a request hook")
+	assert.Nil(t, InstalledQueryHook(), "installing a cipher must not conjure a query hook")
+	assert.Nil(t, InstalledCoordinatorEngine(), "installing a cipher must not conjure an engine")
+	assert.False(t, FormInstalled(), "a cipher is not the mark of a form")
+
+	SetCipher(nil)
+	assert.Nil(t, InstalledCipher())
 }

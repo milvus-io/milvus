@@ -24,4 +24,5 @@ func ResetForTest() {
 	installedHook.Store(nil)
 	installedEngine.Store(nil)
 	installedQueryHook.Store(nil)
+	installedCipher.Store(nil)
 }
