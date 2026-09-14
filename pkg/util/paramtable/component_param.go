@@ -4256,8 +4256,10 @@ Set to 0 to disable the penalty period.`,
 // /////////////////////////////////////////////////////////////////////////////
 // --- querynode ---
 type queryNodeConfig struct {
-	StrictGroupAcceptanceThreshold ParamItem `refreshable:"true"`
-	StrictGroupProbeCandidates     ParamItem `refreshable:"true"`
+	StrictGroupStrategy            ParamItem `refreshable:"true"`
+	StrictGroupDebug               ParamItem `refreshable:"true"`
+	StrictGroupPhase1MaxCandidates ParamItem `refreshable:"true"`
+	StrictGroupSkipRefine          ParamItem `refreshable:"true"`
 	SoPath                         ParamItem `refreshable:"false"`
 
 	// stats
@@ -4489,18 +4491,30 @@ func formatDurationWithMillisecondFallback(v string) string {
 }
 
 func (p *queryNodeConfig) init(base *BaseTable, localStoragePath string) {
-	p.StrictGroupAcceptanceThreshold = ParamItem{
-		Key:     "queryNode.groupBy.strictGroupAcceptanceThreshold",
-		Version: "2.6.23", DefaultValue: "0.1", Export: true,
-		Doc: "Recreate a strict group iterator only below this acceptance ratio [0,1]. Zero disables the optimization.",
+	p.StrictGroupStrategy = ParamItem{
+		Key:     "queryNode.groupBy.strictGroupStrategy",
+		Version: "2.6.23", DefaultValue: "per_group", Export: true,
+		Doc: "Strict group completion strategy: original or per_group. Independent phase-one and refinement controls still apply to original.",
 	}
-	p.StrictGroupAcceptanceThreshold.Init(base.mgr)
-	p.StrictGroupProbeCandidates = ParamItem{
-		Key:     "queryNode.groupBy.strictGroupProbeCandidates",
-		Version: "2.6.23", DefaultValue: "100", Export: true,
-		Doc: "Positive consumer candidate budget after locking strict groups, not a backend graph visit budget.",
+	p.StrictGroupStrategy.Init(base.mgr)
+	p.StrictGroupDebug = ParamItem{
+		Key:     "queryNode.groupBy.strictGroupDebug",
+		Version: "2.6.23", DefaultValue: "false", Export: true,
+		Doc: "Opt-in segment/stage diagnostic logs; no per-candidate logs or customer field values.",
 	}
-	p.StrictGroupProbeCandidates.Init(base.mgr)
+	p.StrictGroupDebug.Init(base.mgr)
+	p.StrictGroupPhase1MaxCandidates = ParamItem{
+		Key:     "queryNode.groupBy.strictGroupPhase1MaxCandidates",
+		Version: "2.6.23", DefaultValue: "0", Export: true,
+		Doc: "Strict group phase-one consumer Next budget; zero is unlimited. Freeze discovered groups at the budget and complete their quotas without this limit. May reduce recall.",
+	}
+	p.StrictGroupPhase1MaxCandidates.Init(base.mgr)
+	p.StrictGroupSkipRefine = ParamItem{
+		Key:     "queryNode.groupBy.strictGroupSkipRefine",
+		Version: "2.6.23", DefaultValue: "false", Export: true,
+		Doc: "Skip query-time refinement consistently in both phases of single-query strict grouping with group size greater than one. May reduce recall.",
+	}
+	p.StrictGroupSkipRefine.Init(base.mgr)
 	p.IDFPreload = ParamItem{
 		Key:          "queryNode.idfOracle.preload",
 		Version:      "2.6.8",
