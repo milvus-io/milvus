@@ -931,6 +931,30 @@ func (s *Server) checkReplicaServiceable(ctx context.Context, replica *meta.Repl
 	return nil
 }
 
+// CheckReplicasServiceableInRGs is the resource-group-scoped form of
+// CheckAllReplicasServiceable: only replicas living in one of rgNames are checked.
+// Unlike CheckAllReplicasServiceable, a collection with no replica in the given
+// groups returns nil — whether any replica SHOULD live there is the replica
+// count / RG distribution check's question; this one only asks whether the
+// replicas that do live there can serve.
+func (s *Server) CheckReplicasServiceableInRGs(ctx context.Context, collectionID int64, rgNames []string) error {
+	rgSet := typeutil.NewSet(rgNames...)
+	for _, replica := range s.meta.GetByCollection(ctx, collectionID) {
+		if !rgSet.Contain(replica.GetResourceGroup()) {
+			continue
+		}
+		if err := s.checkReplicaServiceable(ctx, replica); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ContainResourceGroup reports whether a resource group with the given name exists.
+func (s *Server) ContainResourceGroup(ctx context.Context, rgName string) bool {
+	return s.meta.ContainResourceGroup(ctx, rgName)
+}
+
 // GetLeakedResourcesByCollection returns the number of segments and channels still held by
 // querynodes that are NOT part of any current replica of the collection. A non-zero result
 // means physical resources have not been fully released yet (e.g., during scale-down a

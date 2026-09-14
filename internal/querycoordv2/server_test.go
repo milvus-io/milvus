@@ -1336,3 +1336,90 @@ func TestCheckAllReplicasServiceable(t *testing.T) {
 		assert.NoError(t, err)
 	})
 }
+
+func TestCheckReplicasServiceableInRGs(t *testing.T) {
+	const collectionID int64 = 100
+	const channelName = "test-channel-1"
+
+	replicaRG1 := meta.NewReplica(&querypb.Replica{
+		ID:            1,
+		CollectionID:  collectionID,
+		ResourceGroup: "rg1",
+		Nodes:         []int64{10},
+	}, typeutil.NewUniqueSet(10))
+	replicaRG2 := meta.NewReplica(&querypb.Replica{
+		ID:            2,
+		CollectionID:  collectionID,
+		ResourceGroup: "rg2",
+		Nodes:         []int64{12},
+	}, typeutil.NewUniqueSet(12))
+
+	idAllocator := func() func() (int64, error) {
+		var id int64
+		return func() (int64, error) {
+			id++
+			return id, nil
+		}
+	}
+	newServer := func() *Server {
+		nodeMgr := session.NewNodeManager()
+		targetMgr := meta.NewMockTargetManager(t)
+		return &Server{
+			meta:      meta.NewMeta(idAllocator(), nil, nodeMgr),
+			dist:      meta.NewDistributionManager(nodeMgr),
+			nodeMgr:   nodeMgr,
+			targetMgr: targetMgr,
+		}
+	}
+
+	t.Run("no replica in filtered groups returns nil", func(t *testing.T) {
+		s := newServer()
+		mocker := mockey.Mock((*meta.ReplicaManager).GetByCollection).Return([]*meta.Replica{replicaRG1}).Build()
+		defer mocker.UnPatch()
+
+		// Unlike CheckAllReplicasServiceable, an empty scope is not an error:
+		// whether a replica should live in the group is the count check's question.
+		err := s.CheckReplicasServiceableInRGs(context.Background(), collectionID, []string{"rg-other"})
+		assert.NoError(t, err)
+	})
+
+	t.Run("replica without leader in filtered group returns error", func(t *testing.T) {
+		s := newServer()
+		mocker := mockey.Mock((*meta.ReplicaManager).GetByCollection).Return([]*meta.Replica{replicaRG1, replicaRG2}).Build()
+		defer mocker.UnPatch()
+		s.targetMgr.(*meta.MockTargetManager).EXPECT().GetDmChannelsByCollection(mock.Anything, collectionID, meta.CurrentTarget).Return(map[string]*meta.DmChannel{
+			channelName: {VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: channelName}},
+		})
+
+		// No leader in dist for rg1's replica (node 10) — rg2's replica is out of scope.
+		err := s.CheckReplicasServiceableInRGs(context.Background(), collectionID, []string{"rg1"})
+		assert.ErrorContains(t, err, "no leader for channel")
+	})
+
+	t.Run("non-serviceable replica outside filtered groups is ignored", func(t *testing.T) {
+		s := newServer()
+		mocker := mockey.Mock((*meta.ReplicaManager).GetByCollection).Return([]*meta.Replica{replicaRG1, replicaRG2}).Build()
+		defer mocker.UnPatch()
+		s.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: 12, Address: "localhost:12", Hostname: "localhost"}))
+		s.targetMgr.(*meta.MockTargetManager).EXPECT().GetDmChannelsByCollection(mock.Anything, collectionID, meta.CurrentTarget).Return(map[string]*meta.DmChannel{
+			channelName: {VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: channelName}},
+		})
+		s.targetMgr.(*meta.MockTargetManager).EXPECT().GetSealedSegmentsByChannel(mock.Anything, collectionID, channelName, meta.CurrentTarget).Return(map[int64]*datapb.SegmentInfo{})
+
+		// rg2's replica (node 12) has a serviceable leader; rg1's replica (node 10)
+		// has no leader at all, which would fail an unscoped check.
+		s.dist.ChannelDistManager.Update(12, &meta.DmChannel{
+			VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: channelName},
+			Node:         12,
+			Version:      1,
+			View: &meta.LeaderView{
+				ID: 12, CollectionID: collectionID, Channel: channelName,
+				Status:   &querypb.LeaderViewStatus{Serviceable: true},
+				Segments: map[int64]*querypb.SegmentDist{},
+			},
+		})
+
+		err := s.CheckReplicasServiceableInRGs(context.Background(), collectionID, []string{"rg2"})
+		assert.NoError(t, err)
+	})
+}
