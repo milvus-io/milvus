@@ -16,6 +16,7 @@
 
 #include "storage/LoadAdmissionController.h"
 
+#include <algorithm>
 #include <utility>
 
 #include "common/EasyAssert.h"
@@ -24,6 +25,34 @@
 #include "storage/LoadOverheadController.h"
 
 namespace milvus::storage {
+
+namespace {
+
+bool
+UpdateLoadOverheadControllers(const size_t slots) {
+    // All current Group bindings provide max_runtime_unit, so both policy
+    // updates should succeed. If that invariant is violated and only one
+    // update succeeds, SetCapacitySlots's ordering keeps admission
+    // conservative: expansion stops before admitting more work, while
+    // shrinking restricts admission before updating the policies.
+    const auto memory_updated =
+        storage::LoadMemoryOverheadController::GetInstance()
+            .UpdateAdmissionSlots(slots);
+    const auto file_updated =
+        storage::LoadFileOverheadController::GetInstance().UpdateAdmissionSlots(
+            slots);
+    if (memory_updated != file_updated) {
+        LOG_ERROR(
+            "Load overhead controllers were updated partially, "
+            "memory_updated:{}, file_updated:{}, slots:{}",
+            memory_updated,
+            file_updated,
+            slots);
+    }
+    return memory_updated && file_updated;
+}
+
+}  // namespace
 
 LoadAdmissionLease::LoadAdmissionLease(LoadAdmissionLease&& other) noexcept
     : controller_(std::exchange(other.controller_, nullptr)),
@@ -207,6 +236,7 @@ LoadAdmissionController::TryAcquire(const LoadAdmissionRequest request,
 void
 LoadAdmissionController::Release(const LoadAdmissionRequest request) {
     PendingResolution resolution;
+    bool refresh_slot_policy;
     {
         std::lock_guard lock(mu_);
         AssertInfo(
@@ -220,6 +250,11 @@ LoadAdmissionController::Release(const LoadAdmissionRequest request) {
         inflight_bytes_ -= request.transient_bytes;
         inflight_slots_ -= request.slots;
         resolution = TakeAdmittedLocked();
+        refresh_slot_policy =
+            slot_policy_update_pending_ && inflight_slots_ <= capacity_slots_;
+    }
+    if (refresh_slot_policy) {
+        RefreshSlotPolicy();
     }
     ResolvePending(std::move(resolution));
 }
@@ -264,11 +299,54 @@ void
 LoadAdmissionController::SetCapacitySlots(const size_t slots) {
     PendingResolution resolution;
     {
-        std::lock_guard lock(mu_);
-        capacity_slots_ = slots;
-        resolution = TakeAdmittedLocked();
+        std::lock_guard update_lock(capacity_update_mutex_);
+        const auto old_capacity = CapacitySlots();
+        const bool expanding =
+            old_capacity != 0 && (slots == 0 || slots > old_capacity);
+        size_t effective_slots;
+        {
+            std::lock_guard lock(mu_);
+            effective_slots = slots == 0 ? 0 : std::max(slots, inflight_slots_);
+        }
+        if (expanding && !UpdateLoadOverheadControllers(effective_slots)) {
+            return;
+        }
+        {
+            std::lock_guard lock(mu_);
+            capacity_slots_ = slots;
+            // For a reduction from unlimited admission, sample inflight only
+            // after restricting new work under the same lock.
+            if (!expanding) {
+                effective_slots =
+                    slots == 0 ? 0 : std::max(slots, inflight_slots_);
+            }
+            slot_policy_update_pending_ = effective_slots > slots;
+            resolution = TakeAdmittedLocked();
+        }
+        if (!expanding) {
+            UpdateLoadOverheadControllers(effective_slots);
+        }
     }
+    // Work may have drained between the snapshot and policy publication.
+    RefreshSlotPolicy();
     ResolvePending(std::move(resolution));
+}
+
+void
+LoadAdmissionController::RefreshSlotPolicy() {
+    std::lock_guard update_lock(capacity_update_mutex_);
+    size_t slots;
+    {
+        std::lock_guard lock(mu_);
+        if (!slot_policy_update_pending_ || inflight_slots_ > capacity_slots_) {
+            return;
+        }
+        slots = capacity_slots_;
+    }
+    if (UpdateLoadOverheadControllers(slots)) {
+        std::lock_guard lock(mu_);
+        slot_policy_update_pending_ = false;
+    }
 }
 
 void

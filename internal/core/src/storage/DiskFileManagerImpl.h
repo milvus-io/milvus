@@ -31,6 +31,7 @@
 #include "common/Consts.h"
 #include "storage/Types.h"
 #include "storage/ThreadPools.h"
+#include "folly/coro/Task.h"
 
 namespace milvus::storage {
 
@@ -168,6 +169,15 @@ class DiskFileManagerImpl : public FileManagerImpl {
     void
     CacheIndexToDisk(const std::vector<std::string>& remote_files,
                      milvus::proto::common::LoadPriority priority);
+
+    // Streams legacy slices to this manager's generated local directory.
+    // Publishes local paths only after all files finish; failures remove the
+    // files created by this call. Local I/O drains before releasing admission.
+    folly::coro::Task<void>
+    CacheIndexToDiskAsync(const std::vector<std::string>& remote_files,
+                          const std::string& local_index_prefix,
+                          proto::common::LoadPriority priority,
+                          folly::CancellationToken token = {});
 
     void
     CacheTextLogToDisk(const std::vector<std::string>& remote_files,

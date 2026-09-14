@@ -30,20 +30,19 @@ class LoadOverheadController {
     static LoadOverheadController&
     GetInstance();
 
-    // Returns the singleton Group handle, creating it if needed.
-    // initial_executor_workers bootstraps the worker count used by the
-    // Executor policy only when the controller has not been initialized yet;
-    // it is not a lookup key and every call returns the same Group. Use
-    // UpdateExecutorWorkers() for subsequent worker-count changes.
+    // Returns the same Group across budget, slot and executor changes.
+    // LoadAdmissionController supplies the limits; creation starts no workers.
     cachinglayer::LoadingOverheadGroupHandle
-    GetOrCreate(int64_t initial_executor_workers);
+    GetOrCreate();
 
     bool
     UpdateBudgetBytes(size_t bytes)
         requires(Dimension == cachinglayer::LoadingOverheadDimension::kMemory);
 
+    // Updates the fallback concurrency bound. Zero means no slot bound.
+    // Called by LoadAdmissionController with serialized capacity updates.
     bool
-    UpdateExecutorWorkers(int64_t executor_workers);
+    UpdateAdmissionSlots(size_t slots);
 
  private:
     LoadOverheadController() = default;
@@ -51,14 +50,13 @@ class LoadOverheadController {
     cachinglayer::LoadingOverheadPolicy
     CurrentPolicy() const;
 
-    bool
-    UsesExecutorPolicy() const;
+    static cachinglayer::LoadingOverheadPolicy
+    SlotPolicy(size_t slots);
 
     std::mutex mutex_;
     cachinglayer::LoadingOverheadGroupHandle group_handle_;
     size_t budget_bytes_{0};
-    int64_t executor_workers_{0};
-    bool executor_workers_initialized_{false};
+    size_t admission_slots_{0};
 };
 
 extern template class LoadOverheadController<

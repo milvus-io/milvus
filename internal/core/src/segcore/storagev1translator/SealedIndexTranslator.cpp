@@ -114,7 +114,7 @@ SealedIndexTranslator::SealedIndexTranslator(
                           milvus::storage::kFileStreamBufferMultiplier);
             auto memory_group =
                 milvus::storage::LoadMemoryOverheadController::GetInstance()
-                    .GetOrCreate(milvus::ThreadPools::GetLoadExecutorWorkers());
+                    .GetOrCreate();
             meta_.loading_overhead_config =
                 milvus::cachinglayer::LoadingOverheadConfig{
                     milvus::cachinglayer::LoadingOverheadGroupBinding{

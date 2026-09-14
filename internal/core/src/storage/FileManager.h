@@ -43,6 +43,7 @@
 #include "storage/RemoteOutputStream.h"
 #include "pb/index_coord.pb.h"
 #include "storage/Types.h"
+#include "storage/LegacyIndexLoader.h"
 
 namespace milvus::storage {
 
@@ -120,6 +121,7 @@ struct FileManagerContext {
     IndexMeta indexMeta;
     ChunkManagerPtr chunkManagerPtr;
     milvus_storage::ArrowFileSystemPtr fs;
+    std::shared_ptr<const LegacyIndexFileInfos> legacy_index_files;
     bool for_loading_index{false};
     std::shared_ptr<CPluginContext> plugin_context;
     std::shared_ptr<milvus_storage::api::Properties> loon_ffi_properties;
@@ -375,6 +377,7 @@ class FileManagerImpl : public milvus::FileManager {
     IndexMeta index_meta_;
     ChunkManagerPtr rcm_;
     milvus_storage::ArrowFileSystemPtr fs_;
+    std::shared_ptr<const LegacyIndexFileInfos> legacy_index_files_;
     std::shared_ptr<milvus_storage::api::Properties> loon_ffi_properties_;
     std::shared_ptr<CPluginContext> plugin_context_;
     StorageColumnMappings storage_column_mappings_;

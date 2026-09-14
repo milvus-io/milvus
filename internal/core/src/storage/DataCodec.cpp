@@ -42,7 +42,8 @@ std::unique_ptr<DataCodec>
 DeserializeFileData(const std::shared_ptr<uint8_t[]> input_data,
                     int64_t length,
                     bool is_field_data,
-                    std::optional<proto::schema::TypeSchema> array_type) {
+                    std::optional<proto::schema::TypeSchema> array_type,
+                    std::optional<int64_t> expected_index_payload_bytes) {
     auto buff_to_keep = input_data;  // ref += 1
     auto reader =
         std::make_shared<BinlogReader>(buff_to_keep, length);  //ref += 1
@@ -104,12 +105,25 @@ DeserializeFileData(const std::shared_ptr<uint8_t[]> input_data,
             decrypted_ptr.get(), decrypted_str.data(), decrypted_str.size());
         buff_to_keep = decrypted_ptr;
 
-        reader =
-            std::make_shared<BinlogReader>(buff_to_keep, decrypted_str.size());
+        length = decrypted_str.size();
+        reader = std::make_shared<BinlogReader>(buff_to_keep, length);
     }
 
-    EventHeader header(reader);
-    auto event_data_length = header.event_length_ - GetEventHeaderSize(header);
+    EventHeader header;
+    const auto header_bytes = GetEventHeaderSize(header);
+    const auto remaining = length - reader->Tell();
+    if (expected_index_payload_bytes.has_value() && remaining < header_bytes) {
+        ThrowInfo(DataFormatBroken, "Truncated legacy index event header");
+    }
+    header = EventHeader(reader);
+    if (expected_index_payload_bytes.has_value() &&
+        (header.event_type_ != EventType::IndexFileEvent ||
+         header.event_length_ < header_bytes + 2 * sizeof(Timestamp) ||
+         header.event_length_ != remaining)) {
+        ThrowInfo(DataFormatBroken,
+                  "Invalid legacy index event bounds or type");
+    }
+    auto event_data_length = header.event_length_ - header_bytes;
     switch (header.event_type_) {
         case EventType::InsertEvent: {
             auto insert_event_data = InsertEventData(reader,
@@ -171,6 +185,11 @@ DeserializeFileData(const std::shared_ptr<uint8_t[]> input_data,
             // DataCodec must keep the input_data alive for zero-copy usage,
             // otherwise segmentation violation will occur
             index_data->SetData(buff_to_keep);
+            if (expected_index_payload_bytes.has_value() &&
+                index_data->PayloadSize() != *expected_index_payload_bytes) {
+                ThrowInfo(DataFormatBroken,
+                          "Legacy index decoded payload length mismatch");
+            }
             return index_data;
         }
         default:

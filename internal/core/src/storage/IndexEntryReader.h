@@ -30,6 +30,7 @@
 #include "filemanager/InputStream.h"
 #include "nlohmann/json.hpp"
 #include "storage/FileWriter.h"
+#include "storage/IndexEntryFormat.h"
 #include "storage/IndexEntryWriter.h"
 #include "storage/ThreadPools.h"
 #include "storage/plugin/PluginInterface.h"
@@ -41,14 +42,6 @@ DefaultEntryStreamSliceSize();
 
 struct Entry {
     std::vector<uint8_t> data;
-};
-
-struct EntryStreamLoadInfo {
-    // Exact encrypted-stream task bounds derived from persisted V3 directory
-    // slice metadata. Plaintext files leave both byte counts at zero.
-    bool encrypted{false};
-    size_t total_transient_bytes{0};
-    size_t max_task_transient_bytes{0};
 };
 
 class IndexEntryReader {
@@ -148,24 +141,6 @@ class IndexEntryReader {
     operator=(const IndexEntryReader&) = delete;
 
  private:
-    struct PlainEntryMeta {
-        uint64_t offset;
-        uint64_t size;
-        uint32_t crc32;
-    };
-
-    struct EncryptedEntryMeta {
-        uint64_t original_size;
-        uint32_t crc32;
-        std::vector<SliceMeta> slices;
-    };
-
-    struct EntryMeta {
-        bool encrypted;
-        PlainEntryMeta plain;
-        EncryptedEntryMeta enc;
-    };
-
     IndexEntryReader() = default;
 
     void
@@ -176,19 +151,19 @@ class IndexEntryReader {
     CheckCancelled(const std::string& operation) const;
 
     Entry
-    ReadPlainEntry(const EntryMeta& meta);
+    ReadPlainEntry(const IndexEntryMeta& meta);
     Entry
-    ReadEncryptedEntry(const EntryMeta& meta);
+    ReadEncryptedEntry(const IndexEntryMeta& meta);
 
     void
-    ReadPlainEntryStream(const PlainEntryMeta& pm,
+    ReadPlainEntryStream(const PlainIndexEntryMeta& pm,
                          const std::function<void(const uint8_t* data,
                                                   size_t len)>& slice_consumer,
                          size_t slice_size);
 
     void
     ReadEncryptedEntryStream(
-        const EncryptedEntryMeta& em,
+        const EncryptedIndexEntryMeta& em,
         const std::function<void(const uint8_t* data, size_t len)>&
             slice_consumer);
 
@@ -222,11 +197,11 @@ class IndexEntryReader {
     EntryDownloadState
     PrepareEntryDownload(const std::string& name,
                          const std::string& local_path,
-                         const EntryMeta& meta);
+                         const IndexEntryMeta& meta);
 
     // Submit download tasks for an entry to the futures vector (does not wait)
     void
-    SubmitEntryDownloadTasks(const EntryMeta& meta,
+    SubmitEntryDownloadTasks(const IndexEntryMeta& meta,
                              EntryDownloadState& state,
                              std::vector<std::future<void>>& futures);
 
@@ -234,7 +209,7 @@ class IndexEntryReader {
     DownloadRangeCount(uint64_t size);
 
     static size_t
-    DownloadTaskCount(const EntryMeta& meta);
+    DownloadTaskCount(const IndexEntryMeta& meta);
 
     // Verify CRC and close file descriptor
     void
@@ -243,16 +218,16 @@ class IndexEntryReader {
     EntryStreamDownloadState
     PrepareEntryStreamDownload(const std::string& name,
                                const std::string& local_path,
-                               const EntryMeta& meta,
+                               const IndexEntryMeta& meta,
                                io::Priority write_priority);
 
     void
-    SubmitEntryStreamDownloadTasks(const EntryMeta& meta,
+    SubmitEntryStreamDownloadTasks(const IndexEntryMeta& meta,
                                    EntryStreamDownloadState& state,
                                    std::vector<std::future<void>>& futures);
 
     static size_t
-    StreamDownloadTaskCount(const EntryMeta& meta);
+    StreamDownloadTaskCount(const IndexEntryMeta& meta);
 
     void
     FinalizeEntryStreamDownload(EntryStreamDownloadState& state);
@@ -270,7 +245,7 @@ class IndexEntryReader {
 
     std::shared_ptr<plugin::ICipherPlugin> cipher_plugin_;
 
-    std::unordered_map<std::string, EntryMeta> entry_index_;
+    std::unordered_map<std::string, IndexEntryMeta> entry_index_;
     EntryStreamLoadInfo stream_load_info_;
     std::vector<std::string> entry_names_;
 

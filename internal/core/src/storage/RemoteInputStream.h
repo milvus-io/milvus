@@ -48,6 +48,12 @@ class RemoteInputStream : public milvus::InputStream {
     bool
     Seek(int64_t offset) override;
 
+    // Borrows the backing Arrow file; this stream retains its ownership.
+    const std::shared_ptr<arrow::io::RandomAccessFile>&
+    GetFile() const noexcept {
+        return remote_file_;
+    }
+
  private:
     size_t file_size_;
     std::shared_ptr<arrow::io::RandomAccessFile> remote_file_;
