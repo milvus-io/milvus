@@ -5761,16 +5761,16 @@ type dataCoordConfig struct {
 
 	// Two-dimensional task pricing (dataCoord.taskResource.*). CPU in cores,
 	// memory as a multiplier of the input size or an absolute size.
-	TaskResourceVectorIndexCPU             ParamItem `refreshable:"true"`
-	TaskResourceAnalyzeCPU                 ParamItem `refreshable:"true"`
-	TaskResourceClusteringCompactionCPU    ParamItem `refreshable:"true"`
-	TaskResourceDefaultCPU                 ParamItem `refreshable:"true"`
-	TaskResourceIndexMemoryFactor          ParamItem `refreshable:"true"`
-	TaskResourceStatsMemoryFactor          ParamItem `refreshable:"true"`
-	TaskResourceL0CompactionMemoryFactor   ParamItem `refreshable:"true"`
-	TaskResourceAnalyzeMemoryFactor        ParamItem `refreshable:"true"`
-	TaskResourceClusteringCompactionMemory ParamItem `refreshable:"true"`
-	TaskResourceMinTaskMemory              ParamItem `refreshable:"true"`
+	TaskResourceVectorIndexCPU           ParamItem `refreshable:"true"`
+	TaskResourceAnalyzeCPU               ParamItem `refreshable:"true"`
+	TaskResourceClusteringCompactionCPU  ParamItem `refreshable:"true"`
+	TaskResourceDefaultCPU               ParamItem `refreshable:"true"`
+	TaskResourceIndexMemoryFactor        ParamItem `refreshable:"true"`
+	TaskResourceStatsMemoryFactor        ParamItem `refreshable:"true"`
+	TaskResourceL0CompactionMemoryFactor ParamItem `refreshable:"true"`
+	TaskResourceAnalyzeMemoryFactor      ParamItem `refreshable:"true"`
+	TaskResourceImportMemoryFactor       ParamItem `refreshable:"true"`
+	TaskResourceMinTaskMemory            ParamItem `refreshable:"true"`
 
 	EnableSortCompaction       ParamItem `refreshable:"true"`
 	TaskCheckInterval          ParamItem `refreshable:"true"`
@@ -7413,7 +7413,7 @@ re-ingesting. A job that timed out before applying carries 0 and left the collec
 		Key:          "dataCoord.taskResource.statsMemoryFactor",
 		Version:      "3.0.1",
 		DefaultValue: "2",
-		Doc:          "memory of a stats task (text match, bm25, json key index) or a sort compaction = segment size * this factor",
+		Doc:          "memory of a stats task (text match, bm25, json key index) = size of the fields it indexes * this factor; of a sort compaction = segment size * this factor",
 		Export:       true,
 	}
 	p.TaskResourceStatsMemoryFactor.Init(base.mgr)
@@ -7436,14 +7436,14 @@ re-ingesting. A job that timed out before applying carries 0 and left the collec
 	}
 	p.TaskResourceAnalyzeMemoryFactor.Init(base.mgr)
 
-	p.TaskResourceClusteringCompactionMemory = ParamItem{
-		Key:          "dataCoord.taskResource.clusteringCompactionMemory",
+	p.TaskResourceImportMemoryFactor = ParamItem{
+		Key:          "dataCoord.taskResource.importMemoryFactor",
 		Version:      "3.0.1",
-		DefaultValue: "32g",
-		Doc:          "memory a clustering compaction task is expected to use",
+		DefaultValue: "2",
+		Doc:          "memory of an import task = files * per-file read buffer * this factor; the factor covers the batch that is being serialized and uploaded while the next one is read",
 		Export:       true,
 	}
-	p.TaskResourceClusteringCompactionMemory.Init(base.mgr)
+	p.TaskResourceImportMemoryFactor.Init(base.mgr)
 
 	p.TaskResourceMinTaskMemory = ParamItem{
 		Key:          "dataCoord.taskResource.minTaskMemory",

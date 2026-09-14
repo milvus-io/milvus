@@ -21,7 +21,10 @@ import (
 	"sync/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -34,6 +37,15 @@ import (
 // Memory is what a worker can refuse a task for. Both are floored so that a
 // task whose inputs could not be resolved is still placed as costing
 // something, never as free.
+//
+// Every memory formula mirrors what the worker actually holds for that family
+// (the comment next to each formula names the worker-side code it mirrors),
+// and errs on the high side where the worker's behavior depends on data or on
+// a machine DataCoord does not see. This estimate is what DataCoord places on;
+// the DataNode that accepts the task refines it with what only the worker
+// knows (exact field bytes, per-index-type expansion, its own memory for the
+// families whose buffers are a share of the machine) and books the refined
+// value, so the next round places on the corrected availability.
 
 func defaultCPU() int64 {
 	return max(Params.DataCoordCfg.TaskResourceDefaultCPU.GetAsInt64(), 1)
@@ -54,6 +66,10 @@ func defaultTaskResource() taskcommon.Resource {
 	return taskcommon.Resource{CPU: defaultCPU(), Memory: clampTaskMemory(0)}
 }
 
+// indexTaskResource: the worker (index/task_index.go) loads the whole indexed
+// field through cgo and builds the index beside it, so the field's bytes times
+// the factor. DiskANN builds against a DRAM budget equal to the worker's free
+// memory, so it is not priced lower than an in-memory build.
 func indexTaskResource(fieldSize int64, isVectorIndex bool) taskcommon.Resource {
 	cpu := defaultCPU()
 	if isVectorIndex {
@@ -65,24 +81,35 @@ func indexTaskResource(fieldSize int64, isVectorIndex bool) taskcommon.Resource 
 	}
 }
 
-// statsTaskResource prices text-match / bm25 / json-key stats and sort
-// compaction alike: all of them read the whole segment.
-func statsTaskResource(segmentSize int64) taskcommon.Resource {
+// statsTaskResource prices a stats task by the bytes it reads: the fields it
+// indexes (statsInputSize) for text-match / json-key / bm25, and the whole
+// segment for a sort compaction, which holds every input record in memory
+// until the sort is done (storage.Sort).
+func statsTaskResource(inputSize int64) taskcommon.Resource {
 	return taskcommon.Resource{
 		CPU:    defaultCPU(),
-		Memory: clampTaskMemory(scaled(segmentSize, Params.DataCoordCfg.TaskResourceStatsMemoryFactor.GetAsFloat())),
+		Memory: clampTaskMemory(scaled(inputSize, Params.DataCoordCfg.TaskResourceStatsMemoryFactor.GetAsFloat())),
 	}
 }
 
-// mixCompactionTaskResource is bounded by the output: a mix (or schema bump)
-// compaction writes at most one segment of segment.maxSize.
-func mixCompactionTaskResource() taskcommon.Resource {
+// mixCompactionTaskResource: a mix (or schema bump) compaction streams its
+// input through MultiSegmentWriter, which flushes at binlogMaxSize, so it never
+// holds more than its input and never needs more than one output segment of
+// segment.maxSize. min of the two; an unknown input size gets the upper bound.
+func mixCompactionTaskResource(inputSize int64) taskcommon.Resource {
+	bound := Params.DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024
+	memory := bound
+	if inputSize > 0 {
+		memory = min(inputSize, bound)
+	}
 	return taskcommon.Resource{
 		CPU:    defaultCPU(),
-		Memory: clampTaskMemory(Params.DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024),
+		Memory: clampTaskMemory(memory),
 	}
 }
 
+// l0CompactionTaskResource: the worker (compactor/l0_compactor.go) loads every
+// input delta log into memory before applying it batch by batch.
 func l0CompactionTaskResource(deltaSize int64) taskcommon.Resource {
 	return taskcommon.Resource{
 		CPU:    defaultCPU(),
@@ -90,13 +117,23 @@ func l0CompactionTaskResource(deltaSize int64) taskcommon.Resource {
 	}
 }
 
-func clusteringCompactionTaskResource() taskcommon.Resource {
+// clusteringCompactionTaskResource: the worker (compactor/clustering_compactor.go)
+// buckets its input in memory and flushes buckets once the buffer reaches
+// dataNode.clusteringCompaction.memoryBufferRatio of the machine, so it never
+// holds more than its input. That input is the estimate; the share of the
+// machine is applied by the DataNode that accepts the task, which is the only
+// side that knows the machine.
+func clusteringCompactionTaskResource(inputSize int64) taskcommon.Resource {
 	return taskcommon.Resource{
 		CPU:    max(Params.DataCoordCfg.TaskResourceClusteringCompactionCPU.GetAsInt64(), 1),
-		Memory: clampTaskMemory(Params.DataCoordCfg.TaskResourceClusteringCompactionMemory.GetAsSize()),
+		Memory: clampTaskMemory(inputSize),
 	}
 }
 
+// analyzeTaskResource: the worker (index/task_analyze.go) trains on the raw
+// vectors, so raw bytes times the factor. The worker down-samples to
+// maxTrainSizeRatio of its machine when they exceed it; that cap is applied by
+// the accepting DataNode.
 func analyzeTaskResource(rawDataSize int64) taskcommon.Resource {
 	return taskcommon.Resource{
 		CPU:    max(Params.DataCoordCfg.TaskResourceAnalyzeCPU.GetAsInt64(), 1),
@@ -104,16 +141,99 @@ func analyzeTaskResource(rawDataSize int64) taskcommon.Resource {
 	}
 }
 
-// importTaskResource prices an import by its write buffer, which is what the
-// worker actually holds in memory (see CalculateTaskBufferSize).
-func importTaskResource(bufferSize int64) taskcommon.Resource {
-	return taskcommon.Resource{CPU: defaultCPU(), Memory: clampTaskMemory(bufferSize)}
+// importTaskResource: the worker (importv2/task_import.go) submits every file
+// of the task to its exec pool at once and each file allocates one read buffer
+// of perFileBuffer bytes, so the task holds numFiles buffers; the factor covers
+// the batch being serialized and uploaded while the next one is read. The
+// worker's allocator, a percentage of its machine, is applied by the accepting
+// DataNode.
+func importTaskResource(numFiles, perFileBuffer int64) taskcommon.Resource {
+	return taskcommon.Resource{
+		CPU:    defaultCPU(),
+		Memory: clampTaskMemory(scaled(max(numFiles, 1)*perFileBuffer, Params.DataCoordCfg.TaskResourceImportMemoryFactor.GetAsFloat())),
+	}
+}
+
+// preImportTaskResource: the worker (importv2/task_preimport.go) reads every
+// file in parallel with one base buffer each and keeps nothing: one buffer per
+// file, no in-flight sync, no allocator cap.
+func preImportTaskResource(numFiles, perFileBuffer int64) taskcommon.Resource {
+	return taskcommon.Resource{
+		CPU:    defaultCPU(),
+		Memory: clampTaskMemory(max(numFiles, 1) * perFileBuffer),
+	}
+}
+
+// importFileBufferSize mirrors importv2.ImportTask.GetBufferSize on the worker:
+// the base buffer per (vchannel, partition) pair; an L0 import uses the base
+// buffer as is (importv2.L0ImportTask.GetBufferSize).
+//
+// It is deliberately NOT capped at the largest file. GetBufferSize reads a
+// largest-file cap from the task's own ImportTaskV2.FileStats, but the worker
+// never fills that field for an import task (NewImportTask leaves it nil), so
+// the cap never fires there and capping here would under-price every import.
+// The worker's remaining clamp, a percentage of its machine, is applied by the
+// accepting DataNode.
+func importFileBufferSize(job ImportJob) int64 {
+	base := Params.DataNodeCfg.ImportBaseBufferSize.GetAsInt64()
+	if importutilv2.IsL0Import(job.GetOptions()) {
+		return base
+	}
+	return base * int64(len(job.GetVchannels())) * int64(len(job.GetPartitionIDs()))
 }
 
 // lightweightTaskResource prices copy-segment and external-refresh tasks,
 // which stream data and hold little of it.
 func lightweightTaskResource() taskcommon.Resource {
 	return defaultTaskResource()
+}
+
+// statsInputSize is what a stats task reads: the fields its sub job indexes
+// when the schema is known, else the whole segment. Text match reads the fields
+// with enable_match, json key stats the JSON fields with the stats index
+// enabled, bm25 the sparse output field of each BM25 function (the worker's
+// index/task_stats.go loops over exactly these). A sub job that targets no
+// specific field, or a schema that names none, is priced on the whole segment.
+func statsInputSize(segment *SegmentInfo, schema *schemapb.CollectionSchema, subJob indexpb.StatsSubJob) int64 {
+	fields := statsTargetFields(schema, subJob)
+	if len(fields) == 0 {
+		return estimateSegmentSize(segment, schema)
+	}
+	var size int64
+	for _, fieldID := range fields {
+		size += estimateFieldSize(segment, schema, fieldID)
+	}
+	return size
+}
+
+// statsTargetFields lists the field IDs a stats sub job reads, or nil when
+// the sub job reads the whole segment.
+func statsTargetFields(schema *schemapb.CollectionSchema, subJob indexpb.StatsSubJob) []int64 {
+	if schema == nil {
+		return nil
+	}
+	var fields []int64
+	switch subJob {
+	case indexpb.StatsSubJob_TextIndexJob:
+		for _, field := range schema.GetFields() {
+			if typeutil.CreateFieldSchemaHelper(field).EnableMatch() {
+				fields = append(fields, field.GetFieldID())
+			}
+		}
+	case indexpb.StatsSubJob_JsonKeyIndexJob:
+		for _, field := range schema.GetFields() {
+			if typeutil.CreateFieldSchemaHelper(field).EnableJSONKeyStatsIndex() {
+				fields = append(fields, field.GetFieldID())
+			}
+		}
+	case indexpb.StatsSubJob_BM25Job:
+		for _, fn := range schema.GetFunctions() {
+			if fn.GetType() == schemapb.FunctionType_BM25 {
+				fields = append(fields, fn.GetOutputFieldIds()...)
+			}
+		}
+	}
+	return fields
 }
 
 // estimateSegmentSize is getSegmentSize with a fallback for segments whose
@@ -145,9 +265,8 @@ func estimateSegmentSize(segment *SegmentInfo, schema *schemapb.CollectionSchema
 //
 // The per-field binlog arrays are authoritative when present, but V3 segments
 // do not persist them (kv_catalog: paths live in the LOON manifest), so after
-// a DataCoord restart they are empty. Then: a vector field is rows x dim x
-// element size, exact on every storage version; a scalar field is its share
-// of the segment size, apportioned by the schema's per-record estimate.
+// a DataCoord restart they are empty. Then the field is apportioned out of
+// the segment's insert size, see apportionFieldSize.
 func estimateFieldSize(segment *SegmentInfo, schema *schemapb.CollectionSchema, fieldID int64) int64 {
 	if segment == nil || segment.SegmentInfo == nil {
 		return 0
@@ -160,28 +279,93 @@ func estimateFieldSize(segment *SegmentInfo, schema *schemapb.CollectionSchema, 
 		// Unknown field: be conservative and charge the whole segment.
 		return estimateSegmentSize(segment, schema)
 	}
-	rows := segment.GetNumOfRows()
-	if typeutil.IsVectorType(field.GetDataType()) {
-		if size := vectorFieldBytes(field, rows); size > 0 {
-			mlog.Warn(context.TODO(), "vector field has no binlog size, estimated from dim and rows",
-				mlog.FieldSegmentID(segment.GetID()), mlog.FieldFieldID(fieldID), mlog.Int64("estimatedSize", size))
-			return size
-		}
-	}
-	fieldBytes := fieldBytesPerRow(field)
-	perRecord, err := typeutil.EstimateSizePerRecord(schema)
-	if err != nil || perRecord <= 0 || fieldBytes <= 0 {
+	size := apportionFieldSize(segment, schema, field)
+	if size <= 0 {
 		return estimateSegmentSize(segment, schema)
 	}
-	var size int64
-	if segmentSize := segment.getSegmentSize(); segmentSize > 0 {
-		size = segmentSize * fieldBytes / int64(perRecord)
-	} else {
-		size = rows * fieldBytes
-	}
-	mlog.Warn(context.TODO(), "field has no binlog size, estimated from schema",
+	mlog.Warn(context.TODO(), "field has no binlog size, estimated from schema and segment statistics",
 		mlog.FieldSegmentID(segment.GetID()), mlog.FieldFieldID(fieldID), mlog.Int64("estimatedSize", size))
 	return size
+}
+
+// apportionFieldSize sizes a field without binlogs from what is known exactly
+// and what is not.
+//
+// Fixed-width fields (numbers, bool, timestamps, dense vectors) are exact:
+// rows x width. The rest of the segment's insert bytes -- what is left after
+// every fixed-width field and the two system fields are subtracted -- belongs
+// to the variable-width fields (varchar, text, json, array, geometry, sparse
+// and array-of-vector), and is split among them in proportion to the schema's
+// per-row estimate of each. So the only guess is how the variable-width
+// fields share their residual, never the residual itself, and a segment with
+// one variable-width field prices it exactly.
+//
+// Without an insert size at all (an external collection) a variable-width
+// field falls back to rows x its per-row estimate.
+func apportionFieldSize(segment *SegmentInfo, schema *schemapb.CollectionSchema, field *schemapb.FieldSchema) int64 {
+	rows := segment.GetNumOfRows()
+	if rows <= 0 {
+		return 0
+	}
+	if width := fixedFieldWidth(field); width > 0 {
+		return rows * width
+	}
+
+	fieldEstimate := fieldBytesPerRow(field)
+	if fieldEstimate <= 0 {
+		return 0
+	}
+	insertSize := segment.EnsureStats().GetInsertBinlogSize()
+	if insertSize <= 0 {
+		return rows * fieldEstimate
+	}
+
+	// Residual: the insert bytes not accounted for by fixed-width fields.
+	residual := insertSize
+	var variableEstimate int64
+	hasSystemFields := false
+	for _, f := range typeutil.GetAllFieldSchemas(schema) {
+		if common.IsSystemField(f.GetFieldID()) {
+			hasSystemFields = true
+		}
+		if width := fixedFieldWidth(f); width > 0 {
+			residual -= rows * width
+			continue
+		}
+		variableEstimate += fieldBytesPerRow(f)
+	}
+	if !hasSystemFields {
+		// RowID and Timestamp are written with every segment but are not part of
+		// the collection schema DataCoord holds.
+		residual -= rows * systemFieldsWidth
+	}
+	if residual <= 0 || variableEstimate <= 0 {
+		return rows * fieldEstimate
+	}
+	return residual * fieldEstimate / variableEstimate
+}
+
+// systemFieldsWidth is the bytes per row of RowID and Timestamp, both int64.
+const systemFieldsWidth = 16
+
+// fixedFieldWidth returns the exact bytes per row of a fixed-width field, or 0
+// for a variable-width one.
+func fixedFieldWidth(field *schemapb.FieldSchema) int64 {
+	switch field.GetDataType() {
+	case schemapb.DataType_Bool, schemapb.DataType_Int8:
+		return 1
+	case schemapb.DataType_Int16:
+		return 2
+	case schemapb.DataType_Int32, schemapb.DataType_Float:
+		return 4
+	case schemapb.DataType_Int64, schemapb.DataType_Double, schemapb.DataType_Timestamptz:
+		return 8
+	case schemapb.DataType_FloatVector, schemapb.DataType_BinaryVector,
+		schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector, schemapb.DataType_Int8Vector:
+		return vectorFieldBytes(field, 1)
+	default:
+		return 0
+	}
 }
 
 // rawFieldBinlogSize is getFieldBinlogSize WITHOUT its whole-segment fallback,
@@ -208,7 +392,12 @@ func rawFieldBinlogSize(segment *SegmentInfo, fieldID int64) int64 {
 	return size
 }
 
+// vectorFieldBytes is the exact size of rows dense vectors, or 0 when the
+// field is not a dense vector or its dim is unknown.
 func vectorFieldBytes(field *schemapb.FieldSchema, rows int64) int64 {
+	if !typeutil.IsVectorType(field.GetDataType()) || typeutil.IsSparseFloatVectorType(field.GetDataType()) {
+		return 0
+	}
 	dim, err := typeutil.GetDim(field)
 	if err != nil || dim <= 0 {
 		return 0
@@ -217,7 +406,8 @@ func vectorFieldBytes(field *schemapb.FieldSchema, rows int64) int64 {
 }
 
 // fieldBytesPerRow reuses EstimateSizePerRecord on a one-field schema so the
-// scalar apportioning uses exactly the estimator the rest of DataCoord uses.
+// variable-width apportioning uses exactly the estimator the rest of DataCoord
+// uses.
 func fieldBytesPerRow(field *schemapb.FieldSchema) int64 {
 	n, err := typeutil.EstimateSizePerRecord(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}})
 	if err != nil {

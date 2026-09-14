@@ -1510,8 +1510,6 @@ func TestCalculateTaskBufferSize(t *testing.T) {
 		Options: []*commonpb.KeyValuePair{{Key: importutilv2.L0Import, Value: "true"}},
 	}}
 	assert.Equal(t, paramtable.Get().DataNodeCfg.ImportDeleteBufferSize.GetAsInt64(), CalculateTaskBufferSize(imp, l0Job))
-
-	assert.Equal(t, importTaskResource(base*2*3), taskcommon.Resource{CPU: 1, Memory: max(base*2*3, 64<<20)})
 }
 
 func TestImportTaskResource(t *testing.T) {
@@ -1523,20 +1521,35 @@ func TestImportTaskResource(t *testing.T) {
 	importMeta.EXPECT().GetJob(mock.Anything, int64(1)).Return(job)
 	importMeta.EXPECT().GetJob(mock.Anything, int64(2)).Return(nil)
 
+	// Three files, each with its own (base x 2 x 3) buffer on the worker.
 	imp := &importTask{importMeta: importMeta}
-	imp.task.Store(&datapb.ImportTaskV2{JobID: 1, TaskID: 3})
-	assert.Equal(t, importTaskResource(base*2*3), imp.GetTaskResource())
+	imp.task.Store(&datapb.ImportTaskV2{JobID: 1, TaskID: 3, FileStats: []*datapb.ImportFileStats{
+		{TotalMemorySize: base * 100}, {TotalMemorySize: base * 100}, {TotalMemorySize: base * 100},
+	}})
+	assert.Equal(t, importTaskResource(3, base*2*3), imp.GetTaskResource())
+	assert.Equal(t, taskcommon.Resource{CPU: 1, Memory: max(3*base*2*3*2, 64<<20)}, imp.GetTaskResource())
 
+	// Small files do not shrink the per-file buffer: the worker never caps it
+	// at the file size for an import task.
+	smallFiles := &importTask{importMeta: importMeta}
+	smallFiles.task.Store(&datapb.ImportTaskV2{JobID: 1, TaskID: 7, FileStats: []*datapb.ImportFileStats{
+		{TotalMemorySize: base}, {TotalMemorySize: base / 2},
+	}})
+	assert.Equal(t, importTaskResource(2, base*2*3), smallFiles.GetTaskResource())
+
+	// Pre-import: one base buffer per file, no job lookup needed.
 	pre := &preImportTask{importMeta: importMeta}
-	pre.task.Store(&datapb.PreImportTask{JobID: 1, TaskID: 4})
-	assert.Equal(t, importTaskResource(base), pre.GetTaskResource())
+	pre.task.Store(&datapb.PreImportTask{JobID: 1, TaskID: 4, FileStats: []*datapb.ImportFileStats{{}, {}}})
+	assert.Equal(t, preImportTaskResource(2, base), pre.GetTaskResource())
 
 	// Job dropped between enqueue and dispatch: the floor, never zero.
 	orphanImport := &importTask{importMeta: importMeta}
 	orphanImport.task.Store(&datapb.ImportTaskV2{JobID: 2, TaskID: 5})
 	assert.Equal(t, defaultTaskResource(), orphanImport.GetTaskResource())
 
+	// A pre-import prices itself from its own file list, so a dropped job does
+	// not change its answer.
 	orphanPre := &preImportTask{importMeta: importMeta}
-	orphanPre.task.Store(&datapb.PreImportTask{JobID: 2, TaskID: 6})
-	assert.Equal(t, defaultTaskResource(), orphanPre.GetTaskResource())
+	orphanPre.task.Store(&datapb.PreImportTask{JobID: 2, TaskID: 6, FileStats: []*datapb.ImportFileStats{{}}})
+	assert.Equal(t, preImportTaskResource(1, base), orphanPre.GetTaskResource())
 }

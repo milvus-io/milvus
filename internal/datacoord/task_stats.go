@@ -91,7 +91,10 @@ func (st *statsTask) GetTaskState() taskcommon.State {
 	return st.GetState()
 }
 
-// GetTaskResource prices a stats task by the whole segment it reads.
+// GetTaskResource prices a stats task by the fields its sub job reads
+// (statsInputSize). Without a cached schema the fields cannot be told apart,
+// so the whole segment is charged and the answer is not cached: the schema
+// arriving later must be able to shrink the price.
 func (st *statsTask) GetTaskResource() taskcommon.Resource {
 	return st.resource.get(func() (taskcommon.Resource, bool) {
 		segment := st.meta.GetHealthySegment(context.TODO(), st.GetSegmentID())
@@ -102,11 +105,11 @@ func (st *statsTask) GetTaskResource() taskcommon.Resource {
 		if coll := st.meta.GetCollection(segment.GetCollectionID()); coll != nil {
 			schema = coll.Schema
 		}
-		size := estimateSegmentSize(segment, schema)
+		size := statsInputSize(segment, schema, st.GetSubJobType())
 		if size <= 0 {
 			return defaultTaskResource(), false
 		}
-		return statsTaskResource(size), true
+		return statsTaskResource(size), schema != nil
 	})
 }
 

@@ -130,18 +130,18 @@ func (t *importTask) GetTaskSlot() int64 {
 	return int64(CalculateTaskSlot(t, t.importMeta))
 }
 
-// GetTaskResource prices an import by the write buffer it holds. It is not
-// cached, and does not need to be: CalculateTaskBufferSize reads three cheap
-// job fields (vchannels, partitions, the L0 option), so re-reading them every
-// round costs nothing a cache would save. Not caching also means a job whose
-// partitions or vchannels are amended between enqueue and dispatch is priced on
-// what it will actually run with.
+// GetTaskResource prices an import by one read buffer per file, mirroring
+// what the worker allocates (importTaskResource). It is not cached, and does
+// not need to be: the inputs are the task's file stats and three cheap job
+// fields, so re-reading them every round costs nothing a cache would save, and
+// a job amended between enqueue and dispatch is priced on what it will
+// actually run with.
 func (t *importTask) GetTaskResource() taskcommon.Resource {
 	job := t.importMeta.GetJob(context.TODO(), t.GetJobID())
 	if job == nil {
 		return defaultTaskResource()
 	}
-	return importTaskResource(CalculateTaskBufferSize(t, job))
+	return importTaskResource(int64(len(t.GetFileStats())), importFileBufferSize(job))
 }
 
 func (t *importTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {

@@ -34,9 +34,45 @@ import (
 
 func TestCompactionTaskResource_Mix(t *testing.T) {
 	paramtable.Init()
+	meta := NewMockCompactionMeta(t)
+	calls := 0
+	meta.EXPECT().GetHealthySegment(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, id int64) *SegmentInfo {
+		calls++
+		return &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: id, NumOfRows: 100, Stats: &datapb.Statistics{InsertBinlogSize: 100 * testMiB},
+		}}
+	})
+	task := newMixCompactionTask(&datapb.CompactionTask{PlanID: 1, Type: datapb.CompactionType_MixCompaction, InputSegments: []int64{10, 11}},
+		nil, meta, newMockVersionManager())
+	// Streamed input: the sum of both segments, well under one output segment.
+	assert.Equal(t, mixCompactionTaskResource(200*testMiB), task.GetTaskResource())
+	assert.Equal(t, taskcommon.Resource{CPU: 1, Memory: 200 * testMiB}, task.GetTaskResource())
+	assert.Equal(t, 2, calls) // cached after the first walk
+}
+
+func TestCompactionTaskResource_MixBoundedByOutput(t *testing.T) {
+	paramtable.Init()
+	meta := NewMockCompactionMeta(t)
+	meta.EXPECT().GetHealthySegment(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, id int64) *SegmentInfo {
+		return &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: id, NumOfRows: 100, Stats: &datapb.Statistics{InsertBinlogSize: 900 * testMiB},
+		}}
+	})
+	task := newMixCompactionTask(&datapb.CompactionTask{PlanID: 1, Type: datapb.CompactionType_MixCompaction, InputSegments: []int64{10, 11, 12}},
+		nil, meta, newMockVersionManager())
+	// 2700MiB of input streams through one 1024MiB output segment at a time.
+	assert.Equal(t, taskcommon.Resource{CPU: 1, Memory: 1024 * testMiB}, task.GetTaskResource())
+}
+
+func TestCompactionTaskResource_MixSegmentMissing(t *testing.T) {
+	paramtable.Init()
+	meta := NewMockCompactionMeta(t)
+	meta.EXPECT().GetHealthySegment(mock.Anything, int64(10)).Return(nil).Twice()
 	task := newMixCompactionTask(&datapb.CompactionTask{PlanID: 1, Type: datapb.CompactionType_MixCompaction, InputSegments: []int64{10}},
-		nil, NewMockCompactionMeta(t), newMockVersionManager())
-	assert.Equal(t, mixCompactionTaskResource(), task.GetTaskResource())
+		nil, meta, newMockVersionManager())
+	// Not resolvable: floor, and NOT cached so the next round retries.
+	assert.Equal(t, defaultTaskResource(), task.GetTaskResource())
+	assert.Equal(t, defaultTaskResource(), task.GetTaskResource())
 }
 
 func TestCompactionTaskResource_Sort(t *testing.T) {
@@ -115,14 +151,42 @@ func TestCompactionTaskResource_L0SegmentMissing(t *testing.T) {
 
 func TestCompactionTaskResource_ClusteringAndBump(t *testing.T) {
 	paramtable.Init()
-	clustering := newClusteringCompactionTask(&datapb.CompactionTask{PlanID: 1, Type: datapb.CompactionType_ClusteringCompaction},
-		nil, NewMockCompactionMeta(t), nil, nil, newMockVersionManager())
-	assert.Equal(t, clusteringCompactionTaskResource(), clustering.GetTaskResource())
+	segmentOf := func(size int64) func(ctx context.Context, id int64) *SegmentInfo {
+		return func(ctx context.Context, id int64) *SegmentInfo {
+			return &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: id, NumOfRows: 100, Stats: &datapb.Statistics{InsertBinlogSize: size}}}
+		}
+	}
 
-	bump := newBumpSchemaVersionTask(&datapb.CompactionTask{PlanID: 1, Type: datapb.CompactionType_BumpSchemaVersionCompaction},
-		nil, NewMockCompactionMeta(t), newMockVersionManager())
-	assert.Equal(t, mixCompactionTaskResource(), bump.GetTaskResource())
-	assert.Equal(t, taskcommon.Resource{CPU: 1, Memory: 1024 * testMiB}, bump.GetTaskResource())
+	meta := NewMockCompactionMeta(t)
+	meta.EXPECT().GetHealthySegment(mock.Anything, mock.Anything).RunAndReturn(segmentOf(4 * testGiB)).Times(3)
+	clustering := newClusteringCompactionTask(&datapb.CompactionTask{PlanID: 1, Type: datapb.CompactionType_ClusteringCompaction, InputSegments: []int64{10, 11, 12}},
+		nil, meta, nil, nil, newMockVersionManager())
+	// Its input; the worker applies its buffer share.
+	assert.Equal(t, clusteringCompactionTaskResource(12*testGiB), clustering.GetTaskResource())
+	assert.Equal(t, taskcommon.Resource{CPU: 8, Memory: 12 * testGiB}, clustering.GetTaskResource())
+	assert.Equal(t, clustering.GetTaskResource(), clustering.GetTaskResource()) // cached: Times(3) holds
+
+	missing := NewMockCompactionMeta(t)
+	missing.EXPECT().GetHealthySegment(mock.Anything, mock.Anything).Return(nil).Twice()
+	orphan := newClusteringCompactionTask(&datapb.CompactionTask{PlanID: 2, Type: datapb.CompactionType_ClusteringCompaction, InputSegments: []int64{10}},
+		nil, missing, nil, nil, newMockVersionManager())
+	assert.Equal(t, defaultTaskResource(), orphan.GetTaskResource())
+	assert.Equal(t, defaultTaskResource(), orphan.GetTaskResource()) // not cached
+
+	bumpMeta := NewMockCompactionMeta(t)
+	bumpMeta.EXPECT().GetHealthySegment(mock.Anything, int64(10)).RunAndReturn(segmentOf(300 * testMiB)).Once()
+	bump := newBumpSchemaVersionTask(&datapb.CompactionTask{PlanID: 1, Type: datapb.CompactionType_BumpSchemaVersionCompaction, InputSegments: []int64{10}},
+		nil, bumpMeta, newMockVersionManager())
+	// One segment streamed through the mix writer: priced by that segment.
+	assert.Equal(t, mixCompactionTaskResource(300*testMiB), bump.GetTaskResource())
+	assert.Equal(t, taskcommon.Resource{CPU: 1, Memory: 300 * testMiB}, bump.GetTaskResource())
+
+	bumpMissing := NewMockCompactionMeta(t)
+	bumpMissing.EXPECT().GetHealthySegment(mock.Anything, int64(10)).Return(nil).Twice()
+	bumpOrphan := newBumpSchemaVersionTask(&datapb.CompactionTask{PlanID: 2, Type: datapb.CompactionType_BumpSchemaVersionCompaction, InputSegments: []int64{10}},
+		nil, bumpMissing, newMockVersionManager())
+	assert.Equal(t, defaultTaskResource(), bumpOrphan.GetTaskResource())
+	assert.Equal(t, defaultTaskResource(), bumpOrphan.GetTaskResource())
 }
 
 // TestCompactionTaskResource_RequestCarriesEstimate proves the dispatch the

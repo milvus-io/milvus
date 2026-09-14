@@ -92,16 +92,11 @@ func (p *preImportTask) GetTaskSlot() int64 {
 	return int64(CalculateTaskSlot(p, p.importMeta))
 }
 
-// GetTaskResource prices a pre-import by the one base write buffer it holds.
-// Not cached, for the same reason as importTask.GetTaskResource: the inputs are
-// three cheap job fields re-read each round, so a cache would buy nothing and
-// would freeze a price the job may still amend before dispatch.
+// GetTaskResource prices a pre-import by one base read buffer per file,
+// mirroring what the worker allocates (preImportTaskResource). Not cached, for
+// the same reason as importTask.GetTaskResource.
 func (p *preImportTask) GetTaskResource() taskcommon.Resource {
-	job := p.importMeta.GetJob(context.TODO(), p.GetJobID())
-	if job == nil {
-		return defaultTaskResource()
-	}
-	return importTaskResource(CalculateTaskBufferSize(p, job))
+	return preImportTaskResource(int64(len(p.GetFileStats())), Params.DataNodeCfg.ImportBaseBufferSize.GetAsInt64())
 }
 
 func (p *preImportTask) SetTaskTime(timeType taskcommon.TimeType, time time.Time) {

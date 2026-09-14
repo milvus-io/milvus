@@ -62,7 +62,8 @@ type clusteringCompactionTask struct {
 
 	maxRetryTimes int32
 
-	times *taskcommon.Times
+	times    *taskcommon.Times
+	resource resourceCache
 }
 
 func (t *clusteringCompactionTask) GetTaskID() int64 {
@@ -77,10 +78,17 @@ func (t *clusteringCompactionTask) GetTaskState() taskcommon.State {
 	return taskcommon.FromCompactionState(t.GetTaskProto().GetState())
 }
 
-// GetTaskResource: a clustering compaction buffers many output segments at
-// once, so it is priced by a flat configured budget rather than its input.
+// GetTaskResource: a clustering compaction buckets its input in memory up to
+// a share of the worker, so it is priced by its input with that share as the
+// cap (see clusteringCompactionTaskResource).
 func (t *clusteringCompactionTask) GetTaskResource() taskcommon.Resource {
-	return clusteringCompactionTaskResource()
+	return t.resource.get(func() (taskcommon.Resource, bool) {
+		inputSize, ok := compactionInputSize(t.meta, t.GetTaskProto())
+		if !ok {
+			return defaultTaskResource(), false
+		}
+		return clusteringCompactionTaskResource(inputSize), true
+	})
 }
 
 func (t *clusteringCompactionTask) GetTaskSlot() int64 {

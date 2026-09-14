@@ -35,8 +35,9 @@ import (
 )
 
 // familySegmentSize is the segment size the fixture below reports through
-// Stats: 1000 rows of (int64 pk + 128-dim float vector + 64-byte varchar).
-const familySegmentSize = int64(1000 * (8 + 512 + 64))
+// Stats: 1000 rows of (RowID + Timestamp + int64 pk + 128-dim float vector +
+// 64-byte varchar), the system fields included as every segment writes them.
+const familySegmentSize = int64(1000 * (systemFieldsWidth + 8 + 512 + 64))
 
 // familyMeta builds a meta with one collection (schema from testResourceSchema),
 // one segment (V3 shape: no binlogs, Stats present) and one HNSW index on the
@@ -78,7 +79,9 @@ func TestTaskResource_Index(t *testing.T) {
 }
 
 // TestTaskResource_IndexScalar covers a non-vector index: CPU falls back to the
-// default and the field bytes are apportioned out of the segment size.
+// default and the field bytes are what the segment holds beyond its
+// fixed-width fields -- exactly 64 bytes per row here, the varchar being the
+// only variable-width field.
 func TestTaskResource_IndexScalar(t *testing.T) {
 	paramtable.Init()
 	mt := familyMeta(t)
@@ -88,10 +91,7 @@ func TestTaskResource_IndexScalar(t *testing.T) {
 	idx.IndexParams = []*commonpb.KeyValuePair{{Key: "index_type", Value: "INVERTED"}}
 
 	it := newIndexBuildTask(&model.SegmentIndex{CollectionID: 1, PartitionID: 2, SegmentID: 3, IndexID: 4, BuildID: 5, NumRows: 1000}, 1, mt, nil, nil, nil)
-	strBytes := fieldBytesPerRow(typeutil.GetFieldByID(testResourceSchema(), 102))
-	perRecord, err := typeutilEstimateSizePerRecord(testResourceSchema())
-	assert.NoError(t, err)
-	assert.Equal(t, indexTaskResource(familySegmentSize*strBytes/perRecord, false), it.GetTaskResource())
+	assert.Equal(t, indexTaskResource(1000*64, false), it.GetTaskResource())
 }
 
 // bigFamilyMeta is familyMeta scaled up so that every price in play clears the
@@ -104,7 +104,7 @@ func bigFamilyMeta(t *testing.T) *meta {
 	mt := familyMeta(t)
 	seg := mt.segments.segments[3]
 	seg.NumOfRows = bigFamilyRows
-	seg.Stats = &datapb.Statistics{InsertBinlogSize: bigFamilyRows * (8 + 512 + 64)}
+	seg.Stats = &datapb.Statistics{InsertBinlogSize: bigFamilyRows * (systemFieldsWidth + 8 + 512 + 64)}
 	return mt
 }
 
@@ -200,6 +200,8 @@ func TestTaskResource_IndexUnpriceableField(t *testing.T) {
 func TestTaskResource_Stats(t *testing.T) {
 	paramtable.Init()
 	mt := familyMeta(t)
+	// No field in the fixture schema has text match enabled, so the sub job
+	// targets nothing specific and the whole segment is charged.
 	st := newStatsTask(&indexpb.StatsTask{CollectionID: 1, SegmentID: 3, TaskID: 7, SubJobType: indexpb.StatsSubJob_TextIndexJob}, 1, mt, nil, nil, nil)
 	assert.Equal(t, statsTaskResource(familySegmentSize), st.GetTaskResource())
 	assert.Equal(t, statsTaskResource(familySegmentSize), st.GetTaskResource()) // cached
@@ -207,6 +209,50 @@ func TestTaskResource_Stats(t *testing.T) {
 	orphan := newStatsTask(&indexpb.StatsTask{CollectionID: 1, SegmentID: 999, TaskID: 8}, 1, mt, nil, nil, nil)
 	assert.Equal(t, defaultTaskResource(), orphan.GetTaskResource())
 	assert.Equal(t, defaultTaskResource(), orphan.GetTaskResource())
+}
+
+// TestTaskResource_StatsTargetsFields: a text-match stats task reads only the
+// fields with enable_match, so it is priced on those, not on the vector that
+// dominates the segment.
+func TestTaskResource_StatsTargetsFields(t *testing.T) {
+	paramtable.Init()
+	// bigFamilyMeta, so that the field price clears the floor and is
+	// distinguishable from the whole-segment price.
+	mt := bigFamilyMeta(t)
+	schema := testResourceSchema()
+	str := typeutil.GetFieldByID(schema, 102)
+	str.TypeParams = append(str.TypeParams,
+		&commonpb.KeyValuePair{Key: "enable_match", Value: "true"},
+		&commonpb.KeyValuePair{Key: "enable_analyzer", Value: "true"})
+	mt.collections.Insert(1, &collectionInfo{ID: 1, Schema: schema})
+
+	st := newStatsTask(&indexpb.StatsTask{CollectionID: 1, SegmentID: 3, TaskID: 7, SubJobType: indexpb.StatsSubJob_TextIndexJob}, 1, mt, nil, nil, nil)
+	// The varchar is the only variable-width field: exactly 64 bytes per row.
+	assert.Equal(t, statsTaskResource(bigFamilyRows*64), st.GetTaskResource())
+	assert.Equal(t, statsTaskResource(bigFamilyRows*64), st.GetTaskResource()) // cached
+	assert.Less(t, st.GetTaskResource().Memory, statsTaskResource(bigFamilyRows*(systemFieldsWidth+8+512+64)).Memory)
+}
+
+// TestTaskResource_StatsSchemaCacheMiss: without a schema the targeted fields
+// cannot be told apart, so the whole segment is charged -- and that answer is
+// not cached, so the schema arriving later shrinks the price.
+func TestTaskResource_StatsSchemaCacheMiss(t *testing.T) {
+	paramtable.Init()
+	mt := bigFamilyMeta(t)
+	segmentSize := bigFamilyRows * (systemFieldsWidth + 8 + 512 + 64)
+	schema := testResourceSchema()
+	str := typeutil.GetFieldByID(schema, 102)
+	str.TypeParams = append(str.TypeParams,
+		&commonpb.KeyValuePair{Key: "enable_match", Value: "true"},
+		&commonpb.KeyValuePair{Key: "enable_analyzer", Value: "true"})
+	mt.collections = typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+
+	st := newStatsTask(&indexpb.StatsTask{CollectionID: 1, SegmentID: 3, TaskID: 7, SubJobType: indexpb.StatsSubJob_TextIndexJob}, 1, mt, nil, nil, nil)
+	assert.Equal(t, statsTaskResource(segmentSize), st.GetTaskResource())
+	assert.Equal(t, statsTaskResource(segmentSize), st.GetTaskResource())
+
+	mt.collections.Insert(1, &collectionInfo{ID: 1, Schema: schema})
+	assert.Equal(t, statsTaskResource(bigFamilyRows*64), st.GetTaskResource())
 }
 
 // TestTaskResource_StatsUnsizedSegment covers a segment with neither Stats nor

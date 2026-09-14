@@ -908,7 +908,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 2.0, Params.TaskResourceStatsMemoryFactor.GetAsFloat())
 		assert.Equal(t, 2.0, Params.TaskResourceL0CompactionMemoryFactor.GetAsFloat())
 		assert.Equal(t, 2.0, Params.TaskResourceAnalyzeMemoryFactor.GetAsFloat())
-		assert.Equal(t, int64(32)<<30, Params.TaskResourceClusteringCompactionMemory.GetAsSize())
+		assert.Equal(t, 2.0, Params.TaskResourceImportMemoryFactor.GetAsFloat())
 		assert.Equal(t, int64(64)<<20, Params.TaskResourceMinTaskMemory.GetAsSize())
 	})
 
