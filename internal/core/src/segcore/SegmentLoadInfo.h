@@ -1172,19 +1172,10 @@ class SegmentLoadInfo {
             field_index_id_cache_[field_id].push_back(index_info.indexid());
             auto load_index_info = ConvertFieldIndexInfoToLoadIndexInfo(
                 &index_info, info_.segmentid());
-            auto index_type_it =
-                load_index_info.index_params.find(milvus::index::INDEX_TYPE);
-            auto scalar_version_it = load_index_info.index_params.find(
-                milvus::index::SCALAR_INDEX_ENGINE_VERSION);
-            auto scalar_v3 =
-                !IsVectorDataType(load_index_info.field_type) &&
-                scalar_version_it != load_index_info.index_params.end() &&
-                std::stoi(scalar_version_it->second) >= 3;
-            auto needs_file_context =
-                scalar_v3 ||
-                (!IsVectorDataType(load_index_info.field_type) &&
-                 index_type_it != load_index_info.index_params.end() &&
-                 index_type_it->second == milvus::index::HYBRID_INDEX_TYPE);
+            // Scalar loaders inspect persisted envelopes. Defer their byte
+            // estimates until a file context is available.
+            const bool needs_file_context =
+                !IsVectorDataType(load_index_info.field_type);
             auto request =
                 milvus::index::IndexFactory::GetInstance().IndexLoadResource(
                     load_index_info.field_type,

@@ -130,6 +130,14 @@ class FMIndex : public ScalarIndex<std::string> {
     LoadEntries(storage::IndexEntryReader& reader,
                 const Config& config) override;
 
+    storage::IndexLoadPlan
+    PlanLoad(const storage::IndexEntryCatalog& catalog,
+             const Config& config) override;
+
+    folly::coro::Task<void>
+    FinalizeLoad(storage::IndexLoadArtifact& artifact,
+                 const Config& config) override;
+
     // ---- query ----
 
     const TargetBitmap

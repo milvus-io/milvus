@@ -19,9 +19,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <filesystem>
 #include <list>
 #include <map>
 #include <optional>
+#include <unordered_set>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -39,8 +41,12 @@
 #include "folly/SharedMutex.h"
 #include "glog/logging.h"
 #include "index/InvertedIndexTantivy.h"
+#include "storage/EntryStreamUtils.h"
+#include "storage/LocalFileIOPool.h"
+#include <unordered_set>
 #include "index/InvertedIndexUtil.h"
 #include "index/Utils.h"
+#include "index/IndexLoadUtils.h"
 #include "knowhere/dataset.h"
 #include "log/Log.h"
 #include "nlohmann/detail/iterators/iter_impl.hpp"
@@ -59,6 +65,17 @@
 #include "tantivy-binding.h"
 
 namespace milvus::index {
+namespace {
+
+struct TantivyLoadContext {
+    std::shared_ptr<IndexDirectoryLoadContext> directory;
+    std::shared_ptr<std::vector<size_t>> null_offsets;
+    bool has_null{false};
+    bool load_in_mmap{true};
+};
+
+}  // namespace
+
 inline TantivyDataType
 get_tantivy_data_type(const proto::schema::FieldSchema& schema) {
     switch (schema.data_type()) {
@@ -239,20 +256,105 @@ InvertedIndexTantivy<T>::Load(milvus::tracer::TraceContext ctx,
             .value_or(milvus::proto::common::LoadPriority::HIGH);
     disk_file_manager_->CacheIndexToDisk(inverted_index_files, load_priority);
     auto prefix = disk_file_manager_->GetLocalIndexObjectPrefix();
+    FinishLegacyLoad(prefix, config);
+    if (!GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true)) {
+        RemoveLegacyFiles();
+    }
+}
+
+template <typename T>
+void
+InvertedIndexTantivy<T>::FinishLegacyLoad(const std::string& prefix,
+                                          const Config& config) {
     path_ = prefix;
-    auto load_in_mmap =
+    const auto load_in_mmap =
         GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
     wrapper_ = std::make_shared<TantivyIndexWrapper>(
         prefix.c_str(), load_in_mmap, milvus::index::SetBitsetSealed);
+    FinalizeSealed(/*release_null_offsets=*/true);
+}
 
-    if (!load_in_mmap) {
-        // the index is loaded in ram, so we can remove files in advance
+template <typename T>
+void
+InvertedIndexTantivy<T>::RemoveLegacyFiles() {
+    if (!this->is_index_file_) {
+        disk_file_manager_->RemoveTextLogFiles();
+    } else if (GetIndexType() == ScalarIndexType::NGRAM) {
+        disk_file_manager_->RemoveNgramIndexFiles();
+    } else {
         disk_file_manager_->RemoveIndexFiles();
     }
+}
 
-    // Count() goes through wrapper_, so sealed finalization must happen after
-    // the reader has been constructed rather than in LoadIndexMetas().
-    FinalizeSealed(/*release_null_offsets=*/true);
+template <typename T>
+void
+InvertedIndexTantivy<T>::LoadIndexMetas(const BinarySet& metadata,
+                                        const Config& config) {
+    null_offset_.clear();
+    if (const auto nulls = metadata.GetByName(INDEX_NULL_OFFSET_FILE_NAME)) {
+        if (nulls->size % sizeof(size_t) != 0) {
+            ThrowInfo(DataFormatBroken,
+                      "Invalid legacy Tantivy null offsets size");
+        }
+        null_offset_.resize(nulls->size / sizeof(size_t));
+        if (nulls->size != 0) {
+            std::memcpy(null_offset_.data(), nulls->data.get(), nulls->size);
+        }
+    }
+}
+
+template <typename T>
+folly::coro::Task<void>
+InvertedIndexTantivy<T>::LoadLegacyAsync(const Config& config,
+                                         folly::CancellationToken token) {
+    token = folly::cancellation_token_merge(
+        token, co_await folly::coro::co_current_cancellation_token);
+    storage::ThrowIfCancelled(token, "Tantivy::LoadLegacy");
+    const auto files = config.at(INDEX_FILES).get<std::vector<std::string>>();
+    auto disk_files = files;
+    RetainTantivyIndexFiles(disk_files);
+    const std::unordered_set<std::string> disk_set(disk_files.begin(),
+                                                   disk_files.end());
+    std::vector<std::string> metadata_files;
+    metadata_files.reserve(files.size() - disk_files.size());
+    for (const auto& file : files) {
+        if (!disk_set.contains(file)) {
+            metadata_files.push_back(file);
+        }
+    }
+    const auto priority = GetValueFromConfig<proto::common::LoadPriority>(
+                              config, milvus::LOAD_PRIORITY)
+                              .value_or(proto::common::LoadPriority::HIGH);
+    {
+        auto metadata = co_await this->file_manager_->LoadIndexBinarySetAsync(
+            metadata_files, priority, token);
+        LoadIndexMetas(metadata, config);
+    }
+    const auto prefix = !this->is_index_file_
+                            ? disk_file_manager_->GetLocalTextIndexPrefix()
+                        : GetIndexType() == ScalarIndexType::NGRAM
+                            ? disk_file_manager_->GetLocalNgramIndexPrefix()
+                            : disk_file_manager_->GetLocalIndexObjectPrefix();
+    std::exception_ptr failure;
+    try {
+        co_await disk_file_manager_->CacheIndexToDiskAsync(
+            disk_files, prefix, priority, token);
+        storage::ThrowIfCancelled(token, "Tantivy::FinalizeLegacy");
+        FinishLegacyLoad(prefix, config);
+        storage::ThrowIfCancelled(token, "Tantivy::FinalizeLegacy");
+        if (!GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true)) {
+            co_await storage::RunLocalFileIOAsync([&] { RemoveLegacyFiles(); },
+                                                  priority);
+        }
+    } catch (...) {
+        failure = std::current_exception();
+    }
+    if (failure) {
+        wrapper_.reset();
+        co_await storage::RunLocalFileIOAsync([&] { RemoveLegacyFiles(); },
+                                              priority);
+        std::rethrow_exception(failure);
+    }
 }
 
 template <typename T>
@@ -1048,6 +1150,83 @@ InvertedIndexTantivy<T>::LoadEntries(storage::IndexEntryReader& reader,
         file_names.size(),
         has_null,
         load_in_mmap);
+}
+
+template <typename T>
+storage::IndexLoadPlan
+InvertedIndexTantivy<T>::PlanLoad(const storage::IndexEntryCatalog& catalog,
+                                  const Config& config) {
+    auto context = std::make_shared<TantivyLoadContext>();
+    context->has_null = ReadRequiredIndexMeta<bool>(catalog, "has_null");
+    context->load_in_mmap =
+        GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
+    storage::IndexLoadPlan plan;
+    plan.finalize_context = context;
+    context->directory = PlanIndexDirectory(
+        catalog, disk_file_manager_, context->load_in_mmap, plan);
+
+    if (!context->has_null) {
+        return plan;
+    }
+    if (!catalog.HasEntry(INDEX_NULL_OFFSET_FILE_NAME)) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "corrupt Tantivy index: null-offset Entry is missing");
+    }
+    auto null_bytes = catalog.At(INDEX_NULL_OFFSET_FILE_NAME).plaintext_size;
+    if (null_bytes % sizeof(size_t) != 0) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "corrupt Tantivy index: null-offset Entry size {} is not "
+                  "a multiple of {}",
+                  null_bytes,
+                  sizeof(size_t));
+    }
+    context->null_offsets =
+        std::make_shared<std::vector<size_t>>(null_bytes / sizeof(size_t));
+    plan.entries.push_back(storage::EntryLoadPlan{
+        INDEX_NULL_OFFSET_FILE_NAME,
+        storage::MemoryEntryTarget{
+            context->null_offsets,
+            reinterpret_cast<uint8_t*>(context->null_offsets->data()),
+            null_bytes}});
+    return plan;
+}
+
+template <typename T>
+folly::coro::Task<void>
+InvertedIndexTantivy<T>::FinalizeLoad(storage::IndexLoadArtifact& artifact,
+                                      const Config& config) {
+    (void)config;
+    auto context =
+        artifact.FinalizeContext<std::shared_ptr<TantivyLoadContext>>();
+    AssertInfo(context != nullptr,
+               "InvertedIndexTantivy FinalizeLoad context is null");
+
+    auto new_wrapper =
+        std::make_shared<TantivyIndexWrapper>(context->directory->path.c_str(),
+                                              context->load_in_mmap,
+                                              milvus::index::SetBitsetSealed);
+    std::vector<size_t> new_null_offsets;
+    if (context->has_null) {
+        AssertInfo(context->null_offsets != nullptr,
+                   "Tantivy null-offset target is null");
+        new_null_offsets = std::move(*context->null_offsets);
+    }
+
+    wrapper_ = std::move(new_wrapper);
+    null_offset_ = std::move(new_null_offsets);
+    path_ = context->directory->path;
+    FinalizeSealed(/*release_null_offsets=*/true);
+
+    LOG_INFO(
+        "FinalizeLoad InvertedIndexTantivy done, file_count: {}, has_null: "
+        "{}, mmap: {}",
+        context->directory->files.size(),
+        context->has_null,
+        context->load_in_mmap);
+    storage::ThrowIfCancelled(
+        co_await folly::coro::co_current_cancellation_token,
+        "ScalarIndex::FinalizeLoad");
+    co_return;
 }
 
 template class InvertedIndexTantivy<bool>;

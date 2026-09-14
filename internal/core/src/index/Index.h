@@ -48,6 +48,15 @@ class IndexBase {
     virtual void
     Load(milvus::tracer::TraceContext ctx, const Config& config = {}) = 0;
 
+    // Context-aware load entry. Legacy implementations retain their existing
+    // behavior; migrated implementations can propagate operation cancellation.
+    virtual void
+    Load(milvus::tracer::TraceContext ctx,
+         const Config& config,
+         milvus::OpContext* op_ctx) {
+        Load(ctx, config);
+    }
+
     virtual void
     BuildWithRawDataForUT(size_t n,
                           const void* values,

@@ -46,6 +46,7 @@ using RTreeIndexWrapper = milvus::index::RTreeIndexWrapper;
 template <typename T>
 class RTreeIndex : public ScalarIndex<T> {
  public:
+    using ScalarIndex<T>::Load;
     using MemFileManager = storage::MemFileManagerImpl;
     using MemFileManagerPtr = std::shared_ptr<MemFileManager>;
     using DiskFileManager = storage::DiskFileManagerImpl;
@@ -64,6 +65,10 @@ class RTreeIndex : public ScalarIndex<T> {
 
     void
     Load(milvus::tracer::TraceContext ctx, const Config& config = {}) override;
+
+    folly::coro::Task<void>
+    LoadLegacyAsync(const Config& config,
+                    folly::CancellationToken token) override;
 
     // Load index from an already assembled BinarySet (not used by RTree yet)
     void
@@ -243,6 +248,19 @@ class RTreeIndex : public ScalarIndex<T> {
     void
     LoadEntries(storage::IndexEntryReader& reader,
                 const Config& config) override;
+
+    storage::IndexLoadPlan
+    PlanLoad(const storage::IndexEntryCatalog& catalog,
+             const Config& config) override;
+
+    folly::coro::Task<void>
+    FinalizeLoad(storage::IndexLoadArtifact& artifact,
+                 const Config& config) override;
+
+ private:
+    // Loads completed local files and publishes the query representation.
+    void
+    FinishLegacyLoad();
 
  protected:
     void

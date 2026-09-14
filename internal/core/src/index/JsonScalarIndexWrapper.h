@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include "index/JsonIndexLoadPlan.h"
 #include <algorithm>
 #include "common/FastMem.h"
 #include <cstring>
@@ -63,6 +64,7 @@ class JsonScalarIndexWrapper : public BaseIndex {
         std::is_base_of_v<InvertedIndexTantivy<T>, BaseIndex>;
 
  public:
+    using BaseIndex::Load;
     template <typename... Args>
     JsonScalarIndexWrapper(const JsonCastType& cast_type,
                            const std::string& nested_path,
@@ -193,6 +195,26 @@ class JsonScalarIndexWrapper : public BaseIndex {
         BuildExistsBitset(this->Count());
     }
 
+    storage::IndexLoadPlan
+    PlanLoad(const storage::IndexEntryCatalog& catalog,
+             const Config& config) override {
+        auto plan = BaseIndex::PlanLoad(catalog, config);
+        AppendJsonNonExistOffsetsPlan(plan, catalog);
+        return plan;
+    }
+
+    folly::coro::Task<void>
+    FinalizeLoad(storage::IndexLoadArtifact& artifact,
+                 const Config& config) override {
+        auto new_non_exist_offsets = TakeJsonNonExistOffsets(artifact);
+
+        co_await BaseIndex::FinalizeLoad(artifact, config);
+        non_exist_offsets_ = std::move(new_non_exist_offsets);
+        BuildExistsBitset(this->Count());
+        LOG_INFO("FinalizeLoad JsonScalarIndexWrapper done, has_non_exist: {}",
+                 !non_exist_offsets_.empty());
+    }
+
     // v2 format: override Load() to defer the eager exists bitmap build
     // until after the base Load finishes. LoadIndexMetas (called from within
     // base Load) runs before the tantivy reader is initialized, so we can
@@ -200,6 +222,14 @@ class JsonScalarIndexWrapper : public BaseIndex {
     void
     Load(milvus::tracer::TraceContext ctx, const Config& config = {}) override {
         BaseIndex::Load(ctx, config);
+        BuildExistsBitset(this->Count());
+    }
+
+    // Restores wrapper state after the base coroutine has finalized its reader.
+    folly::coro::Task<void>
+    LoadLegacyAsync(const Config& config,
+                    folly::CancellationToken token) override {
+        co_await BaseIndex::LoadLegacyAsync(config, token);
         BuildExistsBitset(this->Count());
     }
 
@@ -297,6 +327,29 @@ class JsonScalarIndexWrapper : public BaseIndex {
 
             // Fallback: v2.5.x data — use null_offset_ as non_exist_offsets_
             non_exist_offsets_ = this->null_offset_;
+        }
+    }
+
+    // The legacy fallback must run before Tantivy releases null_offset_.
+    void
+    LoadIndexMetas(const BinarySet& metadata, const Config& config) {
+        if constexpr (kIsInverted) {
+            InvertedIndexTantivy<T>::LoadIndexMetas(metadata, config);
+            if (const auto offsets =
+                    metadata.GetByName(INDEX_NON_EXIST_OFFSET_FILE_NAME)) {
+                if (offsets->size % sizeof(size_t) != 0) {
+                    ThrowInfo(DataFormatBroken,
+                              "Invalid legacy JSON non-exist offsets size");
+                }
+                non_exist_offsets_.resize(offsets->size / sizeof(size_t));
+                if (offsets->size != 0) {
+                    std::memcpy(non_exist_offsets_.data(),
+                                offsets->data.get(),
+                                offsets->size);
+                }
+            } else {
+                non_exist_offsets_ = this->null_offset_;
+            }
         }
     }
 

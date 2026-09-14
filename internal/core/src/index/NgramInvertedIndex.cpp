@@ -239,6 +239,47 @@ NgramInvertedIndex::LoadEntries(storage::IndexEntryReader& reader,
              avg_row_size_);
 }
 
+storage::IndexLoadPlan
+NgramInvertedIndex::PlanLoad(const storage::IndexEntryCatalog& catalog,
+                             const Config& config) {
+    auto plan = InvertedIndexTantivy<std::string>::PlanLoad(catalog, config);
+    auto avg_row_size_bytes =
+        catalog.At(NGRAM_AVG_ROW_SIZE_FILE_NAME).plaintext_size;
+    AssertInfo(avg_row_size_bytes == sizeof(size_t),
+               "invalid ngram avg_row_size Entry size: expected {}, got {}",
+               sizeof(size_t),
+               avg_row_size_bytes);
+    auto avg_row_size = std::make_shared<size_t>(0);
+    plan.entries.push_back(storage::EntryLoadPlan{
+        NGRAM_AVG_ROW_SIZE_FILE_NAME,
+        storage::MemoryEntryTarget{
+            avg_row_size,
+            reinterpret_cast<uint8_t*>(avg_row_size.get()),
+            sizeof(size_t)}});
+    return plan;
+}
+
+folly::coro::Task<void>
+NgramInvertedIndex::FinalizeLoad(storage::IndexLoadArtifact& artifact,
+                                 const Config& config) {
+    const auto& avg_row_entry = artifact.At(NGRAM_AVG_ROW_SIZE_FILE_NAME);
+    const auto& avg_row_target =
+        std::get<storage::MemoryEntryTarget>(avg_row_entry.target);
+    AssertInfo(avg_row_target.bytes == sizeof(size_t),
+               "invalid materialized ngram avg_row_size size: expected {}, "
+               "got {}",
+               sizeof(size_t),
+               avg_row_target.bytes);
+    size_t new_avg_row_size = 0;
+    milvus::fastmem::FastMemcpy(
+        &new_avg_row_size, avg_row_target.data, sizeof(size_t));
+
+    co_await InvertedIndexTantivy<std::string>::FinalizeLoad(artifact, config);
+    avg_row_size_ = new_avg_row_size;
+    LOG_INFO("FinalizeLoad NgramInvertedIndex done, avg_row_size: {} bytes",
+             avg_row_size_);
+}
+
 void
 NgramInvertedIndex::LoadIndexMetas(const std::vector<std::string>& index_files,
                                    const Config& config) {
@@ -268,6 +309,20 @@ NgramInvertedIndex::LoadIndexMetas(const std::vector<std::string>& index_files,
         avg_row_size_ = kDefaultAvgRowSize;
         LOG_INFO("No avg_row_size metadata found, using default: {}",
                  kDefaultAvgRowSize);
+    }
+}
+
+void
+NgramInvertedIndex::LoadIndexMetas(const BinarySet& metadata,
+                                   const Config& config) {
+    InvertedIndexTantivy<std::string>::LoadIndexMetas(metadata, config);
+    avg_row_size_ = kDefaultAvgRowSize;
+    if (const auto average = metadata.GetByName(NGRAM_AVG_ROW_SIZE_FILE_NAME)) {
+        if (average->size != sizeof(avg_row_size_)) {
+            ThrowInfo(DataFormatBroken,
+                      "Invalid legacy Ngram average row size");
+        }
+        std::memcpy(&avg_row_size_, average->data.get(), sizeof(avg_row_size_));
     }
 }
 
@@ -308,18 +363,10 @@ NgramInvertedIndex::Load(milvus::tracer::TraceContext ctx,
     AssertInfo(
         tantivy_index_exist(path_.c_str()), "index not exist: {}", path_);
 
-    auto load_in_mmap =
-        GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
-    wrapper_ = std::make_shared<TantivyIndexWrapper>(
-        path_.c_str(), load_in_mmap, milvus::index::SetBitsetSealed);
-
-    if (!load_in_mmap) {
-        // the index is loaded in ram, so we can remove files in advance
-        disk_file_manager_->RemoveNgramIndexFiles();
+    FinishLegacyLoad(path_, config);
+    if (!GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true)) {
+        RemoveLegacyFiles();
     }
-
-    // This custom Load() does not go through InvertedIndexTantivy::Load().
-    FinalizeSealed(/*release_null_offsets=*/true);
 
     LOG_INFO(
         "load ngram index done for field id:{} with dir:{}", field_id_, path_);

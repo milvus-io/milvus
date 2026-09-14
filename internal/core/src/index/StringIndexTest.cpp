@@ -25,6 +25,7 @@
 #include "bitset/bitset.h"
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
+#include "folly/coro/BlockingWait.h"
 #include "gtest/gtest.h"
 #include "index/Index.h"
 #include "index/IndexFactory.h"
@@ -37,10 +38,13 @@
 #include "pb/common.pb.h"
 #include "pb/schema.pb.h"
 #include "storage/ChunkManager.h"
+#include "storage/FileManager.h"
+#include "storage/IndexMaterializer.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "test_utils/AssertUtils.h"
+#include "test_utils/AsyncLoadTestUtils.h"
 #include "test_utils/Constants.h"
 #include "test_utils/indexbuilder_test_utils.h"
 
@@ -84,6 +88,116 @@ class StringIndexBaseTest : public ::testing::Test {
 };
 
 class StringIndexMarisaTest : public StringIndexBaseTest {};
+
+namespace {
+
+class ExposedStringIndexMarisa : public StringIndexMarisa {
+ public:
+    using StringIndexMarisa::StringIndexMarisa;
+
+    void
+    LoadDirectForTest(storage::AsyncIndexEntryReader& reader,
+                      const Config& config,
+                      proto::common::LoadPriority priority) {
+        auto plan = PlanLoad(reader.Catalog(), config);
+        plan.priority = priority;
+        auto artifact = folly::coro::blockingWait(
+            storage::MaterializeIndexAsync(reader, std::move(plan)));
+        folly::coro::blockingWait(FinalizeLoad(artifact, config));
+        artifact.CommitTargets();
+    }
+};
+
+struct MarisaAsyncLoadFixture {
+    explicit MarisaAsyncLoadFixture(std::string test_name)
+        : root_path(TestLocalPath + "/" + std::move(test_name)) {
+        std::filesystem::remove_all(root_path);
+        ctx = CreateStringTestFileManagerContext(root_path);
+    }
+
+    ~MarisaAsyncLoadFixture() {
+        std::filesystem::remove_all(root_path);
+    }
+
+    std::string root_path;
+    storage::FileManagerContext ctx;
+};
+
+}  // namespace
+
+TEST(StringIndexMarisaV3AsyncLoadTest, MemoryPathUsesNativeDirectEntryReads) {
+    milvus::test::ScopedLoadTransientBudget budget_guard(0);
+    MarisaAsyncLoadFixture fixture("marisa_async_memory");
+    std::vector<std::string> data{"delta", "alpha", "charlie", "bravo"};
+
+    ExposedStringIndexMarisa build_index(fixture.ctx);
+    build_index.Build(data.size(), data.data());
+    auto stats = build_index.UploadUnified({});
+
+    milvus::test::ControlledDirectReadFile* remote_file = nullptr;
+    auto reader = milvus::test::OpenDirectIndexEntryReader(
+        milvus::test::ReadPackedIndexBytes(fixture.ctx, stats->GetIndexFiles()),
+        &remote_file);
+    auto read_at_calls_after_open = remote_file->ReadAtCalls();
+
+    ExposedStringIndexMarisa load_index(fixture.ctx);
+    Config config;
+    config[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
+    load_index.LoadDirectForTest(
+        *reader, config, milvus::proto::common::LoadPriority::HIGH);
+
+    EXPECT_GE(remote_file->DirectReadCalls().size(), 4);
+    EXPECT_EQ(remote_file->AsyncReadCalls(), 0);
+    EXPECT_EQ(remote_file->ReadAtCalls(), read_at_calls_after_open);
+    ASSERT_EQ(load_index.Count(), data.size());
+    std::vector<std::string> values{"alpha", "delta"};
+    auto bitset = load_index.In(values.size(), values.data());
+    EXPECT_TRUE(bitset[0]);
+    EXPECT_TRUE(bitset[1]);
+    EXPECT_FALSE(bitset[2]);
+    EXPECT_FALSE(bitset[3]);
+    auto prefix = load_index.PrefixMatch("br");
+    EXPECT_FALSE(prefix[0]);
+    EXPECT_FALSE(prefix[1]);
+    EXPECT_FALSE(prefix[2]);
+    EXPECT_TRUE(prefix[3]);
+    EXPECT_EQ(load_index.Reverse_Lookup(2), data[2]);
+}
+
+TEST(StringIndexMarisaV3AsyncLoadTest, MmapPathUsesNativeDirectEntryReads) {
+    milvus::test::ScopedLoadTransientBudget budget_guard(0);
+    MarisaAsyncLoadFixture fixture("marisa_async_mmap");
+    std::vector<std::string> data{"zero", "one", "two", "three", "four"};
+
+    ExposedStringIndexMarisa build_index(fixture.ctx);
+    build_index.Build(data.size(), data.data());
+    auto stats = build_index.UploadUnified({});
+
+    milvus::test::ControlledDirectReadFile* remote_file = nullptr;
+    auto reader = milvus::test::OpenDirectIndexEntryReader(
+        milvus::test::ReadPackedIndexBytes(fixture.ctx, stats->GetIndexFiles()),
+        &remote_file);
+    auto read_at_calls_after_open = remote_file->ReadAtCalls();
+
+    ExposedStringIndexMarisa load_index(fixture.ctx);
+    Config config;
+    config[milvus::index::MMAP_FILE_PATH] = fixture.root_path + "/mmap/marisa";
+    config[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
+    load_index.LoadDirectForTest(
+        *reader, config, milvus::proto::common::LoadPriority::HIGH);
+
+    EXPECT_GE(remote_file->DirectReadCalls().size(), 4);
+    EXPECT_EQ(remote_file->AsyncReadCalls(), 0);
+    EXPECT_EQ(remote_file->ReadAtCalls(), read_at_calls_after_open);
+    ASSERT_EQ(load_index.Count(), data.size());
+    auto bitset = load_index.PrefixMatch("t");
+    EXPECT_FALSE(bitset[0]);
+    EXPECT_FALSE(bitset[1]);
+    EXPECT_TRUE(bitset[2]);
+    EXPECT_TRUE(bitset[3]);
+    EXPECT_FALSE(bitset[4]);
+    EXPECT_EQ(load_index.Reverse_Lookup(4), data[4]);
+}
 
 TEST_F(StringIndexMarisaTest, Constructor) {
     auto index = milvus::index::CreateStringIndexMarisa();

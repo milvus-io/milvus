@@ -42,6 +42,7 @@ class StringIndexSortImpl;
 // Main StringIndexSort class using pImpl pattern
 class StringIndexSort : public StringIndex {
  public:
+    using ScalarIndex<std::string>::Load;
     static constexpr uint32_t SERIALIZATION_VERSION = 1;
     static constexpr uint64_t MAGIC_CODE =
         0x5354524E47534F52;  // "STRNGSOR" in hex
@@ -155,10 +156,32 @@ class StringIndexSort : public StringIndex {
     LoadEntries(storage::IndexEntryReader& reader,
                 const Config& config) override;
 
+    storage::IndexLoadPlan
+    PlanLoad(const storage::IndexEntryCatalog& catalog,
+             const Config& config) override;
+
+    folly::coro::Task<void>
+    FinalizeLoad(storage::IndexLoadArtifact& artifact,
+                 const Config& config) override;
+
  protected:
+    folly::coro::Task<void>
+    FinishLegacyLoadAsync(BinarySet binary,
+                          const Config& config,
+                          folly::CancellationToken token) override;
+
+ public:
     int64_t
     CalculateTotalSize() const;
 
+ private:
+    // Restore metadata before opening the prepared legacy representation.
+    void
+    LoadLegacyMetadata(const BinarySet& binary, const Config& config);
+    void
+    FinishLegacyLoad();
+
+ public:
     // Common fields
     int64_t field_id_ = 0;
     bool is_built_ = false;
@@ -514,6 +537,13 @@ class StringIndexSortMmapImpl : public StringIndexSortImpl {
     ByteSize() const override;
 
  private:
+    friend class StringIndexSort;
+    // Write and close the padded legacy file without mapping or parsing it.
+    void
+    WriteMmapIndexData(const uint8_t* data,
+                       size_t data_size,
+                       storage::io::Priority priority);
+
     // Binary search for a value
     size_t
     FindValueIndex(const std::string& value) const;
