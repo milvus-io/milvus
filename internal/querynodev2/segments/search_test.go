@@ -24,6 +24,7 @@ import (
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
@@ -341,21 +342,23 @@ func (suite *SearchSuite) TestSearchSegmentsReleasesCompletedResultsBeforeGateRe
 		segment.EXPECT().ExistIndex(mock.Anything).Return(true).Twice()
 	}
 
-	firstSegment.EXPECT().Search(mock.Anything, searchReq).
-		RunAndReturn(func(context.Context, *SearchRequest) (*SearchResult, error) {
+	// A single request travels as a one-branch group.
+	singleBranch := []*SearchRequest{searchReq}
+	firstSegment.EXPECT().SearchGrouped(mock.Anything, singleBranch, mock.Anything).
+		RunAndReturn(func(context.Context, []*SearchRequest, *semaphore.Weighted) ([]*SearchResult, error) {
 			if firstSearchCalls.Add(1) == 1 {
 				close(firstResultReady)
 			}
-			return new(SearchResult), nil
+			return []*SearchResult{new(SearchResult)}, nil
 		}).Twice()
-	secondSegment.EXPECT().Search(mock.Anything, searchReq).
-		RunAndReturn(func(context.Context, *SearchRequest) (*SearchResult, error) {
+	secondSegment.EXPECT().SearchGrouped(mock.Anything, singleBranch, mock.Anything).
+		RunAndReturn(func(context.Context, []*SearchRequest, *semaphore.Weighted) ([]*SearchResult, error) {
 			if secondSearchCalls.Add(1) == 1 {
 				<-firstResultReady
 				return nil, merr.SegcoreError(
 					2037, "segment read gate busy for segment 2")
 			}
-			return new(SearchResult), nil
+			return []*SearchResult{new(SearchResult)}, nil
 		}).Twice()
 
 	cleanupCalled := false
@@ -399,7 +402,7 @@ func (suite *SearchSuite) TestSearchSegmentsGateRetryObeysContext() {
 	segment.EXPECT().DatabaseName().Return("default").Maybe()
 	segment.EXPECT().ResourceGroup().Return("rg").Maybe()
 	segment.EXPECT().ExistIndex(mock.Anything).Return(true).Once()
-	segment.EXPECT().Search(mock.Anything, searchReq).
+	segment.EXPECT().SearchGrouped(mock.Anything, []*SearchRequest{searchReq}, mock.Anything).
 		Return(nil, merr.SegcoreError(
 			2037, "segment read gate busy for segment 1")).Once()
 

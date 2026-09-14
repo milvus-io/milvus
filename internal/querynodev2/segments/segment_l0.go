@@ -21,6 +21,7 @@ import (
 	"sync"
 
 	"github.com/samber/lo"
+	"golang.org/x/sync/semaphore"
 
 	storage "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/segcore"
@@ -148,6 +149,10 @@ func (s *L0Segment) Level() datapb.SegmentLevel {
 
 func (s *L0Segment) Search(ctx context.Context, searchReq *segcore.SearchRequest) (*segcore.SearchResult, error) {
 	return nil, nil
+}
+
+func (s *L0Segment) SearchGrouped(ctx context.Context, searchReqs []*segcore.SearchRequest, limiter *semaphore.Weighted) ([]*segcore.SearchResult, error) {
+	return make([]*segcore.SearchResult, len(searchReqs)), nil
 }
 
 func (s *L0Segment) Retrieve(ctx context.Context, plan *segcore.RetrievePlan) (*segcorepb.RetrieveResults, error) {

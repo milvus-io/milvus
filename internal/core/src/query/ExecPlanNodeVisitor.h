@@ -34,6 +34,7 @@
 #include "exec/expression/Utils.h"
 #include "plan/PlanNode.h"
 #include "query/PlanImpl.h"
+#include "query/SharedFilterBitsetResult.h"
 #include "query/PlanNode.h"
 #include "segcore/SegmentInterface.h"
 
@@ -160,6 +161,33 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
         return *this;
     }
 
+    // ---- shared-filter hybrid search ----
+
+    // Phase 1: evaluate only the filter subtree and hand back its bitset plus
+    // the query state it produced. Mutually exclusive with SetFilterOnly and
+    // with SetPrecomputedBitset.
+    SharedFilterBitsetResultPtr
+    get_shared_filter_bitset_result(PlanNode& node) {
+        AssertInfo(!filter_only_ && precomputed_bitset_result_ == nullptr,
+                   "shared filter bitset computation cannot be combined with "
+                   "filter-only or precomputed-bitset mode");
+        compute_filter_bitset_only_ = true;
+        node.accept(*this);
+        compute_filter_bitset_only_ = false;
+        AssertInfo(shared_filter_bitset_result_ != nullptr,
+                   "shared filter bitset execution produced no result");
+        return std::move(shared_filter_bitset_result_);
+    }
+
+    // Phase 2: execute one branch against a bitset computed earlier. The
+    // caller owns `result` and must keep it alive for the whole call; it is
+    // read-only here, so concurrent branches may share one.
+    ExecPlanNodeVisitor&
+    SetPrecomputedBitset(const SharedFilterBitsetResult* result) {
+        precomputed_bitset_result_ = result;
+        return *this;
+    }
+
     bool
     GetEnableExprCache() {
         return enable_expr_cache_;
@@ -192,6 +220,9 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
 
     bool expr_use_pk_index_ = false;
     bool filter_only_ = false;
+    bool compute_filter_bitset_only_ = false;
+    SharedFilterBitsetResultPtr shared_filter_bitset_result_{nullptr};
+    const SharedFilterBitsetResult* precomputed_bitset_result_{nullptr};
     bool enable_expr_cache_ = false;
     milvus::tracer::SpanPtr trace_span_ = nullptr;
 };
