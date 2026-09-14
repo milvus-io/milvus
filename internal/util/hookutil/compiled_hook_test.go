@@ -262,3 +262,38 @@ func TestInitHookWithoutAnExtensionKeepsTheDefault(t *testing.T) {
 	_, isDefault := GetExtension().(DefaultExtension)
 	assert.True(t, isDefault)
 }
+
+// common.panicWhenPluginFail lets a deployment carry on without a plug-in that
+// failed to load; it does not reach a compiled-in hook. A proxy serving through
+// the default hook beside coordinators that run the distribution's behaviors
+// would be half of that distribution, so a compiled-in hook that cannot
+// initialize, or is configured beside a plug-in, stops the proxy whatever the
+// setting says. A plug-in's failure keeps the setting's meaning
+// (TestHookInitLogError).
+func TestInitOnceHookIsFatalForACompiledInHookWhateverPanicWhenPluginFailSays(t *testing.T) {
+	paramtable.Init()
+	p := paramtable.Get()
+	require.NoError(t, p.Save(p.CommonCfg.PanicWhenPluginFail.Key, "false"))
+	t.Cleanup(func() { p.Reset(p.CommonCfg.PanicWhenPluginFail.Key) })
+	// Each case leaves initOnce done, as the plug-in cases in hook_test.go do:
+	// a Do whose function panics counts as done. Resetting it here instead
+	// would make the next GetHook anywhere in the package - a config watcher's
+	// goroutine included - initialize the hook again behind another test.
+
+	t.Run("it cannot initialize", func(t *testing.T) {
+		installHook(t, &initRecordingHook{initErr: errors.New("the internal port is taken")})
+		assert.Panics(t, func() {
+			initOnce = sync.Once{}
+			InitOnceHook()
+		})
+	})
+	t.Run("it is configured beside a plug-in", func(t *testing.T) {
+		installHook(t, MockAPIHook{User: "root"})
+		require.NoError(t, p.Save(p.ProxyCfg.SoPath.Key, "/tmp/some-hook.so"))
+		t.Cleanup(func() { p.Reset(p.ProxyCfg.SoPath.Key) })
+		assert.Panics(t, func() {
+			initOnce = sync.Once{}
+			InitOnceHook()
+		})
+	})
+}
