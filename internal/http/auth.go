@@ -219,7 +219,7 @@ func checkCrossSite(req *http.Request, route string, allowTopLevelNavigation, ch
 // CheckAdminRequest is the whole root gate for one request: cross-site refusal,
 // then root authentication. Every surface carrying the gate goes through here,
 // so the net/http handlers and the proxy's gin routes cannot drift apart.
-// allowTopLevelNavigation is for document surfaces only; see Handler.AuthChallenge.
+// allowTopLevelNavigation is for document surfaces only; see Handler.BrowserDocument.
 func CheckAdminRequest(req *http.Request, route string, allowTopLevelNavigation bool) AuthDecision {
 	return checkAdminRequest(req, route, allowTopLevelNavigation, allowTopLevelNavigation)
 }
@@ -274,7 +274,7 @@ func GinAdminAuthMiddleware(challenge bool) gin.HandlerFunc {
 }
 
 // wrapAdminAuth wraps next with the gate. route is the registered pattern;
-// document is Handler.AuthChallenge, which for a page a human opens means both
+// document is Handler.BrowserDocument, which for a page a human opens means both
 // "send the challenge" and "a link to it is not an action".
 func wrapAdminAuth(next http.Handler, route string, document bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {

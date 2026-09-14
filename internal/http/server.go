@@ -71,12 +71,12 @@ type Handler struct {
 	// see mustBeGated.
 	AdminAuth bool
 
-	// AuthChallenge marks a browser document surface: a page a human opens. A
+	// BrowserDocument marks a page a human opens. A
 	// 401 then carries WWW-Authenticate so the browser can collect credentials,
 	// and a top-level cross-site navigation is let through, because showing a
 	// page is not an action. Leave it off on JSON APIs and on anything with
 	// side effects, which it would open to cross-site link clicks.
-	AuthChallenge bool
+	BrowserDocument bool
 }
 
 // openOperatorPaths are the only operator-surface paths allowed to stay
@@ -195,27 +195,27 @@ func registerPprof() {
 	// /block, /mutex via path inspection — so we only need to register the
 	// prefix entry plus the four endpoints that have dedicated handlers.
 	Register(&Handler{
-		Path:        "/debug/pprof/",
+		Path:        "GET /debug/pprof/",
 		HandlerFunc: netpprof.Index,
 		AdminAuth:   true,
 	})
 	Register(&Handler{
-		Path:        "/debug/pprof/cmdline",
+		Path:        "GET /debug/pprof/cmdline",
 		HandlerFunc: netpprof.Cmdline,
 		AdminAuth:   true,
 	})
 	Register(&Handler{
-		Path:        "/debug/pprof/profile",
+		Path:        "GET /debug/pprof/profile",
 		HandlerFunc: netpprof.Profile,
 		AdminAuth:   true,
 	})
 	Register(&Handler{
-		Path:        "/debug/pprof/symbol",
+		Path:        "GET /debug/pprof/symbol",
 		HandlerFunc: netpprof.Symbol,
 		AdminAuth:   true,
 	})
 	Register(&Handler{
-		Path:        "/debug/pprof/trace",
+		Path:        "GET /debug/pprof/trace",
 		HandlerFunc: netpprof.Trace,
 		AdminAuth:   true,
 	})
@@ -274,7 +274,7 @@ func RegisterCheckComponentReady(checkActive func(role string) error) {
 // RegisterWebUIHandler serves the web console's static assets.
 //
 // The bundle carries no cluster data of its own; it is gated with
-// AuthChallenge because it is the only place a browser can be told to ask for
+// BrowserDocument because it is the only place a browser can be told to ask for
 // a password. Both halves of the console need it: browsers scope cached
 // credentials by protection space, so gating only the console shell would leave
 // its XHRs against /api/v1/_* taking silent 401s.
@@ -283,19 +283,19 @@ func RegisterWebUIHandler() {
 	fileServer := http.FileServer(httpFS)
 	serveIndex := serveFile(RouteWebUI+"index.html", httpFS)
 	Register(&Handler{
-		Path:          RouteWebUI,
-		Handler:       handleNotFound(fileServer, serveIndex),
-		AdminAuth:     true,
-		AuthChallenge: true,
+		Path:            RouteWebUI,
+		Handler:         handleNotFound(fileServer, serveIndex),
+		AdminAuth:       true,
+		BrowserDocument: true,
 	})
 
 	// Telemetry UI handler
 	serveTelemetry := serveFile("webui/telemetry.html", httpFS)
 	Register(&Handler{
-		Path:          TelemetryUIPath,
-		Handler:       serveTelemetry,
-		AdminAuth:     true,
-		AuthChallenge: true,
+		Path:            TelemetryUIPath,
+		Handler:         serveTelemetry,
+		AdminAuth:       true,
+		BrowserDocument: true,
 	})
 }
 
@@ -385,7 +385,7 @@ func Register(h *Handler) {
 				"Kubernetes probes)", h.Path))
 	}
 	if h.AdminAuth {
-		handler = wrapAdminAuth(handler, h.Path, h.AuthChallenge)
+		handler = wrapAdminAuth(handler, h.Path, h.BrowserDocument)
 	}
 	metricsServer.Handle(h.Path, handler)
 }
@@ -393,29 +393,53 @@ func Register(h *Handler) {
 // managementHTTPHandler preserves the old DefaultServeMux behavior only in
 // the configuration where Milvus used it before this gate existed: pprof is
 // enabled and adminAuthEnabled is off. In that mode a third-party or expvar
-// route registered on the default mux must still outrank the proxy's catch-all
-// "/" handler. Once the gate is on, only Milvus-owned routes on metricsServer
+// route registered on the default mux must retain ServeMux precedence, including
+// beneath private subtree patterns. Once the gate is on, only Milvus-owned routes
 // are reachable, so an init-time http.Handle cannot bypass authentication.
 func managementHTTPHandler(legacyDefaultMux bool) http.Handler {
+	privateMux := metricsServer
 	if !legacyDefaultMux {
-		return metricsServer
+		return privateMux
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		privateHandler, privatePattern := metricsServer.Handler(req)
-		if !AdminAuthEnabled() {
-			legacyHandler, legacyPattern := http.DefaultServeMux.Handler(req)
-			// Before this change, both sets of routes shared DefaultServeMux, so
-			// a specific legacy pattern won over the proxy's catch-all "/". A
-			// Milvus-owned specific pattern still wins and keeps one source of
-			// truth for its behavior.
-			if legacyPattern != "" && legacyPattern != RootPath &&
-				(privatePattern == "" || privatePattern == RootPath) {
-				legacyHandler.ServeHTTP(w, req)
-				return
-			}
+		if AdminAuthEnabled() {
+			privateMux.ServeHTTP(w, req)
+			return
 		}
-		privateHandler.ServeHTTP(w, req)
+		legacyMux := http.DefaultServeMux
+		_, privatePattern := privateMux.Handler(req)
+		_, legacyPattern := legacyMux.Handler(req)
+		switch {
+		case legacyPattern == "" || legacyPattern == privatePattern:
+			privateMux.ServeHTTP(w, req)
+		case privatePattern == "" || privatePattern == RootPath:
+			legacyMux.ServeHTTP(w, req)
+		case legacyPattern == RootPath:
+			privateMux.ServeHTTP(w, req)
+		default:
+			// Only overlapping extension routes need a selector. Built-in pprof
+			// patterns are identical on both muxes and take the first branch.
+			// Let ServeMux compare hosts, methods, wildcards and redirects; then
+			// delegate through the chosen mux's ServeHTTP to populate PathValue.
+			managementRouteSelector(privateMux, legacyMux, privatePattern, legacyPattern).ServeHTTP(w, req)
+		}
 	})
+}
+
+func managementRouteSelector(privateMux, legacyMux *http.ServeMux, privatePattern, legacyPattern string) (selected *http.ServeMux) {
+	selected = privateMux
+	defer func() {
+		if recover() != nil {
+			// Separate muxes can contain ambiguous patterns that the old shared
+			// mux would have rejected at registration. Keep the private route
+			// authoritative instead of panicking or exposing a legacy handler.
+			selected = privateMux
+		}
+	}()
+	selector := http.NewServeMux()
+	selector.Handle(privatePattern, privateMux)
+	selector.Handle(legacyPattern, legacyMux)
+	return selector
 }
 
 func ServeHTTP() {

@@ -55,7 +55,17 @@ Main-port HTTP handlers are registered separately.
 
 Milvus routes use a private ServeMux. With authentication disabled and pprof
 enabled, more-specific legacy routes on `http.DefaultServeMux` remain reachable
-for compatibility. The fallback disappears while authentication is enabled.
+for compatibility, including extensions beneath private subtree routes. ServeMux
+decides method, host and wildcard precedence, and the selected mux handles the
+request so named path values remain available. Equal or ambiguous registrations
+across the two muxes prefer the private route. The fallback disappears while
+authentication is enabled. Explicit pprof registrations retain the standard
+library's GET/HEAD-only methods.
+
+`Handler.BrowserDocument` identifies a page that may issue a Basic challenge and
+accept a top-level cross-site GET navigation. JSON APIs and action handlers must
+not use this page policy; requesting a challenge alone does not imply permission
+to navigate across sites.
 
 ## Design Details
 
@@ -227,7 +237,11 @@ cancellation, password rotation, role priority, event-log listener switching,
 and configuration aliases. Regression cases cover the first real config-source
 override before typed-cache eviction, Proxy root/non-root notifications, revoked
 stale fallback, a post-notification caller joining an obsolete lookup, and
-invalidation during password comparison. These tests do not replace a real coordinator
+invalidation during password comparison. Router regressions compare legacy
+dispatch against a shared ServeMux, including nested extensions, method/host
+precedence, escaped path values, redirects, and private-route precedence for
+conflicts. They also verify GET/HEAD-only pprof registration and removal of the
+legacy fallback when the gate is enabled. These tests do not replace a real coordinator
 failover or browser console acceptance test. Native-linked packages require
 Milvus C++ dependencies and must also compile and run in CI.
 
