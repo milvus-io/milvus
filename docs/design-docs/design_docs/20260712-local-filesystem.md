@@ -32,14 +32,17 @@ auto local_file_system = local::FileSystem::Create(node_cache_root_path);
 auto root_dir = local_file_system.GetRootDirectory();
 auto local_chunk_dir = root_dir->ChildDirectory("local_chunk");
 auto segments_dir = local_chunk_dir->ChildDirectory("segments");
-auto segment_dir = segments_dir->ChildDirectory("100");
+auto segment_dir = segments_dir->ChildDirectory("100_7");  // Segment 100, load 7.
 
 auto output_file = local::FileSystem::Open(
     segment_dir, "index.bin", {.mode = local::OpenMode::ReadWrite, .create = true});
 // output_file and any receiving I/O wrapper retain segment_dir.
 ```
 
-Physical paths and on-disk formats remain unchanged. Persistent
+New loads use distinct physical generations and never depend on old-directory
+cleanup completing. Composition retains shared namespace directories while
+load admission is open. Existing generation naming is reused; fixed paths for
+reloadable instances must migrate. On-disk formats remain unchanged. Persistent
 `storageType=local` stays under `milvus::storage`; cache admission and eviction
 decisions stay with the existing cache and business owners.
 
@@ -347,12 +350,12 @@ rejects empty names, NUL bytes, absolute paths, `.`, `..`, and directory
 separators. Each operation addresses an immediate entry:
 
 ```cpp
-auto segment_dir = segments_dir->ChildDirectory("100");
+auto segment_dir = segments_dir->ChildDirectory("100_7");
 auto index_dir = segment_dir->ChildDirectory("index");
 auto output_file = local::FileSystem::Open(index_dir, "data.bin", options);
 ```
 
-`Open(segments_dir, "100/index/data.bin", options)` is invalid. Keeping only
+`Open(segments_dir, "100_7/index/data.bin", options)` is invalid. Keeping only
 `segments_dir` alive does not retain the independently managed descendants.
 Directory creation goes through `ChildDirectory()` before opening a file.
 
@@ -436,10 +439,10 @@ auto local_file_system = local::FileSystem::Create(node_cache_root_path);
     auto root_dir = local_file_system.GetRootDirectory();
     auto local_chunk_dir = root_dir->ChildDirectory("local_chunk");
     auto segments_dir = local_chunk_dir->ChildDirectory("segments");
-    auto segment_dir = segments_dir->ChildDirectory("100");
+    auto segment_dir = segments_dir->ChildDirectory("100_7");
 
     // Repeated acquisition returns the same live object, preserving files.
-    auto same_segment_dir = segments_dir->ChildDirectory("100");
+    auto same_segment_dir = segments_dir->ChildDirectory("100_7");
     assert(same_segment_dir == segment_dir);
     same_segment_dir.reset();
 
@@ -473,8 +476,8 @@ auto local_file_system = local::FileSystem::Create(node_cache_root_path);
     // future opens by this filename fail. This does not request dir cleanup.
     local::FileSystem::RemoveFile(segment_dir, "index.bin");
     segment_dir.reset();
-    ConsumeIndexBytes(mapped_region.Data());  // Mapping still retains 100.
-    mapped_region.Reset();  // Unmap, release last reference, then clean 100.
+    ConsumeIndexBytes(mapped_region.Data());  // Mapping still retains 100_7.
+    mapped_region.Reset();  // Unmap, release last reference, then clean 100_7.
 }  // Other directory owners release; context still retains its root.
 
 // All application tasks/native users must have finished before this point.
@@ -503,6 +506,8 @@ must also supply the appropriate file/directory synchronization protocol.
 
 Each business level stores its own directory. Consumers acquire the business
 object through its synchronized registry before accessing its directory.
+The examples use `100_7` for segment 100's load generation 7; production
+construction supplies the unique name rather than hard-coding a generation.
 
 ```cpp
 class LoadedSegment {
@@ -517,7 +522,7 @@ class LoadedSegment {
 };
 
 auto loaded_segment = std::make_shared<LoadedSegment>(
-    segments_dir->ChildDirectory("100"));
+    segments_dir->ChildDirectory("100_7"));
 
 // Acquired while the business instance is still published.
 auto segment_dir = loaded_segment->GetDirectory();
@@ -536,16 +541,12 @@ handle if I/O continues after the call. Cancellation releases the reference
 only after the underlying work stops. The executor must retain captures until
 execution completes or the queued operation is safely discarded.
 
-A same-path reload must not call `ChildDirectory("100")` while old users still
-hold that node: the call would legitimately return the old directory. The
-business unload marker can store a `std::weak_ptr<local::Directory>` captured
-before releasing its strong owner. After that weak reference expires, a
-serialized reload attempt may call `ChildDirectory("100")`: busy means old
-cleanup is incomplete; success creates/adopts the next instance after the old
-registration has been removed. Failed cleanup requires supervisor recovery.
-The marker never retains the old directory, and reload follows the business
-scheduler's retry path rather than busy-waiting. All users must follow that
-business admission path (section 4.4).
+A reload of segment 100 creates `100_8` while the old task can still use
+`100_7`. Node composition retains `segments_dir` throughout load admission,
+including intervals with no loaded segments. Neither releasing the old task
+nor completing its directory cleanup is a prerequisite for the new load.
+There is no weak unload marker or cleanup polling on the reload path.
+All users obtain the directory of their admitted business instance (section 4.4).
 
 ### 3.6 Examples: native libraries and individual temporary files
 
@@ -735,27 +736,32 @@ or result tracking, if needed, remains with existing business mechanisms.
 A closed scope stays closed; reload creates a new business scope under the
 generation and admission rules below.
 
-Reload is a separate lifecycle event. Removing a segment from the business
-registry does not prove that old files, mappings, or tasks have finished. If
-they still retain the directory, `ChildDirectory("100")` returns that same live
-node; it does not create a fresh segment generation or report that the old one is
-unloading. The business layer must not treat this successful lookup as
-permission to rebuild into the old instance's files.
+New-load admission must not depend on old references being released or old
+cleanup succeeding. Construction assigns a fresh physical generation to each
+independently reloadable directory scope and injects its `DirectoryPtr` into
+consumers. Reuse `DiskFileManagerImpl::file_path_generation_` and
+`AppendLocalPathGeneration()` for its existing scopes. Reload creates a new
+scope with a new name; it never reopens a closed scope or reuses its physical
+name during the root context's lifetime. Consumers do not each invent names
+or check disk paths for availability.
 
-For reuse of the same physical path, the business lifecycle must retain an
-unloading marker and delay the next load until old users have released their
-references and old-directory cleanup has succeeded. The weak unload marker
-and subsequent `ChildDirectory()` attempt in section 3.5 observe this without
-retaining the old directory itself. Failed cleanup keeps reload blocked. Concurrent
-acquisition either obtains the published old instance before unload begins or
-follows the next-load admission path; it must not bypass admission with a
-direct `ChildDirectory()`.
+Shared namespace directories above those scopes, such as `index_files/`,
+must remain owned by node composition throughout load admission, even when
+they have no business children. Retain the namespace's actual `DirectoryPtr`;
+retaining only the root does not keep a weakly indexed descendant alive.
+Dynamic business directories use generations at independently reloadable
+subtree boundaries, so shared ancestors need not acquire per-load suffixes.
+For example, `index_files/<index-id>_7/` and `index_files/<index-id>_8/` can
+coexist under the same retained parent. Their internal file layouts stay fixed.
 
-This is the default migration rule and preserves existing paths. Where a
-consumer already uses distinct physical paths for load instances, preserve
-that generation scheme to permit overlap. An in-memory registration generation
-alone does not isolate two loads using the same disk path. Introducing new
-physical naming schemes is separate migration work, not required by this API.
+`ChildDirectory()` still addresses an exact physical name: an old live name
+returns the old object, and a retiring or failed name is busy. Those results
+are never a new-load admission protocol. A new load takes its fresh name under
+the retained parent and does not wait for, poll, or retry old cleanup. An
+in-memory registration generation alone does not provide this disk isolation.
+Old cleanup failure reserves only the old name and cannot block acquisition
+of a different generation. Existing business synchronization still controls
+publication of old and new owners; all consumers use that admission path.
 
 ## 5. Files, Writers, and Mappings
 
@@ -767,7 +773,7 @@ concurrent mutation of the same `shared_ptr` variable still requires ordinary
 C++ synchronization.
 
 ```cpp
-auto segment_dir = segments_dir->ChildDirectory("100");
+auto segment_dir = segments_dir->ChildDirectory("100_7");
 {
     auto index_file = local::FileSystem::Open(
         segment_dir, "index.bin", {.mode = local::OpenMode::ReadWrite, .create = true});
@@ -896,6 +902,10 @@ reference remains fully usable until its own users finish.
 The cleanup engine executes recursive cleanup synchronously at
 final release, matching existing destructor-driven cleanup sites. This is
 an explicit latency cost, not an assertion that final release is cheap.
+Old-owner final release belongs to the unload or task-completion path, outside
+locks needed by new-load admission. A new load must not perform that old final
+release inline or join its cleanup; distinct paths alone do not prevent such
+a scheduling dependency. This does not require a separate cleanup executor.
 
 The cleanup record is separate from the dying C++ object. It carries the
 path, generation, parent reference, and attempt result. A cleanup engine
@@ -974,7 +984,7 @@ terminal shutdown. There are no unguarded raw supervisor pointers.
 Normal node shutdown:
 
 1. Stop admission and join tasks/native consumers; release files, mappings,
-   business directory references, and the root handle.
+   business directory references, retained shared namespaces, and the root handle.
 2. `Finish()` stops context admission, releases any root reference held solely
    by the composition object, drains already-retired work, and reports
    outstanding live users or cleanup failures. It must not forcibly delete
@@ -1089,7 +1099,10 @@ local ----------------X storage / cachinglayer policy
 The node owns the `FileSystem` context. Construction values carry
 `DirectoryPtr` fields named `local_chunk_dir`, `growing_mmap_dir`, `bm25_dir`,
 `file_resource_dir`, and `expr_cache_dir`; each consumer receives its required
-scope.
+scope. Composition also retains shared namespaces such as `index_files/`
+and `segments/` before publishing load admission and releases them only after
+admission stops. These are shared containers, not a strong cache of per-load
+directories. Their child indexes remain weak.
 The context's child index coordinates directory identity. Cache admission
 and eviction remain with the business and cache owners.
 
@@ -1149,9 +1162,12 @@ is unverified until measured.
 
 ### 11.1 Compatibility
 
-Existing node-local paths, index formats, mmap layouts, and remote keys remain
-unchanged. Normal final release now deletes the owned cache root as well as
-its children; retaining cache contents across complete context teardown is
+Index formats, mmap layouts, and remote keys remain unchanged. Existing local
+generation paths are preserved. Reloadable scopes using a fixed local path
+must adopt distinct generation names during their ownership-domain migration;
+same-path reload gated on cleanup is not supported. Normal final release now
+deletes the owned cache root as well as its children; retaining cache contents
+across complete context teardown is
 not part of this contract. No required user configuration is added. Persistent
 local object storage continues using `milvus::storage`; none of its directories
 become delete-on-last-reference merely because they use local disk.
@@ -1171,15 +1187,18 @@ ownership domain, including ancestors that legacy code could recursively delete.
    generation-safe cleanup records, and supervisor without attaching partially
    migrated production domains to the new ownership model.
 2. Inventory every writer, reader, mapping, native path escape, fd transfer,
-   directory deletion, and directory rename in the target domain.
+   directory deletion, and directory rename in the target domain. Identify
+   independently reloadable scopes and the shared namespaces above them;
+   retain existing physical generation schemes and add them where missing.
 3. Quiesce legacy admission and drain legacy operations. Construct one root
    context, attach existing directories under exclusive ownership, inject the
    shared references, and remove legacy ancestor deletion paths.
 4. Switch the entire domain to the new API only when all users of those paths
    obey the same ownership contract. After ownership transfer,
    every directory follows final-reference deletion.
-   Verify that business owners retain their directories and that same-path
-   unload/reload follows section 4.4 before removing deletion-only guards;
+   Verify that composition retains shared namespaces and each new load receives
+   a distinct physical generation without waiting for old users or cleanup
+   (section 4.4) before removing deletion-only guards;
    preserve business admission through `closed` under the same synchronization.
 5. Migrate QueryNode/segcore and DataNode/index consumers domain by domain.
    Remove singleton access after the last production consumer has migrated.
@@ -1192,8 +1211,8 @@ cleanup must be resolved or fenced by terminal shutdown before reuse.
 
 | Component | Required change |
 | --- | --- |
-| Node construction | Create the filesystem context for the owned cache root and inject directory references |
-| Segment and index owners | Store the directory for the business instance; synchronize acquisition, unload, and reload |
+| Node construction | Create the filesystem context, retain shared namespaces through load admission, and inject directory references |
+| Segment and index owners | Store a distinct physical directory generation for each reloadable scope; synchronize acquisition and publication without waiting for old cleanup |
 | Local readers, writers, and mappings | Retain the owning directory through resource release and asynchronous completion |
 | Disk file managers and directory cleanup callers | Retain per-scope `closed` admission; replace deletion-only writer counts and flags with directory ownership after complete cutover |
 | Expression cache and temporary-file owners | Retain explicit individual file unlink where independently needed |
@@ -1229,12 +1248,16 @@ The implementation must verify the following behavior before production cutover.
 - Work admitted before close retains its directory even if still awaiting enqueue;
   submission failure or actual task completion releases it, and cancellation
   cannot release it before underlying I/O and callbacks stop.
-- Reload while an old file/task still retains the same path cannot rebuild
-  into the old live node returned by `ChildDirectory()`; admission waits for cleanup.
-- Same-path reload waits without holding the old directory alive, remains
-  blocked on failed cleanup, and proceeds after successful completion.
-- Existing distinct physical generation paths permit old/new overlap without
-  cross-deletion; in-memory generation IDs alone are not treated as isolation.
+- Reload uses a fresh physical generation while old files, mappings, or tasks
+  remain live, with no wait for their release and no cross-deletion.
+- Pause old cleanup before deletion, during partial deletion, and after a
+  failure: a new generation can still be acquired and used without polling or
+  retrying that cleanup. New-load admission never performs old final release.
+- After all business children disappear, shared namespaces remain live under
+  composition ownership; a concurrent new load cannot encounter a retiring
+  `index_files/` or another shared ancestor.
+- A request using an old physical name cannot represent a new load; in-memory
+  generation IDs alone are not treated as isolation.
 - Files, mappings, native wrappers, queued tasks, and completion callbacks each
   keep the directory alive through actual resource release.
 - Last release races with weak lookup: no resurrection or same-name creation
@@ -1329,8 +1352,9 @@ and distinguish implemented guarantees from unverified follow-up work.
    through retirement and failed cleanup.
 3. Children retain parents; files, mappings, and tasks retain their actual
    owning directory. Parent-only retention cannot substitute for child ownership.
-   Each business owner stores its directory; acquisition and unload are
-   synchronized, and same-path reload waits for old-generation cleanup.
+   Composition retains shared namespaces while load admission is open. Each
+   reloadable owner receives a distinct physical generation; acquisition and
+   publication are synchronized without depending on old cleanup completion.
 4. Last strong release triggers cleanup for every directory, including the
    root. Recursive deletion is internal to this lifecycle.
 5. File close and unlink remain distinct; early file removal and directory
