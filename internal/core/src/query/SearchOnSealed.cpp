@@ -39,6 +39,38 @@ SearchOnSealedIndex(const Schema& schema,
                     const BitsetView& bitset,
                     milvus::OpContext* op_context,
                     SearchResult& search_result) {
+    const auto* schema_ptr = &schema;
+    const auto* record_ptr = &record;
+    auto register_vector_search_provider = [&] {
+        if (!search_result.allow_filtered_vector_search_ ||
+            !CanUseStrictGroupSearch(search_info, num_queries) ||
+            !search_result.vector_iterators_.has_value()) {
+            return;
+        }
+        search_result.SetVectorSearchProvider(
+            bitset,
+            [schema_ptr,
+             record_ptr,
+             phase1_search_info = search_info,
+             query_data,
+             query_offsets,
+             num_queries,
+             op_context](const BitsetView& combined_filter,
+                         int64_t remaining_topk,
+                         SearchResult& filtered_result) {
+                SearchOnSealedIndex(
+                    *schema_ptr,
+                    *record_ptr,
+                    StrictGroupSearchInfo(phase1_search_info, remaining_topk),
+                    query_data,
+                    query_offsets,
+                    num_queries,
+                    combined_filter,
+                    op_context,
+                    filtered_result);
+            });
+    };
+
     auto topK = search_info.topk_;
     auto round_decimal = search_info.round_decimal_;
 
@@ -139,6 +171,7 @@ SearchOnSealedIndex(const Schema& schema,
         use_iterator ? nullptr : search_info.array_offsets_.get());
     search_result.total_nq_ = num_queries;
     search_result.unity_topK_ = topK;
+    register_vector_search_provider();
 }
 
 void
@@ -153,6 +186,41 @@ SearchOnSealedColumn(const Schema& schema,
                      const BitsetView& bitview,
                      milvus::OpContext* op_context,
                      SearchResult& result) {
+    const auto* schema_ptr = &schema;
+    auto register_vector_search_provider = [&] {
+        if (!result.allow_filtered_vector_search_ ||
+            !CanUseStrictGroupSearch(search_info, num_queries) ||
+            !result.vector_iterators_.has_value()) {
+            return;
+        }
+        result.SetVectorSearchProvider(
+            bitview,
+            [schema_ptr,
+             column,
+             phase1_search_info = search_info,
+             recreate_index_info = index_info,
+             query_data,
+             query_offsets,
+             num_queries,
+             row_count,
+             op_context](const BitsetView& combined_filter,
+                         int64_t remaining_topk,
+                         SearchResult& filtered_result) {
+                SearchOnSealedColumn(
+                    *schema_ptr,
+                    column,
+                    StrictGroupSearchInfo(phase1_search_info, remaining_topk),
+                    recreate_index_info,
+                    query_data,
+                    query_offsets,
+                    num_queries,
+                    row_count,
+                    combined_filter,
+                    op_context,
+                    filtered_result);
+            });
+    };
+
     auto field_id = search_info.field_id_;
     auto& field = schema[field_id];
 
@@ -336,6 +404,7 @@ SearchOnSealedColumn(const Schema& schema,
     }
     result.unity_topK_ = query_dataset.topk;
     result.total_nq_ = query_dataset.num_queries;
+    register_vector_search_provider();
 }
 
 }  // namespace milvus::query
