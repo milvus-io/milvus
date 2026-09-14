@@ -25,16 +25,16 @@
 
 namespace milvus::exec {
 
-// `base_filter` uses vector-search semantics: one means invalid. The returned
-// membership bitmap uses scalar-index semantics: one means that the eligible
-// row belongs to one of the requested groups.
+// One raw-column pass classifies eligible logical row offsets into groups.
+// Missing or incomplete raw data returns nullopt; retain the original iterator
+// rather than rescanning an indexed column once for each target group.
 template <typename T>
-std::optional<TargetBitmap>
-BuildGroupMembership(milvus::OpContext* op_ctx,
-                     const segcore::SegmentInternalInterface& segment,
-                     FieldId field_id,
-                     int64_t row_count,
-                     const std::vector<std::optional<T>>& groups,
-                     const TargetBitmap* base_filter);
+std::optional<std::vector<std::vector<int64_t>>>
+BuildGroupOffsets(milvus::OpContext* op_ctx,
+                  const segcore::SegmentInternalInterface& segment,
+                  FieldId field_id,
+                  int64_t row_count,
+                  const std::vector<std::optional<T>>& groups,
+                  const TargetBitmap* base_filter);
 
 }  // namespace milvus::exec

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
 	"strconv"
 
 	"google.golang.org/protobuf/proto"
@@ -138,7 +137,7 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 			queryInfo.SearchParams = params[common.SearchParamKey].(string)
 		}
 
-		changed, err := applyStrictGroupSettings(queryInfo)
+		changed, err := applyStrictGroupSettings(ctx, queryInfo)
 		if err != nil {
 			return nil, err
 		}
@@ -181,7 +180,7 @@ func ShouldUseTwoStageSearch(req *querypb.SearchRequest, effectiveSegmentNum int
 // applyStrictGroupSettings runs after the hook, including when it is disabled.
 // Server settings override caller/hook values; unrelated JSON values retain
 // their exact numeric/string types. The serialized plan freezes this snapshot.
-func applyStrictGroupSettings(info *planpb.QueryInfo) (bool, error) {
+func applyStrictGroupSettings(ctx context.Context, info *planpb.QueryInfo) (bool, error) {
 	raw := info.GetSearchParams()
 	if raw == "" {
 		raw = "{}"
@@ -193,27 +192,49 @@ func applyStrictGroupSettings(info *planpb.QueryInfo) (bool, error) {
 	if params == nil {
 		params = make(map[string]json.RawMessage)
 	}
-	_, hadThreshold := params[common.StrictGroupAcceptanceThresholdKey]
-	_, hadProbe := params[common.StrictGroupProbeCandidatesKey]
-	delete(params, common.StrictGroupAcceptanceThresholdKey)
-	delete(params, common.StrictGroupProbeCandidatesKey)
-	// Aggregation plans use only the plural field, even for one grouping key.
-	hasGroupBy := info.GetGroupByFieldId() > 0 || len(info.GetGroupByFieldIds()) > 0
-	eligible := info.GetStrictGroupSize() && info.GetGroupSize() > 1 && hasGroupBy
+	_, hadStrategy := params[common.StrictGroupStrategyKey]
+	_, hadDebug := params[common.StrictGroupDebugKey]
+	_, hadPhase1 := params[common.StrictGroupPhase1MaxCandidatesKey]
+	_, hadSkipRefine := params[common.StrictGroupSkipRefineKey]
+	delete(params, common.StrictGroupStrategyKey)
+	delete(params, common.StrictGroupDebugKey)
+	delete(params, common.StrictGroupPhase1MaxCandidatesKey)
+	delete(params, common.StrictGroupSkipRefineKey)
+	eligible := info.GetStrictGroupSize() && info.GetGroupSize() > 1 && (info.GetGroupByFieldId() > 0 || len(info.GetGroupByFieldIds()) > 0)
 	if eligible {
 		cfg := &paramtable.Get().QueryNodeCfg
-		threshold, err := strconv.ParseFloat(cfg.StrictGroupAcceptanceThreshold.GetValue(), 64)
-		if err != nil || math.IsNaN(threshold) || math.IsInf(threshold, 0) || threshold < 0 || threshold > 1 {
-			return false, merr.WrapErrServiceUnavailable("invalid server config: " + cfg.StrictGroupAcceptanceThreshold.Key)
+		phase1, err := strconv.ParseInt(cfg.StrictGroupPhase1MaxCandidates.GetValue(), 10, 64)
+		if err != nil || phase1 < 0 {
+			return false, merr.WrapErrServiceUnavailable("invalid server config: " + cfg.StrictGroupPhase1MaxCandidates.Key)
 		}
-		probe, err := strconv.ParseInt(cfg.StrictGroupProbeCandidates.GetValue(), 10, 64)
-		if err != nil || probe <= 0 {
-			return false, merr.WrapErrServiceUnavailable("invalid server config: " + cfg.StrictGroupProbeCandidates.Key)
+		skipRefine, err := strconv.ParseBool(cfg.StrictGroupSkipRefine.GetValue())
+		if err != nil {
+			return false, merr.WrapErrServiceUnavailable("invalid server config: " + cfg.StrictGroupSkipRefine.Key)
 		}
-		params[common.StrictGroupAcceptanceThresholdKey] = json.RawMessage(strconv.FormatFloat(threshold, 'g', -1, 64))
-		params[common.StrictGroupProbeCandidatesKey] = json.RawMessage(strconv.FormatInt(probe, 10))
+		params[common.StrictGroupPhase1MaxCandidatesKey] = json.RawMessage(strconv.FormatInt(phase1, 10))
+		params[common.StrictGroupSkipRefineKey] = json.RawMessage(strconv.FormatBool(skipRefine))
+		debug, err := strconv.ParseBool(cfg.StrictGroupDebug.GetValue())
+		if err != nil {
+			return false, merr.WrapErrServiceUnavailable("invalid server config: " + cfg.StrictGroupDebug.Key)
+		}
+		params[common.StrictGroupDebugKey] = json.RawMessage(strconv.FormatBool(debug))
+		strategy := cfg.StrictGroupStrategy.GetValue()
+		if strategy != "original" && strategy != "per_group" {
+			return false, merr.WrapErrServiceUnavailable("invalid server config: " + cfg.StrictGroupStrategy.Key)
+		}
+		params[common.StrictGroupStrategyKey] = json.RawMessage(strconv.Quote(strategy))
+		if debug {
+			// Log the exact snapshot injected after the hook, not another config
+			// read that might race a refresh. Never log caller search payloads.
+			mlog.Info(ctx, "strict_group_config_snapshot",
+				mlog.Int64("node_id", paramtable.GetNodeID()),
+				mlog.String("strategy", strategy),
+				mlog.Int64("phase1_max_candidates", phase1),
+				mlog.Bool("skip_refine", skipRefine),
+				mlog.Bool("strict_group_debug", debug))
+		}
 	}
-	if !eligible && !hadThreshold && !hadProbe {
+	if !eligible && !hadStrategy && !hadDebug && !hadPhase1 && !hadSkipRefine {
 		return false, nil
 	}
 	encoded, err := json.Marshal(params)

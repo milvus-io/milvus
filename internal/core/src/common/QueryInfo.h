@@ -26,6 +26,8 @@
 
 namespace milvus {
 
+enum class StrictGroupStrategy { Original, PerGroup };
+
 struct SearchIteratorV2Info {
     std::string token = "";
     uint32_t batch_size = 0;
@@ -46,8 +48,11 @@ struct SearchInfo {
     int64_t topk_{0};
     int64_t group_size_{1};
     bool strict_group_size_{false};
-    double strict_group_acceptance_threshold_{0.1};
-    int64_t strict_group_probe_candidates_{100};
+    StrictGroupStrategy strict_group_strategy_{StrictGroupStrategy::PerGroup};
+    bool strict_group_debug_{false};
+    int64_t strict_group_phase1_max_candidates_{0};
+    bool strict_group_skip_refine_{false};
+
     int64_t round_decimal_{0};
     FieldId field_id_;
     MetricType metric_type_;
