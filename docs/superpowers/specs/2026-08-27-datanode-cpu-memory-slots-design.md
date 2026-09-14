@@ -74,9 +74,9 @@ compaction and import only) and that stays as is. DataCoord still charges it
 ## DataCoord estimation
 
 `taskcommon.Resource{CPU int64; Memory int64}` — CPU in whole cores, memory in
-bytes. This is the estimate DataCoord places on. The DataNode that accepts the
-task refines it (see "DataNode correction" below) and books the refined value,
-so the next round places on corrected availability.
+bytes. This is the estimate DataCoord places on, and the worker books exactly
+this value. A DataNode-side correction from the data it actually reads is a
+follow-up and is not part of this change.
 
 Every formula mirrors what the worker holds for that family and errs high
 where the worker's behavior depends on data or on a machine DataCoord does not
@@ -90,9 +90,9 @@ see.
 | sort compaction | 1 | segmentSize x 2 | `storage.Sort` retains every input record |
 | mix compaction / bump schema version | 1 | min(sum(input segments), `dataCoord.segment.maxSize`) | `MultiSegmentWriter` streams: never more than the input, never more than one output segment |
 | L0 compaction | 1 | sum(deltalog) x 2 | `l0_compactor.go` loads every delta log |
-| clustering compaction | 8 | sum(input segments) | buckets are flushed at a share of the machine, applied on the DataNode |
-| analyze | 8 | rows x dim x elemSize x 2 | the train-set cap is a share of the machine, applied on the DataNode |
-| import | 1 | files x (base x vchannels x partitions) x `importMemoryFactor` | every file is submitted at once with one read buffer; the allocator limit is applied on the DataNode |
+| clustering compaction | 8 | sum(input segments) | buckets are flushed at `memoryBufferRatio` of the machine; that cap is not applied, so a large input is over-priced |
+| analyze | 8 | rows x dim x elemSize x 2 | the train set is down-sampled to `maxTrainSizeRatio` of the machine; that cap is not applied |
+| import | 1 | files x (base x vchannels x partitions) x `importMemoryFactor` | every file is submitted at once with one read buffer; the allocator limit (a share of the machine) is not applied |
 | preimport | 1 | files x base buffer | every file is read in parallel with one base buffer |
 | copy segment / refresh external collection | 1 | 64MB | stream between buckets |
 
@@ -135,62 +135,6 @@ The **scalar task slot** of an index task is derived from this same field size
 (`calculateIndexTaskSlot`, at creation and at reload); without a cached schema
 it falls back to the binlog size it used before. The **memory** of index and
 stats tasks is this field size times the expansion factor.
-
-## DataNode correction
-
-`internal/datanode/taskresource` refines the estimate on the DataNode that
-accepts the task, in `CreateTask`, before the task is constructed. The
-corrected value is what the task carries, so it is exactly what the ledger
-books at acceptance and releases at completion; `QuerySlot` reports
-`available = total - sum(corrected)`. A difference from the estimate is logged
-("task resource corrected on accept").
-
-Contract, identical for every family:
-
-- a zero estimate (coordinator that predates estimates) is left at zero
-- CPU is DataCoord's; it only ranks
-- when the request carries nothing better than DataCoord had, the estimate
-  stands (a V3 scalar field after a DataCoord restart has no binlog sizes on
-  either side, so its estimate is not replaced by a guess)
-- the corrected memory is floored at `minTaskMemory`
-
-What the worker knows better, per family:
-
-| task | corrected memory |
-|---|---|
-| index | input: min(schema bound, column group in the request's binlogs) for the indexed field and the optional scalar fields the build loads; without binlogs only an exact fixed-width size is used, otherwise the estimate stands; expansion: the build model of the index type, below |
-| stats | per target field, sized the same way: text `raw + min(tantivy budget, 2 x raw)`, json key `2 x raw + json_key_stats_tantivy_memory`, bm25 `2 x raw`; any target field that cannot be sized keeps the estimate |
-| analyze | `min(raw, machine x max_train_size_ratio) x analyzeMemoryFactor` |
-| sort compaction | `insert + rows x 8 + binlogMaxSize + 2 x deltas` |
-| mix / bump | `min(insert, plan.max_size) + 2 x deltas` |
-| L0 compaction | `L0 deltas x l0CompactionMemoryFactor + target segments' statslogs` (the bloom filters it loads) |
-| clustering | `min(insert, machine x memoryBufferRatio) + 2 x deltas` |
-| import | `min(files x importv2.CalculateImportBufferSize, importv2.ImportMemoryLimit) x importMemoryFactor` |
-| preimport | `files x base buffer` |
-
-Index build models (knowhere exposes a load-time estimate only, so these are
-derived from each index's layout; build parameters are the request's merged
-with this node's knowhere build defaults):
-
-| index types | build memory |
-|---|---|
-| FLAT, BIN_FLAT, GPU brute force, SVS_FLAT | `2 x raw` |
-| IVF_FLAT family, SVS_IVF | `2 x raw + rows x 8 + nlist x bytesPerRow` |
-| IVF_SQ8, IVF_SQ_CC | `raw + rows x code(sq_type) + IVF lists` |
-| IVF_PQ family | `raw + rows x ceil(m x nbits / 8) + IVF lists + 2^nbits x bytesPerRow` |
-| IVF_RABITQ | `raw + rows x (ceil(dim/8) + 8) + IVF lists (+ raw with refine)` |
-| SCANN | `raw + rows x ceil(dim/2) + IVF lists (+ raw with with_raw_data)` |
-| HNSW family | `2 x raw + rows x ((3M + 2) x 4 + 56)` (links, label, pointer, lock) |
-| DISKANN, AISAQ, SVS_VAMANA | `raw + raw x pq_code_budget_gb_ratio + rows x (max_degree x 4 x 1.3 + 16)` |
-| sparse, MINHASH_LSH, Trie, RTREE | `2 x raw` |
-| STL_SORT | `2 x raw + rows x 4 + rows / 8` |
-| INVERTED, NGRAM | `raw + min(500MB tantivy budget, 2 x raw)` |
-| BITMAP | `raw + (rows / 8) x bitmap_cardinality_limit` |
-| HYBRID | max(BITMAP, INVERTED) |
-| anything else | `raw x indexMemoryFactor` |
-
-These models are structural, not measured: they have not been calibrated
-against real builds yet.
 
 ### Configuration (`dataCoord.taskResource.*`, refreshable, in milvus.yaml)
 

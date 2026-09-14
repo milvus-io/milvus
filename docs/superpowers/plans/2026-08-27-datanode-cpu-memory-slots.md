@@ -10,20 +10,17 @@
 
 **Spec:** `docs/superpowers/specs/2026-08-27-datanode-cpu-memory-slots-design.md`
 
-> **Revision 2026-09-14 — estimation accuracy and DataNode correction.** The
-> formulas in the tasks below are the first version; the spec's "DataCoord
-> estimation" and "DataNode correction" sections are authoritative. After a
-> family-by-family audit of the worker-side code: DataCoord prices import per
-> file, stats by the fields the sub job indexes, mix / schema bump by
-> `min(input, segment.maxSize)`, clustering by its input
-> (`clusteringCompactionMemory` is gone, `importMemoryFactor` is new), and the
-> V3 per-field fallback subtracts every fixed-width field exactly before
-> splitting the residual. The accepting DataNode then refines the estimate in
-> `CreateTask` (`internal/datanode/taskresource`) with the exact field bytes,
-> a per-index-type build model and its own machine, and books the corrected
-> value. A field's size is min(schema bound, column group size) everywhere
-> (`taskcommon.EstimateFieldSize`): the index task's scalar slot, the
-> DataCoord memory estimate and the DataNode correction.
+> **Revision 2026-09-14 — estimation accuracy.** The formulas in the tasks
+> below are the first version; the spec's "DataCoord estimation" section is
+> authoritative. After a family-by-family audit of the worker-side code:
+> DataCoord prices import per file, stats by the fields the sub job indexes,
+> mix / schema bump by `min(input, segment.maxSize)`, clustering by its input
+> (`clusteringCompactionMemory` is gone, `importMemoryFactor` is new). A
+> field's size is min(schema bound, column group size)
+> (`taskcommon.EstimateFieldSize`), used for both the index task's scalar slot
+> and the index/stats memory estimate. A DataNode-side correction from the data
+> it actually reads is a follow-up.
+
 
 ## Global Constraints
 

@@ -27,7 +27,7 @@ import (
 
 // Field size estimation shared by every place that sizes one field of a
 // segment for a task: DataCoord's memory estimate and the scalar task slot
-// derived from the same size, and the accepting DataNode's correction.
+// derived from the same size.
 //
 // A field's size is the smaller of two upper bounds:
 //   - the schema's: rows x width for a fixed-width type, rows x (max_length +

@@ -41,11 +41,12 @@ import (
 // Every memory formula mirrors what the worker actually holds for that family
 // (the comment next to each formula names the worker-side code it mirrors),
 // and errs on the high side where the worker's behavior depends on data or on
-// a machine DataCoord does not see. This estimate is what DataCoord places on;
-// the DataNode that accepts the task refines it with what only the worker
-// knows (exact field bytes, per-index-type expansion, its own memory for the
-// families whose buffers are a share of the machine) and books the refined
-// value, so the next round places on the corrected availability.
+// a machine DataCoord does not see. The worker books exactly this estimate.
+//
+// Three families size a buffer as a share of the worker's machine
+// (clustering compaction, analyze, import). DataCoord cannot see the machine,
+// so their estimates are bounded by their input only and can exceed what the
+// worker will actually hold.
 
 func defaultCPU() int64 {
 	return max(Params.DataCoordCfg.TaskResourceDefaultCPU.GetAsInt64(), 1)
@@ -120,9 +121,8 @@ func l0CompactionTaskResource(deltaSize int64) taskcommon.Resource {
 // clusteringCompactionTaskResource: the worker (compactor/clustering_compactor.go)
 // buckets its input in memory and flushes buckets once the buffer reaches
 // dataNode.clusteringCompaction.memoryBufferRatio of the machine, so it never
-// holds more than its input. That input is the estimate; the share of the
-// machine is applied by the DataNode that accepts the task, which is the only
-// side that knows the machine.
+// holds more than its input. The input is the estimate; the machine share is
+// not applied, so for an input larger than that share this is an upper bound.
 func clusteringCompactionTaskResource(inputSize int64) taskcommon.Resource {
 	return taskcommon.Resource{
 		CPU:    max(Params.DataCoordCfg.TaskResourceClusteringCompactionCPU.GetAsInt64(), 1),
@@ -132,8 +132,8 @@ func clusteringCompactionTaskResource(inputSize int64) taskcommon.Resource {
 
 // analyzeTaskResource: the worker (index/task_analyze.go) trains on the raw
 // vectors, so raw bytes times the factor. The worker down-samples to
-// maxTrainSizeRatio of its machine when they exceed it; that cap is applied by
-// the accepting DataNode.
+// maxTrainSizeRatio of its machine when they exceed it; that machine cap is not
+// applied here.
 func analyzeTaskResource(rawDataSize int64) taskcommon.Resource {
 	return taskcommon.Resource{
 		CPU:    max(Params.DataCoordCfg.TaskResourceAnalyzeCPU.GetAsInt64(), 1),
@@ -145,8 +145,7 @@ func analyzeTaskResource(rawDataSize int64) taskcommon.Resource {
 // of the task to its exec pool at once and each file allocates one read buffer
 // of perFileBuffer bytes, so the task holds numFiles buffers; the factor covers
 // the batch being serialized and uploaded while the next one is read. The
-// worker's allocator, a percentage of its machine, is applied by the accepting
-// DataNode.
+// worker's allocator limit, a percentage of its machine, is not applied here.
 func importTaskResource(numFiles, perFileBuffer int64) taskcommon.Resource {
 	return taskcommon.Resource{
 		CPU:    defaultCPU(),
@@ -172,8 +171,7 @@ func preImportTaskResource(numFiles, perFileBuffer int64) taskcommon.Resource {
 // largest-file cap from the task's own ImportTaskV2.FileStats, but the worker
 // never fills that field for an import task (NewImportTask leaves it nil), so
 // the cap never fires there and capping here would under-price every import.
-// The worker's remaining clamp, a percentage of its machine, is applied by the
-// accepting DataNode.
+// The worker's remaining clamp, a percentage of its machine, is not applied.
 func importFileBufferSize(job ImportJob) int64 {
 	base := Params.DataNodeCfg.ImportBaseBufferSize.GetAsInt64()
 	if importutilv2.IsL0Import(job.GetOptions()) {

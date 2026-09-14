@@ -66,14 +66,13 @@ func TestTaskResource_Formulas(t *testing.T) {
 	assert.Equal(t, taskcommon.Resource{CPU: defaultCPU, Memory: maxSegment}, mixCompactionTaskResource(5*testGiB))
 	assert.Equal(t, taskcommon.Resource{CPU: defaultCPU, Memory: maxSegment}, mixCompactionTaskResource(0))
 
-	// Clustering: its input; the worker applies its buffer share.
+	// Clustering: its input, bounded by nothing else.
 	assert.Equal(t, taskcommon.Resource{CPU: 8, Memory: 10 * testGiB}, clusteringCompactionTaskResource(10*testGiB))
 
-	// Analyze: raw vectors times the factor; the worker applies its train share.
+	// Analyze: raw vectors times the factor.
 	assert.Equal(t, taskcommon.Resource{CPU: 8, Memory: 2 * testGiB}, analyzeTaskResource(testGiB))
 
-	// Import: one buffer per file times the factor; the worker applies its
-	// allocator share.
+	// Import: one buffer per file times the factor.
 	assert.Equal(t, taskcommon.Resource{CPU: defaultCPU, Memory: 3 * 2 * 100 * testMiB}, importTaskResource(3, 100*testMiB))
 	// Pre-import: one buffer per file, nothing in flight, no allocator.
 	assert.Equal(t, taskcommon.Resource{CPU: defaultCPU, Memory: 3 * 100 * testMiB}, preImportTaskResource(3, 100*testMiB))

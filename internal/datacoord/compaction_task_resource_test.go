@@ -161,7 +161,7 @@ func TestCompactionTaskResource_ClusteringAndBump(t *testing.T) {
 	meta.EXPECT().GetHealthySegment(mock.Anything, mock.Anything).RunAndReturn(segmentOf(4 * testGiB)).Times(3)
 	clustering := newClusteringCompactionTask(&datapb.CompactionTask{PlanID: 1, Type: datapb.CompactionType_ClusteringCompaction, InputSegments: []int64{10, 11, 12}},
 		nil, meta, nil, nil, newMockVersionManager())
-	// Its input; the worker applies its buffer share.
+	// Its input, bounded by nothing else.
 	assert.Equal(t, clusteringCompactionTaskResource(12*testGiB), clustering.GetTaskResource())
 	assert.Equal(t, taskcommon.Resource{CPU: 8, Memory: 12 * testGiB}, clustering.GetTaskResource())
 	assert.Equal(t, clustering.GetTaskResource(), clustering.GetTaskResource()) // cached: Times(3) holds
