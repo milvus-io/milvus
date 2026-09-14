@@ -287,6 +287,7 @@ class GroupByJsonGetterTest
             writer.write_to_target(arrays, target);
             auto* data = target->release();
             auto guard = std::make_shared<ChunkMmapGuard>(data, size, "");
+            target->TransferOwnership();
             chunks.push_back(std::make_unique<StringChunk>(
                 count, data, size, true, std::move(guard)));
         }
