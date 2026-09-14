@@ -337,28 +337,34 @@ void
 MinioChunkManager::BuildGoogleCloudClient(
     const StorageConfig& storage_config,
     const Aws::Client::ClientConfiguration& config) {
-    if (storage_config.useIAM) {
-        // Storage may have installed the process-wide GCP HTTP factory first.
-        // Register this bucket before PreCheck, even if our InitAPI was ignored.
-        milvus_storage::ArrowFileSystemConfig gcp_config;
-        gcp_config.use_iam = true;
-        auto provider = milvus_storage::BuildGcpProviderFromConfig(gcp_config);
-        if (!provider.ok()) {
-            throw milvus_storage::ToSegcoreError(provider.status());
-        }
-        milvus_storage::GcpCredentialRegistry::Instance().Register(
-            {milvus_storage::NormalizeGcpEndpoint(storage_config.address,
-                                                  storage_config.useSSL),
-             storage_config.bucket_name},
-            std::move(provider).ValueOrDie());
+    if (!storage_config.useIAM) {
+        // Preserve the existing access-key validation before building a provider.
+        BuildAccessKeyClient(storage_config, config);
+    }
 
+    // Storage may have installed the process-wide GCP HTTP factory first.
+    // Register both IAM and HMAC identities before PreCheck, even if our
+    // InitAPI was ignored. Building an access-key client alone is insufficient.
+    milvus_storage::ArrowFileSystemConfig gcp_config;
+    gcp_config.use_iam = storage_config.useIAM;
+    gcp_config.access_key_id = storage_config.access_key_id;
+    gcp_config.access_key_value = storage_config.access_key_value;
+    auto provider = milvus_storage::BuildGcpProviderFromConfig(gcp_config);
+    if (!provider.ok()) {
+        throw milvus_storage::ToSegcoreError(provider.status());
+    }
+    milvus_storage::GcpCredentialRegistry::Instance().Register(
+        {milvus_storage::NormalizeGcpEndpoint(storage_config.address,
+                                              storage_config.useSSL),
+         storage_config.bucket_name},
+        std::move(provider).ValueOrDie());
+
+    if (storage_config.useIAM) {
         // Using S3 client instead of google client because of compatible protocol
         client_ = std::make_shared<Aws::S3::S3Client>(
             config,
             Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
             storage_config.useVirtualHost);
-    } else {
-        BuildAccessKeyClient(storage_config, config);
     }
 }
 
