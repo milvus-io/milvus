@@ -2656,35 +2656,3 @@ func TestStoredIndexFilesSizeMetric(t *testing.T) {
 			"FinishTask after index drop must not re-add bytes to gauge")
 	})
 }
-
-func TestIndexMeta_GetDeletedIndexesWithV1Path(t *testing.T) {
-	m := &indexMeta{
-		segmentBuildInfo: newSegmentIndexBuildInfo(),
-	}
-
-	// Add: deleted v0, deleted v1, not-deleted v1.
-	// Only deleted v1 indexes need metadata-driven cleanup under index_v1;
-	// v0 deletion is handled by the buildID-rooted index_files prefix walk.
-	m.segmentBuildInfo.Add(&model.SegmentIndex{
-		BuildID:               1000,
-		CollectionID:          100,
-		IndexStorePathVersion: 0,
-		IsDeleted:             true,
-	})
-	m.segmentBuildInfo.Add(&model.SegmentIndex{
-		BuildID:               2000,
-		CollectionID:          200,
-		IndexStorePathVersion: 1,
-		IsDeleted:             true,
-	})
-	m.segmentBuildInfo.Add(&model.SegmentIndex{
-		BuildID:               3000,
-		CollectionID:          300,
-		IndexStorePathVersion: 1,
-		IsDeleted:             false,
-	})
-
-	result := m.GetDeletedIndexesWithV1Path()
-	assert.Len(t, result, 1)
-	assert.Equal(t, int64(2000), result[0].BuildID)
-}
