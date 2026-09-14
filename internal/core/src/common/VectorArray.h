@@ -71,11 +71,6 @@ class VectorArray : public milvus::VectorTrait {
         }
     }
 
-    // One row of VectorFieldProto
-    explicit VectorArray(const VectorFieldProto& vector_field)
-        : VectorArray(vector_field, false) {
-    }
-
     VectorArray(const VectorFieldProto& vector_field, bool element_nullable)
         : dim_(vector_field.dim()), element_nullable_(element_nullable) {
         if (!element_nullable_) {

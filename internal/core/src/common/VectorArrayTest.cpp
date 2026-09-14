@@ -200,7 +200,8 @@ TEST(VectorArray, TestConstructVectorArray) {
     field_float_vector_array.mutable_float_vector()->mutable_data()->Add(
         data.begin(), data.end());
 
-    auto float_vector_array = milvus::VectorArray(field_float_vector_array);
+    auto float_vector_array =
+        milvus::VectorArray(field_float_vector_array, false);
     ASSERT_EQ(float_vector_array.length(), N);
     ASSERT_EQ(float_vector_array.dim(), dim);
     ASSERT_EQ(float_vector_array.get_element_type(), DataType::VECTOR_FLOAT);
@@ -256,7 +257,7 @@ TEST(VectorArray, TestConstructorWithData) {
         field_proto.set_dim(dim);
         field_proto.mutable_float_vector()->mutable_data()->Add(data.begin(),
                                                                 data.end());
-        milvus::VectorArray va_proto(field_proto);
+        milvus::VectorArray va_proto(field_proto, false);
 
         // Create via data constructor
         milvus::VectorArray va_direct(
@@ -515,5 +516,5 @@ TEST(VectorArray, ElementNullableValidationRejectsInvalidCompactPayload) {
     unexpected_validity.mutable_float_vector()->add_data(1.0F);
     unexpected_validity.mutable_float_vector()->add_data(2.0F);
     unexpected_validity.add_valid_data(true);
-    EXPECT_ANY_THROW((void)milvus::VectorArray(unexpected_validity));
+    EXPECT_ANY_THROW((void)milvus::VectorArray(unexpected_validity, false));
 }

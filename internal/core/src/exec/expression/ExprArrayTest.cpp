@@ -1019,7 +1019,7 @@ TEST(Expr, TestVectorArrayNullExpr) {
     for (int i = 0; i < N; ++i) {
         if (valid_data[i]) {
             valid_bitmap[i >> 3] |= 1 << (i & 0x07);
-            vector_arrays.emplace_back(vector_array_col[i]);
+            vector_arrays.emplace_back(vector_array_col[i], false);
         }
     }
 
@@ -1131,7 +1131,7 @@ TEST(Expr, TestVectorArrayLengthExpr) {
     for (int i = 0; i < N; ++i) {
         if (valid_data[i]) {
             valid_bitmap[i >> 3] |= 1 << (i & 0x07);
-            vector_arrays.emplace_back(vector_array_col[i]);
+            vector_arrays.emplace_back(vector_array_col[i], false);
         }
     }
 

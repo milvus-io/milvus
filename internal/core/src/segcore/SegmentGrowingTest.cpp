@@ -1362,7 +1362,7 @@ TEST(GrowingTest, EmptyVectorArrayRowsInitializeElementOneof) {
         EXPECT_EQ(row.data_case(),
                   proto::schema::VectorField::DataCase::kFloatVector);
         EXPECT_TRUE(row.float_vector().data().empty());
-        EXPECT_NO_THROW(milvus::VectorArray(row));
+        EXPECT_NO_THROW(milvus::VectorArray(row, false));
     }
 }
 

@@ -4493,7 +4493,7 @@ CreateNullableSealedSegment(const NullableElementSearchFixture& f) {
     vector_arrays.reserve(vec_array_values.size());
     for (int64_t row = 0; row < f.raw_data.raw_->num_rows(); ++row) {
         if (IsBitmapRowValid(valid_bitmap, row)) {
-            vector_arrays.emplace_back(vec_array_values[row]);
+            vector_arrays.emplace_back(vec_array_values[row], false);
         }
     }
 
