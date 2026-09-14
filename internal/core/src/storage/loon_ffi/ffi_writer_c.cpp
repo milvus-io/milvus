@@ -64,7 +64,8 @@ GetEncParams(CPluginContext* c_plugin_context,
                                                c_plugin_context->collection_id,
                                                got.second);
         // Both cgo and Loon properties use NUL-terminated strings. Encode the
-        // binary DEK before crossing either boundary; loon_writer_new decodes it.
+        // binary DEK before crossing either boundary. The Parquet writer
+        // decodes it when constructing its encryption configuration.
         auto key = arrow::util::base64_encode(got.first->GetKey());
         auto key_buffer =
             std::unique_ptr<char, decltype(&free)>(strdup(key.c_str()), free);

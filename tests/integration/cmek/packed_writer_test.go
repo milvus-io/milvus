@@ -25,6 +25,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -47,8 +48,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-// Exercise the real Go -> C++ -> Loon writer boundary. A NUL at byte 16 or
-// 24 is especially dangerous: the truncated prefix is still a valid AES key.
+// Exercise the real Go -> C++ -> Loon writer and reader boundaries. A NUL at
+// byte 16 or 24 is especially dangerous: the truncated prefix is still a valid AES key.
 func TestFFIPackedWriterPreservesBinaryKey(t *testing.T) {
 	paramtable.Init()
 	cipherParams := paramtable.GetCipherParams()
@@ -134,6 +135,27 @@ func TestFFIPackedWriterPreservesBinaryKey(t *testing.T) {
 				}
 				require.ErrorContains(t, err, "cipher: message authentication failed")
 			}
+
+			// Read the same file through Milvus's native C++ key retriever too.
+			manifest, err := packed.CommitManifestUpdates("binary-key", packed.ManifestEarliest, cfg,
+				&packed.ManifestUpdates{NewFiles: output})
+			require.NoError(t, err)
+			reader, err := packed.NewFFIPackedReader(manifest, schema, []string{"100"}, 8192,
+				cfg, pluginContext, packed.ExternalReaderContext{})
+			require.NoError(t, err)
+			defer func() { require.NoError(t, reader.Close()) }()
+			actual = nil
+			for {
+				batch, err := reader.ReadNext()
+				if err == io.EOF {
+					break
+				}
+				require.NoError(t, err)
+				require.NotNil(t, batch)
+				require.EqualValues(t, 1, batch.NumCols())
+				actual = append(actual, batch.Column(0).(*array.Int64).Int64Values()...)
+			}
+			require.Equal(t, values, actual)
 		})
 	}
 }
