@@ -3106,19 +3106,36 @@ func (p *pipeline) markSharedOrganizeInputs() {
 }
 
 func (p *pipeline) Run(ctx context.Context, span trace.Span, toReduceResults []*internalpb.SearchResults, storageCost segcore.StorageCost) (*milvuspb.SearchResults, segcore.StorageCost, error) {
-	mlog.Debug(ctx, "SearchPipeline run", mlog.Stringer("pipeline", p))
-	pTrace := newPipelineTrace(p.traceEnabled)
 	msg := opMsg{}
 	msg[pipelineInput] = toReduceResults
 	msg[pipelineStorageCost] = storageCost
-	for _, node := range p.nodes {
-		var err error
+	return p.run(ctx, span, msg, 0)
+}
+
+// RunFromReduced continues a Plain Search pipeline after its first reduction node.
+func (p *pipeline) RunFromReduced(ctx context.Context, span trace.Span, reduced *milvuspb.SearchResults, metricType string, storageCost segcore.StorageCost) (*milvuspb.SearchResults, segcore.StorageCost, error) {
+	if len(p.nodes) == 0 || p.nodes[0].opName != searchReduceOp {
+		return nil, storageCost, merr.WrapErrServiceInternal("SearchPipeline does not start with Plain Search reduction")
+	}
+	msg := opMsg{}
+	msg[reducedMsgKey] = []*milvuspb.SearchResults{reduced}
+	msg["metrics"] = []string{metricType}
+	msg[pipelineStorageCost] = storageCost
+	return p.run(ctx, span, msg, 1)
+}
+
+func (p *pipeline) run(ctx context.Context, span trace.Span, msg opMsg, start int) (*milvuspb.SearchResults, segcore.StorageCost, error) {
+	mlog.Debug(ctx, "SearchPipeline run", mlog.Stringer("pipeline", p))
+	pTrace := newPipelineTrace(p.traceEnabled)
+	initialStorageCost := msg[pipelineStorageCost].(segcore.StorageCost)
+	for _, node := range p.nodes[start:] {
 		mlog.Debug(ctx, "SearchPipeline run node", mlog.String("node", node.name))
-		msg, err = node.Run(ctx, span, msg)
+		nextMsg, err := node.Run(ctx, span, msg)
 		if err != nil {
 			mlog.Error(ctx, "Run node failed: ", mlog.String("err", err.Error()))
-			return nil, storageCost, err
+			return nil, initialStorageCost, err
 		}
+		msg = nextMsg
 		pTrace.TraceMsg(node.opName, msg)
 	}
 	pTrace.LogIfEnabled(ctx, p.name)

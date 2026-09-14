@@ -17,6 +17,7 @@ package dql
 
 import (
 	"context"
+	"io"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -24,6 +25,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/searchutil"
 	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -51,6 +53,22 @@ type fakeLegacyQueryClient struct {
 	queryResult  *queryclient.LegacyQueryResult
 	err          error
 }
+
+type fakeLegacySearchStream struct{}
+
+func (*fakeLegacySearchStream) Recv() (*internalpb.SearchResults, error) {
+	return nil, io.EOF
+}
+
+func (*fakeLegacySearchStream) Close() error {
+	return nil
+}
+
+func (*fakeLegacySearchStream) Interrupt() (*internalpb.SearchResults, error) {
+	return nil, nil
+}
+
+var _ searchutil.ReduceStream = (*fakeLegacySearchStream)(nil)
 
 func (c *fakeLegacyQueryClient) Search(ctx context.Context, req *queryclient.LegacySearchRequest) (*queryclient.LegacySearchResult, error) {
 	c.searchCalled++
@@ -151,4 +169,26 @@ func TestQueryViewRecordsFinalReadFrontiersIncludingEmptyShards(t *testing.T) {
 		require.True(t, ok)
 		require.Equal(t, uint64(300), ts)
 	})
+}
+
+func TestSearchTaskExecuteKeepsReduceStream(t *testing.T) {
+	stream := &fakeLegacySearchStream{}
+	legacy := &fakeLegacyQueryClient{
+		searchResult: &queryclient.LegacySearchResult{Stream: stream},
+	}
+	task := &SearchTask{
+		SearchRequest: &internalpb.SearchRequest{
+			Base:         commonpbutil.NewMsgBase(commonpbutil.WithMsgID(2)),
+			CollectionID: 1,
+			Nq:           1,
+			Topk:         1,
+		},
+		request:         &milvuspb.SearchRequest{DbName: "default"},
+		resultBuf:       typeutil.NewConcurrentSet[*internalpb.SearchResults](),
+		viewQueryClient: &fakeLegacyViewQueryClient{legacy: legacy},
+	}
+
+	require.NoError(t, task.Execute(context.Background()))
+	require.Same(t, stream, task.resultStream)
+	require.Empty(t, task.resultBuf.Collect())
 }

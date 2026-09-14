@@ -136,6 +136,26 @@ func shouldPanic(t *testing.T, name string, f func()) {
 	t.Errorf("%s should have panicked", name)
 }
 
+func TestProxyQueryViewStreamingConfig(t *testing.T) {
+	base := NewBaseTable(SkipRemote(true), SkipEnv(true))
+	config := proxyConfig{}
+	config.init(base)
+	assert.False(t, config.EnableSearchStreaming.GetAsBool())
+	assert.Equal(t, 1024, config.SearchStreamChunkSize.GetAsInt())
+	assert.NoError(t, base.Save(config.EnableSearchStreaming.Key, "true"))
+	assert.NoError(t, base.Save(config.SearchStreamChunkSize.Key, "128"))
+	assert.True(t, config.EnableSearchStreaming.GetAsBool())
+	assert.Equal(t, 128, config.SearchStreamChunkSize.GetAsInt())
+
+	t.Setenv("PROXY_QUERYVIEW_ENABLESEARCHSTREAMING", "true")
+	t.Setenv("PROXY_QUERYVIEW_SEARCHSTREAMCHUNKSIZE", "256")
+	envBase := NewBaseTable(SkipRemote(true))
+	envConfig := proxyConfig{}
+	envConfig.init(envBase)
+	assert.True(t, envConfig.EnableSearchStreaming.GetAsBool())
+	assert.Equal(t, 256, envConfig.SearchStreamChunkSize.GetAsInt())
+}
+
 func TestComponentParam_DataCoordBumpSchemaVersionCompactionParams(t *testing.T) {
 	Init()
 	params := Get()

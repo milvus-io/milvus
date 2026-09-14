@@ -402,6 +402,10 @@ message QueryPlan {
 service ViewQueryService {
     // SearchOnView executes a vector search on segments belonging to the given view version.
     rpc SearchOnView(SearchOnViewRequest) returns (SearchOnViewResponse) {}
+    // SearchOnViewStream executes the same search over a bidirectional stream.
+    // The client sends SearchOnViewRequest first. The server returns result Chunks;
+    // interrupt and metadata are reserved for the stream lifecycle implementation.
+    rpc SearchOnViewStream(stream SearchOnViewStreamRequest) returns (stream SearchOnViewStreamResponse) {}
     // QueryOnView executes a query (retrieve by expression) on segments belonging to the given view version.
     rpc QueryOnView(QueryOnViewRequest) returns (QueryOnViewResponse) {}
     rpc StatisticsOnView(StatisticsOnViewRequest) returns (StatisticsOnViewResponse) {}
@@ -433,11 +437,29 @@ message SearchOnViewRequest {
     SegmentSelection segment_selection = 5;
     repeated SegmentSelection sub_selections = 6;
     SearchExecutionOptions execution_options = 7;
+    int64 stream_chunk_size = 8;
 }
 
 message SearchOnViewResponse {
     // TODO: replace with native view result types once legacy internal protos are removed.
     internal.SearchResults legacy_results = 1;
+}
+
+message SearchOnViewStreamRequest {
+    oneof payload {
+        SearchOnViewRequest request = 1;
+        SearchOnViewInterrupt interrupt = 2;
+    }
+}
+
+message SearchOnViewInterrupt {
+}
+
+message SearchOnViewStreamResponse {
+    oneof payload {
+        internal.SearchResults chunk = 1;
+        internal.SearchResults metadata = 2;
+    }
 }
 
 message QueryOnViewRequest {

@@ -2821,6 +2821,8 @@ type proxyConfig struct {
 
 	SlowQuerySpanInSeconds ParamItem `refreshable:"true"`
 	QueryNodePoolingSize   ParamItem `refreshable:"false"`
+	EnableSearchStreaming  ParamItem `refreshable:"false"`
+	SearchStreamChunkSize  ParamItem `refreshable:"false"`
 
 	HybridSearchRequeryPolicy     ParamItem `refreshable:"true"`
 	SearchPlaceholderLogRateLimit ParamItem `refreshable:"true"`
@@ -3592,6 +3594,24 @@ Disabled if the value is less or equal to 0.`,
 		},
 	}
 	p.SearchPlaceholderLogMaxBytes.Init(base.mgr)
+
+	p.EnableSearchStreaming = ParamItem{
+		Key:          "proxy.queryView.enableSearchStreaming",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc:          "route supported Search requests through Streaming Reduce",
+		Export:       true,
+	}
+	p.EnableSearchStreaming.Init(base.mgr)
+
+	p.SearchStreamChunkSize = ParamItem{
+		Key:          "proxy.queryView.searchStreamChunkSize",
+		Version:      "3.0.0",
+		DefaultValue: "1024",
+		Doc:          "maximum number of Units in each Search stream Chunk",
+		Export:       true,
+	}
+	p.SearchStreamChunkSize.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
