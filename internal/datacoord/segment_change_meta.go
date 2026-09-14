@@ -296,6 +296,17 @@ func (m *meta) UpdateSegmentChangeGroup(ctx context.Context, group *model.Segmen
 	defer m.segMu.Unlock()
 	m.ensureSegmentChangeGroupStoreLocked()
 	current := m.segmentChangeGroups[group.GroupID]
+	// chyezh#2a: COMMITTED is reachable ONLY through the composite publish path
+	// (UpdateSegmentsInfoAndChangeGroups), which flips members visible and
+	// retires superseded parents atomically with the terminal marker. Accepting
+	// it here would let a group reach terminal (releasing its reverse-index
+	// claims) while nothing was actually published — members stay invisible,
+	// parents stay live.
+	if group.State == model.SegmentChangeStateCommitted {
+		return merr.WrapErrDataIntegrityMsg(
+			"segment change group %d may not reach COMMITTED via UpdateSegmentChangeGroup; publish through UpdateSegmentsInfoAndChangeGroups",
+			group.GroupID)
+	}
 	if err := m.validateSegmentChangeGroupTransitionLocked(group); err != nil {
 		return err
 	}
@@ -632,31 +643,6 @@ func (m *meta) UpdateSegmentsInfoAndChangeGroups(ctx context.Context, groupActio
 		}
 	}
 
-	// C3: for a COMMITTED (publish) transition, every member must have been
-	// touched by an operator (i.e. still present in meta and flipped). The
-	// operator return value alone is ambiguous — UpdateStatusOperator returns
-	// false both for an absent segment and for an already-reached target state
-	// (the idempotent superseded-already-Dropped skip) — so verify member
-	// presence explicitly against the pack instead. An externally dropped
-	// member would otherwise let the publish write only
-	// SaveSegmentChangeGroup(COMMITTED): the group reaches a terminal state
-	// while its superseded parents stay unretired. The design's failure matrix
-	// requires the caller to mark the group FAILED here.
-	for _, action := range groupActions {
-		entry, ok := action.Entry.(metastore.SegmentChangeGroupEntry)
-		if !ok || action.Type != metastore.ActionUpdate || entry.Group == nil ||
-			entry.Group.State != model.SegmentChangeStateCommitted {
-			continue
-		}
-		for _, id := range entry.Group.NewSegmentIDs {
-			if _, ok := updatePack.segments[id]; !ok {
-				return merr.WrapErrDataIntegrityMsg(
-					"segment change group %d publish: member %d is absent from meta (externally dropped?)",
-					entry.Group.GroupID, id)
-			}
-		}
-	}
-
 	if err := updatePack.Validate(); err != nil {
 		// C16: errIgnoredSegmentMetaOperation must not fail the composite write
 		// nor loop a retrying RPC. UpdateSegmentsInfo maps it to nil (a stale
@@ -673,6 +659,39 @@ func (m *meta) UpdateSegmentsInfoAndChangeGroups(ctx context.Context, groupActio
 			}
 		} else {
 			return err
+		}
+	}
+
+	// C3 (re-checked AFTER the stale-segment deletion above): for a COMMITTED
+	// (publish) transition, every member must be present in the pack AND
+	// actually flipped visible (IsInvisible=false). The operator return value
+	// alone is ambiguous — UpdateStatusOperator returns false both for an
+	// absent segment and for an already-reached target state (the idempotent
+	// superseded-already-Dropped skip) — so verify member presence AND
+	// visibility explicitly against the pack. An externally dropped member, or
+	// a member whose IsInvisible flip was discarded because a stale
+	// save-binlog-paths operation removed it, would otherwise let the publish
+	// write only SaveSegmentChangeGroup(COMMITTED): the group reaches a
+	// terminal state with no visible replacement. The design's failure matrix
+	// requires the caller to mark the group FAILED here.
+	for _, action := range groupActions {
+		entry, ok := action.Entry.(metastore.SegmentChangeGroupEntry)
+		if !ok || action.Type != metastore.ActionUpdate || entry.Group == nil ||
+			entry.Group.State != model.SegmentChangeStateCommitted {
+			continue
+		}
+		for _, id := range entry.Group.NewSegmentIDs {
+			segment, ok := updatePack.segments[id]
+			if !ok {
+				return merr.WrapErrDataIntegrityMsg(
+					"segment change group %d publish: member %d is absent from meta or was dropped by a stale operation (externally dropped?)",
+					entry.Group.GroupID, id)
+			}
+			if segment.GetIsInvisible() {
+				return merr.WrapErrDataIntegrityMsg(
+					"segment change group %d publish: member %d is still invisible (no visibility flip in this write)",
+					entry.Group.GroupID, id)
+			}
 		}
 	}
 	updatePack.prepareSegmentMetricUpdates()

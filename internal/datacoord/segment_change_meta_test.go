@@ -129,15 +129,23 @@ func TestMeta_UpdateSegmentChangeGroup_Transitions(t *testing.T) {
 	require.NoError(t, m.UpdateSegmentChangeGroup(ctx, ready))
 	require.True(t, m.HasStagedSegment(ctx, 10, 1001), "READY members are still staged")
 
-	// READY -> COMMITTED (standalone; the composite publish is tested below).
+	// READY -> COMMITTED is rejected on the STANDALONE path (the composite
+	// publish must flip members visible and retire parents atomically).
 	committed := ready.Clone()
 	committed.State = model.SegmentChangeStateCommitted
 	committed.CommitTS = 500
-	require.NoError(t, m.UpdateSegmentChangeGroup(ctx, committed))
-	require.False(t, m.HasStagedSegment(ctx, 10, 1001), "COMMITTED members leave the staged index")
+	require.Error(t, m.UpdateSegmentChangeGroup(ctx, committed),
+		"COMMITTED must not be reachable via the standalone transition")
+
+	// A terminal transition releases the staged index; use ABORTED as the
+	// representative terminal state here (COMMITTED is composite-only).
+	aborted := ready.Clone()
+	aborted.State = model.SegmentChangeStateAborted
+	require.NoError(t, m.UpdateSegmentChangeGroup(ctx, aborted))
+	require.False(t, m.HasStagedSegment(ctx, 10, 1001), "terminal members leave the staged index")
 
 	// Updating an unknown group fails.
-	ghost := committed.Clone()
+	ghost := aborted.Clone()
 	ghost.GroupID = 42
 	require.Error(t, m.UpdateSegmentChangeGroup(ctx, ghost))
 }
@@ -434,6 +442,79 @@ func TestMeta_LoadSegmentChangeGroups_L0ExemptionPersistedStable(t *testing.T) {
 	require.Len(t, byID, 2)
 	require.Equal(t, map[int64]int64{1001: 1, 1002: 2}, staged, "members stay staged")
 	require.Empty(t, superseded, "L0-exempt superseded parents are never indexed")
+}
+
+// TestMeta_PublishRequiresVisibleMembers verifies chyezh#1/#2b: a COMMITTED
+// composite publish must actually flip its members visible — a member whose
+// flip was discarded by a stale save-binlog-paths operation, or a member in
+// the pack that was never flipped, must fail the write instead of persisting
+// the terminal marker with no visible replacement.
+func TestMeta_PublishRequiresVisibleMembers(t *testing.T) {
+	ctx := context.Background()
+	newMetaWithGroup := func() (*meta, *model.SegmentChangeGroup) {
+		m, err := newMemoryMeta(t)
+		require.NoError(t, err)
+		require.NoError(t, m.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{
+			ID: 1001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
+			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1, IsInvisible: true,
+		})))
+		require.NoError(t, m.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{
+			ID: 2001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
+			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1,
+		})))
+		group := newTestGroup()
+		require.NoError(t, m.AddSegmentChangeGroup(ctx, group))
+		ready := group.Clone()
+		ready.State = model.SegmentChangeStateReady
+		require.NoError(t, m.UpdateSegmentChangeGroup(ctx, ready))
+		return m, ready
+	}
+
+	t.Run("member flip discarded by stale save-binlog (chyezh#1)", func(t *testing.T) {
+		m, ready := newMetaWithGroup()
+		committed := ready.Clone()
+		committed.State = model.SegmentChangeStateCommitted
+		err := m.UpdateSegmentsInfoAndChangeGroups(ctx,
+			[]metastore.UpdateAction{metastore.SaveSegmentChangeGroup(committed)},
+			SetSegmentIsInvisible(1001, false),
+			UpdateBinlogsFromSaveBinlogPathsOperator(1001, nil, nil, nil, nil), // stale on the member
+		)
+		require.Error(t, err, "stale op discarding a member's flip must fail the publish")
+		require.Equal(t, model.SegmentChangeStateReady, m.GetSegmentChangeGroup(ctx, 10, 1).State)
+	})
+
+	t.Run("member in pack but never flipped (chyezh#2b)", func(t *testing.T) {
+		m, ready := newMetaWithGroup()
+		committed := ready.Clone()
+		committed.State = model.SegmentChangeStateCommitted
+		err := m.UpdateSegmentsInfoAndChangeGroups(ctx,
+			[]metastore.UpdateAction{metastore.SaveSegmentChangeGroup(committed)},
+			UpdateCommitTimestamp(1001, 500), // member in pack, IsInvisible still true
+		)
+		require.Error(t, err, "COMMITTED with an unflipped member must fail")
+		require.Equal(t, model.SegmentChangeStateReady, m.GetSegmentChangeGroup(ctx, 10, 1).State)
+	})
+}
+
+// TestMeta_UpdateSegmentChangeGroup_CommittedOnlyViaComposite verifies
+// chyezh#2a: the standalone transition path rejects COMMITTED — publication
+// must go through UpdateSegmentsInfoAndChangeGroups.
+func TestMeta_UpdateSegmentChangeGroup_CommittedOnlyViaComposite(t *testing.T) {
+	m, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	group := newTestGroup()
+	require.NoError(t, m.AddSegmentChangeGroup(ctx, group))
+	ready := group.Clone()
+	ready.State = model.SegmentChangeStateReady
+	require.NoError(t, m.UpdateSegmentChangeGroup(ctx, ready))
+
+	committed := ready.Clone()
+	committed.State = model.SegmentChangeStateCommitted
+	err = m.UpdateSegmentChangeGroup(ctx, committed)
+	require.Error(t, err, "COMMITTED must not be reachable via the standalone transition")
+	require.Equal(t, model.SegmentChangeStateReady, m.GetSegmentChangeGroup(ctx, 10, 1).State)
 }
 
 // TestMeta_LoadSegmentChangeGroups_InvalidStateFailsClosed verifies C34: a
@@ -808,13 +889,15 @@ func TestMeta_AddSegmentChangeGroup_AntiDuplication(t *testing.T) {
 		ready := base.Clone()
 		ready.State = model.SegmentChangeStateReady
 		require.NoError(t, m.UpdateSegmentChangeGroup(ctx, ready))
-		committed := ready.Clone()
-		committed.State = model.SegmentChangeStateCommitted
-		require.NoError(t, m.UpdateSegmentChangeGroup(ctx, committed))
+		// ABORTED is a terminal state reachable standalone; it releases the
+		// superseded reference exactly like COMMITTED (which is composite-only).
+		aborted := ready.Clone()
+		aborted.State = model.SegmentChangeStateAborted
+		require.NoError(t, m.UpdateSegmentChangeGroup(ctx, aborted))
 
 		reuse := base.Clone()
 		reuse.GroupID = 2
-		reuse.SupersededSegmentIDs = []int64{2001} // parent was released on commit
+		reuse.SupersededSegmentIDs = []int64{2001} // parent was released on the terminal transition
 		require.NoError(t, m.AddSegmentChangeGroup(ctx, reuse))
 		deleteGroupCleanup(t, m, 10, 1)
 		deleteGroupCleanup(t, m, 10, 2)
