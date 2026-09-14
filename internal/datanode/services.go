@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/external"
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"github.com/milvus-io/milvus/internal/datanode/index"
+	"github.com/milvus-io/milvus/internal/datanode/taskresource"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -850,6 +851,20 @@ func nodeTaskCapacity() taskcommon.Resource {
 	return total
 }
 
+// correctResource returns what this node books for a task: the correction the
+// task family computed from the request (package taskresource), logged beside
+// DataCoord's estimate whenever the two differ so the gap stays observable.
+func (node *DataNode) correctResource(ctx context.Context, properties taskcommon.Properties, estimate, corrected taskcommon.Resource) taskcommon.Resource {
+	if corrected != estimate {
+		mlog.Info(ctx, "task resource corrected on accept",
+			mlog.String("taskType", properties[taskcommon.TypeKey]),
+			mlog.String("taskID", properties[taskcommon.TaskIDKey]),
+			mlog.Stringer("estimate", estimate),
+			mlog.Stringer("corrected", corrected))
+	}
+	return corrected
+}
+
 // Not in used now
 func (node *DataNode) DropCompactionPlan(ctx context.Context, req *datapb.DropCompactionPlanRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
@@ -887,7 +902,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
 		}
-		return node.preImport(ctx, req, resource)
+		return node.preImport(ctx, req, node.correctResource(ctx, properties, resource, taskresource.CorrectPreImport(req, resource)))
 	case taskcommon.Import:
 		req := &datapb.ImportRequest{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
@@ -896,7 +911,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
 		}
-		return node.importV2(ctx, req, resource)
+		return node.importV2(ctx, req, node.correctResource(ctx, properties, resource, taskresource.CorrectImport(req, resource)))
 	case taskcommon.Compaction:
 		req := &datapb.CompactionPlan{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
@@ -905,7 +920,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
 		}
-		return node.compactionV2(ctx, req, resource)
+		return node.compactionV2(ctx, req, node.correctResource(ctx, properties, resource, taskresource.CorrectCompaction(req, resource)))
 	case taskcommon.Index:
 		req := &workerpb.CreateJobRequest{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
@@ -914,7 +929,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
 		}
-		return node.createIndexTask(ctx, req, resource)
+		return node.createIndexTask(ctx, req, node.correctResource(ctx, properties, resource, taskresource.CorrectIndex(req, resource)))
 	case taskcommon.Stats:
 		req := &workerpb.CreateStatsRequest{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
@@ -923,7 +938,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
 		}
-		return node.createStatsTask(ctx, req, resource)
+		return node.createStatsTask(ctx, req, node.correctResource(ctx, properties, resource, taskresource.CorrectStats(req, resource)))
 	case taskcommon.Analyze:
 		req := &workerpb.AnalyzeRequest{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
@@ -932,7 +947,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
 		}
-		return node.createAnalyzeTask(ctx, req, resource)
+		return node.createAnalyzeTask(ctx, req, node.correctResource(ctx, properties, resource, taskresource.CorrectAnalyze(req, resource)))
 	case taskcommon.RefreshExternalCollection:
 		req := &datapb.RefreshExternalCollectionTaskRequest{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {

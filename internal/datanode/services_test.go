@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/external"
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"github.com/milvus-io/milvus/internal/datanode/index"
+	"github.com/milvus-io/milvus/internal/datanode/taskresource"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -808,6 +809,53 @@ func (s *DataNodeServicesSuite) TestCreateTaskBooksResourceFromProperties() {
 		s.NoError(merr.CheckRPCCall(status, nil))
 		s.Equal(before.Add(taskcommon.Resource{CPU: 2, Memory: 1 << 30}),
 			s.node.taskScheduler.TaskQueue.GetUsingResource())
+	})
+
+	s.Run("the accepting node books its correction, not the estimate", func() {
+		// A 1M x 128-dim float vector HNSW build: the node knows the field is
+		// exactly 512MB and prices the graph by M, so what it books differs from
+		// the 1GiB DataCoord shipped, and QuerySlot reports the corrected value.
+		const buildID = int64(9005)
+		payload, err := proto.Marshal(&workerpb.CreateJobRequest{
+			BuildID:       buildID,
+			StorageConfig: s.storageConfig,
+			Field:         &schemapb.FieldSchema{FieldID: 101, DataType: schemapb.DataType_FloatVector},
+			FieldID:       101,
+			NumRows:       1_000_000,
+			Dim:           128,
+			IndexParams:   []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "HNSW"}, {Key: "M", Value: "16"}},
+		})
+		s.NoError(err)
+		estimate := taskcommon.Resource{CPU: 8, Memory: 1 << 30}
+		want := taskresource.CorrectIndex(&workerpb.CreateJobRequest{
+			Field:       &schemapb.FieldSchema{FieldID: 101, DataType: schemapb.DataType_FloatVector},
+			FieldID:     101,
+			NumRows:     1_000_000,
+			Dim:         128,
+			IndexParams: []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "HNSW"}, {Key: "M", Value: "16"}},
+		}, estimate)
+		s.NotEqual(estimate, want, "the correction must be observable or the test proves nothing")
+
+		before := s.node.taskScheduler.TaskQueue.GetUsingResource()
+		availableBefore, err := s.node.QuerySlot(s.ctx, &datapb.QuerySlotRequest{})
+		s.NoError(err)
+		status, err := s.node.CreateTask(s.ctx, &workerpb.CreateTaskRequest{
+			Properties: map[string]string{
+				taskcommon.ClusterIDKey: "cluster-0",
+				taskcommon.TypeKey:      taskcommon.Index,
+				taskcommon.TaskIDKey:    strconv.FormatInt(buildID, 10),
+				taskcommon.CPUKey:       strconv.FormatInt(estimate.CPU, 10),
+				taskcommon.MemoryKey:    strconv.FormatInt(estimate.Memory, 10),
+			},
+			Payload: payload,
+		})
+		s.NoError(err)
+		s.NoError(merr.CheckRPCCall(status, nil))
+		s.Equal(before.Add(want), s.node.taskScheduler.TaskQueue.GetUsingResource())
+
+		availableAfter, err := s.node.QuerySlot(s.ctx, &datapb.QuerySlotRequest{})
+		s.NoError(err)
+		s.Equal(max(availableBefore.GetAvailableMemory()-want.Memory, 0), availableAfter.GetAvailableMemory())
 	})
 
 	s.Run("absent properties book zero", func() {

@@ -119,27 +119,38 @@ func (t *ImportTask) GetResource() taskcommon.Resource {
 }
 
 func (t *ImportTask) GetBufferSize() int64 {
-	// Calculate the task buffer size based on the number of vchannels and partitions
-	baseBufferSize := paramtable.Get().DataNodeCfg.ImportBaseBufferSize.GetAsInt()
-	vchannelNum := len(t.GetVchannels())
-	partitionNum := len(t.GetPartitionIDs())
-	taskBufferSize := int64(baseBufferSize * vchannelNum * partitionNum)
-
-	// If the file size is smaller than the task buffer size, use the file size
 	fileSize := lo.MaxBy(t.GetFileStats(), func(a, b *datapb.ImportFileStats) bool {
 		return a.GetTotalMemorySize() > b.GetTotalMemorySize()
 	}).GetTotalMemorySize()
-	if fileSize != 0 && fileSize < taskBufferSize {
-		taskBufferSize = fileSize
+	return CalculateImportBufferSize(len(t.GetVchannels()), len(t.GetPartitionIDs()), fileSize)
+}
+
+// CalculateImportBufferSize is the read buffer one file of an import task
+// allocates: the base buffer per (vchannel, partition) pair, capped at the
+// largest file when that is known (largestFile > 0) and at the import memory
+// limit of this machine. It is the single definition shared by the task that
+// allocates the buffer and by the resource accounting that books it.
+func CalculateImportBufferSize(vchannelNum, partitionNum int, largestFile int64) int64 {
+	baseBufferSize := paramtable.Get().DataNodeCfg.ImportBaseBufferSize.GetAsInt64()
+	taskBufferSize := baseBufferSize * int64(vchannelNum) * int64(partitionNum)
+
+	// If the file size is smaller than the task buffer size, use the file size
+	if largestFile != 0 && largestFile < taskBufferSize {
+		taskBufferSize = largestFile
 	}
 
 	// Task buffer size should not exceed the memory limit
-	percentage := paramtable.Get().DataNodeCfg.ImportMemoryLimitPercentage.GetAsFloat()
-	memoryLimit := int64(float64(hardware.GetMemoryCount()) * percentage / 100.0)
-	if taskBufferSize > memoryLimit {
+	if memoryLimit := ImportMemoryLimit(); taskBufferSize > memoryLimit {
 		return memoryLimit
 	}
 	return taskBufferSize
+}
+
+// ImportMemoryLimit is the most memory all import buffers on this machine may
+// hold at once (the memory allocator blocks beyond it).
+func ImportMemoryLimit() int64 {
+	percentage := paramtable.Get().DataNodeCfg.ImportMemoryLimitPercentage.GetAsFloat()
+	return int64(float64(hardware.GetMemoryCount()) * percentage / 100.0)
 }
 
 func (t *ImportTask) Cancel() {
