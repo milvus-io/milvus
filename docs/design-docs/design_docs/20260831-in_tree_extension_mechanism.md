@@ -90,7 +90,13 @@ start-up. A compiled-in hook is otherwise treated exactly as a plug-in is: it
 gets the same `Init` call with the `hook.*` configuration before it is
 installed, a failure to initialize keeps the proxy from starting, and it is
 registered with the same watcher, so editing a `hook.*` key re-initializes it
-with the new configuration without a restart.
+with the new configuration without a restart. It differs in one respect:
+`common.panicWhenPluginFail`, which lets an operator run on without a plug-in
+that failed to load, does not reach it. A compiled-in hook that cannot
+initialize, or is configured beside a plug-in, stops the proxy whatever the
+setting says, because the distribution that compiled it in has switched the
+coordinators' behaviors on too, and a proxy serving through the default hook
+beside them would run half of that distribution.
 
 ### The query hook
 
@@ -309,8 +315,9 @@ them through `user.yaml` or the environment.
 
 - `pkg/extension`: the setters and getters, and the context mark.
 - hookutil: a compiled-in hook is used, refused beside a plug-in, absent by
-  default, initialized with the `hook.*` configuration, and re-initialized
-  when that configuration changes.
+  default, initialized with the `hook.*` configuration, re-initialized when
+  that configuration changes, and fatal when it cannot initialize even with
+  `common.panicWhenPluginFail` off.
 - hookutil: a compiled-in cipher is used when `cipherPlugin.soPathCpp` is
   set, refused beside `cipherPlugin.soPathGo`, idle without `soPathCpp`,
   absent by default, not installed when it cannot initialize, and

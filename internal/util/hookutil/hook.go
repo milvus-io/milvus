@@ -216,7 +216,15 @@ func InitOnceHook() {
 		err := initHook()
 		if err != nil {
 			soPath := paramtable.Get().ProxyCfg.SoPath.GetValue()
-			if paramtable.Get().CommonCfg.PanicWhenPluginFail.GetAsBool() {
+			// common.panicWhenPluginFail lets an operator run on without a
+			// plug-in that failed to load. A hook compiled into this binary is
+			// not a plug-in: the distribution that installed it has switched
+			// the coordinators' behaviors on too (extension.FormInstalled), so
+			// a proxy that carried on through the default hook would run half
+			// of that distribution, with its request policy missing. Its
+			// failure - it cannot initialize, or it is configured beside a
+			// plug-in - is fatal whatever the setting says.
+			if ext.InstalledHook() != nil || paramtable.Get().CommonCfg.PanicWhenPluginFail.GetAsBool() {
 				mlog.Panic(context.TODO(), "fail to init hook",
 					mlog.String("so_path", soPath), mlog.String("error", config.RedactedValue))
 			}
