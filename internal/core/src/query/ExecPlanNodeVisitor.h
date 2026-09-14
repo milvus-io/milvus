@@ -18,6 +18,7 @@
 #include "plan/PlanNode.h"
 #include "exec/QueryContext.h"
 #include "futures/Future.h"
+#include "query/SharedFilterBitsetResult.h"
 
 namespace milvus::query {
 
@@ -95,10 +96,44 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
         return expr_use_pk_index_;
     }
 
+    // ---- shared-filter hybrid search ----
+
+    // Phase 1: evaluate only the filter subtree and hand back its bitset.
+    // Mutually exclusive with SetPrecomputedBitset.
+    SharedFilterBitsetResultPtr
+    get_shared_filter_bitset_result(PlanNode& node) {
+        AssertInfo(precomputed_bitset_result_ == nullptr,
+                   "shared filter bitset computation cannot be combined with "
+                   "precomputed-bitset mode");
+        compute_filter_bitset_only_ = true;
+        node.accept(*this);
+        compute_filter_bitset_only_ = false;
+        AssertInfo(shared_filter_bitset_result_ != nullptr,
+                   "shared filter bitset execution produced no result");
+        return std::move(shared_filter_bitset_result_);
+    }
+
+    // Phase 2: execute one branch against a bitset computed earlier. The
+    // caller owns `result` and must keep it alive for the whole call; it is
+    // read-only here, so concurrent branches may share one.
+    ExecPlanNodeVisitor&
+    SetPrecomputedBitset(const SharedFilterBitsetResult* result) {
+        precomputed_bitset_result_ = result;
+        return *this;
+    }
+
     static BitsetType
     ExecuteTask(plan::PlanFragment& plan,
                 std::shared_ptr<milvus::exec::QueryContext> query_context,
                 bool collect_bitset = true);
+
+    // Runs a filter prefix and returns its output as the RowVector (bitmap +
+    // validity) the vector search consumes, rather than the bare bitset
+    // ExecuteTask folds it into.
+    static RowVectorPtr
+    ExecuteFilterPrefix(
+        plan::PlanFragment& plan,
+        std::shared_ptr<milvus::exec::QueryContext> query_context);
 
  private:
     const segcore::SegmentInterface& segment_;
@@ -112,6 +147,9 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
     RetrieveResultOpt retrieve_result_opt_;
 
     bool expr_use_pk_index_ = false;
+    bool compute_filter_bitset_only_ = false;
+    SharedFilterBitsetResultPtr shared_filter_bitset_result_{nullptr};
+    const SharedFilterBitsetResult* precomputed_bitset_result_{nullptr};
 };
 
 // for test use only

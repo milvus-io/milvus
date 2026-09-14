@@ -38,6 +38,8 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -60,6 +62,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
@@ -678,6 +681,123 @@ func (s *LocalSegment) Search(ctx context.Context, searchReq *segcore.SearchRequ
 	metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel).Observe(float64(tr.ElapseSpan().Microseconds()) / 1000.0)
 	log.Debug("search segment done")
 	return result, nil
+}
+
+// SearchGrouped runs several branches that share one filter predicate against
+// a single evaluation of that filter.
+//
+// Phase 1 computes the shared prefix; phase 2 runs each branch's vector search
+// against it, concurrently -- the branches are independent given a read-only
+// bitset, and serializing them would trade the saved filter for lost overlap.
+// The fan-out lives here rather than inside one cgo call on purpose: a job
+// running on getSearchCPUExecutor that submits to that same bounded pool and
+// then blocks would deadlock once every thread held such a waiter.
+//
+// limiter bounds the branch searches; it belongs to the task, so every segment
+// of one grouped request shares it. See runBranchesBounded for what a nil one
+// means.
+func (s *LocalSegment) SearchGrouped(ctx context.Context, searchReqs []*segcore.SearchRequest, limiter *semaphore.Weighted) ([]*segcore.SearchResult, error) {
+	if len(searchReqs) == 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("SearchGrouped requires at least one request")
+	}
+	if len(searchReqs) == 1 {
+		result, err := s.Search(ctx, searchReqs[0])
+		if err != nil {
+			return nil, err
+		}
+		return []*segcore.SearchResult{result}, nil
+	}
+
+	log := log.Ctx(ctx).With(
+		zap.Uint64("mvcc", searchReqs[0].MVCC()),
+		zap.Int64("collectionID", s.Collection()),
+		zap.Int64("segmentID", s.ID()),
+		zap.String("segmentType", s.segmentType.String()),
+		zap.Int("branches", len(searchReqs)),
+	)
+
+	if !s.ptrLock.PinIf(state.IsNotReleased) {
+		return nil, merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
+	}
+	defer s.ptrLock.Unpin()
+
+	tr := timerecord.NewTimeRecorder("cgoSearchGrouped")
+	prefix, err := s.csegment.ComputeFilterBitset(ctx, searchReqs[0])
+	if err != nil {
+		log.Warn("compute shared filter bits failed", zap.Error(err))
+		return nil, err
+	}
+	defer prefix.Release()
+
+	results := make([]*segcore.SearchResult, len(searchReqs))
+	err = runBranchesBounded(ctx, len(searchReqs), limiter, func(branchCtx context.Context, branch int) error {
+		result, err := s.csegment.SearchWithBitset(branchCtx, searchReqs[branch], prefix)
+		if err != nil {
+			return err
+		}
+		results[branch] = result
+		return nil
+	})
+	if err != nil {
+		// Release whatever did come back before the group failed; the caller
+		// only cleans up on a nil error.
+		for _, result := range results {
+			if result != nil {
+				result.Release()
+			}
+		}
+		log.Warn("grouped search failed", zap.Error(err))
+		return nil, err
+	}
+
+	metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel).
+		Observe(float64(tr.ElapseSpan().Microseconds()) / 1000.0)
+	log.Debug("grouped search segment done")
+	return results, nil
+}
+
+// runBranchesBounded runs one search per branch with at most limiter's weight
+// of them in flight. limiter belongs to the task, not to this segment: a
+// hybrid search may carry a thousand sub-requests and every segment fans all
+// of them out, so a per-segment cap would still let the segment fan-out
+// multiply it. A nil limiter means the caller has no task to scope the bound
+// to, and gets a local one of the same width.
+//
+// The caller sets the shared limiter width to the core count. This bounds the
+// branch goroutines and queued C++ searches across the admitted task; the
+// segment fan-out has its own bound for filter-bitset lifetime.
+//
+// A unit is taken before the branch goroutine starts rather than inside it, so
+// the group never creates more goroutines than it is allowed to run; otherwise
+// a thousand-branch request would park a thousand goroutines per segment
+// waiting for the same units. The dispatching goroutine holds no unit while it
+// waits for the next one, and every unit it takes is released by the goroutine
+// it hands it to, so waiting can only ever be on searches that are running.
+func runBranchesBounded(ctx context.Context, branches int, limiter *semaphore.Weighted, run func(ctx context.Context, branch int) error) error {
+	if limiter == nil {
+		limiter = semaphore.NewWeighted(int64(hardware.GetCPUNum()))
+	}
+
+	group, groupCtx := errgroup.WithContext(ctx)
+	var dispatchErr error
+	for i := 0; i < branches; i++ {
+		if err := limiter.Acquire(groupCtx, 1); err != nil {
+			// Only a done groupCtx fails this: the caller gave up, or a branch
+			// already failed. Whatever Wait reports is the more specific of
+			// the two, so this error is only the fallback.
+			dispatchErr = err
+			break
+		}
+		branch := i
+		group.Go(func() error {
+			defer limiter.Release(1)
+			return run(groupCtx, branch)
+		})
+	}
+	if err := group.Wait(); err != nil {
+		return err
+	}
+	return dispatchErr
 }
 
 func (s *LocalSegment) retrieve(ctx context.Context, plan *segcore.RetrievePlan, log *zap.Logger) (*segcore.RetrieveResult, error) {

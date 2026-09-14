@@ -149,6 +149,72 @@ func (s *cSegmentImpl) Search(ctx context.Context, searchReq *SearchRequest) (*S
 	return &SearchResult{cSearchResult: (C.CSearchResult)(result)}, nil
 }
 
+// ComputeFilterBitset evaluates the filter subtree of searchReq's plan once
+// and returns the bitset as an opaque handle for the branch searches to reuse.
+// enableExprCache is forwarded: whether the bitset comes from evaluation or
+// from the expression result cache is orthogonal to sharing it.
+func (s *cSegmentImpl) ComputeFilterBitset(ctx context.Context, searchReq *SearchRequest) (*SharedFilterBitsetResult, error) {
+	traceCtx := ParseCTraceContext(ctx)
+	defer runtime.KeepAlive(traceCtx)
+	defer runtime.KeepAlive(searchReq)
+
+	future := cgo.Async(ctx,
+		func() cgo.CFuturePtr {
+			return (cgo.CFuturePtr)(C.AsyncComputeFilterBitset(
+				traceCtx.ctx,
+				s.ptr,
+				searchReq.plan.cSearchPlan,
+				C.uint64_t(searchReq.mvccTimestamp),
+				C.int32_t(searchReq.consistencyLevel),
+				C.uint64_t(searchReq.collectionTTL),
+			))
+		},
+		cgo.WithName("compute-filter-bitset"),
+	)
+	defer future.Release()
+
+	result, err := future.BlockAndLeakyGet()
+	if err != nil {
+		return nil, err
+	}
+	return &SharedFilterBitsetResult{cSharedFilterBitsetResult: (C.CSharedFilterBitsetResult)(result)}, nil
+}
+
+// SearchWithBitset runs one branch's vector search against a shared filter
+// bitset. bitset is read-only here; concurrent calls may pass the same one.
+func (s *cSegmentImpl) SearchWithBitset(ctx context.Context, searchReq *SearchRequest, bitset *SharedFilterBitsetResult) (*SearchResult, error) {
+	if bitset == nil || bitset.cSharedFilterBitsetResult == nil {
+		return nil, merr.WrapErrServiceInternalMsg("SearchWithBitset called without a shared filter bitset")
+	}
+	traceCtx := ParseCTraceContext(ctx)
+	defer runtime.KeepAlive(traceCtx)
+	defer runtime.KeepAlive(searchReq)
+	defer runtime.KeepAlive(bitset)
+
+	future := cgo.Async(ctx,
+		func() cgo.CFuturePtr {
+			return (cgo.CFuturePtr)(C.AsyncSearchWithBitset(
+				traceCtx.ctx,
+				s.ptr,
+				searchReq.plan.cSearchPlan,
+				searchReq.cPlaceholderGroup,
+				bitset.cSharedFilterBitsetResult,
+				C.uint64_t(searchReq.mvccTimestamp),
+				C.int32_t(searchReq.consistencyLevel),
+				C.uint64_t(searchReq.collectionTTL),
+			))
+		},
+		cgo.WithName("search-with-bitset"),
+	)
+	defer future.Release()
+
+	result, err := future.BlockAndLeakyGet()
+	if err != nil {
+		return nil, err
+	}
+	return &SearchResult{cSearchResult: (C.CSearchResult)(result)}, nil
+}
+
 // Retrieve retrieves entities from the segment.
 func (s *cSegmentImpl) Retrieve(ctx context.Context, plan *RetrievePlan) (*RetrieveResult, error) {
 	traceCtx := ParseCTraceContext(ctx)

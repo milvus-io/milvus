@@ -16,6 +16,7 @@
 
 #include "expr/ITypeExpr.h"
 #include "query/PlanImpl.h"
+#include "query/PlanProto.h"
 #include "query/SubSearchResult.h"
 #include "query/Utils.h"
 #include "segcore/SegmentGrowing.h"
@@ -82,6 +83,46 @@ ExecPlanNodeVisitor::ExecuteTask(
     span.SetAttribute("total_rows", processed_num);
 
     return bitset_holder;
+}
+
+// Phase 1 of a shared-filter search. ExecuteTask folds the batches into a
+// bare BitsetType, which drops the validity bitmap; PhyVectorSearchNode reads
+// both (the element-level path derives its element bitset from the two), so
+// the prefix's output is kept as the RowVector the vector search would have
+// received from MvccNode.
+RowVectorPtr
+ExecPlanNodeVisitor::ExecuteFilterPrefix(
+    plan::PlanFragment& plan,
+    std::shared_ptr<milvus::exec::QueryContext> query_context) {
+    tracer::AutoSpan span("ExecuteFilterPrefix", tracer::GetRootSpan(), true);
+    span.SetAttribute("active_count", query_context->get_active_count());
+
+    auto task =
+        milvus::exec::Task::Create(DEFAULT_TASK_ID, plan, 0, query_context);
+    int64_t processed_num = 0;
+    RowVectorPtr bitset;
+    for (;;) {
+        auto result = task->Next();
+        if (!result) {
+            Assert(processed_num == query_context->get_active_count());
+            break;
+        }
+        const auto& childrens = result->childrens();
+        AssertInfo(childrens.size() == 1,
+                   "plannode result vector's children size not equal one");
+        auto vec = std::dynamic_pointer_cast<ColumnVector>(childrens[0]);
+        AssertInfo(vec != nullptr && vec->IsBitmap(),
+                   "shared filter prefix must produce a bitmap");
+        AssertInfo(bitset == nullptr,
+                   "shared filter prefix produced more than one batch");
+        processed_num += vec->size();
+        bitset = std::move(result);
+    }
+    span.SetAttribute("total_rows", processed_num);
+
+    AssertInfo(bitset != nullptr,
+               "shared filter prefix must produce exactly one batch");
+    return bitset;
 }
 
 std::unique_ptr<RetrieveResult>
@@ -169,6 +210,57 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
 
     auto active_count = segment->get_active_count(timestamp_);
 
+    // Shared-filter hybrid search, phase 1: run only the prefix
+    // (FilterBitsNode -> MvccNode) and hand back its bitset for the branches
+    // to reuse. No placeholder group and no vector search here.
+    if (compute_filter_bitset_only_) {
+        auto result = std::make_unique<SharedFilterBitsetResult>();
+        result->active_count = active_count;
+        result->segment_id = segment->get_segment_id();
+
+        // Strict on shape: throws for anything phase 2 could not rebind
+        // (an iterative-filter plan, whose predicate sits above the vector
+        // search), before any filter work is done.
+        auto filter_subtree =
+            ProtoParser::ExtractSharedFilterPrefix(node.plannodes_);
+        AssertInfo(filter_subtree != nullptr,
+                   "shared-filter search requires an extractable filter "
+                   "subtree; the delegator must not group this plan");
+
+        if (active_count == 0) {
+            // Nothing visible: leave `bitset` null. Every branch
+            // short-circuits to an empty result without touching the segment.
+            shared_filter_bitset_result_ = std::move(result);
+            return;
+        }
+
+        auto plan_fragment = plan::PlanFragment(filter_subtree);
+        auto query_context = std::make_shared<milvus::exec::QueryContext>(
+            DEAFULT_QUERY_ID,
+            segment,
+            active_count,
+            timestamp_,
+            collection_ttl_timestamp_,
+            consistency_level_,
+            node.plan_options_);
+
+        auto op_context = milvus::OpContext(cancel_token_);
+        query_context->set_op_context(&op_context);
+
+        result->bitset = ExecuteFilterPrefix(plan_fragment, query_context);
+        AssertInfo(result->bitset != nullptr,
+                   "shared filter produced a null bitset for segment {}",
+                   result->segment_id);
+        // What the filter read. Handed to one branch in phase 2; see
+        // SharedFilterBitsetResult::filter_storage_cost.
+        result->filter_storage_cost.scanned_remote_bytes =
+            op_context.storage_usage.scanned_cold_bytes.load();
+        result->filter_storage_cost.scanned_total_bytes =
+            op_context.storage_usage.scanned_total_bytes.load();
+        shared_filter_bitset_result_ = std::move(result);
+        return;
+    }
+
     // PreExecute: skip all calculation
     if (active_count == 0) {
         auto& ph = placeholder_group_->at(0);
@@ -177,8 +269,38 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
         return;
     }
 
-    // Construct plan fragment
-    auto plan = plan::PlanFragment(node.plannodes_);
+    // Construct plan fragment. In shared-filter phase 2 the prefix is replaced
+    // by a PrecomputedBitsetNode so only this branch's vector search runs.
+    auto plannodes = node.plannodes_;
+    // The caller checks segment identity and the delegator checks predicate
+    // identity. Keep the filter and branch visible-row bounds equal.
+    const auto* shared = precomputed_bitset_result_;
+    const bool reuse_bitset =
+        shared != nullptr && shared->bitset != nullptr &&
+        shared->active_count == active_count;
+    if (shared != nullptr && !reuse_bitset) {
+        // A null bitset is normal only for active_count == 0, which returns
+        // above. Reaching this branch means the shared result is unusable.
+        LOG_WARN(
+            "shared filter bitset cannot be reused on segment {}: bitset "
+            "present {}, active_count {} vs {}; falling back to evaluating "
+            "the filter for this branch",
+            segment->get_segment_id(),
+            shared->bitset != nullptr,
+            shared->active_count,
+            active_count);
+    }
+    if (reuse_bitset) {
+        // No signature re-check: rendering the filter subtree's ToString()
+        // once per branch per segment is pure overhead in the correct case,
+        // and predicate equality is already established by the delegator's
+        // byte comparison.
+        //
+        // Built once per branch and shared by every segment of this search --
+        // see VectorPlanNode::shared_filter_plannodes.
+        plannodes = node.shared_filter_plannodes();
+    }
+    auto plan = plan::PlanFragment(plannodes);
 
     // Set query context
     auto query_context =
@@ -192,6 +314,10 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
 
     query_context->set_search_info(node.search_info_);
     query_context->set_placeholder_group(placeholder_group_);
+    if (reuse_bitset) {
+        query_context->set_precomputed_bitset(
+            precomputed_bitset_result_->bitset);
+    }
 
     // Set op context to query context
     auto op_context = milvus::OpContext(cancel_token_);
@@ -206,6 +332,15 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
         op_context.storage_usage.scanned_cold_bytes.load();
     search_result_opt_->search_storage_cost_.scanned_total_bytes =
         op_context.storage_usage.scanned_total_bytes.load();
+    // This branch did not run the filter; the bytes the filter read in
+    // phase 1 are reported by exactly one branch of the group, so the group's
+    // total matches what a plain search would have carried.
+    if (reuse_bitset && shared->ClaimFilterStorageCost()) {
+        search_result_opt_->search_storage_cost_.scanned_remote_bytes +=
+            shared->filter_storage_cost.scanned_remote_bytes;
+        search_result_opt_->search_storage_cost_.scanned_total_bytes +=
+            shared->filter_storage_cost.scanned_total_bytes;
+    }
 }
 
 }  // namespace milvus::query
