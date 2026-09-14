@@ -22,6 +22,10 @@
 #include "knowhere/comp/index_param.h"
 
 const int64_t INVALID_FIELD_ID = -1;
+inline constexpr char kStrictGroupAcceptanceThreshold[] =
+    "strict_group_acceptance_threshold";
+inline constexpr char kStrictGroupProbeCandidates[] =
+    "strict_group_probe_candidates";
 const int64_t INVALID_SEG_OFFSET = -1;
 const int64_t INVALID_ARRAY_INDEX = -1;
 const milvus::PkType INVALID_PK;  // of std::monostate if not set.
@@ -130,6 +134,8 @@ const std::string DIM_KEY = "dim";
 const std::string DATA_TYPE_KEY = "data_type";
 const std::string ELEMENT_TYPE_KEY = "element_type";
 const std::string INDEX_NUM_ROWS_KEY = "index_num_rows";
+const std::string NUM_ROWS_KEY = "num_rows";
+const std::string OFFSET_KEY = "offset";
 const std::string SEGMENT_MANIFEST_KEY = "segment_manifest";
 const std::string STATS_BASE_PATH_KEY = "stats_base_path";
 const std::string JSON_STATS_CACHE_SHARD_KEY = "json_stats_cache_shard";

@@ -22,6 +22,7 @@ import (
 	"math"
 	"reflect"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 
@@ -91,6 +92,9 @@ type taskEntry struct {
 	done   chan struct{}
 	once   sync.Once
 	wakeup func()
+	// nextRun is the earliest time a delayed (ErrDelay) requeue may execute
+	// again. Zero means the entry may run immediately.
+	nextRun time.Time
 }
 
 func (e *taskEntry) finish() {
@@ -164,7 +168,7 @@ func (s *nodeScheduler) resize(concurrency int) {
 }
 
 func (s *nodeScheduler) Submit(task Task) TaskHandle {
-	ctx, cancel := context.WithCancel(s.ctx) //nolint:gosec // G118: cancel is stored in taskEntry and called by finish on completion, cancellation, or close.
+	ctx, cancel := context.WithCancel(s.ctx) // #nosec G118 -- task completion invokes the retained cancel function.
 	entry := &taskEntry{
 		task:   task,
 		ctx:    ctx,
@@ -228,6 +232,13 @@ func (s *nodeScheduler) runWorker() {
 
 		err := entry.task.Execute(entry.ctx)
 		if entry.ctx.Err() != nil {
+			// Context canceled (e.g. shutdown): finish the entry without
+			// requeueing. Note the task itself may not have done its queue
+			// bookkeeping — with a canceled ctx a retryable segment task
+			// stays in pendingTasks[0] and the segment stops submitting. That
+			// is confined to the shutdown path (Submit handles are dropped,
+			// Cancel is never called) and must be drained by the owner before
+			// Close completes; see ViewConfig.Runtime.
 			entry.finish()
 			continue
 		}
@@ -257,9 +268,22 @@ func (s *nodeScheduler) dequeue() *taskEntry {
 			return nil
 		}
 		if s.queue.Len() > 0 {
-			element := s.queue.Front()
-			s.queue.Remove(element)
-			return element.Value.(*taskEntry)
+			now := time.Now()
+			for element := s.queue.Front(); element != nil; element = element.Next() {
+				entry := element.Value.(*taskEntry)
+				// A delayed requeue is not runnable yet: skip it so it cannot
+				// head-of-line block runnable entries behind it. Ordering among
+				// tasks is the caller's responsibility, not this FIFO's. If every
+				// entry is delayed, fall through to wait for the requeue's
+				// wake-up timer instead of spinning.
+				if !entry.nextRun.IsZero() && now.Before(entry.nextRun) {
+					continue
+				}
+				s.queue.Remove(element)
+				return entry
+			}
+			s.cond.Wait()
+			continue
 		}
 		s.cond.Wait()
 	}
@@ -272,10 +296,22 @@ func (s *nodeScheduler) requeue(entry *taskEntry) bool {
 	if s.closed || entry.ctx.Err() != nil {
 		return false
 	}
+	// Back off a delayed retry: without the delay, a task whose Execute keeps
+	// failing (e.g. an object-storage outage surfaced as ErrDelay) is dequeued
+	// and re-executed in a tight loop, burning a worker at 100% CPU. The timer
+	// wakes the condition variable once the entry becomes runnable again.
+	entry.nextRun = time.Now().Add(delayOnRequeue)
 	s.queue.PushBack(entry)
 	s.cond.Signal()
+	time.AfterFunc(delayOnRequeue, s.wakeup)
 	return true
 }
+
+// delayOnRequeue is the minimum pause between a failed (ErrDelay) execution
+// and its retry. It bounds the retry rate of every scheduler task without
+// blocking the queue: delayed entries are simply not runnable until the pause
+// elapses.
+const delayOnRequeue = 100 * time.Millisecond
 
 var getGlobalScheduler = sync.OnceValue(func() *nodeScheduler {
 	params := paramtable.Get()

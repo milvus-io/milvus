@@ -14,6 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "common/CGoCatch.h"
 #include "storage/storage_c.h"
 
 #include <exception>
@@ -24,6 +25,7 @@
 #include "common/EasyAssert.h"
 #include "monitor/scope_metric.h"
 #include "storage/FileWriter.h"
+#include "storage/LocalFileIOPool.h"
 #include "storage/LocalChunkManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/MmapManager.h"
@@ -52,9 +54,8 @@ GetLocalUsedSize(const char* c_dir, int64_t* size) {
             *size = 0;
         }
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -64,9 +65,8 @@ InitLocalChunkManagerSingleton(const char* c_path) {
         milvus::storage::LocalChunkManagerSingleton::GetInstance().Init(path);
 
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -108,9 +108,8 @@ InitRemoteChunkManagerSingleton(CStorageConfig c_storage_config) {
             storage_config);
 
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 void
@@ -144,31 +143,35 @@ InitMmapManager(CMmapConfig c_mmap_config) {
             std::string(c_mmap_config.json_stats_mmap_path);
         milvus::storage::MmapManager::GetInstance().Init(mmap_config);
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
 InitDiskFileWriterConfig(CDiskWriteConfig c_disk_write_config) {
     try {
-        std::string mode_str(c_disk_write_config.mode);
+        const std::string mode_str(c_disk_write_config.mode);
+        auto mode = milvus::storage::FileWriter::WriteMode::BUFFERED;
         if (mode_str == "direct") {
-            milvus::storage::FileWriter::SetMode(
-                milvus::storage::FileWriter::WriteMode::DIRECT);
-            // buffer size checking is done in FileWriter::SetBufferSize,
-            // and it will try to find a proper and valid buffer size
-            milvus::storage::FileWriter::SetBufferSize(
-                c_disk_write_config.buffer_size_kb * 1024);  // convert to bytes
-        } else if (mode_str == "buffered") {
-            milvus::storage::FileWriter::SetMode(
-                milvus::storage::FileWriter::WriteMode::BUFFERED);
-        } else {
+            mode = milvus::storage::FileWriter::WriteMode::DIRECT;
+        } else if (mode_str != "buffered") {
             return milvus::FailureCStatus(milvus::ConfigInvalid,
                                           "Invalid mode");
         }
-        milvus::storage::FileWriteWorkerPool::GetInstance().Configure(
+        // Reject invalid input before publishing any part of the configuration.
+        const auto& rate_config = c_disk_write_config.rate_limiter_config;
+        milvus::storage::io::WriteRateLimiter::ValidateConfig(
+            rate_config.refill_period_us,
+            rate_config.avg_bps,
+            rate_config.max_burst_bps);
+        milvus::storage::LocalFileIOPool::GetInstance().Configure(
             c_disk_write_config.nr_threads);
+        milvus::storage::FileWriter::SetMode(mode);
+        if (mode == milvus::storage::FileWriter::WriteMode::DIRECT) {
+            // SetBufferSize normalizes the configured size and alignment.
+            milvus::storage::FileWriter::SetBufferSize(
+                c_disk_write_config.buffer_size_kb * 1024);
+        }
         // configure rate limiter
         milvus::storage::io::WriteRateLimiter::GetInstance().Configure(
             c_disk_write_config.rate_limiter_config.refill_period_us,
@@ -178,9 +181,8 @@ InitDiskFileWriterConfig(CDiskWriteConfig c_disk_write_config) {
             c_disk_write_config.rate_limiter_config.middle_priority_ratio,
             c_disk_write_config.rate_limiter_config.low_priority_ratio);
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -203,9 +205,8 @@ InitArrowReaderConfig(CArrowReaderConfig c_arrow_reader_config) {
             .SetArrowReaderConfig(c_arrow_reader_config.hole_size_limit_bytes,
                                   c_arrow_reader_config.range_size_limit_bytes);
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 void
@@ -292,18 +293,27 @@ InitExternalIopsConfig(uint32_t initial_rate, uint32_t max_rate) {
 
 void
 CleanRemoteChunkManagerSingleton() {
-    milvus::storage::RemoteChunkManagerSingleton::GetInstance().Release();
+    try {
+        milvus::storage::RemoteChunkManagerSingleton::GetInstance().Release();
+    }
+    CGO_CATCH_AND_LOG("CleanRemoteChunkManagerSingleton")
 }
 
 void
 ResizeTheadPool(int64_t priority, float ratio) {
-    milvus::ThreadPools::ResizeThreadPool(
-        static_cast<milvus::ThreadPoolPriority>(priority), ratio);
+    try {
+        milvus::ThreadPools::ResizeThreadPool(
+            static_cast<milvus::ThreadPoolPriority>(priority), ratio);
+    }
+    CGO_CATCH_AND_LOG("ResizeTheadPool")
 }
 
 void
 CleanPluginLoader() {
-    milvus::storage::PluginLoader::GetInstance().unloadAll();
+    try {
+        milvus::storage::PluginLoader::GetInstance().unloadAll();
+    }
+    CGO_CATCH_AND_LOG("CleanPluginLoader")
 }
 
 CStatus
@@ -311,34 +321,39 @@ InitPluginLoader(const char* plugin_path) {
     try {
         milvus::storage::PluginLoader::GetInstance().load(plugin_path);
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
 PutOrRefPluginContext(CPluginContext c_plugin_context) {
-    auto cipherPluginPtr =
-        milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
-    if (!cipherPluginPtr) {
-        return milvus::FailureCStatus(milvus::UnexpectedError,
-                                      "cipher plugin not loaded");
+    try {
+        auto cipherPluginPtr =
+            milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
+        if (!cipherPluginPtr) {
+            return milvus::FailureCStatus(milvus::UnexpectedError,
+                                          "cipher plugin not loaded");
+        }
+        cipherPluginPtr->Update(c_plugin_context.ez_id,
+                                c_plugin_context.collection_id,
+                                std::string(c_plugin_context.key));
+        return milvus::SuccessCStatus();
     }
-    cipherPluginPtr->Update(c_plugin_context.ez_id,
-                            c_plugin_context.collection_id,
-                            std::string(c_plugin_context.key));
-    return milvus::SuccessCStatus();
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
 UnRefPluginContext(CPluginContext c_plugin_context) {
-    auto cipherPluginPtr =
-        milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
-    if (!cipherPluginPtr) {
-        return milvus::FailureCStatus(milvus::UnexpectedError,
-                                      "cipher plugin not loaded");
+    try {
+        auto cipherPluginPtr =
+            milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
+        if (!cipherPluginPtr) {
+            return milvus::FailureCStatus(milvus::UnexpectedError,
+                                          "cipher plugin not loaded");
+        }
+        cipherPluginPtr->Update(
+            c_plugin_context.ez_id, c_plugin_context.collection_id, "");
+        return milvus::SuccessCStatus();
     }
-    cipherPluginPtr->Update(
-        c_plugin_context.ez_id, c_plugin_context.collection_id, "");
-    return milvus::SuccessCStatus();
+    CGO_CATCH_AND_RETURN_CSTATUS
 }

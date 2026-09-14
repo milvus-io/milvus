@@ -1153,13 +1153,6 @@ func GetCLoadInfoWithFunc(ctx context.Context,
 	indexInfo *querypb.FieldIndexInfo,
 	f func(c *LoadIndexInfo) error,
 ) error {
-	// 1.
-	loadIndexInfo, err := newLoadIndexInfo(ctx)
-	if err != nil {
-		return err
-	}
-	defer deleteLoadIndexInfo(loadIndexInfo)
-
 	indexParams := funcutil.KeyValuePair2Map(indexInfo.IndexParams)
 	// as Knowhere reports error if encounter an unknown param, we need to delete it
 	delete(indexParams, common.MmapEnabledKey)
@@ -1218,13 +1211,29 @@ func GetCLoadInfoWithFunc(ctx context.Context,
 		IndexStorePathVersion:     indexInfo.GetIndexStorePathVersion(),
 	}
 
-	// 2.
-	if err := loadIndexInfo.appendLoadIndexInfo(ctx, indexInfoProto); err != nil {
-		mlog.Warn(ctx, "fail to append load index info", mlog.Err(err))
+	marshaled, err := proto.Marshal(indexInfoProto)
+	if err != nil {
 		return err
 	}
-	loadIndexInfo.setShard(loadInfo.GetInsertChannel())
-	return f(loadIndexInfo)
+
+	// Keep the complete CLoadIndexInfo lifecycle in one DynamicPool task. The
+	// callback runs on that worker and must call C APIs directly instead of
+	// submitting another task to DynamicPool.
+	_, err = GetDynamicPool().Submit(func() (any, error) {
+		loadIndexInfo, err := newLoadIndexInfo(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer deleteLoadIndexInfo(loadIndexInfo)
+
+		if err := loadIndexInfo.appendLoadIndexInfo(ctx, marshaled); err != nil {
+			mlog.Warn(ctx, "fail to append load index info", mlog.Err(err))
+			return nil, err
+		}
+		loadIndexInfo.setShard(loadInfo.GetInsertChannel())
+		return nil, f(loadIndexInfo)
+	}).Await()
+	return err
 }
 
 func (s *LocalSegment) syncFieldJSONStatsFromLoadInfo(ctx context.Context, loadInfo *querypb.SegmentLoadInfo) {

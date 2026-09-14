@@ -58,16 +58,16 @@ PhyCompareFilterExpr::CanUseBothDataFastPath() {
         return true;
     }
 
-    auto left_chunks = segment->num_chunk_data(left_field_);
-    auto right_chunks = segment->num_chunk_data(right_field_);
+    auto left_chunks = segment_chunk_reader_.NumChunkData(left_field_);
+    auto right_chunks = segment_chunk_reader_.NumChunkData(right_field_);
     if (left_chunks <= 0 || right_chunks <= 0 || left_chunks != right_chunks) {
         can_use_both_data_sequential_fast_path_ = false;
         return false;
     }
 
     for (int64_t i = 0; i <= left_chunks; ++i) {
-        if (segment->num_rows_until_chunk(left_field_, i) !=
-            segment->num_rows_until_chunk(right_field_, i)) {
+        if (segment_chunk_reader_.NumRowsUntilChunk(left_field_, i) !=
+            segment_chunk_reader_.NumRowsUntilChunk(right_field_, i)) {
             can_use_both_data_sequential_fast_path_ = false;
             return false;
         }
@@ -103,11 +103,9 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
         TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
 
         auto left_raw_data_chunk_count =
-            segment_chunk_reader_.segment_->num_chunk_data(
-                expr_->left_field_id_);
+            segment_chunk_reader_.NumChunkData(expr_->left_field_id_);
         auto right_raw_data_chunk_count =
-            segment_chunk_reader_.segment_->num_chunk_data(
-                expr_->right_field_id_);
+            segment_chunk_reader_.NumChunkData(expr_->right_field_id_);
 
         int64_t processed_rows = 0;
         const auto size_per_chunk = segment_chunk_reader_.SizePerChunk();
@@ -120,8 +118,7 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
                 return {offset / size_per_chunk, offset % size_per_chunk};
             } else if (segment_chunk_reader_.segment_->is_chunked() &&
                        raw_data_chunk_count > 0) {
-                return segment_chunk_reader_.segment_->get_chunk_by_offset(
-                    field, offset);
+                return segment_chunk_reader_.GetChunkByOffset(field, offset);
             } else {
                 return {0, offset};
             }

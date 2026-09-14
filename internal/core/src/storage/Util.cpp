@@ -20,6 +20,7 @@
 #include <filesystem>
 #include <functional>
 #include <future>
+#include <limits>
 #include <memory>
 #include "common/FastMem.h"
 
@@ -83,6 +84,7 @@
 #include "milvus-storage/reader.h"
 #include "milvus-storage/segment/segment_reader.h"
 #include "nlohmann/json.hpp"
+#include "storage/StatusToErrorCode.h"
 
 namespace milvus::storage {
 
@@ -157,8 +159,15 @@ ReadMediumType(BinlogReaderPtr reader) {
                "medium type must be parsed from stream header");
     int32_t magic_num;
     auto ret = reader->Read(sizeof(magic_num), &magic_num);
-    AssertInfo(ret.ok(), "read binlog failed: {}", ret.what());
-    AssertInfo(magic_num == MAGIC_NUM, "invalid magic num: {}", magic_num);
+    if (!ret.ok()) {
+        // ret is already a classified SegcoreError (e.g. DataFormatBroken for a
+        // truncated binlog); preserve its code instead of collapsing to 2001.
+        ThrowInfo(ret.get_error_code(), "read binlog failed: {}", ret.what());
+    }
+    if (!(magic_num == MAGIC_NUM)) {
+        ThrowInfo(
+            ErrorCode::DataFormatBroken, "invalid magic num: {}", magic_num);
+    }
 }
 
 void
@@ -186,17 +195,21 @@ add_vector_payload(std::shared_ptr<arrow::ArrayBuilder> builder,
             } else {
                 ast = binary_builder->AppendNull();
             }
-            AssertInfo(ast.ok(),
-                       "append value to arrow builder failed: {}",
-                       ast.ToString());
+            if (!ast.ok()) {
+                ThrowInfo(milvus::storage::ArrowStatusToErrorCode(ast),
+                          "append value to arrow builder failed: {}",
+                          ast.ToString());
+            }
         }
     } else {
         auto binary_builder =
             std::dynamic_pointer_cast<arrow::FixedSizeBinaryBuilder>(builder);
         ast = binary_builder->AppendValues(values, length);
-        AssertInfo(ast.ok(),
-                   "append value to arrow builder failed: {}",
-                   ast.ToString());
+        if (!ast.ok()) {
+            ThrowInfo(milvus::storage::ArrowStatusToErrorCode(ast),
+                      "append value to arrow builder failed: {}",
+                      ast.ToString());
+        }
     }
 }
 
@@ -216,10 +229,16 @@ add_numeric_payload(std::shared_ptr<arrow::ArrayBuilder> builder,
         auto iter = genValidIter(valid_data, length);
         ast =
             numeric_builder->AppendValues(start, start + length, iter.begin());
-        AssertInfo(ast.ok(), "append value to arrow builder failed");
+        if (!ast.ok()) {
+            ThrowInfo(milvus::storage::ArrowStatusToErrorCode(ast),
+                      "append value to arrow builder failed");
+        }
     } else {
         ast = numeric_builder->AppendValues(start, start + length);
-        AssertInfo(ast.ok(), "append value to arrow builder failed");
+        if (!ast.ok()) {
+            ThrowInfo(milvus::storage::ArrowStatusToErrorCode(ast),
+                      "append value to arrow builder failed");
+        }
     }
 }
 
@@ -390,23 +409,31 @@ AddPayloadToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder,
                                     element_type);
                         }
                     } else {
-                        AssertInfo(array.get_element_type() == element_type,
-                                   "Inconsistent element types in "
-                                   "VectorArray");
+                        if (!(array.get_element_type() == element_type)) {
+                            ThrowInfo(ErrorCode::DataFormatBroken,
+                                      "Inconsistent element types in "
+                                      "VectorArray");
+                        }
                     }
                     auto status = list_builder->Append();
-                    AssertInfo(status.ok(),
-                               "Failed to append list: {}",
-                               status.ToString());
+                    if (!status.ok()) {
+                        ThrowInfo(
+                            milvus::storage::ArrowStatusToErrorCode(status),
+                            "Failed to append list: {}",
+                            status.ToString());
+                    }
 
                     int num_vectors = array.length();
                     if (num_vectors > 0) {
                         auto ast = value_builder->AppendValues(
                             reinterpret_cast<const uint8_t*>(array.data()),
                             num_vectors);
-                        AssertInfo(ast.ok(),
-                                   "Failed to batch append vectors: {}",
-                                   ast.ToString());
+                        if (!ast.ok()) {
+                            ThrowInfo(
+                                milvus::storage::ArrowStatusToErrorCode(ast),
+                                "Failed to batch append vectors: {}",
+                                ast.ToString());
+                        }
                     }
                 };
 
@@ -416,9 +443,13 @@ AddPayloadToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder,
                         auto bit = (valid_data[i >> 3] >> (i & 0x07)) & 1;
                         if (!bit) {
                             auto status = list_builder->AppendNull();
-                            AssertInfo(status.ok(),
-                                       "Failed to append null list: {}",
-                                       status.ToString());
+                            if (!status.ok()) {
+                                ThrowInfo(
+                                    milvus::storage::ArrowStatusToErrorCode(
+                                        status),
+                                    "Failed to append null list: {}",
+                                    status.ToString());
+                            }
                             continue;
                         }
                         append_vector_array(vector_arrays[valid_index++]);
@@ -448,8 +479,11 @@ AddOneStringToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder,
     } else {
         ast = string_builder->Append(str, str_size);
     }
-    AssertInfo(
-        ast.ok(), "append value to arrow builder failed: {}", ast.ToString());
+    if (!ast.ok()) {
+        ThrowInfo(milvus::storage::ArrowStatusToErrorCode(ast),
+                  "append value to arrow builder failed: {}",
+                  ast.ToString());
+    }
 }
 
 void
@@ -465,8 +499,11 @@ AddOneBinaryToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder,
     } else {
         ast = binary_builder->Append(data, length);
     }
-    AssertInfo(
-        ast.ok(), "append value to arrow builder failed: {}", ast.ToString());
+    if (!ast.ok()) {
+        ThrowInfo(milvus::storage::ArrowStatusToErrorCode(ast),
+                  "append value to arrow builder failed: {}",
+                  ast.ToString());
+    }
 }
 
 std::shared_ptr<arrow::ArrayBuilder>
@@ -1587,16 +1624,23 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                            DataType data_type,
                            DataType element_type,
                            int64_t dim,
-                           milvus_storage::ArrowFileSystemPtr fs) {
-    AssertInfo(remote_files.size() > 0, "[StorageV2] remote files size is 0");
+                           milvus_storage::ArrowFileSystemPtr fs,
+                           size_t max_rows /*=0*/,
+                           size_t offset /*=0*/) {
+    if (!(remote_files.size() > 0)) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "[StorageV2] remote files size is 0");
+    }
     std::vector<FieldDataPtr> field_data_list;
 
     // remote files might not followed the sequence of column group id,
     // so we need to put into map<column_group_id, remote_chunk_files>
     std::unordered_map<int64_t, std::vector<std::string>> column_group_files;
     for (auto& remote_chunk_files : remote_files) {
-        AssertInfo(remote_chunk_files.size() > 0,
-                   "[StorageV2] remote files size is 0");
+        if (!(remote_chunk_files.size() > 0)) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "[StorageV2] remote files size is 0");
+        }
         int64_t group_id = ExtractGroupIdFromPath(remote_chunk_files[0]);
         column_group_files[group_id] = remote_chunk_files;
     }
@@ -1635,8 +1679,10 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
             field_id);
         return field_data_list;
     }
-    AssertInfo(remote_chunk_files.size() > 0,
-               "[StorageV2] remote files size is 0");
+    if (!(remote_chunk_files.size() > 0)) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "[StorageV2] remote files size is 0");
+    }
 
     // find column offset
     if (col_offset == -1) {
@@ -1670,7 +1716,8 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
     field_data_info.arrow_reader_channel->set_capacity(parallel_degree);
 
     auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
-
+    size_t total_num_rows = 0;
+    bool is_full = false;
     for (auto& column_group_file : remote_chunk_files) {
         // get all row groups for each file
         std::vector<std::vector<int64_t>> row_group_lists;
@@ -1680,25 +1727,68 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
             milvus_storage::DEFAULT_READ_BUFFER_SIZE,
             GetReaderProperties(),
             GetArrowReaderProperties());
-        AssertInfo(result.ok(),
-                   "[StorageV2] Failed to create file row group reader: " +
-                       result.status().ToString());
+        if (!result.ok()) {
+            ThrowInfo(ArrowStatusToErrorCode(result.status()),
+                      "[StorageV2] Failed to create file row group reader: " +
+                          result.status().ToString());
+        }
         auto reader = result.ValueOrDie();
+        auto row_group_meta_data_vector =
+            reader->file_metadata()->GetRowGroupMetadataVector();
+        auto row_group_num = row_group_meta_data_vector.size();
+        LOG_DEBUG("[StorageV2] row_group_num: {}", row_group_num);
 
-        auto row_group_num =
-            reader->file_metadata()->GetRowGroupMetadataVector().size();
         std::vector<int64_t> all_row_groups(row_group_num);
-        std::iota(all_row_groups.begin(), all_row_groups.end(), 0);
+        if (max_rows == 0) {
+            std::iota(all_row_groups.begin(), all_row_groups.end(), 0);
+        } else {
+            all_row_groups.clear();
+            // Find the starting row group by walking through cumulative row
+            // counts. Row groups can have different sizes, so we cannot assume
+            // uniform size based on the first row group.
+            size_t cumulative_rows = 0;
+            size_t start_row_group = 0;
+            for (size_t i = 0; i < row_group_num; i++) {
+                size_t rg_rows = row_group_meta_data_vector.Get(i).row_num();
+                if (cumulative_rows + rg_rows > offset) {
+                    start_row_group = i;
+                    break;
+                }
+                cumulative_rows += rg_rows;
+                start_row_group = i + 1;
+            }
+            if (start_row_group >= row_group_num) {
+                LOG_DEBUG(
+                    "[StorageV2] start_row_group {} is beyond group num {}",
+                    start_row_group,
+                    row_group_num);
+                return field_data_list;
+            }
+            LOG_DEBUG("[StorageV2] starting in row group: {}", start_row_group);
+            size_t total_rows = 0;
+            for (size_t i = start_row_group; i < row_group_num; i++) {
+                size_t num_rows = row_group_meta_data_vector.Get(i).row_num();
+                total_rows += num_rows;
+                all_row_groups.push_back(i);
+                if (total_rows >= max_rows) {
+                    LOG_DEBUG("[StorageV2] ending in row group: {}", i);
+                    break;
+                }
+            }
+        }
         row_group_lists.push_back(all_row_groups);
 
         // create a schema with only the field id
         auto field_schema = reader->schema()->field(col_offset)->Copy();
         auto arrow_schema = arrow::schema({field_schema});
         auto status = reader->Close();
-        AssertInfo(status.ok(),
-                   "[StorageV2] failed to close file reader when get arrow "
-                   "schema from file: " +
-                       column_group_file + " with error: " + status.ToString());
+        if (!status.ok()) {
+            ThrowInfo(ArrowStatusToErrorCode(status),
+                      "[StorageV2] failed to close file reader when get arrow "
+                      "schema from file: " +
+                          column_group_file +
+                          " with error: " + status.ToString());
+        }
 
         // split row groups for parallel reading
         auto strategy = std::make_unique<segcore::ParallelDegreeSplitStrategy>(
@@ -1735,6 +1825,25 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                     field_data->FillFieldData(chunked_array);
                 }
                 field_data_list.push_back(field_data);
+                total_num_rows += num_rows;
+                if (max_rows > 0 && total_num_rows >= max_rows) {
+                    LOG_DEBUG(
+                        "[StorageV2] max_rows: {} reached, total rows: {}",
+                        max_rows,
+                        total_num_rows);
+                    is_full = true;
+                    break;
+                }
+            }
+            if (is_full) {
+                // The background load task captures locals by reference and
+                // may still be pushing into the bounded channel. Drain and
+                // join before leaving scope to avoid use-after-free (#46958).
+                std::shared_ptr<milvus::ArrowDataWrapper> discard;
+                while (field_data_info.arrow_reader_channel->pop(discard)) {
+                }
+                DrainFuture(load_future);
+                break;
             }
         } catch (...) {
             // The load task captures this frame by reference and may be
@@ -1765,7 +1874,9 @@ IterateFieldDataFromManifest(
     std::optional<DataType> element_type,
     std::optional<StorageColumnMapping> storage_column_mapping,
     const std::function<void(FieldDataPtr)>& consumer,
-    int64_t max_inflight_bytes) {
+    int64_t max_inflight_bytes,
+    size_t max_rows,
+    size_t offset) {
     AssertInfo(max_inflight_bytes > 0,
                "max_inflight_bytes must be positive, got {}",
                max_inflight_bytes);
@@ -1777,6 +1888,7 @@ IterateFieldDataFromManifest(
     // storage column mapping through FileManagerContext. The fallback keeps
     // direct test callers and older internal paths on the existing behavior.
     std::string column_name;
+    size_t column_group_index;
     const auto& ext_field = field_meta.field_schema.external_field();
     bool is_external = false;
     if (storage_column_mapping.has_value()) {
@@ -1797,6 +1909,7 @@ IterateFieldDataFromManifest(
         for (size_t i = 0; i < column_groups->size(); i++) {
             for (const auto& column : column_groups->at(i)->columns) {
                 if (column == name) {
+                    column_group_index = i;
                     return true;
                 }
             }
@@ -1854,17 +1967,10 @@ IterateFieldDataFromManifest(
     auto reader = milvus_storage::api::Reader::create(
         column_groups, reader_schema, needed_cols_ptr, *loon_ffi_properties);
 
-    AssertInfo(reader != nullptr, "Failed to create reader");
-
-    auto reader_result = reader->get_record_batch_reader("");
-    if (!reader_result.ok()) {
-        auto error = milvus_storage::ToSegcoreError(reader_result.status());
-        ThrowInfo(error.get_error_code(),
-                  "Failed to get record batch reader: {}",
-                  error.what());
+    if (!(reader != nullptr)) {
+        ThrowInfo(ErrorCode::FileReadFailed, "Failed to create reader");
     }
-
-    auto record_batch_reader = reader_result.ValueOrDie();
+    std::shared_ptr<arrow::RecordBatch> batch;
 
     // Decode batches on a background thread pool while this thread keeps
     // draining the record batch reader. ReadNext must stay single-threaded
@@ -1981,45 +2087,209 @@ IterateFieldDataFromManifest(
 
     auto data_type_v = data_type.value();
     auto element_type_v = element_type.value();
-    while (true) {
-        std::shared_ptr<arrow::RecordBatch> batch;
-        auto fetch_start = now_ns();
-        auto status = record_batch_reader->ReadNext(&batch);
-        auto fetch_elapsed = now_ns() - fetch_start;
-        fetch_ns += fetch_elapsed;
-        fetch_max_ns = std::max(fetch_max_ns, fetch_elapsed);
-        if (!status.ok()) {
-            // pending_drain_guard waits for the outstanding decode tasks
-            // while this throw unwinds.
-            auto error = milvus_storage::ToSegcoreError(status);
+    if (max_rows == 0) {  //read all with record batches
+        auto reader_result = reader->get_record_batch_reader("");
+        if (!reader_result.ok()) {
+            auto error = milvus_storage::ToSegcoreError(reader_result.status());
             ThrowInfo(error.get_error_code(),
-                      "Failed to read record batch: {}",
+                      "Failed to get record batch reader: {}",
                       error.what());
         }
-        if (batch == nullptr) {
-            break;
+        auto record_batch_reader = reader_result.ValueOrDie();
+        while (true) {
+            std::shared_ptr<arrow::RecordBatch> batch;
+            auto fetch_start = now_ns();
+            auto status = record_batch_reader->ReadNext(&batch);
+            auto fetch_elapsed = now_ns() - fetch_start;
+            fetch_ns += fetch_elapsed;
+            fetch_max_ns = std::max(fetch_max_ns, fetch_elapsed);
+            if (!status.ok()) {
+                // pending_drain_guard waits for the outstanding decode tasks
+                // while this throw unwinds.
+                auto error = milvus_storage::ToSegcoreError(status);
+                ThrowInfo(error.get_error_code(),
+                          "Failed to read record batch: {}",
+                          error.what());
+            }
+            if (batch == nullptr) {
+                break;
+            }
+
+            auto num_rows = batch->num_rows();
+            if (num_rows == 0) {
+                continue;
+            }
+
+            // Charge this slice's arrow input bytes against the byte budget (see
+            // the note on the budget above for why input, not decoded, bytes).
+            // A record batch may share a large row-group backing buffer with
+            // adjacent slices, so count only the ranges this slice references.
+            auto batch_bytes = EstimateRecordBatchBytes(*batch);
+
+            auto decode_future = pool.Submit([batch,
+                                              column_name,
+                                              is_external,
+                                              data_type_v,
+                                              element_type_v,
+                                              dim,
+                                              nullable,
+                                              normalize_field_meta,
+                                              num_rows]() -> FieldDataPtr {
+                auto raw_column = batch->GetColumnByName(column_name);
+                if (is_external) {
+                    raw_column =
+                        NormalizeExternalArrowByType(raw_column,
+                                                     data_type_v,
+                                                     dim,
+                                                     nullable,
+                                                     element_type_v,
+                                                     *normalize_field_meta);
+                }
+                auto chunked_array =
+                    std::make_shared<arrow::ChunkedArray>(raw_column);
+                auto field_data = CreateFieldData(
+                    data_type_v, element_type_v, nullable, dim, num_rows);
+                field_data->FillFieldData(chunked_array);
+                return field_data;
+            });
+            pending.emplace_back(std::move(decode_future), batch_bytes);
+            pending_bytes += batch_bytes;
+            total_batch_bytes += batch_bytes;
+            ++batch_count;
+
+            // Backpressure: block on the oldest batch once the window is full
+            // by bytes or by count. Always keep at least one in flight so a
+            // single oversized batch cannot deadlock the loop.
+            while (pending.size() > 1 &&
+                   (pending_bytes > max_inflight_bytes ||
+                    pending.size() >= max_inflight_batches)) {
+                deliver_front();
+            }
+            // Opportunistically deliver whatever is already done, keeping
+            // consumer-side work (e.g. disk writes) interleaved with fetching.
+            while (!pending.empty() &&
+                   pending.front().first.wait_for(std::chrono::seconds(0)) ==
+                       std::future_status::ready) {
+                deliver_front();
+            }
         }
-
-        auto num_rows = batch->num_rows();
-        if (num_rows == 0) {
-            continue;
+    } else {  // read specific rows with chunk_reader
+        auto reader_result = reader->get_chunk_reader(column_group_index);
+        if (!reader_result.ok()) {
+            auto error = milvus_storage::ToSegcoreError(reader_result.status());
+            ThrowInfo(error.get_error_code(),
+                      "Failed to get chunk reader: {}",
+                      error.what());
         }
+        auto chunk_reader = std::move(reader_result).ValueOrDie();
+        auto chunk_rows_result = chunk_reader->get_chunk_rows();
+        if (!chunk_rows_result.ok()) {
+            auto error =
+                milvus_storage::ToSegcoreError(chunk_rows_result.status());
+            ThrowInfo(error.get_error_code(),
+                      "Failed to get chunk rows: {}",
+                      error.what());
+        }
+        auto chunk_rows = chunk_rows_result.ValueOrDie();
+        int64_t segment_total_rows =
+            std::accumulate(chunk_rows.begin(), chunk_rows.end(), int64_t{0});
+        LOG_DEBUG(
+            "[StorageV3] segment number of rows is: {} first chunk rows "
+            "is {}",
+            segment_total_rows,
+            chunk_rows.empty() ? 0 : chunk_rows[0]);
 
-        // Charge this slice's arrow input bytes against the byte budget (see
-        // the note on the budget above for why input, not decoded, bytes).
-        // A record batch may share a large row-group backing buffer with
-        // adjacent slices, so count only the ranges this slice references.
-        auto batch_bytes = EstimateRecordBatchBytes(*batch);
+        // Determine the row range [offset, offset + effective_rows).
+        int64_t signed_offset = static_cast<int64_t>(offset);
+        if (signed_offset >= segment_total_rows) {
+            LOG_DEBUG("[StorageV3] offset: {} is beyond total_rows: {}",
+                      offset,
+                      segment_total_rows);
+            return;
+        }
+        int64_t effective_rows = std::min(static_cast<int64_t>(max_rows),
+                                          segment_total_rows - signed_offset);
 
-        auto decode_future = pool.Submit([batch,
-                                          column_name,
-                                          is_external,
-                                          data_type_v,
-                                          element_type_v,
-                                          dim,
-                                          nullable,
-                                          normalize_field_meta,
-                                          num_rows]() -> FieldDataPtr {
+        std::vector<int64_t> row_indices;
+        row_indices.reserve(effective_rows);
+        for (int64_t i = signed_offset; i < signed_offset + effective_rows;
+             i++) {
+            row_indices.push_back(i);
+        }
+        AssertInfo(!row_indices.empty(),
+                   "row_indices unexpectedly empty after range check");
+
+        auto chunk_indices_result =
+            chunk_reader->get_chunk_indices(row_indices);
+        if (!chunk_indices_result.ok()) {
+            auto error =
+                milvus_storage::ToSegcoreError(chunk_indices_result.status());
+            ThrowInfo(error.get_error_code(),
+                      "Failed to get chunk indices at offset {}: {}",
+                      offset,
+                      error.what());
+        }
+        auto chunk_indices = chunk_indices_result.ValueOrDie();
+        auto parallel_degree = static_cast<uint64_t>(
+            DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
+        LOG_DEBUG(
+            "[StorageV3] Fetching {} chunks, first chunk is: {} "
+            "parallel_degree is: {}",
+            chunk_indices.size(),
+            chunk_indices[0],
+            parallel_degree);
+
+        auto chunks_result =
+            chunk_reader->get_chunks(chunk_indices, parallel_degree);
+        if (!chunks_result.ok()) {
+            auto error = milvus_storage::ToSegcoreError(chunks_result.status());
+            ThrowInfo(error.get_error_code(),
+                      "Failed to read chunks: {}",
+                      error.what());
+        }
+        auto batches = chunks_result.ValueOrDie();
+
+        // Compute the intra-chunk offset for the first batch.
+        // The first chunk returned starts at a global row index equal to
+        // sum(chunk_rows[0..first_chunk_index-1]).  The requested range
+        // starts at signed_offset, so we must skip the leading rows in
+        // the first batch that precede the requested range.
+        int64_t first_chunk_global_start = 0;
+        for (int64_t ci = 0; ci < static_cast<int64_t>(chunk_indices[0]);
+             ci++) {
+            first_chunk_global_start += chunk_rows[ci];
+        }
+        int64_t skip_in_first = signed_offset - first_chunk_global_start;
+        AssertInfo(skip_in_first >= 0,
+                   "skip_in_first must be non-negative, got: " +
+                       std::to_string(skip_in_first));
+
+        int64_t consumed_rows = 0;
+        for (size_t i = 0; i < batches.size(); i++) {
+            batch = batches[i];
+            int64_t num_rows = batch->num_rows();
+            if (num_rows == 0) {
+                continue;
+            }
+
+            // Slice the first batch to skip rows before the requested
+            // offset, and slice any batch that would exceed effective_rows.
+            int64_t slice_offset = 0;
+            int64_t slice_length = num_rows;
+            if (i == 0 && skip_in_first > 0) {
+                slice_offset = skip_in_first;
+                slice_length -= skip_in_first;
+            }
+            int64_t remaining = effective_rows - consumed_rows;
+            if (slice_length > remaining) {
+                slice_length = remaining;
+            }
+
+            if (slice_offset != 0 || slice_length != num_rows) {
+                batch = batch->Slice(slice_offset, slice_length);
+                num_rows = batch->num_rows();
+            }
+
             auto raw_column = batch->GetColumnByName(column_name);
             if (is_external) {
                 raw_column =
@@ -2035,26 +2305,15 @@ IterateFieldDataFromManifest(
             auto field_data = CreateFieldData(
                 data_type_v, element_type_v, nullable, dim, num_rows);
             field_data->FillFieldData(chunked_array);
-            return field_data;
-        });
-        pending.emplace_back(std::move(decode_future), batch_bytes);
-        pending_bytes += batch_bytes;
-        total_batch_bytes += batch_bytes;
-        ++batch_count;
-
-        // Backpressure: block on the oldest batch once the window is full
-        // by bytes or by count. Always keep at least one in flight so a
-        // single oversized batch cannot deadlock the loop.
-        while (pending.size() > 1 && (pending_bytes > max_inflight_bytes ||
-                                      pending.size() >= max_inflight_batches)) {
-            deliver_front();
-        }
-        // Opportunistically deliver whatever is already done, keeping
-        // consumer-side work (e.g. disk writes) interleaved with fetching.
-        while (!pending.empty() &&
-               pending.front().first.wait_for(std::chrono::seconds(0)) ==
-                   std::future_status::ready) {
-            deliver_front();
+            consumer(std::move(field_data));
+            consumed_rows += num_rows;
+            ++batch_count;
+            if (consumed_rows >= effective_rows) {
+                LOG_DEBUG("[StorageV3] max_rows: {} reached, consumed rows: {}",
+                          max_rows,
+                          consumed_rows);
+                break;
+            }
         }
     }
 
@@ -2090,6 +2349,8 @@ GetFieldDatasFromManifest(
     std::optional<DataType> data_type,
     int64_t dim,
     std::optional<DataType> element_type,
+    size_t max_rows,
+    size_t offset,
     std::optional<StorageColumnMapping> storage_column_mapping) {
     std::vector<FieldDataPtr> field_datas;
     IterateFieldDataFromManifest(
@@ -2107,7 +2368,9 @@ GetFieldDatasFromManifest(
         // would only pin extra source arrow batches on top of the full
         // column. Keep it small; overlap still happens, the peak does not
         // grow by half a gigabyte per concurrent build.
-        kAccumulatingInflightBytes);
+        kAccumulatingInflightBytes,
+        max_rows,
+        offset);
     return field_datas;
 }
 
@@ -2263,10 +2526,13 @@ GetTextFieldDatasFromManifest(
         }
 
         auto raw_column = batch->GetColumnByName(column_name);
-        AssertInfo(raw_column != nullptr,
-                   "TEXT field {} column {} not found in SegmentReader batch",
-                   field_meta.field_id,
-                   column_name);
+        if (!(raw_column != nullptr)) {
+            ThrowInfo(
+                ErrorCode::DataFormatBroken,
+                "TEXT field {} column {} not found in SegmentReader batch",
+                field_meta.field_id,
+                column_name);
+        }
         auto chunked_array = std::make_shared<arrow::ChunkedArray>(raw_column);
         auto field_data = CreateFieldData(DataType::TEXT,
                                           DataType::NONE,
@@ -2351,17 +2617,23 @@ GetFieldIDList(FieldId column_group_id,
         milvus_storage::DEFAULT_READ_BUFFER_SIZE,
         GetReaderProperties(),
         GetArrowReaderProperties());
-    AssertInfo(result.ok(),
-               "[StorageV2] Failed to create file row group reader: " +
-                   result.status().ToString());
+    if (!result.ok()) {
+        ThrowInfo(ArrowStatusToErrorCode(result.status()),
+                  "[StorageV2] Failed to create file row group reader: " +
+                      result.status().ToString());
+    }
     auto file_reader = result.ValueOrDie();
     field_id_list =
         file_reader->file_metadata()->GetGroupFieldIDList().GetFieldIDList(
             column_group_id.get());
     auto status = file_reader->Close();
-    AssertInfo(status.ok(),
-               "failed to close file reader when get field id list from {}",
-               filepath);
+    if (!status.ok()) {
+        ThrowInfo(ArrowStatusToErrorCode(status),
+                  "failed to close file reader when get field id list from {}: "
+                  "{}",
+                  filepath,
+                  status.ToString());
+    }
     return field_id_list;
 }
 
@@ -2380,13 +2652,15 @@ ValidateFixedSizeBinaryVectorWidth(const std::shared_ptr<arrow::Array>& array,
     auto fsb_array =
         std::static_pointer_cast<arrow::FixedSizeBinaryArray>(array);
     int byte_width = GetDataTypeSize(data_type, dim);
-    AssertInfo(fsb_array->byte_width() == byte_width,
-               "vector byte width mismatch{}, expected {} bytes for "
-               "dim {}, actual {} bytes",
-               FieldErrorSuffix(field_meta),
-               byte_width,
-               dim,
-               fsb_array->byte_width());
+    if (!(fsb_array->byte_width() == byte_width)) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "vector byte width mismatch{}, expected {} bytes for "
+                  "dim {}, actual {} bytes",
+                  FieldErrorSuffix(field_meta),
+                  byte_width,
+                  dim,
+                  fsb_array->byte_width());
+    }
 }
 
 void
@@ -2401,14 +2675,16 @@ ValidateBinaryVectorWidth(const std::shared_ptr<arrow::Array>& array,
             continue;
         }
         auto actual_width = binary_array->value_length(i);
-        AssertInfo(actual_width == byte_width,
-                   "vector byte width mismatch{}, expected {} bytes for "
-                   "dim {}, actual {} bytes at row {}",
-                   FieldErrorSuffix(field_meta),
-                   byte_width,
-                   dim,
-                   actual_width,
-                   i);
+        if (!(actual_width == byte_width)) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "vector byte width mismatch{}, expected {} bytes for "
+                      "dim {}, actual {} bytes at row {}",
+                      FieldErrorSuffix(field_meta),
+                      byte_width,
+                      dim,
+                      actual_width,
+                      i);
+        }
     }
 }
 
@@ -2421,10 +2697,12 @@ ValidateNoNullValuesInRange(const std::shared_ptr<arrow::Array>& values,
         return;
     }
     for (int64_t i = begin; i < end; ++i) {
-        AssertInfo(values->IsValid(i),
-                   "{} contains null element at child offset {}",
-                   context,
-                   i);
+        if (!(values->IsValid(i))) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "{} contains null element at child offset {}",
+                      context,
+                      i);
+        }
     }
 }
 
@@ -2541,12 +2819,12 @@ ValidateVectorListElementType(
         CanTreatVectorListAsRawBytes(data_type, actual_type)) {
         return;
     }
-    AssertInfo(false,
-               "vector element type mismatch{}, expected {} or raw uint8 "
-               "bytes, actual {}",
-               FieldErrorSuffix(field_meta),
-               ArrowTypeName(expected_type),
-               actual_type->ToString());
+    ThrowInfo(ErrorCode::DataFormatBroken,
+              "vector element type mismatch{}, expected {} or raw uint8 "
+              "bytes, actual {}",
+              FieldErrorSuffix(field_meta),
+              ArrowTypeName(expected_type),
+              actual_type->ToString());
 }
 
 arrow::ArrayVector
@@ -2571,8 +2849,10 @@ NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
 
         int64_t num_rows = array->length();
         auto buffer_result = arrow::AllocateBuffer(num_rows * byte_width);
-        AssertInfo(buffer_result.ok(),
-                   "Failed to allocate buffer for vector normalization");
+        if (!buffer_result.ok()) {
+            ThrowInfo(milvus::storage::ArrowStatusToErrorCode(buffer_result),
+                      "Failed to allocate buffer for vector normalization");
+        }
         auto buffer = std::move(*buffer_result);
         auto dst = buffer->mutable_data();
         // Zero-fill for null rows (nullable vectors from external Parquet)
@@ -2660,11 +2940,13 @@ NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
             int expected_list_length =
                 ExpectedVectorListLength(data_type, dim, values->type());
             int elem_bit_width = values->type()->bit_width();
-            AssertInfo(elem_bit_width > 0 && elem_bit_width % 8 == 0,
-                       "vector list element{} must be fixed-width "
-                       "byte-aligned type, got bit_width={}",
-                       FieldErrorSuffix(field_meta),
-                       elem_bit_width);
+            if (!(elem_bit_width > 0 && elem_bit_width % 8 == 0)) {
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "vector list element{} must be fixed-width "
+                          "byte-aligned type, got bit_width={}",
+                          FieldErrorSuffix(field_meta),
+                          elem_bit_width);
+            }
             int elem_byte_size = elem_bit_width / 8;
             auto raw = reinterpret_cast<const uint8_t*>(
                 values->data()->buffers[1]->data());
@@ -2673,13 +2955,15 @@ NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
                     auto offset = list_array->value_offset(i);
                     auto actual_length =
                         list_array->value_offset(i + 1) - offset;
-                    AssertInfo(actual_length == expected_list_length,
-                               "vector list length mismatch{}, expected {}, "
-                               "actual {} at row {}",
-                               FieldErrorSuffix(field_meta),
-                               expected_list_length,
-                               actual_length,
-                               i);
+                    if (!(actual_length == expected_list_length)) {
+                        ThrowInfo(ErrorCode::DataFormatBroken,
+                                  "vector list length mismatch{}, expected {}, "
+                                  "actual {} at row {}",
+                                  FieldErrorSuffix(field_meta),
+                                  expected_list_length,
+                                  actual_length,
+                                  i);
+                    }
                     if (should_copy_row(
                             values, offset, offset + actual_length, i)) {
                         milvus::fastmem::FastMemcpy(
@@ -2701,17 +2985,22 @@ NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
             int expected_list_length =
                 ExpectedVectorListLength(data_type, dim, values->type());
             int elem_bit_width = values->type()->bit_width();
-            AssertInfo(elem_bit_width > 0 && elem_bit_width % 8 == 0,
-                       "vector list element{} must be fixed-width "
-                       "byte-aligned type, got bit_width={}",
-                       FieldErrorSuffix(field_meta),
-                       elem_bit_width);
+            if (!(elem_bit_width > 0 && elem_bit_width % 8 == 0)) {
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "vector list element{} must be fixed-width "
+                          "byte-aligned type, got bit_width={}",
+                          FieldErrorSuffix(field_meta),
+                          elem_bit_width);
+            }
             int elem_byte_size = elem_bit_width / 8;
-            AssertInfo(fsl_array->value_length() == expected_list_length,
-                       "vector list length mismatch{}, expected {}, actual {}",
-                       FieldErrorSuffix(field_meta),
-                       expected_list_length,
-                       fsl_array->value_length());
+            if (!(fsl_array->value_length() == expected_list_length)) {
+                ThrowInfo(
+                    ErrorCode::DataFormatBroken,
+                    "vector list length mismatch{}, expected {}, actual {}",
+                    FieldErrorSuffix(field_meta),
+                    expected_list_length,
+                    fsl_array->value_length());
+            }
             auto raw = reinterpret_cast<const uint8_t*>(
                 values->data()->buffers[1]->data());
             for (int64_t i = 0; i < num_rows; i++) {
@@ -2780,7 +3069,10 @@ ConvertFixedSizeBinaryToBinary(const arrow::ArrayVector& arrays) {
 
         // Build offsets: null rows occupy no data space
         auto offsets_result = arrow::AllocateBuffer((n + 1) * sizeof(int32_t));
-        AssertInfo(offsets_result.ok(), "Failed to allocate offsets buffer");
+        if (!offsets_result.ok()) {
+            ThrowInfo(milvus::storage::ArrowStatusToErrorCode(offsets_result),
+                      "Failed to allocate offsets buffer");
+        }
         auto offsets_buf = std::move(*offsets_result);
         auto* offsets = reinterpret_cast<int32_t*>(offsets_buf->mutable_data());
         int32_t offset = 0;
@@ -2792,7 +3084,10 @@ ConvertFixedSizeBinaryToBinary(const arrow::ArrayVector& arrays) {
 
         // Build data: copy only valid rows
         auto data_result = arrow::AllocateBuffer(offset);
-        AssertInfo(data_result.ok(), "Failed to allocate data buffer");
+        if (!data_result.ok()) {
+            ThrowInfo(milvus::storage::ArrowStatusToErrorCode(data_result),
+                      "Failed to allocate data buffer");
+        }
         auto data_buf = std::move(*data_result);
         auto* dst = data_buf->mutable_data();
         for (int64_t i = 0; i < n; i++) {
@@ -2849,15 +3144,19 @@ RebuildNullBitmap(const std::shared_ptr<arrow::Array>& array) {
     }
     arrow::TypedBufferBuilder<bool> bb;
     auto status = bb.Reserve(array->length());
-    AssertInfo(status.ok(),
-               "RebuildNullBitmap: reserve failed: " + status.ToString());
+    if (!status.ok()) {
+        ThrowInfo(milvus::storage::ArrowStatusToErrorCode(status),
+                  "RebuildNullBitmap: reserve failed: " + status.ToString());
+    }
     for (int64_t i = 0; i < array->length(); ++i) {
         bb.UnsafeAppend(!array->IsNull(i));
     }
     std::shared_ptr<arrow::Buffer> buf;
     status = bb.Finish(&buf);
-    AssertInfo(status.ok(),
-               "RebuildNullBitmap: finish failed: " + status.ToString());
+    if (!status.ok()) {
+        ThrowInfo(milvus::storage::ArrowStatusToErrorCode(status),
+                  "RebuildNullBitmap: finish failed: " + status.ToString());
+    }
     return buf;
 }
 
@@ -2881,33 +3180,46 @@ CanonicalizeArrowVariants(const std::shared_ptr<arrow::Array>& array) {
     if (tid == arrow::Type::STRING_VIEW || tid == arrow::Type::LARGE_STRING) {
         arrow::StringBuilder builder;
         auto status = builder.Reserve(array->length());
-        AssertInfo(status.ok(),
-                   "CanonicalizeArrowVariants: string reserve failed");
+        if (!status.ok()) {
+            ThrowInfo(milvus::storage::ArrowStatusToErrorCode(status),
+                      "CanonicalizeArrowVariants: string reserve failed");
+        }
         if (tid == arrow::Type::STRING_VIEW) {
             auto src = std::static_pointer_cast<arrow::StringViewArray>(array);
             for (int64_t i = 0; i < src->length(); ++i) {
                 if (src->IsNull(i)) {
-                    AssertInfo(builder.AppendNull().ok(), "appendnull");
+                    if (auto _st = builder.AppendNull(); !_st.ok()) {
+                        ThrowInfo(milvus::storage::ArrowStatusToErrorCode(_st),
+                                  "appendnull");
+                    }
                 } else {
                     auto v = src->GetView(i);
-                    AssertInfo(builder.Append(v.data(), v.size()).ok(),
-                               "append str");
+                    if (!(builder.Append(v.data(), v.size()).ok())) {
+                        ThrowInfo(ErrorCode::MemAllocateFailed, "append str");
+                    }
                 }
             }
         } else {
             auto src = std::static_pointer_cast<arrow::LargeStringArray>(array);
             for (int64_t i = 0; i < src->length(); ++i) {
                 if (src->IsNull(i)) {
-                    AssertInfo(builder.AppendNull().ok(), "appendnull");
+                    if (auto _st = builder.AppendNull(); !_st.ok()) {
+                        ThrowInfo(milvus::storage::ArrowStatusToErrorCode(_st),
+                                  "appendnull");
+                    }
                 } else {
                     auto v = src->GetView(i);
-                    AssertInfo(builder.Append(v.data(), v.size()).ok(),
-                               "append str");
+                    if (!(builder.Append(v.data(), v.size()).ok())) {
+                        ThrowInfo(ErrorCode::MemAllocateFailed, "append str");
+                    }
                 }
             }
         }
         std::shared_ptr<arrow::Array> out;
-        AssertInfo(builder.Finish(&out).ok(), "string finish");
+        if (auto _st = builder.Finish(&out); !_st.ok()) {
+            ThrowInfo(milvus::storage::ArrowStatusToErrorCode(_st),
+                      "string finish");
+        }
         return out;
     }
 
@@ -2915,41 +3227,54 @@ CanonicalizeArrowVariants(const std::shared_ptr<arrow::Array>& array) {
     if (tid == arrow::Type::BINARY_VIEW || tid == arrow::Type::LARGE_BINARY) {
         arrow::BinaryBuilder builder;
         auto status = builder.Reserve(array->length());
-        AssertInfo(status.ok(),
-                   "CanonicalizeArrowVariants: binary reserve failed");
+        if (!status.ok()) {
+            ThrowInfo(milvus::storage::ArrowStatusToErrorCode(status),
+                      "CanonicalizeArrowVariants: binary reserve failed");
+        }
         if (tid == arrow::Type::BINARY_VIEW) {
             auto src = std::static_pointer_cast<arrow::BinaryViewArray>(array);
             for (int64_t i = 0; i < src->length(); ++i) {
                 if (src->IsNull(i)) {
-                    AssertInfo(builder.AppendNull().ok(), "appendnull");
+                    if (auto _st = builder.AppendNull(); !_st.ok()) {
+                        ThrowInfo(milvus::storage::ArrowStatusToErrorCode(_st),
+                                  "appendnull");
+                    }
                 } else {
                     auto v = src->GetView(i);
-                    AssertInfo(
-                        builder
-                            .Append(reinterpret_cast<const uint8_t*>(v.data()),
-                                    v.size())
-                            .ok(),
-                        "append bin");
+                    if (!(builder
+                              .Append(
+                                  reinterpret_cast<const uint8_t*>(v.data()),
+                                  v.size())
+                              .ok())) {
+                        ThrowInfo(ErrorCode::MemAllocateFailed, "append bin");
+                    }
                 }
             }
         } else {
             auto src = std::static_pointer_cast<arrow::LargeBinaryArray>(array);
             for (int64_t i = 0; i < src->length(); ++i) {
                 if (src->IsNull(i)) {
-                    AssertInfo(builder.AppendNull().ok(), "appendnull");
+                    if (auto _st = builder.AppendNull(); !_st.ok()) {
+                        ThrowInfo(milvus::storage::ArrowStatusToErrorCode(_st),
+                                  "appendnull");
+                    }
                 } else {
                     auto v = src->GetView(i);
-                    AssertInfo(
-                        builder
-                            .Append(reinterpret_cast<const uint8_t*>(v.data()),
-                                    v.size())
-                            .ok(),
-                        "append bin");
+                    if (!(builder
+                              .Append(
+                                  reinterpret_cast<const uint8_t*>(v.data()),
+                                  v.size())
+                              .ok())) {
+                        ThrowInfo(ErrorCode::MemAllocateFailed, "append bin");
+                    }
                 }
             }
         }
         std::shared_ptr<arrow::Array> out;
-        AssertInfo(builder.Finish(&out).ok(), "binary finish");
+        if (auto _st = builder.Finish(&out); !_st.ok()) {
+            ThrowInfo(milvus::storage::ArrowStatusToErrorCode(_st),
+                      "binary finish");
+        }
         return out;
     }
 
@@ -2992,33 +3317,53 @@ CanonicalizeArrowVariants(const std::shared_ptr<arrow::Array>& array) {
 
         // Rebuild offsets + slice canonical values per row
         arrow::Int32Builder offset_builder;
-        AssertInfo(offset_builder.Reserve(array->length() + 1).ok(),
-                   "offset reserve");
+        if (auto _st = offset_builder.Reserve(array->length() + 1); !_st.ok()) {
+            ThrowInfo(milvus::storage::ArrowStatusToErrorCode(_st),
+                      "offset reserve");
+        }
         std::vector<std::shared_ptr<arrow::Array>> slices;
         int32_t cur = 0;
-        AssertInfo(offset_builder.Append(0).ok(), "offset append");
+        if (auto _st = offset_builder.Append(0); !_st.ok()) {
+            ThrowInfo(milvus::storage::ArrowStatusToErrorCode(_st),
+                      "offset append");
+        }
         for (int64_t i = 0; i < array->length(); ++i) {
             if (!array->IsNull(i)) {
                 auto [s, e] = ranges[i];
                 int64_t len = e - s;
-                AssertInfo(cur + len <= INT32_MAX,
-                           "CanonicalizeArrowVariants: int32 offset overflow");
+                if (!(cur + len <= INT32_MAX)) {
+                    ThrowInfo(
+                        ErrorCode::DataFormatBroken,
+                        "CanonicalizeArrowVariants: int32 offset overflow");
+                }
                 slices.push_back(canonical_values->Slice(s, len));
                 cur += static_cast<int32_t>(len);
             }
-            AssertInfo(offset_builder.Append(cur).ok(), "offset append");
+            if (auto _st = offset_builder.Append(cur); !_st.ok()) {
+                ThrowInfo(milvus::storage::ArrowStatusToErrorCode(_st),
+                          "offset append");
+            }
         }
         std::shared_ptr<arrow::Array> offsets_arr;
-        AssertInfo(offset_builder.Finish(&offsets_arr).ok(), "offset finish");
+        if (auto _st = offset_builder.Finish(&offsets_arr); !_st.ok()) {
+            ThrowInfo(milvus::storage::ArrowStatusToErrorCode(_st),
+                      "offset finish");
+        }
 
         std::shared_ptr<arrow::Array> concat_values;
         if (slices.empty()) {
             auto empty = arrow::MakeArrayOfNull(canonical_values->type(), 0);
-            AssertInfo(empty.ok(), "empty values");
+            if (!empty.ok()) {
+                ThrowInfo(milvus::storage::ArrowStatusToErrorCode(empty),
+                          "empty values");
+            }
             concat_values = *empty;
         } else {
             auto concat = arrow::Concatenate(slices);
-            AssertInfo(concat.ok(), "concat: " + concat.status().ToString());
+            if (!concat.ok()) {
+                ThrowInfo(milvus::storage::ArrowStatusToErrorCode(concat),
+                          "concat: " + concat.status().ToString());
+            }
             concat_values = *concat;
         }
 
@@ -3094,23 +3439,34 @@ ConvertWKTStringArrayToWKBBinary(const arrow::ArrayVector& arrays) {
         };
         arrow::BinaryBuilder builder;
         auto status = builder.Reserve(arr->length());
-        AssertInfo(status.ok(),
-                   "BinaryBuilder reserve failed: " + status.ToString());
+        if (!status.ok()) {
+            ThrowInfo(milvus::storage::ArrowStatusToErrorCode(status),
+                      "BinaryBuilder reserve failed: " + status.ToString());
+        }
         for (int64_t i = 0; i < arr->length(); ++i) {
             if (arr->IsNull(i)) {
                 status = builder.AppendNull();
-                AssertInfo(status.ok(), "AppendNull failed");
+                if (!status.ok()) {
+                    ThrowInfo(milvus::storage::ArrowStatusToErrorCode(status),
+                              "AppendNull failed");
+                }
                 continue;
             }
             auto wkt = get_string(i);
             Geometry geom(ctx, wkt.c_str());
             auto wkb = geom.to_wkb_string();
             status = builder.Append(wkb);
-            AssertInfo(status.ok(), "Append WKB failed");
+            if (!status.ok()) {
+                ThrowInfo(milvus::storage::ArrowStatusToErrorCode(status),
+                          "Append WKB failed");
+            }
         }
         std::shared_ptr<arrow::Array> wkb_array;
         status = builder.Finish(&wkb_array);
-        AssertInfo(status.ok(), "BinaryBuilder finish failed");
+        if (!status.ok()) {
+            ThrowInfo(milvus::storage::ArrowStatusToErrorCode(status),
+                      "BinaryBuilder finish failed");
+        }
         result.push_back(wkb_array);
     }
 
@@ -3132,7 +3488,10 @@ ConvertTimestampToInt64(const arrow::ArrayVector& arrays) {
         auto unit = ts_type->unit();
         arrow::Int64Builder builder;
         auto status = builder.Reserve(ts_arr->length());
-        AssertInfo(status.ok(), "Int64Builder reserve failed");
+        if (!status.ok()) {
+            ThrowInfo(milvus::storage::ArrowStatusToErrorCode(status),
+                      "Int64Builder reserve failed");
+        }
         for (int64_t i = 0; i < ts_arr->length(); i++) {
             if (ts_arr->IsNull(i)) {
                 status = builder.AppendNull();
@@ -3140,11 +3499,17 @@ ConvertTimestampToInt64(const arrow::ArrayVector& arrays) {
                 status = builder.Append(
                     ConvertToMicroseconds(ts_arr->Value(i), unit));
             }
-            AssertInfo(status.ok(), "Int64Builder append failed");
+            if (!status.ok()) {
+                ThrowInfo(milvus::storage::ArrowStatusToErrorCode(status),
+                          "Int64Builder append failed");
+            }
         }
         std::shared_ptr<arrow::Array> int_array;
         status = builder.Finish(&int_array);
-        AssertInfo(status.ok(), "Int64Builder finish failed");
+        if (!status.ok()) {
+            ThrowInfo(milvus::storage::ArrowStatusToErrorCode(status),
+                      "Int64Builder finish failed");
+        }
         result.push_back(std::move(int_array));
     }
     return result;
@@ -3202,15 +3567,20 @@ ConvertListToProtobufBinary(const arrow::ArrayVector& arrays,
         auto list_arr = std::static_pointer_cast<arrow::ListArray>(arr);
         auto actual_element_type =
             ArrowListElementTypeToMilvus(list_arr->values(), field_meta);
-        AssertInfo(
-            IsCompatibleArrayElementType(actual_element_type, element_type),
-            "array element type mismatch{}, expected {}, actual {}",
-            FieldErrorSuffix(field_meta),
-            element_type,
-            actual_element_type);
+        if (!(IsCompatibleArrayElementType(actual_element_type,
+                                           element_type))) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "array element type mismatch{}, expected {}, actual {}",
+                      FieldErrorSuffix(field_meta),
+                      element_type,
+                      actual_element_type);
+        }
         arrow::BinaryBuilder builder;
         auto status = builder.Reserve(list_arr->length());
-        AssertInfo(status.ok(), "BinaryBuilder reserve failed");
+        if (!status.ok()) {
+            ThrowInfo(milvus::storage::ArrowStatusToErrorCode(status),
+                      "BinaryBuilder reserve failed");
+        }
         for (int64_t i = 0; i < list_arr->length(); i++) {
             if (list_arr->IsNull(i)) {
                 status = builder.AppendNull();
@@ -3224,11 +3594,17 @@ ConvertListToProtobufBinary(const arrow::ArrayVector& arrays,
                 proto.SerializeToString(&serialized);
                 status = builder.Append(serialized);
             }
-            AssertInfo(status.ok(), "BinaryBuilder append failed");
+            if (!status.ok()) {
+                ThrowInfo(milvus::storage::ArrowStatusToErrorCode(status),
+                          "BinaryBuilder append failed");
+            }
         }
         std::shared_ptr<arrow::Array> bin_array;
         status = builder.Finish(&bin_array);
-        AssertInfo(status.ok(), "BinaryBuilder finish failed");
+        if (!status.ok()) {
+            ThrowInfo(milvus::storage::ArrowStatusToErrorCode(status),
+                      "BinaryBuilder finish failed");
+        }
         result.push_back(std::move(bin_array));
     }
     return result;
@@ -3288,8 +3664,10 @@ NormalizeVectorArrayInner(const arrow::ArrayVector& arrays,
             continue;
         }
         auto list_arr = std::static_pointer_cast<arrow::ListArray>(arr);
-        AssertInfo(field_meta.is_nullable() || list_arr->null_count() == 0,
-                   "VECTOR_ARRAY does not support null rows");
+        if (!(field_meta.is_nullable() || list_arr->null_count() == 0)) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "VECTOR_ARRAY does not support null rows");
+        }
         if (list_arr->values()->type_id() == arrow::Type::FIXED_SIZE_BINARY) {
             ValidateFixedSizeBinaryVectorWidth(list_arr->values(),
                                                element_type,
@@ -3377,11 +3755,13 @@ ValidateScalarArrowType(DataType data_type,
     if (expected_type == nullptr) {
         return;
     }
-    AssertInfo(array->type()->Equals(*expected_type),
-               "field type mismatch{}, expected Arrow {}, actual Arrow {}",
-               FieldErrorSuffix(field_meta),
-               expected_type->ToString(),
-               array->type()->ToString());
+    if (!(array->type()->Equals(*expected_type))) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "field type mismatch{}, expected Arrow {}, actual Arrow {}",
+                  FieldErrorSuffix(field_meta),
+                  expected_type->ToString(),
+                  array->type()->ToString());
+    }
 }
 
 void

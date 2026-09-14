@@ -283,6 +283,9 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
                            std::shared_ptr<milvus::exec::BaseConfig>>(),
         entity_ttl_physical_time_us_);
 
+    // Pin the sealed published snapshot exactly once for this request.
+    query_context->set_read_snapshot(segment->CaptureReadSnapshot());
+
     // Set op context to query context
     auto op_context = milvus::OpContext(cancel_token_);
     query_context->set_op_context(&op_context);
@@ -433,6 +436,9 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
                                    std::shared_ptr<milvus::exec::BaseConfig>>(),
                 entity_ttl_physical_time_us_);
 
+            // Pin the sealed published snapshot exactly once for this request.
+            query_context->set_read_snapshot(segment->CaptureReadSnapshot());
+
             if (enable_expr_cache_) {
                 query_context->set_enable_expr_cache(true);
                 query_context->set_enable_sub_expr_cache_write(false);
@@ -489,6 +495,9 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
         std::unordered_map<std::string,
                            std::shared_ptr<milvus::exec::BaseConfig>>(),
         entity_ttl_physical_time_us_);
+
+    // Pin the sealed published snapshot exactly once for this request.
+    query_context->set_read_snapshot(segment->CaptureReadSnapshot());
 
     query_context->set_search_info(node.search_info_);
     query_context->set_placeholder_group(placeholder_group_);

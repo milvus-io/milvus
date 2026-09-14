@@ -317,7 +317,6 @@ func (s *Session) Init(serverName, address string, exclusive bool) {
 	s.ServerName = serverName
 	s.Address = address
 	s.Exclusive = exclusive
-	s.checkIDExist()
 	serverID, err := s.getServerID()
 	if err != nil {
 		panic(err)
@@ -400,7 +399,23 @@ func (s *Session) getServerID() (int64, error) {
 			return nodeID, nil
 		}
 	}
-	nodeID, err := s.getServerIDWithKey(DefaultIDKey)
+	var nodeID int64
+	// Embedded etcd may still be electing its leader when session
+	// initialization starts. A transient leader-election error (e.g.
+	// "etcdserver: leader changed") must be retried with backoff rather than
+	// propagated to Init, which would panic and terminate the whole process.
+	err := retry.Do(s.ctx, func() error {
+		// Ensure the ID key exists inside the retry loop: if its creation
+		// txn failed with a transient error, the key stays absent and
+		// getServerIDWithKey would spin on "no value" forever without
+		// returning an error.
+		if err := s.checkIDExist(); err != nil {
+			return err
+		}
+		var err error
+		nodeID, err = s.getServerIDWithKey(DefaultIDKey)
+		return err
+	}, retry.Attempts(uint(s.sessionRetryTimes)), retry.RetryErr(etcd.IsRetriableEtcdErr))
 	if err != nil {
 		return nodeID, err
 	}
@@ -410,13 +425,14 @@ func (s *Session) getServerID() (int64, error) {
 	return nodeID, nil
 }
 
-func (s *Session) checkIDExist() {
-	s.etcdCli.Txn(s.ctx).If(
+func (s *Session) checkIDExist() error {
+	_, err := s.etcdCli.Txn(s.ctx).If(
 		clientv3.Compare(
 			clientv3.Version(path.Join(s.metaRoot, DefaultServiceRoot, DefaultIDKey)),
 			"=",
 			0)).
 		Then(clientv3.OpPut(path.Join(s.metaRoot, DefaultServiceRoot, DefaultIDKey), "1")).Commit()
+	return err
 }
 
 func (s *Session) getServerIDWithKey(key string) (int64, error) {
