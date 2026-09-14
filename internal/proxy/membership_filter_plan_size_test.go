@@ -370,7 +370,7 @@ func TestQueryTaskMembershipFilterPlanSizeLimit(t *testing.T) {
 		Return(schema, nil).Maybe()
 	task := &queryTask{
 		baseTask: baseTask{
-			metaCache: cache,
+			MetaCache: cache,
 		},
 		ctx: ctx,
 		RetrieveRequest: &internalpb.RetrieveRequest{

@@ -809,5 +809,5 @@ class TestSearchBoostRanker(TestMilvusClientV2Base):
             limit=default_limit,
             ranker=fs,
             check_task=CheckTasks.err_res,
-            check_items={"err_code": 1100, "err_msg": "parse expr failed"},
+            check_items={"err_code": 1100, "err_msg": "parse scorer filter failed"},
         )

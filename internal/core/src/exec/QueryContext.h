@@ -348,6 +348,16 @@ class QueryContext : public Context {
         return enable_sub_expr_cache_write_;
     }
 
+    void
+    set_read_snapshot(std::shared_ptr<const segcore::SegmentReadSnapshot> s) {
+        read_snapshot_ = std::move(s);
+    }
+
+    std::shared_ptr<const segcore::SegmentReadSnapshot>
+    get_read_snapshot() const {
+        return read_snapshot_;
+    }
+
  private:
     folly::Executor* executor_;
     //folly::Executor::KeepAlive<> executor_keepalive_;
@@ -385,6 +395,12 @@ class QueryContext : public Context {
     // Set by element-level filter/search operators after row-to-element
     // conversion.
     bool bitset_is_element_level_{false};
+
+    // Request-scoped sealed read snapshot, captured exactly once in
+    // ExecPlanNodeVisitor::visit() while the request read lease is held.
+    // Expressions borrow the raw pointer at construction; the shared_ptr here
+    // is the single owner for the whole ExecuteTask.
+    std::shared_ptr<const segcore::SegmentReadSnapshot> read_snapshot_{nullptr};
 
     // MVCC fast path: set true when sealed + no-filter + no-delete + no-TTL
     bool all_rows_visible_{false};

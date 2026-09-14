@@ -86,18 +86,31 @@ func (w *walImpl) Append(ctx context.Context, msg message.MutableMessage) (messa
 		return nil, errors.Wrap(err, "get producer from future")
 	}
 	pb := msg.IntoMessageProto()
+	recordSize := estimatePulsarRecordSize(pb.Payload, pb.Properties)
 	id, err := p.Send(ctx, &pulsar.ProducerMessage{
 		Payload:    pb.Payload,
 		Properties: pb.Properties,
 	})
 	// Observe the append traffic even if the message is not sent successfully.
 	// Because if the write is failed, the message may be already written to the pulsar topic.
-	w.backlogClearHelper.ObserveAppend(msg.EstimateSize())
+	w.backlogClearHelper.ObserveAppend(recordSize)
 	if err != nil {
 		w.Log().RatedWarn(ctx, rate.Limit(1), "send message to pulsar failed", mlog.Err(err))
 		return nil, err
 	}
 	return pulsarID{id}, nil
+}
+
+// estimatePulsarRecordSize counts the bytes handed to Pulsar for one physical
+// record. MutableMessage.EstimateSize intentionally reports plaintext logical
+// size for encrypted messages; using it here would therefore count the full
+// logical payload once for every encrypted WAL chunk.
+func estimatePulsarRecordSize(payload []byte, properties map[string]string) int {
+	size := len(payload)
+	for key, value := range properties {
+		size += len(key) + len(value)
+	}
+	return size
 }
 
 func (w *walImpl) Read(ctx context.Context, opt walimpls.ReadOption) (s walimpls.ScannerImpls, err error) {

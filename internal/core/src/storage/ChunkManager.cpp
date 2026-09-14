@@ -91,12 +91,18 @@ AwsChunkManager::AwsChunkManager(const StorageConfig& storage_config) {
         auto provider =
             std::make_shared<Aws::Auth::DefaultAWSCredentialsProviderChain>();
         auto aws_credentials = provider->GetAWSCredentials();
-        AssertInfo(!aws_credentials.GetAWSAccessKeyId().empty(),
-                   "if use iam, access key id should not be empty");
-        AssertInfo(!aws_credentials.GetAWSSecretKey().empty(),
-                   "if use iam, secret key should not be empty");
-        AssertInfo(!aws_credentials.GetSessionToken().empty(),
-                   "if use iam, token should not be empty");
+        if (!(!aws_credentials.GetAWSAccessKeyId().empty())) {
+            ThrowInfo(ErrorCode::ConfigInvalid,
+                      "if use iam, access key id should not be empty");
+        }
+        if (!(!aws_credentials.GetAWSSecretKey().empty())) {
+            ThrowInfo(ErrorCode::ConfigInvalid,
+                      "if use iam, secret key should not be empty");
+        }
+        if (!(!aws_credentials.GetSessionToken().empty())) {
+            ThrowInfo(ErrorCode::ConfigInvalid,
+                      "if use iam, token should not be empty");
+        }
 
         client_ = std::make_shared<Aws::S3::S3Client>(
             provider,
@@ -177,12 +183,18 @@ AliyunChunkManager::AliyunChunkManager(const StorageConfig& storage_config) {
         auto aliyun_provider = AliyunChunkManager::
             GetAliyunSTSAssumeRoleWebIdentityCredentialsProvider();
         auto aliyun_credentials = aliyun_provider->GetAWSCredentials();
-        AssertInfo(!aliyun_credentials.GetAWSAccessKeyId().empty(),
-                   "if use iam, access key id should not be empty");
-        AssertInfo(!aliyun_credentials.GetAWSSecretKey().empty(),
-                   "if use iam, secret key should not be empty");
-        AssertInfo(!aliyun_credentials.GetSessionToken().empty(),
-                   "if use iam, token should not be empty");
+        if (!(!aliyun_credentials.GetAWSAccessKeyId().empty())) {
+            ThrowInfo(ErrorCode::ConfigInvalid,
+                      "if use iam, access key id should not be empty");
+        }
+        if (!(!aliyun_credentials.GetAWSSecretKey().empty())) {
+            ThrowInfo(ErrorCode::ConfigInvalid,
+                      "if use iam, secret key should not be empty");
+        }
+        if (!(!aliyun_credentials.GetSessionToken().empty())) {
+            ThrowInfo(ErrorCode::ConfigInvalid,
+                      "if use iam, token should not be empty");
+        }
         client_ = std::make_shared<Aws::S3::S3Client>(
             aliyun_provider,
             config,
@@ -225,12 +237,18 @@ TencentCloudChunkManager::TencentCloudChunkManager(
             GetTencentCloudSTSAssumeRoleWebIdentityCredentialsProvider();
         auto tencent_cloud_credentials =
             tencent_cloud_provider->GetAWSCredentials();
-        AssertInfo(!tencent_cloud_credentials.GetAWSAccessKeyId().empty(),
-                   "if use iam, access key id should not be empty");
-        AssertInfo(!tencent_cloud_credentials.GetAWSSecretKey().empty(),
-                   "if use iam, secret key should not be empty");
-        AssertInfo(!tencent_cloud_credentials.GetSessionToken().empty(),
-                   "if use iam, token should not be empty");
+        if (!(!tencent_cloud_credentials.GetAWSAccessKeyId().empty())) {
+            ThrowInfo(ErrorCode::ConfigInvalid,
+                      "if use iam, access key id should not be empty");
+        }
+        if (!(!tencent_cloud_credentials.GetAWSSecretKey().empty())) {
+            ThrowInfo(ErrorCode::ConfigInvalid,
+                      "if use iam, secret key should not be empty");
+        }
+        if (!(!tencent_cloud_credentials.GetSessionToken().empty())) {
+            ThrowInfo(ErrorCode::ConfigInvalid,
+                      "if use iam, token should not be empty");
+        }
         client_ = std::make_shared<Aws::S3::S3Client>(
             tencent_cloud_provider,
             config,
@@ -270,12 +288,18 @@ HuaweiCloudChunkManager::HuaweiCloudChunkManager(
             GetHuaweiCloudSTSAssumeRoleWebIdentityCredentialsProvider();
         auto huawei_cloud_credentials =
             huawei_cloud_provider->GetAWSCredentials();
-        AssertInfo(!huawei_cloud_credentials.GetAWSAccessKeyId().empty(),
-                   "if use iam, access key id should not be empty");
-        AssertInfo(!huawei_cloud_credentials.GetAWSSecretKey().empty(),
-                   "if use iam, secret key should not be empty");
-        AssertInfo(!huawei_cloud_credentials.GetSessionToken().empty(),
-                   "if use iam, token should not be empty");
+        if (!(!huawei_cloud_credentials.GetAWSAccessKeyId().empty())) {
+            ThrowInfo(ErrorCode::ConfigInvalid,
+                      "if use iam, access key id should not be empty");
+        }
+        if (!(!huawei_cloud_credentials.GetAWSSecretKey().empty())) {
+            ThrowInfo(ErrorCode::ConfigInvalid,
+                      "if use iam, secret key should not be empty");
+        }
+        if (!(!huawei_cloud_credentials.GetSessionToken().empty())) {
+            ThrowInfo(ErrorCode::ConfigInvalid,
+                      "if use iam, token should not be empty");
+        }
         client_ = std::make_shared<Aws::S3::S3Client>(
             huawei_cloud_provider,
             config,

@@ -4389,6 +4389,65 @@ func (_c *MixCoord_GetComponentStates_Call) RunAndReturn(run func(context.Contex
 	return _c
 }
 
+// GetConnectedDataNodeMetrics provides a mock function with given fields: ctx, req
+func (_m *MixCoord) GetConnectedDataNodeMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) ([]metricsinfo.DataNodeInfos, error) {
+	ret := _m.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetConnectedDataNodeMetrics")
+	}
+
+	var r0 []metricsinfo.DataNodeInfos
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetMetricsRequest) ([]metricsinfo.DataNodeInfos, error)); ok {
+		return rf(ctx, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetMetricsRequest) []metricsinfo.DataNodeInfos); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]metricsinfo.DataNodeInfos)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetMetricsRequest) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_GetConnectedDataNodeMetrics_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetConnectedDataNodeMetrics'
+type MixCoord_GetConnectedDataNodeMetrics_Call struct {
+	*mock.Call
+}
+
+// GetConnectedDataNodeMetrics is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *milvuspb.GetMetricsRequest
+func (_e *MixCoord_Expecter) GetConnectedDataNodeMetrics(ctx interface{}, req interface{}) *MixCoord_GetConnectedDataNodeMetrics_Call {
+	return &MixCoord_GetConnectedDataNodeMetrics_Call{Call: _e.mock.On("GetConnectedDataNodeMetrics", ctx, req)}
+}
+
+func (_c *MixCoord_GetConnectedDataNodeMetrics_Call) Run(run func(ctx context.Context, req *milvuspb.GetMetricsRequest)) *MixCoord_GetConnectedDataNodeMetrics_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.GetMetricsRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_GetConnectedDataNodeMetrics_Call) Return(_a0 []metricsinfo.DataNodeInfos, _a1 error) *MixCoord_GetConnectedDataNodeMetrics_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_GetConnectedDataNodeMetrics_Call) RunAndReturn(run func(context.Context, *milvuspb.GetMetricsRequest) ([]metricsinfo.DataNodeInfos, error)) *MixCoord_GetConnectedDataNodeMetrics_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetCredential provides a mock function with given fields: _a0, _a1
 func (_m *MixCoord) GetCredential(_a0 context.Context, _a1 *rootcoordpb.GetCredentialRequest) (*rootcoordpb.GetCredentialResponse, error) {
 	ret := _m.Called(_a0, _a1)

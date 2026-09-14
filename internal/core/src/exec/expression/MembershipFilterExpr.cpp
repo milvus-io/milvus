@@ -154,8 +154,10 @@ PhyMembershipFilterExpr<LogicalExpr, ProbePolicy>::ExecVisitorImpl(
             const int size,
             TargetBitmapView res,
             TargetBitmapView valid_res) {
-        // data == nullptr means the chunk was skipped upstream; only the
-        // bitmap_input cursor needs to advance.
+        // A null data pointer means evaluation was suppressed because the
+        // payload was skipped, the candidate was inactive, or an index
+        // reverse-lookup miss already applied its invalid result. Ordinary
+        // nullable Scan/Take rows carry a placeholder plus real validity.
         if (data == nullptr) {
             processed_cursor += size;
             return;
@@ -189,8 +191,12 @@ PhyMembershipFilterExpr<LogicalExpr, ProbePolicy>::ExecVisitorImpl(
 
     int64_t processed_size;
     if (has_offset_input_) {
-        processed_size = ProcessDataByOffsets<T>(
-            execute_sub_batch, std::nullptr_t{}, input, res, valid_res);
+        processed_size = ProcessDataByOffsetsWithMask<T>(execute_sub_batch,
+                                                         std::nullptr_t{},
+                                                         input,
+                                                         res,
+                                                         valid_res,
+                                                         bitmap_input);
     } else {
         processed_size = ProcessDataChunks<T>(
             execute_sub_batch, std::nullptr_t{}, res, valid_res);
@@ -247,8 +253,8 @@ PhyMembershipFilterExpr<LogicalExpr, ProbePolicy>::ExecVisitorImplForIndex(
         TargetBitmapView valid_res) {
         // data == nullptr means the helper either pruned an inactive candidate
         // before reverse lookup (leaving false/valid untouched), or found an
-        // active NULL row (after writing false/invalid). In both cases the
-        // reader already owns the result.
+        // active missing value (after writing false/invalid). In both cases
+        // the reader already owns the result.
         if (data == nullptr) {
             return;
         }
@@ -275,18 +281,19 @@ PhyMembershipFilterExpr<LogicalExpr, ProbePolicy>::ExecVisitorImplForIndex(
                                                          bitmap_input);
     } else {
         // No offset input: reverse-look-up the contiguous global row range
-        // [current_index_chunk_pos_, +real_batch_size) for this batch.
-        OffsetVector batch_offsets(real_batch_size);
-        auto start = current_index_chunk_pos_;
-        for (int64_t i = 0; i < real_batch_size; ++i) {
-            batch_offsets[i] = static_cast<int32_t>(start + i);
-        }
-        processed_size = ProcessIndexLookupByOffsetsWithMask<T>(
-            execute_sub_batch, &batch_offsets, res, valid_res, bitmap_input);
-        // ProcessIndexLookupByOffsets is stateless; advance the index cursor
-        // for the next batch. MoveCursor() honors the has_offset_input_ guard
-        // and, on the ScalarIndex path with no raw data, advances only the
-        // index cursor.
+        // [current_index_chunk_pos_, +real_batch_size) for this batch, without
+        // materializing a per-batch OffsetVector.
+        processed_size =
+            ProcessIndexLookupSequentialWithMask<T>(execute_sub_batch,
+                                                    current_index_chunk_pos_,
+                                                    real_batch_size,
+                                                    res,
+                                                    valid_res,
+                                                    bitmap_input);
+        // ProcessIndexLookupSequentialWithMask is stateless; advance the index
+        // cursor for the next batch. MoveCursor() honors the has_offset_input_
+        // guard and, on the ScalarIndex path with no raw data, advances only
+        // the index cursor.
         MoveCursor();
     }
     AssertInfo(processed_size == real_batch_size,
@@ -345,8 +352,9 @@ PhyMembershipFilterExpr<LogicalExpr, ProbePolicy>::ExecVisitorImplJson(
             TargetBitmapView res,
             TargetBitmapView valid_res,
             const std::string& pointer) {
-        // data == nullptr means the chunk was skipped upstream; only the
-        // bitmap_input cursor needs to advance.
+        // A null data pointer means evaluation was suppressed because the
+        // payload was skipped or the candidate was inactive. Ordinary
+        // nullable Scan/Take rows carry a placeholder plus real validity.
         if (data == nullptr) {
             processed_cursor += size;
             return;
@@ -382,19 +390,22 @@ PhyMembershipFilterExpr<LogicalExpr, ProbePolicy>::ExecVisitorImplJson(
             // The blob's declared value domains gate the probes themselves,
             // so a JSON string cannot alias an int64-only filter.
             const auto& json = data[offset];
-            auto str = json.template at<std::string_view>(pointer);
-            if (!str.error()) {
-                res[i] = probe_.TestBytesValue(str.value().data(),
-                                               str.value().size());
-                continue;
-            }
-            auto num = json.at_numeric(pointer);
-            if (num.error()) {
-                res[i] = valid_res[i] = false;
-                continue;
-            }
-            if (auto n = num.value(); n.is_int64()) {
-                res[i] = probe_.TestInt64Value(n.get_int64());
+            const auto value = json.at_string_or_int64(pointer);
+            switch (value.kind) {
+                case JsonStringOrInt64::Kind::String:
+                    res[i] = probe_.TestBytesValue(value.string_value.data(),
+                                                   value.string_value.size());
+                    break;
+                case JsonStringOrInt64::Kind::Int64:
+                    res[i] = probe_.TestInt64Value(value.int64_value);
+                    break;
+                case JsonStringOrInt64::Kind::OtherNumber:
+                    // A numeric value outside the int64 domain is a definite
+                    // non-member, but it is still a valid JSON scalar.
+                    break;
+                case JsonStringOrInt64::Kind::NoProbeValue:
+                    res[i] = valid_res[i] = false;
+                    break;
             }
         }
         processed_cursor += size;
@@ -402,12 +413,14 @@ PhyMembershipFilterExpr<LogicalExpr, ProbePolicy>::ExecVisitorImplJson(
 
     int64_t processed_size;
     if (has_offset_input_) {
-        processed_size = ProcessDataByOffsets<milvus::Json>(execute_sub_batch,
-                                                            std::nullptr_t{},
-                                                            input,
-                                                            res,
-                                                            valid_res,
-                                                            pointer);
+        processed_size =
+            ProcessDataByOffsetsWithMask<milvus::Json>(execute_sub_batch,
+                                                       std::nullptr_t{},
+                                                       input,
+                                                       res,
+                                                       valid_res,
+                                                       bitmap_input,
+                                                       pointer);
     } else {
         processed_size = ProcessDataChunks<milvus::Json>(
             execute_sub_batch, std::nullptr_t{}, res, valid_res, pointer);

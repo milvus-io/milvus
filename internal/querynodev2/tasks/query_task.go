@@ -119,6 +119,9 @@ func (t *QueryTask) Execute() error {
 		return err
 	}
 	defer retrievePlan.Delete()
+	resultCount := retrieveTakeForOutputResultCount(t.req.GetReq(), t.plan)
+	takeAllowed := requestAllowsTakeForOutput(resultCount)
+	retrievePlan.SetTakeForOutputAllowed(takeAllowed)
 
 	results, pinnedSegments, err := segments.Retrieve(t.ctx, t.segmentManager, retrievePlan, t.req)
 	defer t.segmentManager.Segment.Unpin(pinnedSegments)

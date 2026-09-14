@@ -1636,10 +1636,10 @@ func TestMemorySize(t *testing.T) {
 	assert.Equal(t, insertData1.Data[NullableBFloat16VectorField].GetMemorySize(), 22)
 	assert.Equal(t, insertData1.Data[NullableInt8VectorField].GetMemorySize(), 18)
 	assert.Equal(t, insertData1.Data[NullableSparseFloatVectorField].GetMemorySize(), 39)
-	assert.Equal(t, insertData1.Data[ArrayField].GetMemorySize(), 13)
+	assert.Equal(t, insertData1.Data[ArrayField].GetMemorySize(), 14)
 	assert.Equal(t, insertData1.Data[JSONField].GetMemorySize(), 28)
-	assert.Equal(t, insertData1.Data[StructSubInt32Field].GetMemorySize(), 17)
-	assert.Equal(t, insertData1.Data[StructSubFloatVectorField].GetMemorySize(), 20+1)
+	assert.Equal(t, insertData1.Data[StructSubInt32Field].GetMemorySize(), 18)
+	assert.Equal(t, insertData1.Data[StructSubFloatVectorField].GetMemorySize(), 20+2)
 
 	insertData2 := &InsertData{
 		Data: map[int64]FieldData{
@@ -1897,7 +1897,7 @@ func TestMemorySize(t *testing.T) {
 	assert.Equal(t, insertDataEmpty.Data[NullableBFloat16VectorField].GetMemorySize(), 13)
 	assert.Equal(t, insertDataEmpty.Data[NullableInt8VectorField].GetMemorySize(), 13)
 	assert.Equal(t, insertDataEmpty.Data[NullableSparseFloatVectorField].GetMemorySize(), 9)
-	assert.Equal(t, insertDataEmpty.Data[StructSubFloatVectorField].GetMemorySize(), 0+1)
+	assert.Equal(t, insertDataEmpty.Data[StructSubFloatVectorField].GetMemorySize(), 0+2)
 }
 
 func TestDeleteData(t *testing.T) {

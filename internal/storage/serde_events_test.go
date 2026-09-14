@@ -1023,7 +1023,7 @@ func TestValueSerializerRejectsArrayOfVectorElementValidityConflict(t *testing.T
 
 	record, err := ValueSerializer(values, schema)
 	require.Nil(t, record)
-	require.ErrorIs(t, err, merr.ErrStorage)
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
 	require.ErrorContains(t, err, "non-element-nullable ArrayOfVector row cannot carry element valid_data")
 }
 

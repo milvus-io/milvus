@@ -35,6 +35,7 @@
 #include "common/Tracer.h"
 #include "common/TracerBase.h"
 #include "common/Types.h"
+#include "common/Utils.h"
 #include "common/protobuf_utils.h"
 #include "gtest/gtest.h"
 #include "index/HybridScalarIndex.h"
@@ -704,7 +705,7 @@ TYPED_TEST_P(HybridIndexTestV1, ResourceEstimateUsesInternalIndexType) {
 }
 
 TYPED_TEST_P(HybridIndexTestV1, BitmapResourceEstimateKeepsFullStreamOverhead) {
-    auto& budget = storage::TransientMemoryBudget::GetLoadTransientBudget();
+    auto& budget = storage::LoadAdmissionController::GetInstance();
     auto old_capacity = budget.CapacityBytes();
     auto budget_cleanup = folly::makeGuard(
         [&budget, old_capacity]() { budget.SetCapacityBytes(old_capacity); });
@@ -945,8 +946,8 @@ TYPED_TEST_P(HybridIndexTestInverted,
         [&plugin_loader]() { plugin_loader.unload("CipherPlugin"); });
 
     auto max_task_transient_bytes =
-        storage::SaturatingMultiply(storage::MaxEntryStreamTaskBytes(),
-                                    storage::kFileStreamBufferMultiplier);
+        milvus::SaturatingMultiply(storage::MaxEntryStreamTaskBytes(),
+                                   storage::kFileStreamBufferMultiplier);
     auto stream_budget = storage::EntryStreamMaxTransientBytes(
         std::numeric_limits<size_t>::max(), max_task_transient_bytes);
     auto index_size = static_cast<uint64_t>(stream_budget);
@@ -957,8 +958,9 @@ TYPED_TEST_P(HybridIndexTestInverted,
     } else {
         index_size += 1024;
     }
-    auto stream_overhead = static_cast<uint64_t>(storage::SaturatingMultiply(
-        index_size, storage::kFileStreamBufferMultiplier));
+    auto stream_overhead = static_cast<uint64_t>(milvus::SaturatingMultiply(
+        index_size,
+        static_cast<uint64_t>(storage::kFileStreamBufferMultiplier)));
     auto bounded_stream_overhead = storage::EntryStreamMaxTransientBytes(
         stream_overhead, max_task_transient_bytes);
     ASSERT_GT(stream_overhead, bounded_stream_overhead);
@@ -996,7 +998,7 @@ TYPED_TEST_P(HybridIndexTestInverted,
 
 TYPED_TEST_P(HybridIndexTestInverted,
              ScalarIndexLoadingOverheadUsesBudgetAndSingleTaskBounds) {
-    auto& budget = storage::TransientMemoryBudget::GetLoadTransientBudget();
+    auto& budget = storage::LoadAdmissionController::GetInstance();
     auto old_capacity = budget.CapacityBytes();
     auto cleanup = folly::makeGuard(
         [&budget, old_capacity]() { budget.SetCapacityBytes(old_capacity); });
@@ -1050,8 +1052,8 @@ TYPED_TEST_P(HybridIndexTestInverted,
         std::move(config));
 
     auto max_task_overhead =
-        storage::SaturatingMultiply(storage::MaxEntryStreamTaskBytes(),
-                                    storage::kFileStreamBufferMultiplier);
+        milvus::SaturatingMultiply(storage::MaxEntryStreamTaskBytes(),
+                                   storage::kFileStreamBufferMultiplier);
     ASSERT_TRUE(translator.meta()->loading_overhead_config.has_value());
     ASSERT_TRUE(translator.meta()->loading_overhead_config->memory.has_value());
     EXPECT_EQ(translator.meta()->loading_overhead_config->memory->group,
@@ -1122,7 +1124,7 @@ TYPED_TEST_P(HybridIndexTestInverted,
 
 TYPED_TEST_P(HybridIndexTestInverted,
              EncryptedFileAwareResourceEstimateUsesFullOverhead) {
-    auto& budget = storage::TransientMemoryBudget::GetLoadTransientBudget();
+    auto& budget = storage::LoadAdmissionController::GetInstance();
     auto old_capacity = budget.CapacityBytes();
     auto budget_cleanup = folly::makeGuard(
         [&budget, old_capacity]() { budget.SetCapacityBytes(old_capacity); });

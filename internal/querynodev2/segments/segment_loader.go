@@ -1998,11 +1998,12 @@ func estimateLogicalResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 
 			var estimateResult ResourceEstimate
 			err = GetCLoadInfoWithFunc(ctx, fieldSchema, loadInfo, fieldIndexInfo, func(c *LoadIndexInfo) error {
-				GetDynamicPool().Submit(func() (any, error) {
-					loadResourceRequest := C.EstimateLoadIndexResource(c.cLoadIndexInfo)
-					estimateResult = GetResourceEstimate(&loadResourceRequest)
-					return nil, nil
-				}).Await()
+				var loadResourceRequest C.LoadResourceRequest
+				status := C.EstimateLoadIndexResource(c.cLoadIndexInfo, &loadResourceRequest)
+				if err := HandleCStatus(ctx, &status, "failed to estimate load index resource"); err != nil {
+					return err
+				}
+				estimateResult = GetResourceEstimate(&loadResourceRequest)
 				return nil
 			})
 			if err != nil {
@@ -2203,11 +2204,12 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 
 			var estimateResult ResourceEstimate
 			err = GetCLoadInfoWithFunc(ctx, fieldSchema, loadInfo, fieldIndexInfo, func(c *LoadIndexInfo) error {
-				GetDynamicPool().Submit(func() (any, error) {
-					loadResourceRequest := C.EstimateLoadIndexResource(c.cLoadIndexInfo)
-					estimateResult = GetResourceEstimate(&loadResourceRequest)
-					return nil, nil
-				}).Await()
+				var loadResourceRequest C.LoadResourceRequest
+				status := C.EstimateLoadIndexResource(c.cLoadIndexInfo, &loadResourceRequest)
+				if err := HandleCStatus(ctx, &status, "failed to estimate load index resource"); err != nil {
+					return err
+				}
+				estimateResult = GetResourceEstimate(&loadResourceRequest)
 				return nil
 			})
 			if err != nil {

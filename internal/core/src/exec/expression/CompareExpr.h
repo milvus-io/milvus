@@ -239,6 +239,11 @@ class PhyCompareFilterExpr : public Expr {
         }
     }
 
+    void
+    SetSnapshot(const segcore::SegmentReadSnapshot* snapshot) override {
+        segment_chunk_reader_.SetSnapshot(snapshot);
+    }
+
     std::string
     ToString() const override {
         return fmt::format("{}", expr_->ToString());
@@ -279,12 +284,11 @@ class PhyCompareFilterExpr : public Expr {
     int64_t
     GetCurrentRows() {
         if (segment_chunk_reader_.segment_->is_chunked()) {
-            auto current_rows =
-                left_use_index_data_
-                    ? left_current_chunk_pos_
-                    : segment_chunk_reader_.segment_->num_rows_until_chunk(
-                          left_field_, left_current_chunk_id_) +
-                          left_current_chunk_pos_;
+            auto current_rows = left_use_index_data_
+                                    ? left_current_chunk_pos_
+                                    : segment_chunk_reader_.NumRowsUntilChunk(
+                                          left_field_, left_current_chunk_id_) +
+                                          left_current_chunk_pos_;
             return current_rows;
         } else {
             return segment_chunk_reader_.segment_->type() ==
@@ -343,8 +347,8 @@ class PhyCompareFilterExpr : public Expr {
                     auto size_per_chunk = segment_chunk_reader_.SizePerChunk();
                     return {offset / size_per_chunk, offset % size_per_chunk};
                 } else {
-                    return segment_chunk_reader_.segment_->get_chunk_by_offset(
-                        field, offset);
+                    return segment_chunk_reader_.GetChunkByOffset(field,
+                                                                  offset);
                 }
             };
 
@@ -550,8 +554,7 @@ class PhyCompareFilterExpr : public Expr {
                         : segment_chunk_reader_.SizePerChunk() - data_pos;
             } else {
                 size =
-                    segment_chunk_reader_.segment_->chunk_size(left_field_, i) -
-                    data_pos;
+                    segment_chunk_reader_.ChunkSize(left_field_, i) - data_pos;
             }
 
             if (processed_size + size >= batch_size_) {

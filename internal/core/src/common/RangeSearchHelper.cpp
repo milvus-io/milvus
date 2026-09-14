@@ -126,19 +126,23 @@ CheckRangeSearchParam(float radius,
      *
      */
     if (PositivelyRelated(metric_type)) {
-        AssertInfo(range_filter > radius,
-                   "metric type ({}), range_filter({}) must be greater than "
-                   "radius({})",
-                   metric_type.c_str(),
-                   range_filter,
-                   radius);
+        if (!(range_filter > radius)) {
+            ThrowInfo(ErrorCode::InvalidParameter,
+                      "metric type ({}), range_filter({}) must be greater than "
+                      "radius({})",
+                      metric_type.c_str(),
+                      range_filter,
+                      radius);
+        }
     } else {
-        AssertInfo(range_filter < radius,
-                   "metric type ({}), range_filter({}) must be less than "
-                   "radius({})",
-                   metric_type.c_str(),
-                   range_filter,
-                   radius);
+        if (!(range_filter < radius)) {
+            ThrowInfo(ErrorCode::InvalidParameter,
+                      "metric type ({}), range_filter({}) must be less than "
+                      "radius({})",
+                      metric_type.c_str(),
+                      range_filter,
+                      radius);
+        }
     }
 }
 

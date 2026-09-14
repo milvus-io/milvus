@@ -24,6 +24,7 @@
 package testcases
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -741,4 +742,132 @@ func TestStructArrayElementSearchNoFilter(t *testing.T) {
 		first, _ := idCol.Get(0)
 		require.EqualValues(t, int64(0), first.(int64), "self-match top-1 should be row 0 even with group_by_pk")
 	})
+}
+
+// TestStructArrayElementSearchHNSWUsesElementIDSpace covers #53028 across all segment paths.
+func TestStructArrayElementSearchHNSWUsesElementIDSpace(t *testing.T) {
+	const (
+		dim                 = 8
+		indexedSealedRows   = 3000
+		unindexedSealedRows = 500
+		growingRows         = 500
+		totalRows           = indexedSealedRows + unindexedSealedRows + growingRows
+		vectorsPerRow       = 2
+		indexName           = "chunks_embedding_hnsw"
+		limit               = 1
+	)
+
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+	collName := common.GenRandomString(elemSearchPrefix+"_nested_count", 6)
+
+	structSchema := entity.NewStructSchema().
+		WithField(entity.NewField().WithName("embedding").
+			WithDataType(entity.FieldTypeFloatVector).WithDim(dim))
+	schema := entity.NewSchema().WithName(collName).
+		WithField(entity.NewField().WithName("id").
+			WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+		WithField(entity.NewField().WithName("chunks").
+			WithDataType(entity.FieldTypeArray).
+			WithElementType(entity.FieldTypeStruct).
+			WithMaxCapacity(vectorsPerRow).
+			WithStructSchema(structSchema).
+			WithNullable(true))
+	common.CheckErr(t, mc.CreateCollection(ctx,
+		client.NewCreateCollectionOption(collName, schema).WithConsistencyLevel(entity.ClStrong)), true)
+
+	insertRows := func(startID, count int) {
+		ids := make([]int64, count)
+		rows := make([]map[string]any, count)
+		for i := range count {
+			id := startID + i
+			ids[i] = int64(id)
+			if id == 0 {
+				continue
+			}
+			vectors := make([][]float32, vectorsPerRow)
+			for offset := range vectorsPerRow {
+				vectors[offset] = hp.SeedVector(int64(id*vectorsPerRow+offset), dim)
+			}
+			rows[i] = map[string]any{"embedding": vectors}
+		}
+		result, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(collName).
+			WithInt64Column("id", ids).
+			WithStructArrayColumn("chunks", structSchema, rows))
+		common.CheckErr(t, err, true)
+		require.EqualValues(t, count, result.InsertCount)
+	}
+	flush := func() {
+		for attempt := 0; attempt < 3; attempt++ {
+			flushTask, err := mc.Flush(ctx, client.NewFlushOption(collName))
+			if err == nil {
+				common.CheckErr(t, flushTask.Await(ctx), true)
+				return
+			}
+			if !client.IsRetryableError(err) || attempt == 2 {
+				common.CheckErr(t, err, true)
+				return
+			}
+			time.Sleep(10 * time.Second)
+		}
+	}
+
+	insertRows(0, indexedSealedRows)
+	flush()
+	insertRows(indexedSealedRows, unindexedSealedRows)
+	flush()
+
+	indexTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, "chunks[embedding]",
+		index.NewHNSWIndex(entity.COSINE, 16, 200)).WithIndexName(indexName))
+	common.CheckErr(t, err, true)
+	common.CheckErr(t, indexTask.Await(ctx), true)
+	indexDesc, err := mc.DescribeIndex(ctx, client.NewDescribeIndexOption(collName, indexName))
+	common.CheckErr(t, err, true)
+	require.Equal(t, common.IndexStateFinished, indexDesc.State)
+	require.EqualValues(t, indexedSealedRows+unindexedSealedRows, indexDesc.TotalRows)
+
+	loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(collName))
+	common.CheckErr(t, err, true)
+	common.CheckErr(t, loadTask.Await(ctx), true)
+
+	segments, err := mc.GetPersistentSegmentInfo(ctx, client.NewGetPersistentSegmentInfoOption(collName))
+	common.CheckErr(t, err, true)
+	segmentRows := make([]int64, 0, len(segments))
+	for _, segment := range segments {
+		segmentRows = append(segmentRows, segment.NumRows)
+	}
+	// The 500-row segment stays below the index-build threshold and is searched by brute force.
+	require.ElementsMatch(t, []int64{indexedSealedRows, unindexedSealedRows}, segmentRows)
+
+	insertRows(indexedSealedRows+unindexedSealedRows, growingRows)
+	require.EqualValues(t, totalRows, queryCountStar(t, ctx, mc, collName, ""))
+
+	paths := []struct {
+		name     string
+		targetID int
+	}{
+		{name: "indexed_sealed", targetID: 1},
+		{name: "unindexed_sealed", targetID: indexedSealedRows},
+		{name: "growing", targetID: indexedSealedRows + unindexedSealedRows},
+	}
+	for _, path := range paths {
+		t.Run(path.name, func(t *testing.T) {
+			results, err := mc.Search(ctx, client.NewSearchOption(collName, limit,
+				[]entity.Vector{entity.FloatVector(hp.SeedVector(int64(path.targetID*vectorsPerRow), dim))}).
+				WithANNSField("chunks[embedding]").
+				WithSearchParam("metric_type", "COSINE").
+				WithFilter(fmt.Sprintf("id == %d", path.targetID)).
+				WithOutputFields("id").
+				WithConsistencyLevel(entity.ClStrong))
+			common.CheckErr(t, err, true)
+			require.Len(t, results, 1)
+			require.NoError(t, results[0].Err)
+			require.EqualValues(t, limit, results[0].ResultCount)
+			idCol := results[0].GetColumn("id")
+			require.NotNil(t, idCol)
+			id, err := idCol.Get(0)
+			require.NoError(t, err)
+			require.EqualValues(t, int64(path.targetID), id)
+		})
+	}
 }

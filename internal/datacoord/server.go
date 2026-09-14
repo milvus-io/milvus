@@ -171,6 +171,7 @@ type Server struct {
 
 type FileResourceObserver interface {
 	InitDataCoord(manager session.NodeManager)
+	IsEmpty() bool
 	Notify()
 }
 
@@ -738,6 +739,8 @@ func (s *Server) startServerLoop() {
 	}
 
 	s.garbageCollector.start()
+
+	s.meta.statsTaskMeta.StartCleanupDeprecatedSortTasks(s.serverLoopCtx, &s.serverLoopWg)
 }
 
 func (s *Server) startCollectMetaMetrics(ctx context.Context) {
@@ -877,7 +880,7 @@ func (s *Server) handleSessionEvent(ctx context.Context, role string, event *ses
 			}
 
 			// notify file manager sync file resource to new node
-			if s.fileResourceObserver != nil {
+			if s.fileResourceObserver != nil && !s.fileResourceObserver.IsEmpty() {
 				s.fileResourceObserver.Notify()
 			}
 		case sessionutil.SessionDelEvent:

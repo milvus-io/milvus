@@ -21,6 +21,15 @@
 #include "common/EasyAssert.h"
 
 namespace milvus {
+MmapChunkTarget::~MmapChunkTarget() {
+    if (mapped_data_ != nullptr) {
+        munmap(mapped_data_, cap_);
+    }
+    if (owns_file_ && !file_path_.empty()) {
+        unlink(file_path_.c_str());
+    }
+}
+
 void
 MemChunkTarget::write(const void* data, size_t size) {
     AssertInfo(size + size_ <= cap_, "can not exceed target capacity");
@@ -70,11 +79,20 @@ MmapChunkTarget::release() {
         mmap_flag |= MAP_POPULATE;
     }
     auto m = mmap(nullptr, cap_, PROT_READ, mmap_flag, file.Descriptor(), 0);
-    AssertInfo(m != MAP_FAILED,
-               "failed to map: {}, map_size={}",
-               strerror(errno),
-               cap_);
-    return static_cast<char*>(m);
+    if (m == MAP_FAILED) {
+        ThrowInfo(ErrorCode::MmapError,
+                  "failed to map: {}, map_size={}",
+                  strerror(errno),
+                  cap_);
+    }
+    mapped_data_ = static_cast<char*>(m);
+    return mapped_data_;
+}
+
+void
+MmapChunkTarget::TransferOwnership() noexcept {
+    mapped_data_ = nullptr;
+    owns_file_ = false;
 }
 
 size_t

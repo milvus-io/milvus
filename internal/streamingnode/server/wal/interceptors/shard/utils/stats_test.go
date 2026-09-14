@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"math"
 	"testing"
 	"time"
 
@@ -77,6 +78,18 @@ func TestNewSegmentStatFromProtoPreservesCreateSegmentTimeTick(t *testing.T) {
 	assert.Equal(t, uint64(10086), roundTrip.GetCreateSegmentTimeTick())
 }
 
+func TestRecoveredOverTargetSegmentShouldBeSealed(t *testing.T) {
+	stat := NewSegmentStatFromProto(&streamingpb.SegmentAssignmentStat{
+		MaxRows:            100,
+		MaxBinarySize:      400,
+		ModifiedRows:       101,
+		ModifiedBinarySize: 401,
+	})
+
+	assert.False(t, stat.ReachLimit)
+	assert.True(t, stat.ShouldBeSealed())
+}
+
 func TestSegmentStats(t *testing.T) {
 	now := time.Now()
 	stat := &SegmentStats{
@@ -84,6 +97,7 @@ func TestSegmentStats(t *testing.T) {
 			Rows:       100,
 			BinarySize: 200,
 		},
+		MaxRows:           math.MaxUint64,
 		MaxBinarySize:     400,
 		CreateTime:        now,
 		LastModifiedTime:  now,
@@ -108,11 +122,16 @@ func TestSegmentStats(t *testing.T) {
 		BinarySize: 100,
 	}
 	inserted = stat.AllocRows(insert1)
-	assert.False(t, inserted)
-	assert.Equal(t, stat.Modified.Rows, uint64(160))
-	assert.Equal(t, stat.Modified.BinarySize, uint64(320))
+	assert.True(t, inserted)
+	assert.Equal(t, stat.Modified.Rows, uint64(260))
+	assert.Equal(t, stat.Modified.BinarySize, uint64(420))
 	assert.False(t, stat.IsEmpty())
 	assert.True(t, stat.ShouldBeSealed())
+
+	modifiedAfterCrossing := stat.Modified
+	inserted = stat.AllocRows(ModifiedMetrics{Rows: 1, BinarySize: 1})
+	assert.False(t, inserted)
+	assert.Equal(t, modifiedAfterCrossing, stat.Modified)
 
 	stat.UpdateOnSync(SyncOperationMetrics{
 		BinLogCounterIncr:     4,
@@ -135,19 +154,70 @@ func TestIsZero(t *testing.T) {
 	assert.False(t, nonZeroInsert.IsZero())
 }
 
-func TestOversizeAlloc(t *testing.T) {
+func TestOversizeFirstAllocIsAcceptedAndSealed(t *testing.T) {
 	now := time.Now()
 	stat := &SegmentStats{
 		Modified:         ModifiedMetrics{},
+		MaxRows:          100,
 		MaxBinarySize:    400,
 		CreateTime:       now,
 		LastModifiedTime: now,
 	}
-	// Try to alloc a oversized insert metrics.
+	// An oversized first logical batch is accepted because the segment limit is
+	// a sealing threshold, then the segment is sealed immediately.
 	inserted := stat.AllocRows(ModifiedMetrics{
+		Rows:       1,
 		BinarySize: 401,
 	})
+	assert.True(t, inserted)
+	assert.Equal(t, ModifiedMetrics{Rows: 1, BinarySize: 401}, stat.Modified)
+	assert.False(t, stat.IsEmpty())
+	assert.True(t, stat.ShouldBeSealed())
+	assert.Zero(t, stat.BinaryCanBeAssign())
+
+	modifiedAfterCrossing := stat.Modified
+	inserted = stat.AllocRows(ModifiedMetrics{Rows: 1, BinarySize: 1})
 	assert.False(t, inserted)
-	assert.True(t, stat.IsEmpty())
+	assert.Equal(t, modifiedAfterCrossing, stat.Modified)
+
+	rowLimitedStat := &SegmentStats{
+		MaxRows:       1,
+		MaxBinarySize: 400,
+	}
+	inserted = rowLimitedStat.AllocRows(ModifiedMetrics{
+		Rows:       2,
+		BinarySize: 1,
+	})
+	assert.True(t, inserted)
+	assert.True(t, rowLimitedStat.ShouldBeSealed())
+	assert.Zero(t, rowLimitedStat.RowsCanBeAssign())
+
+	modifiedAfterRowCrossing := rowLimitedStat.Modified
+	inserted = rowLimitedStat.AllocRows(ModifiedMetrics{Rows: 1, BinarySize: 1})
+	assert.False(t, inserted)
+	assert.Equal(t, modifiedAfterRowCrossing, rowLimitedStat.Modified)
+}
+
+func TestSegmentStatsExactLimitDoesNotSealBeforeFirstCrossingAllocation(t *testing.T) {
+	stat := &SegmentStats{
+		MaxRows:       2,
+		MaxBinarySize: 400,
+	}
+
+	inserted := stat.AllocRows(ModifiedMetrics{Rows: 2, BinarySize: 400})
+	assert.True(t, inserted)
+	assert.Equal(t, ModifiedMetrics{Rows: 2, BinarySize: 400}, stat.Modified)
 	assert.False(t, stat.ShouldBeSealed())
+	assert.Zero(t, stat.RowsCanBeAssign())
+	assert.Zero(t, stat.BinaryCanBeAssign())
+
+	inserted = stat.AllocRows(ModifiedMetrics{Rows: 1, BinarySize: 1})
+	assert.True(t, inserted)
+	assert.Equal(t, ModifiedMetrics{Rows: 3, BinarySize: 401}, stat.Modified)
+	assert.True(t, stat.ShouldBeSealed())
+
+	modifiedAfterCrossing := stat.Modified
+	inserted = stat.AllocRows(ModifiedMetrics{Rows: 1, BinarySize: 1})
+	assert.False(t, inserted)
+	assert.Equal(t, modifiedAfterCrossing, stat.Modified)
 }

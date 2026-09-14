@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/pkg/v3/util/uniquegenerator"
 )
 
@@ -147,7 +148,7 @@ func TestFlushAllTaskPostExecute(t *testing.T) {
 
 func TestFlushAllTaskImplementsTaskInterface(t *testing.T) {
 	// Verify that flushAllTask implements the task interface
-	var _ task = (*flushAllTask)(nil)
+	var _ taskmodel.Task = (*flushAllTask)(nil)
 
 	task, mixCoord, _ := createTestFlushAllTask(t)
 	defer mixCoord.AssertExpectations(t)
@@ -213,7 +214,6 @@ func TestFlushAllTaskBaseTaskMethods(t *testing.T) {
 
 	// Test SetOnEnqueueTime
 	task.SetOnEnqueueTime()
-	assert.False(t, task.onEnqueueTime.IsZero())
 
 	// Test GetDurationInQueue
 	time.Sleep(1 * time.Millisecond)
@@ -225,7 +225,6 @@ func TestFlushAllTaskBaseTaskMethods(t *testing.T) {
 
 	// Test SetExecutingTime
 	task.SetExecutingTime()
-	assert.False(t, task.executingTime.IsZero())
 
 	// Test GetDurationInExecuting
 	time.Sleep(1 * time.Millisecond)

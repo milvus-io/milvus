@@ -76,7 +76,8 @@ GroupChunkTranslator::GroupChunkTranslator(
     bool mmap_populate,
     int64_t num_fields,
     milvus::proto::common::LoadPriority load_priority,
-    const std::string& warmup_policy)
+    const std::string& warmup_policy,
+    MmapChunkWritebackMode writeback_mode)
     : segment_id_(segment_id),
       group_chunk_type_(group_chunk_type),
       key_([&]() {
@@ -137,6 +138,7 @@ GroupChunkTranslator::GroupChunkTranslator(
                                        return field.second.get_data_type() ==
                                               DataType::ARRAY;
                                    })),
+      writeback_mode_(writeback_mode),
       load_priority_(load_priority) {
     // Build prefix sum for O(1) lookup in get_cid_from_file_and_row_group_index
     file_row_group_prefix_sum_.reserve(row_group_meta_list_.size() + 1);
@@ -200,14 +202,16 @@ GroupChunkTranslator::GroupChunkTranslator(
         meta_.chunk_memory_size_.push_back(cell_size);
     }
 
-    AssertInfo(
-        meta_.num_rows_until_chunk_.back() == column_group_info_.row_count,
-        fmt::format(
-            "[StorageV2] data lost while loading column group {}: found "
-            "num rows {} but expected {}",
-            column_group_info_.field_id,
-            meta_.num_rows_until_chunk_.back(),
-            column_group_info_.row_count));
+    if (!(meta_.num_rows_until_chunk_.back() == column_group_info_.row_count)) {
+        ThrowInfo(
+            ErrorCode::DataFormatBroken,
+            fmt::format(
+                "[StorageV2] data lost while loading column group {}: found "
+                "num rows {} but expected {}",
+                column_group_info_.field_id,
+                meta_.num_rows_until_chunk_.back(),
+                column_group_info_.row_count));
+    }
 
     LOG_INFO(
         "[StorageV2] translator {} merged {} row groups into {} cells "
@@ -528,13 +532,25 @@ GroupChunkTranslator::load_group_chunk(
                           "unknown group chunk type: {}",
                           static_cast<uint8_t>(group_chunk_type_));
         }
-        std::filesystem::create_directories(filepath.parent_path());
+        // Error-code overload: the throwing one escapes this async producer
+        // as a plain filesystem_error and lands on the future/CGo boundary as
+        // a permanent UnexpectedError, so a transient ENOSPC/EACCES would
+        // never be retried or rerouted.
+        std::error_code mkdir_ec;
+        std::filesystem::create_directories(filepath.parent_path(), mkdir_ec);
+        if (mkdir_ec) {
+            ThrowInfo(ErrorCode::FileCreateFailed,
+                      "failed to create chunk directory {}: {}",
+                      filepath.parent_path().string(),
+                      mkdir_ec.message());
+        }
         chunks = create_group_chunk(field_ids,
                                     field_metas,
                                     array_vecs,
                                     mmap_populate_,
                                     filepath.string(),
-                                    load_priority_);
+                                    load_priority_,
+                                    writeback_mode_);
     }
     return std::make_unique<milvus::GroupChunk>(chunks);
 }
