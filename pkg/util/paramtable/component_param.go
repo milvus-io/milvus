@@ -2165,7 +2165,7 @@ Faster the logging writes can be seen by the underlying file system.`,
 		Key:          "log.asyncWrite.droppedTimeout",
 		DefaultValue: "100ms",
 		Version:      "2.6.7",
-		Doc: `The timeout to drop the write operation if the buffer is full.
+		Doc: `The timeout to drop a write below nonDroppableLevel if the buffer is full.
 Once the underlying buffered writer is blocked or too slow and
 the pending length is larger than the pending length threshold,
 the new incoming write operation will be dropped if it exceeds the timeout.`,
@@ -2177,9 +2177,10 @@ the new incoming write operation will be dropped if it exceeds the timeout.`,
 		Key:          "log.asyncWrite.nonDroppableLevel",
 		DefaultValue: "error",
 		Version:      "2.6.7",
-		Doc: `The level at which a new log gets priority when the buffer is full.
-Once the level is greater than or equal to the non-droppable level,
-the oldest pending log is dropped to make room instead of blocking the caller.`,
+		Doc: `The level at which a log uses a best-effort extended wait for queue space.
+At or above this level, the maximum wait is the greater of droppedTimeout and
+stopTimeout. The name is retained for compatibility; these logs can still be dropped
+if the underlying writer remains blocked.`,
 		Export: false,
 	}
 	l.AsyncWriteNonDroppableLevel.Init(base.mgr)
@@ -2188,7 +2189,8 @@ the oldest pending log is dropped to make room instead of blocking the caller.`,
 		Key:          "log.asyncWrite.stopTimeout",
 		DefaultValue: "1s",
 		Version:      "2.6.7",
-		Doc: `The timeout to stop the async write.
+		Doc: `The timeout to stop the async write. It is also the minimum enqueue wait
+for logs at or above nonDroppableLevel.
 When the milvus is on shutdown, 
 the async writer of logger will try to flush all the pending write operations 
 to the underlying file system until reaching the timeout.`,
