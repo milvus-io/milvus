@@ -133,7 +133,7 @@ func WithVersion(version int64) RwOption {
 
 // WithReadConcurrency sets how many input chunks a binlog reader keeps open at
 // once, the one being consumed included. Values <= 1 keep the original
-// strictly serial behaviour; larger values let the reader fetch up to n-1
+// strictly serial behavior; larger values let the reader fetch up to n-1
 // further chunks from object storage while the caller consumes the current
 // one. Chunks are still delivered in order.
 func WithReadConcurrency(n int) RwOption {
