@@ -1240,6 +1240,7 @@ BuildExternalSchemaWithArray() {
                                DataType::ARRAY,
                                DataType::INT32,
                                true,
+                               false,
                                std::optional<DefaultValueType>{std::nullopt},
                                "array_col"));
 
@@ -3671,6 +3672,7 @@ MakeExternalFieldMetaForNormalizeTest(DataType data_type,
                          dim,
                          std::nullopt,
                          nullable,
+                         false,
                          external_field);
     }
     if (IsVectorDataType(data_type)) {
@@ -3698,6 +3700,7 @@ MakeExternalFieldMetaForNormalizeTest(DataType data_type,
                          data_type,
                          element_type,
                          nullable,
+                         false,
                          std::optional<DefaultValueType>{std::nullopt},
                          external_field);
     }

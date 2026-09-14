@@ -1511,7 +1511,8 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                 auto dim = field_meta.get_dim();
                 std::vector<VectorArray> data_raw(src_data.size());
                 for (int i = 0; i < src_data.size(); i++) {
-                    data_raw[i] = VectorArray(src_data.at(i));
+                    data_raw[i] = VectorArray(src_data.at(i),
+                                              field_meta.is_element_nullable());
                 }
                 createFieldData(data_raw.data(), DataType::VECTOR_ARRAY, dim);
                 break;

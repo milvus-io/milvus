@@ -2973,7 +2973,7 @@ TEST_P(SealedVectorArrayTest, SearchVectorArray) {
     auto vec_array_col = dataset.get_col<VectorFieldProto>(array_vec);
     std::vector<milvus::VectorArray> vector_arrays;
     for (auto& v : vec_array_col) {
-        vector_arrays.push_back(milvus::VectorArray(v));
+        vector_arrays.push_back(milvus::VectorArray(v, false));
     }
     auto field_data = storage::CreateFieldData(
         DataType::VECTOR_ARRAY, element_type, false, dim);
@@ -3256,7 +3256,7 @@ TEST_P(SealedVectorArrayTest, DISABLED_BulkSubscriptVectorArrayFromIndex) {
     auto vec_array_col = dataset.get_col<VectorFieldProto>(array_vec);
     std::vector<milvus::VectorArray> vector_arrays;
     for (auto& v : vec_array_col) {
-        vector_arrays.push_back(milvus::VectorArray(v));
+        vector_arrays.push_back(milvus::VectorArray(v, false));
     }
     auto field_data = storage::CreateFieldData(
         DataType::VECTOR_ARRAY, element_type, false, dim);
@@ -3368,8 +3368,8 @@ TEST(SealedVectorArrayNullable, BulkSubscriptEmptyThenSingleVectorArrayRows) {
     }
 
     std::vector<milvus::VectorArray> vector_arrays;
-    vector_arrays.emplace_back(empty_row);
-    vector_arrays.emplace_back(single_row);
+    vector_arrays.emplace_back(empty_row, false);
+    vector_arrays.emplace_back(single_row, false);
 
     constexpr int64_t row_count = 2;
     std::vector<uint8_t> valid_bitmap((row_count + 7) / 8, 0);
@@ -3450,7 +3450,7 @@ TEST(SealedVectorArrayNullable,
     for (int64_t i = 0; i < dataset_size; ++i) {
         if (i % 3 != 0) {
             valid_bitmap[i >> 3] |= (1 << (i & 0x07));
-            vector_arrays.emplace_back(vec_array_col[i]);
+            vector_arrays.emplace_back(vec_array_col[i], false);
         }
     }
 
@@ -3715,7 +3715,7 @@ TEST(SealedVectorArrayFallback,
     auto vec_array_col = dataset.get_col<VectorFieldProto>(array_vec);
     std::vector<milvus::VectorArray> vector_arrays;
     for (auto& v : vec_array_col) {
-        vector_arrays.push_back(milvus::VectorArray(v));
+        vector_arrays.push_back(milvus::VectorArray(v, false));
     }
     auto field_data = storage::CreateFieldData(
         DataType::VECTOR_ARRAY, element_type, false, dim);
@@ -3852,7 +3852,7 @@ TEST_P(SealedVectorArrayTest, DISABLED_BulkSubscriptVectorArrayFromDiskIndex) {
     auto vec_array_col = dataset.get_col<VectorFieldProto>(array_vec);
     std::vector<milvus::VectorArray> vector_arrays;
     for (auto& v : vec_array_col) {
-        vector_arrays.push_back(milvus::VectorArray(v));
+        vector_arrays.push_back(milvus::VectorArray(v, false));
     }
     auto field_data = storage::CreateFieldData(
         DataType::VECTOR_ARRAY, element_type, false, dim);
