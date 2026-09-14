@@ -27,6 +27,7 @@
 #include "storage/AsyncLoadExecutor.h"
 #include "folly/coro/BlockingWait.h"
 #include "storage/MemFileManagerImpl.h"
+#include "knowhere/utils.h"
 #include "storage/LoadOverheadController.h"
 #include "storage/ThreadPools.h"
 
@@ -96,8 +97,11 @@ SealedIndexTranslator::SealedIndexTranslator(
             .value_or(1);
     const bool is_vector = IsVectorDataType(index_load_info_.field_type);
     const bool inspect_legacy =
-        !is_vector && version < 3 &&
-        index_info_.index_type != milvus::index::FMINDEX_INDEX_TYPE;
+        is_vector
+            ? !knowhere::UseDiskLoad(index_info_.index_type,
+                                     index_load_info_.index_engine_version)
+            : version < 3 &&
+                  index_info_.index_type != milvus::index::FMINDEX_INDEX_TYPE;
     if (inspect_legacy && file_manager_context_.Valid() &&
         !index_load_info_.index_files.empty()) {
         auto files = index_load_info_.index_files;

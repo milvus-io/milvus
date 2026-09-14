@@ -351,6 +351,13 @@ TEST_F(SegmentLoadInfoTest, LegacySortDefersFileAwareResourceEstimate) {
     EXPECT_FALSE(indexes[0].load_resource_request.has_value());
 }
 
+TEST_F(SegmentLoadInfoTest, MemoryVectorDefersFileAwareResourceEstimate) {
+    SegmentLoadInfo info(proto_, schema_);
+    const auto indexes = info.GetFieldIndexInfos(FieldId(101));
+    ASSERT_EQ(indexes.size(), 1);
+    EXPECT_FALSE(indexes[0].load_resource_request.has_value());
+}
+
 TEST_F(SegmentLoadInfoTest, CompactRuntimeInfoForManifest) {
     auto proto = proto_;
     for (int i = 0; i < 16; ++i) {

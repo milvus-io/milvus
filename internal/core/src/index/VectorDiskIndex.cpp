@@ -15,6 +15,12 @@
 // limitations under the License.
 
 #include "index/VectorDiskIndex.h"
+#include "folly/ScopeGuard.h"
+#include "folly/coro/BlockingWait.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/AsyncLoadExecutor.h"
+#include "storage/EntryStreamUtils.h"
+#include "storage/LocalFileIOPool.h"
 
 #include <math.h>
 #include <string.h>
@@ -66,8 +72,6 @@ namespace milvus::index {
 #define kPrepareRows 1
 
 namespace {
-
-constexpr const char* EMPTY_EMB_LIST_OFFSET_KEY = "empty_emb_list_offsets";
 
 struct EmptyEmbListState {
     int64_t dim = 0;
@@ -357,6 +361,80 @@ VectorDiskAnnIndex<T>::Load(milvus::tracer::TraceContext ctx,
         read_file_span->End();
     }
 
+    FinalizeDiskLoad(ctx, std::move(load_config));
+}
+
+template <typename T>
+void
+VectorDiskAnnIndex<T>::Load(milvus::tracer::TraceContext ctx,
+                            const Config& config,
+                            milvus::OpContext* op_ctx) {
+    const bool use_async_load =
+        segcore::storagev2translator::StorageV2AsyncLoadEnabled();
+    if (!use_async_load) {
+        Load(ctx, config);
+        return;
+    }
+    const auto priority =
+        GetValueFromConfig<proto::common::LoadPriority>(config, LOAD_PRIORITY)
+            .value_or(proto::common::LoadPriority::HIGH);
+    const auto token =
+        op_ctx ? op_ctx->cancellation_token : folly::CancellationToken{};
+    auto load = [&]() -> folly::coro::Task<void> {
+        storage::ThrowIfCancelled(token, "VectorDiskIndex::Load");
+        auto load_config = update_load_json(config);
+        const auto files =
+            config.at(INDEX_FILES).get<std::vector<std::string>>();
+        // Preserve lazy/stream-capable selection. Such implementations own the
+        // remote reads they issue inside Knowhere; this lease covers only the
+        // files selected for Milvus staging. OSS DiskANN reads staged local files.
+        const auto cache_files =
+            GetCacheFilesForDiskIndexLoad(files, index_.LoadIndexWithStream());
+        std::exception_ptr failure;
+        try {
+            {
+                auto span = tracer::StartSpan("SegCoreReadDiskIndexFile", &ctx);
+                const auto end_span = folly::makeGuard([&] { span->End(); });
+                // Admission/decoding run here; remote reads suspend this worker.
+                // Each awaited file write acquires/releases its local executor.
+                if (!cache_files.empty()) {
+                    co_await file_manager_->CacheIndexToDiskAsync(
+                        cache_files,
+                        file_manager_->GetLocalIndexObjectPrefix(),
+                        priority,
+                        token);
+                }
+            }
+            storage::ThrowIfCancelled(token, "VectorDiskIndex::Finalize");
+            // Staging has closed all files and released its leases. Restore
+            // metadata and invoke Knowhere on this shared async worker; keep
+            // the index and files alive until the synchronous call returns.
+            FinalizeDiskLoad(ctx, std::move(load_config));
+            storage::ThrowIfCancelled(token, "VectorDiskIndex::Publish");
+        } catch (...) {
+            failure = std::current_exception();
+        }
+        if (failure) {
+            co_await storage::RunLocalFileIOAsync(
+                [&] { file_manager_->RemoveIndexFiles(); }, priority);
+            std::rethrow_exception(failure);
+        }
+    };
+    try {
+        // Only the synchronous sealed-load boundary blocks; never an async worker.
+        folly::coro::blockingWait(
+            load().scheduleOn(storage::ResolveAsyncLoadExecutor({}, priority)));
+    } catch (const std::bad_alloc& error) {
+        throw SegcoreError(MemAllocateFailed, error.what());
+    } catch (const folly::OperationCancelled& error) {
+        throw SegcoreError(FollyCancel, error.what());
+    }
+}
+
+template <typename T>
+void
+VectorDiskAnnIndex<T>::FinalizeDiskLoad(milvus::tracer::TraceContext ctx,
+                                        Config load_config) {
     auto local_chunk_manager =
         storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     auto local_index_path_prefix = file_manager_->GetLocalIndexObjectPrefix();

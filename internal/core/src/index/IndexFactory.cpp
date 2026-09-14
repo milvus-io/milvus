@@ -63,6 +63,7 @@
 #include "index/Utils.h"
 #include "index/VectorDiskIndex.h"
 #include "index/VectorMemIndex.h"
+#include "index/VectorIndexValidDataUtils.h"
 #include "knowhere/comp/knowhere_check.h"
 #include "knowhere/emb_list_utils.h"
 #include "knowhere/expected.h"
@@ -454,14 +455,81 @@ IndexFactory::IndexLoadResource(
         *use_shared_memory_overhead_group = false;
     }
     if (milvus::IsVectorDataType(field_type)) {
-        return VecIndexLoadResource(field_type,
-                                    element_type,
-                                    index_version,
-                                    index_size_in_bytes,
-                                    index_params,
-                                    mmap_enable,
-                                    num_rows,
-                                    dim);
+        auto request = VecIndexLoadResource(field_type,
+                                            element_type,
+                                            index_version,
+                                            index_size_in_bytes,
+                                            index_params,
+                                            mmap_enable,
+                                            num_rows,
+                                            dim);
+        const auto& type = index_params.at(INDEX_TYPE);
+        if (index_files.empty() || !file_manager_context.Valid() ||
+            knowhere::UseDiskLoad(type, index_version)) {
+            return request;
+        }
+        const bool mmaped =
+            mmap_enable &&
+            knowhere::KnowhereCheck::SupportMmapIndexTypeCheck(type);
+        // Estimate both modes: the switch may change before a cached reload.
+        // Memory loads retain the BinarySet; mmap retains only sidecars. Writer
+        // buffers and retained metadata are request-owned, outside slice leases.
+        auto inspect = [&]() -> folly::coro::Task<uint64_t> {
+            uint64_t retained = 0;
+            uint64_t scratch = 0;
+            for (const auto& file : index_files) {
+                const auto info = co_await storage::InspectLegacyIndexFileAsync(
+                    file,
+                    file_manager_context.chunkManagerPtr,
+                    file_manager_context.fs,
+                    file_manager_context.legacy_index_files,
+                    proto::common::LoadPriority::HIGH);
+                const auto name = GetIndexFileBaseName(file);
+                const bool sidecar =
+                    name.starts_with(VALID_DATA_KEY) ||
+                    name.starts_with(EMPTY_EMB_LIST_OFFSET_KEY) ||
+                    name.starts_with(knowhere::meta::EMB_LIST_META);
+                if (!mmaped || sidecar) {
+                    // Compatibility mmap assembly overlaps nullable codecs and
+                    // output; Knowhere also reads embedding metadata into heap
+                    // before restoring its strategy. Do not charge main file bytes
+                    // as retained heap memory in the mmap path.
+                    retained = SaturatingAdd(
+                        retained,
+                        SaturatingMultiply(uint64_t{info.payload_bytes},
+                                           uint64_t{mmaped ? 2 : 1}));
+                }
+                scratch = std::max(scratch, uint64_t{info.max_transient_bytes});
+                if (name == INDEX_FILE_SLICE_META) {
+                    retained = SaturatingAdd(
+                        retained,
+                        SaturatingMultiply(uint64_t{info.payload_bytes},
+                                           uint64_t{32}));
+                }
+            }
+            if (mmaped) {
+                retained = SaturatingAdd(
+                    retained,
+                    SaturatingMultiply(
+                        uint64_t{storage::FileWriter::MAX_BUFFER_SIZE},
+                        uint64_t{element_type == DataType::NONE ? 1 : 3}));
+            }
+            co_return SaturatingAdd(
+                retained, storage::IndexLoadMaxTransientBytes(scratch));
+        };
+        // Enabled inspection uses the same shared async executor as loading;
+        // disabled inspection stays at the synchronous planning boundary.
+        const bool use_async_load =
+            segcore::storagev2translator::StorageV2AsyncLoadEnabled();
+        const auto overhead =
+            use_async_load ? folly::coro::blockingWait(inspect().scheduleOn(
+                                 storage::ResolveAsyncLoadExecutor(
+                                     {}, proto::common::LoadPriority::HIGH)))
+                           : folly::coro::blockingWait(inspect());
+        request.max_memory_cost =
+            std::max(request.max_memory_cost,
+                     SaturatingAdd(request.final_memory_cost, overhead));
+        return request;
     }
     return ScalarIndexLoadResource(field_type,
                                    index_version,
@@ -671,11 +739,15 @@ IndexFactory::VecIndexLoadResource(
     request.final_memory_cost = res.memoryCost;
     if (knowhere::UseDiskLoad(index_type, index_version) || mmaped) {
         request.max_disk_cost = res.diskCost;
-        request.max_memory_cost =
-            std::max(res.memoryCost, download_buffer_size_in_bytes);
+        request.max_memory_cost = SaturatingAdd(
+            std::max(res.memoryCost, download_buffer_size_in_bytes),
+            SaturatingMultiply(
+                uint64_t{storage::FileWriter::MAX_BUFFER_SIZE},
+                uint64_t{mmaped && element_type != DataType::NONE ? 3 : 1}));
     } else {
         request.max_disk_cost = 0;
-        request.max_memory_cost = 2 * res.memoryCost;
+        request.max_memory_cost =
+            SaturatingMultiply(uint64_t{2}, res.memoryCost);
     }
     if (knowhere::UseDiskLoad(index_type, index_version)) {
         const auto id_map_disk_cost = IdMapMmapDiskCost(config, num_rows);
