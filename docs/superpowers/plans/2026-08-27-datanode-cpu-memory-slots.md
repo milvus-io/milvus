@@ -10,6 +10,19 @@
 
 **Spec:** `docs/superpowers/specs/2026-08-27-datanode-cpu-memory-slots-design.md`
 
+> **Revision 2026-09-14 — estimation accuracy and DataNode correction.** The
+> formulas in the tasks below are the first version; the spec's "DataCoord
+> estimation" and "DataNode correction" sections are authoritative. After a
+> family-by-family audit of the worker-side code: DataCoord prices import per
+> file, stats by the fields the sub job indexes, mix / schema bump by
+> `min(input, segment.maxSize)`, clustering by its input
+> (`clusteringCompactionMemory` is gone, `importMemoryFactor` is new), and the
+> V3 per-field fallback subtracts every fixed-width field exactly before
+> splitting the residual. The accepting DataNode then refines the estimate in
+> `CreateTask` (`internal/datanode/taskresource`) with the exact field bytes,
+> a per-index-type build model and its own machine, and books the corrected
+> value.
+
 ## Global Constraints
 
 - Branch `enhance/datanode-cpu-memory-slots-3.0`, worktree `/home/zc/work/milvus-worktrees/dn-cpu-mem-3.0`, base `upstream/3.0` @ `b4870e2a34`. Never touch `/home/zc/work/milvus`.

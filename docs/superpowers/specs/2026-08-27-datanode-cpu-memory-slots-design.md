@@ -74,35 +74,106 @@ compaction and import only) and that stays as is. DataCoord still charges it
 ## DataCoord estimation
 
 `taskcommon.Resource{CPU int64; Memory int64}` — CPU in whole cores, memory in
-bytes.
+bytes. This is the estimate DataCoord places on. The DataNode that accepts the
+task refines it (see "DataNode correction" below) and books the refined value,
+so the next round places on corrected availability.
 
-| task | CPU | memory |
-|---|---|---|
-| vector index | 8 | fieldSize x 2 |
-| scalar index | 1 | fieldSize x 2 |
-| stats (TextIndex / BM25 / JsonKeyIndex) | 1 | segmentSize x 2 |
-| sort compaction | 1 | segmentSize x 2 |
-| mix compaction / bump schema version | 1 | `dataCoord.segment.maxSize` (1024MB) |
-| L0 compaction | 1 | sum(deltalog) x 2, floor 64MB |
-| clustering compaction | 8 | 32GB |
-| analyze | 8 | rows x dim x elemSize x 2 |
-| import / preimport | 1 | existing `taskBufferSize` (base x vchannels x partitions; L0 import uses deleteBufferSize; preimport uses base) |
-| copy segment / refresh external collection | 1 | 64MB |
+Every formula mirrors what the worker holds for that family and errs high
+where the worker's behavior depends on data or on a machine DataCoord does not
+see.
 
-Every memory estimate is clamped to at least `minTaskMemory` (64MB) so that a
-task never reports zero and gets treated as free to place anywhere.
+| task | CPU | memory | mirrors |
+|---|---|---|---|
+| vector index | 8 | fieldSize x 2 | `index/task_index.go` loads the whole field through cgo and builds beside it |
+| scalar index | 1 | fieldSize x 2 | same |
+| stats (TextIndex / BM25 / JsonKeyIndex) | 1 | sum(size of the fields the sub job indexes) x 2; whole segment when the schema is not cached | `index/task_stats.go` loops over the `enable_match` fields / the JSON fields / the BM25 output fields only |
+| sort compaction | 1 | segmentSize x 2 | `storage.Sort` retains every input record |
+| mix compaction / bump schema version | 1 | min(sum(input segments), `dataCoord.segment.maxSize`) | `MultiSegmentWriter` streams: never more than the input, never more than one output segment |
+| L0 compaction | 1 | sum(deltalog) x 2 | `l0_compactor.go` loads every delta log |
+| clustering compaction | 8 | sum(input segments) | buckets are flushed at a share of the machine, applied on the DataNode |
+| analyze | 8 | rows x dim x elemSize x 2 | the train-set cap is a share of the machine, applied on the DataNode |
+| import | 1 | files x (base x vchannels x partitions) x `importMemoryFactor` | every file is submitted at once with one read buffer; the allocator limit is applied on the DataNode |
+| preimport | 1 | files x base buffer | every file is read in parallel with one base buffer |
+| copy segment / refresh external collection | 1 | 64MB | stream between buckets |
+
+The import per-file buffer is deliberately not capped at the task's largest
+file: `importv2.ImportTask.GetBufferSize` reads that cap from the task's own
+`ImportTaskV2.FileStats`, which the worker never fills for an import task, so
+the cap never fires there.
+
+Every memory estimate is clamped to at least `minTaskMemory` (64MB). A task
+whose inputs cannot be resolved yet is priced at the floor and not cached.
 
 ### fieldSize / segmentSize fallback
 
-V3 segments do not persist per-field binlog KVs (`kv_catalog.go`: "V3 segments
-persist paths via the LOON manifest"), so after a DataCoord restart
-`segment.getFieldBinlogSize(fieldID)` returns 0, and external-collection
-segments also lack `Stats`. Only when the binlog-derived size is 0 (warn log):
+V3 segments do not persist per-field binlog KVs (`kv_catalog.go`), so after a
+DataCoord restart the per-field binlog size is 0, and external-collection
+segments also lack `Stats`. Then `apportionFieldSize` prices the field:
 
-- vector field: `rows x dim x elemSize` (closed form, valid on every storage
-  version)
-- scalar field: `segmentSize x (field share of typeutil.EstimateSizePerRecord(schema))`
-- `segmentSize` itself is 0: `rows x EstimateSizePerRecord(schema)`
+- fixed-width fields (numbers, bool, timestamps, dense vectors): `rows x width`,
+  exact on every storage version
+- variable-width fields: the segment's insert bytes minus every fixed-width
+  field and the two system fields (16 bytes per row) is the residual that
+  belongs to them; it is split in proportion to `typeutil.EstimateSizePerRecord`
+  of each. Only the split is a guess, never the residual
+- no insert size at all (external collection): `rows x EstimateSizePerRecord(field)`
+- unknown field or nil schema: the whole segment
+
+## DataNode correction
+
+`internal/datanode/taskresource` refines the estimate on the DataNode that
+accepts the task, in `CreateTask`, before the task is constructed. The
+corrected value is what the task carries, so it is exactly what the ledger
+books at acceptance and releases at completion; `QuerySlot` reports
+`available = total - sum(corrected)`. A difference from the estimate is logged
+("task resource corrected on accept").
+
+Contract, identical for every family:
+
+- a zero estimate (coordinator that predates estimates) is left at zero
+- CPU is DataCoord's; it only ranks
+- when the request carries nothing better than DataCoord had, the estimate
+  stands (a V3 scalar field after a DataCoord restart has no binlog sizes on
+  either side, so its estimate is not replaced by a guess)
+- the corrected memory is floored at `minTaskMemory`
+
+What the worker knows better, per family:
+
+| task | corrected memory |
+|---|---|
+| index | exact input: dense vector `rows x dim x elemSize`, otherwise the field's binlog memory sizes in the request (struct-array children through their parent), plus the optional scalar fields the build loads; expansion: the build model of the index type, below |
+| stats | per target field from its binlogs: text `raw + min(tantivy budget, 2 x raw)`, json key `2 x raw + json_key_stats_tantivy_memory`, bm25 `2 x raw`; any target field without binlog bytes keeps the estimate |
+| analyze | `min(raw, machine x max_train_size_ratio) x analyzeMemoryFactor` |
+| sort compaction | `insert + rows x 8 + binlogMaxSize + 2 x deltas` |
+| mix / bump | `min(insert, plan.max_size) + 2 x deltas` |
+| L0 compaction | `L0 deltas x l0CompactionMemoryFactor + target segments' statslogs` (the bloom filters it loads) |
+| clustering | `min(insert, machine x memoryBufferRatio) + 2 x deltas` |
+| import | `min(files x importv2.CalculateImportBufferSize, importv2.ImportMemoryLimit) x importMemoryFactor` |
+| preimport | `files x base buffer` |
+
+Index build models (knowhere exposes a load-time estimate only, so these are
+derived from each index's layout; build parameters are the request's merged
+with this node's knowhere build defaults):
+
+| index types | build memory |
+|---|---|
+| FLAT, BIN_FLAT, GPU brute force, SVS_FLAT | `2 x raw` |
+| IVF_FLAT family, SVS_IVF | `2 x raw + rows x 8 + nlist x bytesPerRow` |
+| IVF_SQ8, IVF_SQ_CC | `raw + rows x code(sq_type) + IVF lists` |
+| IVF_PQ family | `raw + rows x ceil(m x nbits / 8) + IVF lists + 2^nbits x bytesPerRow` |
+| IVF_RABITQ | `raw + rows x (ceil(dim/8) + 8) + IVF lists (+ raw with refine)` |
+| SCANN | `raw + rows x ceil(dim/2) + IVF lists (+ raw with with_raw_data)` |
+| HNSW family | `2 x raw + rows x ((3M + 2) x 4 + 56)` (links, label, pointer, lock) |
+| DISKANN, AISAQ, SVS_VAMANA | `raw + raw x pq_code_budget_gb_ratio + rows x (max_degree x 4 x 1.3 + 16)` |
+| sparse, MINHASH_LSH, Trie, RTREE | `2 x raw` |
+| STL_SORT | `2 x raw + rows x 4 + rows / 8` |
+| INVERTED, NGRAM | `raw + min(500MB tantivy budget, 2 x raw)` |
+| BITMAP | `raw + (rows / 8) x bitmap_cardinality_limit` |
+| HYBRID | max(BITMAP, INVERTED) |
+| anything else | `raw x indexMemoryFactor` |
+
+These models are structural, not measured: they have not been calibrated
+against real builds yet.
 
 ### Configuration (`dataCoord.taskResource.*`, refreshable, in milvus.yaml)
 
@@ -116,7 +187,7 @@ segments also lack `Stats`. Only when the binlog-derived size is 0 (warn log):
 | `statsMemoryFactor` | 2 |
 | `l0CompactionMemoryFactor` | 2 |
 | `analyzeMemoryFactor` | 2 |
-| `clusteringCompactionMemory` | 32GB |
+| `importMemoryFactor` | 2 |
 | `minTaskMemory` | 64MB |
 
 The estimate is cached once on the task object (same pattern as
