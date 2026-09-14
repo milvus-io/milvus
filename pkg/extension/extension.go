@@ -15,15 +15,16 @@
 // limitations under the License.
 
 // Package extension is what a distribution that compiles its own behavior into
-// the milvus binary installs at boot: a request hook, and an engine the
-// coordinator runs while it is active. Everything else such a distribution
-// needs is either the hook's own reach (every proxy RPC passes Mock, Before and
-// After), a coordinator RPC, or a configuration item.
+// the milvus binary installs at boot: a request hook, a query hook, a cipher,
+// and an engine the coordinator runs while it is active. Everything else such
+// a distribution needs is either the hook's own reach (every proxy RPC passes
+// Mock, Before and After), a coordinator RPC, or a configuration item.
 //
-// A stock binary installs nothing: InstalledHook and InstalledCoordinatorEngine
-// answer nil, and milvus behaves as it always did. The one context mark this
-// package defines, WithQueryResourceGroup, pins a query to a resource group for
-// routing; nothing in a stock binary sets it.
+// A stock binary installs nothing: InstalledHook, InstalledQueryHook,
+// InstalledCipher and InstalledCoordinatorEngine answer nil, and milvus
+// behaves as it always did. The one context mark this package defines,
+// WithQueryResourceGroup, pins a query to a resource group for routing;
+// nothing in a stock binary sets it.
 package extension
 
 import (
@@ -33,13 +34,15 @@ import (
 )
 
 var (
-	installedHook   atomic.Pointer[hookBox]
-	installedEngine atomic.Pointer[engineBox]
+	installedHook      atomic.Pointer[hookBox]
+	installedEngine    atomic.Pointer[engineBox]
+	installedQueryHook atomic.Pointer[queryHookBox]
 )
 
 type (
-	hookBox   struct{ hook hook.Hook }
-	engineBox struct{ engine CoordinatorEngine }
+	hookBox      struct{ hook hook.Hook }
+	engineBox    struct{ engine CoordinatorEngine }
+	queryHookBox struct{ hook QueryHook }
 )
 
 // SetHook installs a compiled-in request hook. hookutil prefers it over
