@@ -1124,9 +1124,8 @@ like the old password verification when updating the credential`,
 		// A list of user names, not a credential: knowing who the superusers are
 		// does not let anyone authenticate as one, so it stays readable through
 		// ShowConfigurations and /management/config/get as reviewed access
-		// metadata. (Writing it is a different question, answered by
-		// IsSecurityGoverningConfig, which fences the whole common.security.
-		// section against an endpoint that does not authenticate.)
+		// metadata. Sensitivity does not change the management write contract;
+		// authentication and authorization are handled separately.
 		//
 		// The flag records that decision for TestSensitiveParamItemsMarked; no
 		// runtime fallback pattern matches this key, so it changes nothing by

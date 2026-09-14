@@ -1,4 +1,4 @@
-# Safe Configuration Projections and Management Mutations
+# Safe Configuration Projections
 
 ## Document Information
 
@@ -13,7 +13,7 @@
 
 Milvus configuration currently mixes three audiences in one manager: runtime
 consumers need exact values, diagnostic surfaces need a safe projection, and
-the management API needs a constrained mutation interface. Reusing the raw
+the management API must preserve its existing write contract. Reusing the raw
 view at an external boundary can expose process-environment entries,
 credentials, infrastructure topology, or the manager's deletion tombstone.
 
@@ -22,8 +22,7 @@ This design makes those audiences explicit:
 - existing raw getters retain their compatibility contract;
 - effective internal views omit deletion markers and inert overlays;
 - external projections omit undeclared keys and redact sensitive values;
-- one mutation-policy function resolves key identity once and applies all
-  management restrictions in a stable order;
+- management writes retain their existing validation and storage behavior;
 - request-derived configuration maps are logged by count, never by key or
   value.
 
@@ -34,9 +33,9 @@ This design makes those audiences explicit:
 2. Prevent process environment variables imported by `EnvSource` from becoming
    an accidental public configuration namespace.
 3. Give separator variants such as `a.b`, `a/b`, and `A_B` the same
-   registration, sensitivity, immutability, and etcd-write verdict.
+   registration and sensitivity decisions at projection boundaries.
 4. Preserve existing in-process consumers of raw configuration.
-5. Keep management mutation rules independent of HTTP request parsing.
+5. Preserve management SET/DELETE compatibility independently of read visibility.
 6. Make omissions in sensitivity metadata detectable by tests.
 
 ## 3. Non-Goals
@@ -52,10 +51,9 @@ This design makes those audiences explicit:
 - It does not cache projections. These views are used by diagnostics and
   management operations, where avoiding invalidation races is more important
   than optimizing a small, infrequent full-table walk.
-- It does not remove the ability to delete an open-ended sensitive
-  `ParamGroup` member. Deletion is retained as cleanup because it removes the
-  high-priority value and reveals only a lower-priority value already present
-  in the process. Sensitive scalar deletes remain rejected.
+- It does not add configuration write restrictions based on sensitivity,
+  registration, or security-related namespaces. Authentication, authorization,
+  and any additional write policy belong to a separate change.
 
 ## 4. Domain Model
 
@@ -131,31 +129,34 @@ The management GET handler maps `ErrKeySensitive` to the stable redaction value
 `*****`. It continues to reject undeclared keys so a caller cannot enumerate
 the process environment.
 
-## 6. Mutation Policy
+## 6. Management Write Compatibility
 
-`EvaluateConfigMutation` is the single policy entry point for generic external
-mutations. It resolves the canonical key once, then rejects in this order:
+`POST /management/config/alter` preserves the validation and parameter handling
+that preceded this change. `Sensitive` controls projections and logs only; it
+does not decide whether a configuration may be set or deleted.
 
-1. security-governing settings;
-2. `mq.type`, which has a dedicated WAL transition protocol;
-3. immutable settings;
-4. unregistered sets;
-5. sensitive sets and sensitive scalar deletes.
+The endpoint continues to:
 
-Allowed requests are deduplicated using `EtcdConfigKey`, the identity the
-transaction actually writes. This prevents two separator variants from
-targeting the same etcd entry in one request.
+- accept both the legacy single-key body and the batch `configs` body;
+- treat a present value, including an empty string, as SET, and an omitted or
+  null value as deletion of the etcd override;
+- reject empty keys and duplicate keys with identical caller spellings;
+- apply the existing `mq.type` substring check and `IsImmutable` restriction;
+- pass the original keys to `AlterConfigsInEtcd`, which applies the existing
+  storage formatter and executes updates/deletes in one etcd transaction;
+- leave collisions between different caller spellings to the existing etcd
+  transaction handling, preserving its success or error response.
 
-The policy module returns a decision rather than HTTP strings. The transport
-owns status codes and response compatibility; the policy owns key identity and
-security semantics.
+Sensitive scalars, sensitive group members, unregistered keys, and security
+settings remain writable unless an existing restriction applies. Deleting an
+override restores the lower-priority source or removes the value if none exists.
+`Immutable` retains both its existing API restriction and its startup
+create-if-absent persistence behavior; sensitivity does not imply immutability.
 
-Read visibility and permission to change a setting are separate decisions.
-Readable authorization settings, including `builtinRoles.enable` and
-`builtinRoles.roles`, are fenced against generic writes and deletes, as are the
-authentication plugin selector and its initialization-failure policy. Configured
-role grants are applied when the coordinator initializes, so a setting does not
-need to be immediately refreshable to require this protection.
+Read visibility is independent: a successful write to a sensitive key is still
+masked by management GET, and an unregistered key remains hidden. Clients that
+verify writes by reading raw values through GET must account for that read-side
+change. Request and transaction logs retain counts instead of raw payloads.
 
 ## 7. Logging
 
@@ -217,7 +218,10 @@ values above `MaxInt64` round-trip without sign loss.
   now carry `value: "*****"`; undeclared and missing keys keep error entries.
 - Kafka's printable configuration form intentionally masks credentials. It is
   diagnostic output, not a serialization interface.
-- Adding `GetEffectiveBy` and the mutation decision types is additive.
+- Adding `GetEffectiveBy` is additive.
+- The management write endpoint retains its original validation, request
+  formats, storage-key handling, and error responses. Read registration and
+  sensitivity metadata introduce no additional SET/DELETE restriction.
 - `FieldBroadcastID` now matches the existing protobuf/domain type `uint64`.
   No production caller currently propagates this field through RPC metadata;
   regular logging keeps the same `broadcastID` key.
@@ -272,7 +276,10 @@ Tests cover:
   aliases;
 - positive inventories of sensitive scalars, groups, direct prefixes, and all
   parts of representative connection targets;
-- management set/delete decisions and redacted GET responses;
+- real management writes and resets for sensitive, unregistered, and security
+  settings, with exact runtime values and independently redacted GET responses;
+- retained immutable/WAL restrictions, original key spellings, batch atomicity,
+  and the original validation-versus-storage errors for duplicate keys;
 - WAL recovery log fields containing neither payload keys nor values;
 - real etcd mutation/event logs and access-log initialization failure logs
   containing neither request-name nor request-value canaries;

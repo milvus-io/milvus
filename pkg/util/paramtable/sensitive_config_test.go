@@ -77,8 +77,6 @@ func TestBaseTablePublicGroupEnvironmentOverride(t *testing.T) {
 				require.NoError(t, err, alias)
 				assert.Equal(t, "EnvironmentSource", source)
 				assert.Equal(t, "false", value)
-				assert.Equal(t, ConfigMutationAllowed, EvaluateConfigMutation(mgr, alias, ConfigMutationSet).Rejection)
-				assert.Equal(t, ConfigMutationAllowed, EvaluateConfigMutation(mgr, alias, ConfigMutationDelete).Rejection)
 			}
 			assert.Equal(t, "false", mgr.ProjectConfigs()[strings.ToLower(key)])
 			assert.Equal(t, "false", mgr.ProjectConfigs()[config.EtcdConfigKey(key)])
@@ -93,7 +91,6 @@ func TestBaseTablePublicGroupEnvironmentOverride(t *testing.T) {
 			} {
 				_, _, err := mgr.GetRegisteredConfig(envOnly)
 				require.ErrorIs(t, err, config.ErrKeyUnregistered, envOnly)
-				assert.Equal(t, ConfigMutationUnregistered, EvaluateConfigMutation(mgr, envOnly, ConfigMutationSet).Rejection)
 			}
 			for _, projection := range []map[string]string{mgr.ProjectConfigs(), mgr.GetConfigsView()} {
 				for _, value := range projection {
@@ -131,7 +128,6 @@ func TestBaseTableFileRefreshCannotEndorseOpaqueEnvironment(t *testing.T) {
 	_, value, err := mgr.GetRegisteredConfig(key)
 	require.ErrorIs(t, err, config.ErrKeySensitive)
 	assert.Empty(t, value)
-	assert.Equal(t, ConfigMutationSensitive, EvaluateConfigMutation(mgr, key, ConfigMutationSet).Rejection)
 	for _, projection := range []map[string]string{
 		mgr.ProjectConfigs(), mgr.GetConfigsView(),
 		mgr.ProjectBy(config.WithPrefix("function")),
@@ -308,29 +304,6 @@ func TestDynamicClusterNamespacesAreDeclared(t *testing.T) {
 	assert.Equal(t, "host.example", params.ProxyGrpcClientCfg.GetClusterAuthority("dc2"))
 }
 
-// The fence guards keys no ParamItem declares, so nothing normalises their
-// spelling on the way in — it has to compare on the identity the write would
-// address, or one spelling is fenced and the three that reach the same etcd
-// entry are not.
-func TestSecurityFenceIsSpellingIndependent(t *testing.T) {
-	for _, key := range []string{
-		"proxy.enablePublicPrivilege",
-		"proxy_enablePublicPrivilege",
-		"PROXY_ENABLEPUBLICPRIVILEGE",
-		"proxyenablepublicprivilege",
-		"proxy/enablePublicPrivilege",
-		"common.security.superUsers",
-		"COMMON_SECURITY_SUPERUSERS",
-		"commonsecurityauthorizationenabled",
-	} {
-		assert.True(t, IsSecurityGoverningConfig(key), key)
-		assert.Equal(t, config.EtcdConfigKey(key), config.EtcdConfigKey(strings.ToLower(key)), key)
-	}
-	for _, key := range []string{"proxy.maxNameLength", "queryNode.gracefulStopTimeout", "minio.address"} {
-		assert.False(t, IsSecurityGoverningConfig(key), key)
-	}
-}
-
 func isConfigRegistered(m *config.Manager, key string) bool {
 	_, kind := m.ResolveRegisteredConfigKey(key)
 	return kind != config.RegisteredConfigUnknown
@@ -498,7 +471,7 @@ func TestProjectionOmitsEveryEnvironmentOnlyKey(t *testing.T) {
 //   - and the same again for an identity no source had segmented.
 //
 // Two of those returned a private key from an endpoint with no authentication in
-// front of it, and passed the write fence onto the credential's own etcd slot.
+// front of it. Both spellings address the credential's own etcd slot.
 func TestOneIdentityHasOneVerdict(t *testing.T) {
 	params := newSensitiveAuditParams(t)
 	mgr := params.baseTable.mgr

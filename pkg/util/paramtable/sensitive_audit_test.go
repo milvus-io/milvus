@@ -17,10 +17,7 @@
 package paramtable
 
 import (
-	"os"
-	"path/filepath"
 	"reflect"
-	"regexp"
 	"strings"
 	"testing"
 	"unsafe"
@@ -31,9 +28,8 @@ import (
 )
 
 // Sensitive covers credentials, values that directly enable impersonation or
-// access, and infrastructure topology. A topology value is not merely
-// descriptive at the unauthenticated management boundary: changing an endpoint
-// can redirect a request that carries a separately configured credential.
+// access, and infrastructure topology. These classifications control
+// diagnostic visibility without changing permission to modify a setting.
 // Undeclared keys are also redacted at runtime by Manager's fail-closed rule,
 // which contains the EnvSource disclosure.
 //
@@ -123,11 +119,6 @@ func TestSensitiveTransportAndTopologyControls(t *testing.T) {
 			require.Equal(t, test.value, item.GetValue(), "internal connection consumers need the raw value")
 			for _, alias := range []string{item.Key, strings.ReplaceAll(item.Key, ".", "/"), strings.ToUpper(strings.ReplaceAll(item.Key, ".", "_")), config.EtcdConfigKey(item.Key)} {
 				t.Run(alias, func(t *testing.T) {
-					for _, operation := range []ConfigMutationOperation{ConfigMutationSet, ConfigMutationDelete} {
-						t.Run(map[ConfigMutationOperation]string{ConfigMutationSet: "set", ConfigMutationDelete: "delete"}[operation], func(t *testing.T) {
-							require.Equal(t, ConfigMutationSensitive, EvaluateConfigMutation(manager, alias, operation).Rejection)
-						})
-					}
 					_, _, err := manager.GetRegisteredConfig(alias)
 					require.ErrorIs(t, err, config.ErrKeySensitive)
 				})
@@ -152,9 +143,6 @@ func TestSensitiveConnectionControls(t *testing.T) {
 			require.True(t, declaration.Sensitive, "connection controls need explicit sensitivity metadata")
 			for _, alias := range []string{key, strings.ReplaceAll(key, ".", "/"), strings.ToUpper(strings.ReplaceAll(key, ".", "_")), config.EtcdConfigKey(key)} {
 				require.True(t, manager.IsSensitive(alias), alias)
-				for _, operation := range []ConfigMutationOperation{ConfigMutationSet, ConfigMutationDelete} {
-					require.NotEqual(t, ConfigMutationAllowed, EvaluateConfigMutation(manager, alias, operation).Rejection, alias)
-				}
 			}
 		})
 	}
@@ -343,8 +331,8 @@ func TestSensitiveCipherParamItemsMarked(t *testing.T) {
 // on: it is keyed by the separator-free identity, so two ParamItems whose keys
 // differ only in where the separators fall ("a.bc" and "ab.c") would share one
 // entry. Whichever registered second would then decide the other's dotted
-// spelling, and with it its sensitivity, its prefix membership, and the
-// identity the alter endpoint deduplicates and writes under.
+// spelling, and with it its sensitivity and its prefix membership in
+// external projections.
 func TestDeclaredKeysDoNotCollide(t *testing.T) {
 	params := newSensitiveAuditParams(t)
 
@@ -368,117 +356,6 @@ func TestDeclaredKeysDoNotCollide(t *testing.T) {
 
 	if len(violations) > 0 {
 		t.Errorf("declared key identity collisions:\n  %s", strings.Join(violations, "\n  "))
-	}
-}
-
-// authorizationDeciding names the kinds of key that must sit inside the fenced
-// namespace: anything that decides whether Milvus authenticates, who counts as
-// privileged, or what a role may do.
-var authorizationDeciding = []string{
-	"authorization",
-	"privilege",
-	"superuser",
-	"rootpassword",
-	"authmode",
-	"rbac",
-	"tlsmode",
-}
-
-// TestSecurityGoverningPrefixCoversTheSecuritySection is what keeps the fence
-// from rotting into the list of two names it started as: the fence is a prefix,
-// so it stays complete only while every authorization-deciding key is declared
-// underneath it.
-//
-// It walks ParamItems, so a legacy key read straight through base.Get rather
-// than declared as one is invisible to it — common.security.enablePublicPrivilege's
-// Formatter reads proxy.enablePublicPrivilege that way. Those are unwritable
-// today only because the endpoint refuses undeclared keys, which is a second
-// mechanism rather than this fence.
-func TestSecurityGoverningPrefixCoversTheSecuritySection(t *testing.T) {
-	params := newSensitiveAuditParams(t)
-
-	escaped := make([]string, 0)
-	walkParamItems(reflect.ValueOf(params).Elem(), func(item *ParamItem) {
-		lowerKey := strings.ToLower(item.Key)
-		if IsSecurityGoverningConfig(lowerKey) {
-			return
-		}
-		// Match within a dotted segment, never across one: "pulsar.backlog..."
-		// spans an accidental "rbac" at the join, and a fence driven by
-		// accidents is a fence nobody trusts.
-		for _, segment := range strings.Split(lowerKey, ".") {
-			segment = strings.NewReplacer("/", "", "_", "").Replace(segment)
-			for _, marker := range authorizationDeciding {
-				if strings.Contains(segment, marker) {
-					escaped = append(escaped, item.Key+" (matches \""+marker+"\")")
-					return
-				}
-			}
-		}
-	})
-
-	if len(escaped) > 0 {
-		t.Errorf("these decide authorization but IsSecurityGoverningConfig does not "+
-			"cover them, so an endpoint that does not authenticate can rewrite "+
-			"them:\n  %s\nDeclare them under %q, or add them to "+
-			"securityGoverningConfigKeys with a reason.",
-			strings.Join(escaped, "\n  "), SecurityGoverningConfigPrefix)
-	}
-}
-
-// TestLegacyFallbackKeysAreDeclaredOrFenced closes the blind spot the audit
-// above has by construction.
-//
-// A key read straight through base.Get is not a ParamItem, so the walk cannot
-// see it, and the alter endpoint's undeclared-key check only guards writes — a
-// DELETE of such a key is accepted, and a delete restores a default that can be
-// more permissive than the value it replaces. That is how
-// proxy.enablePublicPrivilege, the legacy alias behind
-// common.security.enablePublicPrivilege, stayed reachable. So scan the
-// declarations themselves for the pattern and require every such key to be
-// either a declared ParamItem or inside the security fence.
-func TestLegacyFallbackKeysAreDeclaredOrFenced(t *testing.T) {
-	params := newSensitiveAuditParams(t)
-
-	declared := make(map[string]struct{})
-	walkParamItems(reflect.ValueOf(params).Elem(), func(item *ParamItem) {
-		declared[strings.ToLower(item.Key)] = struct{}{}
-		for _, fallback := range item.FallbackKeys {
-			declared[strings.ToLower(fallback)] = struct{}{}
-		}
-	})
-
-	sources, err := filepath.Glob("*.go")
-	require.NoError(t, err)
-	pattern := regexp.MustCompile(`\b(?:base|bt|p\.base)\.Get\("([^"]+)"\)`)
-
-	unguarded := make([]string, 0)
-	for _, source := range sources {
-		if strings.HasSuffix(source, "_test.go") {
-			continue
-		}
-		body, err := os.ReadFile(source)
-		require.NoError(t, err)
-		for _, match := range pattern.FindAllStringSubmatch(string(body), -1) {
-			key := strings.ToLower(match[1])
-			if strings.Contains(key, `"+`) || strings.Contains(match[1], "+") {
-				continue // built at runtime, not a fixed key
-			}
-			if _, ok := declared[key]; ok {
-				continue
-			}
-			if IsSecurityGoverningConfig(key) {
-				continue
-			}
-			unguarded = append(unguarded, match[1]+" (read in "+source+")")
-		}
-	}
-
-	if len(unguarded) > 0 {
-		t.Errorf("these keys are read but never declared, so nothing stops the "+
-			"management endpoint deleting them:\n  %s\nDeclare them as ParamItems, "+
-			"or add them to securityGoverningConfigKeys if they decide authorization.",
-			strings.Join(unguarded, "\n  "))
 	}
 }
 

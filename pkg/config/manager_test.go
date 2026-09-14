@@ -477,20 +477,20 @@ func TestRegisteredGroupMemberSeesEtcdOverride(t *testing.T) {
 // A ParamGroup member has to be creatable, readable and deletable through the
 // management endpoints even when no yaml ever mentioned it: AlterConfigsInEtcd
 // stores it under the separator-free identity only, so a rule that demanded the
-// dotted spelling would accept the write and then refuse to read or delete it.
+// dotted spelling would accept the write and then refuse to read it.
 func TestRegisteredGroupMemberLifecycle(t *testing.T) {
 	mgr := NewManager()
 	mgr.RegisterConfigPrefix("kafka.producer.")
 
 	// Nothing anywhere yet: still resolves as a member of a declared group, so
-	// it can be read, written and deleted like any other.
+	// safe reads can resolve it after an etcd write.
 	_, kind := mgr.ResolveRegisteredConfigKey("kafka.producer.linger.ms")
 	assert.Equal(t, RegisteredConfigGroup, kind)
 
 	// What an alter call leaves behind.
 	mgr.SetConfig("kafka.producer.compression.type", "zstd")
 	canonical, kind := mgr.ResolveRegisteredConfigKey("kafka.producer.compression.type")
-	assert.Equal(t, RegisteredConfigGroup, kind, "the key just written must still resolve, or it can never be deleted")
+	assert.Equal(t, RegisteredConfigGroup, kind, "safe reads must resolve the key just written")
 	assert.Equal(t, "kafka.producer.compression.type", canonical)
 }
 
@@ -834,8 +834,7 @@ func TestHalfCollapsedSpellingCannotReachASensitiveMember(t *testing.T) {
 // "<provider>.credential_url" could be asked for as "<provider>credential.url",
 // the same stored entry with its leaf renamed to one the group declared safe,
 // and it came back in the clear from an endpoint with no authentication. The
-// same spelling passed the write fence, and addresses the credential's own etcd
-// identity.
+// spelling addresses the credential's own etcd identity.
 func TestCallerCannotResegmentAKeyOntoAnExemptedLeaf(t *testing.T) {
 	const secret = "provider-secret"
 	const prefix = "function.textembedding.providers."

@@ -1331,52 +1331,36 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 			return
 		}
 
-		operation := paramtable.ConfigMutationDelete
-		if config.Value != nil {
-			operation = paramtable.ConfigMutationSet
-		}
-		decision := paramtable.EvaluateConfigMutation(paramMgr, config.Key, operation)
-		canonicalKey := decision.CanonicalKey
-
-		// Deduplicate on the identity the write actually lands under, not the
-		// caller's spelling: AlterConfigsInEtcd strips separators, so
-		// "kafka.consumer.a.b" and "kafka.consumer.ab" address one etcd key and
-		// would otherwise reach the same transaction twice.
-		if _, exists := seen[pkgconfig.EtcdConfigKey(canonicalKey)]; exists {
+		// Preserve the existing write contract independently of read visibility:
+		// validate and deduplicate the caller's spelling, then let etcd storage
+		// apply its usual key formatting. Sensitivity only controls projections
+		// and logging; it does not add a write restriction.
+		if _, exists := seen[config.Key]; exists {
 			logger.Info(request.Context(), "HandleAlterConfig duplicate key found")
 			writeJSONError(writer, fmt.Sprintf("duplicate key found: %s", config.Key), http.StatusBadRequest)
 			return
 		}
-		seen[pkgconfig.EtcdConfigKey(canonicalKey)] = struct{}{}
+		seen[config.Key] = struct{}{}
 
-		switch decision.Rejection {
-		case paramtable.ConfigMutationSecurityGoverning:
-			logger.Info(request.Context(), "HandleAlterConfig attempted to modify a security-governing config")
-			writeJSONError(writer, fmt.Sprintf("security-governing configuration cannot be modified through this endpoint. Invalid key: %s", config.Key), http.StatusBadRequest)
-			return
-		case paramtable.ConfigMutationWALType:
+		// Keep the historical mq.type check; transitions use the dedicated API.
+		normalizedKey := strings.ToLower(strings.ReplaceAll(config.Key, "/", "."))
+		if strings.Contains(normalizedKey, "mqtype") || strings.Contains(normalizedKey, "mq.type") {
 			logger.Info(request.Context(), "HandleAlterConfig attempted to modify mqtype")
 			writeJSONError(writer, fmt.Sprintf("mqtype configuration cannot be modified through this endpoint. Please use the alterWAL endpoint instead. Invalid key: %s", config.Key), http.StatusBadRequest)
 			return
-		case paramtable.ConfigMutationImmutable:
+		}
+
+		if paramMgr.IsImmutable(config.Key) {
 			logger.Info(request.Context(), "HandleAlterConfig attempted to modify immutable config")
 			writeJSONError(writer, fmt.Sprintf("immutable configuration cannot be modified through this endpoint. Invalid key: %s", config.Key), http.StatusBadRequest)
 			return
-		case paramtable.ConfigMutationUnregistered:
-			logger.Info(request.Context(), "HandleAlterConfig attempted to set unregistered config")
-			writeJSONError(writer, fmt.Sprintf("unregistered configuration cannot be set through this endpoint. Invalid key: %s", config.Key), http.StatusBadRequest)
-			return
-		case paramtable.ConfigMutationSensitive:
-			logger.Info(request.Context(), "HandleAlterConfig attempted to modify sensitive config")
-			writeJSONError(writer, fmt.Sprintf("sensitive configuration cannot be modified through this endpoint. Invalid key: %s", config.Key), http.StatusBadRequest)
-			return
 		}
 
-		if operation == paramtable.ConfigMutationSet {
-			configsToUpdate[canonicalKey] = *config.Value
-			continue
+		if config.Value != nil {
+			configsToUpdate[config.Key] = *config.Value
+		} else {
+			keysToDelete = append(keysToDelete, config.Key)
 		}
-		keysToDelete = append(keysToDelete, canonicalKey)
 	}
 
 	// Get EtcdSource to save the configuration

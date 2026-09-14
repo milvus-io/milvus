@@ -232,10 +232,9 @@ func EtcdConfigKey(key string) string {
 }
 
 // ResolveRegisteredConfigKey reports whether a caller-supplied key names
-// declared configuration, and returns the identity to write it under.
-// The identity returned is the dotted one: it is what every later predicate
-// needs (a prefix cannot be matched against a separator-free key), and callers
-// that write it out go through AlterConfigsInEtcd, which formats it anyway.
+// declared configuration, and returns its namespace-preserving identity for
+// projection policy. This classification does not restrict configuration writes;
+// AlterConfigsInEtcd retains its existing storage-key formatting.
 func (m *Manager) ResolveRegisteredConfigKey(key string) (string, RegisteredConfigKind) {
 	resolved := m.resolveRegisteredKey(key)
 	return resolved.dotted, resolved.kind
