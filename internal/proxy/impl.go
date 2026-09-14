@@ -7101,9 +7101,10 @@ func (node *Proxy) GetReplicateInfo(ctx context.Context, req *milvuspb.GetReplic
 
 // CreateReplicateStream establishes a replication stream on the target Milvus cluster.
 func (node *Proxy) CreateReplicateStream(stream milvuspb.MilvusService_CreateReplicateStreamServer) error {
-	// The hook is consulted by hand here, and only here, because the
-	// interceptor that consults it for every other RPC is a UNARY one and this
-	// is a stream: an interceptor chain binds to one of gRPC's two call kinds.
+	// The hook is consulted by hand here, and in DumpMessages - the service's
+	// two streams - because the interceptor that consults it for every other
+	// RPC is a UNARY one and this is a stream: an interceptor chain binds to
+	// one of gRPC's two call kinds.
 	// It is consulted the same way even so, through HookInterceptor, so a hook
 	// sees Mock, Before and After in the order every other RPC gives it, and
 	// sees a typed, non-nil request: a stream has no request message of its
@@ -7286,6 +7287,36 @@ func dumpOneMessage(
 // gaps or duplicates are possible if that point is filtered, inside a
 // transaction, or no longer retained by the underlying WAL.
 func (node *Proxy) DumpMessages(req *milvuspb.DumpMessagesRequest, stream milvuspb.MilvusService_DumpMessagesServer) error {
+	// The hook is consulted by hand here for the reason CreateReplicateStream
+	// gives: this is a stream, and the interceptor that consults it for every
+	// other RPC is a unary one. It is consulted the same way - Mock, Before
+	// and After in order, through HookInterceptor - with the request this
+	// stream does carry, and the dump runs under the context Before returned.
+	// Without it the dump would be the one RPC on the proxy a hook never sees,
+	// so a policy a hook enforces from Before - refusing a username and
+	// password on the external listener, say - would not reach a raw WAL
+	// read. A Mock answer has no stream to be sent down, so a mocked dump
+	// ends with the hook's verdict. The default hook answers nothing, so a
+	// stock binary is unchanged.
+	ctx := stream.Context()
+	_, err := HookInterceptor(ctx, req, GetCurUserFromContextOrDefault(ctx),
+		milvuspb.MilvusService_DumpMessages_FullMethodName,
+		func(ctx context.Context, _ any) (any, error) {
+			return nil, node.dumpMessages(req, dumpMessagesStreamWithContext{stream, ctx})
+		})
+	return err
+}
+
+// dumpMessagesStreamWithContext is the dump stream, answering the context the
+// hook's Before returned in place of the stream's own.
+type dumpMessagesStreamWithContext struct {
+	milvuspb.MilvusService_DumpMessagesServer
+	ctx context.Context
+}
+
+func (s dumpMessagesStreamWithContext) Context() context.Context { return s.ctx }
+
+func (node *Proxy) dumpMessages(req *milvuspb.DumpMessagesRequest, stream milvuspb.MilvusService_DumpMessagesServer) error {
 	ctx := stream.Context()
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-DumpMessages")
 	defer sp.End()

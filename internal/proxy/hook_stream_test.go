@@ -108,9 +108,10 @@ func installStreamHook(t *testing.T, h hook.Hook) {
 	t.Cleanup(func() { hookutil.SetTestHook(hookutil.DefaultHook{}) })
 }
 
-// CreateReplicateStream is the one RPC that consults the hook by hand, because
-// the interceptor that consults it for every other RPC is a unary one and an
-// interceptor chain binds to one of gRPC's two call kinds. It must consult it
+// CreateReplicateStream is one of the two streams that consult the hook by hand
+// - DumpMessages is the other - because the interceptor that consults it for
+// every other RPC is a unary one and an interceptor chain binds to one of
+// gRPC's two call kinds. It must consult it
 // the same way even so: Mock, Before and After in order, a typed non-nil
 // request, and the handler under the context Before returned. The stream
 // server here is stopped at its first read, so the test is about the seam and
@@ -182,4 +183,151 @@ func (mockingStreamHook) Mock(_ context.Context, _ interface{}, fullMethod strin
 		return true, nil, merr.ErrServiceUnimplemented
 	}
 	return false, nil, nil
+}
+
+// dumpRequestHook records how DumpMessages consults it, and checks that the
+// request it is shown is the dump request itself: this stream, unlike the
+// replicate stream, carries a request message of its own.
+type dumpRequestHook struct {
+	t      *testing.T
+	want   *milvuspb.DumpMessagesRequest
+	refuse error
+
+	calls []string
+	errs  []error
+}
+
+type dumpHookContextKey struct{}
+
+func (h *dumpRequestHook) Init(map[string]string) error        { return nil }
+func (h *dumpRequestHook) VerifyAPIKey(string) (string, error) { return "", nil }
+func (h *dumpRequestHook) Release()                            {}
+
+func (h *dumpRequestHook) Mock(_ context.Context, req interface{}, fullMethod string) (bool, interface{}, error) {
+	assert.Same(h.t, h.want, req, "a dump consults the hook with its own request")
+	h.calls = append(h.calls, "Mock "+fullMethod)
+	return false, nil, nil
+}
+
+func (h *dumpRequestHook) Before(ctx context.Context, req interface{}, fullMethod string) (context.Context, error) {
+	assert.Same(h.t, h.want, req, "a dump consults the hook with its own request")
+	h.calls = append(h.calls, "Before "+fullMethod)
+	if h.refuse != nil {
+		return ctx, h.refuse
+	}
+	return context.WithValue(ctx, dumpHookContextKey{}, "from-the-hook"), nil
+}
+
+func (h *dumpRequestHook) After(_ context.Context, _ interface{}, err error, fullMethod string) error {
+	h.calls = append(h.calls, "After "+fullMethod)
+	h.errs = append(h.errs, err)
+	return nil
+}
+
+var _ hook.Hook = (*dumpRequestHook)(nil)
+
+// DumpMessages is the service's other stream, and it consults the hook the way
+// CreateReplicateStream does: Mock, Before and After in order, the dump running
+// under the context Before returned, and After seeing how the dump ended. The
+// dump itself is stopped at once, so the test is about the seam and not about
+// reading a WAL.
+func TestDumpMessagesConsultsTheHookLikeAUnaryRPC(t *testing.T) {
+	req := &milvuspb.DumpMessagesRequest{}
+	h := &dumpRequestHook{t: t, want: req}
+	installStreamHook(t, h)
+	var seen any
+	dump := mockey.Mock((*Proxy).dumpMessages).
+		To(func(_ *Proxy, _ *milvuspb.DumpMessagesRequest, stream milvuspb.MilvusService_DumpMessagesServer) error {
+			seen = stream.Context().Value(dumpHookContextKey{})
+			return merr.WrapErrParameterMissing("pchannel")
+		}).Build()
+	defer dump.UnPatch()
+
+	node := &Proxy{}
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	err := node.DumpMessages(req, &mockDumpMessagesServer{ctx: context.Background()})
+	assert.ErrorIs(t, err, merr.ErrParameterMissing, "the dump's own error reaches the caller unchanged")
+	method := milvuspb.MilvusService_DumpMessages_FullMethodName
+	assert.Equal(t, []string{"Mock " + method, "Before " + method, "After " + method}, h.calls)
+	assert.Equal(t, "from-the-hook", seen, "the dump runs under the context Before returned")
+	require.Len(t, h.errs, 1)
+	assert.ErrorIs(t, h.errs[0], merr.ErrParameterMissing, "After sees how the dump ended")
+}
+
+// A hook that refuses the dump from Before stops it before any WAL is read: the
+// refusal travels as the non-retried InvalidArgument every other RPC's refusal
+// does, and After is not consulted for a dump that never ran.
+func TestDumpMessagesRefusedByTheHook(t *testing.T) {
+	req := &milvuspb.DumpMessagesRequest{}
+	h := &dumpRequestHook{t: t, want: req, refuse: merr.ErrServiceUnimplemented}
+	installStreamHook(t, h)
+	ran := false
+	dump := mockey.Mock((*Proxy).dumpMessages).
+		To(func(*Proxy, *milvuspb.DumpMessagesRequest, milvuspb.MilvusService_DumpMessagesServer) error {
+			ran = true
+			return nil
+		}).Build()
+	defer dump.UnPatch()
+
+	node := &Proxy{}
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	err := node.DumpMessages(req, &mockDumpMessagesServer{ctx: context.Background()})
+	require.Error(t, err)
+	assert.Equal(t, codes.InvalidArgument, status.Code(err),
+		"a stream refusal travels as a gRPC status, and must not be the codes.Unknown a client retries")
+	assert.False(t, ran, "a refused dump never reads the WAL")
+	method := milvuspb.MilvusService_DumpMessages_FullMethodName
+	assert.Equal(t, []string{"Mock " + method, "Before " + method}, h.calls, "a refused RPC has no result for After to see")
+}
+
+// refusingHook refuses every RPC from Before, and records which it was asked
+// about.
+type refusingHook struct {
+	hookutil.DefaultHook
+	befores []string
+}
+
+func (h *refusingHook) Before(ctx context.Context, _ interface{}, fullMethod string) (context.Context, error) {
+	h.befores = append(h.befores, fullMethod)
+	return ctx, merr.ErrServiceUnimplemented
+}
+
+// A unary RPC milvus-proto adds is covered by the interceptor the moment it
+// exists; a stream is consulted by hand, so a stream it adds is one a hook
+// would silently never see. This drives every stream the proxy consults the
+// hook for against a hook that refuses everything, and fails as soon as the
+// service declares a stream the list does not know.
+func TestEveryStreamTheServiceDeclaresConsultsTheHook(t *testing.T) {
+	node := &Proxy{}
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+	consulted := map[string]func() error{
+		"CreateReplicateStream": func() error {
+			return node.CreateReplicateStream(fakeReplicateStream{ctx: context.Background()})
+		},
+		"DumpMessages": func() error {
+			return node.DumpMessages(&milvuspb.DumpMessagesRequest{}, &mockDumpMessagesServer{ctx: context.Background()})
+		},
+	}
+
+	declared := make([]string, 0, len(milvuspb.MilvusService_ServiceDesc.Streams))
+	for _, stream := range milvuspb.MilvusService_ServiceDesc.Streams {
+		declared = append(declared, stream.StreamName)
+	}
+	known := make([]string, 0, len(consulted))
+	for name := range consulted {
+		known = append(known, name)
+	}
+	assert.ElementsMatch(t, known, declared,
+		"every stream the service declares must consult the hook by hand, as the ones listed here do")
+
+	for name, call := range consulted {
+		h := &refusingHook{}
+		installStreamHook(t, h)
+		err := call()
+		assert.Equal(t, codes.InvalidArgument, status.Code(err), "%s: the hook's refusal ends the stream", name)
+		assert.Equal(t, []string{"/" + milvuspb.MilvusService_ServiceDesc.ServiceName + "/" + name}, h.befores,
+			"%s consults Before", name)
+	}
 }
