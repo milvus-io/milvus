@@ -664,7 +664,14 @@ func (m *CollectionManager) removePartition(ctx context.Context, collectionID ty
 	return nil
 }
 
+// UpdateReplicaNumber updates the legacy count-only target. Its RG distribution
+// becomes unknown; callers with a complete target should use UpdateReplicaConfig.
 func (m *CollectionManager) UpdateReplicaNumber(ctx context.Context, collectionID typeutil.UniqueID, replicaNumber int32, userSpecifiedReplicaMode bool) error {
+	return m.UpdateReplicaConfig(ctx, collectionID, replicaNumber, userSpecifiedReplicaMode, nil)
+}
+
+// UpdateReplicaConfig persists the effective target alongside its total replica count.
+func (m *CollectionManager) UpdateReplicaConfig(ctx context.Context, collectionID typeutil.UniqueID, replicaNumber int32, userSpecifiedReplicaMode bool, replicaNumbers map[string]int32) error {
 	m.rwmutex.Lock()
 	defer m.rwmutex.Unlock()
 
@@ -675,6 +682,10 @@ func (m *CollectionManager) UpdateReplicaNumber(ctx context.Context, collectionI
 	newCollection := collection.Clone()
 	newCollection.ReplicaNumber = replicaNumber
 	newCollection.UserSpecifiedReplicaMode = userSpecifiedReplicaMode
+	newCollection.ResourceGroupReplicaNumbers = make(map[string]int32, len(replicaNumbers))
+	for rg, count := range replicaNumbers {
+		newCollection.ResourceGroupReplicaNumbers[rg] = count
+	}
 	partitions := m.getPartitionsByCollection(collectionID)
 	newPartitions := make([]*Partition, 0, len(partitions))
 	for _, partition := range partitions {

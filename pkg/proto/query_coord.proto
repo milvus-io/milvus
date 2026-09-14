@@ -779,6 +779,9 @@ message CollectionLoadInfo {
     repeated int64 load_fields = 8;
     int64 dbID= 9;
     bool user_specified_replica_mode = 10;
+    // Effective load target, independent of the replicas currently present.
+    // Empty for metadata written before per-resource-group compliance support.
+    map<string, int32> resource_group_replica_numbers = 11;
 }
 
 message PartitionLoadInfo {
