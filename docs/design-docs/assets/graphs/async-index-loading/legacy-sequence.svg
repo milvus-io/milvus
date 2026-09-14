@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-labelledby="legacy-sequence-title legacy-sequence-desc">
+<title id="legacy-sequence-title">Legacy Sort: stream, assemble, restore</title>
+<desc id="legacy-sequence-desc">Legacy numeric Sort assembles admitted ranges into a BinarySet, then writes its mmap file before restoring query state.</desc>
+<defs>
+<marker id="legacy-sequence-arrow" markerWidth="8" markerHeight="8" refX="8" refY="4" orient="auto"><path d="M 0 0 L 8 4 L 0 8 Z" fill="#566A80"/></marker>
+<marker id="legacy-sequence-accent" markerWidth="8" markerHeight="8" refX="8" refY="4" orient="auto"><path d="M 0 0 L 8 4 L 0 8 Z" fill="#397985"/></marker>
+<marker id="legacy-sequence-link" markerWidth="8" markerHeight="8" refX="8" refY="4" orient="auto"><path d="M 0 0 L 8 4 L 0 8 Z" fill="#557794"/></marker>
+</defs>
+<rect width="1280" height="720" fill="#FCFDFE"/>
+<g font-family="Geist, Arial, sans-serif">
+<text x="40" y="56" font-size="28" fill="#25364A" text-anchor="start" font-weight="400">Legacy Sort: stream, assemble, restore</text>
+<text x="40" y="88" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Legacy mmap example; A_0 and A_1 fill disjoint offsets in one BinarySet.</text>
+<line x1="128" y1="168" x2="128" y2="632" stroke="#CDD9E2" stroke-dasharray="4 4"/>
+<line x1="456" y1="168" x2="456" y2="632" stroke="#CDD9E2" stroke-dasharray="4 4"/>
+<line x1="784" y1="168" x2="784" y2="632" stroke="#CDD9E2" stroke-dasharray="4 4"/>
+<line x1="1112" y1="168" x2="1112" y2="632" stroke="#CDD9E2" stroke-dasharray="4 4"/>
+<rect x="24" y="112" width="208" height="56" rx="8" fill="#FFFFFF" stroke="#CDD9E2"/>
+<text x="128" y="136" font-size="16" fill="#25364A" text-anchor="middle" font-weight="600">Cache caller</text>
+<text x="128" y="156" font-size="12" fill="#566A80" text-anchor="middle" font-weight="400">synchronous boundary</text>
+<rect x="352" y="112" width="208" height="56" rx="8" fill="#EFF7F5" stroke="#397985"/>
+<text x="456" y="136" font-size="16" fill="#25364A" text-anchor="middle" font-weight="600">Async worker</text>
+<text x="456" y="156" font-size="12" fill="#566A80" text-anchor="middle" font-weight="400">load coroutine</text>
+<rect x="680" y="112" width="208" height="56" rx="8" fill="#FFFFFF" stroke="#CDD9E2"/>
+<text x="784" y="136" font-size="16" fill="#25364A" text-anchor="middle" font-weight="600">Storage backend</text>
+<text x="784" y="156" font-size="12" fill="#566A80" text-anchor="middle" font-weight="400">native I/O</text>
+<rect x="1008" y="112" width="208" height="56" rx="8" fill="#FFFFFF" stroke="#CDD9E2"/>
+<text x="1112" y="136" font-size="16" fill="#25364A" text-anchor="middle" font-weight="600">LocalFileIOPool</text>
+<text x="1112" y="156" font-size="12" fill="#566A80" text-anchor="middle" font-weight="400">file operations</text>
+<path d="M 128 208 L 456 208" fill="none" stroke="#566A80" stroke-width="1.2" marker-end="url(#legacy-sequence-arrow)"/>
+<rect x="268.0" y="180" width="48" height="20" fill="#FCFDFE"/>
+<text x="292.0" y="196" font-size="16" fill="#566A80" text-anchor="middle" font-weight="400">LOAD</text>
+<rect x="304" y="220" width="304" height="32" rx="4" fill="#EFF7F5"/>
+<text x="456" y="240" font-size="12" fill="#566A80" text-anchor="middle" font-weight="400">Inspect metadata; prepare entry once</text>
+<rect x="304" y="256" width="304" height="32" rx="4" fill="#EFF7F5"/>
+<text x="456" y="276" font-size="12" fill="#566A80" text-anchor="middle" font-weight="400">Acquire bytes + slot</text>
+<path d="M 456 316 L 784 316" fill="none" stroke="#566A80" stroke-width="1.2" marker-end="url(#legacy-sequence-arrow)"/>
+<rect x="572.0" y="288" width="96" height="20" fill="#FCFDFE"/>
+<text x="620.0" y="304" font-size="16" fill="#566A80" text-anchor="middle" font-weight="400">READ RANGE</text>
+<path d="M 784 352 L 456 352" fill="none" stroke="#566A80" stroke-width="1.2" stroke-dasharray="4 4" marker-end="url(#legacy-sequence-arrow)"/>
+<rect x="584.0" y="324" width="72" height="20" fill="#FCFDFE"/>
+<text x="620.0" y="340" font-size="16" fill="#566A80" text-anchor="middle" font-weight="400">PAYLOAD</text>
+<rect x="304" y="364" width="304" height="32" rx="4" fill="#EFF7F5"/>
+<text x="456" y="384" font-size="12" fill="#566A80" text-anchor="middle" font-weight="400">Decode; copy into entry at offset</text>
+<rect x="304" y="400" width="304" height="32" rx="4" fill="#EFF7F5"/>
+<text x="456" y="420" font-size="12" fill="#566A80" text-anchor="middle" font-weight="400">Release unit; join all entry reads</text>
+<path d="M 456 460 L 1112 460" fill="none" stroke="#566A80" stroke-width="1.2" marker-end="url(#legacy-sequence-arrow)"/>
+<rect x="560.0" y="432" width="120" height="20" fill="#FCFDFE"/>
+<text x="620.0" y="448" font-size="16" fill="#566A80" text-anchor="middle" font-weight="400">WRITE / CLOSE</text>
+<path d="M 1112 496 L 456 496" fill="none" stroke="#566A80" stroke-width="1.2" stroke-dasharray="4 4" marker-end="url(#legacy-sequence-arrow)"/>
+<rect x="900.0" y="468" width="96" height="20" fill="#FCFDFE"/>
+<text x="948.0" y="484" font-size="16" fill="#566A80" text-anchor="middle" font-weight="400">FILE READY</text>
+<rect x="304" y="508" width="304" height="32" rx="4" fill="#EFF7F5"/>
+<text x="456" y="528" font-size="12" fill="#566A80" text-anchor="middle" font-weight="400">Restore read-only map and auxiliaries</text>
+<path d="M 456 568 L 128 568" fill="none" stroke="#397985" stroke-width="1.2" marker-end="url(#legacy-sequence-accent)"/>
+<rect x="264.0" y="540" width="56" height="20" fill="#FCFDFE"/>
+<text x="292.0" y="556" font-size="16" fill="#566A80" text-anchor="middle" font-weight="400">READY</text>
+<line x1="40" y1="648" x2="1240" y2="648" stroke="#CDD9E2"/>
+<text x="40" y="676" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">The mmap write starts from assembled input; legacy Sort does not use V3 direct-to-target loading.</text>
+<text x="40" y="700" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Other BinarySet consumers reuse their parsers; awaited file phases do not block an async worker.</text>
+</g></svg>

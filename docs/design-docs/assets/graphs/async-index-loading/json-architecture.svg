@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-labelledby="json-architecture-title json-architecture-desc">
+<title id="json-architecture-title">JSON stats: metadata before column loading</title>
+<desc id="json-architecture-desc">JSON and Parquet metadata prepare field mappings, schemas and row counts before projected readers and independent cache entries are created.</desc>
+<defs>
+<marker id="json-architecture-arrow" markerWidth="8" markerHeight="8" refX="8" refY="4" orient="auto"><path d="M 0 0 L 8 4 L 0 8 Z" fill="#566A80"/></marker>
+<marker id="json-architecture-accent" markerWidth="8" markerHeight="8" refX="8" refY="4" orient="auto"><path d="M 0 0 L 8 4 L 0 8 Z" fill="#397985"/></marker>
+<marker id="json-architecture-link" markerWidth="8" markerHeight="8" refX="8" refY="4" orient="auto"><path d="M 0 0 L 8 4 L 0 8 Z" fill="#557794"/></marker>
+</defs>
+<rect width="1280" height="720" fill="#FCFDFE"/>
+<g font-family="Geist, Arial, sans-serif">
+<text x="40" y="56" font-size="28" fill="#25364A" text-anchor="start" font-weight="400">JSON stats: metadata before column loading</text>
+<text x="40" y="88" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Metadata planning and projected-reader preparation are separate from cold-data materialization.</text>
+<path d="M 360 248 L 456 248" fill="none" stroke="#566A80" stroke-width="1.2" marker-end="url(#json-architecture-arrow)"/>
+<path d="M 776 248 L 872 248" fill="none" stroke="#566A80" stroke-width="1.2" marker-end="url(#json-architecture-arrow)"/>
+<path d="M 1032 320 L 1032 368 Q 1032 376 1024 376 L 624 376 Q 616 376 616 384 L 616 420" fill="none" stroke="#566A80" stroke-width="1.2" marker-end="url(#json-architecture-arrow)"/>
+<path d="M 456 476 L 360 476" fill="none" stroke="#566A80" stroke-width="1.2" marker-end="url(#json-architecture-arrow)"/>
+<path d="M 776 492 L 872 492" fill="none" stroke="#566A80" stroke-width="1.2" marker-end="url(#json-architecture-arrow)"/>
+<g data-node="JsonKeyStats::Load"><rect x="40" y="176" width="320" height="144" rx="8" fill="#FFFFFF" stroke="#CDD9E2" stroke-width="1.2"/>
+<text x="60" y="212" font-size="20" fill="#25364A" text-anchor="start" font-weight="600">JsonKeyStats::Load</text>
+<text x="60" y="244" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Root meta.json: raw JSON</text>
+<text x="60" y="268" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Parquet groups + shared-key files</text>
+</g>
+<g data-node="Admitted metadata planning"><rect x="456" y="176" width="320" height="144" rx="8" fill="#EFF7F5" stroke="#397985" stroke-width="1.2"/>
+<text x="476" y="212" font-size="20" fill="#25364A" text-anchor="start" font-weight="600">Admitted metadata planning</text>
+<text x="476" y="244" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Parse JSON key / field map</text>
+<text x="476" y="268" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Probe + open Parquet footers</text>
+</g>
+<g data-node="Prepared group metadata"><rect x="872" y="176" width="320" height="144" rx="8" fill="#FFFFFF" stroke="#CDD9E2" stroke-width="1.2"/>
+<text x="892" y="212" font-size="20" fill="#25364A" text-anchor="start" font-weight="600">Prepared group metadata</text>
+<text x="892" y="244" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">One schema per group</text>
+<text x="892" y="268" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Row count for each file</text>
+</g>
+<g data-node="Cold / warm column caches"><rect x="40" y="420" width="320" height="144" rx="8" fill="#FFFFFF" stroke="#CDD9E2" stroke-width="1.2"/>
+<text x="60" y="456" font-size="20" fill="#25364A" text-anchor="start" font-weight="600">Cold / warm column caches</text>
+<text x="60" y="488" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">ManifestGroupTranslator</text>
+<text x="60" y="512" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Existing field-data pipeline</text>
+</g>
+<g data-node="Projected readers"><rect x="456" y="420" width="320" height="144" rx="8" fill="#FFFFFF" stroke="#CDD9E2" stroke-width="1.2"/>
+<text x="476" y="456" font-size="20" fill="#25364A" text-anchor="start" font-weight="600">Projected readers</text>
+<text x="476" y="488" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Eager: group projection</text>
+<text x="476" y="512" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Lazy: per-column projection</text>
+</g>
+<g data-node="Outer caller"><rect x="872" y="420" width="320" height="144" rx="8" fill="#FFFFFF" stroke="#CDD9E2" stroke-width="1.2"/>
+<text x="892" y="456" font-size="20" fill="#25364A" text-anchor="start" font-weight="600">Outer caller</text>
+<text x="892" y="488" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Create columns and BSON slot</text>
+<text x="892" y="512" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Shared-key loads use BSON path</text>
+</g>
+<line x1="40" y1="648" x2="1240" y2="648" stroke="#CDD9E2"/>
+<text x="40" y="676" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Metadata: async worker + backend reads; no local staging. Per-group planning allows at most 16 files.</text>
+<text x="40" y="700" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Reader-internal opens have their own scope; preparing a reader does not load its cold columns.</text>
+</g></svg>

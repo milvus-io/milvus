@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-labelledby="json-sequence-title json-sequence-desc">
+<title id="json-sequence-title">JSON stats: plan metadata, prepare readers</title>
+<desc id="json-sequence-desc">JSON parsing and admitted Parquet metadata planning finish before projected readers and column/BSON cache entries are created.</desc>
+<defs>
+<marker id="json-sequence-arrow" markerWidth="8" markerHeight="8" refX="8" refY="4" orient="auto"><path d="M 0 0 L 8 4 L 0 8 Z" fill="#566A80"/></marker>
+<marker id="json-sequence-accent" markerWidth="8" markerHeight="8" refX="8" refY="4" orient="auto"><path d="M 0 0 L 8 4 L 0 8 Z" fill="#397985"/></marker>
+<marker id="json-sequence-link" markerWidth="8" markerHeight="8" refX="8" refY="4" orient="auto"><path d="M 0 0 L 8 4 L 0 8 Z" fill="#557794"/></marker>
+</defs>
+<rect width="1280" height="720" fill="#FCFDFE"/>
+<g font-family="Geist, Arial, sans-serif">
+<text x="40" y="56" font-size="28" fill="#25364A" text-anchor="start" font-weight="400">JSON stats: plan metadata, prepare readers</text>
+<text x="40" y="88" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Each metadata call is scheduled on the shared executor; the outer caller builds cache objects.</text>
+<line x1="128" y1="168" x2="128" y2="632" stroke="#CDD9E2" stroke-dasharray="4 4"/>
+<line x1="456" y1="168" x2="456" y2="632" stroke="#CDD9E2" stroke-dasharray="4 4"/>
+<line x1="784" y1="168" x2="784" y2="632" stroke="#CDD9E2" stroke-dasharray="4 4"/>
+<line x1="1112" y1="168" x2="1112" y2="632" stroke="#CDD9E2" stroke-dasharray="4 4"/>
+<rect x="24" y="112" width="208" height="56" rx="8" fill="#FFFFFF" stroke="#CDD9E2"/>
+<text x="128" y="136" font-size="16" fill="#25364A" text-anchor="middle" font-weight="600">Outer caller</text>
+<text x="128" y="156" font-size="12" fill="#566A80" text-anchor="middle" font-weight="400">JsonKeyStats::Load</text>
+<rect x="352" y="112" width="208" height="56" rx="8" fill="#EFF7F5" stroke="#397985"/>
+<text x="456" y="136" font-size="16" fill="#25364A" text-anchor="middle" font-weight="600">Async worker</text>
+<text x="456" y="156" font-size="12" fill="#566A80" text-anchor="middle" font-weight="400">metadata / readers</text>
+<rect x="680" y="112" width="208" height="56" rx="8" fill="#FFFFFF" stroke="#CDD9E2"/>
+<text x="784" y="136" font-size="16" fill="#25364A" text-anchor="middle" font-weight="600">Storage backend</text>
+<text x="784" y="156" font-size="12" fill="#566A80" text-anchor="middle" font-weight="400">JSON / Parquet</text>
+<rect x="1008" y="112" width="208" height="56" rx="8" fill="#FFFFFF" stroke="#CDD9E2"/>
+<text x="1112" y="136" font-size="16" fill="#25364A" text-anchor="middle" font-weight="600">Cache objects</text>
+<text x="1112" y="156" font-size="12" fill="#566A80" text-anchor="middle" font-weight="400">columns / BSON slot</text>
+<path d="M 128 208 L 456 208" fill="none" stroke="#566A80" stroke-width="1.2" marker-end="url(#json-sequence-arrow)"/>
+<rect x="248.0" y="180" width="88" height="20" fill="#FCFDFE"/>
+<text x="292.0" y="196" font-size="16" fill="#566A80" text-anchor="middle" font-weight="400">LOAD META</text>
+<path d="M 456 244 L 784 244" fill="none" stroke="#566A80" stroke-width="1.2" marker-end="url(#json-sequence-arrow)"/>
+<rect x="576.0" y="216" width="88" height="20" fill="#FCFDFE"/>
+<text x="620.0" y="232" font-size="16" fill="#566A80" text-anchor="middle" font-weight="400">READ JSON</text>
+<path d="M 456 280 L 128 280" fill="none" stroke="#566A80" stroke-width="1.2" stroke-dasharray="4 4" marker-end="url(#json-sequence-arrow)"/>
+<rect x="256.0" y="252" width="72" height="20" fill="#FCFDFE"/>
+<text x="292.0" y="268" font-size="16" fill="#566A80" text-anchor="middle" font-weight="400">KEY MAP</text>
+<path d="M 128 316 L 456 316" fill="none" stroke="#566A80" stroke-width="1.2" marker-end="url(#json-sequence-arrow)"/>
+<rect x="244.0" y="288" width="96" height="20" fill="#FCFDFE"/>
+<text x="292.0" y="304" font-size="16" fill="#566A80" text-anchor="middle" font-weight="400">PLAN GROUP</text>
+<path d="M 456 352 L 784 352" fill="none" stroke="#566A80" stroke-width="1.2" marker-end="url(#json-sequence-arrow)"/>
+<rect x="560.0" y="324" width="120" height="20" fill="#FCFDFE"/>
+<text x="620.0" y="340" font-size="16" fill="#566A80" text-anchor="middle" font-weight="400">PROBE TRAILER</text>
+<rect x="304" y="364" width="304" height="32" rx="4" fill="#EFF7F5"/>
+<text x="456" y="384" font-size="12" fill="#566A80" text-anchor="middle" font-weight="400">Release probe; acquire footer lease</text>
+<path d="M 456 424 L 784 424" fill="none" stroke="#566A80" stroke-width="1.2" marker-end="url(#json-sequence-arrow)"/>
+<rect x="568.0" y="396" width="104" height="20" fill="#FCFDFE"/>
+<text x="620.0" y="412" font-size="16" fill="#566A80" text-anchor="middle" font-weight="400">READ FOOTER</text>
+<path d="M 456 460 L 128 460" fill="none" stroke="#566A80" stroke-width="1.2" stroke-dasharray="4 4" marker-end="url(#json-sequence-arrow)"/>
+<rect x="232.0" y="432" width="120" height="20" fill="#FCFDFE"/>
+<text x="292.0" y="448" font-size="16" fill="#566A80" text-anchor="middle" font-weight="400">SCHEMA / ROWS</text>
+<path d="M 128 496 L 456 496" fill="none" stroke="#566A80" stroke-width="1.2" marker-end="url(#json-sequence-arrow)"/>
+<rect x="224.0" y="468" width="136" height="20" fill="#FCFDFE"/>
+<text x="292.0" y="484" font-size="16" fill="#566A80" text-anchor="middle" font-weight="400">PREPARE READERS</text>
+<path d="M 456 532 L 784 532" fill="none" stroke="#566A80" stroke-width="1.2" marker-end="url(#json-sequence-arrow)"/>
+<rect x="548.0" y="504" width="144" height="20" fill="#FCFDFE"/>
+<text x="620.0" y="520" font-size="16" fill="#566A80" text-anchor="middle" font-weight="400">OPEN PROJECTIONS</text>
+<path d="M 456 568 L 128 568" fill="none" stroke="#566A80" stroke-width="1.2" stroke-dasharray="4 4" marker-end="url(#json-sequence-arrow)"/>
+<rect x="232.0" y="540" width="120" height="20" fill="#FCFDFE"/>
+<text x="292.0" y="556" font-size="16" fill="#566A80" text-anchor="middle" font-weight="400">READERS READY</text>
+<path d="M 128 604 L 1112 604" fill="none" stroke="#397985" stroke-width="1.2" marker-end="url(#json-sequence-accent)"/>
+<rect x="236.0" y="576" width="112" height="20" fill="#FCFDFE"/>
+<text x="292.0" y="592" font-size="16" fill="#566A80" text-anchor="middle" font-weight="400">BUILD CACHES</text>
+<line x1="40" y1="648" x2="1240" y2="648" stroke="#CDD9E2"/>
+<text x="40" y="676" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Parquet groups are sequential; within a group at most 16 file tasks plan metadata concurrently.</text>
+<text x="40" y="700" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">No LocalFileIOPool or metadata staging. Cold column materialization remains a separate cache-load phase.</text>
+</g></svg>
