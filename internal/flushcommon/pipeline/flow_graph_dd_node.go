@@ -282,6 +282,16 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 				mlog.Uint64("timetick", flushAllMsg.FlushAllMessage.TimeTick()),
 			)
 			ddn.msgHandler.HandleFlushAll(ddn.vChannelName, flushAllMsg.FlushAllMessage)
+		case commonpb.MsgType_CreateSnapshot:
+			createSnapshotMsg := msg.(*adaptor.CreateSnapshotMessageBody)
+			mlog.Info(msgCtx, "receive create snapshot message",
+				mlog.FieldVChannel(ddn.Name()),
+				mlog.Int32("msgType", int32(msg.Type())),
+				mlog.Uint64("timetick", createSnapshotMsg.CreateSnapshotMessage.TimeTick()),
+			)
+			if err := ddn.msgHandler.HandleCreateSnapshot(ddn.vChannelName, createSnapshotMsg.CreateSnapshotMessage); err != nil {
+				mlog.Warn(msgCtx, "handle create snapshot message failed", mlog.Err(err))
+			}
 		case commonpb.MsgType_AddCollectionField:
 			schemaMsg := msg.(*adaptor.SchemaChangeMessageBody)
 			logger := mlog.With(

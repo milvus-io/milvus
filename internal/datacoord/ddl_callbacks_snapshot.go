@@ -22,6 +22,8 @@ import (
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // createSnapshotV2AckCallback handles the callback for CreateSnapshot DDL message.
@@ -34,8 +36,21 @@ func (s *DDLCallbacks) createSnapshotV2AckCallback(ctx context.Context, result m
 	)
 	log.Info(ctx, "createSnapshotV2AckCallback received")
 
+	// Validate the declared channels before accepting a legacy CChannel-only
+	// result. A missing result on a new data-channel request is not legacy.
+	for _, channel := range result.Message.BroadcastHeader().VChannels {
+		if !funcutil.IsControlChannel(channel) && result.Results[channel] == nil {
+			return merr.WrapErrServiceInternalMsg("missing snapshot flush result for channel %s", channel)
+		}
+	}
+	boundary, err := NewSnapshotBoundary(result.Results)
+	if err != nil {
+		log.Error(ctx, "failed to derive snapshot boundary from broadcast result", mlog.Err(err))
+		return err
+	}
+
 	// Create snapshot - ID is allocated inside CreateSnapshot
-	snapshotID, err := s.snapshotManager.CreateSnapshot(ctx, header.CollectionId, header.Name, header.Description, header.CompactionProtectionSeconds)
+	snapshotID, err := s.snapshotManager.CreateSnapshot(ctx, header.CollectionId, header.Name, header.Description, header.CompactionProtectionSeconds, boundary, header.GetWaitForSortedSegments())
 	if err != nil {
 		log.Error(ctx, "failed to create snapshot via DDL callback", mlog.Err(err))
 		return err

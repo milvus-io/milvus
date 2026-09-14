@@ -2234,6 +2234,20 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 		return merr.Status(err), nil
 	}
 
+	// A StreamingNode without snapshot-flush support appends this message
+	// without sealing and panics when its flusher consumes it. Release versions
+	// cannot distinguish such builds within the same release line, so require
+	// the capability advertised by the consuming StreamingNodes.
+	if incompatible, role, err := s.hasSnapshotIncompatibleSession(ctx); err != nil {
+		mlog.Warn(ctx, "CreateSnapshot: failed to check snapshot-flush support", mlog.Err(err))
+		return merr.Status(err), nil
+	} else if incompatible {
+		mlog.Warn(ctx, "CreateSnapshot rejected: snapshot-flush support is unavailable", mlog.String("role", role))
+		return merr.Status(merr.WrapErrServiceUnavailableMsg(
+			"cluster has a %s node without snapshot-flush support; finish the rolling upgrade before creating a snapshot",
+			role)), nil
+	}
+
 	mlog.Info(context.TODO(), "receive CreateSnapshot request", mlog.String("name", req.GetName()),
 		mlog.String("description", req.GetDescription()),
 		mlog.Int64("compactionProtectionSeconds", req.GetCompactionProtectionSeconds()))
@@ -2263,78 +2277,174 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 	}
 
 	// Resolve collection identity for the broadcast lock set (also validates
-	// collection existence). Read from the datacoord-local meta cache via
-	// handler.GetCollection — avoids a cross-component RPC to MixCoord on every
-	// CreateSnapshot, and on cache miss handler.GetCollection transparently
-	// falls back to rootcoord with bounded retries.
-	coll, err := s.handler.GetCollection(ctx, req.GetCollectionId())
+	// collection existence), acquire the lock, then re-resolve the identity
+	// fresh (bypassing the handler cache) while holding it.
+	//
+	// The two resolutions are not atomic, and neither is "resolve then lock":
+	// a RenameCollection landing in the gap acquires only ExclusiveDBName locks
+	// (see startBroadcastWithCollectionLock's callers), not
+	// ExclusiveCollectionName, so it is never serialized against by the lock
+	// taken below. If we locked once on the pre-rename name and proceeded, this
+	// call would hold an exclusive lock on a name the collection just vacated —
+	// the collection's real (renamed) identity would have no protection from
+	// this call at all, letting a concurrent DropCollection on the new name
+	// race the broadcast. So the identity is re-checked after locking, and the
+	// lock is re-acquired under the new name if it changed. Renames are rare
+	// enough that this only ever loops when one actually landed in the window.
+	const maxCollectionRenameRetries = 5
+	var coll *collectionInfo
+	for attempt := 0; ; attempt++ {
+		var err error
+		coll, err = s.handler.GetCollection(ctx, req.GetCollectionId())
+		if err != nil {
+			mlog.Warn(context.TODO(), "CreateSnapshot failed to resolve collection", mlog.Err(err))
+			return merr.Status(err), nil
+		}
+		if coll == nil {
+			mlog.Warn(context.TODO(), "CreateSnapshot: collection not found")
+			return merr.Status(merr.WrapErrCollectionNotFound(req.GetCollectionId())), nil
+		}
+		dbName := coll.DatabaseName
+		collectionName := coll.Schema.GetName()
+
+		broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx,
+			message.NewSharedDBNameResourceKey(dbName),
+			message.NewExclusiveCollectionNameResourceKey(dbName, collectionName),
+			message.NewExclusiveSnapshotNameResourceKey(req.GetCollectionId(), req.GetName()),
+		)
+		if err != nil {
+			mlog.Warn(context.TODO(), "CreateSnapshot failed to start broadcast", mlog.Err(err))
+			return merr.Status(err), nil
+		}
+
+		// Re-check collection identity fresh while holding the collection
+		// resource lock: DescribeCollectionInternal goes to MixCoord directly
+		// rather than the (potentially stale) handler cache used above, so a
+		// DropCollection or RenameCollection that won the race between the
+		// pre-lock resolution and lock acquisition is caught here.
+		resp, err := s.broker.DescribeCollectionInternal(ctx, req.GetCollectionId())
+		if err != nil {
+			broadcaster.Close()
+			mlog.Warn(context.TODO(), "CreateSnapshot: failed to re-check collection identity after lock", mlog.Err(err))
+			return merr.Status(err), nil
+		}
+		if resp.GetDbName() != dbName || resp.GetCollectionName() != collectionName {
+			broadcaster.Close()
+			if attempt >= maxCollectionRenameRetries {
+				mlog.Warn(context.TODO(), "CreateSnapshot: collection kept being renamed while acquiring the snapshot lock, giving up",
+					mlog.Int("attempts", attempt+1))
+				return merr.Status(merr.WrapErrServiceInternalMsg(
+					"collection %d was renamed repeatedly while creating snapshot %s", req.GetCollectionId(), req.GetName())), nil
+			}
+			mlog.Info(context.TODO(), "CreateSnapshot: collection was renamed while acquiring the snapshot lock, retrying with its new name",
+				mlog.Int("attempts", attempt+1))
+			continue
+		}
+
+		// Double-check after acquiring lock — another goroutine may have
+		// created it. Same error-handling discipline as the pre-lock check
+		// above: only treat ErrSnapshotNotFound as "good to proceed"; surface
+		// every other error.
+		if _, err := s.snapshotManager.GetSnapshot(ctx, req.GetCollectionId(), req.GetName()); err == nil {
+			broadcaster.Close()
+			mlog.Warn(context.TODO(), "CreateSnapshot failed: snapshot name already exists in collection")
+			return merr.Status(merr.WrapErrParameterInvalidMsg("snapshot name %s already exists in collection %d", req.GetName(), req.GetCollectionId())), nil
+		} else if !errors.Is(err, merr.ErrSnapshotNotFound) {
+			broadcaster.Close()
+			mlog.Warn(context.TODO(), "CreateSnapshot: failed to re-check snapshot existence after lock", mlog.Err(err))
+			return merr.Status(err), nil
+		}
+
+		// Reject an unreachable compaction drain before making the broadcast
+		// durable. Every capture must resolve partially published clustering;
+		// protected snapshots also drain tasks computing their backfill targets.
+		if err := checkSnapshotCompactionReachable(ctx, s.meta, req.GetCollectionId(), req.GetCompactionProtectionSeconds() > 0); err != nil {
+			broadcaster.Close()
+			mlog.Warn(ctx, "CreateSnapshot rejected: its compaction wait cannot finish", mlog.Err(err))
+			return merr.Status(err), nil
+		}
+		// Only snapshots waiting for visibility need sort to remain reachable.
+		// A post-broadcast failure would retain the collection's DDL resource key
+		// through callback retries, even after the client received success.
+		if req.GetWaitForSortedSegments() || req.GetCompactionProtectionSeconds() > 0 {
+			if err := checkSnapshotVisibilityReachable(ctx, s.meta, req.GetCollectionId()); err != nil {
+				broadcaster.Close()
+				mlog.Warn(context.TODO(), "CreateSnapshot rejected: its sort wait could never finish", mlog.Err(err))
+				return merr.Status(err), nil
+			}
+		}
+
+		// The capture always waits for every vchannel's checkpoint to reach the
+		// boundary, opt-in or not. A vchannel DataCoord has no checkpoint for at
+		// all never satisfies that, and the wait has no way to give up -- so
+		// refuse here rather than wedge the collection's DDL on a retry that
+		// cannot succeed. A checkpoint that is merely behind is fine and is not
+		// what this rejects; the caller can simply retry a channel that has not
+		// reported yet.
+		for _, vchannel := range coll.VChannelNames {
+			if s.meta.GetChannelCheckpoint(vchannel) == nil {
+				broadcaster.Close()
+				mlog.Warn(context.TODO(), "CreateSnapshot rejected: vchannel has no checkpoint yet",
+					mlog.String("vchannel", vchannel))
+				return merr.Status(merr.WrapErrServiceUnavailableMsg(
+					"vchannel %s has no checkpoint, so a snapshot boundary on it can never be reached; retry once the channel reports one",
+					vchannel)), nil
+			}
+		}
+
+		// Broadcast to the data channels to establish an active flush watermark.
+		// The callback captures current segment versions after persistence reaches
+		// it. The capability gate above is required because an older shard
+		// interceptor does not implement this message's flush side effect.
+		channels := []string{streaming.WAL().ControlChannel()}
+		channels = append(channels, coll.VChannelNames...)
+		if _, err := broadcaster.Broadcast(ctx, message.NewCreateSnapshotMessageBuilderV2().
+			WithHeader(&message.CreateSnapshotMessageHeader{
+				CollectionId:                req.GetCollectionId(),
+				Name:                        req.GetName(),
+				Description:                 req.GetDescription(),
+				CompactionProtectionSeconds: req.GetCompactionProtectionSeconds(),
+				WaitForSortedSegments:       req.GetWaitForSortedSegments() || req.GetCompactionProtectionSeconds() > 0,
+			}).
+			WithBody(&message.CreateSnapshotMessageBody{}).
+			WithBroadcast(channels).
+			WithUnreplicable().
+			MustBuildBroadcast(),
+		); err != nil {
+			broadcaster.Close()
+			mlog.Error(context.TODO(), "CreateSnapshot broadcast failed", mlog.Err(err))
+			return merr.Status(err), nil
+		}
+		broadcaster.Close()
+
+		mlog.Info(context.TODO(), "CreateSnapshot completed successfully")
+		return merr.Success(), nil
+	}
+}
+
+// hasSnapshotIncompatibleSession checks the nodes that append and consume the
+// data-channel snapshot message. DataNodes no longer consume WAL, and the
+// QueryNode delegator filters this message type out. A missing capability on an
+// old session is false, even when its release version equals this build's.
+// This is an admission check of registered nodes, not a downgrade fence: rollout
+// management must not introduce older consumers after snapshots are enabled.
+func (s *Server) hasSnapshotIncompatibleSession(ctx context.Context) (bool, string, error) {
+	if s.session == nil {
+		// Only unset in tests that construct a bare Server{} without going
+		// through the real startup path (which always calls SetSession); a
+		// live DataCoord always has one.
+		return false, "", nil
+	}
+	sessions, _, err := s.session.GetSessions(ctx, typeutil.StreamingNodeRole)
 	if err != nil {
-		mlog.Warn(context.TODO(), "CreateSnapshot failed to resolve collection", mlog.Err(err))
-		return merr.Status(err), nil
+		return false, "", err
 	}
-	if coll == nil {
-		mlog.Warn(context.TODO(), "CreateSnapshot: collection not found")
-		return merr.Status(merr.WrapErrCollectionNotFound(req.GetCollectionId())), nil
+	for _, session := range sessions {
+		if !session.SnapshotFlush {
+			return true, typeutil.StreamingNodeRole, nil
+		}
 	}
-	dbName := coll.DatabaseName
-	collectionName := coll.Schema.GetName()
-	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx,
-		message.NewSharedDBNameResourceKey(dbName),
-		message.NewExclusiveCollectionNameResourceKey(dbName, collectionName),
-		message.NewExclusiveSnapshotNameResourceKey(req.GetCollectionId(), req.GetName()),
-	)
-	if err != nil {
-		mlog.Warn(context.TODO(), "CreateSnapshot failed to start broadcast", mlog.Err(err))
-		return merr.Status(err), nil
-	}
-	defer broadcaster.Close()
-
-	// Re-check collection availability while holding the collection resource
-	// lock. DropCollection may win the race between the pre-lock collection
-	// resolution above and lock acquisition; in that case this request must
-	// terminate before broadcasting a CreateSnapshot message whose ack callback
-	// can no longer generate a valid snapshot.
-	hasCollection, err := s.broker.HasCollection(ctx, req.GetCollectionId())
-	if err != nil {
-		mlog.Warn(context.TODO(), "CreateSnapshot: failed to re-check collection existence after lock", mlog.Err(err))
-		return merr.Status(err), nil
-	}
-	if !hasCollection {
-		mlog.Warn(context.TODO(), "CreateSnapshot: collection not found after lock")
-		return merr.Status(merr.WrapErrCollectionNotFound(req.GetCollectionId())), nil
-	}
-
-	// Double-check after acquiring lock — another goroutine may have created it.
-	// Same error-handling discipline as the pre-lock check above: only treat
-	// ErrSnapshotNotFound as "good to proceed"; surface every other error.
-	if _, err := s.snapshotManager.GetSnapshot(ctx, req.GetCollectionId(), req.GetName()); err == nil {
-		mlog.Warn(context.TODO(), "CreateSnapshot failed: snapshot name already exists in collection")
-		return merr.Status(merr.WrapErrParameterInvalidMsg("snapshot name %s already exists in collection %d", req.GetName(), req.GetCollectionId())), nil
-	} else if !errors.Is(err, merr.ErrSnapshotNotFound) {
-		mlog.Warn(context.TODO(), "CreateSnapshot: failed to re-check snapshot existence after lock", mlog.Err(err))
-		return merr.Status(err), nil
-	}
-
-	// Broadcast CreateSnapshot message via DDL framework
-	// Snapshot ID is allocated in the callback
-	if _, err := broadcaster.Broadcast(ctx, message.NewCreateSnapshotMessageBuilderV2().
-		WithHeader(&message.CreateSnapshotMessageHeader{
-			CollectionId:                req.GetCollectionId(),
-			Name:                        req.GetName(),
-			Description:                 req.GetDescription(),
-			CompactionProtectionSeconds: req.GetCompactionProtectionSeconds(),
-		}).
-		WithBody(&message.CreateSnapshotMessageBody{}).
-		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
-		WithUnreplicable().
-		MustBuildBroadcast(),
-	); err != nil {
-		mlog.Error(context.TODO(), "CreateSnapshot broadcast failed", mlog.Err(err))
-		return merr.Status(err), nil
-	}
-
-	mlog.Info(context.TODO(), "CreateSnapshot completed successfully")
-	return merr.Success(), nil
+	return false, "", nil
 }
 
 func (s *Server) BatchUpdateManifest(ctx context.Context, req *datapb.BatchUpdateManifestRequest) (*commonpb.Status, error) {

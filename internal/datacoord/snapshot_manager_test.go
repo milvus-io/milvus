@@ -41,6 +41,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
@@ -76,6 +77,43 @@ type restoreWALAccesserTarget struct {
 	streaming.WALAccesser
 }
 
+// emptySnapshotTestMeta is the minimum meta CreateSnapshot needs. Its wait asks
+// two things: whether the channel checkpoint has reached the boundary, and
+// whether any segment inside the boundary still owes a sort. A checkpoint past
+// the boundary plus an empty segment set is the "nothing to wait for" case these
+// fixtures want; leaving the checkpoint unset would instead park them in the
+// completeness gate.
+func emptySnapshotTestMeta() *meta {
+	m := &meta{
+		ctx:         context.Background(),
+		segments:    NewSegmentsInfo(),
+		channelCPs:  newChannelCps(),
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+	}
+	m.channelCPs.checkpoints[testCreateSnapshotChannel] = &msgpb.MsgPosition{
+		ChannelName: testCreateSnapshotChannel,
+		Timestamp:   testCreateSnapshotBoundaryTs + 1,
+	}
+	return m
+}
+
+// testCreateSnapshotBoundary is the boundary a CreateSnapshot message would have
+// cut. These fixtures hold no segments, so any well-formed boundary works; it
+// only has to be non-nil, since GenSnapshot now refuses to invent one.
+const (
+	testCreateSnapshotChannel    = "by-dev-rootcoord-dml_0_100v0"
+	testCreateSnapshotBoundaryTs = uint64(1000)
+)
+
+func testCreateSnapshotBoundary() *SnapshotBoundary {
+	return &SnapshotBoundary{
+		SeekPositions: []*msgpb.MsgPosition{
+			{ChannelName: testCreateSnapshotChannel, Timestamp: testCreateSnapshotBoundaryTs},
+		},
+		SnapshotTs: testCreateSnapshotBoundaryTs,
+	}
+}
+
 // --- Test CreateSnapshot ---
 
 func TestSnapshotManager_CreateSnapshot_Success(t *testing.T) {
@@ -97,7 +135,7 @@ func TestSnapshotManager_CreateSnapshot_Success(t *testing.T) {
 			{SegmentId: 1, NumOfRows: 100},
 		},
 	}
-	mockHandler.EXPECT().GenSnapshot(mock.Anything, int64(100)).Return(snapshotData, nil).Once()
+	mockHandler.EXPECT().GenSnapshot(mock.Anything, int64(100), mock.Anything).Return(snapshotData, nil).Once()
 
 	// Mock snapshotMeta methods using mockey
 	mockGetSnapshot := mockey.Mock((*snapshotMeta).GetSnapshot).To(func(sm *snapshotMeta, ctx context.Context, collectionID int64, name string) (*datapb.SnapshotInfo, error) {
@@ -110,6 +148,10 @@ func TestSnapshotManager_CreateSnapshot_Success(t *testing.T) {
 		assert.Equal(t, int64(1001), data.SnapshotInfo.Id)
 		assert.Equal(t, "test_snapshot", data.SnapshotInfo.Name)
 		assert.Equal(t, "test description", data.SnapshotInfo.Description)
+		// Persisted so a consumer can tell a cut meant to be backfill-ready from
+		// an ordinary one. Nothing else reads it, so without this assertion the
+		// assignment could be deleted and the suite would stay green.
+		assert.True(t, data.SnapshotInfo.WaitedForSortedSegments)
 		return nil
 	}).Build()
 	defer mockSaveSnapshot.UnPatch()
@@ -118,7 +160,7 @@ func TestSnapshotManager_CreateSnapshot_Success(t *testing.T) {
 	// the unconditional SetSnapshotPending / ClearSnapshotPending calls (required for
 	// GenSnapshot → SaveSnapshot atomicity) don't panic on uninitialized maps.
 	sm := NewSnapshotManager(
-		nil,                             // meta
+		emptySnapshotTestMeta(),         // meta
 		createTestSnapshotMetaLoaded(t), // snapshotMeta
 		nil,                             // copySegmentMeta
 		mockAllocator,
@@ -129,7 +171,7 @@ func TestSnapshotManager_CreateSnapshot_Success(t *testing.T) {
 	)
 
 	// Execute
-	snapshotID, err := sm.CreateSnapshot(ctx, 100, "test_snapshot", "test description", 0)
+	snapshotID, err := sm.CreateSnapshot(ctx, 100, "test_snapshot", "test description", 0, testCreateSnapshotBoundary(), true)
 
 	// Verify
 	assert.NoError(t, err)
@@ -153,7 +195,7 @@ func TestSnapshotManager_CreateSnapshot_WithCompactionProtection(t *testing.T) {
 			{SegmentId: 1, NumOfRows: 100},
 		},
 	}
-	mockHandler.EXPECT().GenSnapshot(mock.Anything, int64(100)).Return(snapshotData, nil).Once()
+	mockHandler.EXPECT().GenSnapshot(mock.Anything, int64(100), mock.Anything).Return(snapshotData, nil).Once()
 
 	mockGetSnapshot := mockey.Mock((*snapshotMeta).GetSnapshot).To(func(sm *snapshotMeta, ctx context.Context, collectionID int64, name string) (*datapb.SnapshotInfo, error) {
 		return nil, errors.New("not found")
@@ -163,6 +205,9 @@ func TestSnapshotManager_CreateSnapshot_WithCompactionProtection(t *testing.T) {
 	mockSaveSnapshot := mockey.Mock((*snapshotMeta).SaveSnapshot).To(func(sm *snapshotMeta, ctx context.Context, data *snapshotstorage.SnapshotData) error {
 		// Verify compaction expire time is set
 		assert.True(t, data.SnapshotInfo.CompactionExpireTime > 0)
+		// The other direction of the flag: this call did not ask to wait, and
+		// the record has to say so or a consumer cannot tell the two apart.
+		assert.True(t, data.SnapshotInfo.WaitedForSortedSegments)
 		return nil
 	}).Build()
 	defer mockSaveSnapshot.UnPatch()
@@ -170,7 +215,7 @@ func TestSnapshotManager_CreateSnapshot_WithCompactionProtection(t *testing.T) {
 	snapshotMetaInstance := createTestSnapshotMetaLoaded(t)
 
 	sm := NewSnapshotManager(
-		nil,
+		emptySnapshotTestMeta(),
 		snapshotMetaInstance,
 		nil,
 		mockAllocator,
@@ -180,7 +225,7 @@ func TestSnapshotManager_CreateSnapshot_WithCompactionProtection(t *testing.T) {
 		nil, // indexEngineVersionManager
 	)
 
-	snapshotID, err := sm.CreateSnapshot(ctx, 100, "protected_snap", "with protection", 3600)
+	snapshotID, err := sm.CreateSnapshot(ctx, 100, "protected_snap", "with protection", 3600, testCreateSnapshotBoundary(), false)
 
 	// Verify snapshot pending intent is cleared after CreateSnapshot completes
 	assert.False(t, snapshotMetaInstance.IsCollectionCompactionBlocked(100))
@@ -188,34 +233,39 @@ func TestSnapshotManager_CreateSnapshot_WithCompactionProtection(t *testing.T) {
 	assert.Equal(t, int64(2001), snapshotID)
 }
 
-func TestSnapshotManager_CreateSnapshot_DuplicateName(t *testing.T) {
+// An ack callback is at-least-once, so finding the snapshot already created
+// means this invocation is a replay, not a duplicate request. Returning an error
+// would be retried forever, and the collection's exclusive DDL resource key is
+// released only when the callback succeeds -- so every later DDL on the
+// collection would block permanently. Duplicate user requests are rejected far
+// earlier, in Server.CreateSnapshot, under the snapshot-name resource key.
+func TestSnapshotManager_CreateSnapshot_ReplayIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 
-	// Mock snapshotMeta.GetSnapshot to return existing snapshot
 	mockGetSnapshot := mockey.Mock((*snapshotMeta).GetSnapshot).To(func(sm *snapshotMeta, ctx context.Context, collectionID int64, name string) (*datapb.SnapshotInfo, error) {
-		return &datapb.SnapshotInfo{Id: 1, Name: name}, nil // Name already exists
+		return &datapb.SnapshotInfo{Id: 42, Name: name}, nil // already created by the first invocation
 	}).Build()
 	defer mockGetSnapshot.UnPatch()
 
+	snapshotMetaInstance := createTestSnapshotMetaLoaded(t)
 	sm := NewSnapshotManager(
+		emptySnapshotTestMeta(),
+		snapshotMetaInstance,
 		nil,
-		&snapshotMeta{},
-		nil,
-		nil,
-		nil,
+		nil, // no allocator: a replay must not allocate a second ID
+		nil, // no handler: a replay must not regenerate snapshot data
 		nil,
 		nil,
 		nil, /* indexEngineVersionManager */
 	)
 
-	// Execute
-	snapshotID, err := sm.CreateSnapshot(ctx, 100, "existing_snapshot", "description", 0)
+	snapshotID, err := sm.CreateSnapshot(ctx, 100, "existing_snapshot", "description", 0, testCreateSnapshotBoundary(), true)
 
-	// Verify
-	assert.Error(t, err)
-	assert.Equal(t, int64(0), snapshotID)
-	assert.True(t, errors.Is(err, merr.ErrParameterInvalid))
-	assert.Contains(t, err.Error(), "already exists")
+	assert.NoError(t, err)
+	assert.Equal(t, int64(42), snapshotID)
+	// It returns before touching the freeze, so a replay leaves no protection
+	// behind for a snapshot that is already saved and protected on its own.
+	assert.False(t, snapshotMetaInstance.IsCollectionCompactionBlocked(100))
 }
 
 func TestSnapshotManager_CreateSnapshot_AllocatorError(t *testing.T) {
@@ -233,7 +283,7 @@ func TestSnapshotManager_CreateSnapshot_AllocatorError(t *testing.T) {
 	defer mockGetSnapshot.UnPatch()
 
 	sm := NewSnapshotManager(
-		nil,
+		emptySnapshotTestMeta(),
 		createTestSnapshotMetaLoaded(t),
 		nil,
 		mockAllocator,
@@ -244,7 +294,7 @@ func TestSnapshotManager_CreateSnapshot_AllocatorError(t *testing.T) {
 	)
 
 	// Execute
-	snapshotID, err := sm.CreateSnapshot(ctx, 100, "test_snapshot", "description", 0)
+	snapshotID, err := sm.CreateSnapshot(ctx, 100, "test_snapshot", "description", 0, testCreateSnapshotBoundary(), true)
 
 	// Verify
 	assert.Error(t, err)
@@ -262,7 +312,7 @@ func TestSnapshotManager_CreateSnapshot_GenSnapshotError(t *testing.T) {
 	mockAllocator.EXPECT().AllocID(mock.Anything).Return(int64(1001), nil).Once()
 
 	expectedErr := errors.New("gen snapshot error")
-	mockHandler.EXPECT().GenSnapshot(mock.Anything, int64(100)).Return(nil, expectedErr).Once()
+	mockHandler.EXPECT().GenSnapshot(mock.Anything, int64(100), mock.Anything).Return(nil, expectedErr).Once()
 
 	// Mock snapshotMeta.GetSnapshot to return not found
 	mockGetSnapshot := mockey.Mock((*snapshotMeta).GetSnapshot).To(func(sm *snapshotMeta, ctx context.Context, collectionID int64, name string) (*datapb.SnapshotInfo, error) {
@@ -271,7 +321,7 @@ func TestSnapshotManager_CreateSnapshot_GenSnapshotError(t *testing.T) {
 	defer mockGetSnapshot.UnPatch()
 
 	sm := NewSnapshotManager(
-		nil,
+		emptySnapshotTestMeta(),
 		createTestSnapshotMetaLoaded(t),
 		nil,
 		mockAllocator,
@@ -282,7 +332,7 @@ func TestSnapshotManager_CreateSnapshot_GenSnapshotError(t *testing.T) {
 	)
 
 	// Execute
-	snapshotID, err := sm.CreateSnapshot(ctx, 100, "test_snapshot", "description", 0)
+	snapshotID, err := sm.CreateSnapshot(ctx, 100, "test_snapshot", "description", 0, testCreateSnapshotBoundary(), true)
 
 	// Verify
 	assert.Error(t, err)
@@ -302,7 +352,7 @@ func TestSnapshotManager_CreateSnapshot_SaveError(t *testing.T) {
 	snapshotData := &snapshotstorage.SnapshotData{
 		SnapshotInfo: &datapb.SnapshotInfo{CollectionId: 100},
 	}
-	mockHandler.EXPECT().GenSnapshot(mock.Anything, int64(100)).Return(snapshotData, nil).Once()
+	mockHandler.EXPECT().GenSnapshot(mock.Anything, int64(100), mock.Anything).Return(snapshotData, nil).Once()
 
 	// Mock snapshotMeta methods
 	mockGetSnapshot := mockey.Mock((*snapshotMeta).GetSnapshot).To(func(sm *snapshotMeta, ctx context.Context, collectionID int64, name string) (*datapb.SnapshotInfo, error) {
@@ -317,7 +367,7 @@ func TestSnapshotManager_CreateSnapshot_SaveError(t *testing.T) {
 	defer mockSaveSnapshot.UnPatch()
 
 	sm := NewSnapshotManager(
-		nil,
+		emptySnapshotTestMeta(),
 		createTestSnapshotMetaLoaded(t),
 		nil,
 		mockAllocator,
@@ -328,7 +378,7 @@ func TestSnapshotManager_CreateSnapshot_SaveError(t *testing.T) {
 	)
 
 	// Execute
-	snapshotID, err := sm.CreateSnapshot(ctx, 100, "test_snapshot", "description", 0)
+	snapshotID, err := sm.CreateSnapshot(ctx, 100, "test_snapshot", "description", 0, testCreateSnapshotBoundary(), true)
 
 	// Verify
 	assert.Error(t, err)
@@ -345,7 +395,7 @@ func TestSnapshotManager_CreateSnapshot_ClearsSnapshotPendingOnGenSnapshotError(
 	mockAllocator.EXPECT().AllocID(mock.Anything).Return(int64(1001), nil).Once()
 
 	expectedErr := errors.New("gen snapshot error")
-	mockHandler.EXPECT().GenSnapshot(mock.Anything, int64(100)).Return(nil, expectedErr).Once()
+	mockHandler.EXPECT().GenSnapshot(mock.Anything, int64(100), mock.Anything).Return(nil, expectedErr).Once()
 
 	mockGetSnapshot := mockey.Mock((*snapshotMeta).GetSnapshot).To(func(sm *snapshotMeta, ctx context.Context, collectionID int64, name string) (*datapb.SnapshotInfo, error) {
 		return nil, errors.New("not found")
@@ -355,7 +405,7 @@ func TestSnapshotManager_CreateSnapshot_ClearsSnapshotPendingOnGenSnapshotError(
 	snapshotMetaInstance := createTestSnapshotMetaLoaded(t)
 
 	sm := NewSnapshotManager(
-		nil,
+		emptySnapshotTestMeta(),
 		snapshotMetaInstance,
 		nil,
 		mockAllocator,
@@ -365,11 +415,12 @@ func TestSnapshotManager_CreateSnapshot_ClearsSnapshotPendingOnGenSnapshotError(
 		nil, // indexEngineVersionManager
 	)
 
-	_, err := sm.CreateSnapshot(ctx, 100, "test_snap", "desc", 3600)
+	_, err := sm.CreateSnapshot(ctx, 100, "test_snap", "desc", 3600, testCreateSnapshotBoundary(), true)
 	assert.Error(t, err)
 
-	// Verify snapshot pending intent is cleared even on error
+	// A failed capture releases the short-lived block so compaction can progress.
 	assert.False(t, snapshotMetaInstance.IsCollectionCompactionBlocked(100))
+
 }
 
 func TestSnapshotManager_CreateSnapshot_ClearsSnapshotPendingOnSaveError(t *testing.T) {
@@ -383,7 +434,7 @@ func TestSnapshotManager_CreateSnapshot_ClearsSnapshotPendingOnSaveError(t *test
 	snapshotData := &snapshotstorage.SnapshotData{
 		SnapshotInfo: &datapb.SnapshotInfo{CollectionId: 100},
 	}
-	mockHandler.EXPECT().GenSnapshot(mock.Anything, int64(100)).Return(snapshotData, nil).Once()
+	mockHandler.EXPECT().GenSnapshot(mock.Anything, int64(100), mock.Anything).Return(snapshotData, nil).Once()
 
 	mockGetSnapshot := mockey.Mock((*snapshotMeta).GetSnapshot).To(func(sm *snapshotMeta, ctx context.Context, collectionID int64, name string) (*datapb.SnapshotInfo, error) {
 		return nil, errors.New("not found")
@@ -401,7 +452,7 @@ func TestSnapshotManager_CreateSnapshot_ClearsSnapshotPendingOnSaveError(t *test
 	snapshotMetaInstance := createTestSnapshotMetaLoaded(t)
 
 	sm := NewSnapshotManager(
-		nil,
+		emptySnapshotTestMeta(),
 		snapshotMetaInstance,
 		nil,
 		mockAllocator,
@@ -411,10 +462,9 @@ func TestSnapshotManager_CreateSnapshot_ClearsSnapshotPendingOnSaveError(t *test
 		nil, // indexEngineVersionManager
 	)
 
-	_, err := sm.CreateSnapshot(ctx, 100, "test_snap", "desc", 3600)
+	_, err := sm.CreateSnapshot(ctx, 100, "test_snap", "desc", 3600, testCreateSnapshotBoundary(), true)
 	assert.Error(t, err)
 
-	// Verify snapshot pending intent is cleared after save failure
 	assert.False(t, snapshotMetaInstance.IsCollectionCompactionBlocked(100))
 }
 
@@ -436,7 +486,7 @@ func TestSnapshotManager_CreateSnapshot_PendingHeldEvenWithoutLongTermProtection
 		SnapshotInfo: &datapb.SnapshotInfo{CollectionId: 100},
 		Segments:     []*datapb.SegmentDescription{{SegmentId: 1}},
 	}
-	mockHandler.EXPECT().GenSnapshot(mock.Anything, int64(100)).Return(snapshotData, nil).Once()
+	mockHandler.EXPECT().GenSnapshot(mock.Anything, int64(100), mock.Anything).Return(snapshotData, nil).Once()
 
 	mockGetSnapshot := mockey.Mock((*snapshotMeta).GetSnapshot).To(func(sm *snapshotMeta, ctx context.Context, collectionID int64, name string) (*datapb.SnapshotInfo, error) {
 		return nil, errors.New("not found")
@@ -456,7 +506,7 @@ func TestSnapshotManager_CreateSnapshot_PendingHeldEvenWithoutLongTermProtection
 	defer mockSaveSnapshot.UnPatch()
 
 	sm := NewSnapshotManager(
-		nil,
+		emptySnapshotTestMeta(),
 		snapshotMetaInstance,
 		nil,
 		mockAllocator,
@@ -466,7 +516,7 @@ func TestSnapshotManager_CreateSnapshot_PendingHeldEvenWithoutLongTermProtection
 		nil, // indexEngineVersionManager
 	)
 
-	_, err := sm.CreateSnapshot(ctx, 100, "test_snap", "desc", 0) // compactionProtectionSeconds = 0
+	_, err := sm.CreateSnapshot(ctx, 100, "test_snap", "desc", 0, testCreateSnapshotBoundary(), true) // compactionProtectionSeconds = 0
 	assert.NoError(t, err)
 
 	// After CreateSnapshot returns, the deferred ClearSnapshotPending must have run.
@@ -489,7 +539,7 @@ func TestSnapshotManager_CreateSnapshot_ClearsSnapshotPendingOnAllocError(t *tes
 	snapshotMetaInstance := createTestSnapshotMetaLoaded(t)
 
 	sm := NewSnapshotManager(
-		nil,
+		emptySnapshotTestMeta(),
 		snapshotMetaInstance,
 		nil,
 		mockAllocator,
@@ -499,10 +549,9 @@ func TestSnapshotManager_CreateSnapshot_ClearsSnapshotPendingOnAllocError(t *tes
 		nil, // indexEngineVersionManager
 	)
 
-	_, err := sm.CreateSnapshot(ctx, 100, "test_snap", "desc", 3600)
+	_, err := sm.CreateSnapshot(ctx, 100, "test_snap", "desc", 3600, testCreateSnapshotBoundary(), true)
 	assert.Error(t, err)
 
-	// Verify snapshot pending intent is cleared after alloc failure
 	assert.False(t, snapshotMetaInstance.IsCollectionCompactionBlocked(100))
 }
 
@@ -524,7 +573,7 @@ func TestSnapshotManager_DropSnapshot_Success(t *testing.T) {
 	defer mockDropSnapshot.UnPatch()
 
 	sm := NewSnapshotManager(
-		nil,
+		emptySnapshotTestMeta(),
 		&snapshotMeta{},
 		nil,
 		nil,
@@ -551,7 +600,7 @@ func TestSnapshotManager_DropSnapshot_NotFound_Idempotent(t *testing.T) {
 	defer mockGetSnapshot.UnPatch()
 
 	sm := NewSnapshotManager(
-		nil,
+		emptySnapshotTestMeta(),
 		&snapshotMeta{},
 		nil,
 		nil,
@@ -584,7 +633,7 @@ func TestSnapshotManager_DropSnapshot_Error(t *testing.T) {
 	defer mockDropSnapshot.UnPatch()
 
 	sm := NewSnapshotManager(
-		nil,
+		emptySnapshotTestMeta(),
 		&snapshotMeta{},
 		nil,
 		nil,
@@ -620,7 +669,7 @@ func TestSnapshotManager_GetSnapshot_Success(t *testing.T) {
 	defer mockGetSnapshot.UnPatch()
 
 	sm := NewSnapshotManager(
-		nil,
+		emptySnapshotTestMeta(),
 		&snapshotMeta{},
 		nil,
 		nil,
@@ -648,7 +697,7 @@ func TestSnapshotManager_GetSnapshot_NotFound(t *testing.T) {
 	defer mockGetSnapshot.UnPatch()
 
 	sm := NewSnapshotManager(
-		nil,
+		emptySnapshotTestMeta(),
 		&snapshotMeta{},
 		nil,
 		nil,
@@ -691,7 +740,7 @@ func TestSnapshotManager_DescribeSnapshot_Success(t *testing.T) {
 	defer mockReadSnapshotData.UnPatch()
 
 	sm := NewSnapshotManager(
-		nil,
+		emptySnapshotTestMeta(),
 		&snapshotMeta{},
 		nil,
 		nil,
@@ -719,7 +768,7 @@ func TestSnapshotManager_DescribeSnapshot_NotFound(t *testing.T) {
 	defer mockReadSnapshotData.UnPatch()
 
 	sm := NewSnapshotManager(
-		nil,
+		emptySnapshotTestMeta(),
 		&snapshotMeta{},
 		nil,
 		nil,
@@ -753,7 +802,7 @@ func TestSnapshotManager_ListSnapshots_Success(t *testing.T) {
 	defer mockListSnapshots.UnPatch()
 
 	sm := NewSnapshotManager(
-		nil,
+		emptySnapshotTestMeta(),
 		&snapshotMeta{},
 		nil,
 		nil,
@@ -781,7 +830,7 @@ func TestSnapshotManager_ListSnapshots_Error(t *testing.T) {
 	defer mockListSnapshots.UnPatch()
 
 	sm := NewSnapshotManager(
-		nil,
+		emptySnapshotTestMeta(),
 		&snapshotMeta{},
 		nil,
 		nil,
@@ -829,7 +878,7 @@ func TestSnapshotManager_GetRestoreState_Success(t *testing.T) {
 	defer mockGetJob.UnPatch()
 
 	sm := NewSnapshotManager(
-		nil,
+		emptySnapshotTestMeta(),
 		nil,
 		&copySegmentMeta{},
 		nil,
@@ -860,7 +909,7 @@ func TestSnapshotManager_GetRestoreState_NotFound(t *testing.T) {
 	defer mockGetJob.UnPatch()
 
 	sm := NewSnapshotManager(
-		nil,
+		emptySnapshotTestMeta(),
 		nil,
 		&copySegmentMeta{},
 		nil,
@@ -2019,6 +2068,40 @@ func TestCreateRestoreJob_AllocNFailurePropagates(t *testing.T) {
 	assert.False(t, addJobCalled, "AddJob must not be called when segment-ID allocation fails")
 }
 
+// A snapshot is a point-in-time copy, so restoring it minus a segment produces
+// a collection with rows missing and still reports success -- the caller has no
+// way to notice. Snapshot pins are supposed to keep those segments alive, so a
+// missing one means that protection failed and the restore cannot deliver what
+// it promises. It used to log a warning and skip.
+func TestCreateRestoreJob_MissingSourceSegmentIsFatal(t *testing.T) {
+	ctx := context.Background()
+	snapshotData := &snapshotstorage.SnapshotData{
+		SnapshotInfo: &datapb.SnapshotInfo{Name: "snap1", CollectionId: 100},
+		Segments: []*datapb.SegmentDescription{
+			{SegmentId: 4242, NumOfRows: 100},
+		},
+	}
+
+	addJobCalled := false
+	mAddJob := mockey.Mock((*copySegmentMeta).AddJob).To(
+		func(_ *copySegmentMeta, _ context.Context, _ CopySegmentJob) error {
+			addJobCalled = true
+			return nil
+		}).Build()
+	defer mAddJob.UnPatch()
+
+	// meta holds no such segment.
+	sm := &snapshotManager{
+		meta:            &meta{ctx: ctx, segments: NewSegmentsInfo()},
+		copySegmentMeta: &copySegmentMeta{},
+	}
+
+	err := sm.createRestoreJob(ctx, int64(200), nil, nil, snapshotData, int64(42), int64(7), false, "", "", "")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "4242")
+	assert.False(t, addJobCalled, "must not start a restore that would silently drop rows")
+}
+
 // TestRestoreSnapshot_StartBroadcasterFailureUnpinsAndRollsBack verifies
 // failure at the startBroadcaster step (Phase 4) still triggers defer-unpin
 // and rollback of the target collection.
@@ -2193,7 +2276,7 @@ func TestNewSnapshotManager(t *testing.T) {
 	}
 
 	sm := NewSnapshotManager(
-		nil,
+		emptySnapshotTestMeta(),
 		nil,
 		nil,
 		mockAllocator,
@@ -2219,7 +2302,7 @@ func TestSnapshotManager_RestoreIndexes_FMINDEXNilVersionManager(t *testing.T) {
 	).Once()
 
 	sm := NewSnapshotManager(
-		nil,
+		emptySnapshotTestMeta(),
 		nil,
 		nil,
 		mockAllocator,
@@ -3173,7 +3256,7 @@ func TestSnapshotManager_DropSnapshotsByCollection_Success(t *testing.T) {
 	defer mockDrop.UnPatch()
 
 	sm := NewSnapshotManager(
-		nil,
+		emptySnapshotTestMeta(),
 		&snapshotMeta{},
 		nil,
 		nil,
@@ -3195,7 +3278,7 @@ func TestSnapshotManager_DropSnapshotsByCollection_Error(t *testing.T) {
 	defer mockDrop.UnPatch()
 
 	sm := NewSnapshotManager(
-		nil,
+		emptySnapshotTestMeta(),
 		&snapshotMeta{},
 		nil,
 		nil,
@@ -3218,7 +3301,7 @@ func TestSnapshotManager_DropSnapshotsByCollection_NoSnapshots(t *testing.T) {
 	defer mockDrop.UnPatch()
 
 	sm := NewSnapshotManager(
-		nil,
+		emptySnapshotTestMeta(),
 		&snapshotMeta{},
 		nil,
 		nil,
@@ -3321,6 +3404,155 @@ func TestSnapshotExportManager_LockTargetSerializesEquivalentRoots(t *testing.T)
 	}
 	close(releaseSecond)
 	<-secondDone
+}
+
+// The create lock is held across waitForBoundary, which can run for the
+// whole life of a snapshot. While it was process-wide, one collection with
+// stalled sort compaction starved snapshot creation on every other collection.
+func TestLockCreateSnapshot_ScopedPerCollection(t *testing.T) {
+	// Bare literal on purpose: this is how the tests build the manager, and
+	// KeyLock's zero value has a nil map, so the lazy init has to cover it.
+	sm := &snapshotManager{}
+
+	unlockFirst := sm.lockCreateSnapshot(100)
+
+	otherCollection := make(chan struct{})
+	go func() {
+		defer close(otherCollection)
+		sm.lockCreateSnapshot(200)()
+	}()
+	select {
+	case <-otherCollection:
+	case <-time.After(time.Second):
+		require.FailNow(t, "a different collection must not wait on collection 100's snapshot lock")
+	}
+
+	sameCollection := make(chan struct{})
+	go func() {
+		defer close(sameCollection)
+		sm.lockCreateSnapshot(100)()
+	}()
+	select {
+	case <-sameCollection:
+		require.FailNow(t, "the same collection must still serialize, for the name-uniqueness TOCTOU")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	unlockFirst()
+	select {
+	case <-sameCollection:
+	case <-time.After(time.Second):
+		require.FailNow(t, "second create did not acquire the released collection lock")
+	}
+}
+
+func TestAcquireCaptureSlot(t *testing.T) {
+	sm := &snapshotManager{}
+
+	releases := make([]func(), 0, maxConcurrentSnapshotCaptures)
+	for range maxConcurrentSnapshotCaptures {
+		release, err := sm.acquireCaptureSlot(context.Background())
+		require.NoError(t, err)
+		releases = append(releases, release)
+	}
+
+	// Saturated: the next capture waits rather than piling another collection's
+	// cloned segment list onto the heap.
+	blocked := make(chan struct{})
+	go func() {
+		defer close(blocked)
+		release, err := sm.acquireCaptureSlot(context.Background())
+		if err == nil {
+			release()
+		}
+	}()
+	select {
+	case <-blocked:
+		require.FailNow(t, "capture slots must be bounded")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	releases[0]()
+	select {
+	case <-blocked:
+	case <-time.After(time.Second):
+		require.FailNow(t, "releasing a slot did not admit the waiting capture")
+	}
+	for _, release := range releases[1:] {
+		release()
+	}
+
+	// A canceled context must not leak a slot or block forever.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	saturate := make([]func(), 0, maxConcurrentSnapshotCaptures)
+	for range maxConcurrentSnapshotCaptures {
+		release, err := sm.acquireCaptureSlot(context.Background())
+		require.NoError(t, err)
+		saturate = append(saturate, release)
+	}
+	_, err := sm.acquireCaptureSlot(ctx)
+	require.ErrorIs(t, err, context.Canceled)
+	for _, release := range saturate {
+		release()
+	}
+}
+
+// Queueing for a capture slot must not happen with pending already set. Pending
+// blocks every non-L0 compaction on the collection, sort included, and the slot
+// is contended by unrelated collections -- so the wrong order freezes this
+// collection's compaction for as long as someone else's capture runs, which is
+// the head-of-line coupling the per-collection create lock exists to avoid.
+func TestCreateSnapshot_DoesNotHoldPendingWhileQueuedForCaptureSlot(t *testing.T) {
+	snapshotMetaInstance := createTestSnapshotMetaLoaded(t)
+	m := emptySnapshotTestMeta()
+	m.snapshotMeta = snapshotMetaInstance
+	sm := NewSnapshotManager(
+		m, snapshotMetaInstance, nil, nil, nil, nil, nil, nil,
+	)
+
+	// Saturate the slots so the call below has to queue.
+	releases := make([]func(), 0, maxConcurrentSnapshotCaptures)
+	for range maxConcurrentSnapshotCaptures {
+		release, err := sm.acquireCaptureSlot(context.Background())
+		require.NoError(t, err)
+		releases = append(releases, release)
+	}
+	t.Cleanup(func() {
+		for _, release := range releases {
+			release()
+		}
+	})
+
+	// Observe entry into the real slot acquisition; a sleeping goroutine or a
+	// panic before this point must not make the test pass.
+	entered := make(chan struct{})
+	var acquire func(*snapshotManager, context.Context) (func(), error)
+	patch := mockey.Mock((*snapshotManager).acquireCaptureSlot).To(func(manager *snapshotManager, ctx context.Context) (func(), error) {
+		close(entered)
+		return acquire(manager, ctx)
+	}).Origin(&acquire).Build()
+	defer patch.UnPatch()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	created := make(chan error, 1)
+	go func() {
+		_, err := sm.CreateSnapshot(ctx, 100, "queued", "", 0, testCreateSnapshotBoundary(), true)
+		created <- err
+	}()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("snapshot did not reach capture slot acquisition")
+	}
+	require.False(t, snapshotMetaInstance.IsCollectionCompactionBlocked(100), "queueing for capture must not block compaction")
+	cancel()
+	select {
+	case err := <-created:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(5 * time.Second):
+		t.Fatal("snapshot did not leave the capture queue after cancellation")
+	}
 }
 
 func TestNamespacedSnapshotExportTarget(t *testing.T) {

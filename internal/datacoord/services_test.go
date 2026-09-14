@@ -44,6 +44,8 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -3607,6 +3609,144 @@ func TestServer_GetExportSnapshotState(t *testing.T) {
 
 // --- Test CreateSnapshot additional cases ---
 
+func TestServer_CreateSnapshot_SnapshotFlushCapability(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name     string
+		supports []bool
+		blocked  bool
+	}{
+		{name: "same_version_legacy_node", supports: []bool{false}, blocked: true},
+		{name: "same_version_upgraded_node", supports: []bool{true}},
+		{name: "rolling_upgrade", supports: []bool{true, false}, blocked: true},
+		{name: "all_upgraded", supports: []bool{true, true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sessions := make(map[string]*sessionutil.Session)
+			for i, supported := range tc.supports {
+				sessions[fmt.Sprintf("streamingnode-%d", i)] = &sessionutil.Session{
+					SessionRaw: sessionutil.SessionRaw{SnapshotFlush: supported},
+					Version:    common.Version,
+				}
+			}
+			discovery := sessionutil.NewMockSession(t)
+			// No expectations for DataNode or QueryNode: neither consumes this
+			// WAL message, so those roles must not gate snapshot creation.
+			discovery.EXPECT().GetSessions(ctx, typeutil.StreamingNodeRole).Return(sessions, int64(1), nil).Once()
+			server := &Server{session: discovery}
+			server.stateCode.Store(commonpb.StateCode_Healthy)
+			status, err := server.CreateSnapshot(ctx, &datapb.CreateSnapshotRequest{
+				Name:                        "snapshot",
+				CompactionProtectionSeconds: -1,
+			})
+			require.NoError(t, err)
+			if tc.blocked {
+				require.ErrorIs(t, merr.Error(status), merr.ErrServiceUnavailable)
+				require.True(t, status.GetRetriable())
+				require.Contains(t, status.GetReason(), "snapshot-flush support")
+			} else {
+				// Reaching request validation proves the capability gate passed;
+				// this avoids constructing an unrelated snapshot pipeline.
+				require.ErrorIs(t, merr.Error(status), merr.ErrParameterInvalid)
+			}
+		})
+	}
+
+	t.Run("session_discovery_failure", func(t *testing.T) {
+		discovery := sessionutil.NewMockSession(t)
+		discovery.EXPECT().GetSessions(ctx, typeutil.StreamingNodeRole).
+			Return(nil, int64(0), merr.ErrServiceUnavailable).Once()
+		server := &Server{session: discovery}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+		status, err := server.CreateSnapshot(ctx, &datapb.CreateSnapshotRequest{Name: "snapshot"})
+		require.NoError(t, err)
+		require.ErrorIs(t, merr.Error(status), merr.ErrServiceUnavailable)
+	})
+}
+
+func TestServer_CreateSnapshot_CompactionDisabledBeforeBroadcast(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	previous := params.DataCoordCfg.EnableCompaction.GetValue()
+	require.NoError(t, params.Save(params.DataCoordCfg.EnableCompaction.Key, "false"))
+	t.Cleanup(func() { require.NoError(t, params.Save(params.DataCoordCfg.EnableCompaction.Key, previous)) })
+
+	for _, tc := range []struct {
+		name       string
+		protection int64
+		taskType   datapb.CompactionType
+		taskState  datapb.CompactionTaskState
+	}{
+		{name: "ordinary_snapshot_with_published_clustering", taskType: datapb.CompactionType_ClusteringCompaction, taskState: datapb.CompactionTaskState_completed},
+		{name: "protected_snapshot_with_pending_compaction", protection: 60, taskType: datapb.CompactionType_MixCompaction, taskState: datapb.CompactionTaskState_pipelining},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			const channel = "by-dev-rootcoord-dml_0_100v0"
+			m := &meta{ctx: ctx, segments: NewSegmentsInfo(), channelCPs: newChannelCps()}
+			m.channelCPs.checkpoints[channel] = &msgpb.MsgPosition{ChannelName: channel, Timestamp: 100}
+			// There are no invisible or in-memory compacting inputs. Only the
+			// durable task reveals the drain that cannot finish after restart.
+			m.segments.SetSegment(1, NewSegmentInfo(&datapb.SegmentInfo{
+				ID: 1, CollectionID: 100, InsertChannel: channel,
+				State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1, IsSorted: true,
+			}))
+			task := &datapb.CompactionTask{
+				CollectionID: 100, TriggerID: 10, PlanID: 11,
+				Type: tc.taskType, State: tc.taskState, InputSegments: []int64{1},
+			}
+			if tc.taskType == datapb.CompactionType_ClusteringCompaction {
+				task.ResultSegments = []int64{2}
+				m.segments.SetSegment(2, NewSegmentInfo(&datapb.SegmentInfo{
+					ID: 2, CollectionID: 100, InsertChannel: channel,
+					State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L2,
+					CreatedByCompaction: true, IsSorted: true,
+				}))
+			}
+			m.compactionTaskMeta = &compactionTaskMeta{
+				compactionTasks: map[int64]map[int64]*datapb.CompactionTask{10: {11: task}},
+			}
+
+			mockGet := mockey.Mock((*snapshotManager).GetSnapshot).
+				Return(nil, merr.WrapErrSnapshotNotFound("snapshot")).Build()
+			defer mockGet.UnPatch()
+			handler := NewNMockHandler(t)
+			handler.EXPECT().GetCollection(ctx, int64(100)).Return(&collectionInfo{
+				ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "test_collection"},
+				VChannelNames: []string{channel},
+			}, nil).Once()
+			mockBroker := broker.NewMockBroker(t)
+			mockBroker.EXPECT().DescribeCollectionInternal(ctx, int64(100)).Return(
+				&milvuspb.DescribeCollectionResponse{DbName: "default", CollectionName: "test_collection"}, nil,
+			).Once()
+
+			bapi := mock_broadcaster.NewMockBroadcastAPI(t)
+			bapi.EXPECT().Close().Return().Once()
+			mockStart := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).
+				Return(bapi, nil).Build()
+			defer mockStart.UnPatch()
+			wal := mock_streaming.NewMockWALAccesser(t)
+			wal.EXPECT().ControlChannel().Return("by-dev-rootcoord-dml_0_vcchan").Maybe()
+			mockWAL := mockey.Mock(streaming.WAL).Return(wal).Build()
+			defer mockWAL.UnPatch()
+
+			server := &Server{
+				meta: m, handler: handler, broker: mockBroker,
+				snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+			}
+			server.stateCode.Store(commonpb.StateCode_Healthy)
+			status, err := server.CreateSnapshot(ctx, &datapb.CreateSnapshotRequest{
+				Name: "snapshot", CollectionId: 100, CompactionProtectionSeconds: tc.protection,
+			})
+			require.NoError(t, err)
+			require.ErrorIs(t, merr.Error(status), merr.ErrServiceUnavailable)
+			require.True(t, status.GetRetriable())
+			require.Contains(t, status.GetReason(), "re-enable dataCoord.enableCompaction")
+			bapi.AssertNotCalled(t, "Broadcast", mock.Anything, mock.Anything)
+		})
+	}
+}
+
 func TestServer_CreateSnapshot_AdditionalCases(t *testing.T) {
 	t.Run("server_not_healthy", func(t *testing.T) {
 		ctx := context.Background()
@@ -3771,8 +3911,10 @@ func TestServer_CreateSnapshot_AdditionalCases(t *testing.T) {
 		defer mockBroadcast.UnPatch()
 
 		fakeBroker := &embeddedBroker{}
-		mockHasCollection := mockey.Mock((*embeddedBroker).HasCollection).Return(true, nil).Build()
-		defer mockHasCollection.UnPatch()
+		mockDescribeColl := mockey.Mock((*embeddedBroker).DescribeCollectionInternal).Return(
+			&milvuspb.DescribeCollectionResponse{DbName: "default", CollectionName: "test_collection"}, nil,
+		).Build()
+		defer mockDescribeColl.UnPatch()
 
 		server := &Server{
 			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
@@ -3829,13 +3971,13 @@ func TestServer_CreateSnapshot_AdditionalCases(t *testing.T) {
 
 		hasCollectionCalled := false
 		fakeBroker := &embeddedBroker{}
-		mockHasCollection := mockey.Mock((*embeddedBroker).HasCollection).To(
-			func(_ *embeddedBroker, _ context.Context, collectionID int64) (bool, error) {
+		mockDescribeColl := mockey.Mock((*embeddedBroker).DescribeCollectionInternal).To(
+			func(_ *embeddedBroker, _ context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
 				hasCollectionCalled = true
 				assert.Equal(t, int64(100), collectionID)
-				return false, nil
+				return nil, merr.WrapErrCollectionNotFound(collectionID)
 			}).Build()
-		defer mockHasCollection.UnPatch()
+		defer mockDescribeColl.UnPatch()
 
 		server := &Server{
 			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
@@ -3891,10 +4033,10 @@ func TestServer_CreateSnapshot_AdditionalCases(t *testing.T) {
 		defer mockStartBroadcast.UnPatch()
 
 		fakeBroker := &embeddedBroker{}
-		mockHasCollection := mockey.Mock((*embeddedBroker).HasCollection).Return(
-			false, errors.New("rootcoord unavailable"),
+		mockDescribeColl := mockey.Mock((*embeddedBroker).DescribeCollectionInternal).Return(
+			nil, errors.New("rootcoord unavailable"),
 		).Build()
-		defer mockHasCollection.UnPatch()
+		defer mockDescribeColl.UnPatch()
 
 		server := &Server{
 			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
@@ -3912,6 +4054,72 @@ func TestServer_CreateSnapshot_AdditionalCases(t *testing.T) {
 		assert.Error(t, merr.Error(resp))
 		assert.Contains(t, resp.GetReason(), "rootcoord unavailable")
 		assert.False(t, broadcastCalled, "CreateSnapshot must not broadcast if the lock-held collection recheck fails")
+	})
+
+	// The capture always waits for every vchannel's checkpoint to reach the
+	// boundary, whether or not the sort wait was asked for. A vchannel with no
+	// checkpoint at all never satisfies that, and the wait runs in a callback
+	// that retries forever without releasing the collection's DDL key -- so it
+	// has to be refused before the message is appended.
+	t.Run("vchannel_without_checkpoint_is_refused_before_broadcast", func(t *testing.T) {
+		ctx := context.Background()
+
+		mockGet := mockey.Mock((*snapshotManager).GetSnapshot).Return(
+			nil, merr.WrapErrSnapshotNotFound("no_cp_snapshot", "not found"),
+		).Build()
+		defer mockGet.UnPatch()
+
+		fakeHandler := &embeddedHandler{}
+		mockGetColl := mockey.Mock((*embeddedHandler).GetCollection).Return(
+			&collectionInfo{
+				ID:            100,
+				DatabaseName:  "default",
+				Schema:        &schemapb.CollectionSchema{Name: "test_collection"},
+				VChannelNames: []string{"by-dev-rootcoord-dml_0_100v0"},
+			}, nil,
+		).Build()
+		defer mockGetColl.UnPatch()
+
+		broadcastCalled := false
+		mockBroadcaster := &embeddedBroadcastAPI{}
+		mockClose := mockey.Mock((*embeddedBroadcastAPI).Close).Return().Build()
+		defer mockClose.UnPatch()
+		mockDoBroadcast := mockey.Mock((*embeddedBroadcastAPI).Broadcast).To(
+			func(_ *embeddedBroadcastAPI, _ context.Context, _ message.BroadcastMutableMessage) (*types2.BroadcastAppendResult, error) {
+				broadcastCalled = true
+				return &types2.BroadcastAppendResult{}, nil
+			}).Build()
+		defer mockDoBroadcast.UnPatch()
+		mockStartBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
+			func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+				return mockBroadcaster, nil
+			}).Build()
+		defer mockStartBroadcast.UnPatch()
+
+		fakeBroker := &embeddedBroker{}
+		mockDescribeColl := mockey.Mock((*embeddedBroker).DescribeCollectionInternal).Return(
+			&milvuspb.DescribeCollectionResponse{DbName: "default", CollectionName: "test_collection"}, nil,
+		).Build()
+		defer mockDescribeColl.UnPatch()
+
+		// meta with no checkpoint recorded for that vchannel
+		server := &Server{
+			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+			handler:         fakeHandler,
+			broker:          fakeBroker,
+			meta:            &meta{ctx: ctx, segments: NewSegmentsInfo(), channelCPs: newChannelCps()},
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		resp, err := server.CreateSnapshot(ctx, &datapb.CreateSnapshotRequest{
+			Name:         "no_cp_snapshot",
+			CollectionId: 100,
+		})
+
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp))
+		assert.Contains(t, resp.GetReason(), "has no checkpoint")
+		assert.False(t, broadcastCalled, "must not append a message whose boundary can never be reached")
 	})
 }
 

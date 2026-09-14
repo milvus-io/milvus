@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/samber/lo"
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -72,7 +73,7 @@ func (policy *clusteringCompactionPolicy) Trigger(ctx context.Context) (map[Comp
 			continue
 		}
 		if policy.meta.isCollectionCompactionBlocked(collection.ID) {
-			mlog.Info(ctx, "skip clustering compaction for collection due to unloaded protected snapshot RefIndex",
+			mlog.RatedInfo(ctx, rate.Limit(20), "skip clustering compaction for collection due to unloaded protected snapshot RefIndex",
 				mlog.FieldCollectionID(collection.ID))
 			continue
 		}

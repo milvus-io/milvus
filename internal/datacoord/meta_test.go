@@ -1408,6 +1408,47 @@ func (suite *MetaBasicSuite) TestValidateSegmentState_BlockedBySnapshot() {
 	})
 }
 
+// Capture pending must be rechecked when a compaction commits.
+func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RechecksSnapshotBlock() {
+	newMeta := func() (*meta, *snapshotMeta) {
+		segments := NewSegmentsInfo()
+		segments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: 1, CollectionID: 100, PartitionID: 10, State: commonpb.SegmentState_Flushed,
+		}})
+		sm := createTestSnapshotMetaLoaded(suite.T())
+		return &meta{ctx: context.TODO(), segments: segments, snapshotMeta: sm}, sm
+	}
+
+	mixTask := &datapb.CompactionTask{
+		PlanID:        7001,
+		InputSegments: []UniqueID{1},
+		CollectionID:  100,
+		Type:          datapb.CompactionType_MixCompaction,
+	}
+
+	suite.Run("pending set after validate still blocks the commit", func() {
+		m, sm := newMeta()
+		suite.NoError(m.ValidateSegmentStateBeforeCompleteCompactionMutation(mixTask))
+		sm.SetSnapshotPending(100)
+
+		_, _, err := m.CompleteCompactionMutation(context.TODO(), mixTask, &datapb.CompactionPlanResult{})
+		suite.Error(err)
+		suite.True(errors.Is(err, merr.ErrCompactionBlocked), "got %v", err)
+	})
+
+	suite.Run("L0 delete compaction is never blocked", func() {
+		m, sm := newMeta()
+		sm.SetSnapshotPending(100)
+
+		suite.NoError(m.checkSnapshotBlocksCompaction(&datapb.CompactionTask{
+			PlanID:        7004,
+			InputSegments: []UniqueID{1},
+			CollectionID:  100,
+			Type:          datapb.CompactionType_Level0DeleteCompaction,
+		}))
+	})
+}
+
 func (suite *MetaBasicSuite) TestGetMaxPosition() {
 	suite.Run("nil_positions", func() {
 		pos := getMaxPosition(nil)

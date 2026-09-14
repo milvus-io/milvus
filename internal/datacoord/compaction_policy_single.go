@@ -48,7 +48,9 @@ func newSingleCompactionPolicy(meta *meta, allocator allocator.Allocator, handle
 }
 
 func (policy *singleCompactionPolicy) Enable() bool {
-	return Params.DataCoordCfg.EnableAutoCompaction.GetAsBool()
+	// Periodic sort retries must run even when automatic merging is disabled.
+	// triggerOneCollection applies the auto-compaction switches to merging.
+	return true
 }
 
 func (policy *singleCompactionPolicy) Name() string {
@@ -70,7 +72,7 @@ func (policy *singleCompactionPolicy) Trigger(ctx context.Context) (map[Compacti
 			continue
 		}
 		if policy.meta.isCollectionCompactionBlocked(collection.ID) {
-			mlog.Info(ctx, "skip single compaction for collection due to unloaded protected snapshot RefIndex",
+			mlog.RatedInfo(ctx, rate.Limit(20), "skip single compaction for collection due to unloaded protected snapshot RefIndex",
 				mlog.FieldCollectionID(collection.ID))
 			continue
 		}
@@ -269,8 +271,20 @@ func (policy *singleCompactionPolicy) triggerOneCollection(ctx context.Context, 
 		log.Warn(ctx, "failed to apply singleCompactionPolicy, trigger sort compaction failed", mlog.Err(err))
 		return nil, nil, 0, err
 	}
+	// Both halves of the flag are checked here rather than in Enable(), so that
+	// turning auto compaction off stops merging without also stopping sort.
+	if !Params.DataCoordCfg.EnableAutoCompaction.GetAsBool() {
+		log.RatedInfo(ctx, rate.Limit(20), "auto compaction disabled")
+		return nil, sortViews, 0, nil
+	}
 	if !isCollectionAutoCompactionEnabled(collection) {
 		log.RatedInfo(ctx, rate.Limit(20), "collection auto compaction disabled")
+		return nil, sortViews, 0, nil
+	}
+	// The merge half moves segment boundaries, so it yields to a snapshot that has
+	// already cut one.
+	if policy.meta.isCollectionCompactionBlocked(collectionID) {
+		log.Info(ctx, "skip mix half of single compaction, collection has a snapshot pending")
 		return nil, sortViews, 0, nil
 	}
 

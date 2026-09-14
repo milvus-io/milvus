@@ -2,7 +2,7 @@
 
 ## Implementation Overview
 
-Milvus Snapshot mechanism provides complete collection-level data snapshot capabilities, implementing point-in-time backup and restore functionality. The implementation includes the following core components:
+Milvus Snapshot mechanism provides complete collection-level data snapshot capabilities, implementing persisted-layout backup and restore functionality. The implementation includes the following core components:
 
 ### Architecture Components
 
@@ -34,30 +34,17 @@ Milvus Snapshot mechanism provides complete collection-level data snapshot capab
 
 ## Snapshot Creation Process
 
-### Creation Workflow
+The current creation contract is specified in
+[Snapshot flush and backfill readiness](20260910-snapshot-flush-and-backfill.md).
+CreateSnapshot actively flushes each data channel. Protected snapshots also wait
+for stream-flushed inputs to become visible before pinning the serving segment
+layout. Capture preserves current manifest and delete data; channel watermarks do
+not provide exact historical row visibility. Concurrent compaction may include
+later writes in the captured replacements.
 
-**Execution Steps**:
-
-1. **Acquire Channel Seek Positions**: Obtain a `MsgPosition` for each collection channel. These positions form the snapshot's per-channel data boundary.
-2. **Compute Compatibility CreateTs**: Store `create_ts = min(channel_seek_positions.timestamp)` for legacy display and sorting.
-3. **Filter Segments By Channel**: Select each non-dropped segment only when `segmentEffectiveTs(segment) < channel_seek_positions[segment.channel_name].timestamp`.
-4. **Collect Metadata**: Retrieve collection schema, index definitions, and segment details (binlog/deltalog/indexfile paths).
-5. **Write to S3**: Write complete metadata, schema, index, and segment information to S3 in manifest format.
-6. **Write to Etcd**: Save basic SnapshotInfo to Etcd and establish segment/index references.
-
-**Important Notes**:
-
-- **CreateSnapshot does not actively flush data**: Only collects existing sealed segments
-- **Channel Boundary Source**: Each channel boundary is obtained from that channel's seek position.
-- **CreateTs Semantics**: `create_ts` is a compatibility summary equal to the minimum channel seek timestamp. It is not a global cross-channel visibility boundary.
-- **Data Coverage**: A segment is included according to the seek timestamp of its own insert channel.
-- **Best Practice (Strongly Recommended)**: Call Flush API before creating snapshot to ensure latest data is persisted. Flush is not mandatory but highly recommended to avoid missing data in growing segments.
-
-**Data Point-in-Time**:
-
-- Snapshot contains sealed segment data before each segment channel's seek timestamp.
-- To include latest data, it is strongly recommended to call Flush API before creating snapshot.
-- Data in growing segments will not be included in the snapshot.
+The callback writes metadata and segment descriptions to object storage and
+commits the snapshot catalog entry with its references. The RPC acknowledges the
+broadcast; lookup exposes the snapshot after this capture completes.
 
 ## Snapshot Storage Implementation
 

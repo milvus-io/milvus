@@ -285,6 +285,9 @@ func (t *bumpSchemaVersionTask) QueryTaskOnWorker(cluster session.Cluster) {
 		}
 		err = t.meta.ValidateSegmentStateBeforeCompleteCompactionMutation(t.GetTaskProto())
 		if err != nil {
+			if errors.Is(err, merr.ErrCompactionBlocked) {
+				return
+			}
 			if saveErr := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed), setFailReason(err.Error())); saveErr != nil {
 				log.Warn(context.TODO(), "bumpSchemaVersionTask failed to setState failed", mlog.Err(saveErr))
 			}

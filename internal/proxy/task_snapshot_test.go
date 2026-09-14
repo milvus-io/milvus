@@ -24,6 +24,7 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -204,6 +205,43 @@ func TestCreateSnapshotTask_Execute_Success(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, task.result)
 	assert.True(t, merr.Ok(task.result))
+}
+
+func TestCreateSnapshotTask_Execute_ProtectedSnapshotWaitsForSort(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		protectionSeconds int64
+		waitForSort       bool
+	}{
+		{name: "unprotected", protectionSeconds: 0, waitForSort: false},
+		{name: "minimum protection", protectionSeconds: 1, waitForSort: true},
+		{name: "backfill protection", protectionSeconds: 600, waitForSort: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			task := &createSnapshotTask{
+				req: &milvuspb.CreateSnapshotRequest{
+					Name:                        "backfill_snapshot",
+					CompactionProtectionSeconds: tc.protectionSeconds,
+				},
+				mixCoord:     NewMixCoordMock(),
+				collectionID: 100,
+			}
+			called := false
+			mockCreateSnapshot := mockey.Mock((*MixCoordMock).CreateSnapshot).To(
+				func(_ *MixCoordMock, _ context.Context, req *datapb.CreateSnapshotRequest, _ ...grpc.CallOption) (*commonpb.Status, error) {
+					called = true
+					assert.Equal(t, tc.waitForSort, req.GetWaitForSortedSegments())
+					assert.Equal(t, tc.protectionSeconds, req.GetCompactionProtectionSeconds())
+					assert.Equal(t, int64(100), req.GetCollectionId())
+					assert.Equal(t, "backfill_snapshot", req.GetName())
+					return merr.Success(), nil
+				}).Build()
+			defer mockCreateSnapshot.UnPatch()
+
+			assert.NoError(t, task.Execute(context.Background()))
+			assert.True(t, called)
+		})
+	}
 }
 
 func TestCreateSnapshotTask_Execute_MixCoordError(t *testing.T) {

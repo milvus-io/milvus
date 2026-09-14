@@ -146,6 +146,9 @@ func (t *mixCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 		}
 		err = t.meta.ValidateSegmentStateBeforeCompleteCompactionMutation(t.GetTaskProto())
 		if err != nil {
+			if errors.Is(err, merr.ErrCompactionBlocked) {
+				return
+			}
 			t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed), setFailReason(err.Error()))
 			return
 		}

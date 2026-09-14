@@ -190,6 +190,16 @@ func (q *CompactionQueue) Len() int {
 	return len(q.pq)
 }
 
+// sortCompactionPriority is the same under every prioritizer. The configured
+// prioritizer chooses between optimizations -- merge small segments first, or
+// drain deletes first -- and sort is not one: a flushed segment is published
+// Flushed+IsInvisible and is served from the growing path until a sorted
+// replacement is committed, so anything waiting on that segment waits on its
+// sort task, including a snapshot. It sits below Level0 in LevelPrioritizer and
+// below Mix in MixFirstPrioritizer, so each prioritizer still leads with what
+// it names.
+const sortCompactionPriority = 5
+
 var (
 	DefaultPrioritizer Prioritizer = func(task CompactionTask) int {
 		return int(task.GetTaskProto().GetPlanID())
@@ -199,6 +209,9 @@ var (
 		switch task.GetTaskProto().GetType() {
 		case datapb.CompactionType_Level0DeleteCompaction:
 			return 1
+		case datapb.CompactionType_SortCompaction,
+			datapb.CompactionType_PartitionKeySortCompaction:
+			return sortCompactionPriority
 		case datapb.CompactionType_MixCompaction:
 			return 10
 		case datapb.CompactionType_BumpSchemaVersionCompaction:
@@ -214,6 +227,9 @@ var (
 		switch task.GetTaskProto().GetType() {
 		case datapb.CompactionType_Level0DeleteCompaction:
 			return 10
+		case datapb.CompactionType_SortCompaction,
+			datapb.CompactionType_PartitionKeySortCompaction:
+			return sortCompactionPriority
 		case datapb.CompactionType_MixCompaction:
 			return 1
 		case datapb.CompactionType_BumpSchemaVersionCompaction:

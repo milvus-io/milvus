@@ -95,6 +95,11 @@ func (t *clusteringCompactionTask) GetTaskVersion() int64 {
 }
 
 func (t *clusteringCompactionTask) retryOnError(err error) {
+	// Snapshot protection is a scheduling pause, not a failed clustering run.
+	// In particular, cleanup must not discard a partially published generation.
+	if errors.Is(err, merr.ErrCompactionBlocked) {
+		return
+	}
 	if err != nil {
 		mlog.Warn(context.TODO(), "clustering compaction task failed", mlog.Err(err))
 		if merr.IsRetryableErr(err) && t.GetTaskProto().RetryTimes < t.maxRetryTimes {
@@ -188,6 +193,9 @@ func (t *clusteringCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 
 		err = t.meta.ValidateSegmentStateBeforeCompleteCompactionMutation(t.GetTaskProto())
 		if err != nil {
+			if errors.Is(err, merr.ErrCompactionBlocked) {
+				return
+			}
 			t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed), setFailReason(err.Error()))
 			return
 		}
@@ -589,7 +597,7 @@ func (t *clusteringCompactionTask) processIndexing() error {
 }
 
 func (t *clusteringCompactionTask) markResultSegmentsVisible() error {
-	var operators []UpdateOperator
+	operators := []UpdateOperator{CheckSnapshotCompactionOperator(t.GetTaskProto())}
 	for _, segID := range t.GetTaskProto().GetResultSegments() {
 		operators = append(operators, SetSegmentIsInvisible(segID, false))
 		operators = append(operators, UpdateSegmentPartitionStatsVersionOperator(segID, t.GetTaskProto().GetPlanID()))
@@ -598,13 +606,13 @@ func (t *clusteringCompactionTask) markResultSegmentsVisible() error {
 	err := t.meta.UpdateSegmentsInfo(context.TODO(), operators...)
 	if err != nil {
 		mlog.Warn(context.TODO(), "markResultSegmentVisible UpdateSegmentsInfo fail", mlog.Err(err))
-		return merr.WrapErrClusteringCompactionMetaError("markResultSegmentVisible UpdateSegmentsInfo", err)
+		return merr.Wrap(err, "publish clustering result segments")
 	}
 	return nil
 }
 
 func (t *clusteringCompactionTask) markInputSegmentsDropped() error {
-	var operators []UpdateOperator
+	operators := []UpdateOperator{CheckSnapshotCompactionOperator(t.GetTaskProto())}
 	// mark
 	for _, segID := range t.GetTaskProto().GetInputSegments() {
 		operators = append(operators, UpdateStatusOperator(segID, commonpb.SegmentState_Dropped))
@@ -612,13 +620,25 @@ func (t *clusteringCompactionTask) markInputSegmentsDropped() error {
 	err := t.meta.UpdateSegmentsInfo(context.TODO(), operators...)
 	if err != nil {
 		mlog.Warn(context.TODO(), "markInputSegmentsDropped UpdateSegmentsInfo fail", mlog.Err(err))
-		return merr.WrapErrClusteringCompactionMetaError("markInputSegmentsDropped UpdateSegmentsInfo", err)
+		return merr.Wrap(err, "retire clustering input segments")
 	}
 	return nil
 }
 
 // indexed is the final state of a clustering compaction task
 // one task should only run this once
+//
+// The swap is overlap-based on purpose: results are published first, inputs
+// retired last, so a crash leaves both generations live rather than neither.
+//
+// Do not move markInputSegmentsDropped earlier to narrow that overlap. It must
+// stay after the completed state is saved: doClean's else branch keys on
+// isInputDropped, and reaching it with the inputs already Dropped runs the
+// v2.4-compat path, which demotes the results to L1 and deletes their partition
+// stats -- discarding the whole clustering run instead of rolling back to the
+// inputs. Readers dedup the overlap by CompactionFrom instead (retrieveSegment,
+// dropSupersededByLineage), which they must do anyway for the far longer
+// invisible-results window before this.
 func (t *clusteringCompactionTask) completeTask() error {
 	var err error
 	// first mark result segments visible

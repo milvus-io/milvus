@@ -133,6 +133,7 @@ type SessionRaw struct {
 	IndexEngineVersion       IndexEngineVersion `json:"IndexEngineVersion,omitempty"`
 	ScalarIndexEngineVersion IndexEngineVersion `json:"ScalarIndexEngineVersion,omitempty"`
 	IndexNonEncoding         bool               `json:"IndexNonEncoding,omitempty"`
+	SnapshotFlush            bool               `json:"SnapshotFlush,omitempty"`
 	LeaseID                  *clientv3.LeaseID  `json:"LeaseID,omitempty"`
 
 	HostName     string            `json:"HostName,omitempty"`
@@ -232,6 +233,15 @@ func WithScalarIndexEngineVersion(minimal, current, maximum int32) SessionOption
 func WithIndexNonEncoding() SessionOption {
 	return func(session *Session) {
 		session.IndexNonEncoding = true
+	}
+}
+
+// WithSnapshotFlush advertises support for CreateSnapshot on data channels,
+// including its append fence, flush consumption, and WAL recovery behavior.
+// Only StreamingNodes implementing all three should register this capability.
+func WithSnapshotFlush() SessionOption {
+	return func(session *Session) {
+		session.SnapshotFlush = true
 	}
 }
 

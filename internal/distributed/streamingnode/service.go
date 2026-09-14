@@ -253,7 +253,7 @@ func (s *Server) start() (err error) {
 }
 
 func (s *Server) initSession() error {
-	s.session = sessionutil.NewSession(s.ctx)
+	s.session = sessionutil.NewSession(s.ctx, sessionutil.WithSnapshotFlush())
 	if s.session == nil {
 		return merr.WrapErrServiceUnavailable("session is nil, the etcd client connection may have failed")
 	}

@@ -1756,6 +1756,10 @@ message CreateSnapshotRequest {
   string description = 3; // user-defined snapshot description
   int64 collection_id= 4; // collection name
   int64 compaction_protection_seconds = 5; // duration in seconds to protect referenced segments from compaction, 0 = no protection
+  // Wait for stream-flushed inputs selected by the flush watermark to become
+  // visible before capture. Automatically enabled when protection is nonzero.
+  // This does not wait for indexes or provide a historical read timestamp.
+  bool wait_for_sorted_segments = 6;
 }
 
 message DropSnapshotRequest {
@@ -1841,9 +1845,13 @@ message SnapshotInfo {
   uint64 compaction_expire_time = 10;       // absolute expiry timestamp (Unix seconds) for compaction protection, 0 = no protection
   repeated int64 pin_ids = 11;              // active pin IDs (crypto-random, unique per pin operation)
   map<int64, int64> pin_expire_at_ms = 12;  // pin_id -> expiry timestamp (ms), 0 = no expiry
-  // Per-channel snapshot boundaries. Each position records the seek point used
-  // to decide which segments from that channel are included in the snapshot.
+  // Per-channel flush watermarks used for capture coverage, not historical
+  // read timestamps. Compaction replacements and deletes may advance before
+  // capture. Legacy CChannel-only requests record their channel checkpoints.
   repeated msg.MsgPosition channel_seek_positions = 13;
+  // Whether capture waited for the growing-to-sealed handoff. External
+  // collections bypass sort, so this is not proof that every segment is sorted.
+  bool waited_for_sorted_segments = 14;
 }
 
 // StorageV2SegmentManifest maps a segment ID to its plain manifest object path.

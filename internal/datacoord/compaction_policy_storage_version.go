@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/blang/semver/v4"
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
@@ -119,7 +120,7 @@ func (policy *storageVersionUpgradePolicy) Trigger(ctx context.Context) (map[Com
 			break
 		}
 		if policy.meta.isCollectionCompactionBlocked(collection.ID) {
-			mlog.Info(ctx, "skip storage version compaction for collection due to unloaded protected snapshot RefIndex",
+			mlog.RatedInfo(ctx, rate.Limit(20), "skip storage version compaction for collection due to unloaded protected snapshot RefIndex",
 				mlog.FieldCollectionID(collection.ID))
 			continue
 		}
