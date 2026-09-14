@@ -3,25 +3,26 @@ package walmanager
 import (
 	"context"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
 )
 
 // newWALLifetime create a WALLifetime with opener.
-func newWALLifetime(opener wal.Opener, channel string, logger *mlog.Logger) *walLifetime {
+// The wal open operations are canceled when openingCtx is done.
+func newWALLifetime(openingCtx context.Context, opener wal.Opener, channel string, logger *mlog.Logger) *walLifetime {
 	ctx, cancel := context.WithCancel(context.Background())
 	l := &walLifetime{
-		ctx:       ctx,
-		cancel:    cancel,
-		channel:   channel,
-		finish:    make(chan struct{}),
-		opener:    opener,
-		statePair: newWALStatePair(),
-		logger:    logger.With(mlog.String("channel", channel)),
+		ctx:        ctx,
+		cancel:     cancel,
+		openingCtx: openingCtx,
+		channel:    channel,
+		finish:     make(chan struct{}),
+		opener:     opener,
+		statePair:  newWALStatePair(),
+		logger:     logger.With(mlog.String("channel", channel)),
 	}
 	go l.backgroundTask()
 	return l
@@ -34,9 +35,10 @@ func newWALLifetime(opener wal.Opener, channel string, logger *mlog.Logger) *wal
 // term is always increasing, available is always before unavailable in same term, such as:
 // (-1, false) -> (0, true) -> (1, true) -> (2, true) -> (3, false) -> (7, true) -> ...
 type walLifetime struct {
-	ctx     context.Context
-	cancel  context.CancelFunc
-	channel string
+	ctx        context.Context
+	cancel     context.CancelFunc
+	openingCtx context.Context // done when the owner cancels the wal open operations.
+	channel    string
 
 	finish    chan struct{}
 	opener    wal.Opener
@@ -72,7 +74,8 @@ func (w *walLifetime) Remove(ctx context.Context, term int64) error {
 
 	// Wait until the WAL state is ready or term expired or error occurs.
 	err := w.statePair.WaitCurrentStateReachExpected(ctx, expected)
-	if errors.IsAny(err, context.Canceled, context.DeadlineExceeded) {
+	if err != nil && ctx.Err() != nil {
+		// The caller of Remove gives up before the wal state reaches the expected state.
 		return err
 	}
 	if err != nil {
@@ -154,10 +157,12 @@ func (w *walLifetime) doLifetimeChanged(expectedState expectedWALState) {
 	}
 
 	// If expected state is available, open a new wal.
-	// TODO: merge the expectedState and expected state context together.
-	l, err := w.opener.Open(expectedState.Context(), &wal.OpenOption{
+	// The open is canceled if the caller of Open gives up, the wal manager is closing, or the wal lifetime is closed.
+	openCtx, cancel := contextutil.MergeContext(expectedState.Context(), w.openingCtx)
+	l, err := w.opener.Open(openCtx, &wal.OpenOption{
 		Channel: expectedState.GetPChannelInfo(),
 	})
+	cancel()
 	if err != nil {
 		logger.Warn(w.ctx, "open new wal fail", mlog.Err(err))
 		// Open new wal at expected term failed, push expected term to current state unavailable.

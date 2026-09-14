@@ -2,11 +2,8 @@ package pulsar
 
 import (
 	"context"
-	"time"
 
 	"github.com/apache/pulsar-client-go/pulsar"
-	"github.com/cenkalti/backoff/v4"
-	"github.com/cockroachdb/errors"
 	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -15,62 +12,16 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/helper"
-	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
 var _ walimpls.WALImpls = (*walImpl)(nil)
 
 type walImpl struct {
 	*helper.WALHelper
-	c                  pulsar.Client
-	p                  *syncutil.Future[pulsar.Producer]
-	notifier           *syncutil.AsyncTaskNotifier[struct{}]
+	c                  pulsar.Client // shared by readers, truncate and the backlog clear helper.
+	producer           *walProducer  // nil for a read-only wal.
 	backlogClearHelper *backlogClearHelper
 	tenant             tenant
-}
-
-// initProducerAtBackground initializes the producer at background.
-func (w *walImpl) initProducerAtBackground() {
-	if w.Channel().AccessMode != types.AccessModeRW {
-		w.notifier.Finish(struct{}{})
-		return
-	}
-
-	defer w.notifier.Finish(struct{}{})
-	backoff := backoff.NewExponentialBackOff()
-	backoff.InitialInterval = 10 * time.Millisecond
-	backoff.MaxInterval = 10 * time.Second
-	backoff.MaxElapsedTime = 0
-	backoff.Reset()
-
-	for {
-		if err := w.initProducer(); err == nil {
-			return
-		}
-		select {
-		case <-time.After(backoff.NextBackOff()):
-			continue
-		case <-w.notifier.Context().Done():
-			return
-		}
-	}
-}
-
-// initProducer initializes the producer.
-func (w *walImpl) initProducer() error {
-	topic := w.tenant.MustGetFullTopicName(w.Channel().Name)
-	p, err := w.c.CreateProducer(pulsar.ProducerOptions{
-		Topic: topic,
-		// TODO: current go pulsar client does not support fencing, we should enable it after go pulsar client supports it.
-		// ProducerAccessMode: pulsar.ProducerAccessModeExclusiveWithFencing,
-	})
-	if err != nil {
-		w.Log().Warn(context.TODO(), "create producer failed", mlog.Err(err))
-		return err
-	}
-	w.Log().Info(context.TODO(), "pulsar create producer done")
-	w.p.Set(p)
-	return nil
 }
 
 func (w *walImpl) WALName() message.WALName {
@@ -81,13 +32,9 @@ func (w *walImpl) Append(ctx context.Context, msg message.MutableMessage) (messa
 	if w.Channel().AccessMode != types.AccessModeRW {
 		panic("write on a wal that is not in read-write mode")
 	}
-	p, err := w.p.GetWithContext(ctx)
-	if err != nil {
-		return nil, errors.Wrap(err, "get producer from future")
-	}
 	pb := msg.IntoMessageProto()
 	recordSize := estimatePulsarRecordSize(pb.Payload, pb.Properties)
-	id, err := p.Send(ctx, &pulsar.ProducerMessage{
+	id, err := w.producer.Send(ctx, &pulsar.ProducerMessage{
 		Payload:    pb.Payload,
 		Properties: pb.Properties,
 	})
@@ -175,11 +122,8 @@ func (w *walImpl) Truncate(ctx context.Context, id message.MessageID) error {
 }
 
 func (w *walImpl) Close() {
-	w.notifier.Cancel()
-	w.notifier.BlockUntilFinish()
-	// close producer if it is initialized
-	if w.p.Ready() {
-		w.p.Get().Close()
+	if w.producer != nil {
+		w.producer.Close()
 	}
 	if w.backlogClearHelper != nil {
 		w.backlogClearHelper.Close()

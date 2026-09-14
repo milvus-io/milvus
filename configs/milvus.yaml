@@ -310,6 +310,15 @@ pulsar:
   # If these options is zero, no subscription will be created, so pulsar cluster must close the backlog protection, otherwise the milvus can not recovered if backlog exceed.
   # If this option is zero or negative, it will be ignored and the default value (100m) will be used.
   backlogAutoClearBytes: 100m
+  # The access mode of the pulsar producer that a streaming node creates for a wal topic, shared or exclusive.
+  # exclusive: the producer creation fails while another producer is connected to the topic, and the streaming node retries it.
+  # shared: multiple producers can write to the topic at the same time.
+  # exclusive access is enforced by pulsar broker 2.8.0 or later.
+  producerAccessMode: exclusive
+  # The max time that a streaming node retries creating the pulsar producer when it opens a wal, 1m by default.
+  # It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration
+  # When it is exceeded, the wal open fails and the streaming coord retries the assignment later. 0 disables the limit.
+  producerCreateTimeout: 1m
 
 # If you want to enable kafka, needs to comment the pulsar configs
 # kafka:
@@ -1584,6 +1593,11 @@ streaming:
     # The timeout of wal balancer operation, 30m by default.
     # If the operation exceeds this timeout, it will be canceled.
     operationTimeout: 30m
+    # The wait time before assigning the pchannels of a streaming node that has left the session view to another streaming node, 5s by default.
+    # It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration
+    # It gives the old streaming node time to exit before another streaming node writes to the same wal.
+    # It lowers the chance of two writers on one wal but does not rule it out. 0 disables the wait.
+    nodeLostGracePeriod: 5s
     balancePolicy:
       name: vchannelFair # The multiplier of balance task trigger backoff, 2 by default
       # Whether to allow rebalance, true by default.
