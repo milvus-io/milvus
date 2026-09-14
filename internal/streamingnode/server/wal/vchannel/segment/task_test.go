@@ -27,8 +27,10 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
@@ -119,14 +121,17 @@ func TestRecoveredFinalCommitIsNotRepeated(t *testing.T) {
 	require.NoError(t, task.Execute(context.Background()))
 	assert.True(t, task.Done())
 	assert.Empty(t, recorder.commitSegmentIDs)
+	assert.False(t, segment.IsEmptyFinalCommitDone())
 }
 
-func TestRecoveredDataCheckpointDoesNotProveFinalCommit(t *testing.T) {
+func TestRecoveredDataCheckpointDoesNotProveNonEmptyFinalCommit(t *testing.T) {
 	recorder := &segmentTaskRecorder{}
 	meta := newFinalCommitTestMeta(100)
 	meta.State = streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED
 	meta.CheckpointTimeTick = 30
 	meta.DataCheckpointTimeTick = 30
+	meta.Stat.ModifiedRows = 1
+	meta.Stat.ModifiedBinarySize = 16
 	segment := NewSegmentViewFromMeta(
 		meta,
 		&schemapb.CollectionSchema{},
@@ -225,4 +230,55 @@ func newFinalCommitTestMeta(segmentID int64) *streamingpb.SegmentAssignmentMeta 
 		PersistedStorage:   &streamingpb.L1SegmentPersistedStorage{},
 		Stat:               &streamingpb.SegmentAssignmentStat{CreateSegmentTimeTick: 10},
 	}
+}
+
+func TestEmptyFinalCommitFailureKeepsAssignmentUnfinished(t *testing.T) {
+	meta := emptyFinalCommitTestMeta()
+	meta.DataCheckpointTimeTick = 10
+	view := NewSegmentViewFromMeta(meta, nil, runtimeConfig{
+		lifecycle: &failingSegmentLifecycle{err: merr.ErrServiceUnavailable},
+	})
+	task := &commitL1SegmentTask{segmentTaskBase: segmentTaskBase{segment: view}, timetick: 30}
+	require.ErrorIs(t, task.Execute(context.Background()), merr.ErrServiceUnavailable)
+	require.False(t, task.Done())
+	require.False(t, view.IsEmptyFinalCommitDone())
+	require.False(t, view.TryFinalizeTombstone())
+	require.Equal(t, uint64(10), view.AssignmentMeta().GetDataCheckpointTimeTick())
+}
+
+func TestRecoveredEmptyCompletionRequiresDurableEmptyEvidence(t *testing.T) {
+	for name, change := range map[string]func(*streamingpb.SegmentAssignmentMeta){
+		"rows":     func(meta *streamingpb.SegmentAssignmentMeta) { meta.Stat.ModifiedRows = 1 },
+		"bytes":    func(meta *streamingpb.SegmentAssignmentMeta) { meta.Stat.ModifiedBinarySize = 1 },
+		"manifest": func(meta *streamingpb.SegmentAssignmentMeta) { meta.PersistedStorage.ManifestPath = "manifest" },
+		"binlogs": func(meta *streamingpb.SegmentAssignmentMeta) {
+			meta.PersistedStorage.Binlogs = []*streamingpb.L1SegmentBinLogs{{}}
+		},
+		"stats": func(meta *streamingpb.SegmentAssignmentMeta) {
+			meta.PersistedStorage.MergedStatsBinlog = &datapb.FieldBinlog{}
+		},
+		"growing": func(meta *streamingpb.SegmentAssignmentMeta) {
+			meta.State = streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING
+		},
+		"no stat":                      func(meta *streamingpb.SegmentAssignmentMeta) { meta.Stat = nil },
+		"no storage":                   func(meta *streamingpb.SegmentAssignmentMeta) { meta.PersistedStorage = nil },
+		"no flush boundary":            func(meta *streamingpb.SegmentAssignmentMeta) { meta.CheckpointTimeTick = 0 },
+		"data checkpoint behind flush": func(meta *streamingpb.SegmentAssignmentMeta) { meta.DataCheckpointTimeTick = 20 },
+	} {
+		t.Run(name, func(t *testing.T) {
+			meta := emptyFinalCommitTestMeta()
+			change(meta)
+			view := NewSegmentViewFromMeta(meta, nil)
+			require.False(t, view.IsEmptyFinalCommitDone())
+			require.False(t, view.TryFinalizeTombstone())
+		})
+	}
+}
+
+func emptyFinalCommitTestMeta() *streamingpb.SegmentAssignmentMeta {
+	meta := newFinalCommitTestMeta(100)
+	meta.State = streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED
+	meta.CheckpointTimeTick = 30
+	meta.DataCheckpointTimeTick = 30
+	return meta
 }

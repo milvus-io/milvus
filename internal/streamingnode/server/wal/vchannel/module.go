@@ -135,6 +135,9 @@ func newModule(config ModuleConfig, adoptVChannelMeta bool) (*VChannelRecoveryMo
 		}
 		view := segment.NewSegmentViewFromMetaWithConfig(meta, schema, module.segmentViewConfig())
 		module.segments[id] = view
+		if view.IsEmptyFinalCommitDone() && view.TryFinalizeTombstone() {
+			module.markSegmentDirty(id, view)
+		}
 		if view.TombstonePersisted() {
 			if module.cleanupSegments == nil {
 				module.cleanupSegments = make(map[int64]*segment.SegmentView)
@@ -716,6 +719,9 @@ func (m *VChannelRecoveryModule) advanceSegmentDataVersionSummaryLocked(view *se
 func (m *VChannelRecoveryModule) segmentCleanupReadyLocked(view *segment.SegmentView, cleanup moduleapi.CleanupContext) bool {
 	if m.vchannelView == nil || !view.TombstonedCleanupReady(cleanup.MetaPhysicalTimeTick, cleanup.DataPhysicalTimeTick) {
 		return false
+	}
+	if view.IsEmptyFinalCommitDone() {
+		return true
 	}
 	_, sealedVersion, ok := view.TombstonedSealedDataVersion()
 	return ok && m.vchannelView.PersistedSegmentDataVersionSummary().GTE(sealedVersion)

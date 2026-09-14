@@ -7,9 +7,12 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/segment"
@@ -19,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
@@ -323,7 +327,7 @@ func TestVChannelRecoveryModuleConcurrentObserveAndSnapshot(t *testing.T) {
 	assert.Len(t, module.segments, segmentCount)
 }
 
-func TestRecoveredDurableSegmentRetriesMissingFinalCommit(t *testing.T) {
+func TestRecoveredDurableNonEmptySegmentRetriesMissingFinalCommit(t *testing.T) {
 	for name, state := range map[string]streamingpb.SegmentAssignmentState{
 		"flushed":    streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED,
 		"tombstoned": streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED,
@@ -340,6 +344,8 @@ func TestRecoveredDurableSegmentRetriesMissingFinalCommit(t *testing.T) {
 			meta.State = state
 			meta.CheckpointTimeTick = 30
 			meta.DataCheckpointTimeTick = 30
+			meta.Stat.ModifiedRows = 1
+			meta.Stat.ModifiedBinarySize = 16
 			if state == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED {
 				meta.TombstoneTimeTick = 30
 			}
@@ -543,4 +549,73 @@ func newTestRecoveryBarrierMessage(t *testing.T, timetick uint64) message.Immuta
 	return mutableMsg.WithTimeTick(timetick).
 		WithLastConfirmed(walimplstest.NewTestMessageID(int64(timetick))).
 		IntoImmutableMessage(walimplstest.NewTestMessageID(int64(timetick + 1)))
+}
+
+func TestEmptyCommitCleansAssignmentAfterRecovery(t *testing.T) {
+	for name, dataCheckpoint := range map[string]uint64{
+		"first commit":             10,
+		"recovered durable commit": 30,
+	} {
+		t.Run(name, func(t *testing.T) {
+			client := mocks.NewMockMixCoordClient(t)
+			// A fresh empty assignment commits once; recovered durable metadata
+			// needs no RPC even when DataCoord has collected its SegmentInfo.
+			if dataCheckpoint < 30 {
+				client.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
+			}
+			scheduler := &recordingScheduler{}
+			meta := newTestGrowingSegmentMeta(10, 10)
+			meta.State = streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED
+			meta.CheckpointTimeTick = 30
+			meta.DataCheckpointTimeTick = dataCheckpoint
+			module, err := NewModule(ModuleConfig{
+				PChannel: "p1", VChannel: "v1", VChannelMeta: newTestVChannelMeta("v1"),
+				Segments:         map[int64]*streamingpb.SegmentAssignmentMeta{10: meta},
+				Runtime:          moduleapi.Runtime{Scheduler: scheduler},
+				SegmentLifecycle: segment.NewSegmentLifecycleWriter(client, 1),
+			})
+			require.NoError(t, err)
+			module.SwitchIntoMetaAndData()
+			require.Empty(t, scheduler.tasks)
+			if dataCheckpoint < 30 {
+				require.False(t, module.segments[10].EnsureFinalCommit())
+				require.Len(t, scheduler.tasks, 1)
+				require.NoError(t, scheduler.tasks[0].Execute(context.Background()))
+			}
+			assignment := module.segments[10].AssignmentMeta()
+			require.Equal(t, uint64(30), assignment.GetDataCheckpointTimeTick())
+			require.Nil(t, assignment.GetSealedAtDataVersion())
+			require.Equal(t, streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED, assignment.GetState())
+			require.Equal(t, qviews.DataVersion{}, module.vchannelView.SegmentDataVersionSummary())
+			require.Empty(t, module.ConsumeCleanupSnapshots(moduleapi.CleanupContext{MetaPhysicalTimeTick: 31, DataPhysicalTimeTick: 31}))
+
+			snapshots := module.ConsumeDirtySnapshots()
+			require.Len(t, snapshots, 1)
+			require.Equal(t, moduleapi.ModuleNameSegment, snapshots[0].ModuleName())
+			data, err := proto.Marshal(snapshots[0].Payload().(*streamingpb.SegmentAssignmentMeta))
+			require.NoError(t, err)
+			snapshots[0].MarkPersisted()
+			persisted := &streamingpb.SegmentAssignmentMeta{}
+			require.NoError(t, proto.Unmarshal(data, persisted))
+			recoveredScheduler := &recordingScheduler{}
+			recovered, err := NewModule(ModuleConfig{
+				PChannel: "p1", VChannel: "v1", VChannelMeta: newTestVChannelMeta("v1"),
+				Segments:         map[int64]*streamingpb.SegmentAssignmentMeta{10: persisted},
+				Runtime:          moduleapi.Runtime{Scheduler: recoveredScheduler},
+				SegmentLifecycle: segment.NewSegmentLifecycleWriter(client, 1),
+			})
+			require.NoError(t, err)
+			recovered.SwitchIntoMetaAndData()
+			require.Empty(t, recoveredScheduler.tasks)
+			require.Empty(t, recovered.ConsumeCleanupSnapshots(moduleapi.CleanupContext{MetaPhysicalTimeTick: 30, DataPhysicalTimeTick: 31}))
+			require.Empty(t, recovered.ConsumeCleanupSnapshots(moduleapi.CleanupContext{MetaPhysicalTimeTick: 31, DataPhysicalTimeTick: 30}))
+			deletes := recovered.ConsumeCleanupSnapshots(moduleapi.CleanupContext{MetaPhysicalTimeTick: 31, DataPhysicalTimeTick: 31})
+			require.Len(t, deletes, 1)
+			require.Equal(t, moduleapi.SnapshotOpDelete, deletes[0].Op())
+			require.Contains(t, recovered.segments, int64(10))
+			deletes[0].MarkPersisted()
+			require.Empty(t, recovered.segments)
+			require.Equal(t, qviews.DataVersion{}, recovered.vchannelView.PersistedSegmentDataVersionSummary())
+		})
+	}
 }

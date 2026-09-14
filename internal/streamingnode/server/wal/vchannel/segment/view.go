@@ -68,7 +68,20 @@ func NewSegmentView(
 }
 
 func finalCommitDoneFromMeta(meta *streamingpb.SegmentAssignmentMeta) bool {
-	return meta.GetSealedAtDataVersion() != nil
+	return meta.GetSealedAtDataVersion() != nil || isEmptyFinalCommitDone(meta)
+}
+
+func isEmptyFinalCommitDone(meta *streamingpb.SegmentAssignmentMeta) bool {
+	state, stat, storage := meta.GetState(), meta.GetStat(), meta.GetPersistedStorage()
+	if state != streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED &&
+		state != streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED {
+		return false
+	}
+	checkpoint := meta.GetCheckpointTimeTick()
+	return meta.GetSealedAtDataVersion() == nil && checkpoint > 0 && meta.GetDataCheckpointTimeTick() >= checkpoint &&
+		stat != nil && stat.GetModifiedRows() == 0 && stat.GetModifiedBinarySize() == 0 &&
+		storage != nil && storage.GetManifestPath() == "" &&
+		len(storage.GetBinlogs()) == 0 && storage.GetMergedStatsBinlog() == nil
 }
 
 func shouldRetryRecoveredFinalCommit(meta *streamingpb.SegmentAssignmentMeta) bool {
@@ -155,9 +168,9 @@ type SegmentView struct {
 	// pendingFinalCommit keeps repeated flush messages from enqueueing another
 	// final commit while the current one is pending or retrying.
 	pendingFinalCommit segmentTask
-	// finalCommitDone is process-local task state. Recovery only infers it from
-	// the persisted sealed version; a data checkpoint alone does not prove that
-	// the coordinator accepted the final commit.
+	// finalCommitDone is process-local task state. Recovery infers it from the
+	// persisted sealed version or closed, durable empty metadata; a data
+	// checkpoint alone does not prove that a non-empty final commit succeeded.
 	finalCommitDone bool
 	pending         writeOnlyInsertBuffer // in-memory insert buffer not yet written as L1.
 	// pendingFlushChunks keeps chunks already handed to pending/running flush tasks,
@@ -482,6 +495,12 @@ func (info *SegmentView) TombstonedSealedDataVersion() (string, qviews.DataVersi
 		return "", qviews.DataVersion{}, false
 	}
 	return info.meta.GetVchannel(), qviews.FromProtoDataVersion(info.meta.GetSealedAtDataVersion()), true
+}
+
+func (info *SegmentView) IsEmptyFinalCommitDone() bool {
+	info.mu.Lock()
+	defer info.mu.Unlock()
+	return isEmptyFinalCommitDone(info.meta)
 }
 
 func cloneSchema(schema *schemapb.CollectionSchema) *schemapb.CollectionSchema {
@@ -810,7 +829,7 @@ func (s *SegmentView) tombstoneFinalizeReadyLocked() bool {
 	return s.meta.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED &&
 		tombstoneTimeTick > 0 &&
 		s.finalCommitDone &&
-		s.meta.GetSealedAtDataVersion() != nil &&
+		finalCommitDoneFromMeta(s.meta) &&
 		s.meta.GetDataCheckpointTimeTick() >= tombstoneTimeTick
 }
 
