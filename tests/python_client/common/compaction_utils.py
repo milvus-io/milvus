@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import grpc
 from pymilvus.client.call_context import _api_level_md
 from pymilvus.client.prepare import Prepare
+from pymilvus.client.types import Status
 from pymilvus.client.utils import check_status
 from pymilvus.decorators import IGNORE_RETRY_CODES
 from pymilvus.exceptions import ErrorCode, MilvusException
@@ -45,7 +46,11 @@ def get_compaction_state_info(handler, compact_id: int, timeout: float, context=
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise TimeoutError(f"timed out getting state for compaction {compact_id}") from error
-                handler.reconnect(timeout=remaining)
+                try:
+                    handler.reconnect(timeout=remaining)
+                except MilvusException as reconnect_error:
+                    if reconnect_error.code != Status.CONNECT_FAILED:
+                        raise
                 if time.monotonic() >= deadline:
                     raise TimeoutError(f"timed out getting state for compaction {compact_id}") from error
 

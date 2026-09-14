@@ -11,6 +11,7 @@ from common.compaction_utils import (
     wait_for_compaction_completed,
 )
 from pymilvus.client.call_context import CallContext
+from pymilvus.client.types import Status
 from pymilvus.grpc_gen import common_pb2
 from pymilvus.grpc_gen import milvus_pb2 as milvus_types
 
@@ -248,6 +249,49 @@ class TestGetCompactionStateInfo:
         assert handler.call_count == 2
         assert len(handler.reconnect_timeouts) == 1
         assert 0 < handler.reconnect_timeouts[0] <= 1
+
+    def test_retries_reconnect_handshake_failure_within_deadline(self, monkeypatch):
+        clock = FakeClock()
+        response = milvus_types.GetCompactionStateResponse(
+            status=common_pb2.Status(error_code=common_pb2.Success),
+            state=common_pb2.CompactionState.Executing,
+            executingPlanNo=1,
+        )
+
+        class Handler:
+            def __init__(self):
+                self._stub = self
+                self.call_count = 0
+                self.reconnect_count = 0
+                self.reconnect_timeouts = []
+
+            def GetCompactionState(self, request, timeout, metadata):
+                self.call_count += 1
+                if self.call_count <= 2:
+                    raise RetryableRpcError()
+                return response
+
+            def reconnect(self, timeout):
+                self.reconnect_count += 1
+                self.reconnect_timeouts.append(timeout)
+                if self.reconnect_count == 1:
+                    clock.now += 0.02
+                    raise compaction_utils.MilvusException(
+                        code=Status.CONNECT_FAILED,
+                        message="transient handshake failure",
+                    )
+
+        monkeypatch.setattr(compaction_utils.time, "monotonic", clock.monotonic)
+        monkeypatch.setattr(compaction_utils.time, "sleep", clock.sleep)
+
+        handler = Handler()
+        state = get_compaction_state_info(handler, compact_id=42, timeout=1)
+
+        assert state.state == "Executing"
+        assert handler.call_count == 3
+        assert handler.reconnect_count == 2
+        assert handler.reconnect_timeouts[0] == pytest.approx(1)
+        assert handler.reconnect_timeouts[1] == pytest.approx(0.97)
 
     def test_recovery_uses_remaining_deadline_and_cannot_continue_after_it(self, monkeypatch):
         clock = FakeClock()
