@@ -19,7 +19,7 @@
 #include "folly/Executor.h"
 #include "pb/common.pb.h"
 
-namespace milvus::segcore::storagev2translator {
+namespace milvus::storage {
 
 // Configures workers without creating an unused executor. Positive values only.
 // Resizes the existing pool in place; call from a configuration thread because
@@ -37,4 +37,4 @@ GetAsyncLoadThreadPoolSize();
 ResolveAsyncLoadExecutor(folly::Executor::KeepAlive<> executor,
                          milvus::proto::common::LoadPriority load_priority);
 
-}  // namespace milvus::segcore::storagev2translator
+}  // namespace milvus::storage

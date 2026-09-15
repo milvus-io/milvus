@@ -10,6 +10,11 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <arrow/filesystem/localfs.h>
+#include "test_utils/AsyncLoadTestUtils.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/AsyncLoadExecutor.h"
+#include "folly/system/ThreadName.h"
 #include <nlohmann/detail/iterators/iteration_proxy.hpp>
 #include <nlohmann/json.hpp>
 #include <nlohmann/json_fwd.hpp>
@@ -673,6 +678,247 @@ TEST(TextMatch, TranslatorResourceAccountsForValidityBitmap) {
         } else {
             EXPECT_EQ(loaded->CellByteSize().memory_bytes, loaded->ByteSize());
             EXPECT_EQ(loaded->CellByteSize().file_bytes, 0);
+        }
+    }
+}
+
+class ObservedTextMatchIndex : public index::TextMatchIndex {
+ public:
+    using TextMatchIndex::TextMatchIndex;
+    void
+    ComputeByteSize() override {
+        finalizer_thread = folly::getCurrentThreadName().value_or("");
+        if (on_finalize) {
+            on_finalize();
+        }
+        TextMatchIndex::ComputeByteSize();
+    }
+    std::string
+    LocalDirectory() const {
+        return disk_file_manager_->GetLocalIndexObjectPrefix();
+    }
+    std::string finalizer_thread;
+    std::function<void()> on_finalize;
+};
+
+class TextMatchNativeFileSystem : public arrow::fs::SubTreeFileSystem {
+ public:
+    TextMatchNativeFileSystem()
+        : SubTreeFileSystem("",
+                            std::make_shared<arrow::fs::LocalFileSystem>()) {
+    }
+    arrow::Result<std::shared_ptr<arrow::io::RandomAccessFile>>
+    OpenInputFile(const std::string& path) override {
+        EXPECT_TRUE(folly::getCurrentThreadName().value_or("").starts_with(
+            "MILVUS_ASYNC"));
+        return std::static_pointer_cast<arrow::io::RandomAccessFile>(
+            files.at(path));
+    }
+    std::map<std::string, std::shared_ptr<test::ControlledDirectReadFile>>
+        files;
+};
+
+class PackedTextMatchAsyncLoadTest : public ::testing::Test {
+ protected:
+    void
+    SetUp() override {
+        old_enabled_ = storagev2translator::StorageV2AsyncLoadEnabled();
+        storagev2translator::SetStorageV2AsyncLoadEnabled(true);
+        old_workers_ = storage::GetAsyncLoadThreadPoolSize();
+        storage::SetAsyncLoadThreadPoolSize(1);
+        old_slots_ =
+            storage::LoadAdmissionController::GetInstance().CapacitySlots();
+        storage::LoadAdmissionController::GetInstance().SetCapacitySlots(1);
+    }
+    void
+    TearDown() override {
+        auto& admission = storage::LoadAdmissionController::GetInstance();
+        const bool available =
+            admission.TryAcquire({0, 1}, storage::LoadAdmissionPriority::High);
+        EXPECT_TRUE(available);
+        if (available)
+            admission.Release({0, 1});
+        admission.SetCapacitySlots(old_slots_);
+        storage::SetAsyncLoadThreadPoolSize(old_workers_);
+        storagev2translator::SetStorageV2AsyncLoadEnabled(old_enabled_);
+    }
+    Config
+    Upload(const storage::FileManagerContext& ctx) {
+        index::TextMatchIndex builder(ctx,
+                                      index::TANTIVY_INDEX_LATEST_VERSION,
+                                      "milvus_tokenizer",
+                                      "{}",
+                                      "");
+        std::vector<std::string> texts = {"alpha", "", "beta"};
+        const uint8_t valid = 0b00000101;
+        auto data = storage::CreateFieldData(
+            DataType::VARCHAR, DataType::NONE, true, 1, texts.size());
+        data->FillFieldData(texts.data(), &valid, texts.size(), 0);
+        builder.BuildIndexFromFieldData({data}, true, 0);
+        const auto stats = builder.UploadUnified({});
+        index_size_ = stats->GetMemSize();
+        std::vector<std::string> files;
+        for (const auto& file : stats->GetSerializedIndexFileInfo())
+            files.push_back(file.file_name);
+        storage::MemFileManagerImpl manager(ctx);
+        return {{index::INDEX_FILES, files},
+                {STATS_BASE_PATH_KEY, manager.GetRemoteTextLogPrefix()},
+                {index::ENABLE_MMAP, true},
+                {LOAD_PRIORITY, proto::common::LoadPriority::LOW}};
+    }
+    void
+    CheckQuery(index::TextMatchIndex& loaded) {
+        loaded.RegisterAnalyzer("milvus_tokenizer", "{}");
+        ExpectOnlyTextMatchHit(loaded, "alpha", 0, 3);
+        EXPECT_EQ(loaded.IsNull().count(), 1);
+        EXPECT_TRUE(loaded.IsNull()[1]);
+        const std::string excluded = "alpha";
+        const auto result = loaded.NotIn(1, &excluded);
+        EXPECT_EQ(result.count(), 1);
+        EXPECT_TRUE(result[2]);
+    }
+    test::ScopedLoadTransientBudget budget_{64 * 1024 * 1024};
+    int64_t index_size_{};
+    bool old_enabled_{};
+    int old_workers_{};
+    size_t old_slots_{};
+};
+
+TEST_F(PackedTextMatchAsyncLoadTest, HeapAndMmapReloadAcrossRolloutChanges) {
+    {
+        auto ctx = CreateTextMatchTestFileManagerContext(1011);
+        auto config = Upload(ctx);
+        for (const bool mmap : {false, true}) {
+            config[index::ENABLE_MMAP] = mmap;
+            for (const bool planning_enabled : {false, true}) {
+                storagev2translator::SetStorageV2AsyncLoadEnabled(
+                    planning_enabled);
+                storagev1translator::TextMatchIndexTranslator translator(
+                    {mmap, 3, 101, "{}", index_size_, 3, "", ""}, ctx, config);
+                const auto estimate = translator.estimated_byte_size_of_cell(0);
+                for (const bool enabled : {true, false}) {
+                    storagev2translator::SetStorageV2AsyncLoadEnabled(enabled);
+                    auto cells = translator.get_cells(nullptr, {0});
+                    ASSERT_EQ(cells.size(), 1);
+                    CheckQuery(*cells.front().second);
+                    const auto actual = cells.front().second->CellByteSize();
+                    EXPECT_GE(estimate.first.memory_bytes, actual.memory_bytes);
+                    EXPECT_GE(estimate.first.file_bytes, actual.file_bytes);
+                    EXPECT_EQ(estimate,
+                              translator.estimated_byte_size_of_cell(0));
+
+                    auto cached_ctx = ctx;
+                    cached_ctx.use_async_load = planning_enabled;
+                    ObservedTextMatchIndex cached(cached_ctx);
+                    cached.Load(config);
+                    EXPECT_EQ(
+                        cached.finalizer_thread.starts_with("MILVUS_ASYNC"),
+                        planning_enabled);
+                    CheckQuery(cached);
+
+                    ObservedTextMatchIndex direct(ctx);
+                    direct.Load(config);
+                    EXPECT_EQ(
+                        direct.finalizer_thread.starts_with("MILVUS_ASYNC"),
+                        enabled);
+                    CheckQuery(direct);
+                    EXPECT_EQ(std::filesystem::exists(direct.LocalDirectory()),
+                              mmap);
+                }
+            }
+        }
+    }
+}
+
+TEST_F(PackedTextMatchAsyncLoadTest,
+       TranslatorNativeReadSuspendsAndDrainsOnCancel) {
+    {
+        auto ctx = CreateTextMatchTestFileManagerContext(1013);
+        auto config = Upload(ctx);
+        auto fs = std::make_shared<TextMatchNativeFileSystem>();
+        for (const auto& file :
+             config.at(index::INDEX_FILES).get<std::vector<std::string>>()) {
+            const auto path =
+                config.at(STATS_BASE_PATH_KEY).get<std::string>() + "/" + file;
+            std::vector<uint8_t> bytes;
+            auto input = ctx.fs->OpenInputFile(path).ValueOrDie();
+            const auto size = input->GetSize().ValueOrDie();
+            bytes.resize(size);
+            ASSERT_EQ(input->ReadAt(0, size, bytes.data()).ValueOrDie(), size);
+            fs->files.emplace(path,
+                              std::make_shared<test::ControlledDirectReadFile>(
+                                  std::move(bytes)));
+        }
+        ctx.fs = fs;
+        storagev1translator::TextMatchIndexTranslator translator(
+            {true, 3, 101, "{}", index_size_, 3, "", ""}, ctx, config);
+        const auto first_path = fs->files.begin()->first;
+        auto first = fs->files.at(first_path);
+        first->ResetCounters();
+        first->SetAutoComplete(false);
+        folly::CancellationSource cancel;
+        OpContext op;
+        op.cancellation_token = cancel.getToken();
+        auto pending = std::async(
+            std::launch::async, [&] { return translator.get_cells(&op, {0}); });
+        auto drain = folly::makeGuard([&] {
+            cancel.requestCancellation();
+            first->SetAutoComplete(true);
+            for (size_t i = 0; i < first->DirectReadCalls().size(); ++i)
+                first->Complete(i);
+            pending.wait();
+        });
+        ASSERT_TRUE(first->WaitForCallCount(1));
+        auto probe = std::make_shared<std::promise<void>>();
+        auto ready = probe->get_future();
+        storage::ResolveAsyncLoadExecutor({}, proto::common::LoadPriority::LOW)
+            ->add([probe] { probe->set_value(); });
+        EXPECT_EQ(ready.wait_for(std::chrono::seconds(5)),
+                  std::future_status::ready);
+        auto& admission = storage::LoadAdmissionController::GetInstance();
+        const bool available =
+            admission.TryAcquire({0, 1}, storage::LoadAdmissionPriority::High);
+        EXPECT_FALSE(available);
+        if (available)
+            admission.Release({0, 1});
+        cancel.requestCancellation();
+        EXPECT_EQ(pending.wait_for(std::chrono::milliseconds(30)),
+                  std::future_status::timeout);
+        first->SetAutoComplete(true);
+        first->Complete(0);
+        pending.wait();
+        drain.dismiss();
+        try {
+            pending.get();
+            FAIL() << "cancelled translator must not publish a cell";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), FollyCancel);
+        }
+        for (const auto& [path, file] : fs->files) {
+            EXPECT_EQ(file->ReadAtCalls(), 0);
+            EXPECT_EQ(file->AsyncReadCalls(), 0);
+        }
+    }
+}
+
+TEST_F(PackedTextMatchAsyncLoadTest, FinalizerCancellationCleansFiles) {
+    {
+        auto ctx = CreateTextMatchTestFileManagerContext(1015);
+        auto config = Upload(ctx);
+        for (const bool mmap : {false, true}) {
+            config[index::ENABLE_MMAP] = mmap;
+            folly::CancellationSource cancel;
+            OpContext op;
+            op.cancellation_token = cancel.getToken();
+            ObservedTextMatchIndex loaded(ctx);
+            loaded.on_finalize = [&] { cancel.requestCancellation(); };
+            try {
+                loaded.Load(config, &op);
+                FAIL() << "finalization must observe cancellation";
+            } catch (const SegcoreError& error) {
+                EXPECT_EQ(error.get_error_code(), FollyCancel);
+            }
+            EXPECT_FALSE(std::filesystem::exists(loaded.LocalDirectory()));
         }
     }
 }

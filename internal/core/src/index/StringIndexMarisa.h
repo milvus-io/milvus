@@ -28,6 +28,7 @@ namespace milvus::index {
 
 class StringIndexMarisa : public StringIndex {
  public:
+    using ScalarIndex<std::string>::Load;
     explicit StringIndexMarisa(
         const storage::FileManagerContext& file_manager_context =
             storage::FileManagerContext());
@@ -162,6 +163,17 @@ class StringIndexMarisa : public StringIndex {
     LoadEntries(storage::IndexEntryReader& reader,
                 const Config& config) override;
 
+ protected:
+    storage::IndexLoadPlan
+    PlanLoad(const storage::IndexEntryCatalog& catalog,
+             const Config& config) override;
+
+    folly::coro::Task<void>
+    MaterializeAsync(storage::IndexLoadArtifact& artifact,
+                     const Config& config) override;
+
+ protected:
+ public:
  private:
     Config config_;
     marisa::Trie trie_;

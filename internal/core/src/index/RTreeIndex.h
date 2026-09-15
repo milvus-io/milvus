@@ -46,6 +46,7 @@ using RTreeIndexWrapper = milvus::index::RTreeIndexWrapper;
 template <typename T>
 class RTreeIndex : public ScalarIndex<T> {
  public:
+    using ScalarIndex<T>::Load;
     using MemFileManager = storage::MemFileManagerImpl;
     using MemFileManagerPtr = std::shared_ptr<MemFileManager>;
     using DiskFileManager = storage::DiskFileManagerImpl;
@@ -244,6 +245,15 @@ class RTreeIndex : public ScalarIndex<T> {
     LoadEntries(storage::IndexEntryReader& reader,
                 const Config& config) override;
 
+    storage::IndexLoadPlan
+    PlanLoad(const storage::IndexEntryCatalog& catalog,
+             const Config& config) override;
+
+    folly::coro::Task<void>
+    MaterializeAsync(storage::IndexLoadArtifact& artifact,
+                     const Config& config) override;
+
+ private:
  protected:
     void
     finish();

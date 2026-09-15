@@ -112,6 +112,9 @@ arrow	internal/core/src/segcore/storagev2translator/ManifestGroupTranslator.h
 arrow	internal/core/src/segcore/TextColumnCache.cpp
 arrow	internal/core/src/segcore/TextColumnCache.h
 arrow	internal/core/src/storage/ArrowFileSystemChunkManager.cpp
+arrow	internal/core/src/storage/AsyncFileReader.cpp
+arrow	internal/core/src/storage/AsyncFileReader.h
+arrow	internal/core/src/storage/AsyncIndexEntryReader.h
 arrow	internal/core/src/storage/loon_ffi/ffi_reader_c.cpp
 arrow	internal/core/src/storage/loon_ffi/util.cpp
 arrow	internal/core/src/storage/PayloadReader.cpp
@@ -160,6 +163,7 @@ milvus_storage	internal/core/src/segcore/TextColumnCache.cpp
 milvus_storage	internal/core/src/segcore/TextColumnCache.h
 milvus_storage	internal/core/src/storage/ArrowFileSystemChunkManager.cpp
 milvus_storage	internal/core/src/storage/ArrowFileSystemChunkManager.h
+milvus_storage	internal/core/src/storage/AsyncFileReader.cpp
 milvus_storage	internal/core/src/storage/FileManager.h
 milvus_storage	internal/core/src/storage/IndexEntryEncryptedLocalWriter.cpp
 milvus_storage	internal/core/src/storage/IndexEntryEncryptedLocalWriter.h
