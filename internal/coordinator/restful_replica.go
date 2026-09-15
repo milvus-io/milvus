@@ -17,7 +17,6 @@
 package coordinator
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"sort"
@@ -26,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -56,363 +56,208 @@ type LoadConfigComplianceResponse struct {
 	ResourceGroups *[]ResourceGroupComplianceState `json:"resourceGroups,omitempty"`
 }
 
-// complianceViolation records a single compliance violation: the reason and the resource groups it is
-// attributed to. An empty rgs means the violation cannot be attributed to any specific resource group.
-type complianceViolation struct {
-	rgs    []string
-	reason string
-}
-
-// collectPerResourceGroupErrors aggregates violations into per-resource-group reasons (first reason wins per
-// group), the set of resource groups to report (seeded from initialRGs and widened by every group a violation
-// is attributed to), and a global reason for violations that cannot be attributed to any group.
-func collectPerResourceGroupErrors(violations []complianceViolation, initialRGs map[string]struct{}) (map[string]string, map[string]struct{}, string) {
-	resourceGroupErrors := make(map[string]string)
-	resourceGroups := make(map[string]struct{}, len(initialRGs))
-	for rg := range initialRGs {
-		resourceGroups[rg] = struct{}{}
-	}
-	var globalReason string
-	for _, v := range violations {
-		if len(v.rgs) == 0 {
-			if globalReason == "" {
-				globalReason = v.reason
-			}
-			continue
-		}
-		for _, rg := range v.rgs {
-			if rg == "" {
-				if globalReason == "" {
-					globalReason = v.reason
-				}
-				continue
-			}
-			resourceGroups[rg] = struct{}{}
-			if _, ok := resourceGroupErrors[rg]; !ok {
-				resourceGroupErrors[rg] = v.reason
-			}
-		}
-	}
-	return resourceGroupErrors, resourceGroups, globalReason
-}
-
 // HandleReplicaLoadConfigCompliance serves GET /management/replica/loadconfig/compliance.
+// It reports convergence of queryCoord.clusterLevelLoadReplicaNumber,
+// queryCoord.clusterLevelLoadResourceGroups, their force-override option, and
+// streaming.primaryResourceGroup, using the coordinator's observed state.
 //
-// A resource group (RG) is Ready only when all of its obligations are satisfied:
-//   - Each relevant collection has the expected number of replicas in that RG,
-//     according to the collection's effective load target.
-//   - Every replica is query-visible and every shard in it is serviceable.
-//   - Replicas and segment/channel resources that should be released are gone,
-//     including resources on draining RO/RO SQ nodes and resources of collections
-//     whose load registration has already been removed.
-//   - Its WAL migration obligations, both incoming and outgoing, are complete.
+// An RG is Ready when applicable cluster configuration has the expected replica
+// count there, every existing replica is query-visible and serviceable on all
+// shards, the existing release check finds no resources left outside current
+// replicas, and its incoming/outgoing WAL placement obligations are complete.
+// A single configured RG receives all requested replicas; repeated RG entries
+// specify replica counts. User-specified collections are exempt from cluster
+// count/distribution checks unless force override is enabled, but their existing
+// replicas still undergo serviceability, visibility and release checks.
 //
-// Effective targets are independent of observed replica placement. A valid
-// cluster-level load configuration overrides a collection's persisted target only
-// when the collection is cluster-managed or forceOverride is enabled. Otherwise,
-// the persisted collection target applies; user-specified collections are still
-// checked. A single configured RG receives all requested replicas, while repeated
-// RG names in a multi-entry configuration specify per-RG replica counts.
+// Global Ready requires all involved RGs to be Ready and no global violation.
+// A collection count mismatch must not mark healthy RGs as failed or skip later
+// checks; WAL violations must not skip collection checks. Unknown attribution
+// blocks global Ready. Malformed, partially configured cluster targets are
+// NotReady; clearing both cluster settings disables their count/distribution
+// requirements. Only RGs involved in applicable targets, replicas, release
+// violations or WAL placement are reported.
 //
-// When streaming.primaryResourceGroup is configured, every RW pchannel must be
-// assigned in that RG. Uninitialized, assigning, unavailable, or misplaced WAL
-// channels block the target RG and any identifiable current/historical source RG
-// with unfinished migration obligations, even if no collections are loaded.
-// Without a primary RG, this endpoint imposes no primary-RG placement requirement;
-// RO pchannels are outside that placement check.
+// With a primary RG configured, all RW pchannels must be ASSIGNED there, even
+// with no loaded collections. Current and unfinished historical source RGs also
+// have migration obligations. RO pchannels are outside this placement check.
 //
-// Global Ready requires every involved RG to be Ready, all collection/global
-// constraints (including total replica counts) to hold, and no unknown effective
-// target or unattributable violation. Node quota and node ownership convergence
-// are not additional readiness conditions; residual resources on draining nodes
-// still block readiness, whereas empty RO node metadata alone does not.
+// This is a configuration-convergence report over loaded collections, not a
+// general audit of node quotas, dynamic node/replica RG transfers, collection
+// release lifecycles or historical per-collection load intents. Those mechanisms
+// retain their existing semantics; this endpoint does not modify them.
 //
-// Involved RGs come from effective targets, actual replicas, residual resources,
-// and WAL obligations. An entirely drained RG with no remaining obligation may
-// disappear from the report. WAL violations and collection count mismatches must
-// not skip checks needed to establish other RGs' readiness.
-//
-// Both summary (the default) and per_resource_group use the same global result;
-// output only controls presentation. Per-RG output includes a sorted array (even
-// when empty), retaining the first reason per RG. Global reasons take precedence
-// over RG reasons; WAL reasons take precedence within an RG. Metadata read errors
-// return HTTP 500 rather than a readiness report. Results reflect asynchronously
-// observed state, not an atomic snapshot across components or a future guarantee.
+// Both output modes execute the same checks and return the same global state
+// and reason. per_resource_group adds a sorted array (including when empty).
+// Each RG retains its first violation; global reasons take precedence. Metadata
+// read failures return HTTP 500. Observations and configuration refresh are
+// asynchronous; the report is not a cross-component atomic snapshot.
 func (s *mixCoordImpl) HandleReplicaLoadConfigCompliance(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodGet {
 		writeJSONError(w, "Method not allowed, use GET", http.StatusMethodNotAllowed)
 		return
 	}
-
-	ctx := req.Context()
-	logger := mlog.With(mlog.String("handler", "ReplicaLoadConfigCompliance"))
-
-	// Validate the output selector up front so a typo is rejected instead of silently degrading
-	// to the summary behavior (which could be misread as "no resource groups to worry about").
 	output := req.URL.Query().Get("output")
-	var perResourceGroup bool
-	switch output {
-	case "", "summary":
-		perResourceGroup = false
-	case "per_resource_group":
-		perResourceGroup = true
-	default:
+	if output != "" && output != "summary" && output != "per_resource_group" {
 		writeJSONError(w, fmt.Sprintf("invalid output %q, expected one of: summary, per_resource_group", output), http.StatusBadRequest)
 		return
 	}
-
-	// Get cluster-level configuration
-	clusterReplicaNum := Params.QueryCoordCfg.ClusterLevelLoadReplicaNumber.GetAsInt()
-	clusterResourceGroups := Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.GetAsStrings()
-	forceOverrideUserReplicaMode := Params.QueryCoordCfg.ClusterLevelLoadForceOverrideUserReplicaMode.GetAsBool()
-
-	logger.Info(ctx, "checking replica load config compliance",
-		mlog.Int("clusterReplicaNum", clusterReplicaNum),
-		mlog.Strings("clusterResourceGroups", clusterResourceGroups),
-		mlog.Bool("forceOverrideUserReplicaMode", forceOverrideUserReplicaMode))
-
-	// Per-resource-group mode state: the set of resource groups to report. It is pre-seeded with the
-	// cluster-level expected groups so a configured group that currently hosts no replica still appears
-	// (its missing replica is itself a violation); it is widened as checks run by every group that
-	// actually hosts a replica or is attributed a violation. Resource groups that are neither configured
-	// nor involved are not reported at all — reporting them as Ready would be misleading.
-	resourceGroups := make(map[string]struct{})
-	if perResourceGroup {
-		for _, rg := range clusterResourceGroups {
-			resourceGroups[rg] = struct{}{}
+	ctx := req.Context()
+	reasons := make(map[string]string)
+	record := func(rg, reason string) {
+		if reasons[rg] == "" {
+			reasons[rg] = reason
 		}
 	}
-
-	// All checks funnel their violations into one list; the response is written once at the end.
-	// In summary mode the fast-fail behavior is preserved by reporting only the first violation;
-	// in per-resource-group mode every violation is aggregated per resource group instead.
-	var violations []complianceViolation
-	record := func(rgs []string, reason string) {
-		violations = append(violations, complianceViolation{rgs: rgs, reason: reason})
-	}
-
-	// Cluster-level check: WAL is fully migrated onto the configured primary resource group.
-	// Short-circuit before loading collections — a WAL-layout issue affects every collection and is
-	// independent of per-collection replica/RG config. In per-RG mode the violation is attributed to
-	// the primary resource group only (it is the group that owns the WAL placement obligation); the
-	// check itself only fails when the primary RG is configured, so the attribution is always valid.
-	if b, err := balance.GetWithContext(ctx); err != nil {
-		writeJSONError(w, fmt.Sprintf("failed to get streaming balancer: %s", err.Error()), http.StatusInternalServerError)
-		return
-	} else if err := b.ConfirmPrimaryResourceGroupReady(ctx); err != nil {
-		reason := fmt.Sprintf("WAL placement: %s", err.Error())
-		logger.Info(ctx, "WAL not fully placed on primary resource group", mlog.String("reason", reason))
-		if perResourceGroup {
-			record([]string{Params.StreamingCfg.PrimaryResourceGroup.GetValue()}, reason)
+	// Use the full view: Relations omits uninitialized/assigning/unavailable WALs.
+	primaryRG := Params.StreamingCfg.PrimaryResourceGroup.GetValue()
+	if primaryRG != "" {
+		b, err := balance.GetWithContext(ctx)
+		if err != nil {
+			writeJSONError(w, fmt.Sprintf("failed to get streaming balancer: %s", err), http.StatusInternalServerError)
+			return
 		}
-		record(nil, reason)
-		s.writeComplianceResult(ctx, logger, w, perResourceGroup, resourceGroups, violations, 0)
-		return
+		assignment, err := b.GetLatestChannelAssignment()
+		if err != nil {
+			writeJSONError(w, fmt.Sprintf("failed to get WAL assignment: %s", err), http.StatusInternalServerError)
+			return
+		}
+		if assignment.PChannelView == nil {
+			writeJSONError(w, "WAL channel view is not initialized", http.StatusInternalServerError)
+			return
+		}
+		nodes, err := b.GetAllStreamingNodes(ctx)
+		if err != nil {
+			writeJSONError(w, fmt.Sprintf("failed to get streaming nodes: %s", err), http.StatusInternalServerError)
+			return
+		}
+		record(primaryRG, "")
+		ids := make([]types.ChannelID, 0, len(assignment.PChannelView.Channels))
+		for id := range assignment.PChannelView.Channels {
+			ids = append(ids, id)
+		}
+		sort.Slice(ids, func(i, j int) bool { return ids[i].String() < ids[j].String() })
+		for _, id := range ids {
+			ch := assignment.PChannelView.Channels[id]
+			if ch.ChannelInfo().AccessMode != types.AccessModeRW {
+				continue
+			}
+			owner, known := nodes[ch.CurrentServerID()]
+			if ch.IsAssigned() && known && owner.ResourceGroup == primaryRG {
+				continue
+			}
+			reason := fmt.Sprintf("WAL placement: pchannel %s is %s, expected assigned in primary rg=%s", ch.Name(), ch.State(), primaryRG)
+			record(primaryRG, reason)
+			if known {
+				record(owner.ResourceGroup, reason)
+			} else if ch.CurrentServerID() != 0 {
+				record("", reason)
+			}
+			for _, previous := range ch.AssignHistories() {
+				if previous.Channel.AccessMode != types.AccessModeRW {
+					continue
+				}
+				if owner, ok := nodes[previous.Node.ServerID]; ok {
+					record(owner.ResourceGroup, reason)
+				} else {
+					record("", reason)
+				}
+			}
+		}
 	}
-
-	// Use ShowLoadCollections to get all loaded collections
-	showResp, err := s.ShowLoadCollections(ctx, &querypb.ShowCollectionsRequest{
-		Base: commonpbutil.NewMsgBase(),
-	})
+	count := Params.QueryCoordCfg.ClusterLevelLoadReplicaNumber.GetAsInt()
+	configuredRGs := Params.QueryCoordCfg.ClusterLevelLoadResourceGroups.GetAsStrings()
+	force := Params.QueryCoordCfg.ClusterLevelLoadForceOverrideUserReplicaMode.GetAsBool()
+	validConfig := count > 0 && (len(configuredRGs) == 1 || len(configuredRGs) == count)
+	if (count != 0 || len(configuredRGs) != 0) && !validConfig {
+		record("", "invalid cluster load configuration: positive replica count and one RG or one RG entry per replica are required")
+	}
+	expectedRGs := configuredRGs
+	if validConfig && len(configuredRGs) == 1 {
+		expectedRGs = make([]string, count)
+		for i := range expectedRGs {
+			expectedRGs[i] = configuredRGs[0]
+		}
+	}
+	showResp, err := s.ShowLoadCollections(ctx, &querypb.ShowCollectionsRequest{Base: commonpbutil.NewMsgBase()})
 	if err := merr.CheckRPCCall(showResp, err); err != nil {
-		logger.Warn(ctx, "failed to show collections", mlog.Err(err))
-		writeJSONError(w, fmt.Sprintf("failed to get collections: %s", err.Error()), http.StatusInternalServerError)
+		writeJSONError(w, fmt.Sprintf("failed to get collections: %s", err), http.StatusInternalServerError)
 		return
 	}
-	// Sort collection IDs so the reported reasons are deterministic across polls (which collection's
-	// reason sticks to a resource group must not depend on ShowLoadCollections iteration order).
-	collectionIDs := showResp.GetCollectionIDs()
+	collectionIDs := append([]int64(nil), showResp.GetCollectionIDs()...)
 	sort.Slice(collectionIDs, func(i, j int) bool { return collectionIDs[i] < collectionIDs[j] })
-
-	// Check each collection. Summary mode preserves the fail-fast behavior at collection granularity:
-	// once the first violating collection is found, later collections are not checked (per-collection
-	// checks within that collection still run to completion so the reason is accurate).
-	for _, collectionID := range collectionIDs {
-		skipClusterLevelConfigChecks := !forceOverrideUserReplicaMode && s.queryCoordServer.IsCollectionUserSpecifiedReplicaMode(ctx, collectionID)
-
-		// Get internal replicas from QueryCoord meta which contains StreamingResourceGroup field.
-		// Sort by replica ID so per-replica reasons (serviceability, visibility) are deterministic.
-		internalReplicas := s.queryCoordServer.GetInternalReplicasByCollection(ctx, collectionID)
-		sort.Slice(internalReplicas, func(i, j int) bool { return internalReplicas[i].GetID() < internalReplicas[j].GetID() })
-
-		actualRGs := make([]string, 0, len(internalReplicas))
-		rgByReplica := make(map[int64]string, len(internalReplicas))
-		for _, replica := range internalReplicas {
-			actualRGs = append(actualRGs, replica.GetResourceGroup())
-			rgByReplica[replica.GetID()] = replica.GetResourceGroup()
-			if perResourceGroup && replica.GetResourceGroup() != "" {
-				resourceGroups[replica.GetResourceGroup()] = struct{}{}
+	for _, id := range collectionIDs {
+		replicas := s.queryCoordServer.GetInternalReplicasByCollection(ctx, id)
+		actualRGs := make([]string, 0, len(replicas))
+		rgByReplica := make(map[int64]string, len(replicas))
+		for _, replica := range replicas {
+			rg := replica.GetResourceGroup()
+			record(rg, "")
+			actualRGs = append(actualRGs, rg)
+			rgByReplica[replica.GetID()] = rg
+		}
+		if validConfig && (force || !s.queryCoordServer.IsCollectionUserSpecifiedReplicaMode(ctx, id)) {
+			for _, rg := range configuredRGs {
+				record(rg, "")
+			}
+			if len(replicas) != count {
+				record("", fmt.Sprintf("collection %d: replica count mismatch (expected %d, actual %d)", id, count, len(replicas)))
+			}
+			if reason, groups := s.validateRGDistribution(actualRGs, expectedRGs, "resource group", id); reason != "" {
+				for _, rg := range groups {
+					record(rg, reason)
+				}
 			}
 		}
-		// Resource groups this collection's violations are attributed to: the groups actually hosting its
-		// replicas, falling back to the cluster-level expected groups when the collection has no replicas yet.
-		collectionRGs := actualRGs
-		if len(collectionRGs) == 0 {
-			collectionRGs = clusterResourceGroups
+		if len(replicas) == 0 {
+			record("", fmt.Sprintf("collection %d: no replica found", id))
 		}
-
-		// Check replica count matches exactly — the replica meta must already reflect
-		// the configured count before we inspect serviceability/leaks. Downstream serviceability
-		// and leak checks are only meaningful once the replica meta reflects the configured count,
-		// so a count mismatch skips the rest of this collection's checks.
-		if !skipClusterLevelConfigChecks && clusterReplicaNum > 0 && len(internalReplicas) != clusterReplicaNum {
-			reason := fmt.Sprintf("collection %d: replica count mismatch (expected %d, actual %d)",
-				collectionID, clusterReplicaNum, len(internalReplicas))
-			logger.Info(ctx, "collection replica count does not match cluster requirement", mlog.String("reason", reason))
-			record(collectionRGs, reason)
-			continue
+		errors := s.queryCoordServer.CheckReplicasServiceable(ctx, id)
+		replicaIDs := make([]int64, 0, len(errors))
+		for replicaID := range errors {
+			replicaIDs = append(replicaIDs, replicaID)
 		}
-
-		if !skipClusterLevelConfigChecks && len(clusterResourceGroups) > 0 {
-			// Check resource groups - collect actual RGs from replicas
-			if reason, offendingRGs := s.validateRGDistribution(actualRGs, clusterResourceGroups,
-				"resource group", collectionID); reason != "" {
-				logger.Info(ctx, "collection resource group distribution does not match cluster requirement", mlog.String("reason", reason))
-				record(offendingRGs, reason)
-			}
+		sort.Slice(replicaIDs, func(i, j int) bool { return replicaIDs[i] < replicaIDs[j] })
+		for _, replicaID := range replicaIDs {
+			record(rgByReplica[replicaID], fmt.Sprintf("collection %d: %s", id, errors[replicaID]))
 		}
-
-		// Now that replica count and RG distribution match, verify every replica actually
-		// has a serviceable shard leader for every channel. This live dist check avoids
-		// the stale CollectionObserver-persisted LoadPercentage that can falsely report
-		// 100% during scale-up/scale-down transitions.
-		if perResourceGroup {
-			// Attribute each unserviceable replica to its own resource group instead of the whole
-			// collection: a healthy RG must not be blocked by another RG's problem. Iterate in
-			// replica-ID order so the first-reason-per-RG aggregation is deterministic.
-			if len(internalReplicas) == 0 {
-				reason := fmt.Sprintf("collection %d: no replica found", collectionID)
-				logger.Info(ctx, "collection has no replica", mlog.String("reason", reason))
-				record(nil, reason)
-			}
-			replicaErrs := s.queryCoordServer.CheckReplicasServiceable(ctx, collectionID)
-			replicaIDs := make([]int64, 0, len(replicaErrs))
-			for replicaID := range replicaErrs {
-				replicaIDs = append(replicaIDs, replicaID)
-			}
-			sort.Slice(replicaIDs, func(i, j int) bool { return replicaIDs[i] < replicaIDs[j] })
-			for _, replicaID := range replicaIDs {
-				reason := fmt.Sprintf("collection %d: %s", collectionID, replicaErrs[replicaID].Error())
-				logger.Info(ctx, "collection has unserviceable replica", mlog.String("reason", reason))
-				record([]string{rgByReplica[replicaID]}, reason)
-			}
-		} else if err := s.queryCoordServer.CheckAllReplicasServiceable(ctx, collectionID); err != nil {
-			reason := fmt.Sprintf("collection %d: %s", collectionID, err.Error())
-			logger.Info(ctx, "collection not serviceable", mlog.String("reason", reason))
-			record(collectionRGs, reason)
-		}
-
-		for _, replica := range internalReplicas {
+		for _, replica := range replicas {
 			if !replica.IsQueryVisible() {
-				reason := fmt.Sprintf("collection %d: replica %d (rg=%s) is not query visible",
-					collectionID, replica.GetID(), replica.GetResourceGroup())
-				logger.Info(ctx, "collection has query-invisible replica", mlog.String("reason", reason))
-				record([]string{replica.GetResourceGroup()}, reason)
+				record(replica.GetResourceGroup(), fmt.Sprintf("collection %d: replica %d (rg=%s) is not query visible", id, replica.GetID(), replica.GetResourceGroup()))
 			}
 		}
-
-		// Check that physical resources have been released from querynodes no longer
-		// part of any replica. During scale-down a decommissioned replica's querynode may
-		// still hold segments/channels while release is in flight; compliance must wait for
-		// that to finish before signaling Ready, otherwise callers may terminate nodes while
-		// they are still serving or holding state.
-		if perResourceGroup {
-			// Attribute leaked resources to the resource group of the querynode holding them.
-			for rg, leaked := range s.queryCoordServer.GetLeakedResourcesByCollectionPerRG(ctx, collectionID) {
-				reason := fmt.Sprintf("collection %d: resources not fully released (leaked=%d)", collectionID, leaked)
-				logger.Info(ctx, "collection has leaked resources on non-replica nodes", mlog.String("reason", reason))
-				record([]string{rg}, reason)
-			}
-		} else {
-			leakedSegments, leakedChannels := s.queryCoordServer.GetLeakedResourcesByCollection(ctx, collectionID)
-			if leakedSegments > 0 || leakedChannels > 0 {
-				reason := fmt.Sprintf("collection %d: resources not fully released (leaked segments=%d, channels=%d)",
-					collectionID, leakedSegments, leakedChannels)
-				logger.Info(ctx, "collection has leaked resources on non-replica nodes", mlog.String("reason", reason))
-				record(collectionRGs, reason)
+		for rg, leaked := range s.queryCoordServer.GetLeakedResourcesByCollectionPerRG(ctx, id) {
+			if leaked > 0 {
+				record(rg, fmt.Sprintf("collection %d: resources not fully released (leaked=%d)", id, leaked))
 			}
 		}
-
-		// Summary mode fails fast at collection granularity: stop checking once the first violating
-		// collection is found. Per-resource-group mode must check every collection to aggregate.
-		if !perResourceGroup && len(violations) > 0 {
-			break
-		}
 	}
-
-	s.writeComplianceResult(ctx, logger, w, perResourceGroup, resourceGroups, violations, len(collectionIDs))
-}
-
-// writeComplianceResult writes the compliance response once all checks have run. In summary mode it
-// preserves the fast-fail behavior: only the first violation is reported. In per-resource-group mode
-// violations are aggregated per resource group. totalCollections is only used for the summary-mode
-// Ready log.
-func (s *mixCoordImpl) writeComplianceResult(ctx context.Context, logger *mlog.Logger, w http.ResponseWriter, perResourceGroup bool, resourceGroups map[string]struct{}, violations []complianceViolation, totalCollections int) {
-	if perResourceGroup {
-		resourceGroupErrors, rgs, globalReason := collectPerResourceGroupErrors(violations, resourceGroups)
-		s.writePerResourceGroupComplianceResponse(w, rgs, resourceGroupErrors, globalReason)
-		return
+	names := make([]string, 0, len(reasons))
+	for rg := range reasons {
+		names = append(names, rg)
 	}
-	if len(violations) > 0 {
-		s.writeComplianceResponse(w, LoadConfigComplianceStateNotReady, violations[0].reason)
-		return
-	}
-	logger.Info(ctx, "all collections meet replica load config compliance requirements", mlog.Int("totalCollections", totalCollections))
-	s.writeComplianceResponse(w, LoadConfigComplianceStateReady, "")
-}
-
-// writePerResourceGroupComplianceResponse writes the per-resource-group compliance response: one entry per
-// involved resource group with its Ready/NotReady state and, when not ready, the first reason collected for
-// it. The overall state is NotReady if any resource group is not ready or a global reason exists (a violation
-// that cannot be attributed to any specific resource group, such as a collection with no replica at all).
-// The top-level reason is the global one when present, otherwise the reason of the alphabetically first
-// not-ready resource group, keeping the response compact and deterministic.
-func (s *mixCoordImpl) writePerResourceGroupComplianceResponse(w http.ResponseWriter, resourceGroups map[string]struct{}, resourceGroupErrors map[string]string, globalReason string) {
-	rgs := make([]string, 0, len(resourceGroups))
-	for rg := range resourceGroups {
-		rgs = append(rgs, rg)
-	}
-	sort.Strings(rgs)
-
-	state := LoadConfigComplianceStateReady
-	if globalReason != "" {
-		state = LoadConfigComplianceStateNotReady
-	}
-	firstReason := globalReason
-	rgStates := make([]ResourceGroupComplianceState, 0, len(rgs))
-	for _, rg := range rgs {
-		rgState := ResourceGroupComplianceState{ResourceGroup: rg, State: LoadConfigComplianceStateReady}
-		if reason, ok := resourceGroupErrors[rg]; ok {
-			rgState.State = LoadConfigComplianceStateNotReady
-			rgState.Reason = reason
+	sort.Strings(names)
+	response := LoadConfigComplianceResponse{State: LoadConfigComplianceStateReady}
+	states := make([]ResourceGroupComplianceState, 0, len(reasons))
+	for _, rg := range names {
+		reason := reasons[rg]
+		state := LoadConfigComplianceStateReady
+		if reason != "" {
 			state = LoadConfigComplianceStateNotReady
-			if firstReason == "" {
-				firstReason = reason
+			response.State = state
+			if response.Reason == "" {
+				response.Reason = reason
 			}
+			mlog.Info(ctx, "load config compliance violation", mlog.String("resourceGroup", rg), mlog.String("reason", reason))
 		}
-		rgStates = append(rgStates, rgState)
+		if rg != "" {
+			states = append(states, ResourceGroupComplianceState{ResourceGroup: rg, State: state, Reason: reason})
+		}
 	}
-
-	resp := LoadConfigComplianceResponse{
-		State:          state,
-		ResourceGroups: &rgStates,
+	if output == "per_resource_group" {
+		response.ResourceGroups = &states
 	}
-	if firstReason != "" {
-		resp.Reason = firstReason
-	}
-	writeJSONResponse(w, http.StatusOK, resp)
-}
-
-// writeComplianceResponse writes the compliance check response
-func (s *mixCoordImpl) writeComplianceResponse(w http.ResponseWriter, state LoadConfigComplianceState, reason string) {
-	resp := LoadConfigComplianceResponse{
-		State: state,
-	}
-	if reason != "" {
-		resp.Reason = reason
-	}
-
-	writeJSONResponse(w, http.StatusOK, resp)
+	writeJSONResponse(w, http.StatusOK, response)
 }
 
 // validateRGDistribution validates that replicas are distributed according to cluster config.
