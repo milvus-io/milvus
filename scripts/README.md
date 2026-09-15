@@ -86,11 +86,24 @@ You also can run go unittest only:
 $ make test-go
 ```
 
-Run cpp unittest only:
+Run cpp unittest (also runs the Rust BM25 tests):
 
 ```shell
 $ make test-cpp
 ```
+
+Run the Rust BM25 tests independently:
+
+```shell
+$ make test-rust
+```
+
+The C++ test runners (`run_cpp_unittest.sh`, `run_cpp_ut.sh`, and
+`run_cpp_codecov.sh`) also run this suite and propagate failures. It uses Rust
+1.89, compiles all Tantivy library tests, and executes `bm25_c::tests::` only;
+other Rust suites require external dictionaries or writable system directories.
+Release build artifacts are reused from `cmake_build/thirdparty/tantivy`, or
+`CARGO_TARGET_DIR` if set. This does not collect Rust coverage.
 
 ## Run code coverage
 

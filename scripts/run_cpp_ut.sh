@@ -44,6 +44,9 @@ done
 ROOT_DIR="$(cd -P "$(dirname "$SOURCE")/.." && pwd)"
 source ${ROOT_DIR}/scripts/setenv.sh
 
+# setenv.sh disables errexit; explicitly propagate Rust compilation/test failures.
+bash "${ROOT_DIR}/scripts/run_rust_unittest.sh" || exit $?
+
 MILVUS_CORE_DIR="${ROOT_DIR}/internal/core"
 MILVUS_CORE_UNITTEST_DIR="${MILVUS_CORE_DIR}/output/unittest"
 

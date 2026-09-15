@@ -18,6 +18,7 @@ package canalyzer
 
 import (
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -86,6 +87,34 @@ func TestBatchTokenizeBM25MatchesLegacy(t *testing.T) {
 			require.ErrorIs(t, err, merr.ErrParameterInvalid)
 		})
 	}
+}
+
+func TestBatchTokenizeBM25MixedCardinalities(t *testing.T) {
+	const distinctTokens = 8192
+	tokens := make([]string, distinctTokens)
+	for i := range tokens {
+		tokens[i] = "word" + strconv.Itoa(i)
+	}
+	long := strings.Join(tokens, " ")
+	// Exercise both retaining a large table and releasing it after cardinality
+	// drops, then growing it again. The Rust test asserts the capacity policy;
+	// this test checks the sparse rows across the C++/Go boundary.
+	texts := []string{long, long}
+	for i := 0; i < 64; i++ {
+		texts = append(texts, "short short tail"+strconv.Itoa(i))
+	}
+	texts = append(texts, long, "last last")
+
+	a, err := NewAnalyzer(`{"tokenizer":"whitespace"}`, "")
+	require.NoError(t, err)
+	defer a.Destroy()
+	want := legacyBM25Rows(t, a, texts)
+	// Verify the input really produces a high-cardinality TF map, rather than
+	// a long document made up of repeated tokens or collapsed hash dimensions.
+	require.Equal(t, distinctTokens, typeutil.SparseFloatRowElementCount(want[0]))
+	got, err := a.(*CAnalyzer).BatchTokenizeBM25(texts)
+	require.NoError(t, err)
+	require.Equal(t, want, got)
 }
 
 func TestBatchTokenizeBM25NativeFailure(t *testing.T) {
