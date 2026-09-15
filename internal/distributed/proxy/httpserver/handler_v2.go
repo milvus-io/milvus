@@ -485,24 +485,29 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 		if !ok {
 			return
 		}
-		metrics.ProxyFunctionCall.WithLabelValues(
-			strconv.FormatInt(paramtable.GetNodeID(), 10),
-			methodTag,
-			metrics.TotalLabel,
-			metrics.CauseNA,
-			dbName,
-			collectionName,
-		).Inc()
+		observeProxyFunctionCall := metrics.ShouldObserveProxyFunctionCall(methodTag)
+		if observeProxyFunctionCall {
+			metrics.ProxyFunctionCall.WithLabelValues(
+				strconv.FormatInt(paramtable.GetNodeID(), 10),
+				methodTag,
+				metrics.TotalLabel,
+				metrics.CauseNA,
+				dbName,
+				collectionName,
+			).Inc()
+		}
 		label, cause := requestutil.ParseMetricLabel(resp, err)
 		// set metrics for state code
-		metrics.ProxyFunctionCall.WithLabelValues(
-			strconv.FormatInt(paramtable.GetNodeID(), 10),
-			methodTag,
-			label,
-			cause,
-			dbName,
-			collectionName,
-		).Inc()
+		if observeProxyFunctionCall {
+			metrics.ProxyFunctionCall.WithLabelValues(
+				strconv.FormatInt(paramtable.GetNodeID(), 10),
+				methodTag,
+				label,
+				cause,
+				dbName,
+				collectionName,
+			).Inc()
+		}
 
 		// Mirror the metric's cause into the logs so a failed REST request can be
 		// filtered by error_type. System failures are logged at Warn (actionable);
