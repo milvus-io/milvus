@@ -33,6 +33,25 @@ import (
 
 const NullNodeID = -1
 
+// maxDelayedPerRound caps how many tasks one scheduling round may set aside
+// (because they are in failure backoff, or because they alone do not fit the
+// cluster right now) before it stops popping. Two reasons for a cap:
+//
+//   - it bounds the work of a round. Under memory pressure -- some memory
+//     free on the workers, but not enough for the tasks at hand -- every pick
+//     misses, and without the cap the round pops and prices the entire queue
+//     only to push all of it back;
+//   - it bounds the window in which a set-aside task is invisible. Between the
+//     pop and the re-queue at the end of the round the task is in neither
+//     pendingTasks nor runningTasks, so GetPendingTaskCount does not count it
+//     and AbortAndRemoveTask cannot find it.
+//
+// Backoff and does-not-fit share the one slice and therefore the one budget.
+// That is deliberate: both are "set aside and retried next round", and one
+// counter is simpler than two. The value is a round-trip budget, not a fairness
+// guarantee - a task beyond the cap is simply looked at in a later round.
+const maxDelayedPerRound = 64
+
 type GlobalScheduler interface {
 	Enqueue(task Task)
 	AbortAndRemoveTask(taskID int64)
@@ -233,7 +252,14 @@ func newNodeSlotHeap(workerSlots map[int64]*session.WorkerSlots) typeutil.Heap[*
 // The picked node's slots are updated in place; the caller reuses the same heap
 // across all tasks in a scheduling round so later picks observe the decremented
 // slots.
+//
+// The method is kept for its callers and tests; the placement itself lives in
+// pickNodeFromHeap so nodePicker can share it as its fallback tier.
 func (s *globalTaskScheduler) pickNode(slotHeap typeutil.Heap[*nodeSlotEntry], taskSlot int64) int64 {
+	return pickNodeFromHeap(slotHeap, taskSlot)
+}
+
+func pickNodeFromHeap(slotHeap typeutil.Heap[*nodeSlotEntry], taskSlot int64) int64 {
 	if slotHeap.Len() == 0 {
 		return NullNodeID
 	}
@@ -268,9 +294,9 @@ func (s *globalTaskScheduler) schedule() {
 	nodeSlots := s.cluster.QuerySlot()
 	mlog.Info(s.ctx, "scheduling pending tasks...", mlog.Int("num", pendingNum), mlog.Any("nodeSlots", nodeSlots))
 
-	// Build the node-slot max-heap once per round and reuse it across all picks,
-	// so each task is placed on the currently least-loaded node.
-	slotHeap := newNodeSlotHeap(nodeSlots)
+	// Build the picker once per round and reuse it across all picks, so each
+	// task is placed on the currently least-loaded node.
+	picker := newNodePicker(nodeSlots)
 	futures := make([]*conc.Future[struct{}], 0)
 	var delayed []Task
 	for {
@@ -286,15 +312,42 @@ func (s *globalTaskScheduler) schedule() {
 			continue
 		}
 		taskSlot := task.GetTaskSlot()
-		nodeID := s.pickNode(slotHeap, taskSlot)
+		// Price once per round and reuse: the placement decision and the log
+		// below must agree, and a family that walks meta on a cache miss would
+		// otherwise pay for the walk twice.
+		resource := task.GetTaskResource()
+		nodeID := picker.Pick(taskSlot, resource)
 		if nodeID == NullNodeID {
-			s.pendingTasks.Push(task)
-			break
+			if picker.exhausted() {
+				// No worker of either tier has room left, so nothing behind this
+				// task can be placed either: end the round.
+				s.pendingTasks.Push(task)
+				break
+			}
+			if len(delayed) >= maxDelayedPerRound {
+				// Enough set aside for one round: stop popping rather than walk
+				// the rest of the queue only to push it back. See
+				// maxDelayedPerRound.
+				s.pendingTasks.Push(task)
+				break
+			}
+			// The cluster still has room; this task alone does not fit it. Give
+			// way like a backoff task does, so one oversized task at the head of
+			// the queue cannot stall every smaller task behind it (the queue is
+			// ordered by task ID, so "head" means "oldest", not "biggest").
+			//
+			// Trade-off: ending the round used to reserve the cluster for this
+			// task implicitly. Without that reservation a steady stream of small
+			// tasks can keep delaying it; an explicit reservation or aging
+			// mechanism is a follow-up.
+			delayed = append(delayed, task)
+			continue
 		}
 		future := s.execPool.Submit(func() (struct{}, error) {
 			s.mu.RLock(task.GetTaskID())
 			defer s.mu.RUnlock(task.GetTaskID())
-			mlog.Info(s.ctx, "processing task...", WrapTaskLog(task)...)
+			mlog.Info(s.ctx, "processing task...",
+				WrapTaskLog(task, mlog.Stringer("resource", resource))...)
 			if task.GetTaskState() == taskcommon.Init {
 				task.CreateTaskOnWorker(nodeID, s.cluster)
 				switch task.GetTaskState() {

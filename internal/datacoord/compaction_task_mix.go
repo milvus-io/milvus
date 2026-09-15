@@ -36,6 +36,7 @@ type mixCompactionTask struct {
 	times *taskcommon.Times
 
 	slotUsage atomic.Int64
+	resource  resourceCache
 }
 
 func (t *mixCompactionTask) GetTaskID() int64 {
@@ -48,6 +49,35 @@ func (t *mixCompactionTask) GetTaskType() taskcommon.Type {
 
 func (t *mixCompactionTask) GetTaskState() taskcommon.State {
 	return taskcommon.FromCompactionState(t.GetTaskProto().GetState())
+}
+
+// GetTaskResource prices a sort compaction by the segment it sorts (it reads
+// and rewrites all of it) and a mix compaction by its streamed input, bounded
+// by one output segment.
+func (t *mixCompactionTask) GetTaskResource() taskcommon.Resource {
+	return t.resource.get(func() (taskcommon.Resource, bool) {
+		taskProto := t.GetTaskProto()
+		if taskProto.GetType() != datapb.CompactionType_SortCompaction {
+			inputSize, ok := compactionInputSize(t.meta, taskProto)
+			if !ok {
+				return defaultTaskResource(), false
+			}
+			return mixCompactionTaskResource(inputSize), true
+		}
+		inputs := taskProto.GetInputSegments()
+		if len(inputs) == 0 {
+			return defaultTaskResource(), false
+		}
+		segment := t.meta.GetHealthySegment(context.TODO(), inputs[0])
+		if segment == nil {
+			return defaultTaskResource(), false
+		}
+		size := estimateSegmentSize(segment, taskProto.GetSchema())
+		if size <= 0 {
+			return defaultTaskResource(), false
+		}
+		return statsTaskResource(size), true
+	})
 }
 
 func (t *mixCompactionTask) GetTaskSlot() int64 {
@@ -91,7 +121,8 @@ func (t *mixCompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Clu
 		return
 	}
 
-	err = cluster.CreateCompaction(nodeID, plan, t.GetTaskProto().GetCollectionID())
+	resource := t.GetTaskResource()
+	err = cluster.CreateCompaction(nodeID, plan, t.GetTaskProto().GetCollectionID(), resource)
 	if err != nil {
 		// Compaction tasks may be refused by DataNode because of slot limit. In this case, the node id is reset
 		//  to enable a retry in compaction.checkCompaction().
@@ -439,4 +470,19 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 
 func (t *mixCompactionTask) GetSlotUsage() int64 {
 	return t.GetTaskSlot()
+}
+
+// compactionInputSize sums the sizes of a compaction's input segments, or
+// reports ok=false when one of them is not in meta (dropped between enqueue
+// and dispatch) so the caller prices at the floor without caching.
+func compactionInputSize(meta CompactionMeta, taskProto *datapb.CompactionTask) (int64, bool) {
+	var size int64
+	for _, segID := range taskProto.GetInputSegments() {
+		segment := meta.GetHealthySegment(context.TODO(), segID)
+		if segment == nil {
+			return 0, false
+		}
+		size += estimateSegmentSize(segment, taskProto.GetSchema())
+	}
+	return size, true
 }

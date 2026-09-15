@@ -63,7 +63,8 @@ type clusteringCompactionTask struct {
 
 	maxRetryTimes int32
 
-	times *taskcommon.Times
+	times    *taskcommon.Times
+	resource resourceCache
 }
 
 func (t *clusteringCompactionTask) GetTaskID() int64 {
@@ -76,6 +77,19 @@ func (t *clusteringCompactionTask) GetTaskType() taskcommon.Type {
 
 func (t *clusteringCompactionTask) GetTaskState() taskcommon.State {
 	return taskcommon.FromCompactionState(t.GetTaskProto().GetState())
+}
+
+// GetTaskResource: a clustering compaction buckets its input in memory up to
+// a share of the worker, so it is priced by its input with that share as the
+// cap (see clusteringCompactionTaskResource).
+func (t *clusteringCompactionTask) GetTaskResource() taskcommon.Resource {
+	return t.resource.get(func() (taskcommon.Resource, bool) {
+		inputSize, ok := compactionInputSize(t.meta, t.GetTaskProto())
+		if !ok {
+			return defaultTaskResource(), false
+		}
+		return clusteringCompactionTaskResource(inputSize), true
+	})
 }
 
 func (t *clusteringCompactionTask) GetTaskSlot() int64 {
@@ -780,7 +794,8 @@ func (t *clusteringCompactionTask) doCompact(nodeID int64, cluster session.Clust
 		mlog.Warn(context.TODO(), "Failed to BuildCompactionRequest", mlog.Err(err))
 		return err
 	}
-	err = cluster.CreateCompaction(nodeID, t.GetPlan(), t.GetTaskProto().GetCollectionID())
+	resource := t.GetTaskResource()
+	err = cluster.CreateCompaction(nodeID, t.GetPlan(), t.GetTaskProto().GetCollectionID(), resource)
 	if err != nil {
 		originNodeID := t.GetTaskProto().GetNodeID()
 		mlog.Warn(context.TODO(), "Failed to notify compaction tasks to DataNode",

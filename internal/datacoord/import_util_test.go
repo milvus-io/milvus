@@ -45,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -1489,4 +1490,66 @@ func TestErrPKRangeTooSmall_IsDistinguishableAndKeepsItsCode(t *testing.T) {
 	// why the branch never fired.
 	assert.False(t, merr.IsNonRetryableErr(terminal))
 	assert.False(t, merr.IsNonRetryableErr(transient))
+}
+
+func TestCalculateTaskBufferSize(t *testing.T) {
+	paramtable.Init()
+	base := paramtable.Get().DataNodeCfg.ImportBaseBufferSize.GetAsInt64()
+	job := &importJob{ImportJob: &datapb.ImportJob{JobID: 1, Vchannels: []string{"a", "b"}, PartitionIDs: []int64{1, 2, 3}}}
+
+	pre := &preImportTask{}
+	pre.task.Store(&datapb.PreImportTask{JobID: 1, TaskID: 2})
+	assert.Equal(t, base, CalculateTaskBufferSize(pre, job))
+
+	imp := &importTask{}
+	imp.task.Store(&datapb.ImportTaskV2{JobID: 1, TaskID: 3})
+	assert.Equal(t, base*2*3, CalculateTaskBufferSize(imp, job))
+
+	l0Job := &importJob{ImportJob: &datapb.ImportJob{
+		JobID: 1, Vchannels: []string{"a"}, PartitionIDs: []int64{1},
+		Options: []*commonpb.KeyValuePair{{Key: importutilv2.L0Import, Value: "true"}},
+	}}
+	assert.Equal(t, paramtable.Get().DataNodeCfg.ImportDeleteBufferSize.GetAsInt64(), CalculateTaskBufferSize(imp, l0Job))
+}
+
+func TestImportTaskResource(t *testing.T) {
+	paramtable.Init()
+	base := paramtable.Get().DataNodeCfg.ImportBaseBufferSize.GetAsInt64()
+	job := &importJob{ImportJob: &datapb.ImportJob{JobID: 1, Vchannels: []string{"a", "b"}, PartitionIDs: []int64{1, 2, 3}}}
+
+	importMeta := NewMockImportMeta(t)
+	importMeta.EXPECT().GetJob(mock.Anything, int64(1)).Return(job)
+	importMeta.EXPECT().GetJob(mock.Anything, int64(2)).Return(nil)
+
+	// Three files, each with its own (base x 2 x 3) buffer on the worker.
+	imp := &importTask{importMeta: importMeta}
+	imp.task.Store(&datapb.ImportTaskV2{JobID: 1, TaskID: 3, FileStats: []*datapb.ImportFileStats{
+		{TotalMemorySize: base * 100}, {TotalMemorySize: base * 100}, {TotalMemorySize: base * 100},
+	}})
+	assert.Equal(t, importTaskResource(3, base*2*3), imp.GetTaskResource())
+	assert.Equal(t, taskcommon.Resource{CPU: 1, Memory: max(3*base*2*3*2, 64<<20)}, imp.GetTaskResource())
+
+	// Small files do not shrink the per-file buffer: the worker never caps it
+	// at the file size for an import task.
+	smallFiles := &importTask{importMeta: importMeta}
+	smallFiles.task.Store(&datapb.ImportTaskV2{JobID: 1, TaskID: 7, FileStats: []*datapb.ImportFileStats{
+		{TotalMemorySize: base}, {TotalMemorySize: base / 2},
+	}})
+	assert.Equal(t, importTaskResource(2, base*2*3), smallFiles.GetTaskResource())
+
+	// Pre-import: one base buffer per file, no job lookup needed.
+	pre := &preImportTask{importMeta: importMeta}
+	pre.task.Store(&datapb.PreImportTask{JobID: 1, TaskID: 4, FileStats: []*datapb.ImportFileStats{{}, {}}})
+	assert.Equal(t, preImportTaskResource(2, base), pre.GetTaskResource())
+
+	// Job dropped between enqueue and dispatch: the floor, never zero.
+	orphanImport := &importTask{importMeta: importMeta}
+	orphanImport.task.Store(&datapb.ImportTaskV2{JobID: 2, TaskID: 5})
+	assert.Equal(t, defaultTaskResource(), orphanImport.GetTaskResource())
+
+	// A pre-import prices itself from its own file list, so a dropped job does
+	// not change its answer.
+	orphanPre := &preImportTask{importMeta: importMeta}
+	orphanPre.task.Store(&datapb.PreImportTask{JobID: 2, TaskID: 6, FileStats: []*datapb.ImportFileStats{{}}})
+	assert.Equal(t, preImportTaskResource(1, base), orphanPre.GetTaskResource())
 }
