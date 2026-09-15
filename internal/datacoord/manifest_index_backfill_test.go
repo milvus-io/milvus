@@ -430,3 +430,45 @@ func TestBackfillMutationRejectsMismatchedSegmentIdentity(t *testing.T) {
 	assert.False(t, m.indexMeta.isSegmentIndexCatalogAbsent(restartBuildID))
 }
 
+func TestBackfillMutationRejectsUnsupportedShapes(t *testing.T) {
+	for _, shape := range []string{"noop", "multiple publications", "worker result"} {
+		t.Run(shape, func(t *testing.T) {
+			withSegmentIndexManifestWrites(t, false)
+			store := newFakeManifestStore(t)
+			ctx := context.TODO()
+			catalog := metastorekv.NewCatalog(NewMetaMemoryKV(), "", "")
+			m := bootMetaForRestart(t, catalog, restartCollID)
+			seedLegacyBackfillRecord(t, m, restartSegID, restartBuildID)
+			segment := m.GetSegment(ctx, restartSegID)
+			record, _ := m.indexMeta.GetIndexJob(restartBuildID)
+			entry, err := buildManifestIndexInfo(m, segment, record)
+			require.NoError(t, err)
+			commit := SegmentManifestCommit{
+				SegmentID: restartSegID,
+				Mutation: ManifestMutation{Type: ManifestMutationCommitUpdates,
+					Updates: &packed.ManifestUpdates{Indexes: []packed.ManifestIndexInfo{entry}}},
+				CatalogMutation: SegmentCatalogMutation{SegmentIndexes: []SegmentIndexMutation{{
+					Type: SegmentIndexBackfill, BuildID: restartBuildID,
+				}}},
+			}
+			switch shape {
+			case "noop":
+				commit.Mutation = ManifestMutation{Type: ManifestMutationNoop, ManifestPath: segment.GetManifestPath()}
+			case "multiple publications":
+				second := entry
+				second.BuildID++
+				commit.Mutation.Updates.Indexes = append(commit.Mutation.Updates.Indexes, second)
+				commit.CatalogMutation.SegmentIndexes = append(commit.CatalogMutation.SegmentIndexes,
+					SegmentIndexMutation{Type: SegmentIndexBackfill, BuildID: second.BuildID})
+			case "worker result":
+				commit.CatalogMutation.SegmentIndexes[0].FinishedTask = &workerpb.IndexTaskInfo{BuildID: restartBuildID}
+			}
+			require.Error(t, m.CommitSegmentManifest(ctx, commit))
+			assert.Zero(t, store.commitCount)
+			rows, err := catalog.ListSegmentIndexes(ctx, restartCollID)
+			require.NoError(t, err)
+			assert.Len(t, rows, 1)
+			assert.Equal(t, segment.GetManifestPath(), m.GetSegment(ctx, restartSegID).GetManifestPath())
+		})
+	}
+}

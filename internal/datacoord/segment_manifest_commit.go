@@ -242,6 +242,9 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 
 	for i := range commit.CatalogMutation.SegmentIndexes {
 		indexMutation := &commit.CatalogMutation.SegmentIndexes[i]
+		if indexMutation.Type == SegmentIndexBackfill && segment.GetLevel() == datapb.SegmentLevel_L0 {
+			return errSegmentIndexBackfillSkipped
+		}
 		staged, err := m.indexMeta.stageSegmentIndexMutation(*indexMutation)
 		if err != nil {
 			if errors.Is(err, errSegmentIndexRecordGone) {
@@ -252,10 +255,14 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 			}
 			return err
 		}
-		if staged.record != nil &&
+		if staged.record != nil && staged.record.SegmentID != commit.SegmentID {
+			return merr.WrapErrServiceInternalMsg(
+				"segment index mutation buildID=%d belongs to segment %d, not manifest segment %d",
+				indexMutation.BuildID, staged.record.SegmentID, commit.SegmentID)
+		}
+		if indexMutation.Type == SegmentIndexBackfill && staged.record != nil &&
 			(staged.record.CollectionID != segment.GetCollectionID() ||
-				staged.record.PartitionID != segment.GetPartitionID() ||
-				staged.record.SegmentID != commit.SegmentID) {
+				staged.record.PartitionID != segment.GetPartitionID()) {
 			return merr.WrapErrServiceInternalMsg(
 				"segment index mutation for build %d targets collection/partition/segment %d/%d/%d, not committing segment %d/%d/%d",
 				indexMutation.BuildID,
