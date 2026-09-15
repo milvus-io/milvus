@@ -940,7 +940,7 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 			continue
 		}
 
-		gc.recycleDroppedSegment(ctx, segmentID, segment)
+		gc.recycleDroppedSegment(ctx, segmentID)
 	}
 }
 
@@ -970,7 +970,16 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 // surface NotFound, or batching RemoveSegmentIndex past the per-buildID
 // keyLock — must preserve these invariants, otherwise dropped-segment GC
 // will silently break under load.
-func (gc *garbageCollector) recycleDroppedSegment(ctx context.Context, segmentID int64, segment *SegmentInfo) {
+func (gc *garbageCollector) recycleDroppedSegment(ctx context.Context, segmentID int64) {
+	// Rollback may advance a retained Dropped segment's manifest while keeping
+	// its files. Serialize prefix deletion with that metadata transfer.
+	locks := gc.meta.getSegmentManifestLocks()
+	locks.Lock(segmentID)
+	defer locks.Unlock(segmentID)
+	segment := gc.meta.GetSegment(ctx, segmentID)
+	if segment == nil || segment.GetState() != commonpb.SegmentState_Dropped {
+		return
+	}
 	log := mlog.With(mlog.Int64("segmentID", segmentID), mlog.Int64("collectionID", segment.GetCollectionID()))
 
 	if ctx.Err() != nil {
@@ -1633,7 +1642,7 @@ func (gc *garbageCollector) recycleRecordOnlySegmentIndex(ctx context.Context, o
 	locks.Lock(item.segIdx.SegmentID)
 	defer locks.Unlock(item.segIdx.SegmentID)
 	current := gc.meta.GetSegment(ctx, item.segIdx.SegmentID)
-	if current != nil && isSegmentHealthy(current) &&
+	if current != nil && (isSegmentHealthy(current) || isSegmentIndexRollbackRetained(current)) &&
 		(observed == nil || current.GetManifestPath() != observed.GetManifestPath() ||
 			current.GetManifestHasIndex() != observed.GetManifestHasIndex()) {
 		mlog.RatedInfo(ctx, rate.Limit(10), "segment manifest changed during index GC; retry selection",

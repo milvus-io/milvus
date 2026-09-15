@@ -157,6 +157,7 @@ type Server struct {
 	statsInspector                   *statsInspector
 	indexInspector                   *indexInspector
 	manifestIndexBackfillInspector   *manifestIndexBackfillInspector
+	manifestIndexRollbackInspector   *manifestIndexRollbackInspector
 	analyzeInspector                 *analyzeInspector
 	externalCollectionRefreshManager ExternalCollectionRefreshManager
 	globalScheduler                  task.GlobalScheduler
@@ -378,6 +379,9 @@ func (s *Server) initDataCoord() error {
 		s.copySegmentMeta,
 	)
 	mlog.Info(s.ctx, "init copy segment inspector and checker done")
+	if s.manifestIndexRollbackInspector == nil {
+		s.manifestIndexRollbackInspector = newManifestIndexRollbackInspector(s.ctx, s.meta, s.copySegmentMeta)
+	}
 
 	// Initialize snapshot manager
 	snapshotManager := NewSnapshotManager(
@@ -781,6 +785,9 @@ func (s *Server) startTaskScheduler() {
 	if s.manifestIndexBackfillInspector != nil {
 		s.manifestIndexBackfillInspector.Start()
 	}
+	if s.manifestIndexRollbackInspector != nil {
+		s.manifestIndexRollbackInspector.Start()
+	}
 	s.analyzeInspector.Start()
 	// Note: externalCollectionInspector.Start() is called in startServerLoop as a goroutine
 	s.startCollectMetaMetrics(s.serverLoopCtx)
@@ -1105,6 +1112,10 @@ func (s *Server) Stop() error {
 		s.manifestIndexBackfillInspector.Stop()
 	}
 	mlog.Info(s.ctx, "datacoord manifest index backfill inspector stopped")
+	if s.manifestIndexRollbackInspector != nil {
+		s.manifestIndexRollbackInspector.Stop()
+	}
+	mlog.Info(s.ctx, "datacoord manifest index rollback inspector stopped")
 
 	s.analyzeInspector.Stop()
 	mlog.Info(s.ctx, "datacoord analyze inspector stopped")

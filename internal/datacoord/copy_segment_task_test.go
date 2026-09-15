@@ -1542,16 +1542,20 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_IndexWritePlacementMatrix
 	)
 
 	for _, tc := range []struct {
-		name    string
-		enabled bool
+		name     string
+		enabled  bool
+		rollback bool
 	}{
 		{name: "manifest writes disabled", enabled: false},
 		{name: "manifest writes enabled", enabled: true},
+		{name: "rollback drains manifest copy", enabled: true, rollback: true},
+		{name: "rollback accepts etcd copy", enabled: false, rollback: true},
 	} {
 		s.Run(tc.name, func() {
 			// The runtime switch has flipped by the time the result is handled.
 			// The task's persisted dispatch-time value must still win.
 			withSegmentIndexManifestWrites(s.T(), !tc.enabled)
+			withManifestIndexRollback(s.T(), tc.rollback)
 			store := newFakeManifestStore(s.T())
 			ctx := context.Background()
 			catalog := kvdatacoord.NewCatalog(NewMetaMemoryKV(), "", "")
@@ -1588,7 +1592,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_IndexWritePlacementMatrix
 			s.True(present)
 			s.Equal(tc.enabled, persistedPlacement)
 
-			manifestPath := packed.MarshalManifestPath("files/insert_log/100/10/2001", 3)
+			manifestPath := packed.MarshalManifestPath("/tmp/test-restart/insert_log/100/10/2001", 3)
 			var manifestBuildIDs []int64
 			if tc.enabled {
 				store.revisions[manifestPath] = []packed.ManifestIndexInfo{{
@@ -1624,6 +1628,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_IndexWritePlacementMatrix
 							BuildId:        buildID,
 							IndexName:      "vec_idx",
 							IndexFilePaths: []string{"index.bin"},
+							IndexSize:      1024,
 						},
 					},
 				}},
@@ -1656,6 +1661,21 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_IndexWritePlacementMatrix
 			s.Require().Len(recovered, 1)
 			s.EqualValues(buildID, recovered[indexID].BuildID)
 			s.Equal(commonpb.IndexState_Finished, recovered[indexID].IndexState)
+			if tc.rollback {
+				inspector := newManifestIndexRollbackInspector(ctx, m, copyMeta)
+				inspector.runOnce(ctx)
+				inspector.runOnce(ctx)
+				s.True(inspector.ready)
+				s.False(m.GetSegment(ctx, segmentID).GetManifestHasIndex())
+				persisted, err = catalog.ListSegmentIndexes(ctx, collectionID)
+				s.Require().NoError(err)
+				s.Require().Len(persisted, 1)
+				s.EqualValues(buildID, persisted[0].BuildID)
+				final := m.GetSegment(ctx, segmentID).GetManifestPath()
+				s.Require().NoError(SyncCopySegmentTask(task, resp, copyMeta, m))
+				s.Equal(final, m.GetSegment(ctx, segmentID).GetManifestPath())
+				s.False(m.indexMeta.isSegmentIndexCatalogAbsent(buildID))
+			}
 		})
 	}
 }

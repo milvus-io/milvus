@@ -6136,6 +6136,10 @@ type dataCoordConfig struct {
 	ManifestIndexBackfillInterval       ParamItem `refreshable:"true"`
 	ManifestIndexBackfillBatchSize      ParamItem `refreshable:"true"`
 	ManifestIndexBackfillConcurrency    ParamItem `refreshable:"true"`
+	ManifestIndexRollbackEnabled        ParamItem `refreshable:"false"`
+	ManifestIndexRollbackInterval       ParamItem `refreshable:"true"`
+	ManifestIndexRollbackBatchSize      ParamItem `refreshable:"true"`
+	ManifestIndexRollbackConcurrency    ParamItem `refreshable:"true"`
 	HybridIndexLowCardinalityIndexType  ParamItem `refreshable:"true"`
 	HybridIndexHighCardinalityIndexType ParamItem `refreshable:"true"`
 
@@ -7002,6 +7006,31 @@ Watch milvus_datacoord_manifest_index_backfill_pending_records. Zero means no el
 		Export: true,
 	}
 	p.ManifestIndexBackfillConcurrency.Init(base.mgr)
+
+	p.ManifestIndexRollbackEnabled = ParamItem{
+		Key: "dataCoord.index.manifestIndexRollback.enabled", Version: "3.0.1", DefaultValue: "false",
+		Doc: `Restore StorageV3 manifest index records to etcd and remove their manifest entries atomically, preserving artifact files. This restart-scoped switch overrides forward manifest publication and backfill; new index completions use etcd.
+Wait for milvus_datacoord_manifest_index_rollback_ready=1 before downgrading to a version that supports StorageV3 and the existing index path layouts. Pending copy tasks and retained Dropped segments must also converge. Set the forward switches to false before downgrading: older versions do not understand this override.`,
+		Export: true,
+	}
+	p.ManifestIndexRollbackEnabled.Init(base.mgr)
+	p.ManifestIndexRollbackInterval = ParamItem{
+		Key: "dataCoord.index.manifestIndexRollback.interval", Version: "3.0.1", DefaultValue: "60",
+		Doc: "Seconds between rollback scans. Nonpositive durations use 60 seconds.", Export: true,
+	}
+	p.ManifestIndexRollbackInterval.Init(base.mgr)
+	p.ManifestIndexRollbackBatchSize = ParamItem{
+		Key: "dataCoord.index.manifestIndexRollback.batchSize", Version: "3.0.1", DefaultValue: "1000",
+		Formatter: func(v string) string { return strconv.Itoa(max(1, getAsInt(v))) },
+		Doc:       "Maximum segments visited per rollback scan. Each visit restores at most maxEtcdTxnNum-1 indexes atomically.", Export: true,
+	}
+	p.ManifestIndexRollbackBatchSize.Init(base.mgr)
+	p.ManifestIndexRollbackConcurrency = ParamItem{
+		Key: "dataCoord.index.manifestIndexRollback.concurrency", Version: "3.0.1", DefaultValue: "8",
+		Formatter: func(v string) string { return strconv.Itoa(min(256, max(1, getAsInt(v)))) },
+		Doc:       "Maximum segments processed concurrently during rollback, clamped to [1, 256].", Export: true,
+	}
+	p.ManifestIndexRollbackConcurrency.Init(base.mgr)
 
 	p.HybridIndexLowCardinalityIndexType = ParamItem{
 		Key:          "dataCoord.index.hybridIndex.lowCardinalityIndexType",

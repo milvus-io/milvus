@@ -1168,6 +1168,18 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 			return nil
 		}
 		defer locks.Unlock(task.GetTaskId())
+		if manifestIndexRollbackEnabled() {
+			// Rollback may already have advanced a completed target's manifest.
+			// A duplicate worker result must not reinstall its old pointer or
+			// mark the restored catalog records manifest-resident again.
+			current := copyMeta.GetTask(ctx, task.GetTaskId())
+			if current == nil || current.GetState() == datapb.CopySegmentTaskState_CopySegmentTaskCompleted {
+				return nil
+			}
+			// The failed-task guard below must also observe completed cleanup,
+			// even when this result carries an older in-progress task snapshot.
+			task = current
+		}
 		// Even a late result rejected below owns files that need durable cleanup.
 		// Re-arming an already cleaned task is safe because prefix deletion is idempotent.
 		if err := copyMeta.UpdateTask(ctx, task.GetTaskId(), updateCopyTaskCleanup(true)); err != nil {
@@ -1175,8 +1187,9 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 		}
 		// A failed task with a cleanup plan may already have lost its files,
 		// including after restart when CleanupRequired has been cleared.
-		if len(task.GetCleanupPrefixes()) > 0 && task.GetState() == datapb.CopySegmentTaskState_CopySegmentTaskFailed {
-			return merr.WrapErrServiceInternalMsg("cannot publish a failed copy task with planned cleanup")
+		if task.GetState() == datapb.CopySegmentTaskState_CopySegmentTaskFailed &&
+			(len(task.GetCleanupPrefixes()) > 0 || manifestIndexRollbackEnabled()) {
+			return merr.WrapErrServiceInternalMsg("cannot publish a failed copy task after cleanup or during index rollback")
 		}
 		results := resp.GetSegmentResults()
 		verified := make([]map[int64]int64, len(results))
