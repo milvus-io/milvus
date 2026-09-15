@@ -44,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -1699,6 +1700,10 @@ func (loader *segmentLoader) LoadIndex(ctx context.Context,
 
 	indexInfo := lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *querypb.SegmentLoadInfo {
 		info = typeutil.Clone(info)
+		info.IndexInfos = lo.Filter(info.GetIndexInfos(), func(indexInfo *querypb.FieldIndexInfo, _ int) bool {
+			indexType, ok := funcutil.TryGetAttrByKeyFromRepeatedKV(common.IndexTypeKey, indexInfo.GetIndexParams())
+			return !ok || !vecindexmgr.GetVecIndexMgrInstance().IsNoTrainIndex(indexType)
+		})
 		// remain binlog paths whose field id is in index infos to estimate resource usage correctly
 		indexFields := typeutil.NewSet(lo.Map(info.GetIndexInfos(), func(indexInfo *querypb.FieldIndexInfo, _ int) int64 { return indexInfo.GetFieldID() })...)
 		var binlogPaths []*datapb.FieldBinlog
@@ -1712,7 +1717,8 @@ func (loader *segmentLoader) LoadIndex(ctx context.Context,
 		info.Statslogs = nil
 		return info
 	})
-	requestResourceResult, err := loader.requestResource(ctx, indexInfo...)
+	resourceInfo := lo.Filter(indexInfo, func(info *querypb.SegmentLoadInfo, _ int) bool { return len(info.GetIndexInfos()) > 0 })
+	requestResourceResult, err := loader.requestResource(ctx, resourceInfo...)
 	if err != nil {
 		return err
 	}
@@ -1724,7 +1730,7 @@ func (loader *segmentLoader) LoadIndex(ctx context.Context,
 
 	tr := timerecord.NewTimeRecorder("segmentLoader.LoadIndex")
 	defer metrics.QueryNodeLoadIndexLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	for _, loadInfo := range infos {
+	for _, loadInfo := range indexInfo {
 		fieldIDs := typeutil.NewSet(lo.Map(loadInfo.GetIndexInfos(), func(info *querypb.FieldIndexInfo, _ int) int64 { return info.GetFieldID() })...)
 		fieldInfos := lo.SliceToMap(lo.Filter(loadInfo.GetBinlogPaths(), func(info *datapb.FieldBinlog, _ int) bool { return fieldIDs.Contain(info.GetFieldID()) }),
 			func(info *datapb.FieldBinlog) (int64, *datapb.FieldBinlog) { return info.GetFieldID(), info })
