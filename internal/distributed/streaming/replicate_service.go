@@ -120,6 +120,9 @@ func (s replicateService) overwriteReplicateMessage(ctx context.Context, msg mes
 	if err != nil {
 		return nil, err
 	}
+	if cfg == nil {
+		return nil, status.NewReplicateViolation("cluster has no replicate configuration, cannot receive replicate message")
+	}
 
 	// Get target vchannel on current cluster that should be written to
 	currentCluster := cfg.GetCluster(s.clusterID)
