@@ -225,6 +225,15 @@ var timeoutContextKeysToPropagate = []string{
 	"traceID",
 }
 
+const copiedContextRoutePathKey = "milvus_copied_context_route_path"
+
+func matchedRoutePath(c *gin.Context) string {
+	if path := c.FullPath(); path != "" {
+		return path
+	}
+	return c.GetString(copiedContextRoutePathKey)
+}
+
 func propagateTimeoutContextKeys(dst *gin.Context, src *gin.Context) {
 	for _, key := range timeoutContextKeysToPropagate {
 		if value, ok := src.Get(key); ok {
@@ -256,7 +265,12 @@ func timeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 		buffer := bufPool.Get()
 		buffer.Reset()
 		recorder := newTimeoutResponseRecorder(buffer)
+		// gin.Context.Copy did not retain the matched route path before Gin 1.10.
+		// Preserve the registered route pattern for metrics and audit hooks running
+		// on the copied context; Request.URL.Path is unsuitable for dynamic routes.
+		routePath := matchedRoutePath(gCtx)
 		handlerCtx := gCtx.Copy()
+		handlerCtx.Set(copiedContextRoutePathKey, routePath)
 		handlerCtx.Request = req
 		handlerCtx.Writer = recorder
 
