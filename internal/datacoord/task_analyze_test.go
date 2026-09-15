@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -334,6 +335,107 @@ func (s *analyzeTaskSuite) TestCreateTaskOnWorker_NumClustersCapped() {
 	cluster := session.NewMockCluster(s.T())
 	cluster.EXPECT().CreateAnalyze(mock.Anything, mock.MatchedBy(func(req *workerpb.AnalyzeRequest) bool {
 		return req.NumClusters == 1 // capped at MaxCentroidsNum=1
+	})).Return(nil)
+
+	at.CreateTaskOnWorker(1, cluster)
+	s.Equal(indexpb.JobState_JobStateInProgress, at.GetState())
+}
+
+func TestCalculateVectorCentroidCount(t *testing.T) {
+	tests := []struct {
+		name      string
+		rows      int64
+		dim       int64
+		dataType  schemapb.DataType
+		chunkSize int64
+		want      int64
+		wantErr   bool
+	}{
+		{
+			name:      "float vector",
+			rows:      1_000_000,
+			dim:       768,
+			dataType:  schemapb.DataType_FloatVector,
+			chunkSize: 8 * 1024 * 1024,
+			want:      367,
+		},
+		{
+			name:      "float16 vector",
+			rows:      1_000_000,
+			dim:       768,
+			dataType:  schemapb.DataType_Float16Vector,
+			chunkSize: 8 * 1024 * 1024,
+			want:      184,
+		},
+		{
+			name:      "bfloat16 vector",
+			rows:      1_000_000,
+			dim:       768,
+			dataType:  schemapb.DataType_BFloat16Vector,
+			chunkSize: 8 * 1024 * 1024,
+			want:      184,
+		},
+		{
+			name:      "at most one centroid per row",
+			rows:      2,
+			dim:       8 * 1024 * 1024,
+			dataType:  schemapb.DataType_FloatVector,
+			chunkSize: 8 * 1024 * 1024,
+			want:      2,
+		},
+		{
+			name:      "empty input",
+			rows:      0,
+			dim:       768,
+			dataType:  schemapb.DataType_FloatVector,
+			chunkSize: 8 * 1024 * 1024,
+			want:      0,
+		},
+		{
+			name:      "invalid chunk size",
+			rows:      1,
+			dim:       768,
+			dataType:  schemapb.DataType_FloatVector,
+			chunkSize: 0,
+			wantErr:   true,
+		},
+		{
+			name:      "unsupported vector type",
+			rows:      1,
+			dim:       768,
+			dataType:  schemapb.DataType_Int8Vector,
+			chunkSize: 8 * 1024 * 1024,
+			wantErr:   true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := calculateVectorCentroidCount(test.rows, test.dim, test.dataType, test.chunkSize)
+			if test.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, test.want, got)
+		})
+	}
+}
+
+func (s *analyzeTaskSuite) TestCreateTaskOnWorker_UsesLayoutChunkSize() {
+	origMin := Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.SwapTempValue("1")
+	defer Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.SwapTempValue(origMin)
+	origChunkSize := Params.DataCoordCfg.ClusteringCompactionLayoutChunkSizePerCentroid.SwapTempValue("128KB")
+	defer Params.DataCoordCfg.ClusteringCompactionLayoutChunkSizePerCentroid.SwapTempValue(origChunkSize)
+
+	at := s.newTask()
+	catalog := catalogmocks.NewDataCoordCatalog(s.T())
+	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).Return(nil)
+	s.mt.analyzeMeta.catalog = catalog
+
+	cluster := session.NewMockCluster(s.T())
+	cluster.EXPECT().CreateAnalyze(mock.Anything, mock.MatchedBy(func(req *workerpb.AnalyzeRequest) bool {
+		return req.GetNumClusters() == 12
 	})).Return(nil)
 
 	at.CreateTaskOnWorker(1, cluster)
