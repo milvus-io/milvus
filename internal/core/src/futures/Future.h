@@ -199,7 +199,8 @@ class IFuture {
 
     /// @brief register a callback that will be called when the future is ready or future has been ready.
     virtual void
-    registerReadyCallback(CUnlockGoMutexFn unlockFn, CLockedGoMutex* mutex) = 0;
+    registerReadyCallback(CFutureReadyCallbackFn callback,
+                          CFutureCallbackToken token) = 0;
 
     /// @brief get the result of the future. it must be called if future is ready.
     /// the first element of the pair is the result,
@@ -279,10 +280,10 @@ class Future : public IFuture {
 
     /// @brief see `IFuture::registerReadyCallback`
     void
-    registerReadyCallback(CUnlockGoMutexFn unlockFn,
-                          CLockedGoMutex* mutex) noexcept override {
+    registerReadyCallback(CFutureReadyCallbackFn callback,
+                          CFutureCallbackToken token) noexcept override {
         ready_->callOrRegisterCallback(
-            [unlockFn = unlockFn, mutex = mutex]() { unlockFn(mutex); });
+            [callback = callback, token = token]() { callback(token); });
     }
 
     /// @brief see `IFuture::isReady`

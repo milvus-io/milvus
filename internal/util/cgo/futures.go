@@ -4,23 +4,24 @@ package cgo
 #cgo pkg-config: milvus_core
 
 #include "futures/future_c.h"
+#include <stdint.h>
 #include <stdlib.h>
 
-extern void unlockMutex(void*);
+extern void notifyFutureReady(uintptr_t);
 
-static inline void unlockMutexOnC(CLockedGoMutex* m) {
-    unlockMutex((void*)(m));
+static inline void notifyFutureReadyOnC(CFutureCallbackToken token) {
+    notifyFutureReady(token);
 }
 
-static inline void future_go_register_ready_callback(CFuture* f, CLockedGoMutex* m) {
-	future_register_ready_callback(f, unlockMutexOnC, m);
+static inline void future_go_register_ready_callback(CFuture* f, CFutureCallbackToken token) {
+	future_register_ready_callback(f, notifyFutureReadyOnC, token);
 }
 */
 import "C"
 
 import (
 	"context"
-	"sync"
+	runtimecgo "runtime/cgo"
 	"unsafe"
 
 	"github.com/cockroachdb/errors"
@@ -33,10 +34,14 @@ import (
 // exports and functions in preamble
 // (https://code.google.com/p/go-wiki/wiki/cgo#Global_functions)
 //
-//export unlockMutex
-func unlockMutex(p unsafe.Pointer) {
-	m := (*sync.Mutex)(p)
-	m.Unlock()
+//export notifyFutureReady
+func notifyFutureReady(token C.uintptr_t) {
+	handle := runtimecgo.Handle(token)
+	ready := handle.Value().(chan struct{})
+	// Ready invokes every registered callback exactly once. The callback owns
+	// the handle and releases it before waking its waiter.
+	handle.Delete()
+	close(ready)
 }
 
 type basicFuture interface {
@@ -190,12 +195,14 @@ func (f *futureImpl) blockUntilReady() {
 		return
 	}
 
-	mu := &sync.Mutex{}
-	mu.Lock()
+	// Each concurrent waiter registers its own callback, so each needs an
+	// independently owned handle. C++ retains only the integer token.
+	ready := make(chan struct{})
+	handle := runtimecgo.NewHandle(ready)
 	getCGOCaller().call("future_go_register_ready_callback", func() {
-		C.future_go_register_ready_callback(f.future, (*C.CLockedGoMutex)(unsafe.Pointer(mu)))
+		C.future_go_register_ready_callback(f.future, C.CFutureCallbackToken(handle))
 	})
-	mu.Lock()
+	<-ready
 
 	// mark the future as ready at go side to avoid more cgo calls.
 	f.state.IntoReady()
