@@ -18,7 +18,6 @@ package proxy
 
 import (
 	"fmt"
-	"slices"
 	"strconv"
 	"strings"
 	"unicode"
@@ -307,7 +306,9 @@ func validatePathReplaceArrayOperand(fd *schemapb.FieldData, schema *schemapb.Fi
 		return merr.WrapErrParameterInvalidMsg("PATH_REPLACE field %q expects Array FieldData", fd.GetFieldName())
 	}
 	arrayData := fd.GetScalars().GetArrayData()
-	if arrayData.GetElementType() != schema.GetElementType() {
+	// REST may omit element_type until insertPreExecute fills field properties.
+	// Validate the actual row payload against the schema below in either case.
+	if got := arrayData.GetElementType(); got != schemapb.DataType_None && got != schema.GetElementType() {
 		return merr.WrapErrParameterInvalidMsg("field %q expects element type %s but request provides %s", fd.GetFieldName(), schema.GetElementType().String(), arrayData.GetElementType().String())
 	}
 	if err := validateNonNullOperandRows(fd, rowCount); err != nil {
@@ -512,17 +513,17 @@ func replaceArrayRowElement(
 	out := proto.Clone(base).(*schemapb.ScalarField)
 	switch elementType {
 	case schemapb.DataType_Bool:
-		out.GetBoolData().Data = replaceArrayValue(out.GetBoolData().GetData(), update.GetBoolData().GetData(), index, 1)
+		copyArrayElement(out.GetBoolData().GetData(), update.GetBoolData().GetData(), index, 1)
 	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
-		out.GetIntData().Data = replaceArrayValue(out.GetIntData().GetData(), update.GetIntData().GetData(), index, 1)
+		copyArrayElement(out.GetIntData().GetData(), update.GetIntData().GetData(), index, 1)
 	case schemapb.DataType_Int64:
-		out.GetLongData().Data = replaceArrayValue(out.GetLongData().GetData(), update.GetLongData().GetData(), index, 1)
+		copyArrayElement(out.GetLongData().GetData(), update.GetLongData().GetData(), index, 1)
 	case schemapb.DataType_Float:
-		out.GetFloatData().Data = replaceArrayValue(out.GetFloatData().GetData(), update.GetFloatData().GetData(), index, 1)
+		copyArrayElement(out.GetFloatData().GetData(), update.GetFloatData().GetData(), index, 1)
 	case schemapb.DataType_Double:
-		out.GetDoubleData().Data = replaceArrayValue(out.GetDoubleData().GetData(), update.GetDoubleData().GetData(), index, 1)
+		copyArrayElement(out.GetDoubleData().GetData(), update.GetDoubleData().GetData(), index, 1)
 	case schemapb.DataType_VarChar, schemapb.DataType_String:
-		out.GetStringData().Data = replaceArrayValue(out.GetStringData().GetData(), update.GetStringData().GetData(), index, 1)
+		copyArrayElement(out.GetStringData().GetData(), update.GetStringData().GetData(), index, 1)
 	default:
 		return nil, merr.WrapErrParameterInvalidMsg(
 			"PATH_REPLACE does not support Array element type %s", elementType.String())
@@ -555,20 +556,16 @@ func replaceVectorArrayRowElement(
 	out := proto.Clone(base).(*schemapb.VectorField)
 	switch elementType {
 	case schemapb.DataType_FloatVector:
-		out.GetFloatVector().Data = replaceArrayValue(
+		copyArrayElement(
 			out.GetFloatVector().GetData(), update.GetFloatVector().GetData(), index, int(dim))
 	case schemapb.DataType_BinaryVector:
-		out.Data = &schemapb.VectorField_BinaryVector{BinaryVector: replaceArrayValue(
-			out.GetBinaryVector(), update.GetBinaryVector(), index, int((dim+7)/8))}
+		copyArrayElement(out.GetBinaryVector(), update.GetBinaryVector(), index, int((dim+7)/8))
 	case schemapb.DataType_Float16Vector:
-		out.Data = &schemapb.VectorField_Float16Vector{Float16Vector: replaceArrayValue(
-			out.GetFloat16Vector(), update.GetFloat16Vector(), index, int(dim*2))}
+		copyArrayElement(out.GetFloat16Vector(), update.GetFloat16Vector(), index, int(dim*2))
 	case schemapb.DataType_BFloat16Vector:
-		out.Data = &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: replaceArrayValue(
-			out.GetBfloat16Vector(), update.GetBfloat16Vector(), index, int(dim*2))}
+		copyArrayElement(out.GetBfloat16Vector(), update.GetBfloat16Vector(), index, int(dim*2))
 	case schemapb.DataType_Int8Vector:
-		out.Data = &schemapb.VectorField_Int8Vector{Int8Vector: replaceArrayValue(
-			out.GetInt8Vector(), update.GetInt8Vector(), index, int(dim))}
+		copyArrayElement(out.GetInt8Vector(), update.GetInt8Vector(), index, int(dim))
 	default:
 		return nil, merr.WrapErrParameterInvalidMsg(
 			"PATH_REPLACE does not support ArrayOfVector element type %s", elementType.String())
@@ -576,17 +573,15 @@ func replaceVectorArrayRowElement(
 	return out, nil
 }
 
-func replaceArrayValue[T any](base, update []T, index, width int) []T {
-	out := slices.Clone(base)
-	copy(out[index*width:(index+1)*width], update)
-	return out
+func copyArrayElement[T any](dst, src []T, index, width int) {
+	copy(dst[index*width:(index+1)*width], src)
 }
 
 func scalarArrayRowElementCount(row *schemapb.ScalarField, elementType schemapb.DataType) (int, error) {
 	if row == nil {
 		return 0, merr.WrapErrParameterInvalidMsg("PATH_REPLACE requires a non-nil Array row")
 	}
-	if len(typeutil.GetFieldSpecificValidData(row)) != 0 {
+	if len(typeutil.GetArrayElementValidData(row)) != 0 {
 		return 0, merr.WrapErrParameterInvalidMsg("PATH_REPLACE does not support Array element valid_data")
 	}
 	switch elementType {
@@ -637,7 +632,7 @@ func vectorArrayRowElementCount(row *schemapb.VectorField, elementType schemapb.
 		return 0, merr.WrapErrParameterInvalidMsg(
 			"PATH_REPLACE requires a non-nil vector row and a positive dimension")
 	}
-	if len(typeutil.GetFieldSpecificValidData(row)) != 0 {
+	if len(typeutil.GetVectorArrayElementValidData(row)) != 0 {
 		return 0, merr.WrapErrParameterInvalidMsg(
 			"PATH_REPLACE does not support ArrayOfVector element valid_data")
 	}
@@ -871,6 +866,9 @@ func applyStructPathReplace(dst, operand *schemapb.FieldData, plan *fieldPartial
 			case schemapb.DataType_Array:
 				dstRows := dstChild.GetScalars().GetArrayData().GetData()
 				operandRows := operandChild.GetScalars().GetArrayData().GetData()
+				if dstIndex < 0 || dstIndex >= int64(len(dstRows)) || operandIndex < 0 || operandIndex >= int64(len(operandRows)) {
+					return merr.WrapErrServiceInternalMsg("PATH_REPLACE child %q has out-of-range row mappings: destination %d, operand %d", structChildRawName(childSchema), dstIndex, operandIndex)
+				}
 				replaced, err := replaceArrayRowElement(dstRows[dstIndex], operandRows[operandIndex], plan.index, childSchema.GetElementType())
 				if err != nil {
 					return merr.WrapErrServiceInternalErr(err, "failed to materialize PATH_REPLACE child %q", structChildRawName(childSchema))
@@ -883,6 +881,9 @@ func applyStructPathReplace(dst, operand *schemapb.FieldData, plan *fieldPartial
 				}
 				dstRows := dstChild.GetVectors().GetVectorArray().GetData()
 				operandRows := operandChild.GetVectors().GetVectorArray().GetData()
+				if dstIndex < 0 || dstIndex >= int64(len(dstRows)) || operandIndex < 0 || operandIndex >= int64(len(operandRows)) {
+					return merr.WrapErrServiceInternalMsg("PATH_REPLACE child %q has out-of-range row mappings: destination %d, operand %d", structChildRawName(childSchema), dstIndex, operandIndex)
+				}
 				replaced, err := replaceVectorArrayRowElement(dstRows[dstIndex], operandRows[operandIndex], plan.index, childSchema.GetElementType(), dim)
 				if err != nil {
 					return merr.WrapErrServiceInternalErr(err, "failed to materialize PATH_REPLACE child %q", structChildRawName(childSchema))

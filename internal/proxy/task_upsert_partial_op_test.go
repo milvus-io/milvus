@@ -18,6 +18,7 @@ package proxy
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"testing"
 
@@ -133,11 +134,13 @@ func TestReplaceArrayRowElement(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			base := pathReplaceScalarRow(test.base)
 			update := pathReplaceScalarRow(test.update)
+			originalBase := proto.Clone(base)
+			originalUpdate := proto.Clone(update)
 			got, err := replaceArrayRowElement(base, update, 1, test.elementType)
 			require.NoError(t, err)
 			assert.True(t, proto.Equal(pathReplaceScalarRow(test.want), got))
-			assert.True(t, proto.Equal(pathReplaceScalarRow(test.base), base))
-			assert.True(t, proto.Equal(pathReplaceScalarRow(test.update), update))
+			assert.True(t, proto.Equal(originalBase, base))
+			assert.True(t, proto.Equal(originalUpdate, update))
 		})
 	}
 
@@ -643,6 +646,36 @@ func TestResolveFieldPartialUpdateOps_RejectsInvalidArrayOperand(t *testing.T) {
 	assert.Contains(t, err.Error(), "only supported for PATH_REPLACE")
 }
 
+func TestResolveFieldPartialUpdateOps_PathReplaceElementType(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{arrayIntFieldSchema("scores", false, 8)}}
+	for _, test := range []struct {
+		name        string
+		elementType schemapb.DataType
+		row         *schemapb.ScalarField
+		wantError   bool
+	}{
+		{"omitted REST metadata", schemapb.DataType_None, pathReplaceScalarRow([]int64{100}), false},
+		{"explicit matching metadata", schemapb.DataType_Int64, pathReplaceScalarRow([]int64{100}), false},
+		{"explicit wrong metadata", schemapb.DataType_Float, pathReplaceScalarRow([]int64{100}), true},
+		{"omitted metadata wrong payload", schemapb.DataType_None, pathReplaceScalarRow([]float32{100}), true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fd := arrayLongFieldData("scores", [][]int64{{100}})
+			fd.GetScalars().GetArrayData().ElementType = test.elementType
+			fd.GetScalars().GetArrayData().Data[0] = test.row
+			_, _, err := resolveFieldPartialUpdateOps(&milvuspb.UpsertRequest{
+				NumRows: 1, FieldsData: []*schemapb.FieldData{fd},
+				FieldOps: []*schemapb.FieldPartialUpdateOp{pathOp("scores", "[1]")},
+			}, schema)
+			if test.wantError {
+				require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
 func TestResolveFieldPartialUpdateOps_StructSubsetAndExplicitChild(t *testing.T) {
 	structSchema := pathReplaceStructSchema()
 	age := structScalarChildFieldData("age",
@@ -870,6 +903,28 @@ func TestApplyStructPathReplacePreservesMaterializationCause(t *testing.T) {
 	}
 }
 
+func TestApplyStructPathReplaceRejectsInvalidRowMappings(t *testing.T) {
+	schema := pathReplaceStructSchema()
+	for _, child := range []*schemapb.FieldSchema{schema.GetFields()[0], schema.GetFields()[2]} {
+		t.Run(child.GetName(), func(t *testing.T) {
+			var data *schemapb.FieldData
+			if child.GetDataType() == schemapb.DataType_Array {
+				data = structScalarChildFieldData("age", pathReplaceScalarRow([]int64{18}))
+			} else {
+				data = structVectorChildFieldData("embedding", &schemapb.VectorField{Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2}}}})
+			}
+			field := &schemapb.FieldData{FieldName: "profile", Type: schemapb.DataType_ArrayOfStruct,
+				Field: &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{Fields: []*schemapb.FieldData{data}}}}
+			plan := &fieldPartialUpdatePlan{op: schemapb.FieldPartialUpdateOp_PATH_REPLACE, structParent: schema, operandChildren: []*schemapb.FieldSchema{child}}
+			for _, indices := range [][2]int64{{-1, 0}, {1, 0}, {0, -1}, {0, 1}} {
+				err := applyStructPathReplace(proto.Clone(field).(*schemapb.FieldData), field, plan, []int64{indices[0]}, []int64{indices[1]})
+				require.ErrorIs(t, err, merr.ErrServiceInternal)
+				assert.Equal(t, merr.SystemError, merr.GetErrorType(err))
+			}
+		})
+	}
+}
+
 func TestUpsertTaskQueryPreExecutePathReplaceAlignsRowsByPrimaryKey(t *testing.T) {
 	idField := func(ids ...int64) *schemapb.FieldData {
 		return &schemapb.FieldData{
@@ -896,6 +951,9 @@ func TestUpsertTaskQueryPreExecutePathReplaceAlignsRowsByPrimaryKey(t *testing.T
 			arrayLongFieldData("scores", [][]int64{{200}, {100}}),
 		}
 		requestFields[1].FieldId = 101
+		// Match REST's omitted metadata, then exercise the real resolver and
+		// the insertPreExecute property fill before materialization.
+		requestFields[1].GetScalars().GetArrayData().ElementType = schemapb.DataType_None
 		request := &milvuspb.UpsertRequest{
 			DbName:         "default",
 			CollectionName: "path_replace_test",
@@ -906,6 +964,7 @@ func TestUpsertTaskQueryPreExecutePathReplaceAlignsRowsByPrimaryKey(t *testing.T
 		}
 		plans, _, err := resolveFieldPartialUpdateOps(request, collectionSchema)
 		require.NoError(t, err)
+		require.NoError(t, fillFieldPropertiesOnly(requestFields, schema))
 		return &upsertTask{
 			ctx:                     context.Background(),
 			schema:                  schema,
@@ -968,6 +1027,36 @@ func TestUpsertTaskQueryPreExecutePathReplaceAlignsRowsByPrimaryKey(t *testing.T
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "requires every primary key")
 	})
+
+	for _, rowCount := range []uint32{1, 3} {
+		t.Run(fmt.Sprintf("struct operand rows %d with two primary keys", rowCount), func(t *testing.T) {
+			task := newTask()
+			structSchema := proto.Clone(collectionSchema).(*schemapb.CollectionSchema)
+			structSchema.Fields = structSchema.Fields[:1]
+			structSchema.StructArrayFields = []*schemapb.StructArrayFieldSchema{pathReplaceStructSchema()}
+			task.schema = mustNewSchemaInfo(structSchema)
+			rows := make([]*schemapb.ScalarField, rowCount)
+			for i := range rows {
+				rows[i] = pathReplaceScalarRow([]int64{18})
+			}
+			operand := &schemapb.FieldData{FieldName: "profile", Type: schemapb.DataType_ArrayOfStruct,
+				Field: &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{Fields: []*schemapb.FieldData{structScalarChildFieldData("age", rows...)}}}}
+			task.req.NumRows = rowCount
+			task.req.FieldsData = []*schemapb.FieldData{idField(1, 2), operand}
+			task.req.FieldOps = []*schemapb.FieldPartialUpdateOp{pathOp("profile", "[0]")}
+			plans, _, err := resolveFieldPartialUpdateOps(task.req, structSchema)
+			require.NoError(t, err)
+			task.fieldPartialUpdatePlans = plans
+			// Neither retrieval nor materialization should see this invalid request.
+			mockRetrieve := mockey.Mock(retrieveByPKs).Return(nil, segcore.StorageCost{}, merr.ErrServiceInternal).Build()
+			defer mockRetrieve.UnPatch()
+			err = task.queryPreExecute(context.Background())
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.Equal(t, merr.InputError, merr.GetErrorType(err))
+			assert.ErrorContains(t, err, "does not match primary key count")
+			assert.Zero(t, mockRetrieve.Times())
+		})
+	}
 }
 
 func TestValidateExistingPathRowsRejectsInvalidTargets(t *testing.T) {

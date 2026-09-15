@@ -316,6 +316,10 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 	}
 
 	upsertIDSize := typeutil.GetSizeOfIDs(upsertIDs)
+	if hasPathReplacePlan(it.fieldPartialUpdatePlans) && uint64(it.req.GetNumRows()) != uint64(upsertIDSize) {
+		return merr.WrapErrParameterInvalidMsg(
+			"PATH_REPLACE num_rows %d does not match primary key count %d", it.req.GetNumRows(), upsertIDSize)
+	}
 	if upsertIDSize == 0 {
 		it.deletePKs = &schemapb.IDs{}
 		it.insertFieldData = it.req.GetFieldsData()

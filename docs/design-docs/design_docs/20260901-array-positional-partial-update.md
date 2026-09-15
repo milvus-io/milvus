@@ -97,7 +97,7 @@ a nested mutation language into downstream storage protocols.
 - Define one path grammar and equivalent failure semantics for the server,
   REST v2, and every SDK that exposes the feature.
 - Preserve compatibility with old clients and fail safely when a new client
-  reaches an old Proxy.
+  reaches an older Proxy that already validates `field_ops`.
 - Reuse the existing partial-upsert materialization and write path after Proxy
   resolves the mutation.
 
@@ -222,10 +222,12 @@ signals.
 
 The operation must use a new enum value instead of interpreting
 `REPLACE + non-empty path` as positional replacement. During a rolling upgrade,
-an old server may ignore the unknown `path` field. If the op remained
+an older server that already validates `field_ops` may ignore the unknown
+`path` field. If the op remained
 `REPLACE`, that server could silently perform a whole-field replacement. With
 the new numeric enum value, the existing validation switch reaches its unknown
-operation branch and rejects the request instead.
+operation branch and rejects the request instead. This guarantee does not
+apply to servers that do not recognize `field_ops` at all.
 
 No op is embedded in `FieldData`. `FieldData` remains a reusable data carrier
 for insert, query, search, and internal messages.
@@ -738,11 +740,21 @@ through the existing partial-upsert function pipeline.
 | Old client -> old or new Proxy | Unchanged |
 | New client, no `PATH_REPLACE` -> old or new Proxy | Unchanged |
 | New client with `PATH_REPLACE` -> new Proxy | Supported |
-| New client with `PATH_REPLACE` -> old Proxy | Rejected as unknown op; no silent whole-field replace |
+| New client with `PATH_REPLACE` -> older Proxy that validates `field_ops` | Rejected as unknown op; no silent whole-field replace |
+| New client with `PATH_REPLACE` -> Proxy without `field_ops` validation | Unsupported; no fail-closed guarantee |
 
 The feature is considered available only after every request-serving Proxy in
 a cluster supports enum value 3. SDK release notes must call out the minimum
-server version.
+server version. This change does not add SDK capability probing; deployment
+and application configuration must enforce this prerequisite before sending
+`PATH_REPLACE` requests.
+
+A server that does not recognize `field_ops` can ignore the directive while
+still processing `partial_update` and the singleton operand as a whole-field
+replacement. For example, replacing index 1 in `[10, 20, 30]` with operand
+`[100]` could instead replace the entire Array with `[100]`. This risk is
+derived from the older partial-upsert source path, not an old-server end-to-end
+reproduction. Such servers are outside the compatibility guarantee.
 
 Downstream components can be upgraded independently because they receive only
 the existing materialized DML representation. CDC observes the resulting full
@@ -814,8 +826,10 @@ conversion logic.
 
 ### Interpret `REPLACE + path` as positional replacement
 
-Rejected because an old server can ignore the unknown `path` field and execute
-whole-field `REPLACE`. A distinct enum value fails closed.
+Rejected because an older server can ignore the unknown `path` field and
+execute whole-field `REPLACE`. A distinct enum value fails closed when the
+server already validates `field_ops`; see Compatibility and Upgrade for the
+older-server boundary.
 
 ### Put the full path in `field_name`
 
@@ -943,9 +957,10 @@ The design is under review. It requires explicit approval stamps from
 5. Monitor existing Upsert failures and positional merge latency during initial
    rollout.
 
-No feature flag is required for correctness because an old Proxy fails closed
-on the unknown enum. A deployment may still gate SDK exposure until all Proxies
-are upgraded.
+This change adds neither a feature flag nor SDK capability probing. Deployments
+must gate use until all request-serving Proxies support `PATH_REPLACE`.
+Unknown-enum rejection protects only older Proxies that already validate
+`field_ops`; it is not a substitute for the deployment prerequisite.
 
 ## Acceptance Criteria
 
@@ -963,8 +978,9 @@ are upgraded.
 - Literal bracketed dynamic JSON keys are never parsed as paths.
 - Every participating SDK and REST v2 serialize the same relative path string
   and protobuf-level dense singleton operand convention.
-- Old Proxies reject the new enum and cannot silently perform whole-field
-  replacement.
+- Older Proxies that already validate `field_ops` reject the new enum and
+  cannot silently perform whole-field replacement. Servers without that
+  validation are outside the compatibility guarantee.
 - Proxy materializes complete `FieldData`; downstream DML and storage protocols
   remain unchanged.
 - Each Milvus or SDK component completes its listed validation before that
