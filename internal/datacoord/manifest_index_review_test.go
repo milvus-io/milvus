@@ -104,12 +104,13 @@ func TestInitMetaDoesNotReplayManifestScan(t *testing.T) {
 				require.NoError(t, m.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{
 					CollectionID: 100, PartitionID: 10, ID: id, State: commonpb.SegmentState_Flushed,
 					StorageVersion: storage.StorageV3, ManifestHasIndex: true,
-					ManifestPath: packed.MarshalManifestPath(metautil.JoinIDPath(id), 1),
+					ManifestPath: packed.MarshalManifestPath(path.Join("/tmp/test-restart", "insert_log", metautil.JoinIDPath(100, 10, id)), 1),
 				})))
 			}
 			var mu sync.Mutex
 			reads := make(map[string]int)
-			bad := packed.MarshalManifestPath("5002", 1)
+			good := packed.MarshalManifestPath(path.Join("/tmp/test-restart", "insert_log", metautil.JoinIDPath(100, 10, 5001)), 1)
+			bad := packed.MarshalManifestPath(path.Join("/tmp/test-restart", "insert_log", metautil.JoinIDPath(100, 10, 5002)), 1)
 			reader := mockey.Mock(packed.GetManifestIndexInfos).To(func(pointer string, _ *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
 				mu.Lock()
 				defer mu.Unlock()
@@ -133,7 +134,7 @@ func TestInitMetaDoesNotReplayManifestScan(t *testing.T) {
 			b.EXPECT().ListDatabases(mock.Anything).Run(func(context.Context) { close(collectionsLoaded) }).Return(nil, nil).Maybe()
 			server := &Server{ctx: ctx, kv: kv, broker: b}
 			err := server.initMeta(cm)
-			require.Equal(t, 1, reads[packed.MarshalManifestPath("5001", 1)])
+			require.Equal(t, 1, reads[good])
 			if mode == "transient" {
 				require.NoError(t, err)
 				<-collectionsLoaded

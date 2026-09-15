@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -67,12 +68,13 @@ func (s *MixCompactionTaskStorageV2Suite) SetupTest() {
 }
 
 func (s *MixCompactionTaskStorageV2Suite) TearDownTest() {
+	localStoragePath := paramtable.Get().LocalStorageCfg.Path.GetValue()
+	os.RemoveAll(filepath.Join(localStoragePath, "insert_log"))
+	os.RemoveAll(filepath.Join(localStoragePath, "delta_log"))
+	os.RemoveAll(filepath.Join(localStoragePath, "stats_log"))
 	paramtable.Get().Reset(paramtable.Get().CommonCfg.StorageType.Key)
 	paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
 	paramtable.Get().Reset(paramtable.Get().LocalStorageCfg.Path.Key)
-	os.RemoveAll(paramtable.Get().LocalStorageCfg.Path.GetValue() + "insert_log")
-	os.RemoveAll(paramtable.Get().LocalStorageCfg.Path.GetValue() + "delta_log")
-	os.RemoveAll(paramtable.Get().LocalStorageCfg.Path.GetValue() + "stats_log")
 	initcore.CleanArrowFileSystem()
 }
 

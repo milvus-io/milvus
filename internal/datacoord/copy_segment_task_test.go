@@ -1588,7 +1588,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_IndexWritePlacementMatrix
 			s.True(present)
 			s.Equal(tc.enabled, persistedPlacement)
 
-			manifestPath := packed.MarshalManifestPath("files/insert_log/100/10/2001", 3)
+			manifestPath := packed.MarshalManifestPath("/tmp/test-restart/files/insert_log/100/10/2001", 3)
 			var manifestBuildIDs []int64
 			if tc.enabled {
 				store.revisions[manifestPath] = []packed.ManifestIndexInfo{{

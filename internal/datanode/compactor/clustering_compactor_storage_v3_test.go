@@ -190,7 +190,7 @@ func (s *ClusteringCompactionTaskStorageV3Suite) initStorageV3Segments(rows int,
 	bfs := pkoracle.NewBloomFilterSet()
 
 	k := metautil.JoinIDPath(CollectionID, PartitionID, segmentID)
-	basePath := path.Join(common.SegmentInsertLogPath, k)
+	basePath := path.Join(rootPath, common.SegmentInsertLogPath, k)
 	manifestPath := packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{
@@ -395,7 +395,7 @@ func (s *MixCompactionTaskStorageV3Suite) initStorageV3Segments(rows int, segmen
 	bfs := pkoracle.NewBloomFilterSet()
 
 	k := metautil.JoinIDPath(CollectionID, PartitionID, segmentID)
-	basePath := path.Join(common.SegmentInsertLogPath, k)
+	basePath := path.Join(rootPath, common.SegmentInsertLogPath, k)
 	manifestPath := packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{
@@ -443,7 +443,7 @@ func (s *MixCompactionTaskStorageV3Suite) initTextLOBStorageV3Segment(rows int, 
 	bfs := pkoracle.NewBloomFilterSet()
 
 	k := metautil.JoinIDPath(CollectionID, PartitionID, segmentID)
-	basePath := path.Join(common.SegmentInsertLogPath, k)
+	basePath := path.Join(rootPath, common.SegmentInsertLogPath, k)
 	manifestPath := packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{
