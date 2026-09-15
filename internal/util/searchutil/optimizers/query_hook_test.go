@@ -378,18 +378,18 @@ func (suite *QueryHookSuite) TestStrictGroupServerSettings() {
 func (suite *QueryHookSuite) TestStrictGroupPhase1AndRefineSettings() {
 	paramtable.Init()
 	cfg := paramtable.Get()
-	budgetKey := cfg.QueryNodeCfg.StrictGroupPhase1MaxCandidates.Key
+	weightKey := cfg.QueryNodeCfg.StrictGroupPhase1CandidateWeight.Key
 	skipKey := cfg.QueryNodeCfg.StrictGroupSkipRefine.Key
-	defer cfg.Reset(budgetKey)
+	defer cfg.Reset(weightKey)
 	defer cfg.Reset(skipKey)
 	var previous *planpb.QueryInfo
-	for _, budget := range []string{"0", "7000", "13", "0"} {
+	for _, weight := range []string{"0", "50", "13", "0"} {
 		for _, skip := range []string{"false", "true"} {
-			cfg.Save(budgetKey, budget)
+			cfg.Save(weightKey, weight)
 			cfg.Save(skipKey, skip)
 			info := &planpb.QueryInfo{
 				Topk: 50, GroupByFieldId: 101, GroupSize: 3, StrictGroupSize: true,
-				SearchParams: `{"strict_group_phase1_max_candidates":"bad","strict_group_skip_refine":"bad","nprobe":128}`,
+				SearchParams: `{"strict_group_phase1_candidate_weight":"bad","strict_group_skip_refine":"bad","nprobe":128}`,
 			}
 			before := ""
 			if previous != nil {
@@ -400,7 +400,7 @@ func (suite *QueryHookSuite) TestStrictGroupPhase1AndRefineSettings() {
 			suite.True(changed)
 			var values map[string]json.RawMessage
 			suite.Require().NoError(json.Unmarshal([]byte(info.SearchParams), &values))
-			suite.Equal(budget, string(values[common.StrictGroupPhase1MaxCandidatesKey]))
+			suite.Equal(weight, string(values[common.StrictGroupPhase1CandidateWeightKey]))
 			suite.Equal(skip, string(values[common.StrictGroupSkipRefineKey]))
 			suite.Equal("128", string(values["nprobe"]))
 			if previous != nil {
@@ -410,7 +410,7 @@ func (suite *QueryHookSuite) TestStrictGroupPhase1AndRefineSettings() {
 			for _, strict := range []bool{false, true} {
 				ineligible := &planpb.QueryInfo{
 					GroupByFieldId: 101, GroupSize: 1, StrictGroupSize: strict,
-					SearchParams: `{"strict_group_phase1_max_candidates":5,"strict_group_skip_refine":true}`,
+					SearchParams: `{"strict_group_phase1_candidate_weight":5,"strict_group_skip_refine":true}`,
 				}
 				_, err = applyStrictGroupSettings(context.Background(), ineligible)
 				suite.Require().NoError(err)
@@ -419,7 +419,7 @@ func (suite *QueryHookSuite) TestStrictGroupPhase1AndRefineSettings() {
 		}
 	}
 	for key, bad := range map[string][]string{
-		budgetKey: {"-1", "1.5", "9223372036854775808", "bad"},
+		weightKey: {"-1", "1.5", "9223372036854775808", "bad"},
 		skipKey:   {"bad", "0.5", ""},
 	} {
 		for _, value := range bad {

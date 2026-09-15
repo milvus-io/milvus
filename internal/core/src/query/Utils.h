@@ -32,6 +32,25 @@ CanUseStrictGroupControls(const SearchInfo& info, int64_t nq) {
            nq == 1 && info.array_offsets_ == nullptr;
 }
 
+// Zero disables truncation; saturation prevents overflow from causing an
+// unintended early cutoff.
+inline int64_t
+StrictGroupPhase1CandidateLimit(const SearchInfo& info) {
+    if (info.strict_group_phase1_candidate_weight_ <= 0 || info.topk_ <= 0 ||
+        info.group_size_ <= 0) {
+        return 0;
+    }
+    const auto max = std::numeric_limits<int64_t>::max();
+    int64_t limit = info.strict_group_phase1_candidate_weight_;
+    for (int64_t factor : {info.topk_, info.group_size_}) {
+        if (limit > max / factor) {
+            return max;
+        }
+        limit *= factor;
+    }
+    return limit;
+}
+
 inline void
 ApplyStrictGroupSkipRefine(const SearchInfo& info,
                            int64_t nq,
