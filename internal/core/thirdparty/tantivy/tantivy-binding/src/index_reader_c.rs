@@ -64,6 +64,21 @@ pub extern "C" fn tantivy_terms_query_bool(
 }
 
 #[no_mangle]
+pub extern "C" fn tantivy_term_query_bool_with_callback(
+    ptr: *mut c_void,
+    term: bool,
+    context: *mut c_void,
+    callback: SetBitsetFn,
+) -> RustResult {
+    let real = ptr as *mut IndexReaderWrapper;
+    unsafe {
+        (*real)
+            .term_query_bool_with_callback(term, context, callback)
+            .into()
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn tantivy_terms_query_i64(
     ptr: *mut c_void,
     terms: *const i64,
@@ -73,6 +88,21 @@ pub extern "C" fn tantivy_terms_query_i64(
     let real = ptr as *mut IndexReaderWrapper;
     let terms = unsafe { convert_to_rust_slice!(terms, len) };
     unsafe { (*real).terms_query_i64(terms, bitset).into() }
+}
+
+#[no_mangle]
+pub extern "C" fn tantivy_term_query_i64_with_callback(
+    ptr: *mut c_void,
+    term: i64,
+    context: *mut c_void,
+    callback: SetBitsetFn,
+) -> RustResult {
+    let real = ptr as *mut IndexReaderWrapper;
+    unsafe {
+        (*real)
+            .term_query_i64_with_callback(term, context, callback)
+            .into()
+    }
 }
 
 #[no_mangle]
@@ -88,6 +118,21 @@ pub extern "C" fn tantivy_terms_query_f64(
 }
 
 #[no_mangle]
+pub extern "C" fn tantivy_term_query_f64_with_callback(
+    ptr: *mut c_void,
+    term: f64,
+    context: *mut c_void,
+    callback: SetBitsetFn,
+) -> RustResult {
+    let real = ptr as *mut IndexReaderWrapper;
+    unsafe {
+        (*real)
+            .term_query_f64_with_callback(term, context, callback)
+            .into()
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn tantivy_terms_query_keyword(
     ptr: *mut c_void,
     terms: *const *const c_char,
@@ -97,6 +142,22 @@ pub extern "C" fn tantivy_terms_query_keyword(
     let real = ptr as *mut IndexReaderWrapper;
     let terms = unsafe { convert_to_rust_slice!(terms, len) };
     unsafe { (*real).terms_query_keyword(terms, bitset).into() }
+}
+
+#[no_mangle]
+pub extern "C" fn tantivy_term_query_keyword_with_callback(
+    ptr: *mut c_void,
+    term: *const c_char,
+    context: *mut c_void,
+    callback: SetBitsetFn,
+) -> RustResult {
+    let real = ptr as *mut IndexReaderWrapper;
+    let term = cstr_to_str!(term);
+    unsafe {
+        (*real)
+            .term_query_keyword_with_callback(term, context, callback)
+            .into()
+    }
 }
 
 #[no_mangle]
