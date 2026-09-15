@@ -48,6 +48,8 @@ func isSegmentIndexRollbackRetained(segment *SegmentInfo) bool {
 // rollbackSegmentIndexes transfers at most one atomic batch from the current
 // manifest to etcd. The lock covers discovery as well as publication, and is
 // shared with dropped-segment GC so no prefix is removed during this transfer.
+// The return count includes retired entries retracted without a catalog PUT;
+// the restored-record metric counts only actual PUTs after publication.
 func (m *meta) rollbackSegmentIndexes(ctx context.Context, segmentID int64, catalogAbsentBuilds ...int64) (int, error) {
 	locks := m.getSegmentManifestLocks()
 	locks.Lock(segmentID)
@@ -139,7 +141,11 @@ func (m *meta) rollbackSegmentIndexes(ctx context.Context, segmentID int64, cata
 func (m *meta) validateRollbackIndex(segment *SegmentInfo, mutation SegmentIndexMutation, record *model.SegmentIndex) error {
 	entry := mutation.rollbackEntry
 	if record == nil {
-		return merr.Wrapf(merr.ErrDataIntegrity, "rollback has no record for build %d", mutation.BuildID)
+		// GC may have retired the record while leaving an entry in a retained
+		// Dropped segment's manifest. Retract that entry without recreating the
+		// record. The preparer validated the entry under the segment lock, and
+		// the commit holds its BuildID lock through publication.
+		return nil
 	}
 	if entry == nil {
 		// Only the locked rollback preparer can supply this proof of absence.
@@ -304,7 +310,6 @@ func (i *manifestIndexRollbackInspector) runOnce(ctx context.Context) {
 				mlog.RatedWarn(ctx, 1, "manifest index rollback will retry", mlog.FieldSegmentID(segment.GetID()), mlog.Err(err))
 			}
 			metrics.DataCoordManifestIndexRollbackAttempts.WithLabelValues(status).Inc()
-			metrics.DataCoordManifestIndexRollbackRecords.Add(float64(n))
 			return n, nil
 		}))
 	}

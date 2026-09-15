@@ -134,7 +134,7 @@ func TestManifestIndexRollbackIndependentSwitch(t *testing.T) {
 }
 
 func TestManifestIndexRollbackFailureAndRetry(t *testing.T) {
-	for _, scenario := range []string{"read", "write", "read back", "catalog", "pointer advances", "segment drops", "missing record", "invalid entry"} {
+	for _, scenario := range []string{"read", "write", "read back", "catalog", "pointer advances", "segment drops", "invalid entry"} {
 		t.Run(scenario, func(t *testing.T) {
 			m, catalog, store, kv := rollbackFixture(t)
 			ctx := context.TODO()
@@ -147,8 +147,6 @@ func TestManifestIndexRollbackFailureAndRetry(t *testing.T) {
 				store.failReadsFrom()
 			case "catalog":
 				kv.failAtomicUpdate = true
-			case "missing record":
-				m.indexMeta.segmentBuildInfo.Remove(restartBuildID)
 			case "invalid entry":
 				store.revisions[before][0].Path = "/invalid/index/path"
 			default:
@@ -206,9 +204,6 @@ func TestManifestIndexRollbackFailureAndRetry(t *testing.T) {
 			}
 			kv.failAtomicUpdate = false
 			store.failReads = false
-			if scenario == "missing record" {
-				m.indexMeta.segmentBuildInfo.Add(originalRecord)
-			}
 			if scenario == "invalid entry" {
 				entry, buildErr := buildManifestIndexInfo(m, m.GetSegment(ctx, restartSegID), originalRecord)
 				require.NoError(t, buildErr)
