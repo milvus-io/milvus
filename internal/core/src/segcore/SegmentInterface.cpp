@@ -11,15 +11,20 @@
 
 #include "SegmentInterface.h"
 
+#include <folly/CancellationToken.h>
 #include <folly/ExceptionWrapper.h>
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <future>
 #include <limits>
 #include <map>
+#include <memory>
 #include <ratio>
 #include <type_traits>
 #include <unordered_set>
+#include <utility>
+#include <vector>
 
 #include "ChunkedSegmentSealedImpl.h"
 #include "NamedType/named_type_impl.hpp"
@@ -48,6 +53,8 @@
 #include "query/PlanImpl.h"
 #include "query/PlanNode.h"
 #include "segcore/ConcurrentVector.h"
+#include "storage/ThreadPools.h"
+#include "storage/Util.h"
 
 namespace milvus::segcore {
 
@@ -56,6 +63,17 @@ SegmentInternalInterface::GetGeometryCache(FieldId field_id) const {
     return milvus::exec::SimpleGeometryCacheManager::Instance().GetCache(
         segment_instance_uid(), get_segment_id(), field_id);
 }
+
+namespace {
+
+struct FetchedOutputField {
+    FieldId field_id;
+    std::unique_ptr<DataArray> field_data;
+    int64_t scanned_remote_bytes;
+    int64_t scanned_total_bytes;
+};
+
+}  // namespace
 
 void
 SegmentInternalInterface::FillPrimaryKeys(const query::Plan* plan,
@@ -98,6 +116,80 @@ SegmentInternalInterface::FillPrimaryKeys(const query::Plan* plan,
 }
 
 void
+SegmentInternalInterface::FillSearchResultOutputFields(
+    const query::Plan* plan,
+    const std::vector<FieldId>& field_ids,
+    SearchResult& results,
+    milvus::OpContext* op_ctx) const {
+    if (field_ids.empty()) {
+        return;
+    }
+
+    const auto size = results.seg_offsets_.size();
+    auto fetch_one = [this, plan, &results, size, op_ctx](FieldId field_id) {
+        milvus::OpContext field_ctx;
+        if (op_ctx != nullptr) {
+            field_ctx.cancellation_token = op_ctx->cancellation_token;
+            field_ctx.runtime_load_priority = op_ctx->runtime_load_priority;
+            field_ctx.coload_fields = op_ctx->coload_fields;
+            field_ctx.pinned_segment_state = op_ctx->pinned_segment_state;
+            field_ctx.pinned_state_owner = op_ctx->pinned_state_owner;
+            field_ctx.trace_context = op_ctx->trace_context;
+            field_ctx.trace_span = op_ctx->trace_span;
+        }
+        segcore::CheckCancellation(
+            &field_ctx, get_segment_id(), field_id.get(), "FillTargetEntry");
+        auto& field_meta = plan->schema_->operator[](field_id);
+        std::unique_ptr<DataArray> field_data;
+        if (plan->schema_->get_dynamic_field_id().has_value() &&
+            plan->schema_->get_dynamic_field_id().value() == field_id &&
+            !plan->target_dynamic_fields_.empty()) {
+            field_data = bulk_subscript(&field_ctx,
+                                        field_id,
+                                        results.seg_offsets_.data(),
+                                        size,
+                                        plan->target_dynamic_fields_);
+        } else if (!is_field_exist(field_id)) {
+            field_data = bulk_subscript_not_exist_field(field_meta, size);
+        } else {
+            field_data = bulk_subscript(
+                &field_ctx, field_id, results.seg_offsets_.data(), size);
+        }
+        return FetchedOutputField{
+            field_id,
+            std::move(field_data),
+            field_ctx.storage_usage.scanned_cold_bytes.load(),
+            field_ctx.storage_usage.scanned_total_bytes.load()};
+    };
+
+    // Multi-segment parents run on the search executor. Use MIDDLE for field
+    // tasks so parents and children never wait on the same pool.
+    std::vector<std::future<FetchedOutputField>> futures;
+    futures.reserve(field_ids.size());
+    auto& pool = ThreadPools::GetThreadPool(ThreadPoolPriority::MIDDLE);
+    try {
+        for (auto field_id : field_ids) {
+            futures.emplace_back(pool.Submit(
+                [fetch_one, field_id] { return fetch_one(field_id); }));
+        }
+    } catch (...) {
+        storage::DrainFutures(futures);
+        throw;
+    }
+
+    auto fetched_fields = storage::WaitAllFutures(std::move(futures));
+
+    for (auto& fetched : fetched_fields) {
+        results.output_fields_data_[fetched.field_id] =
+            std::move(fetched.field_data);
+        results.search_storage_cost_.scanned_remote_bytes +=
+            fetched.scanned_remote_bytes;
+        results.search_storage_cost_.scanned_total_bytes +=
+            fetched.scanned_total_bytes;
+    }
+}
+
+void
 SegmentInternalInterface::FillTargetEntry(const query::Plan* plan,
                                           SearchResult& results,
                                           milvus::OpContext* op_ctx) const {
@@ -107,40 +199,7 @@ SegmentInternalInterface::FillTargetEntry(const query::Plan* plan,
     AssertInfo(results.seg_offsets_.size() == size,
                "Size of result distances is not equal to size of ids");
 
-    std::unique_ptr<DataArray> field_data;
-    // See FillPrimaryKeys: per-call OpContext so storage_usage stays scoped
-    // to this segment's fills.
-    milvus::OpContext local_ctx;
-    if (op_ctx != nullptr) {
-        local_ctx.cancellation_token = op_ctx->cancellation_token;
-        local_ctx.runtime_load_priority = op_ctx->runtime_load_priority;
-    }
-    // fill other entries except primary key by result_offset
-    for (auto field_id : plan->target_entries_) {
-        segcore::CheckCancellation(
-            op_ctx, get_segment_id(), field_id.get(), "FillTargetEntry");
-        auto& field_meta = plan->schema_->operator[](field_id);
-        if (plan->schema_->get_dynamic_field_id().has_value() &&
-            plan->schema_->get_dynamic_field_id().value() == field_id &&
-            !plan->target_dynamic_fields_.empty()) {
-            auto& target_dynamic_fields = plan->target_dynamic_fields_;
-            field_data = bulk_subscript(&local_ctx,
-                                        field_id,
-                                        results.seg_offsets_.data(),
-                                        size,
-                                        target_dynamic_fields);
-        } else if (!is_field_exist(field_id)) {
-            field_data = bulk_subscript_not_exist_field(field_meta, size);
-        } else {
-            field_data = bulk_subscript(
-                &local_ctx, field_id, results.seg_offsets_.data(), size);
-        }
-        results.output_fields_data_[field_id] = std::move(field_data);
-    }
-    results.search_storage_cost_.scanned_remote_bytes +=
-        local_ctx.storage_usage.scanned_cold_bytes.load();
-    results.search_storage_cost_.scanned_total_bytes +=
-        local_ctx.storage_usage.scanned_total_bytes.load();
+    FillSearchResultOutputFields(plan, plan->target_entries_, results, op_ctx);
 }
 
 std::unique_ptr<SearchResult>
