@@ -22,6 +22,10 @@
 #include "knowhere/comp/index_param.h"
 
 const int64_t INVALID_FIELD_ID = -1;
+inline constexpr char kStrictGroupAcceptanceThreshold[] =
+    "strict_group_acceptance_threshold";
+inline constexpr char kStrictGroupProbeCandidates[] =
+    "strict_group_probe_candidates";
 const int64_t INVALID_SEG_OFFSET = -1;
 const int64_t INVALID_ARRAY_INDEX = -1;
 const milvus::PkType INVALID_PK;  // of std::monostate if not set.
