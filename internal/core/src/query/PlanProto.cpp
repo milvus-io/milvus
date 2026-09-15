@@ -49,18 +49,18 @@ ParseStrictGroupSettings(SearchInfo& info) {
         info.strict_group_skip_refine_ = it->get<bool>();
         params.erase(it);
     }
-    if (auto it = params.find(kStrictGroupPhase1MaxCandidates);
+    if (auto it = params.find(kStrictGroupPhase1CandidateWeight);
         it != params.end()) {
         if (!it->is_number_integer() ||
             (it->is_number_unsigned() &&
              it->get<uint64_t>() >
                  static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) ||
             it->get<int64_t>() < 0) {
-            ThrowInfo(
-                InvalidParameter,
-                "strict group phase-one budget must be a nonnegative int64");
+            ThrowInfo(InvalidParameter,
+                      "strict group phase-one candidate weight must be a "
+                      "nonnegative int64");
         }
-        info.strict_group_phase1_max_candidates_ = it->get<int64_t>();
+        info.strict_group_phase1_candidate_weight_ = it->get<int64_t>();
         params.erase(it);
     }
     if (auto it = params.find(kStrictGroupDebug); it != params.end()) {

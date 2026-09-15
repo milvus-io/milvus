@@ -988,17 +988,17 @@ func TestQueryNodeStrictGroupSettings(t *testing.T) {
 	params := &ComponentParam{}
 	params.Init(NewBaseTable(SkipRemote(true)))
 	cfg := &params.QueryNodeCfg
-	assert.Equal(t, int64(0), cfg.StrictGroupPhase1MaxCandidates.GetAsInt64())
+	assert.Equal(t, int64(0), cfg.StrictGroupPhase1CandidateWeight.GetAsInt64())
 	assert.False(t, cfg.StrictGroupSkipRefine.GetAsBool())
-	params.Save(cfg.StrictGroupPhase1MaxCandidates.Key, "7000")
+	params.Save(cfg.StrictGroupPhase1CandidateWeight.Key, "50")
 	params.Save(cfg.StrictGroupSkipRefine.Key, "true")
-	assert.Equal(t, int64(7000), cfg.StrictGroupPhase1MaxCandidates.GetAsInt64())
+	assert.Equal(t, int64(50), cfg.StrictGroupPhase1CandidateWeight.GetAsInt64())
 	assert.True(t, cfg.StrictGroupSkipRefine.GetAsBool())
-	params.Reset(cfg.StrictGroupPhase1MaxCandidates.Key)
+	params.Reset(cfg.StrictGroupPhase1CandidateWeight.Key)
 	params.Reset(cfg.StrictGroupSkipRefine.Key)
-	assert.Equal(t, int64(0), cfg.StrictGroupPhase1MaxCandidates.GetAsInt64())
+	assert.Equal(t, int64(0), cfg.StrictGroupPhase1CandidateWeight.GetAsInt64())
 	assert.False(t, cfg.StrictGroupSkipRefine.GetAsBool())
-	for _, name := range []string{"StrictGroupPhase1MaxCandidates", "StrictGroupSkipRefine"} {
+	for _, name := range []string{"StrictGroupPhase1CandidateWeight", "StrictGroupSkipRefine"} {
 		field, ok := reflect.TypeOf(cfg).Elem().FieldByName(name)
 		assert.True(t, ok)
 		assert.Equal(t, "true", field.Tag.Get("refreshable"))
