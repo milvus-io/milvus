@@ -2,6 +2,7 @@ package segment
 
 import (
 	"context"
+	"path"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -10,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -36,6 +38,75 @@ func TestCurrentSplitForGrowingPackFillsNewSplitFormats(t *testing.T) {
 	require.NotEmpty(t, columnGroups)
 	for _, columnGroup := range columnGroups {
 		assert.Equal(t, "parquet", columnGroup.Format)
+	}
+}
+
+func TestManifestPathForGrowingPackUsesPrimaryStorageRoot(t *testing.T) {
+	params := paramtable.Get()
+	meta := &streamingpb.SegmentAssignmentMeta{
+		CollectionId:   1,
+		PartitionId:    2,
+		SegmentId:      3,
+		StorageVersion: storage.StorageV3,
+	}
+	localRoot := t.TempDir()
+
+	for _, testCase := range []struct {
+		name        string
+		storageType string
+		minioRoot   string
+		wantRoot    string
+	}{
+		{name: "local", storageType: "local", minioRoot: "files", wantRoot: localRoot},
+		{name: "remote", storageType: "remote", minioRoot: "files", wantRoot: "files"},
+		{name: "remote_bucket_root", storageType: "remote", minioRoot: "/", wantRoot: "."},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.NoError(t, params.Save(params.CommonCfg.StorageType.Key, testCase.storageType))
+			// minio.rootPath stays set in both cases: under local storage it
+			// must not leak into the key.
+			require.NoError(t, params.Save(params.MinioCfg.RootPath.Key, testCase.minioRoot))
+			require.NoError(t, params.Save(params.LocalStorageCfg.Path.Key, localRoot))
+			t.Cleanup(func() {
+				_ = params.Reset(params.CommonCfg.StorageType.Key)
+				_ = params.Reset(params.MinioCfg.RootPath.Key)
+				_ = params.Reset(params.LocalStorageCfg.Path.Key)
+			})
+
+			base, version, err := packed.UnmarshalManifestPath(manifestPathForGrowingPack(meta))
+			require.NoError(t, err)
+			assert.Equal(t, path.Join(testCase.wantRoot, "insert_log", "1", "2", "3"), base)
+			assert.Equal(t, packed.ManifestEarliest, version)
+		})
+	}
+}
+
+func TestManifestPathForGrowingPackPreservesPersistedPath(t *testing.T) {
+	for _, manifestPath := range []string{
+		packed.MarshalManifestPath("files/insert_log/1/2/3", 7),
+		packed.MarshalManifestPath(path.Join(t.TempDir(), "insert_log/1/2/3"), 9),
+	} {
+		meta := &streamingpb.SegmentAssignmentMeta{
+			CollectionId:   1,
+			PartitionId:    2,
+			SegmentId:      3,
+			StorageVersion: storage.StorageV3,
+			PersistedStorage: &streamingpb.L1SegmentPersistedStorage{
+				ManifestPath: manifestPath,
+			},
+		}
+		assert.Equal(t, manifestPath, manifestPathForGrowingPack(meta))
+	}
+}
+
+func TestManifestPathForGrowingPackSkipsNonV3(t *testing.T) {
+	for _, storageVersion := range []int64{storage.StorageV1, storage.StorageV2} {
+		assert.Empty(t, manifestPathForGrowingPack(&streamingpb.SegmentAssignmentMeta{
+			CollectionId:   1,
+			PartitionId:    2,
+			SegmentId:      3,
+			StorageVersion: storageVersion,
+		}))
 	}
 }
 

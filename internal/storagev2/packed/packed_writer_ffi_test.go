@@ -2,6 +2,7 @@ package packed
 
 import (
 	"math"
+	"path"
 	"testing"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -112,7 +113,7 @@ func TestGetManifestFieldIDs_InvalidColumnName(t *testing.T) {
 		},
 	}, nil)
 	columnGroups := []storagecommon.ColumnGroup{{Columns: []int{0}, GroupID: storagecommon.DefaultShortColumnGroupID}}
-	basePath := "files/packed_writer_invalid_column/1"
+	basePath := path.Join(CreateStorageConfig().GetRootPath(), "packed_writer_invalid_column/1")
 	cfg := CreateStorageConfig()
 	writer, err := NewFFIPackedWriter(basePath, schema, columnGroups, cfg, nil)
 	require.NoError(t, err)
@@ -159,7 +160,7 @@ func TestGetManifestFieldIDs_FromPackedWriterManifest(t *testing.T) {
 		},
 	}, nil)
 	columnGroups := []storagecommon.ColumnGroup{{Columns: []int{0, 1}, GroupID: storagecommon.DefaultShortColumnGroupID}}
-	basePath := "files/packed_writer_field_ids/1"
+	basePath := path.Join(CreateStorageConfig().GetRootPath(), "packed_writer_field_ids/1")
 	cfg := CreateStorageConfig()
 	writer, err := NewFFIPackedWriter(basePath, schema, columnGroups, cfg, nil)
 	require.NoError(t, err)
@@ -214,7 +215,7 @@ func TestResolveManifestSingleWriterFormat_FromPackedWriterManifest(t *testing.T
 		},
 	}, nil)
 	columnGroups := []storagecommon.ColumnGroup{{Columns: []int{0}, GroupID: storagecommon.DefaultShortColumnGroupID, Fields: []int64{100}}}
-	basePath := "files/packed_writer_format/1"
+	basePath := path.Join(CreateStorageConfig().GetRootPath(), "packed_writer_format/1")
 	cfg := CreateStorageConfig()
 	writer, err := NewFFIPackedWriter(basePath, schema, columnGroups, cfg, nil)
 	require.NoError(t, err)
@@ -250,7 +251,7 @@ func TestResolveManifestSingleWriterFormat_FiltersMixedAddColumnGroups(t *testin
 		pt.Reset(pt.LocalStorageCfg.Path.Key)
 	})
 
-	basePath := "files/packed_writer_mixed_format/1"
+	basePath := path.Join(CreateStorageConfig().GetRootPath(), "packed_writer_mixed_format/1")
 	cfg := CreateStorageConfig()
 	writeColumn := func(name string, fieldID int64, format string, asNewColumnGroup bool) WriterOutput {
 		schema := arrow.NewSchema([]arrow.Field{
@@ -347,7 +348,7 @@ func TestPackedFFIWriter(t *testing.T) {
 		},
 	}, nil)
 
-	basePath := "files/packed_writer_test/1"
+	basePath := path.Join(CreateStorageConfig().GetRootPath(), "packed_writer_test/1")
 	version := int64(0)
 
 	for i := 0; i < batch; i++ {
@@ -450,7 +451,7 @@ func TestFFIPackedWriter_CloseThenCommitUpdates(t *testing.T) {
 		{Columns: []int{0}, GroupID: storagecommon.DefaultShortColumnGroupID},
 	}
 
-	basePath := "files/close_commit_test/1"
+	basePath := path.Join(CreateStorageConfig().GetRootPath(), "close_commit_test/1")
 	cfg := CreateStorageConfig()
 	w, err := NewFFIPackedWriter(basePath, schema, columnGroups, cfg, nil)
 	require.NoError(t, err)
