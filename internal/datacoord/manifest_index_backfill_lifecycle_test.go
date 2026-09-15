@@ -219,11 +219,13 @@ func TestManifestIndexBackfillConcurrencyAndShutdown(t *testing.T) {
 	entered := make(chan struct{}, 4)
 	release := make(chan struct{})
 	var once sync.Once
-	var original func(string, SegmentManifestCommit) (string, error)
-	patch := mockey.Mock(commitManifestMutation).Origin(&original).To(func(base string, commit SegmentManifestCommit) (string, error) {
+	// A false condition forwards to the original function after the barrier.
+	// Avoid Origin: mockey 1.4.6 writes shared call arguments in that adapter,
+	// which races when multiple segment workers enter it concurrently.
+	patch := mockey.Mock(commitManifestMutation).When(func(_ string, _ SegmentManifestCommit) bool {
 		entered <- struct{}{}
 		<-release
-		return original(base, commit)
+		return false
 	}).Build()
 	inspector := newManifestIndexBackfillInspector(ctx, m)
 	t.Cleanup(func() {
