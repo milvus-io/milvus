@@ -29,6 +29,8 @@
 #include "expr/ITypeExpr.h"
 #include "index/ScalarIndexSort.h"
 #include "knowhere/comp/index_param.h"
+#include "plan/PlanNode.h"
+#include "query/ExecPlanNodeVisitor.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegcoreConfig.h"
 #include "test_utils/DataGen.h"
@@ -1119,6 +1121,121 @@ TEST(OffsetsEvalIndexOnlyCorrectnessTest,
     segment->ClearData();
     EXPECT_THROW({ auto snapshot = segment->CaptureReadSnapshot(); },
                  milvus::SegcoreError);
+}
+
+// The production visit() path pins the sealed snapshot once and runs the whole
+// expression tree against it (Expr.cpp binds SetSnapshot to every compiled
+// expression). The ExecuteQueryExpr test helper used to skip that step, so the
+// pinned path never executed under CI. Run the same expression both ways and
+// require the bitsets to be bit-identical.
+TEST(OffsetsEvalIndexOnlyCorrectnessTest,
+     PinnedExecuteQueryExprMatchesUnpinnedOnSealed) {
+    constexpr int64_t kChunkRows = 4;
+    constexpr int64_t kRowCount = kChunkRows * 2;
+
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto value_fid = schema->AddDebugField("value", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+
+    auto first = DataGen(schema, kChunkRows, 300, 0, 1, 1);
+    auto second = DataGen(schema, kChunkRows, 301, 0, 1, 1);
+    // Deterministic values spanning both chunks so the filter crosses the
+    // chunk boundary through every hot accessor on the snapshot.
+    SetInt64FieldData(first, value_fid, {1, 2, 999, 4});
+    SetInt64FieldData(second, value_fid, {5, 6, 999, 8});
+
+    auto segment = CreateTwoChunkSealed(schema, first, second);
+    ASSERT_NE(segment->CaptureReadSnapshot(), nullptr);
+
+    proto::plan::GenericValue gate_value;
+    gate_value.set_int64_val(999);
+    auto gate_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(value_fid, DataType::INT64),
+        proto::plan::OpType::Equal,
+        gate_value,
+        std::vector<proto::plan::GenericValue>{});
+    auto filter_node =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, gate_expr);
+
+    auto unpinned = query::ExecuteQueryExpr(
+        filter_node, segment.get(), kRowCount, MAX_TIMESTAMP);
+    auto pinned = query::ExecuteQueryExpr(
+        filter_node, segment.get(), kRowCount, MAX_TIMESTAMP, true);
+
+    ASSERT_EQ(pinned.size(), unpinned.size());
+    for (int64_t i = 0; i < kRowCount; ++i) {
+        EXPECT_EQ(bool(pinned[i]), bool(unpinned[i])) << "row " << i;
+    }
+    ASSERT_EQ(unpinned.count(), 2);
+    EXPECT_TRUE(unpinned[2]);
+    EXPECT_TRUE(unpinned[6]);
+}
+
+// The ready-bit divergence (comment 1 in the PR review) surfaced only on the
+// pinned path. Repeat it end-to-end: with index-only raw data (ready bit
+// cleared), a pinned ExecuteQueryExpr run must not read chunk data for the
+// dropped field and must match the unpinned run exactly.
+TEST(OffsetsEvalIndexOnlyCorrectnessTest,
+     PinnedExecuteQueryExprMatchesUnpinnedWithIndexOnlyField) {
+    constexpr int64_t kChunkRows = 4;
+    constexpr int64_t kRowCount = kChunkRows * 2;
+
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto value_fid = schema->AddDebugField("value", DataType::INT64, true);
+    schema->set_primary_field_id(pk_fid);
+
+    auto first = DataGen(schema, kChunkRows, 400, 0, 1, 1);
+    auto second = DataGen(schema, kChunkRows, 401, 0, 1, 1);
+    SetInt64FieldData(first, value_fid, {1, 2, 999, 4});
+    SetInt64FieldData(second, value_fid, {5, 6, 999, 8});
+
+    auto segment = CreateTwoChunkSealed(schema, first, second);
+
+    std::vector<int64_t> index_values(kRowCount);
+    std::iota(index_values.begin(), index_values.end(), int64_t{0});
+    auto index_valid = std::make_unique<bool[]>(kRowCount);
+    for (int64_t i = 0; i < kRowCount; ++i) {
+        index_valid[i] = true;
+    }
+    auto scalar_index = index::CreateScalarIndexSort<int64_t>();
+    scalar_index->Build(kRowCount, index_values.data(), index_valid.get());
+    LoadIndexInfo load_index_info;
+    load_index_info.field_id = value_fid.get();
+    load_index_info.field_type = DataType::INT64;
+    load_index_info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+    load_index_info.index_params = GenIndexParams(scalar_index.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("pinned-index-only", std::move(scalar_index));
+    segment->LoadIndex(load_index_info);
+    segment->DropFieldData(value_fid);
+    ASSERT_FALSE(segment->HasFieldData(value_fid));
+
+    proto::plan::GenericValue gate_value;
+    gate_value.set_int64_val(999);
+    auto gate_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(value_fid, DataType::INT64),
+        proto::plan::OpType::Equal,
+        gate_value,
+        std::vector<proto::plan::GenericValue>{});
+    auto filter_node =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, gate_expr);
+
+    auto unpinned = query::ExecuteQueryExpr(
+        filter_node, segment.get(), kRowCount, MAX_TIMESTAMP);
+    auto pinned = query::ExecuteQueryExpr(
+        filter_node, segment.get(), kRowCount, MAX_TIMESTAMP, true);
+
+    ASSERT_EQ(pinned.size(), unpinned.size());
+    for (int64_t i = 0; i < kRowCount; ++i) {
+        EXPECT_EQ(bool(pinned[i]), bool(unpinned[i])) << "row " << i;
+    }
 }
 
 TEST(OffsetsEvalIndexOnlyCorrectnessTest,
