@@ -37,6 +37,7 @@ const (
 	CloudProviderGCPNative = "gcpnative"
 	CloudProviderAWS       = "aws"
 	CloudProviderAliyun    = "aliyun"
+	CloudProviderRustFS    = "rustfs"
 	CloudProviderAzure     = "azure"
 	CloudProviderTencent   = "tencent"
 	CloudProviderHuawei    = "huawei"
