@@ -145,6 +145,9 @@ func (i *manifestIndexBackfillInspector) runOnce(ctx context.Context) {
 	record := timerecord.NewTimeRecorder("manifestIndexBackfill")
 
 	work, pending := i.scan(ctx)
+	if ctx.Err() != nil {
+		return
+	}
 	i.reportPending(ctx, pending)
 	if len(work) == 0 {
 		return
@@ -188,6 +191,9 @@ func (i *manifestIndexBackfillInspector) scan(ctx context.Context) ([]segmentMan
 
 	candidates := make([]manifestIndexBackfillCandidate, 0)
 	for _, segment := range segments {
+		if ctx.Err() != nil {
+			return nil, 0
+		}
 		for _, segIdx := range i.meta.indexMeta.GetSegmentIndexes(segment.GetCollectionID(), segment.GetID()) {
 			if !segmentIndexNeedsManifestBackfill(i.meta.indexMeta, segIdx) {
 				continue
@@ -253,7 +259,10 @@ func countManifestIndexBackfillRecords(work []segmentManifestIndexBackfill) int 
 }
 
 func (i *manifestIndexBackfillInspector) execute(ctx context.Context, work []segmentManifestIndexBackfill) int {
-	pool := conc.NewPool[int](Params.DataCoordCfg.ManifestIndexBackfillConcurrency.GetAsInt())
+	if len(work) == 0 {
+		return 0
+	}
+	pool := conc.NewPool[int](max(1, min(len(work), Params.DataCoordCfg.ManifestIndexBackfillConcurrency.GetAsInt())))
 	defer pool.Release()
 
 	futures := make([]*conc.Future[int], 0, len(work))

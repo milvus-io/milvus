@@ -18,6 +18,7 @@ package paramtable
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
