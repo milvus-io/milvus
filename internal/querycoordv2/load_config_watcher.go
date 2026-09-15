@@ -18,7 +18,6 @@ package querycoordv2
 
 import (
 	"context"
-	"maps"
 	"time"
 
 	"github.com/samber/lo"
@@ -132,7 +131,8 @@ func (w *LoadConfigWatcher) applyLoadConfigChanges() error {
 		return nil
 	}
 
-	rgChanged := !maps.Equal(lo.CountValues(w.previousRGs), lo.CountValues(newRGs))
+	left, right := lo.Difference(w.previousRGs, newRGs)
+	rgChanged := len(left) > 0 || len(right) > 0
 	forceOverrideChanged := w.previousForceOverrideUserReplicaMode != forceOverrideUserReplicaMode
 	if w.previousReplicaNum == newReplicaNum && !rgChanged && !forceOverrideChanged {
 		w.Logger().Info(context.TODO(),

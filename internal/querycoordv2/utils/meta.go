@@ -106,11 +106,18 @@ func RecoverAllCollection(m *meta.Meta) {
 	}
 }
 
-// ReplicaCounts normalizes a load configuration without checking node capacity.
-func ReplicaCounts(resourceGroups []string, replicaNumber int32) (map[string]int, error) {
+func AssignReplica(ctx context.Context, m *meta.Meta, resourceGroups []string, replicaNumber int32, checkNodeNum bool) (map[string]int, error) {
 	if len(resourceGroups) != 0 && len(resourceGroups) != 1 && len(resourceGroups) != int(replicaNumber) {
 		return nil, merr.WrapErrParameterInvalidMsg("replica=[%d] resource group=[%s], resource group num can only be 0, 1 or same as replica number", replicaNumber, strings.Join(resourceGroups, ","))
 	}
+
+	if streamingutil.IsStreamingServiceEnabled() && checkNodeNum {
+		streamingNodeCount := snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDs().Len()
+		if replicaNumber > int32(streamingNodeCount) {
+			return nil, merr.WrapErrStreamingNodeNotEnough(streamingNodeCount, int(replicaNumber), fmt.Sprintf("when load %d replica count", replicaNumber))
+		}
+	}
+
 	replicaNumInRG := make(map[string]int)
 	if len(resourceGroups) == 0 {
 		// All replicas should be spawned in default resource group.
@@ -122,22 +129,6 @@ func ReplicaCounts(resourceGroups []string, replicaNumber int32) (map[string]int
 		// replicas should be spawned in different resource groups one by one.
 		for _, rgName := range resourceGroups {
 			replicaNumInRG[rgName] += 1
-		}
-	}
-
-	return replicaNumInRG, nil
-}
-
-func AssignReplica(ctx context.Context, m *meta.Meta, resourceGroups []string, replicaNumber int32, checkNodeNum bool) (map[string]int, error) {
-	replicaNumInRG, err := ReplicaCounts(resourceGroups, replicaNumber)
-	if err != nil {
-		return nil, err
-	}
-
-	if streamingutil.IsStreamingServiceEnabled() && checkNodeNum {
-		streamingNodeCount := snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDs().Len()
-		if replicaNumber > int32(streamingNodeCount) {
-			return nil, merr.WrapErrStreamingNodeNotEnough(streamingNodeCount, int(replicaNumber), fmt.Sprintf("when load %d replica count", replicaNumber))
 		}
 	}
 
