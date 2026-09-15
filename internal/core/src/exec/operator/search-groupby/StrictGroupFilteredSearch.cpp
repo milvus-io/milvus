@@ -83,11 +83,6 @@ struct GroupByMap {
         return group_order_;
     }
 
-    bool
-    Contains(const GroupKey& group) const {
-        return group_map_.find(group) != group_map_.end();
-    }
-
     int
     GetGroupResultCount(const GroupKey& group) const {
         auto it = group_map_.find(group);
