@@ -1152,7 +1152,7 @@ func (s *DelegatorSuite) TestQueryStream() {
 			DmlChannels: []string{s.vchannelName},
 		}, server)
 		s.Error(err)
-		s.ErrorContains(err, "segments not loaded in any worker")
+		s.ErrorContains(err, "mock error")
 	})
 
 	s.Run("worker_return_error", func() {
@@ -1661,6 +1661,19 @@ func (s *DelegatorSuite) TestUpdateSchema() {
 		err := s.delegator.UpdateSchema(ctx, &schemapb.CollectionSchema{}, 100)
 		s.Error(err)
 	})
+}
+
+func (s *DelegatorSuite) TestUpdateSchemaAllowedWhileInitializing() {
+	s.ResetDelegator()
+	collection := s.manager.Collection.Get(s.collectionID)
+	s.Require().NotNil(collection)
+	schema := collection.Schema()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	err := s.delegator.UpdateSchema(ctx, schema, 100)
+	s.NoError(err)
 }
 
 func (s *DelegatorSuite) ResetDelegator() {
@@ -2183,10 +2196,10 @@ func (s *DelegatorSuite) TestDelegatorLifetimeIntegration() {
 		s.Error(err)
 		s.Contains(err.Error(), "delegator is not ready")
 
-		// UpdateSchema should fail when not ready
+		// UpdateSchema is allowed while Initializing so WAL schema events can be
+		// applied before the delegator transitions to Working.
 		err = sd.UpdateSchema(ctx, &schemapb.CollectionSchema{Name: "test"}, 1)
-		s.Error(err)
-		s.Contains(err.Error(), "delegator is not ready")
+		s.NoError(err)
 	})
 
 	s.Run("test_methods_fail_when_stopped", func() {
@@ -2769,7 +2782,11 @@ func TestUpdateSchemaUpdatesDelegatorRuntimeAfterCollectionAdvanced(t *testing.T
 	require.NoError(t, sd.UpdateSchema(context.Background(), newSchema, 100))
 	require.Equal(t, uint64(1), sd.collectionVersion.Load())
 	require.Equal(t, uint64(100), sd.schemaBarrierTs)
-	require.Error(t, sd.addDistributionIfSchemaBarrierOK(99))
+	staleReq := &querypb.LoadSegmentsRequest{
+		Schema: typeutil.Clone(newSchema),
+	}
+	staleReq.Schema.Version--
+	require.Error(t, sd.addDistributionIfLoadSchemaOK(context.Background(), staleReq))
 	require.NotNil(t, sd.getIDFOracle())
 	ok, err := function.GetManager().RunWithRunner(context.Background(), 1000, key, 102, func(function.FunctionRunner) error {
 		return nil
@@ -2873,7 +2890,6 @@ func TestUpdateSchemaSkipsStaleSchemaBeforeSideEffects(t *testing.T) {
 		lifetime:                   lifetime.NewLifetime(lifetime.Working),
 		distribution:               NewDistribution("test-channel", NewChannelQueryView(nil, nil, nil, initialTargetVersion)),
 		workerManager:              workerManager,
-		schemaBarrierTs:            100,
 		deleteBuffer:               deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](0, 0, []string{"1", "test-channel"}),
 		tsCond:                     syncutil.NewContextCond(&sync.Mutex{}),
 		latestRequiredMVCCTimeTick: atomic.NewUint64(0),
@@ -2884,7 +2900,8 @@ func TestUpdateSchemaSkipsStaleSchemaBeforeSideEffects(t *testing.T) {
 	err := sd.UpdateSchema(context.Background(), staleSchema, 200)
 	require.NoError(t, err)
 
-	assert.Equal(t, uint64(100), sd.schemaBarrierTs)
+	_, delegatorSchemaVersion := sd.delegatorSchemaSnapshot()
+	assert.Equal(t, uint64(2), delegatorSchemaVersion)
 	assert.Equal(t, uint64(2), sd.collection.SchemaVersion())
 }
 

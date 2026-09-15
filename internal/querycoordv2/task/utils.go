@@ -193,8 +193,8 @@ func packLoadMeta(loadType querypb.LoadType, collectionInfo *milvuspb.DescribeCo
 		DbName:        collectionInfo.GetDbName(),
 		ResourceGroup: resourceGroup,
 		LoadFields:    loadFields,
-		// The update timestamp is a load barrier, not the logical schema version.
-		// QueryNode uses it only to reject stale load results after schema changes.
+		// Keep the collection update timestamp in load meta for compatibility.
+		// Delegator load freshness is gated by the request schema version.
 		SchemaBarrierTs: collectionInfo.GetUpdateTimestamp(),
 	}
 }

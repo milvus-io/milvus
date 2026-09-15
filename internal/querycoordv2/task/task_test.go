@@ -181,6 +181,7 @@ func (suite *TaskSuite) BeforeTest(suiteName, testName string) {
 		"TestLoadSegmentTask",
 		"TestLoadSegmentTaskNotIndex",
 		"TestSegmentTaskWaitsDistAfterLoadRPC",
+		"TestLoadSegmentTaskWaitsDelegatorSchema",
 		"TestLoadSegmentTaskFailed",
 		"TestTaskCanceled",
 		"TestMoveSegmentTask",
@@ -637,6 +638,126 @@ func (suite *TaskSuite) TestLoadSegmentTaskNotIndex() {
 		suite.Equal(TaskStatusSucceeded, task.Status())
 		suite.NoError(task.Err())
 	}
+}
+
+func (suite *TaskSuite) TestLoadSegmentTaskWaitsDelegatorSchema() {
+	ctx := context.Background()
+	timeout := 10 * time.Second
+	targetNode := int64(3)
+	partition := int64(100)
+	segment := suite.loadSegments[0]
+	channel := &datapb.VchannelInfo{
+		CollectionID: suite.collection,
+		ChannelName:  Params.CommonCfg.RootCoordDml.GetValue() + "-test",
+	}
+
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, suite.collection).RunAndReturn(func(ctx context.Context, i int64) (*milvuspb.DescribeCollectionResponse, error) {
+		return &milvuspb.DescribeCollectionResponse{
+			Schema: &schemapb.CollectionSchema{
+				Name:    "TestLoadSegmentTaskWaitsDelegatorSchema",
+				Version: 1,
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+				},
+			},
+		}, nil
+	}).Times(3)
+	suite.broker.EXPECT().ListIndexes(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
+		{
+			CollectionID: suite.collection,
+		},
+	}, nil).Times(3)
+	suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return([]*datapb.SegmentInfo{
+		{
+			ID:            segment,
+			CollectionID:  suite.collection,
+			PartitionID:   partition,
+			InsertChannel: channel.ChannelName,
+		},
+	}, nil).Times(3)
+	suite.broker.EXPECT().GetIndexInfo(mock.Anything, suite.collection, segment).Return(nil, nil).Times(3)
+	schemaErr := merr.WrapErrCollectionSchemaVersionNotReadyWithVersion("TestLoadSegmentTaskWaitsDelegatorSchema", 0, 1)
+	suite.cluster.EXPECT().LoadSegments(mock.Anything, targetNode, mock.Anything).Return(merr.Status(schemaErr), nil).Once()
+	suite.cluster.EXPECT().LoadSegments(mock.Anything, targetNode, mock.Anything).Return(merr.Status(merr.WrapErrNodeNotAvailable(targetNode, "worker churn")), nil).Once()
+	suite.cluster.EXPECT().LoadSegments(mock.Anything, targetNode, mock.Anything).Return(merr.Success(), nil).Once()
+
+	suite.dist.ChannelDistManager.Update(targetNode, &meta.DmChannel{
+		VchannelInfo: channel,
+		Node:         targetNode,
+		Version:      1,
+		View: &meta.LeaderView{
+			ID:           targetNode,
+			CollectionID: suite.collection,
+			Channel:      channel.ChannelName,
+			Status:       &querypb.LeaderViewStatus{Serviceable: true},
+		},
+	})
+	task, err := NewSegmentTask(
+		ctx,
+		timeout,
+		WrapIDSource(0),
+		suite.collection,
+		suite.replica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentAction(targetNode, ActionTypeGrow, channel.GetChannelName(), segment),
+	)
+	suite.NoError(err)
+	suite.NoError(suite.scheduler.Add(task))
+
+	segments := []*datapb.SegmentInfo{{
+		ID:            segment,
+		InsertChannel: channel.ChannelName,
+		PartitionID:   1,
+	}}
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return([]*datapb.VchannelInfo{channel}, segments, nil)
+	suite.target.UpdateCollectionNextTarget(ctx, suite.collection)
+	suite.AssertTaskNum(0, 1, 0, 1)
+
+	suite.dispatchAndWait(targetNode)
+	suite.AssertTaskNum(1, 0, 0, 1)
+	suite.Equal(TaskStatusStarted, task.Status())
+	suite.NoError(task.Err())
+	suite.Contains(task.GetReason(), "collection schema version not ready")
+	action := task.Actions()[0].(*SegmentAction)
+	suite.False(action.rpcReturned.Load())
+
+	suite.dispatchAndWait(targetNode)
+	suite.AssertTaskNum(1, 0, 0, 1)
+	suite.Equal(TaskStatusStarted, task.Status())
+	suite.NoError(task.Err())
+	suite.Contains(task.GetReason(), "node not available")
+	suite.False(action.rpcReturned.Load())
+
+	suite.dispatchAndWait(targetNode)
+	suite.AssertTaskNum(1, 0, 0, 1)
+	suite.Equal(TaskStatusStarted, task.Status())
+	suite.NoError(task.Err())
+	suite.True(action.rpcReturned.Load())
+
+	view := &meta.LeaderView{
+		ID:           targetNode,
+		CollectionID: suite.collection,
+		Segments: map[int64]*querypb.SegmentDist{
+			segment: {NodeID: targetNode, Version: 0},
+		},
+		Channel: channel.ChannelName,
+	}
+	suite.dist.SegmentDistManager.Update(targetNode, meta.SegmentFromInfo(&datapb.SegmentInfo{
+		ID:            segment,
+		CollectionID:  suite.collection,
+		PartitionID:   partition,
+		InsertChannel: channel.ChannelName,
+	}))
+	suite.dist.ChannelDistManager.Update(targetNode, &meta.DmChannel{
+		VchannelInfo: channel,
+		Node:         targetNode,
+		Version:      1,
+		View:         view,
+	})
+	suite.dispatchAndWait(targetNode)
+	suite.AssertTaskNum(0, 0, 0, 0)
+	suite.Equal(TaskStatusSucceeded, task.Status())
+	suite.NoError(task.Err())
 }
 
 func (suite *TaskSuite) TestLoadSegmentTaskFailed() {
