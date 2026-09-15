@@ -50,7 +50,7 @@ struct SearchInfo {
     bool strict_group_size_{false};
     StrictGroupStrategy strict_group_strategy_{StrictGroupStrategy::PerGroup};
     bool strict_group_debug_{false};
-    int64_t strict_group_phase1_max_candidates_{0};
+    int64_t strict_group_phase1_candidate_weight_{0};
     bool strict_group_skip_refine_{false};
 
     int64_t round_decimal_{0};

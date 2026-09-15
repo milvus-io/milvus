@@ -369,11 +369,11 @@ ConsumeGroupByIteratorUntil(
 
 template <typename T>
 bool
-TryStrictGroupFilteredPhase2(const std::shared_ptr<VectorIterator>& iterator,
-                             const std::shared_ptr<DataGetter<T>>& data_getter,
-                             GroupByMap<T>& group_map,
-                             GroupByResultCollector<T>& collector,
-                             const StrictGroupPhase2Context* context) {
+TryStrictGroupFiltered(const std::shared_ptr<VectorIterator>& iterator,
+                       const std::shared_ptr<DataGetter<T>>& data_getter,
+                       GroupByMap<T>& group_map,
+                       GroupByResultCollector<T>& collector,
+                       const StrictGroupPhase2Context* context) {
     if (context == nullptr) {
         return false;
     }
@@ -417,8 +417,10 @@ TryStrictGroupFilteredPhase2(const std::shared_ptr<VectorIterator>& iterator,
             {"strategy", StrategyName(context->strategy)},
             {"eligible", context->eligible},
             {"controls_eligible", context->controls_eligible},
+            {"phase1_candidate_weight",
+             context->search_info->strict_group_phase1_candidate_weight_},
             {"phase1_max_candidates",
-             context->search_info->strict_group_phase1_max_candidates_},
+             query::StrictGroupPhase1CandidateLimit(*context->search_info)},
             {"phase1_truncated", phase1_truncated},
             {"skip_refine",
              context->controls_eligible &&
@@ -463,7 +465,7 @@ TryStrictGroupFilteredPhase2(const std::shared_ptr<VectorIterator>& iterator,
     };
     diagnostic(context->eligible ? "begin" : "ineligible_original");
     const auto phase1_budget =
-        context->search_info->strict_group_phase1_max_candidates_;
+        query::StrictGroupPhase1CandidateLimit(*context->search_info);
     if (context->controls_eligible && phase1_budget > 0) {
         // Independent of the completion strategy and provider support.
         // Even the original-iterator fallback must honor the frozen group set.
@@ -709,7 +711,7 @@ TrySingleFieldStrictGroup(
     for (const auto& iterator : iterators) {
         GroupByMap<T> map(info.topk_, info.group_size_, true);
         GroupByResultCollector<T> collector;
-        if (!TryStrictGroupFilteredPhase2(
+        if (!TryStrictGroupFiltered(
                 iterator, getter, map, collector, &context)) {
             ConsumeGroupByIteratorUntil(iterator, getter, map, collector, [&] {
                 return map.IsGroupResEnough();
@@ -746,7 +748,7 @@ TryStrictGroupFilteredSearch(
     });
     if (!query::CanUseStrictGroupControls(info, iterators.size()) ||
         (info.strict_group_strategy_ == StrictGroupStrategy::Original &&
-         info.strict_group_phase1_max_candidates_ == 0)) {
+         info.strict_group_phase1_candidate_weight_ == 0)) {
         return false;
     }
     switch (segment.GetFieldDataType(info.group_by_field_ids_.front())) {
