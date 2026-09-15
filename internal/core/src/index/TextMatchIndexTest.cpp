@@ -1128,6 +1128,46 @@ TEST(TextMatch, GrowingBuildTextIndexFromTextLobRefsDecodesText) {
     boost::filesystem::remove_all(TestLocalPath + test_dir);
 }
 
+TEST(TextMatch, BuildIndexFromFieldDataSealedNullableAcrossBatchBoundary) {
+    using Index = index::TextMatchIndex;
+
+    constexpr size_t kBatchRows = 4096;
+    const auto row_count = kBatchRows + 3;
+    std::vector<std::string> texts(row_count);
+    std::vector<uint8_t> valid_bytes((row_count + 7) / 8, 0xff);
+    for (size_t i = 0; i < row_count; ++i) {
+        texts[i] = "sealed row " + std::to_string(i);
+    }
+    valid_bytes[1 >> 3] &= ~(1u << (1 & 7));
+    valid_bytes[kBatchRows >> 3] &= ~(1u << (kBatchRows & 7));
+
+    auto field_data = storage::CreateFieldData(
+        DataType::VARCHAR, DataType::NONE, true, 1, row_count);
+    field_data->FillFieldData(texts.data(), valid_bytes.data(), row_count, 0);
+
+    auto index = std::make_unique<Index>(200,
+                                         "test_sealed_batch_boundary",
+                                         "milvus_tokenizer",
+                                         "{}",
+                                         /*enable_background_merge=*/false);
+    index->BuildIndexFromFieldData({field_data}, true);
+    index->CreateReader(milvus::index::SetBitsetSealed);
+    index->Finish();
+    index->Reload();
+    index->FinalizeSealed();
+
+    auto null_bits = index->IsNull();
+    ASSERT_EQ(null_bits.size(), row_count);
+    EXPECT_TRUE(null_bits[1]);
+    EXPECT_FALSE(null_bits[kBatchRows - 1]);
+    EXPECT_TRUE(null_bits[kBatchRows]);
+    EXPECT_FALSE(null_bits[kBatchRows + 1]);
+
+    auto hits = index->MatchQuery(std::to_string(kBatchRows + 2), 1);
+    ASSERT_EQ(hits.size(), row_count);
+    EXPECT_TRUE(hits[kBatchRows + 2]);
+}
+
 // Regression test: BuildIndexFromFieldData with a single batch should still
 // work correctly (i == offset in this case, so the old bug was hidden).
 TEST(TextMatch, BuildIndexFromFieldDataSingleBatchNullable) {

@@ -742,55 +742,86 @@ InvertedIndexTantivy<T>::BuildWithFieldData(
         case proto::schema::DataType::Int16:
         case proto::schema::DataType::Int32:
         case proto::schema::DataType::Int64:
+        case proto::schema::DataType::Timestamptz:
         case proto::schema::DataType::Float:
         case proto::schema::DataType::Double:
         case proto::schema::DataType::String:
         case proto::schema::DataType::VarChar:
         case proto::schema::DataType::Text: {
-            // Generally, we will not build inverted index with single segment except for building index
-            // for query node with older version(2.4). See more comments above `inverted_index_single_segment_`.
-            if (!inverted_index_single_segment_) {
-                int64_t offset = 0;
-                if (schema_.nullable()) {
-                    for (const auto& data : field_datas) {
-                        auto n = data->get_num_rows();
-                        for (int i = 0; i < n; i++) {
-                            if (!data->is_valid(i)) {
-                                null_offset_.push_back(offset);
-                            }
-                            wrapper_->add_array_data<T>(
-                                static_cast<const T*>(data->RawValue(i)),
-                                data->is_valid(i),
-                                offset++);
-                        }
-                    }
-                } else {
-                    for (const auto& data : field_datas) {
-                        auto n = data->get_num_rows();
-                        wrapper_->add_data<T>(
-                            static_cast<const T*>(data->Data()), n, offset);
-                        offset += n;
-                    }
-                }
-            } else {
-                int64_t offset = 0;
+            int64_t offset = 0;
+            if constexpr (std::is_same_v<T, std::string>) {
+                FixedVector<T> values;
+                std::vector<uintptr_t> row_offsets{0};
+                TantivyIndexWrapper::RowBatchBuffer batch_buffer;
+                std::vector<int64_t> doc_ids;
+                size_t value_bytes = 0;
+                values.reserve(kBuildBatchRowLimit);
+                row_offsets.reserve(kBuildBatchRowLimit + 1);
+                doc_ids.reserve(kBuildBatchRowLimit);
                 for (const auto& data : field_datas) {
                     auto n = data->get_num_rows();
-                    if (schema_.nullable()) {
-                        for (int i = 0; i < n; i++) {
-                            if (!data->is_valid(i)) {
-                                null_offset_.push_back(offset);
-                            }
-                            wrapper_
-                                ->add_array_data_by_single_segment_writer<T>(
-                                    static_cast<const T*>(data->RawValue(i)),
-                                    data->is_valid(i));
-                            offset++;
+                    for (int i = 0; i < n; i++) {
+                        auto valid = !schema_.nullable() || data->is_valid(i);
+                        if (!valid) {
+                            null_offset_.push_back(offset);
+                        } else {
+                            const auto& value =
+                                *static_cast<const T*>(data->RawValue(i));
+                            value_bytes += value.size();
+                            values.push_back(value);
                         }
-                        continue;
+                        row_offsets.push_back(values.size());
+                        doc_ids.push_back(offset++);
+                        if (doc_ids.size() >= kBuildBatchRowLimit ||
+                            value_bytes >= kBuildBatchValueLimit) {
+                            SubmitRowBatch(
+                                values, row_offsets, doc_ids, batch_buffer);
+                            value_bytes = 0;
+                        }
                     }
-                    wrapper_->add_data_by_single_segment_writer<T>(
-                        static_cast<const T*>(data->Data()), n);
+                }
+                SubmitRowBatch(values, row_offsets, doc_ids, batch_buffer);
+            } else if (schema_.nullable()) {
+                FixedVector<T> values;
+                std::vector<uintptr_t> row_offsets{0};
+                TantivyIndexWrapper::RowBatchBuffer batch_buffer;
+                std::vector<int64_t> doc_ids;
+                values.reserve(kBuildBatchRowLimit);
+                row_offsets.reserve(kBuildBatchRowLimit + 1);
+                doc_ids.reserve(kBuildBatchRowLimit);
+                for (const auto& data : field_datas) {
+                    auto n = data->get_num_rows();
+                    for (int i = 0; i < n; i++) {
+                        auto valid = data->is_valid(i);
+                        if (!valid) {
+                            null_offset_.push_back(offset);
+                        } else {
+                            values.push_back(
+                                *static_cast<const T*>(data->RawValue(i)));
+                        }
+                        row_offsets.push_back(values.size());
+                        doc_ids.push_back(offset++);
+                        if (doc_ids.size() >= kBuildBatchRowLimit ||
+                            values.size() * sizeof(T) >=
+                                kBuildBatchValueLimit) {
+                            SubmitRowBatch(
+                                values, row_offsets, doc_ids, batch_buffer);
+                        }
+                    }
+                }
+                SubmitRowBatch(values, row_offsets, doc_ids, batch_buffer);
+            } else {
+                for (const auto& data : field_datas) {
+                    auto remaining = data->get_num_rows();
+                    const auto* values = static_cast<const T*>(data->Data());
+                    while (remaining > 0) {
+                        auto batch_size =
+                            std::min<size_t>(remaining, kBuildBatchRowLimit);
+                        wrapper_->add_data<T>(values, batch_size, offset);
+                        values += batch_size;
+                        remaining -= batch_size;
+                        offset += batch_size;
+                    }
                 }
             }
             break;
@@ -826,28 +857,38 @@ InvertedIndexTantivy<T>::build_index_for_array(
                                            int32_t,
                                            T>;
     int64_t offset = 0;
+    FixedVector<ElementType> values;
+    std::vector<uintptr_t> row_offsets{0};
+    TantivyIndexWrapper::RowBatchBuffer batch_buffer;
+    std::vector<int64_t> doc_ids;
+    row_offsets.reserve(kBuildBatchRowLimit + 1);
+    doc_ids.reserve(kBuildBatchRowLimit);
     for (const auto& data : field_datas) {
         auto n = data->get_num_rows();
-        auto array_column = static_cast<const Array*>(data->Data());
         for (int64_t i = 0; i < n; i++) {
-            if (schema_.nullable() && !data->is_valid(i)) {
+            auto valid = !schema_.nullable() || data->is_valid(i);
+            if (!valid) {
                 null_offset_.push_back(offset);
-            }
-            auto length = data->is_valid(i) ? array_column[i].length() : 0;
-            if (!inverted_index_single_segment_) {
-                wrapper_->add_array_data(reinterpret_cast<const ElementType*>(
-                                             array_column[i].data()),
-                                         length,
-                                         offset++);
             } else {
-                wrapper_->add_array_data_by_single_segment_writer(
-                    reinterpret_cast<const ElementType*>(
-                        array_column[i].data()),
-                    length);
-                offset++;
+                const auto* array =
+                    static_cast<const Array*>(data->RawValue(i));
+                auto length = array->length();
+                const auto* row_values =
+                    reinterpret_cast<const ElementType*>(array->data());
+                if (length > 0) {
+                    values.insert(
+                        values.end(), row_values, row_values + length);
+                }
+            }
+            row_offsets.push_back(values.size());
+            doc_ids.push_back(offset++);
+            if (doc_ids.size() >= kBuildBatchRowLimit ||
+                values.size() * sizeof(ElementType) >= kBuildBatchValueLimit) {
+                SubmitRowBatch(values, row_offsets, doc_ids, batch_buffer);
             }
         }
     }
+    SubmitRowBatch(values, row_offsets, doc_ids, batch_buffer);
 }
 
 template <>
@@ -855,32 +896,41 @@ void
 InvertedIndexTantivy<std::string>::build_index_for_array(
     const std::vector<std::shared_ptr<FieldDataBase>>& field_datas) {
     int64_t offset = 0;
-    std::vector<std::string> output;
+    FixedVector<std::string> values;
+    std::vector<uintptr_t> row_offsets{0};
+    TantivyIndexWrapper::RowBatchBuffer batch_buffer;
+    std::vector<int64_t> doc_ids;
+    size_t value_bytes = 0;
+    row_offsets.reserve(kBuildBatchRowLimit + 1);
+    doc_ids.reserve(kBuildBatchRowLimit);
     for (const auto& data : field_datas) {
         auto n = data->get_num_rows();
-        auto array_column = static_cast<const Array*>(data->Data());
         for (int64_t i = 0; i < n; i++) {
-            if (schema_.nullable() && !data->is_valid(i)) {
+            auto valid = !schema_.nullable() || data->is_valid(i);
+            if (!valid) {
                 null_offset_.push_back(offset);
             } else {
-                Assert(IsStringDataType(array_column[i].get_element_type()));
+                const auto* array =
+                    static_cast<const Array*>(data->RawValue(i));
+                Assert(IsStringDataType(array->get_element_type()));
                 Assert(IsStringDataType(
                     static_cast<DataType>(schema_.element_type())));
+                for (int64_t j = 0; j < array->length(); j++) {
+                    auto value = array->get_data<std::string>(j);
+                    value_bytes += value.size();
+                    values.push_back(std::move(value));
+                }
             }
-            output.clear();
-            for (int64_t j = 0; j < array_column[i].length(); j++) {
-                output.push_back(
-                    array_column[i].template get_data<std::string>(j));
-            }
-            auto length = data->is_valid(i) ? output.size() : 0;
-            if (!inverted_index_single_segment_) {
-                wrapper_->add_array_data(output.data(), length, offset++);
-            } else {
-                wrapper_->add_array_data_by_single_segment_writer(output.data(),
-                                                                  length);
+            row_offsets.push_back(values.size());
+            doc_ids.push_back(offset++);
+            if (doc_ids.size() >= kBuildBatchRowLimit ||
+                value_bytes >= kBuildBatchValueLimit) {
+                SubmitRowBatch(values, row_offsets, doc_ids, batch_buffer);
+                value_bytes = 0;
             }
         }
     }
+    SubmitRowBatch(values, row_offsets, doc_ids, batch_buffer);
 }
 
 template <typename T>
@@ -894,6 +944,12 @@ InvertedIndexTantivy<T>::build_index_for_array_nested(
 
     int64_t offset = 0;
     int64_t row_offset = 0;
+    FixedVector<ElementType> values;
+    std::vector<uintptr_t> row_offsets{0};
+    TantivyIndexWrapper::RowBatchBuffer batch_buffer;
+    std::vector<int64_t> doc_ids;
+    row_offsets.reserve(kBuildBatchRowLimit + 1);
+    doc_ids.reserve(kBuildBatchRowLimit);
     for (const auto& data : field_datas) {
         auto n = data->get_num_rows();
         for (int64_t i = 0; i < n; i++, row_offset++) {
@@ -906,13 +962,21 @@ InvertedIndexTantivy<T>::build_index_for_array_nested(
             // FieldData is read correctly (Data()[i] would overrun).
             auto* array = reinterpret_cast<const Array*>(data->RawValue(i));
             auto length = array->length();
-            wrapper_->template add_data<ElementType>(
-                reinterpret_cast<const ElementType*>(array->data()),
-                length,
-                offset);
-            offset += length;
+            auto* row_values =
+                reinterpret_cast<const ElementType*>(array->data());
+            for (int64_t j = 0; j < length; ++j) {
+                values.push_back(row_values[j]);
+                row_offsets.push_back(values.size());
+                doc_ids.push_back(offset++);
+                if (doc_ids.size() >= kBuildBatchRowLimit ||
+                    values.size() * sizeof(ElementType) >=
+                        kBuildBatchValueLimit) {
+                    SubmitRowBatch(values, row_offsets, doc_ids, batch_buffer);
+                }
+            }
         }
     }
+    SubmitRowBatch(values, row_offsets, doc_ids, batch_buffer);
 }
 
 template <>
@@ -921,7 +985,13 @@ InvertedIndexTantivy<std::string>::build_index_for_array_nested(
     const std::vector<std::shared_ptr<FieldDataBase>>& field_datas) {
     int64_t offset = 0;
     int64_t row_offset = 0;
-    std::vector<std::string> output;
+    FixedVector<std::string> values;
+    std::vector<uintptr_t> row_offsets{0};
+    TantivyIndexWrapper::RowBatchBuffer batch_buffer;
+    std::vector<int64_t> doc_ids;
+    size_t value_bytes = 0;
+    row_offsets.reserve(kBuildBatchRowLimit + 1);
+    doc_ids.reserve(kBuildBatchRowLimit);
     for (const auto& data : field_datas) {
         auto n = data->get_num_rows();
         for (int64_t i = 0; i < n; i++, row_offset++) {
@@ -937,15 +1007,22 @@ InvertedIndexTantivy<std::string>::build_index_for_array_nested(
             Assert(IsStringDataType(
                 static_cast<DataType>(schema_.element_type())));
 
-            output.clear();
             auto length = array->length();
             for (int64_t j = 0; j < length; j++) {
-                output.push_back(array->get_data<std::string>(j));
+                auto value = array->get_data<std::string>(j);
+                value_bytes += value.size();
+                values.push_back(std::move(value));
+                row_offsets.push_back(values.size());
+                doc_ids.push_back(offset++);
+                if (doc_ids.size() >= kBuildBatchRowLimit ||
+                    value_bytes >= kBuildBatchValueLimit) {
+                    SubmitRowBatch(values, row_offsets, doc_ids, batch_buffer);
+                    value_bytes = 0;
+                }
             }
-            wrapper_->add_data(output.data(), length, offset);
-            offset += length;
         }
     }
+    SubmitRowBatch(values, row_offsets, doc_ids, batch_buffer);
 }
 
 template <typename T>

@@ -15,7 +15,17 @@ to_set(const RustArrayWrapper& w) {
 
 int
 main(int argc, char* argv[]) {
-    auto text_index = TantivyIndexWrapper("text_demo", true, "");
+    auto text_index =
+        TantivyIndexWrapper("text_demo",
+                            true,
+                            "",
+                            7,
+                            DEFAULT_ANALYZER_NAME,
+                            DEFAULT_ANALYZER_PARAMS,
+                            "",
+                            DEFAULT_NUM_THREADS,
+                            DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES,
+                            true);
     auto write_single_text = [&text_index](const std::string& s,
                                            int64_t offset) {
         text_index.add_data(&s, 1, offset);
