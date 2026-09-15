@@ -141,18 +141,10 @@ func (s *FlushAllSuite) TestFlushAll() {
 
 	// show and validate segments
 	for collectionName, dbName := range collectionNames {
-		var resp *milvuspb.GetPersistentSegmentInfoResponse
-		// Sort compaction can replace a segment between listing its ID and
-		// fetching its details. Refresh the whole observation in that case.
-		err := retry.Handle(ctx, func() (bool, error) {
-			var err error
-			resp, err = c.MilvusClient.GetPersistentSegmentInfo(ctx, &milvuspb.GetPersistentSegmentInfoRequest{
-				DbName:         dbName,
-				CollectionName: collectionName,
-			})
-			err = merr.CheckRPCCall(resp, err)
-			return errors.Is(err, merr.ErrSegmentNotFound), err
-		}, retry.Attempts(5), retry.Sleep(100*time.Millisecond), retry.MaxSleepTime(time.Second))
+		resp, err := getPersistentSegmentInfoWithRetry(ctx, c.MilvusClient, &milvuspb.GetPersistentSegmentInfoRequest{
+			DbName:         dbName,
+			CollectionName: collectionName,
+		})
 		s.Require().NoError(err)
 		s.Require().Len(resp.GetInfos(), 1)
 		segment := resp.GetInfos()[0]
@@ -174,4 +166,21 @@ func (s *FlushAllSuite) TestFlushAll() {
 
 func TestFlushAll(t *testing.T) {
 	suite.Run(t, new(FlushAllSuite))
+}
+
+// Sort compaction can replace a segment between listing its ID and fetching
+// its details. The state filter can also discard an old ID after replacement,
+// producing a successful but empty response. Refresh either observation.
+func getPersistentSegmentInfoWithRetry(ctx context.Context, client milvuspb.MilvusServiceClient, request *milvuspb.GetPersistentSegmentInfoRequest) (*milvuspb.GetPersistentSegmentInfoResponse, error) {
+	var resp *milvuspb.GetPersistentSegmentInfoResponse
+	err := retry.Handle(ctx, func() (bool, error) {
+		var err error
+		resp, err = client.GetPersistentSegmentInfo(ctx, request)
+		err = merr.CheckRPCCall(resp, err)
+		if err == nil && len(resp.GetInfos()) == 0 {
+			return true, errors.New("empty persistent segment observation after FlushAll")
+		}
+		return errors.Is(err, merr.ErrSegmentNotFound), err
+	}, retry.Attempts(5), retry.Sleep(100*time.Millisecond), retry.MaxSleepTime(time.Second))
+	return resp, err
 }
