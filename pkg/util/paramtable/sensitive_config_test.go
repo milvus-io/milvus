@@ -155,24 +155,25 @@ func TestSensitivePulsarConfigParseFailureLogs(t *testing.T) {
 	}
 }
 
-func TestSensitivePulsarWebAddressOverrideLogs(t *testing.T) {
-	const fallback = "http://broker-0.invalid:8080"
+func TestSensitivePulsarWebAddressLogs(t *testing.T) {
+	// On 3.0 pulsar.webaddress is always derived from pulsar.address; the only
+	// formatter log is the pulsar.address parse failure, whose parser error
+	// would otherwise echo a credential-bearing URL.
+	const webAddress = "https://private-user:password-canary@private-broker.invalid/admin"
 	for _, test := range []struct {
 		name     string
 		address  string
 		expected string
 	}{
-		{"explicit HTTPS", "https://private-user:password-canary@private-broker.invalid/admin", "https://private-user:password-canary@private-broker.invalid/admin"},
-		{"unsupported scheme", "pulsar://private-user:password-canary@private-broker.invalid:6650", fallback},
-		{"malformed URL", "https://private-user:password-canary@private-broker.invalid:%", fallback},
-		{"missing host", "http:///private-user/password-canary/private-broker.invalid", fallback},
+		{"derived address", "pulsar://broker-0.invalid:6650", "http://broker-0.invalid:8080"},
+		{"malformed pulsar address", "pulsar://private-user:password-canary@private-broker.invalid:%", ""},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			base := NewBaseTable(SkipRemote(true), SkipEnv(true), Interval(0))
 			t.Cleanup(base.Manager().Close)
-			require.NoError(t, base.Save("pulsar.address", "pulsar://broker-0.invalid:6650,broker-1.invalid:6650"))
+			require.NoError(t, base.Save("pulsar.address", test.address))
 			require.NoError(t, base.Save("pulsar.webport", "8080"))
-			require.NoError(t, base.Save("pulsar.webaddress", test.address))
+			require.NoError(t, base.Save("pulsar.webaddress", webAddress))
 			sink := mlog.CaptureGlobalLogs(t, &mlog.Config{Level: "debug"})
 			var params PulsarConfig
 			params.Init(base)
@@ -180,12 +181,12 @@ func TestSensitivePulsarWebAddressOverrideLogs(t *testing.T) {
 			assert.Equal(t, test.expected, params.WebAddress.GetValue())
 			_, raw, err := base.Manager().GetConfig(params.WebAddress.Key)
 			require.NoError(t, err)
-			assert.Equal(t, test.address, raw, "formatting must not rewrite the stored configuration")
+			assert.Equal(t, webAddress, raw, "formatting must not rewrite the stored configuration")
 			_, value, err := base.Manager().GetRegisteredConfig(params.WebAddress.Key)
 			require.ErrorIs(t, err, config.ErrKeySensitive)
 			assert.Empty(t, value)
-			if test.expected == fallback {
-				assert.Contains(t, sink.String(), "using the address derived from pulsar.address")
+			if test.expected == "" {
+				assert.Contains(t, sink.String(), "failed to parse pulsar config")
 			}
 			for _, canary := range []string{"private-user", "password-canary", "private-broker.invalid"} {
 				assert.NotContains(t, sink.String(), canary)
