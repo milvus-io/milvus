@@ -1187,8 +1187,9 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 		}
 		// A failed task with a cleanup plan may already have lost its files,
 		// including after restart when CleanupRequired has been cleared.
-		if len(task.GetCleanupPrefixes()) > 0 && task.GetState() == datapb.CopySegmentTaskState_CopySegmentTaskFailed {
-			return merr.WrapErrServiceInternalMsg("cannot publish a failed copy task with planned cleanup")
+		if task.GetState() == datapb.CopySegmentTaskState_CopySegmentTaskFailed &&
+			(len(task.GetCleanupPrefixes()) > 0 || manifestIndexRollbackEnabled()) {
+			return merr.WrapErrServiceInternalMsg("cannot publish a failed copy task after cleanup or during index rollback")
 		}
 		results := resp.GetSegmentResults()
 		verified := make([]map[int64]int64, len(results))
