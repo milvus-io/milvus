@@ -66,6 +66,31 @@ func TestSelectNode(t *testing.T) {
 	}
 }
 
+func TestSelectNodeWithWeights(t *testing.T) {
+	balancer := NewRoundRobinBalancer()
+	nodes := []WeightedNode{
+		{NodeID: 1, Weight: 2},
+		{NodeID: 2, Weight: 1},
+		{NodeID: 3, Weight: 0},
+	}
+
+	counts := map[int64]int{}
+	for i := 0; i < 6; i++ {
+		nodeID, err := balancer.SelectNodeWithWeights(context.Background(), nodes, 0)
+		if err != nil {
+			t.Fatalf("select node with weights failed: %v", err)
+		}
+		counts[nodeID]++
+	}
+
+	if counts[1] != 4 || counts[2] != 2 {
+		t.Fatalf("expected weighted counts 1:4 2:2, got %v", counts)
+	}
+	if counts[3] != 0 {
+		t.Fatalf("zero weight node should not be selected, got %v", counts)
+	}
+}
+
 func TestRoundRobinBalancerSuite(t *testing.T) {
 	suite.Run(t, new(RoundRobinBalancerSuite))
 }

@@ -22,10 +22,14 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proxy/shardclient/querytraffic"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -78,6 +82,36 @@ func TestShardClient(t *testing.T) {
 	assert.False(t, closed)
 	closed = shardClient.Close(true)
 	assert.True(t, closed)
+}
+
+func TestUpdateShardLocationCacheAttachesQueryNodeLabels(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	mixcoord := mocks.NewMockMixCoordClient(t)
+	mixcoord.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
+		Status: merr.Success(),
+		Shards: []*querypb.ShardLeadersList{
+			{
+				ChannelName: "channel-1",
+				NodeIds:     []int64{1, 2},
+				NodeAddrs:   []string{"localhost:9000", "localhost:9001"},
+				Serviceable: []bool{true, true},
+			},
+		},
+	}, nil)
+
+	mgr := NewShardClientMgr(mixcoord, WithQueryTrafficLabelProvider(staticQueryTrafficLabelProvider{
+		nodes: map[int64]querytraffic.Labels{
+			1: {"AZ": "az1"},
+			2: {"AZ": "az2"},
+		},
+	}))
+
+	nodes, err := mgr.GetShard(ctx, false, "default", "test_collection", 100, "channel-1")
+
+	assert.NoError(t, err)
+	assert.Equal(t, map[string]string{"AZ": "az1"}, nodes[0].Labels)
+	assert.Equal(t, map[string]string{"AZ": "az2"}, nodes[1].Labels)
 }
 
 func TestPurgeClient(t *testing.T) {

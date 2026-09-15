@@ -44,6 +44,11 @@ func (b *RoundRobinBalancer) SelectNode(ctx context.Context, availableNodes []in
 	return availableNodes[int(idx)%len(availableNodes)], nil
 }
 
+func (b *RoundRobinBalancer) SelectNodeWithWeights(ctx context.Context, availableNodes []WeightedNode, cost int64) (int64, error) {
+	idx := b.idx.Inc()
+	return selectWeightedRoundRobin(availableNodes, idx)
+}
+
 func (b *RoundRobinBalancer) CancelWorkload(node int64, nq int64) {
 }
 

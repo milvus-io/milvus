@@ -26,6 +26,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proxy/shardclient/querytraffic"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -111,7 +112,7 @@ func TestParseShardLeaderListCarriesResourceGroup(t *testing.T) {
 			Serviceable:    []bool{true, false},
 			ResourceGroups: []string{"rg-a", "rg-b"},
 		},
-	})
+	}, nil)
 
 	assert.Equal(t, []NodeInfo{
 		{NodeID: 1, Address: "addr1", Serviceable: true, ResourceGroup: "rg-a"},
@@ -137,7 +138,7 @@ func TestParseShardLeaderListToleratesMissingResourceGroups(t *testing.T) {
 				Serviceable: []bool{true, true},
 				// ResourceGroups deliberately absent
 			},
-		})
+		}, nil)
 
 		assert.Equal(t, []NodeInfo{
 			{NodeID: 1, Address: "addr1", Serviceable: true, ResourceGroup: ""},
@@ -167,7 +168,7 @@ func TestParseShardLeaderListNeutralizesShortResourceGroups(t *testing.T) {
 				Serviceable:    []bool{true, true},
 				ResourceGroups: []string{"rg-a"}, // one short: which node is rg-a is unknowable
 			},
-		})
+		}, nil)
 
 		assert.Equal(t, []NodeInfo{
 			{NodeID: 1, Address: "addr1", Serviceable: true, ResourceGroup: ""},
@@ -219,4 +220,59 @@ func TestGetShardLeadersReadsWholeTableOnce(t *testing.T) {
 	_, err = mgr.GetShardLeaders(ctx, false, "db", "coll", collectionID)
 	require.NoError(t, err)
 	assert.Equal(t, 2, calls, "withCache=false is exactly one refreshing call")
+}
+
+// disabledQueryTrafficLabelProvider reports the feature disabled and records
+// whether GetNodeLabels would have been called.
+type disabledQueryTrafficLabelProvider struct {
+	called bool
+}
+
+func (p *disabledQueryTrafficLabelProvider) Enabled() bool {
+	return false
+}
+
+func (p *disabledQueryTrafficLabelProvider) GetSourceLabels(ctx context.Context) (querytraffic.Labels, error) {
+	return nil, nil
+}
+
+func (p *disabledQueryTrafficLabelProvider) GetNodeLabels(ctx context.Context, nodeIDs []int64) (map[int64]querytraffic.Labels, error) {
+	p.called = true
+	return nil, nil
+}
+
+// TestGetQueryTrafficNodeLabelsSkipsWhenDisabled pins that a disabled routing
+// feature must not pay the Session/etcd discovery cost on every shard-leader
+// refresh (default enabled=false).
+func TestGetQueryTrafficNodeLabelsSkipsWhenDisabled(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+
+	mixCoord := mocks.NewMockMixCoordClient(t)
+	provider := &disabledQueryTrafficLabelProvider{}
+	mgr := NewShardClientMgr(mixCoord, WithQueryTrafficLabelProvider(provider))
+
+	labels, err := mgr.getQueryTrafficNodeLabels(ctx, []*querypb.ShardLeadersList{
+		{ChannelName: "ch0", NodeIds: []int64{1, 2}},
+	})
+	require.NoError(t, err)
+	assert.Nil(t, labels)
+	assert.False(t, provider.called, "label resolution must be skipped when the feature is disabled")
+}
+
+// TestGetQueryTrafficNodeLabelsReturnsErrorOnFailure pins that a label-fetch
+// failure surfaces as an error so updateShardLocationCache keeps the previous
+// cache instead of caching label-less shard leaders.
+func TestGetQueryTrafficNodeLabelsReturnsErrorOnFailure(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+
+	mixCoord := mocks.NewMockMixCoordClient(t)
+	mgr := NewShardClientMgr(mixCoord, WithQueryTrafficLabelProvider(errorQueryTrafficLabelProvider{}))
+
+	labels, err := mgr.getQueryTrafficNodeLabels(ctx, []*querypb.ShardLeadersList{
+		{ChannelName: "ch0", NodeIds: []int64{1, 2}},
+	})
+	require.Error(t, err)
+	assert.Nil(t, labels)
 }

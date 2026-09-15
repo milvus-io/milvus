@@ -30,3 +30,12 @@ type LBBalancer interface {
 	Start(ctx context.Context)
 	Close()
 }
+
+type WeightedNode struct {
+	NodeID int64
+	Weight int
+}
+
+type WeightedLBBalancer interface {
+	SelectNodeWithWeights(ctx context.Context, availableNodes []WeightedNode, nq int64) (int64, error)
+}

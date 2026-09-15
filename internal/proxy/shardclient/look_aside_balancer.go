@@ -169,6 +169,95 @@ func (b *LookAsideBalancer) SelectNode(ctx context.Context, availableNodes []int
 	return targetNode, nil
 }
 
+func (b *LookAsideBalancer) SelectNodeWithWeights(ctx context.Context, availableNodes []WeightedNode, nq int64) (int64, error) {
+	targetNode := int64(-1)
+	defer func() {
+		if targetNode != -1 {
+			metrics, _ := b.metricsMap.GetOrInsert(targetNode, &CostMetrics{})
+			metrics.executingNQ.Add(nq)
+		}
+	}()
+
+	idx := b.idx.Load()
+	if idx%b.checkWorkloadRequestNum != 0 {
+		var err error
+		targetNode, err = b.selectReachableWeightedRoundRobin(availableNodes, idx)
+		if err != nil {
+			return targetNode, err
+		}
+		b.idx.Inc()
+		return targetNode, nil
+	}
+
+	minScore := math.MaxFloat64
+	maxScore := float64(0)
+	nowTs := time.Now().UnixMilli()
+	for _, node := range availableNodes {
+		if node.Weight <= 0 {
+			continue
+		}
+		score := int64(0)
+		metrics, ok := b.metricsMap.Get(node.NodeID)
+		if ok {
+			if metrics.unavailable.Load() {
+				continue
+			}
+
+			executingNQ := metrics.executingNQ.Load()
+			if executingNQ != 0 || nowTs-metrics.ts.Load() <= b.metricExpireInterval {
+				score = b.calculateScore(node.NodeID, metrics.cost.Load(), executingNQ)
+			}
+		}
+		// Score per unit of weight, kept as a ratio instead of an integer
+		// division: with weights like 100, score/weight truncates every
+		// difference below the weight to zero and makes
+		// workloadToleranceFactor meaningless (a backlogged node would score
+		// the same as an idle one).
+		weightedScore := float64(score) / float64(node.Weight)
+		if weightedScore < minScore || targetNode == -1 {
+			minScore = weightedScore
+			targetNode = node.NodeID
+		}
+		if weightedScore > maxScore {
+			maxScore = weightedScore
+		}
+	}
+
+	if targetNode == -1 {
+		return targetNode, merr.WrapErrServiceUnavailable("all available nodes are unreachable")
+	}
+
+	if minScore <= 0 || (maxScore-minScore)/minScore <= b.workloadToleranceFactor {
+		var err error
+		targetNode, err = b.selectReachableWeightedRoundRobin(availableNodes, idx)
+		if err != nil {
+			return targetNode, err
+		}
+		b.idx.Inc()
+	}
+
+	return targetNode, nil
+}
+
+func (b *LookAsideBalancer) selectReachableWeightedRoundRobin(availableNodes []WeightedNode, idx int64) (int64, error) {
+	reachableNodes := make([]WeightedNode, 0, len(availableNodes))
+	for _, node := range availableNodes {
+		if node.Weight <= 0 {
+			continue
+		}
+		metrics, ok := b.metricsMap.Get(node.NodeID)
+		if ok && metrics.unavailable.Load() {
+			continue
+		}
+		reachableNodes = append(reachableNodes, node)
+	}
+	targetNode, err := selectWeightedRoundRobin(reachableNodes, idx)
+	if err != nil {
+		return targetNode, merr.WrapErrServiceUnavailable("all available nodes are unreachable")
+	}
+	return targetNode, nil
+}
+
 // when task canceled, should reduce executing total nq cost
 func (b *LookAsideBalancer) CancelWorkload(node int64, nq int64) {
 	metrics, ok := b.metricsMap.Get(node)
