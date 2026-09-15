@@ -209,7 +209,14 @@ func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 	}
 	// If refresh mode is ON.
 	if req.GetRefresh() {
-		err := s.refreshCollection(ctx, req.GetCollectionID())
+		release, err := s.acquireTopologyLease(ctx, req.GetCollectionID())
+		if err != nil {
+			logger.Warn(ctx, "load collection refresh blocked by schema installation", mlog.Err(err))
+			metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
+			return merr.Status(err), nil
+		}
+		defer release()
+		err = s.refreshCollection(ctx, req.GetCollectionID())
 		if err != nil {
 			logger.Warn(ctx, "failed to refresh collection", mlog.Err(err))
 			metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
@@ -218,6 +225,16 @@ func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 		logger.Info(ctx, "refresh collection done")
 		metrics.QueryCoordLoadCount.WithLabelValues(metrics.SuccessLabel).Inc()
 		return merr.Success(), nil
+	}
+	// Normal load only publishes a collection-scoped WAL intent here. Holding a
+	// topology lease while waiting for the same broadcaster resource lock used
+	// by schema DDL would invert the lock order (DDL: resource lock -> gate
+	// drain; load: gate lease -> resource lock). The delayed ACK callback takes
+	// the topology lease around the actual replica/target mutation.
+	if err := s.checkTopologyAdmission(req.GetCollectionID()); err != nil {
+		logger.Warn(ctx, "load collection blocked by schema installation", mlog.Err(err))
+		metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
+		return merr.Status(err), nil
 	}
 
 	if err := s.broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx, req); err != nil {
@@ -279,10 +296,16 @@ func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitions
 		metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
-
 	// If refresh mode is ON.
 	if req.GetRefresh() {
-		err := s.refreshCollection(ctx, req.GetCollectionID())
+		release, err := s.acquireTopologyLease(ctx, req.GetCollectionID())
+		if err != nil {
+			logger.Warn(ctx, "load partitions refresh blocked by schema installation", mlog.Err(err))
+			metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
+			return merr.Status(err), nil
+		}
+		defer release()
+		err = s.refreshCollection(ctx, req.GetCollectionID())
 		if err != nil {
 			logger.Warn(ctx, "failed to refresh partitions", mlog.Err(err))
 			metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
@@ -291,6 +314,14 @@ func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitions
 		logger.Info(ctx, "refresh partitions done")
 		metrics.QueryCoordLoadCount.WithLabelValues(metrics.SuccessLabel).Inc()
 		return merr.Success(), nil
+	}
+	// See LoadCollection: the load-config broadcast is serialized with schema
+	// DDL by the collection resource lock, while its ACK callback owns the
+	// topology lease for the actual mutation.
+	if err := s.checkTopologyAdmission(req.GetCollectionID()); err != nil {
+		logger.Warn(ctx, "load partitions blocked by schema installation", mlog.Err(err))
+		metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
+		return merr.Status(err), nil
 	}
 
 	if err := s.broadcastAlterLoadConfigCollectionV2ForLoadPartitions(ctx, req); err != nil {
@@ -446,6 +477,11 @@ func (s *Server) SyncNewCreatedPartition(ctx context.Context, req *querypb.SyncN
 		mlog.Warn(ctx, failedMsg, mlog.Err(err))
 		return merr.Status(err), nil
 	}
+	release, err := s.acquireTopologyLease(ctx, req.GetCollectionID())
+	if err != nil {
+		return merr.Status(err), nil
+	}
+	defer release()
 
 	syncJob := job.NewSyncNewCreatedPartitionJob(ctx, req, s.meta, s.broker, s.targetObserver, s.targetMgr)
 	go func() {
@@ -467,7 +503,7 @@ func (s *Server) SyncNewCreatedPartition(ctx context.Context, req *querypb.SyncN
 			return
 		}
 	}()
-	err := syncJob.Wait()
+	err = syncJob.Wait()
 	if err != nil {
 		mlog.Warn(ctx, failedMsg, mlog.Err(err))
 		return merr.Status(err), nil
@@ -603,7 +639,9 @@ func (s *Server) LoadBalance(ctx context.Context, req *querypb.LoadBalanceReques
 		mlog.Warn(ctx, msg, mlog.Err(err))
 		return merr.Status(merr.Wrapf(err, "%s", msg)), nil
 	}
-
+	if err := s.checkTopologyAdmission(req.GetCollectionID()); err != nil {
+		return merr.Status(err), nil
+	}
 	// Verify request
 	if len(req.GetSourceNodeIDs()) != 1 {
 		err := merr.WrapErrParameterInvalid("only 1 source node", fmt.Sprintf("%d source nodes", len(req.GetSourceNodeIDs())))
@@ -1034,66 +1072,79 @@ func (s *Server) UpdateLoadConfig(ctx context.Context, req *querypb.UpdateLoadCo
 }
 
 func (s *Server) updateLoadConfig(ctx context.Context, collectionIDs []int64, newReplicaNum int32, newRGs []string, needWaitRGReady ...bool) error {
-	jobs := make([]job.Job, 0, len(collectionIDs))
+	var wg sync.WaitGroup
+	var errMu sync.Mutex
+	var combined error
 	for _, collectionID := range collectionIDs {
-		collection := s.meta.GetCollection(ctx, collectionID)
-		if collection == nil {
-			err := merr.WrapErrCollectionNotLoaded(collectionID)
-			mlog.Warn(context.TODO(), "failed to update load config", mlog.Err(err))
-			continue
-		}
+		collectionID := collectionID
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
 
-		collectionUsedRG := s.meta.ReplicaManager.GetResourceGroupByCollection(ctx, collection.GetCollectionID()).Collect()
-		left, right := lo.Difference(collectionUsedRG, newRGs)
-		rgChanged := len(left) > 0 || len(right) > 0
-		replicaChanged := collection.GetReplicaNumber() != newReplicaNum
+			release, err := s.acquireTopologyLease(ctx, collectionID)
+			if err != nil {
+				errMu.Lock()
+				combined = merr.Combine(combined, err)
+				errMu.Unlock()
+				return
+			}
+			defer release()
 
-		subReq := &querypb.UpdateLoadConfigRequest{
-			CollectionIDs:  []int64{collectionID},
-			ReplicaNumber:  newReplicaNum,
-			ResourceGroups: newRGs,
-		}
-		if len(subReq.GetResourceGroups()) == 0 {
-			subReq.ResourceGroups = collectionUsedRG
-			rgChanged = false
-		}
+			collection := s.meta.GetCollection(ctx, collectionID)
+			if collection == nil {
+				err := merr.WrapErrCollectionNotLoaded(collectionID)
+				mlog.Warn(ctx, "failed to update load config", mlog.Err(err))
+				return
+			}
 
-		if subReq.GetReplicaNumber() == 0 {
-			subReq.ReplicaNumber = collection.GetReplicaNumber()
-			replicaChanged = false
-		}
+			collectionUsedRG := s.meta.ReplicaManager.GetResourceGroupByCollection(ctx, collection.GetCollectionID()).Collect()
+			left, right := lo.Difference(collectionUsedRG, newRGs)
+			rgChanged := len(left) > 0 || len(right) > 0
+			replicaChanged := collection.GetReplicaNumber() != newReplicaNum
 
-		if !replicaChanged && !rgChanged {
-			mlog.Info(context.TODO(), "no need to update load config", mlog.Int64("collectionID", collectionID))
-			continue
-		}
+			subReq := &querypb.UpdateLoadConfigRequest{
+				CollectionIDs:  []int64{collectionID},
+				ReplicaNumber:  newReplicaNum,
+				ResourceGroups: newRGs,
+			}
+			if len(subReq.GetResourceGroups()) == 0 {
+				subReq.ResourceGroups = collectionUsedRG
+				rgChanged = false
+			}
 
-		waitRG := len(needWaitRGReady) > 0 && needWaitRGReady[0]
-		updateJob := job.NewUpdateLoadConfigJob(
-			ctx,
-			subReq,
-			s.meta,
-			s.targetMgr,
-			s.targetObserver,
-			s.collectionObserver,
-			s.proxyClientManager,
-			false,
-			waitRG,
-		)
+			if subReq.GetReplicaNumber() == 0 {
+				subReq.ReplicaNumber = collection.GetReplicaNumber()
+				replicaChanged = false
+			}
 
-		jobs = append(jobs, updateJob)
-		s.jobScheduler.Add(updateJob)
+			if !replicaChanged && !rgChanged {
+				mlog.Info(ctx, "no need to update load config", mlog.Int64("collectionID", collectionID))
+				return
+			}
+
+			waitRG := len(needWaitRGReady) > 0 && needWaitRGReady[0]
+			updateJob := job.NewUpdateLoadConfigJob(
+				ctx,
+				subReq,
+				s.meta,
+				s.targetMgr,
+				s.targetObserver,
+				s.collectionObserver,
+				s.proxyClientManager,
+				false,
+				waitRG,
+			)
+
+			s.jobScheduler.Add(updateJob)
+			if err := updateJob.Wait(); err != nil {
+				errMu.Lock()
+				combined = merr.Combine(combined, err)
+				errMu.Unlock()
+			}
+		}()
 	}
-
-	var err error
-	for _, job := range jobs {
-		subErr := job.Wait()
-		if subErr != nil {
-			err = merr.Combine(err, subErr)
-		}
-	}
-
-	return err
+	wg.Wait()
+	return combined
 }
 
 func (s *Server) ListLoadedSegments(ctx context.Context, req *querypb.ListLoadedSegmentsRequest) (*querypb.ListLoadedSegmentsResponse, error) {

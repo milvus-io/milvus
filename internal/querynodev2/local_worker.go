@@ -43,7 +43,12 @@ func NewLocalWorker(node *QueryNode) *LocalWorker {
 }
 
 func (w *LocalWorker) LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
-	status, err := w.node.LoadSegments(ctx, req)
+	// A shard leader may already hold the collection topology lock while it
+	// delegates this load back to its local worker. Mark the in-process callback
+	// so QueryNode reuses that outer serialization boundary instead of trying to
+	// acquire the non-reentrant key lock again. Remote workers do not receive
+	// this context marker and still take their own receiver lock.
+	status, err := w.node.LoadSegments(withLocalTopologyMutation(ctx), req)
 	return merr.CheckRPCCall(status, err)
 }
 

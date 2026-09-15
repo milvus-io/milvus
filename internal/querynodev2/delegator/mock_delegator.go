@@ -599,6 +599,54 @@ func (_c *MockShardDelegator_GetTSafe_Call) RunAndReturn(run func() uint64) *Moc
 	return _c
 }
 
+// InstallSchema provides a mock function with given fields: ctx, sch, schemaBarrierTs
+func (_m *MockShardDelegator) InstallSchema(ctx context.Context, sch *schemapb.CollectionSchema, schemaBarrierTs uint64) error {
+	ret := _m.Called(ctx, sch, schemaBarrierTs)
+
+	if len(ret) == 0 {
+		panic("no return value specified for InstallSchema")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *schemapb.CollectionSchema, uint64) error); ok {
+		r0 = rf(ctx, sch, schemaBarrierTs)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockShardDelegator_InstallSchema_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'InstallSchema'
+type MockShardDelegator_InstallSchema_Call struct {
+	*mock.Call
+}
+
+// InstallSchema is a helper method to define mock.On call
+//   - ctx context.Context
+//   - sch *schemapb.CollectionSchema
+//   - schemaBarrierTs uint64
+func (_e *MockShardDelegator_Expecter) InstallSchema(ctx interface{}, sch interface{}, schemaBarrierTs interface{}) *MockShardDelegator_InstallSchema_Call {
+	return &MockShardDelegator_InstallSchema_Call{Call: _e.mock.On("InstallSchema", ctx, sch, schemaBarrierTs)}
+}
+
+func (_c *MockShardDelegator_InstallSchema_Call) Run(run func(ctx context.Context, sch *schemapb.CollectionSchema, schemaBarrierTs uint64)) *MockShardDelegator_InstallSchema_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*schemapb.CollectionSchema), args[2].(uint64))
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_InstallSchema_Call) Return(_a0 error) *MockShardDelegator_InstallSchema_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockShardDelegator_InstallSchema_Call) RunAndReturn(run func(context.Context, *schemapb.CollectionSchema, uint64) error) *MockShardDelegator_InstallSchema_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // LoadGrowing provides a mock function with given fields: ctx, infos, version
 func (_m *MockShardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.SegmentLoadInfo, version int64) error {
 	ret := _m.Called(ctx, infos, version)

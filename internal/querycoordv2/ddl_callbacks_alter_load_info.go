@@ -32,8 +32,9 @@ import (
 func (s *Server) alterLoadConfigV2AckCallback(ctx context.Context, result message.BroadcastResultAlterLoadConfigMessageV2) error {
 	// currently, we only sent the put load config message to the control channel
 	// TODO: after we support query view in 3.0, we should broadcast the put load config message to all vchannels.
-	job := job.NewLoadCollectionJob(ctx, result, s.dist, s.meta, s.broker, s.targetMgr, s.targetObserver, s.collectionObserver, s.checkerController, s.nodeMgr, s.proxyClientManager)
-	if err := job.Execute(); err != nil {
+	collectionID := result.Message.Header().GetCollectionId()
+	loadJob := job.NewLoadCollectionJob(ctx, result, s.dist, s.meta, s.broker, s.targetMgr, s.targetObserver, s.collectionObserver, s.checkerController, s.nodeMgr, s.proxyClientManager)
+	if err := s.executeLoadCollectionAckJob(loadJob); err != nil {
 		// The collection's channel is already in dropped-sentinel state, meaning
 		// a concurrent DropCollection has landed at the channel level on this
 		// cluster (typically on a CDC replica). The load can never succeed; ack
@@ -48,6 +49,25 @@ func (s *Server) alterLoadConfigV2AckCallback(ctx context.Context, result messag
 		}
 		return err
 	}
-	meta.GlobalFailedLoadCache.Remove(result.Message.Header().GetCollectionId())
+	meta.GlobalFailedLoadCache.Remove(collectionID)
 	return nil
+}
+
+type loadCollectionAckJob interface {
+	Context() context.Context
+	CollectionID() int64
+	Execute() error
+}
+
+func (s *Server) executeLoadCollectionAckJob(loadJob loadCollectionAckJob) error {
+	// The broadcaster will retry the ACK callback after schema installation
+	// reopens admission. Without this lease a delayed load callback could
+	// mutate replica/target state after PrepareSchemaInstall drained the
+	// original LoadCollection/LoadPartitions API lease.
+	release, err := s.acquireTopologyLease(loadJob.Context(), loadJob.CollectionID())
+	if err != nil {
+		return err
+	}
+	defer release()
+	return loadJob.Execute()
 }

@@ -37,10 +37,13 @@ type jobQueue chan Job
 type Scheduler struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
+	mu     sync.Mutex
 
 	processors *typeutil.ConcurrentSet[int64] // Collections of having processor
 	queues     map[int64]jobQueue             // CollectionID -> Queue
 	waitQueue  jobQueue
+	active     map[int64]int           // CollectionID -> admitted jobs not yet terminal
+	idle       map[int64]chan struct{} // CollectionID -> closed when active becomes zero
 
 	stopOnce sync.Once
 }
@@ -50,6 +53,8 @@ func NewScheduler() *Scheduler {
 		processors: typeutil.NewConcurrentSet[int64](),
 		queues:     make(map[int64]jobQueue),
 		waitQueue:  make(jobQueue, waitQueueCap),
+		active:     make(map[int64]int),
+		idle:       make(map[int64]chan struct{}),
 	}
 }
 
@@ -109,7 +114,49 @@ func (scheduler *Scheduler) schedule(ctx context.Context) {
 }
 
 func (scheduler *Scheduler) Add(job Job) {
+	scheduler.mu.Lock()
+	if scheduler.active[job.CollectionID()] == 0 {
+		scheduler.idle[job.CollectionID()] = make(chan struct{})
+	}
+	scheduler.active[job.CollectionID()]++
+	scheduler.mu.Unlock()
 	scheduler.waitQueue <- job
+}
+
+// WaitCollectionIdle waits until every job already admitted for the collection
+// reaches its terminal callback. New jobs are prevented by the schema install
+// admission gate before this method is called.
+func (scheduler *Scheduler) WaitCollectionIdle(ctx context.Context, collectionID int64) error {
+	for {
+		scheduler.mu.Lock()
+		if scheduler.active[collectionID] == 0 {
+			scheduler.mu.Unlock()
+			return nil
+		}
+		idle := scheduler.idle[collectionID]
+		scheduler.mu.Unlock()
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-idle:
+		}
+	}
+}
+
+func (scheduler *Scheduler) finish(job Job) {
+	scheduler.mu.Lock()
+	defer scheduler.mu.Unlock()
+	collectionID := job.CollectionID()
+	if scheduler.active[collectionID] == 0 {
+		return
+	}
+	scheduler.active[collectionID]--
+	if scheduler.active[collectionID] == 0 {
+		close(scheduler.idle[collectionID])
+		delete(scheduler.idle, collectionID)
+		delete(scheduler.active, collectionID)
+	}
 }
 
 func (scheduler *Scheduler) startProcessor(collection int64, queue jobQueue) {
@@ -143,6 +190,7 @@ func (scheduler *Scheduler) process(job Job) {
 		job.PostExecute()
 		log.Info(context.TODO(), "job finished")
 		job.Done()
+		scheduler.finish(job)
 	}()
 
 	log.Info(context.TODO(), "start to pre-execute job")

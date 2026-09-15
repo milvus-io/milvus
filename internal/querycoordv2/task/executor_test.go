@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -162,6 +163,82 @@ func TestExecutorGetCollectionInfoReturnsCallerContextErrorBeforeLookup(t *testi
 	assert.Nil(t, collectionInfo)
 	assert.ErrorIs(t, err, context.Canceled)
 	broker.AssertNotCalled(t, "DescribeCollection", mock.Anything, collectionID)
+}
+
+func TestLeaderMetadataSyncRequestsCarrySchemaBarrier(t *testing.T) {
+	ctx := context.Background()
+	collectionID := int64(1003)
+	leaderID := int64(10)
+	workerID := int64(11)
+	barrier := uint64(200)
+	schema := &schemapb.CollectionSchema{Name: "target", Version: 2}
+	replica := newTestReplica(collectionID, leaderID, workerID)
+
+	for _, tc := range []struct {
+		name       string
+		actionType ActionType
+		invoke     func(*Executor, *LeaderTask) error
+		newTask    func() *LeaderTask
+	}{
+		{
+			name:       "remove",
+			actionType: ActionTypeReduce,
+			invoke: func(ex *Executor, task *LeaderTask) error {
+				return ex.removeDistribution(task, 0)
+			},
+			newTask: func() *LeaderTask {
+				action := NewLeaderAction(leaderID, workerID, ActionTypeReduce, "channel", 100, 0)
+				return NewLeaderSegmentTask(ctx, 10*time.Second, testSource("schema-gate-test"), collectionID, replica, leaderID, action)
+			},
+		},
+		{
+			name:       "partition stats",
+			actionType: ActionTypeStatsUpdate,
+			invoke: func(ex *Executor, task *LeaderTask) error {
+				return ex.updatePartStatsVersions(task, 0)
+			},
+			newTask: func() *LeaderTask {
+				action := NewLeaderUpdatePartStatsAction(leaderID, workerID, ActionTypeStatsUpdate, "channel", map[int64]int64{20: 30})
+				return NewLeaderPartStatsTask(ctx, 10*time.Second, testSource("schema-gate-test"), collectionID, replica, leaderID, action)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			collectionMgr := meta.NewCollectionManager(nil)
+			assert.NoError(t, collectionMgr.PutCollectionWithoutSave(ctx, &meta.Collection{
+				CollectionLoadInfo: &querypb.CollectionLoadInfo{
+					CollectionID: collectionID,
+					LoadType:     querypb.LoadType_LoadCollection,
+					LoadFields:   []int64{100, 101},
+				},
+			}))
+			queryMeta := &meta.Meta{CollectionManager: collectionMgr}
+			broker := meta.NewMockBroker(t)
+			broker.EXPECT().DescribeCollection(mock.Anything, collectionID).Return(&milvuspb.DescribeCollectionResponse{
+				CollectionID:    collectionID,
+				Schema:          schema,
+				UpdateTimestamp: barrier,
+			}, nil).Once()
+			targetMgr := meta.NewMockTargetManager(t)
+			targetMgr.EXPECT().GetPartitions(mock.Anything, collectionID, meta.NextTargetFirst).Return([]int64{20}, nil).Once()
+			cluster := session.NewMockCluster(t)
+			cluster.EXPECT().SyncDistribution(mock.Anything, leaderID, mock.MatchedBy(func(req *querypb.SyncDistributionRequest) bool {
+				return req.GetSchema() == schema &&
+					req.GetLoadMeta().GetSchemaBarrierTs() == barrier &&
+					req.GetLoadMeta().GetCollectionID() == collectionID &&
+					len(req.GetActions()) == 1 &&
+					req.GetActions()[0].GetType() == map[ActionType]querypb.SyncType{
+						ActionTypeReduce:      querypb.SyncType_Remove,
+						ActionTypeStatsUpdate: querypb.SyncType_UpdatePartitionStats,
+					}[tc.actionType]
+			})).Return(merr.Success(), nil).Once()
+
+			ex := NewExecutor(1, queryMeta, nil, broker, targetMgr, cluster, session.NewNodeManager())
+			task := tc.newTask()
+			task.SetID(1)
+			assert.NoError(t, tc.invoke(ex, task))
+		})
+	}
 }
 
 func TestExecutorCapacity(t *testing.T) {

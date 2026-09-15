@@ -355,6 +355,54 @@ func (_c *MockCollectionManager_UpdateSchema_Call) RunAndReturn(run func(int64, 
 	return _c
 }
 
+// ValidateSchemaBarrier provides a mock function with given fields: collectionID, schema, schemaBarrierTs
+func (_m *MockCollectionManager) ValidateSchemaBarrier(collectionID int64, schema *schemapb.CollectionSchema, schemaBarrierTs uint64) error {
+	ret := _m.Called(collectionID, schema, schemaBarrierTs)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ValidateSchemaBarrier")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(int64, *schemapb.CollectionSchema, uint64) error); ok {
+		r0 = rf(collectionID, schema, schemaBarrierTs)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockCollectionManager_ValidateSchemaBarrier_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ValidateSchemaBarrier'
+type MockCollectionManager_ValidateSchemaBarrier_Call struct {
+	*mock.Call
+}
+
+// ValidateSchemaBarrier is a helper method to define mock.On call
+//   - collectionID int64
+//   - schema *schemapb.CollectionSchema
+//   - schemaBarrierTs uint64
+func (_e *MockCollectionManager_Expecter) ValidateSchemaBarrier(collectionID interface{}, schema interface{}, schemaBarrierTs interface{}) *MockCollectionManager_ValidateSchemaBarrier_Call {
+	return &MockCollectionManager_ValidateSchemaBarrier_Call{Call: _e.mock.On("ValidateSchemaBarrier", collectionID, schema, schemaBarrierTs)}
+}
+
+func (_c *MockCollectionManager_ValidateSchemaBarrier_Call) Run(run func(collectionID int64, schema *schemapb.CollectionSchema, schemaBarrierTs uint64)) *MockCollectionManager_ValidateSchemaBarrier_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(*schemapb.CollectionSchema), args[2].(uint64))
+	})
+	return _c
+}
+
+func (_c *MockCollectionManager_ValidateSchemaBarrier_Call) Return(_a0 error) *MockCollectionManager_ValidateSchemaBarrier_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCollectionManager_ValidateSchemaBarrier_Call) RunAndReturn(run func(int64, *schemapb.CollectionSchema, uint64) error) *MockCollectionManager_ValidateSchemaBarrier_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewMockCollectionManager creates a new instance of MockCollectionManager. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockCollectionManager(t interface {
