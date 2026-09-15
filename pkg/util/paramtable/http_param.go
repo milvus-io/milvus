@@ -154,6 +154,7 @@ cost. Disabling restores the old always-decode behavior.`,
 		Version:      "2.6.0",
 		Doc:          "Strict-Transport-Security max-age in seconds",
 		Export:       true,
+		Sensitivity:  Sensitive,
 	}
 	p.HSTSMaxAge.Init(base.mgr)
 
@@ -163,6 +164,7 @@ cost. Disabling restores the old always-decode behavior.`,
 		Version:      "2.6.0",
 		Doc:          "Include subdomains in Strict-Transport-Security",
 		Export:       true,
+		Sensitivity:  Sensitive,
 	}
 	p.HSTSIncludeSubDomains.Init(base.mgr)
 
@@ -172,6 +174,7 @@ cost. Disabling restores the old always-decode behavior.`,
 		Version:      "2.6.0",
 		Doc:          "Whether to enable setting the Strict-Transport-Security header",
 		Export:       true,
+		Sensitivity:  Sensitive,
 	}
 	p.EnableHSTS.Init(base.mgr)
 
