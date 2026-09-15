@@ -36,6 +36,9 @@ log:
   level: debug
 extraConfigFiles:
   user.yaml: |+
+    grpc:
+      client:
+        compressionEnabled: true
     dataCoord:
       targetVecIndexVersion: 11
       forceRebuildScalarSegmentIndex: true
