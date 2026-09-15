@@ -15,20 +15,21 @@
 // limitations under the License.
 
 #include <gtest/gtest.h>
-#include <unordered_set>
-#include "monitor/Monitor.h"
-#include "exec/operator/Utils.h"
-#include "index/VectorMemIndex.h"
-#include "common/Consts.h"
 
 #include <unordered_map>
+#include <unordered_set>
+#include <mutex>
 
 #include "common/PrometheusClient.h"
 #include "exec/operator/search-groupby/GroupMembership.h"
 #include "exec/operator/search-groupby/SearchGroupByOperator.h"
+#include "common/Consts.h"
 #include "index/ScalarIndexSort.h"
-#include "query/Utils.h"
+#include "index/VectorMemIndex.h"
+#include "exec/operator/Utils.h"
+#include "monitor/Monitor.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
+#include "segcore/IndexConfigGenerator.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/storage_test_utils.h"
@@ -36,6 +37,37 @@
 namespace milvus::exec {
 
 namespace {
+
+class StrictGroupLogSink final : public google::LogSink {
+ public:
+    std::mutex mutex;
+    std::vector<knowhere::Json> records;
+    void
+    send(google::LogSeverity,
+         const char*,
+         const char*,
+         int,
+         const std::tm*,
+         const char* message,
+         size_t length) override {
+        const std::string text(message, length);
+        const std::string marker = "strict_group_diagnostic ";
+        auto pos = text.find(marker);
+        if (pos != std::string::npos) {
+            std::lock_guard<std::mutex> lock(mutex);
+            records.push_back(
+                knowhere::Json::parse(text.substr(pos + marker.size())));
+        }
+    }
+};
+
+size_t
+CountInvalidRows(const BitsetView& invalid) {
+    // New Knowhere views leave counts unknown until backend preparation.
+    auto prepared = invalid;
+    prepared.count_filtered_bits(0, prepared.num_bits());
+    return prepared.count();
+}
 
 class CountingScalarIndex : public index::ScalarIndexSort<int64_t> {
  public:
@@ -90,8 +122,8 @@ MakeSequenceVectorIterator(
             eligible.emplace_back(candidate);
         }
     }
-    auto iterator = std::make_shared<ChunkMergeIterator>(
-        /*chunk_count=*/empty_leading_chunk ? 2 : 1);
+    auto iterator =
+        std::make_shared<ChunkMergeIterator>(empty_leading_chunk ? 2 : 1);
     if (empty_leading_chunk) {
         iterator->AddIterator(std::make_shared<SequenceIterator>(
             std::vector<std::pair<int64_t, float>>{}));
@@ -101,327 +133,405 @@ MakeSequenceVectorIterator(
     return iterator;
 }
 
-}  // namespace
-
-TEST(StrictGroupEligibilityTest, RequiresSingleFieldStrictSingleQuery) {
-    SearchInfo info;
-    info.topk_ = 10;
-    info.group_size_ = 3;
-    info.strict_group_size_ = true;
-    info.group_by_field_ids_ = {FieldId(101)};
-    EXPECT_TRUE(query::CanUseStrictGroupFilteredIterator(info, 1));
-    auto disabled = info;
-    disabled.strict_group_acceptance_threshold_ = 0;
-    EXPECT_FALSE(query::CanUseStrictGroupFilteredIterator(disabled, 1));
-    EXPECT_FALSE(query::CanUseStrictGroupFilteredIterator(info, 2));
-    info.group_by_field_ids_.push_back(FieldId(102));
-    EXPECT_FALSE(query::CanUseStrictGroupFilteredIterator(info, 1));
-    info.group_by_field_ids_.pop_back();
-    info.strict_group_size_ = false;
-    EXPECT_FALSE(query::CanUseStrictGroupFilteredIterator(info, 1));
-    info.strict_group_size_ = true;
-    info.group_size_ = 1;
-    EXPECT_FALSE(query::CanUseStrictGroupFilteredIterator(info, 1));
+// Test adapter: compare a single raw classification with row-wise expectations.
+template <typename T>
+std::optional<TargetBitmap>
+BuildOffsetsBitmap(milvus::OpContext* ctx,
+                   const segcore::SegmentInternalInterface& segment,
+                   FieldId field,
+                   int64_t rows,
+                   const std::vector<std::optional<T>>& groups,
+                   const TargetBitmap* base) {
+    std::vector<std::optional<T>> unique;
+    for (const auto& group : groups) {
+        if (std::find(unique.begin(), unique.end(), group) == unique.end())
+            unique.push_back(group);
+    }
+    auto offsets =
+        BuildGroupOffsets<T>(ctx, segment, field, rows, unique, base);
+    if (!offsets)
+        return std::nullopt;
+    TargetBitmap result(rows, false);
+    for (const auto& group : *offsets)
+        for (auto offset : group) result[offset] = true;
+    return result;
 }
 
-TEST(StrictGroupEligibilityTest, CompositeAndMultiQueryKeepOriginalPath) {
-    auto schema = std::make_shared<Schema>();
-    auto pk = schema->AddDebugField("pk", DataType::INT64);
-    auto group = schema->AddDebugField("group", DataType::INT64);
-    auto other = schema->AddDebugField("other", DataType::INT64);
-    schema->set_primary_field_id(pk);
-    auto data = segcore::DataGen(schema, 4, 42, 0, 4);
-    auto segment = CreateSealedWithFieldDataLoaded(schema, data);
-    for (bool composite : {false, true}) {
-        SearchResult result;
-        result.total_nq_ = composite ? 1 : 2;
-        result.total_data_cnt_ = 4;
-        result.vector_iterators_.emplace();
-        for (int i = 0; i < result.total_nq_; ++i) {
-            result.vector_iterators_->push_back(
-                MakeSequenceVectorIterator({{0, 0.0F}, {1, 1.0F}}));
-        }
-        result.SetVectorIteratorRecreator(
-            BitsetView{}, [](const BitsetView&, SearchResult&) {
-                FAIL() << "unsupported group shape must not recreate";
-            });
-        SearchInfo info;
-        info.topk_ = 1;
-        info.group_size_ = 2;
-        info.strict_group_size_ = true;
-        info.group_by_field_ids_ = {group};
-        if (composite) {
-            info.group_by_field_ids_.push_back(other);
-        }
-        info.metric_type_ = knowhere::metric::L2;
-        std::vector<CompositeGroupKey> groups;
-        std::vector<int64_t> offsets;
-        std::vector<float> distances;
-        std::vector<size_t> prefix;
-        SearchGroupBy(nullptr,
-                      *result.vector_iterators_,
-                      info,
-                      groups,
-                      *segment,
-                      offsets,
-                      distances,
-                      prefix,
-                      nullptr,
-                      &result);
-        EXPECT_EQ(offsets.size(), result.total_nq_ * 2);
-        EXPECT_EQ(groups.size(), offsets.size());
-        for (const auto& key : groups) {
-            EXPECT_EQ(key.values_.size(), composite ? 2 : 1);
-        }
-        EXPECT_EQ(prefix.size(), result.total_nq_ + 1);
-        EXPECT_EQ(prefix.back(), offsets.size());
-    }
-}
-
-TEST(StrictGroupPhase2ExecutorTest,
-     LocksGroupsAndRecreatesOneFilteredIterator) {
-    constexpr int64_t kRowCount = 120;
-    auto schema = std::make_shared<Schema>();
-    auto pk_field = schema->AddDebugField("pk", DataType::INT64);
-    auto group_field = schema->AddDebugField("group", DataType::INT64);
-    schema->set_primary_field_id(pk_field);
-    auto data = segcore::DataGen(schema,
-                                 kRowCount,
-                                 /*seed=*/42,
-                                 /*ts_offset=*/0,
-                                 /*repeat_count=*/4);
-    auto segment = CreateSealedWithFieldDataLoaded(schema, data);
-    auto group_values = data.get_col<int64_t>(group_field);
-
-    std::unordered_map<int64_t, std::vector<int64_t>> rows_by_group;
-    for (int64_t offset = 0; offset < kRowCount; ++offset) {
-        rows_by_group[group_values[offset]].emplace_back(offset);
-    }
-    std::vector<int64_t> locked_groups;
-    for (const auto& [group, rows] : rows_by_group) {
-        if (rows.size() >= 3) {
-            locked_groups.emplace_back(group);
-            if (locked_groups.size() == 2) {
-                break;
-            }
-        }
-    }
-    ASSERT_EQ(locked_groups.size(), 2);
-
-    std::vector<std::pair<int64_t, float>> candidates;
-    candidates.emplace_back(rows_by_group[locked_groups[0]][0], 0.0F);
-    candidates.emplace_back(rows_by_group[locked_groups[1]][0], 1.0F);
-    for (int64_t offset = 0; offset < kRowCount; ++offset) {
-        if (group_values[offset] != locked_groups[0] &&
-            group_values[offset] != locked_groups[1]) {
-            candidates.emplace_back(offset,
-                                    static_cast<float>(candidates.size()));
-        }
-    }
-    for (auto group : locked_groups) {
-        for (auto offset : rows_by_group[group]) {
-            if (offset != candidates[0].first &&
-                offset != candidates[1].first) {
-                candidates.emplace_back(offset,
-                                        static_cast<float>(candidates.size()));
-            }
-        }
-    }
-
-    SearchResult search_result;
-    search_result.total_nq_ = 1;
-    search_result.total_data_cnt_ = kRowCount;
-    search_result.vector_iterators_ =
-        std::vector<std::shared_ptr<VectorIterator>>{
-            MakeSequenceVectorIterator(candidates)};
-
-    int recreate_count = 0;
-    TargetBitmap observed_filter;
-    search_result.SetVectorIteratorRecreator(
-        BitsetView{},
-        [&](const BitsetView& invalid, SearchResult& recreated_result) {
-            ++recreate_count;
-            observed_filter = TargetBitmap(invalid.size(), false);
-            for (size_t i = 0; i < invalid.size(); ++i) {
-                observed_filter[i] = invalid.test(i);
-            }
-            recreated_result.vector_iterators_ =
-                std::vector<std::shared_ptr<VectorIterator>>{
-                    MakeSequenceVectorIterator(candidates, invalid, true)};
-        });
-
-    SearchInfo search_info;
-    search_info.topk_ = 2;
-    search_info.group_size_ = 3;
-    search_info.strict_group_size_ = true;
-    search_info.group_by_field_ids_ = {group_field};
-    search_info.metric_type_ = knowhere::metric::L2;
-    std::vector<CompositeGroupKey> output_groups;
-    std::vector<int64_t> offsets;
-    std::vector<float> distances;
-    std::vector<size_t> prefix_sum;
-    const auto before_candidates =
-        milvus::monitor::internal_core_strict_group_phase2_phase1_candidates
-            .Collect()
-            .histogram;
-    const auto before_latency =
-        milvus::monitor::
-            internal_core_strict_group_phase2_membership_build_latency.Collect()
-                .histogram;
-    const auto before_phase2 =
-        milvus::monitor::internal_core_strict_group_phase2_phase2_candidates
-            .Collect()
-            .histogram;
-    const auto before_bitmap =
-        milvus::monitor::internal_core_strict_group_phase2_bitmap_build_latency
-            .Collect()
-            .histogram;
-    const auto before_ratio =
-        milvus::monitor::internal_core_strict_group_phase2_acceptance_ratio
-            .Collect()
-            .histogram;
-    const auto started = std::chrono::steady_clock::now();
-    SearchGroupBy(nullptr,
-                  *search_result.vector_iterators_,
-                  search_info,
-                  output_groups,
-                  *segment,
-                  offsets,
-                  distances,
-                  prefix_sum,
-                  nullptr,
-                  &search_result);
-
-    const auto elapsed_ms = std::chrono::duration<double, std::milli>(
-                                std::chrono::steady_clock::now() - started)
-                                .count();
-    ASSERT_EQ(recreate_count, 1);
-    ASSERT_EQ(observed_filter.size(), kRowCount);
-    const auto after_candidates =
-        milvus::monitor::internal_core_strict_group_phase2_phase1_candidates
-            .Collect()
-            .histogram;
-    const auto after_latency =
-        milvus::monitor::
-            internal_core_strict_group_phase2_membership_build_latency.Collect()
-                .histogram;
-    EXPECT_EQ(after_candidates.sample_count - before_candidates.sample_count,
-              1);
-    EXPECT_EQ(after_candidates.sample_sum - before_candidates.sample_sum, 102);
-    EXPECT_EQ(after_latency.sample_count - before_latency.sample_count, 1);
-    EXPECT_GE(after_latency.sample_sum - before_latency.sample_sum, 0);
-    EXPECT_LE(after_latency.sample_sum - before_latency.sample_sum, elapsed_ms);
-    const auto after_phase2 =
-        milvus::monitor::internal_core_strict_group_phase2_phase2_candidates
-            .Collect()
-            .histogram;
-    const auto after_bitmap =
-        milvus::monitor::internal_core_strict_group_phase2_bitmap_build_latency
-            .Collect()
-            .histogram;
-    const auto after_ratio =
-        milvus::monitor::internal_core_strict_group_phase2_acceptance_ratio
-            .Collect()
-            .histogram;
-    EXPECT_EQ(after_phase2.sample_count - before_phase2.sample_count, 1);
-    // Five candidates accept four rows; one belongs to a now-full group.
-    EXPECT_EQ(after_phase2.sample_sum - before_phase2.sample_sum, 5);
-    EXPECT_EQ(after_bitmap.sample_count - before_bitmap.sample_count, 1);
-    EXPECT_LE(after_bitmap.sample_sum - before_bitmap.sample_sum, elapsed_ms);
-    EXPECT_EQ(after_ratio.sample_count - before_ratio.sample_count, 1);
-    EXPECT_EQ(after_ratio.sample_sum - before_ratio.sample_sum, 0);
-    EXPECT_FALSE(search_result.CanRecreateVectorIterator());
-    EXPECT_EQ(offsets.size(), 6);
-    EXPECT_EQ(prefix_sum, (std::vector<size_t>{0, 6}));
-    EXPECT_TRUE(observed_filter[candidates[0].first]);
-    EXPECT_TRUE(observed_filter[candidates[1].first]);
-    std::unordered_map<int64_t, size_t> output_counts;
-    for (auto offset : offsets) {
-        ++output_counts[group_values[offset]];
-    }
-    EXPECT_EQ(output_counts[locked_groups[0]], 3);
-    EXPECT_EQ(output_counts[locked_groups[1]], 3);
-    for (int64_t offset = 0; offset < kRowCount; ++offset) {
-        auto belongs_to_locked_group =
-            group_values[offset] == locked_groups[0] ||
-            group_values[offset] == locked_groups[1];
-        if (!belongs_to_locked_group) {
-            EXPECT_TRUE(observed_filter[offset]);
-        }
-    }
-}
-
-TEST(StrictGroupPhase2ExecutorTest, EasyQuotaDoesNotRecreate) {
-    auto schema = std::make_shared<Schema>();
-    auto pk = schema->AddDebugField("pk", DataType::INT64);
-    auto field = schema->AddDebugField("group", DataType::INT64);
-    schema->set_primary_field_id(pk);
-    auto data = segcore::DataGen(schema, 1000, 42, 0, 1000);
-    auto segment = CreateSealedWithFieldDataLoaded(schema, data);
-    auto values = data.get_col<int64_t>(field);
-    std::vector<std::pair<int64_t, float>> candidates;
-    for (int64_t i = 0; i < 1000; ++i) {
-        if (values[i] == values[0]) {
-            candidates.emplace_back(i, static_cast<float>(i));
-        }
-    }
-    ASSERT_GE(candidates.size(), 2);
-    SearchResult result;
-    result.total_nq_ = 1;
-    result.total_data_cnt_ = 1000;
-    result.vector_iterators_ = std::vector<std::shared_ptr<VectorIterator>>{
-        MakeSequenceVectorIterator(candidates)};
-    auto filter_owner = std::make_shared<TargetBitmap>(1000, false);
-    std::weak_ptr<TargetBitmap> weak_filter = filter_owner;
-    result.vector_iterator_filter_owner_ = filter_owner;
-    result.SetVectorIteratorRecreator(
-        BitsetView(*filter_owner), [](auto&, auto&) {
-            ADD_FAILURE() << "easy quota must use the original iterator";
-        });
-    EXPECT_EQ(result.vector_iterator_base_filter_, nullptr);
-    filter_owner.reset();
-    SearchInfo info;
-    info.topk_ = 1;
-    info.group_size_ = 2;
-    info.strict_group_size_ = true;
-    info.group_by_field_ids_ = {field};
-    info.metric_type_ = knowhere::metric::L2;
-    std::vector<CompositeGroupKey> groups;
-    std::vector<int64_t> offsets;
-    std::vector<float> distances;
-    std::vector<size_t> prefix;
-    SearchGroupBy(nullptr,
-                  *result.vector_iterators_,
+// Project master composite keys for the shared single-field regression matrix.
+void
+SearchSingleGroup(milvus::OpContext* ctx,
+                  const std::vector<std::shared_ptr<VectorIterator>>& iterators,
+                  const SearchInfo& info,
+                  std::vector<GroupByValueType>& groups,
+                  const segcore::SegmentInternalInterface& segment,
+                  std::vector<int64_t>& offsets,
+                  std::vector<float>& distances,
+                  std::vector<size_t>& prefix,
+                  SearchResult* result) {
+    std::vector<CompositeGroupKey> composite;
+    SearchGroupBy(ctx,
+                  iterators,
                   info,
-                  groups,
-                  *segment,
+                  composite,
+                  segment,
                   offsets,
                   distances,
                   prefix,
                   nullptr,
-                  &result);
-    EXPECT_EQ(offsets.size(), 2);
-    EXPECT_TRUE(weak_filter.expired());
-    EXPECT_EQ(result.vector_iterator_base_filter_, nullptr);
-    EXPECT_FALSE(result.CanRecreateVectorIterator());
+                  result);
+    for (const auto& key : composite) {
+        ASSERT_EQ(key.values_.size(), 1);
+        groups.push_back(key[0]);
+    }
+}
+}  // namespace
+
+TEST(VectorIteratorFilteredChunksTest, EmptyLeadingChunkKeepsSuccessors) {
+    ChunkMergeIterator iterator(2);
+    iterator.AddIterator(std::make_shared<SequenceIterator>(
+        std::vector<std::pair<int64_t, float>>{}));
+    iterator.AddIterator(std::make_shared<SequenceIterator>(
+        std::vector<std::pair<int64_t, float>>{{3, 1.0F}, {4, 2.0F}}));
+    iterator.seal();
+    ASSERT_TRUE(iterator.HasNext());
+    EXPECT_EQ(iterator.Next()->first, 3);
+    ASSERT_TRUE(iterator.HasNext());
+    EXPECT_EQ(iterator.Next()->first, 4);
+    EXPECT_FALSE(iterator.HasNext());
 }
 
-namespace {
+TEST(StrictGroupSearchEligibilityTest,
+     RequiresStrictMultiResultSingleQueryRowLevelSearch) {
+    SearchInfo eligible;
+    eligible.topk_ = 10;
+    eligible.group_size_ = 3;
+    eligible.strict_group_size_ = true;
+    eligible.group_by_field_ids_ = {FieldId(101)};
+    EXPECT_TRUE(query::CanUseStrictGroupSearch(eligible, 1));
 
-void
-CheckProbeScenario(
-    const std::vector<int64_t>& labels,
-    size_t candidate_count,
-    int64_t topk,
-    int64_t group_size,
-    int expected_recreates,
-    size_t expected_rows,
-    std::optional<ErrorCode> recreate_error = std::nullopt,
-    milvus::OpContext* op_ctx = nullptr,
-    folly::CancellationSource* cancel_on_recreate = nullptr,
-    std::optional<double> threshold = std::nullopt,
-    std::optional<std::vector<int64_t>> recreated_offsets = std::nullopt,
-    int64_t probe_budget = 100) {
+    auto disabled = eligible;
+    disabled.strict_group_strategy_ = StrictGroupStrategy::Original;
+    EXPECT_FALSE(query::CanUseStrictGroupSearch(disabled, 1));
+
+    auto non_strict = eligible;
+    non_strict.strict_group_size_ = false;
+    EXPECT_FALSE(query::CanUseStrictGroupSearch(non_strict, 1));
+
+    auto single_result_group = eligible;
+    single_result_group.group_size_ = 1;
+    EXPECT_FALSE(query::CanUseStrictGroupSearch(single_result_group, 1));
+
+    auto empty_topk = eligible;
+    empty_topk.topk_ = 0;
+    EXPECT_FALSE(query::CanUseStrictGroupSearch(empty_topk, 1));
+    EXPECT_FALSE(query::CanUseStrictGroupSearch(eligible, 2));
+
+    auto element_level = eligible;
+    element_level.array_offsets_ = std::make_shared<ArrayOffsetsSealed>();
+    EXPECT_FALSE(query::CanUseStrictGroupSearch(element_level, 1));
+}
+
+TEST(StrictGroupLocalExhaustionTest,
+     AvailabilityAndPartialResultsAcrossStrategies) {
+    StrictGroupLogSink sink;
+    google::AddLogSink(&sink);
+    Defer remove_sink([&] { google::RemoveLogSink(&sink); });
+    for (auto strategy : {StrictGroupStrategy::PerGroup}) {
+        for (int n = 120; n < 128; ++n) {
+            for (int available : {0, 1, 2, 4}) {
+                for (int topk : {1, 3}) {
+                    for (bool debug : {false, true}) {
+                        SCOPED_TRACE(testing::Message()
+                                     << static_cast<int>(strategy) << "/" << n
+                                     << "/" << available << "/" << topk << "/"
+                                     << debug);
+                        sink.records.clear();
+                        auto schema = std::make_shared<Schema>();
+                        auto pk = schema->AddDebugField("pk", DataType::INT64);
+                        auto field =
+                            schema->AddDebugField("group", DataType::INT64);
+                        schema->set_primary_field_id(pk);
+                        std::vector<int64_t> labels(n, 99);
+                        labels[0] = 10;
+                        if (topk == 3) {
+                            labels[1] = 20;
+                            labels[2] = 30;  // This group has no remaining row.
+                            for (int i = n - 3; i < n; ++i) labels[i] = 20;
+                        }
+                        for (int i = 0; i < available; ++i)
+                            labels[n - 10 + i] = 10;
+                        labels[n - 6] = 10;
+                        TargetBitmap base(n, false);
+                        base[n - 6] =
+                            true;  // Excluded by the original predicate.
+                        auto data = segcore::DataGen(schema, n);
+                        for (auto& column : *data.raw_->mutable_fields_data()) {
+                            if (column.field_id() == field.get()) {
+                                auto* values = column.mutable_scalars()
+                                                   ->mutable_long_data();
+                                for (int i = 0; i < n; ++i)
+                                    values->set_data(i, labels[i]);
+                            }
+                        }
+                        auto segment =
+                            CreateSealedWithFieldDataLoaded(schema, data);
+                        std::vector<std::pair<int64_t, float>> candidates;
+                        for (int i = 0; i < n; ++i)
+                            candidates.emplace_back(i, i);
+                        SearchResult result;
+                        result.total_nq_ = 1;
+                        result.total_data_cnt_ = n;
+                        auto original = MakeSequenceVectorIterator(
+                            candidates, BitsetView(base));
+                        result.vector_iterators_ =
+                            std::vector<std::shared_ptr<VectorIterator>>{
+                                original};
+                        size_t provider_calls = 0;
+                        result.SetVectorSearchProvider(
+                            BitsetView(base),
+                            [&](const BitsetView& invalid,
+                                int64_t k,
+                                SearchResult& batch) {
+                                ++provider_calls;
+                                EXPECT_TRUE(invalid.test(n - 6));
+                                for (int i = 0; i < topk; ++i)
+                                    EXPECT_TRUE(invalid.test(i));
+                                size_t valid_count = 0;
+                                for (int i = 0; i < n; ++i)
+                                    valid_count += !invalid.test(i);
+                                EXPECT_GT(
+                                    valid_count,
+                                    0);  // Empty filters never reach the backend.
+                                EXPECT_EQ(CountInvalidRows(invalid),
+                                          n - valid_count);
+                                if (k) {
+                                    for (int i = 0;
+                                         i < n && batch.seg_offsets_.size() < k;
+                                         ++i) {
+                                        if (!invalid.test(i)) {
+                                            batch.seg_offsets_.push_back(i);
+                                            batch.distances_.push_back(i);
+                                        }
+                                    }
+                                }
+                            });
+                        SearchInfo info;
+                        info.topk_ = topk;
+                        info.group_size_ = 3;
+                        info.strict_group_size_ = true;
+                        info.group_by_field_ids_ = {field};
+                        info.metric_type_ = knowhere::metric::L2;
+                        info.strict_group_strategy_ = strategy;
+                        info.strict_group_debug_ = debug;
+                        const auto before =
+                            milvus::monitor::
+                                internal_core_strict_group_phase2_original_remaining_candidates
+                                    .Collect()
+                                    .histogram.sample_sum;
+                        std::vector<GroupByValueType> groups;
+                        std::vector<int64_t> offsets;
+                        std::vector<float> distances;
+                        std::vector<size_t> prefix;
+                        SearchSingleGroup(nullptr,
+                                          *result.vector_iterators_,
+                                          info,
+                                          groups,
+                                          *segment,
+                                          offsets,
+                                          distances,
+                                          prefix,
+                                          &result);
+                        const size_t expected =
+                            1 + std::min(available, 2) + (topk == 3 ? 4 : 0);
+                        EXPECT_EQ(offsets.size(), expected);
+                        EXPECT_EQ(std::unordered_set<int64_t>(offsets.begin(),
+                                                              offsets.end())
+                                      .size(),
+                                  expected);
+                        EXPECT_EQ(
+                            std::count(offsets.begin(), offsets.end(), n - 6),
+                            0);
+                        std::unordered_map<int64_t, size_t> counts;
+                        for (auto offset : offsets) ++counts[labels[offset]];
+                        EXPECT_EQ(counts[10], 1 + std::min(available, 2));
+                        if (topk == 3) {
+                            EXPECT_EQ(counts[20], 3);
+                            EXPECT_EQ(counts[30], 1);
+                        }
+                        EXPECT_EQ(counts[99], 0);
+                        EXPECT_EQ(provider_calls,
+                                  (available > 0) + (topk == 3));
+                        EXPECT_EQ(
+                            milvus::monitor::
+                                internal_core_strict_group_phase2_original_remaining_candidates
+                                    .Collect()
+                                    .histogram.sample_sum,
+                            before);
+                        // Directly prove the original consumer stopped at group lock.
+                        ASSERT_TRUE(original->HasNext());
+                        EXPECT_EQ(original->Next()->first, topk);
+                        if (!debug) {
+                            EXPECT_TRUE(sink.records.empty());
+                        } else {
+                            ASSERT_FALSE(sink.records.empty());
+                            const auto& last = sink.records.back();
+                            EXPECT_EQ(last["stage"], "finish");
+                            EXPECT_EQ(last["original_iterator_skipped"], true);
+                            EXPECT_EQ(last["original_remaining_candidates"], 0);
+                            const char* reason = "quota_satisfied";
+                            if (topk == 1 && available == 0)
+                                reason = "no_available_rows";
+                            else if (topk == 3 || available < 2) {
+                                reason = "insufficient_available_rows";
+                            }
+                            EXPECT_EQ(last["completion_reason"], reason);
+                            for (const auto& record : sink.records) {
+                                EXPECT_NE(record["stage"], "original_begin");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+TEST(StrictGroupPerGroupTest, OrdinarySearchSettingsDoNotMutatePhaseOne) {
+    SearchInfo original;
+    original.topk_ = 50;
+    original.group_by_field_ids_ = {FieldId(101)};
+    original.group_size_ = 3;
+    original.strict_group_size_ = true;
+    original.iterative_filter_execution = true;
+    original.iterator_v2_info_ = SearchIteratorV2Info{};
+    original.search_params_ = {{"ef", 123}, {knowhere::meta::TOPK, 50}};
+    for (int64_t remaining : {1, 2}) {
+        auto ordinary = query::StrictGroupSearchInfo(original, remaining);
+        EXPECT_FALSE(UseVectorIterator(ordinary));
+        EXPECT_FALSE(ordinary.iterator_v2_info_);
+        EXPECT_FALSE(ordinary.strict_group_size_);
+        EXPECT_EQ(ordinary.topk_, remaining);
+        EXPECT_EQ(ordinary.search_params_[knowhere::meta::TOPK], remaining);
+        EXPECT_EQ(ordinary.search_params_["ef"], 123);
+    }
+    EXPECT_TRUE(UseVectorIterator(original));
+    EXPECT_EQ(original.topk_, 50);
+    EXPECT_EQ(original.search_params_[knowhere::meta::TOPK], 50);
+}
+
+TEST(StrictGroupPhase1Test, SkipRefineAllPathsAndEligibility) {
+    SearchInfo info;
+    info.topk_ = 50;
+    info.group_size_ = 3;
+    info.strict_group_size_ = true;
+    info.group_by_field_ids_ = {FieldId(101)};
+    for (bool skip : {false, true}) {
+        info.strict_group_skip_refine_ = skip;
+        for (int nq : {1, 2}) {
+            knowhere::Json params = {{"skip_refine", !skip}, {"ef", 123}};
+            query::ApplyStrictGroupSkipRefine(info, nq, params);
+            EXPECT_EQ(params["skip_refine"], nq == 1 ? skip : !skip);
+            EXPECT_EQ(params["ef"], 123);
+        }
+        EXPECT_EQ(
+            query::StrictGroupSearchInfo(info, 2).search_params_["skip_refine"],
+            skip);
+        EXPECT_FALSE(info.search_params_.contains("skip_refine"));
+    }
+    info.strict_group_strategy_ = StrictGroupStrategy::Original;
+    EXPECT_TRUE(query::CanUseStrictGroupControls(info, 1));
+    EXPECT_FALSE(query::CanUseStrictGroupSearch(info, 1));
+    info.group_size_ = 1;
+    EXPECT_FALSE(query::CanUseStrictGroupControls(info, 1));
+    knowhere::Json params = knowhere::Json::object();
+    query::ApplyStrictGroupSkipRefine(info, 1, params);
+    EXPECT_TRUE(params.empty());
+    info.group_size_ = 3;
+    info.strict_group_size_ = false;
+    EXPECT_FALSE(query::CanUseStrictGroupControls(info, 1));
+}
+
+TEST(StrictGroupPhase1Test, BackendReceivesRefinementOverride) {
+    class CapturingIndex : public index::VectorMemIndex<float> {
+     public:
+        CapturingIndex()
+            : VectorMemIndex(
+                  DataType::NONE,
+                  "FLAT",
+                  knowhere::metric::L2,
+                  knowhere::Version::GetCurrentVersion().VersionNumber()) {
+        }
+        mutable knowhere::Json received;
+        knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
+        VectorIterators(const DatasetPtr,
+                        const knowhere::Json& params,
+                        const BitsetView&,
+                        milvus::OpContext* = nullptr) const override {
+            received = params;
+            throw SegcoreError(ErrorCode::Unsupported, "capture only");
+        }
+    } index;
+    SearchInfo info;
+    info.topk_ = 50;
+    info.group_size_ = 3;
+    info.strict_group_size_ = true;
+    info.group_by_field_ids_ = {FieldId(101)};
+    info.metric_type_ = knowhere::metric::L2;
+    FieldIndexMeta meta(
+        FieldId(100), {{"index_type", "HNSW"}, {"metric_type", "L2"}}, {});
+    segcore::VecIndexConfig interim(10000,
+                                    meta,
+                                    segcore::SegcoreConfig::default_config(),
+                                    SegmentType::Growing,
+                                    false);
+    for (bool skip : {false, true}) {
+        info.strict_group_skip_refine_ = skip;
+        SearchResult result;
+        EXPECT_THROW(PrepareVectorIteratorsFromIndex(
+                         info, 1, nullptr, result, {}, index),
+                     SegcoreError);
+        EXPECT_EQ(index.received["skip_refine"], skip);
+        // Interim-index rewriting must not silently drop the per-group setting.
+        auto ordinary = query::StrictGroupSearchInfo(info, 2);
+        auto growing = interim.GetSearchConf(ordinary);
+        EXPECT_EQ(growing.search_params_.value("skip_refine", false), skip);
+        EXPECT_EQ(index.PrepareSearchParams(ordinary)["skip_refine"], skip);
+    }
+}
+
+TEST(StrictGroupPhase1Test, WeightScalesWithQuotaAndSaturates) {
+    SearchInfo info;
+    info.topk_ = 50;
+    info.group_size_ = 3;
+    EXPECT_EQ(query::StrictGroupPhase1CandidateLimit(info), 0);
+    info.strict_group_phase1_candidate_weight_ = 50;
+    EXPECT_EQ(query::StrictGroupPhase1CandidateLimit(info), 7500);
+    info.topk_ = 10;
+    EXPECT_EQ(query::StrictGroupPhase1CandidateLimit(info), 1500);
+    info.topk_ = 0;
+    EXPECT_EQ(query::StrictGroupPhase1CandidateLimit(info), 0);
+    info.topk_ = 10;
+    info.group_size_ = 0;
+    EXPECT_EQ(query::StrictGroupPhase1CandidateLimit(info), 0);
+    info.group_size_ = 3;
+    info.strict_group_phase1_candidate_weight_ =
+        std::numeric_limits<int64_t>::max();
+    EXPECT_EQ(query::StrictGroupPhase1CandidateLimit(info),
+              std::numeric_limits<int64_t>::max());
+    info.strict_group_phase1_candidate_weight_ = 2;
+    info.topk_ = std::numeric_limits<int64_t>::max();
+    EXPECT_EQ(query::StrictGroupPhase1CandidateLimit(info),
+              std::numeric_limits<int64_t>::max());
+    info.strict_group_phase1_candidate_weight_ = 0;
+    EXPECT_EQ(query::StrictGroupPhase1CandidateLimit(info), 0);
+}
+
+TEST(StrictGroupPhase1Test, WeightFreezesDiscoveryButNotCompletion) {
+    // Weight=2 stops at 18 candidates: group 20 has only one accepted row
+    // at that point, so completion must continue beyond the phase-one limit.
+    std::vector<int64_t> labels(17, 10);
+    labels.insert(labels.end(), 7, 20);
+    labels.insert(labels.end(), 12, 30);
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
     auto field = schema->AddDebugField("group", DataType::INT64);
@@ -436,260 +546,341 @@ CheckProbeScenario(
         }
     }
     auto segment = CreateSealedWithFieldDataLoaded(schema, data);
-    std::vector<std::pair<int64_t, float>> candidates;
-    for (size_t i = 0; i < candidate_count; ++i) {
-        candidates.emplace_back(i, static_cast<float>(i));
-    }
-    SearchResult result;
-    result.total_nq_ = 1;
-    result.total_data_cnt_ = labels.size();
-    result.vector_iterators_ = std::vector<std::shared_ptr<VectorIterator>>{
-        MakeSequenceVectorIterator(candidates)};
-    int recreated = 0;
-    result.SetVectorIteratorRecreator(
-        BitsetView{}, [&](const BitsetView& invalid, SearchResult& batch) {
-            ++recreated;
-            if (cancel_on_recreate != nullptr) {
-                cancel_on_recreate->requestCancellation();
-            }
-            if (recreate_error.has_value()) {
-                throw SegcoreError(*recreate_error,
-                                   "injected preparation failure");
-            }
-            // Locking consumes at least topk candidates, followed by a full
-            // configured probe. This prefix must not be returned again.
-            for (int64_t i = 0; i < topk + probe_budget; ++i) {
-                EXPECT_TRUE(invalid.test(i)) << i;
-            }
-            EXPECT_FALSE(invalid.test(labels.size() - 1));
-            auto fresh_candidates = candidates;
-            if (recreated_offsets) {
-                fresh_candidates.clear();
-                for (auto offset : *recreated_offsets) {
-                    fresh_candidates.emplace_back(offset,
-                                                  static_cast<float>(offset));
+    for (auto strategy :
+         {StrictGroupStrategy::Original, StrictGroupStrategy::PerGroup}) {
+        for (int provider :
+             {0, 1, 2}) {  // no provider, full provider, no result
+            for (bool unused : {false}) {
+                for (int64_t weight : {0, 1, 2, 3, 4, 20}) {
+                    for (int nq : {1, 2}) {
+                        for (int gs : {1, 3}) {
+                            for (bool strict : {false, true}) {
+                                SCOPED_TRACE(::testing::Message()
+                                             << int(strategy) << "/" << provider
+                                             << "/" << weight << "/" << nq
+                                             << "/" << gs << "/" << strict);
+                                std::vector<std::pair<int64_t, float>>
+                                    candidates;
+                                for (size_t i = 0; i < labels.size(); ++i) {
+                                    candidates.emplace_back(i, float(i));
+                                }
+                                SearchResult result;
+                                result.total_nq_ = nq;
+                                result.total_data_cnt_ = labels.size();
+                                result.vector_iterators_ = std::vector<
+                                    std::shared_ptr<VectorIterator>>{};
+                                for (int q = 0; q < nq; ++q) {
+                                    result.vector_iterators_->push_back(
+                                        MakeSequenceVectorIterator(candidates));
+                                }
+                                if (provider == 1) {
+                                    result.SetVectorSearchProvider(
+                                        {},
+                                        [&](const BitsetView& invalid,
+                                            int64_t k,
+                                            SearchResult& batch) {
+                                            {
+                                                for (auto [id, distance] :
+                                                     candidates) {
+                                                    if (!invalid.test(id) &&
+                                                        batch.seg_offsets_
+                                                                .size() < k) {
+                                                        batch.seg_offsets_
+                                                            .push_back(id);
+                                                        batch.distances_
+                                                            .push_back(
+                                                                distance);
+                                                    }
+                                                }
+                                            }
+                                        });
+                                }
+                                SearchInfo info;
+                                info.topk_ = 3;
+                                info.group_size_ = gs;
+                                info.strict_group_size_ = strict;
+                                info.group_by_field_ids_ = {field};
+                                info.metric_type_ = knowhere::metric::L2;
+                                info.strict_group_phase1_candidate_weight_ =
+                                    weight;
+                                info.strict_group_strategy_ = strategy;
+                                std::vector<GroupByValueType> groups;
+                                std::vector<int64_t> offsets;
+                                std::vector<float> distances;
+                                std::vector<size_t> prefix;
+                                SearchSingleGroup(
+                                    nullptr,
+                                    *result.vector_iterators_,
+                                    info,
+                                    groups,
+                                    *segment,
+                                    offsets,
+                                    distances,
+                                    prefix,
+                                    provider == 2 ? nullptr : &result);
+                                size_t group_count = 3;
+                                if (strict && gs > 1 && nq == 1 && weight > 0 &&
+                                    weight < 3) {
+                                    group_count = weight == 1 ? 1 : 2;
+                                }
+                                ASSERT_EQ(prefix.size(), nq + 1);
+                                for (int q = 0; q < nq; ++q) {
+                                    std::unordered_map<int64_t, int> counts;
+                                    std::unordered_set<int64_t> ids;
+                                    for (size_t i = prefix[q];
+                                         i < prefix[q + 1];
+                                         ++i) {
+                                        ++counts[labels[offsets[i]]];
+                                        EXPECT_TRUE(
+                                            ids.insert(offsets[i]).second);
+                                    }
+                                    EXPECT_EQ(counts.size(), group_count);
+                                    if (strict) {
+                                        for (auto [label, count] : counts)
+                                            EXPECT_EQ(count, gs);
+                                    }
+                                    if (group_count < 3)
+                                        EXPECT_EQ(counts.count(30), 0);
+                                    if (group_count < 2)
+                                        EXPECT_EQ(counts.count(20), 0);
+                                }
+                            }
+                        }
+                    }
                 }
             }
-            batch.vector_iterators_ =
+        }
+    }
+}
+
+TEST(StrictGroupPerGroupTest, SearchProviderCapabilityAndErrors) {
+    SearchResult result;
+    auto filter = std::make_shared<TargetBitmap>(8, false);
+    EXPECT_FALSE(result.SearchFilteredVectors(filter, 1));
+    result.SetVectorSearchProvider(
+        {}, [](const BitsetView&, int64_t, SearchResult&) {
+            throw std::runtime_error("backend failure");
+        });
+    EXPECT_TRUE(result.CanSearchFilteredVectors());
+    EXPECT_FALSE(result.SearchFilteredVectors(filter, 0));
+    EXPECT_THROW(result.SearchFilteredVectors(filter, 1), std::runtime_error);
+    result.ClearVectorSearchProvider();
+    EXPECT_FALSE(result.CanSearchFilteredVectors());
+    EXPECT_FALSE(result.SearchFilteredVectors(filter, 1));
+}
+
+TEST(StrictGroupPerGroupTest, IsolatedFiltersReuseStorageAndKeepShortResults) {
+    StrictGroupLogSink sink;
+    google::AddLogSink(&sink);
+    Defer remove_sink([&] { google::RemoveLogSink(&sink); });
+    // A fills before B locks; C is never locked. B/C have rows in later chunks.
+    const std::vector<int64_t> labels{10, 10, 10, 20, 99, 20, 20, 30, 30};
+    for (bool disabled : {false, true}) {
+        // Full results, invalid padding, duplicate result, and empty result.
+        for (int response : {0, 1, 2, 3}) {
+            sink.records.clear();
+            auto schema = std::make_shared<Schema>();
+            auto pk = schema->AddDebugField("pk", DataType::INT64);
+            auto field = schema->AddDebugField("group", DataType::INT64);
+            schema->set_primary_field_id(pk);
+            auto data = segcore::DataGen(schema, labels.size());
+            for (auto& column : *data.raw_->mutable_fields_data()) {
+                if (column.field_id() == field.get()) {
+                    auto* values =
+                        column.mutable_scalars()->mutable_long_data();
+                    for (size_t i = 0; i < labels.size(); ++i) {
+                        values->set_data(i, labels[i]);
+                    }
+                }
+            }
+            auto segment = CreateSealedWithFieldDataLoaded(schema, data);
+            std::vector<std::pair<int64_t, float>> candidates;
+            for (size_t i = 0; i < labels.size(); ++i) {
+                candidates.emplace_back(i, static_cast<float>(i));
+            }
+            SearchResult result;
+            result.total_nq_ = 1;
+            result.total_data_cnt_ = labels.size();
+            result.vector_iterators_ =
                 std::vector<std::shared_ptr<VectorIterator>>{
-                    MakeSequenceVectorIterator(
-                        fresh_candidates, invalid, true)};
+                    MakeSequenceVectorIterator(candidates)};
+            int batches = 0;
+            result.SetVectorSearchProvider(
+                {},
+                [&](const BitsetView& invalid,
+                    int64_t topk,
+                    SearchResult& batch) {
+                    ASSERT_EQ(topk, 2);
+                    ++batches;
+                    // A is already full, B's first result is retained, C excluded.
+                    for (size_t i = 0; i < labels.size(); ++i) {
+                        EXPECT_EQ(invalid.test(i), i != 5 && i != 6);
+                    }
+                    EXPECT_EQ(CountInvalidRows(invalid), labels.size() - 2);
+                    if (response != 3) {
+                        batch.seg_offsets_ = {5,
+                                              response == 1
+                                                  ? INVALID_SEG_OFFSET
+                                                  : (response == 2 ? 5 : 6)};
+                        batch.distances_ = {5.0F, 6.0F};
+                    }
+                });
+            SearchInfo info;
+            info.topk_ = 2;
+            info.group_size_ = 3;
+            info.strict_group_size_ = true;
+            info.group_by_field_ids_ = {field};
+            info.metric_type_ = knowhere::metric::L2;
+            info.strict_group_strategy_ = StrictGroupStrategy::PerGroup;
+            info.strict_group_strategy_ = disabled
+                                              ? StrictGroupStrategy::Original
+                                              : StrictGroupStrategy::PerGroup;
+            info.strict_group_debug_ = response % 2 == 1;
+            std::vector<GroupByValueType> groups;
+            std::vector<int64_t> offsets;
+            std::vector<float> distances;
+            std::vector<size_t> prefix;
+            SearchSingleGroup(nullptr,
+                              *result.vector_iterators_,
+                              info,
+                              groups,
+                              *segment,
+                              offsets,
+                              distances,
+                              prefix,
+                              &result);
+            EXPECT_EQ(batches, disabled ? 0 : 1);
+            const size_t expected_rows =
+                disabled || response == 0 ? 6 : (response == 3 ? 4 : 5);
+            EXPECT_EQ(offsets.size(), expected_rows);
+            auto expected_offsets = std::unordered_set<int64_t>{0, 1, 2, 3};
+            if (expected_rows >= 5)
+                expected_offsets.insert(5);
+            if (expected_rows == 6)
+                expected_offsets.insert(6);
+            EXPECT_EQ(
+                std::unordered_set<int64_t>(offsets.begin(), offsets.end()),
+                expected_offsets);
+            if (info.strict_group_debug_ && !disabled) {
+                ASSERT_FALSE(sink.records.empty());
+                EXPECT_EQ(sink.records.back()["completion_reason"],
+                          "search_short_result");
+                EXPECT_EQ(sink.records.back()["original_iterator_skipped"],
+                          true);
+                EXPECT_EQ(sink.records.back()["original_remaining_candidates"],
+                          0);
+            }
+        }
+    }
+}
+
+class StrictGroupPerGroupPaddingTest
+    : public ::testing::TestWithParam<int64_t> {};
+
+TEST_P(StrictGroupPerGroupPaddingTest, MultipleGroupsAndSharedFilterLifetime) {
+    const int64_t n = GetParam();
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto field = schema->AddDebugField("group", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto data = segcore::DataGen(schema, n, 42, 0, 4);
+    // Keep group quotas satisfiable for every logical-size remainder.
+    for (auto& column : *data.raw_->mutable_fields_data()) {
+        if (column.field_id() == field.get()) {
+            auto* values = column.mutable_scalars()->mutable_long_data();
+            for (int64_t i = 0; i < n; ++i) {
+                values->set_data(i, i % 4);
+            }
+        }
+    }
+    auto segment = CreateSealedWithFieldDataLoaded(schema, data);
+    auto labels = data.get_col<int64_t>(field);
+    std::unordered_map<int64_t, std::vector<int64_t>> by_group;
+    for (int64_t i = 0; i < n; ++i) {
+        by_group[labels[i]].push_back(i);
+    }
+    std::vector<std::optional<int64_t>> targets;
+    std::vector<std::pair<int64_t, float>> candidates;
+    for (auto& [group, rows] : by_group) {
+        ASSERT_GE(rows.size(), 4);
+        targets.emplace_back(group);
+        candidates.emplace_back(rows[0], candidates.size());
+        if (targets.size() == 3)
+            break;
+    }
+    for (int64_t i = 0; i < n; ++i) candidates.emplace_back(i, n + i);
+    // First group already has two hits when the third group locks.
+    candidates.insert(candidates.begin() + 1, {by_group[*targets[0]][1], 0.5F});
+    TargetBitmap base(n, false);
+    auto excluded = by_group[*targets[1]][1];
+    base[excluded] = true;
+    SearchResult result;
+    result.total_nq_ = 1;
+    result.total_data_cnt_ = n;
+    result.vector_iterators_ = std::vector<std::shared_ptr<VectorIterator>>{
+        MakeSequenceVectorIterator(candidates, BitsetView(base))};
+    size_t batches = 0;
+    const uint8_t* bitmap_address = nullptr;
+    result.SetVectorSearchProvider(
+        BitsetView(base),
+        [&](const BitsetView& invalid, int64_t topk, SearchResult& batch) {
+            ASSERT_EQ(topk, batches == 0 ? 1 : 2);
+            if (bitmap_address)
+                EXPECT_EQ(bitmap_address, invalid.data());
+            bitmap_address = invalid.data();
+            auto target = *targets.at(batches++);
+            for (int64_t i = 0; i < n; ++i) {
+                bool accepted = std::any_of(
+                    candidates.begin(),
+                    candidates.begin() + 4,
+                    [&](const auto& item) { return item.first == i; });
+                EXPECT_EQ(invalid.test(i),
+                          base[i] || labels[i] != target || accepted);
+            }
+            size_t expected_filtered = 0;
+            for (int64_t i = 0; i < n; ++i) {
+                expected_filtered += invalid.test(i);
+            }
+            EXPECT_EQ(CountInvalidRows(invalid), expected_filtered);
+            for (int64_t i = 0; i < n && batch.seg_offsets_.size() < topk;
+                 ++i) {
+                if (!invalid.test(i)) {
+                    batch.seg_offsets_.push_back(i);
+                    batch.distances_.push_back(n + i);
+                }
+            }
         });
     SearchInfo info;
-    info.topk_ = topk;
-    info.group_size_ = group_size;
+    info.topk_ = 3;
+    info.group_size_ = 3;
     info.strict_group_size_ = true;
     info.group_by_field_ids_ = {field};
     info.metric_type_ = knowhere::metric::L2;
-    info.search_params_ = knowhere::Json::object();
-    info.strict_group_acceptance_threshold_ = threshold.value_or(0.1);
-    info.strict_group_probe_candidates_ = probe_budget;
-    std::vector<CompositeGroupKey> groups;
+    info.strict_group_strategy_ = StrictGroupStrategy::PerGroup;
+    std::vector<GroupByValueType> groups;
     std::vector<int64_t> offsets;
     std::vector<float> distances;
     std::vector<size_t> prefix;
-    SearchGroupBy(op_ctx,
-                  *result.vector_iterators_,
-                  info,
-                  groups,
-                  *segment,
-                  offsets,
-                  distances,
-                  prefix,
-                  nullptr,
-                  &result);
-    EXPECT_EQ(recreated, expected_recreates);
-    EXPECT_EQ(offsets.size(), expected_rows);
+    SearchSingleGroup(nullptr,
+                      *result.vector_iterators_,
+                      info,
+                      groups,
+                      *segment,
+                      offsets,
+                      distances,
+                      prefix,
+                      &result);
+    EXPECT_EQ(batches, 3);
+    EXPECT_EQ(offsets.size(), 9);
     EXPECT_EQ(
-        std::unordered_set<int64_t>(offsets.begin(), offsets.end()).size(),
-        offsets.size());
-    EXPECT_FALSE(result.CanRecreateVectorIterator());
+        std::unordered_set<int64_t>(offsets.begin(), offsets.end()).size(), 9);
+    EXPECT_EQ(std::count(offsets.begin(), offsets.end(), excluded), 0);
 }
 
-}  // namespace
-
-TEST(StrictGroupPhase2ExecutorTest, ProbeBoundaryAndOnlyOneDecision) {
-    for (int accepted : {9, 10, 11}) {
-        SCOPED_TRACE(accepted);
-        std::vector<int64_t> labels(300, 2);
-        labels[0] = 1;
-        for (int i = 1; i <= accepted; ++i) {
-            labels[i] = 1;
-        }
-        // Do not re-evaluate even if the next window has no useful hits.
-        for (size_t i = 201; i < labels.size(); ++i) {
-            labels[i] = 1;
-        }
-        CheckProbeScenario(
-            labels, labels.size(), 1, 20, accepted < 10 ? 1 : 0, 20);
-    }
-}
-
-TEST(StrictGroupPhase2ExecutorTest, FullGroupHitsAreNotAcceptedProbeRows) {
-    std::vector<int64_t> labels(120, 1);
-    labels[0] = 0;
-    for (size_t i = 2; i < 102; ++i) {
-        labels[i] = 0;
-    }
-    // All 100 candidates hit locked groups, but only two fill a quota.
-    // Acceptance is 2%, so recreate regardless of group-hit rate.
-    CheckProbeScenario(labels, labels.size(), 2, 3, 1, 6);
-}
-
-TEST(StrictGroupPhase2ExecutorTest, ConfigurableProbeBudget) {
-    for (int64_t budget : {1, 17, 100, 250}) {
-        std::vector<int64_t> labels(budget + 4, 99);
-        labels[0] = labels[budget + 1] = labels[budget + 2] =
-            labels[budget + 3] = 1;
-        auto before =
-            milvus::monitor::internal_core_strict_group_phase2_probe_candidates
-                .Collect()
-                .histogram.sample_sum;
-        CheckProbeScenario(labels,
-                           labels.size(),
-                           1,
-                           3,
-                           1,
-                           3,
-                           std::nullopt,
-                           nullptr,
-                           nullptr,
-                           0.1,
-                           std::nullopt,
-                           budget);
-        auto after =
-            milvus::monitor::internal_core_strict_group_phase2_probe_candidates
-                .Collect()
-                .histogram.sample_sum;
-        EXPECT_EQ(after - before, budget);
-    }
-    // With T=10, accepting one row is exactly 10%, not 1%.
-    std::vector<int64_t> labels(14, 99);
-    labels[0] = labels[1] = labels[11] = labels[12] = labels[13] = 1;
-    for (double threshold : {0.1, 0.2}) {
-        CheckProbeScenario(labels,
-                           labels.size(),
-                           1,
-                           3,
-                           threshold == 0.1 ? 0 : 1,
-                           3,
-                           std::nullopt,
-                           nullptr,
-                           nullptr,
-                           threshold,
-                           std::nullopt,
-                           10);
-    }
-}
-
-TEST(StrictGroupPhase2ExecutorTest, ConfigurableAcceptanceThreshold) {
-    for (double threshold : {0.0, 0.01, 0.1, 0.5, 1.0}) {
-        for (int accepted : {0, 1, 2, 9, 10, 11, 49, 50, 51, 100}) {
-            SCOPED_TRACE(threshold);
-            SCOPED_TRACE(accepted);
-            std::vector<int64_t> labels(400, 2);
-            labels[0] = 1;
-            std::fill(labels.begin() + 1, labels.begin() + 1 + accepted, 1);
-            std::fill(labels.begin() + 201, labels.end(), 1);
-            CheckProbeScenario(labels,
-                               labels.size(),
-                               1,
-                               150,
-                               accepted / 100.0 < threshold ? 1 : 0,
-                               150,
-                               std::nullopt,
-                               nullptr,
-                               nullptr,
-                               threshold);
-        }
-    }
-}
-
-TEST(StrictGroupPhase2ExecutorTest, RemainingQuotaDoesNotAffectDecision) {
-    for (int quota : {3, 6, 7, 8, 100}) {
-        std::vector<int64_t> labels(300, 2);
-        labels[0] = labels[1] = 1;
-        std::fill(labels.begin() + 101, labels.end(), 1);
-        // A=1 triggers recreation even when only one row remains.
-        CheckProbeScenario(labels, labels.size(), 1, quota, 1, quota);
-    }
-}
-
-TEST(StrictGroupPhase2ExecutorTest, NonzeroLowAcceptance) {
-    std::vector<int64_t> labels(250, 99);
-    for (int i = 0; i < 50; ++i) {
-        labels[i] = i;
-        labels[150 + 2 * i] = labels[151 + 2 * i] = i;
-    }
-    labels[50] = 0;
-    // A=1 out of 100 triggers recreation.
-    CheckProbeScenario(labels, labels.size(), 50, 3, 1, 150);
-}
-
-TEST(StrictGroupPhase2ExecutorTest, ZeroAcceptanceWithFullGroupHits) {
-    std::vector<int64_t> labels(106, 0);
-    labels[3] = labels[104] = labels[105] = 1;
-    // Group zero is full before locking group one. A=0 still recreates even
-    // though all 100 probe candidates hit the full locked group (H=100).
-    CheckProbeScenario(labels, labels.size(), 2, 3, 1, 6);
-}
-
-TEST(StrictGroupPhase2ExecutorTest, ProbeExhaustionDoesNotRecreate) {
-    std::vector<int64_t> labels(120, 2);
-    labels[0] = 1;
-    CheckProbeScenario(labels, 50, 1, 3, 0, 1);
-}
-
-TEST(StrictGroupPhase2ExecutorTest, PreparationExceptionsPropagate) {
-    std::vector<int64_t> labels(104, 99);
-    labels[0] = labels[102] = labels[103] = 1;
-    for (auto code : {ErrorCode::Unsupported,
-                      ErrorCode::FileReadFailed,
-                      ErrorCode::KnowhereError,
-                      ErrorCode::MemAllocateFailed,
-                      ErrorCode::FollyCancel,
-                      ErrorCode::FollyOtherException,
-                      ErrorCode::UnexpectedError,
-                      ErrorCode::DataFormatBroken}) {
-        EXPECT_THROW(
-            CheckProbeScenario(labels, labels.size(), 1, 3, 1, 3, code),
-            SegcoreError);
-    }
-    folly::CancellationSource source;
-    milvus::OpContext op_ctx(source.getToken());
-    EXPECT_THROW(CheckProbeScenario(labels,
-                                    labels.size(),
-                                    1,
-                                    3,
-                                    1,
-                                    3,
-                                    ErrorCode::Unsupported,
-                                    &op_ctx,
-                                    &source),
-                 SegcoreError);
-}
-
-TEST(StrictGroupPhase2ExecutorTest, ExhaustedRecreatedIteratorResumesOriginal) {
-    std::vector<int64_t> labels(106, 99);
-    labels[0] = labels[102] = labels[103] = labels[104] = labels[105] = 1;
-    // The fresh iterator may return nothing, or return 103 before the original
-    // reaches 102,103,104. Duplicate 103 must not consume the final quota.
-    for (auto fresh : {std::vector<int64_t>{},
-                       std::vector<int64_t>{103},
-                       std::vector<int64_t>{103, 103}}) {
-        CheckProbeScenario(labels,
-                           labels.size(),
-                           1,
-                           4,
-                           1,
-                           4,
-                           std::nullopt,
-                           nullptr,
-                           nullptr,
-                           0.1,
-                           fresh);
-    }
-}
+INSTANTIATE_TEST_SUITE_P(
+    AllByteRemainders,
+    StrictGroupPerGroupPaddingTest,
+    ::testing::Values(120, 121, 122, 123, 124, 125, 126, 127));
 
 TEST(GroupMembershipTest, RawScansHonorCancellation) {
     auto schema = std::make_shared<Schema>();
@@ -711,8 +902,11 @@ TEST(GroupMembershipTest, RawScansHonorCancellation) {
           dynamic_cast<const segcore::SegmentInternalInterface*>(
               growing.get())}) {
         ASSERT_NE(segment, nullptr);
+        EXPECT_THROW(BuildGroupOffsets<int64_t>(
+                         &ctx, *segment, field, rows, {int64_t(1)}, nullptr),
+                     SegcoreError);
         try {
-            BuildGroupMembership<int64_t>(
+            BuildOffsetsBitmap<int64_t>(
                 &ctx, *segment, field, rows, {int64_t(1)}, nullptr);
             FAIL() << "cancelled membership scan completed";
         } catch (const SegcoreError& error) {
@@ -781,7 +975,7 @@ TEST(GroupMembershipTest, CancellationDuringRawScanStopsBeforeNextChunk) {
     milvus::OpContext ctx(source.getToken());
     CancellingSegment segment(schema, source);
     try {
-        BuildGroupMembership<int64_t>(
+        BuildOffsetsBitmap<int64_t>(
             &ctx, segment, field, 8192, {int64_t(1)}, nullptr);
         FAIL() << "membership continued after cancellation";
     } catch (const SegcoreError& error) {
@@ -795,24 +989,26 @@ TEST(StrictGroupPhase2ExecutorTest, SharedBaseFilterIsLazyAndReleased) {
     auto owner = std::make_shared<TargetBitmap>(1000, false);
     (*owner)[17] = true;
     std::weak_ptr<TargetBitmap> weak_owner = owner;
-    result.vector_iterator_filter_owner_ = owner;
-    result.SetVectorIteratorRecreator(
-        BitsetView(*owner), [](const BitsetView& filter, SearchResult&) {
+    result.vector_search_filter_owner_ = owner;
+    result.SetVectorSearchProvider(
+        BitsetView(*owner),
+        [](const BitsetView& filter, int64_t, SearchResult&) {
             EXPECT_TRUE(filter.test(17));
             EXPECT_TRUE(filter.test(33));
         });
-    EXPECT_EQ(result.vector_iterator_base_filter_, nullptr);
+    EXPECT_EQ(result.vector_search_base_filter_, nullptr);
     owner.reset();
     EXPECT_FALSE(weak_owner.expired());
     TargetBitmap extra(1000, false);
     extra[33] = true;
-    auto recreated = result.RecreateVectorIterators(std::move(extra));
-    ASSERT_TRUE(recreated.has_value());
-    EXPECT_NE(result.vector_iterator_base_filter_, nullptr);
-    result.ClearVectorIteratorRecreator();
+    auto searched = result.SearchFilteredVectors(
+        std::make_shared<TargetBitmap>(std::move(extra)), 1);
+    ASSERT_TRUE(searched.has_value());
+    EXPECT_NE(result.vector_search_base_filter_, nullptr);
+    result.ClearVectorSearchProvider();
     EXPECT_TRUE(weak_owner.expired());
-    EXPECT_FALSE(result.CanRecreateVectorIterator());
-    EXPECT_EQ(result.GetVectorIteratorBaseFilter(), nullptr);
+    EXPECT_FALSE(result.CanSearchFilteredVectors());
+    EXPECT_EQ(result.GetVectorSearchBaseFilter(), nullptr);
 }
 
 TEST(StrictGroupPhase2ExecutorTest, BackendPreparationPreservesTypedErrors) {
@@ -826,11 +1022,18 @@ TEST(StrictGroupPhase2ExecutorTest, BackendPreparationPreservesTypedErrors) {
                   knowhere::Version::GetCurrentVersion().VersionNumber()) {
         }
         ErrorCode error = ErrorCode::FollyCancel;
+        bool unsupported_status = false;
         knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
         VectorIterators(const DatasetPtr,
                         const knowhere::Json&,
                         const BitsetView&,
-                        milvus::OpContext*) const override {
+                        milvus::OpContext* = nullptr) const override {
+            if (unsupported_status) {
+                return knowhere::expected<
+                    std::vector<knowhere::IndexNode::IteratorPtr>>::
+                    Err(knowhere::Status::not_implemented,
+                        "iterator unsupported");
+            }
             throw SegcoreError(error, "injected backend preparation failure");
         }
     } index;
@@ -840,7 +1043,7 @@ TEST(StrictGroupPhase2ExecutorTest, BackendPreparationPreservesTypedErrors) {
     info.metric_type_ = knowhere::metric::L2;
     for (bool original : {false, true}) {
         SearchResult result;
-        result.allow_vector_iterator_recreation_ = original;
+        result.allow_filtered_vector_search_ = original;
         for (auto code : {ErrorCode::FollyCancel,
                           ErrorCode::FollyOtherException,
                           ErrorCode::DataFormatBroken,
@@ -851,18 +1054,21 @@ TEST(StrictGroupPhase2ExecutorTest, BackendPreparationPreservesTypedErrors) {
                     info, 1, nullptr, result, BitsetView{}, index);
                 FAIL() << "backend must throw";
             } catch (const SegcoreError& error) {
-                // Master already preserves typed failures for both original
-                // and recreated searches; do not regress its retry contract.
                 EXPECT_EQ(error.get_error_code(), code);
             }
         }
     }
-}
-
-TEST(StrictGroupPhase2ExecutorTest, FilledAtProbeBoundaryDoesNotRecreate) {
-    std::vector<int64_t> labels(120, 2);
-    labels[0] = labels[100] = 1;
-    CheckProbeScenario(labels, labels.size(), 1, 2, 0, 2);
+    index.unsupported_status = true;
+    SearchResult result;
+    try {
+        PrepareVectorIteratorsFromIndex(
+            info, 1, nullptr, result, BitsetView{}, index);
+        FAIL() << "unsupported iterator must throw";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::Unsupported);
+        EXPECT_NE(std::string(error.what()).find("doesn't support"),
+                  std::string::npos);
+    }
 }
 
 TEST(GroupMembershipTest, GrowingMmapStringUsesElementView) {
@@ -886,8 +1092,17 @@ TEST(GroupMembershipTest, GrowingMmapStringUsesElementView) {
     ASSERT_TRUE(
         growing->get_insert_record().get_data<std::string>(field)->is_mmap());
     std::vector<std::optional<std::string>> groups{values[0]};
-    auto membership = BuildGroupMembership<std::string>(
+    auto membership = BuildOffsetsBitmap<std::string>(
         nullptr, *growing, field, 100, groups, nullptr);
+    auto classified = BuildGroupOffsets<std::string>(
+        nullptr, *growing, field, 100, groups, nullptr);
+    ASSERT_TRUE(classified);
+    std::vector<int64_t> expected;
+    for (size_t i = 0; i < values.size(); ++i) {
+        if (values[i] == values[0])
+            expected.push_back(i);
+    }
+    EXPECT_EQ((*classified)[0], expected);
     ASSERT_TRUE(membership.has_value());
     auto bitmap = std::move(membership);
     ASSERT_TRUE(bitmap.has_value());
@@ -896,7 +1111,7 @@ TEST(GroupMembershipTest, GrowingMmapStringUsesElementView) {
     }
 }
 
-TEST(GroupMembershipTest, ScalarIndexAndRawFieldProduceIdenticalMembership) {
+TEST(GroupMembershipTest, RawClassificationAndIndexOnlyFallback) {
     constexpr int64_t kRowCount = 120;
     auto schema = std::make_shared<Schema>();
     auto pk_field = schema->AddDebugField("pk", DataType::INT64);
@@ -935,15 +1150,45 @@ TEST(GroupMembershipTest, ScalarIndexAndRawFieldProduceIdenticalMembership) {
     std::vector<std::optional<int64_t>> groups{
         std::nullopt, values[0], values[4], values[20]};
 
-    auto raw = BuildGroupMembership<int64_t>(
+    auto raw = BuildOffsetsBitmap<int64_t>(
         nullptr, *raw_segment, group_field, kRowCount, groups, &base_filter);
-    auto indexed = BuildGroupMembership<int64_t>(
+    auto indexed = BuildOffsetsBitmap<int64_t>(
         nullptr, *index_segment, group_field, kRowCount, groups, &base_filter);
+    // Raw classification is one pass; index-only retains the original iterator.
+    std::vector<std::optional<int64_t>> unique_groups;
+    for (const auto& group : groups) {
+        if (std::find(unique_groups.begin(), unique_groups.end(), group) ==
+            unique_groups.end())
+            unique_groups.push_back(group);
+    }
+    auto classified = BuildGroupOffsets<int64_t>(nullptr,
+                                                 *raw_segment,
+                                                 group_field,
+                                                 kRowCount,
+                                                 unique_groups,
+                                                 &base_filter);
+    ASSERT_TRUE(classified);
+    for (size_t i = 0; i < unique_groups.size(); ++i) {
+        std::vector<int64_t> expected;
+        for (size_t row = 0; row < kRowCount; ++row) {
+            std::optional<int64_t> key =
+                valid[row] ? std::optional<int64_t>(values[row]) : std::nullopt;
+            if (!base_filter[row] && key == unique_groups[i])
+                expected.push_back(row);
+        }
+        EXPECT_EQ((*classified)[i], expected);
+    }
+    EXPECT_FALSE(BuildGroupOffsets<int64_t>(nullptr,
+                                            *index_segment,
+                                            group_field,
+                                            kRowCount,
+                                            unique_groups,
+                                            &base_filter));
     ASSERT_TRUE(raw.has_value());
-    ASSERT_TRUE(indexed.has_value());
-    EXPECT_EQ(counters->in_calls, 1);
-    EXPECT_EQ(counters->in_values, 3);
-    EXPECT_EQ(counters->null_calls, 1);
+    EXPECT_FALSE(indexed.has_value());
+    EXPECT_EQ(counters->in_calls, 0);
+    EXPECT_EQ(counters->in_values, 0);
+    EXPECT_EQ(counters->null_calls, 0);
     // Both sources present: phase two must use raw data, like phase one.
     LoadGeneratedDataIntoSegment(
         data,
@@ -951,20 +1196,16 @@ TEST(GroupMembershipTest, ScalarIndexAndRawFieldProduceIdenticalMembership) {
         false,
         {pk_field.get(), RowFieldID.get(), TimestampFieldID.get()});
     ASSERT_TRUE(index_segment->HasFieldData(group_field));
-    auto both = BuildGroupMembership<int64_t>(
+    auto both = BuildOffsetsBitmap<int64_t>(
         nullptr, *index_segment, group_field, kRowCount, groups, &base_filter);
     ASSERT_TRUE(both.has_value());
-    EXPECT_EQ(counters->in_calls, 1);
-    EXPECT_EQ(counters->null_calls, 1);
+    EXPECT_EQ(counters->in_calls, 0);
+    EXPECT_EQ(counters->null_calls, 0);
     // The union bitmap owns its bits and no longer needs the source column.
     raw_segment->DropFieldData(group_field);
     auto raw_bitmap = std::move(raw);
-    auto index_bitmap = std::move(indexed);
     ASSERT_TRUE(raw_bitmap.has_value());
-    ASSERT_TRUE(index_bitmap.has_value());
-    ASSERT_EQ(raw_bitmap->size(), index_bitmap->size());
     for (size_t i = 0; i < raw_bitmap->size(); ++i) {
-        EXPECT_EQ((*raw_bitmap)[i], (*index_bitmap)[i]) << "offset " << i;
         EXPECT_EQ((*raw_bitmap)[i], (*both)[i]) << "offset " << i;
         if (base_filter[i]) {
             EXPECT_FALSE((*raw_bitmap)[i]);
@@ -995,12 +1236,12 @@ TEST(GroupMembershipTest, RawStringBoolAndNullGroupsRespectBaseFilter) {
     auto valid = data.get_col_valid(string_field);
     std::vector<std::optional<std::string>> string_groups{
         std::nullopt, strings[0], strings[8]};
-    auto string_membership = BuildGroupMembership<std::string>(nullptr,
-                                                               *segment,
-                                                               string_field,
-                                                               kRowCount,
-                                                               string_groups,
-                                                               &base_filter);
+    auto string_membership = BuildOffsetsBitmap<std::string>(nullptr,
+                                                             *segment,
+                                                             string_field,
+                                                             kRowCount,
+                                                             string_groups,
+                                                             &base_filter);
     ASSERT_TRUE(string_membership.has_value());
     auto string_bitmap = std::move(string_membership);
     ASSERT_TRUE(string_bitmap.has_value());
@@ -1015,7 +1256,7 @@ TEST(GroupMembershipTest, RawStringBoolAndNullGroupsRespectBaseFilter) {
     }
 
     std::vector<std::optional<bool>> bool_groups{false, true};
-    auto bool_membership = BuildGroupMembership<bool>(
+    auto bool_membership = BuildOffsetsBitmap<bool>(
         nullptr, *segment, bool_field, kRowCount, bool_groups, &base_filter);
     ASSERT_TRUE(bool_membership.has_value());
     auto bool_bitmap = std::move(bool_membership);
@@ -1032,9 +1273,64 @@ TEST(GroupMembershipTest, RejectsMismatchedFilterSize) {
     auto segment = CreateSealedWithFieldDataLoaded(schema, data);
     TargetBitmap wrong_size(9, false);
 
-    auto membership = BuildGroupMembership<int64_t>(
+    auto membership = BuildOffsetsBitmap<int64_t>(
         nullptr, *segment, group_field, 10, {0}, &wrong_size);
     EXPECT_FALSE(membership.has_value());
+}
+
+TEST(StrictGroupEligibilityTest, CompositeAndMultiQueryKeepOriginalPath) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto group = schema->AddDebugField("group", DataType::INT64);
+    auto other = schema->AddDebugField("other", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto data = segcore::DataGen(schema, 4, 42, 0, 4);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, data);
+    for (bool composite : {false, true}) {
+        SearchResult result;
+        result.total_nq_ = composite ? 1 : 2;
+        result.total_data_cnt_ = 4;
+        result.vector_iterators_.emplace();
+        for (int i = 0; i < result.total_nq_; ++i) {
+            result.vector_iterators_->push_back(
+                MakeSequenceVectorIterator({{0, 0.0F}, {1, 1.0F}}));
+        }
+        result.SetVectorSearchProvider(
+            BitsetView{}, [](const BitsetView&, int64_t, SearchResult&) {
+                FAIL() << "unsupported group shape must not register filtered "
+                          "Search";
+            });
+        SearchInfo info;
+        info.topk_ = 1;
+        info.group_size_ = 2;
+        info.strict_group_size_ = true;
+        info.group_by_field_ids_ = {group};
+        if (composite) {
+            info.group_by_field_ids_.push_back(other);
+        }
+        info.metric_type_ = knowhere::metric::L2;
+        std::vector<CompositeGroupKey> groups;
+        std::vector<int64_t> offsets;
+        std::vector<float> distances;
+        std::vector<size_t> prefix;
+        SearchGroupBy(nullptr,
+                      *result.vector_iterators_,
+                      info,
+                      groups,
+                      *segment,
+                      offsets,
+                      distances,
+                      prefix,
+                      nullptr,
+                      &result);
+        EXPECT_EQ(offsets.size(), result.total_nq_ * 2);
+        EXPECT_EQ(groups.size(), offsets.size());
+        for (const auto& key : groups) {
+            EXPECT_EQ(key.values_.size(), composite ? 2 : 1);
+        }
+        EXPECT_EQ(prefix.size(), result.total_nq_ + 1);
+        EXPECT_EQ(prefix.back(), offsets.size());
+    }
 }
 
 }  // namespace milvus::exec

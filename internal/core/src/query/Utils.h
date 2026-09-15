@@ -29,11 +29,89 @@
 
 namespace milvus::query {
 inline bool
-CanUseStrictGroupFilteredIterator(const SearchInfo& info, int64_t nq) {
-    return info.strict_group_acceptance_threshold_ > 0 &&
-           info.strict_group_size_ && info.group_size_ > 1 && info.topk_ > 0 &&
-           nq == 1 && !info.element_level() &&
+CanUseStrictGroupControls(const SearchInfo& info, int64_t nq) {
+    return info.strict_group_size_ && info.group_size_ > 1 && info.topk_ > 0 &&
+           nq == 1 && info.array_offsets_ == nullptr &&
            info.group_by_field_ids_.size() == 1;
+}
+
+// Zero disables truncation; saturation prevents overflow from causing an
+// unintended early cutoff.
+inline int64_t
+StrictGroupPhase1CandidateLimit(const SearchInfo& info) {
+    if (info.strict_group_phase1_candidate_weight_ <= 0 || info.topk_ <= 0 ||
+        info.group_size_ <= 0) {
+        return 0;
+    }
+    const auto max = std::numeric_limits<int64_t>::max();
+    int64_t limit = info.strict_group_phase1_candidate_weight_;
+    for (int64_t factor : {info.topk_, info.group_size_}) {
+        if (limit > max / factor) {
+            return max;
+        }
+        limit *= factor;
+    }
+    return limit;
+}
+
+inline void
+ApplyStrictGroupSkipRefine(const SearchInfo& info,
+                           int64_t nq,
+                           knowhere::Json& params) {
+    if (CanUseStrictGroupControls(info, nq)) {
+        params["skip_refine"] = info.strict_group_skip_refine_;
+    }
+}
+
+// Convert a group quota into ordinary vector Search without mutating phase one.
+inline SearchInfo
+StrictGroupSearchInfo(const SearchInfo& original, int64_t remaining_topk) {
+    auto info = original;
+    // Providers are registered only for nq=1. Set the backend parameter before
+    // converting per-group completion into an ordinary (non-grouped) Search.
+    ApplyStrictGroupSkipRefine(original, 1, info.search_params_);
+    info.topk_ = remaining_topk;
+    info.group_by_field_ids_.clear();
+    info.group_size_ = 1;
+    info.strict_group_size_ = false;
+    info.iterative_filter_execution = false;
+    info.iterator_v2_info_.reset();
+    // Group-by consumes unrounded iterator distances; preserve that here.
+    info.round_decimal_ = -1;
+    info.search_params_[knowhere::meta::TOPK] = remaining_topk;
+    // Iterator accepts ef < k, but HNSW Search does not. Knowhere accepts
+    // integer strings as well as JSON integers. Raise only a valid explicit ef
+    // in this copy; leave malformed values and defaults to backend validation.
+    auto ef = info.search_params_.find("ef");
+    if (ef != info.search_params_.end()) {
+        if (ef->is_number_integer() && *ef > 0 &&
+            *ef <= std::numeric_limits<int>::max() && *ef < remaining_topk) {
+            *ef = remaining_topk;
+        } else if (ef->is_string()) {
+            const auto& value = ef->get_ref<const std::string&>();
+            try {
+                size_t end = 0;
+                const auto parsed = std::stoll(value, &end);
+                if (end == value.size() && parsed > 0 &&
+                    parsed <= std::numeric_limits<int>::max() &&
+                    parsed < remaining_topk) {
+                    *ef = std::to_string(remaining_topk);
+                }
+            } catch (const std::invalid_argument&) {
+                // Preserve the invalid input for Knowhere's validation.
+            } catch (const std::out_of_range&) {
+                // Preserve overflow instead of turning it into a valid ef.
+            }
+        }
+    }
+    return info;
+}
+
+inline bool
+CanUseStrictGroupSearch(const SearchInfo& search_info, int64_t num_queries) {
+    return search_info.strict_group_strategy_ ==
+               StrictGroupStrategy::PerGroup &&
+           CanUseStrictGroupControls(search_info, num_queries);
 }
 
 inline void

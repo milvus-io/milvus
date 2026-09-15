@@ -35,16 +35,33 @@ func TestQueryNodeStrictGroupSettings(t *testing.T) {
 	params := &ComponentParam{}
 	params.Init(NewBaseTable(SkipRemote(true)))
 	cfg := &params.QueryNodeCfg
-	assert.Equal(t, 0.1, cfg.StrictGroupAcceptanceThreshold.GetAsFloat())
-	assert.Equal(t, 100, cfg.StrictGroupProbeCandidates.GetAsInt())
-	params.Save(cfg.StrictGroupAcceptanceThreshold.Key, "0")
-	params.Save(cfg.StrictGroupProbeCandidates.Key, "17")
-	assert.Equal(t, 0.0, cfg.StrictGroupAcceptanceThreshold.GetAsFloat())
-	assert.Equal(t, 17, cfg.StrictGroupProbeCandidates.GetAsInt())
-	params.Reset(cfg.StrictGroupAcceptanceThreshold.Key)
-	params.Reset(cfg.StrictGroupProbeCandidates.Key)
-	assert.Equal(t, 0.1, cfg.StrictGroupAcceptanceThreshold.GetAsFloat())
-	assert.Equal(t, 100, cfg.StrictGroupProbeCandidates.GetAsInt())
+	assert.Equal(t, int64(0), cfg.StrictGroupPhase1CandidateWeight.GetAsInt64())
+	assert.False(t, cfg.StrictGroupSkipRefine.GetAsBool())
+	params.Save(cfg.StrictGroupPhase1CandidateWeight.Key, "50")
+	params.Save(cfg.StrictGroupSkipRefine.Key, "true")
+	assert.Equal(t, int64(50), cfg.StrictGroupPhase1CandidateWeight.GetAsInt64())
+	assert.True(t, cfg.StrictGroupSkipRefine.GetAsBool())
+	params.Reset(cfg.StrictGroupPhase1CandidateWeight.Key)
+	params.Reset(cfg.StrictGroupSkipRefine.Key)
+	assert.Equal(t, int64(0), cfg.StrictGroupPhase1CandidateWeight.GetAsInt64())
+	assert.False(t, cfg.StrictGroupSkipRefine.GetAsBool())
+	for _, name := range []string{"StrictGroupPhase1CandidateWeight", "StrictGroupSkipRefine"} {
+		field, ok := reflect.TypeOf(cfg).Elem().FieldByName(name)
+		assert.True(t, ok)
+		assert.Equal(t, "true", field.Tag.Get("refreshable"))
+	}
+	assert.False(t, cfg.StrictGroupDebug.GetAsBool())
+	params.Save(cfg.StrictGroupDebug.Key, "true")
+	assert.True(t, cfg.StrictGroupDebug.GetAsBool())
+	params.Reset(cfg.StrictGroupDebug.Key)
+	assert.False(t, cfg.StrictGroupDebug.GetAsBool())
+	assert.Equal(t, "per_group", cfg.StrictGroupStrategy.GetValue())
+	params.Save(cfg.StrictGroupStrategy.Key, "per_group")
+	assert.Equal(t, "per_group", cfg.StrictGroupStrategy.GetValue())
+	params.Save(cfg.StrictGroupStrategy.Key, "original")
+	assert.Equal(t, "original", cfg.StrictGroupStrategy.GetValue())
+	params.Reset(cfg.StrictGroupStrategy.Key)
+	assert.Equal(t, "per_group", cfg.StrictGroupStrategy.GetValue())
 }
 
 func shouldPanic(t *testing.T, name string, f func()) {
