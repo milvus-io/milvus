@@ -95,8 +95,8 @@ type SegmentCatalogMutation struct {
 	// each record is re-read and projected under indexMeta's per-buildID lock,
 	// so the persisted value cannot be built from a stale read.
 	//
-	// A normal index task still supplies exactly one upsert. Multiple entries
-	// are accepted only for removals, allowing one GC manifest revision to
+	// A foreground completion or historical backfill supplies one publication.
+	// Multiple entries are accepted only for removals, allowing one GC revision to
 	// retract several indexes and retire their records atomically.
 	SegmentIndexes []SegmentIndexMutation
 
@@ -116,6 +116,9 @@ const (
 	// SegmentIndexRemove deletes the record, retiring an artifact the manifest
 	// revision retracts.
 	SegmentIndexRemove
+	// SegmentIndexBackfill publishes an existing finished artifact and retires
+	// its historical catalog row without replacing the in-memory record.
+	SegmentIndexBackfill
 )
 
 // SegmentIndexMutation is one SegmentIndex half of a manifest commit: a record
@@ -128,7 +131,7 @@ type SegmentIndexMutation struct {
 	BuildID int64
 	// FinishedTask is the raw worker result an upsert projects the persisted
 	// record from. Required for SegmentIndexUpsert, rejected for
-	// SegmentIndexRemove.
+	// SegmentIndexRemove and SegmentIndexBackfill.
 	FinishedTask *workerpb.IndexTaskInfo
 }
 
@@ -239,6 +242,9 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 
 	for i := range commit.CatalogMutation.SegmentIndexes {
 		indexMutation := &commit.CatalogMutation.SegmentIndexes[i]
+		if indexMutation.Type == SegmentIndexBackfill && segment.GetLevel() == datapb.SegmentLevel_L0 {
+			return errSegmentIndexBackfillSkipped
+		}
 		staged, err := m.indexMeta.stageSegmentIndexMutation(*indexMutation)
 		if err != nil {
 			if errors.Is(err, errSegmentIndexRecordGone) {
@@ -254,6 +260,15 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 				"segment index mutation buildID=%d belongs to segment %d, not manifest segment %d",
 				indexMutation.BuildID, staged.record.SegmentID, commit.SegmentID)
 		}
+		if indexMutation.Type == SegmentIndexBackfill && staged.record != nil &&
+			(staged.record.CollectionID != segment.GetCollectionID() ||
+				staged.record.PartitionID != segment.GetPartitionID()) {
+			return merr.WrapErrServiceInternalMsg(
+				"segment index mutation for build %d targets collection/partition/segment %d/%d/%d, not committing segment %d/%d/%d",
+				indexMutation.BuildID,
+				staged.record.CollectionID, staged.record.PartitionID, staged.record.SegmentID,
+				segment.GetCollectionID(), segment.GetPartitionID(), commit.SegmentID)
+		}
 		if indexMutation.Type == SegmentIndexRemove && staged.record != nil &&
 			!commitRetractsIndexIdentity(commit, staged.record.IndexID, indexMutation.BuildID) {
 			return merr.WrapErrServiceInternalMsg(
@@ -261,7 +276,7 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 				commit.SegmentID, staged.record.IndexID, indexMutation.BuildID)
 		}
 		stagedIndexes = append(stagedIndexes, staged)
-		if indexMutation.Type == SegmentIndexUpsert {
+		if indexMutation.Type == SegmentIndexUpsert || indexMutation.Type == SegmentIndexBackfill {
 			for _, manifestIndex := range commit.Mutation.Updates.Indexes {
 				if manifestIndex.BuildID != indexMutation.BuildID {
 					continue
@@ -413,7 +428,7 @@ func validateSegmentIndexMutations(commit SegmentManifestCommit) ([]int64, error
 	mutations := commit.CatalogMutation.SegmentIndexes
 	buildIDs := make([]int64, 0, len(mutations))
 	seen := make(map[int64]struct{}, len(mutations))
-	upserts := 0
+	publications := 0
 	for _, mutation := range mutations {
 		if mutation.BuildID == 0 {
 			return nil, merr.WrapErrServiceInternalMsg("segment index mutation requires a build ID")
@@ -425,11 +440,11 @@ func validateSegmentIndexMutations(commit SegmentManifestCommit) ([]int64, error
 		seen[mutation.BuildID] = struct{}{}
 		buildIDs = append(buildIDs, mutation.BuildID)
 		switch mutation.Type {
-		case SegmentIndexUpsert:
-			upserts++
+		case SegmentIndexUpsert, SegmentIndexBackfill:
+			publications++
 			if !commitPublishesIndexEntry(commit, mutation.BuildID) {
 				return nil, merr.WrapErrServiceInternalMsg(
-					"segment index upsert requires a matching manifest entry, segmentID=%d buildID=%d",
+					"segment index publication requires a matching manifest entry, segmentID=%d buildID=%d",
 					commit.SegmentID, mutation.BuildID)
 			}
 		case SegmentIndexRemove:
@@ -440,9 +455,9 @@ func validateSegmentIndexMutations(commit SegmentManifestCommit) ([]int64, error
 			}
 		}
 	}
-	if upserts > 0 && len(mutations) != 1 {
+	if publications > 0 && len(mutations) != 1 {
 		return nil, merr.WrapErrServiceInternalMsg(
-			"segment manifest commit cannot combine an index upsert with other index mutations, segmentID=%d",
+			"segment manifest commit cannot combine an index publication with other index mutations, segmentID=%d",
 			commit.SegmentID)
 	}
 	sort.Slice(buildIDs, func(i, j int) bool { return buildIDs[i] < buildIDs[j] })

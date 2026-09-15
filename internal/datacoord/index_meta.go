@@ -86,6 +86,16 @@ type indexMeta struct {
 	keyLock *lock.KeyLock[UniqueID]
 	// segmentID -> indexID -> segmentIndex
 	segmentIndexes *typeutil.ConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]]
+
+	// segmentIndexCatalogAbsent contains build IDs whose in-memory
+	// SegmentIndex is durable in a segment manifest and therefore has no
+	// catalog row. It is process-local: etcd-loaded records are absent from
+	// this set, while manifest-recovered records are inserted during reload.
+	//
+	// The negative form is deliberate. A missing bookkeeping update then
+	// causes a harmless, idempotent backfill attempt instead of silently
+	// leaving a real catalog row behind forever.
+	segmentIndexCatalogAbsent typeutil.ConcurrentSet[UniqueID]
 }
 
 func newIndexTaskStats(s *model.SegmentIndex) *metricsinfo.IndexTaskStats {
@@ -227,6 +237,10 @@ func (m *indexMeta) reloadFromKV(collectionIDs []int64) error {
 					m.segmentIndexes.Insert(segIdx.SegmentID, indexes)
 				}
 				m.segmentBuildInfo.AddForRecovery(segIdx)
+				// Loaded from ListSegmentIndexes, so this build has a catalog
+				// row. Remove is idempotent and also makes reload robust to a
+				// directly reused indexMeta in tests.
+				m.segmentIndexCatalogAbsent.Remove(segIdx.BuildID)
 			}
 		}
 		return nil
@@ -293,9 +307,21 @@ func (m *indexMeta) alterSegmentIndexes(segIdxes []*model.SegmentIndex) error {
 		return err
 	}
 	for _, segIdx := range segIdxes {
+		// A successful AlterSegmentIndexes creates or replaces the catalog
+		// row even when this record was previously manifest-resident.
+		m.segmentIndexCatalogAbsent.Remove(segIdx.BuildID)
 		m.updateSegmentIndex(segIdx)
 	}
 	return nil
+}
+
+// isSegmentIndexCatalogAbsent reports the current process's durable-placement
+// knowledge for buildID. False is the conservative default: an unknown record
+// is treated as catalog-backed, so the optional backfill may perform an
+// idempotent delete but can never skip a real row because bookkeeping was
+// absent.
+func (m *indexMeta) isSegmentIndexCatalogAbsent(buildID UniqueID) bool {
+	return m.segmentIndexCatalogAbsent.Contain(buildID)
 }
 
 func (m *indexMeta) updateIndexMeta(index *model.Index, updateFunc func(clonedIndex *model.Index) error) error {
@@ -667,6 +693,9 @@ func (m *indexMeta) addSegmentIndex(ctx context.Context, segIndex *model.Segment
 				mlog.Int64("buildID", segIndex.BuildID), mlog.String("indexType", segIndex.IndexType), mlog.Err(err))
 			return err
 		}
+		m.segmentIndexCatalogAbsent.Remove(buildID)
+	} else {
+		m.segmentIndexCatalogAbsent.Upsert(buildID)
 	}
 
 	// Insert + gauge Add must be serialized vs MarkIndexAsDeleted.
@@ -1276,6 +1305,7 @@ func (m *indexMeta) removeSegmentIndexRecordInMemory(segIdx *model.SegmentIndex)
 	}
 
 	m.segmentBuildInfo.Remove(segIdx.BuildID)
+	m.segmentIndexCatalogAbsent.Remove(segIdx.BuildID)
 }
 
 // errSegmentIndexRecordGone reports that the SegmentIndex record a staged
@@ -1283,6 +1313,13 @@ func (m *indexMeta) removeSegmentIndexRecordInMemory(segIdx *model.SegmentIndex)
 // mutation is abandoned before creating a manifest revision; publishing would
 // strand an index entry that no SegmentIndex record can ever drive GC for.
 var errSegmentIndexRecordGone = errors.New("segment index record no longer exists")
+
+// errSegmentIndexBackfillSkipped is an in-process control-flow signal: the
+// record selected by a backfill scan changed before its manifest commit took
+// the BuildID lock, so publishing the scan's entry is no longer applicable.
+// The inspector catches it and retries only if the record becomes eligible
+// again on a later scan.
+var errSegmentIndexBackfillSkipped = errors.New("segment index no longer needs manifest backfill")
 
 // stagedSegmentIndexMutation carries a SegmentIndex change from its projection
 // under keyLock to the in-memory install that follows a successful catalog
@@ -1333,9 +1370,9 @@ func (m *indexMeta) stageSegmentIndexMutation(mut SegmentIndexMutation) (*staged
 			return nil, merr.WrapErrServiceInternalMsg("finished task buildID %d does not match segment index mutation buildID %d",
 				mut.FinishedTask.GetBuildID(), mut.BuildID)
 		}
-	case SegmentIndexRemove:
+	case SegmentIndexRemove, SegmentIndexBackfill:
 		if mut.FinishedTask != nil {
-			return nil, merr.WrapErrServiceInternalMsg("segment index removal cannot carry a finished task, buildID=%d", mut.BuildID)
+			return nil, merr.WrapErrServiceInternalMsg("segment index mutation %d cannot carry a finished task, buildID=%d", mut.Type, mut.BuildID)
 		}
 	default:
 		return nil, merr.WrapErrServiceInternalMsg("unknown segment index mutation type %d, buildID=%d", mut.Type, mut.BuildID)
@@ -1347,6 +1384,9 @@ func (m *indexMeta) stageSegmentIndexMutation(mut SegmentIndexMutation) (*staged
 	if !ok {
 		if mut.Type == SegmentIndexUpsert {
 			return staged, errSegmentIndexRecordGone
+		}
+		if mut.Type == SegmentIndexBackfill {
+			return staged, errSegmentIndexBackfillSkipped
 		}
 		return staged, nil
 	}
@@ -1363,6 +1403,45 @@ func (m *indexMeta) stageSegmentIndexMutation(mut SegmentIndexMutation) (*staged
 		return staged, nil
 	}
 
+	if mut.Type == SegmentIndexBackfill {
+		// The catalog row is the migration marker in the exclusive-placement
+		// design. Once it is absent, this build is already manifest-resident and
+		// republishing it would create a new revision on every inspector tick.
+		if m.isSegmentIndexCatalogAbsent(mut.BuildID) || previous.IsDeleted ||
+			previous.IndexState != commonpb.IndexState_Finished || len(previous.IndexFileKeys) == 0 {
+			return staged, errSegmentIndexBackfillSkipped
+		}
+		if !m.IsIndexExist(previous.CollectionID, previous.IndexID) {
+			// A dropped definition is owned by index GC. It cannot supply the
+			// identity fields a valid manifest entry requires, and publishing it
+			// here would race GC's delete-then-retract protocol.
+			return staged, errSegmentIndexBackfillSkipped
+		}
+		// A rebuild may replace the (segment, index) slot with a new BuildID
+		// after the scan. Publishing the old record would then overwrite the
+		// newer artifact under the manifest's index_id replacement key.
+		indexes, ok := m.segmentIndexes.Get(previous.SegmentID)
+		if !ok {
+			return staged, errSegmentIndexBackfillSkipped
+		}
+		current, ok := indexes.Get(previous.IndexID)
+		if !ok || current.BuildID != mut.BuildID {
+			return staged, errSegmentIndexBackfillSkipped
+		}
+
+		action := metastore.DropSegmentIndex(previous)
+		staged.action = &action
+		staged.record = previous
+		staged.install = func() func() {
+			// The record itself is already the authoritative in-memory object.
+			// Only its durable placement changed, so do not reinsert an old
+			// pointer into the (segment, index) slot and race a new build.
+			m.segmentIndexCatalogAbsent.Upsert(mut.BuildID)
+			return func() {}
+		}
+		return staged, nil
+	}
+
 	finished, previousSize, err := m.buildFinishedSegmentIndex(previous, mut.FinishedTask)
 	if err != nil {
 		return staged, err
@@ -1374,6 +1453,7 @@ func (m *indexMeta) stageSegmentIndexMutation(mut SegmentIndexMutation) (*staged
 	staged.action = &action
 	staged.record = finished
 	staged.install = func() func() {
+		m.segmentIndexCatalogAbsent.Upsert(finished.BuildID)
 		m.updateSegmentIndex(finished)
 		// recordFinishedTask is observability only, but its stored-size gauge
 		// takes fieldIndexLock, so the whole step is deferred out of segMu.

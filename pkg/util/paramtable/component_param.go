@@ -6132,6 +6132,10 @@ type dataCoordConfig struct {
 	IndexStorePathVersion               ParamItem `refreshable:"true"`
 	WriteSegmentIndexToManifest         ParamItem `refreshable:"false"`
 	SegmentIndexManifestLoadConcurrency ParamItem `refreshable:"false"`
+	ManifestIndexBackfillEnabled        ParamItem `refreshable:"false"`
+	ManifestIndexBackfillInterval       ParamItem `refreshable:"true"`
+	ManifestIndexBackfillBatchSize      ParamItem `refreshable:"true"`
+	ManifestIndexBackfillConcurrency    ParamItem `refreshable:"true"`
 	HybridIndexLowCardinalityIndexType  ParamItem `refreshable:"true"`
 	HybridIndexHighCardinalityIndexType ParamItem `refreshable:"true"`
 
@@ -6940,6 +6944,64 @@ Startup processes fixed-size batches and retries failed reads per segment. An ex
 		Export: true,
 	}
 	p.SegmentIndexManifestLoadConcurrency.Init(base.mgr)
+
+	p.ManifestIndexBackfillEnabled = ParamItem{
+		Key:          "dataCoord.index.manifestIndexBackfill.enabled",
+		Version:      "3.0.1",
+		DefaultValue: "false",
+		Doc: `Whether DataCoord migrates historical finished StorageV3 SegmentIndex catalog rows into segment manifests. This is an operator-controlled, restart-scoped migration and is inert unless dataCoord.index.writeSegmentIndexToManifest is also true.
+Each eligible record is moved through the ordinary segment manifest commit: the new manifest pointer, manifest_has_index marker, and deletion of the old catalog row land in one transaction. No separate index-prune phase is required. Failed, in-flight, fake-finished, deleted, StorageV1/V2, and L0 records remain on their existing lifecycle paths.
+Enable only after every DataCoord replica that can become leader supports manifest-index reload. Migrated rows are not recreated when this switch is disabled, so rolling DataCoord back to an older version is unsupported after migration starts.
+Watch milvus_datacoord_manifest_index_backfill_pending_records. Zero means no eligible historical catalog row remains; mixed manifest and etcd placement is safe while the migration is still running.`,
+		Export: true,
+	}
+	p.ManifestIndexBackfillEnabled.Init(base.mgr)
+
+	p.ManifestIndexBackfillInterval = ParamItem{
+		Key:          "dataCoord.index.manifestIndexBackfill.interval",
+		Version:      "3.0.1",
+		DefaultValue: "60",
+		Doc:          "Interval in seconds between manifest index backfill scans.",
+		Export:       true,
+	}
+	p.ManifestIndexBackfillInterval.Init(base.mgr)
+
+	p.ManifestIndexBackfillBatchSize = ParamItem{
+		Key:          "dataCoord.index.manifestIndexBackfill.batchSize",
+		Version:      "3.0.1",
+		DefaultValue: "1000",
+		Formatter: func(v string) string {
+			batchSize := getAsInt(v)
+			if batchSize < 1 {
+				return "1"
+			}
+			return strconv.Itoa(batchSize)
+		},
+		Doc:    "Maximum number of SegmentIndex catalog records migrated per scan; the pending gauge always counts the full backlog.",
+		Export: true,
+	}
+	p.ManifestIndexBackfillBatchSize.Init(base.mgr)
+
+	p.ManifestIndexBackfillConcurrency = ParamItem{
+		Key:          "dataCoord.index.manifestIndexBackfill.concurrency",
+		Version:      "3.0.1",
+		DefaultValue: "16",
+		Formatter: func(v string) string {
+			concurrency := getAsInt(v)
+			if concurrency < 1 {
+				return "1"
+			}
+			// The pool backend stores capacity as int32; a larger value wraps
+			// negative and blocks Submit forever.
+			if concurrency > math.MaxInt32 {
+				return strconv.Itoa(math.MaxInt32)
+			}
+			return strconv.Itoa(concurrency)
+		},
+		Doc:    "Number of segments whose manifest index backfill may run in parallel; records of one segment are committed sequentially.",
+		Export: true,
+	}
+	p.ManifestIndexBackfillConcurrency.Init(base.mgr)
 
 	p.HybridIndexLowCardinalityIndexType = ParamItem{
 		Key:          "dataCoord.index.hybridIndex.lowCardinalityIndexType",
