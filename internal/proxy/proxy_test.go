@@ -4408,6 +4408,38 @@ func Test_GetCompactionStateWithPlans(t *testing.T) {
 		resp, err := proxy.GetCompactionStateWithPlans(context.TODO(), nil)
 		assert.NoError(t, merr.CheckRPCCall(resp, err))
 	})
+	t.Run("test get all compaction tasks by collection", func(t *testing.T) {
+		metaCache := NewMockCache(t)
+		metaCache.EXPECT().GetCollectionID(mock.Anything, "db", "collection").Return(int64(100), nil)
+		mixCoord := mocks.NewMockMixCoordClient(t)
+		mixCoord.EXPECT().GetCompactionStateWithPlans(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, request *milvuspb.GetCompactionPlansRequest, opts ...grpc.CallOption) (*milvuspb.GetCompactionPlansResponse, error) {
+			assert.Equal(t, int64(100), request.GetCollectionId())
+			assert.Equal(t, "collection", request.GetCollectionName())
+			return &milvuspb.GetCompactionPlansResponse{Status: merr.Success()}, nil
+		})
+		proxy := &Proxy{mixCoord: mixCoord, metaCache: metaCache}
+		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+		resp, err := proxy.GetCompactionStateWithPlans(context.TODO(), &milvuspb.GetCompactionPlansRequest{
+			DbName:         "db",
+			CollectionName: "collection",
+		})
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
+	})
+	t.Run("test ignore client supplied collection id", func(t *testing.T) {
+		mixCoord := mocks.NewMockMixCoordClient(t)
+		mixCoord.EXPECT().GetCompactionStateWithPlans(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, request *milvuspb.GetCompactionPlansRequest, opts ...grpc.CallOption) (*milvuspb.GetCompactionPlansResponse, error) {
+			assert.Equal(t, int64(10), request.GetCompactionID())
+			assert.Zero(t, request.GetCollectionId())
+			return &milvuspb.GetCompactionPlansResponse{Status: merr.Success()}, nil
+		})
+		proxy := &Proxy{mixCoord: mixCoord}
+		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+		resp, err := proxy.GetCompactionStateWithPlans(context.TODO(), &milvuspb.GetCompactionPlansRequest{
+			CompactionID: 10,
+			CollectionId: 999,
+		})
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
+	})
 	t.Run("test get compaction state with plans with unhealthy proxy", func(t *testing.T) {
 		mixCoord := &MixCoordMock{}
 		proxy := &Proxy{mixCoord: mixCoord}
