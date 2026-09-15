@@ -18,14 +18,14 @@ package config
 
 import "strings"
 
-// RegisteredConfigKind identifies how a declared external configuration key
+// registeredConfigKind identifies how a declared external configuration key
 // must be resolved.
-type RegisteredConfigKind int
+type registeredConfigKind int
 
 const (
-	RegisteredConfigUnknown RegisteredConfigKind = iota
-	RegisteredConfigScalar
-	RegisteredConfigGroup
+	registeredConfigUnknown registeredConfigKind = iota
+	registeredConfigScalar
+	registeredConfigGroup
 )
 
 // sensitiveKeyPatterns is the last-resort classifier: it decides any key that
@@ -34,9 +34,9 @@ const (
 // That "whether or not" is easy to misread and matters. A declared ParamItem
 // with a credential-shaped name is caught by this list even though nothing
 // marked it Sensitive, which is why proxy.maxPasswordLength and
-// proxy.minPasswordLength carry NonSensitive: true — they are length bounds,
-// and without the flag they would read as passwords. Declaring a key is not by
-// itself a statement that its value is safe.
+// proxy.minPasswordLength carry Sensitivity: NonSensitive — they are length
+// bounds, and without the explicit override they would read as passwords.
+// Declaring a key is not by itself a statement that its value is safe.
 //
 // The list must not be narrower than the audit tripwire in paramtable. A
 // manager whose ParamGroup declares the empty prefix (hook.yaml, whose keys are
@@ -263,7 +263,7 @@ func leafName(canonicalKey string) string {
 type resolvedKey struct {
 	lookup string
 	dotted string
-	kind   RegisteredConfigKind
+	kind   registeredConfigKind
 	// segmented records that dotted came from a declaration or from a source,
 	// rather than from whoever asked. Only one rule in this file widens a
 	// verdict — a NonSensitiveSuffixes exemption, which is granted to a leaf
@@ -375,7 +375,7 @@ func (m *Manager) resolveRegisteredKey(key string) resolvedKey {
 	// same way whether the caller used the declared key, its environment alias,
 	// or the separator-free identity the value is stored under.
 	if declared, ok := m.declaredKeys.Get(formattedKey); ok {
-		return resolvedKey{lookup: formattedKey, dotted: declared, kind: RegisteredConfigScalar, segmented: true}
+		return resolvedKey{lookup: formattedKey, dotted: declared, kind: registeredConfigScalar, segmented: true}
 	}
 
 	// Nobody declared this key, so use the spelling the sources showed us for
@@ -474,7 +474,7 @@ func (m *Manager) resolveRegisteredKey(key string) resolvedKey {
 		default:
 			return true
 		}
-		resolved.kind = RegisteredConfigGroup
+		resolved.kind = registeredConfigGroup
 		return false
 	})
 	return resolved

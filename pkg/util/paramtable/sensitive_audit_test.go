@@ -46,6 +46,10 @@ var knownSensitive = []string{
 	"pulsar.port",
 	"pulsar.webaddress",
 	"pulsar.webport",
+	// Pulsar WAL builder.getPulsarClientOptions passes both to
+	// tenant.MustGetFullTopicName, which constructs tenant/namespace/topic.
+	"pulsar.tenant",
+	"pulsar.namespace",
 	"proxy.ip",
 	"proxy.port",
 	"proxy.internalport",
@@ -140,9 +144,56 @@ func TestSensitiveConnectionControls(t *testing.T) {
 				}
 			})
 			require.NotNil(t, declaration, "inventory must name a live declaration")
-			require.True(t, declaration.Sensitive, "connection controls need explicit sensitivity metadata")
+			require.Equal(t, Sensitive, declaration.Sensitivity, "connection controls need explicit sensitivity metadata")
 			for _, alias := range []string{key, strings.ReplaceAll(key, ".", "/"), strings.ToUpper(strings.ReplaceAll(key, ".", "_")), config.EtcdConfigKey(key)} {
 				require.True(t, manager.IsSensitive(alias), alias)
+			}
+		})
+	}
+}
+
+func TestPulsarResourceConfigVisibility(t *testing.T) {
+	params := newSensitiveAuditParams(t)
+	manager := params.baseTable.mgr
+	for _, item := range []*ParamItem{&params.PulsarCfg.Tenant, &params.PulsarCfg.Namespace} {
+		t.Run(item.Key, func(t *testing.T) {
+			original := item.GetValue()
+			identity := config.EtcdConfigKey(item.Key)
+			aliases := []string{item.Key, strings.ReplaceAll(item.Key, ".", "/"), strings.ToUpper(strings.ReplaceAll(item.Key, ".", "_")), identity}
+			for _, alias := range aliases {
+				t.Run(alias, func(t *testing.T) {
+					const canary = "pulsar-resource-canary"
+					require.NoError(t, params.Save(alias, canary))
+					require.Equal(t, canary, item.GetValue(), "Pulsar topic construction needs the original value")
+					for _, readAlias := range aliases {
+						_, raw, err := manager.GetConfig(readAlias)
+						require.NoError(t, err)
+						require.Equal(t, canary, raw)
+						_, value, err := manager.GetRegisteredConfig(readAlias)
+						require.ErrorIs(t, err, config.ErrKeySensitive)
+						require.Empty(t, value)
+						require.Equal(t, config.RedactedValue, manager.RedactValue(readAlias, canary))
+					}
+					for name, projection := range map[string]map[string]string{
+						"ProjectConfigs": manager.ProjectConfigs(),
+						"ProjectBy":      manager.ProjectBy(config.WithPrefix("pulsar")),
+						"GetConfigsView": manager.GetConfigsView(),
+					} {
+						require.Contains(t, projection, identity, name)
+						for key, value := range projection {
+							if config.EtcdConfigKey(key) == identity {
+								require.Contains(t, value, config.RedactedValue, "%s: %s", name, key)
+								require.NotContains(t, value, canary, "%s: %s", name, key)
+							}
+						}
+					}
+					require.NoError(t, params.Remove(alias))
+					_, _, err := manager.GetRegisteredConfig(alias)
+					require.ErrorIs(t, err, config.ErrKeyNotFound)
+					require.NotContains(t, manager.ProjectConfigs(), identity)
+					require.NoError(t, params.Reset(alias))
+					require.Equal(t, original, item.GetValue(), "reset restores the configured resource")
+				})
 			}
 		})
 	}
@@ -173,6 +224,7 @@ var knownSensitiveDirectPrefixes = []string{
 func newSensitiveAuditParams(t *testing.T) *ComponentParam {
 	t.Helper()
 	base := NewBaseTable(SkipRemote(true), SkipEnv(true))
+	t.Cleanup(base.Manager().Close)
 	if err := base.Save("localStorage.path", t.TempDir()); err != nil {
 		t.Fatalf("set local storage path: %v", err)
 	}
@@ -207,16 +259,11 @@ func TestSensitiveParamItemsMarked(t *testing.T) {
 	violations := make([]string, 0)
 	walkParamItems(reflect.ValueOf(params).Elem(), func(item *ParamItem) {
 		lowerKey := strings.ToLower(item.Key)
-		if item.Sensitive && item.NonSensitive {
-			violations = append(violations, item.Key+" (cannot be both Sensitive and NonSensitive)")
-			return
-		}
-
 		// If the runtime has to infer a verdict for a shipped ParamItem, the
 		// declaration is incomplete. IsSensitive asks the production classifier
 		// directly, so this audit cannot drift behind an exported copy of its
 		// private pattern list.
-		if !item.Sensitive && !item.NonSensitive && params.baseTable.mgr.IsSensitive(lowerKey) {
+		if item.Sensitivity == Auto && params.baseTable.mgr.IsSensitive(lowerKey) {
 			violations = append(violations, item.Key+
 				" (runtime classifies the key as sensitive but the ParamItem declares no reviewed verdict)")
 			return
@@ -224,7 +271,7 @@ func TestSensitiveParamItemsMarked(t *testing.T) {
 
 		// SuperUsers is access metadata rather than a credential, but its name is
 		// deliberately reviewed instead of left to a heuristic.
-		if strings.Contains(lowerKey, "superuser") && !item.Sensitive && !item.NonSensitive {
+		if strings.Contains(lowerKey, "superuser") && item.Sensitivity == Auto {
 			violations = append(violations, item.Key+
 				" (access-governing key must declare Sensitive or NonSensitive explicitly)")
 		}
@@ -235,9 +282,9 @@ func TestSensitiveParamItemsMarked(t *testing.T) {
 		found := false
 		walkParamItems(reflect.ValueOf(params).Elem(), func(item *ParamItem) {
 			if strings.ToLower(item.Key) == want {
-				if !item.Sensitive {
+				if item.Sensitivity != Sensitive {
 					violations = append(violations, item.Key+
-						" (in knownSensitive list but Sensitive: false)")
+						" (in knownSensitive list but Sensitivity is not Sensitive)")
 				}
 				found = true
 			}
@@ -266,14 +313,12 @@ func TestSensitiveParamItemsMarked(t *testing.T) {
 	}
 
 	for _, want := range knownSensitiveDirectPrefixes {
-		_, kind := params.baseTable.mgr.ResolveRegisteredConfigKey(want + "audit.probe")
-		if kind != config.RegisteredConfigGroup {
-			t.Errorf("knownSensitiveDirectPrefixes references %q which is not registered", want)
-			continue
-		}
-		if !params.baseTable.mgr.IsSensitive(want + "audit.probe") {
-			violations = append(violations, want+" (directly registered topology prefix is not Sensitive)")
-		}
+		key := want + "audit.probe"
+		require.NoError(t, params.Save(key, "direct-prefix-canary"))
+		_, value, err := params.baseTable.mgr.GetRegisteredConfig(key)
+		require.ErrorIs(t, err, config.ErrKeySensitive, "%s must be registered and sensitive", want)
+		require.Empty(t, value)
+		require.Equal(t, config.RedactedValue, params.baseTable.mgr.ProjectConfigs()[config.EtcdConfigKey(key)])
 	}
 
 	if len(violations) > 0 {
@@ -295,11 +340,12 @@ func TestNoEmptyPrefixParamGroup(t *testing.T) {
 	// Ask membership about a probe outside every real namespace. This catches an
 	// empty prefix whether it came from a ParamGroup field or a direct manager
 	// registration, without exposing the manager's registry as production API.
-	_, kind := params.baseTable.mgr.ResolveRegisteredConfigKey("__empty_prefix_audit__.probe")
-	if kind != config.RegisteredConfigUnknown {
-		t.Error("an empty prefix on the main table declares every source key, " +
-			"including every process environment variable, to be registered configuration")
-	}
+	const key = "__empty_prefix_audit__.probe"
+	require.NoError(t, params.Save(key, "unregistered-canary"))
+	_, _, err := params.baseTable.mgr.GetRegisteredConfig(key)
+	require.ErrorIs(t, err, config.ErrKeyUnregistered,
+		"an empty prefix on the main table would publish arbitrary source keys")
+	require.NotContains(t, params.baseTable.mgr.ProjectConfigs(), config.EtcdConfigKey(key))
 }
 
 func TestSensitiveCipherParamItemsMarked(t *testing.T) {
@@ -312,7 +358,7 @@ func TestSensitiveCipherParamItemsMarked(t *testing.T) {
 		"AWS role ARN":    &params.KmsAwsRoleARN,
 		"AWS external ID": &params.KmsAwsExternalID,
 	} {
-		if !item.Sensitive {
+		if item.Sensitivity != Sensitive {
 			t.Errorf("%s (%s) must be marked Sensitive", name, item.Key)
 		}
 		if !base.Manager().IsSensitive(item.Key) {
@@ -496,7 +542,7 @@ func TestNoCredentialIsImmutable(t *testing.T) {
 // function.models.zilliz. came to exempt {"enable", "url"}, copied from the two
 // groups above it, while its consumer reads endpoint/enableTLS/certFile/
 // serverNameOverride. The exemption matched nothing, and all four of that
-// group's real settings were redacted and refused by /management/config/alter.
+// group's real settings were redacted at presentation boundaries.
 // Nothing caught it: the group ships no entry in configs/milvus.yaml, so it
 // appears in none of the projection measurements, and every other audit here
 // reflects over declarations rather than over consumers.

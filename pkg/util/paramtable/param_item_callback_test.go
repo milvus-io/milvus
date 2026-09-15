@@ -156,7 +156,7 @@ func TestParamItem_SensitiveCallbackLogsAreRedacted(t *testing.T) {
 			param := &ParamItem{
 				Key:          "cipherPlugin.kms.defaultKey",
 				DefaultValue: priorValue,
-				Sensitive:    true,
+				Sensitivity:  Sensitive,
 			}
 			param.Init(manager)
 

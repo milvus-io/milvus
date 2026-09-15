@@ -231,15 +231,6 @@ func EtcdConfigKey(key string) string {
 	return formatKeyUncached(key)
 }
 
-// ResolveRegisteredConfigKey reports whether a caller-supplied key names
-// declared configuration, and returns its namespace-preserving identity for
-// projection policy. This classification does not restrict configuration writes;
-// AlterConfigsInEtcd retains its existing storage-key formatting.
-func (m *Manager) ResolveRegisteredConfigKey(key string) (string, RegisteredConfigKind) {
-	resolved := m.resolveRegisteredKey(key)
-	return resolved.dotted, resolved.kind
-}
-
 // GetRegisteredConfig reads a caller-supplied key, and is the only read API
 // safe to expose to a management endpoint: it refuses keys that no ParamItem or
 // ParamGroup declares, and refuses sensitive values. Callers distinguish the two
@@ -248,7 +239,7 @@ func (m *Manager) GetRegisteredConfig(key string) (string, string, error) {
 	m.snapshotMutex.RLock()
 	defer m.snapshotMutex.RUnlock()
 	resolved := m.resolveRegisteredKey(key)
-	if resolved.kind == RegisteredConfigUnknown {
+	if resolved.kind == registeredConfigUnknown {
 		return "", "", errors.Wrap(ErrKeyUnregistered, key)
 	}
 	source, value, err := m.readResolved(resolved, key)
@@ -286,7 +277,7 @@ func (m *Manager) readResolved(resolved resolvedKey, requestedKey string) (strin
 	// resolved by ParamItem.get through Manager.GetConfig, which looks only
 	// under the separator-free identity — so considering the dotted form for a
 	// scalar would report a value nothing in the process actually uses.
-	dottedApplies := resolved.kind == RegisteredConfigGroup && resolved.dotted != resolved.lookup
+	dottedApplies := resolved.kind == registeredConfigGroup && resolved.dotted != resolved.lookup
 
 	// A runtime overlay outranks every source. Dotted first, because that is the
 	// one ParamGroup.GetValue ends up with when both are set.
@@ -561,7 +552,7 @@ func (m *Manager) updateEvent(e *Event) error {
 func (m *Manager) eventLogFields(event *Event) []mlog.Field {
 	key, value := RedactedValue, RedactedValue
 	resolved := m.resolveRegisteredKey(event.Key)
-	if event.EventSource != "EtcdSource" && resolved.kind == RegisteredConfigScalar {
+	if event.EventSource != "EtcdSource" && resolved.kind == registeredConfigScalar {
 		key = resolved.dotted
 		value = m.RedactValue(event.Key, event.Value)
 	}

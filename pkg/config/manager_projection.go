@@ -42,9 +42,9 @@ const (
 func (m *Manager) overlayIsAuthoritative(storedKey string) bool {
 	resolved := m.resolveRegisteredKey(storedKey)
 	switch resolved.kind {
-	case RegisteredConfigScalar:
+	case registeredConfigScalar:
 		return storedKey == resolved.lookup
-	case RegisteredConfigGroup:
+	case registeredConfigGroup:
 		// Either spelling may be the live one: a ParamGroup aggregate reads the
 		// dotted prefix, while a caller that builds the key itself — the
 		// per-cluster CDC settings in grpc_param.go — goes through
@@ -59,7 +59,7 @@ func (m *Manager) overlayIsAuthoritative(storedKey string) bool {
 func (m *Manager) classify(key string) projectionKind {
 	resolved := m.resolveRegisteredKey(key)
 	switch {
-	case resolved.kind == RegisteredConfigUnknown:
+	case resolved.kind == registeredConfigUnknown:
 		return projectionOmit
 	case m.isSensitiveResolved(resolved):
 		return projectionRedact

@@ -314,8 +314,8 @@ func TestOnEvent(t *testing.T) {
 }
 
 func isRegistered(m *Manager, key string) bool {
-	_, kind := m.ResolveRegisteredConfigKey(key)
-	return kind != RegisteredConfigUnknown
+	_, _, err := m.GetRegisteredConfig(key)
+	return !errors.Is(err, ErrKeyUnregistered)
 }
 
 func TestGetConfigAndSource(t *testing.T) {
@@ -558,14 +558,17 @@ func TestRegisteredGroupMemberLifecycle(t *testing.T) {
 
 	// Nothing anywhere yet: still resolves as a member of a declared group, so
 	// safe reads can resolve it after an etcd write.
-	_, kind := mgr.ResolveRegisteredConfigKey("kafka.producer.linger.ms")
-	assert.Equal(t, RegisteredConfigGroup, kind)
+	_, _, err := mgr.GetRegisteredConfig("kafka.producer.linger.ms")
+	require.ErrorIs(t, err, ErrKeyNotFound)
 
 	// What an alter call leaves behind.
 	mgr.SetConfig("kafka.producer.compression.type", "zstd")
-	canonical, kind := mgr.ResolveRegisteredConfigKey("kafka.producer.compression.type")
-	assert.Equal(t, RegisteredConfigGroup, kind, "safe reads must resolve the key just written")
-	assert.Equal(t, "kafka.producer.compression.type", canonical)
+	_, value, err := mgr.GetRegisteredConfig("kafka.producer.compression.type")
+	require.NoError(t, err)
+	assert.Equal(t, "zstd", value, "safe reads must return the value just written")
+	mgr.DeleteConfig("kafka.producer.compression.type")
+	_, _, err = mgr.GetRegisteredConfig("kafka.producer.compression.type")
+	require.ErrorIs(t, err, ErrKeyNotFound)
 }
 
 // GetRegisteredConfig must report the value the process actually uses. A scalar
@@ -602,15 +605,13 @@ func TestRegisteredGroupMemberRejectsEnvironmentOnlyKey(t *testing.T) {
 	mgr, _ := Init(WithEnvSource(formatKey))
 	mgr.RegisterConfigPrefix("proxy.accessLog.formatters.")
 
-	_, kind := mgr.ResolveRegisteredConfigKey("proxy.accessLog.formatters.DATABASE_URL")
-	assert.Equal(t, RegisteredConfigUnknown, kind)
 	_, _, err := mgr.GetRegisteredConfig("proxy.accessLog.formatters.DATABASE_URL")
 	require.ErrorIs(t, err, ErrKeyUnregistered)
 
 	// A member of the same group that the environment does not back resolves
 	// normally, so the refusal is targeted rather than a blanket one.
-	_, kind = mgr.ResolveRegisteredConfigKey("proxy.accessLog.formatters.base.format")
-	assert.Equal(t, RegisteredConfigGroup, kind)
+	_, _, err = mgr.GetRegisteredConfig("proxy.accessLog.formatters.base.format")
+	require.ErrorIs(t, err, ErrKeyNotFound)
 }
 
 // formatKey exempts knowhere.* from separator stripping; the EnvSource key
@@ -629,8 +630,8 @@ func TestKnowherePrefixDoesNotAdmitEnvironmentVariables(t *testing.T) {
 
 	require.NotEmpty(t, mgr.GetConfigs(), "the environment was never imported, the test proves nothing")
 	for _, spelling := range []string{"KNOWHERE.INJECTED", "knowhere.INJECTED", "knowhere.lowercase"} {
-		_, kind := mgr.ResolveRegisteredConfigKey(spelling)
-		assert.Equal(t, RegisteredConfigUnknown, kind, spelling)
+		_, _, err := mgr.GetRegisteredConfig(spelling)
+		assert.ErrorIs(t, err, ErrKeyUnregistered, spelling)
 	}
 	for key, value := range mgr.GetConfigsView() {
 		assert.NotContains(t, value, "must-not-be-published", key)
@@ -680,8 +681,6 @@ func TestAlterWrittenGroupMemberIsProjected(t *testing.T) {
 		configs: map[string]string{EtcdConfigKey(dotted): "/etc/ca.pem"},
 	}))
 
-	_, kind := mgr.ResolveRegisteredConfigKey(dotted)
-	assert.Equal(t, RegisteredConfigGroup, kind)
 	assert.Contains(t, mgr.GetConfigsView()[EtcdConfigKey(dotted)], "/etc/ca.pem")
 	_, reported, err := mgr.GetRegisteredConfig(dotted)
 	require.NoError(t, err)
@@ -703,8 +702,8 @@ func TestCollapsedMatchIsNotExtendedToTheEnvironment(t *testing.T) {
 	mgr.RegisterConfigPrefix("tls.clusters.")
 
 	require.NotEmpty(t, mgr.GetConfigs(), "the environment was never imported")
-	_, kind := mgr.ResolveRegisteredConfigKey("tls.clusters.prod.caPemPath")
-	assert.Equal(t, RegisteredConfigUnknown, kind)
+	_, _, err := mgr.GetRegisteredConfig("tls.clusters.prod.caPemPath")
+	assert.ErrorIs(t, err, ErrKeyUnregistered)
 	assert.Empty(t, mgr.ProjectConfigs())
 	assert.Empty(t, mgr.GetConfigsView())
 }
@@ -932,8 +931,8 @@ func TestCallerCannotResegmentAKeyOntoAnExemptedLeaf(t *testing.T) {
 		"function.textEmbedding.providers.myprovcredentialurl",
 		"function/textEmbedding/providers/myprovcredential/url",
 	} {
-		canonical, _ := mgr.ResolveRegisteredConfigKey(spelling)
-		require.Equal(t, identity, EtcdConfigKey(canonical),
+		resolved := mgr.resolveRegisteredKey(spelling)
+		require.Equal(t, identity, resolved.lookup,
 			"%s must address the credential's own identity, or it proves nothing", spelling)
 
 		assert.True(t, mgr.IsSensitive(spelling), spelling)
@@ -1231,9 +1230,8 @@ func TestEnvironmentSecretsAreRedacted(t *testing.T) {
 	mgr.RegisterConfigPrefix("proxy.accessLog.formatters.")
 	mgr.RegisterConfigKey("public.key")
 
-	canonical, kind := mgr.ResolveRegisteredConfigKey("proxy/accessLog/formatters/DATABASE_URL")
-	assert.Equal(t, "proxy.accesslog.formatters.database_url", canonical)
-	assert.Equal(t, RegisteredConfigUnknown, kind,
+	_, _, err := mgr.GetRegisteredConfig("proxy/accessLog/formatters/DATABASE_URL")
+	assert.ErrorIs(t, err, ErrKeyUnregistered,
 		"a prefix match on a re-spelled environment variable is not a group member")
 	assert.False(t, isRegistered(mgr, "PROXY_ACCESSLOG_FORMATTERS_DATABASE_URL"))
 	assert.False(t, isRegistered(mgr, formatKey("PROXY_ACCESSLOG_FORMATTERS_DATABASE_URL")))
@@ -1269,12 +1267,12 @@ func TestRegisteredConfigKeyResolutionPreservesKnowhereSuffixCase(t *testing.T) 
 	// FileSource stores them too.
 	mgr.SetConfig("knowhere.DISKANN.build.search_list", "100")
 
-	canonical, kind := mgr.ResolveRegisteredConfigKey("knowhere.DISKANN/build/search_list")
-	assert.Equal(t, "knowhere.DISKANN.build.search_list", canonical)
-	assert.Equal(t, RegisteredConfigGroup, kind)
+	_, value, err := mgr.GetRegisteredConfig("knowhere.DISKANN/build/search_list")
+	require.NoError(t, err)
+	assert.Equal(t, "100", value)
 
-	_, kind = mgr.ResolveRegisteredConfigKey("knowhere.")
-	assert.Equal(t, RegisteredConfigUnknown, kind, "a ParamGroup prefix without a suffix is not a concrete config key")
+	_, _, err = mgr.GetRegisteredConfig("knowhere.")
+	assert.ErrorIs(t, err, ErrKeyUnregistered, "a ParamGroup prefix without a suffix is not a concrete config key")
 }
 
 func TestRegisteredMetadataOverridesSecretNameFallback(t *testing.T) {

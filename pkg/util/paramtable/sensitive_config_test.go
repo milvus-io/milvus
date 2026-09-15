@@ -25,6 +25,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -175,7 +176,7 @@ func TestSensitivePulsarWebAddressOverrideLogs(t *testing.T) {
 			sink := mlog.CaptureGlobalLogs(t, &mlog.Config{Level: "debug"})
 			var params PulsarConfig
 			params.Init(base)
-			assert.True(t, params.WebAddress.Sensitive)
+			assert.Equal(t, Sensitive, params.WebAddress.Sensitivity)
 			assert.Equal(t, test.expected, params.WebAddress.GetValue())
 			_, raw, err := base.Manager().GetConfig(params.WebAddress.Key)
 			require.NoError(t, err)
@@ -344,8 +345,8 @@ func TestDynamicClusterNamespacesAreDeclared(t *testing.T) {
 }
 
 func isConfigRegistered(m *config.Manager, key string) bool {
-	_, kind := m.ResolveRegisteredConfigKey(key)
-	return kind != config.RegisteredConfigUnknown
+	_, _, err := m.GetRegisteredConfig(key)
+	return !errors.Is(err, config.ErrKeyUnregistered)
 }
 
 func TestSensitiveParamGroupUsesRawValuesInternally(t *testing.T) {
@@ -547,7 +548,7 @@ func TestOneIdentityHasOneVerdict(t *testing.T) {
 	}
 
 	// Group by the identity a write actually lands on, which is EtcdConfigKey of
-	// the *resolved* key rather than of the caller's spelling. The two differ
+	// the read-normalized key rather than of the caller's spelling. The two differ
 	// under NotFormatPrefix: EtcdConfigKey("KNOWHERE.OPAQUE") collapses to
 	// "knowhereopaque" because the guard is case-sensitive, while resolving it
 	// first lower-cases and so keeps "knowhere.opaque". Grouping by the raw
@@ -556,7 +557,12 @@ func TestOneIdentityHasOneVerdict(t *testing.T) {
 	byIdentity := make(map[string][]string, len(seeds)*8)
 	for _, seed := range seeds {
 		for _, spelling := range spellingsOf(seed) {
-			canonical, _ := mgr.ResolveRegisteredConfigKey(spelling)
+			// Normalize read-side separators while preserving the case-sensitive
+			// knowhere suffix. Derive test buckets independently of classification.
+			canonical := strings.ReplaceAll(spelling, "/", ".")
+			if !strings.HasPrefix(canonical, config.NotFormatPrefix) {
+				canonical = strings.ToLower(canonical)
+			}
 			byIdentity[config.EtcdConfigKey(canonical)] = append(
 				byIdentity[config.EtcdConfigKey(canonical)], spelling)
 		}

@@ -41,14 +41,14 @@ func TestConfigDeclarationPublishesSensitivityBeforeVisibility(t *testing.T) {
 		{
 			name: "scalar", key: "minio.port", pauseAt: "minio.port",
 			init: func(mgr *config.Manager) {
-				item := ParamItem{Key: "minio.port", Sensitive: true}
+				item := ParamItem{Key: "minio.port", Sensitivity: Sensitive}
 				item.Init(mgr)
 			},
 		},
 		{
 			name: "fallback", key: "legacy.port", pauseAt: "legacy.port",
 			init: func(mgr *config.Manager) {
-				item := ParamItem{Key: "minio.port", FallbackKeys: []string{"legacy.port"}, Sensitive: true}
+				item := ParamItem{Key: "minio.port", FallbackKeys: []string{"legacy.port"}, Sensitivity: Sensitive}
 				item.Init(mgr)
 			},
 		},

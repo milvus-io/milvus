@@ -101,6 +101,19 @@ func (sw *VersionGateSwitcher) Validate() {
 	}
 }
 
+// Sensitivity controls configuration presentation and log redaction only.
+// Mutation restrictions are independent of this policy.
+type Sensitivity int
+
+const (
+	// Auto inherits the manager's prefix and key-name inference rules.
+	Auto Sensitivity = iota
+	// Sensitive explicitly redacts the value regardless of its key name.
+	Sensitive
+	// NonSensitive explicitly exposes a reviewed value regardless of inference.
+	NonSensitive
+)
+
 type ParamItem struct {
 	Key          string // which should be named as "A.B.C"
 	Version      string
@@ -113,12 +126,9 @@ type ParamItem struct {
 	Formatter func(originValue string) string
 	Forbidden bool
 	Immutable bool
-	// Sensitive marks values that must be redacted from configuration
-	// projections. Scalar GetValue calls remain raw for internal consumers.
-	Sensitive bool
-	// NonSensitive exempts a reviewed secret-like key name from fallback
-	// matching. It must not be combined with Sensitive.
-	NonSensitive bool
+	// Sensitivity defaults to Auto. Scalar GetValue calls remain raw for
+	// internal consumers in every state.
+	Sensitivity Sensitivity
 
 	// VersionGateSwitcher attaches version-gated auto-switch semantics to this
 	// item; nil means no version gating (backward compatible).
@@ -134,13 +144,6 @@ type ParamItem struct {
 }
 
 func (pi *ParamItem) Init(manager *config.Manager) {
-	if pi.Sensitive && pi.NonSensitive {
-		// Contradictory metadata. Sensitive wins at runtime, so this would fail
-		// closed rather than leak, but it would also mean a declaration that
-		// says "reviewed, not sensitive" is quietly not in force. The
-		// declaration site is where that has to be noticed.
-		panic(fmt.Sprintf("%s is declared both Sensitive and NonSensitive", pi.Key))
-	}
 	pi.manager = manager
 	if pi.VersionGateSwitcher != nil {
 		// A version-gated item must declare its full semantics; a
@@ -153,13 +156,13 @@ func (pi *ParamItem) Init(manager *config.Manager) {
 	if pi.Immutable {
 		pi.manager.ImmutableUpdate(pi.Key)
 	}
-	if pi.Sensitive {
+	switch pi.Sensitivity {
+	case Sensitive:
 		pi.manager.RegisterSensitiveKey(pi.Key)
 		for _, key := range pi.FallbackKeys {
 			pi.manager.RegisterSensitiveKey(key)
 		}
-	}
-	if pi.NonSensitive {
+	case NonSensitive:
 		pi.manager.RegisterNonSensitiveKey(pi.Key)
 		for _, key := range pi.FallbackKeys {
 			pi.manager.RegisterNonSensitiveKey(key)

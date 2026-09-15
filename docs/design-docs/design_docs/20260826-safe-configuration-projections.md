@@ -102,12 +102,16 @@ Sensitive values include:
 - credentials and private key material;
 - values that govern access or impersonation;
 - topology capable of redirecting credential-bearing traffic, including all
-  parts of a connection target such as host/IP and port;
+  parts of a connection target such as host/IP and port, and remote resource
+  selectors such as Pulsar tenant and namespace;
 - transport and trust controls, including TLS enablement, certificate and CA
   paths, minimum TLS versions, authentication mechanisms, SNI, and object-store
   provider, routing, identity, and payload-signing options.
 
-Explicit `Sensitive` and `NonSensitive` declarations take precedence. Dynamic
+`ParamItem.Sensitivity` has three states: `Auto` (the zero value) retains
+prefix and key-name inference; `Sensitive` and `NonSensitive` explicitly
+override that inference. This policy controls presentation and log redaction
+only; it does not change runtime values or mutation constraints. Dynamic
 groups default to their prefix policy and may expose only reviewed leaf
 suffixes. A name-pattern classifier is a final fail-closed defense for
 undeclared or plugin-defined names; it is not the primary inventory.

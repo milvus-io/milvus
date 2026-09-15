@@ -229,9 +229,9 @@ func (p *functionConfig) init(base *BaseTable) {
 		KeyPrefix: "function.models.zilliz.",
 		Version:   "2.6.5",
 		Sensitive: true,
-		// Every member controls the remote connection or its trust policy. Keeping
-		// the whole group sensitive prevents an unauthenticated config mutation
-		// from redirecting model traffic or weakening TLS verification.
+		// Every member controls the remote connection or its trust policy, so
+		// projections and logs redact the whole group. Sensitivity does not
+		// restrict configuration writes.
 	}
 	p.ZillizProviders.Init(base.mgr)
 
