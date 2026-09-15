@@ -17,9 +17,9 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
-	"fmt"
-	"log"
+	"os"
 	"strings"
 	"sync"
 
@@ -34,6 +34,15 @@ var (
 	ErrNotInitial   = errors.New("config is not initialized")
 	ErrIgnoreChange = errors.New("ignore change")
 	ErrKeyNotFound  = errors.New("key not found")
+
+	// ErrKeyUnregistered marks a key that no ParamItem or ParamGroup declares.
+	// Config sources carry more than Milvus configuration — EnvSource imports
+	// the whole process environment — so an undeclared key is not something a
+	// caller-supplied lookup may reach.
+	ErrKeyUnregistered = errors.New("unregistered config key")
+	// ErrKeySensitive marks a declared key whose value carries a credential or
+	// protected infrastructure topology.
+	ErrKeySensitive = errors.New("sensitive config key")
 
 	// config source management
 	ErrSourceDuplicate = errors.New("duplicate config source")
@@ -63,7 +72,10 @@ func Init(opts ...Option) (*Manager, error) {
 		s := NewFileSource(o.FileInfo)
 		err := sourceManager.AddSource(s)
 		if err != nil {
-			log.Fatal("failed to add FileSource config", mlog.Err(err))
+			// Parser errors can quote configuration values. Keep the original
+			// process-exit behavior independently of the logger's fatal hook.
+			mlog.Error(context.TODO(), "failed to add FileSource config", mlog.String("error", RedactedValue))
+			os.Exit(1)
 		}
 	}
 	if o.EnvKeyFormatter != nil {
@@ -88,12 +100,28 @@ var (
 	formattedKeysMu sync.Mutex
 )
 
+// Four spellings of one configuration key travel through this package, and
+// picking the wrong one is how a check ends up guarding a name nothing uses:
+//
+//	lowerKey          "Kafka.SSL.tlsKey" -> "kafka.ssl.tlskey"   (case only)
+//	formatKey         "Kafka.SSL.tlsKey" -> "kafkassltlskey"     (memoised; internal keys only)
+//	formatKeyUncached same as formatKey, no memo                 (caller-supplied keys)
+//	strippedKey       same, without the NotFormatPrefix guard    (what EnvSource produces)
+//
+// lowerKey and formatKey both leave NotFormatPrefix ("knowhere.") keys exactly
+// as they are, because the index engine needs the case and the dots; strippedKey
+// is the one that does not, which is why the two disagree there and only there.
+// Values are stored under formatKey's identity, so that is what a lookup must
+// use; prefixes are declared with dots, so that is what a namespace test must
+// use.
 func lowerKey(key string) string {
 	if strings.HasPrefix(key, NotFormatPrefix) {
 		return key
 	}
 	return strings.ToLower(key)
 }
+
+var keyFormatReplacer = strings.NewReplacer("/", "", "_", "", ".", "")
 
 // FormatKey is the identity a config key is stored and looked up under.
 // Callers that guard a specific key must compare against this rather than a
@@ -147,7 +175,29 @@ func formatKey(key string) string {
 // normalizeKey is the normalization itself, split out so the memoized and
 // unmemoized paths cannot drift.
 func normalizeKey(key string) string {
-	return strings.NewReplacer("/", "", "_", "", ".", "").Replace(strings.ToLower(key))
+	return keyFormatReplacer.Replace(strings.ToLower(key))
+}
+
+// formatKeyUncached is formatKey without the memo. Use it for caller-supplied
+// projection keys so diagnostic reads do not populate the bounded cache used
+// by runtime lookups.
+func formatKeyUncached(key string) string {
+	if strings.HasPrefix(key, NotFormatPrefix) {
+		return key
+	}
+	return normalizeKey(key)
+}
+
+// strippedKey collapses a key with no NotFormatPrefix exemption at all.
+//
+// formatKey deliberately leaves knowhere.* alone, but the EnvSource key
+// formatter that BaseTable installs does not — it strips every separator
+// unconditionally. So the two disagree exactly on knowhere.*, and any check
+// that asks "did the environment supply this key?" has to look under this
+// spelling too, or an environment variable named KNOWHERE.SOMETHING is invisible
+// to it.
+func strippedKey(key string) string {
+	return normalizeKey(key)
 }
 
 func flattenAndMergeMap(prefix string, m map[string]interface{}, result map[string]string) {
@@ -181,7 +231,7 @@ func flattenAndMergeMap(prefix string, m map[string]interface{}, result map[stri
 				jsonCompatible := convertToJSONCompatible(val)
 				jsonBytes, err := json.Marshal(jsonCompatible)
 				if err != nil {
-					fmt.Printf("marshal to json failed %s, error = %s\n", fullKey, err.Error())
+					mlog.Warn(context.TODO(), "marshal configuration to json failed", mlog.String("error", RedactedValue))
 					continue
 				}
 				str = string(jsonBytes)
@@ -204,7 +254,7 @@ func flattenAndMergeMap(prefix string, m map[string]interface{}, result map[stri
 		default:
 			str, err := cast.ToStringE(val)
 			if err != nil {
-				fmt.Printf("cast to string failed %s, error = %s\n", fullKey, err.Error())
+				mlog.Warn(context.TODO(), "cast configuration to string failed", mlog.String("error", RedactedValue))
 				continue
 			}
 			result[lowerKey(fullKey)] = str

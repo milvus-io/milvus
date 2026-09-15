@@ -539,6 +539,7 @@ func TestFieldHelperFunctions(t *testing.T) {
 	f = FieldBroadcastID(800)
 	assert.Equal(t, keyBroadcastID, f.Key)
 	assert.Equal(t, int64(800), f.Integer)
+	assert.Equal(t, zapcore.Uint64Type, f.Type)
 
 	// FieldJobID
 	f = FieldJobID(900)
@@ -634,7 +635,6 @@ func TestFieldXXXOptpropagatedInt64Field(t *testing.T) {
 		{"FieldIndexID", func(opts ...FieldOption) Field { return FieldIndexID(500, opts...) }, keyIndexID},
 		{"FieldFieldID", func(opts ...FieldOption) Field { return FieldFieldID(600, opts...) }, keyFieldID},
 		{"FieldTaskID", func(opts ...FieldOption) Field { return FieldTaskID(700, opts...) }, keyTaskID},
-		{"FieldBroadcastID", func(opts ...FieldOption) Field { return FieldBroadcastID(800, opts...) }, keyBroadcastID},
 		{"FieldJobID", func(opts ...FieldOption) Field { return FieldJobID(900, opts...) }, keyJobID},
 		{"FieldBuildID", func(opts ...FieldOption) Field { return FieldBuildID(1000, opts...) }, keyBuildID},
 	}
@@ -652,6 +652,14 @@ func TestFieldXXXOptpropagatedInt64Field(t *testing.T) {
 			assert.True(t, isPropagatedField(&f), "field with OptPropagated should be propagated")
 		})
 	}
+}
+
+func TestFieldBroadcastIDOptPropagated(t *testing.T) {
+	f := FieldBroadcastID(^uint64(0), OptPropagated())
+	assert.Equal(t, keyBroadcastID, f.Key)
+	assert.Equal(t, zapcore.Uint64Type, f.Type)
+	assert.True(t, isPropagatedField(&f))
+	assert.Equal(t, "18446744073709551615", getPropagatedValue(&f))
 }
 
 // Test OptPropagated on string FieldXXX functions
