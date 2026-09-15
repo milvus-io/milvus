@@ -441,6 +441,25 @@ func (suite *AnalyzeTaskSuite) TestMaxConnectionsReachesAnalyze() {
 	suite.Equal(uint32(237), capturedMaxConnections)
 }
 
+func (suite *AnalyzeTaskSuite) TestBuildAnalyzeInfoForwardsClusterConfig() {
+	params := paramtable.Get()
+	suite.Require().NoError(params.Save("knowhere.cluster.type", "custom_kmeans"))
+	suite.Require().NoError(params.Save("knowhere.cluster.analyze.global_train_method", "index"))
+	suite.Require().NoError(params.Save("knowhere.cluster.analyze.search_list_size", "50"))
+	suite.T().Cleanup(func() {
+		suite.NoError(params.Reset("knowhere.cluster.type"))
+		suite.NoError(params.Reset("knowhere.cluster.analyze.global_train_method"))
+		suite.NoError(params.Reset("knowhere.cluster.analyze.search_list_size"))
+	})
+
+	info := buildAnalyzeInfo(&workerpb.AnalyzeRequest{})
+	suite.Equal("custom_kmeans", info.GetClusterType())
+	suite.Equal(map[string]string{
+		"global_train_method": "index",
+		"search_list_size":    "50",
+	}, info.GetClusterParams())
+}
+
 func TestAnalyzeTaskSuite(t *testing.T) {
 	suite.Run(t, new(AnalyzeTaskSuite))
 }
