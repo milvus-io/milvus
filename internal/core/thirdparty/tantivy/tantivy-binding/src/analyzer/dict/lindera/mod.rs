@@ -8,20 +8,21 @@ mod unidic;
 
 use crate::error::Result;
 use lindera::dictionary::{Dictionary, DictionaryKind};
-use once_cell::sync::{Lazy, OnceCell};
+use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 
 type DictionaryKey = (String, Option<PathBuf>);
-type DictionaryCell = Arc<OnceCell<Arc<Dictionary>>>;
+type DictionaryCell = Arc<Mutex<Weak<Dictionary>>>;
 
-// Successful dictionaries remain resident until process exit. Replacing files
-// or retargeting a previously loaded path requires a restart. Download URLs are
-// mirrors, not dictionary identity; existing on-disk dictionaries also ignore them.
+// Only consumers retain dictionaries. Keep a stable per-key initialization lock
+// so concurrent loads share a dictionary, including after its last consumer drops.
+// Download URLs are mirrors, not dictionary identity; existing on-disk
+// dictionaries also ignore them.
 static DICTIONARIES: Lazy<Mutex<HashMap<DictionaryKey, DictionaryCell>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
-static LOADED_PATHS: Lazy<Mutex<HashMap<DictionaryKey, Arc<Dictionary>>>> =
+static LOADED_PATHS: Lazy<Mutex<HashMap<DictionaryKey, Weak<Dictionary>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
 fn dictionary_key(kind: &DictionaryKind, build_dir: &str) -> Result<DictionaryKey> {
@@ -109,6 +110,65 @@ mod tests {
             dictionary_key(&DictionaryKind::IPADIC, &build_dir).unwrap(),
             dictionary_key(&DictionaryKind::KoDic, &build_dir).unwrap()
         );
+    }
+
+    #[test]
+    fn test_dictionary_cache_consumer_lifecycle() {
+        let root = tempfile::tempdir().unwrap();
+        fixture(root.path());
+        let build_dir = root.path().to_str().unwrap().to_string();
+        let load_concurrently = || {
+            let barrier = Arc::new(Barrier::new(16));
+            let workers: Vec<_> = (0..16)
+                .map(|_| {
+                    let barrier = barrier.clone();
+                    let build_dir = build_dir.clone();
+                    std::thread::spawn(move || {
+                        barrier.wait();
+                        load_dictionary_from_kind(&DictionaryKind::IPADIC, build_dir, vec![])
+                            .unwrap()
+                    })
+                })
+                .collect();
+            let dictionaries: Vec<_> = workers
+                .into_iter()
+                .map(|worker| worker.join().unwrap())
+                .collect();
+            for dictionary in &dictionaries {
+                assert!(Arc::ptr_eq(&dictionaries[0], dictionary));
+            }
+            dictionaries
+        };
+
+        let mut dictionaries = load_concurrently();
+        let old = Arc::downgrade(&dictionaries[0]);
+        let last = dictionaries.pop().unwrap();
+        drop(dictionaries);
+        assert!(old.upgrade().is_some());
+        drop(last);
+        assert!(old.upgrade().is_none());
+
+        // An expired cache must actually reload files, and a failed reload must
+        // leave it retryable. Keep the old Weak alive to distinguish generations.
+        let file = root.path().join("lindera-ipadic").join(common::DA_DATA);
+        let contents = fs::read(&file).unwrap();
+        fs::remove_file(&file).unwrap();
+        assert!(matches!(
+            load_dictionary_from_kind(&DictionaryKind::IPADIC, build_dir.clone(), vec![]),
+            Err(TantivyBindingError::IOError(ref error))
+                if error.kind() == std::io::ErrorKind::NotFound
+        ));
+        fs::write(file, contents).unwrap();
+        let dictionaries = load_concurrently();
+        let reloaded = Arc::downgrade(&dictionaries[0]);
+        assert!(!Weak::ptr_eq(&old, &reloaded));
+        // The requested-path fast cache must point to the new generation.
+        root.close().unwrap();
+        let again = load_dictionary_from_kind(&DictionaryKind::IPADIC, build_dir, vec![]).unwrap();
+        assert!(Arc::ptr_eq(&dictionaries[0], &again));
+        drop(again);
+        drop(dictionaries);
+        assert!(reloaded.upgrade().is_none());
     }
 
     #[test]
@@ -231,7 +291,7 @@ pub fn load_dictionary_from_kind(
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .get(&requested_key)
-            .cloned()
+            .and_then(Weak::upgrade)
         {
             return Ok(dictionary);
         }
@@ -259,8 +319,13 @@ pub fn load_dictionary_from_kind(
         .entry(key)
         .or_default()
         .clone();
-    let dictionary = cell
-        .get_or_try_init(|| -> Result<Arc<Dictionary>> {
+    // Never hold the global map lock during I/O. Recheck under the per-key
+    // lock because another caller may have loaded the dictionary while we waited.
+    let dictionary = {
+        let mut cached = cell.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(dictionary) = cached.upgrade() {
+            dictionary
+        } else {
             let dictionary = match kind {
                 DictionaryKind::IPADIC => ipadic::load_ipadic(build_dir, download_url),
                 DictionaryKind::CcCedict => cc_cedict::load_cc_cedict(build_dir, download_url),
@@ -270,16 +335,20 @@ pub fn load_dictionary_from_kind(
                 }
                 DictionaryKind::UniDic => unidic::load_unidic(build_dir, download_url),
             }?;
-            Ok(Arc::new(dictionary))
-        })
-        .cloned()?;
+            let dictionary = Arc::new(dictionary);
+            *cached = Arc::downgrade(&dictionary);
+            dictionary
+        }
+    };
     if requested_key.1.is_some() {
-        return Ok(LOADED_PATHS
+        let mut paths = LOADED_PATHS
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .entry(requested_key)
-            .or_insert(dictionary)
-            .clone());
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        // Preserve a live path binding, but replace an expired generation.
+        if let Some(existing) = paths.get(&requested_key).and_then(Weak::upgrade) {
+            return Ok(existing);
+        }
+        paths.insert(requested_key, Arc::downgrade(&dictionary));
     }
     Ok(dictionary)
 }
