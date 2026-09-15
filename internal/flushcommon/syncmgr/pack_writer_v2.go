@@ -223,12 +223,20 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 	tsFrom, tsTo := bw.getTsRange(rec)
 	pluginContextPtr := bw.getPluginContext(pack.collectionID)
 
+	// Allocate logIDs once, before the retry loop. writeInsertsIntoStorage
+	// builds the actual writer and performs the IO; retries must only repeat
+	// the IO, never draw fresh IDs from the task's fixed IDRange.
+	paths, err := bw.allocInsertLogPaths(pack)
+	if err != nil {
+		return nil, "", err
+	}
+
 	var logs map[int64]*datapb.FieldBinlog
 	var manifestPath string
 
 	if err := retry.Do(ctx, func() error {
 		var err error
-		logs, manifestPath, err = bw.writeInsertsIntoStorage(ctx, pluginContextPtr, pack, rec, tsFrom, tsTo)
+		logs, manifestPath, err = bw.writeInsertsIntoStorage(ctx, pluginContextPtr, pack, rec, tsFrom, tsTo, paths)
 		if err != nil {
 			mlog.Warn(ctx, "failed to write inserts into storage",
 				mlog.FieldCollectionID(pack.collectionID),
@@ -243,12 +251,29 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 	return logs, manifestPath, nil
 }
 
+// allocInsertLogPaths reserves exactly one logID per column group for the whole
+// write. It is deliberately called outside retry.Do: a retried storage write
+// must reuse the same paths instead of consuming a fresh logID on every attempt.
+func (bw *BulkPackWriterV2) allocInsertLogPaths(pack *SyncPack) ([]string, error) {
+	paths := make([]string, 0, len(bw.columnGroups))
+	for _, columnGroup := range bw.columnGroups {
+		id, err := bw.allocator.AllocOne()
+		if err != nil {
+			return nil, err
+		}
+		path := metautil.BuildInsertLogPath(bw.getRootPath(), pack.collectionID, pack.partitionID, pack.segmentID, columnGroup.GroupID, id)
+		paths = append(paths, path)
+	}
+	return paths, nil
+}
+
 func (bw *BulkPackWriterV2) writeInsertsIntoStorage(_ context.Context,
 	pluginContextPtr *indexcgopb.StoragePluginContext,
 	pack *SyncPack,
 	rec storage.Record,
 	tsFrom typeutil.Timestamp,
 	tsTo typeutil.Timestamp,
+	paths []string,
 ) (map[int64]*datapb.FieldBinlog, string, error) {
 	logs := make(map[int64]*datapb.FieldBinlog)
 	columnGroups := bw.columnGroups
@@ -277,15 +302,6 @@ func (bw *BulkPackWriterV2) writeInsertsIntoStorage(_ context.Context,
 		return result
 	}
 
-	paths := make([]string, 0)
-	for _, columnGroup := range columnGroups {
-		id, err := bw.allocator.AllocOne()
-		if err != nil {
-			return nil, "", err
-		}
-		path := metautil.BuildInsertLogPath(bw.getRootPath(), pack.collectionID, pack.partitionID, pack.segmentID, columnGroup.GroupID, id)
-		paths = append(paths, path)
-	}
 	w, err := storage.NewPackedRecordWriter(bucketName, paths, bw.schema, bw.bufferSize, bw.multiPartUploadSize, columnGroups, bw.storageConfig, pluginContextPtr)
 	if err != nil {
 		return nil, "", err
