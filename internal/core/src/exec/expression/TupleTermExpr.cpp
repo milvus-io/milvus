@@ -94,39 +94,73 @@ PhyTupleTermFilterExpr::MakeColumnReader(
     // field id; the C++ storage type T is fixed here, at construction, so
     // the per-row hot path in ExecVisitorImpl never re-branches on DataType.
     //
-    // Deliberately re-pins the field's chunk on every call rather than
-    // caching the last-seen chunk id across consecutive rows the way
+    // Deliberately re-pins/re-fetches the field's chunk on every call rather
+    // than caching the last-seen chunk id across consecutive rows the way
     // PhyCompareFilterExpr does: a correctness-first simplification (see the
-    // class comment in TupleTermExpr.h) made because this code could not be
-    // compiled or profiled in the environment it was authored in.
-    return [this, field](int64_t row, std::string& key) -> bool {
-        auto [chunk_id, chunk_offset] = GetChunkIdAndOffset(field, row);
-        auto pw = segment_chunk_reader_.segment_->chunk_data<T>(
-            op_ctx_, field, chunk_id);
-        auto chunk = pw.get();
-        auto validity = chunk.validity();
-        if (validity && !validity[chunk_offset]) {
-            return false;
-        }
-        const T* base = chunk.data();
-        const T& v = base[chunk_offset];
-        if constexpr (std::is_same_v<T, bool>) {
-            EncodeTupleElementBool(v, key);
-        } else if constexpr (std::is_same_v<T, float> ||
-                             std::is_same_v<T, double>) {
-            EncodeTupleElementDouble(static_cast<double>(v), key);
-        } else if constexpr (std::is_same_v<T, std::string> ||
-                             std::is_same_v<T, std::string_view>) {
+    // class comment in TupleTermExpr.h).
+    if constexpr (std::is_same_v<T, std::string_view>) {
+        // Sealed/chunked columns storing variable-width data have no
+        // contiguous Span representation: ChunkedVariableColumn does not
+        // override ChunkedColumnBase::Span(), which unconditionally throws
+        // "Span only supported for ChunkedColumn" (mmap/ChunkedColumn.h) --
+        // caught by ExprTupleTermTest.cpp's sealed VARCHAR test against a
+        // real build, since this file could not be compiled at authoring
+        // time. chunk_view<T>() is the accessor built for variable-width
+        // data instead (see the sealed-segment std::string_view/Json/
+        // ArrayView branch in SegmentExpr's own per-row processing in
+        // Expr.h, and the single-chunk precedent in
+        // SearchGroupByOperator.h::Get). Without an explicit offset_len it
+        // returns the WHOLE chunk's views, indexed by the row's offset
+        // WITHIN that chunk -- confirmed against that precedent, not
+        // assumed.
+        return [this, field](int64_t row, std::string& key) -> bool {
+            auto [chunk_id, chunk_offset] = GetChunkIdAndOffset(field, row);
+            auto pw = segment_chunk_reader_.segment_->chunk_view<T>(
+                op_ctx_, field, chunk_id);
+            auto& [views, validity] = pw.get();
+            if (validity && !validity[chunk_offset]) {
+                return false;
+            }
+            const auto& v = views[chunk_offset];
             EncodeTupleElementBytes(v.data(), v.size(), key);
-        } else {
-            // int8_t / int16_t / int32_t / int64_t: widen to a canonical
-            // int64 encoding, mirroring how BloomFilterExpr's TestScalar
-            // widens narrow integers before hashing, so the same value
-            // encodes identically regardless of the declared column width.
-            EncodeTupleElementInt64(static_cast<int64_t>(v), key);
-        }
-        return true;
-    };
+            return true;
+        };
+    } else {
+        // Growing-segment storage is contiguous and append-only
+        // (ThreadSafeValidData-backed), so chunk_data<T>()'s Span-based
+        // access works even for T == std::string here (the growing +
+        // non-mmap VARCHAR case selected in BuildColumnReader) -- unlike the
+        // sealed/chunked std::string_view case above, this is not routed
+        // through the view-based accessor.
+        return [this, field](int64_t row, std::string& key) -> bool {
+            auto [chunk_id, chunk_offset] = GetChunkIdAndOffset(field, row);
+            auto pw = segment_chunk_reader_.segment_->chunk_data<T>(
+                op_ctx_, field, chunk_id);
+            auto chunk = pw.get();
+            auto validity = chunk.validity();
+            if (validity && !validity[chunk_offset]) {
+                return false;
+            }
+            const T* base = chunk.data();
+            const T& v = base[chunk_offset];
+            if constexpr (std::is_same_v<T, bool>) {
+                EncodeTupleElementBool(v, key);
+            } else if constexpr (std::is_same_v<T, float> ||
+                                 std::is_same_v<T, double>) {
+                EncodeTupleElementDouble(static_cast<double>(v), key);
+            } else if constexpr (std::is_same_v<T, std::string>) {
+                EncodeTupleElementBytes(v.data(), v.size(), key);
+            } else {
+                // int8_t / int16_t / int32_t / int64_t: widen to a canonical
+                // int64 encoding, mirroring how BloomFilterExpr's TestScalar
+                // widens narrow integers before hashing, so the same value
+                // encodes identically regardless of the declared column
+                // width.
+                EncodeTupleElementInt64(static_cast<int64_t>(v), key);
+            }
+            return true;
+        };
+    }
 }
 
 PhyTupleTermFilterExpr::ColumnReader
