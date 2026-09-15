@@ -159,7 +159,7 @@ func TestSensitivePulsarWebAddressLogs(t *testing.T) {
 	// On 3.0 pulsar.webaddress is always derived from pulsar.address; the only
 	// formatter log is the pulsar.address parse failure, whose parser error
 	// would otherwise echo a credential-bearing URL.
-	const webAddress = "https://private-user:password-canary@private-broker.invalid/admin"
+	const webAddress = "https://private-user:password-canary@private-broker.invalid/admin" //nolint:gosec // G101: fake credential canary used to assert redaction
 	for _, test := range []struct {
 		name     string
 		address  string
