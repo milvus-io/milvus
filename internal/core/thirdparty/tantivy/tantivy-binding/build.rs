@@ -1,6 +1,10 @@
 use std::{env, path::Path, path::PathBuf};
 
 fn main() {
+    // tonic-build emits its own rerun rules; also track the Rust FFI surface
+    // so cbindgen regenerates the header when bindings are added or changed.
+    println!("cargo:rerun-if-changed=src");
+    println!("cargo:rerun-if-changed=cbindgen.toml");
     let crate_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
     let package_name = env::var("CARGO_PKG_NAME").unwrap();
     let output_file = PathBuf::from(&crate_dir)

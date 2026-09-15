@@ -121,6 +121,15 @@ struct RustResult {
   TantivyBindingErrorCode error_code;
 };
 
+/// Borrowed views owned by `handle`. Free exactly once with tantivy_free_bm25_batch.
+/// Each row is sorted (little-endian u32 hash, little-endian f32 term frequency).
+struct TantivyBM25Batch {
+  const uint8_t *data;
+  uint64_t data_size;
+  const uint64_t *offsets;
+  void *handle;
+};
+
 using SetBitsetFn = void(*)(void*, const uint32_t*, uintptr_t);
 
 using RegexMatchFn = bool(*)(void*, const uint8_t*, uintptr_t);
@@ -150,6 +159,17 @@ RustResult test_enum_with_array();
 RustResult test_enum_with_ptr();
 
 void free_test_ptr(void *ptr);
+
+/// Inputs are borrowed only for this call. The caller exclusively owns the analyzer.
+/// On failure no partial result is returned. Panics must not cross the C ABI.
+RustResult tantivy_tokenize_bm25(void *tokenizer,
+                                 const uint8_t *data,
+                                 uint64_t data_size,
+                                 const uint64_t *offsets,
+                                 uint64_t num_rows,
+                                 TantivyBM25Batch *output);
+
+void tantivy_free_bm25_batch(void *handle);
 
 void print_vector_of_strings(const char *const *ptr, uintptr_t len);
 

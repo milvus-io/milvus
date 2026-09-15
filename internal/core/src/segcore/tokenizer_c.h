@@ -51,6 +51,26 @@ create_token_stream(CTokenizer tokenizer,
                     uint32_t text_len,
                     CTokenStream* token_stream);
 
+// All buffers are owned by handle; offsets contains num_rows + 1 byte offsets.
+// Copy the rows before releasing handle with free_bm25_batch.
+typedef struct CBM25Batch {
+    const uint8_t* data;
+    uint64_t data_size;
+    const uint64_t* offsets;
+    void* handle;
+} CBM25Batch;
+
+CStatus
+batch_tokenize_bm25(CTokenizer tokenizer,
+                    const uint8_t* data,
+                    uint64_t data_size,
+                    const uint64_t* offsets,
+                    uint64_t num_rows,
+                    CBM25Batch* output);
+
+void
+free_bm25_batch(void* handle);
+
 #ifdef __cplusplus
 }
 #endif

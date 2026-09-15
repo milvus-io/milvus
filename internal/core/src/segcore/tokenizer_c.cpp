@@ -85,3 +85,28 @@ validate_tokenizer(const char* params, const char* extra_info) {
                                                       "unknown exception")};
     }
 }
+
+CStatus
+batch_tokenize_bm25(CTokenizer tokenizer,
+                    const uint8_t* data,
+                    uint64_t data_size,
+                    const uint64_t* offsets,
+                    uint64_t num_rows,
+                    CBM25Batch* output) {
+    try {
+        AssertInfo(output != nullptr, "null BM25 output");
+        *output = {};
+        AssertInfo(tokenizer != nullptr, "null BM25 tokenizer");
+        auto batch =
+            static_cast<milvus::tantivy::Tokenizer*>(tokenizer)->TokenizeBM25(
+                data, data_size, offsets, num_rows);
+        *output = {batch.data, batch.data_size, batch.offsets, batch.handle};
+        return milvus::SuccessCStatus();
+    }
+    CGO_CATCH_AND_RETURN_CSTATUS
+}
+
+void
+free_bm25_batch(void* handle) {
+    tantivy_free_bm25_batch(handle);
+}

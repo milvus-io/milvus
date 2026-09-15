@@ -32,6 +32,10 @@ message($ENV{PATH})
 
 # Compile tantivy binding using cargo
 # The OUTPUT must be the actual file produced, so ninja/make knows how to generate it
+file(GLOB_RECURSE TANTIVY_RUST_SOURCES CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/tantivy-binding/src/*")
+file(GLOB TANTIVY_WRAPPER_HEADERS CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/*.h")
 add_custom_command(
         OUTPUT ${LIB_FILE}
         COMMENT "Compiling tantivy binding"
@@ -41,6 +45,11 @@ add_custom_command(
                 "CARGO_TARGET_DIR=${CMAKE_CURRENT_BINARY_DIR}"
                 ${CARGO_CMD}
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tantivy-binding
+        DEPENDS ${TANTIVY_RUST_SOURCES}
+                tantivy-binding/Cargo.toml
+                tantivy-binding/Cargo.lock
+                tantivy-binding/build.rs
+                tantivy-binding/cbindgen.toml
         VERBATIM
 )
 
@@ -64,7 +73,8 @@ add_custom_command(
         COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/token-stream.h ${TANTIVY_INCLUDE_DIR}/
         COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/phrase_match.h ${TANTIVY_INCLUDE_DIR}/
         COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/time_recorder.h ${TANTIVY_INCLUDE_DIR}/
-        DEPENDS ${LIB_FILE}
+        DEPENDS ${LIB_FILE} ${TANTIVY_WRAPPER_HEADERS}
+                ${LIB_HEADER_FOLDER}/tantivy-binding.h
         VERBATIM
 )
 
