@@ -268,8 +268,8 @@ clone original user fields and overlay previously allocated AutoIDs by row
      (all collection shards for AutoID, or the fixed namespace channel)
   -> enqueue a new Strong Query with GuaranteeTimestamp = MvccTimestamp = 0
   -> collect actual nonzero readTS from each candidate write channel's successful response
-  -> normalize fields and validate row alignment
-  -> classify existing and missing rows, validate insert fields for missing rows
+  -> classify existing and missing rows
+  -> normalize fields, validate row alignment and insert fields for missing rows
   -> if an unconverted AutoID PK is missing: allocate
      its destination PK, record the row-to-ID mapping, update the working PK column
   -> select final write channels from this query's captured terms and read timestamps
@@ -286,6 +286,13 @@ lifecycle floor validation ensures a snapshot cannot precede the history covered
 by the current owner's index, even if the PChannel term did not change.
 
 ### Query and merge semantics
+
+`queryPreExecute` shares Strong retrieval, row classification, and Existing-row
+Delete preparation with Full AutoID Upsert. Only Partial collects the executed
+channel snapshots for CAS. Full requests only PKs and returns before
+merge or CAS preparation. Partial still queries and merges before
+`insertPreExecute` validates the complete payload, so sharing classification
+does not change omitted-field semantics, read consistency, or CAS retries.
 
 Proxy retains the existing merge implementation, including:
 
@@ -313,17 +320,17 @@ must not be interpreted as absence from every partition in the collection.
 
 Proxy keeps the original user fields immutable and stores allocated AutoIDs in
 a separate map keyed by the original request row offset. Initial preparation
-and CAS retries share the same entry point: clone the original fields, overlay
+and CAS retries share `prepareUpsert`: clone the original fields, overlay
 allocated IDs, generate function output, prepare CAS terms, query, and merge.
-`checkUpsertPrimaryFieldDataWithAutoIDs` centralizes PK validation, conversion,
+`checkUpsertPrimaryFieldData` centralizes PK validation, conversion,
 replacement, collision checking, and ID parsing. It reuses the existing
 primary-field generation and field-update helpers and publishes a replaced
 column only after all checks pass. The task owns allocation and retry state;
 the PK helper does not access the allocator or WAL. The PK payload type and row count are
 validated before allocating IDs. Primary keys are not supported as function
 inputs; allocating AutoIDs retains the existing function outputs.
-Field normalization and alignment validation precede row classification and
-allocation. Allocation replaces only the working PK column; it does not restore
+Field normalization and alignment validation follow row classification and
+precede allocation. Allocation replaces only the working PK column; it does not restore
 the original payload or discard normalized values.
 Each attempt executes one Strong query. Freshly allocated AutoIDs take insert
 semantics without another existence query. Before reading, Proxy captures terms
@@ -335,6 +342,10 @@ allocation. This relies on the normal AutoID allocator's uniqueness guarantee.
 AutoID and non-AutoID collections share row classification, required-field
 validation, and merge. Allocation consumes the missing-row offsets, and merge
 uses the same classification.
+Full AutoID Upsert shares `prepareUpsert`, classification, and the
+`allocateMissingAutoIDs` batch allocator, but does not restore Partial retry
+state, merge old fields, or prepare CAS proofs. Only Partial saves allocated
+IDs and request-order results for retries; its CAS protocol is unchanged.
 The original input is never overwritten by allocated IDs or merged values.
 After each successful allocation, Proxy saves the complete destination IDs in
 request order. Message packing continues to use merge order; `PostExecute`

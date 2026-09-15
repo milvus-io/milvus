@@ -2534,19 +2534,28 @@ func checkInputUtf8Compatiable(allFields []*schemapb.FieldSchema, insertMsg *msg
 	return nil
 }
 
-// checkUpsertPrimaryFieldDataWithAutoIDs validates the PK column and applies only
-// explicitly allocated AutoIDs. A nil allocation map preserves every PK. The
-// working column is replaced only after validation, collision checking, and
-// parsing succeed; allocation and retry state belong to the caller.
-func checkUpsertPrimaryFieldDataWithAutoIDs(
+// checkUpsertPrimaryFieldData validates and returns the PKs, applying only
+// caller-allocated AutoIDs. allocatedIDs maps zero-based row offsets in the
+// supplied field data to IDs; a nil or empty map leaves the input fields unchanged.
+// A PK column is required; non-PK fields are neither validated nor filled, so
+// partial patches are accepted. When IDs are supplied, the PK column is replaced
+// only after validation, collision checking, and parsing succeed. Allocation and
+// retry state remain the caller's responsibility.
+func checkUpsertPrimaryFieldData(
 	schema *schemaInfo,
 	fields []*schemapb.FieldData,
 	numRows uint64,
 	allocatedIDs map[int]int64,
 ) (*schemapb.IDs, error) {
+	if numRows == 0 {
+		return nil, merr.WrapErrParameterInvalid("invalid num_rows", fmt.Sprint(numRows), "num_rows should be greater than 0")
+	}
 	pkSchema, err := typeutil.GetPrimaryFieldSchema(schema.CollectionSchema)
 	if err != nil {
 		return nil, err
+	}
+	if pkSchema.GetNullable() {
+		return nil, merr.WrapErrParameterInvalidMsg("primary field not support null")
 	}
 	primaryField, err := typeutil.GetPrimaryFieldData(fields, pkSchema)
 	if err != nil {
@@ -2595,58 +2604,6 @@ func checkUpsertPrimaryFieldDataWithAutoIDs(
 				break
 			}
 		}
-	}
-	return ids, nil
-}
-
-func checkUpsertPrimaryFieldData(
-	ctx context.Context,
-	allFields []*schemapb.FieldSchema,
-	schema *schemapb.CollectionSchema,
-	insertMsg *msgstream.InsertMsg,
-) (*schemapb.IDs, error) {
-	log := mlog.With(mlog.String("collectionName", insertMsg.CollectionName))
-	rowNums := uint32(insertMsg.NRows())
-	// TODO(dragondriver): in fact, NumRows is not trustable, we should check all input fields
-	if insertMsg.NRows() <= 0 {
-		return nil, merr.WrapErrParameterInvalid("invalid num_rows", fmt.Sprint(rowNums), "num_rows should be greater than 0")
-	}
-
-	if err := checkFieldsDataBySchema(ctx, allFields, schema, insertMsg, false); err != nil {
-		return nil, err
-	}
-
-	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(schema)
-	if err != nil {
-		log.Error(ctx, "get primary field schema failed", mlog.FieldSchema(schema), mlog.Err(err))
-		return nil, err
-	}
-	if primaryFieldSchema.GetNullable() {
-		return nil, merr.WrapErrParameterInvalidMsg("primary field not support null")
-	}
-	// Upsert always requires the caller-supplied primary key. For an AutoID
-	// collection it is a lookup key; later classification decides whether the
-	// final Insert keeps it or uses an allocator-generated value.
-	var primaryFieldData *schemapb.FieldData
-
-	primaryFieldID := primaryFieldSchema.FieldID
-	primaryFieldName := primaryFieldSchema.Name
-	for _, field := range insertMsg.GetFieldsData() {
-		if field.FieldId == primaryFieldID || field.FieldName == primaryFieldName {
-			primaryFieldData = field
-			break
-		}
-	}
-	// must assign primary field data when upsert
-	if primaryFieldData == nil {
-		return nil, merr.WrapErrParameterInvalidMsg("must assign pk when upsert, primary field: %v", primaryFieldName)
-	}
-
-	// Parse the request field once and retain request order.
-	ids, err := parsePrimaryFieldData2IDs(primaryFieldData)
-	if err != nil {
-		log.Warn(ctx, "parse primary field data to IDs failed", mlog.Err(err))
-		return nil, err
 	}
 	return ids, nil
 }

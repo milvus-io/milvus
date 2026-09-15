@@ -88,7 +88,7 @@ func projectPartialUpdateCASError(err error, allowConflictRetry bool) error {
 // preparePartialUpdateRetryAttempt restores the original payload and rebuilds
 // terms, Strong query snapshots, and DML state for one retry.
 func (ut *upsertTask) preparePartialUpdateRetryAttempt(ctx context.Context) error {
-	if err := ut.preparePartialUpdate(ctx); err != nil {
+	if err := ut.prepareUpsert(ctx); err != nil {
 		return err
 	}
 	if err := ut.insertPreExecute(ctx); err != nil {
@@ -203,11 +203,7 @@ func (ut *upsertTask) packInsertMessage(ctx context.Context, ez *message.CipherC
 		mlog.Duration("get cache duration", getCacheDur),
 		mlog.Duration("get msgStream duration", getMsgStreamDur))
 
-	// Route inserts by finalized PKs, not lookup IDs: a missing AutoID row
-	// receives a generated PK that may hash to a different channel.
-	if ut.result.GetIDs() == nil {
-		return nil, merr.WrapErrServiceInternalMsg("upsert insert routing primary keys are unavailable")
-	}
+	// start to repack insert data
 	var msgs []message.MutableMessage
 	if ut.partitionKeys == nil {
 		msgs, err = repackInsertDataForStreamingService(ut.TraceCtx(), ut.GetMetaCache(), channelNames, ut.upsertMsg.InsertMsg, ut.result, ez, ut.schemaVersion, ut.partialUpdateCASGroups)

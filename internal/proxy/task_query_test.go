@@ -171,15 +171,13 @@ func TestQueryShardCollectsOnlySuccessfulSnapshots(t *testing.T) {
 	require.False(t, ok)
 }
 
-func TestQueryTaskPreExecuteUsesStandardVisibility(t *testing.T) {
+func TestQueryTaskPreExecuteUsesStrongVisibility(t *testing.T) {
 	const (
 		collectionID = int64(100)
 		partitionID  = int64(200)
 	)
 	beginTime := time.Unix(1_700_000_000, 0)
-	beginTS := tsoutil.ComposeTSByTime(beginTime)
 	queryUpdateTime := beginTime.Add(time.Second)
-	queryUpdateTS := tsoutil.ComposeTSByTime(queryUpdateTime)
 	schedulerTime := beginTime.Add(2 * time.Second)
 	schedulerTS := tsoutil.ComposeTSByTime(schedulerTime)
 	collectionTTL := time.Hour
@@ -194,10 +192,9 @@ func TestQueryTaskPreExecuteUsesStandardVisibility(t *testing.T) {
 		}},
 	})
 	collectionInfo := &collectionInfo{
-		CollID:          collectionID,
-		Schema:          schema,
-		UpdateTimestamp: queryUpdateTS,
-		CollectionTTL:   uint64(collectionTTL),
+		CollID:        collectionID,
+		Schema:        schema,
+		CollectionTTL: uint64(collectionTTL),
 	}
 	metaCache := &MetaCache{}
 	collectionIDMocker := mockey.Mock((*MetaCache).GetCollectionID).Return(collectionID, nil).Build()
@@ -211,34 +208,48 @@ func TestQueryTaskPreExecuteUsesStandardVisibility(t *testing.T) {
 	}, nil).Build()
 	defer partitionsMocker.UnPatch()
 
-	ctx := context.Background()
-	task := &queryTask{
-		baseTask:  baseTask{MetaCache: metaCache},
-		Condition: NewTaskCondition(ctx),
-		RetrieveRequest: &internalpb.RetrieveRequest{
-			Base: &commonpb.MsgBase{},
-		},
-		ctx: ctx,
-		request: &milvuspb.QueryRequest{
-			Base:               &commonpb.MsgBase{},
-			DbName:             "default",
-			CollectionName:     "test_collection",
-			Expr:               "id in [1]",
-			OutputFields:       []string{"id"},
-			ConsistencyLevel:   commonpb.ConsistencyLevel_Customized,
-			GuaranteeTimestamp: beginTS,
-		},
-	}
-	require.NoError(t, task.OnEnqueue())
-	task.SetTs(schedulerTS)
+	for _, tc := range []struct {
+		name          string
+		updateTime    time.Time
+		guaranteeTime time.Time
+	}{
+		{name: "query timestamp", updateTime: queryUpdateTime, guaranteeTime: schedulerTime},
+		{name: "newer schema", updateTime: schedulerTime.Add(time.Second), guaranteeTime: schedulerTime.Add(time.Second)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			collectionInfo.UpdateTimestamp = tsoutil.ComposeTSByTime(tc.updateTime)
+			ctx := context.Background()
+			task := &queryTask{
+				baseTask:  baseTask{MetaCache: metaCache},
+				Condition: NewTaskCondition(ctx),
+				RetrieveRequest: &internalpb.RetrieveRequest{
+					Base: &commonpb.MsgBase{},
+				},
+				ctx: ctx,
+				request: &milvuspb.QueryRequest{
+					Base:               &commonpb.MsgBase{},
+					DbName:             "default",
+					CollectionName:     "test_collection",
+					Expr:               "id in [1]",
+					OutputFields:       []string{"id"},
+					ConsistencyLevel:   commonpb.ConsistencyLevel_Strong,
+					GuaranteeTimestamp: 0,
+				},
+			}
+			require.NoError(t, task.OnEnqueue())
+			require.False(t, task.CanSkipAllocTimestamp())
+			task.SetTs(schedulerTS)
 
-	require.NoError(t, task.PreExecute(ctx))
-	require.Equal(t, queryUpdateTS, task.GetGuaranteeTimestamp())
-	// Standard Query retains its metadata wait fence and lets QueryNode choose
-	// the readable MVCC timestamp. TTL clocks follow normal Query preprocessing.
-	require.Zero(t, task.GetMvccTimestamp())
-	require.Equal(t, uint64(queryUpdateTime.UnixMilli()*1000), task.GetEntityTtlPhysicalTime())
-	require.Equal(t, tsoutil.ComposeTSByTime(schedulerTime.Add(-collectionTTL)), task.GetCollectionTtlTimestamps())
+			require.NoError(t, task.PreExecute(ctx))
+			require.Equal(t, commonpb.ConsistencyLevel_Strong, task.GetConsistencyLevel())
+			require.Equal(t, tsoutil.ComposeTSByTime(tc.guaranteeTime), task.GetGuaranteeTimestamp())
+			// Strong Query uses its own timestamp plus the metadata fence, leaving
+			// MVCC selection to QueryNode. TTL clocks follow normal preprocessing.
+			require.Zero(t, task.GetMvccTimestamp())
+			require.Equal(t, uint64(tc.guaranteeTime.UnixMilli()*1000), task.GetEntityTtlPhysicalTime())
+			require.Equal(t, tsoutil.ComposeTSByTime(schedulerTime.Add(-collectionTTL)), task.GetCollectionTtlTimestamps())
+		})
+	}
 }
 
 func TestQueryTask_all(t *testing.T) {

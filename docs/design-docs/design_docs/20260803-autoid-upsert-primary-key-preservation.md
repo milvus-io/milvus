@@ -72,7 +72,7 @@ stored row formats are unchanged.
 - Keep an existing entity's Delete and Insert in one VChannel transaction.
 - Preserve allocator-generated insert-on-not-found for Full AutoID Upsert.
 - Support Int64 and VarChar AutoID, partition-key mode, and namespace modes.
-- Fail before RowID allocation and WAL append when the standard Query used for
+- Fail before WAL append when the standard Query used for
   classification returns an error or deterministic validation fails.
 - Define the client, load-state, upgrade, and rollback boundaries introduced by
   the Full Upsert behavior change.
@@ -105,12 +105,12 @@ its business primary key:
   `P`, so Proxy must never copy it directly as a business PK. Full Upsert uses
   an independently allocator-derived `G`.
 
-For a missing row, Milvus derives `G` from the existing allocation for
-the new row version:
+For missing rows, Milvus allocates a batch of business PKs during preparation,
+independently of the later internal RowID allocation:
 
 ```text
-InternalRowID = common.AllocAutoID(globalAllocator)
-G             = EncodeAutoID(InternalRowID)
+AllocatedPKs = common.AllocAutoID(globalAllocator, len(missingRows))
+G            = EncodeAutoID(AllocatedPKs[missingRowOffset])
 ```
 
 Ordinary Insert uses the same global allocator, whose ranges do not overlap
@@ -149,37 +149,42 @@ wire request says `partial_update=false`. Only `autoID=true` with
 Partial behavior is unchanged. No configuration, collection metadata, RootCoord
 path, WAL marker, or readiness protocol is added.
 
-Once Full mode is selected and before classification, Proxy validates and
-retains all Full Upsert fields and request PKs. It rejects omitted, null,
-wrong-type, row-misaligned, or duplicate PKs and malformed field data. PK
-omission is malformed Upsert input; it is not the same as a supplied PK that is
-not visible to the classification Query.
+Before classification, Proxy validates the lookup PKs and rejects omitted, null,
+wrong-type, row-misaligned, or duplicate PKs. PK omission is malformed Upsert
+input; it is not the same as a supplied PK that is not visible to the Query.
+Complete-payload validation and nullable/default field completion remain in
+`insertPreExecute`, after preparation. A request with invalid non-PK data can
+therefore query and allocate IDs before validation rejects it; a Query failure
+can take precedence over that later validation error. No invalid payload is
+appended to WAL.
 
 ### 3.2 One PK-Only Retrieve for Full Upsert
 
-Full AutoID Upsert uses standard Query preprocessing and visibility:
+Full AutoID and Partial Upsert both use standard Strong Query preprocessing
+and visibility:
 
 ```text
-ConsistencyLevel                  = Customized
-Initial GuaranteeTimestamp        = Upsert.BeginTs()
+ConsistencyLevel                  = Strong
+Initial GuaranteeTimestamp        = 0
 Explicit MvccTimestamp             = unset
 Full-specific snapshot / TTL logic = none
 ```
 
-The Query waits at least until `Upsert.BeginTs()` and raises its guarantee for
-newer collection metadata through the existing Query path. QueryNode selects
-the readable MVCC timestamp after that wait, and TTL evaluation follows normal
-Query behavior. The guarantee is a minimum wait fence, not a fixed snapshot.
-Full Upsert does not promise one shared MVCC timestamp across VChannels or an
-existence decision frozen at request admission; concurrent writes and expiry
-before the Query executes may affect its result.
+Each Query obtains its own timestamp through normal Strong Query scheduling;
+it does not reuse `Upsert.BeginTs()`. Query preprocessing raises the guarantee
+for newer collection metadata and derives TTL clocks through the existing path.
+QueryNode can use the local WAL MVCC optimization for Strong reads and selects
+the actual readable snapshot after waiting. The guarantee is not a fixed
+snapshot. Full Upsert does not promise one shared MVCC timestamp across VChannels
+or an existence decision frozen at request admission; concurrent writes and
+expiry before the Query executes may affect its result.
 
 Only Partial Upsert collects the executed per-channel snapshots for its CAS
 proof. Neither path pins an explicit MVCC timestamp. Full Upsert adds no fields
 or special branches to `queryTask`.
 
-Proxy performs one logical internal Retrieve before allocating RowIDs or
-constructing DML messages:
+Proxy performs one logical internal Retrieve before finalizing business PKs and
+packing DML messages:
 
 - The Retrieve requests only the primary-key field. The existing helper must
   honor its `outputFields` argument instead of requesting `*`.
@@ -206,39 +211,60 @@ VChannels or add a feature-specific completeness protocol.
 
 Any load-state, concurrent-release, RPC, timeout, cancellation, schema,
 malformed-result, or decode error returned by the standard Query aborts the
-request with that typed error. No RowID is allocated and no WAL message is
-appended after such an error. Under the standard Query contract, a successful
+request with that typed error, before Full allocates business PKs or internal
+RowIDs. No WAL message is appended. Under the standard Query contract, a successful
 response represents the requested scope and is used to classify each row as
 Existing or NotFound. A successful response must contain the requested,
-correctly typed PK field even when it contains zero rows. An absent or malformed
-PK field is `merr.ErrDataIntegrity`, not an all-NotFound result.
+correctly typed PK field even when it contains zero rows. Both modes rely on the
+standard Query contract for PK type and lookup scope; Full does not add separate
+type, requested-subset, or duplicate-result checks. PK classification uses set
+membership and is unaffected by repeated result IDs. Errors from PK extraction,
+parsing, and membership helpers pass through unchanged, as in Partial Upsert,
+rather than being treated as NotFound.
 
-### 3.3 Full Upsert Row Plan
+### 3.3 Shared Query and Write Preparation
 
-After complete classification and deterministic validation, Proxy returns a
-request-indexed classification plan containing the request IDs, one existence
-bit per request row, and the Existing-row Delete IDs. The plan stays local to
-`insertPreExecute`.
-No new task fields are needed. Internal RowIDs remain in the task's existing
-allocation state.
-After allocation, Proxy copies the validated PK field and replaces only NotFound
-positions with generated IDs, leaving the lookup PKs and internal RowIDs
-unchanged. It derives `MutationResult.IDs` from that final field in request order.
-Full and Partial Update share the PK validation and allocated-ID rewrite helper;
-allocation and retry state remain in their respective callers. The helper rejects
-duplicate final PKs before replacing the working column.
+All Upserts enter `prepareUpsert` for function generation. Non-AutoID Full Upsert
+then returns without querying. Full AutoID and Partial share `queryPreExecute`
+for retrieval, classification, and Existing-row Delete preparation:
 
-Proxy allocates one internal RowID for every inserted row version. The final
-business PK is:
+- Full requests only PKs, retains its working insert fields in request order,
+  and returns the NotFound row offsets without merging old fields.
+- Partial restores original fields and previously allocated IDs and prepares
+  CAS terms before reading. After shared classification, it normalizes and
+  validates patch fields, allocates missing AutoIDs, selects destination CAS
+  proofs, and merges old fields. Omitted fields on existing rows retain their
+  old values; Full does not inherit them.
+
+Both modes use `allocateMissingAutoIDs` to batch-allocate business PKs for missing
+rows and apply them with `checkUpsertPrimaryFieldData`. Full does this immediately
+after classification returns to `prepareUpsert`; Partial does it before merging.
+Only Partial saves allocated IDs and request-order results for CAS retries.
+Full adds no retry state and never queries its freshly generated IDs again.
+The PK helper rejects duplicate final PKs before replacing the working column;
+both modes preserve its errors without Full-specific reclassification.
+
+`prepareUpsert` fills the Insert fields and explicit Delete subset together.
+`insertPreExecute` then retains its original internal RowID, timestamp, and
+success-index initialization block, validates the complete payload, and reads
+the finalized PK column without generating another business PK. Its validation
+still fills omitted nullable/default fields for Full. The final business PK is:
 
 ```text
-FinalPK[i] = RequestPK[i]                   if row i exists
-FinalPK[i] = EncodeAutoID(InternalRowID[i]) if row i is NotFound
+FinalPK[i] = RequestPK[i]             if row i exists
+FinalPK[i] = AllocatedBusinessPK[i]   if row i is NotFound
 ```
 
-The same `InternalRowID` allocation supplies `G`; no second allocator request is
-made. Request IDs remain lookup state. `MutationResult.IDs` supplies both the
-response IDs and the Insert routing IDs; its values and order must match the
+For `N` request rows and `M` missing rows, Full allocates `M` business PKs during
+preparation and `N` internal RowIDs later. When `M=0`, it skips the business-PK
+allocation. Compared with reusing RowIDs, this costs one additional allocator
+call and `M` IDs when rows are missing, but keeps PK preparation in one stage.
+The allocator caches ID ranges, so an extra call need not issue a remote RPC.
+Failed preparation or validation does not return allocated IDs to the pool.
+
+Original lookup PKs determine the Delete subset before any replacement.
+`MutationResult.IDs` supplies both the response IDs and the Insert routing IDs;
+its values and order must match the
 Insert payload's PK field and must not be changed during message packing. Delete
 IDs contain only the request IDs classified as Existing. A NotFound row's final
 PK is accepted based on its allocator provenance.
@@ -342,7 +368,7 @@ is a blind write. The new path must Retrieve before writing:
 
 | Workflow | Old Server | Updated Server |
 |---|---|---|
-| Full AutoID Upsert before required scope is loaded | Blind write and replace identity | Typed load-state error; no allocation or WAL append |
+| Full AutoID Upsert before required scope is loaded | Blind write and replace identity | Typed load-state error; no WAL append |
 | Full AutoID Upsert after required scope is fully loaded | Blind write and replace identity | Preserve Existing PKs; generate IDs for NotFound rows |
 | Partial Upsert | Existing Query/load/CAS behavior | Unchanged |
 
@@ -399,22 +425,24 @@ Partial Upsert CAS change.
 |---|---|
 | Full semantics | Existing PKs are preserved; NotFound rows are inserted with generated IDs; mixed batches and Int64/VarChar final IDs |
 | Mode | `field_ops` normalization selects the existing Partial path; only effective Full AutoID enters classification |
-| Input and Query failures | Invalid PK payloads, malformed Query results, and typed Query errors all fail before allocation |
+| Input and Query failures | Invalid PK payloads and Query failures stop before Full allocation; subsequent allocation/field-validation failures never append to WAL |
+| Allocation stages | Full uses one missing-PK batch followed by one internal RowID batch; all-existing skips PK allocation; Partial retry IDs remain stable |
 | Identity and routing | Allocator-owned `G`, controlled `G == P`, no Delete for NotFound, ordered result IDs, correct counts, and same-channel Existing-row routing |
-| Query visibility | Full Upsert leaves MVCC unpinned and uses standard Query metadata waits and TTL handling; Partial retains Strong reads and actual per-channel CAS snapshots |
+| Query visibility | Both modes use Strong reads with unpinned MVCC and standard Query metadata waits and TTL handling; only Partial collects actual per-channel CAS snapshots |
 | Entry points | MiniCluster covers generated insertion and identity-preserving updates; Go SDK covers row Insert versus Upsert PK handling; REST v1/v2 retain their existing contracts |
 | Regressions | Relevant Partial Upsert, non-AutoID Upsert, Insert, Import, Query, and replication tests pass unchanged |
 
-A real `queryTask.PreExecute` regression verifies that a newer collection
-update still raises the guarantee, MVCC remains unset for QueryNode to select,
-and TTL handling follows standard Query semantics. Request-construction tests
-verify that Full Upsert does not collect CAS snapshots, while Partial Upsert
-retains its Strong query and binds the executed per-channel snapshots.
+A real `queryTask.PreExecute` regression verifies that the guarantee follows
+the Strong Query's own timestamp or a newer collection update, MVCC remains
+unset for QueryNode to select, and TTL handling follows standard Query semantics.
+Request-construction tests verify that both modes use Strong without reusing
+the Upsert timestamp, while only Partial binds executed per-channel snapshots
+for CAS.
 
 The implementation is ready when this table passes and both required Design
-Review approvals are recorded. The additional PK-only Query is an explicit
-Full Upsert cost; performance measurement belongs to release validation and
-does not change the semantic acceptance criteria.
+Review approvals are recorded. The PK-only Query and extra missing-PK allocation
+are explicit Full Upsert costs; performance measurement belongs to release
+validation and does not change the semantic acceptance criteria.
 
 ## 7. Alternatives Considered
 
