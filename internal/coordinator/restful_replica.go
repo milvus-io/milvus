@@ -88,10 +88,13 @@ type LoadConfigComplianceResponse struct {
 // retain their existing semantics; this endpoint does not modify them.
 //
 // Both output modes execute the same checks and return the same global state
-// and reason. per_resource_group adds a sorted array (including when empty).
-// Each RG retains its first violation; global reasons take precedence. Metadata
-// read failures return HTTP 500. Observations and configuration refresh are
-// asynchronous; the report is not a cross-component atomic snapshot.
+// for the same observed configuration and runtime state. per_resource_group
+// adds a sorted array (including when empty). When multiple checks fail, the
+// reported reason may vary between requests or output modes without affecting
+// the Ready verdict. Each RG retains its first observed violation; global
+// reasons take precedence. Metadata read failures return HTTP 500. Observations
+// and configuration refresh are asynchronous; the report is not a
+// cross-component atomic snapshot.
 func (s *mixCoordImpl) HandleReplicaLoadConfigCompliance(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodGet {
 		writeJSONError(w, "Method not allowed, use GET", http.StatusMethodNotAllowed)
