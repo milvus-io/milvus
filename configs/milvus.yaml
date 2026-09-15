@@ -928,6 +928,18 @@ dataCoord:
       batchSize: 1000
       # Number of segments processed in parallel. Records belonging to one segment are committed sequentially under its manifest lock.
       concurrency: 16
+    manifestIndexRollback:
+      # Restore manifest index records to etcd and atomically remove manifest entries. Index files keep their current paths.
+      # This restart-scoped switch overrides writeSegmentIndexToManifest and forward backfill; new completions use etcd.
+      # Wait for milvus_datacoord_manifest_index_rollback_ready=1, then disable both forward switches before downgrading.
+      # The target version must support StorageV3 and the existing index artifact layouts. Unfinished copy tasks also block readiness.
+      enabled: false
+      # Seconds between scans. Nonpositive durations use 60 seconds.
+      interval: 60
+      # Maximum segments visited per scan; each visit restores at most maxEtcdTxnNum-1 indexes in one transaction.
+      batchSize: 1000
+      # Concurrent segments, clamped to [1, 256].
+      concurrency: 8
   enableGarbageCollection: true # Switch value to control if to enable garbage collection to clear the discarded data in MinIO or S3 service.
   gc:
     interval: 3600 # The interval at which data coord performs garbage collection, unit: second.

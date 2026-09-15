@@ -1567,6 +1567,16 @@ func TestManifestIndexBackfillParams(t *testing.T) {
 	assert.Equal(t, 1, params.DataCoordCfg.ManifestIndexBackfillConcurrency.GetAsInt())
 	params.Save(params.DataCoordCfg.ManifestIndexBackfillConcurrency.Key, "2147483648")
 	assert.Equal(t, math.MaxInt32, params.DataCoordCfg.ManifestIndexBackfillConcurrency.GetAsInt())
+	assert.False(t, params.DataCoordCfg.ManifestIndexRollbackEnabled.GetAsBool())
+	assert.Equal(t, 60, params.DataCoordCfg.ManifestIndexRollbackInterval.GetAsInt())
+	assert.Equal(t, 1000, params.DataCoordCfg.ManifestIndexRollbackBatchSize.GetAsInt())
+	assert.Equal(t, 8, params.DataCoordCfg.ManifestIndexRollbackConcurrency.GetAsInt())
+	params.Save(params.DataCoordCfg.ManifestIndexRollbackBatchSize.Key, "0")
+	assert.Equal(t, 1, params.DataCoordCfg.ManifestIndexRollbackBatchSize.GetAsInt())
+	params.Save(params.DataCoordCfg.ManifestIndexRollbackConcurrency.Key, "0")
+	assert.Equal(t, 1, params.DataCoordCfg.ManifestIndexRollbackConcurrency.GetAsInt())
+	params.Save(params.DataCoordCfg.ManifestIndexRollbackConcurrency.Key, "2147483648")
+	assert.Equal(t, 256, params.DataCoordCfg.ManifestIndexRollbackConcurrency.GetAsInt())
 }
 
 func TestSegmentIndexManifestLoadConcurrency(t *testing.T) {

@@ -24,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/txn"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -60,6 +61,12 @@ func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction
 				e.SegmentIndex.BuildID,
 			)
 			switch action.Type {
+			case metastore.ActionUpdate:
+				value, err := proto.Marshal(model.MarshalSegmentIndexModel(e.SegmentIndex))
+				if err != nil {
+					return merr.Wrap(err, "encode restored segment index")
+				}
+				b.Save(key, string(value))
 			case metastore.ActionDelete:
 				// Remove, not CommitRemove: an action set containing a segment
 				// index entry never takes the ordered fallback path (see
