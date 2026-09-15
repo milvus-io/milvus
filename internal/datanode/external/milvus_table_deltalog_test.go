@@ -49,6 +49,39 @@ type fakeMilvusTableDeltalogReader struct {
 	current  storage.Record
 }
 
+func (s *RefreshExternalCollectionTaskSuite) TestReadMilvusTableSourceFilesUsesResolvedPaths() {
+	ctx := context.Background()
+	storageConfig := &indexpb.StorageConfig{StorageType: "local"}
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID:   s.collectionID,
+		ExternalSource: "s3://minio/metadata/v1.json",
+		ExternalSpec:   `{"format":"milvus-table","extfs":{"endpoint_url":"http://minio"}}`,
+		StorageConfig:  storageConfig,
+	}
+	task := NewRefreshExternalCollectionTask(ctx, req)
+	paths := []string{
+		"s3://minio/minio/files/insert_log/1",
+		"s3://minio/minio/files/insert_log/2",
+	}
+
+	var gotPaths []string
+	patchRead := mockey.Mock(packed.ReadFileWithExternalSpec).
+		To(func(sc *indexpb.StorageConfig, filePath string, extfs packed.ExternalSpecContext) ([]byte, error) {
+			s.Same(storageConfig, sc)
+			s.Equal(req.GetCollectionID(), extfs.CollectionID)
+			s.Equal(req.GetExternalSource(), extfs.Source)
+			s.Equal(req.GetExternalSpec(), extfs.Spec)
+			gotPaths = append(gotPaths, filePath)
+			return []byte(filePath), nil
+		}).Build()
+	defer patchRead.UnPatch()
+
+	data, err := task.readMilvusTableSourceFiles(ctx, paths)
+	s.NoError(err)
+	s.Equal(paths, gotPaths)
+	s.Equal([][]byte{[]byte(paths[0]), []byte(paths[1])}, data)
+}
+
 func (r *fakeMilvusTableDeltalogReader) Next() (storage.Record, error) {
 	if r.current != nil {
 		r.current.Release()
@@ -471,21 +504,18 @@ func (s *RefreshExternalCollectionTaskSuite) TestCreateManifestForSegment_Milvus
 		},
 	}
 
-	metadataBytes, err := protojson.MarshalOptions{UseProtoNames: true}.Marshal(&datapb.SnapshotMetadata{
+	metadata := &datapb.SnapshotMetadata{
 		Collection: &datapb.CollectionDescription{Schema: sourceSchema},
-	})
-	s.Require().NoError(err)
-
-	mockReadMetadata := mockey.Mock(packed.ReadFileWithExternalSpec).
-		To(func(storageConfig *indexpb.StorageConfig, filePath string, extfs packed.ExternalSpecContext) ([]byte, error) {
+	}
+	mockReadMetadata := mockey.Mock(packed.ReadMilvusTableSnapshotMetadata).
+		To(func(source, spec string, config *indexpb.StorageConfig, extfs packed.ExternalSpecContext) (*datapb.SnapshotMetadata, error) {
+			s.Equal(metadataPath, source)
+			s.Equal(externalSpec, spec)
+			s.Same(storageConfig, config)
 			s.Equal(s.collectionID, extfs.CollectionID)
 			s.Equal(metadataPath, extfs.Source)
 			s.Equal(externalSpec, extfs.Spec)
-			if filePath != metadataPath {
-				s.Failf("unexpected external read", "path=%s", filePath)
-				return nil, fmt.Errorf("unexpected external read %s", filePath)
-			}
-			return metadataBytes, nil
+			return metadata, nil
 		}).Build()
 	defer mockReadMetadata.UnPatch()
 

@@ -16,7 +16,7 @@ require (
 	github.com/twpayne/go-geom v1.6.1
 	github.com/x448/float16 v0.8.4
 	golang.org/x/time v0.10.0
-	google.golang.org/grpc v1.82.1
+	google.golang.org/grpc v1.82.2
 	google.golang.org/protobuf v1.36.11
 )
 

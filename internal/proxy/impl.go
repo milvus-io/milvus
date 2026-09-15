@@ -5125,6 +5125,9 @@ func (node *Proxy) InvalidateCredentialCache(ctx context.Context, request *proxy
 	if priCache != nil {
 		priCache.RemoveCredential(username) // no need to return error, though credential may be not cached
 	}
+	if username == util.UserRoot && node.managementRootVerifier != nil {
+		node.managementRootVerifier.Forget()
+	}
 	mlog.Debug(ctx, "complete to invalidate credential cache")
 
 	return merr.Success(), nil
@@ -5148,7 +5151,12 @@ func (node *Proxy) UpdateCredentialCache(ctx context.Context, request *proxypb.U
 	if priCache != nil {
 		priCache.UpdateCredential(credInfo) // no need to return error, though credential may be not cached
 	}
-	mlog.Debug(context.TODO(), "complete to update credential cache")
+	if request.Username == util.UserRoot && node.managementRootVerifier != nil {
+		// The notification carries SHA256, not the bcrypt hash this verifier
+		// needs. Revoke the old credential and fetch the current hash on demand.
+		node.managementRootVerifier.Forget()
+	}
+	mlog.Debug(ctx, "complete to update credential cache")
 
 	return merr.Success(), nil
 }
@@ -7384,6 +7392,12 @@ func (node *Proxy) ComputePhraseMatchSlop(ctx context.Context, req *milvuspb.Com
 // =============================================================================
 
 func checkTelemetryAdmin(ctx context.Context, method string) error {
+	if username, ok := http.AuthenticatedAdminFromContext(ctx); ok {
+		if username == util.UserRoot {
+			return nil
+		}
+		return merr.WrapErrPrivilegeNotPermitted("telemetry %s requires root user", method)
+	}
 	if !Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
 		return nil
 	}

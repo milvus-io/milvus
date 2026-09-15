@@ -145,14 +145,18 @@ The endpoint continues to:
 - treat a present value, including an empty string, as SET, and an omitted or
   null value as deletion of the etcd override;
 - reject empty keys and duplicate keys with identical caller spellings;
-- apply the existing `mq.type` substring check and `IsImmutable` restriction;
+- apply the existing `mq.type` substring check to the storage-normalized key,
+  reject `common.security.adminAuthEnabled` under every equivalent spelling,
+  and retain the `IsImmutable` restriction;
 - pass the original keys to `AlterConfigsInEtcd`, which applies the existing
   storage formatter and executes updates/deletes in one etcd transaction;
 - leave collisions between different caller spellings to the existing etcd
   transaction handling, preserving its success or error response.
 
 Sensitive scalars, sensitive group members, unregistered keys, and security
-settings remain writable unless an existing restriction applies. Deleting an
+settings remain writable unless an existing restriction applies. The management
+authentication flag retains the write protection introduced by #52580; it is
+configured outside this endpoint. Deleting an
 override restores the lower-priority source or removes the value if none exists.
 `Immutable` retains both its existing API restriction and its startup
 create-if-absent persistence behavior; sensitivity does not imply immutability.
@@ -260,8 +264,11 @@ source refreshes, runtime overlays, key declarations, and policy registration;
 without evidence that projection time is material, that tradeoff is not
 justified.
 
-Key resolution for caller input uses the uncached formatter so arbitrary HTTP
-keys cannot grow the process-global formatting cache without bound.
+Projection key resolution uses the uncached formatter. Storage and management
+write guards retain the formatter cache bounds from #52580: at most 4096 entries,
+with both input and normalized keys limited to 1024 bytes and copied into owned
+storage. Both paths share the same normalization and preserve the `knowhere.`
+exception.
 
 ## 10. Verification
 

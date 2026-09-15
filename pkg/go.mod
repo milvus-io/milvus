@@ -38,9 +38,9 @@ require (
 	github.com/twpayne/go-geom v1.6.1
 	github.com/x448/float16 v0.8.4
 	github.com/zilliztech/woodpecker v0.1.42
-	go.etcd.io/etcd/api/v3 v3.5.23
-	go.etcd.io/etcd/client/v3 v3.5.23
-	go.etcd.io/etcd/server/v3 v3.5.23
+	go.etcd.io/etcd/api/v3 v3.5.33
+	go.etcd.io/etcd/client/v3 v3.5.33
+	go.etcd.io/etcd/server/v3 v3.5.33
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.59.0
 	go.opentelemetry.io/otel v1.43.0
 	go.opentelemetry.io/otel/exporters/jaeger v1.13.0
@@ -60,7 +60,7 @@ require (
 	golang.org/x/sys v0.47.0
 	golang.org/x/time v0.10.0
 	google.golang.org/api v0.224.0
-	google.golang.org/grpc v1.82.1
+	google.golang.org/grpc v1.82.2
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gopkg.in/yaml.v2 v2.4.0
@@ -220,10 +220,10 @@ require (
 	github.com/xiang90/probing v0.0.0-20190116061207-43a291ad63a2 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	go.etcd.io/bbolt v1.3.12 // indirect
-	go.etcd.io/etcd/client/pkg/v3 v3.5.23 // indirect
-	go.etcd.io/etcd/client/v2 v2.305.23 // indirect
-	go.etcd.io/etcd/pkg/v3 v3.5.23 // indirect
-	go.etcd.io/etcd/raft/v3 v3.5.23 // indirect
+	go.etcd.io/etcd/client/pkg/v3 v3.5.33 // indirect
+	go.etcd.io/etcd/client/v2 v2.305.33 // indirect
+	go.etcd.io/etcd/pkg/v3 v3.5.33 // indirect
+	go.etcd.io/etcd/raft/v3 v3.5.33 // indirect
 	go.mongodb.org/mongo-driver v1.17.7 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/detectors/gcp v1.43.0 // indirect

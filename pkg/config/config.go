@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/cockroachdb/errors"
 	"github.com/spf13/cast"
@@ -94,7 +95,10 @@ func Init(opts ...Option) (*Manager, error) {
 	return sourceManager, nil
 }
 
-var formattedKeys = typeutil.NewConcurrentMap[string, string]()
+var (
+	formattedKeys   = typeutil.NewConcurrentMap[string, string]()
+	formattedKeysMu sync.Mutex
+)
 
 // Four spellings of one configuration key travel through this package, and
 // picking the wrong one is how a check ends up guarding a name nothing uses:
@@ -119,27 +123,69 @@ func lowerKey(key string) string {
 
 var keyFormatReplacer = strings.NewReplacer("/", "", "_", "", ".", "")
 
+// FormatKey is the identity a config key is stored and looked up under.
+// Callers that guard a specific key must compare against this rather than a
+// hand-rolled normalization: separators are stripped, not translated, so
+// "a.b.c", "a_b_c", "a/b/c" and "abc" are all the same key.
+func FormatKey(key string) string { return formatKey(key) }
+
+// maxFormattedKeys bounds the normalization memo. The cache exists for the
+// fixed config vocabulary, which is a few hundred keys and is resolved on every
+// ParamItem read -- but /management/config/get and /management/config/alter
+// normalize caller-supplied keys, and both answer anonymously while
+// common.security.adminAuthEnabled is off. An unbounded memo therefore lets
+// anyone who can reach the metrics port grow it without limit. Past the bound
+// the result is still correct, it is just recomputed. Bound both stored strings
+// to 1 KiB as well: a count limit alone still permits huge request keys to pin
+// gigabytes, and Unicode lowercasing can grow a normalized string.
+const (
+	maxFormattedKeys     = 4096
+	maxFormattedKeyBytes = 1024
+)
+
 func formatKey(key string) string {
 	if strings.HasPrefix(key, NotFormatPrefix) {
 		return key
+	}
+	if len(key) > maxFormattedKeyBytes {
+		return normalizeKey(key)
 	}
 	cached, ok := formattedKeys.Get(key)
 	if ok {
 		return cached
 	}
-	result := keyFormatReplacer.Replace(strings.ToLower(key))
-	formattedKeys.Insert(key, result)
+	result := normalizeKey(key)
+	if len(result) > maxFormattedKeyBytes {
+		return result
+	}
+	formattedKeysMu.Lock()
+	defer formattedKeysMu.Unlock()
+	// A concurrent miss may have populated this key while this goroutine waited.
+	if cached, ok := formattedKeys.Get(key); ok {
+		return cached
+	}
+	if formattedKeys.Len() < maxFormattedKeys {
+		// A short query key can be a substring of a much larger HTTP request.
+		// Own the cached bytes so the byte limits also bound retained memory.
+		formattedKeys.Insert(strings.Clone(key), strings.Clone(result))
+	}
 	return result
 }
 
-// formatKeyUncached is formatKey without the memo. Use it for keys that arrive
-// from outside the process: formattedKeys is global and unbounded, so caching
-// arbitrary caller input would let a request grow it without limit.
+// normalizeKey is the normalization itself, split out so the memoized and
+// unmemoized paths cannot drift.
+func normalizeKey(key string) string {
+	return keyFormatReplacer.Replace(strings.ToLower(key))
+}
+
+// formatKeyUncached is formatKey without the memo. Use it for caller-supplied
+// projection keys so diagnostic reads do not populate the bounded cache used
+// by runtime lookups.
 func formatKeyUncached(key string) string {
 	if strings.HasPrefix(key, NotFormatPrefix) {
 		return key
 	}
-	return keyFormatReplacer.Replace(strings.ToLower(key))
+	return normalizeKey(key)
 }
 
 // strippedKey collapses a key with no NotFormatPrefix exemption at all.
@@ -151,15 +197,7 @@ func formatKeyUncached(key string) string {
 // spelling too, or an environment variable named KNOWHERE.SOMETHING is invisible
 // to it.
 func strippedKey(key string) string {
-	return keyFormatReplacer.Replace(strings.ToLower(key))
-}
-
-// FormatKey formats a config key for storage/retrieval in the config sources
-// (lowercased, with '/', '_' and '.' stripped). It is the exported form of
-// formatKey for callers that must address config keys directly, e.g. writing
-// to the config center from outside pkg/config.
-func FormatKey(key string) string {
-	return formatKey(key)
+	return normalizeKey(key)
 }
 
 func flattenAndMergeMap(prefix string, m map[string]interface{}, result map[string]string) {

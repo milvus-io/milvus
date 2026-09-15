@@ -68,6 +68,8 @@ func configWriteTestBase(t *testing.T) *paramtable.BaseTable {
 	require.NoError(t, base.Manager().AddSource(source))
 	patch := mockey.Mock(paramtable.GetBaseTable).Return(base).Build()
 	t.Cleanup(func() { patch.UnPatch() })
+	paramsPatch := mockey.Mock(paramtable.Get).Return(params).Build()
+	t.Cleanup(func() { paramsPatch.UnPatch() })
 	return base
 }
 
@@ -190,13 +192,19 @@ func TestHandleAlterConfigLegacyValidation(t *testing.T) {
 		{"mq.type", "mqtype configuration cannot be modified"},
 		{"MQ/TYPE", "mqtype configuration cannot be modified"},
 		{"custom.mqtype.option", "mqtype configuration cannot be modified"},
-		{"MQ_TYPE", "immutable configuration cannot be modified"},
+		{"MQ_TYPE", "mqtype configuration cannot be modified"},
+		{"common.security.adminAuthEnabled", "cannot be modified through this endpoint; set it in the configuration file"},
+		{"common_security_adminAuthEnabled", "cannot be modified through this endpoint; set it in the configuration file"},
+		{"common/security/adminAuthEnabled", "cannot be modified through this endpoint; set it in the configuration file"},
+		{"COMMON.SECURITY.ADMINAUTHENABLED", "cannot be modified through this endpoint; set it in the configuration file"},
+		{"commonsecurityadminauthenabled", "cannot be modified through this endpoint; set it in the configuration file"},
 		{"kafka.producer.message.max.bytes", "immutable configuration cannot be modified"},
 		{"test.alter.immutable", "immutable configuration cannot be modified"},
 		{"TEST_ALTER_IMMUTABLE", "immutable configuration cannot be modified"},
 	} {
 		for _, operation := range []string{"set", "delete"} {
 			t.Run(blocked.key+"/"+operation, func(t *testing.T) {
+				sink := mlog.CaptureGlobalLogs(t, &mlog.Config{Level: "debug"})
 				entry := map[string]interface{}{"key": blocked.key}
 				if operation == "set" {
 					entry["value"] = "write-rejected-canary"
@@ -208,6 +216,8 @@ func TestHandleAlterConfigLegacyValidation(t *testing.T) {
 				require.Contains(t, response.Body.String(), blocked.message)
 				_, _, err := manager.GetConfig(key)
 				require.ErrorIs(t, err, pkgconfig.ErrKeyNotFound, "validation must precede the entire transaction")
+				require.NotContains(t, sink.String(), blocked.key)
+				require.NotContains(t, sink.String(), "canary")
 			})
 		}
 	}

@@ -375,6 +375,7 @@ type commonConfig struct {
 	DiskWriteRateLimiterLowPriorityRatio    ParamItem `refreshable:"true"`
 
 	AuthorizationEnabled  ParamItem `refreshable:"false"`
+	AdminAuthEnabled      ParamItem `refreshable:"true"`
 	SuperUsers            ParamItem `refreshable:"true"`
 	DefaultRootPassword   ParamItem `refreshable:"false"`
 	RootShouldBindRole    ParamItem `refreshable:"true"`
@@ -445,6 +446,8 @@ type commonConfig struct {
 
 	// Local RPC enabled for milvus internal communication when mix or standalone mode.
 	LocalRPCEnabled ParamItem `refreshable:"false"`
+
+	InterfaceZeroCopyEnabled ParamItem `refreshable:"true"`
 
 	PreferIPv6LocalIP ParamItem `refreshable:"false"`
 
@@ -1114,6 +1117,37 @@ For example, if the rate limit is 100KB/s, and the high priority ratio is 2, the
 	}
 	p.AuthorizationEnabled.Init(base.mgr)
 
+	p.AdminAuthEnabled = ParamItem{
+		Key:          "common.security.adminAuthEnabled",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc: `Whether the metrics port (default 9091) requires root HTTP Basic authentication
+for /management/*, /log/level, /eventlog, /debug/pprof/* and the web console.
+Probes and scrapes remain open; /api/v1/health retains any existing data-plane auth.
+Legacy /api/v1 data operations keep valid-user/API-key auth when
+common.security.authorizationEnabled is true, and otherwise require root.
+Requests without Origin or Fetch Metadata must include X-Milvus-Admin-Request: true.
+Use HTTPS for the browser console and preserve Fetch Metadata at the reverse proxy.
+Root hashes are cached for 10 seconds; a failed refresh may reuse the last hash for
+up to 10 minutes after its last fetch, including a password rotated during an outage.
+A Proxy receiving a root credential notification revokes that cached hash and any
+in-flight verification results; it returns 503 if the current hash cannot be fetched.
+Other nodes and Proxies that have not received the notification retain the TTL policy.
+Update graceful-shutdown and profiling clients before enabling. The eventlog gRPC
+stream becomes loopback-only. This port remains plaintext: use a trusted network
+or TLS proxy and rotate root with UpdateCredential, not defaultRootPassword.
+Not settable through /management/config/alter. Watch milvus_admin_auth_total.`,
+		Export: true,
+		// Deliberately NOT Immutable. ProcessImmutableConfigs persists an
+		// Immutable key's value into etcd on first startup, and the etcd source
+		// outranks file and env, so the first boot of any cluster would pin
+		// "false" there and an operator later setting adminAuthEnabled: true in
+		// yaml would get no gate and no warning. /management/config/alter
+		// instead rejects this key unconditionally, including while the gate
+		// is off, so an anonymous request cannot persist a disabling value.
+	}
+	p.AdminAuthEnabled.Init(base.mgr)
+
 	p.SuperUsers = ParamItem{
 		Key:     "common.security.superUsers",
 		Version: "2.2.1",
@@ -1634,6 +1668,13 @@ The default matches the milvus-storage default.`,
 		Export:       true,
 	}
 	p.LocalRPCEnabled.Init(base.mgr)
+
+	p.InterfaceZeroCopyEnabled = ParamItem{
+		Key:          "common.interface.zeroCopy",
+		Version:      "2.6.14",
+		DefaultValue: "false",
+	}
+	p.InterfaceZeroCopyEnabled.Init(base.mgr)
 
 	p.PreferIPv6LocalIP = ParamItem{
 		Key:          "common.preferIPv6",
@@ -6103,6 +6144,9 @@ type dataCoordConfig struct {
 	StorageVersionCompactionRateLimitInterval         ParamItem `refreshable:"true"`
 	StorageVersionCompactionSessionVersionRequirement ParamItem `refreshable:"true"`
 
+	MaxFragmentsPerGroup ParamItem `refreshable:"true"`
+	TwoTierCompaction    ParamItem `refreshable:"true"`
+
 	ChannelCheckpointMaxLag ParamItem `refreshable:"true"`
 	SyncSegmentsInterval    ParamItem `refreshable:"false"`
 
@@ -6541,6 +6585,7 @@ mix is prioritized by level: mix compactions first, then L0 compactions, then cl
 		Key:          "dataCoord.compaction.min.segment",
 		Version:      "2.0.0",
 		DefaultValue: "3",
+		Doc:          "Deprecated: unused since two-tier compaction. Replaced by fill-rate gate.",
 	}
 	p.MinSegmentToMerge.Init(base.mgr)
 
@@ -6548,7 +6593,7 @@ mix is prioritized by level: mix compactions first, then L0 compactions, then cl
 		Key:          "dataCoord.segment.smallProportion",
 		Version:      "2.0.0",
 		DefaultValue: "0.5",
-		Doc:          "The segment is considered as \"small segment\" when its # of rows is smaller than",
+		Doc:          "Deprecated: unused since two-tier compaction. Replaced by middleSize (idealSize/4) × fillRate.",
 		Export:       true,
 	}
 	p.SegmentSmallProportion.Init(base.mgr)
@@ -6557,9 +6602,8 @@ mix is prioritized by level: mix compactions first, then L0 compactions, then cl
 		Key:          "dataCoord.segment.compactableProportion",
 		Version:      "2.2.1",
 		DefaultValue: "0.85",
-		Doc: `(smallProportion * segment max # of rows).
-A compaction will happen on small segments if the segment after compaction will have`,
-		Export: true,
+		Doc:          "Deprecated: fill rate is now a hardcoded constant (0.85) in the two-tier compaction algorithm.",
+		Export:       true,
 	}
 	p.SegmentCompactableProportion.Init(base.mgr)
 
@@ -6567,10 +6611,8 @@ A compaction will happen on small segments if the segment after compaction will 
 		Key:          "dataCoord.segment.expansionRate",
 		Version:      "2.2.1",
 		DefaultValue: "1.25",
-		Doc: `over (compactableProportion * segment max # of rows) rows.
-MUST BE GREATER THAN OR EQUAL TO <smallProportion>!!!
-During compaction, the size of segment # of rows is able to exceed segment max # of rows by (expansionRate-1) * 100%. `,
-		Export: true,
+		Doc:          "Deprecated: no longer used by the mix compaction planner. Still read by v2 trigger and import paths.",
+		Export:       true,
 	}
 	p.SegmentExpansionRate.Init(base.mgr)
 
@@ -6744,6 +6786,24 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       false,
 	}
 	p.StorageVersionCompactionSessionVersionRequirement.Init(base.mgr)
+
+	p.MaxFragmentsPerGroup = ParamItem{
+		Key:          "dataCoord.compaction.maxFragmentsPerGroup",
+		Version:      "2.6.0",
+		DefaultValue: "8",
+		Doc:          "maximum number of fragment segments allowed per channel-partition group before fragment-tier compaction triggers",
+		Export:       true,
+	}
+	p.MaxFragmentsPerGroup.Init(base.mgr)
+
+	p.TwoTierCompaction = ParamItem{
+		Key:          "dataCoord.compaction.twoTierCompaction",
+		Version:      "2.6.0",
+		DefaultValue: "false",
+		Doc:          "whether to use the two-tier (full + fragment) compaction algorithm instead of the legacy algorithm",
+		Export:       false,
+	}
+	p.TwoTierCompaction.Init(base.mgr)
 
 	p.GlobalCompactionInterval = ParamItem{
 		Key:          "dataCoord.compaction.global.interval",
