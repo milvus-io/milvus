@@ -6,21 +6,35 @@ use tantivy::tokenizer::{TextAnalyzer, TextAnalyzerBuilder};
 
 use super::{
     CharGroupTokenizer, GrpcTokenizer, IcuTokenizer, JiebaTokenizer, LangIdentTokenizer,
-    LinderaTokenizer, ThaiTokenizer,
+    LinderaTokenizer, StandardTokenizer, ThaiTokenizer,
 };
 
 use crate::error::{Result, TantivyBindingError};
 
 pub fn standard_builder() -> TextAnalyzerBuilder {
-    TextAnalyzer::builder(SimpleTokenizer::default()).dynamic()
+    TextAnalyzer::builder(StandardTokenizer::default()).dynamic()
+}
+
+pub fn standard_builder_with_params(
+    params: Option<&json::Map<String, json::Value>>,
+) -> Result<TextAnalyzerBuilder> {
+    let tokenizer = match params {
+        Some(params) => StandardTokenizer::from_json(params)?,
+        None => StandardTokenizer::default(),
+    };
+    Ok(TextAnalyzer::builder(tokenizer).dynamic())
 }
 
 pub fn whitespace_builder() -> TextAnalyzerBuilder {
     TextAnalyzer::builder(WhitespaceTokenizer::default()).dynamic()
 }
 
-pub fn icu_builder() -> TextAnalyzerBuilder {
-    TextAnalyzer::builder(IcuTokenizer::new()).dynamic()
+pub fn icu_builder(params: Option<&json::Map<String, json::Value>>) -> Result<TextAnalyzerBuilder> {
+    let tokenizer = match params {
+        Some(params) => IcuTokenizer::from_json(params)?,
+        None => IcuTokenizer::new(),
+    };
+    Ok(TextAnalyzer::builder(tokenizer).dynamic())
 }
 
 pub fn thai_builder() -> TextAnalyzerBuilder {
@@ -123,12 +137,12 @@ pub fn get_builder_with_tokenizer(
     }
 
     match name {
-        "standard" => Ok(standard_builder()),
+        "standard" => standard_builder_with_params(params_map),
         "whitespace" => Ok(whitespace_builder()),
         "jieba" => jieba_builder(params_map, helper),
         "lindera" => lindera_builder(params_map, helper),
         "char_group" => char_group_builder(params_map),
-        "icu" => Ok(icu_builder()),
+        "icu" => icu_builder(params_map),
         "thai" => Ok(thai_builder()),
         "language_identifier" => lang_ident_builder(params_map, helper, fc),
         "grpc" => grpc_builder(params_map),
