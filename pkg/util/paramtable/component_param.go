@@ -22,6 +22,7 @@ import (
 	"math"
 	"os"
 	"path"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -90,10 +91,11 @@ type ComponentParam struct {
 	once      sync.Once
 	baseTable *BaseTable
 
-	// versionGates drives the version-gated config items (e.g. write-before
-	// function materialization). It is created and started by the MixCoord
-	// role after the role has been set; see StartVersionGateSwitcher.
-	versionGates *confirmator
+	// versionGateItems is populated after all component configs are initialized,
+	// so declaring VersionGateSwitcher on a ParamItem is sufficient to register
+	// it with the cluster version confirmator.
+	versionGateItems []*ParamItem
+	versionGates     *confirmator
 
 	CommonCfg       commonConfig
 	QuotaConfig     quotaConfig
@@ -200,27 +202,40 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.StreamingNodeGrpcClientCfg.Init("streamingNode", bt)
 
 	p.IntegrationTestCfg.init(bt)
+	p.versionGateItems = collectVersionGateItems(p)
 }
 
-// versionGateItems returns every version-gated config item of the param table.
-// Gate registration follows paramtable initialization: a single confirmator
-// (a paramtable-level capability) drives all of them together. Registration
-// order is the flip order; proxy.splitChunk must come after
-// streaming.splitChunkSN, whose flipped value it depends on.
-func (p *ComponentParam) versionGateItems() []*ParamItem {
-	return []*ParamItem{
-		&p.FunctionCfg.EnableWriteBeforeMaterialization,
-		&p.StreamingCfg.SplitChunkSN,
-		// proxy.splitChunk flips to "false" only after the SN gate has flipped
-		// "true" in the config center: its DependsOn check enforces the WAL
-		// payload chunking design doc §7 etcd write ordering as a state check
-		// instead of a time assumption. The following delay is a propagation
-		// buffer, not a distributed acknowledgement that every StreamingNode
-		// has observed the dependency. An operator's explicit value on the
-		// dependency (e.g. the splitChunkSN=false escape hatch) keeps blocking
-		// the proxy flip forever.
-		&p.ProxyCfg.SplitChunkProxy,
+// collectVersionGateItems discovers every initialized ParamItem carrying a
+// VersionGateSwitcher. This keeps gate registration declarative: adding a gate
+// to any component config cannot be forgotten in a separate manual list.
+func collectVersionGateItems(p *ComponentParam) []*ParamItem {
+	paramItemType := reflect.TypeOf(ParamItem{})
+	items := make([]*ParamItem, 0)
+
+	var collect func(reflect.Value)
+	collect = func(value reflect.Value) {
+		valueType := value.Type()
+		for i := 0; i < value.NumField(); i++ {
+			fieldType := valueType.Field(i)
+			if fieldType.PkgPath != "" { // unexported implementation state
+				continue
+			}
+			field := value.Field(i)
+			if field.Type() == paramItemType {
+				item := field.Addr().Interface().(*ParamItem)
+				if item.VersionGateSwitcher != nil {
+					items = append(items, item)
+				}
+				continue
+			}
+			if field.Kind() == reflect.Struct {
+				collect(field)
+			}
+		}
 	}
+
+	collect(reflect.ValueOf(p).Elem())
+	return items
 }
 
 // startVersionGateSwitcherOnce guards the one-shot global version-gate
@@ -252,7 +267,7 @@ func (p *ComponentParam) startVersionGates() {
 		return
 	}
 	if p.EtcdCfg.UseEmbedEtcd.GetAsBool() {
-		for _, item := range p.versionGateItems() {
+		for _, item := range p.versionGateItems {
 			if item == nil || item.VersionGateSwitcher == nil {
 				continue
 			}
@@ -283,7 +298,7 @@ func (p *ComponentParam) startVersionGates() {
 		return
 	}
 	vg, err := recoverConfirmator(p.baseTable.etcdClient,
-		p.EtcdCfg.MetaRootPath.GetValue(), p.EtcdCfg.RootPath.GetValue(), p.versionGateItems())
+		p.EtcdCfg.MetaRootPath.GetValue(), p.EtcdCfg.RootPath.GetValue(), p.versionGateItems)
 	if err != nil {
 		mlog.Warn(context.TODO(), "recover version gate confirmator failed", mlog.Err(err))
 		return
@@ -2643,7 +2658,7 @@ func (p *proxyConfig) init(base *BaseTable) {
 		DefaultValue: "auto",
 		Doc: `Whether Proxy keeps the legacy row-based size packing before sending messages to StreamingNode.
 auto: keep the legacy packing (the gate's pre-switch value "true") until the cluster confirms version >= 3.1.0, then switch to "false" automatically once streaming.splitChunkSN is confirmed "true" in the config center (dependency-checked flip, so SN chunking is committed before proxy stops packing). false: send one logical message per channel/partition, relying on StreamingNode WAL chunking for oversized payloads. true: force legacy packing (bypasses the gate).`,
-		Export: true,
+		Export: false,
 		VersionGateSwitcher: &VersionGateSwitcher{
 			EnableAutoSwitchValue: "auto",
 			PreSwitchValue:        "true", // safe bridge state (proxy=true, SN=true) while gated
@@ -8848,7 +8863,7 @@ func (p *streamingConfig) init(base *BaseTable) {
 		Doc: `Whether StreamingNode splits oversized logical messages into physical WAL records.
 auto: switched on automatically once the whole cluster has confirmed version >= 3.1.0 and the SwitchDelay stability window has elapsed; before that the write path keeps the legacy single-record format. false: always keep the legacy single-record path (escape hatch). true: force enable and bypass the version gate (use with caution).
 Dependency: proxy.splitChunk flips to "false" automatically only after this switch is confirmed "true" in the config center (confirmator DependsOn check); explicitly setting this switch to "false" keeps blocking the proxy flip.`,
-		Export: true,
+		Export: false,
 		VersionGateSwitcher: &VersionGateSwitcher{
 			EnableAutoSwitchValue: "auto",
 			PreSwitchValue:        "false", // before the gate is activated the write path keeps the legacy single-record format

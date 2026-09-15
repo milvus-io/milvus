@@ -228,27 +228,28 @@ func TestConfirmator_MultipleGatesIndependent(t *testing.T) {
 func TestConfirmator_DependencyOrdersFlip(t *testing.T) {
 	// The WAL payload chunking pair: streaming.splitChunkSN flips to "true"
 	// first; proxy.splitChunk (which declares DependsOn on it) flips to
-	// "false" only after the dependency holds in the config center.
+	// "false" only after the dependency holds in the config center. Register
+	// the dependent gate first to prove correctness does not rely on list order.
 	cli, _ := setupEmbedEtcd(t)
 	metaRoot, configRoot := testRoots(t)
 	putAllUpSessionsAt(t, cli, metaRoot, "3.1.0")
 
 	c := newTestConfirmator(t, cli, metaRoot, configRoot)
+	require.NoError(t, c.registerGate("proxy.splitChunk", &VersionGateSwitcher{
+		EnableAutoSwitchValue: "auto",
+		PreSwitchValue:        "true",
+		GateVersion:           "3.1.0",
+		TargetValue:           "false",
+		SwitchDelay:           50 * time.Millisecond,
+		DependsOn:             "streaming.splitChunkSN",
+		DependsOnValue:        "true",
+	}))
 	require.NoError(t, c.registerGate("streaming.splitChunkSN", &VersionGateSwitcher{
 		EnableAutoSwitchValue: "auto",
 		PreSwitchValue:        "false",
 		GateVersion:           "3.1.0",
 		TargetValue:           "true",
 		SwitchDelay:           50 * time.Millisecond,
-	}))
-	require.NoError(t, c.registerGate("proxy.splitChunk", &VersionGateSwitcher{
-		EnableAutoSwitchValue: "auto",
-		PreSwitchValue:        "true",
-		GateVersion:           "3.1.0",
-		TargetValue:           "false",
-		SwitchDelay:           80 * time.Millisecond,
-		DependsOn:             "streaming.splitChunkSN",
-		DependsOnValue:        "true",
 	}))
 	require.NoError(t, c.start(context.Background()))
 	defer c.close()
@@ -294,31 +295,32 @@ func TestStartVersionGatesSkipRemote(t *testing.T) {
 	assert.Nil(t, p.versionGates)
 }
 
-func TestVersionGateItems_SplitChunkWiring(t *testing.T) {
-	// The WAL payload chunking capability is wired into the confirmator as an
-	// ordered pair: streaming.splitChunkSN auto-flips to "true" at 3.1, and
-	// proxy.splitChunk (registered AFTER it) auto-flips to "false" only once
-	// the SN gate's "true" is confirmed in the config center (DependsOn check),
-	// enforcing the design doc §7 etcd write ordering as a state check.
-	// Registration order is the flip order; per-node observation is deliberately
-	// outside the scope of the gate.
+func TestVersionGateItems_AutoDiscovery(t *testing.T) {
+	// Declaring VersionGateSwitcher on a ParamItem is sufficient for discovery;
+	// no manually maintained registration list or registration order is needed.
+	// DependsOn enforces the config-center write ordering independently.
 	p := &ComponentParam{}
 	p.Init(NewBaseTable(SkipRemote(true)))
 
-	items := p.versionGateItems()
+	items := p.versionGateItems
 	var sn, proxy *ParamItem
-	snIdx, proxyIdx := -1, -1
-	for i, item := range items {
+	keys := make([]string, 0, len(items))
+	for _, item := range items {
+		keys = append(keys, item.Key)
 		switch item.Key {
 		case "streaming.splitChunkSN":
-			sn, snIdx = item, i
+			sn = item
 		case "proxy.splitChunk":
-			proxy, proxyIdx = item, i
+			proxy = item
 		}
 	}
+	assert.ElementsMatch(t, []string{
+		"function.enableWriteBeforeMaterialization",
+		"proxy.splitChunk",
+		"streaming.splitChunkSN",
+	}, keys)
 	require.NotNil(t, sn)
-	require.NotNil(t, proxy, "proxy.splitChunk must be registered for the dependency-checked flip")
-	assert.Less(t, snIdx, proxyIdx, "proxy.splitChunk must flip after streaming.splitChunkSN")
+	require.NotNil(t, proxy)
 	require.NotNil(t, sn.VersionGateSwitcher)
 	assert.Equal(t, "auto", sn.VersionGateSwitcher.EnableAutoSwitchValue)
 	assert.Equal(t, "false", sn.VersionGateSwitcher.PreSwitchValue)

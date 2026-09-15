@@ -92,7 +92,8 @@ requires the `_ci`/`_ct` pair to be valid.
 
 ### 2.2 Write path
 
-Two live-refreshable, version-gated switches control the write path:
+Two live-refreshable, internal version-gated switches control the write path.
+They are not exported to the shipped `configs/milvus.yaml`:
 
 - `proxy.splitChunk` defaults to `auto`, whose pre-switch value is `true`.
   While true, Proxy retains the legacy row-based size packing path; while false,
@@ -348,12 +349,13 @@ and StreamingCoord assignment metadata remain unchanged.
 
 This is an additive WAL property encoding (`_ci`/`_ct`) with no protobuf schema
 change. New StreamingNodes can read old complete records and new chunk records;
-old StreamingNodes cannot interpret chunk records. New configs
-(`proxy.splitChunk`, `streaming.splitChunkSN`,
-`woodpecker.maxMessageSize`, and `pulsar.messageReserveSize`) use safe shipped
-defaults. The two split switches default to `auto`: before the 3.1 gate they
-resolve to the safe initial values `true` and `false`, respectively. Numeric
-Pulsar, Kafka, and Woodpecker message-size values below
+old StreamingNodes cannot interpret chunk records. The internal
+`proxy.splitChunk` and `streaming.splitChunkSN` switches are not exported to the
+shipped configuration; their `ParamItem` defaults are `auto`, which resolves to
+the safe initial values `true` and `false`, respectively, before the 3.1 gate.
+The exported `woodpecker.maxMessageSize` and `pulsar.messageReserveSize`
+configurations retain their safe shipped defaults. Numeric Pulsar, Kafka, and
+Woodpecker message-size values below
 256 KiB are clamped to 256 KiB; parse errors use the backend default. A reserve
 that is too small or does not fit under the active limit falls back rather than
 producing a budget with no envelope headroom (§2.1).
@@ -435,6 +437,8 @@ that requires a separate drain/watermark protocol.
   allocations, seals an over-target segment immediately after recovery, and
   recovers a dropped capacity notification through the periodic scan.
 - `pkg/util/paramtable/{component_param,param_item_version_gate,version_gate}_test.go`
-  verifies the `auto` pre-switch values, the 3.1 gates, the dependency schema,
-  strict config-center flip ordering, and blocking while the dependency is
-  absent or differs from `true`.
+  verifies automatic gate discovery at `ComponentParam` initialization, the
+  internal/non-exported split switches, the `auto` pre-switch values, the 3.1
+  gates, the dependency schema, strict config-center flip ordering independent
+  of registration order, and blocking while the dependency is absent or
+  differs from `true`.

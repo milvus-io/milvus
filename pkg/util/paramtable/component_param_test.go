@@ -592,6 +592,7 @@ func TestComponentParam(t *testing.T) {
 		// value "true" (legacy packing = safe bridge state), then flips to
 		// "false" once the SN gate has flipped "true" in the config center.
 		assert.Equal(t, "auto", Params.SplitChunkProxy.DefaultValue)
+		assert.False(t, Params.SplitChunkProxy.Export)
 		assert.NotNil(t, Params.SplitChunkProxy.VersionGateSwitcher)
 		assert.Equal(t, "true", Params.SplitChunkProxy.VersionGateSwitcher.PreSwitchValue)
 		assert.Equal(t, "false", Params.SplitChunkProxy.VersionGateSwitcher.TargetValue)
@@ -1237,6 +1238,7 @@ func TestComponentParam(t *testing.T) {
 		// Default "auto": before the 3.1 version gate is satisfied the effective
 		// value is the pre-switch "false" (legacy single-record path).
 		assert.Equal(t, "auto", params.StreamingCfg.SplitChunkSN.DefaultValue)
+		assert.False(t, params.StreamingCfg.SplitChunkSN.Export)
 		assert.NotNil(t, params.StreamingCfg.SplitChunkSN.VersionGateSwitcher)
 		assert.Equal(t, "false", params.StreamingCfg.SplitChunkSN.VersionGateSwitcher.PreSwitchValue)
 		assert.Equal(t, "true", params.StreamingCfg.SplitChunkSN.VersionGateSwitcher.TargetValue)
