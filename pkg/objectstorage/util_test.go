@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/base64"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,9 +12,44 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"cloud.google.com/go/storage"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/api/googleapi"
 )
+
+func TestIsGcsNotExist(t *testing.T) {
+	notFound := &googleapi.Error{Code: http.StatusNotFound}
+	// cloud.google.com/go/storage >= v1.51 formats not-found errors this way
+	// (see formatObjectErr / formatBucketError).
+	libBucketNotExist := fmt.Errorf("%w: %w", storage.ErrBucketNotExist, notFound)
+	libObjectNotExist := fmt.Errorf("%w: %w", storage.ErrObjectNotExist, notFound)
+
+	tests := []struct {
+		name         string
+		err          error
+		bucketExpect bool
+		objectExpect bool
+	}{
+		{"nil", nil, false, false},
+		{"unrelated", errors.New("boom"), false, false},
+		{"bare googleapi 404", notFound, false, false},
+		{"bare bucket sentinel", storage.ErrBucketNotExist, true, false},
+		{"bare object sentinel", storage.ErrObjectNotExist, false, true},
+		{"multi-wrapped bucket sentinel", libBucketNotExist, true, false},
+		{"multi-wrapped object sentinel", libObjectNotExist, false, true},
+		{"cockroach-wrapped multi-wrapped bucket", errors.Wrap(libBucketNotExist, "attrs"), true, false},
+		{"cockroach-wrapped multi-wrapped object", errors.Wrap(libObjectNotExist, "attrs"), false, true},
+		{"nested multi-wrapped object", fmt.Errorf("%w; %w", errors.New("other"), libObjectNotExist), false, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.bucketExpect, IsGcsBucketNotExist(tt.err))
+			assert.Equal(t, tt.objectExpect, IsGcsObjectNotExist(tt.err))
+		})
+	}
+}
 
 func TestParseTLSMinVersion(t *testing.T) {
 	tests := []struct {
