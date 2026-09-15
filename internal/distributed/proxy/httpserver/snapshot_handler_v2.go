@@ -175,7 +175,7 @@ func (h *HandlersV2) unpinSnapshotData(ctx context.Context, c *gin.Context, anyR
 	pinID, err := strconv.ParseInt(httpReq.PinID, 10, 64)
 	if err != nil || pinID <= 0 {
 		paramErr := merr.WrapErrParameterInvalidMsg("pinId must be a positive decimal int64, got %q", httpReq.PinID)
-		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(paramErr), HTTPReturnMessage: paramErr.Error()})
+		HTTPAbortReturn(c, projectedStatus(paramErr), gin.H{HTTPReturnCode: merr.Code(paramErr), HTTPReturnMessage: paramErr.Error()})
 		return nil, paramErr
 	}
 	req := &milvuspb.UnpinSnapshotDataRequest{

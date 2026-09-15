@@ -315,3 +315,68 @@ func TestFileResourceHandlerV2ChecksQuota(t *testing.T) {
 	assert.Equal(t, fileResourceLimiterCheck{rateType: internalpb.RateType_DDLCollection, n: 1}, limiter.checks[1])
 	assert.Zero(t, limiter.checks[2].n)
 }
+
+func TestFileResourceHandlerV2ProjectsLimiterOutcomes(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "true")
+	paramtable.Get().Save(paramtable.Get().HTTPCfg.StandardErrorStatus.Key, "true")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+	defer paramtable.Get().Reset(paramtable.Get().HTTPCfg.StandardErrorStatus.Key)
+
+	t.Run("pre-execution rejection", func(t *testing.T) {
+		limiter := &rejectingFileResourceLimiter{t: t}
+		mockProxy := mocks.NewMockProxy(t)
+		mockProxy.EXPECT().GetRateLimiter().Return(limiter, nil).Once()
+		server := initHTTPServerV2(proxyComponentWithMetaCache{
+			ProxyComponent: mockProxy,
+			metaCache:      proxy.InitEmptyMetaCacheForTest(),
+		}, false)
+
+		req := httptest.NewRequest(http.MethodPost, versionalV2(FileResourceCategory, AddAction), bytes.NewBufferString(`{"name":"synonyms","path":"synonyms.txt"}`))
+		resp := httptest.NewRecorder()
+		server.ServeHTTP(resp, req)
+
+		assert.Equal(t, http.StatusTooManyRequests, resp.Code)
+		body := &ReturnErrMsg{}
+		require.NoError(t, json.Unmarshal(resp.Body.Bytes(), body))
+		assert.Equal(t, merr.Code(merr.ErrHTTPRateLimit), body.Code)
+	})
+
+	t.Run("infrastructure cancellation", func(t *testing.T) {
+		mockProxy := mocks.NewMockProxy(t)
+		mockProxy.EXPECT().GetRateLimiter().Return(nil, context.Canceled).Once()
+		server := initHTTPServerV2(proxyComponentWithMetaCache{
+			ProxyComponent: mockProxy,
+			metaCache:      proxy.InitEmptyMetaCacheForTest(),
+		}, false)
+
+		requestCtx, cancel := context.WithCancel(context.Background())
+		cancel()
+		req := httptest.NewRequest(http.MethodPost, versionalV2(FileResourceCategory, AddAction), bytes.NewBufferString(`{"name":"synonyms","path":"synonyms.txt"}`)).WithContext(requestCtx)
+		resp := httptest.NewRecorder()
+		server.ServeHTTP(resp, req)
+
+		assert.Equal(t, statusClientClosedRequest, resp.Code)
+		body := &ReturnErrMsg{}
+		require.NoError(t, json.Unmarshal(resp.Body.Bytes(), body))
+		assert.Equal(t, merr.CanceledCode, body.Code)
+	})
+
+	t.Run("input-marked infrastructure error", func(t *testing.T) {
+		mockProxy := mocks.NewMockProxy(t)
+		mockProxy.EXPECT().GetRateLimiter().Return(nil, merr.WrapErrParameterInvalidMsg("nil rate limiter")).Once()
+		server := initHTTPServerV2(proxyComponentWithMetaCache{
+			ProxyComponent: mockProxy,
+			metaCache:      proxy.InitEmptyMetaCacheForTest(),
+		}, false)
+
+		req := httptest.NewRequest(http.MethodPost, versionalV2(FileResourceCategory, AddAction), bytes.NewBufferString(`{"name":"synonyms","path":"synonyms.txt"}`))
+		resp := httptest.NewRecorder()
+		server.ServeHTTP(resp, req)
+
+		assert.Equal(t, http.StatusInternalServerError, resp.Code)
+		body := &ReturnErrMsg{}
+		require.NoError(t, json.Unmarshal(resp.Body.Bytes(), body))
+		assert.Equal(t, merr.Code(merr.ErrParameterInvalid), body.Code)
+	})
+}

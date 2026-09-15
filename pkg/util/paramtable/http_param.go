@@ -26,6 +26,7 @@ type httpConfig struct {
 	NativeJSONResponse    ParamItem `refreshable:"true"`
 	LegacyArrayResponse   ParamItem `refreshable:"true"`
 	EnablePprof           ParamItem `refreshable:"false"`
+	StandardErrorStatus   ParamItem `refreshable:"true"`
 	RequestTimeoutMs      ParamItem `refreshable:"true"`
 	DQLAdmissionEnabled   ParamItem `refreshable:"true"`
 	ReadHeaderTimeout     ParamItem `refreshable:"false"`
@@ -141,6 +142,23 @@ string wherever one appears, including inside either kind of array.`,
 		Export:       true,
 	}
 	p.EnablePprof.Init(base.mgr)
+
+	p.StandardErrorStatus = ParamItem{
+		Key:          "proxy.http.standardErrorStatus",
+		DefaultValue: "false",
+		Version:      "3.0.2",
+		Doc: `high-level restful api, project business errors to standard HTTP statuses instead of always returning
+200 with the error only in the body (v2 endpoints only; the body keeps the same code/message envelope either way).
+Mapping: explicit input 400, explicit authentication/authorization 401/403, HTTP-layer pre-execution rejection 429,
+proven client cancellation 499, incomplete request upload timeout 408, and every other error 500. The projection uses
+only facts proven at the HTTP boundary; downstream limit, retryable, timeout, and unknown errors all remain 500. A
+status does not prevent gateways from retrying, so mutation routes still require gateway retry exclusions or
+end-to-end idempotency when duplicate execution must be impossible.
+Off by default; enabling flips access-log method_status from Failed to HttpError<code>.`,
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.StandardErrorStatus.Init(base.mgr)
 
 	p.RequestTimeoutMs = ParamItem{
 		Key:          "proxy.http.requestTimeoutMs",

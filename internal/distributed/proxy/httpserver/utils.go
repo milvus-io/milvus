@@ -4467,36 +4467,51 @@ func formatInt64(intArray []int64) []string {
 	return stringArray
 }
 
-func CheckLimiter(ctx context.Context, req interface{}, pxy types.ProxyComponent) (any, error) {
+// CheckLimiter returns limited=true only when the HTTP-layer limiter made an
+// explicit pre-execution rejection. Errors from acquiring or preparing the
+// limiter are infrastructure failures and return limited=false.
+func CheckLimiter(ctx context.Context, req interface{}, pxy types.ProxyComponent) (limited bool, err error) {
 	if !paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.GetAsBool() {
-		return nil, nil
+		return false, nil
 	}
 	// apply limiter for http/http2 server
 	limiter, err := pxy.GetRateLimiter()
 	if err != nil {
 		mlog.Error(ctx, "Get proxy rate limiter for httpV1/V2 server failed", mlog.Err(err))
-		return nil, err
+		// GetRateLimiter historically reports an uninitialized limiter with a
+		// parameter-invalid sentinel, but at this boundary it is infrastructure,
+		// never a client input error.
+		return false, merr.WrapErrAsSysError(err)
 	}
 
 	request, ok := req.(proto.Message)
 	if !ok {
-		return nil, merr.WrapErrParameterInvalidMsg("wrong req format when check limiter")
+		return false, merr.WrapErrAsSysError(merr.WrapErrParameterInvalidMsg("wrong req format when check limiter"))
 	}
 
 	metaCache := getProxyMetaCache(pxy)
 	dbID, collectionIDToPartIDs, rt, n, err := proxy.GetRequestInfo(ctx, metaCache(), request)
 	if err != nil {
-		return nil, err
+		// A caller lookup failure (input-classified at the proxy meta boundary)
+		// cannot be a limit rejection — proceed and let the handler surface the
+		// real error, mirroring the gRPC rate_limit_interceptor. Anything else
+		// (meta cache not ready, transient fetch failures) must not fail open
+		// into unmetered traffic: hand it back as the server error it is.
+		if merr.GetErrorType(err) == merr.InputError {
+			mlog.RatedWarn(ctx, 1, "httpV1/V2 server fail to resolve request for limiter, proceed without rate check", mlog.Err(err))
+			return false, nil
+		}
+		return false, err
 	}
 	err = limiter.Check(dbID, collectionIDToPartIDs, rt, n)
 	nodeID := strconv.FormatInt(paramtable.GetNodeID(), 10)
 	metrics.ProxyRateLimitReqCount.WithLabelValues(nodeID, rt.String(), metrics.TotalLabel).Inc()
 	if err != nil {
 		metrics.ProxyRateLimitReqCount.WithLabelValues(nodeID, rt.String(), metrics.FailLabel).Inc()
-		return proxy.GetFailedResponse(req, err), err
+		return true, err
 	}
 	metrics.ProxyRateLimitReqCount.WithLabelValues(nodeID, rt.String(), metrics.SuccessLabel).Inc()
-	return nil, nil
+	return false, nil
 }
 
 func convertConsistencyLevel(reqConsistencyLevel string) (commonpb.ConsistencyLevel, bool, error) {
@@ -5609,7 +5624,14 @@ func IdempotencyKeyHandlerFunc(c *gin.Context) {
 	// unchecked key would ride along on every coordinator RPC of any v1 or v2
 	// route -- see ValidateIdempotencyKey for what that costs.
 	if err := interceptor.ValidateIdempotencyKey(key); err != nil {
-		HTTPAbortReturn(c, http.StatusOK, gin.H{
+		status := http.StatusOK
+		// This middleware is registered on the whole HTTP engine, before the v1
+		// and v2 groups diverge. Apply the opt-in projection only to v2 so v1 and
+		// the default disabled mode retain the legacy 200 envelope.
+		if strings.HasPrefix(c.FullPath(), "/v2/vectordb/") {
+			status = projectedStatus(err)
+		}
+		HTTPAbortReturn(c, status, gin.H{
 			HTTPReturnCode:    merr.Code(err),
 			HTTPReturnMessage: err.Error(),
 		})
