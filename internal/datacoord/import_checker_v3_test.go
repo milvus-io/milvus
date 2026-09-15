@@ -93,24 +93,29 @@ func TestCalculateV3TaskSlots(t *testing.T) {
 	const mib = int64(1024 * 1024)
 
 	// The model's fixed overhead is the real parquet read stream (64MiB) and
-	// packed writer buffer (32MiB); with R=16MiB and F=128MiB the single
-	// bucket working set is 64+64+2*128+32 = 416MiB.
+	// packed writer buffer (32MiB), the pipeline is 6R (96MiB), and the
+	// resident set carries the GC factor plus the per-fragment structural
+	// overhead; with R=16MiB, F=128MiB and a 15-field temporary schema the
+	// single-bucket working set is 96+96+1.5*(128+~0)+128 ~= 512MiB.
 	mem := reshardmem.Model{ReadBuffer: 16 * mib, FragmentTarget: 128 * mib}
-	require.Equal(t, int64(3), calculateReshardTaskSlot(mem, 160*mib, 1, 16))
-	// With the parquet read buffer charged and one prefetched batch running
-	// ahead of the routing side, a 340 MiB per-slot limit still fits the
-	// 416 MiB working set in two slots.
-	require.Equal(t, int64(2), calculateReshardTaskSlot(mem, 340*mib, 1, 16))
+	require.Equal(t, int64(4), calculateReshardTaskSlot(mem, 160*mib, 1, 16, 15))
+	// A 340 MiB per-slot limit still fits the ~512 MiB working set in two
+	// slots.
+	require.Equal(t, int64(2), calculateReshardTaskSlot(mem, 340*mib, 1, 16, 15))
 	// Full in-flight coverage: each bucket up to the cap adds one
-	// fragmentTarget, so the DataNode's static ceiling covers every bucket
-	// (800/160=5 and ceil(2336/160)=15 slots).
-	require.Equal(t, int64(5), calculateReshardTaskSlot(mem, 160*mib, 4, 16))
-	require.Equal(t, int64(15), calculateReshardTaskSlot(mem, 160*mib, 16, 16))
-	// Beyond the cap the demand flattens; the excess in-flight data spills.
-	require.Equal(t, int64(15), calculateReshardTaskSlot(mem, 160*mib, 128, 16))
+	// GC-scaled fragmentTarget, so the DataNode's resident ceiling covers
+	// every bucket (ceil(1088.6/160)=7 and ceil(3400.7/160)=22 slots).
+	require.Equal(t, int64(7), calculateReshardTaskSlot(mem, 160*mib, 4, 16, 15))
+	require.Equal(t, int64(22), calculateReshardTaskSlot(mem, 160*mib, 16, 16, 15))
+	// Beyond the cap the resident demand flattens (the excess in-flight data
+	// spills), but the structural term keeps growing with the bucket count:
+	// 128 buckets land on the same 22 slots, while 2048 buckets shred the
+	// live set enough to charge 29.
+	require.Equal(t, int64(22), calculateReshardTaskSlot(mem, 160*mib, 128, 16, 15))
+	require.Equal(t, int64(29), calculateReshardTaskSlot(mem, 160*mib, 2048, 16, 15))
 	// Degenerate inputs clamp to the single-bucket base estimate.
-	require.Equal(t, int64(3), calculateReshardTaskSlot(mem, 160*mib, 8, 0))
-	require.Equal(t, int64(3), calculateReshardTaskSlot(mem, 160*mib, 0, 16))
+	require.Equal(t, int64(4), calculateReshardTaskSlot(mem, 160*mib, 8, 0, 15))
+	require.Equal(t, int64(4), calculateReshardTaskSlot(mem, 160*mib, 0, 16, 15))
 	require.Equal(t, int64(4), calculateV3ImportTaskSlot(16*mib, 32*mib, 160*mib, 16))
 	require.Equal(t, int64(1), calculateV3Slots(1, 160*mib))
 	require.Equal(t, int64(2), calculateV3Slots(160*mib+1, 160*mib))
@@ -229,7 +234,9 @@ func TestCreateReshardTasksKeepsExistingAndAddsMissingSources(t *testing.T) {
 	importMeta.EXPECT().GetTaskByJob(mock.Anything, mock.Anything, mock.Anything).Return([]ImportTask{existing}).Once()
 	importMeta.EXPECT().AddTask(mock.Anything, mock.Anything).Run(func(_ context.Context, added ImportTask) {
 		p := added.(*reshardTask).task.Load()
-		require.Equal(t, int64(3), p.GetSlot())
+		// One bucket, two temp-schema fields: 96+96+1.5*(128+~0)+128 ~= 512MiB
+		// of working set at the 160MiB default per-slot limit.
+		require.Equal(t, int64(4), p.GetSlot())
 		require.Equal(t, []int64{2}, p.GetSourceIds())
 	}).Return(nil).Once()
 	importMeta.EXPECT().UpdateJob(mock.Anything, int64(1), mock.Anything).Return(nil).Once()

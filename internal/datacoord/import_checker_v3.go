@@ -649,14 +649,15 @@ func calculateV3Slots(workingSet, memoryPerSlot int64) int64 {
 
 // calculateReshardTaskSlot converts the shared reshard memory model
 // (importutilv2/reshardmem -- the single source of truth also used by the
-// DataNode runtime) into slots. The charge is a CEILING, not a reservation:
-// the DataNode spills resident data once it exceeds slot x memoryLimitPerSlot,
-// and its dynamic free-memory checkpoint spills below that ceiling whenever
-// the real process memory is tighter than the per-task budgets assumed. No
-// churn/GC multiplier is applied on top; that headroom is still being
-// measured.
-func calculateReshardTaskSlot(mem reshardmem.Model, memoryPerSlot, buckets, bucketCap int64) int64 {
-	return calculateV3Slots(mem.WorkingSet(buckets, bucketCap), memoryPerSlot)
+// DataNode runtime) into slots. The charge covers the GC-scaled resident set
+// including the structural overhead of shredded fragments (nFields is the
+// temporary schema's field count, the same schema the DataNode accounts
+// with), the prepare pipeline and one sort copy. The DataNode's per-bucket
+// tail cap bounds the resident accounting at min(buckets, cap) x F, and its
+// dynamic free-memory checkpoint spills below that ceiling whenever the real
+// process memory is tighter than the per-task budgets assumed.
+func calculateReshardTaskSlot(mem reshardmem.Model, memoryPerSlot, buckets, bucketCap, nFields int64) int64 {
+	return calculateV3Slots(mem.WorkingSet(buckets, bucketCap, nFields), memoryPerSlot)
 }
 
 func calculateV3ImportTaskSlot(readBuffer, writerBuffer, memoryPerSlot int64, fanIn int) int64 {
@@ -741,6 +742,7 @@ func (c *importCheckerV3) createReshardTask(job ImportJob, taskID int64, sources
 	}, Params.DataCoordCfg.ImportMemoryLimitPerSlot.GetAsInt64(),
 		int64(len(job.GetVchannels())*len(job.GetPartitionIDs())),
 		Params.DataCoordCfg.ReshardResidentBucketCap.GetAsInt64(),
+		int64(len(typeutil.GetAllFieldSchemas(buildImportV3TempSchema(job.GetSchema(), importutilv2.IsBackup(job.GetOptions()))))),
 	)
 	task := newReshardTask(&datapb.ReshardTask{JobId: job.GetJobID(), TaskId: taskID, CollectionId: job.GetCollectionID(), State: datapb.ImportTaskStateV2_Pending, RunId: 1, NodeId: NullNodeID, Slot: slot, SourceIds: sourceIDs}, c.importMeta, c.meta, c.alloc)
 	return c.importMeta.AddTask(c.ctx, task)
