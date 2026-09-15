@@ -30,6 +30,7 @@
 #include "common/Exception.h"
 #include "common/ArrayOffsets.h"
 #include "common/OpContext.h"
+#include "common/Vector.h"
 #include "segcore/SegmentInterface.h"
 
 namespace milvus::exec {
@@ -344,6 +345,20 @@ class QueryContext : public Context {
         return all_rows_visible_;
     }
 
+    // ---- shared-filter hybrid search ----
+
+    // Bitset produced by a previously executed shared filter. Read-only for
+    // every consumer: it is shared unmodified across all branches.
+    void
+    set_precomputed_bitset(RowVectorPtr bitset) {
+        precomputed_bitset_ = std::move(bitset);
+    }
+
+    const RowVectorPtr&
+    get_precomputed_bitset() const {
+        return precomputed_bitset_;
+    }
+
  private:
     folly::Executor* executor_;
     //folly::Executor::KeepAlive<> executor_keepalive_;
@@ -381,6 +396,10 @@ class QueryContext : public Context {
     // no deletes, no TTL). VectorSearchNode checks this to pass empty
     // BitsetView to Knowhere (IDSelectorAll fast path).
     bool all_rows_visible_{false};
+
+    // Bitset handed in by a prior shared-filter execution. Null for an
+    // ordinary search.
+    RowVectorPtr precomputed_bitset_{nullptr};
 };
 
 // Represent the state of one thread of query execution.

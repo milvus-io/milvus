@@ -55,6 +55,12 @@ namespace milvus::exec {
 class SimpleGeometryCache;
 }
 
+namespace milvus::query {
+// Defined in query/SharedFilterBitsetResult.h; forward-declared because that header
+// pulls in exec/QueryContext.h, which includes this one.
+struct SharedFilterBitsetResult;
+}  // namespace milvus::query
+
 namespace milvus::segcore {
 
 using namespace milvus::cachinglayer;
@@ -412,6 +418,30 @@ class SegmentInternalInterface : public SegmentInterface {
         return std::to_string(get_segment_id()) + "_" +
                std::to_string(field_id);
     }
+
+    // ---- shared-filter hybrid search (see MEP 20260902) ----
+    //
+    // Phase 1: evaluate the filter subtree of `plan` (FilterBitsNode ->
+    // MvccNode) and return its bitset. Any branch's plan may be passed; the
+    // delegator has already established that they share a predicate.
+    std::unique_ptr<query::SharedFilterBitsetResult>
+    ComputeFilterBitset(const query::Plan* plan,
+                        Timestamp timestamp,
+                        const folly::CancellationToken& cancel_token,
+                        int32_t consistency_level,
+                        Timestamp collection_ttl) const;
+
+    // Phase 2: run one branch's vector search against a bitset computed by
+    // ComputeFilterBitset, skipping FilterBitsNode and MvccNode entirely.
+    // `bitset_result` is read-only, so concurrent branches may share one.
+    std::unique_ptr<SearchResult>
+    SearchWithBitset(const query::Plan* plan,
+                     const query::PlaceholderGroup* placeholder_group,
+                     const query::SharedFilterBitsetResult* bitset_result,
+                     Timestamp timestamp,
+                     const folly::CancellationToken& cancel_token,
+                     int32_t consistency_level,
+                     Timestamp collection_ttl) const;
 
     // Bring in base class Search overloads to avoid name hiding
     using SegmentInterface::Search;
