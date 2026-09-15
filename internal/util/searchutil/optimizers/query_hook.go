@@ -232,7 +232,7 @@ func applyStrictGroupSettings(ctx context.Context, info *planpb.QueryInfo) (bool
 			mlog.Info(ctx, "strict_group_config_snapshot",
 				mlog.Int64("node_id", paramtable.GetNodeID()),
 				mlog.String("strategy", strategy),
-				mlog.Int64("phase1_max_candidates", phase1),
+				mlog.Int64("phase1_candidate_weight", phase1),
 				mlog.Bool("skip_refine", skipRefine),
 				mlog.Bool("strict_group_debug", debug))
 		}
