@@ -114,3 +114,11 @@ func TestAppendResponses_FillAllResponse(t *testing.T) {
 		assert.Equal(t, resp, r)
 	}
 }
+
+func TestBroadcastAppendResultDuplicated(t *testing.T) {
+	// A broadcast that was not deduplicated leaves Duplicated nil and keeps the
+	// existing lookup behavior unchanged.
+	fresh := &BroadcastAppendResult{BroadcastID: 1, AppendResults: map[string]*AppendResult{}}
+	assert.Nil(t, fresh.Duplicated)
+	assert.Nil(t, fresh.GetAppendResult("v1"))
+}

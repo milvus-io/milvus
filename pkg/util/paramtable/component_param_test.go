@@ -616,7 +616,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 10, Params.CheckAutoBalanceConfigInterval.GetAsInt())
 		assert.Equal(t, false, Params.AutoUpgradeSegmentIndex.GetAsBool())
 		assert.Equal(t, 2, Params.FilesPerPreImportTask.GetAsInt())
-		assert.Equal(t, 10800*time.Second, Params.ImportTaskRetention.GetAsDuration(time.Second))
+		assert.Equal(t, 172800*time.Second, Params.ImportTaskRetention.GetAsDuration(time.Second))
 		assert.Equal(t, 16384, Params.MaxSizeInMBPerImportTask.GetAsInt())
 		assert.Equal(t, 2*time.Second, Params.ImportScheduleInterval.GetAsDuration(time.Second))
 		assert.Equal(t, 2*time.Second, Params.ImportCheckIntervalHigh.GetAsDuration(time.Second))
@@ -1004,4 +1004,26 @@ func TestQueryNodeMaxLoadingMemoryRatio(t *testing.T) {
 
 	params.Save(item.Key, "1.1")
 	assert.InDelta(t, 1.0, item.GetAsFloat(), 0.0001)
+}
+
+func TestImportIdempotencyParams(t *testing.T) {
+	params := ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true)))
+
+	assert.Equal(t, 256, params.StreamingCfg.IdempotencyMaxKeyLength.GetAsInt())
+
+	// The advertised idempotency window is the tombstone retention, so an import
+	// job must outlive its tombstone. Otherwise a retry inside the window resolves
+	// to a jobID GetImportProgress can no longer find.
+	assert.Equal(t, 172800, params.DataCoordCfg.ImportTaskRetention.GetAsInt())
+
+	// Headroom, not equality. A tombstone's age is measured from the last
+	// StreamingCoord start, so a restart extends its remaining life by up to another
+	// maxLifetime while this retention keeps counting from the job's own completion.
+	// Equal defaults satisfy the >= above yet break on the first restart, which is
+	// how adversarial review on milvus#52544 found this; one restart per tombstone
+	// lifetime is what the 2x covers.
+	assert.GreaterOrEqual(t,
+		params.DataCoordCfg.ImportTaskRetention.GetAsDuration(time.Second),
+		2*params.StreamingCfg.WALBroadcasterTombstoneMaxLifetime.GetAsDurationByParse())
 }
