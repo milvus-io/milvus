@@ -203,6 +203,28 @@ func TestMemoryKV_MultiSaveBytesAndRemoveWithPrefix(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestMemoryKV_MultiLoadMissingKey(t *testing.T) {
+	mem := NewMemoryKV()
+	assert.NoError(t, mem.Save(context.TODO(), "exist", "value"))
+
+	// A missing key must surface as an error with placeholders, mirroring the
+	// single-key Load() and the etcd implementation, not panic on a nil item.
+	values, err := mem.MultiLoad(context.TODO(), []string{"exist", "missing"})
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrIoKeyNotFound)
+	assert.Equal(t, []string{"value", ""}, values)
+}
+
+func TestMemoryKV_MultiLoadBytesMissingKey(t *testing.T) {
+	mem := NewMemoryKV()
+	assert.NoError(t, mem.SaveBytes(context.TODO(), "exist", []byte("value")))
+
+	values, err := mem.MultiLoadBytes(context.TODO(), []string{"exist", "missing"})
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrIoKeyNotFound)
+	assert.Equal(t, [][]byte{[]byte("value"), nil}, values)
+}
+
 func TestHas(t *testing.T) {
 	kv := NewMemoryKV()
 
