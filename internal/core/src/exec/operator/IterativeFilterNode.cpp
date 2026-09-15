@@ -252,6 +252,10 @@ PhyIterativeFilterNode::GetOutput() {
                 }
 
                 if (is_native_supported_) {
+                    // TODO: Remove iterative filtering and this native
+                    // offset-input expression path. Until then, do not expand
+                    // JSON index execution here; JSON predicates retain their
+                    // raw-candidate fallback.
                     eval_ctx.set_offset_input(eval_offsets);
                     std::vector<VectorPtr> results;
                     exprs_->Eval(0, 1, true, eval_ctx, results);

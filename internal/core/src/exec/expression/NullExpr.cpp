@@ -123,7 +123,18 @@ PhyNullExpr::Eval(EvalCtx& context, VectorPtr& result) {
 
 void
 PhyNullExpr::DetermineExecPath() {
-    if (expr_->column_.data_type_ == DataType::VECTOR_ARRAY) {
+    // A typed JSON Path index exposes the validity of its projection, not the
+    // nullable bitmap of the source JSON field.  Values such as `{}` or
+    // `{"a": null}` are invalid for a root DOUBLE projection even though the
+    // JSON field itself is not NULL, so using the index for a root NullExpr
+    // would conflate a cast failure with SQL NULL.
+    //
+    // Nested JSON `IS [NOT] NULL` expressions are rewritten by the parser to
+    // `NOT EXISTS` / `EXISTS`; those continue to use the Path index's separate
+    // existence bitmap.  A JSON NullExpr therefore evaluates the source field
+    // validity bitmap directly.
+    if (expr_->column_.data_type_ == DataType::JSON ||
+        expr_->column_.data_type_ == DataType::VECTOR_ARRAY) {
         exec_path_ = ExprExecPath::RawData;
         return;
     }

@@ -75,15 +75,16 @@ func TestFieldBinlogStatEntry(t *testing.T) {
 func TestTextIndexStatEntries(t *testing.T) {
 	textStats := map[int64]*datapb.TextIndexStats{
 		10: {
-			FieldID:    10,
-			Version:    5,
-			BuildID:    42,
-			Files:      []string{"file1", "file2"},
-			LogSize:    1000,
-			MemorySize: 2000,
+			FieldID:                   10,
+			Version:                   5,
+			BuildID:                   42,
+			Files:                     []string{"file1", "file2"},
+			LogSize:                   1000,
+			MemorySize:                2000,
+			CurrentScalarIndexVersion: 6,
 		},
 	}
-	entries := TextIndexStatEntries(textStats, 3)
+	entries := TextIndexStatEntries(textStats)
 	assert.Len(t, entries, 1)
 	e := entries[0]
 	assert.Equal(t, "text_index.10", e.Key)
@@ -92,7 +93,8 @@ func TestTextIndexStatEntries(t *testing.T) {
 	assert.Equal(t, "42", e.Metadata["build_id"])
 	assert.Equal(t, "1000", e.Metadata["log_size"])
 	assert.Equal(t, "2000", e.Metadata["memory_size"])
-	assert.Equal(t, "3", e.Metadata["current_scalar_index_version"])
+	assert.Equal(t, "6", e.Metadata["current_scalar_index_version"],
+		"manifest metadata must use the worker's actual clamped build version")
 }
 
 func TestJSONKeyStatEntries(t *testing.T) {

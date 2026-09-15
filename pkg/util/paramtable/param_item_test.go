@@ -102,6 +102,39 @@ func TestForbiddenParamItemAllowsRuntimeOverride(t *testing.T) {
 	require.Equal(t, "RUNTIME", param.GetValue())
 }
 
+func TestParamItemPreserveAutoIgnoresStaleTypedCache(t *testing.T) {
+	manager := config.NewManager()
+	item := &ParamItem{
+		Key:          "test.preservedAuto",
+		DefaultValue: "auto",
+		VersionGateSwitcher: &VersionGateSwitcher{
+			EnableAutoSwitchValue: "auto",
+			PreSwitchValue:        "5",
+			GateVersion:           "3.0.2",
+			TargetValue:           "6",
+			PreserveAuto:          true,
+		},
+	}
+	manager.SetConfig(item.Key, "auto")
+	item.Init(manager)
+	before, raw, err := item.getWithRaw()
+	assert.NoError(t, err)
+	assert.Equal(t, "5", before)
+	assert.Equal(t, int32(5), item.GetAsInt32())
+	manager.SetConfig(item.gateReadinessKey, "true")
+
+	// An in-flight pre-switch read can finish conversion after readiness is
+	// updated. A cache CAS on the unchanged primary value still succeeds.
+	assert.True(t, manager.CASCachedValue(item.Key, raw, int32(5)))
+	assert.Equal(t, int32(6), item.GetAsInt32())
+	assert.True(t, manager.CASCachedValue(item.Key, raw, int64(5)))
+	assert.Equal(t, int64(6), item.GetAsInt64())
+	after, raw, err := item.getWithRaw()
+	assert.NoError(t, err)
+	assert.Equal(t, "6", after)
+	assert.Equal(t, "auto", raw)
+}
+
 func TestGetWithRaw_FallbackKeyCacheSuccess(t *testing.T) {
 	// When primary key equals DefaultValue and a fallback key has a different value,
 	// getWithRaw should return the fallback value as result but the primary key's

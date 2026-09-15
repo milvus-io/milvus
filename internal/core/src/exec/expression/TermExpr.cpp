@@ -16,7 +16,6 @@
 
 #include "TermExpr.h"
 
-#include <math.h>
 #include <simdjson.h>
 #include <algorithm>
 #include <cstdint>
@@ -270,7 +269,12 @@ PhyTermFilterExpr::ExecVisitorImplTemplateJson(EvalCtx& context) {
                 if (PinnedJsonIndexIsFlat()) {
                     return ExecVisitorImplForIndex<int64_t>();
                 }
-                return ExecVisitorImplForIndex<double>();
+                switch (PinnedJsonIndexCastElementType()) {
+                    case DataType::INT64:
+                        return ExecVisitorImplForIndex<int64_t>();
+                    default:
+                        return ExecVisitorImplForIndex<double>();
+                }
             } else {
                 return ExecVisitorImplForIndex<ValueType>();
             }
@@ -612,12 +616,30 @@ PhyTermFilterExpr::ExecJsonInVariableByStats() {
     auto real_batch_size = GetNextBatchSize();
 
     auto pointer = milvus::index::JsonPointer(expr_->column_.nested_path_);
+    if constexpr (std::is_same_v<GetType, int64_t> ||
+                  std::is_same_v<GetType, double>) {
+        if (!json_number_membership_matcher_) {
+            json_number_membership_matcher_ =
+                std::make_shared<JsonNumberMembershipMatcher>(expr_->vals_);
+        }
+    }
     if (!arg_inited_) {
-        arg_set_ = std::make_shared<SetElement<ValueType>>(expr_->vals_);
+        if constexpr (!std::is_same_v<GetType, int64_t> &&
+                      !std::is_same_v<GetType, double>) {
+            arg_set_ = std::make_shared<SetElement<ValueType>>(expr_->vals_);
+        }
         arg_inited_ = true;
     }
 
-    if (arg_set_->Empty()) {
+    const bool candidates_empty = [&]() {
+        if constexpr (std::is_same_v<GetType, int64_t> ||
+                      std::is_same_v<GetType, double>) {
+            return !json_number_membership_matcher_->HasNumericCandidates();
+        } else {
+            return arg_set_->Empty();
+        }
+    }();
+    if (candidates_empty) {
         MoveCursor();
         return std::make_shared<ColumnVector>(
             TargetBitmap(real_batch_size, false),
@@ -662,10 +684,8 @@ PhyTermFilterExpr::ExecJsonInVariableByStats() {
                         }
                         if constexpr (std::is_same_v<GetType, int64_t> ||
                                       std::is_same_v<GetType, double>) {
-                            auto value =
-                                ConvertJsonNumberExact<GetType>(src[i]);
-                            res[i] =
-                                value.has_value() && this->arg_set_->In(*value);
+                            res[i] = this->json_number_membership_matcher_
+                                         ->MatchesAny(src[i]);
                         } else {
                             res[i] = this->arg_set_->In(src[i]);
                         }
@@ -717,12 +737,11 @@ PhyTermFilterExpr::ExecJsonInVariableByStats() {
             if constexpr (std::is_same_v<GetType, int64_t> ||
                           std::is_same_v<GetType, double>) {
                 bool is_number = false;
-                auto get_value = ParseBsonNumberExact<GetType>(
-                    bson, value_offset, is_number);
-                if (get_value.has_value()) {
-                    res_view[row_offset] = this->arg_set_->In(*get_value);
-                }
+                const bool matched = this->json_number_membership_matcher_
+                                         ->MatchesAnyBsonNumberAtOffset(
+                                             bson, value_offset, is_number);
                 if (is_number) {
+                    res_view[row_offset] = matched;
                     valid_res_view[row_offset] = true;
                 }
                 return;
@@ -782,7 +801,6 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
                                        ValueType>;
     auto* input = context.get_offset_input();
     const auto& bitmap_input = context.get_bitmap_input();
-    FieldId field_id = expr_->column_.field_id_;
     if (!has_offset_input_ && exec_path_ == ExprExecPath::JsonStats) {
         milvus::ScopedTimer timer("term_json_by_stats", [this](double us) {
             json_filter_stats_latency_us_ += us;
@@ -807,12 +825,30 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
 
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
+    if constexpr (std::is_same_v<GetType, std::int64_t> ||
+                  std::is_same_v<GetType, double>) {
+        if (!json_number_membership_matcher_) {
+            json_number_membership_matcher_ =
+                std::make_shared<JsonNumberMembershipMatcher>(expr_->vals_);
+        }
+    }
     if (!arg_inited_) {
-        arg_set_ = std::make_shared<SetElement<ValueType>>(expr_->vals_);
+        if constexpr (!std::is_same_v<GetType, std::int64_t> &&
+                      !std::is_same_v<GetType, double>) {
+            arg_set_ = std::make_shared<SetElement<ValueType>>(expr_->vals_);
+        }
         arg_inited_ = true;
     }
 
-    if (arg_set_->Empty()) {
+    const bool candidates_empty = [&]() {
+        if constexpr (std::is_same_v<GetType, std::int64_t> ||
+                      std::is_same_v<GetType, double>) {
+            return !json_number_membership_matcher_->HasNumericCandidates();
+        } else {
+            return arg_set_->Empty();
+        }
+    }();
+    if (candidates_empty) {
         res.reset();
         MoveCursor();
         return res_vec;
@@ -829,7 +865,9 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
             TargetBitmapView res,
             TargetBitmapView valid_res,
             const std::string& pointer,
-            const std::shared_ptr<MultiElement>& terms) {
+            const std::shared_ptr<MultiElement>& terms,
+            const std::shared_ptr<JsonNumberMembershipMatcher>&
+                number_membership_matcher) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.
         if (data == nullptr) {
@@ -837,25 +875,16 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
             return;
         }
         auto executor = [&](size_t i) {
-            if constexpr (std::is_same_v<GetType, std::int64_t>) {
+            if constexpr (std::is_same_v<GetType, std::int64_t> ||
+                          std::is_same_v<GetType, double>) {
                 auto x_num = data[i].at_numeric(pointer);
                 if (x_num.error()) {
                     return std::make_pair(false, false);
                 }
-                auto n = x_num.value();
-                if (n.is_int64()) {
-                    return std::make_pair(true,
-                                          terms->In(ValueType(n.get_int64())));
-                }
-                // uint64 or double → compare as double, consistent with
-                // index/stats paths.
-                auto dval = n.is_uint64() ? static_cast<double>(n.get_uint64())
-                                          : n.get_double();
-                // if the term set is {1}, and the value is 1.1, we should
-                // not return true.
                 return std::make_pair(
                     true,
-                    std::floor(dval) == dval && terms->In(ValueType(dval)));
+                    number_membership_matcher
+                        ->MatchesAnyWithUint64DoubleFallback(x_num.value()));
             } else {
                 auto x = data[i].template at<GetType>(pointer);
                 if (x.error()) {
@@ -874,7 +903,15 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
-            if (terms->Empty()) {
+            const bool empty = [&]() {
+                if constexpr (std::is_same_v<GetType, std::int64_t> ||
+                              std::is_same_v<GetType, double>) {
+                    return !number_membership_matcher->HasNumericCandidates();
+                } else {
+                    return terms->Empty();
+                }
+            }();
+            if (empty) {
                 res[i] = false;
                 continue;
             }
@@ -893,20 +930,24 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
     };
     int64_t processed_size;
     if (has_offset_input_) {
-        processed_size = ProcessDataByOffsets<milvus::Json>(execute_sub_batch,
-                                                            std::nullptr_t{},
-                                                            input,
-                                                            res,
-                                                            valid_res,
-                                                            pointer,
-                                                            arg_set_);
+        processed_size =
+            ProcessDataByOffsets<milvus::Json>(execute_sub_batch,
+                                               std::nullptr_t{},
+                                               input,
+                                               res,
+                                               valid_res,
+                                               pointer,
+                                               arg_set_,
+                                               json_number_membership_matcher_);
     } else {
-        processed_size = ProcessDataChunks<milvus::Json>(execute_sub_batch,
-                                                         std::nullptr_t{},
-                                                         res,
-                                                         valid_res,
-                                                         pointer,
-                                                         arg_set_);
+        processed_size =
+            ProcessDataChunks<milvus::Json>(execute_sub_batch,
+                                            std::nullptr_t{},
+                                            res,
+                                            valid_res,
+                                            pointer,
+                                            arg_set_,
+                                            json_number_membership_matcher_);
     }
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "
@@ -968,12 +1009,18 @@ PhyTermFilterExpr::ExecVisitorImplForIndex() {
     }
     auto execute_sub_batch = [](Index* index_ptr,
                                 const std::vector<IndexInnerType>& vals) {
+        if (vals.empty()) {
+            return TargetBitmap(index_ptr->Count(), false);
+        }
         TermIndexFunc<T> func;
         return func(index_ptr, vals.size(), vals.data());
     };
     auto args =
         std::dynamic_pointer_cast<FlatVectorElement<IndexInnerType>>(arg_set_);
-    if (field_type_ == DataType::JSON && args->values_.empty()) {
+    // A genuinely empty IN list is deterministic even for null JSON. A
+    // nonempty list narrowed to no representable values must still preserve
+    // the typed index's null bitmap (including failed casts).
+    if (field_type_ == DataType::JSON && expr_->vals_.empty()) {
         MoveCursor();
         return std::make_shared<ColumnVector>(
             TargetBitmap(real_batch_size, false),
@@ -1294,16 +1341,9 @@ PhyTermFilterExpr::DetermineExecPath() {
         return;
     }
 
-    if (data_type == DataType::JSON && !expr_->vals_.empty() &&
-        expr_->vals_[0].val_case() ==
-            proto::plan::GenericValue::ValCase::kInt64Val) {
-        const auto has_unsafe_literal = std::any_of(
-            expr_->vals_.begin(), expr_->vals_.end(), [this](const auto& val) {
-                return !IsInt64SafeForJsonDoubleIndex(val.int64_val());
-            });
-        if (has_unsafe_literal && !PinnedJsonIndexIsFlat()) {
-            exec_path_ = ExprExecPath::RawData;
-        }
+    // JSON operand compatibility was checked during index selection. The
+    // remaining operator check applies only to VARCHAR/TEXT indexes.
+    if (data_type == DataType::JSON) {
         return;
     }
 

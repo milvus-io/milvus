@@ -13,7 +13,7 @@ type HYBRIDChecker struct {
 	scalarIndexChecker
 }
 
-var validHYBRIDJSONCastTypes = []string{"BOOL", "DOUBLE", "VARCHAR"}
+var validHYBRIDJSONCastTypes = []string{"BOOL", "INT64", "DOUBLE", "VARCHAR"}
 
 func (c *HYBRIDChecker) CheckTrain(dataType schemapb.DataType, elementType schemapb.DataType, params map[string]string) error {
 	if typeutil.IsJSONType(dataType) {
@@ -34,7 +34,7 @@ func (c *HYBRIDChecker) CheckTrain(dataType schemapb.DataType, elementType schem
 					MaxBitmapCardinalityLimit)
 			}
 		}
-		return nil
+		return checkJSONCastFunction(castType, params)
 	}
 	if !CheckIntByRange(params, common.BitmapCardinalityLimitKey, 1, MaxBitmapCardinalityLimit) {
 		return merr.WrapErrParameterInvalidMsg("failed to check bitmap cardinality limit, should be larger than 0 and smaller than %d",

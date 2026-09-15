@@ -52,9 +52,10 @@ type sessionVersion struct {
 // gates are resolved the confirmator exits. No gate can be registered at
 // runtime afterwards.
 type gate struct {
-	key      string
-	switcher *VersionGateSwitcher
-	version  semver.Version // parsed GateVersion
+	key          string
+	switcher     *VersionGateSwitcher
+	version      semver.Version // parsed GateVersion
+	readinessKey string         // separate durable state for PreserveAuto gates
 
 	resolved bool
 	armedAt  time.Time // when the cluster first stayed above GateVersion (zero = not armed)
@@ -76,10 +77,10 @@ type gate struct {
 // all nodes; every registered gate is then driven by that minimum version:
 // once the cluster stays above the gate's GateVersion for the whole
 // SwitchDelay stability window, the gate flips its config item's value to
-// TargetValue in the config center (etcd source). The flip is guarded so an
-// explicit operator value is never overwritten. When every registered gate is
-// resolved the confirmator exits; nothing keeps running afterwards. Use close
-// to stop it.
+// TargetValue in the config center (etcd source), or records separate readiness
+// for PreserveAuto gates. Explicit operator values are never overwritten.
+// When every registered gate is resolved the confirmator exits; nothing keeps
+// running afterwards. Use close to stop it.
 type confirmator struct {
 	cli           *clientv3.Client
 	sessionPrefix string // prefix of the session keys (<metaRoot>/session)
@@ -159,14 +160,16 @@ func (c *confirmator) registerGate(key string, switcher *VersionGateSwitcher) er
 	if err != nil {
 		return errors.Wrapf(err, "version gate: parse gate version %s", switcher.GateVersion)
 	}
-	c.gates = append(c.gates, &gate{key: key, switcher: switcher, version: v})
+	c.gates = append(c.gates, &gate{key: key, switcher: switcher, version: v, readinessKey: switcher.readinessKey(key)})
 	return nil
 }
 
 // start resolves every registered gate. Gates whose config value is no longer
 // the sentinel (flipped earlier or explicitly configured by the operator) are
-// resolved immediately; for the remaining gates a single session watch and one
-// gate-processing loop are started in the background. start returns after the
+// resolved immediately. PreserveAuto gates resolve only from their readiness
+// marker, even if the operator currently pins a value, so switching back to
+// auto works after this one-shot confirmator exits. Pending gates share a watch
+// and one gate-processing loop in the background. start returns after the
 // initial pass. When all gates are resolved the confirmator stops itself.
 func (c *confirmator) start(ctx context.Context) error {
 	c.mu.Lock()
@@ -448,7 +451,8 @@ func (c *confirmator) backoffForRetryLocked(g *gate) {
 	g.retryAt = time.Now().Add(g.backoff)
 }
 
-// flip writes the gate's TargetValue into the config center once. The write is
+// flip records readiness for PreserveAuto gates without touching the configured
+// value. Other gates write TargetValue into the config center once. The write is
 // guarded so an explicit operator value is never overwritten: the etcd-level
 // CAS only writes when the key is absent or still holds the sentinel value, so
 // a concurrently written explicit value wins. The process-local effective
@@ -457,6 +461,17 @@ func (c *confirmator) backoffForRetryLocked(g *gate) {
 // escape hatch during a rolling upgrade) resolves the gate without touching
 // etcd, which would otherwise mask it forever.
 func (c *confirmator) flip(ctx context.Context, g *gate) error {
+	if g.readinessKey != "" {
+		// Readiness describes cluster capability independently of the operator's
+		// current choice. Keep recording it even while an explicit pin is set.
+		if _, err := c.cli.Put(ctx, c.configKey(g.readinessKey), "true"); err != nil {
+			return err
+		}
+		refreshLocalConfig()
+		mlog.Info(ctx, "version gate: readiness recorded, configured value preserved",
+			mlog.String("key", g.key), mlog.String("value", g.switcher.TargetValue))
+		return nil
+	}
 	// The FileSource hot-reloads and the item is refreshable, so an operator
 	// may have set an explicit value (e.g. the false escape hatch) after the
 	// confirmator started; that value must win over the flip.
@@ -510,9 +525,13 @@ func (c *confirmator) flip(ctx context.Context, g *gate) error {
 }
 
 // gateResolvedLocked reports whether the gate needs no flipping: the effective
-// config value is no longer the sentinel (explicit operator value, or the
-// value was already flipped by a previous run). Caller must hold c.mu.
+// config value is no longer the sentinel, or a PreserveAuto gate has its
+// release-specific readiness marker. Caller must hold c.mu.
 func (c *confirmator) gateResolvedLocked(g *gate) bool {
+	if g.readinessKey != "" {
+		ready, present, err := c.configValue(g.readinessKey)
+		return err == nil && present && ready == "true"
+	}
 	if v, ok := currentConfigValue(g.key); ok {
 		return v != g.switcher.EnableAutoSwitchValue
 	}

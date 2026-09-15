@@ -13,7 +13,7 @@ type BITMAPChecker struct {
 	scalarIndexChecker
 }
 
-var validBITMAPJSONCastTypes = []string{"BOOL", "VARCHAR"}
+var validBITMAPJSONCastTypes = []string{"BOOL", "INT64", "VARCHAR"}
 
 func (c *BITMAPChecker) CheckTrain(dataType schemapb.DataType, elementType schemapb.DataType, params map[string]string) error {
 	if typeutil.IsJSONType(dataType) {
@@ -26,6 +26,9 @@ func (c *BITMAPChecker) CheckTrain(dataType schemapb.DataType, elementType schem
 		}
 		if _, exist := params[common.JSONPathKey]; !exist {
 			return merr.WrapErrParameterMissing(common.JSONPathKey, "json index must specify json path")
+		}
+		if err := checkJSONCastFunction(castType, params); err != nil {
+			return err
 		}
 	}
 	return c.scalarIndexChecker.CheckTrain(dataType, elementType, params)

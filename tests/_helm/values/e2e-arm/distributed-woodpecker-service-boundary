@@ -79,8 +79,9 @@ extraConfigFiles:
         insertBufSize: 1048576
     dataCoord:
       targetVecIndexVersion: 11
-      forceRebuildScalarSegmentIndex: true
-      targetScalarIndexVersion: 5
+      forceRebuildScalarSegmentIndex: false
+      targetScalarIndexVersion: auto
+      jsonStatsFormatVersion: auto
       enableCompaction: true
       compaction:
         enableAutoCompaction: false
