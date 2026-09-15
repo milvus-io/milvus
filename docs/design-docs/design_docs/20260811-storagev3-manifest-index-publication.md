@@ -4,6 +4,7 @@
 - **Status:** Implemented
 - **Component:** DataCoord, StorageV3
 - **Depends on:** [DataCoord Segment-Scoped Manifest Commit Framework](20260817-datacoord-segment-manifest-commit.md)
+- **Index metadata migration:** [StorageV3 Manifest Index Backfill and Rollback](20260901-storagev3-manifest-index-backfill.md)
 - **Related upstream change:** [milvus-storage#620](https://github.com/milvus-io/milvus-storage/pull/620/), [milvus-storage#622](https://github.com/milvus-io/milvus-storage/pull/622/)
 
 ## Summary
