@@ -2929,7 +2929,7 @@ func (x *RoaringFilterExpr) GetBitmapBlob() []byte {
 // reading `columns` in order equals one of `tuples` exactly, position for
 // position. Exact (no false positives/negatives), so unlike
 // bloom_filter_expr it is eligible for delete expressions.
-// See design doc <TODO: date>-tuple-term-membership-expression.md.
+// See design doc 20260901-tuple-term-membership-expression.md.
 type TupleTermExpr struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
