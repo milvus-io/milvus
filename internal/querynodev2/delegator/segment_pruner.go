@@ -41,16 +41,42 @@ func PruneSegments(ctx context.Context,
 	sealedSegments []SnapshotItem,
 	info PruneInfo,
 ) {
+	// Ordinary search and query requests have only one vector input, so vector
+	// clustering-key pruning is safe for them. A shared-filter group must call
+	// pruneSegments directly so key selection and the grouped-request guard are
+	// one decision.
+	_ = pruneSegments(ctx, partitionStats, searchReq, queryReq, schema, sealedSegments, info, false)
+}
+
+// pruneSegments is the common implementation. sharedFilterGroup means
+// searchReq carries extra branches whose query vectors differ from branch 0.
+// A vector clustering key cannot prune such a group: the pruning code reads
+// only searchReq's placeholder group, so every extra branch would silently
+// search branch 0's neighboring segments. The guard uses the exact key chosen
+// below for pruning, leaving no refreshable-config window between two key
+// lookups.
+func pruneSegments(ctx context.Context,
+	partitionStats map[UniqueID]*storage.PartitionStatsSnapshot,
+	searchReq *internalpb.SearchRequest,
+	queryReq *internalpb.RetrieveRequest,
+	schema *schemapb.CollectionSchema,
+	sealedSegments []SnapshotItem,
+	info PruneInfo,
+	sharedFilterGroup bool,
+) error {
 	_, span := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "segmentPrune")
 	defer span.End()
-	if partitionStats == nil {
-		return
-	}
 	// 1. select collection, partitions and expr
 	clusteringKeyField := clustering.GetClusteringKeyField(schema)
 	if clusteringKeyField == nil {
 		// no need to prune
-		return
+		return nil
+	}
+	if sharedFilterGroup && typeutil.IsVectorType(clusteringKeyField.GetDataType()) {
+		return errSharedFilterUngroupable
+	}
+	if partitionStats == nil {
+		return nil
 	}
 	tr := timerecord.NewTimeRecorder("PruneSegments")
 	var collectionID int64
@@ -74,17 +100,17 @@ func PruneSegments(ctx context.Context,
 		var vectorsHolder commonpb.PlaceholderGroup
 		err := proto.Unmarshal(searchReq.GetPlaceholderGroup(), &vectorsHolder)
 		if err != nil || len(vectorsHolder.GetPlaceholders()) == 0 {
-			return
+			return nil
 		}
 		vectorsBytes := vectorsHolder.GetPlaceholders()[0].GetValues()
 		// parse dim
 		dimStr, err := funcutil.GetAttrByKeyFromRepeatedKV(common.DimKey, clusteringKeyField.GetTypeParams())
 		if err != nil {
-			return
+			return nil
 		}
 		dimValue, err := strconv.ParseInt(dimStr, 10, 64)
 		if err != nil {
-			return
+			return nil
 		}
 		for _, partStats := range partitionStats {
 			FilterSegmentsByVector(partStats, searchReq, vectorsBytes, dimValue, clusteringKeyField, filteredSegments, info.filterRatio)
@@ -96,19 +122,19 @@ func PruneSegments(ctx context.Context,
 		err := proto.Unmarshal(expr, &plan)
 		if err != nil {
 			mlog.Error(ctx, "failed to unmarshall serialized expr from bytes, failed the operation")
-			return
+			return nil
 		}
 		exprPb, err := exprutil.ParseExprFromPlan(&plan)
 		if err != nil {
 			mlog.Error(ctx, "failed to parse expr from plan, failed the operation")
-			return
+			return nil
 		}
 
 		// 1. parse expr for prune
 		expr, err := ParseExpr(exprPb, NewParseContext(clusteringKeyField.GetFieldID(), clusteringKeyField.GetDataType()))
 		if err != nil {
 			mlog.RatedWarn(ctx, rate.Limit(10), "failed to parse expr for segment prune, fallback to common search/query", mlog.Err(err))
-			return
+			return nil
 		}
 
 		// 2. prune segments by scalar field
@@ -196,6 +222,7 @@ func PruneSegments(ctx context.Context,
 		Observe(float64(tr.ElapseSpan().Milliseconds()))
 	mlog.Debug(ctx, "Pruned segment for search/query",
 		mlog.Duration("duration", tr.ElapseSpan()))
+	return nil
 }
 
 type segmentDisStruct struct {

@@ -20,14 +20,18 @@ import (
 	"context"
 
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/metricsutil"
 	segcoreutil "github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type searchResultsCleanup func([]*SearchResult)
@@ -47,17 +51,44 @@ func searchSegmentsWithRetry(
 	cleanup searchResultsCleanup,
 	waitRetry segmentReadGateRetryWait,
 ) ([]*SearchResult, error) {
+	grouped, err := searchSegmentsGroupedWithRetry(ctx, mgr, segments, segType,
+		[]*SearchRequest{searchReq}, cleanup, waitRetry)
+	if err != nil {
+		return nil, err
+	}
+	return grouped[0], nil
+}
+
+// searchSegmentsGrouped runs several branches that share one filter predicate
+// over the given segments. The result is branch-major -- results[b][i] is
+// branch b's result on segments[i] -- because that is the shape the reduce
+// pipeline consumes, one branch at a time.
+func searchSegmentsGrouped(ctx context.Context, mgr *Manager, segments []Segment, segType SegmentType, searchReqs []*SearchRequest) ([][]*SearchResult, error) {
+	return searchSegmentsGroupedWithRetry(ctx, mgr, segments, segType, searchReqs, DeleteSearchResults, waitSegmentReadGateRetry)
+}
+
+func searchSegmentsGroupedWithRetry(
+	ctx context.Context,
+	mgr *Manager,
+	segments []Segment,
+	segType SegmentType,
+	searchReqs []*SearchRequest,
+	cleanup searchResultsCleanup,
+	waitRetry segmentReadGateRetryWait,
+) ([][]*SearchResult, error) {
 	retryCount := 0
 	for {
-		searchResults, err := searchSegmentsAttempt(ctx, mgr, segments, segType, searchReq)
+		searchResults, err := searchSegmentsGroupedAttempt(ctx, mgr, segments, segType, searchReqs)
 		if err == nil {
 			return searchResults, nil
 		}
 
-		validResults := make([]*SearchResult, 0, len(searchResults))
-		for _, result := range searchResults {
-			if result != nil {
-				validResults = append(validResults, result)
+		validResults := make([]*SearchResult, 0, len(segments)*len(searchReqs))
+		for _, perBranch := range searchResults {
+			for _, result := range perBranch {
+				if result != nil {
+					validResults = append(validResults, result)
+				}
 			}
 		}
 		cleanup(validResults)
@@ -75,26 +106,62 @@ func searchSegmentsWithRetry(
 	}
 }
 
-func searchSegmentsAttempt(ctx context.Context, mgr *Manager, segments []Segment, segType SegmentType, searchReq *SearchRequest) ([]*SearchResult, error) {
+func searchSegmentsGroupedAttempt(ctx context.Context, mgr *Manager, segments []Segment, segType SegmentType, searchReqs []*SearchRequest) ([][]*SearchResult, error) {
 	searchLabel := metrics.SealedSegmentLabel
 	if segType == commonpb.SegmentState_Growing {
 		searchLabel = metrics.GrowingSegmentLabel
 	}
 
 	nodeIDStr := paramtable.GetStringNodeID()
-	searchResults := make([]*SearchResult, len(segments))
+	// Branch-major so the caller can hand one branch's slice straight to the
+	// reduce pipeline; the per-segment call still produces branch-minor.
+	searchResults := make([][]*SearchResult, len(searchReqs))
+	for b := range searchResults {
+		searchResults[b] = make([]*SearchResult, len(segments))
+	}
+
+	// One segment call serves every branch, so per-vector latency is over the
+	// vectors of all of them.
+	var totalNq int64
+	for _, searchReq := range searchReqs {
+		totalNq += searchReq.GetNumOfQuery()
+	}
+
+	// The scheduler sees this whole call as one task, however many branches and
+	// segments it covers. The two bounds below prevent that task from turning
+	// the full branch-by-segment fan-out into in-flight work at once:
+	// branchLimiter is shared by every segment, so the task never has more than
+	// GetCPUNum() branch searches in flight, while the segment loop is capped at
+	// the same width so no more than that many segments sit between phase 1 and
+	// phase 2 holding a filter bitset. Both are for grouped requests only: an
+	// ungrouped one evaluates no shared bitset and keeps the unbounded segment
+	// fan-out it has always had.
+	var branchLimiter *semaphore.Weighted
+	if len(searchReqs) > 1 {
+		branchLimiter = semaphore.NewWeighted(int64(hardware.GetCPUNum()))
+	}
+
 	searcher := func(ctx context.Context, s Segment, idx int) error {
 		tr := timerecord.NewTimeRecorder("searchOnSegments")
-		searchResult, err := s.Search(ctx, searchReq)
+		results, err := s.SearchGrouped(ctx, searchReqs, branchLimiter)
 		if err != nil {
 			return err
 		}
-		searchResults[idx] = searchResult
+		if len(results) != len(searchReqs) {
+			// Not yet stored in searchResults, so the caller's cleanup would
+			// never see them.
+			DeleteSearchResults(results)
+			return merr.WrapErrServiceInternalMsg("grouped search returned %d results for %d branches",
+				len(results), len(searchReqs))
+		}
+		for b, result := range results {
+			searchResults[b][idx] = result
+		}
 		elapsed := float64(tr.ElapseSpan().Microseconds()) / 1000.0
 		metrics.QueryNodeSQSegmentLatency.WithLabelValues(nodeIDStr,
 			metrics.SearchLabel, searchLabel).Observe(elapsed)
 		metrics.QueryNodeSegmentSearchLatencyPerVector.WithLabelValues(nodeIDStr,
-			metrics.SearchLabel, searchLabel).Observe(elapsed / float64(searchReq.GetNumOfQuery()))
+			metrics.SearchLabel, searchLabel).Observe(elapsed / float64(totalNq))
 		return nil
 	}
 
@@ -112,10 +179,19 @@ func searchSegmentsAttempt(ctx context.Context, mgr *Manager, segments []Segment
 		return searcher(ctx, seg, idx)
 	}
 
+	// Branches may target different vector fields; a segment counts as
+	// unindexed if any of them lacks an index there.
+	searchFieldIDs := typeutil.NewUniqueSet()
+	for _, searchReq := range searchReqs {
+		searchFieldIDs.Insert(searchReq.SearchFieldID())
+	}
 	segmentsWithoutIndex := make([]int64, 0, len(segments))
 	for _, seg := range segments {
-		if !seg.ExistIndex(searchReq.SearchFieldID()) {
-			segmentsWithoutIndex = append(segmentsWithoutIndex, seg.ID())
+		for fieldID := range searchFieldIDs {
+			if !seg.ExistIndex(fieldID) {
+				segmentsWithoutIndex = append(segmentsWithoutIndex, seg.ID())
+				break
+			}
 		}
 	}
 
@@ -125,6 +201,9 @@ func searchSegmentsAttempt(ctx context.Context, mgr *Manager, segments []Segment
 		err = executeSegment(ctx, segments[0], 0)
 	} else {
 		errGroup, groupCtx := errgroup.WithContext(ctx)
+		if branchLimiter != nil {
+			errGroup.SetLimit(hardware.GetCPUNum())
+		}
 		for i, segment := range segments {
 			segIdx := i
 			seg := segment
@@ -175,5 +254,35 @@ func SearchStreaming(ctx context.Context, manager *Manager, searchReq *SearchReq
 		return nil, nil, err
 	}
 	searchResults, err := searchSegments(ctx, manager, segments, SegmentTypeGrowing, searchReq)
+	return searchResults, segments, err
+}
+
+// SearchHistoricalGrouped is SearchHistorical for a set of branches that share
+// one filter predicate. Results are branch-major.
+func SearchHistoricalGrouped(ctx context.Context, manager *Manager, searchReqs []*SearchRequest, collID int64, partIDs []int64, segIDs []int64) ([][]*SearchResult, []Segment, error) {
+	if ctx.Err() != nil {
+		return nil, nil, ctx.Err()
+	}
+
+	segments, err := validateOnHistorical(ctx, manager, collID, partIDs, segIDs)
+	if err != nil {
+		return nil, nil, err
+	}
+	searchResults, err := searchSegmentsGrouped(ctx, manager, segments, SegmentTypeSealed, searchReqs)
+	return searchResults, segments, err
+}
+
+// SearchStreamingGrouped is SearchStreaming for a set of branches that share
+// one filter predicate. Results are branch-major.
+func SearchStreamingGrouped(ctx context.Context, manager *Manager, searchReqs []*SearchRequest, collID int64, partIDs []int64, segIDs []int64) ([][]*SearchResult, []Segment, error) {
+	if ctx.Err() != nil {
+		return nil, nil, ctx.Err()
+	}
+
+	segments, err := validateOnStream(ctx, manager, collID, partIDs, segIDs)
+	if err != nil {
+		return nil, nil, err
+	}
+	searchResults, err := searchSegmentsGrouped(ctx, manager, segments, SegmentTypeGrowing, searchReqs)
 	return searchResults, segments, err
 }

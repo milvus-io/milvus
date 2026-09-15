@@ -81,6 +81,35 @@ class ProtoParser {
     static std::shared_ptr<plan::PlanNode>
     ExtractFilterOnlyPlan(const std::shared_ptr<plan::PlanNode>& root_node);
 
+    // Shared-filter search, phase 1: return VectorSearchNode's source subtree
+    // (the filter prefix) from a plan whose chain above VectorSearchNode is
+    // exactly what RebindToPrecomputedBitset can rebuild -- nothing, or a
+    // single SearchGroupByNode. Any other shape throws.
+    //
+    // This is deliberately stricter than ExtractFilterOnlyPlan, which walks
+    // past whatever it finds. An iterative-filter plan puts its predicate
+    // *above* VectorSearchNode (IterativeFilterNode -> VectorSearchNode ->
+    // MvccNode), so the lenient walk would return a bare MvccNode and phase 1
+    // would compute an MVCC-only bitset that carries no predicate at all.
+    // Phase 2 would then throw on the rebind, but only after phase 1 had
+    // already run; rejecting here fails the group before any work is done and
+    // says why. A plan with no predicate is a different case: its prefix is
+    // legitimately just MvccNode and is accepted.
+    static std::shared_ptr<plan::PlanNode>
+    ExtractSharedFilterPrefix(const std::shared_ptr<plan::PlanNode>& root_node);
+
+    // Shared-filter search, phase 2: rebuild `root_node` with VectorSearchNode's
+    // source subtree replaced by a PrecomputedBitsetNode, so the branch
+    // executes only its vector search against a bitset computed earlier.
+    //
+    // The replacement point is exactly the extraction point of
+    // ExtractSharedFilterPrefix, and both accept exactly the same chain above
+    // VectorSearchNode (VectorSearchNode itself, optionally under one
+    // SearchGroupByNode). Anything else means the caller grouped a plan shape
+    // that must not have been grouped, and throws.
+    static std::shared_ptr<plan::PlanNode>
+    RebindToPrecomputedBitset(const std::shared_ptr<plan::PlanNode>& root_node);
+
  private:
     using BloomBlobOwners =
         std::unordered_map<const std::string*,
