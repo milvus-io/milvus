@@ -96,8 +96,8 @@ type SegmentCatalogMutation struct {
 	// so the persisted value cannot be built from a stale read.
 	//
 	// A foreground completion or historical backfill supplies one publication.
-	// Multiple entries are accepted only for removals, allowing one GC revision to
-	// retract several indexes and retire their records atomically.
+	// Multiple entries are accepted for removals and rollback, so one revision
+	// can retract several entries with their corresponding catalog mutations.
 	SegmentIndexes []SegmentIndexMutation
 
 	// manifestHasIndex is framework-owned. A verified presence/emptiness result
@@ -119,6 +119,9 @@ const (
 	// SegmentIndexBackfill publishes an existing finished artifact and retires
 	// its historical catalog row without replacing the in-memory record.
 	SegmentIndexBackfill
+	// SegmentIndexRollback persists the locked record to etcd while retracting
+	// its manifest entry, without deleting artifact files or its memory record.
+	SegmentIndexRollback
 )
 
 // SegmentIndexMutation is one SegmentIndex half of a manifest commit: a record
@@ -131,8 +134,11 @@ type SegmentIndexMutation struct {
 	BuildID int64
 	// FinishedTask is the raw worker result an upsert projects the persisted
 	// record from. Required for SegmentIndexUpsert, rejected for
-	// SegmentIndexRemove and SegmentIndexBackfill.
+	// SegmentIndexRemove, SegmentIndexBackfill and SegmentIndexRollback.
 	FinishedTask *workerpb.IndexTaskInfo
+	// rollbackEntry is prepared only by rollbackSegmentIndexes under the
+	// segment lock from the published manifest, then checked under BuildID lock.
+	rollbackEntry *packed.ManifestIndexInfo
 }
 
 // SegmentManifestCommit describes one segment-scoped StorageV3 commit.
@@ -176,7 +182,19 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 	locks.Lock(commit.SegmentID)
 	defer locks.Unlock(commit.SegmentID)
 	lockWait := time.Since(lockStart)
+	return m.commitSegmentManifestLocked(ctx, commit, "", lockWait)
+}
+
+// rollbackSource is internal: rollback reads its entries under the segment
+// lock, and only that entry point may retract them into etcd or update a
+// retained Dropped segment. Public commit semantics remain unchanged.
+func (m *meta) commitSegmentManifestLocked(ctx context.Context, commit SegmentManifestCommit, rollbackSource string, lockWait time.Duration) error {
 	holdStart := time.Now()
+	for _, mutation := range commit.CatalogMutation.SegmentIndexes {
+		if (mutation.Type == SegmentIndexRollback) != (rollbackSource != "") {
+			return merr.WrapErrServiceInternalMsg("rollback index mutations require the locked rollback entry point")
+		}
+	}
 	indexBuildIDs, err := validateSegmentIndexMutations(commit)
 	if err != nil {
 		return err
@@ -227,7 +245,10 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 	if segment.GetStorageVersion() != storage.StorageV3 {
 		return merr.WrapErrServiceInternalMsg("segment manifest commit requires StorageV3, segmentID=%d", commit.SegmentID)
 	}
-	if !isSegmentHealthy(segment) {
+	if rollbackSource != "" && (!isSegmentIndexRollbackRetained(segment) || segment.GetManifestPath() != rollbackSource) {
+		return staleSegmentManifestError(commit.SegmentID, rollbackSource, segment.GetManifestPath())
+	}
+	if !isSegmentHealthy(segment) && rollbackSource == "" {
 		// A segment retired (dropped) after the worker finished is gone for
 		// publication purposes: the pointer must not advance and the caller must
 		// not retry the obsolete result. Report not-found rather than an
@@ -260,7 +281,7 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 				"segment index mutation buildID=%d belongs to segment %d, not manifest segment %d",
 				indexMutation.BuildID, staged.record.SegmentID, commit.SegmentID)
 		}
-		if indexMutation.Type == SegmentIndexBackfill && staged.record != nil &&
+		if (indexMutation.Type == SegmentIndexBackfill || indexMutation.Type == SegmentIndexRollback) && staged.record != nil &&
 			(staged.record.CollectionID != segment.GetCollectionID() ||
 				staged.record.PartitionID != segment.GetPartitionID()) {
 			return merr.WrapErrServiceInternalMsg(
@@ -269,13 +290,18 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 				staged.record.CollectionID, staged.record.PartitionID, staged.record.SegmentID,
 				segment.GetCollectionID(), segment.GetPartitionID(), commit.SegmentID)
 		}
-		if indexMutation.Type == SegmentIndexRemove && staged.record != nil &&
+		if (indexMutation.Type == SegmentIndexRemove || (indexMutation.Type == SegmentIndexRollback && indexMutation.rollbackEntry != nil)) && staged.record != nil &&
 			!commitRetractsIndexIdentity(commit, staged.record.IndexID, indexMutation.BuildID) {
 			return merr.WrapErrServiceInternalMsg(
 				"segment index removal does not match the manifest retraction, segmentID=%d indexID=%d buildID=%d",
 				commit.SegmentID, staged.record.IndexID, indexMutation.BuildID)
 		}
 		stagedIndexes = append(stagedIndexes, staged)
+		if indexMutation.Type == SegmentIndexRollback {
+			if err := m.validateRollbackIndex(segment, *indexMutation, staged.record); err != nil {
+				return err
+			}
+		}
 		if indexMutation.Type == SegmentIndexUpsert || indexMutation.Type == SegmentIndexBackfill {
 			for _, manifestIndex := range commit.Mutation.Updates.Indexes {
 				if manifestIndex.BuildID != indexMutation.BuildID {
@@ -297,7 +323,15 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 		return err
 	}
 
-	commit.CatalogMutation.manifestHasIndex, err = m.manifestIndexMarkerAfterMutation(ctx, segment, manifestPath, commit)
+	if rollbackSource != "" {
+		var entries []packed.ManifestIndexInfo
+		entries, err = m.readManifestIndexes(ctx, manifestPath, commit.StorageConfig)
+		if err == nil {
+			commit.CatalogMutation.manifestHasIndex = proto.Bool(len(entries) > 0)
+		}
+	} else {
+		commit.CatalogMutation.manifestHasIndex, err = m.manifestIndexMarkerAfterMutation(ctx, segment, manifestPath, commit)
+	}
 	if err != nil {
 		return err
 	}
@@ -327,10 +361,16 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 				return merr.WrapErrSegmentNotFound(commit.SegmentID)
 			}
 			latest = latest.Clone()
+			if rollbackSource != "" && latest.GetManifestPath() != rollbackSource {
+				return staleSegmentManifestError(commit.SegmentID, rollbackSource, latest.GetManifestPath())
+			}
 			if latest.GetStorageVersion() != storage.StorageV3 {
 				return merr.WrapErrServiceInternalMsg("segment manifest commit requires StorageV3, segmentID=%d", commit.SegmentID)
 			}
-			if !isSegmentHealthy(latest) {
+			if rollbackSource != "" && !isSegmentIndexRollbackRetained(latest) {
+				return merr.WrapErrServiceUnavailableMsg("segment %d changed eligibility during index rollback", commit.SegmentID)
+			}
+			if !isSegmentHealthy(latest) && rollbackSource == "" {
 				// Same as the pre-I/O check above: a segment dropped during manifest
 				// I/O is treated as not-found so callers discard rather than retry.
 				return merr.WrapErrSegmentNotFound(commit.SegmentID, "segment dropped or unhealthy during manifest commit")
@@ -384,6 +424,10 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 				segmentMetricFormatLabel(updated),
 				updated.GetNumOfRows(),
 			)
+		} else if rollbackSource != "" {
+			// Rollback does not change binlogs, including for Dropped parents.
+			// Keep the atomic write to one segment PUT plus the index PUTs.
+			action = metastore.UpdateSegment(updated.SegmentInfo)
 		} else {
 			action = metastore.AlterSegment(updated.SegmentInfo)
 		}
@@ -447,6 +491,11 @@ func validateSegmentIndexMutations(commit SegmentManifestCommit) ([]int64, error
 					"segment index publication requires a matching manifest entry, segmentID=%d buildID=%d",
 					commit.SegmentID, mutation.BuildID)
 			}
+		case SegmentIndexRollback:
+			if mutation.rollbackEntry == nil {
+				continue // the locked source read proved no manifest entry exists
+			}
+			fallthrough
 		case SegmentIndexRemove:
 			if !commitRetractsIndexEntry(commit, mutation.BuildID) {
 				return nil, merr.WrapErrServiceInternalMsg(
