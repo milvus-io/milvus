@@ -92,6 +92,8 @@ func setCustomWpConfig(wpConfig *config.Configuration, cfg *paramtable.Woodpecke
 	wpConfig.Etcd.RootPath = paramtable.Get().EtcdCfg.RootPath.GetValue()
 	// logClient
 	wpConfig.Woodpecker.Client.Auditor.MaxInterval = config.NewDurationSecondsFromInt(int(cfg.AuditorMaxInterval.GetAsDurationByParse().Seconds()))
+	wpConfig.Woodpecker.Client.Auditor.CompactionAttemptTimeout = config.NewDurationSecondsFromInt(int(cfg.AuditorCompactionAttemptTimeout.GetAsDurationByParse().Seconds()))
+	wpConfig.Woodpecker.Client.Auditor.CompactionPassBudget = config.NewDurationSecondsFromInt(int(cfg.AuditorCompactionPassBudget.GetAsDurationByParse().Seconds()))
 	wpConfig.Woodpecker.Client.SegmentAppend.MaxRetries = cfg.AppendMaxRetries.GetAsInt()
 	wpConfig.Woodpecker.Client.SegmentAppend.QueueSize = cfg.AppendQueueSize.GetAsInt()
 	// GetAsInt/GetAsSize return 0 on a parse failure (e.g. a typo like "1,000"),
@@ -162,6 +164,10 @@ func setCustomWpConfig(wpConfig *config.Configuration, cfg *paramtable.Woodpecke
 	wpConfig.Woodpecker.Logstore.SegmentCompactionPolicy.MaxBytes = config.NewByteSize(cfg.CompactionSize.GetAsSize())
 	wpConfig.Woodpecker.Logstore.SegmentCompactionPolicy.MaxParallelUploads = cfg.CompactionMaxParallelUploads.GetAsInt()
 	wpConfig.Woodpecker.Logstore.SegmentCompactionPolicy.MaxParallelReads = cfg.CompactionMaxParallelReads.GetAsInt()
+	wpConfig.Woodpecker.Logstore.SegmentCompactionPolicy.Timeout = config.NewDurationSecondsFromInt(int(cfg.CompactionTimeout.GetAsDurationByParse().Seconds()))
+	wpConfig.Woodpecker.Logstore.SegmentCompactionPolicy.MaxInflightMemory = config.NewByteSize(cfg.CompactionMaxInflightMemory.GetAsSize())
+	wpConfig.Woodpecker.Logstore.SegmentCompactionPolicy.MemoryHighWatermark = cfg.CompactionMemoryHighWatermark.GetAsFloat()
+	wpConfig.Woodpecker.Logstore.SyncScheduler.MaxWorkers = cfg.SyncSchedulerMaxWorkers.GetAsInt()
 	wpConfig.Woodpecker.Logstore.SegmentReadPolicy.MaxBatchSize = config.NewByteSize(cfg.ReaderMaxBatchSize.GetAsSize())
 	wpConfig.Woodpecker.Logstore.SegmentReadPolicy.MaxFetchThreads = cfg.ReaderMaxFetchThreads.GetAsInt()
 	wpConfig.Woodpecker.Logstore.RetentionPolicy.TTL = int(cfg.RetentionTTL.GetAsDurationByParse().Milliseconds() / 1000) // convert to seconds
