@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -40,6 +41,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
+
+type releaseJobTargetManager struct{ meta.TargetManagerInterface }
 
 type releaseJobCatalog struct {
 	metastore.QueryCoordCatalog
@@ -143,12 +146,33 @@ func newReleaseCollectionJobMeta(t *testing.T, collectionID, replicaID int64, no
 func newReleaseJobDeps(t *testing.T, m *meta.Meta, dist *meta.DistributionManager) (*observers.TargetObserver, *checkers.CheckerController, proxyutil.ProxyClientManagerInterface) {
 	t.Helper()
 
-	targetMgr := meta.NewMockTargetManager(t)
-	targetMgr.EXPECT().IsNextTargetExist(mock.Anything, mock.Anything).Return(true).Maybe()
-	targetMgr.EXPECT().IsCurrentTargetExist(mock.Anything, mock.Anything, mock.Anything).Return(true).Maybe()
-	targetMgr.EXPECT().GetDmChannelsByCollection(mock.Anything, mock.Anything, mock.Anything).Return(map[string]*meta.DmChannel{}).Maybe()
-	targetMgr.EXPECT().UpdateCollectionNextTarget(mock.Anything, mock.Anything).Return(nil).Maybe()
-	targetMgr.EXPECT().RemoveCollection(mock.Anything, mock.Anything).Return().Maybe()
+	targetMgr := &releaseJobTargetManager{}
+	mockIsNextTargetExist := mockey.Mock((*releaseJobTargetManager).IsNextTargetExist).
+		Return(true).
+		Build()
+	mockIsCurrentTargetExist := mockey.Mock((*releaseJobTargetManager).IsCurrentTargetExist).
+		Return(true).
+		Build()
+	mockGetDmChannels := mockey.Mock((*releaseJobTargetManager).GetDmChannelsByCollection).
+		Return(map[string]*meta.DmChannel{}).
+		Build()
+	mockUpdateNextTarget := mockey.Mock((*releaseJobTargetManager).UpdateCollectionNextTarget).
+		Return(nil).
+		Build()
+	mockRemoveCollection := mockey.Mock((*releaseJobTargetManager).RemoveCollection).
+		Return().
+		Build()
+	mockGetTargetVersion := mockey.Mock((*releaseJobTargetManager).GetCollectionTargetVersion).
+		Return(int64(0)).
+		Build()
+	t.Cleanup(func() {
+		mockGetTargetVersion.UnPatch()
+		mockRemoveCollection.UnPatch()
+		mockUpdateNextTarget.UnPatch()
+		mockGetDmChannels.UnPatch()
+		mockIsCurrentTargetExist.UnPatch()
+		mockIsNextTargetExist.UnPatch()
+	})
 	nodeMgr := session.NewNodeManager()
 
 	targetObserver := observers.NewTargetObserver(m, targetMgr, dist, nil, nil, nodeMgr)
