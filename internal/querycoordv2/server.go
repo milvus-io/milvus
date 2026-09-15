@@ -404,10 +404,6 @@ func (s *Server) initMeta() error {
 		return err
 	}
 
-	if err := s.meta.RecoverReplicaTargets(s.ctx); err != nil {
-		return merr.Wrap(err, "failed to recover replica load targets")
-	}
-
 	err = s.meta.ResourceManager.Recover(s.ctx)
 	if err != nil {
 		mlog.Warn(s.ctx, "failed to recover resource groups", mlog.Err(err))

@@ -19,7 +19,6 @@ package querycoordv2
 import (
 	"context"
 	"fmt"
-	"maps"
 	"sync"
 
 	"github.com/cockroachdb/errors"
@@ -1045,22 +1044,8 @@ func (s *Server) updateLoadConfig(ctx context.Context, collectionIDs []int64, ne
 		}
 
 		collectionUsedRG := s.meta.ReplicaManager.GetResourceGroupByCollection(ctx, collection.GetCollectionID()).Collect()
-		rgChanged := false
-		if len(newRGs) > 0 {
-			count := newReplicaNum
-			if count == 0 {
-				count = collection.GetReplicaNumber()
-			}
-			expected, err := utils.ReplicaCounts(newRGs, count)
-			if err != nil {
-				return err
-			}
-			actual := make(map[string]int)
-			for _, replica := range s.meta.GetByCollection(ctx, collectionID) {
-				actual[replica.GetResourceGroup()]++
-			}
-			rgChanged = !maps.Equal(expected, actual)
-		}
+		left, right := lo.Difference(collectionUsedRG, newRGs)
+		rgChanged := len(left) > 0 || len(right) > 0
 		replicaChanged := collection.GetReplicaNumber() != newReplicaNum
 
 		subReq := &querypb.UpdateLoadConfigRequest{

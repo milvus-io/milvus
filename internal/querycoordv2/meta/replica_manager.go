@@ -634,16 +634,6 @@ func (m *ReplicaManager) removeReplicasInMemory(collectionID typeutil.UniqueID, 
 	}
 }
 
-// GetCollectionIDs includes collections whose replicas are still being released.
-func (m *ReplicaManager) GetCollectionIDs() []int64 {
-	ids := make([]int64, 0)
-	m.coll2Replicas.Range(func(id int64, _ []*Replica) bool {
-		ids = append(ids, id)
-		return true
-	})
-	return ids
-}
-
 func (m *ReplicaManager) GetByCollection(ctx context.Context, collectionID typeutil.UniqueID) []*Replica {
 	replicas, _ := m.coll2Replicas.Get(collectionID)
 	return replicas

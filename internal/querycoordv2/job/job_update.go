@@ -94,10 +94,7 @@ func (job *UpdateLoadConfigJob) Execute() error {
 		job.newResourceGroups = []string{meta.DefaultResourceGroupName}
 	}
 
-	expected, err := utils.ReplicaCounts(job.newResourceGroups, job.newReplicaNumber)
-	if err != nil {
-		return err
-	}
+	var err error
 	// 2. reassign
 	toSpawn, toTransfer, toRelease, err := utils.ReassignReplicaToRG(job.ctx, job.meta, job.collectionID, job.newReplicaNumber, job.newResourceGroups)
 	if err != nil {
@@ -188,11 +185,7 @@ func (job *UpdateLoadConfigJob) Execute() error {
 	utils.RecoverReplicaOfCollection(job.ctx, job.meta, job.collectionID)
 
 	// 7. update replica number in meta
-	replicaNumbers := make(map[string]int32, len(expected))
-	for rg, count := range expected {
-		replicaNumbers[rg] = int32(count)
-	}
-	err = job.meta.UpdateReplicaConfig(job.ctx, job.collectionID, job.newReplicaNumber, job.userSpecifiedReplicaMode, replicaNumbers)
+	err = job.meta.UpdateReplicaNumber(job.ctx, job.collectionID, job.newReplicaNumber, job.userSpecifiedReplicaMode)
 	if err != nil {
 		msg := "failed to update replica number"
 		mlog.Warn(context.TODO(),

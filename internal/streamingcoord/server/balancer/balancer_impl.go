@@ -2,7 +2,6 @@ package balancer
 
 import (
 	"context"
-	"sort"
 	"sync"
 	"time"
 
@@ -170,18 +169,32 @@ func (b *balancerImpl) ConfirmPrimaryResourceGroupReady(ctx context.Context) err
 	}
 	defer b.lifetime.Done()
 
-	groups, err := CheckWALPlacement(ctx, b, paramtable.Get().StreamingCfg.PrimaryResourceGroup.GetValue())
+	primaryRG := paramtable.Get().StreamingCfg.PrimaryResourceGroup.GetValue()
+	if primaryRG == "" {
+		return nil
+	}
+	nodes, err := resource.Resource().StreamingNodeManagerClient().GetAllStreamingNodes(ctx)
 	if err != nil {
 		return err
 	}
-	names := make([]string, 0, len(groups))
-	for rg := range groups {
-		names = append(names, rg)
+	assignment, err := b.channelMetaManager.GetLatestChannelAssignment()
+	if err != nil {
+		return err
 	}
-	sort.Strings(names)
-	for _, rg := range names {
-		if groups[rg] != "" {
-			return merr.WrapErrServiceUnavailableMsg("%s", groups[rg])
+	for _, rel := range assignment.Relations {
+		// Only RW pchannels carry WAL writes; RO pchannels (e.g., CDC source) are
+		// not constrained by the local primary RG.
+		if rel.Channel.AccessMode != types.AccessModeRW {
+			continue
+		}
+		node, ok := nodes[rel.Node.ServerID]
+		if !ok {
+			return status.NewInner("pchannel %s: assigned node %d not found in streaming nodes",
+				rel.Channel.Name, rel.Node.ServerID)
+		}
+		if node.ResourceGroup != primaryRG {
+			return status.NewInner("pchannel %s still on rg=%s, expected primary rg=%s (WAL migration in progress)",
+				rel.Channel.Name, node.ResourceGroup, primaryRG)
 		}
 	}
 	return nil
