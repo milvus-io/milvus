@@ -487,6 +487,10 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		}
 	}
 
+	if hasPathReplacePlan(it.fieldPartialUpdatePlans) && len(insertIdxInUpsert) > 0 {
+		return merr.WrapErrParameterInvalidMsg("PATH_REPLACE requires every primary key in the request to exist")
+	}
+
 	if len(insertIdxInUpsert) > 0 {
 		// Missing rows need complete insert fields, regardless of AutoID.
 		lackOfFieldErr := LackOfFieldsDataBySchema(it.schema.CollectionSchema, it.upsertMsg.InsertMsg.GetFieldsData(), false, true)
@@ -532,10 +536,6 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		}
 		it.partialUpdateCASGroups = groups
 	}
-	if hasPathReplacePlan(it.fieldPartialUpdatePlans) && len(insertIdxInUpsert) > 0 {
-		return merr.WrapErrParameterInvalidMsg("PATH_REPLACE requires every primary key in the request to exist")
-	}
-
 	// 2. merge field data on update semantic
 	var pathReplaceMergeRecorder *timerecord.TimeRecorder
 	if hasPathReplacePlan(it.fieldPartialUpdatePlans) {

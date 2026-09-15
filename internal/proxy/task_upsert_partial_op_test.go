@@ -950,6 +950,12 @@ func TestUpsertTaskQueryPreExecutePathReplaceAlignsRowsByPrimaryKey(t *testing.T
 
 	t.Run("missing primary key", func(t *testing.T) {
 		task := newTask()
+		// A positional replacement is not an insert, even when required
+		// insert-only fields are absent from the operand.
+		schemaWithRequiredField := proto.Clone(collectionSchema).(*schemapb.CollectionSchema)
+		schemaWithRequiredField.Fields = append(schemaWithRequiredField.Fields,
+			&schemapb.FieldSchema{FieldID: 102, Name: "required", DataType: schemapb.DataType_Int64})
+		task.schema = mustNewSchemaInfo(schemaWithRequiredField)
 		existingScores := arrayLongFieldData("scores", [][]int64{{10, 11}})
 		existingScores.FieldId = 101
 		mockRetrieve := mockey.Mock(retrieveByPKs).Return(&milvuspb.QueryResults{
