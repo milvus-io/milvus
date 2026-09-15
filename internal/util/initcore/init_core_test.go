@@ -23,11 +23,90 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/internal/util/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/config"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+func TestResolveArrowIOThreadPoolCapacity(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	defer pt.Reset(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key)
+	defer pt.Reset(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key)
+
+	for _, tc := range []struct {
+		name, coefficient, maxCapacity string
+		want                           int
+		wantErr                        bool
+	}{
+		{name: "negative", coefficient: "-1", maxCapacity: "1", wantErr: true},
+		{name: "negative_fraction", coefficient: "-0.5", maxCapacity: "1", wantErr: true},
+		{name: "zero_fixed_default", coefficient: "0", maxCapacity: "0", want: defaultArrowIOThreadPoolCapacity},
+		{name: "zero_ignores_cap", coefficient: "0", maxCapacity: "1", want: defaultArrowIOThreadPoolCapacity},
+		{name: "positive", coefficient: "2", maxCapacity: "0", want: 2 * hardware.GetCPUNum()},
+		{name: "positive_fraction", coefficient: "0.5", maxCapacity: "0", want: max(1, hardware.GetCPUNum()/2)},
+		{name: "positive_capped", coefficient: "2", maxCapacity: "1", want: 1},
+		{name: "positive_minimum", coefficient: "0.000001", maxCapacity: "0", want: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.NoError(t, pt.Save(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key, tc.coefficient))
+			assert.NoError(t, pt.Save(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key, tc.maxCapacity))
+			got, err := ResolveArrowIOThreadPoolCapacity()
+			if tc.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// TestApplyArrowIOThreadPoolCapacityHotReload drives paramtable Save ->
+// watcher -> ApplyArrowIOThreadPoolCapacity -> arrow and reads the capacity
+// back through the core prometheus gauge.
+func TestApplyArrowIOThreadPoolCapacityHotReload(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	defer func() {
+		pt.Reset(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key)
+		pt.Reset(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key)
+		ApplyArrowIOThreadPoolCapacity("test", "cleanup")
+	}()
+	RegisterArrowIOThreadPoolWatchers(pt, "test")
+
+	registry := metrics.NewCRegistry()
+	capacity := func() int {
+		families, err := registry.Gather()
+		require.NoError(t, err)
+		for _, mf := range families {
+			if mf.GetName() == "internal_arrow_io_pool_capacity" {
+				require.Len(t, mf.GetMetric(), 1)
+				return int(mf.GetMetric()[0].GetGauge().GetValue())
+			}
+		}
+		require.FailNow(t, "internal_arrow_io_pool_capacity gauge not found")
+		return -1
+	}
+
+	assert.NoError(t, pt.Save(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key, "0"))
+	assert.NoError(t, pt.Save(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key, "2"))
+	assert.Equal(t, 2*hardware.GetCPUNum(), capacity())
+
+	assert.NoError(t, pt.Save(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key, "0"))
+	assert.Equal(t, defaultArrowIOThreadPoolCapacity, capacity())
+
+	assert.NoError(t, pt.Save(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key, "-1"))
+	assert.Equal(t, defaultArrowIOThreadPoolCapacity, capacity())
+
+	assert.NoError(t, pt.Save(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key, "2"))
+	assert.NoError(t, pt.Save(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key, "3"))
+	assert.Equal(t, 3, capacity())
+}
 
 func TestTracer(t *testing.T) {
 	paramtable.Init()
