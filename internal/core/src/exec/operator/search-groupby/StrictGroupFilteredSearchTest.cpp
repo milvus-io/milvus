@@ -499,8 +499,39 @@ TEST(StrictGroupPhase1Test, BackendReceivesRefinementOverride) {
     }
 }
 
-TEST(StrictGroupPhase1Test, BudgetFreezesDiscoveryButNotCompletion) {
-    const std::vector<int64_t> labels{10, 10, 20, 30, 10, 20, 20, 30, 30};
+TEST(StrictGroupPhase1Test, WeightScalesWithQuotaAndSaturates) {
+    SearchInfo info;
+    info.topk_ = 50;
+    info.group_size_ = 3;
+    EXPECT_EQ(query::StrictGroupPhase1CandidateLimit(info), 0);
+    info.strict_group_phase1_candidate_weight_ = 50;
+    EXPECT_EQ(query::StrictGroupPhase1CandidateLimit(info), 7500);
+    info.topk_ = 10;
+    EXPECT_EQ(query::StrictGroupPhase1CandidateLimit(info), 1500);
+    info.topk_ = 0;
+    EXPECT_EQ(query::StrictGroupPhase1CandidateLimit(info), 0);
+    info.topk_ = 10;
+    info.group_size_ = 0;
+    EXPECT_EQ(query::StrictGroupPhase1CandidateLimit(info), 0);
+    info.group_size_ = 3;
+    info.strict_group_phase1_candidate_weight_ =
+        std::numeric_limits<int64_t>::max();
+    EXPECT_EQ(query::StrictGroupPhase1CandidateLimit(info),
+              std::numeric_limits<int64_t>::max());
+    info.strict_group_phase1_candidate_weight_ = 2;
+    info.topk_ = std::numeric_limits<int64_t>::max();
+    EXPECT_EQ(query::StrictGroupPhase1CandidateLimit(info),
+              std::numeric_limits<int64_t>::max());
+    info.strict_group_phase1_candidate_weight_ = 0;
+    EXPECT_EQ(query::StrictGroupPhase1CandidateLimit(info), 0);
+}
+
+TEST(StrictGroupPhase1Test, WeightFreezesDiscoveryButNotCompletion) {
+    // Weight=2 stops at 18 candidates: group 20 has only one accepted row
+    // at that point, so completion must continue beyond the phase-one limit.
+    std::vector<int64_t> labels(17, 10);
+    labels.insert(labels.end(), 7, 20);
+    labels.insert(labels.end(), 12, 30);
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
     auto field = schema->AddDebugField("group", DataType::INT64);
@@ -520,13 +551,13 @@ TEST(StrictGroupPhase1Test, BudgetFreezesDiscoveryButNotCompletion) {
         for (int provider :
              {0, 1, 2}) {  // no provider, full provider, no result
             for (bool unused : {false}) {
-                for (int64_t budget : {0, 1, 2, 3, 4, 20}) {
+                for (int64_t weight : {0, 1, 2, 3, 4, 20}) {
                     for (int nq : {1, 2}) {
                         for (int gs : {1, 3}) {
                             for (bool strict : {false, true}) {
                                 SCOPED_TRACE(::testing::Message()
                                              << int(strategy) << "/" << provider
-                                             << "/" << budget << "/" << nq
+                                             << "/" << weight << "/" << nq
                                              << "/" << gs << "/" << strict);
                                 std::vector<std::pair<int64_t, float>>
                                     candidates;
@@ -570,8 +601,8 @@ TEST(StrictGroupPhase1Test, BudgetFreezesDiscoveryButNotCompletion) {
                                 info.strict_group_size_ = strict;
                                 info.group_by_field_ids_ = {field};
                                 info.metric_type_ = knowhere::metric::L2;
-                                info.strict_group_phase1_max_candidates_ =
-                                    budget;
+                                info.strict_group_phase1_candidate_weight_ =
+                                    weight;
                                 info.strict_group_strategy_ = strategy;
                                 std::vector<GroupByValueType> groups;
                                 std::vector<int64_t> offsets;
@@ -588,9 +619,9 @@ TEST(StrictGroupPhase1Test, BudgetFreezesDiscoveryButNotCompletion) {
                                     prefix,
                                     provider == 2 ? nullptr : &result);
                                 size_t group_count = 3;
-                                if (strict && gs > 1 && nq == 1 && budget > 0 &&
-                                    budget < 4) {
-                                    group_count = budget < 3 ? 1 : 2;
+                                if (strict && gs > 1 && nq == 1 && weight > 0 &&
+                                    weight < 3) {
+                                    group_count = weight == 1 ? 1 : 2;
                                 }
                                 ASSERT_EQ(prefix.size(), nq + 1);
                                 for (int q = 0; q < nq; ++q) {
@@ -991,11 +1022,18 @@ TEST(StrictGroupPhase2ExecutorTest, BackendPreparationPreservesTypedErrors) {
                   knowhere::Version::GetCurrentVersion().VersionNumber()) {
         }
         ErrorCode error = ErrorCode::FollyCancel;
+        bool unsupported_status = false;
         knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
         VectorIterators(const DatasetPtr,
                         const knowhere::Json&,
                         const BitsetView&,
                         milvus::OpContext* = nullptr) const override {
+            if (unsupported_status) {
+                return knowhere::expected<
+                    std::vector<knowhere::IndexNode::IteratorPtr>>::
+                    Err(knowhere::Status::not_implemented,
+                        "iterator unsupported");
+            }
             throw SegcoreError(error, "injected backend preparation failure");
         }
     } index;
@@ -1019,6 +1057,17 @@ TEST(StrictGroupPhase2ExecutorTest, BackendPreparationPreservesTypedErrors) {
                 EXPECT_EQ(error.get_error_code(), code);
             }
         }
+    }
+    index.unsupported_status = true;
+    SearchResult result;
+    try {
+        PrepareVectorIteratorsFromIndex(
+            info, 1, nullptr, result, BitsetView{}, index);
+        FAIL() << "unsupported iterator must throw";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::Unsupported);
+        EXPECT_NE(std::string(error.what()).find("doesn't support"),
+                  std::string::npos);
     }
 }
 

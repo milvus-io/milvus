@@ -197,24 +197,24 @@ func applyStrictGroupSettings(ctx context.Context, info *planpb.QueryInfo) (bool
 	}
 	_, hadStrategy := params[common.StrictGroupStrategyKey]
 	_, hadDebug := params[common.StrictGroupDebugKey]
-	_, hadPhase1 := params[common.StrictGroupPhase1MaxCandidatesKey]
+	_, hadPhase1 := params[common.StrictGroupPhase1CandidateWeightKey]
 	_, hadSkipRefine := params[common.StrictGroupSkipRefineKey]
 	delete(params, common.StrictGroupStrategyKey)
 	delete(params, common.StrictGroupDebugKey)
-	delete(params, common.StrictGroupPhase1MaxCandidatesKey)
+	delete(params, common.StrictGroupPhase1CandidateWeightKey)
 	delete(params, common.StrictGroupSkipRefineKey)
 	eligible := info.GetStrictGroupSize() && info.GetGroupSize() > 1 && (info.GetGroupByFieldId() > 0 || len(info.GetGroupByFieldIds()) > 0)
 	if eligible {
 		cfg := &paramtable.Get().QueryNodeCfg
-		phase1, err := strconv.ParseInt(cfg.StrictGroupPhase1MaxCandidates.GetValue(), 10, 64)
+		phase1, err := strconv.ParseInt(cfg.StrictGroupPhase1CandidateWeight.GetValue(), 10, 64)
 		if err != nil || phase1 < 0 {
-			return false, merr.WrapErrServiceUnavailable("invalid server config: " + cfg.StrictGroupPhase1MaxCandidates.Key)
+			return false, merr.WrapErrServiceUnavailable("invalid server config: " + cfg.StrictGroupPhase1CandidateWeight.Key)
 		}
 		skipRefine, err := strconv.ParseBool(cfg.StrictGroupSkipRefine.GetValue())
 		if err != nil {
 			return false, merr.WrapErrServiceUnavailable("invalid server config: " + cfg.StrictGroupSkipRefine.Key)
 		}
-		params[common.StrictGroupPhase1MaxCandidatesKey] = json.RawMessage(strconv.FormatInt(phase1, 10))
+		params[common.StrictGroupPhase1CandidateWeightKey] = json.RawMessage(strconv.FormatInt(phase1, 10))
 		params[common.StrictGroupSkipRefineKey] = json.RawMessage(strconv.FormatBool(skipRefine))
 		debug, err := strconv.ParseBool(cfg.StrictGroupDebug.GetValue())
 		if err != nil {

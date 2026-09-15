@@ -24,8 +24,8 @@
 const int64_t INVALID_FIELD_ID = -1;
 inline constexpr char kStrictGroupStrategy[] = "strict_group_strategy";
 inline constexpr char kStrictGroupDebug[] = "strict_group_debug";
-inline constexpr char kStrictGroupPhase1MaxCandidates[] =
-    "strict_group_phase1_max_candidates";
+inline constexpr char kStrictGroupPhase1CandidateWeight[] =
+    "strict_group_phase1_candidate_weight";
 inline constexpr char kStrictGroupSkipRefine[] = "strict_group_skip_refine";
 const int64_t INVALID_SEG_OFFSET = -1;
 const int64_t INVALID_ARRAY_INDEX = -1;
