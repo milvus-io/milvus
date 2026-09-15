@@ -394,10 +394,11 @@ func (c *confirmator) processGates(ctx context.Context) bool {
 
 // recheckAndFlip re-evaluates the minimum online version against a fresh etcd
 // read before the irreversible flip (the session watch is event-driven and its
-// events may lag behind the flip check), then performs the flip. It returns
-// true when the gate is resolved (flipped, or superseded by an explicit config
-// value). Transient failures (etcd scan/flip errors) grow the gate's retry
-// backoff exponentially up to the SwitchDelay cap.
+// events may lag behind the flip check), verifies the gate's declared
+// dependency, then performs the flip. It returns true when the gate is resolved
+// (flipped, or superseded by an explicit config value). Transient failures
+// (etcd scan/flip errors) grow the gate's retry backoff exponentially up to the
+// SwitchDelay cap; an unsatisfied dependency does not.
 func (c *confirmator) recheckAndFlip(ctx context.Context, g *gate) bool {
 	min, _, err := c.scanSessions(ctx)
 	if err != nil {
@@ -416,6 +417,26 @@ func (c *confirmator) recheckAndFlip(ctx context.Context, g *gate) bool {
 		mlog.Warn(ctx, "version gate: cluster below gate version at flip time, reset stability window",
 			mlog.String("key", g.key), mlog.String("gateVersion", g.switcher.GateVersion),
 			mlog.String("minOnline", min.String()))
+		return false
+	}
+	// The declared dependency must be confirmed in the config center before the
+	// flip: e.g. proxy.splitChunk=false is only written after
+	// streaming.splitChunkSN=true. This guarantees etcd write ordering, not that
+	// every process has observed the first write. A missing or different value
+	// means the dependency is not yet confirmed — keep waiting on the next round
+	// WITHOUT backoff, so an operator's explicit value on the dependency (the
+	// escape hatch) keeps blocking the flip forever.
+	satisfied, err := c.dependencySatisfied(ctx, g)
+	if err != nil {
+		c.backoffForRetryLocked(g)
+		mlog.Warn(ctx, "version gate: dependency check failed, retry later",
+			mlog.String("key", g.key), mlog.String("dependsOn", g.switcher.DependsOn), mlog.Err(err))
+		return false
+	}
+	if !satisfied {
+		mlog.Info(ctx, "version gate: dependency not yet satisfied, keep waiting",
+			mlog.String("key", g.key), mlog.String("dependsOn", g.switcher.DependsOn),
+			mlog.String("want", g.switcher.DependsOnValue))
 		return false
 	}
 	if err := c.flip(ctx, g); err != nil {
@@ -533,6 +554,26 @@ func isZero(v semver.Version) bool {
 // configKey returns the config-center etcd key of a config item.
 func (c *confirmator) configKey(key string) string {
 	return path.Join(c.configRoot, "config", config.FormatKey(key))
+}
+
+// dependencySatisfied reports whether the gate's declared dependency holds in
+// the config center: the etcd key DependsOn must currently hold
+// DependsOnValue. Gates without a dependency are always satisfied. The check
+// reads the config center directly (not the process-local config manager),
+// because it must observe the authoritative cluster-wide state written by
+// another gate's flip, not this process's possibly-stale local view.
+func (c *confirmator) dependencySatisfied(ctx context.Context, g *gate) (bool, error) {
+	if g.switcher.DependsOn == "" {
+		return true, nil
+	}
+	resp, err := c.cli.Get(ctx, c.configKey(g.switcher.DependsOn))
+	if err != nil {
+		return false, err
+	}
+	if len(resp.Kvs) == 0 {
+		return false, nil
+	}
+	return string(resp.Kvs[0].Value) == g.switcher.DependsOnValue, nil
 }
 
 // configValue reads the config-center etcd key of a config item.

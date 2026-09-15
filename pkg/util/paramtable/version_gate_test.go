@@ -225,6 +225,67 @@ func TestConfirmator_MultipleGatesIndependent(t *testing.T) {
 	assertConfigAbsent(t, cli, configRoot, "function.testGate2")
 }
 
+func TestConfirmator_DependencyOrdersFlip(t *testing.T) {
+	// The WAL payload chunking pair: streaming.splitChunkSN flips to "true"
+	// first; proxy.splitChunk (which declares DependsOn on it) flips to
+	// "false" only after the dependency holds in the config center. Register
+	// the dependent gate first to prove correctness does not rely on list order.
+	cli, _ := setupEmbedEtcd(t)
+	metaRoot, configRoot := testRoots(t)
+	putAllUpSessionsAt(t, cli, metaRoot, "3.1.0")
+
+	c := newTestConfirmator(t, cli, metaRoot, configRoot)
+	require.NoError(t, c.registerGate("proxy.splitChunk", &VersionGateSwitcher{
+		EnableAutoSwitchValue: "auto",
+		PreSwitchValue:        "true",
+		GateVersion:           "3.1.0",
+		TargetValue:           "false",
+		SwitchDelay:           50 * time.Millisecond,
+		DependsOn:             "streaming.splitChunkSN",
+		DependsOnValue:        "true",
+	}))
+	require.NoError(t, c.registerGate("streaming.splitChunkSN", &VersionGateSwitcher{
+		EnableAutoSwitchValue: "auto",
+		PreSwitchValue:        "false",
+		GateVersion:           "3.1.0",
+		TargetValue:           "true",
+		SwitchDelay:           50 * time.Millisecond,
+	}))
+	require.NoError(t, c.start(context.Background()))
+	defer c.close()
+
+	waitConfigValue(t, cli, configRoot, "streaming.splitChunkSN", "true")
+	waitConfigValue(t, cli, configRoot, "proxy.splitChunk", "false")
+}
+
+func TestConfirmator_DependencyBlocksFlipUntilSatisfied(t *testing.T) {
+	// Without the dependency (streaming.splitChunkSN=true) the proxy gate stays
+	// pending no matter how long its own stability window has elapsed — e.g. an
+	// operator's explicit splitChunkSN=false escape hatch blocks the dependent
+	// flip forever. Once the dependency holds, the flip happens.
+	cli, _ := setupEmbedEtcd(t)
+	metaRoot, configRoot := testRoots(t)
+	putAllUpSessionsAt(t, cli, metaRoot, "3.1.0")
+
+	c := newTestConfirmator(t, cli, metaRoot, configRoot)
+	require.NoError(t, c.registerGate("proxy.splitChunk", &VersionGateSwitcher{
+		EnableAutoSwitchValue: "auto",
+		PreSwitchValue:        "true",
+		GateVersion:           "3.1.0",
+		TargetValue:           "false",
+		SwitchDelay:           50 * time.Millisecond,
+		DependsOn:             "streaming.splitChunkSN",
+		DependsOnValue:        "true",
+	}))
+	require.NoError(t, c.start(context.Background()))
+	defer c.close()
+
+	assertNoFlip(t, cli, configRoot, "proxy.splitChunk")
+
+	putConfig(t, cli, configRoot, "streaming.splitChunkSN", "true")
+	waitConfigValue(t, cli, configRoot, "proxy.splitChunk", "false")
+}
+
 func TestStartVersionGatesSkipRemote(t *testing.T) {
 	// startVersionGates is a no-op for a skip-remote param table (the common
 	// test setup): no confirmator is created and no goroutine leaks.
@@ -232,6 +293,45 @@ func TestStartVersionGatesSkipRemote(t *testing.T) {
 	p.Init(NewBaseTable(SkipRemote(true)))
 	p.startVersionGates()
 	assert.Nil(t, p.versionGates)
+}
+
+func TestVersionGateItems_AutoDiscovery(t *testing.T) {
+	// Declaring VersionGateSwitcher on a ParamItem is sufficient for discovery;
+	// no manually maintained registration list or registration order is needed.
+	// DependsOn enforces the config-center write ordering independently.
+	p := &ComponentParam{}
+	p.Init(NewBaseTable(SkipRemote(true)))
+
+	items := p.versionGateItems
+	var sn, proxy *ParamItem
+	keys := make([]string, 0, len(items))
+	for _, item := range items {
+		keys = append(keys, item.Key)
+		switch item.Key {
+		case "streaming.splitChunkSN":
+			sn = item
+		case "proxy.splitChunk":
+			proxy = item
+		}
+	}
+	assert.ElementsMatch(t, []string{
+		"function.enableWriteBeforeMaterialization",
+		"proxy.splitChunk",
+		"streaming.splitChunkSN",
+	}, keys)
+	require.NotNil(t, sn)
+	require.NotNil(t, proxy)
+	require.NotNil(t, sn.VersionGateSwitcher)
+	assert.Equal(t, "auto", sn.VersionGateSwitcher.EnableAutoSwitchValue)
+	assert.Equal(t, "false", sn.VersionGateSwitcher.PreSwitchValue)
+	assert.Equal(t, "3.1.0", sn.VersionGateSwitcher.GateVersion)
+	assert.Equal(t, "true", sn.VersionGateSwitcher.TargetValue)
+	require.NotNil(t, proxy.VersionGateSwitcher)
+	assert.Equal(t, "true", proxy.VersionGateSwitcher.PreSwitchValue)
+	assert.Equal(t, "3.1.0", proxy.VersionGateSwitcher.GateVersion)
+	assert.Equal(t, "false", proxy.VersionGateSwitcher.TargetValue)
+	assert.Equal(t, "streaming.splitChunkSN", proxy.VersionGateSwitcher.DependsOn)
+	assert.Equal(t, "true", proxy.VersionGateSwitcher.DependsOnValue)
 }
 
 func TestStartVersionGatesEmbeddedEtcd(t *testing.T) {
@@ -264,6 +364,22 @@ func TestStartVersionGatesEmbeddedEtcd(t *testing.T) {
 	assert.Equal(t, "true", item.GetValue())
 	assert.True(t, item.GetAsBool())
 
+	// The split-chunk capability gate (3.1.0) is NOT satisfied by the local
+	// build version (3.0.0-beta on master): it stays closed and reads the
+	// pre-switch "false", so a standalone build below 3.1 keeps the legacy
+	// single-record path. proxy.splitChunk (registered, but its 3.1.0 gate is
+	// likewise below the local version) keeps the pre-switch "true".
+	sn := &p.StreamingCfg.SplitChunkSN
+	assert.False(t, sn.VersionGateSwitcher.localSatisfied)
+	sn.manager.EvictCachedValue(sn.Key)
+	assert.Equal(t, "false", sn.GetValue())
+	assert.False(t, sn.GetAsBool())
+	proxy := &p.ProxyCfg.SplitChunkProxy
+	assert.False(t, proxy.VersionGateSwitcher.localSatisfied)
+	proxy.manager.EvictCachedValue(proxy.Key)
+	assert.Equal(t, "true", proxy.GetValue())
+	assert.True(t, proxy.GetAsBool())
+
 	// Negative branch: a gate whose version is above the local version stays
 	// closed — localSatisfied remains false and the item reads PreSwitchValue.
 	// (Reset the hint set by the positive branch, then re-run.)
@@ -293,13 +409,19 @@ func gateSwitcher(gateVersion string, delay time.Duration) *VersionGateSwitcher 
 // the common roles, so a watch over the whole session prefix sees them all.
 func putAllUpSessions(t *testing.T, cli *clientv3.Client, metaRoot string) {
 	t.Helper()
+	putAllUpSessionsAt(t, cli, metaRoot, "2.6.23")
+}
+
+// putAllUpSessionsAt is putAllUpSessions with an explicit session version.
+func putAllUpSessionsAt(t *testing.T, cli *clientv3.Client, metaRoot, version string) {
+	t.Helper()
 	for _, role := range []string{
 		typeutil.ProxyRole,
 		typeutil.DataNodeRole,
 		typeutil.QueryNodeRole,
 		typeutil.StreamingNodeRole,
 	} {
-		putSession(t, cli, metaRoot, role, "node-1", "2.6.23")
+		putSession(t, cli, metaRoot, role, "node-1", version)
 	}
 }
 
