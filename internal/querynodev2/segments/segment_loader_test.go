@@ -536,6 +536,7 @@ func (suite *SegmentLoaderSuite) TestLoadIndex() {
 		IndexInfos: []*querypb.FieldIndexInfo{
 			{
 				IndexFilePaths: []string{},
+				IndexParams:    []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: indexparamcheck.IndexINVERTED}},
 			},
 		},
 		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
@@ -548,6 +549,9 @@ func (suite *SegmentLoaderSuite) TestLoadIndex() {
 
 	err := suite.loader.LoadIndex(ctx, segment, loadInfo, 0)
 	suite.ErrorIs(err, merr.ErrIndexNotFound)
+
+	loadInfo.IndexInfos[0].IndexParams[0].Value = mock_segcore.IndexFaissIDMap
+	suite.NoError(suite.loader.LoadIndex(ctx, segment, loadInfo, 0))
 }
 
 func (suite *SegmentLoaderSuite) TestLoadIndexWithLimitedResource() {
@@ -590,6 +594,9 @@ func (suite *SegmentLoaderSuite) TestLoadIndexWithLimitedResource() {
 	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.Key)
 	err := suite.loader.LoadIndex(ctx, segment, loadInfo, 0)
 	suite.Error(err)
+
+	loadInfo.IndexInfos[0].IndexParams[0].Value = mock_segcore.IndexFaissIDMap
+	suite.NoError(suite.loader.LoadIndex(ctx, segment, loadInfo, 0))
 }
 
 func (suite *SegmentLoaderSuite) TestLoadWithMmap() {
