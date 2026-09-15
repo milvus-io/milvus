@@ -510,8 +510,7 @@ struct TantivyIndexWrapper {
         }();
 
         auto res = RustResultWrapper(add);
-        AssertTantivyOk(
-            res, "failed to add row batch: {}", res.result_->error);
+        AssertTantivyOk(res, "failed to add row batch: {}", res.result_->error);
     }
 
     void

@@ -1150,7 +1150,7 @@ TEST(TextMatch, BuildIndexFromFieldDataSealedNullableAcrossBatchBoundary) {
                                          "milvus_tokenizer",
                                          "{}",
                                          /*enable_background_merge=*/false);
-    index->BuildIndexFromFieldData({field_data}, true);
+    index->BuildIndexFromFieldData({field_data}, true, /*offset_begin=*/0);
     index->CreateReader(milvus::index::SetBitsetSealed);
     index->Finish();
     index->Reload();
