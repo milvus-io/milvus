@@ -401,6 +401,8 @@ func printStructArrayFieldsV2(structFields []*schemapb.StructArrayFieldSchema) [
 		subs := make([]gin.H, 0, len(sf.GetFields()))
 		for _, sub := range sf.GetFields() {
 			detail := printFieldDetail(sub, false)
+			// Like PyMilvus, expose nullable only on the parent struct field.
+			detail[HTTPReturnFieldNullable] = false
 			if short, err := typeutil.ExtractStructFieldName(sub.GetName()); err == nil && short != "" {
 				detail[HTTPReturnFieldName] = short
 			}
