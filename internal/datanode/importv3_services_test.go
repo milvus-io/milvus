@@ -33,6 +33,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/datanode/importv3"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -349,10 +350,10 @@ func TestImportV3FinalWriterBackupRejectsBadTimestampColumn(t *testing.T) {
 }
 
 // TestExecuteReshardPlanSpillsAtMemoryCheckpoint pins the dynamic spill path
-// end to end: with a roomy slot budget (static ceiling far above the data)
-// but a process pinned near the high-water mark, every source-batch
-// checkpoint spills the largest bucket, and the end-of-input flush replays
-// all chunks with rows intact.
+// end to end: with an unbounded bucket tail (a single bucket inside the
+// resident cap) but a process pinned near the high-water mark, every
+// source-batch checkpoint drains the largest bucket into the spill log, and
+// the end-of-input flush replays all ranges with rows intact.
 func TestExecuteReshardPlanSpillsAtMemoryCheckpoint(t *testing.T) {
 	initReshardPipelineParams(t)
 	const mib = int64(1024 * 1024)
@@ -367,10 +368,11 @@ func TestExecuteReshardPlanSpillsAtMemoryCheckpoint(t *testing.T) {
 			fix.wideBatch(1), fix.wideBatch(3000), fix.wideBatch(6000),
 		}, size: 100}),
 	}
-	// slot=3 x default 160MiB per slot: the static ceiling is the full
-	// 480MiB budget, never hit by the ~18.6MiB of test data -- only the
-	// dynamic free-memory checkpoint can spill (free=24MiB is far below the
-	// flush spike plus the 20% reserve).
+	// slot=3 x default 160MiB per slot. The fixture's single bucket stays
+	// within reshardResidentBucketCap, so its tail cap is unbounded and the
+	// ~18.6MiB of test data can only reach disk through the dynamic
+	// free-memory checkpoint (free=24MiB is far below the flush spike plus
+	// the 10% reserve).
 	plan := fix.plan([]*datapb.SourceFileSpec{fix.source(1)}, 30*mib)
 	recorder := &reshardCallRecorder{}
 	mockReshardBoundaries(t, readers, recorder)
@@ -378,9 +380,9 @@ func TestExecuteReshardPlanSpillsAtMemoryCheckpoint(t *testing.T) {
 	require.NoError(t, executeReshardPlan(context.Background(), nil, fix.request(plan, 3), plan, nil))
 	require.Equal(t, int64(1), recorder.publishCalled.Load())
 	require.Len(t, recorder.published, 1)
-	// One spill per source-batch checkpoint; the single end-of-input flush
-	// (18.6MiB <= 30MiB sort input) replays all three chunks as one group.
-	require.Equal(t, []int{3}, recorder.spillChunks,
+	// One drained range per source-batch checkpoint; the single end-of-input
+	// flush (18.6MiB <= 30MiB sort input) replays all three ranges as one group.
+	require.Equal(t, []int{3}, recorder.spillRanges,
 		"every source-batch checkpoint must have spilled under memory pressure")
 	require.Equal(t, []int64{0}, recorder.seqs)
 	var totalRows int64
@@ -459,7 +461,7 @@ func TestWriteReshardFragmentReportsDecodedLogicalBytes(t *testing.T) {
 	// The sentinel must stay distinct from the decoded byte count, otherwise
 	// the two assertions below cannot tell the metrics apart.
 	require.NotEqual(t, int64(999), logicalBytes)
-	outcome, err := writeReshardFragment(context.Background(), req, plan, tempSchema, 0, 0, group, 7, 16*1024*1024, nil, nil)
+	outcome, err := writeReshardFragment(context.Background(), req, plan, tempSchema, 0, 0, group, 7, 16*1024*1024, nil, nil, nil)
 	require.NoError(t, err)
 	require.Equal(t, logicalBytes, outcome.descriptor.GetLogicalBytes())
 	require.NotEqual(t, int64(999), outcome.descriptor.GetLogicalBytes())
@@ -473,7 +475,9 @@ func TestWriteReshardFragmentReportsDecodedLogicalBytes(t *testing.T) {
 }
 
 // TestSplitReshardBucketForSortAccountsDecodedBytes pins that the sort split
-// preserves the bucket's decoded-byte accounting: every group carries the
+// preserves the bucket's decoded-byte accounting: packing gates on the items'
+// decoded logical bytes (never the memory-accounted size, which additionally
+// carries the per-fragment structural overhead), every group carries the
 // bytes of exactly its own items, and the group sums reproduce the bucket
 // totals, so the published descriptor bytes match the fragment-target metric.
 func TestSplitReshardBucketForSortAccountsDecodedBytes(t *testing.T) {
@@ -486,10 +490,11 @@ func TestSplitReshardBucketForSortAccountsDecodedBytes(t *testing.T) {
 	size1 := int64(batch1.GetMemorySize())
 	size2 := int64(batch2.GetMemorySize())
 	bucket := &reshardBucket{
-		batches:         []reshardBatch{{data: batch1, bytes: size1}, {data: batch2, bytes: size2}},
-		spillChunks:     []string{"chunk-0"},
-		spillChunkBytes: []int64{100},
-		spillChunkRows:  []int64{5},
+		batches: []reshardBatch{
+			{data: batch1, bytes: size1 + 600, logical: size1},
+			{data: batch2, bytes: size2 + 600, logical: size2},
+		},
+		ranges: []importv3.SpillRange{{Stream: 0, Begin: 8, End: 108, Logical: 100, Rows: 5}},
 	}
 	totalBytes := int64(100) + size1 + size2
 	totalRows := int64(5 + 3 + 1)
@@ -508,8 +513,9 @@ func TestSplitReshardBucketForSortAccountsDecodedBytes(t *testing.T) {
 	require.Equal(t, totalBytes, groups[0].logicalBytes)
 	require.Equal(t, totalRows, groups[0].rows)
 
-	// A limit fitting the spill chunk plus the first batch packs those two
-	// and leaves the second batch alone.
+	// A limit fitting the spill range plus the first batch packs those two
+	// and leaves the second batch alone; the accounted overhead (+600) must
+	// not leak into the packing decision.
 	groups = splitReshardBucketForSort(bucket, 100+size1)
 	require.Len(t, groups, 2)
 	require.Equal(t, int64(100)+size1, groups[0].logicalBytes)
@@ -530,7 +536,7 @@ func TestSplitReshardBucketForSortAccountsDecodedBytes(t *testing.T) {
 	groups = splitReshardBucketForSort(bucket, 0)
 	require.Len(t, groups, 3)
 	for _, g := range groups {
-		require.Equal(t, 1, len(g.spillChunks)+len(g.batches))
+		require.Equal(t, 1, len(g.ranges)+len(g.batches))
 	}
 	sumBytes, sumRows = sumGroups(groups)
 	require.Equal(t, totalBytes, sumBytes)
@@ -651,7 +657,7 @@ type reshardCallRecorder struct {
 	seqs          []int64
 	rows          []int64
 	logicalBytes  []int64
-	spillChunks   []int
+	spillRanges   []int
 	paths         []string
 	onWrite       func(call int, group reshardFragmentGroup) error
 	published     []*datapb.ReshardManifest
@@ -677,13 +683,13 @@ func mockReshardBoundaries(t *testing.T, readers map[int64]reshardReaderBuilder,
 		}).Build()
 	t.Cleanup(func() { readerMock.UnPatch() })
 	writerMock := mockey.Mock(writeReshardFragment).To(
-		func(_ context.Context, _ *datapb.ReshardTaskRequest, _ *datapb.ReshardTaskPlan, _ *schemapb.CollectionSchema, vchannelOrdinal, partitionOrdinal int, group reshardFragmentGroup, seq, _ int64, _ []int64, _ *indexcgopb.StoragePluginContext) (*reshardFragmentOutcome, error) {
+		func(_ context.Context, _ *datapb.ReshardTaskRequest, _ *datapb.ReshardTaskPlan, _ *schemapb.CollectionSchema, vchannelOrdinal, partitionOrdinal int, group reshardFragmentGroup, seq, _ int64, _ []int64, _ *indexcgopb.StoragePluginContext, _ *importv3.SpillLog) (*reshardFragmentOutcome, error) {
 			recorder.mu.Lock()
 			call := len(recorder.seqs)
 			recorder.seqs = append(recorder.seqs, seq)
 			recorder.rows = append(recorder.rows, group.rows)
 			recorder.logicalBytes = append(recorder.logicalBytes, group.logicalBytes)
-			recorder.spillChunks = append(recorder.spillChunks, len(group.spillChunks))
+			recorder.spillRanges = append(recorder.spillRanges, len(group.ranges))
 			recorder.mu.Unlock()
 			if recorder.onWrite != nil {
 				if err := recorder.onWrite(call, group); err != nil {
@@ -1124,45 +1130,100 @@ func TestExecuteReshardPlanRunsFunctionsInPrepareStage(t *testing.T) {
 	require.Equal(t, 3, totalRows)
 }
 
-// TestExecuteReshardPlanSpillsAndReplaysThroughFlush pins the static spill
-// ceiling end to end: with a 16MiB budget (1 slot x 16MiB per slot) and
-// ~18.6MiB of routed data, resident bytes cross the budget during the third
-// batch and the whole bucket spills to one real local Arrow IPC file; the
-// degenerate budget also clamps the sort input to 1 byte, so the
-// end-of-input flush replays the chunk as its own group with all rows
-// intact, and the flush-side removal plus the run-end directory cleanup
+// TestExecuteReshardPlanSpillsBucketTailAndReplaysThroughFlush pins the tail
+// spill model end to end: two buckets over a resident cap of one get a tail
+// cap of fragmentSize/2 (4MiB), each bucket's second batch crosses it and the
+// tail is appended to the run's shared spill log as one real Arrow IPC range;
+// the degenerate slot budget also clamps the sort input to 1 byte, so the
+// end-of-input flush replays each range as its own group with all rows
+// intact, and the flush-side release plus the run-end directory cleanup
 // leave no spill file behind. The memory mocks pin the dynamic checkpoint
-// open (unlimited free memory) so only the static ceiling can spill.
-// The 30MiB target exceeds the three batches' combined logical size (~18.6MiB):
-// fragmentTarget gates on logicalBytes, which accumulates across spills, so a
-// smaller target would flush mid-run instead of spilling.
-func TestExecuteReshardPlanSpillsAndReplaysThroughFlush(t *testing.T) {
+// closed (unlimited free memory) so only the tail cap can spill.
+// The 8MiB fragment target exceeds each bucket's total logical size (~9MiB
+// split across two buckets stays under it per bucket): fragmentTarget gates
+// on logicalBytes, which accumulates across spills, so a smaller target
+// would flush mid-run instead of spilling tails.
+func TestExecuteReshardPlanSpillsBucketTailAndReplaysThroughFlush(t *testing.T) {
 	initReshardPipelineParams(t)
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.ImportMemoryLimitPerSlot.Key, "16")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.ReshardResidentBucketCap.Key, "1")
+	t.Cleanup(func() { paramtable.Get().Reset(paramtable.Get().DataCoordCfg.ReshardResidentBucketCap.Key) })
 	totalMock := mockey.Mock(hardware.GetMemoryCount).Return(uint64(1) << 40).Build()
 	defer totalMock.UnPatch()
 	usedMock := mockey.Mock(hardware.GetUsedMemoryCount).Return(uint64(0)).Build()
 	defer usedMock.UnPatch()
-	fix := newReshardPipelineFixture()
+
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "note", DataType: schemapb.DataType_VarChar, Nullable: true},
+			{FieldID: 102, Name: "part", DataType: schemapb.DataType_Int64, IsPartitionKey: true},
+		},
+	}
+	tempSchema := &schemapb.CollectionSchema{
+		Fields: append(append([]*schemapb.FieldSchema{}, schema.Fields...),
+			&schemapb.FieldSchema{FieldID: common.RowIDField, Name: common.RowIDFieldName, DataType: schemapb.DataType_Int64}),
+	}
+	// Two partition-key values that provably land in different buckets under
+	// the live hash, so the tail cap is crossed in both regardless of the
+	// hash function's mixing.
+	partB := int64(1)
+	hashA, _ := typeutil.Hash32Int64(0)
+	for {
+		hashB, _ := typeutil.Hash32Int64(partB)
+		if hashB%2 != hashA%2 {
+			break
+		}
+		partB++
+	}
+	splitBatch := func(start int64) *storage.InsertData {
+		const rows = 2000
+		ids := make([]int64, rows)
+		parts := make([]int64, rows)
+		payload := make([]string, rows)
+		blob := string(make([]byte, 3000))
+		for i := range ids {
+			ids[i] = start + int64(i)
+			if i%2 == 0 {
+				parts[i] = 0
+			} else {
+				parts[i] = partB
+			}
+			payload[i] = blob
+		}
+		return &storage.InsertData{Data: map[int64]storage.FieldData{
+			100: &storage.Int64FieldData{Data: ids},
+			101: &storage.StringFieldData{Data: payload},
+			102: &storage.Int64FieldData{Data: parts},
+		}}
+	}
 	readers := map[int64]reshardReaderBuilder{
 		1: staticReshardReader(&scriptReader{batches: []*storage.InsertData{
-			fix.wideBatch(1), fix.wideBatch(3000), fix.wideBatch(6000),
+			splitBatch(1), splitBatch(3000), splitBatch(6000),
 		}, size: 100}),
 	}
 	const mib = int64(1024 * 1024)
-	plan := fix.plan([]*datapb.SourceFileSpec{fix.source(1)}, 30*mib)
+	sortSpec := &datapb.SortSpec{Fields: []*datapb.SortFieldSpec{
+		{FieldId: 100, DataType: schemapb.DataType_Int64},
+	}}
+	fix := newReshardPipelineFixture()
+	plan := &datapb.ReshardTaskPlan{
+		Schema: schema, TempSchema: tempSchema,
+		Vchannels: []string{"ch0"}, Partitions: []int64{10, 11},
+		Sources: []*datapb.SourceFileSpec{fix.source(1)}, Sort: sortSpec, FragmentSize: 8 * mib,
+	}
 	recorder := &reshardCallRecorder{}
 	mockReshardBoundaries(t, readers, recorder)
 
 	require.NoError(t, executeReshardPlan(context.Background(), nil, fix.request(plan, 1), plan, nil))
 	require.Equal(t, int64(1), recorder.publishCalled.Load())
 	require.Len(t, recorder.published, 1)
-	// One spill event once resident crossed the 16MiB budget: the single
-	// bucket's three batches land in one chunk, and the clamped sort input
-	// (1 byte) keeps that chunk alone in its group.
-	require.Equal(t, []int{1}, recorder.spillChunks,
-		"resident crossing the budget must have spilled the bucket before the final flush")
-	require.Equal(t, []int64{0}, recorder.seqs)
+	// One spilled range per bucket (its first two batches), then the
+	// end-of-input flush: the clamped sort input (1 byte) keeps each range
+	// and each in-memory tail alone in its own group, in bucket order.
+	require.Equal(t, []int{1, 0, 1, 0}, recorder.spillRanges,
+		"each bucket crossing its tail cap must have spilled once before the final flush")
+	require.Equal(t, []int64{0, 1, 2, 3}, recorder.seqs)
 	var totalRows int64
 	for _, fragment := range recorder.published[0].GetFragments() {
 		totalRows += fragment.GetRows()

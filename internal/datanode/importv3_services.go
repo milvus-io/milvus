@@ -185,23 +185,25 @@ type reshardBucket struct {
 	vchannelOrdinal  int
 	partitionOrdinal int
 	batches          []reshardBatch
-	spillChunks      []string
-	spillChunkBytes  []int64
-	spillChunkRows   []int64
-	bytes            int64
-	logicalBytes     int64
+	ranges           []importv3.SpillRange
+	bytes            int64 // accounted resident bytes (decoded + structural overhead)
+	logicalBytes     int64 // decoded bytes; the flush trigger and descriptor metric
 	rows             int64
-	nextSpillSeq     int
 }
 
-// reshardBatch is one routed batch held in a bucket together with the decoded
-// byte count measured once at routing time. InsertData.GetMemorySize walks
-// every string/JSON value, so measuring per batch once here replaces the
-// repeated measurements that routing, resident accounting, and the sort-input
-// split used to perform on the same batch.
+// reshardBatch is one routed batch held in a bucket together with two sizes
+// measured once at routing time: bytes is the memory-accounted size (decoded
+// plus the calibrated per-fragment structural overhead, see
+// reshardmem.FragmentOverhead) that drives resident accounting and the spill
+// tail cap, and logical is the decoded size (InsertData.GetMemorySize, which
+// walks every string/JSON value) that drives the fragment flush trigger, the
+// sort-group packing and the published descriptor. Measuring both per batch
+// once here replaces the repeated measurements that routing, resident
+// accounting, and the sort-input split used to perform on the same batch.
 type reshardBatch struct {
-	data  *storage.InsertData
-	bytes int64
+	data    *storage.InsertData
+	bytes   int64
+	logical int64
 }
 
 // reshardRunCounters aggregates per-run observations for the reshard summary
@@ -213,7 +215,7 @@ type reshardRunCounters struct {
 	logicalBytes int64 // sum of published descriptor.LogicalBytes (normalized decoded bytes)
 	writtenBytes int64 // sum of the packed writer's uncompressed output, reported
 	// alongside logicalBytes so the run log keeps both sides of the packing metric
-	spillChunks   int
+	spillRanges   int
 	spillBytes    int64
 	sortReadCost  time.Duration
 	sortCost      time.Duration
@@ -339,6 +341,19 @@ func executeReshardPlan(ctx context.Context, cm storage.ChunkManager, req *datap
 		// Best-effort: remove the task-level directory if this was its last run.
 		_ = os.Remove(path.Dir(spillRoot))
 	}()
+	// Fixed bucket-to-shard mapping: every range of one bucket lands in the
+	// same spill file, so reading a bucket back never touches the others and
+	// the file/fd count stays at min(buckets, reshardSpillMaxStreams).
+	bucketCount := int64(len(plan.GetVchannels()) * len(plan.GetPartitions()))
+	numPartitions := int64(len(plan.GetPartitions()))
+	streamCount := int(min(bucketCount, int64(paramtable.Get().DataNodeCfg.ReshardSpillMaxStreams.GetAsInt())))
+	spillLog, err := importv3.NewSpillLog(spillRoot, temporarySchema, streamCount)
+	if err != nil {
+		return err
+	}
+	// Registered after the RemoveAll defer, so Close runs before the cleanup
+	// and no fd is open when the directory goes away.
+	defer func() { _ = spillLog.Close() }()
 
 	manifest := &datapb.ReshardManifest{}
 	buckets := make(map[reshardBucketKey]*reshardBucket)
@@ -350,6 +365,21 @@ func executeReshardPlan(ctx context.Context, cm storage.ChunkManager, req *datap
 
 	memModel := reshardmem.Model{ReadBuffer: bufferSize, FragmentTarget: fragmentTarget}
 	effectiveFragmentInput := memModel.SortInput(memoryBudget)
+	// The per-bucket resident ceiling: unbounded while the whole in-flight
+	// set fits reshardResidentBucketCap (low-bucket jobs reshard fully in
+	// memory), spread across every bucket beyond the cap so the same total
+	// resident budget holds and the excess tails stream to the spill log as
+	// they arrive. Both the total and the per-bucket cap follow the shared
+	// model DataCoord charged the slot from.
+	tailCap := memModel.BucketTailCap(bucketCount,
+		paramtable.Get().DataCoordCfg.ReshardResidentBucketCap.GetAsInt64())
+	// Every routed fragment carries structural live-heap overhead on top of
+	// its decoded bytes (FieldData wrappers, map entries, slice capacity and
+	// allocator rounding -- see reshardmem.FragmentFieldOverhead). Accounting
+	// only GetMemorySize systematically undercharges the real resident set,
+	// worst when a high bucket count shreds every source batch into tiny
+	// fragments; the same term is charged by DataCoord's WorkingSet.
+	fragmentOverhead := reshardmem.FragmentOverhead(int64(len(typeutil.GetAllFieldSchemas(temporarySchema))))
 	var counters reshardRunCounters
 	// flushBucket sorts and writes one bucket's fragments synchronously while
 	// the prepare stage keeps reading ahead, so the source side no longer stalls
@@ -365,7 +395,7 @@ func executeReshardPlan(ctx context.Context, cm storage.ChunkManager, req *datap
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			outcome, err := writeReshardFragment(ctx, req, plan, temporarySchema, b.vchannelOrdinal, b.partitionOrdinal, group, fragmentSeq, bufferSize, sortFields, pluginContext)
+			outcome, err := writeReshardFragment(ctx, req, plan, temporarySchema, b.vchannelOrdinal, b.partitionOrdinal, group, fragmentSeq, bufferSize, sortFields, pluginContext, spillLog)
 			if err != nil {
 				return err
 			}
@@ -381,15 +411,38 @@ func executeReshardPlan(ctx context.Context, cm storage.ChunkManager, req *datap
 				counters.sortWriteCost += outcome.timings.WriteCost
 			}
 		}
-		for _, chunk := range b.spillChunks {
-			_ = os.Remove(chunk)
-		}
+		spillLog.Release(b.ranges)
 		*b = reshardBucket{vchannelOrdinal: b.vchannelOrdinal, partitionOrdinal: b.partitionOrdinal}
 		debug.FreeOSMemory()
 		return nil
 	}
 
-	spillLargest := func() (int64, error) {
+	// spillTail appends one bucket's whole in-memory tail to the shared spill
+	// log as a single indexed range and returns the accounted bytes freed.
+	// The bucket keeps its rows/logicalBytes: the fragment a bucket eventually
+	// flushes covers everything it ever received, in memory or on disk.
+	spillTail := func(b *reshardBucket) (int64, error) {
+		items := make([]importv3.SpillBatch, 0, len(b.batches))
+		for _, batch := range b.batches {
+			items = append(items, importv3.SpillBatch{Data: batch.data, Bytes: batch.logical})
+		}
+		bucketOrdinal := int64(b.vchannelOrdinal)*numPartitions + int64(b.partitionOrdinal)
+		spillRange, err := spillLog.Append(bucketOrdinal, items)
+		if err != nil {
+			return 0, err
+		}
+		b.ranges = append(b.ranges, spillRange)
+		freed := b.bytes
+		b.batches = nil
+		b.bytes = 0
+		counters.spillRanges++
+		counters.spillBytes += freed
+		return freed, nil
+	}
+
+	// drainLargest is the dynamic-checkpoint spill: one bucket per call, the
+	// largest first, converging real free memory back above the floor.
+	drainLargest := func() (int64, error) {
 		var target *reshardBucket
 		for _, b := range buckets {
 			if b.bytes == 0 {
@@ -404,47 +457,7 @@ func executeReshardPlan(ctx context.Context, cm storage.ChunkManager, req *datap
 		if target == nil {
 			return 0, nil
 		}
-		spillPath := path.Join(spillRoot, fmt.Sprintf("%d_%d_%d.arrow",
-			target.vchannelOrdinal, plan.GetPartitions()[target.partitionOrdinal], target.nextSpillSeq))
-		writer, err := importv3.NewSpillWriter(spillPath, temporarySchema)
-		if err != nil {
-			what := fmt.Sprintf("create reshard spill file %s", spillPath)
-			if errors.Is(err, syscall.ENOSPC) {
-				return 0, merr.Wrap(merr.ErrServiceResourceInsufficient, what+": "+err.Error())
-			}
-			return 0, merr.Wrapf(err, "%s", what)
-		}
-		for _, batch := range target.batches {
-			if err := writer.Write(batch.data); err != nil {
-				_ = writer.Close()
-				what := fmt.Sprintf("write reshard spill file %s", spillPath)
-				if errors.Is(err, syscall.ENOSPC) {
-					return 0, merr.Wrap(merr.ErrServiceResourceInsufficient, what+": "+err.Error())
-				}
-				return 0, merr.Wrapf(err, "%s", what)
-			}
-		}
-		if err := writer.Close(); err != nil {
-			what := fmt.Sprintf("close reshard spill file %s", spillPath)
-			if errors.Is(err, syscall.ENOSPC) {
-				return 0, merr.Wrap(merr.ErrServiceResourceInsufficient, what+": "+err.Error())
-			}
-			return 0, merr.Wrapf(err, "%s", what)
-		}
-		spillRows := int64(0)
-		for _, batch := range target.batches {
-			spillRows += int64(batch.data.GetRowNum())
-		}
-		target.spillChunks = append(target.spillChunks, spillPath)
-		target.spillChunkBytes = append(target.spillChunkBytes, target.bytes)
-		target.spillChunkRows = append(target.spillChunkRows, spillRows)
-		target.batches = nil
-		target.nextSpillSeq++
-		spilled := target.bytes
-		target.bytes = 0
-		counters.spillChunks++
-		counters.spillBytes += spilled
-		return spilled, nil
+		return spillTail(target)
 	}
 
 	// readReshardSource prepares one source through the prepare stage, routing
@@ -536,11 +549,12 @@ func executeReshardPlan(ctx context.Context, cm storage.ChunkManager, req *datap
 						b = &reshardBucket{vchannelOrdinal: channelOrdinal, partitionOrdinal: partitionOrdinal}
 						buckets[key] = b
 					}
-					// Measure the routed batch once; the bucket entry carries this
-					// count to resident accounting and the sort-input split so the
+					// Measure the routed batch once; the bucket entry carries both
+					// sizes to resident accounting and the sort-input split so the
 					// O(rows) string/JSON walk is not repeated per batch.
-					mem := int64(bucketData.GetMemorySize())
-					appendReshardBatch(b, bucketData, mem)
+					logical := int64(bucketData.GetMemorySize())
+					mem := logical + fragmentOverhead
+					appendReshardBatch(b, bucketData, mem, logical)
 					residentBytes += mem
 					counters.peakResident = max(counters.peakResident, residentBytes)
 					if b.logicalBytes >= fragmentTarget {
@@ -549,8 +563,13 @@ func executeReshardPlan(ctx context.Context, cm storage.ChunkManager, req *datap
 							return err
 						}
 						residentBytes -= freed
-					} else if residentBytes > memoryBudget {
-						spilled, err := spillLargest()
+					} else if b.bytes >= tailCap {
+						// The bucket tail crossed its resident ceiling: stream it
+						// to the spill log. With buckets inside reshardResidentBucketCap
+						// tailCap is unbounded and this never fires, so the total
+						// resident stays within what DataCoord charged without a
+						// separate global ceiling check.
+						spilled, err := spillTail(b)
 						if err != nil {
 							return err
 						}
@@ -562,15 +581,16 @@ func executeReshardPlan(ctx context.Context, cm storage.ChunkManager, req *datap
 			// the batch cadence itself rate-limits the check, so no sampling
 			// timer is needed. Converges on REMAINING memory: while free is
 			// below the model's checkpoint floor (one flush spike + the
-			// system-memory reserve), spill the largest bucket once per
-			// batch. Free memory sees what the per-task budget misses
-			// (concurrent tasks, V2 import, compaction, GC churn, cgo
-			// buffers); this can only push usage below the static ceiling,
-			// never above it. See importutilv2/reshardmem.
+			// system-memory reserve), drain the largest bucket's tail into
+			// the spill log once per batch. Free memory sees what the
+			// per-bucket tail caps miss (concurrent tasks, V2 import,
+			// compaction, GC churn, cgo buffers); it can only push usage
+			// below what the tail model accounts, never above it. See
+			// importutilv2/reshardmem.
 			if residentBytes > 0 {
 				total := int64(hardware.GetMemoryCount())
 				if total-int64(hardware.GetUsedMemoryCount()) < memModel.CheckpointFloor(memoryBudget, total) {
-					spilled, err := spillLargest()
+					spilled, err := drainLargest()
 					if err != nil {
 						return err
 					}
@@ -605,7 +625,7 @@ func executeReshardPlan(ctx context.Context, cm storage.ChunkManager, req *datap
 			return err
 		}
 		b := buckets[key]
-		if b.rows == 0 && len(b.spillChunks) == 0 {
+		if b.rows == 0 && len(b.ranges) == 0 {
 			continue
 		}
 		if err := flushBucket(b); err != nil {
@@ -621,13 +641,16 @@ func executeReshardPlan(ctx context.Context, cm storage.ChunkManager, req *datap
 		mlog.Int64("memoryBudget", memoryBudget),
 		mlog.Int64("fragmentTarget", fragmentTarget),
 		mlog.Int64("effectiveFragmentInput", effectiveFragmentInput),
+		mlog.Int64("bucketTailCap", tailCap),
 		mlog.Int("buckets", len(buckets)),
 		mlog.Int("sources", len(plan.GetSources())),
 		mlog.Int("fragments", counters.fragments),
 		mlog.Int64("rows", counters.rows),
 		mlog.Int64("logicalBytes", counters.logicalBytes),
 		mlog.Int64("writtenUncompressedBytes", counters.writtenBytes),
-		mlog.Int("spillChunks", counters.spillChunks),
+		mlog.Int("spillRanges", counters.spillRanges),
+		mlog.Int("spillStreams", spillLog.Streams()),
+		mlog.Int("spillFiles", spillLog.Files()),
 		mlog.Int64("spillBytes", counters.spillBytes),
 		mlog.Int64("peakResidentBytes", counters.peakResident),
 		mlog.Duration("readWait", counters.readWait),
@@ -644,10 +667,10 @@ type reshardBucketKey struct {
 	partitionOrdinal int
 }
 
-func appendReshardBatch(b *reshardBucket, data *storage.InsertData, mem int64) {
-	b.batches = append(b.batches, reshardBatch{data: data, bytes: mem})
+func appendReshardBatch(b *reshardBucket, data *storage.InsertData, mem, logical int64) {
+	b.batches = append(b.batches, reshardBatch{data: data, bytes: mem, logical: logical})
 	b.bytes += mem
-	b.logicalBytes += mem
+	b.logicalBytes += logical
 	b.rows += int64(data.GetRowNum())
 }
 
@@ -717,39 +740,41 @@ func normalizeReshardBatch(source *datapb.SourceFileSpec, schema *schemapb.Colle
 
 // reshardFragmentGroup is the bounded input of one storage.Sort call. Splitting
 // a bucket into groups is what turns "the bucket is on disk" into a real memory
-// bound for the sort: storage.Sort materializes its whole input.
+// bound for the sort: storage.Sort materializes its whole input. Group sizes
+// are the items' decoded logical bytes -- the metric Sort actually
+// materializes once the fragments become compact arrow records.
 type reshardFragmentGroup struct {
-	spillChunks  []string
+	ranges       []importv3.SpillRange
 	batches      []*storage.InsertData
 	rows         int64
 	logicalBytes int64
 }
 
-// splitReshardBucketForSort packs spill chunks and the in-memory tail into
+// splitReshardBucketForSort packs spill ranges and the in-memory tail into
 // contiguous groups that each fit inside one Sort's input budget. A single item
 // larger than the budget stays alone; the existing slot estimate makes that a
 // single-record pathological case.
 func splitReshardBucketForSort(b *reshardBucket, limit int64) []reshardFragmentGroup {
 	type item struct {
-		chunk string
-		batch *storage.InsertData
-		bytes int64
-		rows  int64
+		rangeRef *importv3.SpillRange
+		batch    *storage.InsertData
+		bytes    int64
+		rows     int64
 	}
-	items := make([]item, 0, len(b.spillChunks)+len(b.batches))
-	for i, chunk := range b.spillChunks {
-		items = append(items, item{chunk: chunk, bytes: b.spillChunkBytes[i], rows: b.spillChunkRows[i]})
+	items := make([]item, 0, len(b.ranges)+len(b.batches))
+	for i := range b.ranges {
+		items = append(items, item{rangeRef: &b.ranges[i], bytes: b.ranges[i].Logical, rows: b.ranges[i].Rows})
 	}
 	for _, batch := range b.batches {
-		items = append(items, item{batch: batch.data, bytes: batch.bytes, rows: int64(batch.data.GetRowNum())})
+		items = append(items, item{batch: batch.data, bytes: batch.logical, rows: int64(batch.data.GetRowNum())})
 	}
 	groups := make([]reshardFragmentGroup, 0, 1)
 	if limit <= 0 {
 		for _, it := range items {
 			groups = append(groups, reshardFragmentGroup{rows: it.rows, logicalBytes: it.bytes})
 			g := &groups[len(groups)-1]
-			if it.chunk != "" {
-				g.spillChunks = append(g.spillChunks, it.chunk)
+			if it.rangeRef != nil {
+				g.ranges = append(g.ranges, *it.rangeRef)
 			} else {
 				g.batches = append(g.batches, it.batch)
 			}
@@ -757,8 +782,8 @@ func splitReshardBucketForSort(b *reshardBucket, limit int64) []reshardFragmentG
 		return groups
 	}
 	appendItem := func(g *reshardFragmentGroup, it item) {
-		if it.chunk != "" {
-			g.spillChunks = append(g.spillChunks, it.chunk)
+		if it.rangeRef != nil {
+			g.ranges = append(g.ranges, *it.rangeRef)
 		} else {
 			g.batches = append(g.batches, it.batch)
 		}
@@ -801,21 +826,22 @@ type reshardFragmentOutcome struct {
 	writtenUncompressed uint64
 }
 
-func writeReshardFragment(ctx context.Context, req *datapb.ReshardTaskRequest, plan *datapb.ReshardTaskPlan, temporarySchema *schemapb.CollectionSchema, vchannelOrdinal, partitionOrdinal int, group reshardFragmentGroup, seq, bufferSize int64, sortFields []int64, pluginContext *indexcgopb.StoragePluginContext) (*reshardFragmentOutcome, error) {
+func writeReshardFragment(ctx context.Context, req *datapb.ReshardTaskRequest, plan *datapb.ReshardTaskPlan, temporarySchema *schemapb.CollectionSchema, vchannelOrdinal, partitionOrdinal int, group reshardFragmentGroup, seq, bufferSize int64, sortFields []int64, pluginContext *indexcgopb.StoragePluginContext, spillLog *importv3.SpillLog) (*reshardFragmentOutcome, error) {
 	fragmentPath := path.Join(req.GetStorageConfig().GetRootPath(), metautil.BuildImportReshardOutputPath(req.GetJobId(), req.GetTaskId()), "fragments", strconv.Itoa(vchannelOrdinal), strconv.FormatInt(plan.GetPartitions()[partitionOrdinal], 10), fmt.Sprintf("%d_%d.parquet", req.GetRunId(), seq))
 	writer, err := newImportV3PackedRecordWriter(req.GetStorageConfig().GetBucketName(), []string{fragmentPath}, temporarySchema, bufferSize, req.GetStorageConfig(), pluginContext)
 	if err != nil {
 		return nil, err
 	}
 
-	readers := make([]storage.RecordReader, 0, len(group.spillChunks)+len(group.batches))
-	for _, chunk := range group.spillChunks {
-		reader, err := importv3.NewSpillReader(chunk, temporarySchema)
+	readers := make([]storage.RecordReader, 0, len(group.ranges)+len(group.batches))
+	for _, spillRange := range group.ranges {
+		reader, err := spillLog.RangeReader(spillRange)
 		if err != nil {
 			_ = writer.Close()
-			// Readers opened so far own *os.File handles and ipc.Reader arrow
-			// buffers; the deferred close is registered after the loops, so the
-			// failure branch must release them explicitly.
+			// Readers opened so far borrow the ipc.Reader arrow buffers; the
+			// deferred close is registered after the loops, so the failure
+			// branch must release them explicitly. The shared spill fds are
+			// owned by the log, not by these readers.
 			closeReshardReaders(readers)
 			return nil, err
 		}
