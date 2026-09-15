@@ -389,7 +389,13 @@ func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 	if err != nil {
 		return nil, err
 	}
-	compactionParams, err := compaction.GenerateJSONParams(taskProto.GetSchema())
+	var compactionParams string
+	if typeutil.IsDenseFloatVectorType(taskProto.GetClusteringKeyField().GetDataType()) {
+		compactionParams, err = compaction.GenerateClusteringJSONParams(
+			taskProto.GetSchema(), Params.KnowhereConfig.GetCompactionPlanParams())
+	} else {
+		compactionParams, err = compaction.GenerateJSONParams(taskProto.GetSchema())
+	}
 	if err != nil {
 		return nil, err
 	}

@@ -79,6 +79,7 @@ func TestLayoutPlanValidate(t *testing.T) {
 		{"negative centroid rows", func(plan *LayoutPlan) { plan.CentroidCounts[0] = -1 }},
 		{"row count sum", func(plan *LayoutPlan) { plan.RowCount++ }},
 		{"duplicate group id", func(plan *LayoutPlan) { plan.CentroidGroups[1].CentroidGroupID = 0 }},
+		{"non-dense group id", func(plan *LayoutPlan) { plan.CentroidGroups[1].CentroidGroupID = 2 }},
 		{"negative group id", func(plan *LayoutPlan) { plan.CentroidGroups[0].CentroidGroupID = -1 }},
 		{"empty group", func(plan *LayoutPlan) { plan.CentroidGroups[0].Centroids = nil; plan.CentroidGroups[0].Rows = 0 }},
 		{"invalid centroid id", func(plan *LayoutPlan) { plan.CentroidGroups[0].Centroids[0] = 3 }},

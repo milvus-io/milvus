@@ -91,9 +91,15 @@ func (p *LayoutPlan) Validate() error {
 
 	groupIDs := make(map[int64]struct{}, len(p.CentroidGroups))
 	seenCentroids := make([]bool, len(p.CentroidCounts))
-	for _, group := range p.CentroidGroups {
+	for groupOffset, group := range p.CentroidGroups {
 		if group.CentroidGroupID < 0 {
 			return merr.WrapErrServiceInternalMsg("cluster compaction layout plan group id must be non-negative, got %d", group.CentroidGroupID)
+		}
+		if group.CentroidGroupID != int64(groupOffset) {
+			return merr.WrapErrServiceInternalMsg(
+				"cluster compaction layout plan group id must match its offset, got %d at offset %d",
+				group.CentroidGroupID, groupOffset,
+			)
 		}
 		if _, ok := groupIDs[group.CentroidGroupID]; ok {
 			return merr.WrapErrServiceInternalMsg("cluster compaction layout plan has duplicate group id %d", group.CentroidGroupID)
