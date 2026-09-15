@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
@@ -35,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
@@ -139,12 +141,12 @@ func (s *FlushAllSuite) TestFlushAll() {
 
 	// show and validate segments
 	for collectionName, dbName := range collectionNames {
-		resp, err := c.MilvusClient.GetPersistentSegmentInfo(ctx, &milvuspb.GetPersistentSegmentInfoRequest{
+		resp, err := getPersistentSegmentInfoWithRetry(ctx, c.MilvusClient, &milvuspb.GetPersistentSegmentInfoRequest{
 			DbName:         dbName,
 			CollectionName: collectionName,
 		})
-		s.NoError(merr.CheckRPCCall(resp, err))
-		s.Len(resp.GetInfos(), 1)
+		s.Require().NoError(err)
+		s.Require().Len(resp.GetInfos(), 1)
 		segment := resp.GetInfos()[0]
 		s.Equal(segment.GetState(), commonpb.SegmentState_Flushed)
 		s.Equal(segment.GetNumRows(), int64(rowNum))
@@ -164,4 +166,21 @@ func (s *FlushAllSuite) TestFlushAll() {
 
 func TestFlushAll(t *testing.T) {
 	suite.Run(t, new(FlushAllSuite))
+}
+
+// Sort compaction can replace a segment between listing its ID and fetching
+// its details. The state filter can also discard an old ID after replacement,
+// producing a successful but empty response. Refresh either observation.
+func getPersistentSegmentInfoWithRetry(ctx context.Context, client milvuspb.MilvusServiceClient, request *milvuspb.GetPersistentSegmentInfoRequest) (*milvuspb.GetPersistentSegmentInfoResponse, error) {
+	var resp *milvuspb.GetPersistentSegmentInfoResponse
+	err := retry.Handle(ctx, func() (bool, error) {
+		var err error
+		resp, err = client.GetPersistentSegmentInfo(ctx, request)
+		err = merr.CheckRPCCall(resp, err)
+		if err == nil && len(resp.GetInfos()) == 0 {
+			return true, errors.New("empty persistent segment observation after FlushAll")
+		}
+		return errors.Is(err, merr.ErrSegmentNotFound), err
+	}, retry.Attempts(5), retry.Sleep(100*time.Millisecond), retry.MaxSleepTime(time.Second))
+	return resp, err
 }
