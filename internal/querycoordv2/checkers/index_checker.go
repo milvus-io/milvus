@@ -277,7 +277,8 @@ func (c *IndexChecker) checkSegmentStats(segment *meta.Segment, schema *schemapb
 			fieldID := field.GetFieldID()
 			if h.EnableJSONKeyStatsIndex() {
 				if _, ok := loadFieldMap[fieldID]; ok {
-					if info, ok := segment.JSONStatsField[fieldID]; !ok || info.GetDataFormatVersion() < common.JSONStatsDataFormatVersion {
+					if info, ok := segment.JSONStatsField[fieldID]; !ok ||
+						!common.IsSupportedJSONStatsDataFormat(info.GetDataFormatVersion()) {
 						result = append(result, fieldID)
 					}
 				}

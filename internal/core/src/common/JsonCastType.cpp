@@ -17,6 +17,9 @@ const std::unordered_map<std::string, const JsonCastType>
         {"VARCHAR",
          JsonCastType(JsonCastType::DataType::VARCHAR,
                       JsonCastType::DataType::VARCHAR)},
+        {"INT64",
+         JsonCastType(JsonCastType::DataType::INT64,
+                      JsonCastType::DataType::INT64)},
         {"ARRAY_BOOL",
          JsonCastType(JsonCastType::DataType::ARRAY,
                       JsonCastType::DataType::BOOL)},
@@ -65,6 +68,8 @@ JsonCastType::ToMilvusDataType() const {
             return MilvusDataType::DOUBLE;
         case JsonCastType::DataType::VARCHAR:
             return MilvusDataType::VARCHAR;
+        case JsonCastType::DataType::INT64:
+            return MilvusDataType::INT64;
         default:
             ThrowInfo(DataTypeInvalid, "Invalid data type:{}", element_type());
     }

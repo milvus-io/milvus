@@ -21,6 +21,17 @@ namespace milvus {
 std::vector<std::string>
 parse_json_pointer(const std::string& pointer);
 
+// Reject a malformed configured JSON Pointer, throwing InvalidParameter.
+//
+// This is the only place a malformed configured pointer is caught. The Go-side
+// index parameter checkers verify that the path key is present, not its shape,
+// and InspectJsonPathForTypedIndex maps simdjson's INVALID_JSON_POINTER to
+// MISSING exactly like an absent path. Without this check a malformed pointer
+// does not fail the build: it silently produces an all-MISSING index whose
+// queries never match. Call it for the throw, not for a return value.
+void
+validate_json_pointer(const std::string& pointer);
+
 // Check if a JSON Pointer path exists
 bool
 path_exists(const simdjson::dom::element& root,

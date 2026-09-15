@@ -2425,9 +2425,15 @@ func (m *meta) GetFlushingSegments() []*SegmentInfo {
 
 // SelectSegments select segments with selector
 func (m *meta) SelectSegments(ctx context.Context, filters ...SegmentFilter) []*SegmentInfo {
+	return m.SelectSegmentsWithLimit(ctx, -1, filters...)
+}
+
+// SelectSegmentsWithLimit stops once enough matches have been found and limits
+// the result allocation. Negative limits preserve unbounded selection.
+func (m *meta) SelectSegmentsWithLimit(ctx context.Context, limit int, filters ...SegmentFilter) []*SegmentInfo {
 	m.segMu.RLock()
 	defer m.segMu.RUnlock()
-	return m.segments.GetSegmentsBySelector(filters...)
+	return m.segments.GetSegmentsBySelectorWithLimit(limit, filters...)
 }
 
 func (m *meta) GetRealSegmentsForChannel(channel string) []*SegmentInfo {

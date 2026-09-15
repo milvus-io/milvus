@@ -14,7 +14,7 @@ type STLSORTChecker struct {
 	scalarIndexChecker
 }
 
-var validSTLSORTJSONCastTypes = []string{"DOUBLE", "VARCHAR"}
+var validSTLSORTJSONCastTypes = []string{"INT64", "DOUBLE", "VARCHAR"}
 
 func (c *STLSORTChecker) CheckTrain(dataType schemapb.DataType, elementType schemapb.DataType, params map[string]string) error {
 	if typeutil.IsJSONType(dataType) {
@@ -27,6 +27,9 @@ func (c *STLSORTChecker) CheckTrain(dataType schemapb.DataType, elementType sche
 		}
 		if _, exist := params[common.JSONPathKey]; !exist {
 			return merr.WrapErrParameterMissing(common.JSONPathKey, "json index must specify json path")
+		}
+		if err := checkJSONCastFunction(castType, params); err != nil {
+			return err
 		}
 	}
 	return c.scalarIndexChecker.CheckTrain(dataType, elementType, params)

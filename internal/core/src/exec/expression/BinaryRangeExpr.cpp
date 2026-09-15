@@ -125,18 +125,13 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                                JsonNumericBoundRequiresPreciseInt64Comparison(
                                    expr_->upper_val_));
 
-            // Keep sparse JsonFlat offset batches candidate-local when raw
-            // JSON is resident.  An index-only segment cannot use the generic
-            // JSON reverse-lookup path, so it must query the typed JsonFlat
-            // executor and gather the requested rows instead.
-            const bool use_json_flat_raw_offsets =
-                exec_path_ == ExprExecPath::ScalarIndex && has_offset_input_ &&
-                PinnedJsonIndexIsFlat() && num_data_chunk_ > 0;
-            if (exec_path_ == ExprExecPath::ScalarIndex &&
-                !use_json_flat_raw_offsets) {
+            if (exec_path_ == ExprExecPath::ScalarIndex && !has_offset_input_) {
                 if (is_numeric) {
+                    const auto cast_type = PinnedJsonIndexCastElementType();
                     if (!use_double && PinnedJsonIndexIsFlat()) {
-                        result = ExecRangeVisitorImplForIndex<int64_t>(input);
+                        result = ExecRangeVisitorImplForIndex<int64_t>();
+                    } else if (!use_double && cast_type == DataType::INT64) {
+                        result = ExecRangeVisitorImplForIndex<int64_t>();
                     } else {
                         proto::plan::GenericValue double_lower_val;
                         if (lower_type ==
@@ -161,11 +156,11 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                         upper_arg_.SetValue<double>(double_upper_val);
                         arg_inited_ = true;
 
-                        result = ExecRangeVisitorImplForIndex<double>(input);
+                        result = ExecRangeVisitorImplForIndex<double>();
                     }
                 } else if (lower_type ==
                            proto::plan::GenericValue::ValCase::kStringVal) {
-                    result = ExecRangeVisitorImplForIndex<std::string>(input);
+                    result = ExecRangeVisitorImplForIndex<std::string>();
                 } else {
                     ThrowInfo(
                         UnexpectedError,
@@ -174,7 +169,8 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                 }
             } else {
                 if (requires_precise_int64_comparison &&
-                    exec_path_ != ExprExecPath::JsonStats) {
+                    (has_offset_input_ ||
+                     exec_path_ != ExprExecPath::JsonStats)) {
                     result = ExecRangeVisitorImplForJsonPreciseNumeric(context);
                 } else if (is_numeric && use_double) {
                     // Use double when either bound is float
@@ -291,11 +287,9 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonPreciseNumeric(
                 continue;
             }
             auto lower_comparison =
-                CompareJsonNumberToBoundWithUint64DoubleFallback(number.value(),
-                                                                 lower_bound);
+                CompareJsonNumberToBound(number.value(), lower_bound);
             auto upper_comparison =
-                CompareJsonNumberToBoundWithUint64DoubleFallback(number.value(),
-                                                                 upper_bound);
+                CompareJsonNumberToBound(number.value(), upper_bound);
             if (!lower_comparison.has_value() ||
                 !upper_comparison.has_value()) {
                 res[i] = false;
@@ -401,7 +395,7 @@ PhyBinaryRangeFilterExpr::PreCheckOverflow(HighPrecisionType& val1,
 
 template <typename T>
 VectorPtr
-PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForIndex(OffsetVector* input) {
+PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForIndex() {
     typedef std::
         conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
             IndexInnerType;
@@ -417,13 +411,13 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForIndex(OffsetVector* input) {
     bool lower_inclusive = false;
     bool upper_inclusive = false;
     auto next_batch_size =
-        GetNextRealBatchSize(input, expr_->column_.element_level_);
+        GetNextRealBatchSize(nullptr, expr_->column_.element_level_);
     if (!next_batch_size.has_value()) {
         return nullptr;
     }
     auto real_batch_size = *next_batch_size;
     if (auto res = AdvanceEmptyElementBatch(
-            input, expr_->column_.element_level_, real_batch_size)) {
+            nullptr, expr_->column_.element_level_, real_batch_size)) {
         return res;
     }
     if (auto res = PreCheckOverflow<T>(val1,
@@ -431,7 +425,7 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForIndex(OffsetVector* input) {
                                        lower_inclusive,
                                        upper_inclusive,
                                        real_batch_size,
-                                       input)) {
+                                       nullptr)) {
         return res;
     }
 
@@ -442,29 +436,6 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForIndex(OffsetVector* input) {
         BinaryRangeIndexFunc<T> func;
         return func(index_ptr, val1, val2, lower_inclusive, upper_inclusive);
     };
-    if (input != nullptr) {
-        if (PinnedJsonIndexIsFlat()) {
-            return ProcessIndexChunksAndGatherByOffsets<T>(
-                execute_sub_batch, *input, val1, val2);
-        }
-        if (cached_result_ == nullptr) {
-            auto scalar_index =
-                dynamic_cast<const Index*>(pinned_index_[0].get());
-            AssertInfo(scalar_index != nullptr, "invalid scalar index type");
-            auto* index_ptr = const_cast<Index*>(scalar_index);
-            cached_result_ = std::make_shared<TargetBitmap>(
-                execute_sub_batch(index_ptr, val1, val2));
-            cached_valid_result_ = std::make_shared<TargetBitmap>(
-                GetCachedIndexValidBitmap(index_ptr).clone());
-            AssertInfo(
-                cached_result_->size() == static_cast<size_t>(active_count_),
-                "index range result size {} does not match row count {}",
-                cached_result_->size(),
-                active_count_);
-        }
-        return GatherCachedResultByOffsets(
-            *cached_result_, *cached_valid_result_, *input);
-    }
     auto res = ProcessIndexChunks<T>(execute_sub_batch, val1, val2);
     AssertInfo(res->size() == real_batch_size,
                "internal error: expr processed rows {} not equal "
@@ -646,12 +617,11 @@ VectorPtr
 PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJson(EvalCtx& context) {
     const auto& bitmap_input = context.get_bitmap_input();
     auto* input = context.get_offset_input();
-    FieldId field_id = expr_->column_.field_id_;
-    if (exec_path_ == ExprExecPath::JsonStats) {
+    if (!has_offset_input_ && exec_path_ == ExprExecPath::JsonStats) {
         milvus::ScopedTimer timer(
             "binary_range_json_by_stats",
             [this](double us) { json_filter_stats_latency_us_ += us; });
-        return ExecRangeVisitorImplForJsonStats<ValueType>(input);
+        return ExecRangeVisitorImplForJsonStats<ValueType>();
     }
 
     milvus::ScopedTimer timer(
@@ -786,15 +756,12 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJson(EvalCtx& context) {
 
 template <typename ValueType>
 VectorPtr
-PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonStats(
-    OffsetVector* input) {
+PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonStats() {
     using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
                                        std::string_view,
                                        ValueType>;
     auto real_batch_size =
-        input != nullptr
-            ? input->size()
-            : std::min(batch_size_, active_count_ - current_data_global_pos_);
+        std::min(batch_size_, active_count_ - current_data_global_pos_);
     if (real_batch_size == 0) {
         return nullptr;
     }
@@ -992,10 +959,6 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonStats(
         CachePut(CacheElapsedUs(cache_compute_start));
     }
 
-    if (input != nullptr) {
-        return GatherCachedResultByOffsets(
-            *cached_index_chunk_res_, *cached_index_chunk_valid_res_, *input);
-    }
     auto res = MoveOrSliceBitmap(*cached_index_chunk_res_,
                                  *cached_index_chunk_valid_res_,
                                  current_data_global_pos_,
@@ -1188,6 +1151,13 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForPk(EvalCtx& context) {
 
 void
 PhyBinaryRangeFilterExpr::DetermineExecPath() {
+    // Both bounds must fit the selected projection, including when the lower
+    // bound is an integer and only the upper bound is floating-point.
+    if (field_type_ == DataType::JSON && expr_->lower_val_.has_int64_val() &&
+        expr_->upper_val_.has_float_val()) {
+        value_type_ = DataType::DOUBLE;
+    }
+
     // PkIndex (binary range only supports PK on sealed segments)
     if (is_pk_field_ && segment_->type() == SegmentType::Sealed) {
         exec_path_ = ExprExecPath::PkIndex;
@@ -1203,25 +1173,6 @@ PhyBinaryRangeFilterExpr::DetermineExecPath() {
     auto data_type = expr_->column_.data_type_;
     if (expr_->column_.element_level_) {
         data_type = expr_->column_.element_type_;
-    }
-
-    if (data_type == DataType::JSON) {
-        const auto lower_type = expr_->lower_val_.val_case();
-        const auto upper_type = expr_->upper_val_.val_case();
-        const auto is_numeric =
-            (lower_type == proto::plan::GenericValue::ValCase::kInt64Val ||
-             lower_type == proto::plan::GenericValue::ValCase::kFloatVal) &&
-            (upper_type == proto::plan::GenericValue::ValCase::kInt64Val ||
-             upper_type == proto::plan::GenericValue::ValCase::kFloatVal);
-        const auto requires_precise_int64_comparison =
-            is_numeric &&
-            (JsonNumericBoundRequiresPreciseInt64Comparison(
-                 expr_->lower_val_) ||
-             JsonNumericBoundRequiresPreciseInt64Comparison(expr_->upper_val_));
-        if (requires_precise_int64_comparison) {
-            exec_path_ = ExprExecPath::RawData;
-            return;
-        }
     }
 
     // ARRAY type cannot use scalar index.

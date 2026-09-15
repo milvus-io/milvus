@@ -224,6 +224,35 @@ func (m *Manager) GetConfig(key string) (string, string, error) {
 	return sourceName, v, err
 }
 
+// LookupConfig resolves key exactly as GetConfig does, but reports absence with
+// a bool instead of an error.
+//
+// GetConfig's two miss paths allocate errors.Wrap(ErrKeyNotFound), which
+// captures a stack trace. That is the right shape for a caller that propagates
+// the error, but not for one that polls a key which is absent in the steady
+// state: the version-gate readiness marker is unset until the gate opens, and
+// ParamItem.gateValue reads it on every GetAs* of a gated item, including
+// per-segment datacoord paths. Paying a stack capture per read there dominates
+// the cost of the read itself.
+func (m *Manager) LookupConfig(key string) (string, bool) {
+	realKey := formatKey(key)
+	if v, ok := m.overlays.Get(realKey); ok {
+		if v == TombValue {
+			return "", false
+		}
+		return v, true
+	}
+	sourceName, ok := m.keySourceMap.Get(realKey)
+	if !ok {
+		return "", false
+	}
+	v, err := m.getConfigValueBySource(realKey, sourceName)
+	if err != nil {
+		return "", false
+	}
+	return v, true
+}
+
 // EtcdConfigKey returns the identity a configuration key is stored under in
 // etcd. AlterConfigsInEtcd applies it on the way in, so callers that need to
 // reason about collisions before writing must use the same function.
