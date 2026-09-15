@@ -3527,7 +3527,11 @@ Set to 0 to disable the penalty period.`,
 // /////////////////////////////////////////////////////////////////////////////
 // --- querynode ---
 type queryNodeConfig struct {
-	SoPath ParamItem `refreshable:"false"`
+	StrictGroupStrategy              ParamItem `refreshable:"true"`
+	StrictGroupDebug                 ParamItem `refreshable:"true"`
+	StrictGroupPhase1CandidateWeight ParamItem `refreshable:"true"`
+	StrictGroupSkipRefine            ParamItem `refreshable:"true"`
+	SoPath                           ParamItem `refreshable:"false"`
 
 	// stats
 	// Deprecated: Never used
@@ -3736,6 +3740,30 @@ func formatDurationWithMillisecondFallback(v string) string {
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
+	p.StrictGroupStrategy = ParamItem{
+		Key:     "queryNode.groupBy.strictGroupStrategy",
+		Version: "2.6.23", DefaultValue: "per_group", Export: true,
+		Doc: "Strict group completion strategy: original or per_group. Independent phase-one and refinement controls still apply to original.",
+	}
+	p.StrictGroupStrategy.Init(base.mgr)
+	p.StrictGroupDebug = ParamItem{
+		Key:     "queryNode.groupBy.strictGroupDebug",
+		Version: "2.6.23", DefaultValue: "false", Export: true,
+		Doc: "Opt-in segment/stage diagnostic logs; no per-candidate logs or customer field values.",
+	}
+	p.StrictGroupDebug.Init(base.mgr)
+	p.StrictGroupPhase1CandidateWeight = ParamItem{
+		Key:     "queryNode.groupBy.strictGroupPhase1CandidateWeight",
+		Version: "2.6.23", DefaultValue: "0", Export: true,
+		Doc: "Strict group phase-one consumer Next limit is topk * group_size * weight; zero disables truncation. Overflow saturates at INT64_MAX. Only group discovery is limited; completion is not. May reduce recall.",
+	}
+	p.StrictGroupPhase1CandidateWeight.Init(base.mgr)
+	p.StrictGroupSkipRefine = ParamItem{
+		Key:     "queryNode.groupBy.strictGroupSkipRefine",
+		Version: "2.6.23", DefaultValue: "false", Export: true,
+		Doc: "Skip query-time refinement consistently in both phases of single-query strict grouping with group size greater than one. May reduce recall.",
+	}
+	p.StrictGroupSkipRefine.Init(base.mgr)
 	p.IDFPreload = ParamItem{
 		Key:          "queryNode.idfOracle.preload",
 		Version:      "2.6.8",
