@@ -234,7 +234,7 @@ func (bm *broadcastTaskManager) LegacyAck(ctx context.Context, broadcastID uint6
 	task, ok := bm.getBroadcastTaskByID(broadcastID)
 	if !ok {
 		bm.Logger().Warn(ctx,
-			"broadcast task not found, it may already acked, ignore the request", mlog.Uint64("broadcastID", broadcastID), mlog.String("vchannel", vchannel))
+			"broadcast task not found, it may already acked, ignore the request", mlog.FieldBroadcastID(broadcastID), mlog.String("vchannel", vchannel))
 		return nil
 	}
 	msg := task.GetImmutableMessageFromVChannel(vchannel)
@@ -256,7 +256,7 @@ func (bm *broadcastTaskManager) Ack(ctx context.Context, msg message.ImmutableMe
 	if !ok {
 		bm.Logger().Debug(ctx,
 			"task is tombstone, ignored the ack request",
-			mlog.Uint64("broadcastID", msg.BroadcastHeader().BroadcastID),
+			mlog.FieldBroadcastID(msg.BroadcastHeader().BroadcastID),
 			mlog.String("vchannel", msg.VChannel()))
 		return nil
 	}
@@ -272,7 +272,7 @@ func (bm *broadcastTaskManager) DropTombstone(ctx context.Context, broadcastID u
 
 	t, ok := bm.getBroadcastTaskByID(broadcastID)
 	if !ok {
-		bm.Logger().Debug(ctx, "task is not found, ignored the drop tombstone request", mlog.Uint64("broadcastID", broadcastID))
+		bm.Logger().Debug(ctx, "task is not found, ignored the drop tombstone request", mlog.FieldBroadcastID(broadcastID))
 		return nil
 	}
 	if err := t.DropTombstone(ctx); err != nil {

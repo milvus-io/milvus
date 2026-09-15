@@ -84,10 +84,11 @@ func (p *grpcConfig) init(domain string, base *BaseTable) {
 	p.Domain = domain
 	p.base = base
 	p.IPItem = ParamItem{
-		Key:     p.Domain + ".ip",
-		Version: "2.3.3",
-		Doc:     "TCP/IP address of " + p.Domain + ". If not specified, use the first unicastable address",
-		Export:  true,
+		Key:         p.Domain + ".ip",
+		Version:     "2.3.3",
+		Doc:         "TCP/IP address of " + p.Domain + ". If not specified, use the first unicastable address",
+		Export:      true,
+		Sensitivity: Sensitive,
 	}
 	p.IPItem.Init(base.mgr)
 	p.IP = funcutil.GetIP(p.IPItem.GetValue())
@@ -98,6 +99,7 @@ func (p *grpcConfig) init(domain string, base *BaseTable) {
 		DefaultValue: strconv.FormatInt(ProxyExternalPort, 10),
 		Doc:          "TCP port of " + p.Domain,
 		Export:       true,
+		Sensitivity:  Sensitive,
 	}
 	p.Port.Init(base.mgr)
 
@@ -105,6 +107,7 @@ func (p *grpcConfig) init(domain string, base *BaseTable) {
 		Key:          p.Domain + ".internalPort",
 		Version:      "2.0.0",
 		DefaultValue: strconv.FormatInt(ProxyInternalPort, 10),
+		Sensitivity:  Sensitive,
 	}
 	p.InternalPort.Init(base.mgr)
 
@@ -113,29 +116,48 @@ func (p *grpcConfig) init(domain string, base *BaseTable) {
 		Version:      "2.0.0",
 		DefaultValue: "0",
 		Export:       true,
+		Sensitivity:  Sensitive,
 	}
 	p.TLSMode.Init(base.mgr)
 
 	p.ServerPemPath = ParamItem{
-		Key:     "tls.serverPemPath",
-		Version: "2.0.0",
-		Export:  true,
+		Key:         "tls.serverPemPath",
+		Sensitivity: Sensitive,
+		Version:     "2.0.0",
+		Export:      true,
 	}
 	p.ServerPemPath.Init(base.mgr)
 
 	p.ServerKeyPath = ParamItem{
-		Key:     "tls.serverKeyPath",
-		Version: "2.0.0",
-		Export:  true,
+		Key:         "tls.serverKeyPath",
+		Sensitivity: Sensitive,
+		Version:     "2.0.0",
+		Export:      true,
 	}
 	p.ServerKeyPath.Init(base.mgr)
 
 	p.CaPemPath = ParamItem{
-		Key:     "tls.caPemPath",
-		Version: "2.0.0",
-		Export:  true,
+		Key:         "tls.caPemPath",
+		Sensitivity: Sensitive,
+		Version:     "2.0.0",
+		Export:      true,
 	}
 	p.CaPemPath.Init(base.mgr)
+
+	// The per-cluster CDC namespaces are keyed by cluster ID and read by exact
+	// key through base.Get, not as a group — GetClusterTLSConfig and
+	// GetClusterAuthority below. Declaring them makes the namespaces visible
+	// to configuration projections and management GET, with sensitive values
+	// redacted. Registration does not restrict management SET or DELETE.
+	//
+	// Registered directly rather than through a ParamGroup field: a field would
+	// buy a GetValue nothing calls, and grpcConfig is embedded in fifteen
+	// server and client configs, so it would buy thirty of them.
+	//
+	base.mgr.RegisterSensitivePrefix("tls.clusters.")
+	base.mgr.RegisterSensitivePrefix("grpc.clusters.")
+	base.mgr.RegisterConfigPrefix("tls.clusters.")
+	base.mgr.RegisterConfigPrefix("grpc.clusters.")
 }
 
 // GetClusterTLSConfig returns per-cluster outbound TLS cert paths for CDC connections.
@@ -574,35 +596,40 @@ func (p *InternalTLSConfig) Init(base *BaseTable) {
 		Version:      "2.5.0",
 		DefaultValue: "false",
 		Export:       true,
+		Sensitivity:  Sensitive,
 	}
 	p.InternalTLSEnabled.Init(base.mgr)
 
 	p.InternalTLSServerPemPath = ParamItem{
-		Key:     "internaltls.serverPemPath",
-		Version: "2.5.0",
-		Export:  true,
+		Key:         "internaltls.serverPemPath",
+		Sensitivity: Sensitive,
+		Version:     "2.5.0",
+		Export:      true,
 	}
 	p.InternalTLSServerPemPath.Init(base.mgr)
 
 	p.InternalTLSServerKeyPath = ParamItem{
-		Key:     "internaltls.serverKeyPath",
-		Version: "2.5.0",
-		Export:  true,
+		Key:         "internaltls.serverKeyPath",
+		Sensitivity: Sensitive,
+		Version:     "2.5.0",
+		Export:      true,
 	}
 	p.InternalTLSServerKeyPath.Init(base.mgr)
 
 	p.InternalTLSCaPemPath = ParamItem{
-		Key:     "internaltls.caPemPath",
-		Version: "2.5.0",
-		Export:  true,
+		Key:         "internaltls.caPemPath",
+		Sensitivity: Sensitive,
+		Version:     "2.5.0",
+		Export:      true,
 	}
 	p.InternalTLSCaPemPath.Init(base.mgr)
 
 	p.InternalTLSSNI = ParamItem{
-		Key:     "internaltls.sni",
-		Version: "2.5.0",
-		Export:  true,
-		Doc:     "The server name indication (SNI) for internal TLS, should be the same as the name provided by the certificates ref: https://en.wikipedia.org/wiki/Server_Name_Indication",
+		Key:         "internaltls.sni",
+		Sensitivity: Sensitive,
+		Version:     "2.5.0",
+		Export:      true,
+		Doc:         "The server name indication (SNI) for internal TLS, should be the same as the name provided by the certificates ref: https://en.wikipedia.org/wiki/Server_Name_Indication",
 	}
 	p.InternalTLSSNI.Init(base.mgr)
 }

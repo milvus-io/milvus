@@ -1135,6 +1135,23 @@ common:
     lowPriorityRatio: -1 # amplification ratio for low priority tasks if disk rate limiter is enabled, value <= 0 means ratio limit is disabled
   security:
     authorizationEnabled: false
+    # Whether the metrics port (default 9091) requires root HTTP Basic authentication
+    # for /management/*, /log/level, /eventlog, /debug/pprof/* and the web console.
+    # Probes and scrapes remain open; /api/v1/health retains any existing data-plane auth.
+    # Legacy /api/v1 data operations keep valid-user/API-key auth when
+    # common.security.authorizationEnabled is true, and otherwise require root.
+    # Requests without Origin or Fetch Metadata must include X-Milvus-Admin-Request: true.
+    # Use HTTPS for the browser console and preserve Fetch Metadata at the reverse proxy.
+    # Root hashes are cached for 10 seconds; a failed refresh may reuse the last hash for
+    # up to 10 minutes after its last fetch, including a password rotated during an outage.
+    # A Proxy receiving a root credential notification revokes that cached hash and any
+    # in-flight verification results; it returns 503 if the current hash cannot be fetched.
+    # Other nodes and Proxies that have not received the notification retain the TTL policy.
+    # Update graceful-shutdown and profiling clients before enabling. The eventlog gRPC
+    # stream becomes loopback-only. This port remains plaintext: use a trusted network
+    # or TLS proxy and rotate root with UpdateCredential, not defaultRootPassword.
+    # Not settable through /management/config/alter. Watch milvus_admin_auth_total.
+    adminAuthEnabled: false
     # The superusers will ignore some system check processes,
     # like the old password verification when updating the credential
     superUsers: 

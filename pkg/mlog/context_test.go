@@ -156,7 +156,7 @@ func TestContextFieldHelpers(t *testing.T) {
 	assert.Equal(t, zap.String(keyModule, "proxy"), fm[keyModule])
 }
 
-// Tests for propagatedStringField/propagatedInt64Field
+// Tests for propagated scalar fields.
 
 func TestPropagatedStringField(t *testing.T) {
 	f := propagatedStringField("key", "value")
@@ -177,6 +177,15 @@ func TestPropagatedInt64Field(t *testing.T) {
 func TestPropagatedInt64NegativeValue(t *testing.T) {
 	f := propagatedInt64Field("offset", -100)
 	assert.Equal(t, "-100", getPropagatedValue(&f))
+}
+
+func TestPropagatedUint64Field(t *testing.T) {
+	value := ^uint64(0)
+	f := propagatedUint64Field("key", value)
+	assert.Equal(t, "key", f.Key)
+	assert.Equal(t, zapcore.Uint64Type, f.Type)
+	assert.True(t, isPropagatedField(&f))
+	assert.Equal(t, "18446744073709551615", getPropagatedValue(&f))
 }
 
 func TestRegularFieldIsNotPropagated(t *testing.T) {
