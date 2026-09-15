@@ -388,9 +388,11 @@ func GetManifestFieldIDs(manifestPath string, storageConfig *indexpb.StorageConf
 		return nil, err
 	}
 	defer C.loon_manifest_destroy(manifest)
+	return manifestFieldIDsFromColumnGroups(manifestPath, &manifest.column_groups)
+}
 
+func manifestFieldIDsFromColumnGroups(manifestPath string, cgroups *C.LoonColumnGroups) (map[int64]struct{}, error) {
 	fields := make(map[int64]struct{})
-	cgroups := &manifest.column_groups
 	if cgroups.column_group_array == nil && cgroups.num_of_column_groups > 0 {
 		return nil, merr.WrapErrServiceInternalMsg("column_group_array is nil but num_of_column_groups is %d", cgroups.num_of_column_groups)
 	}
@@ -398,13 +400,21 @@ func GetManifestFieldIDs(manifestPath string, storageConfig *indexpb.StorageConf
 	cgArray := unsafe.Slice(cgroups.column_group_array, int(cgroups.num_of_column_groups))
 	for i := range cgArray {
 		cg := &cgArray[i]
-		if cg.columns == nil {
+		if cg.num_of_columns == 0 {
+			mlog.RatedWarn(context.TODO(), 1, "manifest contains an empty column group",
+				mlog.String("manifestPath", manifestPath),
+				mlog.Int("columnGroupIndex", i))
 			continue
 		}
+		if cg.columns == nil {
+			return nil, merr.WrapErrServiceInternalMsg(
+				"columns array is nil but num_of_columns is %d in column group %d", cg.num_of_columns, i)
+		}
 		columns := unsafe.Slice(cg.columns, int(cg.num_of_columns))
-		for _, column := range columns {
+		for j, column := range columns {
 			if column == nil {
-				continue
+				return nil, merr.WrapErrServiceInternalMsg(
+					"nil column name in column group %d at index %d", i, j)
 			}
 			columnName := C.GoString(column)
 			fieldID, err := strconv.ParseInt(columnName, 10, 64)
