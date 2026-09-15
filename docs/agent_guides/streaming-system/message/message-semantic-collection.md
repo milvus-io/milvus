@@ -19,7 +19,7 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 | DropSnapshot | Broadcast: CChannel | No | ExclusiveSnapshotName |
 | RestoreSnapshot | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName + ExclusiveSnapshotName |
 | DropSnapshotsByCollection | Broadcast: CChannel | No | SharedDBName + SharedCollectionName |
-| Import | Broadcast: VChannels (no CChannel) | No | — |
+| Import | Broadcast: VChannels (no CChannel) | No | SharedDBName + ExclusiveCollectionName |
 | Insert | Single VChannel | No | — |
 | Delete | Single VChannel | No | — |
 | CreateSegment *(SelfControlled)* | Single VChannel | No | — |
