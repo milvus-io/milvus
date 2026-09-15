@@ -86,7 +86,7 @@ class TestChaos(TestChaosBase):
 
     def init_health_checkers(self, collection_name=None, dim=2048):
         log.info("init health checkers")
-        c_name = collection_name if collection_name else cf.gen_unique_str("Checker_")
+        c_name = collection_name or cf.gen_unique_str("Checker_")
         checkers = {
             Op.bulk_insert: BulkInsertChecker(
                 collection_name=c_name,

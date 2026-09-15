@@ -60,7 +60,7 @@ class TestBUlkInsertPerf(TestBulkInsertBase):
 
     def init_health_checkers(self, collection_name=None, file_type="npy"):
         log.info("init health checkers")
-        c_name = collection_name if collection_name else cf.gen_unique_str("BulkInsertChecker")
+        c_name = collection_name or cf.gen_unique_str("BulkInsertChecker")
         fields = [
             FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
             FieldSchema(name="title", dtype=DataType.VARCHAR, max_length=65535),
