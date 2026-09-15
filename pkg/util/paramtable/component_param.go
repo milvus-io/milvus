@@ -4268,11 +4268,11 @@ Set to 0 to disable the penalty period.`,
 // /////////////////////////////////////////////////////////////////////////////
 // --- querynode ---
 type queryNodeConfig struct {
-	StrictGroupStrategy            ParamItem `refreshable:"true"`
-	StrictGroupDebug               ParamItem `refreshable:"true"`
-	StrictGroupPhase1MaxCandidates ParamItem `refreshable:"true"`
-	StrictGroupSkipRefine          ParamItem `refreshable:"true"`
-	SoPath                         ParamItem `refreshable:"false"`
+	StrictGroupStrategy              ParamItem `refreshable:"true"`
+	StrictGroupDebug                 ParamItem `refreshable:"true"`
+	StrictGroupPhase1CandidateWeight ParamItem `refreshable:"true"`
+	StrictGroupSkipRefine            ParamItem `refreshable:"true"`
+	SoPath                           ParamItem `refreshable:"false"`
 
 	// stats
 	// Deprecated: Never used
@@ -4516,12 +4516,12 @@ func (p *queryNodeConfig) init(base *BaseTable, localStoragePath string) {
 		Doc: "Opt-in segment/stage diagnostic logs; no per-candidate logs or customer field values.",
 	}
 	p.StrictGroupDebug.Init(base.mgr)
-	p.StrictGroupPhase1MaxCandidates = ParamItem{
-		Key:     "queryNode.groupBy.strictGroupPhase1MaxCandidates",
+	p.StrictGroupPhase1CandidateWeight = ParamItem{
+		Key:     "queryNode.groupBy.strictGroupPhase1CandidateWeight",
 		Version: "2.6.23", DefaultValue: "0", Export: true,
-		Doc: "Strict group phase-one consumer Next budget; zero is unlimited. Freeze discovered groups at the budget and complete their quotas without this limit. May reduce recall.",
+		Doc: "Strict group phase-one consumer Next limit is topk * group_size * weight; zero disables truncation. Overflow saturates at INT64_MAX. Only group discovery is limited; completion is not. May reduce recall.",
 	}
-	p.StrictGroupPhase1MaxCandidates.Init(base.mgr)
+	p.StrictGroupPhase1CandidateWeight.Init(base.mgr)
 	p.StrictGroupSkipRefine = ParamItem{
 		Key:     "queryNode.groupBy.strictGroupSkipRefine",
 		Version: "2.6.23", DefaultValue: "false", Export: true,
