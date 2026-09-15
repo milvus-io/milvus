@@ -103,7 +103,7 @@ func (s *ChainTestSuite) createTestDataFrame() *DataFrame {
 		},
 	}
 
-	df, err := FromSearchResultData(resultData, s.pool, []string{"age", "name"})
+	df, err := FromSearchResultData(resultData, s.pool, testDataFrameInputPlan(resultData, "age", "name"))
 	s.Require().NoError(err)
 	return df
 }
@@ -1505,7 +1505,7 @@ func (s *ChainTestSuite) TestSortOp_StringColumn() {
 		},
 	}
 
-	df, err := FromSearchResultData(resultData, s.pool, []string{"name"})
+	df, err := FromSearchResultData(resultData, s.pool, testDataFrameInputPlan(resultData, "name"))
 	s.Require().NoError(err)
 	defer df.Release()
 
@@ -1566,7 +1566,7 @@ func (s *ChainTestSuite) TestSortOp_AllColumnsReordered() {
 		},
 	}
 
-	df, err := FromSearchResultData(resultData, s.pool, []string{"age", "name"})
+	df, err := FromSearchResultData(resultData, s.pool, testDataFrameInputPlan(resultData, "age", "name"))
 	s.Require().NoError(err)
 	defer df.Release()
 
@@ -1653,7 +1653,7 @@ func (s *ChainTestSuite) TestSortOp_MultipleChunksAllColumnsReordered() {
 		},
 	}
 
-	df, err := FromSearchResultData(resultData, s.pool, []string{"value"})
+	df, err := FromSearchResultData(resultData, s.pool, testDataFrameInputPlan(resultData, "value"))
 	s.Require().NoError(err)
 	defer df.Release()
 
@@ -2329,7 +2329,7 @@ func (s *MergeOpTestSuite) TestMergeOpFieldDataPropagated() {
 			},
 		},
 	}
-	df1, err := FromSearchResultData(resultData1, s.pool, []string{"category"})
+	df1, err := FromSearchResultData(resultData1, s.pool, testDataFrameInputPlan(resultData1, "category"))
 	s.Require().NoError(err)
 	defer df1.Release()
 
@@ -2348,7 +2348,7 @@ func (s *MergeOpTestSuite) TestMergeOpFieldDataPropagated() {
 			},
 		},
 	}
-	df2, err := FromSearchResultData(resultData2, s.pool, []string{"category"})
+	df2, err := FromSearchResultData(resultData2, s.pool, testDataFrameInputPlan(resultData2, "category"))
 	s.Require().NoError(err)
 	defer df2.Release()
 
