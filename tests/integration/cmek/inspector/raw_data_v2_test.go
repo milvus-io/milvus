@@ -66,21 +66,26 @@ func TestLocateRawDataV2RejectsWrongVersionAndEmptyPaths(t *testing.T) {
 	require.ErrorContains(t, err, "belongs to collection 12")
 }
 
-func TestInspectRawDataV2ValidatesEncryptedParquetEnvelope(t *testing.T) {
+func TestInspectEncryptedParquetValidatesEncryptedParquetEnvelope(t *testing.T) {
 	raw := encryptedParquetFixture(t, "17_23_fixture-edek", parquet.AesGcm)
-	require.NoError(t, InspectRawDataV2(raw, 17, 23))
+	edek, err := InspectEncryptedParquet(raw, 17, 23)
+	require.NoError(t, err)
+	require.Equal(t, "fixture-edek", edek)
 }
 
-func TestInspectRawDataV2RejectsWrongIdentityAndCipher(t *testing.T) {
+func TestInspectEncryptedParquetRejectsWrongIdentityAndCipher(t *testing.T) {
 	raw := encryptedParquetFixture(t, "17_23_fixture-edek", parquet.AesGcm)
-	require.ErrorContains(t, InspectRawDataV2(raw, 18, 23), "EZ id 17")
-	require.ErrorContains(t, InspectRawDataV2(raw, 17, 24), "collection id 23")
+	_, err := InspectEncryptedParquet(raw, 18, 23)
+	require.ErrorContains(t, err, "EZ id 17")
+	_, err = InspectEncryptedParquet(raw, 17, 24)
+	require.ErrorContains(t, err, "collection id 23")
 
 	raw = encryptedParquetFixture(t, "17_23_fixture-edek", parquet.AesCtr)
-	require.ErrorContains(t, InspectRawDataV2(raw, 17, 23), "AES_GCM_V1")
+	_, err = InspectEncryptedParquet(raw, 17, 23)
+	require.ErrorContains(t, err, "AES_GCM_V1")
 }
 
-func TestInspectRawDataV2RejectsPlaintextParquet(t *testing.T) {
+func TestInspectEncryptedParquetRejectsPlaintextParquet(t *testing.T) {
 	root, err := schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
 		schema.NewInt64Node("value", parquet.Repetitions.Required, -1),
 	}, -1)
@@ -89,7 +94,8 @@ func TestInspectRawDataV2RejectsPlaintextParquet(t *testing.T) {
 	writer := file.NewParquetWriter(&sink, root)
 	require.NoError(t, writer.Close())
 
-	require.ErrorContains(t, InspectRawDataV2(sink.Bytes(), 17, 23), "encrypted footer")
+	_, err = InspectEncryptedParquet(sink.Bytes(), 17, 23)
+	require.ErrorContains(t, err, "encrypted footer")
 }
 
 func encryptedParquetFixture(t *testing.T, keyMetadata string, cipher parquet.Cipher) []byte {
@@ -132,7 +138,7 @@ func TestLocateRawDataV2RejectsIncompleteObjectSets(t *testing.T) {
 	}
 }
 
-func TestInspectRawDataV2RejectsMalformedKeyMetadata(t *testing.T) {
+func TestInspectEncryptedParquetRejectsMalformedKeyMetadata(t *testing.T) {
 	for _, test := range []struct {
 		name     string
 		metadata string
@@ -145,12 +151,13 @@ func TestInspectRawDataV2RejectsMalformedKeyMetadata(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			raw := encryptedParquetFixture(t, test.metadata, parquet.AesGcm)
-			require.ErrorContains(t, InspectRawDataV2(raw, 17, 23), test.want)
+			_, err := InspectEncryptedParquet(raw, 17, 23)
+			require.ErrorContains(t, err, test.want)
 		})
 	}
 }
 
-func TestInspectRawDataV2RejectsDamagedFooter(t *testing.T) {
+func TestInspectEncryptedParquetRejectsDamagedFooter(t *testing.T) {
 	for _, test := range []struct {
 		name   string
 		mutate func([]byte) []byte
@@ -169,11 +176,12 @@ func TestInspectRawDataV2RejectsDamagedFooter(t *testing.T) {
 			// A compact-protocol field header without its required value.
 			raw = append(append([]byte(nil), raw[:4]...), 0x18, 1, 0, 0, 0, 'P', 'A', 'R', 'E')
 			return raw
-		}, want: "parse Storage V2 encrypted Parquet crypto metadata"},
+		}, want: "parse encrypted Parquet crypto metadata"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			raw := encryptedParquetFixture(t, "17_23_edek", parquet.AesGcm)
-			require.ErrorContains(t, InspectRawDataV2(test.mutate(raw), 17, 23), test.want)
+			_, err := InspectEncryptedParquet(test.mutate(raw), 17, 23)
+			require.ErrorContains(t, err, test.want)
 		})
 	}
 }

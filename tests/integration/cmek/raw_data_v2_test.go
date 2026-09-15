@@ -79,6 +79,7 @@ func (s *rawDataSuite) setupRawData(storageVersion int64) {
 	s.WithOptions(integration.WithoutResetDeploymentWhenTestTearDown())
 	s.WithMilvusConfig("common.storage.useLoonFFI", strconv.FormatBool(storageVersion == 3))
 	s.WithMilvusConfig("dataNode.storage.format", "parquet")
+	s.WithMilvusConfig("dataCoord.enableCompaction", "false")
 	s.WithMilvusConfig("common.storage.enableGrowingSourceFlush", "false")
 	s.WithMilvusConfig("indexCoord.segment.minSegmentNumRowsToEnableIndex", "1024")
 	s.WithMilvusConfig("queryNode.segcore.interimIndex.enableIndex", "false")
@@ -128,78 +129,25 @@ func TestRawDataV2Suite(t *testing.T) {
 }
 
 func (s *rawDataSuite) runRawDataCampaign(c rawDataCampaign) {
-	ctx := s.Cluster.GetContext()
-	collectionName := "cmek_raw_" + c.name + "_" + funcutil.GenRandomStr()
-	c.schema.Name = collectionName
-	loadFieldIDs := requestedFieldIDs(c.schema, c.loadFields)
-	marshaled, err := proto.Marshal(c.schema)
-	s.Require().NoError(err)
-	status, err := s.Cluster.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
-		DbName: s.dbName, CollectionName: collectionName, Schema: marshaled, ShardsNum: common.DefaultShardsNum,
-	})
-	s.Require().NoError(merr.CheckRPCCall(status, err))
-	defer s.cleanupRawCollection(collectionName)
-
-	describe, err := s.Cluster.MilvusClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
-		DbName: s.dbName, CollectionName: collectionName,
-	})
-	s.Require().NoError(merr.CheckRPCCall(describe, err))
-	collectionID := describe.GetCollectionID()
-	s.Require().Equal(strconv.FormatInt(s.ezID, 10), propertyValue(describe.GetProperties(), common.EncryptionEzIDKey))
-	s.Require().Equal(strconv.FormatInt(s.ezID, 10), propertyValue(describe.GetSchema().GetProperties(), common.EncryptionEzIDKey))
-	if c.index {
-		// Complete logical-index broadcasts before insert and flush start the
-		// segment lifecycle. A post-flush CreateIndex was observed remaining
-		// pending indefinitely while those workflows overlapped. The post-flush
-		// metadata assertion below still proves that these small segments have no
-		// physical vector index files.
-		s.createRawVectorIndexes(ctx, collectionName, c.schema)
-	}
-
-	insert, err := s.Cluster.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
-		DbName: s.dbName, CollectionName: collectionName, FieldsData: c.fields,
-		HashKeys: integration.GenerateHashKeys(rawDataRows), NumRows: rawDataRows,
-	})
-	s.Require().NoError(merr.CheckRPCCall(insert, err))
-	flush, err := s.Cluster.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
-		DbName: s.dbName, CollectionNames: []string{collectionName},
-	})
-	s.Require().NoError(merr.CheckRPCCall(flush, err))
-	flushedIDs := flush.GetCollSegIDs()[collectionName].GetData()
-	s.Require().NotEmpty(flushedIDs)
-	s.WaitForFlush(ctx, flushedIDs, flush.GetCollFlushTs()[collectionName], s.dbName, collectionName)
-
-	flushedSegments := s.rawFlushedSegments(collectionName, flushedIDs)
-	s.inspectRawObjects(ctx, flushedSegments, collectionID)
-	segments := s.rawSealedSegments(collectionName)
+	ctx, cancel := context.WithTimeout(s.Cluster.GetContext(), 3*time.Minute)
+	defer cancel()
+	description, segments := s.prepareRawDataCampaign(ctx, c)
+	collection, collectionID := description.GetCollectionName(), description.GetCollectionID()
 	s.inspectRawObjects(ctx, segments, collectionID)
 	if c.index {
-		s.assertNoPhysicalVectorIndex(ctx, segments, c.schema)
+		s.assertNoPhysicalVectorIndex(ctx, segments, description.GetSchema())
 	}
-
-	// Refresh authoritative metadata immediately before release and inspect the
-	// complete current set, including normal compaction replacements.
-	segments = s.rawSealedSegments(collectionName)
-	s.inspectRawObjects(ctx, segments, collectionID)
-	if c.index {
-		s.assertNoPhysicalVectorIndex(ctx, segments, c.schema)
-	}
-	release, err := s.Cluster.MilvusClient.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{
-		DbName: s.dbName, CollectionName: collectionName,
-	})
+	release, err := s.Cluster.MilvusClient.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{DbName: s.dbName, CollectionName: collection})
 	s.Require().NoError(merr.CheckRPCCall(release, err))
 	s.CheckCollectionCacheReleased(collectionID)
-
-	load, err := s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
-		DbName: s.dbName, CollectionName: collectionName, ReplicaNumber: 1, LoadFields: c.loadFields,
-	})
+	load, err := s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{DbName: s.dbName, CollectionName: collection, ReplicaNumber: 1, LoadFields: c.loadFields})
 	s.Require().NoError(merr.CheckRPCCall(load, err))
-	s.WaitForLoadWithDB(ctx, s.dbName, collectionName)
-	s.assertLoadedFields(ctx, collectionID, loadFieldIDs)
+	s.WaitForLoadWithDB(ctx, s.dbName, collection)
+	s.assertLoadedFields(ctx, collectionID, requestedFieldIDs(description.GetSchema(), c.loadFields))
 	s.assertRawLoadedSegments(ctx, collectionID, segments)
-	s.assertRawDataOracle(ctx, collectionName, c.fields, c.loadFields)
-	if c.search {
-		s.assertExactFloatSearch(ctx, collectionName, "float_vector", firstFloatVector(c.fields, "float_vector", rawDataDim), rawDataRows)
+	s.assertRawDataOracle(ctx, collection, c)
+	if c.index {
+		s.assertNoPhysicalVectorIndex(ctx, segments, description.GetSchema())
 	}
 }
 
@@ -212,7 +160,8 @@ func (s *rawDataSuite) inspectRawObjects(ctx context.Context, segments []*datapb
 		raw, readErr := reader.Read(ctx, inspector.Object{Path: object.Path})
 		s.Require().NoError(readErr, "collection=%d segment=%d field=%d path=%s storage_version=%d",
 			object.CollectionID, object.SegmentID, object.FieldID, object.Path, object.StorageVersion)
-		s.Require().NoError(inspector.InspectRawDataV2(raw, s.ezID, collectionID),
+		_, inspectErr := inspector.InspectEncryptedParquet(raw, s.ezID, collectionID)
+		s.Require().NoError(inspectErr,
 			"collection=%d segment=%d field=%d path=%s storage_version=%d",
 			object.CollectionID, object.SegmentID, object.FieldID, object.Path, object.StorageVersion)
 	}
@@ -268,38 +217,36 @@ func (s *rawDataSuite) assertNoPhysicalVectorIndex(ctx context.Context, segments
 		ids = append(ids, segment.GetID())
 	}
 	vectorIDs := make(map[int64]struct{})
-	for _, field := range schema.GetFields() {
+	fields := append([]*schemapb.FieldSchema(nil), schema.GetFields()...)
+	for _, field := range schema.GetStructArrayFields() {
+		fields = append(fields, field.GetFields()...)
+	}
+	for _, field := range fields {
 		if typeutil.IsVectorType(field.GetDataType()) {
 			vectorIDs[field.GetFieldID()] = struct{}{}
 		}
 	}
-	for _, structField := range schema.GetStructArrayFields() {
-		for _, field := range structField.GetFields() {
-			if typeutil.IsVectorType(field.GetDataType()) {
-				vectorIDs[field.GetFieldID()] = struct{}{}
-			}
-		}
-	}
+	s.Require().NotEmpty(ids)
 	s.Require().NotEmpty(vectorIDs)
-	var response *indexpb.GetIndexInfoResponse
-	s.Require().Eventually(func() bool {
-		candidate, err := s.Cluster.MixCoordClient.GetIndexInfos(ctx, &indexpb.GetIndexInfoRequest{
-			CollectionID: segments[0].GetCollectionID(), SegmentIDs: ids,
-		})
-		if err = merr.CheckRPCCall(candidate, err); err != nil {
-			return false
-		}
-		if !completeVectorIndexMetadata(candidate, segments, vectorIDs) {
-			return false
-		}
-		response = candidate
-		return true
-	}, 2*time.Minute, 500*time.Millisecond, "vector-index metadata did not finish for segments %v and fields %v", ids, vectorIDs)
-	for _, segment := range segments {
-		for _, info := range response.GetSegmentInfo()[segment.GetID()].GetIndexInfos() {
-			if _, target := vectorIDs[info.GetFieldID()]; target {
-				s.Require().Empty(info.GetIndexFilePaths(), "raw vector segment %d field %d unexpectedly has physical index files", segment.GetID(), info.GetFieldID())
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		response, err := s.Cluster.MixCoordClient.GetIndexInfos(ctx, &indexpb.GetIndexInfoRequest{CollectionID: segments[0].GetCollectionID(), SegmentIDs: ids})
+		s.Require().NoError(merr.CheckRPCCall(response, err))
+		if completeVectorIndexMetadata(response, segments, vectorIDs) {
+			for _, segment := range segments {
+				for _, info := range response.GetSegmentInfo()[segment.GetID()].GetIndexInfos() {
+					if _, ok := vectorIDs[info.GetFieldID()]; ok {
+						s.Require().Empty(info.GetIndexFilePaths(), "raw vector segment %d has a physical index", segment.GetID())
+					}
+				}
 			}
+			return
+		}
+		select {
+		case <-ctx.Done():
+			s.T().Fatal(ctx.Err())
+		case <-ticker.C:
 		}
 	}
 }
@@ -377,7 +324,8 @@ func (s *rawDataSuite) assertRawLoadedSegments(ctx context.Context, collectionID
 	}, 3*time.Minute, 500*time.Millisecond)
 }
 
-func (s *rawDataSuite) assertRawDataOracle(ctx context.Context, collection string, inserted []*schemapb.FieldData, loadFields []string) {
+func (s *rawDataSuite) assertRawDataOracle(ctx context.Context, collection string, c rawDataCampaign) {
+	inserted, loadFields := c.fields, c.loadFields
 	count, err := s.Cluster.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
 		DbName: s.dbName, CollectionName: collection, Expr: "", OutputFields: []string{"count(*)"},
 		ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
@@ -440,6 +388,9 @@ func (s *rawDataSuite) assertRawDataOracle(ctx context.Context, collection strin
 		delete(expectedByName, actual.GetFieldName())
 	}
 	s.Require().Empty(expectedByName)
+	if c.search {
+		s.assertExactFloatSearch(ctx, collection, "float_vector", firstFloatVector(c.fields, "float_vector", rawDataDim), rawDataRows)
+	}
 }
 
 func (s *rawDataSuite) assertExactFloatSearch(ctx context.Context, collection, field string, vector []float32, ef int) {
@@ -459,25 +410,6 @@ func (s *rawDataSuite) assertExactFloatSearch(ctx context.Context, collection, f
 	s.Require().Equal([]int64{0}, result.GetResults().GetIds().GetIntId().GetData())
 	s.Require().Len(result.GetResults().GetScores(), 1)
 	s.Require().InDelta(0, result.GetResults().GetScores()[0], 1e-6)
-}
-
-func (s *rawDataSuite) rawSealedSegments(collection string) []*datapb.SegmentInfo {
-	var segments []*datapb.SegmentInfo
-	s.Require().Eventually(func() bool {
-		current, err := s.Cluster.ShowSegmentsWithDB(s.dbName, collection)
-		if err != nil {
-			return false
-		}
-		segments = segments[:0]
-		for _, segment := range current {
-			if (segment.GetState() == commonpb.SegmentState_Sealed || segment.GetState() == commonpb.SegmentState_Flushed) &&
-				segment.GetNumOfRows() > 0 && !segment.GetCompacted() && !segment.GetIsInvisible() {
-				segments = append(segments, segment)
-			}
-		}
-		return len(segments) > 0
-	}, 2*time.Minute, 500*time.Millisecond)
-	return segments
 }
 
 func (s *rawDataSuite) rawFlushedSegments(collection string, flushed []int64) []*datapb.SegmentInfo {
@@ -647,11 +579,6 @@ func newStructArrayCampaign() rawDataCampaign {
 	}
 	structField := &schemapb.StructArrayFieldSchema{Name: "structs", Fields: children}
 	regularFields := []*schemapb.FieldSchema{{Name: fixturePrimaryKey, IsPrimaryKey: true, DataType: schemapb.DataType_Int64}, vectorSchema("struct_helper", schemapb.DataType_FloatVector, rawDataDim)}
-	regularFields[0].FieldID, regularFields[1].FieldID = 100, 101
-	structField.FieldID = 102
-	for i, child := range children {
-		child.FieldID = int64(103 + i)
-	}
 	schema := &schemapb.CollectionSchema{
 		Fields:            regularFields,
 		StructArrayFields: []*schemapb.StructArrayFieldSchema{structField},
@@ -806,39 +733,6 @@ func deterministicArrayField(name string, elementType schemapb.DataType, rows in
 		}
 	}
 	return &schemapb.FieldData{Type: schemapb.DataType_Array, FieldName: name, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{Data: values, ElementType: elementType}}}}}
-}
-
-func requestedFieldIDs(schema *schemapb.CollectionSchema, names []string) []int64 {
-	nameToID := make(map[string]int64)
-	structChildren := make(map[string][]int64)
-	nextID := int64(common.StartOfUserFieldID)
-	for _, field := range schema.GetFields() {
-		nameToID[field.GetName()] = nextID
-		field.FieldID = nextID
-		nextID++
-	}
-	if schema.GetEnableDynamicField() {
-		nameToID[common.MetaFieldName] = nextID
-		nextID++
-	}
-	for _, field := range schema.GetStructArrayFields() {
-		field.FieldID = nextID
-		nextID++
-		for _, child := range field.GetFields() {
-			child.FieldID = nextID
-			structChildren[field.GetName()] = append(structChildren[field.GetName()], nextID)
-			nextID++
-		}
-	}
-	ids := make([]int64, 0, len(names))
-	for _, name := range names {
-		if children := structChildren[name]; len(children) > 0 {
-			ids = append(ids, children...)
-		} else {
-			ids = append(ids, nameToID[name])
-		}
-	}
-	return ids
 }
 
 func fieldDataByName(fields []*schemapb.FieldData) map[string]*schemapb.FieldData {

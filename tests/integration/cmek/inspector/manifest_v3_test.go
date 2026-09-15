@@ -67,16 +67,14 @@ func encodeManifestV3(t *testing.T, schema string, records ...map[string]any) []
 }
 
 func TestManifestV3PreservesEveryColumnGroupAndFile(t *testing.T) {
-	manifest, err := ParseManifestV3(encodeManifestV3(t, manifestV3TestSchema, manifestV3Fixture()))
+	objects, err := ParseParquetObjectsV3(encodeManifestV3(t, manifestV3TestSchema, manifestV3Fixture()), "root/11")
 	require.NoError(t, err)
-	require.Len(t, manifest.ColumnGroups, 2)
-	var paths []string
-	for _, group := range manifest.ColumnGroups {
-		for _, file := range group.Files {
-			paths = append(paths, file.Path)
-		}
-	}
-	require.Equal(t, []string{"a.parquet", "b.parquet", "c.parquet", "d.parquet"}, paths)
+	require.Equal(t, []ParquetObjectV3{
+		{Path: "root/11/_data/a.parquet", Columns: []string{"0", "1", "100"}, Rows: 2},
+		{Path: "root/11/_data/b.parquet", Columns: []string{"0", "1", "100"}, Rows: 2},
+		{Path: "root/11/_data/c.parquet", Columns: []string{"101"}, Rows: 2},
+		{Path: "root/11/_data/d.parquet", Columns: []string{"101"}, Rows: 2},
+	}, objects)
 }
 
 func TestManifestV3EnumeratesAllObjectsAcrossSegments(t *testing.T) {
@@ -88,9 +86,7 @@ func TestManifestV3EnumeratesAllObjectsAcrossSegments(t *testing.T) {
 	require.NoError(t, err)
 	var paths []string
 	for _, reference := range references {
-		manifest, err := ParseManifestV3(encodeManifestV3(t, manifestV3TestSchema, manifestV3Fixture()))
-		require.NoError(t, err)
-		objects, err := manifest.ParquetObjects(reference.Locator.BasePath)
+		objects, err := ParseParquetObjectsV3(encodeManifestV3(t, manifestV3TestSchema, manifestV3Fixture()), reference.Locator.BasePath)
 		require.NoError(t, err)
 		for _, object := range objects {
 			paths = append(paths, object.Path)
@@ -109,7 +105,7 @@ func TestManifestV3RejectsPayloadAndUnclassifiedMetadata(t *testing.T) {
 			record := manifestV3Fixture()
 			record[field] = "sensitive-canary"
 			schema := strings.Replace(manifestV3TestSchema, `"fields":[`, `"fields":[{"name":"`+field+`","type":"string"},`, 1)
-			_, err := ParseManifestV3(encodeManifestV3(t, schema, record))
+			_, err := ParseParquetObjectsV3(encodeManifestV3(t, schema, record), "root/11")
 			require.Error(t, err)
 			require.NotContains(t, err.Error(), "sensitive-canary")
 		})
@@ -119,7 +115,7 @@ func TestManifestV3RejectsPayloadAndUnclassifiedMetadata(t *testing.T) {
 			record := manifestV3Fixture()
 			file := record["column_groups"].([]any)[0].(map[string]any)["files"].([]any)[0].(map[string]any)
 			file["properties"].(map[string]string)[property] = "sensitive-canary"
-			_, err := ParseManifestV3(encodeManifestV3(t, manifestV3TestSchema, record))
+			_, err := ParseParquetObjectsV3(encodeManifestV3(t, manifestV3TestSchema, record), "root/11")
 			require.Error(t, err)
 			require.NotContains(t, err.Error(), "sensitive-canary")
 		})
@@ -127,7 +123,7 @@ func TestManifestV3RejectsPayloadAndUnclassifiedMetadata(t *testing.T) {
 	t.Run("stats metadata", func(t *testing.T) {
 		record := manifestV3Fixture()
 		record["stats"].(map[string]any)["bloom_filter.100"].(map[string]any)["metadata"] = map[string]string{"payload": "sensitive-canary"}
-		_, err := ParseManifestV3(encodeManifestV3(t, manifestV3TestSchema, record))
+		_, err := ParseParquetObjectsV3(encodeManifestV3(t, manifestV3TestSchema, record), "root/11")
 		require.Error(t, err)
 		require.NotContains(t, err.Error(), "sensitive-canary")
 	})
@@ -152,6 +148,9 @@ func TestManifestV3RejectsIncompleteAndMalformedObjects(t *testing.T) {
 		{"duplicate object", func(r map[string]any) {
 			r["column_groups"].([]any)[0].(map[string]any)["files"].([]any)[1].(map[string]any)["path"] = "a.parquet"
 		}},
+		{"duplicate resolved object", func(r map[string]any) {
+			r["column_groups"].([]any)[0].(map[string]any)["files"].([]any)[1].(map[string]any)["path"] = "root/11/_data/a.parquet"
+		}},
 		{"invalid size", func(r map[string]any) {
 			r["column_groups"].([]any)[0].(map[string]any)["files"].([]any)[0].(map[string]any)["properties"] = map[string]string{"file_size": "payload"}
 		}},
@@ -159,13 +158,13 @@ func TestManifestV3RejectsIncompleteAndMalformedObjects(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			record := manifestV3Fixture()
 			test.mutate(record)
-			_, err := ParseManifestV3(encodeManifestV3(t, manifestV3TestSchema, record))
+			_, err := ParseParquetObjectsV3(encodeManifestV3(t, manifestV3TestSchema, record), "root/11")
 			require.Error(t, err)
 		})
 	}
 	raw := encodeManifestV3(t, manifestV3TestSchema, manifestV3Fixture())
-	_, err := ParseManifestV3(raw[:len(raw)-4])
+	_, err := ParseParquetObjectsV3(raw[:len(raw)-4], "root/11")
 	require.Error(t, err)
-	_, err = ParseManifestV3(encodeManifestV3(t, manifestV3TestSchema, manifestV3Fixture(), manifestV3Fixture()))
+	_, err = ParseParquetObjectsV3(encodeManifestV3(t, manifestV3TestSchema, manifestV3Fixture(), manifestV3Fixture()), "root/11")
 	require.ErrorContains(t, err, "multiple records")
 }

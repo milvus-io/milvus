@@ -84,7 +84,6 @@ type ManifestReferenceV3 struct {
 	CollectionID int64
 	SegmentID    int64
 	Rows         int64
-	Identity     string
 	Locator      ManifestLocatorV3
 }
 
@@ -108,7 +107,7 @@ func LocateManifestsV3(segments []*datapb.SegmentInfo, collectionID int64) ([]Ma
 			return nil, errors.New("multiple segments reference the same manifest")
 		}
 		seen[segment.GetID()], paths[locator.ObjectPath()] = true, true
-		references = append(references, ManifestReferenceV3{collectionID, segment.GetID(), segment.GetNumOfRows(), segment.GetManifestPath(), locator})
+		references = append(references, ManifestReferenceV3{collectionID, segment.GetID(), segment.GetNumOfRows(), locator})
 	}
 	return references, nil
 }

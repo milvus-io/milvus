@@ -20,9 +20,6 @@ OBJPREFIX := "github.com/milvus-io/milvus/cmd/milvus"
 SONIC_PLUGIN_SYNC_TAG := bytedance_tango
 SONIC_PLUGIN_SYNC_LDFLAG := -checklinkname=0
 MILVUS_GO_BUILD_TAGS := dynamic,sonic,with_jemalloc,$(SONIC_PLUGIN_SYNC_TAG)
-ifeq ($(CMEK_TEST_OBSERVER),1)
-MILVUS_GO_BUILD_TAGS := $(MILVUS_GO_BUILD_TAGS),cmektest
-endif
 
 INSTALL_PATH := $(PWD)/bin
 LIBRARY_PATH := $(PWD)/lib

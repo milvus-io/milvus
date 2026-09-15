@@ -28,8 +28,8 @@ import (
 	"github.com/iskorotkov/avro/v2/ocf"
 )
 
-type ManifestV3 struct {
-	ColumnGroups []ManifestV3ColumnGroup `json:"column_groups"`
+type manifestV3 struct {
+	ColumnGroups []manifestV3ColumnGroup `json:"column_groups"`
 	DeltaLogs    []struct {
 		Path       string `json:"path"`
 		Type       int32  `json:"type"`
@@ -66,13 +66,13 @@ type ManifestV3 struct {
 	} `json:"lob_files"`
 }
 
-type ManifestV3ColumnGroup struct {
+type manifestV3ColumnGroup struct {
 	Columns []string         `json:"columns"`
 	Format  string           `json:"format"`
-	Files   []ManifestV3File `json:"files"`
+	Files   []manifestV3File `json:"files"`
 }
 
-type ManifestV3File struct {
+type manifestV3File struct {
 	Path       string            `json:"path"`
 	Start      int64             `json:"start_index"`
 	End        int64             `json:"end_index"`
@@ -85,29 +85,12 @@ type ParquetObjectV3 struct {
 	Rows    int64
 }
 
-// ParquetObjects returns every physical raw-data reference, resolving paths
-// from the exact manifest's base rather than from an object-store listing.
-func (manifest *ManifestV3) ParquetObjects(basePath string) ([]ParquetObjectV3, error) {
-	var objects []ParquetObjectV3
-	seen := make(map[string]bool)
-	for _, group := range manifest.ColumnGroups {
-		for _, file := range group.Files {
-			name := file.Path
-			if !path.IsAbs(name) && !strings.HasPrefix(name, basePath+"/") {
-				name = path.Join(basePath, "_data", name)
-			}
-			if seen[name] {
-				return nil, errors.New("duplicate resolved manifest raw-data object")
-			}
-			seen[name] = true
-			objects = append(objects, ParquetObjectV3{name, group.Columns, file.End - file.Start})
-		}
+// ParseParquetObjectsV3 independently decodes and validates an exact manifest,
+// returning every physical raw-data object resolved against its base path.
+func ParseParquetObjectsV3(raw []byte, basePath string) ([]ParquetObjectV3, error) {
+	if !structuralPath(basePath) {
+		return nil, errors.New("invalid manifest base path")
 	}
-	return objects, nil
-}
-
-// ParseManifestV3 decodes the exact OCF record independently of Loon.
-func ParseManifestV3(raw []byte) (*ManifestV3, error) {
 	decoder, err := ocf.NewDecoder(bytes.NewReader(raw))
 	if err != nil {
 		return nil, err
@@ -135,7 +118,7 @@ func ParseManifestV3(raw []byte) (*ManifestV3, error) {
 	if err != nil {
 		return nil, err
 	}
-	var manifest ManifestV3
+	var manifest manifestV3
 	strict := json.NewDecoder(bytes.NewReader(encoded))
 	strict.DisallowUnknownFields()
 	if err := strict.Decode(&manifest); err != nil {
@@ -143,10 +126,7 @@ func ParseManifestV3(raw []byte) (*ManifestV3, error) {
 		// precisely the payload or secret that this assertion rejects.
 		return nil, errors.New("manifest contains unclassified fields or invalid structural values")
 	}
-	if err := manifest.validate(); err != nil {
-		return nil, err
-	}
-	return &manifest, nil
+	return manifest.parquetObjects(basePath)
 }
 
 func structuralPath(value string) bool {
@@ -171,65 +151,74 @@ func numericMetadata(properties map[string]string, allowed ...string) error {
 	return nil
 }
 
-func (manifest *ManifestV3) validate() error {
+func (manifest *manifestV3) parquetObjects(basePath string) ([]ParquetObjectV3, error) {
 	if len(manifest.ColumnGroups) == 0 {
-		return errors.New("manifest has no column groups")
+		return nil, errors.New("manifest has no column groups")
 	}
-	objects := make(map[string]bool)
+	var objects []ParquetObjectV3
+	seen := make(map[string]bool)
 	columns := make(map[string]bool)
 	for _, group := range manifest.ColumnGroups {
 		if len(group.Columns) == 0 || len(group.Files) == 0 || group.Format != "parquet" {
-			return errors.New("manifest has empty column group or unclassified format")
+			return nil, errors.New("manifest has empty column group or unclassified format")
 		}
 		for _, column := range group.Columns {
 			if id, err := strconv.ParseInt(column, 10, 64); err != nil || id < 0 || columns[column] {
-				return errors.New("invalid or duplicate manifest column")
+				return nil, errors.New("invalid or duplicate manifest column")
 			}
 			columns[column] = true
 		}
 		for _, file := range group.Files {
-			if !structuralPath(file.Path) || file.Start < 0 || file.End <= file.Start || objects[file.Path] {
-				return errors.New("invalid or duplicate manifest raw-data object")
+			if !structuralPath(file.Path) || file.Start < 0 || file.End <= file.Start {
+				return nil, errors.New("invalid or duplicate manifest raw-data object")
 			}
-			objects[file.Path] = true
+			name := file.Path
+			if !path.IsAbs(name) && !strings.HasPrefix(name, basePath+"/") {
+				name = path.Join(basePath, "_data", name)
+			}
+			if seen[name] {
+				return nil, errors.New("duplicate resolved manifest raw-data object")
+			}
+			seen[name] = true
+			objects = append(objects, ParquetObjectV3{Path: name, Columns: group.Columns, Rows: file.End - file.Start})
 			if err := numericMetadata(file.Properties, "file_size", "footer_size"); err != nil {
-				return err
+				return nil, err
 			}
 		}
 	}
 	for name, stats := range manifest.Stats {
 		kind, field, ok := strings.Cut(name, ".")
 		if !ok || (kind != "bloom_filter" && kind != "bm25") {
-			return errors.New("unclassified manifest statistics")
+			return nil, errors.New("unclassified manifest statistics")
 		}
 		if id, err := strconv.ParseInt(field, 10, 64); err != nil || id < 0 || len(stats.Paths) == 0 {
-			return errors.New("invalid manifest statistics")
+			return nil, errors.New("invalid manifest statistics")
 		}
 		for _, name := range stats.Paths {
 			if !structuralPath(name) {
-				return errors.New("invalid manifest statistics path")
+				return nil, errors.New("invalid manifest statistics path")
 			}
 		}
 		if err := numericMetadata(stats.Metadata, "memory_size"); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	for _, delta := range manifest.DeltaLogs {
 		if !structuralPath(delta.Path) || delta.NumEntries < 0 {
-			return errors.New("invalid manifest delta log")
+			return nil, errors.New("invalid manifest delta log")
 		}
 	}
 	for _, index := range manifest.Indexes {
 		if !structuralPath(index.Path) || index.FieldID < 0 || index.NumRows < 0 || index.SerializedSize < 0 || index.MemSize < 0 {
-			return errors.New("invalid manifest index metadata")
+			return nil, errors.New("invalid manifest index metadata")
 		}
 		if err := numericMetadata(index.Properties); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	// TEXT/LOB encryption has not met the Testable capability requirements.
 	if len(manifest.LOBFiles) != 0 {
-		return errors.New("non-TEXT campaign unexpectedly produced LOB files")
+		return nil, errors.New("non-TEXT campaign unexpectedly produced LOB files")
 	}
-	return nil
+	return objects, nil
 }

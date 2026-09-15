@@ -129,7 +129,6 @@ func (b *brokerMetaWriter) UpdateSync(ctx context.Context, pack *SyncTask) error
 	}
 	err := retry.Handle(ctx, func() (bool, error) {
 		err := b.broker.SaveBinlogPaths(ctx, req)
-		observeCMEKCommit(pack, req, err)
 		// Segment not found during stale segment flush. Segment might get compacted already.
 		// Stop retry and still proceed to the end, ignoring this error.
 		if !pack.pack.isFlush && errors.Is(err, merr.ErrSegmentNotFound) {

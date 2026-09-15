@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/tests/integration/cmek/inspector"
 )
 
 // Exercise the real Go -> C++ -> Loon writer and reader boundaries. A NUL at
@@ -93,7 +94,9 @@ func TestFFIPackedWriterPreservesBinaryKey(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, "PARE", string(raw[:4]))
 			require.Equal(t, "PARE", string(raw[len(raw)-4:]))
-			key := fixtureParquetKey(t, raw, ezID, collectionID)
+			edek, err := inspector.InspectEncryptedParquet(raw, ezID, collectionID)
+			require.NoError(t, err)
+			key := fixtureParquetKey(t, edek, ezID, collectionID)
 			require.Len(t, key, 32)
 			require.Equal(t, offset, bytes.IndexByte(key, 0))
 			table, err := readParquetWithFooterKey(raw, key)

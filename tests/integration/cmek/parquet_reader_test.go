@@ -19,30 +19,18 @@ package cmek
 import (
 	"crypto/hmac"
 	"crypto/sha256"
-	"encoding/binary"
 	"encoding/hex"
-	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
-	"github.com/apache/arrow/go/v17/parquet/metadata"
 	"github.com/stretchr/testify/require"
 )
 
-func fixtureParquetKey(t *testing.T, raw []byte, ezID, collectionID int64) []byte {
+// fixtureParquetKey resolves an already inspected EDEK using the fixture protocol.
+func fixtureParquetKey(t *testing.T, encoded string, ezID, collectionID int64) []byte {
 	t.Helper()
-	require.Greater(t, len(raw), 8)
-	footerSize := int(binary.LittleEndian.Uint32(raw[len(raw)-8 : len(raw)-4]))
-	require.Positive(t, footerSize)
-	require.LessOrEqual(t, footerSize, len(raw)-12)
-	md, err := metadata.NewFileCryptoMetaData(raw[len(raw)-8-footerSize : len(raw)-8])
-	require.NoError(t, err)
-	parts := strings.SplitN(string(md.KeyMetadata()), "_", 3)
-	require.Len(t, parts, 3)
-	require.Equal(t, strconv.FormatInt(ezID, 10), parts[0])
-	require.Equal(t, strconv.FormatInt(collectionID, 10), parts[1])
-	edek := strings.Split(parts[2], ":")
+	edek := strings.Split(encoded, ":")
 	require.Len(t, edek, 3)
 	require.Equal(t, "v1", edek[0])
 	nonce, err := hex.DecodeString(edek[1])
@@ -58,8 +46,9 @@ func fixtureParquetKey(t *testing.T, raw []byte, ezID, collectionID int64) []byt
 // The representative object comes from the independently inspected DataNode
 // manifest. Read all row groups using the same entry point and immutable bytes
 // in each key mode; never obtain the DEK from a production plugin or reader.
-func (s *RawDataV3Suite) assertParquetKeyModes(raw []byte, rows, collectionID int64, objectPath string) {
-	key := fixtureParquetKey(s.T(), raw, s.ezID, collectionID)
+func (s *RawDataV3Suite) assertParquetKeyModes(sample parquetKeySample, collectionID int64) {
+	raw, rows, objectPath := sample.raw, sample.object.Rows, sample.object.Path
+	key := fixtureParquetKey(s.T(), sample.edek, s.ezID, collectionID)
 	digest := sha256.Sum256(raw)
 	table, err := readParquetWithFooterKey(raw, key)
 	s.Require().NoError(err, "correct key must read the complete representative object")
@@ -67,7 +56,7 @@ func (s *RawDataV3Suite) assertParquetKeyModes(raw []byte, rows, collectionID in
 		defer table.Release()
 		s.Require().Positive(rows)
 		s.Require().Equal(rows, table.NumRows())
-		columns := table.Schema().FieldIndices(s.keyBaselineColumn)
+		columns := table.Schema().FieldIndices(sample.column)
 		s.Require().Len(columns, 1, "representative object must contain the pre-generated payload")
 		var count int64
 		for _, chunk := range table.Column(columns[0]).Data().Chunks() {
