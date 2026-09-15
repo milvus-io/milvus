@@ -70,6 +70,24 @@ func TestFieldCloneTypeSchema(t *testing.T) {
 	assert.Equal(t, schemapb.DataType_FloatVector, fieldModel.TypeSchema.GetLeafType())
 }
 
+func TestFieldElementNullableRoundTrip(t *testing.T) {
+	field := &Field{
+		FieldID:         100,
+		Name:            "array",
+		DataType:        schemapb.DataType_Array,
+		ElementType:     schemapb.DataType_Int64,
+		ElementNullable: true,
+	}
+
+	cloned := field.Clone()
+	assert.True(t, cloned.ElementNullable)
+	assert.True(t, field.Equal(*cloned))
+	assert.True(t, UnmarshalFieldModel(MarshalFieldModel(field)).ElementNullable)
+
+	cloned.ElementNullable = false
+	assert.False(t, field.Equal(*cloned))
+}
+
 func TestCheckFieldsEqual(t *testing.T) {
 	type args struct {
 		fieldsA []*Field

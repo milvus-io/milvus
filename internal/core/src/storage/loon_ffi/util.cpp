@@ -46,6 +46,7 @@
 #include "storage/loon_ffi/external_spec_c.h"
 #include "storage/loon_ffi/property_singleton.h"
 #include "storage/loon_ffi/util.h"
+#include "storage/loon_ffi/loon_error_code.h"
 
 using json = nlohmann::json;
 
@@ -406,7 +407,7 @@ IsCloudEndpointHost(const std::string& host) {
     return false;
 }
 
-static void
+static arrow::Status
 InjectExternalSpecProperties(
     milvus_storage::api::Properties& properties,
     int64_t collection_id,
@@ -479,10 +480,12 @@ InjectExternalSpecProperties(
     // Caller must have run Go ValidateExternalSource; malformed here
     // signals etcd corruption or bypass — fail adjacent to bad input.
     auto scheme_end = external_source.find("://");
-    AssertInfo(scheme_end != std::string::npos,
-               "external_source for collection {} missing scheme: {}",
-               collection_id,
-               external_source);
+    if (!(scheme_end != std::string::npos)) {
+        ThrowInfo(milvus::ErrorCode::ConfigInvalid,
+                  "external_source for collection {} missing scheme: {}",
+                  collection_id,
+                  external_source);
+    }
 
     std::string scheme = external_source.substr(0, scheme_end);
     auto rest = external_source.substr(scheme_end + 3);
@@ -492,10 +495,12 @@ InjectExternalSpecProperties(
     // where rest itself is empty.
     std::string host =
         (slash_pos != std::string::npos) ? rest.substr(0, slash_pos) : rest;
-    AssertInfo(!host.empty(),
-               "external_source for collection {} has empty host: {}",
-               collection_id,
-               external_source);
+    if (!(!host.empty())) {
+        ThrowInfo(milvus::ErrorCode::ConfigInvalid,
+                  "external_source for collection {} has empty host: {}",
+                  collection_id,
+                  external_source);
+    }
 
     std::string path_part =
         (slash_pos != std::string::npos) ? rest.substr(slash_pos + 1) : "";
@@ -590,7 +595,7 @@ InjectExternalSpecProperties(
                 "(collection_id={}): {}",
                 collection_id,
                 e.what());
-            ThrowInfo(milvus::ErrorCode::UnexpectedError,
+            ThrowInfo(milvus::ErrorCode::ConfigInvalid,
                       "external_spec parse failed for collection {}: {}",
                       collection_id,
                       e.what());
@@ -656,10 +661,10 @@ InjectExternalSpecProperties(
     }
 
     // Format-layer: emit per-format properties derived from spec.format.
-    // Currently only Iceberg-table → iceberg.snapshot_id. Future formats
+    // Currently only Iceberg-table → reader.exttable.snapshot_id. Future formats
     // (Lance version, Iceberg branch, etc.) land here.
     if (external_spec.empty()) {
-        return;
+        return arrow::Status::OK();
     }
     try {
         simdjson::ondemand::parser parser;
@@ -670,7 +675,8 @@ InjectExternalSpecProperties(
             simdjson::SUCCESS) {
             std::string format{format_view};
             if (format == "iceberg-table") {
-                auto snapshot_field = doc.find_field("snapshot_id");
+                // JSON fields may appear before or after "format".
+                auto snapshot_field = doc.find_field_unordered("snapshot_id");
                 int64_t snapshot_id = 0;
                 auto int_err = snapshot_field.get_int64().get(snapshot_id);
                 if (int_err == simdjson::INCORRECT_TYPE) {
@@ -691,10 +697,15 @@ InjectExternalSpecProperties(
                     }
                 }
                 if (int_err == simdjson::SUCCESS) {
-                    milvus_storage::api::SetValue(
+                    const auto error = milvus_storage::api::SetValue(
                         properties,
-                        "iceberg.snapshot_id",
+                        PROPERTY_READER_EXTTABLE_SNAPSHOT_ID,
                         std::to_string(snapshot_id).c_str());
+                    if (error.has_value()) {
+                        // An invalid snapshot must not fall back to latest.
+                        return arrow::Status::Invalid(
+                            PROPERTY_READER_EXTTABLE_SNAPSHOT_ID, ": ", *error);
+                    }
                 }
             }
         }
@@ -705,6 +716,7 @@ InjectExternalSpecProperties(
                  collection_id,
                  e.what());
     }
+    return arrow::Status::OK();
 }
 
 void
@@ -717,8 +729,11 @@ InjectExternalSpecProperties(milvus_storage::api::Properties& properties,
     const auto iops_config =
         milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
             .GetExternalIopsConfig();
-    InjectExternalSpecProperties(
+    const auto status = InjectExternalSpecProperties(
         properties, collection_id, external_source, external_spec, iops_config);
+    if (!status.ok()) {
+        ThrowInfo(milvus::InvalidParameter, "{}", status.message());
+    }
 }
 
 std::shared_ptr<milvus_storage::api::Properties>
@@ -806,14 +821,21 @@ GetLoonManifest(
         auto current_manifest = manifest_result.ValueOrDie();
         return current_manifest;
     } catch (const json::parse_error& e) {
-        throw std::runtime_error(
-            std::string("Failed to parse manifest JSON: ") + e.what());
+        ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                  "{}",
+                  std::string(std::string("Failed to parse manifest JSON: ") +
+                              e.what()));
     } catch (const json::out_of_range& e) {
-        throw std::runtime_error(
-            std::string("Missing required field in manifest: ") + e.what());
+        ThrowInfo(
+            milvus::ErrorCode::DataFormatBroken,
+            "{}",
+            std::string(std::string("Missing required field in manifest: ") +
+                        e.what()));
     } catch (const json::type_error& e) {
-        throw std::runtime_error(
-            std::string("Invalid field type in manifest: ") + e.what());
+        ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                  "{}",
+                  std::string(std::string("Invalid field type in manifest: ") +
+                              e.what()));
     }
 }
 
@@ -821,7 +843,7 @@ GetLoonManifest(
 //
 // Bridges Go callers into the C++ InjectExternalSpecProperties pipeline so
 // that URI parsing, endpoint derivation, AWS-form rewriting, allowlist
-// enforcement, and format-property derivation (iceberg.snapshot_id etc.)
+// enforcement, and format-property derivation (reader.exttable.snapshot_id etc.)
 // all live in a single implementation driven by the raw external_spec JSON.
 
 extern "C" LoonFFIResult
@@ -855,11 +877,15 @@ loon_properties_inject_external_spec(LoonProperties* properties,
         // would couple concurrent FFI and native reads through global state.
         const milvus::storage::ExternalIopsConfig iops_config{iops_initial_rate,
                                                               iops_max_rate};
-        InjectExternalSpecProperties(props,
-                                     collection_id,
-                                     external_source,
-                                     external_spec ? external_spec : "",
-                                     iops_config);
+        const auto status =
+            InjectExternalSpecProperties(props,
+                                         collection_id,
+                                         external_source,
+                                         external_spec ? external_spec : "",
+                                         iops_config);
+        if (!status.ok()) {
+            RETURN_ERROR(LOON_INVALID_PROPERTIES, status.message());
+        }
 
         // Rebuild LoonProperties from the merged map. Free old entries first
         // so ownership stays with loon_properties_free.
@@ -885,8 +911,9 @@ loon_properties_inject_external_spec(LoonProperties* properties,
         size_t i = 0;
         for (const auto& kv : props) {
             arr[i].key = strdup(kv.first.c_str());
-            const auto* sval = std::get_if<std::string>(&kv.second);
-            arr[i].value = strdup(sval ? sval->c_str() : "");
+            // Registered properties such as snapshot_id are stored as INT64.
+            const auto value = PropertyValueAsString(props, kv.first.c_str());
+            arr[i].value = strdup(value ? value->c_str() : "");
             ++i;
         }
         properties->properties = arr;

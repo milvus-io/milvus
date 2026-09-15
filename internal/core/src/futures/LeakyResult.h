@@ -17,6 +17,7 @@
 #include <memory>
 #include <functional>
 #include <common/type_c.h>
+#include "common/EasyAssert.h"
 
 namespace milvus::futures {
 
@@ -92,7 +93,9 @@ class LeakyResult {
             return std::make_pair<void*, CStatus>(
                 nullptr, CStatus{status.error_code, status.error_msg});
         }
-        throw std::logic_error("get on a not ready LeakyResult");
+        ThrowInfo(ErrorCode::UnexpectedError,
+                  "{}",
+                  std::string("get on a not ready LeakyResult"));
     }
 
     ~LeakyResult() {

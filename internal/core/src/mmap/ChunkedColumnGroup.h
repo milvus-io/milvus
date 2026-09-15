@@ -535,6 +535,21 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         return PinWrapper<Chunk*>(std::move(group_chunk), chunk.get());
     }
 
+    TakeCellPin
+    MakeTakeCellPin(milvus::OpContext* op_ctx) const override {
+        auto group = group_;
+        const auto field_id = field_id_;
+        return [group = std::move(group), field_id, op_ctx](int64_t chunk_id) {
+            auto group_chunk = group->GetGroupChunk(op_ctx, chunk_id);
+            auto* chunk = group_chunk.get()->GetChunkRaw(field_id);
+            AssertInfo(chunk != nullptr,
+                       "field {} is missing from group chunk {}",
+                       field_id.get(),
+                       chunk_id);
+            return PinWrapper<Chunk*>(std::move(group_chunk), chunk);
+        };
+    }
+
     std::vector<PinWrapper<Chunk*>>
     GetAllChunks(milvus::OpContext* op_ctx) const override {
         std::vector<PinWrapper<Chunk*>> ret;
@@ -861,6 +876,11 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
     }
 
  private:
+    std::optional<DataType>
+    GetDefaultScanDataType() const override {
+        return data_type_;
+    }
+
     // Resolve, for each requested offset, the chunk that owns it and invoke
     // fn(chunk, offset_in_chunk, i), preserving the original row order.
     //

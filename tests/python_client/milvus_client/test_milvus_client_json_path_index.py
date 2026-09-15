@@ -345,7 +345,7 @@ class TestMilvusClientInsertJsonPathIndexValid(TestMilvusClientV2Base):
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema, 
                                          desired_field_names=[default_primary_key_field_name, default_int32_field_name])
         error = {ct.err_code: 1100, ct.err_msg: 
-                f"fieldSchema({default_vector_field_name}) has no corresponding fieldData pass in: invalid parameter"}
+                f'missing required field "{default_vector_field_name}": invalid parameter'}
         self.upsert(client, collection_name, rows, partial_update=True, 
                     check_task=CheckTasks.err_res, check_items=error)
         
@@ -471,7 +471,7 @@ class TestMilvusClientInsertJsonPathIndexValid(TestMilvusClientV2Base):
         new_rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema, 
                                             desired_field_names=[default_primary_key_field_name, default_vector_field_name])
         error = {ct.err_code: 1100, 
-                 ct.err_msg: f"fieldSchema({default_int32_field_name}) has no corresponding fieldData pass in: invalid parameter"}
+                 ct.err_msg: f'missing required field "{default_int32_field_name}": invalid parameter'}
         self.upsert(client, collection_name, new_rows, partial_update=True,
                     check_task=CheckTasks.err_res, check_items=error)
         
@@ -520,7 +520,7 @@ class TestMilvusClientInsertJsonPathIndexValid(TestMilvusClientV2Base):
         new_rows = cf.gen_row_data_by_schema(nb=gap, schema=schema, 
                                             desired_field_names=[default_primary_key_field_name, default_vector_field_name])
         error = {ct.err_code: 1100, 
-                 ct.err_msg: f"fieldSchema({default_int32_field_name}) has no corresponding fieldData pass in: invalid parameter"}
+                 ct.err_msg: f'missing required field "{default_int32_field_name}": invalid parameter'}
         self.upsert(client, collection_name, new_rows, partition_name=partition_names[-1], partial_update=True,
                     check_task=CheckTasks.err_res, check_items=error)
         

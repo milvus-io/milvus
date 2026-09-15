@@ -40,6 +40,7 @@ import "C"
 import (
 	"context"
 	"fmt"
+	"path"
 	"sort"
 	"strconv"
 	"strings"
@@ -56,6 +57,16 @@ const (
 	milvusTableSourceRowCountProperty     = "milvus_table.source_row_count"
 )
 
+// Manifest revision layout, mirroring milvus-storage's kMetadataDir /
+// kManifestFileNamePrefix / kManifestFileNameSuffix (cpp/common/layout.h).
+const (
+	// ManifestDir is the segment-base-relative directory holding every
+	// manifest revision of that segment.
+	ManifestDir            = "_metadata"
+	manifestFileNamePrefix = "manifest-"
+	manifestFileNameSuffix = ".avro"
+)
+
 // Fragment represents a data fragment from an external data source.
 // A large file (e.g., 10M rows) can be split into multiple fragments.
 type Fragment struct {
@@ -65,6 +76,7 @@ type Fragment struct {
 	EndRow     int64                 // End row index within the file (exclusive)
 	RowCount   int64                 // Number of rows (EndRow - StartRow)
 	Deltalogs  []*datapb.FieldBinlog // Source delete logs for milvus-table fragments
+	Properties map[string]string     // Immutable file properties shared by splits of the same file
 }
 
 type manifestColumnGroup struct {
@@ -73,6 +85,9 @@ type manifestColumnGroup struct {
 	Format    string
 }
 
+// External-table refresh assumes existing file ranges are immutable; overwrite
+// is unsupported. Properties are preserved for reads, but are deliberately not
+// hashed into fragment identity.
 func fragmentIdentity(f Fragment) string {
 	return fmt.Sprintf("%s:%d:%d", f.FilePath, f.StartRow, f.EndRow)
 }
@@ -307,8 +322,7 @@ func CreateMilvusTableManifestFromSegmentManifests(
 	return manifestPath, nil
 }
 
-// createColumnGroups creates a LoonColumnGroups structure from fragments.
-// This is an internal function used by CreateManifestForSegment.
+// createColumnGroups creates storage-owned column groups, including all file properties.
 func createColumnGroups(
 	columns []string,
 	format string,
@@ -333,6 +347,12 @@ func createColumnGroups(
 	cPaths := make([]*C.char, len(fragments))
 	cStartIndices := make([]C.int64_t, len(fragments))
 	cEndIndices := make([]C.int64_t, len(fragments))
+	cFileProperties := make([]C.LoonProperties, len(fragments))
+	defer func() {
+		for i := range cFileProperties {
+			C.loon_properties_free(&cFileProperties[i])
+		}
+	}()
 
 	for i, f := range fragments {
 		cPaths[i] = C.CString(f.FilePath)
@@ -345,11 +365,33 @@ func createColumnGroups(
 		}
 	}()
 
+	// Storage copies the per-file properties and owns the resulting column groups.
+	for i, fragment := range fragments {
+		if len(fragment.Properties) == 0 {
+			continue
+		}
+		cKeys := make([]*C.char, 0, len(fragment.Properties))
+		cValues := make([]*C.char, 0, len(fragment.Properties))
+		for key, value := range fragment.Properties {
+			cKeys = append(cKeys, C.CString(key))
+			cValues = append(cValues, C.CString(value))
+		}
+		result := C.loon_properties_create(&cKeys[0], &cValues[0], C.size_t(len(cKeys)), &cFileProperties[i])
+		for j := range cKeys {
+			C.free(unsafe.Pointer(cKeys[j]))
+			C.free(unsafe.Pointer(cValues[j]))
+		}
+		if err := HandleLoonFFIResult(result); err != nil {
+			return nil, merr.Wrap(err, "loon_properties_create for fragment failed")
+		}
+	}
+
 	var outColumnGroups *C.LoonColumnGroups
 	var cColumnsPtr **C.char
 	var cPathsPtr **C.char
 	var cStartIndicesPtr *C.int64_t
 	var cEndIndicesPtr *C.int64_t
+	var cFilePropertiesPtr *C.LoonProperties
 
 	if len(cColumns) > 0 {
 		cColumnsPtr = &cColumns[0]
@@ -360,6 +402,7 @@ func createColumnGroups(
 	if len(fragments) > 0 {
 		cStartIndicesPtr = &cStartIndices[0]
 		cEndIndicesPtr = &cEndIndices[0]
+		cFilePropertiesPtr = &cFileProperties[0]
 	}
 
 	result := C.loon_column_groups_create(
@@ -369,12 +412,13 @@ func createColumnGroups(
 		cPathsPtr,
 		cStartIndicesPtr,
 		cEndIndicesPtr,
+		cFilePropertiesPtr,
 		C.size_t(len(fragments)),
 		&outColumnGroups,
 	)
 
 	if err := HandleLoonFFIResult(result); err != nil {
-		return nil, merr.WrapErrStorage(err, "loon_column_groups_create failed")
+		return nil, merr.Wrap(err, "loon_column_groups_create failed")
 	}
 
 	return outColumnGroups, nil
@@ -388,9 +432,11 @@ func GetManifestFieldIDs(manifestPath string, storageConfig *indexpb.StorageConf
 		return nil, err
 	}
 	defer C.loon_manifest_destroy(manifest)
+	return manifestFieldIDsFromColumnGroups(manifestPath, &manifest.column_groups)
+}
 
+func manifestFieldIDsFromColumnGroups(manifestPath string, cgroups *C.LoonColumnGroups) (map[int64]struct{}, error) {
 	fields := make(map[int64]struct{})
-	cgroups := &manifest.column_groups
 	if cgroups.column_group_array == nil && cgroups.num_of_column_groups > 0 {
 		return nil, merr.WrapErrServiceInternalMsg("column_group_array is nil but num_of_column_groups is %d", cgroups.num_of_column_groups)
 	}
@@ -398,13 +444,21 @@ func GetManifestFieldIDs(manifestPath string, storageConfig *indexpb.StorageConf
 	cgArray := unsafe.Slice(cgroups.column_group_array, int(cgroups.num_of_column_groups))
 	for i := range cgArray {
 		cg := &cgArray[i]
-		if cg.columns == nil {
+		if cg.num_of_columns == 0 {
+			mlog.RatedWarn(context.TODO(), 1, "manifest contains an empty column group",
+				mlog.String("manifestPath", manifestPath),
+				mlog.Int("columnGroupIndex", i))
 			continue
 		}
+		if cg.columns == nil {
+			return nil, merr.WrapErrServiceInternalMsg(
+				"columns array is nil but num_of_columns is %d in column group %d", cg.num_of_columns, i)
+		}
 		columns := unsafe.Slice(cg.columns, int(cg.num_of_columns))
-		for _, column := range columns {
+		for j, column := range columns {
 			if column == nil {
-				continue
+				return nil, merr.WrapErrServiceInternalMsg(
+					"nil column name in column group %d at index %d", i, j)
 			}
 			columnName := C.GoString(column)
 			fieldID, err := strconv.ParseInt(columnName, 10, 64)
@@ -540,6 +594,42 @@ func manifestColumnGroupHasAnyColumn(group manifestColumnGroup, columns map[stri
 	return false
 }
 
+// ManifestFilePath returns the object-storage path of the manifest file a
+// marshaled manifest pointer refers to. Callers that need to ask storage
+// whether a revision still exists use it instead of re-deriving the layout.
+func ManifestFilePath(manifestPath string) (string, error) {
+	basePath, version, err := UnmarshalManifestPath(manifestPath)
+	if err != nil {
+		return "", merr.Wrap(err, "failed to parse manifest path")
+	}
+	if basePath == "" {
+		return "", merr.WrapErrServiceInternalMsg("manifest path %s has an empty base path", manifestPath)
+	}
+	return manifestObjectPath(basePath, version), nil
+}
+
+func manifestObjectPath(basePath string, version int64) string {
+	return fmt.Sprintf("%s/%s/%s%d%s", basePath, ManifestDir,
+		manifestFileNamePrefix, version, manifestFileNameSuffix)
+}
+
+// IsManifestRevisionObject reports whether an object path names a manifest
+// revision file inside a segment's manifest directory.
+//
+// A caller that copies a segment directory wholesale needs this to tell the
+// revision files apart from the data it is copying: milvus-storage discovers
+// the current version by listing ManifestDir and taking the highest revision
+// number it finds to allocate the next revision number. OVERWRITE applies the
+// updates to the explicitly selected input revision, which determines contents.
+func IsManifestRevisionObject(objectPath string) bool {
+	dir, name := path.Split(objectPath)
+	if path.Base(path.Clean(dir)) != ManifestDir {
+		return false
+	}
+	return strings.HasPrefix(name, manifestFileNamePrefix) &&
+		strings.HasSuffix(name, manifestFileNameSuffix)
+}
+
 func readColumnGroupsFromManifest(
 	manifestPath string,
 	storageConfig *indexpb.StorageConfig,
@@ -549,7 +639,7 @@ func readColumnGroupsFromManifest(
 		return nil, merr.Wrap(err, "failed to parse manifest path")
 	}
 
-	manifestFilePath := fmt.Sprintf("%s/_metadata/manifest-%d.avro", basePath, version)
+	manifestFilePath := manifestObjectPath(basePath, version)
 
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
 	if err != nil {
@@ -652,12 +742,17 @@ func readColumnGroupsFromManifest(
 					continue
 				}
 
+				properties, err := columnGroupFileProperties(file)
+				if err != nil {
+					return nil, merr.Wrapf(err, "column group %d file %d", i, j)
+				}
 				group.Fragments = append(group.Fragments, Fragment{
 					FragmentID: int64(len(group.Fragments)),
 					FilePath:   filePath,
 					StartRow:   startRow,
 					EndRow:     endRow,
 					RowCount:   endRow - startRow,
+					Properties: properties,
 				})
 			}
 		}

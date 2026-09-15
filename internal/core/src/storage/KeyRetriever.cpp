@@ -26,7 +26,11 @@ KeyRetriever::GetKey(const std::string& key_metadata) {
     auto plugin = PluginLoader::GetInstance().getCipherPlugin();
     AssertInfo(plugin != nullptr, "cipher plugin not found");
     auto context = DecodeKeyMetadata(key_metadata);
-    AssertInfo(context != nullptr, "invalid key metadata: {}", key_metadata);
+    if (!(context != nullptr)) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "invalid key metadata: {}",
+                  key_metadata);
+    }
     auto decryptor = plugin->GetDecryptor(
         context->ez_id, context->collection_id, std::string(context->key));
     return decryptor->GetKey();

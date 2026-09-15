@@ -290,7 +290,7 @@ func (s *ExpressionSuite) searchWithShiftNotExpression() {
 	}
 }
 
-func (s *ExpressionSuite) TestDivisionByZeroError() {
+func (s *ExpressionSuite) testDivisionByZeroError() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -360,7 +360,7 @@ func (s *ExpressionSuite) TestExpression() {
 	s.searchWithExpression()
 	s.searchWithBitwiseExpression()
 	s.searchWithShiftNotExpression()
-	s.TestDivisionByZeroError()
+	s.testDivisionByZeroError()
 }
 
 func TestExpression(t *testing.T) {

@@ -1,7 +1,9 @@
 #pragma once
 
 #include <iostream>
+#include <optional>
 #include <sstream>
+#include <utility>
 
 #include "tantivy-binding.h"
 #include "rust-binding.h"
@@ -134,27 +136,18 @@ struct RustResultWrapper {
     NO_COPY_OR_ASSIGN(RustResultWrapper);
 
     RustResultWrapper() = default;
-    explicit RustResultWrapper(RustResult result)
-        : value_(result), result_(&value_) {
+    explicit RustResultWrapper(RustResult result) noexcept : result_(result) {
     }
 
-    RustResultWrapper(RustResultWrapper&& other) noexcept {
-        if (other.result_ != nullptr) {
-            value_ = other.value_;
-            result_ = &value_;
-            other.result_ = nullptr;
-        }
+    RustResultWrapper(RustResultWrapper&& other) noexcept
+        : result_(std::exchange(other.result_, std::nullopt)) {
     }
 
     RustResultWrapper&
     operator=(RustResultWrapper&& other) noexcept {
         if (this != &other) {
             free();
-            if (other.result_ != nullptr) {
-                value_ = other.value_;
-                result_ = &value_;
-                other.result_ = nullptr;
-            }
+            result_ = std::exchange(other.result_, std::nullopt);
         }
 
         return *this;
@@ -164,15 +157,14 @@ struct RustResultWrapper {
         free();
     }
 
-    RustResult value_{};
-    RustResult* result_ = nullptr;
+    std::optional<RustResult> result_;
 
  private:
     void
     free() {
         if (result_) {
-            free_rust_result(value_);
-            result_ = nullptr;
+            free_rust_result(*result_);
+            result_.reset();
         }
     }
 };

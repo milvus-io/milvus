@@ -17,6 +17,7 @@
 #pragma once
 
 #include <cstring>
+#include <limits>
 #include <memory>
 
 #include "common/FastMem.h"
@@ -55,61 +56,48 @@ class VectorArray : public milvus::VectorTrait {
     // One row of VectorFieldProto
     explicit VectorArray(const VectorFieldProto& vector_field) {
         dim_ = vector_field.dim();
+        AssertInfo(dim_ > 0 && dim_ <= std::numeric_limits<int>::max(),
+                   "invalid vector array dimension {}",
+                   dim_);
+
+        const void* data = nullptr;
+        size_t size = 0;
+        size_t bytes_per_vector = 0;
         switch (vector_field.data_case()) {
             case VectorFieldProto::kFloatVector: {
                 element_type_ = DataType::VECTOR_FLOAT;
-                // data size should be array length * dim
-                length_ = vector_field.float_vector().data().size() / dim_;
-                auto data = new float[length_ * dim_];
-                size_ =
-                    vector_field.float_vector().data().size() * sizeof(float);
-                milvus::fastmem::FastMemcpy(
-                    data,
-                    vector_field.float_vector().data().data(),
-                    vector_field.float_vector().data().size() * sizeof(float));
-                data_ = std::unique_ptr<char[]>(reinterpret_cast<char*>(data));
+                const auto& values = vector_field.float_vector().data();
+                data = values.data();
+                size = static_cast<size_t>(values.size()) * sizeof(float);
+                bytes_per_vector = dim_ * sizeof(float);
                 break;
             }
             case VectorFieldProto::kBinaryVector: {
                 element_type_ = DataType::VECTOR_BINARY;
-                int bytes_per_vector = (dim_ + 7) / 8;
-                length_ =
-                    vector_field.binary_vector().size() / bytes_per_vector;
-                size_ = vector_field.binary_vector().size();
-                data_ = std::make_unique<char[]>(size_);
-                milvus::fastmem::FastMemcpy(
-                    data_.get(), vector_field.binary_vector().data(), size_);
+                data = vector_field.binary_vector().data();
+                size = vector_field.binary_vector().size();
+                bytes_per_vector = (dim_ + 7) / 8;
                 break;
             }
             case VectorFieldProto::kFloat16Vector: {
                 element_type_ = DataType::VECTOR_FLOAT16;
-                int bytes_per_element = 2;  // 2 bytes per float16
-                length_ = vector_field.float16_vector().size() /
-                          (dim_ * bytes_per_element);
-                size_ = vector_field.float16_vector().size();
-                data_ = std::make_unique<char[]>(size_);
-                milvus::fastmem::FastMemcpy(
-                    data_.get(), vector_field.float16_vector().data(), size_);
+                data = vector_field.float16_vector().data();
+                size = vector_field.float16_vector().size();
+                bytes_per_vector = dim_ * sizeof(float16);
                 break;
             }
             case VectorFieldProto::kBfloat16Vector: {
                 element_type_ = DataType::VECTOR_BFLOAT16;
-                int bytes_per_element = 2;  // 2 bytes per bfloat16
-                length_ = vector_field.bfloat16_vector().size() /
-                          (dim_ * bytes_per_element);
-                size_ = vector_field.bfloat16_vector().size();
-                data_ = std::make_unique<char[]>(size_);
-                milvus::fastmem::FastMemcpy(
-                    data_.get(), vector_field.bfloat16_vector().data(), size_);
+                data = vector_field.bfloat16_vector().data();
+                size = vector_field.bfloat16_vector().size();
+                bytes_per_vector = dim_ * sizeof(bfloat16);
                 break;
             }
             case VectorFieldProto::kInt8Vector: {
                 element_type_ = DataType::VECTOR_INT8;
-                length_ = vector_field.int8_vector().size() / dim_;
-                size_ = vector_field.int8_vector().size();
-                data_ = std::make_unique<char[]>(size_);
-                milvus::fastmem::FastMemcpy(
-                    data_.get(), vector_field.int8_vector().data(), size_);
+                data = vector_field.int8_vector().data();
+                size = vector_field.int8_vector().size();
+                bytes_per_vector = dim_;
                 break;
             }
             default: {
@@ -117,6 +105,23 @@ class VectorArray : public milvus::VectorTrait {
                           "Not implemented vector type: {}",
                           static_cast<int>(vector_field.data_case()));
             }
+        }
+        AssertInfo(size % bytes_per_vector == 0,
+                   "vector array data size {} is not a multiple of vector "
+                   "size {} for dimension {}",
+                   size,
+                   bytes_per_vector,
+                   dim_);
+        AssertInfo(size <= std::numeric_limits<int>::max(),
+                   "vector array data size {} exceeds the supported size",
+                   size);
+        length_ = size / bytes_per_vector;
+        size_ = size;
+        // Allocate and delete through the same byte-array type for every
+        // vector encoding, using exactly the size that will be copied.
+        if (size_ != 0) {
+            data_ = std::unique_ptr<char[]>(new char[size_]);
+            milvus::fastmem::FastMemcpy(data_.get(), data, size_);
         }
     }
 

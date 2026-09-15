@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <map>
@@ -2905,6 +2906,29 @@ TEST_F(FlushGrowingSegmentTest, FreeFlushResultNull) {
     result.num_rows = 0;
 
     // should not crash
+    FreeFlushResult(&result);
+}
+
+TEST_F(FlushGrowingSegmentTest, FreePartiallyFilledBM25Stats) {
+    CFlushResult result{};
+    // The output arrays can be allocated before any row is serialized.
+    result.bm25_field_ids = static_cast<int64_t*>(malloc(3 * sizeof(int64_t)));
+    result.bm25_stats_sizes = static_cast<size_t*>(malloc(3 * sizeof(size_t)));
+    result.bm25_stats = static_cast<uint8_t**>(calloc(3, sizeof(uint8_t*)));
+    ASSERT_NE(result.bm25_field_ids, nullptr);
+    ASSERT_NE(result.bm25_stats_sizes, nullptr);
+    ASSERT_NE(result.bm25_stats, nullptr);
+    result.bm25_stats[0] = static_cast<uint8_t*>(malloc(8));
+    ASSERT_NE(result.bm25_stats[0], nullptr);
+    result.bm25_field_ids[0] = 100;
+    result.bm25_stats_sizes[0] = 8;
+    result.num_bm25_stats = 1;
+
+    FreeFlushResult(&result);
+    EXPECT_EQ(result.bm25_stats, nullptr);
+    EXPECT_EQ(result.bm25_field_ids, nullptr);
+    EXPECT_EQ(result.bm25_stats_sizes, nullptr);
+    EXPECT_EQ(result.num_bm25_stats, 0);
     FreeFlushResult(&result);
 }
 

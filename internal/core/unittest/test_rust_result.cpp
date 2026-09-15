@@ -12,11 +12,12 @@
 #include <stddef.h>
 #include <cstdint>
 #include <memory>
+#include <type_traits>
+#include <utility>
 
 #include "gtest/gtest.h"
 #include "tantivy-binding.h"
 #include "rust-array.h"
-#include <utility>
 
 TEST(RustResultTest, TestResult) {
     auto arr = test_enum_with_array();
@@ -37,25 +38,76 @@ TEST(RustResultTest, WrapperMovesOwnedArraysAndErrors) {
     RustResultWrapper source(test_enum_with_array());
     auto* array = source.result_->value.rust_array._0.array;
     RustResultWrapper moved(std::move(source));
-    EXPECT_EQ(source.result_, nullptr);
+    EXPECT_FALSE(source.result_);
+    ASSERT_TRUE(moved.result_);
     EXPECT_EQ(moved.result_->value.rust_array._0.array, array);
     EXPECT_EQ(array[0], 1);
 
     RustResultWrapper destination(test_enum_with_array());
     destination = std::move(moved);
-    EXPECT_EQ(moved.result_, nullptr);
+    EXPECT_FALSE(moved.result_);
+    ASSERT_TRUE(destination.result_);
     EXPECT_EQ(destination.result_->value.rust_array._0.array, array);
     destination = std::move(destination);
     EXPECT_EQ(destination.result_->value.rust_array._0.array, array);
     destination = RustResultWrapper();
-    EXPECT_EQ(destination.result_, nullptr);
+    EXPECT_FALSE(destination.result_);
 
     RustResultWrapper error(tantivy_index_add_ngram_batch(
         nullptr, nullptr, nullptr, nullptr, nullptr, 0));
+    ASSERT_TRUE(error.result_);
     ASSERT_FALSE(error.result_->success);
+    const auto error_code = error.result_->error_code;
     destination = std::move(error);
-    EXPECT_EQ(error.result_, nullptr);
+    EXPECT_FALSE(error.result_);
+    ASSERT_TRUE(destination.result_);
+    EXPECT_EQ(destination.result_->error_code, error_code);
     EXPECT_NE(destination.result_->error, nullptr);
     EXPECT_NE(std::string(destination.result_->error).find("writer is null"),
               std::string::npos);
+}
+
+using milvus::tantivy::RustArrayWrapper;
+using milvus::tantivy::RustResultWrapper;
+
+static_assert(std::is_nothrow_constructible_v<RustResultWrapper, RustResult>);
+static_assert(std::is_nothrow_move_constructible_v<RustResultWrapper>);
+static_assert(std::is_nothrow_move_assignable_v<RustResultWrapper>);
+
+TEST(RustResultTest, WrapperMovesTransferOwnership) {
+    RustResultWrapper source(test_enum_with_array());
+    auto* original_array = source.result_->value.rust_array._0.array;
+
+    RustResultWrapper moved(std::move(source));
+    EXPECT_FALSE(source.result_);
+    ASSERT_TRUE(moved.result_);
+    EXPECT_EQ(moved.result_->value.rust_array._0.array, original_array);
+
+    // Replacing an existing result must release it before adopting the source.
+    RustResultWrapper destination(test_enum_with_array());
+    destination = std::move(moved);
+    EXPECT_FALSE(moved.result_);
+    ASSERT_TRUE(destination.result_);
+    EXPECT_EQ(destination.result_->value.rust_array._0.array, original_array);
+    EXPECT_EQ(destination.result_->value.rust_array._0.len, 3);
+    EXPECT_EQ(destination.result_->value.rust_array._0.array[2], 3);
+
+    RustResultWrapper empty;
+    destination = std::move(empty);
+    EXPECT_FALSE(destination.result_);
+    EXPECT_FALSE(empty.result_);
+}
+
+TEST(RustResultTest, WrapperCanTransferArrayOwnership) {
+    RustResultWrapper result(test_enum_with_array());
+    auto* original_array = result.result_->value.rust_array._0.array;
+    RustArrayWrapper array(std::move(result.result_->value.rust_array._0));
+    EXPECT_EQ(result.result_->value.rust_array._0.array, nullptr);
+    EXPECT_EQ(array.array_.array, original_array);
+
+    // Releasing the moved-from result must leave the transferred array valid.
+    result = RustResultWrapper();
+    EXPECT_EQ(array.array_.len, 3);
+    EXPECT_EQ(array.array_.array[0], 1);
+    EXPECT_EQ(array.array_.array[2], 3);
 }

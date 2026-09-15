@@ -27,7 +27,7 @@ extern "C" {
  *     endpoint, process-local IOPS policy, AWS-form rewrite, Tier-1/2
  *     derivation)
  *   - format-layer properties derived from spec.format (e.g.
- *     iceberg.snapshot_id when format="iceberg-table")
+ *     reader.exttable.snapshot_id when format="iceberg-table")
  *
  * Idempotent over reallocation: the function frees existing LoonProperty
  * entries and rebuilds the array with the merged key set, so the caller

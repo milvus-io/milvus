@@ -46,6 +46,8 @@ struct SearchInfo {
     int64_t topk_{0};
     int64_t group_size_{1};
     bool strict_group_size_{false};
+    double strict_group_acceptance_threshold_{0.1};
+    int64_t strict_group_probe_candidates_{100};
     int64_t round_decimal_{0};
     FieldId field_id_;
     MetricType metric_type_;

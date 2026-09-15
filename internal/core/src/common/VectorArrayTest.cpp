@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 #include <stdint.h>
 #include <algorithm>
+#include <limits>
 #include <memory>
 #include <random>
 #include <string>
@@ -207,5 +208,79 @@ TEST(VectorArray, TestConstructorWithData) {
             small_data.data(), 5, small_dim, DataType::VECTOR_FLOAT);
         ASSERT_EQ(va_small.length(), 5);
         ASSERT_EQ(va_small.dim(), small_dim);
+    }
+}
+
+TEST(VectorArray, RejectsInvalidDimensions) {
+    for (const int64_t dim :
+         {int64_t{0}, int64_t{-1}, std::numeric_limits<int64_t>::max()}) {
+        proto::schema::VectorField field;
+        field.set_dim(dim);
+        field.mutable_float_vector()->add_data(1.0f);
+        EXPECT_ANY_THROW({ milvus::VectorArray array(field); });
+    }
+}
+
+TEST(VectorArray, RejectsPartialVectors) {
+    std::vector<proto::schema::VectorField> fields(5);
+    fields[0].set_dim(3);
+    for (int i = 0; i < 4; ++i) {
+        fields[0].mutable_float_vector()->add_data(static_cast<float>(i));
+    }
+    fields[1].set_dim(16);
+    fields[1].set_binary_vector(std::string(3, 'x'));
+    fields[2].set_dim(2);
+    fields[2].set_float16_vector(std::string(5, 'x'));
+    fields[3].set_dim(2);
+    fields[3].set_bfloat16_vector(std::string(5, 'x'));
+    fields[4].set_dim(3);
+    fields[4].set_int8_vector(std::string(4, 'x'));
+
+    for (const auto& field : fields) {
+        SCOPED_TRACE(static_cast<int>(field.data_case()));
+        EXPECT_ANY_THROW({ milvus::VectorArray array(field); });
+    }
+}
+
+TEST(VectorArray, OwnedBytesRoundTripForEveryEncoding) {
+    std::vector<proto::schema::VectorField> fields(5);
+    for (auto& field : fields) {
+        field.set_dim(16);
+    }
+    for (int i = 0; i < 32; ++i) {
+        fields[0].mutable_float_vector()->add_data(static_cast<float>(i));
+    }
+    fields[1].set_binary_vector(std::string(4, 'a'));
+    fields[2].set_float16_vector(std::string(64, 'b'));
+    fields[3].set_bfloat16_vector(std::string(64, 'c'));
+    fields[4].set_int8_vector(std::string(32, 'd'));
+
+    for (const auto& field : fields) {
+        SCOPED_TRACE(static_cast<int>(field.data_case()));
+        milvus::VectorArray array(field);
+        EXPECT_EQ(array.length(), 2);
+        EXPECT_EQ(array.output_data().SerializeAsString(),
+                  field.SerializeAsString());
+        milvus::VectorArray copy(array);
+        EXPECT_NE(copy.data(), array.data());
+        EXPECT_EQ(copy.output_data().SerializeAsString(),
+                  field.SerializeAsString());
+    }
+}
+
+TEST(VectorArray, EmptyRowsPreserveEncoding) {
+    std::vector<proto::schema::VectorField> fields(5);
+    fields[0].mutable_float_vector();
+    fields[1].mutable_binary_vector();
+    fields[2].mutable_float16_vector();
+    fields[3].mutable_bfloat16_vector();
+    fields[4].mutable_int8_vector();
+    for (auto& field : fields) {
+        field.set_dim(16);
+        milvus::VectorArray array(field);
+        EXPECT_EQ(array.length(), 0);
+        EXPECT_EQ(array.byte_size(), 0);
+        EXPECT_EQ(array.output_data().SerializeAsString(),
+                  field.SerializeAsString());
     }
 }

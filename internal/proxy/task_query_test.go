@@ -19,19 +19,23 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -44,16 +48,126 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-func TestQueryTaskAppliesFixedSnapshotTimestamp(t *testing.T) {
-	const snapshotTS = uint64(100)
+// Exercise real preprocessing: Strong and ordinary queries honor schema fences,
+// while iterator continuations and Search requery retain their own snapshots.
+func TestQueryTaskPreExecuteSnapshotFences(t *testing.T) {
+	for _, scenario := range []struct {
+		name                               string
+		guarantee, wantMvcc, wantGuarantee uint64
+		iterator, requery                  bool
+	}{
+		{name: "strong_first_read", wantGuarantee: 300},
+		{name: "ordinary_customized", guarantee: 400, wantGuarantee: 400},
+		{name: "iterator_continuation", guarantee: 150, iterator: true, wantMvcc: 150, wantGuarantee: 150},
+		{name: "search_requery", requery: true, wantGuarantee: 300},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			schema := createTestSchema()
+			patch := func(target any, values ...any) {
+				m := mockey.Mock(target).Return(values...).Build()
+				t.Cleanup(func() { m.UnPatch() })
+			}
+			patch((*MetaCache).GetCollectionID, int64(1001), nil)
+			patch((*MetaCache).GetCollectionInfo, &collectionInfo{Schema: schema, UpdateTimestamp: 300}, nil)
+			patch((*MetaCache).GetCollectionSchema, schema, nil)
+			patch(isPartitionKeyMode, false, nil)
+			patch(getPartitionIDs, []int64{1}, nil)
+			ctx := context.Background()
+			task := &queryTask{
+				baseTask:        baseTask{MetaCache: &MetaCache{}},
+				ctx:             ctx,
+				RetrieveRequest: &internalpb.RetrieveRequest{Base: &commonpb.MsgBase{Timestamp: 200}},
+				request:         &milvuspb.QueryRequest{CollectionName: "test_collection", Expr: "id in [1]", OutputFields: []string{"id"}, GuaranteeTimestamp: scenario.guarantee},
+				reQuery:         scenario.requery,
+			}
+			if scenario.guarantee > 0 {
+				task.request.ConsistencyLevel = commonpb.ConsistencyLevel_Customized
+			}
+			if scenario.iterator {
+				task.request.QueryParams = []*commonpb.KeyValuePair{{Key: IteratorField, Value: "true"}}
+			}
+			if scenario.requery {
+				task.channelsMvcc = map[string]Timestamp{"ch0": 80}
+			}
+			require.NoError(t, task.PreExecute(ctx))
+			require.Equal(t, scenario.wantMvcc, task.GetMvccTimestamp())
+			require.Equal(t, scenario.wantGuarantee, task.GetGuaranteeTimestamp())
+			if scenario.requery {
+				require.EqualValues(t, 80, task.channelsMvcc["ch0"])
+			}
+		})
+	}
+}
+
+func TestQueryShardCollectsOnlySuccessfulSnapshots(t *testing.T) {
+	type queryClientTarget struct{ types.QueryNodeClient }
+	qn := &queryClientTarget{}
+	patch := mockey.Mock((*queryClientTarget).Query).To(
+		func(_ *queryClientTarget, ctx context.Context, req *querypb.QueryRequest, _ ...grpc.CallOption) (*internalpb.RetrieveResults, error) {
+			channel := req.GetDmlChannels()[0]
+			if channel == "not_leader" {
+				return &internalpb.RetrieveResults{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_NotShardLeader}, MvccTimestamp: 999}, nil
+			}
+			if channel == "rpc_error" {
+				return nil, merr.WrapErrServiceUnavailable("rpc unavailable")
+			}
+			if channel == "overridden" {
+				require.EqualValues(t, 50, req.Req.MvccTimestamp)
+				require.EqualValues(t, 50, req.Req.GuaranteeTimestamp)
+			}
+			if channel == "failed" {
+				return &internalpb.RetrieveResults{Status: merr.Status(merr.WrapErrServiceUnavailableMsg("not ready")), MvccTimestamp: 999}, nil
+			}
+			return &internalpb.RetrieveResults{Status: merr.Success(), MvccTimestamp: uint64(len(channel) + 70)}, nil
+		}).Build()
+	defer patch.UnPatch()
+	type lbTarget struct{ shardclient.LBPolicy }
+	lb := &lbTarget{}
+	patchCost := mockey.Mock((*lbTarget).UpdateCostMetrics).Return().Build()
+	defer patchCost.UnPatch()
+	type managerTarget struct{ shardclient.ShardClientMgr }
+	manager := &managerTarget{}
+	patchInvalidate := mockey.Mock((*managerTarget).InvalidateShardLeaderCache).Return().Build()
+	defer patchInvalidate.UnPatch()
 	task := &queryTask{
-		RetrieveRequest:        &internalpb.RetrieveRequest{MvccTimestamp: 200},
-		fixedSnapshotTimestamp: snapshotTS,
+		shardclientMgr:     manager,
+		RetrieveRequest:    &internalpb.RetrieveRequest{Base: &commonpb.MsgBase{}, ConsistencyLevel: commonpb.ConsistencyLevel_Strong},
+		resultBuf:          typeutil.NewConcurrentSet[*internalpb.RetrieveResults](),
+		actualChannelsMvcc: typeutil.NewConcurrentMap[string, uint64](),
+		lb:                 lb,
+	}
+	var wg sync.WaitGroup
+	errCh := make(chan error, 32)
+	for i := 0; i < 32; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			errCh <- task.queryShard(context.Background(), 1, qn, fmt.Sprintf("ch%d", i))
+		}(i)
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		require.NoError(t, err)
+	}
+	for i := 0; i < 32; i++ {
+		channel := fmt.Sprintf("ch%d", i)
+		ts, ok := task.actualChannelsMvcc.Get(channel)
+		require.True(t, ok)
+		require.EqualValues(t, len(channel)+70, ts)
 	}
 
-	guaranteeTS := task.applyFixedSnapshotTimestamp(300)
-	require.Equal(t, snapshotTS, guaranteeTS)
-	require.Equal(t, snapshotTS, task.GetMvccTimestamp())
+	for _, channel := range []string{"failed", "not_leader", "rpc_error"} {
+		require.Error(t, task.queryShard(context.Background(), 1, qn, channel))
+		_, ok := task.actualChannelsMvcc.Get(channel)
+		require.False(t, ok)
+	}
+	task.channelsMvcc = map[string]Timestamp{"overridden": 50}
+	require.NoError(t, task.queryShard(context.Background(), 1, qn, "overridden"))
+	task.fastSkip = true
+	require.NoError(t, task.queryShard(context.Background(), 1, qn, "skipped"))
+	_, ok := task.actualChannelsMvcc.Get("skipped")
+	require.False(t, ok)
 }
 
 func TestQueryTask_all(t *testing.T) {
