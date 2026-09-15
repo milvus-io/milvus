@@ -339,6 +339,8 @@ TEST_F(TestVectorArrayStorageV2, BuildEmbListHNSWIndex) {
         query_vec_offsets.push_back(10);
         query_dataset->Set(knowhere::meta::EMB_LIST_OFFSET,
                            const_cast<const size_t*>(query_vec_offsets.data()));
+        query_dataset->Set(knowhere::meta::EMB_LIST_COUNT,
+                           static_cast<int64_t>(query_vec_offsets.size() - 1));
 
         auto search_conf = knowhere::Json{{knowhere::indexparam::NPROBE, 10}};
         milvus::SearchInfo searchInfo;
@@ -470,6 +472,8 @@ TEST_F(TestVectorArrayStorageV2, BuildEmbListHNSWIndexWithMmap) {
         query_vec_lims.push_back(10);
         query_dataset->Set(knowhere::meta::EMB_LIST_OFFSET,
                            const_cast<const size_t*>(query_vec_lims.data()));
+        query_dataset->Set(knowhere::meta::EMB_LIST_COUNT,
+                           static_cast<int64_t>(query_vec_lims.size() - 1));
 
         auto search_conf = knowhere::Json{{knowhere::indexparam::NPROBE, 10}};
         milvus::SearchInfo searchInfo;
