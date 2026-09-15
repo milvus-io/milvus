@@ -1,4 +1,4 @@
-package rewriter
+package rules
 
 import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -6,6 +6,11 @@ import (
 )
 
 var jsonTermKindOrder = []string{"bool", "int64", "float", "string", "array"}
+
+// NormalizeTermExprs makes every TermExpr executable by a scalar executor.
+func NormalizeTermExprs(expr *planpb.Expr) *planpb.Expr {
+	return normalizeTermExprs(expr)
+}
 
 // normalizeTermExprs enforces the execution invariant that every TermExpr can
 // be dispatched to one scalar executor. JSON terms are partitioned by concrete
