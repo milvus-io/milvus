@@ -51,7 +51,9 @@ read-then-delete window and require a second convergence protocol for no gain.
   owns that terminal record and its files.
 - Reading every manifest to discover work. Durable placement is already known
   from the source that supplied each in-memory record.
-- Adding an inverse manifest-to-etcd migration when publication is disabled.
+- Automatically reversing placement when publication is disabled. Explicit
+  reverse migration has its own [rollback design](20260915-storagev3-manifest-index-rollback.md)
+  and independent switch in a later stack layer.
 
 ## Candidate Definition
 
@@ -176,10 +178,11 @@ every DataCoord replica that can become leader runs a version that reloads
 manifest-resident indexes. Otherwise an older leader would see neither an
 etcd row nor the manifest entry as an index record.
 
-After the first record is migrated, rolling DataCoord back to a version without
-manifest-index reload is unsupported. Disabling publication or backfill changes
-future work only; it does not recreate retired etcd rows, and this migration
-deliberately has no inverse path. Mixed etcd/manifest placement is supported by
+After the first record is migrated, DataCoord must not be downgraded to a
+version without manifest-index reload until the independent
+[rollback migration](20260915-storagev3-manifest-index-rollback.md) has completed.
+Disabling publication or forward backfill alone changes future work only; it
+does not recreate retired etcd rows. Mixed placement remains supported by
 manifest-aware DataCoord versions throughout the rollout.
 
 ### Garbage collection
@@ -268,9 +271,9 @@ Recommended rollout:
 5. Disable the backfill inspector in a later restart if desired. No prune phase
    or additional destructive switch follows.
 
-Once step 2 or 3 has published a manifest-only record, do not roll DataCoord
-back to a version without manifest-index reload; turning the switches off is
-not an inverse migration.
+Once step 2 or 3 has published a manifest-only record, complete the independent
+rollback migration before downgrading to a version without manifest-index
+reload. Turning the forward switches off alone does not reverse migration.
 
 Mixed placement is supported throughout and after this sequence. Disabling
 foreground manifest publication later affects only new completions; the
@@ -314,6 +317,10 @@ copy cleanup are the baseline.
    inspector, catalog provenance, atomic backfill mutation, GC integration,
    configuration/metrics, and regression tests as one independently testable
    capability.
+3. **Complete reverse migration** (`feat/datacoord-manifest-index-rollback`,
+   targets the forward implementation): independent switch, atomic restoration
+   to etcd, GC/copy coordination, completion checks and tests, as specified in
+   the [rollback design](20260915-storagev3-manifest-index-rollback.md).
 
 Each backfill supplies exactly one `SegmentIndexBackfill` in
 `SegmentCatalogMutation.SegmentIndexes`. It must satisfy the same publication
