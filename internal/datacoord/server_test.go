@@ -1783,6 +1783,36 @@ func TestGetRecoveryInfo(t *testing.T) {
 func TestGetCompactionState(t *testing.T) {
 	paramtable.Get().Save(Params.DataCoordCfg.EnableCompaction.Key, "true")
 	defer paramtable.Get().Reset(Params.DataCoordCfg.EnableCompaction.Key)
+	t.Run("unknown compaction id", func(t *testing.T) {
+		svr := &Server{}
+		svr.stateCode.Store(commonpb.StateCode_Healthy)
+		mockMeta := NewMockCompactionMeta(t)
+		mockMeta.EXPECT().GetCompactionTasksByTriggerID(mock.Anything, int64(999999)).Return(nil)
+		svr.compactionInspector = newCompactionInspector(mockMeta, nil, nil, nil, nil, newMockVersionManager())
+
+		resp, err := svr.GetCompactionState(context.Background(), &milvuspb.GetCompactionStateRequest{CompactionID: 999999})
+
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, commonpb.CompactionState_UndefiedState, resp.GetState())
+		assert.Zero(t, resp.GetExecutingPlanNo())
+		assert.Zero(t, resp.GetCompletedPlanNo())
+	})
+	t.Run("explicit no-op compaction id", func(t *testing.T) {
+		svr := &Server{}
+		svr.stateCode.Store(commonpb.StateCode_Healthy)
+		mockMeta := NewMockCompactionMeta(t)
+		mockMeta.EXPECT().GetCompactionTasksByTriggerID(mock.Anything, int64(-1)).Return(nil)
+		svr.compactionInspector = newCompactionInspector(mockMeta, nil, nil, nil, nil, newMockVersionManager())
+
+		resp, err := svr.GetCompactionState(context.Background(), &milvuspb.GetCompactionStateRequest{CompactionID: -1})
+
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, commonpb.CompactionState_Completed, resp.GetState())
+		assert.Zero(t, resp.GetExecutingPlanNo())
+		assert.Zero(t, resp.GetCompletedPlanNo())
+	})
 	t.Run("test get compaction state with new compaction Handler", func(t *testing.T) {
 		svr := &Server{}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
