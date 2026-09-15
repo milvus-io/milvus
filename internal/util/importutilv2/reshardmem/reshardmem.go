@@ -70,7 +70,7 @@ const PipelineCopies = 6
 // flush boundaries. 1.5 is the measured-median compromise between charging
 // the full 2x (which would halve scheduling density) and ignoring GC
 // entirely (the pre-calibration model, which undercharged real usage 4-10x).
-const GCFactor = 1.5
+const GCFactor = 1
 
 // Model binds the two deployment-dependent buffer sizes every formula shares.
 // FragmentTarget may be the live config (DataCoord planning) or the value
