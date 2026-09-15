@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	taskcommon "github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestBumpSchemaVersionCompactionTaskSuite(t *testing.T) {
@@ -283,6 +284,50 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestBuildCompactionRequestSegment
 	s.Error(err)
 	s.Nil(plan)
 	s.Contains(err.Error(), "segment not found")
+}
+
+// TestCreateTaskOnWorkerSegmentNotFoundDoesNotRetry confirms a non-retryable build failure
+// (segment not found is a deterministic condition, not a transient one) still fails on the
+// first attempt without consuming any retry budget, matching pre-fix behavior.
+func (s *BumpSchemaVersionCompactionTaskSuite) TestCreateTaskOnWorkerSegmentNotFoundDoesNotRetry() {
+	task := s.generateBasicTask()
+	cluster := session.NewMockCluster(s.T())
+	task.CreateTaskOnWorker(1, cluster)
+
+	s.Equal(datapb.CompactionTaskState_failed, task.GetTaskProto().GetState())
+	s.Equal(int32(0), task.GetTaskProto().GetRetryTimes())
+	s.NotEmpty(task.GetTaskProto().GetFailReason())
+}
+
+// TestClassifyFailureRetriesThenTerminates exercises classifyFailure against a real,
+// catalog-backed bumpSchemaVersionTask.updateAndSaveTaskMeta (not a mock), proving retry_times
+// and the terminal failed transition both actually persist through this task type's save path.
+func (s *BumpSchemaVersionCompactionTaskSuite) TestClassifyFailureRetriesThenTerminates() {
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.CompactionMaxRetryTimes.Key, "2")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.CompactionMaxRetryTimes.Key)
+
+	task := s.generateBasicTask()
+	task.SetTask(task.ShadowClone(setState(datapb.CompactionTaskState_executing)))
+
+	// Attempt 1: retryable, under budget (0 < 2) -> retries, state untouched.
+	retried := classifyFailure(context.TODO(), "bumpSchemaVersionTask", task.GetTaskProto(),
+		merr.WrapErrServiceUnavailable("transient"), task.updateAndSaveTaskMeta)
+	s.True(retried)
+	s.Equal(int32(1), task.GetTaskProto().GetRetryTimes())
+	s.Equal(datapb.CompactionTaskState_executing, task.GetTaskProto().GetState())
+
+	// Attempt 2: retryable, under budget (1 < 2) -> retries again.
+	retried = classifyFailure(context.TODO(), "bumpSchemaVersionTask", task.GetTaskProto(),
+		merr.WrapErrServiceUnavailable("transient"), task.updateAndSaveTaskMeta)
+	s.True(retried)
+	s.Equal(int32(2), task.GetTaskProto().GetRetryTimes())
+
+	// Attempt 3: retry_times(2) is no longer < max(2) -> terminates.
+	retried = classifyFailure(context.TODO(), "bumpSchemaVersionTask", task.GetTaskProto(),
+		merr.WrapErrServiceUnavailable("transient"), task.updateAndSaveTaskMeta)
+	s.False(retried)
+	s.Equal(datapb.CompactionTaskState_failed, task.GetTaskProto().GetState())
+	s.NotEmpty(task.GetTaskProto().GetFailReason())
 }
 
 func (s *BumpSchemaVersionCompactionTaskSuite) TestCreateTaskOnWorker() {
