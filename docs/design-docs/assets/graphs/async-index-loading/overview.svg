@@ -21,7 +21,7 @@
 </g>
 <g data-node="AsyncLoadExecutor"><rect x="456" y="320" width="320" height="120" rx="8" fill="#EFF7F5" stroke="#397985" stroke-width="1.2"/>
 <text x="476" y="356" font-size="20" fill="#25364A" text-anchor="start" font-weight="600">AsyncLoadExecutor</text>
-<text x="476" y="388" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Plan / decode / place / finalize</text>
+<text x="476" y="388" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Plan / decode / place / restore</text>
 <text x="476" y="412" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">HIGH and LOW are priorities</text>
 </g>
 <g data-node="Storage backend"><rect x="40" y="320" width="320" height="120" rx="8" fill="#FFFFFF" stroke="#CDD9E2" stroke-width="1.2"/>
@@ -36,10 +36,10 @@
 </g>
 <g data-node="Shared admission"><rect x="456" y="512" width="320" height="112" rx="8" fill="#FFFFFF" stroke="#CDD9E2" stroke-width="1.2"/>
 <text x="476" y="548" font-size="20" fill="#25364A" text-anchor="start" font-weight="600">Shared admission</text>
-<text x="476" y="580" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">GetInstance(): bytes + slots</text>
-<text x="476" y="604" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Lease survives read + consume</text>
+<text x="476" y="580" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Limit bytes and active tasks</text>
+<text x="476" y="604" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Hold budget through placement</text>
 </g>
 <line x1="40" y1="648" x2="1240" y2="648" stroke="#CDD9E2"/>
-<text x="40" y="676" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Awaited I/O releases the async worker; engine deserialization runs on that worker.</text>
+<text x="40" y="676" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Waiting for native I/O frees the worker; engine deserialization occupies an async worker.</text>
 <text x="40" y="700" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Field-data loading shares the executor and admission, and retains its own pipeline.</text>
 </g></svg>

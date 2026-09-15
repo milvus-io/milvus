@@ -42,7 +42,7 @@
 <rect x="304" y="364" width="304" height="32" rx="4" fill="#EFF7F5"/>
 <text x="456" y="384" font-size="12" fill="#566A80" text-anchor="middle" font-weight="400">Decode; copy into entry at offset</text>
 <rect x="304" y="400" width="304" height="32" rx="4" fill="#EFF7F5"/>
-<text x="456" y="420" font-size="12" fill="#566A80" text-anchor="middle" font-weight="400">Release unit; join all entry reads</text>
+<text x="456" y="420" font-size="12" fill="#566A80" text-anchor="middle" font-weight="400">Release budget; finish all entry reads</text>
 <path d="M 456 460 L 1112 460" fill="none" stroke="#566A80" stroke-width="1.2" marker-end="url(#legacy-sequence-arrow)"/>
 <rect x="560.0" y="432" width="120" height="20" fill="#FCFDFE"/>
 <text x="620.0" y="448" font-size="16" fill="#566A80" text-anchor="middle" font-weight="400">WRITE / CLOSE</text>

@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-labelledby="knowhere-architecture-title knowhere-architecture-desc">
-<title id="knowhere-architecture-title">Knowhere: prepared inputs, engine-owned restore</title>
+<title id="knowhere-architecture-title">Knowhere: prepare inputs, then deserialize</title>
 <desc id="knowhere-architecture-desc">The shared legacy loader prepares a BinarySet or positioned files before Knowhere restores the index on the async executor.</desc>
 <defs>
 <marker id="knowhere-architecture-arrow" markerWidth="8" markerHeight="8" refX="8" refY="4" orient="auto"><path d="M 0 0 L 8 4 L 0 8 Z" fill="#566A80"/></marker>
@@ -8,7 +8,7 @@
 </defs>
 <rect width="1280" height="720" fill="#FCFDFE"/>
 <g font-family="Geist, Arial, sans-serif">
-<text x="40" y="56" font-size="28" fill="#25364A" text-anchor="start" font-weight="400">Knowhere: prepared inputs, engine-owned restore</text>
+<text x="40" y="56" font-size="28" fill="#25364A" text-anchor="start" font-weight="400">Knowhere: prepare inputs, then deserialize</text>
 <text x="40" y="88" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Milvus streams selected inputs; Knowhere controls deserialization and later backend reads.</text>
 <path d="M 360 248 L 456 248" fill="none" stroke="#566A80" stroke-width="1.2" marker-end="url(#knowhere-architecture-arrow)"/>
 <path d="M 776 248 L 872 248" fill="none" stroke="#566A80" stroke-width="1.2" marker-end="url(#knowhere-architecture-arrow)"/>
@@ -19,11 +19,11 @@
 <g data-node="Legacy index objects"><rect x="40" y="176" width="320" height="144" rx="8" fill="#FFFFFF" stroke="#CDD9E2" stroke-width="1.2"/>
 <text x="60" y="212" font-size="20" fill="#25364A" text-anchor="start" font-weight="600">Legacy index objects</text>
 <text x="60" y="244" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Main data + metadata sidecars</text>
-<text x="60" y="268" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Envelope snapshots reused</text>
+<text x="60" y="268" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Reuse inspected file metadata</text>
 </g>
 <g data-node="LegacyIndexLoader"><rect x="456" y="176" width="320" height="144" rx="8" fill="#EFF7F5" stroke="#397985" stroke-width="1.2"/>
 <text x="476" y="212" font-size="20" fill="#25364A" text-anchor="start" font-weight="600">LegacyIndexLoader</text>
-<text x="476" y="244" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Admit / read / decode / consume</text>
+<text x="476" y="244" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Budget / read / decode / place</text>
 <text x="476" y="268" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">At most 16 MiB per raw read</text>
 </g>
 <g data-node="Memory inputs"><rect x="872" y="176" width="320" height="144" rx="8" fill="#FFFFFF" stroke="#CDD9E2" stroke-width="1.2"/>
@@ -34,7 +34,7 @@
 <g data-node="LocalFileIOPool"><rect x="40" y="420" width="320" height="144" rx="8" fill="#FFFFFF" stroke="#CDD9E2" stroke-width="1.2"/>
 <text x="60" y="456" font-size="20" fill="#25364A" text-anchor="start" font-weight="600">LocalFileIOPool</text>
 <text x="60" y="488" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">WriteAt to disjoint file offsets</text>
-<text x="60" y="512" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Exact-length Finish after drain</text>
+<text x="60" y="512" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Close after all writes finish</text>
 </g>
 <g data-node="mmap / disk inputs"><rect x="456" y="420" width="320" height="144" rx="8" fill="#FFFFFF" stroke="#CDD9E2" stroke-width="1.2"/>
 <text x="476" y="456" font-size="20" fill="#25364A" text-anchor="start" font-weight="600">mmap / disk inputs</text>
@@ -44,7 +44,7 @@
 <g data-node="Knowhere on async worker"><rect x="872" y="420" width="320" height="144" rx="8" fill="#FFFFFF" stroke="#CDD9E2" stroke-width="1.2"/>
 <text x="892" y="456" font-size="20" fill="#25364A" text-anchor="start" font-weight="600">Knowhere on async worker</text>
 <text x="892" y="488" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Deserialize / DeserializeFromFile</text>
-<text x="892" y="512" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">No slice lease during engine call</text>
+<text x="892" y="512" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Slice budget already released</text>
 </g>
 <line x1="40" y1="648" x2="1240" y2="648" stroke="#CDD9E2"/>
 <text x="40" y="676" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Mmap embedding metadata and optional raw index use separate files; validity sidecars stay in heap.</text>

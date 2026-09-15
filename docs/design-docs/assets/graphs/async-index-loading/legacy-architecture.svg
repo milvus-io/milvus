@@ -19,16 +19,16 @@
 <g data-node="Legacy objects"><rect x="40" y="176" width="320" height="144" rx="8" fill="#FFFFFF" stroke="#CDD9E2" stroke-width="1.2"/>
 <text x="60" y="212" font-size="20" fill="#25364A" text-anchor="start" font-weight="600">Legacy objects</text>
 <text x="60" y="244" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">A_0 / A_1 / SLICE_META</text>
-<text x="60" y="268" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Each object has its own envelope</text>
+<text x="60" y="268" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Each object has format headers</text>
 </g>
 <g data-node="MemFileManagerImpl"><rect x="456" y="176" width="320" height="144" rx="8" fill="#FFFFFF" stroke="#CDD9E2" stroke-width="1.2"/>
 <text x="476" y="212" font-size="20" fill="#25364A" text-anchor="start" font-weight="600">MemFileManagerImpl</text>
-<text x="476" y="244" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Reuse envelope snapshot</text>
+<text x="476" y="244" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Reuse inspected file metadata</text>
 <text x="476" y="268" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Validate slice counts and sizes</text>
 </g>
 <g data-node="LegacyIndexLoader"><rect x="872" y="176" width="320" height="144" rx="8" fill="#EFF7F5" stroke="#397985" stroke-width="1.2"/>
 <text x="892" y="212" font-size="20" fill="#25364A" text-anchor="start" font-weight="600">LegacyIndexLoader</text>
-<text x="892" y="244" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Admit / read / decode / consume</text>
+<text x="892" y="244" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Budget / read / decode / place</text>
 <text x="892" y="268" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Offset placement into one entry</text>
 </g>
 <g data-node="Sort query state"><rect x="40" y="420" width="320" height="144" rx="8" fill="#FFFFFF" stroke="#CDD9E2" stroke-width="1.2"/>
@@ -44,9 +44,9 @@
 <g data-node="One BinarySet"><rect x="872" y="420" width="320" height="144" rx="8" fill="#FFFFFF" stroke="#CDD9E2" stroke-width="1.2"/>
 <text x="892" y="456" font-size="20" fill="#25364A" text-anchor="start" font-weight="600">One BinarySet</text>
 <text x="892" y="488" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Preallocated final entry buffers</text>
-<text x="892" y="512" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">No copied slice-result map</text>
+<text x="892" y="512" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">No extra copy of every slice</text>
 </g>
 <line x1="40" y1="648" x2="1240" y2="648" stroke="#CDD9E2"/>
-<text x="40" y="676" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Reads can complete out of order; each consumer places bytes at the supplied logical offset.</text>
+<text x="40" y="676" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Reads can finish out of order; each result fills its assigned offset in the entry.</text>
 <text x="40" y="700" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Other scalar consumers reuse their existing parser; Tantivy/RTree use shared disk staging.</text>
 </g></svg>
