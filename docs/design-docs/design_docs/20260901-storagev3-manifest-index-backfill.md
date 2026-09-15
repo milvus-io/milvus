@@ -302,7 +302,7 @@ manifest contains no index entries, as implemented by #53048.
 
 This design targets merged [PR #53048](https://github.com/milvus-io/milvus/pull/53048),
 merge commit `240b9c0a916f9633da53230e58854da08d8412f8`, on master snapshot
-`177fa90bbe3c3fa38c5250553f4e220004741530`. Its `SegmentIndexes` mutation slice,
+`2e36c6ff0151b32c187e4c32d40f76cbc8dd6379`. Its `SegmentIndexes` mutation slice,
 batched GC retractions, bounded recovery, verified marker clearing, and durable
 copy cleanup are the baseline.
 
