@@ -457,15 +457,25 @@ func (pi *ParamItem) GetAsFloat() float64 {
 	return floatVal
 }
 
+// cachedDuration is what GetAsDuration stores in the config cache. The raw config
+// value is unit-less (e.g. "5000"), so the unit the caller asked for is part of the
+// conversion and therefore has to be part of the cache entry: the same key is read at
+// different units from different call sites (see QueryCoordCfg.BrokerTimeout), and a
+// bare time.Duration in the cache cannot tell them apart.
+type cachedDuration struct {
+	unit  time.Duration
+	value time.Duration
+}
+
 func (pi *ParamItem) GetAsDuration(unit time.Duration) time.Duration {
 	if val, exist := pi.manager.GetCachedValue(pi.Key); exist {
-		if durationVal, ok := val.(time.Duration); ok {
-			return durationVal
+		if durationVal, ok := val.(cachedDuration); ok && durationVal.unit == unit {
+			return durationVal.value
 		}
 	}
 	val, raw, _ := pi.getWithRaw()
 	durationVal := getAsDuration(val, unit)
-	pi.manager.CASCachedValue(pi.Key, raw, durationVal)
+	pi.manager.CASCachedValue(pi.Key, raw, cachedDuration{unit: unit, value: durationVal})
 	return durationVal
 }
 
