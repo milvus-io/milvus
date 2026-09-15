@@ -386,11 +386,10 @@ class ReaderStringSnapshot : public SegmentReadSnapshot {
     get_row_count() const override {
         return column_->NumRows();
     }
-    std::pair<std::shared_ptr<ChunkedColumnInterface>,
-              std::shared_ptr<const SkipIndex>>
+    std::pair<std::shared_ptr<ChunkedColumnInterface>, FieldSkipMetricsView>
     GetDataScanResources(FieldId) const override {
         ++column_reads;
-        return {column_, nullptr};
+        return {column_, FieldSkipMetricsView{}};
     }
     mutable int64_t column_reads = 0;
 
