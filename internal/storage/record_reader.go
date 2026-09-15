@@ -221,7 +221,7 @@ func newIterativePackedRecordReader(
 type ManifestReader struct {
 	fieldBinlogs []*datapb.FieldBinlog
 	manifest     string
-	reader       *packed.FFIPackedReader
+	reader       manifestArrowReader
 
 	bufferSize           int64
 	arrowSchema          *arrow.Schema
@@ -231,8 +231,14 @@ type ManifestReader struct {
 	storageConfig        *indexpb.StorageConfig
 	storagePluginContext *indexcgopb.StoragePluginContext
 	externalSpecContext  packed.ExternalSpecContext
+	textColumnConfigs    []packed.TextColumnConfig
 
 	neededColumns []string
+}
+
+type manifestArrowReader interface {
+	ReadNext() (arrow.Record, error)
+	Close() error
 }
 
 // NewManifestReaderFromBinlogs creates a ManifestReader from binlogs
@@ -310,6 +316,31 @@ func NewManifestReaderWithExtfs(
 	storagePluginContext *indexcgopb.StoragePluginContext,
 	extfs packed.ExternalSpecContext,
 ) (*ManifestReader, error) {
+	return newManifestReader(manifest, schema, bufferSize, storageConfig, storagePluginContext, extfs, nil)
+}
+
+// NewTextDecodedManifestReader opens a manifest through milvus-storage's
+// SegmentReader so TEXT reference columns are resolved through source-specific
+// LOB paths and returned as logical UTF8 strings.
+func NewTextDecodedManifestReader(
+	manifest string,
+	schema *schemapb.CollectionSchema,
+	bufferSize int64,
+	storageConfig *indexpb.StorageConfig,
+	textColumnConfigs []packed.TextColumnConfig,
+) (*ManifestReader, error) {
+	return newManifestReader(manifest, schema, bufferSize, storageConfig, nil, packed.ExternalSpecContext{}, textColumnConfigs)
+}
+
+func newManifestReader(
+	manifest string,
+	schema *schemapb.CollectionSchema,
+	bufferSize int64,
+	storageConfig *indexpb.StorageConfig,
+	storagePluginContext *indexcgopb.StoragePluginContext,
+	extfs packed.ExternalSpecContext,
+	textColumnConfigs []packed.TextColumnConfig,
+) (*ManifestReader, error) {
 	columnResolver := typeutil.NewStorageColumnResolver(schema, typeutil.WithStorageColumnExternalSpec(extfs.Spec))
 	arrowSchema, err := ConvertToArrowSchemaWithNameResolver(
 		schema,
@@ -328,7 +359,7 @@ func NewManifestReaderWithExtfs(
 	// RecordToInsertData conversion does not accidentally decode internal LOB
 	// references as user text. Any source type coercion must stay in the
 	// external-source normalization path, not in the internal manifest path.
-	if !typeutil.IsExternalCollection(schema) || columnResolver.IsMilvusTable() {
+	if len(textColumnConfigs) == 0 && (!typeutil.IsExternalCollection(schema) || columnResolver.IsMilvusTable()) {
 		arrowSchema = overrideTextFieldsToBinaryByFields(
 			columnResolver.ManifestStoredFields(),
 			arrowSchema,
@@ -360,6 +391,7 @@ func NewManifestReaderWithExtfs(
 		storageConfig:        storageConfig,
 		storagePluginContext: storagePluginContext,
 		externalSpecContext:  extfs,
+		textColumnConfigs:    textColumnConfigs,
 
 		neededColumns: neededColumns,
 	}
@@ -373,6 +405,15 @@ func NewManifestReaderWithExtfs(
 }
 
 func (mr *ManifestReader) init() error {
+	if len(mr.textColumnConfigs) > 0 {
+		reader, err := packed.NewFFISegmentReader(mr.manifest, mr.arrowSchema, mr.neededColumns,
+			mr.bufferSize, mr.storageConfig, mr.textColumnConfigs)
+		if err != nil {
+			return err
+		}
+		mr.reader = reader
+		return nil
+	}
 	reader, err := packed.NewFFIPackedReader(mr.manifest, mr.arrowSchema, mr.neededColumns,
 		mr.bufferSize,
 		mr.storageConfig,

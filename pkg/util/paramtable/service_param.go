@@ -22,6 +22,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -30,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 )
 
@@ -68,7 +70,7 @@ func (p *ServiceParam) init(bt *BaseTable) {
 	p.KafkaCfg.Init(bt)
 	p.RocksmqCfg.Init(bt)
 	p.MinioCfg.Init(bt)
-	p.ProfileCfg.Init(bt)
+	p.ProfileCfg.init(bt, p.LocalStorageCfg.Path.GetValue())
 }
 
 func (p *ServiceParam) RocksmqEnable() bool {
@@ -526,11 +528,27 @@ func (p *LocalStorageConfig) Init(base *BaseTable) {
 		Version:      "2.0.0",
 		DefaultValue: defaultLocalStoragePath,
 		Doc: `Local path to where vector data are stored during a search or a query to avoid repetitve access to MinIO or S3 service.
+Must be an absolute filesystem path. Milvus refuses to start if this value is relative or empty.
+Migration of data written using a relative path in older versions is not supported.
 Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
 It is recommended to change this parameter before starting Milvus for the first time.`,
-		Export: true,
+		// Every local storage key is a complete filesystem path that starts
+		// with this value, and the loon local filesystem is rooted at "/", so
+		// a relative path here would silently depend on the process working
+		// directory. Reject it during configuration initialization.
+		Formatter: formatLocalStoragePath,
+		Forbidden: true,
+		Export:    true,
 	}
 	p.Path.Init(base.mgr)
+}
+
+func formatLocalStoragePath(value string) string {
+	value = strings.TrimSpace(value)
+	if !filepath.IsAbs(value) {
+		panic(merr.WrapErrParameterInvalidMsg("localStorage.path must be an absolute filesystem path, got %q", value))
+	}
+	return filepath.Clean(value)
 }
 
 type MetaStoreConfig struct {
@@ -1835,6 +1853,10 @@ type ProfileConfig struct {
 }
 
 func (p *ProfileConfig) Init(base *BaseTable) {
+	p.init(base, formatLocalStoragePath(base.GetWithDefault("localStorage.path", defaultLocalStoragePath)))
+}
+
+func (p *ProfileConfig) init(base *BaseTable, localStoragePath string) {
 	p.PprofPath = ParamItem{
 		Key:          "profile.pprof.path",
 		Version:      "2.5.5",
@@ -1842,7 +1864,6 @@ func (p *ProfileConfig) Init(base *BaseTable) {
 		Doc:          "The folder that storing pprof files, by default will use localStoragePath/pprof",
 		Formatter: func(v string) string {
 			if len(v) == 0 {
-				localStoragePath := getLocalStoragePath(base)
 				return path.Join(localStoragePath, "pprof")
 			}
 			return v
