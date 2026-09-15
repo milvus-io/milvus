@@ -75,15 +75,21 @@ func TestManifestIndexBackfillRevalidatesSelectedRecord(t *testing.T) {
 			// The inspector has constructed its entry, but the framework has
 			// not acquired the locks that authorize publishing it yet.
 			var original func(*meta, context.Context, SegmentManifestCommit) error
+			var changeErr error
+			changed := false
 			patch := mockey.Mock((*meta).CommitSegmentManifest).Origin(&original).To(
 				func(receiver *meta, ctx context.Context, commit SegmentManifestCommit) error {
-					if err := test.change(ctx, receiver); err != nil {
-						return err
+					changed = true
+					changeErr = test.change(ctx, receiver)
+					if changeErr != nil {
+						return changeErr
 					}
 					return original(receiver, ctx, commit)
 				}).Build()
-			t.Cleanup(patch.UnPatch)
+			t.Cleanup(func() { patch.UnPatch() })
 			err := newManifestIndexBackfillInspector(ctx, m).backfillIndex(ctx, restartSegID, restartBuildID)
+			require.True(t, changed)
+			require.NoError(t, changeErr, "the competing operation must succeed before checking publication")
 			require.Error(t, err)
 			assert.Zero(t, store.commitCount, "stale candidate must fail before manifest I/O")
 			assert.Equal(t, base, m.GetSegment(ctx, restartSegID).GetManifestPath())
@@ -125,7 +131,7 @@ func TestManifestIndexBackfillFailureDuringManifestIO(t *testing.T) {
 					}
 					return result, err
 				}).Build()
-			t.Cleanup(patch.UnPatch)
+			t.Cleanup(func() { patch.UnPatch() })
 			inspector := newManifestIndexBackfillInspector(ctx, m)
 			err := inspector.backfillIndex(ctx, restartSegID, restartBuildID)
 			require.Error(t, err)
