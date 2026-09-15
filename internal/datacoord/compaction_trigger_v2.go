@@ -64,6 +64,7 @@ const (
 	BumpSchemaVersionTicker
 	StorageVersionTicker
 	TargetTicker
+	MigrationCompactionTicker
 )
 
 func (t CompactionTriggerType) GetCompactionType() datapb.CompactionType {
@@ -185,6 +186,7 @@ func NewCompactionTriggerManager(alloc allocator.Allocator, handler Handler, ins
 	m.policies[SingleTicker] = m.singlePolicy
 	m.policies[BumpSchemaVersionTicker] = m.bumpSchemaVersionPolicy
 	m.policies[StorageVersionTicker] = m.upgradeStorageVersionPolicy
+	m.policies[MigrationCompactionTicker] = newMigrationCompactionChecker(meta, m.allocator, m.handler, versionManager)
 	if m.targetReconciler != nil {
 		m.policies[TargetTicker] = m.targetReconciler
 	}
@@ -234,6 +236,8 @@ func (m *CompactionTriggerManager) loop(ctx context.Context) {
 	defer singleTicker.Stop()
 	storageVersionTicker := time.NewTicker(Params.DataCoordCfg.MixCompactionTriggerInterval.GetAsDuration(time.Second))
 	defer storageVersionTicker.Stop()
+	migrationCompactionTicker := time.NewTicker(Params.DataCoordCfg.MixCompactionTriggerInterval.GetAsDuration(time.Second))
+	defer migrationCompactionTicker.Stop()
 	bumpSchemaVersionTicker := time.NewTicker(Params.DataCoordCfg.BumpSchemaVersionCompactionTriggerInterval.GetAsDuration(time.Second))
 	defer bumpSchemaVersionTicker.Stop()
 	targetTicker := time.NewTicker(Params.DataCoordCfg.MixCompactionTriggerInterval.GetAsDuration(time.Second))
@@ -252,6 +256,8 @@ func (m *CompactionTriggerManager) loop(ctx context.Context) {
 			m.handleTicker(ctx, SingleTicker)
 		case <-storageVersionTicker.C:
 			m.handleTicker(ctx, StorageVersionTicker)
+		case <-migrationCompactionTicker.C:
+			m.handleTicker(ctx, MigrationCompactionTicker)
 		case <-bumpSchemaVersionTicker.C:
 			m.handleTicker(ctx, BumpSchemaVersionTicker)
 		case <-targetTicker.C:

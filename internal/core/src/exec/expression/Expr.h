@@ -40,6 +40,7 @@
 #include "expr/ITypeExpr.h"
 #include "index/Index.h"
 #include "index/JsonFlatIndex.h"
+#include "index/json_stats/JsonKeyStats.h"
 #include "log/Log.h"
 #include "mmap/ChunkedColumnInterface.h"
 #include "mmap/ChunkedColumnFilter.h"
@@ -801,14 +802,14 @@ class SegmentExpr : public Expr {
             BindColumnFilter(skip_func, std::move(resources.second));
     }
 
-    detail::ColumnFilterPtr
+    milvus::detail::ColumnFilterPtr
     BindColumnFilter(const SkipChunkFn& skip_func,
                      FieldSkipMetricsView view) const {
         if (!skip_func || !view.HasMetrics()) {
             return {};
         }
-        return std::make_shared<const detail::ColumnFilter>(
-            detail::ColumnFilter::MetricsSource::PreloadedStatistics,
+        return std::make_shared<const milvus::detail::ColumnFilter>(
+            milvus::detail::ColumnFilter::MetricsSource::PreloadedStatistics,
             [skip_func = skip_func, view = std::move(view)](int64_t cell_id) {
                 return skip_func(view, cell_id);
             },
@@ -2693,20 +2694,7 @@ class SegmentExpr : public Expr {
     VectorPtr
     ProcessIndexChunks(FUNC func, const ValTypes&... values) {
         return ProcessIndexChunksImpl<T>(
-            func, false, IndexValidityMode::Default, nullptr, values...);
-    }
-
-    // Execute an index query once for the whole segment and gather only the
-    // requested rows. Unlike ProcessIndexChunksByOffsets, this also supports
-    // JSON indexes whose query APIs return a full row-level bitmap (including
-    // JsonFlatIndexQueryExecutor).
-    template <typename T, typename FUNC, typename... ValTypes>
-    VectorPtr
-    ProcessIndexChunksAndGatherByOffsets(FUNC func,
-                                         const OffsetVector& offsets,
-                                         const ValTypes&... values) {
-        return ProcessIndexChunksImpl<T>(
-            func, false, IndexValidityMode::Default, &offsets, values...);
+            func, false, IndexValidityMode::Default, values...);
     }
 
     // ProcessIndexChunks with func_returns_row_level flag
@@ -2717,8 +2705,7 @@ class SegmentExpr : public Expr {
     ProcessIndexChunksWithRowLevel(FUNC func,
                                    IndexValidityMode validity_mode,
                                    const ValTypes&... values) {
-        return ProcessIndexChunksImpl<T>(
-            func, true, validity_mode, nullptr, values...);
+        return ProcessIndexChunksImpl<T>(func, true, validity_mode, values...);
     }
 
     TargetBitmap
@@ -2759,7 +2746,6 @@ class SegmentExpr : public Expr {
     ProcessIndexChunksImpl(FUNC func,
                            bool func_returns_row_level,
                            IndexValidityMode validity_mode,
-                           const OffsetVector* offsets,
                            const ValTypes&... values) {
         typedef std::
             conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
@@ -2877,20 +2863,6 @@ class SegmentExpr : public Expr {
         // If func already returns row-level bitset, skip element-to-row conversion
         bool need_element_slicing =
             cached_is_nested_index_ && !func_returns_row_level;
-
-        if (offsets != nullptr) {
-            AssertInfo(!need_element_slicing,
-                       "cannot gather row offsets from an element-level "
-                       "index result");
-            AssertInfo(cached_index_chunk_res_->size() ==
-                           static_cast<size_t>(active_count_),
-                       "index result size {} does not match row count {}",
-                       cached_index_chunk_res_->size(),
-                       active_count_);
-            return GatherCachedResultByOffsets(*cached_index_chunk_res_,
-                                               *cached_index_chunk_valid_res_,
-                                               *offsets);
-        }
 
         if (need_element_slicing) {
             // Nested index with element-level result: batch by rows, slice elements
@@ -3392,6 +3364,20 @@ class SegmentExpr : public Expr {
                    pinned_index_[0].get()) != nullptr;
     }
 
+    // Returns the Milvus scalar type of the pinned typed JSON path index, or
+    // DataType::NONE when no typed (non-flat) JSON index is pinned. The flat
+    // index is excluded because it keeps an exact integer field and is handled
+    // separately. Used to dispatch int64 JSON literals to the exact integer
+    // executor when the user provisioned an INT64 cast type.
+    DataType
+    PinnedJsonIndexCastElementType() const {
+        if (field_type_ != DataType::JSON || pinned_index_.empty() ||
+            PinnedJsonIndexIsFlat()) {
+            return DataType::NONE;
+        }
+        return pinned_index_[0].get()->GetCastType().ToMilvusDataType();
+    }
+
     static bool
     IsInt64SafeForJsonDoubleIndex(int64_t value) {
         constexpr int64_t kFirstNonInjectiveInteger = int64_t{1} << 53;
@@ -3470,7 +3456,10 @@ class SegmentExpr : public Expr {
     }
 
     bool
-    HasJsonStats(FieldId field_id) const {
+    HasQueryableJsonStats(FieldId field_id) const {
+        // Supported V3/V4 formats are validated when stats are registered.
+        // Check registration only: execution-path selection must not initialize
+        // a cold stats artifact, especially when a typed Path index wins.
         return segment_->HasJsonStats(field_id);
     }
 
@@ -3486,10 +3475,41 @@ class SegmentExpr : public Expr {
 
     // Check whether this expression can use JsonStats without pinning.
     // All conditions are available before execution path determination.
+    // A typed Path index provisioned for this exact path outranks stats, so
+    // the probe below is part of this single answer instead of being repeated
+    // by every JSON expression.
     bool
     CanUseJsonStatsAtInit() const {
-        return plan_options_.expr_use_json_stats && HasJsonStats(field_id_) &&
-               !nested_path_.empty() && !PathContainsInteger(nested_path_);
+        return plan_options_.expr_use_json_stats &&
+               HasQueryableJsonStats(field_id_) && !nested_path_.empty() &&
+               !PathContainsInteger(nested_path_) &&
+               !PrefersTypedJsonPathIndex();
+    }
+
+    // A typed JSON Path index whose cast type accepts this operand is
+    // explicitly provisioned for the exact path. This metadata-only probe
+    // avoids pinning and deliberately excludes JsonFlatIndex. Once selected,
+    // the Path index answers within its configured projection; numeric
+    // precision does not downgrade it to RawData.
+    bool
+    HasTypedJsonPathIndexForOperandTypeAtInit() const {
+        if (field_type_ != DataType::JSON) {
+            return false;
+        }
+        return segment_->HasTypedJsonPathIndexForOperandType(
+            field_id_,
+            milvus::Json::pointer(nested_path_),
+            value_type_,
+            allow_any_json_cast_type_,
+            is_json_contains_);
+    }
+
+    // Whether the typed Path index should be preferred over JsonStats.
+    // Overridden by expressions whose operand shape can be rejected by the
+    // typed projection even when the cast type matches.
+    virtual bool
+    PrefersTypedJsonPathIndex() const {
+        return HasTypedJsonPathIndexForOperandTypeAtInit();
     }
 
     virtual bool
@@ -3576,30 +3596,6 @@ class SegmentExpr : public Expr {
         valid_result.append(
             *cached_valid_result_, current_data_global_pos_, real_batch_size);
         MoveCursor();
-        return std::make_shared<ColumnVector>(std::move(result),
-                                              std::move(valid_result));
-    }
-
-    VectorPtr
-    GatherCachedResultByOffsets(const TargetBitmap& cached_res,
-                                const TargetBitmap& cached_valid_res,
-                                const OffsetVector& offsets) const {
-        AssertInfo(cached_res.size() == cached_valid_res.size(),
-                   "cached result and validity sizes differ: {} vs {}",
-                   cached_res.size(),
-                   cached_valid_res.size());
-        TargetBitmap result(offsets.size(), false);
-        TargetBitmap valid_result(offsets.size(), false);
-        for (size_t i = 0; i < offsets.size(); ++i) {
-            const auto offset = offsets[i];
-            AssertInfo(
-                offset >= 0 && static_cast<size_t>(offset) < cached_res.size(),
-                "offset {} is outside cached result size {}",
-                offset,
-                cached_res.size());
-            result[i] = cached_res[offset];
-            valid_result[i] = cached_valid_res[offset];
-        }
         return std::make_shared<ColumnVector>(std::move(result),
                                               std::move(valid_result));
     }
@@ -3841,7 +3837,7 @@ class SegmentExpr : public Expr {
     // cursor owns the physical Cell pin; callers never pin Cells separately.
     std::shared_ptr<ChunkedColumnInterface> data_scan_column_{nullptr};
     std::unique_ptr<ChunkedColumnInterface::ScanCursor> data_scan_cursor_;
-    detail::ColumnFilterPtr data_scan_filter_{nullptr};
+    milvus::detail::ColumnFilterPtr data_scan_filter_{nullptr};
     ChunkedColumnInterface::TargetType data_scan_target_type_{
         ChunkedColumnInterface::TargetType::None};
     // Offset input is evaluated in multiple batches by the same expression.
@@ -3849,7 +3845,7 @@ class SegmentExpr : public Expr {
     // like the persistent sequential Scan cursor does.
     bool data_take_resources_initialized_{false};
     std::shared_ptr<ChunkedColumnInterface> data_take_column_{nullptr};
-    detail::ColumnFilterPtr data_take_filter_{nullptr};
+    milvus::detail::ColumnFilterPtr data_take_filter_{nullptr};
 
     // Unified cache for all index paths (ScalarIndex, PkIndex, TextIndex, JsonStats).
     // Populated once per segment, then sliced per batch via SliceCachedResult().

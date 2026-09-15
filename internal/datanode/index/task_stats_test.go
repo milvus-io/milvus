@@ -18,6 +18,7 @@ package index
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -44,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -264,6 +266,7 @@ func (s *TaskStatsSuite) TestBuildIndexParams() {
 			TaskVersion:               5,
 			CurrentScalarIndexVersion: int32(1),
 			StorageVersion:            storage.StorageV2,
+			JsonKeyStatsDataFormat:    common.JSONStatsDataFormatV4,
 			InsertLogs:                []*datapb.FieldBinlog{},
 			StorageConfig:             &indexpb.StorageConfig{RootPath: "/test/path"},
 		}
@@ -277,6 +280,7 @@ func (s *TaskStatsSuite) TestBuildIndexParams() {
 		params := buildIndexParams(req, []string{"file1", "file2"}, nil, &indexcgopb.StorageConfig{}, options, "", nil)
 
 		s.Equal(storage.StorageV2, params.StorageVersion)
+		s.Equal(common.JSONStatsDataFormatV4, params.GetJsonStatsDataFormat())
 		s.NotNil(params.SegmentInsertFiles)
 		s.Nil(params.GetStoragePluginContext())
 	})
@@ -325,14 +329,15 @@ func (s *TaskStatsSuite) TestJSONKeyStatsPropagatesPluginContext() {
 		EncryptionKey:    "unsafe-key",
 	}
 	req := &workerpb.CreateStatsRequest{
-		ClusterID:       s.clusterID,
-		TaskID:          100,
-		CollectionID:    s.collectionID,
-		PartitionID:     s.partitionID,
-		TargetSegmentID: 102,
-		TaskVersion:     1,
-		NumRows:         10,
-		StorageVersion:  storage.StorageV2,
+		ClusterID:              s.clusterID,
+		TaskID:                 100,
+		CollectionID:           s.collectionID,
+		PartitionID:            s.partitionID,
+		TargetSegmentID:        102,
+		TaskVersion:            1,
+		NumRows:                10,
+		StorageVersion:         storage.StorageV2,
+		JsonKeyStatsDataFormat: common.JSONStatsDataFormatV4,
 		StorageConfig: &indexpb.StorageConfig{
 			RootPath:    s.T().TempDir(),
 			StorageType: "local",
@@ -369,7 +374,6 @@ func (s *TaskStatsSuite) TestJSONKeyStatsPropagatesPluginContext() {
 		req.GetTargetSegmentID(),
 		req.GetTaskVersion(),
 		req.GetTaskID(),
-		common.JSONStatsDataFormatVersion,
 		req.GetInsertLogs(),
 		256,
 		0.3,
@@ -378,6 +382,7 @@ func (s *TaskStatsSuite) TestJSONKeyStatsPropagatesPluginContext() {
 	s.Require().NoError(err)
 	s.Require().NotNil(captured)
 	s.Equal(pluginContext, captured.GetStoragePluginContext())
+	s.Equal(common.JSONStatsDataFormatV4, captured.GetJsonStatsDataFormat())
 }
 
 type manifestStatsTextIndex struct{ statsFakeTextIndex }
@@ -447,7 +452,7 @@ func TestStandaloneJSONKeyJobNegotiatesManifestCommit(t *testing.T) {
 		}
 
 		err = st.createJSONKeyStats(ctx, st.req.GetStorageConfig(), 1, 2, 103, 1, taskID,
-			common.JSONStatsDataFormatVersion, st.req.GetInsertLogs(), 256, 0.3, 81920)
+			st.req.GetInsertLogs(), 256, 0.3, 81920)
 		if failCommit {
 			require.ErrorIs(t, err, commitErr)
 			require.Equal(t, baseManifest, st.manifestPath)
@@ -569,6 +574,50 @@ func TestStandaloneTextIndexJobNegotiatesManifestCommit(t *testing.T) {
 	run(indexpb.StatsSubJob_TextIndexJob, false, true)
 }
 
+func (s *TaskStatsSuite) TestUnsupportedJSONStatsDataFormatIsRetryable() {
+	st := &statsTask{req: &workerpb.CreateStatsRequest{
+		ClusterID: "cluster",
+		TaskID:    1,
+	}}
+	for _, format := range []int64{2, 5} {
+		st.req.JsonKeyStatsDataFormat = format
+		err := st.createJSONKeyStats(
+			context.Background(),
+			nil,
+			1,
+			2,
+			3,
+			4,
+			5,
+			nil,
+			256,
+			0.3,
+			81920,
+		)
+		s.ErrorIs(err, merr.ErrServiceUnimplemented)
+		s.Equal(indexpb.JobState_JobStateRetry, getStateFromError(err))
+	}
+}
+
+func (s *TaskStatsSuite) TestV2JSONStatsBasePathUsesRequestedFormat() {
+	req := &workerpb.CreateStatsRequest{
+		TaskID:          11,
+		TaskVersion:     12,
+		CollectionID:    13,
+		PartitionID:     14,
+		TargetSegmentID: 15,
+		StorageVersion:  storage.StorageV2,
+		StorageConfig:   &indexpb.StorageConfig{RootPath: "root"},
+	}
+
+	for _, format := range []int64{common.JSONStatsDataFormatV3, common.JSONStatsDataFormatV4} {
+		req.JsonKeyStatsDataFormat = format
+		path, err := computeStatsBasePath(req, "", "json_stats", 16)
+		s.Require().NoError(err)
+		s.Contains(path, fmt.Sprintf("/%s/%d/", common.JSONStatsPath, format))
+	}
+}
+
 func genCollectionSchemaWithBM25() *schemapb.CollectionSchema {
 	return &schemapb.CollectionSchema{
 		Name:        "schema",
@@ -682,7 +731,6 @@ func TestCreateJSONKeyStats_NullableJSONMissingFieldBinlog(t *testing.T) {
 	err := st.createJSONKeyStats(ctx, req.GetStorageConfig(),
 		req.GetCollectionID(), req.GetPartitionID(), req.GetTargetSegmentID(),
 		req.GetTaskVersion(), req.GetTaskID(),
-		common.JSONStatsDataFormatVersion,
 		insertBinlogs, 256, 0.3, 81920)
 	require.NoError(t, err)
 	require.Empty(t, gotInsertFiles)
@@ -726,7 +774,6 @@ func TestCreateJSONKeyStats_NonNullableJSONMissingFieldBinlog(t *testing.T) {
 	err := st.createJSONKeyStats(ctx, req.GetStorageConfig(),
 		req.GetCollectionID(), req.GetPartitionID(), req.GetTargetSegmentID(),
 		req.GetTaskVersion(), req.GetTaskID(),
-		common.JSONStatsDataFormatVersion,
 		insertBinlogs, 256, 0.3, 81920)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "field binlog not found for field 201")

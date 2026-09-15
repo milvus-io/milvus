@@ -2247,6 +2247,7 @@ func TestHandleSessionEvent(t *testing.T) {
 	defer closeTestServer(t, svr)
 	t.Run("handle events", func(t *testing.T) {
 		svr.indexEngineVersionManager = newIndexEngineVersionManager()
+		versionManager := svr.indexEngineVersionManager.(*versionManagerImpl)
 
 		// None event
 		evt := &sessionutil.SessionEvent{
@@ -2267,10 +2268,11 @@ func TestHandleSessionEvent(t *testing.T) {
 			EventType: sessionutil.SessionAddEvent,
 			Session: &sessionutil.Session{
 				SessionRaw: sessionutil.SessionRaw{
-					ServerID:   101,
-					ServerName: "DN101",
-					Address:    "DN127.0.0.101",
-					Exclusive:  false,
+					ServerID:                 101,
+					ServerName:               "DN101",
+					Address:                  "DN127.0.0.101",
+					Exclusive:                false,
+					ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 6},
 				},
 			},
 		}
@@ -2278,36 +2280,41 @@ func TestHandleSessionEvent(t *testing.T) {
 		assert.NoError(t, err)
 		dataNodes := svr.nodeManager.GetClientIDs()
 		assert.EqualValues(t, 1, len(dataNodes))
+		assert.Equal(t, common.MinScalarIndexVersionForJsonPathPresence, versionManager.dataNodeScalarIndexVersions[101].CurrentIndexVersion)
 		assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, svr.indexEngineVersionManager.GetClusterMinIndexStorePathVersion())
 
 		evt = &sessionutil.SessionEvent{
 			EventType: sessionutil.SessionAddEvent,
 			Session: &sessionutil.Session{
 				SessionRaw: sessionutil.SessionRaw{
-					ServerID:   102,
-					ServerName: "DN102",
-					Address:    "DN127.0.0.102",
-					Exclusive:  false,
+					ServerID:                 102,
+					ServerName:               "DN102",
+					Address:                  "DN127.0.0.102",
+					Exclusive:                false,
+					ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 5},
 				},
 			},
 		}
 		err = svr.handleSessionEvent(context.Background(), typeutil.DataNodeRole, evt)
 		assert.NoError(t, err)
+		assert.Equal(t, common.MinScalarIndexVersionForJsonPathPresence-1, versionManager.dataNodeScalarIndexVersions[102].CurrentIndexVersion)
 		assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, svr.indexEngineVersionManager.GetClusterMinIndexStorePathVersion())
 
 		evt = &sessionutil.SessionEvent{
 			EventType: sessionutil.SessionUpdateEvent,
 			Session: &sessionutil.Session{
 				SessionRaw: sessionutil.SessionRaw{
-					ServerID:   102,
-					ServerName: "DN102",
-					Address:    "DN127.0.0.102",
-					Exclusive:  false,
+					ServerID:                 102,
+					ServerName:               "DN102",
+					Address:                  "DN127.0.0.102",
+					Exclusive:                false,
+					ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 6},
 				},
 			},
 		}
 		err = svr.handleSessionEvent(context.Background(), typeutil.DataNodeRole, evt)
 		assert.NoError(t, err)
+		assert.Equal(t, common.MinScalarIndexVersionForJsonPathPresence, versionManager.dataNodeScalarIndexVersions[102].CurrentIndexVersion)
 		assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, svr.indexEngineVersionManager.GetClusterMinIndexStorePathVersion())
 
 		evt = &sessionutil.SessionEvent{
@@ -2323,6 +2330,8 @@ func TestHandleSessionEvent(t *testing.T) {
 		}
 		err = svr.handleSessionEvent(context.Background(), typeutil.DataNodeRole, evt)
 		assert.NoError(t, err)
+		_, tracked := versionManager.dataNodeScalarIndexVersions[102]
+		assert.False(t, tracked)
 		assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, svr.indexEngineVersionManager.GetClusterMinIndexStorePathVersion())
 		_ = svr.nodeManager.GetClientIDs()
 	})
@@ -2333,6 +2342,58 @@ func TestHandleSessionEvent(t *testing.T) {
 			assert.NoError(t, err)
 		})
 	})
+}
+
+func TestHandleSessionEvent_DataNodeAddPublishesCapabilitiesBeforeSchedulingAndRollsBackOnFailure(t *testing.T) {
+	const (
+		nodeID  = int64(103)
+		address = "DN127.0.0.103"
+	)
+	addErr := errors.New("add datanode failed")
+	versionManager := newIndexEngineVersionManager()
+	versionManagerImpl := versionManager.(*versionManagerImpl)
+	nodeManager := session.NewMockNodeManager(t)
+	nodeManager.EXPECT().AddNode(nodeID, address).Run(func(actualNodeID int64, actualAddress string) {
+		assert.Equal(t, nodeID, actualNodeID)
+		assert.Equal(t, address, actualAddress)
+		assert.Contains(t, versionManagerImpl.dataNodeIndexVersions, nodeID)
+		assert.Contains(t, versionManagerImpl.dataNodeScalarIndexVersions, nodeID)
+		minimum, maximum, ok := versionManagerImpl.GetDataNodeVectorIndexWriterVersionRange()
+		assert.True(t, ok)
+		assert.Equal(t, int32(1), minimum)
+		assert.Equal(t, int32(8), maximum)
+	}).Return(addErr)
+
+	server := &Server{
+		ctx:                       context.Background(),
+		nodeManager:               nodeManager,
+		indexEngineVersionManager: versionManager,
+		metricsCacheManager:       metricsinfo.NewMetricsCacheManager(),
+	}
+	event := &sessionutil.SessionEvent{
+		EventType: sessionutil.SessionAddEvent,
+		Session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{
+			ServerID:   nodeID,
+			ServerName: "DN103",
+			Address:    address,
+			IndexEngineVersion: sessionutil.IndexEngineVersion{
+				MinimalIndexVersion: 1,
+				CurrentIndexVersion: 5,
+				MaximumIndexVersion: 8,
+			},
+			ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{
+				CurrentIndexVersion: 6,
+				MaximumIndexVersion: 6,
+			},
+		}},
+	}
+
+	err := server.handleSessionEvent(context.Background(), typeutil.DataNodeRole, event)
+	assert.ErrorIs(t, err, addErr)
+	assert.NotContains(t, versionManagerImpl.dataNodeIndexVersions, nodeID)
+	assert.NotContains(t, versionManagerImpl.dataNodeScalarIndexVersions, nodeID)
+	_, _, ok := versionManagerImpl.GetDataNodeVectorIndexWriterVersionRange()
+	assert.False(t, ok)
 }
 
 type rootCoordSegFlushComplete struct {
@@ -2695,16 +2756,18 @@ func TestServer_rewatchDataNodes_Success(t *testing.T) {
 	sessions := map[string]*sessionutil.Session{
 		"session1": {
 			SessionRaw: sessionutil.SessionRaw{
-				ServerID: 1,
-				Address:  "localhost:9001",
-				Version:  "2.3.0",
+				ServerID:                 1,
+				Address:                  "localhost:9001",
+				Version:                  "2.3.0",
+				ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 6},
 			},
 		},
 		"session2": {
 			SessionRaw: sessionutil.SessionRaw{
-				ServerID: 2,
-				Address:  "localhost:9002",
-				Version:  "2.2.0", // legacy version
+				ServerID:                 2,
+				Address:                  "localhost:9002",
+				Version:                  "2.2.0", // legacy version
+				ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 5},
 			},
 		},
 	}
@@ -2722,6 +2785,10 @@ func TestServer_rewatchDataNodes_Success(t *testing.T) {
 
 	err := server.rewatchDataNodes(sessions)
 	assert.NoError(t, err)
+	versionManager := server.indexEngineVersionManager.(*versionManagerImpl)
+	assert.Len(t, versionManager.dataNodeScalarIndexVersions, 2)
+	assert.Equal(t, common.MinScalarIndexVersionForJsonPathPresence, versionManager.dataNodeScalarIndexVersions[1].CurrentIndexVersion)
+	assert.Equal(t, common.MinScalarIndexVersionForJsonPathPresence-1, versionManager.dataNodeScalarIndexVersions[2].CurrentIndexVersion)
 	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, server.indexEngineVersionManager.GetClusterMinIndexStorePathVersion())
 }
 
@@ -2745,33 +2812,57 @@ func TestServer_rewatchDataNodes_EmptySession(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestServer_rewatchDataNodes_ClusterStartupFails(t *testing.T) {
+func TestServer_rewatchDataNodes_PublishesCapabilitiesBeforeStartupAndRollsBackOnFailure(t *testing.T) {
 	// Mock semver.Parse to avoid dependency on paramtable
 	mockSemverParse := mockey.Mock(semver.Parse).Return(semver.Version{}, nil).Build()
 	defer mockSemverParse.UnPatch()
 
+	const nodeID = int64(1)
 	sessions := map[string]*sessionutil.Session{
 		"session1": {
 			SessionRaw: sessionutil.SessionRaw{
-				ServerID: 1,
+				ServerID: nodeID,
 				Address:  "localhost:9001",
 				Version:  "2.3.0",
+				IndexEngineVersion: sessionutil.IndexEngineVersion{
+					MinimalIndexVersion: 1,
+					CurrentIndexVersion: 5,
+					MaximumIndexVersion: 8,
+				},
+				ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{
+					CurrentIndexVersion: 6,
+					MaximumIndexVersion: 6,
+				},
 			},
 		},
 	}
 
+	versionManager := newIndexEngineVersionManager()
+	versionManagerImpl := versionManager.(*versionManagerImpl)
 	server := &Server{
-		ctx: context.Background(),
+		ctx:                       context.Background(),
+		indexEngineVersionManager: versionManager,
 	}
 
 	// Create actual implementations
+	startupErr := errors.New("cluster startup failed")
 	nodeManager := session.NewMockNodeManager(t)
-	nodeManager.EXPECT().Startup(mock.Anything, mock.Anything).Return(errors.New("cluster startup failed"))
+	nodeManager.EXPECT().Startup(mock.Anything, mock.Anything).Run(func(_ context.Context, _ []*session.NodeInfo) {
+		assert.Contains(t, versionManagerImpl.dataNodeIndexVersions, nodeID)
+		assert.Contains(t, versionManagerImpl.dataNodeScalarIndexVersions, nodeID)
+		minimum, maximum, ok := versionManagerImpl.GetDataNodeVectorIndexWriterVersionRange()
+		assert.True(t, ok)
+		assert.Equal(t, int32(1), minimum)
+		assert.Equal(t, int32(8), maximum)
+	}).Return(startupErr)
 	server.nodeManager = nodeManager
 
 	err := server.rewatchDataNodes(sessions)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "cluster startup failed")
+	assert.ErrorIs(t, err, startupErr)
+	assert.Empty(t, versionManagerImpl.dataNodeIndexVersions)
+	assert.Empty(t, versionManagerImpl.dataNodeScalarIndexVersions)
+	_, _, ok := versionManagerImpl.GetDataNodeVectorIndexWriterVersionRange()
+	assert.False(t, ok)
 }
 
 func TestServer_initServiceDiscovery_BindIndexNodeDoesNotAffectQueryNodePathVersionGate(t *testing.T) {
@@ -2796,6 +2887,11 @@ func TestServer_initServiceDiscovery_BindIndexNodeDoesNotAffectQueryNodePathVers
 				Version: common.Version,
 				SessionRaw: sessionutil.SessionRaw{
 					ServerID: 1,
+					ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{
+						CurrentIndexVersion: common.CurrentScalarIndexEngineVersion,
+						MaximumIndexVersion: common.MaximumScalarIndexEngineVersion,
+					},
+					IndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 10, MaximumIndexVersion: 10},
 				},
 			},
 		}, int64(20), nil)
@@ -2815,6 +2911,12 @@ func TestServer_initServiceDiscovery_BindIndexNodeDoesNotAffectQueryNodePathVers
 	err := server.initServiceDiscovery()
 	assert.NoError(t, err)
 	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, server.indexEngineVersionManager.GetClusterMinIndexStorePathVersion())
+	// The actual bound discovery path leaves writer maps empty, but migration
+	// can still resolve the same targets used by index-build requests.
+	targets, ok := resolveSafeSegmentRebuildTargets(server.indexEngineVersionManager)
+	assert.True(t, ok)
+	assert.Equal(t, server.indexEngineVersionManager.ResolveScalarIndexVersion(), targets.scalarVersion)
+	assert.Equal(t, server.indexEngineVersionManager.ResolveVecIndexVersion(), targets.vectorVersion)
 }
 
 func Test_CheckHealth(t *testing.T) {

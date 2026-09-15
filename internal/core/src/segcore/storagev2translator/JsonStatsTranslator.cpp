@@ -158,6 +158,7 @@ JsonStatsTranslator::get_cells(
 
     auto stats = std::make_unique<milvus::index::JsonKeyStats>(
         file_ctx, /* is_load */ true);
+    stats->SetDataFormatVersion(info_proto_->json_stats_data_format());
     {
         milvus::ScopedTimer timer(
             "json_stats_load",

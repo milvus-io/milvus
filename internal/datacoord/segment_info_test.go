@@ -1,6 +1,7 @@
 package datacoord
 
 import (
+	"context"
 	"testing"
 
 	"github.com/samber/lo"
@@ -12,6 +13,49 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
+
+func TestSelectSegmentsWithLimit(t *testing.T) {
+	segments := NewSegmentsInfo()
+	for id := int64(1); id <= 200; id++ {
+		collectionID := int64(100)
+		if id > 100 {
+			collectionID = 200
+		}
+		segments.SetSegment(id, NewSegmentInfo(&datapb.SegmentInfo{ID: id, CollectionID: collectionID}))
+	}
+	m := &meta{segments: segments}
+	for _, tc := range []struct {
+		name    string
+		limit   int
+		skip    int
+		matches int
+		visits  int
+	}{
+		{name: "zero skips predicate", limit: 0},
+		{name: "stop after three matches", limit: 3, matches: 3, visits: 3},
+		{name: "count matches rather than visits", limit: 3, skip: 3, matches: 3, visits: 6},
+		{name: "fewer matches than limit", limit: 3, skip: 98, matches: 2, visits: 100},
+		{name: "no matches", limit: 3, skip: 100, visits: 100},
+		{name: "limit above collection size", limit: 200, matches: 100, visits: 100},
+		{name: "unbounded", limit: -1, matches: 100, visits: 100},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			visits := 0
+			selected := m.SelectSegmentsWithLimit(context.Background(), tc.limit,
+				WithCollection(100), SegmentFilterFunc(func(segment *SegmentInfo) bool {
+					require.Equal(t, int64(100), segment.GetCollectionID())
+					visits++
+					return visits > tc.skip
+				}))
+			require.Len(t, selected, tc.matches)
+			require.Equal(t, tc.visits, visits)
+			if tc.limit >= 0 {
+				require.LessOrEqual(t, cap(selected), tc.limit)
+			}
+		})
+	}
+	require.Len(t, m.SelectSegments(context.Background(), WithCollection(100)), 100)
+}
 
 func TestCompactionTo(t *testing.T) {
 	t.Run("mix_2_to_1", func(t *testing.T) {

@@ -1072,23 +1072,30 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
                 "limit": default_limit,
             },
         )
-        expr = f"{json_field_name}['a'] == 1"
-        insert_ids = [i for i in range(default_nb + 50, default_nb + 60)]
-        self.search(
-            client,
-            collection_name,
-            vectors_to_search,
-            filter=expr,
-            consistency_level="Strong",
-            check_task=CheckTasks.check_search_results,
-            check_items={
-                "enable_milvus_client_api": True,
-                "nq": len(vectors_to_search),
-                "ids": insert_ids,
-                "pk_name": default_primary_key_field_name,
-                "limit": default_limit,
-            },
-        )
+        # json_cast_type=JSON builds a JsonFlatIndex, which recursively indexes
+        # primitive JSON leaves and does NOT preserve container boundaries. As a
+        # result, `json_field['a'] == 1` also matches `{"a": [1, 2, 3]}` (the
+        # array's leaf 1), not only `{"a": 1}`. Skip this exact-boundary
+        # assertion for the flat index; see
+        # docs/agent_guides/json-filtering/cross-path-semantics.md.
+        if supported_json_cast_type != "JSON":
+            expr = f"{json_field_name}['a'] == 1"
+            insert_ids = [i for i in range(default_nb + 50, default_nb + 60)]
+            self.search(
+                client,
+                collection_name,
+                vectors_to_search,
+                filter=expr,
+                consistency_level="Strong",
+                check_task=CheckTasks.check_search_results,
+                check_items={
+                    "enable_milvus_client_api": True,
+                    "nq": len(vectors_to_search),
+                    "ids": insert_ids,
+                    "pk_name": default_primary_key_field_name,
+                    "limit": default_limit,
+                },
+            )
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)

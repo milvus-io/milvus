@@ -977,6 +977,44 @@ func (m *indexMeta) GetAllSegmentIndexes(segID UniqueID) []*model.SegmentIndex {
 	return ret
 }
 
+// segmentIndexRebuildInfo contains only the value fields needed for migration.
+// In particular, discovering a candidate must not copy its index file-key slices.
+type segmentIndexRebuildInfo struct {
+	CollectionID              UniqueID
+	IndexID                   UniqueID
+	IndexState                commonpb.IndexState
+	HasFiles                  bool
+	CurrentIndexVersion       int32
+	CurrentScalarIndexVersion int32
+}
+
+func (m *indexMeta) getSegmentIndexRebuildInfo(segID UniqueID) []segmentIndexRebuildInfo {
+	if m.segmentIndexes == nil {
+		return nil
+	}
+	indexes, ok := m.segmentIndexes.Get(segID)
+	if !ok {
+		return nil
+	}
+	// Published records are replaced by index updates. Copy scalar fields into
+	// detached values without exposing records or retaining their file lists.
+	result := make([]segmentIndexRebuildInfo, 0, indexes.Len())
+	indexes.Range(func(_ UniqueID, index *model.SegmentIndex) bool {
+		if index != nil {
+			result = append(result, segmentIndexRebuildInfo{
+				CollectionID:              index.CollectionID,
+				IndexID:                   index.IndexID,
+				IndexState:                index.IndexState,
+				HasFiles:                  len(index.IndexFileKeys) > 0,
+				CurrentIndexVersion:       index.CurrentIndexVersion,
+				CurrentScalarIndexVersion: index.CurrentScalarIndexVersion,
+			})
+		}
+		return true
+	})
+	return result
+}
+
 // Note: thread-unsafe, don't call it outside indexMeta
 func (m *indexMeta) getSegmentIndexes(collectionID UniqueID, segID UniqueID) map[UniqueID]*model.SegmentIndex {
 	ret := make(map[UniqueID]*model.SegmentIndex, 0)

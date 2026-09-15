@@ -211,7 +211,8 @@ func WithResueNodeID(b bool) SessionOption {
 	return func(session *Session) { session.reuseNodeID = b }
 }
 
-// WithIndexEngineVersion should be only used by querynode.
+// WithIndexEngineVersion advertises QueryNode reader compatibility or DataNode
+// writer compatibility for vector index artifacts.
 func WithIndexEngineVersion(minimal, current, maximum int32) SessionOption {
 	return func(session *Session) {
 		session.IndexEngineVersion.MinimalIndexVersion = minimal
@@ -220,7 +221,8 @@ func WithIndexEngineVersion(minimal, current, maximum int32) SessionOption {
 	}
 }
 
-// WithScalarIndexEngineVersion should be only used by querynode.
+// WithScalarIndexEngineVersion is used by QueryNode to advertise reader
+// compatibility and by DataNode to advertise builder compatibility.
 func WithScalarIndexEngineVersion(minimal, current, maximum int32) SessionOption {
 	return func(session *Session) {
 		session.ScalarIndexEngineVersion.MinimalIndexVersion = minimal

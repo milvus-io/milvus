@@ -44,6 +44,13 @@ parse_json_pointer(const std::string& pointer) {
     return tokens;
 }
 
+void
+validate_json_pointer(const std::string& pointer) {
+    // Delegate so the accepted pointer shape keeps exactly one definition. The
+    // parsed tokens are not needed here; the throw is the whole point.
+    (void)parse_json_pointer(pointer);
+}
+
 // Check if a JSON Pointer path exists
 bool
 path_exists(const simdjson::dom::element& root,

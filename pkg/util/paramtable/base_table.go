@@ -229,9 +229,9 @@ func (bt *BaseTable) initConfigsFromRemote() {
 		etcd.WithDialTimeout(etcdConfig.DialTimeout.GetAsDuration(time.Millisecond)))
 	if err != nil {
 		// TLS and dial errors can contain protected paths, endpoints, or
-		// transport settings. Keep those details in the in-process error only.
-		mlog.Warn(context.TODO(), "init with etcd client failed", mlog.String("error", config.RedactedValue))
-		return
+		// transport settings. Do not include them in the panic either.
+		// Continuing without this client permanently disables version gates.
+		mlog.Panic(context.TODO(), "init with etcd client failed", mlog.String("error", config.RedactedValue))
 	}
 	bt.etcdClient = etcdCli
 
@@ -241,10 +241,12 @@ func (bt *BaseTable) initConfigsFromRemote() {
 	}
 	s, err := config.NewEtcdSource(etcdCli, info)
 	if err != nil {
-		mlog.Info(context.TODO(), "init with etcd failed", mlog.Err(err))
-		return
+		mlog.Panic(context.TODO(), "init with etcd source failed", mlog.String("error", config.RedactedValue))
 	}
-	bt.mgr.AddSource(s)
+	if err := bt.mgr.AddSource(s); err != nil {
+		// Startup must load the remote configuration before exposing defaults.
+		mlog.Panic(context.TODO(), "load initial etcd configuration failed", mlog.String("error", config.RedactedValue))
+	}
 	s.SetEventHandler(bt.mgr)
 }
 

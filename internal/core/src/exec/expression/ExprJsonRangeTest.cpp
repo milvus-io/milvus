@@ -74,20 +74,24 @@ TEST(ExprJsonTermTest, MixedValueTypesReturnError) {
     int_value.set_int64_val(1);
     proto::plan::GenericValue string_value;
     string_value.set_string_val("1");
-    auto term_expr = std::make_shared<expr::TermFilterExpr>(
-        expr::ColumnInfo(json_fid, DataType::JSON, {"int"}),
-        std::vector<proto::plan::GenericValue>{int_value, string_value},
-        false);
-    auto plan =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
-
-    try {
-        ExecuteQueryExpr(plan, seg.get(), 1, MAX_TIMESTAMP);
-        FAIL() << "mixed TermExpr values must be rejected";
-    } catch (const ExecOperatorException& error) {
-        EXPECT_NE(std::string_view(error.what())
-                      .find("TermExpr values must have the same type"),
-                  std::string_view::npos);
+    proto::plan::GenericValue float_value;
+    float_value.set_float_val(1.5);
+    for (const auto& values :
+         {std::vector<proto::plan::GenericValue>{int_value, string_value},
+          std::vector<proto::plan::GenericValue>{int_value, float_value},
+          std::vector<proto::plan::GenericValue>{float_value, int_value}}) {
+        auto term_expr = std::make_shared<expr::TermFilterExpr>(
+            expr::ColumnInfo(json_fid, DataType::JSON, {"int"}), values, false);
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           term_expr);
+        try {
+            ExecuteQueryExpr(plan, seg.get(), 1, MAX_TIMESTAMP);
+            FAIL() << "mixed TermExpr values must be rejected";
+        } catch (const ExecOperatorException& error) {
+            EXPECT_NE(std::string_view(error.what())
+                          .find("TermExpr values must have the same type"),
+                      std::string_view::npos);
+        }
     }
 }
 

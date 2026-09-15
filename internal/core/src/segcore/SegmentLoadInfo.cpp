@@ -218,6 +218,8 @@ SegmentLoadInfo::ConvertJsonKeyStatsToLoadJsonKeyIndexInfo(
     info->set_fieldid(json_key_stats.fieldid());
     info->set_version(json_key_stats.version());
     info->set_buildid(json_key_stats.buildid());
+    info->set_json_stats_data_format(
+        json_key_stats.json_key_stats_data_format());
     for (const auto& f : json_key_stats.files()) {
         info->add_files(f);
     }
@@ -788,11 +790,6 @@ SegmentLoadInfo::ComputeDiffDefaultFields(LoadDiff& diff,
 
 namespace {
 
-int64_t
-CurrentJsonStatsDataFormatVersion() {
-    return std::stoll(JSON_STATS_DATA_FORMAT_VERSION);
-}
-
 bool
 JsonStatsFilesEqual(const proto::segcore::JsonKeyStats& lhs,
                     const proto::segcore::JsonKeyStats& rhs) {
@@ -894,7 +891,6 @@ SegmentLoadInfo::ComputeDiffJsonKeyStats(LoadDiff& diff,
         return;
     }
 
-    const auto expected_format = CurrentJsonStatsDataFormatVersion();
     std::set<FieldId> current_fields;
     for (const auto& [field_id, stats] : GetJsonKeyStatsLogs()) {
         current_fields.insert(FieldId(field_id));
@@ -908,17 +904,19 @@ SegmentLoadInfo::ComputeDiffJsonKeyStats(LoadDiff& diff,
         }
         new_fields.insert(fid);
         auto current_stats = GetJsonKeyStatsLog(field_id);
-        if (stats.json_key_stats_data_format() != expected_format) {
+        if (!IsSupportedJsonStatsDataFormat(
+                stats.json_key_stats_data_format())) {
             LOG_WARN(
                 "skip json key stats diff because data format is invalid, "
                 "segment:{}, field:{}, build:{}, version:{}, format:{}, "
-                "expected_format:{}, file_count:{}",
+                "supported_formats:[{},{}], file_count:{}",
                 new_info.GetSegmentID(),
                 field_id,
                 stats.buildid(),
                 stats.version(),
                 stats.json_key_stats_data_format(),
-                expected_format,
+                JSON_STATS_DATA_FORMAT_V3,
+                JSON_STATS_DATA_FORMAT_V4,
                 stats.files_size());
             if (current_stats != nullptr) {
                 diff.json_stats_to_drop.insert(fid);

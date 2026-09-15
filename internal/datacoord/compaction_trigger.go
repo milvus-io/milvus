@@ -29,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
-	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -128,8 +127,6 @@ type compactionTrigger struct {
 	closeCh       lifetime.SafeChan
 	closeWaiter   sync.WaitGroup
 
-	indexEngineVersionManager IndexEngineVersionManager
-
 	// A sloopy hack, so we can test with different segment row count without worrying that
 	// they are re-calculated in every compaction.
 	testingOnly bool
@@ -140,17 +137,15 @@ func newCompactionTrigger(
 	inspector CompactionInspector,
 	allocator allocator.Allocator,
 	handler Handler,
-	indexVersionManager IndexEngineVersionManager,
 ) *compactionTrigger {
 	return &compactionTrigger{
-		meta:                      meta,
-		allocator:                 allocator,
-		signals:                   make(chan *compactionSignal, 100),
-		manualSignals:             make(chan *compactionSignal, 100),
-		inspector:                 inspector,
-		indexEngineVersionManager: indexVersionManager,
-		handler:                   handler,
-		closeCh:                   lifetime.NewSafeChan(),
+		meta:          meta,
+		allocator:     allocator,
+		signals:       make(chan *compactionSignal, 100),
+		manualSignals: make(chan *compactionSignal, 100),
+		inspector:     inspector,
+		handler:       handler,
+		closeCh:       lifetime.NewSafeChan(),
 	}
 }
 
@@ -944,116 +939,12 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compa
 		return true
 	}
 
-	if t.ShouldRebuildSegmentIndex(segment) {
-		return true
-	}
-
 	if t.ShouldCompactExpiryWithTTLField(compactTime, segment) {
 		mlog.Info(context.TODO(), "ttl field is expired, trigger compaction", mlog.FieldSegmentID(segment.ID),
 			mlog.FieldCollectionID(segment.CollectionID),
 			mlog.FieldPartitionID(segment.PartitionID),
 			mlog.String("channel", segment.InsertChannel))
 		return true
-	}
-
-	return false
-}
-
-func (t *compactionTrigger) ShouldRebuildSegmentIndex(segment *SegmentInfo) bool {
-	if Params.DataCoordCfg.AutoUpgradeSegmentIndex.GetAsBool() {
-		// index version of segment lower than resolved version and IndexFileKeys should have value, trigger compaction
-		indexIDToSegIdxes := t.meta.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)
-		for _, index := range indexIDToSegIdxes {
-			if len(index.IndexFileKeys) == 0 {
-				continue
-			}
-
-			indexParams := t.meta.indexMeta.GetIndexParams(segment.CollectionID, index.IndexID)
-			indexType := GetIndexType(indexParams)
-			isVectorIndex := vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType)
-
-			var resolvedEngineVersion int32
-			var segmentIndexVersion int32
-			if isVectorIndex {
-				resolvedEngineVersion = t.indexEngineVersionManager.ResolveVecIndexVersion()
-				segmentIndexVersion = index.CurrentIndexVersion
-			} else {
-				resolvedEngineVersion = t.indexEngineVersionManager.ResolveScalarIndexVersion()
-				segmentIndexVersion = index.CurrentScalarIndexVersion
-			}
-
-			if segmentIndexVersion < resolvedEngineVersion {
-				mlog.Info(context.TODO(), "index version is too old, trigger compaction",
-					mlog.FieldSegmentID(segment.ID),
-					mlog.FieldIndexID(index.IndexID),
-					mlog.String("indexType", indexType),
-					mlog.Bool("isVectorIndex", isVectorIndex),
-					mlog.Strings("indexFileKeys", index.IndexFileKeys),
-					mlog.Int32("segmentIndexVersion", segmentIndexVersion),
-					mlog.Int32("resolvedEngineVersion", resolvedEngineVersion))
-				return true
-			}
-		}
-	}
-
-	// enable force rebuild index with target index version (only for vector index)
-	if Params.DataCoordCfg.ForceRebuildSegmentIndex.GetAsBool() && Params.DataCoordCfg.TargetVecIndexVersion.GetAsInt64() != -1 {
-		resolvedVecTarget := t.indexEngineVersionManager.ResolveVecIndexVersion()
-		indexIDToSegIdxes := t.meta.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)
-		for _, index := range indexIDToSegIdxes {
-			if len(index.IndexFileKeys) == 0 {
-				continue
-			}
-
-			indexParams := t.meta.indexMeta.GetIndexParams(segment.CollectionID, index.IndexID)
-			indexType := GetIndexType(indexParams)
-			isVectorIndex := vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType)
-
-			// ForceRebuildSegmentIndex with TargetVecIndexVersion only applies to vector indexes
-			if !isVectorIndex {
-				continue
-			}
-
-			if index.CurrentIndexVersion != resolvedVecTarget {
-				mlog.Info(context.TODO(), "index version is not equal to target vec index version, trigger compaction",
-					mlog.FieldSegmentID(segment.ID),
-					mlog.FieldIndexID(index.IndexID),
-					mlog.String("indexType", indexType),
-					mlog.Strings("indexFileKeys", index.IndexFileKeys),
-					mlog.Int32("currentIndexVersion", index.CurrentIndexVersion),
-					mlog.Int32("resolvedTargetVersion", resolvedVecTarget))
-				return true
-			}
-		}
-	}
-
-	// enable force rebuild scalar index with target scalar index version
-	if Params.DataCoordCfg.ForceRebuildScalarSegmentIndex.GetAsBool() && Params.DataCoordCfg.TargetScalarIndexVersion.GetAsInt64() != -1 {
-		resolvedScalarTarget := t.indexEngineVersionManager.ResolveScalarIndexVersion()
-		indexIDToSegIdxes := t.meta.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)
-		for _, index := range indexIDToSegIdxes {
-			if len(index.IndexFileKeys) == 0 {
-				continue
-			}
-
-			indexParams := t.meta.indexMeta.GetIndexParams(segment.CollectionID, index.IndexID)
-			indexType := GetIndexType(indexParams)
-			isVectorIndex := vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType)
-
-			if isVectorIndex {
-				continue
-			}
-
-			if index.CurrentScalarIndexVersion != resolvedScalarTarget {
-				mlog.Info(context.TODO(), "scalar index version != target, trigger compaction",
-					mlog.FieldSegmentID(segment.ID),
-					mlog.FieldIndexID(index.IndexID),
-					mlog.String("indexType", indexType),
-					mlog.Int32("currentScalarIndexVersion", index.CurrentScalarIndexVersion),
-					mlog.Int32("resolvedTargetVersion", resolvedScalarTarget))
-				return true
-			}
-		}
 	}
 
 	return false
