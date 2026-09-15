@@ -55,8 +55,8 @@ read-then-delete window and require a second convergence protocol for no gain.
 
 ## Candidate Definition
 
-A record is eligible only when all of the following remain true at commit
-time:
+A record is eligible only when all of the following are true when the mutation is
+staged under the publication locks:
 
 - its segment is healthy, exactly StorageV3, and not L0;
 - its collection, partition, and segment identity matches the segment receiving
@@ -71,6 +71,8 @@ files is the small-segment/fake-Finished case and has no artifact to publish.
 Filtering through `GetSegmentIndexes` excludes records already owned by
 dropped-index GC. The commit repeats the mutable-record checks under the
 BuildID lock so scan results are only hints, never authorization to publish.
+An index definition may be dropped after staging; the record remains available
+to GC, whose segment lock orders cleanup after publication.
 
 A visible StorageV3 segment with an empty manifest path is an invariant
 violation. Such a record remains counted as pending and its attempted entry
@@ -182,15 +184,19 @@ manifest-aware DataCoord versions throughout the rollout.
 
 ### Garbage collection
 
-Backfill ignores a record after its index definition or segment is gone. One
-race needs an explicit guard: GC can resolve the old manifest before backfill
-publishes, delete the terminal artifact bytes, and then wait behind backfill's
-BuildID lock. The legacy GC fallback therefore removes a record only if, after
-acquiring that lock, it is still catalog-backed. If backfill won, GC leaves the
-manifest-resident in-memory record in place; the next cycle resolves and
-retracts its entry through the normal manifest-aware path. Deleted bytes are a
-safe no-op on that retry because no reader can use a dropped index definition.
+Backfill ignores a record after its index definition or segment is gone. GC
+can observe an index-free manifest before backfill publishes an entry, then
+reach record-only cleanup after publication. Record-only GC therefore acquires
+`segmentManifestLock(segmentID)` and rechecks the observed pointer and marker
+before deleting any files. If a healthy segment advanced, it leaves the files
+and record for the next cycle, which resolves and retracts the new entry.
 
+The lock spans file deletion and record removal; removal acquires the BuildID
+lock in the same order as publication. This also allows removal of a
+manifest-resident old build whose absence was verified in the unchanged current
+revision (for example, after replacement). A blanket catalog-provenance guard
+would strand that old build indefinitely. Existing batched manifest retractions
+and cleanup of dropped/missing segments keep their merged lifecycle.
 Dropped-segment GC needs no equivalent conditional path. A segment that becomes
 unhealthy before the final publication check makes the backfill commit fail;
 if publication wins first, dropped-segment GC reads the newly marked manifest
@@ -242,7 +248,8 @@ Prometheus's default zero value for a full interval after DataCoord starts.
 ## Observability and Runbook
 
 - `milvus_datacoord_manifest_index_backfill_pending_records` is the full count
-  of currently eligible catalog-backed records before batch limiting.
+  of currently eligible catalog-backed records before batch limiting. A canceled scan does not overwrite the gauge with a
+partial count.
 - `milvus_datacoord_manifest_index_backfill_records_total{status=...}` counts
   `success`, `failed`, `stale`, and `skipped` outcomes.
 - The transition from a positive pending count to zero logs once.
@@ -288,8 +295,8 @@ manifest contains no index entries, as implemented by #53048.
 - Candidate tests cover healthy exact-StorageV3 selection, reject L0/legacy/
   dropped segments, and reject a catalog record whose segment identity is
   inconsistent with the manifest target.
-- The GC conditional-removal test preserves a manifest-resident record so the
-  ordinary retraction lifecycle can finish cleanup.
+- The GC stale-observation test preserves files and the manifest-resident
+  record so the next cycle can finish ordinary retraction and clear the marker.
 
 ## Base and PR Dependency Order
 
@@ -342,3 +349,7 @@ A real local packed-manifest round trip should verify that existing artifact
 paths and the migrated record survive metadata restart. Unit/fault-injection
 results do not establish cluster failover, snapshot restore, or QueryNode
 end-to-end acceptance.
+
+Shutdown cancels new segment groups and drains every started group before
+returning. Native manifest calls already in progress are synchronous and cannot
+be interrupted by the Go context; shutdown waits for those calls to return.
