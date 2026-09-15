@@ -43,6 +43,7 @@
 #include "exec/expression/NullExpr.h"
 #include "exec/expression/TermExpr.h"
 #include "exec/expression/TimestamptzArithCompareExpr.h"
+#include "exec/expression/TupleTermExpr.h"
 #include "exec/expression/UnaryExpr.h"
 #include "exec/expression/ValueExpr.h"
 #include "expr/ITypeExpr.h"
@@ -478,6 +479,16 @@ CompileExpression(const expr::TypedExprPtr& expr,
             context->get_active_count(),
             context->query_config()->get_expr_batch_size(),
             context->get_consistency_level());
+    } else if (auto tuple_term_expr = std::dynamic_pointer_cast<
+                   const milvus::expr::TupleTermFilterExpr>(expr)) {
+        result = std::make_shared<PhyTupleTermFilterExpr>(
+            compiled_inputs,
+            tuple_term_expr,
+            "PhyTupleTermFilterExpr",
+            op_ctx,
+            context->get_segment(),
+            context->get_active_count(),
+            context->query_config()->get_expr_batch_size());
     } else {
         ThrowInfo(UnexpectedError, "unsupport expr: {}", expr->ToString());
     }
@@ -778,12 +789,24 @@ ReorderConjunctExpr(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
         // hash, but it is likewise index-less (its index-only fallback also
         // reverse-looks-up per row), so it must run after the numeric and
         // indexed predicates that can prune what it has to probe.
+        // PhyTupleTermFilterExpr joins the same post-selective tier: it has
+        // no index-native execution path either (v1 requires raw field data
+        // for every participating column, see the class comment in
+        // TupleTermExpr.h), so it should likewise run after the numeric and
+        // indexed predicates that can prune what it has to probe via
+        // bitmap_input.
         if (input->name() == "PhyBloomFilterExpr" ||
-            input->name() == "PhyRoaringFilterExpr") {
+            input->name() == "PhyRoaringFilterExpr" ||
+            input->name() == "PhyTupleTermFilterExpr") {
             // A JSON-path membership probe parses JSON and resolves a pointer
             // per evaluated row, which is a heavy operation; bucket it with
             // the other JSON predicates instead of the string-compare tier so
             // it runs after cheaper predicates that can prune its rows.
+            // PhyTupleTermFilterExpr's GetColumnInfo() always returns
+            // std::nullopt (it has multiple columns, not one -- see the
+            // class comment in TupleTermExpr.h), so has_value() is false for
+            // it here and it falls straight to the membership_expr branch
+            // below, same as it did before this merge.
             if (input->IsSource() && input->GetColumnInfo().has_value() &&
                 IsJsonDataType(input->GetColumnInfo()->data_type_)) {
                 json_expr.push_back(i);
