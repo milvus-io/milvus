@@ -445,8 +445,10 @@ func TestBackfillMutationRejectsUnsupportedShapes(t *testing.T) {
 			require.NoError(t, err)
 			commit := SegmentManifestCommit{
 				SegmentID: restartSegID,
-				Mutation: ManifestMutation{Type: ManifestMutationCommitUpdates,
-					Updates: &packed.ManifestUpdates{Indexes: []packed.ManifestIndexInfo{entry}}},
+				Mutation: ManifestMutation{
+					Type:    ManifestMutationCommitUpdates,
+					Updates: &packed.ManifestUpdates{Indexes: []packed.ManifestIndexInfo{entry}},
+				},
 				CatalogMutation: SegmentCatalogMutation{SegmentIndexes: []SegmentIndexMutation{{
 					Type: SegmentIndexBackfill, BuildID: restartBuildID,
 				}}},
