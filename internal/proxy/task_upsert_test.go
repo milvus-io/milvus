@@ -644,22 +644,30 @@ func newPartialUpdateCASTestWAL(t *testing.T, term int64) *partialUpdateCASTestW
 	t.Helper()
 
 	w := &partialUpdateCASTestWAL{term: term}
-	appendMock := mockey.Mock((*partialUpdateCASTestWAL).AppendMessages).To(
-		func(w *partialUpdateCASTestWAL, ctx context.Context, msgs ...streamingmessage.MutableMessage) streaming.AppendResponses {
-			w.appendCalls++
-			w.appended = append([]streamingmessage.MutableMessage(nil), msgs...)
-			w.appendedBatches = append(w.appendedBatches, append([]streamingmessage.MutableMessage(nil), msgs...))
-			if w.appendHook != nil {
-				return w.appendHook(ctx, msgs...)
-			}
-			responses := make([]streaming.AppendResponse, len(msgs))
-			for idx := range responses {
-				responses[idx].AppendResult = &streamingtypes.AppendResult{TimeTick: uint64(idx + 1)}
-			}
-			return streaming.AppendResponses{Responses: responses}
+	record := func(w *partialUpdateCASTestWAL, ctx context.Context, msgs ...streamingmessage.MutableMessage) streaming.AppendResponses {
+		w.appendCalls++
+		w.appended = append([]streamingmessage.MutableMessage(nil), msgs...)
+		w.appendedBatches = append(w.appendedBatches, append([]streamingmessage.MutableMessage(nil), msgs...))
+		if w.appendHook != nil {
+			return w.appendHook(ctx, msgs...)
+		}
+		responses := make([]streaming.AppendResponse, len(msgs))
+		for idx := range responses {
+			responses[idx].AppendResult = &streamingtypes.AppendResult{TimeTick: uint64(idx + 1)}
+		}
+		return streaming.AppendResponses{Responses: responses}
+	}
+	appendMock := mockey.Mock((*partialUpdateCASTestWAL).AppendMessages).To(record).Build()
+	t.Cleanup(func() { appendMock.UnPatch() })
+	// insertTask.Execute appends through the options variant so the append can
+	// carry the idempotency key; route it to the same recorder, otherwise it
+	// falls through to the nil embedded WALAccesser.
+	appendWithOptionsMock := mockey.Mock((*partialUpdateCASTestWAL).AppendMessagesWithOptions).To(
+		func(w *partialUpdateCASTestWAL, ctx context.Context, msgs []streamingmessage.MutableMessage, _ ...streaming.AppendOption) streaming.AppendResponses {
+			return record(w, ctx, msgs...)
 		},
 	).Build()
-	t.Cleanup(func() { appendMock.UnPatch() })
+	t.Cleanup(func() { appendWithOptionsMock.UnPatch() })
 	return w
 }
 
@@ -1102,6 +1110,7 @@ func TestRepackInsertDataForStreamingServiceCASMetadata(t *testing.T) {
 		nil,
 		1,
 		groups,
+		nil,
 	)
 	require.NoError(t, err)
 	require.Len(t, msgs, 1)
@@ -1117,6 +1126,7 @@ func TestRepackInsertDataForStreamingServiceCASMetadata(t *testing.T) {
 		nil,
 		1,
 		map[string]*messagespb.PartialUpdateCAS{},
+		nil,
 	)
 	require.Error(t, err)
 
@@ -1130,6 +1140,7 @@ func TestRepackInsertDataForStreamingServiceCASMetadata(t *testing.T) {
 		nil,
 		1,
 		map[string]*messagespb.PartialUpdateCAS{vchannel: nil},
+		nil,
 	)
 	require.Error(t, err)
 
@@ -1144,6 +1155,7 @@ func TestRepackInsertDataForStreamingServiceCASMetadata(t *testing.T) {
 		nil,
 		1,
 		groups,
+		nil,
 	)
 	require.ErrorIs(t, err, merr.ErrServiceInternal)
 }
@@ -1174,6 +1186,7 @@ func TestRepackInsertDataForStreamingServiceProducesSingleMessageWithCASMetadata
 		nil,
 		1,
 		groups,
+		nil,
 	)
 	require.NoError(t, err)
 	require.Len(t, msgs, 1)
@@ -1213,6 +1226,7 @@ func TestRepackInsertDataForStreamingServiceSwitchesCASChunkOwner(t *testing.T) 
 		nil,
 		1,
 		groups,
+		nil,
 	)
 	require.NoError(t, err)
 	require.Len(t, unsplit, 1)
@@ -1230,6 +1244,7 @@ func TestRepackInsertDataForStreamingServiceSwitchesCASChunkOwner(t *testing.T) 
 		nil,
 		1,
 		groups,
+		nil,
 	)
 	require.NoError(t, err)
 	require.Len(t, proxySplit, 2)
@@ -1248,6 +1263,7 @@ func TestRepackInsertDataForStreamingServiceSwitchesCASChunkOwner(t *testing.T) 
 		nil,
 		1,
 		groups,
+		nil,
 	)
 	require.NoError(t, err)
 	require.Len(t, snSplit, 1)
@@ -1281,6 +1297,7 @@ func TestRepackInsertDataByPartitionForStreamingServiceRejectsMisalignedSource(t
 		task.upsertMsg.InsertMsg,
 		nil,
 		1,
+		nil,
 		nil,
 	)
 	require.ErrorIs(t, err, merr.ErrDataIntegrity)
@@ -1321,6 +1338,7 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceCASMetadata(t *testi
 		task.schema.CollectionSchema,
 		1,
 		groups,
+		nil,
 	)
 	require.NoError(t, err)
 	require.Len(t, msgs, 1)
@@ -1338,6 +1356,7 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceCASMetadata(t *testi
 		task.schema.CollectionSchema,
 		1,
 		map[string]*messagespb.PartialUpdateCAS{},
+		nil,
 	)
 	require.Error(t, err)
 
@@ -1353,6 +1372,7 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceCASMetadata(t *testi
 		task.schema.CollectionSchema,
 		1,
 		map[string]*messagespb.PartialUpdateCAS{vchannel: nil},
+		nil,
 	)
 	require.Error(t, err)
 
@@ -1369,6 +1389,7 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceCASMetadata(t *testi
 		task.schema.CollectionSchema,
 		1,
 		groups,
+		nil,
 	)
 	require.ErrorIs(t, err, merr.ErrServiceInternal)
 }
@@ -1408,6 +1429,7 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceProducesSingleMessag
 		task.schema.CollectionSchema,
 		1,
 		groups,
+		nil,
 	)
 	require.NoError(t, err)
 	require.Len(t, msgs, 1)
