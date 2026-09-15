@@ -106,9 +106,9 @@ message WriterSpec {
   double bloom_fpp = 11;
 }
 
-// ImportTaskPlan is the only persisted Planning object for an ImportTaskV3.
-// It is self-contained so a worker needs one object read and never depends on
-// an ImportJob-side snapshot or a separately published task index.
+// ImportTaskPlan is the complete execution input of one ImportTaskV3. It is
+// built at dispatch from the ImportJob, the task record, and current config,
+// and travels inside ImportTaskV3Request; it is never persisted.
 message ImportTaskPlan {
   SortSpec sort = 1;
   string vchannel = 2;
@@ -124,5 +124,5 @@ message ImportTaskPlan {
   // Whether the job restores backup/binlog files. Fragments of a backup job
   // already carry every function output column; ordinary fragments carry them
   // because Reshard computed them.
-  bool backup = 13;
+  bool backup = 12;
 }
