@@ -1362,8 +1362,9 @@ type stagedSegmentIndexMutation struct {
 // so a persisted value can never be built from a read that predates it.
 //
 // A missing record is terminal for an upsert (errSegmentIndexRecordGone) and
-// benign for a removal - the record already being gone is that mutation's
-// intended end state, so the caller's manifest revision still publishes.
+// benign for a removal or rollback: already-retired records need no catalog
+// write, but the caller must still publish their manifest retractions. Rollback
+// excludes active copy installations before selecting segments.
 //
 // Precondition: the caller holds keyLock(mut.BuildID) across this projection,
 // the returned install, and the deferred metric closure install returns. It is
@@ -1395,9 +1396,6 @@ func (m *indexMeta) stageSegmentIndexMutation(mut SegmentIndexMutation) (*staged
 
 	previous, ok := m.segmentBuildInfo.Get(mut.BuildID)
 	if !ok {
-		if mut.Type == SegmentIndexRollback {
-			return staged, merr.WrapErrServiceUnavailableMsg("manifest index record %d is awaiting installation or retirement", mut.BuildID)
-		}
 		if mut.Type == SegmentIndexUpsert {
 			return staged, errSegmentIndexRecordGone
 		}
@@ -1417,7 +1415,7 @@ func (m *indexMeta) stageSegmentIndexMutation(mut SegmentIndexMutation) (*staged
 			// Do not reinsert this record into the current (segment,index) slot:
 			// a replacement build may own that slot under a different key lock.
 			m.segmentIndexCatalogAbsent.Remove(mut.BuildID)
-			return func() {}
+			return func() { metrics.DataCoordManifestIndexRollbackRecords.Inc() }
 		}
 		return staged, nil
 	}

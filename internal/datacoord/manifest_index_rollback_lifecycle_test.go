@@ -370,3 +370,96 @@ func TestManifestIndexRollbackDroppedGCWaitsForPublication(t *testing.T) {
 		t.Fatal("GC did not resume after rollback")
 	}
 }
+
+func TestManifestIndexRollbackAfterDroppedIndexGC(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		keepLive    bool
+		failCatalog bool
+	}{
+		{name: "only retired index"},
+		{name: "mixed retired and live indexes", keepLive: true},
+		{name: "catalog failure and retry", keepLive: true, failCatalog: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, catalog, store, kv := rollbackFixture(t)
+			ctx := context.TODO()
+			retired, _ := m.indexMeta.GetIndexJob(restartBuildID)
+			// A second, live index must still be restored in the same batch.
+			definition := model.CloneIndex(m.indexMeta.GetIndexesForCollection(restartCollID, "")[0])
+			definition.IndexID++
+			definition.IndexName = "live_index"
+			live := model.CloneSegmentIndex(retired)
+			live.IndexID = definition.IndexID
+			live.BuildID++
+			liveCount := 0
+			if tc.keepLive {
+				require.NoError(t, m.indexMeta.CreateIndex(ctx, definition))
+				require.NoError(t, m.indexMeta.AddSegmentIndex(ctx, live))
+				require.NoError(t, newManifestIndexBackfillInspector(ctx, m).backfillIndex(ctx, restartSegID, live.BuildID))
+				liveCount = 1
+			}
+
+			// A snapshot taken before these indexes were built pins the segment,
+			// but does not pin the subsequently deleted index's files.
+			m.snapshotMeta.segmentReferencedByGC.Insert(restartSegID)
+			require.True(t, m.snapshotMeta.IsSegmentGCBlocked(restartCollID, restartSegID))
+			require.False(t, m.snapshotMeta.IsBuildIDGCBlocked(restartCollID, restartBuildID))
+			require.NoError(t, m.SetState(ctx, restartSegID, commonpb.SegmentState_Dropped))
+			require.NoError(t, m.indexMeta.MarkIndexAsDeleted(ctx, restartCollID, []int64{restartIndexID}))
+			gc := newGarbageCollector(m, nil, GcOption{cli: m.chunkManager})
+			t.Cleanup(gc.close)
+			files := gc.getAllIndexFilesOfIndex(retired)
+			for file := range files {
+				require.NoError(t, m.chunkManager.Write(ctx, file, []byte("retired artifact")))
+				t.Cleanup(func() { _ = m.chunkManager.Remove(ctx, file) })
+			}
+			gc.recycleUnusedSegIndexes(ctx, nil)
+			_, exists := m.indexMeta.GetIndexJob(restartBuildID)
+			require.False(t, exists)
+			for file := range files {
+				exists, err := m.chunkManager.Exist(ctx, file)
+				require.NoError(t, err)
+				require.False(t, exists)
+			}
+			before := m.GetSegment(ctx, restartSegID).GetManifestPath()
+			require.Len(t, store.backfillEntriesAt(before), liveCount+1, "Dropped index GC leaves manifest entries behind")
+			restoredBefore := testutil.ToFloat64(metrics.DataCoordManifestIndexRollbackRecords)
+			inspector := newManifestIndexRollbackInspector(ctx, m, nil)
+			if tc.failCatalog {
+				kv.failAtomicUpdate = true
+				inspector.runOnce(ctx)
+				require.False(t, inspector.ready)
+				require.Equal(t, before, m.GetSegment(ctx, restartSegID).GetManifestPath())
+				rows, err := catalog.ListSegmentIndexes(ctx, restartCollID)
+				require.NoError(t, err)
+				require.Empty(t, rows)
+				require.Equal(t, restoredBefore, testutil.ToFloat64(metrics.DataCoordManifestIndexRollbackRecords))
+				kv.failAtomicUpdate = false
+			}
+			inspector.runOnce(ctx)
+			segment := m.GetSegment(ctx, restartSegID)
+			require.False(t, segment.GetManifestHasIndex())
+			require.Empty(t, store.backfillEntriesAt(segment.GetManifestPath()))
+			require.Equal(t, commonpb.SegmentState_Dropped, segment.GetState())
+			rows, err := catalog.ListSegmentIndexes(ctx, restartCollID)
+			require.NoError(t, err)
+			require.Len(t, rows, liveCount)
+			if tc.keepLive {
+				assert.Equal(t, live.BuildID, rows[0].BuildID)
+			}
+			assert.Equal(t, restoredBefore+float64(liveCount), testutil.ToFloat64(metrics.DataCoordManifestIndexRollbackRecords), "only the live record was restored")
+			inspector.runOnce(ctx)
+			assert.True(t, inspector.ready)
+			assert.Equal(t, float64(1), testutil.ToFloat64(metrics.DataCoordManifestIndexRollbackReady))
+			assert.True(t, m.snapshotMeta.IsSegmentGCBlocked(restartCollID, restartSegID))
+
+			store.failReadsFrom()
+			restarted := bootMetaForRestart(t, catalog, restartCollID)
+			_, exists = restarted.indexMeta.GetIndexJob(restartBuildID)
+			assert.False(t, exists, "rollback must not resurrect the retired index")
+			_, exists = restarted.indexMeta.GetIndexJob(live.BuildID)
+			assert.Equal(t, tc.keepLive, exists)
+		})
+	}
+}
