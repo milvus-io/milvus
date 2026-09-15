@@ -1016,3 +1016,83 @@ func TestBuiltinPrivilegeGroup(t *testing.T) {
 		assert.Error(t, err)
 	})
 }
+
+func TestCheckClusterPrivilege_AuthorizationDisabled(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "false")
+	defer paramtable.Get().Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+
+	err := CheckClusterPrivilege(context.Background(), &internalpb.ImportRequest{},
+		milvuspb.MilvusService_Import_FullMethodName,
+		commonpb.ObjectPrivilege_PrivilegeImportBinlog.String())
+	assert.NoError(t, err, "authorization disabled must short-circuit to allow")
+}
+
+func TestCheckClusterPrivilege_RootBypass(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	paramtable.Get().Save(Params.CommonCfg.RootShouldBindRole.Key, "false")
+	defer paramtable.Get().Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+	defer paramtable.Get().Reset(Params.CommonCfg.RootShouldBindRole.Key)
+
+	ctx := GetContext(context.Background(), "root:123456")
+
+	err := CheckClusterPrivilege(ctx, &internalpb.ImportRequest{},
+		milvuspb.MilvusService_Import_FullMethodName,
+		commonpb.ObjectPrivilege_PrivilegeImportBinlog.String())
+	assert.NoError(t, err, "root must bypass when rootShouldBindRole is false; "+
+		"this is what keeps milvus-backup working unchanged")
+}
+
+func TestCheckClusterPrivilege_NoAuthInfo(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	defer paramtable.Get().Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+
+	err := CheckClusterPrivilege(context.Background(), &internalpb.ImportRequest{},
+		milvuspb.MilvusService_Import_FullMethodName,
+		commonpb.ObjectPrivilege_PrivilegeImportBinlog.String())
+	assert.Error(t, err, "a ctx without auth metadata must be refused, not allowed")
+}
+
+// TestCheckClusterPrivilege_GrantedUserIsAllowed proves the gate can actually be
+// opened by granting the privilege, using the same policy encoding the RBAC API
+// stores. Without this, every other test here is consistent with a gate nobody
+// can ever pass -- which would look identical in CI and break every non-root
+// milvus-backup deployment in production.
+func TestCheckClusterPrivilege_GrantedUserIsAllowed(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	paramtable.Get().Save(Params.CommonCfg.RootShouldBindRole.Key, "false")
+	defer paramtable.Get().Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+	defer paramtable.Get().Reset(Params.CommonCfg.RootShouldBindRole.Key)
+
+	client := &MockMixCoordClientInterface{}
+	client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+		return &internalpb.ListPolicyResponse{
+			Status: merr.Success(),
+			PolicyInfos: []string{
+				funcutil.PolicyForPrivilege("role_importer", commonpb.ObjectType_Global.String(), "*",
+					commonpb.ObjectPrivilege_PrivilegeImportBinlog.String(), util.AnyWord),
+			},
+			UserRoles: []string{
+				funcutil.EncodeUserRoleCache("importer", "role_importer"),
+			},
+		}, nil
+	}
+	// initMetaCache also seeds the privilege cache from ListPolicy, which is
+	// what this test needs; the same helper is used at the top of this file.
+	mustInitMetaCacheForTest(context.Background(), client)
+
+	err := CheckClusterPrivilege(GetContext(context.Background(), "importer:123456"),
+		&internalpb.ImportRequest{}, milvuspb.MilvusService_Import_FullMethodName,
+		commonpb.ObjectPrivilege_PrivilegeImportBinlog.String())
+	assert.NoError(t, err, "a user holding the granted privilege must be allowed; "+
+		"if this fails the gate is unopenable and binlog import is dead for every non-root user")
+
+	err = CheckClusterPrivilege(GetContext(context.Background(), "alice:123456"),
+		&internalpb.ImportRequest{}, milvuspb.MilvusService_Import_FullMethodName,
+		commonpb.ObjectPrivilege_PrivilegeImportBinlog.String())
+	assert.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted,
+		"a user without the grant must still be refused")
+}

@@ -28,6 +28,7 @@ import (
 
 	snapshotio "github.com/milvus-io/milvus/internal/snapshotio"
 	milvusstorage "github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -35,7 +36,7 @@ import (
 )
 
 const (
-	SnapshotRootPath         = "snapshots"
+	SnapshotRootPath         = common.SnapshotRootPath
 	SnapshotMetadataSubPath  = "metadata"
 	SnapshotManifestsSubPath = "manifests"
 	SnapshotStagingSubPath   = "_staging"
