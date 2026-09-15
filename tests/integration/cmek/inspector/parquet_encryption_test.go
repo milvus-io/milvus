@@ -21,50 +21,13 @@ import (
 	"encoding/binary"
 	"testing"
 
+	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/apache/arrow/go/v17/parquet"
 	"github.com/apache/arrow/go/v17/parquet/file"
 	"github.com/apache/arrow/go/v17/parquet/schema"
 	"github.com/stretchr/testify/require"
-
-	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
-
-func TestLocateRawDataV2EnumeratesEveryAuthoritativeBinlog(t *testing.T) {
-	segments := []*datapb.SegmentInfo{
-		{
-			ID: 31, CollectionID: 11, PartitionID: 21, StorageVersion: 2,
-			Binlogs: []*datapb.FieldBinlog{
-				{FieldID: 101, Binlogs: []*datapb.Binlog{{LogPath: "raw/a"}, {LogID: 302}}},
-				{FieldID: 102, Binlogs: []*datapb.Binlog{{LogPath: "raw/c"}}},
-			},
-		},
-	}
-
-	objects, err := LocateRawDataV2("files", segments)
-	require.NoError(t, err)
-	require.Equal(t, []RawDataObject{
-		{CollectionID: 11, PartitionID: 21, SegmentID: 31, FieldID: 101, Path: "raw/a", StorageVersion: 2},
-		{CollectionID: 11, PartitionID: 21, SegmentID: 31, FieldID: 101, Path: "files/insert_log/11/21/31/101/302", StorageVersion: 2},
-		{CollectionID: 11, PartitionID: 21, SegmentID: 31, FieldID: 102, Path: "raw/c", StorageVersion: 2},
-	}, objects)
-}
-
-func TestLocateRawDataV2RejectsWrongVersionAndEmptyPaths(t *testing.T) {
-	_, err := LocateRawDataV2("files", []*datapb.SegmentInfo{{ID: 31, StorageVersion: 3}})
-	require.ErrorContains(t, err, "storage version 3")
-
-	_, err = LocateRawDataV2("files", []*datapb.SegmentInfo{{
-		ID: 31, StorageVersion: 2,
-		Binlogs: []*datapb.FieldBinlog{{FieldID: 101, Binlogs: []*datapb.Binlog{{LogPath: ""}}}},
-	}})
-	require.ErrorContains(t, err, "neither a raw-data object path nor a valid log ID")
-
-	_, err = LocateRawDataV2("files", []*datapb.SegmentInfo{
-		{ID: 31, CollectionID: 11, StorageVersion: 2, Binlogs: []*datapb.FieldBinlog{{FieldID: 101, Binlogs: []*datapb.Binlog{{LogPath: "raw/a"}}}}},
-		{ID: 32, CollectionID: 12, StorageVersion: 2, Binlogs: []*datapb.FieldBinlog{{FieldID: 101, Binlogs: []*datapb.Binlog{{LogPath: "raw/b"}}}}},
-	})
-	require.ErrorContains(t, err, "belongs to collection 12")
-}
 
 func TestInspectEncryptedParquetValidatesEncryptedParquetEnvelope(t *testing.T) {
 	raw := encryptedParquetFixture(t, "17_23_fixture-edek", parquet.AesGcm)
@@ -113,31 +76,6 @@ func encryptedParquetFixture(t *testing.T, keyMetadata string, cipher parquet.Ci
 	return append([]byte(nil), sink.Bytes()...)
 }
 
-func TestLocateRawDataV2RejectsIncompleteObjectSets(t *testing.T) {
-	for _, test := range []struct {
-		name     string
-		segments []*datapb.SegmentInfo
-		want     string
-	}{
-		{name: "no segments", want: "no sealed segments"},
-		{name: "no fields", segments: []*datapb.SegmentInfo{{ID: 31, StorageVersion: 2}}, want: "no raw-data FieldBinlog"},
-		{name: "no objects", segments: []*datapb.SegmentInfo{{
-			ID: 31, StorageVersion: 2,
-			Binlogs: []*datapb.FieldBinlog{{FieldID: 101}},
-		}}, want: "no raw-data Binlog"},
-		{name: "duplicate objects", segments: []*datapb.SegmentInfo{{
-			ID: 31, StorageVersion: 2,
-			Binlogs: []*datapb.FieldBinlog{{FieldID: 101, Binlogs: []*datapb.Binlog{{LogPath: "raw/a"}, {LogPath: "raw/a"}}}},
-		}}, want: "reported more than once"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			objects, err := LocateRawDataV2("files", test.segments)
-			require.ErrorContains(t, err, test.want)
-			require.Nil(t, objects)
-		})
-	}
-}
-
 func TestInspectEncryptedParquetRejectsMalformedKeyMetadata(t *testing.T) {
 	for _, test := range []struct {
 		name     string
@@ -184,4 +122,82 @@ func TestInspectEncryptedParquetRejectsDamagedFooter(t *testing.T) {
 			require.ErrorContains(t, err, test.want)
 		})
 	}
+}
+
+func TestReadEncryptedParquetKeyModes(t *testing.T) {
+	key := []byte("0123456789abcdef0123456789abcdef")
+	raw := parquetKeyModeFixture(t, key)
+	t.Run("correct key reads every row group", func(t *testing.T) {
+		table, err := ReadEncryptedParquet(raw, key)
+		require.NoError(t, err)
+		defer table.Release()
+		require.EqualValues(t, 4, table.NumRows())
+		var values []int64
+		for _, chunk := range table.Column(0).Data().Chunks() {
+			values = append(values, chunk.(*array.Int64).Int64Values()...)
+		}
+		require.Equal(t, []int64{7, 19, 31, 41}, values)
+	})
+	t.Run("missing key has no decryption configuration", func(t *testing.T) {
+		table, err := ReadEncryptedParquet(raw, nil)
+		require.Nil(t, table)
+		require.ErrorContains(t, err, "could not read encrypted metadata, no decryption found in reader's properties")
+	})
+	t.Run("wrong legal length key fails authentication", func(t *testing.T) {
+		wrong := append([]byte(nil), key...)
+		wrong[0] ^= 1
+		table, err := ReadEncryptedParquet(raw, wrong)
+		require.Nil(t, table)
+		require.EqualError(t, err, "cipher: message authentication failed")
+	})
+	t.Run("invalid key length is not authentication evidence", func(t *testing.T) {
+		table, err := ReadEncryptedParquet(raw, key[:15])
+		require.Nil(t, table)
+		require.ErrorContains(t, err, "invalid AES key length")
+	})
+	t.Run("unsupported bytes are not missing key evidence", func(t *testing.T) {
+		table, err := ReadEncryptedParquet([]byte("not a parquet object"), nil)
+		require.Nil(t, table)
+		require.Error(t, err)
+		require.NotContains(t, err.Error(), "no decryption found")
+		require.NotContains(t, err.Error(), "message authentication failed")
+	})
+	t.Run("correct key failure is retained", func(t *testing.T) {
+		damaged := append([]byte(nil), raw...)
+		damaged[len(damaged)-9] ^= 1
+		table, err := ReadEncryptedParquet(damaged, key)
+		require.Nil(t, table)
+		require.Error(t, err)
+	})
+	t.Run("unrelated footer panic is retained", func(t *testing.T) {
+		props := parquet.NewReaderProperties(memory.DefaultAllocator)
+		props.FileDecryptProps = parquet.NewFileDecryptionProperties(parquet.WithFooterKey(""))
+		require.PanicsWithValue(t, "no footer key or key retriever", func() {
+			_, _ = openParquetFooter(raw, props)
+		})
+	})
+}
+
+func parquetKeyModeFixture(t *testing.T, key []byte) []byte {
+	t.Helper()
+	root, err := schema.NewGroupNode("schema", parquet.Repetitions.Required, schema.FieldList{
+		schema.NewInt64Node("100", parquet.Repetitions.Required, -1),
+	}, -1)
+	require.NoError(t, err)
+	props := parquet.NewWriterProperties(parquet.WithEncryptionProperties(
+		parquet.NewFileEncryptionProperties(string(key), parquet.WithFooterKeyMetadata("fixture")),
+	))
+	var output bytes.Buffer
+	writer := file.NewParquetWriter(&output, root, file.WithWriterProps(props))
+	for _, values := range [][]int64{{7, 19}, {31, 41}} {
+		group := writer.AppendRowGroup()
+		column, err := group.NextColumn()
+		require.NoError(t, err)
+		_, err = column.(*file.Int64ColumnChunkWriter).WriteBatch(values, nil, nil)
+		require.NoError(t, err)
+		require.NoError(t, column.Close())
+		require.NoError(t, group.Close())
+	}
+	require.NoError(t, writer.Close())
+	return output.Bytes()
 }

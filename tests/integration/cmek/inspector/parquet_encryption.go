@@ -18,14 +18,19 @@ package inspector
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"strconv"
 	"strings"
 
+	"github.com/apache/arrow/go/v17/arrow"
+	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/apache/arrow/go/v17/parquet"
 	"github.com/apache/arrow/go/v17/parquet/file"
 	"github.com/apache/arrow/go/v17/parquet/metadata"
+	"github.com/apache/arrow/go/v17/parquet/pqarrow"
+	"github.com/cockroachdb/errors"
 )
 
 var encryptedParquetMagic = []byte("PARE")
@@ -74,4 +79,42 @@ func InspectEncryptedParquet(raw []byte, expectedEZID, expectedCollectionID int6
 		return "", fmt.Errorf("encrypted Parquet is readable without CMEK decryption information")
 	}
 	return parts[2], nil
+}
+
+// ReadEncryptedParquet reads all row groups with an independent Arrow Go reader.
+// A nil key leaves decryption unconfigured. The caller owns the returned table.
+// Each call creates fresh decryption properties and readers.
+func ReadEncryptedParquet(raw, key []byte) (arrow.Table, error) {
+	props := parquet.NewReaderProperties(memory.DefaultAllocator)
+	if key != nil {
+		if len(key) != 16 && len(key) != 24 && len(key) != 32 {
+			return nil, errors.New("invalid AES key length")
+		}
+		props.FileDecryptProps = parquet.NewFileDecryptionProperties(parquet.WithFooterKey(string(key)))
+	}
+	reader, err := openParquetFooter(raw, props)
+	if err != nil {
+		return nil, err
+	}
+	defer reader.Close()
+	arrowReader, err := pqarrow.NewFileReader(reader, pqarrow.ArrowReadProperties{Parallel: false}, memory.DefaultAllocator)
+	if err != nil {
+		return nil, err
+	}
+	return arrowReader.ReadTable(context.Background())
+}
+
+// Arrow Go panics on GCM footer authentication failures. Recover this exact
+// error only while opening the footer; payload reads have no panic recovery.
+func openParquetFooter(raw []byte, props *parquet.ReaderProperties) (reader *file.Reader, err error) {
+	defer func() {
+		if failure := recover(); failure != nil {
+			authError, ok := failure.(error)
+			if !ok || authError.Error() != "cipher: message authentication failed" {
+				panic(failure)
+			}
+			err = authError
+		}
+	}()
+	return file.NewParquetReader(bytes.NewReader(raw), file.WithReadProps(props))
 }
