@@ -41,7 +41,7 @@ const (
 )
 
 var (
-	metricsServer *http.ServeMux
+	metricsServer *managementMux
 	server        *http.Server
 
 	// passwordVerifyFunc is a callback function to verify user password.
@@ -214,19 +214,17 @@ func acceptsHTML(r *http.Request) bool {
 
 func Register(h *Handler) {
 	if metricsServer == nil {
-		if paramtable.Get().HTTPCfg.EnablePprof.GetAsBool() {
-			metricsServer = http.DefaultServeMux
-		} else {
-			metricsServer = http.NewServeMux()
+		// Capture the policy once. Config refreshes must not reopen endpoints
+		// on an already-running management server.
+		metricsOnly, err := strconv.ParseBool(paramtable.Get().CommonCfg.ManagementMetricsOnly.GetValue())
+		if err != nil {
+			panic("common.security.managementMetricsOnly must be a boolean")
 		}
+		metricsServer = newManagementMux(
+			metricsOnly,
+			paramtable.Get().HTTPCfg.EnablePprof.GetAsBool())
 	}
-	if h.HandlerFunc != nil {
-		metricsServer.HandleFunc(h.Path, h.HandlerFunc)
-		return
-	}
-	if h.Handler != nil {
-		metricsServer.Handle(h.Path, h.Handler)
-	}
+	metricsServer.register(h)
 }
 
 func ServeHTTP() {

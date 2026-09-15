@@ -1018,6 +1018,13 @@ common:
     lowPriorityRatio: -1 # amplification ratio for low priority tasks if disk rate limiter is enabled, value <= 0 means ratio limit is disabled
   security:
     authorizationEnabled: false
+    # Opt-in, restart required on every process. On the management port (default
+    # 9091), allow only GET/HEAD metrics and probes; all other routes return 404.
+    # Disables WebUI APIs, pprof, eventlog, legacy REST and management operations
+    # including /management/stop. Probes omit component details. Metrics remain
+    # unauthenticated and require network isolation. Main service port unaffected.
+    # Not writable through /management/config/alter.
+    managementMetricsOnly: false
     # The superusers will ignore some system check processes,
     # like the old password verification when updating the credential
     superUsers: 
