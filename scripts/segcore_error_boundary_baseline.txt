@@ -188,6 +188,7 @@ tantivy	internal/core/src/index/InvertedIndexTantivy.cpp
 tantivy	internal/core/src/index/InvertedIndexTantivy.h
 tantivy	internal/core/src/index/JsonFlatIndex.h
 tantivy	internal/core/src/index/JsonHybridScalarIndex.h
+tantivy	internal/core/src/index/JsonScalarIndexWrapper.h
 tantivy	internal/core/src/index/json_stats/bson_inverted.cpp
 tantivy	internal/core/src/index/json_stats/bson_inverted.h
 tantivy	internal/core/src/index/json_stats/JsonKeyStats.cpp

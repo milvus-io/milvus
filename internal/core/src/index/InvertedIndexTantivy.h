@@ -58,7 +58,8 @@ get_tantivy_data_type(proto::schema::DataType data_type) {
         case proto::schema::DataType::Int8:
         case proto::schema::DataType::Int16:
         case proto::schema::DataType::Int32:
-        case proto::schema::DataType::Int64: {
+        case proto::schema::DataType::Int64:
+        case proto::schema::DataType::Timestamptz: {
             return TantivyDataType::I64;
         }
 
@@ -347,6 +348,29 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
                 const Config& config) override;
 
  protected:
+    static constexpr size_t kBuildBatchRowLimit = 4096;
+    static constexpr size_t kBuildBatchValueLimit = 8 * 1024 * 1024;
+
+    template <typename ValueType>
+    void
+    SubmitRowBatch(FixedVector<ValueType>& values,
+                   std::vector<uintptr_t>& row_offsets,
+                   std::vector<int64_t>& doc_ids,
+                   TantivyIndexWrapper::RowBatchBuffer& buffer) {
+        if (doc_ids.empty()) {
+            return;
+        }
+        wrapper_->template add_rows<ValueType>(
+            typename TantivyIndexWrapper::template RowBatchView<ValueType>{
+                std::span<const ValueType>(values.data(), values.size()),
+                row_offsets,
+                doc_ids},
+            buffer);
+        values.clear();
+        row_offsets.assign(1, 0);
+        doc_ids.clear();
+    }
+
     const TargetBitmap
     PatternQuery(const std::string& pattern) override;
 

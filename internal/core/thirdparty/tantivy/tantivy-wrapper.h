@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <algorithm>
 #include <cmath>
 #include <sstream>
 #include <fmt/format.h>
@@ -6,8 +7,10 @@
 #include <iostream>
 #include <limits>
 #include <map>
+#include <span>
 #include <vector>
 #include <type_traits>
+#include <utility>
 
 #include "common/EasyAssert.h"
 #include "tantivy-error.h"
@@ -58,6 +61,74 @@ struct TantivyIndexWrapper {
     using IndexWriter = void*;
     using IndexReader = void*;
 
+    struct NgramRowView {
+        const uint8_t* value;
+        uintptr_t value_len;
+        int64_t doc_id;
+        bool has_value;
+    };
+
+    template <typename T>
+    struct RowBatchView {
+        std::span<const T> values;
+        std::span<const uintptr_t> row_offsets;
+        std::span<const int64_t> doc_ids;
+    };
+
+    // Owned by the build call and reused for every batch, including across
+    // FieldData chunks. Growing builds do not share this mutable scratch state.
+    struct RowBatchBuffer {
+        std::vector<const uint8_t*> value_ptrs;
+        std::vector<uintptr_t> value_lens;
+
+        void
+        prepare(std::span<const std::string> values) {
+            value_ptrs.clear();
+            value_lens.clear();
+            value_ptrs.reserve(values.size());
+            value_lens.reserve(values.size());
+            for (const auto& value : values) {
+                value_ptrs.push_back(
+                    reinterpret_cast<const uint8_t*>(value.data()));
+                value_lens.push_back(value.size());
+            }
+        }
+    };
+
+    void
+    add_ngram_batch(const NgramRowView* rows, uintptr_t len) {
+        assert(!finished_);
+        if (len == 0) {
+            return;
+        }
+
+        ngram_ptrs_.clear();
+        ngram_lens_.clear();
+        ngram_doc_ids_.clear();
+        ngram_has_values_.clear();
+        ngram_ptrs_.reserve(len);
+        ngram_lens_.reserve(len);
+        ngram_doc_ids_.reserve(len);
+        ngram_has_values_.reserve(len);
+
+        for (uintptr_t i = 0; i < len; ++i) {
+            ngram_ptrs_.push_back(rows[i].value);
+            ngram_lens_.push_back(rows[i].value_len);
+            ngram_doc_ids_.push_back(rows[i].doc_id);
+            ngram_has_values_.push_back(rows[i].has_value ? 1 : 0);
+        }
+
+        auto res = RustResultWrapper(
+            tantivy_index_add_ngram_batch(writer_,
+                                          ngram_ptrs_.data(),
+                                          ngram_lens_.data(),
+                                          ngram_doc_ids_.data(),
+                                          ngram_has_values_.data(),
+                                          len));
+        AssertTantivyOk(
+            res, "failed to add ngram batch: {}", res.result_->error);
+    }
+
     NO_COPY_OR_ASSIGN(TantivyIndexWrapper);
 
     TantivyIndexWrapper() = default;
@@ -67,6 +138,10 @@ struct TantivyIndexWrapper {
         reader_ = other.reader_;
         finished_ = other.finished_;
         path_ = other.path_;
+        ngram_ptrs_ = std::move(other.ngram_ptrs_);
+        ngram_lens_ = std::move(other.ngram_lens_);
+        ngram_doc_ids_ = std::move(other.ngram_doc_ids_);
+        ngram_has_values_ = std::move(other.ngram_has_values_);
         other.writer_ = nullptr;
         other.reader_ = nullptr;
         other.finished_ = false;
@@ -81,6 +156,10 @@ struct TantivyIndexWrapper {
             reader_ = other.reader_;
             path_ = other.path_;
             finished_ = other.finished_;
+            ngram_ptrs_ = std::move(other.ngram_ptrs_);
+            ngram_lens_ = std::move(other.ngram_lens_);
+            ngram_doc_ids_ = std::move(other.ngram_doc_ids_);
+            ngram_has_values_ = std::move(other.ngram_has_values_);
             other.writer_ = nullptr;
             other.reader_ = nullptr;
             other.finished_ = false;
@@ -312,16 +391,33 @@ struct TantivyIndexWrapper {
         }
 
         if constexpr (std::is_same_v<T, std::string>) {
-            // TODO: not very efficient, a lot of overhead due to rust-ffi call.
-            for (uintptr_t i = 0; i < len; i++) {
-                const auto& s = static_cast<const std::string*>(array)[i];
-                auto res = RustResultWrapper(tantivy_index_add_string(
-                    writer_,
-                    reinterpret_cast<const uint8_t*>(s.data()),
-                    s.size(),
-                    offset_begin + i));
+            constexpr uintptr_t kBatchRows = 4096;
+            constexpr size_t kBatchBytes = 8 * 1024 * 1024;
+            std::vector<const uint8_t*> ptrs;
+            std::vector<uintptr_t> str_lens;
+            ptrs.reserve(std::min(len, kBatchRows));
+            str_lens.reserve(std::min(len, kBatchRows));
+            for (uintptr_t begin = 0; begin < len;) {
+                ptrs.clear();
+                str_lens.clear();
+                size_t bytes = 0;
+                auto end = begin;
+                do {
+                    ptrs.push_back(
+                        reinterpret_cast<const uint8_t*>(array[end].data()));
+                    str_lens.push_back(array[end].size());
+                    bytes += array[end++].size();
+                } while (end < len && end - begin < kBatchRows &&
+                         bytes < kBatchBytes);
+                auto res = RustResultWrapper(
+                    tantivy_index_add_strings_with_len(writer_,
+                                                       ptrs.data(),
+                                                       str_lens.data(),
+                                                       ptrs.size(),
+                                                       offset_begin + begin));
                 AssertTantivyOk(
-                    res, "failed to add string: {}", res.result_->error);
+                    res, "failed to add strings: {}", res.result_->error);
+                begin = end;
             }
             return;
         }
@@ -332,6 +428,110 @@ struct TantivyIndexWrapper {
         ThrowInfo(milvus::ErrorCode::Unsupported,
                   "InvertedIndex.add_data: unsupported data type: {}",
                   typeid(T).name());
+    }
+
+    template <typename T>
+    void
+    add_rows(const RowBatchView<T>& batch, RowBatchBuffer& buffer) {
+        assert(!finished_);
+        AssertInfo(batch.row_offsets.size() == batch.doc_ids.size() + 1,
+                   "row offset count must equal row count plus one");
+
+        auto add = [&]() -> RustResult {
+            if constexpr (std::is_same_v<T, bool>) {
+                return tantivy_index_add_bool_rows(writer_,
+                                                   batch.values.data(),
+                                                   batch.values.size(),
+                                                   batch.row_offsets.data(),
+                                                   batch.doc_ids.data(),
+                                                   batch.doc_ids.size());
+            }
+            if constexpr (std::is_same_v<T, int8_t>) {
+                return tantivy_index_add_int8_rows(writer_,
+                                                   batch.values.data(),
+                                                   batch.values.size(),
+                                                   batch.row_offsets.data(),
+                                                   batch.doc_ids.data(),
+                                                   batch.doc_ids.size());
+            }
+            if constexpr (std::is_same_v<T, int16_t>) {
+                return tantivy_index_add_int16_rows(writer_,
+                                                    batch.values.data(),
+                                                    batch.values.size(),
+                                                    batch.row_offsets.data(),
+                                                    batch.doc_ids.data(),
+                                                    batch.doc_ids.size());
+            }
+            if constexpr (std::is_same_v<T, int32_t>) {
+                return tantivy_index_add_int32_rows(writer_,
+                                                    batch.values.data(),
+                                                    batch.values.size(),
+                                                    batch.row_offsets.data(),
+                                                    batch.doc_ids.data(),
+                                                    batch.doc_ids.size());
+            }
+            if constexpr (std::is_same_v<T, int64_t>) {
+                return tantivy_index_add_int64_rows(writer_,
+                                                    batch.values.data(),
+                                                    batch.values.size(),
+                                                    batch.row_offsets.data(),
+                                                    batch.doc_ids.data(),
+                                                    batch.doc_ids.size());
+            }
+            if constexpr (std::is_same_v<T, float>) {
+                return tantivy_index_add_f32_rows(writer_,
+                                                  batch.values.data(),
+                                                  batch.values.size(),
+                                                  batch.row_offsets.data(),
+                                                  batch.doc_ids.data(),
+                                                  batch.doc_ids.size());
+            }
+            if constexpr (std::is_same_v<T, double>) {
+                return tantivy_index_add_f64_rows(writer_,
+                                                  batch.values.data(),
+                                                  batch.values.size(),
+                                                  batch.row_offsets.data(),
+                                                  batch.doc_ids.data(),
+                                                  batch.doc_ids.size());
+            }
+            if constexpr (std::is_same_v<T, std::string>) {
+                buffer.prepare(batch.values);
+                return tantivy_index_add_string_rows(writer_,
+                                                     buffer.value_ptrs.data(),
+                                                     buffer.value_lens.data(),
+                                                     buffer.value_ptrs.size(),
+                                                     batch.row_offsets.data(),
+                                                     batch.doc_ids.data(),
+                                                     batch.doc_ids.size());
+            }
+            ThrowInfo(Unsupported,
+                      "unsupported Tantivy row batch type: {}",
+                      typeid(T).name());
+        }();
+
+        auto res = RustResultWrapper(add);
+        AssertTantivyOk(res, "failed to add row batch: {}", res.result_->error);
+    }
+
+    void
+    add_json_rows(std::span<const std::string> values,
+                  std::span<const uintptr_t> row_offsets,
+                  std::span<const int64_t> doc_ids,
+                  RowBatchBuffer& buffer) {
+        assert(!finished_);
+        AssertInfo(row_offsets.size() == doc_ids.size() + 1,
+                   "row offset count must equal row count plus one");
+        buffer.prepare(values);
+        auto res = RustResultWrapper(
+            tantivy_index_add_json_rows(writer_,
+                                        buffer.value_ptrs.data(),
+                                        buffer.value_lens.data(),
+                                        buffer.value_ptrs.size(),
+                                        row_offsets.data(),
+                                        doc_ids.data(),
+                                        doc_ids.size()));
+        AssertTantivyOk(
+            res, "failed to add JSON row batch: {}", res.result_->error);
     }
 
     void
@@ -654,6 +854,9 @@ struct TantivyIndexWrapper {
         if (finished_) {
             return;
         }
+
+        AssertInfo(writer_ != nullptr,
+                   "cannot finish tantivy index: writer is unavailable");
 
         // Null writer_ before the FFI call because tantivy_finish_index
         // always consumes (frees) the Rust-side IndexWriterWrapper via
@@ -1564,5 +1767,9 @@ struct TantivyIndexWrapper {
     std::string path_;
     bool load_in_mmap_ = true;
     std::string analyzer_extra_info_ = "";
+    std::vector<const uint8_t*> ngram_ptrs_;
+    std::vector<uintptr_t> ngram_lens_;
+    std::vector<int64_t> ngram_doc_ids_;
+    std::vector<uint8_t> ngram_has_values_;
 };
 }  // namespace milvus::tantivy

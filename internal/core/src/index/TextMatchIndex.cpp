@@ -269,6 +269,59 @@ TextMatchIndex::AddNullSealed(int64_t offset) {
     wrapper_->add_array_data(&empty, 0, offset);
 }
 
+void
+TextMatchIndex::AddTextsSealed(size_t n,
+                               const std::string* texts,
+                               const bool* valids,
+                               int64_t offset_begin) {
+    if (n == 0) {
+        return;
+    }
+
+    FixedVector<std::string> values;
+    std::vector<uintptr_t> row_offsets{0};
+    TantivyIndexWrapper::RowBatchBuffer batch_buffer;
+    std::vector<int64_t> doc_ids;
+    size_t value_bytes = 0;
+    values.reserve(std::min(n, kBuildBatchRowLimit));
+    row_offsets.reserve(std::min(n, kBuildBatchRowLimit) + 1);
+    doc_ids.reserve(std::min(n, kBuildBatchRowLimit));
+
+    auto flush = [&]() {
+        if (doc_ids.empty()) {
+            return;
+        }
+        wrapper_->add_rows<std::string>(
+            TantivyIndexWrapper::RowBatchView<std::string>{
+                std::span<const std::string>(values.data(), values.size()),
+                row_offsets,
+                doc_ids},
+            batch_buffer);
+        values.clear();
+        row_offsets.assign(1, 0);
+        doc_ids.clear();
+        value_bytes = 0;
+    };
+
+    for (size_t i = 0; i < n; ++i) {
+        auto doc_id = offset_begin + static_cast<int64_t>(i);
+        auto valid = valids == nullptr || valids[i];
+        if (!valid) {
+            null_offset_.push_back(doc_id);
+        } else {
+            value_bytes += texts[i].size();
+            values.push_back(texts[i]);
+        }
+        row_offsets.push_back(values.size());
+        doc_ids.push_back(doc_id);
+        if (doc_ids.size() >= kBuildBatchRowLimit ||
+            value_bytes >= kBuildBatchValueLimit) {
+            flush();
+        }
+    }
+    flush();
+}
+
 // Add texts for growing segment
 void
 TextMatchIndex::AddTextsGrowing(size_t n,
@@ -301,56 +354,45 @@ TextMatchIndex::BuildIndexFromFieldData(
     const std::vector<FieldDataPtr>& field_datas,
     bool nullable,
     int64_t offset_begin) {
-    int64_t offset = offset_begin;
-    if (nullable) {
-        int64_t total = 0;
-        for (const auto& data : field_datas) {
-            total += data->get_null_count();
-        }
-        {
+    FixedVector<std::string> values;
+    std::vector<uintptr_t> row_offsets{0};
+    TantivyIndexWrapper::RowBatchBuffer batch_buffer;
+    std::vector<int64_t> doc_ids;
+    std::vector<size_t> null_offsets;
+    size_t value_bytes = 0;
+    values.reserve(kBuildBatchRowLimit);
+    row_offsets.reserve(kBuildBatchRowLimit + 1);
+    doc_ids.reserve(kBuildBatchRowLimit);
+    auto flush = [&]() {
+        if (!null_offsets.empty()) {
             std::unique_lock<folly::SharedMutex> lock(mutex_);
-            null_offset_.reserve(null_offset_.size() +
-                                 static_cast<size_t>(total));
+            null_offset_.insert(
+                null_offset_.end(), null_offsets.begin(), null_offsets.end());
+            null_offsets.clear();
         }
-        for (const auto& data : field_datas) {
-            auto n = data->get_num_rows();
-            auto null_count = data->get_null_count();
-            std::vector<size_t> null_offsets;
-            null_offsets.reserve(null_count);
-            for (int i = 0; i < n; i++) {
-                if (!data->is_valid(i)) {
-                    null_offsets.push_back(offset + i);
-                }
+        SubmitRowBatch(values, row_offsets, doc_ids, batch_buffer);
+        value_bytes = 0;
+    };
+    int64_t offset = offset_begin;
+    for (const auto& data : field_datas) {
+        for (int64_t i = 0; i < data->get_num_rows(); ++i, ++offset) {
+            if (nullable && !data->is_valid(i)) {
+                null_offsets.push_back(offset);
+            } else {
+                const auto& value =
+                    *static_cast<const std::string*>(data->RawValue(i));
+                value_bytes += value.size();
+                values.push_back(value);
             }
-            if (!null_offsets.empty()) {
-                std::unique_lock<folly::SharedMutex> lock(mutex_);
-                null_offset_.insert(null_offset_.end(),
-                                    null_offsets.begin(),
-                                    null_offsets.end());
+            row_offsets.push_back(values.size());
+            doc_ids.push_back(offset);
+            if (doc_ids.size() >= kBuildBatchRowLimit ||
+                value_bytes >= kBuildBatchValueLimit) {
+                flush();
             }
-            for (int i = 0; i < n; i++) {
-                if (!data->is_valid(i)) {
-                    // add empty array doc to register offset in tantivy,
-                    // same as AddNullSealed
-                    static const std::string empty;
-                    wrapper_->add_array_data(&empty, 0, offset);
-                } else {
-                    wrapper_->add_data(
-                        static_cast<const std::string*>(data->RawValue(i)),
-                        1,
-                        offset);
-                }
-                offset++;
-            }
-        }
-    } else {
-        for (const auto& data : field_datas) {
-            auto n = data->get_num_rows();
-            wrapper_->add_data(
-                static_cast<const std::string*>(data->Data()), n, offset);
-            offset += n;
         }
     }
+    flush();
 }
 
 void

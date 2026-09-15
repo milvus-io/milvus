@@ -15,8 +15,42 @@ pub trait TantivyValue<D> {
 }
 
 pub enum IndexWriterWrapper {
-    V5(index_writer_v5::IndexWriterWrapperImpl),
-    V7(index_writer_v7::IndexWriterWrapperImpl),
+    V5(IndexWriterState<index_writer_v5::IndexWriterWrapperImpl>),
+    V7(IndexWriterState<index_writer_v7::IndexWriterWrapperImpl>),
+    NgramV7(crate::index_ngram_writer::NgramIndexWriterWrapperImpl),
+}
+
+pub(crate) struct IndexWriterState<W> {
+    pub(crate) writer: W,
+    last_row_batch_doc_id: Option<i64>,
+}
+
+impl<W> IndexWriterState<W> {
+    pub(crate) fn new(writer: W) -> Self {
+        Self {
+            writer,
+            last_row_batch_doc_id: None,
+        }
+    }
+
+    pub(crate) fn validate_row_batch_doc_ids(&self, ids: &[i64]) -> Result<()> {
+        if let (Some(previous), Some(&first)) = (self.last_row_batch_doc_id, ids.first()) {
+            if first <= previous {
+                // Batch layouts are produced by Milvus, not by request content.
+                return Err(TantivyBindingError::InternalError(
+                    "document IDs must increase across row batches".to_string(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn record_row_batch_doc_ids(&mut self, ids: &[i64]) {
+        // An empty batch must not clear the preceding batch's ordering guard.
+        if let Some(&last) = ids.last() {
+            self.last_row_batch_doc_id = Some(last);
+        }
+    }
 }
 
 impl IndexWriterWrapper {
@@ -44,7 +78,7 @@ impl IndexWriterWrapper {
                     overall_memory_budget_in_bytes,
                     enable_background_merge,
                 )?;
-                Ok(IndexWriterWrapper::V5(writer))
+                Ok(IndexWriterWrapper::V5(IndexWriterState::new(writer)))
             }
             TantivyIndexVersion::V7 => {
                 let writer = index_writer_v7::IndexWriterWrapperImpl::new(
@@ -56,7 +90,7 @@ impl IndexWriterWrapper {
                     enable_user_specified_doc_id,
                     enable_background_merge,
                 )?;
-                Ok(IndexWriterWrapper::V7(writer))
+                Ok(IndexWriterWrapper::V7(IndexWriterState::new(writer)))
             }
         }
     }
@@ -69,7 +103,7 @@ impl IndexWriterWrapper {
         let writer = index_writer_v5::IndexWriterWrapperImpl::new_with_single_segment(
             field_name, data_type, path,
         )?;
-        Ok(IndexWriterWrapper::V5(writer))
+        Ok(IndexWriterWrapper::V5(IndexWriterState::new(writer)))
     }
 
     pub fn create_reader(&self, set_bitset: SetBitsetFn) -> Result<IndexReaderWrapper> {
@@ -81,7 +115,8 @@ impl IndexWriterWrapper {
                         .into(),
                 ));
             }
-            IndexWriterWrapper::V7(writer) => writer.create_reader(set_bitset),
+            IndexWriterWrapper::V7(state) => state.writer.create_reader(set_bitset),
+            IndexWriterWrapper::NgramV7(writer) => writer.create_reader(set_bitset),
         }
     }
 
@@ -90,8 +125,11 @@ impl IndexWriterWrapper {
         T: TantivyValue<TantivyDocumentV5> + TantivyValue<TantivyDocumentV7>,
     {
         match self {
-            IndexWriterWrapper::V5(writer) => writer.add(data, offset),
-            IndexWriterWrapper::V7(writer) => writer.add(data, offset.unwrap() as u32),
+            IndexWriterWrapper::V5(state) => state.writer.add(data, offset),
+            IndexWriterWrapper::V7(state) => state.writer.add(data, offset.unwrap() as u32),
+            IndexWriterWrapper::NgramV7(_) => Err(TantivyBindingError::InternalError(
+                "NGRAM requires its dedicated batch API".into(),
+            )),
         }
     }
 
@@ -101,8 +139,11 @@ impl IndexWriterWrapper {
         T: TantivyValue<TantivyDocumentV5> + TantivyValue<TantivyDocumentV7>,
     {
         match self {
-            IndexWriterWrapper::V5(writer) => writer.add_array(data, offset),
-            IndexWriterWrapper::V7(writer) => writer.add_array(data, offset.unwrap() as u32),
+            IndexWriterWrapper::V5(state) => state.writer.add_array(data, offset),
+            IndexWriterWrapper::V7(state) => state.writer.add_array(data, offset.unwrap() as u32),
+            IndexWriterWrapper::NgramV7(_) => Err(TantivyBindingError::InternalError(
+                "NGRAM requires its dedicated batch API".into(),
+            )),
         }
     }
 
@@ -114,7 +155,10 @@ impl IndexWriterWrapper {
                         .into(),
                 ));
             }
-            IndexWriterWrapper::V7(writer) => writer.add_json(data, offset.unwrap() as u32),
+            IndexWriterWrapper::V7(state) => state.writer.add_json(data, offset.unwrap() as u32),
+            IndexWriterWrapper::NgramV7(_) => Err(TantivyBindingError::InternalError(
+                "NGRAM requires its dedicated batch API".into(),
+            )),
         }
     }
 
@@ -125,7 +169,12 @@ impl IndexWriterWrapper {
                     "add json batch with tantivy index version 5 is not supported".into(),
                 ));
             }
-            IndexWriterWrapper::V7(writer) => writer.add_json_batch(datas, offset_begin as u32),
+            IndexWriterWrapper::V7(state) => {
+                state.writer.add_json_batch(datas, offset_begin as u32)
+            }
+            IndexWriterWrapper::NgramV7(_) => Err(TantivyBindingError::InternalError(
+                "NGRAM requires its dedicated batch API".into(),
+            )),
         }
     }
 
@@ -137,7 +186,12 @@ impl IndexWriterWrapper {
                         .into(),
                 ));
             }
-            IndexWriterWrapper::V7(writer) => writer.add_array_json(datas, offset.unwrap() as u32),
+            IndexWriterWrapper::V7(state) => {
+                state.writer.add_array_json(datas, offset.unwrap() as u32)
+            }
+            IndexWriterWrapper::NgramV7(_) => Err(TantivyBindingError::InternalError(
+                "NGRAM requires its dedicated batch API".into(),
+            )),
         }
     }
 
@@ -147,10 +201,13 @@ impl IndexWriterWrapper {
         offset: Option<i64>,
     ) -> Result<()> {
         match self {
-            IndexWriterWrapper::V5(writer) => writer.add_array_keywords(datas, offset),
-            IndexWriterWrapper::V7(writer) => {
-                writer.add_array_keywords(datas, offset.unwrap() as u32)
-            }
+            IndexWriterWrapper::V5(state) => state.writer.add_array_keywords(datas, offset),
+            IndexWriterWrapper::V7(state) => state
+                .writer
+                .add_array_keywords(datas, offset.unwrap() as u32),
+            IndexWriterWrapper::NgramV7(_) => Err(TantivyBindingError::InternalError(
+                "NGRAM requires its dedicated batch API".into(),
+            )),
         }
     }
 
@@ -161,12 +218,17 @@ impl IndexWriterWrapper {
         offset: Option<i64>,
     ) -> Result<()> {
         match self {
-            IndexWriterWrapper::V5(writer) => {
-                writer.add_array_keywords_with_len(ptrs, lens, offset)
+            IndexWriterWrapper::V5(state) => {
+                state.writer.add_array_keywords_with_len(ptrs, lens, offset)
             }
-            IndexWriterWrapper::V7(writer) => {
-                writer.add_array_keywords_with_len(ptrs, lens, offset.unwrap() as u32)
+            IndexWriterWrapper::V7(state) => {
+                state
+                    .writer
+                    .add_array_keywords_with_len(ptrs, lens, offset.unwrap() as u32)
             }
+            IndexWriterWrapper::NgramV7(_) => Err(TantivyBindingError::InternalError(
+                "NGRAM requires its dedicated batch API".into(),
+            )),
         }
     }
 
@@ -179,36 +241,46 @@ impl IndexWriterWrapper {
         assert!(keys.len() == json_offsets.len());
         assert!(keys.len() == json_offsets_len.len());
         match self {
-            IndexWriterWrapper::V5(writer) => {
-                writer.add_json_key_stats(keys, json_offsets, json_offsets_len)
+            IndexWriterWrapper::V5(state) => {
+                state
+                    .writer
+                    .add_json_key_stats(keys, json_offsets, json_offsets_len)
             }
-            IndexWriterWrapper::V7(writer) => {
-                writer.add_json_key_stats(keys, json_offsets, json_offsets_len)
+            IndexWriterWrapper::V7(state) => {
+                state
+                    .writer
+                    .add_json_key_stats(keys, json_offsets, json_offsets_len)
             }
+            IndexWriterWrapper::NgramV7(_) => Err(TantivyBindingError::InternalError(
+                "NGRAM requires its dedicated batch API".into(),
+            )),
         }
     }
 
     #[allow(dead_code)]
     pub fn manual_merge(&mut self) -> Result<()> {
         match self {
-            IndexWriterWrapper::V5(writer) => writer.manual_merge(),
-            IndexWriterWrapper::V7(writer) => writer.manual_merge(),
+            IndexWriterWrapper::V5(state) => state.writer.manual_merge(),
+            IndexWriterWrapper::V7(state) => state.writer.manual_merge(),
+            IndexWriterWrapper::NgramV7(writer) => writer.manual_merge(),
         }
     }
 
     #[allow(dead_code)]
     pub fn commit(&mut self) -> Result<()> {
         match self {
-            IndexWriterWrapper::V5(writer) => writer.commit(),
-            IndexWriterWrapper::V7(writer) => writer.commit(),
+            IndexWriterWrapper::V5(state) => state.writer.commit(),
+            IndexWriterWrapper::V7(state) => state.writer.commit(),
+            IndexWriterWrapper::NgramV7(writer) => writer.commit(),
         }
     }
 
     #[allow(dead_code)]
     pub fn finish(self) -> Result<()> {
         match self {
-            IndexWriterWrapper::V5(writer) => writer.finish(),
-            IndexWriterWrapper::V7(writer) => writer.finish(),
+            IndexWriterWrapper::V5(state) => state.writer.finish(),
+            IndexWriterWrapper::V7(state) => state.writer.finish(),
+            IndexWriterWrapper::NgramV7(writer) => writer.finish(),
         }
     }
 }
