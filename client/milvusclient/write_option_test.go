@@ -358,6 +358,38 @@ func (s *ColumnBasedDataOptionSuite) TestRowBasedWithNamespaceKeepsRows() {
 	s.Len(upsertReq.GetFieldsData(), 2)
 }
 
+func (s *ColumnBasedDataOptionSuite) TestRowBasedAutoIDUpsertKeepsLookupPrimaryKey() {
+	collName := "auto_id_row_upsert"
+	coll := &entity.Collection{
+		Schema: entity.NewSchema().WithName(collName).
+			WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true).WithIsAutoID(true)).
+			WithField(entity.NewField().WithName("vector").WithDataType(entity.FieldTypeFloatVector).WithDim(2)),
+	}
+	rows := []any{map[string]any{
+		"id":     int64(7),
+		"vector": []float32{0.1, 0.2},
+	}}
+	opt := NewRowBasedInsertOption(collName, rows...)
+
+	insertReq, err := opt.InsertRequest(coll)
+	s.Require().NoError(err)
+	for _, field := range insertReq.GetFieldsData() {
+		s.NotEqual("id", field.GetFieldName())
+	}
+
+	upsertReq, err := opt.UpsertRequest(coll)
+	s.Require().NoError(err)
+	var primaryKey *schemapb.FieldData
+	for _, field := range upsertReq.GetFieldsData() {
+		if field.GetFieldName() == "id" {
+			primaryKey = field
+			break
+		}
+	}
+	s.Require().NotNil(primaryKey)
+	s.Equal([]int64{7}, primaryKey.GetScalars().GetLongData().GetData())
+}
+
 func TestRowBasedDataOption(t *testing.T) {
 	suite.Run(t, new(ColumnBasedDataOptionSuite))
 }
