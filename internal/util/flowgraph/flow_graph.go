@@ -24,7 +24,9 @@ import (
 
 	"go.uber.org/atomic"
 
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // Flow Graph is no longer a graph rather than a simple pipeline, this simplified our code and increase recovery speed - xiaofan.
@@ -38,6 +40,13 @@ type TimeTickedFlowGraph struct {
 	startOnce       sync.Once
 	closeWg         *sync.WaitGroup
 	closeGracefully *atomic.Bool
+
+	// closeDrainTimeout bounds the graceful drain of Close(): the single
+	// pipeline goroutine may be blocked on an external call (e.g. object
+	// storage) that neither completes nor returns an error promptly. After
+	// the timeout the drain is abandoned so a hung call cannot stall the
+	// caller (WAL close / shutdown) forever.
+	closeDrainTimeout time.Duration
 }
 
 // AddNode add Node into flowgraph and fill nodeCtxManager
@@ -121,7 +130,23 @@ func (fg *TimeTickedFlowGraph) Close() {
 				v.Close()
 			}
 		}
-		fg.closeWg.Wait()
+		// Bound the graceful drain. The whole pipeline runs in one goroutine;
+		// if a node is stuck in an external call (e.g. a hung object-storage
+		// flush) the close message cannot propagate and the wait would block
+		// forever. Abandoning the wait is safe: the stuck goroutine owns the
+		// close propagation itself, so once the external call returns it
+		// finishes the drain and exits without touching closed channels.
+		waitDone := make(chan struct{})
+		go func() {
+			fg.closeWg.Wait()
+			close(waitDone)
+		}()
+		select {
+		case <-waitDone:
+		case <-time.After(fg.closeDrainTimeout):
+			mlog.Warn(context.TODO(), "flow graph close drain timeout, abandon wait for pipeline to finish",
+				mlog.Duration("timeout", fg.closeDrainTimeout))
+		}
 
 		// free some source after all node close.
 		// such as function.
@@ -148,6 +173,8 @@ func NewTimeTickedFlowGraph(ctx context.Context) *TimeTickedFlowGraph {
 		nodeCtxManager:  &nodeCtxManager{lastAccessTime: atomic.NewTime(time.Now())},
 		closeWg:         &sync.WaitGroup{},
 		closeGracefully: atomic.NewBool(CloseImmediately),
+		closeDrainTimeout: paramtable.Get().StreamingCfg.WALCloseGracefulTimeout.
+			GetAsDurationByParse(),
 	}
 
 	return &flowGraph

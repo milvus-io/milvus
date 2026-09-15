@@ -3,7 +3,9 @@ package walmanager
 import (
 	"context"
 	"testing"
+	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
@@ -144,4 +146,73 @@ func assertShutdownError(t *testing.T, err error) {
 	assert.Error(t, err)
 	e := status.AsStreamingError(err)
 	assert.Equal(t, e.Code, streamingpb.StreamingCode_STREAMING_CODE_ON_SHUTDOWN)
+}
+
+// TestManagerCloseRejectsRemoveDuringClose verifies that a RemoveWAL arriving
+// while the manager is closing fails fast with a shutdown error, instead of
+// being accepted and waiting on a stuck wal lifetime background task.
+// Regression test for https://github.com/milvus-io/milvus/issues/53237.
+func TestManagerCloseRejectsRemoveDuringClose(t *testing.T) {
+	mixcoord := mocks.NewMockMixCoordClient(t)
+	fMixcoord := syncutil.NewFuture[internaltypes.MixCoordClient]()
+	fMixcoord.Set(mixcoord)
+	resource.InitForTest(
+		t,
+		resource.OptMixCoordClient(fMixcoord),
+	)
+
+	// The first open blocks until the gate is released, so Close() has to
+	// wait for an in-flight Open operation.
+	enteredOpen := make(chan struct{})
+	openGate := make(chan struct{})
+	opener := mock_wal.NewMockOpener(t)
+	opener.EXPECT().Open(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, oo *wal.OpenOption) (wal.WAL, error) {
+			close(enteredOpen)
+			<-openGate
+			l := mock_wal.NewMockWAL(t)
+			l.EXPECT().Channel().Return(oo.Channel)
+			l.EXPECT().Close().Return()
+			return l, nil
+		})
+	opener.EXPECT().Close().Return()
+
+	m := newManager(opener)
+
+	// Start an Open and wait until it is in-flight (holding the manager
+	// lifetime and blocking the wal lifetime background task).
+	openDone := make(chan error, 1)
+	go func() { openDone <- m.Open(context.Background(), types.PChannelInfo{Name: "ch1", Term: 1}) }()
+	<-enteredOpen
+
+	// Start closing; Close() now must wait for the in-flight Open.
+	closeDone := make(chan struct{})
+	go func() { m.Close(); close(closeDone) }()
+
+	// While the manager is closing, RemoveWAL must be rejected immediately.
+	// Calls that race ahead of the close use a canceled context and return
+	// context.Canceled without blocking; once the closing state is set they
+	// return the shutdown error.
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case <-deadline:
+			t.Fatal("manager Close did not reject RemoveWAL in time")
+		default:
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		err := m.Remove(ctx, types.PChannelInfo{Name: "ch2", Term: 1})
+		if err != nil && status.AsStreamingError(err).Code == streamingpb.StreamingCode_STREAMING_CODE_ON_SHUTDOWN {
+			break
+		}
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("unexpected error while manager is closing: %v", err)
+		}
+	}
+
+	// Release the stuck open so Close() can finish.
+	close(openGate)
+	assert.NoError(t, <-openDone)
+	<-closeDone
 }
