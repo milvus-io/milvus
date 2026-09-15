@@ -12,6 +12,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/mocks/util/searchutil/mock_optimizers"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -679,6 +680,38 @@ func (suite *QueryHookSuite) checkStrictGroupServerSettings(singular int64, plur
 		_, err := OptimizeSearchParams(context.Background(), makeRequest(true, raw), nil, 1, false, nil, "")
 		suite.Error(err)
 	}
+}
+
+func (suite *QueryHookSuite) TestStrictGroupConfigSnapshotLogsWeight() {
+	paramtable.Init()
+	cfg := paramtable.Get()
+	weightKey := cfg.QueryNodeCfg.StrictGroupPhase1CandidateWeight.Key
+	debugKey := cfg.QueryNodeCfg.StrictGroupDebug.Key
+	defer cfg.Reset(weightKey)
+	defer cfg.Reset(debugKey)
+	sink := mlog.CaptureGlobalLogs(suite.T(), &mlog.Config{Level: "info"})
+	info := &planpb.QueryInfo{
+		Topk: 50, GroupByFieldId: 101, GroupSize: 3, StrictGroupSize: true,
+	}
+	suite.Require().NoError(cfg.Save(weightKey, "50"))
+	suite.Require().NoError(cfg.Save(debugKey, "false"))
+	_, err := applyStrictGroupSettings(context.Background(), info)
+	suite.Require().NoError(err)
+	suite.NotContains(sink.String(), "strict_group_config_snapshot")
+
+	suite.Require().NoError(cfg.Save(debugKey, "true"))
+	_, err = applyStrictGroupSettings(context.Background(), info)
+	suite.Require().NoError(err)
+	suite.Contains(sink.String(), "strict_group_config_snapshot")
+	// The Go snapshot contains the configured weight, not the effective
+	// candidate limit (50 * 3 * 50 = 7500) computed later in C++.
+	suite.Contains(sink.String(), "[phase1_candidate_weight=50]")
+	suite.NotContains(sink.String(), "phase1_max_candidates")
+
+	suite.Require().NoError(cfg.Save(weightKey, "0"))
+	_, err = applyStrictGroupSettings(context.Background(), info)
+	suite.Require().NoError(err)
+	suite.Contains(sink.String(), "[phase1_candidate_weight=0]")
 }
 
 func (suite *QueryHookSuite) TestStrictGroupPhase1AndRefineSettings() {
