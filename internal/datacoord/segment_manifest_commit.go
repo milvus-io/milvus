@@ -94,8 +94,8 @@ type SegmentCatalogMutation struct {
 	// each record is re-read and projected under indexMeta's per-buildID lock,
 	// so the persisted value cannot be built from a stale read.
 	//
-	// A normal index task still supplies exactly one upsert. Multiple entries
-	// are accepted only for removals, allowing one GC manifest revision to
+	// A foreground completion or historical backfill supplies one publication.
+	// Multiple entries are accepted only for removals, allowing one GC revision to
 	// retract several indexes and retire their records atomically.
 	SegmentIndexes []SegmentIndexMutation
 
@@ -130,7 +130,7 @@ type SegmentIndexMutation struct {
 	BuildID int64
 	// FinishedTask is the raw worker result an upsert projects the persisted
 	// record from. Required for SegmentIndexUpsert, rejected for
-	// SegmentIndexRemove.
+	// SegmentIndexRemove and SegmentIndexBackfill.
 	FinishedTask *workerpb.IndexTaskInfo
 }
 
@@ -433,7 +433,7 @@ func validateSegmentIndexMutations(commit SegmentManifestCommit) ([]int64, error
 	mutations := commit.CatalogMutation.SegmentIndexes
 	buildIDs := make([]int64, 0, len(mutations))
 	seen := make(map[int64]struct{}, len(mutations))
-	upserts := 0
+	publications := 0
 	for _, mutation := range mutations {
 		if mutation.BuildID == 0 {
 			return nil, merr.WrapErrServiceInternalMsg("segment index mutation requires a build ID")
@@ -446,7 +446,7 @@ func validateSegmentIndexMutations(commit SegmentManifestCommit) ([]int64, error
 		buildIDs = append(buildIDs, mutation.BuildID)
 		switch mutation.Type {
 		case SegmentIndexUpsert, SegmentIndexBackfill:
-			upserts++
+			publications++
 			if !commitPublishesIndexEntry(commit, mutation.BuildID) {
 				return nil, merr.WrapErrServiceInternalMsg(
 					"segment index publication requires a matching manifest entry, segmentID=%d buildID=%d",
@@ -460,7 +460,7 @@ func validateSegmentIndexMutations(commit SegmentManifestCommit) ([]int64, error
 			}
 		}
 	}
-	if upserts > 0 && len(mutations) != 1 {
+	if publications > 0 && len(mutations) != 1 {
 		return nil, merr.WrapErrServiceInternalMsg(
 			"segment manifest commit cannot combine an index publication with other index mutations, segmentID=%d",
 			commit.SegmentID)
