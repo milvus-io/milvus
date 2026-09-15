@@ -4338,11 +4338,19 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 		return resp, nil
 	}
 
+	states := req.GetStates()
+	if len(states) == 0 {
+		states = []commonpb.SegmentState{
+			commonpb.SegmentState_Flushing,
+			commonpb.SegmentState_Flushed,
+			commonpb.SegmentState_Sealed,
+		}
+	}
 	getSegmentsByStatesResponse, err := node.mixCoord.GetSegmentsByStates(ctx, &datapb.GetSegmentsByStatesRequest{
 		CollectionID: collectionID,
 		// -1 means list all partition segemnts
 		PartitionID: -1,
-		States:      []commonpb.SegmentState{commonpb.SegmentState_Flushing, commonpb.SegmentState_Flushed, commonpb.SegmentState_Sealed},
+		States:      states,
 	})
 	if err != nil {
 		resp.Status = merr.Status(err)
@@ -4355,7 +4363,8 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 			commonpbutil.WithMsgType(commonpb.MsgType_SegmentInfo),
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
-		SegmentIDs: getSegmentsByStatesResponse.Segments,
+		SegmentIDs:       getSegmentsByStatesResponse.Segments,
+		IncludeUnHealthy: true,
 	})
 	if err != nil {
 		mlog.Warn(context.TODO(), "GetPersistentSegmentInfo fail",
@@ -4371,9 +4380,13 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 	mlog.Debug(context.TODO(), "GetPersistentSegmentInfo",
 		mlog.Int("len(infos)", len(infoResp.Infos)),
 		mlog.Any("status", infoResp.Status))
-	persistentInfos := make([]*milvuspb.PersistentSegmentInfo, len(infoResp.Infos))
-	for i, info := range infoResp.Infos {
-		persistentInfos[i] = &milvuspb.PersistentSegmentInfo{
+	persistentInfos := make([]*milvuspb.PersistentSegmentInfo, 0, len(infoResp.Infos))
+	for _, info := range infoResp.Infos {
+		// Segment state may have changed since GetSegmentsByStates selected its ID.
+		if !lo.Contains(states, info.GetState()) {
+			continue
+		}
+		persistentInfos = append(persistentInfos, &milvuspb.PersistentSegmentInfo{
 			SegmentID:      info.ID,
 			CollectionID:   info.CollectionID,
 			PartitionID:    info.PartitionID,
@@ -4382,7 +4395,9 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 			Level:          commonpb.SegmentLevel(info.Level),
 			IsSorted:       info.GetIsSorted(),
 			StorageVersion: info.GetStorageVersion(),
-		}
+			InsertChannel:  info.GetInsertChannel(),
+			CompactionFrom: info.GetCompactionFrom(),
+		})
 	}
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	resp.Infos = persistentInfos
@@ -4879,6 +4894,25 @@ func (node *Proxy) GetCompactionStateWithPlans(ctx context.Context, req *milvusp
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		resp.Status = merr.Status(err)
 		return resp, nil
+	}
+
+	if req == nil {
+		req = &milvuspb.GetCompactionPlansRequest{}
+	} else {
+		req = proto.Clone(req).(*milvuspb.GetCompactionPlansRequest)
+	}
+	req.CollectionId = 0
+	if req.GetCollectionName() != "" {
+		if err := validateCollectionName(req.GetCollectionName()); err != nil {
+			resp.Status = merr.Status(err)
+			return resp, nil
+		}
+		collectionID, err := node.GetMetaCache().GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
+		if err != nil {
+			resp.Status = merr.Status(err)
+			return resp, nil
+		}
+		req.CollectionId = collectionID
 	}
 
 	resp, err := node.mixCoord.GetCompactionStateWithPlans(ctx, req)
