@@ -19,6 +19,7 @@ package compaction
 import (
 	"context"
 	"fmt"
+	"path"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -43,10 +44,12 @@ const (
 //
 // forced strategies:
 //   - clustering compaction: always REWRITE_ALL (data is repartitioned)
-//   - sort compaction: always REUSE_ALL (row order changes but same data)
+//   - sort compaction: REUSE_ALL when source and output share a partition base
+//     (row order changes but the LOB namespace stays valid)
 //   - schema-bump compaction: always REUSE_ALL (1->1, only materializes a new
 //     non-LOB output column + bumps schema version; existing TEXT LOB data is
-//     unchanged, so its refs are carried as-is — never REWRITE_ALL)
+//     unchanged). Compactors must override this to REWRITE_ALL when a full
+//     rewrite moves the output to a different partition base.
 //   - mix compaction with multiple outputs (N->M, M>1): always REWRITE_ALL
 //     (LOB refs cannot be duplicated across output manifests without inflating ValidRows)
 //   - L0 delete compaction: always SKIP (only applies delete logs, segment LOB refs unchanged)
@@ -271,6 +274,10 @@ type LOBCompactionContext struct {
 	ForcedStrategy LOBCompactionStrategy
 	// isForced indicates whether strategy is forced (skip hole ratio calculation)
 	IsForced bool
+	// DecodeTextFromSource is set when source and output partition bases differ.
+	// The compactor must decode references with the source base before writing
+	// new LOB files under the output base.
+	DecodeTextFromSource bool
 }
 
 // SegmentRowStats tracks row statistics for a segment during compaction
@@ -353,6 +360,75 @@ func (ctx *LOBCompactionContext) ComputeStrategies(textFieldIDs []int64, thresho
 		decision := DecideLOBStrategyFromManifest(allFiles, fieldID, threshold)
 		ctx.Decisions[fieldID] = decision
 	}
+}
+
+// ForceRewriteAll overrides the normal compaction-type or hole-ratio decision.
+// It is used when encoded TEXT references would cross a partition namespace:
+// a reference contains only file ID and row offset, while readers reconstruct
+// its LOB directory from the output manifest's partition base.
+func (ctx *LOBCompactionContext) ForceRewriteAll(textFieldIDs []int64) {
+	if ctx == nil {
+		return
+	}
+	ctx.ForcedStrategy = LOBStrategyRewriteAll
+	ctx.IsForced = true
+	for _, fieldID := range textFieldIDs {
+		decision := ctx.Decisions[fieldID]
+		decision.FieldID = fieldID
+		decision.Strategy = LOBStrategyRewriteAll
+		ctx.Decisions[fieldID] = decision
+	}
+}
+
+// ForceRewriteAllAcrossPartitionBases selects source-side TEXT decoding and
+// canonical output rewriting in addition to overriding the field strategies.
+func (ctx *LOBCompactionContext) ForceRewriteAllAcrossPartitionBases(textFieldIDs []int64) {
+	ctx.ForceRewriteAll(textFieldIDs)
+	if ctx != nil {
+		ctx.DecodeTextFromSource = true
+	}
+}
+
+// LOBSourcePartitionBaseMismatch reports whether any source manifest resolves
+// TEXT LOB references relative to a different partition base than the output.
+// REUSE_ALL is safe only when every source and the output share this base.
+func LOBSourcePartitionBaseMismatch(sourceManifests map[int64]string, outputPartitionBase string) (bool, error) {
+	outputPartitionBase = path.Clean(outputPartitionBase)
+	for _, manifestPath := range sourceManifests {
+		if manifestPath == "" {
+			continue
+		}
+		segmentBasePath, _, err := packed.UnmarshalManifestPath(manifestPath)
+		if err != nil {
+			return false, err
+		}
+		if path.Clean(path.Dir(segmentBasePath)) != outputPartitionBase {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// GetSourceTextColumnConfigs derives the source LOB directories used by the
+// TEXT-decoding SegmentReader for a single manifest.
+func (ctx *LOBCompactionContext) GetSourceTextColumnConfigs(manifestPath string) ([]packed.TextColumnConfig, error) {
+	if ctx == nil || !ctx.DecodeTextFromSource {
+		return nil, nil
+	}
+	segmentBasePath, _, err := packed.UnmarshalManifestPath(manifestPath)
+	if err != nil {
+		return nil, err
+	}
+	partitionBasePath := path.Dir(segmentBasePath)
+	fieldIDs := ctx.GetRewriteAllFieldIDs()
+	configs := make([]packed.TextColumnConfig, 0, len(fieldIDs))
+	for _, fieldID := range fieldIDs {
+		configs = append(configs, packed.TextColumnConfig{
+			FieldID:     fieldID,
+			LobBasePath: path.Join(partitionBasePath, "lobs", fmt.Sprint(fieldID)),
+		})
+	}
+	return configs, nil
 }
 
 // GetStrategy returns the strategy for a specific field.
@@ -655,7 +731,7 @@ func (ctx *LOBCompactionContext) GetTextColumnConfigs(partitionBasePath string, 
 			InlineThreshold:     inlineThreshold,
 			MaxLobFileBytes:     maxLobFileBytes,
 			FlushThresholdBytes: flushThresholdBytes,
-			RewriteMode:         true,
+			RewriteMode:         !ctx.DecodeTextFromSource,
 		})
 	}
 

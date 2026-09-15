@@ -147,8 +147,7 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
     auto index_meta = gen_index_meta(
         segment_id, field_id.get(), index_build_id, index_version);
 
-    std::string root_path = TestLocalPath;
-    auto storage_config = gen_local_storage_config(root_path);
+    auto storage_config = get_default_local_storage_config();
     auto cm = CreateChunkManager(storage_config);
     auto fs = storage::InitArrowFileSystem(storage_config);
 
@@ -176,8 +175,8 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
     auto serialized_bytes = insert_data.Serialize(storage::Remote);
 
     auto get_binlog_path = [=](int64_t log_id) {
-        return fmt::format("{}{}/{}/{}/{}/{}",
-                           TestLocalPath,
+        return fmt::format("{}insert_log/ngram_index/{}/{}/{}/{}/{}",
+                           storage_config.root_path,
                            collection_id,
                            partition_id,
                            segment_id,
@@ -466,8 +465,7 @@ TEST(NgramIndex, TestNonLikeExpressionsWithNgram) {
     auto index_meta = gen_index_meta(
         segment_id, field_id.get(), index_build_id, index_version);
 
-    std::string root_path = TestLocalPath;
-    auto storage_config = gen_local_storage_config(root_path);
+    auto storage_config = get_default_local_storage_config();
     auto cm = CreateChunkManager(storage_config);
     auto fs = storage::InitArrowFileSystem(storage_config);
 
@@ -495,8 +493,8 @@ TEST(NgramIndex, TestNonLikeExpressionsWithNgram) {
     auto serialized_bytes = insert_data.Serialize(storage::Remote);
 
     auto get_binlog_path = [=](int64_t log_id) {
-        return fmt::format("{}{}/{}/{}/{}/{}",
-                           TestLocalPath,
+        return fmt::format("{}insert_log/ngram_index/{}/{}/{}/{}/{}",
+                           storage_config.root_path,
                            collection_id,
                            partition_id,
                            segment_id,
