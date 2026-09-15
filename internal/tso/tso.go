@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -78,8 +79,14 @@ type timestampOracle struct {
 func (t *timestampOracle) loadTimestamp() (time.Time, error) {
 	strData, err := t.txnKV.Load(context.TODO(), t.key)
 	if err != nil {
-		// intend to return nil
-		return typeutil.ZeroTime, nil
+		if errors.Is(err, merr.ErrIoKeyNotFound) {
+			// Fresh deployment: no persisted window yet.
+			return typeutil.ZeroTime, nil
+		}
+		// Any other failure must surface: swallowing it into ZeroTime lets
+		// InitTimestamp fall back to time.Now() below an already-persisted
+		// window and regress TSO/ID monotonicity.
+		return typeutil.ZeroTime, errors.WithStack(err)
 	}
 
 	binData := []byte(strData)
@@ -102,9 +109,20 @@ func (t *timestampOracle) saveTimestamp(ts time.Time) error {
 	return nil
 }
 
+// initLoadRetryAttempts bounds retries of the persisted-window read during
+// initialization: a transient backend hiccup at boot (etcd leader change,
+// TiKV region move) must not fail the coordinator outright, while a
+// persistent failure still surfaces loudly instead of regressing the window
+// to time.Now().
+const initLoadRetryAttempts = 5
+
 func (t *timestampOracle) InitTimestamp() error {
-	last, err := t.loadTimestamp()
-	if err != nil {
+	var last time.Time
+	if err := retry.Do(context.TODO(), func() error {
+		var err error
+		last, err = t.loadTimestamp()
+		return err
+	}, retry.Attempts(initLoadRetryAttempts), retry.Sleep(50*time.Millisecond)); err != nil {
 		return err
 	}
 	next := time.Now()
