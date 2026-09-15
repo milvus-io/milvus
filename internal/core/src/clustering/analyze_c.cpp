@@ -141,17 +141,26 @@ Analyze(CAnalyze* res_analyze,
                         std::string(plugin_context->key)));
         }
 
-        if (field_type != DataType::VECTOR_FLOAT) {
-            throw SegcoreError(
-                DataTypeInvalid,
-                fmt::format("invalid data type for clustering is {}",
-                            int(field_type)));
-        }
         auto clusteringJob =
             std::make_unique<milvus::clustering::KmeansClustering>(
                 fileManagerContext);
 
-        clusteringJob->Run<float>(*analyze_info);
+        switch (field_type) {
+            case DataType::VECTOR_FLOAT:
+                clusteringJob->Run<float>(*analyze_info);
+                break;
+            case DataType::VECTOR_FLOAT16:
+                clusteringJob->Run<float16>(*analyze_info);
+                break;
+            case DataType::VECTOR_BFLOAT16:
+                clusteringJob->Run<bfloat16>(*analyze_info);
+                break;
+            default:
+                throw SegcoreError(
+                    DataTypeInvalid,
+                    fmt::format("invalid data type for clustering is {}",
+                                int(field_type)));
+        }
         *res_analyze = clusteringJob.release();
         auto status = CStatus();
         status.error_code = Success;
