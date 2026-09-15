@@ -20,9 +20,11 @@ import (
 	"context"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
+	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	kvmocks "github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 )
@@ -92,21 +94,6 @@ func TestCommit_FallbackPutBatchesPreserveOrder(t *testing.T) {
 	}, batches)
 }
 
-// TestCommit_AtomicMixedRemovalsRejected proves FIX 2: a single etcd txn
-// cannot express both exact and prefix deletes via MultiSaveAndRemoveWithPrefix
-// (which deletes every listed key by prefix). Mixing them in the atomic path
-// must return an error and issue no KV call at all.
-func TestCommit_AtomicMixedRemovalsRejected(t *testing.T) {
-	tk := kvmocks.NewTxnKV(t) // no EXPECT: any KV call fails the test
-	tk.EXPECT().MaxTxnOps().Return(64).Maybe()
-
-	b := New()
-	b.Save("a", "1")
-	b.Remove("coll-1")
-	b.RemovePrefix("coll-1/")
-	assert.Error(t, Commit(context.Background(), tk, b))
-}
-
 // TestCommit_AtomicOnlyPrefixRemoval covers the prefix-only atomic path: it
 // must route through MultiSaveAndRemoveWithPrefix with exactly the prefix
 // removals (no exact removals folded in).
@@ -120,6 +107,156 @@ func TestCommit_AtomicOnlyPrefixRemoval(t *testing.T) {
 	b.Save("a", "1")
 	b.RemovePrefix("pfx")
 	assert.NoError(t, Commit(context.Background(), tk, b))
+}
+
+// TestCommit_AtomicMixedRemovals: exact and prefix removals in one
+// within-limit Commit must route through MultiSaveAndRemoveMixed - the one
+// TxnKV call that keeps exact deletes exact - with byte-for-byte the recorded
+// saves/removals, in a single call.
+func TestCommit_AtomicMixedRemovals(t *testing.T) {
+	tk := kvmocks.NewTxnKV(t)
+	tk.EXPECT().MaxTxnOps().Return(64).Maybe()
+	tk.EXPECT().MultiSaveAndRemoveMixed(mock.Anything,
+		map[string]string{"a": "1"}, []string{"coll-1"}, []string{"coll-1/"}).Return(nil).Once()
+
+	b := New()
+	b.Save("a", "1")
+	b.Remove("coll-1")
+	b.RemovePrefix("coll-1/")
+	assert.NoError(t, Commit(context.Background(), tk, b))
+}
+
+// TestCommit_AtomicMixedRemovalsOnMemoryKV drives the mixed-removal atomic
+// path against a real (in-memory) TxnKV: one Commit carrying saves, an exact
+// removal AND a prefix removal must succeed atomically and leave exactly the
+// expected keys behind. "coll-10" is the widening canary: routing the exact
+// Remove("coll-1") through a prefix delete would wrongly wipe it.
+func TestCommit_AtomicMixedRemovalsOnMemoryKV(t *testing.T) {
+	ctx := context.Background()
+	mk := memkv.NewMemoryKV()
+	assert.NoError(t, mk.MultiSave(ctx, map[string]string{
+		"coll-1":       "tombstoned",
+		"coll-1/seg-1": "s1",
+		"coll-1/seg-2": "s2",
+		"coll-10":      "keep",
+	}))
+
+	b := New()
+	b.Save("coll-2", "v2")
+	b.Remove("coll-1")
+	b.RemovePrefix("coll-1/")
+	assert.NoError(t, Commit(ctx, mk, b))
+
+	keys, vals, err := mk.LoadWithPrefix(ctx, "")
+	assert.NoError(t, err)
+	got := make(map[string]string, len(keys))
+	for i, k := range keys {
+		got[k] = vals[i]
+	}
+	assert.Equal(t, map[string]string{
+		"coll-10": "keep",
+		"coll-2":  "v2",
+	}, got)
+}
+
+// TestCommit_FallbackMixedRemovalsMarkerLast: a mixed exact+prefix removal set
+// that exceeds the txn limit must take the chunked fallback - each removal
+// kind flushed with its own method, in recorded order - and the commit marker
+// must still be the final guarded txn.
+func TestCommit_FallbackMixedRemovalsMarkerLast(t *testing.T) {
+	tk := kvmocks.NewTxnKV(t)
+	tk.EXPECT().MaxTxnOps().Return(2).Maybe()
+
+	var calls []string
+	tk.EXPECT().MultiSave(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, kvs map[string]string) error {
+		calls = append(calls, "save")
+		return nil
+	}).Once()
+	tk.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, saves map[string]string, removals []string, _ ...predicates.Predicate) error {
+			if len(saves) == 0 {
+				calls = append(calls, "remove:"+removals[0])
+			} else {
+				calls = append(calls, "commit")
+			}
+			return nil
+		}).Twice()
+	tk.EXPECT().MultiSaveAndRemoveWithPrefix(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, _ map[string]string, removals []string, _ ...predicates.Predicate) error {
+			calls = append(calls, "removePrefix:"+removals[0])
+			return nil
+		}).Once()
+
+	b := New()
+	b.Save("a1", "1")
+	b.Save("a2", "2")
+	b.Remove("x")
+	b.RemovePrefix("p/")
+	b.CommitSave("marker", "v")
+	assert.NoError(t, Commit(context.Background(), tk, b)) // 5 ops > limit=2 forces fallback
+
+	assert.Equal(t, []string{"save", "remove:x", "removePrefix:p/", "commit"}, calls)
+}
+
+// flakyPrefixKV wraps MemoryKV, failing the first MultiSaveAndRemoveWithPrefix
+// call to simulate a crash mid-fallback, and shrinking MaxTxnOps so Commit
+// takes the chunked path.
+type flakyPrefixKV struct {
+	*memkv.MemoryKV
+	failures int
+}
+
+func (f *flakyPrefixKV) MaxTxnOps() int { return 2 }
+
+func (f *flakyPrefixKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error {
+	if f.failures > 0 {
+		f.failures--
+		return errors.New("injected crash")
+	}
+	return f.MemoryKV.MultiSaveAndRemoveWithPrefix(ctx, saves, removals, preds...)
+}
+
+// TestCommit_MixedRemovalsRetryAfterCrashConverges: a fallback flush that dies
+// after the puts but before the prefix removal must leave the commit marker
+// unwritten (the composite write stays invisible), and re-running the same
+// Commit must converge to exactly the intended final state.
+func TestCommit_MixedRemovalsRetryAfterCrashConverges(t *testing.T) {
+	ctx := context.Background()
+	fk := &flakyPrefixKV{MemoryKV: memkv.NewMemoryKV(), failures: 1}
+	assert.NoError(t, fk.MultiSave(ctx, map[string]string{
+		"old":       "gone",
+		"old/sub-1": "gone",
+	}))
+
+	build := func() *Builder {
+		b := New()
+		b.Save("k1", "1")
+		b.Save("k2", "2")
+		b.Save("k3", "3")
+		b.Remove("old")
+		b.RemovePrefix("old/")
+		b.CommitSave("marker", "v")
+		return b
+	}
+
+	assert.Error(t, Commit(ctx, fk, build())) // dies at the prefix-removal batch
+
+	// crash-safety: the commit marker must not have landed.
+	has, err := fk.Has(ctx, "marker")
+	assert.NoError(t, err)
+	assert.False(t, has)
+
+	assert.NoError(t, Commit(ctx, fk, build())) // retry converges
+
+	keys, vals, err := fk.LoadWithPrefix(ctx, "")
+	assert.NoError(t, err)
+	got := make(map[string]string, len(keys))
+	for i, k := range keys {
+		got[k] = vals[i]
+	}
+	assert.Equal(t, map[string]string{
+		"k1": "1", "k2": "2", "k3": "3", "marker": "v",
+	}, got)
 }
 
 // TestCommit_FallbackPreservesOrderAcrossKinds is a self-review addition (not

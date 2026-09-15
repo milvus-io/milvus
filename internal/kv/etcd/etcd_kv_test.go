@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -647,6 +648,59 @@ func (s *EtcdKVSuite) TestMultiSaveAndRemoveWithPrefix() {
 		s.NoError(err)
 		s.Equal(test.lengthAfterRemove, len(k))
 	}
+}
+
+func (s *EtcdKVSuite) TestMultiSaveAndRemoveMixed() {
+	etcdKV := s.etcdKV
+
+	prepareTests := map[string]string{
+		"mix/a-1":    "1",
+		"mix/a-1/c1": "11",
+		"mix/a-1/c2": "12",
+		"mix/a-10":   "10", // exact-remove canary: a prefix delete of "mix/a-1" would wipe it
+		"mix/b":      "b",
+	}
+	err := etcdKV.MultiSave(context.TODO(), prepareTests)
+	s.Require().NoError(err)
+
+	err = etcdKV.MultiSaveAndRemoveMixed(context.TODO(),
+		map[string]string{"mix/a-1/c3": "new"}, nil, []string{"mix/a-1/"})
+	s.Error(err)
+	s.ErrorIs(err, merr.ErrParameterInvalid)
+
+	// failed predicate: the whole mixed txn must be a no-op.
+	err = etcdKV.MultiSaveAndRemoveMixed(context.TODO(),
+		map[string]string{"mix/new": "nv"}, []string{"mix/a-1"}, []string{"mix/a-1/"},
+		predicates.ValueEqual("mix/b", "not-b"))
+	s.Error(err)
+	keys, _, err := etcdKV.LoadWithPrefix(context.TODO(), "mix")
+	s.NoError(err)
+	s.ElementsMatch(keys, []string{
+		s.etcdKV.GetPath("mix/a-1"),
+		s.etcdKV.GetPath("mix/a-1/c1"),
+		s.etcdKV.GetPath("mix/a-1/c2"),
+		s.etcdKV.GetPath("mix/a-10"),
+		s.etcdKV.GetPath("mix/b"),
+	})
+
+	// exact removal of "mix/a-1" plus prefix removal of "mix/a-1/" plus a save,
+	// in one txn; "mix/a-10" and "mix/b" must survive.
+	err = etcdKV.MultiSaveAndRemoveMixed(context.TODO(),
+		map[string]string{"mix/new": "nv"}, []string{"mix/a-1"}, []string{"mix/a-1/"},
+		predicates.ValueEqual("mix/b", "b"))
+	s.NoError(err)
+
+	keys, vals, err := etcdKV.LoadWithPrefix(context.TODO(), "mix")
+	s.NoError(err)
+	got := make(map[string]string, len(keys))
+	for i, k := range keys {
+		got[k] = vals[i]
+	}
+	s.Equal(map[string]string{
+		s.etcdKV.GetPath("mix/a-10"): "10",
+		s.etcdKV.GetPath("mix/b"):    "b",
+		s.etcdKV.GetPath("mix/new"):  "nv",
+	}, got)
 }
 
 func (s *EtcdKVSuite) TestWatch() {

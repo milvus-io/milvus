@@ -242,14 +242,11 @@ func (s Catalog) GetResourceGroups(ctx context.Context) ([]*querypb.ResourceGrou
 }
 
 func (s Catalog) ReleaseCollection(ctx context.Context, collection int64) error {
-	// remove collection and obtained partitions
+	// remove collection and obtained partitions in one txn, so a crash cannot
+	// leave partitions behind without their collection load info
 	collectionKey := EncodeCollectionLoadInfoKey(collection)
-	err := s.cli.Remove(ctx, collectionKey)
-	if err != nil {
-		return err
-	}
 	partitionsPrefix := fmt.Sprintf("%s/%d/", PartitionLoadInfoPrefix, collection)
-	return s.cli.RemoveWithPrefix(ctx, partitionsPrefix)
+	return s.cli.MultiSaveAndRemoveMixed(ctx, nil, []string{collectionKey}, []string{partitionsPrefix})
 }
 
 func (s Catalog) ReleasePartition(ctx context.Context, collection int64, partitions ...int64) error {
