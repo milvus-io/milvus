@@ -30,7 +30,7 @@ import (
 func TestConvertHybridSearchToSearchKeepsNamespace(t *testing.T) {
 	namespace := "tenant_a"
 
-	searchReq := convertHybridSearchToSearch(&milvuspb.HybridSearchRequest{
+	searchReq, _ := convertHybridSearchToSearch(&milvuspb.HybridSearchRequest{
 		CollectionName: "coll",
 		Namespace:      &namespace,
 		Requests: []*milvuspb.SearchRequest{
