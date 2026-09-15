@@ -76,6 +76,10 @@ type restoreWALAccesserTarget struct {
 	streaming.WALAccesser
 }
 
+type snapshotHandlerTarget struct {
+	Handler
+}
+
 // --- Test CreateSnapshot ---
 
 func TestSnapshotManager_CreateSnapshot_Success(t *testing.T) {
@@ -129,10 +133,64 @@ func TestSnapshotManager_CreateSnapshot_Success(t *testing.T) {
 	)
 
 	// Execute
-	snapshotID, err := sm.CreateSnapshot(ctx, 100, "test_snapshot", "test description", 0)
+	snapshotID, err := sm.CreateSnapshot(ctx, 100, "test_snapshot", "test description", 0, false)
 
 	// Verify
 	assert.NoError(t, err)
+	assert.Equal(t, int64(1001), snapshotID)
+}
+
+func TestSnapshotManager_CreateSnapshot_SkipIndex(t *testing.T) {
+	ctx := context.Background()
+	mockAllocID := mockey.Mock((*restoreAllocatorTarget).AllocID).Return(int64(1001), nil).Build()
+	defer mockAllocID.UnPatch()
+
+	snapshotData := &snapshotstorage.SnapshotData{
+		SnapshotInfo: &datapb.SnapshotInfo{CollectionId: 100},
+		Indexes:      []*indexpb.IndexInfo{{IndexID: 10}},
+		BuildIDs:     []int64{20, 21, 22},
+		Segments: []*datapb.SegmentDescription{{
+			SegmentId:  1,
+			IndexFiles: []*indexpb.IndexFilePathInfo{{BuildID: 20}},
+			TextIndexFiles: map[int64]*datapb.TextIndexStats{
+				101: {BuildID: 21},
+			},
+			JsonKeyIndexFiles: map[int64]*datapb.JsonKeyStats{
+				102: {BuildID: 22},
+			},
+		}},
+	}
+	mockGenSnapshot := mockey.Mock((*snapshotHandlerTarget).GenSnapshot).Return(snapshotData, nil).Build()
+	defer mockGenSnapshot.UnPatch()
+
+	mockGetSnapshot := mockey.Mock((*snapshotMeta).GetSnapshot).Return(nil, errors.New("not found")).Build()
+	defer mockGetSnapshot.UnPatch()
+	mockSaveSnapshot := mockey.Mock((*snapshotMeta).SaveSnapshot).To(
+		func(_ *snapshotMeta, _ context.Context, data *snapshotstorage.SnapshotData) error {
+			assert.True(t, data.SnapshotInfo.GetSkipIndex())
+			assert.Empty(t, data.Indexes)
+			assert.Empty(t, data.BuildIDs)
+			require.Len(t, data.Segments, 1)
+			assert.Empty(t, data.Segments[0].GetIndexFiles())
+			assert.Empty(t, data.Segments[0].GetTextIndexFiles())
+			assert.Empty(t, data.Segments[0].GetJsonKeyIndexFiles())
+			return nil
+		}).Build()
+	defer mockSaveSnapshot.UnPatch()
+
+	sm := NewSnapshotManager(
+		nil,
+		createTestSnapshotMetaLoaded(t),
+		nil,
+		&restoreAllocatorTarget{},
+		&snapshotHandlerTarget{},
+		nil,
+		nil,
+		nil,
+	)
+
+	snapshotID, err := sm.CreateSnapshot(ctx, 100, "data_only", "", 0, true)
+	require.NoError(t, err)
 	assert.Equal(t, int64(1001), snapshotID)
 }
 
@@ -180,7 +238,7 @@ func TestSnapshotManager_CreateSnapshot_WithCompactionProtection(t *testing.T) {
 		nil, // indexEngineVersionManager
 	)
 
-	snapshotID, err := sm.CreateSnapshot(ctx, 100, "protected_snap", "with protection", 3600)
+	snapshotID, err := sm.CreateSnapshot(ctx, 100, "protected_snap", "with protection", 3600, false)
 
 	// Verify snapshot pending intent is cleared after CreateSnapshot completes
 	assert.False(t, snapshotMetaInstance.IsCollectionCompactionBlocked(100))
@@ -209,7 +267,7 @@ func TestSnapshotManager_CreateSnapshot_DuplicateName(t *testing.T) {
 	)
 
 	// Execute
-	snapshotID, err := sm.CreateSnapshot(ctx, 100, "existing_snapshot", "description", 0)
+	snapshotID, err := sm.CreateSnapshot(ctx, 100, "existing_snapshot", "description", 0, false)
 
 	// Verify
 	assert.Error(t, err)
@@ -244,7 +302,7 @@ func TestSnapshotManager_CreateSnapshot_AllocatorError(t *testing.T) {
 	)
 
 	// Execute
-	snapshotID, err := sm.CreateSnapshot(ctx, 100, "test_snapshot", "description", 0)
+	snapshotID, err := sm.CreateSnapshot(ctx, 100, "test_snapshot", "description", 0, false)
 
 	// Verify
 	assert.Error(t, err)
@@ -282,7 +340,7 @@ func TestSnapshotManager_CreateSnapshot_GenSnapshotError(t *testing.T) {
 	)
 
 	// Execute
-	snapshotID, err := sm.CreateSnapshot(ctx, 100, "test_snapshot", "description", 0)
+	snapshotID, err := sm.CreateSnapshot(ctx, 100, "test_snapshot", "description", 0, false)
 
 	// Verify
 	assert.Error(t, err)
@@ -328,7 +386,7 @@ func TestSnapshotManager_CreateSnapshot_SaveError(t *testing.T) {
 	)
 
 	// Execute
-	snapshotID, err := sm.CreateSnapshot(ctx, 100, "test_snapshot", "description", 0)
+	snapshotID, err := sm.CreateSnapshot(ctx, 100, "test_snapshot", "description", 0, false)
 
 	// Verify
 	assert.Error(t, err)
@@ -365,7 +423,7 @@ func TestSnapshotManager_CreateSnapshot_ClearsSnapshotPendingOnGenSnapshotError(
 		nil, // indexEngineVersionManager
 	)
 
-	_, err := sm.CreateSnapshot(ctx, 100, "test_snap", "desc", 3600)
+	_, err := sm.CreateSnapshot(ctx, 100, "test_snap", "desc", 3600, false)
 	assert.Error(t, err)
 
 	// Verify snapshot pending intent is cleared even on error
@@ -411,7 +469,7 @@ func TestSnapshotManager_CreateSnapshot_ClearsSnapshotPendingOnSaveError(t *test
 		nil, // indexEngineVersionManager
 	)
 
-	_, err := sm.CreateSnapshot(ctx, 100, "test_snap", "desc", 3600)
+	_, err := sm.CreateSnapshot(ctx, 100, "test_snap", "desc", 3600, false)
 	assert.Error(t, err)
 
 	// Verify snapshot pending intent is cleared after save failure
@@ -466,7 +524,7 @@ func TestSnapshotManager_CreateSnapshot_PendingHeldEvenWithoutLongTermProtection
 		nil, // indexEngineVersionManager
 	)
 
-	_, err := sm.CreateSnapshot(ctx, 100, "test_snap", "desc", 0) // compactionProtectionSeconds = 0
+	_, err := sm.CreateSnapshot(ctx, 100, "test_snap", "desc", 0, false) // compactionProtectionSeconds = 0
 	assert.NoError(t, err)
 
 	// After CreateSnapshot returns, the deferred ClearSnapshotPending must have run.
@@ -499,7 +557,7 @@ func TestSnapshotManager_CreateSnapshot_ClearsSnapshotPendingOnAllocError(t *tes
 		nil, // indexEngineVersionManager
 	)
 
-	_, err := sm.CreateSnapshot(ctx, 100, "test_snap", "desc", 3600)
+	_, err := sm.CreateSnapshot(ctx, 100, "test_snap", "desc", 3600, false)
 	assert.Error(t, err)
 
 	// Verify snapshot pending intent is cleared after alloc failure
@@ -1388,7 +1446,7 @@ func TestRestoreSnapshot_ValidationFailsCloseBroadcasterBeforeRollback(t *testin
 
 	// Execute
 	jobID, err := sm.RestoreSnapshot(ctx, int64(100), "snap1", "target_coll", "default",
-		startRestoreLock, startBroadcaster, rollback, validateResources)
+		false, startRestoreLock, startBroadcaster, rollback, validateResources)
 
 	// Verify
 	assert.Error(t, err)
@@ -1457,7 +1515,7 @@ func TestRestoreSnapshot_ValidationFailsRollbackAlsoFails(t *testing.T) {
 	}
 
 	jobID, err := sm.RestoreSnapshot(ctx, int64(100), "snap1", "target", "default",
-		startRestoreLock, startBroadcaster, rollback, validateResources)
+		false, startRestoreLock, startBroadcaster, rollback, validateResources)
 
 	assert.Error(t, err)
 	assert.Equal(t, int64(0), jobID)
@@ -1533,7 +1591,7 @@ func TestRestoreSnapshot_ValidationPassesThenBroadcastSucceeds(t *testing.T) {
 	streaming.SetWALForTest(mockWAL)
 
 	jobID, err := sm.RestoreSnapshot(ctx, int64(100), "snap1", "target", "default",
-		startRestoreLock, startBroadcaster, rollback, validateResources)
+		false, startRestoreLock, startBroadcaster, rollback, validateResources)
 
 	assert.NoError(t, err)
 	assert.Equal(t, int64(999), jobID)
@@ -1544,6 +1602,78 @@ func TestRestoreSnapshot_ValidationPassesThenBroadcastSucceeds(t *testing.T) {
 	// job; the defer must NOT unpin. The job's terminal-transition hook will
 	// release the pin via UpdateJobStateAndReleaseRef.
 	assert.Equal(t, 0, unpinCalls, "success path must not unpin — ownership transferred to job")
+}
+
+func TestRestoreSnapshot_SnapshotSkipIndexIsEnforced(t *testing.T) {
+	ctx := context.Background()
+	mockPin := mockey.Mock((*snapshotMeta).PinSnapshot).Return(int64(42), 1, nil).Build()
+	defer mockPin.UnPatch()
+	mockUnpin := mockey.Mock((*snapshotMeta).UnpinSnapshot).Return(int64(0), "", 0, nil).Build()
+	defer mockUnpin.UnPatch()
+	snapshotData := &snapshotstorage.SnapshotData{
+		SnapshotInfo: &datapb.SnapshotInfo{Name: "snap1", SkipIndex: true},
+		Indexes:      []*indexpb.IndexInfo{{IndexID: 10}},
+	}
+	mockRead := mockey.Mock((*snapshotMeta).ReadSnapshotData).Return(snapshotData, nil).Build()
+	defer mockRead.UnPatch()
+	mockCMEK := mockey.Mock((*snapshotManager).validateCMEKCompatibility).Return(nil).Build()
+	defer mockCMEK.UnPatch()
+	mockCollection := mockey.Mock((*snapshotManager).RestoreCollection).Return(int64(200), nil).Build()
+	defer mockCollection.UnPatch()
+	restoreIndexCalls := 0
+	mockIndexes := mockey.Mock((*snapshotManager).RestoreIndexes).To(
+		func(_ *snapshotManager, _ context.Context, _ *snapshotstorage.SnapshotData, _ int64, _ StartBroadcasterFunc, _ string) error {
+			restoreIndexCalls++
+			return nil
+		}).Build()
+	defer mockIndexes.UnPatch()
+
+	mockAllocID := mockey.Mock((*restoreAllocatorTarget).AllocID).Return(int64(999), nil).Build()
+	defer mockAllocID.UnPatch()
+	sm := &snapshotManager{
+		allocator:       &restoreAllocatorTarget{},
+		snapshotMeta:    &snapshotMeta{},
+		copySegmentMeta: &copySegmentMeta{},
+	}
+	phase0Lock := &mockBroadcastAPI{}
+	capture := &captureBroadcastAPI{}
+	validatedWithoutIndexes := false
+
+	mockControlChannel := mockey.Mock((*restoreWALAccesserTarget).ControlChannel).Return("control_channel").Build()
+	defer mockControlChannel.UnPatch()
+	streaming.SetWALForTest(&restoreWALAccesserTarget{})
+
+	jobID, err := sm.RestoreSnapshot(
+		ctx,
+		100,
+		"snap1",
+		"target",
+		"default",
+		false,
+		func(context.Context, int64, string, string, string) (broadcaster.BroadcastAPI, error) {
+			return phase0Lock, nil
+		},
+		func(context.Context, int64, string) (broadcaster.BroadcastAPI, error) {
+			return capture, nil
+		},
+		func(context.Context, string, string) error {
+			t.Fatal("rollback should not be called")
+			return nil
+		},
+		func(_ context.Context, _ int64, data *snapshotstorage.SnapshotData) error {
+			validatedWithoutIndexes = len(data.Indexes) == 0
+			return nil
+		},
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, int64(999), jobID)
+	assert.Zero(t, restoreIndexCalls)
+	assert.True(t, validatedWithoutIndexes)
+	assert.Len(t, snapshotData.Indexes, 1)
+	require.NotNil(t, capture.captured)
+	restoreMsg := message.MustAsBroadcastRestoreSnapshotMessageV2(capture.captured)
+	assert.True(t, restoreMsg.Header().GetSkipIndex())
 }
 
 // TestRestoreSnapshot_PinTTLReadFromParamtable verifies that the restore pin TTL is
@@ -1584,7 +1714,7 @@ func TestRestoreSnapshot_PinTTLReadFromParamtable(t *testing.T) {
 	validate := func(ctx context.Context, _ int64, _ *snapshotstorage.SnapshotData) error { return nil }
 
 	_, err := sm.RestoreSnapshot(ctx, int64(100), "snap", "target", "default",
-		startRestoreLock, startBroadcaster, rollback, validate)
+		false, startRestoreLock, startBroadcaster, rollback, validate)
 	assert.Error(t, err)
 
 	expected := Params.DataCoordCfg.SnapshotRestorePinTTLSeconds.GetAsInt64()
@@ -1638,7 +1768,7 @@ func TestRestoreSnapshot_FailurePathUnpinsWithCorrectPinID(t *testing.T) {
 	}
 
 	jobID, err := sm.RestoreSnapshot(ctx, int64(100), "snap1", "target", "default",
-		startRestoreLock, startBroadcaster, rollback, validateResources)
+		false, startRestoreLock, startBroadcaster, rollback, validateResources)
 
 	assert.Error(t, err)
 	assert.Equal(t, int64(0), jobID)
@@ -1728,7 +1858,7 @@ func TestRestoreSnapshot_PostPhase2FailurePathsUnpinAndRollback(t *testing.T) {
 			validate := func(ctx context.Context, _ int64, _ *snapshotstorage.SnapshotData) error { return nil }
 
 			_, err := sm.RestoreSnapshot(ctx, int64(100), "s", "target", "default",
-				startRestoreLock, startBroadcaster, rollback, validate)
+				false, startRestoreLock, startBroadcaster, rollback, validate)
 
 			assert.Error(t, err)
 			assert.Contains(t, err.Error(), tc.expectErrString)
@@ -1794,7 +1924,7 @@ func TestRestoreSnapshot_AllocIDFailureUnpinsAndRollsBack(t *testing.T) {
 	validate := func(ctx context.Context, _ int64, _ *snapshotstorage.SnapshotData) error { return nil }
 
 	_, err := sm.RestoreSnapshot(ctx, int64(100), "s", "target", "default",
-		startRestoreLock, startBroadcaster, rollback, validate)
+		false, startRestoreLock, startBroadcaster, rollback, validate)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to allocate job ID")
@@ -1840,7 +1970,7 @@ func TestCreateRestoreJob_PropagatesPinID(t *testing.T) {
 		copySegmentMeta: &copySegmentMeta{},
 	}
 
-	err := sm.createRestoreJob(ctx, int64(200), map[string]string{}, map[int64]int64{}, snapshotData, int64(42), expectedPinID, false, "", "", "")
+	err := sm.createRestoreJob(ctx, int64(200), map[string]string{}, map[int64]int64{}, snapshotData, int64(42), expectedPinID, false, "", "", "", true)
 	assert.NoError(t, err)
 	require.NotNil(t, captured, "AddJob must be invoked")
 	assert.Equal(t, expectedPinID, captured.GetPinId(), "PinId must be propagated verbatim to the persisted job")
@@ -1848,6 +1978,7 @@ func TestCreateRestoreJob_PropagatesPinID(t *testing.T) {
 	assert.Equal(t, int64(200), captured.GetCollectionId())
 	assert.Equal(t, "snap1", captured.GetSnapshotName())
 	assert.Equal(t, int64(100), captured.GetSourceCollectionId())
+	assert.True(t, captured.GetSkipIndex())
 }
 
 func TestCreateRestoreJob_PreRegistersTargetSegmentsAsImporting(t *testing.T) {
@@ -1876,6 +2007,8 @@ func TestCreateRestoreJob_PreRegistersTargetSegmentsAsImporting(t *testing.T) {
 		assert.Equal(t, commonpb.SegmentState_Importing, seg.GetState())
 		assert.True(t, seg.GetIsImporting())
 		assert.Equal(t, int64(3), seg.GetStorageVersion())
+		assert.Empty(t, seg.GetTextStatsLogs())
+		assert.Empty(t, seg.GetJsonKeyStats())
 		return nil
 	}).Once()
 	catalog.EXPECT().SaveChannelCheckpoint(mock.Anything, "dst-ch", mock.Anything).Return(nil).Once()
@@ -1906,7 +2039,7 @@ func TestCreateRestoreJob_PreRegistersTargetSegmentsAsImporting(t *testing.T) {
 		copySegmentMeta: &copySegmentMeta{},
 	}
 
-	err = sm.createRestoreJob(ctx, int64(200), map[string]string{"src-ch": "dst-ch"}, map[int64]int64{10: 20}, snapshotData, int64(42), int64(7), false, "", "", "")
+	err = sm.createRestoreJob(ctx, int64(200), map[string]string{"src-ch": "dst-ch"}, map[int64]int64{10: 20}, snapshotData, int64(42), int64(7), false, "", "", "", true)
 	require.NoError(t, err)
 	assert.True(t, addJobCalled)
 }
@@ -1954,7 +2087,7 @@ func TestCreateRestoreJob_ExternalPersistsSourceLocationAndSkipsLocalSegmentLook
 
 	expectedFingerprint, err := snapshotstorage.SnapshotFingerprint(snapshotData)
 	require.NoError(t, err)
-	err = sm.createRestoreJob(ctx, int64(200), map[string]string{"source-channel": "target-channel"}, map[int64]int64{20: 30}, snapshotData, int64(42), int64(7), true, snapshotLocation, `{"extfs":{"region":"us-west-2"}}`, expectedFingerprint)
+	err = sm.createRestoreJob(ctx, int64(200), map[string]string{"source-channel": "target-channel"}, map[int64]int64{20: 30}, snapshotData, int64(42), int64(7), true, snapshotLocation, `{"extfs":{"region":"us-west-2"}}`, expectedFingerprint, false)
 	assert.NoError(t, err)
 	assert.False(t, getSegmentCalled, "external restore must not require source segments in local meta")
 	require.NotNil(t, captured, "AddJob must be invoked")
@@ -2013,7 +2146,7 @@ func TestCreateRestoreJob_AllocNFailurePropagates(t *testing.T) {
 		copySegmentMeta: &copySegmentMeta{},
 	}
 
-	err := sm.createRestoreJob(ctx, int64(200), nil, nil, snapshotData, int64(42), int64(7), false, "", "", "")
+	err := sm.createRestoreJob(ctx, int64(200), nil, nil, snapshotData, int64(42), int64(7), false, "", "", "", false)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "alloc segment IDs failed")
 	assert.False(t, addJobCalled, "AddJob must not be called when segment-ID allocation fails")
@@ -2070,7 +2203,7 @@ func TestRestoreSnapshot_StartBroadcasterFailureUnpinsAndRollsBack(t *testing.T)
 	validate := func(ctx context.Context, _ int64, _ *snapshotstorage.SnapshotData) error { return nil }
 
 	_, err := sm.RestoreSnapshot(ctx, int64(100), "s", "target", "default",
-		startRestoreLock, startBroadcaster, rollback, validate)
+		false, startRestoreLock, startBroadcaster, rollback, validate)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to start broadcaster")
@@ -2135,6 +2268,7 @@ func TestFinishRestoreSnapshot_BroadcastFailureRollbackBoundary(t *testing.T) {
 				false,
 				"",
 				"",
+				false,
 				func(context.Context, int64, string) (broadcaster.BroadcastAPI, error) { return api, nil },
 				func(context.Context, string, string) error {
 					rollbackCalls++
@@ -2389,6 +2523,7 @@ func TestSnapshotManager_RestoreData_Success(t *testing.T) {
 		snapshotS3Location string,
 		externalSpec string,
 		snapshotFingerprint string,
+		skipIndex bool,
 	) error {
 		assert.Equal(t, int64(200), collectionID)
 		assert.Equal(t, int64(12345), jobID)
@@ -2396,6 +2531,7 @@ func TestSnapshotManager_RestoreData_Success(t *testing.T) {
 		assert.Empty(t, snapshotS3Location)
 		assert.Empty(t, externalSpec)
 		assert.Empty(t, snapshotFingerprint)
+		assert.False(t, skipIndex)
 		return nil
 	}).Build()
 	defer mockCreateJob.UnPatch()
@@ -2404,7 +2540,7 @@ func TestSnapshotManager_RestoreData_Success(t *testing.T) {
 		copySegmentMeta: &copySegmentMeta{},
 	}
 
-	jobID, err := sm.RestoreData(ctx, int64(100), snapshotData.SnapshotInfo.GetName(), 200, 12345, int64(0))
+	jobID, err := sm.RestoreData(ctx, int64(100), snapshotData.SnapshotInfo.GetName(), 200, 12345, int64(0), false)
 
 	assert.NoError(t, err)
 	assert.Equal(t, int64(12345), jobID)
@@ -2440,7 +2576,7 @@ func TestSnapshotManager_RestoreData_Idempotent(t *testing.T) {
 	}
 
 	// Should return immediately without creating a new job
-	jobID, err := sm.RestoreData(ctx, int64(100), snapshotData.SnapshotInfo.GetName(), 200, 12345, int64(0))
+	jobID, err := sm.RestoreData(ctx, int64(100), snapshotData.SnapshotInfo.GetName(), 200, 12345, int64(0), false)
 
 	assert.NoError(t, err)
 	assert.Equal(t, int64(12345), jobID)
@@ -2495,7 +2631,7 @@ func TestSnapshotManager_RestoreData_PartitionMappingError(t *testing.T) {
 		copySegmentMeta: &copySegmentMeta{},
 	}
 
-	jobID, err := sm.RestoreData(ctx, int64(100), snapshotData.SnapshotInfo.GetName(), 200, 12345, int64(0))
+	jobID, err := sm.RestoreData(ctx, int64(100), snapshotData.SnapshotInfo.GetName(), 200, 12345, int64(0), false)
 
 	assert.Error(t, err)
 	assert.Equal(t, int64(0), jobID)
@@ -2562,7 +2698,7 @@ func TestSnapshotManager_RestoreData_ChannelMappingError(t *testing.T) {
 		copySegmentMeta: &copySegmentMeta{},
 	}
 
-	jobID, err := sm.RestoreData(ctx, int64(100), snapshotData.SnapshotInfo.GetName(), 200, 12345, int64(0))
+	jobID, err := sm.RestoreData(ctx, int64(100), snapshotData.SnapshotInfo.GetName(), 200, 12345, int64(0), false)
 
 	assert.Error(t, err)
 	assert.Equal(t, int64(0), jobID)
@@ -2639,11 +2775,13 @@ func TestSnapshotManager_RestoreData_CreateJobError(t *testing.T) {
 		snapshotS3Location string,
 		externalSpec string,
 		snapshotFingerprint string,
+		skipIndex bool,
 	) error {
 		assert.False(t, external)
 		assert.Empty(t, snapshotS3Location)
 		assert.Empty(t, externalSpec)
 		assert.Empty(t, snapshotFingerprint)
+		assert.False(t, skipIndex)
 		return expectedErr
 	}).Build()
 	defer mockCreateJob.UnPatch()
@@ -2652,7 +2790,7 @@ func TestSnapshotManager_RestoreData_CreateJobError(t *testing.T) {
 		copySegmentMeta: &copySegmentMeta{},
 	}
 
-	jobID, err := sm.RestoreData(ctx, int64(100), snapshotData.SnapshotInfo.GetName(), 200, 12345, int64(0))
+	jobID, err := sm.RestoreData(ctx, int64(100), snapshotData.SnapshotInfo.GetName(), 200, 12345, int64(0), false)
 
 	assert.Error(t, err)
 	assert.Equal(t, int64(0), jobID)
@@ -2690,7 +2828,7 @@ func TestSnapshotManager_RestoreData_ReadSnapshotDataError(t *testing.T) {
 		copySegmentMeta: &copySegmentMeta{},
 	}
 
-	jobID, err := sm.RestoreData(ctx, int64(100), "test_snapshot", 200, 12345, int64(0))
+	jobID, err := sm.RestoreData(ctx, int64(100), "test_snapshot", 200, 12345, int64(0), false)
 
 	assert.Error(t, err)
 	assert.Equal(t, int64(0), jobID)
@@ -5242,6 +5380,7 @@ func TestSnapshotManager_RestoreExternalData_PermanentReadErrorCreatesFailedJob(
 		300,
 		"",
 		"",
+		true,
 	)
 
 	require.NoError(t, err)
@@ -5253,6 +5392,7 @@ func TestSnapshotManager_RestoreExternalData_PermanentReadErrorCreatesFailedJob(
 	assert.Contains(t, persisted.GetReason(), "key not found")
 	assert.Contains(t, persisted.GetReason(), "root/snapshots/100/metadata/1.json")
 	assert.Greater(t, persisted.GetCleanupTs(), uint64(0))
+	assert.True(t, persisted.GetSkipIndex())
 }
 
 func TestSnapshotManager_RestoreExternalData_TransientReadErrorRemainsRetryable(t *testing.T) {
@@ -5286,6 +5426,7 @@ func TestSnapshotManager_RestoreExternalData_TransientReadErrorRemainsRetryable(
 		300,
 		"",
 		"",
+		false,
 	)
 
 	require.Error(t, err)
@@ -5325,6 +5466,7 @@ func TestSnapshotManager_RestoreExternalData_DataIntegrityCreatesFailedJob(t *te
 		300,
 		"",
 		"",
+		true,
 	)
 
 	require.NoError(t, err)
@@ -5332,6 +5474,7 @@ func TestSnapshotManager_RestoreExternalData_DataIntegrityCreatesFailedJob(t *te
 	require.NotNil(t, persisted)
 	assert.Equal(t, datapb.CopySegmentJobState_CopySegmentJobFailed, persisted.GetState())
 	assert.Contains(t, persisted.GetReason(), "invalid snapshot metadata")
+	assert.True(t, persisted.GetSkipIndex())
 }
 
 func TestSnapshotManager_RestoreExternalData_FingerprintMismatchCreatesFailedJob(t *testing.T) {
@@ -5344,8 +5487,19 @@ func TestSnapshotManager_RestoreExternalData_FingerprintMismatchCreatesFailedJob
 		ForeignStorageConfig: &indexpb.StorageConfig{},
 	}, nil).Build()
 	defer mockResolve.UnPatch()
-	mockRead := mockey.Mock((*snapshotMeta).ReadAndValidateExternalSnapshotDataWithChunkManager).
-		Return(snapshotData, nil).Build()
+	mockRead := mockey.Mock((*snapshotMeta).ReadAndValidateExternalSnapshotDataWithChunkManager).To(
+		func(
+			_ *snapshotMeta,
+			_ context.Context,
+			_ storage.ChunkManager,
+			_ string,
+			_ bool,
+			_ *indexpb.StorageConfig,
+			skipIndex bool,
+		) (*snapshotstorage.SnapshotData, error) {
+			assert.True(t, skipIndex)
+			return snapshotData, nil
+		}).Build()
 	defer mockRead.UnPatch()
 	copyMeta := &copySegmentMeta{}
 	mockGetJob := mockey.Mock((*copySegmentMeta).GetJob).Return(nil).Build()
@@ -5368,6 +5522,7 @@ func TestSnapshotManager_RestoreExternalData_FingerprintMismatchCreatesFailedJob
 		300,
 		"",
 		"preflight-fingerprint",
+		true,
 	)
 
 	require.NoError(t, err)
@@ -5375,6 +5530,7 @@ func TestSnapshotManager_RestoreExternalData_FingerprintMismatchCreatesFailedJob
 	require.NotNil(t, persisted)
 	assert.Equal(t, datapb.CopySegmentJobState_CopySegmentJobFailed, persisted.GetState())
 	assert.Contains(t, persisted.GetReason(), "fingerprint mismatch")
+	assert.True(t, persisted.GetSkipIndex())
 }
 
 func TestSnapshotManager_RestoreExternalData_DeterministicMappingErrorsCreateFailedJob(t *testing.T) {
@@ -5504,6 +5660,7 @@ func TestSnapshotManager_RestoreExternalData_DeterministicMappingErrorsCreateFai
 				300,
 				"",
 				"",
+				false,
 			)
 
 			require.NoError(t, err)
@@ -5528,6 +5685,7 @@ func TestRestoreExternalSnapshot_RejectsUnsupportedExternalSpecBeforeBroadcast(t
 		"target_collection",
 		"target_db",
 		unsupportedSpec,
+		false,
 		func(context.Context, string, string) (broadcaster.BroadcastAPI, error) {
 			return newMockBroadcastAPIImpl(), nil
 		},
@@ -5563,6 +5721,7 @@ func TestRestoreExternalSnapshot_RejectsObjectKeyBeforeLock(t *testing.T) {
 		"target_collection",
 		"target_db",
 		"",
+		false,
 		func(context.Context, string, string) (broadcaster.BroadcastAPI, error) {
 			lockCalled = true
 			return newMockBroadcastAPIImpl(), nil
@@ -5585,7 +5744,7 @@ func TestRestoreExternalSnapshot_RejectsObjectKeyBeforeLock(t *testing.T) {
 	assert.False(t, broadcastCalled)
 }
 
-func TestRestoreExternalSnapshot_BroadcastCarriesExternalSpec(t *testing.T) {
+func TestRestoreExternalSnapshot_BroadcastCarriesExternalSpecAndSkipIndex(t *testing.T) {
 	ctx := context.Background()
 	sourceCM := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 	foreignSpec := `{"extfs":{"region":"us-west-2"}}`
@@ -5625,10 +5784,12 @@ func TestRestoreExternalSnapshot_BroadcastCarriesExternalSpec(t *testing.T) {
 			gotURI string,
 			includeSegments bool,
 			gotStorageConfig *indexpb.StorageConfig,
+			skipIndex bool,
 		) (*snapshotstorage.SnapshotData, error) {
 			assert.Same(t, sourceCM, gotCM)
 			assert.Equal(t, snapshotURI, gotURI)
 			assert.True(t, includeSegments)
+			assert.True(t, skipIndex)
 			assert.Same(t, foreignStorageConfig, gotStorageConfig)
 			return snapshotData, nil
 		}).Build()
@@ -5648,8 +5809,6 @@ func TestRestoreExternalSnapshot_BroadcastCarriesExternalSpec(t *testing.T) {
 			return 200, nil
 		}).Build()
 	defer mockRestoreCollection.UnPatch()
-	mockRestoreIndexes := mockey.Mock((*snapshotManager).RestoreIndexes).Return(nil).Build()
-	defer mockRestoreIndexes.UnPatch()
 	alloc := &restoreAllocatorTarget{}
 	mockAllocID := mockey.Mock((*restoreAllocatorTarget).AllocID).Return(typeutil.UniqueID(77), nil).Build()
 	defer mockAllocID.UnPatch()
@@ -5672,6 +5831,7 @@ func TestRestoreExternalSnapshot_BroadcastCarriesExternalSpec(t *testing.T) {
 		"target_collection",
 		"target_db",
 		foreignSpec,
+		true,
 		func(context.Context, string, string) (broadcaster.BroadcastAPI, error) {
 			return phase0Lock, nil
 		},
@@ -5699,6 +5859,7 @@ func TestRestoreExternalSnapshot_BroadcastCarriesExternalSpec(t *testing.T) {
 	assert.True(t, header.GetExternal())
 	assert.Equal(t, snapshotURI, header.GetSnapshotS3Location())
 	assert.Equal(t, foreignSpec, header.GetExternalSpec())
+	assert.True(t, header.GetSkipIndex())
 	expectedFingerprint, err := snapshotstorage.SnapshotFingerprint(snapshotData)
 	require.NoError(t, err)
 	assert.Equal(t, expectedFingerprint, header.GetSnapshotFingerprint())
@@ -5742,6 +5903,7 @@ func TestRestoreExternalSnapshot_RejectsExistingTargetUnderNameLock(t *testing.T
 			_ string,
 			_ bool,
 			_ *indexpb.StorageConfig,
+			_ bool,
 		) (*snapshotstorage.SnapshotData, error) {
 			readCalled = true
 			return nil, merr.WrapErrDataIntegrityMsg("external metadata should not be read")
@@ -5758,6 +5920,7 @@ func TestRestoreExternalSnapshot_RejectsExistingTargetUnderNameLock(t *testing.T
 		"target_collection",
 		"target_db",
 		"",
+		false,
 		func(context.Context, string, string) (broadcaster.BroadcastAPI, error) {
 			return phase0Lock, nil
 		},
@@ -5822,6 +5985,7 @@ func TestRestoreExternalSnapshot_SerializesSameTarget(t *testing.T) {
 			"target_collection",
 			"target_db",
 			"",
+			false,
 			func(context.Context, string, string) (broadcaster.BroadcastAPI, error) {
 				return newMockBroadcastAPIImpl(), nil
 			},

@@ -593,7 +593,7 @@ message CopySegmentJob {
     uint64 cleanup_ts = 9;
     string start_time = 10;
     string complete_time = 11;
-    repeated common.KeyValuePair options = 12;       // Option configuration (e.g. copy_index)
+    repeated common.KeyValuePair options = 12;       // Additional job metadata
     int64 total_segments = 13;
     int64 copied_segments = 14;
     int64 total_rows = 15;

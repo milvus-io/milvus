@@ -2408,6 +2408,47 @@ func TestCollectSegmentFiles_WithManifest(t *testing.T) {
 	assert.Contains(t, files.InsertBinlogs, "files/insert_log/111/222/333/_metadata/manifest.json")
 }
 
+func TestCollectSegmentFiles_WithManifestCopiesCompleteRoot(t *testing.T) {
+	mockNoManifestLobFiles(t)
+
+	basePath := "files/insert_log/111/222/333"
+	manifestPath := packed.MarshalManifestPath(basePath, 2)
+	mList := mockey.Mock(listAllFiles).Return([]string{
+		basePath + "/_data/100/file1.log",
+		basePath + "/_metadata/manifest.json",
+		basePath + "/_stats/pk.100/bloom_filter",
+		basePath + "/_stats/bm25.101/stats",
+		basePath + "/_stats/text_index.102/tokenizer.json",
+		basePath + "/_stats/text_index.102/index.data",
+		basePath + "/_stats/json_stats.103/shared_key_index/index.data",
+	}, nil).Build()
+	defer mList.UnPatch()
+
+	files, err := collectSegmentFiles(
+		context.Background(),
+		&struct{ storage.ChunkManager }{},
+		&indexpb.StorageConfig{BucketName: "test-bucket"},
+		&datapb.CopySegmentSource{
+			CollectionId:   111,
+			PartitionId:    222,
+			SegmentId:      333,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   manifestPath,
+		},
+	)
+
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{
+		basePath + "/_data/100/file1.log",
+		basePath + "/_metadata/manifest.json",
+		basePath + "/_stats/pk.100/bloom_filter",
+		basePath + "/_stats/bm25.101/stats",
+		basePath + "/_stats/text_index.102/tokenizer.json",
+		basePath + "/_stats/text_index.102/index.data",
+		basePath + "/_stats/json_stats.103/shared_key_index/index.data",
+	}, files.InsertBinlogs)
+}
+
 func TestCollectSegmentFiles_V3MissingManifestPath(t *testing.T) {
 	ctx := context.Background()
 
@@ -3303,6 +3344,29 @@ func TestRepublishCopiedManifestIndexes_NoWork(t *testing.T) {
 	assert.Equal(t, manifestPath, republished)
 	assert.Empty(t, publishedBuildIDs)
 	assert.Zero(t, manifestReads)
+}
+
+func TestRepublishCopiedManifestIndexes_SkipIndexRetractsInheritedIndexes(t *testing.T) {
+	manifestPath := packed.MarshalManifestPath("files/insert_log/100/200/300", 3)
+	mockCopiedManifestIndexEntries(t, []packed.ManifestIndexInfo{{IndexID: 5001, BuildID: 6001}})
+	republished := packed.MarshalManifestPath("files/insert_log/100/200/300", 4)
+	commitCalls := 0
+	defer mockey.Mock(packed.CommitManifestUpdates).To(
+		func(_ string, _ int64, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
+			commitCalls++
+			assert.Equal(t, []packed.DropIndexEntry{{IndexID: 5001}}, updates.DropIndexes)
+			assert.Empty(t, updates.Indexes)
+			return republished, nil
+		}).Build().UnPatch()
+
+	// Skip-index leaves no copied artifacts, but the source marker must not
+	// claim that the inherited manifest's index section is empty.
+	got, builds, err := republishCopiedManifestIndexes(context.Background(), manifestPath,
+		&datapb.CopySegmentTarget{SegmentId: 300}, 4096, &indexpb.StorageConfig{}, nil, false)
+	require.NoError(t, err)
+	assert.Equal(t, republished, got)
+	assert.Empty(t, builds)
+	assert.Equal(t, 1, commitCalls)
 }
 
 func TestRepublishCopiedManifestIndexes_NoTargetDefinitionsOnlyRetractsInheritedIndexes(t *testing.T) {

@@ -117,11 +117,13 @@ type SnapshotManager interface {
 	//   - collectionID: ID of the collection to snapshot
 	//   - name: Unique name for the snapshot (globally unique)
 	//   - description: Optional description of the snapshot
+	//   - skipIndex: Omit index definitions, separately tracked index artifacts,
+	//     and build IDs. StorageV3 manifest roots remain intact.
 	//
 	// Returns:
 	//   - snapshotID: Allocated snapshot ID (0 on error)
 	//   - error: If name already exists, allocation fails, or save fails
-	CreateSnapshot(ctx context.Context, collectionID int64, name, description string, compactionProtectionSeconds int64) (int64, error)
+	CreateSnapshot(ctx context.Context, collectionID int64, name, description string, compactionProtectionSeconds int64, skipIndex bool) (int64, error)
 
 	// DropSnapshot deletes an existing snapshot by name within a collection.
 	// It removes the snapshot from memory cache, etcd, and S3 storage.
@@ -189,6 +191,8 @@ type SnapshotManager interface {
 	//   - snapshotName: Name of the snapshot to restore (unique within collection)
 	//   - targetCollectionName: Name for the restored collection
 	//   - targetDbName: Database name for the restored collection
+	//   - skipIndex: Restore data without recreating indexes or copying separately
+	//     tracked index artifacts. StorageV3 manifest roots remain intact.
 	//   - startRestoreLock: Function to acquire the Phase 0 restore lock set
 	//   - startBroadcaster: Function to start a broadcaster for DDL operations
 	//   - rollback: Function to rollback on failure (drops collection)
@@ -203,6 +207,7 @@ type SnapshotManager interface {
 		snapshotName string,
 		targetCollectionName string,
 		targetDbName string,
+		skipIndex bool,
 		startRestoreLock StartRestoreLockFunc,
 		startBroadcaster StartBroadcasterFunc,
 		rollback RollbackFunc,
@@ -215,6 +220,7 @@ type SnapshotManager interface {
 		targetCollectionName string,
 		targetDbName string,
 		externalSpec string,
+		skipIndex bool,
 		startExternalRestoreLock StartExternalRestoreLockFunc,
 		startBroadcaster StartBroadcasterFunc,
 		rollback RollbackFunc,
@@ -283,7 +289,7 @@ type SnapshotManager interface {
 	// Returns:
 	//   - jobID: The restore job ID (same as input if job created, or existing job ID)
 	//   - error: If mapping fails or job creation fails
-	RestoreData(ctx context.Context, sourceCollectionID int64, snapshotName string, collectionID int64, jobID int64, pinID int64) (int64, error)
+	RestoreData(ctx context.Context, sourceCollectionID int64, snapshotName string, collectionID int64, jobID int64, pinID int64, skipIndex bool) (int64, error)
 
 	RestoreExternalData(
 		ctx context.Context,
@@ -294,6 +300,7 @@ type SnapshotManager interface {
 		jobID int64,
 		externalSpec string,
 		snapshotFingerprint string,
+		skipIndex bool,
 	) (int64, error)
 
 	// Restore state query
@@ -437,6 +444,7 @@ func (sm *snapshotManager) CreateSnapshot(
 	collectionID int64,
 	name, description string,
 	compactionProtectionSeconds int64,
+	skipIndex bool,
 ) (int64, error) {
 	// Lock to prevent TOCTOU race on snapshot name uniqueness check
 	sm.createSnapshotMu.Lock()
@@ -444,7 +452,8 @@ func (sm *snapshotManager) CreateSnapshot(
 
 	mlog.Info(context.TODO(), "create snapshot request received",
 		mlog.String("description", description),
-		mlog.Int64("compactionProtectionSeconds", compactionProtectionSeconds))
+		mlog.Int64("compactionProtectionSeconds", compactionProtectionSeconds),
+		mlog.Bool("skipIndex", skipIndex))
 
 	// Validate snapshot name uniqueness within collection (protected by createSnapshotMu)
 	if _, err := sm.snapshotMeta.GetSnapshot(ctx, collectionID, name); err == nil {
@@ -478,6 +487,10 @@ func (sm *snapshotManager) CreateSnapshot(
 	snapshotData.SnapshotInfo.Id = snapshotID
 	snapshotData.SnapshotInfo.Name = name
 	snapshotData.SnapshotInfo.Description = description
+	snapshotData.SnapshotInfo.SkipIndex = skipIndex
+	if skipIndex {
+		stripSnapshotIndexes(snapshotData)
+	}
 
 	// Set compaction protection if requested
 	if compactionProtectionSeconds > 0 {
@@ -492,6 +505,19 @@ func (sm *snapshotManager) CreateSnapshot(
 
 	mlog.Info(context.TODO(), "snapshot created successfully", mlog.Int64("snapshotID", snapshotID))
 	return snapshotID, nil
+}
+
+func stripSnapshotIndexes(snapshotData *snapshotstorage.SnapshotData) {
+	snapshotData.Indexes = nil
+	snapshotData.BuildIDs = nil
+	for _, segment := range snapshotData.Segments {
+		if segment == nil {
+			continue
+		}
+		segment.IndexFiles = nil
+		segment.TextIndexFiles = nil
+		segment.JsonKeyIndexFiles = nil
+	}
 }
 
 // DropSnapshot deletes an existing snapshot by name.
@@ -666,6 +692,7 @@ func (sm *snapshotManager) RestoreSnapshot(
 	snapshotName string,
 	targetCollectionName string,
 	targetDbName string,
+	skipIndex bool,
 	startRestoreLock StartRestoreLockFunc,
 	startBroadcaster StartBroadcasterFunc,
 	rollback RollbackFunc,
@@ -735,9 +762,11 @@ func (sm *snapshotManager) RestoreSnapshot(
 	if err != nil {
 		return 0, merr.Wrap(err, "failed to read snapshot data")
 	}
+	skipIndex = skipIndex || snapshotData.SnapshotInfo.GetSkipIndex()
 	mlog.Info(context.TODO(), "snapshot data loaded",
 		mlog.Int("segmentCount", len(snapshotData.Segments)),
-		mlog.Int("indexCount", len(snapshotData.Indexes)))
+		mlog.Int("indexCount", len(snapshotData.Indexes)),
+		mlog.Bool("skipIndex", skipIndex))
 
 	// Phase 1.5: Validate CMEK compatibility
 	// CMEK-encrypted collections can only be restored to databases with matching encryption zone
@@ -763,6 +792,7 @@ func (sm *snapshotManager) RestoreSnapshot(
 		false,
 		"",
 		"",
+		skipIndex,
 		startBroadcaster,
 		rollback,
 		validateResources,
@@ -788,6 +818,7 @@ func (sm *snapshotManager) RestoreExternalSnapshot(
 	targetCollectionName string,
 	targetDbName string,
 	externalSpec string,
+	skipIndex bool,
 	startExternalRestoreLock StartExternalRestoreLockFunc,
 	startBroadcaster StartBroadcasterFunc,
 	rollback RollbackFunc,
@@ -836,6 +867,7 @@ func (sm *snapshotManager) RestoreExternalSnapshot(
 		snapshotS3Location,
 		true,
 		resolved.ForeignStorageConfig,
+		skipIndex,
 	)
 	if err != nil {
 		return 0, merr.Wrap(err, "failed to read external snapshot data")
@@ -845,12 +877,14 @@ func (sm *snapshotManager) RestoreExternalSnapshot(
 		snapshotName = snapshotS3Location
 	}
 	sourceCollectionID := snapshotData.SnapshotInfo.GetCollectionId()
+	skipIndex = skipIndex || snapshotData.SnapshotInfo.GetSkipIndex()
 
 	logger.Info(ctx, "external snapshot data loaded",
 		mlog.String("snapshotName", snapshotName),
 		mlog.Int64("sourceCollectionID", sourceCollectionID),
 		mlog.Int("segmentCount", len(snapshotData.Segments)),
-		mlog.Int("indexCount", len(snapshotData.Indexes)))
+		mlog.Int("indexCount", len(snapshotData.Indexes)),
+		mlog.Bool("skipIndex", skipIndex))
 
 	if err := sm.validateCMEKCompatibility(ctx, snapshotData, targetDbName); err != nil {
 		logger.Warn(ctx, "CMEK compatibility validation failed", mlog.Err(err))
@@ -875,6 +909,7 @@ func (sm *snapshotManager) RestoreExternalSnapshot(
 		true,
 		snapshotS3Location,
 		externalSpec,
+		skipIndex,
 		startBroadcaster,
 		rollback,
 		validateResources,
@@ -893,6 +928,7 @@ func (sm *snapshotManager) finishRestoreSnapshot(
 	external bool,
 	snapshotS3Location string,
 	externalSpec string,
+	skipIndex bool,
 	startBroadcaster StartBroadcasterFunc,
 	rollback RollbackFunc,
 	validateResources ValidateResourcesFunc,
@@ -910,14 +946,18 @@ func (sm *snapshotManager) finishRestoreSnapshot(
 	}
 	logger.Info(ctx, "collection and partitions restored", mlog.Int64("collectionID", collectionID))
 
-	if err := sm.RestoreIndexes(ctx, snapshotData, collectionID, startBroadcaster, snapshotName); err != nil {
-		logger.Error(ctx, "failed to restore indexes, rolling back", mlog.Err(err))
-		if rollbackErr := rollback(ctx, targetDbName, targetCollectionName); rollbackErr != nil {
-			logger.Error(ctx, "rollback failed", mlog.Err(rollbackErr))
+	if !skipIndex {
+		if err := sm.RestoreIndexes(ctx, snapshotData, collectionID, startBroadcaster, snapshotName); err != nil {
+			logger.Error(ctx, "failed to restore indexes, rolling back", mlog.Err(err))
+			if rollbackErr := rollback(ctx, targetDbName, targetCollectionName); rollbackErr != nil {
+				logger.Error(ctx, "rollback failed", mlog.Err(rollbackErr))
+			}
+			return 0, merr.Wrap(err, "failed to restore indexes")
 		}
-		return 0, merr.Wrap(err, "failed to restore indexes")
+		logger.Info(ctx, "indexes restored", mlog.Int("indexCount", len(snapshotData.Indexes)))
+	} else {
+		logger.Info(ctx, "skip restoring indexes")
 	}
-	logger.Info(ctx, "indexes restored", mlog.Int("indexCount", len(snapshotData.Indexes)))
 
 	jobID, err = sm.allocator.AllocID(ctx)
 	if err != nil {
@@ -943,7 +983,13 @@ func (sm *snapshotManager) finishRestoreSnapshot(
 		}
 	}()
 
-	if valErr := validateResources(ctx, collectionID, snapshotData); valErr != nil {
+	validationSnapshotData := snapshotData
+	if skipIndex {
+		dataWithoutIndexes := *snapshotData
+		dataWithoutIndexes.Indexes = nil
+		validationSnapshotData = &dataWithoutIndexes
+	}
+	if valErr := validateResources(ctx, collectionID, validationSnapshotData); valErr != nil {
 		logger.Error(ctx, "resource validation failed, rolling back", mlog.Err(valErr))
 		restoreBroadcaster.Close()
 		restoreBroadcaster = nil
@@ -960,6 +1006,7 @@ func (sm *snapshotManager) finishRestoreSnapshot(
 		SourceCollectionId:  sourceCollectionID,
 		PinId:               pinID,
 		SnapshotFingerprint: snapshotFingerprint,
+		SkipIndex:           skipIndex,
 	}
 	if external {
 		// DataNode receives only the copy-segment task from WAL. Carry the
@@ -997,7 +1044,8 @@ func (sm *snapshotManager) finishRestoreSnapshot(
 	logger.Info(ctx, "restore snapshot completed",
 		mlog.Int64("collectionID", collectionID),
 		mlog.Int64("jobID", jobID),
-		mlog.Bool("external", external))
+		mlog.Bool("external", external),
+		mlog.Bool("skipIndex", skipIndex))
 	return jobID, nil
 }
 
@@ -1252,8 +1300,9 @@ func (sm *snapshotManager) RestoreData(
 	collectionID int64,
 	jobID int64,
 	pinID int64,
+	skipIndex bool,
 ) (int64, error) {
-	return sm.restoreData(ctx, sourceCollectionID, snapshotName, "", collectionID, jobID, pinID, false, "", "")
+	return sm.restoreData(ctx, sourceCollectionID, snapshotName, "", collectionID, jobID, pinID, false, "", "", skipIndex)
 }
 
 func (sm *snapshotManager) RestoreExternalData(
@@ -1265,8 +1314,9 @@ func (sm *snapshotManager) RestoreExternalData(
 	jobID int64,
 	externalSpec string,
 	snapshotFingerprint string,
+	skipIndex bool,
 ) (int64, error) {
-	return sm.restoreData(ctx, sourceCollectionID, snapshotName, snapshotS3Location, collectionID, jobID, 0, true, externalSpec, snapshotFingerprint)
+	return sm.restoreData(ctx, sourceCollectionID, snapshotName, snapshotS3Location, collectionID, jobID, 0, true, externalSpec, snapshotFingerprint, skipIndex)
 }
 
 func (sm *snapshotManager) restoreData(
@@ -1280,6 +1330,7 @@ func (sm *snapshotManager) restoreData(
 	external bool,
 	externalSpec string,
 	expectedSnapshotFingerprint string,
+	skipIndex bool,
 ) (int64, error) {
 	mlog.Info(ctx, "restore data started",
 		mlog.String("snapshot", snapshotName),
@@ -1288,7 +1339,8 @@ func (sm *snapshotManager) restoreData(
 		mlog.Int64("collectionID", collectionID),
 		mlog.Int64("jobID", jobID),
 		mlog.Bool("external", external),
-		mlog.Bool("externalSpecSet", externalSpec != ""))
+		mlog.Bool("externalSpecSet", externalSpec != ""),
+		mlog.Bool("skipIndex", skipIndex))
 	handleExternalError := func(operation string, err error) (int64, error) {
 		return sm.handleExternalRestoreSourceError(
 			ctx,
@@ -1299,6 +1351,7 @@ func (sm *snapshotManager) restoreData(
 			jobID,
 			operation,
 			err,
+			skipIndex,
 		)
 	}
 
@@ -1329,6 +1382,7 @@ func (sm *snapshotManager) restoreData(
 			snapshotS3Location,
 			true,
 			resolved.ForeignStorageConfig,
+			skipIndex,
 		)
 	} else {
 		snapshotData, err = sm.ReadSnapshotData(ctx, sourceCollectionID, snapshotName)
@@ -1389,6 +1443,7 @@ func (sm *snapshotManager) restoreData(
 		snapshotS3Location,
 		externalSpec,
 		actualSnapshotFingerprint,
+		skipIndex,
 	); err != nil {
 		mlog.Error(context.TODO(), "failed to create restore job", mlog.Err(err))
 		if external {
@@ -1413,6 +1468,7 @@ func (sm *snapshotManager) handleExternalRestoreSourceError(
 	jobID int64,
 	operation string,
 	err error,
+	skipIndex bool,
 ) (int64, error) {
 	wrappedErr := merr.Wrap(err, operation)
 	if !isPermanentSnapshotError(err) {
@@ -1431,6 +1487,7 @@ func (sm *snapshotManager) handleExternalRestoreSourceError(
 			SourceCollectionId: sourceCollectionID,
 			External:           true,
 			SnapshotS3Location: snapshotS3Location,
+			SkipIndex:          skipIndex,
 		},
 		tr: timerecord.NewTimeRecorder("copy segment job"),
 	}
@@ -1590,6 +1647,7 @@ func (sm *snapshotManager) createRestoreJob(
 	snapshotS3Location string,
 	externalSpec string,
 	snapshotFingerprint string,
+	skipIndex bool,
 ) error {
 	// Validate which segments exist in local meta for same-cluster restore.
 	// External restore reads source metadata from object storage; source
@@ -1716,16 +1774,12 @@ func (sm *snapshotManager) createRestoreJob(
 	jobTimeout := Params.DataCoordCfg.CopySegmentJobTimeout.GetAsDuration(time.Second)
 	copyJob := &copySegmentJob{
 		CopySegmentJob: &datapb.CopySegmentJob{
-			JobId:        jobID,
-			CollectionId: targetCollection,
-			State:        datapb.CopySegmentJobState_CopySegmentJobPending,
-			IdMappings:   idMappings,
-			TimeoutTs:    CopyJobTimeoutTs(jobTimeout),
-			StartTs:      uint64(time.Now().UnixNano()),
-			Options: []*commonpb.KeyValuePair{
-				{Key: "copy_index", Value: "true"},
-				{Key: "source_type", Value: "snapshot"},
-			},
+			JobId:               jobID,
+			CollectionId:        targetCollection,
+			State:               datapb.CopySegmentJobState_CopySegmentJobPending,
+			IdMappings:          idMappings,
+			TimeoutTs:           CopyJobTimeoutTs(jobTimeout),
+			StartTs:             uint64(time.Now().UnixNano()),
 			TotalSegments:       int64(len(idMappings)),
 			TotalRows:           totalRows,
 			SnapshotName:        snapshotData.SnapshotInfo.GetName(),
@@ -1735,6 +1789,7 @@ func (sm *snapshotManager) createRestoreJob(
 			SnapshotS3Location:  snapshotS3Location,
 			ExternalSpec:        externalSpec,
 			SnapshotFingerprint: snapshotFingerprint,
+			SkipIndex:           skipIndex,
 		},
 		tr:            timerecord.NewTimeRecorder("copy segment job"),
 		snapshotCache: &copySegmentSnapshotCache{},
