@@ -108,7 +108,11 @@ The observable behavior changes are:
   and use insert semantics; the mutation result returns the destination PKs in
   request order.
 
-Ordinary non-partial AutoID upsert continues to allocate a new PK.
+Ordinary non-partial AutoID Upsert follows
+[Preserve Primary Keys in Full AutoID Upsert](20260803-autoid-upsert-primary-key-preservation.md):
+it preserves an existing PK and inserts with a newly generated AutoID when the
+lookup PK is missing. That behavior is independent of
+the Partial Upsert CAS protocol described here.
 
 ### Internal protocol
 
@@ -311,7 +315,7 @@ Proxy keeps the original user fields immutable and stores allocated AutoIDs in
 a separate map keyed by the original request row offset. Initial preparation
 and CAS retries share the same entry point: clone the original fields, overlay
 allocated IDs, generate function output, prepare CAS terms, query, and merge.
-`checkPartialUpdatePrimaryFieldData` centralizes PK validation, conversion,
+`checkUpsertPrimaryFieldDataWithAutoIDs` centralizes PK validation, conversion,
 replacement, collision checking, and ID parsing. It reuses the existing
 primary-field generation and field-update helpers and publishes a replaced
 column only after all checks pass. The task owns allocation and retry state;

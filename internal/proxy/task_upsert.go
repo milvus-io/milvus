@@ -22,6 +22,7 @@ import (
 
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -67,8 +68,8 @@ type upsertTask struct {
 	schema           *schemaInfo
 	partitionKeyMode bool
 	partitionKeys    *schemapb.FieldData
-	// automatic generate pk as new pk wehen autoID == true
-	// delete task need use the oldIDs
+	// oldIDs are the caller-supplied lookup IDs used by the delete side of
+	// Upsert. Full AutoID Upsert deletes only the subset classified as existing.
 	oldIDs          *schemapb.IDs
 	schemaTimestamp uint64
 	schemaVersion   int32
@@ -89,6 +90,14 @@ type upsertTask struct {
 	partialUpdateResultIDs *schemapb.IDs
 
 	storageCost segcore.StorageCost
+}
+
+// fullAutoIDUpsertPlan carries PK classification into payload preparation.
+// existing is indexed by request row; deleteIDs contains only existing lookup IDs.
+type fullAutoIDUpsertPlan struct {
+	requestIDs *schemapb.IDs
+	existing   []bool
+	deleteIDs  *schemapb.IDs
 }
 
 // TraceCtx returns upsertTask context
@@ -125,8 +134,8 @@ func (it *upsertTask) EndTs() Timestamp {
 	return it.baseMsg.EndTimestamp
 }
 
-// refreshMutationResultCounts synchronizes the response with the rebuilt
-// insert/delete payload for the current CAS attempt.
+// refreshMutationResultCounts synchronizes the response with the prepared
+// insert/delete payload for the current Upsert attempt.
 func (it *upsertTask) refreshMutationResultCounts() {
 	it.result.DeleteCnt = it.upsertMsg.DeleteMsg.NumRows
 	it.result.InsertCnt = int64(it.upsertMsg.InsertMsg.NumRows)
@@ -178,20 +187,27 @@ func (it *upsertTask) OnEnqueue() error {
 
 func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, outputFields []string) (*milvuspb.QueryResults, segcore.StorageCost, error) {
 	log := mlog.With(mlog.String("collectionName", t.req.GetCollectionName()))
-	// Only partial updates read existing rows. Each attempt uses a new Strong
-	// query and records its executed snapshots, independent of the Upsert's BeginTs.
-	channelReadTs := typeutil.NewConcurrentMap[string, uint64]()
+	// Full Upsert waits for its admission timestamp. Partial retains the Strong
+	// read protocol and records actual channel snapshots for its CAS proof.
+	consistency := commonpb.ConsistencyLevel_Customized
+	guaranteeTimestamp := t.BeginTs()
+	var channelReadTs *typeutil.ConcurrentMap[string, uint64]
+	if t.req.GetPartialUpdate() {
+		consistency = commonpb.ConsistencyLevel_Strong
+		guaranteeTimestamp = 0
+		channelReadTs = typeutil.NewConcurrentMap[string, uint64]()
+	}
 	queryReq := &milvuspb.QueryRequest{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_Retrieve,
 		},
 		DbName:                t.req.GetDbName(),
 		CollectionName:        t.req.GetCollectionName(),
-		ConsistencyLevel:      commonpb.ConsistencyLevel_Strong,
+		ConsistencyLevel:      consistency,
 		NotReturnAllMeta:      false,
-		OutputFields:          []string{"*"},
+		OutputFields:          outputFields,
 		UseDefaultConsistency: false,
-		GuaranteeTimestamp:    0,
+		GuaranteeTimestamp:    guaranteeTimestamp,
 		Namespace:             t.req.Namespace,
 	}
 	pkField, err := typeutil.GetPrimaryFieldSchema(t.schema.CollectionSchema)
@@ -237,7 +253,7 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 			),
 			ReqID:            paramtable.GetNodeID(),
 			PartitionIDs:     partitionIDs,
-			ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
+			ConsistencyLevel: consistency,
 			MvccTimestamp:    0,
 			QueryLabel:       metrics.UpsertQueryLabel,
 		},
@@ -254,11 +270,16 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 		sp.End()
 	}()
 	queryResult, storageCost, err := t.node.(*Proxy).query(ctx, qt, sp)
-	if err := merr.CheckRPCCall(queryResult.GetStatus(), err); err != nil {
+	if queryResult == nil && err == nil {
+		return nil, storageCost, merr.WrapErrServiceInternalMsg("upsert retrieve returned nil result")
+	}
+	if err := merr.CheckRPCCall(queryResult, err); err != nil {
 		return nil, storageCost, err
 	}
-	if err := t.bindPartialUpdateReadTimestamps(channelReadTs); err != nil {
-		return nil, storageCost, err
+	if t.req.GetPartialUpdate() {
+		if err := t.bindPartialUpdateReadTimestamps(channelReadTs); err != nil {
+			return nil, storageCost, err
+		}
 	}
 	return queryResult, storageCost, err
 }
@@ -271,7 +292,7 @@ func (it *upsertTask) preparePartialUpdate(ctx context.Context) error {
 	// Rebuild input order while retaining AutoIDs allocated by earlier attempts.
 	fields := cloneFieldDataList(it.partialUpdateOriginalFields)
 	if len(it.partialUpdateAllocatedIDs) > 0 {
-		if _, err := checkPartialUpdatePrimaryFieldData(it.schema, fields, it.upsertMsg.InsertMsg.NRows(), it.partialUpdateAllocatedIDs); err != nil {
+		if _, err := checkUpsertPrimaryFieldDataWithAutoIDs(it.schema, fields, it.upsertMsg.InsertMsg.NRows(), it.partialUpdateAllocatedIDs); err != nil {
 			return err
 		}
 	}
@@ -290,6 +311,136 @@ func (it *upsertTask) preparePartialUpdate(ctx context.Context) error {
 	it.upsertMsg.InsertMsg.FieldsData = it.insertFieldData
 	it.upsertMsg.DeleteMsg.PrimaryKeys = it.deletePKs
 	it.upsertMsg.DeleteMsg.NumRows = int64(typeutil.GetSizeOfIDs(it.deletePKs))
+	return nil
+}
+
+// classifyFullAutoIDUpsert queries PK existence and builds a plan in request order.
+// Missing targets receive generated IDs during payload preparation.
+func (it *upsertTask) classifyFullAutoIDUpsert(ctx context.Context, requestIDs *schemapb.IDs, primaryField *schemapb.FieldSchema) (*fullAutoIDUpsertPlan, error) {
+	tr := timerecord.NewTimeRecorder("Proxy-Upsert-classifyFullAutoID")
+	resp, storageCost, err := retrieveByPKs(ctx, it, requestIDs, []string{primaryField.GetName()})
+	if err != nil {
+		return nil, err
+	}
+	it.storageCost.ScannedRemoteBytes += storageCost.ScannedRemoteBytes
+	it.storageCost.ScannedTotalBytes += storageCost.ScannedTotalBytes
+
+	primaryData, err := typeutil.GetPrimaryFieldData(resp.GetFieldsData(), primaryField)
+	if err != nil {
+		return nil, merr.WrapErrDataIntegrity(err, "full AutoID Upsert classification result has no primary key field")
+	}
+	existingIDs, err := parsePrimaryFieldData2IDs(primaryData)
+	if err != nil {
+		return nil, merr.WrapErrDataIntegrity(err, "full AutoID Upsert classification returned invalid primary key data")
+	}
+	switch primaryField.GetDataType() {
+	case schemapb.DataType_Int64:
+		if existingIDs.GetIntId() == nil {
+			return nil, merr.WrapErrDataIntegrityMsg("full AutoID Upsert classification returned non-Int64 primary keys")
+		}
+	case schemapb.DataType_VarChar:
+		if existingIDs.GetStrId() == nil {
+			return nil, merr.WrapErrDataIntegrityMsg("full AutoID Upsert classification returned non-VarChar primary keys")
+		}
+	default:
+		return nil, merr.WrapErrDataIntegrityMsg(
+			"full AutoID Upsert classification used unsupported primary key type %s",
+			primaryField.GetDataType().String(),
+		)
+	}
+
+	// Require a unique subset of the lookup IDs before using the query result
+	// to decide which PKs to preserve and delete.
+	requestChecker, err := typeutil.NewIDsChecker(requestIDs)
+	if err != nil {
+		return nil, err
+	}
+	for i := 0; i < typeutil.GetSizeOfIDs(existingIDs); i++ {
+		requested, err := requestChecker.Contains(existingIDs, i)
+		if err != nil {
+			return nil, merr.WrapErrDataIntegrity(err, "full AutoID Upsert classification returned incompatible primary keys")
+		}
+		if !requested {
+			return nil, merr.WrapErrDataIntegrityMsg("full AutoID Upsert classification returned an unrequested primary key")
+		}
+	}
+
+	existingChecker, err := typeutil.NewIDsChecker(existingIDs)
+	if err != nil {
+		return nil, merr.WrapErrDataIntegrity(err, "full AutoID Upsert classification returned incompatible primary keys")
+	}
+	if existingChecker.Size() != typeutil.GetSizeOfIDs(existingIDs) {
+		return nil, merr.WrapErrDataIntegrityMsg("full AutoID Upsert classification returned duplicate primary keys")
+	}
+	existing := make([]bool, typeutil.GetSizeOfIDs(requestIDs))
+	// Keep this non-nil even when empty so delete preparation does not fall
+	// back to deleting every caller-supplied lookup ID.
+	deleteIDs := &schemapb.IDs{}
+	notFoundCount := 0
+	for i := range existing {
+		exists, err := existingChecker.Contains(requestIDs, i)
+		if err != nil {
+			return nil, merr.WrapErrDataIntegrity(err, "failed to classify full AutoID Upsert primary key")
+		}
+		existing[i] = exists
+		if exists {
+			typeutil.AppendIDs(deleteIDs, requestIDs, i)
+		} else {
+			notFoundCount++
+		}
+	}
+	mlog.With(mlog.String("collectionName", it.req.GetCollectionName())).Debug(
+		ctx,
+		"classified full AutoID Upsert primary keys",
+		mlog.Int("existingCount", len(existing)-notFoundCount),
+		mlog.Int("notFoundCount", notFoundCount),
+		mlog.Int64("latency", tr.ElapseSpan().Milliseconds()),
+	)
+	return &fullAutoIDUpsertPlan{
+		requestIDs: requestIDs,
+		existing:   existing,
+		deleteIDs:  deleteIDs,
+	}, nil
+}
+
+// finalizeFullAutoIDUpsert preserves existing PKs and uses allocated RowIDs as
+// PKs only for missing rows. It sets response IDs in request order and prepares
+// the delete subset from the original lookup IDs.
+func (it *upsertTask) finalizeFullAutoIDUpsert(primaryField *schemapb.FieldSchema, plan *fullAutoIDUpsertPlan) error {
+	if plan == nil {
+		return merr.WrapErrServiceInternalMsg("full AutoID Upsert row plan is unavailable")
+	}
+	if len(plan.existing) != len(it.rowIDs) {
+		return merr.WrapErrServiceInternalMsg(
+			"full AutoID Upsert row plan size %d does not match allocated row count %d",
+			len(plan.existing),
+			len(it.rowIDs),
+		)
+	}
+	requestData, err := typeutil.GetPrimaryFieldData(it.upsertMsg.InsertMsg.GetFieldsData(), primaryField)
+	if err != nil {
+		return merr.WrapErrServiceInternalErr(err, "validated Upsert payload lost its primary key field")
+	}
+	if requestData.GetType() != primaryField.GetDataType() || typeutil.GetPKSize(requestData) != len(plan.existing) {
+		return merr.WrapErrServiceInternalMsg("validated Upsert primary key type or row count does not match the row plan")
+	}
+	// Reuse the PK rewrite without sharing Partial Update allocation or retry state.
+	allocatedIDs := make(map[int]int64)
+	for i, exists := range plan.existing {
+		if !exists {
+			allocatedIDs[i] = it.rowIDs[i]
+		}
+	}
+	insertIDs, err := checkUpsertPrimaryFieldDataWithAutoIDs(it.schema, it.upsertMsg.InsertMsg.FieldsData, uint64(len(it.rowIDs)), allocatedIDs)
+	if err != nil {
+		// The payload was already validated; a rewrite failure is an internal invariant violation.
+		return merr.WrapErrServiceInternalErr(err, "failed to finalize validated Upsert primary keys")
+	}
+
+	it.result.IDs = proto.Clone(insertIDs).(*schemapb.IDs)
+	it.oldIDs = plan.requestIDs
+	it.upsertMsg.DeleteMsg.PrimaryKeys = plan.deleteIDs
+	it.upsertMsg.DeleteMsg.NumRows = int64(typeutil.GetSizeOfIDs(plan.deleteIDs))
 	return nil
 }
 
@@ -754,7 +905,7 @@ func (it *upsertTask) allocateMissingPartialUpdateAutoIDs(missingRows []int) (*s
 	if it.partialUpdateOriginalFields == nil {
 		return nil, merr.WrapErrServiceInternalMsg("partial update: original request fields are unavailable")
 	}
-	if _, err := checkPartialUpdatePrimaryFieldData(it.schema, it.req.GetFieldsData(), it.upsertMsg.InsertMsg.NRows(), nil); err != nil {
+	if _, err := checkUpsertPrimaryFieldDataWithAutoIDs(it.schema, it.req.GetFieldsData(), it.upsertMsg.InsertMsg.NRows(), nil); err != nil {
 		return nil, err
 	}
 	begin, _, err := common.AllocAutoID(it.idAllocator.Alloc, uint32(len(missing)), Params.CommonCfg.ClusterID.GetAsUint64())
@@ -765,7 +916,7 @@ func (it *upsertTask) allocateMissingPartialUpdateAutoIDs(missingRows []int) (*s
 	for offset, row := range missing {
 		allocatedIDs[row] = begin + int64(offset)
 	}
-	rewrittenIDs, err := checkPartialUpdatePrimaryFieldData(it.schema, it.req.GetFieldsData(), it.upsertMsg.InsertMsg.NRows(), allocatedIDs)
+	rewrittenIDs, err := checkUpsertPrimaryFieldDataWithAutoIDs(it.schema, it.req.GetFieldsData(), it.upsertMsg.InsertMsg.NRows(), allocatedIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -1498,43 +1649,6 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 		it.upsertMsg.InsertMsg.FieldsData = ret
 	}
 
-	rowNums := uint32(it.upsertMsg.InsertMsg.NRows())
-	// set upsertTask.insertRequest.rowIDs
-	tr := timerecord.NewTimeRecorder("applyPK")
-	clusterID := Params.CommonCfg.ClusterID.GetAsUint64()
-	rowIDBegin, rowIDEnd, allocateErr := common.AllocAutoID(it.idAllocator.Alloc, rowNums, clusterID)
-	metrics.ProxyApplyPrimaryKeyLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(tr.ElapseSpan().Microseconds()) / 1000.0)
-	if allocateErr != nil {
-		log.Warn(ctx, "failed to allocate auto id for upsert",
-			mlog.String("collectionName", collectionName),
-			mlog.Int64("collectionID", it.upsertMsg.InsertMsg.CollectionID),
-			mlog.Uint32("rowNums", rowNums),
-			mlog.Err(allocateErr))
-		return allocateErr
-	}
-
-	it.upsertMsg.InsertMsg.RowIDs = make([]UniqueID, rowNums)
-	it.rowIDs = make([]UniqueID, rowNums)
-	for i := rowIDBegin; i < rowIDEnd; i++ {
-		offset := i - rowIDBegin
-		it.upsertMsg.InsertMsg.RowIDs[offset] = i
-		it.rowIDs[offset] = i
-	}
-	// set upsertTask.insertRequest.timeStamps
-	rowNum := it.upsertMsg.InsertMsg.NRows()
-	it.upsertMsg.InsertMsg.Timestamps = make([]uint64, rowNum)
-	it.timestamps = make([]uint64, rowNum)
-	for index := range it.timestamps {
-		it.upsertMsg.InsertMsg.Timestamps[index] = it.BeginTs()
-		it.timestamps[index] = it.BeginTs()
-	}
-	// set result.SuccIndex
-	sliceIndex := make([]uint32, rowNums)
-	for i := uint32(0); i < rowNums; i++ {
-		sliceIndex[i] = i
-	}
-	it.result.SuccIndex = sliceIndex
-
 	var err error
 	if it.schema.EnableDynamicField {
 		var err error
@@ -1559,14 +1673,13 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 
 	allFields := typeutil.GetAllFieldSchemas(it.schema.CollectionSchema)
 
-	// Partial update has already resolved existing or newly allocated AutoID
-	// PKs. Keep them so delete, insert, and CAS address the same row.
-	it.result.IDs, it.oldIDs, err = checkUpsertPrimaryFieldData(
+	// Validate and retain the caller-supplied lookup IDs before any allocator
+	// call. Full AutoID Upsert replaces only missing rows after classification.
+	requestIDs, err := checkUpsertPrimaryFieldData(
 		ctx,
 		allFields,
 		it.schema.CollectionSchema,
 		it.upsertMsg.InsertMsg,
-		it.req.GetPartialUpdate(),
 	)
 	if err != nil {
 		log.Warn(ctx, "check primary field data and hash primary key failed when upsert",
@@ -1620,6 +1733,65 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 		return err
 	}
 
+	primaryField, err := typeutil.GetPrimaryFieldSchema(it.schema.CollectionSchema)
+	if err != nil {
+		return err
+	}
+	fullAutoIDUpsert := primaryField.GetAutoID() && !it.req.GetPartialUpdate()
+	var fullAutoIDPlan *fullAutoIDUpsertPlan
+	// Partial Upsert already classifies rows during its read-and-merge phase.
+	if fullAutoIDUpsert {
+		fullAutoIDPlan, err = it.classifyFullAutoIDUpsert(ctx, requestIDs, primaryField)
+		if err != nil {
+			return err
+		}
+	}
+
+	// Every inserted row version needs a new internal RowID, even when its
+	// business PK is preserved. Missing AutoID rows also use it as their PK.
+	rowNums := uint32(it.upsertMsg.InsertMsg.NRows())
+	tr := timerecord.NewTimeRecorder("applyPK")
+	clusterID := Params.CommonCfg.ClusterID.GetAsUint64()
+	rowIDBegin, rowIDEnd, allocateErr := common.AllocAutoID(it.idAllocator.Alloc, rowNums, clusterID)
+	metrics.ProxyApplyPrimaryKeyLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(tr.ElapseSpan().Microseconds()) / 1000.0)
+	if allocateErr != nil {
+		log.Warn(ctx, "failed to allocate auto id for upsert",
+			mlog.String("collectionName", collectionName),
+			mlog.Int64("collectionID", it.upsertMsg.InsertMsg.CollectionID),
+			mlog.Uint32("rowNums", rowNums),
+			mlog.Err(allocateErr))
+		return allocateErr
+	}
+
+	it.upsertMsg.InsertMsg.RowIDs = make([]UniqueID, rowNums)
+	it.rowIDs = make([]UniqueID, rowNums)
+	for i := rowIDBegin; i < rowIDEnd; i++ {
+		offset := i - rowIDBegin
+		it.upsertMsg.InsertMsg.RowIDs[offset] = i
+		it.rowIDs[offset] = i
+	}
+	rowNum := it.upsertMsg.InsertMsg.NRows()
+	it.upsertMsg.InsertMsg.Timestamps = make([]uint64, rowNum)
+	it.timestamps = make([]uint64, rowNum)
+	for index := range it.timestamps {
+		it.upsertMsg.InsertMsg.Timestamps[index] = it.BeginTs()
+		it.timestamps[index] = it.BeginTs()
+	}
+	sliceIndex := make([]uint32, rowNums)
+	for i := uint32(0); i < rowNums; i++ {
+		sliceIndex[i] = i
+	}
+	it.result.SuccIndex = sliceIndex
+
+	if fullAutoIDUpsert {
+		if err := it.finalizeFullAutoIDUpsert(primaryField, fullAutoIDPlan); err != nil {
+			return err
+		}
+	} else {
+		it.result.IDs = proto.Clone(requestIDs).(*schemapb.IDs)
+		it.oldIDs = requestIDs
+	}
+
 	if err := checkMaxInsertSize(ctx, "upsert", it.upsertMsg.InsertMsg.Size()); err != nil {
 		return err
 	}
@@ -1635,7 +1807,8 @@ func (it *upsertTask) deletePreExecute(ctx context.Context) error {
 		mlog.String("collectionName", collName))
 
 	if it.upsertMsg.DeleteMsg.PrimaryKeys == nil {
-		// if primary keys are not set by queryPreExecute, use oldIDs to delete all given records
+		// Fall back only when no delete subset was prepared; an empty subset
+		// means no lookup IDs should be deleted.
 		it.upsertMsg.DeleteMsg.PrimaryKeys = it.oldIDs
 	}
 	if typeutil.GetSizeOfIDs(it.upsertMsg.DeleteMsg.PrimaryKeys) == 0 {
