@@ -107,18 +107,7 @@ func TestCleanupQueryNodeCollectionMetrics(t *testing.T) {
 	QueryNodeNumEntities.WithLabelValues("default", "other_collection", nodeIDStr, otherCollectionIDStr, "growing").Set(200)
 
 	// Helper function to count metrics
-	countCounterMetrics := func(vec *prometheus.CounterVec) int {
-		ch := make(chan prometheus.Metric, 100)
-		vec.Collect(ch)
-		close(ch)
-		count := 0
-		for range ch {
-			count++
-		}
-		return count
-	}
-
-	countGaugeMetrics := func(vec *prometheus.GaugeVec) int {
+	countMetrics := func(vec prometheus.Collector) int {
 		ch := make(chan prometheus.Metric, 100)
 		vec.Collect(ch)
 		close(ch)
@@ -130,16 +119,16 @@ func TestCleanupQueryNodeCollectionMetrics(t *testing.T) {
 	}
 
 	// Record counts before cleanup
-	consumerCountBefore := countCounterMetrics(QueryNodeConsumerMsgCount)
-	numEntitiesBefore := countGaugeMetrics(QueryNodeNumEntities)
+	consumerCountBefore := countMetrics(QueryNodeConsumerMsgCount)
+	numEntitiesBefore := countMetrics(QueryNodeNumEntities)
 
 	// Clean up metrics for the target collection
 	CleanupQueryNodeCollectionMetrics(nodeID, collectionID)
 
 	// Verify that the target collection's metrics are cleaned up
 	// and other collection's metrics still exist
-	consumerCountAfter := countCounterMetrics(QueryNodeConsumerMsgCount)
-	numEntitiesAfter := countGaugeMetrics(QueryNodeNumEntities)
+	consumerCountAfter := countMetrics(QueryNodeConsumerMsgCount)
+	numEntitiesAfter := countMetrics(QueryNodeNumEntities)
 
 	// At least one metric should be removed from each
 	assert.Less(t, consumerCountAfter, consumerCountBefore)
@@ -531,27 +520,30 @@ func labelIdentifiers(t *testing.T) map[string]string {
 	return result
 }
 
-// vecVariableLabels returns the variable label names of a
-// `prometheus.NewXxxVec(opts, []string{...})` expression. Identifiers are kept
+// vecVariableLabels returns the variable label names of either a
+// `prometheus.NewXxxVec(opts, []string{...})` expression or one of this
+// package's cardinality-aware `newXxxVec` constructors. Identifiers are kept
 // as-is; string literals are resolved to their identifier via labelIdentByValue.
 func vecVariableLabels(expr ast.Expr, labelIdentByValue map[string]string) (map[string]struct{}, bool) {
 	call, ok := expr.(*ast.CallExpr)
 	if !ok || len(call.Args) == 0 {
 		return nil, false
 	}
-	sel, ok := call.Fun.(*ast.SelectorExpr)
-	if !ok || !strings.HasSuffix(sel.Sel.Name, "Vec") {
+	if !isMetricVecConstructor(call.Fun) {
 		return nil, false
 	}
-	pkg, ok := sel.X.(*ast.Ident)
-	if !ok || pkg.Name != "prometheus" {
-		return nil, false
+	var lit *ast.CompositeLit
+	for _, arg := range call.Args {
+		candidate, ok := arg.(*ast.CompositeLit)
+		if !ok {
+			continue
+		}
+		if _, ok := candidate.Type.(*ast.ArrayType); ok {
+			lit = candidate
+			break
+		}
 	}
-	lit, ok := call.Args[len(call.Args)-1].(*ast.CompositeLit)
-	if !ok {
-		return nil, false
-	}
-	if _, ok := lit.Type.(*ast.ArrayType); !ok {
+	if lit == nil {
 		return nil, false
 	}
 	labels := make(map[string]struct{}, len(lit.Elts))
@@ -572,4 +564,16 @@ func vecVariableLabels(expr ast.Expr, labelIdentByValue map[string]string) (map[
 		}
 	}
 	return labels, true
+}
+
+func isMetricVecConstructor(expr ast.Expr) bool {
+	switch function := expr.(type) {
+	case *ast.SelectorExpr:
+		pkg, ok := function.X.(*ast.Ident)
+		return ok && pkg.Name == "prometheus" && strings.HasSuffix(function.Sel.Name, "Vec")
+	case *ast.Ident:
+		return strings.HasPrefix(function.Name, "new") && strings.HasSuffix(function.Name, "Vec")
+	default:
+		return false
+	}
 }
