@@ -203,30 +203,36 @@ func TestManifestIndexRollbackCopyDrainAndDuplicateResult(t *testing.T) {
 }
 
 func TestManifestIndexRollbackRejectsLateCleanedCopyResult(t *testing.T) {
-	m, catalog, _, _ := rollbackFixture(t)
-	ctx := context.TODO()
-	copies, err := NewCopySegmentMeta(ctx, catalog, m, nil, nil)
-	require.NoError(t, err)
-	task := createTestCopyTask(restartCollID, restartSegID).(*copySegmentTask)
-	task.task.Load().IndexWriteToManifest = proto.Bool(true)
-	task.task.Load().CleanupPrefixes = []string{"files/owned-copy-prefix/"}
-	require.NoError(t, copies.AddTask(ctx, task))
-	require.NoError(t, copies.UpdateTask(ctx, task.GetTaskId(),
-		UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskFailed), updateCopyTaskCleanup(false)))
-	inspector := newManifestIndexRollbackInspector(ctx, m, copies)
-	inspector.runOnce(ctx)
-	inspector.runOnce(ctx)
-	require.True(t, inspector.ready)
-	before := m.GetSegment(ctx, restartSegID).GetManifestPath()
-	err = SyncCopySegmentTask(task, &datapb.QueryCopySegmentResponse{
-		State: datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
-	}, copies, m)
-	require.ErrorContains(t, err, "cannot publish a failed copy task")
-	assert.Equal(t, before, m.GetSegment(ctx, restartSegID).GetManifestPath())
-	assert.False(t, m.indexMeta.isSegmentIndexCatalogAbsent(restartBuildID))
-	assert.True(t, copies.GetTask(ctx, task.GetTaskId()).GetCleanupRequired())
-	inspector.runOnce(ctx)
-	assert.False(t, inspector.ready, "rearmed cleanup must remain pending")
+	for _, prefix := range []string{"files/owned-copy-prefix/", ""} {
+		t.Run(prefix, func(t *testing.T) {
+			m, catalog, _, _ := rollbackFixture(t)
+			ctx := context.TODO()
+			copies, err := NewCopySegmentMeta(ctx, catalog, m, nil, nil)
+			require.NoError(t, err)
+			task := createTestCopyTask(restartCollID, restartSegID).(*copySegmentTask)
+			task.task.Load().IndexWriteToManifest = proto.Bool(true)
+			if prefix != "" {
+				task.task.Load().CleanupPrefixes = []string{prefix}
+			}
+			require.NoError(t, copies.AddTask(ctx, task))
+			require.NoError(t, copies.UpdateTask(ctx, task.GetTaskId(),
+				UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskFailed), updateCopyTaskCleanup(false)))
+			inspector := newManifestIndexRollbackInspector(ctx, m, copies)
+			inspector.runOnce(ctx)
+			inspector.runOnce(ctx)
+			require.True(t, inspector.ready)
+			before := m.GetSegment(ctx, restartSegID).GetManifestPath()
+			err = SyncCopySegmentTask(task, &datapb.QueryCopySegmentResponse{
+				State: datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
+			}, copies, m)
+			require.ErrorContains(t, err, "cannot publish a failed copy task")
+			assert.Equal(t, before, m.GetSegment(ctx, restartSegID).GetManifestPath())
+			assert.False(t, m.indexMeta.isSegmentIndexCatalogAbsent(restartBuildID))
+			assert.True(t, copies.GetTask(ctx, task.GetTaskId()).GetCleanupRequired())
+			inspector.runOnce(ctx)
+			assert.False(t, inspector.ready, "rearmed cleanup must remain pending")
+		})
+	}
 }
 
 func TestManifestIndexRollbackEmptyMarkerAndUnpublishedCopy(t *testing.T) {
