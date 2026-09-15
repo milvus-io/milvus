@@ -1309,6 +1309,17 @@ func TestFileConfigProjectionRedactsByDefault(t *testing.T) {
 	assert.Equal(t, "unknown-secret", raw["unknown.key"])
 }
 
+func TestGetByPreservesKnowhereKeyCase(t *testing.T) {
+	mgr, err := Init()
+	require.NoError(t, err)
+	mgr.SetConfig("knowhere.cluster.compactionPlan.planner", "ivf")
+
+	assert.Equal(t, map[string]string{"planner": "ivf"}, mgr.GetBy(
+		WithPrefix("knowhere.cluster.compactionPlan."),
+		RemovePrefix("knowhere.cluster.compactionPlan."),
+	))
+}
+
 func TestDeadlock(t *testing.T) {
 	mgr, _ := Init()
 

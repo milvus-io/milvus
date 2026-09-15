@@ -106,6 +106,19 @@ func TestKnowhereConfig_GetAnalyzeParams(t *testing.T) {
 	}, cfg.GetAnalyzeParams())
 }
 
+func TestKnowhereConfig_GetCompactionPlanParams(t *testing.T) {
+	bt := NewBaseTable(SkipRemote(true))
+	cfg := &knowhereConfig{}
+	cfg.init(bt)
+
+	assert.NoError(t, bt.Save("knowhere.cluster.compactionPlan.planner", "ivf"))
+	assert.NoError(t, bt.Save("knowhere.cluster.compactionPlan.compaction_neighbor_k", "32"))
+	assert.Equal(t, map[string]string{
+		"planner":               "ivf",
+		"compaction_neighbor_k": "32",
+	}, cfg.GetCompactionPlanParams())
+}
+
 func TestKnowhereConfig_UpdateParameter(t *testing.T) {
 	bt := NewBaseTable(SkipRemote(true))
 	cfg := &knowhereConfig{}

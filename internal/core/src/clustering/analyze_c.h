@@ -36,6 +36,38 @@ GetAnalyzeResultMeta(CAnalyze analyze,
                      void* id_mapping_paths,
                      int64_t* id_mapping_sizes);
 
+typedef struct CClusteringCentroidGroup {
+    uint32_t centroid_group_id;
+    uint64_t rows;
+    uint64_t centroid_count;
+    const uint32_t* centroids;
+} CClusteringCentroidGroup;
+
+CStatus
+BuildClusteringCompactionPlan(CClusteringCompactionPlan* result,
+                              const uint8_t* serialized_centroids,
+                              uint64_t serialized_centroids_len,
+                              int32_t field_type,
+                              const uint64_t* centroid_counts,
+                              uint64_t centroid_count,
+                              const char* cluster_type,
+                              const char* params_json);
+
+CStatus
+GetClusteringCompactionPlanMeta(CClusteringCompactionPlan plan,
+                                uint64_t* row_count,
+                                uint32_t* centroid_count,
+                                const uint64_t** centroid_counts,
+                                uint64_t* group_count);
+
+CStatus
+GetClusteringCompactionPlanGroup(CClusteringCompactionPlan plan,
+                                 uint64_t group_offset,
+                                 CClusteringCentroidGroup* group);
+
+CStatus
+DeleteClusteringCompactionPlan(CClusteringCompactionPlan plan);
+
 #ifdef __cplusplus
 };
 #endif
