@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/util/function/validator"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
@@ -106,7 +107,7 @@ func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaste
 		}
 	}
 	if plan.HasFunction() {
-		if err := schemautil.ValidateAlterSchemaAddFunctionPlan(plan); err != nil {
+		if err := schemautil.ValidateAlterSchemaAddFunctionPlan(plan, typeutil.IsExternalCollection(coll.ToCollectionSchemaPB())); err != nil {
 			return err
 		}
 		if err := schemautil.CheckNoFunctionCascade(coll.ToCollectionSchemaPB().GetFunctions(), plan.Function); err != nil {
@@ -119,11 +120,24 @@ func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaste
 		}
 	}
 
-	schema, properties, err := buildAlterSchemaAddSchema(coll, plan)
+	assignedFieldID, sourceSchema, err := resolveAlterSchemaAddFieldID(coll, plan)
 	if err != nil {
 		return err
 	}
-	if err := validateSchemaEvolution(coll, schema); err != nil {
+	schema, properties, err := buildAlterSchemaAddSchema(coll, plan, assignedFieldID)
+	if err != nil {
+		return err
+	}
+	if sourceSchema != nil {
+		if err := typeutil.ValidateMilvusTableSchemaIdentity(schema, sourceSchema, true); err != nil {
+			return merr.Wrap(err, "milvus-table target schema does not match source snapshot schema")
+		}
+	}
+	var allowedHistoricalFieldIDs []int64
+	if sourceSchema != nil && plan.Kind == schemautil.AlterSchemaAddField {
+		allowedHistoricalFieldIDs = []int64{assignedFieldID}
+	}
+	if err := validateSchemaEvolution(coll, schema, allowedHistoricalFieldIDs...); err != nil {
 		return err
 	}
 	if plan.HasFunction() {
@@ -163,7 +177,7 @@ func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaste
 	channels := make([]string, 0, len(coll.VirtualChannelNames)+1)
 	channels = append(channels, streaming.WAL().ControlChannel())
 	channels = append(channels, coll.VirtualChannelNames...)
-	msg := message.NewAlterCollectionMessageBuilderV2().
+	msgBuilder := message.NewAlterCollectionMessageBuilderV2().
 		WithHeader(&messagespb.AlterCollectionMessageHeader{
 			DbId:         coll.DBID,
 			CollectionId: coll.CollectionID,
@@ -178,7 +192,11 @@ func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaste
 				Properties:        properties,
 				BoundFieldIndexes: boundFieldIndexes,
 			},
-		}).
+		})
+	if typeutil.IsExternalCollection(schema) {
+		msgBuilder.WithUnreplicable()
+	}
+	msg := msgBuilder.
 		WithBroadcast(channels).
 		MustBuildBroadcast()
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
@@ -320,7 +338,69 @@ func prepareAlterSchemaAddField(coll *model.Collection, plan *schemautil.AlterSc
 	return nil
 }
 
-func buildAlterSchemaAddSchema(coll *model.Collection, plan *schemautil.AlterSchemaAddPlan) (*schemapb.CollectionSchema, []*commonpb.KeyValuePair, error) {
+// resolveAlterSchemaAddFieldID assigns source field IDs for milvus-table data
+// columns and keeps target-only fields above both source and target high-water
+// marks. Other collections use the normal collection high-water mark.
+func resolveAlterSchemaAddFieldID(
+	coll *model.Collection,
+	plan *schemautil.AlterSchemaAddPlan,
+) (int64, *schemapb.CollectionSchema, error) {
+	if !plan.HasField() {
+		return 0, nil, nil
+	}
+
+	assignedFieldID := maxAssignedFieldIDFromSchema(coll.ToCollectionSchemaPB()) + 1
+	targetSchema := coll.ToCollectionSchemaPB()
+	if !typeutil.NewStorageColumnResolver(targetSchema).IsMilvusTable() {
+		return assignedFieldID, nil, nil
+	}
+
+	metadata, err := packed.ReadMilvusTableSnapshotMetadata(
+		targetSchema.GetExternalSource(),
+		targetSchema.GetExternalSpec(),
+		createMilvusTableSnapshotStorageConfig(),
+		packed.ExternalSpecContext{
+			CollectionID: coll.CollectionID,
+			Source:       targetSchema.GetExternalSource(),
+			Spec:         targetSchema.GetExternalSpec(),
+		},
+	)
+	if err != nil {
+		return 0, nil, merr.Wrap(err, "read milvus-table snapshot metadata for schema alignment")
+	}
+	sourceSchema := metadata.GetCollection().GetSchema()
+	if sourceSchema == nil {
+		return 0, nil, merr.WrapErrParameterInvalidMsg("milvus-table snapshot metadata missing collection schema")
+	}
+	if typeutil.IsExternalCollection(sourceSchema) {
+		return 0, nil, merr.WrapErrParameterInvalidMsg("milvus-table external collection cannot use an external collection snapshot as source")
+	}
+	if plan.Kind != schemautil.AlterSchemaAddField {
+		return nextMilvusTableTargetOnlyFieldID(sourceSchema, targetSchema), sourceSchema, nil
+	}
+
+	sourceField := milvusTableSourceFieldsByName(sourceSchema)[plan.Field.GetExternalField()]
+	if sourceField == nil {
+		return 0, nil, merr.WrapErrParameterInvalidMsg(
+			"milvus-table target field %q maps to missing source field %q",
+			plan.Field.GetName(),
+			plan.Field.GetExternalField(),
+		)
+	}
+	for _, field := range coll.Fields {
+		if field.FieldID == sourceField.GetFieldID() {
+			return 0, nil, merr.WrapErrParameterInvalidMsg(
+				"milvus-table source field %q uses field ID %d already assigned to target field %q",
+				sourceField.GetName(),
+				sourceField.GetFieldID(),
+				field.Name,
+			)
+		}
+	}
+	return sourceField.GetFieldID(), sourceSchema, nil
+}
+
+func buildAlterSchemaAddSchema(coll *model.Collection, plan *schemautil.AlterSchemaAddPlan, assignedFieldID int64) (*schemapb.CollectionSchema, []*commonpb.KeyValuePair, error) {
 	schema := coll.ToCollectionSchemaPB()
 	name2id := make(map[string]int64, len(coll.Fields)+1)
 	for _, field := range coll.Fields {
@@ -328,7 +408,7 @@ func buildAlterSchemaAddSchema(coll *model.Collection, plan *schemautil.AlterSch
 	}
 
 	if plan.HasField() {
-		plan.Field.FieldID = maxAssignedFieldIDFromSchema(schema) + 1
+		plan.Field.FieldID = assignedFieldID
 		name2id[plan.Field.GetName()] = plan.Field.GetFieldID()
 	}
 	if plan.HasFunction() {
@@ -383,6 +463,15 @@ func buildAlterSchemaAddSchema(coll *model.Collection, plan *schemautil.AlterSch
 	}
 	properties := updateMaxFieldIDProperty(coll.Properties, maxAssignedFieldIDFromSchema(schema))
 	schema.Properties = properties
+	if typeutil.NewStorageColumnResolver(schema).IsMilvusTable() {
+		if err := typeutil.AddMilvusTableTargetOnlyFieldIDs(
+			schema,
+			currentMilvusTableTargetOnlyFieldIDs(schema)...,
+		); err != nil {
+			return nil, nil, err
+		}
+		properties = schema.GetProperties()
+	}
 	return schema, properties, nil
 }
 
@@ -415,6 +504,15 @@ func (c *Core) broadcastAlterCollectionSchemaDrop(ctx context.Context, broadcast
 	if err != nil {
 		return err
 	}
+	if typeutil.NewStorageColumnResolver(coll.ToCollectionSchemaPB()).IsMilvusTable() {
+		if err := typeutil.AddMilvusTableTargetOnlyFieldIDs(
+			schema,
+			currentMilvusTableTargetOnlyFieldIDs(coll.ToCollectionSchemaPB())...,
+		); err != nil {
+			return err
+		}
+		properties = schema.GetProperties()
+	}
 	if err := validateSchemaEvolution(coll, schema); err != nil {
 		return err
 	}
@@ -431,7 +529,7 @@ func (c *Core) broadcastAlterCollectionSchemaDrop(ctx context.Context, broadcast
 	channels := make([]string, 0, len(coll.VirtualChannelNames)+1)
 	channels = append(channels, streaming.WAL().ControlChannel())
 	channels = append(channels, coll.VirtualChannelNames...)
-	msg := message.NewAlterCollectionMessageBuilderV2().
+	msgBuilder := message.NewAlterCollectionMessageBuilderV2().
 		WithHeader(&messagespb.AlterCollectionMessageHeader{
 			DbId:         coll.DBID,
 			CollectionId: coll.CollectionID,
@@ -446,7 +544,11 @@ func (c *Core) broadcastAlterCollectionSchemaDrop(ctx context.Context, broadcast
 				Schema:     schema,
 				Properties: properties,
 			},
-		}).
+		})
+	if typeutil.IsExternalCollection(schema) {
+		msgBuilder.WithUnreplicable()
+	}
+	msg := msgBuilder.
 		WithBroadcast(channels).
 		MustBuildBroadcast()
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
