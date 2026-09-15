@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
+	paramconfig "github.com/milvus-io/milvus/pkg/v3/config" // aliased: the request-loop variable below is named config
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -65,6 +66,7 @@ func RegisterMgrRoute(s *mixCoordImpl) {
 			management.Register(&management.Handler{
 				Path:        route.path,
 				HandlerFunc: route.handler,
+				AdminAuth:   true,
 			})
 		}
 	})
@@ -1335,11 +1337,29 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 		seen[config.Key] = struct{}{}
 
 		// Check if it's mqtype configuration
-		normalizedKey := strings.ToLower(strings.ReplaceAll(config.Key, "/", "."))
-		if strings.Contains(normalizedKey, "mqtype") || strings.Contains(normalizedKey, "mq.type") {
+		// The identity the key is stored under, shared with pkg/config rather
+		// than recomputed here: separators are stripped, not translated, so a
+		// hand-rolled normalization would let common_security_adminAuthEnabled
+		// -- or the separator-free spelling -- land on the same etcd key while
+		// missing every guard below.
+		normalizedKey := paramconfig.FormatKey(config.Key)
+		if strings.Contains(normalizedKey, "mqtype") {
 			logger.Info(request.Context(), "HandleAlterConfig attempted to modify mqtype",
 				mlog.String("key", config.Key))
 			writeJSONError(writer, fmt.Sprintf("mqtype configuration cannot be modified through this endpoint. Please use the alterWAL endpoint instead. Invalid key: %s", config.Key), http.StatusBadRequest)
+			return
+		}
+
+		// The management-plane auth gate is not settable here. This endpoint is
+		// itself behind that gate, so allowing it would mean: while the gate is
+		// off, anyone who can reach port 9091 -- the exposure the gate exists to
+		// close -- writes false into etcd, and because the etcd source outranks
+		// file and env, the operator's later adminAuthEnabled: true in yaml
+		// never takes effect and nothing says so.
+		if normalizedKey == paramconfig.FormatKey(paramtable.Get().CommonCfg.AdminAuthEnabled.Key) {
+			logger.Info(request.Context(), "HandleAlterConfig attempted to modify the management auth gate",
+				mlog.String("key", config.Key))
+			writeJSONError(writer, fmt.Sprintf("%s cannot be modified through this endpoint; set it in the configuration file. Invalid key: %s", paramtable.Get().CommonCfg.AdminAuthEnabled.Key, config.Key), http.StatusBadRequest)
 			return
 		}
 
