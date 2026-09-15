@@ -8377,7 +8377,7 @@ ChunkedSegmentSealedImpl::SetLoadInfo(
         current,
         MakeStateDelta(
             schema_snapshot, published, static_cast<Timestamp>(commit_ts))));
-    LOG_INFO(
+    LOG_DEBUG(
         "SetLoadInfo for segment {}, num_rows: {}, index count: {}, "
         "storage_version: {}, use_take_for_output: {}, commit_ts: {}",
         id_,
@@ -9241,7 +9241,7 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx,
 
     auto snapshot = CapturePublishedState();
     auto num_rows = snapshot->load_info->GetNumOfRows();
-    LOG_INFO("Loading segment {} with {} rows", id_, num_rows);
+    LOG_DEBUG("Loading segment {} with {} rows", id_, num_rows);
 
     SegmentLoadInfo mutable_copy(snapshot->load_info->GetProto(),
                                  snapshot->schema);
@@ -9251,11 +9251,11 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx,
         mutable_copy.SetTextIndexCreated(fid);
     }
     auto diff = mutable_copy.GetLoadDiff();
-    LOG_WARN("Load segment {} with diff {}", id_, diff.ToString());
+    LOG_DEBUG("Load segment {} with diff {}", id_, diff.ToString());
 
     ApplyLoadDiff(op_ctx, mutable_copy, diff);
 
-    LOG_INFO("Successfully loaded segment {} with {} rows", id_, num_rows);
+    LOG_DEBUG("Successfully loaded segment {} with {} rows", id_, num_rows);
 }
 
 void

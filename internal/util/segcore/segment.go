@@ -608,14 +608,16 @@ func convertTextIndexStats(src map[int64]*datapb.TextIndexStats, basePaths map[i
 			}
 			files = stripped
 		}
-		mlog.Info(context.TODO(), "convertTextIndexStats",
-			mlog.Int64("fieldID", v.GetFieldID()),
-			mlog.Int64("buildID", v.GetBuildID()),
-			mlog.Int64("version", v.GetVersion()),
-			mlog.String("basePath", basePath),
-			mlog.Int("fileCount", len(files)),
-			mlog.Strings("files", files),
-		)
+		if mlog.LevelEnabled(mlog.DebugLevel) {
+			mlog.Debug(context.TODO(), "convertTextIndexStats",
+				mlog.Int64("fieldID", v.GetFieldID()),
+				mlog.Int64("buildID", v.GetBuildID()),
+				mlog.Int64("version", v.GetVersion()),
+				mlog.String("basePath", basePath),
+				mlog.Int("fileCount", len(files)),
+				mlog.Strings("files", files),
+			)
+		}
 
 		result[k] = &segcorepb.TextIndexStats{
 			FieldID:                   v.GetFieldID(),
