@@ -295,10 +295,10 @@ class FixtureCipherPlugin final : public ICipherPlugin {
     GetEncryptor(int64_t ez_id, int64_t coll_id) const override {
         auto ezk = deriveEZKey(ez_id);
         auto nonce = newNonce();
+        auto dek = deriveDataKey(ezk, nonce, ez_id, coll_id);
         auto tag = deriveEDEKTag(ezk, nonce, ez_id, coll_id);
         auto edek = std::string(kEDEKVersion) + ":" + hexEncode(nonce) + ":" +
                     hexEncode(tag);
-        auto dek = deriveDataKey(ezk, nonce, ez_id, coll_id);
         return {std::make_shared<FixtureEncryptor>(std::move(dek)),
                 std::move(edek)};
     }

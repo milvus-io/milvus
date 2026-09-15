@@ -134,6 +134,7 @@ func NewFFIPackedWriter(basePath string, schema *arrow.Schema, columnGroups []st
 
 		// Set encryption properties for the writer
 		extra[PropertyWriterEncEnable] = "true"
+		// GetEncParams returns Base64 text; Loon decodes it after the C string boundary.
 		extra[PropertyWriterEncKey] = C.GoString(cKey)
 		C.free(unsafe.Pointer(cKey))
 		extra[PropertyWriterEncMeta] = C.GoString(cMeta)

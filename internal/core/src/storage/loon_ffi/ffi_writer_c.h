@@ -31,7 +31,8 @@ extern "C" {
  *                             - ez_id: Encryption zone ID
  *                             - collection_id: The collection ID
  *                             - key: The encryption key string
- * @param[out] out_key Pointer to receive the encryption key (caller must free with free())
+ * @param[out] out_key Pointer to receive the Base64-encoded encryption key (caller must free with free()).
+ *                    Pass this text unchanged to Loon's writer.enc.key property.
  * @param[out] out_meta Pointer to receive the encoded key metadata (caller must free with free())
  *
  * @return CStatus Success status or error with message if failed
