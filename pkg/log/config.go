@@ -78,13 +78,17 @@ type Config struct {
 	// AsyncWriteFlushInterval is the interval to flush the logs
 	AsyncWriteFlushInterval time.Duration `toml:"async-write-flush-interval" json:"async-write-flush-interval"`
 
-	// AsyncWriteDroppedTimeout is the timeout to drop a log below AsyncWriteNonDroppableLevel if the buffer is full.
+	// AsyncWriteDroppedTimeout is the maximum time a log below AsyncWriteNonDroppableLevel waits for queue space.
+	// The log is dropped if the queue remains full when the timeout expires.
 	AsyncWriteDroppedTimeout time.Duration `toml:"async-write-dropped-timeout" json:"async-write-dropped-timeout"`
 
-	// AsyncWriteNonDroppableLevel is the level at which a log uses the larger of the drop and stop timeouts. Such logs can still be dropped.
+	// AsyncWriteNonDroppableLevel is the level at which a log uses a best-effort extended enqueue wait.
+	// At or above this level, a log waits at most max(AsyncWriteDroppedTimeout, AsyncWriteStopTimeout)
+	// for queue space and can still be dropped. The name is retained for compatibility.
 	AsyncWriteNonDroppableLevel string `toml:"async-write-non-droppable-level" json:"async-write-non-droppable-level"`
 
-	// AsyncWriteStopTimeout bounds shutdown and provides a minimum enqueue wait for logs at or above AsyncWriteNonDroppableLevel.
+	// AsyncWriteStopTimeout is the maximum time to wait for async logging to stop. It also contributes
+	// to the maximum enqueue wait for logs at or above AsyncWriteNonDroppableLevel.
 	AsyncWriteStopTimeout time.Duration `toml:"async-write-stop-timeout" json:"async-write-stop-timeout"`
 
 	// AsyncWritePendingLength is the maximum number of pending write requests, the exceeded log operation will be dropped
