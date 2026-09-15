@@ -44,22 +44,8 @@ func validateL1FunctionChain(repr *chain.ChainRepr) error {
 	for opIdx, op := range repr.Operators {
 		switch op.Type {
 		case chaintypes.OpTypeMap:
-			fn, err := chain.FunctionFromReprWithContext(op.Function, chaintypes.FunctionBuildContext{})
-			if err != nil {
-				return merr.WrapErrParameterInvalidMsg("op[%d]: %v", opIdx, err)
-			}
-			if len(op.Inputs) == 0 {
-				return merr.WrapErrParameterInvalidMsg("op[%d]: map operator requires inputs", opIdx)
-			}
-			if len(op.Outputs) == 0 {
-				return merr.WrapErrParameterInvalidMsg("op[%d]: map operator requires outputs", opIdx)
-			}
-			outputTypes := fn.OutputDataTypes()
-			if outputTypes != nil && len(op.Outputs) != len(outputTypes) {
-				return merr.WrapErrParameterInvalidMsg("op[%d]: map output columns count %d does not match function output count %d", opIdx, len(op.Outputs), len(outputTypes))
-			}
-			if !fn.IsRunnable(chaintypes.StageL1Rerank) {
-				return merr.WrapErrParameterInvalidMsg("op[%d] function %q does not support stage %q", opIdx, fn.Name(), chaintypes.StageL1Rerank)
+			if err := validateQueryNodeMapOp(&op, chaintypes.StageL1Rerank); err != nil {
+				return merr.Wrapf(err, "op[%d]", opIdx)
 			}
 		case chaintypes.OpTypeSort:
 			if op.Function != nil || len(op.Outputs) > 0 {
