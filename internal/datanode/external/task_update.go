@@ -305,6 +305,8 @@ func (t *RefreshExternalCollectionTask) GetKeptSegmentIDs() []int64 {
 
 // fragmentKey identifies the L1 data fragment. Delete overlays are handled as
 // manifest-only updates so L0 changes do not force a new target segment ID.
+// Existing file ranges are immutable by the external-table contract; overwrite
+// is unsupported. Properties are therefore not hashed to trigger segment rebuilds.
 func fragmentKey(f packed.Fragment) string {
 	return fmt.Sprintf("%s:%d:%d", f.FilePath, f.StartRow, f.EndRow)
 }
