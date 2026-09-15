@@ -1718,6 +1718,8 @@ knowhere:
   cluster:
     type: KMEANS # Clustering implementation registered in Knowhere. The value is passed through without normalization.
     analyze: # Parameters under this prefix are passed through to the clustering implementation.
+    compactionPlan: # Parameters under this prefix are passed through to BuildCompactionPlan.
+      planner: ivf
   AISAQ:
     build:
       max_degree: 56 # Maximum degree of the Vamana graph
