@@ -11,11 +11,13 @@
 
 #include <gtest/gtest.h>
 #include <cmath>
+#include <cstring>
 #include <filesystem>
 #include <functional>
 #include <fstream>
 #include <boost/filesystem.hpp>
 #include <numeric>
+#include <type_traits>
 #include <unordered_set>
 
 #include "common/Tracer.h"
@@ -116,6 +118,7 @@ CheckResultCorrectness(
     const milvus::storage::ChunkManagerPtr cm,
     int64_t segment_id,
     int64_t segment_id2,
+    const std::vector<T>& vectors,
     int64_t dim,
     int64_t nb,
     int expected_num_clusters,
@@ -128,9 +131,27 @@ CheckResultCorrectness(
     ReadPBFile(centroid_path, stats);
     std::vector<T> centroids;
     for (const auto& centroid : stats.centroids()) {
-        const auto& float_vector = centroid.float_vector();
-        for (float value : float_vector.data()) {
-            centroids.emplace_back(T(value));
+        if constexpr (std::is_same_v<T, float>) {
+            ASSERT_TRUE(centroid.has_float_vector());
+            for (float value : centroid.float_vector().data()) {
+                centroids.emplace_back(value);
+            }
+        } else if constexpr (std::is_same_v<T, float16>) {
+            ASSERT_TRUE(centroid.has_float16_vector());
+            ASSERT_EQ(centroid.float16_vector().size(), dim * sizeof(T));
+            const auto offset = centroids.size();
+            centroids.resize(offset + dim);
+            std::memcpy(centroids.data() + offset,
+                        centroid.float16_vector().data(),
+                        dim * sizeof(T));
+        } else if constexpr (std::is_same_v<T, bfloat16>) {
+            ASSERT_TRUE(centroid.has_bfloat16_vector());
+            ASSERT_EQ(centroid.bfloat16_vector().size(), dim * sizeof(T));
+            const auto offset = centroids.size();
+            centroids.resize(offset + dim);
+            std::memcpy(centroids.data() + offset,
+                        centroid.bfloat16_vector().data(),
+                        dim * sizeof(T));
         }
     }
     ASSERT_EQ(centroids.size(), expected_num_clusters * dim);
@@ -153,6 +174,30 @@ CheckResultCorrectness(
         ASSERT_TRUE(id < expected_num_clusters);
     }
     ASSERT_EQ(centroid_id_mapping.size(), nb);
+    ASSERT_EQ(vectors.size(), nb * dim);
+    ASSERT_EQ(mapping_stats.distance_to_centroid_size(), nb);
+    bool has_positive_distance = false;
+    for (int64_t row = 0; row < nb; ++row) {
+        const auto distance = mapping_stats.distance_to_centroid(row);
+        ASSERT_TRUE(std::isfinite(distance));
+        ASSERT_GE(distance, 0.0f);
+        float expected_distance = 0.0f;
+        const auto centroid_id = centroid_id_mapping[row];
+        for (int64_t d = 0; d < dim; ++d) {
+            const auto diff =
+                static_cast<float>(vectors[row * dim + d]) -
+                static_cast<float>(centroids[centroid_id * dim + d]);
+            expected_distance += diff * diff;
+        }
+        const auto relative_tolerance =
+            std::is_same_v<T, float> ? 1e-5f : 5e-2f;
+        const auto tolerance =
+            std::max(std::is_same_v<T, float> ? 1e-4f : 1e-2f,
+                     std::abs(expected_distance) * relative_tolerance);
+        ASSERT_NEAR(distance, expected_distance, tolerance);
+        has_positive_distance = has_positive_distance || distance > 0.0f;
+    }
+    ASSERT_TRUE(has_positive_distance);
     for (const auto num : mapping_stats.num_in_centroid()) {
         num_in_centroid.emplace_back(num);
     }
@@ -167,6 +212,12 @@ CheckResultCorrectness(
         }
         for (int64_t i = 0; i < mapping_stats2.num_in_centroid_size(); i++) {
             ASSERT_EQ(mapping_stats2.num_in_centroid(i), num_in_centroid[i]);
+        }
+        ASSERT_EQ(mapping_stats2.distance_to_centroid_size(), nb);
+        for (int64_t i = 0; i < mapping_stats2.distance_to_centroid_size();
+             ++i) {
+            ASSERT_FLOAT_EQ(mapping_stats2.distance_to_centroid(i),
+                            mapping_stats.distance_to_centroid(i));
         }
     }
     // remove files
@@ -200,7 +251,7 @@ test_run() {
 
     std::vector<T> data_gen(nb * dim);
     for (int64_t i = 0; i < nb * dim; ++i) {
-        data_gen[i] = rand();
+        data_gen[i] = T(static_cast<float>(rand()) / RAND_MAX);
     }
     auto field_data =
         storage::CreateFieldData(dtype, DataType::NONE, false, dim);
@@ -251,6 +302,7 @@ test_run() {
                                   cm,
                                   segment_id,
                                   segment_id2,
+                                  data_gen,
                                   dim,
                                   nb,
                                   config["num_clusters"],
@@ -268,6 +320,7 @@ test_run() {
                                   cm,
                                   segment_id,
                                   segment_id2,
+                                  data_gen,
                                   dim,
                                   nb,
                                   config["num_clusters"],
@@ -324,6 +377,7 @@ test_run() {
                                   cm,
                                   segment_id,
                                   segment_id2,
+                                  data_gen,
                                   dim,
                                   nb,
                                   config["num_clusters"],
@@ -342,6 +396,7 @@ test_run() {
                                   cm,
                                   segment_id,
                                   segment_id2,
+                                  data_gen,
                                   dim,
                                   nb,
                                   config["num_clusters"],
@@ -351,6 +406,30 @@ test_run() {
 
 TEST(MajorCompaction, Naive) {
     test_run<float, DataType::VECTOR_FLOAT>();
+}
+
+TEST(MajorCompaction, Float16) {
+    test_run<float16, DataType::VECTOR_FLOAT16>();
+}
+
+TEST(MajorCompaction, BFloat16) {
+    test_run<bfloat16, DataType::VECTOR_BFLOAT16>();
+}
+
+TEST(KmeansClusteringTest, AllocateSampleRowsAcrossSegments) {
+    const std::vector<int64_t> segment_ids{1, 2, 3};
+    const std::map<int64_t, int64_t> segment_rows{{1, 100}, {2, 2}, {3, 100}};
+
+    const auto allocation =
+        clustering::AllocateSegmentSampleRows(segment_ids, segment_rows, 102);
+    ASSERT_EQ(allocation.at(1), 50);
+    ASSERT_EQ(allocation.at(2), 2);
+    ASSERT_EQ(allocation.at(3), 50);
+    ASSERT_EQ(allocation.at(1) + allocation.at(2) + allocation.at(3), 102);
+
+    EXPECT_THROW(
+        clustering::AllocateSegmentSampleRows(segment_ids, segment_rows, 2),
+        SegcoreError);
 }
 
 // A StorageV3 segment carries its data in a loon manifest instead of insert
@@ -468,9 +547,17 @@ TEST(KmeansClusteringTest, ReadFromManifestStorageV3) {
     milvus::proto::clustering::ClusteringCentroidIdMappingStats mapping_stats;
     ReadPBFile(id_mapping_path, mapping_stats);
     ASSERT_EQ(mapping_stats.centroid_id_mapping_size(), num_rows);
+    ASSERT_EQ(mapping_stats.distance_to_centroid_size(), num_rows);
     for (const auto id : mapping_stats.centroid_id_mapping()) {
         ASSERT_LT(id, num_clusters);
     }
+    bool has_positive_distance = false;
+    for (const auto distance : mapping_stats.distance_to_centroid()) {
+        ASSERT_TRUE(std::isfinite(distance));
+        ASSERT_GE(distance, 0.0f);
+        has_positive_distance = has_positive_distance || distance > 0.0f;
+    }
+    ASSERT_TRUE(has_positive_distance);
     ASSERT_EQ(mapping_stats.num_in_centroid_size(), num_clusters);
     int64_t assigned = 0;
     for (const auto num : mapping_stats.num_in_centroid()) {
