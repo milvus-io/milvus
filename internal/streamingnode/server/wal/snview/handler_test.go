@@ -9,11 +9,14 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/internal/views/worknode/handler"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
@@ -402,7 +405,7 @@ func TestSNHandler_VChannelIndexTracksMultipleReplicas(t *testing.T) {
 	assert.Contains(t, indexed, replica2)
 
 	// Removing one replica keeps the other resolvable by vchannel.
-	h.makeOnEmpty(replica1)()
+	h.makeOnEmpty(replica1)(h.shards[replica1])
 	h.mu.Lock()
 	indexed, ok = h.shardsByVChannel[testVChannel]
 	h.mu.Unlock()
@@ -414,7 +417,7 @@ func TestSNHandler_VChannelIndexTracksMultipleReplicas(t *testing.T) {
 	assert.True(t, ok)
 
 	// Removing the last replica drops the vchannel key entirely.
-	h.makeOnEmpty(replica2)()
+	h.makeOnEmpty(replica2)(h.shards[replica2])
 	h.mu.Lock()
 	_, ok = h.shardsByVChannel[testVChannel]
 	h.mu.Unlock()
@@ -467,7 +470,7 @@ func TestSNHandler_ApplyViews_UnknownViewReportsUnrecoverable(t *testing.T) {
 	mgr := newMockResourceManager()
 	h := recoverSNQueryViewHandler(testPChannel, cat, mgr, nil)
 
-	// Non-Preparing, non-Dropped state for unknown view → Unrecoverable.
+	// Ready for an unknown view reports Unrecoverable.
 	rc := &reportCollector{}
 	h.ApplyViews([]handler.ApplyView{
 		{View: newSNViewWithState(1, viewpb.QueryViewState_QueryViewStateReady), OnReport: rc.onReport},
@@ -1140,4 +1143,220 @@ func TestSNHandler_Recover_AcquireCallbackFlow(t *testing.T) {
 
 	require.Equal(t, 1, rc.count())
 	assert.Equal(t, qviews.QueryViewStateUp, rc.last().State())
+}
+
+func TestSNHandler_UnknownViewsLeaveNoShard(t *testing.T) {
+	for _, state := range []qviews.QueryViewState{
+		qviews.QueryViewStateUp, qviews.QueryViewStateReady,
+		qviews.QueryViewStateDown, qviews.QueryViewStateDropped,
+	} {
+		t.Run(state.String(), func(t *testing.T) {
+			// Unknown views must not acquire, release, or persist resources.
+			h := recoverSNQueryViewHandler(testPChannel, nil, nil, nil)
+			view := newSNViewWithState(1, viewpb.QueryViewState(state))
+			before := view.IntoProto()
+			expected := qviews.QueryViewStateUnrecoverable
+			if state == qviews.QueryViewStateDown || state == qviews.QueryViewStateDropped {
+				expected = qviews.QueryViewStateDropped
+			}
+			for range 3 {
+				rc := &reportCollector{}
+				h.ApplyViews([]handler.ApplyView{{View: view, OnReport: rc.onReport}})
+				require.Equal(t, 1, rc.count())
+				require.Equal(t, expected, rc.last().State())
+				require.Equal(t, view.QueryViewKey(), rc.last().QueryViewKey())
+				require.True(t, proto.Equal(before, view.IntoProto()))
+				require.Empty(t, h.shards)
+				require.Empty(t, h.shardsByVChannel)
+			}
+		})
+	}
+}
+
+func TestSNHandler_AcquireLatestUpViewSkipsUnavailableReplicas(t *testing.T) {
+	mockey.PatchConvey("replica lookup skips shards without an Up view", t, func() {
+		acquires := make(map[qviews.QueryViewKey]AcquireResource)
+		mockey.Mock((*mockResourceManager).Acquire).To(func(_ *mockResourceManager, req AcquireResource) {
+			acquires[req.Key] = req
+		}).Build()
+		up := newFullSNViewWithState(1, viewpb.QueryViewState_QueryViewStateUp, 101, 102)
+		h := recoverSNQueryViewHandler(testPChannel, nil, newMockResourceManager(), []*viewpb.QueryViewOfShard{up.IntoProto()})
+		acquires[up.QueryViewKey()].OnReady()
+		unknown := qviews.ShardID{ReplicaID: qviews.UnknownReplicaID, VChannel: testVChannel}
+		// Include an empty shard (the old bug), plus valid non-serving states.
+		for i, state := range []qviews.QueryViewState{
+			qviews.QueryViewStateNil, qviews.QueryViewStatePreparing, qviews.QueryViewStateReady,
+			qviews.QueryViewStateUpRecovering, qviews.QueryViewStateDown,
+			qviews.QueryViewStateDropping, qviews.QueryViewStateUnrecoverable,
+		} {
+			id := qviews.ShardID{ReplicaID: testReplicaID + int64(i) + 1, VChannel: testVChannel}
+			shard := h.getOrCreateShard(id)
+			if state != qviews.QueryViewStateNil {
+				pb := up.IntoProto()
+				pb.Meta.ReplicaId = id.ReplicaID
+				view := qviews.NewQueryViewAtWorkNodeFromProto(pb)
+				sm := recoverSNQueryViewStateMachine(pb.Meta, pb.StreamingNode, pb.QueryNode)
+				sm.state = state
+				shard.views[view.Version()] = &snViewEntry{ApplyView: handler.ApplyView{View: view}, sm: sm}
+			}
+			// Explicit replica requests must never fall back to another replica.
+			_, err := h.AcquireLatestUpView(context.Background(), id)
+			require.True(t, viewerror.AsViewError(err).IsViewNotFound())
+		}
+		for range 128 {
+			lease, err := h.AcquireLatestUpView(context.Background(), unknown)
+			require.NoError(t, err)
+			require.Equal(t, testReplicaID, lease.Meta.GetReplicaId())
+			require.True(t, proto.Equal(up.IntoProto(), lease.View))
+			lease.Release()
+			lease.Release()
+		}
+		require.Zero(t, h.shards[up.ShardID()].views[up.Version()].queryRefs)
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		_, err := h.AcquireLatestUpView(ctx, unknown)
+		require.ErrorIs(t, err, context.Canceled)
+		// If all replicas are unavailable, preserve the retryable error code.
+		h.shards[up.ShardID()].views[up.Version()].sm.state = qviews.QueryViewStateDown
+		_, err = h.AcquireLatestUpView(context.Background(), unknown)
+		require.True(t, viewerror.AsViewError(err).IsViewNotFound())
+	})
+}
+
+func TestSNHandler_UnknownOldReplicaDoesNotRemoveServingReplica(t *testing.T) {
+	mockey.PatchConvey("late old-replica reports preserve the serving replica", t, func() {
+		var acquire AcquireResource
+		mockey.Mock((*mockResourceManager).Acquire).To(func(_ *mockResourceManager, req AcquireResource) {
+			acquire = req
+		}).Build()
+		up := newFullSNViewWithState(1, viewpb.QueryViewState_QueryViewStateUp, 101)
+		h := recoverSNQueryViewHandler(testPChannel, nil, newMockResourceManager(), []*viewpb.QueryViewOfShard{up.IntoProto()})
+		acquire.OnReady()
+		for _, state := range []qviews.QueryViewState{qviews.QueryViewStateUp, qviews.QueryViewStateDown, qviews.QueryViewStateDropped} {
+			old := up.IntoProto()
+			old.Meta.ReplicaId++
+			old.Meta.State = viewpb.QueryViewState(state)
+			rc := &reportCollector{}
+			h.ApplyViews([]handler.ApplyView{{View: qviews.NewQueryViewAtWorkNodeFromProto(old), OnReport: rc.onReport}})
+			require.Equal(t, 1, rc.count())
+			require.Len(t, h.shards, 1)
+			require.Equal(t, map[qviews.ShardID]struct{}{up.ShardID(): {}}, h.shardsByVChannel[testVChannel])
+			lease, err := h.AcquireLatestUpView(context.Background(), qviews.ShardID{ReplicaID: qviews.UnknownReplicaID, VChannel: testVChannel})
+			require.NoError(t, err)
+			require.True(t, proto.Equal(up.IntoProto(), lease.View))
+			lease.Release()
+		}
+	})
+}
+
+func TestSNHandler_AcquireLatestUpViewRetriesCandidateThatGoesDown(t *testing.T) {
+	mockey.PatchConvey("the first replica can go Down after the index snapshot", t, func() {
+		mockey.Mock((*mockResourceManager).Acquire).Return().Build()
+		first := newFullSNViewWithState(1, viewpb.QueryViewState_QueryViewStateUp, 101).IntoProto()
+		second := proto.Clone(first).(*viewpb.QueryViewOfShard)
+		second.Meta.ReplicaId++
+		h := recoverSNQueryViewHandler(testPChannel, nil, newMockResourceManager(), []*viewpb.QueryViewOfShard{first, second})
+		for _, shard := range h.shards {
+			for version := range shard.views {
+				shard.notifyRecoveringDone(version)
+			}
+		}
+		var original func(*snShardView, context.Context) (*QueryViewLease, error)
+		var unavailable *snShardView
+		attempts := 0
+		mockey.Mock((*snShardView).acquireLatestUpView).Origin(&original).To(func(shard *snShardView, ctx context.Context) (*QueryViewLease, error) {
+			attempts++
+			if attempts == 1 {
+				unavailable = shard
+				shard.mu.Lock()
+				for _, entry := range shard.views {
+					entry.sm.OnCoordStateDelivered(qviews.QueryViewStateDown)
+				}
+				shard.mu.Unlock()
+			}
+			return original(shard, ctx)
+		}).Build()
+		lease, err := h.AcquireLatestUpView(context.Background(), qviews.ShardID{ReplicaID: qviews.UnknownReplicaID, VChannel: testVChannel})
+		require.NoError(t, err)
+		defer lease.Release()
+		require.Equal(t, 2, attempts)
+		require.NotEqual(t, unavailable.shardID.ReplicaID, lease.Meta.GetReplicaId())
+	})
+}
+
+func TestSNHandler_AcquireLatestUpViewCanceledDuringReplicaLookup(t *testing.T) {
+	mockey.PatchConvey("cancellation during replica lookup is returned unchanged", t, func() {
+		h := recoverSNQueryViewHandler(testPChannel, nil, nil, nil)
+		h.getOrCreateShard(qviews.ShardID{ReplicaID: testReplicaID, VChannel: testVChannel})
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		var original func(*snShardView, context.Context) (*QueryViewLease, error)
+		mockey.Mock((*snShardView).acquireLatestUpView).Origin(&original).To(func(shard *snShardView, ctx context.Context) (*QueryViewLease, error) {
+			cancel()
+			return original(shard, ctx)
+		}).Build()
+		_, err := h.AcquireLatestUpView(ctx, qviews.ShardID{ReplicaID: qviews.UnknownReplicaID, VChannel: testVChannel})
+		require.ErrorIs(t, err, context.Canceled)
+	})
+}
+
+func TestSNHandler_ApplyRetriesDetachedShard(t *testing.T) {
+	mockey.PatchConvey("cleanup between lookup and apply cannot orphan a Preparing view", t, func() {
+		var acquire AcquireResource
+		acquireMock := mockey.Mock((*mockResourceManager).Acquire).To(func(_ *mockResourceManager, req AcquireResource) {
+			acquire = req
+		}).Build()
+		h := recoverSNQueryViewHandler(testPChannel, nil, newMockResourceManager(), nil)
+		view := newPreparingSNView(1)
+		old := h.getOrCreateShard(view.ShardID())
+		// Force cleanup after the handler has looked up old but before it
+		// acquires the shard lock, independent of goroutine scheduling.
+		var original func(*snShardView, []handler.ApplyView) bool
+		first := true
+		mockey.Mock((*snShardView).ApplyViews).Origin(&original).To(func(shard *snShardView, views []handler.ApplyView) bool {
+			if first {
+				first = false
+				require.Same(t, old, shard)
+				require.True(t, original(old, []handler.ApplyView{{View: newSNViewWithState(2, viewpb.QueryViewState_QueryViewStateUp)}}))
+			}
+			return original(shard, views)
+		}).Build()
+		rc := &reportCollector{}
+		h.ApplyViews([]handler.ApplyView{{View: view, OnReport: rc.onReport}})
+		replacement := h.shards[view.ShardID()]
+		require.NotNil(t, replacement)
+		require.NotSame(t, old, replacement)
+		require.True(t, old.detached)
+		require.Empty(t, old.views)
+		require.EqualValues(t, 1, acquireMock.Times())
+		acquire.OnReady()
+		require.Equal(t, qviews.QueryViewStateReady, rc.last().State())
+		// A delayed callback from the old instance must not erase the new one.
+		old.onEmpty(old)
+		require.Same(t, replacement, h.shards[view.ShardID()])
+		require.Contains(t, h.shardsByVChannel[testVChannel], view.ShardID())
+	})
+}
+
+func TestSNHandler_UnknownDownInMixedBatchKeepsPreparingView(t *testing.T) {
+	mockey.PatchConvey("unknown teardown and Preparing coexist in one shard batch", t, func() {
+		var acquire AcquireResource
+		mockey.Mock((*mockResourceManager).Acquire).To(func(_ *mockResourceManager, req AcquireResource) {
+			acquire = req
+		}).Build()
+		h := recoverSNQueryViewHandler(testPChannel, nil, newMockResourceManager(), nil)
+		preparing := newPreparingSNView(2)
+		downReports, preparingReports := &reportCollector{}, &reportCollector{}
+		h.ApplyViews([]handler.ApplyView{
+			{View: newSNViewWithState(1, viewpb.QueryViewState_QueryViewStateDown), OnReport: downReports.onReport},
+			{View: preparing, OnReport: preparingReports.onReport},
+		})
+		require.Equal(t, qviews.QueryViewStateDropped, downReports.last().State())
+		require.Len(t, h.shards, 1)
+		shard := h.shards[preparing.ShardID()]
+		require.False(t, shard.detached)
+		require.Len(t, shard.views, 1)
+		acquire.OnReady()
+		require.Equal(t, qviews.QueryViewStateReady, preparingReports.last().State())
+	})
 }
