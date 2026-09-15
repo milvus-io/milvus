@@ -19,6 +19,9 @@ package milvusclient
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
+	"slices"
+	"sort"
 	"strings"
 
 	"github.com/cockroachdb/errors"
@@ -309,18 +312,10 @@ func (opt *columnBasedDataOption) WithStructArrayColumn(colName string, structSc
 }
 
 func buildStructArrayColumn(colName string, structSchema *entity.StructSchema, rows []map[string]any) (column.Column, error) {
-	if structSchema == nil {
-		return nil, errors.New("structSchema is required for WithStructArrayColumn")
+	structCol, err := column.NewColumnStructArrayFromSchema(colName, structSchema)
+	if err != nil {
+		return nil, err
 	}
-	subColumns := make([]column.Column, 0, len(structSchema.Fields))
-	for _, sub := range structSchema.Fields {
-		subColumn, err := newStructSubColumn(sub)
-		if err != nil {
-			return nil, err
-		}
-		subColumns = append(subColumns, subColumn)
-	}
-	structCol := column.NewColumnStructArray(colName, subColumns)
 	for _, row := range rows {
 		if row == nil {
 			structCol.SetNullable(true)
@@ -333,59 +328,6 @@ func buildStructArrayColumn(colName string, structSchema *entity.StructSchema, r
 		}
 	}
 	return structCol, nil
-}
-
-func newStructSubColumn(field *entity.Field) (column.Column, error) {
-	switch field.DataType {
-	case entity.FieldTypeBool:
-		return column.NewColumnBoolArray(field.Name, nil), nil
-	case entity.FieldTypeInt8:
-		return column.NewColumnInt8Array(field.Name, nil), nil
-	case entity.FieldTypeInt16:
-		return column.NewColumnInt16Array(field.Name, nil), nil
-	case entity.FieldTypeInt32:
-		return column.NewColumnInt32Array(field.Name, nil), nil
-	case entity.FieldTypeInt64:
-		return column.NewColumnInt64Array(field.Name, nil), nil
-	case entity.FieldTypeFloat:
-		return column.NewColumnFloatArray(field.Name, nil), nil
-	case entity.FieldTypeDouble:
-		return column.NewColumnDoubleArray(field.Name, nil), nil
-	case entity.FieldTypeVarChar, entity.FieldTypeString:
-		return column.NewColumnVarCharArray(field.Name, nil), nil
-	case entity.FieldTypeFloatVector:
-		dim, err := field.GetDim()
-		if err != nil {
-			return nil, errors.Wrapf(err, "sub-field %q", field.Name)
-		}
-		return column.NewColumnFloatVectorArray(field.Name, int(dim), nil), nil
-	case entity.FieldTypeFloat16Vector:
-		dim, err := field.GetDim()
-		if err != nil {
-			return nil, errors.Wrapf(err, "sub-field %q", field.Name)
-		}
-		return column.NewColumnFloat16VectorArray(field.Name, int(dim), nil), nil
-	case entity.FieldTypeBFloat16Vector:
-		dim, err := field.GetDim()
-		if err != nil {
-			return nil, errors.Wrapf(err, "sub-field %q", field.Name)
-		}
-		return column.NewColumnBFloat16VectorArray(field.Name, int(dim), nil), nil
-	case entity.FieldTypeBinaryVector:
-		dim, err := field.GetDim()
-		if err != nil {
-			return nil, errors.Wrapf(err, "sub-field %q", field.Name)
-		}
-		return column.NewColumnBinaryVectorArray(field.Name, int(dim), nil), nil
-	case entity.FieldTypeInt8Vector:
-		dim, err := field.GetDim()
-		if err != nil {
-			return nil, errors.Wrapf(err, "sub-field %q", field.Name)
-		}
-		return column.NewColumnInt8VectorArray(field.Name, int(dim), nil), nil
-	default:
-		return nil, errors.Newf("unsupported struct sub-field type %v for field %q", field.DataType, field.Name)
-	}
 }
 
 func (opt *columnBasedDataOption) WithPartition(partitionName string) *columnBasedDataOption {
@@ -421,23 +363,38 @@ func (opt *columnBasedDataOption) WithArrayRemove(fieldName string) *columnBased
 	return opt.WithFieldPartialOp(fieldName, schemapb.FieldPartialUpdateOp_ARRAY_REMOVE)
 }
 
+// WithPathReplace replaces one existing value selected by a request-wide
+// relative path such as "[1]" or "[1][age]".
+func (opt *columnBasedDataOption) WithPathReplace(fieldName, path string) *columnBasedDataOption {
+	opt.setFieldPartialUpdateOp(&schemapb.FieldPartialUpdateOp{
+		FieldName: fieldName,
+		Op:        schemapb.FieldPartialUpdateOp_PATH_REPLACE,
+		Path:      path,
+	})
+	return opt
+}
+
 // WithFieldPartialOp attaches an explicit FieldPartialUpdateOp to the field
 // with name `fieldName`. Intended for advanced callers; typical users should
 // prefer the op-specific helpers (WithArrayAppend, WithArrayRemove).
 func (opt *columnBasedDataOption) WithFieldPartialOp(fieldName string, op schemapb.FieldPartialUpdateOp_OpType) *columnBasedDataOption {
-	if op == schemapb.FieldPartialUpdateOp_REPLACE {
-		// REPLACE is the default; clear any prior directive rather than
-		// transmitting a no-op message.
-		if opt.partialOps != nil {
-			delete(opt.partialOps, fieldName)
-		}
-		return opt
-	}
+	opt.setFieldPartialUpdateOp(&schemapb.FieldPartialUpdateOp{FieldName: fieldName, Op: op})
+	return opt
+}
+
+func (opt *columnBasedDataOption) setFieldPartialUpdateOp(op *schemapb.FieldPartialUpdateOp) {
 	if opt.partialOps == nil {
 		opt.partialOps = make(map[string]*schemapb.FieldPartialUpdateOp)
 	}
-	opt.partialOps[fieldName] = &schemapb.FieldPartialUpdateOp{FieldName: fieldName, Op: op}
-	return opt
+	// Builder calls configure the final request; they are not themselves wire
+	// operations. Preserve the existing last-write-wins behavior here and let
+	// Proxy reject requests that actually contain duplicate field_ops entries.
+	fieldName := op.GetFieldName()
+	if op.GetOp() == schemapb.FieldPartialUpdateOp_REPLACE {
+		delete(opt.partialOps, fieldName)
+		return
+	}
+	opt.partialOps[fieldName] = op
 }
 
 // buildFieldOps materializes the recorded FieldPartialUpdateOp directives
@@ -454,7 +411,13 @@ func (opt *columnBasedDataOption) buildFieldOps() []*schemapb.FieldPartialUpdate
 	}
 	out := make([]*schemapb.FieldPartialUpdateOp, 0, len(opt.partialOps))
 	for _, op := range opt.partialOps {
+		if op.GetOp() == schemapb.FieldPartialUpdateOp_REPLACE {
+			continue
+		}
 		out = append(out, op)
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }
@@ -553,6 +516,13 @@ func (opt *rowBasedDataOption) WithArrayAppend(fieldName string) *rowBasedDataOp
 	return opt
 }
 
+// WithPathReplace replaces one existing value selected by a request-wide
+// relative path such as "[1]" or "[1][age]".
+func (opt *rowBasedDataOption) WithPathReplace(fieldName, path string) *rowBasedDataOption {
+	opt.columnBasedDataOption.WithPathReplace(fieldName, path)
+	return opt
+}
+
 func (opt *rowBasedDataOption) WithArrayRemove(fieldName string) *rowBasedDataOption {
 	opt.columnBasedDataOption.WithArrayRemove(fieldName)
 	return opt
@@ -583,7 +553,14 @@ func (opt *rowBasedDataOption) InsertRequest(coll *entity.Collection) (*milvuspb
 }
 
 func (opt *rowBasedDataOption) UpsertRequest(coll *entity.Collection) (*milvuspb.UpsertRequest, error) {
-	columns, err := row.AnyToColumns(opt.rows, opt.keepAutoIDPk, coll.Schema)
+	if opt.deferredErr != nil {
+		return nil, opt.deferredErr
+	}
+	conversionSchema, err := opt.pathReplaceRowSchema(coll.Schema)
+	if err != nil {
+		return nil, err
+	}
+	columns, err := row.AnyToColumns(opt.rows, opt.keepAutoIDPk, conversionSchema)
 	if err != nil {
 		return nil, err
 	}
@@ -606,6 +583,164 @@ func (opt *rowBasedDataOption) UpsertRequest(coll *entity.Collection) (*milvuspb
 		PartialUpdate:  partialUpdate,
 		FieldOps:       fieldOps,
 	}, nil
+}
+
+func (opt *rowBasedDataOption) pathReplaceRowSchema(schema *entity.Schema) (*entity.Schema, error) {
+	conversionSchema := schema
+	for fieldIndex, field := range schema.Fields {
+		op := opt.partialOps[field.Name]
+		// Unknown fields and non-Struct Array fields stay server-authoritative.
+		if op.GetOp() != schemapb.FieldPartialUpdateOp_PATH_REPLACE ||
+			field.DataType != entity.FieldTypeArray || field.ElementType != entity.FieldTypeStruct {
+			continue
+		}
+		mask, err := pathReplaceStructFieldMask(opt.rows, field.Name)
+		if err != nil {
+			return nil, errors.Wrapf(err, "PATH_REPLACE field %q", field.Name)
+		}
+		structSchema, err := selectPathReplaceStructSchema(field, mask)
+		if err != nil {
+			return nil, err
+		}
+		if conversionSchema == schema {
+			cloned := *schema
+			cloned.Fields = slices.Clone(schema.Fields)
+			conversionSchema = &cloned
+		}
+		clonedField := *field
+		clonedField.StructSchema = structSchema
+		conversionSchema.Fields[fieldIndex] = &clonedField
+	}
+	return conversionSchema, nil
+}
+
+func selectPathReplaceStructSchema(field *entity.Field, mask []string) (*entity.StructSchema, error) {
+	if field.StructSchema == nil {
+		return nil, errors.Newf("struct array field %q has no child schema", field.Name)
+	}
+	selected := make(map[string]struct{}, len(mask))
+	for _, name := range mask {
+		selected[name] = struct{}{}
+	}
+	result := entity.NewStructSchema()
+	for _, child := range field.StructSchema.Fields {
+		if _, ok := selected[child.Name]; ok {
+			result.WithField(child)
+			delete(selected, child.Name)
+		}
+	}
+	for name := range selected {
+		return nil, errors.Newf("struct array field %q has no child %q", field.Name, name)
+	}
+	return result, nil
+}
+
+func pathReplaceStructFieldMask(rows []interface{}, fieldName string) ([]string, error) {
+	var expected []string
+	for rowIndex, inputRow := range rows {
+		value, found, err := pathReplaceRowField(reflect.ValueOf(inputRow), fieldName)
+		if err != nil {
+			return nil, err
+		}
+		if !found {
+			return nil, errors.Newf("row %d is missing struct array field %q", rowIndex, fieldName)
+		}
+		for value.IsValid() && (value.Kind() == reflect.Interface || value.Kind() == reflect.Ptr) {
+			if value.IsNil() {
+				return nil, errors.Newf(
+					"row %d struct array field %q must not be null for PATH_REPLACE", rowIndex, fieldName)
+			}
+			value = value.Elem()
+		}
+		if !value.IsValid() || value.Kind() != reflect.Map || value.Type().Key().Kind() != reflect.String {
+			return nil, errors.Newf(
+				"row %d struct array field %q must be map[string]any, got %s", rowIndex, fieldName, value.Kind())
+		}
+		mask := make([]string, 0, value.Len())
+		iter := value.MapRange()
+		for iter.Next() {
+			mask = append(mask, iter.Key().String())
+		}
+		sort.Strings(mask)
+		if len(mask) == 0 {
+			return nil, errors.Newf("row %d struct array field %q child mask must not be empty", rowIndex, fieldName)
+		}
+		if rowIndex == 0 {
+			expected = mask
+			continue
+		}
+		if !slices.Equal(expected, mask) {
+			return nil, errors.Newf(
+				"row %d struct array field %q child mask %v does not match request mask %v",
+				rowIndex, fieldName, mask, expected)
+		}
+	}
+	return expected, nil
+}
+
+func pathReplaceRowField(value reflect.Value, fieldName string) (reflect.Value, bool, error) {
+	for value.IsValid() && value.Kind() == reflect.Ptr {
+		if value.IsNil() {
+			break
+		}
+		value = value.Elem()
+	}
+	if !value.IsValid() {
+		return reflect.Value{}, false, errors.New("unsupported nil row")
+	}
+	switch value.Kind() {
+	case reflect.Map:
+		if value.Type().Key().Kind() != reflect.String {
+			return reflect.Value{}, false, errors.Newf("unsupported row map key type: %s", value.Type().Key())
+		}
+		iter := value.MapRange()
+		for iter.Next() {
+			if iter.Key().String() == fieldName {
+				return iter.Value(), true, nil
+			}
+		}
+		return reflect.Value{}, false, nil
+	case reflect.Struct:
+		var result reflect.Value
+		found := false
+		for i := 0; i < value.NumField(); i++ {
+			fieldType := value.Type().Field(i)
+			if fieldType.Anonymous && fieldType.Type.Kind() == reflect.Struct {
+				embedded, embeddedFound, err := pathReplaceRowField(value.Field(i), fieldName)
+				if err != nil {
+					return reflect.Value{}, false, err
+				}
+				if embeddedFound {
+					if found {
+						return reflect.Value{}, false, errors.Newf(
+							"column has duplicated name: %s when parsing field: %s", fieldName, fieldType.Name)
+					}
+					result, found = embedded, true
+				}
+				continue
+			}
+			name := fieldType.Name
+			if tag, ok := fieldType.Tag.Lookup(row.MilvusTag); ok {
+				if tag == row.MilvusSkipTagValue {
+					continue
+				}
+				if taggedName, ok := row.ParseTagSetting(tag, row.MilvusTagSep)[row.MilvusTagName]; ok {
+					name = taggedName
+				}
+			}
+			if name != fieldName {
+				continue
+			}
+			if found {
+				return reflect.Value{}, false, errors.Newf(
+					"column has duplicated name: %s when parsing field: %s", name, fieldType.Name)
+			}
+			result, found = value.Field(i), true
+		}
+		return result, found, nil
+	default:
+		return reflect.Value{}, false, errors.Newf("unsupported row type: %s", value.Kind())
+	}
 }
 
 func (opt *rowBasedDataOption) WriteBackPKs(sch *entity.Schema, pks column.Column) error {
