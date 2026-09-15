@@ -27,6 +27,9 @@ log:
   level: debug
 extraConfigFiles:
   user.yaml: |+
+    grpc:
+      client:
+        compressionEnabled: true
     common:
       storage:
         enablev2: true
