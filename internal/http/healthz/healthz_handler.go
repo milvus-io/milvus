@@ -132,7 +132,7 @@ func writeJSON(w http.ResponseWriter, r *http.Request, resp *HealthResponse) {
 	w.Header().Set(ContentTypeHeader, ContentTypeJSON)
 	bs, err := json.Marshal(resp)
 	if err != nil {
-		mlog.Warn(context.TODO(), "faild to send response", mlog.Err(err))
+		mlog.Warn(context.TODO(), "failed to send response", mlog.Err(err))
 	}
 	w.Write(bs)
 }
