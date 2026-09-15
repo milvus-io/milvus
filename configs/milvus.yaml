@@ -1672,6 +1672,9 @@ streaming:
 # Any configuration related to the knowhere vector search engine
 knowhere:
   enable: true # When enable this configuration, the index parameters defined following will be automatically populated as index parameters, without requiring user input.
+  cluster:
+    type: KMEANS # Clustering implementation registered in Knowhere. The value is passed through without normalization.
+    analyze: # Parameters under this prefix are passed through to the clustering implementation.
   AISAQ:
     build:
       max_degree: 56 # Maximum degree of the Vamana graph
