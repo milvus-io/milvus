@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-labelledby="overview-title overview-desc">
+<title id="overview-title">Async index loading: shared execution</title>
+<desc id="overview-desc">The caller schedules index loading on one shared async executor, which uses global admission, backend reads and local file operations.</desc>
+<defs>
+<marker id="overview-arrow" markerWidth="8" markerHeight="8" refX="8" refY="4" orient="auto"><path d="M 0 0 L 8 4 L 0 8 Z" fill="#566A80"/></marker>
+<marker id="overview-accent" markerWidth="8" markerHeight="8" refX="8" refY="4" orient="auto"><path d="M 0 0 L 8 4 L 0 8 Z" fill="#397985"/></marker>
+<marker id="overview-link" markerWidth="8" markerHeight="8" refX="8" refY="4" orient="auto"><path d="M 0 0 L 8 4 L 0 8 Z" fill="#557794"/></marker>
+</defs>
+<rect width="1280" height="720" fill="#FCFDFE"/>
+<g font-family="Geist, Arial, sans-serif">
+<text x="40" y="56" font-size="28" fill="#25364A" text-anchor="start" font-weight="400">Async index loading: shared execution</text>
+<text x="40" y="88" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Context-aware load entries use the process-wide enableAsyncLoad switch.</text>
+<path d="M 616 248 L 616 320" fill="none" stroke="#566A80" stroke-width="1.2" marker-end="url(#overview-arrow)"/>
+<path d="M 456 380 L 360 380" fill="none" stroke="#566A80" stroke-width="1.2" marker-end="url(#overview-arrow)"/>
+<path d="M 776 380 L 872 380" fill="none" stroke="#566A80" stroke-width="1.2" marker-end="url(#overview-arrow)"/>
+<path d="M 616 440 L 616 512" fill="none" stroke="#566A80" stroke-width="1.2" marker-end="url(#overview-arrow)"/>
+<g data-node="Cache-load caller"><rect x="456" y="128" width="320" height="120" rx="8" fill="#FFFFFF" stroke="#CDD9E2" stroke-width="1.2"/>
+<text x="476" y="164" font-size="20" fill="#25364A" text-anchor="start" font-weight="600">Cache-load caller</text>
+<text x="476" y="196" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Schedule load; wait at boundary</text>
+<text x="476" y="220" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Publish only after success</text>
+</g>
+<g data-node="AsyncLoadExecutor"><rect x="456" y="320" width="320" height="120" rx="8" fill="#EFF7F5" stroke="#397985" stroke-width="1.2"/>
+<text x="476" y="356" font-size="20" fill="#25364A" text-anchor="start" font-weight="600">AsyncLoadExecutor</text>
+<text x="476" y="388" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Plan / decode / place / restore</text>
+<text x="476" y="412" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">HIGH and LOW are priorities</text>
+</g>
+<g data-node="Storage backend"><rect x="40" y="320" width="320" height="120" rx="8" fill="#FFFFFF" stroke="#CDD9E2" stroke-width="1.2"/>
+<text x="60" y="356" font-size="20" fill="#25364A" text-anchor="start" font-weight="600">Storage backend</text>
+<text x="60" y="388" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Native range I/O</text>
+<text x="60" y="412" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Generic reads may block</text>
+</g>
+<g data-node="LocalFileIOPool"><rect x="872" y="320" width="320" height="120" rx="8" fill="#FFFFFF" stroke="#CDD9E2" stroke-width="1.2"/>
+<text x="892" y="356" font-size="20" fill="#25364A" text-anchor="start" font-weight="600">LocalFileIOPool</text>
+<text x="892" y="388" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Prepare / write / close files</text>
+<text x="892" y="412" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Load-time file cleanup</text>
+</g>
+<g data-node="Shared admission"><rect x="456" y="512" width="320" height="112" rx="8" fill="#FFFFFF" stroke="#CDD9E2" stroke-width="1.2"/>
+<text x="476" y="548" font-size="20" fill="#25364A" text-anchor="start" font-weight="600">Shared admission</text>
+<text x="476" y="580" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Limit bytes and active tasks</text>
+<text x="476" y="604" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Hold budget through placement</text>
+</g>
+<line x1="40" y1="648" x2="1240" y2="648" stroke="#CDD9E2"/>
+<text x="40" y="676" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Waiting for native I/O frees the worker; engine deserialization occupies an async worker.</text>
+<text x="40" y="700" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Field-data loading shares the executor and admission, and retains its own pipeline.</text>
+</g></svg>
