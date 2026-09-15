@@ -14,3 +14,4 @@
 #include "common/type_c.h"
 
 typedef void* CAnalyze;
+typedef void* CClusteringCompactionPlan;

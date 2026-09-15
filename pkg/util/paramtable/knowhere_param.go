@@ -14,10 +14,11 @@ import (
 )
 
 type knowhereConfig struct {
-	Enable       ParamItem  `refreshable:"true"`
-	IndexParam   ParamGroup `refreshable:"true"`
-	ClusterType  ParamItem  `refreshable:"true"`
-	AnalyzeParam ParamGroup `refreshable:"true"`
+	Enable              ParamItem  `refreshable:"true"`
+	IndexParam          ParamGroup `refreshable:"true"`
+	ClusterType         ParamItem  `refreshable:"true"`
+	AnalyzeParam        ParamGroup `refreshable:"true"`
+	CompactionPlanParam ParamGroup `refreshable:"true"`
 }
 
 const (
@@ -90,10 +91,22 @@ func (p *knowhereConfig) init(base *BaseTable) {
 		Doc:       "parameters passed through to the Knowhere clustering analyze implementation",
 	}
 	p.AnalyzeParam.Init(base.mgr)
+
+	p.CompactionPlanParam = ParamGroup{
+		KeyPrefix: "knowhere.cluster.compactionPlan.",
+		Version:   "3.1.0",
+		Export:    true,
+		Doc:       "parameters passed through to the Knowhere clustering compaction plan implementation",
+	}
+	p.CompactionPlanParam.Init(base.mgr)
 }
 
 func (p *knowhereConfig) GetAnalyzeParams() map[string]string {
 	return p.AnalyzeParam.GetValue()
+}
+
+func (p *knowhereConfig) GetCompactionPlanParams() map[string]string {
+	return p.CompactionPlanParam.GetValue()
 }
 
 func (p *knowhereConfig) getIndexParam(indexType string, stage string) map[string]string {
