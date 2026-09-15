@@ -17,12 +17,12 @@
 package http
 
 import (
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/stretchr/testify/assert"
