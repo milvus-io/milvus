@@ -4017,6 +4017,7 @@ name = "tantivy-binding"
 version = "0.1.0"
 dependencies = [
  "cbindgen",
+ "crc32fast",
  "criterion",
  "either",
  "env_logger",

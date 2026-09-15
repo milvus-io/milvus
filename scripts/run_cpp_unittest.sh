@@ -45,6 +45,11 @@ fi
 arg="$1"
 filter_value="${arg#*=}"
 
+# Listing C++ tests should not build or execute tests in another language.
+if [[ "$filter_value" != "--gtest_list_tests" ]]; then
+  bash "${SCRIPTS_DIR}/run_rust_unittest.sh" || exit $?
+fi
+
 for UNITTEST_DIR in "${UNITTEST_DIRS[@]}"; do
   if [ ! -d "${UNITTEST_DIR}" ]; then
     echo "The unittest folder does not exist!"

@@ -143,7 +143,7 @@ func (v *MultiAnalyzerBM25FunctionRunner) getAnalyzer(name string, analyzers map
 	return v.getAnalyzer("default", analyzers)
 }
 
-func (v *MultiAnalyzerBM25FunctionRunner) run(text []string, analyzerName []string, dst []map[uint32]float32) error {
+func (v *MultiAnalyzerBM25FunctionRunner) run(text []string, analyzerName []string, dst [][]byte) error {
 	cloneAnalyzers := map[string]analyzer.Analyzer{}
 	defer func() {
 		for _, analyzer := range cloneAnalyzers {
@@ -151,35 +151,32 @@ func (v *MultiAnalyzerBM25FunctionRunner) run(text []string, analyzerName []stri
 		}
 	}()
 
-	for i := 0; i < len(text); i++ {
+	for i := 0; i < len(text); {
 		if len(text[i]) == 0 {
-			dst[i] = map[uint32]float32{}
+			dst[i] = []byte{}
+			i++
 			continue
 		}
 
 		if !typeutil.IsUTF8(text[i]) {
 			return merr.WrapErrParameterInvalidMsg("string data must be utf8 format: %v", text[i])
 		}
-		embeddingMap := map[uint32]float32{}
 
 		analyzer, err := v.getAnalyzer(analyzerName[i], cloneAnalyzers)
 		if err != nil {
 			return err
 		}
 
-		tokenStream, err := analyzer.NewTokenStream(text[i])
-		if err != nil {
+		// Search uses one analyzer name for all queries. Batch consecutive rows
+		// with that name while preserving input order for mixed-language inserts.
+		end := i + 1
+		for end < len(text) && analyzerName[end] == analyzerName[i] {
+			end++
+		}
+		if err := runBM25(analyzer, text[i:end], dst[i:end]); err != nil {
 			return err
 		}
-
-		for tokenStream.Advance() {
-			token := tokenStream.Token()
-			// TODO More Hash Option
-			hash := typeutil.HashString2LessUint32(token)
-			embeddingMap[hash] += 1
-		}
-		tokenStream.Destroy()
-		dst[i] = embeddingMap
+		i = end
 	}
 	return nil
 }
@@ -211,7 +208,7 @@ func (v *MultiAnalyzerBM25FunctionRunner) BatchRun(inputs ...any) ([]any, error)
 	}
 
 	rowNum := len(text)
-	embedData := make([]map[uint32]float32, rowNum)
+	embedData := make([][]byte, rowNum)
 	wg := sync.WaitGroup{}
 	concurrency := getAnalyzerRunnerConcurrency()
 

@@ -207,7 +207,7 @@ func (s *MultiAnalyzerBM25FunctionSuite) TestRunReleasesTokenStreamsPerInput() {
 			"default": s.newTrackingAnalyzer(&active, &maxActive),
 		},
 	}
-	dst := make([]map[uint32]float32, 3)
+	dst := make([][]byte, 3)
 
 	err := runner.run([]string{"a", "b", "c"}, []string{"default", "default", "default"}, dst)
 

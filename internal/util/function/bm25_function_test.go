@@ -188,7 +188,7 @@ func (s *BM25FunctionRunnerSuite) newTrackingAnalyzer(active *atomic.Int32, maxA
 func (s *BM25FunctionRunnerSuite) TestRunReleasesTokenStreamsPerInput() {
 	var active, maxActive atomic.Int32
 	runner := &BM25FunctionRunner{tokenizer: s.newTrackingAnalyzer(&active, &maxActive)}
-	dst := make([]map[uint32]float32, 3)
+	dst := make([][]byte, 3)
 
 	err := runner.run([]string{"a", "b", "c"}, dst)
 

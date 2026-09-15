@@ -13,6 +13,7 @@
 
 #include <exception>
 #include <memory>
+#include <new>
 #include <string>
 
 #include "common/CGoCatch.h"
@@ -76,7 +77,12 @@ validate_tokenizer(const char* params, const char* extra_info) {
         auto [ids, count] =
             milvus::tantivy::validate_analyzer(params, extra_info);
         return CValidateResult{ids, count, milvus::SuccessCStatus()};
-    } catch (std::exception& e) {
+    } catch (const std::bad_alloc& e) {
+        return CValidateResult{
+            nullptr,
+            0,
+            milvus::FailureCStatus(milvus::MemAllocateFailed, e.what())};
+    } catch (const std::exception& e) {
         return CValidateResult{nullptr, 0, milvus::FailureCStatus(&e)};
     } catch (...) {
         return CValidateResult{nullptr,
@@ -84,4 +90,33 @@ validate_tokenizer(const char* params, const char* extra_info) {
                                milvus::FailureCStatus(milvus::UnexpectedError,
                                                       "unknown exception")};
     }
+}
+
+CStatus
+batch_tokenize_bm25(CTokenizer tokenizer,
+                    const uint8_t* data,
+                    uint64_t data_size,
+                    const uint64_t* offsets,
+                    uint64_t num_rows,
+                    CBM25Batch* output) {
+    try {
+        AssertInfo(output != nullptr, "null BM25 output");
+        *output = {};
+        AssertInfo(tokenizer != nullptr, "null BM25 tokenizer");
+        // TokenizeBM25 uses AssertTantivyOk to classify RustResult.error_code
+        // into SegcoreError; the CStatus catch tail preserves that code.
+        auto batch =
+            static_cast<milvus::tantivy::Tokenizer*>(tokenizer)->TokenizeBM25(
+                data, data_size, offsets, num_rows);
+        *output = {batch.data, batch.data_size, batch.offsets, batch.handle};
+        return milvus::SuccessCStatus();
+    }
+    CGO_CATCH_AND_RETURN_CSTATUS
+}
+
+void
+free_bm25_batch(void* handle) {
+    // This Rust entrypoint only drops owned Vec<u8>/Vec<u64> buffers (or no-ops
+    // for nullptr). It invokes no analyzer code and has no fallible operations.
+    tantivy_free_bm25_batch(handle);
 }

@@ -22,8 +22,6 @@ import (
 	"context"
 	"sync"
 
-	"github.com/samber/lo"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
@@ -171,16 +169,37 @@ func NewBM25FunctionRunner(coll *schemapb.CollectionSchema, schema *schemapb.Fun
 	}, nil
 }
 
-func (v *BM25FunctionRunner) run(data []string, dst []map[uint32]float32) error {
+func (v *BM25FunctionRunner) run(data []string, dst [][]byte) error {
 	tokenizer, err := v.tokenizer.Clone()
 	if err != nil {
 		return err
 	}
 	defer tokenizer.Destroy()
+	return runBM25(tokenizer, data, dst)
+}
+
+// Optional capability keeps non-native analyzers usable without changing the
+// general Analyzer/TokenStream interface (also used by RunAnalyzer and MinHash).
+type bm25BatchTokenizer interface {
+	BatchTokenizeBM25([]string) ([][]byte, error)
+}
+
+func runBM25(tokenizer analyzer.Analyzer, data []string, dst [][]byte) error {
+	if batch, ok := tokenizer.(bm25BatchTokenizer); ok {
+		rows, err := batch.BatchTokenizeBM25(data)
+		if err != nil {
+			return err
+		}
+		if len(rows) != len(data) {
+			return merr.WrapErrFunctionFailedMsg("BM25 tokenizer returned %d rows for %d inputs", len(rows), len(data))
+		}
+		copy(dst, rows)
+		return nil
+	}
 
 	for i := 0; i < len(data); i++ {
 		if len(data[i]) == 0 {
-			dst[i] = map[uint32]float32{}
+			dst[i] = []byte{}
 			continue
 		}
 
@@ -199,7 +218,7 @@ func (v *BM25FunctionRunner) run(data []string, dst []map[uint32]float32) error 
 			embeddingMap[hash] += 1
 		}
 		tokenStream.Destroy()
-		dst[i] = embeddingMap
+		dst[i] = typeutil.CreateAndSortSparseFloatRow(embeddingMap)
 	}
 	return nil
 }
@@ -222,7 +241,7 @@ func (v *BM25FunctionRunner) BatchRun(inputs ...any) ([]any, error) {
 	}
 
 	rowNum := len(text)
-	embedData := make([]map[uint32]float32, rowNum)
+	embedData := make([][]byte, rowNum)
 	wg := sync.WaitGroup{}
 	concurrency := getAnalyzerRunnerConcurrency()
 
@@ -353,19 +372,17 @@ func (v *BM25FunctionRunner) Close() {
 	v.tokenizer.Destroy()
 }
 
-func buildSparseFloatArray(mapdata []map[uint32]float32) *schemapb.SparseFloatArray {
+func buildSparseFloatArray(rows [][]byte) *schemapb.SparseFloatArray {
 	dim := int64(0)
-	bytes := lo.Map(mapdata, func(sparseMap map[uint32]float32, _ int) []byte {
-		row := typeutil.CreateAndSortSparseFloatRow(sparseMap)
+	for _, row := range rows {
 		rowDim := typeutil.SparseFloatRowDim(row)
 		if rowDim > dim {
 			dim = rowDim
 		}
-		return row
-	})
+	}
 
 	return &schemapb.SparseFloatArray{
-		Contents: bytes,
+		Contents: rows,
 		Dim:      dim,
 	}
 }

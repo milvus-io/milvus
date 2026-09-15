@@ -57,6 +57,23 @@ struct Tokenizer {
         return std::make_unique<milvus::tantivy::Tokenizer>(newptr);
     }
 
+    TantivyBM25Batch
+    TokenizeBM25(const uint8_t* data,
+                 uint64_t data_size,
+                 const uint64_t* offsets,
+                 uint64_t num_rows) {
+        TantivyBM25Batch output{};
+        auto result = tantivy_tokenize_bm25(
+            ptr_, data, data_size, offsets, num_rows, &output);
+        std::unique_ptr<void, decltype(&tantivy_free_bm25_batch)> guard(
+            output.handle, tantivy_free_bm25_batch);
+        auto res = RustResultWrapper(result);
+        AssertTantivyOk(
+            res, "BM25 tokenization failed: {}", res.result_->error);
+        guard.release();
+        return output;
+    }
+
     // CreateTokenStreamCopyText will copy the text and then create token stream based on the text.
     std::unique_ptr<TokenStream>
     CreateTokenStreamCopyText(const std::string& text) {

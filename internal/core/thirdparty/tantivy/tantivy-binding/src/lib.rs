@@ -2,6 +2,7 @@ use error::TantivyBindingError;
 
 mod array;
 mod bitset_wrapper;
+mod bm25_c;
 mod data_type;
 mod demo_c;
 mod direct_bitset_collector;

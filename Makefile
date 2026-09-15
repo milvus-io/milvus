@@ -443,6 +443,11 @@ test-go: build-cpp-with-unittest
 	@echo "Running go unittests..."
 	@(env bash $(PWD)/scripts/run_go_unittest.sh)
 
+.PHONY: test-rust
+test-rust:
+	@echo "Running Rust BM25 unittests..."
+	@(env bash $(PWD)/scripts/run_rust_unittest.sh)
+
 test-cpp: build-cpp-with-unittest
 	@echo "Running cpp unittests..."
 	@(env bash $(PWD)/scripts/run_cpp_unittest.sh)
