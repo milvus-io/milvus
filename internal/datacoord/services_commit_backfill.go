@@ -23,24 +23,28 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
-	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // CommitBackfillResult fetches the Spark-produced BackfillResult JSON from
-// object storage, classifies each segment entry (V2 vs V3), and dispatches the
-// updates through the BatchUpdateManifest broadcast pipeline. V2 segments carry
-// a column-group upsert; V3 segments carry a manifest version bump. The
-// broadcaster ensures serialization against compaction and other DDL-like
-// operations on the same collection.
+// object storage, classifies each segment entry (V2 vs V3), and applies the
+// updates directly through DataCoord's commit framework — it does NOT go
+// through the broadcast/WAL pipeline. V2 segments carry a column-group upsert
+// via UpdateSegmentsInfo; V3 segments are committed through
+// meta.CommitSegmentManifests: delta entries (ops) generate a new manifest
+// revision from the segment's current pointer, legacy entries (a pre-baked
+// version) are adopted only when the current manifest still matches the
+// result's sourceVersion.
+//
+// The commit is a per-cluster catalog operation: in a global cluster the
+// primary and the standby each run it against their own metadata, so it must
+// remain self-contained and idempotent. The per-segment manifest lock
+// serializes each cluster's own concurrent writers (stats/index/GC/compaction).
 func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBackfillResultRequest) (*datapb.CommitBackfillResultResponse, error) {
 	log := mlog.With(mlog.String("resultPath", req.GetResultPath()))
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
@@ -53,13 +57,13 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 		return &datapb.CommitBackfillResultResponse{Status: merr.Status(err)}, nil
 	}
 
-	items, statuses := s.classifyBackfillSegments(ctx, result)
+	units, statuses := s.classifyBackfillSegments(ctx, result)
 	total := int32(len(result.Segments))
 
 	// Nothing passed pre-validation: surface as top-level failure so the caller
-	// knows no broadcast happened. segment_statuses still carry per-segment
+	// knows no commit happened. segment_statuses still carry per-segment
 	// diagnostics.
-	if len(items) == 0 {
+	if len(units) == 0 {
 		return &datapb.CommitBackfillResultResponse{
 			Status:          merr.Status(merr.WrapErrParameterInvalidMsg("no backfill segments passed pre-validation")),
 			TotalSegments:   total,
@@ -77,10 +81,8 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 	// Schema-version fence (fast-fail pre-check): a result computed against a
 	// schema that is no longer live (e.g. the function was dropped/changed
 	// while the Spark job was in flight) must not be committed against the
-	// current segments. This read happens outside the broadcast's serialization
-	// boundary, so broadcastBackfillBatch re-validates the version again while
-	// holding the resource keys — a drop/alter-function committing in the
-	// window between this check and the key acquisition is still caught.
+	// current segments. The fence is re-checked before each commit batch below
+	// to narrow the window between this read and the catalog writes.
 	if err := checkBackfillSchemaVersion(result.CollectionID, result.SchemaVersion, coll); err != nil {
 		log.Warn(ctx, "CommitBackfillResult rejected by schema version fence",
 			mlog.Err(err),
@@ -94,38 +96,102 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 		}, nil
 	}
 
-	// Split items across multiple broadcast messages so a single
-	// BatchUpdateManifestMessageBody never exceeds the broker's message size
-	// limit (Pulsar defaults to 5MiB). Each batch acquires its own broadcaster
-	// because broadcasterWithRK consumes its resource-key guards on the first
-	// Broadcast call and would panic on any subsequent call. Failure of one
-	// batch does not cancel subsequent batches; per-segment statuses reflect
-	// batch-level outcomes.
-	channels := []string{streaming.WAL().ControlChannel()}
-	var lastErr error
-	for start := 0; start < len(items); start += maxItemsPerBroadcast {
-		end := start + maxItemsPerBroadcast
-		if end > len(items) {
-			end = len(items)
+	// Split the units into the two dispatch paths and apply them directly:
+	// every V2 column-group upsert in one UpdateSegmentsInfo (one catalog
+	// transaction), and the V3 manifest commits in bounded batches of
+	// CommitSegmentManifests (each batch one all-or-nothing catalog
+	// transaction). A failed batch does not cancel later batches; per-segment
+	// statuses reflect batch-level outcomes.
+	v2Units := make([]backfillCommitUnit, 0)
+	v3Units := make([]backfillCommitUnit, 0)
+	for _, unit := range units {
+		if unit.kind == "v2" {
+			v2Units = append(v2Units, unit)
+		} else {
+			v3Units = append(v3Units, unit)
 		}
-		batch := items[start:end]
-		if err := s.broadcastBackfillBatch(ctx, coll, result.CollectionID, result.SchemaVersion, channels, batch); err != nil {
-			log.Error(ctx, "CommitBackfillResult broadcast batch failed",
+	}
+
+	var lastErr error
+	// V2 dispatch: a single UpdateSegmentsInfo carrying every column-group
+	// upsert, gated by the schema fence re-check. On mismatch the schema moved
+	// after the fast-fail, so the whole result (V2 and V3 alike) is stale and
+	// nothing is applied.
+	if len(v2Units) > 0 {
+		if err := s.recheckBackfillSchemaVersion(ctx, result); err != nil {
+			lastErr = err
+			appendUnitStatuses(&statuses, v2Units, false, err.Error())
+			appendUnitStatuses(&statuses, v3Units, false, err.Error())
+			committed, failed := countStatuses(statuses)
+			log.Warn(ctx, "CommitBackfillResult rejected by schema version fence before V2 commit",
+				mlog.Err(err), mlog.Int32("failed", failed))
+			respStatus := merr.Success()
+			if committed == 0 {
+				respStatus = merr.Status(lastErr)
+			}
+			return &datapb.CommitBackfillResultResponse{
+				Status:            respStatus,
+				TotalSegments:     total,
+				CommittedSegments: committed,
+				FailedSegments:    failed,
+				SegmentStatuses:   sortStatuses(statuses),
+			}, nil
+		}
+		operators := make([]UpdateOperator, 0, len(v2Units))
+		for _, unit := range v2Units {
+			operators = append(operators, unit.operator)
+		}
+		if err := s.meta.UpdateSegmentsInfo(ctx, operators...); err != nil {
+			log.Error(ctx, "CommitBackfillResult V2 column-group update failed",
+				mlog.Err(err), mlog.Int("segments", len(v2Units)))
+			lastErr = err
+			appendUnitStatuses(&statuses, v2Units, false, err.Error())
+		} else {
+			appendUnitStatuses(&statuses, v2Units, true, "")
+		}
+	}
+
+	for start := 0; start < len(v3Units); start += maxBackfillCommitBatch {
+		end := start + maxBackfillCommitBatch
+		if end > len(v3Units) {
+			end = len(v3Units)
+		}
+		batch := v3Units[start:end]
+		// Re-check the schema fence immediately before the catalog writes so a
+		// drop/alter-function committing between the fast-fail above and this
+		// commit is still caught. On mismatch, abort the remaining batches:
+		// continuing would apply a result computed against a stale schema.
+		if err := s.recheckBackfillSchemaVersion(ctx, result); err != nil {
+			log.Warn(ctx, "CommitBackfillResult rejected by schema version fence before batch commit",
 				mlog.Err(err), mlog.Int("batchStart", start), mlog.Int("batchEnd", end))
 			lastErr = err
-			appendItemStatuses(&statuses, batch, false, err.Error())
+			for i := start; i < len(v3Units); i++ {
+				appendUnitStatuses(&statuses, v3Units[i:i+1], false, err.Error())
+			}
+			break
+		}
+
+		commits := make([]SegmentManifestCommit, 0, len(batch))
+		for _, unit := range batch {
+			commits = append(commits, unit.commit)
+		}
+		if err := s.meta.CommitSegmentManifests(ctx, commits); err != nil {
+			log.Error(ctx, "CommitBackfillResult V3 manifest commit batch failed",
+				mlog.Err(err), mlog.Int("batchStart", start), mlog.Int("batchEnd", end))
+			lastErr = err
+			appendUnitStatuses(&statuses, batch, false, err.Error())
 			continue
 		}
-		appendItemStatuses(&statuses, batch, true, "")
+		appendUnitStatuses(&statuses, batch, true, "")
 	}
 
 	committed, failed := countStatuses(statuses)
-	log.Info(ctx, "CommitBackfillResult broadcast completed",
+	log.Info(ctx, "CommitBackfillResult committed",
 		mlog.Int32("total", total),
 		mlog.Int32("committed", committed),
 		mlog.Int32("failed", failed))
 
-	// Top-level Success unless every broadcast failed -- partial failures are
+	// Top-level Success unless every commit failed -- partial failures are
 	// surfaced through per-segment statuses.
 	respStatus := merr.Success()
 	if committed == 0 && lastErr != nil {
@@ -141,72 +207,29 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 	}, nil
 }
 
-// maxItemsPerBroadcast caps the number of BatchUpdateManifestItem entries
-// packed into a single broadcast message. With item payloads in the
-// ~1-2KiB range for V2 column groups this stays well under Pulsar's default
-// 5MiB maxMessageSize while keeping broadcast overhead low.
-const maxItemsPerBroadcast = 512
+// maxBackfillCommitBatch bounds the number of SegmentManifestCommit entries
+// dispatched to a single meta.CommitSegmentManifests call. It keeps one
+// failing commit from dragging an arbitrarily large batch, and bounds the
+// manifest-lock hold time of the batch's all-or-nothing lock acquisition.
+const maxBackfillCommitBatch = 512
 
-// broadcastBackfillBatch acquires a fresh broadcaster bound to the
-// collection's shared resource keys and issues exactly one broadcast for the
-// given items. broadcasterWithRK nils out its lock guards on the first
-// Broadcast call, so each batch needs its own broadcaster.
-func (s *Server) broadcastBackfillBatch(
-	ctx context.Context,
-	coll *milvuspb.DescribeCollectionResponse,
-	collectionID int64,
-	expectedSchemaVersion int32,
-	channels []string,
-	items []*messagespb.BatchUpdateManifestItem,
-) error {
-	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx,
-		message.NewSharedDBNameResourceKey(coll.GetDbName()),
-		message.NewSharedCollectionNameResourceKey(coll.GetDbName(), coll.GetCollectionName()),
-	)
-	if err != nil {
-		return err
-	}
-	defer broadcaster.Close()
-
-	// Schema-version fence, enforced INSIDE the broadcast's serialization
-	// boundary: while we hold the shared collection-name resource key, no
-	// drop/alter-function (which takes the exclusive collection-name key) can
-	// commit, so the version read here cannot change before this broadcast's
-	// ack callback applies the update. The pre-broadcast check in
-	// CommitBackfillResult runs outside this boundary; re-reading here closes
-	// the window where a schema change could slip in between the two.
-	if expectedSchemaVersion != 0 {
-		freshColl, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
-		if err != nil {
-			return err
-		}
-		if err := checkBackfillSchemaVersion(collectionID, expectedSchemaVersion, freshColl); err != nil {
-			return err
-		}
-	}
-
-	_, err = broadcaster.Broadcast(ctx, message.NewBatchUpdateManifestMessageBuilderV2().
-		WithHeader(&message.BatchUpdateManifestMessageHeader{
-			CollectionId: collectionID,
-		}).
-		WithBody(&message.BatchUpdateManifestMessageBody{
-			Items: items,
-		}).
-		WithBroadcast(channels).
-		WithUnreplicable().
-		MustBuildBroadcast(),
-	)
-	return err
+// backfillCommitUnit is one validated backfill segment commit after
+// pre-validation. It carries either a V2 column-group upsert operator or a V3
+// SegmentManifestCommit, dispatched directly by CommitBackfillResult (no
+// broadcast).
+type backfillCommitUnit struct {
+	segmentID int64
+	kind      string // "v2" | "v3"
+	// set for v2: the column-group upsert operator
+	operator UpdateOperator
+	// set for v3: the manifest commit (delta CommitUpdates or legacy Noop)
+	commit SegmentManifestCommit
 }
 
-func appendItemStatuses(out *[]*datapb.CommitBackfillResultSegmentStatus, batch []*messagespb.BatchUpdateManifestItem, ok bool, reason string) {
-	for _, it := range batch {
-		kind := "v3"
-		if it.GetV2ColumnGroups() != nil {
-			kind = "v2"
-		}
+func appendUnitStatuses(out *[]*datapb.CommitBackfillResultSegmentStatus, batch []backfillCommitUnit, ok bool, reason string) {
+	for _, unit := range batch {
 		*out = append(*out, &datapb.CommitBackfillResultSegmentStatus{
-			SegmentId: it.GetSegmentId(), Ok: ok, Kind: kind, Reason: reason,
+			SegmentId: unit.segmentID, Ok: ok, Kind: unit.kind, Reason: reason,
 		})
 	}
 }
@@ -262,15 +285,19 @@ func (s *Server) loadBackfillResult(ctx context.Context, rawPath string) (*Backf
 }
 
 // classifyBackfillSegments validates each segment entry and constructs the
-// broadcast items. Returns the items to broadcast plus per-segment failure
-// statuses recorded during pre-validation (so callers can surface them to the
-// client even when a segment never reached broadcast).
-func (s *Server) classifyBackfillSegments(ctx context.Context, result *BackfillResult) ([]*messagespb.BatchUpdateManifestItem, []*datapb.CommitBackfillResultSegmentStatus) {
+// commit units, dispatched directly by CommitBackfillResult (no broadcast).
+// V2 entries become a column-group upsert operator; V3 delta entries (ops)
+// become a ManifestMutationCommitUpdates commit generated from the segment's
+// current pointer; V3 legacy entries (a pre-baked version) become a Noop
+// commit pinned by ExpectedManifest to the result's sourceVersion. Returns the
+// units plus per-segment failure statuses recorded during pre-validation (so
+// callers can surface them even when a segment never reached a commit).
+func (s *Server) classifyBackfillSegments(ctx context.Context, result *BackfillResult) ([]backfillCommitUnit, []*datapb.CommitBackfillResultSegmentStatus) {
 	bucket := bucketFromChunkManager(s.meta.chunkManager)
-	items := make([]*messagespb.BatchUpdateManifestItem, 0, len(result.Segments))
+	units := make([]backfillCommitUnit, 0, len(result.Segments))
 	statuses := make([]*datapb.CommitBackfillResultSegmentStatus, 0)
 
-	// Deterministic order so broadcast items & diagnostic output are stable.
+	// Deterministic order so commit units & diagnostic output are stable.
 	segIDs := make([]string, 0, len(result.Segments))
 	for k := range result.Segments {
 		segIDs = append(segIDs, k)
@@ -337,64 +364,123 @@ func (s *Server) classifyBackfillSegments(ctx context.Context, result *BackfillR
 				})
 				continue
 			}
-			items = append(items, &messagespb.BatchUpdateManifestItem{
-				SegmentId: segID,
-				V2ColumnGroups: &messagespb.BatchUpdateManifestV2ColumnGroups{
-					ColumnGroups: groups,
+			units = append(units, backfillCommitUnit{
+				segmentID: segID,
+				kind:      "v2",
+				operator:  UpdateSegmentColumnGroupsOperator(segID, groups),
+			})
+			continue
+		}
+
+		// V3 path.
+		if segInfo.GetStorageVersion() != storage.StorageV3 {
+			statuses = append(statuses, &datapb.CommitBackfillResultSegmentStatus{
+				SegmentId: segID, Ok: false, Kind: "v3",
+				Reason: "segment storage version is not V3",
+			})
+			continue
+		}
+		if segInfo.GetManifestPath() == "" {
+			statuses = append(statuses, &datapb.CommitBackfillResultSegmentStatus{
+				SegmentId: segID, Ok: false, Kind: "v3",
+				Reason: "segment has no existing manifest path",
+			})
+			continue
+		}
+
+		basePath, currentVer, verErr := packed.UnmarshalManifestPath(segInfo.GetManifestPath())
+		if verErr != nil {
+			statuses = append(statuses, &datapb.CommitBackfillResultSegmentStatus{
+				SegmentId: segID, Ok: false, Kind: "v3",
+				Reason: "failed to parse current manifest path: " + verErr.Error(),
+			})
+			continue
+		}
+
+		// Delta mode: apply the manifest operations to the segment's current
+		// manifest. No source-version comparison — the new revision is
+		// generated from the pointer current under the per-segment manifest
+		// lock (rebase semantics), so concurrent stats/index commits are
+		// preserved rather than rejected.
+		if entry.IsV3Delta() {
+			updates, err := opsToManifestUpdates(&entry)
+			if err != nil {
+				statuses = append(statuses, &datapb.CommitBackfillResultSegmentStatus{
+					SegmentId: segID, Ok: false, Kind: "v3", Reason: err.Error(),
+				})
+				continue
+			}
+			units = append(units, backfillCommitUnit{
+				segmentID: segID,
+				kind:      "v3",
+				commit: SegmentManifestCommit{
+					SegmentID:     segID,
+					StorageConfig: createStorageConfig(),
+					Mutation: ManifestMutation{
+						Type:    ManifestMutationCommitUpdates,
+						Updates: updates,
+					},
 				},
 			})
-		} else {
-			// V3 path
-			if segInfo.GetStorageVersion() != storage.StorageV3 {
-				statuses = append(statuses, &datapb.CommitBackfillResultSegmentStatus{
-					SegmentId: segID, Ok: false, Kind: "v3",
-					Reason: "segment storage version is not V3",
-				})
-				continue
-			}
-			// UpdateManifestVersion no-ops when ManifestPath is empty. Reject
-			// here so the caller never sees a fake committed=true.
-			if segInfo.GetManifestPath() == "" {
-				statuses = append(statuses, &datapb.CommitBackfillResultSegmentStatus{
-					SegmentId: segID, Ok: false, Kind: "v3",
-					Reason: "segment has no existing manifest path",
-				})
-				continue
-			}
-			if entry.Version <= 0 {
-				statuses = append(statuses, &datapb.CommitBackfillResultSegmentStatus{
-					SegmentId: segID, Ok: false, Kind: "v3",
-					Reason: "missing or invalid manifest version",
-				})
-				continue
-			}
-			// Reject stale results (e.g. Spark retry) that would move the
-			// manifest pointer backwards. UpdateManifestVersion short-circuits
-			// only on equality, so enforcing strict monotonicity here is the
-			// correct guard against silent rollback.
-			_, currentVer, verErr := packed.UnmarshalManifestPath(segInfo.GetManifestPath())
-			if verErr != nil {
-				statuses = append(statuses, &datapb.CommitBackfillResultSegmentStatus{
-					SegmentId: segID, Ok: false, Kind: "v3",
-					Reason: "failed to parse current manifest path: " + verErr.Error(),
-				})
-				continue
-			}
-			if entry.Version <= currentVer {
-				statuses = append(statuses, &datapb.CommitBackfillResultSegmentStatus{
-					SegmentId: segID, Ok: false, Kind: "v3",
-					Reason: "incoming manifest version " + strconv.FormatInt(entry.Version, 10) +
-						" is not greater than current " + strconv.FormatInt(currentVer, 10),
-				})
-				continue
-			}
-			items = append(items, &messagespb.BatchUpdateManifestItem{
-				SegmentId:       segID,
-				ManifestVersion: entry.Version,
-			})
+			continue
 		}
+
+		// Legacy mode: adopt a pre-baked version. Enforce that the base the
+		// version was built from still equals the current manifest; a source
+		// that moved (stats/index committed) means the pre-baked revision does
+		// not contain those changes and must be rejected. The authoritative
+		// check happens under the manifest lock via ExpectedManifest; this
+		// pre-check only fast-fails with a precise diagnostic.
+		if entry.Version <= 0 {
+			statuses = append(statuses, &datapb.CommitBackfillResultSegmentStatus{
+				SegmentId: segID, Ok: false, Kind: "v3",
+				Reason: "missing or invalid manifest version",
+			})
+			continue
+		}
+		if entry.SourceVersion > 0 && entry.SourceVersion != currentVer {
+			statuses = append(statuses, &datapb.CommitBackfillResultSegmentStatus{
+				SegmentId: segID, Ok: false, Kind: "v3",
+				Reason: "source manifest version " + strconv.FormatInt(entry.SourceVersion, 10) +
+					" does not match current " + strconv.FormatInt(currentVer, 10) +
+					"; re-run the backfill against the current manifest",
+			})
+			continue
+		}
+		// Reject stale results (e.g. Spark retry) that would move the manifest
+		// pointer backwards. The commit framework short-circuits only on
+		// equality, so strict monotonicity here is the guard against silent
+		// rollback.
+		if entry.Version <= currentVer {
+			statuses = append(statuses, &datapb.CommitBackfillResultSegmentStatus{
+				SegmentId: segID, Ok: false, Kind: "v3",
+				Reason: "incoming manifest version " + strconv.FormatInt(entry.Version, 10) +
+					" is not greater than current " + strconv.FormatInt(currentVer, 10),
+			})
+			continue
+		}
+		// ExpectedManifest pins the base the pre-baked version was built from.
+		// Empty when the result carries no sourceVersion (produced before the
+		// field existed) — best-effort, preserving the pre-CAS behavior.
+		expectedManifest := ""
+		if entry.SourceVersion > 0 {
+			expectedManifest = packed.MarshalManifestPath(basePath, entry.SourceVersion)
+		}
+		units = append(units, backfillCommitUnit{
+			segmentID: segID,
+			kind:      "v3",
+			commit: SegmentManifestCommit{
+				SegmentID:        segID,
+				StorageConfig:    createStorageConfig(),
+				ExpectedManifest: expectedManifest,
+				Mutation: ManifestMutation{
+					Type:         ManifestMutationNoop,
+					ManifestPath: packed.MarshalManifestPath(basePath, entry.Version),
+				},
+			},
+		})
 	}
-	return items, statuses
+	return units, statuses
 }
 
 func inferKind(entry *BackfillSegment) string {
@@ -426,6 +512,22 @@ func checkBackfillSchemaVersion(collectionID int64, expectedSchemaVersion int32,
 				"; re-run the backfill against the current schema")
 	}
 	return nil
+}
+
+// recheckBackfillSchemaVersion re-reads the collection and re-applies the
+// schema fence immediately before a commit batch, so a drop/alter-function
+// committing between the handler's fast-fail and the catalog writes is still
+// caught. Results without a schema version (0) are exempt. Applies to both the
+// V2 and V3 dispatch paths (see CommitBackfillResult).
+func (s *Server) recheckBackfillSchemaVersion(ctx context.Context, result *BackfillResult) error {
+	if result.SchemaVersion == 0 {
+		return nil
+	}
+	freshColl, err := s.broker.DescribeCollectionInternal(ctx, result.CollectionID)
+	if err != nil {
+		return err
+	}
+	return checkBackfillSchemaVersion(result.CollectionID, result.SchemaVersion, freshColl)
 }
 
 // allSegmentsFailed builds a per-segment failure status for every segment in
