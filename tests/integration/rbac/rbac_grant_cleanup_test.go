@@ -61,7 +61,7 @@ func (s *RBACBasicTestSuite) TestDropCollectionCleansGrants() {
 			Privilege: &milvuspb.PrivilegeEntity{Name: "GetStatistics"},
 		},
 		Type:           milvuspb.OperatePrivilegeType_Grant,
-		DbName:         util.AnyWord,
+		DbName:         util.DefaultDBName,
 		CollectionName: colName,
 	})
 	s.NoError(err)
@@ -73,7 +73,7 @@ func (s *RBACBasicTestSuite) TestDropCollectionCleansGrants() {
 			Role:       &milvuspb.RoleEntity{Name: roleName},
 			Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Collection.String()},
 			ObjectName: colName,
-			DbName:     util.AnyWord,
+			DbName:     util.DefaultDBName,
 		},
 	})
 	s.NoError(err)
@@ -94,7 +94,7 @@ func (s *RBACBasicTestSuite) TestDropCollectionCleansGrants() {
 			Role:       &milvuspb.RoleEntity{Name: roleName},
 			Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Collection.String()},
 			ObjectName: colName,
-			DbName:     util.AnyWord,
+			DbName:     util.DefaultDBName,
 		},
 	})
 	s.NoError(err)
@@ -138,7 +138,7 @@ func (s *RBACBasicTestSuite) TestRenameCollectionMigratesGrants() {
 			Privilege: &milvuspb.PrivilegeEntity{Name: "GetStatistics"},
 		},
 		Type:           milvuspb.OperatePrivilegeType_Grant,
-		DbName:         util.AnyWord,
+		DbName:         util.DefaultDBName,
 		CollectionName: oldName,
 	})
 	s.NoError(err)
@@ -159,7 +159,7 @@ func (s *RBACBasicTestSuite) TestRenameCollectionMigratesGrants() {
 			Role:       &milvuspb.RoleEntity{Name: roleName},
 			Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Collection.String()},
 			ObjectName: oldName,
-			DbName:     util.AnyWord,
+			DbName:     util.DefaultDBName,
 		},
 	})
 	s.NoError(err)
@@ -172,7 +172,7 @@ func (s *RBACBasicTestSuite) TestRenameCollectionMigratesGrants() {
 			Role:       &milvuspb.RoleEntity{Name: roleName},
 			Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Collection.String()},
 			ObjectName: newName,
-			DbName:     util.AnyWord,
+			DbName:     util.DefaultDBName,
 		},
 	})
 	s.NoError(err)
