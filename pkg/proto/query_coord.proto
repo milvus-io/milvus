@@ -332,6 +332,32 @@ message ShardLeadersList {  // All leaders of all replicas of one shard
     repeated int64 node_ids = 2;
     repeated string node_addrs = 3;
     repeated bool serviceable = 4;
+    // resource_groups[i] is the resource group of the REPLICA that node_ids[i]
+    // leads -- parallel to the three arrays above, same length.
+    //
+    // It is the replica's resource group, never the node's. A replica may
+    // borrow nodes from another resource group (querycoord models exactly that
+    // as num_outgoing_node / num_incoming_node), so node-set membership is not
+    // replica membership, and the two diverge precisely during the rebalance
+    // windows a caller asking this question cares about. The coordinator is
+    // the only place that still holds the mapping: this response flattens
+    // every replica into one list per channel, so a caller cannot recover it
+    // afterwards -- which is why the tag has to be on the wire.
+    //
+    // A caller must treat an empty list as "unknown", not as "no resource
+    // group": an old coordinator built before this field existed leaves it
+    // empty while still filling the other three, and proto3 gives the caller
+    // no other way to tell. That is also the difference from putting the
+    // filter in the request, where an old coordinator silently ignores it and
+    // answers unfiltered in a response shape nothing can distinguish.
+    //
+    // The tag says which group a leader belongs to, NOT whether that group can
+    // serve the collection. A replica that is not query-visible yet is
+    // filtered out before this list is built, so a group still coming up
+    // simply does not appear -- absence here does not mean the group holds no
+    // replica. Ask GetShardLeaderReadinessByResourceGroup for that; it
+    // separates "shards without a leader" from "no replica in this group".
+    repeated string resource_groups = 5;
 }
 
 message SyncNewCreatedPartitionRequest {
