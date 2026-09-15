@@ -21,6 +21,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -552,7 +553,8 @@ func (m *meta) UpdateSegmentsInfoAndChangeGroups(ctx context.Context, groupActio
 	// groupIDs seen within this call and reject duplicates, mirroring
 	// addSegmentChangeGroupLocked and loadSegmentChangeGroups.
 	seenGroupIDs := make(map[int64]struct{})
-	for _, action := range groupActions {
+	for i := range groupActions {
+		action := groupActions[i]
 		entry := action.Entry.(metastore.SegmentChangeGroupEntry)
 		switch action.Type {
 		case metastore.ActionUpdate:
@@ -591,6 +593,11 @@ func (m *meta) UpdateSegmentsInfoAndChangeGroups(ctx context.Context, groupActio
 				// fields (PartitionID/SourceJobID/CreateTS/...).
 				entry.Group = mergeTransitionOntoRecord(m.segmentChangeGroups[entry.Group.GroupID], entry.Group)
 			}
+			// A (chyezh): entry is a value copy, so the merge above would be
+			// lost unless written back — persistence and the memory apply later
+			// iterate the ORIGINAL groupActions. Reassign the entry so the
+			// (mutated or merged) group reaches both.
+			groupActions[i] = metastore.UpdateAction{Type: action.Type, Entry: entry}
 		case metastore.ActionDelete:
 			if current := m.segmentChangeGroups[entry.GroupID]; current != nil && !current.IsTerminal() {
 				return merr.WrapErrDataIntegrityMsg(
@@ -690,6 +697,22 @@ func (m *meta) UpdateSegmentsInfoAndChangeGroups(ctx context.Context, groupActio
 			if segment.GetIsInvisible() {
 				return merr.WrapErrDataIntegrityMsg(
 					"segment change group %d publish: member %d is still invisible (no visibility flip in this write)",
+					entry.Group.GroupID, id)
+			}
+		}
+		// C (chyezh): a COMMITTED publish must also retire every superseded
+		// parent — otherwise the parent and the now-visible member both cover
+		// the same rows, duplicating query results, and the terminal group can
+		// never repair it. Each parent must either already be Dropped in meta
+		// (the idempotent skip) or be dropped by this write's operators.
+		for _, id := range entry.Group.SupersededSegmentIDs {
+			if inMeta := m.segments.GetSegment(id); inMeta != nil && inMeta.GetState() == commonpb.SegmentState_Dropped {
+				continue // already retired
+			}
+			segment, ok := updatePack.segments[id]
+			if !ok || segment.GetState() != commonpb.SegmentState_Dropped {
+				return merr.WrapErrDataIntegrityMsg(
+					"segment change group %d publish: superseded parent %d must be retired (Dropped) by this write",
 					entry.Group.GroupID, id)
 			}
 		}

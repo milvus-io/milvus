@@ -350,6 +350,13 @@ Write-time constraints (violation ⇒ `merr.WrapErrDataIntegrityMsg`):
   the uniqueness check skips it and recovery uses the persisted decision, not a
   live segment-level lookup, so GC of the L0 parent cannot flip identical
   persisted bytes into a startup conflict.
+- **The L0 exemption is uniqueness-only, not retirement-only (chyezh#C)**:
+  exemption covers the anti-duplication *claim* check, but an L0-exempt
+  superseded parent must still be retired (marked Dropped) by the group's
+  publish exactly like any other superseded — the publish failure matrix
+  enforces it. A group superseding an L0 segment retires it on publication;
+  skipping the drop would leave the L0 parent live alongside the published
+  member.
 
 #### 1.2 `SegmentInfo` extension (datapb)
 
@@ -629,6 +636,7 @@ only briefly (bounded catalog I/O) and never request manifest, so
 | 2 validate | member missing / externally dropped / `change_group_id` mismatch | untouched | group→FAILED (external drop is unconvergeable) |
 | 2 validate | schema version behind | untouched | stay STAGED waiting for bump convergence (**not** FAILED) |
 | 2 validate | superseded already Dropped | untouched | treated as idempotent, skip (not fail) — covers **same-group publish replay** and **external DDL racing the parent** (truncate/drop-partition dropped it first); it is NOT a path that legitimizes two alive groups sharing a parent, which is rejected at registration by the anti-duplication invariant (§1.1) |
+| 2 validate | publish does not retire a superseded parent (chyezh#C) | untouched | group→FAILED. A COMMITTED publish must drop every superseded parent in the same write (unless it is already Dropped in meta): otherwise the parent and the now-visible member both cover the same rows — duplicated query results — and the terminal group can no longer repair it |
 | 3 | `PublishChange` monotonicity conflict (manifest version pushed higher by L0 then re-read lower) | untouched | stale error, back to STAGED, re-read and retry |
 | 4 | catalog txn fails (etcd error) | untouched (txn atomic) | in-function retry (same as flush semantics); still failing → abortView + STAGED |
 | 4 | **txn committed but process crashed** (response lost) | COMMITTED (etcd is authoritative) | recovery sees `state=COMMITTED` → keep, no replay |

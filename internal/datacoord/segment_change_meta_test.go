@@ -677,6 +677,87 @@ func TestMeta_UpdateSegmentChangeGroup_PreservesImmutableFields(t *testing.T) {
 	require.Equal(t, model.SegmentChangeStateReady, got.State)
 }
 
+// TestMeta_UpdateSegmentsInfoAndChangeGroups_PreservesImmutableFields verifies
+// A (chyezh): the composite transition path writes the merged record back, so
+// a caller-rebuilt group cannot zero the record-owned immutable fields.
+func TestMeta_UpdateSegmentsInfoAndChangeGroups_PreservesImmutableFields(t *testing.T) {
+	m, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	group := newTestGroup() // PartitionID=100, SourceJobID=999, CreateTS=123
+	require.NoError(t, m.AddSegmentChangeGroup(ctx, group))
+
+	// Caller-rebuilt READY record that only carries State + members.
+	ready := &model.SegmentChangeGroup{
+		GroupID:              1,
+		Source:               model.SegmentChangeSourceMixCompaction,
+		CollectionID:         10,
+		State:                model.SegmentChangeStateReady,
+		NewSegmentIDs:        []int64{1001},
+		SupersededSegmentIDs: []int64{2001},
+	}
+	err = m.UpdateSegmentsInfoAndChangeGroups(ctx,
+		[]metastore.UpdateAction{metastore.SaveSegmentChangeGroup(ready)},
+	)
+	require.NoError(t, err)
+	got := m.GetSegmentChangeGroup(ctx, 10, 1)
+	require.Equal(t, int64(100), got.PartitionID, "PartitionID must be preserved via the composite transition")
+	require.Equal(t, int64(999), got.SourceJobID, "SourceJobID must be preserved via the composite transition")
+	require.Equal(t, int64(123), got.CreateTS, "CreateTS must be preserved via the composite transition")
+	require.Equal(t, model.SegmentChangeStateReady, got.State)
+
+	// Persistence round-trip: reload must also carry the immutable fields.
+	byID, _, _, err := m.loadSegmentChangeGroups(ctx)
+	require.NoError(t, err)
+	require.Equal(t, int64(100), byID[1].PartitionID)
+	require.Equal(t, int64(999), byID[1].SourceJobID)
+	require.Equal(t, int64(123), byID[1].CreateTS)
+}
+
+// TestMeta_PublishRequiresSupersededRetired verifies C (chyezh): a COMMITTED
+// composite publish must retire every superseded parent, or it fails instead
+// of leaving old and new segments both visible.
+func TestMeta_PublishRequiresSupersededRetired(t *testing.T) {
+	m, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	require.NoError(t, m.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 1001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
+		State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1, IsInvisible: true,
+	})))
+	require.NoError(t, m.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 2001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
+		State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1,
+	})))
+
+	group := newTestGroup()
+	require.NoError(t, m.AddSegmentChangeGroup(ctx, group))
+	ready := group.Clone()
+	ready.State = model.SegmentChangeStateReady
+	require.NoError(t, m.UpdateSegmentChangeGroup(ctx, ready))
+
+	// Publish flips the member but never retires the superseded parent.
+	committed := ready.Clone()
+	committed.State = model.SegmentChangeStateCommitted
+	err = m.UpdateSegmentsInfoAndChangeGroups(ctx,
+		[]metastore.UpdateAction{metastore.SaveSegmentChangeGroup(committed)},
+		SetSegmentIsInvisible(1001, false),
+	)
+	require.Error(t, err, "COMMITTED without retiring superseded parents must fail")
+	require.Equal(t, model.SegmentChangeStateReady, m.GetSegmentChangeGroup(ctx, 10, 1).State)
+
+	// With the parent retired by this write, the publish succeeds.
+	err = m.UpdateSegmentsInfoAndChangeGroups(ctx,
+		[]metastore.UpdateAction{metastore.SaveSegmentChangeGroup(committed)},
+		SetSegmentIsInvisible(1001, false),
+		UpdateStatusOperator(2001, commonpb.SegmentState_Dropped),
+	)
+	require.NoError(t, err)
+	require.Equal(t, model.SegmentChangeStateCommitted, m.GetSegmentChangeGroup(ctx, 10, 1).State)
+}
+
 // TestMeta_UpdateSegmentsInfoAndChangeGroups_DuplicateGroupID verifies C18: two
 // ActionUpdate actions with the same groupID (differing collectionID and
 // members) in ONE composite write are rejected — otherwise both persist under
