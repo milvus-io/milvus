@@ -188,6 +188,14 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 		}, mockHook, 2, "TEST_INDEX")
 		suite.NoError(err)
 		suite.verifyQueryInfo(req, 100, false, false, `{"default_param":0.8,"hook_param":32}`)
+
+		plan.GetVectorAnns().GetQueryInfo().SearchParams = "invalid"
+		bs, err = proto.Marshal(plan)
+		suite.Require().NoError(err)
+		_, err = OptimizeSearchParams(ctx, &querypb.SearchRequest{
+			Req: &internalpb.SearchRequest{SerializedExprPlan: bs},
+		}, nil, 2, "TEST_INDEX")
+		suite.Error(err)
 	})
 
 	suite.Run("other_plannode", func() {

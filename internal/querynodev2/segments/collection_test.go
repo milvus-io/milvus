@@ -97,6 +97,7 @@ func (s *CollectionManagerSuite) TestGetIndexType() {
 	indexMeta := collection.GetCCollection().IndexMeta().GetIndexMetas()[0]
 	s.Equal(mock_segcore.IndexFaissIVFFlat, collection.GetIndexType(indexMeta.GetFieldID()))
 	s.Empty(collection.GetIndexType(-1))
+	s.Empty(new(Collection).GetIndexType(-1))
 }
 
 func (s *CollectionManagerSuite) TestGpuIndexFlagWithCagraAdaptForCPU() {

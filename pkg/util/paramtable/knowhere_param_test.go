@@ -197,9 +197,21 @@ func TestKnowhereConfig_MergeIndexParamsJSON(t *testing.T) {
 
 	bt.Save("knowhere.TEST_INDEX.search.default_number", "0.5")
 	bt.Save("knowhere.TEST_INDEX.search.default_string", "balanced")
+	assert.True(t, cfg.HasIndexParams("TEST_INDEX", SearchStage))
+	assert.False(t, cfg.HasIndexParams("UNKNOWN_INDEX", SearchStage))
 
 	params := map[string]any{common.SearchParamKey: `{"default_number":0.8,"request_param":16}`}
-	err := cfg.MergeIndexParamsJSON("TEST_INDEX", SearchStage, params)
+	err := cfg.MergeIndexParamsJSON("UNKNOWN_INDEX", SearchStage, params)
+	assert.NoError(t, err)
+	assert.JSONEq(t, `{"default_number":0.8,"request_param":16}`, params[common.SearchParamKey].(string))
+
+	params[common.SearchParamKey] = ""
+	err = cfg.MergeIndexParamsJSON("TEST_INDEX", SearchStage, params)
+	assert.NoError(t, err)
+	assert.JSONEq(t, `{"default_number":0.5,"default_string":"balanced"}`, params[common.SearchParamKey].(string))
+
+	params[common.SearchParamKey] = `{"default_number":0.8,"request_param":16}`
+	err = cfg.MergeIndexParamsJSON("TEST_INDEX", SearchStage, params)
 	assert.NoError(t, err)
 	assert.JSONEq(t, `{"default_number":0.8,"default_string":"balanced","request_param":16}`, params[common.SearchParamKey].(string))
 
