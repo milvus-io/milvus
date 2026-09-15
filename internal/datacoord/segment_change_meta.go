@@ -553,8 +553,13 @@ func (m *meta) UpdateSegmentsInfoAndChangeGroups(ctx context.Context, groupActio
 	// groupIDs seen within this call and reject duplicates, mirroring
 	// addSegmentChangeGroupLocked and loadSegmentChangeGroups.
 	seenGroupIDs := make(map[int64]struct{})
-	for i := range groupActions {
-		action := groupActions[i]
+	// A (chyezh): build a normalized action list instead of writing back into
+	// the caller's slice by index. The validation below merges caller-rebuilt
+	// transition records onto the stored group, so the actions that persistence
+	// and the memory apply consume must carry the merged (or mutation-stamped)
+	// group — not the original caller record.
+	normalized := make([]metastore.UpdateAction, 0, len(groupActions))
+	for _, action := range groupActions {
 		entry := action.Entry.(metastore.SegmentChangeGroupEntry)
 		switch action.Type {
 		case metastore.ActionUpdate:
@@ -593,22 +598,20 @@ func (m *meta) UpdateSegmentsInfoAndChangeGroups(ctx context.Context, groupActio
 				// fields (PartitionID/SourceJobID/CreateTS/...).
 				entry.Group = mergeTransitionOntoRecord(m.segmentChangeGroups[entry.Group.GroupID], entry.Group)
 			}
-			// A (chyezh): entry is a value copy, so the merge above would be
-			// lost unless written back — persistence and the memory apply later
-			// iterate the ORIGINAL groupActions. Reassign the entry so the
-			// (mutated or merged) group reaches both.
-			groupActions[i] = metastore.UpdateAction{Type: action.Type, Entry: entry}
+			normalized = append(normalized, metastore.UpdateAction{Type: action.Type, Entry: entry})
 		case metastore.ActionDelete:
 			if current := m.segmentChangeGroups[entry.GroupID]; current != nil && !current.IsTerminal() {
 				return merr.WrapErrDataIntegrityMsg(
 					"cannot delete non-terminal segment change group %d (state %s) in a composite write; abort or fail it first",
 					entry.GroupID, current.State)
 			}
+			normalized = append(normalized, action)
 		default:
 			return merr.WrapErrServiceInternalMsg(
 				"unsupported segment change group action type %v", action.Type)
 		}
 	}
+	groupActions = normalized
 
 	updatePack := &updateSegmentPack{
 		meta:       m,
