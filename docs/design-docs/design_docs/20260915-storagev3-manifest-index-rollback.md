@@ -76,6 +76,14 @@ manifest commit framework for final publication:
 5. Clear catalog-absent provenance only after the transaction succeeds. Preserve
    current in-memory objects and the current `(segment, index)` build slot.
 
+Include catalog-absent superseded builds still retained in memory, even when
+a replacement has removed their entry from the current manifest. Group these
+records by segment and prove their absence in the same locked source read. If
+the batch has no manifest entries to retract, a private Noop commit atomically
+PUTs the records and the unchanged segment pointer, with the same source-pointer
+checks. Public Noop commits continue to reject index-record mutations. This also
+covers catalog-absent records on segments whose current marker is already false.
+
 The rollback entry point prepares its retractions from a manifest read inside
 the segment lock. It shares the locked commit implementation, without weakening
 the public structured-commit rule against caller-supplied `ExpectedManifest`.
@@ -99,6 +107,12 @@ new revision into it. Index GC may have selected an old manifest revision;
 conditional drops and BuildID locks keep retirement ordered, and rollback
 never installs a stale record over a replacement build.
 
+Catalog reload selects the highest BuildID for each `(segment, index)` slot,
+independently of catalog key iteration order. Superseded records remain available
+by BuildID for GC. A short memory-map lock serializes current-slot installation
+and removal across different BuildID locks; removing an older record checks
+the slot's BuildID and preserves its replacement. This lock covers no I/O.
+
 Rollback includes retained Dropped segments, including snapshot-pinned parents.
 Snapshot references continue to pin the same build IDs and physical files.
 Historical immutable snapshot revisions remain untouched. Unreadable or invalid
@@ -116,6 +130,13 @@ This prevents rollback from racing a result installer between pointer adoption
 and in-memory index installation, or reporting completion before an old task
 publishes a manifest. New tasks use the effective etcd mode.
 
+Result synchronization checks the current persisted task state under the copy
+result lock. Repeated results for a completed task cannot reinstall a manifest
+pointer that rollback has already advanced. Failed tasks are also rejected in
+rollback mode, including historical tasks without a cleanup plan, so a late
+result cannot invalidate a scan that already treated that task as terminal.
+Rejected results continue to re-arm durable cleanup where the task still exists.
+
 On restart, partial progress is derived from durable metadata: catalog rows
 load first; remaining manifest entries recover normally. There is no separate
 checkpoint to commit and no dual-write cleanup phase. A migrated segment with
@@ -126,15 +147,17 @@ index read, matching the target version's catalog-only startup behavior.
 
 Expose bounded-cardinality metrics:
 
-- `manifest_index_rollback_pending_segments`: all marked segments, including
-  unsupported/unreadable/temporarily blocked ones, before batch limiting;
+- `manifest_index_rollback_pending_segments`: all marked segments and segments
+  with catalog-absent records, including unsupported/unreadable/temporarily
+  blocked ones, before batch limiting;
 - `manifest_index_rollback_pending_copy_tasks`: unfinished copy/restore tasks;
 - `manifest_index_rollback_pending_records`: remaining catalog-absent records
   in memory, including inconsistent records without a marked segment;
 - `manifest_index_rollback_ready`: 0 until an active complete scan observes all
   three counts at zero; reset on start/stop and before each scan;
-- `manifest_index_rollback_records_total{status=...}`: migrated records and
-  failed/stale segment attempts.
+- `manifest_index_rollback_records_total`: successfully restored records;
+- `manifest_index_rollback_segments_total{status=success|failed|stale}`:
+  segment migration attempts by outcome.
 
 Readiness requires a subsequent complete scan after the final batch. A failed
 or canceled scan never reports ready. Zero is a migration observation, not a
@@ -165,7 +188,8 @@ row, then retry or restart. Test source pointer advancement and segment drop
 during I/O; conditional build replacement; existing catalog rows with newer
 task state; multiple indexes over several atomic batches; deleted definitions;
 retained Dropped/snapshot-pinned segments; GC selected before/during rollback;
-late copy installation; cancellation and bounded worker concurrency.
+superseded build restoration and retirement; late copy installation and repeated
+completed/failed results; cancellation and bounded worker concurrency.
 
 Use real packed manifests for both supported artifact layouts and verify the
 same bytes remain readable, other manifest sections survive, forward/reverse
