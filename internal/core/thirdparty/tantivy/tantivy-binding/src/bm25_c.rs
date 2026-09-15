@@ -30,6 +30,18 @@ pub struct TantivyBM25Batch {
     pub handle: *mut c_void,
 }
 
+fn drain_frequencies(frequencies: &mut HashMap<u32, f32>, terms: &mut Vec<(u32, f32)>) {
+    // HashMap::drain retains capacity and scans/resets the table's buckets.
+    // Keep small tables and reuse large ones for similarly sized rows, but
+    // release an oversized table once row cardinality drops. Otherwise one
+    // large document makes every subsequent short row pay for its capacity.
+    if frequencies.capacity() > 1024 && frequencies.len() < frequencies.capacity() / 4 {
+        terms.extend(std::mem::take(frequencies));
+    } else {
+        terms.extend(frequencies.drain());
+    }
+}
+
 fn tokenize_batch(analyzer: &mut TextAnalyzer, data: &[u8], offsets: &[u64]) -> Result<BM25Batch> {
     if offsets.first() != Some(&0)
         || offsets.last() != Some(&(data.len() as u64))
@@ -61,7 +73,7 @@ fn tokenize_batch(analyzer: &mut TextAnalyzer, data: &[u8], offsets: &[u64]) -> 
                     .or_default() += 1.0;
             }
         }
-        terms.extend(frequencies.drain());
+        drain_frequencies(&mut frequencies, &mut terms);
         terms.sort_unstable_by_key(|(hash, _)| *hash);
         for (hash, frequency) in terms.drain(..) {
             batch.data.extend_from_slice(&hash.to_le_bytes());
@@ -151,6 +163,64 @@ mod tests {
             token_hash(&format!("{prefix}éx")),
             token_hash(&format!("{prefix}éy"))
         );
+    }
+
+    #[test]
+    fn frequency_map_reuse_follows_row_cardinality() {
+        let mut frequencies = HashMap::new();
+        let mut terms = Vec::new();
+        for count in [8192, 8192, 1, 64, 64] {
+            for hash in 0..count {
+                frequencies.insert(hash, 2.0);
+            }
+            let capacity = frequencies.capacity();
+            drain_frequencies(&mut frequencies, &mut terms);
+            assert!(frequencies.is_empty());
+            terms.sort_unstable_by_key(|(hash, _)| *hash);
+            assert_eq!(
+                terms,
+                (0..count).map(|hash| (hash, 2.0)).collect::<Vec<_>>()
+            );
+            if count == 1 {
+                assert_eq!(
+                    frequencies.capacity(),
+                    0,
+                    "release the previous large table"
+                );
+            } else {
+                assert_eq!(
+                    frequencies.capacity(),
+                    capacity,
+                    "reuse similarly sized tables"
+                );
+            }
+            terms.clear();
+        }
+    }
+
+    #[test]
+    fn mixed_row_cardinalities_preserve_results() {
+        let long = (0..8192)
+            .map(|i| format!("word{i}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let texts = [long.as_str(), "short short tail", "last", "", long.as_str()];
+        let mut data = Vec::new();
+        let mut offsets = vec![0];
+        for text in texts {
+            data.extend_from_slice(text.as_bytes());
+            offsets.push(data.len() as u64);
+        }
+        let mut analyzer = create_analyzer(r#"{"tokenizer":"whitespace"}"#, "").unwrap();
+        let batch = tokenize_batch(&mut analyzer, &data, &offsets).unwrap();
+        for (i, text) in texts.iter().enumerate() {
+            let row =
+                tokenize_batch(&mut analyzer, text.as_bytes(), &[0, text.len() as u64]).unwrap();
+            assert_eq!(
+                &batch.data[batch.offsets[i] as usize..batch.offsets[i + 1] as usize],
+                row.data.as_slice(),
+            );
+        }
     }
 
     #[test]

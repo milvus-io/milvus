@@ -252,3 +252,51 @@ func BenchmarkBM25BatchRun(b *testing.B) {
 		a.Destroy()
 	}
 }
+
+// A high-cardinality row must not make subsequent one-token rows repeatedly
+// scan its retained native TF-map capacity. Both row orders have identical work.
+func BenchmarkBM25BatchRunMixedSizes(b *testing.B) {
+	b.Logf("GOMAXPROCS=%d analyzer_runner_concurrency=%d", runtime.GOMAXPROCS(0), getAnalyzerRunnerConcurrency())
+	a, err := analyzer.NewAnalyzer(`{"tokenizer":"whitespace"}`, "")
+	require.NoError(b, err)
+	defer a.Destroy()
+	runner := &BM25FunctionRunner{tokenizer: a}
+	words := make([]string, 200000)
+	for i := range words {
+		words[i] = fmt.Sprintf("w%d", i)
+	}
+	long := strings.Join(words, " ")
+	for _, nq := range []int{8192, 65536} {
+		for _, position := range []string{"first", "last"} {
+			texts := make([]string, nq)
+			for i := range texts {
+				texts[i] = fmt.Sprintf("short%d", i%32)
+			}
+			if position == "first" {
+				texts[0] = long
+			} else {
+				texts[len(texts)-1] = long
+			}
+			want, err := legacyBM25BatchRun(runner, texts)
+			require.NoError(b, err)
+			got, err := runner.BatchRun(texts)
+			require.NoError(b, err)
+			require.Equal(b, want, got)
+			for _, native := range []bool{false, true} {
+				b.Run(fmt.Sprintf("nq%d/long_%s/native=%t", nq, position, native), func(b *testing.B) {
+					b.ReportAllocs()
+					for i := 0; i < b.N; i++ {
+						if native {
+							_, err = runner.BatchRun(texts)
+						} else {
+							_, err = legacyBM25BatchRun(runner, texts)
+						}
+						if err != nil {
+							b.Fatal(err)
+						}
+					}
+				})
+			}
+		}
+	}
+}
