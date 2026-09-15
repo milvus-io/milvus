@@ -378,12 +378,14 @@ struct CompositeGroupByMap {
 
     bool
     Push(const CompositeGroupKey& key) {
-        auto [it, inserted] = group_map_.try_emplace(key, 0);
-        if (inserted) {
-            if (static_cast<int>(group_map_.size()) > group_capacity_) {
-                group_map_.erase(it);
+        decltype(group_map_)::iterator it;
+        if (static_cast<int>(group_map_.size()) >= group_capacity_) {
+            it = group_map_.find(key);
+            if (it == group_map_.end()) {
                 return false;
             }
+        } else {
+            it = group_map_.try_emplace(key, 0).first;
         }
         if (it->second >= group_size_) {
             return false;
