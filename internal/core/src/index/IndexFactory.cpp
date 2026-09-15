@@ -15,6 +15,12 @@
 // limitations under the License.
 
 #include "index/IndexFactory.h"
+#include "folly/coro/BlockingWait.h"
+#include "storage/AsyncIndexEntryReader.h"
+#include "storage/LoadOverheadController.h"
+#include "storage/AsyncLoadExecutor.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/FileWriter.h"
 
 #include <assert.h>
 #include <algorithm>
@@ -158,7 +164,13 @@ BitmapMmapFrozenBufferBytes(int64_t num_rows, uint64_t index_size_in_bytes) {
     constexpr uint64_t kBitmapFrozenAlignment = 32;
     auto dense_bitmap_bytes =
         AlignUp(BitsetBytes(num_rows), kBitmapFrozenAlignment);
-    return std::max(dense_bitmap_bytes, index_size_in_bytes);
+    // Decoded Roaring and frozen output coexist. Growing the reusable output
+    // can briefly retain its old allocation too; each output allocation holds
+    // at most one batch prefix plus the largest bitmap.
+    return SaturatingAdd(
+        SaturatingMultiply(std::max(dense_bitmap_bytes, index_size_in_bytes),
+                           uint64_t{3}),
+        uint64_t{2 * BITMAP_FROZEN_BATCH_BYTES});
 }
 
 uint64_t
@@ -734,6 +746,23 @@ IndexFactory::ScalarIndexLoadResourceImpl(
                                         file_stream,
                                         stream_load_info);
 
+    return ScalarIndexLoadResourceWithOverhead(field_type,
+                                               index_size_in_bytes,
+                                               index_params,
+                                               mmap_enable,
+                                               num_rows,
+                                               stream_memory_overhead);
+}
+
+LoadResourceRequest
+IndexFactory::ScalarIndexLoadResourceWithOverhead(
+    DataType field_type,
+    uint64_t index_size_in_bytes,
+    const std::map<std::string, std::string>& index_params,
+    bool mmap_enable,
+    int64_t num_rows,
+    uint64_t stream_memory_overhead) {
+    const auto& index_type = index_params.at("index_type");
     LoadResourceRequest request{};
     request.has_raw_data = false;
 
@@ -747,14 +776,16 @@ IndexFactory::ScalarIndexLoadResourceImpl(
             auto resident_bytes = legacy_aux_bytes;
             request.final_memory_cost = resident_bytes;
             request.final_disk_cost = index_size_in_bytes;
-            request.max_memory_cost = resident_bytes + stream_memory_overhead;
+            request.max_memory_cost =
+                SaturatingAdd(resident_bytes, stream_memory_overhead);
             request.max_disk_cost = index_size_in_bytes;
         } else {
             // V3 streaming: pre-allocate target, stream into it
-            request.final_memory_cost = index_size_in_bytes + legacy_aux_bytes;
+            request.final_memory_cost =
+                SaturatingAdd(index_size_in_bytes, legacy_aux_bytes);
             request.final_disk_cost = 0;
-            request.max_memory_cost =
-                request.final_memory_cost + stream_memory_overhead;
+            request.max_memory_cost = SaturatingAdd(request.final_memory_cost,
+                                                    stream_memory_overhead);
             request.max_disk_cost = 0;
         }
         request.has_raw_data = true;
@@ -770,14 +801,14 @@ IndexFactory::ScalarIndexLoadResourceImpl(
             request.final_memory_cost = legacy_csr_resident_bytes;
             request.final_disk_cost = index_size_in_bytes;
             request.max_memory_cost =
-                legacy_csr_peak_bytes + stream_memory_overhead;
+                SaturatingAdd(legacy_csr_peak_bytes, stream_memory_overhead);
             request.max_disk_cost = index_size_in_bytes;
         } else {
             // V3 streaming: trie via temp file + read, str_ids pre-allocated
             request.final_memory_cost = index_size_in_bytes;
             request.final_disk_cost = 0;
             request.max_memory_cost =
-                index_size_in_bytes + stream_memory_overhead;
+                SaturatingAdd(index_size_in_bytes, stream_memory_overhead);
             request.max_disk_cost = index_size_in_bytes;  // trie temp file
         }
         request.has_raw_data = true;
@@ -825,7 +856,7 @@ IndexFactory::ScalarIndexLoadResourceImpl(
             request.final_memory_cost = index_size_in_bytes;
             request.final_disk_cost = index_size_in_bytes;
             request.max_memory_cost =
-                index_size_in_bytes + stream_memory_overhead;
+                SaturatingAdd(index_size_in_bytes, stream_memory_overhead);
             request.max_disk_cost = index_size_in_bytes;
         } else {
             // Deserialize MOVES the reader entry buffer into owned_blob_ (no
@@ -833,9 +864,11 @@ IndexFactory::ScalarIndexLoadResourceImpl(
             // plus the rebuilt rank directories (~1x blob): both steady and
             // peak are ~2x. (Without the move overload the peak was ~4x from
             // three simultaneous full copies.)
-            request.final_memory_cost = 2 * index_size_in_bytes;
+            request.final_memory_cost =
+                SaturatingMultiply(index_size_in_bytes, uint64_t{2});
             request.final_disk_cost = 0;
-            request.max_memory_cost = 2 * index_size_in_bytes;
+            request.max_memory_cost =
+                SaturatingMultiply(index_size_in_bytes, uint64_t{2});
             request.max_disk_cost = 0;
         }
         request.has_raw_data = false;
@@ -850,16 +883,18 @@ IndexFactory::ScalarIndexLoadResourceImpl(
                 BitmapMmapFrozenBufferBytes(num_rows, index_size_in_bytes);
             request.final_memory_cost = resident_bytes;
             request.final_disk_cost = index_size_in_bytes;
-            request.max_memory_cost =
-                resident_bytes + stream_memory_overhead + frozen_buffer_bytes;
-            request.max_disk_cost = 2 * index_size_in_bytes;  // temp + final
+            request.max_memory_cost = SaturatingAdd(
+                SaturatingAdd(resident_bytes, stream_memory_overhead),
+                frozen_buffer_bytes);
+            request.max_disk_cost = SaturatingMultiply(
+                index_size_in_bytes, uint64_t{2});  // temp + final
         } else {
             // V3 streaming: pre-allocate buffer + deserialize
             request.final_memory_cost = index_size_in_bytes;
             request.final_disk_cost = 0;
-            request.max_memory_cost =
-                std::max(2 * index_size_in_bytes,
-                         index_size_in_bytes + stream_memory_overhead);
+            request.max_memory_cost = std::max(
+                SaturatingMultiply(index_size_in_bytes, uint64_t{2}),
+                SaturatingAdd(index_size_in_bytes, stream_memory_overhead));
             request.max_disk_cost = 0;
         }
 
@@ -867,7 +902,8 @@ IndexFactory::ScalarIndexLoadResourceImpl(
     } else if (index_type == milvus::index::HYBRID_INDEX_TYPE) {
         request.final_memory_cost = index_size_in_bytes;
         request.final_disk_cost = index_size_in_bytes;
-        request.max_memory_cost = 2 * index_size_in_bytes;
+        request.max_memory_cost =
+            SaturatingMultiply(index_size_in_bytes, uint64_t{2});
         request.max_disk_cost = index_size_in_bytes;
         request.has_raw_data = false;
     } else {
@@ -879,6 +915,218 @@ IndexFactory::ScalarIndexLoadResourceImpl(
     request.has_raw_data =
         CanUseIndexRawDataForField(field_type, request.has_raw_data);
     return request;
+}
+
+namespace {
+folly::coro::Task<std::unique_ptr<storage::AsyncIndexEntryReader>>
+InspectPackedScalarIndex(const std::vector<std::string>& files,
+                         const storage::FileManagerContext& context,
+                         bool is_index_file) {
+    AssertInfo(files.size() == 1 && context.Valid(),
+               "Async scalar load requires one V3 file and a valid context");
+    storage::MemFileManagerImpl manager(context);
+    auto input = manager.OpenInputStream(files.front(), is_index_file);
+    AssertInfo(input != nullptr, "Failed to open packed scalar index");
+    const auto size = input->Size();
+    co_return co_await storage::AsyncIndexEntryReader::Open(
+        std::move(input),
+        size,
+        context.fieldDataMeta.collection_id,
+        proto::common::LoadPriority::HIGH,
+        {});
+}
+}  // namespace
+
+ScalarIndexLoadResources
+IndexFactory::ScalarIndexFileLoadResource(
+    DataType field_type,
+    uint64_t index_size,
+    const std::map<std::string, std::string>& index_params,
+    bool mmap_enable,
+    int64_t num_rows,
+    const std::vector<std::string>& index_files,
+    const storage::FileManagerContext& context,
+    bool is_index_file) {
+    const auto version =
+        GetValueFromConfig<int32_t>(ParseConfigFromIndexParams(index_params),
+                                    SCALAR_INDEX_ENGINE_VERSION)
+            .value_or(1);
+    const bool use_async_load = context.use_async_load.value_or(
+        segcore::storagev2translator::StorageV2AsyncLoadEnabled());
+    if (version < 3 && index_params.at(INDEX_TYPE) != FMINDEX_INDEX_TYPE) {
+        return {
+            ScalarIndexLoadResource(
+                field_type, 0, index_size, index_params, mmap_enable, num_rows),
+            std::nullopt};
+    }
+    auto inspect = [&]() {
+        return InspectPackedScalarIndex(index_files, context, is_index_file);
+    };
+    auto reader = use_async_load
+                      ? folly::coro::blockingWait(inspect().scheduleOn(
+                            storage::ResolveAsyncLoadExecutor(
+                                {}, proto::common::LoadPriority::HIGH)))
+                      : folly::coro::blockingWait(inspect());
+    const auto& catalog = reader->Catalog();
+    auto resolved_params = index_params;
+    if (resolved_params.at("index_type") == HYBRID_INDEX_TYPE) {
+        auto config = ParseConfigFromIndexParams(index_params);
+        config[INDEX_FILES] = index_files;
+        const auto type = ResolvePackedHybridIndexType(catalog, config);
+        const auto resolved = HybridInternalIndexTypeToIndexType(type);
+        AssertInfo(!resolved.empty(),
+                   "Unknown async hybrid index type {}",
+                   static_cast<int>(type));
+        resolved_params["index_type"] = resolved;
+    }
+    storage::EntryStreamLoadInfo legacy_stream;
+    uint64_t total_transient = 0;
+    uint64_t max_task = 0;
+    for (const auto& entry : catalog.Entries()) {
+        if (const auto* encrypted =
+                std::get_if<storage::EncryptedEntrySource>(&entry.source)) {
+            legacy_stream.encrypted = true;
+            for (const auto& slice : encrypted->slices) {
+                const auto bytes = SaturatingAdd(
+                    milvus::SaturatingMultiply(slice.remote_bytes, uint64_t{2}),
+                    slice.target_bytes);
+                const auto legacy_bytes = SaturatingAdd(
+                    slice.remote_bytes,
+                    SaturatingMultiply(slice.target_bytes, uint64_t{2}));
+                legacy_stream.total_transient_bytes = SaturatingAdd(
+                    legacy_stream.total_transient_bytes, legacy_bytes);
+                legacy_stream.max_task_transient_bytes = std::max(
+                    legacy_stream.max_task_transient_bytes, legacy_bytes);
+                total_transient = SaturatingAdd(total_transient, bytes);
+                max_task = std::max(max_task, bytes);
+            }
+        } else {
+            total_transient =
+                SaturatingAdd(total_transient, entry.plaintext_size);
+            max_task =
+                std::max(max_task,
+                         std::min<uint64_t>(entry.plaintext_size,
+                                            storage::DefaultStreamSliceSize()));
+        }
+    }
+    // Estimates survive admission refreshes, including removal of all limits.
+    // The shared overhead group applies the live global bound where eligible.
+    const auto read_peak = total_transient;
+    const auto& type = resolved_params.at(INDEX_TYPE);
+    const bool file_stream = type == INVERTED_INDEX_TYPE ||
+                             type == NGRAM_INDEX_TYPE ||
+                             type == RTREE_INDEX_TYPE;
+    const auto legacy_peak =
+        ScalarIndexStreamMemoryOverhead(index_size,
+                                        std::max(version, 3),
+                                        legacy_stream.encrypted,
+                                        file_stream,
+                                        legacy_stream);
+    const auto legacy = ScalarIndexLoadResourceWithOverhead(field_type,
+                                                            index_size,
+                                                            resolved_params,
+                                                            mmap_enable,
+                                                            num_rows,
+                                                            legacy_peak);
+    uint64_t staging_bytes = 0;
+    if ((type == INVERTED_INDEX_TYPE || type == NGRAM_INDEX_TYPE) &&
+        catalog.HasEntry(INDEX_NULL_OFFSET_FILE_NAME)) {
+        // The whole sidecar survives until FinalizeSealed builds validity.
+        staging_bytes = catalog.At(INDEX_NULL_OFFSET_FILE_NAME).plaintext_size;
+    } else if (type == BITMAP_INDEX_TYPE) {
+        const bool loads_to_mmap =
+            mmap_enable && catalog.GetMeta<size_t>(BITMAP_INDEX_LENGTH) >
+                               DEFAULT_BITMAP_INDEX_BUILD_MODE_BOUND;
+        if (!loads_to_mmap) {
+            staging_bytes = catalog.At(BITMAP_INDEX_DATA).plaintext_size;
+            mmap_enable = false;
+        }
+        if (catalog.HasEntry(BITMAP_INDEX_VALID_BITSET)) {
+            staging_bytes = SaturatingAdd(
+                staging_bytes,
+                catalog.At(BITMAP_INDEX_VALID_BITSET).plaintext_size);
+        }
+    }
+    if (type == FMINDEX_INDEX_TYPE &&
+        catalog.HasEntry(FMINDEX_NULL_BITMAP_FILE_NAME)) {
+        staging_bytes = SaturatingAdd(
+            staging_bytes,
+            catalog.At(FMINDEX_NULL_BITMAP_FILE_NAME).plaintext_size);
+    }
+    if (type == ASCENDING_SORT && catalog.HasMeta("version") &&
+        catalog.HasEntry("valid_bitset")) {
+        staging_bytes = SaturatingAdd(
+            staging_bytes, catalog.At("valid_bitset").plaintext_size);
+    }
+    auto request = ScalarIndexLoadResourceWithOverhead(field_type,
+                                                       index_size,
+                                                       resolved_params,
+                                                       mmap_enable,
+                                                       num_rows,
+                                                       read_peak);
+    if (type == BITMAP_INDEX_TYPE && mmap_enable) {
+        request.max_memory_cost = SaturatingAdd(
+            request.max_memory_cost, storage::FileWriter::MAX_BUFFER_SIZE);
+    }
+    if (type == RTREE_INDEX_TYPE && catalog.HasEntry("index_null_offset")) {
+        request.final_memory_cost =
+            catalog.At("index_null_offset").plaintext_size;
+    }
+    if (field_type == DataType::JSON) {
+        const auto non_exist_bytes =
+            catalog.HasEntry(INDEX_NON_EXIST_OFFSET_FILE_NAME)
+                ? catalog.At(INDEX_NON_EXIST_OFFSET_FILE_NAME).plaintext_size
+                : uint64_t{0};
+        request.final_memory_cost = SaturatingAdd(
+            request.final_memory_cost,
+            SaturatingAdd(non_exist_bytes, ValidityBitmapBytes(num_rows)));
+    }
+    request.max_memory_cost =
+        std::max(request.max_memory_cost,
+                 SaturatingAdd(request.final_memory_cost,
+                               SaturatingAdd(staging_bytes, read_peak)));
+    // Preserve both routes' final and request-local overhead estimates. A cell
+    // can be reloaded after either rollout or executor configuration changes.
+    const bool can_share =
+        staging_bytes == 0 && type != BITMAP_INDEX_TYPE &&
+        request.max_memory_cost - request.final_memory_cost <= read_peak &&
+        legacy.max_memory_cost - legacy.final_memory_cost <= legacy_peak;
+    const auto memory_overhead =
+        std::max(request.max_memory_cost - request.final_memory_cost,
+                 legacy.max_memory_cost - legacy.final_memory_cost);
+    const auto disk_overhead =
+        std::max(request.max_disk_cost - request.final_disk_cost,
+                 legacy.max_disk_cost - legacy.final_disk_cost);
+    request.final_memory_cost =
+        std::max(request.final_memory_cost, legacy.final_memory_cost);
+    request.final_disk_cost =
+        std::max(request.final_disk_cost, legacy.final_disk_cost);
+    request.max_memory_cost =
+        SaturatingAdd(request.final_memory_cost, memory_overhead);
+    request.max_disk_cost =
+        SaturatingAdd(request.final_disk_cost, disk_overhead);
+    max_task = std::max<uint64_t>(
+        max_task,
+        legacy_stream.encrypted
+            ? legacy_stream.max_task_transient_bytes
+            : SaturatingMultiply(storage::MaxEntryStreamTaskBytes(),
+                                 file_stream
+                                     ? storage::kFileStreamBufferMultiplier
+                                     : size_t{1}));
+    std::optional<cachinglayer::LoadingOverheadConfig> overhead;
+    // Both routes must lease the entire overhead before sharing its reservation.
+    if (can_share) {
+        auto memory_group =
+            storage::LoadMemoryOverheadController::GetInstance().GetOrCreate();
+        AssertInfo(max_task <= static_cast<uint64_t>(
+                                   std::numeric_limits<int64_t>::max()),
+                   "Async scalar task estimate exceeds resource policy range");
+        overhead = cachinglayer::LoadingOverheadConfig{
+            cachinglayer::LoadingOverheadGroupBinding{
+                std::move(memory_group), static_cast<int64_t>(max_task)},
+            std::nullopt};
+    }
+    return {request, std::move(overhead)};
 }
 
 LoadResourceRequest

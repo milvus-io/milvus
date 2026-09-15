@@ -121,6 +121,9 @@ struct FileManagerContext {
     IndexMeta indexMeta;
     ChunkManagerPtr chunkManagerPtr;
     milvus_storage::ArrowFileSystemPtr fs;
+    // Cache translators pin the mode used by their resource estimate. Other
+    // callers leave it unset and select the global mode when loading starts.
+    std::optional<bool> use_async_load;
     bool for_loading_index{false};
     std::shared_ptr<CPluginContext> plugin_context;
     std::shared_ptr<milvus_storage::api::Properties> loon_ffi_properties;
@@ -143,11 +146,20 @@ struct FileManagerContext {
 class FileManagerImpl : public milvus::FileManager {
  public:
     explicit FileManagerImpl(const FieldDataMeta& field_mata,
-                             IndexMeta index_meta)
-        : field_meta_(field_mata), index_meta_(std::move(index_meta)) {
+                             IndexMeta index_meta,
+                             std::optional<bool> use_async_load = std::nullopt)
+        : field_meta_(field_mata),
+          index_meta_(std::move(index_meta)),
+          use_async_load_(use_async_load) {
     }
 
  public:
+    // Unset means the caller has no cache-owned resource reservation.
+    std::optional<bool>
+    GetAsyncLoadEnabled() const {
+        return use_async_load_;
+    }
+
     /**
      * @brief Load a file to the local disk, so we can use stl lib to operate it.
      *
@@ -382,6 +394,7 @@ class FileManagerImpl : public milvus::FileManager {
     IndexMeta index_meta_;
     ChunkManagerPtr rcm_;
     milvus_storage::ArrowFileSystemPtr fs_;
+    std::optional<bool> use_async_load_;
     std::shared_ptr<milvus_storage::api::Properties> loon_ffi_properties_;
     std::shared_ptr<CPluginContext> plugin_context_;
     StorageColumnMappings storage_column_mappings_;

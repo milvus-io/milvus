@@ -58,7 +58,7 @@ class TextMatchIndex : public InvertedIndexTantivy<std::string> {
     UploadUnified(const Config& config) override;
 
     void
-    Load(const Config& config);
+    Load(const Config& config, milvus::OpContext* op_ctx = nullptr);
 
  public:
     void

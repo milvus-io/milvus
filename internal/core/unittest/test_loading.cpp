@@ -22,11 +22,13 @@
 #include "common/resource_c.h"
 #include "gtest/gtest.h"
 #include "index/Index.h"
+#include "index/BitmapIndex.h"
 #include "index/Meta.h"
 #include "knowhere/version.h"
 #include "segcore/Types.h"
 #include "segcore/load_index_c.h"
 #include "storage/EntryStreamUtils.h"
+#include "storage/FileWriter.h"
 
 // EstimateLoadIndexResource now reports failure through a CStatus instead of
 // returning a zero estimate; unwrap it for the happy-path tests below.
@@ -273,7 +275,9 @@ static const auto kIndexLoadTestValues = ::testing::Values(
         {2UL * 1024 * 1024 * 1024, 0UL, 1UL * 1024 * 1024 * 1024, 0UL, false}),
     std::pair<std::map<std::string, std::string>, LoadResourceRequest>(
         {{"index_type", "BITMAP"}, {"mmap", "true"}, {"field_type", "array"}},
-        {2UL * 1024 * 1024 * 1024,
+        // Input, decoded Roaring, and two overlapping frozen output buffers.
+        {4UL * 1024 * 1024 * 1024 +
+             2 * milvus::index::BITMAP_FROZEN_BATCH_BYTES,
          2UL * 1024 * 1024 * 1024,
          0UL,
          1UL * 1024 * 1024 * 1024,

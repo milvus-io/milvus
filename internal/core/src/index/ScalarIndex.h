@@ -26,6 +26,8 @@
 #include "index/Index.h"
 #include "fmt/format.h"
 #include "index/Meta.h"
+#include "folly/coro/Task.h"
+#include "storage/IndexLoadPlan.h"
 
 namespace milvus::storage {
 class IndexEntryWriter;
@@ -118,6 +120,13 @@ class ScalarIndex : public IndexBase {
 
  public:
     using IndexBase::Build;
+    using IndexBase::Load;
+
+    // Forward cancellation to packed FMIndex loads.
+    void
+    Load(milvus::tracer::TraceContext ctx,
+         const Config& config,
+         milvus::OpContext* op_ctx) override;
 
     virtual ScalarIndexType
     GetIndexType() const = 0;
@@ -284,6 +293,31 @@ class ScalarIndex : public IndexBase {
     LoadEntries(storage::IndexEntryReader& reader, const Config& config) {
         ThrowInfo(Unsupported, "LoadEntries is not implemented");
     }
+
+    // Describe final targets before IO; AsyncIndexEntryReader fills them.
+    // Public so Hybrid can delegate both stages to its internal scalar index.
+    virtual storage::IndexLoadPlan
+    PlanLoad(const storage::IndexEntryCatalog& catalog, const Config& config) {
+        ThrowInfo(Unsupported, "Async V3 load planning is not implemented");
+    }
+
+    // Restore query state on the calling async worker from verified targets.
+    // Await local-file writes only; the caller owns artifact cleanup until return.
+    virtual folly::coro::Task<void>
+    MaterializeAsync(storage::IndexLoadArtifact& artifact,
+                     const Config& config) {
+        ThrowInfo(Unsupported,
+                  "Async V3 materialization from artifact is not implemented");
+        co_return;
+    }
+
+ private:
+    // Uses the shared async executor, with local-file phases on LocalFileIOPool.
+    folly::coro::Task<void>
+    LoadUnifiedAsync(const std::string& packed_file,
+                     const Config& config,
+                     proto::common::LoadPriority load_priority,
+                     folly::CancellationToken cancellation_token);
 
  protected:
     // Execute a LIKE-pattern query inside PatternMatch implementations.
