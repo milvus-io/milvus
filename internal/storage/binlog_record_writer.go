@@ -262,9 +262,17 @@ var _ BinlogRecordWriter = (*PackedBinlogRecordWriter)(nil)
 type PackedBinlogRecordWriter struct {
 	packedBinlogRecordWriterBase
 	writer *packedRecordWriter
+	// Count all Arrow buffers submitted to the current packed file. The native
+	// writer may flush some of them itself; keeping this conservative estimate
+	// lets clustering reclaim a file without relying on native flush internals.
+	bufferedSize uint64
+	closed       bool
 }
 
 func (pw *PackedBinlogRecordWriter) Write(r Record) error {
+	if pw.closed {
+		return merr.WrapErrStorageMsg("packed binlog writer is closed")
+	}
 	if err := pw.initWriters(r); err != nil {
 		return err
 	}
@@ -296,11 +304,43 @@ func (pw *PackedBinlogRecordWriter) Write(r Record) error {
 
 	pw.collectNullCounts(r)
 
+	previousWritten := pw.writer.GetWrittenUncompressed()
 	err := pw.writer.Write(r)
 	if err != nil {
 		return merr.WrapErrStorage(err, "write record batch error")
 	}
-	pw.writtenUncompressed = pw.writer.GetWrittenUncompressed()
+	pw.writtenUncompressed += pw.writer.GetWrittenUncompressed() - previousWritten
+	for _, field := range typeutil.GetAllFieldSchemas(pw.schema) {
+		if col := r.Column(field.FieldID); col != nil {
+			pw.bufferedSize += col.Data().SizeInBytes()
+		}
+	}
+	return nil
+}
+
+func (pw *PackedBinlogRecordWriter) GetBufferUncompressed() uint64 {
+	if pw.writer == nil {
+		return 0
+	}
+	return pw.bufferedSize + uint64(pw.multiPartUploadSize)*uint64(len(pw.columnGroups))
+}
+
+// FlushChunk closes the current packed files to release their Arrow batches,
+// Parquet encoder and upload buffers. Subsequent writes allocate new binlogs
+// in the same segment; PK/BM25/TTL statistics remain segment-wide.
+func (pw *PackedBinlogRecordWriter) FlushChunk() error {
+	if pw.writer == nil {
+		return nil
+	}
+	if err := pw.writer.Close(); err != nil {
+		return err
+	}
+	pw.finalizeBinlogs()
+	pw.writer = nil
+	pw.bufferedSize = 0
+	pw.tsFrom = typeutil.MaxTimestamp
+	pw.tsTo = 0
+	pw.nullCounts = nil
 	return nil
 }
 
@@ -332,7 +372,7 @@ func (pw *PackedBinlogRecordWriter) finalizeBinlogs() {
 	if pw.writer == nil {
 		return
 	}
-	pw.rowNum = pw.writer.GetWrittenRowNum()
+	pw.rowNum += pw.writer.GetWrittenRowNum()
 	if pw.fieldBinlogs == nil {
 		pw.fieldBinlogs = make(map[FieldID]*datapb.FieldBinlog, len(pw.columnGroups))
 	}
@@ -358,15 +398,16 @@ func (pw *PackedBinlogRecordWriter) finalizeBinlogs() {
 }
 
 func (pw *PackedBinlogRecordWriter) Close() error {
-	if pw.writer != nil {
-		if err := pw.writer.Close(); err != nil {
-			return err
-		}
+	if pw.closed {
+		return nil
 	}
-	pw.finalizeBinlogs()
+	if err := pw.FlushChunk(); err != nil {
+		return err
+	}
 	if err := pw.writeStats(); err != nil {
 		return err
 	}
+	pw.closed = true
 	return nil
 }
 

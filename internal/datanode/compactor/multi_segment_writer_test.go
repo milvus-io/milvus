@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
@@ -719,4 +720,49 @@ func (s *MultiSegmentWriterSuite) TestLargeDataWrite() {
 		totalRows += segment.NumOfRows
 	}
 	s.Equal(int64(numRows), totalRows)
+}
+
+// Exercise the multi-bucket watermark with real packed writers. Memory flushes
+// must not consume the segment IDs reserved for the next output segment.
+func (s *MultiSegmentWriterSuite) TestClusteringPackedWatermark() {
+	s.params.StorageVersion = storage.StorageV2
+	schema := s.genSimpleSchema()
+	schema.Fields[4].TypeParams[0].Value = "512"
+	task := &clusteringCompactionTask{memoryLimit: 4 << 20, flushPool: conc.NewPool[any](2)}
+	defer task.flushPool.Release()
+	logAlloc := allocator.NewLocalAllocator(1000, 2000)
+	for i := 0; i < 2; i++ {
+		w, err := NewMultiSegmentWriter(context.Background(), s.mockBinlogIO,
+			NewCompactionAllocator(allocator.NewLocalAllocator(int64(i+1), int64(i+2)), logAlloc),
+			1<<30, schema, s.params, 2000, s.partitionID, s.collectionID, s.channel, 100,
+			storage.WithStorageConfig(s.params.StorageConfig), storage.WithBufferSize(8<<20), storage.WithMultiPartUploadSize(0))
+		s.Require().NoError(err)
+		defer w.Close()
+		task.clusterBuffers = append(task.clusterBuffers, newClusterBuffer(i, w, nil))
+	}
+	for round := 0; round < 2; round++ {
+		for i := 0; i < 2000; i++ {
+			v := s.genTestValue(int64(round*2000 + i))
+			v.Value.(map[int64]interface{})[102] = make([]float32, 512)
+			s.Require().NoError(task.clusterBuffers[i%2].Write(v))
+		}
+		s.Require().Greater(task.getBufferTotalUsedMemorySize(), task.getMemoryBufferHighWatermark())
+		s.Require().NoError(task.flushLargestBuffers(context.Background()))
+		s.Require().Zero(task.getBufferTotalUsedMemorySize())
+		for _, b := range task.clusterBuffers {
+			s.Empty(b.GetCompactionSegments(), "memory flush must not end the segment")
+		}
+	}
+	s.Require().NoError(task.flushAll())
+	for i, b := range task.clusterBuffers {
+		segments := b.GetCompactionSegments()
+		s.Require().Len(segments, 1)
+		s.EqualValues(i+1, segments[0].SegmentID)
+		s.EqualValues(2000, segments[0].NumOfRows)
+		for _, field := range segments[0].InsertLogs {
+			s.Require().Len(field.Binlogs, 2)
+			s.EqualValues(1000, field.Binlogs[0].EntriesNum)
+			s.EqualValues(1000, field.Binlogs[1].EntriesNum)
+		}
+	}
 }
