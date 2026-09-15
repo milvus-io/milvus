@@ -67,6 +67,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/config"
+	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgdispatcher"
@@ -634,9 +635,27 @@ func (node *QueryNode) SetAddress(address string) {
 	node.address = address
 }
 
-// initHook initializes parameter tuning hook.
+// initHook installs the parameter tuning hook: the one compiled into this
+// binary if a distribution installed one, otherwise the plug-in at
+// queryNode.soPath.
+//
+// A compiled-in hook is used in preference to the plug-in, and a deployment
+// that configures both is refused: both would tune every search, and picking
+// silently would make which one wins depend on start-up order rather than on
+// the deployment. It is otherwise treated exactly as the plug-in is: the same
+// two Init calls with the autoIndex configuration, the same watchers.
 func (node *QueryNode) initHook() error {
 	path := paramtable.Get().QueryNodeCfg.SoPath.GetValue()
+
+	if compiled := extension.InstalledQueryHook(); compiled != nil {
+		if path != "" {
+			return merr.WrapErrServiceInternalMsg(
+				"queryNode.soPath is set to %q and a query hook is also compiled in; "+
+					"both tune every search, and only one can", path)
+		}
+		return node.useQueryHook(compiled)
+	}
+
 	if path == "" {
 		return merr.WrapErrServiceInternalMsg("fail to set the plugin path")
 	}
@@ -645,17 +664,23 @@ func (node *QueryNode) initHook() error {
 	if err != nil {
 		return err
 	}
+	return node.useQueryHook(hoo)
+}
 
-	if err = hoo.Init(paramtable.Get().AutoIndexConfig.AutoIndexSearchConfig.GetValue()); err != nil {
+// useQueryHook initializes a query hook with the autoIndex configuration,
+// installs it and watches that configuration on its behalf. It is the same
+// for a plug-in and a compiled-in hook, which is the point: a hook a
+// distribution compiled in must not be a second-class one.
+func (node *QueryNode) useQueryHook(hoo optimizers.QueryHook) error {
+	if err := hoo.Init(paramtable.Get().AutoIndexConfig.AutoIndexSearchConfig.GetValue()); err != nil {
 		return merr.Wrap(err, "fail to init configs for the hook")
 	}
-	if err = hoo.InitTuningConfig(paramtable.Get().AutoIndexConfig.AutoIndexTuningConfig.GetValue()); err != nil {
+	if err := hoo.InitTuningConfig(paramtable.Get().AutoIndexConfig.AutoIndexTuningConfig.GetValue()); err != nil {
 		return merr.Wrap(err, "fail to init tuning configs for the hook")
 	}
 
 	node.queryHook = hoo
 	node.handleQueryHookEvent()
-
 	return nil
 }
 

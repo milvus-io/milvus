@@ -9,6 +9,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
@@ -208,4 +210,23 @@ func TestUpdateProxyFunctionCallMetric(t *testing.T) {
 		updateProxyFunctionCallMetric("Flush", merr.WrapErrParameterInvalidMsg("mock input error"))
 		updateProxyFunctionCallMetric("", nil)
 	})
+}
+
+// A refusal returned from Before reaches the client as InvalidArgument, not
+// as codes.Unknown: a bare error would be retried by the SDK forever, which is
+// what the note in hookError is about. A hook that needs the caller to see a
+// classification answers from Mock instead.
+func TestABeforeRefusalIsNotRetriableAtTheTransport(t *testing.T) {
+	// Consume the lazy plugin init first, or the GetHook inside the
+	// interceptor would run it and put the default hook back over this one.
+	hookutil.InitOnceHook()
+	hookutil.SetTestHook(beforeMock{err: merr.WrapErrServiceUnavailable("not ready")})
+	defer hookutil.SetTestHook(hookutil.DefaultHook{})
+
+	_, err := UnaryServerHookInterceptor()(context.Background(), &req{},
+		&grpc.UnaryServerInfo{FullMethod: "insert"},
+		func(ctx context.Context, req interface{}) (interface{}, error) { return nil, nil })
+	require.Error(t, err)
+	assert.Equal(t, codes.InvalidArgument, status.Code(err))
+	assert.False(t, merr.IsMilvusError(err))
 }

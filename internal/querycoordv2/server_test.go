@@ -776,6 +776,7 @@ func (suite *ServerSuite) hackServer() {
 		suite.server.targetObserver,
 		suite.server.checkerController,
 		suite.server.proxyClientManager,
+		suite.server.nodeMgr,
 	)
 
 	suite.broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()

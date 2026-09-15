@@ -53,6 +53,7 @@ type ReplicaManagerInterface interface {
 	MoveReplica(ctx context.Context, collectionID typeutil.UniqueID, dstRGName string, toMove []*Replica) error
 	RemoveCollection(ctx context.Context, collectionID typeutil.UniqueID) error
 	RemoveReplicas(ctx context.Context, collectionID typeutil.UniqueID, replicas ...typeutil.UniqueID) error
+	RemoveReplicasInResourceGroup(ctx context.Context, collectionID typeutil.UniqueID, rgName string, replicas ...typeutil.UniqueID) ([]typeutil.UniqueID, error)
 
 	// Query operations
 	GetByCollection(ctx context.Context, collectionID typeutil.UniqueID) []*Replica
@@ -587,6 +588,52 @@ func (m *ReplicaManager) RemoveReplicas(ctx context.Context, collectionID typeut
 	return m.removeReplicas(ctx, collectionID, replicaIDs...)
 }
 
+// RemoveReplicasInResourceGroup removes those of the given replicas that are
+// still in rgName, and answers which ones it removed. A caller that read the
+// replica list, decided on some replicas by the group they were in, and
+// removes them afterwards is racing TransferReplica, which keeps a replica's
+// ID and rewrites its group: removing by ID alone would delete a replica that
+// now belongs to another group. The group is re-checked here, under the
+// collection lock the transfer also takes, and a replica that has left it -
+// or is gone already - is skipped and logged.
+func (m *ReplicaManager) RemoveReplicasInResourceGroup(ctx context.Context, collectionID typeutil.UniqueID, rgName string, replicaIDs ...typeutil.UniqueID) ([]typeutil.UniqueID, error) {
+	m.collLock.Lock(collectionID)
+	defer m.collLock.Unlock(collectionID)
+
+	if _, ok := m.coll2Replicas.Get(collectionID); !ok {
+		return nil, nil
+	}
+
+	toRemove := make([]typeutil.UniqueID, 0, len(replicaIDs))
+	skipped := make([]typeutil.UniqueID, 0)
+	for _, replicaID := range replicaIDs {
+		replica, ok := m.flatReplicas.Get(replicaID)
+		if !ok || replica.GetCollectionID() != collectionID || replica.GetResourceGroup() != rgName {
+			skipped = append(skipped, replicaID)
+			continue
+		}
+		toRemove = append(toRemove, replicaID)
+	}
+	if len(skipped) > 0 {
+		mlog.Info(ctx, "skipping replicas that left the resource group since they were read",
+			mlog.FieldCollectionID(collectionID),
+			mlog.String("resourceGroup", rgName),
+			mlog.Int64s("replicas", skipped))
+	}
+	if len(toRemove) == 0 {
+		return nil, nil
+	}
+
+	mlog.Info(ctx, "release replicas of resource group",
+		mlog.FieldCollectionID(collectionID),
+		mlog.String("resourceGroup", rgName),
+		mlog.Int64s("replicas", toRemove))
+	if err := m.removeReplicas(ctx, collectionID, toRemove...); err != nil {
+		return nil, err
+	}
+	return toRemove, nil
+}
+
 // removeReplicas removes specific replicas while holding collLock.Lock.
 // coll2Replicas is updated before flatReplicas so lock-free readers never observe
 // a replica that is visible via GetByCollection but missing from Get(id).
@@ -1027,68 +1074,31 @@ func (m *ReplicaManager) recoverSQNodesInCollectionLocked(
 	return modifiedReplicas
 }
 
-// buildSQNodeAssignmentHelpers builds assignment helpers for streaming query node recovery.
-// If streaming node resource groups cover all replica resource groups, creates one helper per RG (isolation mode).
-// During rolling upgrades, old StreamingNodes may not carry RG labels and are reported in DefaultResourceGroupName.
-// In that case, replicas whose RG is not covered by labeled StreamingNodes share the default legacy pool, while
-// covered replicas still use RG isolation.
-// Otherwise, behavior depends on streaming.strictResourceGroupIsolation.enabled config:
-//   - If enabled (strict isolation mode): skip replicas without matching streaming node resource groups.
-//   - If disabled and no default legacy pool exists: pool all nodes together into a single helper (flat allocation mode).
+// buildSQNodeAssignmentHelpers builds one assignment helper per pool of
+// streaming query nodes, over the pools GroupIntoSQNodePools decides -
+// isolation per resource group, the legacy default pool for a rolling
+// upgrade whose old streaming nodes carry no group label, flat allocation
+// when there is no such pool, or nothing at all for an uncovered replica
+// under strict isolation. The admission of a load reads the same grouping,
+// so the two cannot disagree on which pool a replica is served from.
 func (m *ReplicaManager) buildSQNodeAssignmentHelpers(
 	replicas []*Replica,
 	sqnNodesByRG map[string]typeutil.UniqueSet,
 ) map[string]*replicasInSameRGAssignmentHelper {
-	// Group replicas by resource group and check coverage.
-	rgToReplicas := make(map[string][]*Replica)
-	uncoveredReplicas := make([]*Replica, 0)
+	rgOfReplicas := make([]string, 0, len(replicas))
 	for _, replica := range replicas {
-		rgName := replica.GetResourceGroup()
-		if _, ok := sqnNodesByRG[rgName]; ok {
-			rgToReplicas[rgName] = append(rgToReplicas[rgName], replica)
-		} else {
-			uncoveredReplicas = append(uncoveredReplicas, replica)
-		}
+		rgOfReplicas = append(rgOfReplicas, replica.GetResourceGroup())
 	}
-
-	helpers := make(map[string]*replicasInSameRGAssignmentHelper)
 	strictIsolation := paramtable.Get().StreamingCfg.StrictResourceGroupIsolationEnabled.GetAsBool()
+	pools, _ := GroupIntoSQNodePools(rgOfReplicas, sqnNodesByRG, strictIsolation)
 
-	if len(uncoveredReplicas) > 0 && !strictIsolation {
-		if _, ok := sqnNodesByRG[DefaultResourceGroupName]; ok {
-			// Compatibility mode for rolling upgrades from old StreamingNodes without RG labels:
-			// uncovered replicas keep using the default legacy pool, while covered replicas keep
-			// their isolated pools. If there are also replicas explicitly in the default RG, they
-			// share the same default pool with uncovered legacy replicas.
-			rgToReplicas[DefaultResourceGroupName] = append(rgToReplicas[DefaultResourceGroupName], uncoveredReplicas...)
-			for rgName, rgReplicas := range rgToReplicas {
-				helpers[rgName] = newReplicaSQNAssignmentHelper(rgName, rgReplicas, sqnNodesByRG[rgName])
-			}
-			return helpers
+	helpers := make(map[string]*replicasInSameRGAssignmentHelper, len(pools))
+	for name, pool := range pools {
+		pooled := make([]*Replica, 0, len(pool.Replicas))
+		for _, i := range pool.Replicas {
+			pooled = append(pooled, replicas[i])
 		}
-	}
-
-	// Check if we should use fallback mode (flat allocation).
-	// Fallback mode is used when there are uncovered replicas and isolation is disabled.
-	useFallbackMode := len(uncoveredReplicas) > 0 && !strictIsolation
-
-	if useFallbackMode {
-		// Fallback: pool all nodes together for ALL replicas.
-		// When fallback is triggered, we must use flat allocation for all replicas,
-		// not just the uncovered ones, to avoid assigning the same nodes twice.
-		allSQNodes := typeutil.NewUniqueSet()
-		for _, nodes := range sqnNodesByRG {
-			for nodeID := range nodes {
-				allSQNodes.Insert(nodeID)
-			}
-		}
-		helpers[DefaultResourceGroupName] = newReplicaSQNAssignmentHelper(DefaultResourceGroupName, replicas, allSQNodes)
-	} else {
-		// Isolation mode: each replica gets nodes only from its own resource group.
-		// Uncovered replicas (if any and isolation is enabled) simply don't get any streaming query nodes.
-		for rgName, rgReplicas := range rgToReplicas {
-			helpers[rgName] = newReplicaSQNAssignmentHelper(rgName, rgReplicas, sqnNodesByRG[rgName])
-		}
+		helpers[name] = newReplicaSQNAssignmentHelper(name, pooled, pool.Nodes)
 	}
 	return helpers
 }

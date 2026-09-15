@@ -10,6 +10,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -19,14 +20,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-// QueryHook is the interface for search/query parameter optimizer.
-type QueryHook interface {
-	Run(map[string]any) error
-	Init(string) error
-	InitTuningConfig(map[string]string) error
-	DeleteTuningConfig(string) error
-	CalculateEffectiveSegmentNum(rowCounts []int64, topk int64) int
-}
+// QueryHook is extension.QueryHook: the tuning hook a queryNode.soPath plug-in
+// exports, or the one a distribution compiled in. It lives in pkg/extension so
+// a distribution can implement it; every consumer in the tree keeps this name.
+type QueryHook = extension.QueryHook
 
 // OptimizeSearchParams optimizes search parameters using the query hook and applies Knowhere search defaults.
 // numSegments is the effective segment number, pre-computed by the caller via CalculateEffectiveSegmentNum.

@@ -1,0 +1,155 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package extension
+
+import (
+	"context"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
+)
+
+// stubHook is a hook.Hook that answers nothing; the tests only ask whether it
+// is the one installed.
+type stubHook struct{ name string }
+
+func (stubHook) Init(map[string]string) error { return nil }
+func (stubHook) Mock(context.Context, interface{}, string) (bool, interface{}, error) {
+	return false, nil, nil
+}
+
+func (stubHook) Before(ctx context.Context, _ interface{}, _ string) (context.Context, error) {
+	return ctx, nil
+}
+func (stubHook) After(context.Context, interface{}, error, string) error { return nil }
+func (stubHook) VerifyAPIKey(string) (string, error)                     { return "", nil }
+func (stubHook) Release()                                                {}
+
+var _ hook.Hook = stubHook{}
+
+func TestNothingIsInstalledByDefault(t *testing.T) {
+	ResetForTest()
+	assert.Nil(t, InstalledHook(), "a stock binary has no compiled-in hook")
+	assert.Nil(t, InstalledCoordinatorEngine(), "a stock binary has no coordinator engine")
+	assert.Nil(t, InstalledQueryHook(), "a stock binary has no compiled-in query hook")
+	assert.Nil(t, InstalledCipher(), "a stock binary has no compiled-in cipher")
+}
+
+func TestSetHookInstallsTheHook(t *testing.T) {
+	ResetForTest()
+	t.Cleanup(ResetForTest)
+	SetHook(stubHook{name: "form"})
+	assert.Equal(t, stubHook{name: "form"}, InstalledHook())
+	assert.Nil(t, InstalledCoordinatorEngine(), "installing a hook must not conjure an engine")
+}
+
+// FormInstalled is the one question the coordinators ask, and it must be
+// exactly "is a hook installed": nothing else a distribution sets counts.
+func TestFormInstalledFollowsTheHookAlone(t *testing.T) {
+	ResetForTest()
+	t.Cleanup(ResetForTest)
+	assert.False(t, FormInstalled(), "a stock binary has no form installed")
+
+	SetCoordinatorEngine(&fakeCoordinatorEngine{})
+	assert.False(t, FormInstalled(), "an engine alone is not a form: the hook is the mark")
+
+	SetHook(stubHook{name: "form"})
+	assert.True(t, FormInstalled())
+
+	SetHook(nil)
+	assert.False(t, FormInstalled(), "uninstalling the hook uninstalls the form")
+}
+
+func TestSetCoordinatorEngineInstallsTheEngine(t *testing.T) {
+	ResetForTest()
+	t.Cleanup(ResetForTest)
+	engine := &fakeCoordinatorEngine{}
+	SetCoordinatorEngine(engine)
+	assert.Same(t, engine, InstalledCoordinatorEngine())
+	assert.Nil(t, InstalledHook(), "installing an engine must not conjure a hook")
+}
+
+func TestSetNilLeavesNothingInstalled(t *testing.T) {
+	ResetForTest()
+	t.Cleanup(ResetForTest)
+	SetHook(stubHook{name: "form"})
+	SetCoordinatorEngine(&fakeCoordinatorEngine{})
+	SetQueryHook(stubQueryHook{name: "tuner"})
+	SetCipher(stubCipher{name: "kms"})
+	SetHook(nil)
+	SetCoordinatorEngine(nil)
+	SetQueryHook(nil)
+	SetCipher(nil)
+	assert.Nil(t, InstalledHook())
+	assert.Nil(t, InstalledCoordinatorEngine())
+	assert.Nil(t, InstalledQueryHook())
+	assert.Nil(t, InstalledCipher())
+}
+
+// stubQueryHook is a QueryHook that tunes nothing; the tests only ask
+// whether it is the one installed.
+type stubQueryHook struct{ name string }
+
+func (stubQueryHook) Run(map[string]any) error                        { return nil }
+func (stubQueryHook) Init(string) error                               { return nil }
+func (stubQueryHook) InitTuningConfig(map[string]string) error        { return nil }
+func (stubQueryHook) DeleteTuningConfig(string) error                 { return nil }
+func (stubQueryHook) CalculateEffectiveSegmentNum([]int64, int64) int { return 0 }
+
+var _ QueryHook = stubQueryHook{}
+
+func TestSetQueryHookInstallsTheQueryHook(t *testing.T) {
+	ResetForTest()
+	t.Cleanup(ResetForTest)
+	SetQueryHook(stubQueryHook{name: "tuner"})
+	assert.Equal(t, stubQueryHook{name: "tuner"}, InstalledQueryHook())
+	assert.Nil(t, InstalledHook(), "installing a query hook must not conjure a request hook")
+	assert.Nil(t, InstalledCoordinatorEngine(), "installing a query hook must not conjure an engine")
+	assert.False(t, FormInstalled(), "a query hook is not the mark of a form")
+
+	SetQueryHook(nil)
+	assert.Nil(t, InstalledQueryHook())
+}
+
+// stubCipher is a hook.Cipher that encrypts nothing; the tests only ask
+// whether it is the one installed.
+type stubCipher struct{ name string }
+
+func (stubCipher) Init(map[string]string) error { return nil }
+func (stubCipher) GetEncryptor(int64, int64) (hook.Encryptor, []byte, error) {
+	return nil, nil, nil
+}
+func (stubCipher) GetDecryptor(int64, int64, []byte) (hook.Decryptor, error) { return nil, nil }
+func (stubCipher) GetUnsafeKey(int64, int64) []byte                          { return nil }
+
+var _ hook.Cipher = stubCipher{}
+
+func TestSetCipherInstallsTheCipher(t *testing.T) {
+	ResetForTest()
+	t.Cleanup(ResetForTest)
+	SetCipher(stubCipher{name: "kms"})
+	assert.Equal(t, stubCipher{name: "kms"}, InstalledCipher())
+	assert.Nil(t, InstalledHook(), "installing a cipher must not conjure a request hook")
+	assert.Nil(t, InstalledQueryHook(), "installing a cipher must not conjure a query hook")
+	assert.Nil(t, InstalledCoordinatorEngine(), "installing a cipher must not conjure an engine")
+	assert.False(t, FormInstalled(), "a cipher is not the mark of a form")
+
+	SetCipher(nil)
+	assert.Nil(t, InstalledCipher())
+}
