@@ -193,6 +193,26 @@ JsonStatsParquetWriter::AppendValue(const std::string& key,
 }
 
 void
+JsonStatsParquetWriter::AppendNull(const std::string& key) {
+    auto it = builders_map_.find(key);
+    AssertInfo(it != builders_map_.end(), "builder for key {} not found", key);
+    auto status = it->second->AppendNull();
+    AssertInfo(status.ok(), "failed to append null for key {}", key);
+}
+
+void
+JsonStatsParquetWriter::AppendDouble(const std::string& key, double value) {
+    auto it = builders_map_.find(key);
+    AssertInfo(it != builders_map_.end(), "builder for key {} not found", key);
+    AssertInfo(it->second->type()->id() == arrow::Type::DOUBLE,
+               "builder for key {} is not double",
+               key);
+    auto builder = std::static_pointer_cast<arrow::DoubleBuilder>(it->second);
+    auto status = builder->Append(value);
+    AssertInfo(status.ok(), "failed to append double for key {}", key);
+}
+
+void
 JsonStatsParquetWriter::AppendRow(
     const std::map<std::string, std::string>& row_data) {
     for (const auto& [key, value] : row_data) {
