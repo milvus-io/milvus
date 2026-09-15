@@ -35,7 +35,7 @@ jobs:
       - uses: actions/checkout@v2
       - name: Rerun Failure Checks
         if: "github.event_name == 'issue_comment' && steps.is_organization_member.outputs.is-member == 'true'"
-        uses: zymap/bot@master
+        uses: zymap/bot@0245bde808cc2355fb0686d31fc99aa9330e7b5d # master
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # replace here to your token
         with:
