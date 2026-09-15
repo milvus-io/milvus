@@ -1219,6 +1219,9 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 0.1, Params.ClusteringCompactionMemoryBufferRatio.GetAsFloat())
 		params.Save("datanode.clusteringCompaction.workPoolSize", "2")
 		assert.Equal(t, int64(2), Params.ClusteringCompactionWorkerPoolSize.GetAsInt64())
+		assert.Equal(t, 0, Params.ClusteringCompactionSpillPoolSize.GetAsInt())
+		params.Save("datanode.clusteringCompaction.spillPoolSize", "3")
+		assert.Equal(t, 3, Params.ClusteringCompactionSpillPoolSize.GetAsInt())
 
 		assert.Equal(t, 2, Params.BloomFilterApplyParallelFactor.GetAsInt())
 		assert.Equal(t, "dataNode.storage.format", Params.StorageFormat.Key)

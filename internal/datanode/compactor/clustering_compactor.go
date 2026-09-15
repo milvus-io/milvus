@@ -75,6 +75,7 @@ type clusteringCompactionTask struct {
 	tr          *timerecord.TimeRecorder
 	mappingPool *conc.Pool[any]
 	flushPool   *conc.Pool[any]
+	spillPool   *conc.Pool[any]
 
 	plan *datapb.CompactionPlan
 
@@ -104,6 +105,8 @@ type clusteringCompactionTask struct {
 	segmentIDOffsetMapping map[int64]string
 	offsetToBufferFunc     func(int64, []uint32) *ClusterBuffer
 	layoutPlan             *clustercompaction.LayoutPlan
+	centroidGroupIndex     map[uint32]int
+	layoutResult           *clusterLayoutResult
 	// bm25
 	bm25FieldIds []int64
 
@@ -143,6 +146,12 @@ func (b *ClusterBuffer) Close() error {
 	b.lock.Lock()
 	defer b.lock.Unlock()
 	return b.writer.Close()
+}
+
+func (b *ClusterBuffer) resetWriter(writer *MultiSegmentWriter) {
+	b.lock.Lock()
+	defer b.lock.Unlock()
+	b.writer = writer
 }
 
 func (b *ClusterBuffer) GetCompactionSegments() []*datapb.CompactionSegment {
@@ -257,7 +266,12 @@ func (t *clusteringCompactionTask) init() error {
 	workerPoolSize := t.getWorkerPoolSize()
 	t.mappingPool = conc.NewPool[any](workerPoolSize)
 	t.flushPool = conc.NewPool[any](workerPoolSize)
-	mlog.Info(context.TODO(), "clustering compaction task initialed", mlog.Int64("memory_buffer_size", t.memoryLimit), mlog.Int("worker_pool_size", workerPoolSize))
+	spillPoolSize := t.getSpillPoolSize()
+	t.spillPool = conc.NewPool[any](spillPoolSize)
+	mlog.Info(context.TODO(), "clustering compaction task initialed",
+		mlog.Int64("memory_buffer_size", t.memoryLimit),
+		mlog.Int("worker_pool_size", workerPoolSize),
+		mlog.Int("spill_pool_size", spillPoolSize))
 	return nil
 }
 
@@ -417,7 +431,7 @@ func splitCentroids(centroids []int, num int) ([][]int, map[int]int) {
 }
 
 func (t *clusteringCompactionTask) generatedVectorPlan(ctx context.Context, centroidGroups [][]int, centroids []*schemapb.VectorField) error {
-	groupIndex := make(map[int]int, len(centroids))
+	groupIndex := make(map[uint32]int, len(centroids))
 	for id, group := range centroidGroups {
 		fieldStats, err := storage.NewFieldStats(t.clusteringKeyField.FieldID, t.clusteringKeyField.DataType, 0)
 		if err != nil {
@@ -444,11 +458,18 @@ func (t *clusteringCompactionTask) generatedVectorPlan(ctx context.Context, cent
 		buffer := newClusterBuffer(id, writer, fieldStats)
 		t.clusterBuffers = append(t.clusterBuffers, buffer)
 		for _, centroidID := range group {
-			groupIndex[centroidID] = id
+			groupIndex[uint32(centroidID)] = id
 		}
 	}
+	t.centroidGroupIndex = groupIndex
 	t.offsetToBufferFunc = func(offset int64, idMapping []uint32) *ClusterBuffer {
-		centroidGroupOffset := groupIndex[int(idMapping[offset])]
+		if offset < 0 || offset >= int64(len(idMapping)) {
+			return nil
+		}
+		centroidGroupOffset, ok := groupIndex[idMapping[offset]]
+		if !ok {
+			return nil
+		}
 		return t.clusterBuffers[centroidGroupOffset]
 	}
 	return nil
@@ -583,6 +604,12 @@ func (t *clusteringCompactionTask) mapping(ctx context.Context,
 ) ([]*datapb.CompactionSegment, *storage.PartitionStatsSnapshot, error) {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, fmt.Sprintf("mapping-%d", t.GetPlanID()))
 	defer span.End()
+	if t.useClusterLayoutSort() {
+		if len(compaction.GetTEXTFieldIDsFromSchema(t.plan.GetSchema())) > 0 {
+			return nil, nil, merr.WrapErrServiceInternalMsg("sorted-layout clustering compaction does not support TEXT/LOB columns yet")
+		}
+		return t.mappingClusterLayoutSorted(ctx)
+	}
 	inputSegments := t.plan.GetSegmentBinlogs()
 	mapStart := time.Now()
 	futures := make([]*conc.Future[any], 0, len(inputSegments))
@@ -743,6 +770,11 @@ func (t *clusteringCompactionTask) mappingSegment(
 			} else {
 				clusterBuffer = t.keyToBufferFunc(clusteringKey)
 			}
+			if clusterBuffer == nil {
+				return merr.WrapErrServiceInternalMsg(
+					"failed to find clustering buffer, segmentID=%d, offset=%d",
+					segment.GetSegmentID(), offset)
+			}
 			if err := clusterBuffer.Write(v); err != nil {
 				return err
 			}
@@ -786,6 +818,14 @@ func (t *clusteringCompactionTask) mappingSegment(
 
 func (t *clusteringCompactionTask) getWorkerPoolSize() int {
 	return int(math.Max(float64(paramtable.Get().DataNodeCfg.ClusteringCompactionWorkerPoolSize.GetAsInt()), 1.0))
+}
+
+func (t *clusteringCompactionTask) getSpillPoolSize() int {
+	poolSize := paramtable.Get().DataNodeCfg.ClusteringCompactionSpillPoolSize.GetAsInt()
+	if poolSize <= 0 {
+		return t.getWorkerPoolSize()
+	}
+	return poolSize
 }
 
 // getMemoryLimit returns the maximum memory that a clustering compaction task is allowed to use
@@ -900,6 +940,9 @@ func (t *clusteringCompactionTask) cleanUp(ctx context.Context) {
 	}
 	if t.flushPool != nil {
 		t.flushPool.Release()
+	}
+	if t.spillPool != nil {
+		t.spillPool.Release()
 	}
 }
 
