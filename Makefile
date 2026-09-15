@@ -253,9 +253,25 @@ meta-migration:
     		-tags dynamic -o $(INSTALL_PATH)/meta-migration $(MIGRATION_PATH)/main.go 1>/dev/null
 
 INTERATION_PATH = $(PWD)/tests/integration
-integration-test: getdeps
-	@echo "Building integration tests ..."
-	@(env bash $(PWD)/scripts/run_intergration_test.sh "$(INSTALL_PATH)/gotestsum --")
+CMEK_FIXTURE_PATH = $(INSTALL_PATH)/cmek-fixtures
+
+.PHONY: build-cmek-fixtures integration-test integration-test-base integration-test-cmek
+.NOTPARALLEL: integration-test
+
+build-cmek-fixtures:
+	@echo "Building CMEK fixture plugins ..."
+	@(env GO="$(GO)" bash $(PWD)/scripts/build_cmek_fixtures.sh "$(CMEK_FIXTURE_PATH)")
+
+integration-test: MILVUS_INTEGRATION_COVERAGE_APPEND = true
+integration-test: integration-test-base integration-test-cmek
+
+integration-test-base: getdeps
+	@echo "Running integration tests excluding CMEK ..."
+	@(bash $(PWD)/scripts/run_intergration_test.sh --exclude-package ./cmek "$(INSTALL_PATH)/gotestsum --")
+
+integration-test-cmek: getdeps build-cmek-fixtures
+	@echo "Running CMEK scalar-index integration tests ..."
+	@(env MILVUS_CMEK_FIXTURE_DIR="$(CMEK_FIXTURE_PATH)" MILVUS_INTEGRATION_COVERAGE_APPEND="$(MILVUS_INTEGRATION_COVERAGE_APPEND)" bash $(PWD)/scripts/run_intergration_test.sh --package ./cmek "$(INSTALL_PATH)/gotestsum --")
 
 BUILD_TAGS = $(shell git describe --tags --always --dirty="-dev")
 BUILD_TAGS_GPU = ${BUILD_TAGS}-gpu

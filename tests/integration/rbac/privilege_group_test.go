@@ -143,26 +143,33 @@ func (s *RBACBasicTestSuite) TestGrantV2BuiltinPrivilegeGroup() {
 	s.NoError(err)
 	s.True(merr.Ok(createRoleResp))
 
+	// Specific collection grants resolve aliases within a real database.
+	dbName := roleName + "_db"
+	createDBResp, err := s.Cluster.MilvusClient.CreateDatabase(ctx, &milvuspb.CreateDatabaseRequest{DbName: dbName})
+	s.Require().NoError(err)
+	s.Require().True(merr.Ok(createDBResp), createDBResp.GetReason())
+	defer s.Cluster.MilvusClient.DropDatabase(ctx, &milvuspb.DropDatabaseRequest{DbName: dbName}) //nolint
+
 	for _, builtinGroup := range paramtable.Get().RbacConfig.GetDefaultPrivilegeGroupNames() {
 		resp, _ := s.operatePrivilegeV2(ctx, roleName, builtinGroup, util.AnyWord, util.AnyWord, milvuspb.OperatePrivilegeType_Grant)
 		s.True(merr.Ok(resp))
 	}
 
-	resp, _ := s.operatePrivilegeV2(ctx, roleName, "ClusterAdmin", "db1", util.AnyWord, milvuspb.OperatePrivilegeType_Grant)
+	resp, _ := s.operatePrivilegeV2(ctx, roleName, "ClusterAdmin", dbName, util.AnyWord, milvuspb.OperatePrivilegeType_Grant)
 	s.False(merr.Ok(resp))
-	resp, _ = s.operatePrivilegeV2(ctx, roleName, "ClusterAdmin", "db1", "col1", milvuspb.OperatePrivilegeType_Grant)
+	resp, _ = s.operatePrivilegeV2(ctx, roleName, "ClusterAdmin", dbName, "col1", milvuspb.OperatePrivilegeType_Grant)
 	s.False(merr.Ok(resp))
 	resp, _ = s.operatePrivilegeV2(ctx, roleName, "ClusterAdmin", util.AnyWord, "col1", milvuspb.OperatePrivilegeType_Grant)
 	s.False(merr.Ok(resp))
-	resp, _ = s.operatePrivilegeV2(ctx, roleName, "DatabaseAdmin", "db1", util.AnyWord, milvuspb.OperatePrivilegeType_Grant)
+	resp, _ = s.operatePrivilegeV2(ctx, roleName, "DatabaseAdmin", dbName, util.AnyWord, milvuspb.OperatePrivilegeType_Grant)
 	s.True(merr.Ok(resp))
-	resp, _ = s.operatePrivilegeV2(ctx, roleName, "DatabaseAdmin", "db1", "col1", milvuspb.OperatePrivilegeType_Grant)
+	resp, _ = s.operatePrivilegeV2(ctx, roleName, "DatabaseAdmin", dbName, "col1", milvuspb.OperatePrivilegeType_Grant)
 	s.False(merr.Ok(resp))
 	resp, _ = s.operatePrivilegeV2(ctx, roleName, "DatabaseAdmin", util.AnyWord, "col1", milvuspb.OperatePrivilegeType_Grant)
 	s.False(merr.Ok(resp))
-	resp, _ = s.operatePrivilegeV2(ctx, roleName, "CollectionAdmin", "db1", util.AnyWord, milvuspb.OperatePrivilegeType_Grant)
+	resp, _ = s.operatePrivilegeV2(ctx, roleName, "CollectionAdmin", dbName, util.AnyWord, milvuspb.OperatePrivilegeType_Grant)
 	s.True(merr.Ok(resp))
-	resp, _ = s.operatePrivilegeV2(ctx, roleName, "CollectionAdmin", "db1", "col1", milvuspb.OperatePrivilegeType_Grant)
+	resp, _ = s.operatePrivilegeV2(ctx, roleName, "CollectionAdmin", dbName, "col1", milvuspb.OperatePrivilegeType_Grant)
 	s.True(merr.Ok(resp))
 	resp, _ = s.operatePrivilegeV2(ctx, roleName, "CollectionAdmin", util.AnyWord, "col1", milvuspb.OperatePrivilegeType_Grant)
 	s.False(merr.Ok(resp))
