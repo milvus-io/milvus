@@ -325,6 +325,8 @@ TEST(StrictGroupHnswSearch, RaisesExplicitEfOnlyInPhaseTwoCopy) {
                                             : knowhere::Json(ef);
         const auto original_params = info.search_params_;
         SearchResult result;
+        // VectorSearchNode normally supplies the segment row count.
+        result.total_data_cnt_ = n;
         SearchOnSealedIndex(*schema,
                             record,
                             info,
