@@ -54,6 +54,19 @@ const (
 	// BackupFlag indicates whether the import is in backup-restore mode, default to false.
 	BackupFlag = "backup"
 
+	// SourceType selects a metadata source contract for backup import.
+	SourceType = "source_type"
+
+	// SourceTypeSnapshot makes ImportFile.paths[0] an exact snapshot metadata path.
+	SourceTypeSnapshot = "snapshot"
+
+	// ExternalSpec supplies request-scoped source credentials for snapshot import.
+	ExternalSpec = "external_spec"
+
+	// SnapshotSourceURI is coordinator-owned: expanded manifests contain object
+	// keys, so retries need the original storage identity without rereading metadata.
+	SnapshotSourceURI = "_snapshot_source_uri"
+
 	// L0Import indicates whether to import l0 segments only.
 	L0Import = "l0_import"
 
@@ -130,6 +143,125 @@ func IsBackup(options Options) bool {
 		return false
 	}
 	return true
+}
+
+// IsSnapshotSource reports whether the request uses snapshot metadata as its
+// backup source. The option is intentionally opt-in so StorageV1 and StorageV2
+// path-based backup imports retain their existing behavior.
+func IsSnapshotSource(options Options) bool {
+	sourceType, err := funcutil.GetAttrByKeyFromRepeatedKV(SourceType, options)
+	return err == nil && strings.EqualFold(strings.TrimSpace(sourceType), SourceTypeSnapshot)
+}
+
+// ValidateSnapshotSourceOptions rejects combinations that would make the
+// source contract ambiguous. Snapshot metadata is the sole authority for the
+// source storage version. L0 import remains a separate contract; CMEK content
+// is validated later against the source schema and supplied EZK.
+func ValidateSnapshotSourceOptions(options Options) error {
+	contractKeys := []string{SourceType, BackupFlag, L0Import, StorageVersion, EZK, ExternalSpec, SnapshotSourceURI}
+	counts := make(map[string]int, len(contractKeys))
+	hasSnapshotContractOption := false
+	for _, option := range options {
+		if option == nil {
+			continue
+		}
+		if option.GetKey() == SourceType || option.GetKey() == ExternalSpec || option.GetKey() == SnapshotSourceURI {
+			hasSnapshotContractOption = true
+		}
+		if lo.Contains(contractKeys, option.GetKey()) {
+			counts[option.GetKey()]++
+		}
+	}
+	if hasSnapshotContractOption {
+		for _, key := range contractKeys {
+			if counts[key] > 1 {
+				return merr.WrapErrImportFailedMsg("duplicate snapshot-source option: %s", key)
+			}
+		}
+	}
+
+	sourceType, sourceTypeErr := funcutil.GetAttrByKeyFromRepeatedKV(SourceType, options)
+	if value, err := funcutil.GetAttrByKeyFromRepeatedKV(ExternalSpec, options); err == nil {
+		if !IsSnapshotSource(options) {
+			return merr.WrapErrImportFailedMsg("external_spec requires source_type=snapshot")
+		}
+		if strings.TrimSpace(value) == "" || len(value) > 64*1024 {
+			return merr.WrapErrImportFailedMsg("external_spec must be nonempty and at most 64 KiB")
+		}
+	}
+	if _, err := funcutil.GetAttrByKeyFromRepeatedKV(SnapshotSourceURI, options); err == nil && !HasExternalSource(options) {
+		return merr.WrapErrImportFailedMsg("snapshot source URI requires external_spec")
+	}
+	if sourceTypeErr != nil {
+		if IsBackup(options) {
+			storageVersion, err := GetStorageVersion(options)
+			if err != nil {
+				return err
+			}
+			if storageVersion == storage.StorageV3 {
+				return merr.WrapErrImportFailedMsg(
+					"StorageV3 backup import requires %s=%s and must not specify %s",
+					SourceType,
+					SourceTypeSnapshot,
+					StorageVersion,
+				)
+			}
+		}
+		return nil
+	}
+	if !strings.EqualFold(strings.TrimSpace(sourceType), SourceTypeSnapshot) {
+		return merr.WrapErrImportFailedMsg("unsupported %s: %s", SourceType, sourceType)
+	}
+	if !IsBackup(options) {
+		return merr.WrapErrImportFailedMsg("%s=%s requires %s=true",
+			SourceType, SourceTypeSnapshot, BackupFlag)
+	}
+	if IsL0Import(options) {
+		return merr.WrapErrImportFailedMsg("%s=%s does not support %s=true",
+			SourceType, SourceTypeSnapshot, L0Import)
+	}
+	if _, err := funcutil.GetAttrByKeyFromRepeatedKV(StorageVersion, options); err == nil {
+		return merr.WrapErrImportFailedMsg("%s must not be specified with %s=%s",
+			StorageVersion, SourceType, SourceTypeSnapshot)
+	}
+	return nil
+}
+
+func HasExternalSource(options Options) bool {
+	_, err := funcutil.GetAttrByKeyFromRepeatedKV(ExternalSpec, options)
+	return err == nil
+}
+
+// ValidateSnapshotSourceRequest additionally rejects internal routing options
+// supplied by a public caller. Persisted tasks use ValidateSnapshotSourceOptions.
+func ValidateSnapshotSourceRequest(options Options) error {
+	// Do not silently broaden a request written for the earlier partition
+	// selector. Already-expanded tasks still use ValidateSnapshotSourceOptions
+	// and keep their immutable file inventory rather than re-expanding it.
+	if _, err := funcutil.GetAttrByKeyFromRepeatedKV("source_partition_name", options); err == nil {
+		return merr.WrapErrImportFailedMsg("source_partition_name is not supported; snapshot import reads all source partitions")
+	}
+	if _, err := funcutil.GetAttrByKeyFromRepeatedKV(SnapshotSourceURI, options); err == nil {
+		return merr.WrapErrImportFailedMsg("%s is reserved for internal use", SnapshotSourceURI)
+	}
+	return ValidateSnapshotSourceOptions(options)
+}
+
+// RedactOptions returns a logging-only copy; never mutate credentials in live
+// task options, which are also used by retries and the second import phase.
+func RedactOptions(options Options) Options {
+	result := make(Options, 0, len(options))
+	for _, option := range options {
+		if option == nil {
+			continue
+		}
+		value := option.GetValue()
+		if strings.EqualFold(option.GetKey(), ExternalSpec) || strings.EqualFold(option.GetKey(), EZK) {
+			value = "<redacted>"
+		}
+		result = append(result, &commonpb.KeyValuePair{Key: option.GetKey(), Value: value})
+	}
+	return result
 }
 
 func IsL0Import(options Options) bool {

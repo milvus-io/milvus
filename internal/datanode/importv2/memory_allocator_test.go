@@ -17,13 +17,96 @@
 package importv2
 
 import (
+	"context"
+	"math"
 	"math/rand"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+func TestSnapshotMemoryAdmission(t *testing.T) {
+	ma := NewMemoryAllocator(1024).(*memoryAllocator)
+	require.ErrorIs(t, ma.Allocate(context.Background(), 1, 2048), merr.ErrServiceResourceInsufficient)
+	require.ErrorIs(t, ma.Allocate(context.Background(), 1, -1), merr.ErrServiceResourceInsufficient)
+	require.NoError(t, ma.Allocate(context.Background(), 1, 0))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	require.ErrorIs(t, ma.Allocate(ctx, 1, 1), context.Canceled)
+
+	// Occupy all available space independent of the configured percentage.
+	ma.usedMemory = 1024
+	ctx, cancel = context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- ma.Allocate(ctx, 2, 1) }()
+	select {
+	case err := <-done:
+		t.Fatalf("admission returned while memory was full: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	cancel()
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(time.Second):
+		t.Fatal("cancellation did not wake admission")
+	}
+	go func() { done <- ma.Allocate(context.Background(), 3, 1) }()
+	select {
+	case err := <-done:
+		t.Fatalf("admission returned before release: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	ma.Release(1, 1024)
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("release did not wake admission")
+	}
+	ma.Release(3, 1)
+	require.Zero(t, ma.usedMemory)
+}
+
+func TestSnapshotReaderReservation(t *testing.T) {
+	paramtable.Init()
+	for _, budget := range []string{"0", "1"} {
+		t.Run(budget, func(t *testing.T) {
+			old := paramtable.Get().DataNodeCfg.ImportDeleteBufferSize.SwapTempValue(budget)
+			defer paramtable.Get().DataNodeCfg.ImportDeleteBufferSize.SwapTempValue(old)
+			ma := NewMemoryAllocator(1024 * 1024 * 1024).(*memoryAllocator)
+			patch := mockey.Mock(GetMemoryAllocator).Return(ma).Build()
+			defer patch.UnPatch()
+			if budget == "0" {
+				_, release, err := reserveSnapshotRead(context.Background(), 1, 1)
+				require.ErrorIs(t, err, merr.ErrServiceResourceInsufficient)
+				require.Nil(t, release)
+				return
+			}
+			for _, rowSize := range []int64{-1, math.MaxInt64} {
+				_, _, err := reserveSnapshotRead(context.Background(), 1, rowSize)
+				require.ErrorIs(t, err, merr.ErrServiceResourceInsufficient)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			_, release, err := reserveSnapshotRead(ctx, 1, 1)
+			require.ErrorIs(t, err, context.Canceled)
+			require.Nil(t, release)
+			reserved, release, err := reserveSnapshotRead(context.Background(), 1, 1)
+			require.NoError(t, err)
+			require.Equal(t, reserved+1, ma.usedMemory)
+			release()
+			require.Zero(t, ma.usedMemory)
+		})
+	}
+}
 
 // TestMemoryAllocatorBasicOperations tests basic memory allocation and release operations
 func TestMemoryAllocatorBasicOperations(t *testing.T) {

@@ -283,7 +283,12 @@ message RollbackTxnMessageHeader {}
 // Just do nothing now.
 message TxnMessageHeader {}
 
-message ImportMessageHeader {}
+message ImportMessageHeader {
+  // When present, one descriptor per ImportMsg.files entry in the same order.
+  // Kept in the replicated header because the public ImportFile has no internal
+  // snapshot descriptor. ACK attaches each descriptor before allocating IDs.
+  repeated internal.SnapshotImportSource snapshot_sources = 1;
+}
 
 // SchemaChangeMessageHeader is the header of CollectionSchema update message.
 message SchemaChangeMessageHeader{

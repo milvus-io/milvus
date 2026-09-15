@@ -15,7 +15,7 @@
 package packed
 
 /*
-#cgo pkg-config: milvus_core
+#cgo pkg-config: milvus_core milvus-storage
 
 #include <stdlib.h>
 #include "storage/loon_ffi/ffi_reader_c.h"
@@ -67,6 +67,113 @@ func NewFFIPackedReader(manifestPath string, schema *arrow.Schema, neededColumns
 		storagePluginContext,
 		ext,
 	)
+}
+
+// NewFFISegmentReader opens the milvus-storage logical segment reader. Unlike
+// NewFFIPackedReader, it resolves physical TEXT LOB references and exposes the
+// corresponding columns as Arrow UTF8 arrays.
+//
+// The SegmentReader C API currently accepts storage properties only. It does
+// not accept Milvus' key-retriever plugin context, so callers must reject CMEK
+// sources before reaching this function instead of silently reading without a
+// key retriever.
+func NewFFISegmentReader(
+	manifestPath string,
+	schema *arrow.Schema,
+	neededColumns []string,
+	bufferSize int64,
+	storageConfig *indexpb.StorageConfig,
+	textColumns []TextColumnConfig,
+) (*FFIPackedReader, error) {
+	basePath, version, err := UnmarshalManifestPath(manifestPath)
+	if err != nil {
+		return nil, merr.Wrap(err, "failed to parse manifest path")
+	}
+
+	var cas cdata.CArrowSchema
+	cdata.ExportArrowSchema(schema, &cas)
+	cSchema := (*C.struct_ArrowSchema)(unsafe.Pointer(&cas))
+	defer cdata.ReleaseCArrowSchema(&cas)
+
+	cNeededColumns, cNumColumns, cleanupNeededColumns := newCNeededColumns(neededColumns)
+	defer cleanupNeededColumns()
+
+	cConfig, cleanupConfig := newCSegmentReaderConfig(textColumns, bufferSize)
+	defer cleanupConfig()
+
+	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
+	if err != nil {
+		return nil, merr.Wrap(err, "failed to create segment reader properties")
+	}
+	// loon_segment_reader_open copies all properties into its C++ reader
+	// configuration, so the FFI allocation is only needed during construction.
+	defer C.loon_properties_free(cProperties)
+
+	cBasePath := C.CString(basePath)
+	defer C.free(unsafe.Pointer(cBasePath))
+
+	var handle C.LoonSegmentReaderHandle
+	result := C.loon_segment_reader_open(
+		cBasePath,
+		C.int64_t(version),
+		cSchema,
+		cNeededColumns,
+		cNumColumns,
+		cConfig,
+		cProperties,
+		&handle,
+	)
+	if err := HandleLoonFFIResult(result); err != nil {
+		return nil, merr.Wrap(err, "failed to open segment reader")
+	}
+
+	var cStream cdata.CArrowArrayStream
+	result = C.loon_segment_reader_get_stream(
+		handle,
+		(*C.struct_ArrowArrayStream)(unsafe.Pointer(&cStream)),
+	)
+	if err := HandleLoonFFIResult(result); err != nil {
+		C.loon_segment_reader_destroy(handle)
+		return nil, merr.Wrap(err, "failed to get segment reader stream")
+	}
+
+	recordReader, err := cdata.ImportCRecordReader(&cStream, schema)
+	if err != nil {
+		C.loon_segment_reader_destroy(handle)
+		return nil, merr.WrapErrStorage(err, "failed to import segment record reader")
+	}
+
+	return &FFIPackedReader{
+		cSegmentReader: handle,
+		recordReader:   recordReader,
+		schema:         schema,
+	}, nil
+}
+
+func newCSegmentReaderConfig(textColumns []TextColumnConfig, bufferSize int64) (*C.LoonSegmentReaderConfig, func()) {
+	cConfig := &C.LoonSegmentReaderConfig{
+		read_buffer_size: C.int64_t(bufferSize),
+	}
+	if len(textColumns) == 0 {
+		return cConfig, func() {}
+	}
+
+	columnSize := C.size_t(unsafe.Sizeof(C.LoonLobColumnConfig{}))
+	cColumnsPtr := C.calloc(C.size_t(len(textColumns)), columnSize)
+	cColumns := unsafe.Slice((*C.LoonLobColumnConfig)(cColumnsPtr), len(textColumns))
+	for i, column := range textColumns {
+		cColumns[i].lob_base_path = C.CString(column.LobBasePath)
+		cColumns[i].field_id = C.int64_t(column.FieldID)
+	}
+	cConfig.lob_columns = (*C.LoonLobColumnConfig)(cColumnsPtr)
+	cConfig.num_lob_columns = C.size_t(len(textColumns))
+
+	return cConfig, func() {
+		for i := range cColumns {
+			C.free(unsafe.Pointer(cColumns[i].lob_base_path))
+		}
+		C.free(cColumnsPtr)
+	}
 }
 
 // NewFFIPackedReaderWithExtfs opens a StorageV3 manifest after injecting
@@ -380,7 +487,7 @@ func (r *FFIPackedReader) ReadNext() (rec arrow.Record, err error) {
 
 // Close closes the FFI reader
 func (r *FFIPackedReader) Close() error {
-	if r.cPackedReader == nil {
+	if r.cPackedReader == nil && r.cSegmentReader == 0 {
 		return nil
 	}
 
@@ -391,9 +498,15 @@ func (r *FFIPackedReader) Close() error {
 		r.recordReader = nil
 	}
 
-	status := C.CloseFFIReader(r.cPackedReader)
-	r.cPackedReader = nil
-	return ConsumeCStatusIntoError(&status)
+	if r.cPackedReader != nil {
+		status := C.CloseFFIReader(r.cPackedReader)
+		r.cPackedReader = nil
+		return ConsumeCStatusIntoError(&status)
+	}
+
+	C.loon_segment_reader_destroy(r.cSegmentReader)
+	r.cSegmentReader = 0
+	return nil
 }
 
 // Schema returns the schema of the reader
