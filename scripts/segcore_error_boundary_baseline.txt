@@ -196,4 +196,5 @@ tantivy	internal/core/src/index/NgramInvertedIndex.cpp
 tantivy	internal/core/src/index/TextMatchIndex.cpp
 tantivy	internal/core/src/index/TextMatchIndex.h
 tantivy	internal/core/src/pb/index_cgo_msg.pb.h
+tantivy	internal/core/src/segcore/tokenizer_c.cpp
 tantivy	internal/core/src/segcore/Utils.cpp
