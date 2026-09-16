@@ -77,6 +77,8 @@ type Manager struct {
 	lastAcked             *utility.WALCheckpoint
 	lastObserved          *utility.WALCheckpoint
 	latestCoveredTimeTick uint64
+	readableThrough       uint64
+	readableChanged       chan struct{}
 	restoredTimeTick      uint64
 	terminalErr           error
 	gcFrontiers           map[string]uint64
@@ -116,12 +118,10 @@ func NewManager(config ManagerConfig) *Manager {
 // retaining its source handle. Size thresholds schedule asynchronous writes.
 // DDL messages preserve the history of previously committed requests.
 func (m *Manager) ObserveMessage(ctx context.Context, msg message.ImmutableMessage) {
-	if msg == nil || funcutil.IsControlChannel(msg.VChannel()) {
+	if msg == nil {
 		return
 	}
-	if msg.VChannel() == "" && msg.MessageType() != message.MessageTypeTimeTick {
-		return
-	}
+
 	idempotency, insert := idempotencyHalvesOf(msg)
 	var entry *streamingpb.TransformLogEntry
 	// Barriers only advance the consumer window; Summary stores Delete payloads,
@@ -131,10 +131,11 @@ func (m *Manager) ObserveMessage(ctx context.Context, msg message.ImmutableMessa
 	}
 	m.mu.Lock()
 	m.lastObserved = newSummaryCheckpoint(msg.LastConfirmedMessageID(), msg.TimeTick())
-	if (idempotency != nil || entry != nil) && msg.TimeTick() > m.restoredTimeTick && msg.TimeTick() > m.durableFrontiers[msg.VChannel()] {
+	if msg.VChannel() != "" && !funcutil.IsControlChannel(msg.VChannel()) && (idempotency != nil || entry != nil) && msg.TimeTick() > m.restoredTimeTick && msg.TimeTick() > m.durableFrontiers[msg.VChannel()] {
 		m.seedLastAckedLocked(msg)
 		m.stageRecordLocked(msg, idempotency, insert, entry)
 	}
+	m.advanceReadableLocked(msg.TimeTick())
 	m.refreshLastAckedLocked()
 	overThreshold := m.cfg.FlushMaxBytes > 0 && m.pendingBytes >= m.cfg.FlushMaxBytes
 	m.mu.Unlock()
@@ -342,10 +343,12 @@ func (m *Manager) seal() *SealedChunk {
 		// Read-only same-term recovery is allowed, but a writer must use a new
 		// assignment term: old objects may exist beyond the first recovered gap.
 		m.terminalErr = storeCorruptedf("summary writes after recovery require a fresh assignment term")
+		m.notifyReadersLocked()
 		return nil
 	}
 	if m.generationExhausted {
 		m.terminalErr = storeCorruptedf("summary generation exhausted")
+		m.notifyReadersLocked()
 		return nil
 	}
 	// Keep removal and queue insertion atomic: observers must never see a gap
@@ -691,48 +694,11 @@ type SealedChunk struct {
 	MaxTimeTick       uint64
 }
 
-// ReadTransformEntries loads the durable transform backlog in (from, to].
-// Consumers call this once during recovery and observe live deletes directly.
-func (m *Manager) ReadTransformEntries(
-	ctx context.Context,
-	vchannel string,
-	from, to uint64,
-) ([]*streamingpb.TransformLogEntry, error) {
-	m.readMu.RLock()
-	defer m.readMu.RUnlock()
-	m.mu.Lock()
-	chunks := append([]*streamingpb.PChannelSummaryChunkIndexEntry(nil), m.manifest.GetChunks()...)
-	m.mu.Unlock()
-	out := make([]*streamingpb.TransformLogEntry, 0)
-	for _, chunk := range chunks {
-		if chunk.GetEndTimetick() <= from {
-			continue
-		}
-		if chunk.GetStartTimetick() > to {
-			break
-		}
-		index := vchannelChunkIndex(chunk, vchannel)
-		if index == nil || index.GetTransform() == nil {
-			continue
-		}
-		records, err := m.cfg.Store.ReadTransformSection(ctx, chunk.GetGeneration(), chunk.GetTerm(), vchannel, index)
-		if err != nil {
-			return nil, err
-		}
-		for _, record := range records {
-			tt := record.GetTimeTick()
-			if tt <= from || tt > to {
-				continue
-			}
-			out = append(out, &streamingpb.TransformLogEntry{
-				TimeTick: tt,
-				Entry: &streamingpb.TransformLogEntry_Delete{
-					Delete: record.GetDelete(),
-				},
-			})
-		}
-	}
-	return out, nil
+// ReadTransformEntries is an uncapped convenience read over the shared store.
+// Streaming consumers should use ReadTransform and its explicit coverage.
+func (m *Manager) ReadTransformEntries(ctx context.Context, vchannel string, from, to uint64) ([]*streamingpb.TransformLogEntry, error) {
+	batch, err := m.ReadTransform(ctx, vchannel, from, to, ReadLimits{})
+	return batch.Entries, err
 }
 
 // AdvanceGCTimeTick reports a durable transform materialization or cleanup frontier.

@@ -629,6 +629,9 @@ message PChannelSummaryManifest {
     // Absent only when no chunk has been covered yet.
     PChannelSummaryChunkRef last_chunk = 2;
     PChannelSummaryPosition covered_position = 3;
+    // Largest Delete entry removed for each VChannel. Reads starting before
+    // this position must fail instead of treating truncated history as empty.
+    map<string, uint64> transform_truncated_through = 4;
 }
 
 // PChannelSummaryPosition describes the WAL prefix represented by summary data.

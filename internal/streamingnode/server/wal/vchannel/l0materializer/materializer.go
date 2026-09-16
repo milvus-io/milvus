@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package transformlog
+package l0materializer
 
 import (
 	"context"
@@ -88,7 +88,7 @@ func (m *SyncMaterializer) Materialize(ctx context.Context, req MaterializeReque
 	}
 	collectionID := funcutil.GetCollectionIDFromVChannel(req.VChannel)
 	if collectionID <= 0 {
-		return merr.WrapErrServiceInternalMsg("invalid vchannel %q for transform log materialization", req.VChannel)
+		return merr.WrapErrServiceInternalMsg("invalid vchannel %q for L0 materialization", req.VChannel)
 	}
 	for _, group := range splitMaterializeGroups(req) {
 		if err := m.materializeGroup(ctx, req.VChannel, collectionID, req.TargetTimeTick, group); err != nil {
@@ -149,7 +149,7 @@ func (m *SyncMaterializer) materializeGroup(
 		WithSyncPack(pack).
 		WithStorageConfig(packed.CreateStorageConfig())
 
-	mlog.Info(ctx, "materialize transform log into l0 segment",
+	mlog.Info(ctx, "materialize summary deletes into l0 segment",
 		mlog.FieldCollectionID(collectionID),
 		mlog.FieldPartitionID(group.partitionID),
 		mlog.FieldSegmentID(segmentID),
@@ -262,12 +262,4 @@ func newMaterializeMetaCache(collectionID int64, vchannel string, schema *schema
 	}, func(_ *datapb.SegmentInfo) pkoracle.PkStat {
 		return pkoracle.NewBloomFilterSet()
 	}, metacache.NoneBm25StatsFactory)
-}
-
-func transformLogEntryRows(entry *streamingpb.TransformLogEntry) uint64 {
-	var rows uint64
-	for _, block := range entry.GetDelete().GetBlocks() {
-		rows += uint64(len(storage.ParseIDs2PrimaryKeys(block.GetPrimaryKeys())))
-	}
-	return rows
 }

@@ -12,7 +12,7 @@ The existing object-key encoding is retained; §8 describes forward
 generation-prefix discovery and its recovery cost.
 The cross-owner GC protocol is not yet designed; see the TODO in §9.
 The shared bounded-read contract (§5.4) and [L0Materializer](l0_materializer.md)
-integration are agreed targets for this PR, not yet implemented. TransformLog
+integration are implemented. TransformLog
 subscriptions (§5.5) are a separate future integration.
 
 ## 1. Core Purpose
@@ -53,7 +53,7 @@ walsummary.Manager (one per pchannel)
   +-- continuous durable frontier: the prefix with no missing chunk
   +-- manifest: retained chunk/section index and data coverage boundaries
   +-- manifest dirty state: changes awaiting normal publication
-  +-- readable coverage / change version: complete readable prefix (§5.4 target)
+  +-- readable coverage / change version: complete readable prefix (§5.4)
   +-- durableFrontiers: per-vchannel replay filtering positions
   +-- gcFrontiers: consumer progress used to decide retention
   +-- lastAcked: the continuous, recoverable summary confirmation position
@@ -116,7 +116,10 @@ already removed by retention but not yet physically deleted. It describes
 which WAL prefix has been summarized; it is not a GC task or retry state.
 The proto fields are `last_chunk` and `covered_position`; the latter contains
 a logical `time_tick` and a safe physical `message_id` (LastConfirmedMessageID).
-The manifest contains no `pending_gc` queue or DDL invalidation markers.
+The `transform_truncated_through` map records each VChannel’s last removed
+Delete entry; GC publishes this together with reference removal. It survives
+an empty retained chunk set. The manifest contains no `pending_gc` queue or
+DDL invalidation markers.
 
 Each `VChannelSummaryChunkIndex` has independent `idempotency`, `inserts`, and
 `transform` section references. The first two sections are paired by position;
@@ -461,8 +464,10 @@ The contract is:
    record in neither half or return it twice.
 5. Reject a cursor before the retained transform window. Persist enough
    truncation information to retain this distinction after restart and after
-   the last chunk is removed. The exact encoding is pending implementation;
-   existing `covered_position` proves summarization, not retained history.
+   the last chunk is removed. `transform_truncated_through` records the largest
+   removed Delete TimeTick per VChannel; cursors before it fail with
+   `ErrTransformTruncated`. Existing `covered_position` proves summarization,
+   not retained history.
 6. Missing or corrupt referenced objects fail the read; an absent VChannel
    section means an empty interval only within known complete retained coverage.
 7. Pin a read's required objects against local deletion. Pins have bounded read
@@ -632,19 +637,23 @@ per VChannel. The interceptor rebuilds its windows and applies its byte cap
 before the WAL accepts appends. A read or decode failure fails WAL open rather
 than admitting writes with an incomplete deduplication window.
 
-The current `ReadTransformEntries` implementation reads only durable chunks
-and returns the whole requested range. RecoveryStorage currently preloads that
-range into `vchannel/transformlog`, which also observes live messages and keeps
-a copied payload window. The target in §5.2 replaces this with the independent
-L0Materializer and the unified bounded reader in §5.4; these changes are not yet
-implemented. The idempotency reader already captures durable and in-memory
-records consistently, but does not by itself implement the transform contract.
+`ReadTransform` captures durable indexes, sealed records, pending records and
+readable coverage under the same lock. It returns caller-owned whole entries,
+`CoveredThrough`, `ReadableThrough`, and a change channel. Row/byte limits are
+soft for one oversized Entry; decoding holds one chunk section at a time.
+Local read pins protect the captured objects against physical GC.
+`ReadTransformEntries` remains an uncapped convenience wrapper; production L0
+consumption uses bounded reads exclusively.
 
-GC callbacks still need to cover base-only VChannel snapshots (§5.2), and
-count-budget wiring is absent (§3.4). Recoverable transform truncation bounds
-and progress notification APIs in §5.4 also remain implementation work. Future
-subscription retention is not wired. These gaps are separate from the
-implemented asynchronous write path.
+RecoveryStorage observes Summary before VChannel modules. L0Materializer
+restores only its durable cursor, and replay/RecoveryBarrier requests the
+window to read; startup no longer preloads Delete payloads. Both full and
+base-only VChannel snapshot commits report their captured materialization
+frontiers. The manifest persists per-VChannel transform truncation bounds,
+including after removal of the last chunk.
+
+Count-budget wiring remains absent (§3.4). Future subscription retention and
+cross-owner GC fencing remain separate follow-up work.
 
 ## 8. Object Listing And Recovery Cost
 

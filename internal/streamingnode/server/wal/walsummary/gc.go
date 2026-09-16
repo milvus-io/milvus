@@ -43,9 +43,29 @@ func (m *Manager) GCOnce(ctx context.Context) error {
 	m.mu.Lock()
 	if len(released) > 0 {
 		for _, ref := range released {
+			for _, chunk := range m.manifest.Chunks {
+				if chunk.GetGeneration() != ref.Generation {
+					continue
+				}
+				for _, index := range chunk.GetVchannels() {
+					if index.GetTransform() == nil {
+						continue
+					}
+					end := index.GetTransformEndTimetick()
+					if end == 0 {
+						end = index.GetEndTimetick()
+					}
+					if m.manifest.TransformTruncatedThrough == nil {
+						m.manifest.TransformTruncatedThrough = make(map[string]uint64)
+					}
+					vc := index.GetVchannel()
+					m.manifest.TransformTruncatedThrough[vc] = max(m.manifest.TransformTruncatedThrough[vc], end)
+				}
+			}
 			m.manifest.Chunks = removeChunkEntry(m.manifest.Chunks, ref.Generation)
 		}
 		m.manifestVersion++
+		m.notifyReadersLocked()
 	}
 	m.mu.Unlock()
 	m.scheduleManifest()

@@ -8,8 +8,8 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/l0materializer"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/segment"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/transformlog"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walsummary"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -29,22 +29,12 @@ type PChannelManagerConfig struct {
 	Logger            *mlog.Logger
 	SegmentLifecycle  segment.Lifecycle
 	SegmentPackWriter segment.PackWriter
-	// SummaryManager is the pchannel-scoped WALSummary runtime. The vchannel
-	// modules never touch it directly; this manager only reports the GC
-	// boundary of a dropped vchannel to it (AdvanceGCTimeTick with
-	// DroppedVChannelTimeTick), allowing the summary to release records of
-	// the dropped vchannel.
+	// SummaryManager supplies shared Delete reads and accepts durable GC frontiers.
 	SummaryManager *walsummary.Manager
-	// PendingTransformEntries is the recovery-loaded initial materialization
-	// window per vchannel: the durable records after the restored
-	// transform_materialized_time_tick. Live observation feeds the window
-	// after this one-time recovery load.
-	PendingTransformEntries map[string][]*streamingpb.TransformLogEntry
-	// TransformLogMaterializer writes the L0 segments of the transform
-	// consumer.
-	TransformLogMaterializer  transformlog.Materializer
-	TransformLogMaterialRows  uint64
-	TransformLogMaterialBytes uint64
+	// L0Materializer writes and registers L0 output.
+	L0Materializer     l0materializer.Materializer
+	L0MaterializeRows  uint64
+	L0MaterializeBytes uint64
 
 	// Deprecated: GetRecoveryCheckpoint and CoordinatorBroker wire the
 	// temporary channel-checkpoint reporting (PChannelCheckpointUpdater) that
@@ -343,19 +333,19 @@ func (m *PChannelRecoveryManager) newModule(vchannel string) (*VChannelRecoveryM
 		},
 	}
 	module, err := newModuleFromOwnedRecoveryState(ModuleConfig{
-		PChannel:                  m.pchannel,
-		VChannel:                  vchannel,
-		VChannelMeta:              m.config.VChannelMetas[vchannel],
-		Segments:                  m.segmentsByVChannel[vchannel],
-		Runtime:                   runtime,
-		Logger:                    m.config.Logger,
-		SegmentLifecycle:          m.config.SegmentLifecycle,
-		SegmentPackWriter:         m.config.SegmentPackWriter,
-		PendingTransformEntries:   m.config.PendingTransformEntries[vchannel],
-		TransformLogMaterializer:  m.config.TransformLogMaterializer,
-		TransformLogMaterialRows:  m.config.TransformLogMaterialRows,
-		TransformLogMaterialBytes: m.config.TransformLogMaterialBytes,
-		OnCleanup:                 m.removeModule,
+		PChannel:           m.pchannel,
+		VChannel:           vchannel,
+		VChannelMeta:       m.config.VChannelMetas[vchannel],
+		Segments:           m.segmentsByVChannel[vchannel],
+		Runtime:            runtime,
+		Logger:             m.config.Logger,
+		SegmentLifecycle:   m.config.SegmentLifecycle,
+		SegmentPackWriter:  m.config.SegmentPackWriter,
+		SummaryReader:      m.config.SummaryManager,
+		L0Materializer:     m.config.L0Materializer,
+		L0MaterializeRows:  m.config.L0MaterializeRows,
+		L0MaterializeBytes: m.config.L0MaterializeBytes,
+		OnCleanup:          m.removeModule,
 	})
 	if err != nil {
 		return nil, err

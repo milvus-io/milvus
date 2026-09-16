@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walsummary"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -395,4 +396,54 @@ func newAckTestTimeTickMessage(t *testing.T, timetick uint64, lastConfirmed int6
 		WithTimeTick(timetick).
 		WithLastConfirmed(walimplstest.NewTestMessageID(lastConfirmed)).
 		IntoImmutableMessage(walimplstest.NewTestMessageID(lastConfirmed + 1))
+}
+
+func TestPersistReportsCapturedFullAndBaseMaterializationFrontiers(t *testing.T) {
+	checkpoint := &utility.WALCheckpoint{MessageID: walimplstest.NewTestMessageID(1), TimeTick: 10}
+	storage := newTestRecoveryStorage(t, checkpoint)
+	t.Cleanup(storage.metrics.Close)
+	storage.SetLogger(mlog.With())
+	storage.summaryManager = walsummary.NewManager(walsummary.ManagerConfig{})
+	storage.pendingPersistSnapshot = &dirtyPersistSnapshot{Checkpoint: checkpoint, ModuleDirtySnaps: []moduleapi.DirtySnapshot{
+		newOrderedDirtySnapshot(moduleapi.ModuleNameVChannel, moduleapi.SnapshotKey{VChannel: "full"}, moduleapi.SnapshotOpUpsert, &streamingpb.VChannelMeta{Vchannel: "full", TransformMaterializedTimeTick: 100}),
+		newOrderedDirtySnapshot(moduleapi.ModuleNameVChannel, moduleapi.SnapshotKey{VChannel: "base"}, moduleapi.SnapshotOpUpsertBase, &streamingpb.VChannelMeta{Vchannel: "base", TransformMaterializedTimeTick: 200}),
+	}}
+	for _, snap := range storage.pendingPersistSnapshot.ModuleDirtySnaps {
+		snap.(*orderedDirtySnapshot).markPersisted = func() {}
+	}
+	attempts := 0
+	save := mockey.Mock((*recoveryStorageImpl).saveRecoverySnapshot).To(func(_ *recoveryStorageImpl, _ context.Context, snapshot *metastore.WALRecoverySnapshot) error {
+		attempts++
+		require.Equal(t, uint64(100), snapshot.VChannels["full"].GetTransformMaterializedTimeTick())
+		require.Equal(t, uint64(200), snapshot.VChannelBaseMetas["base"].GetTransformMaterializedTimeTick())
+		if attempts == 1 {
+			return context.DeadlineExceeded
+		}
+		return nil
+	}).Build()
+	defer save.UnPatch()
+	releases := map[string]uint64{}
+	advance := mockey.Mock((*walsummary.Manager).AdvanceGCTimeTick).To(func(_ *walsummary.Manager, vc string, tt uint64) { releases[vc] = tt }).Build()
+	defer advance.UnPatch()
+	require.Error(t, storage.persistDirtySnapshot(context.Background(), mlog.DebugLevel))
+	require.Empty(t, releases, "failed persistence cannot release Summary history")
+	require.NoError(t, storage.persistDirtySnapshot(context.Background(), mlog.DebugLevel))
+	require.Equal(t, map[string]uint64{"full": 100, "base": 200}, releases)
+}
+
+func TestSummaryCoveragePrecedesVChannelObservation(t *testing.T) {
+	checkpoint := &utility.WALCheckpoint{MessageID: walimplstest.NewTestMessageID(1), TimeTick: 10}
+	storage := newTestRecoveryStorage(t, checkpoint)
+	t.Cleanup(storage.metrics.Close)
+	storage.summaryManager = walsummary.NewManager(walsummary.ManagerConfig{})
+	observed := false
+	patch := mockey.Mock((*vchannel.PChannelRecoveryManager).ObserveMessage).To(func(_ *vchannel.PChannelRecoveryManager, ctx context.Context, retained message.RetainedImmutableMessage) {
+		batch, err := storage.summaryManager.ReadTransform(ctx, "v1", 0, retained.Message().TimeTick(), walsummary.ReadLimits{MaxRows: 1})
+		require.NoError(t, err)
+		require.Equal(t, retained.Message().TimeTick(), batch.CoveredThrough, "a VChannel task must already see complete Summary coverage")
+		observed = true
+	}).Build()
+	defer patch.UnPatch()
+	storage.observeMessage(context.Background(), newAckTestTimeTickMessage(t, 20, 2))
+	require.True(t, observed)
 }

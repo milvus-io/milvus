@@ -7,13 +7,13 @@ Persists WAL consumer state to the catalog (etcd) and object storage. The author
 - **WALCheckpoint** (etcd): safe `LastConfirmedMessageID` and logical `TimeTick`, publisher term, replication configuration/progress, and AlterWAL state. Publication is bounded by both AckTracker's successful continuous prefix and WALSummary's `LastAcked`.
 - **VChannel metadata** (etcd): Per-VChannel collection info, partition list, schema history, state (NORMAL / DROPPED).
 - **Segment assignments** (etcd): Per-segment growing/flushed status with row count and binary size stats.
-- **Segment data** (object storage): SegmentView writes L1 binlogs and statistics; [L0Materializer](../../../design-docs/design_docs/wal/l0_materializer.md) is the agreed owner of Delete-to-L0 materialization (migration pending). Index building is outside RecoveryStorage.
+- **Segment data** (object storage): SegmentView writes L1 binlogs and statistics; [L0Materializer](../../../design-docs/design_docs/wal/l0_materializer.md) owns Delete-to-L0 materialization. Index building is outside RecoveryStorage.
 - **WALSummary** (object storage): PChannel-scoped immutable chunks and term manifests, storing keyed-write summaries and Delete records independently of source-message handles.
 
 ## Recovery Flow
 
 1. RW WAL opening appends a RecoveryBarrier to fence the old writer.
-2. **Metadata recovery** (`recoverRecoveryInfoFromMeta`): Claim the checkpoint with the assignment term, load component metadata and restore WALSummary. The target L0Materializer restores its cursor and rebuilds its requested window through replay, without preloading Delete payloads; current code still preloads the old copied window.
+2. **Metadata recovery** (`recoverRecoveryInfoFromMeta`): Claim the checkpoint with the assignment term, load component metadata and restore WALSummary. L0Materializer restores its cursor and rebuilds its requested window through replay, without preloading Delete payloads.
 3. **Startup recovery** (`runBoundedRecovery`): Use the ordinary scanner to observe the WAL from the checkpoint through this open's exact barrier. Capture the write-path snapshot and an independent copy of unfinished transaction builders, and restore idempotency snapshots from retained Summary history plus replayed records (failing WAL open if history cannot be read); pause further raw input until write-path initialization finishes. Asynchronous persistence need not have finished.
 4. Resume the same scanner exclusively after the barrier through the opener-provided WAB, retaining its ordering and transaction state. An empty WAB needs no additional persisted TimeTick to switch; eviction uses durable catchup without replacing that state. Run AckTracker stall checks, independent Summary backlog checks, and catalog publication. Component snapshots precede checkpoint publication and WAL truncation. Poisoned messages remain incomplete and block the checkpoint.
 
@@ -27,7 +27,7 @@ Control may persist its latest state ahead of the global checkpoint, like a Segm
 - `internal/streamingnode/server/wal/messageack/` — message completion and stall tracking
 - `internal/streamingnode/server/wal/vchannel/` — VChannel metadata and component ownership
 - `internal/streamingnode/server/wal/vchannel/segment/` — L1 persistence and final DataCoord commit
-- `internal/streamingnode/server/wal/vchannel/transformlog/` — current L0 implementation; to be replaced by `vchannel/l0materializer/` under the agreed design
+- `internal/streamingnode/server/wal/vchannel/l0materializer/` — window tracking and bounded Summary-to-L0 materialization
 - `internal/streamingnode/server/wal/walsummary/` — summary persistence, recovery and retention
 
 Future [TransformLog](../../../design-docs/design_docs/wal/transform_log.md) is a read-only subscription adaptor over Summary, outside this PR. It owns neither WAL observation nor L0 materialization.
