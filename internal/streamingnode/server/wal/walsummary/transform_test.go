@@ -15,17 +15,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
-func newTransformTestManager(t *testing.T, store *Store, retention uint64) *Manager {
-	t.Helper()
-	m := newTestManager(t, store, retention)
-	m.cfg.EnableTransform = true
-	return m
-}
-
 func newTransformTestManagerWithStore(t *testing.T) (*Manager, *Store) {
 	t.Helper()
 	store := newTestStore(t)
-	return newTransformTestManager(t, store, 1<<30), store
+	return newTestManager(t, store, 1<<30), store
 }
 
 func flushTransform(t *testing.T, manager *Manager, vchannel string, tt uint64, finalized *bool) {
@@ -55,7 +48,7 @@ func TestManagerRestoreTransform(t *testing.T) {
 
 	// A new manager over the same store recovers both chunks and continues
 	// generations after them.
-	recovered := newTransformTestManager(t, manager.cfg.Store, 1<<30)
+	recovered := newTestManager(t, manager.cfg.Store, 1<<30)
 	require.NoError(t, recovered.Restore(ctx))
 	assert.Equal(t, uint64(2), recovered.nextGeneration)
 	assert.Equal(t, uint64(200), recovered.LatestCoveredTimeTick())
@@ -164,7 +157,7 @@ func TestMixedSummaryConsumersPersistRecoverAndGC(t *testing.T) {
 	require.NoError(t, persistSummary(ctx, manager))
 	require.NoError(t, persistSummary(ctx, manager), "empty retry must not add another chunk")
 	require.Len(t, manager.Manifest().GetChunks(), 1)
-	recovered := newTransformTestManager(t, NewStore(store.chunkManager, store.PChannel(), 3), 1)
+	recovered := newTestManager(t, NewStore(store.chunkManager, store.PChannel(), 3), 1)
 	require.NoError(t, recovered.Restore(ctx))
 	entries, err := recovered.ReadTransformEntries(ctx, "mixed", 0, 100)
 	require.NoError(t, err)

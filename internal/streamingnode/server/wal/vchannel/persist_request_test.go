@@ -33,7 +33,7 @@ func (recordingVChannelTaskHandle) Cancel() {}
 
 func (recordingVChannelTaskHandle) Wait(context.Context) error { return nil }
 
-// newTestSummaryManager uses a local store with the transform consumer enabled.
+// newTestSummaryManager uses a local summary store.
 func newTestSummaryManager(t *testing.T, scheduler *recordingVChannelScheduler) *walsummary.Manager {
 	t.Helper()
 	cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
@@ -43,7 +43,6 @@ func newTestSummaryManager(t *testing.T, scheduler *recordingVChannelScheduler) 
 		PChannel:          "p1",
 		Term:              1,
 		Store:             store,
-		EnableTransform:   true,
 		RetentionMaxBytes: 1 << 30,
 	})
 }

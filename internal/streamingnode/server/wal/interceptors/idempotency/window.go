@@ -22,7 +22,6 @@ const (
 )
 
 type WindowConfig struct {
-	Enabled      bool
 	MaxBytes     int
 	MaxKeyLength int
 	Now          func() time.Time

@@ -453,8 +453,8 @@ func TestFlushChunkFailureRetriesSameGeneration(t *testing.T) {
 // The error reaches the recovery storage, which returns before saving the
 // consume checkpoint, so the records stay replayable from the WAL and the next
 // tick tries again. A store that is genuinely corrupt therefore stalls the
-// checkpoint rather than silently dropping records -- the remedy is the
-// documented one (disable idempotency, which drops the store, then re-enable).
+// checkpoint rather than silently dropping records. Repair must preserve the
+// history required by every consumer of the always-on summary store.
 func TestPersistSurfacesStoreCorruption(t *testing.T) {
 	ctx := context.Background()
 	cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))

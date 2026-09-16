@@ -189,7 +189,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	}
 	excludeAutoIDPrimary := primaryFieldSchema.GetAutoID() &&
 		!typeutil.IsPrimaryFieldDataExist(it.insertMsg.GetFieldsData(), primaryFieldSchema)
-	if err := it.prepareAutoIdempotencyKeyIfEnabled(ctx, colInfo.Properties, excludeAutoIDPrimary); err != nil {
+	if err := it.prepareIdempotencyKey(colInfo.Properties); err != nil {
 		return err
 	}
 

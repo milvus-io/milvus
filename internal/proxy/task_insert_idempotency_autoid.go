@@ -111,7 +111,7 @@ func reassignAutoIDByOffsetChannels(
 	// insert's row->shard assignment MUST equal hash(assignedPK)%%n), and
 	// deterministic PRNG-generated ids cannot guarantee global uniqueness. The
 	// id space is int64, so the burn is negligible; the extra RTT only applies
-	// to idempotency-enabled autoID collections.
+	// to autoID inserts carrying an explicit idempotency key.
 	const maxAutoIDStabilizeRounds = 256
 	for round := 0; ; round++ {
 		missing := missingAutoIDBucketCount(required, buckets)

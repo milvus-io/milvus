@@ -29,8 +29,11 @@ recovery, retention and GC protocols. The standalone summary is implemented;
 connecting it to recovery and restoring interceptor windows remains the
 [async integration work](wal/summary.md#7-implementation-and-integration-status).
 
-The feature is off by default and is enabled per collection on top of a global
-switch. It applies to `Insert` only.
+Idempotency is always available for `Insert`: a non-empty client-supplied key
+opts that request into deduplication. A request without a key is an ordinary
+write; the proxy never generates a key from its payload. There is no global or
+collection-level enable switch. WALSummary is always on, independently of
+whether any request carries a key.
 
 ## Motivation
 
@@ -69,12 +72,12 @@ cannot be done correctly for autoID collections at all.
 - The guarantee survives streaming node restart and WAL failover, including an outage
   long enough that wall-clock TTLs would have expired.
 - No data loss in the summary store under any crash point.
-- Zero cost when the feature is off.
+- Keyless inserts bypass request-level deduplication and create no idempotency records.
 
 ### Non-goals
 
 - **Encrypted collections.** An insert into a collection with an encryption zone is
-  refused outright when idempotency is asked for, by key or by property. The duplicate
+  refused when a non-empty idempotency key is supplied. The duplicate
   answer is the first attempt's primary keys and it rides in the message HEADER, which the
   builder serializes into a plaintext property — the cipher covers the body only — and the
   client key sits beside it in another plaintext property. The summary store then writes
@@ -94,24 +97,17 @@ cannot be done correctly for autoID collections at all.
 
 ## Public Interfaces
 
-### Collection property
+### Request opt-in
 
-```
-collection.insert.idempotency.enabled = "true" | "false"
-```
-
-Set at `CreateCollection` / `AlterCollection`. An unparseable value is rejected at DDL
-time rather than silently downgrading a durability guarantee the operator believes is
-on.
-
-Both this property **and** the global `streaming.idempotency.enabled` must be true for
-a collection's inserts to be idempotent.
+A non-empty `idempotency-key` on an Insert is the only opt-in. No collection
+property or deployment switch is required. An absent or empty key means every
+request is a new write, even when its payload is identical to an earlier one.
+Legacy global or collection enable settings have no effect.
 
 ### Configuration
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `streaming.idempotency.enabled` | `false` | Global kill switch. |
 | `streaming.idempotency.maxBytesPerWindow` | `16MiB` | Per-vchannel in-memory window cap. Nothing is evicted until this is reached; then oldest-first. |
 | `streaming.idempotency.maxRetainedBytes` | `256MiB` | Pchannel-wide soft budget of the retained chunk objects. `0` disables that bound. |
 | `streaming.idempotency.maxRetainedChunks` | `256` | Pchannel-wide cap on the NUMBER of retained chunk objects. `0` disables that bound. |
@@ -141,9 +137,9 @@ because no schema refresh can fix a caller mistake.
 the retention window returns the first payload's result and does not write the new
 rows.
 
-If no explicit key is supplied, the proxy derives one from the request (see
-[Key derivation](#key-derivation)), so an unmodified client still gets idempotency for
-a byte-identical retry.
+If no explicit key is supplied, the request is not deduplicated. A client must
+reuse its explicit key for retries and choose a new key for each new logical
+write, including intentional writes with identical payloads.
 
 ### Wire protocol
 
@@ -177,7 +173,7 @@ consumers. See its [object layout](wal/summary.md#22-objects-object-storage),
 
 ```
 client ── idempotency-key header ──► proxy
-                                       │  derive/validate key, stamp `_ik`
+                                       │  validate explicit key, stamp `_ik`
                                        │  stamp per-write-unit insert result
                                        ▼
                             fan out by vchannel (+ split by size)
@@ -204,37 +200,13 @@ Two layers, deliberately separated:
 - **The dedup window** builds meaning on top. It decides what to keep and for how
   long; the store neither knows nor records that decision.
 
-### Key derivation
+### Key identity
 
-An explicit client key is used as-is (length-checked). Otherwise the proxy derives one
-deterministically:
-
-```
-key = SHA256( destination ‖ numRows ‖ canonical(client-supplied columns) )
-```
-
-**The destination must be in the key.** The dedup window is keyed by vchannel, and a
-vchannel is a *collection shard* — not a partition, not a namespace. Two logically
-distinct inserts of the same rows into two partitions of one collection would
-otherwise hash to the same key, and the second would be answered as a duplicate with
-the first insert's primary keys while its rows never reached the WAL. A derived key is
-not under the caller's control, so the "do not reuse a key" contract that covers an
-explicit key does not excuse that collision. The destination covers
-`(dbName, collectionName, partitionName, namespace)`, every string length-prefixed so
-neighbouring fields cannot shift into each other. `namespace` distinguishes unset from
-empty: unset routes by primary key, empty routes by namespace.
-
-The destination is hashed **exactly as the client sent it**, before the proxy resolves
-an empty partition name to the default. A retry resends the same request, so the key
-stays stable; spelling one destination two ways costs a missed dedup, never a merge of
-two destinations.
-
-The payload side covers only the client-supplied columns plus `numRows`: derivation
-runs before the proxy fills field properties, function output, dynamic and namespace
-fields, so by design it must not depend on any of them.
-
-For autoID collections the primary column is excluded from the hash — it is
-server-assigned and differs per attempt.
+The explicit client key is used as-is after length validation. The dedup window
+is scoped by vchannel, which identifies a collection shard. Clients must not
+reuse a key for different logical writes within that scope, including writes
+to different partitions or namespaces. The proxy does not hash the payload or
+destination to invent a request identity.
 
 ### autoID and stable shard routing
 
@@ -255,7 +227,7 @@ count and shrinks with batch size: measured at ~1.01x for 100k rows over 4 shard
 over-allocation dominates — the last case is still only about 2k IDs in absolute terms,
 and the ID space is `int64`. The loop is bounded at 256 rounds so a pathological hash
 distribution fails loudly instead of burning the ID space forever; the common case is
-one round. The cost applies only to idempotency-enabled autoID collections.
+one round. The cost applies only to autoID inserts carrying an explicit idempotency key.
 
 The alternatives do not work: deriving the shard from the row offset directly breaks
 `Delete`/`Upsert`, whose index-based routing hashes the primary key against the same
@@ -316,10 +288,9 @@ without executing the insert again, even if another operation removed its data.
 Otherwise, a timeout followed by truncate and a late retry would reinsert data
 that the truncate had removed.
 
-A new logical write needs a new client key. The auto-derived payload key cannot
-distinguish an intentional identical write from a retry; DDL must not guess that
-intent by discarding request history. Drop and recreation under a new collection
-ID creates new vchannels and hence a different deduplication scope. Normal
+A new logical write needs a new client key, or no key when retry deduplication
+is not requested. DDL does not discard request history. Drop and recreation
+under a new collection ID creates new vchannels and hence a different deduplication scope. Normal
 resource validation still applies; this does not promise that a request against
 a removed collection bypasses validation or always returns a cached response.
 
@@ -432,8 +403,8 @@ for what is wired on this branch.
 
 See [WALSummary retention GC](wal/summary.md#4-retention-gc) and the separate
 [cross-owner GC TODO](wal/summary.md#9-gc-design-cross-owner-coordination-todo).
-The idempotency consumer accepts bounded history expiry; disabling idempotency
-does not authorize deleting data needed by other summary consumers.
+The idempotency consumer accepts bounded history expiry. Keyless traffic does
+not clear retained history or authorize deleting data needed by other summary consumers.
 
 ## Split-brain fencing
 
@@ -474,8 +445,9 @@ future code path ever lets two genuinely distinct messages reach this buffer wit
 same timetick, the second is silently dropped — **this invariant must be preserved.**
 Drops are surfaced by a warn log and `idempotency_reader_physical_dedup_drop_total`.
 
-The rule is gated on `streaming.idempotency.enabled`, so the flag is a real kill switch
-that restores the pre-idempotency scanner behavior.
+Physical deduplication is always active and does not depend on a request key.
+Legacy VersionOld messages are exempt from TimeTick deduplication because
+several messages split from one old insert can share a TimeTick.
 
 ## Design Decisions
 
@@ -500,8 +472,8 @@ the data. New intent is expressed with a new key.
 
 **Rejected — clearing the window or filtering summary records at the DDL timetick.**
 Both turn a delayed retry into a new insert. Clearing only the in-memory window
-also makes behavior differ before and after recovery. A payload-derived key's
-ambiguity is not resolved by changing request identity when data is deleted.
+also makes behavior differ before and after recovery. Request identity is
+explicitly supplied by the client and is not changed when data is deleted.
 
 ### Shared storage decisions
 
@@ -512,30 +484,22 @@ and are not separately specified by the idempotency feature.
 
 ## Compatibility, Deprecation, and Migration Plan
 
-**Compatibility.** The feature is off by default. Disabling it disables the
-idempotency window and reader-side physical dedup. A non-idempotent write
-carries no `_ik` property. Other WALSummary consumers are independent of this
-switch; see [consumer lifecycle](wal/summary.md#53-consumer-lifecycle).
+**Compatibility.** Keyless inserts remain ordinary writes and carry no `_ik`
+property or idempotent result. Inserts with a non-empty explicit key are
+idempotent without configuring a global or collection switch. Requests written
+without a key do not acquire an idempotency identity retroactively.
 
-`InsertMessageHeader.idempotent_result` is an optional field; older readers
-ignore it. The `_ik` message property is absent unless a key exists.
-
-**Enabling.** Set the global flag, then the collection property. Requests
-written without a key do not acquire an idempotency identity retroactively.
-
-**Disabling / rollback.** Turn off `streaming.idempotency.enabled`. The disabled
-period is outside the dedup guarantee. Shared summary objects must not be
-removed as a side effect; a reset or re-enable policy for durable idempotency
-windows remains future work. The current RecoveryStorage reads shared Summary
-for transform recovery and runs retention GC; this is separate from restoring
-the idempotency interceptor's windows.
+`InsertMessageHeader.idempotent_result` remains an optional field; older readers
+ignore it. Reader-side physical deduplication and WALSummary are always active.
+The current RecoveryStorage reads Summary for transform recovery and runs
+retention GC; restoring idempotency interceptor windows remains follow-up work.
 
 **No data migration.** The feature is unreleased; there is no earlier on-disk format.
 
 ## Test Coverage
 
-**Unit** — proxy key derivation and destination separation, key length validation,
-autoID routing stability, result merging, DDL property validation; window
+**Unit** — proxy explicit-key opt-in, keyless pass-through, ignored legacy
+switches, key length validation, autoID routing stability and result merging; window
 owner/wait/duplicate decisions, byte-cap eviction, restore-from-snapshot,
 transaction commit dedup with rollback synthesis, expired transaction buffers,
 replicated bypass, and DDL preservation of request history.
@@ -585,16 +549,6 @@ memory tests under skewed shard load.
 - **Shared-store limitations.** Assignment identity, checkpoint fencing and
   unresolved cross-owner GC constraints are described in
   [WALSummary](wal/summary.md#63-storage-lifetime-and-failure-boundaries).
-- **Under `autoID`, a derived key cannot tell an intentional duplicate from a retry.**
-  With no client key the proxy hashes the destination and the payload, and for an `autoID`
-  collection the primary column is deliberately left out of that hash, because a retry is
-  allocated different ids. Two intentional inserts of the same column data therefore derive
-  the same key: the second is answered as a duplicate, its rows never reach the WAL, and the
-  response carries the FIRST batch's primary keys. Nothing reports this — and because the
-  window rolls by byte and chunk budgets, the same pair of calls writes once on a busy shard
-  and twice on a quiet one. A client that may legitimately send the same payload twice must
-  send its own key per logical request; deriving one is a convenience for callers that
-  cannot, not a substitute for a request identity.
 - **Partial fan-out retries.** A retry after an attempt that reached only some shards is
   deduplicated on the landed shards and appended fresh on the missing ones — the intended
   outcome. The proxy cannot distinguish it from the pathological case where one shard's

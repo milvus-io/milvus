@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/interceptors/mock_wab"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/interceptors/timetick/mock_inspector"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
@@ -21,7 +22,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mocks/streaming/mock_walimpls"
-	"github.com/milvus-io/milvus/pkg/v3/mocks/streaming/util/mock_message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -184,7 +184,7 @@ func TestPauseConsumption(t *testing.T) {
 			IgnorePauseConsumption: false,
 		},
 		filterFunc:    func(message.ImmutableMessage) bool { return true },
-		reorderBuffer: utility.NewReOrderBuffer(false),
+		reorderBuffer: utility.NewReOrderBuffer(),
 		pendingQueue:  utility.NewPendingQueue(),
 		cleanup:       func() {},
 		ScannerHelper: helper.NewScannerHelper("test"),
@@ -224,7 +224,7 @@ func TestRecoveryBarrierConfirmsBufferedMessages(t *testing.T) {
 			IgnorePauseConsumption: true,
 		},
 		filterFunc:      func(message.ImmutableMessage) bool { return true },
-		reorderBuffer:   utility.NewReOrderBuffer(false),
+		reorderBuffer:   utility.NewReOrderBuffer(),
 		pendingQueue:    utility.NewPendingQueue(),
 		txnBuffer:       utility.NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics()),
 		cleanup:         func() {},
@@ -232,7 +232,7 @@ func TestRecoveryBarrierConfirmsBufferedMessages(t *testing.T) {
 		metrics:         metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics(),
 		readRateCounter: utility.NewAverageRateCounter(time.Second),
 	}
-	msg := newScannerTestMessage(t, 10, "v1", message.MessageTypeInsert, false)
+	msg := newScannerTestMessage(t, 10, "v1", message.MessageTypeInsert, true)
 	barrier := newScannerTestMessage(t, 20, "", message.MessageTypeRecoveryBarrier, true)
 
 	scanner.handleUpstream(msg)
@@ -255,7 +255,7 @@ func TestTimeTickPreservesLegacyDeliverySemantics(t *testing.T) {
 			IgnorePauseConsumption: true,
 		},
 		filterFunc:      func(message.ImmutableMessage) bool { return true },
-		reorderBuffer:   utility.NewReOrderBuffer(false),
+		reorderBuffer:   utility.NewReOrderBuffer(),
 		pendingQueue:    utility.NewPendingQueue(),
 		txnBuffer:       utility.NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics()),
 		cleanup:         func() {},
@@ -263,7 +263,7 @@ func TestTimeTickPreservesLegacyDeliverySemantics(t *testing.T) {
 		metrics:         metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics(),
 		readRateCounter: utility.NewAverageRateCounter(time.Second),
 	}
-	msg := newScannerTestMessage(t, 10, "v1", message.MessageTypeInsert, false)
+	msg := newScannerTestMessage(t, 10, "v1", message.MessageTypeInsert, true)
 	timeTick := newScannerTestMessage(t, 20, "", message.MessageTypeTimeTick, true)
 
 	scanner.handleUpstream(msg)
@@ -288,15 +288,27 @@ func newScannerTestMessage(
 	vchannel string,
 	msgType message.MessageType,
 	persisted bool,
-) *mock_message.MockImmutableMessage {
-	msg := mock_message.NewMockImmutableMessage(t)
-	msg.EXPECT().EstimateSize().Return(1).Maybe()
-	msg.EXPECT().MessageType().Return(msgType).Maybe()
-	msg.EXPECT().TimeTick().Return(timetick).Maybe()
-	msg.EXPECT().VChannel().Return(vchannel).Maybe()
-	msg.EXPECT().TxnContext().Return(nil).Maybe()
-	msg.EXPECT().IsPersisted().Return(persisted).Maybe()
-	msg.EXPECT().MessageID().Return(walimplstest.NewTestMessageID(int64(timetick))).Maybe()
-	msg.EXPECT().MarshalLogObject(mock.Anything).Return(nil).Maybe()
-	return msg
+) message.ImmutableMessage {
+	t.Helper()
+	var msg message.MutableMessage
+	switch msgType {
+	case message.MessageTypeInsert:
+		msg = message.NewInsertMessageBuilderV1().WithVChannel(vchannel).
+			WithHeader(&message.InsertMessageHeader{}).WithBody(&msgpb.InsertRequest{}).MustBuildMutable()
+	case message.MessageTypeRecoveryBarrier:
+		msg = message.NewRecoveryBarrierMessageBuilderV2().WithAllVChannel().
+			WithHeader(&message.RecoveryBarrierMessageHeader{}).
+			WithBody(&message.RecoveryBarrierMessageBody{}).MustBuildMutable()
+	case message.MessageTypeTimeTick:
+		builder := message.NewTimeTickMessageBuilderV1().WithAllVChannel().
+			WithHeader(&message.TimeTickMessageHeader{}).WithBody(&msgpb.TimeTickMsg{})
+		if !persisted {
+			builder.WithNotPersisted()
+		}
+		msg = builder.MustBuildMutable()
+	default:
+		t.Fatalf("unsupported test message type: %s", msgType)
+	}
+	return msg.WithTimeTick(timetick).WithLastConfirmedUseMessageID().
+		IntoImmutableMessage(walimplstest.NewTestMessageID(int64(timetick)))
 }

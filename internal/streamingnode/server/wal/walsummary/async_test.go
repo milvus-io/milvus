@@ -51,7 +51,7 @@ func TestSummaryBacklogFlushesAfterSourceAckWithoutNewMessages(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return manager.LastAcked().TimeTick == 100 && !manager.HasPendingWork()
 	}, 5*time.Second, time.Millisecond)
-	recovered := newTransformTestManager(t, store, 1<<30)
+	recovered := newTestManager(t, store, 1<<30)
 	require.NoError(t, recovered.Restore(ctx))
 	entries, err := recovered.ReadTransformEntries(ctx, "v1", 0, 100)
 	require.NoError(t, err)
@@ -95,7 +95,7 @@ func TestAsyncSchedulerPersistsAndRestores(t *testing.T) {
 		checkpoint := manager.LastAcked()
 		return checkpoint != nil && checkpoint.TimeTick == 50 && !manager.HasPendingWork()
 	}, 5*time.Second, time.Millisecond)
-	recovered := newTransformTestManager(t, store, 1<<30)
+	recovered := newTestManager(t, store, 1<<30)
 	require.NoError(t, recovered.Restore(ctx))
 	entries, err := recovered.ReadTransformEntries(ctx, "v1", 0, 50)
 	require.NoError(t, err)
