@@ -1851,10 +1851,14 @@ func (node *QueryNode) DropIndex(ctx context.Context, req *querypb.DropIndexRequ
 
 	segment := segments[0]
 	indexIDs := req.GetIndexIDs()
+	// A request can partially succeed. Publish the indexes already removed even
+	// if a subsequent deletion fails, so the coordinator can reconcile the rest.
+	defer node.distDeltaTracker.markSegmentUpsert(req.GetSegmentID())
 	for _, indexID := range indexIDs {
-		segment.DropIndex(ctx, indexID)
+		if err := segment.DropIndex(ctx, indexID); err != nil {
+			return merr.Status(err), nil
+		}
 	}
-	node.distDeltaTracker.markSegmentUpsert(req.GetSegmentID())
 
 	return merr.Success(), nil
 }
