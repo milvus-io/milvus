@@ -460,6 +460,70 @@ func (s *SchedulerSuite) TestExecRecordsReadTaskExecuteDuration() {
 	s.Equal(uint64(1), readTaskExecuteDurationCount(metrics.CancelLabel))
 }
 
+// TestPruneCancelledBeforeExec verifies that a prunable task is asked to drop
+// its cancelled members at dequeue and again right before execution, that a
+// group with no survivor is never executed, that the survivor is what gets
+// executed, and that the waiting counters are debited with the NQ they were
+// credited with, not with the pruned NQ.
+func (s *SchedulerSuite) TestPruneCancelledBeforeExec() {
+	paramtable.Init()
+	scheduler := newScheduler(newFIFOPolicy())
+	scheduler.Start()
+	defer scheduler.Stop()
+
+	s.Run("no survivor is not executed", func() {
+		executed := false
+		task := newMockTask(mockTaskConfig{
+			nq:          5,
+			executeCost: time.Millisecond,
+			execution: func(ctx context.Context) error {
+				executed = true
+				return nil
+			},
+		})
+		mock := task.(*MockTask)
+		mock.prune = func() Task {
+			mock.Done(context.Canceled)
+			return nil
+		}
+		s.NoError(scheduler.Add(task))
+		s.ErrorIs(mock.Wait(), context.Canceled)
+		s.False(executed)
+		s.Eventually(func() bool {
+			return scheduler.GetWaitingTaskTotal() == 0 && scheduler.GetWaitingTaskTotalNQ() == 0
+		}, time.Second, 10*time.Millisecond, "counters must return to zero after the pruned NQ is debited")
+	})
+
+	s.Run("survivor replaces the dequeued task", func() {
+		survivor := newMockTask(mockTaskConfig{
+			nq:          2,
+			executeCost: time.Millisecond,
+			execution: func(ctx context.Context) error {
+				return nil
+			},
+		})
+		group := newMockTask(mockTaskConfig{
+			nq:          5,
+			executeCost: time.Millisecond,
+			execution: func(ctx context.Context) error {
+				s.Fail("the pruned owner must not execute")
+				return nil
+			},
+		})
+		group.(*MockTask).prune = func() Task {
+			// the owner was cancelled: it is told so, the survivor goes on
+			group.(*MockTask).Done(context.Canceled)
+			return survivor
+		}
+		s.NoError(scheduler.Add(group))
+		s.ErrorIs(group.(*MockTask).Wait(), context.Canceled)
+		s.NoError(survivor.(*MockTask).Wait())
+		s.Eventually(func() bool {
+			return scheduler.GetWaitingTaskTotal() == 0 && scheduler.GetWaitingTaskTotalNQ() == 0
+		}, time.Second, 10*time.Millisecond, "the group was credited with 5 and must be debited with 5")
+	})
+}
+
 func (s *SchedulerSuite) TestQueuedTaskTimingHelpers() {
 	now := time.Now()
 	invalid := &queuedTask{}

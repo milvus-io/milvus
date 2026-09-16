@@ -21,6 +21,8 @@ type mockTaskConfig struct {
 	username    string
 	executeCost time.Duration
 	execution   func(ctx context.Context) error
+	// prune, when set, replaces the default PruneCancelled behaviour.
+	prune func() Task
 }
 
 func newMockTask(c mockTaskConfig) Task {
@@ -42,6 +44,7 @@ func newMockTask(c mockTaskConfig) Task {
 		minNQ:       c.nq,
 		username:    c.username,
 		execution:   c.execution,
+		prune:       c.prune,
 		tr:          timerecord.NewTimeRecorderWithTrace(c.ctx, "searchTask"),
 	}
 }
@@ -55,7 +58,22 @@ type MockTask struct {
 	minNQ       int64
 	username    string
 	execution   func(ctx context.Context) error
+	prune       func() Task
 	tr          *timerecord.TimeRecorder
+}
+
+// PruneCancelled implements PrunableTask. Without a custom prune function it
+// behaves like a standalone task: dropped with its own ctx error when
+// cancelled, kept otherwise.
+func (t *MockTask) PruneCancelled() Task {
+	if t.prune != nil {
+		return t.prune()
+	}
+	if err := t.ctx.Err(); err != nil {
+		t.Done(err)
+		return nil
+	}
+	return t
 }
 
 // QueryTypeMetricLabel Return Metric label for metric label.

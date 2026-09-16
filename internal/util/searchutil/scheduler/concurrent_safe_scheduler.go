@@ -285,10 +285,12 @@ func (s *scheduler) exec() {
 			mlog.Info(context.TODO(), "scheduler execChan closed, worker exit")
 			return
 		}
-		// Skip this task if task is canceled.
-		if err := t.Context().Err(); err != nil {
-			mlog.Warn(context.TODO(), "task canceled before executing", mlog.Err(err))
-			t.Done(err)
+		// Drop the task, or the cancelled members of a merged group, if the
+		// cancellation happened between dequeue and execution. Members that
+		// are dropped here have already been completed with their own
+		// context error; the survivors keep running.
+		if t = pruneCancelled(t); t == nil {
+			mlog.Warn(context.TODO(), "task canceled before executing")
 			continue
 		}
 		if err := t.PreExecute(); err != nil {
@@ -349,13 +351,20 @@ func (s *scheduler) setupExecListener(lastWaitingTask *queuedTask, now time.Time
 			if !lastWaitingTask.valid() {
 				break
 			}
-			if err := lastWaitingTask.Context().Err(); err != nil {
-				s.updateWaitingTaskCounter(-1, -lastWaitingTask.NQ())
+			// Remember the NQ the counters were credited with before any
+			// member is pruned away.
+			lastWaitingTask.accountedNQ = lastWaitingTask.NQ()
+			// A cancelled task is dropped; a merged group loses only its
+			// cancelled members and goes on with the rest. Dropped members
+			// are completed with their own context error.
+			survivor := pruneCancelled(lastWaitingTask.Task)
+			if survivor == nil {
+				s.updateWaitingTaskCounter(-1, -lastWaitingTask.countedNQ())
 				s.recordReadTaskQueueDuration(lastWaitingTask, now, readTaskQueueOutcomeExpired)
-				lastWaitingTask.Done(err)
 				lastWaitingTask = nil
 				continue
 			}
+			lastWaitingTask.Task = survivor
 			s.recordReadTaskQueueDuration(lastWaitingTask, now, readTaskQueueOutcomeScheduled)
 			break
 		}
@@ -363,7 +372,7 @@ func (s *scheduler) setupExecListener(lastWaitingTask *queuedTask, now time.Time
 	if lastWaitingTask.valid() {
 		// Try to sent task to execChan if there is a task ready to run.
 		execChan = s.execChan
-		nq = lastWaitingTask.NQ()
+		nq = lastWaitingTask.countedNQ()
 	}
 
 	return lastWaitingTask, nq, execChan
@@ -393,7 +402,7 @@ func (s *scheduler) clearQueuedTasks(filter TaskFilter, reason string, task *que
 		if !removedTask.valid() {
 			continue
 		}
-		nq := removedTask.NQ()
+		nq := removedTask.countedNQ()
 		result.QueuedCleared++
 		result.QueuedNQCleared += nq
 		s.updateWaitingTaskCounter(-1, -nq)
