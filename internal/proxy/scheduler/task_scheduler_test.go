@@ -521,6 +521,32 @@ func TestBaseTaskQueue_EnqueueFastFailBeforeAlloc(t *testing.T) {
 		"Enqueue must not reach the TSO allocator when the queue is already full")
 }
 
+// TestBaseTaskQueue_EnqueueCancelledContextBeforeAlloc verifies that a task
+// whose request ctx is already cancelled is rejected with the ctx error before
+// any timestamp or id allocation, and never occupies a queue slot.
+func TestBaseTaskQueue_EnqueueCancelledContextBeforeAlloc(t *testing.T) {
+	blocking := &blockingTsoAllocator{}
+	queue := newBaseTaskQueue(blocking)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- queue.Enqueue(newMockTask(ctx))
+	}()
+
+	select {
+	case err := <-done:
+		assert.ErrorIs(t, err, context.Canceled)
+	case <-time.After(2 * time.Second):
+		t.Fatalf("Enqueue did not reject the cancelled task; reached blocking TSO allocator")
+	}
+	assert.Equal(t, int64(0), blocking.calls.Load(),
+		"Enqueue must not allocate a timestamp for a cancelled task")
+	assert.Equal(t, 0, queue.unissuedTasks.Len())
+}
+
 // TestBaseTaskQueue_NotifierCoalesces verifies that utBufChan is an edge-
 // triggered notifier: many enqueues produce at most one pending token.
 func TestBaseTaskQueue_NotifierCoalesces(t *testing.T) {

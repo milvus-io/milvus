@@ -323,6 +323,15 @@ var (
 	ErrOperationNotSupported = newMilvusError("unsupported operation", 3000, false)
 
 	ErrOldSessionExists = newMilvusError("old session exists", 3001, false)
+
+	// Request lifecycle: an operator cancelled an in-flight request through the
+	// CancelRequests API. Deliberately distinct from CanceledCode (10000), which
+	// merr synthesizes from context.Canceled and which therefore also covers a
+	// client that simply went away, and from ErrSegcoreFollyCancel (2038), which
+	// is a QueryNode-internal signal. Non-retriable: the request was stopped on
+	// purpose, so an SDK must not re-issue it.
+	ErrRequestCancelled = newMilvusError("request cancelled", 3002, false)
+	ErrRequestNotFound  = newMilvusError("request not found", 3003, false, WithErrorType(InputError))
 )
 
 type errorOption func(*milvusError)

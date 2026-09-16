@@ -216,6 +216,13 @@ func (queue *BaseTaskQueue) Enqueue(t taskmodel.Task) error {
 		return merr.WrapErrTooManyRequests(int32(queue.GetMaxTaskNum()))
 	}
 
+	// A task whose request is already cancelled or timed out must not take a
+	// queue slot or a timestamp: return its ctx error now, the same way the
+	// QueryNode scheduler rejects a cancelled task before enqueue.
+	if err := t.TraceCtx().Err(); err != nil {
+		return err
+	}
+
 	var ts taskmodel.Timestamp
 	var id taskmodel.UniqueID
 	if t.CanSkipAllocTimestamp() {

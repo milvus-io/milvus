@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/metacache"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
@@ -131,6 +132,30 @@ func TestQueryTaskPreExecuteSnapshotFences(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestQueryShardCancelledContextKeepsShardLeaderCache: a QueryNode error
+// observed after the request's own ctx is done is a consequence of the
+// cancellation, so the shard leader cache must stay intact. The mock manager
+// has no expectation for InvalidateShardLeaderCache; a call would fail the test.
+func TestQueryShardCancelledContextKeepsShardLeaderCache(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	qn := mocks.NewMockQueryNodeClient(t)
+	qn.EXPECT().Query(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, req *querypb.QueryRequest, opts ...grpc.CallOption) (*internalpb.RetrieveResults, error) {
+			cancel()
+			return nil, context.Canceled
+		})
+
+	task := &QueryTask{
+		shardclientMgr:     shardclient.NewMockShardClientManager(t),
+		RetrieveRequest:    &internalpb.RetrieveRequest{Base: &commonpb.MsgBase{}, ConsistencyLevel: commonpb.ConsistencyLevel_Strong},
+		resultBuf:          typeutil.NewConcurrentSet[*internalpb.RetrieveResults](),
+		actualChannelsMvcc: typeutil.NewConcurrentMap[string, uint64](),
+	}
+
+	err := task.queryShard(ctx, 1, qn, "ch-cancelled")
+	require.ErrorIs(t, err, context.Canceled)
 }
 
 func TestQueryShardCollectsOnlySuccessfulSnapshots(t *testing.T) {
