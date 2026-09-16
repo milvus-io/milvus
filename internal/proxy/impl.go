@@ -2603,6 +2603,11 @@ func GetCollectionRateSubLabel(req any) string {
 
 // Search searches the most similar records of requests.
 func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+	// Register the request before anything else so that it is listable and
+	// cancellable for its whole lifetime, including the retries below.
+	ctx, entry := node.registerRequest(ctx, searchRequestInfo(request))
+	defer node.unregisterRequest(entry)
+
 	var err error
 	rsp := &milvuspb.SearchResults{
 		Status: merr.Success(),
@@ -2659,6 +2664,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 	if err2 != nil {
 		rsp.Status = merr.Status(err2)
 	}
+	rsp.Status = statusIfCancelled(ctx, rsp.Status)
 	return rsp, nil
 }
 
@@ -2862,6 +2868,9 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 }
 
 func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSearchRequest) (*milvuspb.SearchResults, error) {
+	ctx, entry := node.registerRequest(ctx, hybridSearchRequestInfo(request))
+	defer node.unregisterRequest(entry)
+
 	var err error
 	rsp := &milvuspb.SearchResults{
 		Status: merr.Success(),
@@ -2899,6 +2908,7 @@ func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	if err2 != nil {
 		rsp.Status = merr.Status(err2)
 	}
+	rsp.Status = statusIfCancelled(ctx, rsp.Status)
 	return rsp, nil
 }
 
@@ -3634,6 +3644,11 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 
 // Query get the records by primary keys.
 func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+	// Register before the retry loop so that the request is listable and
+	// cancelable while it waits for an automatic load or a view refresh.
+	ctx, entry := node.registerRequest(ctx, queryRequestInfo(request))
+	defer node.unregisterRequest(entry)
+
 	subLabel := GetCollectionRateSubLabel(request)
 	metrics.GetStats(ctx).
 		SetNodeID(paramtable.GetNodeID()).
@@ -3656,7 +3671,7 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		return false, merr.CheckRPCCall(result, err)
 	})
 	if err != nil {
-		return &milvuspb.QueryResults{Status: merr.Status(err)}, nil
+		return &milvuspb.QueryResults{Status: statusIfCancelled(ctx, merr.Status(err))}, nil
 	}
 	return result, nil
 }
