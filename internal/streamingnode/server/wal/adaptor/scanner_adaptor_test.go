@@ -65,7 +65,7 @@ func TestScannerAdaptorReadError(t *testing.T) {
 			MessageFilter: nil,
 		},
 		metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics(),
-		func() {})
+		func() {}, scannerConfig{})
 	// wait for timetick inspector first round
 	<-sig1.CloseCh()
 	// wait for scanner backoff 2 rounds
@@ -94,11 +94,14 @@ func TestScannerAdaptorStopsOnCorruptedChunk(t *testing.T) {
 	innerScanner.EXPECT().Close().Return(nil).Once()
 
 	l := mock_walimpls.NewMockWALImpls(t)
-	l.EXPECT().Channel().Return(types.PChannelInfo{})
+	l.EXPECT().Channel().Return(types.PChannelInfo{AccessMode: types.AccessModeRO})
 	l.EXPECT().Read(mock.Anything, mock.Anything).Return(innerScanner, nil).Once()
 
-	s := newRecoveryScannerAdaptor(l, walimplstest.NewTestMessageID(0),
-		metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics(), false)
+	s := newScannerAdaptor("scanner", l,
+		wal.ReadOption{DeliverPolicy: options.DeliverPolicyStartFrom(walimplstest.NewTestMessageID(0)), IgnorePauseConsumption: true},
+		metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics(), func() {}, scannerConfig{})
+
+	t.Cleanup(func() { _ = s.Close() })
 
 	select {
 	case <-s.Done():

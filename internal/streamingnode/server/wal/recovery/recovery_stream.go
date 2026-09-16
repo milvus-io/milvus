@@ -3,17 +3,17 @@ package recovery
 import (
 	"context"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // runBoundedRecovery replays the persisted checkpoint through the recovery
 // barrier with complete message semantics and returns the recovered write path.
+// Only this startup observation is bounded; the same stream remains open for live replay.
 func (r *recoveryStorageImpl) runBoundedRecovery(
 	ctx context.Context,
 	recoveryStreamBuilder RecoveryStreamBuilder,
@@ -33,30 +33,32 @@ func (r *recoveryStorageImpl) runBoundedRecovery(
 	r.Logger().Info(context.TODO(), "recover from wal stream...")
 	rs := recoveryStreamBuilder.Build(BuildRecoveryStreamParam{
 		StartCheckpoint: r.checkpoint.MessageID,
-		EndTimeTick:     lastTimeTickMessage.TimeTick(),
+		RecoveryBarrier: lastTimeTickMessage,
 	})
+	r.recoveryStream = rs
 	defer func() {
-		rs.Close()
 		if err != nil {
 			r.Logger().Warn(context.TODO(), "recovery from wal stream failed", mlog.Err(err))
-			return
 		}
 	}()
 L:
 	for {
 		select {
 		case <-ctx.Done():
-			return nil, errors.Wrap(ctx.Err(), "failed to recover from wal")
+			return nil, merr.Wrap(ctx.Err(), "failed to recover from wal")
 		case msg, ok := <-rs.Chan():
 			if !ok {
-				// The recovery stream is reach the end, we can stop the recovery.
-				break L
+				if err := rs.Error(); err != nil {
+					return nil, merr.Wrap(err, "failed to read the recovery stream")
+				}
+				return nil, merr.WrapErrServiceUnavailableMsg("recovery stream ended before the startup barrier")
 			}
 			r.observeMessage(ctx, msg)
+			if msg.MessageType() == message.MessageTypeRecoveryBarrier &&
+				msg.TimeTick() == lastTimeTickMessage.TimeTick() && msg.MessageID().EQ(lastTimeTickMessage.MessageID()) {
+				break L
+			}
 		}
-	}
-	if rs.Error() != nil {
-		return nil, errors.Wrap(rs.Error(), "failed to read the recovery info from wal")
 	}
 	snapshot = r.buildInitialRecoverySnapshot()
 	snapshot.TxnBuffer = rs.TxnBuffer()

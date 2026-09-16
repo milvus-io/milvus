@@ -14,13 +14,14 @@ Persists WAL consumer state to the catalog (etcd) and object storage. The author
 
 1. RW WAL opening appends a RecoveryBarrier to fence the old writer.
 2. **Metadata recovery** (`recoverRecoveryInfoFromMeta`): Claim the checkpoint with the assignment term, load component metadata and restore WALSummary; rebuild outstanding transform windows.
-3. **Bounded recovery** (`runBoundedRecovery`): Observe the WAL from the checkpoint through the barrier and build the write-path snapshot and uncommitted `TxnBuffer`. Asynchronous persistence need not have finished.
-4. Start live observation, AckTracker stall checks, independent Summary backlog checks, and catalog publication. Component snapshots precede checkpoint publication and WAL truncation. Poisoned messages remain incomplete and block the checkpoint.
+3. **Startup recovery** (`runBoundedRecovery`): Use the ordinary scanner to observe the WAL from the checkpoint through this open's exact barrier. Capture the write-path snapshot and an independent copy of unfinished transaction builders; pause further raw input until write-path initialization finishes. Asynchronous persistence need not have finished.
+4. Resume the same scanner exclusively after the barrier through the opener-provided WAB, retaining its ordering and transaction state. An empty WAB needs no additional persisted TimeTick to switch; eviction uses durable catchup without replacing that state. Run AckTracker stall checks, independent Summary backlog checks, and catalog publication. Component snapshots precede checkpoint publication and WAL truncation. Poisoned messages remain incomplete and block the checkpoint.
 
-Control may persist its latest state ahead of the global checkpoint, like a Segment snapshot. Its `control_checkpoint_time_tick` suppresses already covered control effects without skipping data replay. External effects still require idempotent retries when a crash precedes metadata publication. The bounded/live scanner handoff remains an open point documented in the architecture design.
+Control may persist its latest state ahead of the global checkpoint, like a Segment snapshot. Its `control_checkpoint_time_tick` suppresses already covered control effects without skipping data replay. External effects still require idempotent retries when a crash precedes metadata publication. Startup failure and normal shutdown close the retained stream, including when it is paused at the barrier.
 
 ## Key Packages
 
+- `internal/streamingnode/server/wal/adaptor/` — shared scanner, startup boundary and durable WAL/WAB source switching
 - `internal/streamingnode/server/wal/recovery/` — recovery orchestration, BroadcastAck, tail control and checkpoint publication
 - `internal/streamingnode/server/wal/utility/` — checkpoint and recovery snapshot types
 - `internal/streamingnode/server/wal/messageack/` — message completion and stall tracking
