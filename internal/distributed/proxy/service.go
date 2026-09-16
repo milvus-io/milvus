@@ -1359,6 +1359,29 @@ func (s *Server) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearRe
 	return s.proxy.ClearReadTaskQueue(ctx, req)
 }
 
+// ListRunningRequests is the public, cluster-wide call: this proxy asks the
+// coordinator, which fans out to every proxy.
+func (s *Server) ListRunningRequests(ctx context.Context, req *milvuspb.ListRunningRequestsRequest) (*milvuspb.ListRunningRequestsResponse, error) {
+	return s.proxy.ListRunningRequests(ctx, req)
+}
+
+// CancelRequests is the public, cluster-wide call.
+func (s *Server) CancelRequests(ctx context.Context, req *milvuspb.CancelRequestsRequest) (*milvuspb.CancelRequestsResponse, error) {
+	return s.proxy.CancelRequests(ctx, req)
+}
+
+// ListLocalRunningRequests is the internal call the coordinator makes: it
+// answers for this proxy alone.
+func (s *Server) ListLocalRunningRequests(ctx context.Context, req *milvuspb.ListRunningRequestsRequest) (*milvuspb.ListRunningRequestsResponse, error) {
+	return s.proxy.ListLocalRunningRequests(ctx, req)
+}
+
+// CancelLocalRequests is the internal call the coordinator makes: it cancels
+// on this proxy alone.
+func (s *Server) CancelLocalRequests(ctx context.Context, req *milvuspb.CancelRequestsRequest) (*milvuspb.CancelRequestsResponse, error) {
+	return s.proxy.CancelLocalRequests(ctx, req)
+}
+
 // AddFileResource add file resource
 func (s *Server) AddFileResource(ctx context.Context, req *milvuspb.AddFileResourceRequest) (*commonpb.Status, error) {
 	return s.proxy.AddFileResource(ctx, req)

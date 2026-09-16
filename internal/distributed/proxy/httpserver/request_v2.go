@@ -1301,6 +1301,20 @@ func (req *GetSegmentsInfoReq) GetSegmentIDs() []int64 {
 	return req.SegmentIDs
 }
 
+type ListRunningRequestsReq struct {
+	DbName         string `json:"dbName"`
+	CollectionName string `json:"collectionName"`
+	User           string `json:"user"`
+	MinElapsedMs   int64  `json:"minElapsedMs"`
+}
+
+func (req *ListRunningRequestsReq) GetDbName() string { return req.DbName }
+
+type CancelRequestsReq struct {
+	RequestIDs []int64 `json:"requestIds" binding:"required"`
+	Reason     string  `json:"reason"`
+}
+
 type GetQuotaMetricsReq struct{}
 
 type RunAnalyzerReq struct {

@@ -2961,6 +2961,66 @@ func (c *Core) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearRead
 	return resp, nil
 }
 
+// ListRunningRequests returns the requests every proxy is currently serving.
+//
+// The coordinator owns the fan-out because a client talks to one proxy but
+// asks about the cluster. Per-proxy results travel with the answer so that a
+// proxy that could not be reached is visible rather than silently missing.
+func (c *Core) ListRunningRequests(ctx context.Context, req *milvuspb.ListRunningRequestsRequest) (*milvuspb.ListRunningRequestsResponse, error) {
+	resp := &milvuspb.ListRunningRequestsResponse{Status: merr.Success()}
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+
+	requests, nodeResults, err := c.proxyClientManager.ListRunningRequests(ctx, req)
+	resp.Requests = requests
+	resp.NodeResults = nodeResults
+	if err != nil {
+		resp.Status = merr.Status(err)
+	}
+
+	mlog.Info(ctx, "listed running requests",
+		mlog.String("dbName", req.GetDbName()),
+		mlog.String("collectionName", req.GetCollectionName()),
+		mlog.String("user", req.GetUser()),
+		mlog.Int64("minElapsedMs", req.GetMinElapsedMs()),
+		mlog.Int("requests", len(requests)),
+		mlog.Int("nodes", len(nodeResults)),
+		mlog.Err(err))
+	return resp, nil
+}
+
+// CancelRequests cancels the given requests wherever they are running.
+//
+// The ids are broadcast to every proxy: a request id does not carry the proxy
+// that serves it, and the proxies are few. An id nobody claimed comes back in
+// NotFound.
+func (c *Core) CancelRequests(ctx context.Context, req *milvuspb.CancelRequestsRequest) (*milvuspb.CancelRequestsResponse, error) {
+	resp := &milvuspb.CancelRequestsResponse{Status: merr.Success()}
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+
+	cancelled, notFound, nodeResults, err := c.proxyClientManager.CancelRequests(ctx, req)
+	resp.Cancelled = cancelled
+	resp.NotFound = notFound
+	resp.NodeResults = nodeResults
+	if err != nil {
+		resp.Status = merr.Status(err)
+	}
+
+	mlog.Info(ctx, "cancelled running requests",
+		mlog.Int64s("requestIDs", req.GetRequestIds()),
+		mlog.String("reason", req.GetReason()),
+		mlog.Int("cancelled", len(cancelled)),
+		mlog.Int("notFound", len(notFound)),
+		mlog.Int("nodes", len(nodeResults)),
+		mlog.Err(err))
+	return resp, nil
+}
+
 func (c *Core) CheckHealth(ctx context.Context, in *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
 		return &milvuspb.CheckHealthResponse{
