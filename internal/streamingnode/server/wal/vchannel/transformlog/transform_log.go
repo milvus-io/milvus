@@ -161,9 +161,9 @@ func (t *TransformLog) MaterializedTimeTick() uint64 {
 // ObserveMessage observes one WAL message of this vchannel. Delete messages
 // are appended to the in-memory materialization window immediately and may
 // schedule a materialization task; the summary decides persistence entirely on
-// its own, so materialization never waits for a flush event. Barrier messages
-// (flush/manual flush/drop/truncate, see ClassifyTransformLogMessage) are
-// appended as payload-free window entries so the materialization frontier can
+// its own, so materialization never waits for a flush event. Pure Inserts
+// are ignored; all other messages, including routed pchannel broadcasts,
+// are appended as payload-free barrier entries so the materialization frontier can
 // advance past them — a flush boundary has no delete data of its own, but the
 // frontier must be able to reach it once every delete record before it has
 // been emitted as L0 output.
@@ -175,33 +175,19 @@ func (t *TransformLog) ObserveMessage(retained message.RetainedImmutableMessage)
 		return
 	}
 	msg := retained.Message()
-	kind := messageutil.ClassifyTransformLogMessage(msg)
-	var entry *streamingpb.TransformLogEntry
-	switch kind {
-	case messageutil.TransformLogKindDelete:
-		entry = messageutil.BuildTransformLogEntry(msg, messageutil.TransformEntryOption{})
-		if entry == nil {
-			return
-		}
-	case messageutil.TransformLogKindBarrier:
-		// A payload-free barrier only marks a data boundary: it carries no
-		// delete blocks but still bounds the frontier. Only the owning
-		// vchannel's barriers bound its frontier; pchannel-level broadcasts
-		// carry no per-vchannel data boundary.
-		if msg.VChannel() != t.vchannel {
-			return
-		}
-		entry = &streamingpb.TransformLogEntry{TimeTick: msg.TimeTick()}
-	default:
+	if msg.VChannel() != t.vchannel && msg.VChannel() != "" && !msg.IsPChannelLevel() {
 		return
 	}
-	timetick := entry.GetTimeTick()
-	if timetick <= t.materializedTimeTick || timetick <= t.loadedThrough {
-		// Already committed, or already loaded into the window by recovery
-		// (replay re-observes the recovered backlog).
+	entry := messageutil.BuildTransformLogEntry(msg, messageutil.TransformEntryOption{})
+	if entry == nil {
 		return
 	}
 	t.mu.Lock()
+	if entry.GetTimeTick() <= t.materializedTimeTick || entry.GetTimeTick() <= t.loadedThrough {
+		// Already committed, or loaded from Summary before WAL replay.
+		t.mu.Unlock()
+		return
+	}
 	t.pending = append(t.pending, entry)
 	task := t.maybeScheduleMaterializeLocked(true)
 	t.mu.Unlock()
@@ -249,6 +235,12 @@ func (t *TransformLog) materializeTargetLocked() uint64 {
 	target := t.pending[len(t.pending)-1].GetTimeTick()
 	if target > t.materializeUpperBound {
 		target = t.materializeUpperBound
+	}
+	// A bound between the committed frontier and the first pending entry
+	// permits no progress. Wait for the bound to advance instead of creating
+	// an endless chain of empty continuation tasks.
+	if t.pending[0].GetTimeTick() > target {
+		return 0
 	}
 	return target
 }

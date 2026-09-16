@@ -381,6 +381,11 @@ with WALSummary consists of reading transform entries when needed, rebuilding
 its materialization window from summary data during recovery, and supplying a
 GC position after its materialization metadata is durable.
 
+The transform section contains Delete payloads only. TransformLog
+BarrierEntries are runtime progress boundaries and are not staged or written
+into Summary chunks; covered-position metadata can still advance on messages
+that carry no records.
+
 The existing read interface is
 `Manager.ReadTransformEntries(vchannel, materializedTimeTick, +inf)`. The
 committed consumer frontier is carried by

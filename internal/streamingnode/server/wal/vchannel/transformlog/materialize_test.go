@@ -318,7 +318,7 @@ func TestTransformLogObserveSkipsRecordsAtOrBelowLoadedThrough(t *testing.T) {
 	assert.Empty(t, log.pending)
 }
 
-func TestTransformLogObserveIgnoresNonDelete(t *testing.T) {
+func TestTransformLogObserveIgnoresInsert(t *testing.T) {
 	log, scheduler, _ := newTestTransformLog(t, nil, 0)
 	insert := message.NewInsertMessageBuilderV1().
 		WithVChannel("v1").
@@ -397,14 +397,13 @@ func TestTransformLogBarrierBelowUpperBoundPinned(t *testing.T) {
 	require.Len(t, scheduler.tasks, 1)
 	require.NoError(t, scheduler.tasks[0].Execute(context.Background()))
 	assert.Equal(t, uint64(100), log.MaterializedTimeTick())
-	// Raising the bound past the barrier lets the continuation chain reach
-	// it (the pinned task's own continuation re-reads the bound).
-	log.SetMaterializeUpperBound(300)
+	// Nothing is eligible below 150: do not schedule an empty continuation.
+	require.Len(t, scheduler.tasks, 1)
+	require.False(t, log.HasPendingMaterializeTask())
+	// Advancing the bound wakes the queued barrier without another message.
+	require.True(t, log.SetMaterializeUpperBound(300))
 	require.Len(t, scheduler.tasks, 2)
 	require.NoError(t, scheduler.tasks[1].Execute(context.Background()))
-	assert.Equal(t, uint64(100), log.MaterializedTimeTick())
-	require.Len(t, scheduler.tasks, 3)
-	require.NoError(t, scheduler.tasks[2].Execute(context.Background()))
 	assert.Equal(t, uint64(200), log.MaterializedTimeTick())
 	assert.Empty(t, log.pending)
 }
@@ -462,4 +461,61 @@ func TestTransformLogUpperBoundRaiseAfterCommitSchedulesSuccessor(t *testing.T) 
 	require.NoError(t, scheduler.tasks[1].Execute(context.Background()))
 	require.NoError(t, scheduler.tasks[2].Execute(context.Background()))
 	assert.Equal(t, uint64(300), log.MaterializedTimeTick())
+}
+
+func TestTransformLogPChannelBarriersAdvanceWithoutL0(t *testing.T) {
+	broadcast := message.NewFlushAllMessageBuilderV2().
+		WithHeader(&message.FlushAllMessageHeader{}).WithBody(&message.FlushAllMessageBody{}).
+		WithClusterLevelBroadcast(message.ClusterChannels{Channels: []string{"p1"}, ControlChannel: "p1_vcchan"}).
+		MustBuildBroadcast()
+	broadcast.WithBroadcastID(1)
+	for name, mutable := range map[string]message.MutableMessage{
+		"persisted timetick": message.NewTimeTickMessageBuilderV1().WithVChannel("").
+			WithHeader(&message.TimeTickMessageHeader{}).WithBody(&msgpb.TimeTickMsg{}).MustBuildMutable(),
+		"recovery barrier": message.NewRecoveryBarrierMessageBuilderV2().WithVChannel("").
+			WithHeader(&message.RecoveryBarrierMessageHeader{}).WithBody(&message.RecoveryBarrierMessageBody{}).MustBuildMutable(),
+		"cluster broadcast": broadcast.SplitIntoMutableMessage()[0],
+	} {
+		t.Run(name, func(t *testing.T) {
+			log, scheduler, rec := newTestTransformLog(t, nil, 0)
+			log.SetMaterializeUpperBound(100)
+			msg := mutable.WithTimeTick(200).WithLastConfirmed(walimplstest.NewTestMessageID(199)).
+				IntoImmutableMessage(walimplstest.NewTestMessageID(200))
+			finalized := false
+			owner := message.NewOwnedImmutableMessage(msg, func() { finalized = true })
+			retained := owner.Clone()
+			log.ObserveMessage(retained)
+			retained.Release()
+			owner.Release()
+			require.True(t, finalized, "barriers must not retain WAL messages")
+			require.Empty(t, scheduler.tasks, "an L1-blocked barrier must wait without spinning")
+			require.Zero(t, log.MaterializedTimeTick())
+			require.True(t, log.SetMaterializeUpperBound(200))
+			require.Len(t, scheduler.tasks, 1)
+			require.NoError(t, scheduler.tasks[0].Execute(context.Background()))
+			require.Equal(t, uint64(200), log.MaterializedTimeTick())
+			require.Empty(t, rec.calls(), "a barrier advances metadata without producing L0")
+		})
+	}
+}
+
+func TestTransformLogConcurrentBarrierObservationAndMaterialization(t *testing.T) {
+	log := New(Config{VChannel: "v1"})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 1000; i++ {
+			_, err := log.materialize(context.Background(), materializeOption{})
+			assert.NoError(t, err)
+		}
+	}()
+	for tt := uint64(1); tt <= 1000; tt++ {
+		observeBarrier(t, log, tt)
+	}
+	wg.Wait()
+	_, err := log.materialize(context.Background(), materializeOption{})
+	require.NoError(t, err)
+	require.Equal(t, uint64(1000), log.MaterializedTimeTick())
+	require.Empty(t, log.pending)
 }
