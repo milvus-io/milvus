@@ -247,7 +247,7 @@ func (s *indexTaskSuite) TestCreateTaskOnWorker() {
 
 		it.CreateTaskOnWorker(1, cluster)
 		// The dispatch ships exactly what the scheduler placed the task on.
-		s.Equal(it.GetTaskResource(), placed)
+		s.Equal(taskPrice(it.GetTaskResource()), placed)
 		s.Equal(indexpb.JobState_JobStateInProgress, indexpb.JobState(it.IndexState))
 	})
 }

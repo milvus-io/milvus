@@ -85,7 +85,7 @@ func (at *analyzeTask) GetTaskState() taskcommon.State {
 
 // GetTaskResource prices the analyze by the raw vectors it trains on:
 // rows x dim x element size across every input segment.
-func (at *analyzeTask) GetTaskResource() taskcommon.Resource {
+func (at *analyzeTask) GetTaskResource() (taskcommon.Resource, bool) {
 	return at.resource.get(func() (taskcommon.Resource, bool) {
 		// newAnalyzeTask snapshots the schema, and the snapshot is empty when
 		// the collection was not cached yet. Resolve it again here, or a task
@@ -271,7 +271,7 @@ func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 	req.MaxClusterSizeRatio = Params.DataCoordCfg.ClusteringCompactionMaxClusterSizeRatio.GetAsFloat()
 	req.MaxClusterSize = Params.DataCoordCfg.ClusteringCompactionMaxClusterSize.GetAsSize()
 	req.TaskSlot = Params.DataCoordCfg.AnalyzeTaskSlotUsage.GetAsInt64()
-	resource := at.GetTaskResource()
+	resource, _ := at.GetTaskResource()
 
 	WrapPluginContext(task.CollectionID, at.schema.GetProperties(), req)
 

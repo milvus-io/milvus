@@ -54,7 +54,7 @@ func (t *mixCompactionTask) GetTaskState() taskcommon.State {
 // GetTaskResource prices a sort compaction by the segment it sorts (it reads
 // and rewrites all of it) and a mix compaction by its streamed input, bounded
 // by one output segment.
-func (t *mixCompactionTask) GetTaskResource() taskcommon.Resource {
+func (t *mixCompactionTask) GetTaskResource() (taskcommon.Resource, bool) {
 	return t.resource.get(func() (taskcommon.Resource, bool) {
 		taskProto := t.GetTaskProto()
 		if taskProto.GetType() != datapb.CompactionType_SortCompaction {
@@ -121,7 +121,7 @@ func (t *mixCompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Clu
 		return
 	}
 
-	resource := t.GetTaskResource()
+	resource, _ := t.GetTaskResource()
 	err = cluster.CreateCompaction(nodeID, plan, t.GetTaskProto().GetCollectionID(), resource)
 	if err != nil {
 		// Compaction tasks may be refused by DataNode because of slot limit. In this case, the node id is reset

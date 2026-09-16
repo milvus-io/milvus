@@ -283,7 +283,7 @@ func TestGlobalScheduler_TestSchedule(t *testing.T) {
 		task.EXPECT().GetTaskType().Return(taskcommon.Compaction).Maybe()
 		task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return().Maybe()
 		task.EXPECT().GetTaskSlot().Return(1).Maybe()
-		task.EXPECT().GetTaskResource().Return(taskcommon.Resource{}).Maybe()
+		task.EXPECT().GetTaskResource().Return(taskcommon.Resource{}, true).Maybe()
 		return task
 	}
 
@@ -369,7 +369,7 @@ func TestGlobalScheduler_TestSchedule(t *testing.T) {
 		task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return().Maybe()
 		task.EXPECT().GetTaskState().Return(taskcommon.Init).Maybe()
 		task.EXPECT().GetTaskSlot().Return(int64(0)).Once()
-		task.EXPECT().GetTaskResource().Return(taskcommon.Resource{}).Maybe()
+		task.EXPECT().GetTaskResource().Return(taskcommon.Resource{}, true).Maybe()
 
 		var dispatched atomic.Bool
 		task.EXPECT().CreateTaskOnWorker(mock.MatchedBy(func(nodeID int64) bool {
@@ -485,7 +485,7 @@ func TestGlobalScheduler_FailedTaskBacksOffBeforeRedispatch(t *testing.T) {
 	task.EXPECT().GetTaskType().Return(taskcommon.Index).Maybe()
 	task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return().Maybe()
 	task.EXPECT().GetTaskSlot().Return(1).Maybe()
-	task.EXPECT().GetTaskResource().Return(taskcommon.Resource{}).Maybe()
+	task.EXPECT().GetTaskResource().Return(taskcommon.Resource{}, true).Maybe()
 	// CreateTaskOnWorker never flips the state away from Init: every dispatch fails
 	task.EXPECT().GetTaskState().Return(taskcommon.Init).Maybe()
 	var createCalls atomic.Int32
@@ -522,7 +522,7 @@ func TestGlobalScheduler_TerminalTaskClearsBackoff(t *testing.T) {
 	task.EXPECT().GetTaskType().Return(taskcommon.Index).Maybe()
 	task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return().Maybe()
 	task.EXPECT().GetTaskSlot().Return(1).Maybe()
-	task.EXPECT().GetTaskResource().Return(taskcommon.Resource{}).Maybe()
+	task.EXPECT().GetTaskResource().Return(taskcommon.Resource{}, true).Maybe()
 
 	// CreateTaskOnWorker drives the task straight to a terminal state (e.g. its
 	// segment was compacted away), so it never reaches InProgress/runningTasks.
@@ -573,7 +573,7 @@ func TestGlobalScheduler_scheduleUnfitTask(t *testing.T) {
 			examined.Add(1)
 			return 1
 		}).Maybe()
-		task.EXPECT().GetTaskResource().Return(req).Maybe()
+		task.EXPECT().GetTaskResource().Return(req, true).Maybe()
 		task.EXPECT().GetTaskState().RunAndReturn(func() taskcommon.State {
 			if dispatched.Load() {
 				return taskcommon.InProgress
@@ -668,7 +668,7 @@ func TestGlobalScheduler_scheduleDelayedCap(t *testing.T) {
 			examined.Add(1)
 			return 1
 		}).Maybe()
-		task.EXPECT().GetTaskResource().Return(taskcommon.Resource{CPU: 1, Memory: 4 * giB}).Maybe()
+		task.EXPECT().GetTaskResource().Return(taskcommon.Resource{CPU: 1, Memory: 4 * giB}, true).Maybe()
 		scheduler.Enqueue(task)
 	}
 	assert.Equal(t, total, scheduler.GetPendingTaskCount(taskcommon.Compaction))
@@ -682,4 +682,52 @@ func TestGlobalScheduler_scheduleDelayedCap(t *testing.T) {
 	// tripped the cap was popped and priced before being pushed back, hence +1.
 	assert.LessOrEqual(t, int(examined.Load()), maxDelayedPerRound+1)
 	assert.Positive(t, examined.Load())
+}
+
+// TestGlobalScheduler_scheduleUnpricedTask: a family that cannot resolve its
+// inputs yet answers the floor, which fits every worker. Placing on that price
+// would put an unbounded task on a node that books its real size as soon as the
+// request is built, so the scheduler must set it aside instead.
+func TestGlobalScheduler_scheduleUnpricedTask(t *testing.T) {
+	const giB = int64(1) << 30
+
+	newTask := func(taskID int64, res taskcommon.Resource, priced bool) (*MockTask, *atomic.Bool) {
+		task := NewMockTask(t)
+		var dispatched atomic.Bool
+		task.EXPECT().GetTaskID().Return(taskID).Maybe()
+		task.EXPECT().GetTaskType().Return(taskcommon.Index).Maybe()
+		task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return().Maybe()
+		task.EXPECT().GetTaskSlot().Return(1).Maybe()
+		task.EXPECT().GetTaskResource().Return(res, priced).Maybe()
+		task.EXPECT().GetTaskState().RunAndReturn(func() taskcommon.State {
+			if dispatched.Load() {
+				return taskcommon.InProgress
+			}
+			return taskcommon.Init
+		}).Maybe()
+		task.EXPECT().CreateTaskOnWorker(mock.Anything, mock.Anything).
+			Run(func(nodeID int64, cluster session.Cluster) {
+				dispatched.Store(true)
+			}).Maybe()
+		return task, &dispatched
+	}
+
+	cluster := session.NewMockCluster(t)
+	cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{
+		1: {NodeID: 1, AvailableSlots: 100, TotalCPU: 8, AvailableCPU: 8, TotalMemory: 16 * giB, AvailableMemory: 16 * giB},
+	}).Once()
+	scheduler := NewGlobalTaskScheduler(context.TODO(), cluster).(*globalTaskScheduler)
+
+	// The head of the queue prices at the floor and reports it did not resolve.
+	unpriced, unpricedDispatched := newTask(1, taskcommon.Resource{CPU: 1, Memory: 64 << 20}, false)
+	priced, pricedDispatched := newTask(2, taskcommon.Resource{CPU: 1, Memory: giB}, true)
+	scheduler.Enqueue(unpriced)
+	scheduler.Enqueue(priced)
+
+	scheduler.schedule()
+
+	assert.False(t, unpricedDispatched.Load(), "a task whose price did not resolve must not be placed")
+	assert.True(t, pricedDispatched.Load(), "the task behind it must not be stalled")
+	assert.Equal(t, []int64{1}, scheduler.pendingTasks.TaskIDs())
+	assert.True(t, scheduler.runningTasks.Contain(2))
 }

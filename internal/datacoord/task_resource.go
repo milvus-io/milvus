@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -142,25 +143,51 @@ func analyzeTaskResource(rawDataSize int64) taskcommon.Resource {
 }
 
 // importTaskResource: the worker (importv2/task_import.go) submits every file
-// of the task to its exec pool at once and each file allocates one read buffer
-// of perFileBuffer bytes, so the task holds numFiles buffers; the factor covers
-// the batch being serialized and uploaded while the next one is read. The
-// worker's allocator limit, a percentage of its machine, is not applied here.
-func importTaskResource(numFiles, perFileBuffer int64) taskcommon.Resource {
+// of the task to its exec pool at once and each file allocates one read buffer,
+// so the task holds the buffers of all its files (importBufferedBytes); the
+// factor covers the batch being serialized and uploaded while the next one is
+// read.
+//
+// The worker has one more bound this estimate cannot express: its memory
+// allocator keeps all import buffers on the machine under
+// dataNode.import.memoryLimitPercentage of it, so an import never holds more
+// than that share however many files it has. DataCoord does not see the
+// machine, so a task with very many files is still priced above what the
+// worker will use.
+func importTaskResource(bufferedBytes int64) taskcommon.Resource {
 	return taskcommon.Resource{
 		CPU:    defaultCPU(),
-		Memory: clampTaskMemory(scaled(max(numFiles, 1)*perFileBuffer, Params.DataCoordCfg.TaskResourceImportMemoryFactor.GetAsFloat())),
+		Memory: clampTaskMemory(scaled(bufferedBytes, Params.DataCoordCfg.TaskResourceImportMemoryFactor.GetAsFloat())),
 	}
 }
 
 // preImportTaskResource: the worker (importv2/task_preimport.go) reads every
-// file in parallel with one base buffer each and keeps nothing: one buffer per
-// file, no in-flight sync, no allocator cap.
-func preImportTaskResource(numFiles, perFileBuffer int64) taskcommon.Resource {
+// file in parallel with one base buffer each and keeps nothing: no in-flight
+// sync, no allocator cap.
+func preImportTaskResource(bufferedBytes int64) taskcommon.Resource {
 	return taskcommon.Resource{
 		CPU:    defaultCPU(),
-		Memory: clampTaskMemory(max(numFiles, 1) * perFileBuffer),
+		Memory: clampTaskMemory(bufferedBytes),
 	}
+}
+
+// importBufferedBytes is what the read buffers of one import task hold: one
+// buffer per file, each bounded by the file it reads, because a buffer never
+// fills beyond its file. A task with no files listed yet, or a file whose size
+// is not known, is charged a whole buffer.
+func importBufferedBytes(fileStats []*datapb.ImportFileStats, perFileBuffer int64) int64 {
+	if len(fileStats) == 0 {
+		return perFileBuffer
+	}
+	var buffered int64
+	for _, stat := range fileStats {
+		size := stat.GetTotalMemorySize()
+		if size <= 0 || size > perFileBuffer {
+			size = perFileBuffer
+		}
+		buffered += size
+	}
+	return buffered
 }
 
 // importFileBufferSize mirrors importv2.ImportTask.GetBufferSize on the worker:
@@ -349,18 +376,20 @@ func fieldBytesPerRow(field *schemapb.FieldSchema) int64 {
 // what the request ships are the same number, and so the meta walk runs once
 // per task rather than once per scheduling round. A computation that could
 // not resolve its inputs returns ok=false and is NOT cached, so the next round
-// retries instead of freezing a placeholder.
+// retries instead of freezing a placeholder. ok is passed on to the caller:
+// the scheduler must not place a task on a price that did not resolve, or a
+// worker ends up booking far more than the floor it was placed on.
 type resourceCache struct {
 	value atomic.Pointer[taskcommon.Resource]
 }
 
-func (c *resourceCache) get(compute func() (taskcommon.Resource, bool)) taskcommon.Resource {
+func (c *resourceCache) get(compute func() (taskcommon.Resource, bool)) (taskcommon.Resource, bool) {
 	if v := c.value.Load(); v != nil {
-		return *v
+		return *v, true
 	}
 	res, ok := compute()
 	if ok {
 		c.value.Store(&res)
 	}
-	return res
+	return res, ok
 }

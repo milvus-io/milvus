@@ -299,6 +299,17 @@ func (s *globalTaskScheduler) schedule() {
 	picker := newNodePicker(nodeSlots)
 	futures := make([]*conc.Future[struct{}], 0)
 	var delayed []Task
+	// setAside keeps a task for the next round. It reports false when the
+	// round's budget is spent, in which case the task goes back on the queue
+	// and the caller must stop popping. See maxDelayedPerRound.
+	setAside := func(task Task) bool {
+		if len(delayed) >= maxDelayedPerRound {
+			s.pendingTasks.Push(task)
+			return false
+		}
+		delayed = append(delayed, task)
+		return true
+	}
 	for {
 		task := s.pendingTasks.Pop()
 		if task == nil {
@@ -315,19 +326,24 @@ func (s *globalTaskScheduler) schedule() {
 		// Price once per round and reuse: the placement decision and the log
 		// below must agree, and a family that walks meta on a cache miss would
 		// otherwise pay for the walk twice.
-		resource := task.GetTaskResource()
+		resource, priced := task.GetTaskResource()
+		if !priced {
+			// The family could not resolve its inputs yet (a collection whose
+			// schema is still being reloaded after a restart, a job not in meta).
+			// Its answer is the floor, which every worker fits, so placing on it
+			// would put an unbounded task on a node that then books the real
+			// size once the request is built. Wait for the price instead.
+			mlog.Debug(s.ctx, "task resource not resolved yet, deferring", WrapTaskLog(task)...)
+			if !setAside(task) {
+				break
+			}
+			continue
+		}
 		nodeID := picker.Pick(taskSlot, resource)
 		if nodeID == NullNodeID {
 			if picker.exhausted() {
 				// No worker of either tier has room left, so nothing behind this
 				// task can be placed either: end the round.
-				s.pendingTasks.Push(task)
-				break
-			}
-			if len(delayed) >= maxDelayedPerRound {
-				// Enough set aside for one round: stop popping rather than walk
-				// the rest of the queue only to push it back. See
-				// maxDelayedPerRound.
 				s.pendingTasks.Push(task)
 				break
 			}
@@ -340,7 +356,9 @@ func (s *globalTaskScheduler) schedule() {
 			// task implicitly. Without that reservation a steady stream of small
 			// tasks can keep delaying it; an explicit reservation or aging
 			// mechanism is a follow-up.
-			delayed = append(delayed, task)
+			if !setAside(task) {
+				break
+			}
 			continue
 		}
 		future := s.execPool.Submit(func() (struct{}, error) {

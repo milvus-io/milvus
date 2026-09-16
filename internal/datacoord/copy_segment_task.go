@@ -294,8 +294,8 @@ func (t *copySegmentTask) GetTaskState() taskcommon.State {
 }
 
 // GetTaskResource: copy tasks stream objects and hold little of them.
-func (t *copySegmentTask) GetTaskResource() taskcommon.Resource {
-	return lightweightTaskResource()
+func (t *copySegmentTask) GetTaskResource() (taskcommon.Resource, bool) {
+	return lightweightTaskResource(), true
 }
 
 // GetTaskSlot returns the number of task slots this task consumes.
@@ -362,7 +362,7 @@ func (t *copySegmentTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 		}
 		return
 	}
-	resource := t.GetTaskResource()
+	resource, _ := t.GetTaskResource()
 	err = cluster.CreateCopySegment(nodeID, req, t.GetCollectionId(), job.GetExternal(), resource)
 	if err != nil {
 		mlog.Warn(ctx, "failed to create copy segment task on datanode",

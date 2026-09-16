@@ -31,8 +31,9 @@ type Task interface {
 	GetTaskSlot() int64
 	// GetTaskResource is the coordinator-side cpu/memory estimate the scheduler
 	// places on and the request ships. Never zero: a family that cannot price
-	// itself returns the configured floor.
-	GetTaskResource() taskcommon.Resource
+	// itself returns the configured floor, and false, so the scheduler can set
+	// the task aside instead of placing it on a price that is not its own.
+	GetTaskResource() (taskcommon.Resource, bool)
 	SetTaskTime(timeType taskcommon.TimeType, time time.Time)
 	GetTaskTime(timeType taskcommon.TimeType) time.Time
 	GetTaskVersion() int64

@@ -256,7 +256,7 @@ func TestImportTask_CreateTaskOnWorker(t *testing.T) {
 		task.CreateTaskOnWorker(1, cluster)
 		assert.Equal(t, datapb.ImportTaskStateV2_InProgress, task.GetState())
 		// The dispatch ships exactly what the scheduler placed the task on.
-		assert.Equal(t, task.GetTaskResource(), placed)
+		assert.Equal(t, taskPrice(task.GetTaskResource()), placed)
 	})
 }
 

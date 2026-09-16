@@ -47,6 +47,12 @@ func testResourceSchema() *schemapb.CollectionSchema {
 	}
 }
 
+// taskPrice and taskPriceResolved unpack the two-value GetTaskResource in
+// assertions.
+func taskPrice(res taskcommon.Resource, _ bool) taskcommon.Resource { return res }
+
+func taskPriceResolved(_ taskcommon.Resource, ok bool) bool { return ok }
+
 func TestTaskResource_Formulas(t *testing.T) {
 	paramtable.Init()
 	defaultCPU := Params.DataCoordCfg.TaskResourceDefaultCPU.GetAsInt64()
@@ -72,13 +78,10 @@ func TestTaskResource_Formulas(t *testing.T) {
 	// Analyze: raw vectors times the factor.
 	assert.Equal(t, taskcommon.Resource{CPU: 8, Memory: 2 * testGiB}, analyzeTaskResource(testGiB))
 
-	// Import: one buffer per file times the factor.
-	assert.Equal(t, taskcommon.Resource{CPU: defaultCPU, Memory: 3 * 2 * 100 * testMiB}, importTaskResource(3, 100*testMiB))
-	// Pre-import: one buffer per file, nothing in flight, no allocator.
-	assert.Equal(t, taskcommon.Resource{CPU: defaultCPU, Memory: 3 * 100 * testMiB}, preImportTaskResource(3, 100*testMiB))
-	// A task with no files listed yet is still charged one buffer.
-	assert.Equal(t, importTaskResource(1, 100*testMiB), importTaskResource(0, 100*testMiB))
-	assert.Equal(t, preImportTaskResource(1, 100*testMiB), preImportTaskResource(0, 100*testMiB))
+	// Import: what its read buffers hold, times the factor.
+	assert.Equal(t, taskcommon.Resource{CPU: defaultCPU, Memory: 2 * 300 * testMiB}, importTaskResource(300*testMiB))
+	// Pre-import: the same buffers, nothing in flight.
+	assert.Equal(t, taskcommon.Resource{CPU: defaultCPU, Memory: 300 * testMiB}, preImportTaskResource(300*testMiB))
 
 	// Nothing is ever priced below the floor: a 0-byte input still costs minTaskMemory.
 	assert.Equal(t, minMem, indexTaskResource(0, true).Memory)
@@ -86,8 +89,8 @@ func TestTaskResource_Formulas(t *testing.T) {
 	assert.Equal(t, minMem, l0CompactionTaskResource(0).Memory)
 	assert.Equal(t, minMem, analyzeTaskResource(0).Memory)
 	assert.Equal(t, minMem, clusteringCompactionTaskResource(0).Memory)
-	assert.Equal(t, minMem, importTaskResource(0, 0).Memory)
-	assert.Equal(t, minMem, preImportTaskResource(0, 0).Memory)
+	assert.Equal(t, minMem, importTaskResource(0).Memory)
+	assert.Equal(t, minMem, preImportTaskResource(0).Memory)
 }
 
 func TestImportFileBufferSize(t *testing.T) {
@@ -105,6 +108,28 @@ func TestImportFileBufferSize(t *testing.T) {
 		Options: []*commonpb.KeyValuePair{{Key: importutilv2.L0Import, Value: "true"}},
 	}}
 	assert.Equal(t, base, importFileBufferSize(l0Job))
+}
+
+// TestImportBufferedBytes: a buffer never fills beyond the file it reads, so a
+// task of many small files holds their bytes, not one whole buffer each.
+func TestImportBufferedBytes(t *testing.T) {
+	paramtable.Init()
+	const buffer = 16 * testMiB
+
+	// No files listed yet: one buffer.
+	assert.Equal(t, buffer, importBufferedBytes(nil, buffer))
+
+	// 100 files of 1MiB each: 100MiB, not 100 buffers.
+	small := make([]*datapb.ImportFileStats, 0, 100)
+	for i := 0; i < 100; i++ {
+		small = append(small, &datapb.ImportFileStats{TotalMemorySize: testMiB})
+	}
+	assert.Equal(t, 100*testMiB, importBufferedBytes(small, buffer))
+
+	// Files larger than the buffer are charged one buffer each; a file whose
+	// size is unknown is charged a whole buffer too.
+	big := []*datapb.ImportFileStats{{TotalMemorySize: buffer * 10}, {TotalMemorySize: 0}, {TotalMemorySize: testMiB}}
+	assert.Equal(t, 2*buffer+testMiB, importBufferedBytes(big, buffer))
 }
 
 func TestStatsTargetFields(t *testing.T) {
@@ -351,12 +376,21 @@ func TestResourceCache(t *testing.T) {
 			return taskcommon.Resource{CPU: int64(calls), Memory: 1}, ok
 		}
 	}
-	// Not ok: value is returned but not cached, so the next call recomputes.
-	assert.Equal(t, int64(1), c.get(compute(false)).CPU)
-	assert.Equal(t, int64(2), c.get(compute(false)).CPU)
-	// Ok: cached; subsequent calls do not recompute.
-	assert.Equal(t, int64(3), c.get(compute(true)).CPU)
-	assert.Equal(t, int64(3), c.get(compute(true)).CPU)
+	// Not ok: the value is returned, reported as unresolved, and not cached,
+	// so the next call recomputes.
+	res, ok := c.get(compute(false))
+	assert.Equal(t, int64(1), res.CPU)
+	assert.False(t, ok)
+	res, ok = c.get(compute(false))
+	assert.Equal(t, int64(2), res.CPU)
+	assert.False(t, ok)
+	// Ok: cached and reported as resolved; subsequent calls do not recompute.
+	res, ok = c.get(compute(true))
+	assert.Equal(t, int64(3), res.CPU)
+	assert.True(t, ok)
+	res, ok = c.get(compute(true))
+	assert.Equal(t, int64(3), res.CPU)
+	assert.True(t, ok)
 	assert.Equal(t, 3, calls)
 }
 

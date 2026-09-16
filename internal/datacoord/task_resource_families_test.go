@@ -68,14 +68,14 @@ func TestTaskResource_Index(t *testing.T) {
 	segIndex := &model.SegmentIndex{CollectionID: 1, PartitionID: 2, SegmentID: 3, IndexID: 4, BuildID: 5, NumRows: 1000}
 	it := newIndexBuildTask(segIndex, 1, mt, nil, nil, nil)
 	// HNSW on a 128-dim float vector over 1000 rows with no binlogs: closed form.
-	assert.Equal(t, indexTaskResource(1000*128*4, true), it.GetTaskResource())
+	assert.Equal(t, indexTaskResource(1000*128*4, true), taskPrice(it.GetTaskResource()))
 	// Cached: the value the scheduler placed on is the value the request ships.
-	assert.Equal(t, indexTaskResource(1000*128*4, true), it.GetTaskResource())
+	assert.Equal(t, indexTaskResource(1000*128*4, true), taskPrice(it.GetTaskResource()))
 
 	// Segment gone: floor, not cached.
 	orphan := newIndexBuildTask(&model.SegmentIndex{CollectionID: 1, SegmentID: 999, IndexID: 4, BuildID: 6}, 1, mt, nil, nil, nil)
-	assert.Equal(t, defaultTaskResource(), orphan.GetTaskResource())
-	assert.Equal(t, defaultTaskResource(), orphan.GetTaskResource())
+	assert.Equal(t, defaultTaskResource(), taskPrice(orphan.GetTaskResource()))
+	assert.Equal(t, defaultTaskResource(), taskPrice(orphan.GetTaskResource()))
 }
 
 // TestTaskResource_IndexScalar covers a non-vector index: CPU falls back to the
@@ -91,7 +91,7 @@ func TestTaskResource_IndexScalar(t *testing.T) {
 	idx.IndexParams = []*commonpb.KeyValuePair{{Key: "index_type", Value: "INVERTED"}}
 
 	it := newIndexBuildTask(&model.SegmentIndex{CollectionID: 1, PartitionID: 2, SegmentID: 3, IndexID: 4, BuildID: 5, NumRows: 1000}, 1, mt, nil, nil, nil)
-	assert.Equal(t, indexTaskResource(1000*64, false), it.GetTaskResource())
+	assert.Equal(t, indexTaskResource(1000*64, false), taskPrice(it.GetTaskResource()))
 }
 
 // bigFamilyMeta is familyMeta scaled up so that every price in play clears the
@@ -133,13 +133,14 @@ func TestTaskResource_IndexSchemaCacheMiss(t *testing.T) {
 	assert.NotEqual(t, defaultTaskResource(), overEstimate, "the bug this test guards must be observable")
 
 	it := bigFamilyIndexTask(mt)
-	assert.Equal(t, defaultTaskResource(), it.GetTaskResource())
-	assert.Equal(t, defaultTaskResource(), it.GetTaskResource())
+	assert.Equal(t, defaultTaskResource(), taskPrice(it.GetTaskResource()))
+	assert.False(t, taskPriceResolved(it.GetTaskResource()), "the scheduler must be told the price did not resolve")
+	assert.Equal(t, defaultTaskResource(), taskPrice(it.GetTaskResource()))
 
 	// Not cached: once the schema arrives the very next call reprices from meta,
 	// which proves the closure ran again instead of serving a frozen value.
 	mt.collections.Insert(1, &collectionInfo{ID: 1, Schema: testResourceSchema()})
-	assert.Equal(t, priced, it.GetTaskResource())
+	assert.Equal(t, priced, taskPrice(it.GetTaskResource()))
 }
 
 // TestTaskResource_IndexEmptyIndexParams covers an index whose params have not
@@ -157,12 +158,12 @@ func TestTaskResource_IndexEmptyIndexParams(t *testing.T) {
 	assert.NotEqual(t, defaultTaskResource(), misPriced, "the bug this test guards must be observable")
 
 	it := bigFamilyIndexTask(mt)
-	assert.Equal(t, defaultTaskResource(), it.GetTaskResource())
-	assert.Equal(t, defaultTaskResource(), it.GetTaskResource())
+	assert.Equal(t, defaultTaskResource(), taskPrice(it.GetTaskResource()))
+	assert.Equal(t, defaultTaskResource(), taskPrice(it.GetTaskResource()))
 
 	// Not cached: the params arriving repairs the price on the next call.
 	idx.IndexParams = []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "HNSW"}}
-	assert.Equal(t, priced, it.GetTaskResource())
+	assert.Equal(t, priced, taskPrice(it.GetTaskResource()))
 }
 
 // TestTaskResource_IndexFieldNotInSchema is the other side of the same coin: the
@@ -175,13 +176,13 @@ func TestTaskResource_IndexFieldNotInSchema(t *testing.T) {
 	idx.FieldID = 999
 
 	it := newIndexBuildTask(&model.SegmentIndex{CollectionID: 1, PartitionID: 2, SegmentID: 3, IndexID: 4, BuildID: 5, NumRows: 1000}, 1, mt, nil, nil, nil)
-	assert.Equal(t, indexTaskResource(familySegmentSize, true), it.GetTaskResource())
+	assert.Equal(t, indexTaskResource(familySegmentSize, true), taskPrice(it.GetTaskResource()))
 
 	// Cached: dropping the segment does not change the answer, and it is the
 	// whole-segment price rather than the floor.
 	delete(mt.segments.segments, 3)
-	assert.Equal(t, indexTaskResource(familySegmentSize, true), it.GetTaskResource())
-	assert.NotEqual(t, defaultTaskResource().CPU, it.GetTaskResource().CPU)
+	assert.Equal(t, indexTaskResource(familySegmentSize, true), taskPrice(it.GetTaskResource()))
+	assert.NotEqual(t, defaultTaskResource().CPU, taskPrice(it.GetTaskResource()).CPU)
 }
 
 // TestTaskResource_IndexUnpriceableField covers a known schema whose field still
@@ -193,8 +194,8 @@ func TestTaskResource_IndexUnpriceableField(t *testing.T) {
 	mt.segments.segments[3].NumOfRows = 0
 
 	it := newIndexBuildTask(&model.SegmentIndex{CollectionID: 1, SegmentID: 3, IndexID: 4, BuildID: 5, NumRows: 1000}, 1, mt, nil, nil, nil)
-	assert.Equal(t, defaultTaskResource(), it.GetTaskResource())
-	assert.Equal(t, defaultTaskResource(), it.GetTaskResource())
+	assert.Equal(t, defaultTaskResource(), taskPrice(it.GetTaskResource()))
+	assert.Equal(t, defaultTaskResource(), taskPrice(it.GetTaskResource()))
 }
 
 func TestTaskResource_Stats(t *testing.T) {
@@ -203,12 +204,12 @@ func TestTaskResource_Stats(t *testing.T) {
 	// No field in the fixture schema has text match enabled, so the sub job
 	// targets nothing specific and the whole segment is charged.
 	st := newStatsTask(&indexpb.StatsTask{CollectionID: 1, SegmentID: 3, TaskID: 7, SubJobType: indexpb.StatsSubJob_TextIndexJob}, 1, mt, nil, nil, nil)
-	assert.Equal(t, statsTaskResource(familySegmentSize), st.GetTaskResource())
-	assert.Equal(t, statsTaskResource(familySegmentSize), st.GetTaskResource()) // cached
+	assert.Equal(t, statsTaskResource(familySegmentSize), taskPrice(st.GetTaskResource()))
+	assert.Equal(t, statsTaskResource(familySegmentSize), taskPrice(st.GetTaskResource())) // cached
 
 	orphan := newStatsTask(&indexpb.StatsTask{CollectionID: 1, SegmentID: 999, TaskID: 8}, 1, mt, nil, nil, nil)
-	assert.Equal(t, defaultTaskResource(), orphan.GetTaskResource())
-	assert.Equal(t, defaultTaskResource(), orphan.GetTaskResource())
+	assert.Equal(t, defaultTaskResource(), taskPrice(orphan.GetTaskResource()))
+	assert.Equal(t, defaultTaskResource(), taskPrice(orphan.GetTaskResource()))
 }
 
 // TestIndexInspector_EstimateIndexFieldSize: the scalar task slot is derived
@@ -257,9 +258,9 @@ func TestTaskResource_StatsTargetsFields(t *testing.T) {
 
 	st := newStatsTask(&indexpb.StatsTask{CollectionID: 1, SegmentID: 3, TaskID: 7, SubJobType: indexpb.StatsSubJob_TextIndexJob}, 1, mt, nil, nil, nil)
 	// The varchar is the only variable-width field: exactly 64 bytes per row.
-	assert.Equal(t, statsTaskResource(bigFamilyRows*64), st.GetTaskResource())
-	assert.Equal(t, statsTaskResource(bigFamilyRows*64), st.GetTaskResource()) // cached
-	assert.Less(t, st.GetTaskResource().Memory, statsTaskResource(bigFamilyRows*(taskcommon.SystemFieldsBytesPerRow+8+512+64)).Memory)
+	assert.Equal(t, statsTaskResource(bigFamilyRows*64), taskPrice(st.GetTaskResource()))
+	assert.Equal(t, statsTaskResource(bigFamilyRows*64), taskPrice(st.GetTaskResource())) // cached
+	assert.Less(t, taskPrice(st.GetTaskResource()).Memory, statsTaskResource(bigFamilyRows*(taskcommon.SystemFieldsBytesPerRow+8+512+64)).Memory)
 }
 
 // TestTaskResource_StatsSchemaCacheMiss: without a schema the targeted fields
@@ -277,11 +278,12 @@ func TestTaskResource_StatsSchemaCacheMiss(t *testing.T) {
 	mt.collections = typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
 
 	st := newStatsTask(&indexpb.StatsTask{CollectionID: 1, SegmentID: 3, TaskID: 7, SubJobType: indexpb.StatsSubJob_TextIndexJob}, 1, mt, nil, nil, nil)
-	assert.Equal(t, statsTaskResource(segmentSize), st.GetTaskResource())
-	assert.Equal(t, statsTaskResource(segmentSize), st.GetTaskResource())
+	assert.Equal(t, statsTaskResource(segmentSize), taskPrice(st.GetTaskResource()))
+	assert.False(t, taskPriceResolved(st.GetTaskResource()), "without a schema the whole-segment price is not cached")
+	assert.Equal(t, statsTaskResource(segmentSize), taskPrice(st.GetTaskResource()))
 
 	mt.collections.Insert(1, &collectionInfo{ID: 1, Schema: schema})
-	assert.Equal(t, statsTaskResource(bigFamilyRows*64), st.GetTaskResource())
+	assert.Equal(t, statsTaskResource(bigFamilyRows*64), taskPrice(st.GetTaskResource()))
 }
 
 // TestTaskResource_StatsUnsizedSegment covers a segment with neither Stats nor
@@ -293,20 +295,20 @@ func TestTaskResource_StatsUnsizedSegment(t *testing.T) {
 	mt.collections = typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
 
 	st := newStatsTask(&indexpb.StatsTask{CollectionID: 1, SegmentID: 3, TaskID: 7}, 1, mt, nil, nil, nil)
-	assert.Equal(t, defaultTaskResource(), st.GetTaskResource())
-	assert.Equal(t, defaultTaskResource(), st.GetTaskResource())
+	assert.Equal(t, defaultTaskResource(), taskPrice(st.GetTaskResource()))
+	assert.Equal(t, defaultTaskResource(), taskPrice(st.GetTaskResource()))
 }
 
 func TestTaskResource_Analyze(t *testing.T) {
 	paramtable.Init()
 	mt := familyMeta(t)
 	at := newAnalyzeTask(&indexpb.AnalyzeTask{CollectionID: 1, TaskID: 9, FieldID: 101, FieldType: schemapb.DataType_FloatVector, SegmentIDs: []int64{3}}, mt)
-	assert.Equal(t, analyzeTaskResource(1000*128*4), at.GetTaskResource())
-	assert.Equal(t, analyzeTaskResource(1000*128*4), at.GetTaskResource()) // cached
+	assert.Equal(t, analyzeTaskResource(1000*128*4), taskPrice(at.GetTaskResource()))
+	assert.Equal(t, analyzeTaskResource(1000*128*4), taskPrice(at.GetTaskResource())) // cached
 
 	missing := newAnalyzeTask(&indexpb.AnalyzeTask{CollectionID: 1, TaskID: 10, FieldID: 101, FieldType: schemapb.DataType_FloatVector, SegmentIDs: []int64{999}}, mt)
-	assert.Equal(t, defaultTaskResource(), missing.GetTaskResource())
-	assert.Equal(t, defaultTaskResource(), missing.GetTaskResource())
+	assert.Equal(t, defaultTaskResource(), taskPrice(missing.GetTaskResource()))
+	assert.Equal(t, defaultTaskResource(), taskPrice(missing.GetTaskResource()))
 }
 
 // TestTaskResource_AnalyzeSchemaCacheMiss is the analyze counterpart of
@@ -329,17 +331,18 @@ func TestTaskResource_AnalyzeSchemaCacheMiss(t *testing.T) {
 		FieldType: schemapb.DataType_FloatVector, SegmentIDs: []int64{3},
 	}, mt)
 	assert.Nil(t, at.schema, "the snapshot must be empty, or the test proves nothing")
-	assert.Equal(t, defaultTaskResource(), at.GetTaskResource())
-	assert.Equal(t, defaultTaskResource(), at.GetTaskResource())
+	assert.Equal(t, defaultTaskResource(), taskPrice(at.GetTaskResource()))
+	assert.False(t, taskPriceResolved(at.GetTaskResource()), "the scheduler must be told the price did not resolve")
+	assert.Equal(t, defaultTaskResource(), taskPrice(at.GetTaskResource()))
 
 	// The schema arriving repairs the price on the very next call, without the
 	// task being rebuilt.
 	mt.collections.Insert(1, &collectionInfo{ID: 1, Schema: testResourceSchema()})
-	assert.Equal(t, priced, at.GetTaskResource())
+	assert.Equal(t, priced, taskPrice(at.GetTaskResource()))
 
 	// And that answer is cached: dropping the input segment does not change it.
 	delete(mt.segments.segments, 3)
-	assert.Equal(t, priced, at.GetTaskResource())
+	assert.Equal(t, priced, taskPrice(at.GetTaskResource()))
 }
 
 // TestTaskResource_AnalyzeUnknownField covers a clustering key that is not in
@@ -349,20 +352,20 @@ func TestTaskResource_AnalyzeUnknownField(t *testing.T) {
 	mt := familyMeta(t)
 
 	unknown := newAnalyzeTask(&indexpb.AnalyzeTask{CollectionID: 1, TaskID: 11, FieldID: 999, SegmentIDs: []int64{3}}, mt)
-	assert.Equal(t, defaultTaskResource(), unknown.GetTaskResource())
+	assert.Equal(t, defaultTaskResource(), taskPrice(unknown.GetTaskResource()))
 
 	// A scalar clustering key has no raw-vector footprint to price.
 	scalar := newAnalyzeTask(&indexpb.AnalyzeTask{CollectionID: 1, TaskID: 12, FieldID: 100, SegmentIDs: []int64{3}}, mt)
-	assert.Equal(t, defaultTaskResource(), scalar.GetTaskResource())
+	assert.Equal(t, defaultTaskResource(), taskPrice(scalar.GetTaskResource()))
 }
 
 func TestTaskResource_CopySegmentAndRefresh(t *testing.T) {
 	paramtable.Init()
 	copyTask := &copySegmentTask{times: taskcommon.NewTimes()}
 	copyTask.task.Store(&datapb.CopySegmentTask{TaskId: 1, JobId: 2})
-	assert.Equal(t, lightweightTaskResource(), copyTask.GetTaskResource())
+	assert.Equal(t, lightweightTaskResource(), taskPrice(copyTask.GetTaskResource()))
 
 	refresh := &refreshExternalCollectionTask{}
-	assert.Equal(t, lightweightTaskResource(), refresh.GetTaskResource())
-	assert.Equal(t, taskcommon.Resource{CPU: 1, Memory: 64 * testMiB}, refresh.GetTaskResource())
+	assert.Equal(t, lightweightTaskResource(), taskPrice(refresh.GetTaskResource()))
+	assert.Equal(t, taskcommon.Resource{CPU: 1, Memory: 64 * testMiB}, taskPrice(refresh.GetTaskResource()))
 }

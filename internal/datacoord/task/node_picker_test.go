@@ -197,3 +197,30 @@ func TestNodePicker_Exhausted(t *testing.T) {
 	assert.True(t, none.exhausted())
 	assert.True(t, newNodePicker(nil).exhausted())
 }
+
+// TestNodePicker_OversizedSkipsFullWorkers: a task larger than any worker goes
+// to the emptiest one, but never to a worker with nothing free. Otherwise a
+// round of oversized tasks piles onto one worker and leaves the cluster
+// reporting no memory at all for every other family.
+func TestNodePicker_OversizedSkipsFullWorkers(t *testing.T) {
+	p := newNodePicker(map[int64]*session.WorkerSlots{
+		1: resourceWorker(1, 10, 8, 8*pickGiB),
+		2: resourceWorker(2, 10, 8, 8*pickGiB),
+	})
+	oversized := taskcommon.Resource{CPU: 1, Memory: 64 * pickGiB}
+
+	// Two workers, two oversized tasks: one each.
+	first := p.Pick(1, oversized)
+	second := p.Pick(1, oversized)
+	assert.NotEqual(t, int64(NullNodeID), first)
+	assert.NotEqual(t, int64(NullNodeID), second)
+	assert.NotEqual(t, first, second)
+
+	// Both are now over-committed, so the third waits instead of piling on.
+	assert.Equal(t, int64(NullNodeID), p.Pick(1, oversized))
+	for _, n := range p.nodes {
+		assert.LessOrEqual(t, n.availableMemory, int64(0))
+	}
+	// And the round is over: nothing else can be placed either.
+	assert.True(t, p.exhausted())
+}

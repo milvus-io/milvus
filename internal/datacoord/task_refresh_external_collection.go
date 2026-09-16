@@ -90,8 +90,8 @@ func (t *refreshExternalCollectionTask) GetTaskState() taskcommon.State {
 
 // GetTaskResource: a refresh only re-reads external metadata, so it is priced
 // at the floor. The DataNode does not book this task today.
-func (t *refreshExternalCollectionTask) GetTaskResource() taskcommon.Resource {
-	return lightweightTaskResource()
+func (t *refreshExternalCollectionTask) GetTaskResource() (taskcommon.Resource, bool) {
+	return lightweightTaskResource(), true
 }
 
 func (t *refreshExternalCollectionTask) GetTaskSlot() int64 {

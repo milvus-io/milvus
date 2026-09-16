@@ -132,6 +132,11 @@ func (p *nodePicker) pickByResource(req taskcommon.Resource) (int64, bool) {
 // when empty. Waiting for such a task never helps, so it starts where it has the
 // most room and the worker's own limits pace it. A task that merely does not fit
 // right now waits instead: NullNodeID.
+//
+// Only a worker that still has free memory takes one. Otherwise a round of
+// oversized tasks piles onto whichever worker is least loaded, each charging
+// memory that worker does not have, and every other family then sees a cluster
+// with nothing free.
 func (p *nodePicker) pickOversized(req taskcommon.Resource) int64 {
 	var largest int64
 	for _, n := range p.nodes {
@@ -142,6 +147,9 @@ func (p *nodePicker) pickOversized(req taskcommon.Resource) int64 {
 	}
 	var emptiest *resourceNode
 	for _, n := range p.nodes {
+		if n.availableMemory <= 0 {
+			continue
+		}
 		if emptiest == nil || n.availableMemory > emptiest.availableMemory {
 			emptiest = n
 		}

@@ -118,7 +118,7 @@ func (it *indexBuildTask) GetTaskID() int64 {
 // index type a vector build would be frozen at the scalar CPU request. A field
 // that is genuinely absent from a schema we DO have is a different thing: that
 // is a real answer, so the conservative whole-segment price is kept and cached.
-func (it *indexBuildTask) GetTaskResource() taskcommon.Resource {
+func (it *indexBuildTask) GetTaskResource() (taskcommon.Resource, bool) {
 	return it.resource.get(func() (taskcommon.Resource, bool) {
 		segment := it.meta.GetHealthySegment(context.TODO(), it.SegmentID)
 		if segment == nil {
@@ -355,7 +355,7 @@ func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 	}()
 
 	// Send request to worker
-	resource := it.GetTaskResource()
+	resource, _ := it.GetTaskResource()
 	if err = cluster.CreateIndex(nodeID, req, resource); err != nil {
 		log.Warn(ctx, "failed to send job to worker", mlog.Err(err))
 		return

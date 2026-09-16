@@ -77,7 +77,7 @@ func (t *bumpSchemaVersionTask) GetTaskProto() *datapb.CompactionTask {
 
 // GetTaskResource: a schema bump streams one segment through the mix
 // compaction writer, so it is priced like a mix compaction of that segment.
-func (t *bumpSchemaVersionTask) GetTaskResource() taskcommon.Resource {
+func (t *bumpSchemaVersionTask) GetTaskResource() (taskcommon.Resource, bool) {
 	return t.resource.get(func() (taskcommon.Resource, bool) {
 		inputSize, ok := compactionInputSize(t.meta, t.GetTaskProto())
 		if !ok {
@@ -240,7 +240,7 @@ func (t *bumpSchemaVersionTask) CreateTaskOnWorker(nodeID int64, cluster session
 		return
 	}
 
-	resource := t.GetTaskResource()
+	resource, _ := t.GetTaskResource()
 	err = cluster.CreateCompaction(nodeID, plan, t.GetTaskProto().GetCollectionID(), resource)
 	if err != nil {
 		log.Warn(context.TODO(), "bumpSchemaVersionTask failed to notify compaction tasks to DataNode",

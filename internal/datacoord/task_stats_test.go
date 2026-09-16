@@ -440,7 +440,7 @@ func (s *statsTaskSuite) TestCreateTaskOnWorker() {
 		st.CreateTaskOnWorker(1, cluster)
 		s.Equal(indexpb.JobState_JobStateInProgress, st.GetState())
 		// The dispatch ships exactly what the scheduler placed the task on.
-		s.Equal(st.GetTaskResource(), placed)
+		s.Equal(taskPrice(st.GetTaskResource()), placed)
 	})
 }
 

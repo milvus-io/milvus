@@ -344,7 +344,7 @@ func (s *analyzeTaskSuite) TestCreateTaskOnWorker_NumClustersCapped() {
 	at.CreateTaskOnWorker(1, cluster)
 	s.Equal(indexpb.JobState_JobStateInProgress, at.GetState())
 	// The dispatch ships exactly what the scheduler placed the task on.
-	s.Equal(at.GetTaskResource(), placed)
+	s.Equal(taskPrice(at.GetTaskResource()), placed)
 }
 
 func (s *analyzeTaskSuite) TestCreateTaskOnWorker_CreateAnalyzeError() {

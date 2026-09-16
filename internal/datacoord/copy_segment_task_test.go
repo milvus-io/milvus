@@ -513,7 +513,7 @@ func (s *CopySegmentTaskSuite) TestCreateTaskOnWorkerUsesJobExternalFlag() {
 
 			task.CreateTaskOnWorker(10, cluster)
 			// The dispatch ships exactly what the scheduler placed the task on.
-			s.Equal(task.GetTaskResource(), placed)
+			s.Equal(taskPrice(task.GetTaskResource()), placed)
 
 			updated := copyMeta.GetTask(context.Background(), task.GetTaskId())
 			s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskInProgress, updated.GetState())

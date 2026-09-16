@@ -136,12 +136,12 @@ func (t *importTask) GetTaskSlot() int64 {
 // fields, so re-reading them every round costs nothing a cache would save, and
 // a job amended between enqueue and dispatch is priced on what it will
 // actually run with.
-func (t *importTask) GetTaskResource() taskcommon.Resource {
+func (t *importTask) GetTaskResource() (taskcommon.Resource, bool) {
 	job := t.importMeta.GetJob(context.TODO(), t.GetJobID())
 	if job == nil {
-		return defaultTaskResource()
+		return defaultTaskResource(), false
 	}
-	return importTaskResource(int64(len(t.GetFileStats())), importFileBufferSize(job))
+	return importTaskResource(importBufferedBytes(t.GetFileStats(), importFileBufferSize(job))), true
 }
 
 func (t *importTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
@@ -172,7 +172,7 @@ func (t *importTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 		t.retryTimes++
 		return
 	}
-	resource := t.GetTaskResource()
+	resource, _ := t.GetTaskResource()
 	err = cluster.CreateImport(nodeID, req, t.GetTaskSlot(), resource)
 	if err != nil {
 		mlog.Warn(context.TODO(), "import failed", WrapTaskLog(t, mlog.Err(err))...)

@@ -65,7 +65,7 @@ func (t *l0CompactionTask) GetTaskState() taskcommon.State {
 
 // GetTaskResource prices an L0 compaction by the delete records it must hold
 // in memory: the delta logs of every input L0 segment.
-func (t *l0CompactionTask) GetTaskResource() taskcommon.Resource {
+func (t *l0CompactionTask) GetTaskResource() (taskcommon.Resource, bool) {
 	return t.resource.get(func() (taskcommon.Resource, bool) {
 		var deltaSize int64
 		for _, segID := range t.GetTaskProto().GetInputSegments() {
@@ -139,7 +139,7 @@ func (t *l0CompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Clus
 		return
 	}
 
-	resource := t.GetTaskResource()
+	resource, _ := t.GetTaskResource()
 	err = cluster.CreateCompaction(nodeID, plan, t.GetTaskProto().GetCollectionID(), resource)
 	if err != nil {
 		originNodeID := t.GetTaskProto().GetNodeID()

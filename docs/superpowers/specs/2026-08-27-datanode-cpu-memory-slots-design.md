@@ -92,17 +92,24 @@ see.
 | L0 compaction | 1 | sum(deltalog) x 2 | `l0_compactor.go` loads every delta log |
 | clustering compaction | 8 | sum(input segments) | buckets are flushed at `memoryBufferRatio` of the machine; that cap is not applied, so a large input is over-priced |
 | analyze | 8 | rows x dim x elemSize x 2 | the train set is down-sampled to `maxTrainSizeRatio` of the machine; that cap is not applied |
-| import | 1 | files x (base x vchannels x partitions) x `importMemoryFactor` | every file is submitted at once with one read buffer; the allocator limit (a share of the machine) is not applied |
-| preimport | 1 | files x base buffer | every file is read in parallel with one base buffer |
+| import | 1 | sum over files of min(base x vchannels x partitions, file size) x `importMemoryFactor` | every file is submitted at once with one read buffer, and a buffer never fills beyond the file it reads; the allocator limit (a share of the machine) is not applied |
+| preimport | 1 | sum over files of min(base buffer, file size) | every file is read in parallel with one base buffer |
 | copy segment / refresh external collection | 1 | 64MB | stream between buckets |
 
-The import per-file buffer is deliberately not capped at the task's largest
-file: `importv2.ImportTask.GetBufferSize` reads that cap from the task's own
+The import per-file buffer is not capped at the task's *largest* file:
+`importv2.ImportTask.GetBufferSize` reads that cap from the task's own
 `ImportTaskV2.FileStats`, which the worker never fills for an import task, so
-the cap never fires there.
+the cap never fires there. Each file is still bounded by *its own* size, which
+is all the buffer reading it can hold, so a task of many small files is priced
+at their bytes rather than at one whole buffer each.
 
 Every memory estimate is clamped to at least `minTaskMemory` (64MB). A task
-whose inputs cannot be resolved yet is priced at the floor and not cached.
+whose inputs cannot be resolved yet is priced at the floor, not cached, **and
+reported as unresolved**: `GetTaskResource` answers `(resource, false)` and the
+scheduler sets it aside for the next round instead of placing it. The floor
+fits every worker, so placing on it would put a task of unknown size on a node
+that books its real size as soon as the request is built. This is the window
+right after a DataCoord restart, while collection schemas are still reloading.
 
 ### fieldSize
 
@@ -214,7 +221,10 @@ Same rules as PR #52561, implemented thinner:
   room either does the oversized rule apply: if `req.Memory` exceeds the largest
   `total_memory` of any worker, dispatch to the dimensioned worker with the most
   `available_memory` (waiting never helps such a task); otherwise return
-  `NullNodeID`. The scalar slot is not consulted here either.
+  `NullNodeID`. The scalar slot is not consulted here either. Only a worker that
+  still has free memory takes an oversized task: otherwise a round of them piles
+  onto whichever worker is least loaded, each charging memory that worker does
+  not have, and every other family then sees a cluster with nothing free.
 - A task with a zero requirement (family that does not estimate) is placed on
   the dimensioned tier when one exists — the memory filter passes trivially —
   and only reaches the scalar heap when no dimensioned worker has free memory.

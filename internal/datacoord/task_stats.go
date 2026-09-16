@@ -95,7 +95,7 @@ func (st *statsTask) GetTaskState() taskcommon.State {
 // (statsInputSize). Without a cached schema the fields cannot be told apart,
 // so the whole segment is charged and the answer is not cached: the schema
 // arriving later must be able to shrink the price.
-func (st *statsTask) GetTaskResource() taskcommon.Resource {
+func (st *statsTask) GetTaskResource() (taskcommon.Resource, bool) {
 	return st.resource.get(func() (taskcommon.Resource, bool) {
 		segment := st.meta.GetHealthySegment(context.TODO(), st.GetSegmentID())
 		if segment == nil {
@@ -233,7 +233,7 @@ func (st *statsTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 		}
 	}()
 	// Execute task creation
-	resource := st.GetTaskResource()
+	resource, _ := st.GetTaskResource()
 	if err = cluster.CreateStats(nodeID, req, resource); err != nil {
 		log.Warn(context.TODO(), "failed to create stats task on worker", mlog.Err(err))
 		return
