@@ -383,6 +383,9 @@ func (s *Server) initMeta() error {
 	s.broker = meta.NewCoordinatorBroker(
 		s.mixCoord,
 	)
+	if err := s.meta.InitCollectionGroups(paramtable.Get().QueryCoordCfg.CollectionGroups.GetValue(), s.broker.GetRecoveryInfoV2); err != nil {
+		return err
+	}
 
 	mlog.Info(s.ctx, "recover meta...")
 	err := s.meta.CollectionManager.Recover(s.ctx, s.broker)

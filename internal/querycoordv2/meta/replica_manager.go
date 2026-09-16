@@ -20,10 +20,13 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/samber/lo"
+	"golang.org/x/sync/singleflight"
 	"golang.org/x/time/rate"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/json"
@@ -90,6 +93,14 @@ type ReplicaManager struct {
 
 	idAllocator func() (int64, error)
 	catalog     metastore.QueryCoordCatalog
+
+	// Initialized before recovery. Group membership is never rebound from config.
+	collectionGroups map[int64]string
+	recoveryInfo     recoveryInfoFunc
+	groupMu          sync.Mutex
+	rowFlights       singleflight.Group
+	rowStatsMu       sync.Mutex
+	rowStats         map[int64]collectionRowStats
 }
 
 type SQNodeRemoval struct {
@@ -106,6 +117,7 @@ func NewReplicaManager(idAllocator func() (int64, error), catalog metastore.Quer
 		queryInvisibleReplicas: typeutil.NewConcurrentSet[int64](),
 		idAllocator:            idAllocator,
 		catalog:                catalog,
+		rowStats:               make(map[int64]collectionRowStats),
 	}
 }
 
@@ -233,9 +245,10 @@ func (m *ReplicaManager) SpawnWithReplicaConfig(ctx context.Context, params Spaw
 			continue
 		}
 		replica := NewReplicaWithPriority(&querypb.Replica{
-			ID:            config.GetReplicaId(),
-			CollectionID:  params.CollectionID,
-			ResourceGroup: config.ResourceGroupName,
+			ID:                config.GetReplicaId(),
+			CollectionID:      params.CollectionID,
+			ResourceGroup:     config.ResourceGroupName,
+			CollectionGroupId: m.collectionGroups[params.CollectionID],
 		}, config.GetPriority())
 		if enableChannelExclusiveMode {
 			mutableReplica := replica.CopyForWrite()
@@ -348,9 +361,10 @@ func (m *ReplicaManager) Spawn(ctx context.Context, collection int64, replicaNum
 			}
 
 			replica := NewReplicaWithPriority(&querypb.Replica{
-				ID:            id,
-				CollectionID:  collection,
-				ResourceGroup: rgName,
+				ID:                id,
+				CollectionID:      collection,
+				ResourceGroup:     rgName,
+				CollectionGroupId: m.collectionGroups[collection],
 			}, loadPriority)
 			mutableReplica := replica.CopyForWrite()
 			if cfg.waitRGReady {
@@ -398,6 +412,38 @@ func (m *ReplicaManager) Put(ctx context.Context, replicas ...*Replica) error {
 			m.collLock.Unlock(collectionIDs[i])
 		}
 	}()
+
+	// The channel observer may publish a COW snapshot taken before a group
+	// allocation. Merge its channel registration into the latest group replica;
+	// never restore stale ownership, resource group, or immutable binding.
+	updates := make([]*Replica, 0, len(replicas))
+	for _, incoming := range replicas {
+		current, ok := m.flatReplicas.Get(incoming.GetID())
+		if !ok && incoming.GetCollectionGroupID() != "" {
+			return merr.WrapErrReplicaNotFound(incoming.GetID())
+		}
+		if ok && current.GetCollectionGroupID() != "" {
+			mutable := current.CopyForWrite()
+			mutable.TryEnableChannelExclusiveMode(lo.Keys(incoming.replicaPB.GetChannelNodeInfos())...)
+			incoming = mutable.IntoReplica()
+			// Small group replicas often cannot enable channel-exclusive mode.
+			// Repeated observer registration must not rewrite identical metadata.
+			if proto.Equal(current.replicaPB, incoming.replicaPB) {
+				continue
+			}
+		}
+		updates = append(updates, incoming)
+	}
+	replicas = updates
+	if len(replicas) == 0 {
+		return nil
+	}
+	for id := range grouped {
+		grouped[id] = nil
+	}
+	for _, replica := range replicas {
+		grouped[replica.GetCollectionID()] = append(grouped[replica.GetCollectionID()], replica)
+	}
 
 	replicaPBs := make([]*querypb.Replica, 0, len(replicas))
 	for _, replica := range replicas {
@@ -565,6 +611,9 @@ func (m *ReplicaManager) RemoveCollection(ctx context.Context, collectionID type
 		// coll2Replicas is updated before flatReplicas so the invariant
 		// "visible via GetByCollection => visible via Get" holds during deletion.
 		m.coll2Replicas.Remove(collectionID)
+		m.rowStatsMu.Lock()
+		delete(m.rowStats, collectionID)
+		m.rowStatsMu.Unlock()
 		for _, replica := range replicas {
 			metrics.QueryCoordResourceGroupReplicaTotal.WithLabelValues(replica.GetResourceGroup()).Dec()
 			metrics.QueryCoordReplicaRONodeTotal.Add(-float64(replica.RONodesCount()))
@@ -623,6 +672,9 @@ func (m *ReplicaManager) removeReplicasInMemory(collectionID typeutil.UniqueID, 
 		}
 		if len(newSlice) == 0 {
 			m.coll2Replicas.Remove(collectionID)
+			m.rowStatsMu.Lock()
+			delete(m.rowStats, collectionID)
+			m.rowStatsMu.Unlock()
 		} else {
 			m.coll2Replicas.Insert(collectionID, newSlice)
 		}
@@ -684,6 +736,11 @@ func (m *ReplicaManager) GetByResourceGroup(ctx context.Context, rgName string) 
 // 2. Add new incoming nodes into the replica if they are not in-used by other replicas of same collection.
 // 3. replicas in same resource group will shared the nodes in resource group fairly.
 func (m *ReplicaManager) RecoverNodesInCollection(ctx context.Context, collectionID typeutil.UniqueID, rgs map[string]*ResourceGroup) error {
+	return m.RecoverNodesInCollections(ctx, []int64{collectionID}, rgs)
+}
+
+// recoverLegacyNodesInCollection preserves the ungrouped allocation policy.
+func (m *ReplicaManager) recoverLegacyNodesInCollection(ctx context.Context, collectionID typeutil.UniqueID, rgs map[string]*ResourceGroup) error {
 	// Build node sets from resource groups.
 	rgNodeSets := make(map[string]typeutil.UniqueSet, len(rgs))
 	for rgName, rg := range rgs {

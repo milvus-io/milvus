@@ -289,6 +289,11 @@ func (replica *Replica) GetChannelRWNodes(channelName string) []int64 {
 	return replica.replicaPB.ChannelNodeInfos[channelName].GetRwNodes()
 }
 
+// GetCollectionGroupID returns the immutable allocation group bound at creation.
+func (replica *Replica) GetCollectionGroupID() string {
+	return replica.replicaPB.GetCollectionGroupId()
+}
+
 // CopyForWrite returns a mutable replica for write operations.
 func (replica *Replica) CopyForWrite() *mutableReplica {
 	exclusiveRWNodeToChannel := make(map[int64]string)

@@ -811,6 +811,8 @@ message Replica {
     repeated int64 rw_sq_nodes = 7; // all (read and write) nodes. mutual exclusive with ro_sq_nodes.
     repeated int64 ro_sq_nodes = 8; // the in-using node but should not be assigned to these replica.
     // cannot watch channel on it anymore.
+    // Bound only when the replica is created; empty preserves legacy allocation.
+    string collection_group_id = 9;
 }
 
 enum SyncType {
