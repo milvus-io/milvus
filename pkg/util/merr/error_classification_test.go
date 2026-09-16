@@ -118,6 +118,7 @@ func TestSentinelErrorTypeClassification(t *testing.T) {
 		"MissingRequiredParameters": ErrMissingRequiredParameters,
 		"InvalidInsertData":         ErrInvalidInsertData,
 		"FieldInvalidName":          ErrFieldInvalidName,
+		"RequestNotFound":           ErrRequestNotFound,
 	}
 	for name, err := range inputSentinels {
 		assert.Equal(t, InputError, GetErrorType(err), "%s should be InputError", name)
@@ -158,6 +159,7 @@ func TestSentinelErrorTypeClassification(t *testing.T) {
 		1800, 1801, 1802, 1804, // Auth / parameter format / insert data
 		2100, // ImportFailed
 		2201, // QueryPlan
+		3003, // RequestNotFound: the caller named a request id nobody holds
 	}
 	gotInputCodes := make([]int32, 0, len(wantInputCodes))
 	for code, sentinel := range registeredCodes {
