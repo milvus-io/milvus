@@ -848,8 +848,9 @@ func TestCatalogSaveRecoverySnapshotRoundTrip(t *testing.T) {
 		SalvageCheckpoint: &commonpb.ReplicateCheckpoint{ClusterId: "cluster-a", Pchannel: "p1-rootcoord-dml_0"},
 		ConsumeCheckpoint: &streamingpb.WALCheckpoint{
 			TimeTick: 42,
-			// The pchannel control state advances atomically with the checkpoint.
-			AlterWalState: &streamingpb.AlterWALState{Stage: streamingpb.AlterWALStage_FLUSHING},
+			// Latest control state and its own applied frontier persist together.
+			ControlCheckpointTimeTick: 55,
+			AlterWalState:             &streamingpb.AlterWALState{Stage: streamingpb.AlterWALStage_FLUSHING},
 		},
 	})
 	assert.NoError(t, err)
@@ -874,6 +875,7 @@ func TestCatalogSaveRecoverySnapshotRoundTrip(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, checkpoint)
 	assert.Equal(t, uint64(42), checkpoint.GetTimeTick())
+	assert.Equal(t, uint64(55), checkpoint.GetControlCheckpointTimeTick())
 	assert.Equal(t, streamingpb.AlterWALStage_FLUSHING, checkpoint.GetAlterWalState().GetStage())
 }
 
