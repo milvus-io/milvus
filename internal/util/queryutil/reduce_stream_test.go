@@ -82,6 +82,22 @@ func TestOrderedReduceStreamMergesChildChunks(t *testing.T) {
 	require.Equal(t, 1, childB.closeCount())
 }
 
+func TestOrderedReduceStreamAcceptsBoundedOrdinaryQuery(t *testing.T) {
+	child := &queryTestStream{recv: []queryTestRecv{
+		{chunk: newQueryTestChunk([]int64{1, 2}, []int64{10, 20})},
+	}}
+	stream, err := NewReduceStream(
+		&internalpb.RetrieveRequest{Limit: 2},
+		[]ReduceStream{child},
+		2,
+	)
+	require.NoError(t, err)
+
+	chunk, err := stream.Recv()
+	require.NoError(t, err)
+	require.Equal(t, []int64{1, 2}, queryTestIDs(chunk))
+}
+
 func TestOrderedReduceStreamRejectsDuplicatePK(t *testing.T) {
 	childA := &queryTestStream{recv: []queryTestRecv{{chunk: newQueryTestChunk([]int64{1}, []int64{10})}}}
 	childB := &queryTestStream{recv: []queryTestRecv{{chunk: newQueryTestChunk([]int64{1}, []int64{20})}}}
