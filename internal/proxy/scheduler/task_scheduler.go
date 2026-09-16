@@ -28,6 +28,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.opentelemetry.io/otel"
 
+	"github.com/milvus-io/milvus/internal/proxy/reqregistry"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -166,6 +167,9 @@ func (queue *BaseTaskQueue) AddActiveTask(t taskmodel.Task) {
 
 	queue.activeTasks[tID] = t
 	t.SetExecutingTime()
+	if entry := reqregistry.FromContext(t.TraceCtx()); entry != nil {
+		entry.MarkRunning(t.GetDurationInQueue())
+	}
 }
 
 func (queue *BaseTaskQueue) PopActiveTask(taskID taskmodel.UniqueID) taskmodel.Task {
@@ -241,6 +245,9 @@ func (queue *BaseTaskQueue) Enqueue(t taskmodel.Task) error {
 	}
 	t.SetTs(ts)
 	t.SetID(id)
+	if entry := reqregistry.FromContext(t.TraceCtx()); entry != nil {
+		entry.AddTask(id)
+	}
 
 	t.SetOnEnqueueTime()
 	return queue.addUnissuedTask(t)
