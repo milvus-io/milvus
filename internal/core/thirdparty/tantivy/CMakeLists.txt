@@ -20,7 +20,11 @@ set(TANTIVY_LIB_DIR "${CMAKE_INSTALL_PREFIX}/lib")
 set(TANTIVY_INCLUDE_DIR "${CMAKE_INSTALL_PREFIX}/include")
 set(TANTIVY_NAME "libtantivy_binding${CMAKE_STATIC_LIBRARY_SUFFIX}")
 
-set(LIB_FILE "${CMAKE_CURRENT_BINARY_DIR}/${TARGET_DIR}/${TANTIVY_NAME}")
+set(TANTIVY_CARGO_TARGET_DIR "$ENV{CARGO_TARGET_DIR}")
+if (NOT TANTIVY_CARGO_TARGET_DIR)
+    set(TANTIVY_CARGO_TARGET_DIR "${CMAKE_CURRENT_BINARY_DIR}")
+endif ()
+set(LIB_FILE "${TANTIVY_CARGO_TARGET_DIR}/${TARGET_DIR}/${TANTIVY_NAME}")
 set(LIB_HEADER_FOLDER "${CMAKE_CURRENT_SOURCE_DIR}/tantivy-binding/include")
 
 # In fact, cargo was already installed on our builder environment.
@@ -30,46 +34,44 @@ set(PATH_VAR $ENV{PATH})
 set(ENV{PATH} ${HOME_VAR}/.cargo/bin:${PATH_VAR})
 message($ENV{PATH})
 
-# Compile tantivy binding using cargo
-# The OUTPUT must be the actual file produced, so ninja/make knows how to generate it
-add_custom_command(
-        OUTPUT ${LIB_FILE}
+# Always invoke Cargo and let its fingerprinting decide whether Rust code needs
+# to be rebuilt.  Treating the static library as an OUTPUT without declaring
+# every Rust input can otherwise leave a stale library after source changes.
+add_custom_target(tantivy_build
         COMMENT "Compiling tantivy binding"
         COMMAND ${CMAKE_COMMAND} -E env
                 "PATH=${HOME_VAR}/.cargo/bin:${PATH_VAR}"
                 "TOKENIZER_PROTO=${TOKENIZER_PROTO}"
-                "CARGO_TARGET_DIR=${CMAKE_CURRENT_BINARY_DIR}"
+                "CARGO_TARGET_DIR=${TANTIVY_CARGO_TARGET_DIR}"
                 ${CARGO_CMD}
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tantivy-binding
+        BYPRODUCTS ${LIB_FILE}
         VERBATIM
 )
 
 # Set the installed library path
 set(INSTALLED_LIB_FILE "${TANTIVY_LIB_DIR}/${TANTIVY_NAME}")
 
-# Install tantivy library and headers to output directory
-# This custom command produces the installed library file
-add_custom_command(
-        OUTPUT ${INSTALLED_LIB_FILE}
+# Install tantivy library and headers to output directory. copy_if_different
+# keeps downstream C++ targets fresh when Cargo has no work to do.
+add_custom_target(install_tantivy_target
         COMMENT "Installing tantivy binding to ${TANTIVY_LIB_DIR}"
         COMMAND ${CMAKE_COMMAND} -E make_directory ${TANTIVY_LIB_DIR}
         COMMAND ${CMAKE_COMMAND} -E make_directory ${TANTIVY_INCLUDE_DIR}
-        COMMAND ${CMAKE_COMMAND} -E copy ${LIB_FILE} ${TANTIVY_LIB_DIR}/
-        COMMAND ${CMAKE_COMMAND} -E copy ${LIB_HEADER_FOLDER}/tantivy-binding.h ${TANTIVY_INCLUDE_DIR}/
-        COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/tantivy-wrapper.h ${TANTIVY_INCLUDE_DIR}/
-        COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/rust-binding.h ${TANTIVY_INCLUDE_DIR}/
-        COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/rust-array.h ${TANTIVY_INCLUDE_DIR}/
-        COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/rust-hashmap.h ${TANTIVY_INCLUDE_DIR}/
-        COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/tokenizer.h ${TANTIVY_INCLUDE_DIR}/
-        COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/token-stream.h ${TANTIVY_INCLUDE_DIR}/
-        COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/phrase_match.h ${TANTIVY_INCLUDE_DIR}/
-        COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/time_recorder.h ${TANTIVY_INCLUDE_DIR}/
-        DEPENDS ${LIB_FILE}
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${LIB_FILE} ${TANTIVY_LIB_DIR}/
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${LIB_HEADER_FOLDER}/tantivy-binding.h ${TANTIVY_INCLUDE_DIR}/
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/tantivy-wrapper.h ${TANTIVY_INCLUDE_DIR}/
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/rust-binding.h ${TANTIVY_INCLUDE_DIR}/
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/rust-array.h ${TANTIVY_INCLUDE_DIR}/
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/rust-hashmap.h ${TANTIVY_INCLUDE_DIR}/
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/tokenizer.h ${TANTIVY_INCLUDE_DIR}/
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/token-stream.h ${TANTIVY_INCLUDE_DIR}/
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/phrase_match.h ${TANTIVY_INCLUDE_DIR}/
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/time_recorder.h ${TANTIVY_INCLUDE_DIR}/
+        DEPENDS tantivy_build
+        BYPRODUCTS ${INSTALLED_LIB_FILE}
         VERBATIM
 )
-
-# Create a target that other targets can depend on
-add_custom_target(install_tantivy_target DEPENDS ${INSTALLED_LIB_FILE})
 
 add_library(tantivy_binding STATIC IMPORTED)
 add_dependencies(tantivy_binding
