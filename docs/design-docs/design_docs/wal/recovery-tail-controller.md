@@ -6,7 +6,7 @@
 - Design Review: 2026-07-29
 
 The Recovery Tail Controller keeps the replayable WAL suffix within a target
-size. It does not decide how SegmentView or TransformLog batches data and it
+size. It does not decide how SegmentView or L0Materializer batches data and it
 does not solve object fragmentation.
 
 ## 1. Byte Frontiers
@@ -88,7 +88,9 @@ Components implement idempotency:
 - SegmentView batches only its own segment data;
 - Summary seals its own PChannel staging buffer; it also runs independent
   age/pressure checks so summary-only backlog cannot be hidden by completed Ack;
-- TransformLog materializes its copied window independently under the L1 bound;
+- [L0Materializer](l0_materializer.md) reads Summary in bounded batches under
+  its requested window and L1 bound; it holds no source handles and is not an
+  independent WAL checkpoint gate;
 - non-persistence blockers such as BroadcastAck rely on their own retry paths.
   Explicit blocker classification is not implemented; a VChannel persist
   request may still be issued without resolving an Ack or poisoned-message stall.
@@ -149,7 +151,7 @@ Follow-up diagnostic metrics should add:
 - oldest incomplete message age;
 - stalled VChannel count;
 - requested and completed RequestPersistThrough targets;
-- blocker category: Segment data, TransformLog, lifecycle RPC, BroadcastAck,
+- blocker category: Segment data, Summary persistence, lifecycle RPC, BroadcastAck,
   object storage, or catalog;
 - append-backpressure duration.
 

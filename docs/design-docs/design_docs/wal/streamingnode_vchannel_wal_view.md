@@ -13,8 +13,8 @@ does not participate in the global checkpoint protocol.
 > chain (`QueryViewStateMachine.Acquire` → `PChannelRecoveryManager.Acquire` →
 > `VChannelRecoveryModule.queryWALViewLocked` → `QueryRuntime.Initialize`) are
 > **not yet implemented** in the current code; they are pending the qviews
-> feature (#51887). The RecoveryStorage components and checkpoint protocol are
-> final; only the view-construction and live-forwarding chain is unwired.
+> feature (#51887). TransformLog subscriptions are also a future integration,
+> independent of the [L0Materializer](l0_materializer.md) split targeted by this PR.
 
 ## 1. Ownership
 
@@ -26,12 +26,12 @@ QueryViewStateMachine.Acquire
   -> QueryRuntimeModule.Prepare
 ```
 
-The VChannel module already owns the inputs needed for a no-gap view:
+The VChannel module must coordinate these inputs for a no-gap view:
 
 - VChannel and schema history;
 - growing Segment stable and pending state;
 - Segment lifecycle and durable commit state;
-- TransformLog state and stream;
+- WALSummary readable history through the future TransformLog adaptor;
 - the live message observation path.
 
 ## 2. Runtime Frontiers
@@ -55,15 +55,30 @@ WAL-view capture and QueryRuntime registration use the same VChannel lock:
 ```text
 hold VChannel lock
   -> capture stable and pending Segment state
-  -> capture TransformLog readable state
+  -> capture the Transform replay boundary required by the observed snapshot
+  -> protect its historical start point in Summary retention
   -> construct VChannelWALView
   -> install QueryRuntime in Preparing state
 release VChannel lock
 ```
 
 Messages observed before capture are represented by stable objects, pending
-buffers, pending tasks, or TransformLog state. Messages observed afterward see
+buffers, pending tasks, or WALSummary records. Messages observed afterward see
 the installed QueryRuntime and enter its pending event queue.
+
+The captured Transform boundary describes the snapshot's required WAL prefix,
+not L0Materializer's cursor. Bounded replay through the future TransformLog
+adaptor must wait until Summary can completely provide that range before
+reporting SyncUp/completion. Do not lower the required end because a sampled
+Summary frontier is behind, or raise it to recovered Summary history ahead of
+VChannel observation. The target observation order installs Summary records
+before VChannel state/window updates; snapshot capture must preserve the same
+no-gap guarantee when future query wiring is added.
+
+Protect the history before GC can remove it and hold that requirement through
+preparation. An already truncated start is an error, not an empty replay.
+Neither L0 completion nor a subscription's delivery cursor proves that retained
+QueryViews no longer need historical Delete data.
 
 QueryRuntime receives ordinary immutable copies and never retains Message Ack
 handles.

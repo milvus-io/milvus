@@ -11,12 +11,15 @@ checkpoint gating and startup idempotency-window restoration (§7).
 The existing object-key encoding is retained; §8 describes forward
 generation-prefix discovery and its recovery cost.
 The cross-owner GC protocol is not yet designed; see the TODO in §9.
+The shared bounded-read contract (§5.4) and [L0Materializer](l0_materializer.md)
+integration are agreed targets for this PR, not yet implemented. TransformLog
+subscriptions (§5.5) are a separate future integration.
 
 ## 1. Core Purpose
 
 WALSummary is the WAL consumer-side summary of a physical WAL channel: it
 centrally stores the brief fields of the WAL that downstream features need
-(for example primary keys, idempotency, TimeTick, and TransformLog entries).
+(for example primary keys, idempotency, TimeTick, and Delete transform records).
 It exists for two reasons:
 
 1. **Log compression.** Keeping only these brief fields instead of the whole
@@ -32,9 +35,11 @@ It exists for two reasons:
 ### 2.1 Scope And Dependencies
 
 ```text
-RecoveryStorage             -> walsummary
-RecoveryStorage             -> vchannel (seeds transform windows from summary)
-walsummary                  -> (no dependency on vchannel / transformlog)
+RecoveryStorage             -> walsummary (sole record observation/storage)
+RecoveryStorage             -> vchannel (owns SegmentViews and L0Materializer)
+vchannel/l0materializer     -> walsummary read interface
+TransformLog adaptor        -> walsummary read interface (future)
+walsummary                  -> no dependency on its consumers
 ```
 
 The summary is organized per pchannel and internally groups its records by
@@ -48,6 +53,7 @@ walsummary.Manager (one per pchannel)
   +-- continuous durable frontier: the prefix with no missing chunk
   +-- manifest: retained chunk/section index and data coverage boundaries
   +-- manifest dirty state: changes awaiting normal publication
+  +-- readable coverage / change version: complete readable prefix (§5.4 target)
   +-- durableFrontiers: per-vchannel replay filtering positions
   +-- gcFrontiers: consumer progress used to decide retention
   +-- lastAcked: the continuous, recoverable summary confirmation position
@@ -118,8 +124,9 @@ transform records are independently ordered by WAL TimeTick. DDL does not
 invalidate the history of executed requests.
 
 `transform_end_timetick` bounds transform retention without waiting for later
-inserts in the same chunk. Physical deletion remains subject to the consumer's
-durable materialization or cleanup frontier.
+inserts in the same chunk. Physical deletion remains subject to L0Materializer's
+durable materialization or cleanup frontier and any additional history retention
+requirements when subscription consumers are integrated.
 
 ### 2.5 Chunk Format And Read Validation
 
@@ -196,6 +203,9 @@ seals and publishes. Sealed chunks and dirty manifests continue on their own
 scheduler retry paths; periodic checks do not manufacture completion or bypass
 the first-manifest requirement. Empty backlog produces no new chunk.
 Observation retains no source WAL handle and performs no object-storage I/O.
+In the target read integration, Summary installs records and their complete
+readable coverage before VChannel observation can advance L0Materializer's
+requested window. This ordering does not wait for upload or publication.
 The caller owns the scheduler lifetime. The existing convention that a zero
 `FlushMaxBytes` disables size-triggered sealing is unchanged.
 
@@ -336,8 +346,20 @@ that boundary, so an old object awaiting deletion cannot re-enter the index.
 An existing empty manifest is authoritative and must not cause fallback to an
 older manifest that still references retired objects.
 
-Consumer GC positions advance only after their corresponding VChannel metadata
-is durable. Transform materialization and summary persistence remain independent.
+L0Materializer's GC position advances only after its corresponding VChannel
+metadata is durable. L0 materialization and Summary persistence remain
+independent. Before future subscriptions are enabled, the integration must also
+supply the minimum historical start point required by retained QueryViews,
+DataViews, and protected local replays. The effective release position is the
+minimum of those requirements and the durable materialization/cleanup position;
+subscription delivery cursors are not retention acknowledgements. Unknown
+requirements during recovery keep history pinned until they are reconstructed.
+Summary accepts storage retention constraints, not QueryView-specific types.
+
+The read contract also requires a recoverable truncation boundary (§5.4).
+Reference removal and that boundary must be published consistently, so restart
+cannot report removed history as a successfully read empty interval. Local read
+pins protect in-progress I/O; view-level requirements protect future reads.
 
 After term T's complete manifest is successfully published, manifests with
 terms strictly less than T can be deleted asynchronously. Keep T's manifest:
@@ -365,7 +387,7 @@ by vchannel and TimeTick across retained chunks and in-memory records. The
 consumer rebuilds its window from these records and applies its own memory
 budget. WALSummary does not persist window membership or a per-key eviction
 cursor. It does keep runtime consumer frontiers where retention safety requires
-them, as for TransformLog. DDL does not invalidate executed-request history;
+them, as for L0Materializer. DDL does not invalidate executed-request history;
 replicated writes do not contribute foreign keys to the local dedup view.
 
 The current observer stages insert/idempotency pairs for keyed writes. A
@@ -374,28 +396,25 @@ future insert-only consumer would need to provide that observation policy.
 A primary-key index requiring full history would also need a retention contract
 beyond the bounded idempotency tail.
 
-### 5.2 TransformLog
+### 5.2 L0Materializer
 
-[TransformLog](transform_log.md) consumes the transform section. Its interface
-with WALSummary consists of reading transform entries when needed, rebuilding
-its materialization window from summary data during recovery, and supplying a
-GC position after its materialization metadata is durable.
+[L0Materializer](l0_materializer.md) consumes the transform section directly.
+It observes WAL messages only to merge a requested materialization boundary;
+it keeps no copied record window. When work is allowed by its L1 safety bound,
+it reads a bounded range from Summary, writes/registers L0 output, and updates
+`VChannelMeta.transform_materialized_time_tick` through the VChannel owner.
+Recovery restores that cursor and rebuilds the requested boundary through
+ordered replay, including RecoveryBarrier; it does not preload Delete history.
 
-The transform section contains Delete payloads only. TransformLog
-BarrierEntries are runtime progress boundaries and are not staged or written
-into Summary chunks; covered-position metadata can still advance on messages
-that carry no records.
+The transform section contains Delete payloads only. Payload-free Barriers
+advance readable coverage and the materializer's requested boundary, but are
+not staged or written as records. Pure Inserts produce no transform entry;
+general Summary coverage may still pass their positions.
 
-The existing read interface is
-`Manager.ReadTransformEntries(vchannel, materializedTimeTick, +inf)`. The
-committed consumer frontier is carried by
-`VChannelMeta.transform_materialized_time_tick`. Summary persistence, manifest
-publication and LastAcked are owned by WALSummary and its recovery integration;
-TransformLog does not define or drive that protocol. RecoveryStorage reads the
-window during module initialization and reports captured GC frontiers after
-catalog persistence. One integration gap remains: the callback currently visits
-full VChannel snapshots but omits base-only snapshots, so materialization-only
-updates may delay retention release.
+Summary owns persistence, manifest publication and LastAcked. The materializer
+reports its release position only after the corresponding VChannel snapshot is
+durable. Both full and base-only snapshots must participate in that callback.
+This release position is only one input to shared-store retention.
 
 ### 5.3 Consumer Lifecycle
 
@@ -408,6 +427,79 @@ request history.
 The standalone `RemoveAllObjects` helper is destructive maintenance, not a
 feature-toggle or corruption-recovery workflow. Repair must preserve the
 history required by every consumer.
+
+### 5.4 Transform Read Contract
+
+This is the shared storage contract required by L0Materializer now and the
+future TransformLog adaptor. Exact Go interface names remain an implementation
+choice; the semantic result is:
+
+```text
+ReadTransform(vchannel, after, through, row/byte limit)
+    -> Entries, CoveredThrough, retained/readable bounds
+ReadableProgress() -> coverage and change token
+WaitForChange(token)
+```
+
+The reader merges retained durable chunks, sealed records awaiting publication,
+and the pending tail into one ordered VChannel view. Memory-backed records are
+already backed by WAL; reading them does not authorize WAL truncation or require
+waiting for Summary uploads. `LastAcked` retains its separate durability meaning.
+
+The contract is:
+
+1. Return Delete entries strictly in `(after, CoveredThrough]`, ordered by
+   source WAL TimeTick, with `CoveredThrough <= through`.
+2. CoveredThrough proves every Delete in that interval has been included.
+   Page limits stop at a complete Entry boundary; a Txn uses its outer TimeTick
+   and all its Delete children. One oversized Entry may exceed a soft limit.
+3. A proven empty interval may advance CoveredThrough. An empty result without
+   coverage progress does not prove catch-up or completion of the requested
+   range. Never infer coverage from the last payload or the requested end.
+4. Capture disk indexes and in-memory records consistently with readable
+   progress. A concurrent pending/sealed/durable transition cannot leave a
+   record in neither half or return it twice.
+5. Reject a cursor before the retained transform window. Persist enough
+   truncation information to retain this distinction after restart and after
+   the last chunk is removed. The exact encoding is pending implementation;
+   existing `covered_position` proves summarization, not retained history.
+6. Missing or corrupt referenced objects fail the read; an absent VChannel
+   section means an empty interval only within known complete retained coverage.
+7. Pin a read's required objects against local deletion. Pins have bounded read
+   lifetimes, not the lifetime of an external stream. Cross-owner GC still
+   requires the protocol in §9.
+
+Readable coverage advances only after the ordered input prefix has been fully
+accounted for in Summary. This includes applicable payload-free PChannel
+messages such as RecoveryBarrier: skipping record creation must not skip their
+coverage effect. Non-persisted heartbeats do not establish new coverage.
+Recovered coverage comes from validated continuous stored coverage plus ordered
+WAL replay; client cursors and requested endpoints never create coverage.
+
+A change token is captured consistently with progress. Notifications wake
+consumers to recheck state, avoiding a missed update between reading and waiting;
+they do not carry record ownership or subscription delivery guarantees. The
+current materializer normally gets its scheduling triggers from observation
+and L1-bound changes. Future subscriptions use progress notifications to follow
+the tail without adding another WAL observer.
+
+Summary owns any decoded cache and shared object-fetch coordination. Cache
+memory must be bounded independently of total retained history. PChannel
+objects can contain many VChannels; reuse reads where possible instead of
+fetching the same object for each subscriber. Section indexes do not imply
+section-only I/O: the current Store downloads the whole chunk (§2.5).
+
+### 5.5 Future TransformLog Adaptor
+
+[TransformLog](transform_log.md) wraps §5.4 to provide local and remote
+subscriptions. It has no ObserveMessage, independent storage, or L0 execution.
+Entry/SyncUp delivery, resume cursors, stream backpressure, and QueryView
+consumer integration are outside this PR. The storage interfaces must not
+require those components to exist for L0 materialization to run.
+
+Before enabling subscriptions, wire the additional history retention constraints
+in §4 and preserve the [WAL-view handoff](streamingnode_vchannel_wal_view.md).
+L0 completion alone is insufficient to release history required by those readers.
 
 ## 6. Recovery And Term Takeover
 
@@ -528,8 +620,8 @@ manifests are removed after the current term's publication. The cross-owner GC
 protocol remains TODO in §9; local locking is not distributed exclusion.
 
 RecoveryStorage supplies ordered observation and scheduler lifetime, combines
-AckTracker completion with `LastAcked`, restores transform windows, and runs
-Summary backlog checks independently of Tracker stalls and catalog retries.
+AckTracker completion with `LastAcked`, and runs Summary backlog checks
+independently of Tracker stalls and catalog retries.
 At the startup RecoveryBarrier, RecoveryStorage populates
 `RecoverySnapshot.SummarySnapshots` from all retained idempotency sections and
 records staged or sealed during WAL replay, without waiting for their uploads.
@@ -540,8 +632,18 @@ per VChannel. The interceptor rebuilds its windows and applies its byte cap
 before the WAL accepts appends. A read or decode failure fails WAL open rather
 than admitting writes with an incomplete deduplication window.
 
+The current `ReadTransformEntries` implementation reads only durable chunks
+and returns the whole requested range. RecoveryStorage currently preloads that
+range into `vchannel/transformlog`, which also observes live messages and keeps
+a copied payload window. The target in §5.2 replaces this with the independent
+L0Materializer and the unified bounded reader in §5.4; these changes are not yet
+implemented. The idempotency reader already captures durable and in-memory
+records consistently, but does not by itself implement the transform contract.
+
 GC callbacks still need to cover base-only VChannel snapshots (§5.2), and
-count-budget wiring is absent (§3.4). These gaps are separate from the
+count-budget wiring is absent (§3.4). Recoverable transform truncation bounds
+and progress notification APIs in §5.4 also remain implementation work. Future
+subscription retention is not wired. These gaps are separate from the
 implemented asynchronous write path.
 
 ## 8. Object Listing And Recovery Cost
