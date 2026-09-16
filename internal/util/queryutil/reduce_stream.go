@@ -116,14 +116,14 @@ type OrderedReduceStream struct {
 	closeErr        error
 }
 
-// NewReduceStream creates the iterator Plain Query OrderedReduceStream.
+// NewReduceStream creates the bounded Plain Query OrderedReduceStream.
 func NewReduceStream(request *internalpb.RetrieveRequest, childStreams []ReduceStream, chunkSize int) (ReduceStream, error) {
 	if request == nil {
 		return nil, merr.WrapErrServiceInternalMsg("NewReduceStream requires a Query request")
 	}
-	if !request.GetIsIterator() || request.GetIsCount() || len(request.GetGroupByFieldIds()) > 0 ||
+	if request.GetIsCount() || len(request.GetGroupByFieldIds()) > 0 ||
 		len(request.GetAggregates()) > 0 || len(request.GetOrderByFields()) > 0 {
-		return nil, merr.WrapErrServiceUnimplemented(status.Error(codes.Unimplemented, "Query ReduceStream supports iterator Plain Query only"))
+		return nil, merr.WrapErrServiceUnimplemented(status.Error(codes.Unimplemented, "Query ReduceStream supports bounded Plain Query only"))
 	}
 	if request.GetLimit() <= 0 {
 		return nil, merr.WrapErrServiceInternalMsg("Query ReduceStream requires a positive limit, got %d", request.GetLimit())

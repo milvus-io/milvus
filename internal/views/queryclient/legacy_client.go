@@ -25,7 +25,7 @@ type Client interface {
 	Legacy() LegacyClient
 }
 
-// LegacyClient returns batch results or the final iterator ReduceStream.
+// LegacyClient returns batch results or the final ReduceStream.
 // Errors are business merr errors; ViewError and StreamingError remain internal.
 type LegacyClient interface {
 	// Statistics uses the outer BarrierMVCC; zero selects ordinary Strong sampling.
@@ -349,7 +349,6 @@ func (c *legacyClient) Query(ctx context.Context, req *LegacyQueryRequest) (resu
 
 func supportsQueryStream(req *internalpb.RetrieveRequest) bool {
 	return req != nil &&
-		req.GetIsIterator() &&
 		req.GetLimit() > 0 &&
 		!req.GetIsCount() &&
 		len(req.GetGroupByFieldIds()) == 0 &&
