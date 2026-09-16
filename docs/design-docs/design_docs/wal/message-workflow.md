@@ -9,6 +9,10 @@ This document describes how one WAL observation stream routes messages into
 VChannel-owned persistence components. Handle lifetime and checkpoint gating
 are defined by [WAL Message Ack Design](message_ack.md).
 
+The shared observation path is implemented. The capacity/API/Summary-backlog
+admission policy described below is an agreed revision, pending implementation
+in [L0Materializer](l0_materializer.md).
+
 ## 1. Common Flow
 
 Observation is serialized in PChannel WAL order:
@@ -105,8 +109,10 @@ resulting recovery metadata is installed.
 
 WALSummary copies the Delete record and advances `LastAcked()` only through its
 recoverable prefix. RecoveryStorage caps checkpoint publication at that frontier.
-L0Materializer advances its requested boundary and reads Summary to materialize
-L0 independently, without retaining the message.
+L0Materializer advances its observed window boundary. The revised admission
+policy accumulates Deletes to capacity, or waits for an explicit completion or
+Summary backlog request; observation alone does not force output. It reads
+Summary independently without retaining the message.
 
 ### Flush-Style Messages
 
@@ -114,7 +120,10 @@ Flush, ManualFlush, FlushAll, DropCollection, DropPartition,
 TruncateCollection, schema-changing AlterCollection, and AlterWAL may create
 work in multiple SegmentViews and L0Materializers. Each asynchronous Segment
 consumer owns an independent clone; L0Materializer only merges the relevant
-boundary into its requested window, without storing a BarrierEntry.
+boundary into its requested window, without storing a BarrierEntry. Under the
+revised batching policy, operations requiring completed L0 output also record
+explicit completion intent and wait for related L1 flush/final-commit completion.
+Barrier classification alone does not establish that requirement.
 
 ### Txn
 
@@ -132,8 +141,10 @@ SegmentView releases its handle.
 
 RecoveryBarrier passes through the same Observe flow. Summary records its
 readable coverage even though it has no payload; each affected L0Materializer
-advances its requested boundary. This triggers pre-checkpoint Summary backlog
-without needing new Deletes. Tracker accounts for any retained component work.
+advances its requested boundary. This exposes pre-checkpoint Summary backlog
+without needing new Deletes. Under the revised batching policy, Summary backlog
+or another admission reason requests actual materialization; RecoveryBarrier
+does not itself force the historical window into L0. Tracker accounts for any retained component work.
 
 The recovery controller separately observes its TimeTick to announce that the
 startup scanner caught up. The barrier does not change component behavior and

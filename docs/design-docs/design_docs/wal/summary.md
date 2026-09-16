@@ -12,7 +12,9 @@ The existing object-key encoding is retained; §8 describes forward
 generation-prefix discovery and its recovery cost.
 The cross-owner GC protocol is not yet designed; see the TODO in §9.
 The shared bounded-read contract (§5.4) and [L0Materializer](l0_materializer.md)
-integration are implemented. TransformLog
+integration are implemented. The revised batching and Summary-owned
+materialization-backlog policy in [L0Materializer §5](l0_materializer.md#5-read-and-materialize)
+is agreed but not yet wired; current materialization remains eager. TransformLog
 subscriptions (§5.5) are a separate future integration.
 
 ## 1. Core Purpose
@@ -212,6 +214,19 @@ requested window. This ordering does not wait for upload or publication.
 The caller owns the scheduler lifetime. The existing convention that a zero
 `FlushMaxBytes` disables size-triggered sealing is unchanged.
 
+The revised consumer policy also requires Summary to govern **materialization
+backlog**: Deletes not yet consumed into L0, whether pending, sealed or already
+persisted. An upload does not discharge this work. Backlog governance may issue
+a coalesced, bounded progress request to the VChannel owner even with an empty
+pending buffer and no new WAL traffic. It must account for recovered retained
+history and distinguish work needing L0 output from output awaiting durable
+VChannel metadata. The latter needs metadata publication, not duplicate output.
+An ordinary Summary seal/upload is not automatically an L0 flush request.
+L0Materializer introduces no age/idle timer; long-standing unmaterialized data
+is handled through this Summary-owned mechanism. The existing `flushBacklog`
+only examines persistence backlog, so this consumer extension remains to be
+implemented. See [L0Materializer §5](l0_materializer.md#5-read-and-materialize).
+
 Chunk sequence order follows the ordered input stream, not upload completion
 order. An upload completing at sequence N makes N eligible for the manifest
 only when every predecessor after the published boundary has completed too.
@@ -403,8 +418,10 @@ beyond the bounded idempotency tail.
 
 [L0Materializer](l0_materializer.md) consumes the transform section directly.
 It observes WAL messages only to merge a requested materialization boundary;
-it keeps no copied record window. When work is allowed by its L1 safety bound,
-it reads a bounded range from Summary, writes/registers L0 output, and updates
+it keeps no copied record window. Work requires a capacity trigger, an explicit
+completion request after related L1 flushes, or a Summary backlog request;
+the L1 safety bound alone is insufficient. Once admitted, it reads a bounded
+range from Summary, writes/registers L0 output, and updates
 `VChannelMeta.transform_materialized_time_tick` through the VChannel owner.
 Recovery restores that cursor and rebuilds the requested boundary through
 ordered replay, including RecoveryBarrier; it does not preload Delete history.
@@ -484,8 +501,8 @@ WAL replay; client cursors and requested endpoints never create coverage.
 A change token is captured consistently with progress. Notifications wake
 consumers to recheck state, avoiding a missed update between reading and waiting;
 they do not carry record ownership or subscription delivery guarantees. The
-current materializer normally gets its scheduling triggers from observation
-and L1-bound changes. Future subscriptions use progress notifications to follow
+revised materializer re-evaluates admission after observation, L1 completion,
+and Summary backlog requests. Notifications alone do not force L0 output. Future subscriptions use progress notifications to follow
 the tail without adding another WAL observer.
 
 Summary owns any decoded cache and shared object-fetch coordination. Cache
@@ -651,6 +668,12 @@ window to read; startup no longer preloads Delete payloads. Both full and
 base-only VChannel snapshot commits report their captured materialization
 frontiers. The manifest persists per-VChannel transform truncation bounds,
 including after removal of the last chunk.
+
+The revised L0 batching policy is pending: current code still schedules every
+safe outstanding window. Summary also still checks only unpersisted backlog;
+consumer-backlog requests, light range statistics and recoverable explicit
+flush intent must be added as specified in L0Materializer §5–7. The revised
+policy has no L0 age timer and does not use `FlushL0MaxLifetime` as a trigger.
 
 Count-budget wiring remains absent (§3.4). Future subscription retention and
 cross-owner GC fencing remain separate follow-up work.

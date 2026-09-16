@@ -5,8 +5,11 @@
 - Independent Approver: @weiliu1031
 - Design Review: 2026-07-29
 
-**Status:** Implemented in `vchannel/l0materializer`, using WALSummary's shared
-bounded reader. This document owns all L0 materialization behavior.
+**Status:** Shared Summary reads and the independent component are implemented.
+The batching policy below is the revised agreed target: current code still
+schedules every safe nonempty window and must be changed. Capacity triggers,
+explicit flush dependencies, and Summary-owned materialization backlog requests
+are pending. L0Materializer has no age-based flush timer.
 [TransformLog](transform_log.md) remains a separate future subscription adaptor.
 
 ## 1. Ownership
@@ -45,7 +48,8 @@ The runtime keeps three positions:
 | W: requestedThrough | The newest materialization boundary accepted by this component's ordered observation path. |
 | L: upperBound | The inclusive L1 safety bound supplied by the VChannel owner. |
 
-The outstanding window is `(M, W]`; one task targets `min(W, L)`.
+The outstanding window is `(M, W]`; `min(W, L)` is its safe upper bound,
+not a sufficient reason to schedule output.
 The persisted copy of M can lag the running value and is tracked by normal
 VChannel snapshot bookkeeping. W and L are runtime state, not additional
 persistent checkpoints or WAL replay positions.
@@ -66,7 +70,7 @@ Observation classifies each valid, ordered, routed WAL message:
 
 Delete takes precedence inside a Txn. ObserveMessage performs no I/O, copies no
 payload, and retains no message handle. It monotonically merges the requested
-boundary and ensures background work is scheduled when progress is possible.
+boundary and asks the batching policy to re-evaluate when relevant state changes.
 BarrierEntry is a classification, not an allocated queue entry or stored record.
 
 PChannel-level messages, including persisted TimeTicks and RecoveryBarrier,
@@ -105,22 +109,90 @@ materialization from passing Segment state not yet reconstructed by replay.
 A later CreateSegment has a TimeTick beyond an already observed task target;
 it cannot invalidate a correctly captured older interval.
 
-An L1 final commit or lifecycle change recomputes L and independently wakes
-materialization. Progress must not depend on another WAL message arriving.
+An L1 final commit or lifecycle change recomputes L and independently
+re-evaluates pending work. Raising L alone does not force a small output batch.
+An explicit API flush waits for its related L1 Segment flushes to complete,
+including output durability and final DataCoord commit, before L0 executes
+through its requested boundary. Merely enqueuing a flush or marking a Segment
+sealed is insufficient. All work still respects W and the VChannel-wide L.
+Completion notifications must wake eligible requests without another WAL message.
 
 ## 5. Read And Materialize
 
+### 5.1 Reasons To Materialize
+
+The objective is to accumulate useful output batches and minimize physical L0
+materializations. There are exactly three sources of requests:
+
+| Source | Admission rule | Completion boundary |
+|---|---|---|
+| Capacity | Delete rows or logical bytes in `(M,min(W,L)]` reach the configured batch target. | Process a bounded batch, then re-evaluate capacity; a small remaining tail waits. |
+| Explicit completion | An API/lifecycle operation requires L0 progress through F, and its related L1 flushes are complete. | Complete the captured F subject to W and L, including a below-target tail. |
+| Summary backlog | Summary requests progress through B for outstanding Delete consumption or retention pressure. | Complete the requested bounded prefix subject to W and L; coalesce repeated requests. |
+
+Capacity initially uses the existing `FlushL0MaxRowNum` and `FlushL0MaxSize`
+targets (defaults: 500,000 Delete rows or 32 MiB). Barrier counts, Insert sizes,
+and Deletes beyond L do not satisfy this condition. Summary supplies the range
+statistics; entry count is not Delete row count. The materializer does not
+recreate a payload backlog or perform object I/O in ObserveMessage to count it.
+
+ManualFlush, FlushAll and lifecycle operations whose completion/cleanup needs
+L0 output create explicit requests through the VChannel owner. Ordinary
+TimeTicks, RecoveryBarrier, generic DDL and individual automatic Segment flushes
+do not automatically create such requests. Barrier classification and the
+semantic requirement to complete an API are separate decisions.
+
+**There is no L0 maximum-age timer, idle timer, or periodic forced flush.**
+`FlushL0MaxLifetime` does not supply a trigger to this component. Long-unmaterialized
+Delete data is governed by Summary's backlog mechanism (§5.2). A raised L,
+Summary upload completion or recovery checkpoint publication is not itself a
+physical materialization trigger.
+
+### 5.2 Summary-Owned Backlog Requests
+
+Summary's backlog covers both records awaiting object persistence and retained
+Delete records still awaiting consumer materialization. Persisting a chunk
+moves records between storage states; it does not remove unmaterialized Deletes
+from that backlog. This includes durable pre-checkpoint records after recovery,
+even when `pending` is empty and no new WAL messages arrive.
+
+Summary owns the decision to request a bounded consumption prefix and emits
+that request through recovery/VChannel wiring. It does not import or execute
+the L0 writer. The materializer merges requests, waits for safety/dependencies,
+and carries out the output. An ordinary Summary flush need not request L0.
+Retention pressure targets the oldest chunks whose release can actually be
+unblocked; another consumer's retention need cannot be solved by extra L0 output.
+Existing Summary backlog governance is the source of long-standing-work
+requests; no independent per-materializer deadline or age setting is added.
+
+Range statistics and backlog inspection must include cold and hot records,
+using Summary indexes and bounded reads without scanning all payloads on each
+observation. A storage transition or restart cannot reset outstanding work.
+Runtime requests from this policy can be reconstructed from Summary state;
+explicit API requests have the separate recovery requirement in §6.
+
+### 5.3 Execute A Captured Request
+
 Each VChannel executes materialization batches serially:
 
-1. Capture `target = min(W, L)`. If target is at or before M, wait for progress.
-2. Ask Summary for Delete records in `(M, target]`, bounded by rows/bytes.
-3. Use the returned `CoveredThrough`, not the requested target, as this batch's
-   possible commit position.
-4. Group Deletes by partition/PK representation, write L0 deltalogs, and
-   register all resulting output with DataCoord.
-5. Only after the entire batch succeeds, advance M through its covered range,
+1. Admit work for one of the reasons above; safety alone does not admit work.
+2. Capture a finite target bounded by W and L. Explicit API work also waits
+   for its related L1 flush completion; retain blocked requests without polling
+   them as ready tasks.
+3. Read Delete records in `(M,target]` from Summary, bounded by rows/bytes.
+4. Use returned `CoveredThrough`, not the requested target, as the possible
+   commit position; group Deletes by partition/PK representation, write L0
+   deltalogs and register all resulting output with DataCoord.
+5. After the entire batch succeeds, advance M through its covered range,
    update VChannelMeta through the owner callback, and mark the snapshot dirty.
-6. Re-evaluate the latest W and L and schedule a continuation if work remains.
+6. For capacity work, continue only while capacity is still satisfied. For an
+   explicit or backlog request, continue to its captured goal, then re-evaluate.
+   New small arrivals do not indefinitely extend the running request's goal.
+
+A capacity batch must not automatically drain a below-target remainder just
+because W is still ahead of M. Coalesce requests arriving during execution and
+keep one active task per VChannel. Rows/bytes also bound each execution and
+physical output, with the complete-Entry rule below.
 
 The reader covers durable chunks, sealed records, and the pending tail.
 Materialization does not wait for Summary object persistence or manifest
@@ -133,7 +205,9 @@ must not commit an Entry's TimeTick after processing only part of that Entry.
 Physical L0 output may be split, but the batch frontier advances only after all
 required outputs are registered.
 
-A proven empty interval can advance M without producing an empty L0. An
+A proven empty interval can advance M without producing an empty L0. Coalesce
+this metadata work with required boundaries or normal snapshot handling rather
+than scheduling a separate task for every TimeTick. An
 incomplete read cannot. A read with no coverage progress must wait for the
 relevant change or return an error, never spawn an endless continuation chain.
 Task completion and new-window/L1-bound updates must be coordinated so a wakeup
@@ -161,6 +235,14 @@ Summary owns actual chunk retention and deletion. Future subscription consumers
 add their own history requirements; this consumer's release position is not
 permission to override those requirements.
 
+Explicit completion intent must survive a crash if WAL replay will no longer
+contain its initiating message. Persist the pending boundary and recoverable
+L1 dependency information in VChannel recovery state, or derive them fully
+from retained lifecycle metadata, before checkpoint publication can skip that
+message. Current VChannelMeta's materialized field alone cannot preserve an
+unfinished ManualFlush request. This is durable intent, not an additional WAL
+replay checkpoint; the component still owns no separate catalog.
+
 L0 materialization retains no source WAL handles, does not delay BroadcastAck,
 and does not independently gate the global recovery checkpoint. Summary's
 recoverable confirmation protects Delete durability while materialization lags.
@@ -176,12 +258,15 @@ After restoring Summary and VChannel/Segment metadata:
 4. Route the startup RecoveryBarrier to each VChannel still requiring
    materialization. This ensures old Summary backlog is discovered even when
    no new Delete arrives.
-5. Read the outstanding range lazily and continue normal background work.
+5. Restore explicit completion intent and re-evaluate capacity and Summary
+   backlog requests; read outstanding data lazily only when admitted.
 
 For example, M=50 and global checkpoint=200 may coexist with an unmaterialized
 Delete@100 already stored in Summary. WAL replay need not deliver that Delete
-again: RecoveryBarrier@250 requests a window through 250, and the bounded reader
-finds Delete@100 in `(50,250]`, subject to L. No startup payload preload is needed.
+again: RecoveryBarrier@250 exposes a window through 250, and an admitted
+capacity/API/Summary-backlog request reads Delete@100 from `(50,250]`, subject
+to L. RecoveryBarrier itself does not force an undersized tail into L0.
+No startup payload preload is needed.
 Do not initialize W from Summary's largest position, which may be ahead of
 VChannel replay. Restored M may itself be ahead of the global checkpoint;
 older observations never move it backward or request already completed work.
@@ -201,9 +286,18 @@ physical exactly-once output; output idempotency/reconciliation is separate.
 - Payload memory is bounded by active batches, not unmaterialized history.
 - Successful L0 registration precedes M advancement; durable M precedes GC release.
 - Materialization runs without subscribers and does not depend on TransformLog.
+- Safety/Barrier progress alone cannot force output; L0 has no age timer.
+- Capacity tails accumulate; explicit API output waits for related L1 completion.
+- Summary backlog includes already-persisted, still-unmaterialized Delete records.
 
 Validation must cover storage transitions during reads, empty windows,
 row/byte-capped Txns, L1-bound release without new messages, observation/task
 completion races, recovery with Summary ahead of replay, pre-checkpoint Delete
 backlog, Barrier-only startup, and crashes between output registration and
 metadata publication.
+
+Batching validation must additionally cover low-rate Deletes with frequent
+TimeTicks, below-target tails after full batches, no periodic L0 flush,
+Summary backlog requests while pending storage is empty, blocked explicit
+requests surviving restart, L1 completion without new input, and request
+coalescing without continually extending an active goal.
