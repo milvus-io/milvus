@@ -3082,9 +3082,10 @@ func TestGarbageCollector_removeDroppedSegmentFilesV3(t *testing.T) {
 	t.Run("remove index file failed", func(t *testing.T) {
 		cm := mocks.NewChunkManager(t)
 		cm.EXPECT().RootPath().Return("root").Maybe()
-		// No RemoveWithPrefix expectation: a failed index-file delete must
-		// leave basePath - and the manifest inside it, the only thing naming
-		// the surviving index files - untouched for the next cycle.
+		// On 3.0 the dropped-segment index file list comes from index meta,
+		// not from the manifest under basePath, so basePath removal does not
+		// need to wait on index-file removal succeeding: it always runs first.
+		cm.EXPECT().RemoveWithPrefix(mock.Anything, basePath+"/").Return(nil).Once()
 		cm.EXPECT().Remove(mock.Anything, "root/index_files/40/1/10/2001/idx-file").Return(errors.New("remove failed")).Once()
 		gc := newGarbageCollector(nil, nil, GcOption{cli: cm})
 
@@ -3094,10 +3095,10 @@ func TestGarbageCollector_removeDroppedSegmentFilesV3(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	// Index artifacts live outside basePath while the manifest naming them
-	// lives inside it, so basePath must go last: removing it first would
-	// strip a partially-failed cycle of the only record of the survivors.
-	t.Run("index files removed before basePath", func(t *testing.T) {
+	// On 3.0 the index file list comes from index meta rather than the
+	// manifest at basePath, so there is no orphan risk in removing basePath
+	// first: it is deleted before the index files.
+	t.Run("basePath removed before index files", func(t *testing.T) {
 		var mu sync.Mutex
 		var calls []string
 		cm := mocks.NewChunkManager(t)
@@ -3121,7 +3122,7 @@ func TestGarbageCollector_removeDroppedSegmentFilesV3(t *testing.T) {
 			"root/index_files/40/1/10/2001/idx-file2": {},
 		}))
 		require.Len(t, calls, 3)
-		assert.Equal(t, basePath+"/", calls[len(calls)-1])
+		assert.Equal(t, basePath+"/", calls[0])
 	})
 }
 
