@@ -2,7 +2,6 @@ package recovery
 
 import (
 	"context"
-	"math"
 	"sync"
 
 	"google.golang.org/protobuf/proto"
@@ -16,8 +15,8 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/l0materializer"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/segment"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/transformlog"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walsummary"
 	"github.com/milvus-io/milvus/internal/util/idalloc"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -227,51 +226,13 @@ func (r *recoveryStorageImpl) initRecoveryModules(
 		Scheduler: r.taskScheduler,
 		Notifier:  r,
 	}
-	transformLogMaterializer := transformlog.NewSyncMaterializer(
+	l0Writer := l0materializer.NewSyncMaterializer(
 		resource.Resource().ChunkManager(),
 		idalloc.NewMAllocator(resource.Resource().IDAllocator()),
 		syncmgr.BrokerMetaWriter(broker.NewCoordBroker(coord, paramtable.GetNodeID()), paramtable.GetNodeID()),
 	)
-	// Load the initial materialization window of every vchannel: the durable
-	// records after the restored transform_materialized_time_tick. This is
-	// the only read of the summary store the transform consumer relies on; at
-	// runtime it observes the vchannel's messages directly instead.
-	// The persisted frontier is the single source of truth for recovery: a
-	// crash only loses in-flight registrations, whose records are still in
-	// the summary window below and are re-materialized (duplicate L0 output
-	// is idempotent), and a crash never loses materialized-but-unregistered
-	// records because the frontier advances only after registration succeeds.
-	pendingTransformEntries := make(map[string][]*streamingpb.TransformLogEntry, len(vchannels))
-	for vchannel, meta := range vchannels {
-		// The summary was already restored (chunk index, durable frontiers and
-		// GC positions) by Restore; only the transform consumer's recovery
-		// window is loaded here: the durable records after the restored
-		// materialization frontier. This is the only read of the summary store
-		// the transform consumer relies on; at runtime it observes the
-		// vchannel's messages directly instead.
-		//
-		// The persisted frontier is the single source of truth for recovery: a
-		// crash only loses in-flight registrations, whose records are still in
-		// the summary window below and are re-materialized (duplicate L0
-		// output is idempotent), and a crash never loses
-		// materialized-but-unregistered records because the frontier advances
-		// only after registration succeeds.
-		if state := meta.GetState(); state == streamingpb.VChannelState_VCHANNEL_STATE_DROPPED ||
-			state == streamingpb.VChannelState_VCHANNEL_STATE_TOMBSTONED {
-			// A dropped vchannel consumes nothing after its cleanup; it needs
-			// no materialization window.
-			continue
-		}
-		entries, err := summaryManager.ReadTransformEntries(
-			ctx, vchannel, meta.GetTransformMaterializedTimeTick(), math.MaxUint64,
-		)
-		if err != nil {
-			return err
-		}
-		if len(entries) > 0 {
-			pendingTransformEntries[vchannel] = entries
-		}
-	}
+	// L0 recovery restores only its cursor. Ordered replay (including the
+	// RecoveryBarrier) requests windows that are read lazily from Summary.
 	// Deprecated: the manager periodically reports the pchannel recovery
 	// checkpoint to DataCoord (DataCoord.UpdateChannelCheckpoint) so that
 	// GetFlushState can observe flush progress. The recovery storage write
@@ -291,13 +252,12 @@ func (r *recoveryStorageImpl) initRecoveryModules(
 			idalloc.NewMAllocator(resource.Resource().IDAllocator()),
 			packed.CreateStorageConfig(),
 		),
-		SummaryManager:            summaryManager,
-		PendingTransformEntries:   pendingTransformEntries,
-		TransformLogMaterializer:  transformLogMaterializer,
-		TransformLogMaterialRows:  uint64(paramtable.Get().StreamingCfg.FlushL0MaxRowNum.GetAsInt()),
-		TransformLogMaterialBytes: uint64(paramtable.Get().StreamingCfg.FlushL0MaxSize.GetAsSize()),
-		GetRecoveryCheckpoint:     func() *utility.WALCheckpoint { return r.GetCheckpoint(context.TODO()) },
-		CoordinatorBroker:         coordinatorBroker,
+		SummaryManager:        summaryManager,
+		L0Materializer:        l0Writer,
+		L0MaterializeRows:     uint64(paramtable.Get().StreamingCfg.FlushL0MaxRowNum.GetAsInt()),
+		L0MaterializeBytes:    uint64(paramtable.Get().StreamingCfg.FlushL0MaxSize.GetAsSize()),
+		GetRecoveryCheckpoint: func() *utility.WALCheckpoint { return r.GetCheckpoint(context.TODO()) },
+		CoordinatorBroker:     coordinatorBroker,
 	})
 	if err != nil {
 		return err
@@ -593,13 +553,12 @@ func (r *recoveryStorageImpl) observeModulesMessage(
 	if r.vchannelManager == nil {
 		panic("recovery modules are not initialized")
 	}
-	r.vchannelManager.ObserveMessage(ctx, retained)
-	// The summary observes the same message stream independently of the
-	// vchannel modules: its pchannel-level statistics (staging bytes, flush
-	// threshold) are maintained by the summary manager itself.
+	// Publish Summary records and complete coverage before VChannel tasks
+	// can request the new materialization boundary.
 	if r.summaryManager != nil {
 		r.summaryManager.ObserveMessage(ctx, retained.Message())
 	}
+	r.vchannelManager.ObserveMessage(ctx, retained)
 }
 
 // composedPersistRequester fans a tracker stall / under-pressure request out

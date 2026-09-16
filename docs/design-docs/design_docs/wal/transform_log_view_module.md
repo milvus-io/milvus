@@ -10,8 +10,7 @@ The agreed design separates shared storage, L0 materialization, and subscription
 - [WALSummary](summary.md): sole record storage, bounded reads, readable
   coverage, durability, confirmation, and retention.
 - [L0 Materializer](l0_materializer.md): VChannel-owned component that observes
-  window boundaries and reads Summary to produce L0. This is the current PR's
-  target, replacing the existing copied-window `vchannel/transformlog` code.
+  window boundaries and reads Summary to produce L0. Implemented in `vchannel/l0materializer`, replacing the former copied window.
 - [TransformLog Subscription Adaptor](transform_log.md): future read-only
   wrapper over Summary, outside this PR; no observation or materialization.
 

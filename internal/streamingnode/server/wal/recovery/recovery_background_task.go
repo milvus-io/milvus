@@ -91,9 +91,14 @@ func (rs *recoveryStorageImpl) persistDirtySnapshot(ctx context.Context, lvl mlo
 	// The vchannel metas are durable now: advance the summary GC positions to
 	// their materialization frontiers. Only persisted frontiers may release
 	// summary records — a crash-recovery must observe them (see
-	// VChannelRecoveryModule.markTransformMaterialized).
+	// VChannelRecoveryModule.markL0Materialized).
 	if rs.summaryManager != nil {
 		for vchannel, meta := range recoverySnapshot.VChannels {
+			if frontier := meta.GetTransformMaterializedTimeTick(); frontier > 0 {
+				rs.summaryManager.AdvanceGCTimeTick(vchannel, frontier)
+			}
+		}
+		for vchannel, meta := range recoverySnapshot.VChannelBaseMetas {
 			if frontier := meta.GetTransformMaterializedTimeTick(); frontier > 0 {
 				rs.summaryManager.AdvanceGCTimeTick(vchannel, frontier)
 			}
