@@ -204,17 +204,16 @@ class JsonScalarIndexWrapper : public BaseIndex {
     }
 
     folly::coro::Task<void>
-    MaterializeAsync(storage::IndexLoadArtifact& artifact,
-                     const std::any& materialization_context,
-                     const Config& config) override {
+    FinishLoadAsync(storage::IndexLoadArtifact& artifact,
+                    const std::any& load_context,
+                    const Config& config) override {
         auto new_non_exist_offsets = TakeJsonNonExistOffsets(artifact);
 
-        co_await BaseIndex::MaterializeAsync(
-            artifact, materialization_context, config);
+        co_await BaseIndex::FinishLoadAsync(artifact, load_context, config);
         non_exist_offsets_ = std::move(new_non_exist_offsets);
         BuildExistsBitset(this->Count());
         LOG_INFO(
-            "MaterializeAsync JsonScalarIndexWrapper done, "
+            "FinishLoadAsync JsonScalarIndexWrapper done, "
             "has_non_exist: "
             "{}",
             !non_exist_offsets_.empty());

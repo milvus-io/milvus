@@ -1566,7 +1566,7 @@ BitmapIndex<T>::PlanLoad(const storage::IndexEntryCatalog& catalog,
         context->index_length > DEFAULT_BITMAP_INDEX_BUILD_MODE_BOUND;
 
     IndexLoadPlan plan;
-    plan.materialization_context = context;
+    plan.load_context = context;
     if (context->use_mmap) {
         context->final_mmap_path =
             GetValueFromConfig<std::string>(config, MMAP_FILE_PATH).value();
@@ -1611,13 +1611,13 @@ BitmapIndex<T>::PlanLoad(const storage::IndexEntryCatalog& catalog,
 
 template <typename T>
 folly::coro::Task<void>
-BitmapIndex<T>::MaterializeAsync(storage::IndexLoadArtifact& artifact,
-                                 const std::any& materialization_context,
-                                 const Config& config) {
+BitmapIndex<T>::FinishLoadAsync(storage::IndexLoadArtifact& artifact,
+                                const std::any& load_context,
+                                const Config& config) {
     (void)config;
-    auto context = std::any_cast<const std::shared_ptr<BitmapLoadContext>&>(
-        materialization_context);
-    AssertInfo(context != nullptr, "Bitmap MaterializeAsync context is null");
+    auto context =
+        std::any_cast<const std::shared_ptr<BitmapLoadContext>&>(load_context);
+    AssertInfo(context != nullptr, "Bitmap FinishLoadAsync context is null");
 
     total_num_rows_ = context->total_num_rows;
     is_nested_index_ = context->is_nested;
@@ -1677,7 +1677,7 @@ BitmapIndex<T>::MaterializeAsync(storage::IndexLoadArtifact& artifact,
 
     auto file_index_meta = this->file_manager_->GetIndexMeta();
     LOG_INFO(
-        "MaterializeAsync bitmap index with cardinality = {}, "
+        "FinishLoadAsync bitmap index with cardinality = {}, "
         "num_rows "
         "= "
         "{} for "
@@ -1691,7 +1691,7 @@ BitmapIndex<T>::MaterializeAsync(storage::IndexLoadArtifact& artifact,
     ComputeByteSize();
     storage::ThrowIfCancelled(
         co_await folly::coro::co_current_cancellation_token,
-        "ScalarIndex::MaterializeAsync");
+        "ScalarIndex::FinishLoadAsync");
     this->mmap_file_raii_ = std::move(context->final_file_cleanup);
     co_return;
 }

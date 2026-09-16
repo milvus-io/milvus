@@ -40,7 +40,7 @@
 </g>
 <g data-node="Scalar index"><rect x="872" y="420" width="320" height="144" rx="8" fill="#FFFFFF" stroke="#CDD9E2" stroke-width="1.2"/>
 <text x="892" y="456" font-size="20" fill="#25364A" text-anchor="start" font-weight="600">Scalar index</text>
-<text x="892" y="488" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">MaterializeAsync</text>
+<text x="892" y="488" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">FinishLoadAsync</text>
 <text x="892" y="512" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Restore state on async worker</text>
 </g>
 <line x1="40" y1="648" x2="1240" y2="648" stroke="#CDD9E2"/>

@@ -1082,7 +1082,7 @@ InvertedIndexTantivy<T>::PlanLoad(const storage::IndexEntryCatalog& catalog,
     context->load_in_mmap =
         GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
     IndexLoadPlan plan;
-    plan.materialization_context = context;
+    plan.load_context = context;
     context->directory = PlanIndexDirectory(
         catalog, disk_file_manager_, context->load_in_mmap, plan);
 
@@ -1118,15 +1118,14 @@ InvertedIndexTantivy<T>::PlanLoad(const storage::IndexEntryCatalog& catalog,
 
 template <typename T>
 folly::coro::Task<void>
-InvertedIndexTantivy<T>::MaterializeAsync(
-    storage::IndexLoadArtifact& artifact,
-    const std::any& materialization_context,
-    const Config& config) {
+InvertedIndexTantivy<T>::FinishLoadAsync(storage::IndexLoadArtifact& artifact,
+                                         const std::any& load_context,
+                                         const Config& config) {
     (void)config;
-    auto context = std::any_cast<const std::shared_ptr<TantivyLoadContext>&>(
-        materialization_context);
+    auto context =
+        std::any_cast<const std::shared_ptr<TantivyLoadContext>&>(load_context);
     AssertInfo(context != nullptr,
-               "InvertedIndexTantivy MaterializeAsync context is null");
+               "InvertedIndexTantivy FinishLoadAsync context is null");
 
     auto new_wrapper =
         std::make_shared<TantivyIndexWrapper>(context->directory->path.c_str(),
@@ -1145,7 +1144,7 @@ InvertedIndexTantivy<T>::MaterializeAsync(
     FinalizeSealed(/*release_null_offsets=*/true);
 
     LOG_INFO(
-        "MaterializeAsync InvertedIndexTantivy done, file_count: "
+        "FinishLoadAsync InvertedIndexTantivy done, file_count: "
         "{}, "
         "has_null: "
         "{}, mmap: {}",
@@ -1154,7 +1153,7 @@ InvertedIndexTantivy<T>::MaterializeAsync(
         context->load_in_mmap);
     storage::ThrowIfCancelled(
         co_await folly::coro::co_current_cancellation_token,
-        "ScalarIndex::MaterializeAsync");
+        "ScalarIndex::FinishLoadAsync");
     co_return;
 }
 

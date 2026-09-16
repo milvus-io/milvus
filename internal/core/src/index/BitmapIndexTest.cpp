@@ -84,7 +84,7 @@ class ExposedBitmapIndex : public BitmapIndex<int32_t> {
         auto artifact = folly::coro::blockingWait(reader.ReadEntriesAsync(
             std::move(plan.entries), proto::common::LoadPriority::HIGH));
         folly::coro::blockingWait(
-            MaterializeAsync(artifact, plan.materialization_context, config));
+            FinishLoadAsync(artifact, plan.load_context, config));
         artifact.CommitTargets();
     }
 };
@@ -280,8 +280,8 @@ TEST(BitmapIndexV3AsyncLoadTest, PackedValidityUsesFinalAllocation) {
                 if (rows % 8 != 0) {
                     target.data[target.bytes - 1] |= 0x80;
                 }
-                folly::coro::blockingWait(load_index.MaterializeAsync(
-                    artifact, plan.materialization_context, config));
+                folly::coro::blockingWait(load_index.FinishLoadAsync(
+                    artifact, plan.load_context, config));
                 EXPECT_EQ(
                     reinterpret_cast<uint8_t*>(load_index.valid_bitset_.data()),
                     target.data);

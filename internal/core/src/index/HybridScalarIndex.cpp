@@ -568,18 +568,17 @@ HybridScalarIndex<T>::PlanLoad(const storage::IndexEntryCatalog& catalog,
 
 template <typename T>
 folly::coro::Task<void>
-HybridScalarIndex<T>::MaterializeAsync(storage::IndexLoadArtifact& artifact,
-                                       const std::any& materialization_context,
-                                       const Config& config) {
+HybridScalarIndex<T>::FinishLoadAsync(storage::IndexLoadArtifact& artifact,
+                                      const std::any& load_context,
+                                      const Config& config) {
     AssertInfo(internal_index_ != nullptr,
                "Hybrid internal index is unavailable during "
-               "MaterializeAsync");
-    co_await internal_index_->MaterializeAsync(
-        artifact, materialization_context, config);
+               "FinishLoadAsync");
+    co_await internal_index_->FinishLoadAsync(artifact, load_context, config);
     is_built_ = true;
     ComputeByteSize();
     LOG_INFO(
-        "MaterializeAsync hybrid index with internal index type: "
+        "FinishLoadAsync hybrid index with internal index type: "
         "{}",
         ToString(internal_index_type_));
 }

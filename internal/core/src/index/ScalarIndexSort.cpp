@@ -787,7 +787,7 @@ ScalarIndexSort<T>::PlanLoad(const storage::IndexEntryCatalog& catalog,
         catalog.At("index_data").plaintext_size);
 
     IndexLoadPlan plan;
-    plan.materialization_context = context;
+    plan.load_context = context;
     if (context->is_mmap) {
         auto mmap_path = disk_file_manager_ != nullptr
                              ? disk_file_manager_->GetLocalIndexObjectPrefix() +
@@ -875,15 +875,15 @@ ScalarIndexSort<T>::PlanLoad(const storage::IndexEntryCatalog& catalog,
 
 template <typename T>
 folly::coro::Task<void>
-ScalarIndexSort<T>::MaterializeAsync(storage::IndexLoadArtifact& artifact,
-                                     const std::any& materialization_context,
-                                     const Config& config) {
+ScalarIndexSort<T>::FinishLoadAsync(storage::IndexLoadArtifact& artifact,
+                                    const std::any& load_context,
+                                    const Config& config) {
     (void)config;
     auto context =
         std::any_cast<const std::shared_ptr<ScalarSortLoadContext<T>>&>(
-            materialization_context);
+            load_context);
     AssertInfo(context != nullptr,
-               "ScalarIndexSort MaterializeAsync context is null");
+               "ScalarIndexSort FinishLoadAsync context is null");
 
     char* new_mmap_data = nullptr;
     char* new_mmap_meta_data = nullptr;
@@ -1004,14 +1004,14 @@ ScalarIndexSort<T>::MaterializeAsync(storage::IndexLoadArtifact& artifact,
     is_built_ = true;
     ComputeByteSize();
     LOG_INFO(
-        "MaterializeAsync ScalarIndexSort done, field_id: {}, "
+        "FinishLoadAsync ScalarIndexSort done, field_id: {}, "
         "is_mmap: "
         "{}",
         field_id_,
         is_mmap_);
     storage::ThrowIfCancelled(
         co_await folly::coro::co_current_cancellation_token,
-        "ScalarIndex::MaterializeAsync");
+        "ScalarIndex::FinishLoadAsync");
     co_return;
 }
 

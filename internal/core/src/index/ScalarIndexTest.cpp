@@ -232,7 +232,7 @@ class TestScalarIndexV3LoadRoute : public milvus::index::ScalarIndex<int32_t> {
         planned_thread_ = folly::getCurrentThreadName().value_or("");
         const auto bytes = catalog.At("payload").plaintext_size;
         milvus::index::IndexLoadPlan plan;
-        plan.materialization_context =
+        plan.load_context =
             std::make_shared<CleanupThreadRecorder>(cleanup_thread_);
         milvus::storage::EntryTarget target;
         if (mmap_target_path_.empty()) {
@@ -251,42 +251,42 @@ class TestScalarIndexV3LoadRoute : public milvus::index::ScalarIndex<int32_t> {
     }
 
     folly::coro::Task<void>
-    MaterializeAsync(milvus::storage::IndexLoadArtifact& artifact,
-                     const std::any& materialization_context,
-                     const milvus::Config&) override {
-        materialized_thread_ = folly::getCurrentThreadName().value_or("");
-        materialize_from_artifact_calls_++;
-        if (fail_materialize_from_artifact_) {
+    FinishLoadAsync(milvus::storage::IndexLoadArtifact& artifact,
+                    const std::any& load_context,
+                    const milvus::Config&) override {
+        finish_load_thread_ = folly::getCurrentThreadName().value_or("");
+        finish_load_calls_++;
+        if (fail_finish_load_) {
             ThrowInfo(milvus::ErrorCode::FileWriteFailed,
-                      "injected scalar artifact materialization failure");
+                      "injected scalar finish-load failure");
         }
         const auto& target = artifact.At("payload").target;
         if (const auto* memory =
                 std::get_if<milvus::storage::MemoryEntryTarget>(&target)) {
             EXPECT_EQ(memory->bytes, sizeof(int32_t));
-            std::memcpy(&materialized_payload_, memory->data, sizeof(int32_t));
+            std::memcpy(&loaded_payload_, memory->data, sizeof(int32_t));
         } else {
             const auto& mmap =
                 std::get<milvus::storage::MmapEntryTarget>(target);
             EXPECT_THROW((void)mmap.staging->file->Region(0, 1),
                          milvus::SegcoreError);
             std::ifstream file(mmap.staging->path, std::ios::binary);
-            file.read(reinterpret_cast<char*>(&materialized_payload_),
-                      sizeof(materialized_payload_));
+            file.read(reinterpret_cast<char*>(&loaded_payload_),
+                      sizeof(loaded_payload_));
             EXPECT_TRUE(file.good());
         }
         co_return;
     }
 
     std::string planned_thread_;
-    std::string materialized_thread_;
+    std::string finish_load_thread_;
     std::string cleanup_thread_;
     std::string mmap_target_path_;
     bool fail_read_{false};
-    bool fail_materialize_from_artifact_{false};
+    bool fail_finish_load_{false};
     int load_entries_calls_{0};
-    int materialize_from_artifact_calls_{0};
-    int32_t materialized_payload_{0};
+    int finish_load_calls_{0};
+    int32_t loaded_payload_{0};
 };
 
 namespace {
@@ -367,21 +367,20 @@ TEST(ScalarIndexV3AsyncLoadConfigTest, GlobalSwitchSelectsCompleteLoadPath) {
             OpContext op_ctx;
             load_index.LoadUnified(config, &op_ctx);
             EXPECT_EQ(load_index.load_entries_calls_, enabled ? 0 : 1);
-            EXPECT_EQ(load_index.materialize_from_artifact_calls_,
-                      enabled ? 1 : 0);
+            EXPECT_EQ(load_index.finish_load_calls_, enabled ? 1 : 0);
             if (enabled) {
-                EXPECT_EQ(load_index.materialized_payload_, 42);
+                EXPECT_EQ(load_index.loaded_payload_, 42);
                 EXPECT_TRUE(
                     load_index.planned_thread_.starts_with("MILVUS_ASYNC"));
-                EXPECT_TRUE(load_index.materialized_thread_.starts_with(
-                    "MILVUS_ASYNC"));
+                EXPECT_TRUE(
+                    load_index.finish_load_thread_.starts_with("MILVUS_ASYNC"));
             }
         }
     }
 }
 
 TEST(ScalarIndexV3AsyncLoadConfigTest,
-     FileTargetsMaterializeOnAsyncAndCleanUpOnLocalFileIOPool) {
+     FileTargetsFinishLoadOnAsyncAndCleanUpOnLocalFileIOPool) {
     using namespace milvus;
     using namespace milvus::index;
     using namespace milvus::segcore::storagev2translator;
@@ -395,7 +394,7 @@ TEST(ScalarIndexV3AsyncLoadConfigTest,
     auto ctx = GetTempFileManagerCtx(Int32);
     TestScalarIndexV3LoadRoute build_index(ctx);
     auto stats = build_index.UploadUnified({});
-    enum class Outcome { Success, ReadFailure, MaterializeFailure };
+    enum class Outcome { Success, ReadFailure, FinishLoadFailure };
     for (int workers : {0, 1}) {
         pool.Configure(workers);
         for (auto priority : {proto::common::LoadPriority::HIGH,
@@ -403,7 +402,7 @@ TEST(ScalarIndexV3AsyncLoadConfigTest,
             for (bool file_target : {false, true}) {
                 for (auto outcome : {Outcome::Success,
                                      Outcome::ReadFailure,
-                                     Outcome::MaterializeFailure}) {
+                                     Outcome::FinishLoadFailure}) {
                     SCOPED_TRACE(::testing::Message()
                                  << workers << "/" << priority << "/"
                                  << file_target << "/"
@@ -414,8 +413,8 @@ TEST(ScalarIndexV3AsyncLoadConfigTest,
                             TestLocalPath + "/scalar_route_staging/payload";
                     }
                     loaded.fail_read_ = outcome == Outcome::ReadFailure;
-                    loaded.fail_materialize_from_artifact_ =
-                        outcome == Outcome::MaterializeFailure;
+                    loaded.fail_finish_load_ =
+                        outcome == Outcome::FinishLoadFailure;
                     Config config;
                     config[INDEX_FILES] = stats->GetIndexFiles();
                     config[LOAD_PRIORITY] = priority;
@@ -424,10 +423,9 @@ TEST(ScalarIndexV3AsyncLoadConfigTest,
                     if (outcome != Outcome::Success) {
                         try {
                             loaded.LoadUnified(config);
-                            FAIL()
-                                << "expected read or materialization failure";
+                            FAIL() << "expected read or finish-load failure";
                         } catch (const SegcoreError& error) {
-                            if (outcome == Outcome::MaterializeFailure) {
+                            if (outcome == Outcome::FinishLoadFailure) {
                                 EXPECT_EQ(error.get_error_code(),
                                           ErrorCode::FileWriteFailed);
                             } else {
@@ -438,10 +436,10 @@ TEST(ScalarIndexV3AsyncLoadConfigTest,
                         }
                     } else {
                         loaded.LoadUnified(config);
-                        EXPECT_EQ(loaded.materialized_payload_, 42);
+                        EXPECT_EQ(loaded.loaded_payload_, 42);
                     }
                     EXPECT_EQ(loaded.load_entries_calls_, 0);
-                    EXPECT_EQ(loaded.materialize_from_artifact_calls_,
+                    EXPECT_EQ(loaded.finish_load_calls_,
                               outcome == Outcome::ReadFailure ? 0 : 1);
                     EXPECT_TRUE(
                         loaded.planned_thread_.starts_with("MILVUS_ASYNC"));
@@ -449,7 +447,7 @@ TEST(ScalarIndexV3AsyncLoadConfigTest,
                                             ? "MILVUS_LF_IO_"
                                             : "MILVUS_ASYNC";
                     if (outcome != Outcome::ReadFailure) {
-                        EXPECT_TRUE(loaded.materialized_thread_.starts_with(
+                        EXPECT_TRUE(loaded.finish_load_thread_.starts_with(
                             "MILVUS_ASYNC"));
                     }
                     EXPECT_TRUE(loaded.cleanup_thread_.starts_with(prefix));

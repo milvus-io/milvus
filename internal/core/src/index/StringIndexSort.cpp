@@ -688,7 +688,7 @@ StringIndexSort::PlanLoad(const storage::IndexEntryCatalog& catalog,
         std::make_shared<TargetBitmap>(context->total_num_rows, false);
 
     IndexLoadPlan plan;
-    plan.materialization_context = context;
+    plan.load_context = context;
     if (context->is_mmap) {
         auto mmap_path =
             GetValueFromConfig<std::string>(config, MMAP_FILE_PATH).value();
@@ -736,13 +736,13 @@ StringIndexSort::PlanLoad(const storage::IndexEntryCatalog& catalog,
 }
 
 folly::coro::Task<void>
-StringIndexSort::MaterializeAsync(storage::IndexLoadArtifact& artifact,
-                                  const std::any& materialization_context,
-                                  const Config& config) {
+StringIndexSort::FinishLoadAsync(storage::IndexLoadArtifact& artifact,
+                                 const std::any& load_context,
+                                 const Config& config) {
     auto context = std::any_cast<const std::shared_ptr<StringSortLoadContext>&>(
-        materialization_context);
+        load_context);
     AssertInfo(context != nullptr,
-               "StringIndexSort MaterializeAsync context is null");
+               "StringIndexSort FinishLoadAsync context is null");
 
     auto new_valid_bitset = std::move(*context->valid_bitset);
     if (context->total_num_rows % 8 != 0) {
@@ -832,7 +832,7 @@ StringIndexSort::MaterializeAsync(storage::IndexLoadArtifact& artifact,
     ComputeByteSize();
     storage::ThrowIfCancelled(
         co_await folly::coro::co_current_cancellation_token,
-        "ScalarIndex::MaterializeAsync");
+        "ScalarIndex::FinishLoadAsync");
     co_return;
 }
 

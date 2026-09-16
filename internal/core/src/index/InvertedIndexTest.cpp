@@ -149,7 +149,7 @@ class ExposedInvertedIndexTantivy
         auto artifact = folly::coro::blockingWait(
             reader.ReadEntriesAsync(std::move(plan.entries), priority));
         folly::coro::blockingWait(
-            MaterializeAsync(artifact, plan.materialization_context, config));
+            FinishLoadAsync(artifact, plan.load_context, config));
         artifact.CommitTargets();
     }
 };

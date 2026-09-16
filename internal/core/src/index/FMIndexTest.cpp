@@ -1917,7 +1917,7 @@ class ExposedFMIndex : public index::FMIndex {
         auto artifact = folly::coro::blockingWait(
             reader.ReadEntriesAsync(std::move(plan.entries), priority));
         folly::coro::blockingWait(
-            MaterializeAsync(artifact, plan.materialization_context, config));
+            FinishLoadAsync(artifact, plan.load_context, config));
         artifact.CommitTargets();
     }
 };
@@ -2070,16 +2070,16 @@ TEST(FMIndexV3AsyncLoadTest, PackedNullBitmapPreservesRowsAndRejectsTailBits) {
                     // Inject after CRC to exercise the FM format check itself.
                     target.data[target.bytes - 1] |= 0x80;
                     try {
-                        folly::coro::blockingWait(load_index.MaterializeAsync(
-                            artifact, plan.materialization_context, config));
+                        folly::coro::blockingWait(load_index.FinishLoadAsync(
+                            artifact, plan.load_context, config));
                         FAIL() << "Expected corrupt null bitmap to be rejected";
                     } catch (const SegcoreError& error) {
                         EXPECT_EQ(error.get_error_code(),
                                   ErrorCode::DataFormatBroken);
                     }
                 } else {
-                    folly::coro::blockingWait(load_index.MaterializeAsync(
-                        artifact, plan.materialization_context, config));
+                    folly::coro::blockingWait(load_index.FinishLoadAsync(
+                        artifact, plan.load_context, config));
                     artifact.CommitTargets();
                     auto nulls = load_index.IsNull();
                     const auto* bytes =

@@ -260,9 +260,9 @@ NgramInvertedIndex::PlanLoad(const storage::IndexEntryCatalog& catalog,
 }
 
 folly::coro::Task<void>
-NgramInvertedIndex::MaterializeAsync(storage::IndexLoadArtifact& artifact,
-                                     const std::any& materialization_context,
-                                     const Config& config) {
+NgramInvertedIndex::FinishLoadAsync(storage::IndexLoadArtifact& artifact,
+                                    const std::any& load_context,
+                                    const Config& config) {
     const auto& avg_row_entry = artifact.At(NGRAM_AVG_ROW_SIZE_FILE_NAME);
     const auto& avg_row_target =
         std::get<storage::MemoryEntryTarget>(avg_row_entry.target);
@@ -275,11 +275,11 @@ NgramInvertedIndex::MaterializeAsync(storage::IndexLoadArtifact& artifact,
     milvus::fastmem::FastMemcpy(
         &new_avg_row_size, avg_row_target.data, sizeof(size_t));
 
-    co_await InvertedIndexTantivy<std::string>::MaterializeAsync(
-        artifact, materialization_context, config);
+    co_await InvertedIndexTantivy<std::string>::FinishLoadAsync(
+        artifact, load_context, config);
     avg_row_size_ = new_avg_row_size;
     LOG_INFO(
-        "MaterializeAsync NgramInvertedIndex done, avg_row_size: "
+        "FinishLoadAsync NgramInvertedIndex done, avg_row_size: "
         "{} "
         "bytes",
         avg_row_size_);

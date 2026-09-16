@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="808" viewBox="0 0 1280 808" role="img" aria-labelledby="packed-sequence-title packed-sequence-desc">
 <title id="packed-sequence-title">Packed V3: load bytes, then open the index</title>
-<desc id="packed-sequence-desc">Async stream open caches file size; ReadEntriesAsync prepares targets and fills them via ReadAtAsync before MaterializeAsync restores query state.</desc>
+<desc id="packed-sequence-desc">Async stream open caches file size; ReadEntriesAsync prepares targets and fills them via ReadAtAsync before FinishLoadAsync restores query state.</desc>
 <defs>
 <marker id="packed-sequence-arrow" markerWidth="8" markerHeight="8" refX="8" refY="4" orient="auto"><path d="M 0 0 L 8 4 L 0 8 Z" fill="#566A80"/></marker>
 <marker id="packed-sequence-accent" markerWidth="8" markerHeight="8" refX="8" refY="4" orient="auto"><path d="M 0 0 L 8 4 L 0 8 Z" fill="#397985"/></marker>
@@ -60,7 +60,7 @@
 <rect x="884.0" y="588" width="128" height="20" fill="#FCFDFE"/>
 <text x="948.0" y="604" font-size="16" fill="#566A80" text-anchor="middle" font-weight="400">TARGETS CLOSED</text>
 <rect x="304" y="628" width="304" height="32" rx="4" fill="#EFF7F5"/>
-<text x="456" y="648" font-size="12" fill="#566A80" text-anchor="middle" font-weight="400">MaterializeAsync; retain files</text>
+<text x="456" y="648" font-size="12" fill="#566A80" text-anchor="middle" font-weight="400">FinishLoadAsync; retain files</text>
 <path d="M 456 688 L 128 688" fill="none" stroke="#397985" stroke-width="1.2" marker-end="url(#packed-sequence-accent)"/>
 <rect x="264.0" y="660" width="56" height="20" fill="#FCFDFE"/>
 <text x="292.0" y="676" font-size="16" fill="#566A80" text-anchor="middle" font-weight="400">READY</text>

@@ -50,26 +50,28 @@ Loading proceeds in five stages:
    under shared admission. The reader places bytes at their destination offsets
    and verifies checksums. The completed buffers and files form an
    `IndexLoadArtifact`.
-4. Call the index's `MaterializeAsync` to parse the completed inputs and
-   restore query state using existing representation code. Writable mappings close before this
-   stage; read-only mappings and engine objects are opened here.
+4. Call the index's `FinishLoadAsync` to adopt the completed targets, initialize
+   query state, and update index state using existing representation code.
+   Writable mappings close before this stage; read-only mappings and engine
+   objects are opened here. Bitmap mmap loading also converts postings to frozen
+   format and awaits local-file writes, so this stage remains asynchronous.
 5. Retain the files needed by the successful index and release temporary inputs.
    This ownership transfer is `CommitTargets`. The cache caller publishes the
    index only after loading succeeds.
 
 The call chain is `OpenInputStreamAsync` → reader `Open` → `PlanLoad` →
 `ReadEntriesAsync` →
-`MaterializeAsync` → `CommitTargets`. The reader owns byte transfer and
+`FinishLoadAsync` → `CommitTargets`. The reader owns byte transfer and
 validation; the scalar index owns destination selection and query-state restoration.
 The scalar loader retains engine-specific context from `PlanLoad` through
-`MaterializeAsync` and releases file-backed context on `LocalFileIOPool`, including
+`FinishLoadAsync` and releases file-backed context on `LocalFileIOPool`, including
 after a read failure. The reader only receives entry destinations, priority and
 cancellation; its artifact owns the completed targets, not engine state.
 `Catalog()` is a read-only view of the parsed entry layout and metadata. It
 performs no I/O and remains valid for the reader's lifetime. Slice reads are
 private so callers always go through admission and entry checksum verification.
 
-`PlanLoad` and `MaterializeAsync` are public so Hybrid can delegate to its
+`PlanLoad` and `FinishLoadAsync` are public so Hybrid can delegate to its
 internal index. `LoadUnifiedAsync` is a private implementation of `LoadUnified`.
 
 ![Packed scalar index architecture](../assets/graphs/async-packed-scalar-index/packed-architecture.svg)
@@ -188,7 +190,7 @@ state using the existing logic.
 ![Packed Sort mmap loading sequence](../assets/graphs/async-packed-scalar-index/packed-sequence.svg)
 
 Other index implementations provide their own `PlanLoad` and
-`MaterializeAsync` methods while sharing the same reader, slice scheduling,
+`FinishLoadAsync` methods while sharing the same reader, slice scheduling,
 admission, and target lifetime:
 
 | Index | Index-specific work |
@@ -197,7 +199,7 @@ admission, and target lifetime:
 | Marisa | Stage the trie file, then read/map it and restore string IDs and CSR lookup data. Incomplete persisted CSR sets remain invalid. |
 | Bitmap | Restore postings; mmap mode converts them to a frozen file. Conversion uses a 16 MiB batch buffer with at most one additional large bitmap per batch. |
 | Hybrid | Recover the persisted internal type using the existing compatibility rule, then delegate to that child's planning and loading methods. |
-| Tantivy / Ngram / RTree | Materialize validated filenames in an owned directory, then open the engine and restore sidecars. Heap-mode temporary files are removed after restoration. |
+| Tantivy / Ngram / RTree | Read entries into an owned directory, then open the engine and restore sidecars. Heap-mode temporary files are removed after restoration. |
 | TextMatch `.v3` | Reuse the Tantivy planning and loading methods, open the packed object under its text-log prefix, and pass cancellation through the translator. Analyzer registration still finishes before cache publication. |
 | FMIndex | Restore its packed entries through the same pipeline, including older scalar-version metadata that still selects the FM packed loader. |
 | JSON scalar wrappers | Extend the underlying scalar plan with missing-path sidecars and rebuild the existence bitmap after the underlying index has loaded. These are distinct from JSON stats and BSON shared-key loading. |
@@ -254,7 +256,7 @@ the reader cancels pending work, joins issued tasks, and then removes its
 staging files. The original exception is rethrown after cleanup. Admission leases
 return their bytes and slots on success, failure, or cancellation.
 
-`MaterializeAsync` borrows the completed artifact. Synchronous engine calls
+`FinishLoadAsync` borrows the completed artifact. Synchronous engine calls
 return before cancellation is honored and before their inputs are released. Bitmap checks
 cancellation between conversion/write batches. Cleanup is awaited without
 cancellation; it does not publish an index or retain an incomplete directory.

@@ -1044,7 +1044,7 @@ StringIndexMarisa::PlanLoad(const storage::IndexEntryCatalog& catalog,
     }
 
     IndexLoadPlan plan;
-    plan.materialization_context = context;
+    plan.load_context = context;
     plan.entries.push_back(storage::EntryLoadPlan{
         MARISA_TRIE_INDEX,
         storage::MmapEntryTarget{context->trie_file, 0, trie_bytes}});
@@ -1110,13 +1110,13 @@ StringIndexMarisa::PlanLoad(const storage::IndexEntryCatalog& catalog,
 }
 
 folly::coro::Task<void>
-StringIndexMarisa::MaterializeAsync(storage::IndexLoadArtifact& artifact,
-                                    const std::any& materialization_context,
-                                    const Config& config) {
-    auto context = std::any_cast<const std::shared_ptr<MarisaLoadContext>&>(
-        materialization_context);
+StringIndexMarisa::FinishLoadAsync(storage::IndexLoadArtifact& artifact,
+                                   const std::any& load_context,
+                                   const Config& config) {
+    auto context =
+        std::any_cast<const std::shared_ptr<MarisaLoadContext>&>(load_context);
     AssertInfo(context != nullptr,
-               "StringIndexMarisa MaterializeAsync context is null");
+               "StringIndexMarisa FinishLoadAsync context is null");
 
     marisa::Trie new_trie;
     try {
@@ -1251,10 +1251,10 @@ StringIndexMarisa::MaterializeAsync(storage::IndexLoadArtifact& artifact,
     built_ = true;
     total_size_ = CalculateTotalSize();
     ComputeByteSize();
-    LOG_INFO("MaterializeAsync StringIndexMarisa done");
+    LOG_INFO("FinishLoadAsync StringIndexMarisa done");
     storage::ThrowIfCancelled(
         co_await folly::coro::co_current_cancellation_token,
-        "ScalarIndex::MaterializeAsync");
+        "ScalarIndex::FinishLoadAsync");
     mmap_file_raii_ = std::move(context->trie_cleanup);
     str_ids_mmap_raii_ = std::move(context->str_ids_cleanup);
     csr_mmap_raii_ = std::move(context->csr_cleanup);

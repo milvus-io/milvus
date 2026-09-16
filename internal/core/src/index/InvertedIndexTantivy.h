@@ -352,9 +352,9 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
              const Config& config) override;
 
     folly::coro::Task<void>
-    MaterializeAsync(storage::IndexLoadArtifact& artifact,
-                     const std::any& materialization_context,
-                     const Config& config) override;
+    FinishLoadAsync(storage::IndexLoadArtifact& artifact,
+                    const std::any& load_context,
+                    const Config& config) override;
 
  protected:
     const TargetBitmap

@@ -829,7 +829,7 @@ FMIndex::PlanLoad(const storage::IndexEntryCatalog& catalog,
         disk_file_manager_ != nullptr;
 
     IndexLoadPlan plan;
-    plan.materialization_context = context;
+    plan.load_context = context;
     if (context->use_mmap) {
         if (context->blob_size >
             std::numeric_limits<size_t>::max() - kFMIndexMmapPadding) {
@@ -894,13 +894,13 @@ FMIndex::PlanLoad(const storage::IndexEntryCatalog& catalog,
 }
 
 folly::coro::Task<void>
-FMIndex::MaterializeAsync(storage::IndexLoadArtifact& artifact,
-                          const std::any& materialization_context,
-                          const Config& config) {
+FMIndex::FinishLoadAsync(storage::IndexLoadArtifact& artifact,
+                         const std::any& load_context,
+                         const Config& config) {
     (void)config;
-    auto context = std::any_cast<const std::shared_ptr<FMIndexLoadContext>&>(
-        materialization_context);
-    AssertInfo(context != nullptr, "FMIndex MaterializeAsync context is null");
+    auto context =
+        std::any_cast<const std::shared_ptr<FMIndexLoadContext>&>(load_context);
+    AssertInfo(context != nullptr, "FMIndex FinishLoadAsync context is null");
 
     fmindex::FMIndex new_fm;
     char* new_mmap_data = nullptr;
@@ -991,13 +991,13 @@ FMIndex::MaterializeAsync(storage::IndexLoadArtifact& artifact,
         SetCellSize({ByteSize(), estimated_cell.file_bytes});
     }
     LOG_INFO(
-        "MaterializeAsync FM index done, field id: {}, total rows: "
+        "FinishLoadAsync FM index done, field id: {}, total rows: "
         "{}",
         field_id_,
         total_rows_);
     storage::ThrowIfCancelled(
         co_await folly::coro::co_current_cancellation_token,
-        "ScalarIndex::MaterializeAsync");
+        "ScalarIndex::FinishLoadAsync");
     co_return;
 }
 

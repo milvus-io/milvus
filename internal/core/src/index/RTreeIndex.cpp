@@ -908,7 +908,7 @@ RTreeIndex<T>::PlanLoad(const storage::IndexEntryCatalog& catalog,
     auto context = std::make_shared<RTreeLoadContext>();
     context->has_null = ReadRequiredIndexMeta<bool>(catalog, "has_null");
     IndexLoadPlan plan;
-    plan.materialization_context = context;
+    plan.load_context = context;
     context->directory =
         PlanIndexDirectory(catalog, disk_file_manager_, true, plan);
     for (const auto& file : context->directory->files) {
@@ -957,13 +957,13 @@ RTreeIndex<T>::PlanLoad(const storage::IndexEntryCatalog& catalog,
 
 template <typename T>
 folly::coro::Task<void>
-RTreeIndex<T>::MaterializeAsync(storage::IndexLoadArtifact& artifact,
-                                const std::any& materialization_context,
-                                const Config& config) {
+RTreeIndex<T>::FinishLoadAsync(storage::IndexLoadArtifact& artifact,
+                               const std::any& load_context,
+                               const Config& config) {
     (void)config;
-    auto context = std::any_cast<const std::shared_ptr<RTreeLoadContext>&>(
-        materialization_context);
-    AssertInfo(context != nullptr, "RTree MaterializeAsync context is null");
+    auto context =
+        std::any_cast<const std::shared_ptr<RTreeLoadContext>&>(load_context);
+    AssertInfo(context != nullptr, "RTree FinishLoadAsync context is null");
 
     auto new_wrapper = std::make_shared<RTreeIndexWrapper>(
         context->base_path, /*is_build_mode=*/false);
@@ -991,7 +991,7 @@ RTreeIndex<T>::MaterializeAsync(storage::IndexLoadArtifact& artifact,
     }
     ComputeByteSize();
     LOG_INFO(
-        "MaterializeAsync RTreeIndex done, file_count: {}, "
+        "FinishLoadAsync RTreeIndex done, file_count: {}, "
         "has_null: "
         "{}, "
         "base_path: {}",
@@ -1000,7 +1000,7 @@ RTreeIndex<T>::MaterializeAsync(storage::IndexLoadArtifact& artifact,
         path_);
     storage::ThrowIfCancelled(
         co_await folly::coro::co_current_cancellation_token,
-        "ScalarIndex::MaterializeAsync");
+        "ScalarIndex::FinishLoadAsync");
     co_return;
 }
 

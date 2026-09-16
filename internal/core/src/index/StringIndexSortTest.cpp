@@ -63,7 +63,7 @@ class ExposedStringIndexSort : public StringIndexSort {
         auto artifact = folly::coro::blockingWait(
             reader.ReadEntriesAsync(std::move(plan.entries), priority));
         folly::coro::blockingWait(
-            MaterializeAsync(artifact, plan.materialization_context, config));
+            FinishLoadAsync(artifact, plan.load_context, config));
         artifact.CommitTargets();
     }
 };
@@ -246,13 +246,13 @@ TEST(StringIndexSortV3AsyncLoadTest, PackedValidityUsesFinalAllocation) {
                     folly::coro::blockingWait(reader->ReadEntriesAsync(
                         std::move(plan.entries),
                         proto::common::LoadPriority::HIGH));
-                // Inject unused bits after CRC to exercise materialization's
+                // Inject unused bits after CRC to exercise FinishLoadAsync's
                 // compatibility with the synchronous unpacker.
                 if (rows % 8 != 0) {
                     target.data[target.bytes - 1] |= 0x80;
                 }
-                folly::coro::blockingWait(load_index.MaterializeAsync(
-                    artifact, plan.materialization_context, config));
+                folly::coro::blockingWait(load_index.FinishLoadAsync(
+                    artifact, plan.load_context, config));
                 EXPECT_EQ(
                     reinterpret_cast<uint8_t*>(load_index.valid_bitset_.data()),
                     target.data);
