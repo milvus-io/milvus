@@ -485,6 +485,11 @@ message SegmentInfo {
   // verifying the final revision is empty. Recovery normalizes old sticky true
   // values once. False proves emptiness independently of the write-mode switch.
   bool manifest_has_index = 40;
+
+  // mem_size is the RAM consumed by the segment (in bytes) as reported by the
+  // QueryNode. It provides visibility into per-segment memory usage (e.g. index
+  // RAM consumption). Populated from the QueryNode data distribution report.
+  int64 mem_size = 41;
 }
 
 // Statistics carries aggregate metrics for a segment so DataCoord can make
