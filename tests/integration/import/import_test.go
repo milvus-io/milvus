@@ -40,7 +40,7 @@ import (
 )
 
 type importTestBase struct {
-	integration.MiniClusterSuite
+	importSuite
 
 	failed       bool
 	failedReason string
@@ -65,7 +65,7 @@ type MultiFileTypeImportSuite struct {
 
 func (s *importTestBase) SetupSuite() {
 	s.WithMilvusConfig(paramtable.Get().RootCoordCfg.DmlChannelNum.Key, "4")
-	s.MiniClusterSuite.SetupSuite()
+	s.importSuite.SetupSuite()
 }
 
 func (s *importTestBase) SetupTest() {

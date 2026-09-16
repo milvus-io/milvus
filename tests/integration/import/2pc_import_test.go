@@ -43,12 +43,12 @@ import (
 const twoPCRowCount = 100
 
 type TwoPCImportSuite struct {
-	integration.MiniClusterSuite
+	importSuite
 }
 
 func (s *TwoPCImportSuite) SetupSuite() {
 	s.WithMilvusConfig(paramtable.Get().RootCoordCfg.DmlChannelNum.Key, "4")
-	s.MiniClusterSuite.SetupSuite()
+	s.importSuite.SetupSuite()
 }
 
 // WaitForImportState polls GetImportProgress until the job reaches the target state.

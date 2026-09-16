@@ -381,6 +381,9 @@ func (c *MiniClusterV3) clearRedundantNodes() {
 		}
 	}
 
+	// Stop callbacks can still remove nodes after Stop returns. Snapshot the
+	// maps under the same lock used by clearProcess before launching cleanup.
+	c.mu.Lock()
 	wg.Add(5)
 	go clearNodes(c.defaultMixCoord.MilvusProcess, lo.MapToSlice(c.mixcoord, func(_ int64, node *process.MixcoordProcess) *process.MilvusProcess {
 		return node.MilvusProcess
@@ -397,6 +400,7 @@ func (c *MiniClusterV3) clearRedundantNodes() {
 	go clearNodes(c.defaultProxy.MilvusProcess, lo.MapToSlice(c.proxy, func(_ int64, node *process.ProxyProcess) *process.MilvusProcess {
 		return node.MilvusProcess
 	}), func() { c.AddProxy(WithoutWaitForReady()) })
+	c.mu.Unlock()
 	wg.Wait()
 }
 
