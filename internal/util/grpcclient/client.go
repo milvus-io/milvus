@@ -289,6 +289,7 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 			grpc.WithUnaryInterceptor(grpc_middleware.ChainUnaryClient(
 				interceptor.ClusterInjectionUnaryClientInterceptor(),
 				interceptor.ServerIDInjectionUnaryClientInterceptor(c.GetNodeID()),
+				interceptor.IdempotencyKeyPropagationUnaryClientInterceptor(),
 			)),
 			grpc.WithStreamInterceptor(grpc_middleware.ChainStreamClient(
 				interceptor.ClusterInjectionStreamClientInterceptor(),
@@ -327,6 +328,7 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 			grpc.WithUnaryInterceptor(grpc_middleware.ChainUnaryClient(
 				interceptor.ClusterInjectionUnaryClientInterceptor(),
 				interceptor.ServerIDInjectionUnaryClientInterceptor(c.GetNodeID()),
+				interceptor.IdempotencyKeyPropagationUnaryClientInterceptor(),
 			)),
 			grpc.WithStreamInterceptor(grpc_middleware.ChainStreamClient(
 				interceptor.ClusterInjectionStreamClientInterceptor(),

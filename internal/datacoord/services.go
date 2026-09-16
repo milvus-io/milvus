@@ -48,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/interceptor"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -1848,7 +1849,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 
 	// Broadcast the import message
 	// dbName is retrieved inside broadcastImport via broker.DescribeCollectionInternal
-	err = s.broadcastImport(
+	duplicatedJobID, duplicated, err := s.broadcastImport(
 		ctx,
 		in.GetCollectionName(),
 		in.GetCollectionID(),
@@ -1858,10 +1859,29 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 		in.GetSchema(),
 		jobID,
 		in.GetChannelNames(),
+		interceptor.IdempotencyKeyFromContext(ctx),
 	)
 	if err != nil {
 		log.Warn("failed to broadcast import message", zap.Error(err))
 		resp.Status = merr.Status(merr.Wrap(err, "failed to broadcast import"))
+		return resp, nil
+	}
+	if duplicated {
+		// The idempotency window still holds this key, so the original job is the
+		// answer. Whether that job is still queryable is not checked here: the client
+		// takes the jobID to GetImportProgress, which reports a missing job on its own.
+		resp.JobID = fmt.Sprint(duplicatedJobID)
+		// Log the original job's state, not just its ID. A key whose original ended
+		// Failed resolves to that same job for the rest of the window, so a client
+		// retrying it never makes progress; without the state here that looks
+		// indistinguishable from a key stuck on a healthy job.
+		originalState := "gone"
+		if job := s.importMeta.GetJob(ctx, duplicatedJobID); job != nil {
+			originalState = job.GetState().String()
+		}
+		log.Info("import request resolved to an existing job",
+			zap.String("jobID", resp.JobID),
+			zap.String("originalState", originalState))
 		return resp, nil
 	}
 
