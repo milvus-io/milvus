@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <any>
 #include <boost/dynamic_bitset.hpp>
 #include <map>
 #include <memory>
@@ -26,6 +27,8 @@
 #include "index/Index.h"
 #include "fmt/format.h"
 #include "index/Meta.h"
+#include "folly/coro/Task.h"
+#include "storage/IndexLoadPlan.h"
 
 namespace milvus::storage {
 class IndexEntryWriter;
@@ -35,6 +38,13 @@ using MemFileManagerImplPtr = std::shared_ptr<MemFileManagerImpl>;
 }  // namespace milvus::storage
 
 namespace milvus::index {
+
+// The scalar loader keeps engine state across planning, reading and materialization.
+// Only the entry targets are passed to the storage reader.
+struct IndexLoadPlan {
+    std::vector<storage::EntryLoadPlan> entries;
+    std::any materialization_context;
+};
 
 enum class ScalarIndexType {
     NONE = 0,
@@ -118,6 +128,13 @@ class ScalarIndex : public IndexBase {
 
  public:
     using IndexBase::Build;
+    using IndexBase::Load;
+
+    // Forward cancellation to packed FMIndex loads.
+    void
+    Load(milvus::tracer::TraceContext ctx,
+         const Config& config,
+         milvus::OpContext* op_ctx) override;
 
     virtual ScalarIndexType
     GetIndexType() const = 0;
@@ -284,6 +301,33 @@ class ScalarIndex : public IndexBase {
     LoadEntries(storage::IndexEntryReader& reader, const Config& config) {
         ThrowInfo(Unsupported, "LoadEntries is not implemented");
     }
+
+    // Describe final targets before IO; AsyncIndexEntryReader fills them.
+    // Public so Hybrid can delegate both stages to its internal scalar index.
+    virtual IndexLoadPlan
+    PlanLoad(const storage::IndexEntryCatalog& catalog, const Config& config) {
+        ThrowInfo(Unsupported, "Async V3 load planning is not implemented");
+    }
+
+    // Restore query state on the calling async worker from verified targets.
+    // Context comes from PlanLoad; the caller retains it and the artifact until
+    // completion. Await local-file writes only.
+    virtual folly::coro::Task<void>
+    MaterializeAsync(storage::IndexLoadArtifact& artifact,
+                     const std::any& materialization_context,
+                     const Config& config) {
+        ThrowInfo(Unsupported,
+                  "Async V3 materialization from artifact is not implemented");
+        co_return;
+    }
+
+ private:
+    // Uses the shared async executor, with local-file phases on LocalFileIOPool.
+    folly::coro::Task<void>
+    LoadUnifiedAsync(const std::string& packed_file,
+                     const Config& config,
+                     proto::common::LoadPriority load_priority,
+                     folly::CancellationToken cancellation_token);
 
  protected:
     // Execute a LIKE-pattern query inside PatternMatch implementations.

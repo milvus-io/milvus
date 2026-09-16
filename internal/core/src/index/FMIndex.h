@@ -177,6 +177,15 @@ class FMIndex : public ScalarIndex<std::string> {
     LoadEntries(storage::IndexEntryReader& reader,
                 const Config& config) override;
 
+    IndexLoadPlan
+    PlanLoad(const storage::IndexEntryCatalog& catalog,
+             const Config& config) override;
+
+    folly::coro::Task<void>
+    MaterializeAsync(storage::IndexLoadArtifact& artifact,
+                     const std::any& materialization_context,
+                     const Config& config) override;
+
     // ---- query ----
 
     const TargetBitmap

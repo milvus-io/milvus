@@ -92,6 +92,7 @@ using RustArrayWrapper = milvus::tantivy::RustArrayWrapper;
 template <typename T>
 class InvertedIndexTantivy : public ScalarIndex<T> {
  public:
+    using ScalarIndex<T>::Load;
     using MemFileManager = storage::MemFileManagerImpl;
     using MemFileManagerPtr = std::shared_ptr<MemFileManager>;
     using DiskFileManager = storage::DiskFileManagerImpl;
@@ -345,6 +346,15 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     void
     LoadEntries(storage::IndexEntryReader& reader,
                 const Config& config) override;
+
+    IndexLoadPlan
+    PlanLoad(const storage::IndexEntryCatalog& catalog,
+             const Config& config) override;
+
+    folly::coro::Task<void>
+    MaterializeAsync(storage::IndexLoadArtifact& artifact,
+                     const std::any& materialization_context,
+                     const Config& config) override;
 
  protected:
     const TargetBitmap

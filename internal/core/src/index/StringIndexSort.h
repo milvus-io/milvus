@@ -42,6 +42,7 @@ class StringIndexSortImpl;
 // Main StringIndexSort class using pImpl pattern
 class StringIndexSort : public StringIndex {
  public:
+    using ScalarIndex<std::string>::Load;
     static constexpr uint32_t SERIALIZATION_VERSION = 1;
     static constexpr uint64_t MAGIC_CODE =
         0x5354524E47534F52;  // "STRNGSOR" in hex
@@ -155,10 +156,22 @@ class StringIndexSort : public StringIndex {
     LoadEntries(storage::IndexEntryReader& reader,
                 const Config& config) override;
 
+    IndexLoadPlan
+    PlanLoad(const storage::IndexEntryCatalog& catalog,
+             const Config& config) override;
+
+    folly::coro::Task<void>
+    MaterializeAsync(storage::IndexLoadArtifact& artifact,
+                     const std::any& materialization_context,
+                     const Config& config) override;
+
  protected:
+ public:
     int64_t
     CalculateTotalSize() const;
 
+ private:
+ public:
     // Common fields
     int64_t field_id_ = 0;
     bool is_built_ = false;
@@ -514,6 +527,7 @@ class StringIndexSortMmapImpl : public StringIndexSortImpl {
     ByteSize() const override;
 
  private:
+    friend class StringIndexSort;
     // Binary search for a value
     size_t
     FindValueIndex(const std::string& value) const;

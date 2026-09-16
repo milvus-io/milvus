@@ -13,6 +13,9 @@
 #include "common/FastMem.h"
 #include <fcntl.h>
 #include <unistd.h>
+#include <filesystem>
+#include <optional>
+#include <unordered_set>
 #include <algorithm>
 #include <cstdint>
 #include <exception>
@@ -37,7 +40,10 @@
 #include "geos_c.h"
 #include "glog/logging.h"
 #include "index/RTreeIndex.h"
+#include "storage/LocalFileIOPool.h"
+#include "storage/EntryStreamUtils.h"
 #include "index/Utils.h"
+#include "index/IndexLoadUtils.h"
 #include "knowhere/dataset.h"
 #include "log/Log.h"
 #include "nlohmann/json.hpp"
@@ -53,6 +59,17 @@
 #include "storage/Types.h"
 
 namespace milvus::index {
+
+namespace {
+
+struct RTreeLoadContext {
+    std::shared_ptr<IndexDirectoryLoadContext> directory;
+    std::shared_ptr<std::vector<size_t>> null_offsets;
+    std::string base_path;
+    bool has_null{false};
+};
+
+}  // namespace
 
 static constexpr size_t kMetaJsonSuffixLen = sizeof(".meta.json") - 1;
 
@@ -881,6 +898,110 @@ RTreeIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
         file_names.size(),
         has_null,
         path_);
+}
+
+template <typename T>
+IndexLoadPlan
+RTreeIndex<T>::PlanLoad(const storage::IndexEntryCatalog& catalog,
+                        const Config& config) {
+    (void)config;
+    auto context = std::make_shared<RTreeLoadContext>();
+    context->has_null = ReadRequiredIndexMeta<bool>(catalog, "has_null");
+    IndexLoadPlan plan;
+    plan.materialization_context = context;
+    context->directory =
+        PlanIndexDirectory(catalog, disk_file_manager_, true, plan);
+    for (const auto& file : context->directory->files) {
+        const auto& local = file->path;
+        if (ends_with(local, ".bgi")) {
+            context->base_path = local.substr(0, local.size() - 4);
+            break;
+        }
+        if (context->base_path.empty() && ends_with(local, ".meta.json")) {
+            context->base_path =
+                local.substr(0, local.size() - kMetaJsonSuffixLen);
+        }
+    }
+    if (context->base_path.empty()) {
+        ThrowInfo(
+            ErrorCode::DataFormatBroken,
+            "corrupt RTree index: cannot determine base path from file_names");
+    }
+
+    if (!context->has_null) {
+        return plan;
+    }
+    static constexpr std::string_view kNullEntry = "index_null_offset";
+    if (!catalog.HasEntry(kNullEntry)) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "corrupt RTree index: null-offset Entry is missing");
+    }
+    auto null_bytes = catalog.At(kNullEntry).plaintext_size;
+    if (null_bytes % sizeof(size_t) != 0) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "corrupt RTree index: null-offset Entry size {} is not a "
+                  "multiple of {}",
+                  null_bytes,
+                  sizeof(size_t));
+    }
+    context->null_offsets =
+        std::make_shared<std::vector<size_t>>(null_bytes / sizeof(size_t));
+    plan.entries.push_back(storage::EntryLoadPlan{
+        std::string(kNullEntry),
+        storage::MemoryEntryTarget{
+            context->null_offsets,
+            reinterpret_cast<uint8_t*>(context->null_offsets->data()),
+            null_bytes}});
+    return plan;
+}
+
+template <typename T>
+folly::coro::Task<void>
+RTreeIndex<T>::MaterializeAsync(storage::IndexLoadArtifact& artifact,
+                                const std::any& materialization_context,
+                                const Config& config) {
+    (void)config;
+    auto context = std::any_cast<const std::shared_ptr<RTreeLoadContext>&>(
+        materialization_context);
+    AssertInfo(context != nullptr, "RTree MaterializeAsync context is null");
+
+    auto new_wrapper = std::make_shared<RTreeIndexWrapper>(
+        context->base_path, /*is_build_mode=*/false);
+    new_wrapper->load();
+    std::vector<size_t> new_null_offsets;
+    if (context->has_null) {
+        AssertInfo(context->null_offsets != nullptr,
+                   "RTree null-offset target is null");
+        new_null_offsets = std::move(*context->null_offsets);
+    }
+    AssertInfo(new_wrapper->count() <=
+                   std::numeric_limits<int64_t>::max() -
+                       static_cast<int64_t>(new_null_offsets.size()),
+               "RTree row count overflow");
+    auto new_total_rows =
+        new_wrapper->count() + static_cast<int64_t>(new_null_offsets.size());
+
+    {
+        std::unique_lock<folly::SharedMutexWritePriority> lock(mutex_);
+        wrapper_ = std::move(new_wrapper);
+        null_offset_ = std::move(new_null_offsets);
+        total_num_rows_ = new_total_rows;
+        path_ = context->base_path;
+        is_built_ = true;
+    }
+    ComputeByteSize();
+    LOG_INFO(
+        "MaterializeAsync RTreeIndex done, file_count: {}, "
+        "has_null: "
+        "{}, "
+        "base_path: {}",
+        context->directory->files.size(),
+        context->has_null,
+        path_);
+    storage::ThrowIfCancelled(
+        co_await folly::coro::co_current_cancellation_token,
+        "ScalarIndex::MaterializeAsync");
+    co_return;
 }
 
 // Explicit template instantiation for std::string as we only support string field for now.

@@ -80,6 +80,8 @@ class ScalarIndexSort : public ScalarIndex<T> {
     void
     Load(milvus::tracer::TraceContext ctx, const Config& config = {}) override;
 
+    using ScalarIndex<T>::Load;
+
     int64_t
     Count() override {
         return total_num_rows_;
@@ -196,6 +198,17 @@ class ScalarIndexSort : public ScalarIndex<T> {
     LoadEntries(storage::IndexEntryReader& reader,
                 const Config& config) override;
 
+    IndexLoadPlan
+    PlanLoad(const storage::IndexEntryCatalog& catalog,
+             const Config& config) override;
+
+    folly::coro::Task<void>
+    MaterializeAsync(storage::IndexLoadArtifact& artifact,
+                     const std::any& materialization_context,
+                     const Config& config) override;
+
+ protected:
+ public:
  public:
     // zero-cost data acess api
     ALWAYS_INLINE const IndexStructure<T>&
@@ -223,6 +236,13 @@ class ScalarIndexSort : public ScalarIndex<T> {
     }
 
  private:
+    // Write and close the legacy file before mapping/restoring it.
+    void
+    WriteMmapIndexData(const uint8_t* data,
+                       size_t size,
+                       proto::common::LoadPriority priority);
+    void
+    MapIndexData();
     /**
      * Write data to mmap file and setup mmap pointers.
      * Sets mmap_data_, mmap_size_, data_size_.

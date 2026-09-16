@@ -239,6 +239,52 @@ NgramInvertedIndex::LoadEntries(storage::IndexEntryReader& reader,
              avg_row_size_);
 }
 
+IndexLoadPlan
+NgramInvertedIndex::PlanLoad(const storage::IndexEntryCatalog& catalog,
+                             const Config& config) {
+    auto plan = InvertedIndexTantivy<std::string>::PlanLoad(catalog, config);
+    auto avg_row_size_bytes =
+        catalog.At(NGRAM_AVG_ROW_SIZE_FILE_NAME).plaintext_size;
+    AssertInfo(avg_row_size_bytes == sizeof(size_t),
+               "invalid ngram avg_row_size Entry size: expected {}, got {}",
+               sizeof(size_t),
+               avg_row_size_bytes);
+    auto avg_row_size = std::make_shared<size_t>(0);
+    plan.entries.push_back(storage::EntryLoadPlan{
+        NGRAM_AVG_ROW_SIZE_FILE_NAME,
+        storage::MemoryEntryTarget{
+            avg_row_size,
+            reinterpret_cast<uint8_t*>(avg_row_size.get()),
+            sizeof(size_t)}});
+    return plan;
+}
+
+folly::coro::Task<void>
+NgramInvertedIndex::MaterializeAsync(storage::IndexLoadArtifact& artifact,
+                                     const std::any& materialization_context,
+                                     const Config& config) {
+    const auto& avg_row_entry = artifact.At(NGRAM_AVG_ROW_SIZE_FILE_NAME);
+    const auto& avg_row_target =
+        std::get<storage::MemoryEntryTarget>(avg_row_entry.target);
+    AssertInfo(avg_row_target.bytes == sizeof(size_t),
+               "invalid materialized ngram avg_row_size size: expected {}, "
+               "got {}",
+               sizeof(size_t),
+               avg_row_target.bytes);
+    size_t new_avg_row_size = 0;
+    milvus::fastmem::FastMemcpy(
+        &new_avg_row_size, avg_row_target.data, sizeof(size_t));
+
+    co_await InvertedIndexTantivy<std::string>::MaterializeAsync(
+        artifact, materialization_context, config);
+    avg_row_size_ = new_avg_row_size;
+    LOG_INFO(
+        "MaterializeAsync NgramInvertedIndex done, avg_row_size: "
+        "{} "
+        "bytes",
+        avg_row_size_);
+}
+
 void
 NgramInvertedIndex::LoadIndexMetas(const std::vector<std::string>& index_files,
                                    const Config& config) {
