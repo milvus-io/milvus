@@ -62,9 +62,11 @@ main `3e15e837` and cardinal `0b9f18bb`.
 | cardinal | `cardinal/index/index_impl.cpp:19-25, 50, 81`, `storage/translator/chunk_translator.h:169, 261` | Same per-query-vector check, also on chunk loads; also converted to `cardinal_inner_error`. |
 | milvus status mapping | `internal/core/src/common/Utils.h:255-290` | Every knowhere `*_inner_error` maps to `KnowhereError` (2099), not `FollyCancel` (2038). |
 
-Within one segment the interruption granularity is therefore one query vector:
-a cancelled request stops after the query vector currently being searched. No
-additional checks are added inside index search loops.
+Within one segment the granularity depends on the path. A knowhere index
+checks before each query vector, so a cancelled search stops almost at once.
+Segcore's own brute-force scan checks nothing: it receives the `OpContext` but
+never reads its token, so the scan runs to the end. Measured numbers are under
+Known limits.
 
 ### Two places that treat a cancellation as a node failure
 
@@ -372,10 +374,27 @@ take effect or for the proxy's decisions, which rely on ctx state.
 
 ## Known limits
 
-- Interruption granularity: operator boundary, segment boundary, every 8192
-  rows of scalar filtering, and one query vector inside an index. The worst
-  case latency is the time for one query vector to finish one search on one
-  segment.
+The client is released as soon as its request is cancelled, but how long the
+QueryNode keeps working depends on which search path is executing. Measured on
+a single node, 100k rows of dim 768, nq 10000, cancelled about 0.3 s into the
+request:
+
+| Search path | QueryNode kept working | Why |
+|---|---|---|
+| HNSW, and any other knowhere index | ~70 ms after the cancel | knowhere checks the cancellation token before each query vector |
+| FLAT, i.e. segcore's own brute-force scan | 21 s, the whole scan | `SearchOnSealed` / `SearchOnGrowing` / `SearchBruteForce` receive the `OpContext` but never read its token; the only checks are at the operator and segment boundaries, and one segment's scan crosses neither |
+
+So a cancelled indexed search stops almost at once, while a cancelled
+brute-force search returns to its client immediately and goes on burning a
+core until the scan ends. That is the wrong way round for an operator: the
+unindexed query is the one worth stopping. Making it interruptible means
+reading the token inside those scan loops, one relaxed atomic read per chunk.
+It is tracked separately and is not part of this design.
+
+Other limits:
+
+- Scalar filtering is interruptible every 8192 rows, so a filter-heavy request
+  stops promptly even on the brute-force path.
 - When the client receives 3002 the QueryNode may still be winding down; the
   row is already gone from the list. The optional metric above measures this
   window.
