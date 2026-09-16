@@ -109,6 +109,9 @@ func TestPackSegmentLoadInfo_ManifestPath(t *testing.T) {
 			Bm25Statslogs: []*datapb.FieldBinlog{
 				{FieldID: 2},
 			},
+			TextLogV2: []*datapb.FieldBinlog{
+				{FieldID: 3},
+			},
 			TextStatsLogs: map[int64]*datapb.TextIndexStats{
 				10: {FieldID: 10},
 			},
@@ -126,6 +129,7 @@ func TestPackSegmentLoadInfo_ManifestPath(t *testing.T) {
 		assert.Equal(t, childManifestPaths, loadInfo.GetChildManifestPaths())
 		assert.Empty(t, loadInfo.GetStatslogs())
 		assert.Empty(t, loadInfo.GetBm25Logs())
+		assert.Empty(t, loadInfo.GetTextLogV2())
 		assert.Equal(t, seg.GetTextStatsLogs(), loadInfo.GetTextStatsLogs())
 		assert.Equal(t, seg.GetJsonKeyStats(), loadInfo.GetJsonKeyStatsLogs())
 		// Deltalogs should always be populated
@@ -140,6 +144,9 @@ func TestPackSegmentLoadInfo_ManifestPath(t *testing.T) {
 			},
 			Bm25Statslogs: []*datapb.FieldBinlog{
 				{FieldID: 2},
+			},
+			TextLogV2: []*datapb.FieldBinlog{
+				{FieldID: 3},
 			},
 			TextStatsLogs: map[int64]*datapb.TextIndexStats{
 				10: {FieldID: 10},
@@ -156,6 +163,7 @@ func TestPackSegmentLoadInfo_ManifestPath(t *testing.T) {
 		assert.Empty(t, loadInfo.GetManifestPath())
 		assert.NotEmpty(t, loadInfo.GetStatslogs())
 		assert.NotEmpty(t, loadInfo.GetBm25Logs())
+		assert.NotEmpty(t, loadInfo.GetTextLogV2())
 		assert.NotEmpty(t, loadInfo.GetTextStatsLogs())
 		assert.NotEmpty(t, loadInfo.GetJsonKeyStatsLogs())
 		assert.NotEmpty(t, loadInfo.GetDeltalogs())

@@ -133,6 +133,7 @@ type InsertData struct {
 	Timestamps   []uint64
 	InsertRecord *segcorepb.InsertRecord
 	BM25Stats    map[int64]*storage.BM25Stats
+	TextTerms    []*msgpb.TextTermBatch
 
 	StartPosition *msgpb.MsgPosition
 	PartitionID   int64
@@ -193,6 +194,24 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 				panic(err)
 			}
 			newGrowingSegment = true
+		}
+
+		if len(insertData.TextTerms) > 0 {
+			updater, ok := growing.(interface {
+				UpdateTextTerms([]*msgpb.TextTermBatch) error
+			})
+			if !ok {
+				panic(merr.WrapErrServiceInternalMsg("growing segment %d does not support text term updates", segmentID))
+			}
+			if err := updater.UpdateTextTerms(insertData.TextTerms); err != nil {
+				log.Error(context.TODO(), "failed to update growing text term dictionary",
+					mlog.FieldSegmentID(segmentID),
+					mlog.Err(err))
+				if errors.IsAny(err, merr.ErrSegmentNotLoaded, merr.ErrSegmentNotFound) {
+					continue
+				}
+				panic(err)
+			}
 		}
 
 		err := growing.Insert(context.Background(), insertData.RowIDs, insertData.Timestamps, insertData.InsertRecord)

@@ -105,6 +105,7 @@ func PackSegmentLoadInfo(segment *datapb.SegmentInfo, channelCheckpoint *msgpb.M
 	if segment.GetManifestPath() == "" {
 		loadInfo.Statslogs = segment.Statslogs
 		loadInfo.Bm25Logs = segment.Bm25Statslogs
+		loadInfo.TextLogV2 = segment.GetTextLogV2()
 	}
 
 	return loadInfo

@@ -30,12 +30,14 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -43,6 +45,21 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func TestFuzzyBM25TextTermBatchesFiltersCurrentSchema(t *testing.T) {
+	enabled := &msgpb.TextTermBatch{InputFieldId: 101, Terms: [][]byte{[]byte("fuzzy")}}
+	dropped := &msgpb.TextTermBatch{InputFieldId: 102, Terms: [][]byte{[]byte("old")}}
+	msg := &InsertMsg{InsertRequest: &msgpb.InsertRequest{TextTermBatches: []*msgpb.TextTermBatch{enabled, dropped}}}
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 101, DataType: schemapb.DataType_VarChar},
+	}, Functions: []*schemapb.FunctionSchema{{
+		Type:          schemapb.FunctionType_BM25,
+		InputFieldIds: []int64{101},
+		Params:        []*commonpb.KeyValuePair{{Key: common.EnableFuzzyKey, Value: "true"}},
+	}}}
+
+	require.Equal(t, []*msgpb.TextTermBatch{enabled}, fuzzyBM25TextTermBatches(msg, schema))
+}
 
 type InsertNodeSuite struct {
 	suite.Suite

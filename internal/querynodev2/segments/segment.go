@@ -449,6 +449,8 @@ type LocalSegment struct {
 	fieldIndexes       *typeutil.ConcurrentMap[int64, *IndexedFieldInfo] // indexID -> IndexedFieldInfo
 	fieldJSONStats     map[int64]*querypb.JsonStatsInfo
 	fieldJSONStatsMu   sync.RWMutex
+	lexicalMu          sync.RWMutex
+	textTerms          *segmentTextTermDictionary
 }
 
 func NewSegment(ctx context.Context,
@@ -516,6 +518,7 @@ func NewSegment(ctx context.Context,
 		fields:             typeutil.NewConcurrentMap[int64, *FieldInfo](),
 		fieldIndexes:       typeutil.NewConcurrentMap[int64, *IndexedFieldInfo](),
 		fieldJSONStats:     make(map[int64]*querypb.JsonStatsInfo),
+		textTerms:          newSegmentTextTermDictionary(unsafe.Pointer(csegment.RawPointer())),
 
 		memSize:         atomic.NewInt64(-1),
 		binlogSize:      atomic.NewInt64(0),
@@ -620,7 +623,7 @@ func (s *LocalSegment) MemSize() int64 {
 			return nil, nil
 		}).Await()
 	}
-	return memSize
+	return memSize + s.textTerms.memoryBytes()
 }
 
 func (s *LocalSegment) LastDeltaTimestamp() uint64 {
@@ -947,6 +950,64 @@ func (s *LocalSegment) Insert(ctx context.Context, rowIDs []int64, timestamps []
 	s.insertCount.Add(result.InsertedRows)
 	s.rowNum.Store(-1)
 	s.memSize.Store(-1)
+	return nil
+}
+
+// UpdateTextTerms makes WAL-materialized analyzer terms visible to the
+// growing segment dictionary. ProcessInsert calls this before publishing the
+// corresponding row insert, so expansion can temporarily over-enumerate a
+// not-yet-visible term but never miss a visible term.
+func (s *LocalSegment) UpdateTextTerms(batches []*msgpb.TextTermBatch) error {
+	if s.Type() != SegmentTypeGrowing {
+		return merr.WrapErrServiceInternalMsg("cannot update text terms for non-growing segment %d", s.ID())
+	}
+	if !s.ptrLock.PinIf(state.IsNotReleased) {
+		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
+	}
+	defer s.ptrLock.Unpin()
+
+	s.lexicalMu.Lock()
+	defer s.lexicalMu.Unlock()
+	return s.textTerms.add(batches)
+}
+
+func (s *LocalSegment) installLoadedTextTerms(loaded *loadedTextTermDictionary) error {
+	s.lexicalMu.Lock()
+	defer s.lexicalMu.Unlock()
+	switch s.Type() {
+	case SegmentTypeGrowing:
+		if err := s.textTerms.importLoaded(loaded); err != nil {
+			return err
+		}
+	case SegmentTypeSealed:
+		s.textTerms.replaceLoaded(loaded)
+	default:
+		if loaded != nil {
+			loaded.close()
+		}
+		return merr.WrapErrServiceInternalMsg(
+			"cannot install text terms for segment %d with type %s",
+			s.ID(), s.Type().String())
+	}
+	return nil
+}
+
+func (s *LocalSegment) reopenWithTextTerms(
+	ctx context.Context,
+	loadInfo *querypb.SegmentLoadInfo,
+	loaded *loadedTextTermDictionary,
+) error {
+	// Expansion takes the same lexical read lock in Stage 04. Holding the write
+	// lock across segcore reopen and dictionary replacement makes the local row
+	// generation and vocabulary swap atomic. Stage 04 still needs an optimistic
+	// generation token across its separate expansion and search RPCs.
+	s.lexicalMu.Lock()
+	defer s.lexicalMu.Unlock()
+	if err := s.Reopen(ctx, loadInfo); err != nil {
+		loaded.close()
+		return err
+	}
+	s.textTerms.replaceLoaded(loaded)
 	return nil
 }
 
@@ -1375,6 +1436,9 @@ func (s *LocalSegment) Release(ctx context.Context, opts ...releaseOption) {
 		C.DeleteSegment(ptr)
 		return nil, nil
 	}).Await()
+	s.lexicalMu.Lock()
+	s.textTerms.close()
+	s.lexicalMu.Unlock()
 
 	// TODO: disable logical resource handling for now
 	// usage := s.ResourceUsageEstimate()

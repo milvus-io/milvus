@@ -17,6 +17,7 @@ package packed
 import (
 	"fmt"
 	"path"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -39,9 +40,11 @@ type StatsResolver struct {
 	manifestPath  string
 	storageConfig *indexpb.StorageConfig
 
-	// Legacy (V2)
+	// Non-manifest storage metadata. Text Log V2 is the new text-artifact
+	// generation; its V2 suffix is unrelated to Milvus StorageV2.
 	statslogs     []*datapb.FieldBinlog
 	bm25Logs      []*datapb.FieldBinlog
+	textLogV2     []*datapb.FieldBinlog
 	textStatsLogs map[int64]*datapb.TextIndexStats
 	jsonKeyStats  map[int64]*datapb.JsonKeyStats
 
@@ -68,6 +71,7 @@ func NewStatsResolverFromLoadInfo(loadInfo *querypb.SegmentLoadInfo) *StatsResol
 		storageConfig: CreateStorageConfig(),
 		statslogs:     loadInfo.GetStatslogs(),
 		bm25Logs:      loadInfo.GetBm25Logs(),
+		textLogV2:     loadInfo.GetTextLogV2(),
 		textStatsLogs: loadInfo.GetTextStatsLogs(),
 		jsonKeyStats:  loadInfo.GetJsonKeyStatsLogs(),
 	}
@@ -81,6 +85,7 @@ func NewStatsResolverFromSegmentInfo(info *datapb.SegmentInfo) *StatsResolver {
 		storageConfig: CreateStorageConfig(),
 		statslogs:     info.GetStatslogs(),
 		bm25Logs:      info.GetBm25Statslogs(),
+		textLogV2:     info.GetTextLogV2(),
 		textStatsLogs: info.GetTextStatsLogs(),
 		jsonKeyStats:  info.GetJsonKeyStats(),
 	}
@@ -209,6 +214,66 @@ func (r *StatsResolver) BM25StatsPaths() (map[int64][]string, error) {
 			result[fieldID] = resolved
 		}
 	}
+	return result, nil
+}
+
+// TextLogV2 returns load metadata for Text Log V2. Non-manifest segments carry
+// FieldBinlog entries directly. For manifest segments, the resolver reconstructs
+// equivalent metadata so QueryNode can use one load path for Storage V1/V2/V3.
+func (r *StatsResolver) TextLogV2() ([]*datapb.FieldBinlog, error) {
+	if !r.isManifest() {
+		return r.textLogV2, nil
+	}
+
+	if err := r.loadManifest(); err != nil {
+		return nil, err
+	}
+
+	result := make([]*datapb.FieldBinlog, 0)
+	for key, stat := range r.manifestStats {
+		prefix, fieldID, ok := ParseStatKey(key)
+		if !ok || prefix != "text_log_v2" || len(stat.Paths) == 0 {
+			continue
+		}
+
+		coverage, err := strconv.ParseUint(stat.Metadata["coverage_timestamp"], 10, 64)
+		if err != nil {
+			return nil, merr.WrapErrDataIntegrity(err,
+				"invalid text-log-v2 coverage timestamp for field %d", fieldID)
+		}
+		logSize, err := strconv.ParseInt(stat.Metadata["log_size"], 10, 64)
+		if err != nil || logSize <= 0 {
+			return nil, merr.WrapErrDataIntegrity(err,
+				"invalid text-log-v2 size for field %d", fieldID)
+		}
+		memorySize, err := strconv.ParseInt(stat.Metadata["memory_size"], 10, 64)
+		if err != nil || memorySize <= 0 {
+			return nil, merr.WrapErrDataIntegrity(err,
+				"invalid text-log-v2 memory size for field %d", fieldID)
+		}
+
+		paths := r.resolveStatPaths(stat.Paths)
+		binlogs := make([]*datapb.Binlog, 0, len(paths))
+		for _, logPath := range paths {
+			binlogs = append(binlogs, &datapb.Binlog{
+				LogPath:     logPath,
+				TimestampTo: coverage,
+			})
+		}
+		// Manifest metadata stores aggregate sizes for the complete fragment
+		// set. Put them on the first entry so existing FieldBinlog size helpers
+		// produce the correct total without pretending to know per-file sizes.
+		binlogs[0].LogSize = logSize
+		binlogs[0].MemorySize = memorySize
+		result = append(result, &datapb.FieldBinlog{
+			FieldID: fieldID,
+			Format:  stat.Metadata["format"],
+			Binlogs: binlogs,
+		})
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].GetFieldID() < result[j].GetFieldID()
+	})
 	return result, nil
 }
 

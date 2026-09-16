@@ -93,6 +93,7 @@ func (iNode *insertNode) addInsertData(insertDatas map[UniqueID]*delegator.Inser
 		mlog.Error(ctx, "failed to append BM25 stats from insert message", mlog.String("channel", iNode.channel), mlog.Err(err))
 		panic(err)
 	}
+	iData.TextTerms = append(iData.TextTerms, fuzzyBM25TextTermBatches(msg, schema)...)
 
 	pks, err := segments.GetPrimaryKeys(msg, schema)
 	if err != nil {
@@ -109,6 +110,25 @@ func (iNode *insertNode) addInsertData(insertDatas map[UniqueID]*delegator.Inser
 		mlog.Int("insertRowNum", len(pks)),
 		mlog.Uint64("timestampMin", msg.BeginTimestamp),
 		mlog.Uint64("timestampMax", msg.EndTimestamp))
+}
+
+func fuzzyBM25TextTermBatches(msg *InsertMsg, schema *schemapb.CollectionSchema) []*msgpb.TextTermBatch {
+	enabled := make(map[int64]struct{})
+	for _, field := range schema.GetFields() {
+		if typeutil.IsFuzzyEnabledBM25InputField(schema, field) {
+			enabled[field.GetFieldID()] = struct{}{}
+		}
+	}
+	result := make([]*msgpb.TextTermBatch, 0, len(msg.GetTextTermBatches()))
+	for _, batch := range msg.GetTextTermBatches() {
+		if batch == nil {
+			continue
+		}
+		if _, ok := enabled[batch.GetInputFieldId()]; ok {
+			result = append(result, batch)
+		}
+	}
+	return result
 }
 
 func (iNode *insertNode) Close() {

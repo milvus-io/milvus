@@ -66,6 +66,22 @@ type SegmentLoaderSuite struct {
 	segmentNum   int
 }
 
+func (loader *segmentLoader) estimateSegmentLoadingResourceUsage(
+	ctx context.Context,
+	segmentLoadInfos ...*querypb.SegmentLoadInfo,
+) (*ResourceUsage, uint64, error) {
+	return loader.estimateSegmentLoadingResourceUsageForType(ctx, SegmentTypeSealed, segmentLoadInfos...)
+}
+
+func estimateLoadingResourceUsageOfSegment(
+	schema *schemapb.CollectionSchema,
+	loadInfo *querypb.SegmentLoadInfo,
+	multiplyFactor resourceEstimateFactor,
+) (*ResourceUsage, error) {
+	return estimateLoadingResourceUsageOfSegmentForType(
+		schema, loadInfo, SegmentTypeSealed, multiplyFactor)
+}
+
 type eofRecordReader struct{}
 
 func (eofRecordReader) Next() (storage.Record, error) {
@@ -2015,9 +2031,16 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) SetupSuite() {
 		Name: "test_text_estimate",
 		Fields: []*schemapb.FieldSchema{
 			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-			{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
+			{
+				FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar,
+			},
 			{FieldID: 102, Name: "text2", DataType: schemapb.DataType_VarChar},
 		},
+		Functions: []*schemapb.FunctionSchema{{
+			Type:          schemapb.FunctionType_BM25,
+			InputFieldIds: []int64{101},
+			Params:        []*commonpb.KeyValuePair{{Key: common.EnableFuzzyKey, Value: "true"}},
+		}},
 	}
 }
 
@@ -2030,6 +2053,104 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) baseLoadInfo(textStats map[int
 		NumOfRows:     100,
 		TextStatsLogs: textStats,
 	}
+}
+
+func (suite *SegmentLoaderTextIndexEstimateSuite) textTermLoadInfo(logSize, memorySize int64) *querypb.SegmentLoadInfo {
+	info := suite.baseLoadInfo(nil)
+	info.TextLogV2 = []*datapb.FieldBinlog{{
+		FieldID: 101,
+		Binlogs: []*datapb.Binlog{{LogSize: logSize, MemorySize: memorySize}},
+	}}
+	return info
+}
+
+func (suite *SegmentLoaderTextIndexEstimateSuite) TestTextLogV2LoadingEstimate_MmapUsesDisk() {
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapTextLogV2.Key, "true")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapTextLogV2.Key)
+
+	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema,
+		suite.textTermLoadInfo(4096, 8192), resourceEstimateFactor{})
+	suite.NoError(err)
+	suite.EqualValues(0, usage.MemorySize)
+	suite.EqualValues(4096, usage.DiskSize)
+}
+
+func (suite *SegmentLoaderTextIndexEstimateSuite) TestTextLogV2LoadingEstimate_HeapUsesMemory() {
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapTextLogV2.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapTextLogV2.Key)
+
+	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema,
+		suite.textTermLoadInfo(4096, 8192), resourceEstimateFactor{})
+	suite.NoError(err)
+	// One resident native copy plus one transient Go byte buffer while the FST
+	// is copied across cgo.
+	suite.EqualValues(16384, usage.MemorySize)
+	suite.EqualValues(0, usage.DiskSize)
+}
+
+func (suite *SegmentLoaderTextIndexEstimateSuite) TestTextLogV2LoadingEstimate_HeapAddsLargestFragmentPeak() {
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapTextLogV2.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapTextLogV2.Key)
+
+	loadInfo := suite.baseLoadInfo(nil)
+	loadInfo.TextLogV2 = []*datapb.FieldBinlog{{
+		FieldID: 101,
+		Binlogs: []*datapb.Binlog{
+			{LogSize: 4096, MemorySize: 8192},
+			{LogSize: 2048, MemorySize: 4096},
+		},
+	}}
+	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, resourceEstimateFactor{})
+	suite.NoError(err)
+	// 12 KiB resident native FSTs plus the largest 8 KiB Go-side fragment.
+	suite.EqualValues(20*1024, usage.MemorySize)
+	suite.EqualValues(0, usage.DiskSize)
+}
+
+func (suite *SegmentLoaderTextIndexEstimateSuite) TestTextLogV2GrowingLoadingEstimate_MmapIncludesTrieHeap() {
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapTextLogV2.Key, "true")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapTextLogV2.Key)
+
+	usage, err := estimateLoadingResourceUsageOfSegmentForType(
+		suite.schema,
+		suite.textTermLoadInfo(4096, 8192),
+		SegmentTypeGrowing,
+		resourceEstimateFactor{textLogV2GrowingTrieExpansionFactor: 4},
+	)
+	suite.NoError(err)
+	suite.EqualValues(32*1024, usage.MemorySize)
+	// The FST mapping overlaps the Trie rebuild, then is removed after import.
+	suite.EqualValues(4096, usage.DiskSize)
+}
+
+func (suite *SegmentLoaderTextIndexEstimateSuite) TestTextLogV2GrowingLoadingEstimate_HeapIncludesFstAndTrie() {
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapTextLogV2.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapTextLogV2.Key)
+
+	usage, err := estimateLoadingResourceUsageOfSegmentForType(
+		suite.schema,
+		suite.textTermLoadInfo(4096, 8192),
+		SegmentTypeGrowing,
+		resourceEstimateFactor{textLogV2GrowingTrieExpansionFactor: 4},
+	)
+	suite.NoError(err)
+	// 32 KiB Trie + 8 KiB native FST + 8 KiB transient Go buffer.
+	suite.EqualValues(48*1024, usage.MemorySize)
+	suite.EqualValues(0, usage.DiskSize)
+}
+
+func (suite *SegmentLoaderTextIndexEstimateSuite) TestTextLogV2LogicalEstimateIgnoresTieredCacheRatio() {
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapTextLogV2.Key, "true")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapTextLogV2.Key)
+
+	usage, err := estimateLogicalResourceUsageOfSegment(suite.schema,
+		suite.textTermLoadInfo(4096, 8192), resourceEstimateFactor{
+			TieredEvictionEnabled:         true,
+			TieredEvictableDiskCacheRatio: 0.1,
+		})
+	suite.NoError(err)
+	suite.EqualValues(0, usage.MemorySize)
+	suite.EqualValues(4096, usage.DiskSize)
 }
 
 func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_NonMmap_NoTieredEviction() {

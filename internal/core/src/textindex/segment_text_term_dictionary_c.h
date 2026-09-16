@@ -20,45 +20,36 @@
 #include <stdint.h>
 
 #include "common/common_type_c.h"
+#include "common/type_c.h"
+#include "textindex/fst/text_fst_c.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-typedef void* CTextFstHandle;
-
-typedef struct CTextFstBuildResult {
+typedef struct CTextTermTrieUpdateResult {
     CStatus status;
-    const uint8_t* data;
-    int64_t data_size;
     int64_t term_count;
-    // Owns data and must be released with DeleteTextFst.
-    CTextFstHandle handle;
-} CTextFstBuildResult;
-
-typedef struct CTextFstLoadResult {
-    CStatus status;
-    CTextFstHandle handle;
-    int64_t data_size;
-    int64_t term_count;
-    bool is_memory_mapped;
+    int64_t memory_size;
     bool is_data_integrity_error;
-} CTextFstLoadResult;
+} CTextTermTrieUpdateResult;
 
-// BuildTextFst builds a Milvus text FST artifact.
-// encoded_terms is little-endian: u64 count followed by count repetitions of
-// u64 byte_length and the raw term bytes.
-CTextFstBuildResult
-BuildTextFst(const uint8_t* encoded_terms, int64_t encoded_size);
+// Adds one field's message-deduplicated terms to the mutable Trie owned by a
+// growing segcore segment. encoded_terms uses the same little-endian
+// count/length/bytes representation as BuildTextFst.
+CTextTermTrieUpdateResult
+UpdateSegmentTextTermTrie(CSegmentInterface c_segment,
+                          int64_t field_id,
+                          const uint8_t* encoded_terms,
+                          int64_t encoded_size);
 
-CTextFstLoadResult
-LoadTextFstBytes(const uint8_t* data, int64_t data_size);
-
-CTextFstLoadResult
-LoadTextFstFile(const char* path, bool memory_mapped);
-
-void
-DeleteTextFst(CTextFstHandle handle);
+// Streams every term from the supplied persisted FSTs into the mutable Trie
+// owned by a growing segment.
+CTextTermTrieUpdateResult
+AddSegmentTextTermFstsToTrie(CSegmentInterface c_segment,
+                             int64_t field_id,
+                             const CTextFstHandle* fst_handles,
+                             int64_t fst_count);
 
 #ifdef __cplusplus
 }

@@ -15,8 +15,11 @@
 # limitations under the License.
 
 add_library(milvus_textindex OBJECT
+    segment_text_term_dictionary.cpp
+    segment_text_term_dictionary_c.cpp
     fst/text_fst_c.cpp
-    fst/text_fst.cpp)
+    fst/text_fst.cpp
+    fst/levenshtein_dfa.cpp)
 
 target_include_directories(milvus_textindex PUBLIC
     ..)
