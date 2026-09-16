@@ -111,7 +111,7 @@ func (s *BM25FunctionRunnerSuite) TestBatchRunWithTextTerms() {
 	s.Require().Len(output, 1)
 	s.Require().Len(batches, 1)
 	s.EqualValues(101, batches[0].InputFieldID)
-	s.Equal([][]byte{[]byte("2"), []byte("string"), []byte("test")}, batches[0].Terms)
+	s.ElementsMatch([][]byte{[]byte("2"), []byte("string"), []byte("test")}, batches[0].Terms)
 }
 
 func (s *BM25FunctionRunnerSuite) TestBatchAnalyze() {

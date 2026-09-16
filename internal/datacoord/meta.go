@@ -1434,7 +1434,7 @@ func AddL0DeltalogsAndUpdateManifestOperator(
 	}
 }
 
-func UpdateBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25logs []*datapb.FieldBinlog) UpdateOperator {
+func UpdateBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25logs, textLogV2 []*datapb.FieldBinlog) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
 		if segment == nil {
@@ -1447,14 +1447,55 @@ func UpdateBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25l
 		segment.Statslogs = statslogs
 		segment.Deltalogs = deltalogs
 		segment.Bm25Statslogs = bm25logs
+		segment.TextLogV2 = textLogV2
 		// Refresh Stats so callers (import / copy-segment / sort) don't have
 		// to remember to chain UpdateSegmentStats. Stats-fields-from-arrays
 		// is the right semantic for these paths: they don't carry a
 		// writer-reported V3 stats override, and the segment is being
 		// (re)initialized with the supplied arrays.
-		segment.Stats = storage.BuildStatsFromFieldBinlogs(binlogs, statslogs, bm25logs, nil, deltalogs)
+		segment.Stats = storage.BuildStatsFromFieldBinlogs(binlogs, statslogs, bm25logs, textLogV2, deltalogs)
 		modPack.increments[segmentID] = metastore.BinlogsIncrement{
 			Segment: segment.SegmentInfo,
+		}
+		return true
+	}
+}
+
+// UpdateAuxiliaryStatslogsOperator replaces the auxiliary log families
+// produced by a sort stats task without touching insert or delta logs. V1/V2
+// store these families in independent catalog KVs, so the BinlogsIncrement is
+// required for the update to survive DataCoord restart.
+func UpdateAuxiliaryStatslogsOperator(segmentID int64, statslogs, bm25logs, textLogV2 []*datapb.FieldBinlog) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			mlog.Warn(modPack.meta.ctx, "meta update: update auxiliary stats logs failed - segment not found",
+				mlog.FieldSegmentID(segmentID))
+			return false
+		}
+		if len(statslogs) == 0 && len(bm25logs) == 0 && len(textLogV2) == 0 {
+			return false
+		}
+
+		if len(statslogs) > 0 {
+			segment.Statslogs = statslogs
+		}
+		if len(bm25logs) > 0 {
+			segment.Bm25Statslogs = bm25logs
+		}
+		if len(textLogV2) > 0 {
+			segment.TextLogV2 = textLogV2
+		}
+		segment.Stats = storage.BuildStatsFromFieldBinlogs(segment.GetBinlogs(), segment.GetStatslogs(), segment.GetBm25Statslogs(), segment.GetTextLogV2(), segment.GetDeltalogs())
+		modPack.increments[segmentID] = metastore.BinlogsIncrement{
+			Segment: segment.SegmentInfo,
+			UpdateMask: metastore.BinlogsUpdateMask{
+				WithoutBinlogs:       true,
+				WithoutDeltalogs:     true,
+				WithoutStatslogs:     len(statslogs) == 0,
+				WithoutBm25Statslogs: len(bm25logs) == 0,
+				WithoutTextLogV2:     len(textLogV2) == 0,
+			},
 		}
 		return true
 	}
@@ -2494,6 +2535,7 @@ func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 			MaxRowNum:           compactFromSegInfos[0].MaxRowNum,
 			Binlogs:             seg.GetInsertLogs(),
 			Statslogs:           seg.GetField2StatslogPaths(),
+			TextLogV2:           seg.GetTextLogV2(),
 			CreatedByCompaction: true,
 			CompactionFrom:      compactFromSegIDs,
 			LastExpireTime:      tsoutil.ComposeTSByTime(time.Unix(t.GetStartTime(), 0)),
@@ -2603,6 +2645,7 @@ func (m *meta) completeMixCompactionMutation(
 			Statslogs:           compactToSegment.GetField2StatslogPaths(),
 			Deltalogs:           compactToSegment.GetDeltalogs(),
 			Bm25Statslogs:       compactToSegment.GetBm25Logs(),
+			TextLogV2:           compactToSegment.GetTextLogV2(),
 			TextStatsLogs:       compactToSegment.GetTextStatsLogs(),
 			CreatedByCompaction: true,
 			CompactionFrom:      compactFromSegIDs,
@@ -3405,6 +3448,7 @@ func (m *meta) completeSortCompactionMutation(
 		Statslogs:                 resultSegment.GetField2StatslogPaths(),
 		TextStatsLogs:             resultSegment.GetTextStatsLogs(),
 		Bm25Statslogs:             resultSegment.GetBm25Logs(),
+		TextLogV2:                 resultSegment.GetTextLogV2(),
 		Deltalogs:                 resultSegment.GetDeltalogs(),
 		CompactionFrom:            []int64{compactFromSegID},
 		CreateTs:                  compactionTaskCreateTS(t),
@@ -3668,6 +3712,7 @@ func (m *meta) completeBumpSchemaVersionReplacementMutation(
 		Statslogs:                 resultSegment.GetField2StatslogPaths(),
 		TextStatsLogs:             resultSegment.GetTextStatsLogs(),
 		Bm25Statslogs:             resultSegment.GetBm25Logs(),
+		TextLogV2:                 resultSegment.GetTextLogV2(),
 		Deltalogs:                 resultSegment.GetDeltalogs(),
 		CompactionFrom:            []int64{oldSegment.GetID()},
 		CreateTs:                  compactionTaskCreateTS(t),

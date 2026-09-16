@@ -24,6 +24,7 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -64,6 +65,22 @@ type mockeyStatsCluster struct {
 
 type mockeyChunkManager struct {
 	storage.ChunkManager
+}
+
+func TestCountFuzzyBM25TermFields(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 101, DataType: schemapb.DataType_VarChar},
+			{FieldID: 102, DataType: schemapb.DataType_VarChar},
+		},
+		Functions: []*schemapb.FunctionSchema{
+			{Type: schemapb.FunctionType_BM25, InputFieldIds: []int64{101}, Params: []*commonpb.KeyValuePair{{Key: common.EnableFuzzyKey, Value: "true"}}},
+			{Type: schemapb.FunctionType_BM25, InputFieldIds: []int64{101}, Params: []*commonpb.KeyValuePair{{Key: common.EnableFuzzyKey, Value: "true"}}},
+			{Type: schemapb.FunctionType_BM25, InputFieldIds: []int64{102}},
+		},
+	}
+
+	require.Equal(t, int64(1), countFuzzyBM25TermFields(schema))
 }
 
 func Test_statsTaskSuite(t *testing.T) {
@@ -636,6 +653,38 @@ func (s *statsTaskSuite) TestSetJobInfo() {
 
 	// Restore original segments
 	s.mt.segments = origSegments
+}
+
+func (s *statsTaskSuite) TestSetSortJobInfoPersistsStatsAndManifestTogether() {
+	stats := &datapb.Statistics{InsertBinlogSize: 4096, StatsBinlogSize: 1024}
+	manifest := `{"base_path":"files/insert_log/1/2/1180","ver":3}`
+	catalog := catalogmocks.NewDataCoordCatalog(s.T())
+	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil).Once()
+	mt := &meta{ctx: context.Background(), catalog: catalog, segments: NewSegmentsInfo()}
+	mt.segments.SetSegment(s.targetID, NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             s.targetID,
+		CollectionID:   s.collID,
+		PartitionID:    s.partID,
+		InsertChannel:  "ch1",
+		State:          commonpb.SegmentState_Flushed,
+		StorageVersion: storage.StorageV3,
+	}))
+	st := newStatsTask(&indexpb.StatsTask{
+		TaskID:          s.taskID,
+		SegmentID:       s.segID,
+		TargetSegmentID: s.targetID,
+		SubJobType:      indexpb.StatsSubJob_Sort,
+	}, 1, mt, nil, nil, newIndexEngineVersionManager())
+
+	err := st.SetJobInfo(context.Background(), &workerpb.StatsResult{
+		TaskID:   s.taskID,
+		Stats:    stats,
+		Manifest: manifest,
+	})
+	s.Require().NoError(err)
+	updated := mt.GetSegment(context.Background(), s.targetID)
+	s.Equal(stats, updated.GetStats())
+	s.Equal(manifest, updated.GetManifestPath())
 }
 
 func (s *statsTaskSuite) TestSetJobInfoJSONStatsResultManifestHandling() {

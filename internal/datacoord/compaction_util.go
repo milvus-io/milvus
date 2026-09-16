@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // PreAllocateBinlogIDs pre-allocates binlog IDs based on the total number of binlogs from
@@ -49,7 +50,8 @@ func PreAllocateBinlogIDs(allocator allocator.Allocator, segmentInfos []*Segment
 			binlogNum += int64(len(l.GetBinlogs()))
 		}
 	}
-	// Compaction output always needs IDs for PK stats (1) and BM25 stats (per BM25 function).
+	// Compaction output always needs IDs for PK stats (1), BM25 stats (per BM25
+	// function), and one text-term FST per fuzzy-enabled BM25 input field.
 	// For V3 manifest segments, binlog metadata may be empty since data is managed by manifest,
 	// but stats output still requires IDs. Calculate the minimum from schema directly.
 	minIDsFromSchema := int64(1) // 1 for PK stats
@@ -59,6 +61,7 @@ func PreAllocateBinlogIDs(allocator allocator.Allocator, segmentInfos []*Segment
 				minIDsFromSchema++
 			}
 		}
+		minIDsFromSchema += countFuzzyBM25TermFields(schema)
 	}
 	if binlogNum < minIDsFromSchema {
 		binlogNum = minIDsFromSchema
@@ -66,6 +69,19 @@ func PreAllocateBinlogIDs(allocator allocator.Allocator, segmentInfos []*Segment
 	n := binlogNum * int64(paramtable.Get().DataCoordCfg.CompactionPreAllocateIDExpansionFactor.GetAsInt())
 	begin, end, err := allocator.AllocN(n)
 	return &datapb.IDRange{Begin: begin, End: end}, err
+}
+
+func countFuzzyBM25TermFields(schema *schemapb.CollectionSchema) int64 {
+	if schema == nil {
+		return 0
+	}
+	count := int64(0)
+	for _, field := range schema.GetFields() {
+		if typeutil.IsFuzzyEnabledBM25InputField(schema, field) {
+			count++
+		}
+	}
+	return count
 }
 
 // Return None nil slice

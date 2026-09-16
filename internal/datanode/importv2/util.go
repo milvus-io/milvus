@@ -63,6 +63,7 @@ func NewSyncTask(ctx context.Context,
 	storageVersion int64,
 	useLoonFFI bool,
 	storageConfig *indexpb.StorageConfig,
+	textTerms *syncmgr.TextTermData,
 ) (syncmgr.Task, error) {
 	metaCache := metaCaches[vchannel]
 	if _, ok := metaCache.GetSegmentByID(segmentID); !ok {
@@ -105,6 +106,9 @@ func NewSyncTask(ctx context.Context,
 	if bm25Stats != nil {
 		syncPack.WithBM25Stats(bm25Stats)
 	}
+	if textTerms != nil {
+		syncPack.WithTextTerms(textTerms)
+	}
 
 	task := syncmgr.NewSyncTask().
 		WithAllocator(allocator).
@@ -133,7 +137,8 @@ func newWriteRetryOptions() []retry.Option {
 
 func NewImportSegmentInfo(syncTask syncmgr.Task, metaCaches map[string]metacache.MetaCache) (*datapb.ImportSegmentInfo, error) {
 	segmentID := syncTask.SegmentID()
-	insertBinlogs, statsBinlog, deltaLog, bm25Log := syncTask.(*syncmgr.SyncTask).Binlogs()
+	task := syncTask.(*syncmgr.SyncTask)
+	insertBinlogs, statsBinlog, deltaLog, bm25Log := task.Binlogs()
 	metaCache := metaCaches[syncTask.ChannelName()]
 	segment, ok := metaCache.GetSegmentByID(segmentID)
 	if !ok {
@@ -149,6 +154,7 @@ func NewImportSegmentInfo(syncTask syncmgr.Task, metaCaches map[string]metacache
 		Binlogs:      lo.Values(insertBinlogs),
 		Statslogs:    lo.Values(statsBinlog),
 		Bm25Logs:     lo.Values(bm25Log),
+		TextLogV2:    lo.Values(task.TextLogV2()),
 		Deltalogs:    deltaLogs,
 		ManifestPath: segment.ManifestPath(),
 		// Report the writer-built cumulative Statistics so DataCoord persists

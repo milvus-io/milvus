@@ -159,7 +159,6 @@ func (w *MultiSegmentWriter) closeWriter() error {
 			// writers and V3 manifest-embedded-stats writers alike).
 			Stats: buildCompactionOutputStats(sortedInsertLogs, nil, writer.GetStatsBlobSize()),
 		}
-
 		w.res = append(w.res, result)
 
 		mlog.Info(w.ctx, "created new segment",

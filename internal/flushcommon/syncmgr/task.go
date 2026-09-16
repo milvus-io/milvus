@@ -343,6 +343,10 @@ func (t *SyncTask) Binlogs() (map[int64]*datapb.FieldBinlog, map[int64]*datapb.F
 	return t.insertBinlogs, t.statsBinlogs, t.deltaBinlog, t.bm25Binlogs
 }
 
+func (t *SyncTask) TextLogV2() map[int64]*datapb.FieldBinlog {
+	return t.textLogV2
+}
+
 func (t *SyncTask) MarshalJSON() ([]byte, error) {
 	deltaRowCount := int64(0)
 	if t.pack != nil && t.pack.deltaData != nil {

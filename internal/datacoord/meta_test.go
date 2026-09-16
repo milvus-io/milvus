@@ -693,6 +693,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 				SegmentID:           3,
 				InsertLogs:          []*datapb.FieldBinlog{getFieldBinlogIDs(0, 50000)},
 				Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogIDs(0, 50001)},
+				TextLogV2:           []*datapb.FieldBinlog{getFieldBinlogIDs(101, 60001)},
 				NumOfRows:           4,
 			}},
 		}
@@ -711,6 +712,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 		suite.NoError(err)
 		suite.Require().Len(infos, 1)
 		suite.EqualValues(9, infos[0].GetSchemaVersion())
+		suite.Equal(result.GetSegments()[0].GetTextLogV2(), infos[0].GetTextLogV2())
 	})
 
 	suite.Run("test mix complete rejects nil task schema", func() {
@@ -4335,6 +4337,39 @@ func TestAddL0DeltalogsAndUpdateManifestOperatorCacheDoesNotRegressManifest(t *t
 }
 
 func TestUpdateSegmentsInfo(t *testing.T) {
+	t.Run("auxiliary stats logs persist through catalog", func(t *testing.T) {
+		meta, err := newMemoryMeta(t)
+		require.NoError(t, err)
+
+		segment := NewSegmentInfo(&datapb.SegmentInfo{
+			ID:             1,
+			CollectionID:   10,
+			PartitionID:    20,
+			State:          commonpb.SegmentState_Flushed,
+			StorageVersion: storage.StorageV2,
+		})
+		require.NoError(t, meta.AddSegment(context.TODO(), segment))
+
+		textLogV2 := []*datapb.FieldBinlog{{
+			FieldID: 101,
+			Format:  "milvus_text_fst_v1",
+			Binlogs: []*datapb.Binlog{{LogID: 336, EntriesNum: 3, TimestampTo: 200}},
+		}}
+		require.NoError(t, meta.UpdateSegmentsInfo(context.TODO(),
+			UpdateAuxiliaryStatslogsOperator(1, nil, nil, textLogV2)))
+
+		updated := meta.GetHealthySegment(context.TODO(), 1)
+		require.Len(t, updated.GetTextLogV2(), 1)
+		assert.EqualValues(t, 336, updated.GetTextLogV2()[0].GetBinlogs()[0].GetLogID())
+
+		persisted, err := meta.catalog.ListSegments(context.TODO(), 10)
+		require.NoError(t, err)
+		require.Len(t, persisted, 1)
+		require.Len(t, persisted[0].GetTextLogV2(), 1)
+		assert.EqualValues(t, 336, persisted[0].GetTextLogV2()[0].GetBinlogs()[0].GetLogID())
+		assert.Equal(t, "milvus_text_fst_v1", persisted[0].GetTextLogV2()[0].GetFormat())
+	})
+
 	t.Run("operator error stops update", func(t *testing.T) {
 		meta, err := newMemoryMeta(t)
 		require.NoError(t, err)
@@ -4647,7 +4682,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 
 		err = meta.UpdateSegmentsInfo(
 			context.TODO(),
-			UpdateBinlogsOperator(1, nil, nil, nil, nil),
+			UpdateBinlogsOperator(1, nil, nil, nil, nil, nil),
 		)
 		assert.NoError(t, err)
 
@@ -5017,6 +5052,7 @@ func TestUpdateSegmentsInfoUpdatesSegmentFormatMetricWithBinlogsBeforeStateChang
 					},
 				},
 			},
+			nil,
 			nil,
 			nil,
 			nil,
@@ -6939,7 +6975,7 @@ func TestUpdateBinlogsOperator_RefreshesStats(t *testing.T) {
 	newDelta := []*datapb.FieldBinlog{mkBinlog(3, 5, 64, 150, 180)}
 
 	err = meta.UpdateSegmentsInfo(context.TODO(),
-		UpdateBinlogsOperator(11, newBinlogs, newStats, newDelta, nil))
+		UpdateBinlogsOperator(11, newBinlogs, newStats, newDelta, nil, nil))
 	require.NoError(t, err)
 
 	got := meta.GetSegment(context.TODO(), 11)

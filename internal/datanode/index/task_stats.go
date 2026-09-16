@@ -42,7 +42,9 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
+	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
+	"github.com/milvus-io/milvus/internal/util/textindex"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -303,7 +305,53 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 
 	binlogs, stats, bm25stats, manifestPath, _ := srw.GetLogs()
 	insertLogs := storage.SortFieldBinlogs(binlogs)
+	var textLogV2 []*datapb.FieldBinlog
+	var textLogV2Size int64
+	if numValidRows > 0 {
+		textTerms, err := function.CollectSegmentTextTerms(ctx, st.req.GetSchema(), function.SegmentTextTermSource{
+			CollectionID:   st.req.GetCollectionID(),
+			PartitionID:    st.req.GetPartitionID(),
+			SegmentID:      st.req.GetTargetSegmentID(),
+			StorageVersion: st.req.GetStorageVersion(),
+			InsertLogs:     insertLogs,
+			ManifestPath:   manifestPath,
+			StorageConfig:  st.req.GetStorageConfig(),
+			Downloader:     st.binlogIO.Download,
+		})
+		if err != nil {
+			return nil, err
+		}
+		if st.req.GetStorageVersion() < storage.StorageV3 {
+			textLogV2, _, err = textindex.WriteFieldBinlogs(ctx, st.binlogIO.Upload,
+				st.req.GetStorageConfig().GetRootPath(), st.req.GetCollectionID(), st.req.GetPartitionID(),
+				st.req.GetTargetSegmentID(), alloc, textTerms.Fields, textTerms.CoverageTimestamp)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			entries, size, err := textindex.BuildReplacementManifestEntries(manifestPath, st.req.GetStorageConfig(),
+				alloc, textTerms.Fields, textTerms.CoverageTimestamp)
+			if err != nil {
+				return nil, err
+			}
+			if len(entries) > 0 {
+				basePath, version, err := packed.UnmarshalManifestPath(manifestPath)
+				if err != nil {
+					return nil, err
+				}
+				manifestPath, err = packed.CommitManifestUpdates(basePath, version, st.req.GetStorageConfig(),
+					&packed.ManifestUpdates{Stats: entries})
+				if err != nil {
+					return nil, err
+				}
+				textLogV2Size = size
+			}
+		}
+	}
 	if err := binlog.CompressFieldBinlogs(insertLogs); err != nil {
+		return nil, err
+	}
+	if err := binlog.CompressFieldBinlogs(textLogV2); err != nil {
 		return nil, err
 	}
 	st.manifestPath = manifestPath
@@ -347,6 +395,10 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 			return nil, err
 		}
 	}
+	segmentStats := storage.BuildStatsFromFieldBinlogs(insertLogs, statsLogs, bm25StatsLogs, textLogV2, nil)
+	if st.req.GetStorageVersion() >= storage.StorageV3 {
+		segmentStats.StatsBinlogSize = srw.GetStatsBlobSize() + textLogV2Size
+	}
 
 	st.manager.StorePKSortStatsResult(st.req.GetClusterID(),
 		st.req.GetTaskID(),
@@ -355,6 +407,7 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 		st.req.GetTargetSegmentID(),
 		st.req.GetInsertChannel(),
 		int64(numValidRows), insertLogs, statsLogs, bm25StatsLogs,
+		textLogV2, segmentStats,
 		st.manifestPath)
 
 	debug.FreeOSMemory()

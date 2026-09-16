@@ -895,6 +895,9 @@ message CompactionSegment {
   // For V3 outputs whose stats blob lives in the manifest, this is the only
   // authoritative source for stats_binlog_size.
   Statistics stats = 16;
+  // Text Log V2 artifacts for StorageV1/V2 output segments. StorageV3
+  // registers the same artifacts in the LOON manifest.
+  repeated FieldBinlog text_log_v2 = 17;
 }
 
 message CompactionPlanResult {
@@ -1142,6 +1145,9 @@ message ImportSegmentInfo {
   // SegmentInfo.stats directly; when absent (rolling upgrade) DataCoord
   // falls back to reconstructing from the FieldBinlog arrays.
   Statistics stats = 8;
+  // Text Log V2 artifacts for StorageV1/V2 import output. StorageV3 keeps the
+  // same artifacts in manifest_path.
+  repeated FieldBinlog text_log_v2 = 9;
 }
 
 message QueryImportResponse {
@@ -1198,8 +1204,15 @@ message CopySegmentSource {
   // replacing collection/partition/segment IDs.
   string source_root_path = 14;
 
+  // Text Log V2 artifacts on StorageV1/V2 segments. StorageV3 carries these
+  // entries in the manifest.
+  repeated FieldBinlog text_log_v2 = 15;
+
   // Snapshot-declared row count, used when StorageV3 omits legacy PB binlogs.
   int64 num_of_rows = 16;
+
+  // Source segment aggregate statistics.
+  Statistics stats = 17;
 }
 
 message CopySegmentTarget {
@@ -1283,6 +1296,12 @@ message CopySegmentResult {
 
   // Transformed manifest path for target segment
   string manifest_path = 10;
+
+  // Copied Text Log V2 artifacts for StorageV1/V2 segments.
+  repeated FieldBinlog text_log_v2 = 11;
+
+  // Copied segment aggregate statistics.
+  Statistics stats = 12;
 }
 
 // CopySegmentTask represents a copy segment task that copies segment data and optionally indexes
@@ -1754,11 +1773,15 @@ message SegmentDescription {
   msg.MsgPosition dml_position = 14; // dml position
   int64 storage_version = 15; // storage version
   bool is_sorted = 16; // whether the segment is sorted by primary key
-  string manifest_path = 17; // StorageV2 manifest file path
+  string manifest_path = 17; // StorageV2/V3 manifest path
   // commit_timestamp mirrors SegmentInfo.commit_timestamp.
   // Must be preserved across snapshot/restore so temporal protections
   // (GC, TTL, MVCC) are not lost on the restored segments.
   uint64 commit_timestamp = 18;
+  // Text Log V2 artifacts for StorageV1/V2 snapshot restore.
+  repeated data.FieldBinlog text_log_v2 = 19;
+  // Segment aggregate statistics.
+  Statistics stats = 20;
 }
 
 message CollectionDescription {

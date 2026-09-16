@@ -5712,6 +5712,50 @@ func TestNormalizeAndValidateExternalCollectionSchema(t *testing.T) {
 		assert.NoError(t, NormalizeAndValidateExternalCollectionSchema(schema))
 	})
 
+	t.Run("fuzzy BM25 disabled", func(t *testing.T) {
+		schema := buildSchema()
+		schema.Fields[0].TypeParams = append(schema.Fields[0].TypeParams,
+			&commonpb.KeyValuePair{Key: common.EnableAnalyzerKey, Value: "true"})
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			Name:             "sparse",
+			DataType:         schemapb.DataType_SparseFloatVector,
+			IsFunctionOutput: true,
+		})
+		schema.Functions = []*schemapb.FunctionSchema{{
+			Name:             "bm25_fn",
+			Type:             schemapb.FunctionType_BM25,
+			InputFieldNames:  []string{"text"},
+			OutputFieldNames: []string{"sparse"},
+			Params:           []*commonpb.KeyValuePair{{Key: common.EnableFuzzyKey, Value: "true"}},
+		}}
+
+		err := NormalizeAndValidateExternalCollectionSchema(schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), common.EnableFuzzyKey)
+	})
+
+	t.Run("resolved schema rejects fuzzy BM25", func(t *testing.T) {
+		schema := buildSchema()
+		schema.Functions = []*schemapb.FunctionSchema{{
+			Name:   "bm25_fn",
+			Type:   schemapb.FunctionType_BM25,
+			Params: []*commonpb.KeyValuePair{{Key: common.EnableFuzzyKey, Value: "true"}},
+		}}
+		err := ValidateExternalCollectionResolvedSchema(schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), common.EnableFuzzyKey)
+	})
+
+	t.Run("explicit fuzzy BM25 false allowed", func(t *testing.T) {
+		schema := buildSchema()
+		schema.Functions = []*schemapb.FunctionSchema{{
+			Name:   "bm25_fn",
+			Type:   schemapb.FunctionType_BM25,
+			Params: []*commonpb.KeyValuePair{{Key: common.EnableFuzzyKey, Value: "false"}},
+		}}
+		assert.NoError(t, NormalizeAndValidateExternalCollectionSchema(schema))
+	})
+
 	t.Run("external_field mapping required", func(t *testing.T) {
 		schema := buildSchema()
 		schema.Fields[0].ExternalField = ""

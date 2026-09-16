@@ -82,6 +82,7 @@ func NewCopySegmentTask(
 			Statslogs:         []*datapb.FieldBinlog{},
 			Deltalogs:         []*datapb.FieldBinlog{},
 			Bm25Logs:          []*datapb.FieldBinlog{},
+			TextLogV2:         []*datapb.FieldBinlog{},
 			IndexInfos:        make(map[int64]*datapb.VectorScalarIndexInfo),
 			TextIndexInfos:    make(map[int64]*datapb.TextIndexStats),
 			JsonKeyIndexInfos: make(map[int64]*datapb.JsonKeyStats),

@@ -80,6 +80,7 @@ type mixCompactionTask struct {
 	// estimatedOutputSegmentCount is the estimated number of output segments
 	// computed during preCompact, used for LOB compaction strategy decision
 	estimatedOutputSegmentCount int64
+	compactionAllocator         *compactionAlloactor
 }
 
 var _ Compactor = (*mixCompactionTask)(nil)
@@ -208,17 +209,14 @@ func (t *mixCompactionTask) mergeSplit(
 	if err := t.ensureLOBCompactionContext(ctx); err != nil {
 		return nil, err
 	}
-
-	segIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedSegmentIDs().GetBegin(), t.plan.GetPreAllocatedSegmentIDs().GetEnd())
-	logIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedLogIDs().GetBegin(), t.plan.GetPreAllocatedLogIDs().GetEnd())
-	compAlloc := NewCompactionAllocator(segIDAlloc, logIDAlloc)
+	t.ensureCompactionAllocator()
 
 	writerSchema := t.plan.GetSchema()
 
 	writerOpts := t.buildWriterOptions(ctx)
 
 	mWriter, err := NewMultiSegmentWriter(ctx,
-		t.binlogIO, compAlloc, t.plan.GetMaxSize(), writerSchema,
+		t.binlogIO, t.compactionAllocator, t.plan.GetMaxSize(), writerSchema,
 		t.compactionParams, t.maxRows, t.partitionID, t.collectionID, t.GetChannelName(), 4096,
 		writerOpts...,
 	)
@@ -251,7 +249,7 @@ func (t *mixCompactionTask) mergeSplit(
 	res := mWriter.GetCompactionSegments()
 	if len(res) == 0 {
 		// append an empty segment
-		id, err := segIDAlloc.AllocOne()
+		id, err := t.compactionAllocator.allocSegmentID()
 		if err != nil {
 			return nil, err
 		}
@@ -273,6 +271,16 @@ func (t *mixCompactionTask) mergeSplit(
 		mlog.Duration("total elapse", totalElapse))
 
 	return res, nil
+}
+
+func (t *mixCompactionTask) ensureCompactionAllocator() {
+	if t.compactionAllocator != nil {
+		return
+	}
+	t.compactionAllocator = NewCompactionAllocator(
+		allocator.NewLocalAllocator(t.plan.GetPreAllocatedSegmentIDs().GetBegin(), t.plan.GetPreAllocatedSegmentIDs().GetEnd()),
+		allocator.NewLocalAllocator(t.plan.GetPreAllocatedLogIDs().GetBegin(), t.plan.GetPreAllocatedLogIDs().GetEnd()),
+	)
 }
 
 func (t *mixCompactionTask) writeSegment(ctx context.Context,
@@ -468,6 +476,7 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	if err := t.ensureLOBCompactionContext(ctx); err != nil {
 		return nil, err
 	}
+	t.ensureCompactionAllocator()
 
 	useMergeSort := canMergeSort(t.plan, t.compactionParams)
 
@@ -478,7 +487,7 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 		writerOpts := t.buildWriterOptions(ctx)
 		res, err = mergeSortMultipleSegments(ctxTimeout, t.plan, t.collectionID, t.partitionID, t.maxRows, t.binlogIO,
 			t.plan.GetSegmentBinlogs(), t.tr, t.currentTime, t.plan.GetCollectionTtl(), t.compactionParams,
-			writerOpts, t.lobContext, t.sortByFieldIDs)
+			writerOpts, t.lobContext, t.sortByFieldIDs, t.compactionAllocator)
 		if err != nil {
 			// Compactor-boundary catch-all: mergeSortMultipleSegments can fail
 			// before it ever reaches the merge sort step (reader/writer
@@ -505,6 +514,11 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 
 	// apply LOB compaction for TEXT columns (REUSE_ALL mode)
 	if err := t.applyLOBCompaction(ctx, res); err != nil {
+		return nil, err
+	}
+
+	if err := writeCompactionTextTermsForSegments(ctx, t.plan.GetSchema(), res,
+		t.collectionID, t.partitionID, t.binlogIO, t.compactionAllocator.logIDAlloc, t.compactionParams); err != nil {
 		return nil, err
 	}
 

@@ -71,6 +71,7 @@ type sortCompactionTask struct {
 
 	compactionParams compaction.Params
 	sortByFieldIDs   []int64
+	logIDAlloc       allocator.Interface
 
 	// lobContext holds LOB compaction strategy decisions for TEXT columns
 	lobContext *compaction.LOBCompactionContext
@@ -167,6 +168,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 	}
 
 	alloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedLogIDs().GetBegin(), t.plan.GetPreAllocatedLogIDs().GetEnd())
+	t.logIDAlloc = alloc
 	targetSegmentID := t.plan.GetPreAllocatedSegmentIDs().GetBegin()
 
 	phaseStart := time.Now()
@@ -463,6 +465,15 @@ func (t *sortCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	// apply LOB compaction: merge LOB file references to output manifest (REUSE_ALL)
 	if err := t.applyLOBCompaction(ctx, res.GetSegments()); err != nil {
 		log.Warn(t.ctx, "failed to apply LOB compaction", mlog.Err(err))
+		return &datapb.CompactionPlanResult{
+			PlanID: t.GetPlanID(),
+			State:  datapb.CompactionTaskState_failed,
+		}, nil
+	}
+
+	if err := writeCompactionTextTermsForSegments(ctx, t.plan.GetSchema(), res.GetSegments(),
+		t.collectionID, t.partitionID, t.binlogIO, t.logIDAlloc, t.compactionParams); err != nil {
+		log.Warn(t.ctx, "failed to build text term FST", mlog.Err(err))
 		return &datapb.CompactionPlanResult{
 			PlanID: t.GetPlanID(),
 			State:  datapb.CompactionTaskState_failed,

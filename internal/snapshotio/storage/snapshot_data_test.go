@@ -1061,7 +1061,8 @@ func TestSnapshotReader_ReadManifestLegacyIndexFilePathInfoDefaultsBuildRooted(t
 			},
 		},
 	}
-	entry := snapshotio.SegmentToManifestEntry(segment)
+	entry, err := snapshotio.SegmentToManifestEntry(segment)
+	require.NoError(t, err)
 
 	assert.NotContains(t, snapshotio.AvroSchemaV1(), "index_store_path_version")
 	oldSchema, err := snapshotio.ManifestSchemaByVersion(1)
@@ -1095,7 +1096,8 @@ func TestSnapshotManifest_CommitTimestampRoundtripV3(t *testing.T) {
 		ChannelName:     "ch-0",
 		CommitTimestamp: wantCommitTs,
 	}
-	entry := snapshotio.SegmentToManifestEntry(segment)
+	entry, err := snapshotio.SegmentToManifestEntry(segment)
+	require.NoError(t, err)
 	require.Equal(t, int64(wantCommitTs), entry.CommitTimestamp)
 
 	assert.Contains(t, snapshotio.AvroSchemaV3(), "commit_timestamp")
@@ -1125,7 +1127,8 @@ func TestSnapshotManifest_LegacyV2NoCommitTimestamp(t *testing.T) {
 		ChannelName:     "ch-0",
 		CommitTimestamp: 999, // set on the struct; V2 schema must drop it
 	}
-	entry := snapshotio.SegmentToManifestEntry(segment)
+	entry, err := snapshotio.SegmentToManifestEntry(segment)
+	require.NoError(t, err)
 
 	assert.NotContains(t, snapshotio.AvroSchemaV2(), "commit_timestamp")
 	v2Schema, err := snapshotio.ManifestSchemaByVersion(2)
@@ -1160,7 +1163,8 @@ func TestSnapshotManifest_FieldBinlogChildFieldsAndFormatRoundtripV4(t *testing.
 			},
 		},
 	}
-	entry := snapshotio.SegmentToManifestEntry(segment)
+	entry, err := snapshotio.SegmentToManifestEntry(segment)
+	require.NoError(t, err)
 
 	assert.Contains(t, snapshotio.AvroSchemaV4(), "child_fields")
 	assert.Contains(t, snapshotio.AvroSchemaV4(), `"format"`)
@@ -1195,7 +1199,8 @@ func TestSnapshotManifest_LegacyV3NoChildFieldsOrFormat(t *testing.T) {
 			}},
 		}},
 	}
-	entry := snapshotio.SegmentToManifestEntry(segment)
+	entry, err := snapshotio.SegmentToManifestEntry(segment)
+	require.NoError(t, err)
 
 	assert.NotContains(t, snapshotio.AvroSchemaV3(), "child_fields")
 	assert.NotContains(t, snapshotio.AvroSchemaV3(), `"format"`)
@@ -1230,7 +1235,8 @@ func TestSnapshotManifest_LegacyV2NoChildFieldsOrFormat(t *testing.T) {
 			}},
 		}},
 	}
-	entry := snapshotio.SegmentToManifestEntry(segment)
+	entry, err := snapshotio.SegmentToManifestEntry(segment)
+	require.NoError(t, err)
 
 	assert.NotContains(t, snapshotio.AvroSchemaV2(), "child_fields")
 	assert.NotContains(t, snapshotio.AvroSchemaV2(), `"format"`)
@@ -1342,6 +1348,13 @@ func TestListSnapshotDataFiles_CollectsReferencedFiles(t *testing.T) {
 			LogPath: "files/bm25_stats_log/100/11/1001/4",
 		}},
 	}}
+	segment.TextLogV2 = []*datapb.FieldBinlog{{
+		FieldID: 11,
+		Format:  "milvus_text_fst_v1",
+		Binlogs: []*datapb.Binlog{{
+			LogPath: "files/text_log_v2/100/1/1001/11/5.fst",
+		}},
+	}}
 	segment.IndexFiles = []*indexpb.IndexFilePathInfo{{
 		BuildID: 7001,
 		IndexFilePaths: []string{
@@ -1380,10 +1393,11 @@ func TestListSnapshotDataFiles_CollectsReferencedFiles(t *testing.T) {
 	assert.Equal(t, snapshotstorage.SnapshotFileTypeStatsBinlog, byPath["files/stats_log/100/10/1001/2"].Type)
 	assert.Equal(t, snapshotstorage.SnapshotFileTypeDeltaBinlog, byPath["files/delta_log/100/10/1001/3"].Type)
 	assert.Equal(t, snapshotstorage.SnapshotFileTypeBM25StatsBinlog, byPath["files/bm25_stats_log/100/11/1001/4"].Type)
+	assert.Equal(t, snapshotstorage.SnapshotFileTypeTextLogV2, byPath["files/text_log_v2/100/1/1001/11/5.fst"].Type)
 	assert.Equal(t, snapshotstorage.SnapshotFileTypeIndexFile, byPath["files/index_files/100/10/1001/7001/index"].Type)
 	assert.Equal(t, snapshotstorage.SnapshotFileTypeTextIndexFile, byPath["files/text_index/100/12/1001/7002/posting"].Type)
 	assert.Equal(t, snapshotstorage.SnapshotFileTypeJSONKeyIndexFile, byPath["files/json_index/100/13/1001/7003/key"].Type)
-	assert.Len(t, byPath, 7)
+	assert.Len(t, byPath, 8)
 }
 
 func TestListSnapshotDataFiles_StorageV2IncludesManifestObject(t *testing.T) {
@@ -1533,6 +1547,10 @@ func TestListSnapshotDataFiles_StorageV3IncludesManifestRootObjectsAndLobs(t *te
 	segment.StorageVersion = storage.StorageV3
 	segment.ManifestPath = packed.MarshalManifestPath(basePath, 1)
 	segment.Binlogs = nil
+	segment.TextLogV2 = []*datapb.FieldBinlog{{
+		FieldID: 11,
+		Binlogs: []*datapb.Binlog{{LogPath: "stale/text-log-v2/path"}},
+	}}
 	segment.TextIndexFiles = map[int64]*datapb.TextIndexStats{
 		12: {
 			FieldID: 12,
@@ -1584,6 +1602,7 @@ func TestListSnapshotDataFiles_StorageV3IncludesManifestRootObjectsAndLobs(t *te
 	assert.Equal(t, snapshotstorage.SnapshotFileTypeStorageV3LOBFile, byPath["files/insert_log/100/20/lobs/30/_data/lob.vx"].Type)
 	assert.NotContains(t, byPath, "files/text_index/100/12/1001/7002/posting")
 	assert.NotContains(t, byPath, "files/json_index/100/13/1001/7003/key")
+	assert.NotContains(t, byPath, "stale/text-log-v2/path")
 	assert.NotContains(t, byPath, siblingPath)
 	assert.Len(t, byPath, 4)
 }
@@ -1820,6 +1839,13 @@ func TestRewriteSnapshotWithMapping_RewritesAllReferencesStrictly(t *testing.T) 
 			LogPath: "files/bm25_stats_log/100/11/1001/4",
 		}},
 	}}
+	segment.TextLogV2 = []*datapb.FieldBinlog{{
+		FieldID: 11,
+		Format:  "milvus_text_fst_v1",
+		Binlogs: []*datapb.Binlog{{
+			LogPath: "files/text_log_v2/100/1/1001/11/5.fst",
+		}},
+	}}
 	segment.IndexFiles = []*indexpb.IndexFilePathInfo{{
 		BuildID: 7001,
 		IndexFilePaths: []string{
@@ -1851,6 +1877,7 @@ func TestRewriteSnapshotWithMapping_RewritesAllReferencesStrictly(t *testing.T) 
 		"files/stats_log/100/10/1001/2":             "exports/files/stats_log/100/10/1001/2",
 		"files/delta_log/100/10/1001/3":             "exports/files/delta_log/100/10/1001/3",
 		"files/bm25_stats_log/100/11/1001/4":        "exports/files/bm25_stats_log/100/11/1001/4",
+		"files/text_log_v2/100/1/1001/11/5.fst":     "exports/files/text_log_v2/100/1/1001/11/5.fst",
 		"files/index_files/100/10/1001/7001/index":  "exports/files/index_files/100/10/1001/7001/index",
 		"files/text_index/100/12/1001/7002/posting": "exports/files/text_index/100/12/1001/7002/posting",
 		"files/json_index/100/13/1001/7003/key":     "exports/files/json_index/100/13/1001/7003/key",
@@ -1866,6 +1893,7 @@ func TestRewriteSnapshotWithMapping_RewritesAllReferencesStrictly(t *testing.T) 
 	assert.Equal(t, "exports/files/stats_log/100/10/1001/2", rewritten.Segments[0].GetStatslogs()[0].GetBinlogs()[0].GetLogPath())
 	assert.Equal(t, "exports/files/delta_log/100/10/1001/3", rewritten.Segments[0].GetDeltalogs()[0].GetBinlogs()[0].GetLogPath())
 	assert.Equal(t, "exports/files/bm25_stats_log/100/11/1001/4", rewritten.Segments[0].GetBm25Statslogs()[0].GetBinlogs()[0].GetLogPath())
+	assert.Equal(t, "exports/files/text_log_v2/100/1/1001/11/5.fst", rewritten.Segments[0].GetTextLogV2()[0].GetBinlogs()[0].GetLogPath())
 	assert.Equal(t, "exports/files/index_files/100/10/1001/7001/index", rewritten.Segments[0].GetIndexFiles()[0].GetIndexFilePaths()[0])
 	assert.Equal(t, "exports/files/text_index/100/12/1001/7002/posting", rewritten.Segments[0].GetTextIndexFiles()[12].GetFiles()[0])
 	assert.Equal(t, "exports/files/json_index/100/13/1001/7003/key", rewritten.Segments[0].GetJsonKeyIndexFiles()[13].GetFiles()[0])
@@ -1907,6 +1935,10 @@ func TestRewriteSnapshotWithMapping_StorageV3ClearsStaleInsertBinlogs(t *testing
 			LogPath: "files/insert_log/100/10/1001/stale",
 		}},
 	}}
+	segment.TextLogV2 = []*datapb.FieldBinlog{{
+		FieldID: 11,
+		Binlogs: []*datapb.Binlog{{LogPath: "stale/text-log-v2/path"}},
+	}}
 	segment.Statslogs = nil
 	segment.Deltalogs = nil
 	segment.Bm25Statslogs = nil
@@ -1940,6 +1972,7 @@ func TestRewriteSnapshotWithMapping_StorageV3ClearsStaleInsertBinlogs(t *testing
 	assert.Equal(t, int64(1), rewrittenManifestVersion)
 	assert.Equal(t, []string{"stale/text/path"}, rewritten.Segments[0].GetTextIndexFiles()[10].GetFiles())
 	assert.Equal(t, []string{"stale/json/path"}, rewritten.Segments[0].GetJsonKeyIndexFiles()[11].GetFiles())
+	assert.Equal(t, "stale/text-log-v2/path", rewritten.Segments[0].GetTextLogV2()[0].GetBinlogs()[0].GetLogPath())
 	assert.Equal(t, "files/insert_log/100/10/1001/stale", snapshot.Segments[0].GetBinlogs()[0].GetBinlogs()[0].GetLogPath())
 }
 
@@ -2240,6 +2273,10 @@ func TestValidateSelfContainedSnapshotMetadata_StorageV3IgnoresManifestOwnedInde
 		SegmentId:      1001,
 		StorageVersion: storage.StorageV3,
 		ManifestPath:   packed.MarshalManifestPath(manifestRoot, 1),
+		TextLogV2: []*datapb.FieldBinlog{{
+			FieldID: 12,
+			Binlogs: []*datapb.Binlog{{LogPath: "stale/text-log-v2/path"}},
+		}},
 		TextIndexFiles: map[int64]*datapb.TextIndexStats{
 			10: {FieldID: 10, Files: []string{"stale/text/path"}},
 		},
@@ -2272,6 +2309,19 @@ func TestValidateSelfContainedSnapshotMetadata_RejectsDataOutsideFilesSubtree(t 
 				Binlogs: []*datapb.FieldBinlog{{
 					FieldID: 1,
 					Binlogs: []*datapb.Binlog{{LogPath: "bundle/other/insert_log/100/1/1001/1"}},
+				}},
+			}},
+		},
+		{
+			name: "text log v2",
+			metadata: &datapb.SnapshotMetadata{
+				ManifestList: []string{"bundle/snapshots/100/manifests/1/1001.avro"},
+			},
+			segments: []*datapb.SegmentDescription{{
+				SegmentId: 1001,
+				TextLogV2: []*datapb.FieldBinlog{{
+					FieldID: 11,
+					Binlogs: []*datapb.Binlog{{LogPath: "bundle/other/text_log_v2/100/1/1001/11/5.fst"}},
 				}},
 			}},
 		},
@@ -2504,6 +2554,14 @@ func TestRebaseSelfContainedSnapshotData_RewritesSegmentReferences(t *testing.T)
 						LogPath: "export-root/files/bm25_stats_log/100/1/1001/4",
 					}},
 				}},
+				TextLogV2: []*datapb.FieldBinlog{{
+					FieldID: 3,
+					Format:  "milvus_text_fst_v1",
+					Binlogs: []*datapb.Binlog{{
+						LogID:   5,
+						LogPath: "export-root/files/text_log_v2/100/1/1001/3/5.fst",
+					}},
+				}},
 				IndexFiles: []*indexpb.IndexFilePathInfo{{
 					SegmentID:             1001,
 					FieldID:               2,
@@ -2538,6 +2596,7 @@ func TestRebaseSelfContainedSnapshotData_RewritesSegmentReferences(t *testing.T)
 	assert.Equal(t, "restored/x/files/stats_log/100/1/1001/2", segment.GetStatslogs()[0].GetBinlogs()[0].GetLogPath())
 	assert.Equal(t, "restored/x/files/delta_log/100/1/1001/3", segment.GetDeltalogs()[0].GetBinlogs()[0].GetLogPath())
 	assert.Equal(t, "restored/x/files/bm25_stats_log/100/1/1001/4", segment.GetBm25Statslogs()[0].GetBinlogs()[0].GetLogPath())
+	assert.Equal(t, "restored/x/files/text_log_v2/100/1/1001/3/5.fst", segment.GetTextLogV2()[0].GetBinlogs()[0].GetLogPath())
 	assert.Equal(t, "restored/x/files/index_files/100/1/1001/3001/index", segment.GetIndexFiles()[0].GetIndexFilePaths()[0])
 	assert.Equal(t, "restored/x/files/text_index/100/1/1001/5000/text", segment.GetTextIndexFiles()[100].GetFiles()[0])
 	assert.Equal(t, "restored/x/files/json_key_index/100/1/1001/6000/json", segment.GetJsonKeyIndexFiles()[200].GetFiles()[0])
@@ -2607,7 +2666,8 @@ func TestSnapshotReader_ReadSnapshot_RebasesRelocatedSelfContainedBundleBeforeMa
 		StorageVersion:    2,
 		CommitTimestamp:   10,
 	}
-	manifestEntry := snapshotio.SegmentToManifestEntry(segment)
+	manifestEntry, err := snapshotio.SegmentToManifestEntry(segment)
+	require.NoError(t, err)
 	manifestSchema, err := snapshotio.ManifestSchemaByVersion(snapshotio.SnapshotFormatVersion)
 	require.NoError(t, err)
 	manifestBytes, err := avro.Marshal(manifestSchema, manifestEntry)
@@ -3200,7 +3260,8 @@ func TestSnapshotReader_ReadSnapshot_RebasesStorageV2ManifestListBeforeFillingSe
 		StorageVersion:    2,
 		CommitTimestamp:   10,
 	}
-	manifestEntry := snapshotio.SegmentToManifestEntry(segment)
+	manifestEntry, err := snapshotio.SegmentToManifestEntry(segment)
+	require.NoError(t, err)
 	manifestSchema, err := snapshotio.ManifestSchemaByVersion(snapshotio.SnapshotFormatVersion)
 	require.NoError(t, err)
 	manifestBytes, err := avro.Marshal(manifestSchema, manifestEntry)

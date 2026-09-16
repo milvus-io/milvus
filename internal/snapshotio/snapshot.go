@@ -24,6 +24,7 @@ import (
 
 	"github.com/hamba/avro/v2"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -34,7 +35,7 @@ import (
 
 const (
 	// SnapshotFormatVersion is the current snapshot metadata and manifest format.
-	SnapshotFormatVersion = 4
+	SnapshotFormatVersion = 5
 )
 
 var (
@@ -53,11 +54,15 @@ var (
 	manifestSchemaV4Once sync.Once
 	manifestSchemaV4     avro.Schema
 	manifestSchemaV4Err  error
+
+	manifestSchemaV5Once sync.Once
+	manifestSchemaV5     avro.Schema
+	manifestSchemaV5Err  error
 )
 
 // ManifestSchema returns the current Avro schema for snapshot segment manifests.
 func ManifestSchema() (avro.Schema, error) {
-	return ManifestSchemaV4()
+	return ManifestSchemaV5()
 }
 
 // ManifestSchemaV1 returns the Avro schema used by legacy snapshot manifests.
@@ -92,6 +97,14 @@ func ManifestSchemaV4() (avro.Schema, error) {
 	return manifestSchemaV4, manifestSchemaV4Err
 }
 
+// ManifestSchemaV5 returns the current schema with fuzzy BM25 Text Log V2 artifacts.
+func ManifestSchemaV5() (avro.Schema, error) {
+	manifestSchemaV5Once.Do(func() {
+		manifestSchemaV5, manifestSchemaV5Err = avro.Parse(AvroSchemaV5())
+	})
+	return manifestSchemaV5, manifestSchemaV5Err
+}
+
 // ManifestSchemaByVersion returns the Avro schema for a snapshot format version.
 func ManifestSchemaByVersion(version int) (avro.Schema, error) {
 	switch version {
@@ -103,6 +116,8 @@ func ManifestSchemaByVersion(version int) (avro.Schema, error) {
 		return ManifestSchemaV3()
 	case 4:
 		return ManifestSchemaV4()
+	case 5:
+		return ManifestSchemaV5()
 	default:
 		return nil, merr.WrapErrServiceInternalMsg("unsupported manifest schema version: %d", version)
 	}
@@ -156,6 +171,7 @@ type ManifestEntry struct {
 	NumOfRows         int64                   `avro:"num_of_rows"`
 	StatslogFiles     []AvroFieldBinlog       `avro:"statslog_files"`
 	Bm25StatslogFiles []AvroFieldBinlog       `avro:"bm25_statslog_files"`
+	TextLogV2         []AvroFieldBinlog       `avro:"text_log_v2"`
 	TextIndexFiles    []AvroTextIndexEntry    `avro:"text_index_files"`
 	JSONKeyIndexFiles []AvroJSONKeyIndexEntry `avro:"json_key_index_files"`
 	StartPosition     *AvroMsgPosition        `avro:"start_position"`
@@ -163,6 +179,7 @@ type ManifestEntry struct {
 	StorageVersion    int64                   `avro:"storage_version"`
 	IsSorted          bool                    `avro:"is_sorted"`
 	CommitTimestamp   int64                   `avro:"commit_timestamp"`
+	Statistics        []byte                  `avro:"statistics"`
 }
 
 // AvroFieldBinlog represents datapb.FieldBinlog in Avro-compatible format.
@@ -256,7 +273,11 @@ func MarshalSegmentManifest(segment *datapb.SegmentDescription) ([]byte, error) 
 	if err != nil {
 		return nil, merr.WrapErrServiceInternalErr(err, "failed to get manifest schema")
 	}
-	data, err := avro.Marshal(avroSchema, SegmentToManifestEntry(segment))
+	entry, err := SegmentToManifestEntry(segment)
+	if err != nil {
+		return nil, err
+	}
+	data, err := avro.Marshal(avroSchema, entry)
 	if err != nil {
 		return nil, merr.WrapErrServiceInternalErr(err, "failed to serialize entry to avro")
 	}
@@ -273,11 +294,20 @@ func ParseSegmentManifest(data []byte, formatVersion int) (*datapb.SegmentDescri
 	if err := avro.Unmarshal(avroSchema, data, &record); err != nil {
 		return nil, merr.WrapErrServiceInternalErr(err, "failed to parse avro data")
 	}
-	return ManifestEntryToSegment(record), nil
+	return ManifestEntryToSegment(record)
 }
 
 // SegmentToManifestEntry converts a protobuf SegmentDescription to Avro format.
-func SegmentToManifestEntry(segment *datapb.SegmentDescription) ManifestEntry {
+func SegmentToManifestEntry(segment *datapb.SegmentDescription) (ManifestEntry, error) {
+	var statistics []byte
+	if segment.GetStats() != nil {
+		var err error
+		statistics, err = proto.Marshal(segment.GetStats())
+		if err != nil {
+			return ManifestEntry{}, merr.WrapErrServiceInternalErr(err, "failed to serialize segment statistics")
+		}
+	}
+
 	var avroBinlogFiles []AvroFieldBinlog
 	for _, binlog := range segment.GetBinlogs() {
 		avroBinlogFiles = append(avroBinlogFiles, FieldBinlogToAvro(binlog))
@@ -298,6 +328,11 @@ func SegmentToManifestEntry(segment *datapb.SegmentDescription) ManifestEntry {
 		avroBm25StatslogFiles = append(avroBm25StatslogFiles, FieldBinlogToAvro(bm25Statslog))
 	}
 
+	var avroTextLogV2 []AvroFieldBinlog
+	for _, textLogV2 := range segment.GetTextLogV2() {
+		avroTextLogV2 = append(avroTextLogV2, FieldBinlogToAvro(textLogV2))
+	}
+
 	var avroIndexFiles []AvroIndexFilePathInfo
 	for _, indexFile := range segment.GetIndexFiles() {
 		avroIndexFiles = append(avroIndexFiles, IndexFilePathInfoToAvro(indexFile))
@@ -314,6 +349,7 @@ func SegmentToManifestEntry(segment *datapb.SegmentDescription) ManifestEntry {
 		NumOfRows:         segment.GetNumOfRows(),
 		StatslogFiles:     avroStatslogFiles,
 		Bm25StatslogFiles: avroBm25StatslogFiles,
+		TextLogV2:         avroTextLogV2,
 		TextIndexFiles:    TextIndexMapToAvro(segment.GetTextIndexFiles()),
 		JSONKeyIndexFiles: JSONKeyIndexMapToAvro(segment.GetJsonKeyIndexFiles()),
 		StartPosition:     MsgPositionToAvro(segment.GetStartPosition()),
@@ -321,11 +357,12 @@ func SegmentToManifestEntry(segment *datapb.SegmentDescription) ManifestEntry {
 		StorageVersion:    segment.GetStorageVersion(),
 		IsSorted:          segment.GetIsSorted(),
 		CommitTimestamp:   int64(segment.GetCommitTimestamp()),
-	}
+		Statistics:        statistics,
+	}, nil
 }
 
 // ManifestEntryToSegment converts an Avro manifest record to a protobuf segment.
-func ManifestEntryToSegment(record ManifestEntry) *datapb.SegmentDescription {
+func ManifestEntryToSegment(record ManifestEntry) (*datapb.SegmentDescription, error) {
 	segment := &datapb.SegmentDescription{
 		SegmentId:       record.SegmentID,
 		PartitionId:     record.PartitionID,
@@ -337,6 +374,12 @@ func ManifestEntryToSegment(record ManifestEntry) *datapb.SegmentDescription {
 		StorageVersion:  record.StorageVersion,
 		IsSorted:        record.IsSorted,
 		CommitTimestamp: uint64(record.CommitTimestamp),
+	}
+	if len(record.Statistics) > 0 {
+		segment.Stats = &datapb.Statistics{}
+		if err := proto.Unmarshal(record.Statistics, segment.Stats); err != nil {
+			return nil, merr.WrapErrDataIntegrity(err, "failed to parse segment statistics")
+		}
 	}
 
 	for _, binlogFile := range record.BinlogFiles {
@@ -351,12 +394,15 @@ func ManifestEntryToSegment(record ManifestEntry) *datapb.SegmentDescription {
 	for _, bm25StatslogFile := range record.Bm25StatslogFiles {
 		segment.Bm25Statslogs = append(segment.Bm25Statslogs, AvroToFieldBinlog(bm25StatslogFile))
 	}
+	for _, textLogV2 := range record.TextLogV2 {
+		segment.TextLogV2 = append(segment.TextLogV2, AvroToFieldBinlog(textLogV2))
+	}
 	for _, indexFile := range record.IndexFiles {
 		segment.IndexFiles = append(segment.IndexFiles, AvroToIndexFilePathInfo(indexFile))
 	}
 	segment.TextIndexFiles = AvroToTextIndexMap(record.TextIndexFiles)
 	segment.JsonKeyIndexFiles = AvroToJSONKeyIndexMap(record.JSONKeyIndexFiles)
-	return segment
+	return segment, nil
 }
 
 // FieldBinlogToAvro converts protobuf FieldBinlog to Avro format.
@@ -814,5 +860,25 @@ func AvroSchemaV4() string {
 								{"name": "format", "type": "string", "default": ""},
 								{
 									"name": "binlogs",`,
+		1)
+}
+
+// AvroSchemaV5 adds field-level fuzzy BM25 FST files. The default keeps older
+// manifests readable with empty text-log-v2 and statistics fields.
+func AvroSchemaV5() string {
+	return strings.Replace(AvroSchemaV4(),
+		`{
+					"name": "index_files",`,
+		`{
+					"name": "text_log_v2",
+					"type": {
+						"type": "array",
+						"items": "AvroFieldBinlog"
+					},
+					"default": []
+				},
+				{"name": "statistics", "type": "bytes", "default": ""},
+				{
+					"name": "index_files",`,
 		1)
 }

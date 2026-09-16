@@ -150,6 +150,7 @@ func UpdateSegmentInfo(info *datapb.ImportSegmentInfo) UpdateAction {
 				segmentsInfo[segment].Statslogs = mergeFn(segmentsInfo[segment].Statslogs, info.GetStatslogs())
 				segmentsInfo[segment].Deltalogs = mergeFn(segmentsInfo[segment].Deltalogs, info.GetDeltalogs())
 				segmentsInfo[segment].Bm25Logs = mergeFn(segmentsInfo[segment].Bm25Logs, info.GetBm25Logs())
+				segmentsInfo[segment].TextLogV2 = mergeFn(segmentsInfo[segment].TextLogV2, info.GetTextLogV2())
 				segmentsInfo[segment].ManifestPath = info.GetManifestPath()
 				// Stats (segment.Statistics().Publish()) is cumulative per segment,
 				// so the latest contributing file's snapshot supersedes earlier

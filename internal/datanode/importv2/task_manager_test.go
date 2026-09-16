@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
@@ -172,15 +173,22 @@ func TestUpdateSegmentInfoRefreshesStatsOnMerge(t *testing.T) {
 		SegmentID:    10,
 		ImportedRows: 50,
 		Stats:        &datapb.Statistics{InsertBinlogSize: 100, InsertBinlogCount: 1},
+		TextLogV2:    []*datapb.FieldBinlog{{FieldID: 101, Binlogs: []*datapb.Binlog{{LogID: 1}}}},
 	})(task)
 	UpdateSegmentInfo(&datapb.ImportSegmentInfo{
 		SegmentID:    10,
 		ImportedRows: 120,
 		Stats:        &datapb.Statistics{InsertBinlogSize: 250, InsertBinlogCount: 3},
+		TextLogV2:    []*datapb.FieldBinlog{{FieldID: 101, Binlogs: []*datapb.Binlog{{LogID: 2}}}},
 	})(task)
 
 	got := task.segmentsInfo[10]
 	assert.EqualValues(t, 120, got.GetImportedRows())
 	assert.EqualValues(t, 250, got.GetStats().GetInsertBinlogSize(), "stats must reflect the latest cumulative snapshot")
 	assert.EqualValues(t, 3, got.GetStats().GetInsertBinlogCount())
+	require.Len(t, got.GetTextLogV2(), 1)
+	require.Equal(t, []int64{1, 2}, []int64{
+		got.GetTextLogV2()[0].GetBinlogs()[0].GetLogID(),
+		got.GetTextLogV2()[0].GetBinlogs()[1].GetLogID(),
+	})
 }

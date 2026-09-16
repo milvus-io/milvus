@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"path"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -40,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/internal/util/textindex"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -225,7 +227,8 @@ func (s *ClusteringCompactionTaskStorageV3Suite) initStorageV3Segments(rows int,
 		StorageType: "local",
 		RootPath:    rootPath,
 	}, columnGroups, manifestPath)
-	return bw.Write(context.Background(), pack)
+	inserts, deltas, stats, bm25Stats, _, manifest, size, segmentStats, err = bw.Write(context.Background(), pack)
+	return
 }
 
 func TestMixCompactionTaskStorageV3Suite(t *testing.T) {
@@ -318,6 +321,112 @@ func (s *MixCompactionTaskStorageV3Suite) TestCompactV3ManifestSegments() {
 	s.NotEmpty(segment.GetInsertLogs())
 	s.Equal(1, len(segment.GetField2StatslogPaths()))
 	s.Empty(segment.GetDeltalogs())
+}
+
+func (s *MixCompactionTaskStorageV3Suite) TestWriteCompactionTextTermsReplacesManifestEntry() {
+	s.meta = genTestCollectionMetaWithBM25()
+	s.task.plan.Schema = s.meta.GetSchema()
+	s.meta.GetSchema().Functions[0].Params = append(s.meta.GetSchema().Functions[0].Params, &commonpb.KeyValuePair{
+		Key:   common.EnableFuzzyKey,
+		Value: "true",
+	})
+
+	const segmentID = int64(12)
+	alloc := allocator.NewLocalAllocator(7777777, math.MaxInt64)
+	rootPath := paramtable.Get().LocalStorageCfg.Path.GetValue()
+	storageConfig := &indexpb.StorageConfig{StorageType: "local", RootPath: rootPath}
+	basePath := path.Join(common.SegmentInsertLogPath,
+		metautil.JoinIDPath(CollectionID, PartitionID, segmentID))
+	initialManifest := packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
+	metaSegment := metacache.NewSegmentInfo(&datapb.SegmentInfo{ManifestPath: initialManifest},
+		pkoracle.NewBloomFilterSet(), nil, metacache.NewEmptySegmentStats())
+	metacache.UpdateNumOfRows(2)(metaSegment)
+	mc := metacache.NewMockMetaCache(s.T())
+	mc.EXPECT().Collection().Return(CollectionID).Maybe()
+	mc.EXPECT().GetSchema(mock.Anything).Return(s.meta.GetSchema()).Maybe()
+	mc.EXPECT().GetSegmentByID(segmentID).Return(metaSegment, true).Maybe()
+	mc.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).
+		Return([]*metacache.SegmentInfo{metaSegment}).Maybe()
+	mc.EXPECT().UpdateSegments(mock.Anything, mock.Anything).
+		Run(func(action metacache.SegmentAction, filters ...metacache.SegmentFilter) {
+			action(metaSegment)
+		}).Return().Maybe()
+	insertData, err := storage.NewInsertDataWithFunctionOutputField(s.meta.GetSchema())
+	s.Require().NoError(err)
+	firstTimestamp := tsoutil.ComposeTSByTime(getMilvusBirthday())
+	secondTimestamp := tsoutil.ComposeTSByTime(getMilvusBirthday().Add(time.Second))
+	firstRow := genRowWithBM25(1)
+	firstRow[common.TimeStampField] = int64(firstTimestamp)
+	secondRow := genRowWithBM25(2)
+	secondRow[common.TimeStampField] = int64(secondTimestamp)
+	s.Require().NoError(insertData.Append(firstRow))
+	s.Require().NoError(insertData.Append(secondRow))
+	pack := new(syncmgr.SyncPack).
+		WithCollectionID(CollectionID).
+		WithPartitionID(PartitionID).
+		WithSegmentID(segmentID).
+		WithChannelName("test-channel").
+		WithInsertData([]*storage.InsertData{insertData})
+	fields := typeutil.GetAllFieldSchemas(s.meta.GetSchema())
+	columnGroups := storagecommon.SplitColumns(fields, map[int64]storagecommon.ColumnStats{},
+		storagecommon.NewSelectedDataTypePolicy(), storagecommon.NewRemanentShortPolicy(-1))
+	bw := syncmgr.NewBulkPackWriterV3(mc, s.meta.GetSchema(),
+		storage.NewLocalChunkManager(objectstorage.RootPath(rootPath)), alloc,
+		packed.DefaultWriteBufferSize, 0, storageConfig, columnGroups, initialManifest)
+	_, _, _, _, _, manifest, _, _, err := bw.Write(context.Background(), pack)
+	s.Require().NoError(err)
+	params := s.task.compactionParams
+	params.StorageConfig = storageConfig
+	expectedCoverage := secondTimestamp
+	currentManifest := manifest
+	testCases := []struct {
+		name       string
+		insertLogs []*datapb.FieldBinlog
+	}{
+		{
+			name: "bump only after datacoord restart",
+		},
+		{
+			name: "additive reconciliation summary logs",
+			insertLogs: []*datapb.FieldBinlog{{
+				FieldID: 101,
+				Binlogs: []*datapb.Binlog{{
+					LogID:      42,
+					MemorySize: 128,
+					EntriesNum: 2,
+				}},
+			}},
+		},
+	}
+	for _, testCase := range testCases {
+		s.Run(testCase.name, func() {
+			segment := &datapb.CompactionSegment{
+				SegmentID:      segmentID,
+				NumOfRows:      2,
+				InsertLogs:     testCase.insertLogs,
+				StorageVersion: storage.StorageV3,
+				Manifest:       currentManifest,
+			}
+
+			err := writeCompactionTextTerms(context.Background(), s.meta.GetSchema(), segment,
+				CollectionID, PartitionID, nil, alloc, params)
+			s.Require().NoError(err)
+			s.NotEqual(currentManifest, segment.GetManifest())
+			currentManifest = segment.GetManifest()
+
+			stats, err := packed.GetManifestStats(segment.GetManifest(), storageConfig)
+			s.Require().NoError(err)
+			stat, ok := stats["text_log_v2.101"]
+			s.Require().True(ok)
+			s.Equal(textindex.MilvusTextFstFormat, stat.Metadata["format"])
+			s.Equal(strconv.FormatUint(expectedCoverage, 10), stat.Metadata["coverage_timestamp"])
+			s.Require().Len(stat.Paths, 1)
+			data, err := packed.ReadFile(storageConfig, stat.Paths[0])
+			s.Require().NoError(err)
+			s.NotEmpty(data)
+			s.EqualValues(len(data), segment.GetStats().GetStatsBinlogSize())
+		})
+	}
 }
 
 func (s *MixCompactionTaskStorageV3Suite) TestMergeSortPreservesTextLobFiles() {
@@ -425,7 +534,8 @@ func (s *MixCompactionTaskStorageV3Suite) initStorageV3Segments(rows int, segmen
 		StorageType: "local",
 		RootPath:    rootPath,
 	}, columnGroups, manifestPath)
-	return bw.Write(context.Background(), pack)
+	inserts, deltas, stats, bm25Stats, _, manifest, size, segmentStats, err = bw.Write(context.Background(), pack)
+	return
 }
 
 func (s *MixCompactionTaskStorageV3Suite) initTextLOBStorageV3Segment(rows int, segmentID int64, alloc allocator.Interface) (
@@ -473,7 +583,8 @@ func (s *MixCompactionTaskStorageV3Suite) initTextLOBStorageV3Segment(rows int, 
 		StorageType: "local",
 		RootPath:    rootPath,
 	}, columnGroups, manifestPath)
-	return bw.Write(context.Background(), pack)
+	inserts, deltas, stats, bm25Stats, _, manifest, size, segmentStats, err = bw.Write(context.Background(), pack)
+	return
 }
 
 func genTextLOBCompactionSchema() *schemapb.CollectionSchema {

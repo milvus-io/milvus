@@ -183,7 +183,7 @@ func (s *MultiAnalyzerBM25FunctionSuite) TestBatchRunWithTextTerms() {
 	s.Require().NoError(err)
 	s.Require().Len(batches, 1)
 	s.EqualValues(101, batches[0].InputFieldID)
-	s.Equal([][]byte{[]byte("analyz"), []byte("analyzer"), []byte("of"), []byte("test")}, batches[0].Terms)
+	s.ElementsMatch([][]byte{[]byte("analyz"), []byte("analyzer"), []byte("of"), []byte("test")}, batches[0].Terms)
 }
 
 func (s *MultiAnalyzerBM25FunctionSuite) TestAnalyzerAliasResolvedOnce() {

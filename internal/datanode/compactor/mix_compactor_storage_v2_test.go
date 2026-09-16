@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/compaction"
@@ -232,6 +233,23 @@ func (s *MixCompactionTaskStorageV2Suite) TestCompactTwoToOneWithBM25() {
 	s.Equal(1, len(segment.Field2StatslogPaths))
 }
 
+func (s *MixCompactionTaskStorageV2Suite) TestCompactTwoToOneWithFuzzyBM25() {
+	s.prepareCompactTwoToOneWithBM25Segments()
+	s.task.plan.GetSchema().Functions[0].Params = append(s.task.plan.GetSchema().Functions[0].Params, &commonpb.KeyValuePair{
+		Key:   common.EnableFuzzyKey,
+		Value: "true",
+	})
+
+	result, err := s.task.Compact()
+	s.Require().NoError(err)
+	s.Require().Len(result.GetSegments(), 1)
+	segment := result.GetSegments()[0]
+	s.Require().Len(segment.GetTextLogV2(), 1)
+	s.EqualValues(101, segment.GetTextLogV2()[0].GetFieldID())
+	s.Require().Len(segment.GetTextLogV2()[0].GetBinlogs(), 1)
+	s.EqualValues(1, segment.GetTextLogV2()[0].GetBinlogs()[0].GetEntriesNum())
+}
+
 func (s *MixCompactionTaskStorageV2Suite) TestCompactSortedSegment() {
 	s.prepareCompactSortedSegment()
 	paramtable.Get().Save("dataNode.compaction.useMergeSort", "true")
@@ -321,7 +339,8 @@ func (s *MixCompactionTaskStorageV2Suite) initStorageV2Segments(rows int, seed i
 		StorageType: "local",
 		RootPath:    rootPath,
 	}, columnGroups)
-	return bw.Write(context.Background(), pack)
+	inserts, deltas, stats, bm25Stats, _, manifest, size, segmentStats, err = bw.Write(context.Background(), pack)
+	return
 }
 
 func getRowWithoutNil(magic int64) map[int64]interface{} {

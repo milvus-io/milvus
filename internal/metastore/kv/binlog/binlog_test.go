@@ -320,3 +320,19 @@ func TestTextLogV2BinlogCompressAndDecompress(t *testing.T) {
 	assert.Equal(t, textTermPath, segment.GetTextLogV2()[0].GetBinlogs()[0].GetLogPath())
 	assert.Equal(t, "milvus_text_fst_v1", segment.GetTextLogV2()[0].GetFormat())
 }
+
+func TestCompressCompactionTextLogV2(t *testing.T) {
+	textTermPath := metautil.BuildTextLogV2Path(rootPath, collectionID, partitionID, segmentID, fieldID, logID)
+	segments := []*datapb.CompactionSegment{{
+		TextLogV2: []*datapb.FieldBinlog{{
+			FieldID: fieldID,
+			Format:  "milvus_text_fst_v1",
+			Binlogs: []*datapb.Binlog{{LogPath: textTermPath}},
+		}},
+	}}
+
+	err := CompressCompactionBinlogs(segments)
+	assert.NoError(t, err)
+	assert.Empty(t, segments[0].GetTextLogV2()[0].GetBinlogs()[0].GetLogPath())
+	assert.Equal(t, logID, segments[0].GetTextLogV2()[0].GetBinlogs()[0].GetLogID())
+}
