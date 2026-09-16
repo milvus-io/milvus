@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"time"
 
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc/peer"
 
@@ -33,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // registerRequest records a DQL request at the top of its RPC method and
@@ -188,4 +190,138 @@ func queryRequestInfo(request *milvuspb.QueryRequest) reqregistry.Info {
 		TopK:           kvInt64(request.GetQueryParams(), LimitKey),
 		Expr:           request.GetExpr(),
 	}
+}
+
+// toRunningRequestInfo converts a registry snapshot to its wire form.
+func toRunningRequestInfo(info reqregistry.Info) *milvuspb.RunningRequestInfo {
+	return &milvuspb.RunningRequestInfo{
+		RequestId:      info.RequestID,
+		ProxyId:        info.ProxyID,
+		Type:           info.Type,
+		DbName:         info.DBName,
+		CollectionName: info.CollectionName,
+		User:           info.User,
+		ClientAddr:     info.ClientAddr,
+		Nq:             info.NQ,
+		Topk:           info.TopK,
+		Expr:           info.Expr,
+		StartTimeMs:    info.StartTime.UnixMilli(),
+		QueuedMs:       info.QueuedMS,
+		ElapsedMs:      info.ElapsedMS,
+		State:          info.State,
+		TaskIds:        info.TaskIDs,
+		TraceId:        info.TraceID,
+		Cancellable:    info.Cancellable,
+	}
+}
+
+func toRunningRequestInfos(infos []reqregistry.Info) []*milvuspb.RunningRequestInfo {
+	out := make([]*milvuspb.RunningRequestInfo, 0, len(infos))
+	for _, info := range infos {
+		out = append(out, toRunningRequestInfo(info))
+	}
+	return out
+}
+
+// ListRunningRequests reports the requests the whole cluster is serving.
+//
+// The call is answered by the coordinator, which asks every proxy, because a
+// client is connected to one proxy but asks about the cluster. This proxy does
+// not add its own registry on top of that answer: it is part of the fan-out,
+// and querying it twice would list its requests twice.
+func (node *Proxy) ListRunningRequests(ctx context.Context, request *milvuspb.ListRunningRequestsRequest) (*milvuspb.ListRunningRequestsResponse, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &milvuspb.ListRunningRequestsResponse{Status: merr.Status(err)}, nil
+	}
+
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-ListRunningRequests")
+	defer sp.End()
+
+	resp, err := node.mixCoord.ListRunningRequests(ctx, request)
+	if err != nil {
+		return &milvuspb.ListRunningRequestsResponse{Status: merr.Status(err)}, nil
+	}
+	return resp, nil
+}
+
+// CancelRequests stops the given requests wherever in the cluster they run.
+func (node *Proxy) CancelRequests(ctx context.Context, request *milvuspb.CancelRequestsRequest) (*milvuspb.CancelRequestsResponse, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &milvuspb.CancelRequestsResponse{Status: merr.Status(err)}, nil
+	}
+	if len(request.GetRequestIds()) == 0 {
+		return &milvuspb.CancelRequestsResponse{
+			Status: merr.Status(merr.WrapErrParameterMissingMsg("request_ids cannot be empty")),
+		}, nil
+	}
+
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-CancelRequests")
+	defer sp.End()
+
+	// The operator is known here, where the caller authenticated, and nowhere
+	// downstream: the internal calls are new connections that carry no user.
+	// So the audit trail is written here, once, over the whole cluster's
+	// answer.
+	operator := GetCurUserFromContextOrDefault(ctx)
+	resp, err := node.mixCoord.CancelRequests(ctx, request)
+	if err != nil {
+		return &milvuspb.CancelRequestsResponse{Status: merr.Status(err)}, nil
+	}
+	for _, info := range resp.GetCancelled() {
+		mlog.Info(ctx, "request cancelled by operator",
+			mlog.String("operator", operator),
+			mlog.String("reason", request.GetReason()),
+			mlog.Int64("requestID", info.GetRequestId()),
+			mlog.Int64("servedByProxyID", info.GetProxyId()),
+			mlog.String("type", info.GetType()),
+			mlog.String("db", info.GetDbName()),
+			mlog.String("collection", info.GetCollectionName()),
+			mlog.String("user", info.GetUser()),
+			mlog.String("clientAddr", info.GetClientAddr()),
+			mlog.Int64("nq", info.GetNq()),
+			mlog.Int64("topk", info.GetTopk()),
+			mlog.Int64("elapsedMs", info.GetElapsedMs()),
+			mlog.Int64s("taskIDs", info.GetTaskIds()),
+			mlog.String("traceID", info.GetTraceId()))
+	}
+	return resp, nil
+}
+
+// ListLocalRunningRequests answers for this proxy alone. The coordinator calls
+// it on every proxy and merges the answers.
+func (node *Proxy) ListLocalRunningRequests(ctx context.Context, request *milvuspb.ListRunningRequestsRequest) (*milvuspb.ListRunningRequestsResponse, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &milvuspb.ListRunningRequestsResponse{Status: merr.Status(err)}, nil
+	}
+
+	infos := node.listRunningRequests(reqregistry.Filter{
+		DBName:         request.GetDbName(),
+		CollectionName: request.GetCollectionName(),
+		User:           request.GetUser(),
+		MinElapsed:     time.Duration(request.GetMinElapsedMs()) * time.Millisecond,
+	})
+	return &milvuspb.ListRunningRequestsResponse{
+		Status:   merr.Success(),
+		Requests: toRunningRequestInfos(infos),
+	}, nil
+}
+
+// CancelLocalRequests cancels, on this proxy alone, those of the given ids it
+// holds. Ids it does not hold are reported as not found: another proxy may
+// hold them, and only the coordinator sees every answer.
+func (node *Proxy) CancelLocalRequests(ctx context.Context, request *milvuspb.CancelRequestsRequest) (*milvuspb.CancelRequestsResponse, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &milvuspb.CancelRequestsResponse{Status: merr.Status(err)}, nil
+	}
+
+	// The operator authenticated against the proxy that received the public
+	// call, not against this one, so the cancelled client is told the reason
+	// rather than a name this node cannot vouch for. The audit line naming the
+	// operator is written there.
+	cancelled, notFound := node.cancelRequests(ctx, request.GetRequestIds(), "", request.GetReason())
+	return &milvuspb.CancelRequestsResponse{
+		Status:    merr.Success(),
+		Cancelled: toRunningRequestInfos(cancelled),
+		NotFound:  notFound,
+	}, nil
 }

@@ -1827,6 +1827,14 @@ func (coord *MixCoordMock) ClearReadTaskQueue(ctx context.Context, in *internalp
 	return &internalpb.ClearReadTaskQueueResponse{Status: merr.Success()}, nil
 }
 
+func (coord *MixCoordMock) ListRunningRequests(ctx context.Context, in *milvuspb.ListRunningRequestsRequest, opts ...grpc.CallOption) (*milvuspb.ListRunningRequestsResponse, error) {
+	return &milvuspb.ListRunningRequestsResponse{Status: merr.Success()}, nil
+}
+
+func (coord *MixCoordMock) CancelRequests(ctx context.Context, in *milvuspb.CancelRequestsRequest, opts ...grpc.CallOption) (*milvuspb.CancelRequestsResponse, error) {
+	return &milvuspb.CancelRequestsResponse{Status: merr.Success()}, nil
+}
+
 func (coord *MixCoordMock) ListLoadedSegments(ctx context.Context, in *querypb.ListLoadedSegmentsRequest, opts ...grpc.CallOption) (*querypb.ListLoadedSegmentsResponse, error) {
 	return &querypb.ListLoadedSegmentsResponse{}, nil
 }
