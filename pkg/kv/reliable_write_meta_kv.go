@@ -56,16 +56,31 @@ func (kv *ReliableWriteMetaKv) MultiRemove(ctx context.Context, keys []string) e
 	}, true)
 }
 
+// A guarded write is NOT retried. Its predicate is a snapshot of a value the
+// attempt itself may already have changed: an etcd leader change or a timeout
+// can apply the transaction and still report an error to the client, and
+// re-sending the same guard then compares against a value that can never hold
+// again -- the write loops until its context expires while the state it wanted
+// is already in place. An unmet predicate is likewise not transient; retrying it
+// only spins. Both cases belong to the caller, which holds the value it read and
+// can read it again to decide. Unconditional writes keep the retry: re-running
+// the identical key->value operation converges either way.
 func (kv *ReliableWriteMetaKv) MultiSaveAndRemove(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error {
-	return kv.retryWithBackoff(ctx, func(ctx context.Context) error {
+	if len(preds) > 0 {
 		return kv.MetaKv.MultiSaveAndRemove(ctx, saves, removals, preds...)
-	}, len(preds) == 0)
+	}
+	return kv.retryWithBackoff(ctx, func(ctx context.Context) error {
+		return kv.MetaKv.MultiSaveAndRemove(ctx, saves, removals)
+	}, true)
 }
 
 func (kv *ReliableWriteMetaKv) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error {
-	return kv.retryWithBackoff(ctx, func(ctx context.Context) error {
+	if len(preds) > 0 {
 		return kv.MetaKv.MultiSaveAndRemoveWithPrefix(ctx, saves, removals, preds...)
-	}, len(preds) == 0)
+	}
+	return kv.retryWithBackoff(ctx, func(ctx context.Context) error {
+		return kv.MetaKv.MultiSaveAndRemoveWithPrefix(ctx, saves, removals)
+	}, true)
 }
 
 func (kv *ReliableWriteMetaKv) CompareVersionAndSwap(ctx context.Context, key string, version int64, target string) (bool, error) {
