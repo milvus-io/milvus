@@ -73,6 +73,7 @@ func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 		{name: "WAL unavailable", primary: "B", wal: "unavailable", noCollections: true, want: map[string]bool{"B": false}},
 		{name: "WAL uninitialized", primary: "B", wal: "initial", noCollections: true, want: map[string]bool{"B": false}},
 		{name: "WAL RO excluded", primary: "B", wal: "ro", noCollections: true, ready: true, want: map[string]bool{"B": true}},
+		{name: "WAL unknown owner", primary: "B", wal: "old", unknownSource: true, noCollections: true, want: map[string]bool{"B": false}},
 		{name: "WAL unknown history", primary: "B", wal: "assigning", unknownSource: true, noCollections: true, want: map[string]bool{"B": false}},
 		{name: "WAL failure still checks collections", primary: "B", wal: "old", actual: []string{"C"}, badRG: "C", want: map[string]bool{"A": false, "B": false, "C": false}},
 	} {
