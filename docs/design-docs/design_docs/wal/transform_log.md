@@ -10,7 +10,8 @@ transform records of the pchannel-scoped WALSummary into DataCoord-managed L0
 segments. Delete is the initial transform payload. QueryNode and StreamingNode
 query resources consume the L0 output to advance transform visibility.
 
-The module is implemented and wired into RecoveryStorage.
+The module is always active and wired into RecoveryStorage. Delete recording
+and L0 materialization have no enable switch.
 Its WALSummary interactions are reads when needed, recovery of its consumer
 window, and reporting a GC position. This document specifies those consumer
 contracts and L0 materialization. The WALSummary storage protocol is defined

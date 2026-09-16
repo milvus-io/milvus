@@ -326,7 +326,6 @@ func (r *recoveryStorageImpl) newSummaryManager(runtime moduleapi.Runtime) *wals
 			r.channel.Term,
 		),
 		Runtime:           runtime,
-		EnableTransform:   true,
 		FlushMaxBytes:     uint64(paramtable.Get().StreamingCfg.FlushL0MaxSize.GetAsSize()),
 		RetentionMaxBytes: uint64(paramtable.Get().StreamingCfg.SummaryMaxBytesPerPChannel.GetAsSize()),
 		Logger:            r.Logger(),

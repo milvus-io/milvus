@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/stretchr/testify/mock"
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/anypb"
 
@@ -13,159 +13,101 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
-	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-func TestCollectionInsertIdempotencyEnabled(t *testing.T) {
-	require.False(t, collectionInsertIdempotencyEnabled(nil))
-	require.False(t, collectionInsertIdempotencyEnabled([]*commonpb.KeyValuePair{
-		{Key: common.CollectionInsertIdempotencyEnabledKey, Value: "false"},
-	}))
-	require.True(t, collectionInsertIdempotencyEnabled([]*commonpb.KeyValuePair{
-		{Key: common.CollectionInsertIdempotencyEnabledKey, Value: "true"},
-	}))
-}
-
 func TestInsertTaskIdempotencyBehavior(t *testing.T) {
 	paramtable.Init()
 	resetProxyIdempotencyParams(t)
-	require.NoError(t, Params.Save(Params.StreamingCfg.IdempotencyEnabled.Key, "true"))
-	require.NoError(t, Params.Save(Params.StreamingCfg.IdempotencyMaxKeyLength.Key, "1024"))
-
-	ctx := context.Background()
-
-	schema := &schemapb.CollectionSchema{
+	// Retired settings, even when present in an old deployment, cannot gate IK.
+	require.NoError(t, Params.Save("streaming.idempotency.enabled", "false"))
+	t.Cleanup(func() { _ = Params.Reset("streaming.idempotency.enabled") })
+	require.NoError(t, Params.Save(Params.StreamingCfg.IdempotencyMaxKeyLength.Key, "8"))
+	schema, err := newSchemaInfo(&schemapb.CollectionSchema{
 		Name: "coll",
 		Fields: []*schemapb.FieldSchema{
 			{Name: "pk", FieldID: 1, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 			{Name: "value", FieldID: 2, DataType: schemapb.DataType_Int64},
 		},
-	}
-	schemaInfo, err := newSchemaInfo(schema)
+	})
 	require.NoError(t, err)
-
-	tests := []struct {
-		name        string
-		enabled     bool
-		explicitKey string
-		wantErr     bool
-	}{
-		{
-			name:        "enabled explicit key preserves user key",
-			enabled:     true,
-			explicitKey: "user-key",
-		},
-		{
-			name:    "enabled without key generates auto key",
-			enabled: true,
-		},
-		{
-			name: "disabled without key clears idempotency properties",
-		},
-		{
-			name:        "disabled explicit key rejects",
-			explicitKey: "user-key",
-			wantErr:     true,
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			cache := newInsertTaskIdempotencyMockCache(t, schemaInfo, test.enabled)
-			idAllocator := newInsertTaskIdempotencyIDAllocator(t, ctx)
-
-			task := newInsertTaskForIdempotencyTest(cache, idAllocator, test.explicitKey)
-			err := task.PreExecute(ctx)
-			if test.wantErr {
-				require.Error(t, err)
-				require.ErrorIs(t, err, merr.ErrParameterInvalid)
-				return
-			}
-			require.NoError(t, err)
-			require.Equal(t, test.enabled, task.idempotencyEnabled)
-
-			if !test.enabled {
-				require.Empty(t, task.idempotencyKey)
-				return
-			}
-
-			if test.explicitKey == "" {
-				require.NotEqual(t, test.explicitKey, task.idempotencyKey)
-			} else {
-				require.Equal(t, test.explicitKey, task.idempotencyKey)
-			}
-		})
+	for _, property := range []string{"", "false", "true"} {
+		for _, key := range []string{"", "user-key", "too-long-key"} {
+			t.Run("property="+property+"/key="+key, func(t *testing.T) {
+				var properties []*commonpb.KeyValuePair
+				if property != "" {
+					properties = []*commonpb.KeyValuePair{{Key: "collection.insert.idempotency.enabled", Value: property}}
+				}
+				cache := newInsertTaskIdempotencyMockCache(t, schema, properties)
+				idAllocator := newInsertTaskIdempotencyIDAllocator(t, context.Background())
+				task := newInsertTaskForIdempotencyTest(cache, idAllocator, key)
+				err := task.PreExecute(context.Background())
+				if len(key) > 8 {
+					require.ErrorIs(t, err, merr.ErrParameterInvalid)
+					return
+				}
+				require.NoError(t, err)
+				require.Equal(t, key != "", task.idempotencyEnabled)
+				require.Equal(t, key, task.idempotencyKey)
+				if key == "" {
+					require.Nil(t, task.idempotentInsertDecoration())
+				} else {
+					require.NotNil(t, task.idempotentInsertDecoration())
+				}
+			})
+		}
 	}
 }
 
-func TestPrepareAutoIdempotencyKeyUsesFieldsBeforeMutation(t *testing.T) {
+func TestInsertTaskKeylessAutoIDIsNewWrite(t *testing.T) {
 	paramtable.Init()
-	resetProxyIdempotencyParams(t)
-	require.NoError(t, Params.Save(Params.StreamingCfg.IdempotencyEnabled.Key, "true"))
-
-	schema := &schemapb.CollectionSchema{
+	schema, err := newSchemaInfo(&schemapb.CollectionSchema{
 		Name: "coll",
 		Fields: []*schemapb.FieldSchema{
-			{Name: "pk", FieldID: 1, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{Name: "pk", FieldID: 1, DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
 			{Name: "value", FieldID: 2, DataType: schemapb.DataType_Int64},
-			{Name: "generated", FieldID: 3, DataType: schemapb.DataType_Int64},
 		},
-	}
-	task := newInsertTaskForIdempotencyTest(nil, nil, "")
-	task.schema = schema
-	properties := []*commonpb.KeyValuePair{
-		{Key: common.CollectionInsertIdempotencyEnabledKey, Value: "true"},
-	}
-
-	expectedKey, err := canonicalInsertPayloadKey(insertIdempotencyScopeOf(task.insertMsg), task.insertMsg.GetNumRows(), task.insertMsg.GetFieldsData(), schema, false)
+	})
 	require.NoError(t, err)
-	require.NoError(t, task.prepareAutoIdempotencyKeyIfEnabled(context.Background(), properties, false))
-	require.Equal(t, expectedKey, task.idempotencyKey)
-
-	task.insertMsg.FieldsData = append(task.insertMsg.FieldsData, int64FieldData("generated", 3, []int64{200, 201}))
-	mutatedKey, err := canonicalInsertPayloadKey(insertIdempotencyScopeOf(task.insertMsg), task.insertMsg.GetNumRows(), task.insertMsg.GetFieldsData(), schema, false)
-	require.NoError(t, err)
-	require.NotEqual(t, mutatedKey, task.idempotencyKey)
+	cache := newInsertTaskIdempotencyMockCache(t, schema, nil)
+	idAllocator := newInsertTaskIdempotencyIDAllocator(t, context.Background())
+	var previousIDs []int64
+	for i := 0; i < 2; i++ {
+		// No channel manager: a keyless request must not enter stable IK routing.
+		task := newInsertTaskForIdempotencyAutoIDTest(cache, idAllocator, nil)
+		task.idempotencyKey = ""
+		require.NoError(t, task.PreExecute(context.Background()))
+		require.False(t, task.idempotencyEnabled)
+		require.Empty(t, task.idempotencyKey)
+		require.Nil(t, task.idempotentInsertDecoration())
+		ids := task.result.GetIDs().GetIntId().GetData()
+		require.NotEmpty(t, ids)
+		require.NotEqual(t, previousIDs, ids)
+		previousIDs = ids
+	}
 }
 
-func TestPrepareAutoIdempotencyKeyValidatesGeneratedKeyLength(t *testing.T) {
+func TestPrepareIdempotencyKeyEncryptedCollection(t *testing.T) {
 	paramtable.Init()
-	resetProxyIdempotencyParams(t)
-	require.NoError(t, Params.Save(Params.StreamingCfg.IdempotencyEnabled.Key, "true"))
-	// A limit below the 64-char SHA256 hex auto key: the client supplied no key, so
-	// the proxy must reject its own over-limit auto key here rather than letting it
-	// reach the streaming node and fail there with a confusing error.
-	require.NoError(t, Params.Save(Params.StreamingCfg.IdempotencyMaxKeyLength.Key, "16"))
-
-	schema := &schemapb.CollectionSchema{
-		Name: "coll",
-		Fields: []*schemapb.FieldSchema{
-			{Name: "pk", FieldID: 1, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-			{Name: "value", FieldID: 2, DataType: schemapb.DataType_Int64},
-		},
-	}
-	task := newInsertTaskForIdempotencyTest(nil, nil, "")
-	task.schema = schema
-	properties := []*commonpb.KeyValuePair{
-		{Key: common.CollectionInsertIdempotencyEnabledKey, Value: "true"},
-	}
-
-	err := task.prepareAutoIdempotencyKeyIfEnabled(context.Background(), properties, false)
-	require.Error(t, err)
-	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	patch := mockey.Mock(hookutil.IsClusterEncryptionEnabled).Return(true).Build()
+	defer patch.UnPatch()
+	properties := []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "1"}}
+	keyless := &insertTask{}
+	require.NoError(t, keyless.prepareIdempotencyKey(properties))
+	require.False(t, keyless.idempotencyEnabled)
+	keyed := &insertTask{idempotencyKey: "key"}
+	require.ErrorIs(t, keyed.prepareIdempotencyKey(properties), merr.ErrParameterInvalid)
 }
 
 func TestInsertTaskIdempotencyAutoIDStableShardAssignment(t *testing.T) {
 	paramtable.Init()
 	resetProxyIdempotencyParams(t)
-	require.NoError(t, Params.Save(Params.StreamingCfg.IdempotencyEnabled.Key, "true"))
 
 	ctx := context.Background()
 
@@ -177,11 +119,12 @@ func TestInsertTaskIdempotencyAutoIDStableShardAssignment(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	cache := newInsertTaskIdempotencyMockCache(t, schema, true)
+	cache := newInsertTaskIdempotencyMockCache(t, schema, nil)
 	idAllocator := newInsertTaskIdempotencyIDAllocator(t, ctx)
 	channels := []string{"ch0", "ch1", "ch2"}
-	chMgr := channelmgr.NewMockChannelsMgr(t)
-	chMgr.EXPECT().GetVChannels(UniqueID(100)).Return(channels, nil)
+	chMgr := channelmgr.NewChannelsMgr(func(int64) (channelmgr.ChannelInfo, error) {
+		return channelmgr.ChannelInfo{VChans: channels, PChans: channels}, nil
+	})
 
 	task := newInsertTaskForIdempotencyAutoIDTest(cache, idAllocator, chMgr)
 	require.NoError(t, task.PreExecute(ctx))
@@ -219,56 +162,6 @@ func TestReassignAutoIDByOffsetChannelsUsesAssignChannelsByPK(t *testing.T) {
 		require.Equal(t, channels[offset%len(channels)], actualChannels1[offset])
 		require.Equal(t, channels[offset%len(channels)], actualChannels2[offset])
 	}
-}
-
-func TestInsertTaskIdempotencyGlobalConfig(t *testing.T) {
-	paramtable.Init()
-	resetProxyIdempotencyParams(t)
-
-	ctx := context.Background()
-
-	schema, err := newSchemaInfo(&schemapb.CollectionSchema{
-		Name: "coll",
-		Fields: []*schemapb.FieldSchema{
-			{Name: "pk", FieldID: 1, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-			{Name: "value", FieldID: 2, DataType: schemapb.DataType_Int64},
-		},
-	})
-	require.NoError(t, err)
-
-	t.Run("global disabled without key clears idempotency fields", func(t *testing.T) {
-		require.NoError(t, Params.Save(Params.StreamingCfg.IdempotencyEnabled.Key, "false"))
-		cache := newInsertTaskIdempotencyMockCache(t, schema, true)
-		idAllocator := newInsertTaskIdempotencyIDAllocator(t, ctx)
-
-		task := newInsertTaskForIdempotencyTest(cache, idAllocator, "")
-		require.NoError(t, task.PreExecute(ctx))
-		require.False(t, task.idempotencyEnabled)
-		require.Empty(t, task.idempotencyKey)
-	})
-
-	t.Run("global disabled explicit key rejects", func(t *testing.T) {
-		require.NoError(t, Params.Save(Params.StreamingCfg.IdempotencyEnabled.Key, "false"))
-		cache := newInsertTaskIdempotencyMockCache(t, schema, true)
-		idAllocator := newInsertTaskIdempotencyIDAllocator(t, ctx)
-
-		task := newInsertTaskForIdempotencyTest(cache, idAllocator, "user-key")
-		err := task.PreExecute(ctx)
-		require.Error(t, err)
-		require.ErrorIs(t, err, merr.ErrParameterInvalid)
-	})
-
-	t.Run("explicit key length limit", func(t *testing.T) {
-		require.NoError(t, Params.Save(Params.StreamingCfg.IdempotencyEnabled.Key, "true"))
-		require.NoError(t, Params.Save(Params.StreamingCfg.IdempotencyMaxKeyLength.Key, "4"))
-		cache := newInsertTaskIdempotencyMockCache(t, schema, true)
-		idAllocator := newInsertTaskIdempotencyIDAllocator(t, ctx)
-
-		task := newInsertTaskForIdempotencyTest(cache, idAllocator, "too-long")
-		err := task.PreExecute(ctx)
-		require.Error(t, err)
-		require.ErrorIs(t, err, merr.ErrParameterInvalid)
-	})
 }
 
 func TestBuildInsertWriteUnitIdempotentInsertResult(t *testing.T) {
@@ -341,161 +234,23 @@ func TestMergeDuplicateInsertResultsAcrossVChannels(t *testing.T) {
 	require.Equal(t, []int64{200, 101, 102, 203, 104, 105}, result.GetIDs().GetIntId().GetData())
 }
 
-func TestCanonicalInsertPayloadKey(t *testing.T) {
-	schema := &schemapb.CollectionSchema{
-		Fields: []*schemapb.FieldSchema{
-			{Name: "pk", FieldID: 1, DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
-			{Name: "value", FieldID: 2, DataType: schemapb.DataType_Int64},
-		},
-	}
-
-	fields1 := []*schemapb.FieldData{
-		int64FieldData("value", 2, []int64{10, 20}),
-		int64FieldData("pk", 1, []int64{100, 101}),
-	}
-	fields2 := []*schemapb.FieldData{
-		int64FieldData("pk", 1, []int64{200, 201}),
-		int64FieldData("value", 2, []int64{10, 20}),
-	}
-
-	hash1, err := canonicalInsertPayloadKey(insertIdempotencyScope{}, 2, fields1, schema, true)
-	require.NoError(t, err)
-	hash2, err := canonicalInsertPayloadKey(insertIdempotencyScope{}, 2, fields2, schema, true)
-	require.NoError(t, err)
-	require.Equal(t, hash1, hash2)
-	require.Len(t, hash1, 64)
-
-	fields2[1] = int64FieldData("value", 2, []int64{10, 21})
-	hash3, err := canonicalInsertPayloadKey(insertIdempotencyScope{}, 2, fields2, schema, true)
-	require.NoError(t, err)
-	require.NotEqual(t, hash1, hash3)
-
-	_, err = canonicalInsertPayloadKey(insertIdempotencyScope{}, 2, []*schemapb.FieldData{
-		int64FieldData("value", 2, []int64{10, 20}),
-		int64FieldData("other", 2, []int64{30, 40}),
-	}, schema, true)
-	require.Error(t, err)
-	require.ErrorContains(t, err, "duplicate field id 2")
-
-	_, err = canonicalInsertPayloadKey(insertIdempotencyScope{}, 2, []*schemapb.FieldData{
-		int64FieldData("value", 2, []int64{10, 20}),
-		int64FieldData("value", 3, []int64{30, 40}),
-	}, schema, true)
-	require.Error(t, err)
-	require.ErrorContains(t, err, "duplicate field name")
-}
-
-// The server-side dedup window is keyed by vchannel, which is per collection
-// shard and does not separate partitions or namespaces. An auto key derived from
-// the payload alone would therefore make the same rows sent to two different
-// destinations collide on one window entry, and the second insert would be
-// silently dropped as a duplicate.
-func TestCanonicalInsertPayloadKeySeparatesDestinations(t *testing.T) {
-	schema := &schemapb.CollectionSchema{
-		Fields: []*schemapb.FieldSchema{
-			{Name: "pk", FieldID: 1, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-			{Name: "value", FieldID: 2, DataType: schemapb.DataType_Int64},
-		},
-	}
-	fields := []*schemapb.FieldData{
-		int64FieldData("pk", 1, []int64{100, 101}),
-		int64FieldData("value", 2, []int64{10, 20}),
-	}
-	base := insertIdempotencyScope{dbName: "db", collectionName: "coll", partitionName: "p1"}
-	emptyNamespace := ""
-	otherNamespace := "ns"
-
-	keyOf := func(scope insertIdempotencyScope) string {
-		key, err := canonicalInsertPayloadKey(scope, 2, fields, schema, false)
-		require.NoError(t, err)
-		return key
-	}
-
-	baseKey := keyOf(base)
-	require.Equal(t, baseKey, keyOf(base), "same destination and payload must be stable")
-
-	otherPartition := base
-	otherPartition.partitionName = "p2"
-	require.NotEqual(t, baseKey, keyOf(otherPartition))
-
-	otherDB := base
-	otherDB.dbName = "db2"
-	require.NotEqual(t, baseKey, keyOf(otherDB))
-
-	otherCollection := base
-	otherCollection.collectionName = "coll2"
-	require.NotEqual(t, baseKey, keyOf(otherCollection))
-
-	// An unset namespace routes by primary key while an empty-string namespace
-	// routes by namespace, so the two must not share a key either.
-	unsetNamespace := keyOf(base)
-	withEmptyNamespace := base
-	withEmptyNamespace.namespace = &emptyNamespace
-	require.NotEqual(t, unsetNamespace, keyOf(withEmptyNamespace))
-
-	withOtherNamespace := base
-	withOtherNamespace.namespace = &otherNamespace
-	require.NotEqual(t, keyOf(withEmptyNamespace), keyOf(withOtherNamespace))
-
-	// Adjacent string fields must not be shiftable into each other.
-	shifted := insertIdempotencyScope{dbName: "db", collectionName: "col", partitionName: "lp1"}
-	require.NotEqual(t, baseKey, keyOf(shifted))
-}
-
-func TestPrepareAutoIdempotencyKeySeparatesPartitions(t *testing.T) {
-	paramtable.Init()
-	resetProxyIdempotencyParams(t)
-	require.NoError(t, Params.Save(Params.StreamingCfg.IdempotencyEnabled.Key, "true"))
-
-	schema := &schemapb.CollectionSchema{
-		Name: "coll",
-		Fields: []*schemapb.FieldSchema{
-			{Name: "pk", FieldID: 1, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-			{Name: "value", FieldID: 2, DataType: schemapb.DataType_Int64},
-		},
-	}
-	properties := []*commonpb.KeyValuePair{
-		{Key: common.CollectionInsertIdempotencyEnabledKey, Value: "true"},
-	}
-
-	keyOf := func(partitionName string) string {
-		task := newInsertTaskForIdempotencyTest(nil, nil, "")
-		task.schema = schema
-		task.insertMsg.PartitionName = partitionName
-		require.NoError(t, task.prepareAutoIdempotencyKeyIfEnabled(context.Background(), properties, false))
-		return task.idempotencyKey
-	}
-
-	require.Equal(t, keyOf("p1"), keyOf("p1"))
-	require.NotEqual(t, keyOf("p1"), keyOf("p2"))
-}
-
-func newInsertTaskIdempotencyMockCache(t *testing.T, schema *schemaInfo, enabled bool) *MockCache {
+func newInsertTaskIdempotencyMockCache(t *testing.T, schema *schemaInfo, properties []*commonpb.KeyValuePair) *MetaCache {
 	t.Helper()
-
-	properties := []*commonpb.KeyValuePair(nil)
-	if enabled {
-		properties = []*commonpb.KeyValuePair{
-			{Key: common.CollectionInsertIdempotencyEnabledKey, Value: "true"},
-		}
-	}
-
-	cache := NewMockCache(t)
-	cache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(UniqueID(100), nil)
-	cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{
-		CollID:     100,
-		DBName:     "db",
-		Schema:     schema,
-		Properties: properties,
-	}, nil)
-	cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schema, nil)
+	cache := &MetaCache{}
+	id := mockey.Mock((*MetaCache).GetCollectionID).Return(UniqueID(100), nil).Build()
+	info := mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
+		CollID: 100, DBName: "db", Schema: schema, Properties: properties,
+	}, nil).Build()
+	fields := mockey.Mock((*MetaCache).GetCollectionSchema).Return(schema, nil).Build()
+	t.Cleanup(func() { id.UnPatch() })
+	t.Cleanup(func() { info.UnPatch() })
+	t.Cleanup(func() { fields.UnPatch() })
 	return cache
 }
 
 func resetProxyIdempotencyParams(t *testing.T) {
 	t.Helper()
 	keys := []string{
-		Params.StreamingCfg.IdempotencyEnabled.Key,
 		Params.StreamingCfg.IdempotencyMaxKeyLength.Key,
 	}
 	for _, key := range keys {
@@ -507,21 +262,16 @@ func resetProxyIdempotencyParams(t *testing.T) {
 	}
 }
 
-func newInsertTaskIdempotencyIDAllocator(t *testing.T, ctx context.Context) *allocator.IDAllocator {
+func newInsertTaskIdempotencyIDAllocator(t *testing.T, _ context.Context) *allocator.IDAllocator {
 	t.Helper()
-
-	rc := mocks.NewMockRootCoordClient(t)
-	rc.EXPECT().AllocID(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocIDResponse{
-		Status: merr.Success(),
-		ID:     1000,
-		Count:  100,
-	}, nil).Maybe()
-
-	idAllocator, err := allocator.NewIDAllocator(ctx, rc, 0)
-	require.NoError(t, err)
-	require.NoError(t, idAllocator.Start())
-	t.Cleanup(idAllocator.Close)
-	return idAllocator
+	nextID := int64(1000)
+	patch := mockey.Mock((*allocator.IDAllocator).Alloc).To(func(_ *allocator.IDAllocator, count uint32) (int64, int64, error) {
+		begin := nextID
+		nextID += int64(count)
+		return begin, nextID, nil
+	}).Build()
+	t.Cleanup(func() { patch.UnPatch() })
+	return &allocator.IDAllocator{}
 }
 
 func newInsertTaskForIdempotencyTest(cache Cache, idAllocator *allocator.IDAllocator, key string) insertTask {
@@ -570,6 +320,7 @@ func newInsertTaskForIdempotencyAutoIDTest(cache Cache, idAllocator *allocator.I
 			},
 		},
 		idAllocator:     idAllocator,
+		idempotencyKey:  "autoid-request",
 		chMgr:           chMgr,
 		schemaTimestamp: 0,
 	}
