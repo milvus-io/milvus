@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -133,4 +134,102 @@ func TestRankParamsCarryJSONGroupAttributes(t *testing.T) {
 	searchInfo, err := parseSearchInfo(getValidSearchParams(), schema, parsed, false)
 	assert.NoError(t, err)
 	assert.Equal(t, "/brand", searchInfo.planInfo.GetJsonPath())
+}
+
+func TestParseFuzzyBM25SearchOptions(t *testing.T) {
+	kv := func(key, value string) *commonpb.KeyValuePair {
+		return &commonpb.KeyValuePair{Key: key, Value: value}
+	}
+
+	t.Run("disabled", func(t *testing.T) {
+		options, err := parseFuzzyBM25SearchOptions(nil)
+		require.NoError(t, err)
+		assert.Nil(t, options)
+	})
+
+	t.Run("zero distance uses exact BM25", func(t *testing.T) {
+		options, err := parseFuzzyBM25SearchOptions([]*commonpb.KeyValuePair{
+			kv(FuzzyBM25FuzzinessKey, "0"),
+		})
+		require.NoError(t, err)
+		assert.Nil(t, options)
+	})
+
+	t.Run("defaults max expansions", func(t *testing.T) {
+		options, err := parseFuzzyBM25SearchOptions([]*commonpb.KeyValuePair{
+			kv(FuzzyBM25FuzzinessKey, "1"),
+		})
+		require.NoError(t, err)
+		assert.EqualValues(t, 1, options.GetMaxEditDistance())
+		assert.EqualValues(t, 50, options.GetMaxExpansions())
+		assert.Zero(t, options.GetPrefixLength())
+	})
+
+	t.Run("explicit values", func(t *testing.T) {
+		options, err := parseFuzzyBM25SearchOptions([]*commonpb.KeyValuePair{
+			kv(FuzzyBM25FuzzinessKey, "2"),
+			kv(FuzzyMaxExpansionsKey, "1024"),
+			kv(FuzzyPrefixLengthKey, "3"),
+		})
+		require.NoError(t, err)
+		assert.EqualValues(t, 2, options.GetMaxEditDistance())
+		assert.EqualValues(t, 1024, options.GetMaxExpansions())
+		assert.EqualValues(t, 3, options.GetPrefixLength())
+	})
+
+	t.Run("current SDK params JSON", func(t *testing.T) {
+		options, err := parseFuzzyBM25SearchOptions([]*commonpb.KeyValuePair{
+			kv(ParamsKey, `{"metric_type":"BM25","fuzziness":1,"fuzzy_max_expansions":32,"fuzzy_prefix_length":2}`),
+		})
+		require.NoError(t, err)
+		assert.EqualValues(t, 1, options.GetMaxEditDistance())
+		assert.EqualValues(t, 32, options.GetMaxExpansions())
+		assert.EqualValues(t, 2, options.GetPrefixLength())
+	})
+
+	t.Run("matching direct and JSON values", func(t *testing.T) {
+		options, err := parseFuzzyBM25SearchOptions([]*commonpb.KeyValuePair{
+			kv(FuzzyBM25FuzzinessKey, "1"),
+			kv(ParamsKey, `{"fuzziness":1}`),
+		})
+		require.NoError(t, err)
+		assert.EqualValues(t, 1, options.GetMaxEditDistance())
+	})
+
+	for name, params := range map[string][]*commonpb.KeyValuePair{
+		"missing distance": {kv(FuzzyMaxExpansionsKey, "10")},
+		"nested missing distance": {
+			kv(ParamsKey, `{"fuzzy_max_expansions":10}`),
+		},
+		"prefix missing distance": {kv(FuzzyPrefixLengthKey, "1")},
+		"negative distance":       {kv(FuzzyBM25FuzzinessKey, "-1")},
+		"distance too large":      {kv(FuzzyBM25FuzzinessKey, "3")},
+		"conflicting distance": {
+			kv(FuzzyBM25FuzzinessKey, "1"),
+			kv(ParamsKey, `{"fuzziness":2}`),
+		},
+		"nested null distance": {kv(ParamsKey, `{"fuzziness":null}`)},
+		"zero expansions": {
+			kv(FuzzyBM25FuzzinessKey, "1"),
+			kv(FuzzyMaxExpansionsKey, "0"),
+		},
+		"expansions too large": {
+			kv(FuzzyBM25FuzzinessKey, "1"),
+			kv(FuzzyMaxExpansionsKey, "1025"),
+		},
+		"negative prefix": {
+			kv(FuzzyBM25FuzzinessKey, "1"),
+			kv(FuzzyPrefixLengthKey, "-1"),
+		},
+		"invalid prefix": {
+			kv(FuzzyBM25FuzzinessKey, "1"),
+			kv(FuzzyPrefixLengthKey, "one"),
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := parseFuzzyBM25SearchOptions(params)
+			require.Error(t, err)
+			assert.Equal(t, merr.InputError, merr.GetErrorType(err))
+		})
+	}
 }

@@ -333,6 +333,37 @@ func (s *SearchTaskSuite) TestSearchTaskMinNQ() {
 	})
 }
 
+func (s *SearchTaskSuite) TestMergeFuzzyBM25GenerationFence() {
+	newTask := func(options *internalpb.FuzzyBM25SearchOptions, generation uint64) *SearchTask {
+		return &SearchTask{
+			nq:   1,
+			topk: 10,
+			req: &querypb.SearchRequest{
+				Req: &internalpb.SearchRequest{
+					DbID:               1,
+					CollectionID:       2,
+					MvccTimestamp:      3,
+					SerializedExprPlan: []byte("plan"),
+					FuzzyBm25Options:   options,
+				},
+				DmlChannels: []string{"channel"},
+				SegmentIDs:  []int64{10},
+				TextTermGenerations: []*querypb.SegmentTextTermGeneration{{
+					SegmentID:  10,
+					Generation: generation,
+				}},
+			},
+			originTopks: []int64{10},
+			originNqs:   []int64{1},
+		}
+	}
+	options := &internalpb.FuzzyBM25SearchOptions{MaxEditDistance: 1, MaxExpansions: 50}
+	s.True(newTask(options, 7).Merge(newTask(proto.Clone(options).(*internalpb.FuzzyBM25SearchOptions), 7)))
+	s.False(newTask(options, 7).Merge(newTask(options, 8)))
+	s.False(newTask(options, 7).Merge(newTask(&internalpb.FuzzyBM25SearchOptions{MaxEditDistance: 2, MaxExpansions: 50}, 7)))
+	s.False(newTask(options, 7).Merge(newTask(&internalpb.FuzzyBM25SearchOptions{MaxEditDistance: 1, MaxExpansions: 50, PrefixLength: 1}, 7)))
+}
+
 func TestSearchTask(t *testing.T) {
 	suite.Run(t, new(SearchTaskSuite))
 }

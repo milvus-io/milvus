@@ -33,6 +33,9 @@ const (
 	FunctionTypeMinHash       = schemapb.FunctionType_MinHash
 	FunctionTypeTextEmbedding = schemapb.FunctionType_TextEmbedding
 	FunctionTypeRerank        = schemapb.FunctionType_Rerank
+
+	// FunctionParamEnableFuzzy enables fuzzy term expansion for a BM25 function.
+	FunctionParamEnableFuzzy = "enable_fuzzy"
 )
 
 type Function struct {
@@ -74,6 +77,11 @@ func (f *Function) WithOutputFields(outputFields ...string) *Function {
 func (f *Function) WithType(funcType FunctionType) *Function {
 	f.Type = funcType
 	return f
+}
+
+// WithEnableFuzzy enables fuzzy term expansion for a BM25 function.
+func (f *Function) WithEnableFuzzy(enable bool) *Function {
+	return f.WithParam(FunctionParamEnableFuzzy, enable)
 }
 
 func (f *Function) WithParam(key string, value any) *Function {

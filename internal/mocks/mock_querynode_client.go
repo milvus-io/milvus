@@ -367,6 +367,80 @@ func (_c *MockQueryNodeClient_DeleteBatch_Call) RunAndReturn(run func(context.Co
 	return _c
 }
 
+// ExpandTextTerms provides a mock function with given fields: ctx, in, opts
+func (_m *MockQueryNodeClient) ExpandTextTerms(ctx context.Context, in *querypb.ExpandTextTermsRequest, opts ...grpc.CallOption) (*querypb.ExpandTextTermsResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ExpandTextTerms")
+	}
+
+	var r0 *querypb.ExpandTextTermsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ExpandTextTermsRequest, ...grpc.CallOption) (*querypb.ExpandTextTermsResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ExpandTextTermsRequest, ...grpc.CallOption) *querypb.ExpandTextTermsResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*querypb.ExpandTextTermsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.ExpandTextTermsRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryNodeClient_ExpandTextTerms_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ExpandTextTerms'
+type MockQueryNodeClient_ExpandTextTerms_Call struct {
+	*mock.Call
+}
+
+// ExpandTextTerms is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *querypb.ExpandTextTermsRequest
+//   - opts ...grpc.CallOption
+func (_e *MockQueryNodeClient_Expecter) ExpandTextTerms(ctx interface{}, in interface{}, opts ...interface{}) *MockQueryNodeClient_ExpandTextTerms_Call {
+	return &MockQueryNodeClient_ExpandTextTerms_Call{Call: _e.mock.On("ExpandTextTerms",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockQueryNodeClient_ExpandTextTerms_Call) Run(run func(ctx context.Context, in *querypb.ExpandTextTermsRequest, opts ...grpc.CallOption)) *MockQueryNodeClient_ExpandTextTerms_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*querypb.ExpandTextTermsRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockQueryNodeClient_ExpandTextTerms_Call) Return(_a0 *querypb.ExpandTextTermsResponse, _a1 error) *MockQueryNodeClient_ExpandTextTerms_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockQueryNodeClient_ExpandTextTerms_Call) RunAndReturn(run func(context.Context, *querypb.ExpandTextTermsRequest, ...grpc.CallOption) (*querypb.ExpandTextTermsResponse, error)) *MockQueryNodeClient_ExpandTextTerms_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetComponentStates provides a mock function with given fields: ctx, in, opts
 func (_m *MockQueryNodeClient) GetComponentStates(ctx context.Context, in *milvuspb.GetComponentStatesRequest, opts ...grpc.CallOption) (*milvuspb.ComponentStates, error) {
 	_va := make([]interface{}, len(opts))

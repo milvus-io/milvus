@@ -642,6 +642,11 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		}
 
 		internalSubReq.FieldId = queryInfo.GetQueryFieldId()
+		internalSubReq.FuzzyBm25Options, err = t.validateFuzzyBM25Options(
+			subReq.GetSearchParams(), internalSubReq.FieldId, subIsIterator)
+		if err != nil {
+			return err
+		}
 
 		queryFieldIDs = append(queryFieldIDs, internalSubReq.FieldId)
 		// set PartitionIDs for sub search
@@ -936,6 +941,10 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 		}
 	}
 	t.FieldId = queryInfo.GetQueryFieldId()
+	t.FuzzyBm25Options, err = t.validateFuzzyBM25Options(t.request.GetSearchParams(), t.FieldId, isIterator)
+	if err != nil {
+		return err
+	}
 
 	if err := t.addHighlightTask(t.request.GetHighlighter(), queryInfo.GetMetricType(), queryInfo.GetQueryFieldId(), t.request.GetPlaceholderGroup(), t.GetAnalyzerName()); err != nil {
 		return err
@@ -1123,6 +1132,29 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 		mlog.Stringer("plan", planparserv2.RedactPlanForLog(plan))) // may be very large if a large term is passed; membership blobs are redacted.
 
 	return nil
+}
+
+func (t *searchTask) validateFuzzyBM25Options(
+	searchParams []*commonpb.KeyValuePair,
+	outputFieldID int64,
+	isIterator bool,
+) (*internalpb.FuzzyBM25SearchOptions, error) {
+	options, err := parseFuzzyBM25SearchOptions(searchParams)
+	if err != nil || options == nil {
+		return options, err
+	}
+	bm25Function, ok := getBM25FunctionOfAnnsField(outputFieldID, t.schema.CollectionSchema.GetFunctions())
+	if !ok || len(bm25Function.GetInputFieldIds()) != 1 {
+		return nil, merr.WrapErrParameterInvalidMsg("fuzzy BM25 options require a BM25 function output field")
+	}
+	if !typeutil.IsFuzzyEnabledBM25Function(bm25Function) {
+		return nil, merr.WrapErrParameterInvalidMsg(
+			"BM25 function must enable %s before fuzzy search", common.EnableFuzzyKey)
+	}
+	if isIterator {
+		return nil, merr.WrapErrParameterInvalidMsg("fuzzy BM25 search is not supported with search iterator")
+	}
+	return options, nil
 }
 
 func (t *searchTask) skipRequeryByNamespacePartitionMode() bool {
@@ -1532,7 +1564,8 @@ func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.Que
 	if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn(ctx, "QueryNode search result error",
 			mlog.String("reason", result.GetStatus().GetReason()))
-		return errors.Wrapf(merr.Error(result.GetStatus()), "fail to search on QueryNode %d", nodeID)
+		searchErr := merr.Error(result.GetStatus())
+		return errors.Wrapf(searchErr, "fail to search on QueryNode %d", nodeID)
 	}
 	if t.resultBuf != nil {
 		t.resultBuf.Insert(result)

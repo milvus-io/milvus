@@ -1614,6 +1614,7 @@ const (
 	QueryNode_GetStatistics_FullMethodName          = "/milvus.proto.query.QueryNode/GetStatistics"
 	QueryNode_Search_FullMethodName                 = "/milvus.proto.query.QueryNode/Search"
 	QueryNode_SearchSegments_FullMethodName         = "/milvus.proto.query.QueryNode/SearchSegments"
+	QueryNode_ExpandTextTerms_FullMethodName        = "/milvus.proto.query.QueryNode/ExpandTextTerms"
 	QueryNode_Query_FullMethodName                  = "/milvus.proto.query.QueryNode/Query"
 	QueryNode_QueryStream_FullMethodName            = "/milvus.proto.query.QueryNode/QueryStream"
 	QueryNode_QuerySegments_FullMethodName          = "/milvus.proto.query.QueryNode/QuerySegments"
@@ -1653,6 +1654,7 @@ type QueryNodeClient interface {
 	GetStatistics(ctx context.Context, in *GetStatisticsRequest, opts ...grpc.CallOption) (*internalpb.GetStatisticsResponse, error)
 	Search(ctx context.Context, in *SearchRequest, opts ...grpc.CallOption) (*internalpb.SearchResults, error)
 	SearchSegments(ctx context.Context, in *SearchRequest, opts ...grpc.CallOption) (*internalpb.SearchResults, error)
+	ExpandTextTerms(ctx context.Context, in *ExpandTextTermsRequest, opts ...grpc.CallOption) (*ExpandTextTermsResponse, error)
 	Query(ctx context.Context, in *QueryRequest, opts ...grpc.CallOption) (*internalpb.RetrieveResults, error)
 	QueryStream(ctx context.Context, in *QueryRequest, opts ...grpc.CallOption) (QueryNode_QueryStreamClient, error)
 	QuerySegments(ctx context.Context, in *QueryRequest, opts ...grpc.CallOption) (*internalpb.RetrieveResults, error)
@@ -1814,6 +1816,15 @@ func (c *queryNodeClient) Search(ctx context.Context, in *SearchRequest, opts ..
 func (c *queryNodeClient) SearchSegments(ctx context.Context, in *SearchRequest, opts ...grpc.CallOption) (*internalpb.SearchResults, error) {
 	out := new(internalpb.SearchResults)
 	err := c.cc.Invoke(ctx, QueryNode_SearchSegments_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *queryNodeClient) ExpandTextTerms(ctx context.Context, in *ExpandTextTermsRequest, opts ...grpc.CallOption) (*ExpandTextTermsResponse, error) {
+	out := new(ExpandTextTermsResponse)
+	err := c.cc.Invoke(ctx, QueryNode_ExpandTextTerms_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -2047,6 +2058,7 @@ type QueryNodeServer interface {
 	GetStatistics(context.Context, *GetStatisticsRequest) (*internalpb.GetStatisticsResponse, error)
 	Search(context.Context, *SearchRequest) (*internalpb.SearchResults, error)
 	SearchSegments(context.Context, *SearchRequest) (*internalpb.SearchResults, error)
+	ExpandTextTerms(context.Context, *ExpandTextTermsRequest) (*ExpandTextTermsResponse, error)
 	Query(context.Context, *QueryRequest) (*internalpb.RetrieveResults, error)
 	QueryStream(*QueryRequest, QueryNode_QueryStreamServer) error
 	QuerySegments(context.Context, *QueryRequest) (*internalpb.RetrieveResults, error)
@@ -2119,6 +2131,9 @@ func (UnimplementedQueryNodeServer) Search(context.Context, *SearchRequest) (*in
 }
 func (UnimplementedQueryNodeServer) SearchSegments(context.Context, *SearchRequest) (*internalpb.SearchResults, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SearchSegments not implemented")
+}
+func (UnimplementedQueryNodeServer) ExpandTextTerms(context.Context, *ExpandTextTermsRequest) (*ExpandTextTermsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ExpandTextTerms not implemented")
 }
 func (UnimplementedQueryNodeServer) Query(context.Context, *QueryRequest) (*internalpb.RetrieveResults, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Query not implemented")
@@ -2452,6 +2467,24 @@ func _QueryNode_SearchSegments_Handler(srv interface{}, ctx context.Context, dec
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(QueryNodeServer).SearchSegments(ctx, req.(*SearchRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _QueryNode_ExpandTextTerms_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ExpandTextTermsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryNodeServer).ExpandTextTerms(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: QueryNode_ExpandTextTerms_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryNodeServer).ExpandTextTerms(ctx, req.(*ExpandTextTermsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2852,6 +2885,10 @@ var QueryNode_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SearchSegments",
 			Handler:    _QueryNode_SearchSegments_Handler,
+		},
+		{
+			MethodName: "ExpandTextTerms",
+			Handler:    _QueryNode_ExpandTextTerms_Handler,
 		},
 		{
 			MethodName: "Query",

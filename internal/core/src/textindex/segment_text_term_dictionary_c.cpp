@@ -16,16 +16,22 @@
 
 #include "textindex/segment_text_term_dictionary_c.h"
 
+#include <algorithm>
+#include <cstdlib>
+#include <cstring>
 #include <limits>
 #include <new>
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 #include "common/EasyAssert.h"
 #include "monitor/scope_metric.h"
 #include "segcore/SegmentInterface.h"
+#include "textindex/fst/levenshtein_dfa.h"
 #include "textindex/fst/text_fst.h"
 #include "textindex/segment_text_term_dictionary.h"
 
@@ -77,6 +83,20 @@ DecodeSegmentTextTerms(const uint8_t* encoded_terms, int64_t encoded_size) {
     return terms;
 }
 
+std::vector<const milvus::textindex::TextFst*>
+TextTermFsts(const CTextFstHandle* fst_handles, int64_t fst_count) {
+    std::vector<const milvus::textindex::TextFst*> fsts;
+    fsts.reserve(static_cast<size_t>(fst_count));
+    for (int64_t i = 0; i < fst_count; ++i) {
+        if (fst_handles[i] == nullptr) {
+            throw std::invalid_argument("text term FST handle is null");
+        }
+        fsts.push_back(
+            static_cast<const milvus::textindex::TextFst*>(fst_handles[i]));
+    }
+    return fsts;
+}
+
 void
 SetTextTermTrieStats(
     CTextTermTrieUpdateResult* result,
@@ -102,6 +122,42 @@ TrySetTextTermTrieStats(
     } catch (...) {
         result->term_count = 0;
         result->memory_size = 0;
+    }
+}
+
+void
+SetTextTermFuzzyMatches(
+    CTextFstFuzzyResult* result,
+    const std::vector<milvus::textindex::TextTermMatch>& matches) {
+    if (matches.size() >
+        static_cast<size_t>(std::numeric_limits<int64_t>::max())) {
+        throw std::overflow_error("too many segment text term fuzzy matches");
+    }
+    if (!matches.empty()) {
+        result->matches = static_cast<CTextFstMatch*>(
+            std::calloc(matches.size(), sizeof(CTextFstMatch)));
+        if (result->matches == nullptr) {
+            throw std::bad_alloc();
+        }
+    }
+    result->match_count = static_cast<int64_t>(matches.size());
+    for (size_t i = 0; i < matches.size(); ++i) {
+        const auto& match = matches[i];
+        if (match.term.size() >
+            static_cast<size_t>(std::numeric_limits<int64_t>::max())) {
+            throw std::overflow_error("segment text term match is too large");
+        }
+        result->matches[i].term_size = static_cast<int64_t>(match.term.size());
+        result->matches[i].edit_distance = match.edit_distance;
+        if (!match.term.empty()) {
+            result->matches[i].term =
+                static_cast<uint8_t*>(std::malloc(match.term.size()));
+            if (result->matches[i].term == nullptr) {
+                throw std::bad_alloc();
+            }
+            std::memcpy(
+                result->matches[i].term, match.term.data(), match.term.size());
+        }
     }
 }
 
@@ -170,15 +226,7 @@ AddSegmentTextTermFstsToTrie(CSegmentInterface c_segment,
         AssertInfo(segment->type() == ::SegmentType::Growing,
                    "cannot import text term FSTs into non-growing segment");
         dictionary = &segment->GetTextTermDictionary();
-        std::vector<const milvus::textindex::TextFst*> fsts;
-        fsts.reserve(static_cast<size_t>(fst_count));
-        for (int64_t i = 0; i < fst_count; ++i) {
-            if (fst_handles[i] == nullptr) {
-                throw std::invalid_argument("text term FST handle is null");
-            }
-            fsts.push_back(
-                static_cast<const milvus::textindex::TextFst*>(fst_handles[i]));
-        }
+        const auto fsts = TextTermFsts(fst_handles, fst_count);
 
         importing_persisted_terms = true;
         dictionary->AddFstTerms(field_id, fsts);
@@ -216,6 +264,105 @@ AddSegmentTextTermFstsToTrie(CSegmentInterface c_segment,
                 milvus::UnexpectedError,
                 "unknown segment text term FST import failure");
         }
+    }
+    return result;
+}
+
+CTextTermFuzzyQueryBuildResult
+PrepareSegmentTextTermFuzzyQuery(const uint8_t* query,
+                                 int64_t query_size,
+                                 uint32_t max_edit_distance,
+                                 uint32_t prefix_length) {
+    SCOPE_CGO_CALL_METRIC();
+
+    CTextTermFuzzyQueryBuildResult result{};
+    try {
+        if (query_size < 0 ||
+            static_cast<uint64_t>(query_size) >
+                static_cast<uint64_t>(std::numeric_limits<size_t>::max()) ||
+            (query_size > 0 && query == nullptr) || max_edit_distance > 2) {
+            result.status =
+                milvus::FailureCStatus(milvus::UnexpectedError,
+                                       "invalid segment text term fuzzy query");
+            return result;
+        }
+        const std::string_view query_view(
+            query_size == 0 ? "" : reinterpret_cast<const char*>(query),
+            static_cast<size_t>(query_size));
+        auto prepared = milvus::textindex::PrepareLevenshteinQuery(
+            query_view, max_edit_distance, prefix_length);
+        result.handle = new milvus::textindex::PreparedLevenshteinQuery(
+            std::move(prepared));
+        result.status = milvus::SuccessCStatus();
+    } catch (const std::bad_alloc& e) {
+        delete static_cast<milvus::textindex::PreparedLevenshteinQuery*>(
+            result.handle);
+        result.handle = nullptr;
+        result.status =
+            milvus::FailureCStatus(milvus::MemAllocateFailed, e.what());
+    } catch (const std::exception& e) {
+        delete static_cast<milvus::textindex::PreparedLevenshteinQuery*>(
+            result.handle);
+        result.handle = nullptr;
+        result.status = milvus::FailureCStatus(&e);
+    } catch (...) {
+        delete static_cast<milvus::textindex::PreparedLevenshteinQuery*>(
+            result.handle);
+        result.handle = nullptr;
+        result.status = milvus::FailureCStatus(
+            milvus::UnexpectedError,
+            "unknown segment text term fuzzy query preparation failure");
+    }
+    return result;
+}
+
+void
+DeleteSegmentTextTermFuzzyQuery(CTextTermFuzzyQueryHandle handle) {
+    delete static_cast<milvus::textindex::PreparedLevenshteinQuery*>(handle);
+}
+
+CTextFstFuzzyResult
+FuzzySearchSegmentTextTermsPrepared(CSegmentInterface c_segment,
+                                    int64_t field_id,
+                                    const CTextFstHandle* fst_handles,
+                                    int64_t fst_count,
+                                    CTextTermFuzzyQueryHandle query,
+                                    uint32_t max_expansions) {
+    SCOPE_CGO_CALL_METRIC();
+
+    CTextFstFuzzyResult result{};
+    try {
+        if (c_segment == nullptr || fst_count < 0 ||
+            (fst_count > 0 && fst_handles == nullptr) || query == nullptr ||
+            max_expansions == 0) {
+            result.status = milvus::FailureCStatus(
+                milvus::UnexpectedError,
+                "invalid prepared segment text term fuzzy request");
+            return result;
+        }
+        auto* segment =
+            static_cast<milvus::segcore::SegmentInternalInterface*>(c_segment);
+        const auto fsts = TextTermFsts(fst_handles, fst_count);
+        const auto fuzzy = segment->GetTextTermDictionary().FuzzySearchPrepared(
+            field_id,
+            fsts,
+            *static_cast<const milvus::textindex::PreparedLevenshteinQuery*>(
+                query),
+            max_expansions);
+        SetTextTermFuzzyMatches(&result, fuzzy.matches);
+        result.status = milvus::SuccessCStatus();
+    } catch (const std::bad_alloc& e) {
+        FreeTextFstFuzzyResult(&result);
+        result.status =
+            milvus::FailureCStatus(milvus::MemAllocateFailed, e.what());
+    } catch (const std::exception& e) {
+        FreeTextFstFuzzyResult(&result);
+        result.status = milvus::FailureCStatus(&e);
+    } catch (...) {
+        FreeTextFstFuzzyResult(&result);
+        result.status = milvus::FailureCStatus(
+            milvus::UnexpectedError,
+            "unknown prepared segment text term fuzzy search failure");
     }
     return result;
 }

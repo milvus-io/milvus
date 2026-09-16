@@ -929,11 +929,12 @@ func TestLocalSegmentReopenWithTextTermsSwapsOnlyAfterSuccess(t *testing.T) {
 				resourceUsageCache: atomic.NewPointer[ResourceUsage](nil),
 				needUpdatedVersion: atomic.NewInt64(0),
 			},
-			ptrLock:        state.NewLoadStateLock(state.LoadStateDataLoaded),
-			csegment:       csegment,
-			fieldIndexes:   typeutil.NewConcurrentMap[int64, *IndexedFieldInfo](),
-			fieldJSONStats: make(map[int64]*querypb.JsonStatsInfo),
-			textTerms:      dictionary,
+			ptrLock:            state.NewLoadStateLock(state.LoadStateDataLoaded),
+			csegment:           csegment,
+			fieldIndexes:       typeutil.NewConcurrentMap[int64, *IndexedFieldInfo](),
+			fieldJSONStats:     make(map[int64]*querypb.JsonStatsInfo),
+			textTermGeneration: atomic.NewUint64(nextTextTermGeneration()),
+			textTerms:          dictionary,
 		}, oldCacheDir
 	}
 
@@ -960,6 +961,7 @@ func TestLocalSegmentReopenWithTextTermsSwapsOnlyAfterSuccess(t *testing.T) {
 
 	t.Run("success swaps and closes old dictionary", func(t *testing.T) {
 		segment, oldCacheDir := newSegment(t, nil)
+		oldGeneration := segment.currentTextTermGeneration()
 		newCacheDir := filepath.Join(t.TempDir(), "new-cache")
 		require.NoError(t, os.MkdirAll(newCacheDir, 0o700))
 		newLoaded := &loadedTextTermDictionary{
@@ -971,6 +973,7 @@ func TestLocalSegmentReopenWithTextTermsSwapsOnlyAfterSuccess(t *testing.T) {
 			CollectionID: 10, SegmentID: 20, DataVersion: 2,
 		}, newLoaded))
 		assert.Same(t, newLoaded, segment.textTerms.loaded)
+		assert.NotEqual(t, oldGeneration, segment.currentTextTermGeneration())
 		assert.Equal(t, int32(2), segment.LoadInfo().GetDataVersion())
 		_, err := os.Stat(oldCacheDir)
 		assert.ErrorIs(t, err, os.ErrNotExist)

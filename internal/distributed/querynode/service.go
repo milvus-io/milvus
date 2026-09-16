@@ -400,6 +400,10 @@ func (s *Server) SearchSegments(ctx context.Context, req *querypb.SearchRequest)
 	return s.querynode.SearchSegments(ctx, req)
 }
 
+func (s *Server) ExpandTextTerms(ctx context.Context, req *querypb.ExpandTextTermsRequest) (*querypb.ExpandTextTermsResponse, error) {
+	return s.querynode.ExpandTextTerms(ctx, req)
+}
+
 // Query performs query of streaming/historical replica on QueryNode.
 func (s *Server) Query(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
 	return s.querynode.Query(ctx, req)

@@ -137,6 +137,15 @@ func WithLeaderViewUpdatedCallback(callback func(channel string)) ShardDelegator
 	}
 }
 
+// WithFuzzyExpansionSemaphores shares QueryNode-wide fuzzy expansion admission
+// across all shard delegators on the node.
+func WithFuzzyExpansionSemaphores(rpc, native *syncutil.Semaphore) ShardDelegatorOption {
+	return func(sd *shardDelegator) {
+		sd.fuzzyExpansionRPCSemaphore = rpc
+		sd.fuzzyExpansionNativeSemaphore = native
+	}
+}
+
 type idfOracleHolder struct {
 	oracle IDFOracle
 }
@@ -196,6 +205,9 @@ type shardDelegator struct {
 	// limits delegator-side post-load work after worker LoadSegments returns.
 	postLoadSem           *syncutil.Semaphore
 	postLoadConfigHandler config.EventHandler
+
+	fuzzyExpansionRPCSemaphore    *syncutil.Semaphore
+	fuzzyExpansionNativeSemaphore *syncutil.Semaphore
 
 	// streaming data catch-up state
 	catchingUpStreamingData *atomic.Bool
@@ -339,25 +351,36 @@ func (sd *shardDelegator) Stopped() bool {
 	return sd.NotStopped(sd.lifetime.GetState()) != nil
 }
 
-func (sd *shardDelegator) prepareSearchFunction(ctx context.Context, req *internalpb.SearchRequest) (float64, bool, error) {
+func (sd *shardDelegator) prepareSearchFunction(
+	ctx context.Context,
+	req *querypb.SearchRequest,
+	sealed []SnapshotItem,
+	growing []SegmentEntry,
+	sealedRowCount map[int64]int64,
+) (float64, bool, error) {
 	var avgdl float64
 	isBM25 := false
-	ok, err := function.GetManager().RunWithRunner(ctx, sd.collectionID, delegatorFunctionRunnerKey(sd.vchannelName), req.GetFieldId(), func(runner function.FunctionRunner) error {
+	searchReq := req.GetReq()
+	ok, err := function.GetManager().RunWithRunner(ctx, sd.collectionID, delegatorFunctionRunnerKey(sd.vchannelName), searchReq.GetFieldId(), func(runner function.FunctionRunner) error {
 		functionType := runner.GetSchema().GetType()
 		switch functionType {
 		case schemapb.FunctionType_BM25:
 			isBM25 = true
-			if req.GetMetricType() != metric.BM25 && req.GetMetricType() != metric.EMPTY {
-				return merr.WrapErrParameterInvalid("BM25", req.GetMetricType(), "must use BM25 metric type when searching against BM25 Function output field")
+			if searchReq.GetMetricType() != metric.BM25 && searchReq.GetMetricType() != metric.EMPTY {
+				return merr.WrapErrParameterInvalid("BM25", searchReq.GetMetricType(), "must use BM25 metric type when searching against BM25 Function output field")
 			}
 			var runErr error
-			avgdl, runErr = sd.buildBM25IDF(req, runner)
+			if searchReq.GetFuzzyBm25Options() != nil {
+				avgdl, runErr = sd.buildFuzzyBM25IDF(ctx, req, runner, sealed, growing, sealedRowCount)
+			} else {
+				avgdl, runErr = sd.buildBM25IDF(searchReq, runner)
+			}
 			return runErr
 		case schemapb.FunctionType_MinHash:
-			if req.GetMetricType() != metric.MHJACCARD && req.GetMetricType() != metric.EMPTY {
-				return merr.WrapErrParameterInvalid("MHJACCARD", req.GetMetricType(), "must use MHJACCARD metric type when searching against MinHash Function output field")
+			if searchReq.GetMetricType() != metric.MHJACCARD && searchReq.GetMetricType() != metric.EMPTY {
+				return merr.WrapErrParameterInvalid("MHJACCARD", searchReq.GetMetricType(), "must use MHJACCARD metric type when searching against MinHash Function output field")
 			}
-			return sd.parseMinHash(req, runner)
+			return sd.parseMinHash(searchReq, runner)
 		default:
 			return merr.WrapErrServiceInternalMsg("unsupported managed function type %s", functionType.String())
 		}
@@ -414,15 +437,20 @@ func (sd *shardDelegator) GetPartitionStatsVersions(ctx context.Context) map[int
 }
 
 func (sd *shardDelegator) modifySearchRequest(req *querypb.SearchRequest, scope querypb.DataScope, segmentIDs []int64, targetID int64) *querypb.SearchRequest {
+	segmentSet := typeutil.NewSet(segmentIDs...)
+	textTermGenerations := lo.Filter(req.GetTextTermGenerations(), func(generation *querypb.SegmentTextTermGeneration, _ int) bool {
+		return generation != nil && segmentSet.Contain(generation.GetSegmentID())
+	})
 	nodeReq := &querypb.SearchRequest{
-		DmlChannels:     []string{sd.vchannelName},
-		SegmentIDs:      segmentIDs,
-		Scope:           scope,
-		Req:             shallowcopy.ShallowCopySearchRequest(req.GetReq(), targetID),
-		FromShardLeader: req.FromShardLeader,
-		TotalChannelNum: req.TotalChannelNum,
-		FilterOnly:      req.FilterOnly,
-		EnableExprCache: req.EnableExprCache,
+		DmlChannels:         []string{sd.vchannelName},
+		SegmentIDs:          segmentIDs,
+		Scope:               scope,
+		Req:                 shallowcopy.ShallowCopySearchRequest(req.GetReq(), targetID),
+		FromShardLeader:     req.FromShardLeader,
+		TotalChannelNum:     req.TotalChannelNum,
+		FilterOnly:          req.FilterOnly,
+		EnableExprCache:     req.EnableExprCache,
+		TextTermGenerations: textTermGenerations,
 	}
 	return nodeReq
 }
@@ -498,15 +526,6 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		)
 	}
 
-	avgdl, skipSearch, err := sd.prepareSearchFunction(ctx, req.GetReq())
-	if err != nil {
-		return nil, err
-	}
-	if skipSearch {
-		mlog.Warn(ctx, "search bm25 from empty data, skip search", mlog.String("channel", sd.vchannelName), mlog.Float64("avgdl", avgdl))
-		return []*internalpb.SearchResults{}, nil
-	}
-
 	// get final sealedNum after possible segment prune
 	sealedNum := lo.SumBy(sealed, func(item SnapshotItem) int { return len(item.Segments) })
 
@@ -517,6 +536,18 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		}
 	}
 	effectiveSegmentNum := optimizers.CalculateEffectiveSegmentNum(sd.queryHook, rowCounts, req.GetReq().GetTopk())
+	if req.GetReq().GetFuzzyBm25Options() != nil {
+		return sd.searchFuzzyBM25(ctx, req, sealed, growing, sealedRowCount)
+	}
+
+	avgdl, skipSearch, err := sd.prepareSearchFunction(ctx, req, sealed, growing, sealedRowCount)
+	if err != nil {
+		return nil, err
+	}
+	if skipSearch {
+		mlog.Warn(ctx, "search bm25 from empty data, skip search", mlog.String("channel", sd.vchannelName), mlog.Float64("avgdl", avgdl))
+		return []*internalpb.SearchResults{}, nil
+	}
 
 	log.Debug(ctx, "search segments...",
 		mlog.Int("sealedNum", sealedNum),
@@ -655,6 +686,7 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 				AnalyzerName:            subReq.GetAnalyzerName(),
 				PkFilter:                common.PkFilterNoPkFilter, // hybrid search sub-requests rarely have PK predicates, skip unmarshal
 				SearchType:              subReq.GetSearchType(),
+				FuzzyBm25Options:        subReq.GetFuzzyBm25Options(),
 			}
 			future := conc.Go(func() (*internalpb.SearchResults, error) {
 				searchReq := &querypb.SearchRequest{
@@ -991,6 +1023,16 @@ type subTask[T any] struct {
 	worker   cluster.Worker
 }
 
+type subTaskResult[R any] struct {
+	segments []int64
+	result   R
+	err      error
+}
+
+func taskSupportsPartialResult(taskType string) bool {
+	return taskType == "Search" || taskType == "ExpandTextTerms"
+}
+
 func organizeSubTask[T any](ctx context.Context,
 	req T,
 	sealed []SnapshotItem,
@@ -1050,21 +1092,15 @@ func executeSubTasks[T any, R interface {
 	defer cancel()
 
 	var partialResultRequiredDataRatio float64
-	if taskType == "Search" {
+	if taskSupportsPartialResult(taskType) {
 		partialResultRequiredDataRatio = paramtable.Get().QueryNodeCfg.PartialResultRequiredDataRatio.GetAsFloat()
 	} else {
 		partialResultRequiredDataRatio = 1.0
 	}
 
 	wg, ctx := errgroup.WithContext(ctx)
-	type channelResult struct {
-		nodeID   int64
-		segments []int64
-		result   R
-		err      error
-	}
 	// Buffered channel to collect results from all goroutines
-	resultCh := make(chan channelResult, len(tasks))
+	resultCh := make(chan subTaskResult[R], len(tasks))
 	for _, task := range tasks {
 		task := task // capture loop variable
 		wg.Go(func() error {
@@ -1097,8 +1133,7 @@ func executeSubTasks[T any, R interface {
 				}
 			}
 
-			taskResult := channelResult{
-				nodeID: task.targetID,
+			taskResult := subTaskResult[R]{
 				result: result,
 				err:    err,
 			}
@@ -1605,6 +1640,15 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 	for _, opt := range opts {
 		opt(sd)
 	}
+	if sd.fuzzyExpansionRPCSemaphore == nil || sd.fuzzyExpansionNativeSemaphore == nil {
+		concurrency := paramtable.Get().QueryNodeCfg.MaxReadConcurrency.GetAsInt()
+		if sd.fuzzyExpansionRPCSemaphore == nil {
+			sd.fuzzyExpansionRPCSemaphore = syncutil.NewSemaphore(concurrency)
+		}
+		if sd.fuzzyExpansionNativeSemaphore == nil {
+			sd.fuzzyExpansionNativeSemaphore = syncutil.NewSemaphore(concurrency)
+		}
+	}
 	sd.bm25Functions = newBM25FunctionSet(schema)
 
 	if len(sd.bm25Functions) > 0 {
@@ -1689,7 +1733,7 @@ func (sd *shardDelegator) RunAnalyzer(ctx context.Context, req *querypb.RunAnaly
 
 // PartialResultEvaluator evaluates whether partial results should be returned
 // Parameters:
-//   - taskType: the type of task being executed (Search, Query, etc.)
+//   - taskType: the type of task being executed (Search, ExpandTextTerms, Query, etc.)
 //   - successSegments: list of segments that were successfully processed
 //   - failureSegments: list of segments that failed to process
 //   - errors: list of errors that occurred
@@ -1699,11 +1743,13 @@ func (sd *shardDelegator) RunAnalyzer(ctx context.Context, req *querypb.RunAnaly
 //   - float64: actual accessed data ratio (for logging)
 type PartialResultEvaluator func(taskType string, successSegments typeutil.Set[int64], failureSegments []int64, errors []error) (bool, float64)
 
-// NewRowCountBasedEvaluator creates a PartialResultEvaluator based on row count
+// NewRowCountBasedEvaluator creates a PartialResultEvaluator based on row count.
+// Search and its fuzzy term-expansion preparation share the same availability
+// policy so they select one consistent partial target.
 func NewRowCountBasedEvaluator(sealedRowCount map[int64]int64) PartialResultEvaluator {
 	return func(taskType string, successSegments typeutil.Set[int64], failureSegments []int64, errors []error) (bool, float64) {
 		var partialResultRequiredDataRatio float64
-		if taskType == "Search" {
+		if taskSupportsPartialResult(taskType) {
 			partialResultRequiredDataRatio = paramtable.Get().QueryNodeCfg.PartialResultRequiredDataRatio.GetAsFloat()
 		} else {
 			partialResultRequiredDataRatio = 1.0

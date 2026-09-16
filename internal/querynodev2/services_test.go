@@ -214,6 +214,48 @@ func (suite *ServiceSuite) TestGetStatisChannel_Normal() {
 	suite.Equal(commonpb.ErrorCode_Success, rsp.GetStatus().GetErrorCode())
 }
 
+func (suite *ServiceSuite) TestExpandTextTermsUsesFieldScope() {
+	collectionID := suite.collectionID + 10000
+	fieldID := int64(101)
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{
+			FieldID:  fieldID,
+			Name:     "text",
+			DataType: schemapb.DataType_VarChar,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.MaxLengthKey, Value: "1024"},
+				{Key: common.EnableAnalyzerKey, Value: "true"},
+				{Key: "analyzer_params", Value: `{"tokenizer":"standard"}`},
+			},
+		},
+	}, Functions: []*schemapb.FunctionSchema{{
+		Name:            "bm25",
+		Type:            schemapb.FunctionType_BM25,
+		InputFieldIds:   []int64{fieldID},
+		InputFieldNames: []string{"text"},
+		Params:          []*commonpb.KeyValuePair{{Key: common.EnableFuzzyKey, Value: "true"}},
+	}}}
+	err := suite.node.manager.Collection.PutOrRef(collectionID, schema, nil, &querypb.LoadMetaInfo{
+		LoadType:     querypb.LoadType_LoadCollection,
+		CollectionID: collectionID,
+	})
+	suite.Require().NoError(err)
+	defer suite.node.manager.Collection.Unref(collectionID, 1)
+
+	request := &querypb.ExpandTextTermsRequest{
+		CollectionID:    collectionID,
+		FieldID:         fieldID,
+		SourceTerms:     [][]byte{[]byte("book")},
+		MaxEditDistance: 1,
+		MaxExpansions:   50,
+		SegmentIDs:      []int64{1},
+	}
+	response, err := suite.node.ExpandTextTerms(context.Background(), request)
+	suite.Require().NoError(err)
+	suite.ErrorIs(merr.Error(response.GetStatus()), merr.ErrSegmentNotLoaded)
+}
+
 func (suite *ServiceSuite) TestGetStatistics_Normal() {
 	ctx := context.Background()
 	suite.TestWatchDmChannelsInt64()

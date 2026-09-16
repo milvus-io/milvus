@@ -41,6 +41,7 @@ type Worker interface {
 	Delete(ctx context.Context, req *querypb.DeleteRequest) error
 	DeleteBatch(ctx context.Context, req *querypb.DeleteBatchRequest) (*querypb.DeleteBatchResponse, error)
 	SearchSegments(ctx context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error)
+	ExpandTextTerms(ctx context.Context, req *querypb.ExpandTextTermsRequest) (*querypb.ExpandTextTermsResponse, error)
 	QuerySegments(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error)
 	QueryStreamSegments(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error
 	GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) (*internalpb.GetStatisticsResponse, error)
@@ -197,6 +198,15 @@ func (w *remoteWorker) SearchSegments(ctx context.Context, req *querypb.SearchRe
 	}
 
 	return ret, err
+}
+
+func (w *remoteWorker) ExpandTextTerms(ctx context.Context, req *querypb.ExpandTextTermsRequest) (*querypb.ExpandTextTermsResponse, error) {
+	client := w.getClient()
+	response, err := client.ExpandTextTerms(ctx, req)
+	if err := merr.CheckRPCCall(response, err); err != nil {
+		return response, err
+	}
+	return response, nil
 }
 
 func (w *remoteWorker) QuerySegments(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {

@@ -144,6 +144,8 @@ service QueryNode {
     }
     rpc SearchSegments(SearchRequest) returns (internal.SearchResults) {
     }
+    rpc ExpandTextTerms(ExpandTextTermsRequest) returns (ExpandTextTermsResponse) {
+    }
     rpc Query(QueryRequest) returns (internal.RetrieveResults) {
     }
     rpc QueryStream(QueryRequest) returns (stream internal.RetrieveResults) {
@@ -504,6 +506,35 @@ message SearchRequest {
     // If true, enable expression filter cache for two-stage search.
     // Stage 1 caches filter bitset, Stage 2 reuses it to skip re-execution.
     bool enable_expr_cache = 8;
+    repeated SegmentTextTermGeneration text_term_generations = 9;
+}
+
+message SegmentTextTermGeneration {
+    int64 segmentID = 1;
+    uint64 generation = 2;
+}
+
+message ExpandTextTermsRequest {
+    common.MsgBase base = 1;
+    int64 collectionID = 2;
+    int64 fieldID = 3;
+    repeated bytes source_terms = 4;
+    uint32 max_edit_distance = 5;
+    repeated int64 segmentIDs = 6;
+    uint32 max_expansions = 7;
+    uint32 prefix_length = 8;
+}
+
+message ExpandedTextTerm {
+    uint32 source_index = 1;
+    bytes term = 2;
+    uint32 edit_distance = 3;
+}
+
+message ExpandTextTermsResponse {
+    common.Status status = 1;
+    repeated ExpandedTextTerm terms = 2;
+    repeated SegmentTextTermGeneration generations = 3;
 }
 
 message QueryRequest {

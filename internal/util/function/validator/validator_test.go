@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -56,4 +57,31 @@ func TestValidateFunctionChecksMinHashParamsWithRuntimeCheckDisabled(t *testing.
 
 func TestValidateFunctionAcceptsValidMinHashWithRuntimeCheckDisabled(t *testing.T) {
 	require.NoError(t, ValidateFunction(minHashCollectionSchema("2"), "minhash", true))
+}
+
+func TestCheckFunctionBasicParamsFuzzyBM25(t *testing.T) {
+	newFunction := func(params ...*commonpb.KeyValuePair) *schemapb.FunctionSchema {
+		return &schemapb.FunctionSchema{
+			Name:             "bm25",
+			Type:             schemapb.FunctionType_BM25,
+			InputFieldNames:  []string{"input"},
+			OutputFieldNames: []string{"output"},
+			Params:           params,
+		}
+	}
+
+	require.NoError(t, CheckFunctionBasicParams(newFunction()))
+	require.NoError(t, CheckFunctionBasicParams(newFunction(
+		&commonpb.KeyValuePair{Key: common.EnableFuzzyKey, Value: "true"},
+	)))
+	require.ErrorContains(t, CheckFunctionBasicParams(newFunction(
+		&commonpb.KeyValuePair{Key: common.EnableFuzzyKey, Value: "invalid"},
+	)), "should be a boolean")
+	require.ErrorContains(t, CheckFunctionBasicParams(newFunction(
+		&commonpb.KeyValuePair{Key: "unsupported", Value: "true"},
+	)), "does not support")
+	require.ErrorContains(t, CheckFunctionBasicParams(newFunction(
+		&commonpb.KeyValuePair{Key: common.EnableFuzzyKey, Value: "true"},
+		&commonpb.KeyValuePair{Key: common.EnableFuzzyKey, Value: "false"},
+	)), "duplicate")
 }

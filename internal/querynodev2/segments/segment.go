@@ -49,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/segcore"
+	"github.com/milvus-io/milvus/internal/util/textindex"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -75,6 +76,15 @@ const (
 )
 
 var ErrSegmentUnhealthy = errors.New("segment unhealthy")
+
+// textTermGenerationCounter assigns a process-wide token whenever a segment's
+// immutable text-term view is created or replaced. Seeding from wall clock
+// avoids reusing the small per-segment counters after a QueryNode restart.
+var textTermGenerationCounter = atomic.NewUint64(uint64(time.Now().UnixNano()))
+
+func nextTextTermGeneration() uint64 {
+	return textTermGenerationCounter.Inc()
+}
 
 // IndexedFieldInfo contains binlog info of vector field
 type IndexedFieldInfo struct {
@@ -449,7 +459,8 @@ type LocalSegment struct {
 	fieldIndexes       *typeutil.ConcurrentMap[int64, *IndexedFieldInfo] // indexID -> IndexedFieldInfo
 	fieldJSONStats     map[int64]*querypb.JsonStatsInfo
 	fieldJSONStatsMu   sync.RWMutex
-	lexicalMu          sync.RWMutex
+	lexicalMu          sync.RWMutex // fences reopen against expansion and generation-checked search
+	textTermGeneration *atomic.Uint64
 	textTerms          *segmentTextTermDictionary
 }
 
@@ -518,6 +529,7 @@ func NewSegment(ctx context.Context,
 		fields:             typeutil.NewConcurrentMap[int64, *FieldInfo](),
 		fieldIndexes:       typeutil.NewConcurrentMap[int64, *IndexedFieldInfo](),
 		fieldJSONStats:     make(map[int64]*querypb.JsonStatsInfo),
+		textTermGeneration: atomic.NewUint64(nextTextTermGeneration()),
 		textTerms:          newSegmentTextTermDictionary(unsafe.Pointer(csegment.RawPointer())),
 
 		memSize:         atomic.NewInt64(-1),
@@ -783,11 +795,22 @@ func (s *LocalSegment) Search(ctx context.Context, searchReq *segcore.SearchRequ
 		mlog.Bool("filterOnly", filterOnly),
 	)
 
+	_, checkGeneration := searchReq.TextTermGeneration(s.ID())
+	if checkGeneration {
+		s.lexicalMu.RLock()
+		defer s.lexicalMu.RUnlock()
+	}
 	if !s.ptrLock.PinIf(state.IsNotReleased) {
 		// TODO: check if the segment is readable but not released. too many related logic need to be refactor.
 		return nil, merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
 	defer s.ptrLock.Unpin()
+
+	if checkGeneration {
+		if err := searchReq.ValidateTextTermGeneration(s.ID(), s.currentTextTermGeneration()); err != nil {
+			return nil, err
+		}
+	}
 
 	hasIndex := s.ExistIndex(searchReq.SearchFieldID())
 	log = log.With(mlog.Bool("withIndex", hasIndex))
@@ -966,9 +989,43 @@ func (s *LocalSegment) UpdateTextTerms(batches []*msgpb.TextTermBatch) error {
 	}
 	defer s.ptrLock.Unpin()
 
-	s.lexicalMu.Lock()
-	defer s.lexicalMu.Unlock()
 	return s.textTerms.add(batches)
+}
+
+func (s *LocalSegment) currentTextTermGeneration() uint64 {
+	if s.textTermGeneration == nil {
+		return 0
+	}
+	return s.textTermGeneration.Load()
+}
+
+func (s *LocalSegment) bumpTextTermGeneration() uint64 {
+	if s.textTermGeneration == nil {
+		s.textTermGeneration = atomic.NewUint64(nextTextTermGeneration())
+		return s.textTermGeneration.Load()
+	}
+	next := nextTextTermGeneration()
+	s.textTermGeneration.Store(next)
+	return next
+}
+
+func (s *LocalSegment) ExpandTextTerms(
+	fieldID int64,
+	prepared []*textindex.PreparedFuzzySearch,
+	maxExpansions uint32,
+) ([][]textindex.FuzzyMatch, uint64, error) {
+	s.lexicalMu.RLock()
+	defer s.lexicalMu.RUnlock()
+	if !s.ptrLock.PinIf(state.IsNotReleased) {
+		return nil, 0, merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
+	}
+	defer s.ptrLock.Unpin()
+
+	matches, err := s.textTerms.expandPrepared(fieldID, prepared, maxExpansions)
+	if err != nil {
+		return nil, 0, err
+	}
+	return matches, s.currentTextTermGeneration(), nil
 }
 
 func (s *LocalSegment) installLoadedTextTerms(loaded *loadedTextTermDictionary) error {
@@ -989,6 +1046,7 @@ func (s *LocalSegment) installLoadedTextTerms(loaded *loadedTextTermDictionary) 
 			"cannot install text terms for segment %d with type %s",
 			s.ID(), s.Type().String())
 	}
+	s.bumpTextTermGeneration()
 	return nil
 }
 
@@ -1008,6 +1066,7 @@ func (s *LocalSegment) reopenWithTextTerms(
 		return err
 	}
 	s.textTerms.replaceLoaded(loaded)
+	s.bumpTextTermGeneration()
 	return nil
 }
 

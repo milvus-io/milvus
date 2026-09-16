@@ -210,10 +210,6 @@ class LevenshteinNfa {
     }
 
     std::uint8_t
-    MaxDistance() const {
-        return max_distance_;
-    }
-    std::uint8_t
     Diameter() const {
         return 2 * max_distance_ + 1;
     }
@@ -434,23 +430,18 @@ ParametricForDistance(std::uint32_t max_distance) {
 }
 
 struct CharacteristicVector {
-    std::vector<std::uint32_t> words;
+    std::vector<std::size_t> positions;
 
     std::uint32_t
     ShiftAndMask(std::size_t offset, std::uint32_t mask) const {
-        const auto bucket = offset / 32;
-        const auto alignment = offset % 32;
-        if (bucket >= words.size()) {
-            return 0;
+        std::uint32_t result = 0;
+        auto position =
+            std::lower_bound(positions.begin(), positions.end(), offset);
+        while (position != positions.end() && *position - offset < 32) {
+            result |= std::uint32_t{1} << (*position - offset);
+            ++position;
         }
-        if (alignment == 0) {
-            return words[bucket] & mask;
-        }
-        const auto left = words[bucket] >> alignment;
-        const auto right = bucket + 1 < words.size()
-                               ? words[bucket + 1] << (32 - alignment)
-                               : 0;
-        return (left | right) & mask;
+        return result & mask;
     }
 };
 
@@ -461,33 +452,23 @@ struct AlphabetEntry {
 
 std::vector<AlphabetEntry>
 BuildAlphabet(const std::vector<std::uint32_t>& query) {
-    std::vector<std::uint32_t> alphabet = query;
-    std::sort(alphabet.begin(), alphabet.end());
-    alphabet.erase(std::unique(alphabet.begin(), alphabet.end()),
-                   alphabet.end());
     std::vector<AlphabetEntry> entries;
-    entries.reserve(alphabet.size());
-    for (const auto codepoint : alphabet) {
-        CharacteristicVector characteristic;
-        characteristic.words.resize((query.size() + 31) / 32 + 1);
-        for (std::size_t index = 0; index < query.size(); ++index) {
-            if (query[index] == codepoint) {
-                characteristic.words[index / 32] |= std::uint32_t{1}
-                                                    << (index % 32);
-            }
+    std::unordered_map<std::uint32_t, std::size_t> entry_ids;
+    for (std::size_t index = 0; index < query.size(); ++index) {
+        const auto [position, inserted] =
+            entry_ids.try_emplace(query[index], entries.size());
+        if (inserted) {
+            entries.push_back(AlphabetEntry{.codepoint = query[index]});
         }
-        entries.push_back(AlphabetEntry{
-            .codepoint = codepoint,
-            .characteristic = std::move(characteristic),
-        });
+        entries[position->second].characteristic.positions.push_back(index);
     }
     return entries;
 }
 
 class ParametricStateIndex {
  public:
-    ParametricStateIndex(std::size_t query_length, std::size_t shape_count)
-        : offsets_(query_length + 1), index_(offsets_ * shape_count) {
+    ParametricStateIndex(std::size_t offsets, std::size_t index_size)
+        : offsets_(offsets), index_(index_size) {
         states_.reserve(100);
     }
 
@@ -531,15 +512,14 @@ class ParametricStateIndex {
 class Utf8DfaEncoder {
  public:
     Utf8DfaEncoder(std::size_t max_decoded_states,
+                   std::size_t encoded_index_size,
                    std::vector<std::array<std::uint32_t, 256>>& transitions,
                    std::vector<std::uint8_t>& distances)
-        : index_(max_decoded_states * 4 + 3, kUnallocated),
+        : index_(encoded_index_size, kUnallocated),
           defaults_(max_decoded_states),
           encoded_originals_(max_decoded_states, kUnallocated),
           transitions_(transitions),
           distances_(distances) {
-        transitions_.reserve(100);
-        distances_.reserve(100);
     }
 
     void
@@ -584,11 +564,11 @@ class Utf8DfaEncoder {
             }
             from = intermediary;
         }
-        transitions_[from][bytes[length - 1]] =
-            GetOrAllocate(Original(destination));
+        const auto encoded_destination = GetOrAllocate(Original(destination));
+        transitions_[from][bytes[length - 1]] = encoded_destination;
     }
 
-    std::uint32_t
+    [[nodiscard]] std::uint32_t
     EncodedOriginal(std::uint32_t state) {
         return GetOrAllocate(Original(state));
     }
@@ -607,15 +587,18 @@ class Utf8DfaEncoder {
         return static_cast<std::size_t>(state) * 4 + steps;
     }
 
-    std::uint32_t
+    [[nodiscard]] std::uint32_t
     Allocate() {
+        if (transitions_.size() >= std::numeric_limits<std::uint32_t>::max()) {
+            throw std::length_error("UTF-8 DFA has too many states");
+        }
         const auto id = static_cast<std::uint32_t>(transitions_.size());
         transitions_.push_back({});
         distances_.push_back(255);
         return id;
     }
 
-    std::uint32_t
+    [[nodiscard]] std::uint32_t
     GetOrAllocate(std::size_t bucket) {
         if (bucket >= index_.size()) {
             throw std::runtime_error("UTF-8 DFA state index overflow");
@@ -665,8 +648,17 @@ BuildLevenshteinDfa(std::string_view query, std::uint32_t max_distance) {
     const auto& parametric = ParametricForDistance(max_distance);
     const auto query_codepoints = DecodeUtf8(query);
     const auto alphabet = BuildAlphabet(query_codepoints);
-    ParametricStateIndex state_index(query_codepoints.size(),
-                                     parametric.ShapeCount());
+    if (query_codepoints.size() == std::numeric_limits<std::size_t>::max()) {
+        throw std::length_error("Levenshtein query is too long");
+    }
+    const auto offsets = query_codepoints.size() + 1;
+    if (parametric.ShapeCount() != 0 &&
+        offsets >
+            std::numeric_limits<std::size_t>::max() / parametric.ShapeCount()) {
+        throw std::length_error("Levenshtein state index is too large");
+    }
+    ParametricStateIndex state_index(offsets,
+                                     offsets * parametric.ShapeCount());
     const auto dead = state_index.GetOrAllocate(ParametricState{});
     if (dead != kSinkState) {
         throw std::logic_error("Levenshtein sink state must be zero");
@@ -677,8 +669,15 @@ BuildLevenshteinDfa(std::string_view query, std::uint32_t max_distance) {
     });
     LevenshteinDfa dfa;
     dfa.max_distance_ = static_cast<std::uint8_t>(max_distance);
-    Utf8DfaEncoder encoder(
-        state_index.MaxSize(), dfa.transitions_, dfa.distances_);
+    const auto max_decoded_states = state_index.MaxSize();
+    if (max_decoded_states >
+        (std::numeric_limits<std::size_t>::max() - 3) / 4) {
+        throw std::length_error("UTF-8 DFA state index is too large");
+    }
+    Utf8DfaEncoder encoder(max_decoded_states,
+                           max_decoded_states * 4 + 3,
+                           dfa.transitions_,
+                           dfa.distances_);
     const auto mask = static_cast<std::uint32_t>(
         (std::uint64_t{1} << parametric.Diameter()) - 1);
     for (std::uint32_t state_id = 0; state_id < state_index.Size();
@@ -701,9 +700,49 @@ BuildLevenshteinDfa(std::string_view query, std::uint32_t max_distance) {
     return dfa;
 }
 
+PreparedLevenshteinQuery
+PrepareLevenshteinQuery(std::string_view query,
+                        std::uint32_t max_distance,
+                        std::uint32_t prefix_length) {
+    if (max_distance > 2) {
+        throw std::invalid_argument(
+            "text FST fuzzy distance must be in [0, 2]");
+    }
+    const auto prefix_bytes = Utf8PrefixByteLength(query, prefix_length);
+    PreparedLevenshteinQuery prepared{
+        .query = std::string(query),
+        .exact_prefix = std::string(query.substr(0, prefix_bytes)),
+        .max_distance = max_distance,
+    };
+    if (max_distance > 0) {
+        prepared.dfa =
+            BuildLevenshteinDfa(query.substr(prefix_bytes), max_distance);
+    }
+    return prepared;
+}
+
 void
 ValidateUtf8(std::string_view text) {
     static_cast<void>(DecodeUtf8(text, false));
+}
+
+std::size_t
+Utf8PrefixByteLength(std::string_view text, std::size_t char_count) {
+    const auto codepoints = DecodeUtf8(text);
+    if (char_count >= codepoints.size()) {
+        return text.size();
+    }
+
+    std::size_t byte_offset = 0;
+    for (std::size_t index = 0; index < char_count; ++index) {
+        ++byte_offset;
+        while (byte_offset < text.size() &&
+               (static_cast<std::uint8_t>(text[byte_offset]) & 0xC0U) ==
+                   0x80U) {
+            ++byte_offset;
+        }
+    }
+    return byte_offset;
 }
 
 }  // namespace milvus::textindex

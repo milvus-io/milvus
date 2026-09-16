@@ -118,11 +118,12 @@ func TestCheckFunctionAlterAllowed(t *testing.T) {
 		oldBM := &schemapb.FunctionSchema{
 			Name: "b", Type: schemapb.FunctionType_BM25,
 			InputFieldNames: []string{"t"}, OutputFieldNames: []string{"s"},
+			Params: []*commonpb.KeyValuePair{kv("enable_fuzzy", "false")},
 		}
 		newBM := &schemapb.FunctionSchema{
 			Name: "b", Type: schemapb.FunctionType_BM25,
 			InputFieldNames: []string{"t"}, OutputFieldNames: []string{"s"},
-			Params: []*commonpb.KeyValuePair{kv("k1", "1.5")},
+			Params: []*commonpb.KeyValuePair{kv("enable_fuzzy", "true")},
 		}
 		assert.ErrorContains(t, CheckFunctionAlterAllowed(oldBM, newBM), "has no alterable params")
 	})

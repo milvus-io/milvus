@@ -219,6 +219,16 @@ func Test_NewServer(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
+	t.Run("ExpandTextTerms", func(t *testing.T) {
+		mockQN.EXPECT().ExpandTextTerms(mock.Anything, mock.Anything).Return(&querypb.ExpandTextTermsResponse{
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		}, nil)
+		req := &querypb.ExpandTextTermsRequest{}
+		resp, err := server.ExpandTextTerms(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
 	t.Run("Query", func(t *testing.T) {
 		mockQN.EXPECT().Query(mock.Anything, mock.Anything).Return(&internalpb.RetrieveResults{
 			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},

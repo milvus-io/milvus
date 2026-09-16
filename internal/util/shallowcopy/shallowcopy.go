@@ -46,6 +46,7 @@ func ShallowCopySearchRequest(src *internalpb.SearchRequest, targetID int64) *in
 		PkFilter:                src.PkFilter,
 		SearchType:              src.SearchType,
 		GroupByFieldIds:         src.GroupByFieldIds,
+		FuzzyBm25Options:        src.FuzzyBm25Options,
 	}
 }
 

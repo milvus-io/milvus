@@ -94,9 +94,49 @@ type SearchRequest struct {
 	entityTTLPhysicalTime typeutil.Timestamp
 	filterOnly            bool // If true, only execute filter and return valid count (for two-stage search Stage 1)
 	enableExprCache       bool // If true, enable expression filter cache for two-stage search
+	textTermGenerations   map[int64]uint64
+}
+
+func validateTextTermGenerations(req *querypb.SearchRequest) (map[int64]uint64, error) {
+	textTermGenerations := make(map[int64]uint64, len(req.GetTextTermGenerations()))
+	for _, generation := range req.GetTextTermGenerations() {
+		if generation == nil || generation.GetSegmentID() == 0 || generation.GetGeneration() == 0 {
+			return nil, merr.WrapErrServiceInternalMsg("invalid text term generation in search request")
+		}
+		if existing, ok := textTermGenerations[generation.GetSegmentID()]; ok && existing != generation.GetGeneration() {
+			return nil, merr.WrapErrServiceInternalMsg(
+				"conflicting text term generations for segment %d", generation.GetSegmentID())
+		}
+		textTermGenerations[generation.GetSegmentID()] = generation.GetGeneration()
+	}
+	if req.GetReq().GetFuzzyBm25Options() == nil {
+		if len(textTermGenerations) > 0 {
+			return nil, merr.WrapErrServiceInternalMsg("text term generations require fuzzy BM25 options")
+		}
+	} else {
+		targetSegments := make(map[int64]struct{}, len(req.GetSegmentIDs()))
+		for _, segmentID := range req.GetSegmentIDs() {
+			if segmentID == 0 {
+				return nil, merr.WrapErrServiceInternalMsg("invalid fuzzy BM25 target segment 0")
+			}
+			targetSegments[segmentID] = struct{}{}
+			if _, ok := textTermGenerations[segmentID]; !ok {
+				return nil, merr.WrapErrServiceInternalMsg(
+					"missing text term generation for fuzzy BM25 target segment %d", segmentID)
+			}
+		}
+		if len(textTermGenerations) != len(targetSegments) {
+			return nil, merr.WrapErrServiceInternalMsg("text term generations do not match fuzzy BM25 target segments")
+		}
+	}
+	return textTermGenerations, nil
 }
 
 func NewSearchRequest(collection *CCollection, req *querypb.SearchRequest, placeholderGrp []byte) (*SearchRequest, error) {
+	textTermGenerations, err := validateTextTermGenerations(req)
+	if err != nil {
+		return nil, err
+	}
 	metricType := req.GetReq().GetMetricType()
 	expr := req.Req.SerializedExprPlan
 	plan, err := createSearchPlanByExpr(collection, expr)
@@ -144,7 +184,26 @@ func NewSearchRequest(collection *CCollection, req *querypb.SearchRequest, place
 		entityTTLPhysicalTime: req.GetReq().GetEntityTtlPhysicalTime(),
 		filterOnly:            req.GetFilterOnly(),
 		enableExprCache:       req.GetEnableExprCache(),
+		textTermGenerations:   textTermGenerations,
 	}, nil
+}
+
+func (r *SearchRequest) TextTermGeneration(segmentID int64) (uint64, bool) {
+	if r == nil {
+		return 0, false
+	}
+	generation, ok := r.textTermGenerations[segmentID]
+	return generation, ok
+}
+
+func (r *SearchRequest) ValidateTextTermGeneration(segmentID int64, actual uint64) error {
+	expected, ok := r.TextTermGeneration(segmentID)
+	if !ok || expected == actual {
+		return nil
+	}
+	return merr.WrapErrServiceUnavailableMsg(
+		"text term generation changed for segment %d: expected=%d actual=%d",
+		segmentID, expected, actual)
 }
 
 func (req *SearchRequest) GetNumOfQuery() int64 {

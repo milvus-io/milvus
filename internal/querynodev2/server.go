@@ -79,6 +79,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -120,7 +121,9 @@ type QueryNode struct {
 	loader segments.Loader
 
 	// Search/Query
-	scheduler scheduler.Scheduler
+	scheduler                     scheduler.Scheduler
+	fuzzyExpansionRPCSemaphore    *syncutil.Semaphore
+	fuzzyExpansionNativeSemaphore *syncutil.Semaphore
 
 	// etcd client
 	etcdCli *clientv3.Client
@@ -155,13 +158,16 @@ type QueryNode struct {
 // NewQueryNode will return a QueryNode with abnormal state.
 func NewQueryNode(ctx context.Context, factory dependency.Factory) *QueryNode {
 	ctx, cancel := context.WithCancel(ctx)
+	fuzzyExpansionConcurrency := paramtable.Get().QueryNodeCfg.MaxReadConcurrency.GetAsInt()
 	node := &QueryNode{
-		ctx:              ctx,
-		cancel:           cancel,
-		factory:          factory,
-		lifetime:         lifetime.NewLifetime(commonpb.StateCode_Abnormal),
-		metricsRequest:   metricsinfo.NewMetricsRequest(),
-		distDeltaTracker: newDataDistributionDeltaTracker(),
+		ctx:                           ctx,
+		cancel:                        cancel,
+		factory:                       factory,
+		lifetime:                      lifetime.NewLifetime(commonpb.StateCode_Abnormal),
+		metricsRequest:                metricsinfo.NewMetricsRequest(),
+		distDeltaTracker:              newDataDistributionDeltaTracker(),
+		fuzzyExpansionRPCSemaphore:    syncutil.NewSemaphore(fuzzyExpansionConcurrency),
+		fuzzyExpansionNativeSemaphore: syncutil.NewSemaphore(fuzzyExpansionConcurrency),
 	}
 
 	expr.Register("querynode", node)
@@ -252,6 +258,14 @@ func (node *QueryNode) ReconfigDiskFileWriterParams(evt *config.Event) {
 
 func (node *QueryNode) RegisterSegcoreConfigWatcher() {
 	pt := paramtable.Get()
+	pt.Watch(pt.QueryNodeCfg.MaxReadConcurrency.Key,
+		config.NewHandler(fmt.Sprintf("queryNode.fuzzyExpansionConcurrency.%p", node), func(event *config.Event) {
+			if event.HasUpdated {
+				concurrency := pt.QueryNodeCfg.MaxReadConcurrency.GetAsInt()
+				node.fuzzyExpansionRPCSemaphore.SetCapacity(concurrency)
+				node.fuzzyExpansionNativeSemaphore.SetCapacity(concurrency)
+			}
+		}))
 	pt.Watch(pt.CommonCfg.HighPriorityThreadCoreCoefficient.Key,
 		config.NewHandler("common.threadCoreCoefficient.highPriority", ResizeHighPriorityPool))
 	pt.Watch(pt.CommonCfg.MiddlePriorityThreadCoreCoefficient.Key,

@@ -24,7 +24,7 @@ import (
 
 func TestFunctionSchema(t *testing.T) {
 	functions := []*Function{
-		NewFunction().WithName("text_bm25_emb").WithType(FunctionTypeBM25).WithInputFields("a", "b").WithOutputFields("c").WithParam("key", "value"),
+		NewFunction().WithName("text_bm25_emb").WithType(FunctionTypeBM25).WithInputFields("a", "b").WithOutputFields("c").WithEnableFuzzy(true),
 		NewFunction().WithName("other_emb").WithType(FunctionTypeTextEmbedding).WithInputFields("c").WithOutputFields("b", "a"),
 	}
 

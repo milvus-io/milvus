@@ -488,6 +488,18 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 	})
 	require.NoError(t, merr.CheckRPCCall(addFieldResp, err))
 
+	// Segment FST backfill is not available yet, so a fuzzy-enabled BM25
+	// function cannot be introduced through online schema evolution.
+	fuzzyReq := buildAlterSchemaReq(dbName, collectionName, "text_input", "fuzzy_sparse", "fuzzy_bm25")
+	fuzzyReq.GetAction().GetAddRequest().GetFuncSchema()[0].Params = []*commonpb.KeyValuePair{{
+		Key: common.EnableFuzzyKey, Value: "true",
+	}}
+	resp, err = core.AlterCollectionSchema(ctx, fuzzyReq)
+	fuzzyErr := merr.CheckRPCCall(resp.GetAlterStatus(), err)
+	require.ErrorIs(t, fuzzyErr, merr.ErrParameterInvalid)
+	require.ErrorContains(t, fuzzyErr, common.EnableFuzzyKey)
+	assertFieldNotExists(t, ctx, core, dbName, collectionName, "fuzzy_sparse")
+
 	// case 7.2: AUTOINDEX only tolerates an additional metric_type; any other
 	// build param is rejected (rejected at rootcoord prepare, after function
 	// validation passes), mirroring the create_index AUTOINDEX restriction.
