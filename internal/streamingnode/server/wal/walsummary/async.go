@@ -15,9 +15,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
-// Run flushes aged or pressured summary backlog independently of source-message
-// acknowledgements. Deletes can release all handles while their copied records
-// still need persistence. Chunk and manifest I/O and retries use the scheduler.
+// Run governs persistence and Delete-consumption backlog independently of
+// source-message acknowledgements. Uploaded Deletes remain consumption backlog
+// until materialized. Chunk and manifest I/O and retries use the scheduler.
 func (m *Manager) Run(ctx context.Context, maxAge time.Duration, underPressure func() bool) {
 	interval := time.Second
 	if maxAge > 0 && maxAge < interval {
@@ -32,6 +32,7 @@ func (m *Manager) Run(ctx context.Context, maxAge time.Duration, underPressure f
 		case now := <-ticker.C:
 			force := underPressure != nil && underPressure()
 			m.flushBacklog(now, maxAge, force)
+			m.requestMaterializationBacklog(now, maxAge)
 		}
 	}
 }

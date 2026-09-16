@@ -9,9 +9,8 @@ This document describes how one WAL observation stream routes messages into
 VChannel-owned persistence components. Handle lifetime and checkpoint gating
 are defined by [WAL Message Ack Design](message_ack.md).
 
-The shared observation path is implemented. The capacity/API/Summary-backlog
-admission policy described below is an agreed revision, pending implementation
-in [L0Materializer](l0_materializer.md).
+The shared observation path and capacity/API/Summary-backlog admission policy
+are implemented in [L0Materializer](l0_materializer.md).
 
 ## 1. Common Flow
 

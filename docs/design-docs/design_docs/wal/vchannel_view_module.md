@@ -15,8 +15,8 @@ RecoveryStorage also restores idempotency windows from retained Summary history
 and startup replay before accepting writes. QueryRuntime wiring remains follow-up work.
 
 The L0Materializer ownership below is implemented without a copied payload
-window. The revised capacity/API/Summary-backlog admission policy remains
-pending; current scheduling is eager. See
+window. Capacity/API/Summary-backlog admission and persisted explicit completion
+intent are implemented. See
 [L0 Materializer](l0_materializer.md) for the complete window and recovery rules.
 
 ## 1. Ownership
@@ -99,10 +99,11 @@ Rules include:
 - dirty SegmentViews.
 
 L0Materializer has no independent snapshot: its materialization frontier is
-carried by VChannelMeta. The revised explicit-flush policy also requires pending
-completion intent to be persisted in VChannel recovery state or fully derived
-from retained lifecycle metadata before checkpoint can skip its WAL message. After either a full or a
-base-only VChannel snapshot is durable, report its captured frontier to Summary;
+carried by VChannelMeta. `l0_flush_time_tick` persists the explicit completion
+boundary before checkpoint can skip its WAL message. Restored Segment state
+supplies the L1 dependencies; F > M means the request remains pending.
+After either a full or a base-only VChannel snapshot is durable, report its
+captured frontier to Summary;
 a newer in-memory value cannot authorize GC.
 
 Every snapshot has one `checkpoint_time_tick` and an exact `MarkPersisted`

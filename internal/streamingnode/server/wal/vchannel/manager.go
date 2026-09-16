@@ -267,6 +267,14 @@ func (m *PChannelRecoveryManager) RequestPersistThrough(vchannel string, targetT
 	module.RequestPersistThrough(targetTimeTick)
 }
 
+// RequestMaterializationThrough routes Summary consumption pressure only to
+// an existing VChannel; it must not synthesize state ahead of ordered replay.
+func (m *PChannelRecoveryManager) RequestMaterializationThrough(vc string, through uint64) {
+	if module := m.Module(vc); module != nil {
+		module.RequestMaterializationThrough(through)
+	}
+}
+
 // Start starts the deprecated DataCoord channel-checkpoint reporting loop
 // (PChannelCheckpointUpdater). Every other manager resource runs on the
 // recovery storage's scopedTaskScheduler and needs no start hook.
@@ -346,6 +354,11 @@ func (m *PChannelRecoveryManager) newModule(vchannel string) (*VChannelRecoveryM
 		L0MaterializeRows:  m.config.L0MaterializeRows,
 		L0MaterializeBytes: m.config.L0MaterializeBytes,
 		OnCleanup:          m.removeModule,
+		OnL0Materialized: func(through uint64) {
+			if m.config.SummaryManager != nil {
+				m.config.SummaryManager.ReportMaterialized(vchannel, through)
+			}
+		},
 	})
 	if err != nil {
 		return nil, err

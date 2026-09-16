@@ -200,7 +200,7 @@ func TestMixedSummaryDDLPreservesRequestHistory(t *testing.T) {
 	require.NoError(t, gcSummary(ctx, manager))
 	require.Len(t, manager.Manifest().GetChunks(), 1, "DDL observation is not durable transform materialization")
 	manager.RestoreTransformGCTimeTicks(map[string]*streamingpb.VChannelMeta{
-		"v1": {State: streamingpb.VChannelState_VCHANNEL_STATE_TOMBSTONED},
+		"v1": {State: streamingpb.VChannelState_VCHANNEL_STATE_TOMBSTONED, TransformMaterializedTimeTick: 100},
 	})
 	require.NoError(t, gcSummary(ctx, manager))
 	require.Empty(t, manager.Manifest().GetChunks())

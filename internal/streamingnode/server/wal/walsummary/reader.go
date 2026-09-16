@@ -45,6 +45,7 @@ type TransformBatch struct {
 // TransformReader is the storage contract shared by L0 and future subscriptions.
 type TransformReader interface {
 	ReadTransform(context.Context, string, uint64, uint64, ReadLimits) (TransformBatch, error)
+	TransformStats(string, uint64, uint64) TransformStats
 }
 
 func (m *Manager) advanceReadableLocked(tt uint64) {

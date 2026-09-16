@@ -60,6 +60,7 @@ func (m *Manager) GCOnce(ctx context.Context) error {
 					}
 					vc := index.GetVchannel()
 					m.manifest.TransformTruncatedThrough[vc] = max(m.manifest.TransformTruncatedThrough[vc], end)
+					m.trimTransformStatsLocked(vc, end)
 				}
 			}
 			m.manifest.Chunks = removeChunkEntry(m.manifest.Chunks, ref.Generation)

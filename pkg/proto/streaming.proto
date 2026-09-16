@@ -692,6 +692,14 @@ message VChannelSummaryChunkIndex {
     VChannelSummarySectionRef transform = 6;
     // Retention of transforms must not wait for later inserts in this chunk.
     uint64 transform_end_timetick = 7;
+    // Payload-free cumulative Delete statistics, ordered by whole-entry tick.
+    repeated TransformEntryStats transform_stats = 8;
+}
+
+message TransformEntryStats {
+    uint64 time_tick = 1;
+    uint64 rows = 2; // cumulative within this VChannel's chunk section
+    uint64 bytes = 3; // cumulative logical TransformLogEntry protobuf bytes
 }
 
 // VChannelSummarySectionRef is one section's location inside a chunk object.
@@ -848,6 +856,7 @@ message VChannelMeta {
     CollectionInfoOfVChannel collection_info = 3; // if the channel is belong to a collection, the collection info will be setup.
     uint64 checkpoint_time_tick = 4; // The timetick of checkpoint, the meta already see the message at this timetick.
     uint64 transform_materialized_time_tick = 5; // The L0 materialization frontier of the transform consumer. Delete entries through this timetick have been emitted as L0 output.
+    uint64 l0_flush_time_tick = 6; // Explicit completion intent; pending until materialized through this tick. Related L1 segments must final-commit first.
 }
 
 // CollectionInfoOfVChannel is the collection info in vchannel.
