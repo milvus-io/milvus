@@ -19,6 +19,14 @@ Persists WAL consumer state to the catalog (etcd) and object storage. The author
 
 Control may persist its latest state ahead of the global checkpoint, like a Segment snapshot. Its `control_checkpoint_time_tick` suppresses already covered control effects without skipping data replay. External effects still require idempotent retries when a crash precedes metadata publication. Startup failure and normal shutdown close the retained stream, including when it is paused at the barrier.
 
+L0 materialization is admitted by Delete row/byte capacity, an explicit completion
+request after L1 final commit, or a Summary-owned backlog request. Capacity
+batches leave small tails to accumulate; there is no L0 age/idle timer.
+Summary indexes provide payload-free range statistics over hot and durable data.
+`VChannelMeta.l0_flush_time_tick` preserves unfinished explicit requests across
+checkpoint publication and restart. Only persisted materialization progress
+releases Delete history, including when restored metadata is DROPPED/TOMBSTONED.
+
 ## Key Packages
 
 - `internal/streamingnode/server/wal/adaptor/` — shared scanner, startup boundary and durable WAL/WAB source switching

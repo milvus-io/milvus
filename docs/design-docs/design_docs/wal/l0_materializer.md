@@ -5,11 +5,10 @@
 - Independent Approver: @weiliu1031
 - Design Review: 2026-07-29
 
-**Status:** Shared Summary reads and the independent component are implemented.
-The batching policy below is the revised agreed target: current code still
-schedules every safe nonempty window and must be changed. Capacity triggers,
-explicit flush dependencies, and Summary-owned materialization backlog requests
-are pending. L0Materializer has no age-based flush timer.
+**Status:** Shared Summary reads, capacity admission, recoverable explicit
+flush requests and Summary-owned materialization backlog requests are implemented.
+Explicit completion waits for L1 final commit. Capacity work leaves small tails
+for later accumulation. L0Materializer has no age-based flush timer.
 [TransformLog](transform_log.md) remains a separate future subscription adaptor.
 
 ## 1. Ownership
@@ -162,8 +161,13 @@ the L0 writer. The materializer merges requests, waits for safety/dependencies,
 and carries out the output. An ordinary Summary flush need not request L0.
 Retention pressure targets the oldest chunks whose release can actually be
 unblocked; another consumer's retention need cannot be solved by extra L0 output.
-Existing Summary backlog governance is the source of long-standing-work
-requests; no independent per-materializer deadline or age setting is added.
+The existing Summary backlog worker checks the earliest outstanding Delete's
+WAL physical time against its existing backlog age budget. Upload and restart
+do not reset that age. Retention pressure requests only the oldest blocking
+chunk, then reassesses after metadata publication and GC. Successful output is
+reported to Summary immediately to suppress redundant consumption requests;
+this runtime report does not authorize GC. No independent per-materializer
+deadline or age setting is added.
 
 Range statistics and backlog inspection must include cold and hot records,
 using Summary indexes and bounded reads without scanning all payloads on each
@@ -229,7 +233,10 @@ An in-memory M alone cannot authorize GC. Both full and base-only VChannel
 snapshots must report their captured frontier after successful persistence.
 Callbacks cannot substitute a newer in-memory value. Durable lifecycle cleanup
 may provide an equivalent release position when no retained recovery/serving
-state still needs the records.
+state still needs the records. Restoring DROPPED or TOMBSTONED metadata alone
+does not prove L0 completion: these states still use their persisted M for GC.
+The catalog cleanup callback releases the remaining history only after cleanup
+has satisfied its materialization dependency.
 
 Summary owns actual chunk retention and deletion. Future subscription consumers
 add their own history requirements; this consumer's release position is not
@@ -239,9 +246,12 @@ Explicit completion intent must survive a crash if WAL replay will no longer
 contain its initiating message. Persist the pending boundary and recoverable
 L1 dependency information in VChannel recovery state, or derive them fully
 from retained lifecycle metadata, before checkpoint publication can skip that
-message. Current VChannelMeta's materialized field alone cannot preserve an
-unfinished ManualFlush request. This is durable intent, not an additional WAL
-replay checkpoint; the component still owns no separate catalog.
+message. `VChannelMeta.l0_flush_time_tick` stores the monotonic explicit
+boundary F. It remains pending while F > M; Segment metadata reconstructs L1
+dependencies after restart. This field participates in both full and base-only
+snapshots. Requests arriving after a snapshot is frozen remain dirty for the
+next snapshot. This is durable intent, not an additional WAL replay checkpoint;
+the component still owns no separate catalog.
 
 L0 materialization retains no source WAL handles, does not delay BroadcastAck,
 and does not independently gate the global recovery checkpoint. Summary's

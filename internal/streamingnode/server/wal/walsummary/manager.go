@@ -83,6 +83,8 @@ type Manager struct {
 	terminalErr           error
 	gcFrontiers           map[string]uint64
 	durableFrontiers      map[string]uint64
+	transformIndexes      map[string]*transformIndex
+	materializedFrontiers map[string]uint64
 }
 
 // ManagerConfig carries the wiring of one pchannel's summary manager.
@@ -102,15 +104,19 @@ type ManagerConfig struct {
 	// count and the number of object reads recovery pays. Zero disables it.
 	MaxRetainedChunks int
 	Logger            *mlog.Logger
+	// RequestMaterialization routes a bounded consumption request to its VChannel.
+	RequestMaterialization func(vchannel string, through uint64)
 }
 
 // NewManager creates the summary manager of one pchannel.
 func NewManager(config ManagerConfig) *Manager {
 	return &Manager{
-		gcFrontiers:      make(map[string]uint64),
-		cfg:              config,
-		manifest:         &streamingpb.PChannelSummaryManifest{},
-		durableFrontiers: make(map[string]uint64),
+		gcFrontiers:           make(map[string]uint64),
+		transformIndexes:      make(map[string]*transformIndex),
+		materializedFrontiers: make(map[string]uint64),
+		cfg:                   config,
+		manifest:              &streamingpb.PChannelSummaryManifest{},
+		durableFrontiers:      make(map[string]uint64),
 	}
 }
 
@@ -162,6 +168,10 @@ func (m *Manager) stageRecordLocked(
 	}
 	if len(m.pending) == 0 {
 		m.pendingSince = time.Now()
+	}
+	if entry != nil {
+		rows, bytes := transformEntrySize(entry)
+		m.appendTransformStatLocked(msg.VChannel(), msg.TimeTick(), rows, bytes)
 	}
 	m.pending = append(m.pending, record)
 	m.pendingBytes += stagedRecordSize(msg, &record)

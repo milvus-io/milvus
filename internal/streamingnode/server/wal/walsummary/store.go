@@ -635,6 +635,14 @@ func marshalChunk(
 			if err != nil {
 				return nil, nil, err
 			}
+			var rows, bytes uint64
+			for _, record := range records {
+				entry := &streamingpb.TransformLogEntry{TimeTick: record.GetTimeTick(), Entry: &streamingpb.TransformLogEntry_Delete{Delete: record.GetDelete()}}
+				r, b := transformEntrySize(entry)
+				rows += r
+				bytes += b
+				index.TransformStats = append(index.TransformStats, &streamingpb.TransformEntryStats{TimeTick: record.GetTimeTick(), Rows: rows, Bytes: bytes})
+			}
 			index.Transform = ref
 			transformStart, transformEnd := transformRecordTimetickRange(records)
 			index.TransformEndTimetick = transformEnd

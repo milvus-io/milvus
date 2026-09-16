@@ -59,7 +59,7 @@ func testMaterializer(t *testing.T, initial uint64, writeErrors ...*error) (*L0M
 	m := New(Config{
 		VChannel: "v1", MaterializedTimeTick: initial,
 		Reader: walsummary.NewManager(walsummary.ManagerConfig{}), Materializer: writer,
-		Runtime: moduleapi.Runtime{Scheduler: scheduler},
+		Runtime: moduleapi.Runtime{Scheduler: scheduler}, MaterializeMaxRows: 1,
 	})
 	return m, &tasks, &batches
 }
@@ -125,38 +125,25 @@ func TestWindowReadsSharedHotTailAndCaps(t *testing.T) {
 }
 
 func TestL1BoundAndCompletionWakeup(t *testing.T) {
-	for _, duringCallback := range []bool{false, true} {
-		t.Run(map[bool]string{false: "after completion", true: "during completion"}[duringCallback], func(t *testing.T) {
-			m, tasks, _ := testMaterializer(t, 0)
-			m.SetMaterializeUpperBound(150)
-			observeDelete(t, m, 100)
-			observeBarrier(t, m, 200)
-			m.onMaterialized = func(tt uint64) {
-				if duringCallback && tt == 150 {
-					m.SetMaterializeUpperBound(math.MaxUint64)
-					observeDelete(t, m, 300)
-				}
-			}
-			require.NoError(t, (*tasks)[0].Execute(context.Background()))
-			require.Equal(t, uint64(150), m.MaterializedTimeTick(), "proven empty interval reaches L")
-			if !duringCallback {
-				require.False(t, m.HasPendingMaterializeTask())
-				require.True(t, m.SetMaterializeUpperBound(300))
-			}
-			require.Len(t, *tasks, 2)
-			require.NoError(t, (*tasks)[1].Execute(context.Background()))
-			want := uint64(200)
-			if duringCallback {
-				want = 300
-			}
-			require.Equal(t, want, m.MaterializedTimeTick())
-			require.False(t, m.HasPendingMaterializeTask())
-		})
-	}
+	m, tasks, _ := testMaterializer(t, 0)
+	m.materializeMaxRows = 10
+	m.SetMaterializeUpperBound(150)
+	observeDelete(t, m, 100)
+	observeBarrier(t, m, 200)
+	m.RequestFlushThrough(200)
+	require.Empty(t, *tasks, "explicit completion must wait for all earlier L1 commits")
+	m.SetMaterializeUpperBound(199)
+	require.Empty(t, *tasks)
+	require.True(t, m.SetMaterializeUpperBound(300))
+	require.Len(t, *tasks, 1)
+	require.NoError(t, (*tasks)[0].Execute(context.Background()))
+	require.Equal(t, uint64(200), m.MaterializedTimeTick())
+	require.False(t, m.HasPendingMaterializeTask())
 }
 
 func TestRecoveryRequestsBacklogOnlyAfterBarrier(t *testing.T) {
 	m, tasks, batches := testMaterializer(t, 50)
+	m.materializeMaxRows = 10
 	// Summary can contain Delete@100 before checkpoint@200. Recovery restores
 	// M only: replaying a RecoveryBarrier must discover that older Delete.
 	cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
@@ -179,6 +166,8 @@ func TestRecoveryRequestsBacklogOnlyAfterBarrier(t *testing.T) {
 	msg := mutable.WithTimeTick(250).WithLastConfirmed(walimplstest.NewTestMessageID(249)).IntoImmutableMessage(walimplstest.NewTestMessageID(250))
 	m.reader.(*walsummary.Manager).ObserveMessage(context.Background(), msg)
 	m.ObserveMessage(msg)
+	require.Empty(t, *tasks, "recovery barrier alone does not force a small batch")
+	m.RequestBacklogThrough(250)
 	require.Len(t, *tasks, 1)
 	require.NoError(t, (*tasks)[0].Execute(context.Background()))
 	require.Equal(t, uint64(250), m.MaterializedTimeTick())
@@ -241,6 +230,8 @@ func TestObservationClassificationAndEmptyWindows(t *testing.T) {
 	m.ObserveMessage(foreign)
 	require.Empty(t, *tasks)
 	observeBarrier(t, m, 300)
+	require.Empty(t, *tasks)
+	m.RequestFlushThrough(300)
 	require.NoError(t, (*tasks)[0].Execute(context.Background()))
 	require.Equal(t, uint64(300), m.MaterializedTimeTick())
 	require.Empty(t, *batches)
@@ -269,4 +260,88 @@ func TestConcurrentObservationDuringTaskCompletion(t *testing.T) {
 	require.NoError(t, (*tasks)[1].Execute(context.Background()))
 	require.Equal(t, uint64(200), m.MaterializedTimeTick())
 	require.False(t, m.HasPendingMaterializeTask())
+}
+
+func TestCapacityLeavesSmallTailAndIgnoresBarriers(t *testing.T) {
+	m, tasks, batches := testMaterializer(t, 0)
+	m.materializeMaxRows = 2
+	observeDelete(t, m, 100)
+	observeBarrier(t, m, 150)
+	require.Empty(t, *tasks)
+	observeDelete(t, m, 200)
+	require.Len(t, *tasks, 1)
+	// Arrivals during a capacity task cannot make it drain a small remainder.
+	observeDelete(t, m, 300)
+	require.NoError(t, (*tasks)[0].Execute(context.Background()))
+	require.Equal(t, uint64(200), m.MaterializedTimeTick())
+	require.Len(t, *batches, 1)
+	require.Len(t, *tasks, 1)
+	observeBarrier(t, m, 350)
+	m.SetMaterializeUpperBound(400)
+	require.Len(t, *tasks, 1)
+	observeDelete(t, m, 400)
+	require.Len(t, *tasks, 2)
+	require.NoError(t, (*tasks)[1].Execute(context.Background()))
+	require.Equal(t, uint64(400), m.MaterializedTimeTick())
+}
+
+func TestCapacityUsesSafeDeleteBytes(t *testing.T) {
+	m, tasks, _ := testMaterializer(t, 0)
+	m.materializeMaxRows = 100
+	m.materializeMaxBytes = 1
+	m.SetMaterializeUpperBound(99)
+	observeDelete(t, m, 100)
+	observeBarrier(t, m, 200)
+	require.Empty(t, *tasks, "Delete beyond L does not count toward capacity")
+	require.True(t, m.SetMaterializeUpperBound(100))
+	require.NoError(t, (*tasks)[0].Execute(context.Background()))
+	require.Equal(t, uint64(100), m.MaterializedTimeTick())
+	m.SetMaterializeUpperBound(math.MaxUint64)
+	require.Len(t, *tasks, 1, "empty interval does not meet byte capacity")
+}
+
+func TestForcedGoalDoesNotChaseNewSmallTail(t *testing.T) {
+	for _, explicit := range []bool{false, true} {
+		t.Run(map[bool]string{false: "backlog", true: "explicit"}[explicit], func(t *testing.T) {
+			m, tasks, batches := testMaterializer(t, 0)
+			m.materializeMaxRows = 2
+			m.SetMaterializeUpperBound(0)
+			for _, tt := range []uint64{100, 200, 300} {
+				observeDelete(t, m, tt)
+			}
+			if explicit {
+				m.RequestFlushThrough(300)
+			} else {
+				m.RequestBacklogThrough(300)
+			}
+			require.Empty(t, *tasks)
+			m.SetMaterializeUpperBound(math.MaxUint64)
+			require.Len(t, *tasks, 1)
+			observeDelete(t, m, 400)
+			require.NoError(t, (*tasks)[0].Execute(context.Background()))
+			require.Equal(t, uint64(200), m.MaterializedTimeTick())
+			require.Len(t, *tasks, 2)
+			require.NoError(t, (*tasks)[1].Execute(context.Background()))
+			require.Equal(t, uint64(300), m.MaterializedTimeTick())
+			require.Len(t, *batches, 2)
+			require.Len(t, (*batches)[1].Entries, 1, "forced goal includes a small tail")
+			require.Len(t, *tasks, 2, "new small arrivals do not extend the captured goal")
+			require.False(t, m.HasPendingMaterializeTask())
+		})
+	}
+}
+
+func TestRestoredFlushIntentWaitsForReplayAndL1(t *testing.T) {
+	m, tasks, _ := testMaterializer(t, 50)
+	m.materializeMaxRows = 10
+	m.flushThrough = 200 // Config.FlushThrough restored from VChannelMeta.
+	m.SetMaterializeUpperBound(100)
+	observeDelete(t, m, 100)
+	observeBarrier(t, m, 250)
+	require.Empty(t, *tasks)
+	m.SetMaterializeUpperBound(math.MaxUint64)
+	require.Len(t, *tasks, 1)
+	require.NoError(t, (*tasks)[0].Execute(context.Background()))
+	require.Equal(t, uint64(200), m.MaterializedTimeTick())
+	require.Len(t, *tasks, 1)
 }

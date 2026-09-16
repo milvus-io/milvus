@@ -90,13 +90,13 @@ func TestVChannelFlushCheckpointMinOfMaterializedAndGrowing(t *testing.T) {
 		2: newSegmentMetaWithCheckpoint(2, 200),
 	}
 	module, summary := newMaterializeBoundTestModule(t, scheduler, segmentMetas)
-	// delete@100 and delete@400: observation schedules one task, the
-	// cap-batch continuation inside materialize chases the frontier to 400.
+	// With a one-row target, each Delete independently satisfies capacity.
 	observeVChannelDelete(t, module, "v1", 100, summary)
 	observeVChannelDelete(t, module, "v1", 400, summary)
 	require.Len(t, scheduler.tasks, 1)
 	require.NoError(t, scheduler.tasks[0].Execute(ctx))
-	require.Len(t, scheduler.tasks, 1)
+	require.Len(t, scheduler.tasks, 2)
+	require.NoError(t, scheduler.tasks[1].Execute(ctx))
 	assert.Equal(t, uint64(400), module.l0Materializer.MaterializedTimeTick())
 	// The in-memory frontier is 400 but it is not persisted yet: the flush
 	// checkpoint must not report it.

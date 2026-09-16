@@ -12,9 +12,9 @@ The existing object-key encoding is retained; §8 describes forward
 generation-prefix discovery and its recovery cost.
 The cross-owner GC protocol is not yet designed; see the TODO in §9.
 The shared bounded-read contract (§5.4) and [L0Materializer](l0_materializer.md)
-integration are implemented. The revised batching and Summary-owned
-materialization-backlog policy in [L0Materializer §5](l0_materializer.md#5-read-and-materialize)
-is agreed but not yet wired; current materialization remains eager. TransformLog
+integration are implemented, including range statistics and Summary-owned
+materialization-backlog requests described in
+[L0Materializer §5](l0_materializer.md#5-read-and-materialize). TransformLog
 subscriptions (§5.5) are a separate future integration.
 
 ## 1. Core Purpose
@@ -214,8 +214,7 @@ requested window. This ordering does not wait for upload or publication.
 The caller owns the scheduler lifetime. The existing convention that a zero
 `FlushMaxBytes` disables size-triggered sealing is unchanged.
 
-The revised consumer policy also requires Summary to govern **materialization
-backlog**: Deletes not yet consumed into L0, whether pending, sealed or already
+Summary also governs **materialization backlog**: Deletes not yet consumed into L0, whether pending, sealed or already
 persisted. An upload does not discharge this work. Backlog governance may issue
 a coalesced, bounded progress request to the VChannel owner even with an empty
 pending buffer and no new WAL traffic. It must account for recovered retained
@@ -223,9 +222,13 @@ history and distinguish work needing L0 output from output awaiting durable
 VChannel metadata. The latter needs metadata publication, not duplicate output.
 An ordinary Summary seal/upload is not automatically an L0 flush request.
 L0Materializer introduces no age/idle timer; long-standing unmaterialized data
-is handled through this Summary-owned mechanism. The existing `flushBacklog`
-only examines persistence backlog, so this consumer extension remains to be
-implemented. See [L0Materializer §5](l0_materializer.md#5-read-and-materialize).
+is handled through this Summary-owned mechanism. `Manager.Run` performs both
+persistence and consumption checks. Consumption age uses the original WAL
+physical time of the earliest outstanding Delete and the worker's existing
+backlog age budget. Retention pressure requests only the oldest blocking chunk.
+`ReportMaterialized` suppresses redundant consumption before metadata is saved;
+only `AdvanceGCTimeTick` from durable metadata authorizes release.
+See [L0Materializer §5](l0_materializer.md#5-read-and-materialize).
 
 Chunk sequence order follows the ordered input stream, not upload completion
 order. An upload completing at sequence N makes N eligible for the manifest
@@ -338,7 +341,9 @@ pchannel objects, not per-vchannel slices. There is no TTL or minimum duration.
 Either budget can request release, but neither overrides a transform consumer
 that still needs the oldest chunk.
 Unmaterialized transform records cannot be discarded merely to meet a budget;
-missing consumer metadata does not prove cleanup.
+missing consumer metadata does not prove cleanup. Restored DROPPED/TOMBSTONED
+metadata also uses its persisted materialization frontier: the lifecycle state
+alone does not prove that L0 has completed.
 
 GC has no persistent work queue inside the manifest:
 
@@ -669,11 +674,19 @@ base-only VChannel snapshot commits report their captured materialization
 frontiers. The manifest persists per-VChannel transform truncation bounds,
 including after removal of the last chunk.
 
-The revised L0 batching policy is pending: current code still schedules every
-safe outstanding window. Summary also still checks only unpersisted backlog;
-consumer-backlog requests, light range statistics and recoverable explicit
-flush intent must be added as specified in L0Materializer §5–7. The revised
-policy has no L0 age timer and does not use `FlushL0MaxLifetime` as a trigger.
+L0 admission uses capacity, explicit completion, or Summary backlog requests.
+Explicit intent is saved in `VChannelMeta.l0_flush_time_tick` and waits for L1
+final commit. Capacity completion rechecks thresholds without draining a small
+tail. Forced requests use captured finite goals. The policy has no L0 age timer
+and does not use `FlushL0MaxLifetime` as a trigger.
+
+`TransformStats(vchannel, after, through)` uses per-VChannel prefix indexes
+covering hot and durable Delete entries, clamped to readable coverage. The
+manifest's `transform_stats` records one TimeTick and cumulative PK row/logical
+byte counts per complete Entry within each VChannel chunk section. Recovery
+validates these indexes and rebuilds the in-memory prefixes without loading
+payloads. Storage transitions do not double count; GC drops released prefixes.
+These are record metadata, not a second Delete payload buffer.
 
 Count-budget wiring remains absent (§3.4). Future subscription retention and
 cross-owner GC fencing remain separate follow-up work.

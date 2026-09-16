@@ -35,6 +35,7 @@ import (
 type Config struct {
 	VChannel             string
 	MaterializedTimeTick uint64
+	FlushThrough         uint64
 	Reader               walsummary.TransformReader
 	MaterializeMaxRows   uint64
 	MaterializeMaxBytes  uint64
@@ -53,6 +54,9 @@ type L0Materializer struct {
 	vchannel              string
 	materializedTimeTick  uint64
 	requestedThrough      uint64
+	flushThrough          uint64
+	backlogThrough        uint64
+	activeGoal            uint64
 	materializeUpperBound uint64
 	reader                walsummary.TransformReader
 	materializeMaxRows    uint64
@@ -76,6 +80,7 @@ func New(config Config) *L0Materializer {
 		reader: config.Reader, materializer: config.Materializer,
 		materializeMaxRows: config.MaterializeMaxRows, materializeMaxBytes: config.MaterializeMaxBytes,
 		runtime: config.Runtime, onMaterialized: config.OnMaterialized,
+		flushThrough: config.FlushThrough,
 	}
 }
 
@@ -121,11 +126,55 @@ func (m *L0Materializer) HasPendingMaterializeTask() bool {
 	return m.task != nil
 }
 
+// RequestFlushThrough records an explicit API boundary, after the owner has
+// saved the intent in its recovery metadata. L >= F proves all earlier L1
+// segments have completed final commit; partial L1 progress cannot force a batch.
+func (m *L0Materializer) RequestFlushThrough(through uint64) {
+	m.mu.Lock()
+	m.flushThrough = max(m.flushThrough, through)
+	task := m.scheduleLocked()
+	m.mu.Unlock()
+	m.submit(task)
+}
+
+// RequestBacklogThrough is driven by Summary's existing backlog governance.
+// It cannot extend W: restored Summary may contain data ahead of replay.
+func (m *L0Materializer) RequestBacklogThrough(through uint64) {
+	m.mu.Lock()
+	m.backlogThrough = max(m.backlogThrough, through)
+	task := m.scheduleLocked()
+	m.mu.Unlock()
+	m.submit(task)
+}
+
 func (m *L0Materializer) scheduleLocked() *materializeTask {
-	if m.runtime.Scheduler == nil || m.task != nil || min(m.requestedThrough, m.materializeUpperBound) <= m.materializedTimeTick {
+	safe := min(m.requestedThrough, m.materializeUpperBound)
+	if m.runtime.Scheduler == nil || m.task != nil || safe <= m.materializedTimeTick {
 		return nil
 	}
-	m.task = &materializeTask{materializer: m}
+	target := safe
+	switch {
+	case m.activeGoal > m.materializedTimeTick:
+		if m.activeGoal > safe {
+			return nil
+		}
+		target = m.activeGoal
+	case m.flushThrough > m.materializedTimeTick && m.flushThrough <= safe:
+		target = m.flushThrough
+		m.activeGoal = target
+	case min(m.backlogThrough, safe) > m.materializedTimeTick:
+		target = min(m.backlogThrough, safe)
+		m.activeGoal = target
+	default:
+		if m.reader == nil {
+			return nil
+		}
+		stats := m.reader.TransformStats(m.vchannel, m.materializedTimeTick, safe)
+		if stats.Rows < m.materializeMaxRows && stats.Bytes < m.materializeMaxBytes {
+			return nil
+		}
+	}
+	m.task = &materializeTask{materializer: m, target: target}
 	return m.task
 }
 
@@ -135,9 +184,10 @@ func (m *L0Materializer) submit(task *materializeTask) {
 	}
 }
 
-func (m *L0Materializer) materialize(ctx context.Context) error {
+func (m *L0Materializer) materialize(ctx context.Context, target uint64) error {
 	m.mu.Lock()
-	after, target := m.materializedTimeTick, min(m.requestedThrough, m.materializeUpperBound)
+	after := m.materializedTimeTick
+	target = min(target, m.requestedThrough, m.materializeUpperBound)
 	m.mu.Unlock()
 	if target <= after {
 		return nil
@@ -165,6 +215,9 @@ func (m *L0Materializer) materialize(ctx context.Context) error {
 	}
 	m.mu.Lock()
 	m.materializedTimeTick = batch.CoveredThrough
+	if m.materializedTimeTick >= m.activeGoal {
+		m.activeGoal = 0
+	}
 	m.mu.Unlock()
 	if m.onMaterialized != nil {
 		m.onMaterialized(batch.CoveredThrough)
