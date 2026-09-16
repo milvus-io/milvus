@@ -219,10 +219,13 @@ including estimated JSON parsing scratch.
 
 The cache estimate distinguishes final resident resources, request-local inputs,
 and temporary work covered by slice leases. Full-entry buffers or sidecars that
-outlive one slice remain request-local reservations. Scalar estimates use the
-larger compatible path cost and sum the catalog's possible slice scratch before
-global limits are applied, so a later admission-limit expansion does not rely on
-a smaller fixed per-load estimate.
+outlive one slice remain request-local reservations. StringSort and Bitmap
+validity bits, and FMIndex null bits, are read directly into zero-initialized
+final bitmaps and moved into the index after CRC validation. Their async loads
+need no separate packed-byte sidecar; synchronous loads still reserve one.
+Scalar estimates use the larger compatible path cost and sum the catalog's
+possible slice scratch before global limits are applied, so a later
+admission-limit expansion does not rely on a smaller fixed per-load estimate.
 
 Eligible memory overhead shares
 `LoadMemoryOverheadController::GetInstance().GetOrCreate()` with field loading.

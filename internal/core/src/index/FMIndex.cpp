@@ -16,6 +16,7 @@
 #include <fcntl.h>
 
 #include <cerrno>
+#include <bit>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -106,7 +107,7 @@ struct FMIndexLoadContext {
     size_t blob_size{0};
     size_t mmap_size{0};
     std::shared_ptr<std::vector<uint8_t>> blob;
-    std::shared_ptr<std::vector<uint8_t>> packed_null_bitmap;
+    std::shared_ptr<TargetBitmap> null_bitmap;
     std::shared_ptr<storage::MmapFileTarget> blob_file;
     std::optional<storage::DiskFileManagerImpl::LocalDirWriteLease>
         local_dir_lease;
@@ -879,13 +880,16 @@ FMIndex::PlanLoad(const storage::IndexEntryCatalog& catalog,
                   expected_null_bytes,
                   context->total_rows);
     }
-    context->packed_null_bitmap =
-        std::make_shared<std::vector<uint8_t>>(expected_null_bytes);
+    static_assert(std::endian::native == std::endian::little,
+                  "Direct packed bitmap reads require little-endian words");
+    context->null_bitmap =
+        std::make_shared<TargetBitmap>(context->total_rows, false);
     plan.entries.push_back(storage::EntryLoadPlan{
         FMINDEX_NULL_BITMAP_FILE_NAME,
-        storage::MemoryEntryTarget{context->packed_null_bitmap,
-                                   context->packed_null_bitmap->data(),
-                                   context->packed_null_bitmap->size()}});
+        storage::MemoryEntryTarget{
+            context->null_bitmap,
+            reinterpret_cast<uint8_t*>(context->null_bitmap->data()),
+            expected_null_bytes}});
     return plan;
 }
 
@@ -944,26 +948,25 @@ FMIndex::MaterializeAsync(storage::IndexLoadArtifact& artifact,
             new_fm.document_count());
     }
 
-    TargetBitmap new_null_bitmap(context->total_rows);
+    TargetBitmap new_null_bitmap;
     if (context->nullable) {
-        AssertInfo(context->packed_null_bitmap != nullptr,
+        AssertInfo(context->null_bitmap != nullptr,
                    "FMIndex null bitmap target is null");
-        const auto& packed = *context->packed_null_bitmap;
-        if (!packed.empty() && context->total_rows % 8 != 0) {
+        const auto* packed =
+            reinterpret_cast<const uint8_t*>(context->null_bitmap->data());
+        if (context->total_rows % 8 != 0) {
             uint8_t valid_tail_mask =
                 static_cast<uint8_t>((1u << (context->total_rows % 8)) - 1u);
-            if ((packed.back() & ~valid_tail_mask) != 0) {
+            if ((packed[context->total_rows / 8] & ~valid_tail_mask) != 0) {
                 ThrowInfo(ErrorCode::DataFormatBroken,
                           "corrupt FM index: null bitmap has set bits beyond "
                           "total_rows {}",
                           context->total_rows);
             }
         }
-        for (int64_t i = 0; i < context->total_rows; ++i) {
-            if (packed[static_cast<size_t>(i) >> 3] & (1u << (i & 0x07))) {
-                new_null_bitmap.set(i);
-            }
-        }
+        new_null_bitmap = std::move(*context->null_bitmap);
+    } else {
+        new_null_bitmap = TargetBitmap(context->total_rows, false);
     }
 
     fm_ = std::move(new_fm);

@@ -15,6 +15,7 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <algorithm>
 #include <cstring>
 #include <filesystem>
 #include <functional>
@@ -2008,6 +2009,91 @@ TEST(FMIndexV3AsyncLoadTest, MmapPathUsesNativeDirectEntryReads) {
     EXPECT_EQ(remote_file->ReadAtCalls(), read_at_calls_after_open);
     EXPECT_EQ(load_index.Count(), data.size());
     EXPECT_EQ(Inner(&load_index, "hr"), (std::vector<int64_t>{3}));
+}
+
+TEST(FMIndexV3AsyncLoadTest, PackedNullBitmapPreservesRowsAndRejectsTailBits) {
+    milvus::test::ScopedLoadTransientBudget budget_guard(0);
+    FMIndexAsyncLoadFixture fixture("fm_index_async_null_bitmap");
+    fixture.field_schema.set_nullable(true);
+    fixture.field_meta.field_schema = fixture.field_schema;
+    fixture.ctx = storage::FileManagerContext(fixture.field_meta,
+                                              fixture.index_meta,
+                                              fixture.chunk_manager,
+                                              fixture.fs);
+    for (size_t rows : {8, 9, 63, 64, 65}) {
+        std::vector<std::string> data(rows, "value");
+        std::vector<uint8_t> valid((rows + 7) / 8, 0);
+        for (size_t i = 0; i < rows; ++i) {
+            if (i % 3 != 0) {
+                valid[i / 8] |= 1u << (i % 8);
+            }
+        }
+        auto field_data =
+            storage::CreateFieldData(DataType::VARCHAR, DataType::NONE, true);
+        field_data->FillFieldData(data.data(), valid.data(), rows, 0);
+        index::FMIndex build_index(fixture.ctx, {});
+        build_index.BuildWithFieldData({field_data});
+        auto stats = build_index.UploadUnified({});
+        auto packed = milvus::test::ReadPackedIndexBytes(
+            fixture.ctx, stats->GetIndexFiles());
+        for (bool mmap : {false, true}) {
+            for (bool corrupt_tail : {false, true}) {
+                if (corrupt_tail && rows % 8 == 0) {
+                    continue;
+                }
+                SCOPED_TRACE(testing::Message()
+                             << "rows=" << rows << ", mmap=" << mmap
+                             << ", corrupt_tail=" << corrupt_tail);
+                milvus::test::ControlledDirectReadFile* remote_file = nullptr;
+                auto reader = milvus::test::OpenDirectIndexEntryReader(
+                    packed, &remote_file);
+                index::FMIndex load_index(fixture.ctx, {});
+                Config config;
+                config[index::ENABLE_MMAP] = mmap;
+                auto plan = load_index.PlanLoad(reader->Catalog(), config);
+                auto entry = std::find_if(
+                    plan.entries.begin(),
+                    plan.entries.end(),
+                    [](const auto& entry) {
+                        return entry.name ==
+                               index::FMINDEX_NULL_BITMAP_FILE_NAME;
+                    });
+                ASSERT_NE(entry, plan.entries.end());
+                const auto target =
+                    std::get<storage::MemoryEntryTarget>(entry->target);
+                ASSERT_EQ(target.bytes, (rows + 7) / 8);
+                auto artifact =
+                    folly::coro::blockingWait(reader->ReadEntriesAsync(
+                        std::move(plan.entries),
+                        proto::common::LoadPriority::HIGH));
+                if (corrupt_tail) {
+                    // Inject after CRC to exercise the FM format check itself.
+                    target.data[target.bytes - 1] |= 0x80;
+                    try {
+                        folly::coro::blockingWait(load_index.MaterializeAsync(
+                            artifact, plan.materialization_context, config));
+                        FAIL() << "Expected corrupt null bitmap to be rejected";
+                    } catch (const SegcoreError& error) {
+                        EXPECT_EQ(error.get_error_code(),
+                                  ErrorCode::DataFormatBroken);
+                    }
+                } else {
+                    folly::coro::blockingWait(load_index.MaterializeAsync(
+                        artifact, plan.materialization_context, config));
+                    artifact.CommitTargets();
+                    auto nulls = load_index.IsNull();
+                    const auto* bytes =
+                        reinterpret_cast<const uint8_t*>(nulls.data());
+                    for (size_t i = 0; i < nulls.size_in_bytes() * 8; ++i) {
+                        EXPECT_EQ((bytes[i / 8] >> (i % 8)) & 1u,
+                                  i < rows && i % 3 == 0);
+                    }
+                    EXPECT_EQ(load_index.IsNotNull().count(),
+                              build_index.IsNotNull().count());
+                }
+            }
+        }
+    }
 }
 
 // ---- query routing over raw data (no storage) ----

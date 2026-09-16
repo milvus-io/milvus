@@ -897,20 +897,22 @@ IndexFactory::ScalarIndexFileLoadResource(
             staging_bytes = catalog.At(BITMAP_INDEX_DATA).plaintext_size;
             mmap_enable = false;
         }
-        if (catalog.HasEntry(BITMAP_INDEX_VALID_BITSET)) {
+        if (!use_async_load && catalog.HasEntry(BITMAP_INDEX_VALID_BITSET)) {
             staging_bytes = SaturatingAdd(
                 staging_bytes,
                 catalog.At(BITMAP_INDEX_VALID_BITSET).plaintext_size);
         }
     }
-    if (type == FMINDEX_INDEX_TYPE &&
+    // Async packed bitmaps are read into their final allocation. Synchronous
+    // loaders still retain a packed sidecar while constructing TargetBitmap.
+    if (!use_async_load && type == FMINDEX_INDEX_TYPE &&
         catalog.HasEntry(FMINDEX_NULL_BITMAP_FILE_NAME)) {
         staging_bytes = SaturatingAdd(
             staging_bytes,
             catalog.At(FMINDEX_NULL_BITMAP_FILE_NAME).plaintext_size);
     }
-    if (type == ASCENDING_SORT && catalog.HasMeta("version") &&
-        catalog.HasEntry("valid_bitset")) {
+    if (!use_async_load && type == ASCENDING_SORT &&
+        catalog.HasMeta("version") && catalog.HasEntry("valid_bitset")) {
         staging_bytes = SaturatingAdd(
             staging_bytes, catalog.At("valid_bitset").plaintext_size);
     }

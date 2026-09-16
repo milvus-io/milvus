@@ -17,6 +17,7 @@
 #include <algorithm>
 #include "common/FastMem.h"
 #include <boost/algorithm/string.hpp>
+#include <bit>
 #include <folly/ScopeGuard.h>
 #include <optional>
 #include <sys/errno.h>
@@ -66,7 +67,7 @@ struct BitmapLoadContext {
     proto::common::LoadPriority priority{proto::common::LoadPriority::HIGH};
     std::string final_mmap_path;
     std::shared_ptr<std::vector<uint8_t>> index_data;
-    std::shared_ptr<std::vector<uint8_t>> valid_bitset;
+    std::shared_ptr<TargetBitmap> valid_bitset;
     std::shared_ptr<storage::MmapFileTarget> index_data_file;
 };
 
@@ -1538,9 +1539,16 @@ template <typename T>
 IndexLoadPlan
 BitmapIndex<T>::PlanLoad(const storage::IndexEntryCatalog& catalog,
                          const Config& config) {
+    static_assert(std::endian::native == std::endian::little,
+                  "Direct packed bitmap reads require little-endian words");
     auto context = std::make_shared<BitmapLoadContext>();
     context->index_length = catalog.GetMeta<size_t>(BITMAP_INDEX_LENGTH);
     context->total_num_rows = catalog.GetMeta<size_t>(BITMAP_INDEX_NUM_ROWS);
+    AssertInfo(context->total_num_rows <=
+                   std::numeric_limits<size_t>::max() -
+                       (TargetBitmap::policy_type::data_bits - 1),
+               "Bitmap valid bitset size overflow for {} rows",
+               context->total_num_rows);
     context->is_nested =
         catalog.GetMeta<bool>(BITMAP_INDEX_IS_NESTED_META, is_nested_index_);
     context->has_valid_bitset = catalog.HasEntry(BITMAP_INDEX_VALID_BITSET);
@@ -1590,12 +1598,13 @@ BitmapIndex<T>::PlanLoad(const storage::IndexEntryCatalog& catalog,
                    expected_valid_bitset_size,
                    valid_bitset_size);
         context->valid_bitset =
-            std::make_shared<std::vector<uint8_t>>(valid_bitset_size);
+            std::make_shared<TargetBitmap>(context->total_num_rows, false);
         plan.entries.push_back(storage::EntryLoadPlan{
             BITMAP_INDEX_VALID_BITSET,
-            storage::MemoryEntryTarget{context->valid_bitset,
-                                       context->valid_bitset->data(),
-                                       context->valid_bitset->size()}});
+            storage::MemoryEntryTarget{
+                context->valid_bitset,
+                reinterpret_cast<uint8_t*>(context->valid_bitset->data()),
+                valid_bitset_size}});
     }
     return plan;
 }
@@ -1612,13 +1621,19 @@ BitmapIndex<T>::MaterializeAsync(storage::IndexLoadArtifact& artifact,
 
     total_num_rows_ = context->total_num_rows;
     is_nested_index_ = context->is_nested;
-    valid_bitset_ =
-        TargetBitmap(total_num_rows_, is_nested_index_ || !schema_.nullable());
     if (context->has_valid_bitset) {
         AssertInfo(context->valid_bitset != nullptr,
                    "Bitmap valid_bitset memory target is null");
-        DeserializeValidBitsetData(context->valid_bitset->data(),
-                                   context->valid_bitset->size());
+        valid_bitset_ = std::move(*context->valid_bitset);
+        if (total_num_rows_ % 8 != 0) {
+            // Match DeserializeValidBitsetData: ignore unused bits after CRC.
+            auto* bytes = reinterpret_cast<uint8_t*>(valid_bitset_.data());
+            bytes[total_num_rows_ / 8] &=
+                static_cast<uint8_t>((1u << (total_num_rows_ % 8)) - 1u);
+        }
+    } else {
+        valid_bitset_ = TargetBitmap(total_num_rows_,
+                                     is_nested_index_ || !schema_.nullable());
     }
 
     ChooseIndexLoadMode(context->index_length);

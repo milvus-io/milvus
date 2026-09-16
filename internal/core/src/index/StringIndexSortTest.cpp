@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 #include <stdint.h>
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -16,6 +17,7 @@
 #include "folly/coro/BlockingWait.h"
 #include "gtest/gtest.h"
 #include "index/Meta.h"
+#include "index/IndexFactory.h"
 #include "index/StringIndexSort.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "pb/plan.pb.h"
@@ -201,6 +203,89 @@ TEST(StringIndexSortV3AsyncLoadTest, MmapPathUsesNativeDirectEntryReads) {
     EXPECT_TRUE(bitset[3]);
     EXPECT_FALSE(bitset[4]);
     EXPECT_EQ(load_index.Reverse_Lookup(4), data[4]);
+}
+
+TEST(StringIndexSortV3AsyncLoadTest, PackedValidityUsesFinalAllocation) {
+    milvus::test::ScopedLoadTransientBudget budget_guard(0);
+    StringSortAsyncLoadFixture fixture("string_sort_async_validity");
+    for (size_t rows : {8, 9, 63, 64, 65}) {
+        std::vector<std::string> data(rows, "value");
+        auto valid = std::make_unique<bool[]>(rows);
+        for (size_t i = 0; i < rows; ++i) {
+            valid[i] = i % 3 != 0;
+        }
+        StringIndexSort build_index(fixture.ctx);
+        build_index.Build(rows, data.data(), valid.get());
+        auto stats = build_index.UploadUnified({});
+        auto packed = milvus::test::ReadPackedIndexBytes(
+            fixture.ctx, stats->GetIndexFiles());
+        for (bool mmap : {false, true}) {
+            SCOPED_TRACE(testing::Message()
+                         << "rows=" << rows << ", mmap=" << mmap);
+            Config config;
+            if (mmap) {
+                config[MMAP_FILE_PATH] = fixture.root_path + "/mmap/index";
+            }
+            StringIndexSort load_index(fixture.ctx);
+            {
+                milvus::test::ControlledDirectReadFile* remote_file = nullptr;
+                auto reader = milvus::test::OpenDirectIndexEntryReader(
+                    packed, &remote_file);
+                auto plan = load_index.PlanLoad(reader->Catalog(), config);
+                auto entry =
+                    std::find_if(plan.entries.begin(),
+                                 plan.entries.end(),
+                                 [](const auto& entry) {
+                                     return entry.name == "valid_bitset";
+                                 });
+                ASSERT_NE(entry, plan.entries.end());
+                const auto target =
+                    std::get<storage::MemoryEntryTarget>(entry->target);
+                ASSERT_EQ(target.bytes, (rows + 7) / 8);
+                auto artifact =
+                    folly::coro::blockingWait(reader->ReadEntriesAsync(
+                        std::move(plan.entries),
+                        proto::common::LoadPriority::HIGH));
+                // Inject unused bits after CRC to exercise materialization's
+                // compatibility with the synchronous unpacker.
+                if (rows % 8 != 0) {
+                    target.data[target.bytes - 1] |= 0x80;
+                }
+                folly::coro::blockingWait(load_index.MaterializeAsync(
+                    artifact, plan.materialization_context, config));
+                EXPECT_EQ(
+                    reinterpret_cast<uint8_t*>(load_index.valid_bitset_.data()),
+                    target.data);
+                artifact.CommitTargets();
+            }
+            const auto* bytes = reinterpret_cast<const uint8_t*>(
+                load_index.valid_bitset_.data());
+            for (size_t i = 0; i < load_index.valid_bitset_.size_in_bytes() * 8;
+                 ++i) {
+                EXPECT_EQ((bytes[i / 8] >> (i % 8)) & 1u, i < rows && valid[i]);
+            }
+            EXPECT_EQ(load_index.IsNotNull().count(),
+                      build_index.IsNotNull().count());
+
+            std::map<std::string, std::string> params{
+                {INDEX_TYPE, ASCENDING_SORT},
+                {SCALAR_INDEX_ENGINE_VERSION, "3"}};
+            for (bool async : {false, true}) {
+                auto context = fixture.ctx;
+                context.use_async_load = async;
+                auto resources =
+                    IndexFactory::GetInstance().ScalarIndexFileLoadResource(
+                        DataType::VARCHAR,
+                        packed.size(),
+                        params,
+                        mmap,
+                        rows,
+                        stats->GetIndexFiles(),
+                        context);
+                EXPECT_EQ(resources.overhead.has_value(), async);
+            }
+        }
+    }
 }
 
 TEST_F(StringIndexSortTest, ConstructorMemory) {

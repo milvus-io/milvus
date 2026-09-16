@@ -24,6 +24,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #include <algorithm>
+#include <bit>
 #include <cstdint>
 #include <exception>
 #include <filesystem>
@@ -172,7 +173,7 @@ struct StringSortLoadContext {
     size_t offsets_bytes{0};
 
     std::shared_ptr<std::vector<uint8_t>> index_data;
-    std::shared_ptr<std::vector<uint8_t>> valid_bitset;
+    std::shared_ptr<TargetBitmap> valid_bitset;
     std::shared_ptr<storage::MmapFileTarget> index_data_file;
     std::shared_ptr<storage::MmapFileTarget> offsets_file;
 };
@@ -644,6 +645,8 @@ StringIndexSort::WriteEntries(storage::IndexEntryWriter* writer) {
 IndexLoadPlan
 StringIndexSort::PlanLoad(const storage::IndexEntryCatalog& catalog,
                           const Config& config) {
+    static_assert(std::endian::native == std::endian::little,
+                  "Direct packed bitmap reads require little-endian words");
     auto version = catalog.GetMeta<uint32_t>("version");
     AssertInfo(version == SERIALIZATION_VERSION,
                "Unsupported StringIndexSort serialization version: {}, "
@@ -682,7 +685,7 @@ StringIndexSort::PlanLoad(const storage::IndexEntryCatalog& catalog,
                expected_valid_bitset_bytes,
                catalog.At("valid_bitset").plaintext_size);
     context->valid_bitset =
-        std::make_shared<std::vector<uint8_t>>(expected_valid_bitset_bytes);
+        std::make_shared<TargetBitmap>(context->total_num_rows, false);
 
     IndexLoadPlan plan;
     plan.materialization_context = context;
@@ -713,9 +716,10 @@ StringIndexSort::PlanLoad(const storage::IndexEntryCatalog& catalog,
 
     plan.entries.push_back(storage::EntryLoadPlan{
         "valid_bitset",
-        storage::MemoryEntryTarget{context->valid_bitset,
-                                   context->valid_bitset->data(),
-                                   context->valid_bitset->size()}});
+        storage::MemoryEntryTarget{
+            context->valid_bitset,
+            reinterpret_cast<uint8_t*>(context->valid_bitset->data()),
+            expected_valid_bitset_bytes}});
 
     if (context->is_mmap && context->has_persisted_offsets) {
         context->offsets_file = std::make_shared<storage::MmapFileTarget>(
@@ -740,12 +744,13 @@ StringIndexSort::MaterializeAsync(storage::IndexLoadArtifact& artifact,
     AssertInfo(context != nullptr,
                "StringIndexSort MaterializeAsync context is null");
 
-    TargetBitmap new_valid_bitset(context->total_num_rows, false);
-    for (size_t i = 0; i < context->total_num_rows; ++i) {
-        auto byte = (*context->valid_bitset)[i / 8];
-        if ((byte & (1U << (i % 8))) != 0) {
-            new_valid_bitset.set(i);
-        }
+    auto new_valid_bitset = std::move(*context->valid_bitset);
+    if (context->total_num_rows % 8 != 0) {
+        // Ignore unused persisted bits, as the synchronous loader does, after
+        // the reader has checked CRC. Word padding was zeroed by PlanLoad.
+        auto* bytes = reinterpret_cast<uint8_t*>(new_valid_bitset.data());
+        bytes[context->total_num_rows / 8] &=
+            static_cast<uint8_t>((1u << (context->total_num_rows % 8)) - 1u);
     }
 
     std::vector<int32_t> new_offsets;
