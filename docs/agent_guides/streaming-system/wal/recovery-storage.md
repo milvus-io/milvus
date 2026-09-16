@@ -17,7 +17,7 @@ Persists WAL consumer state to the catalog (etcd) and object storage. The author
 3. **Bounded recovery** (`runBoundedRecovery`): Observe the WAL from the checkpoint through the barrier and build the write-path snapshot and uncommitted `TxnBuffer`. Asynchronous persistence need not have finished.
 4. Start live observation, AckTracker stall checks, independent Summary backlog checks, and catalog publication. Component snapshots precede checkpoint publication and WAL truncation. Poisoned messages remain incomplete and block the checkpoint.
 
-The bounded/live scanner handoff and control-state prefix alignment have open implementation points documented in the architecture and checkpoint design; this guide does not claim those contracts are already fully verified.
+Control may persist its latest state ahead of the global checkpoint, like a Segment snapshot. Its own replay-idempotency boundary and the bounded/live scanner handoff have open implementation points documented in the architecture and checkpoint design; this guide does not claim those contracts are already fully verified.
 
 ## Key Packages
 

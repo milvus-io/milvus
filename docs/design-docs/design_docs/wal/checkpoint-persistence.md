@@ -54,9 +54,10 @@ The following state is represented as component snapshots:
   (`VChannelMeta.transform_materialized_time_tick`);
 - salvage and cleanup metadata that must precede checkpoint publication.
 
-The PChannel replication and AlterWAL control state is **not** a component
-snapshot: it is embedded in `WALCheckpoint` itself and advances atomically with
-it (see [§7](#7-pchannel-control-state)).
+The PChannel replication and AlterWAL control state is logically a component
+snapshot, but is physically embedded in `WALCheckpoint` rather than stored under
+a separate catalog key. Its latest recoverable state may be ahead of the global
+replay position, just like a Segment snapshot (see [§7](#7-pchannel-control-state)).
 
 Transform records themselves are not a component snapshot: their durability is
 owned by the pchannel-scoped WALSummary (chunk + manifest on object storage,
@@ -178,11 +179,11 @@ replay.
 
 Replication configuration, replication progress, and AlterWAL state are
 embedded directly in `WALCheckpoint` (fields `replicate_config`,
-`replicate_checkpoint`, `alter_wal_state`). They advance **atomically with the
-checkpoint**: the checkpoint is the single source of truth for the control
-state after a crash, and a control-only change rewrites the checkpoint (the
-dirty check compares the control fields). There is no separate catalog key for
-the control state.
+`replicate_checkpoint`, `alter_wal_state`). They are **stored atomically with the
+checkpoint**, but need not represent the same logical TimeTick. Control keeps
+its latest state; it does not retain historical versions to match the global
+replay position. A control-only change rewrites the checkpoint (the dirty check
+compares the control fields). There is no separate catalog key for control.
 
 ```proto
 message WALCheckpoint {
@@ -196,21 +197,39 @@ message WALCheckpoint {
 }
 ```
 
-This keeps a single metadata point: the durable control state has no
-independent `checkpoint_time_tick` — its frontier is the checkpoint position.
-The in-memory control state is still tracked separately for deduplication and
-stage transitions (AlterWAL FLUSHING → ADVANCE_CHECKPOINT), and recovery
-decodes it from the checkpoint, then replays control messages after it.
+For example, an unfinished Insert can hold the global checkpoint at 100 while
+Control already contains configuration B from 120. Persisting `100 + B` is
+valid: restart restores B, replays the missing data effects, and must converge
+to the latest Control through the recovery barrier. The write-path replication
+manager is initialized from the snapshot after bounded replay finishes.
 
-**Open implementation point:** `updatePChannelControl` currently keeps the latest
-observed control state, and `consumeDirtySnapshot` copies that state even when
-the candidate position is pinned earlier by unfinished Segment or Summary work.
-For example, an Insert at 110 can hold the candidate at 100 while a configuration
-change at 120 is included in the same checkpoint object. Atomic catalog storage
-alone does not make these two logical positions consistent. Selecting control
-state covered by the candidate, including covered-event stage transitions,
-requires a separate design decision and implementation change. The current
-code does not yet establish the prefix-alignment contract described above.
+The required property is replay idempotency of the complete Control state and
+its side effects, not equality with the global checkpoint's TimeTick. Segment
+snapshots establish this using their own applied frontier. A Control-local
+applied frontier is likewise component metadata, not a second global scanner
+or truncation checkpoint. Keeping that frontier with the latest state would
+allow old control effects to be skipped while data components still replay.
+Already-covered AlterWAL events may still advance their persisted stage, after
+the required data checkpoint has been published.
+
+**Open implementation point:** in-memory `PChannelRecoveryControlMeta` has
+`checkpoint_time_tick`, but `ApplyControl` does not persist it. Recovery sets it
+to the global checkpoint TimeTick instead. Configuration assignment itself can
+converge under replay; state-dependent transitions need more care. A targeted
+probe of `updatePChannelControl` demonstrated the following sequence:
+
+1. At local TT 100, this node is secondary with source progress 500.
+2. At 110, topology changes while retaining the same source; progress stays 500.
+3. At 120, force-promote makes it primary and captures salvage progress 500.
+4. Persist latest Control with global position 100, then restart and replay.
+5. Replaying 110 from the saved primary state creates secondary progress 0;
+   replaying 120 captures salvage progress 0. Configuration B is correct, but
+   the pending salvage write differs and can overwrite the saved boundary.
+
+Persisting and restoring the Control-local applied frontier would suppress
+those duplicate effects. Alternatively every transition would need a proven
+idempotent reconstruction rule. The current implementation has not yet completed
+that contract; forcing Control back to the global position is not required.
 
 ## 8. Close
 

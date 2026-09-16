@@ -72,10 +72,11 @@ The checkpoint's WAL position consists of:
 
 PChannel control state such as replication configuration and AlterWAL state
 is embedded in the checkpoint itself (fields `replicate_config`,
-`replicate_checkpoint`, `alter_wal_state`) and advances atomically with it:
-the checkpoint is the single source of truth for the control state after a
-crash, and a control-only change rewrites the checkpoint. Matching control state
-to a candidate pinned behind observation remains an open implementation point;
+`replicate_checkpoint`, `alter_wal_state`) and stored atomically with it.
+Control may contain newer state than the global replay position, just like
+Segment snapshots. Recovery must preserve or reconstruct the latest state and
+make repeated control effects idempotent. Persisting Control's own applied
+frontier remains an open implementation point;
 see [checkpoint control state](checkpoint-persistence.md#7-pchannel-control-state).
 
 The checkpoint is the only:
