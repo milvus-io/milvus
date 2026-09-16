@@ -31,6 +31,7 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/queryutil"
 	"github.com/milvus-io/milvus/internal/util/searchutil"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
@@ -195,6 +196,67 @@ func TestSearchOnViewStreamCloseCancelsServer(t *testing.T) {
 	}
 }
 
+func TestQueryOnViewStreamSendsChunksAndEOF(t *testing.T) {
+	tasks := &streamTestQueryTasks{tasks: []QuerySegmentTask{struct{}{}}}
+	provider := &streamTestProvider{queryTasks: tasks}
+	scheduler := &streamTestScheduler{queryResult: &internalpb.RetrieveResults{
+		Status: merr.Success(),
+		Ids: &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2, 3}}},
+		},
+		FieldsData: []*schemapb.FieldData{
+			{
+				Type:    schemapb.DataType_Int64,
+				FieldId: 101,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{10, 20, 30}}},
+					},
+				},
+			},
+		},
+		AllRetrieveCount: 3,
+	}}
+	server := NewServer(provider, scheduler)
+	client, cleanup := startSearchStreamTestServer(t, server)
+	defer cleanup()
+	request := &viewpb.QueryOnViewRequest{
+		LegacyReq: &internalpb.RetrieveRequest{
+			CollectionID: 10,
+			IsIterator:   true,
+			Limit:        3,
+		},
+		ShardId: &viewpb.ShardID{ReplicaId: 1, Vchannel: "by-dev-rootcoord-dml_0_100v0"},
+		Version: &viewpb.QueryViewVersion{
+			DataVersion:  &viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 2},
+			QueryVersion: 3,
+		},
+		Mvcc:            &viewpb.QueryPlanMVCC{GrowingTimetick: 10},
+		StreamChunkSize: 2,
+	}
+	stream, err := queryutil.NewGRPCReduceStream(context.Background(), client, request)
+	require.NoError(t, err)
+
+	first, err := stream.Recv()
+	require.NoError(t, err)
+	require.Equal(t, []int64{1, 2}, first.GetIds().GetIntId().GetData())
+	require.Equal(t, []int64{10, 20}, first.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+	require.Equal(t, int64(3), first.GetAllRetrieveCount())
+
+	second, err := stream.Recv()
+	require.NoError(t, err)
+	require.Equal(t, []int64{3}, second.GetIds().GetIntId().GetData())
+	require.Equal(t, []int64{30}, second.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+	require.Zero(t, second.GetAllRetrieveCount())
+
+	chunk, err := stream.Recv()
+	require.Nil(t, chunk)
+	require.ErrorIs(t, err, io.EOF)
+	require.NoError(t, stream.Close())
+	require.Equal(t, 1, tasks.releaseCount)
+	require.Equal(t, int64(10), provider.queryRequest.GetCollectionID())
+}
+
 func startSearchStreamTestServer(t *testing.T, service viewpb.ViewQueryServiceServer) (viewpb.ViewQueryServiceClient, func()) {
 	t.Helper()
 	listener := bufconn.Listen(1024 * 1024)
@@ -277,9 +339,11 @@ func streamTestResult() *internalpb.SearchResults {
 }
 
 type streamTestProvider struct {
-	searchTasks SearchSegmentTasks
-	searchErr   error
-	request     *internalpb.SearchRequest
+	searchTasks  SearchSegmentTasks
+	searchErr    error
+	request      *internalpb.SearchRequest
+	queryTasks   QuerySegmentTasks
+	queryRequest *internalpb.RetrieveRequest
 }
 
 func (p *streamTestProvider) AcquireSearchSegmentTasks(
@@ -297,18 +361,32 @@ func (p *streamTestProvider) AcquireSearchSegmentTasks(
 }
 
 func (p *streamTestProvider) AcquireQuerySegmentTasks(
-	context.Context,
-	qviews.ShardID,
-	qviews.QueryViewVersion,
-	*viewpb.QueryPlanMVCC,
-	*internalpb.RetrieveRequest,
+	_ context.Context,
+	_ qviews.ShardID,
+	_ qviews.QueryViewVersion,
+	_ *viewpb.QueryPlanMVCC,
+	request *internalpb.RetrieveRequest,
 ) (QuerySegmentTasks, error) {
-	return nil, nil
+	p.queryRequest = request
+	return p.queryTasks, nil
 }
 
 type streamTestSearchTasks struct {
 	tasks        []SearchSegmentTask
 	releaseCount int
+}
+
+type streamTestQueryTasks struct {
+	tasks        []QuerySegmentTask
+	releaseCount int
+}
+
+func (t *streamTestQueryTasks) Tasks() []QuerySegmentTask {
+	return t.tasks
+}
+
+func (t *streamTestQueryTasks) Release() {
+	t.releaseCount++
 }
 
 func (t *streamTestSearchTasks) Tasks() []SearchSegmentTask {
@@ -320,7 +398,8 @@ func (t *streamTestSearchTasks) Release() {
 }
 
 type streamTestScheduler struct {
-	result *internalpb.SearchResults
+	result      *internalpb.SearchResults
+	queryResult *internalpb.RetrieveResults
 }
 
 func (s *streamTestScheduler) Search(context.Context, SearchSegmentTasks) (*internalpb.SearchResults, error) {
@@ -328,7 +407,7 @@ func (s *streamTestScheduler) Search(context.Context, SearchSegmentTasks) (*inte
 }
 
 func (s *streamTestScheduler) Query(context.Context, QuerySegmentTasks) (*internalpb.RetrieveResults, error) {
-	return nil, nil
+	return s.queryResult, nil
 }
 
 type streamBlockingScheduler struct {

@@ -12,6 +12,7 @@ import (
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/queryutil"
 	"github.com/milvus-io/milvus/internal/util/searchutil"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -202,6 +203,57 @@ func TestShardSearchStreamReturnsPerVChannelReduceStream(t *testing.T) {
 	require.Equal(t, 1, rightStream.closeCount())
 }
 
+func TestShardQueryStreamReturnsPerVChannelReduceStream(t *testing.T) {
+	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
+	leftNode := qviews.NewQueryNode(11)
+	rightNode := qviews.NewQueryNode(12)
+	request := &internalpb.RetrieveRequest{CollectionID: 100, IsIterator: true, Limit: 3}
+	plan := &viewpb.QueryPlan{
+		ShardId: shardID.IntoProto(),
+		Version: &viewpb.QueryViewVersion{QueryVersion: 1},
+		Mvcc:    &viewpb.QueryPlanMVCC{},
+		Request: &viewpb.QueryPlan_LegacyRetrieveRequest{
+			LegacyRetrieveRequest: proto.Clone(request).(*internalpb.RetrieveRequest),
+		},
+		WorkNodes: []*viewpb.QueryPlanWorkNode{
+			{Node: &viewpb.QueryPlanWorkNode_QueryNode{QueryNode: &viewpb.QueryWorkNode{NodeId: leftNode.ID}}},
+			{Node: &viewpb.QueryPlanWorkNode_QueryNode{QueryNode: &viewpb.QueryWorkNode{NodeId: rightNode.ID}}},
+		},
+	}
+	leftStream := &fakeQueryStream{recv: []fakeQueryStreamRecv{{chunk: newTestQueryChunk([]int64{1, 3})}}}
+	rightStream := &fakeQueryStream{recv: []fakeQueryStreamRecv{{chunk: newTestQueryChunk([]int64{2, 4})}}}
+	queryService := &fakeViewQueryServiceClient{
+		queryOnViewStream: func(_ context.Context, node qviews.WorkNode, _ *viewpb.QueryOnViewRequest) (queryutil.ReduceStream, error) {
+			switch node.Key() {
+			case leftNode.Key():
+				return leftStream, nil
+			case rightNode.Key():
+				return rightStream, nil
+			default:
+				return nil, errors.New("unexpected work node")
+			}
+		},
+	}
+	client := newTestShardClient(1, shardID, plan, queryService)
+
+	stream, shardPlan, err := client.QueryStream(context.Background(), shardID.VChannel, request, 2)
+
+	require.NoError(t, err)
+	require.Equal(t, shardID, shardPlan.ShardID)
+	require.Equal(t, int64(2), queryService.queryReq.GetStreamChunkSize())
+	chunk, err := stream.Recv()
+	require.NoError(t, err)
+	require.Equal(t, []int64{1, 2}, chunk.GetIds().GetIntId().GetData())
+	chunk, err = stream.Recv()
+	require.NoError(t, err)
+	require.Equal(t, []int64{3}, chunk.GetIds().GetIntId().GetData())
+	chunk, err = stream.Recv()
+	require.Nil(t, chunk)
+	require.ErrorIs(t, err, io.EOF)
+	require.Equal(t, 1, leftStream.closeCount())
+	require.Equal(t, 1, rightStream.closeCount())
+}
+
 func TestShardSearchStreamCloseReleasesChildStream(t *testing.T) {
 	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
 	request := newTestSearchRequest(1)
@@ -309,10 +361,13 @@ func (f *fakeQueryPlanClient) GetMVCCTimestamp(_ context.Context, shardID qviews
 type fakeViewQueryServiceClient struct {
 	ViewQueryServiceClient
 	searchReq          *viewpb.SearchOnViewRequest
+	queryReq           *viewpb.QueryOnViewRequest
 	searchResponse     *viewpb.SearchOnViewResponse
 	searchOnViewStream func(context.Context, qviews.WorkNode, *viewpb.SearchOnViewRequest) (searchutil.ReduceStream, error)
+	queryOnViewStream  func(context.Context, qviews.WorkNode, *viewpb.QueryOnViewRequest) (queryutil.ReduceStream, error)
 	searchCalls        int
 	searchStreamCalls  int
+	queryStreamCalls   int
 }
 
 func (f *fakeViewQueryServiceClient) SearchOnView(_ context.Context, _ qviews.WorkNode, req *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {
@@ -338,6 +393,14 @@ func (f *fakeViewQueryServiceClient) QueryOnView(context.Context, qviews.WorkNod
 	return &viewpb.QueryOnViewResponse{}, nil
 }
 
+func (f *fakeViewQueryServiceClient) QueryOnViewStream(ctx context.Context, node qviews.WorkNode, req *viewpb.QueryOnViewRequest) (queryutil.ReduceStream, error) {
+	f.queryReq = req
+	f.queryStreamCalls++
+	if f.queryOnViewStream != nil {
+		return f.queryOnViewStream(ctx, node, req)
+	}
+	return &fakeQueryStream{}, nil
+}
 type fakeSearchResultReducer struct{}
 
 func (fakeSearchResultReducer) Add(qviews.ShardID, *viewpb.SearchOnViewResponse) error {
@@ -412,6 +475,53 @@ func (s *fakeSearchStream) closeCount() int {
 	return s.closeCalls
 }
 
+type fakeQueryStreamRecv struct {
+	chunk *internalpb.RetrieveResults
+	err   error
+}
+
+type fakeQueryStream struct {
+	mu         sync.Mutex
+	ctx        context.Context
+	recv       []fakeQueryStreamRecv
+	closeCalls int
+}
+
+func (s *fakeQueryStream) Recv() (*internalpb.RetrieveResults, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ctx != nil {
+		select {
+		case <-s.ctx.Done():
+			return nil, s.ctx.Err()
+		default:
+		}
+	}
+	if len(s.recv) == 0 {
+		return nil, io.EOF
+	}
+	next := s.recv[0]
+	s.recv = s.recv[1:]
+	return next.chunk, next.err
+}
+
+func (s *fakeQueryStream) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.closeCalls++
+	return nil
+}
+
+func (*fakeQueryStream) Interrupt() (*internalpb.RetrieveResults, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (s *fakeQueryStream) closeCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.closeCalls
+}
+
 func newTestShardClient(maxRetries int, shardID qviews.ShardID, plan *viewpb.QueryPlan, queryService ViewQueryServiceClient) *shardViewQueryClient {
 	return newShardViewQueryClient(
 		maxRetries,
@@ -428,6 +538,30 @@ func newTestSearchRequest(topK int) *internalpb.SearchRequest {
 		Topk:             int64(topK),
 		MetricType:       "IP",
 		IsIterator:       true,
+	}
+}
+
+func newTestQueryChunk(ids []int64) *internalpb.RetrieveResults {
+	values := make([]int64, len(ids))
+	for i, id := range ids {
+		values[i] = id * 10
+	}
+	return &internalpb.RetrieveResults{
+		Status: merr.Success(),
+		Ids: &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: ids}},
+		},
+		FieldsData: []*schemapb.FieldData{
+			{
+				Type:    schemapb.DataType_Int64,
+				FieldId: 101,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: values}},
+					},
+				},
+			},
+		},
 	}
 }
 

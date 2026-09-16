@@ -423,6 +423,8 @@ service ViewQueryService {
     rpc SearchOnViewStream(stream SearchOnViewStreamRequest) returns (stream SearchOnViewStreamResponse) {}
     // QueryOnView executes a query (retrieve by expression) on segments belonging to the given view version.
     rpc QueryOnView(QueryOnViewRequest) returns (QueryOnViewResponse) {}
+    // QueryOnViewStream executes the same query over a bidirectional stream.
+    rpc QueryOnViewStream(stream QueryOnViewStreamRequest) returns (stream QueryOnViewStreamResponse) {}
     rpc StatisticsOnView(StatisticsOnViewRequest) returns (StatisticsOnViewResponse) {}
 }
 
@@ -484,6 +486,7 @@ message QueryOnViewRequest {
     QueryViewVersion version = 3;
     QueryPlanMVCC mvcc = 4;
     SegmentSelection segment_selection = 5;
+    int64 stream_chunk_size = 6;
 }
 
 message QueryOnViewResponse {
@@ -552,9 +555,26 @@ message StreamingNodeRequestContext {
     // Node selected for this attempt; does not imply the server received it.
     int64 node_id = 1;
 }
-
 // Monotonic lifecycle controls for one QueryView identity.
 message QueryViewControl {
     // Explicit collection teardown skips timed retention, never operation references.
     bool preempt_serving_lease = 1;
 }
+
+message QueryOnViewStreamRequest {
+    oneof payload {
+        QueryOnViewRequest request = 1;
+        QueryOnViewInterrupt interrupt = 2;
+    }
+}
+
+message QueryOnViewInterrupt {
+}
+
+message QueryOnViewStreamResponse {
+    oneof payload {
+        internal.RetrieveResults chunk = 1;
+        internal.RetrieveResults metadata = 2;
+    }
+}
+
