@@ -28,7 +28,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/mocks"
@@ -3368,12 +3367,11 @@ func TestCopySegmentAndIndexFiles_LocalStorageV3UsesCompletePaths(t *testing.T) 
 	require.NoError(t, cm.Write(ctx, sourcePathlessDeltaPath, []byte("pathless-delta-data")))
 
 	source := &datapb.CopySegmentSource{
-		CollectionId:     111,
-		PartitionId:      222,
-		SegmentId:        333,
-		StorageVersion:   storage.StorageV3,
-		ManifestHasIndex: proto.Bool(false),
-		ManifestPath:     packed.MarshalManifestPath(path.Join(root, "insert_log/111/222/333"), 1),
+		CollectionId:   111,
+		PartitionId:    222,
+		SegmentId:      333,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   packed.MarshalManifestPath(path.Join(root, "insert_log/111/222/333"), 1),
 		InsertBinlogs: []*datapb.FieldBinlog{{
 			FieldID: 100,
 			Binlogs: []*datapb.Binlog{{
@@ -3419,7 +3417,6 @@ func TestCopySegmentAndIndexFiles_LocalStorageV3UsesCompletePaths(t *testing.T) 
 	result, copiedFiles, err := CopySegmentAndIndexFiles(
 		ctx,
 		cm,
-		storageConfig,
 		storageConfig,
 		copier,
 		"",
@@ -3497,7 +3494,7 @@ func TestCopySegmentAndIndexFiles_ExternalSourceToLocalCanonicalLayout(t *testin
 	source := &datapb.CopySegmentSource{
 		CollectionId: 111, PartitionId: 222, SegmentId: 333,
 		SourceRootPath: "s3://source-bucket/source-root",
-		StorageVersion: storage.StorageV3, ManifestHasIndex: proto.Bool(false), ManifestPath: packed.MarshalManifestPath(sourceBase, 17), NumOfRows: 1,
+		StorageVersion: storage.StorageV3, ManifestPath: packed.MarshalManifestPath(sourceBase, 17), NumOfRows: 1,
 		StatsBinlogs: binlog(sourceStats), Bm25Binlogs: binlog(sourceBM25), DeltaBinlogs: binlog(sourceDelta),
 		IndexFiles: []*indexpb.IndexFilePathInfo{{
 			BuildID: 7000, IndexFilePaths: []string{sourceIndex},
@@ -3520,7 +3517,6 @@ func TestCopySegmentAndIndexFiles_ExternalSourceToLocalCanonicalLayout(t *testin
 	})
 	result, copiedFiles, err := CopySegmentAndIndexFiles(ctx, &struct{ storage.ChunkManager }{},
 		&indexpb.StorageConfig{StorageType: "remote", RootPath: "source-root", BucketName: "source-bucket"},
-		&indexpb.StorageConfig{StorageType: "local", RootPath: root},
 		copier, "source-bucket", "", source, target, nil)
 	require.NoError(t, err)
 	require.Len(t, copiedFiles, len(mappings))
