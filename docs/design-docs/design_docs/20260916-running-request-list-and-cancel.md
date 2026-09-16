@@ -162,7 +162,7 @@ message CancelRequestsRequest {
 
 message CancelRequestsResponse {
   common.Status status = 1;
-  repeated int64 cancelled = 2;
+  repeated RunningRequestInfo cancelled = 2;  // snapshot taken at cancellation
   repeated int64 not_found = 3;
   repeated NodeResult node_results = 4;
 }
@@ -173,6 +173,11 @@ message CancelRequestsResponse {
   proxy, so only matching rows travel to the coordinator.
 - `Cancel` accepts request ids only. An empty list is an `InputError`. An id
   whose request is not cancellable is an `InputError`, not `not_found`.
+- `cancelled` carries, for each cancelled request, a snapshot of its registry
+  record taken at the moment of cancellation. `elapsed_ms` is therefore how
+  long the request had been running when it was cancelled, and the other
+  fields (user, collection, nq, topk, expr, client address) identify what was
+  cancelled without a second look at an earlier `List` output.
 - REST v2: `POST /v2/vectordb/requests/list` and
   `POST /v2/vectordb/requests/cancel`, wired through `wrapperPost` in
   `internal/distributed/proxy/httpserver/handler_v2.go`.
