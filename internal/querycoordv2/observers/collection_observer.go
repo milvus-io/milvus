@@ -778,7 +778,7 @@ func (ob *CollectionObserver) observeResourceGroupTimeout(ctx context.Context, k
 		return
 	}
 
-	if now.Before(task.LastProgressAt.Add(Params.QueryCoordCfg.LoadTimeoutSeconds.GetAsDuration(time.Second))) {
+	if now.Before(task.LastProgressAt.Add(scopedStallTimeout())) {
 		return
 	}
 
@@ -1077,6 +1077,25 @@ func (ob *CollectionObserver) groupHoldsReplicas(ctx context.Context, task LoadT
 // tick in between that read one, for longer than d as of now.
 func unknownForLongerThan(task LoadTask, now time.Time, d time.Duration) bool {
 	return !task.UnknownSince.IsZero() && now.Sub(task.UnknownSince) > d
+}
+
+// scopedStallTimeout is how long a resource-group-scoped task's percentage may
+// sit still before the group counts as stalled.
+//
+// It is deliberately longer than the load timeout the unscoped path uses,
+// because a scoped group has a repair of its own to wait for: when a replica
+// loses its regular query node, the segment checker keeps its sealed segments
+// waiting for that node for a whole load timeout (regularNodeGrace) before it
+// places them on a streaming node's query node, and those placements then need
+// time to move the figure. With both clocks set to one load timeout, a group
+// whose regular node went away for good is torn down at about the moment the
+// fallback starts repairing it - the two fire within a heartbeat of each
+// other, since losing the node usually moves the percentage and so restarts
+// this clock. Waiting for two gives the fallback a full grace period plus a
+// load timeout of its own; a group that is genuinely stuck is still released,
+// only later.
+func scopedStallTimeout() time.Duration {
+	return 2 * Params.QueryCoordCfg.LoadTimeoutSeconds.GetAsDuration(time.Second)
 }
 
 func (ob *CollectionObserver) readyToObserve(ctx context.Context, collectionID int64) bool {
