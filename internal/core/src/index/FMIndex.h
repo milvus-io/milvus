@@ -95,6 +95,7 @@ constexpr const char* FMINDEX_META_NULLABLE = "nullable";
 // Regex / range / equality fall back to the raw-data scan (see ShouldUseOp).
 class FMIndex : public ScalarIndex<std::string> {
  public:
+    using ScalarIndex<std::string>::Load;
     using MemFileManager = storage::MemFileManagerImpl;
     using MemFileManagerPtr = std::shared_ptr<MemFileManager>;
 

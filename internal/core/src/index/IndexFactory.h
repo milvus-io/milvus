@@ -31,7 +31,6 @@
 #include "index/ScalarIndex.h"
 #include "cachinglayer/LoadingOverhead.h"
 #include "storage/FileManager.h"
-#include "storage/IndexEntryReader.h"
 
 namespace milvus::index {
 
@@ -70,21 +69,6 @@ class IndexFactory {
                       int64_t dim);
 
     LoadResourceRequest
-    IndexLoadResource(
-        DataType field_type,
-        DataType element_type,
-        IndexVersion index_version,
-        uint64_t index_size_in_bytes,
-        const std::map<std::string, std::string>& index_params,
-        bool mmap_enable,
-        int64_t num_rows,
-        int64_t dim,
-        const std::vector<std::string>& index_files,
-        const storage::FileManagerContext& file_manager_context,
-        std::optional<storage::EntryStreamLoadInfo>* stream_load_info = nullptr,
-        bool* use_shared_memory_overhead_group = nullptr);
-
-    LoadResourceRequest
     VecIndexLoadResource(DataType field_type,
                          DataType element_type,
                          IndexVersion index_version,
@@ -102,19 +86,6 @@ class IndexFactory {
         const std::map<std::string, std::string>& index_params,
         bool mmap_enable,
         int64_t num_rows);
-
-    LoadResourceRequest
-    ScalarIndexLoadResource(
-        DataType field_type,
-        IndexVersion index_version,
-        uint64_t index_size_in_bytes,
-        const std::map<std::string, std::string>& index_params,
-        bool mmap_enable,
-        int64_t num_rows,
-        const std::vector<std::string>& index_files,
-        const storage::FileManagerContext& file_manager_context,
-        std::optional<storage::EntryStreamLoadInfo>* stream_load_info = nullptr,
-        bool* use_shared_memory_overhead_group = nullptr);
 
     // Inspects persisted metadata for the mode captured in the file context.
     // Estimates remain valid across worker and admission-limit updates.
@@ -220,16 +191,6 @@ class IndexFactory {
         bool mmap_enable,
         int64_t num_rows,
         uint64_t stream_memory_overhead);
-
-    LoadResourceRequest
-    ScalarIndexLoadResourceImpl(
-        DataType field_type,
-        IndexVersion index_version,
-        uint64_t index_size_in_bytes,
-        const std::map<std::string, std::string>& index_params,
-        bool mmap_enable,
-        int64_t num_rows,
-        const std::optional<storage::EntryStreamLoadInfo>& stream_load_info);
 
     template <typename T>
     ScalarIndexPtr<T>

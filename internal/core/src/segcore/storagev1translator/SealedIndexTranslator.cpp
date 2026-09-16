@@ -111,9 +111,7 @@ SealedIndexTranslator::SealedIndexTranslator(
             index_load_info_.index_params,
             index_load_info_.enable_mmap,
             index_load_info_.num_rows,
-            index_load_info_.dim,
-            index_load_info_.index_files,
-            file_manager_context_);
+            index_load_info_.dim);
     load_resource_request_ =
         index_load_info_.load_resource_request.value_or(estimated);
 }

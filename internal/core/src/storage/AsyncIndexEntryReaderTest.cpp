@@ -527,14 +527,12 @@ TEST_F(AsyncIndexEntryReaderTest, CatalogExposesStablePlainEntrySources) {
     const auto& alpha_source =
         std::get<PlainEntrySource>(reader->Catalog().At("alpha").source);
     EXPECT_EQ(alpha_source.remote_offset, MILVUS_V3_MAGIC_SIZE);
-    EXPECT_EQ(alpha_source.remote_bytes, alpha.size());
 
     EXPECT_EQ(reader->Catalog().At("beta").name, "beta");
     EXPECT_EQ(reader->Catalog().At("beta").plaintext_size, beta.size());
     const auto& beta_source =
         std::get<PlainEntrySource>(reader->Catalog().At("beta").source);
     EXPECT_EQ(beta_source.remote_offset, MILVUS_V3_MAGIC_SIZE + alpha.size());
-    EXPECT_EQ(beta_source.remote_bytes, beta.size());
 
     EXPECT_EQ(reader->Catalog().At(MILVUS_V3_META_ENTRY_NAME).name,
               MILVUS_V3_META_ENTRY_NAME);

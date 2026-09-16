@@ -1101,6 +1101,10 @@ InvertedIndexTantivy<T>::PlanLoad(const storage::IndexEntryCatalog& catalog,
                   null_bytes,
                   sizeof(size_t));
     }
+    // TODO: With a validated row count available up front, build the validity
+    // bitmap and release null_offsets as soon as this entry passes its CRC check,
+    // instead of waiting for all index files. Before sharing this overhead,
+    // admission must cover the buffer's full allocation-to-release lifetime.
     context->null_offsets =
         std::make_shared<std::vector<size_t>>(null_bytes / sizeof(size_t));
     plan.entries.push_back(storage::EntryLoadPlan{

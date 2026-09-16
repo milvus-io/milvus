@@ -122,8 +122,7 @@ AsyncIndexEntryReader::Open(std::shared_ptr<milvus::InputStream> input,
                 {name,
                  meta.plain.size,
                  meta.plain.crc32,
-                 PlainEntrySource{MILVUS_V3_MAGIC_SIZE + meta.plain.offset,
-                                  meta.plain.size}});
+                 PlainEntrySource{MILVUS_V3_MAGIC_SIZE + meta.plain.offset}});
             continue;
         }
         EncryptedEntrySource source{meta.enc.original_size, {}};

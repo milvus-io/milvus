@@ -32,7 +32,6 @@ namespace milvus::storage {
 struct PlainEntrySource {
     // Absolute offset in the packed V3 object.
     uint64_t remote_offset;
-    size_t remote_bytes;
 };
 
 struct EncryptedSliceSource {

@@ -33,6 +33,7 @@
 #include <vector>
 
 #include "common/EasyAssert.h"
+#include "folly/executors/ManualExecutor.h"
 #include "storage/RemoteInputStream.h"
 #include "test_utils/AsyncLoadTestUtils.h"
 
@@ -334,6 +335,41 @@ TEST(RemoteInputStreamTest, AsyncOpenRejectsNegativeSize) {
     EXPECT_THROW(
         folly::coro::blockingWait(RemoteInputStream::OpenAsync(fs, "packed")),
         SegcoreError);
+}
+
+TEST(RemoteInputStreamTest, AsyncFallbackCopiesOnCallerExecutor) {
+    class PendingReadFile : public milvus::test::AsyncTrackingRandomAccessFile {
+     public:
+        PendingReadFile() : AsyncTrackingRandomAccessFile({'a', 'b', 'c'}) {
+        }
+
+        arrow::Future<std::shared_ptr<arrow::Buffer>>
+        ReadAsync(const arrow::io::IOContext&, int64_t, int64_t) override {
+            started = true;
+            return pending;
+        }
+
+        bool started{false};
+        arrow::Future<std::shared_ptr<arrow::Buffer>> pending =
+            arrow::Future<std::shared_ptr<arrow::Buffer>>::Make();
+    };
+
+    auto file = std::make_shared<PendingReadFile>();
+    RemoteInputStream stream(file);
+    folly::ManualExecutor executor;
+    std::array<char, 3> data{};
+    auto read = stream.ReadAtAsync(data.data(), 0, data.size()).via(&executor);
+    executor.drain();
+    EXPECT_TRUE(file->started);
+    EXPECT_FALSE(read.isReady());
+
+    // Completing Arrow IO must only enqueue the copy on the caller's executor.
+    file->pending.MarkFinished(arrow::Buffer::FromString("abc"));
+    EXPECT_EQ(data, (std::array<char, 3>{}));
+    EXPECT_FALSE(read.isReady());
+    executor.drain();
+    EXPECT_EQ(std::move(read).get(), data.size());
+    EXPECT_EQ(std::string(data.data(), data.size()), "abc");
 }
 
 TEST(RemoteInputStreamTest, RetriesInternalFailedFlushError) {

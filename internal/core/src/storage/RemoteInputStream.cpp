@@ -188,27 +188,34 @@ RemoteInputStream::ReadAtAsyncImpl(void* data, size_t offset, size_t size) {
     auto* native = dynamic_cast<milvus_storage::NonBlockingRandomAccessFile*>(
         remote_file_.get());
     for (int attempt = 0;; ++attempt) {
-        auto future =
-            native != nullptr
-                ? native->ReadAtAsyncInto(
-                      offset, bytes, static_cast<uint8_t*>(data))
-                : remote_file_
-                      ->ReadAsync(remote_file_->io_context(), offset, bytes)
-                      .Then([data, bytes](
-                                const std::shared_ptr<arrow::Buffer>& buffer)
-                                -> arrow::Result<int64_t> {
-                          if (buffer == nullptr || buffer->size() < 0 ||
-                              static_cast<uint64_t>(buffer->size()) > bytes) {
-                              return arrow::Status::IOError(
-                                  "Invalid async read buffer");
-                          }
-                          if (buffer->size() != 0) {
-                              std::memcpy(data, buffer->data(), buffer->size());
-                          }
-                          return buffer->size();
-                      });
-        const auto result = co_await folly::coro::co_withCancellation(
-            folly::CancellationToken{}, AwaitFileResult(std::move(future)));
+        arrow::Result<int64_t> result;
+        if (native != nullptr) {
+            result = co_await folly::coro::co_withCancellation(
+                folly::CancellationToken{},
+                AwaitFileResult(native->ReadAtAsyncInto(
+                    offset, bytes, static_cast<uint8_t*>(data))));
+        } else {
+            auto read = co_await folly::coro::co_withCancellation(
+                folly::CancellationToken{},
+                AwaitFileResult(remote_file_->ReadAsync(offset, bytes)));
+            if (!read.ok()) {
+                result = read.status();
+            } else {
+                // Resume on the caller's executor before copying a whole slice.
+                // Arrow's completion callback only forwards the buffer.
+                const auto& buffer = *read;
+                if (buffer == nullptr || buffer->size() < 0 ||
+                    static_cast<uint64_t>(buffer->size()) > bytes) {
+                    result =
+                        arrow::Status::IOError("Invalid async read buffer");
+                } else {
+                    if (buffer->size() != 0) {
+                        std::memcpy(data, buffer->data(), buffer->size());
+                    }
+                    result = buffer->size();
+                }
+            }
+        }
         if (result.ok()) {
             AssertInfo(*result >= 0 && static_cast<uint64_t>(*result) <= bytes,
                        "Invalid async read count: {} for {} bytes",
