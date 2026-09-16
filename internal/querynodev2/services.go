@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
@@ -260,6 +261,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		node.chunkManager,
 		queryView,
 		node.binlogSaver,
+		delegator.WithInitialSchema(req.GetSchema()),
 		delegator.WithLeaderViewUpdatedCallback(node.markLeaderViewUpdated),
 	)
 	if err != nil {
@@ -578,12 +580,25 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 
 	// Actual load segment
 	log.Info(ctx, "start to load segments...")
-	loaded, err := node.loader.Load(ctx,
-		req.GetCollectionID(),
-		segments.SegmentTypeSealed,
-		req.GetVersion(),
-		req.GetInfos()...,
-	)
+	var loaded []segments.Segment
+	if loader, ok := node.loader.(interface {
+		LoadWithSchema(context.Context, int64, segments.SegmentType, int64, *schemapb.CollectionSchema, ...*querypb.SegmentLoadInfo) ([]segments.Segment, error)
+	}); ok {
+		loaded, err = loader.LoadWithSchema(ctx,
+			req.GetCollectionID(),
+			segments.SegmentTypeSealed,
+			req.GetVersion(),
+			req.GetSchema(),
+			req.GetInfos()...,
+		)
+	} else {
+		loaded, err = node.loader.Load(ctx,
+			req.GetCollectionID(),
+			segments.SegmentTypeSealed,
+			req.GetVersion(),
+			req.GetInfos()...,
+		)
+	}
 	if err != nil {
 		return merr.Status(err), nil
 	}

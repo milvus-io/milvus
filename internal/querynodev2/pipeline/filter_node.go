@@ -95,7 +95,15 @@ func (fNode *filterNode) Operate(in Msg) Msg {
 				mlog.Err(err),
 			)
 		} else {
-			out.append(msg)
+			if err := out.append(msg); err != nil {
+				wrapped := merr.Wrap(err, "failed to append filtered message")
+				mlog.Error(ctx, "failed to append filtered message, stop process to replay WAL",
+					mlog.String("message type", msg.Type().String()),
+					mlog.String("channel", fNode.channel),
+					mlog.FieldCollectionID(fNode.collectionID),
+					mlog.Err(wrapped))
+				panic(wrapped)
+			}
 		}
 	}
 	fNode.delegator.TryCleanExcludedSegments(streamMsgPack.EndTs)
