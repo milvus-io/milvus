@@ -23,6 +23,7 @@
 
 using milvus::FieldId;
 using milvus::Geometry;
+using milvus::exec::GeometryChunkStore;
 using milvus::exec::SimpleGeometryCacheManager;
 
 namespace {
@@ -70,8 +71,7 @@ TEST(GeometryCacheLifetime, SharedPtrOutlivesSegmentRemoval) {
 
     // The cache we still hold remains alive and readable (no use-after-free).
     {
-        auto lock = cache->AcquireReadLock();
-        const Geometry* g = cache->GetByOffsetUnsafe(0);
+        const Geometry* g = cache->GetByOffset(0);
         ASSERT_NE(g, nullptr);
         EXPECT_TRUE(g->IsValid());
     }
@@ -92,9 +92,8 @@ TEST(GeometryCacheLifetime, CacheOwnsItsContext) {
     cache->AppendDataAt(1, nullptr, 0);  // null geometry
     EXPECT_EQ(cache->Size(), 2u);
     {
-        auto lock = cache->AcquireReadLock();
-        EXPECT_NE(cache->GetByOffsetUnsafe(0), nullptr);
-        EXPECT_EQ(cache->GetByOffsetUnsafe(1), nullptr);  // null -> nullptr
+        EXPECT_NE(cache->GetByOffset(0), nullptr);
+        EXPECT_EQ(cache->GetByOffset(1), nullptr);  // null -> nullptr
     }
 
     mgr.RemoveSegmentCaches(kInstanceA, seg_id);
@@ -114,12 +113,11 @@ TEST(GeometryCacheLifetime, ConcurrentGetAndRemove) {
         while (!stop.load()) {
             auto c = mgr.GetCache(kInstanceA, seg_id, field_id);
             if (c) {
-                auto lock = c->AcquireReadLock();
-                // Size() would re-acquire the shared_mutex this thread already
-                // holds via the read lock -- recursive shared locking is UB
-                // and deadlocks against the concurrently queued writer.
-                if (c->SizeUnsafe() > 0) {
-                    const Geometry* g = c->GetByOffsetUnsafe(0);
+                // Reads take no lock at all; the shared_ptr above is the
+                // only thing keeping the cache alive under a concurrent
+                // RemoveSegmentCaches.
+                if (c->Size() > 0) {
+                    const Geometry* g = c->GetByOffset(0);
                     (void)g;
                 }
             }
@@ -161,12 +159,11 @@ TEST(GeometryCacheLifetime, CorruptWkbCachedAsInvalidPlaceholder) {
     // The corrupt row occupies its offset (no shift of later rows).
     ASSERT_EQ(cache->Size(), 3u);
     {
-        auto lock = cache->AcquireReadLock();
-        EXPECT_NE(cache->GetByOffsetUnsafe(0), nullptr);
+        EXPECT_NE(cache->GetByOffset(0), nullptr);
         // Corrupt row -> invalid entry -> nullptr, same contract as null rows;
         // every reader skips it.
-        EXPECT_EQ(cache->GetByOffsetUnsafe(1), nullptr);
-        EXPECT_NE(cache->GetByOffsetUnsafe(2), nullptr);
+        EXPECT_EQ(cache->GetByOffset(1), nullptr);
+        EXPECT_NE(cache->GetByOffset(2), nullptr);
     }
 
     mgr.RemoveSegmentCaches(kInstanceA, seg_id);
@@ -175,8 +172,8 @@ TEST(GeometryCacheLifetime, CorruptWkbCachedAsInvalidPlaceholder) {
 // Regression for the shared cache-context concurrency defect: cache-owned
 // Geometry instances all carry the cache's single GEOS context, which is not
 // thread-safe. The GIS filter path evaluates predicates on those shared
-// geometries under a *shared* read lock, so concurrent queries must each drive
-// GEOS through their own per-thread context (the context-taking predicate
+// geometries with no lock at all, so concurrent queries must each drive GEOS
+// through their own per-thread context (the context-taking predicate
 // overloads) rather than the geometry's stored context. This test mirrors that
 // usage: many threads read the same cached geometry at once and evaluate
 // predicates on per-thread contexts; results must stay correct.
@@ -238,9 +235,8 @@ TEST(GeometryCacheConcurrency, PredicatesUsePerThreadContext) {
             while (!go.load(std::memory_order_relaxed)) {
             }
             for (int i = 0; i < kIters; ++i) {
-                auto lock = cache->AcquireReadLock();
                 for (size_t off = 0; off < wkbs.size(); ++off) {
-                    const Geometry* g = cache->GetByOffsetUnsafe(off);
+                    const Geometry* g = cache->GetByOffset(off);
                     if (g == nullptr) {
                         failures.fetch_add(1, std::memory_order_relaxed);
                         continue;
@@ -273,10 +269,10 @@ TEST(GeometryCacheConcurrency, PredicatesUsePerThreadContext) {
 // in the manager map before it is populated, and AppendDataAt can throw a
 // retriable MemAllocateFailed mid-batch. With the old tail append, a retry
 // after such a partial write appended AFTER the leftover prefix, shifting
-// every subsequent row's absolute offset -- GetByOffsetUnsafe returned the
-// wrong geometry with no error. Offset-addressed writes must instead be
-// idempotent: re-running the same batch overwrites the same slots and
-// alignment never drifts.
+// every subsequent row's absolute offset -- GetByOffset returned the wrong
+// geometry with no error. Offset-addressed writes must instead be idempotent:
+// re-running the same batch addresses the same slots (the ones it already
+// published are simply skipped) and alignment never drifts.
 TEST(GeometryCacheLifetime, RetryAfterPartialWriteKeepsOffsetsAligned) {
     auto& mgr = SimpleGeometryCacheManager::Instance();
     const int64_t seg_id = 900000007;
@@ -304,9 +300,8 @@ TEST(GeometryCacheLifetime, RetryAfterPartialWriteKeepsOffsetsAligned) {
     ASSERT_EQ(cache->Size(), wkbs.size());
     auto ctx = GEOS_init_r();
     {
-        auto lock = cache->AcquireReadLock();
         for (size_t i = 0; i < wkbs.size(); ++i) {
-            const Geometry* g = cache->GetByOffsetUnsafe(i);
+            const Geometry* g = cache->GetByOffset(i);
             ASSERT_NE(g, nullptr) << "offset " << i;
             Geometry probe(
                 ctx,
@@ -336,10 +331,9 @@ TEST(GeometryCacheLifetime, OutOfOrderWritesFillGapsInPlace) {
     cache->AppendDataAt(3, late.data(), late.size());
     ASSERT_EQ(cache->Size(), 4u);
     {
-        auto lock = cache->AcquireReadLock();
-        EXPECT_EQ(cache->GetByOffsetUnsafe(0), nullptr);
-        EXPECT_EQ(cache->GetByOffsetUnsafe(2), nullptr);
-        EXPECT_NE(cache->GetByOffsetUnsafe(3), nullptr);
+        EXPECT_EQ(cache->GetByOffset(0), nullptr);
+        EXPECT_EQ(cache->GetByOffset(2), nullptr);
+        EXPECT_NE(cache->GetByOffset(3), nullptr);
     }
 
     // The earlier batch lands afterwards and fills its own slots.
@@ -348,11 +342,10 @@ TEST(GeometryCacheLifetime, OutOfOrderWritesFillGapsInPlace) {
     cache->AppendDataAt(2, early.data(), early.size());
     ASSERT_EQ(cache->Size(), 4u);
     {
-        auto lock = cache->AcquireReadLock();
-        EXPECT_NE(cache->GetByOffsetUnsafe(0), nullptr);
-        EXPECT_EQ(cache->GetByOffsetUnsafe(1), nullptr);  // real null row
-        EXPECT_NE(cache->GetByOffsetUnsafe(2), nullptr);
-        EXPECT_NE(cache->GetByOffsetUnsafe(3), nullptr);
+        EXPECT_NE(cache->GetByOffset(0), nullptr);
+        EXPECT_EQ(cache->GetByOffset(1), nullptr);  // real null row
+        EXPECT_NE(cache->GetByOffset(2), nullptr);
+        EXPECT_NE(cache->GetByOffset(3), nullptr);
     }
     mgr.RemoveSegmentCaches(kInstanceA, seg_id);
 }
@@ -391,15 +384,12 @@ TEST(GeometryCacheLifetime, SameSegmentIdDifferentInstancesDoNotShareOrEvict) {
     auto still_there = mgr.GetCache(kInstanceB, seg_id, field_id);
     ASSERT_NE(still_there, nullptr);
     EXPECT_EQ(still_there.get(), arriving.get());
-    {
-        auto lock = still_there->AcquireReadLock();
-        EXPECT_NE(still_there->GetByOffsetUnsafe(0), nullptr);
-    }
+    { EXPECT_NE(still_there->GetByOffset(0), nullptr); }
 
     mgr.RemoveSegmentCaches(kInstanceB, seg_id);
 }
 
-// GetByOffsetUnsafe must answer "no geometry here" with nullptr rather than
+// GetByOffset must answer "no geometry here" with nullptr rather than
 // throwing: on a growing segment the R-Tree is fed before the cache, so a
 // concurrent query sized by the index Count() can legitimately probe an offset
 // the cache has not reached yet. Throwing a non-retriable UnexpectedError out
@@ -413,27 +403,30 @@ TEST(GeometryCacheLifetime, OutOfRangeOffsetReturnsNullptrNotThrow) {
     auto cache = mgr.GetOrCreateCache(kInstanceA, seg_id, field_id);
     cache->AppendDataAt(0, wkb.data(), wkb.size());
 
-    auto lock = cache->AcquireReadLock();
-    EXPECT_NE(cache->GetByOffsetUnsafe(0), nullptr);
-    EXPECT_EQ(cache->GetByOffsetUnsafe(1), nullptr);
-    EXPECT_EQ(cache->GetByOffsetUnsafe(1000000), nullptr);
+    EXPECT_NE(cache->GetByOffset(0), nullptr);
+    EXPECT_EQ(cache->GetByOffset(1), nullptr);
+    EXPECT_EQ(cache->GetByOffset(1000000), nullptr);
 }
 
-// Regression for issue #52191: the cache's shared_mutex must not let a
-// continuous stream of overlapping readers starve a writer.
+// Regression for issue #52191: a continuous stream of overlapping readers must
+// never delay a writer.
 //
-// SimpleGeometryCache is read under AcquireReadLock() by every GIS expression
-// (GISFunctionFilterExpr / GISConjunctExpr hold it across a whole batch), while
-// the growing-segment insert path writes through AppendDataAt(). With a
-// reader-preferring rwlock -- which is what libstdc++'s std::shared_mutex maps
-// to on Linux, since glibc's pthread_rwlock_t defaults to
-// PTHREAD_RWLOCK_PREFER_READER_NP -- a writer only ever acquires during a
-// window in which the reader count drops to zero. Under sustained query load
-// that window may never occur, and the insert stalls indefinitely.
+// SimpleGeometryCache is read by every GIS expression (GISFunctionFilterExpr /
+// GISConjunctExpr walk it row by row for a whole batch) while the
+// growing-segment insert path writes through AppendDataAt(). The cache used to
+// serialize the two on one rwlock, with readers holding the shared side across
+// a whole batch; under sustained query load the reader count essentially never
+// dropped to zero, and on a reader-preferring rwlock -- which is what
+// libstdc++'s std::shared_mutex maps to on Linux, since glibc's
+// pthread_rwlock_t defaults to PTHREAD_RWLOCK_PREFER_READER_NP -- the writer
+// was never admitted and the insert stalled indefinitely.
 //
-// The readers below deliberately overlap: each re-acquires immediately after
-// releasing, so with enough of them the reader count is essentially never zero.
-// Readers are stopped BEFORE joining the writer, so a starved writer makes this
+// Reads are now lock-free (chunked storage that never relocates, slots
+// published with a release store), and the writer's mutex is one no reader
+// ever takes, so the two paths do not interact at all. The readers below
+// deliberately hammer the read path for the whole duration of the write.
+//
+// Readers are stopped BEFORE joining the writer, so a blocked writer makes this
 // test fail on the elapsed-time assertion instead of hanging forever.
 TEST(GeometryCacheConcurrency, WriterIsNotStarvedByOverlappingReaders) {
     auto& mgr = SimpleGeometryCacheManager::Instance();
@@ -445,9 +438,8 @@ TEST(GeometryCacheConcurrency, WriterIsNotStarvedByOverlappingReaders) {
     cache->AppendDataAt(0, wkb.data(), wkb.size());
 
     constexpr int kReaders = 8;
-    // Generous: with a write-preferring lock the writer is admitted in about a
-    // millisecond, so this only trips on genuine starvation, not on a loaded
-    // CI machine.
+    // Generous: the writer takes an uncontended mutex and one release store,
+    // so this only trips on genuine starvation, not on a loaded CI machine.
     constexpr auto kWriterBudget = std::chrono::seconds(5);
 
     std::atomic<bool> stop{false};
@@ -458,18 +450,17 @@ TEST(GeometryCacheConcurrency, WriterIsNotStarvedByOverlappingReaders) {
         readers.emplace_back([&]() {
             readers_running.fetch_add(1);
             while (!stop.load(std::memory_order_relaxed)) {
-                auto lock = cache->AcquireReadLock();
-                // Mirror the expression paths: real work is done while the
-                // read lock is held, so the lock is held for a while.
+                // Mirror the expression paths: a long run of per-row reads,
+                // which used to be one long-held shared lock.
                 for (int k = 0; k < 64; ++k) {
-                    const Geometry* g = cache->GetByOffsetUnsafe(0);
+                    const Geometry* g = cache->GetByOffset(0);
                     (void)g;
                 }
             }
         });
     }
 
-    // Let the readers reach steady state so the reader count stays above zero.
+    // Let the readers reach steady state so the read path is genuinely busy.
     while (readers_running.load() < kReaders) {
         std::this_thread::yield();
     }
@@ -489,8 +480,9 @@ TEST(GeometryCacheConcurrency, WriterIsNotStarvedByOverlappingReaders) {
     auto elapsed = std::chrono::steady_clock::now() - started;
     bool acquired = write_done.load(std::memory_order_relaxed);
 
-    // Stop the readers first: once they drain, even a starved writer completes,
-    // so join() cannot hang regardless of the outcome asserted below.
+    // Stop the readers first: with the old rwlock even a starved writer
+    // completes once they drain, so join() cannot hang regardless of the
+    // outcome asserted below.
     stop.store(true, std::memory_order_relaxed);
     writer.join();
     for (auto& t : readers) {
@@ -498,16 +490,161 @@ TEST(GeometryCacheConcurrency, WriterIsNotStarvedByOverlappingReaders) {
     }
 
     EXPECT_TRUE(acquired)
-        << "writer did not acquire the cache lock within "
+        << "writer did not publish within "
         << std::chrono::duration_cast<std::chrono::milliseconds>(kWriterBudget)
                .count()
         << " ms while " << kReaders
-        << " overlapping readers held the shared lock -- the writer is being "
-           "starved (issue #52191)";
+        << " readers hammered the read path -- the writer is being starved "
+           "(issue #52191)";
     EXPECT_LT(
         std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count(),
         std::chrono::duration_cast<std::chrono::milliseconds>(kWriterBudget)
             .count());
+    EXPECT_NE(cache->GetByOffset(1), nullptr);
+
+    mgr.RemoveSegmentCaches(kInstanceA, seg_id);
+}
+
+// The other half of #52191: a writer must not delay readers either. Readers
+// run while a writer appends thousands of rows, and every geometry a reader
+// does observe must be fully built -- a torn or half-published slot would show
+// up here as a predicate mismatch (and as a data race under TSAN).
+TEST(GeometryCacheConcurrency, ReadersNeverObserveAPartiallyPublishedSlot) {
+    auto& mgr = SimpleGeometryCacheManager::Instance();
+    const int64_t seg_id = 900000012;
+    const FieldId field_id(32);
+    const std::string wkb = MakePointWkb(1.0, 1.0);
+
+    // Spans several chunks, so the readers race chunk allocation too.
+    constexpr size_t kRows = GeometryChunkStore::kChunkSize * 3 + 7;
+    constexpr int kReaders = 4;
+
+    auto cache = mgr.GetOrCreateCache(kInstanceA, seg_id, field_id);
+
+    std::atomic<bool> stop{false};
+    std::atomic<int> failures{0};
+    std::vector<std::thread> readers;
+    readers.reserve(kReaders);
+    for (int i = 0; i < kReaders; ++i) {
+        readers.emplace_back([&]() {
+            GEOSContextHandle_t ctx = milvus::GetThreadLocalGEOSContext();
+            Geometry probe(ctx, "POINT (1 1)");
+            while (!stop.load(std::memory_order_relaxed)) {
+                for (size_t off = 0; off < kRows; ++off) {
+                    const Geometry* g = cache->GetByOffset(off);
+                    if (g == nullptr) {
+                        continue;  // not published yet: legitimate
+                    }
+                    if (!g->equals(probe, ctx)) {
+                        failures.fetch_add(1, std::memory_order_relaxed);
+                    }
+                }
+            }
+        });
+    }
+
+    for (size_t off = 0; off < kRows; ++off) {
+        cache->AppendDataAt(off, wkb.data(), wkb.size());
+    }
+
+    stop.store(true, std::memory_order_relaxed);
+    for (auto& t : readers) {
+        t.join();
+    }
+
+    EXPECT_EQ(failures.load(), 0);
+    EXPECT_EQ(cache->Size(), kRows);
+    for (size_t off = 0; off < kRows; ++off) {
+        ASSERT_NE(cache->GetByOffset(off), nullptr) << "offset " << off;
+    }
+
+    mgr.RemoveSegmentCaches(kInstanceA, seg_id);
+}
+
+// Lock-free reads are only sound because a published slot is frozen: its
+// address never moves (chunks are never relocated) and its contents are never
+// rewritten. Both halves are pinned here.
+TEST(GeometryCacheLifetime, PublishedSlotsAreFrozenAndStable) {
+    auto& mgr = SimpleGeometryCacheManager::Instance();
+    const int64_t seg_id = 900000013;
+    const FieldId field_id(33);
+    const std::string first = MakePointWkb(1.0, 1.0);
+    const std::string second = MakePointWkb(2.0, 2.0);
+
+    auto cache = mgr.GetOrCreateCache(kInstanceA, seg_id, field_id);
+    cache->AppendDataAt(0, first.data(), first.size());
+    const Geometry* pinned = cache->GetByOffset(0);
+    ASSERT_NE(pinned, nullptr);
+
+    GEOSContextHandle_t ctx = milvus::GetThreadLocalGEOSContext();
+    Geometry expected(ctx, "POINT (1 1)");
+    ASSERT_TRUE(pinned->equals(expected, ctx));
+
+    // FIRST WRITER WINS: an absolute offset denotes one immutable row, so a
+    // second write to it is by contract the same bytes and is skipped rather
+    // than mutating a slot a reader may be holding.
+    cache->AppendDataAt(0, second.data(), second.size());
+    EXPECT_EQ(cache->GetByOffset(0), pinned);
+    EXPECT_TRUE(pinned->equals(expected, ctx));
+
+    // ...and neither does an invalid/null rewrite.
+    cache->AppendDataAt(0, nullptr, 0);
+    EXPECT_EQ(cache->GetByOffset(0), pinned);
+    EXPECT_TRUE(pinned->equals(expected, ctx));
+
+    // Growing past several chunks must not move the slot pinned above, which
+    // a std::vector<Geometry> + resize() would have done on every growth.
+    for (size_t off = 1; off <= GeometryChunkStore::kChunkSize * 2; ++off) {
+        cache->AppendDataAt(off, first.data(), first.size());
+    }
+    EXPECT_EQ(cache->GetByOffset(0), pinned);
+    EXPECT_TRUE(pinned->equals(expected, ctx));
+
+    mgr.RemoveSegmentCaches(kInstanceA, seg_id);
+}
+
+// Absolute offsets are sparse in practice (a batch reserves a range and may
+// land before an earlier one), and the chunk directory grows in geometric
+// slabs. Write across both boundaries and check that gaps read as "no geometry
+// here" while every written row survives.
+TEST(GeometryCacheLifetime, SparseOffsetsAcrossChunkAndSlabBoundaries) {
+    auto& mgr = SimpleGeometryCacheManager::Instance();
+    const int64_t seg_id = 900000014;
+    const FieldId field_id(34);
+    const std::string wkb = MakePointWkb(5.0, 5.0);
+
+    constexpr size_t kChunk = GeometryChunkStore::kChunkSize;
+    const std::vector<size_t> offsets = {
+        0,
+        kChunk - 1,
+        kChunk,         // second chunk, first slab
+        kChunk * 17,    // second slab (slab 0 holds 16 chunks)
+        kChunk * 496,   // sixth slab (slabs 0..4 hold 496 chunks)
+        kChunk * 1000,  // and well past it
+    };
+
+    auto cache = mgr.GetOrCreateCache(kInstanceA, seg_id, field_id);
+    // Deliberately out of order, newest offset first.
+    for (auto it = offsets.rbegin(); it != offsets.rend(); ++it) {
+        cache->AppendDataAt(*it, wkb.data(), wkb.size());
+    }
+
+    EXPECT_EQ(cache->Size(), offsets.back() + 1);
+    for (size_t off : offsets) {
+        ASSERT_NE(cache->GetByOffset(off), nullptr) << "offset " << off;
+    }
+    // Gaps, including ones inside an allocated chunk and ones in a slab that
+    // was never allocated at all.
+    for (size_t off : {size_t{1},
+                       kChunk + 1,
+                       kChunk * 17 + 1,
+                       kChunk * 2,
+                       kChunk * 600,
+                       kChunk * 1000 + 1}) {
+        EXPECT_EQ(cache->GetByOffset(off), nullptr) << "offset " << off;
+    }
+    // Far outside the addressable range: still an answer, never a throw.
+    EXPECT_EQ(cache->GetByOffset(~size_t{0}), nullptr);
 
     mgr.RemoveSegmentCaches(kInstanceA, seg_id);
 }
