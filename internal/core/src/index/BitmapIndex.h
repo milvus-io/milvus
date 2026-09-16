@@ -31,7 +31,7 @@ namespace milvus {
 namespace index {
 
 // Frozen conversion keeps one batch plus at most one large bitmap.
-inline constexpr size_t BITMAP_FROZEN_BATCH_BYTES = 64 * 1024;
+inline constexpr size_t BITMAP_FROZEN_BATCH_BYTES = 16 * 1024 * 1024;
 
 enum class BitmapIndexBuildMode {
     ROARING,

@@ -195,7 +195,7 @@ admission, and target lifetime:
 | --- | --- |
 | Sort / StringSort | Restore sorted values, offsets, and validity in heap or mmap mode. |
 | Marisa | Stage the trie file, then read/map it and restore string IDs and CSR lookup data. Incomplete persisted CSR sets remain invalid. |
-| Bitmap | Restore postings; mmap mode converts them to a frozen file. Conversion uses a 64 KiB batch buffer with at most one additional large bitmap per batch. |
+| Bitmap | Restore postings; mmap mode converts them to a frozen file. Conversion uses a 16 MiB batch buffer with at most one additional large bitmap per batch. |
 | Hybrid | Recover the persisted internal type using the existing compatibility rule, then delegate to that child's planning and loading methods. |
 | Tantivy / Ngram / RTree | Materialize validated filenames in an owned directory, then open the engine and restore sidecars. Heap-mode temporary files are removed after restoration. |
 | TextMatch `.v3` | Reuse the Tantivy planning and loading methods, open the packed object under its text-log prefix, and pass cancellation through the translator. Analyzer registration still finishes before cache publication. |
