@@ -207,9 +207,10 @@ func (o *openerAdaptorImpl) openRWWAL(ctx context.Context, l walimpls.WALImpls, 
 		return nil, errors.Wrap(err, "when building interceptor params")
 	}
 	resources.param = param
+	liveReady := make(chan struct{})
 	rs, snapshot, err := recovery.RecoverRecoveryStorage(
 		ctx,
-		newRecoveryStreamBuilder(roWAL),
+		newRecoveryStreamBuilder(roWAL, param.WriteAheadBuffer, liveReady),
 		cp,
 		param.LastTimeTickMessage,
 		recovery.WithRecoveryTailRateLimiter(roWAL.RecoveryStorage),
@@ -256,6 +257,7 @@ func (o *openerAdaptorImpl) openRWWAL(ctx context.Context, l walimpls.WALImpls, 
 	}
 
 	wal := adaptImplsToRWWAL(roWAL, o.interceptorBuilders, param)
+	close(liveReady)
 	o.walInstances.Insert(id, wal)
 	resources.Release()
 	return wal, nil

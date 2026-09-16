@@ -48,41 +48,24 @@ var (
 	consumerCounter atomic.Int64
 )
 
-// newRecoveryScannerAdaptor creates a new recovery scanner adaptor.
-func newRecoveryScannerAdaptor(l walimpls.ROWALImpls,
-	startMessageID message.MessageID,
-	scanMetrics *metricsutil.ScannerMetrics,
-	useWriteAheadBuffer bool,
-) *scannerAdaptorImpl {
-	name := "recovery"
-	logger := resource.Resource().Logger().With(
-		mlog.FieldComponent("scanner"),
-		mlog.String("name", name),
-		mlog.String("channel", l.Channel().String()),
-		mlog.String("startMessageID", startMessageID.String()),
-	)
-	readOption := wal.ReadOption{
-		DeliverPolicy:          options.DeliverPolicyStartFrom(startMessageID),
-		MesasgeHandler:         adaptor.ChanMessageHandler(make(chan message.ImmutableMessage)),
-		IgnorePauseConsumption: true,
-	}
+// scannerConfig supplies an already available WAB and an optional startup boundary.
+// Without an injected WAB, RW scanners resolve it through the TimeTick inspector.
+type scannerConfig struct {
+	writeAheadBuffer wab.ROWriteAheadBuffer
+	startupBarrier   *scannerStartupBarrier
+}
 
-	s := &scannerAdaptorImpl{
-		logger:              logger,
-		useWriteAheadBuffer: useWriteAheadBuffer,
-		innerWAL:            l,
-		readOption:          readOption,
-		filterFunc:          func(message.ImmutableMessage) bool { return true },
-		reorderBuffer:       utility.NewReOrderBuffer(),
-		pendingQueue:        utility.NewPendingQueue(),
-		txnBuffer:           utility.NewTxnBuffer(logger, scanMetrics),
-		cleanup:             func() {},
-		ScannerHelper:       helper.NewScannerHelper(name),
-		metrics:             scanMetrics,
-		readRateCounter:     utility.NewAverageRateCounter(10 * time.Second), // 10 second sliding window
-	}
-	go s.execute()
-	return s
+// scannerStartupBarrier pauses raw input after this exact barrier until the
+// caller finishes initialization. The consumer snapshots unfinished transactions
+// before delivering the barrier. Cancellation also releases the pause.
+type scannerStartupBarrier struct {
+	message message.ImmutableMessage
+	resume  <-chan struct{}
+}
+
+func (b *scannerStartupBarrier) matches(msg message.ImmutableMessage) bool {
+	return msg.MessageType() == message.MessageTypeRecoveryBarrier &&
+		msg.TimeTick() == b.message.TimeTick() && msg.MessageID().EQ(b.message.MessageID())
 }
 
 // newScannerAdaptor creates a new scanner adaptor.
@@ -92,29 +75,30 @@ func newScannerAdaptor(
 	readOption wal.ReadOption,
 	scanMetrics *metricsutil.ScannerMetrics,
 	cleanup func(),
+	config scannerConfig,
 ) *scannerAdaptorImpl {
 	if readOption.MesasgeHandler == nil {
 		readOption.MesasgeHandler = adaptor.ChanMessageHandler(make(chan message.ImmutableMessage))
 	}
-	options.GetFilterFunc(readOption.MessageFilter)
 	logger := resource.Resource().Logger().With(
 		mlog.FieldComponent("scanner"),
 		mlog.String("name", name),
 		mlog.String("channel", l.Channel().Name),
 	)
 	s := &scannerAdaptorImpl{
-		logger:              logger,
-		useWriteAheadBuffer: true,
-		innerWAL:            l,
-		readOption:          readOption,
-		filterFunc:          options.GetFilterFunc(readOption.MessageFilter),
-		reorderBuffer:       utility.NewReOrderBuffer(),
-		pendingQueue:        utility.NewPendingQueue(),
-		txnBuffer:           utility.NewTxnBuffer(logger, scanMetrics),
-		cleanup:             cleanup,
-		ScannerHelper:       helper.NewScannerHelper(name),
-		metrics:             scanMetrics,
-		readRateCounter:     utility.NewAverageRateCounter(10 * time.Second), // 10 second sliding window
+		logger:           logger,
+		writeAheadBuffer: config.writeAheadBuffer,
+		startupBarrier:   config.startupBarrier,
+		innerWAL:         l,
+		readOption:       readOption,
+		filterFunc:       options.GetFilterFunc(readOption.MessageFilter),
+		reorderBuffer:    utility.NewReOrderBuffer(),
+		pendingQueue:     utility.NewPendingQueue(),
+		txnBuffer:        utility.NewTxnBuffer(logger, scanMetrics),
+		cleanup:          cleanup,
+		ScannerHelper:    helper.NewScannerHelper(name),
+		metrics:          scanMetrics,
+		readRateCounter:  utility.NewAverageRateCounter(10 * time.Second), // 10 second sliding window
 	}
 	go s.execute()
 	return s
@@ -122,15 +106,17 @@ func newScannerAdaptor(
 
 // scannerAdaptorImpl is a wrapper of ScannerImpls to extend it into a Scanner interface.
 type scannerAdaptorImpl struct {
+	startupBarrier   *scannerStartupBarrier
+	startupTxnBuffer *utility.TxnBuffer // published by delivery of the startup barrier
 	*helper.ScannerHelper
-	useWriteAheadBuffer bool
-	logger              *mlog.Logger
-	innerWAL            walimpls.ROWALImpls
-	readOption          wal.ReadOption
-	filterFunc          func(message.ImmutableMessage) bool
-	reorderBuffer       *utility.ReOrderByTimeTickBuffer // support time tick reorder.
-	pendingQueue        *utility.PendingQueue
-	txnBuffer           *utility.TxnBuffer // txn buffer for txn message.
+	writeAheadBuffer wab.ROWriteAheadBuffer
+	logger           *mlog.Logger
+	innerWAL         walimpls.ROWALImpls
+	readOption       wal.ReadOption
+	filterFunc       func(message.ImmutableMessage) bool
+	reorderBuffer    *utility.ReOrderByTimeTickBuffer // support time tick reorder.
+	pendingQueue     *utility.PendingQueue
+	txnBuffer        *utility.TxnBuffer // txn buffer for txn message.
 
 	cleanup         func()
 	clearOnce       sync.Once
@@ -214,15 +200,15 @@ func (s *scannerAdaptorImpl) execute() {
 
 // produceEventLoop produces the message from the wal and write ahead buffer.
 func (s *scannerAdaptorImpl) produceEventLoop(msgChan chan<- message.ImmutableMessage) error {
-	var wb wab.ROWriteAheadBuffer
+	wb := s.writeAheadBuffer
 	var err error
-	if s.Channel().AccessMode == types.AccessModeRW && s.useWriteAheadBuffer {
+	if wb == nil && s.Channel().AccessMode == types.AccessModeRW {
 		if wb, err = s.waitWriteAheadBuffer(); err != nil {
 			return err
 		}
 	}
 
-	scanner := newSwithableScanner(s.Name(), s.logger, s.innerWAL, wb, s.readOption.DeliverPolicy, msgChan)
+	scanner := newSwithableScanner(s.Name(), s.logger, s.innerWAL, wb, s.readOption.DeliverPolicy, msgChan, s.startupBarrier)
 	s.logger.Info(context.TODO(), "start produce loop of scanner at model", mlog.String("model", getScannerModel(scanner)))
 	for {
 		if s.readOption.RateLimitControl != nil {
@@ -391,6 +377,11 @@ func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) error 
 		// There's some txn message need to hold until confirmed, so we need to handle them in txn buffer.
 		msgs := s.txnBuffer.HandleImmutableMessages(messages, msg.TimeTick())
 		s.metrics.UpdateTxnBufSize(s.txnBuffer.Bytes())
+		if s.startupBarrier != nil && s.startupBarrier.matches(msg) && s.startupTxnBuffer == nil {
+			// The producer stops at this barrier until initialization releases the startup barrier.
+			// Publish a detached snapshot before the barrier reaches the consumer.
+			s.startupTxnBuffer = s.txnBuffer.Snapshot()
+		}
 
 		if len(msgs) > 0 {
 			// Push the confirmed messages into pending queue for consuming.
