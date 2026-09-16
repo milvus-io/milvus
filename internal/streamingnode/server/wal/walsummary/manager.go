@@ -124,6 +124,8 @@ func (m *Manager) ObserveMessage(ctx context.Context, msg message.ImmutableMessa
 	}
 	idempotency, insert := idempotencyHalvesOf(msg)
 	var entry *streamingpb.TransformLogEntry
+	// Barriers only advance the consumer window; Summary stores Delete payloads,
+	// not payload-free BarrierEntries.
 	if messageutil.ClassifyTransformLogMessage(msg) == messageutil.TransformLogKindDelete {
 		entry = messageutil.BuildTransformLogEntry(msg, messageutil.TransformEntryOption{})
 	}

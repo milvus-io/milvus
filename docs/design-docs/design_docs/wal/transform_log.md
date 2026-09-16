@@ -56,12 +56,24 @@ only after the corresponding materialization metadata is durable (§8).
 
 | Kind | WAL messages | Effect |
 |---|---|---|
-| Payload | Delete, committed Txn containing Delete | `TransformLog.ObserveMessage` appends one ordered Delete record to its materialization window. |
-| Barrier | RecoveryBarrier, Flush, ManualFlush, FlushAll, DropPartition, DropCollection, TruncateCollection, CreateCollection, schema-changing AlterCollection, AlterWAL | VChannel handlers coordinate lifecycle work. A barrier of this VChannel also enters the TransformLog window without a delete payload, allowing its materialization frontier to reach the boundary. Pchannel-level broadcasts do not add such a boundary. |
-| None | Insert and other messages | No transform effect. |
+| DeleteEntry | Delete, committed Txn containing Delete | Append one ordered entry carrying Delete blocks. A Txn uses its outer TimeTick and includes all Delete children. |
+| None | Insert, committed Txn containing only Inserts | No transform effect. |
+| BarrierEntry | Every other message, including an empty or non-Insert-only Txn without Delete | Append an entry containing only the message TimeTick. Once preceding Delete entries are materialized, this boundary can advance the materialized frontier without producing L0 output. |
 
-A committed Txn creates one record at the outer Txn TimeTick and stores Delete
-blocks for all Delete children.
+Classification applies to valid messages delivered by the ordered scanner and
+routed to this VChannel. Delete takes precedence when classifying a transaction.
+PChannel-level messages, including persisted TimeTicks and RecoveryBarrier,
+reach every affected VChannel through the existing broadcast route and provide
+a boundary there. Non-persisted heartbeats are filtered by RecoveryStorage before
+observation; messages belonging only to another VChannel are not observed.
+
+BarrierEntry represents transform progress, not completion of the original
+message's other effects. It obeys the same L1 safety bound as DeleteEntry.
+WALSummary stores Delete payloads only in its transform sections, not these
+payload-free BarrierEntries. Summary coverage metadata may still advance with
+later messages. A materialized barrier position is persisted in VChannelMeta;
+losing an unpersisted empty boundary can delay progress until another ordered
+boundary arrives but cannot lose Delete data.
 
 ## 4. Observe And Materialization Trigger
 
@@ -87,8 +99,8 @@ committed frontier, in ascending timetick order:
   `materialized_time_tick`, loaded from the summary store
   (`ReadTransformEntries`); the coverage of that load is remembered as
   `loadedThrough`;
-- live observation appends the tail: delete records past `loadedThrough` (and
-  past the committed frontier);
+- live observation appends the tail: DeleteEntry and BarrierEntry records past
+  `loadedThrough` (and past the committed frontier);
 - committed batches trim the head.
 
 Replay deduplication: after a restart, WAL replay re-observes the records the
@@ -127,9 +139,11 @@ safe to include because rows assigned to that Segment have later TimeTicks.
 This guarantees that an L0 Segment never covers a transform range whose L1
 data has not completed its final commit.
 
-The target of one batch is `min(window_frontier, upper_bound)`. Every
-completed L1 final commit makes the owning VChannel recompute the bound, which
-schedules the next batch without requiring another WAL trigger. Batches are
+The target of one batch is `min(window_frontier, upper_bound)`. If the first
+pending entry is beyond that target, no task or continuation is scheduled;
+the consumer waits for the upper bound to advance. Every completed L1 final
+commit makes the owning VChannel recompute the bound, which schedules the next
+batch without requiring another WAL trigger. Batches are
 capped by rows/bytes; a capped batch schedules a continuation task whose
 predecessor is the current one, keeping batches strictly sequential.
 
@@ -181,7 +195,8 @@ lifecycle cleanup may supply an equivalent release position when applicable.
    position additionally requires durable VChannel metadata.
 4. Records are copied at observation; TransformLog retains no source message
    handle, and L0 materialization does not gate source-message Ack.
-5. VChannel barriers may advance the consumer window without a payload; their
-   arrival alone does not advance the durable GC position.
+5. VChannel and routed PChannel barriers may advance the consumer window
+   without a payload; their arrival alone does not advance the durable GC
+   position. Summary does not persist BarrierEntries.
 6. Recovery reads and WAL replay must not duplicate records in the pending
    materialization window.

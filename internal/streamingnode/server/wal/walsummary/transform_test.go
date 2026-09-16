@@ -10,9 +10,11 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 )
 
 func newTransformTestManagerWithStore(t *testing.T) (*Manager, *Store) {
@@ -312,4 +314,53 @@ func TestMixedTransactionHistorySurvivesDDL(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, keys.Idempotency, 1)
 	require.Equal(t, "txn-key", keys.Idempotency[0].GetKey())
+}
+
+func TestSummaryDoesNotPersistBarrierEntries(t *testing.T) {
+	for _, withDelete := range []bool{false, true} {
+		name := "barriers only"
+		if withDelete {
+			name = "delete followed by barriers"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			manager, store := newTransformTestManagerWithStore(t)
+			require.NoError(t, manager.Restore(ctx))
+			expectedRecords := 0
+			if withDelete {
+				manager.ObserveMessage(ctx, newTestDeleteMessage(t, "v1", 100, 10, 1))
+				expectedRecords = 1
+			}
+			barriers := []message.MutableMessage{
+				message.NewCreatePartitionMessageBuilderV1().WithVChannel("v1").
+					WithHeader(&message.CreatePartitionMessageHeader{CollectionId: 1, PartitionId: 20}).
+					WithBody(&msgpb.CreatePartitionRequest{}).MustBuildMutable(),
+				message.NewManualFlushMessageBuilderV2().WithVChannel("v1").
+					WithHeader(&message.ManualFlushMessageHeader{}).WithBody(&message.ManualFlushMessageBody{}).MustBuildMutable(),
+				message.NewRecoveryBarrierMessageBuilderV2().WithVChannel("").
+					WithHeader(&message.RecoveryBarrierMessageHeader{}).WithBody(&message.RecoveryBarrierMessageBody{}).MustBuildMutable(),
+				message.NewTimeTickMessageBuilderV1().WithVChannel("").
+					WithHeader(&message.TimeTickMessageHeader{}).WithBody(&msgpb.TimeTickMsg{}).MustBuildMutable(),
+			}
+			for i, mutable := range barriers {
+				tt := uint64(200 + i)
+				manager.ObserveMessage(ctx, mutable.WithTimeTick(tt).
+					WithLastConfirmed(walimplstest.NewTestMessageID(int64(tt-1))).
+					IntoImmutableMessage(walimplstest.NewTestMessageID(int64(tt))))
+				require.Len(t, manager.pending, expectedRecords)
+			}
+			require.NoError(t, persistSummary(ctx, manager))
+			require.Len(t, manager.Manifest().GetChunks(), expectedRecords, "barriers must not create chunks")
+			require.Equal(t, uint64(203), manager.LastAcked().TimeTick)
+			recovered := newTestManager(t, NewStore(store.chunkManager, store.PChannel(), 2), 1<<30)
+			require.NoError(t, recovered.Restore(ctx))
+			entries, err := recovered.ReadTransformEntries(ctx, "v1", 0, math.MaxUint64)
+			require.NoError(t, err)
+			require.Len(t, entries, expectedRecords)
+			if withDelete {
+				require.Equal(t, uint64(100), entries[0].GetTimeTick())
+				require.NotNil(t, entries[0].GetDelete())
+			}
+		})
+	}
 }
