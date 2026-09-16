@@ -257,6 +257,38 @@ func TestQueryOnViewStreamSendsChunksAndEOF(t *testing.T) {
 	require.Equal(t, int64(10), provider.queryRequest.GetCollectionID())
 }
 
+func TestQueryOnViewStreamAcceptsBoundedOrdinaryQuery(t *testing.T) {
+	tasks := &streamTestQueryTasks{tasks: []QuerySegmentTask{struct{}{}}}
+	server := NewServer(
+		&streamTestProvider{queryTasks: tasks},
+		&streamTestScheduler{queryResult: &internalpb.RetrieveResults{
+			Status: merr.Success(),
+			Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{Data: []int64{1}},
+			}},
+		}},
+	)
+	client, cleanup := startSearchStreamTestServer(t, server)
+	defer cleanup()
+
+	stream, err := queryutil.NewGRPCReduceStream(context.Background(), client, &viewpb.QueryOnViewRequest{
+		LegacyReq: &internalpb.RetrieveRequest{CollectionID: 10, Limit: 1},
+		ShardId:   &viewpb.ShardID{ReplicaId: 1, Vchannel: "by-dev-rootcoord-dml_0_100v0"},
+		Version: &viewpb.QueryViewVersion{
+			DataVersion:  &viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 2},
+			QueryVersion: 3,
+		},
+		Mvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 10},
+	})
+	require.NoError(t, err)
+
+	chunk, err := stream.Recv()
+	require.NoError(t, err)
+	require.Equal(t, []int64{1}, chunk.GetIds().GetIntId().GetData())
+	require.NoError(t, stream.Close())
+	require.Equal(t, 1, tasks.releaseCount)
+}
+
 func startSearchStreamTestServer(t *testing.T, service viewpb.ViewQueryServiceServer) (viewpb.ViewQueryServiceClient, func()) {
 	t.Helper()
 	listener := bufconn.Listen(1024 * 1024)

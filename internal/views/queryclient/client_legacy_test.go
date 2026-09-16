@@ -387,6 +387,48 @@ func TestLegacyClientQueryReducesIteratorVChannelStreams(t *testing.T) {
 	require.ErrorIs(t, err, io.EOF)
 }
 
+func TestLegacyClientQueryReducesBoundedOrdinaryVChannelStreams(t *testing.T) {
+	collectionID := int64(100)
+	shardA := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
+	shardB := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_1_100v1"}
+	queryNode := qviews.NewQueryNode(11)
+
+	client := NewLegacyViewQueryClient(
+		ViewQueryClientConfig{MaxRetries: 1, EnableQueryStreaming: true, QueryStreamChunkSize: 2},
+		&legacyPlanClient{plans: map[string]*viewpb.QueryPlan{
+			shardA.VChannel: legacyQueryPlan(shardA, queryNode),
+			shardB.VChannel: legacyQueryPlan(shardB, queryNode),
+		}},
+		&legacyServiceClient{queryResults: map[string]*internalpb.RetrieveResults{
+			shardA.VChannel: newTestQueryChunk([]int64{1, 3}),
+			shardB.VChannel: newTestQueryChunk([]int64{2, 4}),
+		}},
+		&legacyResolver{vchannels: []string{shardA.VChannel, shardB.VChannel}},
+	)
+
+	result, err := client.Legacy().Query(context.Background(), &LegacyQueryRequest{
+		Req: &internalpb.RetrieveRequest{
+			CollectionID:     collectionID,
+			ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
+			Limit:            3,
+		},
+	})
+
+	require.NoError(t, err)
+	require.Empty(t, result.Results)
+	require.Len(t, result.Plans, 2)
+	first, err := result.Stream.Recv()
+	require.NoError(t, err)
+	require.Equal(t, []int64{1, 2}, first.GetIds().GetIntId().GetData())
+	second, err := result.Stream.Recv()
+	require.NoError(t, err)
+	require.Equal(t, []int64{3}, second.GetIds().GetIntId().GetData())
+}
+
+func TestLegacyClientQueryKeepsUnlimitedOrdinaryQueryOnBatchPath(t *testing.T) {
+	require.False(t, supportsQueryStream(&internalpb.RetrieveRequest{}))
+}
+
 func TestLegacyClientQueryPreservesEmptyDownstreamSnapshot(t *testing.T) {
 	setupTestReplicaRouting(t)
 	collectionID := int64(100)
