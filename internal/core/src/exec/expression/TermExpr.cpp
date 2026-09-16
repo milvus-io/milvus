@@ -802,6 +802,13 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
                 return std::make_pair(
                     true,
                     std::floor(dval) == dval && terms->In(ValueType(dval)));
+            } else if constexpr (std::is_same_v<GetType, double>) {
+                auto x_num = data[i].at_numeric(pointer);
+                if (x_num.error()) {
+                    return std::make_pair(false, false);
+                }
+                return std::make_pair(
+                    true, terms->In(ValueType(x_num.value().as_double())));
             } else {
                 auto x = data[i].template at<GetType>(pointer);
                 if (x.error()) {

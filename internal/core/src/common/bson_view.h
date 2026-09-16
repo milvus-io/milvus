@@ -340,6 +340,7 @@ class BsonView {
                 }
                 break;
             case bsoncxx::type::k_null:
+            case bsoncxx::type::k_undefined:
             case bsoncxx::type::k_document:
             case bsoncxx::type::k_array:
                 break;
@@ -535,6 +536,9 @@ class BsonView {
                             return ParseAsArray(ptr);
                         }
                         break;
+                    case bsoncxx::type::k_undefined:
+                    case bsoncxx::type::k_null:
+                        return std::nullopt;
                     default:
                         return std::nullopt;
                 }
@@ -557,6 +561,9 @@ class BsonView {
                     break;
                 case bsoncxx::type::k_bool:
                     ptr += 1;
+                    break;
+                case bsoncxx::type::k_undefined:
+                case bsoncxx::type::k_null:
                     break;
                 case bsoncxx::type::k_array:
                 case bsoncxx::type::k_document: {
