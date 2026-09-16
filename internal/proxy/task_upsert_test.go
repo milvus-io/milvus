@@ -1511,6 +1511,7 @@ func TestPackInsertMessageUsesPartitionKeyRouting(t *testing.T) {
 		func(_ context.Context, _ Cache, _ []string, _ *msgstream.InsertMsg,
 			result *milvuspb.MutationResult, _ *schemapb.FieldData, _ *streamingmessage.CipherConfig,
 			_ *schemapb.CollectionSchema, _ int32, _ map[string]*messagespb.PartialUpdateCAS,
+			_ *insertIdempotencyDecoration,
 		) ([]streamingmessage.MutableMessage, error) {
 			require.Same(t, task.result, result)
 			require.Equal(t, []int64{20, 10}, result.GetIDs().GetIntId().GetData())
@@ -1541,6 +1542,7 @@ func TestPackInsertMessageUsesFinalInsertIDsForRouting(t *testing.T) {
 			_ *streamingmessage.CipherConfig,
 			_ int32,
 			_ map[string]*messagespb.PartialUpdateCAS,
+			_ *insertIdempotencyDecoration,
 		) ([]streamingmessage.MutableMessage, error) {
 			routingIDs = result.GetIDs()
 			primaryData, err := typeutil.GetPrimaryFieldData(insertMsg.GetFieldsData(), task.schema.GetFields()[0])
