@@ -25,6 +25,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -32,6 +33,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy/reqregistry"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -223,4 +225,134 @@ func TestCancelCountsOnlyWhatItActuallyCancelled(t *testing.T) {
 	cancelled, _ = node.cancelRequests(context.Background(), []int64{11, 12}, "root", "test")
 	assert.Empty(t, cancelled)
 	assert.Equal(t, float64(2), testutil.ToFloat64(counter)-before)
+}
+
+func TestListLocalRunningRequests(t *testing.T) {
+	cache := NewMockCache(t)
+	cache.EXPECT().AllocID(mock.Anything).Return(int64(1), nil).Once()
+	cache.EXPECT().AllocID(mock.Anything).Return(int64(2), nil).Once()
+	node := &Proxy{requests: reqregistry.New()}
+	node.metaCache = cache
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	_, e1 := node.registerRequest(context.Background(), searchRequestInfo(&milvuspb.SearchRequest{
+		DbName: "db1", CollectionName: "c1", Nq: 3,
+		SearchParams: []*commonpb.KeyValuePair{kv("topk", "10")},
+	}))
+	_, e2 := node.registerRequest(context.Background(), queryRequestInfo(&milvuspb.QueryRequest{
+		DbName: "db2", CollectionName: "c2", Expr: "id > 0",
+	}))
+	defer node.unregisterRequest(e1)
+	defer node.unregisterRequest(e2)
+
+	resp, err := node.ListLocalRunningRequests(context.Background(), &milvuspb.ListRunningRequestsRequest{})
+	require.NoError(t, err)
+	require.True(t, merr.Ok(resp.GetStatus()))
+	require.Len(t, resp.GetRequests(), 2)
+	byID := lo.KeyBy(resp.GetRequests(), func(r *milvuspb.RunningRequestInfo) int64 { return r.GetRequestId() })
+	assert.Equal(t, reqregistry.TypeSearch, byID[1].GetType())
+	assert.Equal(t, "db1", byID[1].GetDbName())
+	assert.Equal(t, int64(3), byID[1].GetNq())
+	assert.Equal(t, int64(10), byID[1].GetTopk())
+	assert.True(t, byID[1].GetCancellable())
+	assert.NotZero(t, byID[1].GetStartTimeMs())
+	assert.Equal(t, reqregistry.TypeQuery, byID[2].GetType())
+	assert.Equal(t, "id > 0", byID[2].GetExpr())
+
+	// the filters are applied on this proxy, not by the caller
+	resp, err = node.ListLocalRunningRequests(context.Background(), &milvuspb.ListRunningRequestsRequest{DbName: "db2"})
+	require.NoError(t, err)
+	require.Len(t, resp.GetRequests(), 1)
+	assert.Equal(t, int64(2), resp.GetRequests()[0].GetRequestId())
+
+	resp, err = node.ListLocalRunningRequests(context.Background(), &milvuspb.ListRunningRequestsRequest{MinElapsedMs: 1 << 40})
+	require.NoError(t, err)
+	assert.Empty(t, resp.GetRequests())
+}
+
+func TestCancelLocalRequests(t *testing.T) {
+	cache := NewMockCache(t)
+	cache.EXPECT().AllocID(mock.Anything).Return(int64(7), nil)
+	node := &Proxy{requests: reqregistry.New()}
+	node.metaCache = cache
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	ctx, entry := node.registerRequest(context.Background(), searchRequestInfo(&milvuspb.SearchRequest{DbName: "db", CollectionName: "c"}))
+	defer node.unregisterRequest(entry)
+
+	resp, err := node.CancelLocalRequests(context.Background(), &milvuspb.CancelRequestsRequest{
+		RequestIds: []int64{7, 8},
+		Reason:     "too heavy",
+	})
+	require.NoError(t, err)
+	require.True(t, merr.Ok(resp.GetStatus()))
+	require.Len(t, resp.GetCancelled(), 1)
+	assert.Equal(t, int64(7), resp.GetCancelled()[0].GetRequestId())
+	// an id this proxy does not hold is reported back; only the coordinator,
+	// which sees every proxy, can call it not found for the cluster
+	assert.Equal(t, []int64{8}, resp.GetNotFound())
+
+	cause := reqregistry.CancelCause(ctx)
+	require.ErrorIs(t, cause, merr.ErrRequestCancelled)
+	assert.Contains(t, cause.Error(), "too heavy")
+	// this proxy did not authenticate the operator, so it names none
+	assert.NotContains(t, cause.Error(), "operator")
+}
+
+func TestPublicRunningRequestHandlersDelegateToCoordinator(t *testing.T) {
+	node := &Proxy{requests: reqregistry.New()}
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+	mixc := mocks.NewMockMixCoordClient(t)
+	node.mixCoord = mixc
+
+	mixc.EXPECT().ListRunningRequests(mock.Anything, mock.Anything).Return(&milvuspb.ListRunningRequestsResponse{
+		Status:   merr.Success(),
+		Requests: []*milvuspb.RunningRequestInfo{{RequestId: 5, ProxyId: 999}},
+	}, nil)
+	listResp, err := node.ListRunningRequests(context.Background(), &milvuspb.ListRunningRequestsRequest{})
+	require.NoError(t, err)
+	require.Len(t, listResp.GetRequests(), 1)
+	// the answer is the cluster's, not this proxy's registry
+	assert.Equal(t, int64(999), listResp.GetRequests()[0].GetProxyId())
+
+	mixc.EXPECT().CancelRequests(mock.Anything, mock.Anything).Return(&milvuspb.CancelRequestsResponse{
+		Status:    merr.Success(),
+		Cancelled: []*milvuspb.RunningRequestInfo{{RequestId: 5, ProxyId: 999, ElapsedMs: 42}},
+		NotFound:  []int64{6},
+	}, nil)
+	cancelResp, err := node.CancelRequests(context.Background(), &milvuspb.CancelRequestsRequest{RequestIds: []int64{5, 6}, Reason: "r"})
+	require.NoError(t, err)
+	require.Len(t, cancelResp.GetCancelled(), 1)
+	assert.Equal(t, int64(42), cancelResp.GetCancelled()[0].GetElapsedMs())
+	assert.Equal(t, []int64{6}, cancelResp.GetNotFound())
+}
+
+func TestCancelRequestsRejectsEmptyIDs(t *testing.T) {
+	node := &Proxy{requests: reqregistry.New()}
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+	// no coordinator call is expected: the request never leaves this proxy
+	resp, err := node.CancelRequests(context.Background(), &milvuspb.CancelRequestsRequest{})
+	require.NoError(t, err)
+	assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrParameterMissing)
+}
+
+func TestRunningRequestHandlersRejectUnhealthyProxy(t *testing.T) {
+	node := &Proxy{requests: reqregistry.New()}
+	node.UpdateStateCode(commonpb.StateCode_Abnormal)
+
+	listResp, err := node.ListRunningRequests(context.Background(), &milvuspb.ListRunningRequestsRequest{})
+	require.NoError(t, err)
+	assert.False(t, merr.Ok(listResp.GetStatus()))
+
+	cancelResp, err := node.CancelRequests(context.Background(), &milvuspb.CancelRequestsRequest{RequestIds: []int64{1}})
+	require.NoError(t, err)
+	assert.False(t, merr.Ok(cancelResp.GetStatus()))
+
+	localListResp, err := node.ListLocalRunningRequests(context.Background(), &milvuspb.ListRunningRequestsRequest{})
+	require.NoError(t, err)
+	assert.False(t, merr.Ok(localListResp.GetStatus()))
+
+	localCancelResp, err := node.CancelLocalRequests(context.Background(), &milvuspb.CancelRequestsRequest{RequestIds: []int64{1}})
+	require.NoError(t, err)
+	assert.False(t, merr.Ok(localCancelResp.GetStatus()))
 }

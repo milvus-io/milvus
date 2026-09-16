@@ -26,6 +26,80 @@ func (_m *MockProxyClient) EXPECT() *MockProxyClient_Expecter {
 	return &MockProxyClient_Expecter{mock: &_m.Mock}
 }
 
+// CancelLocalRequests provides a mock function with given fields: ctx, in, opts
+func (_m *MockProxyClient) CancelLocalRequests(ctx context.Context, in *milvuspb.CancelRequestsRequest, opts ...grpc.CallOption) (*milvuspb.CancelRequestsResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CancelLocalRequests")
+	}
+
+	var r0 *milvuspb.CancelRequestsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CancelRequestsRequest, ...grpc.CallOption) (*milvuspb.CancelRequestsResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CancelRequestsRequest, ...grpc.CallOption) *milvuspb.CancelRequestsResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.CancelRequestsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.CancelRequestsRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxyClient_CancelLocalRequests_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CancelLocalRequests'
+type MockProxyClient_CancelLocalRequests_Call struct {
+	*mock.Call
+}
+
+// CancelLocalRequests is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *milvuspb.CancelRequestsRequest
+//   - opts ...grpc.CallOption
+func (_e *MockProxyClient_Expecter) CancelLocalRequests(ctx interface{}, in interface{}, opts ...interface{}) *MockProxyClient_CancelLocalRequests_Call {
+	return &MockProxyClient_CancelLocalRequests_Call{Call: _e.mock.On("CancelLocalRequests",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockProxyClient_CancelLocalRequests_Call) Run(run func(ctx context.Context, in *milvuspb.CancelRequestsRequest, opts ...grpc.CallOption)) *MockProxyClient_CancelLocalRequests_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*milvuspb.CancelRequestsRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockProxyClient_CancelLocalRequests_Call) Return(_a0 *milvuspb.CancelRequestsResponse, _a1 error) *MockProxyClient_CancelLocalRequests_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxyClient_CancelLocalRequests_Call) RunAndReturn(run func(context.Context, *milvuspb.CancelRequestsRequest, ...grpc.CallOption) (*milvuspb.CancelRequestsResponse, error)) *MockProxyClient_CancelLocalRequests_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ClearReadTaskQueue provides a mock function with given fields: ctx, in, opts
 func (_m *MockProxyClient) ClearReadTaskQueue(ctx context.Context, in *internalpb.ClearReadTaskQueueRequest, opts ...grpc.CallOption) (*internalpb.ClearReadTaskQueueResponse, error) {
 	_va := make([]interface{}, len(opts))
@@ -1103,6 +1177,80 @@ func (_c *MockProxyClient_ListImports_Call) Return(_a0 *internalpb.ListImportsRe
 }
 
 func (_c *MockProxyClient_ListImports_Call) RunAndReturn(run func(context.Context, *internalpb.ListImportsRequest, ...grpc.CallOption) (*internalpb.ListImportsResponse, error)) *MockProxyClient_ListImports_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListLocalRunningRequests provides a mock function with given fields: ctx, in, opts
+func (_m *MockProxyClient) ListLocalRunningRequests(ctx context.Context, in *milvuspb.ListRunningRequestsRequest, opts ...grpc.CallOption) (*milvuspb.ListRunningRequestsResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListLocalRunningRequests")
+	}
+
+	var r0 *milvuspb.ListRunningRequestsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListRunningRequestsRequest, ...grpc.CallOption) (*milvuspb.ListRunningRequestsResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListRunningRequestsRequest, ...grpc.CallOption) *milvuspb.ListRunningRequestsResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.ListRunningRequestsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ListRunningRequestsRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxyClient_ListLocalRunningRequests_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListLocalRunningRequests'
+type MockProxyClient_ListLocalRunningRequests_Call struct {
+	*mock.Call
+}
+
+// ListLocalRunningRequests is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *milvuspb.ListRunningRequestsRequest
+//   - opts ...grpc.CallOption
+func (_e *MockProxyClient_Expecter) ListLocalRunningRequests(ctx interface{}, in interface{}, opts ...interface{}) *MockProxyClient_ListLocalRunningRequests_Call {
+	return &MockProxyClient_ListLocalRunningRequests_Call{Call: _e.mock.On("ListLocalRunningRequests",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockProxyClient_ListLocalRunningRequests_Call) Run(run func(ctx context.Context, in *milvuspb.ListRunningRequestsRequest, opts ...grpc.CallOption)) *MockProxyClient_ListLocalRunningRequests_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*milvuspb.ListRunningRequestsRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockProxyClient_ListLocalRunningRequests_Call) Return(_a0 *milvuspb.ListRunningRequestsResponse, _a1 error) *MockProxyClient_ListLocalRunningRequests_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxyClient_ListLocalRunningRequests_Call) RunAndReturn(run func(context.Context, *milvuspb.ListRunningRequestsRequest, ...grpc.CallOption) (*milvuspb.ListRunningRequestsResponse, error)) *MockProxyClient_ListLocalRunningRequests_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -1944,3 +1944,11 @@ type ImportFunc func(ctx context.Context, req *milvuspb.ImportRequest, opts ...g
 type DropCollectionFunc func(ctx context.Context, request *milvuspb.DropCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 
 type GetGetCredentialFunc func(ctx context.Context, req *rootcoordpb.GetCredentialRequest, opts ...grpc.CallOption) (*rootcoordpb.GetCredentialResponse, error)
+
+func (coord *MixCoordMock) ListRunningRequests(ctx context.Context, in *milvuspb.ListRunningRequestsRequest, opts ...grpc.CallOption) (*milvuspb.ListRunningRequestsResponse, error) {
+	return &milvuspb.ListRunningRequestsResponse{Status: merr.Success()}, nil
+}
+
+func (coord *MixCoordMock) CancelRequests(ctx context.Context, in *milvuspb.CancelRequestsRequest, opts ...grpc.CallOption) (*milvuspb.CancelRequestsResponse, error) {
+	return &milvuspb.CancelRequestsResponse{Status: merr.Success()}, nil
+}

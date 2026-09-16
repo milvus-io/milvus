@@ -40,6 +40,8 @@ const (
 	Proxy_GetQuotaMetrics_FullMethodName               = "/milvus.proto.proxy.Proxy/GetQuotaMetrics"
 	Proxy_ClearReadTaskQueue_FullMethodName            = "/milvus.proto.proxy.Proxy/ClearReadTaskQueue"
 	Proxy_SyncFileResource_FullMethodName              = "/milvus.proto.proxy.Proxy/SyncFileResource"
+	Proxy_ListLocalRunningRequests_FullMethodName      = "/milvus.proto.proxy.Proxy/ListLocalRunningRequests"
+	Proxy_CancelLocalRequests_FullMethodName           = "/milvus.proto.proxy.Proxy/CancelLocalRequests"
 )
 
 // ProxyClient is the client API for Proxy service.
@@ -65,6 +67,14 @@ type ProxyClient interface {
 	GetQuotaMetrics(ctx context.Context, in *internalpb.GetQuotaMetricsRequest, opts ...grpc.CallOption) (*internalpb.GetQuotaMetricsResponse, error)
 	ClearReadTaskQueue(ctx context.Context, in *internalpb.ClearReadTaskQueueRequest, opts ...grpc.CallOption) (*internalpb.ClearReadTaskQueueResponse, error)
 	SyncFileResource(ctx context.Context, in *internalpb.SyncFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	// Running requests registered on THIS proxy. The public
+	// MilvusService.ListRunningRequests / CancelRequests fan out to every proxy
+	// through the coordinator and merge these per-proxy answers; the names
+	// differ because Proxy implements both services and Go methods may not
+	// collide. Request and response types are the public ones: a proxy-local
+	// answer has the same shape as the cluster-wide one.
+	ListLocalRunningRequests(ctx context.Context, in *milvuspb.ListRunningRequestsRequest, opts ...grpc.CallOption) (*milvuspb.ListRunningRequestsResponse, error)
+	CancelLocalRequests(ctx context.Context, in *milvuspb.CancelRequestsRequest, opts ...grpc.CallOption) (*milvuspb.CancelRequestsResponse, error)
 }
 
 type proxyClient struct {
@@ -237,6 +247,24 @@ func (c *proxyClient) SyncFileResource(ctx context.Context, in *internalpb.SyncF
 	return out, nil
 }
 
+func (c *proxyClient) ListLocalRunningRequests(ctx context.Context, in *milvuspb.ListRunningRequestsRequest, opts ...grpc.CallOption) (*milvuspb.ListRunningRequestsResponse, error) {
+	out := new(milvuspb.ListRunningRequestsResponse)
+	err := c.cc.Invoke(ctx, Proxy_ListLocalRunningRequests_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *proxyClient) CancelLocalRequests(ctx context.Context, in *milvuspb.CancelRequestsRequest, opts ...grpc.CallOption) (*milvuspb.CancelRequestsResponse, error) {
+	out := new(milvuspb.CancelRequestsResponse)
+	err := c.cc.Invoke(ctx, Proxy_CancelLocalRequests_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ProxyServer is the server API for Proxy service.
 // All implementations should embed UnimplementedProxyServer
 // for forward compatibility
@@ -260,6 +288,14 @@ type ProxyServer interface {
 	GetQuotaMetrics(context.Context, *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error)
 	ClearReadTaskQueue(context.Context, *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error)
 	SyncFileResource(context.Context, *internalpb.SyncFileResourceRequest) (*commonpb.Status, error)
+	// Running requests registered on THIS proxy. The public
+	// MilvusService.ListRunningRequests / CancelRequests fan out to every proxy
+	// through the coordinator and merge these per-proxy answers; the names
+	// differ because Proxy implements both services and Go methods may not
+	// collide. Request and response types are the public ones: a proxy-local
+	// answer has the same shape as the cluster-wide one.
+	ListLocalRunningRequests(context.Context, *milvuspb.ListRunningRequestsRequest) (*milvuspb.ListRunningRequestsResponse, error)
+	CancelLocalRequests(context.Context, *milvuspb.CancelRequestsRequest) (*milvuspb.CancelRequestsResponse, error)
 }
 
 // UnimplementedProxyServer should be embedded to have forward compatible implementations.
@@ -319,6 +355,12 @@ func (UnimplementedProxyServer) ClearReadTaskQueue(context.Context, *internalpb.
 }
 func (UnimplementedProxyServer) SyncFileResource(context.Context, *internalpb.SyncFileResourceRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SyncFileResource not implemented")
+}
+func (UnimplementedProxyServer) ListLocalRunningRequests(context.Context, *milvuspb.ListRunningRequestsRequest) (*milvuspb.ListRunningRequestsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListLocalRunningRequests not implemented")
+}
+func (UnimplementedProxyServer) CancelLocalRequests(context.Context, *milvuspb.CancelRequestsRequest) (*milvuspb.CancelRequestsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CancelLocalRequests not implemented")
 }
 
 // UnsafeProxyServer may be embedded to opt out of forward compatibility for this service.
@@ -656,6 +698,42 @@ func _Proxy_SyncFileResource_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Proxy_ListLocalRunningRequests_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.ListRunningRequestsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProxyServer).ListLocalRunningRequests(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Proxy_ListLocalRunningRequests_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProxyServer).ListLocalRunningRequests(ctx, req.(*milvuspb.ListRunningRequestsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Proxy_CancelLocalRequests_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.CancelRequestsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProxyServer).CancelLocalRequests(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Proxy_CancelLocalRequests_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProxyServer).CancelLocalRequests(ctx, req.(*milvuspb.CancelRequestsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Proxy_ServiceDesc is the grpc.ServiceDesc for Proxy service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -734,6 +812,14 @@ var Proxy_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SyncFileResource",
 			Handler:    _Proxy_SyncFileResource_Handler,
+		},
+		{
+			MethodName: "ListLocalRunningRequests",
+			Handler:    _Proxy_ListLocalRunningRequests_Handler,
+		},
+		{
+			MethodName: "CancelLocalRequests",
+			Handler:    _Proxy_CancelLocalRequests_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

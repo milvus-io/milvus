@@ -183,6 +183,8 @@ var (
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupCollectionReadWrite.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupCollectionAdmin.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeUpdateReplicateConfiguration.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeListRunningRequests.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeCancelRequests.String()),
 
 			MetaStore2API(PrivilegeExpr),
 		},
@@ -418,6 +420,8 @@ var (
 		commonpb.ObjectPrivilege_PrivilegeListPrivilegeGroups.String(),
 		commonpb.ObjectPrivilege_PrivilegeGetReplicateConfiguration.String(),
 		commonpb.ObjectPrivilege_PrivilegeListFileResources.String(),
+		// Observing what the cluster is doing right now is a read.
+		commonpb.ObjectPrivilege_PrivilegeListRunningRequests.String(),
 	})
 
 	ClusterReadWritePrivileges = append(ClusterReadOnlyPrivileges,
@@ -430,6 +434,12 @@ var (
 			commonpb.ObjectPrivilege_PrivilegeRemoveFileResource.String(),
 			commonpb.ObjectPrivilege_PrivilegePinSnapshotData.String(),
 			commonpb.ObjectPrivilege_PrivilegeUnpinSnapshotData.String(),
+			// Stopping a running request changes what the cluster is doing,
+			// but it destroys no data and grants no access: read-write, not
+			// admin. It reaches ClusterAdminPrivileges through the append
+			// below, which is what makes GetPrivilegeLevel treat it as
+			// cluster-scoped.
+			commonpb.ObjectPrivilege_PrivilegeCancelRequests.String(),
 		})...,
 	)
 

@@ -41,6 +41,14 @@ func (m *GrpcRootCoordClient) ClearReadTaskQueue(ctx context.Context, in *intern
 	return &internalpb.ClearReadTaskQueueResponse{Status: merr.Success()}, m.Err
 }
 
+func (m *GrpcRootCoordClient) ListRunningRequests(ctx context.Context, in *milvuspb.ListRunningRequestsRequest, opts ...grpc.CallOption) (*milvuspb.ListRunningRequestsResponse, error) {
+	return &milvuspb.ListRunningRequestsResponse{Status: merr.Success()}, m.Err
+}
+
+func (m *GrpcRootCoordClient) CancelRequests(ctx context.Context, in *milvuspb.CancelRequestsRequest, opts ...grpc.CallOption) (*milvuspb.CancelRequestsResponse, error) {
+	return &milvuspb.CancelRequestsResponse{Status: merr.Success()}, m.Err
+}
+
 func (m *GrpcRootCoordClient) DescribeDatabase(ctx context.Context, in *rootcoordpb.DescribeDatabaseRequest, opts ...grpc.CallOption) (*rootcoordpb.DescribeDatabaseResponse, error) {
 	return &rootcoordpb.DescribeDatabaseResponse{}, m.Err
 }

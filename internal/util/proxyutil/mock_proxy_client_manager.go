@@ -60,6 +60,83 @@ func (_c *MockProxyClientManager_AddProxyClient_Call) RunAndReturn(run func(*ses
 	return _c
 }
 
+// CancelRequests provides a mock function with given fields: ctx, request
+func (_m *MockProxyClientManager) CancelRequests(ctx context.Context, request *milvuspb.CancelRequestsRequest) ([]*milvuspb.RunningRequestInfo, []int64, []*milvuspb.RunningRequestNodeResult, error) {
+	ret := _m.Called(ctx, request)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CancelRequests")
+	}
+
+	var r0 []*milvuspb.RunningRequestInfo
+	var r1 []int64
+	var r2 []*milvuspb.RunningRequestNodeResult
+	var r3 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CancelRequestsRequest) ([]*milvuspb.RunningRequestInfo, []int64, []*milvuspb.RunningRequestNodeResult, error)); ok {
+		return rf(ctx, request)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CancelRequestsRequest) []*milvuspb.RunningRequestInfo); ok {
+		r0 = rf(ctx, request)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*milvuspb.RunningRequestInfo)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.CancelRequestsRequest) []int64); ok {
+		r1 = rf(ctx, request)
+	} else {
+		if ret.Get(1) != nil {
+			r1 = ret.Get(1).([]int64)
+		}
+	}
+
+	if rf, ok := ret.Get(2).(func(context.Context, *milvuspb.CancelRequestsRequest) []*milvuspb.RunningRequestNodeResult); ok {
+		r2 = rf(ctx, request)
+	} else {
+		if ret.Get(2) != nil {
+			r2 = ret.Get(2).([]*milvuspb.RunningRequestNodeResult)
+		}
+	}
+
+	if rf, ok := ret.Get(3).(func(context.Context, *milvuspb.CancelRequestsRequest) error); ok {
+		r3 = rf(ctx, request)
+	} else {
+		r3 = ret.Error(3)
+	}
+
+	return r0, r1, r2, r3
+}
+
+// MockProxyClientManager_CancelRequests_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CancelRequests'
+type MockProxyClientManager_CancelRequests_Call struct {
+	*mock.Call
+}
+
+// CancelRequests is a helper method to define mock.On call
+//   - ctx context.Context
+//   - request *milvuspb.CancelRequestsRequest
+func (_e *MockProxyClientManager_Expecter) CancelRequests(ctx interface{}, request interface{}) *MockProxyClientManager_CancelRequests_Call {
+	return &MockProxyClientManager_CancelRequests_Call{Call: _e.mock.On("CancelRequests", ctx, request)}
+}
+
+func (_c *MockProxyClientManager_CancelRequests_Call) Run(run func(ctx context.Context, request *milvuspb.CancelRequestsRequest)) *MockProxyClientManager_CancelRequests_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.CancelRequestsRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxyClientManager_CancelRequests_Call) Return(_a0 []*milvuspb.RunningRequestInfo, _a1 []int64, _a2 []*milvuspb.RunningRequestNodeResult, _a3 error) *MockProxyClientManager_CancelRequests_Call {
+	_c.Call.Return(_a0, _a1, _a2, _a3)
+	return _c
+}
+
+func (_c *MockProxyClientManager_CancelRequests_Call) RunAndReturn(run func(context.Context, *milvuspb.CancelRequestsRequest) ([]*milvuspb.RunningRequestInfo, []int64, []*milvuspb.RunningRequestNodeResult, error)) *MockProxyClientManager_CancelRequests_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ClearReadTaskQueue provides a mock function with given fields: ctx, request
 func (_m *MockProxyClientManager) ClearReadTaskQueue(ctx context.Context, request *internalpb.ClearReadTaskQueueRequest) ([]*internalpb.ClearReadTaskQueueComponentResult, error) {
 	ret := _m.Called(ctx, request)
@@ -512,6 +589,74 @@ func (_c *MockProxyClientManager_InvalidateShardLeaderCache_Call) Return(_a0 err
 }
 
 func (_c *MockProxyClientManager_InvalidateShardLeaderCache_Call) RunAndReturn(run func(context.Context, *proxypb.InvalidateShardLeaderCacheRequest) error) *MockProxyClientManager_InvalidateShardLeaderCache_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListRunningRequests provides a mock function with given fields: ctx, request
+func (_m *MockProxyClientManager) ListRunningRequests(ctx context.Context, request *milvuspb.ListRunningRequestsRequest) ([]*milvuspb.RunningRequestInfo, []*milvuspb.RunningRequestNodeResult, error) {
+	ret := _m.Called(ctx, request)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListRunningRequests")
+	}
+
+	var r0 []*milvuspb.RunningRequestInfo
+	var r1 []*milvuspb.RunningRequestNodeResult
+	var r2 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListRunningRequestsRequest) ([]*milvuspb.RunningRequestInfo, []*milvuspb.RunningRequestNodeResult, error)); ok {
+		return rf(ctx, request)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListRunningRequestsRequest) []*milvuspb.RunningRequestInfo); ok {
+		r0 = rf(ctx, request)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*milvuspb.RunningRequestInfo)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ListRunningRequestsRequest) []*milvuspb.RunningRequestNodeResult); ok {
+		r1 = rf(ctx, request)
+	} else {
+		if ret.Get(1) != nil {
+			r1 = ret.Get(1).([]*milvuspb.RunningRequestNodeResult)
+		}
+	}
+
+	if rf, ok := ret.Get(2).(func(context.Context, *milvuspb.ListRunningRequestsRequest) error); ok {
+		r2 = rf(ctx, request)
+	} else {
+		r2 = ret.Error(2)
+	}
+
+	return r0, r1, r2
+}
+
+// MockProxyClientManager_ListRunningRequests_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListRunningRequests'
+type MockProxyClientManager_ListRunningRequests_Call struct {
+	*mock.Call
+}
+
+// ListRunningRequests is a helper method to define mock.On call
+//   - ctx context.Context
+//   - request *milvuspb.ListRunningRequestsRequest
+func (_e *MockProxyClientManager_Expecter) ListRunningRequests(ctx interface{}, request interface{}) *MockProxyClientManager_ListRunningRequests_Call {
+	return &MockProxyClientManager_ListRunningRequests_Call{Call: _e.mock.On("ListRunningRequests", ctx, request)}
+}
+
+func (_c *MockProxyClientManager_ListRunningRequests_Call) Run(run func(ctx context.Context, request *milvuspb.ListRunningRequestsRequest)) *MockProxyClientManager_ListRunningRequests_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.ListRunningRequestsRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxyClientManager_ListRunningRequests_Call) Return(_a0 []*milvuspb.RunningRequestInfo, _a1 []*milvuspb.RunningRequestNodeResult, _a2 error) *MockProxyClientManager_ListRunningRequests_Call {
+	_c.Call.Return(_a0, _a1, _a2)
+	return _c
+}
+
+func (_c *MockProxyClientManager_ListRunningRequests_Call) RunAndReturn(run func(context.Context, *milvuspb.ListRunningRequestsRequest) ([]*milvuspb.RunningRequestInfo, []*milvuspb.RunningRequestNodeResult, error)) *MockProxyClientManager_ListRunningRequests_Call {
 	_c.Call.Return(run)
 	return _c
 }

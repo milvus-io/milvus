@@ -255,6 +255,28 @@ func (c *Client) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearRe
 	})
 }
 
+func (c *Client) ListLocalRunningRequests(ctx context.Context, req *milvuspb.ListRunningRequestsRequest, opts ...grpc.CallOption) (*milvuspb.ListRunningRequestsResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client proxypb.ProxyClient) (*milvuspb.ListRunningRequestsResponse, error) {
+		return client.ListLocalRunningRequests(ctx, req)
+	})
+}
+
+func (c *Client) CancelLocalRequests(ctx context.Context, req *milvuspb.CancelRequestsRequest, opts ...grpc.CallOption) (*milvuspb.CancelRequestsResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client proxypb.ProxyClient) (*milvuspb.CancelRequestsResponse, error) {
+		return client.CancelLocalRequests(ctx, req)
+	})
+}
+
 func (c *Client) SyncFileResource(ctx context.Context, req *internalpb.SyncFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return wrapGrpcCall(ctx, c, func(client proxypb.ProxyClient) (*commonpb.Status, error) {
 		return client.SyncFileResource(ctx, req)
