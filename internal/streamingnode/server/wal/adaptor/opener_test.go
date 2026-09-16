@@ -197,8 +197,9 @@ func TestHandleAlterWALAdvanceCheckpointsStageKeepsReplicateCheckpoint(t *testin
 
 	snapshot := &recovery.RecoverySnapshot{
 		Checkpoint: &recovery.WALCheckpoint{
-			MessageID: rmq.NewRmqID(1),
-			TimeTick:  100,
+			MessageID:                 rmq.NewRmqID(1),
+			TimeTick:                  100,
+			ControlCheckpointTimeTick: 120,
 			AlterWalState: &streamingpb.AlterWALState{
 				TargetWalName: commonpb.WALName_Kafka,
 				TimeTick:      100,
@@ -225,6 +226,8 @@ func TestHandleAlterWALAdvanceCheckpointsStageKeepsReplicateCheckpoint(t *testin
 
 	// The local checkpoint moves to the initial position of the new backend.
 	assert.Equal(t, commonpb.WALName_Kafka, persisted.GetMessageId().GetWALName())
+	assert.Equal(t, uint64(120), persisted.GetControlCheckpointTimeTick())
+	assert.Nil(t, persisted.GetAlterWalState())
 
 	// The replicate checkpoint still points at the source cluster, whose WAL the
 	// local migration did not touch.

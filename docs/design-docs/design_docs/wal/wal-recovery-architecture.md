@@ -75,8 +75,8 @@ is embedded in the checkpoint itself (fields `replicate_config`,
 `replicate_checkpoint`, `alter_wal_state`) and stored atomically with it.
 Control may contain newer state than the global replay position, just like
 Segment snapshots. Recovery must preserve or reconstruct the latest state and
-make repeated control effects idempotent. Persisting Control's own applied
-frontier remains an open implementation point;
+make repeated control effects idempotent. The embedded
+`control_checkpoint_time_tick` preserves Control's own applied frontier;
 see [checkpoint control state](checkpoint-persistence.md#7-pchannel-control-state).
 
 The checkpoint is the only:
