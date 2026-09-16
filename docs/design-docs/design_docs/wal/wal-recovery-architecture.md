@@ -117,24 +117,40 @@ RW startup is one logical replay:
 append RecoveryBarrier to fence the old writer
   -> load and claim checkpoint with the assignment term
   -> load component snapshots and restore summary/transform windows
-  -> open bounded scanner from the checkpoint
+  -> open one scanner from the checkpoint
   -> observe messages with complete semantics
-  -> reach RecoveryBarrier and publish the recovered write-path snapshot
-  -> start live scanner and background persistence/progress checks
+  -> reach this open's RecoveryBarrier and capture the write-path snapshot
+  -> pause raw input while initializing the write path
+  -> resume the same scanner through WriteAheadBuffer
 ```
 
-RecoveryBarrier is only a writer fence and startup catch-up marker. It never
-switches observation behavior.
+RecoveryBarrier is a writer fence and startup catch-up marker. It never
+switches component observation behavior. Recovery and ordinary reads share the
+same scanner constructor, ordering, transaction assembly, source switching, and
+shutdown paths. Recovery supplies an optional startup boundary and the WAB
+created by the opener; it does not create a separate kind of scanner.
 
-If the scanner API requires a bounded scanner followed by a live scanner, the
-two ranges must be adjacent and non-overlapping. That implementation still
-represents one logical replay and must not dispatch any message twice.
+The startup boundary matches the exact RecoveryBarrier MessageID and TimeTick.
+Earlier barriers and TimeTicks cannot trigger the handoff. Before delivering the
+boundary, the scanner takes an independent snapshot of unfinished transaction
+builders, including their body slices. The live scanner retains its original
+TxnBuffer, reorder buffer, and pending queue. A BeginTxn or transaction body
+before the barrier can therefore be completed by CommitTxn or RollbackTxn after
+it; live transaction assembly cannot mutate the write-path startup snapshot.
 
-The current adaptor uses an inclusive `StartFrom` at the barrier MessageID for
-live scanning, after the bounded scanner has delivered the barrier. Boundary
-deduplication and transaction-buffer handoff still need verification; the
-non-overlap rule above is a target contract, not an established implementation
-guarantee.
+After write-path initialization, the scanner reads WAB exclusively after the
+barrier TimeTick. The WAB is seeded by that exact barrier, so this also works
+when it contains no later messages: creating the reader needs no additional
+persisted TimeTick. Startup does not wait for TimeTickInspector registration.
+The barrier is delivered once, and no second logical scanner is opened.
+
+If the handoff position has been evicted, the scanner continues durable catchup.
+If a tailing reader is evicted later, it resumes durable reads from the last
+consumed message's safe physical LastConfirmedMessageID and filters out already
+consumed TimeTicks. Both paths preserve the upper scanner's transaction and
+ordering state. Cancellation releases the scanner while reading durable WAL,
+paused at the startup boundary, or waiting on an empty WAB. Open failure,
+AlterWAL early return, and normal close all release the retained stream.
 
 The current RO opener only constructs the read-only adaptor and does not run
 RecoveryStorage initialization. Recovery against a stable readable WAL frontier

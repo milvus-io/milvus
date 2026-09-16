@@ -77,7 +77,7 @@ func RecoverRecoveryStorage(
 	go rs.backgroundTask()
 	rs.startAckTracker()
 	rs.startSummaryBacklog()
-	rs.startLiveScanner(recoveryStreamBuilder, lastTimeTickMessage)
+	rs.startLiveScanner()
 	return rs, snapshot, nil
 }
 
@@ -165,6 +165,7 @@ type recoveryStorageImpl struct {
 	metrics                *recoveryMetrics
 	pendingPersistSnapshot *dirtyPersistSnapshot
 	scannerWG              sync.WaitGroup
+	recoveryStream         RecoveryStream
 	ackTrackerWG           sync.WaitGroup
 	summaryWG              sync.WaitGroup
 	// pendingSalvageCheckpoint holds the salvage checkpoint captured during force promote.
@@ -376,6 +377,9 @@ func (r *recoveryStorageImpl) Close() {
 // the failed-recovery path (where the background task never started, so
 // BlockUntilFinish must not be called).
 func (r *recoveryStorageImpl) closeRecoveryResources() {
+	if r.recoveryStream != nil {
+		r.recoveryStream.Close()
+	}
 	if r.broadcastAck != nil {
 		r.broadcastAck.Close()
 	}
@@ -615,19 +619,9 @@ func (r composedPersistRequester) RequestPersistThrough(vchannelName string, tar
 	}
 }
 
-func (r *recoveryStorageImpl) startLiveScanner(
-	recoveryStreamBuilder RecoveryStreamBuilder,
-	recoveryBarrier message.ImmutableMessage,
-) {
-	if recoveryBarrier == nil || recoveryBarrier.MessageID() == nil {
-		r.Logger().Warn(context.TODO(), "skip live scanner because recovery barrier is nil")
-		return
-	}
-	rs := recoveryStreamBuilder.Build(BuildRecoveryStreamParam{
-		StartCheckpoint:     recoveryBarrier.MessageID(),
-		EndTimeTick:         0,
-		UseWriteAheadBuffer: true,
-	})
+// startLiveScanner continues the same stream after its startup barrier.
+func (r *recoveryStorageImpl) startLiveScanner() {
+	rs := r.recoveryStream
 	r.scannerWG.Add(1)
 	go func() {
 		defer r.scannerWG.Done()

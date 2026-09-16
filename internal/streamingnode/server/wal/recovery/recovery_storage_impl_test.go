@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel"
@@ -269,10 +270,8 @@ func TestRecoveryStorageCloseWaitsForLiveScanner(t *testing.T) {
 		ch:     make(chan message.ImmutableMessage),
 		closed: make(chan struct{}),
 	}
-	storage.startLiveScanner(
-		&recordingRecoveryStreamBuilder{stream: stream},
-		newAckTestTimeTickMessage(t, 3, 3),
-	)
+	storage.recoveryStream = stream
+	storage.startLiveScanner()
 	go storage.backgroundTask()
 
 	storage.Close()
@@ -310,23 +309,53 @@ func TestRecoveryStorageCloseCancelsAndWaitsForTasks(t *testing.T) {
 	}
 }
 
-func TestRecoveryStorageDataLiveScannerUsesWriteAheadBuffer(t *testing.T) {
-	checkpoint := &utility.WALCheckpoint{
-		MessageID: walimplstest.NewTestMessageID(1),
-		TimeTick:  1,
-	}
-	storage := newTestRecoveryStorage(t, checkpoint)
+func TestRecoveryStorageReusesStartupStream(t *testing.T) {
+	resource.InitForTest(t)
+	storage := newTestRecoveryStorage(t, &utility.WALCheckpoint{
+		MessageID: walimplstest.NewTestMessageID(1), TimeTick: 1,
+	})
 	defer storage.metrics.Close()
 	defer storage.taskScheduler.Close()
-
-	builder := &recordingRecoveryStreamBuilder{}
-	recoveryBarrier := newAckTestTimeTickMessage(t, 3, 3)
-	storage.startLiveScanner(builder, recoveryBarrier)
+	mutable, err := message.NewRecoveryBarrierMessageBuilderV2().WithVChannel("").
+		WithHeader(&message.RecoveryBarrierMessageHeader{}).
+		WithBody(&message.RecoveryBarrierMessageBody{}).BuildMutable()
+	require.NoError(t, err)
+	barrier := mutable.WithTimeTick(3).WithLastConfirmed(walimplstest.NewTestMessageID(2)).
+		IntoImmutableMessage(walimplstest.NewTestMessageID(3))
+	stream := &blockingRecoveryStream{ch: make(chan message.ImmutableMessage, 2), closed: make(chan struct{})}
+	stream.ch <- barrier
+	builder := &recordingRecoveryStreamBuilder{stream: stream}
+	snapshot, err := storage.runBoundedRecovery(context.Background(), builder, barrier)
+	require.NoError(t, err)
+	require.NotNil(t, snapshot)
+	require.Same(t, stream, storage.recoveryStream)
+	require.Equal(t, barrier, builder.param.RecoveryBarrier)
+	select {
+	case <-stream.closed:
+		t.Fatal("startup closed the live stream")
+	default:
+	}
+	stream.ch <- newAckTestTimeTickMessage(t, 4, 4)
+	close(stream.ch)
+	storage.startLiveScanner()
 	storage.scannerWG.Wait()
+	require.Equal(t, uint64(4), storage.ackTracker.CompletedPoint().TimeTick)
+	select {
+	case <-stream.closed:
+	default:
+		t.Fatal("live scanner did not close its stream")
+	}
+}
 
-	assert.True(t, builder.param.UseWriteAheadBuffer)
-	assert.True(t, recoveryBarrier.MessageID().EQ(builder.param.StartCheckpoint))
-	assert.Equal(t, uint64(0), builder.param.EndTimeTick)
+func TestRecoveryStorageRejectsStreamEndingBeforeBarrier(t *testing.T) {
+	resource.InitForTest(t)
+	storage := newTestRecoveryStorage(t, &utility.WALCheckpoint{
+		MessageID: walimplstest.NewTestMessageID(1), TimeTick: 1,
+	})
+	defer storage.metrics.Close()
+	defer storage.taskScheduler.Close()
+	_, err := storage.runBoundedRecovery(context.Background(), &recordingRecoveryStreamBuilder{}, newAckTestTimeTickMessage(t, 3, 3))
+	require.ErrorContains(t, err, "ended before the startup barrier")
 }
 
 func TestRecoveryStorageCompletesMessageWithoutConsumerRefs(t *testing.T) {
@@ -1142,9 +1171,11 @@ func TestRecoverRecoveryStorageFailureReleasesResources(t *testing.T) {
 		return nil
 	}).Build()
 	defer metaMock.UnPatch()
+	stream := &blockingRecoveryStream{ch: make(chan message.ImmutableMessage), closed: make(chan struct{})}
 	boundedMock := mockey.Mock((*recoveryStorageImpl).runBoundedRecovery).To(func(
-		_ *recoveryStorageImpl, _ context.Context, _ RecoveryStreamBuilder, _ message.ImmutableMessage,
+		storage *recoveryStorageImpl, _ context.Context, _ RecoveryStreamBuilder, _ message.ImmutableMessage,
 	) (*RecoverySnapshot, error) {
+		storage.recoveryStream = stream
 		return nil, errors.New("injected bounded recovery failure")
 	}).Build()
 	defer boundedMock.UnPatch()
@@ -1153,6 +1184,11 @@ func TestRecoverRecoveryStorageFailureReleasesResources(t *testing.T) {
 	require.Error(t, err)
 	assert.Nil(t, storage)
 	assert.Nil(t, snapshot)
+	select {
+	case <-stream.closed:
+	default:
+		t.Fatal("failed recovery retained its scanner")
+	}
 }
 
 // immediateTaskScheduler runs every submitted task synchronously, so a
@@ -1363,4 +1399,36 @@ func TestConsumeDirtySnapshotCapsSummaryWithEqualMessageID(t *testing.T) {
 	assert.Equal(t, int64(7), snapshot.Checkpoint.Term)
 	assert.Equal(t, uint64(0), snapshot.LogicalEndOffset,
 		"a later tracker byte offset must not be published with the capped checkpoint")
+}
+
+func TestRecoverRecoveryStorageContinuesRetainedStream(t *testing.T) {
+	resource.InitForTest(t)
+	scheduler := nodescheduler.New(4)
+	defer scheduler.Close()
+	stream := &blockingRecoveryStream{ch: make(chan message.ImmutableMessage), closed: make(chan struct{})}
+	close(stream.ch)
+	expectedSnapshot := &RecoverySnapshot{}
+	metaMock := mockey.Mock((*recoveryStorageImpl).recoverRecoveryInfoFromMeta).Return(nil).Build()
+	defer metaMock.UnPatch()
+	startupMock := mockey.Mock((*recoveryStorageImpl).runBoundedRecovery).To(func(
+		storage *recoveryStorageImpl, _ context.Context, _ RecoveryStreamBuilder, _ message.ImmutableMessage,
+	) (*RecoverySnapshot, error) {
+		storage.recoveryStream = stream
+		return expectedSnapshot, nil
+	}).Build()
+	defer startupMock.UnPatch()
+
+	storage, snapshot, err := RecoverRecoveryStorage(context.Background(), &recordingRecoveryStreamBuilder{},
+		&utility.WALCheckpoint{MessageID: walimplstest.NewTestMessageID(1), TimeTick: 1}, nil,
+		WithNodeScheduler(scheduler))
+	require.NoError(t, err)
+	require.Same(t, expectedSnapshot, snapshot)
+	defer storage.Close()
+	// The startup stream is already at EOF. Continuing it must promptly close
+	// that same stream, instead of building another reader for live observation.
+	select {
+	case <-stream.closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("live observation did not continue the retained startup stream")
+	}
 }

@@ -26,7 +26,7 @@ type RecoverySnapshot struct {
 	// the background persistence transaction stores all required snapshots.
 	Checkpoint      *WALCheckpoint
 	PChannelControl *streamingpb.PChannelRecoveryControlMeta
-	TxnBuffer       *utility.TxnBuffer
+	TxnBuffer       *utility.TxnBuffer // independent startup snapshot; never the live scanner buffer
 	// SummarySnapshots is reserved for idempotency recovery integration.
 	SummarySnapshots map[string]*idempotencyview.Snapshot
 }
@@ -48,10 +48,9 @@ func clonePChannelControl(control *streamingpb.PChannelRecoveryControlMeta) *str
 
 type BuildRecoveryStreamParam struct {
 	StartCheckpoint message.MessageID
-	EndTimeTick     uint64
-	// UseWriteAheadBuffer lets unbounded live scanners switch to WAB tailing after
-	// catching up durable WAL. Bounded startup recovery keeps this disabled.
-	UseWriteAheadBuffer bool
+	// RecoveryBarrier marks the startup snapshot boundary. The stream continues
+	// after this message with the same ordering and transaction state.
+	RecoveryBarrier message.ImmutableMessage
 }
 
 // RecoveryMetrics is the metrics of the recovery info.
@@ -79,7 +78,7 @@ type RecoveryStreamBuilder interface {
 	Channel() types.PChannelInfo
 
 	// Build builds a recovery stream from the given channel info.
-	// The recovery stream will return the messages from the start checkpoint to the end time tick.
+	// The stream replays from StartCheckpoint and remains open after RecoveryBarrier.
 	Build(param BuildRecoveryStreamParam) RecoveryStream
 
 	// Return the underlying walimpls.WALImpls.
@@ -92,13 +91,12 @@ type RecoveryStream interface {
 	// The channel is closed when the recovery stream is done.
 	Chan() <-chan message.ImmutableMessage
 
-	// Error should be called after the stream `Chan()` is consumed.
-	// It returns the error if the stream is not done.
-	// If the stream is full consumed, it returns nil.
+	// Error waits for the stream to finish and returns its terminal error.
+	// Reaching RecoveryBarrier does not finish the stream.
 	Error() error
 
-	// TxnBuffer returns the uncommitted txn buffer after recovery stream is done.
-	// Can be only called the stream is drained and Error() return nil.
+	// TxnBuffer returns an independent snapshot of unfinished transactions at
+	// RecoveryBarrier. Call only after consuming that barrier from Chan().
 	TxnBuffer() *utility.TxnBuffer
 
 	// Close closes the recovery stream.
