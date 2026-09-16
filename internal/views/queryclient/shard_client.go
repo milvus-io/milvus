@@ -12,6 +12,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/util/queryutil"
 	"github.com/milvus-io/milvus/internal/util/searchutil"
 	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/balancer/picker"
@@ -280,6 +281,95 @@ func (s *shardViewQueryClient) Query(ctx context.Context, req *ShardQueryRequest
 		},
 		resetShard: req.Reducer.ResetShard,
 	})
+}
+
+// QueryStream opens the SN/QN child streams for one vchannel and returns its
+// request-scoped Plain Query ReduceStream without consuming output.
+func (s *shardViewQueryClient) QueryStream(
+	ctx context.Context,
+	vchannel string,
+	req *internalpb.RetrieveRequest,
+	chunkSize int,
+) (queryutil.ReduceStream, *ShardPlan, error) {
+	if req == nil {
+		return nil, nil, merr.WrapErrServiceInternalMsg("QueryStream requires a Query request")
+	}
+
+	var lastErr error
+	for attempt := 0; attempt < s.maxRetries; attempt++ {
+		if ctx.Err() != nil {
+			return nil, nil, ctx.Err()
+		}
+		targetShardID := qviews.ShardID{ReplicaID: qviews.UnknownReplicaID, VChannel: vchannel}
+		planReq := &viewpb.GetQueryPlanRequest{
+			CollectionId: req.GetCollectionID(),
+			ShardId:      targetShardID.IntoProto(),
+			PartitionIds: req.GetPartitionIDs(),
+			Request: &viewpb.GetQueryPlanRequest_LegacyRetrieveRequest{
+				LegacyRetrieveRequest: req,
+			},
+		}
+		plan, err := s.executeGetQueryPlan(ctx, targetShardID, planReq, &shardExecParams{
+			consistencyLevel: req.GetConsistencyLevel(),
+		})
+		if err != nil {
+			if ve := viewerror.AsViewError(err); ve != nil && ve.IsRetryable() {
+				lastErr = err
+				continue
+			}
+			return nil, nil, err
+		}
+
+		shardID := qviews.FromProtoShardID(plan.ShardId)
+		workNodes := workNodesFromPlan(plan)
+		childStreams := make([]queryutil.ReduceStream, 0, len(workNodes))
+		for _, node := range workNodes {
+			childStream, openErr := s.queryServiceClient.QueryOnViewStream(ctx, node, &viewpb.QueryOnViewRequest{
+				LegacyReq:       legacyRetrieveRequestForNode(plan, node),
+				ShardId:         shardID.IntoProto(),
+				Version:         plan.Version,
+				Mvcc:            plan.GetMvcc(),
+				StreamChunkSize: int64(chunkSize),
+			})
+			if openErr != nil {
+				err = openErr
+				break
+			}
+			if childStream == nil {
+				err = merr.WrapErrServiceInternalMsg("QueryOnViewStream returned a nil stream for work node %s", node.String())
+				break
+			}
+			childStreams = append(childStreams, childStream)
+		}
+		if err != nil {
+			for _, childStream := range childStreams {
+				err = errors.Join(err, childStream.Close())
+			}
+			if ctx.Err() != nil {
+				return nil, nil, ctx.Err()
+			}
+			if ve := viewerror.AsViewError(err); ve != nil && ve.IsRetryable() {
+				lastErr = err
+				continue
+			}
+			return nil, nil, err
+		}
+
+		reducedStream, err := queryutil.NewReduceStream(req, childStreams, chunkSize)
+		if err != nil {
+			for _, childStream := range childStreams {
+				err = errors.Join(err, childStream.Close())
+			}
+			return nil, nil, err
+		}
+		return reducedStream, &ShardPlan{
+			ShardID:   shardID,
+			Version:   plan.Version,
+			Mvcc:      plan.GetMvcc(),
+			WorkNodes: workNodes,
+		}, nil
+	}
+	return nil, nil, lastErr
 }
 
 // ============================================================================
