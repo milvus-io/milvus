@@ -287,7 +287,14 @@ func (m *versionManagerImpl) GetMaximumIndexEngineVersion() int32 {
 }
 
 func (m *versionManagerImpl) getMaximumVersion() int32 {
-	return getMaximumVersionFrom(m.versions, segcore.GetIndexEngineInfo().CurrentIndexVersion)
+	// The highest version this image can LOAD, which is what an upper bound
+	// asks for and is not the same as the version it builds at. A registered
+	// QueryNode is read as max(Current, Maximum) below, so answering with the
+	// current version alone would make the same image bound an operator's
+	// target lower with no session than with one, and clamp index builds
+	// during a restart to a version this very image can read past.
+	info := segcore.GetIndexEngineInfo()
+	return getMaximumVersionFrom(m.versions, max(info.CurrentIndexVersion, info.MaxIndexVersion))
 }
 
 func (m *versionManagerImpl) GetMaximumScalarIndexEngineVersion() int32 {
