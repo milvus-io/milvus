@@ -480,6 +480,7 @@ func TestStructElementNullableFlattenFillAndValidate(t *testing.T) {
 		validData: []bool{true, false, true},
 	})
 	vectorField.GetVectors().GetVectorArray().Dim = 2
+	vectorField.GetVectors().GetVectorArray().GetData()[0].Dim = 2
 	insertMsg := structElementCountTestInsertMsg(structElementCountTestStructData(scalarField, vectorField))
 
 	require.NoError(t, checkAndFlattenStructFieldData(schema, insertMsg))

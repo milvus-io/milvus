@@ -3204,8 +3204,7 @@ func (s *Server) AbortImport(ctx context.Context, req *datapb.AbortImportRequest
 				return merr.Success()
 			}
 			// Committed states are truly terminal and cannot be rolled back.
-			if state == internalpb.ImportJobState_Committing ||
-				state == internalpb.ImportJobState_Completed {
+			if UnfailableJobStates.Contain(state) {
 				return merr.Status(merr.WrapErrImportFailed(
 					fmt.Sprintf("job %d is in terminal/committed state %s, abort not allowed", req.GetJobId(), state)))
 			}

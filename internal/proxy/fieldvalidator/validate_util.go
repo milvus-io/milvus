@@ -1437,6 +1437,15 @@ func (v *ValidateUtil) checkArrayOfVectorFieldData(field *schemapb.FieldData, fi
 		return merr.WrapErrParameterInvalid("valid length array", "array length exceeds max capacity", msg)
 	}
 
+	// Each row's dimension is serialized into the insert message and used by
+	// segcore to allocate its VectorArray, so it must agree with the schema.
+	for i, vector := range data.GetData() {
+		if vector.GetDim() != dim {
+			return merr.WrapErrParameterInvalidMsg("array of vector field %s row %d has dim %d, expected %d",
+				field.GetFieldName(), i, vector.GetDim(), dim)
+		}
+	}
+
 	validateVectorCount := func(payloadLength int, elementsPerVector int) (int, error) {
 		if elementsPerVector <= 0 {
 			return 0, merr.WrapErrParameterInvalidMsg("invalid dim %d for array of vector field %s", dim, field.GetFieldName())

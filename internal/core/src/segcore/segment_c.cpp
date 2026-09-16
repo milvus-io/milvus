@@ -570,21 +570,13 @@ CRetrieveResult*
 CreateLeakedCRetrieveResultFromProto(
     std::unique_ptr<milvus::proto::segcore::RetrieveResults> retrieve_result) {
     auto size = retrieve_result->ByteSizeLong();
-    auto buffer = new uint8_t[size];
-    try {
-        retrieve_result->SerializePartialToArray(buffer, size);
-    } catch (std::exception& e) {
-        delete[] buffer;
-        throw;
-    } catch (...) {
-        delete[] buffer;
-        throw;
-    }
+    std::unique_ptr<uint8_t[]> buffer(new uint8_t[size]);
+    retrieve_result->SerializePartialToArray(buffer.get(), size);
 
-    auto result = new CRetrieveResult();
-    result->proto_blob = buffer;
+    auto result = std::make_unique<CRetrieveResult>();
+    result->proto_blob = buffer.release();
     result->proto_size = size;
-    return result;
+    return result.release();
 }
 
 CFuture*  // Future<CRetrieveResult>
@@ -2685,27 +2677,46 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
         auto manifest_path = milvus_storage::get_manifest_filepath(
             writer_config.segment_path, committed_version);
         result->manifest_path = strdup(manifest_path.c_str());
+        if (!result->manifest_path) {
+            return milvus::FailureCStatus(milvus::MemAllocateFailed,
+                                          "failed to allocate manifest path");
+        }
         result->committed_version = committed_version;
         result->num_rows = output.rows_written;
         if (!bm25_stats.empty()) {
-            result->num_bm25_stats = bm25_stats.size();
-            result->bm25_field_ids = static_cast<int64_t*>(
-                malloc(sizeof(int64_t) * result->num_bm25_stats));
-            result->bm25_stats = static_cast<uint8_t**>(
-                malloc(sizeof(uint8_t*) * result->num_bm25_stats));
-            result->bm25_stats_sizes = static_cast<size_t*>(
-                malloc(sizeof(size_t) * result->num_bm25_stats));
-            size_t idx = 0;
+            const auto num_stats = bm25_stats.size();
+            result->bm25_field_ids =
+                static_cast<int64_t*>(malloc(sizeof(int64_t) * num_stats));
+            result->bm25_stats =
+                static_cast<uint8_t**>(calloc(num_stats, sizeof(uint8_t*)));
+            result->bm25_stats_sizes =
+                static_cast<size_t*>(malloc(sizeof(size_t) * num_stats));
+            if (!result->bm25_field_ids || !result->bm25_stats ||
+                !result->bm25_stats_sizes) {
+                return milvus::FailureCStatus(
+                    milvus::MemAllocateFailed,
+                    "failed to allocate growing flush BM25 stats arrays");
+            }
             for (const auto& [field_id, stats] : bm25_stats) {
                 auto serialized = SerializeBM25Stats(stats);
+                const auto idx = result->num_bm25_stats;
                 result->bm25_field_ids[idx] = field_id;
                 result->bm25_stats_sizes[idx] = serialized.size();
                 result->bm25_stats[idx] =
                     static_cast<uint8_t*>(malloc(serialized.size()));
-                std::memcpy(result->bm25_stats[idx],
-                            serialized.data(),
-                            serialized.size());
-                idx++;
+                if (!serialized.empty()) {
+                    if (!result->bm25_stats[idx]) {
+                        return milvus::FailureCStatus(
+                            milvus::MemAllocateFailed,
+                            "failed to allocate growing flush BM25 stats");
+                    }
+                    std::memcpy(result->bm25_stats[idx],
+                                serialized.data(),
+                                serialized.size());
+                }
+                // FreeFlushResult must only visit entries whose ownership
+                // has been transferred, including on serialization failure.
+                ++result->num_bm25_stats;
             }
         }
         return milvus::SuccessCStatus();

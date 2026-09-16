@@ -73,7 +73,7 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 				IsTopkReduce:       true,
 			},
 			TotalChannelNum: 2,
-		}, suite.queryHook, 2, false, func(int64) int64 { return 512 })
+		}, suite.queryHook, 2, false, func(int64) int64 { return 512 }, "")
 		suite.NoError(err)
 		suite.verifyQueryInfo(req, 50, true, false, `{"param": 2}`)
 
@@ -85,7 +85,7 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 				IsTopkReduce:       true,
 			},
 			TotalChannelNum: 2,
-		}, suite.queryHook, 2, false, func(int64) int64 { return 512 })
+		}, suite.queryHook, 2, false, func(int64) int64 { return 512 }, "")
 		suite.NoError(err)
 		suite.verifyQueryInfo(req, 50, false, true, `{"param": 2}`)
 	})
@@ -113,7 +113,7 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 				SerializedExprPlan: bs,
 			},
 			TotalChannelNum: 2,
-		}, suite.queryHook, 2, false, func(int64) int64 { return 512 })
+		}, suite.queryHook, 2, false, func(int64) int64 { return 512 }, "")
 		suite.NoError(err)
 		suite.verifyQueryInfo(req, 100, false, false, `{"param": 1}`)
 	})
@@ -141,9 +141,57 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 				IsTopkReduce:       true,
 			},
 			TotalChannelNum: 2,
-		}, suite.queryHook, 2, false, func(int64) int64 { return 512 })
+		}, suite.queryHook, 2, false, func(int64) int64 { return 512 }, "")
 		suite.NoError(err)
 		suite.verifyQueryInfo(req, 100, false, false, `{"param": 1}`)
+	})
+
+	suite.Run("knowhere_search_defaults", func() {
+		params := paramtable.Get()
+		searchKey := params.KnowhereConfig.IndexParam.KeyPrefix + "TEST_INDEX.search.default_param"
+		params.Save(params.AutoIndexConfig.Enable.Key, "true")
+		params.Save(params.KnowhereConfig.Enable.Key, "true")
+		params.Save(searchKey, "0.5")
+		defer params.Reset(params.AutoIndexConfig.Enable.Key)
+		defer params.Reset(params.KnowhereConfig.Enable.Key)
+		defer params.Remove(searchKey)
+
+		plan := &planpb.PlanNode{
+			Node: &planpb.PlanNode_VectorAnns{
+				VectorAnns: &planpb.VectorANNS{
+					QueryInfo: &planpb.QueryInfo{
+						Topk:         100,
+						SearchParams: `{"request_param":16}`,
+					},
+				},
+			},
+		}
+		bs, err := proto.Marshal(plan)
+		suite.Require().NoError(err)
+
+		for _, isSecondStageSearch := range []bool{false, true} {
+			req, err := OptimizeSearchParams(ctx, &querypb.SearchRequest{
+				Req: &internalpb.SearchRequest{
+					SerializedExprPlan: bs,
+					IsTopkReduce:       true,
+				},
+			}, nil, 2, isSecondStageSearch, func(int64) int64 { return 512 }, "TEST_INDEX")
+			suite.NoError(err)
+			suite.JSONEq(`{"default_param":0.5,"request_param":16}`, suite.getQueryInfo(req).GetSearchParams())
+			suite.False(req.GetReq().GetIsTopkReduce())
+		}
+
+		mockHook := mock_optimizers.NewMockQueryHook(suite.T())
+		mockHook.EXPECT().Run(mock.Anything).Run(func(params map[string]any) {
+			params[common.SearchParamKey] = `{"default_param":0.8,"hook_param":32}`
+		}).Return(nil)
+		req, err := OptimizeSearchParams(ctx, &querypb.SearchRequest{
+			Req: &internalpb.SearchRequest{
+				SerializedExprPlan: bs,
+			},
+		}, mockHook, 2, false, func(int64) int64 { return 512 }, "TEST_INDEX")
+		suite.NoError(err)
+		suite.JSONEq(`{"default_param":0.8,"hook_param":32}`, suite.getQueryInfo(req).GetSearchParams())
 	})
 
 	suite.Run("other_plannode", func() {
@@ -170,7 +218,7 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 				SerializedExprPlan: bs,
 			},
 			TotalChannelNum: 2,
-		}, suite.queryHook, 2, false, func(int64) int64 { return 512 })
+		}, suite.queryHook, 2, false, func(int64) int64 { return 512 }, "")
 		suite.NoError(err)
 		suite.Equal(bs, req.GetReq().GetSerializedExprPlan())
 	})
@@ -185,7 +233,7 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 		_, err := OptimizeSearchParams(ctx, &querypb.SearchRequest{
 			Req:             &internalpb.SearchRequest{},
 			TotalChannelNum: 2,
-		}, suite.queryHook, 2, false, func(int64) int64 { return 512 })
+		}, suite.queryHook, 2, false, func(int64) int64 { return 512 }, "")
 		suite.Error(err)
 	})
 
@@ -219,7 +267,7 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 			Req: &internalpb.SearchRequest{
 				SerializedExprPlan: bs,
 			},
-		}, suite.queryHook, 2, false, func(int64) int64 { return 512 })
+		}, suite.queryHook, 2, false, func(int64) int64 { return 512 }, "")
 		suite.Error(err)
 	})
 
@@ -270,7 +318,7 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 		}, suite.queryHook, 2, false, func(fieldID int64) int64 {
 			suite.EqualValues(100, fieldID)
 			return 512
-		})
+		}, "")
 		suite.NoError(err)
 		suite.verifyQueryInfo(req, 100, false, false, `{"param": 1}`)
 		suite.verifyGlobalRefineRatios(req, 4, 2)
@@ -315,7 +363,7 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 				SearchType:         internalpb.SearchType_PURE_ANN_SEARCH_NO_FILTER,
 			},
 			TotalChannelNum: 2,
-		}, suite.queryHook, 2, false, func(int64) int64 { return 512 })
+		}, suite.queryHook, 2, false, func(int64) int64 { return 512 }, "")
 		suite.NoError(err)
 		suite.verifyQueryInfo(req, 100, false, false, `{"param": 1}`)
 		suite.verifyGlobalRefineRatios(req, 0, 0)
@@ -362,7 +410,7 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 				SearchType:         internalpb.SearchType_DEFAULT,
 			},
 			TotalChannelNum: 2,
-		}, suite.queryHook, 2, false, func(int64) int64 { return 512 })
+		}, suite.queryHook, 2, false, func(int64) int64 { return 512 }, "")
 		suite.NoError(err)
 		suite.verifyQueryInfo(req, 100, false, false, `{"param": 1}`)
 		suite.verifyGlobalRefineRatios(req, 0, 0)
@@ -398,7 +446,7 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 				Req: &internalpb.SearchRequest{
 					SerializedExprPlan: bs,
 				},
-			}, suite.queryHook, 2, false, func(int64) int64 { return 512 })
+			}, suite.queryHook, 2, false, func(int64) int64 { return 512 }, "")
 		})
 	})
 }
@@ -580,7 +628,7 @@ func (suite *QueryHookSuite) checkStrictGroupServerSettings(singular int64, plur
 				}
 				cfg.Save(vKey, "0.5")
 				cfg.Save(tKey, "17")
-				req, err := OptimizeSearchParams(context.Background(), makeRequest(true, raw), hook, 1, secondStage, func(int64) int64 { return 128 })
+				req, err := OptimizeSearchParams(context.Background(), makeRequest(true, raw), hook, 1, secondStage, func(int64) int64 { return 128 }, "")
 				suite.Require().NoError(err)
 				values := readParams(req)
 				suite.Equal("0.5", string(values[common.StrictGroupAcceptanceThresholdKey]))
@@ -590,7 +638,7 @@ func (suite *QueryHookSuite) checkStrictGroupServerSettings(singular int64, plur
 				// Updating config affects a later request, not the serialized snapshot.
 				cfg.Save(vKey, "0")
 				cfg.Save(tKey, "1")
-				next, err := OptimizeSearchParams(context.Background(), makeRequest(true, raw), nil, 1, false, func(int64) int64 { return 128 })
+				next, err := OptimizeSearchParams(context.Background(), makeRequest(true, raw), nil, 1, false, func(int64) int64 { return 128 }, "")
 				suite.Require().NoError(err)
 				suite.Equal("0", string(readParams(next)[common.StrictGroupAcceptanceThresholdKey]))
 				suite.Equal("1", string(readParams(next)[common.StrictGroupProbeCandidatesKey]))
@@ -600,12 +648,12 @@ func (suite *QueryHookSuite) checkStrictGroupServerSettings(singular int64, plur
 	}
 	cfg.Reset(vKey)
 	cfg.Reset(tKey)
-	defaultReq, err := OptimizeSearchParams(context.Background(), makeRequest(true, "{}"), nil, 1, false, func(int64) int64 { return 128 })
+	defaultReq, err := OptimizeSearchParams(context.Background(), makeRequest(true, "{}"), nil, 1, false, func(int64) int64 { return 128 }, "")
 	suite.Require().NoError(err)
 	suite.Equal("0.1", string(readParams(defaultReq)[common.StrictGroupAcceptanceThresholdKey]))
 	suite.Equal("100", string(readParams(defaultReq)[common.StrictGroupProbeCandidatesKey]))
 	// Caller-controlled values are removed even on non-strict queries.
-	plain, err := OptimizeSearchParams(context.Background(), makeRequest(false, raw), nil, 1, false, func(int64) int64 { return 128 })
+	plain, err := OptimizeSearchParams(context.Background(), makeRequest(false, raw), nil, 1, false, func(int64) int64 { return 128 }, "")
 	suite.Require().NoError(err)
 	suite.NotContains(readParams(plain), common.StrictGroupAcceptanceThresholdKey)
 	suite.NotContains(readParams(plain), common.StrictGroupProbeCandidatesKey)
@@ -615,13 +663,13 @@ func (suite *QueryHookSuite) checkStrictGroupServerSettings(singular int64, plur
 	} {
 		for _, value := range badValues {
 			cfg.Save(key, value)
-			_, err := OptimizeSearchParams(context.Background(), makeRequest(true, "{}"), nil, 1, false, func(int64) int64 { return 128 })
+			_, err := OptimizeSearchParams(context.Background(), makeRequest(true, "{}"), nil, 1, false, func(int64) int64 { return 128 }, "")
 			suite.ErrorIs(err, merr.ErrServiceUnavailable)
 			cfg.Reset(key)
 		}
 	}
 	for _, raw := range []string{"invalid", "[]", "1"} {
-		_, err := OptimizeSearchParams(context.Background(), makeRequest(true, raw), nil, 1, false, func(int64) int64 { return 128 })
+		_, err := OptimizeSearchParams(context.Background(), makeRequest(true, raw), nil, 1, false, func(int64) int64 { return 128 }, "")
 		suite.Error(err)
 	}
 }

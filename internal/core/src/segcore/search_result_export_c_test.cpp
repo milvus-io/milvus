@@ -953,9 +953,8 @@ TEST(
         (*batch_result)->schema()->field(4)->type()->Equals(arrow::int32()));
 }
 
-TEST(
-    SearchResultExport,
-    ExportSearchResultAsArrowRecordBatch_EmptyGeometryExtraFieldNotImplemented) {
+TEST(SearchResultExport,
+     ExportSearchResultAsArrowRecordBatch_EmptyGeometryExtraField) {
     using namespace milvus;
 
     auto schema = std::make_shared<Schema>();
@@ -991,11 +990,16 @@ TEST(
         nullptr);
     [[maybe_unused]] auto stream_chunk_sizes_guard =
         AdoptChunkSizes(stream_chunk_sizes);
-    EXPECT_NE(status.error_code, 0);
-    EXPECT_NE(std::string(status.error_msg)
-                  .find("GEOMETRY extra field Arrow export is not implemented"),
-              std::string::npos);
-    free(const_cast<char*>(status.error_msg));
+    ASSERT_EQ(status.error_code, 0) << status.error_msg;
+
+    auto batch_result =
+        ImportExportedRecordBatch(&stream_array, &stream_schema);
+    ASSERT_TRUE(batch_result.ok()) << batch_result.status().ToString();
+    auto batch = *batch_result;
+    EXPECT_EQ(batch->num_rows(), 0);
+    auto geom_col = batch->GetColumnByName("extra_geom");
+    ASSERT_NE(geom_col, nullptr);
+    EXPECT_TRUE(geom_col->type()->Equals(arrow::binary()));
 }
 
 TEST(SearchResultExport,

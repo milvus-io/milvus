@@ -334,20 +334,9 @@ func compactionReadSchema(schema *schemapb.CollectionSchema, existingFields map[
 	}
 	readSchema.Fields = fields
 
-	structFields := make([]*schemapb.StructArrayFieldSchema, 0, len(readSchema.GetStructArrayFields()))
-	for _, structField := range readSchema.GetStructArrayFields() {
-		childFields := make([]*schemapb.FieldSchema, 0, len(structField.GetFields()))
-		for _, field := range structField.GetFields() {
-			if compactionFieldReadable(field, existingFields) {
-				childFields = append(childFields, field)
-			}
-		}
-		if len(childFields) > 0 {
-			structField.Fields = childFields
-			structFields = append(structFields, structField)
-		}
-	}
-	readSchema.StructArrayFields = structFields
+	// StructArray fields are physically indivisible. Keep every child in the
+	// read schema so a partially-present struct cannot be hidden by projection;
+	// schema-bump preflight rejects that state before the reader is opened.
 	return readSchema
 }
 
@@ -361,6 +350,86 @@ func compactionFieldReadable(field *schemapb.FieldSchema, existingFields map[int
 		return true
 	}
 	return !field.GetIsFunctionOutput()
+}
+
+// validateSchemaBumpIntegrity checks the persisted schema against the physical
+// field set during schema-bump preflight. Function output ownership is
+// represented both by FunctionSchema.OutputFieldIds and
+// FieldSchema.IsFunctionOutput, so the two representations must agree and each
+// output field must have exactly one owning function.
+// StructArray fields are physically all-or-nothing and cannot contain function
+// outputs, which are top-level fields by schema contract.
+func validateSchemaBumpIntegrity(schema *schemapb.CollectionSchema, existingFields map[int64]struct{}) (map[int64]struct{}, error) {
+	declaredFunctionOutputs := make(map[int64]struct{})
+	outputOwners := make(map[int64]int)
+	topLevelFields := make(map[int64]*schemapb.FieldSchema, len(schema.GetFields()))
+	for _, field := range schema.GetFields() {
+		topLevelFields[field.GetFieldID()] = field
+	}
+
+	for functionIndex, functionSchema := range schema.GetFunctions() {
+		for _, outputFieldID := range functionSchema.GetOutputFieldIds() {
+			if ownerIndex, duplicate := outputOwners[outputFieldID]; duplicate {
+				if ownerIndex == functionIndex {
+					return nil, merr.WrapErrDataIntegrityMsg(
+						"function %s declares output field %d more than once",
+						functionSchema.GetName(), outputFieldID)
+				}
+				return nil, merr.WrapErrDataIntegrityMsg(
+					"function output field %d is declared by both function %s and function %s",
+					outputFieldID, schema.GetFunctions()[ownerIndex].GetName(), functionSchema.GetName())
+			}
+			outputOwners[outputFieldID] = functionIndex
+			declaredFunctionOutputs[outputFieldID] = struct{}{}
+			field, ok := topLevelFields[outputFieldID]
+			if !ok {
+				if typeutil.GetField(schema, outputFieldID) != nil {
+					return nil, merr.WrapErrDataIntegrityMsg(
+						"function %s output field %d must be a top-level field",
+						functionSchema.GetName(), outputFieldID)
+				}
+				return nil, merr.WrapErrDataIntegrityMsg(
+					"function %s output field %d not found in persisted schema",
+					functionSchema.GetName(), outputFieldID)
+			}
+			if !field.GetIsFunctionOutput() {
+				return nil, merr.WrapErrDataIntegrityMsg(
+					"function %s output field %d is not marked as a function output",
+					functionSchema.GetName(), outputFieldID)
+			}
+		}
+	}
+
+	for _, field := range schema.GetFields() {
+		if !field.GetIsFunctionOutput() {
+			continue
+		}
+		if _, hasProducer := declaredFunctionOutputs[field.GetFieldID()]; !hasProducer {
+			return nil, merr.WrapErrDataIntegrityMsg(
+				"function output field %d has no producing function", field.GetFieldID())
+		}
+	}
+
+	for _, structField := range schema.GetStructArrayFields() {
+		presentChildren := 0
+		for _, childField := range structField.GetFields() {
+			if childField.GetIsFunctionOutput() {
+				return nil, merr.WrapErrDataIntegrityMsg(
+					"struct array field %d child field %d cannot be a function output",
+					structField.GetFieldID(), childField.GetFieldID())
+			}
+			if _, present := existingFields[childField.GetFieldID()]; present {
+				presentChildren++
+			}
+		}
+		if presentChildren != 0 && presentChildren != len(structField.GetFields()) {
+			return nil, merr.WrapErrDataIntegrityMsg(
+				"struct array field %d is partially present: %d of %d children exist",
+				structField.GetFieldID(), presentChildren, len(structField.GetFields()))
+		}
+	}
+
+	return declaredFunctionOutputs, nil
 }
 
 func filterV1CompactionFieldBinlogs(fieldBinlogs []*datapb.FieldBinlog, readFields map[int64]struct{}) []*datapb.FieldBinlog {

@@ -17,6 +17,8 @@
 #pragma once
 
 #include <algorithm>
+#include <cstring>
+#include <limits>
 #include <memory>
 
 #include "common/FastMem.h"
@@ -73,15 +75,15 @@ class VectorArray : public milvus::VectorTrait {
 
     VectorArray(const VectorFieldProto& vector_field, bool element_nullable)
         : dim_(vector_field.dim()), element_nullable_(element_nullable) {
+        AssertInfo(dim_ > 0 && dim_ <= std::numeric_limits<int>::max(),
+                   "invalid vector array dimension {}",
+                   dim_);
         if (!element_nullable_) {
             AssertInfo(vector_field.valid_data_size() == 0,
                        "non-element-nullable vector array cannot carry "
                        "element valid_data");
         } else {
             length_ = vector_field.valid_data_size();
-            AssertInfo(dim_ > 0 || length_ == 0,
-                       "VectorArray dim must be positive, dim={}",
-                       dim_);
         }
 
         const char* payload_data = nullptr;
@@ -125,11 +127,6 @@ class VectorArray : public milvus::VectorTrait {
                           static_cast<int>(vector_field.data_case()));
             }
         }
-
-        if (payload_size == 0 && dim_ == 0) {
-            return;
-        }
-        AssertInfo(dim_ > 0, "VectorArray dim must be positive, dim={}", dim_);
         auto bytes_per_vector =
             milvus::vector_bytes_per_element(element_type_, dim_);
         AssertInfo(payload_size % bytes_per_vector == 0,
@@ -137,6 +134,9 @@ class VectorArray : public milvus::VectorTrait {
                    "byte width {}",
                    payload_size,
                    bytes_per_vector);
+        AssertInfo(payload_size <= std::numeric_limits<int>::max(),
+                   "vector array data size {} exceeds the supported size",
+                   payload_size);
         if (!element_nullable_) {
             physical_length_ = payload_size / bytes_per_vector;
             length_ = physical_length_;

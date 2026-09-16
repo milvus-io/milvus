@@ -1258,6 +1258,11 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 24*time.Hour, params.StreamingCfg.WALRecoverySchemaExpirationTolerance.GetAsDurationByParse())
 		assert.Equal(t, 100, params.StreamingCfg.WALRecoveryMaxDirtyMessage.GetAsInt())
 		assert.Equal(t, 10*time.Second, params.StreamingCfg.WALRecoveryPersistInterval.GetAsDurationByParse())
+		assert.Equal(t, false, params.StreamingCfg.IdempotencyEnabled.GetAsBool())
+		assert.Equal(t, int64(16*1024*1024), params.StreamingCfg.IdempotencyMaxBytesPerWindow.GetAsSize())
+		assert.Equal(t, int64(256*1024*1024), params.StreamingCfg.IdempotencyMaxRetainedBytes.GetAsSize())
+		assert.Equal(t, 256, params.StreamingCfg.IdempotencyMaxRetainedChunks.GetAsInt())
+		assert.Equal(t, 256, params.StreamingCfg.IdempotencyMaxKeyLength.GetAsInt())
 		assert.Equal(t, float64(0.6), params.StreamingCfg.FlushMemoryThreshold.GetAsFloat())
 		assert.Equal(t, float64(0.2), params.StreamingCfg.FlushGrowingSegmentBytesHwmThreshold.GetAsFloat())
 		assert.Equal(t, float64(0.1), params.StreamingCfg.FlushGrowingSegmentBytesLwmThreshold.GetAsFloat())
@@ -1352,6 +1357,11 @@ func TestComponentParam(t *testing.T) {
 		params.Save(params.StreamingCfg.WALRecoveryGracefulCloseTimeout.Key, "4s")
 		params.Save(params.StreamingCfg.WALRecoveryMaxDirtyMessage.Key, "200")
 		params.Save(params.StreamingCfg.WALRecoveryPersistInterval.Key, "20s")
+		params.Save(params.StreamingCfg.IdempotencyEnabled.Key, "true")
+		params.Save(params.StreamingCfg.IdempotencyMaxBytesPerWindow.Key, "33554432")
+		params.Save(params.StreamingCfg.IdempotencyMaxRetainedBytes.Key, "1073741824")
+		params.Save(params.StreamingCfg.IdempotencyMaxRetainedChunks.Key, "512")
+		params.Save(params.StreamingCfg.IdempotencyMaxKeyLength.Key, "2048")
 		params.Save(params.StreamingCfg.FlushMemoryThreshold.Key, "0.7")
 		params.Save(params.StreamingCfg.FlushGrowingSegmentBytesHwmThreshold.Key, "0.25")
 		params.Save(params.StreamingCfg.FlushGrowingSegmentBytesLwmThreshold.Key, "0.15")
@@ -1379,6 +1389,11 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 4*time.Second, params.StreamingCfg.WALRecoveryGracefulCloseTimeout.GetAsDurationByParse())
 		assert.Equal(t, 200, params.StreamingCfg.WALRecoveryMaxDirtyMessage.GetAsInt())
 		assert.Equal(t, 20*time.Second, params.StreamingCfg.WALRecoveryPersistInterval.GetAsDurationByParse())
+		assert.Equal(t, true, params.StreamingCfg.IdempotencyEnabled.GetAsBool())
+		assert.Equal(t, int64(32*1024*1024), params.StreamingCfg.IdempotencyMaxBytesPerWindow.GetAsSize())
+		assert.Equal(t, int64(1024*1024*1024), params.StreamingCfg.IdempotencyMaxRetainedBytes.GetAsSize())
+		assert.Equal(t, 512, params.StreamingCfg.IdempotencyMaxRetainedChunks.GetAsInt())
+		assert.Equal(t, 2048, params.StreamingCfg.IdempotencyMaxKeyLength.GetAsInt())
 		assert.Equal(t, float64(0.7), params.StreamingCfg.FlushMemoryThreshold.GetAsFloat())
 		assert.Equal(t, float64(0.25), params.StreamingCfg.FlushGrowingSegmentBytesHwmThreshold.GetAsFloat())
 		assert.Equal(t, float64(0.15), params.StreamingCfg.FlushGrowingSegmentBytesLwmThreshold.GetAsFloat())
@@ -1529,4 +1544,47 @@ func TestImportIdempotencyParams(t *testing.T) {
 	assert.GreaterOrEqual(t,
 		params.DataCoordCfg.ImportTaskRetention.GetAsDuration(time.Second),
 		2*params.StreamingCfg.WALBroadcasterTombstoneMaxLifetime.GetAsDurationByParse())
+}
+
+func TestWriteSegmentIndexToManifest(t *testing.T) {
+	params := ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true)))
+
+	// Off by default: manifest publication is opt-in, and the legacy
+	// etcd-only path must be what a cluster gets without configuration.
+	assert.False(t, params.DataCoordCfg.WriteSegmentIndexToManifest.GetAsBool())
+
+	params.Save(params.DataCoordCfg.WriteSegmentIndexToManifest.Key, "true")
+	assert.True(t, params.DataCoordCfg.WriteSegmentIndexToManifest.GetAsBool())
+
+	// A value that does not parse as a boolean reads as false, i.e. the
+	// legacy behavior. Under the old etcd-write polarity this silently
+	// entered the one-way off state; with publication opt-in the failure is
+	// merely "the operator thinks it is on", with no durability consequence.
+	params.Save(params.DataCoordCfg.WriteSegmentIndexToManifest.Key, "yes")
+	assert.False(t, params.DataCoordCfg.WriteSegmentIndexToManifest.GetAsBool())
+}
+
+func TestSegmentIndexManifestLoadConcurrency(t *testing.T) {
+	params := ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true)))
+
+	// The manifest reload is object-storage IO behind cgo, not metastore IO:
+	// borrowing metastore.readConcurrency (32, and shared with the querycoord
+	// and rootcoord catalogs) would cap a fail-closed startup scan that runs
+	// once per healthy V3 segment.
+	assert.Equal(t, 64, params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.GetAsInt())
+	assert.NotEqual(t,
+		params.MetaStoreCfg.ReadConcurrency.Key,
+		params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.Key)
+
+	// A pool size below 1 would deadlock the scan, so it is clamped, not trusted.
+	params.Save(params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.Key, "0")
+	assert.Equal(t, 1, params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.GetAsInt())
+	params.Save(params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.Key, "-8")
+	assert.Equal(t, 1, params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.GetAsInt())
+
+	// Excessive native concurrency is clamped independently of integer overflow.
+	params.Save(params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.Key, "2147483648")
+	assert.Equal(t, 256, params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.GetAsInt())
 }

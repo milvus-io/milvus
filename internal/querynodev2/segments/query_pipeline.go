@@ -66,7 +66,7 @@ func RunQNQueryPipeline(
 	var err error
 
 	if retrievePlan.IsIgnoreNonPk() {
-		pipeline, msg, err = buildIgnoreNonPkPipeline(req, segcoreResults, segments, manager, retrievePlan)
+		pipeline, msg, err = buildIgnoreNonPkPipeline(req, schema, segcoreResults, segments, manager, retrievePlan)
 	} else {
 		pipeline, msg, err = buildStandardQNPipeline(req, schema, plan, segcoreResults)
 	}
@@ -88,6 +88,7 @@ func RunQNQueryPipeline(
 // [MergeByPKWithOffsets(topK)] → [FetchFieldsData] → output
 func buildIgnoreNonPkPipeline(
 	req *querypb.QueryRequest,
+	schema *schemapb.CollectionSchema,
 	segcoreResults []*segcorepb.RetrieveResults,
 	segments []Segment,
 	manager *Manager,
@@ -108,16 +109,24 @@ func buildIgnoreNonPkPipeline(
 		validSegments = append(validSegments, segments[i])
 	}
 
+	allFields := typeutil.GetAllFieldSchemas(schema)
+	fieldSchemaMap := make(map[int64]*schemapb.FieldSchema, len(allFields))
+	for _, f := range allFields {
+		fieldSchemaMap[f.GetFieldID()] = f
+	}
+
 	builder := queryutil.NewPipelineBuilder(queryutil.PipelineNameQNIgnoreNonPk)
-	builder.Add(queryutil.OpMergeByPKOffsets,
+	builder.Add(
+		queryutil.OpMergeByPKOffsets,
 		[]string{queryutil.PipelineInput},
 		[]string{queryutil.ChannelMerged},
 		NewMergeByPKWithOffsetsOperator(topK, reduceType),
 	)
-	builder.Add(queryutil.OpFetchFields,
+	builder.Add(
+		queryutil.OpFetchFields,
 		[]string{queryutil.ChannelMerged},
 		[]string{queryutil.PipelineOutput},
-		NewFetchFieldsDataOperator(validSegments, manager, retrievePlan),
+		NewFetchFieldsDataOperator(validSegments, manager, retrievePlan, fieldSchemaMap),
 	)
 
 	msg := queryutil.OpMsg{queryutil.PipelineInput: validResults}

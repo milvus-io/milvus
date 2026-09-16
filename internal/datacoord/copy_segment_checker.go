@@ -729,6 +729,10 @@ func (c *copySegmentChecker) checkGC(job CopySegmentJob) {
 		shouldRemoveJob := true
 
 		for _, task := range tasks {
+			if task.GetCleanupRequired() {
+				shouldRemoveJob = false
+				continue
+			}
 			// If job failed and task has target segments in meta, don't remove yet
 			// (wait for segments to be cleaned up first)
 			if job.GetState() == datapb.CopySegmentJobState_CopySegmentJobFailed {

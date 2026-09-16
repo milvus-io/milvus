@@ -318,6 +318,7 @@ func TestCopySegmentTask_CopySingleSegmentAllowsManifestOnlyStorageV3(t *testing
 		Sources:  []*datapb.CopySegmentSource{source},
 		Targets:  []*datapb.CopySegmentTarget{target},
 	}
+	req.TargetIndexes = []*datapb.CopySegmentTargetIndex{{IndexId: 777, IndexName: "shared_idx"}}
 	task := NewCopySegmentTask(
 		context.Background(),
 		req,
@@ -340,6 +341,7 @@ func TestCopySegmentTask_CopySingleSegmentAllowsManifestOnlyStorageV3(t *testing
 			_ context.Context,
 			_ storage.ChunkManager,
 			_ *indexpb.StorageConfig,
+			_ *indexpb.StorageConfig,
 			_ storage.CrossBucketCopier,
 			_ string,
 			_ string,
@@ -349,7 +351,9 @@ func TestCopySegmentTask_CopySingleSegmentAllowsManifestOnlyStorageV3(t *testing
 		) (*datapb.CopySegmentResult, []string, error) {
 			called = true
 			assert.Same(t, source, gotSource)
-			assert.Same(t, target, gotTarget)
+			assert.Equal(t, target.GetSegmentId(), gotTarget.GetSegmentId())
+			assert.Equal(t, req.GetTargetIndexes(), gotTarget.GetTargetIndexes())
+			assert.Empty(t, target.GetTargetIndexes(), "shared definitions must not mutate the original target")
 			return &datapb.CopySegmentResult{SegmentId: target.GetSegmentId()}, nil, nil
 		}).Build()
 	defer mockCopy.UnPatch()
@@ -764,6 +768,7 @@ func TestCopySegmentTaskExecute_FailureWaitsForAllWorkers(t *testing.T) {
 		func(
 			_ context.Context,
 			_ storage.ChunkManager,
+			_ *indexpb.StorageConfig,
 			_ *indexpb.StorageConfig,
 			_ storage.CrossBucketCopier,
 			_ string,

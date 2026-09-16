@@ -48,14 +48,27 @@ func toMilvusS3URIForMinIO(icebergURI, host string) string {
 //	Create Iceberg table on MinIO → CreateCollection (format=iceberg-table) →
 //	Refresh (with snapshot_id) → Load → Search → Query → Drop.
 //
-// The externalSource uses s3://host/bucket/path/metadata.json. The scheme is
-// accepted by Iceberg FileIO, while extfs.cloud_provider=minio keeps Milvus in
-// self-hosted S3-compatible mode.
+// The externalSource uses the legacy Milvus form
+// s3://endpoint/bucket/path/metadata.json.
 //
 // Run:
 //
 //	go test -v -run TestExternalTableIcebergE2E -timeout 30m -tags dynamic,test
 func TestExternalTableIcebergE2E(t *testing.T) {
+	runExternalTableIcebergE2E(t, false)
+}
+
+// TestExternalTableIcebergCustomS3EndpointE2E verifies the full pipeline with
+// an Iceberg-native s3://bucket/path URI and an explicit extfs.endpoint_url.
+// It intentionally omits cloud_provider to cover the generic S3-compatible
+// configuration that originally motivated this test.
+func TestExternalTableIcebergCustomS3EndpointE2E(t *testing.T) {
+	runExternalTableIcebergE2E(t, true)
+}
+
+func runExternalTableIcebergE2E(t *testing.T, explicitEndpoint bool) {
+	t.Helper()
+
 	// Derive the default Iceberg MinIO endpoint from MINIO_ADDRESS (shared env var)
 	// so that all external table tests use a single address knob.
 	minioAddr := envOrDefault("MINIO_ADDRESS", "localhost:9000")
@@ -63,7 +76,13 @@ func TestExternalTableIcebergE2E(t *testing.T) {
 	minioAccessKey := envOrDefault("ICEBERG_MINIO_ACCESS_KEY", "minioadmin")
 	minioSecretKey := envOrDefault("ICEBERG_MINIO_SECRET_KEY", "minioadmin")
 	bucket := envOrDefault("MINIO_BUCKET", "a-bucket")
-	tablePath := envOrDefault("ICEBERG_TABLE_PATH", "iceberg-test/e2e_test_table")
+	defaultTablePath := "iceberg-test/e2e_test_table"
+	collectionPrefix := "iceberg_e2e"
+	if explicitEndpoint {
+		defaultTablePath = "iceberg-test/custom_endpoint_e2e_test_table"
+		collectionPrefix = "iceberg_custom_endpoint_e2e"
+	}
+	tablePath := envOrDefault("ICEBERG_TABLE_PATH", defaultTablePath)
 	numRows := envOrDefault("ICEBERG_NUM_ROWS", "1000")
 	dim := envOrDefault("ICEBERG_DIM", "128")
 
@@ -75,10 +94,12 @@ func TestExternalTableIcebergE2E(t *testing.T) {
 	t.Logf("[Phase 0] Iceberg table created: metadata=%s, snapshot_id=%d, rows=%d",
 		tableInfo.MetadataLocation, tableInfo.SnapshotID, tableInfo.NumRows)
 
-	// Convert Iceberg-native URI (s3://bucket/key) to Milvus form with the
-	// configured MinIO endpoint as URI host.
 	minioHost := strings.TrimPrefix(strings.TrimPrefix(minioEndpoint, "http://"), "https://")
 	externalSource := toMilvusS3URIForMinIO(tableInfo.MetadataLocation, minioHost)
+	useSSL := "false"
+	if strings.HasPrefix(strings.ToLower(minioEndpoint), "https://") {
+		useSSL = "true"
+	}
 
 	// Build ExternalSpec with the minimal extfs needed for MinIO access.
 	type externalSpecJSON struct {
@@ -86,22 +107,31 @@ func TestExternalTableIcebergE2E(t *testing.T) {
 		SnapshotID int64             `json:"snapshot_id,string"`
 		Extfs      map[string]string `json:"extfs,omitempty"`
 	}
+	extfs := map[string]string{
+		"access_key_id":    minioAccessKey,
+		"access_key_value": minioSecretKey,
+		"cloud_provider":   "minio",
+		"region":           "us-east-1",
+		"use_ssl":          useSSL,
+	}
+	if explicitEndpoint {
+		// Keep the Iceberg-native URI unchanged. endpoint_url selects generic
+		// S3-compatible mode, so cloud_provider is intentionally unnecessary.
+		externalSource = tableInfo.MetadataLocation
+		delete(extfs, "cloud_provider")
+		extfs["endpoint_url"] = minioEndpoint
+		extfs["use_virtual_host"] = "false"
+	}
 	specObj := externalSpecJSON{
 		Format:     "iceberg-table",
 		SnapshotID: tableInfo.SnapshotID,
-		Extfs: map[string]string{
-			"access_key_id":    minioAccessKey,
-			"access_key_value": minioSecretKey,
-			"cloud_provider":   "minio",
-			"region":           "us-east-1",
-			"use_ssl":          "false",
-		},
+		Extfs:      extfs,
 	}
 	specBytes, err := json.Marshal(specObj)
 	require.NoError(t, err)
 	externalSpec := string(specBytes)
 
-	t.Logf("=== Iceberg E2E Test ===")
+	t.Logf("=== Iceberg E2E Test (explicit endpoint: %t) ===", explicitEndpoint)
 	t.Logf("External Source: %s", externalSource)
 	t.Logf("External Spec:  %s", externalSpec)
 
@@ -109,7 +139,7 @@ func TestExternalTableIcebergE2E(t *testing.T) {
 	ctx := hp.CreateContext(t, 30*time.Minute)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
-	collName := fmt.Sprintf("iceberg_e2e_%d", time.Now().UnixMilli())
+	collName := fmt.Sprintf("%s_%d", collectionPrefix, time.Now().UnixMilli())
 	schema := entity.NewSchema().
 		WithName(collName).
 		WithExternalSource(externalSource).
@@ -208,7 +238,7 @@ refreshDone:
 	require.NotNil(t, queryResult)
 	t.Logf("[Phase 5] Query returned %d rows", queryResult.GetColumn("pk").Len())
 
-	t.Log("=== Iceberg E2E Test PASSED ===")
+	t.Logf("=== Iceberg E2E Test PASSED (explicit endpoint: %t) ===", explicitEndpoint)
 }
 
 // TestExternalTableIcebergRefreshFailsOnSchemaTypeMismatch verifies that

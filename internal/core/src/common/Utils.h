@@ -140,14 +140,19 @@ GenIdsDataset(const int64_t count, const int64_t* ids) {
 inline DatasetPtr
 GenResultDataset(const int64_t nq,
                  const int64_t topk,
-                 const int64_t* ids,
-                 const float* distance) {
+                 std::unique_ptr<int64_t[]> ids,
+                 std::unique_ptr<float[]> distance) {
     auto ret_ds = std::make_shared<Dataset>();
+    // Dataset setters can allocate. Keep the arrays owned by the guards until
+    // every setter succeeds, including when only one pointer was installed.
+    ret_ds->SetIsOwner(false);
     ret_ds->SetRows(nq);
     ret_ds->SetDim(topk);
-    ret_ds->SetIds(ids);
-    ret_ds->SetDistance(distance);
+    ret_ds->SetIds(ids.get());
+    ret_ds->SetDistance(distance.get());
     ret_ds->SetIsOwner(true);
+    ids.release();
+    distance.release();
     return ret_ds;
 }
 
