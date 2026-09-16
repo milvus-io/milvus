@@ -973,10 +973,11 @@ func (s *Server) GetLeakedResourcesByCollection(ctx context.Context, collectionI
 // querynodes that are NOT part of any current replica of the collection, grouped by the resource
 // group of the holding querynode. Unlike GetLeakedResourcesByCollection, it preserves the per-RG
 // attribution so compliance reporting can mark exactly the resource groups that hold leaked
-// resources. Attribution uses the authoritative ResourceManager node->RG mapping (not the session
-// label, which most deployments never set); a leaked node not in any resource group is attributed
-// to the empty resource group, which callers treat as global.
-func (s *Server) GetLeakedResourcesByCollectionPerRG(ctx context.Context, collectionID int64) map[string]int {
+// resources. Ordinary QueryNodes use the authoritative ResourceManager mapping.
+// Embedded QueryNodes are excluded from that manager, so their RGs are resolved
+// from the caller's complete StreamingNode snapshot, including frozen nodes.
+// Nodes absent from both mappings are attributed to the empty RG (global).
+func (s *Server) GetLeakedResourcesByCollectionPerRG(ctx context.Context, collectionID int64, streamingNodeRGs map[int64]string) map[string]int {
 	replicas := s.meta.GetByCollection(ctx, collectionID)
 	validNodes := typeutil.NewUniqueSet()
 	for _, r := range replicas {
@@ -984,7 +985,10 @@ func (s *Server) GetLeakedResourcesByCollectionPerRG(ctx context.Context, collec
 	}
 	leaked := make(map[string]int)
 	rgOf := func(nodeID int64) string {
-		return s.meta.GetResourceGroupByNodeID(nodeID)
+		if rg := s.meta.GetResourceGroupByNodeID(nodeID); rg != "" {
+			return rg
+		}
+		return streamingNodeRGs[nodeID]
 	}
 	for _, seg := range s.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(collectionID)) {
 		if !validNodes.Contain(seg.Node) {

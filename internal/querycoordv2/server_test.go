@@ -1355,9 +1355,11 @@ func TestGetLeakedResourcesByCollectionPerRG(t *testing.T) {
 		}
 	}
 	newServer := func() *Server {
+		nodeMgr := session.NewNodeManager()
 		return &Server{
-			meta: meta.NewMeta(idAllocator(), nil, session.NewNodeManager()),
-			dist: meta.NewDistributionManager(session.NewNodeManager()),
+			meta:    meta.NewMeta(idAllocator(), nil, nodeMgr),
+			dist:    meta.NewDistributionManager(nodeMgr),
+			nodeMgr: nodeMgr,
 		}
 	}
 
@@ -1366,7 +1368,7 @@ func TestGetLeakedResourcesByCollectionPerRG(t *testing.T) {
 		mocker := mockey.Mock((*meta.ReplicaManager).GetByCollection).Return([]*meta.Replica{replica}).Build()
 		defer mocker.UnPatch()
 
-		leaked := s.GetLeakedResourcesByCollectionPerRG(context.Background(), collectionID)
+		leaked := s.GetLeakedResourcesByCollectionPerRG(context.Background(), collectionID, nil)
 		assert.Empty(t, leaked)
 	})
 
@@ -1392,7 +1394,8 @@ func TestGetLeakedResourcesByCollectionPerRG(t *testing.T) {
 			meta.SegmentFromInfo(&datapb.SegmentInfo{ID: 3, CollectionID: collectionID}))
 		s.dist.ChannelDistManager.Update(98, meta.DmChannelFromVChannel(&datapb.VchannelInfo{CollectionID: collectionID, ChannelName: "c1"}))
 
-		leaked := s.GetLeakedResourcesByCollectionPerRG(context.Background(), collectionID)
+		// ResourceManager remains authoritative when both mappings contain a node.
+		leaked := s.GetLeakedResourcesByCollectionPerRG(context.Background(), collectionID, map[int64]string{99: "other", 98: "other"})
 		assert.Equal(t, map[string]int{"rg2": 2, "rg3": 1}, leaked)
 	})
 
@@ -1405,8 +1408,34 @@ func TestGetLeakedResourcesByCollectionPerRG(t *testing.T) {
 
 		s.dist.SegmentDistManager.Update(99, meta.SegmentFromInfo(&datapb.SegmentInfo{ID: 1, CollectionID: collectionID}))
 
-		leaked := s.GetLeakedResourcesByCollectionPerRG(context.Background(), collectionID)
+		leaked := s.GetLeakedResourcesByCollectionPerRG(context.Background(), collectionID, nil)
 		assert.Equal(t, map[string]int{"": 1}, leaked)
+	})
+
+	t.Run("embedded query node residual uses streaming node RG until released", func(t *testing.T) {
+		ctx := context.Background()
+		s := newServer()
+		mocker := mockey.Mock((*meta.ReplicaManager).GetByCollection).Return([]*meta.Replica{replica}).Build()
+		defer mocker.UnPatch()
+		// Use the real ResourceManager: embedded QueryNodes never enter its RG map.
+		// Role-specific QueryNode labels need not match the StreamingNode's RG.
+		s.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID: 98,
+			Labels: map[string]string{
+				sessionutil.LabelStreamingNodeEmbeddedQueryNode: "1",
+				sessionutil.LabelResourceGroup:                  "querynode-label",
+			},
+		}))
+		s.meta.HandleNodeUp(ctx, 98)
+		assert.Empty(t, s.meta.GetResourceGroupByNodeID(98))
+		s.dist.ChannelDistManager.Update(98, meta.DmChannelFromVChannel(&datapb.VchannelInfo{CollectionID: collectionID, ChannelName: "c1"}))
+
+		assert.Equal(t, map[string]int{"B": 1}, s.GetLeakedResourcesByCollectionPerRG(ctx, collectionID, map[int64]string{98: "B"}))
+		assert.Equal(t, map[string]int{meta.DefaultResourceGroupName: 1}, s.GetLeakedResourcesByCollectionPerRG(ctx, collectionID, map[int64]string{98: meta.DefaultResourceGroupName}))
+		assert.Equal(t, map[string]int{"": 1}, s.GetLeakedResourcesByCollectionPerRG(ctx, collectionID, nil))
+
+		s.dist.ChannelDistManager.Update(98)
+		assert.Empty(t, s.GetLeakedResourcesByCollectionPerRG(ctx, collectionID, map[int64]string{98: "B"}))
 	})
 }
 

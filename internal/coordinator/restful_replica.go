@@ -77,6 +77,10 @@ type LoadConfigComplianceResponse struct {
 // NotReady; clearing both cluster settings disables their count/distribution
 // requirements. Only RGs involved in applicable targets, replicas, release
 // violations or WAL placement are reported.
+// Unlike initial collection loading, this endpoint does not fill in missing
+// cluster settings: replica count and RGs must be configured together. Count-only
+// and RG-only settings remain NotReady even if existing replicas happen to match,
+// because they do not define a target accepted by the dynamic load-config watcher.
 //
 // With a primary RG configured, all RW pchannels must be ASSIGNED there, even
 // with no loaded collections. Current and unfinished historical source RGs also
@@ -112,14 +116,25 @@ func (s *mixCoordImpl) HandleReplicaLoadConfigCompliance(w http.ResponseWriter, 
 			reasons[rg] = reason
 		}
 	}
+	// SQN release attribution needs all streaming nodes, including frozen nodes,
+	// even when no primary RG is configured. Reuse this snapshot for WAL checks.
+	b, err := balance.GetWithContext(ctx)
+	if err != nil {
+		writeJSONError(w, fmt.Sprintf("failed to get streaming balancer: %s", err), http.StatusInternalServerError)
+		return
+	}
+	nodes, err := b.GetAllStreamingNodes(ctx)
+	if err != nil {
+		writeJSONError(w, fmt.Sprintf("failed to get streaming nodes: %s", err), http.StatusInternalServerError)
+		return
+	}
+	streamingNodeRGs := make(map[int64]string, len(nodes))
+	for id, node := range nodes {
+		streamingNodeRGs[id] = node.ResourceGroup
+	}
 	// Use the full view: Relations omits uninitialized/assigning/unavailable WALs.
 	primaryRG := Params.StreamingCfg.PrimaryResourceGroup.GetValue()
 	if primaryRG != "" {
-		b, err := balance.GetWithContext(ctx)
-		if err != nil {
-			writeJSONError(w, fmt.Sprintf("failed to get streaming balancer: %s", err), http.StatusInternalServerError)
-			return
-		}
 		assignment, err := b.GetLatestChannelAssignment()
 		if err != nil {
 			writeJSONError(w, fmt.Sprintf("failed to get WAL assignment: %s", err), http.StatusInternalServerError)
@@ -127,11 +142,6 @@ func (s *mixCoordImpl) HandleReplicaLoadConfigCompliance(w http.ResponseWriter, 
 		}
 		if assignment.PChannelView == nil {
 			writeJSONError(w, "WAL channel view is not initialized", http.StatusInternalServerError)
-			return
-		}
-		nodes, err := b.GetAllStreamingNodes(ctx)
-		if err != nil {
-			writeJSONError(w, fmt.Sprintf("failed to get streaming nodes: %s", err), http.StatusInternalServerError)
 			return
 		}
 		record(primaryRG, "")
@@ -229,7 +239,7 @@ func (s *mixCoordImpl) HandleReplicaLoadConfigCompliance(w http.ResponseWriter, 
 				record(replica.GetResourceGroup(), fmt.Sprintf("collection %d: replica %d (rg=%s) is not query visible", id, replica.GetID(), replica.GetResourceGroup()))
 			}
 		}
-		for rg, leaked := range s.queryCoordServer.GetLeakedResourcesByCollectionPerRG(ctx, id) {
+		for rg, leaked := range s.queryCoordServer.GetLeakedResourcesByCollectionPerRG(ctx, id, streamingNodeRGs) {
 			if leaked > 0 {
 				record(rg, fmt.Sprintf("collection %d: resources not fully released (leaked=%d)", id, leaked))
 			}

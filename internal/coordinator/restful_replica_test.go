@@ -119,7 +119,14 @@ func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 			}
 			defer mockey.Mock(balance.GetWithContext).Return(&mock_balancer.MockBalancer{}, nil).Build().UnPatch()
 			defer mockey.Mock((*mock_balancer.MockBalancer).GetLatestChannelAssignment).Return(snapshot, nil).Build().UnPatch()
-			defer mockey.Mock((*mock_balancer.MockBalancer).GetAllStreamingNodes).Return(nodes, nil).Build().UnPatch()
+			nodeReads := 0
+			defer mockey.Mock((*mock_balancer.MockBalancer).GetAllStreamingNodes).To(func(_ *mock_balancer.MockBalancer, _ context.Context) (map[int64]*types.StreamingNodeInfoWithResourceGroup, error) {
+				nodeReads++
+				return nodes, nil
+			}).Build().UnPatch()
+			// Frozen nodes are absent from the available-node view but must still
+			// be passed to the release check in the complete snapshot above.
+			defer mockey.Mock((*mock_balancer.MockBalancer).GetAvailableStreamingNodes).Return(map[int64]*types.StreamingNodeInfoWithResourceGroup{}, nil).Build().UnPatch()
 			ids := []int64{100}
 			if tc.noCollections {
 				ids = nil
@@ -157,7 +164,13 @@ func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 			if tc.leak {
 				leaks[tc.leakedRG] = 1
 			}
-			defer mockey.Mock((*querycoordv2.Server).GetLeakedResourcesByCollectionPerRG).Return(leaks).Build().UnPatch()
+			defer mockey.Mock((*querycoordv2.Server).GetLeakedResourcesByCollectionPerRG).To(func(_ *querycoordv2.Server, _ context.Context, _ int64, streamingNodeRGs map[int64]string) map[string]int {
+				require.Len(t, streamingNodeRGs, len(nodes))
+				for id, node := range nodes {
+					require.Equal(t, node.ResourceGroup, streamingNodeRGs[id])
+				}
+				return leaks
+			}).Build().UnPatch()
 			coord := &mixCoordImpl{queryCoordServer: &querycoordv2.Server{}}
 			var previousReason string
 			for i, output := range []string{"", "summary", "per_resource_group"} {
@@ -187,15 +200,19 @@ func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 				}
 			}
 			require.Equal(t, 3*len(ids), checked, "every collection must be checked in every output mode")
+			require.Equal(t, 3, nodeReads, "one complete StreamingNode snapshot per request, with or without a primary RG")
 		})
 	}
 }
 
 func TestComplianceReadAndRequestErrors(t *testing.T) {
 	paramtable.Init()
-	for _, stage := range []string{"method", "output", "balancer", "assignment", "view", "nodes", "collections"} {
+	for _, stage := range []string{"method", "output", "balancer", "assignment", "view", "nodes", "nodes without primary", "collections"} {
 		t.Run(stage, func(t *testing.T) {
 			require.NoError(t, paramtable.Get().Save(Params.StreamingCfg.PrimaryResourceGroup.Key, "B"))
+			if stage == "nodes without primary" {
+				require.NoError(t, paramtable.Get().Save(Params.StreamingCfg.PrimaryResourceGroup.Key, ""))
+			}
 			t.Cleanup(func() { paramtable.Get().Reset(Params.StreamingCfg.PrimaryResourceGroup.Key) })
 			failure := merr.WrapErrServiceUnavailableMsg("metadata unavailable")
 			var balErr, assignmentErr, nodesErr, showErr error
@@ -207,7 +224,7 @@ func TestComplianceReadAndRequestErrors(t *testing.T) {
 				assignmentErr = failure
 			case "view":
 				snapshot.PChannelView = nil
-			case "nodes":
+			case "nodes", "nodes without primary":
 				nodesErr = failure
 			case "collections":
 				showErr = failure
