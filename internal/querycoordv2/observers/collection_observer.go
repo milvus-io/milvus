@@ -1118,6 +1118,15 @@ func scopedStallTimeout() time.Duration {
 	return 2 * Params.QueryCoordCfg.LoadTimeoutSeconds.GetAsDuration(time.Second)
 }
 
+// taskIsQuiet answers whether a task is one the tick has nothing to learn from
+// or do for: its group is serving (the readiness shield), or its figure has
+// been unknown for longer than the load timeout. Such a task neither pushes
+// the checkers nor writes its per-tick line at full rate, because it can now
+// live as long as the collection does.
+func taskIsQuiet(task LoadTask, now time.Time, loadTimeout time.Duration) bool {
+	return !task.ReadySince.IsZero() || unknownForLongerThan(task, now, loadTimeout)
+}
+
 func (ob *CollectionObserver) readyToObserve(ctx context.Context, collectionID int64) bool {
 	metaExist := (ob.meta.GetCollection(ctx, collectionID) != nil)
 	targetExist := ob.targetMgr.IsNextTargetExist(ctx, collectionID) || ob.targetMgr.IsCurrentTargetExist(ctx, collectionID, common.AllPartitionsID)
@@ -1141,7 +1150,8 @@ func (ob *CollectionObserver) observeLoadStatus(ctx context.Context, progress ma
 		// intervals for it, and a tick that reads a figure makes it count
 		// again. An unscoped task carries neither mark and behaves as it
 		// always has.
-		if task.ReadySince.IsZero() && !unknownForLongerThan(task, observeStart, loadTimeout) {
+		quiet := taskIsQuiet(task, observeStart, loadTimeout)
+		if !quiet {
 			loading = true
 		}
 		observeTaskNum++
@@ -1232,12 +1242,25 @@ func (ob *CollectionObserver) observeLoadStatus(ctx context.Context, progress ma
 			ob.loadTasks.Remove(traceID)
 		}
 
-		mlog.Info(ctx, "observe collection done", mlog.FieldCollectionID(task.CollectionID), mlog.Duration("dur", time.Since(start)))
+		// A quiet task can live for as long as the collection does, so its
+		// line is rate limited: at the observer's default tick this would
+		// otherwise be five lines a second, for each such task, forever.
+		if quiet {
+			mlog.RatedInfo(ctx, 0.1, "observe collection done", mlog.FieldCollectionID(task.CollectionID), mlog.Duration("dur", time.Since(start)))
+		} else {
+			mlog.Info(ctx, "observe collection done", mlog.FieldCollectionID(task.CollectionID), mlog.Duration("dur", time.Since(start)))
+		}
 		return true
 	})
 
 	if observeTaskNum > 0 {
-		mlog.Info(ctx, "observe all collections done", mlog.Int("num", observeTaskNum), mlog.Duration("dur", time.Since(observeStart)))
+		// Same reasoning as the per-task line above: with every task quiet,
+		// nothing is being observed that this line has to report at speed.
+		if loading {
+			mlog.Info(ctx, "observe all collections done", mlog.Int("num", observeTaskNum), mlog.Duration("dur", time.Since(observeStart)))
+		} else {
+			mlog.RatedInfo(ctx, 0.1, "observe all collections done", mlog.Int("num", observeTaskNum), mlog.Duration("dur", time.Since(observeStart)))
+		}
 	}
 
 	// trigger check logic when loading collections/partitions

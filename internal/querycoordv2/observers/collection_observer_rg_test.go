@@ -23,6 +23,7 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -1228,6 +1229,23 @@ func (s *CollectionObserverRGSuite) TestAScopedGroupGetsTwiceTheLoadTimeoutBefor
 	s.ob.Observe(s.ctx)
 	s.Empty(s.replicaIDsInRG(1910, rgA), "twice the load timeout without progress releases the stalled replica")
 	s.Len(s.replicaIDsInRG(1910, rgB), 1, "the sibling group keeps its own")
+}
+
+// taskIsQuiet is what decides both whether a tick pushes the checkers for a
+// task and whether it writes that task's line at full rate. Both matter only
+// because a scoped task can now live as long as its collection does.
+func TestTaskIsQuiet(t *testing.T) {
+	now := time.Now()
+	const loadTimeout = 10 * time.Minute
+
+	assert.False(t, taskIsQuiet(LoadTask{}, now, loadTimeout),
+		"a task with neither mark is a load in progress")
+	assert.True(t, taskIsQuiet(LoadTask{ReadySince: now.Add(-time.Second)}, now, loadTimeout),
+		"a group the readiness shield found serving is quiet")
+	assert.False(t, taskIsQuiet(LoadTask{UnknownSince: now.Add(-loadTimeout + time.Minute)}, now, loadTimeout),
+		"a figure that has been unknown for less than the load timeout is a load starting")
+	assert.True(t, taskIsQuiet(LoadTask{UnknownSince: now.Add(-loadTimeout - time.Minute)}, now, loadTimeout),
+		"a figure unknown for longer than the load timeout is quiet")
 }
 
 func TestCollectionObserverRG(t *testing.T) {
