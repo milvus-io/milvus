@@ -772,6 +772,124 @@ TEST(storage, ElementNullableVectorArrayUsesBinaryArrowChildren) {
               arrow::Type::FIXED_SIZE_BINARY);
 }
 
+TEST(storage, ElementNullableVectorArrayBinaryNormalizationPreservesPayload) {
+    constexpr int dim = 16;
+    for (auto element_type : {DataType::VECTOR_FLOAT,
+                              DataType::VECTOR_BINARY,
+                              DataType::VECTOR_FLOAT16,
+                              DataType::VECTOR_BFLOAT16,
+                              DataType::VECTOR_INT8}) {
+        SCOPED_TRACE(static_cast<int>(element_type));
+        const auto byte_width =
+            milvus::vector_bytes_per_element(element_type, dim);
+        const std::string first(byte_width, 'a');
+        const std::string second(byte_width, 'b');
+        for (bool nullable : {false, true}) {
+            SCOPED_TRACE(nullable);
+            auto value_builder = std::make_shared<arrow::BinaryBuilder>();
+            arrow::ListBuilder builder(arrow::default_memory_pool(),
+                                       value_builder);
+
+            // Prefix row makes both the sliced row and child offsets nonzero.
+            ASSERT_TRUE(builder.Append().ok());
+            ASSERT_TRUE(value_builder->Append(second).ok());
+            ASSERT_TRUE(builder.Append().ok());
+            ASSERT_TRUE(value_builder->Append(first).ok());
+            ASSERT_TRUE(value_builder->AppendNull().ok());
+            ASSERT_TRUE(value_builder->Append(second).ok());
+            ASSERT_TRUE(builder.Append().ok());  // Empty row.
+            ASSERT_TRUE(builder.Append().ok());  // All-null elements.
+            ASSERT_TRUE(value_builder->AppendNull().ok());
+            ASSERT_TRUE(value_builder->AppendNull().ok());
+            if (nullable) {
+                ASSERT_TRUE(builder.AppendNull().ok());
+            }
+
+            std::shared_ptr<arrow::Array> input;
+            ASSERT_TRUE(builder.Finish(&input).ok());
+            const int64_t num_rows = nullable ? 4 : 3;
+            auto sliced = input->Slice(1, num_rows);
+            FieldMeta field_meta(FieldName("vector_array"),
+                                 FieldId(1000),
+                                 DataType::VECTOR_ARRAY,
+                                 element_type,
+                                 dim,
+                                 std::nullopt,
+                                 nullable,
+                                 true);
+            auto normalized =
+                storage::NormalizeArrowForChunkWriter({sliced}, field_meta);
+            ASSERT_EQ(normalized.size(), 1);
+            EXPECT_EQ(normalized[0].get(), sliced.get());
+
+            auto field_data = std::dynamic_pointer_cast<FieldData<VectorArray>>(
+                storage::CreateFieldData(DataType::VECTOR_ARRAY,
+                                         element_type,
+                                         nullable,
+                                         true,
+                                         dim,
+                                         num_rows));
+            ASSERT_NE(field_data, nullptr);
+            field_data->FillFieldData(
+                std::make_shared<arrow::ChunkedArray>(normalized));
+            ASSERT_EQ(field_data->Length(), num_rows);
+            ASSERT_EQ(field_data->get_valid_rows(), 3);
+            EXPECT_EQ(field_data->get_null_count(), nullable ? 1 : 0);
+            if (nullable) {
+                EXPECT_FALSE(field_data->is_valid(3));
+            }
+
+            const std::vector<std::vector<bool>> expected_validity{
+                {true, false, true}, {}, {false, false}};
+            const std::vector<std::string> expected_payload{
+                first + second, "", ""};
+            for (int row = 0; row < 3; ++row) {
+                EXPECT_TRUE(field_data->is_valid(row));
+                const auto* value = field_data->value_at(row);
+                EXPECT_EQ(value->get_element_type(), element_type);
+                EXPECT_EQ(value->dim(), dim);
+                EXPECT_EQ(value->physical_length(), row == 0 ? 2 : 0);
+                ASSERT_EQ(value->byte_size(), expected_payload[row].size());
+                if (!expected_payload[row].empty()) {
+                    EXPECT_EQ(memcmp(value->data(),
+                                     expected_payload[row].data(),
+                                     expected_payload[row].size()),
+                              0);
+                }
+                auto proto = value->output_data();
+                ASSERT_EQ(proto.valid_data_size(),
+                          expected_validity[row].size());
+                for (int i = 0; i < proto.valid_data_size(); ++i) {
+                    EXPECT_EQ(proto.valid_data(i), expected_validity[row][i]);
+                }
+            }
+        }
+    }
+}
+
+TEST(storage, ElementNullableVectorArrayBinaryNormalizationRejectsWrongWidth) {
+    constexpr int dim = 2;
+    const auto byte_width = dim * sizeof(float);
+    auto field_meta = MakeExternalFieldMetaForTest(
+        DataType::VECTOR_ARRAY, DataType::VECTOR_FLOAT, false, dim, true);
+    for (size_t size : {size_t{0}, byte_width - 1, byte_width + 1}) {
+        SCOPED_TRACE(size);
+        auto value_builder = std::make_shared<arrow::BinaryBuilder>();
+        arrow::ListBuilder builder(arrow::default_memory_pool(), value_builder);
+        ASSERT_TRUE(builder.Append().ok());
+        ASSERT_TRUE(value_builder->AppendNull().ok());
+        ASSERT_TRUE(value_builder->Append(std::string(size, 'a')).ok());
+        std::shared_ptr<arrow::Array> input;
+        ASSERT_TRUE(builder.Finish(&input).ok());
+        try {
+            storage::NormalizeExternalArrow(input, field_meta);
+            FAIL() << "Expected a vector byte width error";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), ErrorCode::DataFormatBroken);
+        }
+    }
+}
+
 TEST(storage, MergeFieldDataRejectsMixedElementNullability) {
     std::vector<FieldDataPtr> arrays{
         storage::CreateFieldData(

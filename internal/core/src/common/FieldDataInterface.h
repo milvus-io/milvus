@@ -1017,9 +1017,6 @@ class FieldDataVectorArrayImpl : public FieldDataImpl<VectorArray, true> {
         int64_t data_size = 0;
         for (size_t offset = 0; offset < count; ++offset) {
             data_size += data_[offset].byte_size();
-            if (element_nullable_) {
-                data_size += data_[offset].get_element_valid_data_byte_size();
-            }
         }
         return data_size;
     }
@@ -1030,11 +1027,7 @@ class FieldDataVectorArrayImpl : public FieldDataImpl<VectorArray, true> {
         AssertInfo(offset < get_num_rows(),
                    "field data subscript out of range");
         AssertInfo(offset < count, "subscript position don't has valid value");
-        auto data_size = data_[offset].byte_size();
-        if (element_nullable_) {
-            data_size += data_[offset].get_element_valid_data_byte_size();
-        }
-        return data_size;
+        return data_[offset].byte_size();
     }
 
     int64_t

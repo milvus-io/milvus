@@ -3810,6 +3810,15 @@ NormalizeVectorArrayInner(const arrow::ArrayVector& arrays,
             ThrowInfo(ErrorCode::DataFormatBroken,
                       "VECTOR_ARRAY does not support null rows");
         }
+        if (field_meta.is_element_nullable() &&
+            list_arr->values()->type_id() == arrow::Type::BINARY) {
+            ValidateBinaryVectorWidth(list_arr->values(),
+                                      element_type,
+                                      static_cast<int>(dim),
+                                      field_meta);
+            result.push_back(arr);
+            continue;
+        }
         if (list_arr->values()->type_id() == arrow::Type::FIXED_SIZE_BINARY) {
             ValidateFixedSizeBinaryVectorWidth(list_arr->values(),
                                                element_type,
