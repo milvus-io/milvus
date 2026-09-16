@@ -125,6 +125,38 @@ func TestMultiAnalyzerBM25BatchRunEquivalence(t *testing.T) {
 	require.Equal(t, want, got)
 }
 
+func TestBM25BatchRunNativeDispatch(t *testing.T) {
+	a, err := analyzer.NewAnalyzer(`{"tokenizer":"whitespace"}`, "")
+	require.NoError(t, err)
+	defer a.Destroy()
+	single := &BM25FunctionRunner{tokenizer: a}
+	multi := &MultiAnalyzerBM25FunctionRunner{analyzers: map[string]analyzer.Analyzer{"default": a}}
+	for _, tc := range []struct {
+		name string
+		run  func(string) ([]any, error)
+	}{
+		{"single", func(text string) ([]any, error) { return single.BatchRun([]string{text}) }},
+		{"multi", func(text string) ([]any, error) {
+			return multi.BatchRun([]string{text}, []string{"default"})
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, count := range []int{1, 1000} {
+				text := strings.Repeat("word ", count)
+				before := runtime.NumCgoCall()
+				result, err := tc.run(text)
+				calls := runtime.NumCgoCall() - before
+				require.NoError(t, err)
+				require.Equal(t, [][]byte{typeutil.CreateAndSortSparseFloatRow(map[uint32]float32{
+					typeutil.HashString2LessUint32("word"): float32(count),
+				})}, result[0].(*schemapb.SparseFloatArray).Contents)
+				// One row means one worker: clone + batch + release + destroy.
+				require.EqualValues(t, 4, calls, "runner must dispatch to the native batch capability")
+			}
+		})
+	}
+}
+
 // Preserve the pre-optimization scheduling/map/sort placement as the benchmark
 // baseline, rather than comparing against a tokenizer-only microbenchmark.
 func legacyBM25BatchRun(v *BM25FunctionRunner, inputs ...any) ([]any, error) {

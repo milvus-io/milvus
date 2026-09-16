@@ -58,12 +58,14 @@ func (impl *CAnalyzer) BatchTokenizeBM25(texts []string) ([][]byte, error) {
 	status := C.batch_tokenize_bm25(impl.ptr,
 		(*C.uint8_t)(unsafe.Pointer(unsafe.SliceData(data))), C.uint64_t(len(data)),
 		(*C.uint64_t)(unsafe.Pointer(unsafe.SliceData(offsets))), C.uint64_t(len(texts)), &result)
+	// Own any returned handle even on failure; do not rely on the native side
+	// always clearing partial output before returning an error status.
+	defer freeBM25Batch(result.handle)
 	runtime.KeepAlive(data)
 	runtime.KeepAlive(offsets)
 	if err := HandleCStatus(&status, "failed to tokenize BM25 batch"); err != nil {
 		return nil, err
 	}
-	defer C.free_bm25_batch(result.handle)
 	if result.handle == nil || result.offsets == nil || uint64(result.data_size) > uint64(^uint(0)>>1) ||
 		(result.data_size != 0 && result.data == nil) {
 		return nil, merr.WrapErrFunctionFailedMsg("invalid native BM25 batch buffers")
@@ -82,4 +84,8 @@ func (impl *CAnalyzer) BatchTokenizeBM25(texts []string) ([][]byte, error) {
 		rows[i] = buffer[start:end:end]
 	}
 	return rows, nil
+}
+
+func freeBM25Batch(handle unsafe.Pointer) {
+	C.free_bm25_batch(handle)
 }

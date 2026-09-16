@@ -86,7 +86,7 @@ You also can run go unittest only:
 $ make test-go
 ```
 
-Run cpp unittest (also runs the Rust BM25 tests):
+Run cpp unittest only:
 
 ```shell
 $ make test-cpp
@@ -98,12 +98,16 @@ Run the Rust BM25 tests independently:
 $ make test-rust
 ```
 
-The C++ test runners (`run_cpp_unittest.sh`, `run_cpp_ut.sh`, and
-`run_cpp_codecov.sh`) also run this suite and propagate failures. It uses Rust
-1.89, compiles all Tantivy library tests, and executes `bm25_c::tests::` only;
-other Rust suites require external dictionaries or writable system directories.
-Release build artifacts are reused from `cmake_build/thirdparty/tantivy`, or
-`CARGO_TARGET_DIR` if set. This does not collect Rust coverage.
+The independent `Rust BM25 Tests` GitHub Actions workflow runs this suite for
+Tantivy binding changes and caches Cargo downloads and test artifacts. C++ test
+runners do not invoke Cargo, including filtered `make run-test-cpp` runs.
+The Rust suite uses toolchain 1.89 and a dedicated `bm25-test` profile with LTO
+and debug information disabled; compilation defaults to two jobs. It compiles
+all Tantivy library tests and executes `bm25_c::tests::` only; other Rust suites
+require external dictionaries or writable system directories. Artifacts live
+in `cmake_build/rust-tests`, or `CARGO_TARGET_DIR` if set; `CARGO_BUILD_JOBS` can
+override the job limit. A cold Rust job still needs dependency downloads, but
+does not block C++ test execution. This does not collect Rust coverage.
 
 ## Run code coverage
 

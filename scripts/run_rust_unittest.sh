@@ -19,12 +19,13 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-${ROOT_DIR}/cmake_build/thirdparty/tantivy}"
+export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-${ROOT_DIR}/cmake_build/rust-tests}"
+export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-2}"
 cd "${ROOT_DIR}/internal/core/thirdparty/tantivy/tantivy-binding"
 
-# Match the toolchain and release artifacts used by the CMake build. --lib
-# compiles all library tests, catching stale call sites outside the BM25 module.
+# --lib compiles all library tests, catching stale call sites outside BM25.
+# Use a separate, non-LTO test profile rather than relinking the Release graph.
 # Run the self-contained BM25 suite: other suites download dictionaries and
 # require writable /var/lib/milvus or /logs directories.
 echo "Running Tantivy BM25 Rust unit tests"
-exec cargo +1.89 test --locked --release --lib bm25_c::tests:: "$@"
+exec cargo +1.89 test --locked --profile bm25-test --lib bm25_c::tests:: "$@"

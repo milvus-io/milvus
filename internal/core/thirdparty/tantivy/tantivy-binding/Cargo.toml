@@ -22,6 +22,13 @@ codegen-units = 4
 panic = "unwind"
 overflow-checks = false
 
+# Keep unit tests independent of the production static library's fat-LTO link.
+[profile.bm25-test]
+inherits = "dev"
+debug = 0
+lto = false
+incremental = false
+
 [dependencies]
 tantivy = { git = "https://github.com/zilliztech/tantivy.git" }
 tantivy-5 = { package = "tantivy", git = "https://github.com/zilliztech/tantivy", tag = "0.21.1-fix4" }

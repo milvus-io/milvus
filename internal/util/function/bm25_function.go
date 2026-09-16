@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
+	"github.com/milvus-io/milvus/internal/util/analyzer/canalyzer"
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
@@ -183,6 +184,9 @@ func (v *BM25FunctionRunner) run(data []string, dst [][]byte) error {
 type bm25BatchTokenizer interface {
 	BatchTokenizeBM25([]string) ([][]byte, error)
 }
+
+// Native API changes must not silently select the token-iteration fallback.
+var _ bm25BatchTokenizer = (*canalyzer.CAnalyzer)(nil)
 
 func runBM25(tokenizer analyzer.Analyzer, data []string, dst [][]byte) error {
 	if batch, ok := tokenizer.(bm25BatchTokenizer); ok {

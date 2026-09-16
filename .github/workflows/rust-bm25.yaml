@@ -1,0 +1,55 @@
+name: Rust BM25 Tests
+
+on:
+  pull_request:
+    paths:
+      - 'internal/core/thirdparty/tantivy/tantivy-binding/**'
+      - 'scripts/run_rust_unittest.sh'
+      - '.github/workflows/rust-bm25.yaml'
+      - 'Makefile'
+  push:
+    branches: [master]
+    paths:
+      - 'internal/core/thirdparty/tantivy/tantivy-binding/**'
+      - 'scripts/run_rust_unittest.sh'
+      - '.github/workflows/rust-bm25.yaml'
+      - 'Makefile'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-bm25-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust-bm25:
+    name: Rust BM25 unit tests
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    env:
+      CARGO_BUILD_JOBS: '2'
+      CARGO_TARGET_DIR: ${{ github.workspace }}/cmake_build/rust-tests
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install Rust toolchain
+        run: rustup toolchain install 1.89 --profile minimal
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libclang-dev
+      - name: Cache Rust dependencies and test artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            cmake_build/rust-tests
+          key: rust-bm25-${{ runner.os }}-1.89-${{ hashFiles('internal/core/thirdparty/tantivy/tantivy-binding/Cargo.lock', 'internal/core/thirdparty/tantivy/tantivy-binding/Cargo.toml', 'scripts/run_rust_unittest.sh') }}
+          restore-keys: |
+            rust-bm25-${{ runner.os }}-1.89-
+      - name: Run Rust BM25 tests
+        run: make test-rust

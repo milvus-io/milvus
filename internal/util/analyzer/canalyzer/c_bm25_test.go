@@ -21,7 +21,9 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"unsafe"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/util/analyzer/interfaces"
@@ -140,4 +142,29 @@ func TestBatchTokenizeBM25CgoCalls(t *testing.T) {
 		}), rows[0])
 		require.EqualValues(t, 2, calls, "one batch call and one release, independent of token count")
 	}
+}
+
+func TestBatchTokenizeBM25ReleasesHandleOnError(t *testing.T) {
+	a, err := NewAnalyzer(`{"tokenizer":"whitespace"}`, "")
+	require.NoError(t, err)
+	defer a.Destroy()
+
+	// Produce a real native batch, then inject an error at status translation
+	// to exercise the failed-status/nonnull-handle combination independently of
+	// the native implementation's current no-partial-output guarantee.
+	statusMock := mockey.Mock(HandleCStatus).Return(merr.ErrServiceUnavailable).Build()
+	defer statusMock.UnPatch()
+	var release func(unsafe.Pointer)
+	var released []unsafe.Pointer
+	releaseMock := mockey.Mock(freeBM25Batch).To(func(handle unsafe.Pointer) {
+		released = append(released, handle)
+		release(handle)
+	}).Origin(&release).Build()
+	defer releaseMock.UnPatch()
+
+	rows, err := a.(*CAnalyzer).BatchTokenizeBM25([]string{"word word tail"})
+	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	require.Nil(t, rows)
+	require.Len(t, released, 1)
+	require.NotNil(t, released[0])
 }
