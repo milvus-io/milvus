@@ -288,6 +288,11 @@ class VectorArray : public milvus::VectorTrait {
         return size_;
     }
 
+    size_t
+    get_element_valid_data_byte_size() const {
+        return element_valid_data_.size_in_bytes();
+    }
+
     int64_t
     dim() const {
         return dim_;

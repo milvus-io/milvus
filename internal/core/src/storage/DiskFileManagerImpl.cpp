@@ -857,10 +857,12 @@ DiskFileManagerImpl::cache_raw_data_to_disk_common(
         dim = field_data->get_dim();
         auto rows = vec_array_data->get_num_rows();
 
-        // Calculate total data size needed
+        // VectorArray data is already compact, so byte_size() contains only
+        // physical vectors.
         int64_t total_size = 0;
         for (auto i = 0; i < vec_array_data->get_valid_rows(); ++i) {
-            total_size += vec_array_data->DataSize(i);
+            const auto* vec_array = vec_array_data->value_at(i);
+            total_size += vec_array->byte_size();
         }
 
         // Allocate buffer and copy data
@@ -874,7 +876,7 @@ DiskFileManagerImpl::cache_raw_data_to_disk_common(
             }
 
             auto vec_array = vec_array_data->value_at(physical_row);
-            auto size = vec_array_data->DataSize(physical_row);
+            auto size = vec_array->byte_size();
 
             // Collect offsets information if needed (cumulative offsets)
             if (offsets != nullptr) {
@@ -890,6 +892,11 @@ DiskFileManagerImpl::cache_raw_data_to_disk_common(
             buf_offset += size;
             physical_row++;
         }
+
+        AssertInfo(buf_offset == total_size,
+                   "VECTOR_ARRAY compact size mismatch, expected {}, got {}",
+                   total_size,
+                   buf_offset);
 
         // Write flattened data to disk
         local_chunk_manager->Write(
@@ -1032,13 +1039,14 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
     // pagination that would throw DataTypeInvalid.
     if (dim <= 0 || is_vector_array) {
         if (manifest_path_str == "") {
-            field_datas =
-                GetFieldDatasFromStorageV2(all_remote_files,
-                                           GetFieldDataMeta().field_id,
-                                           data_type.value(),
-                                           element_type.value(),
-                                           dim,
-                                           fs_);
+            field_datas = GetFieldDatasFromStorageV2(
+                all_remote_files,
+                GetFieldDataMeta().field_id,
+                data_type.value(),
+                element_type.value(),
+                field_meta_.field_schema.element_nullable(),
+                dim,
+                fs_);
         } else {
             // Variable-width manifest fields (sparse vectors with dim <= 0,
             // VECTOR_ARRAY) cannot use the fixed-width row pagination the
@@ -1100,6 +1108,8 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
                                       GetFieldDataMeta().field_id,
                                       data_type.value(),
                                       element_type.value(),
+                                      field_meta_.field_schema
+                                          .element_nullable(),
                                       dim,
                                       fs_,
                                       max_rows,
@@ -1467,10 +1477,13 @@ DiskFileManagerImpl::cache_opt_field_to_disk_v2(const Config& config) {
         const auto& field_type = std::get<1>(tup);
         const auto& element_type = std::get<2>(tup);
 
+        // Vector-index optional fields are scalar-only, so element
+        // nullability does not apply.
         auto field_datas = GetFieldDatasFromStorageV2(remote_files_storage_v2,
                                                       field_id,
                                                       field_type,
                                                       element_type,
+                                                      false,
                                                       1,
                                                       fs_);
 
