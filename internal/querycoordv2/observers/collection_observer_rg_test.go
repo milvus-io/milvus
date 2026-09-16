@@ -1149,6 +1149,49 @@ func (s *CollectionObserverRGSuite) TestATaskWhoseGroupLostItsLastReplicaIsRemov
 		"and the collection keeps serving")
 }
 
+// TestAGroupThatHasServedKeepsItsReplicasWhenItLaterTimesOut pins what the
+// readiness shield is worth over time. The shield asks whether the group can
+// serve at one instant, and a group kept by it can live as long as the ingest
+// does; a delegator catching up or a worker query node restarting makes one
+// later reading answer no. Releasing the replicas of a group that has been
+// serving, over that one instant, is exactly what the shield exists to
+// prevent, so the task goes and the replicas stay.
+func (s *CollectionObserverRGSuite) TestAGroupThatHasServedKeepsItsReplicasWhenItLaterTimesOut() {
+	s.registerLoadingCollection(1900, 1901, "1900-dmc0", 2, 19001, 19002)
+	s.putReplica(1900, 190001, 101, rgA)
+	s.putServiceableDelegator(1900, 101, "1900-dmc0", 19001, 19002)
+	s.putReplica(1900, 190002, 102, rgB)
+	s.putServiceableDelegator(1900, 102, "1900-dmc0", 19001, 19002)
+	s.Require().True(s.targetMgr.UpdateCollectionCurrentTarget(s.ctx, 1900))
+	s.markCollectionLoaded(1900, 1901)
+
+	s.ob.LoadCollection(s.ctx, 1900, rgA)
+	key := s.taskKey(1900, rgA)
+	defer s.scriptResourceGroupPercentage(rgA, 99)()
+
+	// The figure never reaches 100 - a large collection under continuous
+	// ingest - so the timeout comes round and the shield keeps the task.
+	s.ob.Observe(s.ctx)
+	s.ageTaskWatermark(key, time.Hour)
+	s.ob.Observe(s.ctx)
+	task, ok := s.ob.loadTasks.Get(key)
+	s.Require().True(ok, "the shield keeps the task")
+	s.Require().False(task.ReadySince.IsZero(), "and records that the group was serving")
+
+	// A later timeout catches the shard's leader mid-recovery: not
+	// serviceable, so readiness answers no for this one reading.
+	s.putDelegator(1900, 101, "1900-dmc0", 19001, 19002)
+	s.ageTaskWatermark(key, time.Hour)
+	s.ob.Observe(s.ctx)
+
+	s.False(s.ob.loadTasks.Contain(key), "the task is dropped")
+	s.Len(s.replicaIDsInRG(1900, rgA), 1, "but the replica that has been serving stays")
+	collection := s.meta.GetCollection(s.ctx, 1900)
+	s.Require().NotNil(collection)
+	s.Equal(querypb.LoadStatus_Loaded, collection.GetStatus())
+	s.EqualValues(2, collection.GetReplicaNumber(), "and the replica count is untouched")
+}
+
 // TestAScopedGroupGetsTwiceTheLoadTimeoutBeforeTeardown pins the scoped stall
 // clock against the repair it has to wait for. When a replica loses its
 // regular query node, the segment checker keeps its sealed segments waiting a
