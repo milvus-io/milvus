@@ -6,6 +6,7 @@ import (
 	"google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
 
+	"github.com/milvus-io/milvus/internal/util/queryutil"
 	"github.com/milvus-io/milvus/internal/util/searchutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -32,6 +33,7 @@ type QueryViewClient interface {
 
 	// QueryOnView executes a QueryView retrieve on the StreamingNode owning the pchannel.
 	QueryOnView(ctx context.Context, pchannel types.PChannelInfo, req *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error)
+	QueryOnViewStream(ctx context.Context, pchannel types.PChannelInfo, req *viewpb.QueryOnViewRequest) (queryutil.ReduceStream, error)
 }
 
 type queryViewClient struct {
@@ -93,6 +95,12 @@ func (qvc *queryViewClient) QueryOnView(ctx context.Context, pchannel types.PCha
 	return result, err
 }
 
+func (qvc *queryViewClient) QueryOnViewStream(ctx context.Context, pchannel types.PChannelInfo, req *viewpb.QueryOnViewRequest) (queryutil.ReduceStream, error) {
+	result, err := executeViewQueryRPC(ctx, qvc, pchannel, "ViewQueryService.QueryOnViewStream", func(ctx context.Context, client viewpb.ViewQueryServiceClient) (queryutil.ReduceStream, error) {
+		return queryutil.NewGRPCReduceStream(ctx, client, req)
+	})
+	return result, err
+}
 func executeQueryPlanRPC[T any](
 	ctx context.Context,
 	qvc *queryViewClient,

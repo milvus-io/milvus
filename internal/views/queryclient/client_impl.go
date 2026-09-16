@@ -25,6 +25,8 @@ type ViewQueryClientConfig struct {
 	MaxRetries            int  // Maximum per-shard attempts; zero defaults to 3. At least one full candidate pass is allowed.
 	EnableSearchStreaming bool // Route supported Search requests through Streaming Reduce.
 	SearchStreamChunkSize int  // Maximum Units per Search stream Chunk. 0 uses the default (1024).
+	EnableQueryStreaming  bool // Route supported Query requests through Streaming Reduce.
+	QueryStreamChunkSize  int  // Maximum Units per Query stream Chunk. 0 uses the default (1024).
 }
 
 // viewQueryClientImpl implements ViewQueryClient.
