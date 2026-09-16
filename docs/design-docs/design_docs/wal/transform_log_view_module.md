@@ -1,33 +1,37 @@
-# TransformLog View Design Index
+# Transform Storage And Consumer Design Index
 
 - Feature DRI: @chyezh
 - Primary Approver: @czs007
 - Independent Approver: @weiliu1031
 - Design Review: 2026-07-29
 
-TransformLog is a VChannel-owned component, not an independent top-level
-RecoveryStorage module.
+The agreed design separates shared storage, L0 materialization, and subscriptions:
 
-The design is split across:
-
-- [TransformLog Design](transform_log.md): copied consumer window, L1 safety
-  bound, L0 materialization, and recovery;
-- [WALSummary](summary.md): chunk layout, durability, confirmation, and retention;
-- [WAL Message Ack Design](message_ack.md): retained-message completion and
-  global checkpoint gating;
-- [Recovery Tail Controller](recovery-tail-controller.md): VChannel-scoped
-  `RequestPersistThrough` calls;
-- [Broadcast Ack Module](broadcast_ack_module.md): Coordinator Ack ownership;
-- [StreamingNode VChannel WAL Input View](streamingnode_vchannel_wal_view.md):
-  QueryRuntime preparation from VChannel state.
+- [WALSummary](summary.md): sole record storage, bounded reads, readable
+  coverage, durability, confirmation, and retention.
+- [L0 Materializer](l0_materializer.md): VChannel-owned component that observes
+  window boundaries and reads Summary to produce L0. This is the current PR's
+  target, replacing the existing copied-window `vchannel/transformlog` code.
+- [TransformLog Subscription Adaptor](transform_log.md): future read-only
+  wrapper over Summary, outside this PR; no observation or materialization.
 
 ```text
-PChannelRecoveryManager
-  -> VChannelRecoveryModule
-       -> TransformLog
+RecoveryStorage -> WALSummary
+                -> PChannelRecoveryManager
+                     -> VChannelRecoveryModule
+                          -> L0Materializer -> Summary reads
+
+Future TransformLog adaptor -> the same Summary reads
 ```
 
-TransformLog consumes summary records during recovery and supplies the
-materialization frontier used for GC. It does not own summary persistence or
-retain WAL handles. RecoveryStorage separately combines the tracker frontier
-with `WALSummary.LastAcked()` before publishing a checkpoint.
+The materializer's durable cursor is carried by VChannelMeta; it has no separate
+catalog. Neither materialization nor subscription delivery retains WAL handles.
+RecoveryStorage combines Tracker completion with `WALSummary.LastAcked()` before
+publishing the global checkpoint.
+
+Related contracts:
+
+- [WAL Message Ack Design](message_ack.md)
+- [Recovery Tail Controller](recovery-tail-controller.md)
+- [Broadcast Ack Module](broadcast_ack_module.md)
+- [StreamingNode VChannel WAL Input View](streamingnode_vchannel_wal_view.md)

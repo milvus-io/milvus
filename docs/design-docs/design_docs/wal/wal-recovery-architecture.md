@@ -19,10 +19,16 @@ are split by responsibility:
 - [Recovery Tail Controller](recovery-tail-controller.md)
 - [VChannel Recovery Module](vchannel_view_module.md)
 - [Segment View Component](segment_view_module.md)
-- [TransformLog Design](transform_log.md)
+- [L0 Materializer](l0_materializer.md)
+- [TransformLog Subscription Adaptor](transform_log.md) (future integration)
 - [WALSummary](summary.md)
 - [Broadcast Ack Module](broadcast_ack_module.md)
 - [StreamingNode VChannel WAL Input View](streamingnode_vchannel_wal_view.md)
+
+The L0Materializer/shared-reader split is the agreed target of this PR. Code
+still uses `vchannel/transformlog` with a copied payload window; the migration
+status is tracked in [Summary §7](summary.md#7-implementation-and-integration-status).
+TransformLog subscription integration is deferred.
 
 ## 1. Goals
 
@@ -48,12 +54,12 @@ RecoveryStorage
   |     +-- VChannelRecoveryModule*
   |           +-- VChannelView
   |           +-- SegmentView*
-  |           +-- TransformLog
+  |           +-- L0Materializer
   +-- BroadcastAck
 ```
 
 There is no generic top-level recovery-module interface. The PChannel manager,
-BroadcastAck, SegmentView, and TransformLog keep separate APIs because their
+BroadcastAck, SegmentView, and L0Materializer keep separate APIs because their
 ownership and completion conditions differ.
 
 ## 3. One Global Checkpoint
@@ -116,7 +122,7 @@ RW startup is one logical replay:
 ```text
 append RecoveryBarrier to fence the old writer
   -> load and claim checkpoint with the assignment term
-  -> load component snapshots and restore summary/transform windows
+  -> load component snapshots and restore Summary plus L0 materialization cursors
   -> open one scanner from the checkpoint
   -> observe messages with complete semantics
   -> reach this open's RecoveryBarrier and capture the write-path snapshot
@@ -166,12 +172,12 @@ continues to retain message handles and prevents the checkpoint from passing it.
 raw WAL message M
   -> Owner O = Tracker.Track(M)
   -> dispatch Retained D = O.Clone()
+  -> WALSummary.ObserveMessage(M) installs records and readable coverage
   -> PChannelRecoveryManager.ObserveMessage(D)
        -> PChannel/VChannel metadata
-       -> affected SegmentViews
-       -> TransformLog
-       -> QueryRuntime plain immutable event
-  -> WALSummary.ObserveMessage(M) copies records without retaining handles
+       -> affected SegmentViews and L1 materialization bound
+       -> L0Materializer.ObserveMessage records the requested boundary only
+       -> QueryRuntime plain immutable event (future integration)
   -> D.Release()
   -> BroadcastAck.Accept(O)
   -> all retained work and Coordinator Ack succeed without poison
@@ -206,8 +212,9 @@ recovery_tail_bytes = observed_tail_offset - published_checkpoint_offset
 AckTracker requests persistence from VChannels blocking the oldest incomplete
 prefix. Summary independently checks staged-record age and tail pressure, so
 already released messages do not hide its backlog. SegmentView and Summary own
-their batching decisions; TransformLog materializes independently under its L1
-safety bound. RecoveryStorage does not aggregate objects across segments.
+their batching decisions; L0Materializer reads Summary in bounded batches
+under its observed window and L1 safety bound. RecoveryStorage does not aggregate
+objects across segments.
 
 Background persistence gives a soft target. A strict upper bound requires WAL
 append backpressure at a high watermark and release at a low watermark.
@@ -223,7 +230,8 @@ feature branch receives a reader, writer, migration path, or fallback.
 
 1. WAL replay is the source of truth for all state after the global checkpoint.
 2. A message is dispatched once and has one Tracker Owner.
-3. Async Segment consumers own independent Retained handles; Summary and TransformLog copy records.
+3. Async Segment consumers own independent Retained handles; Summary copies
+   records, while L0Materializer records only window boundaries.
 4. Successful release requires recoverability; poisoned release frees memory but leaves checkpoint progress blocked.
 5. Tracker advancement uses only the continuous completed WAL prefix.
 6. Component `checkpoint_time_tick` fields are continuous component-local prefixes.
@@ -232,3 +240,6 @@ feature branch receives a reader, writer, migration path, or fallback.
 9. RecoveryBarrier is not a checkpoint or observation-mode boundary.
 10. QueryRuntime does not participate in persistence acknowledgement.
 11. Summary confirmation independently bounds every published checkpoint.
+12. Summary installs readable records before VChannel observation advances the
+    L0 materialization window; this does not require Summary persistence.
+13. RecoveryBarrier rebuilds requested L0 windows without preloading payloads.

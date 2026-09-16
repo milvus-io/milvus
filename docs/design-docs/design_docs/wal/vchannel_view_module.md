@@ -10,9 +10,13 @@ indexed by `PChannelRecoveryManager`.
 
 RecoveryStorage constructs and dispatches through these modules during bounded
 recovery and live observation. It separately owns [WALSummary](summary.md),
-restores transform windows, and caps checkpoint publication at `LastAcked`.
+restores the Summary index, and caps checkpoint publication at `LastAcked`.
 RecoveryStorage also restores idempotency windows from retained Summary history
 and startup replay before accepting writes. QueryRuntime wiring remains follow-up work.
+
+The L0Materializer ownership below is the agreed target; the current
+`vchannel/transformlog` copied-window implementation awaits migration. See
+[L0 Materializer](l0_materializer.md) for the complete window and recovery rules.
 
 ## 1. Ownership
 
@@ -21,7 +25,7 @@ PChannelRecoveryManager
   -> VChannelRecoveryModule
        +-- VChannelView
        +-- SegmentView*
-       +-- TransformLog
+       +-- L0Materializer
 ```
 
 The module owns:
@@ -29,7 +33,7 @@ The module owns:
 - collection, partition, schema, lifecycle, and tombstone state;
 - one continuous VChannel metadata `checkpoint_time_tick`;
 - SegmentView creation, lookup, routing, and snapshot aggregation;
-- the VChannel TransformLog;
+- the VChannel L0Materializer and its L1 safety bound;
 - DataView recovery state and QueryRuntime live-event forwarding (design
   intent, pending the qviews feature — not yet wired in the current code).
 
@@ -42,18 +46,25 @@ broadcast acknowledgement, or QueryView state transitions.
 ObserveMessage(Retained)
   -> apply VChannel metadata when not already covered
   -> route the same retained message to affected SegmentViews
-  -> route it to TransformLog
+  -> refresh the L1 safety bound
+  -> let L0Materializer observe the requested window boundary
   -> forward a plain live event to QueryRuntime when present
   -> mark changed recovery components dirty
 ```
 
-There is no mode argument. The message TimeTick and each component's loaded
-`checkpoint_time_tick` are sufficient to choose apply versus no-op.
+RecoveryStorage first installs the message's Summary records and readable
+coverage, then dispatches to this module. L0Materializer observation follows
+Segment state changes, so its window never runs ahead of local L1 state.
+
+There is no mode argument. Metadata and Segment effects use their loaded
+`checkpoint_time_tick` to choose apply versus no-op. L0Materializer uses its own
+materialized/requested positions; a metadata no-op must not suppress its window
+observation.
 
 For a PChannel-scoped message, the manager gives every affected VChannel an
 independent dispatch clone. Every SegmentView exposing asynchronous work clones
-again before VChannel observation returns. TransformLog copies records and
-retains no source handle.
+again before VChannel observation returns. L0Materializer records only a
+window boundary and retains no source handle.
 
 ## 3. VChannel Metadata State
 
@@ -83,11 +94,13 @@ Rules include:
 `ConsumeDirtySnapshots` aggregates immutable snapshots from:
 
 - VChannelView (its snapshot carries `transform_materialized_time_tick`, so
-  the TransformLog frontier persists with it);
+  the L0 materialization frontier persists with it);
 - dirty SegmentViews.
 
-The TransformLog itself has no independent snapshot: its only persistent state
-is the materialization frontier, which rides in the VChannelMeta.
+L0Materializer has no independent snapshot: its only persistent state is the
+materialization frontier carried by VChannelMeta. After either a full or a
+base-only VChannel snapshot is durable, report its captured frontier to Summary;
+a newer in-memory value cannot authorize GC.
 
 Every snapshot has one `checkpoint_time_tick` and an exact `MarkPersisted`
 callback. The callback advances only through the captured snapshot and cannot
@@ -96,7 +109,7 @@ clear later mutations.
 The owning RecoveryStorage writes these component snapshots before the one
 global checkpoint.
 
-## 5. Segment And TransformLog Join
+## 5. Segment Completion And L0 Scheduling
 
 One message may have independent effects:
 
@@ -111,22 +124,24 @@ The reference graph joins these effects without a VChannel-level Meta/Data
 state machine. Each component advances its own durable state and releases its
 own handle. Successful Tracker completion requires the entire graph to reach
 zero without poison. Summary copies Txn records separately; its `LastAcked`
-additionally bounds checkpoint publication. TransformLog's copied Delete window
-does not join this reference graph.
+additionally bounds checkpoint publication. L0Materializer reads those records
+without joining this reference graph.
 
 The VChannel module also computes the L0 materialization safety bound across
-its SegmentViews. An L1 Segment blocks TransformLog materialization after its
+its SegmentViews. An L1 Segment blocks L0 materialization after its
 creation TimeTick until its final commit completes. This is scheduling
-coordination only; it does not merge Segment and TransformLog persistence or
-source-message ownership.
+coordination only; it does not merge Segment and L0 persistence or
+source-message ownership. A raised bound independently wakes L0Materializer,
+including when no new message arrives.
 
 ## 6. Recovery
 
 `PChannelRecoveryManager` creates VChannel modules from persisted VChannel and
-Segment metadata. RecoveryStorage reads outstanding Delete records from Summary
-after each VChannel's materialized frontier and seeds its TransformLog window.
-There is no separate TransformLog catalog record. Tombstoned base state can
-coexist with retained child state.
+Segment metadata. L0Materializer restores M from VChannelMeta and initializes
+its requested boundary W = M, without loading Delete payloads. The owner derives
+the L1 bound from restored Segments before scheduling work. There is no separate
+materializer catalog record. Tombstoned base state can coexist with retained
+child state.
 
 After construction:
 
@@ -134,7 +149,9 @@ After construction:
 2. start the single PChannel replay from the global checkpoint;
 3. route every replayed message through the normal Observe path;
 4. let each component independently skip already-covered effects;
-5. announce startup catch-up when the scanner reaches RecoveryBarrier;
+5. route RecoveryBarrier to every VChannel still requiring materialization,
+   advancing W so pre-checkpoint Summary backlog is read lazily, then announce
+   startup catch-up;
 6. independently resolve recovered lifecycle work needed for QueryRuntime view
    capture.
 
@@ -167,8 +184,9 @@ checkpoint by itself.
 
 1. One VChannel module owns every recovery component for that VChannel.
 2. Every message uses the same Observe API during replay and live processing.
-3. Component filtering uses only TimeTick and one `checkpoint_time_tick`.
-4. SegmentView and TransformLog are VChannel-owned, not top-level modules.
+3. Metadata/Segment filtering uses TimeTick and `checkpoint_time_tick`; L0
+   window observation independently uses materialized/requested positions.
+4. SegmentView and L0Materializer are VChannel-owned, not top-level modules.
 5. QueryRuntime observation never delays Message Ack.
 6. Dirty snapshots are stable and precede global checkpoint publication.
 7. VChannel cleanup cannot delete child state still required for recovery.
