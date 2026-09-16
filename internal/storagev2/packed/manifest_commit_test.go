@@ -458,8 +458,10 @@ func TestCommitManifestUpdates_DropColumns_AbsentColumnAndIndexAutoDrop(t *testi
 
 	// Seed a manifest with a single column group (100).
 	schema := arrow.NewSchema([]arrow.Field{
-		{Name: "100", Type: arrow.PrimitiveTypes.Int64, Nullable: true,
-			Metadata: arrow.NewMetadata([]string{ArrowFieldIdMetadataKey}, []string{"100"})},
+		{
+			Name: "100", Type: arrow.PrimitiveTypes.Int64, Nullable: true,
+			Metadata: arrow.NewMetadata([]string{ArrowFieldIdMetadataKey}, []string{"100"}),
+		},
 	}, nil)
 	columnGroups := []storagecommon.ColumnGroup{
 		{Columns: []int{0}, Fields: []int64{100}, GroupID: 100},

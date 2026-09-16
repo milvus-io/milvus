@@ -390,10 +390,14 @@ func TestOpsToManifestUpdates(t *testing.T) {
 
 	t.Run("duplicate column across ops rejected", func(t *testing.T) {
 		entry := &BackfillSegment{Ops: []BackfillManifestOp{
-			{Type: "add", Columns: []string{"100"}, RowCount: 5,
-				Files: []BackfillManifestFile{{Path: "_data/100_a.parquet", StartIndex: 0, EndIndex: 5}}},
-			{Type: "add", Columns: []string{"100"}, RowCount: 5,
-				Files: []BackfillManifestFile{{Path: "_data/100_b.parquet", StartIndex: 0, EndIndex: 5}}},
+			{
+				Type: "add", Columns: []string{"100"}, RowCount: 5,
+				Files: []BackfillManifestFile{{Path: "_data/100_a.parquet", StartIndex: 0, EndIndex: 5}},
+			},
+			{
+				Type: "add", Columns: []string{"100"}, RowCount: 5,
+				Files: []BackfillManifestFile{{Path: "_data/100_b.parquet", StartIndex: 0, EndIndex: 5}},
+			},
 		}}
 		_, err := opsToManifestUpdates(entry)
 		assert.Error(t, err)
