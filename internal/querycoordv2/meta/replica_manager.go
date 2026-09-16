@@ -94,10 +94,11 @@ type ReplicaManager struct {
 	idAllocator func() (int64, error)
 	catalog     metastore.QueryCoordCatalog
 
-	// Initialized before recovery. Group membership is never rebound from config.
+	// Configuration and allocation commits are serialized by groupMu.
 	collectionGroups map[int64]string
+	groupVersion     uint64
 	recoveryInfo     recoveryInfoFunc
-	groupMu          sync.Mutex
+	groupMu          sync.RWMutex
 	rowFlights       singleflight.Group
 	rowStatsMu       sync.Mutex
 	rowStats         map[int64]collectionRowStats
@@ -123,6 +124,8 @@ func NewReplicaManager(idAllocator func() (int64, error), catalog metastore.Quer
 
 // Recover recovers the replicas for given collections from meta store
 func (m *ReplicaManager) Recover(ctx context.Context, collections []int64) error {
+	m.groupMu.RLock()
+	defer m.groupMu.RUnlock()
 	replicas, err := m.catalog.GetReplicas(ctx)
 	if err != nil {
 		return merr.Wrap(err, "failed to recover replicas")
@@ -137,6 +140,7 @@ func (m *ReplicaManager) Recover(ctx context.Context, collections []int64) error
 
 		if collectionSet.Contain(replica.GetCollectionID()) {
 			rep := NewReplicaWithPriority(replica, commonpb.LoadPriority_HIGH)
+			rep.collectionGroupID = m.collectionGroups[rep.GetCollectionID()]
 			grouped[rep.GetCollectionID()] = append(grouped[rep.GetCollectionID()], rep)
 			mlog.Info(ctx, "recover replica",
 				mlog.FieldCollectionID(replica.GetCollectionID()),
@@ -229,6 +233,8 @@ type SpawnWithReplicaConfigParams struct {
 
 // SpawnWithReplicaConfig spawns replicas with replica config.
 func (m *ReplicaManager) SpawnWithReplicaConfig(ctx context.Context, params SpawnWithReplicaConfigParams) ([]*Replica, error) {
+	m.groupMu.RLock()
+	defer m.groupMu.RUnlock()
 	m.collLock.Lock(params.CollectionID)
 	defer m.collLock.Unlock(params.CollectionID)
 
@@ -245,11 +251,11 @@ func (m *ReplicaManager) SpawnWithReplicaConfig(ctx context.Context, params Spaw
 			continue
 		}
 		replica := NewReplicaWithPriority(&querypb.Replica{
-			ID:                config.GetReplicaId(),
-			CollectionID:      params.CollectionID,
-			ResourceGroup:     config.ResourceGroupName,
-			CollectionGroupId: m.collectionGroups[params.CollectionID],
+			ID:            config.GetReplicaId(),
+			CollectionID:  params.CollectionID,
+			ResourceGroup: config.ResourceGroupName,
 		}, config.GetPriority())
+		replica.collectionGroupID = m.collectionGroups[params.CollectionID]
 		if enableChannelExclusiveMode {
 			mutableReplica := replica.CopyForWrite()
 			mutableReplica.TryEnableChannelExclusiveMode(params.Channels...)
@@ -341,6 +347,8 @@ func WithQueryInvisible() SpawnOption {
 func (m *ReplicaManager) Spawn(ctx context.Context, collection int64, replicaNumInRG map[string]int,
 	channels []string, loadPriority commonpb.LoadPriority, opts ...SpawnOption,
 ) ([]*Replica, error) {
+	m.groupMu.RLock()
+	defer m.groupMu.RUnlock()
 	cfg := &spawnConfig{}
 	for _, opt := range opts {
 		opt(cfg)
@@ -361,11 +369,11 @@ func (m *ReplicaManager) Spawn(ctx context.Context, collection int64, replicaNum
 			}
 
 			replica := NewReplicaWithPriority(&querypb.Replica{
-				ID:                id,
-				CollectionID:      collection,
-				ResourceGroup:     rgName,
-				CollectionGroupId: m.collectionGroups[collection],
+				ID:            id,
+				CollectionID:  collection,
+				ResourceGroup: rgName,
 			}, loadPriority)
+			replica.collectionGroupID = m.collectionGroups[collection]
 			mutableReplica := replica.CopyForWrite()
 			if cfg.waitRGReady {
 				mutableReplica.SetWaitRGReadyAt(time.Now())
@@ -415,14 +423,15 @@ func (m *ReplicaManager) Put(ctx context.Context, replicas ...*Replica) error {
 
 	// The channel observer may publish a COW snapshot taken before a group
 	// allocation. Merge its channel registration into the latest group replica;
-	// never restore stale ownership, resource group, or immutable binding.
+	// never restore stale ownership, resource group, or configuration-derived binding.
 	updates := make([]*Replica, 0, len(replicas))
 	for _, incoming := range replicas {
 		current, ok := m.flatReplicas.Get(incoming.GetID())
 		if !ok && incoming.GetCollectionGroupID() != "" {
 			return merr.WrapErrReplicaNotFound(incoming.GetID())
 		}
-		if ok && current.GetCollectionGroupID() != "" {
+		if ok && (current.GetCollectionGroupID() != "" || incoming.GetCollectionGroupID() != "" ||
+			current.collectionGroupVersion != incoming.collectionGroupVersion) {
 			mutable := current.CopyForWrite()
 			mutable.TryEnableChannelExclusiveMode(lo.Keys(incoming.replicaPB.GetChannelNodeInfos())...)
 			incoming = mutable.IntoReplica()

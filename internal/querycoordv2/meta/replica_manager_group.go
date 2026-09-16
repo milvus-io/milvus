@@ -18,6 +18,7 @@ package meta
 
 import (
 	"context"
+	"maps"
 	"math"
 	"sort"
 	"strconv"
@@ -48,9 +49,29 @@ type replicaGroupKey struct {
 	rg    string
 }
 
-// InitCollectionGroups is called once, before recovering metadata or starting
-// observers. Configuration only determines the binding of newly created replicas.
+// InitCollectionGroups supplies the row source and initial configuration before recovery.
 func (m *ReplicaManager) InitCollectionGroups(config string, recoveryInfo recoveryInfoFunc) error {
+	m.recoveryInfo = recoveryInfo
+	return m.UpdateCollectionGroups(context.TODO(), config)
+}
+
+// RefreshCollectionGroups reads the latest configuration under the allocation lock,
+// so concurrent config callbacks cannot apply an older value after a newer one.
+func (m *ReplicaManager) RefreshCollectionGroups(ctx context.Context) error {
+	m.groupMu.Lock()
+	defer m.groupMu.Unlock()
+	return m.updateCollectionGroups(ctx, paramtable.Get().QueryCoordCfg.CollectionGroups.GetValue())
+}
+
+// UpdateCollectionGroups applies configuration to all replicas, including loaded ones.
+// Invalid updates leave the last valid allocation policy intact.
+func (m *ReplicaManager) UpdateCollectionGroups(ctx context.Context, config string) error {
+	m.groupMu.Lock()
+	defer m.groupMu.Unlock()
+	return m.updateCollectionGroups(ctx, config)
+}
+
+func (m *ReplicaManager) updateCollectionGroups(ctx context.Context, config string) error {
 	var groups []struct {
 		ID            string   `json:"id"`
 		CollectionIDs []string `json:"collectionIds"`
@@ -76,8 +97,31 @@ func (m *ReplicaManager) InitCollectionGroups(config string, recoveryInfo recove
 			bindings[id] = group.ID
 		}
 	}
+	if maps.Equal(m.collectionGroups, bindings) {
+		return nil
+	}
 	m.collectionGroups = bindings
-	m.recoveryInfo = recoveryInfo
+	m.groupVersion++
+	m.coll2Replicas.Range(func(id int64, _ []*Replica) bool {
+		m.collLock.Lock(id)
+		defer m.collLock.Unlock(id)
+		replicas, _ := m.coll2Replicas.Get(id)
+		var updated []*Replica
+		for _, replica := range replicas {
+			if replica.GetCollectionGroupID() == bindings[id] {
+				continue
+			}
+			mutable := replica.CopyForWrite()
+			mutable.collectionGroupID = bindings[id]
+			mutable.collectionGroupVersion = m.groupVersion
+			updated = append(updated, mutable.IntoReplica())
+		}
+		// Only change the in-memory policy. Existing RW/RO ownership remains
+		// valid until the normal recovery/balance cycle converges the new plan.
+		m.putReplicasInMemory(id, updated...)
+		return true
+	})
+	mlog.Info(ctx, "updated collection group allocation configuration", mlog.Int("collections", len(bindings)))
 	return nil
 }
 
@@ -131,9 +175,12 @@ func (m *ReplicaManager) getCollectionRows(ctx context.Context, collectionID int
 }
 
 // RecoverNodesInCollections preserves the single-collection caller contract.
-// Group membership comes from Replica metadata, never from current configuration.
+// Group membership is an in-memory projection of the current configuration.
 // Other collections in the same group/RG are expanded here, inside the manager.
 func (m *ReplicaManager) RecoverNodesInCollections(ctx context.Context, collectionIDs []int64, rgs map[string]*ResourceGroup) error {
+	m.groupMu.RLock()
+	version := m.groupVersion
+	m.groupMu.RUnlock()
 	keys := typeutil.NewSet[replicaGroupKey]()
 	requested := typeutil.NewUniqueSet(collectionIDs...)
 	for _, id := range requested.Collect() {
@@ -150,6 +197,11 @@ func (m *ReplicaManager) RecoverNodesInCollections(ctx context.Context, collecti
 		}
 	}
 	if keys.Len() == 0 {
+		m.groupMu.RLock()
+		defer m.groupMu.RUnlock()
+		if version != m.groupVersion {
+			return merr.WrapErrServiceUnavailableMsg("collection group configuration changed during recovery")
+		}
 		for _, id := range requested.Collect() {
 			if err := m.recoverLegacyNodesInCollection(ctx, id, rgs); err != nil {
 				return err
@@ -170,7 +222,7 @@ func (m *ReplicaManager) RecoverNodesInCollections(ctx context.Context, collecti
 	}
 
 	// Keep a snapshot of ALL replicas of participating collections, including
-	// legacy replicas and RO nodes in other RGs, for collection-level exclusion.
+	// RO nodes in other RGs, for collection-level exclusion.
 	snapshots := make(map[int64][]*Replica)
 	m.coll2Replicas.Range(func(id int64, replicas []*Replica) bool {
 		for _, replica := range replicas {
@@ -195,6 +247,18 @@ func (m *ReplicaManager) RecoverNodesInCollections(ctx context.Context, collecti
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
 	m.groupMu.Lock()
 	defer m.groupMu.Unlock()
+	if version != m.groupVersion {
+		return merr.WrapErrServiceUnavailableMsg("collection group configuration changed during recovery")
+	}
+	for _, id := range ids {
+		if m.collectionGroups[id] == "" {
+			if err := m.recoverLegacyNodesInCollection(ctx, id, rgs); err != nil {
+				return err
+			}
+			// Use the updated snapshot for the common consistency check.
+			snapshots[id], _ = m.coll2Replicas.Get(id)
+		}
+	}
 	for _, id := range ids {
 		m.collLock.Lock(id)
 	}
@@ -216,57 +280,6 @@ func (m *ReplicaManager) RecoverNodesInCollections(ctx context.Context, collecti
 		}
 	}
 
-	// Compute legacy quotas with the original collection helper, keeping grouped
-	// replicas in its denominator. Only legacy assignments are applied here.
-	legacyQuotas := make(map[int64]int)
-	for _, id := range ids {
-		allRGs := make(map[string]typeutil.UniqueSet)
-		byRG := make(map[string][]*Replica)
-		for _, replica := range snapshots[id] {
-			rg := replica.GetResourceGroup()
-			byRG[rg] = append(byRG[rg], replica)
-			allRGs[rg] = nodeSets[rg]
-			if allRGs[rg] == nil {
-				allRGs[rg] = typeutil.NewUniqueSet()
-			}
-		}
-		helper := newCollectionAssignmentHelper(id, byRG, allRGs)
-		var applyErr error
-		helper.RangeOverResourceGroup(func(rgHelper *replicasInSameRGAssignmentHelper) {
-			if _, supplied := rgs[rgHelper.rgName]; !supplied || applyErr != nil {
-				return
-			}
-			for _, assignment := range rgHelper.replicas {
-				replica := assignment.replica
-				if replica.GetCollectionGroupID() != "" {
-					continue
-				}
-				legacyQuotas[replica.GetID()] = assignment.expectedNodeCount
-				if waitForGroupRG(replica, rgs[rgHelper.rgName]) {
-					continue
-				}
-				ro := assignment.GetNewRONodes()
-				recoverable, incoming := assignment.GetRecoverNodesAndIncomingNodeCount()
-				rw := append(recoverable, rgHelper.AllocateIncomingNodes(incoming)...)
-				if len(ro)+len(rw) == 0 {
-					continue
-				}
-				mutable := replica.CopyForWrite()
-				mutable.AddRONode(ro...)
-				mutable.AddRWNode(rw...)
-				if mutable.RWNodesCount() > 0 {
-					mutable.SetWaitRGReadyAt(time.Time{})
-				}
-				if applyErr = m.put(ctx, id, mutable.IntoReplica()); applyErr != nil {
-					return
-				}
-			}
-		})
-		if applyErr != nil {
-			return applyErr
-		}
-	}
-
 	orderedKeys := keys.Collect()
 	sort.Slice(orderedKeys, func(i, j int) bool {
 		if orderedKeys[i].group != orderedKeys[j].group {
@@ -279,7 +292,7 @@ func (m *ReplicaManager) RecoverNodesInCollections(ctx context.Context, collecti
 		for _, id := range ids {
 			all[id], _ = m.coll2Replicas.Get(id)
 		}
-		desired := planReplicaGroup(key, all, nodeSets[key.rg], legacyQuotas, stats, rgs[key.rg])
+		desired := planReplicaGroup(key, all, nodeSets[key.rg], stats, rgs[key.rg])
 		replicaIDs := make([]int64, 0, len(desired))
 		for id := range desired {
 			replicaIDs = append(replicaIDs, id)
@@ -337,7 +350,7 @@ type groupReplicaAssignment struct {
 }
 
 func planReplicaGroup(key replicaGroupKey, all map[int64][]*Replica, nodes typeutil.UniqueSet,
-	legacyQuotas map[int64]int, stats map[int64]collectionRowStats, rg *ResourceGroup,
+	stats map[int64]collectionRowStats, rg *ResourceGroup,
 ) map[int64]typeutil.UniqueSet {
 	members := make([]*groupReplicaAssignment, 0)
 	capacity := make(map[int64]int)
@@ -345,21 +358,17 @@ func planReplicaGroup(key replicaGroupKey, all map[int64][]*Replica, nodes typeu
 	draining := false
 	for collectionID, replicas := range all {
 		outsiders := typeutil.NewUniqueSet()
-		reserved := 0
 		for _, replica := range replicas {
 			if replica.GetCollectionGroupID() == key.group && replica.GetResourceGroup() == key.rg {
 				continue
 			}
-			occupied := 0
 			for _, node := range replica.GetNodes() {
 				if nodes.Contain(node) {
 					outsiders.Insert(node)
-					occupied++
 				}
 			}
-			reserved += max(0, legacyQuotas[replica.GetID()]-occupied)
 		}
-		capacity[collectionID] = max(0, nodes.Len()-outsiders.Len()-reserved)
+		capacity[collectionID] = max(0, nodes.Len()-outsiders.Len())
 		for _, replica := range replicas {
 			if replica.GetCollectionGroupID() != key.group || replica.GetResourceGroup() != key.rg || waitForGroupRG(replica, rg) {
 				continue

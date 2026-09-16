@@ -118,15 +118,15 @@ func TestReplicaGroupConfiguration(t *testing.T) {
 	require.Empty(t, mgr.collectionGroups)
 }
 
-func TestReplicaGroupBindingSurvivesRecovery(t *testing.T) {
+func TestReplicaGroupRecoveryUsesCurrentConfiguration(t *testing.T) {
 	ctx := context.Background()
 	mgr, _ := newGroupTestManager(t, "[]", nil)
 	old := groupTestSpawn(t, mgr, 1, 1)[0]
-	// Simulate deployment of a new startup configuration with persisted old replicas.
+	// Every recovered replica follows the current configuration, regardless of creation time.
 	next := NewReplicaManager(params.RandomIncrementIDAllocator(), mgr.catalog)
 	require.NoError(t, next.InitCollectionGroups(groupTestConfig, mgr.recoveryInfo))
 	require.NoError(t, next.Recover(ctx, []int64{1}))
-	require.Empty(t, next.Get(ctx, old.GetID()).GetCollectionGroupID())
+	require.Equal(t, "g", next.Get(ctx, old.GetID()).GetCollectionGroupID())
 	id, err := next.AllocateReplicaID(ctx)
 	require.NoError(t, err)
 	reps, err := next.SpawnWithReplicaConfig(ctx, SpawnWithReplicaConfigParams{
@@ -135,12 +135,12 @@ func TestReplicaGroupBindingSurvivesRecovery(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	require.Empty(t, reps[0].GetCollectionGroupID())
+	require.Equal(t, "g", reps[0].GetCollectionGroupID())
 	require.Equal(t, "g", reps[1].GetCollectionGroupID())
 	restarted := NewReplicaManager(params.RandomIncrementIDAllocator(), mgr.catalog)
 	require.NoError(t, restarted.InitCollectionGroups("[]", mgr.recoveryInfo))
 	require.NoError(t, restarted.Recover(ctx, []int64{1}))
-	require.Equal(t, "g", restarted.Get(ctx, id).GetCollectionGroupID())
+	require.Empty(t, restarted.Get(ctx, id).GetCollectionGroupID())
 	require.Empty(t, restarted.Get(ctx, old.GetID()).GetCollectionGroupID())
 	require.Empty(t, groupTestSpawn(t, restarted, 2, 1)[0].GetCollectionGroupID())
 	require.NoError(t, restarted.RemoveCollection(ctx, 1))
@@ -202,13 +202,13 @@ func TestReplicaGroupSharingAndReplicaIsolation(t *testing.T) {
 	require.Less(t, mgr.Get(ctx, extra[0].GetID()).RWNodesCount()+mgr.Get(ctx, extra[1].GetID()).RWNodesCount(), 2)
 }
 
-func TestReplicaGroupLegacyQuotaAndDrain(t *testing.T) {
+func TestReplicaGroupExistingReplicasAndDrain(t *testing.T) {
 	ctx := context.Background()
 	mgr, _ := newGroupTestManager(t, "[]", map[int64]int64{1: 900, 2: 100})
 	old := groupTestSpawn(t, mgr, 1, 1)[0].GetID()
 	rg := groupTestRG(1, 2, 3, 4, 5, 6, 7, 8)
 	require.NoError(t, mgr.RecoverNodesInCollection(ctx, 1, rg))
-	require.NoError(t, mgr.InitCollectionGroups(groupTestConfig, mgr.recoveryInfo))
+	require.NoError(t, mgr.UpdateCollectionGroups(ctx, groupTestConfig))
 	added := groupTestSpawn(t, mgr, 1, 1)[0].GetID()
 	groupTestSpawn(t, mgr, 2, 1)
 	require.NoError(t, mgr.RecoverNodesInCollection(ctx, 1, rg))
@@ -314,12 +314,14 @@ func TestReplicaGroupPlannerProperties(t *testing.T) {
 			stats[c] = collectionRowStats{valid: true, rows: random.Int63n(1000)}
 			for r := 0; r < 1+random.Intn(4); r++ {
 				id++
-				all[c] = append(all[c], NewReplicaWithPriority(&querypb.Replica{ID: id, CollectionID: c, ResourceGroup: "rg", CollectionGroupId: "g"}, commonpb.LoadPriority_HIGH))
+				replica := NewReplicaWithPriority(&querypb.Replica{ID: id, CollectionID: c, ResourceGroup: "rg"}, commonpb.LoadPriority_HIGH)
+				replica.collectionGroupID = "g"
+				all[c] = append(all[c], replica)
 			}
 		}
 		key := replicaGroupKey{"g", "rg"}
-		planned := planReplicaGroup(key, all, nodes, nil, stats, nil)
-		again := planReplicaGroup(key, all, nodes, nil, stats, nil)
+		planned := planReplicaGroup(key, all, nodes, stats, nil)
+		again := planReplicaGroup(key, all, nodes, stats, nil)
 		for _, replicas := range all {
 			occupied := typeutil.NewUniqueSet()
 			for _, r := range replicas {
@@ -370,7 +372,7 @@ func TestReplicaGroupPartialPersistenceRecovery(t *testing.T) {
 	require.Error(t, mgr.RecoverNodesInCollection(ctx, 1, rg))
 	patch.UnPatch()
 	restarted := NewReplicaManager(params.RandomIncrementIDAllocator(), mgr.catalog)
-	require.NoError(t, restarted.InitCollectionGroups("[]", mgr.recoveryInfo))
+	require.NoError(t, restarted.InitCollectionGroups(groupTestConfig, mgr.recoveryInfo))
 	require.NoError(t, restarted.Recover(ctx, []int64{1, 2, 3}))
 	require.NoError(t, restarted.RecoverNodesInCollection(ctx, 2, rg))
 	for _, id := range []int64{1, 2, 3} {
@@ -451,4 +453,97 @@ func TestReplicaGroupRecoveryInvalidInputs(t *testing.T) {
 	mgr.recoveryInfo = nil
 	expireGroupRows(mgr)
 	require.Error(t, mgr.getCollectionRows(ctx, 1).err)
+}
+
+// Configuration changes must alter all existing replicas without rewriting their
+// persisted node ownership, and must not be undone by a stale observer snapshot.
+func TestReplicaGroupDynamicConfiguration(t *testing.T) {
+	ctx := context.Background()
+	mgr, _ := newGroupTestManager(t, "[]", map[int64]int64{1: 200, 2: 100, 3: 100})
+	ids := []int64{groupTestSpawn(t, mgr, 1, 1)[0].GetID(), groupTestSpawn(t, mgr, 2, 1)[0].GetID(), groupTestSpawn(t, mgr, 3, 1)[0].GetID()}
+	beforeGrouping := mgr.Get(ctx, ids[0]).CopyForWrite().IntoReplica()
+	rg := groupTestRG(1, 2, 3, 4)
+	for _, c := range []int64{1, 2, 3} {
+		require.NoError(t, mgr.RecoverNodesInCollection(ctx, c, rg))
+	}
+	before, err := mgr.catalog.GetReplicas(ctx)
+	require.NoError(t, err)
+	require.NoError(t, mgr.UpdateCollectionGroups(ctx, groupTestConfig))
+	after, err := mgr.catalog.GetReplicas(ctx)
+	require.NoError(t, err)
+	for i := range before {
+		require.True(t, proto.Equal(before[i], after[i]))
+	}
+	for _, id := range ids {
+		require.Equal(t, "g", mgr.Get(ctx, id).GetCollectionGroupID())
+	}
+	require.NoError(t, mgr.RecoverNodesInCollection(ctx, 1, rg))
+	for i, quota := range []int{2, 1, 1} {
+		require.Equal(t, quota, mgr.Get(ctx, ids[i]).RWNodesCount())
+	}
+	version := mgr.groupVersion
+	require.NoError(t, mgr.UpdateCollectionGroups(ctx, groupTestConfig))
+	require.Equal(t, version, mgr.groupVersion)
+	require.Error(t, mgr.UpdateCollectionGroups(ctx, "{"))
+	require.Equal(t, version, mgr.groupVersion)
+	stale := mgr.Get(ctx, ids[0]).CopyForWrite().IntoReplica()
+	// Move an existing collection to another group; removing the other members
+	// restores per-collection allocation on the next normal observer cycle.
+	require.NoError(t, mgr.UpdateCollectionGroups(ctx, `[{"id":"other","collectionIds":["1"]}]`))
+	require.Equal(t, "other", mgr.Get(ctx, ids[0]).GetCollectionGroupID())
+	require.Empty(t, mgr.Get(ctx, ids[1]).GetCollectionGroupID())
+	require.NoError(t, mgr.RecoverNodesInCollections(ctx, []int64{1, 2, 3}, rg))
+	for _, id := range ids {
+		require.Equal(t, 4, mgr.Get(ctx, id).RWNodesCount())
+		require.Zero(t, mgr.Get(ctx, id).RONodesCount())
+	}
+	require.NoError(t, mgr.UpdateCollectionGroups(ctx, "[]"))
+	require.NoError(t, mgr.Put(ctx, stale))
+	// An observer may still hold an ungrouped snapshot from before enablement.
+	// A full enable/disable cycle must not make that snapshot current again.
+	require.NoError(t, mgr.Put(ctx, beforeGrouping))
+	require.Empty(t, mgr.Get(ctx, ids[0]).GetCollectionGroupID())
+	require.Equal(t, 4, mgr.Get(ctx, ids[0]).RWNodesCount())
+	// Re-enabling applies to the same replica IDs, without release/reload.
+	require.NoError(t, mgr.UpdateCollectionGroups(ctx, groupTestConfig))
+	require.NoError(t, mgr.RecoverNodesInCollection(ctx, 1, rg))
+	require.Equal(t, 2, mgr.Get(ctx, ids[0]).RWNodesCount())
+}
+
+func TestReplicaGroupConfigChangesDuringRowFetch(t *testing.T) {
+	ctx := context.Background()
+	mgr, _ := newGroupTestManager(t, groupTestConfig, nil)
+	id := groupTestSpawn(t, mgr, 1, 1)[0].GetID()
+	started, resume := make(chan struct{}), make(chan struct{})
+	mgr.recoveryInfo = func(context.Context, int64, ...int64) ([]*datapb.VchannelInfo, []*datapb.SegmentInfo, error) {
+		close(started)
+		<-resume
+		return nil, []*datapb.SegmentInfo{{ID: 1, NumOfRows: 100}}, nil
+	}
+	result := make(chan error, 1)
+	go func() { result <- mgr.RecoverNodesInCollection(ctx, 1, groupTestRG(1, 2)) }()
+	<-started
+	// Disabling does not wait for DataCoord, and invalidates the in-flight plan.
+	require.NoError(t, mgr.UpdateCollectionGroups(ctx, "[]"))
+	close(resume)
+	require.ErrorIs(t, <-result, merr.ErrServiceUnavailable)
+	require.Empty(t, mgr.Get(ctx, id).GetCollectionGroupID())
+	require.Zero(t, mgr.Get(ctx, id).RWNodesCount())
+	require.NoError(t, mgr.RecoverNodesInCollection(ctx, 1, groupTestRG(1, 2)))
+	require.Equal(t, 2, mgr.Get(ctx, id).RWNodesCount())
+}
+
+func TestReplicaGroupRefreshCurrentConfig(t *testing.T) {
+	ctx := context.Background()
+	mgr, _ := newGroupTestManager(t, "[]", nil)
+	id := groupTestSpawn(t, mgr, 1, 1)[0].GetID()
+	cfg := paramtable.Get()
+	key := cfg.QueryCoordCfg.CollectionGroups.Key
+	t.Cleanup(func() { cfg.Reset(key) })
+	require.NoError(t, cfg.Save(key, groupTestConfig))
+	require.NoError(t, mgr.RefreshCollectionGroups(ctx))
+	require.Equal(t, "g", mgr.Get(ctx, id).GetCollectionGroupID())
+	require.NoError(t, cfg.Save(key, "[]"))
+	require.NoError(t, mgr.RefreshCollectionGroups(ctx))
+	require.Empty(t, mgr.Get(ctx, id).GetCollectionGroupID())
 }

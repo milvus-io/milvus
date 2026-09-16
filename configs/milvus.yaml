@@ -534,7 +534,7 @@ proxy:
 
 # Related configuration of queryCoord, used to manage topology and load balancing for the query nodes, and handoff from growing segments to sealed segments.
 queryCoord:
-  # Startup-only JSON. Group membership is bound only when a replica is created.
+  # Dynamic JSON; applies to all replicas. Removing a group restores per-collection allocation.
   # Example: '[{"id":"search","collectionIds":["123","456"]}]'
   collectionGroups: "[]"
   taskMergeCap: 1

@@ -3499,7 +3499,7 @@ type queryCoordConfig struct {
 	EnableStoppingBalance          ParamItem `refreshable:"true"`
 	StoppingBalanceAssignPolicy    ParamItem `refreshable:"true"`
 	ChannelExclusiveNodeFactor     ParamItem `refreshable:"true"`
-	CollectionGroups               ParamItem `refreshable:"false"`
+	CollectionGroups               ParamItem `refreshable:"true"`
 
 	CollectionObserverInterval                   ParamItem `refreshable:"false"`
 	CollectionBalanceSegmentBatchSize            ParamItem `refreshable:"true"`
@@ -4090,7 +4090,7 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Key:          "queryCoord.collectionGroups",
 		Version:      "3.0.0",
 		DefaultValue: "[]",
-		Doc:          "Startup-only JSON collection groups: [{\"id\":\"group\",\"collectionIds\":[\"123\"]}]. Only newly created replicas bind to a group; existing bindings survive configuration changes.",
+		Doc:          "Dynamic JSON collection groups: [{\"id\":\"group\",\"collectionIds\":[\"123\"]}]. Applies to all replicas, including recovered ones. Removing a collection or group restores per-collection allocation.",
 		Export:       true,
 	}
 	p.CollectionGroups.Init(base.mgr)
