@@ -15,7 +15,8 @@ RecoveryStorage also restores idempotency windows from retained Summary history
 and startup replay before accepting writes. QueryRuntime wiring remains follow-up work.
 
 The L0Materializer ownership below is implemented without a copied payload
-window. See
+window. The revised capacity/API/Summary-backlog admission policy remains
+pending; current scheduling is eager. See
 [L0 Materializer](l0_materializer.md) for the complete window and recovery rules.
 
 ## 1. Ownership
@@ -97,8 +98,10 @@ Rules include:
   the L0 materialization frontier persists with it);
 - dirty SegmentViews.
 
-L0Materializer has no independent snapshot: its only persistent state is the
-materialization frontier carried by VChannelMeta. After either a full or a
+L0Materializer has no independent snapshot: its materialization frontier is
+carried by VChannelMeta. The revised explicit-flush policy also requires pending
+completion intent to be persisted in VChannel recovery state or fully derived
+from retained lifecycle metadata before checkpoint can skip its WAL message. After either a full or a
 base-only VChannel snapshot is durable, report its captured frontier to Summary;
 a newer in-memory value cannot authorize GC.
 
@@ -131,8 +134,10 @@ The VChannel module also computes the L0 materialization safety bound across
 its SegmentViews. An L1 Segment blocks L0 materialization after its
 creation TimeTick until its final commit completes. This is scheduling
 coordination only; it does not merge Segment and L0 persistence or
-source-message ownership. A raised bound independently wakes L0Materializer,
-including when no new message arrives.
+source-message ownership. A raised bound independently re-evaluates pending
+requests, including when no new message arrives; it does not force undersized
+output. Explicit API materialization waits for related L1 flushes and final
+commits, in addition to respecting the VChannel safety bound.
 
 ## 6. Recovery
 
@@ -150,8 +155,9 @@ After construction:
 3. route every replayed message through the normal Observe path;
 4. let each component independently skip already-covered effects;
 5. route RecoveryBarrier to every VChannel still requiring materialization,
-   advancing W so pre-checkpoint Summary backlog is read lazily, then announce
-   startup catch-up;
+   advancing W so pre-checkpoint Summary backlog can be read lazily when the
+   batching policy admits work; the barrier itself does not force output;
+   then announce startup catch-up;
 6. independently resolve recovered lifecycle work needed for QueryRuntime view
    capture.
 
