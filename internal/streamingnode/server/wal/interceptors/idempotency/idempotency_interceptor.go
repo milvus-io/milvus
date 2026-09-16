@@ -90,10 +90,6 @@ func newIdempotencyInterceptorWithSnapshots(config WindowConfig, snapshots map[s
 }
 
 func (impl *idempotencyInterceptor) DoAppend(ctx context.Context, msg message.MutableMessage, append interceptors.Append) (message.MessageID, error) {
-	if !impl.config.Enabled {
-		return append(ctx, msg)
-	}
-
 	// Replicated messages bypass the idempotency window entirely: the replicate
 	// stream has its own exactly-once delivery (source-timetick checkpoints),
 	// and the idempotency key inside a replicated header belongs to the SOURCE

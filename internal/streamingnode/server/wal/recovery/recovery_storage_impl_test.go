@@ -1198,7 +1198,6 @@ func newSummaryManagerWithStagedDelete(t *testing.T, vchannel string, timetick u
 	cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 	store := walsummary.NewStore(cm, "test-pchannel-summary", 1)
 	manager := walsummary.NewManager(walsummary.ManagerConfig{
-		EnableTransform:   true,
 		PChannel:          "test-pchannel-summary",
 		Term:              1,
 		Store:             store,
@@ -1319,7 +1318,6 @@ func TestConsumeDirtySnapshotIgnoresSummaryWhenNoRecordStaged(t *testing.T) {
 	cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 	store := walsummary.NewStore(cm, "test-pchannel-summary", 1)
 	summary := walsummary.NewManager(walsummary.ManagerConfig{
-		EnableTransform:   true,
 		PChannel:          "test-pchannel-summary",
 		Term:              1,
 		Store:             store,

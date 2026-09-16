@@ -221,7 +221,6 @@ func TestInsertTaskReassignAutoIDForStableIdempotency(t *testing.T) {
 func TestInsertTaskReassignAutoIDForStableIdempotencyKeepsVChannelOrder(t *testing.T) {
 	paramtable.Init()
 	resetProxyIdempotencyParams(t)
-	require.NoError(t, Params.Save(Params.StreamingCfg.IdempotencyEnabled.Key, "true"))
 
 	ctx := context.Background()
 
@@ -233,7 +232,7 @@ func TestInsertTaskReassignAutoIDForStableIdempotencyKeepsVChannelOrder(t *testi
 		},
 	})
 	require.NoError(t, err)
-	cache := newInsertTaskIdempotencyMockCache(t, schema, true)
+	cache := newInsertTaskIdempotencyMockCache(t, schema, nil)
 	idAllocator := newInsertTaskIdempotencyIDAllocator(t, ctx)
 	// The stored vchannel order follows pchannel load at allocation time, so it is
 	// not lexicographic; the insert must route against it verbatim.

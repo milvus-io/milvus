@@ -170,7 +170,7 @@ writers to share an assignment term; the fresh-term rule in §2.3 still applies.
 
 ```text
 ObserveMessage(immutable), in WAL TimeTick order
-  -> copy keyed insert and optional delete transform records
+  -> copy keyed insert and delete transform records
   -> seal ordered spans and assign chunk sequences before upload
   -> upload chunks concurrently; completion may be out of order
   -> extend the continuous durable prefix only across completed uploads
@@ -275,12 +275,12 @@ in the restored dirty manifest submitted to the scheduler.
 ### 3.4 Configuration And Checkpoint Integration
 
 `ManagerConfig` supplies `FlushMaxBytes`, `RetentionMaxBytes`,
-`MaxRetainedChunks`, `EnableTransform`, and the scheduler/runtime. A zero flush
+`MaxRetainedChunks`, and the scheduler/runtime. WALSummary and Delete transform
+recording are always active; neither has an enable switch. A zero flush
 threshold disables size-triggered sealing; a zero retention bound disables that
 bound. `RequestFlushThrough` can still request progress independently of size.
-RecoveryStorage currently enables transform records, supplies `FlushL0MaxSize`
-as the staging threshold and `SummaryMaxBytesPerPChannel` as the retained-byte
-budget. It does not yet pass `MaxRetainedChunks`, so the count bound is disabled
+RecoveryStorage supplies `FlushL0MaxSize` as the staging threshold and
+`SummaryMaxBytesPerPChannel` as the retained-byte budget. It does not yet pass `MaxRetainedChunks`, so the count bound is disabled
 in production wiring even though the standalone manager supports it.
 
 Publication is scheduled independently of the RecoveryStorage checkpoint tick.
@@ -394,12 +394,15 @@ updates may delay retention release.
 
 ### 5.3 Consumer Lifecycle
 
-Feature flags govern their consumers, not ownership of the shared directory.
-Disabling idempotency must not delete transform data still required for recovery.
-The standalone `RemoveAllObjects` store helper is destructive maintenance, not
-a feature-toggle or corruption-recovery workflow. The future integration must
-define how an idempotency window resets or resumes after a disabled interval;
-no guarantee covers requests written without keys during that interval.
+WALSummary is a permanent PChannel component. It records Delete transforms
+regardless of request-level idempotency, and records local keyed writes when
+an explicit IK is present. There are no global, collection or transform enable
+switches. Keyless inserts do not create idempotency records or clear existing
+request history.
+
+The standalone `RemoveAllObjects` helper is destructive maintenance, not a
+feature-toggle or corruption-recovery workflow. Repair must preserve the
+history required by every consumer.
 
 ## 6. Recovery And Term Takeover
 

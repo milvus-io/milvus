@@ -43,11 +43,9 @@ func TestWALIdempotencyAppend(t *testing.T) {
 	params.Save(params.EtcdCfg.RootPath.Key, fmt.Sprintf("idempotency-wal-%d", time.Now().UnixNano()))
 	params.Save(params.StreamingCfg.WALWriteAheadBufferKeepalive.Key, "500ms")
 	params.Save(params.StreamingCfg.WALWriteAheadBufferCapacity.Key, "10k")
-	params.Save(params.StreamingCfg.IdempotencyEnabled.Key, "true")
 	message.RegisterDefaultWALName(message.WALNameTest)
 	defer func() {
 		params.Reset(params.EtcdCfg.RootPath.Key)
-		params.Reset(params.StreamingCfg.IdempotencyEnabled.Key)
 	}()
 
 	initIdempotencyResourceForTest(t)
@@ -107,13 +105,11 @@ func TestRecoveryStartsWALSummary(t *testing.T) {
 	paramtable.Init()
 	params := paramtable.Get()
 	params.Save(params.EtcdCfg.RootPath.Key, fmt.Sprintf("idempotency-chunk-%d", time.Now().UnixNano()))
-	params.Save(params.StreamingCfg.IdempotencyEnabled.Key, "true")
 	// Seal on the first record rather than at the 16MiB default.
 	params.Save(params.StreamingCfg.FlushL0MaxSize.Key, "1")
 	message.RegisterDefaultWALName(message.WALNameTest)
 	defer func() {
 		params.Reset(params.EtcdCfg.RootPath.Key)
-		params.Reset(params.StreamingCfg.IdempotencyEnabled.Key)
 		params.Reset(params.StreamingCfg.FlushL0MaxSize.Key)
 	}()
 

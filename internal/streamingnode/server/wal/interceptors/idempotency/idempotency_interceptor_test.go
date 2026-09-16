@@ -38,11 +38,6 @@ import (
 )
 
 func newInterceptor(config WindowConfig) *idempotencyInterceptor {
-	return newInterceptorWithEnabled(true, config)
-}
-
-func newInterceptorWithEnabled(enabled bool, config WindowConfig) *idempotencyInterceptor {
-	config.Enabled = enabled
 	return newIdempotencyInterceptor(config)
 }
 
@@ -958,7 +953,7 @@ func TestInterceptorClearsExpiredTxnInsertResults(t *testing.T) {
 	baseTimeTick := tsoutil.ComposeTS(1000, 0)
 	keepalive := 10 * time.Millisecond
 	mvccManager := mvcc.NewMVCCManager(baseTimeTick)
-	interceptor := newIdempotencyInterceptorWithParam(WindowConfig{Enabled: true}, &interceptors.InterceptorBuildParam{
+	interceptor := newIdempotencyInterceptorWithParam(WindowConfig{}, &interceptors.InterceptorBuildParam{
 		MVCCManager: mvccManager,
 	})
 	txnCtx := message.TxnContext{TxnID: 1, Keepalive: keepalive}
@@ -982,9 +977,9 @@ func TestInterceptorClearsExpiredTxnInsertResults(t *testing.T) {
 	require.Nil(t, interceptor.txnInsertResultBuffers.Build(body))
 }
 
-func TestInterceptorConfigDisabledPassThrough(t *testing.T) {
-	interceptor := newInterceptorWithEnabled(false, WindowConfig{})
-	msg := newIdempotentInsertMessage(t, "v1", "key-1")
+func TestInterceptorKeylessPassThrough(t *testing.T) {
+	interceptor := newInterceptor(WindowConfig{})
+	msg := newIdempotentInsertMessage(t, "v1", "")
 
 	appendCount := 0
 	ctx := utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
@@ -1197,7 +1192,7 @@ func TestInterceptorChainSecondaryNativeDuplicateReachesReplicateGate(t *testing
 		},
 	).Maybe()
 
-	idempotencyInterceptor := newIdempotencyInterceptorWithParam(WindowConfig{Enabled: true}, &interceptors.InterceptorBuildParam{
+	idempotencyInterceptor := newIdempotencyInterceptorWithParam(WindowConfig{}, &interceptors.InterceptorBuildParam{
 		ReplicateManager: manager,
 	})
 	replicateInterceptor := replicate.NewInterceptorBuilder().Build(&interceptors.InterceptorBuildParam{

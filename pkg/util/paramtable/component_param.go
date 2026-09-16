@@ -8815,7 +8815,6 @@ type streamingConfig struct {
 	WALRecoveryTailHighWatermark         ParamItem `refreshable:"true"`
 
 	// idempotent write configuration.
-	IdempotencyEnabled            ParamItem `refreshable:"false"`
 	IdempotencyMaxBytesPerWindow  ParamItem `refreshable:"false"`
 	IdempotencyChunkMaxBytes      ParamItem `refreshable:"false"`
 	IdempotencyMaxStagingInterval ParamItem `refreshable:"false"`
@@ -9337,16 +9336,6 @@ If the schema is older than (the channel checkpoint - tolerance), it will be rem
 		Export:       false,
 	}
 	p.WALRecoverySchemaExpirationTolerance.Init(base.mgr)
-
-	p.IdempotencyEnabled = ParamItem{
-		Key:          "streaming.idempotency.enabled",
-		Version:      "3.0.0",
-		Doc:          `Whether request-level idempotent write is enabled globally. Collection-level idempotent write still needs to be enabled by collection property.`,
-		DefaultValue: "false",
-		FallbackKeys: []string{"idempotency.enabled"},
-		Export:       false,
-	}
-	p.IdempotencyEnabled.Init(base.mgr)
 
 	p.IdempotencyMaxBytesPerWindow = ParamItem{
 		Key:          "streaming.idempotency.maxBytesPerWindow",

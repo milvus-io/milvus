@@ -88,11 +88,8 @@ type ManagerConfig struct {
 	Runtime moduleapi.Runtime
 	// FlushMaxBytes seals a chunk at this staging size. Zero disables size-based sealing.
 	FlushMaxBytes uint64
-	// EnableTransform stages delete records for a wired TransformLog consumer.
-	// Consumers opt in when their recovery and retention paths are ready.
-	EnableTransform bool
-	PChannel        string
-	Term            int64
+	PChannel      string
+	Term          int64
 	// Store is the object storage layer of the summary store.
 	Store *Store
 	// RetentionMaxBytes is the soft budget of the retained chunk objects. GC
@@ -127,7 +124,7 @@ func (m *Manager) ObserveMessage(ctx context.Context, msg message.ImmutableMessa
 	}
 	idempotency, insert := idempotencyHalvesOf(msg)
 	var entry *streamingpb.TransformLogEntry
-	if m.cfg.EnableTransform && messageutil.ClassifyTransformLogMessage(msg) == messageutil.TransformLogKindDelete {
+	if messageutil.ClassifyTransformLogMessage(msg) == messageutil.TransformLogKindDelete {
 		entry = messageutil.BuildTransformLogEntry(msg, messageutil.TransformEntryOption{})
 	}
 	m.mu.Lock()
