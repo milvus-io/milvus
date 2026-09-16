@@ -217,8 +217,8 @@ the general range in `pkg/util/merr/errors.go`; 3000 and 3001 are taken.
 
 ### Privileges
 
-- `ObjectPrivilege` gains `PrivilegeListRunningRequests = 91` and
-  `PrivilegeCancelRequests = 92` (numbering per go-api v3.0.0).
+- `ObjectPrivilege` gains `PrivilegeListRunningRequests = 95` and
+  `PrivilegeCancelRequests = 96`, the next free values on milvus-proto master.
 - `pkg/util/constant.go`: both are added to `ObjectPrivileges[Global]`; List
   joins `ClusterReadOnlyPrivileges`, Cancel joins
   `ClusterReadWritePrivileges`, and both reach `ClusterAdminPrivileges` through
@@ -283,7 +283,10 @@ The path of `ClearReadTaskQueue` is reused: `internal/proxy/impl.go` calls
 - `pkg/proto/root_coord.proto` (existing rpc at `:194`) and
   `pkg/proto/proxy.proto` (`:35`) each gain the two internal rpcs. Request and
   response reuse the milvuspb types (`proxy.proto` already references
-  `milvus.GetMetricsRequest`); no new messages.
+  `milvus.GetMetricsRequest`); no new messages. The proxy-side pair is named
+  `ListLocalRunningRequests` and `CancelLocalRequests`: `Proxy` implements both
+  the public and the internal service, so a method name may appear only once,
+  and the names say that the answer covers this proxy alone.
 - `ProxyClientManager` gains two methods with the `ClearReadTaskQueue` result
   shape: one result per proxy, a failing proxy recorded in its own result while
   the others return normally, `ErrServiceUnimplemented` from an older proxy
@@ -352,7 +355,7 @@ take effect or for the proxy's decisions, which rely on ctx state.
 |---|---|
 | Existing | `CancelRequests` is an ordinary RPC and appears in the access log. `QueryNodeReadTaskExecuteDuration{status=cancel}`, `QueryNodeReadTaskQueueDuration{expired}`, and the cgo counters `internal_cgo_cancel_before_execute_total_search` / `internal_cgo_cancel_during_execute_total_search` count operator cancellations together with client timeouts. |
 | New counter | `milvus_proxy_request_cancelled_total{type}`, incremented when the registry actually cancels a request. This differs from the API call count: one `CancelRequests` may carry several ids, or find none. |
-| Audit log | One line per cancellation: operator, request id, the cancelled request's user, collection and elapsed time, reason. The access log records who called `Cancel`, not whose request was cancelled. |
+| Audit log | One line per cancellation: operator, request id, the cancelled request's user, collection and elapsed time, reason. Written by the proxy that received the public call, which is the only node that authenticated the caller: the internal calls are fresh connections carrying no user, so no other node can name the operator. That proxy sees the whole cluster's answer, so the record is complete. The cancelled client is told the reason, which the operator supplied. The access log records who called `Cancel`, not whose request was cancelled. |
 | Optional | Store `cancelledAt` in the record; in `PopActiveTask`, if the task ctx's cause is `ErrRequestCancelled`, observe the time from cancellation to the end of that task. The record may already be removed from the table; the pointer held in the ctx stays valid. |
 
 ## Compatibility, Deprecation, and Migration Plan
