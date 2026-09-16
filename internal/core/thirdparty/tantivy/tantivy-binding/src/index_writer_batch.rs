@@ -163,27 +163,6 @@ impl IndexWriterWrapper {
         self.add_rows(string_values(ptrs, lens)?, offsets, ids)
     }
 
-    pub fn add_json_rows(
-        &mut self,
-        ptrs: &[*const u8],
-        lens: &[usize],
-        offsets: &[usize],
-        ids: &[i64],
-    ) -> Result<()> {
-        validate_layout(ptrs.len(), offsets, ids)?;
-        if offsets.windows(2).any(|pair| pair[1] - pair[0] > 1) {
-            return Err(invalid_batch(
-                "JSON row contains more than one serialized value",
-            ));
-        }
-        // Parse the complete batch before submitting any of it to the writer.
-        let values = string_values(ptrs, lens)?
-            .into_iter()
-            .map(serde_json::from_str::<serde_json::Value>)
-            .collect::<std::result::Result<Vec<_>, _>>()?;
-        self.add_rows(values, offsets, ids)
-    }
-
     pub fn add_rows<T, I>(&mut self, values: I, offsets: &[usize], ids: &[i64]) -> Result<()>
     where
         I: IntoIterator<Item = T>,
@@ -417,10 +396,8 @@ mod tests {
     }
 
     #[test]
-    fn invalid_rows_and_json_are_rejected_before_submission() {
-        // JSON schemas use the doc_id fast field, not explicit Tantivy IDs.
-        let (dir, mut writer) = writer(TantivyDataType::JSON, false);
-        let text = r#"{"key": 1}"#;
+    fn invalid_rows_are_rejected_before_submission() {
+        let (dir, mut writer) = writer(TantivyDataType::I64, false);
         for (offsets, ids) in [
             (vec![1, 1], vec![0]),
             (vec![0, 2], vec![0]),
@@ -428,22 +405,9 @@ mod tests {
             (vec![0, 1], vec![i64::from(u32::MAX) + 1]),
             (vec![0, 1, 1], vec![4, 4]),
         ] {
-            assert!(writer
-                .add_json_rows(&[text.as_ptr()], &[text.len()], &offsets, &ids)
-                .is_err());
+            assert!(writer.add_rows([11_i64], &offsets, &ids).is_err());
         }
-        let bad = "{";
-        assert!(writer
-            .add_json_rows(
-                &[text.as_ptr(), bad.as_ptr()],
-                &[text.len(), bad.len()],
-                &[0, 1, 2],
-                &[2, 9]
-            )
-            .is_err());
-        writer
-            .add_json_rows(&[text.as_ptr()], &[text.len()], &[0, 1, 1], &[0, 1])
-            .unwrap();
+        writer.add_rows([11_i64], &[0, 1, 1], &[0, 1]).unwrap();
         writer.finish().unwrap();
         let index = Index::open_in_dir(dir.path()).unwrap();
         assert_eq!(index.reader().unwrap().searcher().num_docs(), 2);
@@ -462,11 +426,11 @@ mod tests {
     #[test]
     fn row_batches_enforce_order_in_v5_and_v7_fast_field_modes() {
         for version in [TantivyIndexVersion::V5, TantivyIndexVersion::V7] {
-            for kind in 0..3 {
+            for kind in 0..2 {
                 let data_type = match kind {
                     0 => TantivyDataType::I64,
                     1 => TantivyDataType::Keyword,
-                    _ => TantivyDataType::JSON,
+                    _ => unreachable!(),
                 };
                 let dir = TempDir::new().unwrap();
                 let mut writer = IndexWriterWrapper::new(
@@ -485,10 +449,6 @@ mod tests {
                     1 => {
                         let value = "nul\0测试";
                         writer.add_string_rows(&[value.as_ptr()], &[value.len()], &[0, 1], &[id])
-                    }
-                    2 => {
-                        let value = r#"{"key": 11}"#;
-                        writer.add_json_rows(&[value.as_ptr()], &[value.len()], &[0, 1], &[id])
                     }
                     _ => unreachable!(),
                 };

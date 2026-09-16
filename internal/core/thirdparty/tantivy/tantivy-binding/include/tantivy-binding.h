@@ -512,14 +512,6 @@ RustResult tantivy_index_add_string_rows(void *ptr,
                                          const int64_t *doc_ids,
                                          uintptr_t row_count);
 
-RustResult tantivy_index_add_json_rows(void *ptr,
-                                       const uint8_t *const *value_ptrs,
-                                       const uintptr_t *value_lens,
-                                       uintptr_t value_count,
-                                       const uintptr_t *row_offsets,
-                                       const int64_t *doc_ids,
-                                       uintptr_t row_count);
-
 RustResult tantivy_index_add_int8s(void *ptr,
                                    const int8_t *array,
                                    uintptr_t len,

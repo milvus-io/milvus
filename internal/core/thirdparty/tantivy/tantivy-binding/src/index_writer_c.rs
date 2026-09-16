@@ -329,7 +329,8 @@ pub extern "C" fn tantivy_index_add_bool_rows(
     )
 }
 
-fn add_delimited_rows(
+#[no_mangle]
+pub extern "C" fn tantivy_index_add_string_rows(
     ptr: *mut c_void,
     value_ptrs: *const *const u8,
     value_lens: *const usize,
@@ -337,7 +338,6 @@ fn add_delimited_rows(
     row_offsets: *const usize,
     doc_ids: *const i64,
     row_count: usize,
-    json: bool,
 ) -> RustResult {
     if ptr.is_null() {
         return invalid_batch("index writer handle is null");
@@ -364,60 +364,10 @@ fn add_delimited_rows(
     }
     let real = ptr as *mut IndexWriterWrapper;
     unsafe {
-        if json {
-            (*real)
-                .add_json_rows(value_ptrs, value_lens, row_offsets, doc_ids)
-                .into()
-        } else {
-            (*real)
-                .add_string_rows(value_ptrs, value_lens, row_offsets, doc_ids)
-                .into()
-        }
+        (*real)
+            .add_string_rows(value_ptrs, value_lens, row_offsets, doc_ids)
+            .into()
     }
-}
-
-#[no_mangle]
-pub extern "C" fn tantivy_index_add_string_rows(
-    ptr: *mut c_void,
-    value_ptrs: *const *const u8,
-    value_lens: *const usize,
-    value_count: usize,
-    row_offsets: *const usize,
-    doc_ids: *const i64,
-    row_count: usize,
-) -> RustResult {
-    add_delimited_rows(
-        ptr,
-        value_ptrs,
-        value_lens,
-        value_count,
-        row_offsets,
-        doc_ids,
-        row_count,
-        false,
-    )
-}
-
-#[no_mangle]
-pub extern "C" fn tantivy_index_add_json_rows(
-    ptr: *mut c_void,
-    value_ptrs: *const *const u8,
-    value_lens: *const usize,
-    value_count: usize,
-    row_offsets: *const usize,
-    doc_ids: *const i64,
-    row_count: usize,
-) -> RustResult {
-    add_delimited_rows(
-        ptr,
-        value_ptrs,
-        value_lens,
-        value_count,
-        row_offsets,
-        doc_ids,
-        row_count,
-        true,
-    )
 }
 
 // -------------------------build--------------------

@@ -514,27 +514,6 @@ struct TantivyIndexWrapper {
     }
 
     void
-    add_json_rows(std::span<const std::string> values,
-                  std::span<const uintptr_t> row_offsets,
-                  std::span<const int64_t> doc_ids,
-                  RowBatchBuffer& buffer) {
-        assert(!finished_);
-        AssertInfo(row_offsets.size() == doc_ids.size() + 1,
-                   "row offset count must equal row count plus one");
-        buffer.prepare(values);
-        auto res = RustResultWrapper(
-            tantivy_index_add_json_rows(writer_,
-                                        buffer.value_ptrs.data(),
-                                        buffer.value_lens.data(),
-                                        buffer.value_ptrs.size(),
-                                        row_offsets.data(),
-                                        doc_ids.data(),
-                                        doc_ids.size()));
-        AssertTantivyOk(
-            res, "failed to add JSON row batch: {}", res.result_->error);
-    }
-
-    void
     add_json_key_stats_data_by_batch(const char* const* keys,
                                      const int64_t* const* json_offsets,
                                      const uintptr_t* json_offsets_lens,
