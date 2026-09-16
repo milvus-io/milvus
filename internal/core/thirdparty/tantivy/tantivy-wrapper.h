@@ -8,6 +8,7 @@
 #include <limits>
 #include <map>
 #include <span>
+#include <string_view>
 #include <vector>
 #include <type_traits>
 #include <utility>
@@ -81,8 +82,9 @@ struct TantivyIndexWrapper {
         std::vector<const uint8_t*> value_ptrs;
         std::vector<uintptr_t> value_lens;
 
+        template <typename StringType>
         void
-        prepare(std::span<const std::string> values) {
+        prepare(std::span<const StringType> values) {
             value_ptrs.clear();
             value_lens.clear();
             value_ptrs.reserve(values.size());
@@ -494,7 +496,8 @@ struct TantivyIndexWrapper {
                                                   batch.doc_ids.data(),
                                                   batch.doc_ids.size());
             }
-            if constexpr (std::is_same_v<T, std::string>) {
+            if constexpr (std::is_same_v<T, std::string> ||
+                          std::is_same_v<T, std::string_view>) {
                 buffer.prepare(batch.values);
                 return tantivy_index_add_string_rows(writer_,
                                                      buffer.value_ptrs.data(),

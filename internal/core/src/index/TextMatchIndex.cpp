@@ -14,6 +14,7 @@
 #include <boost/uuid/uuid_io.hpp>
 #include <memory>
 #include <shared_mutex>
+#include <string_view>
 
 #include "index/TextMatchIndex.h"
 #include "index/InvertedIndexUtil.h"
@@ -248,27 +249,6 @@ TextMatchIndex::Load(const Config& config) {
     FinalizeSealed(/*release_null_offsets=*/true);
 }
 
-// Add text for sealed segment
-void
-TextMatchIndex::AddTextSealed(const std::string& text,
-                              const bool valid,
-                              int64_t offset) {
-    if (!valid) {
-        AddNullSealed(offset);
-        return;
-    }
-    wrapper_->add_data(&text, 1, offset);
-}
-
-// Add null for sealed segment
-void
-TextMatchIndex::AddNullSealed(int64_t offset) {
-    null_offset_.push_back(offset);
-    // still need to add null to make offset is correct
-    static const std::string empty;
-    wrapper_->add_array_data(&empty, 0, offset);
-}
-
 void
 TextMatchIndex::AddTextsSealed(size_t n,
                                const std::string* texts,
@@ -278,7 +258,9 @@ TextMatchIndex::AddTextsSealed(size_t n,
         return;
     }
 
-    FixedVector<std::string> values;
+    // The caller owns the payloads until the synchronous FFI call copies them
+    // into Tantivy documents. Only stage views here, including for nullable rows.
+    std::vector<std::string_view> values;
     std::vector<uintptr_t> row_offsets{0};
     TantivyIndexWrapper::RowBatchBuffer batch_buffer;
     std::vector<int64_t> doc_ids;
@@ -291,9 +273,9 @@ TextMatchIndex::AddTextsSealed(size_t n,
         if (doc_ids.empty()) {
             return;
         }
-        wrapper_->add_rows<std::string>(
-            TantivyIndexWrapper::RowBatchView<std::string>{
-                std::span<const std::string>(values.data(), values.size()),
+        wrapper_->add_rows<std::string_view>(
+            TantivyIndexWrapper::RowBatchView<std::string_view>{
+                std::span<const std::string_view>(values.data(), values.size()),
                 row_offsets,
                 doc_ids},
             batch_buffer);
@@ -354,6 +336,18 @@ TextMatchIndex::BuildIndexFromFieldData(
     const std::vector<FieldDataPtr>& field_datas,
     bool nullable,
     int64_t offset_begin) {
+    if (!nullable) {
+        // Reuse the wrapper's bounded batches without copying string payloads.
+        int64_t offset = offset_begin;
+        for (const auto& data : field_datas) {
+            auto n = data->get_num_rows();
+            wrapper_->add_data(
+                static_cast<const std::string*>(data->Data()), n, offset);
+            offset += n;
+        }
+        return;
+    }
+
     FixedVector<std::string> values;
     std::vector<uintptr_t> row_offsets{0};
     TantivyIndexWrapper::RowBatchBuffer batch_buffer;
@@ -376,7 +370,7 @@ TextMatchIndex::BuildIndexFromFieldData(
     int64_t offset = offset_begin;
     for (const auto& data : field_datas) {
         for (int64_t i = 0; i < data->get_num_rows(); ++i, ++offset) {
-            if (nullable && !data->is_valid(i)) {
+            if (!data->is_valid(i)) {
                 null_offsets.push_back(offset);
             } else {
                 const auto& value =

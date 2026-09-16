@@ -317,9 +317,10 @@ TEST(TextMatch, Index) {
                                          "{}",
                                          /*enable_background_merge=*/false);
     index->CreateReader(milvus::index::SetBitsetSealed);
-    index->AddTextSealed("football, basketball, pingpang", true, 0);
-    index->AddTextSealed("", false, 1);
-    index->AddTextSealed("swimming, football", true, 2);
+    const std::vector<std::string> texts = {
+        "football, basketball, pingpang", "", "swimming, football"};
+    const bool valids[] = {true, false, true};
+    index->AddTextsSealed(texts.size(), texts.data(), valids, 0);
     index->Commit();
     index->Reload();
 
@@ -390,9 +391,10 @@ TEST(TextMatch, FuzzyIndex) {
                                          "{}",
                                          /*enable_background_merge=*/false);
     index->CreateReader(milvus::index::SetBitsetSealed);
-    index->AddTextSealed("football, basketball, pingpang", true, 0);
-    index->AddTextSealed("", false, 1);
-    index->AddTextSealed("swimming, football", true, 2);
+    const std::vector<std::string> texts = {
+        "football, basketball, pingpang", "", "swimming, football"};
+    const bool valids[] = {true, false, true};
+    index->AddTextsSealed(texts.size(), texts.data(), valids, 0);
     index->Commit();
     index->Reload();
 
@@ -461,9 +463,10 @@ TEST(TextMatch, RawSealedFinalizationMaterializesOnlyWhenNeeded) {
                                 "milvus_tokenizer",
                                 "{}",
                                 /*enable_background_merge=*/false);
-    with_null->AddTextSealed("alpha", true, 0);
-    with_null->AddNullSealed(1);
-    with_null->AddTextSealed("beta", true, 2);
+    const std::vector<std::string> nullable_texts = {"alpha", "", "beta"};
+    const bool valids[] = {true, false, true};
+    with_null->AddTextsSealed(
+        nullable_texts.size(), nullable_texts.data(), valids, 0);
     with_null->CreateReader(milvus::index::SetBitsetSealed);
     with_null->Finish();
     with_null->Reload();
@@ -483,8 +486,9 @@ TEST(TextMatch, RawSealedFinalizationMaterializesOnlyWhenNeeded) {
                                 "milvus_tokenizer",
                                 "{}",
                                 /*enable_background_merge=*/false);
-    all_valid->AddTextSealed("alpha", true, 0);
-    all_valid->AddTextSealed("beta", true, 1);
+    const std::vector<std::string> valid_texts = {"alpha", "beta"};
+    all_valid->AddTextsSealed(
+        valid_texts.size(), valid_texts.data(), nullptr, 0);
     all_valid->CreateReader(milvus::index::SetBitsetSealed);
     all_valid->Finish();
     all_valid->Reload();
@@ -842,6 +846,60 @@ TEST(TextMatch, BuildIndexFromFieldDataAtOffsetBegin) {
     ExpectOnlyTextMatchHit(*index, "epsilon", 5, 6);
 }
 
+TEST(TextMatch, BuildIndexFromFieldDataNonNullableAcrossBatches) {
+    using Index = index::TextMatchIndex;
+    constexpr size_t kFirstFieldRows = 4097;
+    constexpr size_t kLoadedRows = kFirstFieldRows + 2;
+    constexpr int64_t kOffsetBegin = 3;
+    constexpr int64_t kTotalRows = kOffsetBegin + kLoadedRows;
+
+    auto index = std::make_unique<Index>(200,
+                                         "test_non_nullable_batches",
+                                         "milvus_tokenizer",
+                                         "{}",
+                                         /*enable_background_merge=*/true);
+    index->CreateReader(milvus::index::SetBitsetGrowing);
+    index->RegisterAnalyzer("milvus_tokenizer", "{}");
+
+    const std::vector<std::string> inserted = {"alpha", "beta", "gamma"};
+    index->AddTextsGrowing(
+        inserted.size(), inserted.data(), nullptr, /*offset_begin=*/0);
+
+    {
+        std::vector<std::string> values(kLoadedRows);
+        for (size_t i = 0; i < kLoadedRows; ++i) {
+            values[i] =
+                "this is a non nullable text row marker" + std::to_string(i);
+        }
+        auto first =
+            storage::CreateFieldData(DataType::VARCHAR, DataType::NONE, false);
+        first->FillFieldData(values.data(), kFirstFieldRows);
+        auto empty =
+            storage::CreateFieldData(DataType::VARCHAR, DataType::NONE, false);
+        auto second =
+            storage::CreateFieldData(DataType::VARCHAR, DataType::NONE, false);
+        second->FillFieldData(values.data() + kFirstFieldRows,
+                              kLoadedRows - kFirstFieldRows);
+        index->BuildIndexFromFieldData(
+            {first, empty, second}, false, kOffsetBegin);
+    }
+    // The index must own the text after the input FieldData is released.
+    index->Commit();
+    index->Reload();
+
+    auto nulls = index->IsNull();
+    ASSERT_EQ(nulls.size(), kTotalRows);
+    EXPECT_EQ(nulls.count(), 0);
+    ExpectOnlyTextMatchHit(*index, "alpha", 0, kTotalRows);
+    ExpectOnlyTextMatchHit(*index, "gamma", 2, kTotalRows);
+    for (int64_t row : {0, 4095, 4096, 4097, 4098}) {
+        ExpectOnlyTextMatchHit(*index,
+                               "marker" + std::to_string(row),
+                               kOffsetBegin + row,
+                               kTotalRows);
+    }
+}
+
 // The wiring, not the index: BuildIndexFromFieldDataAtOffsetBegin covers the
 // index honouring offset_begin, this covers load_field_data_common actually
 // handing it the offset PreInsert reserved. Insert fills rows [0, 2), a load
@@ -1126,6 +1184,103 @@ TEST(TextMatch, GrowingBuildTextIndexFromTextLobRefsDecodesText) {
     EXPECT_FALSE(null_hits[7]);
 
     boost::filesystem::remove_all(TestLocalPath + test_dir);
+}
+
+TEST(TextMatch, AddTextsSealedPreservesRowsAndOwnsValues) {
+    constexpr size_t kRows = 4099;
+    constexpr int64_t kOffsetBegin = 3;
+    constexpr int64_t kTotalRows = kOffsetBegin + kRows;
+
+    // Short rows reach the row limit; long rows reach the byte limit first.
+    for (size_t payload_bytes : {64, 4096}) {
+        SCOPED_TRACE(payload_bytes);
+        auto index = std::make_unique<index::TextMatchIndex>(
+            200,
+            "test_sealed_borrowed_values",
+            "milvus_tokenizer",
+            "{}",
+            /*enable_background_merge=*/false);
+        {
+            const std::vector<std::string> prefix = {"alpha", "beta", "gamma"};
+            index->AddTextsSealed(prefix.size(), prefix.data(), nullptr, 0);
+
+            std::vector<std::string> texts(kRows);
+            FixedVector<bool> valids(kRows, true);
+            for (size_t i = 0; i < kRows; ++i) {
+                texts[i] = "marker" + std::to_string(i);
+                texts[i].resize(payload_bytes, ' ');
+            }
+            valids[1] = false;
+            valids[4095] = false;
+            valids[4098] = false;
+            texts[2048].clear();  // A valid empty string is not NULL.
+            texts[4096] += '\0';
+            texts[4096] += "afterzero";
+
+            index->AddTextsSealed(
+                texts.size(), texts.data(), valids.data(), kOffsetBegin);
+            // Callers may overwrite and release their payloads immediately.
+            for (auto& text : texts) {
+                text.assign(text.size(), 'x');
+            }
+        }
+        index->CreateReader(milvus::index::SetBitsetSealed);
+        index->Finish();
+        index->Reload();
+        index->FinalizeSealed();
+
+        auto nulls = index->IsNull();
+        ASSERT_EQ(nulls.size(), kTotalRows);
+        EXPECT_EQ(nulls.count(), 3);
+        for (int64_t row : {1, 4095, 4098}) {
+            EXPECT_TRUE(nulls[kOffsetBegin + row]);
+            auto hits = index->MatchQuery("marker" + std::to_string(row), 1);
+            EXPECT_EQ(hits.count(), 0);
+        }
+        EXPECT_FALSE(nulls[kOffsetBegin + 2048]);
+        ExpectOnlyTextMatchHit(*index, "alpha", 0, kTotalRows);
+        ExpectOnlyTextMatchHit(*index, "gamma", 2, kTotalRows);
+        for (int64_t row : {0, 2047, 2049, 2050, 4094, 4096, 4097}) {
+            ExpectOnlyTextMatchHit(*index,
+                                   "marker" + std::to_string(row),
+                                   kOffsetBegin + row,
+                                   kTotalRows);
+        }
+        ExpectOnlyTextMatchHit(
+            *index, "afterzero", kOffsetBegin + 4096, kTotalRows);
+    }
+}
+
+TEST(TextMatch, AddTextsSealedAllNullBatchPreservesFollowingRows) {
+    constexpr size_t kNullRows = 4097;
+    constexpr size_t kTotalRows = kNullRows + 2;
+    auto index = std::make_unique<index::TextMatchIndex>(
+        200,
+        "test_sealed_all_null_batch",
+        "milvus_tokenizer",
+        "{}",
+        /*enable_background_merge=*/false);
+    index->AddTextsSealed(0, nullptr, nullptr, 0);
+    {
+        std::vector<std::string> texts(kNullRows, "hidden");
+        FixedVector<bool> valids(kNullRows, false);
+        index->AddTextsSealed(texts.size(), texts.data(), valids.data(), 0);
+        const std::vector<std::string> tail = {"", "tailmarker"};
+        index->AddTextsSealed(tail.size(), tail.data(), nullptr, kNullRows);
+    }
+    index->CreateReader(milvus::index::SetBitsetSealed);
+    index->Finish();
+    index->Reload();
+    index->FinalizeSealed();
+
+    auto nulls = index->IsNull();
+    ASSERT_EQ(nulls.size(), kTotalRows);
+    EXPECT_EQ(nulls.count(), kNullRows);
+    EXPECT_FALSE(nulls[kNullRows]);
+    EXPECT_FALSE(nulls[kNullRows + 1]);
+    auto hidden_hits = index->MatchQuery("hidden", 1);
+    EXPECT_EQ(hidden_hits.count(), 0);
+    ExpectOnlyTextMatchHit(*index, "tailmarker", kNullRows + 1, kTotalRows);
 }
 
 TEST(TextMatch, BuildIndexFromFieldDataSealedNullableAcrossBatchBoundary) {

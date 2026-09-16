@@ -751,7 +751,22 @@ InvertedIndexTantivy<T>::BuildWithFieldData(
         case proto::schema::DataType::VarChar:
         case proto::schema::DataType::Text: {
             int64_t offset = 0;
-            if constexpr (std::is_same_v<T, std::string>) {
+            if (!schema_.nullable()) {
+                // The wrapper batches strings using pointers into FieldData,
+                // so non-null rows need no staging copy of their payloads.
+                for (const auto& data : field_datas) {
+                    auto remaining = data->get_num_rows();
+                    const auto* values = static_cast<const T*>(data->Data());
+                    while (remaining > 0) {
+                        auto batch_size =
+                            std::min<size_t>(remaining, kBuildBatchRowLimit);
+                        wrapper_->add_data<T>(values, batch_size, offset);
+                        values += batch_size;
+                        remaining -= batch_size;
+                        offset += batch_size;
+                    }
+                }
+            } else if constexpr (std::is_same_v<T, std::string>) {
                 FixedVector<T> values;
                 std::vector<uintptr_t> row_offsets{0};
                 TantivyIndexWrapper::RowBatchBuffer batch_buffer;
@@ -763,7 +778,7 @@ InvertedIndexTantivy<T>::BuildWithFieldData(
                 for (const auto& data : field_datas) {
                     auto n = data->get_num_rows();
                     for (int i = 0; i < n; i++) {
-                        auto valid = !schema_.nullable() || data->is_valid(i);
+                        auto valid = data->is_valid(i);
                         if (!valid) {
                             null_offset_.push_back(offset);
                         } else {
@@ -783,7 +798,7 @@ InvertedIndexTantivy<T>::BuildWithFieldData(
                     }
                 }
                 SubmitRowBatch(values, row_offsets, doc_ids, batch_buffer);
-            } else if (schema_.nullable()) {
+            } else {
                 FixedVector<T> values;
                 std::vector<uintptr_t> row_offsets{0};
                 TantivyIndexWrapper::RowBatchBuffer batch_buffer;
@@ -812,19 +827,6 @@ InvertedIndexTantivy<T>::BuildWithFieldData(
                     }
                 }
                 SubmitRowBatch(values, row_offsets, doc_ids, batch_buffer);
-            } else {
-                for (const auto& data : field_datas) {
-                    auto remaining = data->get_num_rows();
-                    const auto* values = static_cast<const T*>(data->Data());
-                    while (remaining > 0) {
-                        auto batch_size =
-                            std::min<size_t>(remaining, kBuildBatchRowLimit);
-                        wrapper_->add_data<T>(values, batch_size, offset);
-                        values += batch_size;
-                        remaining -= batch_size;
-                        offset += batch_size;
-                    }
-                }
             }
             break;
         }
