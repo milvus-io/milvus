@@ -62,6 +62,7 @@ func TestComponentParamDerivedLocalStoragePathsUseCanonicalFrozenValue(t *testin
 	require.Equal(t, initialDiskCapacity, params.QueryNodeCfg.DiskCapacityLimit.GetValue())
 	require.NoDirExists(t, filepath.Join(workingDir, "relative"))
 }
+
 func shouldPanic(t *testing.T, name string, f func()) {
 	defer func() { recover() }()
 	f()
