@@ -183,10 +183,12 @@ func oldCode(code int32) commonpb.ErrorCode {
 	case ErrCollectionNotFound.code():
 		return commonpb.ErrorCode_CollectionNotExists
 
-	case ErrParameterInvalid.code(), ErrParameterMissing.code(), ErrParameterTooLarge.code():
+	case ErrParameterInvalid.code(), ErrParameterMissing.code(), ErrParameterTooLarge.code(), ErrRequestNotFound.code():
 		// The legacy contract is that every parameter-class error surfaces as
 		// IllegalArgument, so the finer-grained 1101/1102 codes must not regress
 		// old SDKs (which still read the deprecated ErrorCode) to UnexpectedError.
+		// ErrRequestNotFound is the caller naming a request id that does not
+		// exist: a bad argument for the same legacy readers.
 		return commonpb.ErrorCode_IllegalArgument
 
 	case ErrNodeNotMatch.code():
@@ -1669,6 +1671,21 @@ func WrapErrCompactionBlocked(reason string, msg ...string) error {
 		err = errors.Wrap(err, strings.Join(msg, "->"))
 	}
 	return err
+}
+
+// WrapErrRequestCancelled marks a request stopped by an operator. operator is
+// the user that issued the cancel; reason is the free-text reason they gave.
+func WrapErrRequestCancelled(operator string, reason string) error {
+	err := wrapFields(ErrRequestCancelled, value("operator", operator))
+	if reason != "" {
+		err = errors.Wrap(err, reason)
+	}
+	return err
+}
+
+// WrapErrRequestNotFound reports a request id that no proxy currently holds.
+func WrapErrRequestNotFound(requestID int64) error {
+	return wrapFields(ErrRequestNotFound, value("request_id", requestID))
 }
 
 func WrapErrOldSessionExists(msg ...string) error {

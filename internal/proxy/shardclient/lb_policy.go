@@ -446,6 +446,12 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			log.Warn(ctx, "search/query channel failed, node not available",
 				mlog.Int64("nodeID", targetNode.NodeID),
 				mlog.Err(err))
+			// The request itself is already over (client deadline, client
+			// disconnect, or an operator cancel): the failure says nothing
+			// about the node, so neither blacklist it nor retry.
+			if ctx.Err() != nil {
+				return false, err
+			}
 			lb.blacklist.Add(workload.Channel, targetNode.NodeID)
 
 			lastErr = errors.Wrapf(err, "failed to get delegator %d for channel %s", targetNode.NodeID, workload.Channel)
@@ -457,6 +463,18 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			log.Warn(ctx, "search/query channel failed",
 				mlog.Int64("nodeID", targetNode.NodeID),
 				mlog.Err(err))
+			// Once the request's own ctx is done -- client deadline, client
+			// disconnect, or an operator cancelling it -- whatever the node
+			// returned (context.Canceled, a segcore FollyCancel, or an inner
+			// error raised while unwinding) is a consequence of the
+			// cancellation, not evidence about node health. Abort without
+			// retrying, without excluding the node from this request, and
+			// without touching the blacklist. This check is keyed on ctx state
+			// on purpose: it must not depend on the index layer reporting the
+			// cancellation with any particular status code.
+			if ctx.Err() != nil {
+				return false, err
+			}
 			// An input error is the request's own fault: re-dispatching it to
 			// other replicas cannot make it succeed, and blacklisting the
 			// (healthy) serving node would penalize it for a bad request. Abort
