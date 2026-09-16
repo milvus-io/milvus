@@ -336,52 +336,29 @@ the window after an outage -- exactly when a resuming client needs it.
 
 ### DDL that empties a collection
 
-`DropCollection`, `TruncateCollection` and `DropPartition` all destroy the rows
-underneath a vchannel. Every one of them invalidates that vchannel's window: the
-entries at or below the DDL's timetick are dropped, in memory and in the durable
-sections alike, and a retry arriving after one of them is answered as a fresh
-write.
+An idempotency record describes an executed request, not whether its rows still
+exist. `DropCollection`, `TruncateCollection` and `DropPartition` do not clear the
+interceptor's window or filter retained WALSummary records. Within the retained
+window and the same vchannel scope, a delayed retry returns the original result
+without executing the insert again, even if another operation removed its data.
+Otherwise, a timeout followed by truncate and a late retry would reinsert data
+that the truncate had removed.
 
-The reason is the auto-derived key. It is a hash of the destination and the
-payload, with no collection generation and no partition id in it -- by
-construction, because a key derived from server-side state is no longer stable
-across the retry it exists to recognize. So re-inserting the same rows after the
-data underneath them is gone hashes to exactly the same key. Without the
-tombstone that write is answered as a duplicate: nothing reaches the WAL, and the
-client is told it succeeded, with the *previous* generation's primary keys, into
-an empty collection. A silently discarded write is a far worse outcome than a
-lost dedup opportunity, which only degrades to the behavior without this
-feature.
+A new logical write needs a new client key. The auto-derived payload key cannot
+distinguish an intentional identical write from a retry; DDL must not guess that
+intent by discarding request history. Drop and recreation under a new collection
+ID creates new vchannels and hence a different deduplication scope. Normal
+resource validation still applies; this does not promise that a request against
+a removed collection bypasses validation or always returns a cached response.
 
-Two of the three are in place -- truncate keeps the collection id and therefore
-the channel names, and a dropped partition leaves the vchannel untouched -- so
-nothing else tears the window down for them. The tombstone is what does.
+History is bounded by the existing retention policy. Closing an interceptor
+releases its in-memory state; summary retention GC releases durable chunks.
+The summary contains no DDL invalidation markers.
 
-Three consequences worth stating:
-
-- **The tombstone is per vchannel, not per partition.** A `DropPartition`
-  invalidates the whole vchannel's window, which is broader than the rows it
-  removed. Narrowing it would mean resolving each retained entry's partition,
-  and the auto key cannot tell a later partition of the same *name* from the one
-  that was dropped anyway.
-- **It buries the past, not the vchannel.** Writes past the DDL's timetick are
-  deduplicated normally; only what preceded it is unserveable.
-- **It must be durable.** The interceptor reclaims the in-memory window, but the
-  records already sealed into summary chunks outlive it. The tombstone is folded
-  into the WAL summary manifest by the next publish, and recovery applies it as a
-  floor when it reads a vchannel's sections back. The entry is dropped once no
-  retained chunk reaches below it.
-
-  The tombstone rides the same persist as the records, so it reaches the manifest
-  before the checkpoint covering the DDL is saved -- a restart can never come back
-  to a checkpoint past the DDL with the tombstone missing. It does not wait for a
-  chunk of its own either, which matters because a collection-emptying DDL usually
-  leaves nothing to write: the persist publishes the manifest for the tombstone
-  alone when there is nothing else.
-
-An insert genuinely racing a concurrent truncate is unaffected by any of this:
-which of the two lands first is a race the client cannot win either way, with or
-without this feature.
+This follows the request-identity contract described by
+[Stripe's idempotent requests](https://docs.stripe.com/api/idempotent_requests)
+and the deleted-resource, late-retry example in
+[AWS Builders' Library](https://aws.amazon.com/builders-library/making-retries-safe-with-idempotent-APIs/).
 
 ### Transactions
 
@@ -619,7 +596,7 @@ background persist.
 persistDirtySnapshot:
    1. drain the staged records of every vchannel into one chunk
    2. write chunk object            chunks/{generation}_{term}    ← blocking
-   3. record it in the manifest, fold in any DDL tombstone,
+   3. record it in the manifest,
       write the manifest                                          ← blocking
    4. save the WAL consume checkpoint                             ← only now
 ```
@@ -662,12 +639,12 @@ storage's background tick still does for the summary.
       read chunks/{g}_{T_M}, stop at the first miss
 3. write manifest/{T_now}
       = inherit M + fold in every chunk discovered in step 2
-      + carry pending_gc and the DDL tombstones forward
+      + carry pending_gc forward
 4. only now may this owner write a chunk. A term that inherited nothing publishes no
    manifest at step 3 and publishes it before its first chunk instead, so the invariant
    step 2 depends on -- a term that holds chunks always has a manifest object -- holds
    either way
-5. read every chunk in M.chunks, plus the DDL tombstones as a per-vchannel floor,
+5. read every chunk in M.chunks within the requested range,
    rebuild each vchannel's record set and hand it to that vchannel's window
 7. resume WAL consumption from the consume checkpoint — unchanged
 ```
@@ -984,24 +961,16 @@ The cost of the choice is stated in [Retention](#retention): visibility is measu
 bytes, idle windows are not released over time, and a bound window may be shorter than the
 floor promises.
 
-### A DDL tombstone is a manifest entry, not a rewrite of the chunks
+### DDL preserves request history
 
-**Chosen:** a per-vchannel timetick in the manifest, applied as a floor when a
-vchannel's sections are read back. The chunk objects that hold the buried records are
-left exactly as they are, and the entry is dropped once retention has released every
-chunk that could reach below it.
+**Chosen:** retain executed requests across DDL until ordinary retention removes
+them. A retry must not repeat its side effects after a different request deletes
+the data. New intent is expressed with a new key.
 
-**Rejected — rewriting or deleting the chunks the DDL invalidates.** A chunk is a
-pchannel-wide object carrying every vchannel written in the same span, so burying one
-vchannel's records would mean rewriting objects that other vchannels still depend on,
-under a DDL that is supposed to be cheap. The floor costs one map entry and one
-comparison on a read path that already takes a range.
-
-**Rejected — reclaiming only the in-memory window.** That is what the interceptor
-does, and it is not enough on its own: the records already sealed into chunks outlive
-the window, and recovery would read them straight back. The gap is invisible until a
-restart, which is the worst shape for this particular bug -- it resurrects keys whose
-whole danger is being served.
+**Rejected — clearing the window or filtering summary records at the DDL timetick.**
+Both turn a delayed retry into a new insert. Clearing only the in-memory window
+also makes behavior differ before and after recovery. A payload-derived key's
+ambiguity is not resolved by changing request identity when data is deleted.
 
 ### The store keeps no per-consumer state
 
@@ -1168,7 +1137,7 @@ decisions, byte-cap eviction, restore-from-snapshot, txn commit dedup with rollb
 synthesis, expired txn buffer classification, replicated bypass; chunk codec round-trip
 and frame damage rejection, section misalignment and out-of-bounds section refs, the
 absent-idempotency-section case, single-section ranged read, oldest-first release under
-the byte budget and the zero-budget off switch, DDL invalidation of chunked, sealed and
+the byte budget and the zero-budget off switch, DDL preservation of chunked, sealed and
 staged records together with its survival across a restart and its own expiry, manifest
 inheritance, forward probing including the probe-from-generation-zero case, an identical
 rewrite of a chunk staying idempotent across a proto re-encode while a foreign-term object
@@ -1213,9 +1182,10 @@ message id, timetick and last-confirmed position unchanged.
   dominate a chunk's size — and fetch the insert section only when a duplicate actually
   hits. The layout is in place; the read path is not.
 - **Wire the transform consumer into recovery.** The summary store now implements an
-  optional transform section (field 6) and its GC frontier. Production recovery still
-  enables only idempotency; `ManagerConfig.EnableTransform` remains off until that
-  consumer is wired. See [WALSummary](wal/summary.md).
+  optional transform section (field 6) and its GC frontier. Legacy RecoveryStorage
+  no longer wires the summary; the next async recovery PR will connect summary
+  scheduling, `LastAcked`, idempotency-window restoration and the transform
+  consumer. The idempotency feature code and summary sections are retained. See [WALSummary](wal/summary.md).
 - **A primary-key index as a second consumer.** It reads the insert section, which already
   holds every primary key, so nothing is stored twice. It would want full history rather
   than a bounded tail, so it needs its own retention input; the current store is shaped for
@@ -1241,10 +1211,6 @@ message id, timetick and last-confirmed position unchanged.
   cluster that no longer exists. Nothing else in Milvus supports that state either, so
   this is called out rather than handled; the drop path (`streaming.idempotency.enabled=false`,
   restart) clears the store when it is needed.
-- **A DDL tombstone is coarser than the rows it buries.** `DropPartition` invalidates
-  the whole vchannel's window (see [DDL that empties a
-  collection](#ddl-that-empties-a-collection)), so unrelated keys of the same vchannel
-  lose their dedup opportunity with it.
 - **A lost checkpoint claim is not distinguishable from a timeout.** The compare-and-swap
   refuses a superseded publisher correctly, but `ReliableWriteMetaKv` retries every error a
   guarded commit returns, including the predicate mismatch itself, until the context
@@ -1264,16 +1230,6 @@ message id, timetick and last-confirmed position unchanged.
   and twice on a quiet one. A client that may legitimately send the same payload twice must
   send its own key per logical request; deriving one is a convenience for callers that
   cannot, not a substitute for a request identity.
-- **A DDL that empties a collection also forgets explicit keys.** The tombstone is what
-  keeps a derived key from answering a re-insert of the same rows after the data under it
-  is gone, and the record it is applied to does not say whether its key was supplied by the
-  client or derived from the payload — so the tombstone cannot spare one and bury the other.
-  An explicit key is therefore executable again after `DropCollection`, `TruncateCollection`
-  or `DropPartition`, which is not what a request identity should mean. Separating the two
-  would mean carrying the distinction in every persisted record and keeping explicit keys
-  alive past a drop, and the case handling that costs is not worth putting in the middle of
-  the write path for it. The narrower contract stands: within a collection's life a key
-  identifies one logical insert; a DDL that empties the collection ends that life.
 - **The consume checkpoint's fence does not extend to the rest of the snapshot.** The
   compare-and-swap guards the checkpoint, but when a snapshot exceeds the store's txn op
   limit the segment, vchannel and salvage writes go out in unguarded batches before it, so a

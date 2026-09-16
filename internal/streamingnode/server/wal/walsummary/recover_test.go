@@ -61,7 +61,12 @@ func TestRestoreInheritsPreviousTermChunks(t *testing.T) {
 	require.Len(t, sections.Inserts, 1)
 	assert.Equal(t, uint64(100), sections.Inserts[0].GetSourceTimetick())
 
-	// Term 2 sealed the inheritance into its own manifest, so the chain never
+	// Term 2 schedules publication without writing inline.
+	_, exists, err := store2.ReadManifest(ctx)
+	require.NoError(t, err)
+	require.False(t, exists)
+	require.NoError(t, drainSummary(ctx, manager2))
+	// Term 2 seals the inheritance into its own manifest, so the chain never
 	// grows beyond one hop: a term 3 restore reads term 2's manifest.
 	loaded, found, err := store2.ReadManifest(ctx)
 	require.NoError(t, err)
@@ -95,13 +100,7 @@ func TestRestoreInheritsPreviousTermProbedTail(t *testing.T) {
 	assert.Equal(t, int64(1), manager2.manifest.GetChunks()[0].GetTerm())
 }
 
-// TestRestoreInheritsSkipsBurnedIntermediateTerm covers chained handoffs: a
-// term that was assigned (TryAssignToServerID burns a term on every
-// assignment attempt) but died before ever sealing a manifest leaves an empty
-// manifest at term-1. Restore must keep walking back until it finds the most
-// recent term that actually holds chunks — otherwise the records of an older
-// term vanish from the manifest chain, their deletes silently resurrect, and
-// the orphaned chunk objects become unreachable to GC.
+// Assignment attempts without a manifest do not change the discovery root.
 func TestRestoreInheritsSkipsBurnedIntermediateTerm(t *testing.T) {
 	ctx := context.Background()
 	cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
@@ -135,12 +134,8 @@ func TestRestoreInheritsSkipsBurnedIntermediateTerm(t *testing.T) {
 	assert.Equal(t, uint64(100), sections.Inserts[0].GetSourceTimetick())
 }
 
-// TestRestorePublishesManifestBeforeFirstChunk covers a term that inherits
-// nothing: recovery has no content to publish, so the manifest is written by
-// the first chunk write instead. Without it the successor's takeover -- which
-// lists the manifest prefix to decide which terms to probe -- would not see
-// this term at all, and its chunk would be unreachable.
-func TestRestorePublishesManifestBeforeFirstChunk(t *testing.T) {
+// Empty recovery schedules a discovery manifest without performing inline I/O.
+func TestRestoreSchedulesEmptyManifest(t *testing.T) {
 	ctx := context.Background()
 	cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 
@@ -153,12 +148,14 @@ func TestRestorePublishesManifestBeforeFirstChunk(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, found, "an empty store leaves this term without a manifest")
 
-	// Its first chunk write publishes the manifest first.
+	// Drain the scheduled empty manifest without requiring a chunk.
+	require.NoError(t, drainSummary(ctx, manager1))
+	// Subsequent chunks extend the discoverable term.
 	var unused bool
 	flushObserved(t, manager1, "v1", 100, &unused)
 	_, found, err = store1.ReadManifest(ctx)
 	require.NoError(t, err)
-	require.True(t, found, "the first chunk of a term must be preceded by its manifest")
+	require.True(t, found, "the completed publication makes the term discoverable")
 
 	// So the successor finds term 1 by listing the manifest prefix, probes it,
 	// and inherits the chunk.

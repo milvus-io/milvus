@@ -102,24 +102,11 @@ func (impl *idempotencyInterceptor) DoAppend(ctx context.Context, msg message.Mu
 	// sit in this cluster's window — e.g. after a demotion, or after the source
 	// evicted the key by TTL and a client legally re-issued it.
 	if msg.ReplicateHeader() != nil {
-		msgID, err := append(ctx, msg)
-		if err == nil && idempotencyview.InvalidatesIdempotencyWindow(msg.MessageType()) {
-			// A replicated drop or truncate reclaims the vchannel just like a native one.
-			impl.removeWindow(msg.VChannel())
-		}
-		return msgID, err
+		return append(ctx, msg)
 	}
 
 	if impl.shouldLetReplicateGateHandle(msg) {
 		return append(ctx, msg)
-	}
-
-	if idempotencyview.InvalidatesIdempotencyWindow(msg.MessageType()) {
-		msgID, err := append(ctx, msg)
-		if err == nil {
-			impl.removeWindow(msg.VChannel())
-		}
-		return msgID, err
 	}
 
 	if isTxnMessage(msg) {
@@ -136,21 +123,6 @@ func (impl *idempotencyInterceptor) shouldLetReplicateGateHandle(msg message.Mut
 		return false
 	}
 	return true
-}
-
-// removeWindow drops the in-memory window, its metric series, and any buffered
-// txn insert results for a reclaimed vchannel, mirroring the recovery-side
-// removeSummary. Without this, dropped vchannels pin retained PKs,
-// Prometheus series, or abandoned txn builders for the WAL's lifetime under
-// collection create/drop churn.
-func (impl *idempotencyInterceptor) removeWindow(vchannel string) {
-	if vchannel == "" {
-		return
-	}
-	impl.txnInsertResultBuffers.RemoveVChannel(vchannel)
-	if _, loaded := impl.windows.GetAndRemove(vchannel); loaded {
-		deleteWindowMetrics(vchannel)
-	}
 }
 
 func logIdempotencyDuplicateHit(ctx context.Context, vchannel string, key IdempotencyKey) {

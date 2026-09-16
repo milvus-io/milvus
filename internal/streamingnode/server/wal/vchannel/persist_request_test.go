@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walsummary"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -33,11 +34,12 @@ func (recordingVChannelTaskHandle) Cancel() {}
 func (recordingVChannelTaskHandle) Wait(context.Context) error { return nil }
 
 // newTestSummaryManager uses a local store with the transform consumer enabled.
-func newTestSummaryManager(t *testing.T) *walsummary.Manager {
+func newTestSummaryManager(t *testing.T, scheduler *recordingVChannelScheduler) *walsummary.Manager {
 	t.Helper()
 	cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 	store := walsummary.NewStore(cm, "p1", 1)
 	return walsummary.NewManager(walsummary.ManagerConfig{
+		Runtime:           moduleapi.Runtime{Scheduler: scheduler},
 		PChannel:          "p1",
 		Term:              1,
 		Store:             store,
@@ -48,18 +50,24 @@ func newTestSummaryManager(t *testing.T) *walsummary.Manager {
 
 func TestSummaryManagerPersistsThroughPChannelLevel(t *testing.T) {
 	ctx := context.Background()
-	manager := newTestSummaryManager(t)
-	require.NoError(t, manager.Persist(ctx))
-	require.Empty(t, manager.Manifest().GetChunks())
+	scheduler := &recordingVChannelScheduler{}
+	manager := newTestSummaryManager(t, scheduler)
+	manager.RequestFlushThrough(10)
+	require.Empty(t, scheduler.tasks)
 	var finalized bool
 	observeSummaryDelete(t, manager, "v1", 10, &finalized)
 	require.True(t, finalized)
 	require.Empty(t, manager.Manifest().GetChunks())
-	require.NoError(t, manager.Persist(ctx))
+	manager.RequestFlushThrough(10)
+	require.Len(t, scheduler.tasks, 1)
+	require.NoError(t, scheduler.tasks[0].Execute(ctx))
 	require.Len(t, manager.Manifest().GetChunks(), 1)
-	require.Equal(t, uint64(10), manager.DurableTimeTick("v1"))
-	require.NoError(t, manager.Persist(ctx))
-	require.Len(t, manager.Manifest().GetChunks(), 1)
+	require.Equal(t, uint64(9), manager.LastAcked().TimeTick, "first publication gates confirmation")
+	require.Len(t, scheduler.tasks, 2)
+	require.NoError(t, scheduler.tasks[1].Execute(ctx))
+	require.Equal(t, uint64(10), manager.LastAcked().TimeTick)
+	manager.RequestFlushThrough(10)
+	require.Len(t, scheduler.tasks, 2)
 }
 
 // observeSummaryDelete observes one delete message through the summary

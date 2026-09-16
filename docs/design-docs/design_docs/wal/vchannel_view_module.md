@@ -10,8 +10,9 @@ indexed by `PChannelRecoveryManager`.
 
 This document describes the module boundary. Production RecoveryStorage does
 not yet dispatch through these modules; that integration remains follow-up
-work. The currently wired summary persistence is synchronous (see
-[WALSummary](summary.md)).
+work. Legacy RecoveryStorage also has no summary wiring. The
+[WALSummary](summary.md) module exposes asynchronous scheduling and `LastAcked`
+for the next integration PR.
 
 ## 1. Ownership
 

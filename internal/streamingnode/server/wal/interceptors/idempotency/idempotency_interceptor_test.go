@@ -506,48 +506,81 @@ func TestInterceptorOwnerCommitFailsOnLostInsertResults(t *testing.T) {
 	require.Equal(t, 0, interceptor.window("v1").InflightLen())
 }
 
-// A DropCollection append reclaims the vchannel's window, metric series, and
-// buffered txn insert results, mirroring the recovery-side
-// removeSummary — without this every dropped vchannel pins retained
-// PK memory or abandoned txn builders for the WAL's lifetime.
-func TestInterceptorRemovesWindowOnDropCollection(t *testing.T) {
-	interceptor := newInterceptor(WindowConfig{})
-
-	ctx := utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
-	_, err := interceptor.DoAppend(ctx, newIdempotentInsertMessage(t, "v1", "key-1"), func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
-		utility.ReplaceAppendResultTimeTick(ctx, 100)
-		utility.ReplaceAppendResultLastConfirmedMessageID(ctx, newTestMessageID(9))
-		return newTestMessageID(10), nil
-	})
-	require.NoError(t, err)
-	require.True(t, interceptor.windows.Contain("v1"))
-
-	txnCtx := message.TxnContext{TxnID: 1, Keepalive: 10}
-	txnBody := newIdempotentInsertMessageWithInsertResult(t, "v1", "", &messagespb.IdempotentInsertResult{
-		RowOffsets: []uint32{0},
-		Ids: &schemapb.IDs{
-			IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{100}}},
+// A retry still names the original write after a DDL removes its data. It
+// must return that write's result rather than insert the deleted rows again.
+func TestInterceptorDDLPreservesIdempotentResult(t *testing.T) {
+	ddls := map[string]func() message.MutableMessage{
+		"drop-collection": func() message.MutableMessage {
+			return message.NewDropCollectionMessageBuilderV1().WithVChannel("v1").
+				WithHeader(&message.DropCollectionMessageHeader{CollectionId: 1}).
+				WithBody(&msgpb.DropCollectionRequest{}).MustBuildMutable()
 		},
-	}).WithTxnContext(txnCtx)
-	ctx = utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
-	_, err = interceptor.DoAppend(ctx, txnBody, func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
-		utility.ReplaceAppendResultTimeTick(ctx, 101)
-		return newTestMessageID(11), nil
-	})
-	require.NoError(t, err)
-	require.NotNil(t, interceptor.txnInsertResultBuffers.Build(txnBody))
-
-	dropMsg := message.NewDropCollectionMessageBuilderV1().
-		WithVChannel("v1").
-		WithHeader(&message.DropCollectionMessageHeader{CollectionId: 1}).
-		WithBody(&msgpb.DropCollectionRequest{}).
-		MustBuildMutable()
-	_, err = interceptor.DoAppend(utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{}), dropMsg, func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
-		return newTestMessageID(12), nil
-	})
-	require.NoError(t, err)
-	require.False(t, interceptor.windows.Contain("v1"))
-	require.Nil(t, interceptor.txnInsertResultBuffers.Build(txnBody))
+		"truncate": func() message.MutableMessage {
+			return message.NewTruncateCollectionMessageBuilderV2().WithVChannel("v1").
+				WithHeader(&message.TruncateCollectionMessageHeader{CollectionId: 1}).
+				WithBody(&message.TruncateCollectionMessageBody{}).MustBuildMutable()
+		},
+		"drop-partition": func() message.MutableMessage {
+			return message.NewDropPartitionMessageBuilderV1().WithVChannel("v1").
+				WithHeader(&message.DropPartitionMessageHeader{CollectionId: 1, PartitionId: 10}).
+				WithBody(&msgpb.DropPartitionRequest{}).MustBuildMutable()
+		},
+	}
+	for name, buildDDL := range ddls {
+		for _, replicated := range []bool{false, true} {
+			t.Run(name+"/replicated="+strconv.FormatBool(replicated), func(t *testing.T) {
+				interceptor := newInterceptor(WindowConfig{})
+				defer interceptor.Close()
+				result := &messagespb.IdempotentInsertResult{
+					RowOffsets: []uint32{0},
+					Ids:        &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{42}}}},
+				}
+				newInsert := func(key string) message.MutableMessage {
+					return newIdempotentInsertMessageWithInsertResult(t, "v1", key, result)
+				}
+				ctx := utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
+				firstID, err := interceptor.DoAppend(ctx, newInsert("original-key"), func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+					utility.ReplaceAppendResultTimeTick(ctx, 100)
+					utility.ReplaceAppendResultLastConfirmedMessageID(ctx, newTestMessageID(9))
+					return newTestMessageID(10), nil
+				})
+				require.NoError(t, err)
+				ddl := buildDDL()
+				if replicated {
+					ddl = withTestReplicateHeader(ddl)
+				}
+				ddlAppended := false
+				_, err = interceptor.DoAppend(ctx, ddl, func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+					ddlAppended = true
+					return newTestMessageID(20), nil
+				})
+				require.NoError(t, err)
+				require.True(t, ddlAppended)
+				ctx = utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
+				retryID, err := interceptor.DoAppend(ctx, newInsert("original-key"), func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+					t.Fatal("delayed retry must not append the old insert again")
+					return nil, nil
+				})
+				require.NoError(t, err)
+				require.True(t, firstID.EQ(retryID))
+				extra := utility.GetExtraAppendResult(ctx)
+				require.Equal(t, uint64(100), extra.TimeTick)
+				require.True(t, newTestMessageID(9).EQ(extra.LastConfirmedMessageID))
+				require.True(t, proto.Equal(result, extra.Extra))
+				// A new logical insert has a new key and can execute normally.
+				freshAppended := false
+				ctx = utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
+				_, err = interceptor.DoAppend(ctx, newInsert("new-key"), func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+					freshAppended = true
+					utility.ReplaceAppendResultTimeTick(ctx, 300)
+					utility.ReplaceAppendResultLastConfirmedMessageID(ctx, newTestMessageID(20))
+					return newTestMessageID(30), nil
+				})
+				require.NoError(t, err)
+				require.True(t, freshAppended)
+			})
+		}
+	}
 }
 
 func TestInterceptorDuplicateReturnsInsertIDs(t *testing.T) {
