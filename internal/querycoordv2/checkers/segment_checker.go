@@ -811,17 +811,43 @@ func (c *SegmentChecker) createMisplacedSegmentMoveTasks(ctx context.Context, re
 	if !extension.FormInstalled() || replica.RWSQNodesCount()+replica.ROSQNodesCount() == 0 {
 		return nil
 	}
-	// Nothing to move a segment to: while the regular node has not
-	// returned, the streaming node's query node is where the segment
-	// belongs for now. Decided before the target is fetched and each shard
-	// asked for its leader, since this is every check of the collection for
-	// as long as the node is away. The per-shard RW nodes are drawn from the
-	// replica's RW set (Replica.CopyForWrite, removeChannelExclusiveNodes),
-	// so an empty RW set means no shard has one either.
+	// Where the segments go, and which of them are misplaced, depends on what
+	// the replica has to offer:
+	//
+	//   - A regular RW query node: every sealed segment on a streaming node's
+	//     query node belongs on the regular node, which is the case this pass
+	//     was written for.
+	//   - No regular node, but an RW streaming node beside an RO one: only the
+	//     segments on the RO streaming node are misplaced, and they belong on
+	//     the RW streaming node. A streaming node goes RO while it is still
+	//     running whenever a resource group's compute is redistributed - a
+	//     replica added to the group, a node transferred out of it - and in a
+	//     group whose only compute is streaming nodes nothing else would ever
+	//     move those segments: the balancers walk the regular nodes only, the
+	//     lack and redundancy passes count an RO streaming node's segments as
+	//     the replica's own (meta.WithReplica), and the replica observer drops
+	//     the node from the replica only once it holds none. The node would
+	//     stay in the replica for good, and the replica it was taken for would
+	//     never receive one.
+	//   - Neither: while the regular node has not returned, the streaming
+	//     node's query node is where the segment belongs for now.
+	//
+	// Decided before the target is fetched and each shard asked for its
+	// leader, since this runs on every check of the collection for as long as
+	// the node is away. The per-shard RW nodes are drawn from the replica's RW
+	// set (Replica.CopyForWrite, removeChannelExclusiveNodes), so an empty RW
+	// set means no shard has one either.
+	fromReadOnlyStreamingNodes := false
 	if replica.RWNodesCount() == 0 {
-		return nil
+		if replica.RWSQNodesCount() == 0 || replica.ROSQNodesCount() == 0 {
+			return nil
+		}
+		fromReadOnlyStreamingNodes = true
 	}
 	misplaced := lo.Filter(dist, func(s *meta.Segment, _ int) bool {
+		if fromReadOnlyStreamingNodes {
+			return replica.ContainROSQNode(s.Node)
+		}
 		return replica.ContainSQNode(s.Node)
 	})
 	if len(misplaced) == 0 {
@@ -850,6 +876,11 @@ func (c *SegmentChecker) createMisplacedSegmentMoveTasks(ctx context.Context, re
 		if len(rwNodes) == 0 {
 			rwNodes = replica.GetRWNodes()
 		}
+		if fromReadOnlyStreamingNodes {
+			// The replica holds no regular node at all; its RW streaming
+			// nodes are the only place a segment can go.
+			rwNodes = replica.GetRWSQNodes()
+		}
 		residentOn := lo.SliceToMap(segments, func(s *meta.Segment) (int64, int64) { return s.GetID(), s.Node })
 		// Through the policy's normal node filter and batch size, as every
 		// automatic move is: a node that is stopping or has reported
@@ -871,7 +902,11 @@ func (c *SegmentChecker) createMisplacedSegmentMoveTasks(ctx context.Context, re
 	if len(plans) == 0 {
 		return nil
 	}
-	logger.Info(ctx, "moving sealed segments off a streaming node's query node onto a regular query node",
+	destination := "a regular query node"
+	if fromReadOnlyStreamingNodes {
+		destination = "a read-write streaming node's query node"
+	}
+	logger.Info(ctx, "moving sealed segments off a streaming node's query node onto "+destination,
 		mlog.Int64s("segmentIDs", lo.Map(plans, func(p assign.SegmentAssignPlan, _ int) int64 { return p.Segment.GetID() })))
 	return balance.CreateSegmentTasksFromPlans(ctx, c.ID(), Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond), plans)
 }

@@ -1106,3 +1106,81 @@ func TestAReactivatedCheckerRestartsTheGrace(t *testing.T) {
 	require.Len(t, tasks, 1)
 	assert.EqualValues(t, sqnStreaming, tasks[0].Actions()[0].Node())
 }
+
+// A streaming node goes read-only while it is still running whenever its
+// resource group's compute is redistributed: a replica added to the group, a
+// node transferred out of it. In a group whose only compute is streaming
+// nodes, the sealed segments the fallback placed on that node then have
+// nowhere to go by any other path - the balancers walk the regular nodes, and
+// the lack and redundancy passes count them as the replica's own - so the node
+// never empties, the replica observer never drops it, and the replica it was
+// taken for never receives a node. The move pass moves them onto the replica's
+// read-write streaming node instead.
+func TestSealedSegmentsMoveOffAReadOnlyStreamingNodeWhenNoRegularNodeExists(t *testing.T) {
+	setForm(t, true)
+	f := newSQNFixture(t)
+	// The shard has a leader, as it does while the replica serves; without
+	// one the move pass waits, as TestMisplacedSealedSegmentsWaitForAShardLeader
+	// pins.
+	shardLeader := mockey.Mock((*meta.ChannelDistManager).GetShardLeader).Return(&meta.DmChannel{}).Build()
+	defer shardLeader.UnPatch()
+	const readOnlyStreaming = int64(9)
+	f.putSealedSegmentOn(readOnlyStreaming)
+	replica := meta.NewReplica(&querypb.Replica{
+		ID: sqnReplica, CollectionID: sqnCollection, ResourceGroup: sqnGroup,
+		RwSqNodes: []int64{sqnStreaming}, RoSqNodes: []int64{readOnlyStreaming},
+	})
+
+	dist := f.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(sqnCollection))
+	require.Len(t, dist, 1)
+	tasks := f.checker.createMisplacedSegmentMoveTasks(context.Background(), replica, dist)
+
+	require.Len(t, tasks, 1, "the segment on the read-only streaming node is misplaced and has somewhere to go")
+	assert.EqualValues(t, 1, tasks[0].(*task.SegmentTask).SegmentID())
+	nodesByAction := make(map[task.ActionType]int64)
+	for _, action := range tasks[0].Actions() {
+		nodesByAction[action.Type()] = action.Node()
+	}
+	assert.EqualValues(t, sqnStreaming, nodesByAction[task.ActionTypeGrow],
+		"loaded on the replica's read-write streaming node")
+	assert.EqualValues(t, readOnlyStreaming, nodesByAction[task.ActionTypeReduce],
+		"and released from the read-only one")
+}
+
+// The segments of a read-write streaming node are not misplaced: that is where
+// the fallback puts them and where they serve from. Only the read-only node's
+// are moved, so a replica whose streaming nodes are all read-write produces no
+// move at all.
+func TestSegmentsOnAReadWriteStreamingNodeAreNotMovedWhenNoRegularNodeExists(t *testing.T) {
+	setForm(t, true)
+	f := newSQNFixture(t)
+	f.putSealedSegmentOn(sqnStreaming)
+	// A target manager with no expectations: any call fails the test, so this
+	// also pins that the decision is made before the target is fetched.
+	f.checker.targetMgr = meta.NewMockTargetManager(t)
+
+	dist := f.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(sqnCollection))
+	require.Len(t, dist, 1)
+	tasks := f.checker.createMisplacedSegmentMoveTasks(context.Background(),
+		f.replica(nil, []int64{sqnStreaming}), dist)
+	assert.Empty(t, tasks)
+}
+
+// With no regular node and no read-write streaming node either, there is
+// nowhere to move anything: the segments stay where they are until the group
+// has compute again.
+func TestNothingMovesOffAReadOnlyStreamingNodeWithoutSomewhereToPutIt(t *testing.T) {
+	setForm(t, true)
+	f := newSQNFixture(t)
+	const readOnlyStreaming = int64(9)
+	f.putSealedSegmentOn(readOnlyStreaming)
+	f.checker.targetMgr = meta.NewMockTargetManager(t)
+	replica := meta.NewReplica(&querypb.Replica{
+		ID: sqnReplica, CollectionID: sqnCollection, ResourceGroup: sqnGroup,
+		RoSqNodes: []int64{readOnlyStreaming},
+	})
+
+	dist := f.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(sqnCollection))
+	require.Len(t, dist, 1)
+	assert.Empty(t, f.checker.createMisplacedSegmentMoveTasks(context.Background(), replica, dist))
+}
