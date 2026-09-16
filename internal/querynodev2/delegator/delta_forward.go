@@ -170,6 +170,7 @@ func (sd *shardDelegator) forwardL0RemoteLoad(ctx context.Context,
 		CollectionID:  info.GetCollectionID(),
 		LoadScope:     querypb.LoadScope_Delta,
 		Schema:        req.GetSchema(),
+		LoadMeta:      req.GetLoadMeta(),
 		IndexInfoList: req.GetIndexInfoList(),
 		Version:       req.GetVersion(),
 	})
