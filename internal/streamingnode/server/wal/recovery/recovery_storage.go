@@ -29,10 +29,9 @@ type RecoverySnapshot struct {
 	// It must be persisted before the consume checkpoint so that the ordering guarantee holds.
 	SalvageCheckpoint *utility.ReplicateCheckpoint
 
-	// SummarySnapshots contains the recovered in-memory summary snapshots. They are
-	// plain data: the idempotency interceptor is today's only consumer and turns
-	// them into its dedup window, but nothing here is specific to that use. Rebuilt
-	// from the pchannel summary store during recovery, never persisted to etcd.
+	// SummarySnapshots is reserved for the future async recovery integration.
+	// Legacy RecoveryStorage leaves it empty. The interceptor can consume these
+	// in-memory views once recovery restores them from the pchannel summary store.
 	SummarySnapshots map[string]*idempotencyview.Snapshot
 }
 

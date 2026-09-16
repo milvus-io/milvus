@@ -624,22 +624,17 @@ message PChannelSummaryManifest {
     // Every chunk recovery may read, one entry each. Generations are contiguous:
     // retention only ever releases from the oldest end, never from the middle.
     repeated PChannelSummaryChunkIndexEntry chunks = 1;
-    // Chunks released by retention and not yet deleted. An entry present means
-    // "not deleted yet"; absent means "done". This is both the work queue and the
-    // progress record, so gc needs no watermark of its own -- and no cross-check
-    // against `chunks` either: an entry is only ever moved here by the same
-    // manifest write that stopped recovery depending on it.
-    repeated PChannelSummaryChunkRef pending_gc = 2;
-    // vchannel -> the timetick of the DDL that made every earlier record of that
-    // vchannel meaningless (a drop, an in-place truncate, a dropped partition).
-    //
-    // A pending entry marks the summary dirty by itself, which is what schedules
-    // the manifest PUT; without that the checkpoint would advance past the DDL
-    // while the tombstone was still only in memory, and a restart would
-    // resurrect exactly the facts it was meant to bury.
-    //
-    // An entry is dropped once no retained chunk reaches below it.
-    map<string, uint64> invalidated_vchannels = 3;
+    // The last continuously covered chunk, even after retention removes it.
+    // Absent only when no chunk has been covered yet.
+    PChannelSummaryChunkRef last_chunk = 2;
+    PChannelSummaryPosition covered_position = 3;
+}
+
+// PChannelSummaryPosition describes the WAL prefix represented by summary data.
+// message_id is a safe physical replay position (LastConfirmedMessageID).
+message PChannelSummaryPosition {
+    uint64 time_tick = 1;
+    common.MessageID message_id = 2;
 }
 
 // PChannelSummaryChunkIndexEntry is one chunk entry of the manifest.
@@ -658,9 +653,10 @@ message PChannelSummaryChunkIndexEntry {
     // The chunk footer's per-vchannel index, copied verbatim. Read by a consumer
     // locating its own section; retention does not look at it.
     repeated VChannelSummaryChunkIndex vchannels = 6;
+    PChannelSummaryPosition covered_position = 7;
 }
 
-// PChannelSummaryChunkRef is all gc needs to build the object key.
+// PChannelSummaryChunkRef identifies an immutable chunk object.
 message PChannelSummaryChunkRef {
     uint64 generation = 1;
     int64 term        = 2;
@@ -677,6 +673,7 @@ message PChannelSummaryChunkFooter {
     uint64 start_timetick = 4;
     uint64 end_timetick   = 5;
     repeated VChannelSummaryChunkIndex chunks = 6;
+    PChannelSummaryPosition covered_position = 7;
 }
 
 // VChannelSummaryChunkIndex locates one vchannel's sections inside a chunk.
