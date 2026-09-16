@@ -281,11 +281,11 @@ func (p *ComponentParam) startVersionGates() {
 
 func (p *ComponentParam) GetComponentConfigurations(componentName string, sub string) map[string]string {
 	allownPrefixs := append(globalConfigPrefixs(), componentName+".")
-	return p.baseTable.mgr.GetBy(config.WithSubstr(sub), config.WithOneOfPrefixs(allownPrefixs...))
+	return p.baseTable.mgr.ProjectBy(config.WithSubstr(sub), config.WithOneOfPrefixs(allownPrefixs...))
 }
 
 func (p *ComponentParam) GetAll() map[string]string {
-	return p.baseTable.mgr.GetConfigs()
+	return p.baseTable.mgr.ProjectConfigs()
 }
 
 func (p *ComponentParam) GetConfigsView() map[string]string {
@@ -356,7 +356,10 @@ type commonConfig struct {
 	BeamWidthRatio                      ParamItem `refreshable:"true"`
 	GracefulTime                        ParamItem `refreshable:"true"`
 	GracefulStopTimeout                 ParamItem `refreshable:"true"`
-	ParquetStatsSkipIndex               ParamItem `refreshable:"true"`
+	// Not refreshable: this flag decides the row-group -> cell packing of
+	// loaded segments; flipping it at runtime would let a reloaded column's
+	// cell layout diverge from what in-flight queries cached. Requires restart.
+	ParquetStatsSkipIndex ParamItem `refreshable:"false"`
 
 	StorageType                   ParamItem `refreshable:"false"`
 	ManifestTransactionRetryLimit ParamItem `refreshable:"true"`
@@ -820,9 +823,12 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 	p.ParquetStatsSkipIndex = ParamItem{
 		Key:          "common.parquetStatsSkipIndex.enabled",
 		Version:      "2.6.0",
-		DefaultValue: "false",
-		Doc:          "whether to skip parquet stats index when reading; set true to enable skipping.",
-		Export:       true,
+		DefaultValue: "true",
+		Doc: "whether to force one row group per cache cell and build the sealed-segment chunk skip index from parquet footer statistics. " +
+			"When enabled, packing is 1:1 even without usable statistics; disabling allows target-size packing. " +
+			"Takes effect only at startup (not refreshable): the flag decides the segment cache cell layout, which must not change while queries are running. " +
+			"Storage v2 segments only; manifest-based (v3) segments do not build this index yet.",
+		Export: true,
 	}
 	p.ParquetStatsSkipIndex.Init(base.mgr)
 
@@ -905,9 +911,8 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 			`range reads (ReadRangeCache) on this pool, which issue the actual ` +
 			`S3 GetObject requests — it is the real ceiling on parallel ` +
 			`object-storage reads, independent of segcore HIGH/MIDDLE pools and ` +
-			`minio.maxConnections. Arrow's built-in default is a fixed constant ` +
-			`of 8, which is almost always undersized. Typical range 2–8. 0 keeps ` +
-			`arrow's default (and the cap is ignored).`,
+			`minio.maxConnections. 0 means a fixed pool of 8 threads (the cap ` +
+			`is ignored). Typical range: 2–8. Negative values are ignored.`,
 		Export: false,
 	}
 	p.ArrowIOThreadPoolCoefficient.Init(base.mgr)
@@ -1155,6 +1160,16 @@ Not settable through /management/config/alter. Watch milvus_admin_auth_total.`,
 like the old password verification when updating the credential`,
 		DefaultValue: "",
 		Export:       true,
+		// A list of user names, not a credential: knowing who the superusers are
+		// does not let anyone authenticate as one, so it stays readable through
+		// ShowConfigurations and /management/config/get as reviewed access
+		// metadata. Sensitivity does not change the management write contract;
+		// authentication and authorization are handled separately.
+		//
+		// The metadata records that decision for TestSensitiveParamItemsMarked; no
+		// runtime fallback pattern matches this key, so it changes nothing by
+		// itself.
+		Sensitivity: NonSensitive,
 	}
 	p.SuperUsers.Init(base.mgr)
 
@@ -1165,6 +1180,12 @@ like the old password verification when updating the credential`,
 Large numeric passwords require double quotes to avoid yaml parsing precision issues.`,
 		DefaultValue: "Milvus",
 		Export:       true,
+		// Sensitive but deliberately NOT Immutable: ProcessImmutableConfigs
+		// persists every Immutable key's current value into etcd on first
+		// startup, so marking a credential Immutable would copy it into etcd in
+		// cleartext -- the opposite of what redacting it from a configuration
+		// projection is for. See TestNoCredentialIsImmutable.
+		Sensitivity: Sensitive,
 	}
 	p.DefaultRootPassword.Init(base.mgr)
 
@@ -1960,18 +1981,20 @@ Fractions >= 1 will always sample. Fractions < 0 are treated as zero.`,
 	t.SampleFraction.Init(base.mgr)
 
 	t.JaegerURL = ParamItem{
-		Key:     "trace.jaeger.url",
-		Version: "2.3.0",
-		Doc:     "when exporter is jaeger should set the jaeger's URL",
-		Export:  true,
+		Key:         "trace.jaeger.url",
+		Version:     "2.3.0",
+		Doc:         "when exporter is jaeger should set the jaeger's URL",
+		Export:      true,
+		Sensitivity: Sensitive,
 	}
 	t.JaegerURL.Init(base.mgr)
 
 	t.OtlpEndpoint = ParamItem{
-		Key:     "trace.otlp.endpoint",
-		Version: "2.3.0",
-		Doc:     `example: "127.0.0.1:4317" for grpc, "127.0.0.1:4318" for http`,
-		Export:  true,
+		Key:         "trace.otlp.endpoint",
+		Version:     "2.3.0",
+		Doc:         `example: "127.0.0.1:4317" for grpc, "127.0.0.1:4318" for http`,
+		Export:      true,
+		Sensitivity: Sensitive,
 	}
 	t.OtlpEndpoint.Init(base.mgr)
 
@@ -1989,6 +2012,7 @@ Fractions >= 1 will always sample. Fractions < 0 are treated as zero.`,
 		Version:      "2.4.0",
 		DefaultValue: "true",
 		Export:       true,
+		Sensitivity:  Sensitive,
 	}
 	t.OtlpSecure.Init(base.mgr)
 
@@ -1998,6 +2022,7 @@ Fractions >= 1 will always sample. Fractions < 0 are treated as zero.`,
 		DefaultValue: "",
 		Doc:          "otlp header that encoded in base64",
 		Export:       true,
+		Sensitivity:  Sensitive,
 	}
 	t.OtlpHeaders.Init(base.mgr)
 
@@ -2144,7 +2169,8 @@ It is recommended to use debug level under test and development environments, an
 The default value is set empty, indicating to output log files to standard output (stdout) and standard error (stderr).
 If this parameter is set to a valid local path, Milvus writes and stores log files in this path.
 Set this parameter as the path that you have permission to write.`,
-		Export: true,
+		Export:      true,
+		Sensitivity: NonSensitive,
 	}
 	l.RootPath.Init(base.mgr)
 
@@ -2685,6 +2711,7 @@ For migration, enable streaming.splitChunkSN first, then disable proxy.splitChun
 		DefaultValue: "6",
 		Version:      "2.0.0",
 		PanicIfEmpty: true,
+		Sensitivity:  NonSensitive,
 	}
 	p.MinPasswordLength.Init(base.mgr)
 
@@ -2708,6 +2735,7 @@ For migration, enable streaming.splitChunkSN first, then disable proxy.splitChun
 		Key:          "proxy.maxPasswordLength",
 		DefaultValue: "72", // bcrypt max length
 		Version:      "2.0.0",
+		Sensitivity:  NonSensitive,
 		Formatter: func(v string) string {
 			n := getAsInt(v)
 			if n <= 0 || n > 72 {
@@ -6742,6 +6770,7 @@ mix is prioritized by level: mix compactions first, then L0 compactions, then cl
 		DefaultValue: "3",
 		Doc:          "The storage version compaction tokens per period, applying rate limit",
 		Export:       false,
+		Sensitivity:  NonSensitive,
 	}
 	p.StorageVersionCompactionRateLimitTokens.Init(base.mgr)
 
@@ -7231,7 +7260,8 @@ Startup processes fixed-size batches and retries failed reads per segment. An ex
 			"server-side cross-bucket copy with custom object storage endpoints. " +
 			"Canonical cloud endpoints derived from cloud_provider and region are " +
 			"allowed without this list.",
-		Export: true,
+		Export:      true,
+		Sensitivity: Sensitive,
 	}
 	p.SnapshotCrossBucketEndpointAllowlist.Init(base.mgr)
 
@@ -7357,6 +7387,7 @@ Startup processes fixed-size batches and retries failed reads per segment. An ex
 		Version:      "2.0.0",
 		DefaultValue: "localhost:22930",
 		Export:       true,
+		Sensitivity:  Sensitive,
 	}
 	p.IndexNodeAddress.Init(base.mgr)
 
@@ -7365,6 +7396,7 @@ Startup processes fixed-size batches and retries failed reads per segment. An ex
 		Version:      "2.0.0",
 		DefaultValue: "false",
 		Export:       true,
+		Sensitivity:  Sensitive,
 	}
 	p.WithCredential.Init(base.mgr)
 
@@ -8776,6 +8808,14 @@ type streamingConfig struct {
 	WALRecoveryGracefulCloseTimeout      ParamItem `refreshable:"true"`
 	WALRecoverySchemaExpirationTolerance ParamItem `refreshable:"true"`
 
+	// idempotent write configuration.
+	IdempotencyEnabled            ParamItem `refreshable:"false"`
+	IdempotencyMaxBytesPerWindow  ParamItem `refreshable:"false"`
+	IdempotencyChunkMaxBytes      ParamItem `refreshable:"false"`
+	IdempotencyMaxStagingInterval ParamItem `refreshable:"false"`
+	IdempotencyMaxRetainedBytes   ParamItem `refreshable:"false"`
+	IdempotencyMaxRetainedChunks  ParamItem `refreshable:"false"`
+
 	// wal rate limit
 	WALRateLimitDefaultBurst                     ParamItem `refreshable:"true"`
 	WALRateLimitNodeMemorySlowdownThreshold      ParamItem `refreshable:"true"`
@@ -9063,8 +9103,8 @@ too few tombstones may lead to ABA issues in the state of milvus cluster.`,
 		Doc: `The max length in bytes of a client-supplied idempotency key, 256 by default.
 The key is stored in the message properties of every write it guards, so an
 oversized key inflates both the WAL entry and the in-memory dedup index.
-A value of 0 rejects every non-empty key, disabling idempotency keys entirely;
-requests that carry no key are accepted at any value.`,
+Zero disables the bound, as it does for the other streaming.idempotency.*
+limits; requests that carry no key are accepted at any value.`,
 		DefaultValue: "256",
 		Export:       false,
 	}
@@ -9232,6 +9272,46 @@ If the schema is older than (the channel checkpoint - tolerance), it will be rem
 		Export:       false,
 	}
 	p.WALRecoverySchemaExpirationTolerance.Init(base.mgr)
+
+	p.IdempotencyEnabled = ParamItem{
+		Key:          "streaming.idempotency.enabled",
+		Version:      "3.0.0",
+		Doc:          `Whether request-level idempotent write is enabled globally. Collection-level idempotent write still needs to be enabled by collection property.`,
+		DefaultValue: "false",
+		FallbackKeys: []string{"idempotency.enabled"},
+		Export:       false,
+	}
+	p.IdempotencyEnabled.Init(base.mgr)
+
+	p.IdempotencyMaxBytesPerWindow = ParamItem{
+		Key:          "streaming.idempotency.maxBytesPerWindow",
+		Version:      "3.0.0",
+		Doc:          `The maximum total serialized bytes of retained idempotency entries per vchannel window (each entry carries the per-row primary keys of its insert). Nothing is evicted until this is reached; then the oldest entries by commit order are replaced. There is deliberately no TTL: any horizon expressed in time is invalidated by time passing, which would leave the window empty after an outage -- exactly when a resuming client needs it.`,
+		DefaultValue: "16777216",
+		FallbackKeys: []string{"idempotency.maxBytesPerWindow"},
+		Export:       false,
+	}
+	p.IdempotencyMaxBytesPerWindow.Init(base.mgr)
+
+	p.IdempotencyMaxRetainedBytes = ParamItem{
+		Key:          "streaming.idempotency.maxRetainedBytes",
+		Version:      "3.0.0",
+		Doc:          `The soft budget of the retained WAL summary chunk objects per pchannel. Once the retained set is over the budget, the oldest chunks are released whole. It bounds storage, not a duration: how far back a duplicate is still recognized after a restart follows from how fast the pchannel is written, not from elapsed time. Zero disables the release entirely.`,
+		DefaultValue: "268435456",
+		FallbackKeys: []string{"idempotency.maxRetainedBytes"},
+		Export:       false,
+	}
+	p.IdempotencyMaxRetainedBytes.Init(base.mgr)
+
+	p.IdempotencyMaxRetainedChunks = ParamItem{
+		Key:          "streaming.idempotency.maxRetainedChunks",
+		Version:      "3.0.0",
+		Doc:          `Hard cap on how many WAL summary chunk objects stay retained per pchannel. It bounds what maxRetainedBytes cannot: recovery pays one object read per chunk and every publish rewrites the whole manifest, so both scale with the chunk COUNT rather than with total size. Without it a workload writing little per checkpoint persist would retain an unbounded number of tiny chunks while the byte budget stayed far from its bound. When this cap binds, the deduplication window is smaller than maxRetainedBytes asks for. Zero disables it.`,
+		DefaultValue: "256",
+		FallbackKeys: []string{"idempotency.maxRetainedChunks"},
+		Export:       false,
+	}
+	p.IdempotencyMaxRetainedChunks.Init(base.mgr)
 
 	p.OldVersionLastConfirmedWindowSize = ParamItem{
 		Key:     "streaming.walScanner.oldVersionLastConfirmedWindowSize",

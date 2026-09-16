@@ -22,6 +22,7 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <unordered_map>
 #include <vector>
 #include <cmath>
@@ -183,6 +184,25 @@ class ChunkedColumnGroup {
         return meta->num_fields_;
     }
 
+    const index::FieldChunkMetrics*
+    GetSkipMetrics(FieldId field_id, int64_t chunk_id) const {
+        if (chunk_id < 0 || static_cast<size_t>(chunk_id) >= num_chunks_) {
+            return nullptr;
+        }
+        auto meta =
+            static_cast<milvus::segcore::storagev2translator::GroupCTMeta*>(
+                slot_->meta());
+        return meta->FindSkipMetric(field_id.get(), chunk_id);
+    }
+
+    const SkipMetricsList*
+    GetSkipMetricsList(FieldId field_id) const {
+        auto meta =
+            static_cast<milvus::segcore::storagev2translator::GroupCTMeta*>(
+                slot_->meta());
+        return meta->FindSkipMetricsList(field_id.get());
+    }
+
     size_t
     memory_size() const {
         auto meta =
@@ -221,6 +241,19 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
 
     ~ProxyChunkColumn() override {
         CancelWarmup();
+    }
+
+    const index::FieldChunkMetrics*
+    GetSkipMetrics(int64_t chunk_id) const override {
+        return group_->GetSkipMetrics(field_id_, chunk_id);
+    }
+
+    std::optional<const SkipMetricsList*>
+    GetSkipMetricsList() const override {
+        // Lists are always supported here; a field the group holds no metrics
+        // for yields a null list, which the view treats as "never prune"
+        // without falling back to per-cell calls.
+        return group_->GetSkipMetricsList(field_id_);
     }
 
     bool

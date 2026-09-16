@@ -1403,6 +1403,63 @@ TYPED_TEST(ChunkedColumnInterfaceTest,
 }
 
 TYPED_TEST(ChunkedColumnInterfaceTest,
+           NullableSkipMayOmitValidityOnlyForNullRejectingConsumer) {
+    for (const bool needs_validity : {false, true}) {
+        for (const bool prefetch : {false, true}) {
+            ColumnSpec spec{{2, 2}, {{false, true}, {true, true}}, true};
+            spec.data_type = DataType::INT32;
+            auto fx = TypeParam::Create(spec);
+            auto filter = std::make_shared<const detail::ColumnFilter>(
+                detail::ColumnFilter::MetricsSource::PreloadedStatistics,
+                [](int64_t) { return true; },
+                needs_validity);
+            auto options = ChunkedColumnInterface::ScanOptions::ForData(
+                0,
+                ChunkedColumnInterface::TargetType::Int32,
+                ChunkedColumnInterface::ScanPinPolicy::CursorOwned,
+                prefetch);
+            options.filter = filter;
+            auto cursor = fx.column->Scan(nullptr, options);
+            ASSERT_NE(cursor, nullptr);
+            ChunkedColumnInterface::ScanBatch batch;
+            ASSERT_TRUE(cursor->Next(
+                4,
+                ChunkedColumnInterface::ScanReadMode::DataAndValidity,
+                &batch));
+            EXPECT_TRUE(batch.data_skipped);
+            EXPECT_TRUE(batch.values.empty());
+            if (needs_validity) {
+                ASSERT_TRUE(batch.validity);
+                EXPECT_FALSE(batch.validity[0]);
+                EXPECT_TRUE(batch.validity[1]);
+                EXPECT_FALSE(fx.pin_requests->empty());
+            } else {
+                EXPECT_FALSE(batch.validity);
+                EXPECT_TRUE(fx.pin_requests->empty());
+            }
+
+            const int32_t offsets[] = {0, 1, 0};
+            auto take = fx.column->Take(
+                nullptr,
+                ChunkedColumnInterface::TakeOptions{
+                    ChunkedColumnInterface::OffsetView::From(offsets, 3),
+                    ChunkedColumnInterface::TargetType::Int32,
+                    filter});
+            ASSERT_NE(take, nullptr);
+            for (int64_t i = 0; i < 3; ++i) {
+                const auto item = take->template Get<int32_t>(i);
+                EXPECT_TRUE(item.data_skipped);
+                EXPECT_FALSE(item.value.has_value());
+                EXPECT_EQ(item.is_valid, !needs_validity || offsets[i] == 1);
+            }
+            if (!needs_validity) {
+                EXPECT_TRUE(fx.pin_requests->empty());
+            }
+        }
+    }
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
            TakeSkippedNullableRowsStillReadRealValidity) {
     ColumnSpec spec{{2, 2}, {{false, true}, {true, true}}, /*nullable=*/true};
     spec.data_type = DataType::INT32;

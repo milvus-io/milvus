@@ -2523,6 +2523,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		idAllocator:     node.rowIDAllocator,
 		chMgr:           node.chMgr,
 		schemaTimestamp: request.SchemaTimestamp,
+		idempotencyKey:  GetIdempotencyKeyFromContext(ctx),
 	}
 
 	constructFailedResponse := func(err error) *milvuspb.MutationResult {
@@ -6602,12 +6603,12 @@ func DeregisterSubLabel(subLabel string) {
 func (node *Proxy) RegisterRestRouter(router gin.IRouter) {
 	// Cluster request that executed by proxy
 	router.GET(http.ClusterInfoPath, getClusterInfo(node))
-	router.GET(http.ClusterConfigsPath, getConfigs(paramtable.Get().GetConfigsView()))
+	router.GET(http.ClusterConfigsPath, getProjectedConfigs(paramtable.Get().GetConfigsView))
 	router.GET(http.ClusterClientsPath, getConnectedClients)
 	router.GET(http.ClusterDependenciesPath, getDependencies)
 
 	// Hook request that executed by proxy
-	router.GET(http.HookConfigsPath, getConfigs(paramtable.GetHookParams().GetAll()))
+	router.GET(http.HookConfigsPath, getProjectedConfigs(paramtable.GetHookParams().GetAll))
 
 	// Slow query request that executed by proxy
 	router.GET(http.SlowQueryPath, getSlowQuery(node))

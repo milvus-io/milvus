@@ -18,15 +18,30 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <map>
+#include <memory>
 #include <string>
 #include <type_traits>
 #include <utility>
 #include <vector>
 
 #include "cachinglayer/Translator.h"
+#include "index/FieldChunkMetricsProvider.h"
+#include "log/Log.h"
 #include "segcore/CacheMetricAttribution.h"
 
+namespace milvus::index {
+class FieldChunkMetrics;
+}  // namespace milvus::index
+
 namespace milvus::segcore::storagev2translator {
+
+// Positional, deep-owning per-cell skip metrics. For Storage V2, the loader
+// keeps row groups and cells 1:1 whenever this map is non-empty, so index i is
+// both row group i and cache cell i. A missing/unsupported statistic is
+// represented by NoneFieldChunkMetrics and therefore always fails open.
+using SkipMetricsList = milvus::SkipMetricsList;
+using SkipMetricsByField = std::map<int64_t, SkipMetricsList>;
 
 // Target average byte size per storage-v2 cache cell. Parquet row groups
 // are packed into cells so that `rgs_per_cell * avg_row_group_size ≈ target`.
@@ -115,6 +130,71 @@ struct GroupCTMeta : public milvus::cachinglayer::Meta {
     get_row_group_range(size_t cid) const {
         return cell_row_group_ranges_[cid];
     }
+
+    // The only way to attach footer-derived skip metrics, so that every
+    // producer inherits the positional rule instead of restating it.
+    //
+    // Publication is positional: entry i of a field's list must describe cache
+    // cell i. A list whose length does not match the group's cell count is
+    // dropped for that field rather than partially applied -- a partial vector
+    // would associate bounds with the wrong cell and prune away a matching row.
+    // Storage V2's GroupChunkTranslator is the only producer today; a Storage
+    // V3 / Vortex footer adapter plugs in here and gets the same guarantee.
+    void
+    InstallSkipMetrics(SkipMetricsByField metrics,
+                       size_t num_cells,
+                       const std::string& debug_key) {
+        for (auto it = metrics.begin(); it != metrics.end();) {
+            if (it->second.size() != num_cells) {
+                LOG_WARN(
+                    "skip metrics/cell count mismatch for translator {}, field "
+                    "{}: {} metrics vs {} cells; disabling footer pruning for "
+                    "this field",
+                    debug_key,
+                    it->first,
+                    it->second.size(),
+                    num_cells);
+                it = metrics.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        skip_metrics_by_field_ = std::move(metrics);
+    }
+
+    // One field's whole aligned list, or nullptr when it kept none. This is
+    // the single map lookup a resolved FieldSkipMetricsView performs; every
+    // cell-level check afterwards is a plain index into the returned vector.
+    const SkipMetricsList*
+    FindSkipMetricsList(int64_t field_id) const {
+        auto it = skip_metrics_by_field_.find(field_id);
+        return it == skip_metrics_by_field_.end() ? nullptr : &it->second;
+    }
+
+    // Positional lookup for one field's cell. Returns nullptr when the field
+    // has no usable metrics, which every caller must treat as fail-open.
+    const index::FieldChunkMetrics*
+    FindSkipMetric(int64_t field_id, int64_t chunk_id) const {
+        const auto* list = FindSkipMetricsList(field_id);
+        if (list == nullptr || chunk_id < 0 ||
+            static_cast<size_t>(chunk_id) >= list->size()) {
+            return nullptr;
+        }
+        return (*list)[chunk_id].get();
+    }
+
+    // Whether the field kept a full, aligned metric list after installation.
+    bool
+    HasSkipMetrics(int64_t field_id) const {
+        return skip_metrics_by_field_.count(field_id) > 0;
+    }
+
+ private:
+    // Footer-derived metrics belong to the same immutable column-group
+    // generation as the row-group/cell mapping they describe. Keeping them
+    // here avoids a second segment-level field->metrics lifecycle. Private so
+    // the alignment rule in InstallSkipMetrics cannot be bypassed.
+    SkipMetricsByField skip_metrics_by_field_;
 };
 
 }  // namespace milvus::segcore::storagev2translator

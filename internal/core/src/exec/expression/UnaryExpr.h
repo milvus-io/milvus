@@ -19,6 +19,7 @@
 #include <fmt/core.h>
 #include <folly/Unit.h>
 
+#include <memory>
 #include <optional>
 #include <utility>
 
@@ -747,6 +748,8 @@ struct UnaryIndexFunc {
     }
 };
 
+// LIKE and regex are handled by ShreddingExecutor, which retains their
+// compiled matchers across batches.
 template <typename T, typename U>
 void
 BatchUnaryCompare(const T* src,
@@ -836,26 +839,6 @@ BatchUnaryCompare(const T* src,
             }
             break;
         }
-        case proto::plan::Match: {
-            if constexpr (std::is_same_v<U, std::string> ||
-                          std::is_same_v<U, std::string_view>) {
-                LikePatternMatcher matcher(val);
-                for (int i = 0; i < size; ++i) {
-                    res[i] = matcher(src[i]);
-                }
-                break;
-            }
-        }
-        case proto::plan::RegexMatch: {
-            if constexpr (std::is_same_v<U, std::string> ||
-                          std::is_same_v<U, std::string_view>) {
-                PartialRegexMatcher matcher(val);
-                for (int i = 0; i < size; ++i) {
-                    res[i] = matcher(src[i]);
-                }
-                break;
-            }
-        }
         default: {
             ThrowInfo(
                 UnexpectedError,
@@ -898,12 +881,38 @@ class ShreddingExecutor {
  private:
     void
     ExecuteOperation(const GetType* src, size_t size, TargetBitmapView res) {
+        if constexpr (std::is_same_v<InnerType, std::string>) {
+            // Compile on the first evaluated batch, then reuse for this
+            // executor's remaining windows. Empty/skipped scans do not
+            // construct a matcher, just as in the chunk-based path.
+            if (op_type_ == proto::plan::Match) {
+                if (!like_matcher_) {
+                    like_matcher_ = std::make_unique<LikePatternMatcher>(val_);
+                }
+                for (size_t i = 0; i < size; ++i) {
+                    res[i] = (*like_matcher_)(src[i]);
+                }
+                return;
+            }
+            if (op_type_ == proto::plan::RegexMatch) {
+                if (!regex_matcher_) {
+                    regex_matcher_ =
+                        std::make_unique<PartialRegexMatcher>(val_);
+                }
+                for (size_t i = 0; i < size; ++i) {
+                    res[i] = (*regex_matcher_)(src[i]);
+                }
+                return;
+            }
+        }
         BatchUnaryCompare<GetType, InnerType>(src, size, val_, op_type_, res);
     }
 
     proto::plan::OpType op_type_;
     InnerType val_;
     std::string pointer_;
+    std::unique_ptr<LikePatternMatcher> like_matcher_;
+    std::unique_ptr<PartialRegexMatcher> regex_matcher_;
 };
 
 // Executor for shredding ARRAY type stored as BSON binary in variable-length
