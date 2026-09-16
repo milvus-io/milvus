@@ -11,7 +11,8 @@ indexed by `PChannelRecoveryManager`.
 RecoveryStorage constructs and dispatches through these modules during bounded
 recovery and live observation. It separately owns [WALSummary](summary.md),
 restores transform windows, and caps checkpoint publication at `LastAcked`.
-QueryRuntime wiring and idempotency-window restoration remain follow-up work.
+RecoveryStorage also restores idempotency windows from retained Summary history
+and startup replay before accepting writes. QueryRuntime wiring remains follow-up work.
 
 ## 1. Ownership
 

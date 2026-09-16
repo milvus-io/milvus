@@ -27,7 +27,8 @@ type RecoverySnapshot struct {
 	Checkpoint      *WALCheckpoint
 	PChannelControl *streamingpb.PChannelRecoveryControlMeta
 	TxnBuffer       *utility.TxnBuffer // independent startup snapshot; never the live scanner buffer
-	// SummarySnapshots is reserved for idempotency recovery integration.
+	// SummarySnapshots restores the interceptor windows from retained summary
+	// history and startup replay before the WAL accepts writes.
 	SummarySnapshots map[string]*idempotencyview.Snapshot
 }
 
