@@ -833,6 +833,26 @@ func (ob *CollectionObserver) observeResourceGroupTimeout(ctx context.Context, k
 		return
 	}
 
+	// A group the shield has already found serving is never torn down by a
+	// later timeout. Readiness is a snapshot: a delegator catching up, or a
+	// worker query node restarting, makes one reading answer no, and releasing
+	// the replicas of a group that has been serving over that one instant is
+	// exactly what the shield exists to prevent. The longer such a task lives
+	// - and it may live as long as the ingest does - the likelier that instant
+	// becomes. The task goes instead, and the group keeps its replicas; the
+	// checkers go on repairing whatever is behind at their own cadence, as
+	// they do for any Loaded collection on master.
+	if !task.ReadySince.IsZero() {
+		mlog.Info(ctx, "load timeout for a resource group that has been serving, dropping its task and keeping its replicas",
+			mlog.FieldCollectionID(task.CollectionID),
+			mlog.String("resourceGroup", task.ResourceGroup),
+			mlog.String("traceID", key),
+			mlog.Int32("loadPercentage", percentage),
+			mlog.Time("readySince", task.ReadySince))
+		ob.loadTasks.Remove(key)
+		return
+	}
+
 	mlog.Info(ctx, "load timeout for resource group, cancel it",
 		mlog.FieldCollectionID(task.CollectionID),
 		mlog.String("resourceGroup", task.ResourceGroup),
