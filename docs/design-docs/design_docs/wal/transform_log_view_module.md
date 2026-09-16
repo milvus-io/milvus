@@ -10,8 +10,9 @@ RecoveryStorage module.
 
 The design is split across:
 
-- [TransformLog Design](transformlog/transform_log.md): storage layout,
-  durability, subscription, materialization, truncation, and recovery;
+- [TransformLog Design](transform_log.md): copied consumer window, L1 safety
+  bound, L0 materialization, and recovery;
+- [WALSummary](summary.md): chunk layout, durability, confirmation, and retention;
 - [WAL Message Ack Design](message_ack.md): retained-message completion and
   global checkpoint gating;
 - [Recovery Tail Controller](recovery-tail-controller.md): VChannel-scoped

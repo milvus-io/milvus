@@ -21,6 +21,7 @@ import (
 	"math"
 	"sort"
 	"sync"
+	"time"
 
 	"google.golang.org/protobuf/proto"
 
@@ -49,8 +50,8 @@ const DroppedVChannelTimeTick = math.MaxUint64
 //     per-vchannel records, indexed by the manifest.
 //
 // Records are copied without retaining WAL handles. LastAcked exposes the
-// continuous durable prefix that a future RecoveryStorage integration must
-// combine with its own completed point before publishing a checkpoint.
+// continuous durable prefix that RecoveryStorage combines with its own
+// completed point before publishing a checkpoint.
 // mu guards in-memory state; publishMu serializes manifest writes.
 type Manager struct {
 	mu sync.Mutex
@@ -61,6 +62,7 @@ type Manager struct {
 	cfg                   ManagerConfig
 	pending               []stagedRecord
 	pendingBytes          uint64
+	pendingSince          time.Time
 	pendingSealed         []*SealedChunk
 	pendingFlushTimeTick  uint64
 	nextGeneration        uint64
@@ -116,7 +118,6 @@ func NewManager(config ManagerConfig) *Manager {
 // ObserveMessage copies one ordered WAL message into the summary without
 // retaining its source handle. Size thresholds schedule asynchronous writes.
 // DDL messages preserve the history of previously committed requests.
-// RecoveryStorage wiring is intentionally left to the next integration PR.
 func (m *Manager) ObserveMessage(ctx context.Context, msg message.ImmutableMessage) {
 	if msg == nil || funcutil.IsControlChannel(msg.VChannel()) {
 		return
@@ -158,6 +159,9 @@ func (m *Manager) stageRecordLocked(
 		timeTick:    msg.TimeTick(),
 		idempotency: idempotency,
 		insert:      insert,
+	}
+	if len(m.pending) == 0 {
+		m.pendingSince = time.Now()
 	}
 	m.pending = append(m.pending, record)
 	m.pendingBytes += stagedRecordSize(msg, &record)
@@ -358,6 +362,7 @@ func (m *Manager) seal() *SealedChunk {
 	}
 	m.pending = nil
 	m.pendingBytes = 0
+	m.pendingSince = time.Time{}
 	m.pendingSealed = append(m.pendingSealed, sc)
 	m.pendingFlushTimeTick = sc.MaxTimeTick
 	return sc

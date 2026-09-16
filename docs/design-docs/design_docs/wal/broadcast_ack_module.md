@@ -30,8 +30,10 @@ BroadcastAck registers one exclusive callback. The callback fires when all
 local Retained consumers have released and BroadcastAck is the only remaining
 Owner holder.
 
-The callback only marks the task ready and nonblockingly wakes the dispatcher.
-It performs no Coordinator IO and does not release the Owner.
+For successful consumers the callback marks the task ready and nonblockingly
+wakes the dispatcher; it performs no Coordinator I/O. If any consumer poisoned
+the message, the callback releases the Owner to free payload memory and records
+a poisoned task. That task cannot Ack and retains its ResourceKey ordering claim.
 
 ## 3. ResourceKey Ordering
 
@@ -40,6 +42,7 @@ side is exclusive. A task is schedulable when:
 
 ```text
 exclusive callback fired
+AND message is not poisoned
 AND task is not in flight
 AND no earlier unfinished task conflicts
 ```
@@ -59,9 +62,10 @@ replay and repeat it.
 ## 5. Recovery Tail Interaction
 
 A stalled BroadcastAck holds the global continuous prefix but cannot be fixed
-by Segment or TransformLog persistence. Tracker reports it as an Ack blocker;
-the tail controller records the category and relies on Ack retry rather than
-issuing `RequestPersistThrough`.
+by Segment persistence. Coordinator failures use the Ack retry path; poisoned
+local work remains incomplete and keeps the WAL available for replay. Explicit
+Tracker blocker categories are not implemented yet, so a VChannel persist
+request may still be issued for such an entry without resolving it.
 
 ## 6. Close
 
@@ -71,7 +75,7 @@ The message is replayed from the last published global checkpoint.
 ## 7. Invariants
 
 1. `Accept` consumes the Owner exactly once.
-2. A broadcast Owner remains live until Coordinator Ack succeeds.
+2. A successful broadcast releases its Owner after Coordinator Ack; poisoned release never acknowledges success.
 3. The readiness callback is one-shot and nonblocking.
 4. Earlier conflicting tasks retain their ResourceKey claims through retry.
 5. BroadcastAck has no component `checkpoint_time_tick`.

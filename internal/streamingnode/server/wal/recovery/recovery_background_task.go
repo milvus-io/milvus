@@ -15,12 +15,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// TODO: !!! all recovery persist operation should be a compare-and-swap operation to
-// promise there's only one consumer of wal.
-// But currently, we don't implement the CAS operation of meta interface.
-// Should be fixed in future.
-// The compound SaveRecoverySnapshot already gathers the whole snapshot into
-// one catalog call, paving the way for a future single-point CAS commit.
+// SaveRecoverySnapshot fences checkpoint publication with a term and value CAS.
+// TODO: Fence component writes as well, including batches written before the
+// final checkpoint CAS when the snapshot exceeds the catalog transaction limit.
 func (rs *recoveryStorageImpl) backgroundTask() {
 	ticker := time.NewTicker(rs.cfg.persistInterval)
 	defer func() {

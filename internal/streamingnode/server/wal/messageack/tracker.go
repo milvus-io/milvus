@@ -72,8 +72,8 @@ func (t *Tracker) Track(raw message.ImmutableMessage) message.OwnedImmutableMess
 		message:   raw,
 		trackedAt: time.Now(),
 	}
-	owner := message.NewOwnedImmutableMessage(raw, func() {
-		t.complete(entry)
+	owner := message.NewOwnedImmutableMessageWithFinalizer(raw, func(poisoned bool) {
+		t.complete(entry, poisoned)
 	})
 
 	t.mu.Lock()
@@ -202,13 +202,21 @@ func (t *Tracker) Pending() int {
 	return len(t.pending)
 }
 
-func (t *Tracker) complete(entry *trackedEntry) {
+func (t *Tracker) complete(entry *trackedEntry, poisoned bool) {
 	t.mu.Lock()
 	if entry.completed {
 		t.mu.Unlock()
 		return
 	}
 	entry.message = nil
+	if poisoned {
+		// Poisoned messages are not durable: retain the incomplete entry so
+		// checkpoint publication and WAL truncation cannot pass this message.
+		// TODO: Durably dump the entire poisoned message before completing it,
+		// preserving all data while allowing the normal stream to make progress.
+		t.mu.Unlock()
+		return
+	}
 	onAdvance, point, advanced := t.completeLocked(entry)
 	if entry.vchannel != "" {
 		if state := t.vchannels[entry.vchannel]; state != nil {
