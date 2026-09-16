@@ -28,8 +28,9 @@ are split by responsibility:
 The L0Materializer/shared-reader split is implemented without a copied payload
 window. Integration status is tracked in
 [Summary §7](summary.md#7-implementation-and-integration-status).
-The revised capacity/API/Summary-backlog materialization policy is pending:
-L0 has no age timer, and explicit API output waits for related L1 flush completion.
+Capacity/API/Summary-backlog admission and recoverable explicit completion
+intent are implemented. L0 has no age timer, and explicit API output waits for
+related L1 flush completion.
 TransformLog subscription integration is deferred.
 
 ## 1. Goals

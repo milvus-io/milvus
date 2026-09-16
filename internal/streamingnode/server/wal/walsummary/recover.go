@@ -100,6 +100,11 @@ func (m *Manager) Restore(ctx context.Context) error {
 	for _, chunk := range manifest.GetChunks() {
 		for _, index := range chunk.GetVchannels() {
 			m.durableFrontiers[index.GetVchannel()] = max(m.durableFrontiers[index.GetVchannel()], index.GetEndTimetick())
+			var rows, bytes uint64
+			for _, stat := range index.GetTransformStats() {
+				m.appendTransformStatLocked(index.GetVchannel(), stat.GetTimeTick(), stat.GetRows()-rows, stat.GetBytes()-bytes)
+				rows, bytes = stat.GetRows(), stat.GetBytes()
+			}
 		}
 	}
 	m.mu.Unlock()
@@ -140,6 +145,11 @@ func validateManifest(manifest *streamingpb.PChannelSummaryManifest) error {
 			(position.GetTimeTick() < chunk.GetEndTimetick() || position.GetTimeTick() > manifest.GetCoveredPosition().GetTimeTick()) {
 			return storeCorruptedf("summary chunk coverage is outside its manifest boundary")
 		}
+		for _, index := range chunk.GetVchannels() {
+			if err := validateTransformStats(index); err != nil {
+				return err
+			}
+		}
 		previous = chunk
 	}
 	if previous.GetGeneration() != manifest.LastChunk.GetGeneration() || previous.GetTerm() != manifest.LastChunk.GetTerm() {
@@ -162,12 +172,11 @@ func (m *Manager) RestoreTransformGCTimeTicks(vchannels map[string]*streamingpb.
 	defer m.mu.Unlock()
 	for vchannel, meta := range vchannels {
 		frontier := meta.GetTransformMaterializedTimeTick()
-		switch meta.GetState() {
-		case streamingpb.VChannelState_VCHANNEL_STATE_DROPPED, streamingpb.VChannelState_VCHANNEL_STATE_TOMBSTONED:
-			frontier = DroppedVChannelTimeTick
-		}
+		// Dropped/tombstoned metadata can precede L0 completion. Only its
+		// persisted M releases records; final catalog cleanup reports infinity.
 		if frontier > m.gcFrontiers[vchannel] {
 			m.gcFrontiers[vchannel] = frontier
+			m.materializedFrontiers[vchannel] = max(m.materializedFrontiers[vchannel], frontier)
 		}
 	}
 }

@@ -290,6 +290,9 @@ func (r *recoveryStorageImpl) newSummaryManager(runtime moduleapi.Runtime) *wals
 		FlushMaxBytes:     uint64(paramtable.Get().StreamingCfg.FlushL0MaxSize.GetAsSize()),
 		RetentionMaxBytes: uint64(paramtable.Get().StreamingCfg.SummaryMaxBytesPerPChannel.GetAsSize()),
 		Logger:            r.Logger(),
+		RequestMaterialization: func(vc string, through uint64) {
+			r.vchannelManager.RequestMaterializationThrough(vc, through)
+		},
 	})
 }
 

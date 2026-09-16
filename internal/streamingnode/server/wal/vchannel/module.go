@@ -42,6 +42,7 @@ type ModuleConfig struct {
 	L0MaterializeRows  uint64
 	L0MaterializeBytes uint64
 	OnCleanup          func(*VChannelRecoveryModule)
+	OnL0Materialized   func(uint64)
 }
 
 // VChannelRecoveryModule owns all recovery_storage state for one vchannel.
@@ -81,8 +82,9 @@ type VChannelRecoveryModule struct {
 	segmentLifecycle  segment.Lifecycle
 	segmentPackWriter segment.PackWriter
 
-	removed   bool
-	onCleanup func(*VChannelRecoveryModule)
+	removed          bool
+	onCleanup        func(*VChannelRecoveryModule)
+	onL0Materialized func(uint64)
 }
 
 // NewModule creates a single-vchannel recovery module.
@@ -110,6 +112,7 @@ func newModule(config ModuleConfig, adoptVChannelMeta bool) (*VChannelRecoveryMo
 		segmentLifecycle:          config.SegmentLifecycle,
 		segmentPackWriter:         config.SegmentPackWriter,
 		onCleanup:                 config.OnCleanup,
+		onL0Materialized:          config.OnL0Materialized,
 		materializeUpperBound:     math.MaxUint64,
 		materializeBoundChangedAt: time.Now(),
 	}
@@ -143,6 +146,7 @@ func newModule(config ModuleConfig, adoptVChannelMeta bool) (*VChannelRecoveryMo
 		// position. A crash before publishing M may repeat physical L0 output;
 		// the outstanding Summary window is read lazily after ordered replay.
 		MaterializedTimeTick: config.VChannelMeta.GetTransformMaterializedTimeTick(),
+		FlushThrough:         config.VChannelMeta.GetL0FlushTimeTick(),
 		Reader:               config.SummaryReader,
 		MaterializeMaxRows:   config.L0MaterializeRows,
 		MaterializeMaxBytes:  config.L0MaterializeBytes,
@@ -213,6 +217,17 @@ func (m *VChannelRecoveryModule) ObserveMessage(
 		m.handleFlushAllMessage(ctx, retained)
 	case message.MessageTypeAlterWAL:
 		m.handleAlterWALMessage(ctx, retained)
+	}
+	// Completion requests are separate from generic Barrier classification.
+	// Their L1 flushes were initiated above. Persist intent before dispatch ends.
+	switch msg.MessageType() {
+	case message.MessageTypeManualFlush, message.MessageTypeFlushAll,
+		message.MessageTypeDropCollection, message.MessageTypeDropPartition,
+		message.MessageTypeTruncateCollection, message.MessageTypeAlterWAL:
+		if m.vchannelView != nil {
+			m.vchannelView.RequestL0Flush(msg.TimeTick())
+			m.l0Materializer.RequestFlushThrough(msg.TimeTick())
+		}
 	}
 	// Summary coverage and Segment state are installed before advancing W.
 	m.l0Materializer.ObserveMessage(retained.Message())
@@ -292,6 +307,16 @@ func (m *VChannelRecoveryModule) IsActive() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.vchannelView != nil && m.vchannelView.IsActive()
+}
+
+// RequestMaterializationThrough accepts a Summary backlog request without
+// inventing observed coverage or bypassing L1 safety.
+func (m *VChannelRecoveryModule) RequestMaterializationThrough(through uint64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !m.removed {
+		m.l0Materializer.RequestBacklogThrough(through)
+	}
 }
 
 // RequestPersistThrough schedules persistence for buffered data observed by
@@ -612,6 +637,9 @@ func (m *VChannelRecoveryModule) markL0Materialized(timeTick uint64) {
 		m.vchannelView.SetTransformMaterializedTimeTick(timeTick)
 	}
 	m.mu.Unlock()
+	if m.onL0Materialized != nil {
+		m.onL0Materialized(timeTick)
+	}
 	if m.runtime.Notifier != nil {
 		m.runtime.Notifier.NotifyModuleUpdated(moduleapi.ModuleNameVChannel)
 	}
