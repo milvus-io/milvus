@@ -181,10 +181,7 @@ func TestStoreManifestRoundTrip(t *testing.T) {
 			Term:       1,
 			ObjectSize: 123,
 		}},
-		PendingGc: []*streamingpb.PChannelSummaryChunkRef{{
-			Generation: 0,
-			Term:       1,
-		}},
+		LastChunk: &streamingpb.PChannelSummaryChunkRef{Generation: 0, Term: 1},
 	}
 	assert.NoError(t, store.WriteManifest(ctx, manifest))
 
@@ -193,7 +190,7 @@ func TestStoreManifestRoundTrip(t *testing.T) {
 	assert.True(t, found)
 	assert.Len(t, loaded.GetChunks(), 1)
 	assert.Equal(t, uint64(0), loaded.GetChunks()[0].GetGeneration())
-	assert.Len(t, loaded.GetPendingGc(), 1)
+	assert.True(t, proto.Equal(manifest.LastChunk, loaded.LastChunk))
 }
 
 func TestStoreManifestCorrupted(t *testing.T) {
@@ -226,10 +223,13 @@ func TestStoreProbeChunkForward(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Len(t, entries, 1)
 	assert.Equal(t, uint64(2), entries[0].GetGeneration())
-	// probe from 0 finds both, in order.
+	// A gap at 0 prevents adopting the later generations.
 	entries, err = store.ProbeChunkForward(ctx, 0)
-	assert.NoError(t, err)
-	assert.Len(t, entries, 2)
+	require.NoError(t, err)
+	require.Empty(t, entries)
+	entries, err = store.ProbeChunkForward(ctx, 1)
+	require.NoError(t, err)
+	require.Len(t, entries, 2)
 	assert.Equal(t, uint64(1), entries[0].GetGeneration())
 	assert.Equal(t, uint64(2), entries[1].GetGeneration())
 }
@@ -252,7 +252,7 @@ func TestStoreDeleteChunk(t *testing.T) {
 func TestInheritManifest(t *testing.T) {
 	previous := &streamingpb.PChannelSummaryManifest{
 		Chunks:    []*streamingpb.PChannelSummaryChunkIndexEntry{{Generation: 0}},
-		PendingGc: []*streamingpb.PChannelSummaryChunkRef{{Generation: 0}},
+		LastChunk: &streamingpb.PChannelSummaryChunkRef{Generation: 0},
 	}
 	discovered := []*streamingpb.PChannelSummaryChunkIndexEntry{
 		{Generation: 2},
@@ -414,11 +414,8 @@ func TestUnmarshalIdempotencySectionsRejectsMisalignedSections(t *testing.T) {
 	assert.True(t, errors.Is(err, ErrStoreCorrupted))
 }
 
-// TestProbeChunkForwardStopsAtUnreadableTail covers a chunk found above the last
-// published manifest that cannot be decoded. Nothing depends on it yet -- the
-// persist that wrote it had to publish the manifest next, and failing that
-// leaves its records replayable from the WAL -- so it ends the probe rather
-// than the WAL open.
+// A corrupt durable tail may already be confirmed. Surface data corruption
+// instead of silently discarding the confirmed WAL prefix.
 func TestProbeChunkForwardStopsAtUnreadableTail(t *testing.T) {
 	ctx := context.Background()
 	cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
@@ -434,8 +431,22 @@ func TestProbeChunkForwardStopsAtUnreadableTail(t *testing.T) {
 	require.NoError(t, err)
 
 	entries, err := store.ProbeChunkForward(ctx, 0)
-	require.NoError(t, err, "an unreadable probed tail must not fail the open")
-	require.Len(t, entries, 2, "the probe adopts the contiguous run below the damage")
-	assert.Equal(t, uint64(0), entries[0].GetGeneration())
-	assert.Equal(t, uint64(1), entries[1].GetGeneration())
+	require.ErrorIs(t, err, ErrStoreCorrupted)
+	require.Empty(t, entries)
+}
+
+// inheritManifest produces the manifest a new owner publishes: everything the
+// previous one knew, plus what this recovery just learned.
+func inheritManifest(
+	previous *streamingpb.PChannelSummaryManifest,
+	discovered []*streamingpb.PChannelSummaryChunkIndexEntry,
+) *streamingpb.PChannelSummaryManifest {
+	manifest := &streamingpb.PChannelSummaryManifest{}
+	if previous != nil {
+		manifest = proto.Clone(previous).(*streamingpb.PChannelSummaryManifest)
+	}
+	for _, entry := range discovered {
+		recordChunk(manifest, entry)
+	}
+	return manifest
 }

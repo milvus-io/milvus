@@ -31,7 +31,7 @@ func newTransformTestManagerWithStore(t *testing.T) (*Manager, *Store) {
 func flushTransform(t *testing.T, manager *Manager, vchannel string, tt uint64, finalized *bool) {
 	t.Helper()
 	observeTransformDelete(t, manager, vchannel, tt, finalized)
-	require.NoError(t, manager.Persist(context.Background()))
+	require.NoError(t, persistSummary(context.Background(), manager))
 }
 
 func observeTransformDelete(t *testing.T, manager *Manager, vchannel string, timetick uint64, finalized *bool) {
@@ -74,26 +74,24 @@ func TestManagerGCReleaseAndMaterializationFloorTransform(t *testing.T) {
 
 	// Without a GC position nothing is eligible, even under budget pressure.
 	manager.cfg.RetentionMaxBytes = 1
-	require.NoError(t, manager.GCOnce(ctx))
+	require.NoError(t, gcSummary(ctx, manager))
 	assert.Len(t, manager.Manifest().GetChunks(), 3)
 
 	// Advance the GC position through 200 (a completed materialization):
 	// chunks 0 (end 100) and 1 (end 200) are fully consumed and released;
 	// chunk 2 (end 300) still holds records past the position and stays.
 	manager.AdvanceGCTimeTick("v1", 200)
-	require.NoError(t, manager.GCOnce(ctx))
+	require.NoError(t, gcSummary(ctx, manager))
 	chunks := manager.Manifest().GetChunks()
 	require.Len(t, chunks, 1)
 	assert.Equal(t, uint64(2), chunks[0].GetGeneration())
 	// The released object is gone.
 	_, _, err := manager.cfg.Store.ReadChunk(ctx, 0, 1)
 	assert.Error(t, err)
-	// pending_gc drained.
-	assert.Empty(t, manager.Manifest().GetPendingGc())
 
 	// Advance past everything: all chunks are released.
 	manager.AdvanceGCTimeTick("v1", 400)
-	require.NoError(t, manager.GCOnce(ctx))
+	require.NoError(t, gcSummary(ctx, manager))
 	assert.Empty(t, manager.Manifest().GetChunks())
 }
 
@@ -107,13 +105,13 @@ func TestAdvanceGCTimeTickDroppedAllowsGCReleaseTransform(t *testing.T) {
 
 	// Without any GC position the chunk is not releasable.
 	manager.cfg.RetentionMaxBytes = 1
-	require.NoError(t, manager.GCOnce(ctx))
+	require.NoError(t, gcSummary(ctx, manager))
 	require.Len(t, manager.Manifest().GetChunks(), 1)
 
 	// The GC boundary of a dropped vchannel makes its chunks releasable
 	// regardless of materialization. The notification touches nothing else.
 	manager.AdvanceGCTimeTick("v1", DroppedVChannelTimeTick)
-	require.NoError(t, manager.GCOnce(ctx))
+	require.NoError(t, gcSummary(ctx, manager))
 	assert.Empty(t, manager.Manifest().GetChunks())
 	_, _, err := manager.cfg.Store.ReadChunk(ctx, 0, 1)
 	assert.Error(t, err, "chunk object must be deleted after release")
@@ -163,8 +161,8 @@ func TestMixedSummaryConsumersPersistRecoverAndGC(t *testing.T) {
 	manager.ObserveMessage(ctx, newTestIdempotentInsertMessage(t, "mixed", 200, "key", []int64{2}, []uint32{0}))
 	manager.ObserveMessage(ctx, newTestIdempotentInsertMessage(t, "insert-only", 300, "other", []int64{3}, []uint32{0}))
 	require.Empty(t, manager.Manifest().GetChunks(), "observation must not persist")
-	require.NoError(t, manager.Persist(ctx))
-	require.NoError(t, manager.Persist(ctx), "empty retry must not add another chunk")
+	require.NoError(t, persistSummary(ctx, manager))
+	require.NoError(t, persistSummary(ctx, manager), "empty retry must not add another chunk")
 	require.Len(t, manager.Manifest().GetChunks(), 1)
 	recovered := newTransformTestManager(t, NewStore(store.chunkManager, store.PChannel(), 3), 1)
 	require.NoError(t, recovered.Restore(ctx))
@@ -189,28 +187,27 @@ func TestMixedSummaryConsumersPersistRecoverAndGC(t *testing.T) {
 	require.Empty(t, recovered.Manifest().GetChunks(), "later inserts and insert-only vchannels do not pin consumed transforms")
 }
 
-func TestMixedSummaryDDLDoesNotDiscardTransforms(t *testing.T) {
+func TestMixedSummaryDDLPreservesRequestHistory(t *testing.T) {
 	ctx := context.Background()
 	manager, _ := newTransformTestManagerWithStore(t)
 	manager.ObserveMessage(ctx, newTestDeleteMessage(t, "v1", 100, 10, 1))
 	manager.ObserveMessage(ctx, newTestIdempotentInsertMessage(t, "v1", 110, "old-key", []int64{2}, []uint32{0}))
-	// This is the same invalidation path used by DropPartition/Truncate/DropCollection.
-	manager.invalidateVChannel("v1", 120)
-	require.Len(t, manager.pending, 1, "only the idempotency record may be discarded")
-	require.NoError(t, manager.Persist(ctx))
+	manager.ObserveMessage(ctx, newTestSummaryDDL(t, "truncate", 120))
+	require.Len(t, manager.pending, 2, "DDL preserves both transform and idempotency records")
+	require.NoError(t, persistSummary(ctx, manager))
 	transforms, err := manager.ReadTransformEntries(ctx, "v1", 0, 1000)
 	require.NoError(t, err)
 	require.Len(t, transforms, 1)
 	keys, err := manager.ReadIdempotencyEntries(ctx, "v1", 0, 1000)
 	require.NoError(t, err)
-	require.Empty(t, keys.Inserts)
+	require.Len(t, keys.Inserts, 1)
 	manager.cfg.RetentionMaxBytes = 1
-	require.NoError(t, manager.GCOnce(ctx))
-	require.Len(t, manager.Manifest().GetChunks(), 1, "idempotency invalidation is not transform materialization")
+	require.NoError(t, gcSummary(ctx, manager))
+	require.Len(t, manager.Manifest().GetChunks(), 1, "DDL observation is not durable transform materialization")
 	manager.RestoreTransformGCTimeTicks(map[string]*streamingpb.VChannelMeta{
 		"v1": {State: streamingpb.VChannelState_VCHANNEL_STATE_TOMBSTONED},
 	})
-	require.NoError(t, manager.GCOnce(ctx))
+	require.NoError(t, gcSummary(ctx, manager))
 	require.Empty(t, manager.Manifest().GetChunks())
 }
 
@@ -297,7 +294,7 @@ func TestTransformSectionRejectsMalformedPayload(t *testing.T) {
 	require.ErrorIs(t, err, ErrStoreCorrupted, "invalid object framing must be rejected before reading a section")
 }
 
-func TestMixedTransactionSurvivesIdempotencyInvalidation(t *testing.T) {
+func TestMixedTransactionHistorySurvivesDDL(t *testing.T) {
 	ctx := context.Background()
 	original := message.AsImmutableTxnMessage(newTestIdempotentTxnMessage(t, "v1", 100, "txn-key", [][]int64{{1}, {2}}))
 	builder := message.NewImmutableTxnMessageBuilder(message.MustAsImmutableBeginTxnMessageV2(original.Begin()))
@@ -310,9 +307,9 @@ func TestMixedTransactionSurvivesIdempotencyInvalidation(t *testing.T) {
 	require.Len(t, manager.pending, 1)
 	require.NotNil(t, manager.pending[0].entry)
 	require.NotNil(t, manager.pending[0].insert)
-	manager.invalidateVChannel("v1", 200)
-	require.Len(t, manager.pending, 1, "a transaction's transform must survive invalidation of its insert key")
-	require.NoError(t, manager.Persist(ctx))
+	manager.ObserveMessage(ctx, newTestSummaryDDL(t, "drop-partition", 200))
+	require.Len(t, manager.pending, 1, "DDL preserves the complete transaction summary")
+	require.NoError(t, persistSummary(ctx, manager))
 	transforms, err := manager.ReadTransformEntries(ctx, "v1", 0, 200)
 	require.NoError(t, err)
 	require.Len(t, transforms, 1)
@@ -320,5 +317,6 @@ func TestMixedTransactionSurvivesIdempotencyInvalidation(t *testing.T) {
 	require.Equal(t, []int64{99}, transforms[0].GetDelete().GetBlocks()[0].GetPrimaryKeys().GetIntId().GetData())
 	keys, err := manager.ReadIdempotencyEntries(ctx, "v1", 0, 200)
 	require.NoError(t, err)
-	require.Empty(t, keys.Idempotency)
+	require.Len(t, keys.Idempotency, 1)
+	require.Equal(t, "txn-key", keys.Idempotency[0].GetKey())
 }
