@@ -4572,8 +4572,8 @@ func TestGarbageCollector_recycleDroppedSegment_MissingLocalV3DataStillRemovesMe
 	segment.StorageVersion = storage.StorageV3
 	segment.ManifestPath = packed.MarshalManifestPath(basePath, 1)
 	gc := newGarbageCollector(m, newMockHandler(), GcOption{cli: cli})
-	_, indexFiles, blocked := gc.getDroppedSegmentIndexFiles(ctx, segment.ID)
-	require.Equal(t, gcNotBlocked, blocked)
+	_, indexFiles, indexSnapshotBlocked := gc.getDroppedSegmentIndexFiles(segment.ID)
+	require.False(t, indexSnapshotBlocked)
 	require.NotEmpty(t, indexFiles)
 	for file := range indexFiles {
 		require.NoError(t, cli.Write(ctx, file, []byte("remaining index")))

@@ -35,7 +35,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/metastore"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storage/localmigrate"
@@ -44,7 +43,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -355,84 +353,5 @@ func TestMigrateDoubleRootPackedReferencesAndGCRetry(t *testing.T) {
 			require.ErrorIs(t, err, fs.ErrNotExist, name)
 			require.NoFileExists(t, filepath.Join(f.legacyRoot, name))
 		}
-	}
-}
-
-func TestReloadLocalManifestCommitSegmentManifestCAS(t *testing.T) {
-	for _, mutationType := range []ManifestMutationType{ManifestMutationNoop, ManifestMutationCommitUpdates} {
-		name := "noop CAS"
-		if mutationType == ManifestMutationCommitUpdates {
-			name = "structured mutation"
-		}
-		t.Run(name, func(t *testing.T) {
-			f := newLegacyLocalPackedFixture(t)
-			f.assertNoCanonicalLayout(t)
-			stored := proto.Clone(f.segment).(*datapb.SegmentInfo)
-			catalog := catalogmocks.NewDataCoordCatalog(t)
-			catalog.EXPECT().ListSegments(mock.Anything, int64(1)).RunAndReturn(func(context.Context, int64) ([]*datapb.SegmentInfo, error) {
-				return []*datapb.SegmentInfo{stored}, nil
-			}).Twice()
-			catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil).Twice()
-			mt := newLocalManifestTestMeta(catalog, f.cm)
-			ctx := context.Background()
-			require.NoError(t, mt.reloadFromKV(ctx, []int64{1}))
-			assertLocalManifestCatalogReadOnly(t, catalog)
-			base, version, err := packed.UnmarshalManifestPath(f.physicalManifest)
-			require.NoError(t, err)
-			prepared := packed.MarshalManifestPath(base, version+1)
-			// CAS compares the authoritative normalized in-memory pointer, not the
-			// still-relative catalog value. Old workers and old versions are stale.
-			for _, expected := range []string{f.segment.GetManifestPath(), packed.MarshalManifestPath(base, version-1)} {
-				err := mt.CommitSegmentManifest(ctx, SegmentManifestCommit{
-					SegmentID: 3, ExpectedManifest: expected,
-					Mutation: ManifestMutation{Type: ManifestMutationNoop, ManifestPath: prepared},
-				})
-				require.ErrorIs(t, err, errSegmentManifestStale)
-				require.ErrorIs(t, err, merr.ErrServiceUnavailable)
-			}
-			catalog.AssertNotCalled(t, "Update", mock.Anything, mock.Anything)
-			require.Equal(t, f.segment.GetManifestPath(), stored.GetManifestPath())
-			updates := &packed.ManifestUpdates{Stats: []packed.StatEntry{{
-				Key: "bloom_filter.100", Files: []string{filepath.Join(base, "_stats/bloom_filter.100/42")},
-				Metadata: map[string]string{"memory_size": "48"},
-			}}}
-			commit := SegmentManifestCommit{
-				SegmentID: 3, StorageConfig: f.cfg,
-				Mutation: ManifestMutation{Type: mutationType, Updates: updates},
-			}
-			if mutationType == ManifestMutationNoop {
-				actualPrepared, err := packed.CommitManifestUpdates(base, version, f.cfg, updates)
-				require.NoError(t, err)
-				require.Equal(t, prepared, actualPrepared)
-				commit.ExpectedManifest = f.physicalManifest
-				commit.Mutation.ManifestPath = actualPrepared
-			}
-			catalog.EXPECT().Update(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, actions ...metastore.UpdateAction) error {
-				require.Equal(t, f.segment.GetManifestPath(), stored.GetManifestPath(), "no startup write may precede the ordinary commit")
-				require.Equal(t, f.physicalManifest, mt.segments.GetSegment(3).GetManifestPath(), "publish memory only after catalog success")
-				require.Len(t, actions, 1)
-				entry, ok := actions[0].Entry.(metastore.SegmentEntry)
-				require.True(t, ok)
-				require.Equal(t, prepared, entry.Segment.GetManifestPath())
-				stored = proto.Clone(entry.Segment).(*datapb.SegmentInfo)
-				return nil
-			}).Once()
-			require.NoError(t, mt.CommitSegmentManifest(ctx, commit))
-			require.Equal(t, prepared, mt.segments.GetSegment(3).GetManifestPath())
-			f.assertReadable(t, prepared, f.legacyRoot)
-			f.assertNoCanonicalLayout(t)
-			// A result prepared on the previously normalized pointer must not be
-			// accepted after this publication, even with a higher prepared version.
-			err = mt.CommitSegmentManifest(ctx, SegmentManifestCommit{
-				SegmentID: 3, ExpectedManifest: f.physicalManifest,
-				Mutation: ManifestMutation{Type: ManifestMutationNoop, ManifestPath: packed.MarshalManifestPath(base, version+2)},
-			})
-			require.ErrorIs(t, err, errSegmentManifestStale)
-			require.Equal(t, prepared, stored.GetManifestPath())
-			catalog.AssertNumberOfCalls(t, "Update", 1)
-			require.NoError(t, mt.reloadFromKV(ctx, []int64{1}))
-			require.Equal(t, prepared, mt.segments.GetSegment(3).GetManifestPath())
-			f.assertNoCanonicalLayout(t)
-		})
 	}
 }
