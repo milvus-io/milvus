@@ -176,54 +176,40 @@ func (v *BM25FunctionRunner) run(data []string, dst [][]byte) error {
 		return err
 	}
 	defer tokenizer.Destroy()
-	return runBM25(tokenizer, data, dst)
+	batch, err := requireBM25BatchTokenizer(tokenizer)
+	if err != nil {
+		return err
+	}
+	return runBM25(batch, data, dst)
 }
 
-// Optional capability keeps non-native analyzers usable without changing the
-// general Analyzer/TokenStream interface (also used by RunAnalyzer and MinHash).
+// BM25 requires batching without widening the general Analyzer/TokenStream
+// interface used by RunAnalyzer and MinHash. Clones must retain this contract.
 type bm25BatchTokenizer interface {
+	analyzer.Analyzer
 	BatchTokenizeBM25([]string) ([][]byte, error)
 }
 
-// Native API changes must not silently select the token-iteration fallback.
+// Native API changes must fail at compile time.
 var _ bm25BatchTokenizer = (*canalyzer.CAnalyzer)(nil)
 
-func runBM25(tokenizer analyzer.Analyzer, data []string, dst [][]byte) error {
-	if batch, ok := tokenizer.(bm25BatchTokenizer); ok {
-		rows, err := batch.BatchTokenizeBM25(data)
-		if err != nil {
-			return err
-		}
-		if len(rows) != len(data) {
-			return merr.WrapErrFunctionFailedMsg("BM25 tokenizer returned %d rows for %d inputs", len(rows), len(data))
-		}
-		copy(dst, rows)
-		return nil
+func requireBM25BatchTokenizer(tokenizer analyzer.Analyzer) (bm25BatchTokenizer, error) {
+	batch, ok := tokenizer.(bm25BatchTokenizer)
+	if !ok {
+		return nil, merr.WrapErrFunctionFailedMsg("BM25 analyzer does not support batch tokenization")
 	}
+	return batch, nil
+}
 
-	for i := 0; i < len(data); i++ {
-		if len(data[i]) == 0 {
-			dst[i] = []byte{}
-			continue
-		}
-
-		if !typeutil.IsUTF8(data[i]) {
-			return merr.WrapErrParameterInvalidMsg("string data must be utf8 format: %v", data[i])
-		}
-		embeddingMap := map[uint32]float32{}
-		tokenStream, err := tokenizer.NewTokenStream(data[i])
-		if err != nil {
-			return err
-		}
-		for tokenStream.Advance() {
-			token := tokenStream.Token()
-			// TODO More Hash Option
-			hash := typeutil.HashString2LessUint32(token)
-			embeddingMap[hash] += 1
-		}
-		tokenStream.Destroy()
-		dst[i] = typeutil.CreateAndSortSparseFloatRow(embeddingMap)
+func runBM25(tokenizer bm25BatchTokenizer, data []string, dst [][]byte) error {
+	rows, err := tokenizer.BatchTokenizeBM25(data)
+	if err != nil {
+		return err
 	}
+	if len(rows) != len(data) {
+		return merr.WrapErrFunctionFailedMsg("BM25 tokenizer returned %d rows for %d inputs", len(rows), len(data))
+	}
+	copy(dst, rows)
 	return nil
 }
 

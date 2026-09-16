@@ -21,11 +21,13 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 	"unsafe"
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/analyzer/interfaces"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -126,6 +128,73 @@ func TestBatchTokenizeBM25NativeFailure(t *testing.T) {
 	require.Nil(t, rows)
 	require.ErrorIs(t, err, merr.ErrSegcore)
 	require.NotErrorIs(t, err, merr.ErrParameterInvalid)
+}
+
+func TestBatchTokenizeBM25UTF8Validation(t *testing.T) {
+	a, err := NewAnalyzer(`{"tokenizer":"whitespace"}`, "")
+	require.NoError(t, err)
+	defer a.Destroy()
+	var validate func(string) bool
+	checks := 0
+	patch := mockey.Mock(typeutil.IsUTF8).To(func(text string) bool {
+		checks++
+		return validate(text)
+	}).Origin(&validate).Build()
+	defer patch.UnPatch()
+
+	_, err = a.(*CAnalyzer).BatchTokenizeBM25([]string{"hello", "北京 café", "x\x00y"})
+	require.NoError(t, err)
+	require.Zero(t, checks, "valid native batches must not scan UTF-8 in Go")
+
+	for _, invalid := range []string{"\xff", "x\x00\xff", "\xe4\xb8"} {
+		checks = 0
+		rows, err := a.(*CAnalyzer).BatchTokenizeBM25([]string{"ok", invalid, "tail"})
+		require.Nil(t, rows)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		require.ErrorContains(t, err, "string data must be utf8 format: "+invalid)
+		require.EqualValues(t, 1100, merr.Status(err).GetCode())
+		require.Equal(t, merr.InputError, merr.GetErrorType(err))
+		require.False(t, merr.Status(err).GetRetriable())
+		require.Equal(t, 2, checks, "only failed batches rescan to recover the legacy error")
+	}
+}
+
+func TestBatchTokenizeBM25RowsReleaseIndependently(t *testing.T) {
+	a, err := NewAnalyzer(`{"tokenizer":"whitespace"}`, "")
+	require.NoError(t, err)
+	defer a.Destroy()
+	released := make(chan struct{})
+	// Return only the repacked small row so the source rows leave the stack.
+	retained := func() []byte {
+		words := make([]string, 8192)
+		for i := range words {
+			words[i] = "word" + strconv.Itoa(i)
+		}
+		rows, err := a.(*CAnalyzer).BatchTokenizeBM25([]string{strings.Join(words, " "), "small"})
+		require.NoError(t, err)
+		require.Greater(t, len(rows[0]), 32768) // Avoid the runtime's tiny-object batching.
+		runtime.AddCleanup(&rows[0][0], func(done chan struct{}) { close(done) }, released)
+		src := []*schemapb.FieldData{{
+			Type: schemapb.DataType_SparseFloatVector,
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Data: &schemapb.VectorField_SparseFloatVector{SparseFloatVector: &schemapb.SparseFloatArray{Contents: rows}},
+			}},
+		}}
+		dst := make([]*schemapb.FieldData, 1)
+		typeutil.AppendFieldData(dst, src, 1)
+		return dst[0].GetVectors().GetSparseFloatVector().GetContents()[0]
+	}()
+	require.Eventually(t, func() bool {
+		runtime.GC()
+		select {
+		case <-released:
+			return true
+		default:
+			return false
+		}
+	}, 10*time.Second, 10*time.Millisecond, "keeping a small row must not keep the large row's allocation alive")
+	require.Equal(t, typeutil.CreateAndSortSparseFloatRow(map[uint32]float32{typeutil.HashString2LessUint32("small"): 1}), retained)
+	runtime.KeepAlive(retained)
 }
 
 func TestBatchTokenizeBM25CgoCalls(t *testing.T) {

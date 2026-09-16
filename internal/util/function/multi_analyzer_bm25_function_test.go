@@ -200,22 +200,6 @@ func (s *MultiAnalyzerBM25FunctionSuite) newTrackingAnalyzer(active *atomic.Int3
 	return tokenizer
 }
 
-func (s *MultiAnalyzerBM25FunctionSuite) TestRunReleasesTokenStreamsPerInput() {
-	var active, maxActive atomic.Int32
-	runner := &MultiAnalyzerBM25FunctionRunner{
-		analyzers: map[string]analyzer.Analyzer{
-			"default": s.newTrackingAnalyzer(&active, &maxActive),
-		},
-	}
-	dst := make([][]byte, 3)
-
-	err := runner.run([]string{"a", "b", "c"}, []string{"default", "default", "default"}, dst)
-
-	s.NoError(err)
-	s.Equal(int32(0), active.Load())
-	s.Equal(int32(1), maxActive.Load())
-}
-
 func (s *MultiAnalyzerBM25FunctionSuite) TestAnalyzeReleasesTokenStreamsPerInput() {
 	var active, maxActive atomic.Int32
 	runner := &MultiAnalyzerBM25FunctionRunner{

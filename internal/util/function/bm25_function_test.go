@@ -185,18 +185,6 @@ func (s *BM25FunctionRunnerSuite) newTrackingAnalyzer(active *atomic.Int32, maxA
 	return tokenizer
 }
 
-func (s *BM25FunctionRunnerSuite) TestRunReleasesTokenStreamsPerInput() {
-	var active, maxActive atomic.Int32
-	runner := &BM25FunctionRunner{tokenizer: s.newTrackingAnalyzer(&active, &maxActive)}
-	dst := make([][]byte, 3)
-
-	err := runner.run([]string{"a", "b", "c"}, dst)
-
-	s.NoError(err)
-	s.Equal(int32(0), active.Load())
-	s.Equal(int32(1), maxActive.Load())
-}
-
 func (s *BM25FunctionRunnerSuite) TestAnalyzeReleasesTokenStreamsPerInput() {
 	var active, maxActive atomic.Int32
 	runner := &BM25FunctionRunner{tokenizer: s.newTrackingAnalyzer(&active, &maxActive)}
@@ -216,7 +204,7 @@ func (s *BM25FunctionRunnerSuite) TestAnalyzerRunnerConcurrencyConfigDynamic() {
 
 	var cloneCount atomic.Int32
 	tokenizer := s.newCloneCountingAnalyzer(&cloneCount)
-	runner := &BM25FunctionRunner{tokenizer: tokenizer}
+	runner := &BM25FunctionRunner{tokenizer: legacyBM25Analyzer{tokenizer}}
 	input := []string{"a", "b", "c", "d", "e", "f"}
 
 	_, err := runner.BatchRun(input)

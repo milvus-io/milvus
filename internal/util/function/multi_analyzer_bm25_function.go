@@ -122,25 +122,40 @@ func NewMultiAnalyzerBM25FunctionRunner(coll *schemapb.CollectionSchema, schema 
 	return runner, nil
 }
 
-func (v *MultiAnalyzerBM25FunctionRunner) getAnalyzer(name string, analyzers map[string]analyzer.Analyzer) (analyzer.Analyzer, error) {
-	if alias, ok := v.alias[name]; ok {
-		name = alias
+func (v *MultiAnalyzerBM25FunctionRunner) resolveAnalyzerName(name string) (string, error) {
+	// Resolve aliases once, including an alias on the fallback name itself.
+	for _, candidate := range [2]string{name, "default"} {
+		if alias, ok := v.alias[candidate]; ok {
+			candidate = alias
+		}
+		if _, ok := v.analyzers[candidate]; ok {
+			return candidate, nil
+		}
 	}
+	// Collection validation requires a default. An unusable fallback here is
+	// an invalid runner configuration, not an unknown user-supplied label.
+	return "", merr.WrapErrFunctionFailedMsg("BM25 default analyzer is not configured")
+}
 
+func (v *MultiAnalyzerBM25FunctionRunner) getAnalyzer(name string, analyzers map[string]analyzer.Analyzer) (analyzer.Analyzer, error) {
+	name, err := v.resolveAnalyzerName(name)
+	if err != nil {
+		return nil, err
+	}
+	return v.getResolvedAnalyzer(name, analyzers)
+}
+
+func (v *MultiAnalyzerBM25FunctionRunner) getResolvedAnalyzer(name string, analyzers map[string]analyzer.Analyzer) (analyzer.Analyzer, error) {
 	if analyzer, ok := analyzers[name]; ok {
 		return analyzer, nil
 	}
 
-	var err error
-	if analyzer, ok := v.analyzers[name]; ok {
-		analyzers[name], err = analyzer.Clone()
-		if err != nil {
-			return nil, err
-		}
-		return analyzers[name], nil
+	clone, err := v.analyzers[name].Clone()
+	if err != nil {
+		return nil, err
 	}
-
-	return v.getAnalyzer("default", analyzers)
+	analyzers[name] = clone
+	return clone, nil
 }
 
 func (v *MultiAnalyzerBM25FunctionRunner) run(text []string, analyzerName []string, dst [][]byte) error {
@@ -158,22 +173,36 @@ func (v *MultiAnalyzerBM25FunctionRunner) run(text []string, analyzerName []stri
 			continue
 		}
 
-		if !typeutil.IsUTF8(text[i]) {
-			return merr.WrapErrParameterInvalidMsg("string data must be utf8 format: %v", text[i])
-		}
-
-		analyzer, err := v.getAnalyzer(analyzerName[i], cloneAnalyzers)
+		name, err := v.resolveAnalyzerName(analyzerName[i])
 		if err != nil {
 			return err
 		}
 
-		// Search uses one analyzer name for all queries. Batch consecutive rows
-		// with that name while preserving input order for mixed-language inserts.
+		analyzer, err := v.getResolvedAnalyzer(name, cloneAnalyzers)
+		if err != nil {
+			return err
+		}
+		batch, err := requireBM25BatchTokenizer(analyzer)
+		if err != nil {
+			return err
+		}
+
+		// Group by the configured analyzer, not the caller's alias or unknown
+		// fallback label. Never reorder rows across different analyzers.
 		end := i + 1
-		for end < len(text) && analyzerName[end] == analyzerName[i] {
+		for end < len(text) {
+			if len(text[end]) != 0 {
+				next, err := v.resolveAnalyzerName(analyzerName[end])
+				if err != nil {
+					return err
+				}
+				if next != name {
+					break
+				}
+			}
 			end++
 		}
-		if err := runBM25(analyzer, text[i:end], dst[i:end]); err != nil {
+		if err := runBM25(batch, text[i:end], dst[i:end]); err != nil {
 			return err
 		}
 		i = end

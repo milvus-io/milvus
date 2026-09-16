@@ -24,6 +24,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/require"
 
@@ -34,8 +35,42 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-// Hide the optional batch capability to exercise the original token API.
+// A token-only analyzer must now be rejected by the production BM25 path.
 type tokenOnlyAnalyzer struct{ analyzer.Analyzer }
+
+// Keep the old token implementation exclusively in tests as an independent
+// equivalence oracle. Production BM25 runners require the batch interface.
+type legacyBM25Analyzer struct{ analyzer.Analyzer }
+
+func (a legacyBM25Analyzer) Clone() (interfaces.Analyzer, error) {
+	clone, err := a.Analyzer.Clone()
+	if err != nil {
+		return nil, err
+	}
+	return legacyBM25Analyzer{clone}, nil
+}
+
+func (a legacyBM25Analyzer) BatchTokenizeBM25(texts []string) ([][]byte, error) {
+	rows := make([][]byte, len(texts))
+	for i, text := range texts {
+		if !typeutil.IsUTF8(text) {
+			return nil, merr.WrapErrParameterInvalidMsg("string data must be utf8 format: %v", text)
+		}
+		tf := make(map[uint32]float32)
+		if text != "" {
+			stream, err := a.NewTokenStream(text)
+			if err != nil {
+				return nil, err
+			}
+			for stream.Advance() {
+				tf[typeutil.HashString2LessUint32(stream.Token())]++
+			}
+			stream.Destroy()
+		}
+		rows[i] = typeutil.CreateAndSortSparseFloatRow(tf)
+	}
+	return rows, nil
+}
 
 type stubBM25BatchTokenizer struct {
 	analyzer.Analyzer
@@ -73,7 +108,7 @@ func TestBM25BatchRunEquivalence(t *testing.T) {
 			require.NoError(t, err)
 			defer a.Destroy()
 			native := &BM25FunctionRunner{tokenizer: a}
-			legacy := &BM25FunctionRunner{tokenizer: tokenOnlyAnalyzer{a}}
+			legacy := &BM25FunctionRunner{tokenizer: legacyBM25Analyzer{a}}
 			texts := []string{"", "test test runs running", "北京大学北京大学", "the and", "café", "x\x00y", "a b a", "!!!", "tail"}
 			want, err := legacy.BatchRun(texts)
 			require.NoError(t, err)
@@ -115,7 +150,7 @@ func TestMultiAnalyzerBM25BatchRunEquivalence(t *testing.T) {
 	defer english.Destroy()
 	aliases := map[string]string{"en": "english"}
 	native := &MultiAnalyzerBM25FunctionRunner{analyzers: map[string]analyzer.Analyzer{"default": base, "english": english}, alias: aliases}
-	legacy := &MultiAnalyzerBM25FunctionRunner{analyzers: map[string]analyzer.Analyzer{"default": tokenOnlyAnalyzer{base}, "english": tokenOnlyAnalyzer{english}}, alias: aliases}
+	legacy := &MultiAnalyzerBM25FunctionRunner{analyzers: map[string]analyzer.Analyzer{"default": legacyBM25Analyzer{base}, "english": legacyBM25Analyzer{english}}, alias: aliases}
 	texts := []string{"running runs the", "running runs the", "", "the and", "the and", "running running", "tail", "tail", "tail"}
 	names := []string{"default", "en", "missing", "english", "default", "english", "missing", "missing", "default"}
 	want, err := legacy.BatchRun(texts, names)
@@ -129,6 +164,11 @@ func TestBM25BatchRunNativeDispatch(t *testing.T) {
 	a, err := analyzer.NewAnalyzer(`{"tokenizer":"whitespace"}`, "")
 	require.NoError(t, err)
 	defer a.Destroy()
+	patch := mockey.Mock(typeutil.IsUTF8).To(func(string) bool {
+		t.Error("valid native batch must not validate UTF-8 in Go")
+		return true
+	}).Build()
+	defer patch.UnPatch()
 	single := &BM25FunctionRunner{tokenizer: a}
 	multi := &MultiAnalyzerBM25FunctionRunner{analyzers: map[string]analyzer.Analyzer{"default": a}}
 	for _, tc := range []struct {
@@ -155,6 +195,78 @@ func TestBM25BatchRunNativeDispatch(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBM25RejectsTokenOnlyClone(t *testing.T) {
+	a, err := analyzer.NewAnalyzer(`{"tokenizer":"whitespace"}`, "")
+	require.NoError(t, err)
+	defer a.Destroy()
+	for _, multi := range []bool{false, true} {
+		before := runtime.NumCgoCall()
+		if multi {
+			runner := &MultiAnalyzerBM25FunctionRunner{analyzers: map[string]analyzer.Analyzer{"default": tokenOnlyAnalyzer{a}}}
+			_, err = runner.BatchRun([]string{"word"}, []string{"default"})
+		} else {
+			runner := &BM25FunctionRunner{tokenizer: tokenOnlyAnalyzer{a}}
+			_, err = runner.BatchRun([]string{"word"})
+		}
+		calls := runtime.NumCgoCall() - before
+		require.ErrorIs(t, err, merr.ErrFunctionFailed)
+		require.Equal(t, merr.SystemError, merr.GetErrorType(err))
+		require.EqualValues(t, 2, calls, "clone is released without attempting token-stream fallback")
+	}
+}
+
+func TestMultiAnalyzerBM25ResolvedGroups(t *testing.T) {
+	base, err := analyzer.NewAnalyzer(`{"tokenizer":"whitespace"}`, "")
+	require.NoError(t, err)
+	defer base.Destroy()
+	english, err := analyzer.NewAnalyzer(`{"type":"english"}`, "")
+	require.NoError(t, err)
+	defer english.Destroy()
+	for _, tc := range []struct {
+		name  string
+		alias map[string]string
+		names []string
+		keys  []string
+		calls int64
+	}{
+		{"alias", map[string]string{"en": "english"}, []string{"en", "english", "en", "english"}, []string{"english", "english", "english", "english"}, 4},
+		{"unknown", nil, []string{"missing-a", "default", "missing-b", "missing-c"}, []string{"default", "default", "default", "default"}, 4},
+		{"default-alias", map[string]string{"default": "english"}, []string{"missing-a", "english", "default", "missing-b"}, []string{"english", "english", "english", "english"}, 4},
+		{"one-hop-alias", map[string]string{"english": "default", "en": "english"}, []string{"en", "english", "en"}, []string{"english", "default", "english"}, 10},
+		{"mixed", map[string]string{"en": "english"}, []string{"en", "english", "missing", "default", "en"}, []string{"english", "english", "default", "default", "english"}, 10},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := &MultiAnalyzerBM25FunctionRunner{analyzers: map[string]analyzer.Analyzer{"default": base, "english": english}, alias: tc.alias}
+			texts := make([]string, len(tc.names))
+			want := make([][]byte, len(texts))
+			for i := range texts {
+				texts[i] = fmt.Sprintf("running the word%d", i)
+				rows, err := (legacyBM25Analyzer{runner.analyzers[tc.keys[i]]}).BatchTokenizeBM25(texts[i : i+1])
+				require.NoError(t, err)
+				want[i] = rows[0]
+			}
+			got := make([][]byte, len(texts))
+			before := runtime.NumCgoCall()
+			err := runner.run(texts, tc.names, got) // One worker, independent of global concurrency.
+			calls := runtime.NumCgoCall() - before
+			require.NoError(t, err)
+			require.Equal(t, want, got)
+			require.Equal(t, tc.calls, calls, "two calls per resolved group plus clone/destroy per used analyzer")
+			for _, idx := range []int{0, len(texts) - 1} {
+				invalid := append([]string(nil), texts...)
+				invalid[idx] = "\xff"
+				_, err := runner.BatchRun(invalid, tc.names)
+				require.ErrorIs(t, err, merr.ErrParameterInvalid)
+				require.EqualValues(t, 1100, merr.Status(err).GetCode())
+			}
+		})
+	}
+	missing := &MultiAnalyzerBM25FunctionRunner{}
+	_, err = missing.resolveAnalyzerName("missing")
+	require.ErrorIs(t, err, merr.ErrFunctionFailed)
+	require.Equal(t, merr.SystemError, merr.GetErrorType(err))
 }
 
 // Preserve the pre-optimization scheduling/map/sort placement as the benchmark

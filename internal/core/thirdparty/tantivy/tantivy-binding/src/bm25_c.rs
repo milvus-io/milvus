@@ -53,8 +53,9 @@ fn tokenize_batch(analyzer: &mut TextAnalyzer, data: &[u8], offsets: &[u64]) -> 
     }
     let mut batch = BM25Batch {
         data: Vec::new(),
-        offsets: vec![0],
+        offsets: Vec::with_capacity(offsets.len()),
     };
+    batch.offsets.push(0);
     let mut frequencies = HashMap::<u32, f32>::new();
     let mut terms = Vec::new();
     for range in offsets.windows(2) {
@@ -75,6 +76,8 @@ fn tokenize_batch(analyzer: &mut TextAnalyzer, data: &[u8], offsets: &[u64]) -> 
         }
         drain_frequencies(&mut frequencies, &mut terms);
         terms.sort_unstable_by_key(|(hash, _)| *hash);
+        // Reserve the entire encoded row before appending its 8-byte entries.
+        batch.data.reserve(terms.len() * 8);
         for (hash, frequency) in terms.drain(..) {
             batch.data.extend_from_slice(&hash.to_le_bytes());
             batch.data.extend_from_slice(&frequency.to_le_bytes());

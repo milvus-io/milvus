@@ -32,7 +32,8 @@ import (
 
 // BatchTokenizeBM25 returns sorted sparse rows with the same hashes and term
 // frequencies as iterating TokenStream in Go. The analyzer must be exclusively
-// owned for this call, as with NewTokenStream. Returned rows are Go-owned.
+// owned for this call, as with NewTokenStream. Each returned row is independently
+// Go-owned, so retaining one row does not retain the rest of its batch.
 func (impl *CAnalyzer) BatchTokenizeBM25(texts []string) ([][]byte, error) {
 	rows := make([][]byte, len(texts))
 	if len(texts) == 0 {
@@ -41,9 +42,6 @@ func (impl *CAnalyzer) BatchTokenizeBM25(texts []string) ([][]byte, error) {
 	offsets := make([]uint64, len(texts)+1)
 	total := 0
 	for i, text := range texts {
-		if !typeutil.IsUTF8(text) {
-			return nil, merr.WrapErrParameterInvalidMsg("string data must be utf8 format: %v", text)
-		}
 		if len(text) > int(^uint(0)>>1)-total {
 			return nil, merr.WrapErrFunctionFailedMsg("BM25 input batch exceeds addressable memory")
 		}
@@ -64,6 +62,14 @@ func (impl *CAnalyzer) BatchTokenizeBM25(texts []string) ([][]byte, error) {
 	runtime.KeepAlive(data)
 	runtime.KeepAlive(offsets)
 	if err := HandleCStatus(&status, "failed to tokenize BM25 batch"); err != nil {
+		// Rust validates UTF-8 on the normal path. Only rescan failed batches
+		// to preserve the legacy Go parameter error (including the bad text),
+		// rather than exposing a different segcore code for the same input.
+		for _, text := range texts {
+			if !typeutil.IsUTF8(text) {
+				return nil, merr.WrapErrParameterInvalidMsg("string data must be utf8 format: %v", text)
+			}
+		}
 		return nil, err
 	}
 	if result.handle == nil || result.offsets == nil || uint64(result.data_size) > uint64(^uint(0)>>1) ||
@@ -74,14 +80,14 @@ func (impl *CAnalyzer) BatchTokenizeBM25(texts []string) ([][]byte, error) {
 	if rowOffsets[0] != 0 || rowOffsets[len(texts)] != uint64(result.data_size) {
 		return nil, merr.WrapErrFunctionFailedMsg("invalid native BM25 batch offsets")
 	}
-	buffer := make([]byte, int(result.data_size))
-	copy(buffer, unsafe.Slice((*byte)(unsafe.Pointer(result.data)), len(buffer)))
+	buffer := unsafe.Slice((*byte)(unsafe.Pointer(result.data)), int(result.data_size))
 	for i := range texts {
 		start, end := rowOffsets[i], rowOffsets[i+1]
 		if start > end || end > uint64(len(buffer)) || (end-start)%8 != 0 {
 			return nil, merr.WrapErrFunctionFailedMsg("invalid native BM25 row offsets")
 		}
-		rows[i] = buffer[start:end:end]
+		rows[i] = make([]byte, int(end-start))
+		copy(rows[i], buffer[start:end])
 	}
 	return rows, nil
 }
