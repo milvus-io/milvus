@@ -3,6 +3,7 @@ package walsummary
 import (
 	"context"
 	"sync/atomic"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
@@ -13,6 +14,39 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
+
+// Run flushes aged or pressured summary backlog independently of source-message
+// acknowledgements. Deletes can release all handles while their copied records
+// still need persistence. Chunk and manifest I/O and retries use the scheduler.
+func (m *Manager) Run(ctx context.Context, maxAge time.Duration, underPressure func() bool) {
+	interval := time.Second
+	if maxAge > 0 && maxAge < interval {
+		interval = maxAge
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-ticker.C:
+			force := underPressure != nil && underPressure()
+			m.flushBacklog(now, maxAge, force)
+		}
+	}
+}
+
+func (m *Manager) flushBacklog(now time.Time, maxAge time.Duration, force bool) {
+	m.mu.Lock()
+	if len(m.pending) == 0 || m.terminalErr != nil ||
+		(!force && (maxAge <= 0 || now.Sub(m.pendingSince) < maxAge)) {
+		m.mu.Unlock()
+		return
+	}
+	target := m.lastObserved.TimeTick
+	m.mu.Unlock()
+	m.RequestFlushThrough(target)
+}
 
 // InitLastAcked seeds the caller's already published recovery position.
 func (m *Manager) InitLastAcked(checkpoint *utility.WALCheckpoint) {

@@ -11,12 +11,75 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/messageack"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
+
+func TestSummaryBacklogFlushesAfterSourceAckWithoutNewMessages(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	manager, store := newTransformTestManagerWithStore(t)
+	scheduler := nodescheduler.New(1)
+	defer scheduler.Close()
+	manager.cfg.Runtime = moduleapi.Runtime{Scheduler: scheduler}
+	manager.cfg.FlushMaxBytes = 1 << 30
+	tracker := messageack.NewTracker(utility.WALCheckpoint{}, nil, nil)
+	msg := newTestDeleteMessage(t, "v1", 100, 10, 1)
+	owner := tracker.Track(msg)
+	manager.ObserveMessage(ctx, owner.Message())
+	owner.Release()
+	require.Zero(t, tracker.Pending())
+	require.Equal(t, uint64(100), tracker.CompletedPoint().TimeTick)
+	require.Less(t, manager.LastAcked().TimeTick, uint64(100))
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		manager.Run(ctx, time.Millisecond, nil)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Error("summary backlog worker did not stop")
+		}
+	})
+	require.Eventually(t, func() bool {
+		return manager.LastAcked().TimeTick == 100 && !manager.HasPendingWork()
+	}, 5*time.Second, time.Millisecond)
+	recovered := newTransformTestManager(t, store, 1<<30)
+	require.NoError(t, recovered.Restore(ctx))
+	entries, err := recovered.ReadTransformEntries(ctx, "v1", 0, 100)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	require.Equal(t, uint64(100), entries[0].GetTimeTick())
+}
+
+func TestSummaryBacklogAgeAndPressure(t *testing.T) {
+	manager, _ := newTransformTestManagerWithStore(t)
+	ctx := context.Background()
+	manager.ObserveMessage(ctx, newTestDeleteMessage(t, "v1", 100, 10, 1))
+	start := manager.pendingSince
+	manager.ObserveMessage(ctx, newTestDeleteMessage(t, "v2", 200, 10, 2))
+	require.Equal(t, start, manager.pendingSince, "new traffic must not postpone the oldest record")
+	manager.flushBacklog(start.Add(time.Second), time.Minute, false)
+	require.Empty(t, manager.pendingSealed)
+	manager.flushBacklog(start.Add(time.Minute), time.Minute, false)
+	require.Len(t, manager.pendingSealed, 1)
+	require.True(t, manager.pendingSince.IsZero())
+	require.NoError(t, drainSummary(ctx, manager))
+	manager.ObserveMessage(ctx, newTestDeleteMessage(t, "v1", 300, 10, 3))
+	manager.flushBacklog(manager.pendingSince, time.Hour, true)
+	require.Len(t, manager.pendingSealed, 1, "pressure must flush a young small batch")
+	manager.flushBacklog(time.Now(), time.Hour, true)
+	require.Len(t, manager.pendingSealed, 1, "an empty backlog creates no duplicate chunk")
+	require.NoError(t, drainSummary(ctx, manager))
+	require.Equal(t, uint64(300), manager.LastAcked().TimeTick)
+}
 
 func TestAsyncSchedulerPersistsAndRestores(t *testing.T) {
 	ctx := context.Background()

@@ -1217,6 +1217,35 @@ func newSummaryManagerWithStagedDelete(t *testing.T, vchannel string, timetick u
 	return manager
 }
 
+func TestRecoverySummaryBacklogUnblocksCandidateWithoutTrackerStall(t *testing.T) {
+	for _, timeout := range []time.Duration{time.Millisecond, 0} {
+		t.Run(timeout.String(), func(t *testing.T) {
+			rs := newTestRecoveryStorage(t, &utility.WALCheckpoint{
+				MessageID: walimplstest.NewTestMessageID(1),
+				TimeTick:  10,
+				Magic:     utility.RecoveryMagicRecoveryStorageV2,
+			})
+			rs.cfg.ackStallTimeout = timeout
+			rs.cfg.persistInterval = time.Millisecond
+			rs.summaryManager = newSummaryManagerWithStagedDelete(t, "test-vchannel", 50)
+			rs.ackTracker.Track(newAckTestTimeTickMessage(t, 100, 99)).Release()
+			require.Zero(t, rs.ackTracker.Pending())
+			require.Equal(t, uint64(49), rs.consumeDirtySnapshot().Checkpoint.TimeTick)
+			t.Cleanup(func() {
+				rs.backgroundTaskNotifier.Cancel()
+				rs.summaryWG.Wait()
+				rs.closeRecoveryResources()
+			})
+			rs.startSummaryBacklog()
+			require.Eventually(t, func() bool {
+				return rs.summaryManager.LastAcked().TimeTick == 50
+			}, time.Second, time.Millisecond)
+			require.Equal(t, uint64(50), rs.consumeDirtySnapshot().Checkpoint.TimeTick,
+				"summary-only backlog must release the candidate without new WAL messages")
+		})
+	}
+}
+
 // TestConsumeDirtySnapshotMergesSummaryLastAcked verifies the persisted
 // checkpoint never advances past the summary's confirmation frontier: the ack
 // tracker has confirmed a newer message, but a delete record staged in the

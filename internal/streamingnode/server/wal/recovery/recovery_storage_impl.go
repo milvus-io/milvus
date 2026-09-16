@@ -76,6 +76,7 @@ func RecoverRecoveryStorage(
 	rs.truncator = recoveryStreamBuilder.RWWALImpls()
 	go rs.backgroundTask()
 	rs.startAckTracker()
+	rs.startSummaryBacklog()
 	rs.startLiveScanner(recoveryStreamBuilder, lastTimeTickMessage)
 	return rs, snapshot, nil
 }
@@ -166,6 +167,7 @@ type recoveryStorageImpl struct {
 	pendingPersistSnapshot *dirtyPersistSnapshot
 	scannerWG              sync.WaitGroup
 	ackTrackerWG           sync.WaitGroup
+	summaryWG              sync.WaitGroup
 	// pendingSalvageCheckpoint holds the salvage checkpoint captured during force promote.
 	// Set under r.mu; consumed and persisted by the background task to avoid holding the lock.
 	pendingSalvageCheckpoint *utility.ReplicateCheckpoint
@@ -367,6 +369,7 @@ func (r *recoveryStorageImpl) Close() {
 	r.backgroundTaskNotifier.BlockUntilFinish()
 	r.scannerWG.Wait()
 	r.ackTrackerWG.Wait()
+	r.summaryWG.Wait()
 	r.closeRecoveryResources()
 }
 
@@ -400,6 +403,25 @@ func (r *recoveryStorageImpl) startAckTracker() {
 			underPressure = r.tailController.UnderSoftPressure
 		}
 		r.ackTracker.Run(r.backgroundTaskNotifier.Context(), r.cfg.ackStallTimeout, underPressure)
+	}()
+}
+
+func (r *recoveryStorageImpl) startSummaryBacklog() {
+	if r.summaryManager == nil {
+		return
+	}
+	r.summaryWG.Add(1)
+	go func() {
+		defer r.summaryWG.Done()
+		var underPressure func() bool
+		if r.tailController != nil {
+			underPressure = r.tailController.UnderSoftPressure
+		}
+		maxAge := r.cfg.ackStallTimeout
+		if maxAge <= 0 {
+			maxAge = r.cfg.persistInterval
+		}
+		r.summaryManager.Run(r.backgroundTaskNotifier.Context(), maxAge, underPressure)
 	}()
 }
 
@@ -633,7 +655,7 @@ func (r *recoveryStorageImpl) runLiveScanner(rs RecoveryStream) {
 }
 
 // updatePChannelControl applies pchannel-scoped recovery control effects. The
-// global WAL checkpoint is advanced exclusively by AckTracker completion.
+// global WAL checkpoint is bounded by AckTracker completion and Summary confirmation.
 func (r *recoveryStorageImpl) updatePChannelControl(msg message.ImmutableMessage) {
 	if r.pchannelControl == nil {
 		r.installPChannelControl(nil)

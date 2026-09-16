@@ -16,7 +16,7 @@ SegmentView separates execution state from recoverable snapshot state:
 ```text
 live observed state
   +-- pending asynchronous work in message order
-  +-- completed-but-not-committed work behind an earlier gap
+  +-- one serial task queue per Segment
 
 stable recoverable state
   +-- object references and lifecycle state
@@ -24,9 +24,10 @@ stable recoverable state
   +-- persisted snapshot frontier
 ```
 
-Only stable recoverable state is emitted to catalog. A later object write may
-finish before an earlier write, but its reference stays in the pending commit
-queue until the segment-local relevant prefix is continuous.
+Only stable recoverable state is emitted to catalog. The current implementation
+executes each Segment's tasks serially and updates stable state in that order.
+Different Segments may finish out of order; one Segment does not currently need
+an out-of-order completion queue.
 
 This prevents a snapshot from containing an effect that its
 `checkpoint_time_tick` cannot safely suppress during replay.
@@ -40,6 +41,11 @@ recovery state is committed.
 
 If dynamic child tasks are discovered asynchronously, SegmentView clones a
 parent handle during synchronous observation and joins children behind it.
+
+Retriable errors retain unfinished handles. A terminal failure poisons and
+releases affected handles, freeing payload memory while leaving their Tracker
+entries incomplete. The checkpoint and WAL truncation remain blocked before
+the poisoned message; durable whole-message dumping is future work.
 
 One Txn affecting several segments gives each SegmentView one independent
 outer-Txn handle. Multiple assignments within one Txn for the same segment are
@@ -77,8 +83,8 @@ when flushing.
 
 After the object chunk succeeds:
 
-1. install the chunk reference into completed pending state;
-2. advance the continuous commit queue as far as gaps allow;
+1. install the chunk reference into stable state;
+2. complete the current task in the Segment's serial queue;
 3. update stable row/byte accounting and `checkpoint_time_tick`;
 4. mark SegmentView dirty;
 5. release handles whose durable effects are now represented.
@@ -163,8 +169,8 @@ objects. Cleanup tasks do not create a second checkpoint frontier.
 
 1. SegmentView has one stable `checkpoint_time_tick`.
 2. Stable state never contains committed effects beyond a frontier gap.
-3. A buffered message handle releases only after its durable effect is
-   represented by dirty stable state.
+3. Successful release follows dirty stable state; poisoned release never
+   authorizes checkpoint advancement.
 4. Same-segment batching is owned by SegmentView, not the Ack trigger.
 5. Txn assignment count does not change message ownership count per segment.
 6. Close and cancellation never release unfinished handles.

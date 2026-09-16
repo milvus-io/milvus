@@ -408,8 +408,8 @@ append(msg with `_ik`)
         Owner     -> append to WAL, then window.Complete(key, result)
 ```
 
-The append interceptor updates its in-memory window. In the intended recovery
-integration, the ordered WAL consumer separately calls `WALSummary.ObserveMessage`;
+The append interceptor updates its in-memory window. RecoveryStorage's ordered
+WAL consumer separately calls `WALSummary.ObserveMessage`;
 summary staging is not a synchronous step of the interceptor's append path.
 See [WALSummary lifecycle](wal/summary.md#3-lifecycle-and-persistence).
 
@@ -526,8 +526,9 @@ written without a key do not acquire an idempotency identity retroactively.
 **Disabling / rollback.** Turn off `streaming.idempotency.enabled`. The disabled
 period is outside the dedup guarantee. Shared summary objects must not be
 removed as a side effect; a reset or re-enable policy for durable idempotency
-windows must be provided by the future recovery integration. The current branch
-has no legacy RecoveryStorage wiring for summary reads or deletion.
+windows remains future work. The current RecoveryStorage reads shared Summary
+for transform recovery and runs retention GC; this is separate from restoring
+the idempotency interceptor's windows.
 
 **No data migration.** The feature is unreleased; there is no earlier on-disk format.
 
@@ -545,9 +546,9 @@ Shared codec, persistence, recovery and GC tests are described in
 **StreamingNode integration** — `TestWALIdempotencyAppend` in
 `wal_idempotency_test.go` checks duplicate responses within one open WAL,
 including the original message ID, TimeTick and last-confirmed position.
-`TestRecoveryDoesNotStartWALSummary` verifies the current legacy recovery path
-leaves summary object storage untouched. Neither test proves durable window
-recovery; that remains part of the async integration.
+This test does not prove durable window recovery. Summary write/restore and
+checkpoint-gating tests exercise the shared storage integration, while restoring
+the interceptor's idempotency windows remains unfinished.
 
 **Known gaps:** SDK → proxy → full interceptor-chain coverage, durable-window
 recovery through that chain, failover during an in-flight append, and long-running

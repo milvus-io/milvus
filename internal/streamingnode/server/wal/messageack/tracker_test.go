@@ -47,6 +47,34 @@ func TestTrackerDerivesCheckpointFromMessage(t *testing.T) {
 	assert.Equal(t, uint64(200), point.TimeTick)
 }
 
+func TestTrackerPoisonPinsCompletedPrefixAfterPayloadRelease(t *testing.T) {
+	for _, ownerFirst := range []bool{false, true} {
+		t.Run(map[bool]string{false: "consumer-first", true: "owner-first"}[ownerFirst], func(t *testing.T) {
+			tracker := NewTracker(utility.WALCheckpoint{TimeTick: 10}, nil, nil)
+			first := tracker.Track(testMessage(t, 2, 20))
+			failed := first.Clone()
+			last := first.Clone()
+			second := tracker.Track(testMessage(t, 3, 30))
+			second.Release()
+			if ownerFirst {
+				first.Release()
+			}
+			failed.PoisonedRelease()
+			last.Release()
+			if !ownerFirst {
+				first.Release()
+			}
+			require.Equal(t, uint64(10), tracker.CompletedPoint().TimeTick)
+			require.Equal(t, 2, tracker.Pending())
+			_, completedBytes := tracker.LogicalOffsets()
+			require.Zero(t, completedBytes)
+			require.Nil(t, tracker.pending[0].message, "WAL retains the payload; the blocker needs only its position")
+			require.False(t, tracker.pending[0].completed)
+			require.True(t, tracker.pending[1].completed)
+		})
+	}
+}
+
 func TestTrackerAdvancesOnlyContinuousCompletedPrefix(t *testing.T) {
 	initial := utility.WALCheckpoint{
 		MessageID: walimplstest.NewTestMessageID(1),

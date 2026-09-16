@@ -49,7 +49,7 @@ For incomplete entries it also retains enough classification to report:
 - message TimeTick;
 - affected VChannels;
 - first-observed time;
-- current blocking category when known.
+- explicit blocking categories are a follow-up diagnostic, not current Tracker state.
 
 On each control cycle, the Tracker finds incomplete messages older than the
 stall timeout. For each affected VChannel, it returns the largest stalled
@@ -86,9 +86,12 @@ Components implement idempotency:
 - a covered target is a no-op;
 - an existing task is widened or reused when safe;
 - SegmentView batches only its own segment data;
-- TransformLog flushes only its own open chunk range;
-- non-persistence blockers such as BroadcastAck are reported, not converted
-  into fake flush requests.
+- Summary seals its own PChannel staging buffer; it also runs independent
+  age/pressure checks so summary-only backlog cannot be hidden by completed Ack;
+- TransformLog materializes its copied window independently under the L1 bound;
+- non-persistence blockers such as BroadcastAck rely on their own retry paths.
+  Explicit blocker classification is not implemented; a VChannel persist
+  request may still be issued without resolving an Ack or poisoned-message stall.
 
 ## 5. Watermarks
 

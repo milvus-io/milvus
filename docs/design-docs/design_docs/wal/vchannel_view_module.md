@@ -8,11 +8,10 @@
 `VChannelRecoveryModule` owns all recovery state for one VChannel and is
 indexed by `PChannelRecoveryManager`.
 
-This document describes the module boundary. Production RecoveryStorage does
-not yet dispatch through these modules; that integration remains follow-up
-work. Legacy RecoveryStorage also has no summary wiring. The
-[WALSummary](summary.md) module exposes asynchronous scheduling and `LastAcked`
-for the next integration PR.
+RecoveryStorage constructs and dispatches through these modules during bounded
+recovery and live observation. It separately owns [WALSummary](summary.md),
+restores transform windows, and caps checkpoint publication at `LastAcked`.
+QueryRuntime wiring and idempotency-window restoration remain follow-up work.
 
 ## 1. Ownership
 
@@ -51,8 +50,9 @@ There is no mode argument. The message TimeTick and each component's loaded
 `checkpoint_time_tick` are sufficient to choose apply versus no-op.
 
 For a PChannel-scoped message, the manager gives every affected VChannel an
-independent dispatch clone. Every SegmentView or TransformLog that exposes
-asynchronous work clones again before VChannel observation returns.
+independent dispatch clone. Every SegmentView exposing asynchronous work clones
+again before VChannel observation returns. TransformLog copies records and
+retains no source handle.
 
 ## 3. VChannel Metadata State
 
@@ -74,8 +74,8 @@ Rules include:
 - DropCollection/DropPartition persist logical tombstones before cleanup;
 - TruncateCollection records the new lifecycle boundary and routes data work;
 - schema-changing AlterCollection appends schema history before segment routing;
-- AlterWAL state belongs to the PChannel control snapshot, not the global
-  checkpoint.
+- AlterWAL state belongs to the PChannel control fields embedded in the global
+  WALCheckpoint, not a VChannel snapshot.
 
 ## 4. Dirty Snapshots
 
@@ -103,13 +103,15 @@ One message may have independent effects:
 Txn Owner
   +-- Segment A handle
   +-- Segment B handle
-  +-- TransformLog handle
   +-- BroadcastAck root
 ```
 
 The reference graph joins these effects without a VChannel-level Meta/Data
 state machine. Each component advances its own durable state and releases its
-own handle. Tracker completion occurs only when the entire graph reaches zero.
+own handle. Successful Tracker completion requires the entire graph to reach
+zero without poison. Summary copies Txn records separately; its `LastAcked`
+additionally bounds checkpoint publication. TransformLog's copied Delete window
+does not join this reference graph.
 
 The VChannel module also computes the L0 materialization safety bound across
 its SegmentViews. An L1 Segment blocks TransformLog materialization after its
@@ -119,9 +121,11 @@ source-message ownership.
 
 ## 6. Recovery
 
-`PChannelRecoveryManager` creates VChannel modules from the union of persisted
-VChannel, Segment, and TransformLog records. This allows tombstoned base state
-to coexist with retained child state.
+`PChannelRecoveryManager` creates VChannel modules from persisted VChannel and
+Segment metadata. RecoveryStorage reads outstanding Delete records from Summary
+after each VChannel's materialized frontier and seeds its TransformLog window.
+There is no separate TransformLog catalog record. Tombstoned base state can
+coexist with retained child state.
 
 After construction:
 

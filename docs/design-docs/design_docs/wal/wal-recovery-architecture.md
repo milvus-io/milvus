@@ -19,7 +19,8 @@ are split by responsibility:
 - [Recovery Tail Controller](recovery-tail-controller.md)
 - [VChannel Recovery Module](vchannel_view_module.md)
 - [Segment View Component](segment_view_module.md)
-- [TransformLog Design](transformlog/transform_log.md)
+- [TransformLog Design](transform_log.md)
+- [WALSummary](summary.md)
 - [Broadcast Ack Module](broadcast_ack_module.md)
 - [StreamingNode VChannel WAL Input View](streamingnode_vchannel_wal_view.md)
 
@@ -41,6 +42,7 @@ those objects without changing the recovery checkpoint protocol.
 RecoveryStorage
   +-- background persistence task (publishes the global checkpoint)
   +-- messageack.Tracker
+  +-- WALSummary (chunks, manifests, independent backlog and LastAcked)
   +-- RecoveryTailController
   +-- PChannelRecoveryManager
   |     +-- VChannelRecoveryModule*
@@ -59,11 +61,11 @@ ownership and completion conditions differ.
 A PChannel has exactly one global recovery checkpoint:
 
 ```text
-Checkpoint = largest continuous WAL prefix for which every message owner
-             has completed and whose component snapshots have been published
+Candidate = min_by_TimeTick(Tracker.CompletedPoint(), WALSummary.LastAcked())
+Checkpoint = published candidate with all required component snapshots durable
 ```
 
-The checkpoint contains only the WAL position:
+The checkpoint's WAL position consists of:
 
 - `MessageID`, using the message's `LastConfirmedMessageID`;
 - `TimeTick`, using the message's unique PChannel-order TimeTick.
@@ -72,16 +74,22 @@ PChannel control state such as replication configuration and AlterWAL state
 is embedded in the checkpoint itself (fields `replicate_config`,
 `replicate_checkpoint`, `alter_wal_state`) and advances atomically with it:
 the checkpoint is the single source of truth for the control state after a
-crash, and a control-only change rewrites the checkpoint.
+crash, and a control-only change rewrites the checkpoint. Matching control state
+to a candidate pinned behind observation remains an open implementation point;
+see [checkpoint control state](checkpoint-persistence.md#7-pchannel-control-state).
 
 The checkpoint is the only:
 
 - WAL replay start position;
 - WAL truncation position;
-- externally reported recovery progress;
+- published recovery progress returned by `GetCheckpoint`;
 - starting point for recovery-tail byte accounting.
 
 There is no Meta checkpoint, Data checkpoint, DataBarrier, or recovery mode.
+`Metrics().RecoveryTimeTick` currently reports Tracker completion, which can be
+ahead of Summary confirmation and published progress. The compatibility
+DataCoord VChannel checkpoint updater reports flush progress, not a second WAL
+recovery cursor.
 
 ## 4. Component Snapshot Checkpoints
 
@@ -105,12 +113,13 @@ work for 101 is incomplete, even if the work for 102 completed first.
 RW startup is one logical replay:
 
 ```text
-load checkpoint and component snapshots
-  -> append RecoveryBarrier to fence the old writer
-  -> open one scanner from the checkpoint
-  -> observe every message once with complete semantics
+append RecoveryBarrier to fence the old writer
+  -> load and claim checkpoint with the assignment term
+  -> load component snapshots and restore summary/transform windows
+  -> open bounded scanner from the checkpoint
+  -> observe messages with complete semantics
   -> reach RecoveryBarrier and publish the recovered write-path snapshot
-  -> continue the same observation stream into the live WAL tail
+  -> start live scanner and background persistence/progress checks
 ```
 
 RecoveryBarrier is only a writer fence and startup catch-up marker. It never
@@ -120,7 +129,15 @@ If the scanner API requires a bounded scanner followed by a live scanner, the
 two ranges must be adjacent and non-overlapping. That implementation still
 represents one logical replay and must not dispatch any message twice.
 
-RO startup uses a stable readable WAL frontier instead of appending a barrier.
+The current adaptor uses an inclusive `StartFrom` at the barrier MessageID for
+live scanning, after the bounded scanner has delivered the barrier. Boundary
+deduplication and transaction-buffer handoff still need verification; the
+non-overlap rule above is a target contract, not an established implementation
+guarantee.
+
+The current RO opener only constructs the read-only adaptor and does not run
+RecoveryStorage initialization. Recovery against a stable readable WAL frontier
+is a future RO design, not the current startup behavior.
 
 Reaching the barrier proves that all startup WAL messages have been observed.
 It does not require every asynchronous object write to finish. Pending work
@@ -137,9 +154,10 @@ raw WAL message M
        -> affected SegmentViews
        -> TransformLog
        -> QueryRuntime plain immutable event
+  -> WALSummary.ObserveMessage(M) copies records without retaining handles
   -> D.Release()
   -> BroadcastAck.Accept(O)
-  -> all retained work and Coordinator Ack finish
+  -> all retained work and Coordinator Ack succeed without poison
   -> Tracker advances its continuous completed prefix
 ```
 
@@ -168,10 +186,11 @@ The primary pressure signal is:
 recovery_tail_bytes = observed_tail_offset - published_checkpoint_offset
 ```
 
-The controller asks the AckTracker for VChannels blocking the oldest incomplete
-prefix and requests persistence through a target TimeTick. SegmentView and
-TransformLog own batching decisions. RecoveryStorage does not aggregate objects
-across segments.
+AckTracker requests persistence from VChannels blocking the oldest incomplete
+prefix. Summary independently checks staged-record age and tail pressure, so
+already released messages do not hide its backlog. SegmentView and Summary own
+their batching decisions; TransformLog materializes independently under its L1
+safety bound. RecoveryStorage does not aggregate objects across segments.
 
 Background persistence gives a soft target. A strict upper bound requires WAL
 append backpressure at a high watermark and release at a low watermark.
@@ -187,11 +206,12 @@ feature branch receives a reader, writer, migration path, or fallback.
 
 1. WAL replay is the source of truth for all state after the global checkpoint.
 2. A message is dispatched once and has one Tracker Owner.
-3. Every asynchronous consumer owns an independent Retained handle.
-4. A handle releases only after its concrete recoverability condition succeeds.
+3. Async Segment consumers own independent Retained handles; Summary and TransformLog copy records.
+4. Successful release requires recoverability; poisoned release frees memory but leaves checkpoint progress blocked.
 5. Tracker advancement uses only the continuous completed WAL prefix.
 6. Component `checkpoint_time_tick` fields are continuous component-local prefixes.
 7. Dirty component snapshots are written before the global checkpoint.
 8. WAL truncation never passes the published global checkpoint.
 9. RecoveryBarrier is not a checkpoint or observation-mode boundary.
 10. QueryRuntime does not participate in persistence acknowledgement.
+11. Summary confirmation independently bounds every published checkpoint.
