@@ -25,6 +25,7 @@ type Meta struct {
 	*CollectionManager
 	*ReplicaManager
 	*ResourceManager
+	replicaRecoveryCh chan struct{}
 }
 
 func NewMeta(
@@ -36,5 +37,18 @@ func NewMeta(
 		NewCollectionManager(catalog),
 		NewReplicaManager(idAllocator, catalog),
 		NewResourceManager(catalog, nodeMgr),
+		make(chan struct{}, 1),
 	}
+}
+
+// RequestReplicaRecovery wakes the observer after replica metadata changes.
+func (m *Meta) RequestReplicaRecovery() {
+	select {
+	case m.replicaRecoveryCh <- struct{}{}:
+	default:
+	}
+}
+
+func (m *Meta) ReplicaRecoveryRequested() <-chan struct{} {
+	return m.replicaRecoveryCh
 }

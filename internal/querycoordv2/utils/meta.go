@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func GetPartitions(ctx context.Context, targetMgr meta.TargetManagerInterface, collectionID int64) ([]int64, error) {
@@ -78,32 +77,6 @@ func GroupSegmentsByReplica(ctx context.Context, replicaMgr *meta.ReplicaManager
 		}
 	}
 	return ret
-}
-
-// RecoverReplicaOfCollection recovers all replica of collection with latest resource group.
-func RecoverReplicaOfCollection(ctx context.Context, m *meta.Meta, collectionID typeutil.UniqueID) {
-	logger := mlog.With(mlog.FieldCollectionID(collectionID))
-	rgNames := m.GetResourceGroupByCollection(ctx, collectionID)
-	if rgNames.Len() == 0 {
-		logger.Error(ctx, "no resource group found for collection")
-		return
-	}
-	rgs, err := m.GetResourceGroups(ctx, rgNames.Collect())
-	if err != nil {
-		logger.Error(ctx, "unreachable code as expected, fail to get resource group for replica", mlog.Err(err))
-		return
-	}
-
-	if err := m.RecoverNodesInCollection(ctx, collectionID, rgs); err != nil {
-		logger.Warn(ctx, "fail to set available nodes in replica", mlog.Err(err))
-	}
-}
-
-// RecoverAllCollectionrecovers all replica of all collection in resource group.
-func RecoverAllCollection(m *meta.Meta) {
-	for _, collection := range m.GetAll(context.TODO()) {
-		RecoverReplicaOfCollection(context.TODO(), m, collection)
-	}
 }
 
 func AssignReplica(ctx context.Context, m *meta.Meta, resourceGroups []string, replicaNumber int32, checkNodeNum bool) (map[string]int, error) {
@@ -162,7 +135,7 @@ func SpawnReplicasWithReplicaConfig(ctx context.Context, m *meta.Meta, params me
 	if err != nil {
 		return nil, err
 	}
-	RecoverReplicaOfCollection(ctx, m, params.CollectionID)
+	m.RequestReplicaRecovery()
 	if streamingutil.IsStreamingServiceEnabled() {
 		m.RecoverSQNodesInCollections(
 			ctx,
@@ -187,7 +160,7 @@ func SpawnReplicasWithRG(ctx context.Context, m *meta.Meta, collection int64, re
 		return nil, err
 	}
 	// Active recover it.
-	RecoverReplicaOfCollection(ctx, m, collection)
+	m.RequestReplicaRecovery()
 	if streamingutil.IsStreamingServiceEnabled() {
 		m.RecoverSQNodesInCollections(
 			ctx,

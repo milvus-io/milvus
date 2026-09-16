@@ -27,8 +27,8 @@ import (
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
-	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
+	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
@@ -43,15 +43,24 @@ type ReplicaObserver struct {
 	distMgr   *meta.DistributionManager
 	targetMgr meta.TargetManagerInterface
 
+	broker           meta.Broker
+	recoveryMu       sync.Mutex
+	collectionGroups map[int64]string
+	configRaw        string
+	rowStats         map[int64]cachedCollectionRows
+	configHandler    config.EventHandler
+
 	startOnce sync.Once
 	stopOnce  sync.Once
 }
 
-func NewReplicaObserver(meta *meta.Meta, distMgr *meta.DistributionManager, targetMgr meta.TargetManagerInterface) *ReplicaObserver {
+func NewReplicaObserver(meta *meta.Meta, distMgr *meta.DistributionManager, targetMgr meta.TargetManagerInterface, broker meta.Broker) *ReplicaObserver {
 	return &ReplicaObserver{
 		meta:      meta,
 		distMgr:   distMgr,
 		targetMgr: targetMgr,
+		broker:    broker,
+		rowStats:  make(map[int64]cachedCollectionRows),
 	}
 }
 
@@ -60,6 +69,11 @@ func (ob *ReplicaObserver) Start() {
 		ctx, cancel := context.WithCancel(context.Background())
 		ob.cancel = cancel
 
+		ob.configHandler = config.NewHandler("replicaObserver.collectionGroups", func(_ *config.Event) {
+			ob.meta.RequestReplicaRecovery()
+		})
+		paramtable.Get().Watch(paramtable.Get().QueryCoordCfg.CollectionGroups.Key, ob.configHandler)
+		ob.meta.RequestReplicaRecovery()
 		ob.wg.Add(1)
 		go ob.schedule(ctx)
 		if streamingutil.IsStreamingServiceEnabled() {
@@ -71,6 +85,9 @@ func (ob *ReplicaObserver) Start() {
 
 func (ob *ReplicaObserver) Stop() {
 	ob.stopOnce.Do(func() {
+		if ob.configHandler != nil {
+			paramtable.Get().Unwatch(paramtable.Get().QueryCoordCfg.CollectionGroups.Key, ob.configHandler)
+		}
 		if ob.cancel != nil {
 			ob.cancel()
 		}
@@ -83,16 +100,18 @@ func (ob *ReplicaObserver) schedule(ctx context.Context) {
 	mlog.Info(ctx, "Start check replica loop")
 
 	listener := ob.meta.ListenNodeChanged(ctx)
+	ticker := time.NewTicker(params.Params.QueryCoordCfg.CheckNodeInReplicaInterval.GetAsDuration(time.Second))
+	defer ticker.Stop()
 	for {
-		ob.waitNodeChangedOrTimeout(ctx, listener)
-		// stop if the context is canceled.
-		if ctx.Err() != nil {
-			mlog.Info(ctx, "Stop check replica observer")
+		select {
+		case <-ctx.Done():
 			return
+		case <-ticker.C:
+		case <-ob.meta.ReplicaRecoveryRequested():
+		case <-listener.WaitChan():
+			listener.Sync()
 		}
-
-		// do check once.
-		ob.checkNodesInReplica()
+		ob.checkNodesInReplica(ctx)
 	}
 }
 
@@ -196,13 +215,12 @@ func (ob *ReplicaObserver) checkStreamingQueryNodesInReplica(sqNodeIDsByRG map[s
 	flushRemovals()
 }
 
-func (ob *ReplicaObserver) checkNodesInReplica() {
-	ctx := context.Background()
+func (ob *ReplicaObserver) checkNodesInReplica(ctx context.Context) {
+	ob.recoveryMu.Lock()
+	defer ob.recoveryMu.Unlock()
+	ob.recoverNodes(ctx)
 
 	collections := ob.meta.GetAll(ctx)
-	for _, collectionID := range collections {
-		utils.RecoverReplicaOfCollection(ctx, ob.meta, collectionID)
-	}
 
 	balancePolicy := paramtable.Get().QueryCoordCfg.Balancer.GetValue()
 	enableChannelExclusiveMode := balancePolicy == meta.ChannelLevelScoreBalancerName
@@ -214,11 +232,10 @@ func (ob *ReplicaObserver) checkNodesInReplica() {
 		for _, replica := range replicas {
 			if enableChannelExclusiveMode && !replica.IsChannelExclusiveModeEnabled() {
 				// register channel for enable exclusive mode
-				mutableReplica := replica.CopyForWrite()
 				channels := ob.targetMgr.GetDmChannelsByCollection(ctx, collectionID, meta.CurrentTargetFirst)
-				mutableReplica.TryEnableChannelExclusiveMode(lo.Keys(channels)...)
-				replica = mutableReplica.IntoReplica()
-				ob.meta.Put(ctx, replica)
+				if err := ob.meta.RegisterReplicaChannels(ctx, collectionID, replica.GetID(), lo.Keys(channels)); err != nil {
+					mlog.Warn(ctx, "failed to register replica channels", mlog.Err(err))
+				}
 			}
 
 			roNodes := replica.GetRONodes()
@@ -257,7 +274,7 @@ func (ob *ReplicaObserver) checkNodesInReplica() {
 			)
 		}
 		if hasNodeRemoved {
-			utils.RecoverReplicaOfCollection(ctx, ob.meta, collectionID)
+			ob.meta.RequestReplicaRecovery()
 		}
 	}
 }

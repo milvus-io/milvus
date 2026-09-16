@@ -20,12 +20,9 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"sync"
 	"time"
 
 	"github.com/samber/lo"
-	"golang.org/x/sync/singleflight"
-	"golang.org/x/time/rate"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -93,15 +90,6 @@ type ReplicaManager struct {
 
 	idAllocator func() (int64, error)
 	catalog     metastore.QueryCoordCatalog
-
-	// Configuration and allocation commits are serialized by groupMu.
-	collectionGroups map[int64]string
-	groupVersion     uint64
-	recoveryInfo     recoveryInfoFunc
-	groupMu          sync.RWMutex
-	rowFlights       singleflight.Group
-	rowStatsMu       sync.Mutex
-	rowStats         map[int64]collectionRowStats
 }
 
 type SQNodeRemoval struct {
@@ -118,14 +106,11 @@ func NewReplicaManager(idAllocator func() (int64, error), catalog metastore.Quer
 		queryInvisibleReplicas: typeutil.NewConcurrentSet[int64](),
 		idAllocator:            idAllocator,
 		catalog:                catalog,
-		rowStats:               make(map[int64]collectionRowStats),
 	}
 }
 
 // Recover recovers the replicas for given collections from meta store
 func (m *ReplicaManager) Recover(ctx context.Context, collections []int64) error {
-	m.groupMu.RLock()
-	defer m.groupMu.RUnlock()
 	replicas, err := m.catalog.GetReplicas(ctx)
 	if err != nil {
 		return merr.Wrap(err, "failed to recover replicas")
@@ -140,7 +125,6 @@ func (m *ReplicaManager) Recover(ctx context.Context, collections []int64) error
 
 		if collectionSet.Contain(replica.GetCollectionID()) {
 			rep := NewReplicaWithPriority(replica, commonpb.LoadPriority_HIGH)
-			rep.collectionGroupID = m.collectionGroups[rep.GetCollectionID()]
 			grouped[rep.GetCollectionID()] = append(grouped[rep.GetCollectionID()], rep)
 			mlog.Info(ctx, "recover replica",
 				mlog.FieldCollectionID(replica.GetCollectionID()),
@@ -233,8 +217,6 @@ type SpawnWithReplicaConfigParams struct {
 
 // SpawnWithReplicaConfig spawns replicas with replica config.
 func (m *ReplicaManager) SpawnWithReplicaConfig(ctx context.Context, params SpawnWithReplicaConfigParams) ([]*Replica, error) {
-	m.groupMu.RLock()
-	defer m.groupMu.RUnlock()
 	m.collLock.Lock(params.CollectionID)
 	defer m.collLock.Unlock(params.CollectionID)
 
@@ -255,7 +237,6 @@ func (m *ReplicaManager) SpawnWithReplicaConfig(ctx context.Context, params Spaw
 			CollectionID:  params.CollectionID,
 			ResourceGroup: config.ResourceGroupName,
 		}, config.GetPriority())
-		replica.collectionGroupID = m.collectionGroups[params.CollectionID]
 		if enableChannelExclusiveMode {
 			mutableReplica := replica.CopyForWrite()
 			mutableReplica.TryEnableChannelExclusiveMode(params.Channels...)
@@ -347,8 +328,6 @@ func WithQueryInvisible() SpawnOption {
 func (m *ReplicaManager) Spawn(ctx context.Context, collection int64, replicaNumInRG map[string]int,
 	channels []string, loadPriority commonpb.LoadPriority, opts ...SpawnOption,
 ) ([]*Replica, error) {
-	m.groupMu.RLock()
-	defer m.groupMu.RUnlock()
 	cfg := &spawnConfig{}
 	for _, opt := range opts {
 		opt(cfg)
@@ -373,7 +352,6 @@ func (m *ReplicaManager) Spawn(ctx context.Context, collection int64, replicaNum
 				CollectionID:  collection,
 				ResourceGroup: rgName,
 			}, loadPriority)
-			replica.collectionGroupID = m.collectionGroups[collection]
 			mutableReplica := replica.CopyForWrite()
 			if cfg.waitRGReady {
 				mutableReplica.SetWaitRGReadyAt(time.Now())
@@ -420,39 +398,6 @@ func (m *ReplicaManager) Put(ctx context.Context, replicas ...*Replica) error {
 			m.collLock.Unlock(collectionIDs[i])
 		}
 	}()
-
-	// The channel observer may publish a COW snapshot taken before a group
-	// allocation. Merge its channel registration into the latest group replica;
-	// never restore stale ownership, resource group, or configuration-derived binding.
-	updates := make([]*Replica, 0, len(replicas))
-	for _, incoming := range replicas {
-		current, ok := m.flatReplicas.Get(incoming.GetID())
-		if !ok && incoming.GetCollectionGroupID() != "" {
-			return merr.WrapErrReplicaNotFound(incoming.GetID())
-		}
-		if ok && (current.GetCollectionGroupID() != "" || incoming.GetCollectionGroupID() != "" ||
-			current.collectionGroupVersion != incoming.collectionGroupVersion) {
-			mutable := current.CopyForWrite()
-			mutable.TryEnableChannelExclusiveMode(lo.Keys(incoming.replicaPB.GetChannelNodeInfos())...)
-			incoming = mutable.IntoReplica()
-			// Small group replicas often cannot enable channel-exclusive mode.
-			// Repeated observer registration must not rewrite identical metadata.
-			if proto.Equal(current.replicaPB, incoming.replicaPB) {
-				continue
-			}
-		}
-		updates = append(updates, incoming)
-	}
-	replicas = updates
-	if len(replicas) == 0 {
-		return nil
-	}
-	for id := range grouped {
-		grouped[id] = nil
-	}
-	for _, replica := range replicas {
-		grouped[replica.GetCollectionID()] = append(grouped[replica.GetCollectionID()], replica)
-	}
 
 	replicaPBs := make([]*querypb.Replica, 0, len(replicas))
 	for _, replica := range replicas {
@@ -620,9 +565,6 @@ func (m *ReplicaManager) RemoveCollection(ctx context.Context, collectionID type
 		// coll2Replicas is updated before flatReplicas so the invariant
 		// "visible via GetByCollection => visible via Get" holds during deletion.
 		m.coll2Replicas.Remove(collectionID)
-		m.rowStatsMu.Lock()
-		delete(m.rowStats, collectionID)
-		m.rowStatsMu.Unlock()
 		for _, replica := range replicas {
 			metrics.QueryCoordResourceGroupReplicaTotal.WithLabelValues(replica.GetResourceGroup()).Dec()
 			metrics.QueryCoordReplicaRONodeTotal.Add(-float64(replica.RONodesCount()))
@@ -681,9 +623,6 @@ func (m *ReplicaManager) removeReplicasInMemory(collectionID typeutil.UniqueID, 
 		}
 		if len(newSlice) == 0 {
 			m.coll2Replicas.Remove(collectionID)
-			m.rowStatsMu.Lock()
-			delete(m.rowStats, collectionID)
-			m.rowStatsMu.Unlock()
 		} else {
 			m.coll2Replicas.Insert(collectionID, newSlice)
 		}
@@ -745,96 +684,37 @@ func (m *ReplicaManager) GetByResourceGroup(ctx context.Context, rgName string) 
 // 2. Add new incoming nodes into the replica if they are not in-used by other replicas of same collection.
 // 3. replicas in same resource group will shared the nodes in resource group fairly.
 func (m *ReplicaManager) RecoverNodesInCollection(ctx context.Context, collectionID typeutil.UniqueID, rgs map[string]*ResourceGroup) error {
-	return m.RecoverNodesInCollections(ctx, []int64{collectionID}, rgs)
+	return m.RecoverNodesInCollections(ctx, []int64{collectionID}, rgs, nil)
 }
 
-// recoverLegacyNodesInCollection preserves the ungrouped allocation policy.
-func (m *ReplicaManager) recoverLegacyNodesInCollection(ctx context.Context, collectionID typeutil.UniqueID, rgs map[string]*ResourceGroup) error {
-	// Build node sets from resource groups.
-	rgNodeSets := make(map[string]typeutil.UniqueSet, len(rgs))
-	for rgName, rg := range rgs {
-		if rg == nil {
-			rgNodeSets[rgName] = typeutil.NewUniqueSet()
-		} else {
-			rgNodeSets[rgName] = typeutil.NewUniqueSet(rg.GetNodes()...)
-		}
-	}
+// GetReplicaCollections includes newly spawned replicas whose collection load
+// metadata has not been published yet, so the observer can assign their nodes.
+func (m *ReplicaManager) GetReplicaCollections() []int64 {
+	ids := make([]int64, 0)
+	m.coll2Replicas.Range(func(id int64, _ []*Replica) bool {
+		ids = append(ids, id)
+		return true
+	})
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	return ids
+}
 
-	if err := m.validateResourceGroups(rgNodeSets); err != nil {
-		return err
-	}
-
+// RegisterReplicaChannels updates the latest replica under its collection lock.
+// Observers must not write back a whole snapshot taken before node allocation.
+func (m *ReplicaManager) RegisterReplicaChannels(ctx context.Context, collectionID, replicaID int64, channels []string) error {
 	m.collLock.Lock(collectionID)
 	defer m.collLock.Unlock(collectionID)
-
-	if _, ok := m.coll2Replicas.Get(collectionID); !ok {
-		return merr.WrapErrCollectionNotLoaded(collectionID)
+	replica, ok := m.flatReplicas.Get(replicaID)
+	if !ok || replica.GetCollectionID() != collectionID {
+		return merr.WrapErrReplicaNotFound(replicaID)
 	}
-
-	// create a helper to do the recover.
-	helper, err := m.getCollectionAssignmentHelper(collectionID, rgNodeSets)
-	if err != nil {
-		return err
-	}
-
-	modifiedReplicas := make([]*Replica, 0)
-	// recover node by resource group.
-	helper.RangeOverResourceGroup(func(replicaHelper *replicasInSameRGAssignmentHelper) {
-		replicaHelper.RangeOverReplicas(func(assignment *replicaAssignmentInfo) {
-			replica := assignment.GetReplica()
-			// For replicas with needWaitRGReady flag, skip assignment if the RG still has missing nodes.
-			if replica.NeedWaitRGReady() {
-				rgName := replica.GetResourceGroup()
-				if rg := rgs[rgName]; rg != nil && rg.MissingNumOfNodes() > 0 {
-					mlog.RatedInfo(ctx, rate.Limit(10), "defer node assignment for new replica, resource group not ready",
-						mlog.FieldCollectionID(collectionID),
-						mlog.Int64("replicaID", replica.GetID()),
-						mlog.String("rgName", rgName),
-						mlog.Int("missingNodes", rg.MissingNumOfNodes()),
-					)
-					return
-				}
-			}
-
-			roNodes := assignment.GetNewRONodes()
-			recoverableNodes, incomingNodeCount := assignment.GetRecoverNodesAndIncomingNodeCount()
-			// There may be not enough incoming nodes for current replica,
-			// Even we filtering the nodes that are used by other replica of same collection in other resource group,
-			// current replica's expected node may be still used by other replica of same collection in same resource group.
-			incomingNode := replicaHelper.AllocateIncomingNodes(incomingNodeCount)
-			if len(roNodes) == 0 && len(recoverableNodes) == 0 && len(incomingNode) == 0 {
-				// nothing to do.
-				return
-			}
-			mutableReplica := replica.CopyForWrite()
-			mutableReplica.AddRONode(roNodes...)          // rw -> ro
-			mutableReplica.AddRWNode(recoverableNodes...) // ro -> rw
-			mutableReplica.AddRWNode(incomingNode...)     // unused -> rw
-			// Clear waitRGReady after first successful node assignment.
-			if mutableReplica.NeedWaitRGReady() {
-				mutableReplica.SetWaitRGReadyAt(time.Time{})
-			}
-			mlog.Info(ctx, "new replica recovery found",
-				mlog.FieldCollectionID(collectionID),
-				mlog.Int64("replicaID", assignment.GetReplicaID()),
-				mlog.Int64s("newRONodes", roNodes),
-				mlog.Int64s("roToRWNodes", recoverableNodes),
-				mlog.Int64s("newIncomingNodes", incomingNode),
-				mlog.Bool("enableChannelExclusiveMode", mutableReplica.IsChannelExclusiveModeEnabled()),
-				mlog.Any("channelNodeInfos", mutableReplica.replicaPB.GetChannelNodeInfos()),
-				mlog.Int64s("rwNodes", mutableReplica.GetRWNodes()),
-				mlog.Int64s("roNodes", mutableReplica.GetRONodes()),
-				mlog.Int64s("rwSQNodes", mutableReplica.GetRWSQNodes()),
-				mlog.Int64s("roSQNodes", mutableReplica.GetROSQNodes()),
-			)
-			modifiedReplicas = append(modifiedReplicas, mutableReplica.IntoReplica())
-		})
-	})
-
-	if len(modifiedReplicas) == 0 {
+	mutable := replica.CopyForWrite()
+	mutable.TryEnableChannelExclusiveMode(channels...)
+	updated := mutable.IntoReplica()
+	if proto.Equal(replica.replicaPB, updated.replicaPB) {
 		return nil
 	}
-	return m.put(ctx, collectionID, modifiedReplicas...)
+	return m.put(ctx, collectionID, updated)
 }
 
 // validateResourceGroups checks if the resource groups are valid.
@@ -850,26 +730,6 @@ func (m *ReplicaManager) validateResourceGroups(rgs map[string]typeutil.UniqueSe
 		}
 	}
 	return nil
-}
-
-// getCollectionAssignmentHelper builds an assignment helper from collection replicas.
-// Caller must hold collLock for this collection.
-func (m *ReplicaManager) getCollectionAssignmentHelper(collectionID typeutil.UniqueID, rgs map[string]typeutil.UniqueSet) (*collectionAssignmentHelper, error) {
-	// check if the collection is exist.
-	replicas, ok := m.coll2Replicas.Get(collectionID)
-	if !ok {
-		return nil, merr.WrapErrCollectionNotLoaded(collectionID)
-	}
-
-	rgToReplicas := make(map[string][]*Replica)
-	for _, replica := range replicas {
-		rgName := replica.GetResourceGroup()
-		if _, ok := rgs[rgName]; !ok {
-			return nil, merr.WrapErrServiceInternalMsg("lost resource group info, collectionID: %d, replicaID: %d, resourceGroup: %s", collectionID, replica.GetID(), rgName)
-		}
-		rgToReplicas[rgName] = append(rgToReplicas[rgName], replica)
-	}
-	return newCollectionAssignmentHelper(collectionID, rgToReplicas, rgs), nil
 }
 
 // RemoveNode removes the node from the given replica.

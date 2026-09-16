@@ -162,7 +162,7 @@ func (suite *ReplicaObserverSuite) SetupTest() {
 	suite.collectionID = int64(1000)
 	suite.partitionID = int64(100)
 	suite.targetMgr = &replicaObserverTargetManager{collectionID: suite.collectionID}
-	suite.observer = NewReplicaObserver(suite.meta, suite.distMgr, suite.targetMgr)
+	suite.observer = NewReplicaObserver(suite.meta, suite.distMgr, suite.targetMgr, nil)
 	suite.observer.Start()
 }
 
@@ -313,7 +313,7 @@ func (suite *ReplicaObserverSuite) TestCheckSQnodesInReplica() {
 		}
 	})
 	balance.Register(b)
-	suite.observer = NewReplicaObserver(suite.meta, suite.distMgr, suite.targetMgr)
+	suite.observer = NewReplicaObserver(suite.meta, suite.distMgr, suite.targetMgr, nil)
 	suite.observer.Start()
 
 	ctx := context.Background()
@@ -489,7 +489,7 @@ func TestCheckStreamingQueryNodesBatchesRecoveryByReplicaCountAndContinuesAfterE
 	catalog.failSaveReplicaCall = 1
 	catalog.saveErr = errors.New("save failed")
 
-	observer := NewReplicaObserver(metadata, meta.NewDistributionManager(nodeMgr), nil)
+	observer := NewReplicaObserver(metadata, meta.NewDistributionManager(nodeMgr), nil, nil)
 	observer.checkStreamingQueryNodesInReplica(map[string]typeutil.UniqueSet{
 		"RG1": typeutil.NewUniqueSet(int64(101), int64(102)),
 	})
@@ -538,7 +538,7 @@ func TestCheckStreamingQueryNodesContinuesCleanupAfterBatchError(t *testing.T) {
 	catalog.failSaveReplicaCall = 1
 	catalog.saveErr = errors.New("save failed")
 
-	observer := NewReplicaObserver(metadata, meta.NewDistributionManager(nodeMgr), nil)
+	observer := NewReplicaObserver(metadata, meta.NewDistributionManager(nodeMgr), nil, nil)
 	observer.checkStreamingQueryNodesInReplica(map[string]typeutil.UniqueSet{
 		"RG1": typeutil.NewUniqueSet(),
 	})

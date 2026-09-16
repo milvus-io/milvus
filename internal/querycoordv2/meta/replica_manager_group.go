@@ -18,247 +18,30 @@ package meta
 
 import (
 	"context"
-	"maps"
-	"math"
 	"sort"
-	"strconv"
-	"strings"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
-	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-const collectionRowsRefreshInterval = 30 * time.Second
-
-type recoveryInfoFunc func(context.Context, int64, ...int64) ([]*datapb.VchannelInfo, []*datapb.SegmentInfo, error)
-
-type collectionRowStats struct {
-	rows    int64
-	valid   bool
-	retryAt time.Time
-	err     error
+// CollectionRowCount is an allocation input prepared by the caller. Valid
+// distinguishes zero rows from unknown data; Fresh controls optional rebalancing.
+type CollectionRowCount struct {
+	Rows  int64
+	Valid bool
+	Fresh bool
 }
 
-type replicaGroupKey struct {
-	group string
-	rg    string
-}
-
-// InitCollectionGroups supplies the row source and initial configuration before recovery.
-func (m *ReplicaManager) InitCollectionGroups(config string, recoveryInfo recoveryInfoFunc) error {
-	m.recoveryInfo = recoveryInfo
-	return m.UpdateCollectionGroups(context.TODO(), config)
-}
-
-// RefreshCollectionGroups reads the latest configuration under the allocation lock,
-// so concurrent config callbacks cannot apply an older value after a newer one.
-func (m *ReplicaManager) RefreshCollectionGroups(ctx context.Context) error {
-	m.groupMu.Lock()
-	defer m.groupMu.Unlock()
-	return m.updateCollectionGroups(ctx, paramtable.Get().QueryCoordCfg.CollectionGroups.GetValue())
-}
-
-// UpdateCollectionGroups applies configuration to all replicas, including loaded ones.
-// Invalid updates leave the last valid allocation policy intact.
-func (m *ReplicaManager) UpdateCollectionGroups(ctx context.Context, config string) error {
-	m.groupMu.Lock()
-	defer m.groupMu.Unlock()
-	return m.updateCollectionGroups(ctx, config)
-}
-
-func (m *ReplicaManager) updateCollectionGroups(ctx context.Context, config string) error {
-	var groups []struct {
-		ID            string   `json:"id"`
-		CollectionIDs []string `json:"collectionIds"`
-	}
-	if err := json.Unmarshal([]byte(config), &groups); err != nil {
-		return merr.WrapErrParameterInvalidMsg("invalid queryCoord.collectionGroups JSON")
-	}
-	bindings := make(map[int64]string)
-	names := typeutil.NewSet[string]()
-	for _, group := range groups {
-		if strings.TrimSpace(group.ID) == "" || names.Contain(group.ID) {
-			return merr.WrapErrParameterInvalidMsg("collection group ID must be nonempty and unique: %q", group.ID)
-		}
-		names.Insert(group.ID)
-		for _, value := range group.CollectionIDs {
-			id, err := strconv.ParseInt(value, 10, 64)
-			if err != nil || id <= 0 {
-				return merr.WrapErrParameterInvalidMsg("invalid collection ID in group %q: %q", group.ID, value)
-			}
-			if _, exists := bindings[id]; exists {
-				return merr.WrapErrParameterInvalidMsg("collection %d belongs to multiple group entries", id)
-			}
-			bindings[id] = group.ID
-		}
-	}
-	if maps.Equal(m.collectionGroups, bindings) {
-		return nil
-	}
-	m.collectionGroups = bindings
-	m.groupVersion++
-	m.coll2Replicas.Range(func(id int64, _ []*Replica) bool {
-		m.collLock.Lock(id)
-		defer m.collLock.Unlock(id)
-		replicas, _ := m.coll2Replicas.Get(id)
-		var updated []*Replica
-		for _, replica := range replicas {
-			if replica.GetCollectionGroupID() == bindings[id] {
-				continue
-			}
-			mutable := replica.CopyForWrite()
-			mutable.collectionGroupID = bindings[id]
-			mutable.collectionGroupVersion = m.groupVersion
-			updated = append(updated, mutable.IntoReplica())
-		}
-		// Only change the in-memory policy. Existing RW/RO ownership remains
-		// valid until the normal recovery/balance cycle converges the new plan.
-		m.putReplicasInMemory(id, updated...)
-		return true
-	})
-	mlog.Info(ctx, "updated collection group allocation configuration", mlog.Int("collections", len(bindings)))
-	return nil
-}
-
-// getCollectionRows coalesces fills per collection. Neither allocation locks
-// nor the cache mutex are held across the DataCoord request.
-func (m *ReplicaManager) getCollectionRows(ctx context.Context, collectionID int64) collectionRowStats {
-	result, _, _ := m.rowFlights.Do(strconv.FormatInt(collectionID, 10), func() (any, error) {
-		m.rowStatsMu.Lock()
-		stats := m.rowStats[collectionID]
-		m.rowStatsMu.Unlock()
-		if time.Now().Before(stats.retryAt) {
-			return stats, nil
-		}
-		if m.recoveryInfo == nil {
-			stats.err = merr.WrapErrServiceUnavailableMsg("collection group recovery source is not initialized")
-		} else {
-			_, segments, err := m.recoveryInfo(ctx, collectionID)
-			stats.err = err
-			if err == nil {
-				var rows int64
-				seen := typeutil.NewUniqueSet()
-				for _, segment := range segments {
-					if seen.Contain(segment.GetID()) {
-						continue
-					}
-					seen.Insert(segment.GetID())
-					count := segment.GetNumOfRows()
-					if count < 0 || count > math.MaxInt64-rows {
-						stats.err = merr.WrapErrServiceInternalMsg("invalid recovery row count for collection %d", collectionID)
-						break
-					}
-					rows += count
-				}
-				if stats.err == nil {
-					stats.rows, stats.valid = rows, true
-				}
-			}
-		}
-		stats.retryAt = time.Now().Add(collectionRowsRefreshInterval)
-		if stats.err != nil {
-			mlog.Warn(ctx, "failed to refresh collection group rows", mlog.FieldCollectionID(collectionID), mlog.Err(stats.err))
-		}
-		m.rowStatsMu.Lock()
-		if _, exists := m.coll2Replicas.Get(collectionID); exists {
-			m.rowStats[collectionID] = stats
-		}
-		m.rowStatsMu.Unlock()
-		return stats, nil
-	})
-	return result.(collectionRowStats)
-}
-
-// RecoverNodesInCollections preserves the single-collection caller contract.
-// Group membership is an in-memory projection of the current configuration.
-// Other collections in the same group/RG are expanded here, inside the manager.
-func (m *ReplicaManager) RecoverNodesInCollections(ctx context.Context, collectionIDs []int64, rgs map[string]*ResourceGroup) error {
-	m.groupMu.RLock()
-	version := m.groupVersion
-	m.groupMu.RUnlock()
-	keys := typeutil.NewSet[replicaGroupKey]()
-	requested := typeutil.NewUniqueSet(collectionIDs...)
-	for _, id := range requested.Collect() {
-		replicas, ok := m.coll2Replicas.Get(id)
-		if !ok {
-			return merr.WrapErrCollectionNotLoaded(id)
-		}
-		for _, replica := range replicas {
-			if group := replica.GetCollectionGroupID(); group != "" {
-				if _, supplied := rgs[replica.GetResourceGroup()]; supplied {
-					keys.Insert(replicaGroupKey{group, replica.GetResourceGroup()})
-				}
-			}
-		}
-	}
-	if keys.Len() == 0 {
-		m.groupMu.RLock()
-		defer m.groupMu.RUnlock()
-		if version != m.groupVersion {
-			return merr.WrapErrServiceUnavailableMsg("collection group configuration changed during recovery")
-		}
-		for _, id := range requested.Collect() {
-			if err := m.recoverLegacyNodesInCollection(ctx, id, rgs); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-
-	nodeSets := make(map[string]typeutil.UniqueSet, len(rgs))
-	for name, rg := range rgs {
-		nodeSets[name] = typeutil.NewUniqueSet()
-		if rg != nil {
-			nodeSets[name].Insert(rg.GetNodes()...)
-		}
-	}
-	if err := m.validateResourceGroups(nodeSets); err != nil {
-		return err
-	}
-
-	// Keep a snapshot of ALL replicas of participating collections, including
-	// RO nodes in other RGs, for collection-level exclusion.
-	snapshots := make(map[int64][]*Replica)
-	m.coll2Replicas.Range(func(id int64, replicas []*Replica) bool {
-		for _, replica := range replicas {
-			if requested.Contain(id) || keys.Contain(replicaGroupKey{replica.GetCollectionGroupID(), replica.GetResourceGroup()}) {
-				snapshots[id] = replicas
-				break
-			}
-		}
-		return true
-	})
-	ids := make([]int64, 0, len(snapshots))
-	stats := make(map[int64]collectionRowStats)
-	for id, replicas := range snapshots {
-		ids = append(ids, id)
-		for _, replica := range replicas {
-			if keys.Contain(replicaGroupKey{replica.GetCollectionGroupID(), replica.GetResourceGroup()}) {
-				stats[id] = m.getCollectionRows(ctx, id)
-				break
-			}
-		}
-	}
+// RecoverNodesInCollections allocates nodes for exactly the supplied collection
+// batch. The caller owns batching and row statistics; the manager only plans and
+// persists RW/RO assignments. A singleton batch uses equal replica weights and
+// needs no row statistics.
+func (m *ReplicaManager) RecoverNodesInCollections(ctx context.Context, collectionIDs []int64, rgs map[string]*ResourceGroup, rows map[int64]CollectionRowCount) error {
+	ids := typeutil.NewUniqueSet(collectionIDs...).Collect()
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
-	m.groupMu.Lock()
-	defer m.groupMu.Unlock()
-	if version != m.groupVersion {
-		return merr.WrapErrServiceUnavailableMsg("collection group configuration changed during recovery")
-	}
-	for _, id := range ids {
-		if m.collectionGroups[id] == "" {
-			if err := m.recoverLegacyNodesInCollection(ctx, id, rgs); err != nil {
-				return err
-			}
-			// Use the updated snapshot for the common consistency check.
-			snapshots[id], _ = m.coll2Replicas.Get(id)
-		}
-	}
 	for _, id := range ids {
 		m.collLock.Lock(id)
 	}
@@ -267,32 +50,40 @@ func (m *ReplicaManager) RecoverNodesInCollections(ctx context.Context, collecti
 			m.collLock.Unlock(ids[i])
 		}
 	}()
+	all := make(map[int64][]*Replica, len(ids))
+	nodeSets := make(map[string]typeutil.UniqueSet)
 	for _, id := range ids {
-		current, _ := m.coll2Replicas.Get(id)
-		previous := snapshots[id]
-		if len(current) != len(previous) {
-			return merr.WrapErrServiceUnavailableMsg("replicas changed during collection group recovery")
+		replicas, ok := m.coll2Replicas.Get(id)
+		if !ok {
+			return merr.WrapErrCollectionNotLoaded(id)
 		}
-		for i := range current {
-			if current[i] != previous[i] {
-				return merr.WrapErrServiceUnavailableMsg("replica changed during collection group recovery")
+		all[id] = replicas
+		for _, replica := range replicas {
+			rgName := replica.GetResourceGroup()
+			rg, supplied := rgs[rgName]
+			if !supplied {
+				return merr.WrapErrServiceInternalMsg("lost resource group info for replica %d: %s", replica.GetID(), rgName)
+			}
+			nodeSets[rgName] = typeutil.NewUniqueSet()
+			if rg != nil {
+				nodeSets[rgName].Insert(rg.GetNodes()...)
 			}
 		}
 	}
-
-	orderedKeys := keys.Collect()
-	sort.Slice(orderedKeys, func(i, j int) bool {
-		if orderedKeys[i].group != orderedKeys[j].group {
-			return orderedKeys[i].group < orderedKeys[j].group
-		}
-		return orderedKeys[i].rg < orderedKeys[j].rg
-	})
-	for _, key := range orderedKeys {
-		all := make(map[int64][]*Replica)
-		for _, id := range ids {
-			all[id], _ = m.coll2Replicas.Get(id)
-		}
-		desired := planReplicaGroup(key, all, nodeSets[key.rg], stats, rgs[key.rg])
+	if err := m.validateResourceGroups(nodeSets); err != nil {
+		return err
+	}
+	if len(ids) == 1 {
+		rows = map[int64]CollectionRowCount{ids[0]: {Rows: 1, Valid: true, Fresh: true}}
+	}
+	rgNames := make([]string, 0, len(nodeSets))
+	for name := range nodeSets {
+		rgNames = append(rgNames, name)
+	}
+	sort.Strings(rgNames)
+	updates := make(map[int64][]*Replica)
+	for _, name := range rgNames {
+		desired := planReplicaGroup(name, all, nodeSets[name], rows, rgs[name])
 		replicaIDs := make([]int64, 0, len(desired))
 		for id := range desired {
 			replicaIDs = append(replicaIDs, id)
@@ -300,37 +91,35 @@ func (m *ReplicaManager) RecoverNodesInCollections(ctx context.Context, collecti
 		sort.Slice(replicaIDs, func(i, j int) bool { return replicaIDs[i] < replicaIDs[j] })
 		for _, id := range replicaIDs {
 			replica, _ := m.flatReplicas.Get(id)
-			nodes := desired[id]
-			mutable := replica.CopyForWrite()
-			remove := make([]int64, 0)
-			add := make([]int64, 0)
+			add, remove := make([]int64, 0), make([]int64, 0)
 			for _, node := range replica.GetRWNodes() {
-				if !nodes.Contain(node) {
+				if !desired[id].Contain(node) {
 					remove = append(remove, node)
 				}
 			}
-			for node := range nodes {
-				if !replica.rwNodes.Contain(node) {
+			for node := range desired[id] {
+				if !replica.ContainRWNode(node) {
 					add = append(add, node)
 				}
 			}
-			if len(remove)+len(add) == 0 {
+			if len(add)+len(remove) == 0 {
 				continue
 			}
+			mutable := replica.CopyForWrite()
 			mutable.AddRONode(remove...)
 			mutable.AddRWNode(add...)
 			if mutable.RWNodesCount() > 0 {
 				mutable.SetWaitRGReadyAt(time.Time{})
 			}
-			// A single Replica per write avoids the catalog's chunked multi-write
-			// semantics. No same-collection ownership is transferred before drain.
-			if err := m.put(ctx, replica.GetCollectionID(), mutable.IntoReplica()); err != nil {
-				return err
-			}
-			mlog.Info(ctx, "assigned collection group replica nodes",
-				mlog.String("group", key.group), mlog.String("resourceGroup", key.rg),
-				mlog.FieldCollectionID(replica.GetCollectionID()), mlog.Int64("replicaID", id),
+			updates[replica.GetCollectionID()] = append(updates[replica.GetCollectionID()], mutable.IntoReplica())
+			mlog.Info(ctx, "assigned replica nodes in collection batch", mlog.Int64s("collections", ids),
+				mlog.String("resourceGroup", name), mlog.Int64("replicaID", id),
 				mlog.Int64s("newRWNodes", add), mlog.Int64s("newRONodes", remove))
+		}
+	}
+	for _, id := range ids {
+		if err := m.put(ctx, id, updates[id]...); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -349,8 +138,8 @@ type groupReplicaAssignment struct {
 	desired   typeutil.UniqueSet
 }
 
-func planReplicaGroup(key replicaGroupKey, all map[int64][]*Replica, nodes typeutil.UniqueSet,
-	stats map[int64]collectionRowStats, rg *ResourceGroup,
+func planReplicaGroup(rgName string, all map[int64][]*Replica, nodes typeutil.UniqueSet,
+	stats map[int64]CollectionRowCount, rg *ResourceGroup,
 ) map[int64]typeutil.UniqueSet {
 	members := make([]*groupReplicaAssignment, 0)
 	capacity := make(map[int64]int)
@@ -359,7 +148,7 @@ func planReplicaGroup(key replicaGroupKey, all map[int64][]*Replica, nodes typeu
 	for collectionID, replicas := range all {
 		outsiders := typeutil.NewUniqueSet()
 		for _, replica := range replicas {
-			if replica.GetCollectionGroupID() == key.group && replica.GetResourceGroup() == key.rg {
+			if replica.GetResourceGroup() == rgName {
 				continue
 			}
 			for _, node := range replica.GetNodes() {
@@ -370,16 +159,16 @@ func planReplicaGroup(key replicaGroupKey, all map[int64][]*Replica, nodes typeu
 		}
 		capacity[collectionID] = max(0, nodes.Len()-outsiders.Len())
 		for _, replica := range replicas {
-			if replica.GetCollectionGroupID() != key.group || replica.GetResourceGroup() != key.rg || waitForGroupRG(replica, rg) {
+			if replica.GetResourceGroup() != rgName || waitForGroupRG(replica, rg) {
 				continue
 			}
 			stat := stats[collectionID]
 			// An unknown NEW replica has no allocation weight. Preserve existing
 			// replicas during a source outage; never reinterpret missing as zero.
-			if !stat.valid && replica.RWNodesCount() == 0 && replica.RONodesCount() == 0 {
+			if !stat.Valid && replica.RWNodesCount() == 0 && replica.RONodesCount() == 0 {
 				continue
 			}
-			fresh = fresh && stat.valid && stat.err == nil
+			fresh = fresh && stat.Valid && stat.Fresh
 			draining = draining || replica.RONodesCount() > 0
 			available := nodes.Clone()
 			for _, other := range replicas {
@@ -388,7 +177,7 @@ func planReplicaGroup(key replicaGroupKey, all map[int64][]*Replica, nodes typeu
 				}
 			}
 			members = append(members, &groupReplicaAssignment{
-				replica: replica, rows: stat.rows, available: available,
+				replica: replica, rows: stat.Rows, available: available,
 				desired: typeutil.NewUniqueSet(),
 			})
 		}
@@ -400,8 +189,8 @@ func planReplicaGroup(key replicaGroupKey, all map[int64][]*Replica, nodes typeu
 			member.quota = max(1, member.replica.RWNodesCount())
 		}
 	}
-	// Enforce each collection's aggregate capacity, including reserved legacy
-	// quotas. Replicas of a collection have the same row weight.
+	// Enforce collection-level capacity, including ownership in other RGs.
+	// Replicas of a collection have the same row weight.
 	for collectionID, limit := range capacity {
 		trimGroupCollectionQuota(members, collectionID, limit)
 	}

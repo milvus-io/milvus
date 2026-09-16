@@ -132,8 +132,7 @@ type Server struct {
 	nodeIdx atomic.Uint32
 
 	// load config watcher
-	loadConfigWatcher       *LoadConfigWatcher
-	collectionGroupsHandler config.EventHandler
+	loadConfigWatcher *LoadConfigWatcher
 }
 
 type FileResourceObserver interface {
@@ -354,6 +353,9 @@ func (s *Server) initQueryCoord() error {
 
 	// Init observers
 	s.initObserver()
+	if err := s.replicaObserver.Init(); err != nil {
+		return err
+	}
 
 	// Init heartbeat
 	mlog.Info(s.ctx, "init dist controller")
@@ -384,9 +386,6 @@ func (s *Server) initMeta() error {
 	s.broker = meta.NewCoordinatorBroker(
 		s.mixCoord,
 	)
-	if err := s.meta.InitCollectionGroups(paramtable.Get().QueryCoordCfg.CollectionGroups.GetValue(), s.broker.GetRecoveryInfoV2); err != nil {
-		return err
-	}
 
 	mlog.Info(s.ctx, "recover meta...")
 	err := s.meta.CollectionManager.Recover(s.ctx, s.broker)
@@ -448,6 +447,7 @@ func (s *Server) initObserver() {
 		s.meta,
 		s.dist,
 		s.targetMgr,
+		s.broker,
 	)
 
 	s.resourceObserver = observers.NewResourceObserver(s.meta)
@@ -502,7 +502,6 @@ func (s *Server) startQueryCoord() error {
 	// check replica changes after restart
 	// Note: this should be called after start progress is done
 	s.watchLoadConfigChanges()
-	s.watchCollectionGroups()
 	return nil
 }
 
@@ -538,9 +537,6 @@ func (s *Server) Stop() error {
 	// job scheduler -> checker controller -> task scheduler -> dist controller -> cluster -> session
 	// observers -> dist controller
 
-	if s.collectionGroupsHandler != nil {
-		paramtable.Get().Unwatch(paramtable.Get().QueryCoordCfg.CollectionGroups.Key, s.collectionGroupsHandler)
-	}
 	if s.loadConfigWatcher != nil {
 		mlog.Info(s.ctx, "stop load config watcher...")
 		s.loadConfigWatcher.Close()
@@ -866,18 +862,6 @@ func (s *Server) updateBalanceConfig() bool {
 	Params.Save(Params.QueryCoordCfg.AutoBalance.Key, "false")
 	mlog.RatedDebug(s.ctx, rate.Limit(10), "old query node exist", mlog.Strings("sessions", lo.Keys(sessions)))
 	return false
-}
-
-func (s *Server) watchCollectionGroups() {
-	refresh := func() {
-		if err := s.meta.RefreshCollectionGroups(s.ctx); err != nil {
-			mlog.Warn(s.ctx, "ignoring invalid collection group configuration", mlog.Err(err))
-		}
-	}
-	s.collectionGroupsHandler = config.NewHandler("watchCollectionGroups", func(_ *config.Event) { refresh() })
-	paramtable.Get().Watch(paramtable.Get().QueryCoordCfg.CollectionGroups.Key, s.collectionGroupsHandler)
-	// Cover any update between metadata initialization and watch registration.
-	refresh()
 }
 
 func (s *Server) watchLoadConfigChanges() {

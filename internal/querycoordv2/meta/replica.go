@@ -60,10 +60,6 @@ var NilReplica = newReplica(&querypb.Replica{
 // So only read only operations are allowed on these type.
 type Replica struct {
 	replicaPB *querypb.Replica
-	// Derived from the current configuration; never persisted.
-	collectionGroupID string
-	// Identifies policy changes across enable/disable cycles for stale COW writes.
-	collectionGroupVersion uint64
 	// Nodes is the legacy querynode that is not embedded in the streamingnode, which can only load sealed segment.
 	rwNodes typeutil.UniqueSet // a helper field for manipulating replica's Available Nodes slice field.
 	// always keep consistent with replicaPB.Nodes.
@@ -293,11 +289,6 @@ func (replica *Replica) GetChannelRWNodes(channelName string) []int64 {
 	return replica.replicaPB.ChannelNodeInfos[channelName].GetRwNodes()
 }
 
-// GetCollectionGroupID returns the allocation group from the current configuration.
-func (replica *Replica) GetCollectionGroupID() string {
-	return replica.collectionGroupID
-}
-
 // CopyForWrite returns a mutable replica for write operations.
 func (replica *Replica) CopyForWrite() *mutableReplica {
 	exclusiveRWNodeToChannel := make(map[int64]string)
@@ -309,16 +300,14 @@ func (replica *Replica) CopyForWrite() *mutableReplica {
 
 	return &mutableReplica{
 		Replica: &Replica{
-			replicaPB:              proto.Clone(replica.replicaPB).(*querypb.Replica),
-			rwNodes:                typeutil.NewUniqueSet(replica.replicaPB.Nodes...),
-			roNodes:                typeutil.NewUniqueSet(replica.replicaPB.RoNodes...),
-			rwSQNodes:              typeutil.NewUniqueSet(replica.replicaPB.RwSqNodes...),
-			roSQNodes:              typeutil.NewUniqueSet(replica.replicaPB.RoSqNodes...),
-			loadPriority:           replica.LoadPriority(),
-			waitRGReadyAt:          replica.waitRGReadyAt,
-			queryInvisible:         replica.queryInvisible,
-			collectionGroupID:      replica.collectionGroupID,
-			collectionGroupVersion: replica.collectionGroupVersion,
+			replicaPB:      proto.Clone(replica.replicaPB).(*querypb.Replica),
+			rwNodes:        typeutil.NewUniqueSet(replica.replicaPB.Nodes...),
+			roNodes:        typeutil.NewUniqueSet(replica.replicaPB.RoNodes...),
+			rwSQNodes:      typeutil.NewUniqueSet(replica.replicaPB.RwSqNodes...),
+			roSQNodes:      typeutil.NewUniqueSet(replica.replicaPB.RoSqNodes...),
+			loadPriority:   replica.LoadPriority(),
+			waitRGReadyAt:  replica.waitRGReadyAt,
+			queryInvisible: replica.queryInvisible,
 		},
 		exclusiveRWNodeToChannel: exclusiveRWNodeToChannel,
 	}

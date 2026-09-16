@@ -247,6 +247,8 @@ func (suite *ServiceSuite) SetupTest() {
 	suite.jobScheduler.Start()
 	assign.ResetGlobalAssignPolicyFactoryForTest()
 	assign.InitGlobalAssignPolicyFactory(suite.taskScheduler, suite.nodeMgr, suite.dist, suite.meta, suite.targetMgr)
+	balance.ResetGlobalBalancerFactoryForTest()
+	balance.InitGlobalBalancerFactory(suite.taskScheduler, suite.nodeMgr, suite.dist, suite.targetMgr)
 	suite.balancer = balance.NewRowCountBasedBalancer(
 		suite.taskScheduler,
 		suite.nodeMgr,
@@ -297,6 +299,9 @@ func (suite *ServiceSuite) SetupTest() {
 		suite.taskScheduler,
 		suite.broker,
 	)
+
+	suite.server.replicaObserver = observers.NewReplicaObserver(suite.meta, suite.dist, suite.targetMgr, suite.broker)
+	suite.server.replicaObserver.Start()
 
 	suite.server.registerMetricsRequest()
 	suite.server.UpdateStateCode(commonpb.StateCode_Healthy)
@@ -709,10 +714,7 @@ func (suite *ServiceSuite) TestTransferNode() {
 
 	server.resourceObserver = observers.NewResourceObserver(server.meta)
 	server.resourceObserver.Start()
-	server.replicaObserver = observers.NewReplicaObserver(server.meta, server.dist, server.targetMgr)
-	server.replicaObserver.Start()
 	defer server.resourceObserver.Stop()
-	defer server.replicaObserver.Stop()
 
 	_, err := server.meta.AddResourceGroup(ctx, "rg1", &rgpb.ResourceGroupConfig{
 		Requests: &rgpb.ResourceGroupLimit{NodeNum: 0},
@@ -1958,16 +1960,9 @@ func (suite *ServiceSuite) TestGetShardLeadersWithUnserviceableShards() {
 }
 
 func (suite *ServiceSuite) TestHandleNodeUp() {
-	suite.server.replicaObserver = observers.NewReplicaObserver(
-		suite.server.meta,
-		suite.server.dist,
-		suite.server.targetMgr,
-	)
 	suite.server.resourceObserver = observers.NewResourceObserver(
 		suite.server.meta,
 	)
-	suite.server.replicaObserver.Start()
-	defer suite.server.replicaObserver.Stop()
 	suite.server.resourceObserver.Start()
 	defer suite.server.resourceObserver.Stop()
 
@@ -2033,6 +2028,15 @@ func (suite *ServiceSuite) loadAll() {
 			suite.NotNil(suite.meta.GetPartitionsByCollection(ctx, collection))
 			suite.targetMgr.UpdateCollectionCurrentTarget(ctx, collection)
 		}
+		// Node assignment is performed asynchronously by ReplicaObserver.
+		suite.Require().Eventually(func() bool {
+			for _, replica := range suite.meta.GetByCollection(ctx, collection) {
+				if replica.RWNodesCount() == 0 {
+					return false
+				}
+			}
+			return true
+		}, 5*time.Second, 10*time.Millisecond)
 	}
 }
 
@@ -2306,10 +2310,12 @@ func (suite *ServiceSuite) TestManualUpdateCurrentTarget() {
 }
 
 func (suite *ServiceSuite) TearDownTest() {
+	suite.server.replicaObserver.Stop()
 	suite.targetObserver.Stop()
 	suite.collectionObserver.Stop()
 	suite.jobScheduler.Stop()
 	assign.ResetGlobalAssignPolicyFactoryForTest()
+	balance.ResetGlobalBalancerFactoryForTest()
 }
 
 func TestService(t *testing.T) {
