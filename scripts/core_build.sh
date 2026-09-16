@@ -234,9 +234,14 @@ if [[ -n "${MILVUS_CARGO_TARGET_ROOT:-}" ]]; then
   MILVUS_STORAGE_CARGO_DIR="${MILVUS_CARGO_TARGET_ROOT}/milvus-storage"
   if [[ -L "${CORROSION_CARGO_DIR}" ]]; then
     ln -sfn "${MILVUS_STORAGE_CARGO_DIR}" "${CORROSION_CARGO_DIR}"
+  elif [[ -d "${CORROSION_CARGO_DIR}" ]]; then
+    # Migrate a generated target directory left by builds that predate the
+    # persistent Cargo root. Cargo can safely recreate all of its contents.
+    echo "Migrating ${CORROSION_CARGO_DIR} to persistent Cargo target storage"
+    rm -rf -- "${CORROSION_CARGO_DIR}"
+    ln -s "${MILVUS_STORAGE_CARGO_DIR}" "${CORROSION_CARGO_DIR}"
   elif [[ -e "${CORROSION_CARGO_DIR}" ]]; then
     echo "ERROR: ${CORROSION_CARGO_DIR} already exists and is not a symbolic link" >&2
-    echo "Remove it before enabling MILVUS_CARGO_TARGET_ROOT" >&2
     exit 1
   else
     ln -s "${MILVUS_STORAGE_CARGO_DIR}" "${CORROSION_CARGO_DIR}"
