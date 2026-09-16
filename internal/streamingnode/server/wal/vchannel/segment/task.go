@@ -299,13 +299,10 @@ func (s *SegmentView) finishTask() {
 // created tasks fail fast with the same error instead of executing, and observations are poisoned
 // instead of buffered (see ObserveInsert / ObserveCreateSegmentMessageV2 / Flush).
 //
-// Every retained message in the three pending structures is poisoned and released, so a failed
-// segment pins nothing in memory and leaves no message silently dropped: each poisoned message
-// carries a marker a consumer can observe and handle separately (reassign / replay), instead of
-// the failure becoming invisible. The poison is message-level and survives in the shared core, so
-// any handle to the same message can observe it. Reclaiming the view itself is the concern of the
-// future owner that wires this package into the vchannel module; until then the view stays, which
-// is the intended fail-safe. The failure is logged loudly for upper-layer accounting.
+// Retained messages are poisoned and released to free payload memory. Tracker leaves their
+// positions incomplete, keeping the WAL available for replay; BroadcastAck must not acknowledge
+// failed local work. The VChannel-owned view retains its terminal state and rejects subsequent
+// work until recovery replaces it. The failure is logged for upper-layer accounting.
 func (s *SegmentView) markUnrecoverable(ctx context.Context, err error) {
 	// Record the terminal error and snapshot the retained handles under the
 	// same lock, so the logged count is an exact snapshot of the terminal

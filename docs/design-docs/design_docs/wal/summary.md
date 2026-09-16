@@ -5,8 +5,9 @@
 - Independent Approver: @weiliu1031
 - Design Review: 2026-07-29
 
-**Status:** The standalone write, recovery and local GC workflow is implemented;
-external RecoveryStorage wiring remains follow-up work on this branch (see §7).
+**Status:** The asynchronous write, recovery and local GC workflow is implemented
+and wired into RecoveryStorage, including independent backlog checks and
+checkpoint gating. Idempotency-window restoration remains follow-up work (§7).
 The existing object-key encoding is retained; §8 describes forward
 generation-prefix discovery and its recovery cost.
 The cross-owner GC protocol is not yet designed; see the TODO in §9.
@@ -31,8 +32,8 @@ It exists for two reasons:
 ### 2.1 Scope And Dependencies
 
 ```text
-future async RecoveryStorage -> walsummary
-vchannel (VChannelRecoveryModule) -> walsummary
+RecoveryStorage             -> walsummary
+RecoveryStorage             -> vchannel (seeds transform windows from summary)
 walsummary                  -> (no dependency on vchannel / transformlog)
 ```
 
@@ -42,6 +43,7 @@ vchannel:
 ```text
 walsummary.Manager (one per pchannel)
   +-- pending: ordered records not yet sealed
+  +-- pendingSince: age of the oldest staged record, independent of message Ack
   +-- upload state: sealed chunks and their independent upload completions
   +-- continuous durable frontier: the prefix with no missing chunk
   +-- manifest: retained chunk/section index and data coverage boundaries
@@ -181,6 +183,18 @@ NodeScheduler manifest publication task
 ### 3.1 Ordered Publication After Concurrent Uploads
 
 `FlushMaxBytes` and `RequestFlushThrough` trigger sealing and scheduling.
+`Manager.Run` independently checks staged backlog at most one second apart.
+The oldest record's age is not reset by later records. Once it reaches the
+configured wait, or the recovery tail is under soft pressure, the manager
+requests a flush through its observed frontier. RecoveryStorage supplies the
+existing `dataNode.segment.syncPeriod` wait (falling back to the checkpoint persistence
+interval if it is disabled), and cancels/joins this worker during Close.
+
+This trigger requires neither an incomplete AckTracker entry nor another WAL
+message. In particular, a small Delete-only workload followed by silence still
+seals and publishes. Sealed chunks and dirty manifests continue on their own
+scheduler retry paths; periodic checks do not manufacture completion or bypass
+the first-manifest requirement. Empty backlog produces no new chunk.
 Observation retains no source WAL handle and performs no object-storage I/O.
 The caller owns the scheduler lifetime. The existing convention that a zero
 `FlushMaxBytes` disables size-triggered sealing is unchanged.
@@ -264,8 +278,10 @@ in the restored dirty manifest submitted to the scheduler.
 `MaxRetainedChunks`, `EnableTransform`, and the scheduler/runtime. A zero flush
 threshold disables size-triggered sealing; a zero retention bound disables that
 bound. `RequestFlushThrough` can still request progress independently of size.
-The idempotency feature exposes object-budget settings, but mapping feature
-settings into this manager belongs to the external integration described in §7.
+RecoveryStorage currently enables transform records, supplies `FlushL0MaxSize`
+as the staging threshold and `SummaryMaxBytesPerPChannel` as the retained-byte
+budget. It does not yet pass `MaxRetainedChunks`, so the count bound is disabled
+in production wiring even though the standalone manager supports it.
 
 Publication is scheduled independently of the RecoveryStorage checkpoint tick.
 The integration must combine its own completed frontier with `LastAcked()`;
@@ -370,8 +386,11 @@ The existing read interface is
 committed consumer frontier is carried by
 `VChannelMeta.transform_materialized_time_tick`. Summary persistence, manifest
 publication and LastAcked are owned by WALSummary and its recovery integration;
-TransformLog does not define or drive that protocol. The next async
-RecoveryStorage PR wires the read/recovery/GC interactions between the modules.
+TransformLog does not define or drive that protocol. RecoveryStorage reads the
+window during module initialization and reports captured GC frontiers after
+catalog persistence. One integration gap remains: the callback currently visits
+full VChannel snapshots but omits base-only snapshots, so materialization-only
+updates may delay retention release.
 
 ### 5.3 Consumer Lifecycle
 
@@ -459,7 +478,7 @@ verification detects a rejected or ambiguously completed guarded write. Every
 later publication carries the owner's term. This is a checkpoint-publication
 fence, not an object-store deletion fence.
 
-Once wired, checkpoint publication must also satisfy §3.4. Summary storage
+Checkpoint publication satisfies the Summary confirmation bound in §3.4. Summary storage
 stalls can therefore pin WAL truncation even while the append side still makes
 progress. Backend retention behavior and WAL backpressure remain outside
 WALSummary; the replay interval must remain available until safely summarized.
@@ -500,10 +519,13 @@ then deletes asynchronously and rediscovers failed deletions on retry. Older
 manifests are removed after the current term's publication. The cross-owner GC
 protocol remains TODO in §9; local locking is not distributed exclusion.
 
-Legacy RecoveryStorage has no WALSummary wiring. The later async integration
-must provide ordered observation and scheduler lifetime, combine AckTracker
-completion with summary `LastAcked`, restore idempotency and transform consumer
-windows, and advance consumer GC positions only after their metadata is durable.
+RecoveryStorage supplies ordered observation and scheduler lifetime, combines
+AckTracker completion with `LastAcked`, restores transform windows, and runs
+Summary backlog checks independently of Tracker stalls and catalog retries.
+The initial `RecoverySnapshot.SummarySnapshots` remains reserved/unpopulated;
+durable idempotency-window restoration is not complete. GC callbacks still need
+to cover base-only VChannel snapshots (§5.2), and count-budget wiring is absent
+(§3.4). These gaps are separate from the implemented asynchronous write path.
 
 ## 8. Object Listing And Recovery Cost
 
@@ -599,9 +621,11 @@ not for already covered generations in the first batch.
 
 WAL owns backpressure, including limiting accumulation when uploads or manifest
 publication stall. WALSummary does not introduce a separate backpressure policy
-or admission-control interface. Its progress and pending-work state participate
-in that later WAL integration. The integration must account for the whole
-unpublished backlog, not just actively uploading tasks.
+or admission-control interface. Its confirmation frontier constrains checkpoint
+publication, and its independent backlog worker observes WAL tail pressure.
+Staged records participate even when there are no active uploads or Tracker
+entries. Tail accounting currently uses observed logical bytes; it does not
+include unobserved scanner lag or directly bound the retained transform window.
 
 Discovery cost still depends on manifest cleanup backlog, old-term objects
 sharing a batch, unpublished tail length and loaded index size. Normal
@@ -662,8 +686,9 @@ coalesced manifest publication and retries, restore without inline writes,
 continuous tail probing across numeric-prefix boundaries and mixed terms,
 empty-manifest coverage, same-term writer rejection, byte/count retention,
 transform GC frontiers, reader pins, failed-deletion rediscovery and retention
-across restart. They do not establish distributed GC safety or complete the
-external recovery wiring.
+across restart. Backlog tests cover source Ack followed by silence, oldest-record
+age, pressure-triggered sealing and cancellation. They do not establish
+distributed GC safety or complete idempotency-window restoration.
 
 Key source files, relative to the repository root:
 

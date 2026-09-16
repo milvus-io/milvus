@@ -21,6 +21,7 @@ raw message M
        -> route to every affected VChannel
        -> each actual async consumer clones its own handle
        -> QueryRuntime receives a plain immutable copy when needed
+  -> WALSummary.ObserveMessage(M) copies keyed-write and Delete records
   -> D.Release()
   -> BroadcastAck.Accept(O)
 ```
@@ -53,9 +54,9 @@ message TimeTick > component checkpoint_time_tick
 The manager still routes one message to all affected components because their
 frontiers may differ. It does not decide whether a message is metadata or data.
 
-For a component with outstanding earlier work, later completed work waits in a
-component-local completed queue. Its published `checkpoint_time_tick` moves
-only when the component's relevant prefix is continuous.
+Each component's published `checkpoint_time_tick` moves only through its
+continuous relevant prefix. SegmentView enforces this with serial task execution;
+different Segments may complete independently.
 
 ## 3. Ownership Table
 
@@ -103,14 +104,16 @@ TransformLog materializes L0 independently without retaining the message.
 
 Flush, ManualFlush, FlushAll, DropCollection, DropPartition,
 TruncateCollection, schema-changing AlterCollection, and AlterWAL may create
-work in multiple SegmentViews and TransformLogs. Every concrete consumer owns
-an independent clone.
+work in multiple SegmentViews and TransformLogs. Each asynchronous Segment
+consumer owns an independent clone; TransformLog copies any relevant boundary
+into its materialization window.
 
 ### Txn
 
-A committed Txn is one WAL message. Each affected SegmentView and TransformLog
-retains an independent reference to the whole outer Txn. Children returned by
-`RangeOver` do not receive independent Tracker entries.
+A committed Txn is one WAL message. Each affected SegmentView retains an
+independent reference to the whole outer Txn. Summary and TransformLog copy
+their records. Children returned by `RangeOver` do not receive independent
+Tracker entries.
 
 One Txn may contain several inserts for the same segment. That SegmentView owns
 one Txn handle and applies all of its assignments before completing its local
@@ -129,7 +132,7 @@ does not create a second checkpoint.
 ## 6. Checkpoint Batch
 
 ```text
-candidate = Tracker continuous completed point
+candidate = min_by_TimeTick(Tracker.CompletedPoint(), WALSummary.LastAcked())
 freeze candidate
   -> consume stable component snapshots
   -> persist snapshots
@@ -146,8 +149,9 @@ may be newer than the global checkpoint and uses its own
 
 1. Every observed message has exactly one Tracker Owner.
 2. Startup and live messages use the same complete Observe flow.
-3. Every asynchronous consumer clones before synchronous dispatch returns.
+3. Every asynchronous Segment consumer clones before synchronous dispatch returns; Summary and TransformLog copy records.
 4. Txn children never have independent recovery ownership.
 5. QueryRuntime does not retain RecoveryStorage handles.
 6. Component filtering uses only TimeTick and `checkpoint_time_tick`.
 7. RecoveryBarrier is a catch-up event, not an Observe-mode transition.
+8. Poisoned release frees memory but blocks the successful prefix and broadcast Ack.

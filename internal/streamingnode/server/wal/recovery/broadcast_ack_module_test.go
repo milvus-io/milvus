@@ -44,6 +44,39 @@ func TestBroadcastAckHoldsOwnerUntilExclusiveAndAckSucceeds(t *testing.T) {
 	assert.Equal(t, msg.TimeTick(), tracker.CompletedPoint().TimeTick)
 }
 
+func TestBroadcastAckPoisonKeepsConflictingTasksBlocked(t *testing.T) {
+	scheduler := &recordingAckTaskScheduler{}
+	module := newBroadcastAckModule(moduleapi.Runtime{Scheduler: scheduler})
+	t.Cleanup(module.Close)
+	var acked []uint64
+	module.ack = func(_ context.Context, msg message.ImmutableMessage) error {
+		acked = append(acked, msg.TimeTick())
+		return nil
+	}
+	tracker := messageack.NewTracker(utility.WALCheckpoint{}, nil, nil)
+	makeOwner := func(id, tt uint64, collection string) message.OwnedImmutableMessage {
+		return tracker.Track(newBroadcastAckMessageWith(t, message.NewCreateCollectionMessageBuilderV1().
+			WithBroadcast([]string{"v1"}).
+			WithHeader(&message.CreateCollectionMessageHeader{CollectionId: 1}).
+			WithBody(&msgpb.CreateCollectionRequest{}), id, tt,
+			message.NewExclusiveCollectionNameResourceKey("db", collection)))
+	}
+	first := makeOwner(1, 10, "c1")
+	failed := first.Clone()
+	module.Accept(first)
+	module.Accept(makeOwner(2, 20, "c1"))
+	module.Accept(makeOwner(3, 30, "c2"))
+	failed.PoisonedRelease()
+	module.dispatchReadyTasks()
+	require.Panics(t, func() { first.Message() }, "poison releases payload memory")
+	task := scheduler.waitTask(t)
+	require.NoError(t, task.Execute(context.Background()))
+	module.dispatchReadyTasks()
+	require.Len(t, scheduler.snapshot(), 1)
+	require.Equal(t, []uint64{30}, acked, "only the independent broadcast may succeed")
+	require.Zero(t, tracker.CompletedPoint().TimeTick)
+}
+
 func TestBroadcastAckSubmitsExclusiveOwnerImmediately(t *testing.T) {
 	scheduler := &recordingAckTaskScheduler{}
 	module := newBroadcastAckModule(moduleapi.Runtime{Scheduler: scheduler})

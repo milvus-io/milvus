@@ -62,6 +62,12 @@ func (m *broadcastAckModule) Accept(
 	m.ackTasks = append(m.ackTasks, task)
 	m.ackTaskMu.Unlock()
 	owner.RegisterExclusiveCallback(func() {
+		task.poisoned = owner.IsPoisoned()
+		if task.poisoned {
+			// Release payload memory, but keep this task as a resource-ordering
+			// blocker. Failed local work must not be acknowledged to the coordinator.
+			owner.Release()
+		}
 		task.exclusive.Store(true)
 		m.wakeDispatcher()
 	})
@@ -95,7 +101,7 @@ func (m *broadcastAckModule) dispatchReadyTasks() {
 	m.compactCompletedTasksLocked()
 	readyTasks := make([]*broadcastAckTask, 0)
 	for idx, task := range m.ackTasks {
-		if !task.exclusive.Load() || task.inFlight {
+		if !task.exclusive.Load() || task.poisoned || task.inFlight {
 			continue
 		}
 		if hasEarlierBroadcastAckConflict(m.ackTasks[:idx], task) {
@@ -176,6 +182,7 @@ type broadcastAckTask struct {
 	owner        message.OwnedImmutableMessage
 	resourceKeys []message.ResourceKey
 	exclusive    atomic.Bool
+	poisoned     bool // Published by exclusive.Store after the last consumer releases.
 	inFlight     bool
 	completed    bool
 }

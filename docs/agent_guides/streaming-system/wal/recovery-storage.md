@@ -1,20 +1,32 @@
 # RecoveryStorage
 
-Persists WAL consumer state to the catalog (etcd) and object storage. **Core invariant**: from any WAL position + the corresponding persisted state, RecoveryStorage can replay the WAL forward and recover a fully consistent in-memory state.
+Persists WAL consumer state to the catalog (etcd) and object storage. The authoritative design is [WAL Recovery Architecture](../../../design-docs/design_docs/wal/wal-recovery-architecture.md) and its linked documents. **Core invariant**: the published checkpoint and persisted component state allow replay of the remaining WAL tail without losing data.
 
 ## Persisted State
 
-- **WALCheckpoint** (etcd): `MessageID` (= LastConfirmedMessageID of last consumed message), `TimeTick`, `ReplicateCheckpoint` (for secondary clusters), `AlterWalState` (for WAL backend migration).
+- **WALCheckpoint** (etcd): safe `LastConfirmedMessageID` and logical `TimeTick`, publisher term, replication configuration/progress, and AlterWAL state. Publication is bounded by both AckTracker's successful continuous prefix and WALSummary's `LastAcked`.
 - **VChannel metadata** (etcd): Per-VChannel collection info, partition list, schema history, state (NORMAL / DROPPED).
 - **Segment assignments** (etcd): Per-segment growing/flushed status with row count and binary size stats.
-- **Segment data** (object storage): Sealed segment binlog, indexes, and stats files.
+- **Segment data** (object storage): SegmentView writes L1 binlogs and statistics; TransformLog materializes Delete records into L0. Index building is outside RecoveryStorage.
+- **WALSummary** (object storage): PChannel-scoped immutable chunks and term manifests, storing keyed-write summaries and Delete records independently of source-message handles.
 
 ## Recovery Flow
 
-1. **Persist recovery** (`recoverRecoveryInfoFromMeta`): Load checkpoint, VChannel metadata, and segment assignments from catalog in parallel.
-2. **Stream recovery** (`recoverFromStream`): Build a `RecoveryStream` from the checkpoint's MessageID to the current WAL position. Replay all messages to reconstruct in-memory state. Extract uncommitted `TxnBuffer`.
+1. RW WAL opening appends a RecoveryBarrier to fence the old writer.
+2. **Metadata recovery** (`recoverRecoveryInfoFromMeta`): Claim the checkpoint with the assignment term, load component metadata and restore WALSummary; rebuild outstanding transform windows.
+3. **Bounded recovery** (`runBoundedRecovery`): Observe the WAL from the checkpoint through the barrier and build the write-path snapshot and uncommitted `TxnBuffer`. Asynchronous persistence need not have finished.
+4. Start live observation, AckTracker stall checks, independent Summary backlog checks, and catalog publication. Component snapshots precede checkpoint publication and WAL truncation. Poisoned messages remain incomplete and block the checkpoint.
+
+The bounded/live scanner handoff and control-state prefix alignment have open implementation points documented in the architecture and checkpoint design; this guide does not claim those contracts are already fully verified.
 
 ## Key Packages
 
-- `internal/streamingnode/server/wal/recovery/` — `RecoveryStorage`, `RecoverySnapshot`, `WALCheckpoint`, background persist task
-- `internal/streamingnode/server/flusher/flusherimpl/` — `WALFlusherImpl`, segment data flush to object storage
+- `internal/streamingnode/server/wal/recovery/` — recovery orchestration, BroadcastAck, tail control and checkpoint publication
+- `internal/streamingnode/server/wal/utility/` — checkpoint and recovery snapshot types
+- `internal/streamingnode/server/wal/messageack/` — message completion and stall tracking
+- `internal/streamingnode/server/wal/vchannel/` — VChannel metadata and component ownership
+- `internal/streamingnode/server/wal/vchannel/segment/` — L1 persistence and final DataCoord commit
+- `internal/streamingnode/server/wal/vchannel/transformlog/` — L0 materialization
+- `internal/streamingnode/server/wal/walsummary/` — summary persistence, recovery and retention
+
+The former `flusher/flusherimpl` path has been removed. A compatibility VChannel checkpoint updater still reports flush progress to DataCoord; it is not another recovery or truncation cursor.

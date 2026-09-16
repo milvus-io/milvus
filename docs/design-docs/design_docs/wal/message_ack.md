@@ -7,15 +7,15 @@
 
 This document defines how RecoveryStorage tracks one WAL message until all
 required persistence consumers and Coordinator broadcast acknowledgement have
-finished. The resulting continuous completed prefix is the sole candidate for
-the global recovery checkpoint.
+finished. The resulting continuous successful prefix, capped by
+`WALSummary.LastAcked()`, bounds the global recovery checkpoint.
 
 ## 1. Scope
 
 One WAL message may create asynchronous work in multiple SegmentViews and
-TransformLogs. RecoveryStorage may advance past it only after every concrete
-consumer succeeds. Broadcast messages additionally wait for consuming-side Ack
-to StreamingCoord.
+copied records in WALSummary and TransformLog. Segment work participates in
+reference-counted completion; Summary has its own confirmation frontier.
+Broadcast messages additionally wait for consuming-side Ack to StreamingCoord.
 
 Ack observes completion. It does not define Segment or TransformLog scheduling,
 batch boundaries, or object layout.
@@ -28,6 +28,7 @@ The common wrapper is:
 type OwnedImmutableMessage interface {
     Message() ImmutableMessage
     Clone() RetainedImmutableMessage
+    IsPoisoned() bool
     RegisterExclusiveCallback(callback func())
     Release()
 }
@@ -36,12 +37,17 @@ type RetainedImmutableMessage interface {
     Message() ImmutableMessage
     Clone() RetainedImmutableMessage
     Release()
+    PoisonedRelease()
+    IntoPoisoned()
+    IsPoisoned() bool
 }
 ```
 
 `NewOwnedImmutableMessage` creates the unique root reference. Every independent
 async unit gets its own clone. The finalizer runs exactly once when the total
-reference count reaches zero.
+reference count reaches zero. Tracker uses
+`NewOwnedImmutableMessageWithFinalizer`, whose callback also receives the final
+poison status. The original constructor retains its cleanup-only callback API.
 
 `RegisterExclusiveCallback` fires when the Owner is the only remaining
 reference. BroadcastAck uses it as the readiness signal for Coordinator Ack.
@@ -68,7 +74,7 @@ type trackedEntry struct {
 finalizer:
 
 1. clears the entry's message pointer immediately;
-2. marks the entry completed;
+2. leaves a poisoned entry incomplete, or marks a successful entry completed;
 3. removes the continuous completed prefix;
 4. advances the completed point and byte offset to the last removed entry.
 
@@ -84,6 +90,11 @@ M2 and M3 retain only lightweight ordered records while M1 blocks the global
 prefix. Their payloads do not stay live solely because the checkpoint is
 blocked.
 
+A poisoned entry also releases its payload, but remains an incomplete prefix
+blocker. Its raw message stays recoverable from the untruncated WAL. A future
+durable dump of the entire poisoned message may permit checkpoint advancement
+without data loss; until that protocol exists, poison never means success.
+
 ## 4. Dispatch
 
 ```text
@@ -94,8 +105,9 @@ D.Release()
 BroadcastAck.Accept(O)
 ```
 
-PChannel-wide routing clones once for every affected VChannel. SegmentView and
-TransformLog clone only when they expose actual asynchronous work.
+PChannel-wide routing clones once for every affected VChannel. SegmentView
+clones when it exposes asynchronous work. Summary and TransformLog copy records
+without retaining source handles.
 
 There is no special untracked metadata flow. Every recovered or live WAL
 message enters the same Tracker path.
@@ -108,14 +120,15 @@ A Segment handle releases after the required object write or lifecycle side
 effect succeeds, the resulting recovery state is installed, its continuous
 `checkpoint_time_tick` advances when possible, and the view is marked dirty.
 
-One object chunk may cover multiple handles. Failure keeps all uncovered
-handles live.
+One object chunk may cover multiple handles. Retriable failures keep uncovered
+handles live. Terminal failures poison and release them; the Tracker retains
+the incomplete positions and cannot advance through them.
 
 ### TransformLog
 
-A TransformLog handle releases after the chunk covering the message is durable
-and recoverable TransformLog state is installed and marked dirty. L0
-materialization does not participate in source-message Ack.
+TransformLog owns a copied materialization window and retains no WAL handle.
+WALSummary independently persists Delete records and exposes `LastAcked`.
+L0 materialization does not participate in source-message Ack.
 
 ### Metadata Components
 
@@ -134,10 +147,11 @@ Tracker exposes:
 
 ```go
 CompletedPoint() WALCheckpoint
-CompletedLogicalOffset() uint64
+Completed() (WALCheckpoint, uint64)
 ```
 
-The publisher may freeze this point but cannot publish a newer point. The
+The publisher freezes the minimum by TimeTick of this point and Summary's
+`LastAcked`; neither frontier alone permits publication. The
 published checkpoint remains a separate state until catalog commit succeeds.
 
 An asynchronous consumer always marks its component dirty before releasing its
@@ -161,9 +175,11 @@ For each VChannel, Tracker requests the largest TimeTick that currently
 satisfies the stall timeout. It does not pass message objects and does not route
 through RecoveryStorageImpl.
 
-The trigger is meaningful only for persistence consumers. BroadcastAck or
-catalog publication stalls are exposed to the tail controller as separate
-blocker categories.
+Summary runs its own backlog check based on the oldest staged record's age or
+tail pressure. It can flush even when Tracker has no pending entries, including
+low-traffic Deletes followed by no new messages. Chunk/manifest retries remain
+owned by the scheduler. BroadcastAck and catalog publication have separate
+retry paths; explicit blocker-category reporting is not yet implemented.
 
 ## 8. Broadcast Ack And Retry
 
@@ -171,8 +187,10 @@ Ordinary messages release the Owner immediately after dispatch. BroadcastAck
 keeps the Owner, waits for the exclusive callback, and performs Coordinator Ack
 under ResourceKey ordering. Ack failure keeps the Owner and retries.
 
-Reference count zero for a broadcast therefore proves both local consumer
-completion and Coordinator Ack success.
+A poisoned broadcast releases its payload without sending Coordinator Ack and
+remains a ResourceKey ordering blocker. Non-conflicting broadcasts can proceed.
+Only successful, non-poisoned finalization proves local handle-consumer
+completion and Coordinator Ack success; Summary confirmation is checked separately.
 
 ## 9. Close
 
@@ -183,7 +201,7 @@ reconstructed by replay from the global checkpoint.
 ## 10. Invariants
 
 1. Every WAL message has one Tracker entry and one Owner.
-2. Each async consumer owns an independent Retained clone.
+2. Each async Segment consumer owns an independent Retained clone; copied Summary/TransformLog records do not.
 3. Finalization occurs only at reference count zero.
 4. Completed payloads are released independently of ordered-prefix progress.
 5. Tracker checkpoint progress is continuous and monotonic.

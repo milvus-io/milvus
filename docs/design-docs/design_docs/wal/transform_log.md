@@ -10,7 +10,7 @@ transform records of the pchannel-scoped WALSummary into DataCoord-managed L0
 segments. Delete is the initial transform payload. QueryNode and StreamingNode
 query resources consume the L0 output to advance transform visibility.
 
-The module is implemented, but its production recovery wiring is pending.
+The module is implemented and wired into RecoveryStorage.
 Its WALSummary interactions are reads when needed, recovery of its consumer
 window, and reporting a GC position. This document specifies those consumer
 contracts and L0 materialization. The WALSummary storage protocol is defined
@@ -20,15 +20,12 @@ in [WALSummary](summary.md).
 
 ```text
 RecoveryStorage (pchannel)
+  +-- walsummary.Manager (pchannel-scoped persistence and reads)
   -> PChannelRecoveryManager
        +-- VChannelRecoveryModule A
-       |     +-- summaryView (per-vchannel view of the walsummary.Manager)
        |     +-- TransformLog A   (materialize-only consumer)
        +-- VChannelRecoveryModule B
-       |     +-- summaryView (per-vchannel view of the walsummary.Manager)
        |     +-- TransformLog B
-       +-- walsummary.Manager (pchannel-scoped summary read interface)
-             +-- views per vchannel
 ```
 
 TransformLog owns:
@@ -38,7 +35,7 @@ TransformLog owns:
   once, by recovery);
 - the committed materialization frontier `materialized_time_tick`, carried by
   `VChannelMeta.transform_materialized_time_tick`;
-- the L1 upper bound derived from uncommitted L0 segments;
+- the L1 upper bound derived from L1 segments awaiting final commit;
 - L0 materialization (batching, ordering, retry).
 
 ## 2. WALSummary Consumer Interface

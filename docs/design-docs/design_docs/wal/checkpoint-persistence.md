@@ -24,7 +24,8 @@ The checkpoint is the largest published continuous prefix. Internally, the
 Tracker also has a completed point that may be newer than the published point:
 
 ```text
-published checkpoint <= completed point <= observed WAL tail
+candidate = min_by_TimeTick(Tracker.CompletedPoint(), WALSummary.LastAcked())
+published checkpoint <= candidate <= observed WAL tail
 ```
 
 Only the published point survives a crash and only it may be used for replay or
@@ -106,7 +107,7 @@ mechanism; it does not create another recovery cursor.
 The publisher executes:
 
 ```text
-candidate = Tracker.CompletedPoint()
+candidate = min_by_TimeTick(Tracker.CompletedPoint(), WALSummary.LastAcked())
 freeze candidate
   -> consume stable dirty component snapshots
   -> save all component deltas
@@ -200,6 +201,16 @@ independent `checkpoint_time_tick` — its frontier is the checkpoint position.
 The in-memory control state is still tracked separately for deduplication and
 stage transitions (AlterWAL FLUSHING → ADVANCE_CHECKPOINT), and recovery
 decodes it from the checkpoint, then replays control messages after it.
+
+**Open implementation point:** `updatePChannelControl` currently keeps the latest
+observed control state, and `consumeDirtySnapshot` copies that state even when
+the candidate position is pinned earlier by unfinished Segment or Summary work.
+For example, an Insert at 110 can hold the candidate at 100 while a configuration
+change at 120 is included in the same checkpoint object. Atomic catalog storage
+alone does not make these two logical positions consistent. Selecting control
+state covered by the candidate, including covered-event stage transitions,
+requires a separate design decision and implementation change. The current
+code does not yet establish the prefix-alignment contract described above.
 
 ## 8. Close
 
