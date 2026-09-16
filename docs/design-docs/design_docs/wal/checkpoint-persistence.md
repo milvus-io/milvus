@@ -50,8 +50,8 @@ The following state is represented as component snapshots:
 
 - VChannel collection, partition, schema, and lifecycle state;
 - Segment assignment, object references, row statistics, and lifecycle state;
-- the VChannel transform materialization frontier
-  (`VChannelMeta.transform_materialized_time_tick`);
+- the VChannel [L0Materializer](l0_materializer.md) frontier, using the existing
+  `VChannelMeta.transform_materialized_time_tick` field;
 - salvage and cleanup metadata that must precede checkpoint publication.
 
 The PChannel replication and AlterWAL control state is logically a component
@@ -74,13 +74,19 @@ The persisted component fields use one uniform name:
 | `SegmentAssignmentMeta` | `checkpoint_time_tick` |
 
 There is no `applied_through_time_tick`, `data_checkpoint_time_tick`, persisted
-`sync_up_time_tick`, or persisted last-Delete frontier. Component code uses the
+`sync_up_time_tick`, or persisted last-Delete frontier. Metadata and Segment components use the
 same replay rule:
 
 ```text
 message.TimeTick <= component.checkpoint_time_tick -> no-op
 message.TimeTick >  component.checkpoint_time_tick -> apply complete effect
 ```
+
+L0Materializer's materialized cursor is independent of VChannel metadata's
+`checkpoint_time_tick`. Its requested window is runtime-only and reconstructed
+through replay. After either a full or base-only VChannel snapshot is durable,
+its captured materialized cursor may be reported to Summary for retention;
+in-memory completion alone does not release stored Delete history.
 
 ## 3. Why Component Checkpoints Are Required
 

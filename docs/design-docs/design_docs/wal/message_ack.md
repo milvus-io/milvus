@@ -13,11 +13,13 @@ finished. The resulting continuous successful prefix, capped by
 ## 1. Scope
 
 One WAL message may create asynchronous work in multiple SegmentViews and
-copied records in WALSummary and TransformLog. Segment work participates in
-reference-counted completion; Summary has its own confirmation frontier.
+copied records in WALSummary. Segment work participates in reference-counted
+completion; Summary has its own confirmation frontier. The target
+[L0Materializer](l0_materializer.md) observes only window boundaries and reads
+Summary without holding WAL handles.
 Broadcast messages additionally wait for consuming-side Ack to StreamingCoord.
 
-Ack observes completion. It does not define Segment or TransformLog scheduling,
+Ack observes completion. It does not define Segment or L0Materializer scheduling,
 batch boundaries, or object layout.
 
 ## 2. Message Handles
@@ -100,14 +102,15 @@ without data loss; until that protocol exists, poison never means success.
 ```text
 Owner O = Tracker.Track(M)
 dispatch D = O.Clone()
-manager.ObserveMessage(D)
+Summary.ObserveMessage(M) // install records and readable coverage first
+manager.ObserveMessage(D) // Segment state, then L0 requested window
 D.Release()
 BroadcastAck.Accept(O)
 ```
 
 PChannel-wide routing clones once for every affected VChannel. SegmentView
-clones when it exposes asynchronous work. Summary and TransformLog copy records
-without retaining source handles.
+clones when it exposes asynchronous work. Summary copies records without
+retaining source handles; L0Materializer records only boundary positions.
 
 There is no special untracked metadata flow. Every recovered or live WAL
 message enters the same Tracker path.
@@ -124,11 +127,14 @@ One object chunk may cover multiple handles. Retriable failures keep uncovered
 handles live. Terminal failures poison and release them; the Tracker retains
 the incomplete positions and cannot advance through them.
 
-### TransformLog
+### L0Materializer
 
-TransformLog owns a copied materialization window and retains no WAL handle.
+L0Materializer retains no WAL handle and keeps no copied record window.
 WALSummary independently persists Delete records and exposes `LastAcked`.
-L0 materialization does not participate in source-message Ack.
+L0Materializer reads Summary in bounded batches. L0 materialization does not
+participate in source-message Ack or wait for a TransformLog subscriber.
+The ownership split is an implementation target; see the component status in
+[L0 Materializer](l0_materializer.md).
 
 ### Metadata Components
 
@@ -201,7 +207,8 @@ reconstructed by replay from the global checkpoint.
 ## 10. Invariants
 
 1. Every WAL message has one Tracker entry and one Owner.
-2. Each async Segment consumer owns an independent Retained clone; copied Summary/TransformLog records do not.
+2. Each async Segment consumer owns an independent Retained clone; Summary
+   records and L0Materializer window boundaries do not.
 3. Finalization occurs only at reference count zero.
 4. Completed payloads are released independently of ordered-prefix progress.
 5. Tracker checkpoint progress is continuous and monotonic.
