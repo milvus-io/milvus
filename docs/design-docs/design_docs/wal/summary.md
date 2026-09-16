@@ -7,7 +7,7 @@
 
 **Status:** The asynchronous write, recovery and local GC workflow is implemented
 and wired into RecoveryStorage, including independent backlog checks and
-checkpoint gating. Idempotency-window restoration remains follow-up work (§7).
+checkpoint gating and startup idempotency-window restoration (§7).
 The existing object-key encoding is retained; §8 describes forward
 generation-prefix discovery and its recovery cost.
 The cross-owner GC protocol is not yet designed; see the TODO in §9.
@@ -525,10 +525,19 @@ protocol remains TODO in §9; local locking is not distributed exclusion.
 RecoveryStorage supplies ordered observation and scheduler lifetime, combines
 AckTracker completion with `LastAcked`, restores transform windows, and runs
 Summary backlog checks independently of Tracker stalls and catalog retries.
-The initial `RecoverySnapshot.SummarySnapshots` remains reserved/unpopulated;
-durable idempotency-window restoration is not complete. GC callbacks still need
-to cover base-only VChannel snapshots (§5.2), and count-budget wiring is absent
-(§3.4). These gaps are separate from the implemented asynchronous write path.
+At the startup RecoveryBarrier, RecoveryStorage populates
+`RecoverySnapshot.SummarySnapshots` from all retained idempotency sections and
+records staged or sealed during WAL replay, without waiting for their uploads.
+It enumerates VChannels from Summary, including history absent from the current
+write path, and reads the whole retained range rather than filtering by the
+WAL checkpoint. A single multi-VChannel read avoids fetching each chunk once
+per VChannel. The interceptor rebuilds its windows and applies its byte cap
+before the WAL accepts appends. A read or decode failure fails WAL open rather
+than admitting writes with an incomplete deduplication window.
+
+GC callbacks still need to cover base-only VChannel snapshots (§5.2), and
+count-budget wiring is absent (§3.4). These gaps are separate from the
+implemented asynchronous write path.
 
 ## 8. Object Listing And Recovery Cost
 
@@ -690,8 +699,11 @@ continuous tail probing across numeric-prefix boundaries and mixed terms,
 empty-manifest coverage, same-term writer rejection, byte/count retention,
 transform GC frontiers, reader pins, failed-deletion rediscovery and retention
 across restart. Backlog tests cover source Ack followed by silence, oldest-record
-age, pressure-triggered sealing and cancellation. They do not establish
-distributed GC safety or complete idempotency-window restoration.
+age, pressure-triggered sealing and cancellation. Recovery tests cover retained
+idempotency history before the checkpoint, staged/sealed replay at the barrier,
+and WAL-open failure on unreadable history; interceptor-builder tests verify
+that recovered keys return the original append result without another append.
+These tests do not establish distributed GC safety.
 
 Key source files, relative to the repository root:
 
