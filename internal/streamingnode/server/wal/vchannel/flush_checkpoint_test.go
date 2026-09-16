@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walsummary"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
@@ -60,7 +61,7 @@ func persistDirtySnapshots(module *VChannelRecoveryModule) {
 
 // observeVChannelBarrier observes one ManualFlush message of the module's
 // vchannel; it is classified as a transform barrier.
-func observeVChannelBarrier(t *testing.T, module *VChannelRecoveryModule, vchannel string, timetick uint64) {
+func observeVChannelBarrier(t *testing.T, module *VChannelRecoveryModule, vchannel string, timetick uint64, summary *walsummary.Manager) {
 	t.Helper()
 	mutable := message.NewManualFlushMessageBuilderV2().
 		WithVChannel(vchannel).
@@ -72,6 +73,7 @@ func observeVChannelBarrier(t *testing.T, module *VChannelRecoveryModule, vchann
 		IntoImmutableMessage(walimplstest.NewTestMessageID(int64(timetick + 1)))
 	owner := message.NewOwnedImmutableMessage(raw, nil)
 	retained := owner.Clone()
+	summary.ObserveMessage(context.Background(), raw)
 	require.True(t, module.ObserveMessage(context.Background(), retained))
 	retained.Release()
 	owner.Release()
@@ -87,16 +89,15 @@ func TestVChannelFlushCheckpointMinOfMaterializedAndGrowing(t *testing.T) {
 		1: newSegmentMetaWithCheckpoint(1, 150),
 		2: newSegmentMetaWithCheckpoint(2, 200),
 	}
-	module := newMaterializeBoundTestModule(t, scheduler, segmentMetas)
+	module, summary := newMaterializeBoundTestModule(t, scheduler, segmentMetas)
 	// delete@100 and delete@400: observation schedules one task, the
 	// cap-batch continuation inside materialize chases the frontier to 400.
-	observeVChannelDelete(t, module, "v1", 100)
-	observeVChannelDelete(t, module, "v1", 400)
+	observeVChannelDelete(t, module, "v1", 100, summary)
+	observeVChannelDelete(t, module, "v1", 400, summary)
 	require.Len(t, scheduler.tasks, 1)
 	require.NoError(t, scheduler.tasks[0].Execute(ctx))
-	require.Len(t, scheduler.tasks, 2)
-	require.NoError(t, scheduler.tasks[1].Execute(ctx))
-	assert.Equal(t, uint64(400), module.transformLog.MaterializedTimeTick())
+	require.Len(t, scheduler.tasks, 1)
+	assert.Equal(t, uint64(400), module.l0Materializer.MaterializedTimeTick())
 	// The in-memory frontier is 400 but it is not persisted yet: the flush
 	// checkpoint must not report it.
 	assert.Equal(t, uint64(0), module.FlushCheckpointTimeTick())
@@ -115,11 +116,11 @@ func TestVChannelFlushCheckpointIgnoresFlushedSegments(t *testing.T) {
 		1: newFlushedSegmentMetaWithCheckpoint(1, 150), // flushed below, must not pin
 		2: newSegmentMetaWithCheckpoint(2, 200),
 	}
-	module := newMaterializeBoundTestModule(t, scheduler, segmentMetas)
-	observeVChannelDelete(t, module, "v1", 400)
+	module, summary := newMaterializeBoundTestModule(t, scheduler, segmentMetas)
+	observeVChannelDelete(t, module, "v1", 400, summary)
 	require.Len(t, scheduler.tasks, 1)
 	require.NoError(t, scheduler.tasks[0].Execute(ctx))
-	assert.Equal(t, uint64(400), module.transformLog.MaterializedTimeTick())
+	assert.Equal(t, uint64(400), module.l0Materializer.MaterializedTimeTick())
 	persistDirtySnapshots(module)
 	assert.Equal(t, uint64(200), module.FlushCheckpointTimeTick())
 }
@@ -130,12 +131,12 @@ func TestVChannelFlushCheckpointBarrierAdvancesFrontier(t *testing.T) {
 	// value and the flush checkpoint would never reach the flush boundary.
 	ctx := context.Background()
 	scheduler := &recordingVChannelScheduler{}
-	module := newMaterializeBoundTestModule(t, scheduler, nil)
+	module, summary := newMaterializeBoundTestModule(t, scheduler, nil)
 	assert.Equal(t, uint64(0), module.FlushCheckpointTimeTick())
-	observeVChannelBarrier(t, module, "v1", 200)
+	observeVChannelBarrier(t, module, "v1", 200, summary)
 	require.Len(t, scheduler.tasks, 1)
 	require.NoError(t, scheduler.tasks[0].Execute(ctx))
-	assert.Equal(t, uint64(200), module.transformLog.MaterializedTimeTick())
+	assert.Equal(t, uint64(200), module.l0Materializer.MaterializedTimeTick())
 	persistDirtySnapshots(module)
 	assert.Equal(t, uint64(200), module.FlushCheckpointTimeTick())
 }

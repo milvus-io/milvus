@@ -14,8 +14,8 @@ restores the Summary index, and caps checkpoint publication at `LastAcked`.
 RecoveryStorage also restores idempotency windows from retained Summary history
 and startup replay before accepting writes. QueryRuntime wiring remains follow-up work.
 
-The L0Materializer ownership below is the agreed target; the current
-`vchannel/transformlog` copied-window implementation awaits migration. See
+The L0Materializer ownership below is implemented without a copied payload
+window. See
 [L0 Materializer](l0_materializer.md) for the complete window and recovery rules.
 
 ## 1. Ownership

@@ -6,9 +6,9 @@
 - Design Review: 2026-07-29
 
 **Status:** Future integration, outside the current recovery-storage PR.
-This is the agreed subscription contract. The existing branch implementation
-under `vchannel/transformlog` is a materialization component awaiting migration
-to [L0 Materializer](l0_materializer.md); it does not implement this adaptor.
+This is the agreed subscription contract. L0 materialization is implemented
+separately in [L0 Materializer](l0_materializer.md); the former
+`vchannel/transformlog` package has been removed.
 
 TransformLog is a read-only subscription adaptor over
 [WALSummary](summary.md#54-transform-read-contract). It owns no record storage,
@@ -19,7 +19,7 @@ TransformLog subscriptions are independent consumers of the same Summary.
 
 ```text
 WALSummary (one store per PChannel)
-  +-- L0Materializer per VChannel       [current PR target]
+  +-- L0Materializer per VChannel       [implemented]
   +-- TransformLog subscription adaptor [future integration]
         +-- local / remote PChannel streams
               +-- VChannel subscriptions

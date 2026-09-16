@@ -96,7 +96,7 @@ func observeSummaryDelete(t *testing.T, manager *walsummary.Manager, vchannel st
 	owner.Release()
 }
 
-func observeVChannelDelete(t *testing.T, module *VChannelRecoveryModule, vchannel string, timetick uint64) {
+func observeVChannelDelete(t *testing.T, module *VChannelRecoveryModule, vchannel string, timetick uint64, summaries ...*walsummary.Manager) {
 	t.Helper()
 	mutable := message.NewDeleteMessageBuilderV1().
 		WithVChannel(vchannel).
@@ -116,6 +116,9 @@ func observeVChannelDelete(t *testing.T, module *VChannelRecoveryModule, vchanne
 		IntoImmutableMessage(walimplstest.NewTestMessageID(int64(timetick + 1)))
 	owner := message.NewOwnedImmutableMessage(raw, nil)
 	retained := owner.Clone()
+	for _, summary := range summaries {
+		summary.ObserveMessage(context.Background(), raw)
+	}
 	require.True(t, module.ObserveMessage(context.Background(), retained))
 	retained.Release()
 	owner.Release()

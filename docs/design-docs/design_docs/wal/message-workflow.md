@@ -27,8 +27,8 @@ raw message M
   -> BroadcastAck.Accept(O)
 ```
 
-This is the target order for the [L0Materializer](l0_materializer.md) split;
-current code still dispatches VChannel before Summary and must be reordered.
+This order is implemented for the [L0Materializer](l0_materializer.md) split: Summary
+installs readable records and coverage before VChannel observation advances W.
 Summary visibility here means in-memory readable coverage, not upload success.
 Every message follows this flow during both startup replay and live consumption.
 There is no metadata-only scan and no observation mode.

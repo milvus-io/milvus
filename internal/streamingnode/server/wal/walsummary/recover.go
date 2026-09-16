@@ -95,6 +95,7 @@ func (m *Manager) Restore(ctx context.Context) error {
 	}
 	m.latestCoveredTimeTick = manifest.GetCoveredPosition().GetTimeTick()
 	m.restoredTimeTick = m.latestCoveredTimeTick
+	m.advanceReadableLocked(m.restoredTimeTick)
 	m.advanceLastAckedLocked(summaryCheckpoint(manifest.GetCoveredPosition()))
 	for _, chunk := range manifest.GetChunks() {
 		for _, index := range chunk.GetVchannels() {
@@ -116,6 +117,11 @@ func validateManifest(manifest *streamingpb.PChannelSummaryManifest) error {
 	}
 	if manifest.GetLastChunk() != nil && manifest.GetCoveredPosition() == nil {
 		return storeCorruptedf("summary generation boundary has no covered position")
+	}
+	for _, frontier := range manifest.GetTransformTruncatedThrough() {
+		if frontier > manifest.GetCoveredPosition().GetTimeTick() {
+			return storeCorruptedf("summary truncation exceeds covered position")
+		}
 	}
 	if len(manifest.GetChunks()) == 0 {
 		return nil

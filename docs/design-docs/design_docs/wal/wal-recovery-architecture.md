@@ -25,9 +25,9 @@ are split by responsibility:
 - [Broadcast Ack Module](broadcast_ack_module.md)
 - [StreamingNode VChannel WAL Input View](streamingnode_vchannel_wal_view.md)
 
-The L0Materializer/shared-reader split is the agreed target of this PR. Code
-still uses `vchannel/transformlog` with a copied payload window; the migration
-status is tracked in [Summary §7](summary.md#7-implementation-and-integration-status).
+The L0Materializer/shared-reader split is implemented without a copied payload
+window. Integration status is tracked in
+[Summary §7](summary.md#7-implementation-and-integration-status).
 TransformLog subscription integration is deferred.
 
 ## 1. Goals

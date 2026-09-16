@@ -463,7 +463,7 @@ func (info *SegmentView) CreateTimeTick() uint64 {
 	return info.meta.GetStat().GetCreateSegmentTimeTick()
 }
 
-// L1MaterializationBlockerTimeTick reports the inclusive TransformLog
+// L1MaterializationBlockerTimeTick reports the inclusive L0 materialization
 // materialization frontier imposed by an L1 segment whose final commit has not
 // completed yet. Lock-free by design: finalCommitDone is published atomically
 // and createSegmentTimeTick is immutable, so the vchannel module may scan every

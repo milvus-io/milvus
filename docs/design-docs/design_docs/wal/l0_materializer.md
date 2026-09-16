@@ -5,11 +5,9 @@
 - Independent Approver: @weiliu1031
 - Design Review: 2026-07-29
 
-**Status:** Agreed implementation target for the current recovery-storage PR.
-The branch still implements a copied materialization window under
-`vchannel/transformlog`; migration to this component and the Summary read
-contract below is pending. This document owns all L0 materialization behavior.
-[TransformLog](transform_log.md) is a separate future subscription adaptor.
+**Status:** Implemented in `vchannel/l0materializer`, using WALSummary's shared
+bounded reader. This document owns all L0 materialization behavior.
+[TransformLog](transform_log.md) remains a separate future subscription adaptor.
 
 ## 1. Ownership
 
