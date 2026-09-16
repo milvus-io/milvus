@@ -940,18 +940,19 @@ func TestEmptySessionSetBoundsAnOverrideByThisBinary(t *testing.T) {
 	p := paramtable.Get()
 	m := newIndexEngineVersionManager()
 
-	compiledInVec := segcore.GetIndexEngineInfo().CurrentIndexVersion
-	assert.Equal(t, compiledInVec, m.GetMaximumIndexEngineVersion(),
-		"with no session the ceiling is what this image can load")
+	info := segcore.GetIndexEngineInfo()
+	loadableVec := max(info.CurrentIndexVersion, info.MaxIndexVersion)
+	assert.Equal(t, loadableVec, m.GetMaximumIndexEngineVersion(),
+		"with no session the ceiling is the highest version this image can load")
 	assert.Equal(t, common.CurrentScalarIndexEngineVersion, m.GetMaximumScalarIndexEngineVersion())
 
-	p.Save(Params.DataCoordCfg.TargetVecIndexVersion.Key, strconv.Itoa(int(compiledInVec)+5))
+	p.Save(Params.DataCoordCfg.TargetVecIndexVersion.Key, strconv.Itoa(int(loadableVec)+5))
 	defer p.Reset(Params.DataCoordCfg.TargetVecIndexVersion.Key)
 	p.Save(Params.DataCoordCfg.TargetScalarIndexVersion.Key,
 		strconv.Itoa(int(common.CurrentScalarIndexEngineVersion)+5))
 	defer p.Reset(Params.DataCoordCfg.TargetScalarIndexVersion.Key)
 
-	assert.Equal(t, compiledInVec, m.ResolveVecIndexVersion(),
+	assert.Equal(t, loadableVec, m.ResolveVecIndexVersion(),
 		"an override above what this image can load must be clamped to it")
 	assert.Equal(t, common.CurrentScalarIndexEngineVersion, m.ResolveScalarIndexVersion())
 }
@@ -975,4 +976,33 @@ func TestEmptySessionSetLeavesAnOverrideBelowThisBinaryAlone(t *testing.T) {
 
 	assert.EqualValues(t, 1, m.ResolveVecIndexVersion())
 	assert.EqualValues(t, 0, m.ResolveScalarIndexVersion())
+}
+
+// The bound with no session must be the same figure a registered QueryNode
+// running this image would give: every session is read as max(Current,
+// Maximum), so answering with the current version alone would bound an
+// operator's target lower during a restart than a moment later, and clamp
+// index builds to a version this very image can read past. The fallback is
+// also still only about an EMPTY set: one session replaces it.
+func TestTheNoSessionBoundIsWhatThisImageCanLoad(t *testing.T) {
+	paramtable.Init()
+	installForm(t)
+	m := newIndexEngineVersionManager()
+
+	info := segcore.GetIndexEngineInfo()
+	loadable := max(info.CurrentIndexVersion, info.MaxIndexVersion)
+	assert.Equal(t, loadable, m.GetMaximumIndexEngineVersion())
+	assert.GreaterOrEqual(t, loadable, info.CurrentIndexVersion,
+		"what an image can load is never below what it builds at")
+
+	m.Startup(map[string]*sessionutil.Session{
+		"qn1": {SessionRaw: sessionutil.SessionRaw{
+			ServerID: 1,
+			IndexEngineVersion: sessionutil.IndexEngineVersion{
+				CurrentIndexVersion: 3, MaximumIndexVersion: 4,
+			},
+		}},
+	})
+	assert.EqualValues(t, 4, m.GetMaximumIndexEngineVersion(),
+		"a session that exists is read the same way, and replaces the fallback")
 }
