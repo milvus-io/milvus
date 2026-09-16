@@ -958,9 +958,8 @@ message WALCheckpoint {
     // It's a hint for easier debugging.
     int64 recovery_magic = 3; // The recovery version of the checkpoint, it's used to hint the future recovery info upgrading.
     // Pchannel-scoped recovery control state (replication config/checkpoint
-    // and AlterWAL state). It advances atomically with the checkpoint: the
-    // checkpoint is the single source of truth for the control state after a
-    // crash.
+    // and AlterWAL state). Stored atomically with the checkpoint, but may
+    // cover a newer prefix than the global replay position.
     common.ReplicateConfiguration replicate_config = 4;
     common.ReplicateCheckpoint replicate_checkpoint = 5;
     AlterWALState alter_wal_state = 6;
@@ -971,6 +970,10 @@ message WALCheckpoint {
     // with the compare-and-swap commit of SaveRecoverySnapshot, this fences
     // checkpoint advancement across concurrent publishers.
     int64 term = 7;
+    // Applied-through local WAL timetick of the embedded control state.
+    // Only filters control effects during replay; never advances WAL truncation.
+    // Absent in older checkpoints, whose global time_tick is the recovery floor.
+    uint64 control_checkpoint_time_tick = 8;
 }
 
 message PChannelRecoveryControlMeta {

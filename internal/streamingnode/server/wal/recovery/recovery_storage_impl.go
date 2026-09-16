@@ -120,9 +120,8 @@ func newRecoveryStorage(channel types.PChannelInfo, cp *utility.WALCheckpoint, o
 	if cp != nil {
 		rs.installCheckpoint(cp)
 	}
-	// The pchannel control state is embedded in the checkpoint: it advances
-	// atomically with it, so the checkpoint is the single source of truth for
-	// the control state after a crash (see utility.WALCheckpoint).
+	// Restore the latest control state and its own replay boundary, which may
+	// be ahead of the global WAL checkpoint (see utility.WALCheckpoint).
 	rs.installPChannelControl(utility.PChannelControlFromCheckpoint(cp))
 	for _, opt := range opts {
 		opt(rs)
@@ -478,9 +477,8 @@ func (r *recoveryStorageImpl) consumeDirtySnapshot() *dirtyPersistSnapshot {
 		Magic:     utility.RecoveryMagicRecoveryStorageV2,
 		Term:      r.channel.Term,
 	}
-	// The control state advances atomically with the checkpoint: freeze the
-	// current in-memory control into the checkpoint so a control-only change
-	// rewrites the checkpoint and is never lost on crash.
+	// Freeze the latest control state with its own applied frontier. Its
+	// derived salvage metadata is saved before this checkpoint becomes visible.
 	frozenCheckpoint.ApplyControl(r.pchannelControl)
 	checkpointDirty := checkpoint == nil ||
 		!consumeCheckpointEqual(checkpoint, frozenCheckpoint)
@@ -518,6 +516,12 @@ func consumeCheckpointEqual(left, right *utility.WALCheckpoint) bool {
 		return false
 	}
 	if left.Magic != right.Magic {
+		return false
+	}
+	// A frontier below the global position covers no additional replay work.
+	// Treat its normalization during recovery (including old checkpoints) as
+	// equivalent, but persist any control-only advancement beyond that floor.
+	if max(left.TimeTick, left.ControlCheckpointTimeTick) != max(right.TimeTick, right.ControlCheckpointTimeTick) {
 		return false
 	}
 	if !proto.Equal(left.ReplicateConfig, right.ReplicateConfig) ||

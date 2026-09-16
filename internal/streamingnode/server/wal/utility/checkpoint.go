@@ -19,13 +19,14 @@ func NewWALCheckpointFromProto(cp *streamingpb.WALCheckpoint) *WALCheckpoint {
 		return nil
 	}
 	return &WALCheckpoint{
-		MessageID:           message.MustUnmarshalMessageID(cp.MessageId),
-		TimeTick:            cp.TimeTick,
-		Magic:               cp.RecoveryMagic,
-		Term:                cp.Term,
-		ReplicateConfig:     cp.ReplicateConfig,
-		ReplicateCheckpoint: cp.ReplicateCheckpoint,
-		AlterWalState:       cp.AlterWalState,
+		MessageID:                 message.MustUnmarshalMessageID(cp.MessageId),
+		TimeTick:                  cp.TimeTick,
+		Magic:                     cp.RecoveryMagic,
+		Term:                      cp.Term,
+		ControlCheckpointTimeTick: cp.ControlCheckpointTimeTick,
+		ReplicateConfig:           cp.ReplicateConfig,
+		ReplicateCheckpoint:       cp.ReplicateCheckpoint,
+		AlterWalState:             cp.AlterWalState,
 	}
 }
 
@@ -40,11 +41,10 @@ type WALCheckpoint struct {
 	// superseded), or WAL truncation would outrun the successor's inherited
 	// manifest coverage.
 	Term int64
-	// ReplicateConfig, ReplicateCheckpoint and AlterWalState are the
-	// pchannel-scoped recovery control state. They advance atomically with
-	// the checkpoint: the checkpoint is the single source of truth for the
-	// control state after a crash, and a crash never loses an applied control
-	// effect because the control messages are replayed after the checkpoint.
+	// ControlCheckpointTimeTick covers the embedded control effects, which may
+	// be ahead of the global replay position. It never authorizes WAL truncation.
+	ControlCheckpointTimeTick uint64
+	// Latest pchannel-scoped control state, persisted with its applied frontier.
 	ReplicateConfig     *commonpb.ReplicateConfiguration
 	ReplicateCheckpoint *commonpb.ReplicateCheckpoint
 	AlterWalState       *streamingpb.AlterWALState
@@ -56,13 +56,14 @@ func (c *WALCheckpoint) IntoProto() *streamingpb.WALCheckpoint {
 		return nil
 	}
 	return &streamingpb.WALCheckpoint{
-		MessageId:           message.MustMarshalMessageID(c.MessageID),
-		TimeTick:            c.TimeTick,
-		RecoveryMagic:       c.Magic,
-		Term:                c.Term,
-		ReplicateConfig:     c.ReplicateConfig,
-		ReplicateCheckpoint: c.ReplicateCheckpoint,
-		AlterWalState:       c.AlterWalState,
+		MessageId:                 message.MustMarshalMessageID(c.MessageID),
+		TimeTick:                  c.TimeTick,
+		RecoveryMagic:             c.Magic,
+		Term:                      c.Term,
+		ControlCheckpointTimeTick: c.ControlCheckpointTimeTick,
+		ReplicateConfig:           c.ReplicateConfig,
+		ReplicateCheckpoint:       c.ReplicateCheckpoint,
+		AlterWalState:             c.AlterWalState,
 	}
 }
 
@@ -72,40 +73,42 @@ func (c *WALCheckpoint) Clone() *WALCheckpoint {
 		return nil
 	}
 	return &WALCheckpoint{
-		MessageID:           c.MessageID,
-		TimeTick:            c.TimeTick,
-		Magic:               c.Magic,
-		Term:                c.Term,
-		ReplicateConfig:     proto.Clone(c.ReplicateConfig).(*commonpb.ReplicateConfiguration),
-		ReplicateCheckpoint: proto.Clone(c.ReplicateCheckpoint).(*commonpb.ReplicateCheckpoint),
-		AlterWalState:       proto.Clone(c.AlterWalState).(*streamingpb.AlterWALState),
+		MessageID:                 c.MessageID,
+		TimeTick:                  c.TimeTick,
+		Magic:                     c.Magic,
+		Term:                      c.Term,
+		ControlCheckpointTimeTick: c.ControlCheckpointTimeTick,
+		ReplicateConfig:           proto.Clone(c.ReplicateConfig).(*commonpb.ReplicateConfiguration),
+		ReplicateCheckpoint:       proto.Clone(c.ReplicateCheckpoint).(*commonpb.ReplicateCheckpoint),
+		AlterWalState:             proto.Clone(c.AlterWalState).(*streamingpb.AlterWALState),
 	}
 }
 
-// ApplyControl freezes the pchannel control state into the checkpoint so it
-// advances atomically with the checkpoint publication. Callers must hold the
-// same ordering guarantees as the checkpoint itself: the control effects
-// applied through this call are covered by the checkpoint position.
+// ApplyControl freezes the latest control state and its own applied frontier.
+// Derived metadata (such as salvage checkpoints) must be persisted before or
+// with this snapshot. The control frontier may lead the global replay position.
 func (c *WALCheckpoint) ApplyControl(control *streamingpb.PChannelRecoveryControlMeta) {
 	if c == nil || control == nil {
 		return
 	}
+	c.ControlCheckpointTimeTick = control.CheckpointTimeTick
 	c.ReplicateConfig = proto.Clone(control.ReplicateConfig).(*commonpb.ReplicateConfiguration)
 	c.ReplicateCheckpoint = proto.Clone(control.ReplicateCheckpoint).(*commonpb.ReplicateCheckpoint)
 	c.AlterWalState = proto.Clone(control.AlterWalState).(*streamingpb.AlterWALState)
 }
 
 // PChannelControlFromCheckpoint decodes the pchannel-scoped control state
-// embedded in the WAL checkpoint. The control fields advance atomically with
-// the checkpoint, so the checkpoint is the single source of truth for the
-// control state after a crash; the decoded frontier is the lower bound for
-// the control messages replayed during recovery.
+// embedded in the WAL checkpoint. Its applied frontier skips already durable
+// control effects while other components replay from the global position.
 func PChannelControlFromCheckpoint(cp *WALCheckpoint) *streamingpb.PChannelRecoveryControlMeta {
 	control := &streamingpb.PChannelRecoveryControlMeta{}
 	if cp == nil {
 		return control
 	}
-	control.CheckpointTimeTick = cp.TimeTick
+	// The global prefix is already covered even if no control event changed
+	// state at its end. This also preserves recovery of older checkpoints that
+	// did not store a separate control frontier.
+	control.CheckpointTimeTick = max(cp.TimeTick, cp.ControlCheckpointTimeTick)
 	control.ReplicateConfig = proto.Clone(cp.ReplicateConfig).(*commonpb.ReplicateConfiguration)
 	control.ReplicateCheckpoint = proto.Clone(cp.ReplicateCheckpoint).(*commonpb.ReplicateCheckpoint)
 	control.AlterWalState = proto.Clone(cp.AlterWalState).(*streamingpb.AlterWALState)

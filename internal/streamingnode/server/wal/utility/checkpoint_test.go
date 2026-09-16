@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -77,4 +79,59 @@ func TestNewWALCheckpointFromProto(t *testing.T) {
 	applyTarget.ApplyControl(control)
 	assert.Equal(t, uint64(123456), applyTarget.ReplicateCheckpoint.GetTimeTick())
 	assert.Equal(t, rmq.NewRmqID(2).IntoProto(), applyTarget.ReplicateCheckpoint.GetMessageId())
+}
+
+func TestControlCheckpointRoundTripPreservesIndependentFrontier(t *testing.T) {
+	control := &streamingpb.PChannelRecoveryControlMeta{
+		CheckpointTimeTick: 120,
+		ReplicateConfig: &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{{ClusterId: "local"}},
+		},
+		AlterWalState: &streamingpb.AlterWALState{
+			TimeTick: 115, Stage: streamingpb.AlterWALStage_FLUSHING,
+		},
+	}
+	cp := &WALCheckpoint{MessageID: rmq.NewRmqID(10), TimeTick: 100, Term: 3}
+	cp.ApplyControl(control)
+	control.CheckpointTimeTick = 130
+	control.AlterWalState.Stage = streamingpb.AlterWALStage_ADVANCE_CHECKPOINT
+	control.ReplicateConfig.Clusters[0].ClusterId = "changed"
+
+	cloned := cp.Clone()
+	cp.ControlCheckpointTimeTick = 140
+	cp.AlterWalState.TimeTick = 135
+	encoded, err := proto.Marshal(cloned.IntoProto())
+	require.NoError(t, err)
+	stored := &streamingpb.WALCheckpoint{}
+	require.NoError(t, proto.Unmarshal(encoded, stored))
+	recovered := NewWALCheckpointFromProto(stored)
+	require.Equal(t, uint64(100), recovered.TimeTick)
+	require.True(t, rmq.NewRmqID(10).EQ(recovered.MessageID))
+	require.Equal(t, int64(3), recovered.Term)
+	require.Equal(t, uint64(120), recovered.ControlCheckpointTimeTick)
+	state := PChannelControlFromCheckpoint(recovered)
+	require.Equal(t, uint64(120), state.CheckpointTimeTick)
+	require.Equal(t, "local", state.ReplicateConfig.Clusters[0].ClusterId)
+	require.Equal(t, uint64(115), state.AlterWalState.TimeTick)
+	require.Equal(t, streamingpb.AlterWALStage_FLUSHING, state.AlterWalState.Stage)
+
+	// A covered AlterWAL event may advance its stage without moving either frontier.
+	state.AlterWalState.Stage = streamingpb.AlterWALStage_ADVANCE_CHECKPOINT
+	recovered.ApplyControl(state)
+	reopened := PChannelControlFromCheckpoint(NewWALCheckpointFromProto(recovered.IntoProto()))
+	require.Equal(t, uint64(120), reopened.CheckpointTimeTick)
+	require.Equal(t, streamingpb.AlterWALStage_ADVANCE_CHECKPOINT, reopened.AlterWalState.Stage)
+}
+
+func TestControlCheckpointRecoveryUsesGlobalFloor(t *testing.T) {
+	for _, controlTimeTick := range []uint64{0, 80, 100, 120} {
+		stored := &streamingpb.WALCheckpoint{
+			MessageId: rmq.NewRmqID(10).IntoProto(), TimeTick: 100,
+			ControlCheckpointTimeTick: controlTimeTick,
+		}
+		cp := NewWALCheckpointFromProto(stored)
+		state := PChannelControlFromCheckpoint(cp)
+		require.Equal(t, max(uint64(100), controlTimeTick), state.CheckpointTimeTick)
+		require.Equal(t, uint64(100), cp.TimeTick, "control never changes the global replay position")
+	}
 }

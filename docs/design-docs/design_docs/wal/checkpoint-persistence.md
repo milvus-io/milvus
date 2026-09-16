@@ -194,6 +194,7 @@ message WALCheckpoint {
     common.ReplicateCheckpoint replicate_checkpoint = 5;
     AlterWALState alter_wal_state = 6;
     int64 term = 7;
+    uint64 control_checkpoint_time_tick = 8;
 }
 ```
 
@@ -207,16 +208,21 @@ The required property is replay idempotency of the complete Control state and
 its side effects, not equality with the global checkpoint's TimeTick. Segment
 snapshots establish this using their own applied frontier. A Control-local
 applied frontier is likewise component metadata, not a second global scanner
-or truncation checkpoint. Keeping that frontier with the latest state would
-allow old control effects to be skipped while data components still replay.
+or truncation checkpoint. The latest state and its frontier are stored together
+in `WALCheckpoint.control_checkpoint_time_tick`, allowing old control effects
+to be skipped while data components still replay.
 Already-covered AlterWAL events may still advance their persisted stage, after
 the required data checkpoint has been published.
 
-**Open implementation point:** in-memory `PChannelRecoveryControlMeta` has
-`checkpoint_time_tick`, but `ApplyControl` does not persist it. Recovery sets it
-to the global checkpoint TimeTick instead. Configuration assignment itself can
-converge under replay; state-dependent transitions need more care. A targeted
-probe of `updatePChannelControl` demonstrated the following sequence:
+`ApplyControl`, proto conversion and cloning preserve the Control frontier.
+Recovery initializes its applied boundary to the maximum of the saved Control
+frontier and the global TimeTick: the global prefix is already covered even if
+the last control event was older. Older checkpoints without the new field use
+the global position as before; their missing historical Control frontier cannot
+be inferred. A Control-only frontier advance beyond the global floor makes the
+checkpoint dirty even when the control payload is unchanged.
+
+The regression test covers a failure that occurred when this frontier was lost:
 
 1. At local TT 100, this node is secondary with source progress 500.
 2. At 110, topology changes while retaining the same source; progress stays 500.
@@ -226,10 +232,17 @@ probe of `updatePChannelControl` demonstrated the following sequence:
    replaying 120 captures salvage progress 0. Configuration B is correct, but
    the pending salvage write differs and can overwrite the saved boundary.
 
-Persisting and restoring the Control-local applied frontier would suppress
-those duplicate effects. Alternatively every transition would need a proven
-idempotent reconstruction rule. The current implementation has not yet completed
-that contract; forcing Control back to the global position is not required.
+With the saved Control frontier at 120, replay skips both old control effects
+and leaves the saved salvage boundary intact. A crash before metadata publication
+instead restores the old secondary state and replays the transitions, producing
+the same salvage boundary 500. New control events after 120 still apply.
+
+This is not exactly-once external API execution. An API may succeed just before
+a crash that loses the local metadata update, in which case recovery invokes it
+again. Such APIs must tolerate retries or deduplicate a stable operation ID.
+Control's applied frontier may be published only after its required effects are
+recoverable. Derived salvage metadata is saved before or with the checkpoint;
+marking an effect covered before its required work succeeds would lose that work.
 
 ## 8. Close
 
