@@ -354,6 +354,7 @@ func (c *importCheckerV3) checkImportingJob(job ImportJob) {
 	}
 	importDuration := job.GetTR().RecordSpan()
 	metrics.ImportJobLatency.WithLabelValues(metrics.ImportStageImport, job.GetVersion().String()).Observe(float64(importDuration.Milliseconds()))
+	log.Info(c.ctx, "import v3 import done", mlog.Duration("jobTimeCost/import", importDuration))
 }
 
 func (c *importCheckerV3) checkIndexBuildingJob(job ImportJob) {
@@ -386,6 +387,7 @@ func (c *importCheckerV3) checkIndexBuildingJob(job ImportJob) {
 	}
 	buildIndexDuration := job.GetTR().RecordSpan()
 	metrics.ImportJobLatency.WithLabelValues(metrics.ImportStageBuildIndex, job.GetVersion().String()).Observe(float64(buildIndexDuration.Milliseconds()))
+	log.Info(c.ctx, "import v3 build index done", mlog.Duration("jobTimeCost/buildIndex", buildIndexDuration))
 }
 
 // checkUncommittedJob handles jobs in the Uncommitted state.
