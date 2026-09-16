@@ -1460,6 +1460,14 @@ func (s *mixCoordImpl) ComputePhraseMatchSlop(ctx context.Context, req *querypb.
 	return s.queryCoordServer.ComputePhraseMatchSlop(ctx, req)
 }
 
+func (s *mixCoordImpl) ListRunningRequests(ctx context.Context, req *milvuspb.ListRunningRequestsRequest) (*milvuspb.ListRunningRequestsResponse, error) {
+	return s.rootcoordServer.ListRunningRequests(ctx, req)
+}
+
+func (s *mixCoordImpl) CancelRequests(ctx context.Context, req *milvuspb.CancelRequestsRequest) (*milvuspb.CancelRequestsResponse, error) {
+	return s.rootcoordServer.CancelRequests(ctx, req)
+}
+
 // Deprecated: QueryView does not use the legacy cluster read-task queues.
 func (s *mixCoordImpl) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error) {
 	return &internalpb.ClearReadTaskQueueResponse{

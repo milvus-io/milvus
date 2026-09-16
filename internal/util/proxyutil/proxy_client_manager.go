@@ -19,6 +19,7 @@ package proxyutil
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -95,8 +96,15 @@ type ProxyClientManagerInterface interface {
 	GetProxyMetrics(ctx context.Context) ([]*milvuspb.GetMetricsResponse, error)
 	SetRates(ctx context.Context, request *proxypb.SetRatesRequest) error
 	ClearReadTaskQueue(ctx context.Context, request *internalpb.ClearReadTaskQueueRequest) ([]*internalpb.ClearReadTaskQueueComponentResult, error)
+	ListRunningRequests(ctx context.Context, request *milvuspb.ListRunningRequestsRequest) ([]*milvuspb.RunningRequestInfo, []*milvuspb.RunningRequestNodeResult, error)
+	CancelRequests(ctx context.Context, request *milvuspb.CancelRequestsRequest) ([]*milvuspb.RunningRequestInfo, []int64, []*milvuspb.RunningRequestNodeResult, error)
 	GetComponentStates(ctx context.Context) (map[int64]*milvuspb.ComponentStates, error)
 }
+
+// RunningRequestTimeout bounds a running-request fan-out. Without it one
+// wedged proxy would hold the caller's request open for as long as its own
+// deadline allows; the other proxies' answers are worth more than waiting.
+const RunningRequestTimeout = 10 * time.Second
 
 type ProxyClientManager struct {
 	creator     ProxyCreator
@@ -420,6 +428,119 @@ func (p *ProxyClientManager) ClearReadTaskQueue(ctx context.Context, request *in
 		return true
 	})
 	return results, group.Wait()
+}
+
+// ListRunningRequests collects the requests registered on every proxy and
+// returns them together with one result row per proxy.
+//
+// Partial results are the point: a proxy that is unreachable, unhealthy or
+// running an older build shows up in nodeResults, and the requests the other
+// proxies reported are still returned. An empty client map is an error rather
+// than an empty success, because "no proxy answered" and "no request is
+// running" must not look the same to an operator.
+func (p *ProxyClientManager) ListRunningRequests(ctx context.Context, request *milvuspb.ListRunningRequestsRequest) ([]*milvuspb.RunningRequestInfo, []*milvuspb.RunningRequestNodeResult, error) {
+	if p.proxyClient.Len() == 0 {
+		return nil, nil, merr.WrapErrServiceUnavailable("no proxy is registered, cannot list running requests")
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, RunningRequestTimeout)
+	defer cancel()
+
+	var mu sync.Mutex
+	requests := make([]*milvuspb.RunningRequestInfo, 0, p.proxyClient.Len())
+	nodeResults := make([]*milvuspb.RunningRequestNodeResult, 0, p.proxyClient.Len())
+	group := &errgroup.Group{}
+	p.proxyClient.Range(func(key int64, value types.ProxyClient) bool {
+		nodeID, client := key, value
+		group.Go(func() error {
+			resp, err := client.ListLocalRunningRequests(ctx, request)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				nodeResults = append(nodeResults, newRunningRequestNodeResult(nodeID, err))
+				if errors.Is(err, merr.ErrServiceUnimplemented) {
+					return nil
+				}
+				return errors.Wrapf(err, "ListRunningRequests failed, proxyID = %d", nodeID)
+			}
+			nodeResults = append(nodeResults, &milvuspb.RunningRequestNodeResult{
+				NodeId: nodeID,
+				Status: resp.GetStatus(),
+			})
+			if !merr.Ok(resp.GetStatus()) {
+				return errors.Wrapf(merr.Error(resp.GetStatus()), "ListRunningRequests failed, proxyID = %d", nodeID)
+			}
+			requests = append(requests, resp.GetRequests()...)
+			return nil
+		})
+		return true
+	})
+	return requests, nodeResults, group.Wait()
+}
+
+// CancelRequests asks every proxy to cancel the given request ids and returns
+// the descriptions of what was cancelled, the ids no proxy held, and one
+// result row per proxy.
+//
+// The call is broadcast because a request id does not say which proxy serves
+// it. An id is reported as not found only when no proxy claimed it, so a
+// single proxy's "not found" is not mistaken for the cluster's answer.
+func (p *ProxyClientManager) CancelRequests(ctx context.Context, request *milvuspb.CancelRequestsRequest) ([]*milvuspb.RunningRequestInfo, []int64, []*milvuspb.RunningRequestNodeResult, error) {
+	if p.proxyClient.Len() == 0 {
+		return nil, nil, nil, merr.WrapErrServiceUnavailable("no proxy is registered, cannot cancel requests")
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, RunningRequestTimeout)
+	defer cancel()
+
+	var mu sync.Mutex
+	cancelled := make([]*milvuspb.RunningRequestInfo, 0, len(request.GetRequestIds()))
+	// Start from every requested id and strike out the ones a proxy cancelled.
+	// Whatever remains was held by nobody.
+	pending := typeutil.NewSet(request.GetRequestIds()...)
+	nodeResults := make([]*milvuspb.RunningRequestNodeResult, 0, p.proxyClient.Len())
+	group := &errgroup.Group{}
+	p.proxyClient.Range(func(key int64, value types.ProxyClient) bool {
+		nodeID, client := key, value
+		group.Go(func() error {
+			resp, err := client.CancelLocalRequests(ctx, request)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				nodeResults = append(nodeResults, newRunningRequestNodeResult(nodeID, err))
+				if errors.Is(err, merr.ErrServiceUnimplemented) {
+					return nil
+				}
+				return errors.Wrapf(err, "CancelRequests failed, proxyID = %d", nodeID)
+			}
+			nodeResults = append(nodeResults, &milvuspb.RunningRequestNodeResult{
+				NodeId: nodeID,
+				Status: resp.GetStatus(),
+			})
+			if !merr.Ok(resp.GetStatus()) {
+				return errors.Wrapf(merr.Error(resp.GetStatus()), "CancelRequests failed, proxyID = %d", nodeID)
+			}
+			for _, info := range resp.GetCancelled() {
+				cancelled = append(cancelled, info)
+				pending.Remove(info.GetRequestId())
+			}
+			return nil
+		})
+		return true
+	})
+	err := group.Wait()
+	return cancelled, pending.Collect(), nodeResults, err
+}
+
+// newRunningRequestNodeResult records why one proxy could not answer. A node
+// running an older build is flagged so that the caller can tell "this proxy
+// cannot do it yet" from "this proxy failed".
+func newRunningRequestNodeResult(nodeID int64, err error) *milvuspb.RunningRequestNodeResult {
+	return &milvuspb.RunningRequestNodeResult{
+		NodeId:        nodeID,
+		Status:        merr.Status(err),
+		Unimplemented: errors.Is(err, merr.ErrServiceUnimplemented),
+	}
 }
 
 func (p *ProxyClientManager) GetComponentStates(ctx context.Context) (map[int64]*milvuspb.ComponentStates, error) {

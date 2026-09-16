@@ -760,6 +760,14 @@ func (m *MockMixCoord) ClearReadTaskQueue(ctx context.Context, req *internalpb.C
 	return &internalpb.ClearReadTaskQueueResponse{Status: merr.Success()}, nil
 }
 
+func (m *MockMixCoord) ListRunningRequests(ctx context.Context, req *milvuspb.ListRunningRequestsRequest) (*milvuspb.ListRunningRequestsResponse, error) {
+	return &milvuspb.ListRunningRequestsResponse{Status: merr.Success()}, nil
+}
+
+func (m *MockMixCoord) CancelRequests(ctx context.Context, req *milvuspb.CancelRequestsRequest) (*milvuspb.CancelRequestsResponse, error) {
+	return &milvuspb.CancelRequestsResponse{Status: merr.Success()}, nil
+}
+
 func (m *MockMixCoord) ListLoadedSegments(ctx context.Context, req *querypb.ListLoadedSegmentsRequest) (*querypb.ListLoadedSegmentsResponse, error) {
 	return &querypb.ListLoadedSegmentsResponse{
 		Status: merr.Success(),
