@@ -121,7 +121,7 @@ func TestBuildTransformLogEntry_NoPayload(t *testing.T) {
 	txn := newTestTxnMessage(t, 100, newTestInsertMessage(t, 90))
 	assert.Nil(t, BuildTransformLogEntry(txn, TransformEntryOption{}))
 
-	// A barrier message produces no entry.
+	// A barrier carries its position without a Delete payload.
 	flushMsg := message.NewManualFlushMessageBuilderV2().
 		WithHeader(&message.ManualFlushMessageHeader{CollectionId: 1}).
 		WithBody(&message.ManualFlushMessageBody{}).
@@ -130,7 +130,7 @@ func TestBuildTransformLogEntry_NoPayload(t *testing.T) {
 		WithTimeTick(100).
 		WithLastConfirmed(walimplstest.NewTestMessageID(100)).
 		IntoImmutableMessage(walimplstest.NewTestMessageID(101))
-	assert.Nil(t, BuildTransformLogEntry(flushMsg, TransformEntryOption{}))
+	assert.Equal(t, &streamingpb.TransformLogEntry{TimeTick: 100}, BuildTransformLogEntry(flushMsg, TransformEntryOption{}))
 	assert.Nil(t, BuildTransformLogEntry(nil, TransformEntryOption{}))
 }
 
@@ -172,3 +172,41 @@ func TestPrimaryKeyCount(t *testing.T) {
 }
 
 var _ = streamingpb.TransformLogEntry{}
+
+func TestTransformLogMessageClassification(t *testing.T) {
+	insert := newTestInsertMessage(t, 10)
+	deleted := newTestDeleteMessage(t, 20, 1, 1)
+	barrier := message.NewCreatePartitionMessageBuilderV1().WithVChannel("v1").
+		WithHeader(&message.CreatePartitionMessageHeader{CollectionId: 1, PartitionId: 2}).
+		WithBody(&msgpb.CreatePartitionRequest{}).MustBuildMutable().
+		WithTimeTick(30).IntoImmutableMessage(walimplstest.NewTestMessageID(30))
+	for _, tc := range []struct {
+		name string
+		msg  message.ImmutableMessage
+		kind TransformLogKind
+	}{
+		{"insert", insert, TransformLogKindNone},
+		{"delete", deleted, TransformLogKindDelete},
+		{"other message", barrier, TransformLogKindBarrier},
+		{"insert txn", newTestTxnMessage(t, 100, insert), TransformLogKindNone},
+		{"mixed dml txn", newTestTxnMessage(t, 100, insert, deleted), TransformLogKindDelete},
+		{"other txn", newTestTxnMessage(t, 100, insert, barrier), TransformLogKindBarrier},
+		{"delete then barrier txn", newTestTxnMessage(t, 100, deleted, barrier), TransformLogKindDelete},
+		{"barrier then delete txn", newTestTxnMessage(t, 100, barrier, deleted), TransformLogKindDelete},
+		{"empty txn", newTestTxnMessage(t, 100), TransformLogKindBarrier},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.kind, ClassifyTransformLogMessage(tc.msg))
+			entry := BuildTransformLogEntry(tc.msg, TransformEntryOption{})
+			switch tc.kind {
+			case TransformLogKindNone:
+				assert.Nil(t, entry)
+			case TransformLogKindBarrier:
+				assert.Equal(t, &streamingpb.TransformLogEntry{TimeTick: tc.msg.TimeTick()}, entry)
+			case TransformLogKindDelete:
+				assert.Equal(t, tc.msg.TimeTick(), entry.GetTimeTick())
+				assert.Len(t, entry.GetDelete().GetBlocks(), 1)
+			}
+		})
+	}
+}

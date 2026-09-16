@@ -42,45 +42,35 @@ func ClassifyTransformLogMessage(msg message.ImmutableMessage) TransformLogKind 
 	switch msg.MessageType() {
 	case message.MessageTypeDelete:
 		return TransformLogKindDelete
+	case message.MessageTypeInsert:
+		return TransformLogKindNone
 	case message.MessageTypeTxn:
-		if txnContainsDelete(msg) {
-			return TransformLogKindDelete
-		}
-		return TransformLogKindNone
-	case message.MessageTypeCreateCollection,
-		message.MessageTypeRecoveryBarrier,
-		message.MessageTypeFlush,
-		message.MessageTypeManualFlush,
-		message.MessageTypeFlushAll,
-		message.MessageTypeDropPartition,
-		message.MessageTypeDropCollection,
-		message.MessageTypeTruncateCollection,
-		message.MessageTypeAlterWAL:
-		return TransformLogKindBarrier
-	case message.MessageTypeAlterCollection:
-		alter := message.MustAsImmutableAlterCollectionMessageV2(msg)
-		if IsSchemaChange(alter.Header()) {
-			return TransformLogKindBarrier
-		}
-		return TransformLogKindNone
+		return classifyTransformTxn(message.AsImmutableTxnMessage(msg))
 	default:
-		return TransformLogKindNone
+		return TransformLogKindBarrier
 	}
 }
 
-func txnContainsDelete(msg message.ImmutableMessage) bool {
-	txn := message.AsImmutableTxnMessage(msg)
-	if txn == nil {
-		return false
+// A transaction is classified as a whole: any Delete takes precedence, only
+// a nonempty sequence of Inserts is None, and every other transaction is a barrier.
+func classifyTransformTxn(txn message.ImmutableTxnMessage) TransformLogKind {
+	if txn == nil || txn.Size() == 0 {
+		return TransformLogKindBarrier
 	}
-	contains := false
+	kind := TransformLogKindNone
 	_ = txn.RangeOver(func(inner message.ImmutableMessage) error {
-		if inner.MessageType() == message.MessageTypeDelete {
-			contains = true
+		switch inner.MessageType() {
+		case message.MessageTypeDelete:
+			kind = TransformLogKindDelete
+		case message.MessageTypeInsert:
+		default:
+			if kind != TransformLogKindDelete {
+				kind = TransformLogKindBarrier
+			}
 		}
 		return nil
 	})
-	return contains
+	return kind
 }
 
 // TransformEntryOption carries the per-append options for building a transform
@@ -99,14 +89,17 @@ func (o TransformEntryOption) acceptDelete(partitionID int64, timeTick uint64) b
 }
 
 // BuildTransformLogEntry converts a WAL message into its transform log entry.
-// It returns nil when the message carries no transform payload, such as an
-// insert, a payload-free barrier, or a delete filtered out by the option.
+// Inserts produce no entry; other payload-free messages produce a barrier
+// containing only their TimeTick. A filtered-out Delete still produces no entry.
 //
 // A committed Txn containing Delete produces one entry at the outer Txn
 // TimeTick, holding the Delete blocks of every Delete child.
 func BuildTransformLogEntry(msg message.ImmutableMessage, opt TransformEntryOption) *streamingpb.TransformLogEntry {
-	if ClassifyTransformLogMessage(msg) != TransformLogKindDelete {
+	switch ClassifyTransformLogMessage(msg) {
+	case TransformLogKindNone:
 		return nil
+	case TransformLogKindBarrier:
+		return &streamingpb.TransformLogEntry{TimeTick: msg.TimeTick()}
 	}
 	switch msg.MessageType() {
 	case message.MessageTypeDelete:
