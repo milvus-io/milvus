@@ -1301,7 +1301,49 @@ TEST_P(ManifestGroupTranslatorTest, TestAsyncLoadParity) {
     }
 }
 
-TEST_P(ManifestGroupTranslatorTest, AsyncReadWindowConfigControlsReadBatching) {
+TEST_P(ManifestGroupTranslatorTest, AsyncOverheadBoundsWholeWindows) {
+    const auto previous_window = StorageV2AsyncLoadReadWindowSizeBytes();
+    const auto previous_cell_target = GetCellTargetSizeBytes();
+    auto restore = folly::makeGuard([&] {
+        SetStorageV2AsyncLoadReadWindowSizeBytes(previous_window);
+        SetCellTargetSizeBytes(previous_cell_target);
+    });
+    SetCellTargetSizeBytes(1);
+    const int64_t wide_window = 4 * FieldDataLoadBatchTargetBytes();
+    for (const int64_t window :
+         {int64_t{1}, wide_window, std::numeric_limits<int64_t>::max()}) {
+        SetStorageV2AsyncLoadReadWindowSizeBytes(window);
+        // Group 0 contains arrays; group 1 contains only a vector field.
+        for (const int64_t group : {int64_t{0}, int64_t{1}}) {
+            auto translator = MakeTranslator(group, GetParam(), true);
+            const auto* meta = static_cast<GroupCTMeta*>(translator->meta());
+            ASSERT_GT(meta->chunk_memory_size_.size(), 1);
+            const auto largest_cell =
+                *std::max_element(meta->chunk_memory_size_.begin(),
+                                  meta->chunk_memory_size_.end());
+            if (window == wide_window) {
+                ASSERT_LT(largest_cell, window);
+            }
+            const auto data_bound = std::max(window, largest_cell);
+            const auto memory_bound =
+                group == 0
+                    ? (data_bound > std::numeric_limits<int64_t>::max() / 2
+                           ? std::numeric_limits<int64_t>::max()
+                           : 2 * data_bound)
+                    : data_bound;
+            ASSERT_TRUE(meta->loading_overhead_config.has_value());
+            const auto& config = *meta->loading_overhead_config;
+            ASSERT_TRUE(config.memory.has_value());
+            EXPECT_EQ(config.memory->max_runtime_unit, memory_bound);
+            if (GetParam()) {
+                ASSERT_TRUE(config.file.has_value());
+                EXPECT_EQ(config.file->max_runtime_unit, data_bound);
+            }
+        }
+    }
+}
+
+TEST_P(ManifestGroupTranslatorTest, AsyncReadWindowIsCapturedForReloads) {
     auto previous = StorageV2AsyncLoadReadWindowSizeBytes();
     auto restore = folly::makeGuard(
         [previous]() { SetStorageV2AsyncLoadReadWindowSizeBytes(previous); });
@@ -1327,9 +1369,22 @@ TEST_P(ManifestGroupTranslatorTest, AsyncReadWindowConfigControlsReadBatching) {
     EXPECT_EQ(wide_window_reader->AsyncCalls(), 1);
 
     SetStorageV2AsyncLoadReadWindowSizeBytes(1);
-    auto limited_cells = wide_window_translator->get_cells(nullptr, cids);
+    auto reloaded_cells = wide_window_translator->get_cells(nullptr, cids);
+    EXPECT_EQ(reloaded_cells.size(), num_cells);
+    EXPECT_EQ(wide_window_reader->AsyncCalls(), 2);
+
+    auto limited_reader =
+        std::make_shared<CountingChunkReader>(test_data_->CreateChunkReader(0));
+    auto limited_translator = MakeTranslator(0, use_mmap, true, limited_reader);
+    auto limited_cells = limited_translator->get_cells(nullptr, cids);
     EXPECT_EQ(limited_cells.size(), num_cells);
-    EXPECT_EQ(wide_window_reader->AsyncCalls(), 1 + num_cells);
+    EXPECT_EQ(limited_reader->AsyncCalls(), num_cells);
+
+    SetStorageV2AsyncLoadReadWindowSizeBytes(
+        std::numeric_limits<int64_t>::max());
+    auto limited_reload = limited_translator->get_cells(nullptr, cids);
+    EXPECT_EQ(limited_reload.size(), num_cells);
+    EXPECT_EQ(limited_reader->AsyncCalls(), 2 * num_cells);
 }
 
 TEST_P(ManifestGroupTranslatorTest, RoutesAsyncFinalizationByMmapMode) {

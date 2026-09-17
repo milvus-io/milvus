@@ -288,6 +288,15 @@ Without either bound, it passes through each load's reservation. An async read
 can retain memory while no CPU worker is occupied, so accounting uses admission
 capacity rather than HIGH/LOW or async worker counts.
 
+For manifest field loading, one async slot covers a whole read window. Its
+runtime-unit bounds use the larger of the captured read-window size and the
+largest cell, with the array overhead multiplier applied to the whole memory
+bound. The file bound uses the data size without that multiplier. Each manifest
+translator captures the read-window configuration at construction and passes it
+to every async reload, so configuration changes affect newly created translators
+without invalidating existing overhead bounds. Synchronous batch bounds are
+unchanged.
+
 Admission expands accounting bounds before permitting more work; a rejected
 accounting update leaves the admission limit unchanged. Shrinking first restricts
 new admissions and keeps accounting for already active work until it drains.
