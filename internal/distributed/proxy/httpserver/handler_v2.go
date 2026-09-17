@@ -4548,7 +4548,14 @@ func (h *HandlersV2) getQuotaMetrics(ctx context.Context, c *gin.Context, anyReq
 func (h *HandlersV2) listRunningRequests(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	httpReq := anyReq.(*ListRunningRequestsReq)
 	req := &milvuspb.ListRunningRequestsRequest{
-		DbName:         dbName,
+		// Here the database name is one of four filters, not the target of the
+		// call, so it is taken from the body as written rather than from the
+		// name the wrapper resolved. The wrapper substitutes "default" when
+		// the body and the header name none, which for a filter would silently
+		// hide every other database's requests from an operator who asked
+		// about all of them. An empty filter means every database, which is
+		// what the same call over gRPC does.
+		DbName:         httpReq.DbName,
 		CollectionName: httpReq.CollectionName,
 		User:           httpReq.User,
 		MinElapsedMs:   httpReq.MinElapsedMs,
