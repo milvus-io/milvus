@@ -37,6 +37,15 @@ Explore is a separate layout: local temporary manifests live under
 
 ## Local upgrade compatibility
 
+The official Docker Compose and embedded standalone launchers run Milvus as the
+image's `milvus` user. Before starting Milvus, their one-shot volume initializer
+changes an uninitialized bind mount to that image user's numeric UID/GID. A
+versioned `.milvus-volume-owner-<uid>-<gid>` marker makes the recursive ownership
+migration resumable and prevents repeating it on every start. The marker is
+written only after the full ownership change succeeds; changing the image UID or
+GID causes a new migration. Restoring files with another owner after the marker
+was created requires removing the marker before the next start.
+
 Let `R = localStorage.path` and `M = the legacy minio.rootPath`.
 
 | Existing layout | Upgrade behavior |

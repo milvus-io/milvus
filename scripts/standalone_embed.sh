@@ -16,6 +16,31 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+MILVUS_IMAGE=milvusdb/milvus:v3.0.1
+
+prepare_milvus_volume() {
+    local volume_dir="$(pwd)/volumes/milvus"
+    sudo docker run --rm \
+        --user 0:0 \
+        --network none \
+        --read-only \
+        --entrypoint /bin/sh \
+        -v "${volume_dir}:/var/lib/milvus" \
+        "${MILVUS_IMAGE}" \
+        -c '
+            set -eu
+            uid="$(id -u milvus)"
+            gid="$(id -g milvus)"
+            marker="/var/lib/milvus/.milvus-volume-owner-${uid}-${gid}"
+            if [ ! -e "${marker}" ]; then
+                echo "Preparing /var/lib/milvus for ${uid}:${gid}"
+                chown -R "${uid}:${gid}" /var/lib/milvus
+                touch "${marker}"
+                chown "${uid}:${gid}" "${marker}"
+            fi
+        '
+}
+
 run_embed() {
     cat << EOF > embedEtcd.yaml
 listen-client-urls: http://0.0.0.0:2379
@@ -39,7 +64,7 @@ EOF
         echo "user.yaml file does not exist. Please try to create it in the current directory."
         exit 1
     fi
-    
+
     sudo docker run -d \
         --name milvus-standalone \
         --security-opt seccomp:unconfined \
@@ -59,7 +84,7 @@ EOF
         --health-start-period=90s \
         --health-timeout=20s \
         --health-retries=3 \
-        milvusdb/milvus:v3.0.1 \
+        "${MILVUS_IMAGE}" \
         milvus run standalone  1> /dev/null
 }
 
@@ -84,6 +109,12 @@ start() {
     then
         echo "Milvus is running."
         exit 0
+    fi
+
+    if ! prepare_milvus_volume
+    then
+        echo "Failed to prepare the Milvus data directory."
+        exit 1
     fi
 
     res=`sudo docker ps -a|grep milvus-standalone|wc -l`
