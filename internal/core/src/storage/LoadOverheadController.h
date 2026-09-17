@@ -30,10 +30,20 @@ class LoadOverheadController {
     static LoadOverheadController&
     GetInstance();
 
-    // Returns the same Group across budget, slot and executor changes.
-    // LoadAdmissionController supplies the limits; creation starts no workers.
+    // Returns the async Group, bounded by admission bytes/slots.
+    // Its identity survives configuration changes and starts no workers.
     cachinglayer::LoadingOverheadGroupHandle
     GetOrCreate();
+
+    // Returns a separate sync Group bounded by HIGH + LOW workers. The initial
+    // count only bootstraps the policy; later calls cannot overwrite a resize.
+    cachinglayer::LoadingOverheadGroupHandle
+    GetOrCreateForSync(int64_t initial_executor_workers);
+
+    // Called by ThreadPools before expansion and after shrink; never updates
+    // the async Group, including while sync and async translators coexist.
+    bool
+    UpdateExecutorWorkers(int64_t executor_workers);
 
     bool
     UpdateBudgetBytes(size_t bytes)
@@ -55,6 +65,8 @@ class LoadOverheadController {
 
     std::mutex mutex_;
     cachinglayer::LoadingOverheadGroupHandle group_handle_;
+    cachinglayer::LoadingOverheadGroupHandle sync_group_handle_;
+    int64_t executor_workers_{-1};
     size_t budget_bytes_{0};
     size_t admission_slots_{0};
 };

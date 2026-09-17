@@ -17,6 +17,8 @@
 #ifndef MILVUS_THREADPOOLS_H
 #define MILVUS_THREADPOOLS_H
 
+#include <atomic>
+
 #include "common/Common.h"
 #include "ThreadPool.h"
 namespace milvus {
@@ -52,6 +54,9 @@ class ThreadPools {
     static void
     ResizeThreadPool(ThreadPoolPriority priority, float ratio);
 
+    static int64_t
+    GetLoadExecutorWorkers();
+
     ~ThreadPools() {
         ShutDown();
     }
@@ -77,6 +82,7 @@ class ThreadPools {
         thread_pool_map;
     static std::shared_mutex mutex_;
     static std::mutex resize_mutex_;
+    static std::atomic<int64_t> load_executor_workers_;
 };
 
 }  // namespace milvus

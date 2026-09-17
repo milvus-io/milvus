@@ -103,6 +103,49 @@ LoadOverheadController<Dimension>::GetOrCreate() {
 }
 
 template <cachinglayer::LoadingOverheadDimension Dimension>
+cachinglayer::LoadingOverheadGroupHandle
+LoadOverheadController<Dimension>::GetOrCreateForSync(
+    int64_t initial_executor_workers) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    AssertInfo(initial_executor_workers >= 0,
+               "Load {} executor workers must be non-negative",
+               ResourceName<Dimension>());
+    if (executor_workers_ < 0) {
+        executor_workers_ = initial_executor_workers;
+    }
+    if (sync_group_handle_ == nullptr) {
+        sync_group_handle_ = cachinglayer::Manager::CreateLoadingOverheadGroup(
+            Dimension,
+            cachinglayer::LoadingOverheadPolicy::Executor(executor_workers_));
+        AssertInfo(sync_group_handle_ != nullptr,
+                   "Failed to create sync load {} overhead group",
+                   ResourceName<Dimension>());
+    }
+    return sync_group_handle_;
+}
+
+template <cachinglayer::LoadingOverheadDimension Dimension>
+bool
+LoadOverheadController<Dimension>::UpdateExecutorWorkers(
+    int64_t executor_workers) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    AssertInfo(executor_workers >= 0,
+               "Load {} executor workers must be non-negative",
+               ResourceName<Dimension>());
+    if (executor_workers == executor_workers_) {
+        return true;
+    }
+    if (!UpdateGroupPolicy(
+            sync_group_handle_,
+            cachinglayer::LoadingOverheadPolicy::Executor(executor_workers),
+            ResourceName<Dimension>())) {
+        return false;
+    }
+    executor_workers_ = executor_workers;
+    return true;
+}
+
+template <cachinglayer::LoadingOverheadDimension Dimension>
 bool
 LoadOverheadController<Dimension>::UpdateBudgetBytes(size_t bytes)
     requires(Dimension == cachinglayer::LoadingOverheadDimension::kMemory)

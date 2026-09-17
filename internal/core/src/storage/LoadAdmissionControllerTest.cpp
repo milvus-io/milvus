@@ -47,6 +47,7 @@
 #include "segcore/storagev2translator/StorageV2Config.h"
 #include "storage/AsyncLoadExecutor.h"
 #include "storage/LoadOverheadController.h"
+#include "storage/ThreadPools.h"
 
 namespace milvus::storage {
 namespace {
@@ -180,6 +181,69 @@ TEST_F(LoadAdmissionControllerAsyncTest, SharedOverheadFollowsAdmissionLimits) {
     check({1000, 500});
     budget_.SetCapacitySlots(std::numeric_limits<size_t>::max());
     check({1000, 500});  // The policy conversion must not overflow.
+}
+
+TEST_F(LoadAdmissionControllerAsyncTest,
+       SyncOverheadFollowsPoolsIndependently) {
+    using namespace cachinglayer;
+    const auto high = ThreadPools::GetThreadPool(HIGH).GetMaxThreadNum();
+    const auto low = ThreadPools::GetThreadPool(LOW).GetMaxThreadNum();
+    auto restore = folly::makeGuard([&] {
+        ThreadPools::ResizeThreadPool(HIGH, static_cast<float>(high) / CPU_NUM);
+        ThreadPools::ResizeThreadPool(LOW, static_cast<float>(low) / CPU_NUM);
+    });
+    ThreadPools::ResizeThreadPool(HIGH, 1.0f / CPU_NUM);
+    ThreadPools::ResizeThreadPool(LOW, 1.0f / CPU_NUM);
+    const auto workers = ThreadPools::GetLoadExecutorWorkers();
+    ASSERT_EQ(workers, 2);
+    auto& memory = LoadMemoryOverheadController::GetInstance();
+    auto& file = LoadFileOverheadController::GetInstance();
+    const LoadingOverheadConfig sync{
+        LoadingOverheadGroupBinding{memory.GetOrCreateForSync(workers), 100},
+        LoadingOverheadGroupBinding{file.GetOrCreateForSync(workers), 50}};
+    const LoadingOverheadConfig async{
+        LoadingOverheadGroupBinding{memory.GetOrCreate(), 100},
+        LoadingOverheadGroupBinding{file.GetOrCreate(), 50}};
+    EXPECT_NE(sync.memory->group, async.memory->group);
+    EXPECT_NE(sync.file->group, async.file->group);
+    internal::DList list(false, {100000, 100000}, {}, {}, {});
+    list.BindLoadingOverheadGroups(sync);
+    list.BindLoadingOverheadGroups(async);
+    auto unbind = folly::makeGuard([&] {
+        list.UnbindLoadingOverheadGroups(sync);
+        list.UnbindLoadingOverheadGroups(async);
+    });
+    const ResourceUsage overhead{10000, 5000};
+    const auto check = [&](const LoadingOverheadConfig& config,
+                           ResourceUsage expected) {
+        const auto result =
+            list.ReserveLoadingResourceWithTimeout(
+                    {}, overhead, &config, std::chrono::milliseconds(0))
+                .get();
+        ASSERT_TRUE(result.success);
+        EXPECT_EQ(result.reserved, expected);
+        EXPECT_EQ(list.ReleaseLoadingResource({}, overhead, &config), expected);
+    };
+    budget_.SetCapacitySlots(8);
+    check(sync, {200, 100});
+    check(async, {800, 400});
+    budget_.SetCapacityBytes(600);
+    check(sync, {200, 100});
+    check(async, {600, 400});
+    ThreadPools::ResizeThreadPool(HIGH, 3.0f / CPU_NUM);
+    check(sync, {400, 200});
+    check(async, {600, 400});
+    ThreadPools::ResizeThreadPool(LOW, 2.0f / CPU_NUM);
+    check(sync, {500, 250});
+    ThreadPools::ResizeThreadPool(HIGH, 1.0f / CPU_NUM);
+    check(sync, {300, 150});
+    budget_.SetCapacityBytes(0);
+    budget_.SetCapacitySlots(0);
+    check(sync, {300, 150});
+    check(async, overhead);
+    // A stale bootstrap count must not overwrite a published resize.
+    EXPECT_EQ(memory.GetOrCreateForSync(workers), sync.memory->group);
+    check(sync, {300, 150});
 }
 
 TEST_F(LoadAdmissionControllerAsyncTest,

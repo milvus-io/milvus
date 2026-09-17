@@ -20,6 +20,7 @@
 #include "folly/coro/BlockingWait.h"
 #include "storage/AsyncIndexEntryReader.h"
 #include "storage/LoadOverheadController.h"
+#include "storage/ThreadPools.h"
 #include "storage/AsyncLoadExecutor.h"
 #include "segcore/storagev2translator/StorageV2Config.h"
 #include "storage/FileWriter.h"
@@ -945,8 +946,11 @@ IndexFactory::ScalarIndexFileLoadResource(
                                SaturatingAdd(staging_bytes, read_peak)));
     // Preserve both routes' final and request-local overhead estimates. A cell
     // can be reloaded after either rollout or executor configuration changes.
+    // Ordered sync prefetch retains completed buffers beyond worker execution.
+    // Only direct-to-file sync streams have worker-bounded scratch lifetimes.
     const bool can_share =
-        staging_bytes == 0 && type != BITMAP_INDEX_TYPE &&
+        (use_async_load || file_stream) && staging_bytes == 0 &&
+        type != BITMAP_INDEX_TYPE &&
         request.max_memory_cost - request.final_memory_cost <= read_peak &&
         legacy.max_memory_cost - legacy.final_memory_cost <= legacy_peak;
     const auto memory_overhead =
@@ -974,8 +978,11 @@ IndexFactory::ScalarIndexFileLoadResource(
     std::optional<cachinglayer::LoadingOverheadConfig> overhead;
     // Both routes must lease the entire overhead before sharing its reservation.
     if (can_share) {
-        auto memory_group =
-            storage::LoadMemoryOverheadController::GetInstance().GetOrCreate();
+        auto& controller = storage::LoadMemoryOverheadController::GetInstance();
+        auto memory_group = use_async_load
+                                ? controller.GetOrCreate()
+                                : controller.GetOrCreateForSync(
+                                      ThreadPools::GetLoadExecutorWorkers());
         AssertInfo(max_task <= static_cast<uint64_t>(
                                    std::numeric_limits<int64_t>::max()),
                    "Async scalar task estimate exceeds resource policy range");

@@ -234,8 +234,8 @@ Scalar estimates use the larger compatible path cost and sum the catalog's
 possible slice scratch before global limits are applied, so a later
 admission-limit expansion does not rely on a smaller fixed per-load estimate.
 
-Eligible memory overhead shares
-`LoadMemoryOverheadController::GetInstance().GetOrCreate()` with field loading.
+Eligible async memory overhead shares
+`LoadMemoryOverheadController::GetInstance().GetOrCreate()` with async field loading.
 Scalar staging-file reservations remain local to the load. With a nonzero byte
 budget, the shared memory group uses that budget and its oversized-unit allowance.
 Without a byte budget, it uses admission slots times the largest admitted unit.
@@ -246,9 +246,14 @@ capacity rather than HIGH/LOW or async worker counts.
 Admission expands accounting bounds before permitting more work; a rejected
 accounting update leaves the admission limit unchanged. Shrinking first restricts
 new admissions and keeps accounting for already active work until it drains.
-Executor resizing does not change these accounting bounds. This shared accounting
-change also applies to existing field-data loads and synchronous admission users.
-It does not change the legacy scalar download algorithm or its batch allowance.
+Async executor resizing does not change these accounting bounds. Synchronous
+field-data and direct-to-file scalar loads use a separate overhead group bounded
+by HIGH + LOW thread-pool workers, updated when those pools resize. Each
+translator retains its group's identity across rollout changes, so synchronous
+and asynchronous loads can coexist without changing each other's bounds.
+Synchronous ordered scalar prefetch retains completed buffers after its workers
+return; it keeps request-local reservations rather than sharing a worker-bound
+group. The legacy scalar download algorithm and its batch allowance are unchanged.
 
 These estimates cover loader-managed allocations, not every allocation inside
 remote SDKs or index engines. This design makes no throughput or peak-RSS claim.

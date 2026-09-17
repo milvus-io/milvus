@@ -1058,6 +1058,7 @@ TYPED_TEST_P(HybridIndexTestInverted,
     storage::FileManagerContext ctx(
         this->field_meta_, this->index_meta_, this->chunk_manager_, this->fs_);
     ctx.set_for_loading_index(true);
+    ctx.use_async_load = true;
 
     Config config = index_params;
     milvus::segcore::storagev1translator::SealedIndexTranslator translator(

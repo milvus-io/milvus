@@ -374,7 +374,7 @@ TEST_P(ManifestGroupTranslatorTest, TestScalarColumnGroup) {
 
     auto memory_group =
         milvus::storage::LoadMemoryOverheadController::GetInstance()
-            .GetOrCreate();
+            .GetOrCreateForSync(milvus::ThreadPools::GetLoadExecutorWorkers());
     ASSERT_TRUE(translator->meta()->loading_overhead_config.has_value());
     ASSERT_TRUE(
         translator->meta()->loading_overhead_config->memory.has_value());
@@ -391,7 +391,8 @@ TEST_P(ManifestGroupTranslatorTest, TestScalarColumnGroup) {
             translator->meta()->loading_overhead_config->file.has_value());
         EXPECT_EQ(translator->meta()->loading_overhead_config->file->group,
                   milvus::storage::LoadFileOverheadController::GetInstance()
-                      .GetOrCreate());
+                      .GetOrCreateForSync(
+                          milvus::ThreadPools::GetLoadExecutorWorkers()));
         ASSERT_TRUE(
             translator->meta()
                 ->loading_overhead_config->file->max_runtime_unit.has_value());
@@ -1244,6 +1245,21 @@ TEST_P(ManifestGroupTranslatorTest, TestAsyncLoadParity) {
     };
     auto sync_translator = MakeTranslator(0, use_mmap, false);
     auto async_translator = MakeTranslator(0, use_mmap, true);
+    ASSERT_TRUE(sync_translator->meta()->loading_overhead_config.has_value());
+    ASSERT_TRUE(async_translator->meta()->loading_overhead_config.has_value());
+    EXPECT_NE(sync_translator->meta()->loading_overhead_config->memory->group,
+              async_translator->meta()->loading_overhead_config->memory->group);
+    EXPECT_EQ(
+        async_translator->meta()->loading_overhead_config->memory->group,
+        storage::LoadMemoryOverheadController::GetInstance().GetOrCreate());
+    if (use_mmap) {
+        EXPECT_NE(
+            sync_translator->meta()->loading_overhead_config->file->group,
+            async_translator->meta()->loading_overhead_config->file->group);
+        EXPECT_EQ(
+            async_translator->meta()->loading_overhead_config->file->group,
+            storage::LoadFileOverheadController::GetInstance().GetOrCreate());
+    }
     ASSERT_EQ(sync_translator->num_cells(), async_translator->num_cells());
 
     std::vector<milvus::cachinglayer::cid_t> cids(sync_translator->num_cells());

@@ -224,7 +224,20 @@ RunTantivyDirectLoad(bool enable_mmap, bool nullable) {
             stats->GetIndexFiles(),
             fixture.ctx);
     };
+    fixture.ctx.use_async_load = false;
+    const auto sync_resources = estimate();
+    fixture.ctx.use_async_load = true;
     const auto resources = estimate();
+    if (!nullable) {
+        ASSERT_TRUE(sync_resources.overhead.has_value());
+        ASSERT_TRUE(resources.overhead.has_value());
+        EXPECT_EQ(
+            sync_resources.overhead->memory->group,
+            storage::LoadMemoryOverheadController::GetInstance()
+                .GetOrCreateForSync(ThreadPools::GetLoadExecutorWorkers()));
+        EXPECT_NE(sync_resources.overhead->memory->group,
+                  resources.overhead->memory->group);
+    }
     const auto old_workers = storage::GetAsyncLoadThreadPoolSize();
     const auto old_enabled =
         segcore::storagev2translator::StorageV2AsyncLoadEnabled();

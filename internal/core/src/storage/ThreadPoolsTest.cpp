@@ -14,6 +14,7 @@
 #include <gtest/gtest.h>
 #include <memory>
 
+#include "folly/ScopeGuard.h"
 #include "gtest/gtest.h"
 #include "storage/LoadOverheadController.h"
 #include "storage/ThreadPool.h"
@@ -33,7 +34,20 @@ struct ThreadPoolsTestAccess {
 TEST(ThreadPool, ThreadNum) {
     auto& threadPool =
         milvus::ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
-    auto max_thread_num = threadPool.GetMaxThreadNum();
+    auto& lowThreadPool =
+        milvus::ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::LOW);
+    const auto max_thread_num = threadPool.GetMaxThreadNum();
+    const auto low_max_thread_num = lowThreadPool.GetMaxThreadNum();
+    auto restore = folly::makeGuard([&] {
+        milvus::ThreadPools::ResizeThreadPool(
+            milvus::ThreadPoolPriority::HIGH,
+            static_cast<float>(max_thread_num) / milvus::CPU_NUM);
+        milvus::ThreadPools::ResizeThreadPool(
+            milvus::ThreadPoolPriority::LOW,
+            static_cast<float>(low_max_thread_num) / milvus::CPU_NUM);
+    });
+    EXPECT_EQ(milvus::ThreadPools::GetLoadExecutorWorkers(),
+              max_thread_num + low_max_thread_num);
     milvus::ThreadPools::ResizeThreadPool(milvus::ThreadPoolPriority::HIGH,
                                           0.0);
     ASSERT_EQ(threadPool.GetMaxThreadNum(), max_thread_num);
@@ -42,15 +56,47 @@ TEST(ThreadPool, ThreadNum) {
     ASSERT_EQ(threadPool.GetMaxThreadNum(), max_thread_num);
     milvus::ThreadPools::ResizeThreadPool(milvus::ThreadPoolPriority::HIGH,
                                           2.0);
-    ASSERT_EQ(threadPool.GetMaxThreadNum(), 2.0 * milvus::CPU_NUM);
+    ASSERT_EQ(threadPool.GetMaxThreadNum(),
+              milvus::ClampThreadPoolMaxThreads(2 * milvus::CPU_NUM));
+    EXPECT_EQ(milvus::ThreadPools::GetLoadExecutorWorkers(),
+              threadPool.GetMaxThreadNum() + lowThreadPool.GetMaxThreadNum());
+    milvus::ThreadPools::ResizeThreadPool(milvus::ThreadPoolPriority::LOW, 2.0);
+    EXPECT_EQ(milvus::ThreadPools::GetLoadExecutorWorkers(),
+              threadPool.GetMaxThreadNum() + lowThreadPool.GetMaxThreadNum());
 
     milvus::ThreadPools::ResizeThreadPool(
         milvus::ThreadPoolPriority::HIGH,
         static_cast<float>(max_thread_num) / milvus::CPU_NUM);
     ASSERT_EQ(threadPool.GetMaxThreadNum(), max_thread_num);
+    EXPECT_EQ(milvus::ThreadPools::GetLoadExecutorWorkers(),
+              max_thread_num + lowThreadPool.GetMaxThreadNum());
+    milvus::ThreadPools::ResizeThreadPool(
+        milvus::ThreadPoolPriority::LOW,
+        static_cast<float>(low_max_thread_num) / milvus::CPU_NUM);
+    EXPECT_EQ(milvus::ThreadPools::GetLoadExecutorWorkers(),
+              max_thread_num + low_max_thread_num);
 }
 
-TEST(ThreadPool, OverheadGroupsDoNotAcquirePoolMapLock) {
+TEST(ThreadPool, LoadExecutorWorkerCountUsesCacheAfterInitialization) {
+    const auto expected = milvus::ThreadPools::GetLoadExecutorWorkers();
+    auto pool_map_lock = milvus::ThreadPoolsTestAccess::LockPoolMap();
+    std::promise<void> query_started;
+    auto started = query_started.get_future();
+    auto query = std::async(std::launch::async, [&query_started]() {
+        query_started.set_value();
+        return milvus::ThreadPools::GetLoadExecutorWorkers();
+    });
+
+    const auto started_status = started.wait_for(std::chrono::seconds(1));
+    const auto query_status = query.wait_for(std::chrono::seconds(2));
+    pool_map_lock.unlock();
+
+    EXPECT_EQ(started_status, std::future_status::ready);
+    EXPECT_EQ(query_status, std::future_status::ready);
+    EXPECT_EQ(query.get(), expected);
+}
+
+TEST(ThreadPool, AsyncOverheadGroupsDoNotAcquirePoolMapLock) {
     auto pool_map_lock = milvus::ThreadPoolsTestAccess::LockPoolMap();
     std::promise<void> query_started;
     auto started = query_started.get_future();
