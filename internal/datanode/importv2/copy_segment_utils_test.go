@@ -4008,8 +4008,8 @@ func TestRepublishCopiedManifestIndexes_WritePlacementMatrix(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}
-			basePath := "files/copy_manifest_write_matrix/" + strings.ReplaceAll(tc.name, " ", "_")
-			sourceIndexPath := "files/index_v1/1/2/3/6001/1"
+			basePath := path.Join(cfg.RootPath, "copy_manifest_write_matrix", strings.ReplaceAll(tc.name, " ", "_"))
+			sourceIndexPath := path.Join(cfg.RootPath, "index_v1/1/2/3/6001/1")
 			relativePath, err := packed.ManifestIndexRelativePath(basePath, sourceIndexPath)
 			require.NoError(t, err)
 			copiedManifest, err := packed.CommitManifestUpdates(basePath, packed.ManifestEarliest, cfg,
@@ -4043,7 +4043,7 @@ func TestRepublishCopiedManifestIndexes_WritePlacementMatrix(t *testing.T) {
 					IndexName:      "vec_idx",
 					BuildId:        888,
 					Version:        2,
-					IndexFilePaths: []string{"files/index_v1/100/200/300/888/2/target.bin"},
+					IndexFilePaths: []string{path.Join(cfg.RootPath, "index_v1/100/200/300/888/2/target.bin")},
 				},
 			}
 
