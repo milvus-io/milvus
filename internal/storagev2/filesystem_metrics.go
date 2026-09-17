@@ -151,7 +151,9 @@ func makePropertiesFromConfig(storageConfig *indexpb.StorageConfig) (C.LoonPrope
 		keys = append(keys, propAccessKeyValue)
 		values = append(values, v)
 	}
-	if v := storageConfig.GetRootPath(); v != "" {
+	// Same root rule as packed.MakePropertiesFromStorageConfig, otherwise the
+	// metrics lookup addresses a filesystem that was never created.
+	if v := LoonFSRootPath(storageConfig); v != "" {
 		keys = append(keys, propRootPath)
 		values = append(values, v)
 	}

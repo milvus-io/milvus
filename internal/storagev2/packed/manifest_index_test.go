@@ -52,8 +52,8 @@ func indexEntry(t *testing.T, basePath, indexPrefix string, indexID, buildID int
 // absolute legacy prefix, with every scalar field intact.
 func TestCommitManifestUpdates_IndexRoundTrip(t *testing.T) {
 	cfg := manifestTestStorageConfig(t)
-	basePath := "files/commit_index_roundtrip/seg1"
-	indexPrefix := "files/index_v1/1/2/3/500/1"
+	basePath := path.Join(cfg.GetRootPath(), "commit_index_roundtrip/seg1")
+	indexPrefix := path.Join(cfg.GetRootPath(), "index_v1/1/2/3/500/1")
 
 	committed, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, &ManifestUpdates{
 		Indexes: []ManifestIndexInfo{indexEntry(t, basePath, indexPrefix, 10, 500)},
@@ -90,17 +90,19 @@ func TestCommitManifestUpdates_IndexRoundTrip(t *testing.T) {
 // DataCoord publish a rebuild without an explicit drop.
 func TestCommitManifestUpdates_IndexRepublishReplaces(t *testing.T) {
 	cfg := manifestTestStorageConfig(t)
-	basePath := "files/commit_index_republish/seg1"
+	basePath := path.Join(cfg.GetRootPath(), "commit_index_republish/seg1")
+	firstPrefix := path.Join(cfg.GetRootPath(), "index_v1/1/2/3/500/1")
+	secondPrefix := path.Join(cfg.GetRootPath(), "index_v1/1/2/3/501/2")
 
 	first, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, &ManifestUpdates{
-		Indexes: []ManifestIndexInfo{indexEntry(t, basePath, "files/index_v1/1/2/3/500/1", 10, 500)},
+		Indexes: []ManifestIndexInfo{indexEntry(t, basePath, firstPrefix, 10, 500)},
 	})
 	require.NoError(t, err)
 	_, version, err := UnmarshalManifestPath(first)
 	require.NoError(t, err)
 
 	second, err := CommitManifestUpdates(basePath, version, cfg, &ManifestUpdates{
-		Indexes: []ManifestIndexInfo{indexEntry(t, basePath, "files/index_v1/1/2/3/501/2", 10, 501)},
+		Indexes: []ManifestIndexInfo{indexEntry(t, basePath, secondPrefix, 10, 501)},
 	})
 	require.NoError(t, err)
 
@@ -108,17 +110,17 @@ func TestCommitManifestUpdates_IndexRepublishReplaces(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, indexes, 1)
 	require.EqualValues(t, 501, indexes[0].BuildID)
-	require.Equal(t, "files/index_v1/1/2/3/501/2", indexes[0].Path)
+	require.Equal(t, secondPrefix, indexes[0].Path)
 }
 
 func TestCommitManifestUpdates_DropIndex(t *testing.T) {
 	cfg := manifestTestStorageConfig(t)
-	basePath := "files/commit_index_drop/seg1"
+	basePath := path.Join(cfg.GetRootPath(), "commit_index_drop/seg1")
 
 	published, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, &ManifestUpdates{
 		Indexes: []ManifestIndexInfo{
-			indexEntry(t, basePath, "files/index_v1/1/2/3/500/1", 10, 500),
-			indexEntry(t, basePath, "files/index_v1/1/2/3/600/1", 11, 600),
+			indexEntry(t, basePath, path.Join(cfg.GetRootPath(), "index_v1/1/2/3/500/1"), 10, 500),
+			indexEntry(t, basePath, path.Join(cfg.GetRootPath(), "index_v1/1/2/3/600/1"), 11, 600),
 		},
 	})
 	require.NoError(t, err)
