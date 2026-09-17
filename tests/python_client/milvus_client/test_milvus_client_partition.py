@@ -2500,14 +2500,13 @@ class TestPartitionOperations(TestMilvusClientV2Base):
         )
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="smellthemoon: behavior changed")
     def test_partition_upsert_with_auto_id(self):
         """
         target: test upsert data in partition when auto_id=True
         method: 1. create a partition
                 2. insert some data
                 3. upsert data
-        expected: raise exception
+        expected: reject an AutoID Upsert that omits its lookup primary key
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
@@ -2535,7 +2534,7 @@ class TestPartitionOperations(TestMilvusClientV2Base):
             upsert_data,
             partition_name=partition_name,
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 1, ct.err_msg: "Upsert don't support autoid == true"},
+            check_items={ct.err_code: 1100, ct.err_msg: "must assign pk when upsert"},
         )
 
     @pytest.mark.tags(CaseLabel.L1)
