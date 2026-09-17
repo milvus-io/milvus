@@ -56,6 +56,8 @@
 #include "storage/ChunkManager.h"
 #include "storage/FileManager.h"
 #include "storage/InsertData.h"
+#include "storage/IndexEntryDirectStreamWriter.h"
+#include "storage/RemoteOutputStream.h"
 #include "storage/PayloadReader.h"
 #include "storage/RemoteInputStream.h"
 #include "storage/ThreadPools.h"
@@ -1185,3 +1187,73 @@ REGISTER_TYPED_TEST_SUITE_P(BitmapIndexTestV6,
 INSTANTIATE_TYPED_TEST_SUITE_P(BitmapIndexE2ECheck_Mmap,
                                BitmapIndexTestV6,
                                BitmapType);
+
+TEST(BitmapIndexV3AsyncLoadTest, RejectsMalformedPostingsWithValidEntryCrc) {
+    milvus::test::ScopedLoadTransientBudget budget_guard(0);
+    BitmapAsyncLoadFixture fixture("bitmap_async_corrupt");
+    ASSERT_TRUE(fixture.fs->CreateDir(fixture.root_path, true).ok());
+    roaring::Roaring bitmap;
+    bitmap.add(0);
+    const int32_t key = 7;
+    std::vector<uint8_t> good(sizeof(key) + bitmap.getSizeInBytes());
+    std::memcpy(good.data(), &key, sizeof(key));
+    bitmap.write(reinterpret_cast<char*>(good.data() + sizeof(key)));
+    std::vector<std::vector<uint8_t>> invalid;
+    invalid.emplace_back(good.begin(), good.begin() + sizeof(key) - 1);
+    invalid.emplace_back(good.begin(), good.end() - 1);
+    invalid.push_back(good);
+    invalid.back().push_back(
+        0);  // Bytes left over after the declared postings.
+    bitmap = roaring::Roaring();
+    bitmap.add(100);  // Valid roaring encoding, invalid document offset.
+    invalid.emplace_back(sizeof(key) + bitmap.getSizeInBytes());
+    std::memcpy(invalid.back().data(), &key, sizeof(key));
+    bitmap.write(reinterpret_cast<char*>(invalid.back().data() + sizeof(key)));
+    const uint32_t malformed_header[] = {
+        static_cast<uint32_t>(key),
+        roaring::internal::SERIAL_COOKIE_NO_RUNCONTAINER,
+        UINT32_MAX};
+    const auto* header_bytes =
+        reinterpret_cast<const uint8_t*>(malformed_header);
+    invalid.emplace_back(header_bytes, header_bytes + sizeof(malformed_header));
+    for (bool mmap : {false, true}) {
+        for (size_t i = 0; i < invalid.size(); ++i) {
+            SCOPED_TRACE(::testing::Message()
+                         << "mmap=" << mmap << " case=" << i);
+            auto path = fixture.root_path + "/bad.v3";
+            {
+                auto output = fixture.fs->OpenOutputStream(path);
+                ASSERT_TRUE(output.ok()) << output.status().ToString();
+                auto stream = std::make_shared<storage::RemoteOutputStream>(
+                    std::move(output.ValueOrDie()));
+                storage::IndexEntryDirectStreamWriter writer(stream);
+                writer.WriteEntry(
+                    BITMAP_INDEX_DATA, invalid[i].data(), invalid[i].size());
+                // Large cardinality selects the mmap decoder. Both decoders must
+                // reject the malformed first posting without reading past it.
+                writer.PutMeta(
+                    BITMAP_INDEX_LENGTH,
+                    mmap ? DEFAULT_BITMAP_INDEX_BUILD_MODE_BOUND + 1 : 1);
+                writer.PutMeta(BITMAP_INDEX_NUM_ROWS, 1);
+                writer.Finish();
+            }
+            auto file = fixture.fs->OpenInputFile(path);
+            ASSERT_TRUE(file.ok());
+            auto input = std::make_shared<storage::RemoteInputStream>(
+                std::move(file.ValueOrDie()));
+            auto reader =
+                folly::coro::blockingWait(storage::AsyncIndexEntryReader::Open(
+                    input, 0, proto::common::LoadPriority::HIGH));
+            ExposedBitmapIndex index(fixture.ctx);
+            Config config;
+            if (mmap)
+                config[MMAP_FILE_PATH] = fixture.root_path + "/mmap/index";
+            try {
+                index.LoadPlannedForTest(*reader, config);
+                FAIL() << "expected corrupt bitmap error";
+            } catch (const SegcoreError& error) {
+                EXPECT_EQ(error.get_error_code(), ErrorCode::DataFormatBroken);
+            }
+        }
+    }
+}

@@ -57,6 +57,53 @@ constexpr const char* BITMAP_INDEX_IS_NESTED_META = "is_nested";
 
 namespace {
 
+// Validate serialized bounds before allocating; CRoaring's safe decoder returns
+// null for both truncated input and allocation failure. After these checks its
+// remaining failure paths are allocation failures (CRoaring 3.0).
+roaring::Roaring
+ReadBitmap(std::span<const uint8_t>& input, size_t total_rows) {
+    if (input.size() >= 2 * sizeof(uint32_t)) {
+        uint32_t cookie, count;
+        memcpy(&cookie, input.data(), sizeof(cookie));
+        memcpy(&count, input.data() + sizeof(cookie), sizeof(count));
+        // The size probe in CRoaring 3.0 does not reject negative int32 counts.
+        if (cookie == roaring::internal::SERIAL_COOKIE_NO_RUNCONTAINER &&
+            count > 65536) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "Invalid Bitmap container count {}",
+                      count);
+        }
+    }
+    const auto* bytes = reinterpret_cast<const char*>(input.data());
+    const auto size = roaring::api::roaring_bitmap_portable_deserialize_size(
+        bytes, input.size());
+    if (size == 0 || size > input.size()) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "Truncated or invalid Bitmap posting");
+    }
+    auto* decoded =
+        roaring::api::roaring_bitmap_portable_deserialize_safe(bytes, size);
+    if (decoded == nullptr) {
+        ThrowInfo(ErrorCode::MemAllocateFailed,
+                  "Failed to allocate Bitmap posting");
+    }
+    roaring::Roaring value(decoded);
+    const char* reason = nullptr;
+    if (!roaring::api::roaring_bitmap_internal_validate(&value.roaring,
+                                                        &reason)) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "Invalid Bitmap posting: {}",
+                  reason ? reason : "unknown");
+    }
+    if (!value.isEmpty() && value.maximum() >= total_rows) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "Bitmap posting exceeds row count {}",
+                  total_rows);
+    }
+    input = input.subspan(size);
+    return value;
+}
+
 struct BitmapLoadContext {
     std::unique_ptr<MmapFileRAII> final_file_cleanup;
     size_t index_length{0};
@@ -472,18 +519,14 @@ BitmapIndex<T>::ChooseIndexLoadMode(int64_t index_length) {
 template <typename T>
 void
 BitmapIndex<T>::DeserializeIndexData(const uint8_t* data_ptr,
+                                     size_t data_size,
                                      size_t index_length,
                                      bool rebuild_validity_from_postings) {
     ChooseIndexLoadMode(index_length);
+    std::span<const uint8_t> input(data_ptr, data_size);
     for (size_t i = 0; i < index_length; ++i) {
-        T key;
-        milvus::fastmem::FastMemcpy(&key, data_ptr, sizeof(T));
-        data_ptr += sizeof(T);
-
-        roaring::Roaring value;
-        value = roaring::Roaring::read(reinterpret_cast<const char*>(data_ptr));
-        data_ptr += value.getSizeInBytes();
-
+        auto key = ParseKey(input);
+        auto value = ReadBitmap(input, total_num_rows_);
         if (build_mode_ == BitmapIndexBuildMode::BITSET) {
             bitsets_[key] = ConvertRoaringToBitset(value);
         } else {
@@ -494,6 +537,10 @@ BitmapIndex<T>::DeserializeIndexData(const uint8_t* data_ptr,
                 valid_bitset_.set(v);
             }
         }
+    }
+    if (!input.empty()) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "Bitmap index data has trailing bytes");
     }
 }
 
@@ -532,58 +579,33 @@ BitmapIndex<T>::BuildOffsetCache() {
     LOG_INFO("build offset cache for bitmap index");
 }
 
-template <>
-void
-BitmapIndex<std::string>::DeserializeIndexData(
-    const uint8_t* data_ptr,
-    size_t index_length,
-    bool rebuild_validity_from_postings) {
-    ChooseIndexLoadMode(index_length);
-    for (size_t i = 0; i < index_length; ++i) {
-        size_t key_size;
-        milvus::fastmem::FastMemcpy(&key_size, data_ptr, sizeof(size_t));
-        data_ptr += sizeof(size_t);
-
-        std::string key(reinterpret_cast<const char*>(data_ptr), key_size);
-        data_ptr += key_size;
-
-        roaring::Roaring value;
-        value = roaring::Roaring::read(reinterpret_cast<const char*>(data_ptr));
-        data_ptr += value.getSizeInBytes();
-
-        if (build_mode_ == BitmapIndexBuildMode::BITSET) {
-            bitsets_[key] = ConvertRoaringToBitset(value);
-        } else {
-            data_[key] = value;
-        }
-        if (rebuild_validity_from_postings) {
-            for (const auto& v : value) {
-                valid_bitset_.set(v);
-            }
-        }
-    }
-}
-
 template <typename T>
 T
-BitmapIndex<T>::ParseKey(const uint8_t** ptr) {
+BitmapIndex<T>::ParseKey(std::span<const uint8_t>& input) {
+    if (input.size() < sizeof(T)) {
+        ThrowInfo(ErrorCode::DataFormatBroken, "Truncated Bitmap key");
+    }
     T key;
-    milvus::fastmem::FastMemcpy(&key, *ptr, sizeof(T));
-    *ptr += sizeof(T);
+    milvus::fastmem::FastMemcpy(&key, input.data(), sizeof(T));
+    input = input.subspan(sizeof(T));
     return key;
 }
 
 template <>
 std::string
-BitmapIndex<std::string>::ParseKey(const uint8_t** ptr) {
-    auto data_ptr = *ptr;
+BitmapIndex<std::string>::ParseKey(std::span<const uint8_t>& input) {
+    if (input.size() < sizeof(size_t)) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "Truncated Bitmap string key length");
+    }
     size_t key_size;
-    milvus::fastmem::FastMemcpy(&key_size, data_ptr, sizeof(size_t));
-    data_ptr += sizeof(size_t);
-
-    std::string key(reinterpret_cast<const char*>(data_ptr), key_size);
-    data_ptr += key_size;
-    *ptr = data_ptr;
+    milvus::fastmem::FastMemcpy(&key_size, input.data(), sizeof(key_size));
+    input = input.subspan(sizeof(key_size));
+    if (key_size > input.size()) {
+        ThrowInfo(ErrorCode::DataFormatBroken, "Truncated Bitmap string key");
+    }
+    std::string key(reinterpret_cast<const char*>(input.data()), key_size);
+    input = input.subspan(key_size);
     return key;
 }
 
@@ -598,7 +620,7 @@ BitmapIndex<T>::MMapIndexData(const std::string& file_name,
     std::filesystem::create_directories(
         std::filesystem::path(file_name).parent_path());
     auto cleanup = std::make_unique<MmapFileRAII>(file_name);
-    FrozenIndexData frozen{data_ptr, index_length};
+    FrozenIndexData frozen{std::span(data_ptr, data_size), index_length};
     {
         storage::FileWriter writer(
             file_name, storage::io::GetPriorityFromLoadPriority(priority));
@@ -616,12 +638,11 @@ template <typename T>
 void
 BitmapIndex<T>::BuildFrozenBatch(FrozenIndexData& data,
                                  bool rebuild_validity_from_postings) {
-    auto& [data_ptr, remaining, file_offset, bitmaps, buffer] = data;
+    auto& [input, remaining, file_offset, bitmaps, buffer] = data;
     buffer.clear();
     while (remaining != 0 && buffer.size() < BITMAP_FROZEN_BATCH_BYTES) {
-        auto key = ParseKey(&data_ptr);
-        auto value =
-            roaring::Roaring::read(reinterpret_cast<const char*>(data_ptr));
+        auto key = ParseKey(input);
+        auto value = ReadBitmap(input, total_num_rows_);
         if (rebuild_validity_from_postings) {
             for (const auto offset : value) {
                 valid_bitset_.set(offset);
@@ -646,8 +667,11 @@ BitmapIndex<T>::BuildFrozenBatch(FrozenIndexData& data,
         value.writeFrozen(reinterpret_cast<char*>(buffer.data() + begin));
         bitmaps[std::move(key)] = {file_offset, frozen_size};
         file_offset += aligned_size;
-        data_ptr += value.getSizeInBytes();
         --remaining;
+    }
+    if (remaining == 0 && !input.empty()) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "Bitmap index data has trailing bytes");
     }
 }
 
@@ -677,6 +701,7 @@ template <typename T>
 folly::coro::Task<std::unique_ptr<MmapFileRAII>>
 BitmapIndex<T>::MMapIndexDataAsync(const std::string& file_name,
                                    const uint8_t* data_ptr,
+                                   size_t data_size,
                                    size_t index_length,
                                    proto::common::LoadPriority priority,
                                    bool rebuild_validity_from_postings) {
@@ -696,7 +721,7 @@ BitmapIndex<T>::MMapIndexDataAsync(const std::string& file_name,
                     storage::io::GetPriorityFromLoadPriority(priority));
             },
             priority);
-        FrozenIndexData frozen{data_ptr, index_length};
+        FrozenIndexData frozen{std::span(data_ptr, data_size), index_length};
         while (frozen.remaining != 0) {
             storage::ThrowIfCancelled(token, "Bitmap::ConvertFrozen");
             BuildFrozenBatch(frozen, rebuild_validity_from_postings);
@@ -782,6 +807,7 @@ BitmapIndex<T>::LoadWithoutAssemble(const BinarySet& binary_set,
                       rebuild_validity_from_postings);
     } else {
         DeserializeIndexData(index_data_buffer->data.get(),
+                             index_data_buffer->size,
                              index_length,
                              rebuild_validity_from_postings);
     }
@@ -1568,6 +1594,9 @@ BitmapIndex<T>::PlanLoad(const storage::IndexEntryDirectory& directory,
             .value_or(proto::common::LoadPriority::HIGH);
 
     auto raw_data_size = directory.At(BITMAP_INDEX_DATA).plaintext_size;
+    if (context->index_length > 0 && raw_data_size == 0) {
+        ThrowInfo(ErrorCode::DataFormatBroken, "Bitmap postings are empty");
+    }
     context->use_mmap =
         config.contains(MMAP_FILE_PATH) &&
         context->index_length > DEFAULT_BITMAP_INDEX_BUILD_MODE_BOUND;
@@ -1667,6 +1696,7 @@ BitmapIndex<T>::FinishLoadAsync(IndexLoadPlan& plan, const Config& config) {
         context->final_file_cleanup = co_await MMapIndexDataAsync(
             context->final_mmap_path,
             static_cast<const uint8_t*>(raw_map),
+            raw_size,
             context->index_length,
             context->priority,
             context->rebuild_validity_from_postings);
@@ -1674,6 +1704,7 @@ BitmapIndex<T>::FinishLoadAsync(IndexLoadPlan& plan, const Config& config) {
         AssertInfo(context->index_data != nullptr,
                    "Bitmap raw memory target is null");
         DeserializeIndexData(context->index_data->data(),
+                             context->index_data->size(),
                              context->index_length,
                              context->rebuild_validity_from_postings);
     }
@@ -1796,8 +1827,10 @@ BitmapIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
                                    memcpy(buf.data() + wo, d, len);
                                    wo += len;
                                });
-        DeserializeIndexData(
-            buf.data(), index_length, rebuild_validity_from_postings);
+        DeserializeIndexData(buf.data(),
+                             buf.size(),
+                             index_length,
+                             rebuild_validity_from_postings);
     }
 
     if (enable_offset_cache.has_value() && enable_offset_cache.value()) {

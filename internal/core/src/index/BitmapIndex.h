@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #pragma once
+#include <span>
 
 #include <map>
 #include <memory>
@@ -369,7 +370,7 @@ class BitmapIndex : public ScalarIndex<T> {
     DeserializeValidBitsetData(const uint8_t* data_ptr, size_t data_size);
 
     T
-    ParseKey(const uint8_t** ptr);
+    ParseKey(std::span<const uint8_t>& input);
 
     // Deserialize posting data.
     //
@@ -384,6 +385,7 @@ class BitmapIndex : public ScalarIndex<T> {
     // null arrays during reconstruction.
     void
     DeserializeIndexData(const uint8_t* data_ptr,
+                         size_t data_size,
                          size_t index_length,
                          bool rebuild_validity_from_postings);
 
@@ -443,7 +445,7 @@ class BitmapIndex : public ScalarIndex<T> {
     using FrozenOffsets = std::map<T, std::pair<size_t, size_t>>;
 
     struct FrozenIndexData {
-        const uint8_t* cursor;
+        std::span<const uint8_t> input;
         size_t remaining;
         size_t file_size{0};
         FrozenOffsets offsets;
@@ -464,6 +466,7 @@ class BitmapIndex : public ScalarIndex<T> {
     folly::coro::Task<std::unique_ptr<MmapFileRAII>>
     MMapIndexDataAsync(const std::string& path,
                        const uint8_t* data,
+                       size_t data_size,
                        size_t index_length,
                        proto::common::LoadPriority priority,
                        bool rebuild_validity_from_postings);
