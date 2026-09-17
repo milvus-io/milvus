@@ -740,27 +740,18 @@ func (s *CollectionObserverRGSuite) TestScopedTaskFinishesOnItsOwnResourceGroup(
 	s.True(s.ob.loadTasks.Contain(keyB), "a lagging resource group must not be finished by a loaded sibling")
 }
 
-// TestScopedTaskWaitsForCurrentTargetPromotion asserts that a scoped task does
-// not declare its resource group loaded until the current target has been
-// promoted. The per-resource-group percentage is measured against the NEXT
-// target, so it reaches 100 while the promotion is still pending -- and until
-// it lands, the group cannot serve: shard leader readiness is measured against
-// the CURRENT target. Finishing there would drop the group's supervision (its
-// timeout and teardown) at the moment it is carrying everything but answering
-// nothing.
-//
-// The fixture is the shape the expansion path actually produces: a collection
-// that is already loaded, all partitions at 100, with a resource group just
-// added to it. That is why the gate cannot be read off the partitions -- they
-// are all at 100 and are skipped -- and is asked of the target manager
-// directly.
-func (s *CollectionObserverRGSuite) TestScopedTaskWaitsForCurrentTargetPromotion() {
+// TestScopedTaskWaitsForACurrentTargetToExist pins the one thing the target
+// term of a scoped task's completion guards: a collection with no current
+// target at all. A coordinator that restarted without a saved target rebuilds
+// its scoped tasks for loaded collections before the first promotion; every
+// partition is at 100 and the group already carries everything of the next
+// target, yet nothing can serve until a current target exists, so the task
+// must not finish and take the group's supervision with it.
+func (s *CollectionObserverRGSuite) TestScopedTaskWaitsForACurrentTargetToExist() {
 	s.registerLoadingCollection(800, 80, "800-dmc0", 2, 801, 802)
 	s.putReplica(800, 8001, 81, rgA)
 	s.putDelegator(800, 81, "800-dmc0", 801, 802)
 	s.markCollectionLoaded(800, 80)
-	// rg-b was just added and has already picked up every target of the next
-	// target, while the promotion of the current target is still pending.
 	s.putReplica(800, 8002, 82, rgB)
 	s.putDelegator(800, 82, "800-dmc0", 801, 802)
 
@@ -769,11 +760,10 @@ func (s *CollectionObserverRGSuite) TestScopedTaskWaitsForCurrentTargetPromotion
 	s.Require().EqualValues(100, s.ob.observeResourceGroupProgress(s.ctx)[key].Percentage)
 	s.Require().EqualValues(100, s.meta.GetPartitionLoadPercentage(s.ctx, 80),
 		"the partitions are all loaded, so the gate cannot come from them")
-	s.Require().False(s.targetMgr.IsCurrentTargetExist(s.ctx, 800, 80))
+	s.Require().False(s.targetMgr.IsCurrentTargetExist(s.ctx, 800, 80), "no current target yet, as after such a restart")
 
 	s.ob.observeLoadStatus(s.ctx, s.ob.observeResourceGroupProgress(s.ctx))
-	s.True(s.ob.loadTasks.Contain(key),
-		"a scoped task must not finish while the current target promotion is still pending")
+	s.True(s.ob.loadTasks.Contain(key), "a scoped task must not finish while the collection has no current target")
 
 	// Promote the current target, then refill the next target, which is the
 	// order TargetObserver drives these two in.
@@ -782,7 +772,37 @@ func (s *CollectionObserverRGSuite) TestScopedTaskWaitsForCurrentTargetPromotion
 	s.Require().True(s.targetMgr.IsCurrentTargetExist(s.ctx, 800, 80))
 
 	s.ob.observeLoadStatus(s.ctx, s.ob.observeResourceGroupProgress(s.ctx))
-	s.False(s.ob.loadTasks.Contain(key), "a scoped task must finish once its resource group is loaded and promoted")
+	s.False(s.ob.loadTasks.Contain(key), "and finishes once one exists")
+}
+
+// TestAnExpansionsScopedTaskFinishesAtHundred is the shape the expansion path
+// actually produces: a loaded collection, which always has a current target,
+// with a resource group just added to it. The target term is true from the
+// start, so the task finishes on the tick its group reads 100 - it does not
+// wait for the promotion of the target that figure was measured against. That
+// is master's behavior for a loaded collection, whose supervision also ends at
+// 100; the promotion is the target observer's, with or without a load task.
+func (s *CollectionObserverRGSuite) TestAnExpansionsScopedTaskFinishesAtHundred() {
+	s.registerLoadingCollection(810, 81, "810-dmc0", 2, 811, 812)
+	s.putReplica(810, 8101, 83, rgA)
+	s.putDelegator(810, 83, "810-dmc0", 811, 812)
+	s.markCollectionLoaded(810, 81)
+	s.Require().True(s.targetMgr.UpdateCollectionCurrentTarget(s.ctx, 810))
+	s.Require().NoError(s.targetMgr.UpdateCollectionNextTarget(s.ctx, 810))
+	s.Require().True(s.targetMgr.IsCurrentTargetExist(s.ctx, 810, 81), "a loaded collection has a current target")
+
+	// rg-b is added, registered before it carries anything.
+	s.putReplica(810, 8102, 84, rgB)
+	s.putDelegator(810, 84, "810-dmc0", 811)
+	s.ob.LoadCollection(s.ctx, 810, rgB)
+	key := s.taskKey(810, rgB)
+	s.ob.observeLoadStatus(s.ctx, s.ob.observeResourceGroupProgress(s.ctx))
+	s.True(s.ob.loadTasks.Contain(key), "below 100 the task keeps watching its group")
+
+	s.putDelegator(810, 84, "810-dmc0", 811, 812)
+	s.Require().EqualValues(100, s.ob.observeResourceGroupProgress(s.ctx)[key].Percentage)
+	s.ob.observeLoadStatus(s.ctx, s.ob.observeResourceGroupProgress(s.ctx))
+	s.False(s.ob.loadTasks.Contain(key), "at 100 it finishes, the current target having existed all along")
 }
 
 // TestAReplicaThatHasNotReportedMakesTheGroupUnknown is the min-across-replicas
