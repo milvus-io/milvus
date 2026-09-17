@@ -6362,7 +6362,8 @@ func TestRestoreExternalSnapshot_PreparationFailuresReleaseLocks(t *testing.T) {
 			mFinish := mockey.Mock((*snapshotManager).finishRestoreSnapshot).To(
 				func(_ *snapshotManager, _ context.Context, _ *mlog.Logger, _ *snapshotstorage.SnapshotData,
 					name string, _ int64, _, _ string, _ int64, _ bool, _, _ string,
-					_ StartBroadcasterFunc, _ RollbackFunc, _ ValidateResourcesFunc) (int64, error) {
+					_ StartBroadcasterFunc, _ RollbackFunc, _ ValidateResourcesFunc,
+				) (int64, error) {
 					assert.Equal(t, uri, name)
 					assert.Equal(t, 1, closed, "DDL lock must be released before collection creation")
 					return 77, nil
