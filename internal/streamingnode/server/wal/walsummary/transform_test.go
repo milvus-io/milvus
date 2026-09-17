@@ -264,9 +264,6 @@ func TestTransformReadBoundsAndMissingObject(t *testing.T) {
 	records, err := manager.ReadTransformEntries(ctx, "v1", 0, 99)
 	require.NoError(t, err)
 	require.Empty(t, records)
-	// A legacy index has no per-section end; fall back to the vchannel span.
-	index := manager.manifest.Chunks[0].Vchannels[0]
-	index.TransformEndTimetick = 0
 	manager.AdvanceGCTimeTick("v1", 100)
 	require.True(t, manager.chunkReleasedLocked(manager.manifest.Chunks[0]))
 	require.NoError(t, store.DeleteChunk(ctx, 0, store.Term()))

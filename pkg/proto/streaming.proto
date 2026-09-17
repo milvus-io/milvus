@@ -591,25 +591,6 @@ message TransformLogEntry {
     }
 }
 
-// Deprecated: TransformLogChunk was the per-vchannel transform log chunk object
-// persisted before WALSummary. The definition is kept only to read legacy chunk
-// objects during migration; new code never writes it.
-message TransformLogChunk {
-    uint64 chunk_id = 1;
-    repeated TransformLogEntry entries = 2;
-}
-
-// Deprecated: VChannelTransformLogMeta was the per-vchannel transform log
-// recovery meta persisted in the streaming catalog before WALSummary. The
-// definition is kept only to read legacy catalog data during migration; new
-// code never writes it.
-message VChannelTransformLogMeta {
-    uint64 checkpoint_time_tick = 1;
-    uint64 truncate_time_tick = 2;
-    uint64 first_chunk_id = 3;
-    uint64 next_chunk_id = 4;
-    uint64 materialized_time_tick = 5;
-}
 //
 // WALSummary
 //
@@ -711,8 +692,7 @@ message VChannelSummarySectionRef {
 
 // VChannelSummaryTransformSection records the transform consumer's view of the
 // WAL: ordered delete entries, one per Delete or committed Txn containing
-// Delete, addressed by source WAL timetick. It replaces the legacy
-// TransformLogChunk objects.
+// Delete, addressed by source WAL timetick.
 message VChannelSummaryTransformSection {
     repeated VChannelSummaryTransformRecord records = 1;
 }
@@ -856,8 +836,6 @@ message VChannelMeta {
     CollectionInfoOfVChannel collection_info = 3; // if the channel is belong to a collection, the collection info will be setup.
     uint64 checkpoint_time_tick = 4; // The timetick of checkpoint, the meta already see the message at this timetick.
     uint64 transform_materialized_time_tick = 5; // The L0 materialization frontier of the transform consumer. Delete entries through this timetick have been emitted as L0 output.
-    reserved 6;
-    reserved "l0_flush_time_tick"; // Unfinished explicit requests are replayed from WAL.
 }
 
 // CollectionInfoOfVChannel is the collection info in vchannel.
