@@ -184,6 +184,33 @@ message CancelRequestsResponse {
   `POST /v2/vectordb/requests/cancel`, wired through `wrapperPost` in
   `internal/distributed/proxy/httpserver/handler_v2.go`.
 
+### When a proxy does not answer
+
+Both calls are broadcast from the coordinator to every proxy, so one proxy can
+be unreachable, unhealthy, or running a build without the RPC while the others
+answer normally. The rule is the same for both:
+
+- The call succeeds as long as at least one proxy answered. The rows the
+  others returned are still returned, and every proxy that failed appears in
+  `node_results` with its own status. A build without the RPC is flagged
+  `unimplemented` rather than counted as a failure, so a rolling upgrade is
+  not an error.
+- The call fails only when no proxy answered at all, including the case of no
+  registered proxy. An empty list must never be mistaken for "nothing is
+  running".
+- For `Cancel`, `not_found` stops being authoritative once `node_results`
+  contains a failure: an id that no answering proxy claimed may still be
+  running on the proxy that did not answer.
+
+Returning an error instead, and letting the caller discard the rows, would be
+backwards. The reason to list running requests is usually that something is
+wrong, which is when a proxy is most likely to be unreachable, and an operator
+who cannot see the other proxies' requests cannot act at all.
+
+Each fan-out is bounded by `RunningRequestTimeout` (10s), so one wedged proxy
+delays the answer by at most that much rather than holding it open for the
+caller's whole deadline.
+
 ### Scope of the interfaces
 
 The two RPCs are defined over "requests registered on the proxy". The names do
