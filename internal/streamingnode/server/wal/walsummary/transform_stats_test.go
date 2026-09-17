@@ -39,7 +39,7 @@ func TestTransformStatisticsAcrossStorageAndGC(t *testing.T) {
 	m.ObserveMessage(ctx, newTestDeleteMessage(t, "v1", 300, 10, 6))
 	observeReadBarrier(m, 400)
 	want := m.TransformStats("v1", 0, math.MaxUint64)
-	require.Equal(t, uint64(6), want.Rows)
+	require.Equal(t, want.Bytes, want.UpperBytes)
 	require.Equal(t, uint64(100), want.FirstTimeTick)
 	require.Equal(t, uint64(300), want.LastTimeTick)
 	batch, err := m.ReadTransform(ctx, "v1", 0, 400, ReadLimits{})
@@ -49,7 +49,7 @@ func TestTransformStatisticsAcrossStorageAndGC(t *testing.T) {
 		bytes += uint64(proto.Size(entry))
 	}
 	require.Equal(t, bytes, want.Bytes)
-	require.Equal(t, uint64(3), m.TransformStats("v1", 100, 250).Rows)
+	require.Equal(t, uint64(proto.Size(batch.Entries[1])), m.TransformStats("v1", 100, 250).Bytes)
 	require.Equal(t, TransformStats{}, m.TransformStats("v1", 200, 100))
 	require.Equal(t, TransformStats{}, m.TransformStats("absent", 0, 400))
 	require.NoError(t, m.writeChunk(ctx, sealed))
@@ -64,12 +64,12 @@ func TestTransformStatisticsAcrossStorageAndGC(t *testing.T) {
 	restored.cfg.RetentionMaxBytes = 1
 	restored.AdvanceGCTimeTick("v1", 100)
 	require.NoError(t, gcSummary(ctx, restored))
-	require.Equal(t, uint64(4), restored.TransformStats("v1", 100, 400).Rows)
+	require.Equal(t, want.Bytes-uint64(proto.Size(batch.Entries[0])), restored.TransformStats("v1", 100, 400).Bytes)
 	restored.AdvanceGCTimeTick("v1", 400)
 	require.NoError(t, gcSummary(ctx, restored))
 	require.Equal(t, TransformStats{}, restored.TransformStats("v1", 400, 500))
 	restored.ObserveMessage(ctx, newTestDeleteMessage(t, "v1", 500, 10, 7))
-	require.Equal(t, uint64(1), restored.TransformStats("v1", 400, 500).Rows)
+	require.Positive(t, restored.TransformStats("v1", 400, 500).Bytes)
 }
 
 func TestMaterializationBacklogSurvivesPersistenceAndRestart(t *testing.T) {
@@ -83,9 +83,9 @@ func TestMaterializationBacklogSurvivesPersistenceAndRestart(t *testing.T) {
 	m.cfg.RequestMaterialization = request
 	m.ObserveMessage(ctx, newTestDeleteMessage(t, "v1", first, 10, 1))
 	m.ObserveMessage(ctx, newTestDeleteMessage(t, "v1", last, 10, 2))
-	m.requestMaterializationBacklog(now, 3*time.Minute)
+	m.requestMaterializationBacklog(context.Background(), now, 3*time.Minute)
 	require.Empty(t, requests)
-	m.requestMaterializationBacklog(now, time.Minute)
+	m.requestMaterializationBacklog(context.Background(), now, time.Minute)
 	require.Equal(t, last, requests["v1"])
 	clear(requests)
 	require.NoError(t, persistSummary(ctx, m))
@@ -94,13 +94,13 @@ func TestMaterializationBacklogSurvivesPersistenceAndRestart(t *testing.T) {
 	restored := newTestManager(t, store, 1<<30)
 	restored.cfg.RequestMaterialization = request
 	require.NoError(t, restored.Restore(ctx))
-	restored.requestMaterializationBacklog(now, time.Minute)
+	restored.requestMaterializationBacklog(context.Background(), now, time.Minute)
 	require.Equal(t, last, requests["v1"], "durable backlog retains its original age")
 	clear(requests)
 	// Output completion suppresses new requests, but does not authorize GC.
 	restored.ReportMaterialized("v1", last)
 	restored.ReportMaterialized("v1", first)
-	restored.requestMaterializationBacklog(now, time.Minute)
+	restored.requestMaterializationBacklog(context.Background(), now, time.Minute)
 	require.Empty(t, requests)
 	restored.cfg.RetentionMaxBytes = 1
 	require.NoError(t, gcSummary(ctx, restored))
@@ -118,23 +118,23 @@ func TestRetentionBacklogRequestsOnlyOldestBlockingChunk(t *testing.T) {
 	requests := map[string]uint64{}
 	m.cfg.RequestMaterialization = func(vc string, tt uint64) {
 		// Callback may re-enter Summary through VChannel capacity checks.
-		require.Positive(t, m.TransformStats(vc, 0, tt).Rows)
+		require.Positive(t, m.TransformStats(vc, 0, tt).Bytes)
 		requests[vc] = tt
 	}
 	m.cfg.RetentionMaxBytes = 1
-	m.requestMaterializationBacklog(time.Now(), 0)
+	m.requestMaterializationBacklog(context.Background(), time.Now(), 0)
 	require.Equal(t, uint64(100), requests["v1"])
 	clear(requests)
 	m.ReportMaterialized("v1", 100)
-	m.requestMaterializationBacklog(time.Now(), 0)
+	m.requestMaterializationBacklog(context.Background(), time.Now(), 0)
 	require.Empty(t, requests, "wait for metadata/GC instead of draining later chunks")
 	m.AdvanceGCTimeTick("v1", 100)
 	require.NoError(t, gcSummary(context.Background(), m))
-	m.requestMaterializationBacklog(time.Now(), 0)
+	m.requestMaterializationBacklog(context.Background(), time.Now(), 0)
 	require.Equal(t, uint64(200), requests["v1"])
 	clear(requests)
 	m.terminalErr = ErrStoreCorrupted
-	m.requestMaterializationBacklog(time.Now(), time.Nanosecond)
+	m.requestMaterializationBacklog(context.Background(), time.Now(), time.Nanosecond)
 	require.Empty(t, requests)
 }
 
@@ -144,18 +144,17 @@ func TestValidateTransformStatistics(t *testing.T) {
 	m.ObserveMessage(context.Background(), newTestDeleteMessage(t, "v1", 200, 10, 2))
 	require.NoError(t, persistSummary(context.Background(), m))
 	valid := m.Manifest().GetChunks()[0].GetVchannels()[0]
-	require.NoError(t, validateTransformStats(valid))
+	require.NoError(t, validateTransformIndex(valid))
 	for _, damage := range []func(*streamingpb.VChannelSummaryChunkIndex){
-		func(i *streamingpb.VChannelSummaryChunkIndex) { i.TransformStats = nil },
-		func(i *streamingpb.VChannelSummaryChunkIndex) { i.TransformStats[1].TimeTick = 100 },
-		func(i *streamingpb.VChannelSummaryChunkIndex) { i.TransformStats[1].Rows = 0 },
-		func(i *streamingpb.VChannelSummaryChunkIndex) { i.TransformStats[1].Bytes = 0 },
-		func(i *streamingpb.VChannelSummaryChunkIndex) { i.TransformEndTimetick = 0 },
-		func(i *streamingpb.VChannelSummaryChunkIndex) { i.TransformEndTimetick = 199 },
+		func(i *streamingpb.VChannelSummaryChunkIndex) { i.Transform.Ref = nil },
+		func(i *streamingpb.VChannelSummaryChunkIndex) { i.Transform.TotalSize = 0 },
+		func(i *streamingpb.VChannelSummaryChunkIndex) { i.Transform.StartTimeTick = 201 },
+		func(i *streamingpb.VChannelSummaryChunkIndex) { i.Transform.EndTimeTick = 0 },
+		func(i *streamingpb.VChannelSummaryChunkIndex) { i.Transform.EndTimeTick = 201 },
 	} {
 		index := proto.Clone(valid).(*streamingpb.VChannelSummaryChunkIndex)
 		damage(index)
-		require.ErrorIs(t, validateTransformStats(index), ErrStoreCorrupted)
+		require.ErrorIs(t, validateTransformIndex(index), ErrStoreCorrupted)
 	}
 }
 
@@ -172,7 +171,7 @@ func TestRestoredLifecycleStillPinsUnfinishedMaterialization(t *testing.T) {
 			require.Len(t, recovered.Manifest().GetChunks(), 1, "lifecycle state cannot discard outstanding Delete@100")
 			var requested uint64
 			recovered.cfg.RequestMaterialization = func(_ string, tt uint64) { requested = tt }
-			recovered.requestMaterializationBacklog(time.Now(), time.Minute)
+			recovered.requestMaterializationBacklog(context.Background(), time.Now(), time.Minute)
 			require.Equal(t, uint64(100), requested)
 			batch, err := recovered.ReadTransform(context.Background(), "v1", 50, 200, ReadLimits{})
 			require.NoError(t, err)
@@ -199,4 +198,28 @@ func TestBacklogWorkerRequestsAlreadyPersistedDeletes(t *testing.T) {
 	}
 	m.Run(ctx, time.Millisecond, nil)
 	require.Equal(t, uint64(100), requested, "idle cold backlog is driven by the existing Summary worker")
+}
+
+func TestPartialTransformSectionBoundsAndBacklogAge(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now()
+	old := tsoutil.ComposeTSByTime(now.Add(-2 * time.Minute))
+	recent := tsoutil.ComposeTSByTime(now.Add(-time.Second))
+	m, _ := newTransformTestManagerWithStore(t)
+	var requested uint64
+	m.cfg.RequestMaterialization = func(_ string, through uint64) { requested = through }
+	m.ObserveMessage(ctx, newTestDeleteMessage(t, "v1", old, 10, 1))
+	m.ObserveMessage(ctx, newTestDeleteMessage(t, "v1", recent, 10, 2))
+	require.NoError(t, persistSummary(ctx, m))
+	full := m.TransformStats("v1", 0, recent)
+	partial := m.TransformStats("v1", old, recent)
+	require.Positive(t, full.Bytes)
+	require.Equal(t, full.Bytes, full.UpperBytes)
+	require.Zero(t, partial.Bytes)
+	require.Equal(t, full.Bytes, partial.UpperBytes)
+	m.ReportMaterialized("v1", old)
+	m.requestMaterializationBacklog(ctx, now, time.Minute)
+	require.Zero(t, requested, "consumed old records must not age the remaining section")
+	m.requestMaterializationBacklog(ctx, now.Add(2*time.Minute), time.Minute)
+	require.Equal(t, recent, requested)
 }

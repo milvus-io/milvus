@@ -605,20 +605,19 @@ message PChannelSummaryManifest {
     // Every chunk recovery may read, one entry each. Generations are contiguous:
     // retention only ever releases from the oldest end, never from the middle.
     repeated PChannelSummaryChunkIndexEntry chunks = 1;
-    // The last continuously covered chunk, even after retention removes it.
-    // Absent only when no chunk has been covered yet.
-    PChannelSummaryChunkRef last_chunk = 2;
-    PChannelSummaryPosition covered_position = 3;
-    // Largest Delete entry removed for each VChannel. Reads starting before
-    // this position must fail instead of treating truncated history as empty.
-    map<string, uint64> transform_truncated_through = 4;
+    // Coverage survives retention of every chunk; it is not an object reference.
+    SummaryCoverage coverage = 2;
+    // Readers before this boundary explicitly fast-forward past retired Deletes.
+    map<string, uint64> transform_fast_forward_time_tick = 3;
 }
 
-// PChannelSummaryPosition describes the WAL prefix represented by summary data.
-// message_id is a safe physical replay position (LastConfirmedMessageID).
-message PChannelSummaryPosition {
-    uint64 time_tick = 1;
-    common.MessageID message_id = 2;
+// SummaryCoverage describes the complete WAL prefix accounted for by Summary.
+// generation and term identify the last continuously covered upload, not a live object.
+message SummaryCoverage {
+    uint64 generation = 1;
+    int64 term = 2;
+    uint64 start_time_tick = 3; // exclusive
+    uint64 end_time_tick = 4; // inclusive
 }
 
 // PChannelSummaryChunkIndexEntry is one chunk entry of the manifest.
@@ -631,13 +630,12 @@ message PChannelSummaryChunkIndexEntry {
     // depend on how the writes happened to be distributed, for a budget that is
     // spent on the object either way.
     uint64 object_size = 3;
-    // The chunk's own span, for coarse time filtering before any read.
+    // Complete WAL coverage (start_timetick, end_timetick], including messages
+    // that produce no stored record.
     uint64 start_timetick = 4;
     uint64 end_timetick   = 5;
-    // The chunk footer's per-vchannel index, copied verbatim. Read by a consumer
-    // locating its own section; retention does not look at it.
+    // The chunk footer's per-vchannel indexes, used by reads and retention.
     repeated VChannelSummaryChunkIndex vchannels = 6;
-    PChannelSummaryPosition covered_position = 7;
 }
 
 // PChannelSummaryChunkRef identifies an immutable chunk object.
@@ -651,13 +649,11 @@ message PChannelSummaryChunkFooter {
     string pchannel   = 1;
     uint64 generation = 2;
     int64 term        = 3;
-    // The span covered by the whole object: the earliest and latest timetick
-    // across every vchannel in it. Each vchannel index below carries the same
-    // span narrowed to itself.
+    // Complete WAL coverage (start_timetick, end_timetick]. Section indexes
+    // separately describe the actual records within that interval.
     uint64 start_timetick = 4;
     uint64 end_timetick   = 5;
     repeated VChannelSummaryChunkIndex chunks = 6;
-    PChannelSummaryPosition covered_position = 7;
 }
 
 // VChannelSummaryChunkIndex locates one vchannel's sections inside a chunk.
@@ -669,17 +665,16 @@ message VChannelSummaryChunkIndex {
     // Optional: written only for vchannels that carry idempotency keys.
     VChannelSummarySectionRef idempotency = 4;
     VChannelSummarySectionRef inserts     = 5;
-    VChannelSummarySectionRef transform = 6;
-    // Retention of transforms must not wait for later inserts in this chunk.
-    uint64 transform_end_timetick = 7;
-    // Payload-free cumulative Delete statistics, ordered by whole-entry tick.
-    repeated TransformEntryStats transform_stats = 8;
+    VChannelSummaryTransformIndex transform = 6;
 }
 
-message TransformEntryStats {
-    uint64 time_tick = 1;
-    uint64 rows = 2; // cumulative within this VChannel's chunk section
-    uint64 bytes = 3; // cumulative logical TransformLogEntry protobuf bytes
+// One section's actual Delete range and total logical entry bytes.
+// Counts and offsets are in ref; no per-entry statistics are persisted.
+message VChannelSummaryTransformIndex {
+    VChannelSummarySectionRef ref = 1;
+    uint64 start_time_tick = 2;
+    uint64 end_time_tick = 3;
+    uint64 total_size = 4;
 }
 
 // VChannelSummarySectionRef is one section's location inside a chunk object.

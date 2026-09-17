@@ -155,7 +155,7 @@ does not create a second checkpoint.
 ## 6. Checkpoint Batch
 
 ```text
-candidate = min_by_TimeTick(Tracker.CompletedPoint(), WALSummary.LastAcked())
+candidate = Tracker.CheckpointThrough(WALSummary.LastAcked())
 freeze candidate
   -> consume stable component snapshots
   -> persist snapshots

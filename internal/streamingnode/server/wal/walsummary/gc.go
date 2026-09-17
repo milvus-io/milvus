@@ -21,6 +21,7 @@ import (
 	"sync/atomic"
 
 	"github.com/cockroachdb/errors"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
@@ -51,13 +52,12 @@ func (m *Manager) GCOnce(ctx context.Context) error {
 					if index.GetTransform() == nil {
 						continue
 					}
-					end := index.GetTransformEndTimetick()
-					if m.manifest.TransformTruncatedThrough == nil {
-						m.manifest.TransformTruncatedThrough = make(map[string]uint64)
+					end := index.GetTransform().GetEndTimeTick()
+					if m.manifest.TransformFastForwardTimeTick == nil {
+						m.manifest.TransformFastForwardTimeTick = make(map[string]uint64)
 					}
 					vc := index.GetVchannel()
-					m.manifest.TransformTruncatedThrough[vc] = max(m.manifest.TransformTruncatedThrough[vc], end)
-					m.trimTransformStatsLocked(vc, end)
+					m.manifest.TransformFastForwardTimeTick[vc] = max(m.manifest.TransformFastForwardTimeTick[vc], end)
 				}
 			}
 			m.manifest.Chunks = removeChunkEntry(m.manifest.Chunks, ref.Generation)
@@ -112,9 +112,12 @@ func (t *summaryGCTask) Execute(ctx context.Context) error {
 		refs[ChunkRef{Generation: chunk.GetGeneration(), Term: chunk.GetTerm()}] = struct{}{}
 	}
 	version := m.manifestVersion
-	last := m.manifest.GetLastChunk()
+	var coverage *streamingpb.SummaryCoverage
+	if m.manifest.Coverage != nil {
+		coverage = proto.Clone(m.manifest.Coverage).(*streamingpb.SummaryCoverage)
+	}
 	m.mu.Unlock()
-	_, finished, err := m.cfg.Store.sweepGarbage(ctx, m.cfg.Term, last, refs, orphanSweepBudget)
+	_, finished, err := m.cfg.Store.sweepGarbage(ctx, m.cfg.Term, coverage, refs, orphanSweepBudget)
 	if err != nil {
 		return errors.Mark(err, nodescheduler.ErrDelay)
 	}
@@ -216,7 +219,7 @@ func (m *Manager) chunkReleasedLocked(chunk *streamingpb.PChannelSummaryChunkInd
 			// No GC position yet: nothing of this vchannel may be released.
 			return false
 		}
-		end := index.GetTransformEndTimetick()
+		end := index.GetTransform().GetEndTimeTick()
 		if end > floor {
 			// The chunk still holds records past the GC position.
 			return false

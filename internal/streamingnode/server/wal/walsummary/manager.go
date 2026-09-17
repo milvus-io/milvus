@@ -27,7 +27,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -74,8 +73,9 @@ type Manager struct {
 	manifestPublished     bool
 	manifestTask          *manifestWriteTask
 	gcTask                *summaryGCTask
-	lastAcked             *utility.WALCheckpoint
-	lastObserved          *utility.WALCheckpoint
+	lastAcked             uint64
+	lastObserved          uint64
+	sealedThrough         uint64
 	latestCoveredTimeTick uint64
 	readableThrough       uint64
 	readableChanged       chan struct{}
@@ -83,7 +83,7 @@ type Manager struct {
 	terminalErr           error
 	gcFrontiers           map[string]uint64
 	durableFrontiers      map[string]uint64
-	transformIndexes      map[string]*transformIndex
+	pendingTransforms     map[string]*streamingpb.VChannelSummaryTransformIndex
 	materializedFrontiers map[string]uint64
 }
 
@@ -112,7 +112,7 @@ type ManagerConfig struct {
 func NewManager(config ManagerConfig) *Manager {
 	return &Manager{
 		gcFrontiers:           make(map[string]uint64),
-		transformIndexes:      make(map[string]*transformIndex),
+		pendingTransforms:     make(map[string]*streamingpb.VChannelSummaryTransformIndex),
 		materializedFrontiers: make(map[string]uint64),
 		cfg:                   config,
 		manifest:              &streamingpb.PChannelSummaryManifest{},
@@ -136,9 +136,8 @@ func (m *Manager) ObserveMessage(ctx context.Context, msg message.ImmutableMessa
 		entry = messageutil.BuildTransformLogEntry(msg, messageutil.TransformEntryOption{})
 	}
 	m.mu.Lock()
-	m.lastObserved = newSummaryCheckpoint(msg.LastConfirmedMessageID(), msg.TimeTick())
+	m.lastObserved = max(m.lastObserved, msg.TimeTick())
 	if msg.VChannel() != "" && !funcutil.IsControlChannel(msg.VChannel()) && (idempotency != nil || entry != nil) && msg.TimeTick() > m.restoredTimeTick && msg.TimeTick() > m.durableFrontiers[msg.VChannel()] {
-		m.seedLastAckedLocked(msg)
 		m.stageRecordLocked(msg, idempotency, insert, entry)
 	}
 	m.advanceReadableLocked(msg.TimeTick())
@@ -170,8 +169,7 @@ func (m *Manager) stageRecordLocked(
 		m.pendingSince = time.Now()
 	}
 	if entry != nil {
-		rows, bytes := transformEntrySize(entry)
-		m.appendTransformStatLocked(msg.VChannel(), msg.TimeTick(), rows, bytes)
+		addTransformSize(m.pendingTransforms, msg.VChannel(), entry)
 	}
 	m.pending = append(m.pending, record)
 	m.pendingBytes += stagedRecordSize(msg, &record)
@@ -364,9 +362,10 @@ func (m *Manager) seal() *SealedChunk {
 	// Keep removal and queue insertion atomic: observers must never see a gap
 	// where an unwritten chunk appears to have no pending records.
 	sc := buildSealedChunk(m.nextGeneration, m.pending)
-	if m.lastObserved != nil {
-		sc.confirmedThrough = m.lastObserved.Clone()
-	}
+	sc.Coverage = TimeTickRange{Start: m.sealedThrough, End: m.lastObserved}
+	sc.Transforms = m.pendingTransforms
+	m.pendingTransforms = make(map[string]*streamingpb.VChannelSummaryTransformIndex)
+	m.sealedThrough = m.lastObserved
 	if m.nextGeneration == math.MaxUint64 {
 		m.generationExhausted = true
 	} else {
@@ -417,7 +416,7 @@ func (m *Manager) writeChunk(ctx context.Context, sc *SealedChunk) error {
 		}
 		sections[vchannel] = cs
 	}
-	footer, size, err := m.cfg.Store.WriteChunk(ctx, sc.Generation, sections, summaryPosition(sc.confirmedThrough))
+	footer, size, err := m.cfg.Store.WriteChunk(ctx, sc.Generation, sections, sc.Coverage)
 	if err != nil {
 		return err
 	}
@@ -431,7 +430,7 @@ func (m *Manager) writeChunk(ctx context.Context, sc *SealedChunk) error {
 				m.durableFrontiers[vchannel] = max(m.durableFrontiers[vchannel], record.timeTick)
 			}
 		}
-		m.latestCoveredTimeTick = m.manifest.GetCoveredPosition().GetTimeTick()
+		m.latestCoveredTimeTick = m.manifest.GetCoverage().GetEndTimeTick()
 		m.manifestVersion++
 		m.pendingSealed[0] = nil
 		m.pendingSealed = m.pendingSealed[1:]
@@ -698,7 +697,8 @@ type stagedRecord struct {
 type SealedChunk struct {
 	task              *chunkWriteTask
 	index             *streamingpb.PChannelSummaryChunkIndexEntry
-	confirmedThrough  *utility.WALCheckpoint
+	Coverage          TimeTickRange
+	Transforms        map[string]*streamingpb.VChannelSummaryTransformIndex
 	Generation        uint64
 	RecordsByVChannel map[string][]*stagedRecord
 	MaxTimeTick       uint64

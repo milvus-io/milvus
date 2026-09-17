@@ -34,7 +34,7 @@ func TestSummaryBacklogFlushesAfterSourceAckWithoutNewMessages(t *testing.T) {
 	owner.Release()
 	require.Zero(t, tracker.Pending())
 	require.Equal(t, uint64(100), tracker.CompletedPoint().TimeTick)
-	require.Less(t, manager.LastAcked().TimeTick, uint64(100))
+	require.Less(t, manager.LastAcked(), uint64(100))
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -49,7 +49,7 @@ func TestSummaryBacklogFlushesAfterSourceAckWithoutNewMessages(t *testing.T) {
 		}
 	})
 	require.Eventually(t, func() bool {
-		return manager.LastAcked().TimeTick == 100 && !manager.HasPendingWork()
+		return manager.LastAcked() == 100 && !manager.HasPendingWork()
 	}, 5*time.Second, time.Millisecond)
 	recovered := newTestManager(t, store, 1<<30)
 	require.NoError(t, recovered.Restore(ctx))
@@ -78,7 +78,7 @@ func TestSummaryBacklogAgeAndPressure(t *testing.T) {
 	manager.flushBacklog(time.Now(), time.Hour, true)
 	require.Len(t, manager.pendingSealed, 1, "an empty backlog creates no duplicate chunk")
 	require.NoError(t, drainSummary(ctx, manager))
-	require.Equal(t, uint64(300), manager.LastAcked().TimeTick)
+	require.Equal(t, uint64(300), manager.LastAcked())
 }
 
 func TestAsyncSchedulerPersistsAndRestores(t *testing.T) {
@@ -93,7 +93,7 @@ func TestAsyncSchedulerPersistsAndRestores(t *testing.T) {
 	}
 	require.Eventually(t, func() bool {
 		checkpoint := manager.LastAcked()
-		return checkpoint != nil && checkpoint.TimeTick == 50 && !manager.HasPendingWork()
+		return checkpoint == 50 && !manager.HasPendingWork()
 	}, 5*time.Second, time.Millisecond)
 	recovered := newTestManager(t, store, 1<<30)
 	require.NoError(t, recovered.Restore(ctx))
@@ -146,17 +146,17 @@ func TestAsyncIdempotencyReadersAcrossPendingAndDurableState(t *testing.T) {
 func TestAsyncRestoredFrontierAndNonRecordMessages(t *testing.T) {
 	ctx := context.Background()
 	manager, _ := newTestManagerWithStore(t)
-	require.Nil(t, manager.LastAcked())
-	manager.InitLastAcked(nil)
-	manager.InitLastAcked(&utility.WALCheckpoint{})
-	require.Nil(t, manager.LastAcked())
+	require.Zero(t, manager.LastAcked())
+	manager.InitLastAcked(0)
+	manager.InitLastAcked(0)
+	require.Zero(t, manager.LastAcked())
 	checkpoint := &utility.WALCheckpoint{MessageID: walimplstest.NewTestMessageID(10), TimeTick: 10}
-	manager.InitLastAcked(checkpoint)
+	manager.InitLastAcked(checkpoint.TimeTick)
 	checkpoint.TimeTick = 0
-	manager.InitLastAcked(checkpoint)
-	require.Equal(t, uint64(10), manager.LastAcked().TimeTick)
+	manager.InitLastAcked(checkpoint.TimeTick)
+	require.Equal(t, uint64(10), manager.LastAcked())
 	manager.ObserveMessage(ctx, newTestBarrierMessage(t, "v1", 20))
-	require.Equal(t, uint64(20), manager.LastAcked().TimeTick)
+	require.Equal(t, uint64(20), manager.LastAcked())
 	require.False(t, manager.HasPendingWork())
 }
 
@@ -169,10 +169,10 @@ func TestAsyncThresholdAndSourceRelease(t *testing.T) {
 	require.True(t, finalized, "async summary must not retain the source message")
 	require.Len(t, scheduler.tasks, 1)
 	require.True(t, manager.HasPendingWork())
-	require.Less(t, manager.LastAcked().TimeTick, uint64(100))
+	require.Less(t, manager.LastAcked(), uint64(100))
 	require.Empty(t, manager.Manifest().GetChunks())
 	require.NoError(t, drainSummary(context.Background(), manager))
-	require.Equal(t, uint64(100), manager.LastAcked().TimeTick)
+	require.Equal(t, uint64(100), manager.LastAcked())
 	require.False(t, manager.HasPendingWork())
 	manager.RequestFlushThrough(100)
 	require.Len(t, scheduler.tasks, 2, "a covered target must not create another task")
@@ -181,25 +181,22 @@ func TestAsyncThresholdAndSourceRelease(t *testing.T) {
 func TestAsyncConfirmationIncludesBarrierBeforeLaterPendingData(t *testing.T) {
 	ctx := context.Background()
 	manager, _ := newTransformTestManagerWithStore(t)
-	manager.InitLastAcked(&utility.WALCheckpoint{MessageID: walimplstest.NewTestMessageID(1), TimeTick: 1})
+	manager.InitLastAcked(1)
 	manager.ObserveMessage(ctx, newTestDeleteMessage(t, "v1", 100, 10, 1))
 	manager.ObserveMessage(ctx, newTestBarrierMessage(t, "v1", 200))
-	require.Equal(t, uint64(1), manager.LastAcked().TimeTick)
+	require.Equal(t, uint64(1), manager.LastAcked())
 	manager.RequestFlushThrough(200)
 	manager.ObserveMessage(ctx, newTestDeleteMessage(t, "v1", 300, 10, 2))
 	scheduler := manager.cfg.Runtime.Scheduler.(*recordingScheduler)
 	require.Len(t, scheduler.tasks, 1)
 	require.NoError(t, drainSummary(ctx, manager))
-	require.Equal(t, uint64(200), manager.LastAcked().TimeTick,
+	require.Equal(t, uint64(200), manager.LastAcked(),
 		"the sealed batch covers the barrier but cannot cover later staged data")
 	require.True(t, manager.HasPendingWork())
 	manager.RequestFlushThrough(300)
 	require.Len(t, scheduler.tasks, 3)
 	require.NoError(t, drainSummary(ctx, manager))
-	require.Equal(t, uint64(300), manager.LastAcked().TimeTick)
-	checkpointCopy := manager.LastAcked()
-	checkpointCopy.TimeTick = 0
-	require.Equal(t, uint64(300), manager.LastAcked().TimeTick)
+	require.Equal(t, uint64(300), manager.LastAcked())
 }
 
 func TestAsyncDDLDoesNotFlushOrForgetRequests(t *testing.T) {
@@ -208,7 +205,7 @@ func TestAsyncDDLDoesNotFlushOrForgetRequests(t *testing.T) {
 	manager.ObserveMessage(ctx, newTestIdempotentInsertMessage(t, "v1", 100, "key", []int64{1}, []uint32{0}))
 	manager.ObserveMessage(ctx, newTestDropCollectionMessage(t, "v1", 200))
 	require.Len(t, manager.pending, 1)
-	require.Less(t, manager.LastAcked().TimeTick, uint64(100))
+	require.Less(t, manager.LastAcked(), uint64(100))
 	scheduler := manager.cfg.Runtime.Scheduler.(*recordingScheduler)
 	require.Empty(t, scheduler.tasks, "DDL creates no summary persistence work")
 	manager.RequestFlushThrough(200)
@@ -217,10 +214,10 @@ func TestAsyncDDLDoesNotFlushOrForgetRequests(t *testing.T) {
 	_, exists, err := store.ReadManifest(ctx)
 	require.NoError(t, err)
 	require.True(t, exists)
-	require.Equal(t, uint64(200), manager.LastAcked().TimeTick)
+	require.Equal(t, uint64(200), manager.LastAcked())
 	require.False(t, manager.HasPendingWork())
 	manager.ObserveMessage(ctx, newTestDropCollectionMessage(t, "v1", 300))
-	require.Equal(t, uint64(300), manager.LastAcked().TimeTick)
+	require.Equal(t, uint64(300), manager.LastAcked())
 	require.Len(t, scheduler.tasks, 2, "a DDL after durable data needs no new task")
 }
 
@@ -248,7 +245,7 @@ func TestAsyncWriteFailurePinsConfirmation(t *testing.T) {
 			err := task.Execute(ctx)
 			require.ErrorIs(t, err, failure)
 			require.Contains(t, err.Error(), failure.Error())
-			require.Less(t, manager.LastAcked().TimeTick, uint64(100))
+			require.Less(t, manager.LastAcked(), uint64(100))
 			if terminal {
 				require.ErrorIs(t, manager.terminalErr, failure)
 			}
@@ -256,13 +253,13 @@ func TestAsyncWriteFailurePinsConfirmation(t *testing.T) {
 			if terminal {
 				manager.ObserveMessage(ctx, newTestBarrierMessage(t, "v1", 200))
 				manager.RequestFlushThrough(200)
-				require.Less(t, manager.LastAcked().TimeTick, uint64(100))
+				require.Less(t, manager.LastAcked(), uint64(100))
 				require.Len(t, manager.cfg.Runtime.Scheduler.(*recordingScheduler).tasks, 2)
 				return
 			}
 			require.True(t, errors.Is(err, nodescheduler.ErrDelay))
 			require.NoError(t, task.Execute(ctx))
-			require.Equal(t, uint64(100), manager.LastAcked().TimeTick)
+			require.Equal(t, uint64(100), manager.LastAcked())
 			require.Len(t, manager.Manifest().GetChunks(), 1)
 			require.Equal(t, uint64(0), manager.Manifest().GetChunks()[0].GetGeneration())
 		})
@@ -291,7 +288,7 @@ func TestAsyncRestorePropagatesStorageFailures(t *testing.T) {
 			}
 			defer patch.UnPatch()
 			require.ErrorIs(t, recovered.Restore(ctx), failure)
-			require.Nil(t, recovered.LastAcked(), "failed recovery must not confirm a WAL position")
+			require.Zero(t, recovered.LastAcked(), "failed recovery must not confirm a WAL position")
 			patch.UnPatch()
 			require.NoError(t, recovered.Restore(ctx))
 			records, err := recovered.ReadIdempotencyEntries(ctx, "v1", 0, 100)
@@ -321,7 +318,7 @@ func TestSummaryStoreRemovalIsScopedToPChannel(t *testing.T) {
 }
 
 func TestSummaryRejectsCorruptMetadataBeforeConsumerRecovery(t *testing.T) {
-	payload, _, err := marshalChunk("p1", 1, 1, writeSections(map[string][]uint64{"v1": {100}}))
+	payload, _, err := marshalChunk("p1", 1, 1, writeSections(map[string][]uint64{"v1": {100}}), testRecordRange(writeSections(map[string][]uint64{"v1": {100}})))
 	require.NoError(t, err)
 	_, footerStart, err := unmarshalChunkTail(payload)
 	require.NoError(t, err)

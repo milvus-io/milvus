@@ -42,7 +42,7 @@ The qv interface shape is retained:
 ```text
 AcquireStream(PChannel)
   -> Subscribe(VChannel, StartAfterTimeTick, optional EndTimeTick, Handler)
-       -> DeleteEntry / SyncUp / Error
+       -> DeleteEntry / SyncUp / FastForward / Error
 ```
 
 One stream may carry several VChannel subscriptions. A subscription reads
@@ -102,7 +102,7 @@ subscriptions to the same VChannel avoids decoding the same records repeatedly.
 
 Local and remote transports expose the same contract. After transport failure,
 the client reacquires the PChannel stream and resubscribes exclusively after the
-last position its handler successfully accepted. Both Entry and SyncUp advance
+last position its handler successfully accepted. Entry, SyncUp and an explicitly accepted FastForward advance
 that cursor; failed handler calls do not.
 
 No durable consumer ACK or cross-process exactly-once guarantee is introduced.
@@ -110,9 +110,13 @@ A caller recovering its own state must select a cursor consistent with that
 state. If the recovered server has not yet reconstructed a previously delivered
 position, it must not manufacture coverage from the resume request.
 
-Invalid options, an unavailable VChannel, and a start before the retained
-window are explicit semantic errors. Missing or corrupt retained objects fail
-the read; they are never converted into empty history or SyncUp.
+Invalid options and an unavailable VChannel are explicit semantic errors.
+When Summary returns `FastForwardTimeTick`, the adaptor must expose the skipped
+interval before delivering later entries. The caller must reconcile that skip
+with its own base state; it is not SyncUp or proof that retired Deletes were
+delivered. A consumer requiring complete replay rejects the skip. Missing or
+corrupt retained objects fail the read; they are never converted into empty
+history, fast-forward, or SyncUp.
 
 ## 6. Retention Prerequisite
 

@@ -44,9 +44,13 @@ type Tracker struct {
 	observedLogicalOffset  uint64
 	completedLogicalOffset uint64
 	pending                []*trackedEntry
-	vchannels              map[string]*vchannelPending
-	onAdvance              func(utility.WALCheckpoint)
-	persistRequester       VChannelPersistRequester
+	// Completed entries retain only position metadata until Summary confirms them.
+	checkpointPending       []*trackedEntry
+	checkpointPoint         utility.WALCheckpoint
+	checkpointLogicalOffset uint64
+	vchannels               map[string]*vchannelPending
+	onAdvance               func(utility.WALCheckpoint)
+	persistRequester        VChannelPersistRequester
 }
 
 func NewTracker(
@@ -56,6 +60,7 @@ func NewTracker(
 ) *Tracker {
 	return &Tracker{
 		completedPoint:   initial,
+		checkpointPoint:  initial,
 		vchannels:        make(map[string]*vchannelPending),
 		onAdvance:        onAdvance,
 		persistRequester: persistRequester,
@@ -188,6 +193,26 @@ func (t *Tracker) Completed() (utility.WALCheckpoint, uint64) {
 	return *t.completedPoint.Clone(), t.completedLogicalOffset
 }
 
+// CheckpointThrough selects one complete WAL position at or below Summary's
+// logical confirmation. The TimeTick, MessageID and byte offset always come
+// from the same tracked entry; payloads have already been released.
+func (t *Tracker) CheckpointThrough(through uint64) (utility.WALCheckpoint, uint64) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	n := 0
+	for n < len(t.checkpointPending) && t.checkpointPending[n].point.TimeTick <= through {
+		entry := t.checkpointPending[n]
+		if shouldAdvance(t.checkpointPoint, entry.point) {
+			t.checkpointPoint = entry.point
+			t.checkpointLogicalOffset = entry.logicalEndOffset
+		}
+		n++
+	}
+	clear(t.checkpointPending[:n])
+	t.checkpointPending = t.checkpointPending[n:]
+	return *t.checkpointPoint.Clone(), t.checkpointLogicalOffset
+}
+
 // LogicalOffsets returns the observed and continuous completed runtime byte
 // frontiers. Both offsets are relative to the Tracker's initial checkpoint.
 func (t *Tracker) LogicalOffsets() (observed, completed uint64) {
@@ -255,6 +280,7 @@ func (t *Tracker) completeLocked(entry *trackedEntry) (func(utility.WALCheckpoin
 	}
 	point := *t.pending[completed-1].point.Clone()
 	completedLogicalOffset := t.pending[completed-1].logicalEndOffset
+	t.checkpointPending = append(t.checkpointPending, t.pending[:completed]...)
 	clear(t.pending[:completed])
 	t.pending = t.pending[completed:]
 	t.completedLogicalOffset = completedLogicalOffset

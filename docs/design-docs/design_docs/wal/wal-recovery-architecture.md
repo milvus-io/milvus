@@ -71,7 +71,7 @@ ownership and completion conditions differ.
 A PChannel has exactly one global recovery checkpoint:
 
 ```text
-Candidate = min_by_TimeTick(Tracker.CompletedPoint(), WALSummary.LastAcked())
+Candidate = Tracker.CheckpointThrough(WALSummary.LastAcked())
 Checkpoint = published candidate with all required component snapshots durable
 ```
 

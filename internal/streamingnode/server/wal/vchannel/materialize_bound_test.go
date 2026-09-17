@@ -43,14 +43,15 @@ func newMaterializeBoundTestModule(t *testing.T, scheduler *recordingVChannelSch
 	t.Helper()
 	summary := walsummary.NewManager(walsummary.ManagerConfig{})
 	module, err := NewModule(ModuleConfig{
-		PChannel:          "p1",
-		VChannel:          "v1",
-		VChannelMeta:      &streamingpb.VChannelMeta{Vchannel: "v1", State: streamingpb.VChannelState_VCHANNEL_STATE_NORMAL},
-		Segments:          segmentMetas,
-		L0Materializer:    &recordingMaterializer{},
-		L0MaterializeRows: 1,
-		SummaryReader:     summary,
-		Runtime:           moduleapi.Runtime{Scheduler: scheduler},
+		PChannel:           "p1",
+		VChannel:           "v1",
+		VChannelMeta:       &streamingpb.VChannelMeta{Vchannel: "v1", State: streamingpb.VChannelState_VCHANNEL_STATE_NORMAL},
+		Segments:           segmentMetas,
+		L0Materializer:     &recordingMaterializer{},
+		L0MaterializeRows:  1,
+		L0MaterializeBytes: 1,
+		SummaryReader:      summary,
+		Runtime:            moduleapi.Runtime{Scheduler: scheduler},
 	})
 	require.NoError(t, err)
 	for _, timetick := range timeticks {

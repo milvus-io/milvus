@@ -8,10 +8,8 @@ import (
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
@@ -32,7 +30,7 @@ func (m *Manager) Run(ctx context.Context, maxAge time.Duration, underPressure f
 		case now := <-ticker.C:
 			force := underPressure != nil && underPressure()
 			m.flushBacklog(now, maxAge, force)
-			m.requestMaterializationBacklog(now, maxAge)
+			m.requestMaterializationBacklog(ctx, now, maxAge)
 		}
 	}
 }
@@ -44,79 +42,43 @@ func (m *Manager) flushBacklog(now time.Time, maxAge time.Duration, force bool) 
 		m.mu.Unlock()
 		return
 	}
-	target := m.lastObserved.TimeTick
+	target := m.lastObserved
 	m.mu.Unlock()
 	m.RequestFlushThrough(target)
 }
 
-// InitLastAcked seeds the caller's already published recovery position.
-func (m *Manager) InitLastAcked(checkpoint *utility.WALCheckpoint) {
+// InitLastAcked seeds the already published global checkpoint's logical frontier.
+func (m *Manager) InitLastAcked(timetick uint64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.advanceLastAckedLocked(checkpoint)
+	m.advanceLastAckedLocked(timetick)
+	if m.manifest.Coverage == nil && len(m.pendingSealed) == 0 {
+		m.sealedThrough = timetick
+	}
 }
 
-// LastAcked is the continuous, recoverable confirmation frontier. Message
-// release does not authorize checkpoint advancement past this position.
-func (m *Manager) LastAcked() *utility.WALCheckpoint {
+// LastAcked is a logical confirmation frontier, never a physical replay position.
+func (m *Manager) LastAcked() uint64 {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.lastAcked == nil {
-		return nil
-	}
-	return m.lastAcked.Clone()
+	return m.lastAcked
 }
 
-func newSummaryCheckpoint(id message.MessageID, timetick uint64) *utility.WALCheckpoint {
-	if id == nil {
-		return nil
-	}
-	return &utility.WALCheckpoint{MessageID: id, TimeTick: timetick, Magic: utility.RecoveryMagicRecoveryStorageV2}
-}
-
-func summaryPosition(cp *utility.WALCheckpoint) *streamingpb.PChannelSummaryPosition {
-	if cp == nil {
-		return nil
-	}
-	return &streamingpb.PChannelSummaryPosition{TimeTick: cp.TimeTick, MessageId: messageIDProto(cp.MessageID)}
-}
-
-func summaryCheckpoint(p *streamingpb.PChannelSummaryPosition) *utility.WALCheckpoint {
-	if p.GetMessageId() == nil {
-		return nil
-	}
-	return newSummaryCheckpoint(message.MustUnmarshalMessageID(p.GetMessageId()), p.GetTimeTick())
-}
-
-func (m *Manager) seedLastAckedLocked(msg message.ImmutableMessage) {
-	if m.lastAcked != nil {
-		return
-	}
-	tt := msg.TimeTick()
-	if tt > 0 {
-		tt--
-	}
-	m.lastAcked = newSummaryCheckpoint(msg.LastConfirmedMessageID(), tt)
-}
-
-func (m *Manager) advanceLastAckedLocked(cp *utility.WALCheckpoint) {
-	if m.terminalErr != nil || cp == nil || cp.MessageID == nil {
-		return
-	}
-	if m.lastAcked == nil || (cp.TimeTick > m.lastAcked.TimeTick && !cp.MessageID.LT(m.lastAcked.MessageID)) {
-		m.lastAcked = cp.Clone()
+func (m *Manager) advanceLastAckedLocked(timetick uint64) {
+	if m.terminalErr == nil {
+		m.lastAcked = max(m.lastAcked, timetick)
 	}
 }
 
 func (m *Manager) refreshLastAckedLocked() {
 	// Current-term data is discoverable only after its first manifest PUT.
 	if m.manifestPublished {
-		m.advanceLastAckedLocked(summaryCheckpoint(m.manifest.GetCoveredPosition()))
+		m.advanceLastAckedLocked(m.manifest.GetCoverage().GetEndTimeTick())
 	}
 	// Non-record messages need no new object. But a first-term unpublished
 	// chunk must still pin confirmation even after leaving pendingSealed.
 	if len(m.pending) == 0 && len(m.pendingSealed) == 0 &&
-		(m.manifestPublished || m.manifest.GetLastChunk() == nil || m.manifest.GetLastChunk().GetTerm() != m.cfg.Term) {
+		(m.manifestPublished || m.manifest.GetCoverage() == nil || m.manifest.GetCoverage().GetTerm() != m.cfg.Term) {
 		m.advanceLastAckedLocked(m.lastObserved)
 	}
 }
@@ -124,7 +86,7 @@ func (m *Manager) refreshLastAckedLocked() {
 // RequestFlushThrough schedules progress through the observed position.
 func (m *Manager) RequestFlushThrough(timetick uint64) {
 	m.mu.Lock()
-	covered := m.lastAcked != nil && timetick <= m.lastAcked.TimeTick
+	covered := timetick <= m.lastAcked
 	seal := timetick > m.pendingFlushTimeTick
 	m.mu.Unlock()
 	if !covered && seal {
