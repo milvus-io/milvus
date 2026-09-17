@@ -28,7 +28,10 @@ func (m *BroadcastAck) Accept(owner message.OwnedImmutableMessage)
 
 BroadcastAck registers one exclusive callback. The callback fires when all
 local Retained consumers have released and BroadcastAck is the only remaining
-Owner holder.
+Owner holder. Explicit Flush/lifecycle requests include L0Materializer among
+these consumers: readiness waits for L1 final commit, required L0 output, and
+installation of dirty materialization metadata. Ordinary Delete materialization
+from Summary does not retain a source handle.
 
 For successful consumers the callback marks the task ready and nonblockingly
 wakes the dispatcher; it performs no Coordinator I/O. If any consumer poisoned

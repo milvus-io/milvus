@@ -22,9 +22,10 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/messageack"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/l0materializer"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/segment"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walsummary"
@@ -34,7 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
-func TestExplicitL0IntentSurvivesSnapshotAndRestart(t *testing.T) {
+func TestExplicitFlushPinsCheckpointAndReplaysAfterRestart(t *testing.T) {
 	ctx := context.Background()
 	summary := walsummary.NewManager(walsummary.ManagerConfig{})
 	scheduler := nodescheduler.New(1)
@@ -58,38 +59,34 @@ func TestExplicitL0IntentSurvivesSnapshotAndRestart(t *testing.T) {
 	module, err := NewModule(config)
 	require.NoError(t, err)
 	observeVChannelDelete(t, module, "v1", 120, summary)
-	observeVChannelBarrier(t, module, "v1", 200, summary)
+	initial := utility.WALCheckpoint{MessageID: walimplstest.NewTestMessageID(119), TimeTick: 120}
+	tracker := messageack.NewTracker(initial, nil, nil)
+	raw := message.NewManualFlushMessageBuilderV2().WithVChannel("v1").
+		WithHeader(&message.ManualFlushMessageHeader{}).WithBody(&message.ManualFlushMessageBody{}).MustBuildMutable().
+		WithTimeTick(200).WithLastConfirmed(walimplstest.NewTestMessageID(199)).IntoImmutableMessage(walimplstest.NewTestMessageID(200))
+	dispatch := func(module *VChannelRecoveryModule, tracker *messageack.Tracker) {
+		owner := tracker.Track(raw)
+		retained := owner.Clone()
+		summary.ObserveMessage(ctx, raw)
+		require.True(t, module.ObserveMessage(ctx, retained))
+		retained.Release()
+		owner.Release()
+	}
+	dispatch(module, tracker)
 	require.Empty(t, tasks, "sub-target API flush waits for L1 final commit")
-	snapshots := module.ConsumeDirtySnapshots()
-	require.Len(t, snapshots, 1)
-	require.Equal(t, moduleapi.SnapshotOpUpsertBase, snapshots[0].Op())
-	saved := snapshots[0].Payload().(*streamingpb.VChannelMeta)
-	require.Equal(t, uint64(200), saved.GetL0FlushTimeTick())
-	// A newer request cannot mutate the in-flight snapshot or disappear when
-	// that older snapshot is acknowledged.
-	observeVChannelBarrier(t, module, "v1", 250, summary)
-	require.Equal(t, uint64(200), saved.GetL0FlushTimeTick())
-	snapshots[0].MarkPersisted()
-	next := module.ConsumeDirtySnapshots()
-	require.Len(t, next, 1)
-	require.Equal(t, uint64(250), next[0].Payload().(*streamingpb.VChannelMeta).GetL0FlushTimeTick())
-	// Simulate the crash after publishing the first checkpoint. Replay starts
-	// after request@200, so RecoveryBarrier must wake the persisted intent.
-	wire, err := proto.Marshal(saved)
-	require.NoError(t, err)
-	config.VChannelMeta = &streamingpb.VChannelMeta{}
-	require.NoError(t, proto.Unmarshal(wire, config.VChannelMeta))
-	restored, err := NewModule(config)
-	require.NoError(t, err)
-	raw := message.NewRecoveryBarrierMessageBuilderV2().WithVChannel("").
+	later := message.NewRecoveryBarrierMessageBuilderV2().WithVChannel("").
 		WithHeader(&message.RecoveryBarrierMessageHeader{}).WithBody(&message.RecoveryBarrierMessageBody{}).MustBuildMutable().
 		WithTimeTick(300).WithLastConfirmed(walimplstest.NewTestMessageID(299)).IntoImmutableMessage(walimplstest.NewTestMessageID(300))
-	owner := message.NewOwnedImmutableMessage(raw, nil)
-	retained := owner.Clone()
-	summary.ObserveMessage(ctx, raw)
-	require.True(t, restored.ObserveMessage(ctx, retained))
-	retained.Release()
-	owner.Release()
+	tracker.Track(later).Release()
+	require.Equal(t, uint64(120), tracker.CompletedPoint().TimeTick, "later completed messages cannot bypass unfinished Flush")
+	require.Empty(t, module.ConsumeDirtySnapshots(), "pending intent needs no metadata field")
+	// Crash before L0: checkpoint remains before Flush@200, so WAL replay
+	// reconstructs the request. Summary still owns Delete@120 before checkpoint.
+	restored, err := NewModule(config)
+	require.NoError(t, err)
+	recoveredTracker := messageack.NewTracker(tracker.CompletedPoint(), nil, nil)
+	require.Greater(t, raw.TimeTick(), recoveredTracker.CompletedPoint().TimeTick)
+	dispatch(restored, recoveredTracker)
 	require.Empty(t, tasks)
 	committed := segment.NewSegmentViewFromMetaWithConfig(newMaterializationBlockerMeta(1, 100, true), nil, restored.segmentViewConfig())
 	restored.mu.Lock()
@@ -99,6 +96,7 @@ func TestExplicitL0IntentSurvivesSnapshotAndRestart(t *testing.T) {
 	require.Len(t, tasks, 1, "final-commit notification wakes L0 without a new message")
 	require.NoError(t, tasks[0].Execute(ctx))
 	require.Equal(t, uint64(200), restored.l0Materializer.MaterializedTimeTick())
+	require.Equal(t, uint64(200), recoveredTracker.CompletedPoint().TimeTick, "handle releases after L0 and dirty metadata")
 	require.Zero(t, restored.FlushCheckpointTimeTick(), "output alone is not a persisted flush checkpoint")
 	persistDirtySnapshots(restored)
 	require.Equal(t, uint64(200), restored.vchannelView.PersistedMaterializedTimeTick())
