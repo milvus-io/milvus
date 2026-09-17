@@ -193,6 +193,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestBuildCompactionRequest() {
 	s.NotNil(plan)
 
 	// Verify plan
+	s.True(plan.GetEnableManifestDelta())
 	s.Equal(int64(1), plan.GetPlanID())
 	s.Equal(datapb.CompactionType_BumpSchemaVersionCompaction, plan.GetType())
 	s.Equal("ch-1", plan.GetChannel())

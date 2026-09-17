@@ -1931,6 +1931,7 @@ func (s *statsTaskSuite) TestPrepareJobRequest() {
 		s.NotNil(req)
 
 		// Verify request fields
+		s.True(req.GetEnableManifestDelta())
 		s.Equal(s.taskID, req.TaskID)
 		s.Equal(s.collID, req.CollectionID)
 		s.Equal(s.partID, req.PartitionID)
