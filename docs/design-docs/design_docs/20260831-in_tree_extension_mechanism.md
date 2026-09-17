@@ -157,21 +157,26 @@ that group. Nothing in a stock binary sets it.
 The hook is also the mark of an installed form: `extension.FormInstalled()`
 answers true once `SetHook` has been called, and three behaviors in the
 coordinators are switched on by that answer alone. They exist for the
-deployment shape a distribution runs - a resource group whose only compute is
-a streaming node, one collection loaded into several resource groups
-independently, every role rolled from one image - and a stock binary, which
+deployment shape a distribution runs - one streaming node kept for DDL and the
+write ahead log while queries are served from resource groups of regular query
+nodes, one collection loaded into several of those groups independently,
+every role rolled from one image - and a stock binary, which
 answers false, keeps master's behavior exactly. Because the query coordinator
 and the data coordinator read the mark too, a distribution must install its
 hook in every role it runs, not only in the proxy.
 
-- **Streaming-node admission and placement** (`utils.AssignReplica`, the
-  segment checker). With a form installed, a resource group's streaming query
-  nodes count as replica capacity, and a replica with no regular query node
-  has its sealed segments placed on the streaming node's embedded query node.
-  Stock: a load into a resource group with no regular node is refused with
-  `ErrResourceGroupNodeNotEnough`, and sealed segments never land on a
-  streaming node - the balancers only walk regular nodes, so a segment placed
-  there would stay for good.
+- **Delegator placement** (`streamingutil.UseStreamingQueryNodeAsDelegator`).
+  With the streaming service on, the query coordinator places shard delegators
+  on streaming query nodes only, gives every replica a streaming query node of
+  its own, and refuses a collection more replicas than there are streaming
+  nodes. With a form installed, delegators go onto the replica's regular RW
+  query nodes instead, which watch the channel and read the WAL remotely, and
+  the streaming node takes no part in serving: a form runs one, and loads the
+  same collection into several resource groups. The replica bound in
+  `utils.AssignReplica`, the channel and leader checkers, the assign policies'
+  node filter, the channel balance helpers and the manual channel transfer ask
+  this one question; each already carried both placements. Stock: exactly the
+  streaming gate's answer, as before.
 
 - **Resource-group-scoped load placement** (`completePlacementForOutOfScopeResourceGroups`).
   With a form installed, a load request naming resource groups only ever
@@ -331,8 +336,9 @@ them through `user.yaml` or the environment.
 - mixcoord: the engine starts on activation only, receives the coordinator
   client, and is stopped once.
 - querycoord / datacoord: each hook-gated behavior with and without a form
-  installed - the stock cases assert master's answers (a load refused for a
-  group with no regular node, a scoped load that moves the replica, version 0
+  installed - the stock cases assert master's answers (a second replica
+  refused for want of a streaming node, a delegator placed on the streaming
+  query node, a scoped load that moves the replica, version 0
   with no session) - plus a request naming no resource group, a load
   percentage that regresses, the three ways a serving group reads as an
   unreliable 0 (failed read, no target, a replica that has not reported), a

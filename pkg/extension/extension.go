@@ -78,7 +78,8 @@ func InstalledHook() hook.Hook {
 // binary, which is exactly "a hook is installed".
 //
 // A few behaviors in the coordinators exist for the deployment shape such a
-// distribution runs - a resource group whose only compute is a streaming node,
+// distribution runs - shard delegators on the regular query nodes of its
+// resource groups, with the streaming node kept for DDL and the write ahead log,
 // a load that names the resource groups it speaks for, an index engine version
 // answered before any QueryNode registers - and are switched on by this
 // answer alone. It is consulted in the query coordinator and the data

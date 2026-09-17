@@ -18,7 +18,6 @@ package querycoordv2
 
 import (
 	"context"
-	"strconv"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -76,8 +75,7 @@ func newAdmissionFixture(t *testing.T) *admissionFixture {
 }
 
 // putResourceGroup registers rgName holding exactly the given regular query
-// nodes; with none, the group is one whose only compute could be a streaming
-// node, or one that has no compute at all.
+// nodes; with none, the group has no compute at all.
 func (f *admissionFixture) putResourceGroup(t *testing.T, rgName string, nodeIDs ...int64) {
 	t.Helper()
 	ctx := context.Background()
@@ -188,32 +186,24 @@ func (f *admissionFixture) loadPartitions(t *testing.T, req *querypb.LoadPartiti
 	return checkedNodeNum, err
 }
 
-// withStrictResourceGroupIsolation sets the streaming query node assignment
-// mode for the test and restores the default when it ends.
-func withStrictResourceGroupIsolation(t *testing.T, enabled bool) {
-	t.Helper()
-	p := paramtable.Get()
-	require.NoError(t, p.Save(p.StreamingCfg.StrictResourceGroupIsolationEnabled.Key, strconv.FormatBool(enabled)))
-	t.Cleanup(func() { p.Reset(p.StreamingCfg.StrictResourceGroupIsolationEnabled.Key) })
+// theFormsOnlyStreamingNode is the streaming side of a form's instance: one
+// streaming node, for DDL and the write ahead log, in a group of its own that
+// holds no replica. Every query cluster is a group of regular query nodes.
+func theFormsOnlyStreamingNode() map[string]typeutil.UniqueSet {
+	return map[string]typeutil.UniqueSet{"internal": typeutil.NewUniqueSet(7)}
 }
 
-// LoadPartitions checks node numbers on every request, and under strict
-// isolation the per-group rule refuses a group with no streaming node of
-// its own whatever its regular count. A collection loaded into rg_b with two
-// replicas on its two regular and two streaming nodes, both streaming nodes
-// restarting at once, and the identical LoadPartitions re-sent: the request
-// adds no replica and is not admitted against anything, while the same
-// request asking a third replica is.
-func TestAnIdenticalScopedLoadPartitionsReSendIsNotRefusedByTheStrictRule(t *testing.T) {
+// LoadPartitions checks node numbers on every request. A collection loaded
+// into rg_b with two replicas on its two query nodes, one of them restarting,
+// and the identical LoadPartitions re-sent: the request adds no replica and is
+// not admitted against anything, while the same request asking a third
+// replica is.
+func TestAnIdenticalScopedLoadPartitionsReSendIsNotRefused(t *testing.T) {
 	setForm(t, true)
-	withStrictResourceGroupIsolation(t, true)
 	f := newAdmissionFixture(t)
-	f.putResourceGroup(t, "rg_b", 1, 2)
+	f.putResourceGroup(t, "rg_b", 1)
 	f.loadedIn(t, 17, "rg_b", "rg_b")
-	// Streaming nodes elsewhere keep the cluster-wide check out of the way.
-	defer withStreamingQueryNodes(map[string]typeutil.UniqueSet{
-		"rg_elsewhere": typeutil.NewUniqueSet(301, 302, 303),
-	})()
+	defer withStreamingQueryNodes(theFormsOnlyStreamingNode())()
 
 	checked, err := f.loadPartitions(t, &querypb.LoadPartitionsRequest{
 		CollectionID:   17,
@@ -232,7 +222,7 @@ func TestAnIdenticalScopedLoadPartitionsReSendIsNotRefusedByTheStrictRule(t *tes
 	})
 	assert.True(t, checked, "a third replica is an expansion")
 	require.Error(t, err)
-	assert.ErrorIs(t, err, merr.ErrResourceGroupNodeNotEnough, "under strict isolation rg_b has no streaming node to give it a delegator")
+	assert.ErrorIs(t, err, merr.ErrResourceGroupNodeNotEnough, "three replicas on rg_b's one query node")
 }
 
 // A stock binary checks node numbers on every load_partitions, as it always
@@ -256,72 +246,8 @@ func TestAStockLoadPartitionsAlwaysChecksNodeNumbers(t *testing.T) {
 	assert.NoError(t, err, "two replicas on two regular nodes, as master admits")
 }
 
-// The reviewer's failure, through the callback. With strict isolation off,
-// rg_a holds one regular node and no streaming node, and the default group
-// holds two streaming nodes. The collection is loaded into rg_a, whose
-// replica the replica manager serves from the default group's pool. A
-// scoped load of two replicas into the default group would put three
-// replicas on that pool's two nodes: one would never receive a delegator,
-// its group's scoped task would read unknown forever and the load would
-// neither complete nor time out. It is refused; one replica is admitted.
-func TestAScopedExpansionIsAdmittedAgainstThePoolItsReplicasShare(t *testing.T) {
-	setForm(t, true)
-	f := newAdmissionFixture(t)
-	f.putResourceGroup(t, "rg_a", 1)
-	f.loadedIn(t, 13, "rg_a")
-	defer withStreamingQueryNodes(map[string]typeutil.UniqueSet{
-		meta.DefaultResourceGroupName: typeutil.NewUniqueSet(901, 902),
-	})()
-
-	checked, err := f.loadCollection(t, &querypb.LoadCollectionRequest{
-		CollectionID:   13,
-		ReplicaNumber:  2,
-		ResourceGroups: []string{meta.DefaultResourceGroupName},
-	})
-	assert.True(t, checked)
-	require.Error(t, err)
-	assert.ErrorIs(t, err, merr.ErrResourceGroupNodeNotEnough,
-		"rg_a's replica already sits in the default pool: three replicas on two streaming nodes")
-
-	_, err = f.loadCollection(t, &querypb.LoadCollectionRequest{
-		CollectionID:   13,
-		ReplicaNumber:  1,
-		ResourceGroups: []string{meta.DefaultResourceGroupName},
-	})
-	assert.NoError(t, err, "two replicas on two streaming nodes")
-}
-
-// LoadPartitions checks node numbers on every request and takes the same
-// bound, or a placement the pool cannot serve would be admitted through it.
-func TestAScopedLoadPartitionsIsAdmittedAgainstThePoolItsReplicasShare(t *testing.T) {
-	setForm(t, true)
-	f := newAdmissionFixture(t)
-	f.putResourceGroup(t, "rg_a", 1)
-	f.loadedIn(t, 14, "rg_a")
-	defer withStreamingQueryNodes(map[string]typeutil.UniqueSet{
-		meta.DefaultResourceGroupName: typeutil.NewUniqueSet(901, 902),
-	})()
-
-	_, err := f.loadPartitions(t, &querypb.LoadPartitionsRequest{
-		CollectionID:   14,
-		PartitionIDs:   []int64{1},
-		ReplicaNumber:  2,
-		ResourceGroups: []string{meta.DefaultResourceGroupName},
-	})
-	require.Error(t, err)
-	assert.ErrorIs(t, err, merr.ErrResourceGroupNodeNotEnough)
-
-	_, err = f.loadPartitions(t, &querypb.LoadPartitionsRequest{
-		CollectionID:   14,
-		PartitionIDs:   []int64{1},
-		ReplicaNumber:  1,
-		ResourceGroups: []string{meta.DefaultResourceGroupName},
-	})
-	assert.NoError(t, err)
-}
-
 // The reviewer's finding: a client re-sending the load that placed a
-// collection's two replicas in rg_b, while one of rg_b's two streaming nodes
+// collection's two replicas in rg_b, while one of rg_b's two query nodes
 // restarts, names a group on a loaded collection and so was admitted like an
 // expansion: two replicas against one node, refused, thirty lines before the
 // callback would have recognized a request that changes nothing. Admission
@@ -330,14 +256,9 @@ func TestAScopedLoadPartitionsIsAdmittedAgainstThePoolItsReplicasShare(t *testin
 func TestAnIdenticalScopedReSendIsANoOpNotARefusal(t *testing.T) {
 	setForm(t, true)
 	f := newAdmissionFixture(t)
-	f.putResourceGroup(t, "rg_b")
+	f.putResourceGroup(t, "rg_b", 1)
 	f.loadedIn(t, 15, "rg_b", "rg_b")
-	// Streaming nodes elsewhere keep the cluster-wide check, which milvus
-	// has always had, out of the way: what would refuse is rg_b's pool.
-	defer withStreamingQueryNodes(map[string]typeutil.UniqueSet{
-		"rg_b":         typeutil.NewUniqueSet(201),
-		"rg_elsewhere": typeutil.NewUniqueSet(301, 302, 303),
-	})()
+	defer withStreamingQueryNodes(theFormsOnlyStreamingNode())()
 
 	checked, err := f.loadCollection(t, &querypb.LoadCollectionRequest{
 		CollectionID:   15,
@@ -357,17 +278,14 @@ func TestAnIdenticalScopedReSendIsANoOpNotARefusal(t *testing.T) {
 	assert.ErrorIs(t, err, merr.ErrResourceGroupNodeNotEnough)
 }
 
-// With BOTH of rg_b's streaming nodes away, the per-group rule falls back to
-// the regular-node bound and would refuse two replicas on none; the re-send
-// still adds nothing and is still the no-op.
-func TestAnIdenticalScopedReSendIsANoOpWhileTheGroupHasNoStreamingNode(t *testing.T) {
+// With BOTH of rg_b's query nodes away the regular bound would refuse two
+// replicas on none; the re-send still adds nothing and is still the no-op.
+func TestAnIdenticalScopedReSendIsANoOpWhileAllTheGroupsQueryNodesRestart(t *testing.T) {
 	setForm(t, true)
 	f := newAdmissionFixture(t)
 	f.putResourceGroup(t, "rg_b")
 	f.loadedIn(t, 16, "rg_b", "rg_b")
-	defer withStreamingQueryNodes(map[string]typeutil.UniqueSet{
-		"rg_elsewhere": typeutil.NewUniqueSet(301, 302),
-	})()
+	defer withStreamingQueryNodes(theFormsOnlyStreamingNode())()
 
 	checked, err := f.loadCollection(t, &querypb.LoadCollectionRequest{
 		CollectionID:   16,
@@ -392,9 +310,7 @@ func TestAScopedExpansionIntoAGroupWithNoNodeIsRefused(t *testing.T) {
 	f.putResourceGroup(t, "rg_a", 1)
 	f.putResourceGroup(t, "rg_b")
 	f.loadedIn(t, 7, "rg_a")
-	defer withStreamingQueryNodes(map[string]typeutil.UniqueSet{
-		"rg_a": typeutil.NewUniqueSet(101),
-	})()
+	defer withStreamingQueryNodes(theFormsOnlyStreamingNode())()
 
 	checked, err := f.loadCollection(t, &querypb.LoadCollectionRequest{
 		CollectionID:   7,
@@ -406,20 +322,15 @@ func TestAScopedExpansionIntoAGroupWithNoNodeIsRefused(t *testing.T) {
 	assert.ErrorIs(t, err, merr.ErrResourceGroupNodeNotEnough)
 }
 
-// One streaming node in the group gives one replica a delegator; asking two
-// is refused up front rather than leaving the second waiting forever.
-func TestAScopedExpansionAskingMoreReplicasThanTheGroupCanDelegateIsRefused(t *testing.T) {
+// One query node in the group serves one replica; asking two is refused up
+// front rather than leaving the second waiting forever.
+func TestAScopedExpansionAskingMoreReplicasThanTheGroupHasQueryNodesIsRefused(t *testing.T) {
 	setForm(t, true)
 	f := newAdmissionFixture(t)
 	f.putResourceGroup(t, "rg_a", 1)
-	f.putResourceGroup(t, "rg_b")
+	f.putResourceGroup(t, "rg_b", 21)
 	f.loadedIn(t, 8, "rg_a")
-	// A second streaming node elsewhere keeps the cluster-wide check out of
-	// the way: what refuses is the group.
-	defer withStreamingQueryNodes(map[string]typeutil.UniqueSet{
-		"rg_a": typeutil.NewUniqueSet(101),
-		"rg_b": typeutil.NewUniqueSet(102),
-	})()
+	defer withStreamingQueryNodes(theFormsOnlyStreamingNode())()
 
 	checked, err := f.loadCollection(t, &querypb.LoadCollectionRequest{
 		CollectionID:   8,
@@ -431,18 +342,17 @@ func TestAScopedExpansionAskingMoreReplicasThanTheGroupCanDelegateIsRefused(t *t
 	assert.ErrorIs(t, err, merr.ErrResourceGroupNodeNotEnough)
 }
 
-// A group with enough compute admits the expansion, exactly as a first load
-// into it would be admitted.
+// A group with enough query nodes admits the expansion, exactly as a first
+// load into it would be admitted - and with a form installed it is admitted
+// although the whole instance runs one streaming node: a form's delegators
+// go onto the replicas' own query nodes (UseStreamingQueryNodeAsDelegator).
 func TestAScopedExpansionIntoAGroupWithEnoughNodesIsAdmitted(t *testing.T) {
 	setForm(t, true)
 	f := newAdmissionFixture(t)
 	f.putResourceGroup(t, "rg_a", 1)
-	f.putResourceGroup(t, "rg_b")
+	f.putResourceGroup(t, "rg_b", 21, 22)
 	f.loadedIn(t, 9, "rg_a")
-	defer withStreamingQueryNodes(map[string]typeutil.UniqueSet{
-		"rg_a": typeutil.NewUniqueSet(101),
-		"rg_b": typeutil.NewUniqueSet(102, 103),
-	})()
+	defer withStreamingQueryNodes(theFormsOnlyStreamingNode())()
 
 	checked, err := f.loadCollection(t, &querypb.LoadCollectionRequest{
 		CollectionID:   9,
