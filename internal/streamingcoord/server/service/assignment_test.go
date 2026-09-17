@@ -41,7 +41,7 @@ func TestAssignmentService(t *testing.T) {
 	// Set up the balancer
 	snmanager.ResetStreamingNodeManager()
 	b := mock_balancer.NewMockBalancer(t)
-	b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
+	b.EXPECT().WaitUntilVersionFeatureReady(mock.Anything, balancer.VersionFeatureWALBasedDDL).Return(nil).Maybe()
 	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
 		<-ctx.Done()
 		return ctx.Err()
@@ -259,7 +259,7 @@ func TestForcePromoteOnPrimaryCluster(t *testing.T) {
 	broadcast.ResetBroadcaster()
 	snmanager.ResetStreamingNodeManager()
 	b := mock_balancer.NewMockBalancer(t)
-	b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
+	b.EXPECT().WaitUntilVersionFeatureReady(mock.Anything, balancer.VersionFeatureWALBasedDDL).Return(nil).Maybe()
 	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
 		<-ctx.Done()
 		return ctx.Err()
@@ -302,7 +302,7 @@ func TestForcePromoteSuccess(t *testing.T) {
 	broadcast.ResetBroadcaster()
 	snmanager.ResetStreamingNodeManager()
 	b := mock_balancer.NewMockBalancer(t)
-	b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
+	b.EXPECT().WaitUntilVersionFeatureReady(mock.Anything, balancer.VersionFeatureWALBasedDDL).Return(nil).Maybe()
 	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
 		<-ctx.Done()
 		return ctx.Err()
@@ -369,7 +369,7 @@ func TestForcePromoteIdempotent(t *testing.T) {
 	broadcast.ResetBroadcaster()
 	snmanager.ResetStreamingNodeManager()
 	b := mock_balancer.NewMockBalancer(t)
-	b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
+	b.EXPECT().WaitUntilVersionFeatureReady(mock.Anything, balancer.VersionFeatureWALBasedDDL).Return(nil).Maybe()
 	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
 		<-ctx.Done()
 		return ctx.Err()
@@ -432,7 +432,7 @@ func TestAlterReplicateConfigCallbackForcePromote(t *testing.T) {
 
 	// Set up balancer
 	b := mock_balancer.NewMockBalancer(t)
-	b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
+	b.EXPECT().WaitUntilVersionFeatureReady(mock.Anything, balancer.VersionFeatureWALBasedDDL).Return(nil).Maybe()
 	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
 		<-ctx.Done()
 		return ctx.Err()
@@ -489,7 +489,7 @@ func TestAlterReplicateConfigCallbackIgnore(t *testing.T) {
 
 	// Set up balancer - should NOT be called
 	b := mock_balancer.NewMockBalancer(t)
-	b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
+	b.EXPECT().WaitUntilVersionFeatureReady(mock.Anything, balancer.VersionFeatureWALBasedDDL).Return(nil).Maybe()
 	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
 		<-ctx.Done()
 		return ctx.Err()
@@ -538,7 +538,7 @@ func TestForcePromoteBroadcastOtherError(t *testing.T) {
 	broadcast.ResetBroadcaster()
 	snmanager.ResetStreamingNodeManager()
 	b := mock_balancer.NewMockBalancer(t)
-	b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
+	b.EXPECT().WaitUntilVersionFeatureReady(mock.Anything, balancer.VersionFeatureWALBasedDDL).Return(nil).Maybe()
 	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
 		<-ctx.Done()
 		return ctx.Err()
@@ -580,7 +580,7 @@ func TestForcePromoteBroadcastAppendError(t *testing.T) {
 	broadcast.ResetBroadcaster()
 	snmanager.ResetStreamingNodeManager()
 	b := mock_balancer.NewMockBalancer(t)
-	b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
+	b.EXPECT().WaitUntilVersionFeatureReady(mock.Anything, balancer.VersionFeatureWALBasedDDL).Return(nil).Maybe()
 	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
 		<-ctx.Done()
 		return ctx.Err()
@@ -638,7 +638,7 @@ func TestAlterReplicateConfigCallbackErrors(t *testing.T) {
 		snmanager.ResetStreamingNodeManager()
 
 		b := mock_balancer.NewMockBalancer(t)
-		b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
+		b.EXPECT().WaitUntilVersionFeatureReady(mock.Anything, balancer.VersionFeatureWALBasedDDL).Return(nil).Maybe()
 		b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
 			<-ctx.Done()
 			return ctx.Err()
@@ -694,7 +694,7 @@ func TestUpdateReplicateConfigNonPrimaryBroadcastError(t *testing.T) {
 	defer mockGetClusterChannels.UnPatch()
 
 	b := mock_balancer.NewMockBalancer(t)
-	b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
+	b.EXPECT().WaitUntilVersionFeatureReady(mock.Anything, balancer.VersionFeatureWALBasedDDL).Return(nil).Maybe()
 	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
 		<-ctx.Done()
 		return ctx.Err()
@@ -750,7 +750,7 @@ func TestUpdateReplicateConfigBroadcastError(t *testing.T) {
 	defer mockGetClusterChannels.UnPatch()
 
 	b := mock_balancer.NewMockBalancer(t)
-	b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
+	b.EXPECT().WaitUntilVersionFeatureReady(mock.Anything, balancer.VersionFeatureWALBasedDDL).Return(nil).Maybe()
 	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
 		<-ctx.Done()
 		return ctx.Err()
@@ -827,7 +827,7 @@ func TestUpdateReplicateConfigSecondValidateSameConfig(t *testing.T) {
 	}
 
 	b := mock_balancer.NewMockBalancer(t)
-	b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
+	b.EXPECT().WaitUntilVersionFeatureReady(mock.Anything, balancer.VersionFeatureWALBasedDDL).Return(nil).Maybe()
 	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
 		<-ctx.Done()
 		return ctx.Err()
@@ -990,7 +990,7 @@ func TestHandleForcePromoteGetAssignmentError(t *testing.T) {
 	streaming.SetWALForTest(mw)
 
 	b := mock_balancer.NewMockBalancer(t)
-	b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
+	b.EXPECT().WaitUntilVersionFeatureReady(mock.Anything, balancer.VersionFeatureWALBasedDDL).Return(nil).Maybe()
 	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
 		<-ctx.Done()
 		return ctx.Err()
@@ -1050,7 +1050,7 @@ func TestHandleForcePromoteSameConfigAfterBroadcasterCheck(t *testing.T) {
 	streaming.SetWALForTest(mw)
 
 	b := mock_balancer.NewMockBalancer(t)
-	b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
+	b.EXPECT().WaitUntilVersionFeatureReady(mock.Anything, balancer.VersionFeatureWALBasedDDL).Return(nil).Maybe()
 	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
 		<-ctx.Done()
 		return ctx.Err()
@@ -1104,7 +1104,7 @@ func TestHandleForcePromoteValidatorError(t *testing.T) {
 	streaming.SetWALForTest(mw)
 
 	b := mock_balancer.NewMockBalancer(t)
-	b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
+	b.EXPECT().WaitUntilVersionFeatureReady(mock.Anything, balancer.VersionFeatureWALBasedDDL).Return(nil).Maybe()
 	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
 		<-ctx.Done()
 		return ctx.Err()
@@ -1165,7 +1165,7 @@ func TestHandleForcePromoteNoCurrentConfig(t *testing.T) {
 	streaming.SetWALForTest(mw)
 
 	b := mock_balancer.NewMockBalancer(t)
-	b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
+	b.EXPECT().WaitUntilVersionFeatureReady(mock.Anything, balancer.VersionFeatureWALBasedDDL).Return(nil).Maybe()
 	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
 		<-ctx.Done()
 		return ctx.Err()
@@ -1216,7 +1216,7 @@ func TestHandleForcePromoteClusterNotFound(t *testing.T) {
 	streaming.SetWALForTest(mw)
 
 	b := mock_balancer.NewMockBalancer(t)
-	b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
+	b.EXPECT().WaitUntilVersionFeatureReady(mock.Anything, balancer.VersionFeatureWALBasedDDL).Return(nil).Maybe()
 	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
 		<-ctx.Done()
 		return ctx.Err()
@@ -1281,7 +1281,7 @@ func TestSecondValidateNonSameError(t *testing.T) {
 	// before the resource key is acquired; the failure belongs to the third.
 	callCount := 0
 	b := mock_balancer.NewMockBalancer(t)
-	b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
+	b.EXPECT().WaitUntilVersionFeatureReady(mock.Anything, balancer.VersionFeatureWALBasedDDL).Return(nil).Maybe()
 	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
 		<-ctx.Done()
 		return ctx.Err()
@@ -1377,7 +1377,7 @@ func TestForcePromoteMultiplePChannels(t *testing.T) {
 	broadcast.ResetBroadcaster()
 	snmanager.ResetStreamingNodeManager()
 	b := mock_balancer.NewMockBalancer(t)
-	b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
+	b.EXPECT().WaitUntilVersionFeatureReady(mock.Anything, balancer.VersionFeatureWALBasedDDL).Return(nil).Maybe()
 	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
 		<-ctx.Done()
 		return ctx.Err()

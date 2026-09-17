@@ -36,6 +36,7 @@ import (
 	imocks "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/tso"
@@ -1015,8 +1016,8 @@ func TestDDLCallbacksAlterCollectionDropFieldWaitsForSchemaDropReady(t *testing.
 
 	barrierErr := errors.New("proxy version barrier")
 	b := mock_balancer.NewMockBalancer(t)
-	b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
-	b.EXPECT().WaitUntilSchemaDropReady(mock.Anything).Return(barrierErr).Once()
+	b.EXPECT().WaitUntilVersionFeatureReady(mock.Anything, balancer.VersionFeatureWALBasedDDL).Return(nil).Maybe()
+	b.EXPECT().WaitUntilVersionFeatureReady(mock.Anything, balancer.VersionFeatureSchemaDrop).Return(barrierErr).Once()
 	b.EXPECT().Close().Return().Maybe()
 	balance.ResetBalancer()
 	balance.Register(b)
@@ -1033,7 +1034,7 @@ func TestDDLCallbacksAlterCollectionDropFieldWaitsForSchemaDropReady(t *testing.
 		},
 	})
 	require.Error(t, merr.CheckRPCCall(resp.GetAlterStatus(), err))
-	require.Contains(t, resp.GetAlterStatus().GetDetail(), "failed to wait until schema drop ready")
+	require.Contains(t, resp.GetAlterStatus().GetDetail(), "failed to wait until schema-drop is ready")
 	assertFieldExists(t, ctx, core, dbName, collectionName, "field2", 101)
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 1)
 }
@@ -1066,7 +1067,7 @@ func TestDDLCallbacksAlterCollectionSchemaAddSkipsSchemaDropReady(t *testing.T) 
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 1)
 
 	b := mock_balancer.NewMockBalancer(t)
-	b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
+	b.EXPECT().WaitUntilVersionFeatureReady(mock.Anything, balancer.VersionFeatureWALBasedDDL).Return(nil).Maybe()
 	b.EXPECT().Close().Return().Maybe()
 	balance.ResetBalancer()
 	balance.Register(b)

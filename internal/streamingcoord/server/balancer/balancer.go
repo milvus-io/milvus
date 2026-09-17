@@ -54,11 +54,10 @@ type Balancer interface {
 	// ReplicateRole returns the replicate role of the balancer.
 	ReplicateRole() replicateutil.Role
 
-	// WaitUntilWALbasedDDLReady waits until the WAL based DDL is ready.
-	WaitUntilWALbasedDDLReady(ctx context.Context) error
-
-	// WaitUntilSchemaDropReady waits until schema-drop DDL can be accepted.
-	WaitUntilSchemaDropReady(ctx context.Context) error
+	// WaitUntilVersionFeatureReady blocks until the version-gated feature is usable on
+	// this cluster - its dependencies and every required role version are satisfied -
+	// and persists the feature's marker, so a later call returns immediately.
+	WaitUntilVersionFeatureReady(ctx context.Context, feature VersionFeature) error
 
 	// RegisterStreamingEnabledNotifier registers a notifier into the balancer.
 	// If the error is returned, the balancer is closed.
