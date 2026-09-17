@@ -419,11 +419,23 @@ func emptySearchResultData(nq, topK int64) *schemapb.SearchResultData {
 	}
 }
 
+// cancellationOf reports why a task's request was cancelled, or nil if it was
+// not. A task built by NewSearchTask always carries a context, but the struct
+// is also built directly, notably in tests that exercise the merge rules
+// alone; a task with no context has nothing that could cancel it, and reading
+// the field directly would panic on one.
+func cancellationOf(ctx context.Context) error {
+	if ctx == nil {
+		return nil
+	}
+	return ctx.Err()
+}
+
 // Merge folds other into this task's group when the two are compatible. A
 // task whose context is already cancelled is never merged, in either
 // direction: it would only be dropped again at dequeue.
 func (t *SearchTask) Merge(other *SearchTask) bool {
-	if t.ctx.Err() != nil || other.ctx.Err() != nil {
+	if cancellationOf(t.ctx) != nil || cancellationOf(other.ctx) != nil {
 		return false
 	}
 	if !t.canMerge(other) {
@@ -504,7 +516,7 @@ func (t *SearchTask) PruneCancelled() scheduler.Task {
 	members := t.members()
 	alive := make([]*SearchTask, 0, len(members))
 	for _, m := range members {
-		if err := m.ctx.Err(); err != nil {
+		if err := cancellationOf(m.ctx); err != nil {
 			m.finishPruned(err)
 			continue
 		}
@@ -513,7 +525,7 @@ func (t *SearchTask) PruneCancelled() scheduler.Task {
 	if len(alive) == len(members) {
 		return t
 	}
-	if t.ctx.Err() != nil {
+	if cancellationOf(t.ctx) != nil {
 		// The old owner is finished; drop its references to the survivors.
 		t.resetGroup()
 	}
@@ -544,7 +556,7 @@ func (t *SearchTask) notify(err error) {
 // groupErr: its own context error if its request was cancelled meanwhile,
 // otherwise the group's outcome.
 func (t *SearchTask) resultErr(groupErr error) error {
-	if err := t.ctx.Err(); err != nil {
+	if err := cancellationOf(t.ctx); err != nil {
 		return err
 	}
 	return groupErr
