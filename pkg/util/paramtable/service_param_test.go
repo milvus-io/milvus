@@ -492,6 +492,16 @@ func TestServiceParam(t *testing.T) {
 		assert.Equal(t, int64(100*1024*1024), Params.BacklogAutoClearBytes.GetAsSize())
 	})
 
+	t.Run("pulsar_producer_access_mode", func(t *testing.T) {
+		Params := &SParams.PulsarCfg
+		assert.Equal(t, "exclusive", Params.ProducerAccessMode.GetValue())
+	})
+
+	t.Run("pulsar_producer_create_timeout", func(t *testing.T) {
+		Params := &SParams.PulsarCfg
+		assert.Equal(t, "1m", Params.ProducerCreateTimeout.GetValue())
+	})
+
 	t.Run("test rocksmqConfig", func(t *testing.T) {
 		Params := &SParams.RocksmqCfg
 

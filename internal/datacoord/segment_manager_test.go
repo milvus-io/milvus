@@ -974,6 +974,7 @@ func TestSegmentManager_CleanZeroSealedSegmentsOfChannel(t *testing.T) {
 	}
 
 	mockCatalog := mocks.NewDataCoordCatalog(t)
+	mockCatalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	mockCatalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 	seg1 := &SegmentInfo{
