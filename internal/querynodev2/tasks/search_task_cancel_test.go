@@ -267,6 +267,42 @@ func TestGroupContextRestoreReleasesListeners(t *testing.T) {
 // through a run-time type assertion, so a group must still be pruned when it
 // is held by that interface. Without this a group could silently take the
 // single-task path and one member's cancellation would end the others.
+// A SearchTask built directly rather than through NewSearchTask carries no
+// context. The merge rules must still apply to it: the cancellation check
+// added in front of them may not turn a task with nothing to cancel into a
+// panic, which is how the pre-existing merge tests build their tasks.
+func TestMergeWithoutContext(t *testing.T) {
+	newTask := func(nq int64) *SearchTask {
+		return &SearchTask{
+			nq:   nq,
+			topk: 100,
+			req: &querypb.SearchRequest{
+				Req: &internalpb.SearchRequest{
+					DbID:               1,
+					CollectionID:       1000,
+					MvccTimestamp:      100,
+					PartitionIDs:       []int64{1},
+					SerializedExprPlan: []byte("plan"),
+				},
+				DmlChannels: []string{"channel1"},
+				SegmentIDs:  []int64{1},
+			},
+			originTopks: []int64{100},
+			originNqs:   []int64{nq},
+			groupSize:   1,
+		}
+	}
+
+	owner, other := newTask(10), newTask(5)
+	require.True(t, owner.Merge(other), "a task with no context is not a cancelled task")
+	assert.Equal(t, int64(15), owner.nq)
+	assert.Equal(t, int64(2), owner.groupSize)
+
+	// The rest of the group handling has to survive the absent context too.
+	assert.Same(t, owner, owner.PruneCancelled())
+	assert.NoError(t, owner.resultErr(nil))
+}
+
 func TestSearchTaskIsPrunableThroughTheSchedulerInterface(t *testing.T) {
 	ownerCtx, cancelOwner := context.WithCancel(context.Background())
 	owner := newGroupMember(ownerCtx, 1)
