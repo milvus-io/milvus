@@ -644,8 +644,8 @@ class TestMilvusClientSnapshotRestoreInvalid(TestMilvusClientSnapshotBase):
         # Create target collection (should cause conflict)
         self.create_collection(client, target_collection_name, default_dim)
 
-        error = {ct.err_code: 65535, ct.err_msg: "duplicate collection"}
-        self.restore_snapshot(
+        error = {ct.err_code: 1100, ct.err_msg: "already exists in database"}
+        res, _ = self.restore_snapshot(
             client,
             snapshot_name,
             collection_name,
@@ -653,6 +653,7 @@ class TestMilvusClientSnapshotRestoreInvalid(TestMilvusClientSnapshotBase):
             check_task=CheckTasks.err_res,
             check_items=error,
         )
+        assert res.code == error[ct.err_code], f"Unexpected restore error: {res}"
 
         # Cleanup
         self.drop_snapshot(client, snapshot_name, collection_name)
@@ -4043,8 +4044,8 @@ class TestMilvusClientSnapshotLifecycle(TestMilvusClientSnapshotBase):
         self.create_collection(client, existing_collection, default_dim)
 
         # 3. Restore to existing collection - should fail
-        error = {ct.err_code: 65535, ct.err_msg: "duplicate collection"}
-        self.restore_snapshot(
+        error = {ct.err_code: 1100, ct.err_msg: "already exists in database"}
+        res, _ = self.restore_snapshot(
             client,
             snapshot_name,
             collection_name,
@@ -4052,6 +4053,7 @@ class TestMilvusClientSnapshotLifecycle(TestMilvusClientSnapshotBase):
             check_task=CheckTasks.err_res,
             check_items=error,
         )
+        assert res.code == error[ct.err_code], f"Unexpected restore error: {res}"
 
         # 4. Verify the existing collection is untouched
         self.load_collection(client, existing_collection)
