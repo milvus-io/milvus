@@ -102,8 +102,8 @@ ApplyElementIDMapping(const std::vector<int64_t>& element_ids,
 }
 
 // Convert VECTOR_ARRAY element IDs to (row_id, elem_idx). Row-level vector
-// search receives logical IDs from Knowhere on the raw BF paths, which pass
-// physical->logical IDs through BitsetView (#50524).
+// search already receives logical IDs from Knowhere: indexed paths use IdMap,
+// raw BF paths pass physical->logical IDs through BitsetView.
 inline void
 FinalizeVectorSearchOffsets(SearchResult& result,
                             const milvus::IArrayOffsets* array_offsets) {
@@ -114,19 +114,6 @@ FinalizeVectorSearchOffsets(SearchResult& result,
         result.element_indices_ = std::move(elem_indices);
         result.element_level_ = true;
     }
-}
-
-// Indexed vector readers still hand back physical row IDs, so the index paths
-// remap them through their OffsetMapping. The two inputs remain mutually
-// exclusive: element-level search uses array_offsets and never the row map.
-inline void
-FinalizeVectorSearchOffsets(SearchResult& result,
-                            const milvus::OffsetMapping& offset_mapping,
-                            const milvus::IArrayOffsets* array_offsets) {
-    if (array_offsets == nullptr && offset_mapping.IsEnabled()) {
-        offset_mapping.TransformOffsets(result.seg_offsets_);
-    }
-    FinalizeVectorSearchOffsets(result, array_offsets);
 }
 
 template <typename T, typename U>

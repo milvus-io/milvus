@@ -16,6 +16,8 @@
 #include "segcore/indexing/GrowingIndexSet.h"
 
 #include <algorithm>
+#include <cmath>
+#include <functional>
 #include <limits>
 #include <mutex>
 #include <span>
@@ -29,6 +31,7 @@
 #include "index/growing/RTreeGrowingSpatialIndex.h"
 #include "index/growing/TantivyGrowingTextIndex.h"
 #include "knowhere/comp/index_param.h"
+#include "knowhere/comp/knowhere_config.h"
 #include "knowhere/version.h"
 #include "segcore/ConcurrentVector.h"
 #include "segcore/IndexConfigGenerator.h"
@@ -210,6 +213,28 @@ MakeCapability(FieldId field_id,
 
 }  // namespace
 
+// Resolved against the live build pool size -- the cpu budget of index
+// building -- and clamped to [1, pool size] because knowhere declares
+// num_build_thread without a range and hands it to omp_set_num_threads, and
+// this config is refreshable.
+int64_t
+ResolveGrowingBuildThreadNum(const SegcoreConfig& segcore_config) {
+    const auto rate = segcore_config.get_growing_index_build_thread_rate();
+    if (!std::isfinite(rate) || rate <= 0.0F) {
+        return 1;
+    }
+    const auto pool_size = static_cast<int64_t>(
+        knowhere::KnowhereConfig::GetBuildThreadPoolSize());
+    if (pool_size <= 1) {
+        return 1;
+    }
+    // Cap the rate before scaling so the product can never overflow llround.
+    const auto capped_rate = std::min(static_cast<double>(rate), 1.0);
+    const auto thread_num = static_cast<int64_t>(
+        std::llround(capped_rate * static_cast<double>(pool_size)));
+    return std::clamp<int64_t>(thread_num, 1, pool_size);
+}
+
 GrowingIndexSet::Appender::Appender(
     FieldId field_id,
     index::ReaderCaps reader_caps,
@@ -311,11 +336,22 @@ GrowingIndexSet::StageAppender(const FieldMeta& field_meta,
     if (dim > 0) {
         build_params[knowhere::meta::DIM] = std::to_string(dim);
     }
-    build_params[knowhere::meta::NUM_BUILD_THREAD] = std::to_string(1);
+    build_params[knowhere::meta::NUM_BUILD_THREAD] =
+        std::to_string(ResolveGrowingBuildThreadNum(segcore_config));
     const bool source_backed =
         config.GetIndexType() == knowhere::IndexEnum::INDEX_FAISS_SCANN_DVR;
-    const auto version =
-        knowhere::Version::GetCurrentVersion().VersionNumber();
+    // #52361: honour the configured interim index target engine version
+    // instead of pinning the growing index to knowhere's current version.
+    const auto version = segcore_config.get_interim_index_version();
+
+    // The knob is refreshable, so resolve it again before every knowhere
+    // Build/Add instead of freezing the value stamped above. SegcoreConfig
+    // state is process-global (every member is `inline static`), so reading
+    // the default instance observes the same values as `segcore_config`
+    // without retaining a reference to the caller's object.
+    std::function<int64_t()> build_thread_num = [] {
+        return ResolveGrowingBuildThreadNum(SegcoreConfig::default_config());
+    };
 
     auto make_owner = [&]<typename EngineType>(
                           std::shared_ptr<const index::GrowingVectorSource<
@@ -331,7 +367,8 @@ GrowingIndexSet::StageAppender(const FieldMeta& field_meta,
             build_params,
             config.GetSearchBaseParams(),
             std::move(source),
-            source_backed);
+            source_backed,
+            build_thread_num);
     };
 
     std::unique_ptr<index::IGrowingIndex> owner;

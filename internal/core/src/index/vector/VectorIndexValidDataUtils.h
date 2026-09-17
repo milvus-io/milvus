@@ -24,23 +24,29 @@
 #include <limits>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "common/EasyAssert.h"
 #include "common/FastMem.h"
-#include "common/OffsetMapping.h"
+#include "common/Types.h"
+#include "common/ValidityView.h"
 #include "index/Meta.h"
-#include "index/vector/VectorValidData.h"
+#include "knowhere/expected.h"
+#include "knowhere/id_map.h"
+#include "knowhere/index/index_node.h"
 
 namespace milvus::index {
 
 // Sealed vector-validity wire helpers. The legacy entries remain an exact
 // native uint64 row count plus an LSB-first bitmap. Readers accept trailing
 // bitmap bytes for compatibility but require the count entry to be exact and
-// validate the coordinate domain before allocating the decoded bool array.
+// validate the coordinate domain before handing the bitmap to knowhere.
 //
-// The stateful part lives in VectorValidData. These helpers never expose the
-// mutable SealedOffsetMapping used during construction.
+// The stateful part lives in knowhere's IdMap (#50524): loaders and builders
+// hand it the public-row validity bitmap and knowhere owns both mapping
+// directions, so no Milvus-side offset mapping exists for an indexed nullable
+// vector field.
 
 // Entry names of the valid-data payload inside a nullable vector artifact.
 constexpr const char* VALID_DATA_KEY = "valid_data";
@@ -105,9 +111,10 @@ ContainsOnlyValidData(const BinarySet& binary_set) {
     return true;
 }
 
+// A nullable index whose public domain is non-empty but holds no vector.
 inline bool
-IsAllNullNullable(const OffsetMapping& offset_mapping) {
-    return offset_mapping.IsEnabled() && offset_mapping.GetValidCount() == 0;
+IsAllNullNullable(const knowhere::IdMap& id_map) {
+    return !id_map.ValidBitmap().empty() && id_map.InCount() == 0;
 }
 
 inline size_t
@@ -121,7 +128,7 @@ ValidatePersistedValidDataCount(size_t count) {
         static_cast<size_t>(std::numeric_limits<int32_t>::max()) + 1;
     if (count > max_count) {
         ThrowInfo(DataFormatBroken,
-                  "nullable vector valid_data count {} exceeds offset mapping "
+                  "nullable vector valid_data count {} exceeds the id map "
                   "domain",
                   count);
     }
@@ -131,7 +138,7 @@ inline uint64_t
 ToValidDataCount(size_t count) {
     AssertInfo(
         count <= static_cast<size_t>(std::numeric_limits<int32_t>::max()) + 1,
-        "nullable vector valid_data count exceeds offset mapping domain");
+        "nullable vector valid_data count exceeds the id map domain");
     return static_cast<uint64_t>(count);
 }
 
@@ -141,7 +148,7 @@ FromValidDataCount(uint64_t count) {
         static_cast<uint64_t>(std::numeric_limits<int32_t>::max()) + 1;
     if (count > std::numeric_limits<size_t>::max() || count > max_count) {
         ThrowInfo(DataFormatBroken,
-                  "nullable vector valid_data count {} exceeds offset mapping "
+                  "nullable vector valid_data count {} exceeds the id map "
                   "domain",
                   count);
     }
@@ -205,91 +212,274 @@ CountValidDataBitmap(size_t count, const uint8_t* bitmap) {
     return valid_count;
 }
 
-inline constexpr const char* OFFSET_MAPPING_MMAP_DIR = "id_mapping_mmap";
+// --- knowhere IdMap input views ------------------------------------------
+
+// Borrowed public-row validity bitmap. `count` is the number of public rows,
+// not bytes; the bitmap is LSB-first over that range.
+struct ValidDataView {
+    bool found{false};
+    size_t count{0};
+    const uint8_t* bitmap{nullptr};
+};
+
+struct OwnedValidData {
+    bool found{false};
+    size_t count{0};
+    std::vector<uint8_t> bitmap;
+
+    ValidDataView
+    View() const {
+        return {found, count, bitmap.data()};
+    }
+};
+
+// Materialize one LSB-first public-row validity bitmap the IdMap can consume.
+// knowhere only views the buffer during Build/Add, so the returned vector must
+// outlive that call.
+inline std::vector<uint8_t>
+PackValidityBitmap(ValidityView validity, int64_t total_count) {
+    AssertInfo(total_count >= 0,
+               "nullable vector row count {} is negative",
+               total_count);
+    const auto count = static_cast<size_t>(total_count);
+    ValidatePersistedValidDataCount(count);
+    std::vector<uint8_t> bitmap(GetValidDataBitmapSize(count), 0);
+    if (count == 0) {
+        return bitmap;
+    }
+    AssertInfo(static_cast<bool>(validity),
+               "nullable vector validity view is empty for {} rows",
+               total_count);
+    for (int64_t row = 0; row < total_count; ++row) {
+        if (validity[row]) {
+            bitmap[static_cast<size_t>(row) >> 3] |=
+                static_cast<uint8_t>(1U << (static_cast<size_t>(row) & 7U));
+        }
+    }
+    return bitmap;
+}
+
+inline std::vector<uint8_t>
+PackValidityBitmap(const bool* valid_data, int64_t total_count) {
+    return PackValidityBitmap(
+        total_count == 0 ? ValidityView{} : ValidityView::FromExpanded(
+                                                valid_data),
+        total_count);
+}
+
+inline knowhere::IdMapData
+MakeIdMapData(const ValidDataView& valid_data) {
+    AssertInfo(valid_data.found, "nullable vector valid_data is empty");
+    ValidatePersistedValidDataCount(valid_data.count);
+    if (valid_data.count > 0 && valid_data.bitmap == nullptr) {
+        ThrowInfo(DataFormatBroken,
+                  "nullable vector valid_data bitmap is null for {} rows",
+                  valid_data.count);
+    }
+    return knowhere::IdMapData::FromValidBitmap(valid_data.bitmap,
+                                                valid_data.count);
+}
+
+// --- knowhere IdMap mmap configuration -----------------------------------
+
+// Derived dense id arrays may be file-backed. The name is kept from the
+// pre-#50524 layout so an already deployed local staging directory keeps
+// working.
+inline constexpr const char* ID_MAP_MMAP_DIR = "id_mapping_mmap";
+
+struct IdMapMmapFlags {
+    // i2o: compact vector id -> public row id.
+    bool enable_i2o{false};
+    // o2i: public row id -> compact vector id.
+    bool enable_o2i{false};
+
+    bool
+    Any() const {
+        return enable_i2o || enable_o2i;
+    }
+};
+
+inline bool
+ReadIdMapMmapFlag(const Config& config, const char* key) {
+    if (!config.contains(key) || config.at(key).is_null()) {
+        return false;
+    }
+
+    const auto& encoded = config.at(key);
+    if (encoded.is_boolean()) {
+        return encoded.get<bool>();
+    }
+    if (encoded.is_string()) {
+        const auto& value = encoded.get_ref<const std::string&>();
+        const bool is_true = value.size() == 4 &&
+                             (value[0] == 't' || value[0] == 'T') &&
+                             (value[1] == 'r' || value[1] == 'R') &&
+                             (value[2] == 'u' || value[2] == 'U') &&
+                             (value[3] == 'e' || value[3] == 'E');
+        const bool is_false = value.size() == 5 &&
+                              (value[0] == 'f' || value[0] == 'F') &&
+                              (value[1] == 'a' || value[1] == 'A') &&
+                              (value[2] == 'l' || value[2] == 'L') &&
+                              (value[3] == 's' || value[3] == 'S') &&
+                              (value[4] == 'e' || value[4] == 'E');
+        if (is_true || is_false) {
+            return is_true;
+        }
+    }
+    ThrowInfo(
+        DataTypeInvalid, "nullable vector parameter {} must be boolean", key);
+}
+
+inline IdMapMmapFlags
+GetIdMapMmapFlags(const Config& config) {
+    IdMapMmapFlags flags;
+    flags.enable_i2o = ReadIdMapMmapFlag(config, ENABLE_MMAP_I2O_MAP);
+    flags.enable_o2i = ReadIdMapMmapFlag(config, ENABLE_MMAP_O2I_MAP);
+    return flags;
+}
 
 inline std::string
-GetOffsetMappingMmapDir(const std::string& local_index_path_prefix) {
-    return (std::filesystem::path(local_index_path_prefix) /
-            OFFSET_MAPPING_MMAP_DIR)
+GetIdMapMmapDir(const std::string& local_index_path_prefix) {
+    return (std::filesystem::path(local_index_path_prefix) / ID_MAP_MMAP_DIR)
         .string();
 }
 
-inline bool
-NeedOffsetMappingMmap(const OffsetMappingBuildOptions& options,
-                      size_t total_count,
-                      size_t valid_count) {
-    return (options.enable_mmap_o2i_map && total_count > 0) ||
-           (options.enable_mmap_i2o_map && valid_count > 0);
-}
-
-OffsetMappingBuildOptions
-GetOffsetMappingMmapOptions(const Config& config);
-
-inline std::vector<uint8_t>
-PackValidDataBitmap(const OffsetMapping& offset_mapping) {
-    const auto total_count = offset_mapping.GetTotalCount();
-    AssertInfo(total_count >= 0,
-               "nullable vector offset mapping has a negative row count");
-    const auto count = static_cast<size_t>(total_count);
-    (void)ToValidDataCount(count);
-    std::vector<uint8_t> data(GetValidDataBitmapSize(count), 0);
-    for (size_t i = 0; i < count; ++i) {
-        if (offset_mapping.IsValid(i)) {
-            data[i / 8] |= (1 << (i % 8));
-        }
-    }
-    return data;
-}
-
+// Mmap applies only to the derived dense id arrays. The validity bitmap stays
+// heap-backed and is consumed once by AddFromData. knowhere removes each
+// backing file together with its mapping, so only the (empty) directory is
+// left behind.
 inline void
-BuildValidDataFromBitmap(VectorValidData& valid,
-                         size_t count,
-                         const uint8_t* bitmap,
-                         const OffsetMappingBuildOptions& options = {}) {
-    ValidatePersistedValidDataCount(count);
-    if (count > 0 && bitmap == nullptr) {
-        ThrowInfo(DataFormatBroken,
-                  "nullable vector valid_data bitmap is null for {} rows",
-                  count);
-    }
-
-    std::unique_ptr<bool[]> valid_data(count == 0 ? nullptr : new bool[count]);
-    for (size_t i = 0; i < count; ++i) {
-        valid_data[i] = (bitmap[i / 8] >> (i % 8)) & 1;
-    }
-    valid.Build(valid_data.get(), static_cast<int64_t>(count), options);
-}
-
-inline void
-AppendValidDataToBinarySet(const OffsetMapping& offset_mapping,
-                           BinarySet& binary_set) {
-    if (!offset_mapping.IsEnabled()) {
+ConfigureIdMapMmap(knowhere::IdMap& id_map,
+                   const IdMapMmapFlags& flags,
+                   const std::string& local_index_path_prefix) {
+    if (!flags.Any()) {
         return;
     }
-
-    auto count = static_cast<size_t>(offset_mapping.GetTotalCount());
-    auto wire_count = ToValidDataCount(count);
-    std::shared_ptr<uint8_t[]> count_buf(new uint8_t[sizeof(uint64_t)]);
-    milvus::fastmem::FastMemcpy(count_buf.get(), &wire_count, sizeof(uint64_t));
-    binary_set.Append(VALID_DATA_COUNT_KEY, count_buf, sizeof(uint64_t));
-
-    auto packed_data = PackValidDataBitmap(offset_mapping);
-    std::shared_ptr<uint8_t[]> data(new uint8_t[packed_data.size()]);
-    if (!packed_data.empty()) {
-        milvus::fastmem::FastMemcpy(
-            data.get(), packed_data.data(), packed_data.size());
+    AssertInfo(!local_index_path_prefix.empty(),
+               "nullable vector id map mmap requires a staging parent");
+    if (!id_map.IsEnabled()) {
+        id_map.SetType(knowhere::IdMap::Type::SEALED);
     }
-    binary_set.Append(VALID_DATA_KEY, data, packed_data.size());
+    AssertInfo(id_map.type() == knowhere::IdMap::Type::SEALED,
+               "nullable vector id map mmap requires sealed storage");
+
+    knowhere::IdMapMmapOptions options;
+    options.enable_in_to_out_ids = flags.enable_i2o;
+    options.enable_out_to_in_ids = flags.enable_o2i;
+    options.mmap_dir_path = GetIdMapMmapDir(local_index_path_prefix);
+    id_map.ConfigureMmap(std::move(options));
 }
 
-inline bool
-LoadValidDataFromBinarySet(const BinarySet& binary_set,
-                           VectorValidData& valid,
-                           const OffsetMappingBuildOptions& options = {}) {
-    bool has_count = binary_set.Contains(VALID_DATA_COUNT_KEY);
-    bool has_data = binary_set.Contains(VALID_DATA_KEY);
+inline void
+ConfigureIdMapMmap(knowhere::IdMap& id_map,
+                   const Config& config,
+                   const std::string& local_index_path_prefix) {
+    ConfigureIdMapMmap(
+        id_map, GetIdMapMmapFlags(config), local_index_path_prefix);
+}
+
+// --- restore / persist ----------------------------------------------------
+
+struct RestoredIdMap {
+    bool has_valid_data{false};
+    bool all_null_nullable{false};
+
+    bool
+    IsAllNullNullable() const {
+        return has_valid_data && all_null_nullable;
+    }
+};
+
+// knowhere derives both mapping directions inside Build / Add / Deserialize.
+// A metadata-only artifact never reaches any of those, so its restore has to
+// finalize the map explicitly.
+inline void
+FinalizeRestoredIdMap(knowhere::IndexNode* index_node,
+                      ErrorCode error_code,
+                      const std::string& context) {
+    AssertInfo(index_node != nullptr, "index node is null");
+    auto status = index_node->FinalizeIdMap();
+    if (status != knowhere::Status::success) {
+        ThrowInfo(error_code,
+                  "failed to finalize the nullable vector id map for {}: "
+                  "status {} ({})",
+                  context,
+                  static_cast<int>(status),
+                  knowhere::Status2String(status));
+    }
+}
+
+// Publish the borrowed validity bitmap into a sealed id map. Must run before
+// the engine is deserialized, because deserialization is what derives the
+// dense id arrays from this bitmap.
+inline RestoredIdMap
+RestoreIdMapFromValidData(knowhere::IdMap& id_map,
+                          const ValidDataView& valid_data,
+                          const IdMapMmapFlags& mmap_flags = {},
+                          const std::string& mmap_path_prefix = {}) {
+    if (!valid_data.found) {
+        return {};
+    }
+    if (!id_map.IsEnabled()) {
+        id_map.SetType(knowhere::IdMap::Type::SEALED);
+    }
+    AssertInfo(id_map.type() == knowhere::IdMap::Type::SEALED,
+               "a nullable sealed vector index requires sealed id map "
+               "storage");
+    ConfigureIdMapMmap(id_map, mmap_flags, mmap_path_prefix);
+    id_map.AddFromData(MakeIdMapData(valid_data));
+    return {true, IsAllNullNullable(id_map)};
+}
+
+inline ValidDataView
+LoadValidDataViewFromPayload(const uint8_t* count_data,
+                             int64_t count_size,
+                             const uint8_t* bitmap_data,
+                             int64_t bitmap_size) {
+    if (count_data == nullptr ||
+        count_size != static_cast<int64_t>(sizeof(uint64_t))) {
+        ThrowInfo(DataFormatBroken,
+                  "nullable vector index valid_data count file is invalid");
+    }
+    uint64_t wire_count = 0;
+    milvus::fastmem::FastMemcpy(&wire_count, count_data, sizeof(uint64_t));
+    const auto count = FromValidDataCount(wire_count);
+
+    const auto required_bytes =
+        static_cast<int64_t>(GetValidDataBitmapSize(count));
+    if (bitmap_size < required_bytes ||
+        (required_bytes > 0 && bitmap_data == nullptr)) {
+        ThrowInfo(DataFormatBroken,
+                  "nullable vector index valid_data bitmap file is invalid");
+    }
+    return {true, count, bitmap_data};
+}
+
+inline RestoredIdMap
+RestoreIdMapFromValidDataPayload(knowhere::IdMap& id_map,
+                                 const uint8_t* count_data,
+                                 int64_t count_size,
+                                 const uint8_t* bitmap_data,
+                                 int64_t bitmap_size,
+                                 const IdMapMmapFlags& mmap_flags = {},
+                                 const std::string& mmap_path_prefix = {}) {
+    return RestoreIdMapFromValidData(
+        id_map,
+        LoadValidDataViewFromPayload(
+            count_data, count_size, bitmap_data, bitmap_size),
+        mmap_flags,
+        mmap_path_prefix);
+}
+
+inline RestoredIdMap
+RestoreIdMapFromBinarySet(const BinarySet& binary_set,
+                          knowhere::IdMap& id_map,
+                          const IdMapMmapFlags& mmap_flags = {},
+                          const std::string& mmap_path_prefix = {}) {
+    const bool has_count = binary_set.Contains(VALID_DATA_COUNT_KEY);
+    const bool has_data = binary_set.Contains(VALID_DATA_KEY);
     if (!has_count && !has_data) {
-        return false;
+        return {};
     }
     if (!has_count || !has_data) {
         ThrowInfo(DataFormatBroken,
@@ -297,25 +487,63 @@ LoadValidDataFromBinarySet(const BinarySet& binary_set,
     }
 
     auto count_ptr = binary_set.GetByName(VALID_DATA_COUNT_KEY);
-    if (count_ptr == nullptr || count_ptr->size != sizeof(uint64_t) ||
-        count_ptr->data == nullptr) {
-        ThrowInfo(DataFormatBroken,
-                  "nullable vector index valid_data count file is invalid");
-    }
-    uint64_t wire_count = 0;
-    milvus::fastmem::FastMemcpy(
-        &wire_count, count_ptr->data.get(), sizeof(uint64_t));
-    auto count = FromValidDataCount(wire_count);
-
     auto data_ptr = binary_set.GetByName(VALID_DATA_KEY);
-    const auto required_bytes = GetValidDataBitmapSize(count);
-    if (data_ptr == nullptr || data_ptr->size < required_bytes ||
-        (required_bytes > 0 && data_ptr->data == nullptr)) {
+    if (count_ptr == nullptr || data_ptr == nullptr) {
         ThrowInfo(DataFormatBroken,
-                  "nullable vector index valid_data bitmap file is invalid");
+                  "nullable vector index valid_data files are incomplete");
     }
-    BuildValidDataFromBitmap(valid, count, data_ptr->data.get(), options);
-    return true;
+    return RestoreIdMapFromValidDataPayload(id_map,
+                                            count_ptr->data.get(),
+                                            count_ptr->size,
+                                            data_ptr->data.get(),
+                                            data_ptr->size,
+                                            mmap_flags,
+                                            mmap_path_prefix);
+}
+
+inline std::vector<uint8_t>
+PackValidDataBitmap(const knowhere::IdMap& id_map) {
+    const auto valid_bitmap = id_map.ValidBitmap();
+    if (valid_bitmap.empty()) {
+        return {};
+    }
+    const auto count = valid_bitmap.size();
+    (void)ToValidDataCount(count);
+    const auto bytes = GetValidDataBitmapSize(count);
+    std::vector<uint8_t> data(bytes, 0);
+    // A growing id map holds its bitmap in append-only chunks, so read it
+    // byte-wise instead of assuming one contiguous buffer.
+    if (const auto* contiguous = valid_bitmap.data(); contiguous != nullptr) {
+        milvus::fastmem::FastMemcpy(data.data(), contiguous, bytes);
+    } else {
+        for (size_t i = 0; i < bytes; ++i) {
+            data[i] = valid_bitmap[i];
+        }
+    }
+    return data;
+}
+
+inline void
+AppendValidDataToBinarySet(const knowhere::IdMap& id_map,
+                           BinarySet& binary_set) {
+    const auto valid_bitmap = id_map.ValidBitmap();
+    if (valid_bitmap.empty()) {
+        return;
+    }
+
+    const auto count = valid_bitmap.size();
+    auto wire_count = ToValidDataCount(count);
+    std::shared_ptr<uint8_t[]> count_buf(new uint8_t[sizeof(uint64_t)]);
+    milvus::fastmem::FastMemcpy(count_buf.get(), &wire_count, sizeof(uint64_t));
+    binary_set.Append(VALID_DATA_COUNT_KEY, count_buf, sizeof(uint64_t));
+
+    auto packed_data = PackValidDataBitmap(id_map);
+    std::shared_ptr<uint8_t[]> data(new uint8_t[packed_data.size()]);
+    if (!packed_data.empty()) {
+        milvus::fastmem::FastMemcpy(
+            data.get(), packed_data.data(), packed_data.size());
+    }
+    binary_set.Append(VALID_DATA_KEY, data, packed_data.size());
 }
 
 }  // namespace milvus::index

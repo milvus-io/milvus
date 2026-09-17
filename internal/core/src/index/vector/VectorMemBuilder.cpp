@@ -92,6 +92,21 @@ struct PreparedInput {
     bool embedding_list{false};
     bool all_null{false};
     bool empty_embedding_list{false};
+    // Owned LSB-first public-row validity bitmap. knowhere's IdMapData only
+    // views it, so it has to outlive every Build/Add call it is attached to.
+    std::vector<uint8_t> validity_bitmap;
+    bool nullable{false};
+
+    // Publishes the whole public row domain on the first knowhere call. Every
+    // later batch of the same sealed build must still carry id-map input (an
+    // enabled IdMap rejects a batch without it), but an empty domain makes it
+    // a no-op instead of replacing the sealed map.
+    knowhere::IdMapData
+    IdMapDataFor(int64_t logical_rows, bool first_batch) const {
+        return knowhere::IdMapData::FromValidBitmap(
+            validity_bitmap.data(),
+            first_batch ? static_cast<size_t>(logical_rows) : 0);
+    }
 };
 
 PreparedInput
@@ -102,8 +117,7 @@ PrepareInput(int64_t logical_rows,
              bool has_scalar_fields,
              const std::optional<int64_t>& expected_rows,
              const knowhere::Json& build_params,
-             KnowhereEngine& engine,
-             VectorValidData& valid_data) {
+             KnowhereEngine& engine) {
     if (logical_rows == 0) {
         ThrowInfo(DataIsEmpty, "cannot build an empty memory vector index");
     }
@@ -149,29 +163,73 @@ PrepareInput(int64_t logical_rows,
                    physical_rows);
     }
 
+    PreparedInput result;
     if (parent_validity) {
-        auto options = GetOffsetMappingMmapOptions(build_params);
-        if (options.enable_mmap_i2o_map || options.enable_mmap_o2i_map) {
+        // The engine owns the nullable mapping through knowhere's IdMap
+        // (#50524). Arm it before any Build/Add so knowhere derives both
+        // mapping directions from the bitmap attached to the dataset.
+        auto& id_map = engine.native_index.GetIdMap();
+        AssertInfo(!id_map.IsEnabled(),
+                   "memory vector builder received an engine whose id map is "
+                   "already armed");
+        id_map.SetType(knowhere::IdMap::Type::SEALED);
+        const auto mmap_flags = GetIdMapMmapFlags(build_params);
+        if (mmap_flags.Any()) {
             const auto local_dir =
                 GetValueFromConfig<std::string>(build_params, "local_dir");
             AssertInfo(local_dir.has_value() && !local_dir->empty(),
                        "nullable memory vector mmap requires local_dir");
-            options.mmap_dir_path = *local_dir;
+            ConfigureIdMapMmap(id_map, mmap_flags, *local_dir);
         }
-        valid_data.Build(parent_validity, logical_rows, options);
-        AssertInfo(valid_data.ValidCount() == valid_parents,
-                   "memory vector validity count changed during build");
+        result.validity_bitmap =
+            PackValidityBitmap(parent_validity, logical_rows);
+        result.nullable = true;
     } else {
         AssertInfo(valid_parents == logical_rows,
                    "non-nullable memory vector has compacted parents");
     }
 
     const bool all_null = parent_validity && valid_parents == 0;
-    return {.valid_parents = valid_parents,
-            .embedding_list = embedding_list,
-            .all_null = all_null,
-            .empty_embedding_list =
-                embedding_list && !all_null && physical_rows == 0};
+    result.valid_parents = valid_parents;
+    result.embedding_list = embedding_list;
+    result.all_null = all_null;
+    result.empty_embedding_list =
+        embedding_list && !all_null && physical_rows == 0;
+    return result;
+}
+
+// knowhere publishes the id map inside Build/Add, so a nullable artifact that
+// holds no engine state at all still has to reach one of them.
+void
+BuildIdMapOnly(KnowhereEngine& engine,
+               const PreparedInput& prepared,
+               int64_t logical_rows,
+               const knowhere::Json& build_params,
+               bool is_sparse) {
+    AssertInfo(prepared.nullable,
+               "a non-nullable memory vector index has no id map to publish");
+    auto dataset = knowhere::GenDataSet(0, engine.Dim(), nullptr);
+    if (is_sparse) {
+        dataset->SetIsSparse(true);
+    }
+    dataset->SetIdMapData(prepared.IdMapDataFor(logical_rows, true));
+    auto config = build_params;
+    config.erase(INSERT_FILES_KEY);
+    config.erase(VEC_OPT_FIELDS);
+    config[EMB_LIST] = prepared.embedding_list;
+    const auto status =
+        engine.native_index.Build(dataset, config, engine.UseBuildPool());
+    if (status != knowhere::Status::success) {
+        ThrowInfo(knowhere::ToSegcoreErrorCode(status),
+                  "failed to publish the nullable memory vector id map: "
+                  "status {} ({})",
+                  static_cast<int>(status),
+                  knowhere::Status2String(status));
+    }
+    AssertInfo(static_cast<int64_t>(
+                   engine.native_index.GetIdMap().InCount()) ==
+                   prepared.valid_parents,
+               "memory vector validity count changed during build");
 }
 
 template <typename T>
@@ -400,20 +458,31 @@ VectorMemBuilder<T>::Build(const VectorBuildInput<T>& input) && {
                                            !input.scalar_fields.empty(),
                                            expected_rows_,
                                            build_params_,
-                                           engine,
-                                           valid_data_);
+                                           engine);
 
+        constexpr bool is_sparse = std::is_same_v<T, sparse_u32_f32>;
         if (prepared.all_null) {
             AssertInfo(input.physical_values.empty(),
                        "all-null memory vector input contains physical values");
-            return std::make_unique<VectorMemArtifact>(
-                std::move(engine), std::move(valid_data_));
+            BuildIdMapOnly(engine,
+                           prepared,
+                           input.logical_rows,
+                           build_params_,
+                           is_sparse);
+            return std::make_unique<VectorMemArtifact>(std::move(engine));
         }
         if (prepared.empty_embedding_list) {
+            if (prepared.nullable) {
+                BuildIdMapOnly(engine,
+                               prepared,
+                               input.logical_rows,
+                               build_params_,
+                               is_sparse);
+            }
             auto offsets = std::vector<size_t>(input.embedding_offsets->begin(),
                                                input.embedding_offsets->end());
-            return std::make_unique<VectorMemArtifact>(
-                std::move(engine), std::move(valid_data_), std::move(offsets));
+            return std::make_unique<VectorMemArtifact>(std::move(engine),
+                                                       std::move(offsets));
         }
 
         AssertInfo(input.physical_rows > 0,
@@ -434,6 +503,14 @@ VectorMemBuilder<T>::Build(const VectorBuildInput<T>& input) && {
                            input.embedding_offsets->end());
             dataset->Set(knowhere::meta::EMB_LIST_OFFSET,
                          const_cast<const size_t*>(offsets.data()));
+            // knowhere requires the explicit list count next to the offsets
+            // (#53077); the offset array holds one terminal entry.
+            dataset->Set(knowhere::meta::EMB_LIST_COUNT,
+                         static_cast<int64_t>(offsets.size() - 1));
+        }
+        if (prepared.nullable) {
+            dataset->SetIdMapData(
+                prepared.IdMapDataFor(input.logical_rows, true));
         }
 
         auto config = build_params_;
@@ -449,8 +526,17 @@ VectorMemBuilder<T>::Build(const VectorBuildInput<T>& input) && {
                       knowhere::Status2String(status));
         }
         engine.SetDim(engine.native_index.Dim());
-        return std::make_unique<VectorMemArtifact>(std::move(engine),
-                                                   std::move(valid_data_));
+        // An embedding-list dataset searched with an ordinary metric builds a
+        // flat vector index, and knowhere then materializes an element-domain
+        // identity map instead of consuming the list validity, so the row
+        // count check only holds for row-domain builds.
+        if (prepared.nullable && !prepared.embedding_list) {
+            AssertInfo(static_cast<int64_t>(
+                           engine.native_index.GetIdMap().InCount()) ==
+                           prepared.valid_parents,
+                       "memory vector validity count changed during build");
+        }
+        return std::make_unique<VectorMemArtifact>(std::move(engine));
     } catch (...) {
         failed_ = true;
         throw;
@@ -475,13 +561,17 @@ VectorMemBuilder<T>::Build(const InterimVectorBuildInput<T>& input) && {
                                            false,
                                            expected_rows_,
                                            build_params_,
-                                           engine,
-                                           valid_data_);
+                                           engine);
         AssertInfo(!prepared.embedding_list,
                    "interim chunked input does not support embedding lists");
+        constexpr bool is_sparse = std::is_same_v<T, sparse_u32_f32>;
         if (prepared.all_null) {
-            return std::make_unique<VectorMemArtifact>(
-                std::move(engine), std::move(valid_data_));
+            BuildIdMapOnly(engine,
+                           prepared,
+                           input.logical_rows,
+                           build_params_,
+                           is_sparse);
+            return std::make_unique<VectorMemArtifact>(std::move(engine));
         }
 
         AssertInfo(input.physical_rows > 0,
@@ -503,6 +593,13 @@ VectorMemBuilder<T>::Build(const InterimVectorBuildInput<T>& input) && {
             if constexpr (std::is_same_v<T, sparse_u32_f32>) {
                 dataset->SetIsSparse(true);
             }
+            if (prepared.nullable) {
+                // The whole public row domain is published with the first
+                // chunk; the remaining chunks carry an empty domain so the
+                // sealed map is not replaced while it is being filled.
+                dataset->SetIdMapData(
+                    prepared.IdMapDataFor(input.logical_rows, !built));
+            }
             const auto status =
                 built ? engine.native_index.Add(
                             dataset, config, engine.UseBuildPool())
@@ -521,8 +618,13 @@ VectorMemBuilder<T>::Build(const InterimVectorBuildInput<T>& input) && {
         AssertInfo(built,
                    "non-empty interim vector input contains no build chunk");
         engine.SetDim(engine.native_index.Dim());
-        return std::make_unique<VectorMemArtifact>(std::move(engine),
-                                                   std::move(valid_data_));
+        if (prepared.nullable) {
+            AssertInfo(static_cast<int64_t>(
+                           engine.native_index.GetIdMap().InCount()) ==
+                           prepared.valid_parents,
+                       "interim vector validity count changed during build");
+        }
+        return std::make_unique<VectorMemArtifact>(std::move(engine));
     } catch (...) {
         failed_ = true;
         throw;

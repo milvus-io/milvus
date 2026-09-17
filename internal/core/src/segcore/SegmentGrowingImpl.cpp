@@ -2857,27 +2857,6 @@ SegmentGrowingImpl::bulk_subscript(
     return result;
 }
 
-// The refactor's growing vector readers index only the non-null rows and
-// validate physical ids, so a retrieval by logical row offsets has to be
-// converted first. Master #50524 pushed this into knowhere's IdMap instead
-// and hands the reader logical ids.
-static const int64_t*
-ToReaderPhysicalOffsets(const index::IVectorReader& reader,
-                        const int64_t* seg_offsets,
-                        int64_t count,
-                        std::vector<int64_t>& storage) {
-    if (!reader.HasValidData()) {
-        return seg_offsets;
-    }
-    const auto& mapping = reader.OffsetMapping();
-    if (!mapping.IsEnabled()) {
-        return seg_offsets;
-    }
-    storage.assign(seg_offsets, seg_offsets + count);
-    mapping.TransformLogicalOffsets(storage);
-    return storage.data();
-}
-
 std::unique_ptr<DataArray>
 SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                                    FieldId field_id,
@@ -3180,13 +3159,12 @@ SegmentGrowingImpl::bulk_subscript_sparse_float_vector_impl(
     AssertInfo(reader != nullptr && reader->HasRawData(),
                "growing sparse vector reader for field {} has no raw values",
                field_id.get());
-    std::vector<int64_t> physical_offsets;
-    const auto* reader_offsets =
-        ToReaderPhysicalOffsets(*reader, seg_offsets, count, physical_offsets);
+    // Nullable row mapping lives inside knowhere's IdMap (#50524), so the
+    // reader takes logical row ids directly.
     auto ids = std::make_shared<knowhere::DataSet>();
     ids->SetRows(count);
     ids->SetDim(1);
-    ids->SetIds(reader_offsets);
+    ids->SetIds(seg_offsets);
     ids->SetIsOwner(false);
     auto retrieved = reader->GetSparseVector(ids);
     SparseRowsToProto(
@@ -3268,13 +3246,12 @@ SegmentGrowingImpl::bulk_subscript_impl(milvus::OpContext* op_ctx,
     AssertInfo(reader != nullptr && reader->HasRawData(),
                "growing vector reader for field {} has no raw values",
                field_id.get());
-    std::vector<int64_t> physical_offsets;
-    const auto* reader_offsets =
-        ToReaderPhysicalOffsets(*reader, seg_offsets, count, physical_offsets);
+    // Nullable row mapping lives inside knowhere's IdMap (#50524), so the
+    // reader takes logical row ids directly.
     auto ids = std::make_shared<knowhere::DataSet>();
     ids->SetRows(count);
     ids->SetDim(1);
-    ids->SetIds(reader_offsets);
+    ids->SetIds(seg_offsets);
     ids->SetIsOwner(false);
     auto retrieved = reader->GetVector(ids);
     AssertInfo(retrieved.size() ==

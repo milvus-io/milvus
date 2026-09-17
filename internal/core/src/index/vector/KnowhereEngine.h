@@ -33,8 +33,9 @@
 
 // Shared knowhere handle and metadata, held by composition in readers and build
 // artifacts rather than inherited through a concrete index implementation.
-// Nullable offset mappings live separately in VectorValidData so append/build
-// paths can maintain them independently of a built engine.
+// The nullable row mapping lives inside the native index's knowhere IdMap
+// (#50524): builders and loaders publish the public-row validity bitmap into
+// it, and knowhere derives both mapping directions.
 
 namespace milvus::index {
 
@@ -101,8 +102,8 @@ class KnowhereEngine {
     // transfer built state without copying index data or its O(rows) offset
     // array.
     // A reader sharing a mutable growing handle must separately freeze its
-    // physical prefix and nullable mapping; the handle is not a physically
-    // immutable ANN snapshot.
+    // logical row prefix and physical count; the handle -- and the append-only
+    // IdMap inside it -- is not a physically immutable ANN snapshot.
     KnowhereEngine(const KnowhereEngine&) = default;
     KnowhereEngine&
     operator=(const KnowhereEngine&) = delete;

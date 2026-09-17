@@ -28,7 +28,8 @@
 #include "common/EasyAssert.h"
 #include "index/Families.h"
 #include "index/vector/VectorIndexReader.h"
-#include "index/vector/VectorValidData.h"
+#include "index/vector/VectorIndexValidDataUtils.h"
+#include "knowhere/comp/index_param.h"
 #include "knowhere/dataset.h"
 #include "knowhere/expected.h"
 #include "knowhere/segcore_error_code.h"
@@ -126,7 +127,8 @@ KnowhereGrowingVectorIndex<T>::KnowhereGrowingVectorIndex(
     knowhere::Json search_defaults,
     std::shared_ptr<
         const GrowingVectorSource<GrowingVectorStorageType<T>>> source,
-    bool retain_source_as_data_view)
+    bool retain_source_as_data_view,
+    std::function<int64_t()> build_thread_num)
     : value_type_(value_type),
       index_type_(std::move(index_type)),
       metric_type_(std::move(metric_type)),
@@ -136,6 +138,7 @@ KnowhereGrowingVectorIndex<T>::KnowhereGrowingVectorIndex(
       build_params_(std::move(build_params)),
       search_defaults_(std::move(search_defaults)),
       retain_source_as_data_view_(retain_source_as_data_view),
+      build_thread_num_(std::move(build_thread_num)),
       source_(std::move(source)) {
     constexpr auto physical_type = PhysicalVectorDataType<T>();
     AssertInfo(value_type_ == physical_type,
@@ -188,14 +191,81 @@ KnowhereGrowingVectorIndex<T>::CreateEngine() const {
 }
 
 template <typename T>
+knowhere::Json
+KnowhereGrowingVectorIndex<T>::BuildConfig() const {
+    if (!build_thread_num_) {
+        return build_params_;
+    }
+    auto config = build_params_;
+    config[knowhere::meta::NUM_BUILD_THREAD] =
+        std::to_string(build_thread_num_());
+    return config;
+}
+
+template <typename T>
+std::vector<uint8_t>
+KnowhereGrowingVectorIndex<T>::MaterializeValidity(
+    int64_t logical_begin, int64_t logical_count) const {
+    AssertInfo(logical_begin >= 0 && logical_count >= 0,
+               "invalid growing vector validity range [{}, +{})",
+               logical_begin,
+               logical_count);
+    const auto count = static_cast<size_t>(logical_count);
+    std::vector<uint8_t> bitmap(GetValidDataBitmapSize(count), 0);
+    if (logical_count == 0) {
+        return bitmap;
+    }
+
+    // The physical -> logical spine is strictly increasing, so one forward
+    // walk over the physical window covering this logical range sets exactly
+    // the valid public rows.
+    auto physical = validity_.ValidCountBelow(logical_begin);
+    const auto physical_end =
+        validity_.ValidCountBelow(logical_begin + logical_count);
+    while (physical < physical_end) {
+        const auto view = validity_.GetPhysicalToLogicalIds(
+            physical, physical_end - physical);
+        AssertInfo(!view.empty(),
+                   "growing vector validity spine has no entry at physical "
+                   "offset {}",
+                   physical);
+        for (int64_t i = 0; i < view.count; ++i) {
+            const auto row = static_cast<int64_t>(view.data[i]) - logical_begin;
+            AssertInfo(row >= 0 && row < logical_count,
+                       "growing vector validity spine returned public row {} "
+                       "outside [{}, +{})",
+                       view.data[i],
+                       logical_begin,
+                       logical_count);
+            bitmap[static_cast<size_t>(row) >> 3] |=
+                static_cast<uint8_t>(1U << (static_cast<size_t>(row) & 7U));
+        }
+        physical += view.count;
+    }
+    return bitmap;
+}
+
+template <typename T>
 void
-KnowhereGrowingVectorIndex<T>::BuildFromSource(int64_t physical_count) {
+KnowhereGrowingVectorIndex<T>::BuildFromSource(int64_t physical_count,
+                                               int64_t logical_count) {
     AssertInfo(physical_count == build_threshold_,
                "growing vector cold build count {} disagrees with threshold {}",
                physical_count,
                build_threshold_);
     auto next = engine_.has_value() ? std::move(*engine_) : CreateEngine();
     engine_.reset();
+
+    // A nullable growing index hands its public-row validity to knowhere's
+    // append-only IdMap (#50524); the cold build publishes the logical prefix
+    // that covers the first `physical_count` stored vectors.
+    const bool nullable = nullable_.value_or(false);
+    std::vector<uint8_t> validity_bitmap;
+    if (nullable) {
+        validity_bitmap = MaterializeValidity(0, logical_count);
+        next.native_index.SetIdMapType(knowhere::IdMap::Type::GROWING);
+    }
+    const auto build_config = BuildConfig();
 
     WithSourceRows<T>(
         source_,
@@ -211,8 +281,13 @@ KnowhereGrowingVectorIndex<T>::BuildFromSource(int64_t physical_count) {
             if constexpr (kSparseVector<T>) {
                 dataset->SetIsSparse(true);
             }
+            if (nullable) {
+                dataset->SetIdMapData(knowhere::IdMapData::FromValidBitmap(
+                    validity_bitmap.data(),
+                    static_cast<size_t>(logical_count)));
+            }
             const auto status = next.native_index.Build(
-                dataset, build_params_, next.UseBuildPool());
+                dataset, build_config, next.UseBuildPool());
             if (status != knowhere::Status::success) {
                 ThrowInfo(knowhere::ToSegcoreErrorCode(status),
                           "failed to build growing vector index: status {} ({})",
@@ -229,17 +304,34 @@ void
 KnowhereGrowingVectorIndex<T>::AddBatch(
     const GrowingVectorStorageType<T>* values,
     int64_t physical_count,
-    int64_t dim) {
+    int64_t dim,
+    const uint8_t* validity_bitmap,
+    int64_t logical_count) {
     AssertInfo(built_ && engine_.has_value(),
                "cannot append an unbuilt growing vector engine");
-    AssertInfo(physical_count > 0 && values != nullptr,
+    AssertInfo(physical_count >= 0,
+               "growing vector append physical count {} is negative",
+               physical_count);
+    AssertInfo(physical_count == 0 || values != nullptr,
                "growing vector append has no physical values");
-    auto dataset = knowhere::GenDataSet(physical_count, dim, values);
+    const bool nullable = validity_bitmap != nullptr;
+    // A nullable batch must reach knowhere even when every row is null: the
+    // IdMap's public row domain has to advance with the segment, and an armed
+    // IdMap rejects any batch that carries no id-map input.
+    AssertInfo(nullable || physical_count > 0,
+               "non-nullable growing vector append has no physical values");
+    auto dataset = knowhere::GenDataSet(
+        physical_count, dim, physical_count == 0 ? nullptr : values);
     if constexpr (kSparseVector<T>) {
         dataset->SetIsSparse(true);
     }
+    if (nullable) {
+        engine_->native_index.SetIdMapType(knowhere::IdMap::Type::GROWING);
+        dataset->SetIdMapData(knowhere::IdMapData::FromValidBitmap(
+            validity_bitmap, static_cast<size_t>(logical_count)));
+    }
     const auto status = engine_->native_index.Add(
-        dataset, build_params_, engine_->UseBuildPool());
+        dataset, BuildConfig(), engine_->UseBuildPool());
     if (status != knowhere::Status::success) {
         ThrowInfo(knowhere::ToSegcoreErrorCode(status),
                   "failed to append growing vector index: status {} ({})",
@@ -254,8 +346,19 @@ KnowhereGrowingVectorIndex<T>::AddBatch(
 template <typename T>
 void
 KnowhereGrowingVectorIndex<T>::AddFromSource(int64_t physical_begin,
-                                             int64_t physical_count) {
+                                             int64_t physical_count,
+                                             int64_t logical_begin,
+                                             int64_t logical_count) {
+    const bool nullable = nullable_.value_or(false);
+    if (physical_count == 0 && (!nullable || logical_count == 0)) {
+        return;
+    }
+    std::vector<uint8_t> validity_bitmap;
+    if (nullable) {
+        validity_bitmap = MaterializeValidity(logical_begin, logical_count);
+    }
     if (physical_count == 0) {
+        AddBatch(nullptr, 0, dim_, validity_bitmap.data(), logical_count);
         return;
     }
     WithSourceRows<T>(
@@ -266,7 +369,11 @@ KnowhereGrowingVectorIndex<T>::AddFromSource(int64_t physical_begin,
         [&](std::span<const GrowingVectorStorageType<T>> values) {
             const auto dataset_dim =
                 kSparseVector<T> ? SparseDimension<T>(values) : dim_;
-            AddBatch(values.data(), physical_count, dataset_dim);
+            AddBatch(values.data(),
+                     physical_count,
+                     dataset_dim,
+                     nullable ? validity_bitmap.data() : nullptr,
+                     logical_count);
         });
 }
 
@@ -275,8 +382,25 @@ bool
 KnowhereGrowingVectorIndex<T>::TryBuildAccepted() {
     AssertInfo(!built_ && accepted_physical_count_ >= build_threshold_,
                "invalid growing vector cold-build state");
+    // Public row prefix that covers the first build_threshold_ stored vectors.
+    // A nullable field compacts null rows away, so the two counts differ.
+    int64_t build_logical_count = build_threshold_;
+    if (nullable_.value_or(false)) {
+        const auto last_logical =
+            validity_.GetLogicalOffset(build_threshold_ - 1);
+        AssertInfo(last_logical >= 0,
+                   "growing vector cold build cannot resolve the public row "
+                   "of physical offset {}",
+                   build_threshold_ - 1);
+        build_logical_count = last_logical + 1;
+    }
+    AssertInfo(build_logical_count <= accepted_row_end_,
+               "growing vector cold build public prefix {} exceeds the "
+               "accepted row end {}",
+               build_logical_count,
+               accepted_row_end_);
     try {
-        BuildFromSource(build_threshold_);
+        BuildFromSource(build_threshold_, build_logical_count);
     } catch (const std::exception& error) {
         LOG_WARN(
             "growing vector cold build failed; retaining complete raw source "
@@ -306,7 +430,9 @@ KnowhereGrowingVectorIndex<T>::TryBuildAccepted() {
     built_ = true;
     try {
         AddFromSource(build_threshold_,
-                      accepted_physical_count_ - build_threshold_);
+                      accepted_physical_count_ - build_threshold_,
+                      build_logical_count,
+                      accepted_row_end_ - build_logical_count);
     } catch (...) {
         poison_ = std::current_exception();
         throw;
@@ -322,12 +448,12 @@ void
 KnowhereGrowingVectorIndex<T>::PublishAccepted() {
     AssertInfo(built_ && engine_.has_value(),
                "cannot publish an unbuilt growing vector engine");
-    auto valid = VectorValidData::FromGrowingSnapshot(validity_);
-    auto reader = std::make_unique<VectorIndexReader>(
-        *engine_,
-        std::move(valid),
-        accepted_physical_count_,
-        search_defaults_);
+    // The reader shares the live engine -- including its append-only IdMap --
+    // but freezes this generation's public row prefix and vector count.
+    auto reader = std::make_unique<VectorIndexReader>(*engine_,
+                                                      accepted_row_end_,
+                                                      accepted_physical_count_,
+                                                      search_defaults_);
     PublishSnapshot(std::move(reader), accepted_row_end_);
     publication_pending_ = false;
 }
@@ -461,10 +587,21 @@ KnowhereGrowingVectorIndex<T>::Append(int64_t row_begin,
         }
     } else {
         try {
-            if (batch_physical > 0) {
+            // A nullable batch always reaches knowhere so the IdMap's public
+            // row domain advances with the segment, even for an all-null tail.
+            if (batch_physical > 0 || nullable) {
                 const auto add_dim =
                     kSparseVector<T> ? batch.dim : dim_;
-                AddBatch(batch.values, batch_physical, add_dim);
+                std::vector<uint8_t> validity_bitmap;
+                if (nullable) {
+                    validity_bitmap =
+                        PackValidityBitmap(batch.valid, logical_rows);
+                }
+                AddBatch(batch.values,
+                         batch_physical,
+                         add_dim,
+                         nullable ? validity_bitmap.data() : nullptr,
+                         logical_rows);
             }
         } catch (...) {
             poison_ = std::current_exception();

@@ -90,9 +90,8 @@ ValidateEntries(const knowhere::BinarySet& entries) {
 
 VectorMemArtifact::VectorMemArtifact(
     KnowhereEngine engine,
-    VectorValidData valid,
     std::vector<size_t> empty_emb_list_offsets)
-    : engine_(std::move(engine)), valid_(std::move(valid)) {
+    : engine_(std::move(engine)) {
     const auto& existing = engine_.EmptyEmbListOffsets();
     if (!empty_emb_list_offsets.empty()) {
         AssertInfo(existing.empty() || existing == empty_emb_list_offsets,
@@ -119,8 +118,7 @@ VectorMemArtifact::VectorMemArtifact(
 
 IIndexReaderBasePtr
 VectorMemArtifact::IntoReader() && {
-    return std::make_unique<VectorIndexReader>(std::move(engine_),
-                                               std::move(valid_));
+    return std::make_unique<VectorIndexReader>(std::move(engine_));
 }
 
 void
@@ -133,7 +131,7 @@ VectorMemArtifact::Serialize(storage::FileSink& sink) const {
     knowhere::BinarySet entries;
     if (!engine_.EmptyEmbListOffsets().empty()) {
         AppendEmptyEmbListOffsets(engine_, entries);
-    } else if (!IsAllNullNullable(valid_.Mapping())) {
+    } else if (!IsAllNullNullable(engine_.native_index.GetIdMap())) {
         const auto status = engine_.native_index.Serialize(entries);
         if (status != knowhere::Status::success) {
             ThrowInfo(knowhere::ToSegcoreErrorCode(status),
@@ -142,7 +140,7 @@ VectorMemArtifact::Serialize(storage::FileSink& sink) const {
                       knowhere::Status2String(status));
         }
     }
-    AppendValidDataToBinarySet(valid_.Mapping(), entries);
+    AppendValidDataToBinarySet(engine_.native_index.GetIdMap(), entries);
     ValidateEntries(entries);
 
     // FileSink owns physical slicing and publication. All entries are prepared

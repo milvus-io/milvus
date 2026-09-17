@@ -18,6 +18,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <functional>
+#include <vector>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -52,7 +54,12 @@ class KnowhereGrowingVectorIndex final
         knowhere::Json build_params,
         knowhere::Json search_defaults,
         std::shared_ptr<const GrowingVectorSource<StorageType>> source,
-        bool retain_source_as_data_view);
+        bool retain_source_as_data_view,
+        // Re-resolved before every knowhere Build/Add so a refreshed build
+        // thread-num config takes effect on the next build of an existing
+        // growing segment (#53030). Empty keeps whatever `build_params`
+        // already carries.
+        std::function<int64_t()> build_thread_num = {});
 
     ~KnowhereGrowingVectorIndex() override = default;
 
@@ -75,17 +82,36 @@ class KnowhereGrowingVectorIndex final
     KnowhereEngine
     CreateEngine() const;
 
+    knowhere::Json
+    BuildConfig() const;
+
     bool
     TryBuildAccepted();
 
     void
-    BuildFromSource(int64_t physical_count);
+    BuildFromSource(int64_t physical_count, int64_t logical_count);
 
     void
-    AddFromSource(int64_t physical_begin, int64_t physical_count);
+    AddFromSource(int64_t physical_begin,
+                  int64_t physical_count,
+                  int64_t logical_begin,
+                  int64_t logical_count);
 
+    // `validity_bitmap` is the LSB-first public-row validity for
+    // [logical_begin, logical_begin + logical_count). knowhere's IdMapData
+    // only views it, so it must outlive this call. Empty means non-nullable.
     void
-    AddBatch(const StorageType* values, int64_t physical_count, int64_t dim);
+    AddBatch(const StorageType* values,
+             int64_t physical_count,
+             int64_t dim,
+             const uint8_t* validity_bitmap,
+             int64_t logical_count);
+
+    // Rebuild the public-row validity bitmap for one logical range out of the
+    // writer's append-only bookkeeping. Only the cold build needs this; an
+    // incremental append already holds its batch's validity array.
+    std::vector<uint8_t>
+    MaterializeValidity(int64_t logical_begin, int64_t logical_count) const;
 
     void
     PublishAccepted();
@@ -102,6 +128,7 @@ class KnowhereGrowingVectorIndex final
     const knowhere::Json build_params_;
     const knowhere::Json search_defaults_;
     const bool retain_source_as_data_view_;
+    const std::function<int64_t()> build_thread_num_;
 
     mutable std::mutex writer_mutex_;
     std::shared_ptr<const GrowingVectorSource<StorageType>> source_;

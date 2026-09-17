@@ -17,135 +17,15 @@
 #include "common/GrowingOffsetMapping.h"
 
 #include <algorithm>
-#include <atomic>
 #include <limits>
-#include <memory>
 #include <mutex>
-#include <utility>
 
 #include "common/EasyAssert.h"
 
 namespace milvus {
 
-// Shared append-only storage. A snapshot keeps this state alive and fixes only
-// its Counts boundary; later appends allocate new chunks or fill indices above
-// that boundary, never moving or rewriting an entry the snapshot can reach.
-class GrowingOffsetMapping::State final {
- public:
-    class ChunkedArray {
-     public:
-        static constexpr int64_t kFirstChunkLog2 = 10;
-        static constexpr int64_t kFirstChunk = int64_t{1} << kFirstChunkLog2;
-        static constexpr int kMaxChunks = 24;
-        static constexpr int32_t kUnset =
-            std::numeric_limits<int32_t>::min();
-
-        ChunkedArray() {
-            for (auto& chunk : chunks_) {
-                chunk.store(nullptr, std::memory_order_relaxed);
-            }
-        }
-
-        ~ChunkedArray() {
-            for (auto& chunk : chunks_) {
-                delete[] chunk.load(std::memory_order_relaxed);
-            }
-        }
-
-        ChunkedArray(const ChunkedArray&) = delete;
-        ChunkedArray&
-        operator=(const ChunkedArray&) = delete;
-
-        void
-        Reserve(int64_t capacity);
-
-        void
-        Set(int64_t index, int32_t value) {
-            const int chunk = ChunkOf(index);
-            chunks_[chunk].load(
-                std::memory_order_relaxed)[PosOf(index, chunk)] = value;
-        }
-
-        int32_t
-        Get(int64_t index) const {
-            const int chunk = ChunkOf(index);
-            return chunks_[chunk].load(
-                std::memory_order_relaxed)[PosOf(index, chunk)];
-        }
-
-        // Contiguous read-only window over the entries starting at `index`.
-        // The window never crosses a chunk boundary, so the returned view can
-        // be shorter than `count`; callers loop until they have consumed the
-        // range they asked for.
-        OffsetMappingIdView
-        View(int64_t index, int64_t count) const {
-            if (count <= 0) {
-                return {};
-            }
-            AssertInfo(
-                index >= 0, "offset mapping index {} is negative", index);
-            const int chunk = ChunkOf(index);
-            auto* data = chunks_[chunk].load(std::memory_order_relaxed);
-            AssertInfo(data != nullptr,
-                       "growing offset mapping chunk {} is not allocated",
-                       chunk);
-            const auto pos = PosOf(index, chunk);
-            const auto chunk_size = kFirstChunk << chunk;
-            return {data + pos, std::min<int64_t>(count, chunk_size - pos)};
-        }
-
-     private:
-        static int
-        ChunkOf(int64_t index) {
-            const auto scaled =
-                static_cast<uint64_t>(index) / kFirstChunk + 1;
-            return 63 - __builtin_clzll(scaled);
-        }
-
-        static int64_t
-        PosOf(int64_t index, int chunk) {
-            return index - kFirstChunk * ((int64_t{1} << chunk) - 1);
-        }
-
-        std::atomic<int32_t*> chunks_[kMaxChunks];
-    };
-
-    std::mutex append_mutex_;
-    ChunkedArray p2l_;
-    std::atomic<uint64_t> counts_{0};
-};
-
-GrowingOffsetMapping::GrowingOffsetMapping() : state_(std::make_shared<State>()) {
-}
-
-GrowingOffsetMapping::GrowingOffsetMapping(std::shared_ptr<State> state,
-                                           Counts counts)
-    : state_(std::move(state)), frozen_counts_(counts) {
-}
-
-GrowingOffsetMapping::~GrowingOffsetMapping() = default;
-
-GrowingOffsetMapping::Counts
-GrowingOffsetMapping::LoadCounts() const {
-    if (frozen_counts_.has_value()) {
-        return *frozen_counts_;
-    }
-    const uint64_t packed = state_->counts_.load(std::memory_order_acquire);
-    return Counts{static_cast<int64_t>(packed >> 32),
-                  static_cast<int64_t>(packed & 0xffffffffULL)};
-}
-
-std::shared_ptr<const OffsetMapping>
-GrowingOffsetMapping::Snapshot() const {
-    // Load the published pair exactly once. Allocating the wrapper happens
-    // afterwards and cannot alter the writer state if it fails.
-    const auto counts = LoadCounts();
-    return std::shared_ptr<const OffsetMapping>(
-        new GrowingOffsetMapping(state_, counts));
-}
-
 void
-GrowingOffsetMapping::State::ChunkedArray::Reserve(int64_t capacity) {
+GrowingOffsetMapping::ChunkedArray::Reserve(int64_t capacity) {
     if (capacity <= 0) {
         return;
     }
@@ -177,9 +57,7 @@ GrowingOffsetMapping::Append(const bool* valid_data,
 
     // Writer-vs-writer only. Readers are lock-free and see nothing until the
     // release-store to counts_ at the bottom of this function.
-    AssertInfo(!frozen_counts_.has_value(),
-               "cannot append through a frozen growing offset mapping");
-    std::lock_guard<std::mutex> writer(state_->append_mutex_);
+    std::lock_guard<std::mutex> writer(append_mutex_);
     const auto counts = LoadCounts();
     if (start_logical < 0) {
         start_logical = counts.total;
@@ -228,12 +106,11 @@ GrowingOffsetMapping::Append(const bool* valid_data,
     // per field, per growing segment.
     const int64_t batch_valid =
         std::count(valid_data, valid_data + count, true);
-    state_->p2l_.Reserve(counts.valid + batch_valid);
+    p2l_.Reserve(counts.valid + batch_valid);
 
     for (int64_t i = 0; i < count; ++i) {
         if (valid_data[i]) {
-            state_->p2l_.Set(physical_idx,
-                            static_cast<int32_t>(start_logical + i));
+            p2l_.Set(physical_idx, static_cast<int32_t>(start_logical + i));
             ++physical_idx;
         }
     }
@@ -241,8 +118,8 @@ GrowingOffsetMapping::Append(const bool* valid_data,
     // Single publication point: this release-store is what makes the chunk
     // pointers and every element written above visible to a reader that
     // acquire-loads counts_.
-    state_->counts_.store(PackCounts(physical_idx, new_total),
-                          std::memory_order_release);
+    counts_.store(PackCounts(physical_idx, new_total),
+                  std::memory_order_release);
 }
 
 int64_t
@@ -270,7 +147,7 @@ GrowingOffsetMapping::GetPhysicalOffsetInternal(int64_t logical_offset,
     // having no entry at all.
     const int64_t pos = LowerBound(logical_offset, counts.valid);
     if (pos < counts.valid &&
-        static_cast<int64_t>(state_->p2l_.Get(pos)) == logical_offset) {
+        static_cast<int64_t>(p2l_.Get(pos)) == logical_offset) {
         return pos;
     }
     return -1;
@@ -291,7 +168,7 @@ GrowingOffsetMapping::GetLogicalOffsetInternal(int64_t physical_offset,
     if (physical_offset < 0 || physical_offset >= valid_count) {
         return -1;
     }
-    return state_->p2l_.Get(physical_offset);
+    return p2l_.Get(physical_offset);
 }
 
 int64_t
@@ -340,7 +217,7 @@ GrowingOffsetMapping::LowerBound(int64_t logical_target,
     int64_t hi = valid_count;
     while (lo < hi) {
         const int64_t mid = lo + (hi - lo) / 2;
-        if (static_cast<int64_t>(state_->p2l_.Get(mid)) < logical_target) {
+        if (static_cast<int64_t>(p2l_.Get(mid)) < logical_target) {
             lo = mid + 1;
         } else {
             hi = mid;
@@ -354,7 +231,7 @@ GrowingOffsetMapping::GallopLowerBound(int64_t logical_target,
                                        int64_t from,
                                        int64_t bound) const {
     if (from >= bound ||
-        static_cast<int64_t>(state_->p2l_.Get(from)) >= logical_target) {
+        static_cast<int64_t>(p2l_.Get(from)) >= logical_target) {
         // Also the duplicate-input case: the previous answer still holds.
         return from;
     }
@@ -363,7 +240,7 @@ GrowingOffsetMapping::GallopLowerBound(int64_t logical_target,
     int64_t lo = from;
     int64_t step = 1;
     while (lo + step < bound &&
-           static_cast<int64_t>(state_->p2l_.Get(lo + step)) < logical_target) {
+           static_cast<int64_t>(p2l_.Get(lo + step)) < logical_target) {
         lo += step;
         step <<= 1;
     }
@@ -371,89 +248,13 @@ GrowingOffsetMapping::GallopLowerBound(int64_t logical_target,
     ++lo;
     while (lo < hi) {
         const int64_t mid = lo + (hi - lo) / 2;
-        if (static_cast<int64_t>(state_->p2l_.Get(mid)) < logical_target) {
+        if (static_cast<int64_t>(p2l_.Get(mid)) < logical_target) {
             lo = mid + 1;
         } else {
             hi = mid;
         }
     }
     return lo;
-}
-
-OffsetMapping::BitsetTransformStatus
-GrowingOffsetMapping::TransformBitset(const BitsetView& bitset,
-                                      TargetBitmap& result) const {
-    const auto counts = LoadCounts();
-    result.clear();
-    if (counts.total == 0) {
-        return BitsetTransformStatus::NoFilter;
-    }
-
-    // An empty BitsetView means "no filter", NOT "zero rows", and both all()
-    // and none() are vacuously true on it -- so it has to be classified before
-    // either of them is consulted. SealedOffsetMapping gets this from
-    // ShouldSkipBitsetTransform; #51953 open-coded the growing path and dropped
-    // the check, which turned an unfiltered growing search into AllFiltered,
-    // i.e. an empty result. Both call sites also guard on !bitset.empty(), but
-    // the classification belongs here so a third caller cannot reintroduce it.
-    if (bitset.empty()) {
-        return BitsetTransformStatus::NoFilter;
-    }
-    if (bitset.all()) {
-        return BitsetTransformStatus::AllFiltered;
-    }
-
-    // #51953: materialize the no-filter case instead of returning NoFilter.
-    // The bitmap is sized to valid_count from the SAME counts snapshot that
-    // total_count came from, so callers get one consistent view instead of
-    // pairing a NoFilter status with a separately (racily) read GetValidCount().
-    if (static_cast<int64_t>(bitset.size()) >= counts.total && bitset.none()) {
-        result.resize(counts.valid, false);
-        return BitsetTransformStatus::Transformed;
-    }
-
-    result.resize(counts.valid, true);
-    const auto bitset_size = static_cast<int64_t>(bitset.size());
-    for (int64_t physical_idx = 0; physical_idx < counts.valid;
-         ++physical_idx) {
-        const int64_t logical_offset = state_->p2l_.Get(physical_idx);
-        // p2l is strictly increasing, so once a row sits past the end of the
-        // bitset every later row does too. Those stay set (= filtered out),
-        // which is exactly how rows appended after the bitset was built are
-        // excluded.
-        if (logical_offset >= bitset_size) {
-            break;
-        }
-        result[physical_idx] = bitset.test(logical_offset);
-    }
-    return BitsetTransformStatus::Transformed;
-}
-
-void
-GrowingOffsetMapping::TransformOffsets(std::vector<int64_t>& offsets) const {
-    const auto counts = LoadCounts();
-    if (counts.total == 0) {
-        return;
-    }
-    for (auto& offset : offsets) {
-        if (offset >= 0) {
-            offset = GetLogicalOffsetInternal(offset, counts.valid);
-        }
-    }
-}
-
-void
-GrowingOffsetMapping::TransformLogicalOffsets(
-    std::vector<int64_t>& offsets) const {
-    const auto counts = LoadCounts();
-    if (counts.total == 0) {
-        return;
-    }
-    for (auto& offset : offsets) {
-        if (offset >= 0) {
-            offset = GetPhysicalOffsetInternal(offset, counts);
-        }
-    }
 }
 
 OffsetMappingIdView
@@ -471,7 +272,7 @@ GrowingOffsetMapping::GetPhysicalToLogicalIds(int64_t physical_offset,
                physical_offset,
                counts.valid);
     const auto available = counts.valid - physical_offset;
-    return state_->p2l_.View(physical_offset, std::min(count, available));
+    return p2l_.View(physical_offset, std::min(count, available));
 }
 
 void
@@ -527,8 +328,7 @@ GrowingOffsetMapping::FilterValidLogicalOffsets(
         hint = pos;
         prev = offset;
         const bool valid =
-            pos < counts.valid &&
-            static_cast<int64_t>(state_->p2l_.Get(pos)) == offset;
+            pos < counts.valid && static_cast<int64_t>(p2l_.Get(pos)) == offset;
         valid_data[i] = valid;
         if (valid) {
             physical_offsets.push_back(pos);

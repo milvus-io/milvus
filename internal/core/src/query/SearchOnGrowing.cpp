@@ -464,14 +464,10 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
         }
         if (use_vector_iterator) {
             bool larger_is_closer = PositivelyRelated(info.metric_type_);
-            // Brute force attaches the physical -> logical id window to the
-            // bitset (#50524), so the iterators already carry logical offsets
-            // and need no mapping of their own.
             search_result.AssembleChunkVectorIterators(
                 num_queries,
                 bf_chunk_count,
                 final_qr.chunk_iterators(),
-                /*offset_mapping=*/nullptr,
                 larger_is_closer);
             // Knowhere's brute-force iterators retain raw pointers into the
             // chunk storage and are consumed after SearchOnGrowing returns.

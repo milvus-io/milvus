@@ -279,11 +279,11 @@ PlanEntries(storage::FileSource& source, const RuntimeParams& params) {
     return plan;
 }
 
-VectorValidData
-DecodeValidityBytes(const std::vector<uint8_t>& bytes,
-                    const RuntimeParams& params,
-                    const std::string& local_prefix) {
-    VectorValidData valid;
+// Disk artifacts store the count header and the bitmap in one entry. The
+// decoded bytes stay owned by the caller: knowhere's IdMapData only views the
+// bitmap until AddFromData consumes it.
+ValidDataView
+DecodeValidityBytes(const std::vector<uint8_t>& bytes) {
     if (bytes.size() < sizeof(uint64_t)) {
         ThrowInfo(DataFormatBroken,
                   "nullable vector disk valid_data file is too small");
@@ -296,29 +296,36 @@ DecodeValidityBytes(const std::vector<uint8_t>& bytes,
         ThrowInfo(DataFormatBroken,
                   "nullable vector disk valid_data bitmap is truncated");
     }
-    const auto valid_count =
-        CountValidDataBitmap(count, bytes.data() + sizeof(uint64_t));
-    OffsetMappingBuildOptions options;
-    options.enable_mmap_i2o_map = params.mmap_i2o;
-    options.enable_mmap_o2i_map = params.mmap_o2i;
-    if (NeedOffsetMappingMmap(options, count, valid_count)) {
-        options.mmap_dir_path = GetOffsetMappingMmapDir(local_prefix);
-    }
-    BuildValidDataFromBitmap(
-        valid, count, bytes.data() + sizeof(uint64_t), options);
-    return valid;
+    return {true, count, bytes.data() + sizeof(uint64_t)};
 }
 
-VectorValidData
-DecodeValidity(storage::FileSource& source,
-               const EntryPlan& plan,
-               const RuntimeParams& params,
-               const std::string& local_prefix) {
+// Publish the persisted validity into the engine's knowhere IdMap (#50524).
+// Must run before Deserialize, which is what derives the dense id arrays.
+RestoredIdMap
+RestoreValidity(storage::FileSource& source,
+                const EntryPlan& plan,
+                const RuntimeParams& params,
+                KnowhereEngine& engine,
+                const std::string& local_prefix,
+                std::vector<uint8_t>& owned_bytes) {
     if (!plan.has_validity) {
         return {};
     }
-    return DecodeValidityBytes(
-        source.ReadEntry(VALID_DATA_KEY), params, local_prefix);
+    owned_bytes = source.ReadEntry(VALID_DATA_KEY);
+    const auto valid_data = DecodeValidityBytes(owned_bytes);
+    IdMapMmapFlags mmap_flags;
+    mmap_flags.enable_i2o = params.mmap_i2o;
+    mmap_flags.enable_o2i = params.mmap_o2i;
+    // A fully null column derives no dense id array at all, so mmap staging
+    // would only create an empty directory.
+    if (mmap_flags.Any() &&
+        CountValidDataBitmap(valid_data.count, valid_data.bitmap) == 0) {
+        mmap_flags = {};
+    }
+    return RestoreIdMapFromValidData(engine.native_index.GetIdMap(),
+                                     valid_data,
+                                     mmap_flags,
+                                     local_prefix);
 }
 
 using detail::EmptyEmbeddingListState;
@@ -405,31 +412,50 @@ ValidateDimension(const RuntimeParams& params,
     }
 }
 
+// The nullable row mapping lives in the engine's knowhere IdMap (#50524), so
+// every shape check reads it instead of a Milvus-side offset mapping.
+struct LoadedValidity {
+    bool enabled{false};
+    int64_t total_count{0};
+    int64_t valid_count{0};
+};
+
+LoadedValidity
+InspectValidity(const KnowhereEngine& engine) {
+    const auto& id_map = engine.native_index.GetIdMap();
+    const auto valid_bitmap = id_map.ValidBitmap();
+    if (valid_bitmap.empty()) {
+        return {};
+    }
+    return {true,
+            static_cast<int64_t>(valid_bitmap.size()),
+            static_cast<int64_t>(id_map.InCount())};
+}
+
 void
 ValidateShape(const RuntimeParams& params,
               const EntryPlan& plan,
-              const KnowhereEngine& engine,
-              const VectorValidData& valid) {
+              const KnowhereEngine& engine) {
+    const auto valid = InspectValidity(engine);
     if (params.nullable.has_value()) {
         const bool zero_rows = params.num_rows.value_or(-1) == 0;
-        if ((!*params.nullable && valid.Enabled()) ||
-            (*params.nullable && !valid.Enabled() && !zero_rows)) {
+        if ((!*params.nullable && valid.enabled) ||
+            (*params.nullable && !valid.enabled && !zero_rows)) {
             ThrowInfo(UnexpectedError,
                       "runtime nullable metadata disagrees with disk vector "
                       "validity");
         }
     }
     if (plan.state == ArtifactState::AllNull &&
-        (!valid.Enabled() || valid.ValidCount() != 0)) {
+        (!valid.enabled || valid.valid_count != 0)) {
         ThrowInfo(DataFormatBroken,
                   "validity-only disk vector artifact contains valid rows");
     }
     if (plan.state == ArtifactState::EmptyEmbeddingList) {
         const auto& offsets = engine.EmptyEmbListOffsets();
-        if (valid.Enabled()) {
-            if (valid.ValidCount() < 0 ||
-                static_cast<uint64_t>(valid.ValidCount()) + 1 !=
-                    offsets.size()) {
+        if (valid.enabled) {
+            if (static_cast<uint64_t>(valid.valid_count) + 1 !=
+                offsets.size()) {
                 ThrowInfo(DataFormatBroken,
                           "empty embedding-list offsets disagree with valid "
                           "parent rows");
@@ -443,23 +469,23 @@ ValidateShape(const RuntimeParams& params,
         }
     }
     if (plan.state == ArtifactState::Normal &&
-        params.elem_type == DataType::NONE && valid.Enabled() &&
-        engine.native_index.Count() != valid.ValidCount()) {
+        params.elem_type == DataType::NONE && valid.enabled &&
+        engine.native_index.Count() != valid.valid_count) {
         ThrowInfo(DataFormatBroken,
                   "loaded disk vector count {} disagrees with valid row count "
                   "{}",
                   engine.native_index.Count(),
-                  valid.ValidCount());
+                  valid.valid_count);
     }
     if (params.num_rows.has_value()) {
-        if (valid.Enabled() && valid.TotalCount() != *params.num_rows) {
+        if (valid.enabled && valid.total_count != *params.num_rows) {
             ThrowInfo(UnexpectedError,
                       "runtime row count {} disagrees with nullable vector "
                       "row count {}",
                       *params.num_rows,
-                      valid.TotalCount());
+                      valid.total_count);
         }
-        if (!valid.Enabled() && params.elem_type == DataType::NONE &&
+        if (!valid.enabled && params.elem_type == DataType::NONE &&
             plan.state == ArtifactState::Normal &&
             engine.native_index.Count() != *params.num_rows) {
             ThrowInfo(UnexpectedError,
@@ -518,12 +544,20 @@ OpenIndex(storage::FileSource& source,
         selected_handle = stream_handle;
     }
     const auto prefix = selected_handle->LocalPrefix();
-    auto valid = DecodeValidity(source, plan, params, prefix);
+    // Keep the decoded payload alive until AddFromData has copied it.
+    std::vector<uint8_t> validity_bytes;
+    const auto restored_id_map = RestoreValidity(
+        source, plan, params, engine, prefix, validity_bytes);
 
     if (plan.state == ArtifactState::EmptyEmbeddingList) {
         auto empty = DecodeEmptyEmbeddingList(source);
         engine.SetDim(empty.dim);
         engine.SetEmptyEmbListOffsets(std::move(empty.offsets));
+        if (restored_id_map.has_valid_data) {
+            FinalizeRestoredIdMap(engine.native_index.Node(),
+                                  UnexpectedError,
+                                  "empty embedding-list disk vector load");
+        }
         ValidateDimension(params, engine.Dim(), true);
     } else if (plan.state == ArtifactState::AllNull) {
         if (!params.runtime_dim.has_value()) {
@@ -532,6 +566,11 @@ OpenIndex(storage::FileSource& source,
                       "dim");
         }
         engine.SetDim(*params.runtime_dim);
+        if (restored_id_map.has_valid_data) {
+            FinalizeRestoredIdMap(engine.native_index.Node(),
+                                  UnexpectedError,
+                                  "all-null nullable disk vector load");
+        }
         ValidateDimension(params, engine.Dim(), false);
     } else {
         const bool enable_mmap = opts.enable_mmap &&
@@ -580,9 +619,9 @@ OpenIndex(storage::FileSource& source,
         ValidateDimension(params, engine.Dim(), true);
     }
 
-    ValidateShape(params, plan, engine, valid);
-    return std::make_unique<VectorIndexReader>(
-        params.beamwidth, std::move(engine), std::move(valid));
+    ValidateShape(params, plan, engine);
+    return std::make_unique<VectorIndexReader>(params.beamwidth,
+                                               std::move(engine));
 }
 
 }  // namespace

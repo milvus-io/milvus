@@ -3992,9 +3992,16 @@ ChunkedSegmentSealedImpl::FilterVectorValidOffsetsFromIndex(
     AssertInfo(reader.HasValidData(),
                "nullable vector index does not contain valid data");
 
+    // Knowhere's IdMap owns the nullable mapping (#50524), so the surviving
+    // offsets stay in logical row space and only null rows are dropped.
     result.valid_data = std::make_unique<bool[]>(count);
-    reader.OffsetMapping().FilterValidLogicalOffsets(
-        seg_offsets, count, result.valid_data.get(), result.valid_offsets);
+    result.valid_offsets.reserve(count);
+    for (int64_t i = 0; i < count; ++i) {
+        result.valid_data[i] = reader.IsRowValid(seg_offsets[i]);
+        if (result.valid_data[i]) {
+            result.valid_offsets.push_back(seg_offsets[i]);
+        }
+    }
     result.valid_count = result.valid_offsets.size();
     return result;
 }
@@ -6824,20 +6831,10 @@ ChunkedSegmentSealedImpl::CalcDistByIDs(
     if (reader == nullptr) {
         return false;
     }
-    // Callers pass logical offsets (already translated from physical by
-    // SearchOnIndex). When the index carries an offset_mapping (nullable
-    // vector), the underlying knowhere index operates on physical offsets,
-    // so translate logical -> physical before the call.
-    const auto& offset_mapping = reader->OffsetMapping();
-    std::vector<int64_t> physical_offsets;
-    const int64_t* labels = seg_offsets;
-    if (offset_mapping.IsEnabled()) {
-        physical_offsets.assign(seg_offsets, seg_offsets + count);
-        offset_mapping.TransformLogicalOffsets(physical_offsets);
-        labels = physical_offsets.data();
-    }
+    // Callers pass logical offsets, and knowhere's IdMap compacts them to
+    // storage ids inside CalcDistByIDs (#50524).
     auto res = reader->CalcDistByIDs(
-        query_dataset, BitsetView(), labels, count, is_cosine, op_ctx);
+        query_dataset, BitsetView(), seg_offsets, count, is_cosine, op_ctx);
     if (!res.has_value()) {
         return false;
     }

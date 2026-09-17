@@ -298,14 +298,12 @@ TEST(GrowingVectorPublicationAcceptance,
         EXPECT_EQ(old_pin.Reader().CoordDomain(), index::Domain::Row);
         EXPECT_TRUE(old_reader->HasValidData());
         EXPECT_EQ(old_reader->ValidCount(), 2);
-        EXPECT_EQ(old_reader->OffsetMapping().GetTotalCount(), 4);
+        // Nullable mapping lives in knowhere's IdMap (#50524), so a reader
+        // only exposes logical-row validity.
         EXPECT_TRUE(old_reader->IsRowValid(0));
         EXPECT_FALSE(old_reader->IsRowValid(1));
-        EXPECT_EQ(old_reader->PhysicalOffset(0), 0);
-        EXPECT_EQ(old_reader->PhysicalOffset(1), -1);
-        EXPECT_EQ(old_reader->PhysicalOffset(2), 1);
-        EXPECT_EQ(old_reader->LogicalOffset(0), 0);
-        EXPECT_EQ(old_reader->LogicalOffset(1), 2);
+        EXPECT_TRUE(old_reader->IsRowValid(2));
+        EXPECT_FALSE(old_reader->IsRowValid(3));
         EXPECT_TRUE(indexes.CanReleaseVectorColumn(field_id, 4));
 
         source.reset();
@@ -329,32 +327,29 @@ TEST(GrowingVectorPublicationAcceptance,
         EXPECT_EQ(new_pin.Reader().Count(), 4);
         EXPECT_TRUE(new_reader->HasValidData());
         EXPECT_EQ(new_reader->ValidCount(), 4);
-        EXPECT_EQ(new_reader->OffsetMapping().GetTotalCount(), 7);
         EXPECT_FALSE(new_reader->IsRowValid(4));
         EXPECT_TRUE(new_reader->IsRowValid(5));
         EXPECT_TRUE(new_reader->IsRowValid(6));
-        EXPECT_EQ(new_reader->PhysicalOffset(4), -1);
-        EXPECT_EQ(new_reader->PhysicalOffset(5), 2);
-        EXPECT_EQ(new_reader->PhysicalOffset(6), 3);
-        EXPECT_EQ(new_reader->LogicalOffset(2), 5);
-        EXPECT_EQ(new_reader->LogicalOffset(3), 6);
         EXPECT_TRUE(indexes.CanReleaseVectorColumn(field_id, 7));
         EXPECT_FALSE(indexes.CanReleaseVectorColumn(field_id, 8));
 
         EXPECT_EQ(old_pin.CoveredRowEnd(), 4);
         EXPECT_EQ(old_pin.Reader().Count(), 2);
         EXPECT_EQ(old_reader->ValidCount(), 2);
-        EXPECT_EQ(old_reader->OffsetMapping().GetTotalCount(), 4);
-        EXPECT_EQ(old_reader->PhysicalOffset(1), -1);
-        EXPECT_EQ(old_reader->LogicalOffset(1), 2);
+        // The old generation shares the live append-only IdMap, so its frozen
+        // logical prefix -- not the writer's -- is what it may answer for.
+        EXPECT_FALSE(old_reader->IsRowValid(4));
+        EXPECT_FALSE(old_reader->IsRowValid(5));
+        EXPECT_FALSE(old_reader->IsRowValid(6));
 
         ASSERT_TRUE(old_reader->HasRawData());
         ASSERT_TRUE(new_reader->HasRawData());
-        const int64_t later_physical_id = 2;
+        // Logical row 5 exists only in the newer generation.
+        const int64_t later_logical_id = 5;
         EXPECT_ANY_THROW(static_cast<void>(
-            old_reader->GetVector(GenIdsDataset(1, &later_physical_id))));
+            old_reader->GetVector(GenIdsDataset(1, &later_logical_id))));
         const auto new_value =
-            new_reader->GetVector(GenIdsDataset(1, &later_physical_id));
+            new_reader->GetVector(GenIdsDataset(1, &later_logical_id));
         ASSERT_EQ(new_value.size(), 2 * sizeof(float));
         std::array<float, 2> decoded{};
         std::memcpy(decoded.data(), new_value.data(), new_value.size());
@@ -374,8 +369,10 @@ TEST(GrowingVectorPublicationAcceptance,
         dynamic_cast<const index::IVectorReader*>(&new_pin.Reader());
     ASSERT_NE(old_reader, nullptr);
     ASSERT_NE(new_reader, nullptr);
-    EXPECT_EQ(old_reader->OffsetMapping().GetTotalCount(), 4);
-    EXPECT_EQ(new_reader->OffsetMapping().GetTotalCount(), 7);
+    EXPECT_EQ(old_reader->ValidCount(), 2);
+    EXPECT_EQ(new_reader->ValidCount(), 4);
+    EXPECT_FALSE(old_reader->IsRowValid(5));
+    EXPECT_TRUE(new_reader->IsRowValid(5));
 }
 
 class TrackingReader final : public index::IIndexReaderBase {

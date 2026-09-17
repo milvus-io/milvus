@@ -24,7 +24,6 @@
 #include <vector>
 
 #include "common/BitsetView.h"
-#include "common/OffsetMapping.h"
 #include "common/QueryResult.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
@@ -65,10 +64,11 @@ class IVectorReader {
            SearchResult& result) const = 0;
 
     // Returned iterators do not carry a reader pin. Consumers may retain them in
-    // SearchResult::vector_iterators_, and merge iterators can borrow the reader's
-    // offset mapping. The consumer must keep all borrowed state alive for iterator
-    // use. TODO: audit and wire that lifetime anchor across deferred consumption;
-    // this return type alone does not establish it.
+    // SearchResult::vector_iterators_, and knowhere iterators borrow the index's
+    // IdMap to map their result ids back to logical rows. The consumer must keep
+    // all borrowed state alive for iterator use. TODO: audit and wire that
+    // lifetime anchor across deferred consumption; this return type alone does
+    // not establish it.
     virtual knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
     Iterators(const DatasetPtr& dataset,
               const knowhere::Json& json,
@@ -107,8 +107,9 @@ class IVectorReader {
     PrepareSearchParams(const VectorSearchParams& params) const = 0;
 
     // Nullable vectors omit null rows from the engine's physical coordinate
-    // space. The mapping is borrowed; keep the reader pinned while using it,
-    // including deferred ChunkMergeIterator consumption.
+    // space, but that mapping is owned by knowhere's IdMap (#50524): bitsets,
+    // requested ids and result ids all stay in the segment's logical row
+    // space, so the only nullable surface here is logical-row metadata.
     virtual bool
     HasValidData() const = 0;
 
@@ -117,15 +118,6 @@ class IVectorReader {
 
     virtual bool
     IsRowValid(int64_t logical_offset) const = 0;
-
-    virtual int64_t
-    PhysicalOffset(int64_t logical_offset) const = 0;
-
-    virtual int64_t
-    LogicalOffset(int64_t physical_offset) const = 0;
-
-    virtual const milvus::OffsetMapping&
-    OffsetMapping() const = 0;
 
     // Runtime/backend capability checks remain authoritative: exposing the
     // unified vector contract does not make every operation available for

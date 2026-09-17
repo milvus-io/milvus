@@ -27,6 +27,7 @@
 #include "common/Utils.h"
 #include "index/Meta.h"
 #include "index/vector/RangeSearchParams.h"
+#include "index/vector/VectorIndexValidDataUtils.h"
 #include "index/vector/VectorReaderUtils.h"
 #include "index/vector/VectorReaderValidation.h"
 #include "knowhere/comp/index_param.h"
@@ -102,25 +103,20 @@ FillRegularSearchResult(const DatasetPtr& native_result,
 
 }  // namespace
 
-VectorIndexReader::VectorIndexReader(KnowhereEngine engine,
-                                     VectorValidData valid)
+VectorIndexReader::VectorIndexReader(KnowhereEngine engine)
     : engine_(std::move(engine)),
-      valid_(std::move(valid)),
-      physical_count_((valid_.Enabled() && valid_.ValidCount() == 0) ||
+      physical_count_(IsAllNullNullable(IdMap()) ||
                               engine_.IsEmptyEmbListIndex()
                           ? 0
                           : engine_.native_index.Count()) {
 }
 
-VectorIndexReader::VectorIndexReader(
-    uint32_t disk_ann_beamwidth,
-    KnowhereEngine engine,
-    VectorValidData valid)
+VectorIndexReader::VectorIndexReader(uint32_t disk_ann_beamwidth,
+                                     KnowhereEngine engine)
     : engine_(std::move(engine)),
-      valid_(std::move(valid)),
       backend_(Backend::Disk),
       disk_ann_beamwidth_(disk_ann_beamwidth),
-      physical_count_((valid_.Enabled() && valid_.ValidCount() == 0) ||
+      physical_count_(IsAllNullNullable(IdMap()) ||
                               engine_.IsEmptyEmbListIndex()
                           ? 0
                           : engine_.native_index.Count()) {
@@ -128,30 +124,39 @@ VectorIndexReader::VectorIndexReader(
 }
 
 VectorIndexReader::VectorIndexReader(KnowhereEngine engine,
-                                     VectorValidData valid,
+                                     int64_t logical_count,
                                      int64_t physical_count,
                                      knowhere::Json search_defaults)
     : engine_(std::move(engine)),
-      valid_(std::move(valid)),
       backend_(Backend::Memory),
       physical_count_(physical_count),
+      logical_count_(logical_count),
       growing_search_defaults_(std::move(search_defaults)) {
     AssertInfo(physical_count_ >= 0,
                "growing vector reader physical count {} is negative",
                physical_count_);
+    AssertInfo(logical_count_ >= physical_count_,
+               "growing vector reader logical count {} is below its physical "
+               "count {}",
+               logical_count_,
+               physical_count_);
     if (physical_count_ > 0) {
         const auto engine_count = engine_.native_index.Count();
-        AssertInfo(physical_count_ == engine_count,
-                   "growing vector reader physical count {} disagrees with "
-                   "engine count {}",
+        AssertInfo(physical_count_ <= engine_count,
+                   "growing vector reader physical count {} exceeds engine "
+                   "count {}",
                    physical_count_,
                    engine_count);
     }
-    AssertInfo(!valid_.Enabled() || valid_.ValidCount() == physical_count_,
-               "growing vector reader physical count {} disagrees with "
-               "validity count {}",
-               physical_count_,
-               valid_.ValidCount());
+    // The shared IdMap keeps growing behind this generation, so only the
+    // frozen prefix may be compared against it.
+    const auto& id_map = IdMap();
+    AssertInfo(id_map.ValidBitmap().empty() ||
+                   static_cast<int64_t>(id_map.OutCount()) >= logical_count_,
+               "growing vector reader logical count {} exceeds the published "
+               "id map row domain {}",
+               logical_count_,
+               id_map.OutCount());
 }
 
 cachinglayer::ResourceUsage
@@ -223,8 +228,7 @@ VectorIndexReader::Iterators(const DatasetPtr& dataset,
                              milvus::OpContext* op_ctx) const {
     const auto shape = detail::ValidateQueryDataset(
         dataset, engine_.PhysicalType(), engine_.Dim());
-    if (IsEmptyEngine() ||
-        (IsGrowingGeneration() && physical_count_ == 0)) {
+    if (IsEmptyEngine()) {
         return detail::MakeEmptyVectorIterators(shape.logical_nq_size);
     }
     const auto bounded = BoundIteratorBitset(bitset);
@@ -252,7 +256,12 @@ VectorIndexReader::GetVector(const DatasetPtr& dataset) const {
                       : "dense vector retrieval is not supported for a sparse "
                         "index");
     }
-    ValidatePhysicalIds(dataset, "get vector");
+    ValidateGenerationIds(dataset, "get vector");
+    if (IsAllNullNullable(IdMap())) {
+        ThrowInfo(UnexpectedError,
+                  "failed to get vector, this nullable vector index contains "
+                  "no valid vectors");
+    }
     switch (engine_.PhysicalType()) {
         case DataType::VECTOR_FLOAT:
             return detail::RetrieveDenseVectors<float>(engine_, dataset);
@@ -284,7 +293,12 @@ VectorIndexReader::GetSparseVector(const DatasetPtr& dataset) const {
                   "index");
     }
 
-    ValidatePhysicalIds(dataset, "get sparse vector");
+    ValidateGenerationIds(dataset, "get sparse vector");
+    if (IsAllNullNullable(IdMap())) {
+        ThrowInfo(UnexpectedError,
+                  "failed to get vector, this nullable vector index contains "
+                  "no valid vectors");
+    }
     const auto request = detail::ValidateIdRequest(dataset, "get sparse vector");
     if (request.rows_size == 0) {
         return nullptr;
@@ -351,32 +365,24 @@ VectorIndexReader::PrepareSearchParams(
 
 bool
 VectorIndexReader::HasValidData() const {
-    return valid_.Enabled();
+    return !IdMap().ValidBitmap().empty();
 }
 
 int64_t
 VectorIndexReader::ValidCount() const {
-    return valid_.ValidCount();
+    // A growing generation reports the vector count it froze, not the live
+    // count of the shared engine.
+    return IsGrowingGeneration() ? physical_count_
+                                 : static_cast<int64_t>(IdMap().InCount());
 }
 
 bool
 VectorIndexReader::IsRowValid(int64_t logical_offset) const {
-    return valid_.IsRowValid(logical_offset);
-}
-
-int64_t
-VectorIndexReader::PhysicalOffset(int64_t logical_offset) const {
-    return valid_.PhysicalOffset(logical_offset);
-}
-
-int64_t
-VectorIndexReader::LogicalOffset(int64_t physical_offset) const {
-    return valid_.LogicalOffset(physical_offset);
-}
-
-const milvus::OffsetMapping&
-VectorIndexReader::OffsetMapping() const {
-    return valid_.Mapping();
+    if (IsGrowingGeneration() &&
+        (logical_offset < 0 || logical_offset >= logical_count_)) {
+        return false;
+    }
+    return IdMap().IsValidOutId(logical_offset);
 }
 
 knowhere::expected<knowhere::DataSetPtr>
@@ -386,7 +392,7 @@ VectorIndexReader::CalcDistByIDs(const knowhere::DataSetPtr& query_dataset,
                                  size_t labels_len,
                                  bool is_cosine,
                                  milvus::OpContext* op_ctx) const {
-    ValidatePhysicalIds(labels, labels_len, "calculate distance");
+    ValidateGenerationIds(labels, labels_len, "calculate distance");
     return engine_.native_index.CalcDistByIDs(
         query_dataset, bitset, labels, labels_len, is_cosine, op_ctx);
 }
@@ -585,8 +591,12 @@ VectorIndexReader::BoundSearchBitset(const BitsetView& bitset,
         return bitset;
     }
 
+    // Bitsets are public-row keyed (#50524): knowhere projects them onto the
+    // backend id domain through the IdMap, and every backend id whose public
+    // row falls outside this bitmap is filtered. Bounding in logical space is
+    // therefore what keeps rows appended after publication out of the top-k.
     const auto prefix = detail::CheckedInputSize(
-        physical_count_, "growing vector physical count");
+        logical_count_, "growing vector logical row count");
     if (bitset.empty()) {
         storage = TargetBitmap(prefix, false);
         return BitsetView(storage);
@@ -612,35 +622,35 @@ VectorIndexReader::BoundIteratorBitset(const BitsetView& bitset) const {
     }
 
     const auto prefix = detail::CheckedInputSize(
-        physical_count_, "growing vector physical count");
+        logical_count_, "growing vector logical row count");
     AssertInfo(!bitset.empty(),
-               "growing vector iterators require a caller-owned physical "
+               "growing vector iterators require a caller-owned logical "
                "prefix bitmap");
     AssertInfo(!bitset.has_out_ids(),
-               "growing vector iterators require a materialized physical "
+               "growing vector iterators require a materialized logical "
                "prefix bitmap");
     AssertInfo(bitset.size() <= prefix,
                "growing vector iterator bitmap size {} exceeds frozen "
-               "physical count {}",
+               "logical row count {}",
                bitset.size(),
                prefix);
     return bitset;
 }
 
 void
-VectorIndexReader::ValidatePhysicalIds(const DatasetPtr& dataset,
-                                       const char* operation) const {
+VectorIndexReader::ValidateGenerationIds(const DatasetPtr& dataset,
+                                         const char* operation) const {
     if (!IsGrowingGeneration()) {
         return;
     }
     const auto request = detail::ValidateIdRequest(dataset, operation);
-    ValidatePhysicalIds(request.ids, request.rows_size, operation);
+    ValidateGenerationIds(request.ids, request.rows_size, operation);
 }
 
 void
-VectorIndexReader::ValidatePhysicalIds(const int64_t* ids,
-                                       size_t count,
-                                       const char* operation) const {
+VectorIndexReader::ValidateGenerationIds(const int64_t* ids,
+                                         size_t count,
+                                         const char* operation) const {
     if (!IsGrowingGeneration()) {
         return;
     }
@@ -649,18 +659,24 @@ VectorIndexReader::ValidatePhysicalIds(const int64_t* ids,
                operation,
                count);
     for (size_t i = 0; i < count; ++i) {
-        AssertInfo(ids[i] >= 0 && ids[i] < physical_count_,
-                   "{} id {} is outside frozen physical prefix [0, {})",
+        AssertInfo(ids[i] >= 0 && ids[i] < logical_count_,
+                   "{} id {} is outside the frozen logical prefix [0, {})",
                    operation,
                    ids[i],
-                   physical_count_);
+                   logical_count_);
+        AssertInfo(IdMap().IsValidOutId(ids[i]),
+                   "{} id {} is a null row of this nullable vector index",
+                   operation,
+                   ids[i]);
     }
 }
 
 bool
 VectorIndexReader::IsEmptyEngine() const {
-    return (valid_.Enabled() && valid_.ValidCount() == 0) ||
-           engine_.IsEmptyEmbListIndex();
+    if (IsGrowingGeneration()) {
+        return physical_count_ == 0;
+    }
+    return IsAllNullNullable(IdMap()) || engine_.IsEmptyEmbListIndex();
 }
 
 }  // namespace milvus::index

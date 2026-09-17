@@ -40,7 +40,7 @@ using detail::SaturatingAdd;
 using detail::SaturatingMul;
 
 uint64_t
-OffsetMappingMmapDiskCost(const Config& config, int64_t num_rows) {
+IdMapMmapDiskCost(const Config& config, int64_t num_rows) {
     if (num_rows <= 0) {
         return 0;
     }
@@ -189,6 +189,10 @@ VecIndexLoadResource(DataType field_type,
                                                has_raw_data);
                 return true;
             case DataType::VECTOR_SPARSE_U32_F32:
+                // Sparse index implementations are registered in knowhere's
+                // sparse_u32_f32 static registry (#53106); looking them up in
+                // the fp32 registry missed the index type, logged "unhandled
+                // create config" and fell back to has_raw_data=false.
                 EstimateVector<knowhere::sparse_u32_f32>(index_type,
                                                          index_version,
                                                          index_size_in_bytes,
@@ -197,14 +201,6 @@ VecIndexLoadResource(DataType field_type,
                                                          config,
                                                          resource,
                                                          has_raw_data);
-                if (resource.has_value()) {
-                    // Preserve the existing factory's raw-data query for
-                    // sparse indexes; changing it belongs to a separate
-                    // behavior change.
-                    has_raw_data =
-                        knowhere::IndexStaticFaced<knowhere::fp32>::HasRawData(
-                            index_type, index_version, config);
-                }
                 return true;
             case DataType::VECTOR_INT8:
                 EstimateVector<knowhere::int8>(index_type,
@@ -256,7 +252,7 @@ VecIndexLoadResource(DataType field_type,
         request.max_memory_cost = SaturatingMul(2, estimated.memoryCost);
     }
     if (VectorUsesDiskLoad(index_type, index_version)) {
-        auto offset_cost = OffsetMappingMmapDiskCost(config, num_rows);
+        auto offset_cost = IdMapMmapDiskCost(config, num_rows);
         request.final_disk_cost =
             SaturatingAdd(request.final_disk_cost, offset_cost);
         request.max_disk_cost =

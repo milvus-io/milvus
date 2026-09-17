@@ -21,12 +21,12 @@
 
 #include "index/contracts/build/IReaderConvertible.h"
 #include "index/vector/KnowhereEngine.h"
-#include "index/vector/VectorValidData.h"
 #include "storage/artifact/Artifact.h"
 #include "storage/artifact/FileSink.h"
 
-// Memory-shaped knowhere artifact: serialize the engine and validity metadata
-// as logical named BinarySet entries through FileSink. Slice assembly and
+// Memory-shaped knowhere artifact: serialize the engine and the validity
+// metadata its knowhere IdMap owns as logical named BinarySet entries through
+// FileSink. Slice assembly and
 // transport naming belong to the sink/source, not the artifact. This artifact
 // does not implement a packed V3 vector format and rejects a V3 sink.
 
@@ -35,9 +35,9 @@ namespace milvus::index {
 class VectorMemArtifact final : public storage::Artifact,
                                 public IReaderConvertible {
  public:
-    VectorMemArtifact(KnowhereEngine engine,
-                      VectorValidData valid,
-                      std::vector<size_t> empty_emb_list_offsets = {});
+    explicit VectorMemArtifact(
+        KnowhereEngine engine,
+        std::vector<size_t> empty_emb_list_offsets = {});
 
     ~VectorMemArtifact() override = default;
 
@@ -51,9 +51,8 @@ class VectorMemArtifact final : public storage::Artifact,
 
  private:
     KnowhereEngine engine_;
-    VectorValidData valid_;
     // The all-null-nullable and empty-embedding-list artifacts have NO knowhere
-    // index inside at all — only the validity mapping and/or the offsets. Both
+    // index payload inside at all — only the id map and/or the offsets. Both
     // are real, serialized states today (`VectorMemIndex.cpp:306-316`), and both
     // must survive as artifacts, which is a useful check on the model: an
     // artifact is not required to contain an engine. The offsets live in the

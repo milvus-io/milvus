@@ -23,7 +23,6 @@
 #include "index/contracts/build/IArtifactBuilder.h"
 #include "index/contracts/build/VectorBuildInput.h"
 #include "index/vector/KnowhereEngine.h"
-#include "index/vector/VectorValidData.h"
 #include "knowhere/operands.h"
 
 namespace milvus::index {
@@ -99,7 +98,6 @@ class VectorMemBuilder final : public IArtifactBuilder<VectorBuildInput<T>> {
     KnowhereEngine engine_;
     knowhere::Json build_params_;
     std::optional<int64_t> expected_rows_;
-    VectorValidData valid_data_;
     bool sealed_{false};
     bool failed_{false};
 };

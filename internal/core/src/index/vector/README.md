@@ -10,7 +10,7 @@
 | 文件组 | 职责 |
 |---|---|
 | `KnowhereEngine` | 持有 native engine、完整 backing owner 及实际类型、metric、dim、physical/embedding-list 状态 |
-| `VectorValidData` / `VectorIndexValidDataUtils` | nullable 行与物理向量的映射及相关元数据编解码 |
+| `VectorIndexValidDataUtils` | nullable 行有效位图的编解码，以及把它发布进 knowhere IdMap（#50524，映射本身由 knowhere 持有） |
 | `contracts/query/IVectorReader.h` | 统一向量查询接口，包含搜索、取值、metadata、nullable、refine 与 embedding-list 操作 |
 | `VectorIndexReader` | 非模板统一 reader；运行时仅区分 memory/disk 搜索外壳与 DiskANN beamwidth，物理类型只在取值 leaf 分派 |
 | `VectorMemBuilder` | `IArtifactBuilder<VectorBuildInput<T>>`，一次接受完整输入，调用方持有 tensor 及 side inputs |

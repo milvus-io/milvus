@@ -367,32 +367,51 @@ ValidateDimension(const RuntimeParams& params,
     }
 }
 
+// The nullable row mapping lives in the engine's knowhere IdMap (#50524), so
+// every shape check reads it instead of a Milvus-side offset mapping.
+struct LoadedValidity {
+    bool enabled{false};
+    int64_t total_count{0};
+    int64_t valid_count{0};
+};
+
+LoadedValidity
+InspectValidity(const KnowhereEngine& engine) {
+    const auto& id_map = engine.native_index.GetIdMap();
+    const auto valid_bitmap = id_map.ValidBitmap();
+    if (valid_bitmap.empty()) {
+        return {};
+    }
+    return {true,
+            static_cast<int64_t>(valid_bitmap.size()),
+            static_cast<int64_t>(id_map.InCount())};
+}
+
 void
 ValidateShape(const RuntimeParams& params,
               const EntryPlan& plan,
-              const KnowhereEngine& engine,
-              const VectorValidData& valid) {
+              const KnowhereEngine& engine) {
+    const auto valid = InspectValidity(engine);
     if (params.nullable.has_value()) {
         const bool zero_rows = params.num_rows.value_or(-1) == 0;
-        if ((!*params.nullable && valid.Enabled()) ||
-            (*params.nullable && !valid.Enabled() && !zero_rows)) {
+        if ((!*params.nullable && valid.enabled) ||
+            (*params.nullable && !valid.enabled && !zero_rows)) {
             ThrowInfo(UnexpectedError,
                       "runtime nullable metadata disagrees with vector "
                       "validity entries");
         }
     }
     if (plan.state == ArtifactState::AllNull) {
-        if (!valid.Enabled() || valid.ValidCount() != 0) {
+        if (!valid.enabled || valid.valid_count != 0) {
             ThrowInfo(DataFormatBroken,
                       "validity-only vector artifact contains valid rows");
         }
     }
     if (plan.state == ArtifactState::EmptyEmbeddingList) {
         const auto& offsets = engine.EmptyEmbListOffsets();
-        if (valid.Enabled()) {
-            if (valid.ValidCount() < 0 ||
-                static_cast<uint64_t>(valid.ValidCount()) + 1 !=
-                    offsets.size()) {
+        if (valid.enabled) {
+            if (static_cast<uint64_t>(valid.valid_count) + 1 !=
+                offsets.size()) {
                 ThrowInfo(DataFormatBroken,
                           "empty embedding-list offset count disagrees with "
                           "nullable valid row count");
@@ -406,23 +425,23 @@ ValidateShape(const RuntimeParams& params,
         }
     }
     if (plan.state == ArtifactState::Normal &&
-        params.elem_type == DataType::NONE && valid.Enabled() &&
-        engine.native_index.Count() != valid.ValidCount()) {
+        params.elem_type == DataType::NONE && valid.enabled &&
+        engine.native_index.Count() != valid.valid_count) {
         ThrowInfo(DataFormatBroken,
                   "loaded vector count {} disagrees with nullable valid row "
                   "count {}",
                   engine.native_index.Count(),
-                  valid.ValidCount());
+                  valid.valid_count);
     }
     if (params.num_rows.has_value()) {
-        if (valid.Enabled() && valid.TotalCount() != *params.num_rows) {
+        if (valid.enabled && valid.total_count != *params.num_rows) {
             ThrowInfo(UnexpectedError,
                       "runtime vector row count {} disagrees with nullable "
                       "row count {}",
                       *params.num_rows,
-                      valid.TotalCount());
+                      valid.total_count);
         }
-        if (!valid.Enabled() && params.elem_type == DataType::NONE &&
+        if (!valid.enabled && params.elem_type == DataType::NONE &&
             plan.state == ArtifactState::Normal &&
             engine.native_index.Count() != *params.num_rows) {
             ThrowInfo(UnexpectedError,
@@ -434,15 +453,19 @@ ValidateShape(const RuntimeParams& params,
     }
 }
 
-VectorValidData
-LoadValidity(storage::FileSource& source,
-             const EntryPlan& plan,
-             const storage::LoadOptions& opts,
-             const RuntimeParams& params,
-             knowhere::BinarySet* existing = nullptr) {
-    VectorValidData valid;
+// Publish the persisted validity into the engine's id map. This must happen
+// BEFORE the engine is deserialized: knowhere derives both mapping directions
+// from the bitmap inside Deserialize, and a metadata-only artifact never
+// reaches Deserialize at all, so its map is finalized explicitly.
+RestoredIdMap
+RestoreValidity(storage::FileSource& source,
+                const EntryPlan& plan,
+                const RuntimeParams& params,
+                KnowhereEngine& engine,
+                const std::string& mmap_path_prefix,
+                knowhere::BinarySet* existing = nullptr) {
     if (!plan.has_validity) {
-        return valid;
+        return {};
     }
     knowhere::BinarySet local;
     auto& entries = existing == nullptr ? local : *existing;
@@ -450,12 +473,15 @@ LoadValidity(storage::FileSource& source,
         AppendReadEntry(source, VALID_DATA_COUNT_KEY, entries);
         AppendReadEntry(source, VALID_DATA_KEY, entries);
     }
-    OffsetMappingBuildOptions options;
-    options.enable_mmap_i2o_map = params.mmap_i2o;
-    options.enable_mmap_o2i_map = params.mmap_o2i;
-    options.mmap_dir_path = opts.mmap_dir_path;
-    LoadValidDataFromBinarySet(entries, valid, options);
-    return valid;
+    IdMapMmapFlags mmap_flags;
+    if (!mmap_path_prefix.empty()) {
+        mmap_flags.enable_i2o = params.mmap_i2o;
+        mmap_flags.enable_o2i = params.mmap_o2i;
+    }
+    return RestoreIdMapFromBinarySet(entries,
+                                     engine.native_index.GetIdMap(),
+                                     mmap_flags,
+                                     mmap_path_prefix);
 }
 
 struct OpenedMemState {
@@ -468,7 +494,6 @@ struct OpenedMemState {
     }
 
     KnowhereEngine engine;
-    VectorValidData valid;
 };
 
 void
@@ -483,12 +508,38 @@ PopulateState(OpenedMemState& state,
     config.erase(EMB_LIST_RAW_INDEX_PATH);
     SetWarmup(config, opts.warmup);
 
+    // The id map's derived arrays may be file-backed, and knowhere removes
+    // each backing file with its mapping, so the staging directory only has to
+    // outlive the engine. A metadata-only artifact owns no engine file, so it
+    // creates that directory on its own when mmap was requested.
+    const auto id_map_mmap_requested = params.mmap_i2o || params.mmap_o2i;
+    auto stage_id_map_mmap_dir = [&]() -> std::string {
+        if (!plan.has_validity || !id_map_mmap_requested) {
+            return {};
+        }
+        auto local_files = storage::LocalDirectory::CreateOwned(
+            opts.mmap_dir_path, "vector_id_map_XXXXXX", "vector id map mmap");
+        auto path = local_files->Path();
+        state.engine.backing_owner = std::move(local_files);
+        return path;
+    };
+
     if (plan.state == ArtifactState::EmptyEmbeddingList) {
         auto entries = ReadEntries(source, plan.all_names);
         auto empty = DecodeEmptyEmbeddingList(entries);
         state.engine.SetDim(empty.dim);
         state.engine.SetEmptyEmbListOffsets(std::move(empty.offsets));
-        state.valid = LoadValidity(source, plan, opts, params, &entries);
+        const auto restored = RestoreValidity(source,
+                                              plan,
+                                              params,
+                                              state.engine,
+                                              stage_id_map_mmap_dir(),
+                                              &entries);
+        if (restored.has_valid_data) {
+            FinalizeRestoredIdMap(state.engine.native_index.Node(),
+                                  UnexpectedError,
+                                  "empty embedding-list vector load");
+        }
         ValidateDimension(params, state.engine.Dim(), true);
     } else if (plan.state == ArtifactState::AllNull) {
         if (!params.runtime_dim.has_value()) {
@@ -496,7 +547,13 @@ PopulateState(OpenedMemState& state,
                       "validity-only vector artifact requires runtime dim");
         }
         state.engine.SetDim(*params.runtime_dim);
-        state.valid = LoadValidity(source, plan, opts, params);
+        const auto restored = RestoreValidity(
+            source, plan, params, state.engine, stage_id_map_mmap_dir());
+        if (restored.has_valid_data) {
+            FinalizeRestoredIdMap(state.engine.native_index.Node(),
+                                  UnexpectedError,
+                                  "all-null nullable vector load");
+        }
         ValidateDimension(params, state.engine.Dim(), false);
     } else {
         const bool mmap = opts.enable_mmap &&
@@ -527,6 +584,10 @@ PopulateState(OpenedMemState& state,
                     config[EMB_LIST_RAW_INDEX_PATH] = raw_path;
                 }
             }
+            // Restore before deserializing: Deserialize is what derives the
+            // dense id arrays from the validity bitmap.
+            RestoreValidity(
+                source, plan, params, state.engine, directory);
             const auto status = state.engine.native_index.DeserializeFromFile(
                 main_path, config);
             // The knowhere deserialize API has no OpContext entrance. Remote
@@ -535,23 +596,23 @@ PopulateState(OpenedMemState& state,
             if (status != knowhere::Status::success) {
                 ThrowDeserializeError(status);
             }
-            state.valid = LoadValidity(source, plan, opts, params);
         } else {
             config[ENABLE_MMAP] = false;
             auto entries = ReadEntries(source, plan.all_names);
+            RestoreValidity(
+                source, plan, params, state.engine, std::string{}, &entries);
             const auto status =
                 state.engine.native_index.Deserialize(entries, config);
             if (status != knowhere::Status::success) {
                 ThrowDeserializeError(status);
             }
-            state.valid = LoadValidity(source, plan, opts, params, &entries);
             entries.clear();
         }
         state.engine.SetDim(state.engine.native_index.Dim());
         ValidateDimension(params, state.engine.Dim(), true);
     }
 
-    ValidateShape(params, plan, state.engine, state.valid);
+    ValidateShape(params, plan, state.engine);
 }
 
 }  // namespace
@@ -580,8 +641,7 @@ VectorMemLoader::Open(storage::FileSource& source,
     }
     OpenedMemState state(params);
     PopulateState(state, source, opts, params, plan);
-    return std::make_unique<VectorIndexReader>(std::move(state.engine),
-                                               std::move(state.valid));
+    return std::make_unique<VectorIndexReader>(std::move(state.engine));
 }
 
 }  // namespace milvus::index

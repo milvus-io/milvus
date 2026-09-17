@@ -41,6 +41,13 @@
 // this same ownership and publication path.
 namespace milvus::segcore {
 
+// Threads one growing interim index build/add may use, resolved from
+// queryNode.segcore.interimIndex.growingBuildThreadRate (#53030) against the
+// live knowhere build thread pool and clamped to [1, pool size]. Exposed so
+// the resolution rule is testable without a per-field build-params accessor.
+int64_t
+ResolveGrowingBuildThreadNum(const SegcoreConfig& segcore_config);
+
 class InsertRecordGrowing;
 class VectorBase;
 

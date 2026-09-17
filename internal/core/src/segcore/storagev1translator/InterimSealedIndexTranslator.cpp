@@ -164,8 +164,9 @@ InterimSealedIndexTranslator::InterimSealedIndexTranslator(
         .index_type = index_type_,
         .field_type = vec_data_type_,
         .element_type = DataType::NONE,
-        .index_engine_version =
-            knowhere::Version::GetCurrentVersion().VersionNumber(),
+        // #52361: the interim index is built at the configured target engine
+        // version, so the adapter must classify it at the same version.
+        .index_engine_version = index_version_,
         .params = std::move(build_config_),
         .is_nested = false,
         .is_text_match = false,

@@ -26,23 +26,25 @@
 
 #include "index/contracts/query/IVectorReader.h"
 #include "index/vector/KnowhereEngine.h"
-#include "index/vector/VectorValidData.h"
+#include "knowhere/id_map.h"
 
 namespace milvus::index {
 
 class VectorIndexReader final : public IIndexReaderBase, public IVectorReader {
  public:
-    VectorIndexReader(KnowhereEngine engine, VectorValidData valid);
+    // Nullable row mapping lives inside the engine's knowhere IdMap (#50524):
+    // bitsets and result ids stay in the segment's logical row space and the
+    // reader only exposes logical-row helpers.
+    explicit VectorIndexReader(KnowhereEngine engine);
 
-    VectorIndexReader(uint32_t disk_ann_beamwidth,
-                      KnowhereEngine engine,
-                      VectorValidData valid);
+    VectorIndexReader(uint32_t disk_ann_beamwidth, KnowhereEngine engine);
 
-    // A growing generation shares one live Add/Search engine but freezes the
-    // physical prefix, nullable mapping and legacy growing search defaults at
-    // publication. The query consumer may impose a shorter visible prefix.
+    // A growing generation shares one live Add/Search engine -- including its
+    // append-only IdMap -- but freezes the logical row prefix, the physical
+    // vector count and the legacy growing search defaults at publication. The
+    // query consumer may impose a shorter visible prefix.
     VectorIndexReader(KnowhereEngine engine,
-                      VectorValidData valid,
+                      int64_t logical_count,
                       int64_t physical_count,
                       knowhere::Json search_defaults);
 
@@ -112,15 +114,6 @@ class VectorIndexReader final : public IIndexReaderBase, public IVectorReader {
     bool
     IsRowValid(int64_t logical_offset) const override;
 
-    int64_t
-    PhysicalOffset(int64_t logical_offset) const override;
-
-    int64_t
-    LogicalOffset(int64_t physical_offset) const override;
-
-    const milvus::OffsetMapping&
-    OffsetMapping() const override;
-
     knowhere::expected<knowhere::DataSetPtr>
     CalcDistByIDs(const knowhere::DataSetPtr& query_dataset,
                   const BitsetView& bitset,
@@ -173,22 +166,33 @@ class VectorIndexReader final : public IIndexReaderBase, public IVectorReader {
     BitsetView
     BoundIteratorBitset(const BitsetView& bitset) const;
 
+    // A growing generation must not serve a row only a newer generation
+    // covers, so every id-addressed operation is clipped to the frozen
+    // logical prefix.
     void
-    ValidatePhysicalIds(const DatasetPtr& dataset, const char* operation) const;
+    ValidateGenerationIds(const DatasetPtr& dataset,
+                          const char* operation) const;
 
     void
-    ValidatePhysicalIds(const int64_t* ids,
-                        size_t count,
-                        const char* operation) const;
+    ValidateGenerationIds(const int64_t* ids,
+                          size_t count,
+                          const char* operation) const;
 
     bool
     IsEmptyEngine() const;
 
+    const knowhere::IdMap&
+    IdMap() const {
+        return engine_.native_index.GetIdMap();
+    }
+
     KnowhereEngine engine_;
-    VectorValidData valid_;
     Backend backend_{Backend::Memory};
     uint32_t disk_ann_beamwidth_{8};
     int64_t physical_count_;
+    // Growing only: the frozen public row count this generation may answer
+    // for. Sealed readers read their row domain from the immutable IdMap.
+    int64_t logical_count_{0};
     std::optional<knowhere::Json> growing_search_defaults_;
 };
 

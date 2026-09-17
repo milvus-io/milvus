@@ -117,34 +117,12 @@ SearchOnSealedIndex(const Schema& schema,
 
     dataset->SetIsSparse(is_sparse);
 
-    // The refactor's vector readers search in the index's physical row space,
-    // so a nullable field's logical bitset and result offsets are converted
-    // here (master #50524 moved this into knowhere's IdMap instead).
-    const auto& offset_mapping = reader.OffsetMapping();
+    // Nullable row mapping lives inside the reader's knowhere IdMap (#50524),
+    // so the plan's logical bitset and the result offsets both stay in
+    // logical row space here.
     const bool is_element_level_search = search_info.array_offsets_ != nullptr;
     search_result.element_level_ = is_element_level_search;
-    TargetBitmap transformed_bitset;
     BitsetView search_bitset = bitset;
-    const auto has_offset_mapping =
-        offset_mapping.IsEnabled() && !is_element_level_search;
-    if (has_offset_mapping) {
-        if (offset_mapping.GetValidCount() == 0) {
-            FillEmptySearchResult(search_result, num_queries, topK);
-            return;
-        }
-        if (!bitset.empty()) {
-            auto status =
-                offset_mapping.TransformBitset(bitset, transformed_bitset);
-            if (status == OffsetMapping::BitsetTransformStatus::AllFiltered) {
-                FillEmptySearchResult(search_result, num_queries, topK);
-                return;
-            }
-            search_bitset =
-                status == OffsetMapping::BitsetTransformStatus::NoFilter
-                    ? BitsetView{}
-                    : search_result.PinBitset(std::move(transformed_bitset));
-        }
-    }
 
     if (search_info.iterator_v2_info_.has_value()) {
         CachedSearchIterator cached_iter(reader,
@@ -153,8 +131,8 @@ SearchOnSealedIndex(const Schema& schema,
                                          search_bitset,
                                          op_context);
         cached_iter.NextBatch(search_info, search_result);
-        FinalizeVectorSearchOffsets(
-            search_result, offset_mapping, search_info.array_offsets_.get());
+        FinalizeVectorSearchOffsets(search_result,
+                                    search_info.array_offsets_.get());
         return;
     }
 
@@ -175,7 +153,6 @@ SearchOnSealedIndex(const Schema& schema,
     }
     FinalizeVectorSearchOffsets(
         search_result,
-        offset_mapping,
         use_iterator ? nullptr : search_info.array_offsets_.get());
     search_result.total_nq_ = num_queries;
     search_result.unity_topK_ = topK;
@@ -379,12 +356,9 @@ SearchOnSealedColumn(const Schema& schema,
     }
     if (use_vector_iterator) {
         bool larger_is_closer = PositivelyRelated(search_info.metric_type_);
-        // Brute force attaches the physical -> logical id window to the bitset
-        // (#50524), so the iterators already carry logical offsets.
         result.AssembleChunkVectorIterators(num_queries,
                                             num_chunk,
                                             final_qr.chunk_iterators(),
-                                            /*offset_mapping=*/nullptr,
                                             larger_is_closer);
     } else {
         // See FinalizeVectorSearchOffsets for the rationale: element-level
