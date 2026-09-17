@@ -188,7 +188,7 @@ func watchHookConfigReload() {
 						// path redacts it: an initialization error can echo
 						// the opaque, sensitive configuration map back.
 						mlog.Error(context.TODO(),
-							"fail to init configs for the compiled-in hook when refreshing, keeping the previous configuration",
+							"fail to init configs for the compiled-in hook when refreshing, the new configuration is refused",
 							mlog.String("error", config.RedactedValue))
 						return
 					}

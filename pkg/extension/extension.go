@@ -56,6 +56,12 @@ type (
 // A distribution must therefore install its hook in EVERY process and role it
 // runs - the query coordinator and the data coordinator as much as the proxy -
 // or those roles behave as a stock binary.
+//
+// Init is called again whenever the hook's configuration is refreshed. A
+// compiled-in hook whose Init returns an error then must leave the
+// configuration it was running with in effect: hookutil logs the refusal and
+// keeps the process up, where a plug-in's failed refresh stops it, and it has
+// no way to inspect or roll back what the hook did with the new values.
 func SetHook(h hook.Hook) {
 	installedHook.Store(&hookBox{hook: h})
 }
