@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
@@ -58,6 +59,12 @@ import (
 
 type ImportCallbacksSuite struct {
 	suite.Suite
+}
+
+func (s *ImportCallbacksSuite) SetupTest() {
+	previous := streaming.WAL()
+	streaming.SetupNoopWALForTest()
+	s.T().Cleanup(func() { streaming.SetWALForTest(previous) })
 }
 
 func TestImportCallbacksSuite(t *testing.T) {
@@ -577,6 +584,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 	)
 
 	s.NoError(err)
+	s.ElementsMatch([]string{"v1", streaming.WAL().ControlChannel()}, mockBroadcastAPI.capturedMsg.BroadcastHeader().VChannels)
 }
 
 // --------------------------------
@@ -902,7 +910,7 @@ func buildRollbackImportBroadcastResult(jobID int64) message.BroadcastResultRoll
 	}
 }
 
-func TestCommitImportCallback_UncommittedToCommitting(t *testing.T) {
+func TestCommitImportCallback_UncommittedToCompleted(t *testing.T) {
 	ctx := context.Background()
 	importMeta, _ := newTestImportMeta(t)
 
@@ -923,7 +931,7 @@ func TestCommitImportCallback_UncommittedToCommitting(t *testing.T) {
 
 	updatedJob := importMeta.GetJob(ctx, 1)
 	assert.NotNil(t, updatedJob)
-	assert.Equal(t, internalpb.ImportJobState_Committing, updatedJob.GetState())
+	assert.Equal(t, internalpb.ImportJobState_Completed, updatedJob.GetState())
 }
 
 func TestCommitImportCallback_BeforeUncommitted_Retry(t *testing.T) {
@@ -977,7 +985,7 @@ func TestCommitImportCallback_MissingJob_Retry(t *testing.T) {
 
 	updatedJob := importMeta.GetJob(ctx, 13)
 	assert.NotNil(t, updatedJob)
-	assert.Equal(t, internalpb.ImportJobState_Committing, updatedJob.GetState())
+	assert.Equal(t, internalpb.ImportJobState_Completed, updatedJob.GetState())
 }
 
 func TestCommitImportCallback_RetryAfterUncommitted(t *testing.T) {
@@ -1007,7 +1015,7 @@ func TestCommitImportCallback_RetryAfterUncommitted(t *testing.T) {
 
 	updatedJob := importMeta.GetJob(ctx, 12)
 	assert.NotNil(t, updatedJob)
-	assert.Equal(t, internalpb.ImportJobState_Committing, updatedJob.GetState())
+	assert.Equal(t, internalpb.ImportJobState_Completed, updatedJob.GetState())
 }
 
 func TestRollbackImportCallback_TransitionToFailed(t *testing.T) {
@@ -1100,7 +1108,7 @@ func TestRollbackImportCallback_AfterCommit_NoOp(t *testing.T) {
 // on NewExclusiveCollectionNameResourceKey), so this race is unreachable. The
 // test documents the invariant from the callback side and provides regression
 // coverage against future drift: the job must end in a deterministic terminal
-// state (Committing or Failed) without panicking or corrupting meta. Run with
+// state (Completed or Failed) without panicking or corrupting meta. Run with
 // `-race` to detect any unsynchronized access.
 func TestImportAckCallbacks_CommitVsAbort_Race(t *testing.T) {
 	for iter := 0; iter < 32; iter++ {
@@ -1142,8 +1150,8 @@ func TestImportAckCallbacks_CommitVsAbort_Race(t *testing.T) {
 
 		final := importMeta.GetJob(ctx, jobID).GetState()
 		assert.Contains(t,
-			[]internalpb.ImportJobState{internalpb.ImportJobState_Committing, internalpb.ImportJobState_Failed},
-			final, "iter %d: terminal state must be Committing or Failed, got %s", iter, final)
+			[]internalpb.ImportJobState{internalpb.ImportJobState_Completed, internalpb.ImportJobState_Failed},
+			final, "iter %d: terminal state must be Completed or Failed, got %s", iter, final)
 	}
 }
 
@@ -1165,6 +1173,9 @@ func (c *captureBroadcastAPI) Broadcast(_ context.Context, msg message.Broadcast
 func (c *captureBroadcastAPI) Close() {}
 
 func testBroadcastTargetsDataVchannels(t *testing.T, broadcastFn func(*Server, context.Context, ImportJob) error) {
+	previous := streaming.WAL()
+	streaming.SetupNoopWALForTest()
+	t.Cleanup(func() { streaming.SetWALForTest(previous) })
 	ctx := context.Background()
 	wantVchannels := []string{"by-dev-rootcoord-dml_0_v0", "by-dev-rootcoord-dml_1_v0"}
 
@@ -1194,21 +1205,18 @@ func testBroadcastTargetsDataVchannels(t *testing.T, broadcastFn func(*Server, c
 	err := broadcastFn(server, ctx, job)
 	assert.NoError(t, err)
 	assert.NotNil(t, capture.captured, "Broadcast must have been called")
-	assert.ElementsMatch(t, wantVchannels, capture.captured.BroadcastHeader().VChannels,
-		"broadcast must target the job's data vchannels, not the control channel")
+	assert.ElementsMatch(t, append(wantVchannels, streaming.WAL().ControlChannel()), capture.captured.BroadcastHeader().VChannels,
+		"business channels supply timestamps and CChannel orders replicated callbacks")
+	assert.False(t, capture.captured.BroadcastHeader().AckSyncUp)
 }
 
-// TestBroadcastCommitImportMessage_TargetsDataVchannels asserts that the
-// CommitImport WAL message is broadcast to the job's data vchannels.
-// Control-channel-only broadcasts are dropped by the WAL flusher's
-// IsControlChannel guard before reaching the CommitImport case, so the
-// message must reach data vchannels for HandleCommitVchannel to run.
+// CommitImport targets business channels and CChannel for the unified callback.
 func TestBroadcastCommitImportMessage_TargetsDataVchannels(t *testing.T) {
 	testBroadcastTargetsDataVchannels(t, (*Server).broadcastCommitImportMessage)
 }
 
 // TestBroadcastRollbackImportMessage_TargetsDataVchannels asserts that the
-// RollbackImport WAL message is broadcast to the job's data vchannels,
+// RollbackImport WAL message is broadcast to the job's data vchannels and CChannel,
 // matching the CommitImport routing.
 func TestBroadcastRollbackImportMessage_TargetsDataVchannels(t *testing.T) {
 	testBroadcastTargetsDataVchannels(t, (*Server).broadcastRollbackImportMessage)

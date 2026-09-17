@@ -2056,19 +2056,9 @@ func UpdateCommitTimestamp(segmentID int64, ts uint64) UpdateOperator {
 					mlog.Int64("segmentID", segmentID),
 					mlog.Uint64("commitTs", ts),
 					mlog.Uint64("maxBinlogTimestampTo", maxTsTo))
-				// Fail-stop. Unreachable for a normal import: its rows carry the
-				// Import message's timetick and the commit fence is a later
-				// timetick on the same WAL. Keep the error retriable so the
-				// flusher blocks on the fence instead of failing the job — a
-				// blocked pchannel surfaces as WAL lag, whereas a replica that
-				// commits what the source rejected can no longer be rolled back.
-				//
-				// Recovery from here is out of band. The job is already
-				// Committing by the time this runs -- commitImportV2AckCallback
-				// persists that state on the broadcast FastAck, independent of
-				// this fence -- and Committing cannot be failed by any writer
-				// (UnfailableJobStates). Validating earlier does not change that:
-				// the ack path flips the state regardless of what this check says.
+				// Preserve the commit fence and let the broadcast callback retry.
+				// It must not publish segment visibility or complete the job
+				// with a timestamp preceding the imported rows.
 				return modPack.fail(merr.WrapErrImportSysFailedMsg(
 					"commit timestamp %d is less than max binlog timestamp %d for import segment %d",
 					ts, maxTsTo, segmentID))
