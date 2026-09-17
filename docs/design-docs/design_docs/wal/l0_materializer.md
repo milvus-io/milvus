@@ -57,7 +57,9 @@ There is no pending Delete-entry list, recovery-loaded payload window, or
 `loadedThrough`. Window positions are constant-sized; only the current bounded
 read/materialization batch holds Delete payloads. Explicit completion requests
 add an ordered list of retained WAL handles until their boundaries are covered.
-Coalescing targets does not discard the individual handles.
+Coalescing targets does not discard the individual handles. When several
+requests are blocked, schedule the largest request boundary within the current
+safe range; a later blocked request must not hold back an earlier ready one.
 
 ## 3. ObserveMessage
 
@@ -154,6 +156,11 @@ semantic requirement to complete an API are separate decisions.
 Delete data is governed by Summary's backlog mechanism (§5.2). A raised L,
 Summary upload completion or recovery checkpoint publication is not itself a
 physical materialization trigger.
+
+DropPartition flushes every Segment in the affected VChannel created before
+its request boundary, including Segments in other partitions. Only the target
+partition is dropped. This matches the VChannel-wide L0 completion frontier and
+ensures every earlier L1 blocker is driven to final commit.
 
 ### 5.2 Summary-Owned Backlog Requests
 

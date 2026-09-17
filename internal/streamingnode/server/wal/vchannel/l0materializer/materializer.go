@@ -191,13 +191,14 @@ func splitMaterializeGroups(req MaterializeRequest) []materializeGroup {
 		delete(currentByPartition, partitionID)
 	}
 	for _, entry := range req.Entries {
-		entryBytes := uint64(proto.Size(entry))
 		for _, block := range entry.GetDelete().GetBlocks() {
 			pks := storage.ParseIDs2PrimaryKeys(block.GetPrimaryKeys())
 			if len(pks) == 0 {
 				continue
 			}
-			pkBytes := entryBytes / uint64(len(pks))
+			// A transaction may contain many blocks. Charge each block's size
+			// once rather than charging the entire transaction for every block.
+			pkBytes := uint64(proto.Size(block)) / uint64(len(pks))
 			if pkBytes == 0 {
 				pkBytes = 1
 			}

@@ -386,7 +386,9 @@ func (m *VChannelRecoveryModule) handleDropPartitionMessage(
 	if m.vchannelView != nil {
 		m.vchannelView.ObserveDropPartitionMessageV1(msg)
 	}
-	m.flushPartitionSegmentsCreatedBefore(ctx, owned, msg.Header().GetPartitionId())
+	// L0 completion is VChannel-wide, so every earlier L1 blocker must flush,
+	// including segments belonging to partitions that remain live.
+	m.flushAllSegmentsCreatedBefore(ctx, owned)
 }
 
 func (m *VChannelRecoveryModule) handleTruncateCollectionMessage(
@@ -480,21 +482,6 @@ func (m *VChannelRecoveryModule) flushAllSegmentsCreatedBefore(
 ) {
 	for _, view := range m.segments {
 		if view.CreateTimeTick() >= msg.Message().TimeTick() {
-			continue
-		}
-		if view.Flush(ctx, msg) {
-			m.markSegmentUpdatedLocked(view.ID())
-		}
-	}
-}
-
-func (m *VChannelRecoveryModule) flushPartitionSegmentsCreatedBefore(
-	ctx context.Context,
-	msg message.RetainedImmutableMessage,
-	partitionID int64,
-) {
-	for _, view := range m.segments {
-		if view.PartitionID() != partitionID || view.CreateTimeTick() >= msg.Message().TimeTick() {
 			continue
 		}
 		if view.Flush(ctx, msg) {

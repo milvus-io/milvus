@@ -21,6 +21,7 @@ package l0materializer
 import (
 	"context"
 	"math"
+	"sort"
 	"sync"
 
 	"google.golang.org/protobuf/proto"
@@ -56,7 +57,6 @@ type L0Materializer struct {
 	vchannel              string
 	materializedTimeTick  uint64
 	requestedThrough      uint64
-	flushThrough          uint64
 	pendingFlushes        []message.RetainedImmutableMessage
 	backlogThrough        uint64
 	activeGoal            uint64
@@ -142,7 +142,6 @@ func (m *L0Materializer) RequestFlush(owned message.RetainedImmutableMessage) {
 	}
 	// Requests arrive in WAL order. Keep each handle even when targets coalesce.
 	m.pendingFlushes = append(m.pendingFlushes, owned.Clone())
-	m.flushThrough = max(m.flushThrough, through)
 	task := m.scheduleLocked()
 	m.mu.Unlock()
 	m.submit(task)
@@ -165,14 +164,22 @@ func (m *L0Materializer) scheduleLocked() *materializeTask {
 	}
 	target := safe
 	capacity := false
+	// Coalesce only ready requests; a later blocked Flush must not hold back
+	// the already-safe prefix. Handles arrive in WAL order.
+	flushThrough := uint64(0)
+	if n := sort.Search(len(m.pendingFlushes), func(i int) bool {
+		return m.pendingFlushes[i].Message().TimeTick() > safe
+	}); n > 0 {
+		flushThrough = m.pendingFlushes[n-1].Message().TimeTick()
+	}
 	switch {
 	case m.activeGoal > m.materializedTimeTick:
 		if m.activeGoal > safe {
 			return nil
 		}
 		target = m.activeGoal
-	case m.flushThrough > m.materializedTimeTick && m.flushThrough <= safe:
-		target = m.flushThrough
+	case flushThrough > m.materializedTimeTick:
+		target = flushThrough
 		m.activeGoal = target
 	case min(m.backlogThrough, safe) > m.materializedTimeTick:
 		target = min(m.backlogThrough, safe)
