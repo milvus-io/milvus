@@ -19,12 +19,14 @@ package utils
 import (
 	"testing"
 
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // TestPrefetchDelegatorsByChannelIsPerChannelNotPerSegment pins the
@@ -112,12 +114,21 @@ func TestReplicaLoadPercentageUsesTheSuppliedSnapshots(t *testing.T) {
 		}},
 	}
 
-	assert.EqualValues(t, 100, replicaLoadPercentage(replica, channelTargets, segmentTargets, delegators))
+	segmentTargetIDs := typeutil.NewUniqueSet(lo.Keys(segmentTargets)...)
+	assert.EqualValues(t, 100, replicaLoadPercentage(replica, channelTargets, segmentTargets, segmentTargetIDs, delegators))
 
 	// Same replica, same targets, empty delegator snapshot: 0. The function
 	// cannot reach past what it was handed.
-	assert.EqualValues(t, 0, replicaLoadPercentage(replica, channelTargets, segmentTargets,
+	assert.EqualValues(t, 0, replicaLoadPercentage(replica, channelTargets, segmentTargets, segmentTargetIDs,
 		map[string][]*meta.DmChannel{}))
+
+	// A segment the shared store can no longer resolve still counts toward the
+	// target, so the percentage must fall rather than stay at 100: 2 of 3.
+	// The unresolvable segment is in the ID set but absent from the resolved
+	// map -- it counts toward the target and never as loaded: 2 of 3.
+	withUnresolvable := typeutil.NewUniqueSet(lo.Keys(segmentTargets)...)
+	withUnresolvable.Insert(9999)
+	assert.EqualValues(t, 66, replicaLoadPercentage(replica, channelTargets, segmentTargets, withUnresolvable, delegators))
 }
 
 // TestMinReplicaLoadPercentageIsTheLaggard pins the fold from per-replica

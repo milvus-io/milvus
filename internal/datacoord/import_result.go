@@ -315,7 +315,7 @@ func dropImportV3Segments(segmentIDs []int64) UpdateOperator {
 				continue
 			}
 			segment := pack.Get(segmentID)
-			updateSegStateAndPrepareMetrics(segment, commonpb.SegmentState_Dropped, pack.metricMutation)
+			updateSegState(segment, commonpb.SegmentState_Dropped)
 			segment.DroppedAt = uint64(time.Now().UnixNano())
 			updated = true
 		}

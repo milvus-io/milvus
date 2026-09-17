@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/metacache"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
@@ -80,7 +81,7 @@ func newLoadedVectorIndexServer(t *testing.T) (*Server, *indexpb.DropIndexReques
 				},
 				segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 			},
-			segments: NewSegmentsInfo(),
+			segments: NewSegmentsInfo(metacache.NewMetaStore(nil)),
 		},
 		broker:          b,
 		allocator:       newMockAllocator(t),
