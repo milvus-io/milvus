@@ -19,6 +19,8 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"path"
+	"strings"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -246,6 +248,15 @@ func (st *statsTask) QueryTaskOnWorker(cluster session.Cluster) {
 		mlog.FieldNodeID(st.NodeID),
 	)
 
+	// The segment may have been dropped (collection/partition drop, compaction)
+	// while the task is in flight. Cancel the worker-side job instead of
+	// letting it finish stats nobody will read.
+	if st.meta.GetHealthySegment(ctx, st.GetSegmentID()) == nil {
+		log.Info(ctx, "segment dropped while stats task in progress, aborting")
+		st.abortForDroppedSegment(ctx, cluster)
+		return
+	}
+
 	// Query task status
 	results, err := cluster.QueryStats(st.NodeID, &workerpb.QueryJobsRequest{
 		ClusterID: Params.CommonCfg.ClusterPrefix.GetValue(),
@@ -291,6 +302,22 @@ func (st *statsTask) QueryTaskOnWorker(cluster session.Cluster) {
 
 	log.Warn(context.TODO(), "task not found in results")
 	st.resetTask(ctx, "task not found in results")
+}
+
+// abortForDroppedSegment cancels an in-flight stats task whose origin segment
+// is gone: drop the job on the worker first, then remove the task meta. Either
+// step failing leaves the task InProgress so the next check round retries.
+// Files the worker already uploaded are reclaimed by the orphan binlog scans.
+func (st *statsTask) abortForDroppedSegment(ctx context.Context, cluster session.Cluster) {
+	if err := st.tryDropTaskOnWorker(cluster); err != nil {
+		return
+	}
+	if err := st.meta.statsTaskMeta.DropStatsTask(ctx, st.GetTaskID()); err != nil {
+		mlog.Warn(ctx, "remove stats task of dropped segment failed, will retry later",
+			mlog.FieldTaskID(st.GetTaskID()), mlog.FieldSegmentID(st.GetSegmentID()), mlog.Err(err))
+		return
+	}
+	st.SetState(indexpb.JobState_JobStateNone, "segment is not healthy")
 }
 
 func (st *statsTask) tryDropTaskOnWorker(cluster session.Cluster) error {
@@ -353,14 +380,41 @@ func (st *statsTask) cleanupRejectedStatsResultFiles(ctx context.Context, result
 		return
 	}
 
-	files, err := collectRejectedStatsResultFiles(result)
+	expectedSegmentID := st.GetSegmentID()
+	if st.GetTargetSegmentID() != 0 {
+		expectedSegmentID = st.GetTargetSegmentID()
+	}
+	if result.GetCollectionID() != st.GetCollectionID() ||
+		result.GetPartitionID() != st.GetPartitionID() ||
+		result.GetSegmentID() != expectedSegmentID {
+		mlog.Warn(ctx, "refuse to cleanup rejected stats files for a mismatched segment",
+			mlog.FieldTaskID(st.GetTaskID()),
+			mlog.Int64("resultCollectionID", result.GetCollectionID()),
+			mlog.Int64("resultPartitionID", result.GetPartitionID()),
+			mlog.Int64("resultSegmentID", result.GetSegmentID()))
+		return
+	}
+
+	basePath, files, err := collectRejectedStatsResultFiles(
+		result, st.meta.chunkManager.RootPath(),
+		st.GetCollectionID(), st.GetPartitionID(), expectedSegmentID)
 	if err != nil {
 		mlog.Warn(ctx, "failed to collect rejected stats result files",
 			mlog.FieldTaskID(st.GetTaskID()),
 			mlog.FieldSegmentID(st.GetSegmentID()),
 			mlog.Err(err))
+		return
 	}
 	if len(files) == 0 {
+		return
+	}
+	// Complete keys are absolute filesystem paths locally and bucket-relative
+	// object keys remotely. Never resolve a local base against the process CWD
+	// or pass a filesystem path to remote storage.
+	if _, local := st.meta.chunkManager.(*storage.LocalChunkManager); local != path.IsAbs(basePath) {
+		mlog.Warn(ctx, "refuse to cleanup rejected stats files with a manifest base for another storage namespace",
+			mlog.FieldTaskID(st.GetTaskID()),
+			mlog.String("basePath", basePath))
 		return
 	}
 	if err := st.meta.chunkManager.MultiRemove(ctx, files); err != nil {
@@ -372,49 +426,131 @@ func (st *statsTask) cleanupRejectedStatsResultFiles(ctx context.Context, result
 	}
 }
 
-func collectRejectedStatsResultFiles(result *workerpb.StatsResult) ([]string, error) {
+func collectRejectedStatsResultFiles(
+	result *workerpb.StatsResult,
+	rootPath string,
+	collectionID, partitionID, segmentID int64,
+) (string, []string, error) {
 	files := make([]string, 0)
 	seen := make(map[string]struct{})
-	addFile := func(file string) {
-		if file == "" {
-			return
+	addStatsFiles := func(statsBasePath string, statFiles []string, relative bool) error {
+		local := path.IsAbs(statsBasePath)
+		statsPrefix := statsBasePath + "/"
+		if local {
+			statsPrefix = path.Clean(statsBasePath) + "/"
 		}
-		if _, ok := seen[file]; ok {
-			return
+		for _, file := range statFiles {
+			if strings.TrimSpace(file) == "" {
+				continue
+			}
+			// JSON reports names relative to the field's stats directory;
+			// TEXT reports complete keys. Decode before the shared check.
+			if relative {
+				if path.IsAbs(file) {
+					return merr.WrapErrDataIntegrityMsg("rejected JSON stats file must be relative to its stats directory")
+				}
+				file = statsBasePath + "/" + file
+			}
+			checkedFile := file
+			if local {
+				checkedFile = path.Clean(file)
+			}
+			// Workers report complete TEXT stats keys, including an absolute
+			// filesystem path on local storage. Do not guess a prefix for a
+			// relative filename or a key outside this field's stats directory.
+			if !strings.HasPrefix(checkedFile, statsPrefix) {
+				return merr.WrapErrDataIntegrityMsg("rejected stats file escapes its stats directory")
+			}
+			// Clean only for the local directory check. Remote object keys must be
+			// deleted exactly as reported, not rewritten as filesystem paths.
+			if _, ok := seen[file]; ok {
+				continue
+			}
+			seen[file] = struct{}{}
+			files = append(files, file)
 		}
-		seen[file] = struct{}{}
-		files = append(files, file)
+		return nil
 	}
-
-	for _, stats := range result.GetTextStatsLogs() {
-		for _, file := range stats.GetFiles() {
-			addFile(file)
-		}
-	}
-
-	jsonStats := result.GetJsonKeyStatsLogs()
-	if len(jsonStats) == 0 {
-		return files, nil
-	}
-
 	manifest := result.GetBaseManifest()
 	if manifest == "" {
 		manifest = result.GetManifest()
 	}
-	if manifest == "" {
-		return files, merr.WrapErrServiceInternalMsg("manifest is empty for rejected json stats result")
-	}
-	basePath, _, err := packed.UnmarshalManifestPath(manifest)
-	if err != nil {
-		return files, err
-	}
-	for fieldID, stats := range jsonStats {
-		statsBasePath := fmt.Sprintf("%s/_stats/json_stats.%d", basePath, fieldID)
-		for _, file := range metautil.BuildStatsFilePaths(statsBasePath, stats.GetFiles()) {
-			addFile(file)
+	basePath := rootPath
+	if manifest != "" {
+		var err error
+		basePath, _, err = packed.UnmarshalManifestPath(manifest)
+		if err != nil {
+			return "", nil, err
+		}
+		if err := validateStatsManifestBase(basePath, collectionID, partitionID, segmentID); err != nil {
+			return "", nil, err
+		}
+		if result.GetManifest() != "" && result.GetManifest() != manifest {
+			resultBase, _, err := packed.UnmarshalManifestPath(result.GetManifest())
+			if err != nil {
+				return "", nil, err
+			}
+			sameBase := resultBase == basePath
+			if path.IsAbs(basePath) {
+				sameBase = path.Clean(resultBase) == path.Clean(basePath)
+			}
+			if !sameBase {
+				return "", nil, merr.WrapErrDataIntegrityMsg("rejected stats result changes manifest base path")
+			}
 		}
 	}
-	return files, nil
+
+	// Manifest-less V2 results use build/version directories; V3 uses _stats.
+	validateLegacyLocation := func(fieldID, buildID, version int64) error {
+		if buildID <= 0 || version <= 0 {
+			return merr.WrapErrDataIntegrityMsg(
+				"rejected stats result for field %d carries no build ID or version to locate its stats directory", fieldID)
+		}
+		return nil
+	}
+	for fieldID, stats := range result.GetTextStatsLogs() {
+		statsBase := basePath + fmt.Sprintf("/_stats/text_index.%d", fieldID)
+		if manifest == "" {
+			if err := validateLegacyLocation(fieldID, stats.GetBuildID(), stats.GetVersion()); err != nil {
+				return "", nil, err
+			}
+			statsBase = metautil.BuildTextIndexPrefix(rootPath, stats.GetBuildID(), stats.GetVersion(),
+				collectionID, partitionID, segmentID, fieldID)
+		}
+		if err := addStatsFiles(statsBase, stats.GetFiles(), false); err != nil {
+			return "", nil, err
+		}
+	}
+	for fieldID, stats := range result.GetJsonKeyStatsLogs() {
+		statsBase := metautil.BuildJSONKeyStatsV3Prefix(basePath, fieldID)
+		if manifest == "" {
+			if err := validateLegacyLocation(fieldID, stats.GetBuildID(), stats.GetVersion()); err != nil {
+				return "", nil, err
+			}
+			statsBase = metautil.BuildJSONKeyStatsPrefix(rootPath,
+				stats.GetJsonKeyStatsDataFormat(), stats.GetBuildID(), stats.GetVersion(),
+				collectionID, partitionID, segmentID, fieldID)
+		}
+		if err := addStatsFiles(statsBase, stats.GetFiles(), true); err != nil {
+			return "", nil, err
+		}
+	}
+	return basePath, files, nil
+}
+
+func validateStatsManifestBase(basePath string, collectionID, partitionID, segmentID int64) error {
+	// Manifests carry complete storage keys, not provider URIs.  A URI would
+	// be passed verbatim to ChunkManager cleanup and is not a valid object key.
+	if strings.Contains(basePath, "://") {
+		return merr.WrapErrDataIntegrityMsg("stats manifest base must be a storage key")
+	}
+	if path.IsAbs(basePath) {
+		basePath = path.Clean(basePath)
+	}
+	if !segmentBaseMatches(basePath, collectionID, partitionID, segmentID) {
+		return merr.WrapErrDataIntegrityMsg("stats manifest base does not match task segment identity")
+	}
+	return nil
 }
 
 func (st *statsTask) DropTaskOnWorker(cluster session.Cluster) {
