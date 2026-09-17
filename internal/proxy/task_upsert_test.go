@@ -731,8 +731,7 @@ func requireAppendedPartialUpdateCASGroups(
 
 	seen := make(map[string]struct{}, len(expected))
 	for _, msg := range msgs {
-		meta, err := streamingmessage.ExtractPartialUpdateCAS(msg)
-		require.NoError(t, err)
+		meta := partialUpdateCASOf(t, msg)
 		if meta == nil {
 			continue
 		}
@@ -746,12 +745,24 @@ func requireAppendedPartialUpdateCASGroups(
 	require.Len(t, seen, len(expected))
 }
 
+// partialUpdateCASOf reads the CAS metadata from the body of a marked insert
+// message. It returns nil when the message is not marked.
+func partialUpdateCASOf(t *testing.T, msg streamingmessage.MutableMessage) *messagespb.PartialUpdateCAS {
+	t.Helper()
+	if !streamingmessage.HasPartialUpdateCAS(msg) {
+		return nil
+	}
+	body := streamingmessage.MustAsMutableInsertMessageV1(msg).MustBody()
+	meta, err := streamingmessage.DecodePartialUpdateCASMetadata(body.GetBase().GetProperties()["_puc"])
+	require.NoError(t, err)
+	return meta
+}
+
 func requireFirstPartialUpdateCAS(t *testing.T, msgs []streamingmessage.MutableMessage) *messagespb.PartialUpdateCAS {
 	t.Helper()
 
 	for _, msg := range msgs {
-		meta, err := streamingmessage.ExtractPartialUpdateCAS(msg)
-		require.NoError(t, err)
+		meta := partialUpdateCASOf(t, msg)
 		if meta != nil {
 			return meta
 		}
@@ -1203,8 +1214,7 @@ func TestRepackInsertDataForStreamingServiceProducesSingleMessageWithCASMetadata
 	require.NoError(t, err)
 	require.Len(t, msgs, 1)
 	require.True(t, streamingmessage.HasPartialUpdateCAS(msgs[0]))
-	meta, err := streamingmessage.ExtractPartialUpdateCAS(msgs[0])
-	require.NoError(t, err)
+	meta := partialUpdateCASOf(t, msgs[0])
 	require.True(t, proto.Equal(groups[vchannel], meta))
 
 	insert := streamingmessage.MustAsMutableInsertMessageV1(msgs[0])
@@ -1446,8 +1456,7 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceProducesSingleMessag
 	require.NoError(t, err)
 	require.Len(t, msgs, 1)
 	require.True(t, streamingmessage.HasPartialUpdateCAS(msgs[0]))
-	meta, err := streamingmessage.ExtractPartialUpdateCAS(msgs[0])
-	require.NoError(t, err)
+	meta := partialUpdateCASOf(t, msgs[0])
 	require.True(t, proto.Equal(groups[vchannel], meta))
 
 	insert := streamingmessage.MustAsMutableInsertMessageV1(msgs[0])
@@ -1631,8 +1640,7 @@ func TestFullAutoIDRoutesExistingInsertAndDeleteTogether(t *testing.T) {
 	require.Zero(t, fakeWAL.resolveCalls, "Full Upsert must not prepare CAS terms")
 	var insertMsgs, deleteMsgs []streamingmessage.MutableMessage
 	for _, msg := range fakeWAL.appended {
-		proof, err := streamingmessage.ExtractPartialUpdateCAS(msg)
-		require.NoError(t, err)
+		proof := partialUpdateCASOf(t, msg)
 		require.Nil(t, proof)
 		if msg.MessageType() == streamingmessage.MessageTypeInsert {
 			insertMsgs = append(insertMsgs, msg)
@@ -2264,8 +2272,7 @@ func TestNonPartialUpsertDoesNotAttachCASMetadata(t *testing.T) {
 	require.Equal(t, 1, fakeWAL.appendCalls)
 	require.Len(t, fakeWAL.appended, len(insertMsgs)+len(deleteMsgs))
 	for _, msg := range fakeWAL.appended {
-		meta, err := streamingmessage.ExtractPartialUpdateCAS(msg)
-		require.NoError(t, err)
+		meta := partialUpdateCASOf(t, msg)
 		require.Nil(t, meta)
 	}
 }
@@ -2435,8 +2442,7 @@ func TestAttachPartialUpdateCASAcceptsEveryBuilderMarkedInsertChunk(t *testing.T
 	require.NoError(t, task.attachPartialUpdateCAS(msgs))
 
 	for _, msg := range msgs {
-		meta, err := streamingmessage.ExtractPartialUpdateCAS(msg)
-		require.NoError(t, err)
+		meta := partialUpdateCASOf(t, msg)
 		require.NotNil(t, meta)
 	}
 }

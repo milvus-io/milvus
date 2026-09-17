@@ -195,12 +195,12 @@ func (s *Server) isReplicatingClusterNow(ctx context.Context) (bool, error) {
 // idempotency key is scoped to this collection's ID, so a hit already means both
 // broadcasts targeted it. It is checked as an invariant, to fail loudly on an encoding
 // or scoping bug rather than hand back a jobID for another collection's import.
-func jobIDFromDuplicatedBroadcast(msg message.BroadcastMutableMessage, collectionID int64) (int64, error) {
+func jobIDFromDuplicatedBroadcast(ctx context.Context, msg message.BroadcastMutableMessage, collectionID int64) (int64, error) {
 	importMsg, err := message.AsBroadcastImportMessageV1(msg)
 	if err != nil {
 		return 0, merr.Wrap(err, "malformed duplicated import broadcast message")
 	}
-	body, err := importMsg.Body()
+	body, err := importMsg.Body(ctx)
 	if err != nil {
 		return 0, merr.Wrap(err, "malformed duplicated import broadcast message body")
 	}
@@ -325,7 +325,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 	}
 	// The broadcaster resolved this idempotency key to an earlier broadcast, so no
 	// new job was created; recover what that broadcast carried.
-	originalJobID, err := jobIDFromDuplicatedBroadcast(result.Duplicated, collectionID)
+	originalJobID, err := jobIDFromDuplicatedBroadcast(ctx, result.Duplicated, collectionID)
 	if err != nil {
 		return 0, false, err
 	}

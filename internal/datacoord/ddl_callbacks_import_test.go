@@ -1248,7 +1248,7 @@ func TestJobIDFromDuplicatedBroadcast(t *testing.T) {
 		WithBroadcast([]string{"v1"}).
 		MustBuildBroadcast()
 
-	jobID, err := jobIDFromDuplicatedBroadcast(msg, 100)
+	jobID, err := jobIDFromDuplicatedBroadcast(context.Background(), msg, 100)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(4242), jobID)
 }
@@ -1265,7 +1265,7 @@ func TestJobIDFromDuplicatedBroadcast_RejectsADifferentCollection(t *testing.T) 
 		WithBroadcast([]string{"v1"}).
 		MustBuildBroadcast()
 
-	_, err := jobIDFromDuplicatedBroadcast(msg, 101)
+	_, err := jobIDFromDuplicatedBroadcast(context.Background(), msg, 101)
 	assert.Error(t, err)
 	assert.True(t, errors.Is(err, merr.ErrServiceInternal))
 }
