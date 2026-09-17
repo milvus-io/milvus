@@ -189,13 +189,13 @@ var (
 		})
 
 	// RootCoordRateLimitRatio reflects the ratio of rate limit.
-	RootCoordRateLimitRatio = prometheus.NewGaugeVec(
+	RootCoordRateLimitRatio = newCollectionGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.RootCoordRole,
 			Name:      "rate_limit_ratio",
 			Help:      "",
-		}, []string{collectionIDLabelName})
+		}, []string{collectionIDLabelName}, collectionGaugeAggregateDisabled)
 
 	RootCoordDDLReqLatencyInQueue = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -206,7 +206,7 @@ var (
 			Buckets:   subMsBuckets,
 		}, []string{functionLabelName})
 
-	RootCoordNumEntities = prometheus.NewGaugeVec(
+	RootCoordNumEntities = newCollectionGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.RootCoordRole,
@@ -216,9 +216,9 @@ var (
 			databaseLabelName,
 			collectionName,
 			statusLabelName,
-		})
+		}, collectionGaugeAggregateSum)
 
-	RootCoordIndexedNumEntities = prometheus.NewGaugeVec(
+	RootCoordIndexedNumEntities = newCollectionGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.RootCoordRole,
@@ -229,7 +229,7 @@ var (
 			collectionName,
 			indexName,
 			isVectorIndex,
-		})
+		}, collectionGaugeAggregateSum)
 
 	QueryNodeMemoryHighWaterLevel = prometheus.NewGauge(
 		prometheus.GaugeOpts{
