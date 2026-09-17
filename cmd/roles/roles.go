@@ -36,10 +36,12 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/cmd/components"
+	mix "github.com/milvus-io/milvus/internal/distributed/mixcoord/client"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/http/healthz"
 	"github.com/milvus-io/milvus/internal/storagev2"
+	"github.com/milvus-io/milvus/internal/util/adminauth"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
@@ -433,14 +435,24 @@ func (mr *MilvusRoles) Run() {
 		}
 
 		params := paramtable.Get()
+		// Recover visible legacy local files before etcd and components start.
+		if !mr.migrateLocalStorageLayoutOrDie(ctx, params) {
+			return
+		}
 		if params.EtcdCfg.UseEmbedEtcd.GetAsBool() {
 			// Start etcd server.
-			etcd.InitEtcdServer(
+			if err := etcd.InitEtcdServer(
 				params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
 				params.EtcdCfg.ConfigPath.GetValue(),
 				params.EtcdCfg.DataDir.GetValue(),
 				params.EtcdCfg.EtcdLogPath.GetValue(),
-				params.EtcdCfg.EtcdLogLevel.GetValue())
+				params.EtcdCfg.EtcdLogLevel.GetValue()); err != nil {
+				// Panic (non-zero exit) so restart policies such as systemd
+				// Restart=on-failure or docker --restart on-failure treat the
+				// startup failure as a crash rather than a clean exit.
+				mlog.Error(context.TODO(), "failed to start embedded Etcd server", mlog.Err(err))
+				panic(err)
+			}
 			defer etcd.StopEtcdServer()
 		}
 		paramtable.SetRole(typeutil.StandaloneRole)
@@ -493,6 +505,20 @@ func (mr *MilvusRoles) Run() {
 	mr.setupLogger()
 	defer mlog.Cleanup()
 
+	// Worker nodes (querynode, datanode, streamingnode) host no credential
+	// metadata, so without this their management plane and pprof would answer
+	// 503 to root as well as to attackers once adminAuthEnabled is on. It takes
+	// the lowest-priority slot: proxy and mix coord register in-process
+	// verifiers that win, so single-process standalone never makes this RPC.
+	rootCredentialVerifier := adminauth.NewRootCredentialVerifier(ctx, mix.NewClient)
+	http.RegisterManagementVerifier(http.VerifierSlotWorker, rootCredentialVerifier.Verify)
+	defer func() {
+		http.RegisterManagementVerifier(http.VerifierSlotWorker, nil)
+		if err := rootCredentialVerifier.Close(); err != nil {
+			mlog.Warn(ctx, "close root credential verifier failed", mlog.Err(err))
+		}
+	}()
+
 	http.ServeHTTP()
 	setupPrometheusHTTPServer(Registry)
 
@@ -528,6 +554,11 @@ func (mr *MilvusRoles) Run() {
 
 	if (mr.EnableRootCoord && mr.EnableDataCoord && mr.EnableQueryCoord) || mr.EnableMixCoord {
 		paramtable.SetLocalComponentEnabled(typeutil.MixCoordRole)
+		// The version-gate switcher is a cluster-wide, one-shot capability:
+		// only the MixCoord role starts it, so a single coordinator drives the
+		// flip of every version-gated config item. Other roles observe the
+		// flipped value through the regular config refresh.
+		paramtable.StartVersionGateSwitcher()
 		mixCoord := mr.runMixCoord(ctx, local)
 		componentFutureMap[typeutil.MixCoordRole] = mixCoord
 	}

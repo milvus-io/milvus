@@ -28,6 +28,7 @@
 #include <string>
 #include <vector>
 
+#include "common/CGoCatch.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
 #include "common/Utils.h"
@@ -42,10 +43,14 @@
 #include "segcore/SegmentInterface.h"
 #include "segcore/SegmentReadLease.h"
 #include "segcore/Utils.h"
+#include "segcore/arrow_field_utils.h"
 #include "segcore/reduce/Reduce.h"
 #include "storage/ThreadPools.h"
 
 using SearchResult = milvus::SearchResult;
+using milvus::segcore::EmptyExtraFieldArrowType;
+using milvus::segcore::FieldDataToArrow;
+using milvus::segcore::MilvusField;
 
 namespace {
 
@@ -108,27 +113,6 @@ AssertSearchResultReadLease(const SearchResult* result) {
     }
 }
 
-constexpr const char* kMilvusFieldIDMetadataKey = "milvus.field_id";
-constexpr const char* kMilvusDataTypeMetadataKey = "milvus.data_type";
-
-std::shared_ptr<arrow::KeyValueMetadata>
-MilvusFieldMetadata(milvus::FieldId field_id, milvus::DataType data_type) {
-    return arrow::key_value_metadata(
-        {kMilvusFieldIDMetadataKey, kMilvusDataTypeMetadataKey},
-        {std::to_string(field_id.get()),
-         std::to_string(static_cast<int32_t>(data_type))});
-}
-
-std::shared_ptr<arrow::Field>
-MilvusField(const std::string& name,
-            const std::shared_ptr<arrow::DataType>& arrow_type,
-            bool nullable,
-            milvus::FieldId field_id,
-            milvus::DataType data_type) {
-    return arrow::field(
-        name, arrow_type, nullable, MilvusFieldMetadata(field_id, data_type));
-}
-
 void
 SetFieldDataElementTypeIfNeeded(milvus::proto::schema::FieldData* field_data,
                                 const milvus::FieldMeta& field_meta) {
@@ -166,36 +150,6 @@ SerializeSearchResultDataToCProto(
 std::string
 GroupByColumnName(milvus::FieldId field_id) {
     return "$group_by_" + std::to_string(field_id.get());
-}
-
-arrow::Result<std::shared_ptr<arrow::DataType>>
-EmptyExtraFieldArrowType(const milvus::FieldMeta& field_meta) {
-    switch (field_meta.get_data_type()) {
-        case milvus::DataType::BOOL:
-            return arrow::boolean();
-        case milvus::DataType::INT8:
-        case milvus::DataType::INT16:
-        case milvus::DataType::INT32:
-            return arrow::int32();
-        case milvus::DataType::INT64:
-        case milvus::DataType::TIMESTAMPTZ:
-            return arrow::int64();
-        case milvus::DataType::FLOAT:
-            return arrow::float32();
-        case milvus::DataType::DOUBLE:
-            return arrow::float64();
-        case milvus::DataType::STRING:
-        case milvus::DataType::VARCHAR:
-        case milvus::DataType::TEXT:
-            return arrow::utf8();
-        case milvus::DataType::JSON:
-            return arrow::binary();
-        case milvus::DataType::GEOMETRY:
-            return arrow::Status::NotImplemented(
-                "GEOMETRY extra field Arrow export is not implemented");
-        default:
-            return milvus::GetArrowDataType(field_meta.get_data_type());
-    }
 }
 
 std::vector<GroupByArrowInfo>
@@ -324,72 +278,6 @@ BuildEmptyBatch(milvus::query::Plan* plan,
     return arrow::RecordBatch::Make(arrow::schema(fields), 0, arrays);
 }
 
-// BuildFixedWidthArray builds an Arrow Array from a fixed-width protobuf repeated field.
-template <typename BuilderType, typename DataContainer>
-arrow::Result<std::shared_ptr<arrow::Array>>
-BuildFixedWidthArray(const DataContainer& data,
-                     const milvus::DataArray& field_data,
-                     size_t total_valid) {
-    AssertInfo(static_cast<size_t>(data.size()) >= total_valid,
-               "field data length {} is smaller than expected row count {}",
-               data.size(),
-               total_valid);
-    const auto& valid_data = milvus::GetFieldDataRowValidData(field_data);
-    const bool has_valid_data = !valid_data.empty();
-    if (has_valid_data) {
-        AssertInfo(static_cast<size_t>(valid_data.size()) == total_valid,
-                   "valid_data length {} does not match expected row count {}",
-                   valid_data.size(),
-                   total_valid);
-    }
-
-    BuilderType builder;
-    ARROW_RETURN_NOT_OK(builder.Reserve(total_valid));
-    for (size_t i = 0; i < total_valid; ++i) {
-        if (has_valid_data && !valid_data[i]) {
-            ARROW_RETURN_NOT_OK(builder.AppendNull());
-            continue;
-        }
-        builder.UnsafeAppend(data[i]);
-    }
-    std::shared_ptr<arrow::Array> arr;
-    ARROW_RETURN_NOT_OK(builder.Finish(&arr));
-    return arr;
-}
-
-// BuildVarLenArray builds an Arrow Array from a variable-length protobuf repeated field.
-template <typename BuilderType, typename DataContainer>
-arrow::Result<std::shared_ptr<arrow::Array>>
-BuildVarLenArray(const DataContainer& data,
-                 const milvus::DataArray& field_data,
-                 size_t total_valid) {
-    AssertInfo(static_cast<size_t>(data.size()) >= total_valid,
-               "field data length {} is smaller than expected row count {}",
-               data.size(),
-               total_valid);
-    const auto& valid_data = milvus::GetFieldDataRowValidData(field_data);
-    const bool has_valid_data = !valid_data.empty();
-    if (has_valid_data) {
-        AssertInfo(static_cast<size_t>(valid_data.size()) == total_valid,
-                   "valid_data length {} does not match expected row count {}",
-                   valid_data.size(),
-                   total_valid);
-    }
-
-    BuilderType builder;
-    ARROW_RETURN_NOT_OK(builder.Reserve(total_valid));
-    for (size_t i = 0; i < total_valid; ++i) {
-        if (has_valid_data && !valid_data[i]) {
-            ARROW_RETURN_NOT_OK(builder.AppendNull());
-            continue;
-        }
-        ARROW_RETURN_NOT_OK(builder.Append(data[i]));
-    }
-    std::shared_ptr<arrow::Array> arr;
-    ARROW_RETURN_NOT_OK(builder.Finish(&arr));
-    return arr;
-}
-
 // Build the $group_by Arrow array from SearchResult::composite_group_by_values_,
 // dispatching on the resolved element type. Each entry in `values` is an
 // std::optional<std::variant<monostate, ints..., bool, string>>; entries that
@@ -439,79 +327,6 @@ BuildGroupByArray(const std::vector<milvus::GroupByValueType>& values,
             return arrow::Status::NotImplemented(
                 "unsupported group-by element type in Arrow export");
     }
-}
-
-// Convert a protobuf FieldData (scalar) to an Arrow Array + Field.
-arrow::Result<
-    std::pair<std::shared_ptr<arrow::Field>, std::shared_ptr<arrow::Array>>>
-FieldDataToArrow(const std::string& field_name,
-                 const milvus::DataArray& field_data,
-                 size_t total_valid) {
-    if (!field_data.has_scalars()) {
-        return arrow::Status::NotImplemented(
-            "non-scalar output field not supported in Arrow export");
-    }
-    const auto& scalars = field_data.scalars();
-
-    if (scalars.has_bool_data()) {
-        ARROW_ASSIGN_OR_RAISE(
-            auto arr,
-            BuildFixedWidthArray<arrow::BooleanBuilder>(
-                scalars.bool_data().data(), field_data, total_valid));
-        return std::make_pair(arrow::field(field_name, arrow::boolean()), arr);
-    }
-    if (scalars.has_int_data()) {
-        ARROW_ASSIGN_OR_RAISE(
-            auto arr,
-            BuildFixedWidthArray<arrow::Int32Builder>(
-                scalars.int_data().data(), field_data, total_valid));
-        return std::make_pair(arrow::field(field_name, arrow::int32()), arr);
-    }
-    if (scalars.has_long_data()) {
-        ARROW_ASSIGN_OR_RAISE(
-            auto arr,
-            BuildFixedWidthArray<arrow::Int64Builder>(
-                scalars.long_data().data(), field_data, total_valid));
-        return std::make_pair(arrow::field(field_name, arrow::int64()), arr);
-    }
-    if (scalars.has_timestamptz_data()) {
-        ARROW_ASSIGN_OR_RAISE(
-            auto arr,
-            BuildFixedWidthArray<arrow::Int64Builder>(
-                scalars.timestamptz_data().data(), field_data, total_valid));
-        return std::make_pair(arrow::field(field_name, arrow::int64()), arr);
-    }
-    if (scalars.has_float_data()) {
-        ARROW_ASSIGN_OR_RAISE(
-            auto arr,
-            BuildFixedWidthArray<arrow::FloatBuilder>(
-                scalars.float_data().data(), field_data, total_valid));
-        return std::make_pair(arrow::field(field_name, arrow::float32()), arr);
-    }
-    if (scalars.has_double_data()) {
-        ARROW_ASSIGN_OR_RAISE(
-            auto arr,
-            BuildFixedWidthArray<arrow::DoubleBuilder>(
-                scalars.double_data().data(), field_data, total_valid));
-        return std::make_pair(arrow::field(field_name, arrow::float64()), arr);
-    }
-    if (scalars.has_string_data()) {
-        ARROW_ASSIGN_OR_RAISE(
-            auto arr,
-            BuildVarLenArray<arrow::StringBuilder>(
-                scalars.string_data().data(), field_data, total_valid));
-        return std::make_pair(arrow::field(field_name, arrow::utf8()), arr);
-    }
-    if (scalars.has_json_data()) {
-        ARROW_ASSIGN_OR_RAISE(
-            auto arr,
-            BuildVarLenArray<arrow::BinaryBuilder>(
-                scalars.json_data().data(), field_data, total_valid));
-        return std::make_pair(arrow::field(field_name, arrow::binary()), arr);
-    }
-
-    return arrow::Status::NotImplemented(
-        "unsupported scalar type in Arrow export");
 }
 
 // Build Arrow RecordBatch from a SearchResult that has been filtered and had PKs filled.
@@ -1089,9 +904,8 @@ ExportSearchResultAsArrowRecordBatch(CSearchResult c_search_result,
         return milvus::SuccessCStatus();
     } catch (folly::FutureCancellation& e) {
         return milvus::FailureCStatus(milvus::ErrorCode::FollyCancel, e.what());
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -1191,9 +1005,8 @@ FillOutputFieldsOrderedImpl(CSearchResult* search_results,
             "failed to serialize SearchResultData proto");
     } catch (folly::FutureCancellation& e) {
         return milvus::FailureCStatus(milvus::ErrorCode::FollyCancel, e.what());
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -1205,9 +1018,20 @@ FillOutputFieldsOrdered(CSearchResult* search_results,
                         int64_t total_rows,
                         CProto* out_result,
                         void* cancellation_source) {
-    if (cancellation_source != nullptr) {
-        auto source =
-            static_cast<folly::CancellationSource*>(cancellation_source);
+    try {
+        if (cancellation_source != nullptr) {
+            auto source =
+                static_cast<folly::CancellationSource*>(cancellation_source);
+            return FillOutputFieldsOrderedImpl(search_results,
+                                               num_search_results,
+                                               c_plan,
+                                               result_seg_indices,
+                                               result_seg_offsets,
+                                               total_rows,
+                                               out_result,
+                                               source->getToken());
+        }
+
         return FillOutputFieldsOrderedImpl(search_results,
                                            num_search_results,
                                            c_plan,
@@ -1215,17 +1039,9 @@ FillOutputFieldsOrdered(CSearchResult* search_results,
                                            result_seg_offsets,
                                            total_rows,
                                            out_result,
-                                           source->getToken());
+                                           folly::CancellationToken());
     }
-
-    return FillOutputFieldsOrderedImpl(search_results,
-                                       num_search_results,
-                                       c_plan,
-                                       result_seg_indices,
-                                       result_seg_offsets,
-                                       total_rows,
-                                       out_result,
-                                       folly::CancellationToken());
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -1327,9 +1143,8 @@ FillFieldsOrderedAsArrowRecordBatch(CSearchResult* search_results,
         return milvus::SuccessCStatus();
     } catch (folly::FutureCancellation& e) {
         return milvus::FailureCStatus(milvus::ErrorCode::FollyCancel, e.what());
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 void
@@ -1338,13 +1153,16 @@ GetSearchResultMetadata(CSearchResult c_search_result,
                         int64_t* group_size,
                         int64_t* scanned_remote_bytes,
                         int64_t* scanned_total_bytes) {
-    auto search_result = static_cast<SearchResult*>(c_search_result);
-    *has_group_by = search_result->composite_group_by_values_.has_value();
-    *group_size = search_result->group_size_.value_or(0);
-    *scanned_remote_bytes =
-        search_result->search_storage_cost_.scanned_remote_bytes;
-    *scanned_total_bytes =
-        search_result->search_storage_cost_.scanned_total_bytes;
+    try {
+        auto search_result = static_cast<SearchResult*>(c_search_result);
+        *has_group_by = search_result->composite_group_by_values_.has_value();
+        *group_size = search_result->group_size_.value_or(0);
+        *scanned_remote_bytes =
+            search_result->search_storage_cost_.scanned_remote_bytes;
+        *scanned_total_bytes =
+            search_result->search_storage_cost_.scanned_total_bytes;
+    }
+    CGO_CATCH_AND_LOG("GetSearchResultMetadata")
 }
 
 CStatus
@@ -1400,9 +1218,8 @@ PrepareSearchResultsForExportImpl(
         return milvus::SuccessCStatus();
     } catch (folly::FutureCancellation& e) {
         return milvus::FailureCStatus(milvus::ErrorCode::FollyCancel, e.what());
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -1416,9 +1233,22 @@ PrepareSearchResultsForExport(CTraceContext c_trace,
                               int64_t* slice_topKs,
                               int64_t* all_search_count,
                               void* cancellation_source) {
-    if (cancellation_source != nullptr) {
-        auto source =
-            static_cast<folly::CancellationSource*>(cancellation_source);
+    try {
+        if (cancellation_source != nullptr) {
+            auto source =
+                static_cast<folly::CancellationSource*>(cancellation_source);
+            return PrepareSearchResultsForExportImpl(c_trace,
+                                                     c_plan,
+                                                     c_placeholder_group,
+                                                     c_search_results,
+                                                     num_segments,
+                                                     slice_nqs,
+                                                     num_slices,
+                                                     slice_topKs,
+                                                     all_search_count,
+                                                     source->getToken());
+        }
+
         return PrepareSearchResultsForExportImpl(c_trace,
                                                  c_plan,
                                                  c_placeholder_group,
@@ -1428,17 +1258,7 @@ PrepareSearchResultsForExport(CTraceContext c_trace,
                                                  num_slices,
                                                  slice_topKs,
                                                  all_search_count,
-                                                 source->getToken());
+                                                 folly::CancellationToken());
     }
-
-    return PrepareSearchResultsForExportImpl(c_trace,
-                                             c_plan,
-                                             c_placeholder_group,
-                                             c_search_results,
-                                             num_segments,
-                                             slice_nqs,
-                                             num_slices,
-                                             slice_topKs,
-                                             all_search_count,
-                                             folly::CancellationToken());
+    CGO_CATCH_AND_RETURN_CSTATUS
 }

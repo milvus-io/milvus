@@ -17,6 +17,7 @@
 
 #include <stdint.h>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -45,6 +46,25 @@ using data_access_type = std::optional<boost::variant<bool,
 using ChunkDataAccessor = std::function<const data_access_type(int)>;
 using MultipleChunkDataAccessor = std::function<const data_access_type()>;
 using PinnedIndexView = boost::span<const PinWrapper<const index::IndexBase*>>;
+
+// One sealed raw string consumer owns this handle across complete execution
+// windows of one field and request snapshot. Two consumers of the same field
+// must use separate handles. A default handle does not allocate Scan state.
+class StringScanState {
+ public:
+    StringScanState() = default;
+    StringScanState(const StringScanState&) = delete;
+    StringScanState&
+    operator=(const StringScanState&) = delete;
+    StringScanState(StringScanState&&) noexcept = default;
+    StringScanState&
+    operator=(StringScanState&&) noexcept = default;
+
+ private:
+    friend class SegmentChunkReader;
+    struct State;
+    std::shared_ptr<State> state_;
+};
 
 // Helper to extract a value of type T from data_access_type.
 // For std::string, handles both std::string and std::string_view in the variant.
@@ -107,12 +127,25 @@ class SegmentChunkReader {
           op_ctx_(op_ctx) {
     }
 
+    // A sequential string accessor materializes at most scan_batch_size rows
+    // per window. It may serve multiple windows; consume borrowed values before
+    // advancing it into the next window or Cell.
     MultipleChunkDataAccessor
     GetMultipleChunkDataAccessor(DataType data_type,
                                  FieldId field_id,
                                  int64_t& current_chunk_id,
                                  int64_t& current_chunk_pos,
-                                 PinnedIndexView pinned_index) const;
+                                 PinnedIndexView pinned_index,
+                                 int64_t scan_batch_size = 1024,
+                                 StringScanState* scan_state = nullptr) const;
+
+    // Sealed string access over one expression's finite offset input. Offsets
+    // and pinned indexes must outlive the accessor. Borrowed strings must be
+    // consumed before the next access that switches the underlying Cell.
+    ChunkDataAccessor
+    GetStringDataAccessorByOffsets(FieldId field_id,
+                                   OffsetView offsets,
+                                   PinnedIndexView pinned_index) const;
 
     ChunkDataAccessor
     GetChunkDataAccessor(DataType data_type,
@@ -126,23 +159,58 @@ class SegmentChunkReader {
                                const FieldId field_id,
                                const int64_t num_chunk,
                                const int64_t batch_size) const {
-        int64_t segment_row_count = segment_->get_row_count();
+        int64_t segment_row_count = RowCount();
         int64_t current_offset =
-            segment_->num_rows_until_chunk(field_id, current_chunk_id) +
-            current_chunk_pos;
+            NumRowsUntilChunk(field_id, current_chunk_id) + current_chunk_pos;
         int64_t target_offset = current_offset + batch_size;
 
         if (target_offset >= segment_row_count) {
             current_chunk_id = num_chunk - 1;
-            current_chunk_pos =
-                segment_row_count -
-                segment_->num_rows_until_chunk(field_id, current_chunk_id);
+            current_chunk_pos = segment_row_count -
+                                NumRowsUntilChunk(field_id, current_chunk_id);
             return;
         }
-        auto [chunk_id, chunk_pos] =
-            segment_->get_chunk_by_offset(field_id, target_offset);
+        auto [chunk_id, chunk_pos] = GetChunkByOffset(field_id, target_offset);
         current_chunk_id = chunk_id;
         current_chunk_pos = chunk_pos;
+    }
+
+    // Bind the request-scoped sealed read snapshot. Borrowed from the owning
+    // QueryContext; valid for the whole ExecuteTask. Null for growing /
+    // non-pinned paths, which fall back to segment access below.
+    void
+    SetSnapshot(const segcore::SegmentReadSnapshot* snapshot) const {
+        snapshot_ = snapshot;
+    }
+
+    int64_t
+    ChunkSize(FieldId field_id, int64_t chunk_id) const {
+        return snapshot_ ? snapshot_->chunk_size(field_id, chunk_id)
+                         : segment_->chunk_size(field_id, chunk_id);
+    }
+
+    int64_t
+    NumRowsUntilChunk(FieldId field_id, int64_t chunk_id) const {
+        return snapshot_ ? snapshot_->num_rows_until_chunk(field_id, chunk_id)
+                         : segment_->num_rows_until_chunk(field_id, chunk_id);
+    }
+
+    std::pair<int64_t, int64_t>
+    GetChunkByOffset(FieldId field_id, int64_t offset) const {
+        return snapshot_ ? snapshot_->get_chunk_by_offset(field_id, offset)
+                         : segment_->get_chunk_by_offset(field_id, offset);
+    }
+
+    int64_t
+    NumChunkData(FieldId field_id) const {
+        return snapshot_ ? snapshot_->num_chunk_data(field_id)
+                         : segment_->num_chunk_data(field_id);
+    }
+
+    int64_t
+    RowCount() const {
+        return snapshot_ ? snapshot_->get_row_count()
+                         : segment_->get_row_count();
     }
 
     void
@@ -177,14 +245,29 @@ class SegmentChunkReader {
 
     const int64_t active_count_;
     const segcore::SegmentInternalInterface* segment_;
+    mutable const segcore::SegmentReadSnapshot* snapshot_{nullptr};
 
  private:
+    std::shared_ptr<ChunkedColumnInterface>
+    GetStringColumn(FieldId field_id) const {
+        return snapshot_ ? snapshot_->GetDataScanResources(field_id).first
+                         : segment_->GetChunkedColumn(field_id);
+    }
+
     template <typename T>
     MultipleChunkDataAccessor
     GetMultipleChunkDataAccessor(FieldId field_id,
                                  int64_t& current_chunk_id,
                                  int64_t& current_chunk_pos,
                                  PinnedIndexView pinned_index) const;
+
+    MultipleChunkDataAccessor
+    GetMultipleChunkStringDataAccessor(FieldId field_id,
+                                       int64_t& current_chunk_id,
+                                       int64_t& current_chunk_pos,
+                                       PinnedIndexView pinned_index,
+                                       int64_t scan_batch_size,
+                                       StringScanState* scan_state) const;
 
     template <typename T>
     ChunkDataAccessor

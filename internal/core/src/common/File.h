@@ -42,15 +42,19 @@ class File {
     static File
     Open(const std::string_view filepath, int flags, size_t buf_size) {
         int fd = open(filepath.data(), flags, S_IRUSR | S_IWUSR);
-        AssertInfo(fd != -1,
-                   "failed to create mmap file {}: {}",
-                   filepath,
-                   strerror(errno));
+        if (fd == -1) {
+            ThrowInfo(ErrorCode::FileOpenFailed,
+                      "failed to create mmap file {}: {}",
+                      filepath,
+                      strerror(errno));
+        }
         FILE* fs = fdopen(fd, get_mode_from_flags(flags));
-        AssertInfo(fs != nullptr,
-                   "failed to open file {}: {}",
-                   filepath,
-                   strerror(errno));
+        if (fs == nullptr) {
+            ThrowInfo(ErrorCode::FileOpenFailed,
+                      "failed to open file {}: {}",
+                      filepath,
+                      strerror(errno));
+        }
         auto f = File(fd, fs, std::string(filepath));
         // setup buffer size file stream will use
         setvbuf(f.fs_, nullptr, _IOFBF, buf_size);

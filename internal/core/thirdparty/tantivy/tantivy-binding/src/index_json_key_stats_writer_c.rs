@@ -23,7 +23,7 @@ pub extern "C" fn tantivy_create_json_key_stats_writer(
 
     let tantivy_index_version = match TantivyIndexVersion::from_u32(tantivy_index_version) {
         Ok(v) => v,
-        Err(e) => return RustResult::from_error(e.to_string()),
+        Err(e) => return RustResult::from_binding_error(&e),
     };
 
     match IndexWriterWrapper::create_json_key_stats_writer(

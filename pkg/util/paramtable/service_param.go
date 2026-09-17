@@ -19,9 +19,11 @@ package paramtable
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"net/url"
 	"os"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -32,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 )
 
@@ -115,7 +118,7 @@ func (p *ServiceParam) init(bt *BaseTable) {
 	p.KafkaCfg.Init(bt)
 	p.RocksmqCfg.Init(bt)
 	p.MinioCfg.Init(bt)
-	p.ProfileCfg.Init(bt)
+	p.ProfileCfg.init(bt, p.LocalStorageCfg.Path.GetValue())
 }
 
 func (p *ServiceParam) RocksmqEnable() bool {
@@ -197,7 +200,8 @@ func (p *EtcdConfig) Init(base *BaseTable) {
 		Doc: `Endpoints used to access etcd service. You can change this parameter as the endpoints of your own etcd cluster.
 Environment variable: ETCD_ENDPOINTS
 etcd preferentially acquires valid address from environment variable ETCD_ENDPOINTS when Milvus is started.`,
-		Export: true,
+		Export:      true,
+		Sensitivity: Sensitive,
 	}
 	p.Endpoints.Init(base.mgr)
 
@@ -240,7 +244,8 @@ It is recommended to change this parameter before starting Milvus for the first 
 To share an etcd instance among multiple Milvus instances, consider changing this to a different value for each Milvus instance before you start them.
 Set an easy-to-identify root path for Milvus if etcd service already exists.
 Changing this for an already running Milvus instance may result in failures to read legacy data.`,
-		Export: true,
+		Export:      true,
+		Sensitivity: Sensitive,
 	}
 	p.RootPath.Init(base.mgr)
 
@@ -307,6 +312,7 @@ please adjust in embedded Milvus: /tmp/milvus/logs/etcd.log`,
 
 	p.EtcdUseSSL = ParamItem{
 		Key:          "etcd.ssl.enabled",
+		Sensitivity:  Sensitive,
 		DefaultValue: "false",
 		Version:      "2.0.0",
 		Doc:          "Whether to support ETCD secure connection mode",
@@ -315,31 +321,35 @@ please adjust in embedded Milvus: /tmp/milvus/logs/etcd.log`,
 	p.EtcdUseSSL.Init(base.mgr)
 
 	p.EtcdTLSCert = ParamItem{
-		Key:     "etcd.ssl.tlsCert",
-		Version: "2.0.0",
-		Doc:     "path to your cert file",
-		Export:  true,
+		Key:         "etcd.ssl.tlsCert",
+		Sensitivity: Sensitive,
+		Version:     "2.0.0",
+		Doc:         "path to your cert file",
+		Export:      true,
 	}
 	p.EtcdTLSCert.Init(base.mgr)
 
 	p.EtcdTLSKey = ParamItem{
-		Key:     "etcd.ssl.tlsKey",
-		Version: "2.0.0",
-		Doc:     "path to your key file",
-		Export:  true,
+		Key:         "etcd.ssl.tlsKey",
+		Sensitivity: Sensitive,
+		Version:     "2.0.0",
+		Doc:         "path to your key file",
+		Export:      true,
 	}
 	p.EtcdTLSKey.Init(base.mgr)
 
 	p.EtcdTLSCACert = ParamItem{
-		Key:     "etcd.ssl.tlsCACert",
-		Version: "2.0.0",
-		Doc:     "path to your CACert file",
-		Export:  true,
+		Key:         "etcd.ssl.tlsCACert",
+		Sensitivity: Sensitive,
+		Version:     "2.0.0",
+		Doc:         "path to your CACert file",
+		Export:      true,
 	}
 	p.EtcdTLSCACert.Init(base.mgr)
 
 	p.EtcdTLSMinVersion = ParamItem{
 		Key:          "etcd.ssl.tlsMinVersion",
+		Sensitivity:  Sensitive,
 		DefaultValue: "1.3",
 		Version:      "2.0.0",
 		Doc: `TLS min version
@@ -387,6 +397,7 @@ We recommend using version 1.2 and above.`,
 
 	p.EtcdEnableAuth = ParamItem{
 		Key:          "etcd.auth.enabled",
+		Sensitivity:  Sensitive,
 		DefaultValue: "true",
 		Version:      "2.3.7",
 		Doc:          "Whether to enable authentication",
@@ -405,6 +416,7 @@ We recommend using version 1.2 and above.`,
 		DefaultValue: "etcdadmin",
 		Doc:          "username for etcd authentication",
 		Export:       true,
+		Sensitivity:  Sensitive,
 	}
 	p.EtcdAuthUserName.Init(base.mgr)
 
@@ -414,6 +426,7 @@ We recommend using version 1.2 and above.`,
 		DefaultValue: "etcdadmin",
 		Doc:          "password for etcd authentication",
 		Export:       true,
+		Sensitivity:  Sensitive,
 	}
 	p.EtcdAuthPassword.Init(base.mgr)
 
@@ -485,6 +498,7 @@ func (p *TiKVConfig) Init(base *BaseTable) {
 		PanicIfEmpty: true,
 		Doc:          "Note that the default pd port of tikv is 2379, which conflicts with etcd.",
 		Export:       true,
+		Sensitivity:  Sensitive,
 	}
 	p.Endpoints.Init(base.mgr)
 
@@ -495,6 +509,7 @@ func (p *TiKVConfig) Init(base *BaseTable) {
 		PanicIfEmpty: true,
 		Doc:          "The root path where data is stored in tikv",
 		Export:       true,
+		Sensitivity:  Sensitive,
 	}
 	p.RootPath.Init(base.mgr)
 
@@ -552,6 +567,7 @@ func (p *TiKVConfig) Init(base *BaseTable) {
 
 	p.TiKVUseSSL = ParamItem{
 		Key:          "tikv.ssl.enabled",
+		Sensitivity:  Sensitive,
 		DefaultValue: "false",
 		Version:      "2.3.0",
 		Doc:          "Whether to support TiKV secure connection mode",
@@ -560,26 +576,29 @@ func (p *TiKVConfig) Init(base *BaseTable) {
 	p.TiKVUseSSL.Init(base.mgr)
 
 	p.TiKVTLSCert = ParamItem{
-		Key:     "tikv.ssl.tlsCert",
-		Version: "2.3.0",
-		Doc:     "path to your cert file",
-		Export:  true,
+		Key:         "tikv.ssl.tlsCert",
+		Sensitivity: Sensitive,
+		Version:     "2.3.0",
+		Doc:         "path to your cert file",
+		Export:      true,
 	}
 	p.TiKVTLSCert.Init(base.mgr)
 
 	p.TiKVTLSKey = ParamItem{
-		Key:     "tikv.ssl.tlsKey",
-		Version: "2.3.0",
-		Doc:     "path to your key file",
-		Export:  true,
+		Key:         "tikv.ssl.tlsKey",
+		Sensitivity: Sensitive,
+		Version:     "2.3.0",
+		Doc:         "path to your key file",
+		Export:      true,
 	}
 	p.TiKVTLSKey.Init(base.mgr)
 
 	p.TiKVTLSCACert = ParamItem{
-		Key:     "tikv.ssl.tlsCACert",
-		Version: "2.3.0",
-		Doc:     "path to your CACert file",
-		Export:  true,
+		Key:         "tikv.ssl.tlsCACert",
+		Sensitivity: Sensitive,
+		Version:     "2.3.0",
+		Doc:         "path to your CACert file",
+		Export:      true,
 	}
 	p.TiKVTLSCACert.Init(base.mgr)
 }
@@ -594,11 +613,27 @@ func (p *LocalStorageConfig) Init(base *BaseTable) {
 		Version:      "2.0.0",
 		DefaultValue: defaultLocalStoragePath,
 		Doc: `Local path to where vector data are stored during a search or a query to avoid repetitve access to MinIO or S3 service.
+Must be an absolute filesystem path. Milvus refuses to start if this value is relative or empty.
+Migration of data written using a relative path in older versions is not supported.
 Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
 It is recommended to change this parameter before starting Milvus for the first time.`,
-		Export: true,
+		// Every local storage key is a complete filesystem path that starts
+		// with this value, and the loon local filesystem is rooted at "/", so
+		// a relative path here would silently depend on the process working
+		// directory. Reject it during configuration initialization.
+		Formatter: formatLocalStoragePath,
+		Forbidden: true,
+		Export:    true,
 	}
 	p.Path.Init(base.mgr)
+}
+
+func formatLocalStoragePath(value string) string {
+	value = strings.TrimSpace(value)
+	if !filepath.IsAbs(value) {
+		panic(merr.WrapErrParameterInvalidMsg("localStorage.path must be an absolute filesystem path, got %q", value))
+	}
+	return filepath.Clean(value)
 }
 
 type MetaStoreConfig struct {
@@ -989,7 +1024,8 @@ Example configuration below:
     seeds: [n1,n2,n3] # List of seed node addresses for this pool
   - name: region2 # Name of the region pool
     seeds: [n4,n5,n6] # List of seed node addresses for this pool`,
-		Export: true,
+		Export:      true,
+		Sensitivity: Sensitive,
 	}
 	p.QuorumBufferPools.Init(base.mgr)
 
@@ -1222,6 +1258,7 @@ Valid values: [auto, enable, disable]`,
 		DefaultValue: "default",
 		Doc:          "The root path of the storage provider. If set to 'default', uses localStorage.path as base directory and creates a woodpecker subdirectory. Otherwise, specifies a custom woodpecker data storage directory.",
 		Export:       true,
+		Sensitivity:  Sensitive,
 	}
 	p.RootPath.Init(base.mgr)
 }
@@ -1251,6 +1288,10 @@ type PulsarConfig struct {
 	EnableClientMetrics ParamItem `refreshable:"false"`
 
 	BacklogAutoClearBytes ParamItem `refreshable:"false"`
+
+	ProducerAccessMode ParamItem `refreshable:"false"`
+
+	ProducerCreateTimeout ParamItem `refreshable:"true"`
 }
 
 // GetMessageSizeLimitsFor generalizes the plaintext-body budget to an
@@ -1302,6 +1343,7 @@ func (p *PulsarConfig) Init(base *BaseTable) {
 		DefaultValue: "6650",
 		Doc:          "Port of Pulsar service.",
 		Export:       true,
+		Sensitivity:  Sensitive,
 	}
 	p.Port.Init(base.mgr)
 
@@ -1325,7 +1367,8 @@ Environment variable: PULSAR_ADDRESS
 pulsar.address and pulsar.port together generate the valid access to Pulsar.
 Pulsar preferentially acquires the valid IP address from the environment variable PULSAR_ADDRESS when Milvus is started.
 Default value applies when Pulsar is running on the same network with Milvus.`,
-		Export: true,
+		Export:      true,
+		Sensitivity: Sensitive,
 	}
 	p.Address.Init(base.mgr)
 
@@ -1335,6 +1378,7 @@ Default value applies when Pulsar is running on the same network with Milvus.`,
 		DefaultValue: "80",
 		Doc:          "Web port of of Pulsar service. If you connect direcly without proxy, should use 8080.",
 		Export:       true,
+		Sensitivity:  Sensitive,
 	}
 	p.WebPort.Init(base.mgr)
 
@@ -1342,13 +1386,42 @@ Default value applies when Pulsar is running on the same network with Milvus.`,
 		Key:          "pulsar.webaddress",
 		Version:      "2.0.0",
 		DefaultValue: "",
+		Sensitivity:  Sensitive,
+		Doc: `Web address of the Pulsar admin REST API, used to clean up subscriptions. It must be a full url with scheme, e.g. http://pulsar-web:8080.
+Empty by default, in which case http://<host of pulsar.address>:<pulsar.webport> is used. Set it only if the admin API is not reachable there, e.g. behind a proxy or over https.`,
+		Export: true,
 		Formatter: func(add string) string {
+			add = strings.TrimSpace(add)
+			if add != "" {
+				// An explicit web address is used as is, but unlike pulsar.address it has to carry
+				// its scheme: the admin API may be served over https, so it cannot be guessed here.
+				u, err := url.Parse(add)
+				if err == nil && u.Host != "" && (u.Scheme == "http" || u.Scheme == "https") {
+					return add
+				}
+				// The configured URL may contain credentials or private topology.
+				mlog.Warn(context.TODO(), "pulsar.webaddress is not an http(s) url, using the address derived from pulsar.address")
+			}
 			pulsarURL, err := url.ParseRequestURI(p.Address.GetValue())
 			if err != nil {
-				mlog.Info(context.TODO(), "failed to parse pulsar config, assume pulsar not used", mlog.Err(err))
+				// URL parser errors include the input, which can carry credentials.
+				mlog.Info(context.TODO(), "failed to parse pulsar config, assume pulsar not used")
 				return ""
 			}
-			return "http://" + pulsarURL.Hostname() + ":" + p.WebPort.GetValue()
+			// pulsar.address may be a multi-host service url such as
+			// pulsar://host1:6650,host2:6650, which url.Hostname() cannot handle.
+			// Derive the web address from the first host.
+			host := pulsarURL.Host
+			if idx := strings.Index(host, ","); idx >= 0 {
+				host = host[:idx]
+			}
+			if hostOnly, _, err := net.SplitHostPort(host); err == nil {
+				host = hostOnly
+			} else {
+				// no port in the host; strip IPv6 brackets so that JoinHostPort adds them back
+				host = strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
+			}
+			return "http://" + net.JoinHostPort(host, p.WebPort.GetValue())
 		},
 	}
 	p.WebAddress.Init(base.mgr)
@@ -1389,6 +1462,7 @@ Must be a 32-bit integer of at least 1024 bytes and smaller than the active WAL 
 
 	p.Tenant = ParamItem{
 		Key:          "pulsar.tenant",
+		Sensitivity:  Sensitive,
 		Version:      "2.2.0",
 		DefaultValue: "public",
 		Doc: `Pulsar can be provisioned for specific tenants with appropriate capacity allocated to the tenant.
@@ -1399,6 +1473,7 @@ To share a Pulsar instance among multiple Milvus instances, you can change this 
 
 	p.Namespace = ParamItem{
 		Key:          "pulsar.namespace",
+		Sensitivity:  Sensitive,
 		Version:      "2.2.0",
 		DefaultValue: "default",
 		Doc:          "A Pulsar namespace is the administrative unit nomenclature within a tenant.",
@@ -1407,14 +1482,16 @@ To share a Pulsar instance among multiple Milvus instances, you can change this 
 	p.Namespace.Init(base.mgr)
 
 	p.AuthPlugin = ParamItem{
-		Key:     "pulsar.authPlugin",
-		Version: "2.2.0",
+		Key:         "pulsar.authPlugin",
+		Sensitivity: Sensitive,
+		Version:     "2.2.0",
 	}
 	p.AuthPlugin.Init(base.mgr)
 
 	p.AuthParams = ParamItem{
-		Key:     "pulsar.authParams",
-		Version: "2.2.0",
+		Key:         "pulsar.authParams",
+		Version:     "2.2.0",
+		Sensitivity: Sensitive,
 		Formatter: func(authParams string) string {
 			jsonMap := make(map[string]string)
 			params := strings.Split(authParams, ",")
@@ -1464,6 +1541,29 @@ If this option is zero or negative, it will be ignored and the default value (10
 		Export: true,
 	}
 	p.BacklogAutoClearBytes.Init(base.mgr)
+
+	p.ProducerAccessMode = ParamItem{
+		Key:          "pulsar.producerAccessMode",
+		Version:      "3.0.2",
+		DefaultValue: "exclusive",
+		Doc: `The access mode of the pulsar producer that a streaming node creates for a wal topic, shared or exclusive.
+exclusive: the producer creation fails while another producer is connected to the topic, and the streaming node retries it.
+shared: multiple producers can write to the topic at the same time.
+exclusive access is enforced by pulsar broker 2.8.0 or later.`,
+		Export: true,
+	}
+	p.ProducerAccessMode.Init(base.mgr)
+
+	p.ProducerCreateTimeout = ParamItem{
+		Key:          "pulsar.producerCreateTimeout",
+		Version:      "3.0.2",
+		DefaultValue: "1m",
+		Doc: `The max time that a streaming node retries creating the pulsar producer when it opens a wal, 1m by default.
+It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration
+When it is exceeded, the wal open fails and the streaming coord retries the assignment later. 0 disables the limit.`,
+		Export: true,
+	}
+	p.ProducerCreateTimeout.Init(base.mgr)
 }
 
 // --- kafka ---
@@ -1492,6 +1592,7 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 		DefaultValue: "localhost:9092",
 		Version:      "2.1.0",
 		Export:       true,
+		Sensitivity:  Sensitive,
 	}
 	k.Address.Init(base.mgr)
 
@@ -1500,6 +1601,7 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 		DefaultValue: "",
 		Version:      "2.1.0",
 		Export:       true,
+		Sensitivity:  Sensitive,
 	}
 	k.SaslUsername.Init(base.mgr)
 
@@ -1508,11 +1610,13 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 		DefaultValue: "",
 		Version:      "2.1.0",
 		Export:       true,
+		Sensitivity:  Sensitive,
 	}
 	k.SaslPassword.Init(base.mgr)
 
 	k.SaslMechanisms = ParamItem{
 		Key:          "kafka.saslMechanisms",
+		Sensitivity:  Sensitive,
 		DefaultValue: "",
 		Version:      "2.1.0",
 		Export:       true,
@@ -1521,6 +1625,7 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 
 	k.SecurityProtocol = ParamItem{
 		Key:          "kafka.securityProtocol",
+		Sensitivity:  Sensitive,
 		DefaultValue: "",
 		Version:      "2.1.0",
 		Export:       true,
@@ -1529,6 +1634,7 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 
 	k.KafkaUseSSL = ParamItem{
 		Key:          "kafka.ssl.enabled",
+		Sensitivity:  Sensitive,
 		DefaultValue: "false",
 		Version:      "2.3.11",
 		Doc:          "whether to enable ssl mode",
@@ -1537,34 +1643,38 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 	k.KafkaUseSSL.Init(base.mgr)
 
 	k.KafkaTLSCert = ParamItem{
-		Key:     "kafka.ssl.tlsCert",
-		Version: "2.3.11",
-		Doc:     "path to client's public key (PEM) used for authentication",
-		Export:  true,
+		Key:         "kafka.ssl.tlsCert",
+		Sensitivity: Sensitive,
+		Version:     "2.3.11",
+		Doc:         "path to client's public key (PEM) used for authentication",
+		Export:      true,
 	}
 	k.KafkaTLSCert.Init(base.mgr)
 
 	k.KafkaTLSKey = ParamItem{
-		Key:     "kafka.ssl.tlsKey",
-		Version: "2.3.11",
-		Doc:     "path to client's private key (PEM) used for authentication",
-		Export:  true,
+		Key:         "kafka.ssl.tlsKey",
+		Sensitivity: Sensitive,
+		Version:     "2.3.11",
+		Doc:         "path to client's private key (PEM) used for authentication",
+		Export:      true,
 	}
 	k.KafkaTLSKey.Init(base.mgr)
 
 	k.KafkaTLSCACert = ParamItem{
-		Key:     "kafka.ssl.tlsCaCert",
-		Version: "2.3.11",
-		Doc:     "file or directory path to CA certificate(s) for verifying the broker's key",
-		Export:  true,
+		Key:         "kafka.ssl.tlsCaCert",
+		Sensitivity: Sensitive,
+		Version:     "2.3.11",
+		Doc:         "file or directory path to CA certificate(s) for verifying the broker's key",
+		Export:      true,
 	}
 	k.KafkaTLSCACert.Init(base.mgr)
 
 	k.KafkaTLSKeyPassword = ParamItem{
-		Key:     "kafka.ssl.tlsKeyPassword",
-		Version: "2.3.11",
-		Doc:     "private key passphrase for use with ssl.key.location and set_ssl_cert(), if any",
-		Export:  true,
+		Key:         "kafka.ssl.tlsKeyPassword",
+		Version:     "2.3.11",
+		Doc:         "private key passphrase for use with ssl.key.location and set_ssl_cert(), if any",
+		Export:      true,
+		Sensitivity: Sensitive,
 	}
 	k.KafkaTLSKeyPassword.Init(base.mgr)
 
@@ -1575,19 +1685,39 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 		Doc:          "Maximum size of a Kafka producer message in bytes. Values below 256 KiB are clamped to 256 KiB; invalid or out-of-range values fall back to the default 10 MiB. Kafka broker/topic limits must support the configured value. Requires a restart to take effect.",
 		Export:       true,
 		Immutable:    true,
-		Formatter:    walMessageSizeFormatter(KafkaProducerConfigPrefix+"message.max.bytes", 10*1024*1024),
+		// A size bound that happens to live below the kafka.producer. prefix,
+		// which is sensitive because librdkafka options are arbitrary. This one
+		// is declared here, so it is not arbitrary.
+		Sensitivity: NonSensitive,
+		Formatter:   walMessageSizeFormatter(KafkaProducerConfigPrefix+"message.max.bytes", 10*1024*1024),
 	}
 	k.ProducerMessageMaxBytes.Init(base.mgr)
 
+	// Sensitive as a group, with no NonSensitiveSuffixes, and both halves of
+	// that are deliberate.
+	//
+	// Sensitive because the name-pattern fallback cannot classify librdkafka's
+	// option names: "ssl.key.pem" carries an inline private key and matches no
+	// pattern in the list, and neither do ssl.keystore.* or oauthbearer.*. The
+	// cost is that ordinary tunables (compression.type, linger.ms) also read as
+	// ***** through ShowConfigurations; that is diagnosability, and it is the
+	// side to be wrong on when the alternative is publishing a private key.
+	//
+	// No suffix exemptions because NonSensitiveSuffixes matches a leaf name at
+	// one level of nesting: exempting "compression.type" would register the leaf
+	// "type" and let through anything under the prefix ending in it. Dotted
+	// librdkafka names are not what that mechanism is shaped for.
 	k.ConsumerExtraConfig = ParamGroup{
 		KeyPrefix: "kafka.consumer.",
 		Version:   "2.2.0",
+		Sensitive: true,
 	}
 	k.ConsumerExtraConfig.Init(base.mgr)
 
 	k.ProducerExtraConfig = ParamGroup{
 		KeyPrefix: "kafka.producer.",
 		Version:   "2.2.0",
+		Sensitive: true,
 	}
 	k.ProducerExtraConfig.Init(base.mgr)
 
@@ -1738,6 +1868,7 @@ func (p *MinioConfig) Init(base *BaseTable) {
 		Doc:          "Port of MinIO or S3 service.",
 		PanicIfEmpty: true,
 		Export:       true,
+		Sensitivity:  Sensitive,
 	}
 	p.Port.Init(base.mgr)
 
@@ -1760,7 +1891,8 @@ Environment variable: MINIO_ADDRESS
 minio.address and minio.port together generate the valid access to MinIO or S3 service.
 MinIO preferentially acquires the valid IP address from the environment variable MINIO_ADDRESS when Milvus is started.
 Default value applies when MinIO or S3 is running on the same network with Milvus.`,
-		Export: true,
+		Export:      true,
+		Sensitivity: Sensitive,
 	}
 	p.Address.Init(base.mgr)
 
@@ -1774,7 +1906,8 @@ Environment variable: MINIO_ACCESS_KEY_ID or minio.accessKeyID
 minio.accessKeyID and minio.secretAccessKey together are used for identity authentication to access the MinIO or S3 service.
 This configuration must be set identical to the environment variable MINIO_ACCESS_KEY_ID, which is necessary for starting MinIO or S3.
 The default value applies to MinIO or S3 service that started with the default docker-compose.yml file.`,
-		Export: true,
+		Export:      true,
+		Sensitivity: Sensitive,
 	}
 	p.AccessKeyID.Init(base.mgr)
 
@@ -1788,12 +1921,14 @@ Environment variable: MINIO_SECRET_ACCESS_KEY or minio.secretAccessKey
 minio.accessKeyID and minio.secretAccessKey together are used for identity authentication to access the MinIO or S3 service.
 This configuration must be set identical to the environment variable MINIO_SECRET_ACCESS_KEY, which is necessary for starting MinIO or S3.
 The default value applies to MinIO or S3 service that started with the default docker-compose.yml file.`,
-		Export: true,
+		Export:      true,
+		Sensitivity: Sensitive,
 	}
 	p.SecretAccessKey.Init(base.mgr)
 
 	p.UseSSL = ParamItem{
 		Key:          "minio.useSSL",
+		Sensitivity:  Sensitive,
 		Version:      "2.0.0",
 		DefaultValue: "false",
 		PanicIfEmpty: true,
@@ -1804,6 +1939,7 @@ The default value applies to MinIO or S3 service that started with the default d
 
 	p.DisableAWSChunkedEncoding = ParamItem{
 		Key:          "minio.disableAWSChunkedEncoding",
+		Sensitivity:  Sensitive,
 		Version:      "2.6.20",
 		DefaultValue: "false",
 		Doc: `When enabled, PutObject requests use UNSIGNED-PAYLOAD to support S3-compatible endpoints that are incompatible with AWS chunked encoding.
@@ -1814,6 +1950,7 @@ HTTPS is recommended because payload integrity is then protected by TLS rather t
 
 	p.SslCACert = ParamItem{
 		Key:          "minio.ssl.tlsCACert",
+		Sensitivity:  Sensitive,
 		Version:      "2.3.12",
 		DefaultValue: "",
 		Doc:          "path to your CACert file",
@@ -1823,6 +1960,7 @@ HTTPS is recommended because payload integrity is then protected by TLS rather t
 
 	p.SslTLSMinVersion = ParamItem{
 		Key:          "minio.ssl.tlsMinVersion",
+		Sensitivity:  Sensitive,
 		DefaultValue: "default",
 		Version:      "2.6.11",
 		Doc: `TLS minimum version for MinIO/S3 SSL connections.
@@ -1844,7 +1982,8 @@ Bucket with this name will be created if it does not exist. If the bucket alread
 To share an MinIO instance among multiple Milvus instances, consider changing this to a different value for each Milvus instance before you start them. For details, see Operation FAQs.
 The data will be stored in the local Docker if Docker is used to start the MinIO service locally. Ensure that there is sufficient storage space.
 A bucket name is globally unique in one MinIO or S3 instance.`,
-		Export: true,
+		Export:      true,
+		Sensitivity: Sensitive,
 	}
 	p.BucketName.Init(base.mgr)
 
@@ -1864,12 +2003,14 @@ It is recommended to change this parameter before starting Milvus for the first 
 To share an MinIO instance among multiple Milvus instances, consider changing this to a different value for each Milvus instance before you start them. For details, see Operation FAQs.
 Set an easy-to-identify root key prefix for Milvus if etcd service already exists.
 Changing this for an already running Milvus instance may result in failures to read legacy data.`,
-		Export: true,
+		Export:      true,
+		Sensitivity: Sensitive,
 	}
 	p.RootPath.Init(base.mgr)
 
 	p.UseIAM = ParamItem{
 		Key:          "minio.useIAM",
+		Sensitivity:  Sensitive,
 		DefaultValue: DefaultMinioUseIAM,
 		Version:      "2.0.0",
 		Doc: `Whether to useIAM role to access S3/GCS instead of access/secret keys
@@ -1884,6 +2025,7 @@ aliyun (ecs): https://www.alibabacloud.com/help/en/elastic-compute-service/lates
 
 	p.CloudProvider = ParamItem{
 		Key:          "minio.cloudProvider",
+		Sensitivity:  Sensitive,
 		DefaultValue: DefaultMinioCloudProvider,
 		Version:      "2.4.1",
 		Doc: `Cloud Provider of S3. Supports: "aws", "gcp", "aliyun".
@@ -1904,7 +2046,8 @@ When useIAM enabled, only "aws", "gcp", "aliyun" is supported for now`,
 		DefaultValue: "",
 		Doc: `The JSON content contains the gcs service account credentials.
 Used only for the "gcpnative" cloud provider.`,
-		Export: true,
+		Export:      true,
+		Sensitivity: Sensitive,
 	}
 	p.GcpCredentialJSON.Init(base.mgr)
 
@@ -1914,7 +2057,8 @@ Used only for the "gcpnative" cloud provider.`,
 		Version:      "2.0.0",
 		Doc: `Custom endpoint for fetch IAM role credentials. when useIAM is true & cloudProvider is "aws".
 Leave it empty if you want to use AWS default endpoint`,
-		Export: true,
+		Export:      true,
+		Sensitivity: Sensitive,
 	}
 	p.IAMEndpoint.Init(base.mgr)
 	p.LogLevel = ParamItem{
@@ -1927,6 +2071,7 @@ Leave it empty if you want to use AWS default endpoint`,
 	p.LogLevel.Init(base.mgr)
 	p.Region = ParamItem{
 		Key:          "minio.region",
+		Sensitivity:  Sensitive,
 		DefaultValue: DefaultMinioRegion,
 		Version:      "2.3.0",
 		Doc:          `Specify minio storage system location region`,
@@ -1936,6 +2081,7 @@ Leave it empty if you want to use AWS default endpoint`,
 
 	p.UseVirtualHost = ParamItem{
 		Key:          "minio.useVirtualHost",
+		Sensitivity:  Sensitive,
 		Version:      "2.3.0",
 		DefaultValue: DefaultMinioUseVirtualHost,
 		PanicIfEmpty: false,
@@ -1987,6 +2133,10 @@ type ProfileConfig struct {
 }
 
 func (p *ProfileConfig) Init(base *BaseTable) {
+	p.init(base, formatLocalStoragePath(base.GetWithDefault("localStorage.path", defaultLocalStoragePath)))
+}
+
+func (p *ProfileConfig) init(base *BaseTable, localStoragePath string) {
 	p.PprofPath = ParamItem{
 		Key:          "profile.pprof.path",
 		Version:      "2.5.5",
@@ -1994,7 +2144,6 @@ func (p *ProfileConfig) Init(base *BaseTable) {
 		Doc:          "The folder that storing pprof files, by default will use localStoragePath/pprof",
 		Formatter: func(v string) string {
 			if len(v) == 0 {
-				localStoragePath := getLocalStoragePath(base)
 				return path.Join(localStoragePath, "pprof")
 			}
 			return v

@@ -43,6 +43,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
@@ -1012,7 +1013,8 @@ func separateLoadInfoV2(loadInfo *querypb.SegmentLoadInfo, schema *schemapb.Coll
 
 	// For V2 (non-manifest) segments, compute basePaths from metadata.
 	// The resolver returns empty basePaths for V2; we compute them here.
-	rootPath := paramtable.Get().MinioCfg.RootPath.GetValue()
+	// Match the writer's primary storage root; local stats do not use MinIO's prefix.
+	rootPath := binlog.GetRootPath()
 	for fieldID, stats := range textIndexedInfo {
 		if _, ok := textBasePaths[fieldID]; !ok {
 			textBasePaths[fieldID] = metautil.BuildTextIndexPrefix(rootPath,
@@ -1998,11 +2000,12 @@ func estimateLogicalResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 
 			var estimateResult ResourceEstimate
 			err = GetCLoadInfoWithFunc(ctx, fieldSchema, loadInfo, fieldIndexInfo, func(c *LoadIndexInfo) error {
-				GetDynamicPool().Submit(func() (any, error) {
-					loadResourceRequest := C.EstimateLoadIndexResource(c.cLoadIndexInfo)
-					estimateResult = GetResourceEstimate(&loadResourceRequest)
-					return nil, nil
-				}).Await()
+				var loadResourceRequest C.LoadResourceRequest
+				status := C.EstimateLoadIndexResource(c.cLoadIndexInfo, &loadResourceRequest)
+				if err := HandleCStatus(ctx, &status, "failed to estimate load index resource"); err != nil {
+					return err
+				}
+				estimateResult = GetResourceEstimate(&loadResourceRequest)
 				return nil
 			})
 			if err != nil {
@@ -2203,11 +2206,12 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 
 			var estimateResult ResourceEstimate
 			err = GetCLoadInfoWithFunc(ctx, fieldSchema, loadInfo, fieldIndexInfo, func(c *LoadIndexInfo) error {
-				GetDynamicPool().Submit(func() (any, error) {
-					loadResourceRequest := C.EstimateLoadIndexResource(c.cLoadIndexInfo)
-					estimateResult = GetResourceEstimate(&loadResourceRequest)
-					return nil, nil
-				}).Await()
+				var loadResourceRequest C.LoadResourceRequest
+				status := C.EstimateLoadIndexResource(c.cLoadIndexInfo, &loadResourceRequest)
+				if err := HandleCStatus(ctx, &status, "failed to estimate load index resource"); err != nil {
+					return err
+				}
+				estimateResult = GetResourceEstimate(&loadResourceRequest)
 				return nil
 			})
 			if err != nil {

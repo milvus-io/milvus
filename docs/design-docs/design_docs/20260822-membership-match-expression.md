@@ -111,15 +111,16 @@ All in `internal/parser/planparserv2/`:
    64 MiB) limits one blob body and falls back to the released
    `proxy.maxBloomFilterSize` key (plus the development-only
    `proxy.maxRoaringFilterSize` predecessor). The separate
-   `proxy.maxMembershipFilterPlanSize` (default 128 MiB) limits aggregate
-   serialized membership-bearing plans for one request and falls back to
-   `proxy.maxBloomFilterPlanSize`. The parser uses that same aggregate ceiling
-   for a conservative body-occurrence preflight shared by all HybridSearch
-   sub-requests and scorer filters; exact `proto.Size` accounting remains the
-   final gate. Keeping the two dimensions separate prevents a legacy plan
-   setting from silently widening the per-blob admission limit. The fixed MRB1
-   admissions (262,144 high containers, 64 MiB decoded estimate per occurrence,
-   aggregate) are unchanged.
+   `proxy.maxMembershipFilterPlanSize` (default 128 MiB) is the request-wide
+   membership budget and falls back to `proxy.maxBloomFilterPlanSize`. Its value
+   independently limits aggregate serialized membership-bearing plans and
+   aggregate estimated decoded bytes for all MRB1 occurrences. The parser shares
+   both totals across HybridSearch sub-requests and scorer filters; exact
+   `proto.Size` accounting remains the final serialized gate. Keeping the two
+   configurable dimensions separate prevents a legacy plan setting from
+   silently widening the per-blob admission limit. The fixed MRB1 admissions
+   (262,144 high containers and a 64 MiB decoded estimate per occurrence) remain
+   unchanged.
 
 ### Guards unified
 

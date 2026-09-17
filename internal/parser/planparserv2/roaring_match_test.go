@@ -434,22 +434,68 @@ func TestRoaringMatchPreflightCachesValidationByTemplateName(t *testing.T) {
 
 func TestRoaringMatchPreflightBudgetsAggregateDecodedBytes(t *testing.T) {
 	helper := newTestSchemaHelper(t)
-	blob := compactHighContainerRoaringBlob(170_000)
+	blob := compactHighContainerRoaringBlob(220_000)
 	summary, err := serverroaring.Validate(blob)
 	require.NoError(t, err)
-	require.LessOrEqual(t, summary.EstimatedDecodedBytes, uint64(serverroaring.MaxEstimatedDecodedBytes))
-	require.Greater(t, summary.EstimatedDecodedBytes*2, uint64(serverroaring.MaxEstimatedDecodedBytes))
+	require.Greater(t, summary.EstimatedDecodedBytes, uint64(40*1024*1024))
+	require.Less(t, summary.EstimatedDecodedBytes, uint64(44*1024*1024))
+	require.LessOrEqual(t, summary.EstimatedDecodedBytes, uint64(serverroaring.MaxEstimatedDecodedBytes),
+		"each bitmap must still satisfy the fixed 64 MiB per-bitmap admission")
+	require.LessOrEqual(t, summary.EstimatedDecodedBytes*2,
+		uint64(paramtable.DefaultMaxMembershipFilterPlanSize))
+	require.Greater(t, summary.EstimatedDecodedBytes*3,
+		uint64(paramtable.DefaultMaxMembershipFilterPlanSize))
 
 	values := map[string]*schemapb.TemplateValue{"rb": bytesTemplate(blob)}
-	_, err = ParseExpr(helper, "membership_match(Int64Field, {rb}, type=roaring)", values)
-	require.NoError(t, err, "one admitted bitmap must stay valid")
+	const occurrence = "membership_match(Int64Field, {rb}, type=roaring)"
+	_, err = ParseExpr(helper, occurrence+" and "+occurrence, values)
+	require.NoError(t, err, "two approximately 40 MiB decoded bitmaps fit the default 128 MiB request budget")
 
-	_, err = ParseExpr(helper,
-		"membership_match(Int64Field, {rb}, type=roaring) and membership_match(Int64Field, {rb}, type=roaring)",
-		values)
+	_, err = ParseExpr(helper, occurrence+" and "+occurrence+" and "+occurrence, values)
 	require.ErrorIs(t, err, merr.ErrParameterTooLarge)
 	require.ErrorContains(t, err, "estimated decoded size")
+	require.ErrorContains(t, err, "proxy.maxMembershipFilterPlanSize")
 	require.ErrorContains(t, err, "before plan materialization")
+
+	t.Run("custom plan size controls decoded aggregate", func(t *testing.T) {
+		pt := paramtable.Get()
+		configuredLimit := summary.EstimatedDecodedBytes*2 - 1
+		require.LessOrEqual(t, uint64((len(blob)-roaringfilter.HeaderSize)*2), configuredLimit,
+			"the serialized-body preflight must fit so this exercises the decoded-total gate")
+		pt.Save(pt.ProxyCfg.MaxMembershipFilterPlanSize.Key,
+			strconv.FormatUint(configuredLimit, 10))
+		defer pt.Reset(pt.ProxyCfg.MaxMembershipFilterPlanSize.Key)
+
+		_, err := ParseExpr(helper, occurrence+" and "+occurrence, values)
+		require.ErrorIs(t, err, merr.ErrParameterTooLarge)
+		require.ErrorContains(t, err, "estimated decoded size")
+		require.ErrorContains(t, err, "proxy.maxMembershipFilterPlanSize")
+	})
+}
+
+func TestRoaringMatchDecodedBudgetIsSharedAcrossParses(t *testing.T) {
+	helper := newTestSchemaHelper(t)
+	blob := compactHighContainerRoaringBlob(220_000)
+	summary, err := serverroaring.Validate(blob)
+	require.NoError(t, err)
+
+	pt := paramtable.Get()
+	pt.Save(pt.ProxyCfg.MaxMembershipFilterPlanSize.Key,
+		strconv.FormatUint(summary.EstimatedDecodedBytes*2, 10))
+	defer pt.Reset(pt.ProxyCfg.MaxMembershipFilterPlanSize.Key)
+
+	values := map[string]*schemapb.TemplateValue{"rb": bytesTemplate(blob)}
+	const expr = "membership_match(Int64Field, {rb}, type=roaring)"
+	visitorArgs := &ParserVisitorArgs{MembershipBudget: NewMembershipPreflightBudget()}
+
+	_, err = parseExprInner(helper, expr, values, visitorArgs)
+	require.NoError(t, err)
+	_, err = parseExprInner(helper, expr, values, visitorArgs)
+	require.NoError(t, err, "the configured decoded budget admits its exact boundary")
+	_, err = parseExprInner(helper, expr, values, visitorArgs)
+	require.ErrorIs(t, err, merr.ErrParameterTooLarge,
+		"all expression parses in one request must share the decoded total")
+	require.ErrorContains(t, err, "proxy.maxMembershipFilterPlanSize")
 }
 
 // The occurrence budget is documented as a per-request ceiling. It used to be
@@ -458,21 +504,30 @@ func TestRoaringMatchPreflightBudgetsAggregateDecodedBytes(t *testing.T) {
 func TestRoaringMatchPreflightBudgetIsSharedAcrossParses(t *testing.T) {
 	helper := newTestSchemaHelper(t)
 	pt := paramtable.Get()
-	// A structurally valid blob: this test is about the budget, so the parse
-	// must not fail for any other reason.
-	template, blob := roaringBytesTemplate(t, 1, 2, 3)
+	// Use a bitmap body large enough that its fixed decoded-container overhead
+	// still fits below two body lengths. This test targets the serialized-body
+	// occurrence budget; a tiny bitmap would now hit the shared configurable
+	// decoded budget first.
+	members := make([]int64, 4097)
+	for i := range members {
+		members[i] = int64(i * 2)
+	}
+	template, blob := roaringBytesTemplate(t, members...)
 	values := map[string]*schemapb.TemplateValue{"rb": template}
 	expr := "membership_match(Int64Field, {rb}, type=roaring)"
 
 	// Room for exactly one occurrence across the whole request (body basis;
 	// the fixed MRB1 header rides on top of the budget).
 	body := len(blob) - roaringfilter.HeaderSize
+	summary, err := serverroaring.Validate(blob)
+	require.NoError(t, err)
+	require.LessOrEqual(t, summary.EstimatedDecodedBytes, uint64(2*body-1))
 	pt.Save(pt.ProxyCfg.MaxMembershipFilterPlanSize.Key, strconv.Itoa(2*body-1))
 	defer pt.Reset(pt.ProxyCfg.MaxMembershipFilterPlanSize.Key)
 
 	visitorArgs := &ParserVisitorArgs{MembershipBudget: NewMembershipPreflightBudget()}
 
-	_, err := parseExprInner(helper, expr, values, visitorArgs)
+	_, err = parseExprInner(helper, expr, values, visitorArgs)
 	require.NoError(t, err, "first parse fits in the budget")
 
 	_, err = parseExprInner(helper, expr, values, visitorArgs)

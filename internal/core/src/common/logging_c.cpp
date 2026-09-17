@@ -104,6 +104,16 @@ InitGoogleLoggingWithZapSink() {
     FLAGS_logtostderr = false;
     FLAGS_alsologtostderr = false;
     FLAGS_log_dir = "";
+    // Disable file logging for every severity. With an empty base filename,
+    // glog's LogFileObject::Write returns early without creating any file;
+    // otherwise an empty FLAGS_log_dir makes glog fall back to the temp
+    // directory (e.g. /tmp) and pollute it with milvus.*.log.* files.
+    // C++ logs are forwarded to zap through the GoZapSink added above.
+    for (int severity = google::GLOG_INFO; severity < google::NUM_SEVERITIES;
+         ++severity) {
+        google::SetLogDestination(static_cast<google::LogSeverity>(severity),
+                                  "");
+    }
     return;
 }
 

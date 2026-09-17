@@ -164,7 +164,7 @@ class Array {
         }
     }
 
-    Array(const Array& array) noexcept
+    Array(const Array& array)
         : length_{array.length_},
           size_{array.size_},
           element_type_{array.element_type_} {

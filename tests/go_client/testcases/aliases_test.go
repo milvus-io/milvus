@@ -14,8 +14,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "index/Meta.h"
+package testcases
 
-namespace milvus::index {
-std::string kOverrideRootPathForUT;
-}  // namespace milvus::index
+import (
+	"context"
+
+	"github.com/milvus-io/milvus/tests/go_client/base"
+)
+
+// Type aliases shared across all test files to keep test signatures readable.
+// They live here (not in a feature-specific file) so no file depends on another
+// test file for a cross-cutting declaration.
+type (
+	CtxT = context.Context
+	MC   = *base.MilvusClient
+)

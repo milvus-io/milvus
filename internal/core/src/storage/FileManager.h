@@ -32,6 +32,7 @@
 #include "log/Log.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/properties.h"
+#include "storage/StatusToErrorCode.h"
 #include "storage/ChunkManager.h"
 #include "storage/LocalChunkManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
@@ -220,9 +221,11 @@ class FileManagerImpl : public milvus::FileManager {
                                               : GetRemoteTextLogPrefix();
         remote_file_path += "/" + local_file_name;
         auto remote_file = fs_->OpenInputFile(remote_file_path);
-        AssertInfo(remote_file.ok(),
-                   "failed to open remote file, reason: {}",
-                   remote_file.status().ToString());
+        if (!remote_file.ok()) {
+            ThrowInfo(ArrowStatusToErrorCode(remote_file.status()),
+                      "failed to open remote file, reason: {}",
+                      remote_file.status().ToString());
+        }
         return std::static_pointer_cast<milvus::InputStream>(
             std::make_shared<milvus::storage::RemoteInputStream>(
                 std::move(remote_file.ValueOrDie())));
@@ -244,16 +247,20 @@ class FileManagerImpl : public milvus::FileManager {
                 remote_file_path.substr(0, remote_file_path.find_last_of('/'));
             if (!dir_path.empty()) {
                 auto status = fs_->CreateDir(dir_path, /*recursive=*/true);
-                AssertInfo(status.ok(),
-                           "failed to create directory {}, reason: {}",
-                           dir_path,
-                           status.ToString());
+                if (!status.ok()) {
+                    ThrowInfo(ArrowStatusToErrorCode(status),
+                              "failed to create directory {}, reason: {}",
+                              dir_path,
+                              status.ToString());
+                }
             }
         }
         auto remote_stream = fs_->OpenOutputStream(remote_file_path);
-        AssertInfo(remote_stream.ok(),
-                   "failed to open remote stream, reason: {}",
-                   remote_stream.status().ToString());
+        if (!remote_stream.ok()) {
+            ThrowInfo(ArrowStatusToErrorCode(remote_stream.status()),
+                      "failed to open remote stream, reason: {}",
+                      remote_stream.status().ToString());
+        }
         return std::make_shared<milvus::storage::RemoteOutputStream>(
             std::move(remote_stream.ValueOrDie()));
     }
@@ -302,9 +309,7 @@ class FileManagerImpl : public milvus::FileManager {
 
     virtual std::string
     GetRemoteIndexObjectPrefix() const {
-        boost::filesystem::path prefix = index::kOverrideRootPathForUT.empty()
-                                             ? rcm_->GetRootPath()
-                                             : index::kOverrideRootPathForUT;
+        boost::filesystem::path prefix = rcm_->GetRootPath();
         if (index_meta_.index_store_path_version >=
             ::milvus::proto::index::IndexStorePathVersion::
                 INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED) {
@@ -329,9 +334,7 @@ class FileManagerImpl : public milvus::FileManager {
         if (!stats_base_path_.empty()) {
             return stats_base_path_;
         }
-        boost::filesystem::path prefix = index::kOverrideRootPathForUT.empty()
-                                             ? rcm_->GetRootPath()
-                                             : index::kOverrideRootPathForUT;
+        boost::filesystem::path prefix = rcm_->GetRootPath();
         boost::filesystem::path path = std::string(TEXT_LOG_ROOT_PATH);
         boost::filesystem::path path1 =
             std::to_string(index_meta_.build_id) + "/" +

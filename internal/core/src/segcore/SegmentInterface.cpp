@@ -737,7 +737,8 @@ SegmentInternalInterface::get_field_avg_size(FieldId field_id) const {
     auto& field_meta = (*schema)[field_id];
     auto data_type = field_meta.get_data_type();
 
-    std::shared_lock lck(mutex_);
+    // Retrieve already holds mutex_; acquiring it again may deadlock
+    // when a writer is waiting.
     if (IsVariableDataType(data_type)) {
         if (variable_fields_avg_size_.find(field_id) ==
             variable_fields_avg_size_.end()) {
@@ -786,12 +787,12 @@ SegmentInternalInterface::set_field_avg_size(const FieldMeta& field_meta,
     }
 }
 
-std::shared_ptr<const SkipIndex>
-SegmentInternalInterface::GetSkipIndex() const {
+FieldSkipMetricsView
+SegmentInternalInterface::GetFieldSkipMetrics(FieldId field_id) const {
     if (auto* sealed = dynamic_cast<const ChunkedSegmentSealedImpl*>(this)) {
-        return sealed->GetSkipIndexSnapshot();
+        return sealed->GetFieldSkipMetrics(field_id);
     }
-    return skip_index_;
+    return {};
 }
 
 PinWrapper<index::TextMatchIndex*>

@@ -559,6 +559,68 @@ TEST(FMIndex, LibraryDocLocateBoundsOutOfRangePositions) {
     }
 }
 
+// GuardFMIndexLibrary is the single Ring-2 boundary every call into the
+// vendored fm-index-lite library goes through. What it must not do is let an
+// exception past untyped: FailureCStatus() reports anything that is not a
+// SegcoreError as UnexpectedError(2001), which merr classifies as a permanent
+// system error.
+//
+// The bad_alloc case is the one with teeth. FMIndex::parseView self-classifies
+// every other std::exception into a false return value (which the caller turns
+// into DataFormatBroken via !valid()) and deliberately RETHROWS bad_alloc, so
+// an out-of-memory during index load is the exception that actually escapes the
+// library. MemAllocateFailed(2034) is retriable in merr's classForCode while
+// 2001 is not, so folding it into the phase fallback would make a transient OOM
+// look permanent and stop the load from being retried.
+TEST(FMIndex, LibraryGuardClassifiesEscapingExceptions) {
+    constexpr int64_t kFieldId = 101;
+    auto guard = [](auto&& fn, ErrorCode fallback) {
+        return index::detail::GuardFMIndexLibrary(
+            std::forward<decltype(fn)>(fn), fallback, "load", kFieldId);
+    };
+    auto code_of = [&](auto&& fn, ErrorCode fallback) {
+        try {
+            guard(std::forward<decltype(fn)>(fn), fallback);
+        } catch (const SegcoreError& e) {
+            return e.get_error_code();
+        }
+        return ErrorCode::Success;
+    };
+
+    // OOM stays retriable and is never folded into the phase fallback.
+    EXPECT_EQ(
+        code_of([] { throw std::bad_alloc(); }, ErrorCode::DataFormatBroken),
+        ErrorCode::MemAllocateFailed);
+    EXPECT_EQ(
+        code_of([] { throw std::bad_alloc(); }, ErrorCode::IndexBuildError),
+        ErrorCode::MemAllocateFailed);
+
+    // Any other std:: exception takes the phase's fallback, which differs
+    // between build and load: a library failure while building is a build
+    // error, while one during load means the persisted blob is unusable.
+    EXPECT_EQ(code_of([] { throw std::runtime_error("truncated"); },
+                      ErrorCode::DataFormatBroken),
+              ErrorCode::DataFormatBroken);
+    EXPECT_EQ(code_of([] { throw std::length_error("corpus too large"); },
+                      ErrorCode::IndexBuildError),
+              ErrorCode::IndexBuildError);
+
+    // A non-std exception must not escape the boundary untyped either.
+    EXPECT_EQ(code_of([] { throw 42; }, ErrorCode::DataFormatBroken),
+              ErrorCode::DataFormatBroken);
+
+    // An already-classified error keeps its own code instead of being
+    // relabelled by the boundary.
+    EXPECT_EQ(
+        code_of(
+            [] { ThrowInfo(ErrorCode::FileReadFailed, "staged file gone"); },
+            ErrorCode::DataFormatBroken),
+        ErrorCode::FileReadFailed);
+
+    // The success path returns normally and throws nothing.
+    EXPECT_EQ(code_of([] {}, ErrorCode::DataFormatBroken), ErrorCode::Success);
+}
+
 TEST(FMIndex, UnsupportedSchemaUsesDataTypeInvalidCode) {
     storage::FileManagerContext ctx;
     ctx.fieldDataMeta.field_id = 101;
@@ -1005,7 +1067,7 @@ TEST(FMIndex, ExecutorPathDeclinedOpsFallBackToScan) {
                                                       false);
     auto index_meta = gen_index_meta(
         segment_id, field_id.get(), index_build_id, index_version);
-    auto storage_config = gen_local_storage_config(TestLocalPath);
+    auto storage_config = get_default_local_storage_config();
     auto cm = CreateChunkManager(storage_config);
     auto fs = storage::InitArrowFileSystem(storage_config);
 
@@ -1034,8 +1096,8 @@ TEST(FMIndex, ExecutorPathDeclinedOpsFallBackToScan) {
     insert_data.SetFieldDataMeta(field_meta);
     insert_data.SetTimestamps(0, 100);
     auto serialized_bytes = insert_data.Serialize(storage::Remote);
-    auto log_path = fmt::format("{}{}/{}/{}/{}/{}",
-                                TestLocalPath,
+    auto log_path = fmt::format("{}insert_log/fm_index/{}/{}/{}/{}/{}",
+                                storage_config.root_path,
                                 collection_id,
                                 partition_id,
                                 segment_id,
@@ -1194,7 +1256,7 @@ TEST(FMIndex, ExecutorPathMatchRechecksVarchar) {
                                                       false);
     auto index_meta = gen_index_meta(
         segment_id, field_id.get(), index_build_id, index_version);
-    auto storage_config = gen_local_storage_config(TestLocalPath);
+    auto storage_config = get_default_local_storage_config();
     auto cm = CreateChunkManager(storage_config);
     auto fs = storage::InitArrowFileSystem(storage_config);
 
@@ -1235,8 +1297,8 @@ TEST(FMIndex, ExecutorPathMatchRechecksVarchar) {
     insert_data.SetFieldDataMeta(field_meta);
     insert_data.SetTimestamps(0, 100);
     auto serialized_bytes = insert_data.Serialize(storage::Remote);
-    auto log_path = fmt::format("{}{}/{}/{}/{}/{}",
-                                TestLocalPath,
+    auto log_path = fmt::format("{}insert_log/fm_index/{}/{}/{}/{}/{}",
+                                storage_config.root_path,
                                 collection_id,
                                 partition_id,
                                 segment_id,
@@ -1357,9 +1419,8 @@ struct SealedFMMatch {
     FieldId varchar_id;
     FieldId int_id;
     std::unique_ptr<segcore::SegmentSealed> segment;
-    // Owns the insert-log write and keeps TestLocalPath alive until the
-    // loaded segment is destroyed. ChunkManagerWrapper::dtor wipes the
-    // chunk-manager root.
+    // Owns the insert-log write and cleans the remote test root with this
+    // fixture. ChunkManagerWrapper::dtor wipes the chunk-manager root.
     std::unique_ptr<ChunkManagerWrapper> cm_w;
 };
 
@@ -1426,11 +1487,11 @@ LoadSealedFMMatch(int64_t collection_id,
                                                       /*max_length=*/65535);
     auto index_meta = gen_index_meta(
         segment_id, out.varchar_id.get(), index_build_id, index_build_id);
-    auto storage_config = gen_local_storage_config(TestLocalPath);
+    auto storage_config = get_default_local_storage_config();
     auto cm = CreateChunkManager(storage_config);
-    // Same FS handle as ExecutorPathMatchRechecksVarchar. UploadUnified writes
-    // through StorageV2FSCache; AppendIndexV2 reads through the process Arrow
-    // FS. Both are rooted at TestLocalPath, so the packed file is visible.
+    // AppendIndexV2 loads through RemoteChunkManagerSingleton, so build the
+    // index under that singleton's TestRemotePath root as well. TestLocalPath
+    // remains the mmap/local-temp root.
     auto fs = storage::InitArrowFileSystem(storage_config);
     out.cm_w = std::make_unique<ChunkManagerWrapper>(cm);
 
@@ -1482,8 +1543,8 @@ LoadSealedFMMatch(int64_t collection_id,
     insert_data.SetFieldDataMeta(field_meta);
     insert_data.SetTimestamps(0, 100);
     auto serialized_bytes = insert_data.Serialize(storage::Remote);
-    auto log_path = fmt::format("{}{}/{}/{}/{}/{}",
-                                TestLocalPath,
+    auto log_path = fmt::format("{}insert_log/fm_index/{}/{}/{}/{}/{}",
+                                storage_config.root_path,
                                 collection_id,
                                 partition_id,
                                 segment_id,

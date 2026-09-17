@@ -23,7 +23,7 @@ pub extern "C" fn tantivy_load_index(
     let path_str = cstr_to_str!(path);
     match IndexReaderWrapper::load(path_str, load_in_mmap, set_bitset) {
         Ok(w) => RustResult::from_ptr(create_binding(w)),
-        Err(e) => RustResult::from_error(e.to_string()),
+        Err(e) => RustResult::from_binding_error(&e),
     }
 }
 

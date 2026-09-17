@@ -32,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/roaringfilter"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -299,19 +298,19 @@ func TestMembershipMatchElementLevelGuards(t *testing.T) {
 func TestMembershipMatchPreflightChargesUnifiedOccurrences(t *testing.T) {
 	helper := newTestSchemaHelper(t)
 	pt := paramtable.Get()
-	_, blob := roaringBytesTemplate(t, 1, 2, 3)
-	values := map[string]*schemapb.TemplateValue{"rb": bytesTemplate(blob)}
-	body := len(blob) - roaringfilter.HeaderSize
+	template, blob := bloomBytesTemplate(t, 0.001, 1, 2, 3)
+	values := map[string]*schemapb.TemplateValue{"bf": template}
+	body := len(blob) - mbf1HeaderSize
 
 	// One occurrence fits; two occurrences of the same body exceed it.
 	pt.Save(pt.ProxyCfg.MaxMembershipFilterPlanSize.Key, strconv.Itoa(2*body-1))
 	defer pt.Reset(pt.ProxyCfg.MaxMembershipFilterPlanSize.Key)
 
-	_, err := ParseExpr(helper, "membership_match(Int64Field, {rb})", values)
+	_, err := ParseExpr(helper, "membership_match(Int64Field, {bf})", values)
 	require.NoError(t, err, "one occurrence fits")
 
 	_, err = ParseExpr(helper,
-		"membership_match(Int64Field, {rb}) and membership_match(Int64Field, {rb})", values)
+		"membership_match(Int64Field, {bf}) and membership_match(Int64Field, {bf})", values)
 	require.ErrorIs(t, err, merr.ErrParameterTooLarge)
 	require.ErrorContains(t, err, "before plan materialization")
 }

@@ -7,11 +7,25 @@ from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
-from pymilvus import DataType, Function, FunctionChain, FunctionChainStage, FunctionScore, FunctionType
+from pymilvus import (
+    AnnSearchRequest,
+    DataType,
+    Function,
+    FunctionChain,
+    FunctionChainStage,
+    FunctionScore,
+    FunctionType,
+    RRFRanker,
+)
+from pymilvus.client.prepare import Prepare
+from pymilvus.exceptions import MilvusException
 from pymilvus.function_chain import col, fn
 from pymilvus.function_chain.chain import FunctionChainExpr
 
 prefix = "function_chain"
+HYBRID_FUNCTION_CHAIN_CI_SKIP_REASON = (
+    "temporarily skipped because CI PyMilvus does not yet include Hybrid Search Function Chain support"
+)
 
 
 class TestFunctionChain(TestMilvusClientV2Base):
@@ -166,6 +180,38 @@ class TestFunctionChain(TestMilvusClientV2Base):
             check_items={ct.err_code: 1100, ct.err_msg: err_msg},
             **kwargs,
         )
+
+    def _execute_hybrid_with_nested_function_chains(
+        self,
+        client,
+        collection_name,
+        sub_searches,
+        *,
+        ranker=None,
+        function_chains=None,
+        limit=1,
+        output_fields=None,
+    ):
+        sub_requests = [
+            Prepare.search_requests_with_expr(
+                collection_name=collection_name,
+                data=sub_search["data"],
+                anns_field=sub_search.get("anns_field", self.vector_field),
+                param={"metric_type": sub_search.get("metric_type", "COSINE")},
+                limit=sub_search.get("limit", 6),
+                function_chains=sub_search.get("function_chains"),
+            )
+            for sub_search in sub_searches
+        ]
+        request = Prepare.hybrid_search_request_with_ranker(
+            collection_name,
+            sub_requests,
+            ranker,
+            limit,
+            output_fields=output_fields,
+            function_chains=function_chains,
+        )
+        return client._get_connection()._execute_hybrid_search(request, timeout=120)
 
     @staticmethod
     def _generate_xgboost_model(tmp_path):
@@ -1070,6 +1116,641 @@ class TestFunctionChain(TestMilvusClientV2Base):
         )
 
         assert len(res[0]) == 2
+
+    @pytest.mark.skip(reason=HYBRID_FUNCTION_CHAIN_CI_SKIP_REASON)
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_hybrid_search_function_chain_sdk_owns_final_output(self):
+        """
+        target: test PyMilvus hybrid search executes a top-level Function Chain
+        method: merge two ANN results, rerank with a hidden scalar field, sort, and limit in chain
+        expected: chain owns final ordering/count despite request limit/offset, and hidden input is not returned
+        """
+        client = self._client()
+        collection_name = self._create_function_chain_collection(client)
+        reqs = [
+            AnnSearchRequest(
+                data=[[0.0, 0.0]],
+                anns_field=self.vector_field,
+                param={"metric_type": "L2"},
+                limit=3,
+            )
+            for _ in range(2)
+        ]
+        chain = (
+            FunctionChain(FunctionChainStage.L2_RERANK, name="hybrid_score_plus_ts")
+            .merge(strategy="rrf")
+            .map(
+                "$score",
+                fn.num_combine(col("$score"), col(self.scalar_field), mode="sum"),
+            )
+            .sort(col("$score"), desc=True, tie_break_col=col("$id"))
+            .limit(2)
+        )
+
+        res, _ = self.hybrid_search(
+            client,
+            collection_name,
+            reqs=reqs,
+            ranker=None,
+            limit=1,
+            output_fields=["id"],
+            function_chains=chain,
+            offset=1,
+        )
+
+        assert len(res) == 1
+        assert [hit["id"] for hit in res[0]] == [3, 2]
+        assert len(res[0]) == 2
+        assert all(self._hit_field(hit, self.scalar_field) is None for hit in res[0])
+        scores = [hit["distance"] for hit in res[0]]
+        assert scores == sorted(scores, reverse=True)
+
+    @pytest.mark.skip(reason=HYBRID_FUNCTION_CHAIN_CI_SKIP_REASON)
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_hybrid_search_with_l0_l1_l2_function_chains_execute_in_stage_order(self):
+        """
+        target: test Hybrid Search composes sub-request L0/L1 chains with a top-level L2 chain
+        method: add ts in request 0 at L0, add category in request 1 at L1, then sum-merge,
+                add payload, sort, and limit at L2
+        expected: final IDs and scores equal the exact L0/L1 results followed by L2 arithmetic
+        """
+        client = self._client()
+        collection_name = self._create_l1_function_chain_collection(client)
+
+        l0_chain = FunctionChain(FunctionChainStage.L0_RERANK, name="hybrid_l0_add_ts").map(
+            "$score",
+            fn.num_combine(col("$score"), col(self.scalar_field), mode="sum"),
+        )
+        l1_chain = (
+            FunctionChain(FunctionChainStage.L1_RERANK, name="hybrid_l1_add_category")
+            .map(
+                "$score",
+                fn.num_combine(col("$score"), col("category"), mode="sum"),
+            )
+            .sort(col("$score"), desc=True, tie_break_col=col("$id"))
+        )
+        l2_chain = (
+            FunctionChain(FunctionChainStage.L2_RERANK, name="hybrid_l2_add_payload")
+            .merge(strategy="sum", norm_score=False)
+            .map(
+                "$score",
+                fn.num_combine(col("$score"), col("payload"), mode="sum"),
+            )
+            .sort(col("$score"), desc=True, tie_break_col=col("$id"))
+            .limit(3)
+        )
+
+        # AnnSearchRequest does not expose per-request Function Chains yet.
+        # Build the same nested SearchRequest protobufs through PyMilvus Prepare
+        # so this E2E still exercises the real HybridSearch RPC and server path.
+        sub_requests = [
+            Prepare.search_requests_with_expr(
+                collection_name=collection_name,
+                data=[[1.0, 0.0]],
+                anns_field=self.vector_field,
+                param={"metric_type": "COSINE"},
+                limit=6,
+                function_chains=l0_chain,
+            ),
+            Prepare.search_requests_with_expr(
+                collection_name=collection_name,
+                data=[[0.0, 1.0]],
+                anns_field=self.vector_field,
+                param={"metric_type": "COSINE"},
+                limit=6,
+                function_chains=l1_chain,
+            ),
+        ]
+        request = Prepare.hybrid_search_request_with_ranker(
+            collection_name,
+            sub_requests,
+            None,
+            1,
+            output_fields=[self.scalar_field, "category", "payload"],
+            function_chains=l2_chain,
+        )
+        res = client._get_connection()._execute_hybrid_search(request, timeout=120)
+
+        assert len(res) == 1
+        assert [hit["id"] for hit in res[0]] == [6, 5, 4]
+        assert len(res[0]) == 3
+
+        expected_by_id = {
+            4: 404 + (0.0 + 50) + (1.0 + 4),
+            5: 505 + (-0.6 + 20) + (0.8 + 5),
+            6: 606 + (-1.0 + 40) + (0.0 + 6),
+        }
+        for hit in res[0]:
+            entity_id = hit["id"]
+            assert hit["distance"] == pytest.approx(
+                expected_by_id[entity_id],
+                rel=1e-5,
+                abs=1e-5,
+            )
+            assert (
+                self._hit_field(hit, self.scalar_field)
+                == {
+                    4: 50,
+                    5: 20,
+                    6: 40,
+                }[entity_id]
+            )
+            assert self._hit_field(hit, "category") == entity_id
+            assert self._hit_field(hit, "payload") == entity_id * 101
+
+    @pytest.mark.skip(reason=HYBRID_FUNCTION_CHAIN_CI_SKIP_REASON)
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_hybrid_search_l0_then_l1_isolated_from_sibling_and_l2_owns_final_limit(
+        self,
+    ):
+        """
+        target: test one sub-search can run L0 then L1 without changing its sibling
+        method: limit the chained sub-search to two candidates at L1, leave its sibling
+                unchanged, then let the top-level L2 chain return four candidates
+        expected: L1 only limits one merge input and L2 exclusively owns final result count
+        """
+        client = self._client()
+        collection_name = self._create_l1_function_chain_collection(client)
+        nested_chains = [
+            FunctionChain(FunctionChainStage.L0_RERANK, name="isolated_l0").map(
+                "$score",
+                fn.num_combine(col("$score"), col(self.scalar_field), mode="sum"),
+            ),
+            (
+                FunctionChain(FunctionChainStage.L1_RERANK, name="isolated_l1")
+                .map(
+                    "$score",
+                    fn.num_combine(col("$score"), col("category"), mode="sum"),
+                )
+                .sort(col("$score"), desc=True, tie_break_col=col("$id"))
+                .limit(2)
+            ),
+        ]
+        top_chain = (
+            FunctionChain(FunctionChainStage.L2_RERANK, name="final_limit_owner")
+            .merge(strategy="sum", norm_score=False)
+            .sort(col("$score"), desc=True, tie_break_col=col("$id"))
+            .limit(4)
+        )
+
+        res = self._execute_hybrid_with_nested_function_chains(
+            client,
+            collection_name,
+            [
+                {"data": [[1.0, 0.0]], "function_chains": nested_chains},
+                {"data": [[0.0, 1.0]]},
+            ],
+            function_chains=top_chain,
+            limit=1,
+        )
+
+        assert len(res) == 1
+        assert len(res[0]) == 4
+        ids = [hit["id"] for hit in res[0]]
+        assert ids[:2] == [2, 4]
+        assert 3 in ids
+        assert res[0][0]["distance"] == pytest.approx(63.4, rel=1e-5, abs=1e-5)
+        assert res[0][1]["distance"] == pytest.approx(55.0, rel=1e-5, abs=1e-5)
+
+    @pytest.mark.skip(reason=HYBRID_FUNCTION_CHAIN_CI_SKIP_REASON)
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_hybrid_search_same_anns_field_keeps_nested_chains_by_request_index(self):
+        """
+        target: test nested chains bind to request index even when ANN fields are identical
+        method: use different queries and chains, then fuse them with asymmetric weights
+        expected: exact weighted scores prove neither chain was assigned to the sibling request
+        """
+        client = self._client()
+        collection_name = self._create_l1_function_chain_collection(client)
+        l0_chain = FunctionChain(FunctionChainStage.L0_RERANK, name="indexed_l0").map(
+            "$score",
+            fn.num_combine(col("$score"), col(self.scalar_field), mode="sum"),
+        )
+        l1_chain = (
+            FunctionChain(FunctionChainStage.L1_RERANK, name="indexed_l1")
+            .map(
+                "$score",
+                fn.num_combine(col("$score"), col("category"), mode="sum"),
+            )
+            .sort(col("$score"), desc=True, tie_break_col=col("$id"))
+        )
+        top_chain = (
+            FunctionChain(FunctionChainStage.L2_RERANK, name="indexed_weighted_merge")
+            .merge(strategy="weighted", weights=[0.25, 0.75], norm_score=False)
+            .sort(col("$score"), desc=True, tie_break_col=col("$id"))
+            .limit(3)
+        )
+
+        res = self._execute_hybrid_with_nested_function_chains(
+            client,
+            collection_name,
+            [
+                {"data": [[1.0, 0.0]], "function_chains": l0_chain},
+                {"data": [[0.0, 1.0]], "function_chains": l1_chain},
+            ],
+            function_chains=top_chain,
+        )
+
+        assert [hit["id"] for hit in res[0]] == [2, 4, 6]
+        expected_scores = [17.15, 16.25, 14.25]
+        for hit, expected_score in zip(res[0], expected_scores):
+            assert hit["distance"] == pytest.approx(expected_score, rel=1e-5, abs=1e-5)
+
+    @pytest.mark.skip(reason=HYBRID_FUNCTION_CHAIN_CI_SKIP_REASON)
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.parametrize(
+        "top_source",
+        ["legacy_rrf", "l2_function_chain"],
+        ids=["legacy-rrf", "l2-function-chain"],
+    )
+    def test_hybrid_search_nested_l0_l1_supports_compatible_top_level_rerank_sources(
+        self,
+        top_source,
+    ):
+        """
+        target: test nested L0/L1 with compatible top-level rerank sources
+        method: run the same nested chains with legacy RRF and a declarative L2 merge chain
+        expected: both sources successfully return a complete top-three result
+        """
+        client = self._client()
+        collection_name = self._create_l1_function_chain_collection(client)
+        l0_chain = FunctionChain(FunctionChainStage.L0_RERANK, name="source_l0").map(
+            "$score",
+            fn.num_combine(col("$score"), col(self.scalar_field), mode="sum"),
+        )
+        l1_chain = (
+            FunctionChain(FunctionChainStage.L1_RERANK, name="source_l1")
+            .map(
+                "$score",
+                fn.num_combine(col("$score"), col("category"), mode="sum"),
+            )
+            .sort(col("$score"), desc=True, tie_break_col=col("$id"))
+        )
+
+        ranker = None
+        top_chain = None
+        if top_source == "legacy_rrf":
+            ranker = RRFRanker()
+        elif top_source == "l2_function_chain":
+            top_chain = (
+                FunctionChain(FunctionChainStage.L2_RERANK, name="source_l2")
+                .merge(strategy="sum", norm_score=False)
+                .sort(col("$score"), desc=True, tie_break_col=col("$id"))
+                .limit(3)
+            )
+        else:
+            pytest.fail(f"unknown top source: {top_source}")
+
+        res = self._execute_hybrid_with_nested_function_chains(
+            client,
+            collection_name,
+            [
+                {"data": [[1.0, 0.0]], "function_chains": l0_chain},
+                {"data": [[0.0, 1.0]], "function_chains": l1_chain},
+            ],
+            ranker=ranker,
+            function_chains=top_chain,
+            limit=3,
+        )
+
+        assert len(res) == 1
+        assert len(res[0]) == 3
+        assert len({hit["id"] for hit in res[0]}) == 3
+
+    @pytest.mark.skip(reason=HYBRID_FUNCTION_CHAIN_CI_SKIP_REASON)
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_hybrid_search_nested_and_top_chain_inputs_do_not_leak_into_response(self):
+        """
+        target: test scalar fields fetched only for L0/L1/L2 execution remain hidden
+        method: use ts, category, and payload in three stages while requesting only id
+        expected: reranking uses all hidden inputs but none is projected in final hits
+        """
+        client = self._client()
+        collection_name = self._create_l1_function_chain_collection(client)
+        l0_chain = FunctionChain(FunctionChainStage.L0_RERANK, name="hidden_l0").map(
+            "$score",
+            fn.num_combine(col("$score"), col(self.scalar_field), mode="sum"),
+        )
+        l1_chain = (
+            FunctionChain(FunctionChainStage.L1_RERANK, name="hidden_l1")
+            .map(
+                "$score",
+                fn.num_combine(col("$score"), col("category"), mode="sum"),
+            )
+            .sort(col("$score"), desc=True, tie_break_col=col("$id"))
+        )
+        top_chain = (
+            FunctionChain(FunctionChainStage.L2_RERANK, name="hidden_l2")
+            .merge(strategy="sum", norm_score=False)
+            .map(
+                "$score",
+                fn.num_combine(col("$score"), col("payload"), mode="sum"),
+            )
+            .sort(col("$score"), desc=True, tie_break_col=col("$id"))
+            .limit(3)
+        )
+
+        res = self._execute_hybrid_with_nested_function_chains(
+            client,
+            collection_name,
+            [
+                {"data": [[1.0, 0.0]], "function_chains": l0_chain},
+                {"data": [[0.0, 1.0]], "function_chains": l1_chain},
+            ],
+            function_chains=top_chain,
+            output_fields=["id"],
+        )
+
+        assert [hit["id"] for hit in res[0]] == [6, 5, 4]
+        for hit in res[0]:
+            assert self._hit_field(hit, self.scalar_field) is None
+            assert self._hit_field(hit, "category") is None
+            assert self._hit_field(hit, "payload") is None
+
+    @pytest.mark.skip(reason=HYBRID_FUNCTION_CHAIN_CI_SKIP_REASON)
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.parametrize(
+        "case_name, expected_error",
+        [
+            (
+                "invalid_l0_sub_chain",
+                'system output "$id" is not writable by L0 rerank function chain',
+            ),
+            (
+                "invalid_l1_sub_chain",
+                'system output "$id" is not writable by L1 rerank function chain',
+            ),
+            (
+                "invalid_l2_top_chain",
+                'function chain input "missing_field" is neither a previous output nor a collection field',
+            ),
+            (
+                "l2_chain_in_sub_request",
+                "stage FunctionChainStageL2Rerank is not supported",
+            ),
+            (
+                "l0_chain_at_hybrid_top",
+                "stage FunctionChainStageL0Rerank is not supported in search request",
+            ),
+            (
+                "l1_chain_at_hybrid_top",
+                "stage FunctionChainStageL1Rerank is not supported in search request",
+            ),
+        ],
+        ids=[
+            "invalid-l0-sub-chain",
+            "invalid-l1-sub-chain",
+            "invalid-l2-top-chain",
+            "l2-chain-in-sub-request",
+            "l0-chain-at-hybrid-top",
+            "l1-chain-at-hybrid-top",
+        ],
+    )
+    def test_hybrid_search_with_l0_l1_l2_rejects_invalid_chain_placement_or_execution(
+        self,
+        case_name,
+        expected_error,
+    ):
+        """
+        target: test errors from every Hybrid Search function-chain stage fail the whole request
+        method: combine nested L0/L1 chains with a top-level L2 chain, then make one stage
+                invalid or place a chain at the wrong level
+        expected: HybridSearch raises parameter error and never returns partial sub-search results
+        """
+        client = self._client()
+        collection_name = self._create_function_chain_collection(client)
+
+        valid_l0 = FunctionChain(FunctionChainStage.L0_RERANK, name="valid_hybrid_l0").map(
+            "$score",
+            fn.num_combine(col("$score"), col(self.scalar_field), mode="sum"),
+        )
+        valid_l1 = (
+            FunctionChain(FunctionChainStage.L1_RERANK, name="valid_hybrid_l1")
+            .map(
+                "$score",
+                fn.num_combine(col("$score"), col(self.scalar_field), mode="sum"),
+            )
+            .sort(col("$score"), desc=True, tie_break_col=col("$id"))
+        )
+        valid_l2 = FunctionChain(FunctionChainStage.L2_RERANK, name="valid_hybrid_l2").merge(
+            strategy="sum", norm_score=False
+        )
+
+        sub_chains = [[valid_l0], [valid_l1]]
+        top_chain = valid_l2
+        if case_name == "invalid_l0_sub_chain":
+            sub_chains[0] = [
+                FunctionChain(FunctionChainStage.L0_RERANK, name="invalid_hybrid_l0").map(
+                    "$id",
+                    fn.num_combine(col("$score"), col(self.scalar_field), mode="sum"),
+                )
+            ]
+        elif case_name == "invalid_l1_sub_chain":
+            sub_chains[1] = [
+                FunctionChain(FunctionChainStage.L1_RERANK, name="invalid_hybrid_l1").map(
+                    "$id",
+                    fn.num_combine(col("$score"), col(self.scalar_field), mode="sum"),
+                )
+            ]
+        elif case_name == "invalid_l2_top_chain":
+            top_chain = (
+                FunctionChain(FunctionChainStage.L2_RERANK, name="invalid_hybrid_l2")
+                .merge(strategy="sum", norm_score=False)
+                .map(
+                    "$score",
+                    fn.num_combine(col("$score"), col("missing_field"), mode="sum"),
+                )
+            )
+        elif case_name == "l2_chain_in_sub_request":
+            sub_chains[0].append(
+                FunctionChain(FunctionChainStage.L2_RERANK, name="misplaced_hybrid_l2").map(
+                    "$score",
+                    fn.num_combine(col("$score"), col(self.scalar_field), mode="sum"),
+                )
+            )
+        elif case_name == "l0_chain_at_hybrid_top":
+            top_chain = valid_l0
+        elif case_name == "l1_chain_at_hybrid_top":
+            top_chain = valid_l1
+        else:
+            pytest.fail(f"unknown case: {case_name}")
+
+        sub_requests = []
+        for function_chains in sub_chains:
+            sub_request = Prepare.search_requests_with_expr(
+                collection_name=collection_name,
+                data=[[0.0, 0.0]],
+                anns_field=self.vector_field,
+                param={"metric_type": "L2"},
+                limit=3,
+            )
+            sub_request.function_chains.extend(function_chain.to_proto() for function_chain in function_chains)
+            sub_requests.append(sub_request)
+
+        # Add the top-level chain after Prepare builds the request so wrong-stage
+        # cases reach Milvus instead of being rejected by PyMilvus validation.
+        request = Prepare.hybrid_search_request_with_ranker(
+            collection_name,
+            sub_requests,
+            None,
+            3,
+        )
+        request.function_chains.extend([top_chain.to_proto()])
+
+        with pytest.raises(MilvusException) as exc_info:
+            client._get_connection()._execute_hybrid_search(request, timeout=120)
+
+        assert exc_info.value.code == 1100
+        assert expected_error in str(exc_info.value)
+
+    @pytest.mark.skip(reason=HYBRID_FUNCTION_CHAIN_CI_SKIP_REASON)
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.parametrize(
+        "strategy, merge_params",
+        [
+            ("rrf", {}),
+            ("weighted", {"weights": [0.4, 0.6], "norm_score": True}),
+            ("max", {"norm_score": True}),
+            ("sum", {"norm_score": True}),
+            ("avg", {"norm_score": True}),
+        ],
+    )
+    def test_hybrid_search_function_chain_sdk_merge_strategies(self, strategy, merge_params):
+        """
+        target: test all declarative Merge strategies through the PyMilvus hybrid search API
+        method: execute the same two ANN requests with rrf, weighted, max, sum, and avg
+        expected: every strategy succeeds and its chain-level limit determines the result count
+        """
+        client = self._client()
+        collection_name = self._create_function_chain_collection(client)
+        reqs = [
+            AnnSearchRequest(
+                data=[[0.0, 0.0]],
+                anns_field=self.vector_field,
+                param={"metric_type": "L2"},
+                limit=3,
+            )
+            for _ in range(2)
+        ]
+        chain = (
+            FunctionChain(FunctionChainStage.L2_RERANK, name=f"hybrid_{strategy}")
+            .merge(
+                strategy=strategy,
+                **merge_params,
+            )
+            .limit(2)
+        )
+
+        res, _ = self.hybrid_search(
+            client,
+            collection_name,
+            reqs=reqs,
+            ranker=None,
+            limit=1,
+            function_chains=chain,
+        )
+
+        assert len(res) == 1
+        assert [hit["id"] for hit in res[0]] == [1, 2]
+        assert len(res[0]) == 2
+
+    @pytest.mark.skip(reason=HYBRID_FUNCTION_CHAIN_CI_SKIP_REASON)
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.parametrize(
+        "chain_factory, ranker_factory, expected_error",
+        [
+            (
+                lambda: FunctionChain(FunctionChainStage.L2_RERANK, name="ranker_conflict").merge(strategy="rrf"),
+                lambda: RRFRanker(),
+                "function_chains and ranker cannot be used together",
+            ),
+            (
+                lambda: FunctionChain(FunctionChainStage.L2_RERANK, name="missing_merge").limit(2),
+                lambda: None,
+                "must contain exactly one merge operator",
+            ),
+            (
+                lambda: (
+                    FunctionChain(FunctionChainStage.L2_RERANK, name="merge_not_first").limit(2).merge(strategy="rrf")
+                ),
+                lambda: None,
+                "merge operator must be first",
+            ),
+            (
+                lambda: (
+                    FunctionChain(FunctionChainStage.L2_RERANK, name="duplicate_merge")
+                    .merge(strategy="rrf")
+                    .merge(strategy="rrf")
+                ),
+                lambda: None,
+                "must contain exactly one merge operator",
+            ),
+            (
+                lambda: FunctionChain(FunctionChainStage.L1_RERANK, name="invalid_stage").merge(strategy="rrf"),
+                lambda: None,
+                "stage FunctionChainStageL1Rerank is not supported",
+            ),
+            (
+                lambda: [
+                    FunctionChain(FunctionChainStage.L2_RERANK, name="first").merge(strategy="rrf"),
+                    FunctionChain(FunctionChainStage.L2_RERANK, name="second").merge(strategy="rrf"),
+                ],
+                lambda: None,
+                "requires exactly one function chain",
+            ),
+            (
+                lambda: FunctionChain(FunctionChainStage.L2_RERANK, name="bad_weight_count").merge(
+                    strategy="weighted",
+                    weights=[1.0],
+                    norm_score=True,
+                ),
+                lambda: None,
+                "weights count 1 does not match search input count 2",
+            ),
+        ],
+        ids=[
+            "ranker-conflict",
+            "missing-merge",
+            "merge-not-first",
+            "duplicate-merge",
+            "invalid-stage",
+            "multiple-chains",
+            "weighted-input-count-mismatch",
+        ],
+    )
+    def test_hybrid_search_function_chain_sdk_rejects_invalid_request(
+        self,
+        chain_factory,
+        ranker_factory,
+        expected_error,
+    ):
+        """
+        target: test PyMilvus validates invalid Hybrid Function Chain requests before RPC
+        method: build conflicting or structurally invalid chains and submit two ANN requests
+        expected: PyMilvus raises a parameter error describing the invalid request
+        """
+        client = self._client()
+        collection_name = self._create_function_chain_collection(client)
+        reqs = [
+            AnnSearchRequest(
+                data=[[0.0, 0.0]],
+                anns_field=self.vector_field,
+                param={"metric_type": "L2"},
+                limit=3,
+            )
+            for _ in range(2)
+        ]
+
+        with pytest.raises(MilvusException) as exc_info:
+            client.hybrid_search(
+                collection_name=collection_name,
+                reqs=reqs,
+                ranker=ranker_factory(),
+                limit=1,
+                function_chains=chain_factory(),
+            )
+
+        assert expected_error in str(exc_info.value)
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_search_rejects_l2_function_chain_write_readonly_system_column(self):

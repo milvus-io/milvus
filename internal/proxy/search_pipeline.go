@@ -962,6 +962,7 @@ type rerankOperator struct {
 	groupByFieldName string
 	groupSize        int64
 	groupScorerStr   string
+	useRequestLimit  bool
 
 	collSchema *schemapb.CollectionSchema
 	rerankMeta rerankMeta
@@ -1017,6 +1018,12 @@ func fillFieldNames(schema *schemapb.CollectionSchema, resultData *schemapb.Sear
 
 func newRerankOperator(t *searchTask, params map[string]any) (operator, error) {
 	if t.GetIsAdvanced() {
+		useRequestLimit := false
+		if meta, ok := t.rerankMeta.(*functionChainRerankMeta); ok {
+			useRequestLimit = !lo.ContainsBy(meta.repr.Operators, func(op chain.OperatorRepr) bool {
+				return op.Type == chaintypes.OpTypeLimit
+			})
+		}
 		return &rerankOperator{
 			nq:               t.GetNq(),
 			topK:             t.rankParams.limit,
@@ -1028,6 +1035,7 @@ func newRerankOperator(t *searchTask, params map[string]any) (operator, error) {
 			collSchema:       t.schema.CollectionSchema,
 			rerankMeta:       t.rerankMeta,
 			dbName:           t.request.GetDbName(),
+			useRequestLimit:  useRequestLimit,
 		}, nil
 	}
 	return &rerankOperator{
@@ -1148,6 +1156,10 @@ func (op *rerankOperator) run(ctx context.Context, span trace.Span, inputs ...an
 			df.Release()
 		}
 		return nil, err
+	}
+	if op.useRequestLimit {
+		// Hybrid L2 chains without an explicit Limit inherit the request limit and offset.
+		fc.LimitWithOffset(op.topK, op.offset)
 	}
 
 	if allEmpty {
@@ -3545,8 +3557,9 @@ func newBuiltInPipeline(t *searchTask) (*pipeline, error) {
 			// so there's some memory overhead.
 			return newPipeline(hybridSearchWithRequeryAndRerankByFieldDataPipe, t)
 		} else {
-			// Otherwise, we can rerank and limit the requery size to the limit.
-			// so the memory overhead is less than the hybridSearchWithRequeryAndRerankByFieldDataPipe.
+			// Otherwise, rerank first and requery only the rows emitted by the reranker.
+			// Hybrid Function Chains use their explicit Limit or the request limit
+			// before requery; legacy paths use their server-built limit.
 			return newPipeline(hybridSearchWithRequeryPipe, t)
 		}
 	}

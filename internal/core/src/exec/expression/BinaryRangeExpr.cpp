@@ -593,23 +593,15 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
         processed_cursor += size;
     };
 
-    auto skip_index_func =
-        [op_ctx = op_ctx_, val1, val2, lower_inclusive, upper_inclusive](
-            const SkipIndex& skip_index, FieldId field_id, int64_t chunk_id) {
-            if (lower_inclusive && upper_inclusive) {
-                return skip_index.CanSkipBinaryRange<T>(
-                    op_ctx, field_id, chunk_id, val1, val2, true, true);
-            } else if (lower_inclusive && !upper_inclusive) {
-                return skip_index.CanSkipBinaryRange<T>(
-                    op_ctx, field_id, chunk_id, val1, val2, true, false);
-            } else if (!lower_inclusive && upper_inclusive) {
-                return skip_index.CanSkipBinaryRange<T>(
-                    op_ctx, field_id, chunk_id, val1, val2, false, true);
-            } else {
-                return skip_index.CanSkipBinaryRange<T>(
-                    op_ctx, field_id, chunk_id, val1, val2, false, false);
-            }
+    SkipChunkFn skip_index_func;
+    if (CanUseSkipFilter(is_nullable_, null_rejecting_)) {
+        skip_index_func = [val1, val2, lower_inclusive, upper_inclusive](
+                              const FieldSkipMetricsView& view,
+                              int64_t chunk_id) {
+            return view.CanSkipBinaryRange<T>(
+                chunk_id, val1, val2, lower_inclusive, upper_inclusive);
         };
+    }
     int64_t processed_size;
     if (has_offset_input_) {
         if (expr_->column_.element_level_) {
@@ -1329,30 +1321,72 @@ PhyBinaryRangeFilterExpr::PrefetchRawData() {
 template <typename T>
 void
 PhyBinaryRangeFilterExpr::PrefetchRawData() {
+    if (!CanUseSkipFilter(is_nullable_, null_rejecting_)) {
+        SegmentExpr::PrefetchRawData(field_id_);
+        return;
+    }
     using U =
         std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
     using H =
         std::conditional_t<std::is_integral_v<U> && !std::is_same_v<bool, T>,
                            int64_t,
                            U>;
-    H lower_val = GetValueWithCastNumber<H>(expr_->lower_val_);
-    H upper_val = GetValueWithCastNumber<H>(expr_->upper_val_);
-    auto skip_index = segment_->GetSkipIndex();
 
-    std::vector<int64_t> chunks_may_hit;
-    for (size_t i = RawDataPrefetchStartChunk(); i < num_data_chunk_; ++i) {
-        auto skip = skip_index->CanSkipBinaryRange(field_id_,
-                                                   i,
-                                                   lower_val,
-                                                   upper_val,
-                                                   expr_->lower_inclusive_,
-                                                   expr_->upper_inclusive_);
-        if (!skip) {
+    auto prefetch = [&](const auto& lower_val,
+                        const auto& upper_val,
+                        bool lower_inclusive,
+                        bool upper_inclusive) {
+        using ValueType = std::decay_t<decltype(lower_val)>;
+        std::vector<int64_t> chunks_may_hit;
+        for (size_t i = RawDataPrefetchStartChunk(); i < num_data_chunk_; ++i) {
+            auto skip = skip_view_.CanSkipBinaryRange<ValueType>(
+                i, lower_val, upper_val, lower_inclusive, upper_inclusive);
+            if (skip) {
+                continue;
+            }
             chunks_may_hit.push_back(i);
         }
-    }
+        segment_->prefetch_chunks(op_ctx_, field_id_, chunks_may_hit);
+    };
 
-    segment_->prefetch_chunks(op_ctx_, field_id_, chunks_may_hit);
+    H lower_val = GetValueWithCastNumber<H>(expr_->lower_val_);
+    H upper_val = GetValueWithCastNumber<H>(expr_->upper_val_);
+    bool lower_inclusive = expr_->lower_inclusive_;
+    bool upper_inclusive = expr_->upper_inclusive_;
+    if constexpr (std::is_integral_v<U> && !std::is_same_v<bool, T>) {
+        // Skip metrics carry the field's physical type, so the literals must be
+        // narrowed before a bound can be matched against them. Resolve an
+        // out-of-range literal the way PreCheckOverflow<T> does instead of
+        // abandoning the pruning: a bound past the far end of T makes the range
+        // provably empty, and a bound past the near end constrains nothing on
+        // that side. The scan settles both cases and keeps pruning with the
+        // clamped bounds, so a prefetch that gave up here would fetch cells the
+        // scan has already proven it will never read.
+        if (query::gt_ub<T>(lower_val) || query::lt_lb<T>(upper_val)) {
+            // Provably empty: PreCheckOverflow answers the batch outright and
+            // reaches the column only to materialize validity, which
+            // ApplyFieldValidData skips for a non-nullable field and the
+            // element-level branch fills in without any read.
+            if (is_nullable_ && !expr_->column_.element_level_) {
+                SegmentExpr::PrefetchRawData(field_id_);
+            }
+            return;
+        }
+        if (query::lt_lb<T>(lower_val)) {
+            lower_val = std::numeric_limits<T>::min();
+            lower_inclusive = true;
+        }
+        if (query::gt_ub<T>(upper_val)) {
+            upper_val = std::numeric_limits<T>::max();
+            upper_inclusive = true;
+        }
+        prefetch(static_cast<T>(lower_val),
+                 static_cast<T>(upper_val),
+                 lower_inclusive,
+                 upper_inclusive);
+    } else {
+        prefetch(lower_val, upper_val, lower_inclusive, upper_inclusive);
+    }
 }
 }  // namespace exec
 }  // namespace milvus

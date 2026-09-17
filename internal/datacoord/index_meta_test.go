@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -2657,34 +2658,31 @@ func TestStoredIndexFilesSizeMetric(t *testing.T) {
 	})
 }
 
-func TestIndexMeta_GetDeletedIndexesWithV1Path(t *testing.T) {
-	m := &indexMeta{
-		segmentBuildInfo: newSegmentIndexBuildInfo(),
+// The feature switch controls completed-artifact publication only. Task
+// lifecycle states remain durable in etcd in both modes.
+func TestSegmentIndexTaskStatesAlwaysPersistToEtcd(t *testing.T) {
+	assert.False(t, paramtable.Get().DataCoordCfg.WriteSegmentIndexToManifest.GetAsBool())
+
+	for _, enabled := range []bool{false, true} {
+		t.Run(fmt.Sprintf("manifest=%t", enabled), func(t *testing.T) {
+			withSegmentIndexManifestWrites(t, enabled)
+			catalog := catalogmocks.NewDataCoordCatalog(t)
+			catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil).Once()
+			catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil).Times(2)
+			m := &indexMeta{
+				ctx:              context.TODO(),
+				catalog:          catalog,
+				indexes:          map[UniqueID]map[UniqueID]*model.Index{},
+				keyLock:          lock.NewKeyLock[UniqueID](),
+				segmentBuildInfo: newSegmentIndexBuildInfo(),
+				segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+			}
+			require.NoError(t, m.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
+				CollectionID: 100, PartitionID: 10, SegmentID: 6002,
+				IndexID: 600, BuildID: 6200,
+			}))
+			require.NoError(t, m.BuildIndex(6200))
+			require.NoError(t, m.UpdateIndexState(6200, commonpb.IndexState_Failed, "failed"))
+		})
 	}
-
-	// Add: deleted v0, deleted v1, not-deleted v1.
-	// Only deleted v1 indexes need metadata-driven cleanup under index_v1;
-	// v0 deletion is handled by the buildID-rooted index_files prefix walk.
-	m.segmentBuildInfo.Add(&model.SegmentIndex{
-		BuildID:               1000,
-		CollectionID:          100,
-		IndexStorePathVersion: 0,
-		IsDeleted:             true,
-	})
-	m.segmentBuildInfo.Add(&model.SegmentIndex{
-		BuildID:               2000,
-		CollectionID:          200,
-		IndexStorePathVersion: 1,
-		IsDeleted:             true,
-	})
-	m.segmentBuildInfo.Add(&model.SegmentIndex{
-		BuildID:               3000,
-		CollectionID:          300,
-		IndexStorePathVersion: 1,
-		IsDeleted:             false,
-	})
-
-	result := m.GetDeletedIndexesWithV1Path()
-	assert.Len(t, result, 1)
-	assert.Equal(t, int64(2000), result[0].BuildID)
 }

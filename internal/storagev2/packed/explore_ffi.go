@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/externalspec/specutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -93,6 +94,7 @@ type FileInfo struct {
 	NumRows         int64
 	SourceSegmentID int64
 	Deltalogs       []*datapb.FieldBinlog
+	Properties      map[string]string `json:"properties,omitempty"`
 }
 
 // ExploreFiles scans an external directory and returns file information.
@@ -117,7 +119,7 @@ func GetFileInfo(
 		return nil, merr.Wrap(err, "inject extfs")
 	}
 
-	normalizedFilePath, err := normalizeExternalPathForStorage(filePath, cProperties, extfs)
+	normalizedFilePath, err := normalizeExternalResolvedPath(filePath, cProperties, extfs)
 	if err != nil {
 		return nil, merr.WrapErrStorage(err, "normalize external file path")
 	}
@@ -137,7 +139,32 @@ func GetFileInfo(
 	}, nil
 }
 
-func normalizeExternalPathForStorage(path string, properties *C.LoonProperties, extfs ExternalSpecContext) (string, error) {
+func normalizeExternalSourcePath(path string, properties *C.LoonProperties, extfs ExternalSpecContext) (string, error) {
+	return normalizeExternalPath(path, properties, extfs, externalPathSource)
+}
+
+func normalizeExternalResolvedPath(path string, properties *C.LoonProperties, extfs ExternalSpecContext) (string, error) {
+	return normalizeExternalPath(path, properties, extfs, externalPathResolved)
+}
+
+type externalPathForm uint8
+
+const (
+	// externalPathSource comes from the schema or source snapshot metadata;
+	// its URI format depends on whether endpoint_url is configured.
+	externalPathSource externalPathForm = iota
+	// externalPathResolved has already passed through source resolution or
+	// Loon exploration. Never infer this state from a bucket-like key prefix:
+	// source and resolved URIs can look identical when endpoint host == bucket.
+	externalPathResolved
+)
+
+func normalizeExternalPath(
+	path string,
+	properties *C.LoonProperties,
+	extfs ExternalSpecContext,
+	pathForm externalPathForm,
+) (string, error) {
 	if extfs.Source == "" || path == "" || properties == nil {
 		return path, nil
 	}
@@ -161,27 +188,54 @@ func normalizeExternalPathForStorage(path string, properties *C.LoonProperties, 
 	if err != nil {
 		return "", err
 	}
-	if addressHost == "" || addressHost == u.Host {
+	if addressHost == "" {
 		return path, nil
 	}
-
-	oldPath := strings.TrimPrefix(u.Path, "/")
-	if oldPath == "" {
-		u.Path = "/" + bucketName
-	} else {
-		u.Path = "/" + bucketName + "/" + oldPath
+	if addressHost == u.Host {
+		hasExplicitEndpoint, err := externalSpecHasEndpointURL(extfs.Spec)
+		if err != nil {
+			return "", err
+		}
+		if !hasExplicitEndpoint || pathForm == externalPathResolved {
+			return path, nil
+		}
 	}
+
+	// Keep the bucket/key separator even when the key is empty.
+	u.Path = "/" + bucketName + "/" + strings.TrimPrefix(u.Path, "/")
 	u.RawPath = ""
 	u.Host = addressHost
 	return u.String(), nil
 }
 
-func resolveExternalSourceRelativePath(sourcePath string, properties *C.LoonProperties, extfs ExternalSpecContext) (string, error) {
+func externalSpecHasEndpointURL(specJSON string) (bool, error) {
+	spec, err := specutil.ParseExternalSpec(specJSON)
+	if err != nil {
+		return false, merr.WrapErrServiceInternalErr(err, "invalid persisted external spec")
+	}
+	_, ok := spec.Extfs[specutil.ExtfsKeyEndpointURL]
+	return ok, nil
+}
+
+func resolveExternalSourcePath(sourcePath string, properties *C.LoonProperties, extfs ExternalSpecContext) (string, error) {
+	return resolveExternalRelativePath(sourcePath, properties, extfs, externalPathSource)
+}
+
+func resolveExternalResolvedPath(sourcePath string, properties *C.LoonProperties, extfs ExternalSpecContext) (string, error) {
+	return resolveExternalRelativePath(sourcePath, properties, extfs, externalPathResolved)
+}
+
+func resolveExternalRelativePath(
+	sourcePath string,
+	properties *C.LoonProperties,
+	extfs ExternalSpecContext,
+	pathForm externalPathForm,
+) (string, error) {
 	if sourcePath == "" || extfs.Source == "" || properties == nil {
 		return sourcePath, nil
 	}
 	if isAbsoluteExternalPath(sourcePath) {
-		return normalizeExternalPathForStorage(sourcePath, properties, extfs)
+		return normalizeExternalPath(sourcePath, properties, extfs, pathForm)
 	}
 
 	sourceURI, err := url.Parse(extfs.Source)
@@ -218,7 +272,7 @@ func resolveExternalSourceRelativePath(sourcePath string, properties *C.LoonProp
 	} else {
 		resolved.Path = "/" + relativePath
 	}
-	return normalizeExternalPathForStorage(resolved.String(), properties, extfs)
+	return normalizeExternalResolvedPath(resolved.String(), properties, extfs)
 }
 
 func isAbsoluteExternalPath(filePath string) bool {
@@ -280,7 +334,7 @@ func ExploreFilesReturnManifestPath(
 		if err != nil {
 			return nil, "", err
 		}
-		metadataBytes, err := ReadFileWithExternalSpec(storageConfig, metadataPath, extfs)
+		metadataBytes, err := readExternalSourceFile(storageConfig, metadataPath, extfs)
 		if err != nil {
 			return nil, "", merr.Wrap(err, "read milvus snapshot metadata")
 		}
@@ -293,7 +347,7 @@ func ExploreFilesReturnManifestPath(
 			return nil, "", merr.Wrap(err, "inject extfs")
 		}
 		resolveSourcePath := func(sourcePath string) (string, error) {
-			return resolveExternalSourceRelativePath(sourcePath, cProperties, extfs)
+			return resolveExternalSourcePath(sourcePath, cProperties, extfs)
 		}
 		fileInfos, err := buildMilvusTableFileInfosFromSnapshotMetadata(
 			metadataBytes,
@@ -351,7 +405,7 @@ func ExploreFilesReturnManifestPath(
 		return nil, "", merr.Wrap(err, "inject extfs")
 	}
 
-	normalizedExploreDir, err := normalizeExternalPathForStorage(exploreDir, cProperties, extfs)
+	normalizedExploreDir, err := normalizeExternalSourcePath(exploreDir, cProperties, extfs)
 	if err != nil {
 		return nil, "", merr.WrapErrStorage(err, "normalize external explore path")
 	}
@@ -438,9 +492,14 @@ func ReadFileInfosFromManifestPath(
 			if fileArray[j].path == nil {
 				return nil, merr.WrapErrServiceInternalMsg("file path is nil in column group %d, file %d", i, j)
 			}
+			properties, err := columnGroupFileProperties(&fileArray[j])
+			if err != nil {
+				return nil, merr.Wrapf(err, "column group %d file %d", i, j)
+			}
 			fileInfos = append(fileInfos, FileInfo{
-				FilePath: C.GoString(fileArray[j].path),
-				NumRows:  int64(fileArray[j].end_index),
+				FilePath:   C.GoString(fileArray[j].path),
+				NumRows:    int64(fileArray[j].end_index),
+				Properties: properties,
 			})
 		}
 	}

@@ -405,6 +405,9 @@ func validateTTLField(props []*commonpb.KeyValuePair, fields []*schemapb.FieldSc
 }
 
 func (t *createCollectionTask) validateTTL() error {
+	if err := validateInsertIdempotencyProperty(t.GetProperties()); err != nil {
+		return err
+	}
 	hasCollectionTTL, err := validateCollectionTTL(t.GetProperties())
 	if err != nil {
 		return err
@@ -2128,6 +2131,9 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 	if err := common.ValidateNamespaceShardingEnabledNotAltered(t.GetProperties(), t.GetDeleteKeys()); err != nil {
 		return err
 	}
+	if err := common.ValidateRLSEnabledNotAltered(t.GetProperties(), t.GetDeleteKeys()); err != nil {
+		return err
+	}
 
 	collSchema, err := t.GetMetaCache().GetCollectionSchema(ctx, t.GetDbName(), t.CollectionName)
 	if err != nil {
@@ -2191,6 +2197,9 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 			return merr.WrapErrParameterInvalidMsg("unknown or invalid IANA Time Zone ID: %s", userDefinedTimezone)
 		}
 
+		if err := validateInsertIdempotencyProperty(t.GetProperties()); err != nil {
+			return err
+		}
 		hasTTL, err := validateCollectionTTL(t.GetProperties())
 		if err != nil {
 			return err

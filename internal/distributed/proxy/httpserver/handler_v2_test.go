@@ -34,6 +34,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tidwall/gjson"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -1303,6 +1304,186 @@ func TestHybridSearchWithRerank(t *testing.T) {
 		requestBody: []byte(`{"collectionName": "hello_milvus", "partitionNames": ["part_a"], "search": [{"data": [[0.1, 0.2]], "annsField": "book_intro", "metricType": "L2", "limit": 3}, {"data": [[0.1, 0.2]], "annsField": "book_intro", "metricType": "L2", "limit": 3}], "functionScore": {"functions": [{"name": "testRank", "type": "Rerank", "inputFieldNames": ["FieldWordCount"], "params": {"name": "decay"}}]}}`),
 	}
 	sendReqAndVerify(t, testEngine, queryTestCases.path, http.MethodPost, queryTestCases)
+}
+
+func TestHybridSearchWithFunctionChain(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	mp := mocks.NewMockProxy(t)
+	testEngine := initHTTPServerV2(mp, false)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         generateCollectionSchema(schemapb.DataType_Int64, true, true),
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Once()
+
+	mp.EXPECT().HybridSearch(mock.Anything, mock.MatchedBy(func(req *milvuspb.HybridSearchRequest) bool {
+		if len(req.GetFunctionChains()) != 1 {
+			return false
+		}
+		if len(req.GetRequests()) != 2 || len(req.GetRequests()[0].GetFunctionChains()) != 2 ||
+			len(req.GetRequests()[1].GetFunctionChains()) != 0 {
+			return false
+		}
+		subL0ChainPB := req.GetRequests()[0].GetFunctionChains()[0]
+		if subL0ChainPB.GetStage() != schemapb.FunctionChainStage_FunctionChainStageL0Rerank ||
+			len(subL0ChainPB.GetOps()) != 1 || subL0ChainPB.GetOps()[0].GetOp() != "map" {
+			return false
+		}
+		subL0Expr := subL0ChainPB.GetOps()[0].GetExpr()
+		if subL0Expr.GetName() != "xgboost" || len(subL0Expr.GetArgs()) != 1 ||
+			subL0Expr.GetArgs()[0].GetColumn().GetName() != "book_id" ||
+			subL0Expr.GetParams()["model_resource"].GetStringValue() != "test-model" {
+			return false
+		}
+		subL1ChainPB := req.GetRequests()[0].GetFunctionChains()[1]
+		if subL1ChainPB.GetStage() != schemapb.FunctionChainStage_FunctionChainStageL1Rerank ||
+			len(subL1ChainPB.GetOps()) != 1 || subL1ChainPB.GetOps()[0].GetOp() != "limit" ||
+			subL1ChainPB.GetOps()[0].GetParams()["limit"].GetInt64Value() != 2 {
+			return false
+		}
+		chainPB := req.GetFunctionChains()[0]
+		if chainPB.GetStage() != schemapb.FunctionChainStage_FunctionChainStageL2Rerank ||
+			len(chainPB.GetOps()) != 1 || chainPB.GetOps()[0].GetOp() != "merge" {
+			return false
+		}
+
+		keys := make(map[string]string, len(req.GetRankParams()))
+		for _, param := range req.GetRankParams() {
+			keys[param.GetKey()] = param.GetValue()
+		}
+		_, hasStrategy := keys[proxy.RankTypeKey]
+		_, hasParams := keys[proxy.ParamsKey]
+		return hasStrategy && hasParams && keys[proxy.RankTypeKey] == "" && keys[proxy.ParamsKey] == "null" &&
+			keys[proxy.LimitKey] == "2" && keys[proxy.OffsetKey] == "1" && keys[ParamRoundDecimal] == "-1"
+	})).Return(&milvuspb.SearchResults{
+		Status:  commonSuccessStatus,
+		Results: &schemapb.SearchResultData{},
+	}, nil).Once()
+
+	testcase := requestBodyTestCase{
+		path: versionalV2(EntityCategory, HybridSearchAction),
+		requestBody: []byte(`{
+			"collectionName": "hello_milvus",
+			"search": [
+				{
+					"data": [[0.1, 0.2]],
+					"annsField": "book_intro",
+					"metricType": "L2",
+					"limit": 3,
+					"functionChains": [
+						{
+							"name": "sub_l0_rerank",
+							"stage": "FunctionChainStageL0Rerank",
+							"ops": [{
+								"op": "map",
+								"outputs": ["$score"],
+								"expr": {
+									"name": "xgboost",
+									"args": [{"column": "book_id"}],
+									"params": {"model_resource": "test-model"}
+								}
+							}]
+						},
+						{
+							"name": "sub_l1_rerank",
+							"stage": "FunctionChainStageL1Rerank",
+							"ops": [{"op": "limit", "params": {"limit": 2}}]
+						}
+					]
+				},
+				{"data": [[0.1, 0.2]], "annsField": "book_intro", "metricType": "L2", "limit": 3}
+			],
+			"limit": 2,
+			"offset": 1,
+			"functionChains": [{
+				"name": "hybrid_rerank",
+				"stage": "FunctionChainStageL2Rerank",
+				"ops": [{"op": "merge", "params": {"strategy": "rrf"}}]
+			}]
+		}`),
+	}
+	sendReqAndVerify(t, testEngine, testcase.path, http.MethodPost, testcase)
+}
+
+func TestHybridSearchRejectsInvalidSubSearchFunctionChain(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	mp := mocks.NewMockProxy(t)
+	testEngine := initHTTPServerV2(mp, false)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         generateCollectionSchema(schemapb.DataType_Int64, true, true),
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Once()
+
+	testcase := requestBodyTestCase{
+		path: versionalV2(EntityCategory, HybridSearchAction),
+		requestBody: []byte(`{
+			"collectionName": "hello_milvus",
+			"search": [{
+				"data": [[0.1, 0.2]],
+				"annsField": "book_intro",
+				"metricType": "L2",
+				"limit": 3,
+				"functionChains": [{"stage": "BadStage", "ops": [{"op": "limit"}]}]
+			}]
+		}`),
+		errCode: 1100,
+		errMsg:  "unsupported function chain stage",
+	}
+	sendReqAndVerify(t, testEngine, testcase.path, http.MethodPost, testcase)
+}
+
+func TestHybridSearchKeepsFunctionChainWithRerank(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+	mp := mocks.NewMockProxy(t)
+	testEngine := initHTTPServerV2(mp, false)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         generateCollectionSchema(schemapb.DataType_Int64, true, true),
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Once()
+	mp.EXPECT().HybridSearch(mock.Anything, mock.MatchedBy(func(req *milvuspb.HybridSearchRequest) bool {
+		if len(req.GetFunctionChains()) != 1 {
+			return false
+		}
+		params := make(map[string]string, len(req.GetRankParams()))
+		for _, param := range req.GetRankParams() {
+			params[param.GetKey()] = param.GetValue()
+		}
+		return params[proxy.RankTypeKey] == "rrf" && params[proxy.ParamsKey] == `{"k":60}`
+	})).Return(&milvuspb.SearchResults{
+		Status:  commonSuccessStatus,
+		Results: &schemapb.SearchResultData{},
+	}, nil).Once()
+
+	testcase := requestBodyTestCase{
+		path: versionalV2(EntityCategory, HybridSearchAction),
+		requestBody: []byte(`{
+			"collectionName": "hello_milvus",
+			"search": [
+				{"data": [[0.1, 0.2]], "annsField": "book_intro", "metricType": "L2", "limit": 3}
+			],
+			"limit": 2,
+			"rerank": {"strategy": "rrf", "params": {"k": 60}},
+			"functionChains": [{
+				"name": "hybrid_rerank",
+				"stage": "FunctionChainStageL2Rerank",
+				"ops": [{"op": "merge", "params": {"strategy": "rrf"}}]
+			}]
+		}`),
+	}
+	sendReqAndVerify(t, testEngine, testcase.path, http.MethodPost, testcase)
 }
 
 func TestDocInDocOutSearch(t *testing.T) {
@@ -2772,6 +2953,9 @@ func versionalV2(category string, action string) string {
 func initHTTPServerV2(proxy types.ProxyComponent, needAuth bool) *gin.Engine {
 	h := NewHandlersV2(proxy)
 	ginHandler := gin.Default()
+	// Mirror the middleware the real server installs, so tests exercise the same
+	// chain rather than a handler-only subset of it.
+	ginHandler.Use(IdempotencyKeyHandlerFunc)
 	appV2 := ginHandler.Group("/v2/vectordb", genAuthMiddleWare(needAuth))
 	h.RegisterRoutesToV2(appV2)
 
@@ -6792,4 +6976,137 @@ func TestGroupKnobSpellingsCannotDisagree(t *testing.T) {
 		assert.Equal(t, http.StatusOK, code)
 		assert.Contains(t, body, "cannot be used simultaneously")
 	})
+}
+
+func TestIdempotencyKeyHandlerFuncSetsIncomingMetadata(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v2/vectordb/jobs/import/create", nil)
+	c.Request.Header.Set(HTTPHeaderIdempotencyKey, "run-1-batch-1")
+
+	IdempotencyKeyHandlerFunc(c)
+
+	md, ok := metadata.FromIncomingContext(c.Request.Context())
+	assert.True(t, ok)
+	assert.Equal(t, []string{"run-1-batch-1"}, md.Get(util.HeaderIdempotencyKey))
+}
+
+// TestIdempotencyKeyHandlerFuncRejectsUnsendableKey pins the REST door found open by
+// the adversarial review on milvus#52544. Go's header parser accepts every byte
+// >= 0x80, gRPC refuses anything outside printable ASCII before the stream exists,
+// and ClientBase reads that codes.Internal as a broken connection -- so an unchecked
+// key turns one request into repeated resets of a shared connection. The middleware is
+// mounted on the whole engine, so this covers every v1 and v2 route.
+func TestIdempotencyKeyHandlerFuncRejectsUnsendableKey(t *testing.T) {
+	paramtable.Init()
+
+	for _, key := range []string{"批次-1", "run\t1"} {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodPost, "/v2/vectordb/jobs/import/create", nil)
+		c.Request.Header.Set(HTTPHeaderIdempotencyKey, key)
+
+		IdempotencyKeyHandlerFunc(c)
+
+		assert.True(t, c.IsAborted())
+		assert.Contains(t, w.Body.String(), "printable ASCII")
+		// The key must not have been copied onto the outgoing path.
+		md, ok := metadata.FromIncomingContext(c.Request.Context())
+		if ok {
+			assert.Empty(t, md.Get(util.HeaderIdempotencyKey))
+		}
+	}
+}
+
+func TestIdempotencyKeyHandlerFuncRejectsOversizedKey(t *testing.T) {
+	paramtable.Init()
+	limit := paramtable.Get().StreamingCfg.IdempotencyMaxKeyLength.GetAsInt()
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v2/vectordb/jobs/import/create", nil)
+	c.Request.Header.Set(HTTPHeaderIdempotencyKey, strings.Repeat("a", limit+1))
+
+	IdempotencyKeyHandlerFunc(c)
+
+	assert.True(t, c.IsAborted())
+	assert.Contains(t, w.Body.String(), "exceeds limit")
+}
+
+func TestIdempotencyKeyHandlerFuncPreservesExistingMetadata(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	req := httptest.NewRequest(http.MethodPost, "/v2/vectordb/jobs/import/create", nil)
+	req = req.WithContext(metadata.NewIncomingContext(req.Context(),
+		metadata.Pairs(util.HeaderDBName, "db1")))
+	req.Header.Set(HTTPHeaderIdempotencyKey, "run-1-batch-1")
+	c.Request = req
+
+	IdempotencyKeyHandlerFunc(c)
+
+	md, _ := metadata.FromIncomingContext(c.Request.Context())
+	assert.Equal(t, []string{"db1"}, md.Get(util.HeaderDBName))
+	assert.Equal(t, []string{"run-1-batch-1"}, md.Get(util.HeaderIdempotencyKey))
+}
+
+// A request without the header must leave the context alone: an empty metadata value
+// is not the same as an absent one for the components that read it, and every route in
+// the cluster passes through this middleware.
+func TestIdempotencyKeyHandlerFuncNoHeaderIsNoop(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v2/vectordb/collections/list", nil)
+	before := c.Request.Context()
+
+	IdempotencyKeyHandlerFunc(c)
+
+	assert.Equal(t, before, c.Request.Context())
+	md, ok := metadata.FromIncomingContext(c.Request.Context())
+	if ok {
+		_, present := md[util.HeaderIdempotencyKey]
+		assert.False(t, present)
+	}
+}
+
+func TestCreateImportJobForwardsIdempotencyKeyWithAuth(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(proxy.Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	defer paramtable.Get().Reset(proxy.Params.CommonCfg.AuthorizationEnabled.Key)
+
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().ImportV2(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, req *internalpb.ImportRequest) (*internalpb.ImportResponse, error) {
+			md, ok := metadata.FromIncomingContext(ctx)
+			assert.True(t, ok)
+			assert.Equal(t, []string{"run-1-batch-1"}, md.Get(util.HeaderIdempotencyKey))
+			return &internalpb.ImportResponse{
+				Status: commonSuccessStatus,
+				JobID:  "1234567890",
+			}, nil
+		}).Once()
+	testEngine := initHTTPServerV2(mp, true)
+
+	bodyReader := bytes.NewReader([]byte(`{"collectionName": "` + DefaultCollectionName + `", "files": [["book.json"]]}`))
+	req := httptest.NewRequest(http.MethodPost, versionalV2(ImportJobCategory, CreateAction), bodyReader)
+	req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
+	req.Header.Set(HTTPHeaderIdempotencyKey, "run-1-batch-1")
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	returnBody := &ReturnErrMsg{}
+	err := json.Unmarshal(w.Body.Bytes(), returnBody)
+	assert.NoError(t, err)
+	assert.Equal(t, merr.Code(nil), returnBody.Code)
+}
+
+// A browser sends the Idempotency-Key header cross-origin only if the preflight
+// response lists it in Access-Control-Allow-Headers; the header is otherwise blocked
+// before the actual request is ever sent, making idempotent import unusable from a
+// browser client.
+func TestRequestHandlerFuncAllowsIdempotencyKeyHeaderInCORS(t *testing.T) {
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodOptions, "/v2/vectordb/jobs/import/create", nil)
+
+	RequestHandlerFunc(c)
+
+	assert.Contains(t, w.Header().Get("Access-Control-Allow-Headers"), HTTPHeaderIdempotencyKey)
 }

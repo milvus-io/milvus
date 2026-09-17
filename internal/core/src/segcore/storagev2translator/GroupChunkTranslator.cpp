@@ -77,7 +77,9 @@ GroupChunkTranslator::GroupChunkTranslator(
     int64_t num_fields,
     milvus::proto::common::LoadPriority load_priority,
     const std::string& warmup_policy,
-    MmapChunkWritebackMode writeback_mode)
+    MmapChunkWritebackMode writeback_mode,
+    bool force_one_row_group_per_cell,
+    SkipMetricsByField skip_metrics_by_field)
     : segment_id_(segment_id),
       group_chunk_type_(group_chunk_type),
       key_([&]() {
@@ -168,8 +170,16 @@ GroupChunkTranslator::GroupChunkTranslator(
     // runtime-configurable target cell byte size so avg cell size ≈ target.
     const int64_t cell_target_size_bytes = GetCellTargetSizeBytes();
     meta_.total_row_groups_ = total_row_groups;
+    // force_one_row_group_per_cell is the caller's single snapshot of the
+    // stats-skip-index flag for this load. When set, force exactly one row
+    // group per cell so the per-row-group footer statistics that back the skip
+    // index are 1:1 with cache cells: the skip check (which judges per cell)
+    // needs no cross-row-group aggregation and cannot produce a false negative.
+    // Trade-off: while enabled, cells are as fine as one row group.
     const size_t rgs_per_cell =
-        ComputeRowGroupsPerCell(row_group_sizes, cell_target_size_bytes);
+        force_one_row_group_per_cell
+            ? 1
+            : ComputeRowGroupsPerCell(row_group_sizes, cell_target_size_bytes);
     size_t global_rg_offset = 0;
     for (const auto& rg_meta : row_group_meta_list_) {
         size_t file_rg_count = rg_meta.size();
@@ -184,6 +194,10 @@ GroupChunkTranslator::GroupChunkTranslator(
     }
 
     size_t num_cells = meta_.cell_row_group_ranges_.size();
+
+    // GroupCTMeta owns the positional rule; publishing through it keeps a
+    // future Storage V3 / Vortex producer from having to restate it.
+    meta_.InstallSkipMetrics(std::move(skip_metrics_by_field), num_cells, key_);
 
     // Merge row groups into group chunks(cache cells)
     meta_.num_rows_until_chunk_.reserve(num_cells + 1);
@@ -202,14 +216,16 @@ GroupChunkTranslator::GroupChunkTranslator(
         meta_.chunk_memory_size_.push_back(cell_size);
     }
 
-    AssertInfo(
-        meta_.num_rows_until_chunk_.back() == column_group_info_.row_count,
-        fmt::format(
-            "[StorageV2] data lost while loading column group {}: found "
-            "num rows {} but expected {}",
-            column_group_info_.field_id,
-            meta_.num_rows_until_chunk_.back(),
-            column_group_info_.row_count));
+    if (!(meta_.num_rows_until_chunk_.back() == column_group_info_.row_count)) {
+        ThrowInfo(
+            ErrorCode::DataFormatBroken,
+            fmt::format(
+                "[StorageV2] data lost while loading column group {}: found "
+                "num rows {} but expected {}",
+                column_group_info_.field_id,
+                meta_.num_rows_until_chunk_.back(),
+                column_group_info_.row_count));
+    }
 
     LOG_INFO(
         "[StorageV2] translator {} merged {} row groups into {} cells "
@@ -530,7 +546,18 @@ GroupChunkTranslator::load_group_chunk(
                           "unknown group chunk type: {}",
                           static_cast<uint8_t>(group_chunk_type_));
         }
-        std::filesystem::create_directories(filepath.parent_path());
+        // Error-code overload: the throwing one escapes this async producer
+        // as a plain filesystem_error and lands on the future/CGo boundary as
+        // a permanent UnexpectedError, so a transient ENOSPC/EACCES would
+        // never be retried or rerouted.
+        std::error_code mkdir_ec;
+        std::filesystem::create_directories(filepath.parent_path(), mkdir_ec);
+        if (mkdir_ec) {
+            ThrowInfo(ErrorCode::FileCreateFailed,
+                      "failed to create chunk directory {}: {}",
+                      filepath.parent_path().string(),
+                      mkdir_ec.message());
+        }
         chunks = create_group_chunk(field_ids,
                                     field_metas,
                                     array_vecs,

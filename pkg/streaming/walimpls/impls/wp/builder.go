@@ -307,10 +307,10 @@ func validateQuorumJSON(label, raw string, parse func([]byte) error) {
 		return
 	}
 	if err := parse([]byte(raw)); err != nil {
+		// Quorum JSON can contain private seed addresses; parser errors may
+		// also include input fragments. Keep only the declared configuration label.
 		mlog.Warn(context.TODO(), "invalid quorum JSON config at startup, will fall back to static default",
-			mlog.String("config", label),
-			mlog.String("json", raw),
-			mlog.Err(err))
+			mlog.String("config", label))
 	}
 }
 

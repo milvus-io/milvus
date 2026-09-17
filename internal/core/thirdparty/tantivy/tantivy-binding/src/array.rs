@@ -5,7 +5,7 @@ use libc::c_char;
 use libc::size_t;
 
 use crate::error;
-use crate::error::Result;
+use crate::error::{Result, TantivyBindingError, TantivyBindingErrorCode};
 use crate::string_c::create_string;
 use crate::string_c::free_rust_string;
 use crate::util::free_binding;
@@ -192,6 +192,9 @@ pub struct RustResult {
     pub success: bool,
     pub value: Value,
     pub error: *const c_char,
+    /// 0 (Ok) on success. Carried explicitly so the C++ side classifies by
+    /// discriminant instead of parsing the error text.
+    pub error_code: TantivyBindingErrorCode,
 }
 
 impl RustResult {
@@ -200,6 +203,7 @@ impl RustResult {
             success: true,
             value: Value::None(()),
             error: std::ptr::null(),
+            error_code: TantivyBindingErrorCode::Ok,
         }
     }
 
@@ -208,6 +212,7 @@ impl RustResult {
             success: true,
             value: Value::Ptr(value),
             error: std::ptr::null(),
+            error_code: TantivyBindingErrorCode::Ok,
         }
     }
 
@@ -216,6 +221,7 @@ impl RustResult {
             success: true,
             value: Value::RustArrayI64(RustArrayI64::from_vec(value)),
             error: std::ptr::null(),
+            error_code: TantivyBindingErrorCode::Ok,
         }
     }
 
@@ -224,6 +230,29 @@ impl RustResult {
             success: false,
             value: Value::None(()),
             error: create_string(&error),
+            error_code: TantivyBindingErrorCode::Internal,
+        }
+    }
+
+    /// Keep the producer's discriminant while replacing the message with a
+    /// contextual one. from_error(format!(...)) drops the code to Internal,
+    /// which is exactly how a user-supplied bad analyzer_params was reaching
+    /// the C++ side as UnexpectedError(2001) instead of InvalidParameter.
+    pub fn from_binding_error_msg(error: &TantivyBindingError, msg: String) -> Self {
+        RustResult {
+            success: false,
+            value: Value::None(()),
+            error: create_string(&msg),
+            error_code: error.code(),
+        }
+    }
+
+    pub fn from_binding_error(error: &TantivyBindingError) -> Self {
+        RustResult {
+            success: false,
+            value: Value::None(()),
+            error: create_string(&error.to_string()),
+            error_code: error.code(),
         }
     }
 }
@@ -238,11 +267,13 @@ where
                 success: true,
                 value: v.into(),
                 error: null(),
+                error_code: TantivyBindingErrorCode::Ok,
             },
             Err(e) => RustResult {
                 success: false,
                 value: Value::None(()),
                 error: create_string(&e.to_string()),
+                error_code: e.code(),
             },
         }
     }

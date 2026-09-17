@@ -72,8 +72,9 @@ void
 BitmapIndex<T>::UnmapIndexData() {
     if (mmap_data_ != nullptr && mmap_data_ != MAP_FAILED) {
         if (munmap(mmap_data_, mmap_size_) != 0) {
-            AssertInfo(
-                true, "failed to unmap bitmap index, err={}", strerror(errno));
+            // Teardown path: report, never throw. (This used to be
+            // AssertInfo(true, ...), which can never fire.)
+            LOG_WARN("failed to unmap bitmap index, err={}", strerror(errno));
         }
         mmap_data_ = nullptr;
         mmap_size_ = 0;
@@ -1490,9 +1491,11 @@ BitmapIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
         auto tmp_file = File::Open(tmp_path, O_RDONLY);
         auto* tmp_map = mmap(
             NULL, tmp_size, PROT_READ, MAP_PRIVATE, tmp_file.Descriptor(), 0);
-        AssertInfo(tmp_map != MAP_FAILED,
-                   "failed to mmap temp file: {}",
-                   strerror(errno));
+        if (tmp_map == MAP_FAILED) {
+            ThrowInfo(ErrorCode::MmapError,
+                      "failed to mmap temp file: {}",
+                      strerror(errno));
+        }
         tmp_file.Close();
         // Declared after tmp_path_guard so LIFO unwinding runs munmap first,
         // releasing the inode reference before unlink reclaims disk space.

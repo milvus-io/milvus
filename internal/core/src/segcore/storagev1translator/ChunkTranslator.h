@@ -74,8 +74,7 @@ class ChunkTranslator : public milvus::cachinglayer::Translator<milvus::Chunk> {
                     bool mmap_populate,
                     milvus::proto::common::LoadPriority load_priority,
                     const std::string& warmup_policy,
-                    MmapChunkWritebackMode writeback_mode =
-                        MmapChunkWritebackMode::Disabled);
+                    MmapChunkWritebackMode writeback_mode);
 
     size_t
     num_cells() const override;

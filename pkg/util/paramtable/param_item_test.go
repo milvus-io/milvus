@@ -17,12 +17,89 @@
 package paramtable
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/config"
 )
+
+func TestParamItemSensitivity(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		key         string
+		prefix      string
+		sensitivity Sensitivity
+		redacted    bool
+	}{
+		{name: "zero value public", key: "feature.limit"},
+		{name: "auto secret name", key: "feature.password", redacted: true},
+		{name: "auto sensitive prefix", key: "feature.limit", prefix: "feature.", redacted: true},
+		{name: "explicit sensitive", key: "feature.limit", sensitivity: Sensitive, redacted: true},
+		{name: "explicit non-sensitive name", key: "feature.password", sensitivity: NonSensitive},
+		{name: "explicit non-sensitive prefix", key: "feature.limit", prefix: "feature.", sensitivity: NonSensitive},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			manager := config.NewManager()
+			if test.prefix != "" {
+				manager.RegisterSensitivePrefix(test.prefix)
+			}
+			fallback := test.key + ".legacy"
+			item := ParamItem{Key: test.key, FallbackKeys: []string{fallback}, Sensitivity: test.sensitivity}
+			item.Init(manager)
+			const raw = "sensitivity-value-canary"
+			manager.SetConfig(fallback, raw)
+			require.Equal(t, raw, item.GetValue(), "fallback consumers receive the original value")
+			manager.SetConfig(item.Key, raw)
+			require.Equal(t, raw, item.GetValue())
+			for _, key := range []string{item.Key, fallback} {
+				for _, alias := range []string{key, strings.ReplaceAll(key, ".", "/"), strings.ToUpper(strings.ReplaceAll(key, ".", "_")), config.EtcdConfigKey(key)} {
+					_, value, err := manager.GetRegisteredConfig(alias)
+					if test.redacted {
+						require.ErrorIs(t, err, config.ErrKeySensitive)
+						require.Empty(t, value)
+						require.Equal(t, config.RedactedValue, manager.RedactValue(alias, raw))
+					} else {
+						require.NoError(t, err)
+						require.Equal(t, raw, value)
+						require.Equal(t, raw, manager.RedactValue(alias, raw))
+					}
+					require.False(t, manager.IsImmutable(alias), "sensitivity is independent of mutation restrictions")
+				}
+			}
+		})
+	}
+}
+
+func TestParamGroupDeleteDoesNotSurfaceTombstone(t *testing.T) {
+	manager := config.NewManager()
+	group := ParamGroup{KeyPrefix: "dynamic."}
+	group.Init(manager)
+
+	manager.SetMapConfig("dynamic.member", "value")
+	assert.Equal(t, map[string]string{"member": "value"}, group.GetValue())
+
+	manager.DeleteConfig("dynamic.member")
+	assert.Empty(t, group.GetValue())
+}
+
+func TestForbiddenParamItemAllowsRuntimeOverride(t *testing.T) {
+	manager := config.NewManager()
+	manager.SetConfig("test.static.path", "initial")
+
+	param := &ParamItem{
+		Key:       "test.static.path",
+		Forbidden: true,
+		Formatter: strings.ToUpper,
+	}
+	param.Init(manager)
+	require.Equal(t, "INITIAL", param.GetValue())
+
+	manager.SetConfig("test.static.path", "runtime")
+	require.Equal(t, "RUNTIME", param.GetValue())
+}
 
 func TestGetWithRaw_FallbackKeyCacheSuccess(t *testing.T) {
 	// When primary key equals DefaultValue and a fallback key has a different value,

@@ -24,6 +24,7 @@ func TestEquiv_RetrieveResults(t *testing.T) {
 		AllRetrieveCount:          3,
 		HasMoreResult:             true,
 		ScannedTotalBytes:         4096,
+		MvccTimestamp:             1<<48 + 123,
 		FieldsData: []*schemapb.FieldData{
 			{Type: schemapb.DataType_VarChar, FieldName: "title", FieldId: 101, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"a", "b", "c"}}}}}},
 			{Type: schemapb.DataType_FloatVector, FieldName: "emb", FieldId: 102, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4, 5, 6}}}}}},
@@ -89,12 +90,13 @@ func TestInsertRequest_UTF8MatchesOfficial(t *testing.T) {
 
 func TestTryUnmarshal_Dispatch(t *testing.T) {
 	// known type → handled
-	rr := &internalpb.RetrieveResults{ReqID: 5}
+	// Empty results must also preserve the executed snapshot for partial-update CAS.
+	rr := &internalpb.RetrieveResults{ReqID: 5, MvccTimestamp: 1<<48 + 123}
 	wire, _ := proto.Marshal(rr)
 	var got internalpb.RetrieveResults
 	handled, err := TryUnmarshal(&got, wire)
-	if !handled || err != nil || got.ReqID != 5 {
-		t.Fatalf("expected handled RetrieveResults: handled=%v err=%v reqID=%d", handled, err, got.ReqID)
+	if !handled || err != nil || !proto.Equal(rr, &got) {
+		t.Fatalf("expected handled RetrieveResults: handled=%v err=%v result=%v", handled, err, &got)
 	}
 	// unknown type → not handled (caller falls back to official)
 	var status commonpb.Status

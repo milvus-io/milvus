@@ -107,6 +107,11 @@ class PhyColumnExpr : public Expr {
     }
 
     void
+    SetSnapshot(const segcore::SegmentReadSnapshot* snapshot) override {
+        segment_chunk_reader_.SetSnapshot(snapshot);
+    }
+
+    void
     MoveCursorForIndexed() {
         current_chunk_pos_ = current_chunk_pos_ + batch_size_ >=
                                      segment_chunk_reader_.active_count_
@@ -122,7 +127,7 @@ class PhyColumnExpr : public Expr {
                 use_index_data_ && segment_chunk_reader_.segment_->type() ==
                                        SegmentType::Sealed
                     ? current_chunk_pos_
-                    : segment_chunk_reader_.segment_->num_rows_until_chunk(
+                    : segment_chunk_reader_.NumRowsUntilChunk(
                           expr_->GetColumn().field_id_, current_chunk_id_) +
                           current_chunk_pos_;
             return current_rows;
@@ -178,6 +183,7 @@ class PhyColumnExpr : public Expr {
     int64_t current_chunk_id_{0};
     int64_t current_chunk_pos_{0};
 
+    segcore::StringScanState string_scan_state_;
     const segcore::SegmentChunkReader segment_chunk_reader_;
     int64_t batch_size_;
     std::shared_ptr<const milvus::expr::ColumnExpr> expr_;

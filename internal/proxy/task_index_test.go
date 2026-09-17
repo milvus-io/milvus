@@ -1659,6 +1659,24 @@ func Test_ngram_parseIndexParams(t *testing.T) {
 }
 
 func Test_fmindex_parseIndexParams(t *testing.T) {
+	t.Run("varchar autoindex follows configured scalar policy", func(t *testing.T) {
+		cit := &createIndexTask{
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: AutoIndexName},
+				},
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID: 101, Name: "FieldID", DataType: schemapb.DataType_VarChar,
+			},
+		}
+		err := cit.parseIndexParams(context.TODO())
+		assert.NoError(t, err)
+		resolvedType, err := funcutil.GetAttrByKeyFromRepeatedKV(common.IndexTypeKey, cit.newIndexParams)
+		assert.NoError(t, err)
+		assert.Equal(t, Params.AutoIndexConfig.ScalarVarcharIndexType.GetValue(), resolvedType)
+	})
+
 	t.Run("valid fmindex index params without sample rate", func(t *testing.T) {
 		cit := &createIndexTask{
 			req: &milvuspb.CreateIndexRequest{

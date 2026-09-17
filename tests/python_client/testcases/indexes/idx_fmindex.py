@@ -1,17 +1,10 @@
-from pymilvus import DataType
-
 success = "success"
 
 
 class FMINDEX:
-    # FM-index is an exact byte-level substring index for VARCHAR. JSON string
-    # paths, TEXT and ARRAY are follow-ups (rejected at create_index for now).
-    supported_field_types = [
-        DataType.VARCHAR,
-    ]
-
-    # Build-parameter test configurations. fm_sa_sample_rate is optional
-    # (defaults to 8) and, when present, must be an integer in [4, 256].
+    # Build-parameter test configurations. fm_sa_sample_rate defaults to 8 and
+    # must be an integer in [4, 256]; fm_block_bytes defaults to 64 and must be
+    # an integer power of two in [8, 128].
     build_params = [
         {
             "description": "no optional params (defaults applied)",
@@ -66,6 +59,16 @@ class FMINDEX:
             "expected": success,
         },
         {
+            "description": "sample rate and block bytes supplied together",
+            "params": {"fm_sa_sample_rate": 32, "fm_block_bytes": 16},
+            "expected": success,
+        },
+        {
+            "description": "block bytes below minimum (power of two but < 8)",
+            "params": {"fm_block_bytes": 4},
+            "expected": {"err_code": 1100, "err_msg": "fm_block_bytes for FM-index must be a power of two"},
+        },
+        {
             "description": "block bytes not a power of two",
             "params": {"fm_block_bytes": 24},
             "expected": {"err_code": 1100, "err_msg": "fm_block_bytes for FM-index must be a power of two"},
@@ -74,5 +77,10 @@ class FMINDEX:
             "description": "block bytes above maximum",
             "params": {"fm_block_bytes": 256},
             "expected": {"err_code": 1100, "err_msg": "fm_block_bytes for FM-index must be a power of two"},
+        },
+        {
+            "description": "block bytes not an integer",
+            "params": {"fm_block_bytes": "abc"},
+            "expected": {"err_code": 1100, "err_msg": "fm_block_bytes for FM-index must be an integer"},
         },
     ]

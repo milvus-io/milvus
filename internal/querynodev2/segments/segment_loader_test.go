@@ -27,6 +27,7 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
 
@@ -48,6 +49,39 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func TestSeparateLoadInfoV2LegacyStatsRoot(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	for _, item := range []*paramtable.ParamItem{&params.CommonCfg.StorageType, &params.LocalStorageCfg.Path, &params.MinioCfg.RootPath} {
+		key, value := item.Key, item.GetValue()
+		t.Cleanup(func() { require.NoError(t, params.Save(key, value)) })
+	}
+	const localRoot = "/var/lib/milvus/data"
+	require.NoError(t, params.Save(params.LocalStorageCfg.Path.Key, localRoot))
+	require.NoError(t, params.Save(params.MinioCfg.RootPath.Key, "files"))
+	for _, backend := range []struct{ name, root string }{{"local", localRoot}, {"remote", "files"}} {
+		t.Run(backend.name, func(t *testing.T) {
+			require.NoError(t, params.Save(params.CommonCfg.StorageType.Key, backend.name))
+			for _, version := range []int64{storage.StorageV1, storage.StorageV2} {
+				loadInfo := &querypb.SegmentLoadInfo{
+					StorageVersion: version, CollectionID: 2, PartitionID: 3, SegmentID: 4,
+					TextStatsLogs: map[int64]*datapb.TextIndexStats{
+						106: {FieldID: 106, BuildID: 10, Version: 1, Files: []string{"index.v3"}},
+					},
+					JsonKeyStatsLogs: map[int64]*datapb.JsonKeyStats{
+						107: {FieldID: 107, BuildID: 11, Version: 1, JsonKeyStatsDataFormat: 3, Files: []string{"meta.json", "shared_key_index/0", "shredding_data/0/0"}},
+					},
+				}
+				_, _, textStats, _, jsonStats, textBases, jsonBases := separateLoadInfoV2(loadInfo, &schemapb.CollectionSchema{})
+				assert.Equal(t, backend.root+"/text_log/10/1/2/3/4/106", textBases[106])
+				assert.Equal(t, backend.root+"/json_stats/3/11/1/2/3/4/107", jsonBases[107])
+				assert.Equal(t, loadInfo.TextStatsLogs, textStats)
+				assert.Equal(t, loadInfo.JsonKeyStatsLogs, jsonStats)
+			}
+		})
+	}
+}
 
 type SegmentLoaderSuite struct {
 	suite.Suite

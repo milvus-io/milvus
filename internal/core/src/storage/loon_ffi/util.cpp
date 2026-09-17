@@ -46,6 +46,7 @@
 #include "storage/loon_ffi/external_spec_c.h"
 #include "storage/loon_ffi/property_singleton.h"
 #include "storage/loon_ffi/util.h"
+#include "storage/loon_ffi/loon_error_code.h"
 
 using json = nlohmann::json;
 
@@ -73,9 +74,17 @@ MakeInternalPropertiesFromStorageConfig(CStorageConfig c_storage_config) {
                                       PROPERTY_FS_ACCESS_KEY_VALUE,
                                       c_storage_config.access_key_value);
     }
-    if (c_storage_config.root_path != nullptr) {
+    const std::string storage_type = c_storage_config.storage_type != nullptr
+                                         ? c_storage_config.storage_type
+                                         : "";
+    if (c_storage_config.root_path != nullptr || storage_type == "local") {
+        const std::string root_path = c_storage_config.root_path != nullptr
+                                          ? c_storage_config.root_path
+                                          : "";
         milvus_storage::api::SetValue(
-            *properties_map, PROPERTY_FS_ROOT_PATH, c_storage_config.root_path);
+            *properties_map,
+            PROPERTY_FS_ROOT_PATH,
+            LoonFSRootPath(storage_type, root_path).c_str());
     }
     if (c_storage_config.storage_type != nullptr) {
         milvus_storage::api::SetValue(*properties_map,
@@ -185,6 +194,7 @@ static const std::unordered_set<std::string> kAllowedExtfsSpecKeys = {
     "use_virtual_host",
     "region",
     "cloud_provider",
+    "endpoint_url",
     "iam_endpoint",
     "storage_type",
     "ssl_ca_cert",
@@ -406,7 +416,7 @@ IsCloudEndpointHost(const std::string& host) {
     return false;
 }
 
-static void
+static arrow::Status
 InjectExternalSpecProperties(
     milvus_storage::api::Properties& properties,
     int64_t collection_id,
@@ -479,10 +489,12 @@ InjectExternalSpecProperties(
     // Caller must have run Go ValidateExternalSource; malformed here
     // signals etcd corruption or bypass — fail adjacent to bad input.
     auto scheme_end = external_source.find("://");
-    AssertInfo(scheme_end != std::string::npos,
-               "external_source for collection {} missing scheme: {}",
-               collection_id,
-               external_source);
+    if (!(scheme_end != std::string::npos)) {
+        ThrowInfo(milvus::ErrorCode::ConfigInvalid,
+                  "external_source for collection {} missing scheme: {}",
+                  collection_id,
+                  external_source);
+    }
 
     std::string scheme = external_source.substr(0, scheme_end);
     auto rest = external_source.substr(scheme_end + 3);
@@ -492,10 +504,12 @@ InjectExternalSpecProperties(
     // where rest itself is empty.
     std::string host =
         (slash_pos != std::string::npos) ? rest.substr(0, slash_pos) : rest;
-    AssertInfo(!host.empty(),
-               "external_source for collection {} has empty host: {}",
-               collection_id,
-               external_source);
+    if (!(!host.empty())) {
+        ThrowInfo(milvus::ErrorCode::ConfigInvalid,
+                  "external_source for collection {} has empty host: {}",
+                  collection_id,
+                  external_source);
+    }
 
     std::string path_part =
         (slash_pos != std::string::npos) ? rest.substr(slash_pos + 1) : "";
@@ -528,9 +542,12 @@ InjectExternalSpecProperties(
     // Layer 2: apply spec.extfs JSON. Gate every key through
     // kAllowedExtfsSpecKeys — defense-in-depth against property injection
     // if a caller bypasses Go ParseExternalSpec. Note: "address" is NOT in
-    // the allowlist; user-facing endpoint override must use Milvus-form URI.
+    // the allowlist. endpoint_url is captured below and translated to the
+    // internal address property instead of being forwarded verbatim.
     std::string spec_cloud_provider;
     std::string spec_region;
+    std::string spec_endpoint_url;
+    bool has_spec_endpoint_url = false;
     if (!external_spec.empty()) {
         try {
             simdjson::ondemand::parser parser;
@@ -553,6 +570,11 @@ InjectExternalSpecProperties(
                         }
                         auto val =
                             std::string(field.value().get_string().value());
+                        if (key == "endpoint_url") {
+                            has_spec_endpoint_url = true;
+                            spec_endpoint_url = val;
+                            continue;
+                        }
                         if (val.empty()) {
                             continue;
                         }
@@ -590,48 +612,104 @@ InjectExternalSpecProperties(
                 "(collection_id={}): {}",
                 collection_id,
                 e.what());
-            ThrowInfo(milvus::ErrorCode::UnexpectedError,
+            ThrowInfo(milvus::ErrorCode::ConfigInvalid,
                       "external_spec parse failed for collection {}: {}",
                       collection_id,
                       e.what());
         }
     }
 
-    // Layer 3: AWS-form disambiguation via derived-endpoint vs URI.host.
-    //   Compute DeriveEndpoint(cp, region). If non-empty and different from
-    //   URI.host, source is AWS-form (scheme://bucket/key) — swap URI.host
-    //   into bucket_name and write derived endpoint as address. Otherwise
-    //   Milvus-form (URI.host == endpoint) or unresolvable — keep Layer1
-    //   values.
+    // Layer 3: resolve the effective endpoint.
     //
-    //   Path-segment heuristics are unreliable: AWS-form S3 keys may contain
-    //   '/' (`s3://bucket/deep/key.parquet`) and Milvus-form URIs may omit
-    //   keys (`s3://endpoint/bucket`). Comparing derive result with host
-    //   handles both cases correctly — the derived endpoint string is a
-    //   stable cloud-provider identifier, not dependent on path structure.
-    // Swap decision uses ONLY the user-supplied cloud_provider, never a
-    // scheme-inferred fallback. Self-hosted MinIO with
-    // `s3://localhost:9000/bucket/...` is Milvus-form; inferring
-    // cloud_provider=aws from scheme=s3 would produce
-    // derived=https://s3.<region>.amazonaws.com, falsely classify host
-    // as a bucket, and swap. When the user does not declare
-    // cloud_provider, DeriveEndpoint returns empty and the URI is
-    // treated as Milvus-form (host is endpoint).
-    std::string derived = DeriveEndpoint(spec_cloud_provider, spec_region);
-    // Cloud-family host suffix check: if URI.host ends with a known cloud
-    // provider domain (AWS, GCP, Aliyun, Tencent, Huawei, Azure — all
-    // endpoint variants including global/accelerate/dualstack/FIPS/VPC), the
-    // URI is Milvus-form and URI.host is authoritative. Skip swap regardless
-    // of whether DeriveEndpoint string-matches. This prevents misclassifying
-    // `s3://s3.amazonaws.com/bucket/key` as AWS-form when spec.region is a
-    // regional value.
-    bool uri_host_is_cloud_endpoint = IsCloudEndpointHost(host);
-    if (!uri_host_is_cloud_endpoint && !derived.empty() &&
-        StripURIScheme(derived) != host) {
+    // endpoint_url selects explicit-endpoint mode. In this mode
+    // external_source has the standard scheme://bucket/key shape: URI.host is
+    // the bucket, while endpoint_url is the physical S3-compatible address.
+    // The Go API boundary validates the full URL contract. The checks here are
+    // defense in depth for corrupted metadata or callers that bypass Go.
+    if (has_spec_endpoint_url) {
+        std::string effective_endpoint = spec_endpoint_url;
+        if (!effective_endpoint.empty() && effective_endpoint.back() == '/') {
+            effective_endpoint.pop_back();
+        }
+        auto endpoint_scheme_end = effective_endpoint.find("://");
+        AssertInfo(endpoint_scheme_end != std::string::npos,
+                   "extfs.endpoint_url for collection {} missing scheme",
+                   collection_id);
+        std::string endpoint_scheme =
+            effective_endpoint.substr(0, endpoint_scheme_end);
+        std::transform(endpoint_scheme.begin(),
+                       endpoint_scheme.end(),
+                       endpoint_scheme.begin(),
+                       [](unsigned char c) { return std::tolower(c); });
+        AssertInfo(endpoint_scheme == "http" || endpoint_scheme == "https",
+                   "extfs.endpoint_url for collection {} must use http or "
+                   "https",
+                   collection_id);
+        std::string endpoint_authority =
+            effective_endpoint.substr(endpoint_scheme_end + 3);
+        AssertInfo(
+            !endpoint_authority.empty() &&
+                endpoint_authority.find_first_of("/@?#") == std::string::npos,
+            "extfs.endpoint_url for collection {} must contain only "
+            "scheme and authority",
+            collection_id);
+        AssertInfo(
+            host.find(':') == std::string::npos,
+            "external_source host for collection {} must be a bucket name "
+            "without a port when extfs.endpoint_url is set",
+            collection_id);
+
+        effective_endpoint = endpoint_scheme + "://" + endpoint_authority;
+        milvus_storage::api::SetValue(properties,
+                                      (extfs_prefix + "address").c_str(),
+                                      effective_endpoint.c_str());
         milvus_storage::api::SetValue(
             properties, (extfs_prefix + "bucket_name").c_str(), host.c_str());
         milvus_storage::api::SetValue(
-            properties, (extfs_prefix + "address").c_str(), derived.c_str());
+            properties,
+            (extfs_prefix + "use_ssl").c_str(),
+            endpoint_scheme == "https" ? "true" : "false");
+    } else {
+        // AWS-form disambiguation via derived-endpoint vs URI.host.
+        //   Compute DeriveEndpoint(cp, region). If non-empty and different
+        //   from URI.host, source is AWS-form (scheme://bucket/key) — swap
+        //   URI.host into bucket_name and write derived endpoint as address.
+        //   Otherwise Milvus-form (URI.host == endpoint) or unresolvable —
+        //   keep Layer1 values.
+        //
+        //   Path-segment heuristics are unreliable: AWS-form S3 keys may
+        //   contain '/' (`s3://bucket/deep/key.parquet`) and Milvus-form URIs
+        //   may omit keys (`s3://endpoint/bucket`). Comparing derive result
+        //   with host handles both cases correctly — the derived endpoint
+        //   string is a stable cloud-provider identifier, not dependent on
+        //   path structure.
+        // Swap decision uses ONLY the user-supplied cloud_provider, never a
+        // scheme-inferred fallback. Self-hosted MinIO with
+        // `s3://localhost:9000/bucket/...` is Milvus-form; inferring
+        // cloud_provider=aws from scheme=s3 would produce
+        // derived=https://s3.<region>.amazonaws.com, falsely classify host
+        // as a bucket, and swap. When the user does not declare
+        // cloud_provider, DeriveEndpoint returns empty and the URI is
+        // treated as Milvus-form (host is endpoint).
+        std::string derived = DeriveEndpoint(spec_cloud_provider, spec_region);
+        // Cloud-family host suffix check: if URI.host ends with a known cloud
+        // provider domain (AWS, GCP, Aliyun, Tencent, Huawei, Azure — all
+        // endpoint variants including global/accelerate/dualstack/FIPS/VPC),
+        // the URI is Milvus-form and URI.host is authoritative. Skip swap
+        // regardless of whether DeriveEndpoint string-matches. This prevents
+        // misclassifying `s3://s3.amazonaws.com/bucket/key` as AWS-form when
+        // spec.region is a regional value.
+        bool uri_host_is_cloud_endpoint = IsCloudEndpointHost(host);
+        if (!uri_host_is_cloud_endpoint && !derived.empty() &&
+            StripURIScheme(derived) != host) {
+            milvus_storage::api::SetValue(
+                properties,
+                (extfs_prefix + "bucket_name").c_str(),
+                host.c_str());
+            milvus_storage::api::SetValue(properties,
+                                          (extfs_prefix + "address").c_str(),
+                                          derived.c_str());
+        }
     }
 
     // Reconcile bare address with final use_ssl. Addresses that already
@@ -656,10 +734,10 @@ InjectExternalSpecProperties(
     }
 
     // Format-layer: emit per-format properties derived from spec.format.
-    // Currently only Iceberg-table → iceberg.snapshot_id. Future formats
+    // Currently only Iceberg-table → reader.exttable.snapshot_id. Future formats
     // (Lance version, Iceberg branch, etc.) land here.
     if (external_spec.empty()) {
-        return;
+        return arrow::Status::OK();
     }
     try {
         simdjson::ondemand::parser parser;
@@ -670,7 +748,8 @@ InjectExternalSpecProperties(
             simdjson::SUCCESS) {
             std::string format{format_view};
             if (format == "iceberg-table") {
-                auto snapshot_field = doc.find_field("snapshot_id");
+                // JSON fields may appear before or after "format".
+                auto snapshot_field = doc.find_field_unordered("snapshot_id");
                 int64_t snapshot_id = 0;
                 auto int_err = snapshot_field.get_int64().get(snapshot_id);
                 if (int_err == simdjson::INCORRECT_TYPE) {
@@ -691,10 +770,15 @@ InjectExternalSpecProperties(
                     }
                 }
                 if (int_err == simdjson::SUCCESS) {
-                    milvus_storage::api::SetValue(
+                    const auto error = milvus_storage::api::SetValue(
                         properties,
-                        "iceberg.snapshot_id",
+                        PROPERTY_READER_EXTTABLE_SNAPSHOT_ID,
                         std::to_string(snapshot_id).c_str());
+                    if (error.has_value()) {
+                        // An invalid snapshot must not fall back to latest.
+                        return arrow::Status::Invalid(
+                            PROPERTY_READER_EXTTABLE_SNAPSHOT_ID, ": ", *error);
+                    }
                 }
             }
         }
@@ -705,6 +789,7 @@ InjectExternalSpecProperties(
                  collection_id,
                  e.what());
     }
+    return arrow::Status::OK();
 }
 
 void
@@ -717,21 +802,19 @@ InjectExternalSpecProperties(milvus_storage::api::Properties& properties,
     const auto iops_config =
         milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
             .GetExternalIopsConfig();
-    InjectExternalSpecProperties(
+    const auto status = InjectExternalSpecProperties(
         properties, collection_id, external_source, external_spec, iops_config);
+    if (!status.ok()) {
+        ThrowInfo(milvus::InvalidParameter, "{}", status.message());
+    }
 }
 
-std::shared_ptr<milvus_storage::api::Properties>
-MakeInternalLocalProperies(const char* c_path) {
-    auto properties_map = std::make_shared<milvus_storage::api::Properties>();
-
-    milvus_storage::api::SetValue(
-        *properties_map, PROPERTY_FS_STORAGE_TYPE, "local");
-
-    milvus_storage::api::SetValue(
-        *properties_map, PROPERTY_FS_ROOT_PATH, c_path);
-
-    return properties_map;
+std::string
+LoonFSRootPath(const std::string& storage_type, const std::string& root_path) {
+    if (storage_type == "local") {
+        return kLoonLocalFSRootPath;
+    }
+    return root_path;
 }
 
 CStorageConfig
@@ -806,14 +889,21 @@ GetLoonManifest(
         auto current_manifest = manifest_result.ValueOrDie();
         return current_manifest;
     } catch (const json::parse_error& e) {
-        throw std::runtime_error(
-            std::string("Failed to parse manifest JSON: ") + e.what());
+        ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                  "{}",
+                  std::string(std::string("Failed to parse manifest JSON: ") +
+                              e.what()));
     } catch (const json::out_of_range& e) {
-        throw std::runtime_error(
-            std::string("Missing required field in manifest: ") + e.what());
+        ThrowInfo(
+            milvus::ErrorCode::DataFormatBroken,
+            "{}",
+            std::string(std::string("Missing required field in manifest: ") +
+                        e.what()));
     } catch (const json::type_error& e) {
-        throw std::runtime_error(
-            std::string("Invalid field type in manifest: ") + e.what());
+        ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                  "{}",
+                  std::string(std::string("Invalid field type in manifest: ") +
+                              e.what()));
     }
 }
 
@@ -821,7 +911,7 @@ GetLoonManifest(
 //
 // Bridges Go callers into the C++ InjectExternalSpecProperties pipeline so
 // that URI parsing, endpoint derivation, AWS-form rewriting, allowlist
-// enforcement, and format-property derivation (iceberg.snapshot_id etc.)
+// enforcement, and format-property derivation (reader.exttable.snapshot_id etc.)
 // all live in a single implementation driven by the raw external_spec JSON.
 
 extern "C" LoonFFIResult
@@ -855,11 +945,15 @@ loon_properties_inject_external_spec(LoonProperties* properties,
         // would couple concurrent FFI and native reads through global state.
         const milvus::storage::ExternalIopsConfig iops_config{iops_initial_rate,
                                                               iops_max_rate};
-        InjectExternalSpecProperties(props,
-                                     collection_id,
-                                     external_source,
-                                     external_spec ? external_spec : "",
-                                     iops_config);
+        const auto status =
+            InjectExternalSpecProperties(props,
+                                         collection_id,
+                                         external_source,
+                                         external_spec ? external_spec : "",
+                                         iops_config);
+        if (!status.ok()) {
+            RETURN_ERROR(LOON_INVALID_PROPERTIES, status.message());
+        }
 
         // Rebuild LoonProperties from the merged map. Free old entries first
         // so ownership stays with loon_properties_free.
@@ -885,8 +979,9 @@ loon_properties_inject_external_spec(LoonProperties* properties,
         size_t i = 0;
         for (const auto& kv : props) {
             arr[i].key = strdup(kv.first.c_str());
-            const auto* sval = std::get_if<std::string>(&kv.second);
-            arr[i].value = strdup(sval ? sval->c_str() : "");
+            // Registered properties such as snapshot_id are stored as INT64.
+            const auto value = PropertyValueAsString(props, kv.first.c_str());
+            arr[i].value = strdup(value ? value->c_str() : "");
             ++i;
         }
         properties->properties = arr;

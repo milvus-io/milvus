@@ -38,7 +38,7 @@ class BinlogReader {
     ReadSingleValue(T& val) {
         auto needed_size = sizeof(T);
         if (needed_size > size_ - tell_) {
-            return SegcoreError(milvus::UnexpectedError,
+            return SegcoreError(milvus::DataFormatBroken,
                                 "out range of binlog data");
         }
         val = *reinterpret_cast<T*>(data_.get() + tell_);

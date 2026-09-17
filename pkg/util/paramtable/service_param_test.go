@@ -17,17 +17,118 @@
 package paramtable
 
 import (
+	"os"
+	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+// Every local storage key is a complete filesystem path that starts with
+// localStorage.path, and the loon local filesystem is rooted at "/", so the
+// configured value must never depend on the process working directory.
+func TestLocalStorageConfig_PathIsAbsolute(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		configured string
+		want       string
+	}{
+		{name: "default", want: filepath.Clean(defaultLocalStoragePath)},
+		{name: "absolute", configured: "/var/lib/milvus/data", want: "/var/lib/milvus/data"},
+		{name: "clean_absolute", configured: "  /var/lib/milvus/./old/../data/  ", want: "/var/lib/milvus/data"},
+		{name: "filesystem_root", configured: "/", want: "/"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bt := NewBaseTable(SkipRemote(true), SkipEnv(true), Files([]string{}))
+			t.Cleanup(bt.mgr.Close)
+			if tc.configured != "" {
+				require.NoError(t, bt.Save("localStorage.path", tc.configured))
+			}
+			var params ServiceParam
+			require.NotPanics(t, func() { params.init(bt) })
+			require.Equal(t, tc.want, params.LocalStorageCfg.Path.GetValue())
+			require.True(t, filepath.IsAbs(params.LocalStorageCfg.Path.GetValue()))
+		})
+	}
+}
+
+func TestLocalStorageConfig_RejectsInvalidPathDuringInit(t *testing.T) {
+	assertInvalidInit := func(t *testing.T, bt *BaseTable) {
+		t.Helper()
+		t.Cleanup(bt.mgr.Close)
+		var panicValue any
+		func() {
+			defer func() { panicValue = recover() }()
+			var params ServiceParam
+			params.init(bt)
+		}()
+		require.NotNil(t, panicValue, "service initialization must reject the configured path before starting components")
+		panicErr, ok := panicValue.(error)
+		require.True(t, ok, "initialization must panic with a typed configuration error, got %T", panicValue)
+		require.ErrorIs(t, panicErr, merr.ErrParameterInvalid)
+		require.Contains(t, panicErr.Error(), "localStorage.path must be an absolute filesystem path")
+	}
+	for _, tc := range []struct {
+		name  string
+		value string
+	}{
+		{name: "relative", value: "relative/data"},
+		{name: "current_directory_relative", value: "./data"},
+		{name: "parent_directory_relative", value: "../data"},
+		{name: "current_directory", value: "."},
+		{name: "empty", value: ""},
+		{name: "blank", value: " \t\n "},
+	} {
+		t.Run("saved/"+tc.name, func(t *testing.T) {
+			bt := NewBaseTable(SkipRemote(true), SkipEnv(true), Files([]string{}))
+			// Save before initialization exercises the startup path, rather
+			// than calling the formatter through a later GetValue.
+			require.NoError(t, bt.Save("localStorage.path", tc.value))
+			assertInvalidInit(t, bt)
+		})
+		t.Run("environment/"+tc.name, func(t *testing.T) {
+			t.Setenv("LOCALSTORAGE_PATH", tc.value)
+			bt := NewBaseTable(SkipRemote(true), Files([]string{}))
+			assertInvalidInit(t, bt)
+		})
+	}
+}
+
+func TestLocalStorageConfig_PathDoesNotChangeAtRuntime(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("MILVUSCONF", dir)
+	configFile := filepath.Join(dir, "local-storage.yaml")
+	require.NoError(t, os.WriteFile(configFile, []byte("localStorage:\n  path: /var/lib/milvus/data\n"), 0o600))
+	bt := NewBaseTable(SkipRemote(true), SkipEnv(true), Files([]string{filepath.Base(configFile)}), Interval(10*time.Millisecond))
+	t.Cleanup(bt.mgr.Close)
+
+	var params ServiceParam
+	require.NotPanics(t, func() { params.init(bt) })
+	require.Equal(t, "/var/lib/milvus/data", params.LocalStorageCfg.Path.GetValue())
+
+	// File and config-center sources replace their stored value before emitting
+	// an update event. A forbidden path must retain its startup value even then.
+	require.NoError(t, os.WriteFile(configFile, []byte("localStorage:\n  path: relative/data\n"), 0o600))
+	require.Eventually(t, func() bool {
+		return bt.Get("localStorage.path") == "relative/data"
+	}, time.Second, 10*time.Millisecond)
+	require.NotPanics(t, func() {
+		require.Equal(t, "/var/lib/milvus/data", params.LocalStorageCfg.Path.GetValue())
+	})
+	value, raw, err := params.LocalStorageCfg.Path.getWithRaw()
+	require.NoError(t, err)
+	require.Equal(t, "/var/lib/milvus/data", value)
+	require.Equal(t, "relative/data", raw)
+}
 
 func TestServiceParam(t *testing.T) {
 	var SParams ServiceParam
@@ -300,6 +401,63 @@ func TestServiceParam(t *testing.T) {
 			bt.Save(SParams.PulsarCfg.Address.Key, "")
 			assert.Equal(t, SParams.PulsarCfg.WebAddress.GetValue(), "")
 		}
+
+		{
+			// derived from pulsar.address: single host is unchanged, a multi-host
+			// service url uses the first host, and IPv6 hosts are bracketed
+			webPort := SParams.PulsarCfg.WebPort.GetValue()
+			for _, c := range []struct {
+				address  string
+				expected string
+			}{
+				{"pulsar://localhost:6650", "http://localhost:" + webPort},
+				{"pulsar://10.1.2.3:6650", "http://10.1.2.3:" + webPort},
+				{"pulsar+ssl://broker.example.com:6651", "http://broker.example.com:" + webPort},
+				{"pulsar://broker.example.com", "http://broker.example.com:" + webPort},
+				{"broker.example.com", "http://broker.example.com:" + webPort},
+				{"pulsar://user:pw@broker.example.com:6650", "http://broker.example.com:" + webPort},
+				{"pulsar://[::1]:6650", "http://[::1]:" + webPort},
+				{"pulsar://[fd00::1]", "http://[fd00::1]:" + webPort},
+				{"pulsar://broker-0.example.com:6650,broker-1.example.com:6650", "http://broker-0.example.com:" + webPort},
+				{"broker-0.example.com,broker-1.example.com", "http://broker-0.example.com:" + webPort},
+			} {
+				bt.Save(SParams.PulsarCfg.Address.Key, c.address)
+				assert.Equal(t, c.expected, SParams.PulsarCfg.WebAddress.GetValue(), c.address)
+			}
+		}
+
+		{
+			// an explicitly configured web address is honored as is, whatever pulsar.address is
+			bt.Save(SParams.PulsarCfg.WebAddress.Key, "http://pulsar-web.example.com:8080")
+			for _, address := range []string{"pulsar://localhost:6650", "pulsar://broker-0.example.com:6650,broker-1.example.com:6650", ""} {
+				bt.Save(SParams.PulsarCfg.Address.Key, address)
+				assert.Equal(t, "http://pulsar-web.example.com:8080", SParams.PulsarCfg.WebAddress.GetValue(), address)
+			}
+			bt.Remove(SParams.PulsarCfg.WebAddress.Key)
+		}
+
+		{
+			// an explicit web address must be an http(s) url, otherwise it is ignored in favor of the derived one
+			bt.Save(SParams.PulsarCfg.Address.Key, "pulsar://localhost:6650")
+			derived := "http://localhost:" + SParams.PulsarCfg.WebPort.GetValue()
+			for _, c := range []struct {
+				webAddress string
+				expected   string
+			}{
+				{"https://pulsar-admin.example.com", "https://pulsar-admin.example.com"},
+				{" http://pulsar-web.example.com:8080 ", "http://pulsar-web.example.com:8080"},
+				{"   ", derived},                                  // blank
+				{"pulsar-web.example.com:8080", derived},          // no scheme
+				{"pulsar://pulsar-web.example.com:6650", derived}, // not http(s)
+				{"http://", derived},                              // no host
+			} {
+				bt.Save(SParams.PulsarCfg.WebAddress.Key, c.webAddress)
+				assert.Equal(t, c.expected, SParams.PulsarCfg.WebAddress.GetValue(), c.webAddress)
+			}
+			bt.Remove(SParams.PulsarCfg.WebAddress.Key)
+		}
+
+		bt.Save(SParams.PulsarCfg.Address.Key, "")
 	})
 
 	t.Run("test pulsar auth config", func(t *testing.T) {
@@ -332,6 +490,16 @@ func TestServiceParam(t *testing.T) {
 	t.Run("pulsar_backlog_auto_clear_bytes", func(t *testing.T) {
 		Params := &SParams.PulsarCfg
 		assert.Equal(t, int64(100*1024*1024), Params.BacklogAutoClearBytes.GetAsSize())
+	})
+
+	t.Run("pulsar_producer_access_mode", func(t *testing.T) {
+		Params := &SParams.PulsarCfg
+		assert.Equal(t, "exclusive", Params.ProducerAccessMode.GetValue())
+	})
+
+	t.Run("pulsar_producer_create_timeout", func(t *testing.T) {
+		Params := &SParams.PulsarCfg
+		assert.Equal(t, "1m", Params.ProducerCreateTimeout.GetValue())
 	})
 
 	t.Run("test rocksmqConfig", func(t *testing.T) {

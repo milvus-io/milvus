@@ -12,8 +12,8 @@
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
-#include <filesystem>
 #include <map>
 #include <optional>
 #include <thread>
@@ -27,6 +27,7 @@
 #include "test_utils/c_api_test_utils.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/SegcoreConfigUtils.h"
+#include "test_utils/TmpPath.h"
 #include "storage/Util.h"
 #include "storage/loon_ffi/property_singleton.h"
 #include "knowhere/index/index_factory.h"
@@ -36,8 +37,6 @@
 
 using namespace milvus;
 using namespace milvus::segcore;
-
-namespace fs = std::filesystem;
 
 class FlushGrowingSegmentTest : public ::testing::Test {
  protected:
@@ -49,21 +48,13 @@ class FlushGrowingSegmentTest : public ::testing::Test {
 
     void
     SetUp() override {
-        // create a temporary directory for test output
-        test_dir_ = "/tmp/flush_growing_test_" + std::to_string(time(nullptr));
-        fs::create_directories(test_dir_);
-
+        // Each fixture owns a unique directory under the shard-specific
+        // TestLocalPath. TmpPath also cleans up only this fixture's files.
+        test_dir_ = temp_path_.get().string();
         // Arrow filesystem is initialized by init_gtest.cpp
     }
 
-    void
-    TearDown() override {
-        // cleanup test directory
-        if (fs::exists(test_dir_)) {
-            fs::remove_all(test_dir_);
-        }
-    }
-
+    milvus::test::TmpPath temp_path_;
     std::string test_dir_;
 
     std::vector<FieldDataPtr>
@@ -2905,6 +2896,29 @@ TEST_F(FlushGrowingSegmentTest, FreeFlushResultNull) {
     result.num_rows = 0;
 
     // should not crash
+    FreeFlushResult(&result);
+}
+
+TEST_F(FlushGrowingSegmentTest, FreePartiallyFilledBM25Stats) {
+    CFlushResult result{};
+    // The output arrays can be allocated before any row is serialized.
+    result.bm25_field_ids = static_cast<int64_t*>(malloc(3 * sizeof(int64_t)));
+    result.bm25_stats_sizes = static_cast<size_t*>(malloc(3 * sizeof(size_t)));
+    result.bm25_stats = static_cast<uint8_t**>(calloc(3, sizeof(uint8_t*)));
+    ASSERT_NE(result.bm25_field_ids, nullptr);
+    ASSERT_NE(result.bm25_stats_sizes, nullptr);
+    ASSERT_NE(result.bm25_stats, nullptr);
+    result.bm25_stats[0] = static_cast<uint8_t*>(malloc(8));
+    ASSERT_NE(result.bm25_stats[0], nullptr);
+    result.bm25_field_ids[0] = 100;
+    result.bm25_stats_sizes[0] = 8;
+    result.num_bm25_stats = 1;
+
+    FreeFlushResult(&result);
+    EXPECT_EQ(result.bm25_stats, nullptr);
+    EXPECT_EQ(result.bm25_field_ids, nullptr);
+    EXPECT_EQ(result.bm25_stats_sizes, nullptr);
+    EXPECT_EQ(result.num_bm25_stats, 0);
     FreeFlushResult(&result);
 }
 

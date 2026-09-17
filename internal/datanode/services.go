@@ -766,8 +766,9 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "importUsed").Set(float64(importUsed))
 
 	return &datapb.QuerySlotResponse{
-		Status:         merr.Success(),
-		AvailableSlots: availableSlots,
+		Status:                   merr.Success(),
+		AvailableSlots:           availableSlots,
+		CopySegmentSharedIndexes: true,
 	}, nil
 }
 

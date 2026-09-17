@@ -115,10 +115,11 @@ func validateBloomFilterBlob(blob []byte) ([]byte, error) {
 	// body, ~half the member capacity). The 128 MiB MBF1 num_blocks format cap
 	// (checked in validateMBF1Envelope) remains the hard ceiling above this.
 	//
-	// A separate proxy.maxMembershipFilterPlanSize budget bounds the aggregate
-	// serialized plans before proto.Marshal. This per-blob gate remains necessary:
-	// it rejects one oversized filter at the input boundary, while the aggregate
-	// gate limits repeated otherwise-valid occurrences across the request.
+	// A separate proxy.maxMembershipFilterPlanSize budget bounds aggregate
+	// membership resources across the request: serialized plan bytes for every
+	// filter and estimated decoded bytes for Roaring filters. This per-blob gate
+	// remains necessary: it rejects one oversized filter at the input boundary,
+	// while the request-wide gate limits repeated otherwise-valid occurrences.
 	if maxSize := paramtable.Get().ProxyCfg.MaxMembershipFilterSize.GetAsInt(); len(blob) > maxSize+mbf1HeaderSize {
 		return nil, merr.WrapErrParameterInvalidMsg(
 			"membership_match bloom filter blob body is %d bytes, exceeding proxy.maxMembershipFilterSize (%d)%s",
