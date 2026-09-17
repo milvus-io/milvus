@@ -305,7 +305,9 @@ func (m *versionManagerImpl) GetMaximumScalarIndexEngineVersion() int32 {
 }
 
 func (m *versionManagerImpl) getMaximumScalarVersion() int32 {
-	return getMaximumVersionFrom(m.scalarIndexVersions, common.CurrentScalarIndexEngineVersion)
+	// As getMaximumVersion: the bound with no session is what this image can
+	// LOAD, which is how a registered node is read too.
+	return getMaximumVersionFrom(m.scalarIndexVersions, max(common.CurrentScalarIndexEngineVersion, common.MaximumScalarIndexEngineVersion))
 }
 
 // noSessionVersion is the current index engine version with no QueryNode

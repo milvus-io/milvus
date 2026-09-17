@@ -1006,3 +1006,29 @@ func TestTheNoSessionBoundIsWhatThisImageCanLoad(t *testing.T) {
 	assert.EqualValues(t, 4, m.GetMaximumIndexEngineVersion(),
 		"a session that exists is read the same way, and replaces the fallback")
 }
+
+// The scalar side of TestTheNoSessionBoundIsWhatThisImageCanLoad: with no
+// query node session the bound is what this image can load, read the same
+// way a registered node's scalar triple is. Both constants are equal today,
+// so this pins the shape rather than a difference.
+func TestTheNoSessionScalarBoundIsWhatThisImageCanLoad(t *testing.T) {
+	paramtable.Init()
+	installForm(t)
+	m := newIndexEngineVersionManager()
+
+	loadable := max(common.CurrentScalarIndexEngineVersion, common.MaximumScalarIndexEngineVersion)
+	assert.Equal(t, loadable, m.GetMaximumScalarIndexEngineVersion())
+	assert.GreaterOrEqual(t, loadable, common.CurrentScalarIndexEngineVersion,
+		"what an image can load is never below what it builds at")
+
+	m.Startup(map[string]*sessionutil.Session{
+		"qn1": {SessionRaw: sessionutil.SessionRaw{
+			ServerID: 1,
+			ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{
+				CurrentIndexVersion: 3, MaximumIndexVersion: 4,
+			},
+		}},
+	})
+	assert.EqualValues(t, 4, m.GetMaximumScalarIndexEngineVersion(),
+		"a session that exists is read the same way, and replaces the fallback")
+}
