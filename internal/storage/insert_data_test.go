@@ -715,3 +715,45 @@ func TestNewFieldData_ElementNullableArrayPayloads(t *testing.T) {
 	assert.True(t, vectorArrayData.ElementNullable)
 	assert.NotNil(t, vectorArrayData.Data)
 }
+
+func TestNewFieldData_NullableVectorCap(t *testing.T) {
+	cases := []struct {
+		dataType schemapb.DataType
+		scaled   int
+		check    func(t *testing.T, fd FieldData, scaled int)
+	}{
+		{schemapb.DataType_FloatVector, 1000 * 128, func(t *testing.T, fd FieldData, scaled int) {
+			assert.Equal(t, scaled, cap(fd.(*FloatVectorFieldData).Data))
+		}},
+		{schemapb.DataType_Float16Vector, 1000 * 128 * 2, func(t *testing.T, fd FieldData, scaled int) {
+			assert.Equal(t, scaled, cap(fd.(*Float16VectorFieldData).Data))
+		}},
+		{schemapb.DataType_BFloat16Vector, 1000 * 128 * 2, func(t *testing.T, fd FieldData, scaled int) {
+			assert.Equal(t, scaled, cap(fd.(*BFloat16VectorFieldData).Data))
+		}},
+		{schemapb.DataType_BinaryVector, 1000 * 128 / 8, func(t *testing.T, fd FieldData, scaled int) {
+			assert.Equal(t, scaled, cap(fd.(*BinaryVectorFieldData).Data))
+		}},
+		{schemapb.DataType_Int8Vector, 1000 * 128, func(t *testing.T, fd FieldData, scaled int) {
+			assert.Equal(t, scaled, cap(fd.(*Int8VectorFieldData).Data))
+		}},
+	}
+	for _, c := range cases {
+		newSchema := func(nullable bool) *schemapb.FieldSchema {
+			return &schemapb.FieldSchema{
+				FieldID:    100,
+				Name:       "vec",
+				DataType:   c.dataType,
+				Nullable:   nullable,
+				TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}},
+			}
+		}
+		fd, err := NewFieldData(c.dataType, newSchema(false), 1000)
+		require.NoError(t, err)
+		c.check(t, fd, c.scaled)
+
+		fd, err = NewFieldData(c.dataType, newSchema(true), 1000)
+		require.NoError(t, err)
+		c.check(t, fd, 1000)
+	}
+}

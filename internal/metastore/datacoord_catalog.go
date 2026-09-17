@@ -155,4 +155,12 @@ type DataCoordCatalog interface {
 	SaveExportSnapshotJob(ctx context.Context, job *datapb.ExportSnapshotJob) error
 	ListExportSnapshotJobs(ctx context.Context) ([]*datapb.ExportSnapshotJob, error)
 	DropExportSnapshotJob(ctx context.Context, jobID int64) error
+
+	// Import V3 control-plane records.
+	SaveReshardTask(ctx context.Context, task *datapb.ReshardTask) error
+	ListReshardTasks(ctx context.Context) ([]*datapb.ReshardTask, error)
+	DropReshardTask(ctx context.Context, taskID int64) error
+	SaveImportTaskV3(ctx context.Context, task *datapb.ImportTaskV3) error
+	ListImportTasksV3(ctx context.Context) ([]*datapb.ImportTaskV3, error)
+	DropImportTaskV3(ctx context.Context, taskID int64) error
 }

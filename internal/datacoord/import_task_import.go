@@ -130,6 +130,30 @@ func (t *importTask) GetTaskSlot() int64 {
 	return int64(CalculateTaskSlot(t, t.importMeta))
 }
 
+func (t *importTask) setState(state datapb.ImportTaskStateV2) {
+	t.task.Load().State = state
+}
+
+func (t *importTask) setReason(reason string) {
+	t.task.Load().Reason = reason
+}
+
+func (t *importTask) setCompleteTime(completeTime string) {
+	t.task.Load().CompleteTime = completeTime
+}
+
+func (t *importTask) setNodeID(nodeID int64) {
+	t.task.Load().NodeID = nodeID
+}
+
+func (t *importTask) setSegmentIDs(segmentIDs []UniqueID) {
+	t.task.Load().SegmentIDs = segmentIDs
+}
+
+func (t *importTask) setStatsSegmentIDs(segmentIDs []UniqueID) {
+	t.task.Load().SortedSegmentIDs = segmentIDs
+}
+
 func (t *importTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	mlog.Info(context.TODO(), "processing pending import task...", WrapTaskLog(t)...)
 	job := t.importMeta.GetJob(context.TODO(), t.GetJobID())
@@ -172,7 +196,7 @@ func (t *importTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 		return
 	}
 	pendingDuration := t.GetTR().RecordSpan()
-	metrics.ImportTaskLatency.WithLabelValues(metrics.ImportStagePending).Observe(float64(pendingDuration.Milliseconds()))
+	metrics.ImportTaskLatency.WithLabelValues(metrics.ImportStagePending, t.GetType().String()).Observe(float64(pendingDuration.Milliseconds()))
 	mlog.Info(context.TODO(), "import task start to execute", WrapTaskLog(t, mlog.Int64("scheduledNodeID", nodeID), mlog.Duration("taskTimeCost/pending", pendingDuration))...)
 }
 
@@ -300,7 +324,7 @@ func (t *importTask) QueryTaskOnWorker(cluster session.Cluster) {
 			return
 		}
 		importDuration := t.GetTR().RecordSpan()
-		metrics.ImportTaskLatency.WithLabelValues(metrics.ImportStageImport).Observe(float64(importDuration.Milliseconds()))
+		metrics.ImportTaskLatency.WithLabelValues(metrics.ImportStageImport, t.GetType().String()).Observe(float64(importDuration.Milliseconds()))
 		mlog.Info(context.TODO(), "import done", WrapTaskLog(t, mlog.Int64("totalRows", totalRows), mlog.Duration("taskTimeCost/import", importDuration))...)
 	}
 	mlog.Info(context.TODO(), "query import", WrapTaskLog(t, mlog.String("respState", resp.GetState().String()),

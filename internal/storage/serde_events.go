@@ -811,6 +811,7 @@ func newCompositeBinlogRecordWriter(collectionID, partitionID, segmentID UniqueI
 		collectionID,
 		schema,
 		maxRowNum,
+		nil,
 	)
 	if err != nil {
 		return nil, err

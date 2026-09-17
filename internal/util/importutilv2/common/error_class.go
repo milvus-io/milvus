@@ -70,3 +70,41 @@ func WrapDecodeErr(err error, what string) error {
 	}
 	return merr.WrapErrImportFailedMsg("%s, err=%v", what, err)
 }
+
+// IsTerminalImportV3Err decides whether an Import V3 error should immediately
+// fail the job/task instead of retrying.
+//
+// Denylist, matching the V2 read paths (merr.IsNonRetryableErr): only provably
+// permanent errors fail fast — the IO sentinels IsNonRetryableErr lists (key
+// not found, permission denied, bad argument, ...), the import-specific
+// terminal codes ErrDataIntegrity, ErrImportSysFailed and ErrImportFailed, and
+// ErrParameterInvalid for caller-input defects (oversized import file,
+// parquet type/dimension mismatch, string over max_length, invalid UTF-8):
+// the request content itself forces these branches, so retrying cannot change
+// the outcome — but each retry burns a fresh segment and log range with no
+// retry cap. Everything else retries until the job timeout. That notably
+// includes ErrIoFailed: mapObjectStorageError assigns it to every unenumerated
+// S3/Azure/GCS code (InternalError, ServiceUnavailable, RequestTimeout, ...)
+// and to unrecognized network errors, so honoring its retriable=false flag as
+// a terminal verdict would let one transient 5xx fail a whole job.
+//
+// Shared by DataCoord (checker and task pollers) and DataNode (the Import V3
+// task manager's Retry/Failed classifier) so the two sides cannot drift.
+// Non-milvus errors carry no code and are treated as transient — on the worker
+// this is load-bearing: RemoteChunkManager.Write does not map object-store
+// errors, so manifest-write failures surface raw (and typically transient).
+func IsTerminalImportV3Err(err error) bool {
+	if err == nil {
+		return false
+	}
+	if !merr.IsMilvusError(err) {
+		return false
+	}
+	if merr.IsNonRetryableErr(err) {
+		return true
+	}
+	return errors.Is(err, merr.ErrDataIntegrity) ||
+		errors.Is(err, merr.ErrImportSysFailed) ||
+		errors.Is(err, merr.ErrImportFailed) ||
+		errors.Is(err, merr.ErrParameterInvalid)
+}

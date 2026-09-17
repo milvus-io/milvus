@@ -76,7 +76,8 @@ func TestUpdateCommitTimestamp_SegmentNotFound(t *testing.T) {
 }
 
 // ── UpdateCommitTimestamp input validation ──────────────────────────────
-// Invariant: commit_ts (when non-zero) must be >= max(binlog.TimestampTo).
+// Invariant: commit_ts (when non-zero) must be >= the accepted segment
+// timestamp bound (Statistics.TimestampTo for V3, binlog fallback for V2).
 // Reject violations at the entry point so C++ segcore never sees an invalid
 // commit_ts that would silently lower row timestamps during load-time overwrite.
 
@@ -126,6 +127,33 @@ func TestUpdateCommitTimestamp_RejectBelowMaxTimestampTo(t *testing.T) {
 	assert.ErrorIs(t, err, merr.ErrImportSysFailed)
 	assert.Equal(t, uint64(0), meta.GetSegment(context.Background(), 1).GetCommitTimestamp(),
 		"rejected update must leave commit_timestamp unchanged")
+}
+
+func TestUpdateCommitTimestamp_RejectBelowPersistedStatsTimestampTo(t *testing.T) {
+	meta, err := newMemoryMeta(t)
+	assert.NoError(t, err)
+	assert.NoError(t, meta.AddSegment(context.Background(), &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:           1,
+		State:        commonpb.SegmentState_Flushed,
+		ManifestPath: "files/insert_log/1/2/1/manifest",
+		Stats:        &datapb.Statistics{TimestampTo: 5000},
+	}}))
+
+	err = meta.UpdateSegmentsInfo(context.Background(), UpdateCommitTimestamp(1, 3000))
+	assert.ErrorIs(t, err, merr.ErrImportSysFailed)
+	assert.Equal(t, uint64(0), meta.GetSegment(context.Background(), 1).GetCommitTimestamp())
+}
+
+func TestUpdateCommitTimestamp_UsesLargestPersistedBound(t *testing.T) {
+	meta, err := newMemoryMeta(t)
+	assert.NoError(t, err)
+	seg := segWithBinlogs(1, 4000)
+	seg.Stats = &datapb.Statistics{TimestampTo: 5000}
+	assert.NoError(t, meta.AddSegment(context.Background(), seg))
+
+	err = meta.UpdateSegmentsInfo(context.Background(), UpdateCommitTimestamp(1, 4500))
+	assert.ErrorIs(t, err, merr.ErrImportSysFailed)
+	assert.Equal(t, uint64(0), meta.GetSegment(context.Background(), 1).GetCommitTimestamp())
 }
 
 func TestUpdateCommitTimestamp_AcceptZeroReset(t *testing.T) {
