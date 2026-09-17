@@ -223,6 +223,23 @@ Admission limits temporary bytes and task slots across field and index loads.
 `common.loadTransientBudgetBytes` and `common.loadAdmissionSlots` are
 refreshable. With async enabled and no explicit overrides, the existing defaults
 are 2 GiB and twice the initialized CPU count. Zero disables the respective limit.
+
+The effective `common.loadAdmissionSlots` value depends on whether it is explicitly
+configured:
+
+| Slot configuration | Synchronous loading | Asynchronous loading |
+| --- | --- | --- |
+| Unset | 0 (unlimited) | Twice the CPU count reported by Milvus at initialization |
+| Explicit positive N | N | N |
+| Explicit 0 | Unlimited | Unlimited |
+
+Synchronous loading has no admission slot limit by default; HIGH/LOW pool sizes
+bound executing tasks, and shared overhead is estimated from their combined
+worker count. Admission slots do not automatically track pool resizing.
+Explicit slot limits also apply to synchronous paths that acquire admission.
+Similarly, an unset `common.loadTransientBudgetBytes` resolves to 0 in synchronous
+mode and 2 GiB in asynchronous mode; explicit values apply in either mode.
+
 An indivisible unit larger than a nonzero byte limit may run exclusively so it
 can make progress; it still needs a slot. Waiters hold neither resource.
 
