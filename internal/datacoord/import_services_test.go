@@ -638,7 +638,7 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck_ServerNotHealthyReturns
 	server := &Server{}
 	server.stateCode.Store(commonpb.StateCode_Initializing)
 
-	resp, err := server.createImportJobFromAck(ctx, nil)
+	resp, err := server.createImportJobFromAck(ctx, nil, nil)
 
 	s.NoError(err)
 	s.NotNil(resp)
@@ -656,7 +656,7 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck_InvalidTimeoutReturnsEr
 		},
 	}
 
-	resp, err := server.createImportJobFromAck(ctx, req)
+	resp, err := server.createImportJobFromAck(ctx, req, nil)
 
 	s.NoError(err)
 	s.NotNil(resp)
@@ -682,7 +682,7 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck_AllocatorFailsReturnsEr
 		},
 	}
 
-	resp, err := server.createImportJobFromAck(ctx, req)
+	resp, err := server.createImportJobFromAck(ctx, req, nil)
 
 	s.NoError(err)
 	s.NotNil(resp)
@@ -715,7 +715,7 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck_CollectionNotFoundRetur
 		},
 	}
 
-	resp, err := server.createImportJobFromAck(ctx, req)
+	resp, err := server.createImportJobFromAck(ctx, req, nil)
 
 	s.NoError(err)
 	s.NotNil(resp)
@@ -747,7 +747,7 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck_CollectionNilReturnsErr
 		},
 	}
 
-	resp, err := server.createImportJobFromAck(ctx, req)
+	resp, err := server.createImportJobFromAck(ctx, req, nil)
 
 	s.NoError(err)
 	s.NotNil(resp)
@@ -798,7 +798,7 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck_AddJobFailsReturnsError
 		JobID:         2000,
 	}
 
-	resp, err := server.createImportJobFromAck(ctx, req)
+	resp, err := server.createImportJobFromAck(ctx, req, nil)
 
 	s.NoError(err)
 	s.NotNil(resp)
@@ -850,7 +850,7 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck_SuccessWithProvidedJobI
 		JobID:         2000, // Provided job ID should be used
 	}
 
-	resp, err := server.createImportJobFromAck(ctx, req)
+	resp, err := server.createImportJobFromAck(ctx, req, nil)
 
 	s.NoError(err)
 	s.NotNil(resp)
@@ -902,7 +902,7 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck_SuccessAllocatesJobIDWh
 		JobID:         0, // Not provided - should use idStart (1000)
 	}
 
-	resp, err := server.createImportJobFromAck(ctx, req)
+	resp, err := server.createImportJobFromAck(ctx, req, nil)
 
 	s.NoError(err)
 	s.NotNil(resp)
@@ -961,7 +961,7 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck_AssignsFileIDs() {
 		JobID:         2000,
 	}
 
-	resp, err := server.createImportJobFromAck(ctx, req)
+	resp, err := server.createImportJobFromAck(ctx, req, nil)
 
 	s.NoError(err)
 	s.NotNil(resp)
@@ -1030,7 +1030,7 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck_L0ImportDisabledCreates
 		JobID:         2000,
 	}
 
-	resp, err := server.createImportJobFromAck(ctx, req)
+	resp, err := server.createImportJobFromAck(ctx, req, nil)
 
 	s.NoError(err)
 	s.NotNil(resp)
@@ -1098,7 +1098,7 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck_L0ImportEnabledCreatesP
 		JobID:         2000,
 	}
 
-	resp, err := server.createImportJobFromAck(ctx, req)
+	resp, err := server.createImportJobFromAck(ctx, req, nil)
 
 	s.NoError(err)
 	s.NotNil(resp)

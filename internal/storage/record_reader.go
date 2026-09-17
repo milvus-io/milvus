@@ -2,6 +2,7 @@ package storage
 
 import (
 	"io"
+	"path"
 	"strconv"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -233,7 +234,8 @@ type ManifestReader struct {
 	externalSpecContext  packed.ExternalSpecContext
 	textColumnConfigs    []packed.TextColumnConfig
 
-	neededColumns []string
+	neededColumns  []string
+	resolveTextLob bool
 }
 
 type manifestArrowReader interface {
@@ -303,6 +305,7 @@ func NewManifestReader(manifest string,
 		storageConfig,
 		storagePluginContext,
 		rwOptions.externalReader,
+		option...,
 	)
 }
 
@@ -315,8 +318,9 @@ func NewManifestReaderWithExtfs(
 	storageConfig *indexpb.StorageConfig,
 	storagePluginContext *indexcgopb.StoragePluginContext,
 	extfs packed.ExternalSpecContext,
+	option ...RwOption,
 ) (*ManifestReader, error) {
-	return newManifestReader(manifest, schema, bufferSize, storageConfig, storagePluginContext, extfs, nil)
+	return newManifestReader(manifest, schema, bufferSize, storageConfig, storagePluginContext, extfs, nil, option...)
 }
 
 // NewTextDecodedManifestReader opens a manifest through milvus-storage's
@@ -340,7 +344,21 @@ func newManifestReader(
 	storagePluginContext *indexcgopb.StoragePluginContext,
 	extfs packed.ExternalSpecContext,
 	textColumnConfigs []packed.TextColumnConfig,
+	option ...RwOption,
 ) (*ManifestReader, error) {
+	rwOptions := DefaultReaderOptions()
+	for _, opt := range option {
+		opt(rwOptions)
+	}
+	// milvus-storage SegmentReader resolves TEXT LOB values, but its current C
+	// API has no key-retriever plugin context. Reject this exact combination so
+	// the caller never silently drops a source key. CMEK sources without
+	// TEXT/LOB stay on PackedReader, which accepts storagePluginContext below.
+	if rwOptions.resolveTextLob && storagePluginContext != nil {
+		return nil, merr.WrapErrOperationNotSupportedMsg(
+			"CMEK-protected StorageV3 import does not support TEXT/LOB fields",
+		)
+	}
 	columnResolver := typeutil.NewStorageColumnResolver(schema, typeutil.WithStorageColumnExternalSpec(extfs.Spec))
 	arrowSchema, err := ConvertToArrowSchemaWithNameResolver(
 		schema,
@@ -351,15 +369,12 @@ func newManifestReader(
 		return nil, merr.WrapErrSerializationFailed(err, "convert collection schema [%s] to arrow schema", schema.Name)
 	}
 
-	// The Arrow schema passed to storagev2 is a physical read contract, not a
-	// generic "accept whatever the reader returns" conversion layer. TEXT is the
-	// boundary case: internal packed manifests store TEXT as binary LOB
-	// references, while external collections read source columns where TEXT is
-	// ordinary UTF8 data. Keep that storage-format split here so later
-	// RecordToInsertData conversion does not accidentally decode internal LOB
-	// references as user text. Any source type coercion must stay in the
-	// external-source normalization path, not in the internal manifest path.
-	if len(textColumnConfigs) == 0 && (!typeutil.IsExternalCollection(schema) || columnResolver.IsMilvusTable()) {
+	// The packed reader consumes internal TEXT columns as physical binary LOB
+	// references. SegmentReader is the logical reader and requires UTF8 TEXT so
+	// it can resolve those references before returning Arrow records. External
+	// source coercion remains in the external-source normalization path.
+	if len(textColumnConfigs) == 0 && !rwOptions.resolveTextLob &&
+		(!typeutil.IsExternalCollection(schema) || columnResolver.IsMilvusTable()) {
 		arrowSchema = overrideTextFieldsToBinaryByFields(
 			columnResolver.ManifestStoredFields(),
 			arrowSchema,
@@ -393,7 +408,8 @@ func newManifestReader(
 		externalSpecContext:  extfs,
 		textColumnConfigs:    textColumnConfigs,
 
-		neededColumns: neededColumns,
+		neededColumns:  neededColumns,
+		resolveTextLob: rwOptions.resolveTextLob,
 	}
 
 	err = prr.init()
@@ -405,6 +421,30 @@ func newManifestReader(
 }
 
 func (mr *ManifestReader) init() error {
+	if mr.resolveTextLob {
+		basePath, _, err := packed.UnmarshalManifestPath(mr.manifest)
+		if err != nil {
+			return merr.Wrap(err, "failed to parse manifest path for TEXT LOB resolution")
+		}
+
+		textColumns := make([]packed.TextColumnConfig, 0)
+		for _, field := range typeutil.GetAllFieldSchemas(mr.schema) {
+			if field.GetDataType() != schemapb.DataType_Text {
+				continue
+			}
+			if _, ok := mr.field2Col[field.GetFieldID()]; !ok {
+				continue
+			}
+			textColumns = append(textColumns, packed.TextColumnConfig{
+				FieldID:     field.GetFieldID(),
+				LobBasePath: path.Join(path.Dir(basePath), "lobs", strconv.FormatInt(field.GetFieldID(), 10)),
+			})
+		}
+
+		// Share the upstream logical reader with compaction; only the source
+		// LOB path derivation is specific to snapshot import.
+		mr.textColumnConfigs = textColumns
+	}
 	if len(mr.textColumnConfigs) > 0 {
 		reader, err := packed.NewFFISegmentReader(mr.manifest, mr.arrowSchema, mr.neededColumns,
 			mr.bufferSize, mr.storageConfig, mr.textColumnConfigs)
@@ -437,7 +477,9 @@ func (mr *ManifestReader) Next() (Record, error) {
 
 func (mr *ManifestReader) Close() error {
 	if mr.reader != nil {
-		return mr.reader.Close()
+		err := mr.reader.Close()
+		mr.reader = nil
+		return err
 	}
 	return nil
 }
