@@ -1,5 +1,6 @@
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import pytest
@@ -8,7 +9,7 @@ from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from ml_dtypes import bfloat16
-from pymilvus import DataType
+from pymilvus import DataType, MilvusException
 from pymilvus.client.embedding_list import EmbeddingList
 from utils.util_log import test_log as log
 
@@ -3523,6 +3524,7 @@ class TestMilvusClientSnapshotConcurrency(TestMilvusClientSnapshotBase):
     - Concurrent snapshot creation with same name
     - Snapshot consistency during concurrent writes
     - Concurrent restore operations from same snapshot
+    - Competing restores to the same target collection
     """
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -3728,6 +3730,85 @@ class TestMilvusClientSnapshotConcurrency(TestMilvusClientSnapshotBase):
         self.drop_snapshot(client, snapshot_name, collection_name)
         for name in restored_names:
             self.drop_collection(client, name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_concurrent_restore_same_target(self):
+        """
+        target: reject competing restores to the same database and collection
+        method: release two restore RPCs together, then inspect jobs and data
+        expected: one success, one target-exists error, one job, unchanged data
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        snapshot_name = cf.gen_unique_str(prefix)
+        restored_name = cf.gen_unique_str(prefix + "_same_target")
+        self.create_collection(client, collection_name, default_dim)
+        rng = np.random.default_rng(seed=19530)
+        rows = [
+            {
+                "id": i,
+                "vector": rng.random(default_dim).astype(np.float32).tolist(),
+                "value": i * 3,
+                "tag": f"row_{i}",
+                "active": i % 2 == 0,
+            }
+            for i in range(256)
+        ]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        self.create_snapshot(client, snapshot_name, collection_name)
+        # Register the target even if an assertion or RPC fails after creation.
+        self.tear_down_collection_names.append(restored_name)
+        start = threading.Barrier(2)
+
+        def restore():
+            start.wait(timeout=10)
+            try:
+                return client.restore_snapshot(
+                    snapshot_name,
+                    collection_name,
+                    restored_name,
+                    target_db_name="default",
+                    timeout=120,
+                )
+            except MilvusException as exc:
+                return exc
+
+        try:
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                futures = [executor.submit(restore) for _ in range(2)]
+                results = [future.result(timeout=150) for future in futures]
+            job_ids = [result for result in results if isinstance(result, int) and result > 0]
+            errors = [result for result in results if isinstance(result, MilvusException)]
+            # Let every accepted job finish, including duplicate jobs on a buggy
+            # server, so the snapshot pin is released before cleanup.
+            for job_id in job_ids:
+                wait_for_restore_complete(self, client, job_id, timeout=120)
+            assert len(job_ids) == 1 and len(errors) == 1, f"Unexpected restore results: {results}"
+            assert errors[0].code == 1100, f"Unexpected restore error: {errors[0]}"
+            assert "already exists" in errors[0].message and restored_name in errors[0].message
+
+            jobs, _ = self.list_restore_snapshot_jobs(client, collection_name=restored_name)
+            assert [job.job_id for job in jobs] == job_ids, f"Unexpected restore jobs: {jobs}"
+            self.load_collection(client, restored_name)
+            count, _ = self.query(client, restored_name, filter="", output_fields=["count(*)"])
+            assert count[0]["count(*)"] == len(rows)
+            restored, _ = self.query(
+                client,
+                restored_name,
+                filter="id >= 0",
+                output_fields=["id", "vector", "value", "tag", "active"],
+                limit=len(rows),
+            )
+            assert len(restored) == len(rows)
+            assert {row["id"] for row in restored} == set(range(len(rows)))
+            for row in restored:
+                expected = rows[row["id"]]
+                for field in ("value", "tag", "active"):
+                    assert row[field] == expected[field], f"Mismatch at id={row['id']}, field={field}"
+                np.testing.assert_allclose(row["vector"], expected["vector"], rtol=1e-6, atol=1e-7)
+        finally:
+            self.drop_snapshot(client, snapshot_name, collection_name)
 
 
 class TestMilvusClientSnapshotLifecycle(TestMilvusClientSnapshotBase):

@@ -66,7 +66,7 @@ type StartBroadcasterFunc func(ctx context.Context, collectionID int64, snapshot
 //
 // The lock set is:
 //   - Shared lock on target database
-//   - Exclusive lock on target collection name (reserves the name before creation)
+//   - Exclusive lock on target collection name during admission validation
 //   - Exclusive lock on (sourceCollectionID, snapshotName) — serializes against
 //     DropSnapshot of the same source snapshot
 //
@@ -376,10 +376,10 @@ type snapshotManager struct {
 	// createSnapshotMu protects CreateSnapshot to prevent TOCTOU race on snapshot name uniqueness
 	createSnapshotMu sync.Mutex
 
-	// Serialize external restores by target name without holding RootCoord's DDL lock.
-	externalRestoreTargetLockOnce sync.Once
-	externalRestoreTargetLock     *lock.KeyLock[restoreTarget]
-	exportManager                 *snapshotExportManager
+	// Serialize all restores by target name without holding RootCoord's DDL lock.
+	restoreTargetLockOnce sync.Once
+	restoreTargetLock     *lock.KeyLock[restoreTarget]
+	exportManager         *snapshotExportManager
 }
 
 type restoreTarget struct {
@@ -671,6 +671,11 @@ func (sm *snapshotManager) RestoreSnapshot(
 	rollback RollbackFunc,
 	validateResources ValidateResourcesFunc,
 ) (jobID int64, err error) {
+	// Keep admission, target creation, job submission, and synchronous cleanup
+	// serialized across internal and external restores to the same target.
+	unlockTarget := sm.lockRestoreTarget(targetDbName, targetCollectionName)
+	defer unlockTarget()
+
 	// ========================================================================
 	// Phase 0: Acquire serialization lock + claim restore reference
 	//
@@ -683,6 +688,10 @@ func (sm *snapshotManager) RestoreSnapshot(
 	phase0Lock, err := startRestoreLock(ctx, sourceCollectionID, snapshotName, targetDbName, targetCollectionName)
 	if err != nil {
 		return 0, merr.Wrap(err, "failed to acquire restore lock")
+	}
+	if err := sm.validateRestoreTargetAbsent(ctx, targetDbName, targetCollectionName); err != nil {
+		phase0Lock.Close()
+		return 0, err
 	}
 
 	// Pin the source snapshot while holding the phase-0 lock. The pin is the
@@ -803,7 +812,7 @@ func (sm *snapshotManager) RestoreExternalSnapshot(
 	if snapshotS3Location == "" {
 		return 0, merr.WrapErrParameterInvalidMsg("snapshot_s3_location is required")
 	}
-	unlockTarget := sm.lockExternalRestoreTarget(targetDbName, targetCollectionName)
+	unlockTarget := sm.lockRestoreTarget(targetDbName, targetCollectionName)
 	defer unlockTarget()
 
 	resolved, err := snapshotstorage.ResolveForeignStorage(
@@ -859,7 +868,7 @@ func (sm *snapshotManager) RestoreExternalSnapshot(
 
 	// RootCoord CreateCollection acquires the same broadcaster resource key, so
 	// release the phase-0 lock before entering the common restore flow. The
-	// per-target DataCoord lock above continues to serialize external restores.
+	// per-target DataCoord lock above continues to serialize all restores.
 	phase0Lock.Close()
 	phase0Lock = nil
 
@@ -1001,16 +1010,20 @@ func (sm *snapshotManager) finishRestoreSnapshot(
 	return jobID, nil
 }
 
-func (sm *snapshotManager) lockExternalRestoreTarget(dbName, collectionName string) func() {
-	sm.externalRestoreTargetLockOnce.Do(func() {
-		if sm.externalRestoreTargetLock == nil {
-			sm.externalRestoreTargetLock = lock.NewKeyLock[restoreTarget]()
+func (sm *snapshotManager) lockRestoreTarget(dbName, collectionName string) func() {
+	sm.restoreTargetLockOnce.Do(func() {
+		if sm.restoreTargetLock == nil {
+			sm.restoreTargetLock = lock.NewKeyLock[restoreTarget]()
 		}
 	})
+	// Match the database normalization used by DDL resource keys.
+	if dbName == "" {
+		dbName = util.DefaultDBName
+	}
 	target := restoreTarget{dbName: dbName, collectionName: collectionName}
-	sm.externalRestoreTargetLock.Lock(target)
+	sm.restoreTargetLock.Lock(target)
 	return func() {
-		sm.externalRestoreTargetLock.Unlock(target)
+		sm.restoreTargetLock.Unlock(target)
 	}
 }
 
