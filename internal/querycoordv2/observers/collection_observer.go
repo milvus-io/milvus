@@ -1060,22 +1060,28 @@ func (ob *CollectionObserver) releaseResourceGroupOnTimeout(ctx context.Context,
 // collection that is gone has nothing to write and answers true; a write the
 // catalog refuses answers false, and the caller retries on a later tick.
 func (ob *CollectionObserver) writeReplicaNumberBack(ctx context.Context, task LoadTask) bool {
-	coll := ob.meta.GetCollection(ctx, task.CollectionID)
-	if coll == nil {
+	if ob.meta.GetCollection(ctx, task.CollectionID) == nil {
 		return true
 	}
-	replicas := len(ob.meta.GetByCollection(ctx, task.CollectionID))
-	if int(coll.GetReplicaNumber()) == replicas {
-		return true
-	}
-	if err := ob.meta.UpdateReplicaNumber(ctx, task.CollectionID, int32(replicas), coll.GetUserSpecifiedReplicaMode()); err != nil {
+	// Counted inside the collection manager's critical section
+	// (SyncReplicaNumber), not here: a count read here and written afterwards
+	// can be overtaken by a concurrent expansion's own write and land last,
+	// one short of the replicas that exist. The stored replica mode is kept;
+	// a teardown has no say in how the replicas were asked for.
+	replicas, err := ob.meta.SyncReplicaNumber(ctx, task.CollectionID, func() int32 {
+		return int32(len(ob.meta.GetByCollection(ctx, task.CollectionID)))
+	}, nil)
+	if err != nil {
+		if ob.meta.GetCollection(ctx, task.CollectionID) == nil {
+			// Released between the check above and the write: nothing owed.
+			return true
+		}
 		// Rate-limited: a catalog that stays down is retried on every tick
 		// of the task, and would otherwise print five times a second.
 		mlog.RatedWarn(ctx, 0.1, "failed to write ReplicaNumber back down after releasing a timed-out resource group, will retry",
 			mlog.FieldCollectionID(task.CollectionID),
 			mlog.String("resourceGroup", task.ResourceGroup),
-			mlog.Int32("staleReplicaNumber", coll.GetReplicaNumber()),
-			mlog.Int("replicas", replicas),
+			mlog.Int32("replicas", replicas),
 			mlog.Err(err))
 		return false
 	}

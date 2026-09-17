@@ -215,7 +215,17 @@ func (job *LoadCollectionJob) Execute() error {
 		// the already-serving resource groups stay Loaded at 100%. Leaving it
 		// stale instead would misreport the collection's replica count to every
 		// later UpdateLoadConfig, which reads it as the replica number to keep.
-		if err := job.meta.UpdateReplicaNumber(job.ctx, req.GetCollectionId(), replicaNumber, req.GetUserSpecifiedReplicaMode()); err != nil {
+		//
+		// The number written is the replicas that exist, counted inside the
+		// collection manager's critical section (SyncReplicaNumber), rather
+		// than the request's own count: they are the same unless a resource
+		// group's teardown runs beside this ack, and then the request's count
+		// written last would stand one above the replicas there are, with the
+		// teardown's task already gone and nothing left to correct it.
+		userSpecifiedReplicaMode := req.GetUserSpecifiedReplicaMode()
+		if _, err := job.meta.SyncReplicaNumber(job.ctx, req.GetCollectionId(), func() int32 {
+			return int32(len(job.meta.GetByCollection(job.ctx, req.GetCollectionId())))
+		}, &userSpecifiedReplicaMode); err != nil {
 			msg := "failed to update replica number"
 			mlog.Warn(job.ctx, msg, mlog.Err(err))
 			return merr.Wrapf(err, "%s", msg)
