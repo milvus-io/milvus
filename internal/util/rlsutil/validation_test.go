@@ -90,6 +90,27 @@ func TestValidatePayloadBounds(t *testing.T) {
 		))
 	})
 
+	t.Run("stored policies ignore refreshable expression limits", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().ProxyCfg.RLSMaxExpressionLength.Key, "1")
+		defer paramtable.Get().Reset(paramtable.Get().ProxyCfg.RLSMaxExpressionLength.Key)
+
+		err := ValidatePolicyForUpdate(
+			"policy",
+			PolicyTypePermissive,
+			[]PolicyAction{PolicyActionQuery},
+			"true",
+			"",
+		)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		require.NoError(t, ValidateStoredPolicy(
+			"policy",
+			PolicyTypePermissive,
+			[]PolicyAction{PolicyActionQuery},
+			"true",
+			"",
+		))
+	})
+
 	t.Run("unused policy expressions are rejected", func(t *testing.T) {
 		for _, test := range []struct {
 			name      string

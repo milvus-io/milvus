@@ -85,6 +85,8 @@ func TagsFromJSON(payload string) (map[string]TagValue, error) {
 					tags[key] = NewInt64TagValue(value)
 					continue
 				}
+				// encoding/json may serialize an integral double without a decimal
+				// point. Preserve values outside int64 as doubles on round trip.
 				doubleValue, doubleErr := strconv.ParseFloat(typed.String(), 64)
 				if doubleErr != nil {
 					return nil, merr.WrapErrParameterInvalidMsg("RLS principal tag %q has an invalid numeric value", key)
