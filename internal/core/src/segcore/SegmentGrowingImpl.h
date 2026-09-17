@@ -136,12 +136,16 @@ class SegmentGrowingImpl : public SegmentGrowing {
     load_column_group_data_internal(const LoadFieldDataInfo& load_info);
 
     void
+    // `reserved_offset` is the logical offset PreInsert reserved for this
+    // batch. Every structure this function writes -- column data, validity,
+    // pk2offset_, the growing indexes, array offsets -- addresses the batch by
+    // it rather than by "wherever I currently am" (#52637).
     load_field_data_common(FieldId field_id,
                            size_t reserved_offset,
                            const std::vector<FieldDataPtr>& field_data,
                            FieldId primary_field_id,
                            size_t num_rows,
-                           bool text_is_remote_lob_ref);
+                           bool text_is_remote_lob_ref = false);
 
     // Test-only: inject TEXT LOB base path.
     void

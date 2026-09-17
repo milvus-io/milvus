@@ -146,8 +146,22 @@ CreateMissingFieldData(const storage::FileManagerContext& context,
 
     // #52905 removed FieldDataBase::FillFieldData(default_value, rows); build
     // the batch straight from the default value instead.
-    auto batch = storage::CreateFieldDataFromDefaultValue(
-        field_type, /*nullable=*/true, static_cast<int64_t>(rows), default_value);
+    //
+    // A nested ARRAY needs its TypeSchema, or the batch comes back as the flat
+    // FieldData<Array> shape while the rest of the build feeds
+    // FieldData<ArrayValue>. Mirrors FieldMeta::is_nested_array().
+    std::optional<proto::schema::TypeSchema> array_type;
+    if (field_type == DataType::ARRAY && schema.has_type_schema() &&
+        schema.type_schema().has_array_element() &&
+        schema.type_schema().array_element().has_array_element()) {
+        array_type = schema.type_schema();
+    }
+    auto batch =
+        storage::CreateFieldDataFromDefaultValue(field_type,
+                                                 /*nullable=*/true,
+                                                 static_cast<int64_t>(rows),
+                                                 default_value,
+                                                 std::move(array_type));
     AssertInfo(batch != nullptr,
                "failed to allocate missing-row field-data batch");
     return batch;
