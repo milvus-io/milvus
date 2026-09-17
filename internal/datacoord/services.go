@@ -3207,11 +3207,9 @@ func (s *Server) ListRefreshExternalCollectionJobs(ctx context.Context, req *dat
 }
 
 // broadcastCommitImportMessage broadcasts a CommitImport WAL message for the given import job.
-// The message is broadcast to the job's data vchannels so each vchannel's WAL flusher
-// can observe the commit fence, flush pending DML, and call HandleCommitVchannel.
-// (Control-channel-only broadcast is dropped by the flusher's IsControlChannel guard
-// before reaching the CommitImport case, so it cannot drive per-vchannel commits; the
-// control channel is added on top of the data vchannels for ordering only.)
+// Business vchannels supply their own commit timestamps; CChannel supplies the
+// common ordering point for replicated broadcast callbacks. The callback makes
+// the imported segments visible and completes the job.
 func (s *Server) broadcastCommitImportMessage(ctx context.Context, job ImportJob) error {
 	vchannels := job.GetVchannels()
 	if len(vchannels) == 0 {
@@ -3245,7 +3243,7 @@ func (s *Server) broadcastCommitImportMessage(ctx context.Context, job ImportJob
 var errRollbackImportNoVchannels = errors.New("import job has no vchannels")
 
 // broadcastRollbackImportMessage broadcasts a RollbackImport WAL message for the given import job.
-// Targets the job's data vchannels, matching the CommitImport routing.
+// Targets the job's data vchannels and CChannel, matching CommitImport routing.
 func (s *Server) broadcastRollbackImportMessage(ctx context.Context, job ImportJob) error {
 	vchannels := job.GetVchannels()
 	if len(vchannels) == 0 {
@@ -3425,65 +3423,26 @@ func (s *Server) AbortImport(ctx context.Context, req *datapb.AbortImportRequest
 	)
 }
 
-// HandleCommitVchannel records that a vchannel has processed the commit fence for a 2PC import job.
-// When all vchannels have acknowledged, the import job transitions to Completed and segments become visible.
+// HandleCommitVchannel is retained for existing callers. Import visibility and
+// completion are owned by commitImportV2AckCallback, not per-channel RPCs.
 func (s *Server) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCommitVchannelRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return merr.Status(err), nil
-	}
-	jobID := req.GetJobId()
-	vchannel := req.GetVchannel()
-
-	// Pre-fetch segment IDs for this job+vchannel BEFORE calling HandleCommitVchannel.
-	// The callback must not access importMeta because HandleCommitVchannel holds m.mu (write lock);
-	// calling GetTaskBy inside the callback would attempt to re-acquire m.mu (read lock) → deadlock.
-	collectionID, segIDs := s.getImportSegmentIDsByVchannel(ctx, jobID, vchannel)
-
-	commitTs := req.GetCommitTimestamp()
-	err := s.importMeta.HandleCommitVchannel(ctx, jobID, vchannel, func() error {
-		// Only access s.meta (segment meta) here, NOT s.importMeta.
-		// Set CommitTimestamp and clear isImporting in a single call per segment.
-		ops := make([]UpdateOperator, 0, len(segIDs)*2)
-		for _, segID := range segIDs {
-			ops = append(ops,
-				UpdateCommitTimestamp(segID, commitTs),
-				UpdateIsImporting(segID, false),
-			)
-		}
-		if len(ops) == 0 {
-			return nil
-		}
-		if err := s.meta.UpdateSegmentsInfo(ctx, ops...); err != nil {
-			return err
-		}
-		return nil
-	})
-	if err != nil {
-		return merr.Status(err), nil
-	}
-	// The SegmentMeta mutation is committed (segments finalized, importing
-	// cleared); schedule an asynchronous DataView snapshot reconciliation.
-	// This also runs on an idempotent retry whose vchannel was already
-	// committed - the recompute is a no-op when the projection is unchanged.
-	if s.meta != nil {
-		s.meta.recomputeDataView(ctx, collectionID)
 	}
 	return merr.Success(), nil
 }
 
 // getImportSegmentIDsByVchannel returns all segment IDs (including sorted segments) belonging to
 // the given import job that are assigned to the given vchannel.
-// This must be called BEFORE acquiring importMeta's mutex (i.e., before HandleCommitVchannel).
-func (s *Server) getImportSegmentIDsByVchannel(ctx context.Context, jobID int64, vchannel string) (int64, []int64) {
+// Called by the broadcast callback without holding importMeta's mutex.
+func (s *Server) getImportSegmentIDsByVchannel(ctx context.Context, jobID int64, vchannel string) []int64 {
 	tasks := s.importMeta.GetTaskByJob(ctx, jobID, WithType(ImportTaskType))
-	var collectionID int64
 	var segIDs []int64
 	for _, task := range tasks {
 		it, ok := task.(*importTask)
 		if !ok {
 			continue
 		}
-		collectionID = it.GetCollectionID()
 		// Collect all candidate segment IDs from this task (safe copies).
 		candidates := make([]int64, 0, len(it.GetSegmentIDs())+len(it.GetSortedSegmentIDs()))
 		candidates = append(candidates, it.GetSegmentIDs()...)
@@ -3499,5 +3458,5 @@ func (s *Server) getImportSegmentIDsByVchannel(ctx context.Context, jobID int64,
 			segIDs = append(segIDs, segID)
 		}
 	}
-	return collectionID, segIDs
+	return segIDs
 }

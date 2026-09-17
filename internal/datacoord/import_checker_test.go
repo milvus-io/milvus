@@ -1240,7 +1240,7 @@ func (s *ImportCheckerSuite) TestCheckUncommittedJob_NilFn_AutoCommitTrue() {
 // checkUncommittedJob before the ack callback transitions the job state is safe.
 // the commit hook is invoked once per tick; correctness against the resulting
 // duplicate broadcasts is guaranteed by the broadcaster's resource-key lock,
-// the ack callback's state guard, and HandleCommitVchannel's idempotency.
+// the completed callback's idempotency guard.
 func (s *ImportCheckerSuite) TestCheckUncommittedJob_RepeatedTicks_Safe() {
 	s.manuallyUpdateJob(s.jobID, func(job ImportJob) {
 		job.(*importJob).State = internalpb.ImportJobState_Uncommitted

@@ -21,6 +21,7 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 | DropSnapshotsByCollection | Broadcast: CChannel | No | SharedDBName + SharedCollectionName |
 | Import | Broadcast: VChannels + CChannel | No | SharedDBName + ExclusiveCollectionName |
 | ImportIDRange | Broadcast: VChannels + CChannel | No | SharedDBName + ExclusiveCollectionName |
+| CommitImport / RollbackImport | Broadcast: VChannels + CChannel | No | SharedDBName + ExclusiveCollectionName |
 | Insert | Single VChannel | No | — |
 | Delete | Single VChannel | No | — |
 | CreateSegment *(SelfControlled)* | Single VChannel | No | — |
@@ -42,8 +43,10 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 - **CreatePartition** / **DropPartition**: Creates or drops a partition. DropPartition implicitly flushes the partition's growing segments.
 - **CreateIndex** / **AlterIndex** / **DropIndex**: Manages indexes on a collection's field. CChannel-only.
 - **CreateSnapshot** / **DropSnapshot** / **RestoreSnapshot** / **DropSnapshotsByCollection**: Manages collection snapshots. CChannel-only.
-- **Import**: Initiates a bulk import job for a collection.
-- **ImportIDRange**: Assigns the per-file ID ranges to an in-progress import job once preimport reports exact row counts; replicated so both clusters derive identical PK/RowID. DataCoord ack callback only (flusher no-op).
+- **Import**: Initiates a bulk import job for a collection through its broadcast callback; CChannel is excluded from the job's data-channel list.
+- **CommitImport**: The DataCoord callback persists Committing, publishes imported segment visibility at each business VChannel's own append TimeTick, then persists Completed. The broadcast task retries failures. It does not require a StreamingNode Flush or per-channel commit RPC.
+- **RollbackImport**: The DataCoord callback marks an uncommitted job Failed; committed jobs are unchanged.
+- **ImportIDRange**: Assigns the per-file ID ranges to an in-progress import job once preimport reports exact row counts; replicated so both clusters derive identical PK/RowID. DataCoord ack callback only (no local recovery data work).
 - **Insert** / **Delete**: DML on a single VChannel. CipherEnabled.
 - **CreateSegment** / **Flush**: WAL-generated (SelfControlled). Allocates or seals a growing segment.
 - **ManualFlush**: Seals all growing segments for a collection on a VChannel.
