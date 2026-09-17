@@ -2321,6 +2321,7 @@ func TestServer_FlushAll(t *testing.T) {
 		// Mock broadcaster
 		bapi := mock_broadcaster.NewMockBroadcastAPI(t)
 		bapi.EXPECT().Broadcast(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, msg message.BroadcastMutableMessage) (*types2.BroadcastAppendResult, error) {
+			require.True(t, msg.BroadcastHeader().AckSyncUp, "FlushAll must wait for consuming-side completion")
 			results := make(map[string]*message.AppendResult)
 			for _, vchannel := range msg.BroadcastHeader().VChannels {
 				results[vchannel] = &message.AppendResult{
@@ -2376,229 +2377,34 @@ func TestServer_FlushAll(t *testing.T) {
 	})
 }
 
-// createTestGetFlushAllStateServer creates a test server for GetFlushAllState tests
-func createTestGetFlushAllStateServer() *Server {
-	// Create a mock broker that will be replaced by mockey
-	mockBroker := &broker.MockBroker{}
-
-	server := &Server{
-		broker: mockBroker,
-		meta: &meta{
-			channelCPs: newChannelCps(),
-		},
-	}
-	server.stateCode.Store(commonpb.StateCode_Healthy)
-
-	return server
-}
-
 func TestServer_GetFlushAllState(t *testing.T) {
 	t.Run("server not healthy", func(t *testing.T) {
 		server := &Server{}
 		server.stateCode.Store(commonpb.StateCode_Abnormal)
-
-		req := &milvuspb.GetFlushAllStateRequest{}
-		resp, err := server.GetFlushAllState(context.Background(), req)
-
-		assert.NoError(t, err)
-		assert.Error(t, merr.Error(resp.GetStatus()))
+		resp, err := server.GetFlushAllState(context.Background(), &milvuspb.GetFlushAllStateRequest{})
+		require.NoError(t, err)
+		require.Error(t, merr.Error(resp.GetStatus()))
+		require.False(t, resp.GetFlushed())
 	})
 
-	t.Run("ListDatabases error", func(t *testing.T) {
-		server := createTestGetFlushAllStateServer()
-
-		// Mock ListDatabases error
-		mockListDatabases := mockey.Mock(mockey.GetMethod(server.broker, "ListDatabases")).Return(nil, errors.New("list databases error")).Build()
-		defer mockListDatabases.UnPatch()
-
-		req := &milvuspb.GetFlushAllStateRequest{}
-
-		resp, err := server.GetFlushAllState(context.Background(), req)
-
-		assert.NoError(t, err)
-		assert.Error(t, merr.Error(resp.GetStatus()))
-	})
-
-	t.Run("all flushed", func(t *testing.T) {
-		server := createTestGetFlushAllStateServer()
-
-		// Mock ListDatabases
-		mockListDatabases := mockey.Mock(mockey.GetMethod(server.broker, "ListDatabases")).Return(&milvuspb.ListDatabasesResponse{
-			Status:  merr.Success(),
-			DbNames: []string{"db1", "db2"},
-		}, nil).Build()
-		defer mockListDatabases.UnPatch()
-
-		// Mock ShowCollections for db1
-		mockShowCollections := mockey.Mock(mockey.GetMethod(server.broker, "ShowCollections")).To(func(ctx context.Context, dbName string) (*milvuspb.ShowCollectionsResponse, error) {
-			if dbName == "db1" {
-				return &milvuspb.ShowCollectionsResponse{
-					Status:          merr.Success(),
-					CollectionIds:   []int64{100},
-					CollectionNames: []string{"collection1"},
-				}, nil
-			}
-			if dbName == "db2" {
-				return &milvuspb.ShowCollectionsResponse{
-					Status:          merr.Success(),
-					CollectionIds:   []int64{200},
-					CollectionNames: []string{"collection2"},
-				}, nil
-			}
-			return nil, errors.New("unknown db")
-		}).Build()
-		defer mockShowCollections.UnPatch()
-
-		// Mock DescribeCollectionInternal
-		mockDescribeCollection := mockey.Mock(mockey.GetMethod(server.broker, "DescribeCollectionInternal")).To(func(ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
-			if collectionID == 100 {
-				return &milvuspb.DescribeCollectionResponse{
-					Status:              merr.Success(),
-					VirtualChannelNames: []string{"channel1"},
-				}, nil
-			}
-			if collectionID == 200 {
-				return &milvuspb.DescribeCollectionResponse{
-					Status:              merr.Success(),
-					VirtualChannelNames: []string{"channel2"},
-				}, nil
-			}
-			return nil, errors.New("collection not found")
-		}).Build()
-		defer mockDescribeCollection.UnPatch()
-
-		// Setup channel checkpoints - both flushed
-		server.meta.channelCPs.checkpoints["channel1"] = &msgpb.MsgPosition{Timestamp: 15000}
-		server.meta.channelCPs.checkpoints["channel2"] = &msgpb.MsgPosition{Timestamp: 15000}
-
-		req := &milvuspb.GetFlushAllStateRequest{
-			FlushAllTss: map[string]uint64{
-				"channel1": 15000,
-				"channel2": 15000,
-			},
-		}
-
-		resp, err := server.GetFlushAllState(context.Background(), req)
-
-		assert.NoError(t, merr.CheckRPCCall(resp, err))
-		assert.True(t, resp.GetFlushed())
-	})
-
-	t.Run("not flushed, channel checkpoint too old", func(t *testing.T) {
-		server := createTestGetFlushAllStateServer()
-
-		// Mock ListDatabases
-		mockListDatabases := mockey.Mock(mockey.GetMethod(server.broker, "ListDatabases")).Return(&milvuspb.ListDatabasesResponse{
-			Status:  merr.Success(),
-			DbNames: []string{"test-db"},
-		}, nil).Build()
-		defer mockListDatabases.UnPatch()
-
-		// Mock ShowCollections
-		mockShowCollections := mockey.Mock(mockey.GetMethod(server.broker, "ShowCollections")).Return(&milvuspb.ShowCollectionsResponse{
-			Status:          merr.Success(),
-			CollectionIds:   []int64{100},
-			CollectionNames: []string{"collection1"},
-		}, nil).Build()
-		defer mockShowCollections.UnPatch()
-
-		// Mock DescribeCollectionInternal
-		mockDescribeCollection := mockey.Mock(mockey.GetMethod(server.broker, "DescribeCollectionInternal")).Return(&milvuspb.DescribeCollectionResponse{
-			Status:              merr.Success(),
-			VirtualChannelNames: []string{"channel1"},
-		}, nil).Build()
-		defer mockDescribeCollection.UnPatch()
-
-		// Setup channel checkpoint with timestamp lower than FlushAllTs
-		server.meta.channelCPs.checkpoints["channel1"] = &msgpb.MsgPosition{Timestamp: 10000}
-
-		req := &milvuspb.GetFlushAllStateRequest{
-			FlushAllTss: map[string]uint64{
-				"channel1": 15000,
-			},
-		}
-
-		resp, err := server.GetFlushAllState(context.Background(), req)
-
-		assert.NoError(t, merr.CheckRPCCall(resp, err))
-		assert.False(t, resp.GetFlushed())
-	})
-
-	t.Run("test legacy FlushAllTs provided and flushed", func(t *testing.T) {
-		server := createTestGetFlushAllStateServer()
-
-		// Mock ListDatabases
-		mockListDatabases := mockey.Mock(mockey.GetMethod(server.broker, "ListDatabases")).Return(&milvuspb.ListDatabasesResponse{
-			Status:  merr.Success(),
-			DbNames: []string{"test-db"},
-		}, nil).Build()
-		defer mockListDatabases.UnPatch()
-
-		// Mock ShowCollections
-		mockShowCollections := mockey.Mock(mockey.GetMethod(server.broker, "ShowCollections")).Return(&milvuspb.ShowCollectionsResponse{
-			Status:          merr.Success(),
-			CollectionIds:   []int64{100},
-			CollectionNames: []string{"collection1"},
-		}, nil).Build()
-		defer mockShowCollections.UnPatch()
-
-		// Mock DescribeCollectionInternal
-		mockDescribeCollection := mockey.Mock(mockey.GetMethod(server.broker, "DescribeCollectionInternal")).Return(&milvuspb.DescribeCollectionResponse{
-			Status:              merr.Success(),
-			VirtualChannelNames: []string{"channel1"},
-		}, nil).Build()
-		defer mockDescribeCollection.UnPatch()
-
-		// Setup channel checkpoint with timestamp >= deprecated FlushAllTs
-		server.meta.channelCPs.checkpoints["channel1"] = &msgpb.MsgPosition{Timestamp: 15000}
-
-		req := &milvuspb.GetFlushAllStateRequest{
-			FlushAllTs: 15000, // deprecated field
-		}
-
-		resp, err := server.GetFlushAllState(context.Background(), req)
-
-		assert.NoError(t, merr.CheckRPCCall(resp, err))
-		assert.True(t, resp.GetFlushed())
-	})
-
-	t.Run("test legacy FlushAllTs provided and not flushed", func(t *testing.T) {
-		server := createTestGetFlushAllStateServer()
-
-		// Mock ListDatabases
-		mockListDatabases := mockey.Mock(mockey.GetMethod(server.broker, "ListDatabases")).Return(&milvuspb.ListDatabasesResponse{
-			Status:  merr.Success(),
-			DbNames: []string{"test-db"},
-		}, nil).Build()
-		defer mockListDatabases.UnPatch()
-
-		// Mock ShowCollections
-		mockShowCollections := mockey.Mock(mockey.GetMethod(server.broker, "ShowCollections")).Return(&milvuspb.ShowCollectionsResponse{
-			Status:          merr.Success(),
-			CollectionIds:   []int64{100},
-			CollectionNames: []string{"collection1"},
-		}, nil).Build()
-		defer mockShowCollections.UnPatch()
-
-		// Mock DescribeCollectionInternal
-		mockDescribeCollection := mockey.Mock(mockey.GetMethod(server.broker, "DescribeCollectionInternal")).Return(&milvuspb.DescribeCollectionResponse{
-			Status:              merr.Success(),
-			VirtualChannelNames: []string{"channel1"},
-		}, nil).Build()
-		defer mockDescribeCollection.UnPatch()
-
-		// Setup channel checkpoint with timestamp < deprecated FlushAllTs
-		server.meta.channelCPs.checkpoints["channel1"] = &msgpb.MsgPosition{Timestamp: 10000}
-
-		req := &milvuspb.GetFlushAllStateRequest{
-			FlushAllTs: 15000, // deprecated field
-		}
-
-		resp, err := server.GetFlushAllState(context.Background(), req)
-
-		assert.NoError(t, merr.CheckRPCCall(resp, err))
-		assert.False(t, resp.GetFlushed())
-	})
+	for _, tc := range []struct {
+		name string
+		req  *milvuspb.GetFlushAllStateRequest
+	}{
+		{"legacy maximum timestamp", &milvuspb.GetFlushAllStateRequest{FlushAllTs: 101}},
+		{"per-channel timestamps", &milvuspb.GetFlushAllStateRequest{FlushAllTss: map[string]uint64{"p0": 100, "p1": 101}}},
+		{"empty request", &milvuspb.GetFlushAllStateRequest{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// No broker or metadata: completion must not depend on enumerating
+			// collections or on the independently reported channel checkpoints.
+			server := &Server{}
+			server.stateCode.Store(commonpb.StateCode_Healthy)
+			resp, err := server.GetFlushAllState(context.Background(), tc.req)
+			require.NoError(t, merr.CheckRPCCall(resp, err))
+			require.True(t, resp.GetFlushed())
+		})
+	}
 }
 
 func getWatchKV(t *testing.T) kv.WatchKV {

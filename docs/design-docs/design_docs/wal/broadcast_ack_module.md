@@ -84,6 +84,27 @@ The message is replayed from the last published global checkpoint.
 5. BroadcastAck has no component `checkpoint_time_tick`.
 6. BroadcastAck does not wait for checkpoint catalog publication.
 
+## Flush API Completion
+
+FlushAll uses `AckSyncUp`: its cluster-level broadcast cannot FastAck on WAL
+append. Every PChannel dispatches it to all affected VChannels and waits for
+their L1 final commits and L0 output/registration before consuming-side Ack.
+The RPC returns success only after all channel Acks and the broadcast callback
+complete. `GetFlushAllState` is a follow-up completion endpoint and returns true
+on a healthy server; it does not compare independently reported channel
+checkpoints against a cross-channel maximum timestamp.
+
+Global recovery checkpoint publication is not part of this RPC completion
+boundary. A crash before publication replays unfinished recovery bookkeeping
+and may repeat already durable output safely.
+
+ManualFlush currently uses per-VChannel `RawAppend`, not Broadcast. Its append
+response does not wait for retained consumers, although RecoveryStorage holds
+the message through L1/L0 completion. `GetFlushState` therefore continues to
+check segment/flush progress. Giving ManualFlush the same synchronous API
+contract would require an explicit consuming-side wait or a broadcast path;
+setting a broadcast option on RawAppend cannot provide that contract.
+
 ## 8. Import Commit Ownership
 
 Import, CommitImport, and RollbackImport broadcast to the business VChannels
