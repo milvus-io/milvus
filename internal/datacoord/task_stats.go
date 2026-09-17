@@ -248,6 +248,15 @@ func (st *statsTask) QueryTaskOnWorker(cluster session.Cluster) {
 		mlog.FieldNodeID(st.NodeID),
 	)
 
+	// The segment may have been dropped (collection/partition drop, compaction)
+	// while the task is in flight. Cancel the worker-side job instead of
+	// letting it finish stats nobody will read.
+	if st.meta.GetHealthySegment(ctx, st.GetSegmentID()) == nil {
+		log.Info(ctx, "segment dropped while stats task in progress, aborting")
+		st.abortForDroppedSegment(ctx, cluster)
+		return
+	}
+
 	// Query task status
 	results, err := cluster.QueryStats(st.NodeID, &workerpb.QueryJobsRequest{
 		ClusterID: Params.CommonCfg.ClusterPrefix.GetValue(),
@@ -293,6 +302,22 @@ func (st *statsTask) QueryTaskOnWorker(cluster session.Cluster) {
 
 	log.Warn(context.TODO(), "task not found in results")
 	st.resetTask(ctx, "task not found in results")
+}
+
+// abortForDroppedSegment cancels an in-flight stats task whose origin segment
+// is gone: drop the job on the worker first, then remove the task meta. Either
+// step failing leaves the task InProgress so the next check round retries.
+// Files the worker already uploaded are reclaimed by the orphan binlog scans.
+func (st *statsTask) abortForDroppedSegment(ctx context.Context, cluster session.Cluster) {
+	if err := st.tryDropTaskOnWorker(cluster); err != nil {
+		return
+	}
+	if err := st.meta.statsTaskMeta.DropStatsTask(ctx, st.GetTaskID()); err != nil {
+		mlog.Warn(ctx, "remove stats task of dropped segment failed, will retry later",
+			mlog.FieldTaskID(st.GetTaskID()), mlog.FieldSegmentID(st.GetSegmentID()), mlog.Err(err))
+		return
+	}
+	st.SetState(indexpb.JobState_JobStateNone, "segment is not healthy")
 }
 
 func (st *statsTask) tryDropTaskOnWorker(cluster session.Cluster) error {

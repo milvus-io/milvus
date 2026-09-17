@@ -568,6 +568,13 @@ func (s *statsTaskSuite) SetupSuite() {
 	s.segID = 1179
 	s.targetID = 1180
 
+	s.mt = s.newMeta()
+}
+
+// newMeta builds a fresh meta holding one flushed segment and one Init stats
+// task on it. Tests that remove the task or drop the segment should use their
+// own instance instead of mutating the shared s.mt.
+func (s *statsTaskSuite) newMeta() *meta {
 	tasks := typeutil.NewConcurrentMap[UniqueID, *indexpb.StatsTask]()
 	statsTask := &indexpb.StatsTask{
 		CollectionID:  1,
@@ -586,7 +593,7 @@ func (s *statsTaskSuite) SetupSuite() {
 	secondaryKey := createSecondaryIndexKey(statsTask.GetSegmentID(), statsTask.GetSubJobType().String())
 	secondaryIndex.Insert(secondaryKey, statsTask)
 
-	s.mt = &meta{
+	return &meta{
 		segments: &SegmentsInfo{
 			segments: map[int64]*SegmentInfo{
 				s.segID: {
@@ -1041,6 +1048,81 @@ func (s *statsTaskSuite) TestQueryTaskOnWorker() {
 
 		st.QueryTaskOnWorker(cluster)
 		s.Equal(indexpb.JobState_JobStateInit, st.GetState()) // No change
+	})
+}
+
+func (s *statsTaskSuite) TestQueryTaskOnWorkerAbortsWhenSegmentDropped() {
+	newTask := func(mt *meta) *statsTask {
+		return newStatsTask(&indexpb.StatsTask{
+			TaskID:     s.taskID,
+			SegmentID:  s.segID,
+			SubJobType: indexpb.StatsSubJob_JsonKeyIndexJob,
+			State:      indexpb.JobState_JobStateInProgress,
+			NodeID:     100,
+		}, 1, mt, nil, nil, newIndexEngineVersionManager())
+	}
+
+	s.Run("segment dropped", func() {
+		mt := s.newMeta()
+		mt.segments.segments[s.segID].State = commonpb.SegmentState_Dropped
+		catalog := catalogmocks.NewDataCoordCatalog(s.T())
+		catalog.EXPECT().DropStatsTask(mock.Anything, s.taskID).Return(nil)
+		mt.statsTaskMeta.catalog = catalog
+		st := newTask(mt)
+
+		// No QueryStats expectation: the dropped segment must be detected
+		// before polling the worker, and the worker-side job canceled.
+		cluster := session.NewMockCluster(s.T())
+		cluster.EXPECT().DropStats(int64(100), s.taskID).Return(nil)
+		st.QueryTaskOnWorker(cluster)
+
+		s.Equal(indexpb.JobState_JobStateNone, st.GetState())
+		s.Nil(mt.statsTaskMeta.GetStatsTask(s.taskID))
+	})
+
+	s.Run("segment removed from meta", func() {
+		mt := s.newMeta()
+		delete(mt.segments.segments, s.segID)
+		catalog := catalogmocks.NewDataCoordCatalog(s.T())
+		catalog.EXPECT().DropStatsTask(mock.Anything, s.taskID).Return(nil)
+		mt.statsTaskMeta.catalog = catalog
+		st := newTask(mt)
+
+		cluster := session.NewMockCluster(s.T())
+		cluster.EXPECT().DropStats(int64(100), s.taskID).Return(nil)
+		st.QueryTaskOnWorker(cluster)
+
+		s.Equal(indexpb.JobState_JobStateNone, st.GetState())
+		s.Nil(mt.statsTaskMeta.GetStatsTask(s.taskID))
+	})
+
+	s.Run("drop on worker failed keeps task for next round", func() {
+		mt := s.newMeta()
+		mt.segments.segments[s.segID].State = commonpb.SegmentState_Dropped
+		st := newTask(mt)
+
+		cluster := session.NewMockCluster(s.T())
+		cluster.EXPECT().DropStats(int64(100), s.taskID).Return(errors.New("mock error"))
+		st.QueryTaskOnWorker(cluster)
+
+		s.Equal(indexpb.JobState_JobStateInProgress, st.GetState())
+		s.NotNil(mt.statsTaskMeta.GetStatsTask(s.taskID))
+	})
+
+	s.Run("drop meta failed keeps task for next round", func() {
+		mt := s.newMeta()
+		mt.segments.segments[s.segID].State = commonpb.SegmentState_Dropped
+		catalog := catalogmocks.NewDataCoordCatalog(s.T())
+		catalog.EXPECT().DropStatsTask(mock.Anything, s.taskID).Return(errors.New("mock error"))
+		mt.statsTaskMeta.catalog = catalog
+		st := newTask(mt)
+
+		cluster := session.NewMockCluster(s.T())
+		cluster.EXPECT().DropStats(int64(100), s.taskID).Return(nil)
+		st.QueryTaskOnWorker(cluster)
+
+		s.Equal(indexpb.JobState_JobStateInProgress, st.GetState())
+		s.NotNil(mt.statsTaskMeta.GetStatsTask(s.taskID))
 	})
 }
 
