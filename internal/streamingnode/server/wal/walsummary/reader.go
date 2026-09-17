@@ -103,11 +103,7 @@ func (m *Manager) ReadTransform(ctx context.Context, vchannel string, after, thr
 		if entry == nil || entry.GetTimeTick() <= after || entry.GetTimeTick() > target {
 			return true
 		}
-		var n uint64
-		for _, block := range entry.GetDelete().GetBlocks() {
-			n += uint64(len(block.GetPrimaryKeys().GetIntId().GetData()) + len(block.GetPrimaryKeys().GetStrId().GetData()))
-		}
-		size := uint64(proto.Size(entry))
+		n, size := transformEntrySize(entry)
 		if len(batch.Entries) > 0 && ((limits.MaxRows > 0 && rows+n > limits.MaxRows) || (limits.MaxBytes > 0 && bytes+size > limits.MaxBytes)) {
 			return false
 		}

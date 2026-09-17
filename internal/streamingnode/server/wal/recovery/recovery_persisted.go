@@ -2,6 +2,7 @@ package recovery
 
 import (
 	"context"
+	"maps"
 	"math"
 	"sort"
 
@@ -177,7 +178,8 @@ func (r *recoveryStorageImpl) migrateLegacyRecoveryInfo(
 	if err != nil {
 		return false, err
 	}
-	replaceSegmentSnapshots(segments, normalizedSegments)
+	clear(segments)
+	maps.Copy(segments, normalizedSegments)
 
 	migratedCheckpoint := checkpoint.Clone()
 	migratedCheckpoint.Magic = utility.RecoveryMagicRecoveryStorageV2
@@ -371,13 +373,6 @@ func legacyDurableBinarySize(info *datapb.SegmentInfo) uint64 {
 		}
 	}
 	return size
-}
-
-func replaceSegmentSnapshots(target, source map[int64]*streamingpb.SegmentAssignmentMeta) {
-	clear(target)
-	for segmentID, snapshot := range source {
-		target[segmentID] = snapshot
-	}
 }
 
 func normalizeLegacyRecoveredViewMeta(

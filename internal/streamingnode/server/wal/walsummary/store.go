@@ -499,12 +499,7 @@ func buildManifestPrefix(cm storage.ChunkManager, pchannel string) string {
 }
 
 func buildManifestKey(cm storage.ChunkManager, pchannel string, term int64) string {
-	return path.Join(
-		cm.RootPath(),
-		walsummaryObjectDir,
-		sanitizePathPart(pchannel),
-		manifestObjectDir,
-	) + "/" + fmt.Sprintf("%020d", term)
+	return buildManifestPrefix(cm, pchannel) + fmt.Sprintf("%020d", term)
 }
 
 func buildStorePrefix(cm storage.ChunkManager, pchannel string) string {
@@ -622,7 +617,7 @@ func marshalChunk(
 				return nil, nil, err
 			}
 			insertStart, insertEnd := insertRecordTimetickRange(ordered.Inserts)
-			start, end = minUint64(start, insertStart), maxUint64(end, insertEnd)
+			start, end = min(start, insertStart), max(end, insertEnd)
 		}
 
 		if len(sections.Transform) > 0 {
@@ -643,7 +638,7 @@ func marshalChunk(
 			index.Transform = ref
 			transformStart, transformEnd := transformRecordTimetickRange(records)
 			index.TransformEndTimetick = transformEnd
-			start, end = minUint64(start, transformStart), maxUint64(end, transformEnd)
+			start, end = min(start, transformStart), max(end, transformEnd)
 		}
 		index.StartTimetick, index.EndTimetick = start, end
 		extendFooterRange(footer, index.StartTimetick, index.EndTimetick)
@@ -876,20 +871,6 @@ func unmarshalChunkTail(payload []byte) (*streamingpb.PChannelSummaryChunkFooter
 	return footer, uint64(footerStart), nil
 }
 
-func minUint64(a, b uint64) uint64 {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func maxUint64(a, b uint64) uint64 {
-	if a > b {
-		return a
-	}
-	return b
-}
-
 // sortedByInsertTimetick orders a vchannel's idempotency halves by the WAL
 // timetick of the write, so a chunk's sections read back in WAL order.
 //
@@ -924,8 +905,8 @@ func insertRecordTimetickRange(records []*streamingpb.VChannelSummaryInsertRecor
 	}
 	start, end := records[0].GetSourceTimetick(), records[0].GetSourceTimetick()
 	for _, record := range records[1:] {
-		start = minUint64(start, record.GetSourceTimetick())
-		end = maxUint64(end, record.GetSourceTimetick())
+		start = min(start, record.GetSourceTimetick())
+		end = max(end, record.GetSourceTimetick())
 	}
 	return start, end
 }

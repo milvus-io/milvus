@@ -53,17 +53,8 @@ func (r *Record) Size() int {
 	if r == nil {
 		return 0
 	}
-	size := len(r.IdempotencyKey) + 8
-	if r.SourceMessageID != nil {
-		size += proto.Size(r.SourceMessageID)
-	}
-	if r.LastConfirmedMessageID != nil {
-		size += proto.Size(r.LastConfirmedMessageID)
-	}
-	if r.InsertResult != nil {
-		size += proto.Size(r.InsertResult)
-	}
-	return size
+	return len(r.IdempotencyKey) + 8 + proto.Size(r.SourceMessageID) +
+		proto.Size(r.LastConfirmedMessageID) + proto.Size(r.InsertResult)
 }
 
 // Snapshot is what recovery hands the idempotency interceptor once it has

@@ -91,8 +91,7 @@ func (r *recoveryStreamImpl) TxnBuffer() *utility.TxnBuffer {
 // Close closes the recovery stream.
 func (r *recoveryStreamImpl) Close() error {
 	r.notifier.Cancel()
-	err := r.notifier.BlockAndGetResult()
-	return err
+	return r.notifier.BlockAndGetResult()
 }
 
 // execute starts the recovery stream.
