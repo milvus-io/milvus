@@ -8,6 +8,7 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -24,6 +25,9 @@ import (
 func RecoverBroadcaster(ctx context.Context) (Broadcaster, error) {
 	tasks, err := resource.Resource().StreamingCatalog().ListBroadcastTask(ctx)
 	if err != nil {
+		return nil, err
+	}
+	if err := finishRecoveredResourceKeyOwners(ctx, tasks); err != nil {
 		return nil, err
 	}
 	return newBroadcastTaskManager(tasks), nil
@@ -48,15 +52,27 @@ func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) *broadcastTask
 	pendingAckCallbackTasks := make([]*broadcastTask, 0, len(recoveryTasks))
 	tombstoneIDs := make([]uint64, 0, len(recoveryTasks))
 	idxOfKeys := newIdempotencyIndex()
+	owners := make(map[int64]*broadcastTask)
+	ends := make(map[uint64]*broadcastTask)
 	for _, task := range recoveryTasks {
-		switch task.task.State {
-		case streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING, streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_WAIT_ACK:
+		ownerID := task.task.GetResourceKeyOwnerId()
+		if ownerID != 0 {
+			if ownerID == task.Header().BroadcastID {
+				jobID, _ := registry.BroadcastPair(task.BroadcastMessage())
+				owners[jobID] = task
+			} else {
+				ends[ownerID] = task
+			}
+		}
+		if task.holdsResourceKeys() {
 			guards, err := rkLocker.FastLock(task.Header().ResourceKeys.Collect()...)
 			if err != nil {
 				panic(err)
 			}
 			task.WithResourceKeyLockGuards(guards)
-
+		}
+		switch task.task.State {
+		case streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING, streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_WAIT_ACK:
 			if newPending := newPendingBroadcastTask(task); newPending != nil {
 				// if there's some pending messages that is not appended, it should be continued to be appended.
 				pendingTasks = append(pendingTasks, newPending)
@@ -72,7 +88,9 @@ func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) *broadcastTask
 				pendingAckCallbackTasks = append(pendingAckCallbackTasks, task)
 			}
 		case streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE:
-			tombstoneIDs = append(tombstoneIDs, task.Header().BroadcastID)
+			if !task.holdsResourceKeys() {
+				tombstoneIDs = append(tombstoneIDs, task.Header().BroadcastID)
+			}
 		}
 		tasks[task.Header().BroadcastID] = task
 		// Rebuild the idempotency index across EVERY state, tombstones included:
@@ -85,6 +103,9 @@ func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) *broadcastTask
 		mu:                 &sync.Mutex{},
 		tasks:              tasks,
 		idempotencyIndex:   idxOfKeys,
+		resourceKeyOwners:  owners,
+		resourceKeyEnds:    ends,
+		admissions:         make(map[string]chan struct{}),
 		resourceKeyLocker:  rkLocker,
 		metrics:            metrics,
 		broadcastScheduler: newBroadcasterScheduler(pendingTasks, logger),
@@ -107,6 +128,9 @@ type broadcastTaskManager struct {
 	lifetime           *typeutil.Lifetime
 	mu                 *sync.Mutex
 	tasks              map[uint64]*broadcastTask // map the broadcastID to the broadcastTaskState
+	resourceKeyOwners  map[int64]*broadcastTask  // job ID -> Begin, retained through close/GC
+	resourceKeyEnds    map[uint64]*broadcastTask // owner broadcast ID -> chosen End
+	admissions         map[string]chan struct{}  // idempotency scopes being prepared, not yet accepted
 	idempotencyIndex   *idempotencyIndex         // map the idempotency key to the broadcastID that owns it
 	resourceKeyLocker  *resourceKeyLocker
 	metrics            *broadcasterMetrics
@@ -383,6 +407,10 @@ func (bm *broadcastTaskManager) getOrAddBroadcastTask(
 	newIncomingTask := newBroadcastTaskFromBroadcastMessage(msg, bm.metrics, bm.ackScheduler)
 	newIncomingTask.SetLogger(bm.Logger())
 	newIncomingTask.WithResourceKeyLockGuards(guards)
+	if jobID, begin := registry.BroadcastPair(msg); begin && jobID != 0 {
+		newIncomingTask.task.ResourceKeyOwnerId = broadcastID
+		bm.resourceKeyOwners[jobID] = newIncomingTask
+	}
 	bm.tasks[broadcastID] = newIncomingTask
 	bm.idempotencyIndex.Add(scope, broadcastID)
 	return newIncomingTask, true
@@ -428,6 +456,13 @@ func (bm *broadcastTaskManager) removeBroadcastTask(broadcastID uint64) {
 
 	if t, ok := bm.tasks[broadcastID]; ok {
 		bm.idempotencyIndex.Remove(t.IdempotencyScope(), broadcastID)
+		ownerID, _ := t.resourceKeyOwnership()
+		if ownerID == broadcastID {
+			jobID, _ := registry.BroadcastPair(t.BroadcastMessage())
+			delete(bm.resourceKeyOwners, jobID)
+		} else if ownerID != 0 {
+			delete(bm.resourceKeyEnds, ownerID)
+		}
 	}
 	delete(bm.tasks, broadcastID)
 }

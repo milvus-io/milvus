@@ -18,16 +18,22 @@ package datacoord
 
 import (
 	"context"
+	"slices"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -93,8 +99,8 @@ func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.B
 // validateImportRequest validates the import request before broadcasting.
 // This includes all validation logic previously done in CheckCallback and Proxy.
 //
-// All of this runs before the broadcaster's idempotency lookup, which cannot happen
-// until the resource keys are held inside Broadcast. A retry therefore has to pass
+// All of this runs before the broadcaster's idempotency admission lookup.
+// A retry therefore has to pass
 // these checks again before it can resolve to its original jobID, and not all of them
 // are a pure function of the request: ValidateMaxImportJobExceed counts in-flight jobs,
 // ValidateBinlogImportRequest lists the backup files in object storage, and
@@ -267,7 +273,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 
 	// Get database name from collection metadata via broker
 	// This is safer than extracting from schema which may be stale
-	broadcaster, err := s.startBroadcastWithCollectionID(ctx, collectionID)
+	broadcaster, lockedCollection, err := s.startImportBroadcast(ctx, collectionID, message.NewCollectionScopedIdempotencyKey(collectionID, idempotencyKey))
 	if err != nil {
 		return 0, false, merr.Wrap(err, "failed to start broadcast with collection id")
 	}
@@ -287,6 +293,26 @@ func (s *Server) broadcastImport(ctx context.Context,
 	if err := merr.CheckRPCCall(coll, err); err != nil {
 		return 0, false, err
 	}
+	if lockedCollection.GetDbName() != coll.GetDbName() || lockedCollection.GetCollectionName() != coll.GetCollectionName() {
+		return 0, false, merr.WrapErrServiceUnavailableMsg("collection metadata changed while acquiring import resource keys")
+	}
+	if schema == nil || coll.GetSchema() == nil {
+		return 0, false, merr.WrapErrServiceUnavailableMsg("collection schema is unavailable during import admission")
+	}
+	current := proto.Clone(coll.GetSchema()).(*schemapb.CollectionSchema)
+	current.Fields = lo.Filter(current.GetFields(), func(field *schemapb.FieldSchema, _ int) bool {
+		return field.GetFieldID() >= common.StartOfUserFieldID
+	})
+	// Proxy caches omit system fields; legacy callers also leave Version unset.
+	// Normalize only the comparison clone, never the authoritative metadata.
+	if schema.GetVersion() == 0 {
+		current.Version = 0
+	}
+	if !proto.Equal(schema, current) || !slices.Equal(vchannels, coll.GetVirtualChannelNames()) {
+		return 0, false, merr.WrapErrServiceUnavailableMsg("collection schema or channels changed during import admission")
+	}
+	schema = proto.Clone(schema).(*schemapb.CollectionSchema)
+	schema.Version = coll.GetSchema().GetVersion()
 	// Build import message without deprecated MsgBase
 	msg := message.NewImportMessageBuilderV1().
 		WithHeader(&message.ImportMessageHeader{}).
@@ -424,4 +450,17 @@ func (c *DDLCallbacks) rollbackImportV2AckCallback(ctx context.Context, result m
 		UpdateJobState(internalpb.ImportJobState_Failed),
 		UpdateJobReason(importJobReasonAbortedByUser),
 	)
+}
+
+// startImportBroadcast keeps the lock-name snapshot for the admission recheck.
+// Only Import needs to resolve idempotent retries before its long-held keys.
+func (s *Server) startImportBroadcast(ctx context.Context, collectionID int64, key message.IdempotencyKey) (broadcaster.BroadcastAPI, *milvuspb.DescribeCollectionResponse, error) {
+	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
+	if err := merr.CheckRPCCall(coll, err); err != nil {
+		return nil, nil, err
+	}
+	api, err := broadcast.StartBroadcastWithIdempotencyKey(ctx, message.MessageTypeImport, key,
+		message.NewSharedDBNameResourceKey(coll.GetDbName()),
+		message.NewExclusiveCollectionNameResourceKey(coll.GetDbName(), coll.GetCollectionName()))
+	return api, coll, err
 }

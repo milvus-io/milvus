@@ -288,7 +288,16 @@ func (s *ackCallbackScheduler) doAckCallback(bt *broadcastTask, g *lockGuards) (
 		// The catalog is reliable to write, so we can mark the ack callback done without retrying.
 		return err
 	}
-	s.tombstoneScheduler.AddPending(bt.Header().BroadcastID)
+	gcIDs := []uint64{bt.Header().BroadcastID}
+	if s.bm != nil {
+		gcIDs, err = s.bm.completeResourceKeyOwner(s.notifier.Context(), bt)
+		if err != nil {
+			return err
+		}
+	}
+	for _, id := range gcIDs {
+		s.tombstoneScheduler.AddPending(id)
+	}
 	return nil
 }
 
