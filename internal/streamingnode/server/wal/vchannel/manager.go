@@ -226,15 +226,10 @@ func (m *PChannelRecoveryManager) ConsumeCleanupSnapshots(cleanup moduleapi.Clea
 	m.cleanupModules = nil
 	m.dirtyMu.Unlock()
 	var snapshots []moduleapi.DirtySnapshot
-	for vchannel, module := range candidates {
+	for _, module := range candidates {
 		snapshots = append(snapshots, module.ConsumeCleanupSnapshots(cleanup)...)
 		if module.HasCleanupCandidates() {
-			m.dirtyMu.Lock()
-			if m.cleanupModules == nil {
-				m.cleanupModules = make(map[string]*VChannelRecoveryModule)
-			}
-			m.cleanupModules[vchannel] = module
-			m.dirtyMu.Unlock()
+			m.markCleanupCandidate(module)
 		}
 	}
 	return snapshots

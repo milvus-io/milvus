@@ -2,6 +2,7 @@ package segment
 
 import (
 	"context"
+	"math"
 	"strconv"
 	"sync"
 
@@ -39,7 +40,7 @@ func (l *commitL1Limiter) UpdateConcurrency(concurrency int) {
 
 	if concurrency <= 0 {
 		if l.semaphore != nil {
-			l.semaphore.SetCapacity(maxInt())
+			l.semaphore.SetCapacity(math.MaxInt)
 		}
 		l.semaphore = nil
 		return
@@ -49,10 +50,6 @@ func (l *commitL1Limiter) UpdateConcurrency(concurrency int) {
 		return
 	}
 	l.semaphore.SetCapacity(concurrency)
-}
-
-func maxInt() int {
-	return int(^uint(0) >> 1)
 }
 
 type commitL1LimiterRegistry struct {

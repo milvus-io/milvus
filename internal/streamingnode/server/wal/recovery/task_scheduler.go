@@ -55,9 +55,8 @@ func newScopedTaskScheduler(inner nodescheduler.Scheduler, maxRunning ...int) *s
 
 func (s *scopedTaskScheduler) Submit(task nodescheduler.Task) nodescheduler.TaskHandle {
 	entry := &scopedTaskEntry{
-		owner: s,
-		task:  task,
-		done:  make(chan struct{}),
+		task: task,
+		done: make(chan struct{}),
 	}
 	entry.ctx, entry.cancel = context.WithCancel(context.Background()) //nolint:gosec // cancel is stored and called when the task finishes
 
@@ -203,9 +202,8 @@ func (s *scopedTaskScheduler) finishEntryLocked(entry *scopedTaskEntry) {
 func (s *scopedTaskScheduler) dispatchLocked() {
 	for len(s.pending) > 0 && (s.maxRunning <= 0 || s.running < s.maxRunning) && !s.closed {
 		entry := s.pending[0]
-		copy(s.pending, s.pending[1:])
-		s.pending[len(s.pending)-1] = nil
-		s.pending = s.pending[:len(s.pending)-1]
+		s.pending[0] = nil
+		s.pending = s.pending[1:]
 		if _, ok := s.tasks[entry.id]; !ok {
 			continue
 		}
@@ -229,9 +227,8 @@ func (s *scopedTaskScheduler) signalChangedLocked() {
 }
 
 type scopedTaskEntry struct {
-	owner *scopedTaskScheduler
-	id    uint64
-	task  nodescheduler.Task
+	id   uint64
+	task nodescheduler.Task
 
 	ctx      context.Context
 	cancel   context.CancelFunc
