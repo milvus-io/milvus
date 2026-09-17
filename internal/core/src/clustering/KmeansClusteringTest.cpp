@@ -1680,12 +1680,19 @@ runDataSkewDetectionTestUnified(
     std::cout << "\n[TEST] Running DataSkewDetection test (" << storage_version
               << ")...\n";
     auto job = std::make_unique<KmeansClustering>(prep.ctx);
-    // Expect SegcoreError::ClusterSkip
+    // The clustering must NOT finish normally. runClustering already maps the
+    // data-skew ClusterSkip to a `false` return (and logs it), while any other
+    // SegcoreError — e.g. the row-count guard when a segment's declared
+    // num_rows exceeds the data actually read — is rethrown. Both outcomes mean
+    // "clustering was not allowed to complete", which is what this test asserts.
+    // Only a successful run (`true`) is a failure.
     try {
         bool success = runClustering<T>(job, cfg);
-        // If no exception is thrown → test fails
-        FAIL() << "Expected SegcoreError::ClusterSkip but clustering completed "
-                  "successfully";
+        ASSERT_FALSE(success)
+            << "Expected clustering to be skipped due to data skew, but it "
+               "completed successfully";
+        std::cout << "[INFO] DataSkewDetection test correctly detected skip for "
+                  << storage_version << "\n";
     } catch (const milvus::SegcoreError& e) {
         std::cout << "[INFO] DataSkewDetection test correctly triggered "
                      "ClusterSkip for "
@@ -1832,6 +1839,11 @@ TEST(KmeansClusteringTest, ReadFromManifestStorageV3) {
     info.set_version(index_version);
     info.set_dim(dim);
     info.set_num_clusters(num_clusters);
+    // Select the manifest-backed read path: Run seeds insert_files from
+    // manifest_paths only when the storage version is V3. Without this the
+    // proto default (STORAGE_V1) leaves insert_files empty while num_rows
+    // still lists this segment, so DatasetIterator::Next() throws map::at.
+    info.set_storage_version(STORAGE_V3);
     // Sized so train_num == data_num; the manifest route forces full-data
     // training regardless (see KmeansClustering::Run).
     info.set_train_size(num_rows * dim * int64_t(sizeof(float)));
