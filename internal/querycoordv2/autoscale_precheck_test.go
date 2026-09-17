@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/metacache"
 	metastoremocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/querycoordv2/autoscale"
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
@@ -489,7 +490,7 @@ func newAutoscalePrecheckTestServer(t *testing.T, cluster session.Cluster) *Serv
 		SaveResourceGroup(mock.Anything, mock.Anything).
 		Return(nil).
 		Once()
-	metaManager := meta.NewMeta(nil, catalog, nodeManager)
+	metaManager := meta.NewMeta(nil, catalog, nodeManager, metacache.NewMetaStore(nil))
 	metaManager.HandleNodeUp(context.Background(), 1)
 	return &Server{
 		meta:    metaManager,
@@ -728,7 +729,7 @@ func TestCurrentQueryNodeResourceStatusByRGUsesActiveResourceGroupNodes(t *testi
 		SaveResourceGroup(mock.Anything, mock.Anything).
 		Return(nil).
 		Twice()
-	metaManager := meta.NewMeta(nil, catalog, nodeManager)
+	metaManager := meta.NewMeta(nil, catalog, nodeManager, metacache.NewMetaStore(nil))
 	metaManager.HandleNodeUp(context.Background(), 1)
 	metaManager.HandleNodeUp(context.Background(), 2)
 	nodeManager.Stopping(2)

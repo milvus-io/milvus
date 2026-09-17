@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -63,15 +64,15 @@ func TestBuildManifestIndexInfoFromDataCoordMetadata(t *testing.T) {
 		buildID      = int64(102)
 	)
 	basePath := "files/insert_log/1/2/3"
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(collectionID, &collectionInfo{
+	ms := metacache.NewMetaStore(nil)
+	ms.PutCollection(&collectionInfo{
 		ID: collectionID,
 		Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 			{FieldID: fieldID, Name: "vector"},
 		}},
 	})
 	m := &meta{
-		collections:  collections,
+		metaStore:    ms,
 		chunkManager: storage.NewLocalChunkManager(objectstorage.RootPath("files")),
 		indexMeta: &indexMeta{
 			indexes: map[UniqueID]map[UniqueID]*model.Index{
@@ -142,9 +143,9 @@ func TestBuildManifestIndexInfoFromDataCoordMetadata(t *testing.T) {
 // TestBuildManifestIndexInfoRespectsSegmentIndexTypeOverride covers a segment
 // whose index type was downgraded away from the collection definition.
 func TestBuildManifestIndexInfoRespectsSegmentIndexTypeOverride(t *testing.T) {
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+	ms := metacache.NewMetaStore(nil)
 	m := &meta{
-		collections:  collections,
+		metaStore:    ms,
 		chunkManager: storage.NewLocalChunkManager(objectstorage.RootPath("files")),
 		indexMeta: &indexMeta{
 			indexes: map[UniqueID]map[UniqueID]*model.Index{
@@ -231,7 +232,8 @@ func TestServerGetIndexInfosReadsNoManifest(t *testing.T) {
 	segmentIndexes := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
 	segmentIndexes.Insert(indexID, segmentIndex)
 	segmentIndexes.Insert(indexID2, segmentIndex2)
-	segments := NewSegmentsInfo()
+	ms := metacache.NewMetaStore(nil)
+	segments := NewSegmentsInfo(ms)
 	segments.SetSegment(segmentID, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 		ID:             segmentID,
 		CollectionID:   collectionID,
@@ -528,7 +530,7 @@ func TestUnreadableManifestAbortsMetaBoot(t *testing.T) {
 		DbCollections: []*rootcoordpb.DBCollections{{DbName: "default", CollectionIDs: []int64{restartCollID}}},
 	}, nil).Maybe()
 	_, err := newMeta(context.TODO(), catalog,
-		storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test-restart")), b)
+		storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test-restart")), metacache.NewMetaStore(catalog), b)
 	require.Error(t, err, "startup must fail rather than come up with an incomplete indexMeta")
 }
 
@@ -618,7 +620,7 @@ func bootMetaForRestart(t *testing.T, catalog metastore.DataCoordCatalog, collec
 		DbCollections: []*rootcoordpb.DBCollections{{DbName: "default", CollectionIDs: []int64{collectionID}}},
 	}, nil)
 	m, err := newMeta(context.TODO(), catalog,
-		storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test-restart")), b)
+		storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test-restart")), metacache.NewMetaStore(catalog), b)
 	require.NoError(t, err)
 	return m
 }

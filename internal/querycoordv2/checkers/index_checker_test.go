@@ -27,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -47,6 +48,7 @@ type IndexCheckerSuite struct {
 	kv        kv.MetaKv
 	checker   *IndexChecker
 	meta      *meta.Meta
+	metaStore metacache.MetaStore
 	broker    *meta.MockBroker
 	nodeMgr   *session.NodeManager
 	targetMgr *meta.MockTargetManager
@@ -74,7 +76,8 @@ func (suite *IndexCheckerSuite) SetupTest() {
 	store := querycoord.NewCatalog(suite.kv)
 	idAllocator := params.RandomIncrementIDAllocator()
 	suite.nodeMgr = session.NewNodeManager()
-	suite.meta = meta.NewMeta(idAllocator, store, suite.nodeMgr)
+	suite.metaStore = metacache.NewMetaStore(nil)
+	suite.meta = meta.NewMeta(idAllocator, store, suite.nodeMgr, suite.metaStore)
 	distManager := meta.NewDistributionManager(suite.nodeMgr)
 	suite.broker = meta.NewMockBroker(suite.T())
 
@@ -107,6 +110,7 @@ func (suite *IndexCheckerSuite) TestLoadIndex() {
 		},
 	}
 	checker.meta.PutCollection(ctx, coll)
+	suite.metaStore.PutCollection(&metacache.CollectionInfo{ID: coll.GetCollectionID(), Schema: coll.Schema})
 	checker.meta.Put(ctx, utils.CreateTestReplica(200, 1, []int64{1, 2}))
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
@@ -180,6 +184,7 @@ func (suite *IndexCheckerSuite) TestIndexInfoNotMatch() {
 		},
 	}
 	checker.meta.PutCollection(ctx, coll)
+	suite.metaStore.PutCollection(&metacache.CollectionInfo{ID: coll.GetCollectionID(), Schema: coll.Schema})
 	checker.meta.Put(ctx, utils.CreateTestReplica(200, 1, []int64{1, 2}))
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
@@ -248,6 +253,7 @@ func (suite *IndexCheckerSuite) TestGetIndexInfoFailed() {
 		},
 	}
 	checker.meta.PutCollection(ctx, coll)
+	suite.metaStore.PutCollection(&metacache.CollectionInfo{ID: coll.GetCollectionID(), Schema: coll.Schema})
 	checker.meta.Put(ctx, utils.CreateTestReplica(200, 1, []int64{1, 2}))
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
@@ -295,6 +301,7 @@ func (suite *IndexCheckerSuite) TestCreateNewIndex() {
 		},
 	}
 	checker.meta.PutCollection(ctx, coll)
+	suite.metaStore.PutCollection(&metacache.CollectionInfo{ID: coll.GetCollectionID(), Schema: coll.Schema})
 	checker.meta.Put(ctx, utils.CreateTestReplica(200, 1, []int64{1, 2}))
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
@@ -366,7 +373,8 @@ func TestRemoveRedundantIndex(t *testing.T) {
 	catalog.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 	nodeMgr := session.NewNodeManager()
-	metaMgr := meta.NewMeta(params.RandomIncrementIDAllocator(), catalog, nodeMgr)
+	metaStore := metacache.NewMetaStore(nil)
+	metaMgr := meta.NewMeta(params.RandomIncrementIDAllocator(), catalog, nodeMgr, metaStore)
 	distManager := meta.NewDistributionManager(nodeMgr)
 	broker := meta.NewMockBroker(t)
 	targetMgr := meta.NewMockTargetManager(t)
@@ -388,6 +396,7 @@ func TestRemoveRedundantIndex(t *testing.T) {
 		},
 	}
 	require.NoError(t, checker.meta.PutCollection(ctx, coll))
+	metaStore.PutCollection(&metacache.CollectionInfo{ID: coll.GetCollectionID(), Schema: coll.Schema})
 	require.NoError(t, checker.meta.Put(ctx, utils.CreateTestReplica(200, 1, []int64{1, 2})))
 	nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
@@ -454,6 +463,7 @@ func (suite *IndexCheckerSuite) TestLoadJsonIndex() {
 	}
 	coll.LoadFields = []int64{101}
 	checker.meta.PutCollection(ctx, coll)
+	suite.metaStore.PutCollection(&metacache.CollectionInfo{ID: coll.GetCollectionID(), Schema: coll.Schema})
 	checker.meta.Put(ctx, utils.CreateTestReplica(200, 1, []int64{1, 2}))
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
@@ -541,6 +551,7 @@ func (suite *IndexCheckerSuite) TestJsonIndexNotMatch() {
 		},
 	}
 	checker.meta.PutCollection(ctx, coll)
+	suite.metaStore.PutCollection(&metacache.CollectionInfo{ID: coll.GetCollectionID(), Schema: coll.Schema})
 	checker.meta.Put(ctx, utils.CreateTestReplica(200, 1, []int64{1, 2}))
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
@@ -602,6 +613,7 @@ func (suite *IndexCheckerSuite) TestCreateNewJsonIndex() {
 		},
 	}
 	checker.meta.PutCollection(ctx, coll)
+	suite.metaStore.PutCollection(&metacache.CollectionInfo{ID: coll.GetCollectionID(), Schema: coll.Schema})
 	checker.meta.Put(ctx, utils.CreateTestReplica(200, 1, []int64{1, 2}))
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,

@@ -27,11 +27,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestClusteringCompactionPolicySuite(t *testing.T) {
@@ -65,9 +65,10 @@ func (s *ClusteringCompactionPolicySuite) SetupTest() {
 	partitionStatsMeta, _ := newPartitionStatsMeta(context.TODO(), s.catalog)
 	indexMeta, _ := newIndexMeta(context.TODO(), s.catalog, nil)
 
+	store := metacache.NewMetaStore(nil)
 	meta := &meta{
-		segments:           NewSegmentsInfo(),
-		collections:        typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments:           NewSegmentsInfo(store),
+		metaStore:          store,
 		compactionTaskMeta: compactionTaskMeta,
 		partitionStatsMeta: partitionStatsMeta,
 		indexMeta:          indexMeta,
@@ -109,12 +110,12 @@ func (s *ClusteringCompactionPolicySuite) TestTriggerWithNoCollecitons() {
 
 func (s *ClusteringCompactionPolicySuite) TestTriggerWithCollections() {
 	// valid collection
-	s.meta.collections.Insert(1, &collectionInfo{
+	s.meta.metaStore.PutCollection(&collectionInfo{
 		ID:     1,
 		Schema: newTestScalarClusteringKeySchema(),
 	})
 	// deleted collection
-	s.meta.collections.Insert(2, &collectionInfo{
+	s.meta.metaStore.PutCollection(&collectionInfo{
 		ID:     2,
 		Schema: newTestScalarClusteringKeySchema(),
 	})
@@ -124,7 +125,7 @@ func (s *ClusteringCompactionPolicySuite) TestTriggerWithCollections() {
 		if collectionID == 2 {
 			return nil, errors.New("mock get collection fail error")
 		}
-		coll, exist := s.meta.collections.Get(collectionID)
+		coll, exist := s.meta.metaStore.GetCollection(collectionID)
 		if exist {
 			return coll, nil
 		}
@@ -335,7 +336,7 @@ func (s *ClusteringCompactionPolicySuite) TestTriggerOneCollectionNormal() {
 		Channel:      "ch-1",
 	}
 
-	s.meta.collections.Insert(testLabel.CollectionID, &collectionInfo{
+	s.meta.metaStore.PutCollection(&collectionInfo{
 		ID:     testLabel.CollectionID,
 		Schema: newTestScalarClusteringKeySchema(),
 	})
@@ -346,7 +347,7 @@ func (s *ClusteringCompactionPolicySuite) TestTriggerOneCollectionNormal() {
 	}
 
 	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, collectionID int64) (*collectionInfo, error) {
-		coll, exist := s.meta.collections.Get(collectionID)
+		coll, exist := s.meta.metaStore.GetCollection(collectionID)
 		if exist {
 			return coll, nil
 		}
@@ -370,7 +371,7 @@ func (s *ClusteringCompactionPolicySuite) TestTriggerOneCollectionAllowsMixedSch
 		Channel:      "ch-1",
 	}
 
-	s.meta.collections.Insert(testLabel.CollectionID, &collectionInfo{
+	s.meta.metaStore.PutCollection(&collectionInfo{
 		ID:     testLabel.CollectionID,
 		Schema: newTestScalarClusteringKeySchema(),
 	})
@@ -387,8 +388,8 @@ func (s *ClusteringCompactionPolicySuite) TestTriggerOneCollectionAllowsMixedSch
 	}
 
 	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, collectionID int64) (*collectionInfo, error) {
-		coll, exist := s.meta.collections.Get(collectionID)
-		if exist {
+		coll := s.meta.GetCollection(collectionID)
+		if coll != nil {
 			return coll, nil
 		}
 		return nil, nil
