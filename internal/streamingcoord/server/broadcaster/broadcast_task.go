@@ -577,3 +577,88 @@ func (b *broadcastTask) saveTaskIfDirty(ctx context.Context, logger *mlog.Logger
 	logger.Info(ctx, "save broadcast task done")
 	return nil
 }
+
+func (b *broadcastTask) resourceKeyOwnership() (uint64, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.task.GetResourceKeyOwnerId(), b.task.GetResourceKeysReleased()
+}
+
+func (b *broadcastTask) holdsResourceKeys() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if ownerID := b.task.GetResourceKeyOwnerId(); ownerID != 0 {
+		return ownerID == b.header().BroadcastID && !b.task.GetResourceKeysReleased()
+	}
+	return b.task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING ||
+		b.task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_WAIT_ACK
+}
+
+func (b *broadcastTask) releaseResourceKeys(ctx context.Context) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !b.task.GetResourceKeysReleased() {
+		b.task.ResourceKeysReleased = true
+		b.dirty = true
+	}
+	if err := b.saveTaskIfDirty(ctx, b.Logger()); err != nil {
+		return err
+	}
+	if b.guards != nil {
+		b.guards.Unlock()
+	}
+	return nil
+}
+
+func (b *broadcastTask) notifyDoneLocked() {
+	select {
+	case <-b.done:
+	default:
+		close(b.done)
+	}
+}
+
+// finishRecoveredResourceKeyOwners closes the crash window between durable End
+// ACK and durable owner release, before restoring locks or starting GC. Without
+// this pass a later DDL's PENDING record could conflict with a completed owner.
+func finishRecoveredResourceKeyOwners(ctx context.Context, tasks []*streamingpb.BroadcastTask) error {
+	completed := make(map[uint64]struct{})
+	for _, task := range tasks {
+		msg := message.NewBroadcastMutableMessageBeforeAppend(task.Message.Payload, task.Message.Properties)
+		ownerID := task.GetResourceKeyOwnerId()
+		if ownerID != 0 && ownerID != msg.BroadcastHeader().BroadcastID && task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE {
+			completed[ownerID] = struct{}{}
+		}
+	}
+	for _, task := range tasks {
+		ownerID := task.GetResourceKeyOwnerId()
+		if _, ok := completed[ownerID]; !ok || task.GetResourceKeysReleased() {
+			continue
+		}
+		msg := message.NewBroadcastMutableMessageBeforeAppend(task.Message.Payload, task.Message.Properties)
+		if ownerID != msg.BroadcastHeader().BroadcastID {
+			continue
+		}
+		task.ResourceKeysReleased = true
+		if err := resource.Resource().StreamingCatalog().SaveBroadcastTask(ctx, ownerID, task); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// broadcastPair identifies the existing Begin/End message family. The job ID is
+// allocated before Import is broadcast and is carried unchanged by both Ends.
+// A zero ID denotes a legacy message with no recoverable pairing identity.
+func broadcastPair(msg message.BroadcastMutableMessage) (jobID int64, begin bool) {
+	switch msg.MessageTypeWithVersion() {
+	case message.MessageTypeImportV1:
+		return message.MustAsBroadcastImportMessageV1(msg).MustBody().GetJobID(), true
+	case message.MessageTypeCommitImportV2:
+		return message.MustAsBroadcastCommitImportMessageV2(msg).Header().GetJobId(), false
+	case message.MessageTypeRollbackImportV2:
+		return message.MustAsBroadcastRollbackImportMessageV2(msg).Header().GetJobId(), false
+	default:
+		return 0, false
+	}
+}

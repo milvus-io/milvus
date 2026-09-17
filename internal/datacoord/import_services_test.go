@@ -212,16 +212,19 @@ func (s *ImportServicesSuite) TestImportV2_BroadcastFailsReturnsError() {
 		}).Build()
 	defer mockAssignment.UnPatch()
 
-	// Mock broker.DescribeCollectionInternal (called once in startBroadcastWithCollectionID, which will fail at StartBroadcastWithResourceKeys)
+	// Mock broker.DescribeCollectionInternal (called once in startImportBroadcast, which will fail at StartBroadcastWithResourceKeys)
 	mockBroker := broker.NewMockBroker(s.T())
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
-		DbName:         "test_db",
-		CollectionName: "test_collection",
+		Schema:              &schemapb.CollectionSchema{Name: "test_collection", DbName: "test_db"},
+		VirtualChannelNames: []string{"v1"},
+		Status:              merr.Success(),
+		DbName:              "test_db",
+		CollectionName:      "test_collection",
 	}, nil)
 
 	// Mock StartBroadcastWithResourceKeys to fail
-	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
-		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithIdempotencyKey).To(
+		func(ctx context.Context, _ message.MessageType, _ message.IdempotencyKey, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
 			return nil, merr.WrapErrServiceUnavailable("broadcast failed")
 		}).Build()
 	defer mockBroadcast.UnPatch()
@@ -286,18 +289,21 @@ func (s *ImportServicesSuite) TestImportV2_SuccessReturnsJobID() {
 
 	// Mock StartBroadcastWithResourceKeys to succeed
 	mockBroadcastAPI := newMockBroadcastAPIImpl()
-	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
-		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithIdempotencyKey).To(
+		func(ctx context.Context, _ message.MessageType, _ message.IdempotencyKey, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
 			return mockBroadcastAPI, nil
 		}).Build()
 	defer mockBroadcast.UnPatch()
 
 	// Mock broker: DescribeCollectionInternal is called twice
-	// First call in startBroadcastWithCollectionID, second call in broadcastImport
+	// First call in startImportBroadcast, second call in broadcastImport
 	mockBroker := broker.NewMockBroker(s.T())
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
-		DbName:         "test_db",
-		CollectionName: "test_collection",
+		Schema:              &schemapb.CollectionSchema{Name: "test_collection", DbName: "test_db"},
+		VirtualChannelNames: []string{"v1"},
+		Status:              merr.Success(),
+		DbName:              "test_db",
+		CollectionName:      "test_collection",
 	}, nil).Times(2)
 
 	server := &Server{
@@ -392,8 +398,8 @@ func (s *ImportServicesSuite) setupImportV2DuplicateBroadcast(importMeta ImportM
 
 	mockBroadcastAPI := newMockBroadcastAPIImpl()
 	mockBroadcastAPI.broadcastResult = newDuplicatedImportBroadcastResult(originalJobID, originalPaths...)
-	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
-		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithIdempotencyKey).To(
+		func(ctx context.Context, _ message.MessageType, _ message.IdempotencyKey, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
 			return mockBroadcastAPI, nil
 		}).Build()
 	s.T().Cleanup(func() { mockBroadcast.UnPatch() })
@@ -402,8 +408,11 @@ func (s *ImportServicesSuite) setupImportV2DuplicateBroadcast(importMeta ImportM
 	// Maybe rather than Times(2): a request rejected by validateImportRequest -- the
 	// job-count limit, say -- returns before either describe call.
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
-		DbName:         "test_db",
-		CollectionName: "test_collection",
+		Schema:              &schemapb.CollectionSchema{Name: "test_collection", DbName: "test_db"},
+		VirtualChannelNames: []string{"v1"},
+		Status:              merr.Success(),
+		DbName:              "test_db",
+		CollectionName:      "test_collection",
 	}, nil).Maybe()
 
 	server := &Server{
@@ -576,8 +585,8 @@ func (s *ImportServicesSuite) TestImportV2_UsesDefaultDbNameWhenEmpty() {
 
 	// Capture the dbName passed to broadcastImport
 	var capturedDbName string
-	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
-		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithIdempotencyKey).To(
+		func(ctx context.Context, _ message.MessageType, _ message.IdempotencyKey, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
 			// Check if default db name resource key is used
 			for _, key := range keys {
 				if key.String() != "" {
@@ -588,11 +597,14 @@ func (s *ImportServicesSuite) TestImportV2_UsesDefaultDbNameWhenEmpty() {
 		}).Build()
 	defer mockBroadcast.UnPatch()
 
-	// Mock broker.DescribeCollectionInternal to return empty dbName (called in startBroadcastWithCollectionID)
+	// Mock broker.DescribeCollectionInternal to return empty dbName (called in startImportBroadcast)
 	mockBroker := broker.NewMockBroker(s.T())
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
-		DbName:         "", // Empty - should use default
-		CollectionName: "test_collection",
+		Schema:              &schemapb.CollectionSchema{Name: "test_collection", DbName: "test_db"},
+		VirtualChannelNames: []string{"v1"},
+		Status:              merr.Success(),
+		DbName:              "", // Empty - should use default
+		CollectionName:      "test_collection",
 	}, nil)
 
 	server := &Server{

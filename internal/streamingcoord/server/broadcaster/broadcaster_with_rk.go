@@ -7,21 +7,35 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type broadcasterWithRK struct {
-	broadcaster *broadcastTaskManager
-	broadcastID uint64
-	guards      *lockGuards
+	broadcaster      *broadcastTaskManager
+	broadcastID      uint64
+	guards           *lockGuards
+	scope            string
+	duplicate        *broadcastTask
+	releaseAdmission func()
 }
 
 func (b *broadcasterWithRK) Broadcast(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
-	// The idempotency decision lives in the manager, under the same lock that
-	// registers the task: see getOrAddBroadcastTask. It used to live here, as a
-	// lookup separate from the registration, with the resource keys this object
-	// holds expected to keep two same-key requests apart in between. They do not,
-	// whenever the lock names a different object than the scope does.
-	//
+	if b.releaseAdmission != nil {
+		defer b.releaseAdmission()
+	}
+	if b.scope != "" && idempotencyScopeOfMessage(msg) != b.scope {
+		b.Close()
+		return nil, merr.WrapErrServiceInternalMsg("broadcast does not match its admitted idempotency scope")
+	}
+	if b.duplicate != nil {
+		result, err := b.duplicate.BlockUntilDone(ctx)
+		if err != nil {
+			return nil, err
+		}
+		result.Duplicated = b.duplicate.BroadcastMessage()
+		return result, nil
+	}
+
 	// Consume the guards up front: broadcast takes ownership on every path -- the
 	// registered task owns them, or broadcast releases them itself -- so Close()
 	// must stay a no-op from here on, panic paths included.
@@ -47,6 +61,9 @@ func (b *broadcasterWithRK) Broadcast(ctx context.Context, msg message.Broadcast
 }
 
 func (b *broadcasterWithRK) Close() {
+	if b.releaseAdmission != nil {
+		defer b.releaseAdmission()
+	}
 	if b.guards != nil {
 		b.guards.Unlock()
 	}
