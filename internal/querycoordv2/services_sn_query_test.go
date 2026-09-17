@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -14,7 +15,7 @@ import (
 
 func TestQueryViewLoadInfoUsesCurrentLoadedMetadata(t *testing.T) {
 	ctx := context.Background()
-	manager := meta.NewCollectionManager(nil)
+	manager := meta.NewCollectionManager(nil, metacache.NewMetaStore(nil))
 	s := &Server{meta: &meta.Meta{CollectionManager: manager}}
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
 	require.NoError(t, manager.PutCollectionWithoutSave(ctx, &meta.Collection{CollectionLoadInfo: &querypb.CollectionLoadInfo{CollectionID: 1, LoadFields: []int64{100, 102}}}))

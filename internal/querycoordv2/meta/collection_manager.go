@@ -28,6 +28,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/eventlog"
@@ -48,7 +49,6 @@ type Collection struct {
 	mut             sync.RWMutex
 	refreshNotifier chan struct{}
 	LoadSpan        trace.Span
-	Schema          *schemapb.CollectionSchema
 }
 
 func (collection *Collection) setRefreshNotifier(notifier chan struct{}) {
@@ -84,7 +84,6 @@ func (collection *Collection) Clone() *Collection {
 		UpdatedAt:          collection.UpdatedAt,
 		refreshNotifier:    collection.refreshNotifier,
 		LoadSpan:           collection.LoadSpan,
-		Schema:             collection.Schema,
 	}
 }
 
@@ -109,14 +108,19 @@ type CollectionManager struct {
 
 	collectionPartitions map[typeutil.UniqueID]typeutil.Set[typeutil.UniqueID]
 	catalog              metastore.QueryCoordCatalog
+
+	// metaView is the shared MetaStore view used to read collection schema
+	// without a broker round-trip.
+	metaView metacache.MetaView
 }
 
-func NewCollectionManager(catalog metastore.QueryCoordCatalog) *CollectionManager {
+func NewCollectionManager(catalog metastore.QueryCoordCatalog, metaView metacache.MetaView) *CollectionManager {
 	return &CollectionManager{
 		collections:          make(map[int64]*Collection),
 		partitions:           make(map[int64]*Partition),
 		collectionPartitions: make(map[int64]typeutil.Set[typeutil.UniqueID]),
 		catalog:              catalog,
+		metaView:             metaView,
 	}
 }
 
@@ -255,7 +259,6 @@ func (m *CollectionManager) upgradeLoadFields(ctx context.Context, collection *q
 	err = m.putCollection(ctx, true, &Collection{
 		CollectionLoadInfo: collection,
 		LoadPercentage:     100,
-		Schema:             resp.GetSchema(),
 	})
 	if err != nil {
 		return err
@@ -271,25 +274,20 @@ func (m *CollectionManager) GetCollection(ctx context.Context, collectionID type
 	return m.collections[collectionID]
 }
 
+// GetCollectionSchema proxies the shared metacache. QueryCoord keeps no schema
+// copy of its own -- that is the point: a second copy per loaded collection is
+// exactly the duplication this store exists to remove, and it would go stale
+// independently of DC's. Every schema-mutating DDL refreshes the store:
+// they all broadcast AlterCollectionMessageV2, whose ack calls DataCoord's
+// BroadcastAlteredCollection. A miss means the collection is not in the store
+// yet -- CreateCollection does not push, DataCoord fills it lazily on first
+// use -- and the caller is expected to fall back to DescribeCollection.
 func (m *CollectionManager) GetCollectionSchema(ctx context.Context, collectionID typeutil.UniqueID) *schemapb.CollectionSchema {
-	m.rwmutex.RLock()
-	defer m.rwmutex.RUnlock()
-	collection, ok := m.collections[collectionID]
+	info, ok := m.metaView.GetCollection(collectionID)
 	if !ok {
 		return nil
 	}
-	return collection.Schema
-}
-
-func (m *CollectionManager) PutCollectionSchema(ctx context.Context, collectionID typeutil.UniqueID, schema *schemapb.CollectionSchema) {
-	m.rwmutex.Lock()
-	defer m.rwmutex.Unlock()
-
-	collection, ok := m.collections[collectionID]
-	if !ok {
-		return
-	}
-	collection.Schema = schema
+	return proto.Clone(info.Schema).(*schemapb.CollectionSchema)
 }
 
 func (m *CollectionManager) GetPartition(ctx context.Context, partitionID typeutil.UniqueID) *Partition {

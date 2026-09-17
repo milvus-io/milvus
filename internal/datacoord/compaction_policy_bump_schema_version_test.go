@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -61,10 +62,11 @@ func (s *BumpSchemaVersionPolicySuite) SetupTest() {
 
 	segments := genSegmentsForMeta(s.testLabel)
 	mockCatalog := mocks.NewDataCoordCatalog(s.T())
+	store := metacache.NewMetaStore(nil)
 	meta := &meta{
-		segments:    NewSegmentsInfo(),
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-		catalog:     mockCatalog,
+		segments:  NewSegmentsInfo(store),
+		metaStore: store,
+		catalog:   mockCatalog,
 	}
 	for id, segment := range segments {
 		meta.segments.SetSegment(id, segment)
@@ -193,7 +195,7 @@ func (s *BumpSchemaVersionPolicySuite) TestEnable() {
 func (s *BumpSchemaVersionPolicySuite) TestTriggerSchedulesReadySegmentWhenCollectionHasV2FlushedDataSegment() {
 	ctx := context.Background()
 	collID := int64(100)
-	s.bumpSchemaVersionPolicy.meta.collections.Insert(collID, newBumpSchemaVersionTestCollection(collID, 2))
+	s.bumpSchemaVersionPolicy.meta.metaStore.PutCollection(newBumpSchemaVersionTestCollection(collID, 2))
 	s.bumpSchemaVersionPolicy.meta.segments.SetSegment(101, newBumpSchemaVersionTestSegment(collID, 101, 1, storage.StorageV3, "manifest"))
 	s.bumpSchemaVersionPolicy.meta.segments.SetSegment(102, newBumpSchemaVersionTestSegment(collID, 102, 1, storage.StorageV2, "manifest"))
 
@@ -209,7 +211,7 @@ func (s *BumpSchemaVersionPolicySuite) TestTriggerCapturesSchemaSnapshot() {
 	ctx := context.Background()
 	collID := int64(100)
 	collection := newBumpSchemaVersionTestCollection(collID, 2)
-	s.bumpSchemaVersionPolicy.meta.collections.Insert(collID, collection)
+	s.bumpSchemaVersionPolicy.meta.metaStore.PutCollection(collection)
 	s.bumpSchemaVersionPolicy.meta.segments.SetSegment(101, newBumpSchemaVersionTestSegment(collID, 101, 1, storage.StorageV3, "manifest"))
 
 	events, err := s.bumpSchemaVersionPolicy.Trigger(ctx)
@@ -229,11 +231,12 @@ func (s *BumpSchemaVersionPolicySuite) TestTriggerClonesSchemaOnlyForCandidates(
 		s.Run(fmt.Sprintf("stale=%t", stale), func() {
 			collection := newBumpSchemaVersionTestCollection(100, 2)
 			mockAlloc := newMockAllocator(s.T())
+			store := metacache.NewMetaStore(nil)
 			policy := newBumpSchemaVersionPolicy(&meta{
-				collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-				segments:    NewSegmentsInfo(),
+				segments:  NewSegmentsInfo(store),
+				metaStore: store,
 			}, mockAlloc, s.handler)
-			policy.meta.collections.Insert(collection.ID, collection)
+			store.PutCollection(collection)
 			segmentSchemaVersion := int32(2)
 			if stale {
 				segmentSchemaVersion = 1
@@ -272,7 +275,7 @@ func (s *BumpSchemaVersionPolicySuite) TestTriggerClonesSchemaOnlyForCandidates(
 func (s *BumpSchemaVersionPolicySuite) TestTriggerRetainsSchemaAcrossCacheReplacement() {
 	collection := newBumpSchemaVersionTestCollection(100, 2)
 	policy := s.bumpSchemaVersionPolicy
-	policy.meta.collections.Insert(collection.ID, collection)
+	policy.meta.metaStore.PutCollection(collection)
 	policy.meta.segments.SetSegment(101, newBumpSchemaVersionTestSegment(collection.ID, 101, 1, storage.StorageV3, "manifest"))
 	// This segment only becomes stale at V3, after this scan's V2 snapshot.
 	policy.meta.segments.SetSegment(102, newBumpSchemaVersionTestSegment(collection.ID, 102, 2, storage.StorageV3, "manifest"))
@@ -281,7 +284,7 @@ func (s *BumpSchemaVersionPolicySuite) TestTriggerRetainsSchemaAcrossCacheReplac
 	selectMock := mockey.Mock((*bumpSchemaVersionPolicy).staleFlushedSegments).To(
 		func(policy *bumpSchemaVersionPolicy, collectionID int64, version int32) []*chanPartSegments {
 			segments := selectSegments(policy, collectionID, version)
-			policy.meta.collections.Insert(collectionID, newBumpSchemaVersionTestCollection(collectionID, 3))
+			policy.meta.metaStore.PutCollection(newBumpSchemaVersionTestCollection(collectionID, 3))
 			return segments
 		}).Origin(&selectSegments).Build()
 	defer selectMock.UnPatch()
@@ -300,7 +303,7 @@ func (s *BumpSchemaVersionPolicySuite) TestTriggerRetainsSchemaAcrossCacheReplac
 func (s *BumpSchemaVersionPolicySuite) TestTriggerSchedulesReadySegmentWhenCollectionHasMissingManifestFlushedDataSegment() {
 	ctx := context.Background()
 	collID := int64(100)
-	s.bumpSchemaVersionPolicy.meta.collections.Insert(collID, newBumpSchemaVersionTestCollection(collID, 2))
+	s.bumpSchemaVersionPolicy.meta.metaStore.PutCollection(newBumpSchemaVersionTestCollection(collID, 2))
 	s.bumpSchemaVersionPolicy.meta.segments.SetSegment(101, newBumpSchemaVersionTestSegment(collID, 101, 1, storage.StorageV3, "manifest"))
 	s.bumpSchemaVersionPolicy.meta.segments.SetSegment(102, newBumpSchemaVersionTestSegment(collID, 102, 1, storage.StorageV3, ""))
 
@@ -315,7 +318,7 @@ func (s *BumpSchemaVersionPolicySuite) TestTriggerSchedulesReadySegmentWhenColle
 func (s *BumpSchemaVersionPolicySuite) TestTriggerFiltersSegmentLevelV3Readiness() {
 	ctx := context.Background()
 	collID := int64(100)
-	s.bumpSchemaVersionPolicy.meta.collections.Insert(collID, newBumpSchemaVersionTestCollection(collID, 2))
+	s.bumpSchemaVersionPolicy.meta.metaStore.PutCollection(newBumpSchemaVersionTestCollection(collID, 2))
 	s.bumpSchemaVersionPolicy.meta.segments.SetSegment(101, newBumpSchemaVersionTestSegment(collID, 101, 1, storage.StorageV3, "manifest"))
 	s.bumpSchemaVersionPolicy.meta.segments.SetSegment(102, newBumpSchemaVersionTestSegment(collID, 102, 1, storage.StorageV2, ""))
 
@@ -330,7 +333,7 @@ func (s *BumpSchemaVersionPolicySuite) TestTriggerFiltersSegmentLevelV3Readiness
 func (s *BumpSchemaVersionPolicySuite) TestTriggerReadinessIgnoresNonDataSegments() {
 	ctx := context.Background()
 	collID := int64(100)
-	s.bumpSchemaVersionPolicy.meta.collections.Insert(collID, newBumpSchemaVersionTestCollection(collID, 2))
+	s.bumpSchemaVersionPolicy.meta.metaStore.PutCollection(newBumpSchemaVersionTestCollection(collID, 2))
 	s.bumpSchemaVersionPolicy.meta.segments.SetSegment(101, newBumpSchemaVersionTestSegment(collID, 101, 1, storage.StorageV3, "manifest"))
 
 	l0Segment := newBumpSchemaVersionTestSegment(collID, 102, 1, storage.StorageV2, "")
@@ -354,7 +357,7 @@ func (s *BumpSchemaVersionPolicySuite) TestTriggerReadinessIgnoresNonDataSegment
 func (s *BumpSchemaVersionPolicySuite) TestTriggerReusesOneTriggerIDPerCollection() {
 	ctx := context.Background()
 	collID := int64(100)
-	s.bumpSchemaVersionPolicy.meta.collections.Insert(collID, newBumpSchemaVersionTestCollection(collID, 2))
+	s.bumpSchemaVersionPolicy.meta.metaStore.PutCollection(newBumpSchemaVersionTestCollection(collID, 2))
 	s.bumpSchemaVersionPolicy.meta.segments.SetSegment(101, newBumpSchemaVersionTestSegment(collID, 101, 1, storage.StorageV3, "manifest-101"))
 	s.bumpSchemaVersionPolicy.meta.segments.SetSegment(102, newBumpSchemaVersionTestSegment(collID, 102, 1, storage.StorageV3, "manifest-102"))
 
@@ -369,8 +372,8 @@ func (s *BumpSchemaVersionPolicySuite) TestTriggerAllocatesTriggerIDPerCollectio
 	ctx := context.Background()
 	collID1 := int64(100)
 	collID2 := int64(200)
-	s.bumpSchemaVersionPolicy.meta.collections.Insert(collID1, newBumpSchemaVersionTestCollection(collID1, 2))
-	s.bumpSchemaVersionPolicy.meta.collections.Insert(collID2, newBumpSchemaVersionTestCollection(collID2, 2))
+	s.bumpSchemaVersionPolicy.meta.metaStore.PutCollection(newBumpSchemaVersionTestCollection(collID1, 2))
+	s.bumpSchemaVersionPolicy.meta.metaStore.PutCollection(newBumpSchemaVersionTestCollection(collID2, 2))
 	s.bumpSchemaVersionPolicy.meta.segments.SetSegment(101, newBumpSchemaVersionTestSegment(collID1, 101, 1, storage.StorageV3, "manifest-101"))
 	s.bumpSchemaVersionPolicy.meta.segments.SetSegment(201, newBumpSchemaVersionTestSegment(collID2, 201, 1, storage.StorageV3, "manifest-201"))
 
@@ -384,7 +387,7 @@ func (s *BumpSchemaVersionPolicySuite) TestTriggerAllocatesTriggerIDPerCollectio
 func (s *BumpSchemaVersionPolicySuite) TestTriggerAllocIDFailureSkipsCurrentCollection() {
 	ctx := context.Background()
 	collID := int64(100)
-	s.bumpSchemaVersionPolicy.meta.collections.Insert(collID, newBumpSchemaVersionTestCollection(collID, 2))
+	s.bumpSchemaVersionPolicy.meta.metaStore.PutCollection(newBumpSchemaVersionTestCollection(collID, 2))
 	s.bumpSchemaVersionPolicy.meta.segments.SetSegment(101, newBumpSchemaVersionTestSegment(collID, 101, 1, storage.StorageV3, "manifest"))
 	segmentInAnotherGroup := newBumpSchemaVersionTestSegment(collID, 102, 1, storage.StorageV3, "manifest")
 	segmentInAnotherGroup.InsertChannel = "ch-2"
@@ -401,7 +404,7 @@ func (s *BumpSchemaVersionPolicySuite) TestTriggerAllocIDFailureSkipsCurrentColl
 func (s *BumpSchemaVersionPolicySuite) TestTriggerSkipsBlockedCollection() {
 	ctx := context.Background()
 	collID := int64(100)
-	s.bumpSchemaVersionPolicy.meta.collections.Insert(collID, newBumpSchemaVersionTestCollection(collID, 2))
+	s.bumpSchemaVersionPolicy.meta.metaStore.PutCollection(newBumpSchemaVersionTestCollection(collID, 2))
 	s.bumpSchemaVersionPolicy.meta.segments.SetSegment(101, newBumpSchemaVersionTestSegment(collID, 101, 1, storage.StorageV3, "manifest"))
 	s.bumpSchemaVersionPolicy.meta.snapshotMeta = &snapshotMeta{
 		compactionBlockedCollections: typeutil.NewUniqueSet(collID),
@@ -416,7 +419,7 @@ func (s *BumpSchemaVersionPolicySuite) TestTriggerSkipsBlockedCollection() {
 func (s *BumpSchemaVersionPolicySuite) TestTriggerSkipsSnapshotPendingCollection() {
 	ctx := context.Background()
 	collID := int64(100)
-	s.bumpSchemaVersionPolicy.meta.collections.Insert(collID, newBumpSchemaVersionTestCollection(collID, 2))
+	s.bumpSchemaVersionPolicy.meta.metaStore.PutCollection(newBumpSchemaVersionTestCollection(collID, 2))
 	s.bumpSchemaVersionPolicy.meta.segments.SetSegment(101, newBumpSchemaVersionTestSegment(collID, 101, 1, storage.StorageV3, "manifest"))
 	s.bumpSchemaVersionPolicy.meta.snapshotMeta = &snapshotMeta{
 		compactionBlockedCollections: typeutil.NewUniqueSet(),
@@ -432,7 +435,7 @@ func (s *BumpSchemaVersionPolicySuite) TestTriggerSkipsSnapshotProtectedSegment(
 	ctx := context.Background()
 	collID := int64(100)
 	segmentID := int64(101)
-	s.bumpSchemaVersionPolicy.meta.collections.Insert(collID, newBumpSchemaVersionTestCollection(collID, 2))
+	s.bumpSchemaVersionPolicy.meta.metaStore.PutCollection(newBumpSchemaVersionTestCollection(collID, 2))
 	s.bumpSchemaVersionPolicy.meta.segments.SetSegment(segmentID, newBumpSchemaVersionTestSegment(collID, segmentID, 1, storage.StorageV3, "manifest"))
 	s.bumpSchemaVersionPolicy.meta.snapshotMeta = &snapshotMeta{
 		compactionBlockedCollections: typeutil.NewUniqueSet(),
@@ -451,7 +454,7 @@ func (s *BumpSchemaVersionPolicySuite) TestTriggerSkipsExternalCollection() {
 	coll := newBumpSchemaVersionTestCollection(collID, 2)
 	// IsExternalCollection is true when any field carries an external field mapping.
 	coll.Schema.Fields[1].ExternalField = "src_text"
-	s.bumpSchemaVersionPolicy.meta.collections.Insert(collID, coll)
+	s.bumpSchemaVersionPolicy.meta.metaStore.PutCollection(coll)
 	s.bumpSchemaVersionPolicy.meta.segments.SetSegment(101, newBumpSchemaVersionTestSegment(collID, 101, 1, storage.StorageV3, "manifest"))
 
 	events, err := s.bumpSchemaVersionPolicy.Trigger(ctx)
@@ -483,7 +486,7 @@ func (s *BumpSchemaVersionPolicySuite) TestTriggerWithCurrentSchemaVersion() {
 			},
 		},
 	}
-	s.bumpSchemaVersionPolicy.meta.collections.Insert(collID, coll)
+	s.bumpSchemaVersionPolicy.meta.metaStore.PutCollection(coll)
 
 	// Create segment with same schema version.
 	segmentID := int64(101)
@@ -539,7 +542,7 @@ func (s *BumpSchemaVersionPolicySuite) TestTriggerWithCompactingSegment() {
 			},
 		},
 	}
-	s.bumpSchemaVersionPolicy.meta.collections.Insert(collID, coll)
+	s.bumpSchemaVersionPolicy.meta.metaStore.PutCollection(coll)
 
 	// Create segment that is compacting (should be filtered out)
 	segmentID := int64(101)
@@ -596,7 +599,7 @@ func (s *BumpSchemaVersionPolicySuite) TestTriggerWithImportingSegment() {
 			},
 		},
 	}
-	s.bumpSchemaVersionPolicy.meta.collections.Insert(collID, coll)
+	s.bumpSchemaVersionPolicy.meta.metaStore.PutCollection(coll)
 
 	// Create segment that is importing (should be filtered out)
 	segmentID := int64(101)
@@ -651,7 +654,7 @@ func (s *BumpSchemaVersionPolicySuite) TestTriggerWithInvisibleSegment() {
 			},
 		},
 	}
-	s.bumpSchemaVersionPolicy.meta.collections.Insert(collID, coll)
+	s.bumpSchemaVersionPolicy.meta.metaStore.PutCollection(coll)
 
 	// Create segment that is invisible (should be filtered out)
 	segmentID := int64(101)
@@ -706,7 +709,7 @@ func (s *BumpSchemaVersionPolicySuite) TestTriggerWithUnhealthySegment() {
 			},
 		},
 	}
-	s.bumpSchemaVersionPolicy.meta.collections.Insert(collID, coll)
+	s.bumpSchemaVersionPolicy.meta.metaStore.PutCollection(coll)
 
 	// Create segment that is not healthy (should be filtered out)
 	segmentID := int64(101)
@@ -761,7 +764,7 @@ func (s *BumpSchemaVersionPolicySuite) TestTriggerWithNonFlushedSegment() {
 			},
 		},
 	}
-	s.bumpSchemaVersionPolicy.meta.collections.Insert(collID, coll)
+	s.bumpSchemaVersionPolicy.meta.metaStore.PutCollection(coll)
 
 	// Create segment that is not flushed (should be filtered out)
 	segmentID := int64(101)
@@ -825,7 +828,7 @@ func (s *BumpSchemaVersionPolicySuite) TestTriggerWithOutdatedSchemaVersion() {
 			},
 		},
 	}
-	s.bumpSchemaVersionPolicy.meta.collections.Insert(collID, coll)
+	s.bumpSchemaVersionPolicy.meta.metaStore.PutCollection(coll)
 
 	// Create segment with outdated schema version 1, binlogs only have field 101 (missing 102)
 	segmentID := int64(101)
@@ -897,7 +900,7 @@ func (s *BumpSchemaVersionPolicySuite) TestTriggerSchedulesSchemaBumpForStaleSeg
 			},
 		},
 	}
-	s.bumpSchemaVersionPolicy.meta.collections.Insert(collID, coll)
+	s.bumpSchemaVersionPolicy.meta.metaStore.PutCollection(coll)
 
 	// Create segment with outdated schema version 1
 	segmentID := int64(101)
@@ -961,7 +964,7 @@ func (s *BumpSchemaVersionPolicySuite) TestTriggerSchemaBumpWithAutoCompactionDi
 			},
 		},
 	}
-	s.bumpSchemaVersionPolicy.meta.collections.Insert(collID, coll)
+	s.bumpSchemaVersionPolicy.meta.metaStore.PutCollection(coll)
 
 	segmentID := int64(101)
 	segment := &SegmentInfo{
@@ -1030,7 +1033,7 @@ func (s *BumpSchemaVersionPolicySuite) TestTriggerMissingFunctionOutputWithAutoC
 			},
 		},
 	}
-	s.bumpSchemaVersionPolicy.meta.collections.Insert(collID, coll)
+	s.bumpSchemaVersionPolicy.meta.metaStore.PutCollection(coll)
 
 	segmentID := int64(101)
 	segment := &SegmentInfo{
@@ -1096,7 +1099,7 @@ func (s *BumpSchemaVersionPolicySuite) TestSchemaFrozenAtScanTime() {
 			{Name: "bm25_v1", OutputFieldIds: []int64{102}},
 		},
 	}
-	s.bumpSchemaVersionPolicy.meta.collections.Insert(collID, &collectionInfo{ID: collID, Schema: schemaV1})
+	s.bumpSchemaVersionPolicy.meta.metaStore.PutCollection(&collectionInfo{ID: collID, Schema: schemaV1})
 	segment := &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
 			ID: int64(201), CollectionID: collID, PartitionID: 10,
@@ -1147,7 +1150,7 @@ func (s *BumpSchemaVersionPolicySuite) TestTriggerSchedulesMultiFunctionSchemaBu
 			},
 		},
 	}
-	s.bumpSchemaVersionPolicy.meta.collections.Insert(collID, coll)
+	s.bumpSchemaVersionPolicy.meta.metaStore.PutCollection(coll)
 
 	// DataCoord only detects stale schema version; DataNode validates function-output field state.
 	segmentID := int64(301)
@@ -1196,7 +1199,7 @@ func (s *BumpSchemaVersionPolicySuite) TestTriggerSchedulesAlreadyMaterializedSt
 			},
 		},
 	}
-	s.bumpSchemaVersionPolicy.meta.collections.Insert(collID, coll)
+	s.bumpSchemaVersionPolicy.meta.metaStore.PutCollection(coll)
 
 	// Segment at version=1 (stale) but already has field 102 present in binlogs.
 	segmentID := int64(401)

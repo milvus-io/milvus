@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/json"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
@@ -1105,7 +1106,7 @@ func TestGetReplicasJSON(t *testing.T) {
 	assert.NoError(t, err)
 
 	meta := &Meta{
-		CollectionManager: NewCollectionManager(catalog),
+		CollectionManager: NewCollectionManager(catalog, metacache.NewMetaStore(nil)),
 	}
 
 	err = meta.PutCollectionWithoutSave(ctx, &Collection{
