@@ -237,14 +237,11 @@ func (t *mixCompactionTask) saveSegmentMeta(result *datapb.CompactionPlanResult)
 	if err := binlog.CompressCompactionBinlogs(result.GetSegments()); err != nil {
 		return err
 	}
-	// Also prepare metric updates.
-	newSegments, metricMutation, err := t.meta.CompleteCompactionMutation(context.TODO(), t.taskProto.Load().(*datapb.CompactionTask), result)
+	newSegments, err := t.meta.CompleteCompactionMutation(context.TODO(), t.taskProto.Load().(*datapb.CompactionTask), result)
 	if err != nil {
 		return err
 	}
-	// Apply metrics after successful meta update.
 	newSegmentIDs := lo.Map(newSegments, func(s *SegmentInfo, _ int) UniqueID { return s.GetID() })
-	metricMutation.commit()
 	for _, newSegID := range newSegmentIDs {
 		select {
 		case getBuildIndexChSingleton() <- newSegID:

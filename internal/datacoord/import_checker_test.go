@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	broker2 "github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -76,7 +77,7 @@ func (s *ImportCheckerSuite) SetupTest() {
 	broker := broker2.NewMockBroker(s.T())
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 
-	meta, err := newMeta(context.TODO(), catalog, nil, broker)
+	meta, err := newMeta(context.TODO(), nil, metacache.NewMetaStore(catalog), catalog)
 	s.NoError(err)
 
 	importMeta, err := NewImportMeta(context.TODO(), catalog, s.alloc, meta)
@@ -86,8 +87,8 @@ func (s *ImportCheckerSuite) SetupTest() {
 	ci := NewMockCompactionInspector(s.T())
 
 	handler := NewNMockHandler(s.T())
-	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, collID int64) (*collectionInfo, error) {
-		return &collectionInfo{
+	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, collID int64) (*metacache.CollectionInfo, error) {
+		return &metacache.CollectionInfo{
 			ID: collID,
 		}, nil
 	}).Maybe()
@@ -917,7 +918,7 @@ func TestImportCheckerCompaction(t *testing.T) {
 	broker := broker2.NewMockBroker(t)
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{}, nil)
 
-	meta, err := newMeta(context.TODO(), catalog, nil, broker)
+	meta, err := newMeta(context.TODO(), nil, metacache.NewMetaStore(catalog), catalog)
 	assert.NoError(t, err)
 
 	importMeta, err := NewImportMeta(context.TODO(), catalog, alloc, meta)

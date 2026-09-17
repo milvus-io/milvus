@@ -2,6 +2,7 @@ package datacoord
 
 import (
 	"testing"
+	"time"
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
@@ -9,13 +10,82 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
 
+func TestSegmentsInfo_MetaStore_GetSegment(t *testing.T) {
+	store := metacache.NewMetaStore(nil)
+	info := NewSegmentsInfo(store)
+
+	seg := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID: 1, CollectionID: 100, InsertChannel: "ch-0",
+			State: commonpb.SegmentState_Flushed, NumOfRows: 1000,
+		},
+		isCompacting:  true,
+		lastFlushTime: time.Now(),
+	}
+	info.SetSegment(1, seg)
+
+	got := info.GetSegment(1)
+	assert.NotNil(t, got)
+	assert.Equal(t, int64(1), got.GetID())
+	assert.Equal(t, int64(1000), got.GetNumOfRows())
+	assert.True(t, got.isCompacting)
+
+	// Verify proto lives in MetaStore, not in a local map
+	storeSeg, ok := store.GetSegment(1)
+	assert.True(t, ok)
+	assert.Equal(t, int64(1), storeSeg.GetID())
+
+	// Verify DC-only field mutations don't touch the store
+	info.SetIsCompacting(1, false)
+	got2 := info.GetSegment(1)
+	assert.False(t, got2.isCompacting)
+
+	// Verify proto field mutations go through the store
+	info.SetRowCount(1, 2000)
+	got3 := info.GetSegment(1)
+	assert.Equal(t, int64(2000), got3.GetNumOfRows())
+	storeSeg3, _ := store.GetSegment(1)
+	assert.Equal(t, int64(2000), storeSeg3.GetNumOfRows())
+}
+
+func TestSegmentsInfo_MetaStore_GetCandidates(t *testing.T) {
+	store := metacache.NewMetaStore(nil)
+	info := NewSegmentsInfo(store)
+
+	info.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID: 1, CollectionID: 100, InsertChannel: "ch-0",
+		State: commonpb.SegmentState_Flushed,
+	}})
+	info.SetSegment(2, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID: 2, CollectionID: 100, InsertChannel: "ch-1",
+		State: commonpb.SegmentState_Growing,
+	}})
+	info.SetSegment(3, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID: 3, CollectionID: 200, InsertChannel: "ch-0",
+		State: commonpb.SegmentState_Flushed,
+	}})
+
+	// By collection
+	result := info.GetSegmentsBySelector(CollectionFilter(100))
+	assert.Len(t, result, 2)
+
+	// By channel
+	result = info.GetSegmentsBySelector(ChannelFilter("ch-0"))
+	assert.Len(t, result, 2)
+
+	// By collection + channel
+	result = info.GetSegmentsBySelector(CollectionFilter(100), ChannelFilter("ch-0"))
+	assert.Len(t, result, 1)
+}
+
 func TestCompactionTo(t *testing.T) {
 	t.Run("mix_2_to_1", func(t *testing.T) {
-		segments := NewSegmentsInfo()
+		segments := NewSegmentsInfo(metacache.NewMetaStore(nil))
 		segment := NewSegmentInfo(&datapb.SegmentInfo{
 			ID: 1,
 		})
@@ -71,7 +141,7 @@ func TestCompactionTo(t *testing.T) {
 	})
 
 	t.Run("split_1_to_2", func(t *testing.T) {
-		segments := NewSegmentsInfo()
+		segments := NewSegmentsInfo(metacache.NewMetaStore(nil))
 		segment := NewSegmentInfo(&datapb.SegmentInfo{
 			ID: 1,
 		})
@@ -439,4 +509,16 @@ func TestNewSegmentInfo_PreservesExplicitStats(t *testing.T) {
 		Stats:        explicit,
 	})
 	assert.Same(t, explicit, seg.GetStats(), "supplied Stats must not be replaced")
+}
+
+// newSegmentsInfoWithSegments builds a store-backed SegmentsInfo pre-populated
+// with the given segments, for use in test fixtures that used to build a
+// SegmentsInfo struct literal directly (e.g. `&SegmentsInfo{segments: ...}`)
+// back when the standalone in-memory map existed.
+func newSegmentsInfoWithSegments(segs map[int64]*SegmentInfo) *SegmentsInfo {
+	si := NewSegmentsInfo(metacache.NewMetaStore(nil))
+	for id, seg := range segs {
+		si.SetSegment(id, seg)
+	}
+	return si
 }

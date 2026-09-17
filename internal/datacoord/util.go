@@ -143,6 +143,10 @@ func FilterInIndexedSegments(ctx context.Context, handler Handler, mt *meta, ski
 	return ret
 }
 
+func isFlushState(state commonpb.SegmentState) bool {
+	return state == commonpb.SegmentState_Flushing || state == commonpb.SegmentState_Flushed
+}
+
 func getZeroTime() time.Time {
 	var t time.Time
 	return t
@@ -408,13 +412,6 @@ func createStorageConfig() *indexpb.StorageConfig {
 	}
 
 	return storageConfig
-}
-
-func getSortStatus(sorted bool) string {
-	if sorted {
-		return "sorted"
-	}
-	return "unsorted"
 }
 
 const (

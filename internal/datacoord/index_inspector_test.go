@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
+	"github.com/milvus-io/milvus/internal/metacache"
 	mocks2 "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
@@ -54,8 +55,8 @@ func TestIndexInspector_inspect(t *testing.T) {
 		catalog := mocks2.NewDataCoordCatalog(t)
 
 		meta := &meta{
-			segments:    NewSegmentsInfo(),
-			collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+			segments:  NewSegmentsInfo(metacache.NewMetaStore(nil)),
+			metaStore: metacache.NewMetaStore(nil),
 			indexMeta: &indexMeta{
 				keyLock:          lock.NewKeyLock[UniqueID](),
 				catalog:          catalog,
@@ -147,8 +148,8 @@ func TestIndexInspector_ReloadFromMeta(t *testing.T) {
 	catalog := mocks2.NewDataCoordCatalog(t)
 
 	meta := &meta{
-		segments:    NewSegmentsInfo(),
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments:  NewSegmentsInfo(metacache.NewMetaStore(nil)),
+		metaStore: metacache.NewMetaStore(nil),
 		indexMeta: &indexMeta{
 			keyLock:          lock.NewKeyLock[UniqueID](),
 			catalog:          catalog,

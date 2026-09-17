@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/rgpb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
@@ -156,7 +157,7 @@ func (suite *ReplicaObserverSuite) SetupTest() {
 	store := querycoord.NewCatalog(suite.kv)
 	idAllocator := RandomIncrementIDAllocator()
 	suite.nodeMgr = session.NewNodeManager()
-	suite.meta = meta.NewMeta(idAllocator, store, suite.nodeMgr)
+	suite.meta = meta.NewMeta(idAllocator, store, suite.nodeMgr, metacache.NewMetaStore(nil))
 
 	suite.distMgr = meta.NewDistributionManager(suite.nodeMgr)
 	suite.collectionID = int64(1000)

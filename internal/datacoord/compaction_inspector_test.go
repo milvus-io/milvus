@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -65,7 +66,7 @@ func (s *CompactionPlanHandlerSuite) SetupTest() {
 	mockScheduler := task.NewMockGlobalScheduler(s.T())
 	s.handler = newCompactionInspector(s.mockMeta, s.mockAlloc, nil, mockScheduler, mockScheduler, newMockVersionManager())
 	s.mockHandler = NewNMockHandler(s.T())
-	s.mockHandler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{}, nil).Maybe()
+	s.mockHandler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&metacache.CollectionInfo{}, nil).Maybe()
 }
 
 func (s *CompactionPlanHandlerSuite) TestScheduleEmpty() {
@@ -693,14 +694,14 @@ func (s *CompactionPlanHandlerSuite) TestCheckCompaction() {
 	// s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything).Return(nil)
 	s.mockMeta.EXPECT().ValidateSegmentStateBeforeCompleteCompactionMutation(mock.Anything).Return(nil)
 	s.mockMeta.EXPECT().CompleteCompactionMutation(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
-		func(ctx context.Context, t *datapb.CompactionTask, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error) {
+		func(ctx context.Context, t *datapb.CompactionTask, result *datapb.CompactionPlanResult) ([]*SegmentInfo, error) {
 			if t.GetPlanID() == 2 {
 				segment := NewSegmentInfo(&datapb.SegmentInfo{ID: 100})
-				return []*SegmentInfo{segment}, &segMetricMutation{}, nil
+				return []*SegmentInfo{segment}, nil
 			} else if t.GetPlanID() == 6 {
-				return nil, nil, errors.Errorf("intended error")
+				return nil, errors.Errorf("intended error")
 			}
-			return nil, nil, errors.Errorf("unexpected error")
+			return nil, errors.Errorf("unexpected error")
 		}).Twice()
 
 	for _, t := range inTasks {
@@ -787,8 +788,7 @@ func (s *CompactionPlanHandlerSuite) TestProcessCompleteCompaction() {
 	segment := NewSegmentInfo(&datapb.SegmentInfo{ID: 100})
 	s.mockMeta.EXPECT().ValidateSegmentStateBeforeCompleteCompactionMutation(mock.Anything).Return(nil)
 	s.mockMeta.EXPECT().CompleteCompactionMutation(mock.Anything, mock.Anything, mock.Anything).Return(
-		[]*SegmentInfo{segment},
-		&segMetricMutation{}, nil).Once()
+		[]*SegmentInfo{segment}, nil).Once()
 
 	dataNodeID := UniqueID(111)
 

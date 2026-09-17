@@ -15,7 +15,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
-	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -263,7 +263,7 @@ func TestGetQueryVChanPositionsRetrieveM2N(t *testing.T) {
 	schema := newTestSchema()
 
 	channel := "ch1"
-	svr.meta.AddCollection(&collectionInfo{
+	svr.meta.AddCollection(&metacache.CollectionInfo{
 		ID:         1,
 		Partitions: []int64{0},
 		Schema:     schema,
@@ -364,7 +364,7 @@ func TestGetQueryVChanPositions(t *testing.T) {
 	svr := newTestServer(t)
 	defer closeTestServer(t, svr)
 	schema := newTestSchema()
-	svr.meta.AddCollection(&collectionInfo{
+	svr.meta.AddCollection(&metacache.CollectionInfo{
 		ID:         0,
 		Partitions: []int64{0, 1},
 		Schema:     schema,
@@ -375,7 +375,7 @@ func TestGetQueryVChanPositions(t *testing.T) {
 			},
 		},
 	})
-	svr.meta.AddCollection(&collectionInfo{
+	svr.meta.AddCollection(&metacache.CollectionInfo{
 		ID:     1,
 		Schema: schema,
 		StartPositions: []*commonpb.KeyDataPair{
@@ -530,7 +530,7 @@ func TestGetQueryVChanPositions_PartitionStats(t *testing.T) {
 	partitionID := int64(1)
 	vchannel := "test_vchannel"
 	version := int64(100)
-	svr.meta.AddCollection(&collectionInfo{
+	svr.meta.AddCollection(&metacache.CollectionInfo{
 		ID:     collectionID,
 		Schema: schema,
 	})
@@ -565,7 +565,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 		schema := newTestSchema()
-		svr.meta.AddCollection(&collectionInfo{
+		svr.meta.AddCollection(&metacache.CollectionInfo{
 			ID:     0,
 			Schema: schema,
 		})
@@ -634,7 +634,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 		schema := newTestSchema()
-		svr.meta.AddCollection(&collectionInfo{
+		svr.meta.AddCollection(&metacache.CollectionInfo{
 			ID:     0,
 			Schema: schema,
 		})
@@ -719,7 +719,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 		schema := newTestSchema()
-		svr.meta.AddCollection(&collectionInfo{
+		svr.meta.AddCollection(&metacache.CollectionInfo{
 			ID:     0,
 			Schema: schema,
 		})
@@ -828,7 +828,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 		schema := newTestSchema()
-		svr.meta.AddCollection(&collectionInfo{
+		svr.meta.AddCollection(&metacache.CollectionInfo{
 			ID:         0,
 			Partitions: []int64{0},
 			Schema:     schema,
@@ -1208,7 +1208,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 		schema := newTestSchema()
-		svr.meta.AddCollection(&collectionInfo{
+		svr.meta.AddCollection(&metacache.CollectionInfo{
 			ID:         0,
 			Partitions: []int64{0},
 			Schema:     schema,
@@ -1411,7 +1411,7 @@ func TestGetCurrentSegmentsView(t *testing.T) {
 	svr := newTestServer(t)
 	defer closeTestServer(t, svr)
 	schema := newTestSchema()
-	svr.meta.AddCollection(&collectionInfo{
+	svr.meta.AddCollection(&metacache.CollectionInfo{
 		ID:         0,
 		Partitions: []int64{0},
 		Schema:     schema,
@@ -1599,7 +1599,7 @@ func TestShouldDropChannel(t *testing.T) {
 	svr := newTestServer(t)
 	defer closeTestServer(t, svr)
 	schema := newTestSchema()
-	svr.meta.AddCollection(&collectionInfo{
+	svr.meta.AddCollection(&metacache.CollectionInfo{
 		ID:     0,
 		Schema: schema,
 		StartPositions: []*commonpb.KeyDataPair{
@@ -1609,7 +1609,7 @@ func TestShouldDropChannel(t *testing.T) {
 			},
 		},
 	})
-	svr.meta.AddCollection(&collectionInfo{
+	svr.meta.AddCollection(&metacache.CollectionInfo{
 		ID:     1,
 		Schema: schema,
 		StartPositions: []*commonpb.KeyDataPair{
@@ -1625,7 +1625,7 @@ func TestShouldDropChannel(t *testing.T) {
 	})
 
 	t.Run("channel in remove flag", func(t *testing.T) {
-		err := svr.meta.catalog.Update(context.TODO(), metastore.MarkChannelDropped("ch1"))
+		err := svr.meta.metaStore.MarkChannelDeleted(context.TODO(), "ch1")
 		require.NoError(t, err)
 		assert.True(t, svr.handler.CheckShouldDropChannel("ch1"))
 	})
@@ -1635,7 +1635,7 @@ func TestGetDataVChanPositions(t *testing.T) {
 	svr := newTestServer(t)
 	defer closeTestServer(t, svr)
 	schema := newTestSchema()
-	svr.meta.AddCollection(&collectionInfo{
+	svr.meta.AddCollection(&metacache.CollectionInfo{
 		ID:     0,
 		Schema: schema,
 		StartPositions: []*commonpb.KeyDataPair{
@@ -1645,7 +1645,7 @@ func TestGetDataVChanPositions(t *testing.T) {
 			},
 		},
 	})
-	svr.meta.AddCollection(&collectionInfo{
+	svr.meta.AddCollection(&metacache.CollectionInfo{
 		ID:     1,
 		Schema: schema,
 		StartPositions: []*commonpb.KeyDataPair{

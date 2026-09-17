@@ -27,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/rgpb"
 	etcdKV "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
@@ -76,7 +77,7 @@ func (suite *ResourceObserverSuite) SetupTest() {
 	suite.store = mocks.NewQueryCoordCatalog(suite.T())
 	idAllocator := RandomIncrementIDAllocator()
 	suite.nodeMgr = session.NewNodeManager()
-	suite.meta = meta.NewMeta(idAllocator, suite.store, suite.nodeMgr)
+	suite.meta = meta.NewMeta(idAllocator, suite.store, suite.nodeMgr, metacache.NewMetaStore(nil))
 
 	suite.observer = NewResourceObserver(suite.meta)
 

@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/metacache"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
@@ -68,23 +69,21 @@ func (s *indexTaskSuite) SetupSuite() {
 
 	catalog := catalogmocks.NewDataCoordCatalog(s.T())
 	catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil).Maybe()
-	s.mt = &meta{
-		segments: &SegmentsInfo{
-			segments: map[int64]*SegmentInfo{
-				s.segID: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:            s.segID,
-						CollectionID:  s.collID,
-						PartitionID:   s.partID,
-						InsertChannel: "ch1",
-						NumOfRows:     65535,
-						State:         commonpb.SegmentState_Flushed,
-						MaxRowNum:     65535,
-						Level:         datapb.SegmentLevel_L2,
-					},
-				},
-			},
+	segments := NewSegmentsInfo(metacache.NewMetaStore(nil))
+	segments.SetSegment(s.segID, &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            s.segID,
+			CollectionID:  s.collID,
+			PartitionID:   s.partID,
+			InsertChannel: "ch1",
+			NumOfRows:     65535,
+			State:         commonpb.SegmentState_Flushed,
+			MaxRowNum:     65535,
+			Level:         datapb.SegmentLevel_L2,
 		},
+	})
+	s.mt = &meta{
+		segments:  segments,
 		indexMeta: createIndexMetaWithSegment(catalog, s.collID, s.partID, s.segID, s.indexID, s.fieldID, s.taskID),
 	}
 }
@@ -138,7 +137,7 @@ func (s *indexTaskSuite) TestCreateTaskOnWorker() {
 		NumRows:      65535,
 	}
 	handler := NewNMockHandler(s.T())
-	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{
+	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&metacache.CollectionInfo{
 		ID: s.collID,
 		Schema: &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
@@ -175,7 +174,7 @@ func (s *indexTaskSuite) TestCreateTaskOnWorker() {
 			IndexState:   commonpb.IndexState_Unissued,
 			NumRows:      65535,
 		})
-		s.mt.segments.segments[s.segID].State = commonpb.SegmentState_Dropped
+		s.mt.segments.GetSegment(s.segID).State = commonpb.SegmentState_Dropped
 		cluster := session.NewMockCluster(s.T())
 		it.CreateTaskOnWorker(1, cluster)
 		// The task must reach a terminal state in meta, otherwise GC keeps the
@@ -188,7 +187,7 @@ func (s *indexTaskSuite) TestCreateTaskOnWorker() {
 	})
 
 	s.Run("index not exist", func() {
-		s.mt.segments.segments[s.segID].State = commonpb.SegmentState_Flushed
+		s.mt.segments.GetSegment(s.segID).State = commonpb.SegmentState_Flushed
 		s.mt.indexMeta.indexes[s.collID][s.indexID].IsDeleted = true
 		defer func() {
 			s.mt.indexMeta.indexes[s.collID][s.indexID].IsDeleted = false

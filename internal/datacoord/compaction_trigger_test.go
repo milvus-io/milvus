@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -151,35 +152,23 @@ func Test_compactionTrigger_force_without_index(t *testing.T) {
 		Deltalogs:      deltaLogs,
 		IsSorted:       true,
 	}
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(collectionID, &collectionInfo{
+	metaStore := metacache.NewMetaStore(catalog)
+	metaStore.PutCollection(&metacache.CollectionInfo{
 		ID:     collectionID,
 		Schema: schema,
 	})
 	m := &meta{
-		catalog:    catalog,
-		channelCPs: newChannelCps(),
-		segments: &SegmentsInfo{
-			segments: map[int64]*SegmentInfo{
-				1: {
-					SegmentInfo: segInfo,
-				},
+
+		segments: newSegmentsInfoWithSegments(map[int64]*SegmentInfo{
+			1: {
+				SegmentInfo: segInfo,
 			},
-			secondaryIndexes: segmentInfoIndexes{
-				coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
-					collectionID: {
-						1: {
-							SegmentInfo: segInfo,
-						},
-					},
-				},
-			},
-		},
+		}),
 		indexMeta: &indexMeta{
 			segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 			indexes:        map[UniqueID]map[UniqueID]*model.Index{},
 		},
-		collections: collections,
+		metaStore: metaStore,
 	}
 
 	inspector := &spyCompactionInspector{t: t, spyChan: make(chan *datapb.CompactionPlan, 1), meta: m}
@@ -317,15 +306,15 @@ func Test_compactionTrigger_force(t *testing.T) {
 		},
 	}
 
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(2, &collectionInfo{
+	metaStore := metacache.NewMetaStore(nil)
+	metaStore.PutCollection(&metacache.CollectionInfo{
 		ID:     2,
 		Schema: schema,
 		Properties: map[string]string{
 			common.CollectionTTLConfigKey: "0",
 		},
 	})
-	collections.Insert(1111, &collectionInfo{
+	metaStore.PutCollection(&metacache.CollectionInfo{
 		ID: 1111,
 		Schema: &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
@@ -345,7 +334,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 			common.CollectionTTLConfigKey: "error",
 		},
 	})
-	collections.Insert(1000, &collectionInfo{
+	metaStore.PutCollection(&metacache.CollectionInfo{
 		ID: 1000,
 		Schema: &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
@@ -363,7 +352,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 		},
 	})
 	// error (has no vector field)
-	collections.Insert(2000, &collectionInfo{
+	metaStore.PutCollection(&metacache.CollectionInfo{
 		ID: 2000,
 		Schema: &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
@@ -375,7 +364,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 		},
 	})
 	// error (has no dim)
-	collections.Insert(3000, &collectionInfo{
+	metaStore.PutCollection(&metacache.CollectionInfo{
 		ID: 3000,
 		Schema: &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
@@ -390,7 +379,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 		},
 	})
 	// error (dim parse fail)
-	collections.Insert(4000, &collectionInfo{
+	metaStore.PutCollection(&metacache.CollectionInfo{
 		ID: 4000,
 		Schema: &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
@@ -407,7 +396,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 			},
 		},
 	})
-	collections.Insert(10000, &collectionInfo{
+	metaStore.PutCollection(&metacache.CollectionInfo{
 		ID: 10000,
 		Schema: &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
@@ -539,28 +528,14 @@ func Test_compactionTrigger_force(t *testing.T) {
 			"test force compaction",
 			fields{
 				&meta{
-					catalog:    catalog,
-					channelCPs: newChannelCps(),
-					segments: &SegmentsInfo{
-						segments: map[int64]*SegmentInfo{
-							1: seg1,
-							2: seg2,
-							3: seg3,
-						},
-						secondaryIndexes: segmentInfoIndexes{
-							coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
-								2: {
-									seg1.GetID(): seg1,
-									seg2.GetID(): seg2,
-								},
-								1111: {
-									seg3.GetID(): seg3,
-								},
-							},
-						},
-					},
-					indexMeta:   im,
-					collections: collections,
+			
+					segments: newSegmentsInfoWithSegments(map[int64]*SegmentInfo{
+						1: seg1,
+						2: seg2,
+						3: seg3,
+					}),
+					indexMeta: im,
+					metaStore: metaStore,
 				},
 				mock0Allocator,
 				nil,
@@ -610,13 +585,8 @@ func Test_compactionTrigger_force(t *testing.T) {
 		t.Run(tt.name+" with DiskANN index", func(t *testing.T) {
 			for _, segment := range tt.fields.meta.segments.GetSegments() {
 				// Collection 1000 means it has DiskANN index
-				delete(tt.fields.meta.segments.secondaryIndexes.coll2Segments[segment.GetCollectionID()], segment.GetID())
 				segment.CollectionID = 1000
-				_, ok := tt.fields.meta.segments.secondaryIndexes.coll2Segments[segment.GetCollectionID()]
-				if !ok {
-					tt.fields.meta.segments.secondaryIndexes.coll2Segments[segment.GetCollectionID()] = make(map[UniqueID]*SegmentInfo)
-				}
-				tt.fields.meta.segments.secondaryIndexes.coll2Segments[segment.GetCollectionID()][segment.GetID()] = segment
+				tt.fields.meta.segments.SetSegment(segment.GetID(), segment)
 			}
 			tr := &compactionTrigger{
 				meta:          tt.fields.meta,
@@ -721,12 +691,7 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 		compactTime  *compactTime
 	}
 	vecFieldID := int64(201)
-	segmentInfos := &SegmentsInfo{
-		segments: make(map[UniqueID]*SegmentInfo),
-		secondaryIndexes: segmentInfoIndexes{
-			coll2Segments: make(map[UniqueID]map[UniqueID]*SegmentInfo),
-		},
-	}
+	segmentInfos := NewSegmentsInfo(metacache.NewMetaStore(nil))
 
 	indexMeta := newSegmentIndexMeta(nil)
 	indexMeta.indexes = map[UniqueID]map[UniqueID]*model.Index{
@@ -752,7 +717,6 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 		},
 	}
 
-	segmentInfos.secondaryIndexes.coll2Segments[2] = make(map[UniqueID]*SegmentInfo)
 	nSegments := 50
 	for i := UniqueID(0); i < UniqueID(nSegments); i++ {
 		info := &SegmentInfo{
@@ -795,14 +759,13 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 			IndexState:   commonpb.IndexState_Finished,
 		})
 
-		segmentInfos.segments[i] = info
-		segmentInfos.secondaryIndexes.coll2Segments[2][i] = info
+		segmentInfos.SetSegment(i, info)
 	}
 
 	mock0Allocator := newMockAllocator(t)
 
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(2, &collectionInfo{
+	metaStore := metacache.NewMetaStore(nil)
+	metaStore.PutCollection(&metacache.CollectionInfo{
 		ID: 2,
 		Schema: &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
@@ -831,10 +794,10 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 			"test many segments",
 			fields{
 				&meta{
-					segments:    segmentInfos,
-					channelCPs:  newChannelCps(),
-					collections: collections,
-					indexMeta:   indexMeta,
+					segments:   segmentInfos,
+			
+					metaStore:  metaStore,
+					indexMeta:  indexMeta,
 				},
 				mock0Allocator,
 				nil,
@@ -952,8 +915,8 @@ func Test_compactionTrigger_noplan(t *testing.T) {
 	im := newSegmentIndexMeta(nil)
 	im.indexes[2] = make(map[UniqueID]*model.Index)
 
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(2, &collectionInfo{
+	metaStore := metacache.NewMetaStore(nil)
+	metaStore.PutCollection(&metacache.CollectionInfo{
 		ID: 2,
 		Schema: &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
@@ -984,60 +947,58 @@ func Test_compactionTrigger_noplan(t *testing.T) {
 				&meta{
 					indexMeta: im,
 					// 4 segment
-					channelCPs: newChannelCps(),
+			
 
-					segments: &SegmentsInfo{
-						segments: map[int64]*SegmentInfo{
-							1: {
-								SegmentInfo: &datapb.SegmentInfo{
-									ID:             1,
-									CollectionID:   2,
-									PartitionID:    1,
-									LastExpireTime: 100,
-									NumOfRows:      200,
-									MaxRowNum:      300,
-									InsertChannel:  "ch1",
-									State:          commonpb.SegmentState_Flushed,
-									Binlogs: []*datapb.FieldBinlog{
-										{
-											Binlogs: []*datapb.Binlog{
-												{EntriesNum: 5, LogPath: "log1", LogSize: 100, MemorySize: 100},
-											},
+					segments: newSegmentsInfoWithSegments(map[int64]*SegmentInfo{
+						1: {
+							SegmentInfo: &datapb.SegmentInfo{
+								ID:             1,
+								CollectionID:   2,
+								PartitionID:    1,
+								LastExpireTime: 100,
+								NumOfRows:      200,
+								MaxRowNum:      300,
+								InsertChannel:  "ch1",
+								State:          commonpb.SegmentState_Flushed,
+								Binlogs: []*datapb.FieldBinlog{
+									{
+										Binlogs: []*datapb.Binlog{
+											{EntriesNum: 5, LogPath: "log1", LogSize: 100, MemorySize: 100},
 										},
 									},
 								},
-								lastFlushTime: time.Now(),
 							},
-							2: {
-								SegmentInfo: &datapb.SegmentInfo{
-									ID:             2,
-									CollectionID:   2,
-									PartitionID:    1,
-									LastExpireTime: 100,
-									NumOfRows:      200,
-									MaxRowNum:      300,
-									InsertChannel:  "ch1",
-									State:          commonpb.SegmentState_Flushed,
-									Binlogs: []*datapb.FieldBinlog{
-										{
-											Binlogs: []*datapb.Binlog{
-												{EntriesNum: 5, LogPath: "log2", LogSize: Params.DataCoordCfg.SegmentMaxSize.GetAsInt64()*1024*1024 - 1, MemorySize: Params.DataCoordCfg.SegmentMaxSize.GetAsInt64()*1024*1024 - 1},
-											},
-										},
-									},
-									Deltalogs: []*datapb.FieldBinlog{
-										{
-											Binlogs: []*datapb.Binlog{
-												{EntriesNum: 5, LogPath: "deltalog2"},
-											},
-										},
-									},
-								},
-								lastFlushTime: time.Now(),
-							},
+							lastFlushTime: time.Now(),
 						},
-					},
-					collections: collections,
+						2: {
+							SegmentInfo: &datapb.SegmentInfo{
+								ID:             2,
+								CollectionID:   2,
+								PartitionID:    1,
+								LastExpireTime: 100,
+								NumOfRows:      200,
+								MaxRowNum:      300,
+								InsertChannel:  "ch1",
+								State:          commonpb.SegmentState_Flushed,
+								Binlogs: []*datapb.FieldBinlog{
+									{
+										Binlogs: []*datapb.Binlog{
+											{EntriesNum: 5, LogPath: "log2", LogSize: Params.DataCoordCfg.SegmentMaxSize.GetAsInt64()*1024*1024 - 1, MemorySize: Params.DataCoordCfg.SegmentMaxSize.GetAsInt64()*1024*1024 - 1},
+										},
+									},
+								},
+								Deltalogs: []*datapb.FieldBinlog{
+									{
+										Binlogs: []*datapb.Binlog{
+											{EntriesNum: 5, LogPath: "deltalog2"},
+										},
+									},
+								},
+							},
+							lastFlushTime: time.Now(),
+						},
+					}),
+					metaStore: metaStore,
 				},
 				mock0Allocator,
 				make(chan *compactionSignal, 1),
@@ -1110,12 +1071,6 @@ func mockSegment(segID, rows, deleteRows, sizeInMB int64) *datapb.SegmentInfo {
 
 func mockSegmentsInfo(sizeInMB ...int64) *SegmentsInfo {
 	segments := make(map[int64]*SegmentInfo, len(sizeInMB))
-	collectionID := int64(2)
-	channel := "ch1"
-	coll2Segments := make(map[UniqueID]map[UniqueID]*SegmentInfo)
-	coll2Segments[collectionID] = make(map[UniqueID]*SegmentInfo)
-	channel2Segments := make(map[string]map[UniqueID]*SegmentInfo)
-	channel2Segments[channel] = make(map[UniqueID]*SegmentInfo)
 	for i, size := range sizeInMB {
 		segId := int64(i + 1)
 		info := &SegmentInfo{
@@ -1123,16 +1078,8 @@ func mockSegmentsInfo(sizeInMB ...int64) *SegmentsInfo {
 			lastFlushTime: time.Now().Add(-100 * time.Minute),
 		}
 		segments[segId] = info
-		coll2Segments[collectionID][segId] = info
-		channel2Segments[channel][segId] = info
 	}
-	return &SegmentsInfo{
-		segments: segments,
-		secondaryIndexes: segmentInfoIndexes{
-			coll2Segments:    coll2Segments,
-			channel2Segments: channel2Segments,
-		},
-	}
+	return newSegmentsInfoWithSegments(segments)
 }
 
 // Test compaction with prioritized candi
@@ -1167,8 +1114,8 @@ func Test_compactionTrigger_PrioritizedCandi(t *testing.T) {
 		return segIdx
 	}
 
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(2, &collectionInfo{
+	metaStore := metacache.NewMetaStore(nil)
+	metaStore.PutCollection(&metacache.CollectionInfo{
 		ID: 2,
 		Schema: &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
@@ -1228,11 +1175,11 @@ func Test_compactionTrigger_PrioritizedCandi(t *testing.T) {
 			fields{
 				&meta{
 					// 8 small segments
-					channelCPs: newChannelCps(),
+			
 
-					segments:    mockSegmentsInfo(20, 20, 20, 20, 20, 20),
-					indexMeta:   im,
-					collections: collections,
+					segments:  mockSegmentsInfo(20, 20, 20, 20, 20, 20),
+					indexMeta: im,
+					metaStore: metaStore,
 				},
 				mock0Allocator,
 				make(chan *compactionSignal, 1),
@@ -1246,10 +1193,12 @@ func Test_compactionTrigger_PrioritizedCandi(t *testing.T) {
 	for _, tt := range tests {
 		(tt.fields.inspector).(*spyCompactionInspector).meta = tt.fields.meta
 		t.Run(tt.name, func(t *testing.T) {
-			tt.fields.meta.channelCPs.checkpoints["ch1"] = &msgpb.MsgPosition{
-				Timestamp: tsoutil.ComposeTSByTime(time.Now()),
-				MsgID:     []byte{1, 2, 3, 4},
-			}
+			tt.fields.meta.metaStore.LoadChannelCheckpoints(map[string]*msgpb.MsgPosition{
+				"ch1": {
+					Timestamp: tsoutil.ComposeTSByTime(time.Now(), 0),
+					MsgID:     []byte{1, 2, 3, 4},
+				},
+			})
 			tr := &compactionTrigger{
 				meta:          tt.fields.meta,
 				handler:       newMockHandlerWithMeta(tt.fields.meta),
@@ -1315,8 +1264,8 @@ func Test_compactionTrigger_SmallCandi(t *testing.T) {
 		return segIdx
 	}
 
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(2, &collectionInfo{
+	metaStore := metacache.NewMetaStore(nil)
+	metaStore.PutCollection(&metacache.CollectionInfo{
 		ID: 2,
 		Schema: &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
@@ -1371,14 +1320,13 @@ func Test_compactionTrigger_SmallCandi(t *testing.T) {
 			"test small segment",
 			fields{
 				&meta{
-					channelCPs: newChannelCps(),
 					// 7 segments with 200MB each. The first 5 clear the
 					// full-tier fill-rate gate and are packed into one
 					// bucket; the remaining 2 stay below
 					// MaxFragmentsPerGroup and are left uncompacted.
-					segments:    mockSegmentsInfo(200, 200, 200, 200, 200, 200, 200),
-					indexMeta:   im,
-					collections: collections,
+					segments:  mockSegmentsInfo(200, 200, 200, 200, 200, 200, 200),
+					indexMeta: im,
+					metaStore: metaStore,
 				},
 				mock0Allocator,
 				make(chan *compactionSignal, 1),
@@ -1396,10 +1344,12 @@ func Test_compactionTrigger_SmallCandi(t *testing.T) {
 	for _, tt := range tests {
 		(tt.fields.inspector).(*spyCompactionInspector).meta = tt.fields.meta
 		t.Run(tt.name, func(t *testing.T) {
-			tt.fields.meta.channelCPs.checkpoints["ch1"] = &msgpb.MsgPosition{
-				Timestamp: tsoutil.ComposeTSByTime(time.Now()),
-				MsgID:     []byte{1, 2, 3, 4},
-			}
+			tt.fields.meta.metaStore.LoadChannelCheckpoints(map[string]*msgpb.MsgPosition{
+				"ch1": {
+					Timestamp: tsoutil.ComposeTSByTime(time.Now(), 0),
+					MsgID:     []byte{1, 2, 3, 4},
+				},
+			})
 			tr := &compactionTrigger{
 				meta:                      tt.fields.meta,
 				handler:                   newMockHandlerWithMeta(tt.fields.meta),
@@ -1448,13 +1398,7 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 		compactTime  *compactTime
 	}
 
-	segmentInfos := &SegmentsInfo{
-		segments: make(map[UniqueID]*SegmentInfo),
-		secondaryIndexes: segmentInfoIndexes{
-			coll2Segments:    map[UniqueID]map[UniqueID]*SegmentInfo{2: {}},
-			channel2Segments: map[string]map[UniqueID]*SegmentInfo{"ch1": {}},
-		},
-	}
+	segmentInfos := NewSegmentsInfo(metacache.NewMetaStore(nil))
 
 	size := []int64{
 		510, 500, 480, 300, 250, 200, 128, 128, 128, 127,
@@ -1525,15 +1469,13 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 			IndexState:   commonpb.IndexState_Finished,
 		})
 
-		segmentInfos.segments[i] = info
-		segmentInfos.secondaryIndexes.coll2Segments[2][i] = info
-		segmentInfos.secondaryIndexes.channel2Segments["ch1"][i] = info
+		segmentInfos.SetSegment(i, info)
 	}
 
 	mock0Allocator := newMockAllocator(t)
 
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(2, &collectionInfo{
+	metaStore := metacache.NewMetaStore(nil)
+	metaStore.PutCollection(&metacache.CollectionInfo{
 		ID: 2,
 		Schema: &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
@@ -1562,11 +1504,11 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 			"test rand size segment",
 			fields{
 				&meta{
-					channelCPs: newChannelCps(),
+			
 
-					segments:    segmentInfos,
-					collections: collections,
-					indexMeta:   indexMeta,
+					segments:  segmentInfos,
+					metaStore: metaStore,
+					indexMeta: indexMeta,
 				},
 				mock0Allocator,
 				make(chan *compactionSignal, 1),
@@ -1584,10 +1526,12 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 	for _, tt := range tests {
 		(tt.fields.inspector).(*spyCompactionInspector).meta = tt.fields.meta
 		t.Run(tt.name, func(t *testing.T) {
-			tt.fields.meta.channelCPs.checkpoints["ch1"] = &msgpb.MsgPosition{
-				Timestamp: tsoutil.ComposeTSByTime(time.Now()),
-				MsgID:     []byte{1, 2, 3, 4},
-			}
+			tt.fields.meta.metaStore.LoadChannelCheckpoints(map[string]*msgpb.MsgPosition{
+				"ch1": {
+					Timestamp: tsoutil.ComposeTSByTime(time.Now(), 0),
+					MsgID:     []byte{1, 2, 3, 4},
+				},
+			})
 			tr := &compactionTrigger{
 				meta:                      tt.fields.meta,
 				handler:                   newMockHandlerWithMeta(tt.fields.meta),
@@ -1635,7 +1579,7 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 	mock0Allocator := newMockAllocator(t)
 	trigger := newCompactionTrigger(&meta{
 		indexMeta:  indexMeta,
-		channelCPs: newChannelCps(),
+
 	}, &compactionInspector{}, mock0Allocator, newMockHandler(), newIndexEngineVersionManager())
 
 	// Test too many deltalogs.
@@ -2106,7 +2050,7 @@ func TestCompactionTriggerKeepsMixedSchemaVersionSegments(t *testing.T) {
 }
 
 func Test_compactionTrigger_getCompactTime(t *testing.T) {
-	coll := &collectionInfo{
+	coll := &metacache.CollectionInfo{
 		ID:         1,
 		Schema:     newTestSchema(),
 		Partitions: []UniqueID{1},
@@ -2127,8 +2071,9 @@ func Test_TirggerCompaction_WaitResult(t *testing.T) {
 		Params.Save(Params.DataCoordCfg.EnableAutoCompaction.Key, originValue)
 	}()
 	m := &meta{
-		channelCPs: newChannelCps(),
-		segments:   NewSegmentsInfo(), collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+
+		segments:   NewSegmentsInfo(metacache.NewMetaStore(nil)),
+		metaStore:  metacache.NewMetaStore(nil),
 	}
 	got := newCompactionTrigger(m, &compactionInspector{}, newMockAllocator(t),
 		&ServerHandler{
@@ -2312,8 +2257,8 @@ func (s *CompactionTriggerSuite) SetupTest() {
 		lastFlushTime: time.Now(),
 	}
 
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(s.collectionID, &collectionInfo{
+	metaStore := metacache.NewMetaStore(nil)
+	metaStore.PutCollection(&metacache.CollectionInfo{
 		ID: s.collectionID,
 		Schema: &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
@@ -2357,42 +2302,17 @@ func (s *CompactionTriggerSuite) SetupTest() {
 	im.segmentIndexes.Insert(5, s.genSegIndex(5, indexID, 60))
 	im.segmentIndexes.Insert(6, s.genSegIndex(6, indexID, 60))
 	s.meta = &meta{
-		channelCPs: newChannelCps(),
-		catalog:    catalog,
-		segments: &SegmentsInfo{
-			segments: map[int64]*SegmentInfo{
-				1: seg1,
-				2: seg2,
-				3: seg3,
-				4: seg4,
-				5: seg5,
-				6: seg6,
-			},
-			secondaryIndexes: segmentInfoIndexes{
-				coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
-					s.collectionID: {
-						1: seg1,
-						2: seg2,
-						3: seg3,
-						4: seg4,
-						5: seg5,
-						6: seg6,
-					},
-				},
-				channel2Segments: map[string]map[UniqueID]*SegmentInfo{
-					s.channel: {
-						1: seg1,
-						2: seg2,
-						3: seg3,
-						4: seg4,
-						5: seg5,
-						6: seg6,
-					},
-				},
-			},
-		},
-		indexMeta:   im,
-		collections: collections,
+
+		segments: newSegmentsInfoWithSegments(map[int64]*SegmentInfo{
+			1: seg1,
+			2: seg2,
+			3: seg3,
+			4: seg4,
+			5: seg5,
+			6: seg6,
+		}),
+		indexMeta: im,
+		metaStore: metaStore,
 	}
 	s.meta.UpdateChannelCheckpoint(context.TODO(), s.channel, &msgpb.MsgPosition{
 		ChannelName: s.channel,
@@ -2435,7 +2355,7 @@ func (s *CompactionTriggerSuite) TestHandleSignal() {
 		tr := s.tr
 		s.inspector.EXPECT().isFull().Return(false)
 		// s.allocator.EXPECT().AllocTimestamp(mock.Anything).Return(10000, nil)
-		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&collectionInfo{
+		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&metacache.CollectionInfo{
 			Properties: map[string]string{
 				common.CollectionAutoCompactionKey: "bad_value",
 			},
@@ -2463,7 +2383,7 @@ func (s *CompactionTriggerSuite) TestHandleSignal() {
 		tr := s.tr
 		s.inspector.EXPECT().isFull().Return(false)
 		// s.allocator.EXPECT().AllocTimestamp(mock.Anything).Return(10000, nil)
-		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&collectionInfo{
+		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&metacache.CollectionInfo{
 			Properties: map[string]string{
 				common.CollectionAutoCompactionKey: "false",
 			},
@@ -2498,7 +2418,7 @@ func (s *CompactionTriggerSuite) TestHandleSignal() {
 			return start, start + i, nil
 		})
 		s.allocator.EXPECT().AllocTimestamp(mock.Anything).Return(10000, nil)
-		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&collectionInfo{
+		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&metacache.CollectionInfo{
 			Properties: map[string]string{
 				common.CollectionAutoCompactionKey: "false",
 			},
@@ -2631,7 +2551,7 @@ func (s *CompactionTriggerSuite) TestHandleGlobalSignal() {
 		tr := s.tr
 		s.inspector.EXPECT().isFull().Return(false)
 		s.allocator.EXPECT().AllocTimestamp(mock.Anything).Return(10000, nil)
-		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&collectionInfo{
+		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&metacache.CollectionInfo{
 			Schema: schema,
 			Properties: map[string]string{
 				common.CollectionAutoCompactionKey: "bad_value",
@@ -2650,7 +2570,7 @@ func (s *CompactionTriggerSuite) TestHandleGlobalSignal() {
 		defer s.SetupTest()
 		tr := s.tr
 		s.inspector.EXPECT().isFull().Return(false)
-		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&collectionInfo{
+		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&metacache.CollectionInfo{
 			Schema: schema,
 			Properties: map[string]string{
 				common.CollectionAutoCompactionKey: "false",
@@ -2672,7 +2592,7 @@ func (s *CompactionTriggerSuite) TestHandleGlobalSignal() {
 			return start, start + i, nil
 		}).Maybe()
 		s.allocator.EXPECT().AllocTimestamp(mock.Anything).Return(10000, nil)
-		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&collectionInfo{
+		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&metacache.CollectionInfo{
 			Schema: schema,
 			Properties: map[string]string{
 				common.CollectionAutoCompactionKey: "false",
@@ -2795,8 +2715,8 @@ func Test_compactionTrigger_generatePlans(t *testing.T) {
 		expectedSize int64
 	}
 
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(2, &collectionInfo{
+	metaStore := metacache.NewMetaStore(nil)
+	metaStore.PutCollection(&metacache.CollectionInfo{
 		ID:     2,
 		Schema: schema,
 		Properties: map[string]string{
@@ -2924,22 +2844,11 @@ func Test_compactionTrigger_generatePlans(t *testing.T) {
 			name: "force trigger on large segments",
 			fields: fields{
 				meta: &meta{
-					catalog:    catalog,
-					channelCPs: newChannelCps(),
-					segments: &SegmentsInfo{
-						segments: map[int64]*SegmentInfo{
-							1: seg1,
-							2: seg2,
-						},
-						secondaryIndexes: segmentInfoIndexes{
-							coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
-								2: {
-									seg1.GetID(): seg1,
-									seg2.GetID(): seg2,
-								},
-							},
-						},
-					},
+			
+					segments: newSegmentsInfoWithSegments(map[int64]*SegmentInfo{
+						1: seg1,
+						2: seg2,
+					}),
 					indexMeta: &indexMeta{
 						segmentIndexes: segIndexes,
 						indexes: map[UniqueID]map[UniqueID]*model.Index{
@@ -2965,7 +2874,7 @@ func Test_compactionTrigger_generatePlans(t *testing.T) {
 							},
 						},
 					},
-					collections: collections,
+					metaStore: metaStore,
 				},
 				allocator:     mock0Allocator,
 				signals:       nil,
@@ -3312,8 +3221,8 @@ func Test_compactionTrigger_generatePlansByTime(t *testing.T) {
 		expectedSize int64
 	}
 
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(2, &collectionInfo{
+	metaStore := metacache.NewMetaStore(nil)
+	metaStore.PutCollection(&metacache.CollectionInfo{
 		ID:     2,
 		Schema: schema,
 		Properties: map[string]string{
@@ -3390,24 +3299,12 @@ func Test_compactionTrigger_generatePlansByTime(t *testing.T) {
 			name: "test time-based compaction",
 			fields: fields{
 				meta: &meta{
-					catalog:    catalog,
-					channelCPs: newChannelCps(),
-					segments: &SegmentsInfo{
-						segments: map[int64]*SegmentInfo{
-							1: seg1,
-							2: seg2,
-							3: seg3,
-						},
-						secondaryIndexes: segmentInfoIndexes{
-							coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
-								2: {
-									seg1.GetID(): seg1,
-									seg2.GetID(): seg2,
-									seg3.GetID(): seg3,
-								},
-							},
-						},
-					},
+			
+					segments: newSegmentsInfoWithSegments(map[int64]*SegmentInfo{
+						1: seg1,
+						2: seg2,
+						3: seg3,
+					}),
 					indexMeta: &indexMeta{
 						segmentIndexes: segIndexes,
 						indexes: map[UniqueID]map[UniqueID]*model.Index{
@@ -3433,7 +3330,7 @@ func Test_compactionTrigger_generatePlansByTime(t *testing.T) {
 							},
 						},
 					},
-					collections: collections,
+					metaStore: metaStore,
 				},
 				allocator:     mock0Allocator,
 				signals:       nil,

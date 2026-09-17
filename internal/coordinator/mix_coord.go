@@ -21,6 +21,8 @@ import (
 	internalhttp "github.com/milvus-io/milvus/internal/http"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
+	"github.com/milvus-io/milvus/internal/metacache"
+	dccatalog "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/querycoordv2"
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	streamingcoord "github.com/milvus-io/milvus/internal/streamingcoord/server"
@@ -41,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -84,6 +87,10 @@ type mixCoordImpl struct {
 	// Set in initInternal, unregistered in Stop.
 	rootCredentialVerifier *adminauth.CachedRootVerifier
 
+	// metaStore is the shared metacache backing DataCoord (read-write) and
+	// QueryCoord (read-only) segment/collection metadata.
+	metaStore metacache.MetaStore
+
 	// POSIX directory cleanup task
 	posixCleanupCancel    context.CancelFunc
 	posixCleanupWg        sync.WaitGroup
@@ -98,14 +105,12 @@ func NewMixCoordServer(c context.Context, factory dependency.Factory) (*mixCoord
 	ctx, cancel := context.WithCancel(c) //nolint:gosec // cancel is stored below and called in Stop
 	rootCoordServer, _ := rootcoord.NewCore(ctx, factory)
 	queryCoordServer, _ := querycoordv2.NewQueryCoord(c)
-	dataCoordServer := datacoord.CreateServer(c, factory)
 
 	return &mixCoordImpl{
 		ctx:              ctx,
 		cancel:           cancel,
 		rootcoordServer:  rootCoordServer,
 		queryCoordServer: queryCoordServer,
-		datacoordServer:  dataCoordServer,
 		factory:          factory,
 	}, nil
 }
@@ -161,9 +166,30 @@ func (s *mixCoordImpl) activateFunc() error {
 }
 
 func (s *mixCoordImpl) initInternal() error {
+	// Create catalog and MetaStore — MetaStore owns the catalog.
+	metaKV := s.metaKVCreator()
+	var metaRootPath string
+	if Params.MetaStoreCfg.MetaStoreType.GetValue() == util.MetaStoreTypeTiKV {
+		metaRootPath = Params.TiKVCfg.MetaRootPath.GetValue()
+	} else {
+		metaRootPath = Params.EtcdCfg.MetaRootPath.GetValue()
+	}
+	catalog := dccatalog.NewCatalog(metaKV, "", metaRootPath)
+	s.metaStore = metacache.NewMetaStore(catalog)
+
+	// Create DC server with MetaStore injected via constructor option.
+	s.datacoordServer = datacoord.CreateServer(s.ctx, s.factory, datacoord.WithMetaStore(s.metaStore), datacoord.WithCatalog(catalog))
+	s.datacoordServer.SetSession(s.session)
+	s.datacoordServer.SetAddress(s.address)
+	s.datacoordServer.SetEtcdClient(s.etcdCli)
+	if s.tikvCli != nil {
+		s.datacoordServer.SetTiKVClient(s.tikvCli)
+	}
+
 	s.rootcoordServer.SetMixCoord(s)
 	s.datacoordServer.SetMixCoord(s)
 	s.queryCoordServer.SetMixCoord(s)
+	s.queryCoordServer.SetMetaView(s.metaStore)
 	s.fileResourceObserver = NewFileResourceObserver(s.ctx)
 
 	// Register WAL callbacks
@@ -186,17 +212,15 @@ func (s *mixCoordImpl) initInternal() error {
 		return err
 	}
 
-	// Register a password verifier for /management/* HTTP basic auth: a mix
-	// coord process does not host the proxy package, where the verifier is
-	// otherwise registered, so without this the gate answers 503 to root as
-	// well as to attackers once adminAuthEnabled is on.
-	//
-	// It goes through the shared cache rather than straight to rootcoord's
-	// credential RPC, which reads the metastore on every call: the gated
-	// endpoints answer unauthenticated callers, so binding directly would let
-	// anyone who can reach port 9091 drive etcd load into the coordinator.
+	// Register a password verifier for /management/* HTTP basic auth.
 	s.rootCredentialVerifier = adminauth.NewCachedRootVerifier(s.fetchRootHash)
 	internalhttp.RegisterManagementVerifier(internalhttp.VerifierSlotCoordinator, s.rootCredentialVerifier.Verify)
+
+	// Load collections into MetaStore before DC/QC init.
+	if err := s.loadCollectionsIntoMetaStore(s.ctx); err != nil {
+		mlog.Error(s.ctx, "failed to load collections into metaStore", mlog.Err(err))
+		return err
+	}
 
 	// DataCoord and QueryCoord are independent of each other;
 	// both only depend on RootCoord being ready. Initialize and start them in parallel.
@@ -230,6 +254,47 @@ func (s *mixCoordImpl) initInternal() error {
 	}
 
 	s.fileResourceObserver.Start()
+	return nil
+}
+
+func (s *mixCoordImpl) loadCollectionsIntoMetaStore(ctx context.Context) error {
+	resp, err := s.rootcoordServer.ListDatabases(ctx, &milvuspb.ListDatabasesRequest{})
+	if err = merr.CheckRPCCall(resp, err); err != nil {
+		return err
+	}
+	for _, dbName := range resp.GetDbNames() {
+		collectionsResp, err := s.rootcoordServer.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
+			DbName: dbName,
+		})
+		if err = merr.CheckRPCCall(collectionsResp, err); err != nil {
+			return err
+		}
+		for _, collectionID := range collectionsResp.GetCollectionIds() {
+			descResp, err := s.rootcoordServer.DescribeCollectionInternal(ctx, &milvuspb.DescribeCollectionRequest{
+				CollectionID: collectionID,
+			})
+			if err = merr.CheckRPCCall(descResp, err); err != nil {
+				return err
+			}
+			partResp, err := s.rootcoordServer.ShowPartitionsInternal(ctx, &milvuspb.ShowPartitionsRequest{
+				CollectionID: collectionID,
+			})
+			if err = merr.CheckRPCCall(partResp, err); err != nil {
+				return err
+			}
+			s.metaStore.PutCollection(&metacache.CollectionInfo{
+				ID:             collectionID,
+				Schema:         descResp.GetSchema(),
+				Partitions:     partResp.GetPartitionIDs(),
+				StartPositions: descResp.GetStartPositions(),
+				Properties:     funcutil.KeyValuePair2Map(descResp.GetProperties()),
+				CreatedAt:      descResp.GetCreatedTimestamp(),
+				DatabaseName:   descResp.GetDbName(),
+				DatabaseID:     descResp.GetDbId(),
+				VChannelNames:  descResp.GetVirtualChannelNames(),
+			})
+		}
+	}
 	return nil
 }
 
@@ -271,11 +336,6 @@ func (s *mixCoordImpl) IsServerActive(serverID int64) bool {
 
 // fetchRootHash reads root's stored bcrypt hash from the rootcoord embedded in
 // this mix coord.
-//
-// This is not a cheap in-process getter: Catalog.GetCredential does an
-// unconditional Txn.Load against the metastore and bumps the DDL request
-// counters, so it must never run once per request. adminauth.CachedRootVerifier
-// is what keeps that from happening.
 func (s *mixCoordImpl) fetchRootHash(ctx context.Context) (string, error) {
 	resp, err := s.rootcoordServer.GetCredential(ctx, &rootcoordpb.GetCredentialRequest{
 		Username: util.UserRoot,
@@ -431,7 +491,6 @@ func (s *mixCoordImpl) initSession() error {
 	// MixCoord owns the session lifecycle and stops it after all coordinators have stopped.
 	s.session.SetMixCoordMode(true)
 	s.rootcoordServer.SetSession(s.session)
-	s.datacoordServer.SetSession(s.session)
 	s.queryCoordServer.SetSession(s.session)
 
 	return nil
@@ -440,21 +499,18 @@ func (s *mixCoordImpl) initSession() error {
 func (s *mixCoordImpl) SetAddress(address string) {
 	s.address = address
 	s.rootcoordServer.SetAddress(address)
-	s.datacoordServer.SetAddress(address)
 	s.queryCoordServer.SetAddress(address)
 }
 
 func (s *mixCoordImpl) SetEtcdClient(client *clientv3.Client) {
 	s.etcdCli = client
 	s.rootcoordServer.SetEtcdClient(client)
-	s.datacoordServer.SetEtcdClient(client)
 	s.queryCoordServer.SetEtcdClient(client)
 }
 
 func (s *mixCoordImpl) SetTiKVClient(client *txnkv.Client) {
 	s.tikvCli = client
 	s.rootcoordServer.SetTiKVClient(client)
-	s.datacoordServer.SetTiKVClient(client)
 	s.queryCoordServer.SetTiKVClient(client)
 }
 

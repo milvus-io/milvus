@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -58,10 +59,7 @@ func (s *L0CompactionPolicySuite) SetupTest() {
 	}
 
 	segments := genSegmentsForMeta(s.testLabel)
-	meta := &meta{
-		segments:    NewSegmentsInfo(),
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-	}
+	meta := &meta{segments: NewSegmentsInfo(metacache.NewMetaStore(nil))}
 	for id, segment := range segments {
 		meta.segments.SetSegment(id, segment)
 	}
@@ -151,11 +149,9 @@ func (s *L0CompactionPolicySuite) TestTriggerViewChange() {
 		info.DmlPosition = &msgpb.MsgPosition{Timestamp: arg.PosT}
 		segments[arg.ID] = info
 	}
-	meta := &meta{
-		segments:    NewSegmentsInfo(),
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-	}
-	meta.collections.Insert(s.testLabel.CollectionID, &collectionInfo{
+	store := metacache.NewMetaStore(nil)
+	meta := &meta{segments: NewSegmentsInfo(store), metaStore: store}
+	meta.metaStore.PutCollection(&metacache.CollectionInfo{
 		ID:     s.testLabel.CollectionID,
 		Schema: &schemapb.CollectionSchema{},
 	})

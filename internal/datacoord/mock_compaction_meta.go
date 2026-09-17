@@ -129,7 +129,7 @@ func (_c *MockCompactionMeta_CleanPartitionStatsInfo_Call) RunAndReturn(run func
 }
 
 // CompleteCompactionMutation provides a mock function with given fields: ctx, t, result
-func (_m *MockCompactionMeta) CompleteCompactionMutation(ctx context.Context, t *datapb.CompactionTask, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error) {
+func (_m *MockCompactionMeta) CompleteCompactionMutation(ctx context.Context, t *datapb.CompactionTask, result *datapb.CompactionPlanResult) ([]*SegmentInfo, error) {
 	ret := _m.Called(ctx, t, result)
 
 	if len(ret) == 0 {
@@ -137,9 +137,8 @@ func (_m *MockCompactionMeta) CompleteCompactionMutation(ctx context.Context, t 
 	}
 
 	var r0 []*SegmentInfo
-	var r1 *segMetricMutation
-	var r2 error
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CompactionTask, *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error)); ok {
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CompactionTask, *datapb.CompactionPlanResult) ([]*SegmentInfo, error)); ok {
 		return rf(ctx, t, result)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CompactionTask, *datapb.CompactionPlanResult) []*SegmentInfo); ok {
@@ -150,21 +149,13 @@ func (_m *MockCompactionMeta) CompleteCompactionMutation(ctx context.Context, t 
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *datapb.CompactionTask, *datapb.CompactionPlanResult) *segMetricMutation); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.CompactionTask, *datapb.CompactionPlanResult) error); ok {
 		r1 = rf(ctx, t, result)
 	} else {
-		if ret.Get(1) != nil {
-			r1 = ret.Get(1).(*segMetricMutation)
-		}
+		r1 = ret.Error(1)
 	}
 
-	if rf, ok := ret.Get(2).(func(context.Context, *datapb.CompactionTask, *datapb.CompactionPlanResult) error); ok {
-		r2 = rf(ctx, t, result)
-	} else {
-		r2 = ret.Error(2)
-	}
-
-	return r0, r1, r2
+	return r0, r1
 }
 
 // MockCompactionMeta_CompleteCompactionMutation_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CompleteCompactionMutation'
@@ -187,12 +178,12 @@ func (_c *MockCompactionMeta_CompleteCompactionMutation_Call) Run(run func(ctx c
 	return _c
 }
 
-func (_c *MockCompactionMeta_CompleteCompactionMutation_Call) Return(_a0 []*SegmentInfo, _a1 *segMetricMutation, _a2 error) *MockCompactionMeta_CompleteCompactionMutation_Call {
-	_c.Call.Return(_a0, _a1, _a2)
+func (_c *MockCompactionMeta_CompleteCompactionMutation_Call) Return(_a0 []*SegmentInfo, _a1 error) *MockCompactionMeta_CompleteCompactionMutation_Call {
+	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockCompactionMeta_CompleteCompactionMutation_Call) RunAndReturn(run func(context.Context, *datapb.CompactionTask, *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error)) *MockCompactionMeta_CompleteCompactionMutation_Call {
+func (_c *MockCompactionMeta_CompleteCompactionMutation_Call) RunAndReturn(run func(context.Context, *datapb.CompactionTask, *datapb.CompactionPlanResult) ([]*SegmentInfo, error)) *MockCompactionMeta_CompleteCompactionMutation_Call {
 	_c.Call.Return(run)
 	return _c
 }

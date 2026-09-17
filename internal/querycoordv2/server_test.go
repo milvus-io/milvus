@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/metacache"
 	coordMocks "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/dist"
@@ -734,7 +735,7 @@ func (suite *ServerSuite) updateCollectionStatus(collectionID int64, status quer
 func (suite *ServerSuite) hackServer() {
 	suite.broker = meta.NewMockBroker(suite.T())
 	suite.server.broker = suite.broker
-	suite.server.targetMgr = meta.NewTargetManager(suite.broker, suite.server.meta)
+	suite.server.targetMgr = meta.NewTargetManager(suite.broker, suite.server.meta, metacache.NewMetaStore(nil))
 	suite.server.taskScheduler = task.NewScheduler(
 		suite.server.ctx,
 		suite.server.meta,

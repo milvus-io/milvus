@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/json"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
@@ -218,9 +219,9 @@ func (suite *ServiceSuite) SetupTest() {
 	suite.store = querycoord.NewCatalog(suite.kv)
 	suite.nodeMgr = session.NewNodeManager()
 	suite.dist = meta.NewDistributionManager(suite.nodeMgr)
-	suite.meta = meta.NewMeta(params.RandomIncrementIDAllocator(), suite.store, suite.nodeMgr)
+	suite.meta = meta.NewMeta(params.RandomIncrementIDAllocator(), suite.store, suite.nodeMgr, metacache.NewMetaStore(nil))
 	suite.broker = meta.NewMockBroker(suite.T())
-	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta)
+	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta, metacache.NewMetaStore(nil))
 	suite.cluster = session.NewMockCluster(suite.T())
 	suite.cluster.EXPECT().SyncDistribution(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
 	suite.targetObserver = observers.NewTargetObserver(
