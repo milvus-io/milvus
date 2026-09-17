@@ -1296,6 +1296,11 @@ COMPACTION_INTEGRITY_V2_DDL_DROP_CANDIDATES = (
 )
 COMPACTION_INTEGRITY_DDL_ROWS_PER_BATCH = int(os.getenv("MILVUS_COMPACTION_INTEGRITY_DDL_ROWS_PER_BATCH", "5000"))
 COMPACTION_INTEGRITY_DDL_BATCHES = int(os.getenv("MILVUS_COMPACTION_INTEGRITY_DDL_BATCHES", "5"))
+# Dedicated V2 projection workload: do not change the ordinary suite's dim=16.
+COMPACTION_INTEGRITY_V2_PROJECTION_ROWS = int(os.getenv("MILVUS_COMPACTION_INTEGRITY_V2_PROJECTION_ROWS", "16384"))
+COMPACTION_INTEGRITY_V2_PROJECTION_DIM = int(os.getenv("MILVUS_COMPACTION_INTEGRITY_V2_PROJECTION_DIM", "4096"))
+COMPACTION_INTEGRITY_V2_PROJECTION_INSERT_BATCH = 256
+COMPACTION_INTEGRITY_V2_PROJECTION_DROP_FIELD = "binary_vector"
 COMPACTION_INTEGRITY_V3_ADOPTION_TIMEOUT = 30
 COMPACTION_INTEGRITY_KEEP_DDL_COLLECTION = (
     os.getenv("MILVUS_COMPACTION_INTEGRITY_KEEP_DDL_COLLECTION", "false").lower() == "true"
@@ -1900,6 +1905,36 @@ def _canonical_compaction_integrity_row(row, output_fields, primary_key_type):
     return {
         field_name: _canonical_compaction_integrity_cell(field_name, row[field_name], primary_key_type)
         for field_name in output_fields
+    }
+
+
+def _build_compaction_integrity_v2_projection_row(run_id, logical_pk, explicit_test_ts, wide_dim):
+    """Unequal-width, PK-bound vectors; no dependence on physical file layout."""
+    assert 0 <= logical_pk < 2**20, "narrow FLOAT16 fingerprint requires a 20-bit PK"
+    assert 0 < explicit_test_ts < 2**24
+    assert 16 < wide_dim <= 32768
+    # Mix each coordinate to avoid a highly compressible repeated wide payload,
+    # without touching the process-wide RNG or introducing float roundoff.
+    coordinates = np.arange(wide_dim, dtype=np.uint32)
+    values = coordinates ^ np.uint32((logical_pk * 2654435761 + explicit_test_ts * 2246822519 + 7) & 0xFFFFFFFF)
+    values ^= values >> 16
+    values *= np.uint32(0x7FEB352D)
+    values ^= values >> 15
+    values *= np.uint32(0x846CA68B)
+    values ^= values >> 16
+    wide_vector = (values & np.uint32(0xFFFFFF)).astype(np.float32) / np.float32(2**20)
+    wide_vector[:3] = [logical_pk, explicit_test_ts, 7]
+    return {
+        "id": _compaction_integrity_physical_pk(logical_pk, DataType.VARCHAR),
+        "explicit_test_ts": explicit_test_ts,
+        "int64_value": logical_pk * 257 + explicit_test_ts,
+        "varchar_payload": _compaction_integrity_signature(run_id, logical_pk, explicit_test_ts, 4),
+        # Declaration order is intentional, but is not a claim about file order.
+        "binary_vector": _compaction_integrity_binary_vector(logical_pk, explicit_test_ts, 5),
+        "float16_vector": np.frombuffer(
+            _compaction_integrity_float16_vector(logical_pk, explicit_test_ts, 6), dtype=np.float16
+        ).copy(),
+        "float_vector": wide_vector.tolist(),
     }
 
 
@@ -4273,6 +4308,183 @@ class TestMilvusClientCompactionDataIntegrity(TestMilvusClientV2Base):
                         drop_seed=drop_seed,
                         dropped_fields=list(dropped_fields),
                     )
+            finally:
+                if created and COMPACTION_INTEGRITY_KEEP_DDL_COLLECTION:
+                    _log_compaction_integrity_evidence(
+                        "ddl_collection_preserved", collection=collection_name, storage_version=2
+                    )
+                elif created:
+                    self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.parametrize("compaction_integrity_storage_config", [2], indirect=True, ids=["storage_v2"])
+    def test_v2_drop_vector_mix_compaction_preserves_projected_rows(self, compaction_integrity_storage_config):
+        """
+        target: detect retained-column/PK misalignment after V2 vector-field projection (milvus-storage#667)
+        method: persist unequal-width vectors, verify all cells, drop a vector, then verify an adopted Mix rewrite
+        expected: every retained cell matches its original PK, using SDK lifecycle evidence and no storage-file reads
+        """
+        # This is an adversarial E2E workload, not proof of a particular native
+        # buffer schedule; calibrate reproduction on buggy/fixed builds separately.
+        row_count = COMPACTION_INTEGRITY_V2_PROJECTION_ROWS
+        wide_dim = COMPACTION_INTEGRITY_V2_PROJECTION_DIM
+        batch_size = COMPACTION_INTEGRITY_V2_PROJECTION_INSERT_BATCH
+        assert 1 < row_count <= 2**20
+        assert 16 < wide_dim <= 32768
+        assert batch_size > 0
+        assert compaction_integrity_storage_config["storage_version"] == 2
+        client = self._client()
+        collection_name = cf.gen_unique_str("v2_projection_compaction_integrity")
+        primary_key_type = DataType.VARCHAR
+        dropped_field = COMPACTION_INTEGRITY_V2_PROJECTION_DROP_FIELD
+        controller = compaction_integrity_storage_config["controller"]
+        config_key = COMPACTION_INTEGRITY_BUMP_SCHEMA_VERSION_CONFIG
+        original = controller.read_config(config_key)
+        with self._preserve_compaction_integrity_runtime_config(
+            controller, config_key, original, evidence_prefix="v2_projection_bump_schema"
+        ):
+            configured = controller.set_config(config_key, "false", settle_after_write=True)
+            observed = controller.read_config(config_key)
+            assert observed.value == b"false" and observed.mod_revision == configured.mod_revision
+            created = False
+            try:
+                schema = self.create_schema(client, auto_id=False, enable_dynamic_field=False)[0]
+                schema.add_field("id", DataType.VARCHAR, max_length=64, is_primary=True, auto_id=False)
+                schema.add_field("explicit_test_ts", DataType.INT64)
+                schema.add_field("int64_value", DataType.INT64)
+                schema.add_field("varchar_payload", DataType.VARCHAR, max_length=512)
+                schema.add_field(dropped_field, DataType.BINARY_VECTOR, dim=COMPACTION_INTEGRITY_VECTOR_DIM)
+                schema.add_field("float16_vector", DataType.FLOAT16_VECTOR, dim=COMPACTION_INTEGRITY_VECTOR_DIM)
+                schema.add_field("float_vector", DataType.FLOAT_VECTOR, dim=wide_dim)
+                output_fields = [field.name for field in schema.fields]
+                indexes = self.prepare_index_params(client)[0]
+                indexes.add_index(dropped_field, index_type="BIN_FLAT", metric_type="HAMMING")
+                indexes.add_index("float16_vector", index_type="FLAT", metric_type="L2")
+                indexes.add_index("float_vector", index_type="FLAT", metric_type="L2")
+                self.create_collection(client, collection_name, schema=schema, consistency_level="Strong", num_shards=1)
+                created = True
+                self.create_index(client, collection_name, indexes)
+                self.load_collection(client, collection_name)
+                _log_compaction_integrity_evidence(
+                    "v2_projection_workload_started",
+                    collection=collection_name,
+                    rows=row_count,
+                    wide_dim=wide_dim,
+                    wide_payload_bytes=row_count * wide_dim * 4,
+                    narrow_dim=COMPACTION_INTEGRITY_VECTOR_DIM,
+                    dropped_field=dropped_field,
+                    insert_batch_size=batch_size,
+                    config_key=config_key,
+                    config_revision=configured.mod_revision,
+                    bump_enabled=False,
+                    physical_layout_inspection=False,
+                    native_refill_verified=False,
+                )
+                expected_by_pk = {}
+                for batch_index, pk_start in enumerate(range(0, row_count, batch_size)):
+                    explicit_test_ts = batch_index + 1
+                    rows = [
+                        _build_compaction_integrity_v2_projection_row(
+                            collection_name, logical_pk, explicit_test_ts, wide_dim
+                        )
+                        for logical_pk in range(pk_start, min(row_count, pk_start + batch_size))
+                    ]
+                    batch_expected = {
+                        row["id"]: _canonical_compaction_integrity_row(row, output_fields, primary_key_type)
+                        for row in rows
+                    }
+                    result = self.insert(client, collection_name, rows)[0]
+                    assert result["insert_count"] == len(rows)
+                    expected_by_pk.update(batch_expected)
+                    _log_compaction_integrity_evidence(
+                        "v2_projection_ingress_mutation_committed",
+                        **_compaction_integrity_ingress_identity(
+                            collection_name,
+                            "insert",
+                            0,
+                            batch_index,
+                            explicit_test_ts,
+                            batch_expected,
+                            primary_key_type,
+                        ),
+                        expected_total=len(expected_by_pk),
+                    )
+                # Small RPC payloads do not mean small flush batches or control
+                # the native reader; flush once after the complete logical ingress.
+                self.flush(client, collection_name)
+                _log_compaction_integrity_evidence(
+                    "v2_projection_ingress_persistence_requested", collection=collection_name, rows=row_count
+                )
+                checkpoint, _, _ = _assert_compaction_integrity_fenced_dataset(
+                    client,
+                    collection_name,
+                    expected_by_pk,
+                    output_fields,
+                    primary_key_type,
+                    expected_storage_version=2,
+                    timeout=600,
+                )
+                _assert_compaction_integrity_v2_ddl_checkpoint(checkpoint)
+                schema_before = _compaction_integrity_schema_snapshot(client, collection_name)
+                assert set(schema_before["fields"]) == set(output_fields)
+                _log_compaction_integrity_checkpoint(
+                    "C0_projection_initial",
+                    collection_name,
+                    checkpoint,
+                    schema_before,
+                    rows=row_count,
+                    expected_cell_count=row_count * len(output_fields),
+                    dropped_field=dropped_field,
+                )
+
+                self.drop_collection_field(client, collection_name, field_name=dropped_field)
+                retained_fields = [field for field in output_fields if field != dropped_field]
+                for expected in expected_by_pk.values():
+                    expected.pop(dropped_field)
+                schema_after = _compaction_integrity_schema_snapshot(client, collection_name)
+                assert schema_after["schema_version"] > schema_before["schema_version"]
+                assert set(schema_after["fields"]) == set(retained_fields)
+                manual_job = self.compact(client, collection_name)[0]
+                self._wait_for_ddl_schema_transition(
+                    client,
+                    collection_name,
+                    row_count,
+                    checkpoint,
+                    transition_policy="lineage",
+                    expected_schema_version=schema_after["schema_version"],
+                    expected_storage_version=2,
+                    required_task_types={"MixCompaction"},
+                    timeout=600,
+                )
+
+                def verify_dropped_index():
+                    assert client.list_indexes(collection_name, field_name=dropped_field) == []
+
+                after, _, _ = _assert_compaction_integrity_fenced_dataset(
+                    client,
+                    collection_name,
+                    expected_by_pk,
+                    retained_fields,
+                    primary_key_type,
+                    expected_storage_version=2,
+                    additional_validator=verify_dropped_index,
+                    timeout=600,
+                )
+                edges = _assert_compaction_integrity_v2_ddl_checkpoint(after, checkpoint)
+                observed = controller.read_config(config_key)
+                assert observed.value == b"false" and observed.mod_revision == configured.mod_revision
+                _log_compaction_integrity_checkpoint(
+                    "C1_projection_drop_vector",
+                    collection_name,
+                    after,
+                    schema_after,
+                    rows=row_count,
+                    expected_cell_count=row_count * len(retained_fields),
+                    expected_pk_digest=_compaction_integrity_pk_digest(expected_by_pk, primary_key_type),
+                    dropped_field=dropped_field,
+                    manual_job=manual_job,
+                    accepted_edges=sorted(edges),
+                )
             finally:
                 if created and COMPACTION_INTEGRITY_KEEP_DDL_COLLECTION:
                     _log_compaction_integrity_evidence(
