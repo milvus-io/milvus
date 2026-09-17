@@ -532,6 +532,215 @@ func ManifestHasColumns(
 	return len(required) == 0, nil
 }
 
+// readManifestColumnGroupEntries copies selected column-group metadata into
+// Go-owned descriptors. Unlike Fragment, ColumnGroupEntry preserves all file
+// properties (including file_size and footer_size), so the native manifest can
+// be released here without losing metadata needed by Parquet/Vortex readers.
+func readManifestColumnGroupEntries(
+	manifestPath string,
+	storageConfig *indexpb.StorageConfig,
+	columns []string,
+) ([]ColumnGroupEntry, error) {
+	manifest, err := GetManifestHandle(manifestPath, storageConfig)
+	if err != nil {
+		return nil, merr.Wrap(err, "read source manifest column groups")
+	}
+	if manifest == nil {
+		return nil, merr.WrapErrDataIntegrityMsg("source manifest %s is nil", manifestPath)
+	}
+	defer C.loon_manifest_destroy(manifest)
+	groups, err := columnGroupEntriesFromC(&manifest.column_groups)
+	if err != nil {
+		// The shared decoder also handles writer output. At this boundary its
+		// shape errors describe corrupt persisted metadata, not a writer failure.
+		return nil, merr.WrapErrDataIntegrity(err, "decode column groups from manifest %s", manifestPath)
+	}
+
+	required := make(map[string]struct{}, len(columns))
+	for _, column := range columns {
+		required[column] = struct{}{}
+	}
+	missing := make(map[string]struct{}, len(required))
+	for column := range required {
+		missing[column] = struct{}{}
+	}
+
+	var selected []ColumnGroupEntry
+	for index, group := range groups {
+		matched := false
+		hasUnexpectedColumn := false
+		for _, column := range group.Columns {
+			if _, ok := required[column]; ok {
+				matched = true
+				delete(missing, column)
+				continue
+			}
+			hasUnexpectedColumn = true
+		}
+		if !matched {
+			continue
+		}
+		if hasUnexpectedColumn {
+			return nil, merr.WrapErrDataIntegrityMsg(
+				"manifest %s mixes requested columns with unrelated columns in column group %d",
+				manifestPath,
+				index,
+			)
+		}
+		if len(group.Files) == 0 {
+			return nil, merr.WrapErrDataIntegrityMsg("manifest %s column group %d has no files", manifestPath, index)
+		}
+		if group.Format == "" {
+			return nil, merr.WrapErrDataIntegrityMsg("manifest %s column group %d has files but no format", manifestPath, index)
+		}
+		selected = append(selected, group)
+	}
+
+	if len(missing) > 0 {
+		missingColumns := make([]string, 0, len(missing))
+		for column := range missing {
+			missingColumns = append(missingColumns, column)
+		}
+		sort.Strings(missingColumns)
+		return nil, merr.WrapErrDataIntegrityMsg(
+			"manifest %s is missing columns %v",
+			manifestPath,
+			missingColumns,
+		)
+	}
+	return selected, nil
+}
+
+// ManifestArtifactCarryResult is the complete metadata produced by carrying
+// artifacts onto a rebuilt manifest. The stats maps are derived from the final
+// manifest contents, including target-side entries that won on duplicate keys.
+// The result is empty on any error. A commit may already have succeeded; leave
+// failure artifacts for segment-drop GC so manifest versions cannot be reused.
+type ManifestArtifactCarryResult struct {
+	ManifestPath  string
+	TextStatsLogs map[int64]*datapb.TextIndexStats
+	JSONKeyStats  map[int64]*datapb.JsonKeyStats
+}
+
+// CarryManifestArtifacts completes a deltalog-only manifest refresh by
+// attaching artifacts derived from unchanged L1 rows to the rebuilt target
+// manifest. Selected source column groups retain all packed-writer file
+// properties through ColumnGroupEntry. Source stats are added only when the
+// target does not already contain the same stat key. Both kinds of artifacts
+// are committed together so callers do not publish an intermediate manifest.
+//
+// Source deltalogs are intentionally not copied: targetManifestPath must already
+// contain the latest complete deltalog set. Callers must also prove that the L1
+// fragments and Function definitions are unchanged before using this helper.
+func CarryManifestArtifacts(
+	sourceManifestPath string,
+	targetManifestPath string,
+	storageConfig *indexpb.StorageConfig,
+	columns []string,
+) (ManifestArtifactCarryResult, error) {
+	sourceBasePath, _, err := UnmarshalManifestPath(sourceManifestPath)
+	if err != nil {
+		return ManifestArtifactCarryResult{}, merr.WrapErrDataIntegrity(err, "parse source manifest path")
+	}
+	targetBasePath, targetVersion, err := UnmarshalManifestPath(targetManifestPath)
+	if err != nil {
+		return ManifestArtifactCarryResult{}, merr.WrapErrDataIntegrity(err, "parse target manifest path")
+	}
+	if sourceBasePath != targetBasePath {
+		return ManifestArtifactCarryResult{}, merr.WrapErrServiceInternalMsg(
+			"cannot carry manifest artifacts across segment base paths: source=%s target=%s",
+			sourceBasePath,
+			targetBasePath,
+		)
+	}
+
+	var columnGroups []ColumnGroupEntry
+	if len(columns) > 0 {
+		columnGroups, err = readManifestColumnGroupEntries(sourceManifestPath, storageConfig, columns)
+		if err != nil {
+			return ManifestArtifactCarryResult{}, err
+		}
+	}
+
+	sourceStats, err := GetManifestStats(sourceManifestPath, storageConfig)
+	if err != nil {
+		return ManifestArtifactCarryResult{}, merr.Wrap(err, "read source manifest stats")
+	}
+	targetStats, err := GetManifestStats(targetManifestPath, storageConfig)
+	if err != nil {
+		return ManifestArtifactCarryResult{}, merr.Wrap(err, "read rebuilt manifest stats")
+	}
+
+	statKeys := make([]string, 0, len(sourceStats))
+	for key := range sourceStats {
+		if _, exists := targetStats[key]; !exists {
+			statKeys = append(statKeys, key)
+		}
+	}
+	sort.Strings(statKeys)
+	stats := make([]StatEntry, 0, len(statKeys))
+	for _, key := range statKeys {
+		stat := sourceStats[key]
+		stats = append(stats, StatEntry{
+			Key:      key,
+			Files:    stat.Paths,
+			Metadata: stat.Metadata,
+		})
+	}
+
+	manifestPath, err := CommitManifestUpdates(targetBasePath, targetVersion, storageConfig, &ManifestUpdates{
+		ColumnGroups: columnGroups,
+		Stats:        stats,
+	})
+	if err != nil {
+		return ManifestArtifactCarryResult{}, merr.Wrap(err, "reference source manifest artifacts")
+	}
+	// TODO: This carry commit currently uses OVERWRITE semantics. A manifest
+	// update committed concurrently after targetVersion, such as text or JSON
+	// stats, can be superseded. A follow-up should propagate the dispatched
+	// BaseManifest to DataCoord, reject stale refresh results, and retry the carry
+	// on version drift. Until then, derive placeholders from the committed
+	// manifest so SegmentInfo never advertises stats absent from that manifest.
+	finalStats, err := GetManifestStats(manifestPath, storageConfig)
+	if err != nil {
+		return ManifestArtifactCarryResult{}, merr.Wrap(err, "read final manifest stats")
+	}
+	textStatsLogs, jsonKeyStats := resolveManifestStatsPlaceholders(manifestPath, finalStats)
+	return ManifestArtifactCarryResult{
+		ManifestPath:  manifestPath,
+		TextStatsLogs: textStatsLogs,
+		JSONKeyStats:  jsonKeyStats,
+	}, nil
+}
+
+// RemoveUnpublishedManifest deletes exactly one manifest version after its
+// complete successor has been committed and will be retained. Never delete the
+// latest version, even if unpublished: Loon uses the highest existing version
+// to allocate the next one, and reusing a path would alias its cached manifest.
+// It must never be used for a manifest published in SegmentInfo. This helper
+// deliberately leaves every referenced data, delta, and stat file untouched.
+func RemoveUnpublishedManifest(
+	manifestPath string,
+	storageConfig *indexpb.StorageConfig,
+) error {
+	basePath, version, err := UnmarshalManifestPath(manifestPath)
+	if err != nil {
+		return merr.WrapErrDataIntegrity(err, "parse unpublished manifest path")
+	}
+	if version <= ManifestEarliest {
+		return merr.WrapErrDataIntegrityMsg(
+			"unpublished manifest %s has non-persisted version %d",
+			manifestPath,
+			version,
+		)
+	}
+	manifestFilePath := fmt.Sprintf("%s/_metadata/manifest-%d.avro", basePath, version)
+	if err := DeleteFile(storageConfig, manifestFilePath); err != nil {
+		return merr.Wrap(err, "remove unpublished manifest")
+	}
+	return nil
+}
+
 // ResolveManifestSingleWriterFormat returns the single-policy writer format
 // constrained by an existing manifest. When no committed manifest column group
 // overlaps columns, fallbackFormat is returned.
