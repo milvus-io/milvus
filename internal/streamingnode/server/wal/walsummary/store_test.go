@@ -67,7 +67,7 @@ func TestMarshalUnmarshalChunkRoundTrip(t *testing.T) {
 	assert.NotNil(t, footer)
 	assert.Equal(t, uint64(7), footer.GetGeneration())
 	assert.Equal(t, int64(1), footer.GetTerm())
-	assert.Equal(t, uint64(99), footer.GetStartAfterTimeTick())
+	assert.Equal(t, uint64(100), footer.GetStartTimeTick())
 	assert.Equal(t, uint64(102), footer.GetEndTimetick())
 	assert.Len(t, footer.GetChunks(), 2)
 
@@ -350,7 +350,7 @@ func TestMarshalUnmarshalIdempotencySectionsRoundTrip(t *testing.T) {
 
 	// The chunk span covers every vchannel in the object, not just the first:
 	// v2's single write sits between v1's two.
-	assert.Equal(t, uint64(99), footer.GetStartAfterTimeTick())
+	assert.Equal(t, uint64(100), footer.GetStartTimeTick())
 	assert.Equal(t, uint64(103), footer.GetEndTimetick())
 	v2Index := vchannelChunkIndex(&streamingpb.PChannelSummaryChunkIndexEntry{Vchannels: footer.GetChunks()}, "v2")
 	require.NotNil(t, v2Index)

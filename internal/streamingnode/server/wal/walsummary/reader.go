@@ -121,7 +121,7 @@ func (m *Manager) ReadTransform(ctx context.Context, vchannel string, after, thr
 		if chunk.GetEndTimetick() <= after {
 			continue
 		}
-		if chunk.GetStartAfterTimeTick() > target {
+		if chunk.GetStartTimeTick() > target {
 			break
 		}
 		index := vchannelChunkIndex(chunk, vchannel)
