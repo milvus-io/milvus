@@ -83,14 +83,20 @@ namespace milvus::index {
 
 namespace {
 
+// Bounds for the synchronous encrypted entry-stream implementation.
+struct EntryStreamLoadInfo {
+    bool encrypted{false};
+    size_t total_transient_bytes{0};
+    size_t max_task_transient_bytes{0};
+};
+
 uint64_t
 ScalarIndexStreamMemoryOverhead(
     uint64_t index_size_in_bytes,
     int32_t scalar_version,
     bool encrypted,
     bool file_stream,
-    const std::optional<storage::EntryStreamLoadInfo>& stream_load_info =
-        std::nullopt) {
+    const std::optional<EntryStreamLoadInfo>& stream_load_info = std::nullopt) {
     if (index_size_in_bytes == 0) {
         return 0;
     }
@@ -844,7 +850,7 @@ IndexFactory::ScalarIndexFileLoadResource(
     const bool may_write_files =
         use_async_load && (mmap_enable || file_stream || type == MARISA_TRIE ||
                            type == MARISA_TRIE_UPPER);
-    storage::EntryStreamLoadInfo legacy_stream;
+    EntryStreamLoadInfo legacy_stream;
     uint64_t total_transient = 0;
     uint64_t max_task = 0;
     for (const auto& entry : directory.Entries()) {
@@ -852,8 +858,18 @@ IndexFactory::ScalarIndexFileLoadResource(
                 std::get_if<storage::EncryptedEntrySource>(&entry.source)) {
             legacy_stream.encrypted = true;
             for (const auto& slice : encrypted->slices) {
+                if (!use_async_load) {
+                    const auto bytes = SaturatingAdd(
+                        slice.remote_bytes,
+                        SaturatingMultiply(slice.plaintext_bytes, uint64_t{2}));
+                    legacy_stream.total_transient_bytes = SaturatingAdd(
+                        legacy_stream.total_transient_bytes, bytes);
+                    legacy_stream.max_task_transient_bytes =
+                        std::max(legacy_stream.max_task_transient_bytes, bytes);
+                    continue;
+                }
                 auto bytes = SaturatingAdd(
-                    milvus::SaturatingMultiply(slice.remote_bytes, uint64_t{2}),
+                    SaturatingMultiply(slice.remote_bytes, uint64_t{2}),
                     slice.plaintext_bytes);
                 if (may_write_files) {
                     bytes = SaturatingAdd(
@@ -862,17 +878,10 @@ IndexFactory::ScalarIndexFileLoadResource(
                             slice.plaintext_bytes,
                             uint64_t{2 * storage::FileWriter::ALIGNMENT_MASK}));
                 }
-                const auto legacy_bytes = SaturatingAdd(
-                    slice.remote_bytes,
-                    SaturatingMultiply(slice.plaintext_bytes, uint64_t{2}));
-                legacy_stream.total_transient_bytes = SaturatingAdd(
-                    legacy_stream.total_transient_bytes, legacy_bytes);
-                legacy_stream.max_task_transient_bytes = std::max(
-                    legacy_stream.max_task_transient_bytes, legacy_bytes);
                 total_transient = SaturatingAdd(total_transient, bytes);
                 max_task = std::max(max_task, bytes);
             }
-        } else {
+        } else if (use_async_load) {
             const auto slice_size = storage::DefaultStreamSliceSize();
             auto bytes = entry.plaintext_size;
             auto task_bytes = std::min<uint64_t>(bytes, slice_size);
@@ -893,19 +902,13 @@ IndexFactory::ScalarIndexFileLoadResource(
     }
     // Estimates survive admission refreshes, including removal of all limits.
     // The shared overhead group applies the live global bound where eligible.
-    const auto read_peak = total_transient;
-    const auto legacy_peak =
-        ScalarIndexStreamMemoryOverhead(index_size,
-                                        std::max(version, 3),
-                                        legacy_stream.encrypted,
-                                        file_stream,
-                                        legacy_stream);
-    const auto legacy = ScalarIndexLoadResourceWithOverhead(field_type,
-                                                            index_size,
-                                                            resolved_params,
-                                                            mmap_enable,
-                                                            num_rows,
-                                                            legacy_peak);
+    const auto read_peak = use_async_load ? total_transient
+                                          : ScalarIndexStreamMemoryOverhead(
+                                                index_size,
+                                                std::max(version, 3),
+                                                legacy_stream.encrypted,
+                                                file_stream,
+                                                legacy_stream);
     uint64_t staging_bytes = 0;
     if ((type == INVERTED_INDEX_TYPE || type == NGRAM_INDEX_TYPE) &&
         directory.HasEntry(INDEX_NULL_OFFSET_FILE_NAME)) {
@@ -967,39 +970,23 @@ IndexFactory::ScalarIndexFileLoadResource(
         std::max(request.max_memory_cost,
                  SaturatingAdd(request.final_memory_cost,
                                SaturatingAdd(staging_bytes, read_peak)));
-    // Preserve both routes' final and request-local overhead estimates. A cell
-    // can be reloaded after either rollout or executor configuration changes.
-    // Ordered sync prefetch retains completed buffers beyond worker execution.
-    // Only direct-to-file sync streams have worker-bounded scratch lifetimes.
+    // The translator pins the load mode for the lifetime of this cell.
+    // Ordered sync prefetch retains completed buffers beyond worker execution;
+    // only its direct-to-file streams have worker-bounded scratch lifetimes.
     const bool can_share =
         (use_async_load || file_stream) && staging_bytes == 0 &&
         type != BITMAP_INDEX_TYPE &&
-        request.max_memory_cost - request.final_memory_cost <= read_peak &&
-        legacy.max_memory_cost - legacy.final_memory_cost <= legacy_peak;
-    const auto memory_overhead =
-        std::max(request.max_memory_cost - request.final_memory_cost,
-                 legacy.max_memory_cost - legacy.final_memory_cost);
-    const auto disk_overhead =
-        std::max(request.max_disk_cost - request.final_disk_cost,
-                 legacy.max_disk_cost - legacy.final_disk_cost);
-    request.final_memory_cost =
-        std::max(request.final_memory_cost, legacy.final_memory_cost);
-    request.final_disk_cost =
-        std::max(request.final_disk_cost, legacy.final_disk_cost);
-    request.max_memory_cost =
-        SaturatingAdd(request.final_memory_cost, memory_overhead);
-    request.max_disk_cost =
-        SaturatingAdd(request.final_disk_cost, disk_overhead);
-    max_task = std::max<uint64_t>(
-        max_task,
-        legacy_stream.encrypted
-            ? legacy_stream.max_task_transient_bytes
-            : SaturatingMultiply(storage::MaxEntryStreamTaskBytes(),
-                                 file_stream
-                                     ? storage::kFileStreamBufferMultiplier
-                                     : size_t{1}));
+        request.max_memory_cost - request.final_memory_cost <= read_peak;
+    if (!use_async_load) {
+        max_task = legacy_stream.encrypted
+                       ? legacy_stream.max_task_transient_bytes
+                       : SaturatingMultiply(
+                             storage::MaxEntryStreamTaskBytes(),
+                             file_stream ? storage::kFileStreamBufferMultiplier
+                                         : size_t{1});
+    }
     std::optional<cachinglayer::LoadingOverheadConfig> overhead;
-    // Both routes must lease the entire overhead before sharing its reservation.
+    // Shared reservations require the selected route to lease all scratch.
     if (can_share) {
         auto& controller = storage::LoadMemoryOverheadController::GetInstance();
         auto memory_group = controller.GetOrCreate();

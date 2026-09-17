@@ -80,8 +80,6 @@ class ScalarIndexSort : public ScalarIndex<T> {
     void
     Load(milvus::tracer::TraceContext ctx, const Config& config = {}) override;
 
-    using ScalarIndex<T>::Load;
-
     int64_t
     Count() override {
         return total_num_rows_;
@@ -206,9 +204,6 @@ class ScalarIndexSort : public ScalarIndex<T> {
     folly::coro::Task<void>
     FinishLoadAsync(IndexLoadPlan& plan, const Config& config) override;
 
- protected:
- public:
- public:
     // zero-cost data acess api
     ALWAYS_INLINE const IndexStructure<T>&
     operator[](size_t idx) const {

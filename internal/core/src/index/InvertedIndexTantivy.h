@@ -92,7 +92,6 @@ using RustArrayWrapper = milvus::tantivy::RustArrayWrapper;
 template <typename T>
 class InvertedIndexTantivy : public ScalarIndex<T> {
  public:
-    using ScalarIndex<T>::Load;
     using MemFileManager = storage::MemFileManagerImpl;
     using MemFileManagerPtr = std::shared_ptr<MemFileManager>;
     using DiskFileManager = storage::DiskFileManagerImpl;
@@ -394,7 +393,6 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     virtual nlohmann::json
     BuildTantivyMeta(const std::vector<std::string>& file_names, bool has_null);
 
- protected:
     std::shared_ptr<TantivyIndexWrapper> wrapper_;
     TantivyDataType d_type_;
     std::string path_;

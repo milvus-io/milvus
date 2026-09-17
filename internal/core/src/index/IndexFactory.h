@@ -46,7 +46,6 @@ class IndexFactory {
     IndexFactory
     operator=(const IndexFactory&) = delete;
 
- public:
     static IndexFactory&
     GetInstance() {
         // thread-safe enough after c++ 11

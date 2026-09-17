@@ -49,6 +49,12 @@ class StringIndexBaseTest : public ::testing::Test {
 
 class StringIndexSortTest : public StringIndexBaseTest {};
 
+class InspectableStringIndexSort : public StringIndexSort {
+ public:
+    using StringIndexSort::StringIndexSort;
+    using StringIndexSort::valid_bitset_;
+};
+
 namespace {
 
 class ExposedStringIndexSort : public StringIndexSort {
@@ -225,7 +231,7 @@ TEST(StringIndexSortV3AsyncLoadTest, PackedValidityUsesFinalAllocation) {
             if (mmap) {
                 config[MMAP_FILE_PATH] = fixture.root_path + "/mmap/index";
             }
-            StringIndexSort load_index(fixture.ctx);
+            InspectableStringIndexSort load_index(fixture.ctx);
             {
                 milvus::test::ControlledDirectReadFile* remote_file = nullptr;
                 auto reader = milvus::test::OpenDirectIndexEntryReader(

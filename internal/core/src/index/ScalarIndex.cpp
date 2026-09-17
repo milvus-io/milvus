@@ -291,19 +291,6 @@ ScalarIndex<T>::LoadUnified(const Config& config, milvus::OpContext* op_ctx) {
     LOG_INFO("LoadUnified completed for index type: {}", index_type_);
 }
 
-template <typename T>
-void
-ScalarIndex<T>::Load(milvus::tracer::TraceContext ctx,
-                     const Config& config,
-                     milvus::OpContext* op_ctx) {
-    // FMIndex has always persisted the packed format, even through Load().
-    if (GetIndexType() == ScalarIndexType::FMINDEX) {
-        LoadUnified(config, op_ctx);
-        return;
-    }
-    this->Load(ctx, config);
-}
-
 template class ScalarIndex<bool>;
 template class ScalarIndex<int8_t>;
 template class ScalarIndex<int16_t>;

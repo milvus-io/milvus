@@ -186,14 +186,16 @@ SealedIndexTranslator::get_cells(milvus::OpContext* ctx,
         milvus::index::GetValueFromConfig<int32_t>(
             config_, milvus::index::SCALAR_INDEX_ENGINE_VERSION)
             .value_or(1);
-    if (scalar_version >= 3 && !IsVectorDataType(index_info_.field_type)) {
+    if (!IsVectorDataType(index_info_.field_type) &&
+        (scalar_version >= 3 ||
+         index_info_.index_type == milvus::index::FMINDEX_INDEX_TYPE)) {
         config_[milvus::index::COLLECTION_ID] =
             file_manager_context_.fieldDataMeta.collection_id;
         LOG_INFO("load V3 scalar index with configs: {}", config_.dump());
         index->LoadUnified(config_, ctx);
     } else {
         LOG_INFO("load index with configs: {}", config_.dump());
-        index->Load(ctx_, config_, ctx);
+        index->Load(ctx_, config_);
     }
 
     std::vector<std::pair<cid_t, std::unique_ptr<milvus::index::IndexBase>>>

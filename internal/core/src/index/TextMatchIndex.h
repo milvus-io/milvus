@@ -50,7 +50,6 @@ class TextMatchIndex : public InvertedIndexTantivy<std::string> {
 
     using InvertedIndexTantivy<std::string>::Load;
 
- public:
     IndexStatsPtr
     Upload(const Config& config) override;
 
@@ -60,7 +59,6 @@ class TextMatchIndex : public InvertedIndexTantivy<std::string> {
     void
     Load(const Config& config, milvus::OpContext* op_ctx = nullptr);
 
- public:
     void
     AddTextSealed(const std::string& text, const bool valid, int64_t offset);
 
@@ -91,7 +89,6 @@ class TextMatchIndex : public InvertedIndexTantivy<std::string> {
     void
     Reload();
 
- public:
     void
     CreateReader(SetBitsetFn set_bitset);
 
@@ -114,7 +111,6 @@ class TextMatchIndex : public InvertedIndexTantivy<std::string> {
     bool
     shouldTriggerCommit();
 
- private:
     mutable std::mutex mtx_;
     std::atomic<stdclock::time_point> last_commit_time_;
     int64_t commit_interval_in_ms_;

@@ -120,15 +120,8 @@ class ScalarIndex : public IndexBase {
                   "scalar index don't support build index with dataset");
     };
 
- public:
     using IndexBase::Build;
     using IndexBase::Load;
-
-    // Forward cancellation to packed FMIndex loads.
-    void
-    Load(milvus::tracer::TraceContext ctx,
-         const Config& config,
-         milvus::OpContext* op_ctx) override;
 
     virtual ScalarIndexType
     GetIndexType() const = 0;

@@ -153,7 +153,6 @@ class FileManagerImpl : public milvus::FileManager {
           use_async_load_(use_async_load) {
     }
 
- public:
     // Unset means the caller has no cache-owned resource reservation.
     std::optional<bool>
     GetAsyncLoadEnabled() const {
@@ -321,7 +320,6 @@ class FileManagerImpl : public milvus::FileManager {
             OpenOutputStream(filename, is_index_file));
     }
 
- public:
     virtual std::string
     GetName() const = 0;
 

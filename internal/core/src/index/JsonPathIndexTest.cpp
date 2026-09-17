@@ -487,9 +487,8 @@ TEST(JsonPathIndexTest, SortDouble_LegacyContextLoadFinalizesWrapper) {
     load_config[ENABLE_MMAP] = false;
     load_config[JSON_PATH] = "/a";
     load_config[INDEX_TYPE] = ASCENDING_SORT;
-    OpContext op_ctx;
     static_cast<IndexBase&>(load_index)
-        .Load(tracer::TraceContext{}, load_config, &op_ctx);
+        .Load(tracer::TraceContext{}, load_config);
 
     EXPECT_EQ(load_index.Count(), 4);
     const auto exists = load_index.Exists();
