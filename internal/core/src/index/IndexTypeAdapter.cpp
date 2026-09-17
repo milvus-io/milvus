@@ -268,18 +268,28 @@ AdaptIndexType(const IndexTypeAdapterRequest& request) {
     }
 
     if (request.field_type == DataType::GEOMETRY) {
-        AssertInfo(request.index_type == RTREE_INDEX_TYPE,
-                   "geometry requires RTREE index, got {}",
-                   request.index_type);
+        if (request.index_type != RTREE_INDEX_TYPE) {
+            // A build this node cannot serve, not an unclassified bug: the Go
+            // index scheduler matches ErrSegcoreUnsupported and fails the task
+            // instead of re-dispatching it forever.
+            ThrowInfo(Unsupported,
+                      "geometry requires RTREE index, got {}",
+                      request.index_type);
+        }
         result.family = families::kRTree;
         result.value_type = DataType::GEOMETRY;
     } else if (request.field_type == DataType::JSON) {
         auto cast = JsonCast(request.params);
         result.value_type = JsonCastValueType(cast);
         if (cast.element_type() == JsonCastType::DataType::JSON) {
-            AssertInfo(request.index_type == INVERTED_INDEX_TYPE ||
-                           request.index_type == NGRAM_INDEX_TYPE,
-                       "JSON flat index requires INVERTED or NGRAM spelling");
+            if (request.index_type != INVERTED_INDEX_TYPE &&
+                request.index_type != NGRAM_INDEX_TYPE) {
+                ThrowInfo(
+                    Unsupported,
+                    "JSON flat index requires INVERTED or NGRAM spelling, "
+                    "got {}",
+                    request.index_type);
+            }
             result.family = families::kJsonFlat;
         } else {
             const auto cast_type = cast.element_type();

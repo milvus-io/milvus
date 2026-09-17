@@ -121,16 +121,22 @@ PlaceholderBox() {
 }  // namespace
 
 RTreeBuildEngine::RTreeBuildEngine(std::string index_path)
-    : index_path_(std::move(index_path)), geos_context_(GEOS_init_r()) {
+    : index_path_(std::move(index_path)),
+      // InitGEOSContext turns the bad_alloc GEOS_init_r raises on OOM into a
+      // retriable MemAllocateFailed; a bare GEOS_init_r() lets it reach cgo as
+      // UnexpectedError(2001), inverting transient vs permanent.
+      geos_context_(InitGEOSContext("R-Tree build")) {
     if (geos_context_ == nullptr) {
-        ThrowInfo(UnexpectedError,
+        ThrowInfo(ErrorCode::MemAllocateFailed,
                   "failed to initialize GEOS for R-Tree build");
     }
     wkb_reader_ = GEOSWKBReader_create_r(geos_context_);
     if (wkb_reader_ == nullptr) {
         GEOS_finish_r(geos_context_);
         geos_context_ = nullptr;
-        ThrowInfo(UnexpectedError,
+        // Resource acquisition failure, not an invariant: same code master
+        // gives every GEOS reader-creation failure.
+        ThrowInfo(ErrorCode::MemAllocateFailed,
                   "failed to create GEOS WKB reader for R-Tree build");
     }
 }

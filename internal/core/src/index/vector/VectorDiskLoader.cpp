@@ -32,6 +32,7 @@
 
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
+#include "common/Utils.h"
 #include "index/Meta.h"
 #include "index/vector/KnowhereEngine.h"
 #include "index/vector/VectorIndexReader.h"
@@ -40,7 +41,6 @@
 #include "index/vector/VectorParamUtils.h"
 #include "knowhere/binaryset.h"
 #include "knowhere/comp/index_param.h"
-#include "knowhere/segcore_error_code.h"
 #include "nlohmann/json.hpp"
 #include "storage/artifact/DiskEngineFileHandle.h"
 
@@ -499,7 +499,7 @@ ValidateShape(const RuntimeParams& params,
 
 [[noreturn]] void
 ThrowDeserializeError(knowhere::Status status) {
-    ThrowInfo(knowhere::ToSegcoreErrorCode(status),
+    ThrowInfo(KnowhereStatusToErrorCode(status),
               "failed to deserialize disk vector index: status {} ({})",
               static_cast<int>(status),
               knowhere::Status2String(status));
@@ -555,7 +555,6 @@ OpenIndex(storage::FileSource& source,
         engine.SetEmptyEmbListOffsets(std::move(empty.offsets));
         if (restored_id_map.has_valid_data) {
             FinalizeRestoredIdMap(engine.native_index.Node(),
-                                  UnexpectedError,
                                   "empty embedding-list disk vector load");
         }
         ValidateDimension(params, engine.Dim(), true);
@@ -568,7 +567,6 @@ OpenIndex(storage::FileSource& source,
         engine.SetDim(*params.runtime_dim);
         if (restored_id_map.has_valid_data) {
             FinalizeRestoredIdMap(engine.native_index.Node(),
-                                  UnexpectedError,
                                   "all-null nullable disk vector load");
         }
         ValidateDimension(params, engine.Dim(), false);

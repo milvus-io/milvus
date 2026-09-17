@@ -35,6 +35,7 @@
 
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
+#include "common/Utils.h"
 #include "index/Meta.h"
 #include "index/Utils.h"
 #include "index/vector/VectorDiskArtifact.h"
@@ -45,7 +46,6 @@
 #include "storage/artifact/LocalFileUtils.h"
 #include "knowhere/binaryset.h"
 #include "knowhere/comp/index_param.h"
-#include "knowhere/segcore_error_code.h"
 
 namespace milvus::index {
 namespace {
@@ -443,7 +443,7 @@ VectorDiskBuilder<T>::Build(const PreparedVectorBuildFiles<T>& input) && {
             const auto status = engine_->native_index.Build({}, config);
             file_manager_->RethrowFirstFailure();
             if (status != knowhere::Status::success) {
-                ThrowInfo(knowhere::ToSegcoreErrorCode(status),
+                ThrowInfo(KnowhereBuildStatusToErrorCode(status),
                           "failed to build disk vector index: status {} ({})",
                           static_cast<int>(status),
                           knowhere::Status2String(status));
@@ -453,7 +453,7 @@ VectorDiskBuilder<T>::Build(const PreparedVectorBuildFiles<T>& input) && {
                 engine_->native_index.Serialize(entries);
             file_manager_->RethrowFirstFailure();
             if (serialize_status != knowhere::Status::success) {
-                ThrowInfo(knowhere::ToSegcoreErrorCode(serialize_status),
+                ThrowInfo(KnowhereStatusToErrorCode(serialize_status),
                           "failed to serialize disk vector index: status {} "
                           "({})",
                           static_cast<int>(serialize_status),

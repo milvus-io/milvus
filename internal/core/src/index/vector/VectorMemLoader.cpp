@@ -32,13 +32,13 @@
 
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
+#include "common/Utils.h"
 #include "index/Meta.h"
 #include "index/vector/VectorIndexReader.h"
 #include "index/vector/VectorIndexValidDataUtils.h"
 #include "index/vector/VectorLoadResource.h"
 #include "knowhere/binaryset.h"
 #include "knowhere/comp/index_param.h"
-#include "knowhere/segcore_error_code.h"
 #include "nlohmann/json.hpp"
 #include "storage/artifact/LocalDirectory.h"
 
@@ -338,7 +338,7 @@ SetWarmup(Config& config, storage::WarmupPolicy warmup) {
 
 [[noreturn]] void
 ThrowDeserializeError(knowhere::Status status) {
-    ThrowInfo(knowhere::ToSegcoreErrorCode(status),
+    ThrowInfo(KnowhereStatusToErrorCode(status),
               "failed to deserialize vector index: status {} ({})",
               static_cast<int>(status),
               knowhere::Status2String(status));
@@ -537,7 +537,6 @@ PopulateState(OpenedMemState& state,
                                               &entries);
         if (restored.has_valid_data) {
             FinalizeRestoredIdMap(state.engine.native_index.Node(),
-                                  UnexpectedError,
                                   "empty embedding-list vector load");
         }
         ValidateDimension(params, state.engine.Dim(), true);
@@ -551,7 +550,6 @@ PopulateState(OpenedMemState& state,
             source, plan, params, state.engine, stage_id_map_mmap_dir());
         if (restored.has_valid_data) {
             FinalizeRestoredIdMap(state.engine.native_index.Node(),
-                                  UnexpectedError,
                                   "all-null nullable vector load");
         }
         ValidateDimension(params, state.engine.Dim(), false);

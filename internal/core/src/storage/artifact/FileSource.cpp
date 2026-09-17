@@ -49,8 +49,12 @@ namespace milvus::storage {
 
 namespace {
 
+// Named per unit rather than plain BaseName: the source and its sibling
+// translation unit both need this helper, and milvus_storage_artifact is a
+// unity-build target, where two file-local BaseName definitions would merge
+// into one translation unit and redefine each other.
 std::string
-BaseName(const std::string& path) {
+SourceBaseName(const std::string& path) {
     return std::filesystem::path(path).filename().string();
 }
 
@@ -495,7 +499,7 @@ class V1RemoteSource::Impl {
     BuildDirectory() {
         std::map<std::string, std::string> by_basename;
         for (size_t i = 0; i < normalized_paths.size(); ++i) {
-            auto name = BaseName(normalized_paths[i]);
+            auto name = SourceBaseName(normalized_paths[i]);
             auto [_, inserted] = by_basename.emplace(name, normalized_paths[i]);
             if (!inserted) {
                 ThrowInfo(DataFormatBroken,
@@ -650,8 +654,12 @@ class V1RemoteSource::Impl {
     const std::vector<std::string>&
     Paths(std::string_view name) const {
         auto it = logical_entries.find(std::string(name));
-        AssertInfo(
-            it != logical_entries.end(), "artifact entry not found: {}", name);
+        if (it == logical_entries.end()) {
+            // The persisted entry set does not contain an entry the loader
+            // requires: the artifact is incomplete, not a Milvus bug (same
+            // bucket as a lost index slice).
+            ThrowInfo(DataFormatBroken, "artifact entry not found: {}", name);
+        }
         return it->second;
     }
 
@@ -663,7 +671,7 @@ class V1RemoteSource::Impl {
         CheckCancelled("V1/V2 artifact download");
         size_t total = 0;
         for (const auto& path : paths) {
-            auto it = codecs.find(BaseName(path));
+            auto it = codecs.find(SourceBaseName(path));
             if (it == codecs.end() || it->second == nullptr) {
                 ThrowInfo(FileReadFailed,
                           "loaded artifact slice {} is missing",
@@ -683,7 +691,7 @@ class V1RemoteSource::Impl {
         size_t offset = 0;
         constexpr size_t kCopyBufferSize = 1024 * 1024;
         for (const auto& path : paths) {
-            const auto& codec = codecs.at(BaseName(path));
+            const auto& codec = codecs.at(SourceBaseName(path));
             const auto payload_size = codec->PayloadSize();
             const auto* payload = codec->PayloadData();
             if (payload_size != 0 && payload == nullptr) {
@@ -740,7 +748,7 @@ class V1RemoteSource::Impl {
         const auto& paths = Paths(name);
         return !paths.empty() &&
                std::all_of(paths.begin(), paths.end(), [](const auto& path) {
-                   return SplitNumericSuffix(BaseName(path)).has_value();
+                   return SplitNumericSuffix(SourceBaseName(path)).has_value();
                });
     }
 
@@ -799,7 +807,7 @@ class V1RemoteSource::Impl {
         }
         CheckCancelled("V1/V2 artifact disk cache");
         for (const auto& local : disk_manager->GetLocalFilePaths()) {
-            if (BaseName(local) == name) {
+            if (SourceBaseName(local) == name) {
                 RecordOrValidateEntrySize(name, LocalFileSize(local), local);
                 staged_files.emplace(std::string(name), local);
                 return local;
@@ -941,7 +949,7 @@ V1RemoteSource::ReadEntriesToLocalDir(const std::vector<std::string>& names,
     staged.reserve(names.size());
     for (const auto& name : names) {
         auto path =
-            (std::filesystem::path(local_dir) / BaseName(name)).string();
+            (std::filesystem::path(local_dir) / SourceBaseName(name)).string();
         AssertInfo(targets.insert(path).second,
                    "artifact entries collide at local path {}",
                    path);
@@ -1012,6 +1020,9 @@ class V3PackedSource::Impl {
                                         context.fieldDataMeta.collection_id,
                                         PoolPriority(this->options),
                                         CancellationToken(this->options));
+        if (reader == nullptr) {
+            ThrowInfo(FileOpenFailed, "failed to create V3 artifact reader");
+        }
     }
 
     LoadOptions options;
@@ -1064,9 +1075,14 @@ V3PackedSource::ReadEntryToLocalFile(std::string_view name,
         std::string(name),
         staged.Staging(),
         io::GetPriorityFromLoadPriority(LoadPriority(impl_->options)));
-    AssertInfo(LocalFileSize(staged.Staging()) == EntrySize(name),
-               "materialized V3 artifact entry size mismatch: {}",
-               name);
+    if (LocalFileSize(staged.Staging()) != EntrySize(name)) {
+        // The streamed entry does not match the size the packed directory
+        // declares: the artifact bytes or its directory are inconsistent, the
+        // same bucket master uses for a short index slice.
+        ThrowInfo(DataFormatBroken,
+                  "materialized V3 artifact entry size mismatch: {}",
+                  name);
+    }
     staged.Commit();
 }
 
@@ -1108,7 +1124,7 @@ V3PackedSource::ReadEntriesToLocalDir(const std::vector<std::string>& names,
     staged.reserve(names.size());
     for (const auto& name : names) {
         auto path =
-            (std::filesystem::path(local_dir) / BaseName(name)).string();
+            (std::filesystem::path(local_dir) / SourceBaseName(name)).string();
         AssertInfo(targets.insert(path).second,
                    "artifact entries collide at local path {}",
                    path);
@@ -1119,9 +1135,11 @@ V3PackedSource::ReadEntriesToLocalDir(const std::vector<std::string>& names,
     impl_->reader->ReadEntriesStreamToFiles(
         pairs, io::GetPriorityFromLoadPriority(LoadPriority(impl_->options)));
     for (size_t i = 0; i < names.size(); ++i) {
-        AssertInfo(LocalFileSize(staged[i].Staging()) == EntrySize(names[i]),
-                   "materialized V3 artifact entry size mismatch: {}",
-                   names[i]);
+        if (LocalFileSize(staged[i].Staging()) != EntrySize(names[i])) {
+            ThrowInfo(DataFormatBroken,
+                      "materialized V3 artifact entry size mismatch: {}",
+                      names[i]);
+        }
     }
     CommitAll(staged);
     return paths;

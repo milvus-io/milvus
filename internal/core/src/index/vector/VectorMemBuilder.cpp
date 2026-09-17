@@ -26,13 +26,13 @@
 
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
+#include "common/Utils.h"
 #include "index/Meta.h"
 #include "index/Utils.h"
 #include "index/vector/VectorIndexValidDataUtils.h"
 #include "index/vector/VectorMemArtifact.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/dataset.h"
-#include "knowhere/segcore_error_code.h"
 
 namespace milvus::index {
 namespace {
@@ -220,7 +220,7 @@ BuildIdMapOnly(KnowhereEngine& engine,
     const auto status =
         engine.native_index.Build(dataset, config, engine.UseBuildPool());
     if (status != knowhere::Status::success) {
-        ThrowInfo(knowhere::ToSegcoreErrorCode(status),
+        ThrowInfo(KnowhereBuildStatusToErrorCode(status),
                   "failed to publish the nullable memory vector id map: "
                   "status {} ({})",
                   static_cast<int>(status),
@@ -520,7 +520,7 @@ VectorMemBuilder<T>::Build(const VectorBuildInput<T>& input) && {
         const auto status =
             engine.native_index.Build(dataset, config, engine.UseBuildPool());
         if (status != knowhere::Status::success) {
-            ThrowInfo(knowhere::ToSegcoreErrorCode(status),
+            ThrowInfo(KnowhereBuildStatusToErrorCode(status),
                       "failed to build memory vector index: status {} ({})",
                       static_cast<int>(status),
                       knowhere::Status2String(status));
@@ -606,7 +606,7 @@ VectorMemBuilder<T>::Build(const InterimVectorBuildInput<T>& input) && {
                       : engine.native_index.Build(
                             dataset, config, engine.UseBuildPool());
             if (status != knowhere::Status::success) {
-                ThrowInfo(knowhere::ToSegcoreErrorCode(status),
+                ThrowInfo(KnowhereBuildStatusToErrorCode(status),
                           "failed to {} interim memory vector index: status "
                           "{} ({})",
                           built ? "append" : "build",

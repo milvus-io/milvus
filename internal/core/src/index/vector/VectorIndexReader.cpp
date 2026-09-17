@@ -31,7 +31,6 @@
 #include "index/vector/VectorReaderUtils.h"
 #include "index/vector/VectorReaderValidation.h"
 #include "knowhere/comp/index_param.h"
-#include "knowhere/segcore_error_code.h"
 
 namespace milvus::index {
 namespace {
@@ -59,14 +58,14 @@ ThrowSearchError(const char* operation,
                  const knowhere::Json* config = nullptr) {
     const auto status = result.error();
     if (config == nullptr) {
-        ThrowInfo(knowhere::ToSegcoreErrorCode(status),
+        ThrowInfo(KnowhereStatusToErrorCode(status),
                   "failed to {}: status {} ({}), detail: {}",
                   operation,
                   static_cast<int>(status),
                   knowhere::Status2String(status),
                   result.what());
     }
-    ThrowInfo(knowhere::ToSegcoreErrorCode(status),
+    ThrowInfo(KnowhereStatusToErrorCode(status),
               "failed to {}: config={} status {} ({}), detail: {}",
               operation,
               milvus::EscapeBraces(config->dump()),
@@ -493,7 +492,7 @@ VectorIndexReader::SearchMemory(const DatasetPtr& dataset,
             if (!search.has_value()) {
                 const auto status = search.error();
                 ThrowInfo(
-                    knowhere::ToSegcoreErrorCode(status),
+                    KnowhereStatusToErrorCode(status),
                     "failed to range search: status {} ({}), detail: {}",
                     static_cast<int>(status),
                     knowhere::Status2String(status),
@@ -511,7 +510,7 @@ VectorIndexReader::SearchMemory(const DatasetPtr& dataset,
         milvus::tracer::AddEvent("finish_knowhere_index_search");
         if (!search.has_value()) {
             const auto status = search.error();
-            ThrowInfo(knowhere::ToSegcoreErrorCode(status),
+            ThrowInfo(KnowhereStatusToErrorCode(status),
                       "failed to search: config={} status {} ({}), detail: {}",
                       milvus::EscapeBraces(search_conf.dump()),
                       static_cast<int>(status),

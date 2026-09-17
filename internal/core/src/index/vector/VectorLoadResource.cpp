@@ -20,6 +20,7 @@
 
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
+#include "common/Utils.h"
 #include "index/LoadResource.h"
 #include "index/ResourceUsageUtils.h"
 #include "index/Meta.h"
@@ -71,44 +72,17 @@ EstimateVector(const IndexType& index_type,
     }
 }
 
+// One mapper owns every knowhere status in the tree (#50768 T2): a local copy
+// drifts, and this one did -- it routed invalid_metric_type to
+// MetricTypeInvalid and knowhere's whole input_error category to ConfigInvalid,
+// neither of which is what the audited table says, and its `default:` arm
+// suppressed the -Wswitch drift guard that makes a newly added knowhere status
+// a compile error rather than a silent fallback.
 [[noreturn]] void
 ThrowVectorEstimateError(
     const knowhere::expected<knowhere::Resource>& resource) {
     const auto status = resource.error();
-    auto error_code = ErrorCode::KnowhereError;
-    switch (status) {
-        case knowhere::Status::invalid_metric_type:
-            error_code = ErrorCode::MetricTypeInvalid;
-            break;
-        case knowhere::Status::malloc_error:
-            error_code = ErrorCode::MemAllocateFailed;
-            break;
-        case knowhere::Status::disk_file_error:
-            error_code = ErrorCode::FileReadFailed;
-            break;
-        case knowhere::Status::not_implemented:
-        case knowhere::Status::invalid_instruction_set:
-            error_code = ErrorCode::Unsupported;
-            break;
-        case knowhere::Status::invalid_serialized_index_type:
-            error_code = ErrorCode::DataFormatBroken;
-            break;
-        default:
-            switch (knowhere::StatusCategoryOf(status)) {
-                case knowhere::StatusCategory::input_error:
-                    error_code = ErrorCode::ConfigInvalid;
-                    break;
-                case knowhere::StatusCategory::transient_error:
-                    error_code = ErrorCode::StorageTransientError;
-                    break;
-                case knowhere::StatusCategory::success:
-                case knowhere::StatusCategory::permanent_error:
-                    error_code = ErrorCode::KnowhereError;
-                    break;
-            }
-            break;
-    }
-    ThrowInfo(error_code,
+    ThrowInfo(KnowhereStatusToErrorCode(status),
               "knowhere load-resource estimate failed: status {} ({}), "
               "detail: {}",
               static_cast<int>(status),

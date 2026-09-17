@@ -89,8 +89,12 @@ class ScopedFd {
     int fd_;
 };
 
+// Named per unit rather than plain BaseName: the sink and its sibling
+// translation unit both need this helper, and milvus_storage_artifact is a
+// unity-build target, where two file-local BaseName definitions would merge
+// into one translation unit and redefine each other.
 std::string
-BaseName(const std::string& path) {
+SinkBaseName(const std::string& path) {
     return std::filesystem::path(path).filename().string();
 }
 
@@ -145,8 +149,11 @@ StreamRawFile(DiskFileManagerImpl& manager,
 
     auto output = manager.OpenOutputStream(
         std::string(name), storage_path == ArtifactStoragePath::Index);
-    AssertInfo(output != nullptr,
-               "file manager returned a null raw artifact output stream");
+    if (output == nullptr) {
+        ThrowInfo(FileCreateFailed,
+                  "failed to open a raw artifact output stream for {}",
+                  name);
+    }
 
     const auto buffer_size =
         std::min(file_size, static_cast<size_t>(DEFAULT_INDEX_FILE_SLICE_SIZE));
@@ -424,7 +431,7 @@ V1DiskSink::WriteEntryFromLocalFile(std::string_view name,
     AssertOpen(impl_->state);
     try {
         const auto entry_name = impl_->ReserveEntryName(name);
-        AssertInfo(BaseName(entry_name) == entry_name,
+        AssertInfo(SinkBaseName(entry_name) == entry_name,
                    "local-file artifact entry must be a basename: {}",
                    name);
 
@@ -479,7 +486,8 @@ V1DiskSink::WriteRawEntryFromLocalFile(std::string_view name,
     AssertOpen(impl_->state);
     try {
         const auto entry_name = impl_->ReserveEntryName(name);
-        AssertInfo(!entry_name.empty() && BaseName(entry_name) == entry_name,
+        AssertInfo(!entry_name.empty() &&
+                       SinkBaseName(entry_name) == entry_name,
                    "raw artifact entry must be a non-empty basename: {}",
                    name);
         const auto remote_path = impl_->RemotePathFor(entry_name);
@@ -566,7 +574,11 @@ class V3PackedSink::Impl {
           storage_path(storage_path) {
         writer = manager->CreateIndexEntryWriterUnified(
             this->file_name, storage_path == ArtifactStoragePath::Index);
-        AssertInfo(writer != nullptr, "failed to create V3 artifact writer");
+        if (writer == nullptr) {
+            ThrowInfo(FileCreateFailed,
+                      "failed to create V3 artifact writer for {}",
+                      this->file_name);
+        }
     }
 
     std::shared_ptr<MemFileManagerImpl> manager;
@@ -580,7 +592,7 @@ class V3PackedSink::Impl {
         auto prefix = storage_path == ArtifactStoragePath::Index
                           ? manager->GetRemoteIndexObjectPrefix()
                           : manager->GetRemoteTextLogPrefix();
-        return prefix + "/" + BaseName(file_name);
+        return prefix + "/" + SinkBaseName(file_name);
     }
 
     std::string

@@ -26,13 +26,13 @@
 #include <vector>
 
 #include "common/EasyAssert.h"
+#include "common/Utils.h"
 #include "index/Families.h"
 #include "index/vector/VectorIndexReader.h"
 #include "index/vector/VectorIndexValidDataUtils.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/dataset.h"
 #include "knowhere/expected.h"
-#include "knowhere/segcore_error_code.h"
 #include "log/Log.h"
 
 namespace milvus::index {
@@ -289,7 +289,7 @@ KnowhereGrowingVectorIndex<T>::BuildFromSource(int64_t physical_count,
             const auto status = next.native_index.Build(
                 dataset, build_config, next.UseBuildPool());
             if (status != knowhere::Status::success) {
-                ThrowInfo(knowhere::ToSegcoreErrorCode(status),
+                ThrowInfo(KnowhereBuildStatusToErrorCode(status),
                           "failed to build growing vector index: status {} ({})",
                           static_cast<int>(status),
                           knowhere::Status2String(status));
@@ -333,7 +333,7 @@ KnowhereGrowingVectorIndex<T>::AddBatch(
     const auto status = engine_->native_index.Add(
         dataset, BuildConfig(), engine_->UseBuildPool());
     if (status != knowhere::Status::success) {
-        ThrowInfo(knowhere::ToSegcoreErrorCode(status),
+        ThrowInfo(KnowhereBuildStatusToErrorCode(status),
                   "failed to append growing vector index: status {} ({})",
                   static_cast<int>(status),
                   knowhere::Status2String(status));

@@ -22,6 +22,7 @@
 
 #include <marisa.h>
 
+#include "common/EasyAssert.h"
 #include "common/Types.h"
 #include "storage/artifact/Artifact.h"
 #include "storage/artifact/FileSink.h"
@@ -32,6 +33,34 @@
 // the temporary file directly into its packed entry.
 
 namespace milvus::index {
+
+// Classify a marisa::Exception into a segcore ErrorCode so a trie IO /
+// corruption failure does not collapse to the generic UnexpectedError(2001).
+// marisa is a vendored third-party library with no dependency on
+// milvus-common, so every call into it owes this mapping at its boundary.
+//
+// io_code is used for MARISA_IO_ERROR (FileReadFailed on load,
+// FileWriteFailed on save); data_code for MARISA_FORMAT_ERROR /
+// MARISA_SIZE_ERROR (DataFormatBroken when reading back a persisted trie means
+// the bytes are corrupt; InvalidParameter when building means the input key set
+// exceeds marisa's limits). MARISA_MEMORY_ERROR is a retriable OOM; anything
+// else is an internal invariant.
+inline ErrorCode
+ClassifyMarisaError(const marisa::Exception& error,
+                    ErrorCode io_code,
+                    ErrorCode data_code) {
+    switch (error.error_code()) {
+        case MARISA_IO_ERROR:
+            return io_code;
+        case MARISA_FORMAT_ERROR:
+        case MARISA_SIZE_ERROR:
+            return data_code;
+        case MARISA_MEMORY_ERROR:
+            return ErrorCode::MemAllocateFailed;
+        default:
+            return ErrorCode::UnexpectedError;
+    }
+}
 
 struct MarisaIndexStorage;
 

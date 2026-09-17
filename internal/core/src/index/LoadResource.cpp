@@ -224,11 +224,19 @@ ResolveHybridInternalIndexType(
 
     if (index_files.size() == 1 && context.fs != nullptr) {
         auto input = file_manager.OpenInputStream(index_files.front());
-        AssertInfo(input != nullptr,
-                   "failed to open packed hybrid index file: {}",
-                   index_files.front());
+        if (input == nullptr) {
+            ThrowInfo(FileOpenFailed,
+                      "failed to open packed hybrid index file: {}",
+                      index_files.front());
+        }
         auto reader = storage::IndexEntryReader::Open(
             input, input->Size(), context.fieldDataMeta.collection_id);
+        if (reader == nullptr) {
+            ThrowInfo(FileOpenFailed,
+                      "failed to create IndexEntryReader for hybrid index "
+                      "file: {}",
+                      index_files.front());
+        }
         if (stream_load_info != nullptr) {
             *stream_load_info = reader->GetStreamLoadInfo();
         }
@@ -248,9 +256,11 @@ InspectScalarIndexStreamLoadInfo(const std::vector<std::string>& index_files,
     }
     storage::MemFileManagerImpl file_manager(context);
     auto input = file_manager.OpenInputStream(index_files.front());
-    AssertInfo(input != nullptr,
-               "failed to open packed scalar index file: {}",
-               index_files.front());
+    if (input == nullptr) {
+        ThrowInfo(FileOpenFailed,
+                  "failed to open packed scalar index file: {}",
+                  index_files.front());
+    }
     return storage::IndexEntryReader::InspectStreamLoadInfo(input,
                                                             input->Size());
 }

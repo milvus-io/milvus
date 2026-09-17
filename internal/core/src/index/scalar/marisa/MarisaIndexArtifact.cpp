@@ -158,7 +158,18 @@ MarisaIndexArtifact::Serialize(storage::FileSink& sink) const {
     auto [fd, file] = CreateTrieFile();
     storage::MappedRegionGuard legacy_mapping;
     try {
-        storage_->trie->write(fd);
+        try {
+            storage_->trie->write(fd);
+        } catch (const marisa::Exception& error) {
+            // Same boundary obligation as the load path: without this the
+            // vendored library's exception reaches cgo as
+            // UnexpectedError(2001) instead of a retriable write failure.
+            ThrowInfo(
+                ClassifyMarisaError(error, FileWriteFailed, DataFormatBroken),
+                "failed to write marisa trie {}: {}",
+                file.Path(),
+                error.what());
+        }
         if (sink.Gen() == storage::Generation::V1V2) {
             const auto size = SerializedTrieSize(fd, file.Path());
             if (size != 0) {

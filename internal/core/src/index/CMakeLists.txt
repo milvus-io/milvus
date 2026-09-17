@@ -15,7 +15,10 @@ list(FILTER SOURCE_FILES EXCLUDE REGEX "^test_utils/")
 
 # These files intentionally define matching translation-unit-local helpers
 # (e.g. kEmptyEmbListOffsets). Keep them separate when the target uses unity
-# builds.
+# builds. NOTE: milvus_index is not in src/CMakeLists.txt's unity target list
+# today (the per-family layout collides far beyond these four files -- see the
+# comment there), so these properties are currently inert; they stay as the
+# already-known subset for whenever the target is re-enabled.
 set_source_files_properties(
     vector/VectorDiskBuilder.cpp
     vector/VectorDiskLoader.cpp

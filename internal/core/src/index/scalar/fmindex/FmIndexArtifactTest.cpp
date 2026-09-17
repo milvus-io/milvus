@@ -18,11 +18,15 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <new>
+#include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #include "index/contracts/query/INullReader.h"
 #include "index/contracts/query/IPatternMatchReader.h"
+#include "index/scalar/fmindex/FmIndexArtifact.h"
 #include "index/test_utils/ArtifactTestUtils.h"
 #include "index/test_utils/ScalarTestData.h"
 
@@ -280,6 +284,65 @@ TEST(FmIndexArtifactTest, RejectsSetBitmapPaddingBits) {
     ExpectSegcoreError(ErrorCode::DataFormatBroken, [&] {
         static_cast<void>(OpenV3(backend, persisted, {.row_count = 9}));
     });
+}
+
+// GuardFmIndexLibrary is the single classifying boundary every call into the
+// vendored fm-index-lite library goes through. What it must not do is let an
+// exception past untyped: FailureCStatus() reports anything that is not a
+// SegcoreError as UnexpectedError(2001), which merr classifies as a permanent
+// system error.
+//
+// The bad_alloc case is the one with teeth. FMIndex::parseView self-classifies
+// every other std::exception into a false return value (which the caller turns
+// into DataFormatBroken via !valid()) and deliberately RETHROWS bad_alloc, so
+// an out-of-memory during index load is the exception that actually escapes the
+// library. MemAllocateFailed(2034) is retriable in merr's classForCode while
+// 2001 is not, so folding it into the phase fallback would make a transient OOM
+// look permanent and stop the load from being retried.
+TEST(FmIndexArtifactTest, LibraryGuardClassifiesEscapingExceptions) {
+    auto code_of = [](auto&& fn, ErrorCode fallback) {
+        try {
+            GuardFmIndexLibrary(std::forward<decltype(fn)>(fn),
+                                fallback,
+                                "load");
+        } catch (const SegcoreError& error) {
+            return error.get_error_code();
+        }
+        return ErrorCode::Success;
+    };
+
+    // OOM stays retriable and is never folded into the phase fallback.
+    EXPECT_EQ(
+        code_of([] { throw std::bad_alloc(); }, ErrorCode::DataFormatBroken),
+        ErrorCode::MemAllocateFailed);
+    EXPECT_EQ(
+        code_of([] { throw std::bad_alloc(); }, ErrorCode::IndexBuildError),
+        ErrorCode::MemAllocateFailed);
+
+    // Any other std:: exception takes the phase's fallback, which differs
+    // between build and load: a library failure while building is a build
+    // error, while one during load means the persisted blob is unusable.
+    EXPECT_EQ(code_of([] { throw std::runtime_error("truncated"); },
+                      ErrorCode::DataFormatBroken),
+              ErrorCode::DataFormatBroken);
+    EXPECT_EQ(code_of([] { throw std::length_error("corpus too large"); },
+                      ErrorCode::IndexBuildError),
+              ErrorCode::IndexBuildError);
+
+    // A non-std exception must not escape the boundary untyped either.
+    EXPECT_EQ(code_of([] { throw 42; }, ErrorCode::DataFormatBroken),
+              ErrorCode::DataFormatBroken);
+
+    // An already-classified error keeps its own code instead of being
+    // relabelled by the boundary.
+    EXPECT_EQ(
+        code_of(
+            [] { ThrowInfo(ErrorCode::FileReadFailed, "staged file gone"); },
+            ErrorCode::DataFormatBroken),
+        ErrorCode::FileReadFailed);
+
+    // The success path returns normally and throws nothing.
+    EXPECT_EQ(code_of([] {}, ErrorCode::DataFormatBroken), ErrorCode::Success);
 }
 
 }  // namespace

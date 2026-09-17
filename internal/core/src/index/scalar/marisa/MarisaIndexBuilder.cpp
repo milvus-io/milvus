@@ -125,7 +125,19 @@ MarisaIndexBuilder::Build(const ScalarBuildInput<std::string_view>& input) && {
                 }
             }
         }
-        trie->build(keyset, MARISA_LABEL_ORDER);
+        try {
+            trie->build(keyset, MARISA_LABEL_ORDER);
+        } catch (const marisa::Exception& error) {
+            // Unguarded, a marisa failure reaches cgo untyped as
+            // UnexpectedError(2001). A size/format error on the build path
+            // means the indexed key set exceeds marisa's limits -- the request
+            // content is at fault, so InvalidParameter -- while a memory error
+            // is the retriable MemAllocateFailed.
+            ThrowInfo(ClassifyMarisaError(
+                          error, ErrorCode::UnexpectedError, InvalidParameter),
+                      "failed to build marisa trie: {}",
+                      error.what());
+        }
     }
 
     std::vector<int64_t> str_ids(row_count,

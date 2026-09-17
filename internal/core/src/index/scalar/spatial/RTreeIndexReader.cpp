@@ -21,15 +21,19 @@
 #include <utility>
 
 #include "common/EasyAssert.h"
+#include "common/Geometry.h"
 
 namespace milvus::index {
 namespace {
 
 class GeosContextGuard {
  public:
-    GeosContextGuard() : context_(GEOS_init_r()) {
+    // InitGEOSContext turns the bad_alloc GEOS_init_r raises on OOM into a
+    // retriable MemAllocateFailed instead of letting it reach cgo as
+    // UnexpectedError(2001).
+    GeosContextGuard() : context_(InitGEOSContext("R-Tree query")) {
         if (context_ == nullptr) {
-            ThrowInfo(UnexpectedError,
+            ThrowInfo(ErrorCode::MemAllocateFailed,
                       "failed to initialize GEOS for R-Tree query");
         }
     }

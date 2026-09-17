@@ -22,8 +22,8 @@
 
 #include "common/EasyAssert.h"
 #include "common/FastMem.h"
+#include "common/Utils.h"
 #include "knowhere/index/index_factory.h"
-#include "knowhere/segcore_error_code.h"
 
 namespace milvus::index {
 
@@ -131,7 +131,7 @@ CreateTypedIndex(const IndexType& index_type,
         const auto status = created.error();
         const auto error_code = status == knowhere::Status::invalid_index_error
                                     ? ErrorCode::Unsupported
-                                    : knowhere::ToSegcoreErrorCode(status);
+                                    : KnowhereStatusToErrorCode(status);
         ThrowInfo(error_code,
                   "failed to create knowhere index {}: status {} ({}), "
                   "detail: {}",

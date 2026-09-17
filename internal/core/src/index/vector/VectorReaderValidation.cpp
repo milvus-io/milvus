@@ -21,7 +21,7 @@
 #include <utility>
 
 #include "common/EasyAssert.h"
-#include "knowhere/segcore_error_code.h"
+#include "common/Utils.h"
 
 namespace milvus::index::detail {
 namespace {
@@ -200,7 +200,7 @@ ValidateIdRequest(const DatasetPtr& dataset, const char* operation) {
 ThrowRetrievalError(const char* operation,
                     const knowhere::expected<knowhere::DataSetPtr>& result) {
     const auto status = result.error();
-    ThrowInfo(knowhere::ToSegcoreErrorCode(status),
+    ThrowInfo(KnowhereStatusToErrorCode(status),
               "failed to {}: status {} ({}), detail: {}",
               operation,
               static_cast<int>(status),

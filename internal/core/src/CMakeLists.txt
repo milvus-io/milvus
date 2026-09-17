@@ -120,9 +120,20 @@ milvus_add_pkg_config("milvus_core")
 # translation-unit-local symbols that collide when their sources are merged.
 # Protobuf-generated sources are not unity-compatible, while milvus_query was
 # slower in isolation because merging its ten sources reduced parallelism.
+#
+# milvus_index is deliberately NOT in this list. Its sources are laid out as
+# one parallel unit per index family (index/scalar/<family>/{Artifact,Builder,
+# Loader,Reader}.cpp), and that symmetry is expressed by giving every family the
+# same translation-unit-local helper names: 47 function/constant names and 4
+# file-scope type names (RuntimeParams, EffectiveLoadOptions, PersistedEntries,
+# StagingDirectory) are each defined in 2-8 of its 61 translation units.
+# Merging any two of them is a redefinition, and the collisions span nearly
+# every file, so neither SKIP_UNITY_BUILD_INCLUSION nor UNITY_GROUP leaves a
+# useful batch behind. Re-enabling it means prefixing or per-family-namespacing
+# those helpers first.
 if (MILVUS_UNITY_BUILD)
     foreach(_target
-        milvus_common milvus_storage milvus_index milvus_segcore
+        milvus_common milvus_storage milvus_storage_artifact milvus_segcore
         milvus_exec)
         set_target_properties(${_target} PROPERTIES
             UNITY_BUILD ON

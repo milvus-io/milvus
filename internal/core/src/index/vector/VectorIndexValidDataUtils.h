@@ -30,6 +30,7 @@
 #include "common/EasyAssert.h"
 #include "common/FastMem.h"
 #include "common/Types.h"
+#include "common/Utils.h"
 #include "common/ValidityView.h"
 #include "index/Meta.h"
 #include "knowhere/expected.h"
@@ -395,12 +396,16 @@ struct RestoredIdMap {
 // finalize the map explicitly.
 inline void
 FinalizeRestoredIdMap(knowhere::IndexNode* index_node,
-                      ErrorCode error_code,
                       const std::string& context) {
     AssertInfo(index_node != nullptr, "index node is null");
     auto status = index_node->FinalizeIdMap();
     if (status != knowhere::Status::success) {
-        ThrowInfo(error_code,
+        // Route the knowhere status through the shared mapper rather than
+        // taking a fixed code from the caller: every caller passed
+        // UnexpectedError, which discarded the retriability verdict knowhere
+        // had already made (e.g. malloc_error -> retriable MemAllocateFailed)
+        // and left the failure in the "unclassified internal bug" bucket.
+        ThrowInfo(KnowhereStatusToErrorCode(status),
                   "failed to finalize the nullable vector id map for {}: "
                   "status {} ({})",
                   context,

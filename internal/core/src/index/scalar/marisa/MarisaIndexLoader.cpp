@@ -44,6 +44,7 @@
 #include "index/Utils.h"
 #include "index/contracts/Registry.h"
 #include "index/scalar/json/JsonProjectedIndexLoad.h"
+#include "index/scalar/marisa/MarisaIndexArtifact.h"
 #include "index/scalar/marisa/MarisaIndexReader.h"
 #include "nlohmann/json.hpp"
 
@@ -162,7 +163,7 @@ MapReadOnly(const std::string& path, size_t size) {
         static_cast<char*>(mmap(nullptr, size, PROT_READ, MAP_PRIVATE, fd, 0));
     const auto saved_errno = errno;
     if (mapped == MAP_FAILED) {
-        ThrowInfo(UnexpectedError,
+        ThrowInfo(MmapError,
                   "failed to mmap marisa file {}: {}",
                   path,
                   std::strerror(saved_errno));
@@ -199,8 +200,12 @@ OpenTrie(const std::string& path, bool mmap_enabled) {
         }
         return trie;
     } catch (const marisa::Exception& error) {
-        ThrowInfo(
-            DataFormatBroken, "invalid marisa trie entry: {}", error.what());
+        // A blanket DataFormatBroken here would report a read failure or an
+        // allocation failure as permanently corrupt data, so the index
+        // scheduler gives up on an artifact that a retry would have loaded.
+        ThrowInfo(ClassifyMarisaError(error, FileReadFailed, DataFormatBroken),
+                  "invalid marisa trie entry: {}",
+                  error.what());
     }
 }
 

@@ -21,10 +21,10 @@
 #include <limits>
 
 #include "common/EasyAssert.h"
+#include "common/Utils.h"
 #include "index/vector/VectorIndexReader.h"
 #include "index/vector/VectorIndexValidDataUtils.h"
 #include "knowhere/binaryset.h"
-#include "knowhere/segcore_error_code.h"
 
 namespace milvus::index {
 namespace {
@@ -134,7 +134,7 @@ VectorMemArtifact::Serialize(storage::FileSink& sink) const {
     } else if (!IsAllNullNullable(engine_.native_index.GetIdMap())) {
         const auto status = engine_.native_index.Serialize(entries);
         if (status != knowhere::Status::success) {
-            ThrowInfo(knowhere::ToSegcoreErrorCode(status),
+            ThrowInfo(KnowhereStatusToErrorCode(status),
                       "failed to serialize vector index: status {} ({})",
                       static_cast<int>(status),
                       knowhere::Status2String(status));
