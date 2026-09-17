@@ -24,6 +24,11 @@
 
 namespace milvus::storage {
 
+// Reconfigures both dimensions for a quiescent load-mode transition. Rejected
+// policies leave both controllers unchanged; callers publish the mode afterward.
+bool
+ConfigureLoadOverheadControllers(size_t slots, size_t memory_budget_bytes);
+
 template <cachinglayer::LoadingOverheadDimension Dimension>
 class LoadOverheadController {
  public:
@@ -44,6 +49,8 @@ class LoadOverheadController {
     UpdateConcurrencyLimit(size_t slots);
 
  private:
+    friend bool ConfigureLoadOverheadControllers(size_t, size_t);
+
     LoadOverheadController() = default;
 
     cachinglayer::LoadingOverheadPolicy

@@ -17,6 +17,7 @@
 package initcore
 
 import (
+	"errors"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -229,7 +230,7 @@ func TestQueryNodeLoadConfigSerializesUpdatesAcrossKeys(t *testing.T) {
 	tasks.Add(1)
 	go func() {
 		defer tasks.Done()
-		registerQueryNodeLoadConfig(t.Context(), pt, func(enabled bool, budgetBytes, slots int64) {
+		registerQueryNodeLoadConfig(t.Context(), pt, func(enabled bool, budgetBytes, slots int64) error {
 			if active.Add(1) != 1 {
 				overlap.Store(true)
 			}
@@ -240,6 +241,8 @@ func TestQueryNodeLoadConfigSerializesUpdatesAcrossKeys(t *testing.T) {
 			}
 			lastBytes.Store(budgetBytes)
 			lastSlots.Store(slots)
+
+			return nil
 		})
 	}()
 	<-firstApply
@@ -270,8 +273,9 @@ func TestQueryNodeLoadConfigSerializesUpdatesAcrossKeys(t *testing.T) {
 
 func TestApplyQueryNodeLoadConfigOrdersRolloutAndLimits(t *testing.T) {
 	var calls []string
-	enabled := mockey.Mock(updateStorageV2AsyncLoadEnabled).To(func(value bool) {
+	enabled := mockey.Mock(updateStorageV2AsyncLoadEnabled).To(func(value bool) error {
 		calls = append(calls, "enabled="+strconv.FormatBool(value))
+		return nil
 	}).Build()
 	defer enabled.UnPatch()
 	memory := mockey.Mock(UpdateLoadTransientBudgetBytes).To(func(value int64) {
@@ -288,4 +292,34 @@ func TestApplyQueryNodeLoadConfigOrdersRolloutAndLimits(t *testing.T) {
 	calls = nil
 	applyQueryNodeLoadConfig(false, 0, 0)
 	assert.Equal(t, []string{"enabled=false", "bytes=0", "slots=0"}, calls)
+}
+
+func TestApplyQueryNodeLoadConfigStopsAfterRejectedDisable(t *testing.T) {
+	failure := errors.New("mode rejected")
+	enabled := mockey.Mock(updateStorageV2AsyncLoadEnabled).To(func(bool) error { return failure }).Build()
+	defer enabled.UnPatch()
+	changed := false
+	memory := mockey.Mock(UpdateLoadTransientBudgetBytes).To(func(int64) { changed = true }).Build()
+	defer memory.UnPatch()
+	slots := mockey.Mock(UpdateLoadAdmissionSlots).To(func(int64) { changed = true }).Build()
+	defer slots.UnPatch()
+	require.ErrorIs(t, applyQueryNodeLoadConfig(false, 0, 0), failure)
+	assert.False(t, changed)
+}
+
+func TestQueryNodeLoadConfigReportsStartupFailureAndAllowsRefresh(t *testing.T) {
+	pt := &paramtable.ComponentParam{}
+	pt.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true), paramtable.SkipEnv(true), paramtable.Files(nil)))
+	calls := 0
+	failure := errors.New("mode rejected")
+	err := registerQueryNodeLoadConfig(t.Context(), pt, func(bool, int64, int64) error {
+		calls++
+		if calls == 1 {
+			return failure
+		}
+		return nil
+	})
+	require.ErrorIs(t, err, failure)
+	require.NoError(t, pt.Save(pt.CommonCfg.LoadAdmissionSlots.Key, "7"))
+	assert.Equal(t, 2, calls)
 }

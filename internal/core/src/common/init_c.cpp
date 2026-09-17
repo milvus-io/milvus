@@ -243,9 +243,18 @@ SetStorageV2CellTargetSizeBytes(int64_t bytes) {
     milvus::segcore::storagev2translator::SetCellTargetSizeBytes(bytes);
 }
 
-void
+CStatus
 SetStorageV2AsyncLoadEnabled(const bool enabled) {
-    milvus::segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(enabled);
+    try {
+        milvus::segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(
+            enabled);
+        return milvus::SuccessCStatus();
+    } catch (const std::exception& error) {
+        return milvus::FailureCStatus(&error);
+    } catch (...) {
+        return milvus::FailureCStatus(milvus::UnexpectedError,
+                                      "Failed to configure async load mode");
+    }
 }
 
 CStatus

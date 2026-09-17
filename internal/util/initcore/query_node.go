@@ -178,7 +178,9 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	if err := registerQueryNodeAsyncLoadThreadPoolConfig(ctx, paramtable.Get(), updateStorageV2AsyncLoadThreadPoolSize); err != nil {
 		return err
 	}
-	registerQueryNodeLoadConfig(ctx, paramtable.Get(), applyQueryNodeLoadConfig)
+	if err := registerQueryNodeLoadConfig(ctx, paramtable.Get(), applyQueryNodeLoadConfig); err != nil {
+		return err
+	}
 	cStorageV2AsyncLoadReadWindowSizeBytes := C.int64_t(paramtable.Get().QueryNodeCfg.StorageV2AsyncLoadReadWindowSizeBytes.GetAsInt64())
 	C.SetStorageV2AsyncLoadReadWindowSizeBytes(cStorageV2AsyncLoadReadWindowSizeBytes)
 	enableParquetStatsSkipIndex := paramtable.Get().CommonCfg.ParquetStatsSkipIndex.GetAsBool()

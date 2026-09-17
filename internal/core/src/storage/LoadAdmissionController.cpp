@@ -329,8 +329,9 @@ LoadAdmissionController::SetCapacitySlots(const size_t slots) {
             slot_policy_update_pending_ = effective_slots > slots;
             resolution = TakeAdmittedLocked();
         }
-        if (!expanding) {
-            UpdateLoadOverheadControllers(effective_slots);
+        if (!expanding && !UpdateLoadOverheadControllers(effective_slots)) {
+            std::lock_guard lock(mu_);
+            slot_policy_update_pending_ = true;
         }
     }
     // Work may have drained between the snapshot and policy publication.

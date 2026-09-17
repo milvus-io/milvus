@@ -17,6 +17,7 @@
 #include "segcore/storagev2translator/StorageV2Config.h"
 
 #include <atomic>
+#include <mutex>
 #include "storage/LoadAdmissionController.h"
 #include "storage/LoadOverheadController.h"
 #include "storage/ThreadPools.h"
@@ -38,6 +39,8 @@ StorageV2AsyncLoadEnabled() {
 
 void
 SetStorageV2AsyncLoadEnabled(const bool enabled) {
+    static std::mutex mode_update_mutex;
+    std::lock_guard lock(mode_update_mutex);
     if (enabled == StorageV2AsyncLoadEnabled()) {
         return;
     }
@@ -46,14 +49,11 @@ SetStorageV2AsyncLoadEnabled(const bool enabled) {
     const auto limit =
         enabled ? admission.CapacitySlots()
                 : static_cast<size_t>(ThreadPools::GetLoadExecutorWorkers());
-    auto& memory = storage::LoadMemoryOverheadController::GetInstance();
-    auto& file = storage::LoadFileOverheadController::GetInstance();
-    const bool memory_limit_updated = memory.UpdateConcurrencyLimit(limit);
-    const bool file_limit_updated = file.UpdateConcurrencyLimit(limit);
-    const bool budget_updated =
-        memory.UpdateBudgetBytes(enabled ? admission.CapacityBytes() : 0);
-    AssertInfo(memory_limit_updated && file_limit_updated && budget_updated,
-               "Failed to configure loading overhead for load mode");
+    if (!storage::ConfigureLoadOverheadControllers(
+            limit, enabled ? admission.CapacityBytes() : 0)) {
+        ThrowInfo(ErrorCode::UnexpectedError,
+                  "Failed to configure loading overhead for load mode");
+    }
     g_async_load_enabled.store(enabled, std::memory_order_release);
 }
 

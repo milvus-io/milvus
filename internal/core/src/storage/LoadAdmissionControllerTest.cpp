@@ -43,6 +43,7 @@
 #include "folly/executors/ManualExecutor.h"
 #include "gtest/gtest.h"
 #include "monitor/monitor_c.h"
+#include "common/init_c.h"
 #include "cachinglayer/lrucache/DList.h"
 #include "segcore/storagev2translator/StorageV2Config.h"
 #include "storage/AsyncLoadExecutor.h"
@@ -267,6 +268,71 @@ TEST_F(LoadAdmissionControllerAsyncTest,
     EXPECT_EQ(budget_.CapacitySlots(), 2);
     lease = folly::coro::blockingWait(
         budget_.AcquireAsync({1, 2}, LoadAdmissionPriority::High));
+}
+
+TEST_F(LoadAdmissionControllerAsyncTest,
+       RejectedModeChangeRestoresBothPolicies) {
+    using namespace cachinglayer;
+    const LoadingOverheadConfig config{
+        LoadingOverheadGroupBinding{
+            LoadMemoryOverheadController::GetInstance().GetOrCreate(),
+            std::nullopt},
+        LoadingOverheadGroupBinding{
+            LoadFileOverheadController::GetInstance().GetOrCreate(), 1}};
+    internal::DList list(false, {1000000000, 1000000000}, {}, {}, {});
+    list.BindLoadingOverheadGroups(config);
+    auto unbind =
+        folly::makeGuard([&] { list.UnbindLoadingOverheadGroups(config); });
+    // File accepts the executor policy; memory rejects it. The C boundary must
+    // return an error and the file policy must be restored to Passthrough.
+    auto status = ::SetStorageV2AsyncLoadEnabled(false);
+    auto release_error = folly::makeGuard(
+        [&] { std::free(const_cast<char*>(status.error_msg)); });
+    EXPECT_NE(status.error_code, 0);
+    EXPECT_TRUE(segcore::storagev2translator::StorageV2AsyncLoadEnabled());
+    const ResourceUsage demand{1000000, 1000000};
+    const auto result =
+        list.ReserveLoadingResourceWithTimeout(
+                {}, demand, &config, std::chrono::milliseconds(0))
+            .get();
+    ASSERT_TRUE(result.success);
+    EXPECT_EQ(result.reserved, demand);
+    EXPECT_EQ(list.ReleaseLoadingResource({}, demand, &config), demand);
+}
+
+TEST_F(LoadAdmissionControllerAsyncTest,
+       RejectedSlotShrinkRetriesAfterRelease) {
+    using namespace cachinglayer;
+    auto memory = LoadMemoryOverheadController::GetInstance().GetOrCreate();
+    auto file = LoadFileOverheadController::GetInstance().GetOrCreate();
+    const LoadingOverheadConfig incomplete{
+        LoadingOverheadGroupBinding{memory, std::nullopt}, std::nullopt};
+    internal::DList list(false, {100000, 100000}, {}, {}, {});
+    list.BindLoadingOverheadGroups(incomplete);
+    auto unbind_incomplete =
+        folly::makeGuard([&] { list.UnbindLoadingOverheadGroups(incomplete); });
+    budget_.SetCapacitySlots(1);
+    EXPECT_EQ(budget_.CapacitySlots(), 1);
+    list.UnbindLoadingOverheadGroups(incomplete);
+    unbind_incomplete.dismiss();
+    const LoadingOverheadConfig complete{
+        LoadingOverheadGroupBinding{memory, 100},
+        LoadingOverheadGroupBinding{file, 50}};
+    list.BindLoadingOverheadGroups(complete);
+    auto unbind =
+        folly::makeGuard([&] { list.UnbindLoadingOverheadGroups(complete); });
+    auto lease = folly::coro::blockingWait(
+        budget_.AcquireAsync({1, 1}, LoadAdmissionPriority::High));
+    lease.Release();
+    const ResourceUsage demand{1000, 500};
+    const ResourceUsage expected{100, 50};
+    const auto result =
+        list.ReserveLoadingResourceWithTimeout(
+                {}, demand, &complete, std::chrono::milliseconds(0))
+            .get();
+    ASSERT_TRUE(result.success);
+    EXPECT_EQ(result.reserved, expected);
+    EXPECT_EQ(list.ReleaseLoadingResource({}, demand, &complete), expected);
 }
 
 TEST_F(LoadAdmissionControllerAsyncTest, MetricsExposeReservationsAndCapacity) {

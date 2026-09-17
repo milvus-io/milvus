@@ -151,6 +151,55 @@ LoadOverheadController<Dimension>::UpdateConcurrencyLimit(const size_t slots) {
     return true;
 }
 
+bool
+ConfigureLoadOverheadControllers(size_t slots, size_t memory_budget_bytes) {
+    AssertInfo(
+        memory_budget_bytes <=
+            static_cast<size_t>(std::numeric_limits<int64_t>::max()),
+        "Load memory budget bytes exceed the loading-overhead policy range");
+    auto& memory = LoadMemoryOverheadController::GetInstance();
+    auto& file = LoadFileOverheadController::GetInstance();
+    std::scoped_lock lock(memory.mutex_, file.mutex_);
+    const auto old_memory = memory.CurrentPolicy();
+    const auto old_file = file.CurrentPolicy();
+    const auto memory_policy =
+        memory_budget_bytes == 0
+            ? memory.SlotPolicy(slots)
+            : cachinglayer::LoadingOverheadPolicy::Budget(
+                  static_cast<int64_t>(memory_budget_bytes));
+    try {
+        // Apply file first: removing the memory Budget can reject a binding
+        // without max_runtime_unit. Its preceding file update remains reversible.
+        if (!UpdateGroupPolicy(
+                file.group_handle_, file.SlotPolicy(slots), "file")) {
+            return false;
+        }
+        if (!UpdateGroupPolicy(memory.group_handle_, memory_policy, "memory")) {
+            if (!UpdateGroupPolicy(file.group_handle_, old_file, "file")) {
+                ThrowInfo(ErrorCode::UnexpectedError,
+                          "Failed to restore file loading overhead policy");
+            }
+            return false;
+        }
+    } catch (...) {
+        // A manager update can also throw after changing its policy. Restore
+        // both snapshots before allowing the C boundary to report the failure.
+        const bool memory_restored =
+            UpdateGroupPolicy(memory.group_handle_, old_memory, "memory");
+        const bool file_restored =
+            UpdateGroupPolicy(file.group_handle_, old_file, "file");
+        if (!memory_restored || !file_restored) {
+            ThrowInfo(ErrorCode::UnexpectedError,
+                      "Failed to restore loading overhead policies");
+        }
+        throw;
+    }
+    memory.concurrency_limit_ = file.concurrency_limit_ = slots;
+    memory.budget_bytes_ = memory_budget_bytes;
+    memory.initialized_ = file.initialized_ = true;
+    return true;
+}
+
 template class LoadOverheadController<
     cachinglayer::LoadingOverheadDimension::kMemory>;
 template class LoadOverheadController<
