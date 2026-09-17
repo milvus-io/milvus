@@ -20,6 +20,7 @@ import (
 	"context"
 	"slices"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -255,7 +256,8 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 				indexMutation.BuildID, staged.record.SegmentID, commit.SegmentID)
 		}
 		if indexMutation.Type == SegmentIndexRemove && staged.record != nil &&
-			!commitRetractsIndexIdentity(commit, staged.record.IndexID, indexMutation.BuildID) {
+			!commitRetractsIndexIdentity(commit, staged.record.IndexID, indexMutation.BuildID) &&
+			!commitDropsColumnOfIndex(m, staged.record, commit) {
 			return merr.WrapErrServiceInternalMsg(
 				"segment index removal does not match the manifest retraction, segmentID=%d indexID=%d buildID=%d",
 				commit.SegmentID, staged.record.IndexID, indexMutation.BuildID)
@@ -467,6 +469,30 @@ func commitRetractsIndexEntry(commit SegmentManifestCommit, buildID int64) bool 
 	}
 	for _, drop := range commit.Mutation.Updates.DropIndexes {
 		if drop.ExpectedBuildID == buildID {
+			return true
+		}
+	}
+	// DropColumns retracts every index attached to the dropped column inside
+	// milvus-storage; the per-record match is verified precisely in
+	// CommitSegmentManifest via commitDropsColumnOfIndex.
+	return len(commit.Mutation.Updates.DropColumns) > 0
+}
+
+// commitDropsColumnOfIndex reports whether the commit's DropColumns retracts
+// the index a SegmentIndex record describes: the record's index maps to a
+// field (via indexMeta), and a dropped column named by that field ID makes
+// milvus-storage auto-drop the index's manifest entry. This is the manifest
+// half of the backfill-replace index retraction; the record half is the paired
+// SegmentIndexRemove.
+func commitDropsColumnOfIndex(m *meta, record *model.SegmentIndex, commit SegmentManifestCommit) bool {
+	if record == nil || commit.Mutation.Type != ManifestMutationCommitUpdates ||
+		commit.Mutation.Updates == nil || len(commit.Mutation.Updates.DropColumns) == 0 {
+		return false
+	}
+	fid := m.indexMeta.GetFieldIDByIndexID(record.CollectionID, record.IndexID)
+	column := strconv.FormatInt(fid, 10)
+	for _, dropped := range commit.Mutation.Updates.DropColumns {
+		if dropped == column {
 			return true
 		}
 	}

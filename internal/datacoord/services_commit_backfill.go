@@ -152,18 +152,47 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 	}
 
 	// Segments whose delta was already applied (replay of a committed result)
-	// are reported committed without issuing another manifest commit.
-	v3ToCommit := make([]backfillCommitUnit, 0, len(v3Units))
+	// are reported committed without issuing another manifest commit. The
+	// remaining V3 units split into per-segment commits (those that also mutate
+	// SegmentIndex records, which the batch path rejects) and the batch path.
 	v3Applied := make([]backfillCommitUnit, 0)
+	v3Single := make([]backfillCommitUnit, 0)
+	v3ToCommit := make([]backfillCommitUnit, 0, len(v3Units))
 	for _, unit := range v3Units {
-		if unit.alreadyApplied {
+		switch {
+		case unit.alreadyApplied:
 			v3Applied = append(v3Applied, unit)
-		} else {
+		case unit.singleCommit:
+			v3Single = append(v3Single, unit)
+		default:
 			v3ToCommit = append(v3ToCommit, unit)
 		}
 	}
 	if len(v3Applied) > 0 {
 		appendUnitStatuses(&statuses, v3Applied, true, "")
+	}
+
+	// Per-segment commits (replace of an indexed field): each goes through
+	// meta.CommitSegmentManifest so the SegmentIndexRemove lands in the same
+	// catalog transaction as the new manifest pointer.
+	if len(v3Single) > 0 {
+		if err := s.recheckBackfillSchemaVersion(ctx, result); err != nil {
+			log.Warn(ctx, "CommitBackfillResult rejected by schema version fence before commit",
+				mlog.Err(err), mlog.Int("segments", len(v3Single)))
+			lastErr = err
+			appendUnitStatuses(&statuses, v3Single, false, err.Error())
+		} else {
+			for _, unit := range v3Single {
+				if err := s.meta.CommitSegmentManifest(ctx, unit.commit); err != nil {
+					log.Error(ctx, "CommitBackfillResult V3 manifest commit failed",
+						mlog.Err(err), mlog.FieldSegmentID(unit.segmentID))
+					lastErr = err
+					appendUnitStatuses(&statuses, []backfillCommitUnit{unit}, false, err.Error())
+					continue
+				}
+				appendUnitStatuses(&statuses, []backfillCommitUnit{unit}, true, "")
+			}
+		}
 	}
 
 	for start := 0; start < len(v3ToCommit); start += maxBackfillCommitBatch {
@@ -246,6 +275,12 @@ type backfillCommitUnit struct {
 	// lost response recovers a success instead of failing on the
 	// existing-column rejection milvus-storage enforces.
 	alreadyApplied bool
+	// singleCommit routes the unit through meta.CommitSegmentManifest (the
+	// per-segment commit) instead of the batch CommitSegmentManifests. Needed
+	// when the commit also mutates SegmentIndex records, which the batch path
+	// rejects: a backfill replace of an indexed column retracts the stale
+	// SegmentIndex records atomically with the manifest pointer.
+	singleCommit bool
 }
 
 func appendUnitStatuses(out *[]*datapb.CommitBackfillResultSegmentStatus, batch []backfillCommitUnit, ok bool, reason string) {
@@ -425,19 +460,6 @@ func (s *Server) classifyBackfillSegments(ctx context.Context, result *BackfillR
 		// lock (rebase semantics), so concurrent stats/index commits are
 		// preserved rather than rejected.
 		if entry.IsV3Delta() {
-			// A replace of a column that carries a SegmentIndex record would
-			// drop the column's manifest index entries while indexMeta keeps
-			// the stale Finished record: readers would use an index built from
-			// the old column data alongside the new manifest. Reject until the
-			// index-record lifecycle is wired into the commit.
-			if fid, indexed := s.replaceTargetsIndexedField(result.CollectionID, segID, &entry); indexed {
-				statuses = append(statuses, &datapb.CommitBackfillResultSegmentStatus{
-					SegmentId: segID, Ok: false, Kind: "v3",
-					Reason: "replace of indexed field " + strconv.FormatInt(fid, 10) +
-						" is not supported yet; drop the index on the field first",
-				})
-				continue
-			}
 			// Already-applied replay detection: an add whose target column
 			// already exists in the manifest with exactly the op's descriptors
 			// is a re-submission of a committed result and must return success
@@ -457,7 +479,7 @@ func (s *Server) classifyBackfillSegments(ctx context.Context, result *BackfillR
 				})
 				continue
 			}
-			units = append(units, backfillCommitUnit{
+			unit := backfillCommitUnit{
 				segmentID: segID,
 				kind:      "v3",
 				commit: SegmentManifestCommit{
@@ -468,7 +490,20 @@ func (s *Server) classifyBackfillSegments(ctx context.Context, result *BackfillR
 						Updates: updates,
 					},
 				},
-			})
+			}
+			// A replace of a column with a live SegmentIndex record: the
+			// manifest's DropColumns strips the column's index entries, so the
+			// matching SegmentIndex records must be retracted in the SAME
+			// catalog transaction as the new manifest pointer, or readers
+			// would keep serving an index built from the old column data while
+			// indexInspector skips rebuilding. The single-commit path stages
+			// the SegmentIndexRemove atomically; once the record is gone the
+			// inspector issues a fresh build against the new data (reset).
+			if removals := s.replaceIndexRemovals(result.CollectionID, segID, &entry); len(removals) > 0 {
+				unit.singleCommit = true
+				unit.commit.CatalogMutation.SegmentIndexes = removals
+			}
+			units = append(units, unit)
 			continue
 		}
 
@@ -530,16 +565,18 @@ func (s *Server) classifyBackfillSegments(ctx context.Context, result *BackfillR
 	return units, statuses
 }
 
-// replaceTargetsIndexedField reports whether a delta backfill replace op
-// targets a column that has a live SegmentIndex record. Replacing such a
-// column would drop the column's manifest index entries while indexMeta keeps
-// the stale Finished record (indexInspector skips rebuilding when a record
-// exists), so readers could serve an index built from the old column data.
-func (s *Server) replaceTargetsIndexedField(collectionID, segID int64, entry *BackfillSegment) (int64, bool) {
+// replaceIndexRemovals returns a SegmentIndexRemove mutation for every live
+// SegmentIndex record on a column a delta backfill replace targets. The
+// replace's DropColumns strips the column's index entries from the manifest,
+// so the matching records must be retracted in the same catalog transaction to
+// stop readers serving an index built from the old column data; once removed,
+// indexInspector issues a fresh build against the new data.
+func (s *Server) replaceIndexRemovals(collectionID, segID int64, entry *BackfillSegment) []SegmentIndexMutation {
 	segIndexes := s.meta.indexMeta.GetSegmentIndexes(collectionID, segID)
 	if len(segIndexes) == 0 {
-		return 0, false
+		return nil
 	}
+	var removals []SegmentIndexMutation
 	for _, op := range entry.Ops {
 		if op.Type != "replace" {
 			continue
@@ -548,14 +585,17 @@ func (s *Server) replaceTargetsIndexedField(collectionID, segID int64, entry *Ba
 		for _, col := range op.Columns {
 			replaced[col] = struct{}{}
 		}
-		for indexID := range segIndexes {
+		for indexID, segIdx := range segIndexes {
 			fid := s.meta.indexMeta.GetFieldIDByIndexID(collectionID, indexID)
 			if _, ok := replaced[strconv.FormatInt(fid, 10)]; ok {
-				return fid, true
+				removals = append(removals, SegmentIndexMutation{
+					Type:    SegmentIndexRemove,
+					BuildID: segIdx.BuildID,
+				})
 			}
 		}
 	}
-	return 0, false
+	return removals
 }
 
 // deltaOpsToManifestUpdates converts a delta backfill's ops into the manifest

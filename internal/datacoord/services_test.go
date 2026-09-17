@@ -4958,18 +4958,48 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		assert.Equal(t, []string{"100"}, commit.Mutation.Updates.ColumnGroups[0].Columns)
 	})
 
-	// Replacing a column that carries a Finished SegmentIndex record must be
-	// rejected: the manifest drops the column's index entries while indexMeta
-	// keeps the stale record, so readers would use an index built from the old
-	// column data.
-	t.Run("v3_delta_replace_indexed_field_rejected", func(t *testing.T) {
+	// A replace of a column with a live Finished SegmentIndex record retracts
+	// the record atomically with the manifest pointer (whose DropColumns strips
+	// the column's index entries): after the commit, GetIndexInfos no longer
+	// serves the stale index and the inspector rebuilds against the new data.
+	t.Run("v3_delta_replace_indexed_field_removes_index", func(t *testing.T) {
 		ctx := context.Background()
+		localRoot := t.TempDir()
+		paramtable.Get().Save(Params.CommonCfg.StorageType.Key, "local")
+		paramtable.Get().Save(Params.LocalStorageCfg.Path.Key, localRoot)
+		defer paramtable.Get().Reset(Params.CommonCfg.StorageType.Key)
+		defer paramtable.Get().Reset(Params.LocalStorageCfg.Path.Key)
+
+		cfg := createStorageConfig()
+		basePath := path.Join("files", "backfill_replace_indexed", "seg810")
+		oldPath := path.Join(basePath, "_data", "100_old.parquet")
+		// Seed a manifest holding an old group for field 100 plus an index
+		// entry on that column.
+		seedManifest, err := packed.CommitManifestUpdates(basePath, packed.ManifestEarliest, cfg, &packed.ManifestUpdates{
+			ColumnGroups: []packed.ColumnGroupEntry{{
+				Columns: []string{"100"},
+				Format:  "parquet",
+				Files:   []packed.ColumnGroupFileEntry{{Path: oldPath, StartIndex: 0, EndIndex: 5}},
+			}},
+			Indexes: []packed.ManifestIndexInfo{{
+				ColumnName: "100", IndexName: "idx_100", IndexType: "HNSW",
+				Path: "../idx_100.idx", FieldID: 100, IndexID: 10, BuildID: 500,
+				IndexVersion: 1, NumRows: 5, SerializedSize: 2048, MemSize: 4096,
+				CurrentIndexVersion: 5, CurrentScalarIndexVersion: 6,
+				IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+				IndexFileKeys:         []string{"0"},
+			}},
+		})
+		require.NoError(t, err)
+		_, _, err = packed.UnmarshalManifestPath(seedManifest)
+		require.NoError(t, err)
+
 		m, err := newMemoryMeta(t)
 		require.NoError(t, err)
 		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 810, CollectionID: 100, State: commonpb.SegmentState_Flushed,
 			StorageVersion: storage.StorageV3,
-			ManifestPath:   packed.MarshalManifestPath("/seg/810", 3),
+			ManifestPath:   packed.MarshalManifestPath(basePath, 1),
 		}})
 		require.NoError(t, m.indexMeta.CreateIndex(ctx, &model.Index{
 			CollectionID: 100, FieldID: 100, IndexID: 10, IndexName: "idx_100",
@@ -4979,7 +5009,8 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 			IndexState: commonpb.IndexState_Finished, IndexVersion: 1,
 		}))
 
-		jsonStr := `{
+		newPath := path.Join(basePath, "_data", "100_new.parquet")
+		jsonStr := fmt.Sprintf(`{
           "success": true,
           "collectionId": 100,
           "segments": {
@@ -4988,23 +5019,41 @@ func TestServer_CommitBackfillResult(t *testing.T) {
               "outputPath": "x",
               "ops": [
                 {"type": "replace", "columns": ["100"], "format": "parquet", "rowCount": 5,
-                 "files": [{"path": "_data/100_new.parquet", "startIndex": 0, "endIndex": 5}]}
+                 "files": [{"path": "%s", "startIndex": 0, "endIndex": 5}]}
               ]
             }
           }
-        }`
-		server := newServerForCommit(t, m, nil, []byte(jsonStr))
+        }`, newPath)
+		mockBroker := broker.NewMockBroker(t)
+		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
+			Return(&milvuspb.DescribeCollectionResponse{
+				Status: merr.Success(), DbName: "default", CollectionName: "c",
+			}, nil).Maybe()
+		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
+
 		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
 			ResultPath: "s3a://bkt/foo",
 		})
 		assert.NoError(t, err)
-		assert.Error(t, merr.Error(resp.GetStatus()))
-		assert.Equal(t, int32(1), resp.GetFailedSegments())
-		require.Len(t, resp.GetSegmentStatuses(), 1)
-		assert.False(t, resp.GetSegmentStatuses()[0].GetOk())
-		assert.Contains(t, resp.GetSegmentStatuses()[0].GetReason(), "replace of indexed field 100")
-		// The index record is untouched by the rejection.
-		require.NotEmpty(t, m.indexMeta.GetSegmentIndexes(100, 810))
+		assert.True(t, merr.Ok(resp.GetStatus()))
+		assert.Equal(t, int32(1), resp.GetCommittedSegments())
+
+		// The SegmentIndex record is retracted in the same transaction, so the
+		// stale Finished record no longer serves the old artifact and the
+		// inspector will rebuild against the new column data.
+		require.Empty(t, m.indexMeta.GetSegmentIndexes(100, 810))
+		// The manifest dropped the column's index entries and re-registered
+		// the field with the new files.
+		manifestPath := m.GetSegment(ctx, 810).GetManifestPath()
+		indexes, err := packed.GetManifestIndexInfos(manifestPath, cfg)
+		require.NoError(t, err)
+		require.Empty(t, indexes)
+		groups, err := packed.ReadManifestColumnGroups(manifestPath, cfg)
+		require.NoError(t, err)
+		require.Len(t, groups, 1)
+		require.Equal(t, []string{"100"}, groups[0].Columns)
+		require.Len(t, groups[0].Files, 1)
+		require.Equal(t, newPath, groups[0].Files[0].Path)
 	})
 
 	// Re-submitting an already-committed delta add must return success instead
