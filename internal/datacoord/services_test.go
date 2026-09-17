@@ -588,6 +588,7 @@ func (s *ServerSuite) TestSaveBinlogPath_L0Segment() {
 	segment := s.testServer.meta.GetHealthySegment(context.TODO(), 1)
 	s.Require().Nil(segment)
 	ctx := context.Background()
+	startPosition := &msgpb.MsgPosition{ChannelName: "ch1", Timestamp: 100}
 	resp, err := s.testServer.SaveBinlogPaths(ctx, &datapb.SaveBinlogPathsRequest{
 		Base: &commonpb.MsgBase{
 			Timestamp: uint64(time.Now().Unix()),
@@ -597,6 +598,9 @@ func (s *ServerSuite) TestSaveBinlogPath_L0Segment() {
 		CollectionID: 0,
 		SegLevel:     datapb.SegmentLevel_L0,
 		Channel:      "ch1",
+		StartPositions: []*datapb.SegmentStartPosition{
+			{SegmentID: 1, StartPosition: startPosition},
+		},
 		Deltalogs: []*datapb.FieldBinlog{
 			{
 				FieldID: 1,
@@ -632,6 +636,14 @@ func (s *ServerSuite) TestSaveBinlogPath_L0Segment() {
 	segment = s.testServer.meta.GetHealthySegment(context.TODO(), 1)
 	s.NotNil(segment)
 	s.EqualValues(datapb.SegmentLevel_L0, segment.GetLevel())
+	s.Equal(startPosition, segment.GetStartPosition())
+
+	// Check the catalog too: keeping the boundary only in memory would lose
+	// the L0 delete retention boundary after coordinator recovery.
+	persisted, err := s.testServer.meta.catalog.ListSegments(ctx, 0)
+	s.Require().NoError(err)
+	s.Require().Len(persisted, 1)
+	s.Equal(startPosition, persisted[0].GetStartPosition())
 }
 
 func (s *ServerSuite) TestSaveBinlogPath_NormalCase() {
