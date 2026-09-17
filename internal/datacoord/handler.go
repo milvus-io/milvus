@@ -612,6 +612,15 @@ func (h *ServerHandler) FinishDropChannel(channel string, collectionID int64) er
 	// clean collection info cache when meet drop collection info
 	h.s.meta.DropCollection(collectionID)
 
+	// tedxu: drop this collection's segment change group records together with
+	// its other metadata. Without this they would leak in etcd forever (and a
+	// reused collectionID could resurrect stale groups on recovery).
+	if err := h.s.meta.DropSegmentChangeGroupsOfCollection(h.s.ctx, collectionID); err != nil {
+		mlog.Warn(context.TODO(), "drop segment change groups of collection failed",
+			mlog.Int64("collectionID", collectionID), mlog.Err(err))
+		return err
+	}
+
 	return nil
 }
 
