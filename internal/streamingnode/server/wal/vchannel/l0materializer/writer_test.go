@@ -6,6 +6,7 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -83,4 +84,18 @@ func TestWriterRejectsMissingDependencies(t *testing.T) {
 	require.ErrorContains(t, writer.Materialize(ctx, req), "meta writer")
 	writer.metaWriter = syncmgr.BrokerMetaWriter(nil, 1)
 	require.ErrorContains(t, writer.Materialize(ctx, req), "invalid vchannel")
+}
+
+func TestWriterTransactionBlocksShareByteBudget(t *testing.T) {
+	ids := &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}}
+	entry := deleteEntry(100, 10, ids)
+	entry.GetDelete().Blocks = append(entry.GetDelete().Blocks,
+		&streamingpb.TransformDeleteBlock{PartitionId: 10, PrimaryKeys: ids})
+	req := MaterializeRequest{Entries: []*streamingpb.TransformLogEntry{entry}, MaxRows: 100, MaxBytes: uint64(proto.Size(entry))}
+	groups := splitMaterializeGroups(req)
+	require.Len(t, groups, 1, "one transaction fits the byte budget")
+	require.Len(t, groups[0].pks, 2)
+	require.Equal(t, []uint64{100, 100}, groups[0].timestamps)
+	req.MaxBytes = uint64(proto.Size(entry.GetDelete().Blocks[0]))
+	require.Len(t, splitMaterializeGroups(req), 2, "separate blocks still consume the shared budget")
 }

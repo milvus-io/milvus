@@ -471,3 +471,27 @@ func TestFastForwardCannotCompleteUnmaterializedFlush(t *testing.T) {
 		})
 	}
 }
+
+func TestFlushCompletesReadyPrefixBeforeLaterBlockedRequests(t *testing.T) {
+	m, tasks, batches := testMaterializer(t, 0)
+	m.materializeMaxBytes = 1 << 20
+	m.SetMaterializeUpperBound(99)
+	tracker := messageack.NewTracker(utility.WALCheckpoint{}, nil, nil)
+	for _, tt := range []uint64{100, 120, 200} {
+		trackFlush(t, m, tracker, tt)
+	}
+	require.Empty(t, *tasks)
+	require.True(t, m.SetMaterializeUpperBound(150))
+	require.Len(t, *tasks, 1)
+	require.NoError(t, (*tasks)[0].Execute(context.Background()))
+	require.Equal(t, uint64(120), m.MaterializedTimeTick())
+	require.Equal(t, uint64(120), tracker.CompletedPoint().TimeTick)
+	require.Len(t, m.pendingFlushes, 1)
+	require.Len(t, *tasks, 1, "blocked later request does not poll")
+	require.True(t, m.SetMaterializeUpperBound(200))
+	require.Len(t, *tasks, 2)
+	require.NoError(t, (*tasks)[1].Execute(context.Background()))
+	require.Equal(t, uint64(200), tracker.CompletedPoint().TimeTick)
+	require.Empty(t, m.pendingFlushes)
+	require.Empty(t, *batches, "empty coverage completes without physical L0 output")
+}

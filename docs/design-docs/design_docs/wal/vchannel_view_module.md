@@ -140,7 +140,10 @@ coordination only; it does not merge Segment and L0 persistence or
 source-message ownership. A raised bound independently re-evaluates pending
 requests, including when no new message arrives; it does not force undersized
 output. Explicit API materialization waits for related L1 flushes and final
-commits, in addition to respecting the VChannel safety bound.
+commits, in addition to respecting the VChannel safety bound. DropPartition
+therefore flushes all Segments in the VChannel created before its boundary,
+including Segments belonging to other partitions; its logical tombstone still
+applies only to the target partition.
 
 ## 6. Recovery
 
