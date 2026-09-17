@@ -1691,8 +1691,9 @@ runDataSkewDetectionTestUnified(
         ASSERT_FALSE(success)
             << "Expected clustering to be skipped due to data skew, but it "
                "completed successfully";
-        std::cout << "[INFO] DataSkewDetection test correctly detected skip for "
-                  << storage_version << "\n";
+        std::cout
+            << "[INFO] DataSkewDetection test correctly detected skip for "
+            << storage_version << "\n";
     } catch (const milvus::SegcoreError& e) {
         std::cout << "[INFO] DataSkewDetection test correctly triggered "
                      "ClusterSkip for "
